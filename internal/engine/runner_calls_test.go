@@ -82,7 +82,11 @@ func TestRunnerFinishResentAfterACrashAddsUsageOnce(t *testing.T) {
 	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: id})
 	f := subagent.RunnerFinish{Turn: 1, Usage: workeroutput.Usage{InputTokens: 10}}
 	// The first attempt commits, then the engine stops: no stored result.
-	if err := m.RunnerFinish(state.ForRequest(ctx, "runner/1"), f); err != nil {
+	fingerprint, err := requestFingerprint("RunnerFinish", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.RunnerFinish(state.ForRequestCall(ctx, "runner/1", "RunnerFinish", fingerprint), f); err != nil {
 		t.Fatal(err)
 	}
 	once := &requestRunner{w: state.For(db), logf: t.Logf}
