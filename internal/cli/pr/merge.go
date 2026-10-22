@@ -29,8 +29,14 @@ func MergeCommand(o Options) *cobra.Command {
 	})
 }
 
-// engineMergeController keeps status reads local and sends mutations to the engine.
+// engineMergeController reads the engine queue, including its fairness counters.
 type engineMergeController struct{ *watch.Service }
+
+func (engineMergeController) MergeControlStatus(roomID string) (watch.MergeControlStatus, error) {
+	var result watch.MergeControlStatus
+	err := engineclient.New("").Call(context.Background(), "MergeControlStatus", []any{roomID}, &result)
+	return result, err
+}
 
 func (engineMergeController) MergeControl(ctx context.Context, roomID, action string, args, without []string) error {
 	return engineclient.New("").Call(ctx, "MergeControl", []any{roomID, action, args, without}, nil)

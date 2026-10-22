@@ -38,11 +38,13 @@ type ReviewCurrent struct {
 	StartedAt time.Time `json:"startedAt"`
 }
 type ReviewQueued struct {
-	ChangeID string `json:"changeId,omitempty"`
-	Kind     string `json:"kind,omitempty"`
-	PR       int    `json:"pr"`
-	Title    string `json:"title"`
-	Head     string `json:"head"`
+	GoalID    string `json:"goalId,omitempty"`
+	Expedited bool   `json:"expedited,omitempty"`
+	ChangeID  string `json:"changeId,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	PR        int    `json:"pr"`
+	Title     string `json:"title"`
+	Head      string `json:"head"`
 }
 type ReviewerSlotStatus struct {
 	Session   *ReviewerSession `json:"session"`
@@ -52,8 +54,9 @@ type ReviewerSlotStatus struct {
 	LastError string           `json:"lastError"`
 }
 type ReviewerStatus struct {
-	Reviewers []ReviewerSlotStatus `json:"reviewers"`
-	Helpers   []ReviewerHelper     `json:"helpers"`
+	ExpeditedGoalID string               `json:"expeditedGoalId,omitempty"`
+	Reviewers       []ReviewerSlotStatus `json:"reviewers"`
+	Helpers         []ReviewerHelper     `json:"helpers"`
 
 	Enabled       bool                 `json:"enabled"`
 	Profile       string               `json:"profile"`
@@ -241,11 +244,13 @@ type reviewerTurn struct {
 // ReviewFacts is one observation shared by dispatch, queue and client status.
 // None of these facts are persisted as pool occupancy or review status.
 type ReviewFacts struct {
-	State    State
-	Need     []*Record
-	Busy     map[string]reviewerTurn
-	Sessions map[string]reviewerTurn
-	Paused   map[string]bool
+	ExpeditedGoals map[string]string
+	Streaks        map[string]int
+	State          State
+	Need           []*Record
+	Busy           map[string]reviewerTurn
+	Sessions       map[string]reviewerTurn
+	Paused         map[string]bool
 }
 
 func needsReview(st State, r Record) bool {
@@ -283,6 +288,11 @@ func (s *Service) roomPausedCached(roomID string, cache map[string]bool) (bool, 
 
 func (s *Service) ReviewFacts(st State) (ReviewFacts, error) {
 	facts := ReviewFacts{State: st, Busy: map[string]reviewerTurn{}, Sessions: map[string]reviewerTurn{}, Paused: map[string]bool{}}
+	active, _, err := s.expeditedGoals()
+	if err != nil {
+		return facts, err
+	}
+	facts.ExpeditedGoals, facts.Streaks = active, map[string]int{}
 	ids := map[string]bool{}
 	if s.Notify != nil {
 		infos, err := s.Notify.Sessions.Store.ListSnapshot(false)
@@ -297,6 +307,7 @@ func (s *Service) ReviewFacts(st State) (ReviewFacts, error) {
 	}
 	for _, r := range st.Records {
 		if _, known := facts.Paused[r.RoomID]; !known {
+			facts.Streaks[r.RoomID] = s.expediteStreak("review:" + r.RoomID)
 			paused, err := s.RoomPaused(r.RoomID)
 			if err != nil {
 				return facts, err
@@ -345,13 +356,17 @@ func (s *Service) ReviewFacts(st State) (ReviewFacts, error) {
 }
 
 func (f ReviewFacts) Queue(roomID string) []*Record {
-	queue := []*Record{}
+	queue, blocked := []*Record{}, []*Record{}
 	for _, r := range f.Need {
 		if (roomID == "" || r.RoomID == roomID) && f.Busy[r.Key].Info.ID == "" {
-			queue = append(queue, r)
+			if dependencyWaiting(f.State, *r) {
+				blocked = append(blocked, r)
+			} else {
+				queue = append(queue, r)
+			}
 		}
 	}
-	return queue
+	return append(reviewPriority(queue, f.ExpeditedGoals, f.Streaks[roomID]), blocked...)
 }
 
 func (f ReviewFacts) ReviewState(r Record) (string, *int, string) {
@@ -401,7 +416,7 @@ func (s *Service) ReviewerStatus(roomID string) (ReviewerStatus, error) {
 		return ReviewerStatus{}, err
 	}
 	cfg := st.Reviewers[roomID]
-	out := ReviewerStatus{Reviewers: []ReviewerSlotStatus{}, Helpers: []ReviewerHelper{}, Enabled: !cfg.Disabled && !facts.Paused[roomID], ProfileSource: "auto", Queue: []ReviewQueued{}, LastError: cfg.LastError}
+	out := ReviewerStatus{ExpeditedGoalID: facts.ExpeditedGoals[roomID], Reviewers: []ReviewerSlotStatus{}, Helpers: []ReviewerHelper{}, Enabled: !cfg.Disabled && !facts.Paused[roomID], ProfileSource: "auto", Queue: []ReviewQueued{}, LastError: cfg.LastError}
 	for _, record := range st.Records {
 		if record.RoomID != roomID {
 			continue
@@ -455,7 +470,7 @@ func (s *Service) ReviewerStatus(roomID string) (ReviewerStatus, error) {
 		}
 	}
 	for _, r := range facts.Queue(roomID) {
-		out.Queue = append(out.Queue, ReviewQueued{ChangeID: changeID(*r), Kind: changeKind(*r), PR: r.Number, Title: r.Title, Head: r.Head})
+		out.Queue = append(out.Queue, ReviewQueued{GoalID: r.GoalID, Expedited: expeditedRecord(*r, facts.ExpeditedGoals), ChangeID: changeID(*r), Kind: changeKind(*r), PR: r.Number, Title: r.Title, Head: r.Head})
 	}
 	return out, nil
 }
@@ -641,7 +656,11 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 	if err != nil {
 		return s.reviewBlocked(roomID, Sanitize(err.Error()))
 	}
-	for _, candidate := range facts.Queue(roomID) {
+	pending := facts.Queue(roomID)
+	for len(pending) > 0 {
+		i := nextReview(pending, facts.ExpeditedGoals, s.expediteStreak("review:"+roomID))
+		candidate := pending[i]
+		pending = append(pending[:i], pending[i+1:]...)
 		if err = ctx.Err(); err != nil {
 			return err
 		}
@@ -716,6 +735,7 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 			}
 			continue
 		}
+		s.expediteGranted("review:"+roomID, expeditedRecord(r, facts.ExpeditedGoals))
 		busy++
 	}
 	return nil
