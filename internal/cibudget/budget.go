@@ -261,32 +261,21 @@ func (r Report) BudgetTests() []Test {
 	return append([]Test(nil), r.Tests...)
 }
 
-// Allowed checks the qualified ID first, then the legacy bare name.
+// Allowed checks the exact test ID.
 func (t Test) Allowed(allowed map[string]bool) bool {
-	if allowed[t.ID()] {
-		return true
-	}
-	// TODO: legacy/shim remove later — keep bare names until allowlists migrate to qualified IDs.
-	return allowed[t.Name]
+	return allowed[t.ID()]
 }
 
-// AllowWarnings identifies broad and stale entries without hiding test failures.
+// AllowWarnings identifies stale entries without hiding test failures.
 func (r Report) AllowWarnings(allowed map[string]bool) []string {
-	ids, names := map[string]bool{}, map[string]bool{}
+	ids := map[string]bool{}
 	for _, test := range r.Tests {
 		ids[test.ID()] = true
-		names[test.Name] = true
 	}
 	var warnings []string
 	for entry, enabled := range allowed {
-		if !enabled {
-			continue
-		}
-		if !ids[entry] && !names[entry] {
+		if enabled && !ids[entry] {
 			warnings = append(warnings, fmt.Sprintf("allow entry %q matches no test", entry))
-		}
-		if !ids[entry] && (names[entry] || !strings.Contains(entry, "/")) {
-			warnings = append(warnings, fmt.Sprintf("allow entry %q is a bare name; use a package/name ID", entry))
 		}
 	}
 	sort.Strings(warnings)
