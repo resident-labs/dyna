@@ -2,11 +2,13 @@ package callerid
 
 import (
 	"context"
+	"dyna-agent/internal/authority"
 	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -371,5 +373,62 @@ func TestLaunchRecordsTheStoreFormat(t *testing.T) {
 		if err != nil || !ok || l.Session != tc.session || l.Format != tc.format {
 			t.Errorf("ProcessLaunch(%v) = %+v, %v, %v; want %s with format %d", tc.p, l, ok, err, tc.session, tc.format)
 		}
+	}
+}
+
+// The owner shell is recorded by PID and birth time, never by engine cgroup.
+func TestOwnerTerminalDescendantKeepsOwnerIdentity(t *testing.T) {
+	t.Cleanup(authority.InEngine())
+	dir := t.TempDir()
+	t.Cleanup(func() { database.Close(dir) })
+	current, err := ProcessOf(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", "-l")
+	var inherited *os.File
+	if err := StartTerminal(t.Context(), cmd, dir, func() error {
+		if cmd.Path != "/bin/sh" || len(cmd.ExtraFiles) != 1 || len(cmd.Args) != 6 || cmd.Args[5] != "-l" {
+			t.Fatalf("shell was not gated: %+v", cmd)
+		}
+		fd, err := syscall.Dup(int(cmd.ExtraFiles[0].Fd()))
+		if err != nil {
+			return err
+		}
+		inherited = os.NewFile(uintptr(fd), "inherited terminal gate")
+		if err := syscall.SetNonblock(fd, true); err != nil {
+			return err
+		}
+		if n, err := syscall.Read(fd, make([]byte, 1)); n != -1 || err != syscall.EAGAIN {
+			t.Fatalf("terminal gate opened before recording: %d %v", n, err)
+		}
+		cmd.Process = &os.Process{Pid: current.PID} // Fake starter: no subprocess.
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defer inherited.Close()
+	gate, err := io.ReadAll(inherited)
+	if err != nil || string(gate) != "ready\n" {
+		t.Fatalf("gate = %q, %v", gate, err)
+	}
+	saved, err := OpenStore(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver, proc := newResolver(t, engineCG)
+	resolver.records = saved
+	proc.add(current.PID, engine, current.Start, engineCG)
+	proc.add(600, current.PID, 60, engineCG)
+	proc.add(601, engine, 61, engineCG)
+	if got := resolver.Resolve(600); got != (Identity{Kind: Owner}) {
+		t.Fatalf("owner terminal descendant = %+v", got)
+	}
+	if got := resolver.Resolve(601); got.Kind != Refused {
+		t.Fatalf("unrelated engine child = %+v", got)
+	}
+	proc.add(current.PID, engine, current.Start+1, engineCG)
+	if got := resolver.Resolve(600); got.Kind != Refused {
+		t.Fatalf("reused terminal PID = %+v", got)
 	}
 }
