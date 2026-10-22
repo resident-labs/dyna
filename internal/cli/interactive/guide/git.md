@@ -21,10 +21,13 @@ A stamped session cannot open a change in another room.
 Owner tracking records no session author. Its PR notices go only to the owner;
 CI and land notices never start an agent.
 
-Keep authors open while their change is open and watched. Dyna closes reviewers
-that have no live turn on a needed current head, including after a verdict.
-Paused rooms start no new reviewers.
-Use `dyna git pr transfer <pr> --role author --to <session>` to transfer authorship.
+Keep authors open while their change is open and watched. An author that must
+stop first transfers authorship to its parent, root, or another open agent:
+`dyna git pr transfer <pr> --role author --to <session>`. Never close an author
+that still holds an open PR. Its notices would go up its parent chain, or to a
+fresh agent that does not know the change.
+Dyna closes reviewers that have no live turn on a needed current head, including
+after a verdict. Paused rooms start no new reviewers.
 Use `dyna git pr reviewer` to inspect reviewers, `--profile <profile>` to pin one,
 `--auto` for automatic choice, or `--restart` to restart them.
 `dyna git pr review on|off` controls automatic review.
