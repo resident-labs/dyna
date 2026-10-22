@@ -4,7 +4,6 @@
 # violation: state written directly today. These lines may only shrink: move the write
 #   behind internal/state, then run the test with -update (it never adds a line).
 # not-state: files that are not shared Dyna state. Each needs a reason.
-not-state internal/account/store/active.go Store.activeLock 1 # a harness's .active.lock flock lock file, not state
 not-state internal/account/store/registry.go Store.removeCredential 1 # deletes an account's private credential file after its row is removed; secrets stay out of dyna.db and its backups
 not-state internal/account/store/registry.go Store.writeCredential 2 # the one writer of an account's private 0600 credential file (login, refresh, switch checkpoint, import); secrets stay out of dyna.db and its backups
 not-state internal/account/store/store.go Store.lock 1 # accounts.lock, the registry's flock lock file, not state

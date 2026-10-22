@@ -1,7 +1,6 @@
 package service
 
 import (
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -16,7 +15,7 @@ func TestAccountUsageCachedMarksActiveAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(store.Root, "codex", ".active.json"), []byte(`{"id":"`+n.ID+`"}`), 0o600); err != nil {
+	if err := store.SetActive("codex", n.ID); err != nil {
 		t.Fatal(err)
 	}
 	rows := New(Options{Store: store}).AccountUsageCached().Accounts
