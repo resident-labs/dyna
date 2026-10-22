@@ -46,9 +46,8 @@ func queueVersion(t *testing.T, dir string) string {
 	return version
 }
 
-// The row is the queue. queue.json is the previous release's copy: it
-// matches the row after a write, and this code never reads it back.
-func TestQueueRowIsTheRecordAndTheFileOnlyItsCopy(t *testing.T) {
+// Queue writes and reads use SQLite without creating a retained file.
+func TestQueueRowIsTheRecord(t *testing.T) {
 	dir := queueDir(t)
 	if q, err := readQueue(dir); err != nil || len(q.Claimed) != 0 {
 		t.Fatalf("a new session's queue = %+v, %v", q, err)
@@ -56,28 +55,15 @@ func TestQueueRowIsTheRecordAndTheFileOnlyItsCopy(t *testing.T) {
 	if err := writeQueue(dir, claims(1)); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(filepath.Join(dir, queueFile))
-	var copied queueClaims
-	if err != nil || json.Unmarshal(b, &copied) != nil || copied.Claimed["msg_a"] != 1 {
-		t.Fatalf("copy = %+v, %v; want the row's claims", copied, err)
-	}
-	if err := os.Remove(filepath.Join(dir, queueFile)); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(dir, queueFile)); !os.IsNotExist(err) {
+		t.Fatalf("queue file exists or cannot be checked: %v", err)
 	}
 	if got := claimedTurn(t, dir); got != 1 {
-		t.Fatalf("without its copy, the claim reads turn %d", got)
-	}
-}
-
-// This code's own copy never counts as another binary's write.
-func TestOwnQueueCopyIsNotImported(t *testing.T) {
-	dir := queueDir(t)
-	if err := writeQueue(dir, claims(1)); err != nil {
-		t.Fatal(err)
+		t.Fatalf("claim = %d", got)
 	}
 	before := queueVersion(t, dir)
 	if again := queueVersion(t, dir); again != before {
-		t.Fatalf("a read imported this code's own copy: %s then %s", before, again)
+		t.Fatalf("read changed revision: %s then %s", before, again)
 	}
 }
 
@@ -110,9 +96,8 @@ func TestQueueUpdateIgnoresForeignFileWhenTheRowExists(t *testing.T) {
 	}
 }
 
-// A crash after the row commits and before Mirror writes its copy leaves
-// the old copy, which the stamp still owns, so the row wins.
-func TestCrashBeforeTheQueueCopyKeepsTheRow(t *testing.T) {
+// A direct transactional update is visible to queue readers.
+func TestQueueReadSeesCommittedRow(t *testing.T) {
 	dir := queueDir(t)
 	if err := writeQueue(dir, claims(1)); err != nil {
 		t.Fatal(err)
@@ -167,9 +152,8 @@ func TestQueueWriteIgnoresStaleFileCancellations(t *testing.T) {
 }
 
 // The first start of this release takes one backup before queue claims move
-// into dyna.db. There is no import walk: each queue.json imports on its
-// first read, and stays readable after its file is gone.
-func TestQueuesBackUpOnceAndImportOnFirstRead(t *testing.T) {
+// into dyna.db. The eager import stays readable after its file is gone.
+func TestQueuesBackUpOnceAndImportRetainedFiles(t *testing.T) {
 	dir := queueDir(t)
 	sessions := filepath.Dir(dir)
 	other := filepath.Join(sessions, NewID())
