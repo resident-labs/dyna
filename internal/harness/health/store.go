@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"dyna-agent/internal/database"
@@ -37,11 +38,15 @@ func New(dir string) *Service { return &Service{dir: dir} }
 
 // Migrate creates the health table. Only the engine runs it, at start.
 func Migrate(dataDir string) error {
-	_, err := open(dataDir)
+	dir, err := (&Service{}).sourceDir()
+	if err != nil {
+		return err
+	}
+	_, err = open(dataDir, dir)
 	return err
 }
 
-func open(dataDir string) (*sql.DB, error) {
+func open(dataDir, sourceDir string) (*sql.DB, error) {
 	db, err := database.Open(dataDir)
 	if err != nil {
 		return nil, err
@@ -49,18 +54,27 @@ func open(dataDir string) (*sql.DB, error) {
 	if err := state.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "harness.health", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), schema)
-		return err
+	err = database.Migrate(db, "harness.health", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old < 1 {
+			if _, err := conn.ExecContext(ctx, schema); err != nil {
+				return err
+			}
+		}
+		return importHealthRecords(ctx, conn, sourceDir)
 	})
 	return db, err
 }
 
 func (s *Service) db() (*sql.DB, error) {
 	if s.dir != "" {
-		return open(s.dir)
+		return open(s.dir, s.dir)
 	}
-	return open(store.DataDir())
+	dir, err := s.sourceDir()
+	if err != nil {
+		return nil, err
+	}
+	return open(store.DataDir(), dir)
 }
 
 // key names a profile's record: a complete hash avoids traversal, collisions
@@ -74,33 +88,63 @@ func key(name string) string {
 func mirrorKey(name string) string { return "health/" + key(name) }
 
 // path is the previous release's file for a profile's record.
+func (s *Service) sourceDir() (string, error) {
+	if s.dir != "" {
+		return s.dir, nil
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(cache, "dyna", "profile-health"), nil
+}
+
 func (s *Service) path(name string) (string, error) {
-	dir := s.dir
-	if dir == "" {
-		cache, err := os.UserCacheDir()
-		if err != nil {
-			return "", err
-		}
-		dir = filepath.Join(cache, "dyna", "profile-health")
+	dir, err := s.sourceDir()
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(dir, key(name)+".json"), nil
 }
 
-// importFile imports a profile's file when the previous release wrote it.
-//
-// TODO: legacy/shim remove later — the previous release reads and writes
-// profile-health/<hash>.json; remove importFile and the copy in record with
-// requirement 31, when no binary from before dyna.db is alive.
-func (s *Service) importFile(ctx context.Context, db *sql.DB, name, path string) error {
-	_, err := state.For(db).ImportIfForeign(ctx, mirrorKey(name), path, func(conn *sql.Conn, raw []byte) error {
-		var r record
-		if err := json.Unmarshal(raw, &r); err != nil {
-			// Corrupt cache data is disposable; a new observation repairs it.
-			return fmt.Errorf("profile health %s: %v: %w", path, err, state.ErrSkipForeign)
+// TODO: legacy/shim remove later — import retained health records only at migration.
+func importHealthRecords(ctx context.Context, conn *sql.Conn, dir string) error {
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if len(name) != 69 || !strings.HasSuffix(name, ".json") {
+			continue
 		}
-		return saveRow(ctx, conn, name, raw)
-	})
-	return err
+		hash := strings.TrimSuffix(name, ".json")
+		if _, err := hex.DecodeString(hash); err != nil || strings.ToLower(hash) != hash {
+			continue
+		}
+		var exists bool
+		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM harness_health WHERE profile = ?)", hash).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		_, err := state.ImportMigration(ctx, conn, "health/"+hash, filepath.Join(dir, name), func(conn *sql.Conn, raw []byte) error {
+			var r record
+			if json.Unmarshal(raw, &r) != nil {
+				return nil
+			}
+			_, err := conn.ExecContext(ctx, "INSERT INTO harness_health(profile,record) VALUES(?,?)", hash, raw)
+			return err
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func saveRow(ctx context.Context, conn *sql.Conn, name string, raw []byte) error {
@@ -123,8 +167,7 @@ func readRow(ctx context.Context, q state.Reader, name string) (r record, ok boo
 }
 
 // View reads persisted evidence and compares it with the current configuration
-// and CLI version. It executes no version command. It imports a record that
-// the previous release wrote, as every read does.
+// and CLI version. It executes no version command.
 func (s *Service) View(p profile.Profile, version string) View {
 	v := baseView(p, version)
 	ctx := context.Background()
@@ -142,13 +185,6 @@ func (s *Service) View(p profile.Profile, version string) View {
 func (s *Service) load(ctx context.Context, name string) (record, bool, error) {
 	db, err := s.db()
 	if err != nil {
-		return record{}, false, err
-	}
-	path, err := s.path(name)
-	if err != nil {
-		return record{}, false, err
-	}
-	if err := s.importFile(ctx, db, name, path); err != nil {
 		return record{}, false, err
 	}
 	return readRow(ctx, db, name)
@@ -176,7 +212,7 @@ func (s *Service) RecordProbe(p profile.Profile, version string, o Observation, 
 
 // An optional health write must not hold a real turn behind another writer
 // indefinitely: lockWait bounds the wait for another writer of the same
-// profile, and saveWait the import, row write and copy together.
+// profile, and saveWait the row write and copy together.
 const (
 	lockWait = 100 * time.Millisecond
 	saveWait = time.Second
@@ -218,9 +254,8 @@ func recordObservation(p profile.Profile, version string, o Observation, probe, 
 }
 
 // save applies apply to the profile's stored record in the order
-// state.Mirror needs: import the previous release's file, write the row,
-// then copy it. Runners and the engine both record health, so the
-// per-profile flock covers all three steps, with a bounded wait.
+// state.Mirror needs: write the row, then copy it. Runners and the engine
+// both record health, so the per-profile flock covers both steps with a bounded wait.
 func (s *Service) save(name string, r *record, apply func()) error {
 	ctx, cancel := context.WithTimeout(context.Background(), lockWait)
 	defer cancel()
@@ -248,9 +283,6 @@ func (s *Service) save(name string, r *record, apply func()) error {
 // saveRecord commits the health row and its previous-release copy under the
 // caller's record lock. save supplies the optional write's work deadline.
 func (s *Service) saveRecord(work context.Context, db *sql.DB, name, path string, r *record, apply func()) error {
-	if err := s.importFile(work, db, name, path); err != nil {
-		return err
-	}
 	var before record
 	fresh := true
 	err := state.For(db).Write(work, hub.Event{}, func(conn *sql.Conn) error {
