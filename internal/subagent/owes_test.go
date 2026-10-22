@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"fmt"
 	"testing"
 
 	"dyna-agent/internal/room"
@@ -31,5 +32,28 @@ func TestOwesOnlyForDirectPostsFromParentOrOwner(t *testing.T) {
 		if got := m.Store.Owes(child, tc.msg); got != tc.want {
 			t.Errorf("%s: Owes = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A broadcast post that names many sessions must not read every session's
+// metadata for each mention: the claim holds the gate lock while it checks.
+func TestOwesBroadcastReadsNoSessionMetadata(t *testing.T) {
+	m, _, work, metas := actorFixture(t)
+	child := metas["child"]
+	var via []string
+	for i := range 30 {
+		via = append(via, fmt.Sprintf("@agent-%d", i))
+	}
+	reads := 0
+	beforeRoomMetaRead = func(string) { reads++ }
+	t.Cleanup(func() { beforeRoomMetaRead = func(string) {} })
+	if m.Store.Owes(child, room.Message{From: work.Name, Via: via}) {
+		t.Error("a post that names other sessions owes a report")
+	}
+	if !m.Store.Owes(child, room.Message{From: work.Name, Via: append(via, "@child")}) {
+		t.Error("a post that names the session owes no report")
+	}
+	if reads != 0 {
+		t.Errorf("Owes read %d session records, want 0", reads)
 	}
 }
