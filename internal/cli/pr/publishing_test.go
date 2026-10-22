@@ -59,7 +59,7 @@ case "$*" in
  *"--method POST"*) printf '%s\n' "$*" >> "$PR_CLI_WRITES"; printf '{"id": %s}' "${PR_CLI_ID:-987654}";;
  *"check-runs?"*) printf '{"check_runs":[{"name":"unit","status":"completed","conclusion":"success"}]}';;
  *"actions/runs?"*) printf '{"workflow_runs":[]}';;
- *"/status?"*) printf '{"statuses":[]}';;
+ *"/statuses?"*) printf '[]';;
  *"/reviews?"*|*"/comments?"*) printf '[]';;
  *) printf '{"state":"open","head":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}';;
 esac

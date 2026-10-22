@@ -75,7 +75,7 @@ case "$1 $2" in
  */reviews*|*/comments*) echo '[]' ;;
  */check-runs*) echo '{"check_runs":[]}' ;;
  */actions/runs*) echo '{"workflow_runs":[]}' ;;
- */status*) echo '{"statuses":[]}' ;;
+ */statuses?*) echo '[]' ;;
  */actions/workflows*) echo '{"workflows":[]}' ;;
  *) cat "` + pullPath + `" ;;
  esac ;;
