@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"dyna-agent/internal/childenv"
@@ -61,7 +62,7 @@ func (m *Manager) EffectiveDir(meta Meta) (dir, note string) {
 // across retries and continuations. Otherwise it ends when ctx is canceled
 // (dyna subagent stop / close, or a signal to the runner).
 func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) error {
-	protectLock(lock)
+	syscall.CloseOnExec(int(lock.Fd()))
 	defer lock.Close()
 	store := m.store()
 	writes := m.runnerWrites(id, n)
