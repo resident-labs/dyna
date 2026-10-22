@@ -16,7 +16,8 @@ jobs:
       - name: Install image tools
         run: |
           pacman -Syu --noconfirm --needed arch-install-scripts git go nodejs npm gcc pkgconf gtk3 webkit2gtk-4.1 curl gnupg zstd sudo
-          # systemd-nspawn needs a machine ID, which the container lacks.
+          # systemd-nspawn needs a machine ID, which the container lacks. build.sh
+          # passes --keep-unit, so nspawn needs no systemd bus either.
           systemd-machine-id-setup
           # uid 1001 is the runner user on GitHub-hosted machines, so the
           # runner can still read the workspace and its temp folder.
