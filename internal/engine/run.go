@@ -256,9 +256,15 @@ func printDevices(svc *devicesvc.Service, out io.Writer) int {
 // publishState sends committed state changes to clients through the hub. A
 // PR state change goes to the room service instead, which turns it into the
 // PR rows that clients read.
-func publishState(events *hub.Hub, rooms *roomsvc.Service) func(hub.Event) {
+func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignals) func(hub.Event) {
 	return func(ev hub.Event) {
 		switch ev.Topic {
+		case "localci":
+			if ev.Key == "mode" || strings.HasPrefix(ev.Key, "node:") || strings.HasPrefix(ev.Key, "result:") {
+				wakeWorker(signals.channels["prs"])
+				wakeWorker(signals.channels["merges"])
+			}
+			return
 		case "callers":
 			if ev.Key != "" {
 				rooms.CoordinatorChanged(ev.Key)
@@ -442,6 +448,7 @@ func Run(ctx context.Context, f Options) (runErr error) {
 	// The epoch is the engine start: events of one run share it.
 	started := time.Now()
 	events := hub.New(started.UnixMilli())
+	signals := newWorkerSignals()
 	rooms.Notify.Sessions.InputEvents = events
 	// writer is the one state write path (internal/state). Stores move onto
 	// it one per PR; until then it only reports write health. A read-only
@@ -453,13 +460,12 @@ func Run(ctx context.Context, f Options) (runErr error) {
 			return err
 		}
 		writer = state.For(db)
-		writer.SetPublish(publishState(events, rooms))
+		writer.SetPublish(publishState(events, rooms, signals))
 	}
 	callers, err := identifyCallers(ctx, dataDir, readOnly, rooms.Notify.Sessions.Store)
 	if err != nil {
 		return err
 	}
-	signals := newWorkerSignals()
 	health := engineHealth(status, connectNote, started, writer, events, callers, signals)
 	load := sysload.New()
 	if !readOnly {
