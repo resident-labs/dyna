@@ -112,8 +112,10 @@ the missing reviewers. Releasing a draft does not bypass this review gate.
 See `dyna guide git`.
 
 Dyna derives the review queue from current PR and session facts. A watched,
-open change needs review when its head is verified, CI has not failed, and
-that head has no verdict. Review policy and the room pause also apply.
+open, non-draft change needs review when its head is verified, CI has not
+failed, and that head has no verdict. Review policy and the room pause also
+apply. A draft PR gets no automatic reviewer, even with required reviewers;
+mark it ready for review to start one.
 A paused room starts no reviewers and makes no GitHub polling requests.
 Polling resumes when the room resumes.
 

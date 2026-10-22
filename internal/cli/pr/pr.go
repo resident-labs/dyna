@@ -232,7 +232,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		return prWrite(c, s, r.Key(), "SetPRDraft", false, "")
 	}}
 
-	require := &cobra.Command{Use: "require <number|url> <reviewer>...", Short: "Require reviewers on a tracked PR", Long: "Add reviewers that must review a tracked PR. The engine resolves and checks each reviewer. Adding a reviewer that is already required keeps the PR unchanged.", Args: func(_ *cobra.Command, a []string) error {
+	require := &cobra.Command{Use: "require <number|url> <reviewer>...", Short: "Require reviewers on a tracked PR", Long: "Add reviewers that must review a tracked PR. The engine resolves and checks each reviewer. Adding a reviewer that is already required keeps the PR unchanged. Reviewers are open sessions in the PR's room, not profiles. Draft PRs get no automatic review.", Args: func(_ *cobra.Command, a []string) error {
 		if len(a) < 2 {
 			return fmt.Errorf("name at least one reviewer after the PR")
 		}
