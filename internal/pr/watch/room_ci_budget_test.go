@@ -66,7 +66,7 @@ func TestSetRoomCIBudgetUpdatesLivePolicyAndNotes(t *testing.T) {
 		t.Fatal("missing room accepted")
 	}
 	before := again
-	for _, bad := range []ChangePolicy{{CIWarnAfter: "5m", CIFailAfter: "4m"}, {CITestMax: "0s"}, {CITestAllow: []string{"new-without-note"}}} {
+	for _, bad := range []ChangePolicy{{CITimeBudget: "warn", CIWarnAfter: "5m", CIFailAfter: "4m"}, {CITimeBudget: "warn", CITestMax: "0s"}, {CITimeBudget: "warn", CITestAllow: []string{"new-without-note"}}} {
 		if err := e.s.SetRoomCIBudget(id, authority.Actor{Role: authority.Owner}, bad); err == nil {
 			t.Fatalf("invalid budget accepted: %+v", bad)
 		}
