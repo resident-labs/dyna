@@ -102,9 +102,6 @@ func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([
 			errs = append(errs, fmt.Errorf("PR #%d author has no open ancestor or root", r.Number))
 			continue
 		}
-		if s.beforeCloseTransfer != nil {
-			s.beforeCloseTransfer(key)
-		}
 		moved, err := s.transfer(ctx, key, "author", heir, "", transferOptions{expectAuthor: from.ID, inheritUnread: true})
 		if err != nil {
 			errs = append(errs, fmt.Errorf("PR #%d author handoff: %w", r.Number, err))

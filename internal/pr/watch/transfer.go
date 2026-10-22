@@ -55,7 +55,7 @@ func (s *Service) transfer(ctx context.Context, key, role string, to subagent.In
 	}
 	// git runs here, never under the PR lock.
 	var path string
-	var unread map[string]bool
+	readPosts := map[string]string{}
 	if r, err := s.Store.Get(key); err == nil {
 		path = matchingCheckout(ctx, r, dir)
 		if opts.inheritUnread {
@@ -65,11 +65,19 @@ func (s *Service) transfer(ctx context.Context, key, role string, to subagent.In
 					posted[n.PostID] = true
 				}
 			}
-			unread, err = s.queuedUnread(opts.expectAuthor, posted)
+			unread, err := s.queuedUnread(opts.expectAuthor, posted)
 			if err != nil {
 				return false, fmt.Errorf("read queued author notices: %w", err)
 			}
+			for _, n := range r.Notices {
+				if posted[n.PostID] && !unread[n.PostID] {
+					readPosts[n.ID] = n.PostID
+				}
+			}
 		}
+	}
+	if opts.inheritUnread && s.beforeCloseTransfer != nil {
+		s.beforeCloseTransfer(key)
 	}
 	moved := false
 	err := s.Store.update(func(st *State) error {
@@ -109,9 +117,11 @@ func (s *Service) transfer(ctx context.Context, key, role string, to subagent.In
 			if n.SupersededBy != "" || n.Target != old {
 				continue
 			}
-			// A delivered notice still counts as pending when its post was queued
-			// and the closing author never read it.
-			if n.Done && !(opts.inheritUnread && unread[n.PostID]) {
+			// Skip only delivery already confirmed read by the scan. A notice
+			// delivered since that scan cannot reach the stopped closing session;
+			// it must follow the heir even when flush has now marked it Done.
+			readPost, read := readPosts[n.ID]
+			if n.Done && (!opts.inheritUnread || read && readPost == n.PostID) {
 				continue
 			}
 			replacement := *n

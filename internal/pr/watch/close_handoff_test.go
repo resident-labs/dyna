@@ -73,36 +73,74 @@ func TestCloseKeepsQuotaPausedVerdictForReplay(t *testing.T) {
 }
 
 func TestCloseHandsQueuedUnreadNoticeToHeir(t *testing.T) {
-	e := newEnv(t)
-	e.s.Notify = notify.New(room.DefaultStore(), subagent.NewManager())
-	r := e.track()
-	author, heir := e.author, subagent.Info{Meta: subagent.Meta{ID: "ses_20261017-000003-cccccccc", RoomID: e.author.RoomID, Room: e.author.Room, Name: "heir"}}
-	author.Name = "author"
-	recordtest.Write(t, e.s.sessionStore().Root, author.ID, author.Meta)
-	// The room is paused: flush marked the notice Done, but the author never read its post.
-	if _, err := e.s.Notify.Rooms.SetSessionsPaused(t.Context(), r.RoomID, true); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.s.Notify.Rooms.Post(r.RoomID, room.PostInput{ID: "msg_00000000000000a1", From: "owner", To: []string{author.Address()}, Text: "Fix CI"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.s.Store.update(func(st *State) error {
-		st.Records[r.Key].Notices = append(st.Records[r.Key].Notices, Notice{ID: "msg_00000000000000a1", Target: author.ID, Text: "Fix CI", PostID: "msg_00000000000000a1", Done: true})
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.s.CloseSession(context.Background(), author, heir); err != nil {
-		t.Fatal(err)
-	}
-	var got []string
-	for _, n := range e.sent {
-		if n.Target == heir.ID {
-			got = append(got, n.Text)
+	for _, overlap := range []bool{false, true} {
+		name := "already delivered"
+		if overlap {
+			name = "delivery overlaps close"
 		}
-	}
-	if !strings.Contains(strings.Join(got, "\n"), "Fix CI") {
-		t.Fatalf("queued notice did not reach the heir: %q", got)
+		t.Run(name, func(t *testing.T) {
+			e := newEnv(t)
+			e.s.Notify = notify.New(room.DefaultStore(), subagent.NewManager())
+			r := e.track()
+			author, heir := e.author, subagent.Info{Meta: subagent.Meta{ID: "ses_20261017-000003-cccccccc", RoomID: e.author.RoomID, Room: e.author.Room, Name: "heir"}}
+			author.Name = "author"
+			recordtest.Write(t, e.s.sessionStore().Root, author.ID, author.Meta)
+			if _, err := e.s.Notify.Rooms.SetSessionsPaused(t.Context(), r.RoomID, true); err != nil {
+				t.Fatal(err)
+			}
+			if err := e.s.Store.update(func(st *State) error {
+				st.Records[r.Key].Notices = append(st.Records[r.Key].Notices, Notice{ID: "msg_00000000000000a1", Target: author.ID, Text: "Fix CI"})
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			posted, release := make(chan struct{}), make(chan struct{})
+			deliver := e.s.Deliver
+			e.s.Deliver = func(ctx context.Context, rec Record, n Notice) (string, error) {
+				if n.Target != author.ID {
+					return deliver(ctx, rec, n)
+				}
+				post, err := e.s.Notify.Rooms.Post(r.RoomID, room.PostInput{ID: n.ID, From: "owner", To: []string{author.Address()}, Text: n.Text})
+				if err != nil {
+					return "", err
+				}
+				if overlap {
+					close(posted)
+					<-release
+				}
+				return post.ID, nil
+			}
+			if overlap {
+				done := make(chan error, 1)
+				go func() { done <- e.s.flush(t.Context(), r.Key) }()
+				select {
+				case <-posted:
+				case err := <-done:
+					t.Fatalf("delivery ended before posting: %v", err)
+				}
+				// Commit Done only after close has scanned the pending notice.
+				e.s.beforeCloseTransfer = func(string) {
+					close(release)
+					if err := <-done; err != nil {
+						t.Fatal(err)
+					}
+				}
+			} else if err := e.s.flush(t.Context(), r.Key); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.s.CloseSession(t.Context(), author, heir); err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, n := range e.sent {
+				if n.Target == heir.ID {
+					got = append(got, n.Text)
+				}
+			}
+			if !strings.Contains(strings.Join(got, "\n"), "Fix CI") {
+				t.Fatalf("queued notice did not reach the heir: %q", got)
+			}
+		})
 	}
 }
 

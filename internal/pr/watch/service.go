@@ -31,7 +31,7 @@ import (
 )
 
 type Service struct {
-	// beforeCloseTransfer lets a test act between CloseSession's snapshot and its transfer.
+	// beforeCloseTransfer lets a test act after the notice scan, before the transfer commits.
 	beforeCloseTransfer func(key string)
 	tickReads           *tickReadView
 	StewardSessions     steward.Sessions
