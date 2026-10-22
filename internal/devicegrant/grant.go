@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"sync"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/scope"
@@ -20,9 +19,6 @@ const schema = `CREATE TABLE IF NOT EXISTS device_grants (
  legacy INTEGER NOT NULL,
  PRIMARY KEY (kind, id)
 );`
-
-// legacyImported remembers a database whose one-time import has finished.
-var legacyImported sync.Map // *sql.DB -> struct{}
 
 // Grant is the access stored for one device.
 type Grant struct {
@@ -53,12 +49,13 @@ func Open(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "device_grants.version", 1, func(conn *sql.Conn, old int) error {
-		if old != 0 {
-			return nil
+	err = database.Migrate(db, "device_grants.version", 2, func(conn *sql.Conn, old int) error {
+		if old == 0 {
+			if _, err := conn.ExecContext(context.Background(), schema); err != nil {
+				return err
+			}
 		}
-		_, err := conn.ExecContext(context.Background(), schema)
-		return err
+		return importDeviceScopes(conn, dataDir)
 	})
 	if err != nil {
 		return nil, err
@@ -161,55 +158,6 @@ func (s *Store) Delete(kind string, ids []string) error {
 		}
 		return nil
 	})
-}
-
-// TODO: legacy/shim remove later — grants every device that existed before scopes full access and marks it legacy; remove after those devices are narrowed or revoked.
-func (s *Store) ImportLegacy(paired, connect []string) error {
-	if _, ok := legacyImported.Load(s.db); ok {
-		return nil
-	}
-	err := database.Immediate(context.Background(), s.db, func(conn *sql.Conn) error {
-		ctx := context.Background()
-		var marker string
-		err := conn.QueryRowContext(ctx, `SELECT value FROM meta WHERE key='device_grants.legacy_imported'`).Scan(&marker)
-		if err == nil {
-			return nil
-		}
-		if err != sql.ErrNoRows {
-			return err
-		}
-		raw, err := json.Marshal(scope.All())
-		if err != nil {
-			return err
-		}
-		insert := func(kind string, ids []string) error {
-			for _, id := range ids {
-				if id == "" {
-					continue
-				}
-				_, err := conn.ExecContext(ctx,
-					`INSERT OR IGNORE INTO device_grants(kind, id, scopes, legacy) VALUES(?,?,?,1)`,
-					kind, id, string(raw))
-				if err != nil {
-					return err
-				}
-			}
-			return nil
-		}
-		if err := insert("paired", paired); err != nil {
-			return err
-		}
-		if err := insert("connect", connect); err != nil {
-			return err
-		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO meta(key, value) VALUES('device_grants.legacy_imported','1')`)
-		return err
-	})
-	if err != nil {
-		return err
-	}
-	legacyImported.Store(s.db, struct{}{})
-	return nil
 }
 
 func checkKey(kind, id string) error {
