@@ -2,7 +2,6 @@
 set -euo pipefail
 out=${1:?Usage: image/smoke.sh BUILD_OUTPUT_DIRECTORY}
 out=$(realpath "$out")
-extract_name="dyna-extract-$(printf %s "$out" | sha256sum | cut -c1-12)"
 run_root() {
  printf 'sudo' >> "$out/sudo-commands.log"
  printf ' %q' "$@" >> "$out/sudo-commands.log"
@@ -22,10 +21,13 @@ fi
 [[ -f "$out/$archive" ]]
 # /tmp can be nosuid. Use the normal machine image location for the boot check.
 # Refuse any existing image before creating this temporary test directory.
-run_root systemd-nspawn --machine="$extract_name" --register=no --resolv-conf=off --timezone=off -D "$out/rootfs" \
- --bind="$out:/output" --bind=/var/lib/machines:/machines \
- /bin/bash -c 'set -e; mkdir /machines/dyna-imgtest; tar "$@"; test ! -e /machines/dyna-imgtest/var/lib/systemd/linger/dyna; mkdir -p /machines/dyna-imgtest/var/lib/systemd/linger; touch /machines/dyna-imgtest/var/lib/systemd/linger/dyna' bash \
- "${tar_flags[@]}" -xpf "/output/$archive" -C /machines/dyna-imgtest
+# The host tar unpacks the archive, so the check needs only the output files.
+machine=/var/lib/machines/$name
+run_root mkdir "$machine"
+run_root tar "${tar_flags[@]}" -xpf "$out/$archive" -C "$machine"
+run_root test ! -e "$machine/var/lib/systemd/linger/dyna"
+run_root mkdir -p "$machine/var/lib/systemd/linger"
+run_root touch "$machine/var/lib/systemd/linger/dyna"
 cleanup() {
  run_root machinectl terminate "$name" 2>/dev/null || true
  wait "${boot_pid:-}" 2>/dev/null || true
