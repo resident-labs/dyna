@@ -550,7 +550,7 @@ func TestPlanArchiveFailsWhenAncestryStoreCannotBeRead(t *testing.T) {
 
 func TestPlanArchiveUsesLineageImportedAtStartup(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv(ArchiveDirEnv, "")
+	t.Setenv(ArchiveDirEnv, t.TempDir())
 	now := time.Now()
 	writeMetaRun(t, "wf_legacy_parent", "ok", now.Add(-time.Hour), "")
 	writeMetaRun(t, "wf_legacy_child", "running", now, "")
@@ -559,7 +559,14 @@ func TestPlanArchiveUsesLineageImportedAtStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	dataDir := store.DataDir()
-	if err := ancestry.Migrate(dataDir); err != nil {
+	archived := filepath.Join(ArchiveDir(), "wf_external", "workflows", "nested")
+	if err := os.MkdirAll(archived, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(archived, "plan.json"), []byte(`{"resumedFrom":"wf_external_parent"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(dataDir); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { database.Close(dataDir) })
@@ -568,8 +575,12 @@ func TestPlanArchiveUsesLineageImportedAtStartup(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rows int
-	if err := db.QueryRow("SELECT count(*) FROM plan_ancestry").Scan(&rows); err != nil || rows != 2 {
+	if err := db.QueryRow("SELECT count(*) FROM plan_ancestry").Scan(&rows); err != nil || rows != 3 {
 		t.Fatalf("startup imported %d rows: %v", rows, err)
+	}
+	var externalParent string
+	if err := db.QueryRow("SELECT resumed_from FROM plan_ancestry WHERE plan='wf_external/workflows/nested'").Scan(&externalParent); err != nil || externalParent != "wf_external_parent" {
+		t.Fatalf("custom archive startup row = %q, %v", externalParent, err)
 	}
 	selected, skips, err := PlanArchive(ArchiveSelector{AllFinished: true, Now: now})
 	if err != nil {
