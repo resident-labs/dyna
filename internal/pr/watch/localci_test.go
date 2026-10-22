@@ -483,3 +483,59 @@ func TestRegisteredCIPreservesRequiredCheckCoverage(t *testing.T) {
 		})
 	}
 }
+
+// A completed manual rerun must reach GitHub even while automatic work holds
+// every node slot, including an older job that is still waiting for a slot.
+type savedCIRegistry struct {
+	occupiedCIRegistry
+	result localci.Result
+}
+
+func (r *savedCIRegistry) LoadResult(_ context.Context, _, sha string) (localci.Result, error) {
+	if sha == r.result.SHA {
+		return r.result, nil
+	}
+	return localci.Result{}, os.ErrNotExist
+}
+
+func TestRegisteredCIPublishesSavedResultWhileNodesAreBusy(t *testing.T) {
+	repo := t.TempDir()
+	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
+		t.Fatalf("init repository: %v: %s", err, raw)
+	}
+	for _, earlierWaiting := range []bool{false, true} {
+		t.Run(fmt.Sprintf("earlier_waiting=%t", earlierWaiting), func(t *testing.T) {
+			head := strings.Repeat("a", 40)
+			r := &Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Branch: "feature", RepoPath: repo, Watching: true, State: "open", Created: time.Unix(2, 0)}
+			registry := &savedCIRegistry{result: localci.Result{Repo: repo, SHA: head, Node: "node", Status: "failed", Checks: []localci.SuiteResult{{CheckName: "go-static", Status: "failed"}}}}
+			key := registeredJobKey(registeredCIJob{record: *r, head: head})
+			cancelled := false
+			run := &registeredCIRun{node: "node", cancel: func() { cancelled = true }}
+			s := &Service{LocalCIRegistry: registry, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{key: run}}}
+			posts := 0
+			s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+				if !strings.Contains(strings.Join(cmd.Args, " "), "state=failure") {
+					return fmt.Errorf("unexpected GitHub call: %v", cmd.Args)
+				}
+				posts++
+				_, err := fmt.Fprint(cmd.Stdout, "HTTP/2.0 201 Created\r\n\r\n{}")
+				return err
+			}
+			st := State{Records: map[string]*Record{r.Key: r}}
+			if earlierWaiting {
+				waiting := *r
+				waiting.Key, waiting.Head, waiting.Created = "waiting", strings.Repeat("b", 40), time.Unix(1, 0)
+				st.Records[waiting.Key] = &waiting
+			}
+			if err := s.scheduleRegisteredCI(context.Background(), st); err != nil {
+				t.Fatal(err)
+			}
+			if posts != 1 || registry.hosted.PublishedKey == "" {
+				t.Fatalf("busy slots blocked saved result publication: posts=%d marker=%q", posts, registry.hosted.PublishedKey)
+			}
+			if cancelled || len(s.registeredRuns.runs) != 1 || s.registeredRuns.runs[key] != run {
+				t.Fatal("publishing a saved result changed the active slot reservation")
+			}
+		})
+	}
+}
