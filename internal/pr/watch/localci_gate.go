@@ -72,8 +72,10 @@ func registeredCheckSummaries(result localci.Result) []CheckSummary {
 		switch check.Status {
 		case "passed":
 			state, status, conclusion = "success", "completed", "success"
-		case "failed", "error":
+		case "failed":
 			state, status, conclusion = "failure", "completed", "failure"
+		case "error":
+			state, status, conclusion = "skipped", "completed", "neutral"
 		}
 		excerpt := failureExcerpt(check.Error+"\n"+strings.Join(check.Failures, "\n")+"\n"+check.LogTail, true)
 		if state != "failure" {
