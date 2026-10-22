@@ -128,14 +128,11 @@ func NewCommand() *cobra.Command {
 		return output(c, rows)
 	}})
 	var label, accountID string
-	var usePersonal, signIn, acpLogin bool
+	var usePersonal, signIn bool
 	login := &cobra.Command{Use: "login <harness>", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
 		harness, err := harnessruntime.CanonicalHarness(a[0])
 		if err != nil {
 			return err
-		}
-		if acpLogin && (harness != "antigravity" || accountID == "") {
-			return errors.New("--acp signs in to Antigravity's ACP server and needs --account <account-id>")
 		}
 		id := accountID
 		if id == "" && !signIn {
@@ -179,10 +176,6 @@ func NewCommand() *cobra.Command {
 		if account.Harness != b.Harness {
 			return errors.New("private account belongs to another harness")
 		}
-		if acpLogin && !account.Active {
-			// The ACP token is stored beside the live CLI token, so it must belong to this account.
-			return fmt.Errorf("activate the account first: dyna harness accounts activate %s", id)
-		}
 		flow, err := accounts.BeginLogin(c.Context(), id, b.Executable)
 		if err != nil {
 			return err
@@ -196,7 +189,8 @@ func NewCommand() *cobra.Command {
 		if flow.Warning != "" {
 			fmt.Fprintln(c.ErrOrStderr(), flow.Warning)
 		}
-		if acpLogin {
+		if account.Harness == "antigravity" {
+			// Antigravity signs in through its ACP server only.
 			if err := antigravityACPLogin(c, b.Executable, account.Identity, flow); err != nil {
 				return err
 			}
@@ -223,8 +217,6 @@ func NewCommand() *cobra.Command {
 	login.Flags().BoolVar(&signIn, "sign-in", false, "sign in with an account without asking about your personal login")
 	login.Flags().StringVar(&label, "label", "", "account label")
 	login.Flags().StringVar(&accountID, "account", "", "existing private account ID")
-	login.Flags().BoolVar(&acpLogin, "acp", false, "sign in to Antigravity's ACP server (Google) in the account's private home")
-	login.MarkFlagsMutuallyExclusive("acp", "use-personal")
 	login.MarkFlagsMutuallyExclusive("use-personal", "sign-in")
 	login.MarkFlagsMutuallyExclusive("use-personal", "account")
 	var confirmed bool

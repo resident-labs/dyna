@@ -122,6 +122,7 @@ func legacyGrant(e store.Entry) bool {
 // that entry, which keeps its own login and gains a missing usage observation.
 // Then it drops every grant-only entry that is left.
 func (a *Accounts) MigrateLegacyGrants() error {
+	a.recordAntigravityACPAccount()
 	found := false
 	if err := a.transaction(func(s *store.State) error {
 		found = slices.ContainsFunc(s.Entries, func(e store.Entry) bool { return e.NativeHome == "" })
@@ -130,6 +131,26 @@ func (a *Accounts) MigrateLegacyGrants() error {
 		return err
 	}
 	return a.transaction(a.migrateLegacyGrants, true)
+}
+
+// recordAntigravityACPAccount gives a HOME signed in before ACP-only accounts
+// the identity of its grant. Activation only ever wrote the active account's
+// grant there, so the active account names it. It is best effort and never
+// stops startup: a HOME it cannot repair stays signed out until its account
+// signs in again.
+//
+// TODO: legacy/shim remove later — once every such HOME has its record.
+func (a *Accounts) recordAntigravityACPAccount() {
+	id, err := a.activeID("antigravity")
+	if err != nil || id == "" {
+		return
+	}
+	n, err := a.Find(id)
+	scope, scopeErr := a.HarnessHome("antigravity")
+	if err != nil || scopeErr != nil || n.Identity == "" {
+		return
+	}
+	_ = native.RecordAntigravityACPAccount(harnesshome.Home(scope), n.Identity, n.Label)
 }
 
 func (a *Accounts) migrateLegacyGrants(state *store.State) error {

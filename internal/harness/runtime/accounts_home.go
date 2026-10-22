@@ -71,7 +71,7 @@ func privateAccountFiles(h, scope string) []string {
 	switch h {
 	case "antigravity":
 		home := harnesshome.Home(scope)
-		return []string{filepath.Join(home, native.AntigravityAuthFile), filepath.Join(home, native.AntigravityACPTokenFile)}
+		return []string{filepath.Join(home, native.AntigravityACPTokenFile), filepath.Join(home, native.AntigravityAccountFile)}
 	case "muse":
 		return []string{filepath.Join(config, "muse", "auth.json"), filepath.Join(config, "muse", ".auth.json.lock")}
 	case "opencode":
