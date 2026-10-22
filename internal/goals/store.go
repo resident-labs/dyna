@@ -50,6 +50,9 @@ type Goal struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 	Edits     []Edit    `json:"edits"`
 	Done      *Outcome  `json:"done,omitempty"`
+	// ExpediteUntil marks the room's one expedited goal until that time.
+	// Readers drop an expired value; see Store.Expedite.
+	ExpediteUntil *time.Time `json:"expediteUntil,omitempty"`
 }
 
 func (g Goal) Open() bool { return g.State == "active" }
@@ -256,7 +259,7 @@ func (s *Store) Edit(room, id, by, text string, holders *[]string, shared bool) 
 }
 func (s *Store) Finish(room, id, by, summary string, drop bool) (Goal, error) {
 	return s.change(room, id, func(_ *wake, _ *RoomState, g *Goal) error {
-		g.State = "done"
+		g.State, g.ExpediteUntil = "done", nil
 		if drop {
 			g.State = "dropped"
 		}
@@ -338,7 +341,7 @@ func (s *Store) CloseSession(room, id, heir string, open map[string]bool, comple
 				now := s.now()
 				g.Holders, g.Shared, g.UpdatedAt = []string{}, false, now
 				if g.Setter == id {
-					g.State = "dropped"
+					g.State, g.ExpediteUntil = "dropped", nil
 					g.Done = &Outcome{At: now, By: id, Summary: "The sole holder " + id + " closed its own goal."}
 					continue
 				}

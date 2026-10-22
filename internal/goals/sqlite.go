@@ -274,6 +274,7 @@ func (s *Store) read(locked bool, where string, args ...any) (State, error) {
 	var st State
 	if locked {
 		err = state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error { var err error; st, _, err = readState(conn, where, args...); return err })
+		s.dropExpired(&st)
 		return st, err
 	}
 	err = state.For(db).Read(context.Background(), func(query state.Reader) error {
@@ -281,6 +282,7 @@ func (s *Store) read(locked bool, where string, args ...any) (State, error) {
 		st, _, err = readState(query, where, args...)
 		return err
 	})
+	s.dropExpired(&st)
 	return st, err
 }
 
@@ -415,6 +417,9 @@ func (s *Store) list(locked bool, where string, args ...any) ([]Goal, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	for i := range out {
+		out[i].dropExpired(s.now())
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].CreatedAt.Before(out[j].CreatedAt) || out[i].CreatedAt.Equal(out[j].CreatedAt) && out[i].ID < out[j].ID
