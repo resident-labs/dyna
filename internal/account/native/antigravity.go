@@ -51,6 +51,7 @@ type antigravityManager struct {
 
 func init()                                 { register("antigravity", func(h Host) Manager { return &antigravityManager{host: h} }) }
 func (*antigravityManager) Harness() string { return "antigravity" }
+
 // SupportsCredentialRefresh is true only for a legacy saved CLI token. The ACP
 // server refreshes an ACP-only account's grant itself.
 func (*antigravityManager) SupportsCredentialRefresh(c Captured) bool {
