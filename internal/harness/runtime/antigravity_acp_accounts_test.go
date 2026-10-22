@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"dyna-agent/internal/account/native"
 	harnesshome "dyna-agent/internal/harness/home"
@@ -120,30 +119,31 @@ func TestAntigravityUpgradeRecordsTheActiveAccount(t *testing.T) {
 // switch gate that new turns wait on.
 func TestAntigravityACPAccountSkipsCredentialRefresh(t *testing.T) {
 	a := testAccounts(t)
-	signIn := func(sub string) (NativeAccount, *NativeLogin) {
-		t.Helper()
-		n, err := a.Create("antigravity", "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		flow, err := a.BeginLogin(context.Background(), n.ID, "/fake/agy")
-		if err != nil {
-			t.Fatal(err)
-		}
-		agySignInFixture(t, flow, sub)
-		return n, flow
-	}
-	first, flow := signIn("first")
-	if _, err := flow.Complete(context.Background()); err != nil {
+	n, err := a.Create("antigravity", "")
+	if err != nil {
 		t.Fatal(err)
 	}
-	// An open sign-in holds the switch gate; a refresh that took it would block.
-	_, open := signIn("second")
+	flow, err := a.BeginLogin(context.Background(), n.ID, "/fake/agy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agySignInFixture(t, flow, "first")
+	if _, err = flow.Complete(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// An open sign-in holds the switch gate, so a refresh that took it would
+	// block there instead of returning.
+	second, err := a.Create("antigravity", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	open, err := a.BeginLogin(context.Background(), second.ID, "/fake/agy")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer func() { _ = open.Cancel() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	result, err := a.RefreshCredentials(ctx, first.ID, "/fake/agy")
-	if result.Supported || ctx.Err() != nil || !errors.Is(err, native.ErrUnsupported) {
+	result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/agy")
+	if result.Supported || !errors.Is(err, native.ErrUnsupported) {
 		t.Fatalf("an ACP-only account was refreshed: %+v %v", result, err)
 	}
 }
