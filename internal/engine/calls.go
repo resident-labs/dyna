@@ -362,6 +362,8 @@ func bindings(s services) []websvc.Binding {
 		{Name: "SetHarnessConfigEnabled", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.SetHarnessConfigEnabled},
 		{Name: "SyncCatalogAccount", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.runtime.SyncCatalogAccount},
 		{Name: "SyncPrivateRuntime", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.SyncPrivateRuntime},
+		{Name: "ActivatePrivateRuntimeAccount", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.ActivatePrivateRuntimeAccount},
+		{Name: "GCPrivateRuntime", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.GCPrivateRuntime},
 		{Name: "AddCatalogMCP", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.runtime.AddCatalogMCP},
 		{Name: "AddCatalogSkill", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.runtime.AddCatalogSkill},
 		{Name: "RemoveCatalogEntry", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.runtime.RemoveCatalogEntry},
