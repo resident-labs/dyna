@@ -357,18 +357,26 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      # A slow mirror once left apt-get update hanging until the job timeout and
-      # failed a whole merge batch, and this step has legitimately taken 185 s.
-      # apt now gives up on a stalled connection, and the calls share one 230 s
-      # deadline, so a hang fails the step near four minutes with a reason. The
-      # caps are looser than the slowest good run (about 155 s) and only stop a
-      # call that is stuck.
+      # The Azure apt mirror is the real problem, not a hung apt: the four
+      # megabytes these packages need sometimes arrive at 38 kB/s, which took the
+      # install to 186 s and failed a merge trial, while the unpack itself is 3 s.
+      # So keep the .deb files in a cache, fetch a cold cache in parallel, and
+      # bound every call so a real stall fails with a reason near four minutes.
+      - name: Restore apt package cache
+        id: apt-debs
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.apt-debs
+          key: apt-debs-${{ runner.os }}-labwc-xwayland-sqlite3-v1
       - name: Install GUI tools
         shell: bash
         run: |
           set -euo pipefail
-          deadline=$((SECONDS + 230))
-          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+          deadline=$((SECONDS + 200))
+          arch=$HOME/.apt-debs
+          mkdir -p "$arch/partial"
+          apt_opts=(-o Dir::Cache::archives="$arch"
+            -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
           # bounded <cap-seconds> <command...> never runs past the deadline.
           bounded() {
             local cap=$1 left
@@ -389,10 +397,29 @@ jobs:
             shift
             bounded "$cap" "$@" || { echo "retrying: $*" >&2; bounded "$cap" "$@"; }
           }
-          retry 75 sudo apt-get "${apt_opts[@]}" update -qq
-          retry 180 sudo apt-get "${apt_opts[@]}" install -y -qq --no-install-recommends labwc xwayland sqlite3 >/dev/null
+          # The index is needed to resolve the packages and costs a few seconds.
+          retry 60 sudo apt-get "${apt_opts[@]}" update -qq
+          # One slow request must not stall the step: fetch the package files
+          # eight at a time. apt skips whatever is already in its archive
+          # directory, so this only ever removes work from the install below.
+          packages=(labwc xwayland sqlite3)
+          uris=$(sudo apt-get "${apt_opts[@]}" install -y -qq --print-uris \
+            --no-install-recommends "${packages[@]}" |
+            sed -n "s/^'\(https\?:\/\/[^']*\.deb\)'.*/\1/p")
+          if [ -n "$uris" ]; then
+            printf '%s\n' "$uris" |
+              xargs -P 8 -n 1 timeout 45 curl -fsSL -O --output-dir "$arch" ||
+              echo "parallel fetch incomplete; apt will fetch the rest"
+          fi
+          retry 120 sudo apt-get "${apt_opts[@]}" install -y -qq --no-install-recommends "${packages[@]}" >/dev/null
           bounded 60 npm install -g agent-browser
           sudo loginctl enable-linger "$USER"
+      - name: Save apt package cache
+        if: steps.apt-debs.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.apt-debs
+          key: apt-debs-${{ runner.os }}-labwc-xwayland-sqlite3-v1
       - name: Live computer and cleanup tests
         shell: bash
         run: |
