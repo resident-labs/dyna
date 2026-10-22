@@ -189,13 +189,18 @@ func (s *Service) deliverNotice(ctx context.Context, rec room.Record, r *goals.R
 		kind = "holder_closed"
 	}
 	switch kind {
-	case "holder_closed":
-		if g := r.Goals[n.Goal]; g == nil || !g.Open() {
-			return true, nil
+	case "holder_closed", "item_moved":
+		if kind == "holder_closed" {
+			if g := r.Goals[n.Goal]; g == nil || !g.Open() {
+				return true, nil
+			}
 		}
 		text := "Goal " + n.Goal + ": " + n.Text
 		if n.To != "" {
 			info, err := s.Notify.Sessions.Store.Resolve(n.To)
+			if err != nil && kind == "item_moved" {
+				return false, err
+			}
 			if err == nil && info.Status != subagent.StatusClosed {
 				input := room.PostInput{Wake: true, ID: stableID(rec.ID + "/" + n.ID), From: room.GoalKeeperSender, Kind: "goal", Text: text,
 					To: []string{info.Address()}, Via: []string{"@" + info.Name}, SessionIDs: map[string]string{info.Address(): info.ID}}

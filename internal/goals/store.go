@@ -65,7 +65,7 @@ func (g Goal) HeldBy(id string) bool {
 	return false
 }
 
-// Notice is a queued keeper post. Kind is holder_closed, journal or alert.
+// Notice is a queued keeper post. New notices use holder_closed or item_moved.
 // A notice stays queued until its post is stored.
 type Notice struct {
 	Kind string `json:"kind,omitempty"`

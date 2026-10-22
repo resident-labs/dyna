@@ -17,8 +17,8 @@ func (m *Manager) goalStore() *goals.Store {
 }
 
 // addSpawnGoal creates the work a new session holds: a delegation item on
-// an effective goal for a child, a goal of its own for a top-level session.
-// Root and service sessions hold no goals.
+// an effective goal for a child, or a goal of its own when none is eligible.
+// Service sessions hold no goals.
 func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string) (goalID, itemID string, err error) {
 	if meta.Service {
 		return "", "", nil
@@ -28,7 +28,7 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string) (goalID, it
 		setter = "owner"
 	}
 	store := m.goalStore()
-	if meta.ParentSession != "" {
+	if meta.ParentSession != "" || under != "" {
 		goal, err := store.EffectiveGoal(meta.RoomID, meta.ParentSession, under)
 		if err != nil {
 			return "", "", err
@@ -43,11 +43,6 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string) (goalID, it
 				return "", "", fmt.Errorf("cannot create the session's item: %w", err)
 			}
 			return goal, item.ID, nil
-		}
-		// Root and service parents hold no goals ever; their children stand
-		// alone like top-level sessions.
-		if parent, perr := m.store().Info(meta.ParentSession); perr != nil || !parent.Service && parent.Role != RoleRoot {
-			return "", "", fmt.Errorf("no goal to delegate from: %s holds no goal and is assigned no item; pass the goal to delegate from with --under", meta.ParentSession)
 		}
 	}
 	g, err := store.Add(meta.RoomID, setter, goals.Input{Text: text, Detail: brief, Holders: []string{meta.ID}})
