@@ -358,8 +358,8 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 				return err
 			}
 		}
-		status, err := s.ReviewerStatus(roomID)
-		if err != nil {
+		var status watch.ReviewerStatus
+		if err := engine.Call(c.Context(), "ReviewerStatus", []any{roomID}, &status); err != nil {
 			return err
 		}
 		return output(c, status)
