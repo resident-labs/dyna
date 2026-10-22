@@ -17,7 +17,7 @@ import (
 	"dyna-agent/internal/store/storetest"
 )
 
-func TestAncestryImportsLegacyHeaderOnRead(t *testing.T) {
+func TestAncestryImportsLegacyHeaderAtStartup(t *testing.T) {
 	dataDir := storetest.DataDir(t)
 	t.Setenv("DYNA_ARCHIVE_DIR", "")
 	dir := filepath.Join(dataDir, "runs", "wf_old")
@@ -44,7 +44,7 @@ func TestAncestryImportsLegacyHeaderOnRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRow("SELECT count(*) FROM plan_ancestry").Scan(&beforeRows); err != nil || beforeRows != 0 {
+	if err := db.QueryRow("SELECT count(*) FROM plan_ancestry").Scan(&beforeRows); err != nil || beforeRows != 1 {
 		t.Fatalf("startup imported %d rows: %v", beforeRows, err)
 	}
 	got, err := plan.ReadFile(dir)
@@ -204,7 +204,7 @@ func TestAncestryReadOnlyOldStoreFailsWithoutMigrating(t *testing.T) {
 	}
 }
 
-func TestAncestryImportsOldBinaryBeforeWriteAndMirror(t *testing.T) {
+func TestAncestryStampIgnoresOldBinaryParent(t *testing.T) {
 	s := testAncestryStore(t)
 	dir := t.TempDir()
 	p := plan.Extract("return 1", plan.Options{})
@@ -232,10 +232,14 @@ func TestAncestryImportsOldBinaryBeforeWriteAndMirror(t *testing.T) {
 	}
 }
 
-func TestAncestryEmptyHeaderOnlyKeepsImportStamp(t *testing.T) {
-	s := testAncestryStore(t)
+func TestAncestryStartupKeepsEmptyRow(t *testing.T) {
+	s := ancestry.Store{DataDir: storetest.DataDir(t)}
+	t.Cleanup(func() { database.Close(s.DataDir) })
 	dir := filepath.Join(s.DataDir, "runs", "wf_empty")
 	if err := plan.WriteAtomic(dir, plan.Extract("return 1", plan.Options{}), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ancestry.Migrate(s.DataDir); err != nil {
 		t.Fatal(err)
 	}
 	if parent, err := s.Parent(t.Context(), dir); err != nil || parent != "" {
@@ -252,12 +256,12 @@ func TestAncestryEmptyHeaderOnlyKeepsImportStamp(t *testing.T) {
 	if err := db.QueryRow("SELECT count(*) FROM state_mirrors WHERE key='plans/wf_empty'").Scan(&stamps); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 0 || stamps != 1 {
+	if rows != 1 || stamps != 1 {
 		t.Fatalf("empty header kept %d rows and %d stamps", rows, stamps)
 	}
 }
 
-func TestAncestryStartupDoesNotWalkGraphs(t *testing.T) {
+func TestAncestryStartupRejectsUnreadableHeader(t *testing.T) {
 	dataDir := storetest.DataDir(t)
 	dir := filepath.Join(dataDir, "runs", "wf_malformed")
 	if err := os.MkdirAll(dir, 0700); err != nil {
@@ -266,17 +270,15 @@ func TestAncestryStartupDoesNotWalkGraphs(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "plan.json"), []byte("{"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := ancestry.Migrate(dataDir); err != nil {
-		t.Fatalf("startup read a graph: %v", err)
-	}
 	t.Cleanup(func() { database.Close(dataDir) })
-	if _, err := (ancestry.Store{DataDir: dataDir}).Parent(context.Background(), dir); err == nil {
-		t.Fatal("malformed legacy header was ignored")
+	if err := ancestry.Migrate(dataDir); err == nil {
+		t.Fatal("startup ignored malformed legacy header")
 	}
 }
 
 func TestAncestryReadKeepsReadOnlyArtifactTimes(t *testing.T) {
-	s := testAncestryStore(t)
+	s := ancestry.Store{DataDir: storetest.DataDir(t)}
+	t.Cleanup(func() { database.Close(s.DataDir) })
 	dir := filepath.Join(s.DataDir, "archive", "runs", "wf_readonly")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -290,6 +292,9 @@ func TestAncestryReadKeepsReadOnlyArtifactTimes(t *testing.T) {
 	defer os.Chmod(dir, 0700)
 	before, err := os.Stat(dir)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ancestry.Migrate(s.DataDir); err != nil {
 		t.Fatal(err)
 	}
 	parent, err := s.Parent(context.Background(), dir)
