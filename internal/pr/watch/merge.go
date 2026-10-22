@@ -18,6 +18,8 @@ import (
 
 // MergeQueueItem is a view of current facts. It is never saved as queue state.
 type MergeQueueItem struct {
+	GoalID                   string            `json:"goalId,omitempty"`
+	Expedited                bool              `json:"expedited,omitempty"`
 	MissingRequiredReviewers []string          `json:"missingRequiredReviewers,omitempty"`
 	Title                    string            `json:"title,omitempty"`
 	Author                   string            `json:"author,omitempty"`
@@ -200,31 +202,15 @@ func (s *Service) RoomMergeQueue(roomID string) ([]MergeQueueItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	paused, err := s.RoomPaused(roomID)
+	ordered, err := s.prioritizedMergeQueue(context.Background(), st)
 	if err != nil {
 		return nil, err
 	}
 	rows := []MergeQueueItem{}
-	for _, item := range mergeQueue(st) {
-		if item.RoomID != roomID {
-			continue
+	for _, item := range ordered {
+		if item.RoomID == roomID {
+			rows = append(rows, item)
 		}
-		if paused {
-			markPaused(&item)
-		} else if r := recordByID(&st, item.ChangeID); r != nil {
-			why, err := s.trialRoomHold(context.Background(), *r)
-			if err != nil {
-				return nil, err
-			}
-			if why != "" {
-				if st.MergePauses[r.RoomID] != "" {
-					item.State, item.Reason = "merge-paused", why
-				} else {
-					item.State, item.Reason = "read-only", why
-				}
-			}
-		}
-		rows = append(rows, item)
 	}
 	return rows, nil
 }
@@ -242,24 +228,9 @@ func (s *Service) MergeStatus(ctx context.Context) ([]MergeQueueItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows := mergeQueue(st)
-	for i := range rows {
-		r := recordByID(&st, rows[i].ChangeID)
-		paused, err := s.RoomPaused(r.RoomID)
-		if err != nil {
-			return nil, err
-		}
-		if paused {
-			markPaused(&rows[i])
-		} else if why, err := s.trialRoomHold(ctx, *r); err != nil {
-			return nil, err
-		} else if why != "" {
-			if st.MergePauses[r.RoomID] != "" {
-				rows[i].State, rows[i].Reason = "merge-paused", why
-			} else {
-				rows[i].State, rows[i].Reason = "read-only", why
-			}
-		}
+	rows, err := s.prioritizedMergeQueue(ctx, st)
+	if err != nil {
+		return nil, err
 	}
 	for _, r := range records {
 		p, status := storedDefault(st, r)
