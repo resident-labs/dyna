@@ -368,11 +368,14 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	}
 	inner := "mkdir -p /tmp/home /tmp/data /tmp/config /tmp/cache; " + check.inner
 	user := " --user $(id -u):$(id -g)"
-	if strings.HasPrefix(check.image, "golang:") {
+	if strings.HasPrefix(check.image, "golang:") || check.id == "android" {
 		user = ""
 		prepare := ""
 		if check.id == "go-static" {
 			prepare = "timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq && timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq shellcheck >/dev/null || exit 69; "
+		}
+		if check.id == "android" {
+			prepare = "if ! command -v curl >/dev/null || ! command -v unzip >/dev/null; then timeout --signal=TERM --kill-after=10s 180s bash -c " + q("apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 update -qq && apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 install -y -qq curl unzip >/dev/null") + " || exit 69; fi; "
 		}
 		inner = prepare + "(getent group $CI_GID >/dev/null || groupadd --gid $CI_GID dyna-ci) && (getent passwd $CI_UID >/dev/null || useradd --no-log-init --uid $CI_UID --gid $CI_GID --no-create-home --home-dir /tmp/home dyna-ci) && exec setpriv --reuid=$CI_UID --regid=$CI_GID --clear-groups bash -c " + q(inner)
 	}
@@ -381,7 +384,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	for _, mount := range [][2]string{{"go-build", "build"}, {"go-mod", "mod"}, {"npm", "npm"}, {"android", "android"}, {"gradle", "gradle"}} {
 		args += " -v " + q(path.Join(base, mount[0])+":/cache/"+mount[1])
 	}
-	args += " -e HOME=/tmp/home -e XDG_DATA_HOME=/tmp/data -e XDG_CONFIG_HOME=/tmp/config -e XDG_CACHE_HOME=/tmp/cache -e RUNNER_TEMP=/reports -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod -e npm_config_cache=/cache/npm -e ANDROID_HOME=/cache/android -e GRADLE_USER_HOME=/cache/gradle -e GOMAXPROCS=2 -e GOMEMLIMIT=3GiB -e GOFLAGS=-p=2 -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=" + q(work) + " -e CI_UID=$(id -u) -e CI_GID=$(id -g) -e JUNIT_REPORT_PATH=/reports/" + check.id + "-test.xml " + check.image
+	args += " -e HOME=/tmp/home -e XDG_DATA_HOME=/tmp/data -e XDG_CONFIG_HOME=/tmp/config -e XDG_CACHE_HOME=/tmp/cache -e RUNNER_TEMP=/reports -e GITHUB_STEP_SUMMARY=/reports/step-summary.md -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod -e npm_config_cache=/cache/npm -e ANDROID_HOME=/cache/android -e GRADLE_USER_HOME=/cache/gradle -e GOMAXPROCS=2 -e GOMEMLIMIT=3GiB -e GOFLAGS=-p=2 -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=" + q(work) + " -e CI_UID=$(id -u) -e CI_GID=$(id -g) -e JUNIT_REPORT_PATH=/reports/" + check.id + "-test.xml " + check.image
 	// Both host and container deadlines survive a disconnected SSH client.
 	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner)
 	return nodeSlotScript(base, node.Slots, index, setup)
