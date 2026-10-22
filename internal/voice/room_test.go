@@ -33,20 +33,6 @@ func TestCallPostsAreOwnerVoiceDMs(t *testing.T) {
 	}
 }
 
-// Voice's recent activity reads a report's result, not its header and pointer.
-func TestResultTextIsTheResult(t *testing.T) {
-	for in, want := range map[string]string{
-		"dyna-agent:root turn 700 completed. Result: No, root has not checked the TUI yet. Full output: dyna subagent output dyna-agent:root": "No, root has not checked the TUI yet.",
-		"dyna-agent:root turn 701 completed. Result:\n\n- CI is green\n- PR 1035 merged\n\nFull output: dyna subagent output dyna-agent:root": "- CI is green\n- PR 1035 merged",
-		"dyna-agent:root turn 702 failed. Error: the build broke":                                                                             "Error: the build broke",
-		"CI is green on main.": "CI is green on main.",
-	} {
-		if got := resultText(in); got != want {
-			t.Errorf("resultText(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 // Watch hands the call root's open questions, then root's @voice-call posts
 // from the call's start, and nothing else.
 func TestWatchSaysRootsQuestionsAndCallPosts(t *testing.T) {
@@ -107,59 +93,66 @@ func TestWatchNamesWhatRootShares(t *testing.T) {
 
 // fakeSpeaker records what Watch hands the call.
 type fakeSpeaker struct {
-	said  chan string // the text of each Speak
-	other chan string // "progress <task> <text>" and "end <task>"
+	said    chan string // the text of each Speak
+	context chan string // execution context that requests no speech
 }
 
 func newFakeSpeaker() *fakeSpeaker {
-	return &fakeSpeaker{said: make(chan string, 8), other: make(chan string, 8)}
+	return &fakeSpeaker{said: make(chan string, 8), context: make(chan string, 8)}
 }
 
 func (f *fakeSpeaker) Speak(_, _, text string) { f.said <- text }
-func (f *fakeSpeaker) Progress(task string, _ time.Time, text string) {
-	f.other <- "progress " + task + " " + text
-}
-func (f *fakeSpeaker) EndProgress(task string) { f.other <- "end " + task }
+func (f *fakeSpeaker) Context(text string)     { f.context <- text }
 
-// While a request Voice dispatched is open, posts between root and its
-// agents are its progress. Root's answer to the call closes it, and later
-// posts are no one's progress.
-func TestWatchOffersRootAndAgentPostsAsProgress(t *testing.T) {
+// Room traffic for running work is context and never requests speech. Multiple explicit
+// call posts still reach Voice, including corrections and distinct results.
+func TestWatchKeepsExecutionTrafficAsSilentContext(t *testing.T) {
 	tools, work, _ := toolsFixture(t)
 	externalRoot(t, work)
 	link, rooms := tools.link, room.DefaultStore()
 	call := newFakeSpeaker()
 	ctx, stop := context.WithCancel(t.Context())
 	defer stop()
-	go link.Watch(ctx, time.Now().Add(-time.Second), call)
-	task, err := link.Ask(t.Context(), "Fix CI on PR 7.")
-	if err != nil {
+	ended := make(chan error, 1)
+	if _, err := link.Ask(t.Context(), "Fix CI on PR 7."); err != nil {
 		t.Fatal(err)
 	}
-	post := func(from string, to ...string) {
+	post := func(from, text string, to ...string) {
 		t.Helper()
-		if _, err := rooms.Post(work.ID, room.PostInput{From: from, To: to, Text: "Rerunning the failed job."}); err != nil {
+		if _, err := rooms.Post(work.ID, room.PostInput{From: from, To: to, Text: text}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	post("work:builder", "work")
-	if got := <-call.other; got != "progress "+task+" Rerunning the failed job." {
-		t.Fatalf("got %q, want the builder's post as the request's progress", got)
+	post("work:builder", "Rerunning a different job.", "work")
+	post("work:root", "Check another PR.", "work:builder")
+	post("work", "Check the release.", "work:helper")
+	post("work:builder", "Review the logs.", "work:helper")
+	if _, err := rooms.Post(work.ID, room.PostInput{From: "work:root", Kind: "completed", To: []string{"work"}, Text: "Finished this turn."}); err != nil {
+		t.Fatal(err)
 	}
-	post("work:builder", "work:helper") // agent to agent: no one's progress
-	post("work", "work:voice-call")     // root answers the call
-	if got := <-call.said; !strings.HasSuffix(got, "Rerunning the failed job.") {
-		t.Fatalf("said %q", got)
+	post("work:builder", "Traffic after the turn.", "work")
+	texts := []string{"CI is green.", "Correction: one job is still running.", "The review passed."}
+	for _, text := range texts {
+		post("work", text, "work:voice-call")
 	}
-	if got := <-call.other; got != "end "+task {
-		t.Fatalf("got %q, want the request closed", got)
+	// Follow reads the existing log at once; no polling or wall-clock wait
+	// is needed to observe this complete sequence.
+	go func() { ended <- link.Watch(ctx, time.Time{}, call) }()
+	for _, want := range []string{"Rerunning a different job.", "Check another PR.", "Check the release."} {
+		if got := <-call.context; !strings.HasPrefix(got, "[BACKEND] ") || !strings.HasSuffix(got, want) {
+			t.Fatalf("context %q, want %q", got, want)
+		}
 	}
-	post("work:builder", "work")
-	post("work", "work:voice-call")
-	<-call.said
+	for _, text := range texts {
+		if got := <-call.said; !strings.HasSuffix(got, text) {
+			t.Fatalf("said %q, want explicit call post %q", got, text)
+		}
+	}
+	stop()
+	<-ended // every earlier room post has been handled
 	select {
-	case got := <-call.other:
-		t.Fatalf("got %q after the request closed", got)
+	case got := <-call.context:
+		t.Fatalf("unexpected execution context: %q", got)
 	default:
 	}
 }
