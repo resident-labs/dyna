@@ -205,10 +205,6 @@ func (a *Accounts) ownerLoginManager(h string, owner native.Host, env map[string
 	}
 	lookup := owner.Env
 	owner.Env = func(k string) string {
-		// Owner capture must not trigger the private-home legacy import.
-		if h == "antigravity" && k == "SSH_TTY" {
-			return ""
-		}
 		if v, ok := env[k]; ok && v == "" {
 			return ""
 		}
