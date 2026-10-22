@@ -30,6 +30,7 @@ type projectionCache struct {
 // need a lock. No record points into the shared state snapshot.
 type projection struct {
 	root, revision, version, members string
+	priority                         string
 	rooms                            int64
 	at                               time.Time
 	exits                            uint64
@@ -69,13 +70,17 @@ func (s *Service) readProjection() (*projection, error) {
 	if err != nil {
 		return nil, err
 	}
+	priority, priorityUntil, err := watcher.PriorityInputs()
+	if err != nil {
+		return nil, err
+	}
 	exits := c.exits.Load()
 	old := c.current
 	now := time.Now()
 	if watcher.Now != nil {
 		now = watcher.Now()
 	}
-	if old != nil && old.root == watcher.Store.Root && old.revision == snapshot.Revision() && old.members == members && old.rooms == rooms && old.exits == exits && (old.until.IsZero() || now.Before(old.until)) {
+	if old != nil && old.root == watcher.Store.Root && old.revision == snapshot.Revision() && old.members == members && old.rooms == rooms && old.priority == priority && old.exits == exits && (old.until.IsZero() || now.Before(old.until)) {
 		return old, nil
 	}
 	var st watch.State
@@ -86,7 +91,7 @@ func (s *Service) readProjection() (*projection, error) {
 	}
 	version := snapshot.Revision()
 	var facts watch.ReviewFacts
-	if old != nil && old.root == watcher.Store.Root && old.members == members && old.rooms == rooms && old.exits == exits &&
+	if old != nil && old.root == watcher.Store.Root && old.members == members && old.rooms == rooms && old.priority == priority && old.exits == exits &&
 		(old.until.IsZero() || now.Before(old.until)) && sameProjectionInputs(old.state, st) {
 		// Keep the committed state current, but reuse the same observation.
 		// Its session and pause inputs have not changed. Need must point at
@@ -104,7 +109,7 @@ func (s *Service) readProjection() (*projection, error) {
 			return nil, err
 		}
 	}
-	p := &projection{root: watcher.Store.Root, revision: snapshot.Revision(), version: version, members: members, rooms: rooms, at: now, exits: exits,
+	p := &projection{root: watcher.Store.Root, revision: snapshot.Revision(), version: version, members: members, rooms: rooms, priority: priority, until: priorityUntil, at: now, exits: exits,
 		state: st, snapshot: snapshot, facts: facts, rows: map[string][]byte{}, pages: map[projectionPage]listpage.Page[*watch.Record]{}}
 	// History pages and reviewer occupancy have time boundaries even when
 	// no writer commits another revision.
@@ -150,7 +155,7 @@ func copyProjectionState(snapshot state.Snapshot, old *projection) watch.State {
 }
 
 func (p *projection) dependency() string {
-	return p.root + "\x00" + p.members + "|" + strconv.FormatInt(p.rooms, 10) + "|" + strconv.FormatUint(p.exits, 10) + "|" + p.until.String()
+	return p.root + "\x00" + p.priority + "|" + p.members + "|" + strconv.FormatInt(p.rooms, 10) + "|" + strconv.FormatUint(p.exits, 10) + "|" + p.until.String()
 }
 
 func (p *projection) row(r *watch.Record) ChangeView {
