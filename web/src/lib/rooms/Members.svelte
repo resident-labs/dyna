@@ -11,6 +11,8 @@
   import { ago, clock, stamp } from '../ui/format.js'
   import DoingLine from '../sessions/DoingLine.svelte'
   import ResponsibilityCount from './ResponsibilityCount.svelte'
+  import ExpediteBadge from './ExpediteBadge.svelte'
+  import { expedite, agentExpedited } from './expedite.ts'
   import MonitorGlyph from '../computers/MonitorGlyph.svelte'
   import { isLive, hasComputer, appName, ageText } from '../computers/computers.js'
   import { finishedTrees, foldMembers, isFinished, openTrail, orderMemberSessions } from './memberOrder.js'
@@ -108,7 +110,7 @@
     {/if}
     <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={32} state={finished(m) ? 'finished' : m.state} status={m.status} ring="var(--side)" />
     <span class="text">
-      <span class="name hue-{m.hue}">{offSeat ? 'root (internal)' : m.name}{#if row.folded}<span class="kids" title="{row.hidden} folded subagent{row.hidden === 1 ? '' : 's'}">{row.hidden}</span>{/if}</span>
+      <span class="name hue-{m.hue}">{offSeat ? 'root (internal)' : m.name}{#if row.folded}<span class="kids" title="{row.hidden} folded subagent{row.hidden === 1 ? '' : 's'}">{row.hidden}</span>{/if}{#if agentExpedited($expedite, m)} <ExpediteBadge short />{/if}</span>
       <span class="sub {finished(m) ? 'finished' : m.state}">{m.profile} · {#if offSeat}off seat{:else if finished(m)}dormant · {ago(m.lastActivity)}{:else if m.state === 'live' && m.doing?.text}<DoingLine doing={m.doing} {now} />{:else}{sessionStatus(m, true)}{/if}</span>
       <ResponsibilityCount counts={m.responsibilities} />
     </span>

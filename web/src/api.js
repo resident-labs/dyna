@@ -167,6 +167,10 @@ export const api = {
   editGoal: (room, id, text, holders, shared) => app.EditGoal(room, id, text, holders, shared),
   finishGoal: (room, id, summary, drop = false) => app.FinishGoal(room, id, summary, drop),
   checkGoal: (room, id) => app.CheckGoal(room, id),
+  // An empty id stops the room's expedite; replace switches from another goal.
+  expediteGoal: (room, id, replace = false) => app.ExpediteGoal(room, id, replace),
+  // An empty goalId unlinks the change.
+  setPRGoal: (room, key, goalId) => app.SetPRGoal(room, key, goalId),
 
   // global = true selects the rules for all rooms instead of this room's.
   rules: (room, global) => app.Rules(room, global),

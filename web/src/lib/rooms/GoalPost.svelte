@@ -1,5 +1,7 @@
 <script>
   import GoalGlyph from './GoalGlyph.svelte'
+  import ExpediteBadge from './ExpediteBadge.svelte'
+  import { expedite, goalExpedited } from './expedite.ts'
   import { stamp } from '../ui/format.js'
   let { post, goals = [], ongoal } = $props()
   let id = $derived(post.text?.match(/\bgoal (g\d+)\b/i)?.[1] ?? '')
@@ -27,6 +29,7 @@
     {:else}
       <span>{#if actor}<strong class="hue-{post.fromHue}">{actor}</strong>{prefix.slice(actor.length)}{:else}{prefix}{/if}<button class="goal" onclick={() => ongoal(id)}>{id}</button>{post.text?.split(/goal g\d+:?/i).slice(1).join('')}</span>
     {/if}
+    {#if goalExpedited($expedite, { id })}<ExpediteBadge />{/if}
     {#if expanded}<p>{post.text}</p>{/if}
   </div><time title={new Date(post.ts).toLocaleString()}>{stamp(post.ts)}</time>
 </div>
