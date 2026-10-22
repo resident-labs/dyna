@@ -54,7 +54,8 @@ export function listVisible(name, { view, drill, showRoomSettings, memberChips, 
   if (name === 'mentions') return !drill && isChannel(view)
   // Changes rows feed the PR screen, a session's PR tab and the PR chips.
   if (name === 'changes' || name === 'reviewer') return (!drill && view === 'github') || !!drill || !!showRoomSettings || !!memberChips || !!sidebarChips
-  if (name === 'goals') return !!memberChips || (!drill && (view === 'goals' || isChannel(view)))
+  // Goal priority also feeds PR controls and the agent and PR badges.
+  if (name === 'goals') return !!memberChips || !!sidebarChips || !!drill || view === 'github' || view === 'goals' || isChannel(view)
   // Cards in chat, a session's media and the Visuals view all show the
   // newest version of their visual.
   if (name === 'visuals') return !!drill || view === 'visuals' || isChannel(view)

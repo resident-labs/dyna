@@ -1381,15 +1381,19 @@
   // Expedite gives the goal's agents and PRs the first review and merge.
   // A goal that would replace another asks first.
   async function expediteGoal(g) {
+    if (g.room && g.room !== roomId) return
     const action = expediteAction($expedite, g)
-    if (action === 'replace') { confirm = { kind: 'expedite', goal: g }; return }
+    if (action === 'replace') { confirm = { kind: 'expedite', goal: g, roomId }; return }
     await api.expediteGoal(roomId, action === 'stop' ? '' : g.id, false)
     say(action === 'stop' ? `Goal ${g.id} is no longer expedited.` : `Goal ${g.id} is expedited.`)
     loadGoals()
   }
   async function linkPRGoal(change, goalId) {
-    await api.setPRGoal(roomId, change.key, goalId)
-    await loadChanges()
+    const id = roomId
+    // A GitHub-only row has no record to hold its goal yet. Track it for the owner first.
+    const row = change.key ? change : await api.trackPR(id, '', change.number)
+    await api.setPRGoal(id, row.key, goalId)
+    if (id === roomId) await loadChanges()
   }
   // Menu items for the goal an agent holds, or its nearest ancestor holds; with several goals, one item for each.
   function expediteItems(m) {
@@ -1577,7 +1581,7 @@
     confirm = { ...confirm, busy: true, error: '' }
     if (kind === 'expedite') {
       try {
-        await api.expediteGoal(roomId, confirm.goal.id, true)
+        await api.expediteGoal(confirm.roomId, confirm.goal.id, true)
         say(`Goal ${confirm.goal.id} is expedited.`)
         confirm = null
         loadGoals()

@@ -67,5 +67,10 @@
   .avatars :global(.avatar) + :global(.avatar) { margin-left: -6px; }
   .status { overflow-wrap: anywhere; } .coral { color: var(--coral); } .faint { color: var(--faint); } .sage { color: var(--sage); }
   .count { color: var(--faint); font-size: var(--t-sm); white-space: nowrap; padding-top: 3px; }
-  @media (max-width: 760px) { .list { padding: 0 var(--s2) var(--s4); } }
+  @media (max-width: 760px) {
+    .list { padding: 0 var(--s2) var(--s4); }
+    .branch { flex-wrap: wrap; }
+    .branch :global(.row) { flex-basis: 100%; }
+    .xp { margin: 0 var(--s3) var(--s2) auto; }
+  }
 </style>
