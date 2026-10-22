@@ -79,7 +79,7 @@ func TestRoomCIBudgetConversion(t *testing.T) {
 	// Invalid writes must preserve the last saved settings.
 	before, _ := a.RoomCIBudget(rec.ID)
 	for _, bad := range []prview.CIBudgetSettings{
-		{CIWarnAfter: "5m", CIFailAfter: "4m"}, {CITestMax: "0s"}, {CITestMax: "bad"}, {CITestAllow: []string{" trailing "}},
+		{CITimeBudget: "warn", CIWarnAfter: "5m", CIFailAfter: "4m"}, {CITimeBudget: "warn", CITestMax: "0s"}, {CITimeBudget: "warn", CITestMax: "bad"}, {CITimeBudget: "warn", CITestAllow: []string{" trailing "}},
 	} {
 		if err := a.SetRoomCIBudget(ownerCtx, rec.ID, bad); err == nil {
 			t.Fatalf("accepted invalid budget: %#v", bad)
@@ -100,7 +100,7 @@ func TestRoomCIBudgetConversion(t *testing.T) {
 	if err := svc.SetRoomChangePolicy(rec.ID, authority.Actor{Role: authority.Session, Session: "agent", Room: rec.ID}, base); err == nil {
 		t.Fatal("agent bypassed owner gate")
 	}
-	if err := a.SetRoomCIBudget(ownerCtx, rec.ID, prview.CIBudgetSettings{}); err != nil {
+	if err := a.SetRoomCIBudget(ownerCtx, rec.ID, prview.CIBudgetSettings{CITimeBudget: "warn"}); err != nil {
 		t.Fatal(err)
 	}
 	reset, err := a.RoomCIBudget(rec.ID)
