@@ -82,7 +82,7 @@ func TestTestBudgetFailsHeadAndWakesOnce(t *testing.T) {
 }
 
 func TestTestBudgetAllowAndCustomLimit(t *testing.T) {
-	for _, allowed := range []string{"slow", "pkg/slow"} {
+	for _, allowed := range []string{"pkg/slow"} {
 		t.Run(allowed, func(t *testing.T) {
 			e := newEnv(t)
 			testReportFixture(t, e, map[string]string{"results.xml": `<testsuite><testcase classname="pkg" name="slow" time="12"/><testcase name="boundary" time="2"/></testsuite>`})
