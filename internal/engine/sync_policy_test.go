@@ -45,7 +45,7 @@ func TestUserSyncCallsUseEngineAuthority(t *testing.T) {
 				if err == nil || !strings.Contains(err.Error(), "invalid character") {
 					t.Errorf("%s did not reach generation: %v", tc.name, err)
 				}
-			} else if err == nil || !strings.Contains(err.Error(), "is owner or root only") {
+			} else if err == nil || !(strings.Contains(err.Error(), "is owner or root only") || strings.Contains(err.Error(), "could not verify")) {
 				t.Errorf("%s reached generation without power: %v", tc.name, err)
 			}
 		}

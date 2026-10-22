@@ -96,16 +96,16 @@ func TestLibrarianEngineCannotUseProcessAuthority(t *testing.T) {
 	ctx := localCallerContext(t, websvc.Caller{Kind: websvc.Unverified}, authority.Actor{Role: authority.Owner})
 	ctx = callspec.WithClaim(ctx, callspec.Claim{Session: "other"})
 	s := services{}
-	if _, err := s.enableLibrarian(ctx, "missing", "", "missing"); err == nil || !strings.HasPrefix(err.Error(), "library enable is ") {
+	if _, err := s.enableLibrarian(ctx, "missing", "", "missing"); err == nil || !strings.Contains(err.Error(), "could not verify") {
 		t.Fatalf("enable = %v", err)
 	}
 	// Disable reaches the same explicit service guard. Give it the real service
 	// dependencies; its actor must still come from the call, not the process.
 	s = testServices(t, false)
-	if _, err := s.disableLibrarian(ctx, "missing"); err == nil || !strings.HasPrefix(err.Error(), "library disable is ") {
+	if _, err := s.disableLibrarian(ctx, "missing"); err == nil || !strings.Contains(err.Error(), "could not verify") {
 		t.Fatalf("disable = %v", err)
 	}
-	if _, err := s.fileLibrarySmell(ctx, librarianRepo(t), librarian.Smell{}); err == nil || !strings.HasPrefix(err.Error(), "library smell is ") {
+	if _, err := s.fileLibrarySmell(ctx, librarianRepo(t), librarian.Smell{}); err == nil || !strings.Contains(err.Error(), "could not verify") {
 		t.Fatalf("smell = %v", err)
 	}
 }
@@ -127,7 +127,7 @@ func TestLibrarianEngineKeepsCallerRoom(t *testing.T) {
 	}
 }
 
-func TestLibrarianSmellRecordsUnverifiedAuthor(t *testing.T) {
+func TestLibrarianSmellRefusesUnverifiedAuthor(t *testing.T) {
 	storetest.Isolate(t)
 	s := testServices(t, false)
 	repo := librarianRepo(t)
@@ -136,16 +136,15 @@ func TestLibrarianSmellRecordsUnverifiedAuthor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// No claim keeps the incoming owner actor in report-only mode, while
-	// the issue audit still identifies the unresolved caller as unverified.
+	// An unresolved caller cannot file an issue with the engine owner actor.
 	ctx := localCallerContext(t, websvc.Caller{Kind: websvc.Unverified}, authority.Actor{Role: authority.Owner})
 	sm := librarian.Smell{Title: "One shared entry path", At: []string{"entry.go"}, Symbols: []string{"entry"}, Cost: "Repeated edits.", Direction: "Share the entry."}
 	issue, err := s.fileLibrarySmell(ctx, repo, sm)
-	if err != nil || issue.Filer != enabled.Room+":unverified" {
+	if err == nil || !strings.Contains(err.Error(), "could not verify") || issue.ID != "" {
 		t.Fatalf("issue = %+v, %v", issue, err)
 	}
 	st, err := (librarianstate.Store{DataDir: store.DataDir()}).Get(enabled.Repo.ID)
-	if err != nil || st.Smells != 1 {
+	if err != nil || st.Smells != 0 {
 		t.Fatalf("state = %+v, %v", st, err)
 	}
 }
