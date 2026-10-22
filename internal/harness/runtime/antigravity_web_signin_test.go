@@ -113,3 +113,35 @@ func TestAntigravitySignInFailureNamesTheCLILogin(t *testing.T) {
 		t.Fatalf("another harness's failure was rewritten: %v", got)
 	}
 }
+
+// Until an ACP grant alone can be saved, capture names the account from the
+// agy CLI token in the shared HOME. A grant for any other Google account would
+// save one account with another's identity, so the sign-in is pinned to it.
+func TestAntigravityACPSignInIsPinnedToTheCLITokenBesideIt(t *testing.T) {
+	home := t.TempDir()
+	// No CLI token: the selected account, or the first sign-in of a new one.
+	for _, expect := range []string{"", "google:b"} {
+		if got, err := antigravityACPExpect(home, expect); err != nil || got != expect {
+			t.Fatalf("expect %q became %q: %v", expect, got, err)
+		}
+	}
+	path := filepath.Join(home, native.AntigravityAuthFile)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"token":{"access_token":"fake-access"},"id_token":"e30.eyJzdWIiOiJhIn0.sig","auth_method":"consumer"}`)
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Adding account B while A's CLI token is in the HOME pins the grant to A.
+	if got, err := antigravityACPExpect(home, ""); err != nil || got != "google:a" {
+		t.Fatalf("a new account was not pinned to the CLI token: %q %v", got, err)
+	}
+	// Signing in B again while A is active is refused before Google is asked.
+	if _, err := antigravityACPExpect(home, "google:b"); err == nil || !strings.Contains(err.Error(), "Switch to this account first") {
+		t.Fatalf("account B signed in beside A's CLI token: %v", err)
+	}
+	if got, err := antigravityACPExpect(home, "google:a"); err != nil || got != "google:a" {
+		t.Fatalf("the active account was refused: %q %v", got, err)
+	}
+}
