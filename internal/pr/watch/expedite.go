@@ -25,6 +25,9 @@ func (s *Service) expediteCounters() *expediteCounters {
 }
 
 func (s *Service) expediteStreak(queue string) int {
+	if s.Store == nil {
+		return 0
+	}
 	c := s.expediteCounters()
 	c.mu.Lock()
 	defer c.mu.Unlock()
