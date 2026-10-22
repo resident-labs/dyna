@@ -93,7 +93,7 @@ type Manager struct {
 
 	// checkpoint lets tests act inside a lifecycle race window. Stages:
 	// "finish-checked", "dismiss-reserved", "wake-selected", "turn-started",
-	// "turn-finished", "close-before-stop", and "cleanup-start".
+	// "turn-finished", "close-before-stop", "close-before-goal-handoff", and "cleanup-start".
 	checkpoint func(stage string)
 
 	// RoomFileSize measures a room log for a terminal input cutoff. Tests use

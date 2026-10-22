@@ -344,7 +344,7 @@ func TestTransferCancelledWorkerCannotCreateReplacement(t *testing.T) {
 	if _, err := e.m.TransferContext(context.Background(), info.ID, TransferOptions{Profile: "missing"}); err == nil {
 		t.Fatal("accepted missing profile")
 	}
-	if _, err := e.m.Close(e.ctx, info.ID); err != nil {
+	if _, err := e.m.CloseWithOptions(e.ctx, info.ID, CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.m.TransferContext(context.Background(), info.ID, TransferOptions{Profile: "next"}); !errors.Is(err, ErrClosed) {

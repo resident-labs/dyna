@@ -20,6 +20,9 @@ func TestBulkCloseKeepsOrderAndIndependentPRAndRoomGuards(t *testing.T) {
 	alpha, beta := e.room("alpha"), e.room("beta")
 	author := e.start(alpha, "author", nil)
 	free := e.start(alpha, "free", nil)
+	if _, err := e.svc.goalService().Store.Finish(alpha.ID, free.Goal, "owner", "Fixture completed", false); err != nil {
+		t.Fatal(err)
+	}
 	other := e.start(beta, "other", nil)
 	key := "github.com/owner/repo#17"
 	prfixture.SaveState(t, e.svc.PRs.Watcher().Store.Root, watch.State{Version: 1, Records: map[string]*watch.Record{
@@ -112,7 +115,7 @@ func TestBulkCloseHandsSurvivingChildrenUpWithoutLosingHistory(t *testing.T) {
 	lead := e.start(rec, "lead", nil)
 	child := e.start(rec, "child", &lead)
 	leaf := e.start(rec, "leaf", &child)
-	got, err := e.svc.BulkSessionAction(e.ctx, rec.ID, BulkSessionOptions{Action: "close", Sessions: []string{lead.ID, child.ID}})
+	got, err := e.svc.BulkSessionAction(e.ctx, rec.ID, BulkSessionOptions{Action: "close", Sessions: []string{lead.ID, child.ID}, Force: true})
 	if err != nil || got.Succeeded != 2 {
 		t.Fatalf("close hierarchy = %+v, %v", got, err)
 	}
