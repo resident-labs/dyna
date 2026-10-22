@@ -1,6 +1,8 @@
 package terminalsvc
 
 import (
+	"dyna-agent/internal/authority"
+	"dyna-agent/internal/store/storetest"
 	"encoding/base64"
 	"errors"
 	"strings"
@@ -26,6 +28,8 @@ func TestTermWriteBounds(t *testing.T) {
 }
 
 func TestTerminalAPI(t *testing.T) {
+	storetest.DataDir(t)
+	t.Cleanup(authority.InEngine())
 	t.Setenv("HOME", t.TempDir())
 	cwd := t.TempDir()
 	s := New(Options{Shell: "/bin/sh", Directory: func(ref string) (string, string, string, error) {
