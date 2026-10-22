@@ -35,7 +35,7 @@ func nodeCommand(s localci.Store) *cobra.Command {
 	}
 	add.Flags().StringVar(&ssh, "ssh", "", "SSH destination as host or user@host (default: this machine)")
 	add.Flags().StringVar(&jump, "jump", "", "SSH jump destination as host or user@host")
-	add.Flags().IntVar(&slots, "slots", 1, "maximum concurrent CI runs")
+	add.Flags().IntVar(&slots, "slots", 1, "maximum concurrent CI checks")
 	var asJSON bool
 	list := &cobra.Command{
 		Use: "list", Short: "List enabled and disabled CI runners", Args: cobra.NoArgs,
