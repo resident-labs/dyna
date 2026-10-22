@@ -43,24 +43,24 @@ func TestTestStateNamesWhatToDo(t *testing.T) {
 }
 
 func TestIgnoredTestReadsTheAllowList(t *testing.T) {
-	allowed := map[string]bool{"internal/pr/watch/TestSlow": true, "TestBare": true, "TestParent/child": true, "child": true}
+	allowed := map[string]bool{"internal/pr/watch/TestSlow": true, "TestBare": true, "internal/pr/watch/TestParent/child": true, "child": true}
 	notes := map[string]string{
-		"internal/pr/watch/TestSlow": "measured 12 s alone; keep until the parser rewrite",
-		"TestParent/child":           "waits on the trial gate",
+		"internal/pr/watch/TestSlow":         "measured 12 s alone; keep until the parser rewrite",
+		"internal/pr/watch/TestParent/child": "waits on the trial gate",
 	}
 	if ignored, reason := ignoredTest("internal/pr/watch/TestSlow", "internal/pr/watch", allowed, notes); !ignored || reason == "" {
 		t.Fatalf("qualified allow entry: %v %q", ignored, reason)
 	}
-	// TODO: legacy/shim remove later — a bare allow entry still counts.
-	if ignored, _ := ignoredTest("internal/other/TestBare", "internal/other", allowed, notes); !ignored {
-		t.Fatal("bare allow entry ignored")
+	// Bare entries cannot exempt packaged tests.
+	if ignored, _ := ignoredTest("internal/other/TestBare", "internal/other", allowed, notes); ignored {
+		t.Fatal("bare allow entry exempted packaged test")
 	}
 	if ignored, _ := ignoredTest("internal/pr/watch/TestFast", "internal/pr/watch", allowed, notes); ignored {
 		t.Fatal("a test outside the allow list is ignored")
 	}
 	// A subtest keeps its parent in the bare name, so allowing one subtest
 	// neither allows its sibling nor matches the bare last segment.
-	if ignored, reason := ignoredTest("internal/pr/watch/TestParent/child", "internal/pr/watch", allowed, notes); !ignored || reason != notes["TestParent/child"] {
+	if ignored, reason := ignoredTest("internal/pr/watch/TestParent/child", "internal/pr/watch", allowed, notes); !ignored || reason != notes["internal/pr/watch/TestParent/child"] {
 		t.Fatalf("subtest allow entry: %v %q", ignored, reason)
 	}
 	if ignored, _ := ignoredTest("internal/pr/watch/TestParent/sibling", "internal/pr/watch", allowed, notes); ignored {
@@ -71,8 +71,11 @@ func TestIgnoredTestReadsTheAllowList(t *testing.T) {
 	if ignored, _ := ignoredTest("internal/pr/watch/TestOther/child", "internal/pr/watch", allowed, notes); ignored {
 		t.Fatal("a bare subtest segment allowed an unrelated subtest")
 	}
-	if ignored, _ := ignoredTest("internal/other/TestParent/child", "internal/other", allowed, notes); !ignored {
-		t.Fatal("the bare subtest name does not match in another package")
+	if ignored, _ := ignoredTest("internal/other/TestParent/child", "internal/other", allowed, notes); ignored {
+		t.Fatal("qualified subtest ID matched another package")
+	}
+	if ignored, _ := ignoredTest("TestBare", "", allowed, notes); !ignored {
+		t.Fatal("package-less literal ID rejected")
 	}
 	if got := bareName("internal/pr/watch/TestParent/child", "internal/pr/watch"); got != "TestParent/child" {
 		t.Fatalf("bareName of a subtest = %q", got)
