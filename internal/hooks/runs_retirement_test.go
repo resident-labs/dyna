@@ -73,4 +73,41 @@ func TestRunReceiptStaysCanonicalAfterImport(t *testing.T) {
 	if err := db.QueryRow("SELECT version FROM state_mirrors WHERE key=?", runMirrorKey(key, ownedID)).Scan(&after); err != nil || after != stamp {
 		t.Fatalf("stamp changed: %s, %v", after, err)
 	}
+	run.Result = "pass"
+	if _, err := s.saveRun(t.Context(), run); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != string(raw) {
+		t.Fatalf("save changed source: %s, %v", got, err)
+	}
+	conflicting := run
+	conflicting.Result = "error"
+	conflictRaw, err := json.Marshal(conflicting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, conflictRaw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(s.DataDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateRuns(s.DataDir); err != nil {
+		t.Fatal(err)
+	}
+	list, err := s.runs(t.Context(), run.Repo, "")
+	if err != nil || len(list) != 1 || list[0].Result != "pass" {
+		t.Fatalf("reopen = %+v, %v", list, err)
+	}
+	db, err = s.runsDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT version FROM state_mirrors WHERE key=?", runMirrorKey(key, ownedID)).Scan(&after); err != nil || after != stamp {
+		t.Fatalf("save changed stamp: %s, %v", after, err)
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != string(conflictRaw) {
+		t.Fatalf("listing changed source: %s, %v", got, err)
+	}
+
 }

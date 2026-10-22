@@ -27,14 +27,14 @@ func runTestService(t *testing.T) Service {
 	return s
 }
 
-func TestRunRecordSurvivesRemovalOfLegacyFile(t *testing.T) {
+func TestRunRecordNeedsNoLegacyFile(t *testing.T) {
 	s := runTestService(t)
 	run := Run{ID: strings.Repeat("a", 32), Repo: "repo", Name: "hook-test", Result: "pass", StartedAt: time.Now().UTC()}
 	if _, err := s.saveRun(t.Context(), run); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(s.dir(run.Repo), "runs", run.ID+".json")); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(s.dir(run.Repo), "runs", run.ID+".json")); !os.IsNotExist(err) {
+		t.Fatalf("created receipt copy: %v", err)
 	}
 	runs, err := s.runs(t.Context(), run.Repo, "")
 	if err != nil || len(runs) != 1 || runs[0].ID != run.ID || runs[0].Result != "pass" {
@@ -42,7 +42,7 @@ func TestRunRecordSurvivesRemovalOfLegacyFile(t *testing.T) {
 	}
 }
 
-func TestRunReadDoesNotImportOwnCopyOrPublish(t *testing.T) {
+func TestRunReadDoesNotWriteOrPublish(t *testing.T) {
 	s := runTestService(t)
 	db, err := s.runsDB()
 	if err != nil {
@@ -55,9 +55,6 @@ func TestRunReadDoesNotImportOwnCopyOrPublish(t *testing.T) {
 		t.Fatal(err)
 	}
 	lockPath := filepath.Join(s.dir(run.Repo), "runs", run.ID+".json.lock")
-	if err := os.Remove(lockPath); err != nil {
-		t.Fatal(err)
-	}
 	writes := statewrite.For(db).Health().Writes
 	if _, err := s.runs(t.Context(), run.Repo, ""); err != nil {
 		t.Fatal(err)
@@ -116,9 +113,6 @@ func TestRunImportSkipsDamagedFiles(t *testing.T) {
 		t.Run(kind, func(t *testing.T) {
 			s := runTestService(t)
 			good := Run{ID: strings.Repeat("a", 32), Repo: "repo", Name: "hook-test", Result: "pass"}
-			if _, err := s.saveRun(t.Context(), good); err != nil {
-				t.Fatal(err)
-			}
 			bad := Run{ID: strings.Repeat("b", 32), Repo: "repo", Name: "hook-test"}
 			name := bad.ID + ".json"
 			switch kind {
@@ -137,7 +131,16 @@ func TestRunImportSkipsDamagedFiles(t *testing.T) {
 				raw = []byte("{")
 			}
 			path := filepath.Join(s.dir(good.Repo), "runs", name)
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.WriteJSON(filepath.Join(filepath.Dir(path), good.ID+".json"), good, 0600); err != nil {
+				t.Fatal(err)
+			}
 			if err := os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := MigrateRuns(s.DataDir); err != nil {
 				t.Fatal(err)
 			}
 			runs, err := s.runs(t.Context(), good.Repo, "")
@@ -149,8 +152,8 @@ func TestRunImportSkipsDamagedFiles(t *testing.T) {
 				t.Fatal(err)
 			}
 			key := runMirrorKey(filepath.Base(s.dir(good.Repo)), strings.TrimSuffix(name, ".json"))
-			if foreign, err := statewrite.For(db).Foreign(t.Context(), key, path); err != nil || foreign {
-				t.Fatalf("skipped file was not stamped: foreign=%v, %v", foreign, err)
+			if foreign, err := statewrite.For(db).Foreign(t.Context(), key, path); err != nil || !foreign {
+				t.Fatalf("migration changed source stamp: foreign=%v, %v", foreign, err)
 			}
 			writes := statewrite.For(db).Health().Writes
 			if _, err := s.runs(t.Context(), good.Repo, ""); err != nil {
@@ -189,27 +192,6 @@ func TestRunTableRequiresEngineMigration(t *testing.T) {
 	}
 }
 
-func TestRunWriteKeepsNewValueAfterOlderBinaryFile(t *testing.T) {
-	s := runTestService(t)
-	run := Run{ID: strings.Repeat("e", 32), Repo: "repo", Name: "hook-test", Result: "pending"}
-	if _, err := s.saveRun(t.Context(), run); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(s.dir(run.Repo), "runs", run.ID+".json")
-	run.Result = "fail"
-	if err := store.WriteJSON(path, run, 0600); err != nil {
-		t.Fatal(err)
-	}
-	run.Result = "pass"
-	if _, err := s.saveRun(t.Context(), run); err != nil {
-		t.Fatal(err)
-	}
-	runs, err := s.runs(t.Context(), run.Repo, "")
-	if err != nil || len(runs) != 1 || runs[0].Result != "pass" {
-		t.Fatalf("older file replaced newer run value: %+v, %v", runs, err)
-	}
-}
-
 func TestRunOperationsRespectCancelledContext(t *testing.T) {
 	s := runTestService(t)
 	if err := MigrateRuns(s.DataDir); err != nil {
@@ -224,11 +206,7 @@ func TestRunOperationsRespectCancelledContext(t *testing.T) {
 	if runs, err := s.runs(t.Context(), run.Repo, ""); err != nil || len(runs) != 0 {
 		t.Fatalf("cancelled save committed: %+v, %v", runs, err)
 	}
-	path := filepath.Join(s.dir(run.Repo), "runs", run.ID+".json")
-	if err := store.WriteJSON(path, run, 0600); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := s.runs(ctx, run.Repo, ""); !errors.Is(err, context.Canceled) {
-		t.Fatalf("cancelled import: %v", err)
+		t.Fatalf("cancelled read: %v", err)
 	}
 }
