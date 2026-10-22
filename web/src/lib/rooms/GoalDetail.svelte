@@ -3,8 +3,11 @@
   import Avatar from '../ui/Avatar.svelte'
   import GoalGlyph from './GoalGlyph.svelte'
   import GoalHolders from './GoalHolders.svelte'
+  import ExpediteBadge from './ExpediteBadge.svelte'
+  import { expedite, goalExpedited } from './expedite.ts'
   import { goalAgo } from './goals.js'
-  let { roomId, goal: g, members = [], onchanged, onclose } = $props()
+  // onexpedite(goal) starts or stops priority; App asks first when it replaces another goal.
+  let { roomId, goal: g, members = [], onchanged, onclose, onexpedite = null } = $props()
   let editing = $state(false)
   let text = $state('')
   let pick = $state(false)
@@ -45,7 +48,7 @@
   }
 </script>
 <aside class="detail" aria-label="Goal {g.id}">
-  <header><GoalGlyph goal={g} /><h2>Goal {g.id}</h2><button class="link" disabled={editing} onclick={() => { text = g.text; editing = true }}>Edit</button><button class="x" aria-label="Close goal detail" title="Close (Esc)" onclick={onclose}>✕</button></header>
+  <header><GoalGlyph goal={g} /><h2>Goal {g.id}</h2>{#if goalExpedited($expedite, g)}<ExpediteBadge />{/if}<button class="link" disabled={editing} onclick={() => { text = g.text; editing = true }}>Edit</button><button class="x" aria-label="Close goal detail" title="Close (Esc)" onclick={onclose}>✕</button></header>
   <div class="scroll">
     {#if editing}
       <textarea aria-label="Edit goal text" maxlength="2000" rows="5" bind:value={text}></textarea>
@@ -74,7 +77,7 @@
       <dt>State</dt><dd class:done={g.state === 'done'}>{g.state}</dd>
     </dl>
     {#if g.state === 'active'}
-      <div class="buttons actions"><button disabled={busy} title="Ask the room's goal holders for a check-in now" onclick={() => perform(() => api.checkGoal(roomId, g.id))}>Check in now</button><button onclick={() => (action = action === 'done' ? '' : 'done')}>Mark done</button><button class="danger" onclick={() => (action = action === 'drop' ? '' : 'drop')}>Drop</button></div>
+      <div class="buttons actions"><button disabled={busy} title="Ask the room's goal holders for a check-in now" onclick={() => perform(() => api.checkGoal(roomId, g.id))}>Check in now</button>{#if onexpedite}<button disabled={busy} title="Review and merge this goal's agents and PRs first" onclick={() => perform(() => onexpedite(g))}>{goalExpedited($expedite, g) ? 'Stop expediting' : 'Expedite'}</button>{/if}<button onclick={() => (action = action === 'done' ? '' : 'done')}>Mark done</button><button class="danger" onclick={() => (action = action === 'drop' ? '' : 'drop')}>Drop</button></div>
       {#if action === 'done'}<form class="inline" onsubmit={(e) => { e.preventDefault(); perform(() => api.finishGoal(roomId, g.id, summary)) }}><input aria-label="Completion summary" placeholder="One-line summary (optional)" bind:value={summary} maxlength="2000" /><div class="buttons"><button disabled={busy}>Mark done</button><button type="button" onclick={() => (action = '')}>Cancel</button></div></form>{/if}
       {#if action === 'drop'}<div class="inline"><p>Drop this goal?</p><div class="buttons"><button class="danger" disabled={busy} onclick={() => perform(() => api.finishGoal(roomId, g.id, '', true))}>Drop goal</button><button onclick={() => (action = '')}>Cancel</button></div></div>{/if}
     {/if}

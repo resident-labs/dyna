@@ -23,6 +23,7 @@
   import { roomHash } from '../ui/route.ts'
   import { trackedFor, issueGroups, loadFilters, saveFilters, loadFolds, saveFolds, type Folds } from './github.ts'
   import type { MergeQueueItem, ReviewerStatus } from '../api/change.ts'
+import type { Goal } from '../api/goal.ts'
   import type { GitHubDetail, GitHubItem, GitHubListResult } from '../api/github.ts'
   import type { Integration } from '../api/lanesync.ts'
   import type { Member } from '../api/room.ts'
@@ -60,6 +61,9 @@
     onresume?: ChangeAction
     reviewer?: ReviewerStatus | null
     onreviewer?: () => void
+    goals?: Goal[]
+    onexpedite?: (goal: Goal) => void | Promise<void>
+    onlinkgoal?: (change: Row, goalId: string) => void | Promise<void>
   }
 
   // changes: the room's Changes rows, local changes and PRs.
@@ -68,7 +72,7 @@
   // kind is 'pr' or 'issue': the Pull requests tab and the Issues tab each mount this view.
   // onpr opens a PR by number in the Pull requests tab, from an issue's linked PRs.
   // link is a PR link ({pr, tab}) or issue link ({issue}) to open, from the address bar.
-  let { older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, kind = 'pr', integration = null, changes = null, members = [], link = null, onask, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {} }: Props = $props()
+  let { older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, kind = 'pr', integration = null, changes = null, members = [], link = null, onask, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
 
   const saved = loadFilters()
   let listState = $state(saved.state)
@@ -401,7 +405,7 @@
     {#if chg}
       <div class="dscroll" role="presentation" ontouchstart={narrow ? swipeStart : null} ontouchend={narrow ? swipeEnd : null}>
         {#key chg.changeId}
-          <PRDetail change={chg} {detail} {detailError} {roomId} {names} review={reviewer?.enabled ?? true} merge={merge?.find((m) => m.changeId === chg.changeId) ?? null} standing={view.states[chg.changeId ?? '']} bind:tab ontab={showTab} onback={narrow ? back : null} {onuntrack} {onresume} ontrack={trackRow} onchange={onreviewer} onauthor={chgAuthor ? () => onsession?.(chgAuthor, 'prs') : null} onreviewer={chgReviewer ? () => onsession?.(chgReviewer) : null} actions={askAgent} />
+          <PRDetail change={chg} {detail} {detailError} {roomId} {names} review={reviewer?.enabled ?? true} merge={merge?.find((m) => m.changeId === chg.changeId) ?? null} standing={view.states[chg.changeId ?? '']} bind:tab ontab={showTab} onback={narrow ? back : null} {onuntrack} {onresume} ontrack={trackRow} onchange={onreviewer} onauthor={chgAuthor ? () => onsession?.(chgAuthor, 'prs') : null} onreviewer={chgReviewer ? () => onsession?.(chgReviewer) : null} actions={askAgent} {goals} {onexpedite} {onlinkgoal} />
         {/key}
       </div>
     {:else if !narrow && anyRows}
