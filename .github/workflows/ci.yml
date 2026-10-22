@@ -367,7 +367,11 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.apt-debs/*.deb
-          key: apt-debs-${{ runner.os }}-labwc-xwayland-sqlite3-v1
+          # A fresh key per run keeps a package update from freezing the cache:
+          # the exact key never matches, and the prefix finds the newest set, so
+          # the save below always stores what this run downloaded.
+          key: apt-debs-${{ runner.os }}-labwc-xwayland-sqlite3-${{ github.run_id }}
+          restore-keys: apt-debs-${{ runner.os }}-labwc-xwayland-sqlite3-
       - name: Install GUI tools
         shell: bash
         run: |
@@ -419,11 +423,10 @@ jobs:
           bounded 60 npm install -g agent-browser
           sudo loginctl enable-linger "$USER"
       - name: Save apt package cache
-        if: steps.apt-debs.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ~/.apt-debs/*.deb
-          key: apt-debs-${{ runner.os }}-labwc-xwayland-sqlite3-v1
+          key: apt-debs-${{ runner.os }}-labwc-xwayland-sqlite3-${{ github.run_id }}
       - name: Live computer and cleanup tests
         shell: bash
         run: |
