@@ -239,6 +239,9 @@ not-state internal/webpush/webpush.go writeFile0600 1 # immutable VAPID signing-
 violation internal/websvc/devicestore/store.go Store.Pair 3
 violation internal/websvc/devicestore/store.go Store.locked 1
 violation internal/websvc/devicestore/store.go Store.write 1
+not-state internal/workeroutput/projection/pack.go Pack.Abort 1 # removes unpublished immutable blobs and temporary mapping spools; durable projection state belongs in SQLite
+not-state internal/workeroutput/projection/pack.go Pack.open 1 # unlinks the temporary mapping spool while its file descriptor remains open
+not-state internal/workeroutput/projection/pack.go publish 1 # removes the staging name after publishing an immutable content-addressed output blob
 not-state internal/workflowsvc/launch.go Launch 3 # immutable script and launch input snapshots plus the runner raw daemon log; blobs stay files (item 20)
 not-state internal/workflowtemplate/catalog.go replaceRegularFile 1 # only editable .js source blobs; seed metadata is written to SQLite through internal/state
 not-state internal/worktrees/lifecycle.go CreateForRun 2 # Removes failed git worktree allocations; registry records stay in SQLite.
