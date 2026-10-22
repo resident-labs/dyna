@@ -36,7 +36,7 @@ func TestClaudeLaunchTurnsAllAttributionOff(t *testing.T) {
 	}
 	for name, argv := range map[string][]string{"initial": inv.initial.argv, "resume": inv.resume("ses", "again").argv} {
 		layer := settingsLayer(t, argv)
-		if layer["includeCoAuthoredBy"] != false {
+		if _, exists := layer["includeCoAuthoredBy"]; exists {
 			t.Fatalf("%s: includeCoAuthoredBy = %v", name, layer["includeCoAuthoredBy"])
 		}
 		attr, ok := layer["attribution"].(map[string]any)
