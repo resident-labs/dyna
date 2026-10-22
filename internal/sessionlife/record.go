@@ -355,11 +355,31 @@ func Delete(sessions, id string) error {
 		if err := deleteTurnsAndQueue(conn, id); err != nil {
 			return err
 		}
+		if err := deletePromptReferences(conn, id); err != nil {
+			return err
+		}
 		if err := countDelete(conn); err != nil {
 			return err
 		}
 		return deleteSteering(conn, id)
 	})
+}
+
+// deletePromptReferences removes only blobs owned by the deleted session
+// that no other session references. Both deletes share the session transaction.
+func deletePromptReferences(conn *sql.Conn, id string) error {
+	ok, err := tableExists(conn, "prompt_refs")
+	if err != nil || !ok {
+		return err
+	}
+	ctx := context.Background()
+	if _, err := conn.ExecContext(ctx, `DELETE FROM prompt_blobs
+WHERE hash IN (SELECT hash FROM prompt_refs WHERE session = ?)
+AND NOT EXISTS (SELECT 1 FROM prompt_refs WHERE prompt_refs.hash = prompt_blobs.hash AND session != ?)`, id, id); err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, "DELETE FROM prompt_refs WHERE session = ?", id)
+	return err
 }
 
 // turnsMirrorKey is the stamp key under which every turn copy of session id
