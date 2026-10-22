@@ -85,6 +85,10 @@ jobs:
 
   # Go tests run in parallel shards balanced by measured package time (see
   # scripts/ci-shard.sh). Each shard keeps its own JUnit report and budget check.
+  # Jobs run on the bare runner: it skips the Go image pull, and setup-go is fast.
+  # Only pushes to main save the build cache, since a save costs about 45 seconds.
+  # Main also compiles the non-race objects, so pull requests and merge trials
+  # both restore a warm cache from the same save.
   go-shard:
     name: go-test-shard (${{ matrix.shard }})
     needs: [changes]
@@ -96,34 +100,24 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6]
-    container:
-      image: golang:1.26.3
-    # Actions sets HOME to /github/home in job containers, so Go would put
-    # its build cache there. Keep the caches at fixed paths for actions/cache.
     env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
+      GOCACHE: /home/runner/.cache/go-build
+      GOMODCACHE: /home/runner/go/pkg/mod
       CI_SHARD: ${{ matrix.shard }}/7
     steps:
       - uses: actions/checkout@v6
-      # The container runs as root, but the runner user owns the workspace.
-      # Git then refuses the repo, and go build fails with
-      # "error obtaining VCS status".
-      - name: Trust workspace
-        run: |
-          echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
-          echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
-          echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
       - name: Restore Go caches
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
-            /root/.cache/go-build
-            /go/pkg/mod
-          key: go-test-${{ github.event_name == 'pull_request' && 'pr' || 'race' }}-${{ hashFiles('go.sum') }}-${{ matrix.shard }}
-          restore-keys: |
-            go-test-${{ github.event_name == 'pull_request' && 'pr' || 'race' }}-${{ hashFiles('go.sum') }}-
-            go-test-${{ github.event_name == 'pull_request' && 'pr' || 'race' }}-
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
+          key: go-shard-${{ matrix.shard }}-${{ github.sha }}
+          restore-keys: go-shard-${{ matrix.shard }}-
       # go test pipes its results through the checker.
       - name: Build CI checker
         run: bash scripts/ci.sh go build
@@ -137,6 +131,27 @@ jobs:
           bash scripts/ci.sh go test
         env:
           CI_EVENT: ${{ github.event_name }}
+      # The desktop is its own Go module, so the root ./... skips it. It needs
+      # no WebKit and no cgo. No built frontend exists in this job, so a stub
+      # page stands in for the assets.
+      - name: Desktop module
+        if: matrix.shard == 4
+        working-directory: desktop
+        shell: bash
+        run: |
+          touch ../web/dist/index.html
+          bash ../scripts/ci.sh go desktop
+      - name: Compile non-race objects for the cache
+        if: github.ref == 'refs/heads/main'
+        run: go test -run '^$' $(bash scripts/ci-shard.sh ${{ matrix.shard }} 7) >/dev/null
+      - name: Save Go caches
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
+          key: go-shard-${{ matrix.shard }}-${{ github.sha }}
       - name: Upload Go test report
         if: always()
         uses: actions/upload-artifact@v4
@@ -145,14 +160,20 @@ jobs:
           path: ${{ runner.temp }}/go-test.xml
           if-no-files-found: ignore
           retention-days: 1
-      # Each artifact uses one path so the runner can translate its temp
-      # directory into the job container.
       - name: Upload raw Go test events
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: go-test-raw-${{ matrix.shard }}
           path: ${{ runner.temp }}/go-test.json
+          if-no-files-found: ignore
+          retention-days: 1
+      - name: Upload desktop test report
+        if: always() && matrix.shard == 4
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-test-report
+          path: ${{ runner.temp }}/desktop-test.xml
           if-no-files-found: ignore
           retention-days: 1
       - name: Upload Go diagnostics
@@ -171,28 +192,22 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    container:
-      image: golang:1.26.3
     env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
+      GOCACHE: /home/runner/.cache/go-build
+      GOMODCACHE: /home/runner/go/pkg/mod
     steps:
-      - name: Install shellcheck
-        run: |
-          apt-get update -qq && apt-get install -y -qq shellcheck >/dev/null
       - uses: actions/checkout@v6
-      - name: Trust workspace
-        run: |
-          echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
-          echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
-          echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
       - name: Restore Go caches
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
-            /root/.cache/go-build
-            /go/pkg/mod
-          key: go-static-${{ hashFiles('go.sum') }}
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
+          key: go-static-${{ github.sha }}
           restore-keys: go-static-
       - name: Verify modules
         run: bash scripts/ci.sh go modules
@@ -200,23 +215,14 @@ jobs:
         run: bash scripts/ci.sh go vet
       - name: Check installer
         run: bash scripts/ci.sh go installer
-      # The desktop is its own Go module, so the root ./... skips it. It needs
-      # no WebKit and no cgo. This job has no built frontend, so a stub page
-      # stands in for the assets and the end-to-end part of its tests is skipped.
-      - name: Desktop module
-        working-directory: desktop
-        shell: bash
-        run: |
-          touch ../web/dist/index.html
-          bash ../scripts/ci.sh go desktop
-      - name: Upload desktop test report
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Save Go caches
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
         with:
-          name: desktop-test-report
-          path: ${{ runner.temp }}/desktop-test.xml
-          if-no-files-found: ignore
-          retention-days: 1
+          path: |
+            /home/runner/.cache/go-build
+            /home/runner/go/pkg/mod
+          key: go-static-${{ github.sha }}
       - name: Upload Go diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -252,17 +258,16 @@ jobs:
     # Its own job, so the frontend build and tests do not spend go-test's time
     # budget, and both run at once.
     timeout-minutes: 15
-    container: node:22
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@v6
-      - name: Trust workspace
-        run: |
-          echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
-          echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
-          echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Build and test frontend and export JUnit
         run: bash ../scripts/ci.sh frontend test
         env:
@@ -290,19 +295,23 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    container: node:22
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - name: Type-check the frontend
         run: bash ../scripts/ci.sh frontend check
 
   computer-smoke:
-    # Live tests need host GUI tools, installed below. It waits only for the
-    # frontend assets, not for the Go tests.
-    needs: [changes, frontend]
+    # Live tests need host GUI tools, installed below. They run alone, without
+    # the checker build or the frontend assets, to stay inside the time budget.
+    needs: [changes]
     if: needs.changes.outputs.computers == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -313,33 +322,19 @@ jobs:
       DYNA_COMPUTERS_REQUIRE_LIVE: '1'
     steps:
       - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
       - name: Install GUI tools
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq labwc xwayland sqlite3 >/dev/null
           npm install -g agent-browser
           sudo loginctl enable-linger "$USER"
-      - name: Download frontend assets
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-dist
-          path: web/dist
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-      - name: Build CI checker
-        run: go build -o "$RUNNER_TEMP/dyna-ci" ./cmd/dyna
       - name: Live computer and cleanup tests
         shell: bash
         run: |
-          set -o pipefail
           export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-          systemd-run --user --scope --quiet -p TasksMax=600 -p MemoryMax=2G -- go test -race -json -count=1 ./internal/computers | "$RUNNER_TEMP/dyna-ci" git ci tests --junit-output "$RUNNER_TEMP/computer-smoke-test.xml"
-      - name: Upload computer smoke test report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: computer-smoke-test-report
-          path: ${{ runner.temp }}/computer-smoke-test.xml
-          if-no-files-found: error
-          retention-days: 1
+          race=
+          if [ "${{ github.event_name }}" != pull_request ]; then race=-race; fi
+          systemd-run --user --scope --quiet -p TasksMax=600 -p MemoryMax=2G -- go test $race -count=1 -timeout 5m ./internal/computers

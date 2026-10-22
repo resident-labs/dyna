@@ -23,7 +23,7 @@ case "$suite" in
     if [[ $phase == all || $phase == check ]]; then
       # The four checks do not depend on each other, so they run side by side.
       pids=()
-      node scripts/check-typescript.ts & pids+=($!)
+      npm exec -- node scripts/check-typescript.ts & pids+=($!)
       npm exec -- svelte-check --tsconfig ./tsconfig.json & pids+=($!)
       npm exec -- tsc --project ./tsconfig.json & pids+=($!)
       npm exec -- tsc --project ./tsconfig.worker.json & pids+=($!)
