@@ -2,6 +2,7 @@ package roomsvc
 
 import (
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/subagent"
 	"encoding/json"
 	"os"
@@ -16,7 +17,7 @@ import (
 )
 
 func TestCloseHandsAuthorshipAndGoalsToAncestor(t *testing.T) {
-	for _, ancestry := range []string{"parent", "closed parent", "root"} {
+	for _, ancestry := range []string{"parent", "closed parent", "root", "pruned parent"} {
 		t.Run(ancestry, func(t *testing.T) {
 			e := newEnv(t)
 			rec := e.room("alpha")
@@ -39,6 +40,28 @@ func TestCloseHandsAuthorshipAndGoalsToAncestor(t *testing.T) {
 					t.Fatal(err)
 				}
 				parent.Name = "root"
+			}
+			if ancestry == "pruned parent" {
+				middle := e.start(rec, "middle", &parent)
+				if _, err := e.mgr.Store.UpdateMeta(author.ID, func(m *subagent.Meta) { m.ParentSession = middle.ID; m.Closed = time.Now() }); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := e.mgr.Store.UpdateMeta(middle.ID, func(m *subagent.Meta) { m.Closed = time.Now() }); err != nil {
+					t.Fatal(err)
+				}
+				if err := sessionlife.Delete(e.mgr.Store.Root, middle.ID); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.RemoveAll(filepath.Join(e.mgr.Store.Root, middle.ID)); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := e.mgr.Store.UpdateMeta(parent.ID, func(m *subagent.Meta) { m.Role = subagent.RoleRoot; m.Name = "root" }); err != nil {
+					t.Fatal(err)
+				}
+				parent.Name = "root"
+				if _, err := e.mgr.Reopen(e.ctx, author.ID); err != nil {
+					t.Fatal(err)
+				}
 			}
 			const key = "github.com/owner/repo#17"
 			prfixture.SaveState(t, e.svc.PRs.Watcher().Store.Root, watch.State{Version: 1, Records: map[string]*watch.Record{
@@ -74,6 +97,9 @@ func TestCloseCancelsWorkflowFromSQLite(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
 	author := e.start(rec, "author", nil)
+	if _, err := e.svc.goalService().Store.Finish(rec.ID, author.Goal, "owner", "Fixture completed", false); err != nil {
+		t.Fatal(err)
+	}
 	const runID = "wf_close-handoff"
 	dir := filepath.Join(runstore.RunsDir(), runID)
 	if err := os.MkdirAll(dir, 0700); err != nil {

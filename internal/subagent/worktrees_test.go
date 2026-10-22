@@ -82,7 +82,7 @@ func TestLifecycleCleansOnlySafeOwnedWorktrees(t *testing.T) {
 			os.WriteFile(filepath.Join(ahead.Path, "commit"), []byte("unlanded"), 0600)
 			lifecycleGit(t, ahead.Path, "add", ".")
 			lifecycleGit(t, ahead.Path, "commit", "-m", "unlanded")
-			if _, err := e.m.Close(e.ctx, info.ID); err != nil {
+			if _, err := e.m.CloseWithOptions(e.ctx, info.ID, CloseOptions{Force: true}); err != nil {
 				t.Fatal(err)
 			}
 			awaitWorktreeCleanup(t, e.m)

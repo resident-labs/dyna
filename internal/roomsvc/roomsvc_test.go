@@ -217,7 +217,7 @@ func TestOwnerCountSkipsClosedSessions(t *testing.T) {
 	rec := e.room("alpha")
 	e.start(rec, "open", nil)
 	gone := e.start(rec, "gone", nil)
-	if _, err := e.svc.CloseSession(e.ctx, "alpha", gone.ID); err != nil {
+	if _, err := e.svc.ForceCloseSession(e.ctx, "alpha", gone.ID); err != nil {
 		t.Fatal(err)
 	}
 	members, err := e.svc.Members("alpha", true)

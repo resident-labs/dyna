@@ -124,7 +124,7 @@ func TestPromoteInvalidAndClosed(t *testing.T) {
 	}
 	info, _ := e.start("SLEEP:1 RESPOND: done")
 	e.wait(info.ID, 1)
-	if _, err := e.m.Close(e.ctx, info.ID); err != nil {
+	if _, err := e.m.CloseWithOptions(e.ctx, info.ID, CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.m.Promote(context.Background(), info.ID); !errors.Is(err, ErrClosed) {
@@ -207,7 +207,7 @@ func TestChildCreationRejectsMissingOrClosedParent(t *testing.T) {
 	e := newTestEnv(t)
 	parent, _ := e.start("SLEEP:1 RESPOND: done")
 	e.wait(parent.ID, 1)
-	if _, err := e.m.Close(e.ctx, parent.ID); err != nil {
+	if _, err := e.m.CloseWithOptions(e.ctx, parent.ID, CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	stampParent(t, parent)

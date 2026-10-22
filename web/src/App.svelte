@@ -1476,7 +1476,8 @@
 
   // guardItems lists what a close-guard error names: "responsibilities: cannot close:\n- ...".
   function guardItems(msg) {
-    return msg.split('\n').filter((l) => l.startsWith('- ') && !l.startsWith('- or close anyway')).map((l) => l.slice(2))
+    const items = msg.split('\n').filter((l) => l.startsWith('- ') && !l.startsWith('- or close anyway')).map((l) => l.slice(2))
+    return items.length ? items : [msg]
   }
 
   let confirmText = $derived.by(() => {
