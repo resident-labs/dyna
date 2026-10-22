@@ -22,8 +22,12 @@ var betaNames = map[string]string{
 	"response.audio_transcript.done":  "response.output_audio_transcript.done",
 }
 
-func (b Beta) ResponseCreate(string) any {
-	return msg{"type": "response.create", "response": msg{"modalities": b.Modalities}}
+func (b Beta) ResponseCreate(key string) any {
+	response := msg{"modalities": b.Modalities}
+	if key != "" {
+		response["tool_choice"] = "none"
+	}
+	return msg{"type": "response.create", "response": response}
 }
 
 func (Beta) Decode(data []byte) (Event, error) { return decodeEvent(data, betaNames) }

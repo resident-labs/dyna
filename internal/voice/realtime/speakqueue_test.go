@@ -96,7 +96,7 @@ func TestSpeakQueueSendsOnceAndCountsAnItemSpokenWhenItsReplyPlays(t *testing.T)
 
 // batchOf is the text of one batch of items.
 func batchOf(texts ...string) string {
-	return strings.Join(texts, "\n\n")
+	return batchHeader + "\n\n" + strings.Join(texts, "\n\n")
 }
 
 // A resend carries exactly the items of its first send; an item that
@@ -161,23 +161,22 @@ func TestSpeakQueueBatchesWhatWaits(t *testing.T) {
 	}
 }
 
-// All posts pending during speech share one later response, including a
-// burst larger than the old four-item batch limit.
-func TestSpeakQueueCoalescesAllPendingPosts(t *testing.T) {
+// A batch holds at most MaxBatchItems items and MaxBatchChars characters,
+// but always at least one item.
+func TestSpeakQueueBoundsABatch(t *testing.T) {
 	f := setupQueue(false)
-	var texts []string
-	for i := range 6 {
-		text := strings.Repeat(strconv.Itoa(i), 500)
-		texts = append(texts, text)
-		f.q.add("m"+strconv.Itoa(i), "", text)
+	for i := range MaxBatchItems + 1 {
+		f.q.add("m"+strconv.Itoa(i), "", "item")
 	}
-	f.ok = true
-	f.q.pump()
-	wantSent(t, f, batchOf(texts...))
-	f.q.started("r1", "m0")
-	f.q.ended("r1")
-	f.q.pump()
-	wantSent(t, f, batchOf(texts...))
+	if got := len(f.q.batch()); got != MaxBatchItems {
+		t.Fatalf("batch of %d, want %d", got, MaxBatchItems)
+	}
+	g := setupQueue(false)
+	g.q.add("big", "", strings.Repeat("x", MaxBatchChars+1))
+	g.q.add("small", "", "y")
+	if got := len(g.q.batch()); got != 1 {
+		t.Fatalf("batch of %d, want only the big item", got)
+	}
 }
 
 // A newer item with the same topic replaces a waiting one, as a newer
