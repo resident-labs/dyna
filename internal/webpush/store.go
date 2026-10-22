@@ -5,7 +5,6 @@ import (
 	"crypto/ecdh"
 	"database/sql"
 	"errors"
-	"log"
 	"time"
 
 	"dyna-agent/internal/hub"
@@ -38,9 +37,7 @@ var ErrNotFound = errors.New("webpush: no subscription for this device")
 
 // Store keeps one subscription per device in the shared dyna.db.
 type Store struct {
-	db *sql.DB
-	// TODO: legacy/shim remove later — locate the rollback copy; remove when requirement 31 ends.
-	dir string
+	db  *sql.DB
 	now func() time.Time
 	// allow checks an endpoint. Tests replace it; otherwise it is ValidateEndpoint.
 	allow func(string) error
@@ -52,7 +49,7 @@ func OpenStore(dataDir string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Store{db: db, dir: legacyDir(dataDir), now: time.Now, allow: ValidateEndpoint}, nil
+	return &Store{db: db, now: time.Now, allow: ValidateEndpoint}, nil
 }
 
 // Subscribe checks and stores sub for the device. The last subscribe wins.
@@ -180,18 +177,7 @@ func (s *Store) RemoveDevicesNotIn(keep func(deviceID string) bool) (int, error)
 	return removed, nil
 }
 
-// write imports an old binary's subscription file, applies update, then
-// writes the rollback copy: the order state.Mirror needs.
+// write commits a subscription change through the shared state writer.
 func (s *Store) write(update func(*sql.Conn) error) error {
-	if err := importLegacy(s.db, s.dir); err != nil {
-		return err
-	}
-	if err := state.For(s.db).Write(context.Background(), hub.Event{}, update); err != nil {
-		return err
-	}
-	// TODO: legacy/shim remove later — old releases read the post-commit subscription copy; remove when requirement 31 ends.
-	if err := s.mirror(); err != nil {
-		log.Printf("webpush: copy subscriptions for rollback: %v", err)
-	}
-	return nil
+	return state.For(s.db).Write(context.Background(), hub.Event{}, update)
 }
