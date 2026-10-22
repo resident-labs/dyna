@@ -279,7 +279,7 @@ func TestGenerationPreferencesAndCatalogOrder(t *testing.T) {
 	if err = writeGenerationJSON(settings, map[string]any{"tui.animations": false, "history.persistence": "none"}, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err = writeGenerationJSON(metadata, map[string]preferences.Ref{id: {Settings: settings, Harness: "codex"}}, 0600); err != nil {
+	if err = preferences.Save(metadata, id, preferences.Ref{Settings: settings, Harness: "codex"}); err != nil {
 		t.Fatal(err)
 	}
 	withPrefs := buildGeneration(t, r, "codex", home, id)
