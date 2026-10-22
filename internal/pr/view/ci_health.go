@@ -378,19 +378,10 @@ func (s *Service) dataDir() string {
 	return filepath.Dir(root)
 }
 
-// ignoredTest reads the room's allow list, which is where an ignored test and
-// its reason already live. One list, not a second one, and the same two names
-// the budget matches: the qualified ID, then the bare name. A subtest keeps
-// its parent, so allowing TestParent/child does not allow TestParent/other or
-// a bare child.
+// ignoredTest uses the same exact IDs as budget enforcement.
 func ignoredTest(test, pkg string, allowed map[string]bool, notes map[string]string) (bool, string) {
 	if allowed[test] {
 		return true, notes[test]
-	}
-	bare := bareName(test, pkg)
-	// TODO: legacy/shim remove later — keep bare names until allow lists migrate to qualified IDs.
-	if bare != test && allowed[bare] {
-		return true, notes[bare]
 	}
 	return false, ""
 }
