@@ -131,8 +131,9 @@ func TestAntigravityACPAccountSkipsCredentialRefresh(t *testing.T) {
 	if _, err = flow.Complete(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	// An open sign-in holds the switch gate, so a refresh that took it would
-	// block there instead of returning.
+	// An open sign-in holds the switch gate. A refresh that waited there would
+	// wait on its context, which then cancels itself, so a regression fails at
+	// once with context.Canceled instead of blocking.
 	second, err := a.Create("antigravity", "")
 	if err != nil {
 		t.Fatal(err)
@@ -142,8 +143,21 @@ func TestAntigravityACPAccountSkipsCredentialRefresh(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = open.Cancel() }()
-	result, err := a.RefreshCredentials(context.Background(), n.ID, "/fake/agy")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result, err := a.RefreshCredentials(cancelOnWait{ctx, cancel}, n.ID, "/fake/agy")
 	if result.Supported || !errors.Is(err, native.ErrUnsupported) {
 		t.Fatalf("an ACP-only account was refreshed: %+v %v", result, err)
 	}
+}
+
+// cancelOnWait cancels itself the first time a caller waits on it.
+type cancelOnWait struct {
+	context.Context
+	cancel context.CancelFunc
+}
+
+func (c cancelOnWait) Done() <-chan struct{} {
+	c.cancel()
+	return c.Context.Done()
 }
