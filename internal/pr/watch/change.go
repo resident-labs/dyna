@@ -434,12 +434,15 @@ func (s *Service) UpdateChangeNotes(key, author string, notes ChangeNotes, categ
 }
 
 // SetGoal links the change to a goal of its room; "" clears the link. The
-// caller has checked the goal and the right to change the link.
-func (s *Service) SetGoal(key, goalID string) error {
+// caller has checked the goal and the right to change the link against author.
+func (s *Service) SetGoal(key, author, goalID string) error {
 	return s.Store.update(func(st *State) error {
 		r := recordByID(st, key)
 		if r == nil {
 			return fmt.Errorf("change is not tracked")
+		}
+		if err := sameAuthor(r, author); err != nil {
+			return err
 		}
 		r.GoalID = goalID
 		return nil

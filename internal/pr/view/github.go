@@ -502,8 +502,8 @@ func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir, g
 	if r.RoomID != rec.ID {
 		return watch.Record{}, false, fmt.Errorf("PR #%d is tracked in another room", r.Number)
 	}
-	r.GoalID = s.linkGoal(p, r, info, created, goal)
-	return r, created, nil
+	r.GoalID, err = s.linkGoal(ctx, p, r, info, created, goal)
+	return r, created, err
 }
 
 // authorIn resolves the room and the author a caller names for new work. Only
@@ -571,7 +571,7 @@ func (s *Service) OpenChange(ctx context.Context, roomRef, sessionRef, prRef, di
 		opts.Dir = dir
 		r, created, err := p.OpenChange(ctx, actor, info, opts)
 		if err == nil {
-			r.GoalID = s.linkGoal(p, r, info, created, opts.Goal)
+			r.GoalID, err = s.linkGoal(ctx, p, r, info, created, opts.Goal)
 		}
 		return OpenedChange{r, created}, err
 	}
@@ -611,7 +611,9 @@ func (s *Service) OpenChange(ctx context.Context, roomRef, sessionRef, prRef, di
 	if err := p.UpdateChangeNotes(r.Key, checkedAuthor, opts.Notes, opts.Category, opts.Dependencies); err != nil {
 		return OpenedChange{}, err
 	}
-	s.linkGoal(p, r, info, created, opts.Goal)
+	if _, err := s.linkGoal(ctx, p, r, info, created, opts.Goal); err != nil {
+		return OpenedChange{}, err
+	}
 	r, err = p.Store.Get(r.Key)
 	return OpenedChange{r, created}, err
 }

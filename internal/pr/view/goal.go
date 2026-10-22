@@ -25,7 +25,7 @@ func (s *Service) SetPRGoal(ctx context.Context, roomRef, key, goalID string) er
 			return err
 		}
 	}
-	return p.SetGoal(key, goalID)
+	return p.SetGoal(key, r.Author, goalID)
 }
 
 // checkGoalLink refuses an explicit goal that cannot link, before any work.
@@ -41,11 +41,11 @@ func (s *Service) checkGoalLink(roomID, goalID string) error {
 // nearest ancestor's, when that is unambiguous; an existing link and an
 // existing change without one stay as they are.
 // It returns the change's goal after the call.
-func (s *Service) linkGoal(p *watch.Service, r watch.Record, actor subagent.Info, created bool, explicit string) string {
+func (s *Service) linkGoal(ctx context.Context, p *watch.Service, r watch.Record, actor subagent.Info, created bool, explicit string) (string, error) {
 	goal := explicit
 	if goal == "" {
 		if !created || r.GoalID != "" || actor.ID == "" {
-			return r.GoalID
+			return r.GoalID, nil
 		}
 		goal = s.goalStore().InheritedGoal(r.RoomID, actor.ID, func(id string) string {
 			info, err := s.Notify.Sessions.Store.Info(id)
@@ -55,11 +55,22 @@ func (s *Service) linkGoal(p *watch.Service, r watch.Record, actor subagent.Info
 			return info.ParentSession
 		})
 		if goal == "" {
-			return r.GoalID
+			return r.GoalID, nil
 		}
 	}
-	if goal != r.GoalID && p.SetGoal(r.Key, goal) == nil {
-		return goal
+	checkedAuthor := r.Author
+	if explicit != "" {
+		_, checked, err := s.authorPRInRoom(ctx, "SetPRGoal", r.RoomID, r.Key)
+		if err != nil {
+			return "", err
+		}
+		checkedAuthor = checked.Author
 	}
-	return r.GoalID
+	if err := p.SetGoal(r.Key, checkedAuthor, goal); err != nil {
+		if explicit != "" {
+			return "", err
+		}
+		return r.GoalID, nil
+	}
+	return goal, nil
 }

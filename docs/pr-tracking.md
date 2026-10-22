@@ -7,6 +7,40 @@ Tracking is explicit because a shared branch does not identify which agent
 opened a PR. The engine merges approved PRs with passing CI through batch
 trials (see `dyna guide git`); agents never run merge commands.
 
+## Goal links and expedited goals
+
+A new change or tracked PR records its author's nearest active goal. Dyna
+checks the author first, then each parent. It leaves the link empty when a
+session has several active goals. Dyna does not add links to existing records
+during an upgrade or a later tracking call.
+
+Pass `--goal g12` to `dyna git pr track` or `dyna git change open` to choose an
+open goal in the same room. The owner, root, author, or author's ancestor
+can replace the link. Tracking again without `--goal` preserves the link,
+including an empty link. The app can also link or clear a goal.
+
+The owner or root can expedite one active goal per room:
+
+```sh
+dyna goal expedite g12
+dyna goal expedite g14 --replace
+dyna goal expedite --off
+```
+
+Expediting the same goal preserves its original expiry. Expediting a second
+goal needs `--replace`. Priority ends when the goal is done or dropped, when
+it is stopped, or after 24 hours. Goal reads and live events remove expired
+priority. Goal holders and their descendants share the goal's priority.
+PRs and changes use their saved goal link.
+
+Linked changes get priority for the next available review slot in their
+room. Merge priority applies per repository: an eligible expedited PR gets
+a trial of its own. Existing review, dependency, draft, mergeability, and CI
+gates still apply. When normal work is waiting, it gets a slot after three
+expedited selections. Review fairness is per room; merge fairness is per
+repository. Running reviews, merge trials, and CI continue. Expedite does
+not change session, workflow, or CI scheduling.
+
 ## Polling and GitHub rate limits
 
 The engine worker loop ticks once a minute. Each PR has its own due time. First polls and
