@@ -27,17 +27,17 @@ func (s *Service) Transfer(ctx context.Context, key, role string, to subagent.In
 
 // queuedUnread returns the IDs of posts to session that sit after its room
 // cursor, so the session has not read them. A paused room queues posts this way.
-func (s *Service) queuedUnread(session string, postIDs map[string]bool) map[string]bool {
+func (s *Service) queuedUnread(session string, postIDs map[string]bool) (map[string]bool, error) {
 	if s.Notify == nil || s.Notify.Rooms == nil || len(postIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 	meta, err := s.sessionStore().ReadMeta(session)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	posts, _, err := s.Notify.Rooms.ReadAll(meta.RoomID, meta.RoomCursor)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	unread := map[string]bool{}
 	for _, p := range posts {
@@ -45,7 +45,7 @@ func (s *Service) queuedUnread(session string, postIDs map[string]bool) map[stri
 			unread[p.ID] = true
 		}
 	}
-	return unread
+	return unread, nil
 }
 
 // transfer reports whether the role moved. A skipped stale transfer is not an error.
@@ -65,7 +65,10 @@ func (s *Service) transfer(ctx context.Context, key, role string, to subagent.In
 					posted[n.PostID] = true
 				}
 			}
-			unread = s.queuedUnread(opts.expectAuthor, posted)
+			unread, err = s.queuedUnread(opts.expectAuthor, posted)
+			if err != nil {
+				return false, fmt.Errorf("read queued author notices: %w", err)
+			}
 		}
 	}
 	moved := false
