@@ -58,7 +58,7 @@ func TestProfileWritesUseCallerPower(t *testing.T) {
 					if allow && err != nil {
 						t.Fatalf("allowed profile write: %v", err)
 					}
-					if !allow && (err == nil || !strings.Contains(err.Error(), op.action+" is owner or root only")) {
+					if !allow && (err == nil || !(strings.Contains(err.Error(), op.action+" is owner or root only") || role == "" && strings.Contains(err.Error(), "could not verify"))) {
 						t.Errorf("profile write as %q: %v", role, err)
 					}
 					after, err := os.ReadFile(reg.Path)

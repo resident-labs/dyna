@@ -28,25 +28,12 @@ func (s services) post(ctx context.Context, req notify.PostRequest) (notify.Resu
 	return res, err
 }
 
-// postSender decides who a post through the engine is from. A verified
-// caller is itself, whatever it claims: a claim that names someone else is
-// refused once callers are enforced, and logged until then. An unverified
-// caller, which only report-only lets through, keeps today's behavior: its
-// claim.
-func postSender(caller websvc.Caller, local bool, actor authority.Actor, claim notify.Claim, enforce bool, logf func(string, ...any), senderOf func(notify.Claim) (notify.Sender, error)) (notify.Sender, error) {
+// postSender uses the verified caller identity. Only room routing comes
+// from the claim; root-mode CLI processes carry an owner claim.
+func postSender(caller websvc.Caller, local bool, actor authority.Actor, claim notify.Claim, _ bool, _ func(string, ...any), senderOf func(notify.Claim) (notify.Sender, error)) (notify.Sender, error) {
 	as, ok := verified(caller, local, actor)
 	if !ok {
-		if enforce {
-			return notify.Sender{}, errors.New("the engine could not verify who is posting")
-		}
-		logf("posts: report-only, an unverified caller posted as %s", claimed(claim))
-		return senderOf(claim)
-	}
-	if who, claimedAs := claimed(as), claimed(claim); who != claimedAs {
-		if enforce {
-			return notify.Sender{}, fmt.Errorf("%s cannot post as %s", who, claimedAs)
-		}
-		logf("posts: report-only, %s claimed to be %s; stored as %s", who, claimedAs, who)
+		return notify.Sender{}, errors.New("the engine could not verify who is posting")
 	}
 	as.Room = claim.Room
 	return senderOf(as)

@@ -562,7 +562,6 @@ func TestHookWritesUseAuthorityInsteadOfEnvironment(t *testing.T) {
 		{"session", websvc.Caller{Kind: websvc.Session, Session: "ses_real"}, authority.Actor{Role: authority.Session, Session: "ses_real", Room: "room-real"}, "ses_real"},
 		{"root", websvc.Caller{Kind: websvc.Session, Session: "ses_root"}, authority.Actor{Role: authority.Root, Session: "ses_root", Room: "room-root"}, "ses_root"},
 		{"worker", websvc.Caller{Kind: websvc.Worker, Run: "wf_real", Agent: 2}, authority.Actor{Role: authority.Worker, Run: "wf_real", Agent: 2}, "run wf_real agent 2"},
-		{"unverified", websvc.Caller{Kind: websvc.Unverified}, authority.Actor{Role: authority.Owner}, "unverified"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := localCallerContext(t, tc.caller, tc.actor)
@@ -661,10 +660,10 @@ func TestRequirePRReviewersUsesPRCallerGuard(t *testing.T) {
 	ctx := localCallerContext(t, websvc.Caller{Kind: websvc.Unverified}, authority.Actor{Role: authority.Owner})
 	claim := callspec.Claim{Session: "ordinary-session", Room: "work"}
 	ctx = callspec.WithClaim(ctx, claim)
-	if _, err := calls["RequirePRReviewers"](ctx, nil); err != nil {
-		t.Fatal(err)
+	if _, err := calls["RequirePRReviewers"](ctx, nil); err == nil || !strings.Contains(err.Error(), "could not verify") {
+		t.Fatalf("unverified require: %v", err)
 	}
-	want := authority.Actor{Role: authority.Session, Session: claim.Session, Room: claim.Room}
+	want := authority.Actor{}
 	if got != want {
 		t.Fatalf("require caller = %+v, want %+v", got, want)
 	}
@@ -679,15 +678,14 @@ func TestMergeControlUsesPRCallerGuard(t *testing.T) {
 		},
 	}
 	protectPRCalls(calls)
-	// The shared report-only policy must reduce a claimed session to Session,
-	// rather than pass the process owner's authority through to merge controls.
+	// The shared policy refuses unverified callers before merge controls run.
 	ctx := localCallerContext(t, websvc.Caller{Kind: websvc.Unverified}, authority.Actor{Role: authority.Owner})
 	claim := callspec.Claim{Session: "ordinary-session", Room: "work"}
 	ctx = callspec.WithClaim(ctx, claim)
-	if _, err := calls["MergeControl"](ctx, nil); err != nil {
-		t.Fatal(err)
+	if _, err := calls["MergeControl"](ctx, nil); err == nil || !strings.Contains(err.Error(), "could not verify") {
+		t.Fatalf("unverified merge control: %v", err)
 	}
-	want := authority.Actor{Role: authority.Session, Session: claim.Session, Room: claim.Room}
+	want := authority.Actor{}
 	if got != want {
 		t.Fatalf("merge caller = %+v, want %+v", got, want)
 	}

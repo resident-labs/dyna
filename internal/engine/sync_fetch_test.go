@@ -45,7 +45,7 @@ func TestSyncFetchUsesConfiguredRepositories(t *testing.T) {
 		t.Fatal("SyncFetch is not registered")
 	}
 	// Use the real binding and caller wrapper through the fake Unix engine.
-	callers := &socketCallers{enforce: true}
+	callers := &socketCallers{}
 	callers.actForCallers(calls)
 	enginetest.Serve(t, store.DataDir(), calls)
 	var status lanesync.Status
