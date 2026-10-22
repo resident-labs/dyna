@@ -56,6 +56,8 @@ func init() {
 		ConfigFile: "", SkillDir: "config/skills", ConfigAllowlist: []string{},
 		// agy 1.4.2 loads ~/.gemini/GEMINI.md as global rules.
 		AuthFiles: []string{native.AntigravityAuthFile},
+		// Sessions and sign-in run the pinned ACP server and its local harness.
+		Requires: []string{"agy_acp_server.par", "localharness_external"},
 		NativeEnv: func(string) map[string]string {
 			env := native.AntigravityFileEnv()
 			// The upstream troubleshooting guide documents the literal value true.

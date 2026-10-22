@@ -48,3 +48,35 @@ func TestDynaByPathInPrivateHomeUsesOwnerData(t *testing.T) {
 		t.Fatalf("dyna created a data tree inside the private HOME: %v", err)
 	}
 }
+
+// The Settings sign-in runs `dyna harness accounts _acp-signin` in a prepared
+// private login environment that carries DYNA_OWNER_ENV. The helper must keep
+// the private HOME: restoring the owner's HOME first would sign in to the
+// wrong home. It reaches the ACP server check only when the HOME matched.
+func TestACPSignInHelperKeepsThePrivateHome(t *testing.T) {
+	bin := dynaBinary(t)
+	owner := t.TempDir()
+	scope := filepath.Join(owner, ".local", "share", "dyna", "accounts", "antigravity", ".runtime")
+	ownerEnv := []string{"HOME=" + owner, "PATH=/usr/bin:/bin", "DYNA_NO_AUTO_UPDATE=1", "DYNA_COMPUTERS_ENABLED=0", "DYNA_SLICE=off"}
+	private, err := home.Prepare(scope, bin, ownerEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if private[home.OwnerEnvKey] == "" || private["HOME"] != home.Home(scope) {
+		t.Fatalf("the fixture is not a private login environment: %v", private)
+	}
+	env := append([]string(nil), ownerEnv...)
+	for key, value := range private {
+		env = append(env, key+"="+value)
+	}
+	agy := filepath.Join(t.TempDir(), "agy")
+	cmd := exec.Command(bin, "harness", "accounts", "_acp-signin", "--agy", agy, "--scope", scope)
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err == nil || strings.Contains(string(out), "does not match") || !strings.Contains(string(out), "not installed beside agy") {
+		t.Fatalf("the helper did not keep the private HOME: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(home.Home(scope), ".local", "share", "dyna")); !os.IsNotExist(err) {
+		t.Fatalf("the helper created a data tree inside the private HOME: %v", err)
+	}
+}

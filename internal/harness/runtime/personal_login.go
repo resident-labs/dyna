@@ -24,6 +24,12 @@ func (r *Runtime) FindPersonalLogin(ctx context.Context, harness string) (*Perso
 	if err != nil {
 		return nil, err
 	}
+	// Antigravity signs in through its ACP server, which keeps its own grant
+	// beside the agy CLI token. The owner's CLI token is a different grant, so
+	// there is nothing Sign in could copy.
+	if h == "antigravity" {
+		return nil, nil
+	}
 	a := r.Accounts
 	if a == nil {
 		return nil, errors.New("Private account storage is unavailable.")
