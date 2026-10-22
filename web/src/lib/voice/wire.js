@@ -1,6 +1,6 @@
 // The page-to-engine call protocol, in one place: JSON text frames on
-// /api/voice/realtime?room=<name>, with base64 PCM16 mono audio at 24 kHz
-// both ways. Everything else in the call speaks app events; a protocol
+// /api/voice/realtime?v=2&room=<name>, with binary PCM16 mono input and
+// base64 PCM16 mono output at 24 kHz. Everything else in the call speaks app events; a protocol
 // change changes only this file.
 
 export const RATE = 24000

@@ -116,7 +116,7 @@ func TestDialSignsInAndSendsTheSession(t *testing.T) {
 	f := newFakeServer(t)
 	_, update := dial(t, f)
 	h := <-f.header
-	for name, want := range map[string]string{"Authorization": "Bearer tok", "ChatGPT-Account-ID": "acct", "originator": "codex_chatgpt_desktop"} {
+	for name, want := range map[string]string{"Authorization": "Bearer tok", "ChatGPT-Account-ID": "acct", "originator": "codex_cli_rs"} {
 		if got := h.Get(name); got != want {
 			t.Errorf("header %s = %q, want %q", name, got, want)
 		}

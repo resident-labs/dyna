@@ -15,7 +15,7 @@ func CodexHeader(token, account string) http.Header {
 	h := http.Header{}
 	h.Set("Authorization", "Bearer "+token)
 	h.Set("ChatGPT-Account-ID", account)
-	h.Set("originator", "codex_chatgpt_desktop")
+	h.Set("originator", "codex_cli_rs")
 	return h
 }
 

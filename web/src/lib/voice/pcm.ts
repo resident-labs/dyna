@@ -1,5 +1,5 @@
-// PCM16 helpers for the call: the gateway takes and gives mono 16-bit
-// little-endian PCM as base64.
+// PCM16 helpers for the call: binary microphone input and base64 output,
+// both mono 16-bit little-endian PCM.
 
 // downsample averages each output sample's span of input, which also keeps
 // most aliasing out. Rates at or below the target pass through.
@@ -48,8 +48,12 @@ export function base64ToBytes(b64: string): Uint8Array {
 // encodeFrame turns one microphone frame into the base64 PCM16 the gateway
 // takes at rate to.
 export function encodeFrame(frame: Float32Array, from: number, to: number): string {
-  const pcm = floatToPCM16(downsample(frame, from, to))
-  return bytesToBase64(new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength))
+  return bytesToBase64(new Uint8Array(encodePCMFrame(frame, from, to)))
+}
+
+// encodePCMFrame returns the raw microphone bytes for a version 2 socket.
+export function encodePCMFrame(frame: Float32Array, from: number, to: number): ArrayBuffer {
+  return floatToPCM16(downsample(frame, from, to)).buffer as ArrayBuffer
 }
 
 // decodeAudio turns a gateway audio delta into samples to play.
