@@ -35,8 +35,7 @@ const (
 
 var Harnesses = harnessNames()
 
-// EffectiveDialect resolves old profiles without changing their stored declaration.
-// TODO: legacy/shim remove later — infers output dialects for old profile stores; remove after all stored profiles declare their output dialect
+// EffectiveDialect resolves a declaration or the default for programmatic profiles.
 func (p Profile) EffectiveDialect() string {
 	if p.Output != nil && strings.TrimSpace(p.Output.Dialect) != "" {
 		return strings.TrimSpace(p.Output.Dialect)
@@ -251,11 +250,11 @@ func (p *Profile) Validate() error {
 // Store is the on-disk profile registry.
 type Store struct {
 	Path     string    `json:"-"`
-	Version  int       `json:"version"` // 2 = 1..10 stat scale
+	Version  int       `json:"version"` // 3 = explicit output declarations
 	Profiles []Profile `json:"profiles"`
 }
 
-const storeVersion = 2
+const storeVersion = 3
 
 var (
 	bundledMu       sync.RWMutex
@@ -408,8 +407,11 @@ func cloneCompact(c *Compact) *Compact {
 }
 
 func (s *Store) Save() error {
-	if s.Version == 0 {
+	if s.Version < storeVersion {
 		s.Version = storeVersion
+	}
+	for i := range s.Profiles {
+		s.Profiles[i].DeclareOutput()
 	}
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 		return err
@@ -431,6 +433,7 @@ func (s *Store) Get(name string) (*Profile, bool) {
 }
 
 func (s *Store) Upsert(p Profile) error {
+	p.DeclareOutput()
 	if err := p.Validate(); err != nil {
 		return err
 	}

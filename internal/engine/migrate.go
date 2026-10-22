@@ -7,6 +7,7 @@ import (
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/engine/stores"
+	"dyna-agent/internal/profile"
 )
 
 // migrateStores lets startup tests inject a failing migration. Production and
@@ -19,6 +20,9 @@ var migrateStores = stores.Migrate
 func ownStores(dataDir string, readOnly bool) error {
 	if readOnly {
 		return nil
+	}
+	if err := profile.Migrate(profile.DefaultPath()); err != nil {
+		return err
 	}
 	database.OwnSchema()
 	return MigrateStores(dataDir)
