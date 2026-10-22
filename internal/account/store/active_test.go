@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -12,59 +13,76 @@ import (
 	"dyna-agent/internal/account/reposcope"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/harness/preferences"
+	statewrite "dyna-agent/internal/state"
 )
 
-// The selection lives in its row; .active.json is the previous release's
-// 0600 copy.
-func TestSelectionLivesInItsRowWithA0600Copy(t *testing.T) {
+func TestActiveSelectionImportsOnceAndDoesNotResurrect(t *testing.T) {
 	s := registryStore(t)
-	meta := saveAccount(t, s, "token")
-	if err := s.SetActive("fixture", meta.ID); err != nil {
+	dataDir := filepath.Dir(s.Root)
+	db, err := database.Open(dataDir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(s.activePath("fixture"))
-	if err != nil || !strings.Contains(string(raw), meta.ID) {
-		t.Fatalf("selection copy = %q, %v", raw, err)
-	}
-	if info, err := os.Stat(s.activePath("fixture")); err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("selection copy mode = %v, %v", info.Mode().Perm(), err)
-	}
-	if err := os.Remove(s.activePath("fixture")); err != nil {
+	if err := database.Migrate(db, "account.registry", 2, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), registrySchema+activeSchema)
+		return err
+	}); err != nil {
 		t.Fatal(err)
 	}
-	if id, err := s.Active("fixture"); err != nil || id != meta.ID {
-		t.Fatalf("without the copy, Active = %q, %v", id, err)
+	if err := statewrite.MigrateMirrors(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	id := strings.Repeat("a", 32)
+	raw := []byte(`{"id":"` + id + `"}`)
+	for _, h := range []string{"fixture", "cleared-final", "cleared-pending"} {
+		if err := os.MkdirAll(filepath.Dir(s.activePath(h)), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(s.activePath(h), raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, h := range []string{"cleared-final", "cleared-pending"} {
+		version, pending := "prior-copy", ""
+		if h == "cleared-pending" {
+			version, pending = "", "prior-copy"
+		}
+		if _, err := db.Exec("INSERT INTO state_mirrors(key,version,pending) VALUES(?,?,?)", activeKey(h), version, pending); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Migrate(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	if err := db.QueryRow("SELECT account FROM account_active WHERE harness = ?", "fixture").Scan(&got); err != nil || got != id {
+		t.Fatalf("eager selection = %q, %v", got, err)
+	}
+	for _, h := range []string{"cleared-final", "cleared-pending"} {
+		if got, err := s.Active(h); err != nil || got != "" {
+			t.Fatalf("%s restored selection %q: %v", h, got, err)
+		}
 	}
 	if err := s.SetActive("fixture", ""); err != nil {
 		t.Fatal(err)
 	}
-	if id, err := s.Active("fixture"); err != nil || id != "" {
-		t.Fatalf("after clearing, Active = %q, %v", id, err)
-	}
-}
-
-// A selection that the previous release wrote is imported on read; a
-// damaged one is skipped and the row stays.
-func TestOldBinarySelectionIsImportedAndADamagedOneSkipped(t *testing.T) {
-	s := registryStore(t)
-	meta := saveAccount(t, s, "token")
-	if err := os.MkdirAll(filepath.Dir(s.activePath("fixture")), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(s.activePath("fixture"), []byte(`{"id":"`+meta.ID+`"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if id, err := s.Active("fixture"); err != nil || id != meta.ID {
-		t.Fatalf("old binary's selection, Active = %q, %v", id, err)
+	if got, err := os.ReadFile(s.activePath("fixture")); err != nil || string(got) != string(raw) {
+		t.Fatalf("SetActive changed retained bytes: %q, %v", got, err)
 	}
 	if err := os.Remove(s.activePath("fixture")); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(s.activePath("fixture"), []byte("not JSON"), 0600); err != nil {
+	if err := os.WriteFile(s.activePath("fixture"), raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if id, err := s.Active("fixture"); err != nil || id != meta.ID {
-		t.Fatalf("after a damaged selection, Active = %q, %v", id, err)
+	if err := Migrate(dataDir); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Active("fixture"); err != nil || got != "" {
+		t.Fatalf("cleared selection = %q, %v", got, err)
+	}
+	if err := db.QueryRow("SELECT account FROM account_active WHERE harness = ?", "fixture").Scan(&got); err != nil || got != "" {
+		t.Fatalf("empty selection row = %q, %v", got, err)
 	}
 }
 

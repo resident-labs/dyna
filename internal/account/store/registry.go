@@ -57,15 +57,17 @@ func openRegistry(dataDir string) (*sql.DB, error) {
 	if err := statewrite.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account.registry", 2, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "account.registry", 3, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, registrySchema); err != nil {
 				return err
 			}
 		}
-		_, err := conn.ExecContext(ctx, activeSchema)
-		return err
+		if _, err := conn.ExecContext(ctx, activeSchema); err != nil {
+			return err
+		}
+		return importActiveSelections(ctx, conn, filepath.Join(dataDir, "accounts"))
 	})
 	return db, err
 }
