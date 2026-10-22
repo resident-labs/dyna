@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,10 +39,72 @@ func (s Store) db() (*sql.DB, error) {
 	return db, err
 }
 
-// Migrate creates the ancestry table at engine start.
-// Legacy headers are imported on read; startup never inspects graph files.
+// Migrate imports retained ancestry once at engine start. Imported rows and
+// the version commit together; source headers and ownership stamps stay intact.
+// Both the default archive and any configured archive root are scanned.
 func Migrate(dataDir string) error {
-	_, err := (Store{DataDir: dataDir}).db()
+	db, err := (Store{DataDir: dataDir}).db()
+	if err != nil {
+		return err
+	}
+	return database.Migrate(db, "plan.ancestry.import", 1, func(conn *sql.Conn, _ int) error {
+		ctx := context.Background()
+		roots := []string{filepath.Join(dataDir, "runs"), filepath.Join(dataDir, "archive", "runs")}
+		if archive := store.RunArchiveDir(dataDir); archive != roots[1] {
+			roots = append(roots, archive)
+		}
+		for _, root := range roots {
+			if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+				if os.IsNotExist(err) && path == root {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				if entry.Name() != "plan.json" {
+					return nil
+				}
+				key, err := planKey(filepath.Dir(path))
+				if err != nil {
+					return err
+				}
+				var exists bool
+				if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM plan_ancestry WHERE plan=?)", key).Scan(&exists); err != nil {
+					return err
+				}
+				if exists {
+					return nil
+				}
+				imported, err := state.ImportMigration(ctx, conn, "plans/"+key, path, func(conn *sql.Conn, raw []byte) error {
+					return importRetainedHeader(ctx, conn, key, raw)
+				})
+				if err == nil && !imported {
+					// Older readers stamped empty headers without storing a row.
+					// Preserve that empty value without reading an owned copy.
+					_, err = conn.ExecContext(ctx, "INSERT INTO plan_ancestry(plan,resumed_from) VALUES(?, '') ON CONFLICT(plan) DO NOTHING", key)
+				}
+				return err
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// TODO: legacy/shim remove later — decodes retained ancestry only at startup.
+func importRetainedHeader(ctx context.Context, conn *sql.Conn, key string, raw []byte) error {
+	fields, err := decodeHeader(raw)
+	if err != nil {
+		return err
+	}
+	var parent string
+	if raw, ok := fields["resumedFrom"]; ok {
+		if err := json.Unmarshal(raw, &parent); err != nil {
+			return err
+		}
+	}
+	_, err = conn.ExecContext(ctx, "INSERT INTO plan_ancestry(plan,resumed_from) VALUES(?,?) ON CONFLICT(plan) DO NOTHING", key, strings.TrimSpace(parent))
 	return err
 }
 
@@ -194,12 +257,8 @@ func (s Store) importHeader(ctx context.Context, db *sql.DB, dir string) error {
 			}
 		}
 		parent = strings.TrimSpace(parent)
-		if parent == "" {
-			return nil // ImportIfForeign still stamps this file version.
-		}
-		// A nonempty row wins over a stale header, including a crash before
-		// its rollback copy was written. Old binaries can only fill an empty row.
-		_, err = conn.ExecContext(ctx, "INSERT INTO plan_ancestry(plan,resumed_from) VALUES(?,?) ON CONFLICT(plan) DO UPDATE SET resumed_from=excluded.resumed_from WHERE plan_ancestry.resumed_from=''", key, parent)
+		// Existing rows, including empty parents imported at startup, win.
+		_, err = conn.ExecContext(ctx, "INSERT INTO plan_ancestry(plan,resumed_from) VALUES(?,?) ON CONFLICT(plan) DO NOTHING", key, parent)
 		return err
 	})
 	return err
