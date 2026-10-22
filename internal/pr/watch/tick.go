@@ -136,6 +136,9 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 		headErr = errors.Join(headErr, e)
 	}
 	stopReplay()
+	if e := s.releaseDeferredReviewers(ctx); e != nil {
+		headErr = errors.Join(headErr, e)
+	}
 	// Reconcile before ancillary requests and their full-state writes.
 	if e := s.dispatch(ctx, false); e != nil {
 		headErr = errors.Join(headErr, e)

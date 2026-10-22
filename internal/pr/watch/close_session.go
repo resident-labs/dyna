@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -11,8 +12,58 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
+// pendingVerdictFrom reports whether a saved submission from id awaits replay.
+func pendingVerdictFrom(r *Record, id string) bool {
+	for p := r.PendingVerdict; p != nil; p = p.Next {
+		if p.Actor == id {
+			return true
+		}
+	}
+	return false
+}
+
+// dropPendingVerdictsFrom removes id's saved submissions and keeps every other
+// reviewer's chain entry.
+func dropPendingVerdictsFrom(r *Record, id string) {
+	slot := &r.PendingVerdict
+	for *slot != nil {
+		if (*slot).Actor == id {
+			*slot = (*slot).Next
+			continue
+		}
+		slot = &(*slot).Next
+	}
+}
+
+// releaseReviewer returns id's roles on r to the pool.
+func releaseReviewer(r *Record, id string) {
+	retireSessionReviewNotices(r, id, "session-closed")
+	missingRequired := slices.Contains(facts.MissingRequiredReviewers(*r), id)
+	if r.Reviewer == id {
+		rememberReviewAssignment(r)
+		r.Reviewer, r.ReviewerName, r.ReviewerMode = "", "", ""
+		// Keep a completed verdict at its reviewed head.
+		if r.Verdict == "" {
+			r.RoundHead = ""
+			r.RoundStarted = time.Time{}
+		}
+	}
+	if r.ReviewerOverride == id {
+		r.ReviewerOverride = ""
+	}
+	if missingRequired {
+		// A missing named review becomes fresh pool work, not a waived gate.
+		r.RoundHead, r.Verdict = "", ""
+		r.RoundStarted = time.Time{}
+	}
+	dropPendingVerdictsFrom(r, id)
+	r.ReleaseReviewerAfterReplay = false
+	r.RequiredReviewers = slices.DeleteFunc(r.RequiredReviewers, func(x string) bool { return x == id })
+}
+
 // CloseSession releases reviewer roles and uses the normal author transfer,
-// including notice successors and author history.
+// including notice successors and author history. An assigned reviewer with a
+// saved verdict keeps its role until the replay applies or rejects it.
 func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([]string, error) {
 	var summary []string
 	err := s.Store.update(func(st *State) error {
@@ -24,29 +75,12 @@ func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([
 			if !reviewer {
 				continue
 			}
-			retireSessionReviewNotices(r, from.ID, "session-closed")
-			missingRequired := slices.Contains(facts.MissingRequiredReviewers(*r), from.ID)
-			if r.Reviewer == from.ID {
-				rememberReviewAssignment(r)
-				r.Reviewer, r.ReviewerName, r.ReviewerMode = "", "", ""
-				// Keep a completed verdict at its reviewed head.
-				if r.Verdict == "" {
-					r.RoundHead = ""
-					r.RoundStarted = time.Time{}
-				}
+			if r.Reviewer == from.ID && pendingVerdictFrom(r, from.ID) {
+				r.ReleaseReviewerAfterReplay = true
+				summary = append(summary, fmt.Sprintf("PR #%d reviewer release waits for its saved verdict", r.Number))
+				continue
 			}
-			if r.ReviewerOverride == from.ID {
-				r.ReviewerOverride = ""
-			}
-			if missingRequired {
-				// A missing named review becomes fresh pool work, not a waived gate.
-				r.RoundHead, r.Verdict = "", ""
-				r.RoundStarted = time.Time{}
-			}
-			if r.PendingVerdict != nil && r.PendingVerdict.Actor == from.ID {
-				r.PendingVerdict = nil
-			}
-			r.RequiredReviewers = slices.DeleteFunc(r.RequiredReviewers, func(id string) bool { return id == from.ID })
+			releaseReviewer(r, from.ID)
 			summary = append(summary, fmt.Sprintf("PR #%d reviewer released to the pool", r.Number))
 		}
 		return nil
@@ -67,11 +101,39 @@ func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([
 			errs = append(errs, fmt.Errorf("PR #%d author has no open ancestor or root", r.Number))
 			continue
 		}
-		if err := s.Transfer(ctx, key, "author", heir, ""); err != nil {
+		if s.beforeCloseTransfer != nil {
+			s.beforeCloseTransfer(key)
+		}
+		moved, err := s.transfer(ctx, key, "author", heir, "", transferOptions{expectAuthor: from.ID, inheritUnread: true})
+		if err != nil {
 			errs = append(errs, fmt.Errorf("PR #%d author handoff: %w", r.Number, err))
-		} else {
+		} else if moved {
 			summary = append(summary, fmt.Sprintf("PR #%d author → %s", r.Number, heir.Name))
 		}
 	}
 	return summary, errors.Join(errs...)
+}
+
+// releaseDeferredReviewers finishes the releases CloseSession deferred, once
+// the reviewer's saved verdicts have been applied or rejected.
+func (s *Service) releaseDeferredReviewers(ctx context.Context) error {
+	st, err := s.readTickState(ctx)
+	if err != nil {
+		return err
+	}
+	if !slices.ContainsFunc(slices.Collect(maps.Values(st.Records)), func(r *Record) bool { return r.ReleaseReviewerAfterReplay }) {
+		return nil
+	}
+	return s.Store.update(func(st *State) error {
+		for _, r := range st.Records {
+			if r.ReleaseReviewerAfterReplay && (r.Reviewer == "" || !pendingVerdictFrom(r, r.Reviewer)) {
+				if r.Reviewer == "" {
+					r.ReleaseReviewerAfterReplay = false
+					continue
+				}
+				releaseReviewer(r, r.Reviewer)
+			}
+		}
+		return nil
+	})
 }
