@@ -175,8 +175,8 @@ func (cf *callFixture) wantSpoken(t *testing.T, key, text string) {
 		t.Fatalf("server got item %v, want one saying %q", item, text)
 	}
 	create := cf.serverGets(t, "response.create")
-	if field(create, "response", "metadata", "dyna_speak") != key || field(create, "response", "tool_choice") != nil {
-		t.Fatalf("server got %v, want a response using the session tools for %s", create, key)
+	if field(create, "response", "metadata", "dyna_speak") != key || field(create, "response", "tool_choice") != "none" {
+		t.Fatalf("server got %v, want a tool-free response for %s", create, key)
 	}
 }
 
@@ -204,21 +204,32 @@ func TestCallSpeaksADynaItemOnlyWhenNoResponseIsActive(t *testing.T) {
 	cf.wantSpoken(t, "m2", "The merge queue is empty.")
 }
 
-// Backend replies wait until playback ends, including when the provider
-// has already finished generation. Pending replies share one response.
-func TestCallHoldsUpdatesUntilPlaybackEnds(t *testing.T) {
+// The provider can finish a reply the page still plays. A new item then
+// still steers that audio: it is cut and cleared at the sentence end, and
+// the item goes out folded in, not plainly after the old audio.
+func TestCallSteersAudioThatPlaysAfterItsResponseEnded(t *testing.T) {
 	cf := startCall(t)
 	cf.call.Speak("m1", "", "CI is green.")
 	cf.wantSpoken(t, "m1", "CI is green.")
 	cf.f.reply <- `{"type":"response.created","response":{"id":"r1","metadata":{"dyna_speak":"m1"}}}`
-	cf.voiceSays(t, "r1", "i1", "CI is green.")
+	cf.voiceSays(t, "r1", "i1", "CI is green. The merge queue is next.")
 	cf.f.reply <- `{"type":"response.done","response":{"id":"r1","status":"completed"}}`
 	cf.sync(t)
 	cf.call.Speak("m2", "", "PR 7 failed review.")
-	cf.call.Speak("m3", "", "The release passed.")
-	cf.mark(t) // no cancellation or second response during playback
-	cf.call.FromPage(PageMessage{Type: "playback", ID: "i1", State: "ended", PlayedMs: 1000})
-	cf.wantSpoken(t, "m2", "PR 7 failed review.\n\nThe release passed.")
+	cf.mark(t) // the item waits for the sentence end
+	cf.lastTimer(t)()
+	if e := cf.pageGets(t, "clear"); e.ID != "i1" {
+		t.Fatalf("clear for %q, want i1", e.ID)
+	}
+	cf.call.FromPage(PageMessage{Type: "playback", ID: "i1", State: "ended", PlayedMs: 400})
+	if tr := cf.serverGets(t, "conversation.item.truncate"); tr["item_id"] != "i1" {
+		t.Fatalf("truncate %v, want i1", tr)
+	}
+	msg := cf.serverGets(t, "conversation.item.create")
+	content, _ := field(msg, "item", "content").([]any)
+	if got, _ := field(content[0], "text").(string); !strings.HasPrefix(got, foldHeader) || !strings.HasSuffix(got, "PR 7 failed review.") {
+		t.Fatalf("server got %q, want the folded item", got)
+	}
 }
 
 // timed is one wait the call started: d long, then fn.
@@ -281,25 +292,54 @@ func (cf *callFixture) voiceSays(t *testing.T, response, item, words string) {
 	cf.call.FromPage(PageMessage{Type: "playback", ID: item, State: "started"})
 }
 
-// Progress enters conversation history at once without requesting speech,
-// both while idle and during an active response.
-func TestCallAppendsContextWithoutRequestingSpeech(t *testing.T) {
-	cf := startCall(t)
-	for _, text := range []string{"[BACKEND] Started tests.", "[BACKEND] Tests passed."} {
-		cf.call.Context(text)
-		item := cf.serverGets(t, "conversation.item.create")
-		content, _ := field(item, "item", "content").([]any)
-		if field(item, "item", "role") != "user" || len(content) != 1 || field(content[0], "text") != text {
-			t.Fatalf("context item: %v", item)
-		}
-		cf.mark(t) // context did not create a response
-		cf.f.reply <- `{"type":"response.created","response":{"id":"r1"}}`
-		cf.sync(t)
+// wantSteered checks that Voice stopped its reply for new items: the server
+// gets a cancel, the page a clear, and once the page reports what it played,
+// a truncate and one reply that says the rest and folds the item in.
+func (cf *callFixture) wantSteered(t *testing.T, response, item, key, text string) {
+	t.Helper()
+	cf.serverGets(t, "response.cancel")
+	if e := cf.pageGets(t, "clear"); e.ID != item {
+		t.Fatalf("clear for %q, want %q", e.ID, item)
 	}
-	cf.call.Speak("result", "", "[BACKEND] CI is green.")
-	cf.mark(t) // the explicit answer waits for the active response
-	cf.f.reply <- `{"type":"response.done","response":{"id":"r1","status":"completed"}}`
-	cf.wantSpoken(t, "result", "[BACKEND] CI is green.")
+	cf.call.FromPage(PageMessage{Type: "playback", ID: item, State: "ended", PlayedMs: 400})
+	if tr := cf.serverGets(t, "conversation.item.truncate"); tr["item_id"] != item || tr["audio_end_ms"] != float64(400) {
+		t.Fatalf("truncate %v, want %s at 400 ms", tr, item)
+	}
+	cf.f.reply <- `{"type":"response.done","response":{"id":"` + response + `","status":"cancelled"}}`
+	msg := cf.serverGets(t, "conversation.item.create")
+	content, _ := field(msg, "item", "content").([]any)
+	got, _ := field(content[0], "text").(string)
+	if !strings.HasPrefix(got, foldHeader) || !strings.HasSuffix(got, text) {
+		t.Fatalf("server got %q, want the fold header and %q", got, text)
+	}
+	if create := cf.serverGets(t, "response.create"); field(create, "response", "metadata", "dyna_speak") != key {
+		t.Fatalf("server got %v, want the reply for %s", create, key)
+	}
+}
+
+// A root post that comes while Voice says an earlier one stops Voice at the
+// end of its sentence; the next reply says the rest and folds the post in.
+func TestCallSteersMidReplyForANewItem(t *testing.T) {
+	cf := startCall(t)
+	cf.call.Speak("m1", "", "CI is green.")
+	cf.wantSpoken(t, "m1", "CI is green.")
+	cf.f.reply <- `{"type":"response.created","response":{"id":"r1","metadata":{"dyna_speak":"m1"}}}`
+	cf.voiceSays(t, "r1", "i1", "CI is green. The merge queue is next.")
+	cf.call.Speak("m2", "", "PR 7 failed review.")
+	cf.mark(t) // Voice finishes its sentence first
+	cf.lastTimer(t)()
+	cf.wantSteered(t, "r1", "i1", "m2", "PR 7 failed review.")
+}
+
+// The owner's own answer is steered too: the rest of it is carried into the
+// next reply, so nothing the owner asked for is lost.
+func TestCallSteersAnAnswerToTheOwner(t *testing.T) {
+	cf := startCall(t)
+	cf.f.reply <- `{"type":"response.created","response":{"id":"r1"}}`
+	cf.voiceSays(t, "r1", "i1", "Two plus two is four. Anything else?")
+	cf.call.Speak("m1", "", "CI is red.")
+	cf.lastTimer(t)()
+	cf.wantSteered(t, "r1", "i1", "m1", "CI is red.")
 }
 
 // A reply that plays nothing yet, such as a tool call, is never cut: the
@@ -312,6 +352,24 @@ func TestCallNeverCutsAReplyThatPlaysNothing(t *testing.T) {
 	cf.mark(t) // no cancel
 	cf.f.reply <- `{"type":"response.done","response":{"id":"r1","status":"completed"}}`
 	cf.wantSpoken(t, "m1", "CI is red.")
+}
+
+func TestUntilSentenceEnd(t *testing.T) {
+	words := "CI is green. The merge queue is next." // 37 runes; the first sentence ends at 12
+	for _, c := range []struct {
+		heard, want time.Duration
+	}{
+		{0, 12 * time.Second / 37},                                   // the first sentence ends
+		{500 * time.Millisecond, time.Second - 500*time.Millisecond}, // the last one ends
+		{time.Second, SteerWait},                                     // no end left yet
+	} {
+		if got := untilSentenceEnd(words, time.Second, c.heard); got != c.want {
+			t.Errorf("heard %v: %v, want %v", c.heard, got, c.want)
+		}
+	}
+	if got := untilSentenceEnd("", time.Second, 0); got != SteerWait {
+		t.Errorf("no words: %v, want %v", got, SteerWait)
+	}
 }
 
 func TestCallAnswersTheOwnersTurnBeforeADynaItem(t *testing.T) {
@@ -974,70 +1032,49 @@ func TestCallHoldsProgressWhileVoiceSpeaks(t *testing.T) {
 	cf.wantSpoken(t, "progress/q1/1", "Rerunning the failed job.")
 }
 
-// Dispatch and silence need no acknowledgement response. A later owner
-// turn can steer the same work, and explicit results can still be spoken.
-func TestCallWaitsSilentlyAfterDispatchAndAllowsSteering(t *testing.T) {
-	runs := 0
+// Once Voice dispatched the owner's question, its answer comes later in the
+// call. A check Voice then calls on the same turn is refused without a
+// reply, so its empty result never speaks over the answer. The owner's next
+// turn may use tools again.
+func TestCallRefusesOtherToolsOnceATurnIsDispatched(t *testing.T) {
+	checks := 0
 	cf := startCall(t, Tool{Name: "dispatch", Later: true, Run: func(context.Context, json.RawMessage) (string, error) {
-		runs++
-		return "accepted", nil
-	}}, Tool{Name: "remain_silent", Silent: true, Run: func(context.Context, json.RawMessage) (string, error) {
-		return "", nil
+		return "Started.", nil
+	}}, Tool{Name: "recent", Run: func(context.Context, json.RawMessage) (string, error) {
+		checks++
+		return "Nothing about that.", nil
 	}})
 	cf.f.reply <- `{"type":"response.created","response":{"id":"r1"}}`
 	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r1","call_id":"c1","name":"dispatch","arguments":"{}"}`
-	cf.wantOutput(t, "c1", "accepted")
-	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r1","call_id":"c2","name":"remain_silent","arguments":"{}"}`
-	out := cf.serverGets(t, "conversation.item.create")
-	if field(out, "item", "call_id") != "c2" || field(out, "item", "output") != "" {
-		t.Fatalf("silence returned %v, want an empty output", out)
-	}
+	cf.wantOutput(t, "c1", "Started.")
 	cf.f.reply <- `{"type":"response.done","response":{"id":"r1","status":"completed"}}`
-	cf.sync(t)
-	for _, e := range cf.sync(t) {
-		if e.Type == "tool" && e.Name == "remain_silent" {
-			t.Fatalf("silence had a visible tool effect: %+v", e)
-		}
-	}
-	cf.mark(t) // neither tool requested an acknowledgement
-	cf.f.reply <- `{"type":"input_audio_buffer.committed","item_id":"u2"}`
-	cf.serverGets(t, "response.create")
+	cf.serverGets(t, "response.create") // "I've started that"
 	cf.f.reply <- `{"type":"response.created","response":{"id":"r2"}}`
+	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r2","call_id":"c2","name":"recent","arguments":"{}"}`
+	cf.wantOutput(t, "c2", "already being answered")
 	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r2","call_id":"c3","name":"dispatch","arguments":"{}"}`
-	cf.wantOutput(t, "c3", "accepted")
+	cf.wantOutput(t, "c3", "already being answered")
 	cf.f.reply <- `{"type":"response.done","response":{"id":"r2","status":"completed"}}`
-	cf.sync(t)
-	cf.mark(t)
-	if runs != 2 {
-		t.Fatalf("dispatch ran %d times, want the initial request and steering", runs)
+	cf.mark(t) // no reply is asked for the refused calls
+	if checks != 0 {
+		t.Fatalf("the check ran %d times after the dispatch", checks)
 	}
-	cf.call.Speak("result", "", "CI passed.")
-	cf.wantSpoken(t, "result", "CI passed.")
-	wait := cf.timer(t, is(SpeakWait))
-	cf.f.reply <- `{"type":"response.created","response":{"id":"r3","metadata":{"dyna_speak":"result"}}}`
-	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r3","call_id":"c4","name":"remain_silent","arguments":"{}"}`
-	out = cf.serverGets(t, "conversation.item.create")
-	if field(out, "item", "output") != "" {
-		t.Fatalf("silent result returned %v", out)
-	}
-	cf.f.reply <- `{"type":"response.done","response":{"id":"r3","status":"completed"}}`
-	cf.sync(t)
-	wait() // choosing silence acknowledges the batch without playback or retries
-	cf.mark(t)
+	cf.f.reply <- `{"type":"input_audio_buffer.committed","item_id":"u2"}`
+	cf.serverGets(t, "response.create") // the owner's new turn is answered
+	cf.f.reply <- `{"type":"response.created","response":{"id":"r3"}}`
+	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r3","call_id":"c4","name":"recent","arguments":"{}"}`
+	cf.wantOutput(t, "c4", "Nothing about that.")
 }
 
 // A dispatch that fails accepted no work, so no answer is coming: the same
 // owner turn may dispatch again, without a new commit.
 func TestCallLetsAFailedDispatchBeRetried(t *testing.T) {
 	runs := 0
-	entered, release := make(chan struct{}), make(chan struct{})
 	cf := startCall(t, Tool{Name: "dispatch", Later: true, Run: func(context.Context, json.RawMessage) (string, error) {
 		runs++
 		if runs == 1 {
 			return "", errors.New("the request is empty")
 		}
-		close(entered)
-		<-release
 		return "accepted", nil
 	}})
 	cf.f.reply <- `{"type":"response.created","response":{"id":"r1"}}`
@@ -1047,13 +1084,7 @@ func TestCallLetsAFailedDispatchBeRetried(t *testing.T) {
 	cf.serverGets(t, "response.create")
 	cf.f.reply <- `{"type":"response.created","response":{"id":"r2"}}`
 	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r2","call_id":"c2","name":"dispatch","arguments":"{\"text\":\"x\"}"}`
-	<-entered
-	cf.f.reply <- `{"type":"response.done","response":{"id":"r2","status":"completed"}}`
-	cf.f.reply <- `{"type":"input_audio_buffer.committed","item_id":"u3"}`
-	cf.sync(t)
-	close(release)
 	cf.wantOutput(t, "c2", "accepted")
-	cf.serverGets(t, "response.create") // the new owner turn is still owed
 	if runs != 2 {
 		t.Fatalf("dispatch ran %d times, want the retry to run", runs)
 	}

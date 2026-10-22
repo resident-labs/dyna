@@ -22,8 +22,8 @@ func TestBetaMapsItsAudioEventsAndAsksWithModalities(t *testing.T) {
 			t.Errorf("%s: kind %v, %v; want %v", in, ev.Kind, err, want)
 		}
 	}
-	if got := b.ResponseCreate("m1").(msg)["response"].(msg)["tool_choice"]; got != nil {
-		t.Errorf("a Dyna item's reply: tool_choice %v, want the session tool policy", got)
+	if got := b.ResponseCreate("m1").(msg)["response"].(msg)["tool_choice"]; got != "none" {
+		t.Errorf("a Dyna item's reply: tool_choice %v, want none", got)
 	}
 	r := b.ResponseCreate("").(msg)["response"].(msg)
 	if _, ok := r["metadata"]; ok || len(r["modalities"].([]string)) != 2 || r["tool_choice"] != nil {
