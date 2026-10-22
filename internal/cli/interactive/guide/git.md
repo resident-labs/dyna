@@ -157,13 +157,14 @@ dyna git ci mode local
 
 The mode applies to the current room. `github` is the default. `local` and
 `both` accept the first conclusive local or GitHub result; any observed failure
-blocks merging. With no enabled nodes, GitHub remains the CI source.
+blocks merging. Every configured required check must pass. With no enabled
+nodes, GitHub remains the CI source.
 Use `node disable <name>` or `node rm <name>` to stop assigning a node work.
 Merge trials run first. Superseded heads are cancelled. Forks stay on GitHub.
 Local checks use bounded systemd scopes and containers, with warm caches.
-When local work starts, Dyna removes only queued or waiting hosted runs for that
-exact head. Running jobs finish. An infrastructure error reruns the removed
-runs. Main pushes are never cancelled.
+When local work starts, Dyna removes only queued or waiting runs of
+`.github/workflows/ci.yml` for that exact head. Running jobs and other workflows
+finish. An infrastructure error reruns the removed runs. Main pushes are never cancelled.
 The PR Checks tab and `dyna git merge status` show the node for each check.
 
 Manual CI can also run one commit over the configured SSH destination:
