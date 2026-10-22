@@ -32,7 +32,7 @@ type Triager interface {
 }
 type Rules struct{ Learned []NoiseRule }
 
-// Rules drops only explicit author markers and exact known noise. Everything
+// Rules drops only stored author comments and exact known noise. Everything
 // uncertain stays, because dropping useful feedback is the worse error.
 func (r Rules) Triage(pr PRContext, events []Event) []Decision {
 	out := make([]Decision, len(events))
@@ -60,12 +60,6 @@ func (r Rules) Triage(pr PRContext, events []Event) []Decision {
 }
 func rule(pr PRContext, e Event) Decision {
 	who := e.Session
-	if who == "" {
-		// TODO: legacy/shim remove later — resolves old body markers until stored comment ownership replaces them.
-		if m := markerPattern.FindStringSubmatch(e.Text); len(m) > 1 {
-			who = m[1]
-		}
-	}
 	if who == "" && strings.EqualFold(e.Commenter, pr.OwnerLogin) && pr.OwnerLogin != "" {
 		return Decision{Action: "keep", Reason: "owner"}
 	}

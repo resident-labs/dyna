@@ -108,7 +108,7 @@ func TestNoiseNormalizationAndWholeTemplateScope(t *testing.T) {
 		{"inline", "https://github.com/owner/repo/pull/17", rule.Bot, "comments", quotaVariant, "keep", true},
 		{"appended content", "https://github.com/owner/repo/pull/17", rule.Bot, "issue-comments", quotaVariant + "\nThe return value disappears here.", "keep", true},
 		{"changed wording", "https://github.com/owner/repo/pull/17", rule.Bot, "issue-comments", "Review quota restored; results are ready.", "keep", true},
-		{"marked feedback", "https://github.com/owner/repo/pull/17", rule.Bot, "issue-comments", quotaVariant + Marker("ses_reviewer"), "keep", true},
+		{"marked feedback", "https://github.com/owner/repo/pull/17", rule.Bot, "issue-comments", quotaVariant + Marker("ses_reviewer"), "drop", false},
 		{"new review link", "https://github.com/owner/repo/pull/17", rule.Bot, "issue-comments", quotaVariant + " https://github.com/owner/repo/pull/17#discussion_r123", "keep", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
