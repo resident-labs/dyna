@@ -44,7 +44,7 @@ done
 # checks run through systemd-run, which also returns their exit status.
 run_root systemd-run --machine="$name" --pipe --wait --quiet /bin/bash -lc '
 set -euo pipefail
-timeout 120 systemctl is-system-running --wait
+timeout 120 systemctl is-system-running --wait || { systemctl --failed --no-pager; journalctl -b -p err --no-pager | tail -n 40; exit 1; }
 test "$(cat /proc/1/comm)" = systemd
 test "$(id -u dyna)" = 1000
 test "$(id -g dyna)" = 1000
