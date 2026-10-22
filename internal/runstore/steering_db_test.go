@@ -36,7 +36,7 @@ func TestSteeringStateLivesInDynaDB(t *testing.T) {
 	if err := SubmitAgentSteering(run.Meta.ID, 1, "first"); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(dir, "steering-state.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(dir, "steering-state.json")); !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	if got, _ := steeringTexts(t, run.Meta.ID, 0); strings.Join(got, ",") != "first" {
@@ -53,10 +53,8 @@ func TestSteeringStateLivesInDynaDB(t *testing.T) {
 	}
 }
 
-// An earlier release's worker activates by truncating the queue and writing
-// steering-state.json with no queueStart. The import resets the start, so
-// the reader does not begin inside the new, shorter queue.
-func TestOldWorkerActivationResetsQueueStart(t *testing.T) {
+// A retained file cannot reset the canonical activation offset.
+func TestOldWorkerFilePreservesQueueStart(t *testing.T) {
 	run := createSteeringTestRun(t, "wf_steering-old")
 	dir, _ := agentSteeringDir(run.Meta.ID, 1)
 	if err := ActivateAgentSteering(run.Meta.ID, 1); err != nil {
@@ -66,6 +64,10 @@ func TestOldWorkerActivationResetsQueueStart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := ActivateAgentSteering(run.Meta.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	before, err := readSteeringState(dir, run.Meta.ID, 1)
+	if err != nil {
 		t.Fatal(err)
 	}
 	// The old worker's queue is longer than the start the row holds.
@@ -81,8 +83,9 @@ func TestOldWorkerActivationResetsQueueStart(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "steering-state.json"), state, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := steeringTexts(t, run.Meta.ID, 0); strings.Join(got, ",") != "old one,old two" {
-		t.Fatalf("messages after an old worker's activation = %v; want both", got)
+	after, err := readSteeringState(dir, run.Meta.ID, 1)
+	if err != nil || after.QueueStart != before.QueueStart {
+		t.Fatalf("activation offset changed from %d to %d: %v", before.QueueStart, after.QueueStart, err)
 	}
 }
 
