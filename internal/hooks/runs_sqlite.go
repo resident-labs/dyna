@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -31,15 +32,19 @@ func (s Service) runsDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "hooks.runs", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), runsSchema)
-		return err
+	err = database.Migrate(db, "hooks.runs", 2, func(conn *sql.Conn, old int) error {
+		if old < 1 {
+			if _, err := conn.ExecContext(context.Background(), runsSchema); err != nil {
+				return err
+			}
+		}
+		return s.importRuns(conn)
 	})
 	return db, err
 }
 
 // MigrateRuns creates the hook run table before the engine serves requests.
-// Previous-release files are imported lazily when their repository is read.
+// Previous-release receipts import once in the versioned migration.
 func MigrateRuns(dataDir string) error {
 	_, err := (Service{DataDir: dataDir}).runsDB()
 	return err
@@ -186,4 +191,42 @@ func (s Service) runs(ctx context.Context, repo, name string) ([]Run, error) {
 		return result[i].StartedAt.Before(result[j].StartedAt)
 	})
 	return result, nil
+}
+
+// TODO: legacy/shim remove later — imports retained receipts once during startup.
+func (s Service) importRuns(conn *sql.Conn) error {
+	ctx := context.Background()
+	paths, err := filepath.Glob(filepath.Join(s.dataDir(), "repos", "*", "runs", "*.json"))
+	if err != nil {
+		return err
+	}
+	for _, path := range paths {
+		key := filepath.Base(filepath.Dir(filepath.Dir(path)))
+		id := strings.TrimSuffix(filepath.Base(path), ".json")
+		var exists int
+		err := conn.QueryRowContext(ctx, "SELECT 1 FROM hook_runs WHERE repo=? AND id=?", key, id).Scan(&exists)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		_, err = statewrite.ImportMigration(ctx, conn, runMirrorKey(key, id), path, func(conn *sql.Conn, raw []byte) error {
+			var run Run
+			if err := json.Unmarshal(raw, &run); err != nil {
+				log.Printf("skip hook receipt %s: %v", path, err)
+				return nil
+			}
+			if !validRunID(id) || run.ID != id || filepath.Base(s.dir(run.Repo)) != key {
+				log.Printf("skip hook receipt %s: invalid run or repository identity", path)
+				return nil
+			}
+			_, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO hook_runs(repo,id,name,body) VALUES(?,?,?,?)", key, id, run.Name, raw)
+			return err
+		})
+		if err != nil {
+			return fmt.Errorf("import hook receipt %s: %w", path, err)
+		}
+	}
+	return nil
 }
