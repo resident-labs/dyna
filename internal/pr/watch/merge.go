@@ -385,6 +385,10 @@ func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool
 		return Record{}, false, nil
 	}
 	policy := EffectivePolicy(st, *current)
+	snap, err = s.withRegisteredCI(ctx, *current, snap, policy)
+	if err != nil {
+		return Record{}, false, err
+	}
 	ci, key, jobs, _ := s.ciStatus(snap, *current, policy)
 	if err := s.process(ctx, current.Key, snap, ci, key, jobs, nil, false); err != nil {
 		return Record{}, false, err

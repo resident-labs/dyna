@@ -16,6 +16,7 @@ import (
 	"dyna-agent/internal/changepolicy"
 	"dyna-agent/internal/escalate"
 	"dyna-agent/internal/hooks"
+	"dyna-agent/internal/localci"
 	"dyna-agent/internal/maintenance"
 	"dyna-agent/internal/notify"
 	prfacts "dyna-agent/internal/pr/facts"
@@ -36,6 +37,9 @@ type Service struct {
 	tickReads           *tickReadView
 	StewardSessions     steward.Sessions
 	LocalCI             localCIRunner
+	LocalCIRegistry     localCIRegistry
+	RunNodeCI           func(context.Context, localci.Node, localci.Request) (localci.Result, error)
+	registeredRuns      *registeredCIRuns
 	localCIRuns         *sync.Map
 
 	autoTrackFailures *sync.Map // PR key and remote head; only failed attempts remain.
@@ -144,6 +148,7 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 	rec.BaseRef = snap.Pull.Base.Ref
 	rec.IsDraft = snap.Pull.Draft
 	rec.Branch, rec.Base = snap.Pull.Head.Ref, snap.Pull.Base.SHA
+	rec.HeadRepo = snap.Pull.Head.Repo.FullName
 	if rec.Base == "" {
 		rec.Base = snap.Pull.Base.Ref
 	}
@@ -458,6 +463,7 @@ func (s *Service) process(ctx context.Context, key string, snap Snapshot, ci, ci
 			return nil
 		}
 		r.Title = Sanitize(snap.Pull.Title)
+		r.HeadRepo = snap.Pull.Head.Repo.FullName
 		baseRetargeted, keepReview := s.observeBase(st, r, snap, pollTime)
 		previousPullHead := s.observePoll(st, r, snap, pollTime)
 		n := newPollNotices(r)
@@ -552,6 +558,9 @@ func (s *Service) observeBase(st *State, r *Record, snap Snapshot, pollTime []ti
 func (s *Service) observePoll(st *State, r *Record, snap Snapshot, pollTime []time.Time) (previousPullHead string) {
 	if snap.Pull.State != "closed" {
 		r.Checks = savedCheckSummaries(*r, snap)
+		if snap.localCI != nil && snap.localCI.BudgetNote != "" {
+			notice(r, r.Author, snap.localCI.BudgetNote, "informational:ci-budget:local:"+snap.Pull.Head.SHA+":"+digest(snap.localCI.BudgetNote))
+		}
 		r.BotReviews = snap.BotReviews(EffectivePolicy(*st, *r).RequiredChecks...)
 	}
 	observe(&r.Polling, s.now(), snap, reserve(quotaFor(*st, r, s.now()), s.now()))
@@ -1048,6 +1057,10 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 		head = registered.Commit
 	}
 	if err := staleVerdict(r, actor, head, snap.Pull, reviewID, named); err != nil {
+		return err
+	}
+	snap, err = s.withRegisteredCI(ctx, r, snap, policy)
+	if err != nil {
 		return err
 	}
 
