@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
 )
 
@@ -130,12 +132,48 @@ func importRegistry(ctx context.Context, conn *sql.Conn, registry string) error 
 		return err
 	}
 	defer unlock()
-	_, err = state.ImportMigration(ctx, conn, seedMirrorKey(registry), manifestPath(registry), func(conn *sql.Conn, raw []byte) error {
+	return importMissingSeedManifest(ctx, conn, registry)
+}
+
+// TODO: legacy/shim remove later — discovers pre-SQLite custom registries on
+// first use. The caller holds the registry lock. A canonical row always wins.
+func importCustomRegistry(ctx context.Context, db *sql.DB, registry string) error {
+	var exists bool
+	if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM workflow_template_seeds WHERE registry=?)", registry).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	if _, err := os.Lstat(manifestPath(registry)); os.IsNotExist(err) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		return importMissingSeedManifest(ctx, conn, registry)
+	})
+}
+
+// TODO: legacy/shim remove later — imports missing hashes without changing the file or its stamp.
+func importMissingSeedManifest(ctx context.Context, conn *sql.Conn, registry string) error {
+	var exists bool
+	if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM workflow_template_seeds WHERE registry=?)", registry).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	_, err := state.ImportMigration(ctx, conn, seedMirrorKey(registry), manifestPath(registry), func(conn *sql.Conn, raw []byte) error {
 		manifest, err := decodeManagedManifest(raw)
 		if err != nil {
 			return err
 		}
 		return saveSeedRecord(ctx, conn, registry, manifest)
 	})
+	if err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, "INSERT INTO workflow_template_seeds(registry,hashes) VALUES(?, '{}') ON CONFLICT(registry) DO NOTHING", registry)
 	return err
 }

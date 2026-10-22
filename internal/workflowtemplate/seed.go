@@ -77,6 +77,9 @@ func (s Store) Seed(ctx context.Context, c Catalog, fsys fs.FS) (SeedResult, err
 	if err != nil {
 		return result, err
 	}
+	if err := importCustomRegistry(ctx, db, c.RegistryDir); err != nil {
+		return result, err
+	}
 	manifest, err := readSeedRecord(ctx, db, c.RegistryDir)
 	if err != nil {
 		return result, err

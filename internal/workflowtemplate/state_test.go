@@ -77,28 +77,21 @@ func TestStartupImportsLegacyDefaultManifestOnce(t *testing.T) {
 	}
 }
 
-func TestStartupPreservesCanonicalHashesInKnownCustomRegistry(t *testing.T) {
-	cat := newSeedCatalog(t, filepath.Join(t.TempDir(), "custom"))
-	if _, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 1\n")}}); err != nil {
+func TestSeedImportsPreviouslyUnknownLegacyCustomRegistry(t *testing.T) {
+	registry := filepath.Join(t.TempDir(), "custom")
+	writeOldManifest(t, registry, map[string]string{"echo": contentHash([]byte("return 1\n"))})
+	if err := os.WriteFile(filepath.Join(registry, "echo.js"), []byte("return 1\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cat.RegistryDir, "echo.js"), []byte("return 2\n"), 0o644); err != nil {
-		t.Fatal(err)
+	cat := newSeedCatalog(t, registry)
+	result, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 2\n")}})
+	if err != nil || len(result.Updated) != 1 {
+		t.Fatalf("first custom seed: %#v, %v", result, err)
 	}
-	writeOldManifest(t, cat.RegistryDir, map[string]string{"echo": contentHash([]byte("return 2\n"))})
-	if err := Migrate(cat.store.DataDir); err != nil {
-		t.Fatal(err)
-	}
-	manifest := seedRow(t, cat)
-	if manifest.Files["echo"] != contentHash([]byte("return 1\n")) {
-		t.Fatalf("old binary import: %#v", manifest)
-	}
-	if err := os.Remove(manifestPath(cat.RegistryDir)); err != nil {
-		t.Fatal(err)
-	}
-	result, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 3\n")}})
-	if err != nil || len(result.Preserved) != 1 {
-		t.Fatalf("seed after old binary import: %#v, %v", result, err)
+	writeOldManifest(t, registry, map[string]string{"echo": "stale"})
+	result, err = cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 3\n")}})
+	if err != nil || len(result.Updated) != 1 {
+		t.Fatalf("canonical custom seed: %#v, %v", result, err)
 	}
 }
 
@@ -178,7 +171,7 @@ func TestStartupPreservesRemovedRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := db.QueryRow("SELECT count(*) FROM workflow_template_seeds").Scan(&count); err != nil || count != 1 {
+	if err := db.QueryRow("SELECT count(*) FROM workflow_template_seeds WHERE registry=?", cat.RegistryDir).Scan(&count); err != nil || count != 1 {
 		t.Fatalf("removed registry rows = %d: %v", count, err)
 	}
 	// Restore the same files; the canonical hashes must still manage them.
