@@ -13,7 +13,8 @@ import (
 // raw change never reaches clients. Other changes go to the hub.
 func TestPublishStateRoutesPRChanges(t *testing.T) {
 	events := hub.New(1)
-	publish := publishState(events, roomsvc.New(nil))
+	signals := newWorkerSignals()
+	publish := publishState(events, roomsvc.New(nil), signals)
 	publish(hub.Event{Topic: prstate.Topic})
 	if events.Rev() != 0 {
 		t.Fatalf("a PR state change reached the hub (rev %d)", events.Rev())
@@ -26,5 +27,13 @@ func TestPublishStateRoutesPRChanges(t *testing.T) {
 	publish(hub.Event{Topic: "goals", Room: "room_1"})
 	if events.Rev() != 1 {
 		t.Fatalf("hub rev %d after a goals change; want 1", events.Rev())
+	}
+	publish(hub.Event{Topic: "localci", Key: "result:head"})
+	for _, worker := range []string{"prs", "merges"} {
+		select {
+		case <-signals.channels[worker]:
+		default:
+			t.Fatalf("local CI completion did not wake %s", worker)
+		}
 	}
 }
