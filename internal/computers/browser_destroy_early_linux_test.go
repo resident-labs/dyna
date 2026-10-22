@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -139,9 +138,9 @@ func TestDestroyStopsBrowserWhenDaemonDoesNotAnswer(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("destroy left the browser daemon running")
 	}
-	state, err := os.ReadFile(filepath.Join(Dir(id), "state.json"))
-	if err != nil || !strings.Contains(string(state), string(StateDestroyed)) {
-		t.Fatalf("state after destroy: %s %v", state, err)
+	state := savedStatus(id)
+	if state.State != StateDestroyed {
+		t.Fatalf("state after destroy: %+v", state)
 	}
 }
 
