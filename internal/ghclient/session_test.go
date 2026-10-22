@@ -5,8 +5,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
+
+	"dyna-agent/internal/shellquote"
 )
+
+func gitConfigValue(env map[string]string, key string) string {
+	count, _ := strconv.Atoi(env["GIT_CONFIG_COUNT"])
+	for i := 0; i < count; i++ {
+		if env["GIT_CONFIG_KEY_"+strconv.Itoa(i)] == key {
+			return env["GIT_CONFIG_VALUE_"+strconv.Itoa(i)]
+		}
+	}
+	return ""
+}
 
 func TestSessionUsesTheRoomAccount(t *testing.T) {
 	records := setupRooms(t, "resident-labs/personal", "work/private")
@@ -42,6 +55,14 @@ esac
 		}
 		if i == 1 && (target != "/real/dyna" || env[ReadOnlyEnv] != "1") {
 			t.Fatal("read-only room did not receive the gh guard")
+		}
+		helperKey := "credential.https://github.com/" + []string{"resident-labs/personal", "work/private"}[i] + ".helper"
+		helper := gitConfigValue(env, helperKey)
+		if i == 0 && helper != "!"+shellquote.Quote(filepath.Join(bin, "gh"))+" auth git-credential" {
+			t.Fatalf("write room git has no gh credential helper: %q", helper)
+		}
+		if i == 1 && helper != "" {
+			t.Fatal("read-only room git received a push credential helper")
 		}
 		inherited := append([]string{}, os.Environ()...)
 		for k, v := range env {

@@ -10,6 +10,7 @@ import (
 
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/shellquote"
 )
 
 // ReadOnlyEnv marks the gh multicall guard, used only by read-only sessions.
@@ -85,13 +86,27 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 	}
 	out[BinaryEnv] = cmd.Path
 	out["PATH"] = bin + string(os.PathListSeparator) + values["PATH"]
-	if err := sessionGitConfig(ctx, rec, readOnly, values, out); err != nil {
+	// Read-only rooms get no helper; its keys still clear a parent's helper.
+	credentials := sessionCredentialHelper(r, cmd.Path)
+	if err := sessionGitConfig(ctx, rec, readOnly, credentials, !readOnly && token != "", values, out); err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func sessionGitConfig(ctx context.Context, rec room.Record, readOnly bool, inherited, out map[string]string) error {
+// sessionCredentialHelper lets plain git push to the room's repository with the
+// session's GH_TOKEN. The helper answers only for that repository's HTTPS URL,
+// and no token or configuration is saved to disk.
+func sessionCredentialHelper(r repository, ghPath string) [][2]string {
+	helper := "!" + shellquote.Quote(ghPath) + " auth git-credential"
+	return [][2]string{
+		{"credential.https://" + r.host + ".useHttpPath", "true"},
+		{"credential.https://" + r.host + "/" + r.name + ".helper", helper},
+		{"credential.https://" + r.host + "/" + r.name + ".git.helper", helper},
+	}
+}
+
+func sessionGitConfig(ctx context.Context, rec room.Record, readOnly bool, credentials [][2]string, grant bool, inherited, out map[string]string) error {
 	count := 0
 	if raw := inherited["GIT_CONFIG_COUNT"]; raw != "" {
 		var err error
@@ -100,11 +115,20 @@ func sessionGitConfig(ctx context.Context, rec room.Record, readOnly bool, inher
 			return fmt.Errorf("invalid inherited GIT_CONFIG_COUNT")
 		}
 	}
+	ownCredentialKeys := map[string]bool{}
+	for _, entry := range credentials {
+		ownCredentialKeys[entry[0]] = true
+	}
 	keys, values := []string{}, []string{}
 	for i := 0; i < count; i++ {
 		key := inherited[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)]
 		value := inherited[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)]
 		if key == "url."+blockedPushURL+".pushInsteadOf" {
+			continue
+		}
+		// A parent session's helper is replaced below, so it never accumulates
+		// and a read-only child does not keep its parent's push credentials.
+		if ownCredentialKeys[key] {
 			continue
 		}
 		if strings.HasPrefix(key, "remote.") && strings.HasSuffix(key, ".pushurl") {
@@ -136,6 +160,11 @@ func sessionGitConfig(ctx context.Context, rec room.Record, readOnly bool, inher
 					keys, values = append(keys, "url."+blockedPushURL+".pushInsteadOf"), append(values, remote)
 				}
 			}
+		}
+	}
+	if grant {
+		for _, entry := range credentials {
+			keys, values = append(keys, entry[0]), append(values, entry[1])
 		}
 	}
 	for i, key := range keys {
