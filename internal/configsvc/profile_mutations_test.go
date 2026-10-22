@@ -58,6 +58,7 @@ func TestFullProfileOperationsPreserveFields(t *testing.T) {
 	}
 	// A manual add replaces all fields, including the old marker and declaration.
 	replacement := mock(p.Name)
+	replacement.DeclareOutput()
 	if err := svc.UpsertProfile(ctx, replacement); err != nil {
 		t.Fatal(err)
 	}
@@ -70,6 +71,7 @@ func TestSeedProfilesKeepsExistingAndDefault(t *testing.T) {
 	isolate(t)
 	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
 	old := mock("existing")
+	old.DeclareOutput()
 	old.Default, old.Env = true, map[string]string{"SECRET": "private"}
 	seed(t, old)
 	candidate := mock(old.Name)
