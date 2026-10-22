@@ -548,7 +548,7 @@ func TestPlanArchiveFailsWhenAncestryStoreCannotBeRead(t *testing.T) {
 	}
 }
 
-func TestPlanArchiveImportsOldLineageWithoutStartupWalk(t *testing.T) {
+func TestPlanArchiveUsesLineageImportedAtStartup(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv(ArchiveDirEnv, "")
 	now := time.Now()
@@ -568,7 +568,7 @@ func TestPlanArchiveImportsOldLineageWithoutStartupWalk(t *testing.T) {
 		t.Fatal(err)
 	}
 	var rows int
-	if err := db.QueryRow("SELECT count(*) FROM plan_ancestry").Scan(&rows); err != nil || rows != 0 {
+	if err := db.QueryRow("SELECT count(*) FROM plan_ancestry").Scan(&rows); err != nil || rows != 2 {
 		t.Fatalf("startup imported %d rows: %v", rows, err)
 	}
 	selected, skips, err := PlanArchive(ArchiveSelector{AllFinished: true, Now: now})
