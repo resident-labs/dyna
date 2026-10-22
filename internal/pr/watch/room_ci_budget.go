@@ -16,6 +16,9 @@ func (s *Service) SetRoomCIBudget(roomID string, actor authority.Actor, budget C
 	if roomID == "" {
 		return fmt.Errorf("room is required")
 	}
+	if budget.CITimeBudget != "warn" && budget.CITimeBudget != "enforce" {
+		return fmt.Errorf("CI time budget must be enforce or warn")
+	}
 	return s.Store.update(func(st *State) error {
 		p := RoomPolicy(*st, roomID)
 		previous := map[string]bool{}
@@ -32,14 +35,8 @@ func (s *Service) SetRoomCIBudget(roomID string, actor authority.Actor, budget C
 				return fmt.Errorf("add a measured time and reason for %s", id)
 			}
 		}
-		// TODO: legacy/shim remove later — older app clients omit workflow exemptions; preserve them until all clients send this field.
-		if budget.CIBudgetExempt != nil {
-			p.CIBudgetExempt = append([]string{}, budget.CIBudgetExempt...)
-		}
-		// TODO: legacy/shim remove later — older budget clients omit the mode; preserve the saved choice until all clients send ciTimeBudget.
-		if budget.CITimeBudget != "" {
-			p.CITimeBudget = budget.CITimeBudget
-		}
+		p.CIBudgetExempt = append([]string{}, budget.CIBudgetExempt...)
+		p.CITimeBudget = budget.CITimeBudget
 		p.CIWarnAfter, p.CIFailAfter = budget.CIWarnAfter, budget.CIFailAfter
 		p.CITestMax = budget.CITestMax
 		p.CITestAllow = append([]string{}, budget.CITestAllow...)
