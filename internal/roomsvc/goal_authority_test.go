@@ -91,6 +91,38 @@ func TestGoalMutationsUseAuthenticatedCaller(t *testing.T) {
 	}
 }
 
+func TestExpediteGoalIsOwnerOrRootOnly(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	id := "ses_20261020-000001-aaaaaaaa"
+	recordtest.Write(t, e.mgr.Store.Root, id, subagent.Meta{ID: id, Name: "helper", RoomID: r.ID, Room: r.Name, Depth: 1, Resumable: true, HarnessSession: "mock-fixture"})
+	session := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: id})
+	owner := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
+	first, err := e.svc.AddGoal(owner, r.ID, "First", []string{"@room"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := e.svc.AddGoal(owner, r.ID, "Second", []string{"@room"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.svc.ExpediteGoal(session, r.ID, first.ID, false); err == nil {
+		t.Fatal("a session expedited a goal")
+	}
+	if g, err := e.svc.ExpediteGoal(owner, r.ID, first.ID, false); err != nil || g.ExpediteUntil == nil {
+		t.Fatalf("owner expedite = %+v, %v", g, err)
+	}
+	if _, err := e.svc.ExpediteGoal(owner, r.ID, second.ID, false); err == nil {
+		t.Fatal("a second expedited goal needs replace")
+	}
+	if _, err := e.svc.ExpediteGoal(session, r.ID, "", false); err == nil {
+		t.Fatal("a session stopped the priority")
+	}
+	if g, err := e.svc.ExpediteGoal(owner, r.ID, "", false); err != nil || g.ID != first.ID || g.ExpediteUntil != nil {
+		t.Fatalf("stop = %+v, %v", g, err)
+	}
+}
+
 func TestRuleMutationsUseAuthenticatedCaller(t *testing.T) {
 	e := newEnv(t)
 	r := e.room("work")
