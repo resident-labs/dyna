@@ -8,7 +8,6 @@ package realtime
 import (
 	"strings"
 	"time"
-	"unicode/utf8"
 )
 
 // SpeakWait is how long a sent batch may wait, while Voice is silent, for a
@@ -18,24 +17,10 @@ const (
 	SpeakTries = 3
 )
 
-// MaxBatchItems and MaxBatchChars bound one batch, as qwen bounds its
-// announcement batches.
-const (
-	MaxBatchItems = 4
-	MaxBatchChars = 2000
-)
-
-// batchHeader leads a batch of more than one item, and foldHeader a batch
-// sent right after Voice stopped mid-reply for it.
-const (
-	batchHeader = "Several updates for the owner. Tell them together in one short reply, the most important first:"
-	foldHeader  = "You stopped mid-reply because new information came in. Say the rest of what you were saying, briefly, and fold in this:"
-)
-
-// speakQueue says what Voice must say for Dyna, oldest first. Every item
-// waiting when Voice is free goes out in one batch, one reply. A batch
-// counts as spoken only when a reply that answers it starts to play; the
-// caller names the batch a reply answers, so an unrelated reply or a late
+// speakQueue holds Dyna's response requests, oldest first. All waiting
+// items go out in one batch when Voice is free. Playback or a deliberate
+// remain_silent acknowledges the batch. The caller names the batch a reply
+// answers, so an unrelated reply or a late
 // reply to an earlier try never counts. If no reply starts within
 // SpeakWait of Voice falling silent, the batch is sent again, up to
 // SpeakTries times, then given up. An item is never said twice. A waiting
@@ -55,7 +40,6 @@ type speakQueue struct {
 	seen    map[string]bool // every key ever added
 	playing map[string]bool // replies playing now
 	flight  *flight         // the batch sent, waiting for its reply
-	fold    bool            // the next batch follows a reply Voice cut short
 }
 
 type speakItem struct {
@@ -102,7 +86,7 @@ func (q *speakQueue) pump() {
 	// same key, so a late reply to either counts for the same items. Items
 	// added meanwhile wait for the next batch.
 	if len(q.sent) == 0 {
-		q.sent = q.batch()
+		q.sent = q.queue
 	}
 	for _, item := range q.sent {
 		item.tries++
@@ -112,30 +96,10 @@ func (q *speakQueue) pump() {
 		texts[i] = item.text
 	}
 	text := strings.Join(texts, "\n\n")
-	switch {
-	case q.fold:
-		text = foldHeader + "\n\n" + text
-	case len(q.sent) > 1:
-		text = batchHeader + "\n\n" + text
-	}
-	q.fold = false
 	q.flight = &flight{}
 	q.sentKey = q.sent[0].key
 	q.send(q.sentKey, text)
 	q.arm()
-}
-
-// batch is the front of the queue that fits one reply: at least one item.
-func (q *speakQueue) batch() []*speakItem {
-	n, chars := 0, 0
-	for _, item := range q.queue {
-		chars += utf8.RuneCountInString(item.text)
-		if n > 0 && (n >= MaxBatchItems || chars > MaxBatchChars) {
-			break
-		}
-		n++
-	}
-	return q.queue[:n]
 }
 
 // arm starts the wait, but only while Voice is silent: a reply already
@@ -179,8 +143,16 @@ func (q *speakQueue) started(id, key string) {
 		f.cancel()
 		f.cancel = nil
 	}
+	q.acknowledged(key)
+}
+
+// acknowledged accepts a batch that played or deliberately chose silence.
+func (q *speakQueue) acknowledged(key string) {
 	if key == "" || len(q.sent) == 0 || key != q.sentKey {
 		return
+	}
+	if q.flight != nil && q.flight.cancel != nil {
+		q.flight.cancel()
 	}
 	q.flight = nil
 	q.queue, q.sent = q.queue[len(q.sent):], nil

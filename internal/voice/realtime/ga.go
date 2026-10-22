@@ -89,6 +89,9 @@ func (GA) UserText(text string) any {
 	}}
 }
 
+// Context adds text without completing a turn or requesting speech.
+func (g GA) Context(text string) any { return g.UserText(text) }
+
 func (GA) FunctionOutput(callID, output string) any {
 	return msg{"type": "conversation.item.create", "item": msg{
 		"type": "function_call_output", "call_id": callID, "output": output,
@@ -99,7 +102,7 @@ func (GA) ResponseCreate(key string) any {
 	if key == "" {
 		return msg{"type": "response.create"}
 	}
-	return msg{"type": "response.create", "response": msg{"metadata": msg{speakKey: key}, "tool_choice": "none"}}
+	return msg{"type": "response.create", "response": msg{"metadata": msg{speakKey: key}}}
 }
 
 // speakKey is the response metadata field that names the Dyna item a reply speaks.
