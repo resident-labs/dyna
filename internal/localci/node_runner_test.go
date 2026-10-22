@@ -82,7 +82,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 				t.Errorf("scope lacks %s", want)
 			}
 		}
-		for _, want := range []string{"flock -n 9", "--cpus=2", "--memory=4g", "sudo -n docker", "GOCACHE=/cache/build", "GOMODCACHE=/cache/mod"} {
+		for _, want := range []string{"flock -n 9", "--cpus=2", "--memory=4g", "sudo -n docker", "GOCACHE=/cache/build", "GOMODCACHE=/cache/mod", "GITHUB_STEP_SUMMARY=/reports/step-summary.md"} {
 			if !strings.Contains(script, want) {
 				t.Errorf("check lacks %s", want)
 			}
