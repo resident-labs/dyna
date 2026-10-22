@@ -292,3 +292,133 @@ func TestCallRecordsHeldWordsBeforeARedial(t *testing.T) {
 		t.Fatalf("lines %+v, want the held words once", lines)
 	}
 }
+
+// Quiet tools use Google's non-blocking SILENT response path. Fake timers
+// and channel markers verify silence, no retry, and a later spoken result.
+func TestGoogleQuietToolsDoNotResumeGeneration(t *testing.T) {
+	tools := []Tool{
+		{Name: "dispatch", Parameters: json.RawMessage(`{"type":"object","properties":{}}`), Later: true, Run: func(context.Context, json.RawMessage) (string, error) { return "accepted", nil }},
+		{Name: "remain_silent", Parameters: json.RawMessage(`{"type":"object","properties":{}}`), Silent: true, Run: func(context.Context, json.RawMessage) (string, error) { return "", nil }},
+	}
+	f := newFakeServer(t)
+	p, err := GoogleLive("", f.url, func() string { return "k" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.reply <- `{"setupComplete":{}}`
+	conn, err := Dial(t.Context(), p, Session{Tools: tools})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	setup := <-f.got
+	decls := field(setup, "setup", "tools").([]any)[0].(map[string]any)["functionDeclarations"].([]any)
+	for _, decl := range decls {
+		if field(decl, "behavior") != "NON_BLOCKING" {
+			t.Fatalf("quiet tool declaration blocks: %v", decl)
+		}
+	}
+	call := NewCall(conn, tools, func(bool, string) {})
+	timers := make(chan timed, 32)
+	call.after = func(d time.Duration, fn func()) func() { timers <- timed{d, fn}; return func() {} }
+	ctx, cancel := context.WithCancel(t.Context())
+	ended := make(chan error, 1)
+	go func() { ended <- call.Run(ctx) }()
+	t.Cleanup(func() { cancel(); <-ended })
+	page := make(chan PageEvent, 64)
+	call.Attach(&Page{Send: func(e PageEvent) { page <- e }, Close: func(int, string) {}})
+	barrier := func() {
+		t.Helper()
+		// This server marker follows all decoded events of the tool turn.
+		f.reply <- `{"serverContent":{"inputTranscription":{"text":"barrier"}}}`
+		for {
+			e := <-page
+			if e.Type == "audio" || e.Type == "tool" && e.Name == "remain_silent" {
+				t.Fatalf("quiet completion had a visible effect: %+v", e)
+			}
+			if e.Type == "transcript" && !e.Final && strings.HasSuffix(e.Text, "barrier") {
+				return
+			}
+		}
+	}
+	marker := func() {
+		t.Helper()
+		call.FromPage(PageMessage{Type: "audio", Audio: make([]byte, 6)})
+		if m := <-f.got; field(m, "realtimeInput", "audio") == nil {
+			t.Fatalf("unexpected generation or retry before marker: %v", m)
+		}
+	}
+	quietResult := func(name, id string) {
+		t.Helper()
+		f.reply <- `{"toolCall":{"functionCalls":[{"id":"` + id + `","name":"` + name + `","args":{}}]}}`
+		m := <-f.got
+		responses, ok := field(m, "toolResponse", "functionResponses").([]any)
+		if !ok || len(responses) != 1 {
+			t.Fatalf("wanted one tool response, got %v", m)
+		}
+		r := responses[0]
+		// A normal response would resume the fake provider. SILENT must be
+		// a FunctionResponse field, outside its result payload.
+		if field(r, "id") != id || field(r, "name") != name || field(r, "scheduling") != "SILENT" || field(r, "willContinue") != false {
+			t.Fatalf("tool response would resume generation: %v", r)
+		}
+		barrier()
+		marker()
+	}
+	rootResult := func(key string) {
+		t.Helper()
+		call.Speak(key, "", "[BACKEND] CI passed.")
+		call.FromPage(PageMessage{Type: "audio", Audio: make([]byte, 6)})
+		if m := <-f.got; field(m, "clientContent", "turnComplete") != false {
+			t.Fatalf("root result did not append context: %v", m)
+		}
+		if m := <-f.got; field(m, "clientContent", "turnComplete") != true {
+			t.Fatalf("quiet completion swallowed a later response: %v", m)
+		}
+		if m := <-f.got; field(m, "realtimeInput", "audio") == nil {
+			t.Fatalf("unexpected extra response: %v", m)
+		}
+	}
+	rootResult("duplicate")
+	quietResult("remain_silent", "q1")
+	// Even firing the old speech deadline must not retry a silent batch.
+	for {
+		select {
+		case timer := <-timers:
+			if timer.d == SpeakWait {
+				timer.fn()
+			}
+		default:
+			goto fired
+		}
+	}
+fired:
+	marker()
+	call.do(func() { call.event(ctx, Event{Kind: Committed}) })
+	call.FromPage(PageMessage{Type: "audio", Audio: make([]byte, 6)})
+	if m := <-f.got; field(m, "clientContent", "turnComplete") != true {
+		t.Fatalf("later owner turn did not request a response: %v", m)
+	}
+	if m := <-f.got; field(m, "realtimeInput", "audio") == nil {
+		t.Fatalf("unexpected owner continuation: %v", m)
+	}
+	quietResult("dispatch", "q2")
+	for {
+		select {
+		case e := <-page:
+			if e.Type == "audio" || e.Type == "tool" && e.Name == "remain_silent" {
+				t.Fatalf("quiet tools produced visible speech or a tool row: %+v", e)
+			}
+		default:
+			goto silent
+		}
+	}
+silent:
+	rootResult("answer")
+	f.reply <- `{"serverContent":{"modelTurn":{"parts":[{"inlineData":{"data":"AQI="}}]}}}`
+	for e := range page {
+		if e.Type == "audio" {
+			return // the final root result still produces audible output
+		}
+	}
+}

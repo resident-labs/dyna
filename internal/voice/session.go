@@ -50,58 +50,33 @@ func CallSession(call context.Context, t *Tools) realtime.Session {
 }
 
 var (
-	noParams     = json.RawMessage(`{"type":"object","properties":{}}`)
-	textParams   = json.RawMessage(`{"type":"object","properties":{"text":{"type":"string","description":"The owner's request, in their words."}},"required":["text"]}`)
-	numberParams = json.RawMessage(`{"type":"object","properties":{"number":{"type":"integer","description":"The PR number."}},"required":["number"]}`)
-	answerParams = json.RawMessage(`{"type":"object","properties":{"text":{"type":"string","description":"The owner's answer, in their words."},"question_id":{"type":"string","description":"The question_id given with the question you read out. Never guess it."}},"required":["text"]}`)
+	noParams     = json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
+	promptParams = json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"The owner's request, in their exact words."}},"required":["prompt"],"additionalProperties":false}`)
 )
 
-// Realtime lists t's tools for the model.
+// Realtime follows Codex's two conversational tools. Execution and owner
+// question answers go through root; remaining silent has no visible effect.
 func (t *Tools) Realtime(call context.Context) []realtime.Tool {
-	status := func(f func() (string, error)) func(context.Context, json.RawMessage) (string, error) {
-		return func(context.Context, json.RawMessage) (string, error) { return f() }
-	}
 	return []realtime.Tool{
 		{
 			Name:        "dispatch",
-			Description: "Start the owner's request in Dyna, in the owner's words: work, a change, a fix, a decision, or a question no check answers. Returns at once with accepted, or duplicate when the same request is still under way; the answer is spoken in the call when it comes. After it, call no other tool for the same question.",
-			Parameters:  textParams,
+			Description: "Send the owner's exact words to the execution agent. Use this by default for work, status checks, question answers, and requests for later work. An idle agent starts work; a running agent receives steering. Do not paraphrase or promise work without calling this tool.",
+			Parameters:  promptParams,
 			Later:       true,
 			Run: func(_ context.Context, args json.RawMessage) (string, error) {
-				var a struct{ Text string }
+				var a struct{ Prompt string }
 				if err := json.Unmarshal(args, &a); err != nil {
 					return "", errors.New("the arguments are not JSON")
 				}
-				return t.Dispatch(call, a.Text)
+				return t.Dispatch(call, a.Prompt)
 			},
 		},
 		{
-			Name:        "check_pr",
-			Description: "Check one of the room's PRs: its state, CI result, review verdict and merge queue place.",
-			Parameters:  numberParams,
-			Run: func(_ context.Context, args json.RawMessage) (string, error) {
-				var a struct{ Number int }
-				if err := json.Unmarshal(args, &a); err != nil || a.Number <= 0 {
-					return "", errors.New("say which PR number")
-				}
-				return t.PRStatus(a.Number)
-			},
-		},
-		{Name: "check_merge_queue", Description: "Check how many of the room's PRs wait to merge or are merging, and which is next.", Parameters: noParams, Run: status(t.MergeQueue)},
-		{
-			Name:        "answer_question",
-			Description: "Answer an open question to the owner, one that was read out in this call, with the owner's words. Use it instead of dispatch when the owner answers that question.",
-			Parameters:  answerParams,
-			Run: func(_ context.Context, args json.RawMessage) (string, error) {
-				var a struct {
-					Text       string `json:"text"`
-					QuestionID string `json:"question_id"`
-				}
-				if err := json.Unmarshal(args, &a); err != nil {
-					return "", errors.New("the arguments are not JSON")
-				}
-				return t.AnswerQuestion(call, a.QuestionID, a.Text)
-			},
+			Name:        "remain_silent",
+			Description: "Say nothing when an acknowledgement would distract, a control message needs no reply, or updates add nothing useful. This tool has no user-visible effect.",
+			Parameters:  noParams,
+			Silent:      true,
+			Run:         func(context.Context, json.RawMessage) (string, error) { return "", nil },
 		},
 	}
 }
@@ -183,20 +158,19 @@ func runCall(ctx context.Context, link *RoomLink, p realtime.Provider) (*session
 	return sess, nil
 }
 
-// tellPrompt asks Voice to pass on what root says to the owner. The files
-// root shared show in the call, where the owner opens them; Voice only says,
-// in one short line, that it shared them.
+// tellPrompt gives Voice context for a concise update. Shared files show
+// in the call, where the owner opens them; Voice cannot see their contents.
 func tellPrompt(text string, shared []room.Attachment) string {
 	var parts []string
 	if strings.TrimSpace(text) != "" || len(shared) == 0 {
-		parts = append(parts, "A work result for the owner. Tell the owner in your own words, in one to three short sentences, as your own work: say \"I\", and keep what was done accurate: "+text)
+		parts = append(parts, "[BACKEND] "+text)
 	}
 	if len(shared) > 0 {
 		names := make([]string, len(shared))
 		for i, a := range shared {
 			names[i] = sharedName(a)
 		}
-		parts = append(parts, "Shared in the call, where the owner can open it: "+strings.Join(names, "; ")+`. Say one short line that you shared it, such as "I sent you a comparison card." You cannot see inside it, so never describe what it holds.`)
+		parts = append(parts, "Shared in the call, where the owner can open it: "+strings.Join(names, "; ")+`. Mention newly shared items briefly. You cannot see inside them, so never describe what they hold.`)
 	}
 	return strings.Join(parts, "\n\n")
 }
