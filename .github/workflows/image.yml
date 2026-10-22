@@ -15,11 +15,13 @@ jobs:
       - name: Install image tools
         run: |
           pacman -Syu --noconfirm --needed arch-install-scripts git go npm pkgconf curl zstd sudo
-          useradd -m builder
+          # uid 1001 is the runner user on GitHub-hosted machines, so the
+          # runner can still read the workspace and its temp folder.
+          useradd -m -u 1001 builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
       - uses: actions/checkout@v6
       - name: Give the checkout to the build user
-        run: chown -R builder "$GITHUB_WORKSPACE" "$RUNNER_TEMP"
+        run: chown -R builder "$GITHUB_WORKSPACE"
       - name: Build root filesystem
         run: sudo -u builder image/build.sh "${{ runner.temp }}/dyna-image-${{ github.run_id }}-${{ github.run_attempt }}"
       - name: Boot and smoke test
