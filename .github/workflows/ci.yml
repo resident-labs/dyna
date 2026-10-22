@@ -344,8 +344,9 @@ jobs:
           retention-days: 1
 
   computer-smoke:
-    # Live tests need host GUI tools, installed below.
-    needs: [changes, test, frontend]
+    # Live tests need host GUI tools, installed below. It waits only for the
+    # frontend assets, not for the Go tests.
+    needs: [changes, frontend]
     if: needs.changes.outputs.computers == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
