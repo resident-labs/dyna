@@ -141,8 +141,11 @@
   function loadAgents(list) { return reloadAgents('members', async (current) => {
     const request = ++agentsRequest
     const open = list.filter((r) => !r.archived && r.members > 0)
-    const lists = await Promise.all(open.map((r) => api.members(r.id).catch(() => null)))
-    const goalLists = await Promise.all(open.map((r) => api.goals(r.id).then((page) => page?.items ?? [], () => null)))
+    // Goals includes all active goals on the first page, regardless of its closed-item limit.
+    const [lists, goalLists] = await Promise.all([
+      Promise.all(open.map((r) => api.members(r.id).catch(() => null))),
+      Promise.all(open.map((r) => api.goals(r.id).then((page) => page?.items ?? [], () => null))),
+    ])
     if (!current() || request !== agentsRequest) return
     agentGoals = Object.fromEntries(open.map((r, i) => [r.id, goalLists[i] ?? agentGoals[r.id] ?? []]))
     agentMembers = Object.fromEntries(open.map((r, i) => [r.id, reconcileRows(agentMembers?.[r.id] ?? [], lists[i] ?? agentMembers?.[r.id] ?? [])]))
@@ -245,9 +248,10 @@
   let expireTick = $state(Date.now())
   let knownGoals = $derived(fetchedGoal && !goals.some((g) => g.id === fetchedGoal.id) ? [...goals, fetchedGoal] : goals)
   $effect(() => {
-    const scope = expediteScope(knownGoals, hierarchy, expireTick)
+    const now = Math.max(expireTick, Date.now())
+    const scope = expediteScope(knownGoals, hierarchy, now)
     // The agents list shows other rooms too: their expedited agents carry the badge as well.
-    const others = Object.entries(agentGoals).filter(([id]) => id !== roomId).map(([id, list]) => expediteScope(list, agentMembers?.[id] ?? [], expireTick))
+    const others = Object.entries(agentGoals).filter(([id]) => id !== roomId).map(([id, list]) => expediteScope(list, agentMembers?.[id] ?? [], now))
     const agents = new Set([scope, ...others].flatMap((x) => [...x.agents]))
     expedite.set({ ...scope, agents })
     const until = Math.min(...[scope, ...others].filter((x) => x.goalId).map((x) => x.until))

@@ -11,6 +11,8 @@
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
   import GoalGlyph from '../rooms/GoalGlyph.svelte'
+  import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
+  import { expedite, agentExpedited, goalExpedited } from '../rooms/expedite.ts'
   import { goalAgo, goalParts, goalTone } from '../rooms/goals.js'
   import { markdown, stamp, tokens, roomLabel } from '../ui/format.js'
 
@@ -63,7 +65,7 @@
         <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={80} state={m.state} status={m.status} ring="var(--side)" />
       </div>
       <div class="body">
-        <h2 class="hue-{m.hue}">{m.name}</h2>
+        <h2 class="hue-{m.hue}">{m.name} {#if agentExpedited($expedite, m)}<ExpediteBadge />{/if}</h2>
         <p class="addr mono">{m.address}</p>
 
         <div class="actions">
@@ -93,7 +95,7 @@
               {@const active = g.state === 'active'}
               <Row text={parts.aim} clamp={!active} context={!active} onclick={ongoal && (() => ongoal(g.id))}>
                 {#snippet lead()}<GoalGlyph goal={g} />{/snippet}
-                {#snippet meta()}<Chip tone={goalTone(g)} outline={!active}>{g.state}</Chip><span>{active ? `opened ${goalAgo(g.createdAt)}` : goalAgo(g.done?.at ?? g.updatedAt)}</span>{/snippet}
+                {#snippet meta()}{#if goalExpedited($expedite, g)}<ExpediteBadge />{/if}<Chip tone={goalTone(g)} outline={!active}>{g.state}</Chip><span>{active ? `opened ${goalAgo(g.createdAt)}` : goalAgo(g.done?.at ?? g.updatedAt)}</span>{/snippet}
                 {#snippet detail()}
                   {#if !active}{#if g.done?.summary}<span class="when clamp">{g.done.summary}</span>{/if}
                   {:else}{#if parts.done}<span class="when"><b>Done when</b> {parts.done}</span>{/if}{/if}
