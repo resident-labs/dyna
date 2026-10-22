@@ -139,11 +139,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     env:
       GOCACHE: /root/.cache/go-build
       GOMODCACHE: /go/pkg/mod
-      CI_SHARD: ${{ matrix.shard }}/7
+      CI_SHARD: ${{ matrix.shard }}/8
+      # The slowest package, internal/pr/watch, is split across shards 0 and 7.
+      CI_SLICE: ${{ matrix.shard == 0 && '0/2' || matrix.shard == 7 && '1/2' || '' }}
     steps:
       - uses: actions/checkout@v6
       # The container runs as root, but the runner user owns the workspace.
