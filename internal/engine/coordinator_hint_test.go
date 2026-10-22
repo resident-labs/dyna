@@ -21,9 +21,9 @@ func TestCoordinatorSocketHintRequiresVerifiedCoordinator(t *testing.T) {
 				t.Fatalf("hint run=%q", run)
 			}
 			calls++
-		}, logf: func(string, ...any) {}}
-		if _, err := s.identify(nil); err != nil {
-			t.Fatal(err)
+		}}
+		if _, err := s.identify(nil); (err != nil) != (id.Kind == callerid.Refused) {
+			t.Fatalf("identify(%+v): %v", id, err)
 		}
 		want := 0
 		if id.Kind == callerid.Worker && id.Agent == 0 && id.Session == "" {

@@ -42,7 +42,7 @@ func TestHookEditsUseCallerPower(t *testing.T) {
 				if err == nil {
 					t.Fatalf("%s reached a write for a non-repository", name)
 				}
-				refused := strings.Contains(err.Error(), "owner or root only")
+				refused := (strings.Contains(err.Error(), "owner or root only") || role == "" && strings.Contains(err.Error(), "could not verify"))
 				wantRefusal := role != authority.Owner && role != authority.Root
 				if refused != wantRefusal {
 					t.Errorf("%s as %q: %v", name, role, err)

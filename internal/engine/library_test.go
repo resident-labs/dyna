@@ -67,13 +67,12 @@ func TestLibraryEngineTransport(t *testing.T) {
 	}
 }
 
-// Report-only callers retain the old CLI guard, even when the socket's
-// unresolved caller has an owner actor.
+// Unverified callers cannot gain authority from a claim or the engine actor.
 func TestLibraryUnverifiedClaimCannotEditAsOwner(t *testing.T) {
 	data := storetest.Isolate(t)
 	ctx := callspec.WithClaim(localCallerContext(t, websvc.Caller{Kind: websvc.Unverified}, authority.Actor{Role: authority.Owner}), callspec.Claim{Session: "other"})
 	_, err := (services{}).addLibraryEntry(ctx, "repo", library.Entry{ID: "entry", Name: "Entry", Kind: "feature", Summary: "Entry.", Owns: []string{"internal/**"}})
-	if err == nil || !strings.Contains(err.Error(), "library add is ") {
+	if err == nil || !strings.Contains(err.Error(), "could not verify") {
 		t.Fatalf("claimed session received owner authority: %v", err)
 	}
 	rows, err := (library.Store{DataDir: data}).List("repo", true)

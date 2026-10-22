@@ -43,7 +43,7 @@ func TestQuestionEngineUsesVerifiedCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver := &socketCallers{sessions: s.rooms.Notify.Sessions.Store, enforce: true}
+	resolver := &socketCallers{sessions: s.rooms.Notify.Sessions.Store}
 	resolver.actForCallers(calls)
 	enginetest.Serve(t, store.DataDir(), calls)
 	// The socket caller is the owner. Forged process stamps must not turn
@@ -126,7 +126,7 @@ func TestQuestionRecordsKeepUnverifiedCaller(t *testing.T) {
 	}
 }
 
-func TestQuestionAskKeepsUnverifiedClaim(t *testing.T) {
+func TestQuestionAskRejectsUnverifiedClaim(t *testing.T) {
 	req := notify.AskRequest{Claim: notify.Claim{Session: "ses_claimed", Room: "room"}}
 	logged := false
 	snd, err := postSender(websvc.Caller{Kind: websvc.Unverified}, true, authority.Actor{Role: authority.Owner}, req.Claim, false,
@@ -136,7 +136,7 @@ func TestQuestionAskKeepsUnverifiedClaim(t *testing.T) {
 			info.ID = claim.Session
 			return notify.Sender{Kind: notify.SenderSession, Session: info, Room: claim.Room}, nil
 		})
-	if err != nil || snd.Kind != notify.SenderSession || snd.Session.ID != "ses_claimed" || !logged {
+	if err == nil || logged {
 		t.Fatalf("unverified ask = %+v, %v, logged=%v", snd, err, logged)
 	}
 }

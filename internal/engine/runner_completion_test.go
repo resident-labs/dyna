@@ -192,7 +192,7 @@ func newCompletionHarness(t *testing.T) *completionHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	callers := &socketCallers{sessions: mgr.Store, enforce: true, logf: t.Logf}
+	callers := &socketCallers{sessions: mgr.Store}
 	callers.actForCallers(calls)
 	db, err := database.Open(store.DataDir())
 	if err != nil {
