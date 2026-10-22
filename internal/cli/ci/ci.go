@@ -123,6 +123,7 @@ func NewCommand() *cobra.Command {
 	tests.Flags().BoolVar(&isolateRace, "isolate-race", false, "run isolated tests with -race, like the full run")
 	cmd.AddCommand(tests)
 	cmd.AddCommand(localCommands()...)
+	cmd.AddCommand(registryCommands()...)
 	return cmd
 }
 

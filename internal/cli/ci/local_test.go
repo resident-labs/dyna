@@ -11,7 +11,7 @@ import (
 
 func TestLocalCICommandsRegistered(t *testing.T) {
 	root := NewCommand()
-	for _, name := range []string{"run", "show", "tests"} {
+	for _, name := range []string{"run", "show", "tests", "node", "mode"} {
 		cmd, _, err := root.Find([]string{name})
 		if err != nil || cmd.Name() != name {
 			t.Fatalf("%s missing: %v", name, err)
