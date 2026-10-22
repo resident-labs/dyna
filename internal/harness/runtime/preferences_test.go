@@ -295,7 +295,7 @@ func TestPreferenceValuesRevalidateAndConfineReference(t *testing.T) {
 	ref := refs[a.ID]
 	ref.Settings = filepath.Join(home, ".claude/settings.json")
 	refs[a.ID] = ref
-	if err := store.WriteJSON(metadata, refs, 0600); err != nil {
+	if err := preferences.Save(metadata, a.ID, ref); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.PreferenceValues(a.ID); err == nil {
