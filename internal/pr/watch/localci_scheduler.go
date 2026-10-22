@@ -213,6 +213,13 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		if chosen == nil {
 			break
 		}
+		settled, err := s.scheduledCIConclusive(ctx, job, repo)
+		if err != nil {
+			return err
+		}
+		if settled {
+			continue
+		}
 		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		run := &registeredCIRun{node: chosen.Name, cancel: cancel}
 		runs.runs[key] = run
@@ -389,4 +396,35 @@ func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob,
 		saveErr = s.ciRegistry().SaveResult(recoveryCtx, result)
 	}
 	return errors.Join(saveErr, s.resumeHostedCI(recoveryCtx, job, repo))
+}
+
+// Saved CI belongs to a PR head only after that head received a full poll.
+// Trial heads have separate push runs and must use their own exact-head facts.
+func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob, repo string) (bool, error) {
+	r := job.record
+	if !job.trial {
+		return headVerified(r) && job.head == r.Head && r.Polling.PullHead == r.Head && conclusiveCI(r.CI), nil
+	}
+	var snap Snapshot
+	if err := s.github(r.RoomID).readCommitCI(ctx, refRecord(r), job.head, &snap); err != nil {
+		return false, err
+	}
+	var matching []Run
+	for _, run := range snap.Runs {
+		if hostedRunMatches(job, run) {
+			matching = append(matching, run)
+		}
+	}
+	if len(matching) == 0 {
+		return false, nil
+	}
+	snap.Runs = matching
+	saved, err := s.ciRegistry().LoadHostedRuns(ctx, repo, job.head)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return false, err
+	}
+	snap = withoutLocalHostedCancellations(snap, saved)
+	snap.Pull.Head.SHA = job.head
+	ci, _, _, _ := s.registeredHostedStatus(snap, Record{}, ChangePolicy{})
+	return conclusiveCI(ci), nil
 }

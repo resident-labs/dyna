@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -144,7 +145,12 @@ func (s *Service) publishLocalStatuses(ctx context.Context, job registeredCIJob,
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if saved.Published {
+	payload, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	publicationKey := digest(string(payload))
+	if saved.PublishedKey == publicationKey {
 		return nil
 	}
 	gh := s.github(job.record.RoomID)
@@ -170,5 +176,6 @@ func (s *Service) publishLocalStatuses(ctx context.Context, job registeredCIJob,
 		}
 	}
 	saved.Published = true
+	saved.PublishedKey = publicationKey
 	return registry.SaveHostedRuns(ctx, result.Repo, job.head, saved)
 }
