@@ -205,7 +205,6 @@ func (s *Service) SaveProfile(ctx context.Context, e ProfileEdit) (ProfileView, 
 	if len(env) > 0 {
 		p.Env = env
 	}
-	p.DeclareOutput()
 	if err := saveProfile(ctx, s.Sessions, reg, p, e.Original); err != nil {
 		return ProfileView{}, err
 	}
