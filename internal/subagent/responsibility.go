@@ -2,7 +2,6 @@ package subagent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -25,13 +24,6 @@ type Responsibility struct {
 	ID   string `json:"id"`
 	// Text names the item and the command that ends or moves it.
 	Text string `json:"text"`
-}
-
-// closeMoves reports whether close ends or hands over the kind by itself:
-// goals pass to the setter, questions are withdrawn, children close or move up
-// a level, and shell jobs stop unless they were started with --keep.
-func (r Responsibility) closeMoves() bool {
-	return r.Kind != "pr" && r.Kind != "workflow"
 }
 
 // owned is one responsibility and the session that owns it.
@@ -284,7 +276,7 @@ func (m *Manager) runOwned(byID map[string]Info) ([]owned, error) {
 		if runstore.ValidateRunID(entry.Name()) != nil {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(root, entry.Name(), "meta.json"))
+		job, err := runstore.ReadMetaIn(root, entry.Name())
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				unpublished, inspectErr := unpublishedDormantJob(root, entry.Name())
@@ -295,10 +287,6 @@ func (m *Manager) runOwned(byID map[string]Info) ([]owned, error) {
 					continue
 				}
 			}
-			return nil, err
-		}
-		var job runstore.Meta
-		if err = json.Unmarshal(b, &job); err != nil {
 			return nil, err
 		}
 		if job.ID != entry.Name() {
@@ -340,27 +328,33 @@ func uniqueIDs(ids ...string) []string {
 // the same choice when they close, so grandchildren do not count here. The rest
 // move to the closed session's parent, or become top-level leads when that
 // parent is gone.
-func (m *Manager) handOverChildren(ctx context.Context, closed Meta) ([]string, error) {
+func (m *Manager) handOverChildren(ctx context.Context, closed Meta, heir Info) (closeNext, summary []string, err error) {
 	children, err := m.OpenChildren(closed.ID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	parent, depth := "", 1
-	if p, err := m.store().ReadMeta(closed.ParentSession); err == nil && p.Closed.IsZero() && p.RoomID == closed.RoomID {
-		parent, depth = p.ID, p.Depth+1
+	if heir.ID != "" {
+		parent, depth = heir.ID, heir.Depth+1
 	}
-	var closeNext []string
 	for _, child := range children {
 		items, err := m.Responsibilities(ctx, child)
 		if err != nil {
-			return closeNext, err
+			return closeNext, summary, err
 		}
 		items = slices.DeleteFunc(items, func(r Responsibility) bool { return r.Kind == "child" })
 		if len(items) == 0 {
 			closeNext = append(closeNext, child.ID)
+			summary = append(summary, "Child "+child.Name+" closed")
 		} else if err = m.reparentLockedContext(ctx, child.ID, parent, depth); err != nil {
-			return closeNext, err
+			return closeNext, summary, err
+		} else {
+			target := heir.Name
+			if target == "" {
+				target = "top level"
+			}
+			summary = append(summary, "Child "+child.Name+" → "+target)
 		}
 	}
-	return closeNext, nil
+	return closeNext, summary, nil
 }
