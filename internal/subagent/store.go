@@ -1073,32 +1073,21 @@ func (s *Store) resolveMeta(ref string) (Meta, error) {
 	if runstore.IsSessionDirID(ref) {
 		return s.ReadMeta(ref)
 	}
-	sessions, err := s.listMeta(false, false)
+	// Stored session addresses include the internal root, whose name is
+	// reserved in message selectors but valid for session lookup.
+	room, name, address := "", ref, false
+	if r, n, ok := strings.Cut(ref, ":"); ok {
+		room, name, address = r, n, true
+	}
+	matches, err := s.nameMatches(room, name)
 	if err != nil {
 		return Meta{}, err
 	}
-	sort.Slice(sessions, func(i, j int) bool { return sessions[i].Created.After(sessions[j].Created) })
-	// Stored session addresses include the internal root, whose name is
-	// reserved in message selectors but valid for session lookup.
-	if strings.Contains(ref, ":") {
-		for _, info := range sessions {
-			if !info.Closed.IsZero() && info.ConsumedBy == "" {
-				continue
-			}
-			if info.Address() == ref {
-				return info, nil
-			}
+	if address {
+		if room == "" || len(matches) == 0 {
+			return Meta{}, fmt.Errorf("%w %q (no open session has that address)", ErrNotFound, ref)
 		}
-		return Meta{}, fmt.Errorf("%w %q (no open session has that address)", ErrNotFound, ref)
-	}
-	var matches []Meta
-	for _, info := range sessions {
-		if !info.Closed.IsZero() && info.ConsumedBy == "" {
-			continue
-		}
-		if info.EffectiveName() == ref {
-			matches = append(matches, info)
-		}
+		return matches[0], nil
 	}
 	switch len(matches) {
 	case 1:
@@ -1112,6 +1101,39 @@ func (s *Store) resolveMeta(ref string) (Meta, error) {
 		}
 		return Meta{}, fmt.Errorf("session name %q is ambiguous; use a full address: %s", ref, strings.Join(addrs, ", "))
 	}
+}
+
+// nameMatches returns the sessions that answer to name, newest first, from one
+// indexed lookup: room narrows an address lookup, and an empty room finds the
+// name in every room. A name lookup runs while the recipient gate can be
+// held, so it must never list the store.
+//
+// The answers keep the tolerance of a metadata scan: a record that cannot be
+// read, a record whose stored name changed since the lookup, and a record
+// without a room stamp are left out, and a closed session answers only while
+// a consolidation consumed it, so a consumed name still redirects. Only the
+// rows of dyna.db answer: a record that is still only a legacy session.json,
+// which the engine imports at start, answers no name lookup.
+func (s *Store) nameMatches(room, name string) ([]Meta, error) {
+	ids, err := sessionlife.Lookup(s.root(), room, name)
+	if err != nil {
+		return nil, err
+	}
+	var out []Meta
+	for _, id := range ids {
+		meta, assigned, err := s.readRoomMeta(id)
+		if err != nil || !assigned {
+			continue
+		}
+		if meta.EffectiveName() != name || (room != "" && meta.Room != room) {
+			continue
+		}
+		if !meta.Closed.IsZero() && meta.ConsumedBy == "" {
+			continue
+		}
+		out = append(out, meta)
+	}
+	return out, nil
 }
 
 // nameTaken reports whether an open session in one room already uses name.
