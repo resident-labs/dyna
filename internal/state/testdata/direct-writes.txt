@@ -184,6 +184,8 @@ not-state internal/pr/watch/review_context.go Service.prepareReviewTask 1 # revi
 not-state internal/pr/watch/review_context.go writeDiff 1 # a diff file that a reviewer reads
 not-state internal/pr/watch/sync_operations.go Service.publishLaneExport 2 # a temporary folder and PR body file for gh, removed on return
 not-state internal/processguard/helper.go runGuard 2 # removes the temporary Unix-socket control directory for one process group
+not-state internal/profile/migrate.go Migrate 1 # atomic upgrade of hand-edited profile configuration
+not-state internal/profile/migrate.go profileV2Backup 1 # checked private backup of hand-edited profile configuration
 not-state internal/profile/profile.go Store.Save 1 # hand-edited worker profile configuration in profiles.json
 not-state internal/profilecheck/probe.go Run 2 # creates and removes temporary probe output.jsonl; persistent health belongs to internal/harness/health
 not-state internal/questions/sqlite.go Store.writeMigrationFile 1 # one-time import backup and old-binary rejection guard; never live question state
