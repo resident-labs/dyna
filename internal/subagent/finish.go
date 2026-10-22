@@ -3,12 +3,14 @@ package subagent
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/shells"
 )
 
 // Finish makes a session dormant. It works during the session's own turn.
@@ -19,6 +21,40 @@ func (m *Manager) Finish(ctx context.Context, ref string) (Info, error) {
 		return Info{}, err
 	}
 	return m.finish(ctx, ref, 0)
+}
+
+type callerJobKey struct{}
+
+// WithCallerJob returns ctx naming the shell job that runs a finish call. The
+// engine process has no job of its own, so the caller must name it. An empty
+// job adds nothing, and a job must have the shell ID shape.
+func WithCallerJob(ctx context.Context, job string) (context.Context, error) {
+	if job == "" {
+		return ctx, nil
+	}
+	if !shells.ValidID(job) {
+		return ctx, fmt.Errorf("finish: invalid shell job %q", job)
+	}
+	return context.WithValue(ctx, callerJobKey{}, job), nil
+}
+
+// withoutCallerJob drops the shell item for the job that runs the finish call.
+// That job ends with the command, so it is not unfinished work. Responsibilities
+// lists only jobs the session owns, so another session's job is never dropped.
+// Any other live job still refuses the finish.
+func withoutCallerJob(ctx context.Context, items []Responsibility) []Responsibility {
+	job, _ := ctx.Value(callerJobKey{}).(string)
+	if job == "" {
+		return items
+	}
+	kept := items[:0]
+	for _, r := range items {
+		if r.Kind == "shell" && r.ID == job {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept
 }
 
 // afterTurn uses the same reservation, responsibility check and transition for
@@ -46,6 +82,7 @@ func (m *Manager) finish(ctx context.Context, ref string, afterTurn int) (Info, 
 	if err != nil {
 		return info, err
 	}
+	items = withoutCallerJob(ctx, items)
 	if len(items) > 0 {
 		if afterTurn > 0 {
 			// Taking work consumes the temporary wake. Later idle turns keep

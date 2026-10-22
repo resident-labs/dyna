@@ -542,6 +542,7 @@ func TestCloseEndsSessionAndFreesName(t *testing.T) {
 	e := newTestEnv(t)
 	info, _ := e.start("SLEEP:1 RESPOND: ok", func(o *StartOptions) { o.Name = "scout" })
 	e.wait(info.ID, 1)
+	e.doneGoals()
 	closed, err := e.m.Close(e.ctx, "scout")
 	if err != nil || closed.Status != StatusClosed {
 		t.Fatalf("Close = %#v, %v", closed, err)
@@ -570,6 +571,7 @@ func TestCloseStopsARunningTurn(t *testing.T) {
 	e := newTestEnv(t)
 	info, _ := e.start("job SLEEP:60000")
 	e.waitStatus(info.ID, StatusRunning)
+	e.doneGoals()
 	closed, err := e.m.Close(e.ctx, info.ID)
 	if err != nil || closed.Status != StatusClosed {
 		t.Fatalf("Close = %#v, %v", closed, err)
