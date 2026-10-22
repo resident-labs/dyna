@@ -50,6 +50,8 @@ Run it again after commits to update the change. Omitted notes remain.
 Closing never merges or deletes the branch.
 
 A reviewer starts on each needed verified head, in parallel with CI.
+Draft PRs get no automatic review, even with required reviewers. Open a PR
+ready for review, or run `gh pr ready <number>` when it should be reviewed.
 Known failed CI blocks review until a rerun starts or passes.
 Reviewers never run the test suite; CI is the test oracle. They read the diff
 and may run cheap static checks on changed files (go vet, gofmt, tsc, linters).
@@ -150,7 +152,7 @@ The configured SSH destination is `localci.remote`.
 ## Hold and release
 
 Use `dyna git pr hold <number|url> "<reason>"` to make a tracked PR a GitHub draft.
-Dyna posts the reason to the PR's room. GitHub draft status prevents automatic merging.
+Dyna posts the reason to the PR's room. GitHub draft status prevents automatic merging and automatic review.
 Use `dyna git pr release <number|url>` when the PR can merge again.
 The room owner or current author can hold or release a PR.
 Release removes the draft hold. The PR must still pass review and CI before it can merge.
