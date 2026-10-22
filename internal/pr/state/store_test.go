@@ -2,7 +2,12 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
+	"database/sql"
+	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
+	appstate "dyna-agent/internal/state"
 	"encoding/hex"
 	"fmt"
 	"log"
@@ -297,5 +302,58 @@ func TestFailedCommitLeavesDurableStateForReadAndRetry(t *testing.T) {
 	forgetSnapshot()
 	if got, err = Read(root); err != nil || got.Records[key].Title != "lost" {
 		t.Fatalf("retry skipped the change: %q, %v", got.Records[key].Title, err)
+	}
+}
+
+func TestPRImportPreservesRawDocumentsAndCanonicalOwnership(t *testing.T) {
+	for _, table := range []string{"pr_state", "pr_records"} {
+		t.Run(table, func(t *testing.T) {
+			root := newRoot(t)
+			db, err := database.Open(filepath.Dir(root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := database.Close(filepath.Dir(root)); err != nil {
+					t.Error(err)
+				}
+			})
+			err = appstate.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+				if _, err := conn.ExecContext(context.Background(), schema); err != nil {
+					return err
+				}
+				if table == "pr_state" {
+					_, err = conn.ExecContext(context.Background(), `INSERT INTO pr_state VALUES(1,17,'{"version":1,"future":42}')`)
+				} else {
+					_, err = conn.ExecContext(context.Background(), `INSERT INTO pr_records VALUES('saved','room','acme/widgets',7,0,17,'{"record":{"number":7},"future":42}')`)
+				}
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := []byte("{malformed stale input")
+			path := filepath.Join(root, "index.json")
+			if err := os.WriteFile(path, source, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := Migrate(filepath.Dir(root)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Read(root); err != nil {
+				t.Fatal(err)
+			}
+			var revision, future int
+			column := "revision"
+			if table == "pr_records" {
+				column = "rev"
+			}
+			if err := db.QueryRow("SELECT "+column+",json_extract(body,'$.future') FROM "+table).Scan(&revision, &future); err != nil || revision != 17 || future != 42 {
+				t.Fatalf("canonical state: revision=%d future=%d, %v", revision, future, err)
+			}
+			if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, source) {
+				t.Fatalf("source changed: %q, %v", got, err)
+			}
+		})
 	}
 }
