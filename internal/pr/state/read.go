@@ -77,8 +77,7 @@ func open(root string) (*sql.DB, error) {
 		if err != nil || !found {
 			return err
 		}
-		_, err = writeRows(conn, newState(), nil, st, 1)
-		return err
+		return importLegacyRows(conn, st)
 	})
 	if err != nil {
 		return db, err
