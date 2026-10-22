@@ -13,6 +13,7 @@ import (
 
 type registeredCIObservation struct {
 	Status, Key, Logs string
+	Reason            string
 	BudgetNote        string
 	Jobs              []string
 	Runs              []Run
@@ -196,7 +197,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		}
 		hosted := withoutLocalHostedCancellations(snap, saved)
 		ci, key, jobs, runs := hosted.CIStatus(policy.RequiredChecks...)
-		snap.localCI = &registeredCIObservation{Status: ci, Key: key, Jobs: jobs, Runs: runs}
+		snap.localCI = &registeredCIObservation{Status: ci, Key: key, Jobs: jobs, Runs: runs, Reason: hostedFallbackReason(hosted)}
 		return snap, nil
 	}
 	hosted := withoutLocalHostedCancellations(snap, saved)
@@ -214,12 +215,26 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		localState = "pending"
 	}
 	observation := chooseRegisteredCI(r.Head, hostedState, hostedKey, hostedJobs, hostedRuns, localState, localJobs, logs)
+	if observation.Status == "pending" {
+		observation.Reason = "waiting for local CI"
+		if localInfrastructureError(result) {
+			observation.Reason = hostedFallbackReason(hosted)
+		} else {
+			runs := s.nodeRuns()
+			runs.Lock()
+			if run := runs.runs[registeredJobKey(registeredCIJob{record: r, head: r.Head})]; run != nil {
+				observation.Reason = "running local CI on " + run.node
+			}
+			runs.Unlock()
+		}
+	}
 	if observation.Status == "passed" {
 		missing := missingRequiredCIChecks(policy.RequiredChecks, result, hosted)
 		if len(missing) > 0 {
 			observation.Status = "pending"
 			observation.Key = "required:" + r.Head + ":" + digest(strings.Join(missing, "\n"))
 			observation.Jobs = missing
+			observation.Reason = "waiting for required CI checks: " + strings.Join(missing, ", ")
 		}
 	}
 	observation.Checks = registeredCheckSummaries(result)
@@ -423,4 +438,13 @@ func missingRequiredCIChecks(required []string, result localci.Result, hosted Sn
 		}
 	}
 	return missing
+}
+
+func hostedFallbackReason(snap Snapshot) string {
+	for _, run := range currentRuns(snap.Runs) {
+		if run.Status == "in_progress" {
+			return "running hosted CI fallback"
+		}
+	}
+	return "waiting for hosted CI fallback"
 }
