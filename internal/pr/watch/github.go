@@ -66,8 +66,11 @@ type Pull struct {
 	Merged  bool   `json:"merged"`
 	User    User   `json:"user"`
 	Head    struct {
-		SHA string `json:"sha"`
-		Ref string `json:"ref"`
+		SHA  string `json:"sha"`
+		Ref  string `json:"ref"`
+		Repo struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
 	} `json:"head"`
 	Base struct {
 		SHA  string `json:"sha"`
@@ -109,14 +112,16 @@ type Run struct {
 	Conclusion   string `json:"conclusion"`
 }
 type Status struct {
-	Creator User   `json:"creator"`
-	ID      int64  `json:"id"`
-	Context string `json:"context"`
-	State   string `json:"state"`
-	Updated string `json:"updated_at"`
-	URL     string `json:"target_url"`
+	Description string `json:"description"`
+	Creator     User   `json:"creator"`
+	ID          int64  `json:"id"`
+	Context     string `json:"context"`
+	State       string `json:"state"`
+	Updated     string `json:"updated_at"`
+	URL         string `json:"target_url"`
 }
 type Snapshot struct {
+	localCI       *registeredCIObservation
 	ciReused      bool // A discussion refresh does not advance the full CI safety clock.
 	headConfirmed bool
 	ciProbe       string
@@ -205,11 +210,17 @@ func (s Snapshot) CheckSummaries(ref Ref) []CheckSummary {
 		}
 	}
 	for _, v := range statuses {
+		if s.localCI != nil && localCommitStatus(v) {
+			continue
+		}
 		status := "completed"
 		if v.State == "pending" || v.State == "" {
 			status = "in_progress"
 		}
-		out = append(out, CheckSummary{Name: Sanitize(v.Context), State: checkState(status, v.State), Status: status, Conclusion: v.State, URL: v.URL, CommentURL: s.checkCommentURL(v.URL, v.Context)})
+		out = append(out, CheckSummary{Node: localStatusNode(v), Name: Sanitize(v.Context), State: checkState(status, v.State), Status: status, Conclusion: v.State, URL: v.URL, CommentURL: s.checkCommentURL(v.URL, v.Context)})
+	}
+	if s.localCI != nil {
+		out = append(out, s.localCI.Checks...)
 	}
 	if len(out) == 0 {
 		for _, r := range currentRuns(s.Runs) {
@@ -610,6 +621,9 @@ func ciCheck(c Check, required []string) bool {
 }
 
 func (s Snapshot) CIStatus(required ...string) (state, key string, jobs []string, failedRuns []Run) {
+	if s.localCI != nil {
+		return s.localCI.Status, s.localCI.Key, s.localCI.Jobs, s.localCI.Runs
+	}
 	pending, failed, count := false, false, 0
 	passed := false
 	executedChecksBySuite := map[int64]bool{}
@@ -665,7 +679,7 @@ func (s Snapshot) CIStatus(required ...string) (state, key string, jobs []string
 		}
 	}
 	for _, v := range statuses {
-		if !requiredCheck(v.Context, required) {
+		if localCommitStatus(v) || !requiredCheck(v.Context, required) {
 			continue
 		}
 		count++
@@ -720,6 +734,9 @@ func (s Snapshot) ciCancelled(required ...string) bool {
 
 // hasRealCI includes only Actions runs and explicitly required check names.
 func (s Snapshot) hasRealCI(required ...string) bool {
+	if s.localCI != nil {
+		return true
+	}
 	if len(s.Runs) > 0 {
 		return true
 	}
@@ -729,7 +746,7 @@ func (s Snapshot) hasRealCI(required ...string) bool {
 		}
 	}
 	for _, status := range s.Statuses {
-		if requiredCheck(status.Context, required) {
+		if !localCommitStatus(status) && requiredCheck(status.Context, required) {
 			return true
 		}
 	}

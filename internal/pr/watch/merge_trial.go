@@ -43,6 +43,9 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		return retry(err)
 	}
 	failures := []error{refreshErr}
+	if err := s.scheduleRegisteredCI(ctx, st); err != nil {
+		failures = append(failures, err)
+	}
 	if _, err := s.refreshRepositoryFacts(ctx, st); err != nil {
 		failures = append(failures, err)
 	}
@@ -63,6 +66,10 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 				return retry(err)
 			}
 			snap.ciProbe = probe.CI
+			snap, err = s.withRegisteredCI(ctx, *r, snap, EffectivePolicy(st, *r))
+			if err != nil {
+				return retry(err)
+			}
 			ci, key, jobs, _ := s.ciStatus(snap, *r, EffectivePolicy(st, *r))
 			if err := s.process(ctx, r.Key, snap, ci, key, jobs, nil, false); err != nil {
 				return retry(err)
@@ -544,6 +551,22 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 		}
 	}
 	snap.Runs = pushes
+	snap.Pull.Head.SHA = head
+	snap.Pull.Head.Repo.FullName = r.Repo
+	trialRecord := r
+	trialRecord.Head = head
+	trialRecord.Branch = branch
+	st, err := s.Store.Read()
+	if err != nil {
+		return "", "", "", err
+	}
+	snap, err = s.withRegisteredCI(ctx, trialRecord, snap, EffectivePolicy(st, r))
+	if err != nil {
+		return "", "", "", err
+	}
+	if snap.localCI != nil && conclusiveCI(snap.localCI.Status) {
+		return snap.localCI.Status, snap.localCI.Logs, "", nil
+	}
 	ci := "pending"
 	var failed []Run
 	if started {

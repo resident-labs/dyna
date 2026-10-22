@@ -163,6 +163,7 @@ type Record struct {
 	LookupDir        string                       `json:"lookupDir"`
 	Head             string                       `json:"head"`
 	HeadSeen         time.Time                    `json:"headSeen,omitempty"`
+	HeadRepo         string                       `json:"headRepo,omitempty"`
 	HeadStale        bool                         `json:"headStale,omitempty"`
 	HeadVerifiedAt   time.Time                    `json:"headVerifiedAt,omitempty"`
 	State            string                       `json:"state"`
@@ -378,6 +379,7 @@ type Decision struct {
 }
 
 type CheckSummary struct {
+	Node                  string `json:"node,omitempty"`
 	DurationMs            int64  `json:"durationMs,omitempty"`
 	ID                    int64  `json:"id,omitempty"`
 	Completed             string `json:"completed,omitempty"`

@@ -1,0 +1,359 @@
+package watch
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/gitexec"
+	"dyna-agent/internal/localci"
+)
+
+type localCIRegistry interface {
+	Nodes(context.Context) ([]localci.Node, error)
+	Mode(context.Context, string) (string, error)
+	SaveResult(context.Context, localci.Result) error
+	LoadResult(context.Context, string, string) (localci.Result, error)
+	LoadHostedRuns(context.Context, string, string) (localci.HostedRuns, error)
+	SaveHostedRuns(context.Context, string, string, localci.HostedRuns) error
+}
+
+func (s *Service) ciRegistry() localCIRegistry {
+	if s.LocalCIRegistry != nil {
+		return s.LocalCIRegistry
+	}
+	return localci.Store{DataDir: filepath.Dir(s.Store.Root)}
+}
+
+type registeredCIRuns struct {
+	sync.Mutex
+	runs map[string]*registeredCIRun
+}
+type registeredCIRun struct {
+	node   string
+	cancel context.CancelFunc
+}
+type registeredCIJob struct {
+	record       Record
+	head, branch string
+	trial        bool
+	created      time.Time
+}
+
+func (s *Service) nodeRuns() *registeredCIRuns {
+	localCIInit.Lock()
+	defer localCIInit.Unlock()
+	if s.registeredRuns == nil {
+		s.registeredRuns = &registeredCIRuns{runs: map[string]*registeredCIRun{}}
+	}
+	return s.registeredRuns
+}
+
+func registeredJobKey(j registeredCIJob) string { return defaultRepo(j.record) + "\x00" + j.head }
+
+// Trials use the same node slots as PR heads and enter the queue first.
+func registeredCIJobs(st State) []registeredCIJob {
+	var jobs []registeredCIJob
+	for _, b := range st.MergeTrials {
+		if len(b.Changes) == 0 {
+			continue
+		}
+		r := st.Records[b.Changes[0].Key]
+		if r == nil || changeKind(*r) != "github" {
+			continue
+		}
+		valid := true
+		for _, c := range b.Changes {
+			if member := st.Records[c.Key]; !currentTrialMember(member, c) || member == nil || !strings.EqualFold(member.HeadRepo, member.Repo) {
+				valid = false
+			}
+		}
+		if !valid {
+			continue
+		}
+		if b.Head != "" && (b.Phase == "running" || b.Phase == "building" || b.Phase == "passed") {
+			jobs = append(jobs, registeredCIJob{record: *r, head: b.Head, branch: b.Branch, trial: true, created: b.Created})
+		}
+		for _, stack := range b.Stacks {
+			if stack.Head != "" && stack.Phase == "running" {
+				jobs = append(jobs, registeredCIJob{record: *r, head: stack.Head, branch: stack.Branch, trial: true, created: b.Created})
+			}
+		}
+	}
+	for _, r := range st.Records {
+		if changeKind(*r) == "github" && r.Watching && r.State == "open" && !r.IsDraft && headVerified(*r) && r.Head != "" && strings.EqualFold(r.HeadRepo, r.Repo) {
+			jobs = append(jobs, registeredCIJob{record: *r, head: r.Head, branch: r.Branch, created: r.Created})
+		}
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		if jobs[i].trial != jobs[j].trial {
+			return jobs[i].trial
+		}
+		if !jobs[i].created.Equal(jobs[j].created) {
+			return jobs[i].created.Before(jobs[j].created)
+		}
+		return registeredJobKey(jobs[i]) < registeredJobKey(jobs[j])
+	})
+	return jobs
+}
+
+// scheduleRegisteredCI owns only live cancellation handles. Nodes, modes,
+// completed results and hosted cancellations live in SQLite.
+func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
+	registry := s.ciRegistry()
+	nodes, err := registry.Nodes(ctx)
+	if err != nil {
+		return err
+	}
+	var enabled []localci.Node
+	for _, node := range nodes {
+		if node.Enabled && node.Slots > 0 {
+			enabled = append(enabled, node)
+		}
+	}
+	runs := s.nodeRuns()
+	runs.Lock()
+	defer runs.Unlock()
+	desired := map[string]registeredCIJob{}
+	var jobs []registeredCIJob
+	modes := map[string]string{}
+	for _, job := range registeredCIJobs(st) {
+		mode, ok := modes[job.record.RoomID]
+		if !ok {
+			mode, err = registry.Mode(ctx, job.record.RoomID)
+			if err != nil {
+				return err
+			}
+			modes[job.record.RoomID] = mode
+		}
+		if mode != localci.ModeLocal && mode != localci.ModeBoth || len(enabled) == 0 {
+			continue
+		}
+		paused, err := s.RoomPaused(job.record.RoomID)
+		if err != nil {
+			return err
+		}
+		if paused {
+			continue
+		}
+		if job.record.RepoPath == "" {
+			s.resolveCheckout(ctx, st, &job.record)
+		}
+		if job.record.RepoPath == "" {
+			continue
+		}
+		key := registeredJobKey(job)
+		if _, exists := desired[key]; !exists {
+			desired[key] = job
+			jobs = append(jobs, job)
+		}
+	}
+	active := map[string]int{}
+	for key, run := range runs.runs {
+		if _, ok := desired[key]; !ok {
+			run.cancel()
+			delete(runs.runs, key)
+			continue
+		}
+		found := false
+		for _, node := range enabled {
+			if node.Name == run.node {
+				found = true
+			}
+		}
+		if !found {
+			run.cancel()
+			delete(runs.runs, key)
+			continue
+		}
+		active[run.node]++
+	}
+	for _, job := range jobs {
+		key := registeredJobKey(job)
+		if runs.runs[key] != nil {
+			continue
+		}
+		repo, err := localci.CanonicalRepo(ctx, job.record.RepoPath)
+		if err != nil {
+			return err
+		}
+		result, err := registry.LoadResult(ctx, repo, job.head)
+		if err == nil && s.registeredJobResultComplete(ctx, job, result) {
+			if localInfrastructureError(result) {
+				if err := s.resumeHostedCI(ctx, job, repo); err != nil {
+					return err
+				}
+			}
+			if !localInfrastructureError(result) {
+				if err := s.publishLocalStatuses(ctx, job, result); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		var chosen *localci.Node
+		for i := range enabled {
+			node := &enabled[i]
+			if active[node.Name] < node.Slots && (chosen == nil || active[node.Name] < active[chosen.Name]) {
+				chosen = node
+			}
+		}
+		if chosen == nil {
+			break
+		}
+		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+		run := &registeredCIRun{node: chosen.Name, cancel: cancel}
+		runs.runs[key] = run
+		active[chosen.Name]++
+		go s.executeRegisteredCI(runCtx, job, repo, *chosen, key, run)
+	}
+	return nil
+}
+
+func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, repo string, node localci.Node, key string, run *registeredCIRun) {
+	defer func() {
+		run.cancel()
+		runs := s.nodeRuns()
+		runs.Lock()
+		if runs.runs[key] == run {
+			delete(runs.runs, key)
+		}
+		runs.Unlock()
+	}()
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Minute)
+	defer cancel()
+	policyState, err := s.Store.Read()
+	if err != nil {
+		log.Printf("local CI: %v", err)
+		return
+	}
+	policy := EffectivePolicy(policyState, job.record)
+	maxTest, allowed, err := policy.TestBudget()
+	if err != nil {
+		log.Printf("local CI: %v", err)
+		return
+	}
+	if !policy.EnforceCITimeBudget() {
+		maxTest = time.Duration(1<<63 - 1)
+	}
+	suites, err := s.prepareRegisteredCI(ctx, job)
+	result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: node.Name, Started: s.now(), Status: "error"}
+	if err == nil && len(suites) > 0 {
+		req := localci.Request{Repo: job.record.RepoPath, SHA: job.head, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed}
+		req.OnStart = func(startCtx context.Context) error {
+			if err := s.cancelQueuedHostedCI(startCtx, job, repo); err != nil {
+				log.Printf("cancel queued hosted CI: %v", err)
+			}
+			return startCtx.Err()
+		}
+		if s.RunNodeCI != nil {
+			result, err = s.RunNodeCI(ctx, node, req)
+		} else {
+			result, err = (localci.Runner{DataDir: filepath.Dir(s.Store.Root), Node: &node}).Run(ctx, req)
+		}
+	} else if err == nil {
+		result.Status = "passed"
+		result.Checks = []localci.SuiteResult{{Suite: "changes", CheckName: "changes", Node: node.Name, Status: "passed"}}
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	result.Repo, result.SHA, result.RoomID, result.Node = repo, job.head, job.record.RoomID, node.Name
+	if err != nil {
+		result.Status = "error"
+		result.Error = Sanitize(err.Error())
+	}
+	applyLocalBudgets(&result, policy)
+	registry := s.ciRegistry()
+	if err := registry.SaveResult(ctx, result); err != nil {
+		log.Printf("save local CI: %v", err)
+		return
+	}
+	if localInfrastructureError(result) {
+		if err := s.resumeHostedCI(ctx, job, repo); err != nil {
+			log.Printf("resume hosted CI: %v", err)
+		}
+	} else {
+		if err := s.publishLocalStatuses(ctx, job, result); err != nil {
+			log.Printf("publish local CI: %v", err)
+		}
+	}
+	// A local completion must force a full snapshot even if GitHub did not change.
+	if err := s.Store.updateRecords([]string{job.record.Key}, func(st *State) error {
+		if r := st.Records[job.record.Key]; r != nil && r.Head == job.record.Head {
+			r.Polling.Next = time.Time{}
+			r.Polling.FullChecked = time.Time{}
+		}
+		return nil
+	}); err != nil {
+		log.Printf("refresh local CI: %v", err)
+	}
+}
+
+func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) ([]string, error) {
+	r := job.record
+	args := []string{"fetch", "--quiet", "--no-tags", "--", "https://" + r.Host + "/" + r.Repo + ".git", job.head}
+	if !job.trial && headSHAPattern.MatchString(r.Base) {
+		args = append(args, r.Base)
+	}
+	cmd := gitexec.Command(ctx, r.RepoPath, args...)
+	g := s.github(r.RoomID)
+	ctx = ghclient.WithRepository(ghclient.WithRoom(ghclient.WithRooms(ctx, g.Rooms), r.RoomID), r.Host, r.Repo)
+	var err error
+	if g.run != nil {
+		err = g.run(ctx, cmd)
+	} else {
+		err = ghclient.RunGit(ctx, g.Executable, cmd)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("fetch local CI head: %w", err)
+	}
+	if job.trial {
+		return []string{"relay", "go", "cross-build", "computer-smoke", "android"}, nil
+	}
+	if !headSHAPattern.MatchString(r.Base) {
+		return nil, fmt.Errorf("local CI requires a verified base SHA")
+	}
+	files, err := gitRead(ctx, r.RepoPath, "diff", "--name-only", r.Base+"..."+job.head)
+	if err != nil {
+		return nil, err
+	}
+	return registeredSuites(strings.Split(files, "\n")), nil
+}
+
+func registeredSuites(files []string) []string {
+	relay, goSuite, computers, android := false, false, false, false
+	for _, f := range files {
+		workflow := strings.HasPrefix(f, ".github/")
+		script := f == "scripts/ci.sh"
+		relay = relay || workflow || script || strings.HasPrefix(f, "relay/")
+		goSuite = goSuite || workflow || script || strings.HasSuffix(f, ".go") || strings.HasPrefix(f, "internal/") || f == "go.mod" || f == "go.sum" || strings.HasPrefix(f, "desktop/") || strings.HasPrefix(f, "web/") || f == "install.sh"
+		computers = computers || workflow || strings.HasPrefix(f, "internal/computers/") || strings.HasPrefix(f, "internal/computerweb/")
+		android = android || workflow || script || strings.HasPrefix(f, "mobile/android/")
+	}
+	var suites []string
+	if relay {
+		suites = append(suites, "relay")
+	}
+	if goSuite {
+		suites = append(suites, "go", "cross-build")
+	}
+	if computers {
+		suites = append(suites, "computer-smoke")
+	}
+	if android {
+		suites = append(suites, "android")
+	}
+	return suites
+}
