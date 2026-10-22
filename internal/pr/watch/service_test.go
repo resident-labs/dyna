@@ -135,8 +135,8 @@ func runFakeGH(args []string, stdout, stderr io.Writer, getenv func(string) stri
 		out = []any{map[string]any{"check_runs": f.Checks}}
 	case strings.Contains(path, "/actions/runs?"):
 		out = []any{map[string]any{"workflow_runs": f.Runs}}
-	case strings.Contains(path, "/status?"):
-		out = map[string]any{"statuses": f.Statuses}
+	case strings.Contains(path, "/statuses?"):
+		out = f.Statuses
 	case strings.Contains(path, "/reviews?") || strings.Contains(path, "/comments?"):
 		kind := "comments"
 		if strings.Contains(path, "/reviews?") {

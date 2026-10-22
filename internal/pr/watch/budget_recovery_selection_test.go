@@ -28,7 +28,7 @@ func TestQuietBudgetRecoveryDoesNotTrustOneMatchingOutcome(t *testing.T) {
 	entries := map[string]cachedResponse{
 		"github.com/repos/owner/repo/actions/runs?head_sha=" + head + "&per_page=100":            {Body: runs},
 		"github.com/repos/owner/repo/commits/" + head + "/check-runs?per_page=100&filter=latest": {Body: json.RawMessage(`{"check_runs":[]}`)},
-		"github.com/repos/owner/repo/commits/" + head + "/status?per_page=100":                   {Body: json.RawMessage(`{"statuses":[]}`)},
+		"github.com/repos/owner/repo/commits/" + head + "/statuses?per_page=100":                 {Body: json.RawMessage(`[]`)},
 	}
 	s := &Service{}
 	if !s.quietBudgetRecovery(t.Context(), r, ChangePolicy{CITimeBudget: "enforce"}, pull, entries) || decodes.Load() == 0 {
@@ -67,7 +67,7 @@ func TestQuietTestBudgetDecodesEachCIInputOnce(t *testing.T) {
 	for path, body := range map[string]any{
 		"actions/runs?head_sha=" + head + "&per_page=100":            map[string][]Run{"workflow_runs": snap.Runs},
 		"commits/" + head + "/check-runs?per_page=100&filter=latest": map[string][]Check{"check_runs": snap.Checks},
-		"commits/" + head + "/status?per_page=100":                   map[string][]Status{"statuses": snap.Statuses},
+		"commits/" + head + "/statuses?per_page=100":                 snap.Statuses,
 	} {
 		raw, err := json.Marshal(body)
 		if err != nil {
@@ -78,10 +78,13 @@ func TestQuietTestBudgetDecodesEachCIInputOnce(t *testing.T) {
 	original := unmarshalSavedCI
 	counts := map[string]int{}
 	unmarshalSavedCI = func(body []byte, out any) error {
-		for _, field := range []string{"workflow_runs", "check_runs", "statuses"} {
+		for _, field := range []string{"workflow_runs", "check_runs"} {
 			if bytes.Contains(body, []byte(`"`+field+`"`)) {
 				counts[field]++
 			}
+		}
+		if bytes.Contains(body, []byte(`"context"`)) {
+			counts["statuses"]++
 		}
 		return original(body, out)
 	}
