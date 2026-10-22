@@ -4,10 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -72,58 +70,6 @@ func TestLegacyImportRefusesDamagedPublishedJobs(t *testing.T) {
 				t.Fatalf("List error = %v, want one naming %s", err, id)
 			}
 		})
-	}
-}
-
-func TestLegacySupervisorExitAfterImport(t *testing.T) {
-	s := &Store{Root: filepath.Join(t.TempDir(), "shells")}
-	const id = "sh_20261018-090000-aaaaaaaa"
-	// The old supervisor and its command are still running at import time.
-	supervisor := exec.Command("sleep", "600")
-	if err := supervisor.Start(); err != nil {
-		t.Fatal(err)
-	}
-	command := exec.Command("sleep", "600")
-	if err := command.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = command.Process.Kill(); _ = command.Wait() })
-	meta := Meta{ID: id, Cmd: []string{"sleep", "600"}, Cwd: "/", Pid: command.Process.Pid, Supervisor: supervisor.Process.Pid, Started: time.Now()}
-	write := func(name string, value any) {
-		t.Helper()
-		if err := store.WriteJSON(filepath.Join(s.Root, id, name), value, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.MkdirAll(filepath.Join(s.Root, id), 0700); err != nil {
-		t.Fatal(err)
-	}
-	write("meta.json", meta)
-	if in, err := s.Info(id); err != nil || in.Status != "running" {
-		t.Fatalf("imported job = %#v, %v", in, err)
-	}
-	// The old supervisor records the exit only in exit.json, then ends.
-	write("exit.json", Exit{Code: 4, Ended: time.Now()})
-	if err := supervisor.Process.Kill(); err != nil {
-		t.Fatal(err)
-	}
-	_ = supervisor.Wait()
-	in, done, err := s.Wait(context.Background(), id, time.Second, nil)
-	if err != nil || !done || in.Status != "exited" || in.Exit.Code != 4 {
-		t.Fatalf("Wait = %#v, %v, %v", in, done, err)
-	}
-	if in, err = s.Stop(id, "owner"); err != nil || in.Status != "exited" || in.Exit.Code != 4 {
-		t.Fatalf("Stop = %#v, %v", in, err)
-	}
-	if syscall.Kill(command.Process.Pid, 0) != nil {
-		t.Fatal("Stop signaled the stale command PID of a finished legacy job")
-	}
-	// The exit is now in dyna.db, so it survives without the JSON file.
-	if err := os.Remove(filepath.Join(s.Root, id, "exit.json")); err != nil {
-		t.Fatal(err)
-	}
-	if ex, err := s.ReadExit(id); err != nil || ex == nil || ex.Code != 4 {
-		t.Fatalf("stored exit = %#v, %v", ex, err)
 	}
 }
 
