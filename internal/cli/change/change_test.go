@@ -376,7 +376,7 @@ case "$*" in
  *"repo view"*) printf '{"nameWithOwner":"owner/repo","url":"https://github.com/owner/repo"}';;
  *"check-runs?"*) printf '{"check_runs":[{"name":"unit","status":"completed","conclusion":"success"}]}';;
  *"actions/runs?"*) printf '{"workflow_runs":[]}';;
- *"/status?"*) printf '{"statuses":[]}';;
+ *"/statuses?"*) printf '[]';;
  *"/reviews?"*) printf '[{"id":42,"body":"Review <!-- dyna:%s -->","commit_id":"%s","state":"COMMENTED"}]' "$CHANGE_TEST_REVIEWER" "$CHANGE_TEST_HEAD";;
  *"/comments?"*) printf '[]';;
  *) printf '{"state":"open","head":{"sha":"%s"}}' "$CHANGE_TEST_HEAD";;
