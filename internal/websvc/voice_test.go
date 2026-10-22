@@ -73,12 +73,12 @@ func TestVoiceRealtimeProtocolVersion(t *testing.T) {
 	for _, c := range []struct {
 		query string
 		code  int
-	}{{"?v=2", 400}, {"?v=0", 400}, {"?v=x", 400}} {
+	}{{"?v=3", 400}, {"?v=0", 400}, {"?v=x", 400}} {
 		if _, res, err := dialVoiceQuery(ts, cookie, tsApp, c.query); err == nil || res == nil || res.StatusCode != c.code {
 			t.Errorf("%s: want %d, got %v %v", c.query, c.code, err, res)
 		}
 	}
-	for _, q := range []string{"", "?v=1"} { // no version means the web page's version 1
+	for _, q := range []string{"", "?v=1", "?v=2"} { // no version means the web page's version 1
 		f := fakeVoice{live: true, pages: make(chan *realtime.Page, 1), got: make(chan realtime.PageMessage, 1), left: make(chan struct{})}
 		e.srv.o.Voice = f
 		ws, _, err := dialVoiceQuery(ts, cookie, tsApp, q)
@@ -123,4 +123,38 @@ func TestVoiceRealtimeJoinsThePageToTheCall(t *testing.T) {
 		t.Fatalf("close = %v", err)
 	}
 	<-f.left // the page left the call
+}
+
+// A control message marks the end of this input batch. If binary audio is
+// dropped, the next legacy message exposes the loss without a timeout.
+func TestVoiceRealtimeDeliversBinaryAndLegacyAudio(t *testing.T) {
+	e := newEnv(t)
+	f := fakeVoice{live: true, pages: make(chan *realtime.Page, 1), got: make(chan realtime.PageMessage, 3), left: make(chan struct{})}
+	e.srv.o.Voice = f
+	ts := httptest.NewServer(e.app)
+	defer ts.Close()
+	ws, _, err := dialVoice(ts, e.paired(), tsApp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.Close()
+	<-f.pages
+	if err := ws.WriteMessage(websocket.BinaryMessage, []byte{0, 0, 255, 127}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"audio\",\"audio\":\"AIAAAA==\"}")); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.WriteMessage(websocket.TextMessage, []byte("{\"type\":\"mute\",\"muted\":true}")); err != nil {
+		t.Fatal(err)
+	}
+	if m := <-f.got; m.Type != "audio" || string(m.Audio) != string([]byte{0, 0, 255, 127}) {
+		t.Fatalf("binary microphone audio was lost or changed: %+v", m)
+	}
+	if m := <-f.got; m.Type != "audio" || string(m.Audio) != string([]byte{0, 128, 0, 0}) {
+		t.Fatalf("legacy JSON microphone audio was lost or changed: %+v", m)
+	}
+	if m := <-f.got; m.Type != "mute" || !m.Muted {
+		t.Fatalf("control message changed after audio: %+v", m)
+	}
 }

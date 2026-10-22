@@ -25,10 +25,10 @@ type VoiceHost interface {
 // ?v=N; a client that sends none speaks version 1. The engine keeps accepting the earlier
 // versions, so an installed app works until its owner updates it, and refuses a client
 // that speaks a newer one than this engine knows.
-const VoiceProtocol = 1
+const VoiceProtocol = 2
 
-// maxVoiceMessage bounds one page message. Audio travels as base64 PCM in
-// JSON; one chunk is far smaller.
+// maxVoiceMessage bounds one page message. Microphone chunks are PCM16
+// binary frames in version 2, or base64 PCM in legacy JSON.
 const maxVoiceMessage = 4 << 20
 
 // voiceQueue is how many events may wait for a slow page before the call
@@ -36,7 +36,7 @@ const maxVoiceMessage = 4 << 20
 const voiceQueue = 512
 
 // voiceRealtime serves the owner's page of the live call at
-// /api/voice/realtime: the Dyna voice protocol, one JSON message per frame.
+// /api/voice/realtime: JSON control/output messages and binary microphone PCM.
 func (s *Server) voiceRealtime(w http.ResponseWriter, r *http.Request, rt Route, tok string, pr Principal) {
 	if !pr.Allows(ScopeOperate) {
 		jsonError(w, http.StatusForbidden, "this device cannot take voice calls")
@@ -162,6 +162,16 @@ func (p *voicePage) serve(ws *websocket.Conn, send func(realtime.PageMessage), a
 			return
 		}
 		_ = ws.SetReadDeadline(time.Now().Add(3 * viewPing))
+		if typ == websocket.BinaryMessage {
+			if len(b)%2 != 0 {
+				p.end(websocket.CloseUnsupportedData, "microphone audio must contain whole PCM16 samples")
+				return
+			}
+			if len(b) > 0 {
+				send(realtime.PageMessage{Type: "audio", Audio: b})
+			}
+			continue
+		}
 		var m realtime.PageMessage
 		if typ != websocket.TextMessage || json.Unmarshal(b, &m) != nil {
 			continue

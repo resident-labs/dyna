@@ -2,8 +2,8 @@
 // the call, opens the call's socket, and moves audio both ways. It is a
 // Svelte store of the callState.js state.
 import { capturing, initial, reduce } from './callState.js'
-import { RATE, TAKEN_OVER, audioMsg, cancelMsg, fromWire, hangupMsg, muteMsg, playbackMsg } from './wire.js'
-import { encodeFrame } from './pcm.ts'
+import { RATE, TAKEN_OVER, cancelMsg, fromWire, hangupMsg, muteMsg, playbackMsg } from './wire.js'
+import { encodePCMFrame } from './pcm.ts'
 import { micError } from './audio.js'
 import { createEarlySpeech } from './earlySpeech.ts'
 
@@ -46,7 +46,7 @@ export function createCall(deps) {
     else if (state.phase !== 'resumable' && watch) { watch(); watch = null }
     for (const fn of subs) fn(state)
   }
-  const send = (msg) => { if (ws?.readyState === 1) ws.send(JSON.stringify(msg)) }
+  const send = (msg) => { if (ws?.readyState === 1) ws.send(msg instanceof ArrayBuffer ? msg : JSON.stringify(msg)) }
 
   function release() {
     audio?.close()
@@ -68,7 +68,7 @@ export function createCall(deps) {
     if (!micOpen(state)) return
     if (ws?.readyState === 1) {
       if (capturing(state)) audio?.hear(frame, rate)
-      send(audioMsg(encodeFrame(frame, rate, RATE)))
+      send(encodePCMFrame(frame, rate, RATE))
     } else early?.push(frame, rate)
   }
 
@@ -78,7 +78,7 @@ export function createCall(deps) {
     if (!early) return
     const { samples, rate } = early.take()
     early = null
-    for (let i = 0; i < samples.length; i += rate) send(audioMsg(encodeFrame(samples.subarray(i, i + rate), rate, RATE)))
+    for (let i = 0; i < samples.length; i += rate) send(encodePCMFrame(samples.subarray(i, i + rate), rate, RATE))
   }
 
   function onMessage(raw) {
