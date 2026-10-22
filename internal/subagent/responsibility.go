@@ -17,7 +17,7 @@ import (
 )
 
 // Responsibility is one thing a session owns. A session may finish only when
-// it owns none. Close hands over what it can and refuses the rest unless forced.
+// it owns none. Close hands work to an ancestor and refuses failed handoffs unless forced.
 type Responsibility struct {
 	// Kind is pr, goal, question, child, shell or workflow.
 	Kind string `json:"kind"`
@@ -326,8 +326,7 @@ func uniqueIDs(ids ...string) []string {
 // handOverChildren runs under the names lock after a session closes. It
 // returns the children that own nothing, to close next. Their own children get
 // the same choice when they close, so grandchildren do not count here. The rest
-// move to the closed session's parent, or become top-level leads when that
-// parent is gone.
+// move to the heir, or become top-level leads when there is no open ancestor.
 func (m *Manager) handOverChildren(ctx context.Context, closed Meta, heir Info) (closeNext, summary []string, err error) {
 	children, err := m.OpenChildren(closed.ID)
 	if err != nil {

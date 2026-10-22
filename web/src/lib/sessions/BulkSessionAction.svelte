@@ -42,7 +42,7 @@
         <fieldset disabled={value.loading || value.busy} class="models"><legend>New parent for all selected sessions</legend>
           {#each targets as t (t.member.id)}<label class="model" class:current={value.parent === t.member.id} class:off={t.reason}><input type="radio" name="bulk-parent" disabled={!!t.reason} checked={value.parent === t.member.id} onchange={() => onconfigure({ parent: t.member.id })} /><span><strong>{t.member.name}</strong>{#if t.reason}<small>{t.reason}</small>{/if}</span></label>{/each}
         </fieldset>
-      {:else if batch.action === 'close'}<p class="hint">Close all selected sessions? This stops their work. Tracked pull request authors and reviewers stay open unless you explicitly confirm force closing after a refusal.</p>
+      {:else if batch.action === 'close'}<p class="hint">Close all selected sessions? PR authorship and held goals move to the nearest open ancestor, or root. Reviewer roles return to the pool. Live workflows are canceled.</p>
       {:else}<p class="hint">Apply this action to all selected sessions.</p>{/if}
       <p class="names">{batch.sessions.map((m) => m.name).join(', ')}</p>
     {:else}
@@ -50,7 +50,7 @@
       {#if batch.action === 'transfer'}<p class="hint">Model: {value.profile}</p><p class="hint">Accepted transfers continue in the background. Progress below follows each saved transfer.</p>{/if}
       <ul class="results">{#each value.results as result (result.session)}<li class:error={bulkRetryable(result, batch.action)}><strong>{name(result.session)}</strong><span>{bulkResultText(result, batch.action)}</span>{#if result.transfer?.error}<span>{result.transfer.error}</span>{/if}{#if result.progressError}<span>{result.progressError}</span>{/if}</li>{/each}</ul>
     {/if}
-    {#if confirmForce}<p class="error">Force close the remaining {retries.length} sessions? This can remove tracked pull request author or reviewer roles. Review the refusals above first.</p>{/if}
+    {#if confirmForce}<p class="error">Force close the remaining {retries.length} sessions? Work that could not move may remain unresolved. Review the refusals above first.</p>{/if}
     <footer>
       <button class="quiet" onclick={onclose}>{value.busy ? 'Hide progress' : value.started ? 'Done' : 'Cancel'}</button>
       {#if !value.started}<button class="go" class:danger={batch.action === 'close' || batch.action === 'stop'} disabled={value.loading || value.busy || batch.action === 'transfer' && !value.profile || batch.action === 'adopt' && !value.parent} onclick={() => onrun(false)}>{{ stop: 'Stop', transfer: 'Transfer', close: 'Close sessions', promote: 'Promote', adopt: 'Move' }[batch.action]}</button>

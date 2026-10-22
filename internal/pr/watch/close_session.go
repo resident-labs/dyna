@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	"dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/subagent"
 )
 
@@ -24,6 +25,7 @@ func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([
 				continue
 			}
 			retireSessionReviewNotices(r, from.ID, "session-closed")
+			missingRequired := slices.Contains(facts.MissingRequiredReviewers(*r), from.ID)
 			if r.Reviewer == from.ID {
 				rememberReviewAssignment(r)
 				r.Reviewer, r.ReviewerName, r.ReviewerMode = "", "", ""
@@ -35,6 +37,14 @@ func (s *Service) CloseSession(ctx context.Context, from, heir subagent.Info) ([
 			}
 			if r.ReviewerOverride == from.ID {
 				r.ReviewerOverride = ""
+			}
+			if missingRequired {
+				// A missing named review becomes fresh pool work, not a waived gate.
+				r.RoundHead, r.Verdict = "", ""
+				r.RoundStarted = time.Time{}
+			}
+			if r.PendingVerdict != nil && r.PendingVerdict.Actor == from.ID {
+				r.PendingVerdict = nil
 			}
 			r.RequiredReviewers = slices.DeleteFunc(r.RequiredReviewers, func(id string) bool { return id == from.ID })
 			summary = append(summary, fmt.Sprintf("PR #%d reviewer released to the pool", r.Number))

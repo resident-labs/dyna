@@ -13,10 +13,14 @@ Each session has one status. Use the status from the session record or member li
 A normal turn moves from idle to queued, then running, then idle. A failed or stopped
 turn also returns the open session to idle.
 
+Closing transfers PR authorship and held goals to the nearest open ancestor, or root.
+It releases reviewer roles, cancels live workflows, and reports the handoff.
+A failed handoff keeps the session open unless force close is chosen.
+
 Only `dyna subagent finish` makes a session dormant. End or transfer its goals,
 PRs, questions, children, shells and workflow runs first. Finish checks this work
 under a reservation. It can run during the session's own final turn; the active
-turn still shows queued or running until that turn ends.
+turn still shows queued or running until that turn ends. The shell job running finish does not block it.
 
 A coordination post addressed to a dormant session starts a new turn. Informational
 notices stay unread and never wake it. Time spent idle never makes a session dormant.

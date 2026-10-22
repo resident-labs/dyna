@@ -276,6 +276,7 @@
   let consolidationAlive = true
   let transferring = $state(null) // {kind: 'stop'|'close', m, busy, error}
   let toast = $state('')
+  let closeResult = $state(null)
   let runs = $state(null) // roomsvc.RunList for the room
   let runsError = $state('')
   let openRun = $state('') // the run whose detail is open, in the runs view
@@ -1489,8 +1490,8 @@
     }
     if (confirm.kind === 'forceclose') {
       return {
-        title: `${confirm.m.name} still owns work`,
-        lines: [...confirm.items, 'After closing, nobody acts on these. End or move them first, or close the session anyway.'],
+        title: `Could not hand over all work from ${confirm.m.name}`,
+        lines: [...confirm.items, 'Some work could not move. Retry after fixing the error, or force close and leave that work unresolved.'],
         action: 'Close anyway',
       }
     }
@@ -1509,10 +1510,10 @@
         action: 'Stop turn',
       }
     }
-    const lines = ['The session closes, and its name becomes free. You can reopen a resumable session later if its name is available.']
+    const lines = ['The session closes, and its name becomes free.', 'PR authorship and held goals move to its nearest open ancestor, or root. Reviewer roles return to the pool. Live workflows are canceled.']
     if (m.state === 'live') lines.push('Its running turn stops first.')
     const hasChildren = members.some((child) => !child.closed && child.parent === m.id)
-    if (hasChildren) lines.push('Its open children that own no work close too. Children that still own work move up to its parent and keep running.')
+    if (hasChildren) lines.push('Its open children that own no work close too. Children that still own work move to its nearest open ancestor and keep running.')
     return { title: `Close ${m.name}?`, lines, action: 'Close session' }
   })
 
@@ -1534,14 +1535,17 @@
     try {
       if (kind === 'stop') await api.stopSession(roomId, m.id)
       else if (kind === 'promote') await api.promoteSession(roomId, m.id)
-      else await api.closeSession(roomId, m.id, kind === 'forceclose')
+      else {
+        const result = await api.closeSession(roomId, m.id, kind === 'forceclose')
+        closeResult = { name: m.name, items: result?.closeSummary ?? [] }
+      }
       confirm = null
       say(kind === 'stop' ? `Turn stopped. ${m.name} stays open.` : kind === 'promote' ? `${m.name} is now a top-level lead.` : `${m.name} is closed.`)
       loadMembers()
       loadChanges()
     } catch (e) {
       const msg = String(e?.message || e)
-      // Close refuses PR roles and live runs until the owner confirms.
+      // Force is offered only when the automatic handoff fails.
       if (kind === 'close' && msg.startsWith('responsibilities:')) confirm = { kind: 'forceclose', m, items: guardItems(msg) }
       else confirm = { ...confirm, busy: false, error: msg }
     }
@@ -2415,7 +2419,13 @@
 {#if ask}
   <Prompt {...ask} onsubmit={ask.submit} oncancel={() => (ask = null)} />
 {/if}
-{#if toast}
+{#if closeResult}
+  <section class="toast close-result" role="status" aria-label="Session close result">
+    <strong>{closeResult.name} is closed.</strong>
+    {#if closeResult.items.length}<ul>{#each closeResult.items as item}<li>{item}</li>{/each}</ul>{/if}
+    <button onclick={() => (closeResult = null)}>Dismiss</button>
+  </section>
+{:else if toast}
   <div class="toast" role="status">{toast}</div>
 {/if}
 {#if card && room}
@@ -2537,6 +2547,10 @@
   @media (hover: hover) {
     .update button:hover { color: var(--ink); }
   }
+  .close-result { max-width: min(640px, calc(100vw - 32px)); max-height: 50vh; overflow: auto; overflow-wrap: anywhere; }
+  .close-result ul { margin: 8px 0; padding-left: 20px; }
+  .close-result button { margin-top: 8px; }
+
   .toast {
     position: fixed;
     left: 50%;

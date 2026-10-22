@@ -12,7 +12,7 @@ import (
 const MaxBulkSessions = 512
 
 // BulkSessionOptions applies one shared choice to each selected session.
-// Close never bypasses a tracked PR unless Force is explicitly set. Adopt
+// Close hands work to an ancestor; Force permits failed handoffs. Adopt
 // moves each session under Parent.
 type BulkSessionOptions struct {
 	Sessions []string `json:"sessions"`

@@ -22,7 +22,7 @@ func (m *Manager) closeHeir(info Info) (Info, error) {
 		if parent.RoomID != info.RoomID {
 			return Info{}, errors.New("parent belongs to another room")
 		}
-		if parent.Closed.IsZero() {
+		if parent.Closed.IsZero() && !parent.Closing.Active() {
 			return parent, nil
 		}
 		id = parent.ParentSession
@@ -31,7 +31,7 @@ func (m *Manager) closeHeir(info Info) (Info, error) {
 	if err != nil {
 		return Info{}, err
 	}
-	if ok && root.ID != info.ID {
+	if ok && root.ID != info.ID && !root.Closing.Active() {
 		return root, nil
 	}
 	return Info{}, nil
