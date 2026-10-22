@@ -1,0 +1,43 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { terminalFocusHint, terminalFocusOnOpen, terminalReady } from './terminalFocus.ts'
+
+test('a terminal that failed to attach is not ready, so it shows no hint', () => {
+  assert.equal(terminalReady({ attached: true, failed: false }), true)
+  assert.equal(terminalReady({ attached: false, failed: false }), false)
+  assert.equal(terminalReady({ attached: true, failed: true }), false)
+  const ready = terminalReady({ attached: true, failed: true })
+  assert.equal(terminalFocusHint({ ready, focused: false }), false)
+})
+
+test('the hint appears once the terminal is ready and typing would go nowhere', () => {
+  // Before the terminal is on screen there is nothing to click, so no hint.
+  assert.equal(terminalFocusHint({ ready: false, focused: false }), false)
+  assert.equal(terminalFocusHint({ ready: true, focused: false }), true)
+  assert.equal(terminalFocusHint({ ready: true, focused: true }), false)
+})
+
+test('a pane takes focus on open unless it is a phone pane or refuses it', () => {
+  // A desktop session pane focuses itself, so typing works at once.
+  assert.equal(terminalFocusOnOpen(null, false), true)
+  // A phone pane keeps the soft keyboard down.
+  assert.equal(terminalFocusOnOpen(null, true), false)
+  // The sign-in terminal is narrow and must still take typing at once.
+  assert.equal(terminalFocusOnOpen(true, true), true)
+  assert.equal(terminalFocusOnOpen(false, false), false)
+})
+
+test('the sign-in terminal asks for focus and the pane shows the hint', () => {
+  const signin = readFileSync(new URL('../settings/harnesses/HarnessesPane.svelte', import.meta.url), 'utf8')
+  const usage = /<TermPane[^>]*id=\{login\.terminalId\}[^>]*\/>/.exec(signin)?.[0] ?? ''
+  assert.match(usage, /id=\{login\.terminalId\}/, 'the sign-in terminal is still rendered')
+  assert.match(usage, /\bautofocus\b/, 'the sign-in terminal takes keyboard focus when it opens')
+  const pane = readFileSync(new URL('./TermPane.svelte', import.meta.url), 'utf8')
+  assert.match(pane, /terminalFocusHint\(/, 'the pane shows the hint while it lacks focus')
+  assert.match(pane, /terminalReady\(/, 'the pane shows the hint only for a terminal that attached')
+  assert.match(pane, /terminalFocusOnOpen\(/, 'the pane decides focus on open from its props')
+  assert.match(pane, /addEventListener\('focus'/, 'the pane follows the terminal input focus')
+  assert.match(pane, /addEventListener\('blur'/, 'the pane follows the terminal input blur')
+  assert.match(pane, /Click to type/)
+})

@@ -716,7 +716,7 @@
                 <div class="login-box">
                   {#if login.warning}<p class="muted small" style="margin:0 0 var(--s2)">{login.warning}</p>{/if}
                   <p class="muted small" style="margin:0 0 var(--s2)">Complete sign-in in the terminal below, then click Finish sign-in.</p>
-                  <div class="terminal">{#key login.terminalId}<TermPane id={login.terminalId} narrow />{/key}</div>
+                  <div class="terminal">{#key login.terminalId}<TermPane id={login.terminalId} narrow autofocus />{/key}</div>
                   <div class="btn-group" style="margin-top:10px">
                     <button class="btn" disabled={busy} onclick={finishLogin}>Finish sign-in</button>
                     {#if snapshot?.selectedVersions}<button class="btn quiet" disabled={busy} onclick={cancelLogin}>Cancel sign-in</button>{/if}

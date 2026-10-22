@@ -14,12 +14,27 @@
   import { errorText } from '../errorText.ts'
   import type { TermEvent } from '../api/terminal.ts'
   import type { GhosttyTerminalSurface } from './ghostty/surface.ts'
+  import { terminalFocusHint, terminalFocusOnOpen, terminalReady } from './terminalFocus.ts'
 
-  let { id, narrow = false, onexit = () => {}, ctrl = $bindable(false) }: { id: string; narrow?: boolean; onexit?: (code: number) => void; ctrl?: boolean } = $props()
+  // autofocus null follows the layout: a wide pane takes focus, a phone pane
+  // leaves it so the soft keyboard stays down.
+  let { id, narrow = false, onexit = () => {}, autofocus = null, ctrl = $bindable(false) }: {
+    id: string
+    narrow?: boolean
+    onexit?: (code: number) => void
+    autofocus?: boolean | null
+    ctrl?: boolean
+  } = $props()
 
   let host = $state<HTMLElement>()
   let failed = $state('')
   let term = $state<GhosttyTerminalSurface | null>(null)
+  // ready turns true once the terminal is drawn and attached; until then there
+  // is nothing to click.
+  let ready = $state(false)
+  let focused = $state(false)
+  const takesFocus = $derived(terminalFocusOnOpen(autofocus, narrow))
+  const showHint = $derived(terminalFocusHint({ ready, focused }))
 
   const enc = new TextEncoder()
   const toB64 = (bytes: Uint8Array) => {
@@ -97,7 +112,9 @@
 
   onMount(() => {
     let gone = false
+    let attached = false
     let detach: () => void = () => {}
+    let dropFocusListeners: () => void = () => {}
     ;(async () => {
       try {
         // The WASM runtime and the symbol font load only when a terminal opens.
@@ -120,6 +137,17 @@
           return
         }
         term = made
+        // The surface types into a hidden textarea, so its focus is the pane's
+        // focus: when it blurs, this pane shows the hint instead of going quiet.
+        const input = made.input
+        const onFocus = () => (focused = true)
+        const onBlur = () => (focused = false)
+        input.addEventListener('focus', onFocus)
+        input.addEventListener('blur', onBlur)
+        dropFocusListeners = () => {
+          input.removeEventListener('focus', onFocus)
+          input.removeEventListener('blur', onBlur)
+        }
         // The first event replays the history. resetAndWrite keeps the
         // terminal from answering old queries in it (such as nvim's device
         // attribute requests), which would reach the shell as typed text.
@@ -132,6 +160,7 @@
           if (ev.exited) onexit(ev.exitCode ?? 0)
         })
         if (gone) detach()
+        attached = true
       } catch (e) {
         // A shell that is gone (the host restarted, or it closed elsewhere)
         // shows as exited; the tab offers a new one.
@@ -139,13 +168,21 @@
         if (/no such terminal|not found/i.test(msg)) onexit(-1)
         else failed = msg
       }
-      if (!narrow && !gone) term?.focus()
+      // Focus first, so a pane that takes focus never flashes the hint. A pane
+      // whose surface or attach failed has nothing to type into, so no hint.
+      if (!gone) {
+        if (takesFocus && term) term.focus()
+        ready = terminalReady({ attached, failed: failed !== '' })
+      }
     })()
     return () => {
       gone = true
       detach?.()
+      dropFocusListeners()
       term?.dispose()
       term = null
+      ready = false
+      focused = false
     }
   })
 </script>
@@ -154,12 +191,16 @@
   {#if failed}<p class="err">{failed}</p>{/if}
   <div class="term-frame">
     <div class="term-host" bind:this={host}></div>
+    {#if showHint}<p class="type-hint" role="status">Click to type</p>{/if}
   </div>
 </div>
 
 <style>
   .pane { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: #19181a; }
-  .term-frame { flex: 1; display: flex; min-height: 0; min-width: 0; padding: var(--s1) 0 0 var(--s2); }
+  .term-frame { position: relative; flex: 1; display: flex; min-height: 0; min-width: 0; padding: var(--s1) 0 0 var(--s2); }
+  /* The hint never takes the click: it points at the canvas under it, whose
+     pointerdown already focuses the terminal. */
+  .type-hint { position: absolute; left: 50%; bottom: 12px; z-index: 1; margin: 0; transform: translateX(-50%); padding: 3px 10px; border-radius: 999px; background: rgba(236, 233, 228, 0.14); color: var(--ink-2); font-size: var(--t-sm); pointer-events: none; }
   .term-host { position: relative; flex: 1; min-height: 0; min-width: 0; overflow: hidden; }
   .term-host :global(.ghostty-canvas) { display: block; width: 100%; height: 100%; cursor: text; }
   .term-host :global(.ghostty-scrollbar) { position: absolute; top: 4px; right: 1px; bottom: 4px; z-index: 1; width: 8px; cursor: default; touch-action: none; }
