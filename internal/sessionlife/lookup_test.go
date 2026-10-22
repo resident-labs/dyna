@@ -52,8 +52,14 @@ func TestLookupFindsNamesWithoutListingRecords(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, room := range []bool{false, true} {
-		rows, err := db.Query("EXPLAIN QUERY PLAN "+lookupQuery(room), lookupArgs("work", "lead")...)
+	for _, lookup := range []struct {
+		what, room, name string
+	}{
+		{"a stored name", "work", "lead"},
+		{"a stored name in every room", "", "lead"},
+		{"a generated name", "work", "agent-abcdef12"},
+	} {
+		rows, err := db.Query("EXPLAIN QUERY PLAN "+lookupQuery(lookup.room != ""), lookupArgs(lookup.room, lookup.name)...)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,8 +74,8 @@ func TestLookupFindsNamesWithoutListingRecords(t *testing.T) {
 		}
 		rows.Close()
 		got := strings.Join(plan, "; ")
-		if !strings.Contains(got, "session_records_name") || strings.Contains(got, "SCAN session_records") {
-			t.Errorf("room=%t: plan %q does not seek the name index", room, got)
+		if !strings.Contains(got, "SEARCH session_records USING INDEX session_records_effective_name") || strings.Contains(got, "SCAN session_records") {
+			t.Errorf("%s: plan %q does not seek the effective-name index", lookup.what, got)
 		}
 	}
 }

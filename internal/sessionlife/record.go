@@ -28,8 +28,8 @@ import (
 // revision grows with every write in the table, so a reader can tell whether
 // its cached copy is current. session_records_closed covers the listing
 // queries (every version, or open ones only), so they never read the wide
-// meta rows. session_records_name covers a lookup by address or name, which
-// must not read every record either.
+// meta rows. session_records_effective_name covers a lookup by address or
+// name, which must not read every record either.
 const recordSchema = `CREATE TABLE IF NOT EXISTS session_records (
   id TEXT PRIMARY KEY,
   revision INTEGER NOT NULL,
@@ -46,7 +46,7 @@ const recordSchema = `CREATE TABLE IF NOT EXISTS session_records (
 CREATE INDEX IF NOT EXISTS session_records_room ON session_records(room_id, closed);
 CREATE UNIQUE INDEX IF NOT EXISTS session_records_revision ON session_records(revision);
 CREATE INDEX IF NOT EXISTS session_records_closed ON session_records(closed, id, revision);
-CREATE INDEX IF NOT EXISTS session_records_name ON session_records(name, room);`
+CREATE INDEX IF NOT EXISTS session_records_effective_name ON session_records(` + effectiveName + `, room);`
 
 // recordLimit bounds one record; real records stay under 1 MB.
 const recordLimit = 4 << 20
@@ -79,8 +79,8 @@ func records(sessions string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Version 2 adds session_records_closed, version 3 session_records_name;
-	// the schema is idempotent.
+	// Version 2 adds session_records_closed, version 3
+	// session_records_effective_name; the schema is idempotent.
 	err = database.Migrate(db, "sessions.records", 3, func(conn *sql.Conn, _ int) error {
 		_, err := conn.ExecContext(context.Background(), recordSchema)
 		return err
