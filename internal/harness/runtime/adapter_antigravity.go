@@ -55,7 +55,7 @@ func init() {
 		// The shared view follows the exclusive account turn and its frozen generation.
 		ConfigFile: "", SkillDir: "config/skills", ConfigAllowlist: []string{},
 		// agy 1.4.2 loads ~/.gemini/GEMINI.md as global rules.
-		AuthFiles: []string{native.AntigravityAuthFile},
+		AuthFiles: []string{native.AntigravityACPTokenFile, native.AntigravityAccountFile},
 		// Sessions and sign-in run the pinned ACP server and its local harness.
 		Requires: []string{"agy_acp_server.par", "localharness_external"},
 		NativeEnv: func(string) map[string]string {

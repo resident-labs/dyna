@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"dyna-agent/internal/account/native"
 	"dyna-agent/internal/account/reposcope"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/harness/config"
@@ -179,20 +178,6 @@ func privateSignInArgv(harness, exe, scope, identity string, native []string) ([
 	return []string{dyna, "harness", "accounts", acpSignInCommand, "--agy", exe, "--scope", scope, "--expect", identity}, nil
 }
 
-// privateSignInFailure names the missing step instead of a raw capture error.
-//
-// TODO: legacy/shim remove later — this message, once an ACP grant alone can be
-// saved into an account without an agy CLI token beside it.
-//
-// Antigravity saves an ACP grant beside the agy CLI token, so a machine that
-// never ran the CLI sign-in has nothing to save the grant beside.
-func (a *Runtime) privateSignInFailure(id string, err error) error {
-	if n, findErr := a.Accounts.Find(id); findErr != nil || n.Harness != "antigravity" || !errors.Is(err, native.ErrNotSignedIn) {
-		return err
-	}
-	return errors.New("The Antigravity Google sign-in is complete, but this machine has no agy CLI login to save it beside. Run `dyna harness login antigravity` once, then sign in here again.")
-}
-
 func (a *Runtime) RestartPrivateRuntimeLogin(ctx context.Context, id string, _ bool) (PrivateLogin, error) {
 	n, err := a.Accounts.Find(id)
 	if err != nil {
@@ -227,7 +212,7 @@ func (a *Runtime) FinishPrivateRuntimeLogin(ctx context.Context, id string) (Pri
 	}
 	result, err := flow.Complete(a.lifetimeContext())
 	if err != nil {
-		return PrivateRuntimeSnapshot{}, a.privateSignInFailure(id, err)
+		return PrivateRuntimeSnapshot{}, err
 	}
 	if result.Status != "ready" {
 		if result.ExpiresAt != nil && !result.ExpiresAt.After(time.Now()) {

@@ -2,6 +2,7 @@ package native
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -41,31 +42,9 @@ type AntigravityACPLogin struct {
 	Out  io.Writer
 	// Expect is the Dyna identity ("google:<sub>") of the account being signed
 	// in. A grant for any other Google account is deleted and refused. An empty
-	// Expect means the account has no recorded identity yet, so its first
-	// sign-in binds the account and capture records the identity afterwards.
+	// Expect means a new account, which the first Google sign-in binds.
 	Expect string
 	Client claudeHTTPClient // nil uses a bounded default client
-}
-
-// AntigravityCLIIdentity names the Google account of the agy CLI token in home,
-// or "" when the home has no CLI token. It reads that token file only and never
-// calls Google, so it can pin a new ACP sign-in to the login beside it.
-func AntigravityCLIIdentity(home string) (string, error) {
-	if !filepath.IsAbs(home) {
-		return "", ErrUnsupported
-	}
-	raw, err := (agyFileStore{path: filepath.Join(home, AntigravityAuthFile)}).Read(context.Background())
-	if errors.Is(err, ErrNotSignedIn) {
-		return "", nil
-	}
-	if err != nil {
-		return "", err
-	}
-	c, err := agyAccount(raw)
-	if err != nil {
-		return "", err
-	}
-	return c.Identity, nil
 }
 
 // agyEnvValue returns the last assignment of key in an exec environment.
@@ -90,8 +69,9 @@ func agyLoopbackAuthURL(raw string) bool {
 	return err == nil && redirect.Scheme == "http" && redirect.Hostname() == "127.0.0.1" && redirect.Port() != ""
 }
 
-// Run signs in and returns once the token file is complete. It never prints
-// token contents; the owner sees only the sign-in link.
+// Run signs in and returns once the grant and the identity Google confirmed
+// for it are both written. It never prints token contents; the owner sees only
+// the sign-in link.
 func (l AntigravityACPLogin) Run(ctx context.Context) error {
 	if !filepath.IsAbs(l.Home) || l.Server == "" {
 		return ErrUnsupported
@@ -103,6 +83,16 @@ func (l AntigravityACPLogin) Run(ctx context.Context) error {
 	}
 	dir := filepath.Join(l.Home, filepath.Dir(AntigravityACPTokenFile))
 	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	// Start from an empty grant: the server would otherwise reuse the outgoing
+	// account's grant, which the login flow has already saved.
+	store := agyFileStore{path: filepath.Join(l.Home, AntigravityACPTokenFile)}
+	account := agyFileStore{path: filepath.Join(l.Home, AntigravityAccountFile)}
+	if err := store.remove(); err != nil {
+		return err
+	}
+	if err := account.remove(); err != nil {
 		return err
 	}
 	if err := fsutil.WriteFile(filepath.Join(l.Home, AntigravityACPSettingsFile), []byte(antigravityACPSettings), 0600, true); err != nil {
@@ -176,7 +166,6 @@ func (l AntigravityACPLogin) Run(ctx context.Context) error {
 		}
 		return errors.New("Google sign-in for Antigravity ACP did not complete.")
 	}
-	store := agyFileStore{path: filepath.Join(l.Home, AntigravityACPTokenFile)}
 	raw, err := store.Read(ctx)
 	if err != nil {
 		return errors.New("Antigravity ACP signed in but wrote no token file.")
@@ -184,13 +173,21 @@ func (l AntigravityACPLogin) Run(ctx context.Context) error {
 	if err = agyACPValidate(raw); err != nil {
 		return err
 	}
-	// The grant must belong to the selected account. Never keep one that cannot be proven.
+	// The grant must belong to the selected account. Never keep one that cannot
+	// be proven. Google confirms the account here, once; capture and switching
+	// read the identity recorded beside the grant.
 	identity, err := agyACPIdentity(ctx, l.Client, raw, time.Now())
-	if err != nil || l.Expect != "" && identity != l.Expect {
+	if err != nil {
 		_ = store.remove()
-		if err == nil {
-			err = errors.New("The Google account you signed in with is not this Antigravity account. The ACP sign-in was discarded.")
-		}
+		return fmt.Errorf("Google did not confirm the account of this Antigravity sign-in, so nothing was saved: %w", err)
+	}
+	if l.Expect != "" && identity.Identity != l.Expect {
+		_ = store.remove()
+		return errors.New("The Google account you signed in with is not this Antigravity account. The ACP sign-in was discarded.")
+	}
+	record, _ := json.Marshal(identity)
+	if err = account.Write(ctx, record); err != nil {
+		_ = store.remove()
 		return err
 	}
 	return nil
