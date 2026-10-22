@@ -23,6 +23,7 @@ var computerCodePaths = []string{
 	"internal/hub",
 	"internal/mode",
 	"internal/plan/ancestry",
+	"internal/processguard",
 	"internal/procident",
 	"internal/runstore",
 	"internal/sessionlife",
