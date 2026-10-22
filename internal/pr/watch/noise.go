@@ -211,7 +211,7 @@ var reviewCount = regexp.MustCompile(`(?i)(?:\b0*[1-9]\d*[\s\p{P}\p{S}]+` + revi
 var reviewLink = regexp.MustCompile(`#(?:discussion_r|pullrequestreview-|r\d)`)
 
 func protectedFeedback(e Event) bool {
-	return e.Kind == "comments" || e.Session != "" || markerPattern.MatchString(e.Text) || strings.Contains(e.Text, "```") || strings.Contains(e.Text, "~~~") || strings.Contains(strings.ToLower(e.Text), "<code") || strings.Contains(strings.ToLower(e.Text), "<pre") || codeLocation.MatchString(e.Text) || reviewContent.MatchString(e.Text) || reviewCount.MatchString(noiseMarkup.ReplaceAllString(html.UnescapeString(e.Text), " ")) || reviewLink.MatchString(e.Text)
+	return e.Kind == "comments" || e.Session != "" || strings.Contains(e.Text, "```") || strings.Contains(e.Text, "~~~") || strings.Contains(strings.ToLower(e.Text), "<code") || strings.Contains(strings.ToLower(e.Text), "<pre") || codeLocation.MatchString(e.Text) || reviewContent.MatchString(e.Text) || reviewCount.MatchString(noiseMarkup.ReplaceAllString(html.UnescapeString(e.Text), " ")) || reviewLink.MatchString(e.Text)
 }
 
 func learnedDecision(pr PRContext, e Event, rules []NoiseRule) (Decision, bool) {

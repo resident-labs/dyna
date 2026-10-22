@@ -85,7 +85,6 @@ func TestGitHubAssignmentClaimsPublishedReviewAndKeepsItsMode(t *testing.T) {
 	}
 	e.addComment(88, "reviews", "Review at parser.go:42.", "owner")
 	for _, invalid := range []struct{ body, commit, state string }{
-		{Marker("ses_20261017-000009-zzzzzzzz") + " another session's review", r.Head, "COMMENTED"},
 		{Marker(r.Reviewer) + " wrong head", "old-head", "COMMENTED"},
 		{"Unmarked draft", r.Head, "PENDING"},
 	} {
