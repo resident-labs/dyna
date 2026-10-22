@@ -147,8 +147,9 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 	var profileName, name, roomRef, dir, schemaPath, goal, under string
 	var asJSON bool
 	cmd := &cobra.Command{
-		Use:   "start --goal <outcome; done when> --profile <name> [--name <label>] [--room <room>] [--dir <path>] [--schema <file>] <brief text | @file>",
+		Use:   "start --goal <outcome; done when> --profile <name> [--name <label>] [--room <room>] [--dir <path>] [--schema <file>] [--under <goal>] <brief text | @file>",
 		Short: "Start a subagent session; prints its address and runs the first turn in the background",
+		Long:  "Start a subagent with a goal and brief. Use --under gN to select its goal. Otherwise, start uses the starter's unique open assigned item goal, then its single open held goal set by someone else. Multiple eligible goals require --under. With no eligible goal, the child holds a new standalone goal.",
 		// Start explains a missing brief better than cobra's argument count.
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -181,20 +182,28 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 				return err
 			}
 			if asJSON {
-				return jsonout.Write(c.OutOrStdout(), map[string]any{
+				out := map[string]any{
 					"session": info.ID, "address": info.Address(), "name": info.Name,
 					"room": info.Room, "roomId": info.RoomID, "goal": info.Goal,
 					"profile": info.Profile, "depth": info.Depth, "turn": info.Turns,
-				})
+				}
+				if info.Item != "" {
+					out["item"] = info.Item
+				}
+				return jsonout.Write(c.OutOrStdout(), out)
 			}
 			fmt.Fprintln(c.OutOrStdout(), info.Address())
-			progress(c, "holds goal %s", info.Goal)
+			if info.Item != "" {
+				progress(c, "assigned item %s on goal %s", info.Item, info.Goal)
+			} else {
+				progress(c, "holds goal %s", info.Goal)
+			}
 			progress(c, "running in background; post to it with `dyna post @%s <text>`, inspect it with `dyna subagent show %s`, watch live in the desktop app", info.Address(), info.Address())
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&goal, "goal", "", "required outcome and done condition; for a child session this becomes its item's brief")
-	cmd.Flags().StringVar(&under, "under", "", "goal ID to delegate from; default: the starter's item's goal, or its single held goal")
+	cmd.Flags().StringVar(&goal, "goal", "", "required outcome and done condition; placed in an item or a standalone goal")
+	cmd.Flags().StringVar(&under, "under", "", "goal ID to delegate from; default: the starter's open assigned item's goal, then its single held goal set by someone else; otherwise a standalone goal")
 	cmd.Flags().StringVar(&profileName, "profile", "", "worker profile (default: the default profile)")
 	cmd.Flags().StringVar(&name, "name", "", "label for this session, unique among open sessions in its room")
 	cmd.Flags().StringVar(&roomRef, "room", "", "room name or ID (default: inherited room, else the current repo's room)")

@@ -2,12 +2,69 @@ package goalkeeper
 
 import (
 	"context"
-	"time"
-
-	"dyna-agent/internal/subagent"
 	"strings"
 	"testing"
+	"time"
+
+	"dyna-agent/internal/goals"
+	"dyna-agent/internal/subagent"
 )
+
+func TestMoveNoticeRetriesUntilStored(t *testing.T) {
+	for _, promote := range []bool{false, true} {
+		t.Run(map[bool]string{false: "move", true: "promote"}[promote], func(t *testing.T) {
+			e := newEscalationEnv(t)
+			it, err := e.s.Store.AddItem(e.rec.ID, e.goal.ID, setterID, "Move the work", holderID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			to := "new"
+			if !promote {
+				dest, err := e.s.Store.Add(e.rec.ID, setterID, goals.Input{Text: "Destination", Holders: []string{setterID}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				to = dest.ID
+			}
+			moved, err := e.s.Store.MoveItem(e.rec.ID, e.goal.ID, it.ID, setterID, to)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lock, err := e.mgr.Store.TryLockTurnForTest(holderID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = lock.Close() })
+			if err := e.s.checkNotices(t.Context(), e.rec.ID); err != nil {
+				t.Fatal(err)
+			}
+			st, _ := e.s.Store.Read()
+			if len(st.Room(e.rec.ID).Notices) != 1 {
+				t.Fatal("busy assignee lost the placement notice")
+			}
+			if err := lock.Close(); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				if err := e.s.checkNotices(t.Context(), e.rec.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			msgs, err := e.rooms.Messages(e.rec.ID)
+			command := "dyna goal item done " + moved.To.Goal + " " + moved.To.Item
+			if promote {
+				command = "dyna goal done " + moved.To.Goal + " \"<summary>\""
+			}
+			if err != nil || len(msgs) != 1 || !strings.Contains(msgs[0].Text, command) || strings.Contains(msgs[0].Text, "dropped") || len(msgs[0].To) != 1 || msgs[0].To[0] != "work:cccccccc" {
+				t.Fatalf("placement post = %+v, %v", msgs, err)
+			}
+			st, _ = e.s.Store.Read()
+			if len(st.Room(e.rec.ID).Notices) != 0 {
+				t.Fatal("stored notice stayed queued")
+			}
+		})
+	}
+}
 
 func TestHolderCloseHandbackDeliversOnce(t *testing.T) {
 	for _, setterLive := range []bool{true, false} {

@@ -273,6 +273,14 @@ func (s *Service) EditGoalItem(ctx context.Context, roomRef, goal, item, text st
 	return s.goalService().Store.EditItem(r.ID, goal, item, author.ID, text, assignee)
 }
 
+func (s *Service) MoveGoalItem(ctx context.Context, roomRef, goal, item, to string) (goals.ItemMove, error) {
+	r, author, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.ItemMove{}, err
+	}
+	return s.goalService().Store.MoveItem(r.ID, goal, item, author.ID, to)
+}
+
 func (s *Service) SetGoalItemState(ctx context.Context, roomRef, goal, item, state string) (goals.Item, error) {
 	r, author, err := s.goalCaller(ctx, roomRef)
 	if err != nil {
