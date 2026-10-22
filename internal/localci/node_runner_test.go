@@ -77,7 +77,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		if !started.Load() {
 			t.Error("check ran before OnStart")
 		}
-		for _, want := range []string{"CPUQuota=200%", "MemoryMax=5G", "nice -n 10", "--unit"} {
+		for _, want := range []string{"CPUQuota=200%", "MemoryMax=5G", "nice -n 10", "--unit", "--expand-environment=no"} {
 			if !strings.Contains(strings.Join(args, " "), want) {
 				t.Errorf("scope lacks %s", want)
 			}
