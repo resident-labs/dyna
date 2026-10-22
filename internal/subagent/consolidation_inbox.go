@@ -323,26 +323,32 @@ func (s *Store) deliveryTarget(ref string, repair bool) (Info, error) {
 }
 
 func (s *Store) deliveryMeta(ref string) (Meta, error) {
-	info, err := s.resolveMeta(ref)
+	meta, err := s.resolveMeta(ref)
 	if err != nil {
-		return info, err
+		return meta, err
 	}
+	return s.consumedTarget(meta)
+}
+
+// consumedTarget follows the consolidation redirects from meta to the session
+// that receives its posts. It never repairs a record.
+func (s *Store) consumedTarget(meta Meta) (Meta, error) {
 	seen := map[string]bool{}
-	for info.ConsumedBy != "" {
-		if seen[info.ID] {
+	for meta.ConsumedBy != "" {
+		if seen[meta.ID] {
 			return Meta{}, errors.New("consolidation redirect cycle")
 		}
-		seen[info.ID] = true
-		next, e := s.ReadMeta(info.ConsumedBy)
-		if e != nil {
-			return Meta{}, e
+		seen[meta.ID] = true
+		next, err := s.ReadMeta(meta.ConsumedBy)
+		if err != nil {
+			return Meta{}, err
 		}
-		if next.RoomID != info.RoomID {
+		if next.RoomID != meta.RoomID {
 			return Meta{}, errors.New("cross-room consolidation redirect")
 		}
-		info = next
+		meta = next
 	}
-	return info, nil
+	return meta, nil
 }
 
 // consolidationHierarchy creates a complete cycle-free plan before writing.

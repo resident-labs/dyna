@@ -7,6 +7,7 @@ import (
 
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/sessionlife"
 )
 
 // maxGroupShown bounds the members listed per selector in a turn frame.
@@ -121,49 +122,34 @@ func (s *Store) ReplyAddress(msg room.Message) string {
 }
 
 // replyTarget runs while the recipient gate can be held. It must never use
-// Info/List and trigger orphan repair or a notification callback under it.
+// Info/List and trigger orphan repair or a notification callback under it. It
+// answers from one indexed lookup, then follows consumption redirects without
+// repair, so a reply arrives at the session that receives the posts.
 func (s *Store) replyTarget(ref string) (Meta, error) {
 	var meta Meta
-	var err error
 	if runstore.IsSessionDirID(ref) {
-		meta, err = s.ReadMeta(ref)
-	} else if strings.Contains(ref, ":") {
-		ids, e := s.sessionIDs()
-		if e != nil {
-			return meta, e
+		found, err := s.ReadMeta(ref)
+		if err != nil {
+			return found, err
 		}
-		found := false
-		for _, id := range ids {
-			candidate, e := s.ReadMeta(id)
-			if e == nil && candidate.Address() == ref {
-				meta = candidate
-				found = true
-				break
-			}
-		}
-		if !found {
-			return meta, ErrNotFound
-		}
-	} else {
+		return s.consumedTarget(found)
+	}
+	room, name, ok := strings.Cut(ref, ":")
+	if !ok || room == "" {
 		return meta, ErrNotFound
 	}
+	ids, err := sessionlife.Lookup(s.root(), room, name)
 	if err != nil {
 		return meta, err
 	}
-	seen := map[string]bool{}
-	for meta.ConsumedBy != "" {
-		if seen[meta.ID] {
-			return Meta{}, fmt.Errorf("consolidation redirect cycle")
+	// An address is reused after a session closes, so the oldest session that
+	// still holds it answers, as the ID scan did.
+	sort.Strings(ids)
+	for _, id := range ids {
+		candidate, err := s.ReadMeta(id)
+		if err == nil && candidate.Address() == ref {
+			return s.consumedTarget(candidate)
 		}
-		seen[meta.ID] = true
-		next, e := s.ReadMeta(meta.ConsumedBy)
-		if e != nil {
-			return Meta{}, e
-		}
-		if next.RoomID != meta.RoomID {
-			return Meta{}, fmt.Errorf("cross-room redirect")
-		}
-		meta = next
 	}
-	return meta, nil
+	return meta, ErrNotFound
 }

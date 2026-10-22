@@ -42,7 +42,7 @@ func TestCloseReleasesComputerThroughTypedProtocol(t *testing.T) {
 		return computers.Stopped{State: computers.StateDestroyed}, nil
 	}
 	go fake.Serve(ctx, listener)
-	closed, err := e.m.Close(e.ctx, info.ID)
+	closed, err := e.m.CloseWithOptions(e.ctx, info.ID, CloseOptions{Force: true})
 	if err != nil || closed.Status != StatusClosed || calls.Load() != 1 {
 		t.Fatalf("close: %+v %v cleanup calls=%d", closed, err, calls.Load())
 	}
@@ -71,7 +71,7 @@ func TestCloseContinuesAfterStaleComputerSocket(t *testing.T) {
 	}
 	listener.SetUnlinkOnClose(false)
 	listener.Close()
-	closed, err := e.m.Close(e.ctx, info.ID)
+	closed, err := e.m.CloseWithOptions(e.ctx, info.ID, CloseOptions{Force: true})
 	if err != nil || closed.Status != StatusClosed {
 		t.Fatalf("close: %+v %v", closed, err)
 	}
