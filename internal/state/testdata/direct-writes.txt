@@ -71,7 +71,6 @@ not-state internal/database/database.go openDatabase 2 # the schema and meta boo
 not-state internal/database/outside.go appendLine 1 # outside-writes.jsonl, the item 41 report of dyna.db writes outside the engine; a log file, one line per call site, capped at 1 MB
 not-state internal/database/slow.go Read 1 # a read-only transaction (state.Read's snapshot); it writes nothing
 violation internal/devicegrant/grant.go Store.Delete 1
-violation internal/devicegrant/grant.go Store.ImportLegacy 1
 violation internal/devicegrant/grant.go Store.Put 1
 violation internal/doctor/samples.go Samples.Record 1
 not-state internal/engine/runner_spool.go reserve 1 # reserves an empty frozen spool or rejected-artifact name with O_EXCL before the rename fills it; the spool is a transport log, not state
