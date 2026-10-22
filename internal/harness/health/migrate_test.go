@@ -74,4 +74,17 @@ func TestMigrationImportsRetainedHealthOnce(t *testing.T) {
 	if v := New(dataDir).View(p, "v1"); v.LastHealthyVersion != "v1" || v.StorageError != "" {
 		t.Fatalf("view = %+v", v)
 	}
+	// Later observations must refresh the retained copy without importing it again.
+	recordObservation(p, "v2", Observation{At: time.Unix(10, 0).UTC(), Successful: true, RecognizedRecords: 1}, false, false, func(name string, r *record, apply func()) error {
+		return New(sourceDir).saveRecord(context.Background(), db, name, path, r, apply)
+	})
+	copied, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var afterRecord record
+	if err := json.Unmarshal(copied, &afterRecord); err != nil || afterRecord.LastHealthyVersion != "v2" {
+		t.Fatalf("updated copy = %s, %v", copied, err)
+	}
+
 }
