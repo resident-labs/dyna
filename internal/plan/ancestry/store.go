@@ -41,14 +41,16 @@ func (s Store) db() (*sql.DB, error) {
 
 // Migrate imports retained ancestry once at engine start. Imported rows and
 // the version commit together; source headers and ownership stamps stay intact.
-func Migrate(dataDir string) error {
+// archiveDirs adds configured archive locations to the default retained roots.
+func Migrate(dataDir string, archiveDirs ...string) error {
 	db, err := (Store{DataDir: dataDir}).db()
 	if err != nil {
 		return err
 	}
 	return database.Migrate(db, "plan.ancestry.import", 1, func(conn *sql.Conn, _ int) error {
 		ctx := context.Background()
-		for _, root := range []string{filepath.Join(dataDir, "runs"), filepath.Join(dataDir, "archive", "runs")} {
+		roots := append([]string{filepath.Join(dataDir, "runs"), filepath.Join(dataDir, "archive", "runs")}, archiveDirs...)
+		for _, root := range roots {
 			if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 				if os.IsNotExist(err) && path == root {
 					return nil
@@ -70,9 +72,14 @@ func Migrate(dataDir string) error {
 				if exists {
 					return nil
 				}
-				_, err = state.ImportMigration(ctx, conn, "plans/"+key, path, func(conn *sql.Conn, raw []byte) error {
+				imported, err := state.ImportMigration(ctx, conn, "plans/"+key, path, func(conn *sql.Conn, raw []byte) error {
 					return importRetainedHeader(ctx, conn, key, raw)
 				})
+				if err == nil && !imported {
+					// Older readers stamped empty headers without storing a row.
+					// Preserve that empty value without reading an owned copy.
+					_, err = conn.ExecContext(ctx, "INSERT INTO plan_ancestry(plan,resumed_from) VALUES(?, '') ON CONFLICT(plan) DO NOTHING", key)
+				}
 				return err
 			}); err != nil {
 				return err

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -55,7 +56,11 @@ func Migrate(dataDir string) error {
 // migrate only in the engine and in tests; elsewhere an unmigrated store
 // fails with its name (item 41).
 func openRuns(dataDir string) (*sql.DB, error) {
-	if err := ancestry.Migrate(dataDir); err != nil {
+	var archives []string
+	if strings.TrimSpace(os.Getenv(ArchiveDirEnv)) != "" {
+		archives = append(archives, ArchiveDir())
+	}
+	if err := ancestry.Migrate(dataDir, archives...); err != nil {
 		return nil, err
 	}
 	if err := state.MigrateMirrors(dataDir); err != nil {
