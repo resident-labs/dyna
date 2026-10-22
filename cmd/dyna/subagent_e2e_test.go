@@ -366,7 +366,11 @@ func (e *e2e) serveEngine() {
 			svc := notify.Default()
 			svc.Sessions.Executable = e.bin
 			svc.EngineRunning = func() bool { return false }
-			snd, err := svc.SenderOf(req.Claim)
+			claim := notify.Claim{Room: req.Claim.Room}
+			if caller, _ := websvc.CallerFromContext(ctx); caller.Kind == websvc.Session {
+				claim.Session = caller.Session
+			}
+			snd, err := svc.SenderOf(claim)
 			if err != nil {
 				return notify.Result{}, err
 			}
@@ -399,19 +403,8 @@ func (e *e2e) serveEngine() {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	// As the engine's actForCallers does before its caller policy, a
-	// session call acts for the session that the launch record names.
 	for name, call := range sessions {
-		calls[name] = func(ctx context.Context, args []json.RawMessage) (any, error) {
-			if caller, _ := websvc.CallerFromContext(ctx); caller.Kind == websvc.Session {
-				actor, err := svc.Sessions.Store.SessionActor(caller.Session)
-				if err != nil {
-					return nil, err
-				}
-				ctx = authority.WithActor(ctx, actor)
-			}
-			return call(ctx, args)
-		}
+		calls[name] = call
 	}
 	// Runner completion uses the same configured notify service as session
 	// controls. Store the report before acknowledging the fixture call.
@@ -432,29 +425,64 @@ func (e *e2e) serveEngine() {
 			return call(authority.WithActor(ctx, authority.Actor{Role: authority.Session, Session: caller.Session}), args)
 		}
 	}
+	// All fixture calls act for their recorded caller, including owner CLIs.
+	for name, call := range calls {
+		calls[name] = func(ctx context.Context, args []json.RawMessage) (any, error) {
+			actor := authority.Actor{Role: authority.Owner}
+			if caller, _ := websvc.CallerFromContext(ctx); caller.Kind == websvc.Session {
+				var err error
+				actor, err = svc.Sessions.Store.SessionActor(caller.Session)
+				if err != nil {
+					return nil, err
+				}
+			}
+			return call(authority.WithActor(ctx, actor), args)
+		}
+	}
 	dataDir := filepath.Join(e.data, "dyna")
 	enginetest.ServeCallers(e.t, dataDir, e.runnerCallers(dataDir), calls)
 }
 
-// runnerCallers identifies a turn runner by its launch record, as the
-// engine's socket does. Every other caller is unverified, as the report-only
-// engine serves it: a session call then acts for the session that the CLI's
-// stamp claims, and an unstamped CLI acts as the owner.
+// e2eCallerRecords makes in-process CLI assertions the owner of their
+// private fake engine. Other processes keep their recorded launch identity.
+type e2eCallerRecords struct {
+	callerid.Store
+	owner callerid.Process
+}
+
+func (r e2eCallerRecords) ProcessIdentity(p callerid.Process) (callerid.Identity, bool, error) {
+	if p == r.owner {
+		return callerid.Identity{Kind: callerid.Owner}, true, nil
+	}
+	return r.Store.ProcessIdentity(p)
+}
+
+// runnerCallers uses launch records for both fixture CLI commands and real
+// turn runners. It never grants authority from an unverified claim.
 func (e *e2e) runnerCallers(dataDir string) func(net.Conn) (websvc.Caller, error) {
 	e.t.Helper()
 	records, err := callerid.OpenStore(dataDir)
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	r, err := callerid.New("/proc", 0, records)
+	owner, err := callerid.ProcessOf(os.Getpid())
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	r, err := callerid.New("/proc", 0, e2eCallerRecords{Store: records, owner: owner})
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	return func(c net.Conn) (websvc.Caller, error) {
-		if id := r.ResolveConn(c); id.Kind == callerid.Session {
+		id := r.ResolveConn(c)
+		switch id.Kind {
+		case callerid.Session:
 			return websvc.Caller{Kind: websvc.Session, Session: id.Session}, nil
+		case callerid.Owner:
+			return websvc.Caller{Kind: websvc.Owner}, nil
+		default:
+			return websvc.Caller{}, fmt.Errorf("fixture caller refused: %s", id.Reason)
 		}
-		return websvc.Caller{Kind: websvc.Unverified}, nil
 	}
 }
 
@@ -488,8 +516,26 @@ func (e *e2e) runEnv(extra []string, args ...string) (string, string, error) {
 	}
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
-	err := cmd.Run()
+	err := e.startCLI(ctx, cmd)
+	if err == nil {
+		err = cmd.Wait()
+	}
 	return out.String(), errb.String(), err
+}
+
+// startCLI records the test's chosen identity before its command can call
+// the fake engine. Environment stamps select a fixture, never production authority.
+func (e *e2e) startCLI(ctx context.Context, cmd *exec.Cmd) error {
+	dataDir := filepath.Join(e.data, "dyna")
+	for _, entry := range cmd.Env {
+		if id, ok := strings.CutPrefix(entry, "DYNA_SESSION="); ok && id != "" {
+			return callerid.Start(ctx, cmd, callerid.Launch{DataDir: dataDir, Name: id,
+				Actor: callerid.Identity{Kind: callerid.Session, Session: id}, Launcher: "fixture-cli"})
+		}
+	}
+	restore := authority.InEngine()
+	defer restore()
+	return callerid.StartTerminal(ctx, cmd, dataDir, cmd.Start)
 }
 
 func (e *e2e) must(args ...string) string {
@@ -1034,7 +1080,7 @@ func (e *e2e) roomEvents(roomName string) <-chan room.Message {
 	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	if err := cmd.Start(); err != nil {
+	if err := e.startCLI(ctx, cmd); err != nil {
 		cancel()
 		t.Fatal(err)
 	}
