@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -164,19 +165,36 @@ func chooseMergeBatch(queue []Record, active map[string]string, streak int) []Re
 	return normal
 }
 
-func (s *Service) prioritizedMergeQueue(st State) ([]MergeQueueItem, error) {
+func (s *Service) prioritizedMergeQueue(ctx context.Context, st State) ([]MergeQueueItem, error) {
 	active, _, err := s.expeditedGoals()
 	if err != nil {
 		return nil, err
 	}
 	rows := mergeQueue(st)
 	indices := map[string][]int{}
+	pauses := map[string]bool{}
 	for i := range rows {
 		r := recordByID(&st, rows[i].ChangeID)
 		if r == nil {
 			continue
 		}
 		rows[i].GoalID, rows[i].Expedited = r.GoalID, expeditedRecord(*r, active)
+		// Held work remains visible, but never consumes a simulated grant.
+		paused, err := s.roomPausedCached(r.RoomID, pauses)
+		if err != nil {
+			return nil, err
+		}
+		if paused {
+			markPaused(&rows[i])
+		} else if why, err := s.trialRoomHold(ctx, *r); err != nil {
+			return nil, err
+		} else if why != "" {
+			if st.MergePauses[r.RoomID] != "" {
+				rows[i].State, rows[i].Reason = "merge-paused", why
+			} else {
+				rows[i].State, rows[i].Reason = "read-only", why
+			}
+		}
 		if rows[i].State == "ready" && rows[i].Trial == nil {
 			repo := defaultRepo(*r)
 			indices[repo] = append(indices[repo], i)

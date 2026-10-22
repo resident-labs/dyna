@@ -116,8 +116,8 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		return output(c, tracked)
 	}
 	mergeStatus := &cobra.Command{Use: "merge-status", Short: "Show automatic merge eligibility and order", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
-		rows, err := o.Service().MergeStatus(c.Context())
-		if err != nil {
+		var rows []watch.MergeQueueItem
+		if err := engineclient.New("").Call(c.Context(), "MergeStatus", nil, &rows); err != nil {
 			return err
 		}
 		return output(c, rows)
