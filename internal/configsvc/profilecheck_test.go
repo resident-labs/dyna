@@ -81,7 +81,7 @@ func TestChangingHarnessUsesNewNativeDialect(t *testing.T) {
 		t.Fatal(err)
 	}
 	current, _ := store.Get(p.Name)
-	if current.Output == nil || current.Output.Dialect != "claude-stream-json" {
-		t.Fatal("harness edit did not persist the new dialect")
+	if current.Output != nil || current.EffectiveDialect() != "claude-stream-json" {
+		t.Fatal("harness edit did not use the new default without an override")
 	}
 }

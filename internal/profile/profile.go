@@ -410,9 +410,6 @@ func (s *Store) Save() error {
 	if s.Version < storeVersion {
 		s.Version = storeVersion
 	}
-	for i := range s.Profiles {
-		s.Profiles[i].DeclareOutput()
-	}
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 		return err
 	}
@@ -433,7 +430,6 @@ func (s *Store) Get(name string) (*Profile, bool) {
 }
 
 func (s *Store) Upsert(p Profile) error {
-	p.DeclareOutput()
 	if err := p.Validate(); err != nil {
 		return err
 	}
