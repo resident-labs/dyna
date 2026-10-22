@@ -312,7 +312,7 @@ func MatchesSource(p *Plan, src string) bool {
 }
 
 // WriteAtomic writes an immutable generated graph blob. Resume ancestry goes
-// through the engine into SQLite; its header remains for older releases.
+// through the engine into SQLite; stamping does not change the graph bytes.
 func WriteAtomic(dir string, p *Plan, write AncestryWriter) error {
 	if dir == "" {
 		return preserveAncestryError(fmt.Errorf("plan directory is empty"), p.ResumedFrom)

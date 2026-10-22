@@ -28,7 +28,7 @@ func TestRemoveClearsAncestryLock(t *testing.T) {
 	if err := plan.WriteAtomic(run.Dir, plan.Extract("return 1", plan.Options{}), nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := (ancestry.Store{DataDir: dataDir}).Parent(context.Background(), run.Dir); err != nil {
+	if _, err := (ancestry.Store{DataDir: dataDir}).Stamp(context.Background(), run.Dir, "wf_parent"); err != nil {
 		t.Fatal(err)
 	}
 	path := ancestry.LockPath(dataDir, run.Meta.ID)
@@ -69,11 +69,16 @@ func TestRemoveClearsAncestryRowsAndStamps(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := Remove(run.Meta.ID); err != nil {
-		t.Fatal(err)
-	}
 	db, err := database.Open(dataDir)
 	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{run.Meta.ID, run.Meta.ID + "/workflows/nested", run.Meta.ID + "/workflows/empty", run.Meta.ID + "_kept"} {
+		if _, err := db.Exec("INSERT INTO state_mirrors(key,version) VALUES(?,?)", "plans/"+key, "legacy"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Remove(run.Meta.ID); err != nil {
 		t.Fatal(err)
 	}
 	var rows, stamps int
@@ -112,6 +117,9 @@ func TestRemoveAncestryFailureKeepsRunAndStamps(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { database.Close(dataDir) })
+	if _, err := db.Exec("INSERT INTO state_mirrors(key,version) VALUES(?,?)", "plans/"+run.Meta.ID, "legacy"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.Exec("CREATE TRIGGER reject_ancestry_delete BEFORE DELETE ON plan_ancestry BEGIN SELECT RAISE(ABORT,'keep ancestry'); END"); err != nil {
 		t.Fatal(err)
 	}
