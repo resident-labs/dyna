@@ -106,7 +106,21 @@ dyna goal wait g1 --until 2h       # waiting on something; not progress
 dyna goal item done g1 i2
 dyna goal item move g1 i2 --to g3
 dyna goal item move g1 i2 --to new
+dyna goal expedite g1 [--replace]  # owner or root: room priority
+dyna goal expedite --off
 ```
+
+Each room has at most one expedited goal. Only the owner or root sets it. It ends when
+the goal is done or dropped, with `--off`, or after 24 hours. Replacing it needs
+`--replace`. Expediting the same goal preserves its original expiry. Its holders
+and their descendants share priority; PRs use their saved goal link.
+
+Queue ordering is planned for a separate update. Linked changes will get the next
+available review slot in their room. Eligible expedited PRs will get an isolated merge
+trial. When normal work is waiting, it will get a slot after three expedited selections.
+Review fairness will be per room; merge fairness will be per repository. Running reviews,
+merge trials and CI will continue. Expedite will not change session, workflow or CI
+scheduling. Existing review and merge gates will still apply.
 
 Goal changes print one short status line. Add `--json` for the full record and keeper history.
 Edits wake nobody. The goal keeper schedules stale holder nudges and delivers queued notices.
