@@ -156,6 +156,9 @@ func promptRunners(db *sql.DB, sessions string) ([]promptRunner, error) {
 				return err
 			}
 		}
+		if _, ok := fields["pid"]; !ok && field == "turn" {
+			return fmt.Errorf("missing runner pid for %s", id)
+		}
 		if value, ok := fields[field]; ok {
 			if err := json.Unmarshal(value, &turn); err != nil {
 				return err
