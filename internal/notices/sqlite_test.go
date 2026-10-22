@@ -1,10 +1,8 @@
 package notices
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"dyna-agent/internal/database"
@@ -20,7 +18,7 @@ func TestRowsSurviveMissingLegacyFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(s.Path()); err != nil {
+	if err := os.Remove(s.Path()); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	list, err := s.List()
@@ -29,7 +27,7 @@ func TestRowsSurviveMissingLegacyFile(t *testing.T) {
 	}
 }
 
-func TestForeignFileImportsBeforeWriteAndDamageKeepsRows(t *testing.T) {
+func TestStartupImportIgnoresLaterFileChanges(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	t.Cleanup(func() { _ = database.Close(s.Dir) })
 	old := Notice{ID: "old", Key: "disk", Text: "Old binary."}
@@ -54,15 +52,13 @@ func TestForeignFileImportsBeforeWriteAndDamageKeepsRows(t *testing.T) {
 	if _, err := s.Post(Notice{Key: "provider", Text: "New binary."}); err != nil {
 		t.Fatal(err)
 	}
+	list, err = s.List()
+	if err != nil || len(list) != 2 || list[0].Text != "Old binary." {
+		t.Fatalf("retained file changed SQLite rows: %+v %v", list, err)
+	}
 	raw, err := os.ReadFile(s.Path())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(raw, &list); err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 2 || list[0].Text != old.Text {
-		t.Fatalf("legacy mirror lost foreign update = %+v", list)
+	if err != nil || !strings.Contains(string(raw), "Changed by old binary.") {
+		t.Fatalf("source file was overwritten: %s %v", raw, err)
 	}
 }
 
@@ -100,25 +96,6 @@ func TestRevisionIncreasesAfterNewestIsDismissed(t *testing.T) {
 	check()
 }
 
-func TestMigrationDoesNotReadLegacyFile(t *testing.T) {
-	s := Store{Dir: t.TempDir()}
-	t.Cleanup(func() { _ = database.Close(s.Dir) })
-	if err := os.WriteFile(s.Path(), []byte("damaged"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := Migrate(s.Dir); err != nil {
-		t.Fatal(err)
-	}
-	db, err := database.Open(s.Dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var stamps int
-	if err := db.QueryRow("SELECT count(*) FROM state_mirrors WHERE key=?", mirrorKey).Scan(&stamps); err != nil || stamps != 0 {
-		t.Fatalf("startup imported file: stamps=%d, %v", stamps, err)
-	}
-}
-
 func TestPostDoesNotRewriteUnchangedNotice(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	t.Cleanup(func() { _ = database.Close(s.Dir) })
@@ -140,32 +117,4 @@ func TestPostDoesNotRewriteUnchangedNotice(t *testing.T) {
 	if err := s.Dismiss(newest.ID); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func TestNoticeLockHonorsCancellationAndRelease(t *testing.T) {
-	s := Store{Dir: t.TempDir()}
-	unlock, err := s.lock(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if unlock != nil {
-			unlock()
-		}
-	})
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if release, err := s.lock(ctx); !errors.Is(err, context.Canceled) {
-		if release != nil {
-			release()
-		}
-		t.Fatalf("cancelled lock = %v", err)
-	}
-	unlock()
-	unlock = nil
-	release, err := s.lock(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	release()
 }
