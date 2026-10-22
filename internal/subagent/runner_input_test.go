@@ -6,12 +6,14 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/state"
+	filestore "dyna-agent/internal/store"
 )
 
 func postClaimInput(t *testing.T, e *testEnv, info Info, text string) room.Message {
@@ -145,5 +147,77 @@ func TestInputSelectorFramesDoNotRepairOtherTurns(t *testing.T) {
 	_ = e.m.Store.SelectorContext(meta)
 	if turn, err := e.m.Store.ReadTurn(parent.ID, 1); err != nil || turn.Status != TurnRunning {
 		t.Fatalf("a selector frame repaired the parent: status %s, %v", turn.Status, err)
+	}
+}
+
+// Resolving a consumed name may read other sessions. Senders must still be
+// able to change the gate or dismiss input before the claim commits.
+func TestInputClaimResolvesDeliveryOutsideGate(t *testing.T) {
+	for _, startup := range []bool{true, false} {
+		name := "live"
+		if startup {
+			name = "startup"
+		}
+		t.Run(name, func(t *testing.T) {
+			e := newTestEnv(t)
+			info := completedFixtureSession(t, e)
+			source := completedFixtureSession(t, e)
+			if _, err := e.m.Store.UpdateMeta(info.ID, func(meta *Meta) { meta.ConsolidationCharter = "combined work" }); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.m.Store.UpdateMeta(source.ID, func(meta *Meta) {
+				meta.ConsumedBy, meta.Closed = info.ID, time.Now()
+			}); err != nil {
+				t.Fatal(err)
+			}
+			msg, err := e.m.rooms().Post(info.RoomID, room.PostInput{
+				From: info.Room, Human: true, To: []string{info.Address()},
+				Via: []string{"@" + source.Address()}, Text: "work from the consumed name",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !startup {
+				gate := e.m.Store.newTurnGate(e.m.rooms(), info.Meta, 1, 0)
+				if err := gate.Activate(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dir, _ := e.m.Store.Dir(info.ID)
+			infoCache.Delete(e.m.Store.recordKey(source.ID))
+			resolved := false
+			e.m.Store.decodeMeta = func(raw []byte, v any) error {
+				var identity struct{ ID string }
+				if err := json.Unmarshal(raw, &identity); err != nil {
+					return err
+				}
+				if identity.ID == source.ID && !resolved {
+					resolved = true
+					unlock, owned, err := filestore.TryLock(filepath.Join(dir, "gate.lock"))
+					if err != nil || !owned {
+						t.Errorf("delivery resolution holds the gate: owned %v, %v", owned, err)
+					} else {
+						defer unlock()
+						q, err := readQueue(dir)
+						if err != nil {
+							t.Fatal(err)
+						}
+						q.Dismissed[msg.ID] = true
+						if err := writeQueue(dir, q); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				return json.Unmarshal(raw, v)
+			}
+			ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: info.ID})
+			got, err := e.m.RunnerClaimInput(ctx, InputClaim{Turn: 1, Startup: startup, Depth: info.Depth})
+			if err != nil || len(got.Posts) != 0 || !resolved {
+				t.Fatalf("claim after dismissal = %+v, %v; resolved %v", got, err, resolved)
+			}
+			if q, err := readQueue(dir); err != nil || q.Claimed[msg.ID] != 0 || !q.Dismissed[msg.ID] {
+				t.Fatalf("claim did not recheck dismissal: %+v, %v", q, err)
+			}
+		})
 	}
 }
