@@ -163,7 +163,7 @@ func (w *runnerWatch) needsFullScans() bool {
 	return len(w.unwatched) > 0
 }
 
-// probe imports the turn and the queue of each session whose runner runs a
+// probe imports the turn of each session whose runner runs a
 // replaced binary. Importing a file such a runner wrote moves the
 // members revision.
 func (w *runnerWatch) probe(sessions *subagent.Store) {
@@ -177,7 +177,6 @@ func (w *runnerWatch) probe(sessions *subagent.Store) {
 	}
 	w.mu.Unlock()
 	for id, turns := range legacy {
-		_ = sessions.ImportLegacyQueue(id)
 		if turns > 0 {
 			_ = sessions.ImportLegacyTurn(id, turns)
 		}
