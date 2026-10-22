@@ -21,7 +21,7 @@ func TestOwnerTracksAndOpensPRWithoutSession(t *testing.T) {
 			defer restore()
 			call := func(ctx context.Context) (watch.Record, error) {
 				if method == "track" {
-					out, err := e.svc.PRs.TrackPRRef(ctx, rec.ID, "", "7", "")
+					out, err := e.svc.PRs.TrackPRRef(ctx, rec.ID, "", "7", "", "")
 					return out.PR, err
 				}
 				out, err := e.svc.PRs.OpenChange(ctx, rec.ID, "", "7", "", watch.OpenChangeOptions{Notes: watch.ChangeNotes{Intent: "Owner work"}})

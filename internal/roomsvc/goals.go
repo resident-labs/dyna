@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/goalkeeper"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/listchange"
@@ -195,6 +196,24 @@ func (s *Service) FinishGoal(ctx context.Context, roomRef, id, summary string, d
 		verb = "dropped"
 	}
 	return g, service.Milestone(g, author.ID, verb)
+}
+
+// ExpediteGoal makes goal id the room's one expedited goal, for goals.ExpediteTTL.
+// An empty id stops the room's priority and returns the goal that had it.
+// Only the owner or root may call it. Another expedited goal needs replace.
+func (s *Service) ExpediteGoal(ctx context.Context, roomRef, id string, replace bool) (goals.Goal, error) {
+	r, _, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	if err := authority.Check("goal expedite", authority.Of(ctx), nil); err != nil {
+		return goals.Goal{}, err
+	}
+	store := s.goalService().Store
+	if id == "" {
+		return store.StopExpedite(r.ID)
+	}
+	return store.Expedite(r.ID, id, replace)
 }
 func (s *Service) CheckGoal(ctx context.Context, roomRef, id string) (goals.Goal, error) {
 	r, _, err := s.goalCaller(ctx, roomRef)

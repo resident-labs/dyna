@@ -420,7 +420,7 @@ func (s *Service) TrackPR(ctx context.Context, roomRef, sessionRef string, numbe
 	if number <= 0 {
 		return ChangeView{}, errors.New("number must be positive")
 	}
-	r, created, err := s.track(ctx, roomRef, sessionRef, strconv.Itoa(number), "")
+	r, created, err := s.track(ctx, roomRef, sessionRef, strconv.Itoa(number), "", "")
 	if err != nil {
 		return ChangeView{}, err
 	}
@@ -452,18 +452,22 @@ type TrackedPR struct {
 
 // TrackPRRef tracks a PR named by number or URL for the CLI. dir is the
 // caller's checkout; the engine accepts it only as a checkout of the room's
-// repository and of the PR's, and "" uses the room's workspace root.
-func (s *Service) TrackPRRef(ctx context.Context, roomRef, sessionRef, ref, dir string) (TrackedPR, error) {
-	r, created, err := s.track(ctx, roomRef, sessionRef, ref, dir)
+// repository and of the PR's, and "" uses the room's workspace root. A goal
+// ID links the PR to that goal, replacing any link.
+func (s *Service) TrackPRRef(ctx context.Context, roomRef, sessionRef, ref, dir, goal string) (TrackedPR, error) {
+	r, created, err := s.track(ctx, roomRef, sessionRef, ref, dir, goal)
 	return TrackedPR{r, created}, err
 }
 
 // track is the one PR tracking path of the web app and the CLI. The caller
 // acts in the PR's room, and only the owner or root names another author.
 // The gh work runs before the state write, never under the PR lock.
-func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir string) (watch.Record, bool, error) {
+func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir, goal string) (watch.Record, bool, error) {
 	rec, actor, info, err := s.authorIn(ctx, roomRef, sessionRef, "tracks a PR")
 	if err != nil {
+		return watch.Record{}, false, err
+	}
+	if err := s.checkGoalLink(rec.ID, goal); err != nil {
 		return watch.Record{}, false, err
 	}
 	root, err := s.WorkspaceRoot(rec.ID, "")
@@ -498,6 +502,7 @@ func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir st
 	if r.RoomID != rec.ID {
 		return watch.Record{}, false, fmt.Errorf("PR #%d is tracked in another room", r.Number)
 	}
+	r.GoalID = s.linkGoal(p, r, info, created, goal)
 	return r, created, nil
 }
 
@@ -555,6 +560,9 @@ func (s *Service) OpenChange(ctx context.Context, roomRef, sessionRef, prRef, di
 			return OpenedChange{}, err
 		}
 	}
+	if err := s.checkGoalLink(rec.ID, opts.Goal); err != nil {
+		return OpenedChange{}, err
+	}
 	p := s.Watcher()
 	if prRef == "" {
 		if dir == "" {
@@ -562,6 +570,9 @@ func (s *Service) OpenChange(ctx context.Context, roomRef, sessionRef, prRef, di
 		}
 		opts.Dir = dir
 		r, created, err := p.OpenChange(ctx, actor, info, opts)
+		if err == nil {
+			r.GoalID = s.linkGoal(p, r, info, created, opts.Goal)
+		}
 		return OpenedChange{r, created}, err
 	}
 	if dir == "" {
@@ -600,6 +611,7 @@ func (s *Service) OpenChange(ctx context.Context, roomRef, sessionRef, prRef, di
 	if err := p.UpdateChangeNotes(r.Key, checkedAuthor, opts.Notes, opts.Category, opts.Dependencies); err != nil {
 		return OpenedChange{}, err
 	}
+	s.linkGoal(p, r, info, created, opts.Goal)
 	r, err = p.Store.Get(r.Key)
 	return OpenedChange{r, created}, err
 }
