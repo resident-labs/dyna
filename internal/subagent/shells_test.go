@@ -45,7 +45,7 @@ func TestCloseStopsOwnedShells(t *testing.T) {
 		}
 		metas = append(metas, meta)
 	}
-	if _, err := e.m.Close(e.ctx, session.ID); err != nil {
+	if _, err := e.m.CloseWithOptions(e.ctx, session.ID, CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	for _, meta := range metas {

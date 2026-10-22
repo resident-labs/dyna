@@ -982,7 +982,8 @@ func TestSubagentCLILifecycleEndToEnd(t *testing.T) {
 		}
 
 		e.waitTurnReleased(id)
-		must("subagent", "close", addr)
+		// This fixture has unfinished work and no root to inherit it.
+		must("subagent", "close", addr, "--force")
 		if out := must("subagent", "list"); strings.Contains(out, id) {
 			t.Fatalf("closed session in default list: %q", out)
 		}

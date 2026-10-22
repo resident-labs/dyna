@@ -33,8 +33,12 @@ Writers use `dyna git worktrees new <branch>`; never edit the main checkout.
 Output prints a finished turn; `--raw` prints harness stdout. Show includes prompts, steering, deferred deliveries, and results.
 List shows open sessions; `--all` includes closed ones.
 Stop cancels only the current turn. Cancel children and runs separately.
-Close stops the session. Open PR roles or live workflow runs block close unless `--force` is set.
-Goals return to their setter; questions withdraw; non-kept shells stop. Empty children close; other children move to the parent.
+Close stops the session and hands PR authorship and held goals to its nearest open ancestor.
+A top-level session hands work to the room's root. Reviewer roles return to the pool.
+Live workflow runs are canceled because their running coordinator cannot change owners.
+Questions withdraw; non-kept shells stop. Empty children close; other children move to the heir.
+The command and app show what moved or stopped. A failed handoff keeps the session open;
+retry after fixing the error, or use `--force` to close with unresolved work.
 Reopen restores history without starting a turn. An address selects its latest closed history; an ID selects exact history.
 An occupied name blocks reopen.
 
@@ -131,7 +135,8 @@ Read `dyna guide steering` for reports and handoffs.
 Close accepted children unless a follow-up is likely.
 When done, run `dyna goal done <id> "Summary"`.
 End or move PR roles, other goals, questions, children, shells, and runs. Then run `dyna subagent finish`.
-It lists remaining responsibilities and commands to resolve them.
+It lists remaining responsibilities and commands to resolve them. The shell job running finish does not block it.
+Finish keeps the session available. Close ends it and automatically hands work up the parent chain.
 Finish makes the session dormant; messages wake it. Dyna closes it after 7 dormant days.
-Keep PR authors and reviewers open as required by `dyna guide git`.
+Keep authors open while they handle their changes. If an author must close, the handoff described in `dyna guide git` applies.
 Use `dyna guide recovery` for transfers.

@@ -100,12 +100,14 @@ type PendingVerdict struct {
 }
 
 type Record struct {
-	PendingVerdict    *PendingVerdict    `json:"pendingVerdict,omitempty"`
-	MergeTrialFailure *MergeTrialFailure `json:"mergeTrialFailure,omitempty"`
-	IsDraft           bool               `json:"isDraft,omitempty"`
-	Mergeable         *bool              `json:"mergeable,omitempty"`
-	DefaultBranch     string             `json:"defaultBranch,omitempty"`
-	ChecksAt          time.Time          `json:"checksAt,omitempty"`
+	PendingVerdict *PendingVerdict `json:"pendingVerdict,omitempty"`
+	// ReleaseReviewersAfterReplay holds closed reviewers until their saved verdicts replay.
+	ReleaseReviewersAfterReplay []string           `json:"releaseReviewersAfterReplay,omitempty"`
+	MergeTrialFailure           *MergeTrialFailure `json:"mergeTrialFailure,omitempty"`
+	IsDraft                     bool               `json:"isDraft,omitempty"`
+	Mergeable                   *bool              `json:"mergeable,omitempty"`
+	DefaultBranch               string             `json:"defaultBranch,omitempty"`
+	ChecksAt                    time.Time          `json:"checksAt,omitempty"`
 
 	CIBudgetHead   string            `json:"ciBudgetHead,omitempty"`
 	CIBudgetErrors map[string]string `json:"ciBudgetErrors,omitempty"`

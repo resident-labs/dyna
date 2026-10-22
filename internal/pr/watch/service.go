@@ -31,10 +31,12 @@ import (
 )
 
 type Service struct {
-	tickReads       *tickReadView
-	StewardSessions steward.Sessions
-	LocalCI         localCIRunner
-	localCIRuns     *sync.Map
+	// beforeCloseTransfer lets a test act after the notice scan, before the transfer commits.
+	beforeCloseTransfer func(key string)
+	tickReads           *tickReadView
+	StewardSessions     steward.Sessions
+	LocalCI             localCIRunner
+	localCIRuns         *sync.Map
 
 	autoTrackFailures *sync.Map // PR key and remote head; only failed attempts remain.
 	ReviewerProfiles  func() ([]profile.Profile, error)
@@ -962,7 +964,7 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 	if err != nil {
 		return err
 	}
-	named := s.namedReviewer(policyState, r, actor)
+	named := s.namedReviewer(policyState, r, actor) || (confirmed != nil && deferredReplayReviewer(r, actor, head))
 	paused := confirmed == nil && changeKind(r) == "github" && s.now().Before(quotaFor(policyState, &r, s.now()).PauseUntil)
 	if !paused {
 		if err := staleVerdict(r, actor, head, Pull{}, reviewID, named); err != nil {
@@ -1054,7 +1056,7 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 		if r == nil {
 			return fmt.Errorf("PR is not tracked")
 		}
-		named := s.namedReviewer(*st, *r, actor)
+		named := s.namedReviewer(*st, *r, actor) || (confirmed != nil && deferredReplayReviewer(*r, actor, head))
 		if err := staleVerdict(*r, actor, head, snap.Pull, reviewID, named); err != nil {
 			return err
 		}

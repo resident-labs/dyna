@@ -34,7 +34,7 @@ func TestClosedGoalHolderNoticeOffersCompletedResult(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := e.m.Close(e.ctx, info.ID); err != nil {
+			if _, err := e.m.CloseWithOptions(e.ctx, info.ID, CloseOptions{Force: true}); err != nil {
 				t.Fatal(err)
 			}
 			state, err := e.m.goalStore().Read()
