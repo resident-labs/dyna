@@ -78,7 +78,7 @@ func openRuns(dataDir string) (*sql.DB, error) {
 	if err != nil {
 		return db, err
 	}
-	return db, migrateSteering(db)
+	return db, migrateSteering(db, dataDir)
 }
 
 // nextRev advances the runs table's revision and returns it.
