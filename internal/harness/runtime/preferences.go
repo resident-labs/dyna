@@ -324,18 +324,15 @@ func (r *Runtime) PreviewPreferenceImport(accountID string) (PreferencePreview, 
 	}
 	return p, err
 }
-func (r *Runtime) preferencePaths() (string, string, error) {
-	if r.Config == nil || r.Config.Path == "" || !filepath.IsAbs(r.Generations) {
-		return "", "", errPreferences
+func (r *Runtime) preferenceRoot() (string, error) {
+	if !filepath.IsAbs(r.Generations) {
+		return "", errPreferences
 	}
 	root := filepath.Join(r.Generations, "preferences")
-	metadata := filepath.Join(filepath.Dir(r.Config.Path), "harness-preferences.json")
-	for _, path := range []string{root, metadata, metadata + ".lock"} {
-		if safeAccountPath(path) != nil {
-			return "", "", errPreferences
-		}
+	if safeAccountPath(root) != nil {
+		return "", errPreferences
 	}
-	return root, metadata, nil
+	return root, nil
 }
 func (r *Runtime) ImportPreferences(accountID, previewHash string) error {
 	p, values, err := r.preferenceSource(accountID)
@@ -351,11 +348,11 @@ func (r *Runtime) ImportPreferences(accountID, previewHash string) error {
 	if len(values) == 0 {
 		return errors.New("No safe personal preferences were accepted.")
 	}
-	root, metadata, err := r.preferencePaths()
+	root, err := r.preferenceRoot()
 	if err != nil {
 		return err
 	}
-	if os.MkdirAll(root, 0700) != nil || os.MkdirAll(filepath.Dir(metadata), 0700) != nil {
+	if os.MkdirAll(root, 0700) != nil {
 		return errPreferences
 	}
 	if os.Chmod(root, 0700) != nil {
@@ -375,7 +372,7 @@ func (r *Runtime) ImportPreferences(accountID, previewHash string) error {
 	if store.WriteJSON(path, values, 0600) != nil {
 		return errPreferences
 	}
-	if preferences.Save(metadata, accountID, preferences.Ref{Settings: path, SourceHash: p.Hash, Harness: p.Harness}) != nil {
+	if preferences.Save(accountID, preferences.Ref{Settings: path, SourceHash: p.Hash, Harness: p.Harness}) != nil {
 		return errPreferences
 	}
 	committed = true
@@ -394,11 +391,11 @@ func (r *Runtime) PreferenceValues(accountID string) (map[string]any, error) {
 	if err != nil {
 		return nil, errPreferences
 	}
-	root, metadata, err := r.preferencePaths()
+	root, err := r.preferenceRoot()
 	if err != nil {
 		return nil, err
 	}
-	ref, ok, err := preferences.For(metadata, accountID)
+	ref, ok, err := preferences.For(accountID)
 	if err != nil {
 		return nil, errPreferences
 	}

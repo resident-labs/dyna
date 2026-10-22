@@ -8,7 +8,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"io"
 	"path/filepath"
 
 	"dyna-agent/internal/database"
@@ -100,68 +99,19 @@ ON CONFLICT(account) DO UPDATE SET ref = excluded.ref`, account, raw)
 	return err
 }
 
-// Save records account's layer and copies the whole index for the previous release.
-func Save(metadata, account string, ref Ref) error {
-	ctx := context.Background() // Until callers pass one.
-	unlock, err := store.LockContext(ctx, metadata+".lock")
+// Save records account's immutable settings layer in SQLite.
+func Save(account string, ref Ref) error {
+	db, err := open(store.DataDir(), filepath.Join(store.ConfigDir(), "harness-preferences.json"))
 	if err != nil {
 		return err
 	}
-	defer unlock()
-	db, err := open(store.DataDir(), metadata)
-	if err != nil {
-		return err
-	}
-	if err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-		return saveRow(ctx, conn, account, ref)
-	}); err != nil {
-		return err
-	}
-	// TODO: legacy/shim remove later — harness-preferences.json is the
-	// previous release's copy of the whole index; remove with requirement 31.
-	return state.For(db).Mirror(ctx, mirrorKey, metadata, func(out io.Writer) error {
-		refs, err := readIndex(ctx, db)
-		if err != nil {
-			return err
-		}
-		b, err := json.MarshalIndent(refs, "", "  ")
-		if err != nil {
-			return err
-		}
-		_, err = out.Write(append(b, '\n'))
-		return err
-	})
-}
-
-// readIndex reads every account's layer.
-func readIndex(ctx context.Context, db *sql.DB) (map[string]Ref, error) {
-	refs := map[string]Ref{}
-	err := state.For(db).Read(ctx, func(q state.Reader) error {
-		rows, err := q.QueryContext(ctx, "SELECT account, ref FROM harness_preferences")
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var account string
-			var raw []byte
-			if err := rows.Scan(&account, &raw); err != nil {
-				return err
-			}
-			var ref Ref
-			if err := json.Unmarshal(raw, &ref); err != nil {
-				return err
-			}
-			refs[account] = ref
-		}
-		return rows.Err()
-	})
-	return refs, err
+	ctx := context.Background()
+	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error { return saveRow(ctx, conn, account, ref) })
 }
 
 // For reads account's layer; ok is false when the account has none.
-func For(metadata, account string) (ref Ref, ok bool, err error) {
-	db, err := open(store.DataDir(), metadata)
+func For(account string) (ref Ref, ok bool, err error) {
+	db, err := open(store.DataDir(), filepath.Join(store.ConfigDir(), "harness-preferences.json"))
 	if err != nil {
 		return ref, false, err
 	}
@@ -181,9 +131,7 @@ func For(metadata, account string) (ref Ref, ok bool, err error) {
 	return ref, ok, err
 }
 
-// Forget deletes account's row inside the caller's write, the account
-// store's removal. The copy keeps naming the account until the next Save;
-// the previous release cannot use a removed account, so that is harmless.
+// Forget deletes account's row inside the account store's removal transaction.
 func Forget(ctx context.Context, conn *sql.Conn, account string) error {
 	ok, err := database.HasTable(ctx, conn, "harness_preferences")
 	if err != nil || !ok {
