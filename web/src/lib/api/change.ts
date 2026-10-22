@@ -9,6 +9,7 @@ export interface CheckSummary {
   url: string
   id?: number
   durationMs?: number
+  node?: string
   completed?: string
   failureExcerpt?: string
   failureExcerptChecked?: boolean

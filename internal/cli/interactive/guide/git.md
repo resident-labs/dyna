@@ -68,7 +68,7 @@ with the earlier findings and delta context. The final review answers each comme
 A reviewer may return changes or approve before CI finishes. Dyna marks a change
 ready only when an approval and green CI are on the same head. CI failures go
 to the author; the final review notes the CI result.
-Source-only reviews of draft changes need no CI evidence. Merging a PR requires passing GitHub CI.
+Source-only reviews of draft changes need no CI evidence. Merging a PR requires passing CI.
 
 Verdicts are `approve`, `approve-with-nits`, `changes`, or `question`.
 Approval cannot contain `blocking` or `should-fix` findings.
@@ -131,7 +131,7 @@ dyna git pr budget
 dyna git pr budget --warn 2m --fail 3m --test 10s
 ```
 
-Keep each test under 10 seconds. Authors run the affected test commands directly in the agent environment under `dyna.slice`. For Go, test only touched packages. Keep `DYNA_OWNER_ENV` and `DYNA_BIN` set: they keep `dyna` on the owner's data folder. If a test reads the session stamp, run it with `env -u DYNA_SESSION -u DYNA_MODE`. A test that needs its own data folder calls `storetest.DataDir(t)`. No local evidence ledger is required; GitHub CI gates merges.
+Keep each test under 10 seconds. Authors run the affected test commands directly in the agent environment under `dyna.slice`. For Go, test only touched packages. Keep `DYNA_OWNER_ENV` and `DYNA_BIN` set: they keep `dyna` on the owner's data folder. If a test reads the session stamp, run it with `env -u DYNA_SESSION -u DYNA_MODE`. A test that needs its own data folder calls `storetest.DataDir(t)`. No local evidence ledger is required; the configured CI source gates merges.
 Export Go reports with `dyna git ci tests --junit-output <file>`.
 Missing JUnit produces one warning; `dyna git pr budget --no-junit-warning=false` disables it.
 `--allow package/TestName` sets exact allowed test names; repeat it for more names.
@@ -144,7 +144,29 @@ Exempt workflows still gate CI. In enforce mode, runs that finish over budget st
 Use `dyna git sync status --json` to inspect saved ahead and behind counts.
 `dyna git sync fetch` refreshes the configured local lane remotes.
 
-Local CI runs one commit over SSH. It excludes live computer tests.
+Registered nodes run CI for tracked PR heads and merge trials. Nodes are not
+GitHub self-hosted runners. Add this machine or SSH machines:
+
+```sh
+dyna git ci node add local --slots 1
+dyna git ci node add omarchy --ssh ari@omarchy --slots 2
+dyna git ci node add hermeslab --ssh pip@hermeslab --jump ari@omarchy --slots 2
+dyna git ci node list
+dyna git ci mode local
+```
+
+The mode applies to the current room. `github` is the default. `local` and
+`both` accept the first conclusive local or GitHub result; any observed failure
+blocks merging. With no enabled nodes, GitHub remains the CI source.
+Use `node disable <name>` or `node rm <name>` to stop assigning a node work.
+Merge trials run first. Superseded heads are cancelled. Forks stay on GitHub.
+Local checks use bounded systemd scopes and containers, with warm caches.
+When local work starts, Dyna removes only queued or waiting hosted runs for that
+exact head. Running jobs finish. An infrastructure error reruns the removed
+runs. Main pushes are never cancelled.
+The PR Checks tab and `dyna git merge status` show the node for each check.
+
+Manual CI can also run one commit over the configured SSH destination:
 
 ```sh
 dyna git ci run <sha>
@@ -166,7 +188,7 @@ Release removes the draft hold. The PR must still pass review and CI before it c
 ## Automatic merging
 
 Dyna merges tracked pull requests automatically when the current head has
-a Dyna reviewer approval and passing GitHub CI. The engine runs one merge
+a Dyna reviewer approval and passing CI. The engine runs one merge
 at a time. Authors do not run a landing command or a merge command.
 Root controls failed batches with `dyna git merge`; see Root merge controls.
 
@@ -182,7 +204,7 @@ Push the rebased head, then wait for its new review and CI.
 `dyna git change policy` reads room defaults; only root changes them.
 No stamp means root. Authors or root can override review or named GitHub check settings
 with `--reason`. These settings control review work; automatic merging still
-needs exact-head approval and green GitHub CI.
+needs exact-head approval and passing CI.
 
 After each merge, the existing hook spool runs repository hooks.
 The install service combines installs during a burst of merges.
