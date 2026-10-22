@@ -33,6 +33,9 @@ type OpenChangeOptions struct {
 	Notes          ChangeNotes
 	Category       string
 	Dependencies   []string
+	// Goal links the change to this goal of its room, replacing any link.
+	// Empty keeps the link, or captures one when the change is new.
+	Goal string
 }
 
 // gitRead performs bounded, read-only repository inspection without shell expansion.
@@ -426,6 +429,22 @@ func (s *Service) UpdateChangeNotes(key, author string, notes ChangeNotes, categ
 			return err
 		}
 		r.Notes, r.Category, r.Dependencies = cleanNotes(notes), category, append([]string{}, deps...)
+		return nil
+	})
+}
+
+// SetGoal links the change to a goal of its room; "" clears the link. The
+// caller has checked the goal and the right to change the link against author.
+func (s *Service) SetGoal(key, author, goalID string) error {
+	return s.Store.update(func(st *State) error {
+		r := recordByID(st, key)
+		if r == nil {
+			return fmt.Errorf("change is not tracked")
+		}
+		if err := sameAuthor(r, author); err != nil {
+			return err
+		}
+		r.GoalID = goalID
 		return nil
 	})
 }

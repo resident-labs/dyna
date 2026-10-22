@@ -17,6 +17,7 @@ import (
 )
 
 type ChangeView struct {
+	GoalID                   string   `json:"goalId,omitempty"`
 	RequiredReviewers        []string `json:"requiredReviewers,omitempty"`
 	MissingRequiredReviewers []string `json:"missingRequiredReviewers,omitempty"`
 	IsDraft                  bool     `json:"isDraft"`

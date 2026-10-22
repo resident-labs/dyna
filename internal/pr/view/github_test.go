@@ -268,7 +268,7 @@ func TestTrackPRRefChecksTheCheckoutAndTheCaller(t *testing.T) {
 	// The room fixture already made root a checkout with an acme/widgets origin.
 	foreign := t.TempDir()
 	gitRepo(foreign, "https://github.com/other/repo.git")
-	if _, err := e.svc.PRs.TrackPRRef(ownerCtx, rec.ID, author.ID, "7", foreign); err == nil || !strings.Contains(err.Error(), "not a checkout of room") {
+	if _, err := e.svc.PRs.TrackPRRef(ownerCtx, rec.ID, author.ID, "7", foreign, ""); err == nil || !strings.Contains(err.Error(), "not a checkout of room") {
 		t.Fatalf("a checkout of another repository was accepted: %v", err)
 	}
 	asAuthor := authority.WithActor(context.Background(), authority.Actor{Role: authority.Session, Session: author.ID, Room: rec.ID})
@@ -284,16 +284,16 @@ func TestTrackPRRefChecksTheCheckoutAndTheCaller(t *testing.T) {
 		if who == "the author's parent" {
 			named = child.ID
 		}
-		if _, err := e.svc.PRs.TrackPRRef(ctx, rec.ID, named, "7", ""); err == nil || !strings.Contains(err.Error(), "tracks a PR only as itself") {
+		if _, err := e.svc.PRs.TrackPRRef(ctx, rec.ID, named, "7", "", ""); err == nil || !strings.Contains(err.Error(), "tracks a PR only as itself") {
 			t.Fatalf("%s tracked a PR for another session: %v", who, err)
 		}
 	}
 	other := e.room("track-other")
 	asOtherRoot := authority.WithActor(context.Background(), authority.Actor{Role: authority.Root, Session: "ses_20261020-000000-0000abcd", Room: other.ID})
-	if _, err := e.svc.PRs.TrackPRRef(asOtherRoot, rec.ID, author.ID, "7", ""); err == nil || !strings.Contains(err.Error(), "only in its own room") {
+	if _, err := e.svc.PRs.TrackPRRef(asOtherRoot, rec.ID, author.ID, "7", "", ""); err == nil || !strings.Contains(err.Error(), "only in its own room") {
 		t.Fatalf("root of another room tracked a PR here: %v", err)
 	}
-	got, err := e.svc.PRs.TrackPRRef(asAuthor, rec.ID, author.ID, "7", root)
+	got, err := e.svc.PRs.TrackPRRef(asAuthor, rec.ID, author.ID, "7", root, "")
 	if err != nil || got.PR.Number != 7 || got.PR.Author != author.ID || !got.Created {
 		t.Fatalf("track from the room's checkout = %+v, %v", got, err)
 	}
@@ -306,7 +306,7 @@ func TestTrackPRRefRootTracksAsItsOwnSession(t *testing.T) {
 	prfixture.FakeGH(t)
 	seat := e.start(rec, "root-seat", nil)
 	asRoot := authority.WithActor(context.Background(), authority.Actor{Role: authority.Root, Session: seat.ID, Room: rec.ID})
-	got, err := e.svc.PRs.TrackPRRef(asRoot, rec.ID, "", "7", root)
+	got, err := e.svc.PRs.TrackPRRef(asRoot, rec.ID, "", "7", root, "")
 	if err != nil || got.PR.Author != seat.ID || !got.Created {
 		t.Fatalf("root track = %+v, %v", got, err)
 	}

@@ -122,6 +122,7 @@ type Record struct {
 	PolicyOverride    changepolicy.Override `json:"policyOverride"`
 	Landing           *Landing              `json:"landing,omitempty"`
 	ChangeID          string                `json:"changeId,omitempty"`
+	GoalID            string                `json:"goalId,omitempty"` // goal of the same room that this change serves
 	Kind              string                `json:"kind,omitempty"`
 	RepoPath          string                `json:"repoPath,omitempty"`
 	BaseRef           string                `json:"baseRef,omitempty"`

@@ -63,6 +63,7 @@ func Command(o Options) *cobra.Command {
 	open.Flags().StringVar(&opts.Notes.Questions, "questions", "", "questions for the reviewer")
 	open.Flags().StringVar(&opts.Category, "category", "", "change category: fix, small, refactor, or move")
 	skipReview := open.Flags().String("skip-review", "", "skip review with this recorded reason")
+	open.Flags().StringVar(&opts.Goal, "goal", "", "link the change to this open room goal, such as g12 (default: your goal when unambiguous)")
 	open.Flags().StringArrayVar(&opts.Dependencies, "depends-on", nil, "required change ID; repeat for each dependency")
 	open.RunE = func(c *cobra.Command, _ []string) error {
 		if c.Flags().Changed("skip-review") && strings.TrimSpace(*skipReview) == "" {

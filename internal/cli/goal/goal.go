@@ -92,7 +92,7 @@ func Command(o Options) *cobra.Command {
 			if setter == "" {
 				setter = g.Setter
 			}
-			fmt.Fprintf(c.OutOrStdout(), "%s ◎ %s · held by %s · from %s · %s%s\n", g.ID, goals.Clip(g.Text, 160), strings.Join(holders, ", "), setter, g.State, items)
+			fmt.Fprintf(c.OutOrStdout(), "%s ◎ %s · held by %s · from %s · %s%s\n", g.ID, goals.Clip(g.Text, 160), strings.Join(holders, ", "), setter, g.State, items+expediteNote(g))
 		}
 		for _, section := range []struct {
 			title string
@@ -207,6 +207,35 @@ func Command(o Options) *cobra.Command {
 		}}
 		return cmd
 	}
+	expedite := &cobra.Command{Use: "expedite [id]", Short: "Owner or root: put one goal first in the room's review and merge queues", Long: "Marks the goal's agents and changes for earlier review and merge. Each room has at most one expedited goal. It lasts until the goal is done or dropped, until --off, or for 24 hours. Use --replace to switch from another goal.", Args: cobra.MaximumNArgs(1)}
+	replace := expedite.Flags().Bool("replace", false, "replace the room's current expedited goal")
+	off := expedite.Flags().Bool("off", false, "stop the room's expedited goal")
+	expedite.RunE = func(c *cobra.Command, a []string) error {
+		if *off == (len(a) == 1) {
+			return fmt.Errorf("give a goal ID, or --off with no ID")
+		}
+		id := ""
+		if len(a) == 1 {
+			id = a[0]
+		}
+		var g goals.Goal
+		if err := o.Client.Call(c.Context(), "ExpediteGoal", []any{MutationRoom(roomRef), id, *replace}, &g); err != nil {
+			return err
+		}
+		if asJSON {
+			return printGoal(c, g)
+		}
+		if g.ID == "" {
+			_, err := fmt.Fprintln(c.OutOrStdout(), "no expedited goal")
+			return err
+		}
+		state := "no longer expedited"
+		if g.ExpediteUntil != nil {
+			state = strings.TrimPrefix(expediteNote(g), " · ")
+		}
+		_, err := fmt.Fprintln(c.OutOrStdout(), g.ID, state)
+		return err
+	}
 	note := &cobra.Command{Use: "note <id> <text>", Short: "Append a progress note to a goal's journal", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, a []string) error {
 		var e goals.Event
 		err := o.Client.Call(c.Context(), "NoteGoal", []any{MutationRoom(roomRef), a[0], a[1]}, &e)
@@ -277,8 +306,16 @@ func Command(o Options) *cobra.Command {
 	itemMove.Flags().StringVar(&itemMoveTo, "to", "", "destination goal ID, or new to promote the item (required)")
 	_ = itemMove.MarkFlagRequired("to")
 	item.AddCommand(itemAdd, itemState("done <goal> <item>", "Mark an item done", goals.ItemDone), itemState("drop <goal> <item>", "Drop an item", goals.ItemDropped), itemState("reopen <goal> <item>", "Reopen an item", goals.ItemOpen), itemEdit, itemMove)
-	root.AddCommand(list, show, edit, waitCommand(o, &roomRef), journalCommand(o, &roomRef), finish(false), finish(true), note, item)
+	root.AddCommand(list, show, edit, waitCommand(o, &roomRef), journalCommand(o, &roomRef), finish(false), finish(true), expedite, note, item)
 	return root
+}
+
+// expediteNote is the list suffix for a goal that has room priority.
+func expediteNote(g goals.Goal) string {
+	if g.ExpediteUntil == nil {
+		return ""
+	}
+	return " · expedited until " + g.ExpediteUntil.Local().Format("Jan 2 15:04")
 }
 
 func printItem(c *cobra.Command, it goals.Item) error {
