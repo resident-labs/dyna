@@ -602,13 +602,11 @@ func startGuarded(ctx context.Context, p profile.Profile, cmd *exec.Cmd, prompt 
 	release := func() {}
 	// Own process group so a timeout/cancel kills the whole worker tree.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	if execution.KillOnCancel || cmd.Cancel == nil {
-		cmd.Cancel = func() error {
-			if execution.KillOnCancel {
-				return signalProcessGroup(cmd, syscall.SIGKILL)
-			}
-			return signalProcessGroup(cmd, syscall.SIGTERM)
+	cmd.Cancel = func() error {
+		if execution.KillOnCancel {
+			return signalProcessGroup(cmd, syscall.SIGKILL)
 		}
+		return signalProcessGroup(cmd, syscall.SIGTERM)
 	}
 	if steering != nil && steering.opts.BeforeStart != nil {
 		if err := steering.opts.BeforeStart(ctx, prompt); err != nil {
