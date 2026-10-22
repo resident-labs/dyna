@@ -4,9 +4,7 @@ package computers
 
 import (
 	"context"
-	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -29,16 +27,9 @@ func TestBrowserOpenSavesIntentAndWaitsForHumanControl(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "human has control") {
 		t.Fatalf("browser ignored human control: %v", err)
 	}
-	body, err := os.ReadFile(filepath.Join(Dir(id), "state.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var saved Status
-	if err := json.Unmarshal(body, &saved); err != nil {
-		t.Fatal(err)
-	}
+	saved := savedStatus(id)
 	if saved.LatestStatus == nil || saved.LatestStatus.Text != "Checking the example page" || saved.LatestStatus.At.IsZero() {
-		t.Fatalf("saved intent: %s", body)
+		t.Fatalf("saved intent: %+v", saved)
 	}
 }
 
