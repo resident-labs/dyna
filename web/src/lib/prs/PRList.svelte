@@ -18,6 +18,8 @@
   //   onpick     opens a row
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
+  import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
+  import { expedite, prExpedited } from '../rooms/expedite.ts'
   import LoadOlder from '../ui/LoadOlder.svelte'
   import { changeTitle } from './pr.ts'
   import { listLine, isDone, groupOpen, checksLine, queueLine, overlapChip, type Group, type MergeItem, type MergeState, type Names, type Row as ChangeRow } from './prlist.ts'
@@ -64,7 +66,7 @@
   <Row dense selected={c.changeId === selId} context={isDone(c)} onclick={() => onpick(c)}>
     {#snippet lead()}<span class="sdot {state?.tone ?? ''}" role="img" aria-label={state?.label} title={state?.reason ? `${state.label} · ${state.reason}` : state?.label}></span>{/snippet}
     <span class="one"><span class="t">{changeTitle(c)}</span><span class="m">{listLine(c, names)}</span></span>
-    {#snippet trail()}{@const radar = overlapChip(c)}{#if radar}<Chip tone={radar.tone}>{radar.text}</Chip>{/if}{#if checksLine(c)}<span class="checks">{checksLine(c)}</span>{/if}{/snippet}
+    {#snippet trail()}{@const radar = overlapChip(c)}{#if prExpedited($expedite, c)}<ExpediteBadge />{/if}{#if radar}<Chip tone={radar.tone}>{radar.text}</Chip>{/if}{#if checksLine(c)}<span class="checks">{checksLine(c)}</span>{/if}{/snippet}
   </Row>
 {/snippet}
 <div class="rows">

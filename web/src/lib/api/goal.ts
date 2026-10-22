@@ -31,6 +31,7 @@ export interface Goal {
   edits: GoalEdit[] | null
   detail?: string
   service?: boolean
+  expediteUntil?: string // omitted when not expedited; the room's one priority goal
   done?: GoalOutcome
 }
 

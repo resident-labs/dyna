@@ -16,6 +16,9 @@
   import { ago } from '../ui/format.js'
   import MergeBox from './MergeBox.svelte'
   import PRChip from './PRChip.svelte'
+  import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
+  import { expedite, goalExpedited, prExpedited } from '../rooms/expedite.ts'
+  import type { Goal } from '../api/goal.ts'
   import PRGlyph from './PRGlyph.svelte'
   import PROverlaps from './PROverlaps.svelte'
   import PRChecks from './PRChecks.svelte'
@@ -52,8 +55,27 @@
     onauthor?: ChangeAction | null
     onreviewer?: (() => void) | null
     actions?: Snippet | null
+    goals?: Goal[]
+    onexpedite?: ((goal: Goal) => void | Promise<void>) | null
+    onlinkgoal?: ((change: Row, goalId: string) => void | Promise<void>) | null
   }
-  let { change, detail = null, detailError = '', roomId, names = {}, review = true, merge = null, standing = null, tab = $bindable('conversation'), ontab = () => {}, onback = null, onuntrack = null, onresume = null, ontrack = null, onchange = () => {}, onauthor = null, onreviewer = null, actions = null }: Props = $props()
+  let { change, detail = null, detailError = '', roomId, names = {}, review = true, merge = null, standing = null, tab = $bindable('conversation'), ontab = () => {}, onback = null, onuntrack = null, onresume = null, ontrack = null, onchange = () => {}, onauthor = null, onreviewer = null, actions = null, goals = [], onexpedite = null, onlinkgoal = null }: Props = $props()
+  let linking = $state(false)
+  let pick = $state('')
+  let xpBusy = $state(false)
+  let xpError = $state('')
+  let linked = $derived(goals.find((g) => g.id === change.goalId && g.state === 'active'))
+  let candidates = $derived(goals.filter((g) => g.state === 'active'))
+  // The button uses the linked goal; a change with none first links one.
+  async function expediteChange(goal: Goal | undefined, link = '') {
+    xpBusy = true; xpError = ''
+    try {
+      if (link) await onlinkgoal?.(change, link)
+      const g = goal ?? goals.find((x) => x.id === link)
+      if (g) await onexpedite?.(g)
+      linking = false
+    } catch (e) { xpError = String((e as Error)?.message || e) } finally { xpBusy = false }
+  }
   let changeDetail = $state<Detail | null>(null)
   let drawer = $state(false)
   let conversation = $state<{ reveal: () => Promise<void> } | null>(null)
@@ -111,10 +133,33 @@
     </div>
     <p class="meta">
       {#if !isLocal(change)}<span class="badge {gh.tone}"><PRGlyph it={change} size={14} />{gh.label}</span>{/if}
-      {#if change.state === 'open'}<PRChip pr={change} meta={merged} number={false} />{/if}
+      {#if change.state === 'open'}<PRChip pr={change} meta={merged} number={false} badge={false} />{/if}
+      {#if prExpedited($expedite, change)}<ExpediteBadge />{/if}
       <span class="facts">{factsLine(change, { byline: false, size, ago })}</span>
       {#each labels as l (l.name)}<span class="ghlabel" style={labelStyle(l.color)}>{l.name}</span>{/each}
     </p>
+    {#if change.state === 'open' && onexpedite}
+      <div class="xp">
+        {#if linked && goalExpedited($expedite, linked)}
+          <button class="btn" disabled={xpBusy} onclick={() => expediteChange(linked)}>Stop expediting</button>
+          <span class="quiet">Goal {linked.id} has priority.</span>
+        {:else if linked}
+          <button class="btn" disabled={xpBusy} onclick={() => expediteChange(linked)}>Expedite</button>
+          <span class="quiet">Expedites goal {linked.id}, and every PR linked to it.</span>
+        {:else if !linking}
+          <button class="btn" onclick={() => (linking = true)}>Expedite</button>
+        {:else}
+          <label class="quiet" for="xp-goal">This change has no goal. Link it to one to expedite it.</label>
+          <select id="xp-goal" bind:value={pick}>
+            <option value="">Choose a goal</option>
+            {#each candidates as g (g.id)}<option value={g.id}>{g.id} · {g.text.slice(0, 60)}</option>{/each}
+          </select>
+          <button class="btn" disabled={xpBusy || !pick} onclick={() => expediteChange(undefined, pick)}>Link and expedite</button>
+          <button class="btn" onclick={() => (linking = false)}>Cancel</button>
+        {/if}
+        {#if xpError}<span class="err" role="alert">{xpError}</span>{/if}
+      </div>
+    {/if}
   </header>
   <ChangeDetail row={change} {roomId} bind:detail={changeDetail}>
     {#snippet children(full, fullError, fullLoading, refresh)}
@@ -172,6 +217,12 @@
   @keyframes tabfade { from { opacity: 0; } }
   .tabs button span { font-size: 11.5px; color: var(--faint); font-weight: 500; }
   .tabs button.on { color: var(--ink); border-color: var(--iris); }
+  .xp { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-top: var(--s3); font-size: var(--t-sm); }
+  .xp .quiet, .xp .err { padding: 0; font-size: var(--t-sm); }
+  .xp .btn { padding: 4px 10px; border-radius: 6px; background: var(--raise); color: var(--ink-2); font-weight: 600; }
+  .xp .btn:hover:not(:disabled) { color: var(--ink); background: var(--raise-hover); }
+  .xp .btn:disabled { opacity: .5; }
+  .xp select { background: var(--field); color: var(--ink); border: 1px solid var(--line); border-radius: 5px; padding: 4px 6px; max-width: 280px; }
   .quiet { color: var(--faint); font-size: 13.5px; padding: 12px 2px; }
   .err { color: var(--coral); padding: 12px 2px; overflow-wrap: anywhere; }
   @media (max-width: 760px) {

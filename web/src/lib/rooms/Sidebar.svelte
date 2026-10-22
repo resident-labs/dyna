@@ -9,6 +9,8 @@
   import { features } from '../../api.js'
   import { ago, roomLabel } from '../ui/format.js'
   import PRChip from '../prs/PRChip.svelte'
+  import ExpediteBadge from './ExpediteBadge.svelte'
+  import { expedite, agentExpedited } from './expedite.ts'
   import GoalGlyph from './GoalGlyph.svelte'
   import { isLive } from '../computers/computers.js'
   import { available as terminal } from '../sessions/TermPane.svelte'
@@ -54,6 +56,7 @@
   <button class="chan person" class:sel style="--depth: {agents ? m.depth : 0}" {onclick}>
     <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={22} state={m.state} ring="var(--side)" />
     <span class="label hue-{m.hue}">{m.name}</span>
+    {#if agentExpedited($expedite, m)}<ExpediteBadge short />{/if}
     {#if prs[m.id]?.length}<PRChip pr={prs[m.id][0]} short />{:else}<span class="turn">{m.state === 'live' ? `turn ${m.turns}` : m.state === 'error' ? sessionStatus(m) : ago(m.lastActivity)}</span>{/if}
   </button>
 {/snippet}

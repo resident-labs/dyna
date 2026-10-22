@@ -49,6 +49,7 @@
   import { changesVisuals } from './lib/files/visuals.js'
   import Goals from './lib/rooms/Goals.svelte'
   import GoalDetail from './lib/rooms/GoalDetail.svelte'
+  import { expedite, expediteScope, expediteAction, heldGoals } from './lib/rooms/expedite.ts'
   import Rules from './lib/rooms/Rules.svelte'
   import { nextRules } from './lib/rooms/rules.js'
   import PinIcon from './lib/ui/PinIcon.svelte'
@@ -236,6 +237,17 @@
   let roomMenu = $state(null) // {r, x, y, anchor}: the open room menu
   let goals = $state([])
   let goalId = $state('')
+  // The room's one expedited goal, kept for the badges. A timer wakes it at the
+  // deadline, so the badges leave on time without a server event.
+  let expireTick = $state(Date.now())
+  let knownGoals = $derived(fetchedGoal && !goals.some((g) => g.id === fetchedGoal.id) ? [...goals, fetchedGoal] : goals)
+  $effect(() => {
+    const scope = expediteScope(knownGoals, hierarchy, expireTick)
+    expedite.set(scope)
+    if (!scope.goalId) return
+    const timer = setTimeout(() => (expireTick = Date.now()), Math.min(scope.until - Date.now() + 50, 2 ** 31 - 1))
+    return () => clearTimeout(timer)
+  })
   // A goal opened by a link but held by no loaded page; list refreshes keep it.
   let fetchedGoal = $state(null)
   // Counts change events applied to fetchedGoal, so a slower reload answer
@@ -1355,6 +1367,29 @@
     } finally { dismissing = '' }
   }
 
+  // Expedite gives the goal's agents and PRs the first review and merge.
+  // A goal that would replace another asks first.
+  async function expediteGoal(g) {
+    const action = expediteAction($expedite, g)
+    if (action === 'replace') { confirm = { kind: 'expedite', goal: g }; return }
+    await api.expediteGoal(roomId, action === 'stop' ? '' : g.id, false)
+    say(action === 'stop' ? `Goal ${g.id} is no longer expedited.` : `Goal ${g.id} is expedited.`)
+    loadGoals()
+  }
+  async function linkPRGoal(change, goalId) {
+    await api.setPRGoal(roomId, change.key, goalId)
+    await loadChanges()
+  }
+  // Menu items for the goal an agent holds, or its nearest ancestor holds; with several goals, one item for each.
+  function expediteItems(m) {
+    if (m.closed) return []
+    const held = heldGoals(m, hierarchy, knownGoals)
+    return held.map((g) => ({
+      label: expediteAction($expedite, g) === 'stop' ? `Stop expediting${held.length > 1 ? ` ${g.id}` : ' goal'}` : held.length > 1 ? `Expedite goal ${g.id}: ${g.text.slice(0, 40)}` : 'Expedite goal',
+      run: () => expediteGoal(g).catch((e) => say(String(e?.message || e))),
+    }))
+  }
+
   // Session menu: safe actions first, then the two that stop work, set
   // apart in coral. Both of those ask first.
   function menuItems(m) {
@@ -1367,6 +1402,7 @@
     // The internal root holds the root seat, so it is never consolidated.
     if (!m.closed && m.role !== 'root') items.push({ label: 'Consolidate sessions…', run: () => { selectingSessions = true; setPicked([m.id]); showMembers = true; showPins = false } })
     if (!m.closed) items.push({ label: 'Mention in composer', run: () => mentionMember(m) })
+    items.push(...expediteItems(m))
     items.push({ label: 'Copy address', hint: m.address, run: () => copyText(m.address).then(() => say(`Copied ${m.address}`), (e) => say(String(e))) })
     if (!m.closed) items.push({ label: m.transfer ? 'Model transfer…' : 'Transfer to new model…', run: () => { loadProfiles(); transferring = m } })
     if (!m.closed && m.parent) items.push({ label: 'Promote to lead', run: () => (confirm = { kind: 'promote', m }) })
@@ -1496,6 +1532,13 @@
         action: 'Close anyway',
       }
     }
+    if (confirm.kind === 'expedite') {
+      return {
+        title: `Expedite goal ${confirm.goal.id}?`,
+        lines: [`Goal ${$expedite.goalId} is expedited now. A room has one expedited goal, so this replaces it.`],
+        action: 'Replace and expedite', danger: false,
+      }
+    }
     if (confirm.kind === 'cancelrun') {
       return {
         title: `Cancel ${confirm.run.name}?`,
@@ -1521,6 +1564,17 @@
   async function runConfirm() {
     const { kind, m } = confirm
     confirm = { ...confirm, busy: true, error: '' }
+    if (kind === 'expedite') {
+      try {
+        await api.expediteGoal(roomId, confirm.goal.id, true)
+        say(`Goal ${confirm.goal.id} is expedited.`)
+        confirm = null
+        loadGoals()
+      } catch (e) {
+        confirm = { ...confirm, busy: false, error: String(e?.message || e) }
+      }
+      return
+    }
     if (kind === 'cancelrun') {
       try {
         await api.cancelRun(confirm.run.id)
@@ -2309,7 +2363,7 @@
         {:else if view === 'library'}
           {#key room.id}<Library roomId={room.id} {narrow} onopen={({ path, dir }) => { openView('files'); if (dir) revealFolder = { path }; else reveal = path }} />{/key}
         {:else if view === 'github' || view === 'issues'}
-          {#key `${room.id}:${view}`}<GitHub older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind={view === 'issues' ? 'issue' : 'pr'} integration={syncRepo?.integration ?? null} link={prLink} {changes} members={hierarchy} onask={askAgent} onsession={(m, tab) => { openSession(m); if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} />{/key}
+          {#key `${room.id}:${view}`}<GitHub older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind={view === 'issues' ? 'issue' : 'pr'} integration={syncRepo?.integration ?? null} link={prLink} {changes} members={hierarchy} onask={askAgent} onsession={(m, tab) => { openSession(m); if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
         {:else if view === 'terminal' && hasTerminal}
           {#key room.id}<Terminal roomId={room.id} ref={room.id} noRepo={!room.repo} {narrow} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
         {:else if view === 'questions'}
@@ -2323,7 +2377,7 @@
         {:else if view === 'jobs'}
           {#key room.id}<Jobs older={listPages.jobs?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['jobs'])} {jobs} error={jobsError} jobId={openJob} {narrow} onstop={stopJob} />{/key}
         {:else if view === 'goals'}
-          {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id) => (goalId = id)} ongoal={openGoal} />{/key}
+          {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id) => (goalId = id)} ongoal={openGoal} onexpedite={(g) => expediteGoal(g).catch((e) => say(String(e?.message || e)))} />{/key}
         {:else if view === 'runs'}
           {#if openRun}
             {#key openRun}<Run detail={runDetail} error={runError} oncancel={(run) => (confirm = { kind: 'cancelrun', run })} onpause={pauseRun} onsteer={steerAgent} />{/key}
@@ -2346,7 +2400,7 @@
       <!-- On a wide screen this wrapper adds no box; on a narrow one it is a sheet. -->
       <div class="panel">
       {#if roomId && room && view === 'goals' && selectedGoal}
-        {#key selectedGoal.id}<GoalDetail roomId={room.id} goal={selectedGoal} members={hierarchy} onchanged={loadGoals} onclose={() => (goalId = '')} />{/key}
+        {#key selectedGoal.id}<GoalDetail roomId={room.id} goal={selectedGoal} members={hierarchy} onchanged={loadGoals} onclose={() => (goalId = '')} onexpedite={expediteGoal} />{/key}
       {:else if roomId && room && showPins}
         <Pins {room} {pins} ondetail={openDetail} onjump={(id) => { if (narrow) showPins = false; jumpTo(id) }} onunpin={togglePin} onopenfile={(a) => (viewing = a)} onclose={() => (showPins = false)} />
       {:else if roomId && room && showIssues}
