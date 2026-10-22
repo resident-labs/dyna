@@ -280,7 +280,7 @@ func TestPostMigrationRunnerClaimKeepsCanonicalQueueAndReceipt(t *testing.T) {
 			}
 			actor := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: info.ID})
 			rid := info.ID + "/post-migration-claim"
-			ctx := state.ForRequest(callspec.WithRequest(actor, rid), "runner/"+rid)
+			ctx := state.ForRequestCall(callspec.WithRequest(actor, rid), "runner/"+rid, "RunnerClaimInput", []byte("fixture-call"))
 			reply, err := e.m.RunnerClaimInput(ctx, InputClaim{Turn: 1, Startup: true})
 			if err != nil || len(reply.Posts) != 1 || reply.Posts[0].Steer.ID != msg.ID {
 				t.Fatalf("post-migration claim used stale state: %+v, %v", reply, err)
