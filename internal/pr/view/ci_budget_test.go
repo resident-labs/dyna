@@ -13,7 +13,7 @@ func TestSetRoomCIBudgetResolvesRoomAndScopesChanges(t *testing.T) {
 	t.Setenv(mode.EnvMode, mode.Workflow)
 	t.Setenv(mode.EnvSession, "ses_engine_worker")
 	t.Setenv(mode.EnvRoomID, beta.ID)
-	p := prview.CIBudgetSettings{CIWarnAfter: "4m", CIFailAfter: "5m", CITestMax: "20s", CITestAllow: []string{"pkg/slow"}, CITestAllowNotes: map[string]string{"pkg/slow": "12 seconds: setup"}}
+	p := prview.CIBudgetSettings{CITimeBudget: "warn", CIWarnAfter: "4m", CIFailAfter: "5m", CITestMax: "20s", CITestAllow: []string{"pkg/slow"}, CITestAllowNotes: map[string]string{"pkg/slow": "12 seconds: setup"}}
 	if err := e.svc.PRs.SetRoomCIBudget(ownerCtx, alpha.Name, p); err != nil {
 		t.Fatal(err)
 	}
