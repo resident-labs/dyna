@@ -143,7 +143,12 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		}
 		groups[repo] = append(groups[repo], current)
 	}
+	active, _, err := s.expeditedGoals()
+	if err != nil {
+		return retry(err)
+	}
 	for _, repo := range repos {
+		groups[repo] = chooseMergeBatch(groups[repo], active, s.expediteStreak("merge:"+repo))
 		limit := 0
 		for _, member := range groups[repo] {
 			settings, err := s.MergeSettings(member.RoomID)
@@ -177,6 +182,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 			failures = append(failures, err)
 			continue
 		}
+		s.expediteGranted("merge:"+repo, expeditedRecord(groups[repo][0], active))
 		if err := s.advanceMergeTrial(ctx, repo, batch); err != nil {
 			failures = append(failures, err)
 		}

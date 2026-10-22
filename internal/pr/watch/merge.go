@@ -18,6 +18,8 @@ import (
 
 // MergeQueueItem is a view of current facts. It is never saved as queue state.
 type MergeQueueItem struct {
+	GoalID                   string            `json:"goalId,omitempty"`
+	Expedited                bool              `json:"expedited,omitempty"`
 	MissingRequiredReviewers []string          `json:"missingRequiredReviewers,omitempty"`
 	Title                    string            `json:"title,omitempty"`
 	Author                   string            `json:"author,omitempty"`
@@ -205,7 +207,11 @@ func (s *Service) RoomMergeQueue(roomID string) ([]MergeQueueItem, error) {
 		return nil, err
 	}
 	rows := []MergeQueueItem{}
-	for _, item := range mergeQueue(st) {
+	ordered, err := s.prioritizedMergeQueue(st)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range ordered {
 		if item.RoomID != roomID {
 			continue
 		}
@@ -242,7 +248,10 @@ func (s *Service) MergeStatus(ctx context.Context) ([]MergeQueueItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows := mergeQueue(st)
+	rows, err := s.prioritizedMergeQueue(st)
+	if err != nil {
+		return nil, err
+	}
 	for i := range rows {
 		r := recordByID(&st, rows[i].ChangeID)
 		paused, err := s.RoomPaused(r.RoomID)

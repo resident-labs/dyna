@@ -55,8 +55,11 @@ func newWorkerSignals() *workerSignals {
 }
 
 func (s *workerSignals) wake(ev roomsvc.Event) {
-	if (ev.Kind == "prs" && ev.WorkerWake) || ev.Kind == "room.resumed" {
+	if ((ev.Kind == "prs" || ev.Kind == "goals") && ev.WorkerWake) || ev.Kind == "room.resumed" {
 		wakeWorker(s.channels["merges"])
+	}
+	if ev.Kind == "goals" && ev.WorkerWake {
+		wakeWorker(s.channels["prs"])
 	}
 	// A paused room's check-ins wait for its resume.
 	if ev.Kind == "room.resumed" {
