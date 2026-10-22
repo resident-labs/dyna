@@ -24,9 +24,9 @@ case "$suite" in
       # The four checks do not depend on each other, so they run side by side.
       pids=()
       node scripts/check-typescript.ts & pids+=($!)
-      npx svelte-check --tsconfig ./tsconfig.json & pids+=($!)
-      npx tsc --project ./tsconfig.json & pids+=($!)
-      npx tsc --project ./tsconfig.worker.json & pids+=($!)
+      npm exec -- svelte-check --tsconfig ./tsconfig.json & pids+=($!)
+      npm exec -- tsc --project ./tsconfig.json & pids+=($!)
+      npm exec -- tsc --project ./tsconfig.worker.json & pids+=($!)
       failed=0
       for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
       if ((failed)); then echo "Frontend type check failed" >&2; exit 1; fi

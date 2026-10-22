@@ -200,6 +200,23 @@ jobs:
         run: bash scripts/ci.sh go vet
       - name: Check installer
         run: bash scripts/ci.sh go installer
+      # The desktop is its own Go module, so the root ./... skips it. It needs
+      # no WebKit and no cgo. This job has no built frontend, so a stub page
+      # stands in for the assets and the end-to-end part of its tests is skipped.
+      - name: Desktop module
+        working-directory: desktop
+        shell: bash
+        run: |
+          touch ../web/dist/index.html
+          bash ../scripts/ci.sh go desktop
+      - name: Upload desktop test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-test-report
+          path: ${{ runner.temp }}/desktop-test.xml
+          if-no-files-found: ignore
+          retention-days: 1
       - name: Upload Go diagnostics
         if: always()
         uses: actions/upload-artifact@v4
@@ -232,16 +249,13 @@ jobs:
     needs: [changes]
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
-    # Its own job, so the frontend check does not spend go-test's time
+    # Its own job, so the frontend build and tests do not spend go-test's time
     # budget, and both run at once.
     timeout-minutes: 15
-    # The same container as go-test.
-    container:
-      image: golang:1.26.3
-    env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
-      npm_config_cache: /root/.npm
+    container: node:22
+    defaults:
+      run:
+        working-directory: web
     steps:
       - uses: actions/checkout@v6
       - name: Trust workspace
@@ -249,23 +263,8 @@ jobs:
           echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
           echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
           echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-      - name: Restore Go and npm caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            /root/.cache/go-build
-            /go/pkg/mod
-            /root/.npm
-          key: frontend-${{ hashFiles('go.sum', 'desktop/go.sum', 'web/package-lock.json') }}
-          restore-keys: frontend-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      # The frontend step uses the checker to re-measure slow web tests.
-      - name: Build CI checker
-        run: bash scripts/ci.sh go build
       - name: Build and test frontend and export JUnit
-        run: bash scripts/ci.sh frontend test
+        run: bash ../scripts/ci.sh frontend test
         env:
           JUNIT_REPORT_PATH: ${{ runner.temp }}/frontend-test.xml
       - name: Upload frontend test report
@@ -276,36 +275,13 @@ jobs:
           path: ${{ runner.temp }}/frontend-test.xml
           if-no-files-found: error
           retention-days: 1
-      # The desktop module and computer-smoke read these assets.
+      # computer-smoke reads these assets.
       - name: Upload frontend assets
         uses: actions/upload-artifact@v4
         with:
           name: frontend-dist
           path: web/dist
           if-no-files-found: error
-          retention-days: 1
-      # The desktop is its own Go module, so the root ./... skips it. Its
-      # tests need no WebKit and no cgo. The built frontend assets also
-      # let the desktop end-to-end test run.
-      - name: Desktop module
-        working-directory: desktop
-        shell: bash
-        run: bash ../scripts/ci.sh go desktop
-      - name: Upload desktop test report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: desktop-test-report
-          path: ${{ runner.temp }}/desktop-test.xml
-          if-no-files-found: ignore
-          retention-days: 1
-      - name: Upload frontend Go diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-go-diagnostics
-          path: ${{ runner.temp }}/ci-diagnostics.jsonl
-          if-no-files-found: ignore
           retention-days: 1
 
   frontend-check:
