@@ -108,10 +108,12 @@ func (s *Store) issuesDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "room.issues.schema", 1, func(conn *sql.Conn, _ int) error {
+	err = database.Migrate(db, "room.issues.schema", 2, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
-		if _, err := conn.ExecContext(ctx, issuesSchema); err != nil {
-			return err
+		if old < 1 {
+			if _, err := conn.ExecContext(ctx, issuesSchema); err != nil {
+				return err
+			}
 		}
 		return s.importLegacyIssues(ctx, conn)
 	})
@@ -121,7 +123,8 @@ func (s *Store) issuesDB() (*sql.DB, error) {
 	return db, nil
 }
 
-// TODO: legacy/shim remove later — copies each room's issues.json into dyna.db once and leaves the file in place so an older binary can roll back; remove with the files after every host has run a SQLite build for a while.
+// TODO: legacy/shim remove later — imports retained issues.json only during
+// schema upgrade; remove once supported stores have passed room.issues.schema 2.
 func (s *Store) importLegacyIssues(ctx context.Context, conn *sql.Conn) error {
 	entries, err := os.ReadDir(s.root())
 	if os.IsNotExist(err) {
@@ -134,24 +137,48 @@ func (s *Store) importLegacyIssues(ctx context.Context, conn *sql.Conn) error {
 		if !entry.IsDir() || !ValidID(entry.Name()) {
 			continue
 		}
-		b, err := os.ReadFile(filepath.Join(s.root(), entry.Name(), IssuesFile))
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		var rows []Issue
-		if err := json.Unmarshal(b, &rows); err != nil {
-			// Fail the whole import, as the old reader failed: the version
-			// stays unrecorded, so repairing the file lets the next call retry.
-			return fmt.Errorf("import %s: %w", filepath.Join(s.root(), entry.Name(), IssuesFile), err)
-		}
-		// The file lists newest first; insert oldest first so seq keeps the order.
-		for n := len(rows) - 1; n >= 0; n-- {
-			if err := insertIssue(ctx, conn, entry.Name(), rows[n]); err != nil {
+		id := entry.Name()
+		path := filepath.Join(s.root(), id, IssuesFile)
+		_, err := state.ImportMigration(ctx, conn, roomKey(id)+"/issues", path, func(conn *sql.Conn, raw []byte) error {
+			var rows []Issue
+			if err := json.Unmarshal(raw, &rows); err != nil {
+				return fmt.Errorf("import issues %s: %w", path, err)
+			}
+			seen := map[string]bool{}
+			var sequence int64
+			// seq is a table-wide primary key. Recover below every current row.
+			if err := conn.QueryRowContext(ctx, "SELECT COALESCE(MIN(seq),0) FROM room_issues").Scan(&sequence); err != nil {
 				return err
 			}
+			// The source lists newest first. Descending sequence values keep that order.
+			for _, issue := range rows {
+				if seen[issue.ID] {
+					return fmt.Errorf("import issues %s: duplicate issue ID %q", path, issue.ID)
+				}
+				seen[issue.ID] = true
+				var exists bool
+				if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM room_issues WHERE room_id=? AND id=?)", id, issue.ID).Scan(&exists); err != nil {
+					return err
+				}
+				if exists {
+					continue
+				}
+				body, err := json.Marshal(issue)
+				if err != nil {
+					return err
+				}
+				sequence--
+				if _, err := conn.ExecContext(ctx, "INSERT INTO room_issues(seq,room_id,id,state,body) VALUES(?,?,?,?,?)", sequence, id, issue.ID, issue.State, string(body)); err != nil {
+					return err
+				}
+				if err := bumpIssues(ctx, conn, id); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
 		}
 	}
 	return nil
