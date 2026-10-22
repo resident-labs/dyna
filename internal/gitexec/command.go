@@ -21,3 +21,4 @@ func Command(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	cmd.Env = append(cmd.Env, "GIT_TERMINAL_PROMPT=0", "GIT_OPTIONAL_LOCKS=0", "GIT_NO_LAZY_FETCH=1", "GIT_MERGE_AUTOEDIT=no", "GIT_SSH_COMMAND=ssh -oBatchMode=yes")
 	return childenv.Clean(cmd)
 }
+// probe
