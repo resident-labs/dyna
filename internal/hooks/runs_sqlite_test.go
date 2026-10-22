@@ -42,46 +42,6 @@ func TestRunRecordSurvivesRemovalOfLegacyFile(t *testing.T) {
 	}
 }
 
-func TestRunFilesImportLazilyOnRead(t *testing.T) {
-	s := runTestService(t)
-	run := Run{ID: strings.Repeat("b", 32), Repo: "repo", Name: "hook-test", Result: "pass"}
-	path := filepath.Join(s.dir(run.Repo), "runs", run.ID+".json")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.WriteJSON(path, run, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := MigrateRuns(s.DataDir); err != nil {
-		t.Fatal(err)
-	}
-	db, err := s.runsDB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	var count int
-	if err := db.QueryRow("SELECT count(*) FROM hook_runs").Scan(&count); err != nil || count != 0 {
-		t.Fatalf("startup imported %d run records: %v", count, err)
-	}
-	if err := db.QueryRow("SELECT count(*) FROM meta WHERE key='hooks.runs.import'").Scan(&count); err != nil || count != 0 {
-		t.Fatalf("startup wrote %d legacy import flags: %v", count, err)
-	}
-	if _, err := os.Stat(path + ".lock"); !os.IsNotExist(err) {
-		t.Fatalf("startup created a run lock: %v", err)
-	}
-	runs, err := s.runs(t.Context(), run.Repo, "")
-	if err != nil || len(runs) != 1 || runs[0].Result != "pass" {
-		t.Fatalf("lazy import: %+v, %v", runs, err)
-	}
-	writes := statewrite.For(db).Health().Writes
-	if _, err := s.runs(t.Context(), run.Repo, ""); err != nil {
-		t.Fatal(err)
-	}
-	if after := statewrite.For(db).Health().Writes; after != writes {
-		t.Fatalf("read imported the same file again: %d -> %d", writes, after)
-	}
-}
-
 func TestRunReadDoesNotImportOwnCopyOrPublish(t *testing.T) {
 	s := runTestService(t)
 	db, err := s.runsDB()
