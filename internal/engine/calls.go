@@ -265,6 +265,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "GoalItemCounts", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.GoalItemCounts},
 		{Name: "AddGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.AddGoal, Local: true},
 		{Name: "AddGoalItem", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.AddGoalItem, Local: true},
+		{Name: "MoveGoalItem", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.MoveGoalItem, Local: true},
 		{Name: "EditGoalSelectors", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.EditGoalSelectors, Local: true},
 		{Name: "EditGoalItem", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.EditGoalItem, Local: true},
 		{Name: "WaitGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.WaitGoal, Local: true},
