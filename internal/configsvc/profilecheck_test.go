@@ -14,6 +14,7 @@ import (
 func TestProfileAPIReportsObservedHealthAndVersionDrift(t *testing.T) {
 	isolate(t)
 	p := mock("health")
+	p.DeclareOutput()
 	p.Uses = []string{profile.UseAgents}
 	seed(t, p)
 	store := harnesshealth.New("")
@@ -80,7 +81,7 @@ func TestChangingHarnessUsesNewNativeDialect(t *testing.T) {
 		t.Fatal(err)
 	}
 	current, _ := store.Get(p.Name)
-	if current.Output != nil {
-		t.Fatal("harness edit retained an explicit old dialect")
+	if current.Output == nil || current.Output.Dialect != "claude-stream-json" {
+		t.Fatal("harness edit did not persist the new dialect")
 	}
 }
