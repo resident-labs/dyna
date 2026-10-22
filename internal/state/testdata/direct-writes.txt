@@ -215,7 +215,6 @@ not-state internal/store/store.go WriteJSON 1 # the JSON write primitives themse
 not-state internal/store/store.go flock 1 # the JSON write primitives themselves
 not-state internal/store/store.go flockOpened 1 # the JSON write primitives themselves
 not-state internal/subagent/consolidation.go Manager.consolidationWorkerLock 1 # a non-blocking flock for the one consolidation worker of a session
-not-state internal/subagent/lock_owner.go Store.recoverTurnLock 1 # removes a stale turn.lock file left by a dead runner
 not-state internal/subagent/manager.go ExecSpawner.Spawn 1 # daemon.log, the append-only log of the detached turn runner
 not-state internal/subagent/manager.go Manager.start 3 # a new session's folder, its two empty journal logs and output-config.json, a snapshot written once
 not-state internal/subagent/room_controls.go Manager.runRoomResume 1 # a non-blocking flock for one room resume worker
