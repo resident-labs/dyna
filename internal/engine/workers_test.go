@@ -81,6 +81,8 @@ func TestWorkersStartupStoreEventsSafetyAndDailySweep(t *testing.T) {
 		signals.wake(roomsvc.Event{Kind: kind, WorkerWake: true})
 		if kind == "prs" {
 			awaitWorker(t, calls, "prs", "merges")
+		} else if kind == "goals" {
+			awaitWorker(t, calls, "goals", "prs", "merges")
 		} else {
 			awaitWorker(t, calls, kind)
 		}
@@ -196,9 +198,10 @@ func TestBlockedKeeperDoesNotDelayPRQuestionsOrSweep(t *testing.T) {
 	set.stop(timerSafetySweep)
 	clock.advance(sweepEvery - safetySweepEvery)
 	awaitWorker(t, calls, "sweep")
-	// Repeated keeper events coalesce into the one pending pass.
+	// Repeated keeper wakes coalesce into the one pending pass. Goal event
+	// routing to the PR and merge workers is covered separately.
 	for i := 0; i < 100; i++ {
-		signals.wake(roomsvc.Event{Kind: "goals", WorkerWake: true})
+		wakeWorker(signals.channels["goals"])
 	}
 	close(release)
 	awaitWorker(t, calls, "goals")

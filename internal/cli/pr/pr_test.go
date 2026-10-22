@@ -58,6 +58,7 @@ func TestPRCommandsAndPauseExplanation(t *testing.T) {
 		recordtest.Write(t, filepath.Join(filepath.Dir(s.Store.Root), "sessions"), meta.ID, meta)
 	}
 	engineCalls, err := websvc.Bind([]websvc.Binding{
+		{Name: "ReviewerStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: view.ReviewerStatus},
 		{Name: "TrackPRRef", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.TrackPRRef},
 		{Name: "SetReviewerProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: view.SetReviewerProfile},
 		{Name: "SetRoomChangePolicy", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: view.SetRoomChangePolicy},
@@ -328,6 +329,11 @@ func TestReviewerCommandReturnsEveryPoolSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	saveState(t, s.Store.Root, data)
+	calls, err := websvc.Bind([]websvc.Binding{{Name: "ReviewerStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.ReviewerStatus}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enginetest.Serve(t, store.DataDir(), calls)
 	cmd := Command(Options{Service: func() *watch.Service { return s }})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
