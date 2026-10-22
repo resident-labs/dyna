@@ -293,9 +293,6 @@ func (s *Service) ReviewFacts(st State) (ReviewFacts, error) {
 		return facts, err
 	}
 	facts.ExpeditedGoals, facts.Streaks = active, map[string]int{}
-	for room := range active {
-		facts.Streaks[room] = s.expediteStreak("review:" + room)
-	}
 	ids := map[string]bool{}
 	if s.Notify != nil {
 		infos, err := s.Notify.Sessions.Store.ListSnapshot(false)
@@ -310,6 +307,7 @@ func (s *Service) ReviewFacts(st State) (ReviewFacts, error) {
 	}
 	for _, r := range st.Records {
 		if _, known := facts.Paused[r.RoomID]; !known {
+			facts.Streaks[r.RoomID] = s.expediteStreak("review:" + r.RoomID)
 			paused, err := s.RoomPaused(r.RoomID)
 			if err != nil {
 				return facts, err
