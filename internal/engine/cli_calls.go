@@ -38,6 +38,8 @@ var cliCalls = []string{
 	"UsePersonalLogin",
 	"FindPersonalLogin",
 	"SwitchPrivateRuntimeAccount",
+	"ActivatePrivateRuntimeAccount",
+	"GCPrivateRuntime",
 	"RemovePrivateRuntimeAccount",
 	"UpdateDyna",
 	"ReconcileHookInstall",
