@@ -61,11 +61,14 @@ func (s *Service) cancelQueuedHostedCI(ctx context.Context, job registeredCIJob,
 		if fresh.ID != run.ID || !hostedRunMatches(job, fresh) || !queuedHostedRun(fresh) {
 			continue
 		}
-		if _, exists := saved.Attempts[fresh.ID]; exists {
+		if attempt, exists := saved.Attempts[fresh.ID]; exists && fresh.Attempt <= attempt {
 			continue
 		}
 		// Save intent first, so a restart recognizes the cancellation as ours.
-		saved.IDs = append(saved.IDs, fresh.ID)
+		if _, exists := saved.Attempts[fresh.ID]; !exists {
+			saved.IDs = append(saved.IDs, fresh.ID)
+		}
+		saved.Resumed = false
 		saved.Attempts[fresh.ID] = fresh.Attempt
 		if err := registry.SaveHostedRuns(ctx, repo, job.head, saved); err != nil {
 			return err

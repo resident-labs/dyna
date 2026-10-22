@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -104,9 +105,14 @@ func TestRegisteredCIQueuesTrialsBeforeOldestSameRepoHeads(t *testing.T) {
 
 type hostedCIRegistry struct {
 	localCIRegistry
-	hosted localci.HostedRuns
+	hosted  localci.HostedRuns
+	results []localci.Result
 }
 
+func (r *hostedCIRegistry) SaveResult(_ context.Context, result localci.Result) error {
+	r.results = append(r.results, result)
+	return nil
+}
 func (r *hostedCIRegistry) Mode(context.Context, string) (string, error) {
 	return localci.ModeGitHub, nil
 }
@@ -208,6 +214,40 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 	if ci, _, _, _ := fallback.CIStatus(); ci != "pending" || !registry.hosted.Resumed {
 		t.Fatalf("disabled local CI did not restore hosted CI: %s %+v", ci, registry.hosted)
 	}
+	// A current-head node cancellation restores hosted CI before replacement.
+	s.Store = &Store{Root: filepath.Join(t.TempDir(), "prs")}
+	job.record.Key, job.record.State, job.record.Watching = "pr", "open", true
+	if err := s.Store.update(func(st *State) error { st.Records[job.record.Key] = &job.record; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	registry.hosted.Resumed = false
+	interrupted := interruptedCIContext{Context: context.Background(), reason: context.Canceled}
+	if err := s.recoverInterruptedCI(interrupted, job, "repo", localci.Node{Name: "node"}, localci.Result{}); err != nil {
+		t.Fatal(err)
+	}
+	if !registry.hosted.Resumed || len(registry.results) != 0 {
+		t.Fatalf("current cancellation recovery: %+v results=%v", registry.hosted, registry.results)
+	}
+	// A deadline saves infrastructure evidence and uses the same hosted fallback.
+	registry.hosted.Resumed = false
+	interrupted.reason = context.DeadlineExceeded
+	if err := s.recoverInterruptedCI(interrupted, job, "repo", localci.Node{Name: "node"}, localci.Result{}); err != nil {
+		t.Fatal(err)
+	}
+	if !registry.hosted.Resumed || len(registry.results) != 1 || registry.results[0].Status != "error" {
+		t.Fatalf("timeout recovery: %+v results=%v", registry.hosted, registry.results)
+	}
+	// An old head must not restart work after a replacement is tracked.
+	registry.hosted.Resumed = false
+	if err := s.Store.update(func(st *State) error { st.Records[job.record.Key].Head = strings.Repeat("b", 40); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.recoverInterruptedCI(interrupted, job, "repo", localci.Node{Name: "node"}, localci.Result{}); err != nil {
+		t.Fatal(err)
+	}
+	if registry.hosted.Resumed || len(registry.results) != 1 {
+		t.Fatal("superseded head restarted hosted CI")
+	}
 	cancelledRun.Attempt = 2
 	cancelledRun.Conclusion = "failure"
 	snap = withoutLocalHostedCancellations(Snapshot{Runs: []Run{cancelledRun}}, registry.hosted)
@@ -243,3 +283,10 @@ func TestRegisteredCICancellationKeepsSlotUntilExecutionStops(t *testing.T) {
 		t.Fatalf("cancellation freed a live slot: cancelled=%d runs=%v", cancelled, s.registeredRuns.runs)
 	}
 }
+
+type interruptedCIContext struct {
+	context.Context
+	reason error
+}
+
+func (c interruptedCIContext) Err() error { return c.reason }
