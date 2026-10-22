@@ -297,10 +297,10 @@ func TestStore(t *testing.T) {
 	if len(mustList(t, s)) != 2 {
 		t.Fatal("want 2 entries")
 	}
-	fi, err := os.Stat(filepath.Join(dir, "connect", "push", subsFile))
-	if err != nil || fi.Mode().Perm() != 0o600 {
-		t.Fatalf("file: %v %v", fi, err)
+	if _, err := os.Stat(filepath.Join(dir, "connect", "push", subsFile)); !os.IsNotExist(err) {
+		t.Fatalf("subscription write created a retained file: %v", err)
 	}
+
 	if m, _ := filepath.Glob(filepath.Join(dir, ".tmp-*")); len(m) != 0 {
 		t.Fatalf("temp files left: %v", m)
 	}
