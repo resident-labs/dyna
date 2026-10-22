@@ -15,8 +15,8 @@ const functionCode = (name) => {
 function app(state, members) {
   const c = {
     pageVisible: true, agentsNav: true, narrow: false, showSide: true, navOpen: false,
-    agentsRequest: 0, agentMembers: {}, createReloadGate, reconcileRows,
-    ...state, api: { members },
+    agentsRequest: 0, agentMembers: {}, agentGoals: {}, createReloadGate, reconcileRows,
+    ...state, api: { members, goals: async () => ({ items: [] }) },
   }
   vm.createContext(c)
   vm.runInContext(functionCode('agentsVisible'), c)
