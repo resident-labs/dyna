@@ -9,6 +9,7 @@ import (
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife/recordtest"
+	"dyna-agent/internal/shells"
 	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/subagent"
 )
@@ -29,6 +30,8 @@ func TestFinishCallsTheEngine(t *testing.T) {
 	t.Setenv(mode.EnvSession, lead.ID)
 	t.Setenv(mode.EnvRoomID, work.ID)
 	t.Setenv(mode.EnvRoom, work.Name)
+	job := "sh_20261017-000001-aaaaaaaa"
+	t.Setenv(shells.JobEnv, job)
 	got := serveRecordedCalls(t, "FinishSession")
 	cmd := finishCommand(func() *subagent.Manager { return m })
 	var out bytes.Buffer
@@ -40,7 +43,7 @@ func TestFinishCallsTheEngine(t *testing.T) {
 			t.Fatalf("finish %v: %v: %s", args, err, out.String())
 		}
 	}
-	wantCalls(t, got, map[string][]string{"FinishSession": {work.ID, lead.ID, work.ID, child.ID}})
+	wantCalls(t, got, map[string][]string{"FinishSession": {work.ID, lead.ID, job, work.ID, child.ID, job}})
 	for _, expected := range []string{
 		"finished work:lead (" + lead.ID + "); dormant until a message wakes it",
 		"finished work:child (" + child.ID + "); dormant until a message wakes it",
