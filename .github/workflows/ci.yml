@@ -83,12 +83,52 @@ jobs:
       - name: Build and test the Android app
         run: bash scripts/ci.sh android
 
+  # Saves the shared Go build and module cache on main. Only main caches are
+  # readable by every pull request and merge trial. The cache holds race and
+  # non-race objects for the tests, vet and the CI checker, so every Go job
+  # starts warm. Run it by hand with workflow_dispatch on main to refresh it.
+  cache-warm:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    container:
+      image: golang:1.26.3
+    env:
+      GOCACHE: /root/.cache/go-build
+      GOMODCACHE: /go/pkg/mod
+    steps:
+      - uses: actions/checkout@v6
+      - name: Trust workspace
+        run: |
+          echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
+          echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - uses: actions/cache/restore@v4
+        with:
+          path: |
+            /root/.cache/go-build
+            /go/pkg/mod
+          key: go-build-${{ github.sha }}
+          restore-keys: go-build-
+      - name: Compile every Go object the other jobs need
+        run: |
+          mkdir -p web/dist && touch web/dist/.keep
+          go build -o /tmp/dyna-ci ./cmd/dyna
+          go vet ./...
+          go test -run '^$' ./... >/dev/null
+          go test -race -run '^$' ./... >/dev/null
+          go clean -testcache
+      - uses: actions/cache/save@v4
+        with:
+          path: |
+            /root/.cache/go-build
+            /go/pkg/mod
+          key: go-build-${{ github.sha }}
+
   # Go tests run in parallel shards balanced by measured package time (see
   # scripts/ci-shard.sh). Each shard keeps its own JUnit report and budget check.
   # Jobs run on the bare runner: it skips the Go image pull, and setup-go is fast.
-  # Only pushes to main save the build cache, since a save costs about 45 seconds.
-  # Main also compiles the non-race objects, so pull requests and merge trials
-  # both restore a warm cache from the same save.
+  # Every Go job restores the one shared build cache that cache-warm saves on main.
   go-shard:
     name: go-test-shard (${{ matrix.shard }})
     needs: [changes]
@@ -122,8 +162,8 @@ jobs:
           path: |
             /root/.cache/go-build
             /go/pkg/mod
-          key: go-shard-${{ matrix.shard }}-${{ github.sha }}
-          restore-keys: go-shard-${{ matrix.shard }}-
+          key: go-build-${{ github.sha }}
+          restore-keys: go-build-
       # go test pipes its results through the checker.
       - name: Build CI checker
         run: bash scripts/ci.sh go build
@@ -147,17 +187,6 @@ jobs:
         run: |
           touch ../web/dist/index.html
           bash ../scripts/ci.sh go desktop
-      - name: Compile non-race objects for the cache
-        if: github.ref == 'refs/heads/main' || github.head_ref == 'ci/shard-go-test'
-        run: go test -run '^$' $(bash scripts/ci-shard.sh ${{ matrix.shard }} 7) >/dev/null
-      - name: Save Go caches
-        if: github.ref == 'refs/heads/main' || github.head_ref == 'ci/shard-go-test'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            /root/.cache/go-build
-            /go/pkg/mod
-          key: go-shard-${{ matrix.shard }}-${{ github.sha }}
       - name: Upload Go test report
         if: always()
         uses: actions/upload-artifact@v4
@@ -219,8 +248,8 @@ jobs:
           path: |
             /root/.cache/go-build
             /go/pkg/mod
-          key: go-static-${{ github.sha }}
-          restore-keys: go-static-
+          key: go-build-${{ github.sha }}
+          restore-keys: go-build-
       - name: Install shellcheck
         run: apt-get update -qq && apt-get install -y -qq shellcheck >/dev/null
       - name: Verify modules
@@ -229,14 +258,6 @@ jobs:
         run: bash scripts/ci.sh go vet
       - name: Check installer
         run: bash scripts/ci.sh go installer
-      - name: Save Go caches
-        if: github.ref == 'refs/heads/main' || github.head_ref == 'ci/shard-go-test'
-        uses: actions/cache/save@v4
-        with:
-          path: |
-            /root/.cache/go-build
-            /go/pkg/mod
-          key: go-static-${{ github.sha }}
       - name: Upload Go diagnostics
         if: always()
         uses: actions/upload-artifact@v4
