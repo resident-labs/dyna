@@ -67,6 +67,9 @@ func (s *Service) PriorityInputs() (string, time.Time, error) {
 }
 
 func (s *Service) expeditedGoals() (map[string]string, time.Time, error) {
+	if s.Store == nil {
+		return map[string]string{}, time.Time{}, nil
+	}
 	st, err := s.queueGoalStore().ReadOpen()
 	if err != nil {
 		return nil, time.Time{}, err

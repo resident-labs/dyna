@@ -2,6 +2,7 @@ package watch
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -103,11 +104,13 @@ func TestExpeditedMergeTrialsAreIsolatedAndFair(t *testing.T) {
 	}
 	want := [][]int{{3}, {4}, {5}, {1, 2}, {6}}
 	for i, numbers := range want {
-		// Each completed batch changes main; simulate fresh green PR checks.
+		f.head = fmt.Sprintf("%040x", 1000+i)
+		// Simulate the PR watcher confirming each fresh CI probe between trials.
 		if err := s.Store.update(func(st *State) error {
 			for _, r := range st.Records {
 				if r.State == "open" {
 					r.CI = "passed"
+					r.Polling.CIVersion = "SUCCESS"
 				}
 			}
 			return nil
@@ -122,6 +125,9 @@ func TestExpeditedMergeTrialsAreIsolatedAndFair(t *testing.T) {
 			t.Fatal(err)
 		}
 		if len(st.MergeTrials) != 1 {
+			for _, r := range st.Records {
+				t.Logf("PR %d CI=%s reason=%s checks=%+v", r.Number, r.CI, r.CIReason, r.Checks)
+			}
 			t.Fatalf("trial %d: %+v queue=%+v merged=%v", i, st.MergeTrials, mergeQueue(st), *f.merged)
 		}
 		var got []int
