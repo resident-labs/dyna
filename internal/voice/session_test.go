@@ -29,7 +29,7 @@ func TestCallSessionGivesVoiceItsToolsAndSettings(t *testing.T) {
 			t.Errorf("tool %s has no description or bad parameters", tool.Name)
 		}
 	}
-	if want := []string{"dispatch", "check_pr", "check_merge_queue", "answer_question"}; !slices.Equal(names, want) {
+	if want := []string{"dispatch", "remain_silent"}; !slices.Equal(names, want) {
 		t.Errorf("tools = %v, want %v", names, want)
 	}
 	if s.Voice != "marin" || s.Language != "en" || s.TranscriptionPrompt != TranscriptionPrompt || !strings.Contains(s.Instructions, "dispatch") {
@@ -37,10 +37,10 @@ func TestCallSessionGivesVoiceItsToolsAndSettings(t *testing.T) {
 	}
 }
 
-func TestPRStatusToolAsksForANumber(t *testing.T) {
+func TestDispatchToolRequiresTheOwnersPrompt(t *testing.T) {
 	tools, _, _ := toolsFixture(t)
-	if _, err := run(t, tools.Realtime(context.Background()), context.Background(), "check_pr", `{}`); err == nil {
-		t.Fatal("check_pr without a number answered, want an error")
+	if _, err := run(t, tools.Realtime(context.Background()), context.Background(), "dispatch", `{}`); err == nil {
+		t.Fatal("dispatch without a prompt answered, want an error")
 	}
 }
 
@@ -77,7 +77,7 @@ func TestCallRedialsWhenTheProviderDropsAfterAToolCall(t *testing.T) {
 			}
 			return
 		}
-		_ = ws.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.function_call_arguments.done","call_id":"c1","name":"dispatch","arguments":"{\"text\":\"check CI\"}"}`))
+		_ = ws.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.function_call_arguments.done","call_id":"c1","name":"dispatch","arguments":"{\"prompt\":\"check CI\"}"}`))
 		for ws.ReadJSON(&m) == nil {
 			if m["type"] == "conversation.item.create" {
 				return // dispatch ran; the connection drops

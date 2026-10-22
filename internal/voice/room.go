@@ -39,7 +39,7 @@ func (r *RoomLink) Name() string { return r.rec.Name }
 // ID is the room's ID.
 func (r *RoomLink) ID() string { return r.rec.ID }
 
-// Ask posts the owner's spoken request, in Voice's words, from Voice to
+// Ask posts the owner's spoken request, in the owner's words, from Voice to
 // @root, and returns the post ID. Like the owner's typed request, it starts
 // root when none is open, and root owes it a report.
 func (r *RoomLink) Ask(ctx context.Context, text string) (string, error) {
@@ -79,15 +79,18 @@ func (r *RoomLink) callPost(owner bool, in room.PostInput) room.PostInput {
 // Speaker is the call's side of Watch.
 type Speaker interface {
 	Speak(key, topic, text string)
+	Context(text string)
 }
 
 // Watch hands the call what root says to the owner: each post to
 // @voice-call from since on, and each of root's questions to the owner
 // while it is open, the oldest first. A question's topic is its ID, so a
-// newer post of the same question replaces one not yet said. Other room
-// traffic is not progress for the call. It runs until ctx ends.
+// newer post of the same question replaces one not yet said. While root
+// works on a dispatched request, its agent traffic is silent context. Only
+// explicit call posts and owner questions request speech. It runs until ctx ends.
 func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) error {
 	voice := r.rec.Name + ":" + room.VoiceAgent
+	open := false
 	return r.svc.Rooms.Follow(ctx, r.rec.ID, func(msg room.Message) (bool, error) {
 		if id := msg.QuestionID(); id != "" && r.fromRoot(msg) {
 			if q, ok := r.openQuestion(id); ok {
@@ -98,12 +101,34 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 		if time.UnixMilli(msg.TS).Before(since) {
 			return false, nil
 		}
-		// Only root may post to Voice; the call's own transcript is kind voice.
-		if msg.Kind != "voice" && slices.Contains(msg.To, voice) {
+		switch {
+		case msg.From == voice && msg.Kind != "voice":
+			open = true
+		case r.fromRoot(msg) && msg.Kind != "voice" && slices.Contains(msg.To, voice):
 			call.Speak(msg.ID, "", tellPrompt(msg.Text, msg.Attachments))
+		case r.fromRoot(msg) && slices.Contains([]string{"completed", "failed", "stopped"}, msg.Kind):
+			open = false
+		case open && r.rootAgentPost(msg):
+			call.Context("[BACKEND] " + msg.From + ": " + msg.Text)
 		}
 		return false, nil
 	})
+}
+
+// rootAgentPost selects execution messages, excluding service notices and
+// the owner's unrelated conversation. These messages never request speech.
+func (r *RoomLink) rootAgentPost(msg room.Message) bool {
+	switch msg.Kind {
+	case "", "message", "completed", "failed", "stopped":
+	default:
+		return false
+	}
+	agent := func(addr string) bool {
+		name, ok := strings.CutPrefix(addr, r.rec.Name+":")
+		return ok && name != "" && name != room.RootAgent && name != room.VoiceAgent
+	}
+	toRoot := slices.ContainsFunc(msg.To, func(addr string) bool { return addr == r.rec.Name || addr == r.rec.Name+":"+room.RootAgent })
+	return r.fromRoot(msg) && slices.ContainsFunc(msg.To, agent) || agent(msg.From) && toRoot
 }
 
 // fromRoot reports whether root posted msg: the internal root, or an
@@ -130,11 +155,11 @@ func (r *RoomLink) openQuestion(id string) (questions.Question, bool) {
 // options are suggestions: an answer that picks none of them is passed on
 // in the owner's own words.
 func questionPrompt(q questions.Question) string {
-	text := "Ask the owner: " + q.Text
+	text := "[BACKEND] Ask the owner: " + q.Text
 	if len(q.Options) > 0 {
 		text += " The options are: " + strings.Join(q.Options, ", ") + ". The owner may also answer in their own words."
 	}
-	return text + " Read the question aloud in the first person, and give the owner's answer with answer_question, in the owner's own words, with question_id " + q.ID + ". Never say the ID aloud. Never choose an option for the owner, and never turn their answer into an option they did not pick."
+	return text + " Read the question aloud in the first person. Dispatch the answer in the owner's own words for recording. Never choose an option for the owner, and never turn their answer into an option they did not pick."
 }
 
 // joinRequestedCall closes a ringing request only after the call connects.

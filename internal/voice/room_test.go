@@ -93,23 +93,20 @@ func TestWatchNamesWhatRootShares(t *testing.T) {
 
 // fakeSpeaker records what Watch hands the call.
 type fakeSpeaker struct {
-	said  chan string // the text of each Speak
-	other chan string // "progress <task> <text>" and "end <task>"
+	said    chan string // the text of each Speak
+	context chan string // execution context that requests no speech
 }
 
 func newFakeSpeaker() *fakeSpeaker {
-	return &fakeSpeaker{said: make(chan string, 8), other: make(chan string, 8)}
+	return &fakeSpeaker{said: make(chan string, 8), context: make(chan string, 8)}
 }
 
 func (f *fakeSpeaker) Speak(_, _, text string) { f.said <- text }
-func (f *fakeSpeaker) Progress(task string, _ time.Time, text string) {
-	f.other <- "progress " + task + " " + text
-}
-func (f *fakeSpeaker) EndProgress(task string) { f.other <- "end " + task }
+func (f *fakeSpeaker) Context(text string)     { f.context <- text }
 
-// Incidental room traffic never becomes spoken progress. Multiple explicit
+// Room traffic for running work is context and never requests speech. Multiple explicit
 // call posts still reach Voice, including corrections and distinct results.
-func TestWatchIgnoresIncidentalProgress(t *testing.T) {
+func TestWatchKeepsExecutionTrafficAsSilentContext(t *testing.T) {
 	tools, work, _ := toolsFixture(t)
 	externalRoot(t, work)
 	link, rooms := tools.link, room.DefaultStore()
@@ -117,7 +114,6 @@ func TestWatchIgnoresIncidentalProgress(t *testing.T) {
 	ctx, stop := context.WithCancel(t.Context())
 	defer stop()
 	ended := make(chan error, 1)
-	go func() { ended <- link.Watch(ctx, time.Time{}, call) }()
 	if _, err := link.Ask(t.Context(), "Fix CI on PR 7."); err != nil {
 		t.Fatal(err)
 	}
@@ -131,8 +127,23 @@ func TestWatchIgnoresIncidentalProgress(t *testing.T) {
 	post("work:root", "Check another PR.", "work:builder")
 	post("work", "Check the release.", "work:helper")
 	post("work:builder", "Review the logs.", "work:helper")
-	for _, text := range []string{"CI is green.", "Correction: one job is still running.", "The review passed."} {
+	if _, err := rooms.Post(work.ID, room.PostInput{From: "work:root", Kind: "completed", To: []string{"work"}, Text: "Finished this turn."}); err != nil {
+		t.Fatal(err)
+	}
+	post("work:builder", "Traffic after the turn.", "work")
+	texts := []string{"CI is green.", "Correction: one job is still running.", "The review passed."}
+	for _, text := range texts {
 		post("work", text, "work:voice-call")
+	}
+	// Follow reads the existing log at once; no polling or wall-clock wait
+	// is needed to observe this complete sequence.
+	go func() { ended <- link.Watch(ctx, time.Time{}, call) }()
+	for _, want := range []string{"Rerunning a different job.", "Check another PR.", "Check the release."} {
+		if got := <-call.context; !strings.HasPrefix(got, "[BACKEND] ") || !strings.HasSuffix(got, want) {
+			t.Fatalf("context %q, want %q", got, want)
+		}
+	}
+	for _, text := range texts {
 		if got := <-call.said; !strings.HasSuffix(got, text) {
 			t.Fatalf("said %q, want explicit call post %q", got, text)
 		}
@@ -140,8 +151,8 @@ func TestWatchIgnoresIncidentalProgress(t *testing.T) {
 	stop()
 	<-ended // every earlier room post has been handled
 	select {
-	case got := <-call.other:
-		t.Fatalf("incidental progress reached the call: %q", got)
+	case got := <-call.context:
+		t.Fatalf("unexpected execution context: %q", got)
 	default:
 	}
 }

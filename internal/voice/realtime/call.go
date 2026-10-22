@@ -8,9 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
 )
@@ -75,7 +73,6 @@ type Call struct {
 	requested  bool   // a response.create is on its way
 	owed       bool   // the owner's turn or tool outputs await a plain response
 	tooling    int    // tool runs in progress
-	waiting    bool   // a Later tool ran in the owner's turn: other tools are refused
 	speaking   bool   // the owner speaks, or their turn is not yet committed
 	muted      bool   // the page muted the owner: their speech ends the turn at once
 	cancelNext bool   // the response on its way is cancelled once it starts
@@ -88,8 +85,6 @@ type Call struct {
 	onPage     []string             // audio items sent and not yet ended, oldest first
 	cleared    map[string]bool      // audio items the page was told to stop
 	playing    map[string]time.Time // audio items the page plays -> when they started
-	words      map[string]string    // audio item -> what Voice says in it so far
-	steering   func()               // cancels the wait to cut Voice's reply for new items
 
 	backoff     *backoff
 	connectedAt time.Time
@@ -123,7 +118,7 @@ func NewCall(conn *Conn, tools []Tool, transcript func(owner bool, text string))
 			return func() { t.Stop() }
 		},
 		inbox: make(chan func(), 64), done: make(chan struct{}), backoff: newBackoff(),
-		keys: map[string]string{}, cancelled: map[string]bool{}, known: map[string]bool{}, responses: map[string]string{}, audio: map[string]int{}, cleared: map[string]bool{}, playing: map[string]time.Time{}, words: map[string]string{}, progress: progress{tasks: map[string]*progressTask{}},
+		keys: map[string]string{}, cancelled: map[string]bool{}, known: map[string]bool{}, responses: map[string]string{}, audio: map[string]int{}, cleared: map[string]bool{}, playing: map[string]time.Time{}, progress: progress{tasks: map[string]*progressTask{}},
 	}
 	c.queue = newSpeakQueue(c.say, c.ready, c.later, func(key string) { c.toPage(PageEvent{Type: "unspoken", Post: key}) })
 	return c
@@ -132,8 +127,8 @@ func NewCall(conn *Conn, tools []Tool, transcript func(owner bool, text string))
 // Speak queues an item for Voice to say: text tells the model what to say.
 // key names the item, such as its post ID; an item with a key already
 // queued or said is dropped. A waiting item with the same topic is
-// replaced; an empty topic replaces nothing. While Voice speaks, it stops
-// at the end of a sentence and folds the new item in.
+// replaced; an empty topic replaces nothing. Items arriving during speech
+// share one pending response after the current playback ends.
 func (c *Call) Speak(key, topic, text string) {
 	c.do(func() {
 		if c.provider.Caps.NoClientResponses {
@@ -141,7 +136,16 @@ func (c *Call) Speak(key, topic, text string) {
 			return
 		}
 		c.queue.add(key, topic, text)
-		c.steer()
+	})
+}
+
+// Context appends execution progress without requesting a response. Some
+// providers cannot accept text independently from speech; those skip it.
+func (c *Call) Context(text string) {
+	c.do(func() {
+		if p, ok := c.provider.Protocol.(interface{ Context(string) any }); ok {
+			c.send(p.Context(text))
+		}
 	})
 }
 
@@ -309,14 +313,9 @@ func (c *Call) lost(ctx context.Context, conn *Conn, err error) {
 		delete(c.playing, id)
 		delete(c.audio, id)
 		delete(c.responses, id)
-		delete(c.words, id)
 	}
 	c.onPage = nil
 	c.cleared = map[string]bool{} // the new connection has none of these items
-	if c.steering != nil {
-		c.steering()
-		c.steering = nil
-	}
 	if c.recovering {
 		// What the provider refused must not go to the new connection: the
 		// batch it was sent, and audio that waited from before the refusal.
@@ -423,8 +422,8 @@ func (c *Call) idle() bool {
 // ready reports whether a Dyna item may go out now: the call is idle and
 // owes the owner no reply.
 // Dyna items also wait while the page still plays Voice's audio, as qwen's
-// announcement window does: new items steer that audio instead.
-func (c *Call) ready() bool { return c.idle() && !c.owed && len(c.onPage) == 0 && c.steering == nil }
+// announcement window does: new items wait for its playback to end.
+func (c *Call) ready() bool { return c.idle() && !c.owed && len(c.onPage) == 0 }
 
 // next requests the response the call owes, or else sends the next Dyna
 // item. The call creates every response itself, one at a time, so they
@@ -540,19 +539,19 @@ func (c *Call) event(ctx context.Context, ev Event) {
 		c.setState("thinking")
 	case Committed:
 		// The owner's turn is final: answer it before any Dyna item.
-		c.speaking, c.owed, c.waiting = false, true, false
+		c.speaking, c.owed = false, true
 	case ToolCall:
-		if c.waiting {
-			// The answer to this turn comes later; a second tool would only
-			// speak over it. Its output asks for no reply.
-			c.send(c.provider.Protocol.FunctionOutput(ev.CallID, answerComing))
-			return
-		}
-		c.waiting = laterTool(c.tools, ev.Name)
+		silent := silentTool(c.tools, ev.Name)
 		c.tooling++
-		c.setState("thinking")
-		c.toPage(PageEvent{Type: "tool", ID: ev.CallID, Name: ev.Name, Text: string(ev.Args), State: "running"})
+		if !silent {
+			c.setState("thinking")
+			c.toPage(PageEvent{Type: "tool", ID: ev.CallID, Name: ev.Name, Text: string(ev.Args), State: "running"})
+		}
 		gen := c.gen
+		key := c.keys[ev.ResponseID]
+		if ev.ResponseID == "" {
+			key = c.keys[c.active]
+		}
 		go func() {
 			out := RunTool(ctx, c.tools, ev)
 			c.do(func() {
@@ -560,21 +559,22 @@ func (c *Call) event(ctx context.Context, ev Event) {
 				state := "done"
 				if failed(out) {
 					state = "failed"
-					// No work was accepted, so no answer is coming: the
-					// owner's turn may use tools again, such as a corrected
-					// dispatch.
-					if laterTool(c.tools, ev.Name) {
-						c.waiting = false
-					}
 				}
-				c.toPage(PageEvent{Type: "tool", ID: ev.CallID, Name: ev.Name, State: state})
+				if !silent {
+					c.toPage(PageEvent{Type: "tool", ID: ev.CallID, Name: ev.Name, State: state})
+				}
 				if gen != c.gen {
 					return // a dropped connection asked; the new one does not wait for its output
 				}
 				c.send(c.provider.Protocol.FunctionOutput(ev.CallID, out))
+				if silent && !failed(out) {
+					c.queue.acknowledged(key)
+				}
 				// Accepted work answers later. Keep its receipt as context
 				// without requesting an acknowledgement response.
-				c.owed = !c.waiting
+				if failed(out) || !laterTool(c.tools, ev.Name) && !silent {
+					c.owed = true
+				}
 			})
 		}()
 	case OwnerPartial:
@@ -582,8 +582,6 @@ func (c *Call) event(ctx context.Context, ev Event) {
 	case OwnerTranscript:
 		c.toPage(PageEvent{Type: "transcript", Text: ev.Text, Final: true})
 		c.transcript(true, ev.Text)
-	case VoiceDelta:
-		c.words[ev.ItemID] += ev.Text
 	case VoiceTranscript:
 		// A model reply that writes a reserved protocol tag is not
 		// recorded, and Voice is asked once to answer again, unless the
@@ -696,78 +694,6 @@ func (c *Call) fromPage(m PageMessage) {
 	}
 }
 
-// SteerWait bounds how long Voice may keep talking, to reach the end of a
-// sentence, before it stops for new items.
-const SteerWait = 2 * time.Second
-
-// steer stops the audio the owner hears now for items that wait, at the
-// end of its sentence, so the next reply folds them in. It follows the
-// page's playback, not the response: the provider may have finished a
-// reply the page still plays. Any spoken reply is cut, an answer to the
-// owner too. Nothing is cut while no audio is on the page, such as during
-// a tool call; the items go out after it.
-func (c *Call) steer() {
-	if c.steering != nil || !c.queue.waiting() || !c.audible() {
-		return
-	}
-	cut := func() {
-		c.steering = nil
-		if c.audible() && c.queue.waiting() {
-			c.queue.fold = true
-			c.interrupt()
-		}
-	}
-	wait := c.sentenceEnd()
-	if wait <= 0 {
-		cut()
-		return
-	}
-	c.steering = c.later(wait, cut)
-}
-
-// audible reports whether the page has audio of Voice it has not been told
-// to stop.
-func (c *Call) audible() bool {
-	for _, id := range c.onPage {
-		if !c.cleared[id] {
-			return true
-		}
-	}
-	return false
-}
-
-// sentenceEnd is how long until the owner hears the end of the sentence of
-// the item the page plays now, at most SteerWait. It reads the place from
-// the playback clock and the item's words so far, spread evenly over its
-// audio. Audio the page has not started yet waits SteerWait.
-func (c *Call) sentenceEnd() time.Duration {
-	for _, id := range c.onPage {
-		if at, playing := c.playing[id]; playing && !c.cleared[id] {
-			return min(SteerWait, untilSentenceEnd(c.words[id], c.length(id), c.now().Sub(at)))
-		}
-	}
-	return SteerWait
-}
-
-// untilSentenceEnd is how long after heard the sentence ends in words,
-// spoken evenly over audio, or SteerWait when the words so far hold no
-// end past heard.
-func untilSentenceEnd(words string, audio, heard time.Duration) time.Duration {
-	n := utf8.RuneCountInString(words)
-	if n == 0 || audio <= 0 {
-		return SteerWait
-	}
-	at := int(int64(n) * int64(heard) / int64(audio))
-	i := 0
-	for _, r := range words {
-		i++
-		if i > at && strings.ContainsRune(".!?", r) {
-			return time.Duration(int64(audio)*int64(i)/int64(n)) - heard
-		}
-	}
-	return SteerWait
-}
-
 // playbackEnded notes that the page stopped playing item id after played.
 // When the page stopped early on a clear, the provider forgets the rest, so
 // Voice never remembers words the owner did not hear. The provider may hold
@@ -788,12 +714,6 @@ func (c *Call) playbackEnded(id string, played time.Duration) {
 	delete(c.playing, id)
 	delete(c.audio, id)
 	delete(c.responses, id)
-	delete(c.words, id)
-	if len(c.onPage) == 0 && c.steering != nil {
-		// The audio ended by itself before the cut: the items go out plainly.
-		c.steering()
-		c.steering = nil
-	}
 	if len(c.onPage) == 0 && c.active == "" && !c.speaking {
 		c.setState("listening")
 	}

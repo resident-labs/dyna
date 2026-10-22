@@ -175,6 +175,8 @@ func (*Google) UserText(text string) any {
 	return msg{"clientContent": msg{"turns": []msg{{"role": "user", "parts": []msg{{"text": text}}}}, "turnComplete": false}}
 }
 
+func (g *Google) Context(text string) any { return g.UserText(text) }
+
 func (g *Google) FunctionOutput(callID, output string) any {
 	g.mu.Lock()
 	defer g.mu.Unlock()
