@@ -15,6 +15,8 @@ const (
 	// KeyVoiceURL is the provider's WebSocket address: required for a
 	// self-hosted server, else it overrides the provider's own.
 	KeyVoiceURL = "voice.url"
+	// KeyVoiceDucking enables optional microphone-driven playback attenuation.
+	KeyVoiceDucking = "voice.ducking"
 )
 
 // VoiceProviders are the voice.provider values.
@@ -30,8 +32,13 @@ func (v *Values) loadVoice(raw map[string]any) error {
 	if !ok {
 		return fmt.Errorf("voice settings must be an object")
 	}
-	for _, key := range []string{KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL} {
+	for _, key := range []string{KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking} {
 		if value, ok := values[strings.TrimPrefix(key, "voice.")]; ok {
+			if key == KeyVoiceDucking {
+				if _, ok := value.(bool); !ok {
+					return fmt.Errorf("voice.ducking must be a boolean")
+				}
+			}
 			if err := v.setVoice(key, fmt.Sprint(value)); err != nil {
 				return err
 			}
@@ -43,6 +50,12 @@ func (v *Values) loadVoice(raw map[string]any) error {
 func (v *Values) setVoice(key, value string) error {
 	value = strings.TrimSpace(value)
 	switch key {
+	case KeyVoiceDucking:
+		b, err := parseBool(value)
+		if err != nil {
+			return err
+		}
+		v.VoiceDucking = b
 	case KeyVoiceProvider:
 		if !slices.Contains(VoiceProviders, value) {
 			return fmt.Errorf("voice.provider must be one of %s", strings.Join(VoiceProviders, ", "))
@@ -63,5 +76,6 @@ func (v *Values) setVoice(key, value string) error {
 func (v Values) saveVoice(raw map[string]any) {
 	values := nested(raw, "voice")
 	values["provider"], values["model"], values["url"] = v.VoiceProvider, v.VoiceModel, v.VoiceURL
+	values["ducking"] = v.VoiceDucking
 	raw["voice"] = values
 }

@@ -1,21 +1,14 @@
-// Ducking: Voice gets quieter the moment the owner starts talking, before
-// the gateway's turn detection stops it, and comes back if they stop. The
-// numbers are the ChatGPT app's (voice-dsp AssistantPlaybackDucker): 10 dB
-// down, 20 ms attack, 800 ms release, 300 ms hold, at least 750 ms ducked,
-// then a 1 s ramp back. ChatGPT detects speech with a Silero model; this uses
-// the microphone frame's energy instead.
+// Optional microphone-driven playback attenuation. Server speech detection
+// controls interruption independently. Require sustained energy above the
+// recent noise floor so background noise and brief bursts do not lower Voice.
 export const DUCKED = 10 ** (-10 / 20)
-const ATTACK = 0.02
+const ATTACK = 0.15
 const RELEASE = 0.8
 const HOLD = 0.3
 const MIN_DUCKED = 0.75
 const RESTORE = 1
-// SPEECH is the frame RMS that counts as the owner talking, about -34 dBFS
-// after the browser's echo cancelling and gain control. A guess: tune it
-// from live calls.
-const SPEECH = 0.02
-
-const WINDOW = 0.01 // ChatGPT's VAD frame: a single click fills one window
+const WINDOW = 0.01 // Measure energy in 10 ms windows.
+const HISTORY = 200 // Two seconds of recent RMS measurements.
 
 // The parts of an AudioParam the ducker drives.
 export interface DuckGain {
@@ -39,6 +32,8 @@ const rms = (samples: Float32Array): number => {
 // createDucker drives gain, an AudioParam. hear takes each microphone frame,
 // its sample rate and the context time at its end; reset ends ducking.
 export function createDucker(gain: DuckGain): Ducker {
+  const noise: number[] = []
+  let noiseAt = 0
   let loudFor = 0 // seconds of speech in a row
   let quietSince: number | null = null
   let duckedAt: number | null = null
@@ -68,10 +63,21 @@ export function createDucker(gain: DuckGain): Ducker {
       const start = now - frame.length / rate
       for (let i = 0; i < frame.length; i += size) {
         const window = frame.subarray(i, i + size)
-        step(rms(window) >= SPEECH, window.length / rate, start + (i + window.length) / rate)
+        const level = rms(window)
+        // Do not let sustained speech raise its own noise floor after ducking.
+        if (duckedAt === null) {
+          noise[noiseAt] = level
+          noiseAt = (noiseAt + 1) % HISTORY
+        }
+        const sorted = [...noise].sort((a, b) => a - b)
+        const floor = sorted[Math.floor((sorted.length - 1) * 0.1)] ?? level
+        const threshold = floor + Math.max(0.005, floor * 2)
+        step(level > threshold, window.length / rate, start + (i + window.length) / rate)
       }
     },
     reset(now) {
+      noise.length = 0
+      noiseAt = 0
       loudFor = 0
       quietSince = null
       duckedAt = null

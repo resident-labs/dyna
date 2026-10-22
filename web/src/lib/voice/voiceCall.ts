@@ -4,8 +4,15 @@ import { api } from '../../api.js'
 import { openAudio } from './audio.js'
 import { createCall } from './call.js'
 import { createCallRequests } from './callRequests.ts'
+import type { SettingItem } from '../api/settings.ts'
 
-export const voiceCall = createCall({ api, socket: (room: string) => new WebSocket(`${api.voiceURL()}?room=${encodeURIComponent(room)}`), openAudio })
+async function configuredAudio(...[onFrame, receipts]: Parameters<typeof openAudio>) {
+  const items: SettingItem[] = await api.settings().catch(() => [])
+  const ducking = items?.some((item) => item.key === 'voice.ducking' && item.value === true) ?? false
+  return openAudio(onFrame, receipts, ducking)
+}
+
+export const voiceCall = createCall({ api, socket: (room: string) => new WebSocket(`${api.voiceURL()}?room=${encodeURIComponent(room)}`), openAudio: configuredAudio })
 export const callRequests = createCallRequests(api)
 
 // clock formats a call's length as m:ss, or h:mm:ss.
