@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestSharedGoTestStepPreservesRaceAndPipelineFailure(t *testing.T) {
+func TestSharedGoTestStepRunsWithoutRaceAndPreservesPipelineFailure(t *testing.T) {
 	for _, event := range []string{"push", "pull_request"} {
 		t.Run(event, func(t *testing.T) {
 			dir := t.TempDir()
@@ -32,7 +32,7 @@ cat >/dev/null
 			}
 			run := func(fail bool) error {
 				cmd := exec.Command("bash", "../../scripts/ci.sh", "go", "test")
-				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "CI_EVENT="+event, "CALL_LOG="+log)
+				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "CI_EVENT="+event, "CALL_LOG="+log, "CI_SHARD=")
 				if fail {
 					cmd.Env = append(cmd.Env, "FAIL_GO=1")
 				}
@@ -49,14 +49,10 @@ cat >/dev/null
 			if err != nil {
 				t.Fatal(err)
 			}
-			hasRace := strings.Contains(string(data), "test -race -json")
-			if hasRace != (event == "push") {
-				t.Fatalf("event=%s commands=%s", event, data)
+			if strings.Contains(string(data), "-race") {
+				t.Fatalf("event=%s ran with the race detector: %s", event, data)
 			}
 			isolate := "tests --isolate-over 1s --junit-output " + dir + "/go-test.xml"
-			if event == "push" {
-				isolate = "tests --isolate-over 1s --isolate-race --junit-output " + dir + "/go-test.xml"
-			}
 			if !strings.Contains(string(data), isolate) {
 				t.Fatalf("checker args: %s", data)
 			}

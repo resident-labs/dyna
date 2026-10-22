@@ -1,0 +1,71 @@
+name: Race nightly
+
+# Runs every Go test with the race detector on main. It has no time budget and
+# is not a PR or push check, so Dyna's merge queue never waits on it. A failure
+# opens a GitHub issue labelled ci-race, or comments on the open one.
+on:
+  schedule:
+    - cron: '23 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: race-nightly
+  cancel-in-progress: false
+
+jobs:
+  race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    container:
+      image: golang:1.26.3
+    env:
+      GOCACHE: /root/.cache/go-build
+      GOMODCACHE: /go/pkg/mod
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+      - name: Trust workspace
+        run: |
+          echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
+          echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+      - name: Restore Go caches
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /root/.cache/go-build
+            /go/pkg/mod
+          key: go-build-race-${{ github.sha }}
+          restore-keys: go-build-
+      - name: Test with the race detector
+        shell: bash
+        run: |
+          export HOME="$(mktemp -d)" XDG_DATA_HOME="$(mktemp -d)" XDG_CONFIG_HOME="$(mktemp -d)" XDG_CACHE_HOME="$(mktemp -d)"
+          bash scripts/ci.sh go race
+
+  report:
+    needs: race
+    if: ${{ failure() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the ci-race issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create ci-race --description "Nightly race detector run failed" --color B60205 2>/dev/null || true
+          number=$(gh issue list --label ci-race --state open --limit 1 --json number --jq '.[0].number // empty')
+          body="The nightly race run failed on main: $RUN_URL"
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "$body"
+          else
+            gh issue create --label ci-race --title "Nightly race run failed" --body "$body"
+          fi
