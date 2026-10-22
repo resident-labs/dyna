@@ -57,3 +57,10 @@ jobs:
           path: /tmp/dyna-image
       - name: Boot and smoke test
         run: image/smoke.sh /tmp/dyna-image
+      - name: Upload smoke logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-smoke-logs
+          path: /tmp/dyna-image/*.log
+          retention-days: 7
