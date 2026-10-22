@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"slices"
 
 	"dyna-agent/internal/store"
@@ -14,10 +16,15 @@ import (
 // Migrate upgrades retained profile configuration before services start.
 // TODO: legacy/shim remove later — reads version 2 profiles and preserves unknown fields.
 func Migrate(path string) error {
-	info, err := os.Lstat(path)
+	resolved, err := filepath.EvalSymlinks(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
+	if err != nil {
+		return err
+	}
+	path = resolved
+	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
@@ -111,8 +118,30 @@ func Migrate(path string) error {
 	return store.WriteJSON(path, json.RawMessage(transformed), info.Mode().Perm())
 }
 
+var profileBackupWrite = (*os.File).Write
+
 func profileV2Backup(path string, raw []byte) error {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name())
+	defer f.Close()
+	n, err := profileBackupWrite(f, raw)
+	if err != nil {
+		return err
+	}
+	if n != len(raw) {
+		return io.ErrShortWrite
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	// A hard link publishes the complete backup without replacing a competing one.
+	err = os.Link(f.Name(), path)
 	if errors.Is(err, os.ErrExist) {
 		info, err := os.Lstat(path)
 		if err != nil {
@@ -130,16 +159,5 @@ func profileV2Backup(path string, raw []byte) error {
 		}
 		return nil
 	}
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(raw); err != nil {
-		f.Close()
-		return err
-	}
-	if err := f.Sync(); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
+	return err
 }
