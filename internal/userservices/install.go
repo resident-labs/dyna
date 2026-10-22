@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/agentslice"
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/store"
 )
 
 const Engine = agentslice.EngineUnit
@@ -30,11 +31,14 @@ type Options struct {
 	RestartComputers bool
 	// Quiet returns why restarting the computer service would disturb users, or
 	// "" when it is safe. Nil means always safe.
-	Quiet  func(context.Context) (string, error)
-	Run    func(context.Context, ...string) (string, error)
-	Output io.Writer
+	Quiet func(context.Context) (string, error)
+	// EngineQuiet returns why a voice call prevents an engine restart, or "".
+	EngineQuiet func(context.Context) (string, error)
+	Now         func() time.Time
+	Run         func(context.Context, ...string) (string, error)
+	Output      io.Writer
 	// Pause waits between engine state checks after a failed restart. Tests set it
-	// to return at once.
+	// to return at once. It also waits between deferred restart checks.
 	Pause func(context.Context, time.Duration) error
 	// Healthy checks the restarted engine, for example through its Health
 	// call. An install whose engine is not healthy fails. Nil skips the check.
@@ -155,6 +159,20 @@ WantedBy=default.target
 `
 }
 
+func engineRestartUnit(binary, dir string) string {
+	return `[Unit]
+Description=Finish a deferred Dyna engine restart
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+ExecStart=` + quote(binary) + ` engine finish-restart --unit-dir ` + quote(dir) + `
+Restart=on-failure
+RestartSec=3
+Slice=` + agentslice.ForegroundSlice + `
+`
+}
+
 // ComputerEnvironment keeps the settings the transient starter used to forward.
 // Missing settings retain their installed values across sanitized hook launches.
 func ComputerEnvironment(dir string, env []string) error {
@@ -211,7 +229,7 @@ func Write(o Options) error {
 	if _, err := agentslice.WriteSlice(o.Dir); err != nil {
 		return err
 	}
-	for name, text := range map[string]string{Engine: engineUnit(o.Binary), Computers: computersUnit(o.Binary)} {
+	for name, text := range map[string]string{Engine: engineUnit(o.Binary), Computers: computersUnit(o.Binary), engineRestartWorker: engineRestartUnit(o.Binary, o.Dir)} {
 		if err := fsutil.WriteFile(filepath.Join(o.Dir, name), []byte(text), 0644, true); err != nil {
 			return err
 		}
@@ -325,18 +343,47 @@ func Install(ctx context.Context, o Options) error {
 			fmt.Fprintf(o.Output, "Restarted %s.\n", Computers)
 		}
 	}
-	if err := restartEngine(ctx, o, run, runWithin); err != nil {
-		return err
+	restarted := false
+	if o.EngineQuiet != nil {
+		before, _ := run("show", Engine, "--property=InvocationID")
+		unlock, err := store.LockContext(ctx, engineRestartLock(o.Dir))
+		if err != nil {
+			return err
+		}
+		defer unlock()
+		after, _ := run("show", Engine, "--property=InvocationID")
+		was, now := property(before, "InvocationID"), property(after, "InvocationID")
+		restarted = was != "" && now != "" && was != now
+		// Stop a waiting worker while we hold its restart lock. A worker that
+		// already restarted the published binary changed InvocationID above.
+		if _, err := run("stop", engineRestartWorker); err != nil {
+			return err
+		}
+		if !restarted {
+			if deferred, err := deferEngineRestart(ctx, o); err != nil {
+				return err
+			} else if deferred {
+				_, err := run("--no-block", "start", engineRestartWorker)
+				return err
+			}
+		}
 	}
-	if o.Healthy == nil {
-		return nil
+	if !restarted {
+		if err := restartEngine(ctx, o, run, runWithin); err != nil {
+			return err
+		}
 	}
-	healthCtx, cancel := context.WithTimeout(ctx, healthBound)
-	defer cancel()
-	if err := o.Healthy(healthCtx); err != nil {
-		return fmt.Errorf("%s restarted but is not healthy: %w (see journalctl --user -u %s)", Engine, err, Engine)
+	if o.Healthy != nil {
+		healthCtx, cancel := context.WithTimeout(ctx, healthBound)
+		defer cancel()
+		if err := o.Healthy(healthCtx); err != nil {
+			return fmt.Errorf("%s restarted but is not healthy: %w (see journalctl --user -u %s)", Engine, err, Engine)
+		}
+		fmt.Fprintf(o.Output, "%s answers Health.\n", Engine)
 	}
-	fmt.Fprintf(o.Output, "%s answers Health.\n", Engine)
+	if o.EngineQuiet != nil {
+		return clearEngineRestart(ctx, o.Dir)
+	}
 	return nil
 }
 
@@ -350,19 +397,6 @@ func restartEngine(ctx context.Context, o Options, run func(...string) (string, 
 	_, err := runWithin(restartBound, "restart", Engine)
 	if err == nil {
 		return nil
-	}
-	pause := o.Pause
-	if pause == nil {
-		pause = func(ctx context.Context, d time.Duration) error {
-			timer := time.NewTimer(d)
-			defer timer.Stop()
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-timer.C:
-				return nil
-			}
-		}
 	}
 	// Every start gets a new InvocationID, so an engine that is active under a new
 	// one has been restarted, and one that is still the old one has not.
@@ -378,11 +412,25 @@ func restartEngine(ctx context.Context, o Options, run func(...string) (string, 
 		case "failed":
 			return err
 		}
-		if pause(ctx, time.Second) != nil {
+		if o.pause(ctx, time.Second) != nil {
 			break
 		}
 	}
 	return err
+}
+
+func (o Options) pause(ctx context.Context, d time.Duration) error {
+	if o.Pause != nil {
+		return o.Pause(ctx, d)
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // systemctlUser runs one systemctl --user command with the given environment,
