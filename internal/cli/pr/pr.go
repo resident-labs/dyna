@@ -89,6 +89,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 	}
 	track := &cobra.Command{Use: "track <number|url>", Short: "Link a PR to this session, or to root with no Dyna stamp", Args: cobra.ExactArgs(1)}
 	trackRepo := track.Flags().String("repo", "", "matching repository checkout path")
+	trackGoal := track.Flags().String("goal", "", "link the PR to this open room goal, such as g12 (default: your goal when unambiguous; never replaces a link unless given)")
 	track.RunE = func(c *cobra.Command, a []string) error {
 		s := o.Service()
 		info, err := subagent.Actor(s.Notify.Rooms, o.Session, "")
@@ -109,7 +110,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		// The engine tracks as this caller (requirements item 3) and checks
 		// that dir is a checkout of the room's and the PR's repository.
 		var tracked prview.TrackedPR
-		if err := engineclient.New("").Call(c.Context(), "TrackPRRef", []any{info.RoomID, info.ID, a[0], dir}, &tracked); err != nil {
+		if err := engineclient.New("").Call(c.Context(), "TrackPRRef", []any{info.RoomID, info.ID, a[0], dir, *trackGoal}, &tracked); err != nil {
 			return err
 		}
 		return output(c, tracked)

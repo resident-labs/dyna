@@ -55,6 +55,20 @@ Run it again after commits to update the change. Omitted notes remain.
 `dyna git change show <id>`, and `dyna git change close <id>` to manage changes.
 Closing never merges or deletes the branch.
 
+A new change or tracked PR links to your goal, or your nearest ancestor's, when that is
+unambiguous. Pass `--goal <id>` to `dyna git pr track` or `dyna git change open` to
+choose an open goal in the room; it replaces an existing link. Without `--goal`,
+tracking again never changes a link. The owner, root, author or author's ancestor can
+also link in the app.
+
+Only the owner or root can expedite one goal per room with `dyna goal expedite`.
+Queue ordering is planned for a separate update. Linked changes will get the next
+available review slot in their room. Eligible expedited PRs will get an isolated merge
+trial, with merge priority per repository. When normal work is waiting, it will get a
+slot after three expedited selections. Review fairness will be per room; merge fairness
+will be per repository. Existing gates will still apply. Running reviews, merge trials
+and CI will continue. Expedite will not change session, workflow or CI scheduling.
+
 A reviewer starts on each needed verified head, in parallel with CI.
 Draft PRs get no automatic review, even with required reviewers. Open a PR
 ready for review, or run `gh pr ready <number>` when it should be reviewed.

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/goalkeeper"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/listchange"
@@ -196,6 +197,24 @@ func (s *Service) FinishGoal(ctx context.Context, roomRef, id, summary string, d
 	}
 	return g, service.Milestone(g, author.ID, verb)
 }
+
+// ExpediteGoal makes goal id the room's one expedited goal, for goals.ExpediteTTL.
+// An empty id stops the room's priority and returns the goal that had it.
+// Only the owner or root may call it. Another expedited goal needs replace.
+func (s *Service) ExpediteGoal(ctx context.Context, roomRef, id string, replace bool) (goals.Goal, error) {
+	r, _, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	if err := authority.Check("goal expedite", authority.Of(ctx), nil); err != nil {
+		return goals.Goal{}, err
+	}
+	store := s.goalService().Store
+	if id == "" {
+		return store.StopExpedite(r.ID)
+	}
+	return store.Expedite(r.ID, id, replace)
+}
 func (s *Service) CheckGoal(ctx context.Context, roomRef, id string) (goals.Goal, error) {
 	r, _, err := s.goalCaller(ctx, roomRef)
 	if err != nil {
@@ -304,9 +323,18 @@ func (s *Service) NoteGoal(ctx context.Context, roomRef, goal, text string) (goa
 	return s.goalService().Store.AddEvent(r.ID, goals.Event{Goal: goal, By: author.ID, Event: "note", Text: strings.TrimSpace(text)})
 }
 func (s *Service) scanGoals(signatures, work map[string]string, version *string, first bool, emit func(Event)) {
+	s.scanGoalsAt(time.Now(), signatures, work, version, first, emit)
+}
+
+func (s *Service) scanGoalsAt(now time.Time, signatures, work map[string]string, version *string, first bool, emit func(Event)) {
 	service := s.goalService()
+	service.Store.Now = func() time.Time { return now }
 	current, err := service.Store.Revision()
-	if err != nil || current == *version {
+	// Expiry changes the published goal even without a database write.
+	// Keep the next boundary with this watcher's cached goal inputs.
+	const expiryKey = "\x00expediteUntil"
+	expiry, _ := time.Parse(time.RFC3339Nano, work[expiryKey])
+	if err != nil || current == *version && (expiry.IsZero() || now.Before(expiry)) {
 		return
 	}
 	state, err := service.Store.Read()
@@ -315,10 +343,14 @@ func (s *Service) scanGoals(signatures, work map[string]string, version *string,
 	}
 	rows := []listchange.Item{}
 	wake, metadata := map[string]bool{}, map[string]bool{}
+	var nextExpiry time.Time
 	for roomID, room := range state.Rooms {
 		items := make([]goals.Goal, 0, len(room.Goals))
 		inputs := map[string]goals.Goal{}
 		for id, goal := range room.Goals {
+			if goal.ExpeditedAt(now) && (nextExpiry.IsZero() || goal.ExpediteUntil.Before(nextExpiry)) {
+				nextExpiry = *goal.ExpediteUntil
+			}
 			items = append(items, *goal)
 			inputs[id] = *goal
 		}
@@ -344,6 +376,10 @@ func (s *Service) scanGoals(signatures, work map[string]string, version *string,
 		return
 	}
 	*version = current
+	delete(work, expiryKey)
+	if !nextExpiry.IsZero() {
+		work[expiryKey] = nextExpiry.Format(time.RFC3339Nano)
+	}
 	emitted := map[string]bool{}
 	for _, change := range changes {
 		value := change.Change
