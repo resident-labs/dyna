@@ -64,7 +64,7 @@ func (s *Service) StopSession(ctx context.Context, roomRef, ref string) (Member,
 }
 
 // CloseSession closes a session: it stops a running turn first and frees the
-// name. Children that own nothing close with it; the rest move to its parent.
+// name. It hands work to the nearest open ancestor, or root.
 // CloseOptions are the choices a close makes explicit.
 type CloseOptions struct {
 	Force         bool `json:"force"`
@@ -75,13 +75,13 @@ func (s *Service) CloseSession(ctx context.Context, roomRef, ref string) (Member
 	return s.closeSession(ctx, roomRef, ref, CloseOptions{})
 }
 
-// ForceCloseSession is the explicit confirmation path for PR roles and live runs.
+// ForceCloseSession closes even when an automatic handoff fails.
 func (s *Service) ForceCloseSession(ctx context.Context, roomRef, ref string) (Member, error) {
 	return s.closeSession(ctx, roomRef, ref, CloseOptions{Force: true})
 }
 
-// CloseSessionOptions is close with the CLI's choices: force past open
-// responsibilities, and keep the session's worktrees for a manual handoff.
+// CloseSessionOptions is close with the CLI's choices: force past failed
+// handoffs, and keep the session's worktrees for a manual handoff.
 // Only the CLI uses it, so the two plain calls the web app uses stay as they
 // are, and the worktree locks stay behind this call's authority check.
 func (s *Service) CloseSessionOptions(ctx context.Context, roomRef, ref string, opts CloseOptions) (Member, error) {

@@ -16,7 +16,9 @@ func TestCloseReleasesReviewerAndPreservesVerdict(t *testing.T) {
 			if err := e.s.Store.update(func(st *State) error {
 				live := st.Records[r.Key]
 				live.Reviewer, live.ReviewerOverride, live.RoundHead, live.Verdict = reviewer, reviewer, "head", verdict
-				live.RequiredReviewers = []string{reviewer}
+				if verdict == "" {
+					live.RequiredReviewers = []string{reviewer}
+				}
 				return nil
 			}); err != nil {
 				t.Fatal(err)

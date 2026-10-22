@@ -1043,6 +1043,9 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	if fresh.Consolidating != "" {
 		return info, errors.New("cancel or finish consolidation before closing this session")
 	}
+	if fresh.Closing == nil || fresh.Closing.Token != opts.closingToken || !fresh.Closing.Active() {
+		return info, errors.New("close reservation changed or expired; retry")
+	}
 	// Every check that can refuse this close has passed, and a running turn is
 	// stopped, so the trees kept here are the ones cleanup would remove.
 	if opts.KeepWorktrees {
@@ -1059,6 +1062,12 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		}
 	} else if _, err := store.updateMetaContext(ctx, info.ID, func(meta *Meta) { meta.Closed = time.Now() }); err != nil {
 		return info, err
+	}
+	// Recheck the heir under the names lock: a bulk close may also close
+	// the ancestor selected before the handoff.
+	heir, err = m.closeHeir(Info{Meta: fresh})
+	if err != nil {
+		summary = append(summary, "Child heir lookup failed: "+err.Error())
 	}
 	// The session is closed now. A hand-over failure leaves that child open
 	// under a closed parent, so record it and finish the close.
