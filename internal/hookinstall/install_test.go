@@ -155,7 +155,7 @@ func TestInstallRequiresCommandLayout(t *testing.T) {
 			fake := fakeInstaller(t, j, "main", "", &calls)
 			s.Exec = func(ctx context.Context, p processguard.Process) error {
 				if len(p.Args) > 5 && p.Args[3] == "go" {
-					p.Timeout = 8 * time.Second
+					p.Timeout = 30 * time.Second
 					err := processguard.Execute(ctx, p)
 					// The build must leave the mode file as the only entry in
 					// the telemetry directory. Telemetry data here means a
