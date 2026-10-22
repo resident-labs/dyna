@@ -4,7 +4,7 @@ import { createCall } from './call.js'
 
 function fakeSocket() {
   const ws = { readyState: 0, sent: [], closed: null }
-  ws.send = (m) => ws.sent.push(JSON.parse(m))
+  ws.send = (m) => ws.sent.push(m instanceof ArrayBuffer ? m : JSON.parse(m))
   ws.close = (code) => { ws.closed = code }
   ws.open = () => { ws.readyState = 1; ws.onopen() }
   ws.recv = (m) => ws.onmessage({ data: JSON.stringify(m) })
@@ -68,11 +68,11 @@ test("start asks the engine, opens the room's call socket and says whether the m
 
 test('microphone frames go out only while the mic is open, at 24 kHz', async () => {
   const { call, ws, mic } = await liveCall()
-  const frames = () => ws.sent.filter((m) => m.type === 'audio')
+  const frames = () => ws.sent.filter((m) => m instanceof ArrayBuffer)
   mic()
   assert.equal(frames().length, 1)
   // 480 samples at 48 kHz are 240 at 24 kHz: 480 bytes of PCM16.
-  assert.equal(atob(frames()[0].audio).length, 480)
+  assert.equal(frames()[0].byteLength, 480)
   call.toggleMute()
   mic()
   call.toggleMute()
@@ -167,13 +167,13 @@ test('mute is the turn signal: releasing push to talk or muting closes the turn,
   call.talk(false)
   assert.deepEqual(sent(), [false, true, false, true])
   mic()
-  assert.equal(ws.sent.filter((m) => m.type === 'audio').length, 1, 'the mic stays closed after the release')
+  assert.equal(ws.sent.filter((m) => m instanceof ArrayBuffer).length, 1, 'the mic stays closed after the release')
   call.setPushToTalk(false)
   call.toggleMute()
   call.toggleMute()
   assert.deepEqual(sent(), [false, true, false, true, false, true, false])
   // Nothing but audio frames carries sound.
-  assert.ok(ws.sent.filter((m) => m.type === 'audio').every((m) => /[^\0]/.test(atob(m.audio))))
+  assert.ok(ws.sent.filter((m) => m instanceof ArrayBuffer).every((m) => new Uint8Array(m).some((byte) => byte !== 0)))
 })
 
 test("a failed start's late status never touches the next call", async () => {
@@ -261,7 +261,7 @@ test("an old call's socket never touches the next call", async () => {
 // The owner may talk as soon as they press Call. Their words wait in the
 // browser until the call's socket opens; the engine holds them until Voice
 // is ready, and they are never lost.
-const spoken = (ws) => ws.sent.filter((m) => m.type === 'audio')
+const spoken = (ws) => ws.sent.filter((m) => m instanceof ArrayBuffer)
 
 test('speech after Call and before the socket opens is sent as it opens', async () => {
   const t = setup()
@@ -270,7 +270,7 @@ test('speech after Call and before the socket opens is sent as it opens', async 
   t.mic()
   assert.equal(spoken(t.ws).length, 0, 'nothing goes out before the socket opens')
   t.ws.open()
-  const sent = spoken(t.ws).reduce((n, m) => n + atob(m.audio).length, 0)
+  const sent = spoken(t.ws).reduce((n, m) => n + m.byteLength, 0)
   // Two frames of 480 samples at 48 kHz are 480 samples at 24 kHz: 960 bytes.
   assert.equal(sent, 960)
   // Then frames stream at once, before Voice is ready: the engine holds them.
@@ -328,7 +328,7 @@ test('push to talk speech released before the socket opens still reaches Voice, 
   t.mic() // not held: not kept
   t.ws.open()
   // One 480-sample frame at 48 kHz is 240 samples at 24 kHz: 480 bytes.
-  assert.equal(spoken(t.ws).reduce((n, m) => n + atob(m.audio).length, 0), 480)
+  assert.equal(spoken(t.ws).reduce((n, m) => n + m.byteLength, 0), 480)
   // The speech goes first, then the closed mic ends the turn.
   assert.deepEqual(t.ws.sent.at(-1), { type: 'mute', muted: true })
 })

@@ -12,7 +12,7 @@ async function configuredAudio(...[onFrame, receipts]: Parameters<typeof openAud
   return openAudio(onFrame, receipts, ducking)
 }
 
-export const voiceCall = createCall({ api, socket: (room: string) => new WebSocket(`${api.voiceURL()}?room=${encodeURIComponent(room)}`), openAudio: configuredAudio })
+export const voiceCall = createCall({ api, socket: (room: string) => new WebSocket(`${api.voiceURL()}?v=2&room=${encodeURIComponent(room)}`), openAudio: configuredAudio })
 export const callRequests = createCallRequests(api)
 
 // clock formats a call's length as m:ss, or h:mm:ss.
