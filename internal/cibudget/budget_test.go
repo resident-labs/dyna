@@ -39,7 +39,7 @@ func TestGoBudgetAndFailureOutput(t *testing.T) {
 }
 
 func TestAllowNamesAndComments(t *testing.T) {
-	allowed, err := ReadAllow(strings.NewReader("# reason\n\n p/TestSlow  # measured 11s\nTestOther\n"))
+	allowed, err := ReadAllow(strings.NewReader("# reason\n\n p/TestSlow  # measured 11s\nq/TestOther\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestAllowLiteralHashAndWarnings(t *testing.T) {
 	if !report.Write(&out, 10*time.Second, allowed) {
 		t.Fatal(out.String())
 	}
-	for _, want := range []string{"bare name", "matches no test", "missing/name"} {
+	for _, want := range []string{"matches no test", "missing/name"} {
 		if !strings.Contains(out.String(), want) {
 			t.Fatalf("missing %q: %s", want, &out)
 		}
@@ -217,17 +217,6 @@ func TestGoParentOwnTimeAndLiteralJUnitNames(t *testing.T) {
 		t.Fatal(out.String())
 	}
 }
-func TestAllowWarningsWithoutParserChanges(t *testing.T) {
-	report := Report{Tests: []Test{{Package: "widget", Name: "renders", Duration: time.Second}}}
-	var out bytes.Buffer
-	report.Write(&out, 10*time.Second, map[string]bool{"renders": true, "missing/case": true})
-	for _, want := range []string{"bare name", "matches no test"} {
-		if !strings.Contains(out.String(), want) {
-			t.Fatalf("missing %s: %s", want, &out)
-		}
-	}
-}
-
 func TestGoOwnTimeNestedParallelAndRepeated(t *testing.T) {
 	var report Report
 	input := `{"Action":"pass","Package":"p","Test":"TestNested/child/grandchild","Elapsed":1}
@@ -334,5 +323,30 @@ func TestIsolateMarksOnlyReplacedTimes(t *testing.T) {
 	// confirmation: nobody measured it alone, and its suite did isolate.
 	if got := report.Tests[1]; got.Isolated || !got.IsolationRan || got.Duration != time.Second {
 		t.Fatalf("failed isolated run: %+v", got)
+	}
+}
+
+func TestBareAllowDoesNotExemptTwoPackages(t *testing.T) {
+	report := Report{Tests: []Test{
+		{Package: "one", Name: "TestShared", Duration: 2 * time.Second},
+		{Package: "two", Name: "TestShared", Duration: 2 * time.Second},
+	}}
+	var out bytes.Buffer
+	if report.Write(&out, time.Second, map[string]bool{"TestShared": true}) ||
+		strings.Count(out.String(), "OVER BUDGET") != 2 ||
+		!strings.Contains(out.String(), "allow entry \"TestShared\" matches no test") {
+		t.Fatalf("bare name exempted qualified tests: %s", &out)
+	}
+	out.Reset()
+	if report.Write(&out, time.Second, map[string]bool{"one/TestShared": true}) ||
+		strings.Count(out.String(), "OVER BUDGET") != 1 ||
+		!strings.Contains(out.String(), "OVER BUDGET two/TestShared") {
+		t.Fatalf("qualified ID crossed package boundary: %s", &out)
+	}
+	out.Reset()
+	literal := Report{Tests: []Test{{Name: "literal/name #1", Duration: 2 * time.Second}}}
+	if !literal.Write(&out, time.Second, map[string]bool{"literal/name #1": true}) ||
+		strings.Contains(out.String(), "WARNING") {
+		t.Fatalf("package-less literal ID was not accepted: %s", &out)
 	}
 }
