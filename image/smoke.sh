@@ -40,7 +40,9 @@ for ((attempt=0; attempt<60; attempt++)); do
  if run_root machinectl shell "root@$name" /usr/bin/true >> "$out/boot-ready.log" 2>&1; then break; fi
  sleep 1
 done
-run_root machinectl shell "root@$name" /bin/bash -lc '
+# machinectl shell ends at once when stdin is not a terminal, as in CI, so the
+# checks run through systemd-run, which also returns their exit status.
+run_root systemd-run --machine="$name" --pipe --wait --quiet /bin/bash -lc '
 set -euo pipefail
 timeout 120 systemctl is-system-running --wait
 test "$(cat /proc/1/comm)" = systemd
@@ -59,7 +61,7 @@ dyna engine run --help
 echo DYNA_ROOT_SMOKE_OK
 ' | tr -d '\r' | tee "$out/smoke.log"
 grep -Fxq DYNA_ROOT_SMOKE_OK "$out/smoke.log"
-run_root machinectl shell "dyna@$name" /bin/bash -lc '
+run_root systemd-run --machine="dyna@$name" --user --pipe --wait --quiet /bin/bash -lc '
 set -euo pipefail
 sudo -n true
 export XDG_RUNTIME_DIR=/run/user/1000
