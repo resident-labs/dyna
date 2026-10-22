@@ -290,3 +290,107 @@ type interruptedCIContext struct {
 }
 
 func (c interruptedCIContext) Err() error { return c.reason }
+
+func TestRegisteredCIRepublishesReplacementResultsAndBudgets(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	registry := &hostedCIRegistry{hosted: localci.HostedRuns{Published: true}}
+	var states []string
+	s := &Service{LocalCIRegistry: registry}
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		for _, arg := range cmd.Args {
+			if strings.HasPrefix(arg, "state=") {
+				states = append(states, strings.TrimPrefix(arg, "state="))
+			}
+		}
+		_, err := fmt.Fprint(cmd.Stdout, "HTTP/2.0 201 Created\r\n\r\n{}")
+		return err
+	}
+	job := registeredCIJob{record: Record{Host: "github.com", Repo: "owner/repo"}, head: head}
+	result := localci.Result{Repo: "repo", SHA: head, Node: "node", Status: "failed", Started: time.Unix(100, 0), Checks: []localci.SuiteResult{{CheckName: "go-test", Status: "failed"}}}
+	if err := s.publishLocalStatuses(context.Background(), job, result); err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("legacy publication marker hid current result: %v", states)
+	}
+	if err := s.publishLocalStatuses(context.Background(), job, result); err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 {
+		t.Fatalf("unchanged result posted again: %v", states)
+	}
+	result.Started = result.Started.Add(time.Second)
+	result.Status = "passed"
+	result.Checks[0].Status = "passed"
+	if err := s.publishLocalStatuses(context.Background(), job, result); err != nil {
+		t.Fatal(err)
+	}
+	result.Checks[0].Duration = 4 * time.Minute
+	applyLocalBudgets(&result, ChangePolicy{CITimeBudget: "enforce"})
+	if err := s.publishLocalStatuses(context.Background(), job, result); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(states, []string{"failure", "success", "failure"}) {
+		t.Fatalf("replacement and budget statuses: %v", states)
+	}
+}
+
+func TestRegisteredCISkipsCurrentConclusiveHeadsAndTrials(t *testing.T) {
+	head := strings.Repeat("a", 40)
+	r := Record{Head: head, CI: "passed", Polling: Polling{PullHead: head}}
+	s := &Service{LocalCIRegistry: &hostedCIRegistry{}}
+	for _, tc := range []struct {
+		ci, polled  string
+		stale, want bool
+	}{{"passed", head, false, true}, {"failed", head, false, true}, {"pending", head, false, false}, {"passed", "old", false, false}, {"passed", head, true, false}} {
+		r.CI, r.Polling.PullHead, r.HeadStale = tc.ci, tc.polled, tc.stale
+		got, err := s.scheduledCIConclusive(context.Background(), registeredCIJob{record: r, head: head}, "repo")
+		if err != nil || got != tc.want {
+			t.Fatalf("ci=%s polled=%s stale=%t: settled=%t err=%v", tc.ci, tc.polled, tc.stale, got, err)
+		}
+	}
+	job := registeredCIJob{record: Record{Host: "github.com", Repo: "owner/repo"}, head: head, branch: "dyna/merge-trial/1", trial: true}
+	run := Run{ID: 1, HeadSHA: head, HeadBranch: job.branch, Event: "push", Status: "completed", Conclusion: "success"}
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		var body any = map[string]any{}
+		for _, arg := range cmd.Args {
+			switch {
+			case strings.Contains(arg, "check-runs?"):
+				body = map[string]any{"check_runs": []Check{actionsCheck(Check{Name: "go-test", Status: "completed", Conclusion: "success"})}}
+			case strings.Contains(arg, "actions/runs?"):
+				body = map[string]any{"workflow_runs": []Run{run}}
+			case strings.Contains(arg, "/statuses?"):
+				body = []Status{}
+			}
+		}
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n%s", raw)
+		return err
+	}
+	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo"); err != nil || !done {
+		t.Fatalf("passing exact trial: %t %v", done, err)
+	}
+	run.HeadBranch = "main"
+	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo"); err != nil || done {
+		t.Fatalf("unrelated main push settled trial: %t %v", done, err)
+	}
+	// A settled record does not remove an already active run from the queue.
+	repo := t.TempDir()
+	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
+		t.Fatalf("init repository: %v: %s", err, raw)
+	}
+	r = Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: head, Branch: "feature", RepoPath: repo, Watching: true, State: "open", CI: "passed", Polling: Polling{PullHead: head}}
+	activeJob := registeredCIJob{record: r, head: head}
+	cancelled := false
+	active := &registeredCIRun{node: "node", cancel: func() { cancelled = true }}
+	s = &Service{LocalCIRegistry: &occupiedCIRegistry{}, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{registeredJobKey(activeJob): active}}}
+	if err := s.scheduleRegisteredCI(context.Background(), State{Records: map[string]*Record{r.Key: &r}}); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled || s.registeredRuns.runs[registeredJobKey(activeJob)] != active {
+		t.Fatal("settled hosted result stopped an active local run")
+	}
+}
