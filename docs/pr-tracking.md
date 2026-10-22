@@ -241,12 +241,13 @@ dyna git ci node rm omarchy
 
 The mode applies to the current room. The default, `github`, keeps hosted CI.
 `local` and `both` let local and GitHub results race. A conclusive pass permits
-progress, but an observed failure from either source blocks it. No enabled
+progress when every required check has passed. An observed failure from either
+source blocks it. No enabled
 nodes means GitHub remains the source. Review approval remains required.
 
-When a node starts a PR head or merge trial, Dyna cancels that head's hosted
-runs that are still queued or waiting. Running jobs finish. An infrastructure
-error makes Dyna rerun those cancelled runs. A test
+When a node starts a PR head or merge trial, Dyna cancels that head's queued
+or waiting runs of `.github/workflows/ci.yml`. Running jobs and other workflows
+finish. An infrastructure error makes Dyna rerun those cancelled runs. A test
 failure remains a failure. Dyna never cancels main pushes or fork PR runs.
 The GitHub workflow stays unchanged and always checks landed code on main.
 
