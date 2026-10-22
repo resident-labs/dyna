@@ -11,10 +11,8 @@ import (
 	"sort"
 
 	"dyna-agent/internal/database"
-	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
-	"dyna-agent/internal/store"
 )
 
 const questionsSchema = `CREATE TABLE IF NOT EXISTS questions (
@@ -42,149 +40,67 @@ func (s *Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := database.Migrate(db, "questions.schema", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), questionsSchema)
+	if err := database.Migrate(db, "questions.schema", 2, func(conn *sql.Conn, _ int) error {
+		ctx := context.Background()
+		if _, err := conn.ExecContext(ctx, questionsSchema); err != nil {
+			return err
+		}
+		var owned bool
+		if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM questions) OR EXISTS(SELECT 1 FROM question_next) OR EXISTS(SELECT 1 FROM meta WHERE key='questions.imported' OR (key='questions.revision' AND CAST(value AS INTEGER)>0))`).Scan(&owned); err != nil {
+			return err
+		}
+		if !owned {
+			st, err := s.readImportSource()
+			if err != nil {
+				return err
+			}
+			if err := importQuestionRows(conn, st); err != nil {
+				return err
+			}
+		}
+		if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO meta(key,value) VALUES ('questions.revision','0')"); err != nil {
+			return err
+		}
+		_, err := conn.ExecContext(ctx, "DELETE FROM meta WHERE key='questions.imported'")
 		return err
 	}); err != nil {
 		return nil, err
-	}
-	if database.OwnsSchema() {
-		if err := s.importLegacy(db, s.installGuard); err != nil {
-			return nil, err
-		}
-	} else {
-		done, err := importDone(db)
-		if err != nil {
-			return nil, err
-		}
-		if !done {
-			return nil, fmt.Errorf("only the engine imports questions; restart it: systemctl --user restart dyna-engine.service")
-		}
 	}
 	s.db = db
 	return db, nil
 }
 
-func importDone(db *sql.DB) (bool, error) {
-	var value string
-	err := db.QueryRow("SELECT value FROM meta WHERE key='questions.imported'").Scan(&value)
-	if err == sql.ErrNoRows {
-		return false, nil
+// TODO: legacy/shim remove later — reads retained question files only for the schema migration; remove after all retained stores are migrated.
+func (s *Store) readImportSource() (legacyQuestionState, error) {
+	raw, err := os.ReadFile(filepath.Join(s.Root, "state.json"))
+	if err != nil && !os.IsNotExist(err) {
+		return legacyQuestionState{}, err
 	}
-	return err == nil, err
-}
-
-func guardInstalled(root string) bool {
-	data, err := os.ReadFile(filepath.Join(root, "state.json"))
-	if err != nil {
-		return false
-	}
-	var state struct {
+	var header struct {
 		Version int `json:"version"`
 	}
-	return json.Unmarshal(data, &state) == nil && state.Version == 2
-}
-
-// TODO: legacy/shim remove later — imports version-1 questions and excludes old writers until the guard is installed; remove when supported binaries all use dyna.db.
-func (s *Store) importLegacy(db *sql.DB, installGuard func() error) error {
-	done, err := importDone(db)
-	if err != nil {
-		return err
-	}
-	if done && guardInstalled(s.Root) {
-		return nil
-	}
-	if err := os.MkdirAll(s.Root, 0700); err != nil {
-		return err
-	}
-	unlock, err := store.Lock(filepath.Join(s.Root, "state.lock"))
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	if err := state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-		ctx := context.Background()
-		var marker string
-		err := conn.QueryRowContext(ctx, "SELECT value FROM meta WHERE key='questions.imported'").Scan(&marker)
-		if err == nil {
-			return nil
+	if err == nil {
+		if err := json.Unmarshal(raw, &header); err != nil {
+			return legacyQuestionState{}, fmt.Errorf("invalid question state: %w", err)
 		}
-		if err != sql.ErrNoRows {
-			return err
+	}
+	if os.IsNotExist(err) || header.Version == 2 {
+		raw, err = os.ReadFile(filepath.Join(s.Root, "state.v1.backup.json"))
+		if os.IsNotExist(err) && header.Version != 2 {
+			return legacyQuestionState{}, nil
 		}
-		st, err := s.prepareLegacyImport(installGuard)
 		if err != nil {
-			return err
-		}
-		if err := importQuestionRows(conn, st); err != nil {
-			return err
-		}
-		_, err = conn.ExecContext(ctx, "INSERT INTO meta(key,value) VALUES ('questions.imported','1'),('questions.revision','0')")
-		return err
-	}); err != nil {
-		return err
-	}
-	if !guardInstalled(s.Root) {
-		return installGuard()
-	}
-	return nil
-}
-
-// TODO: legacy/shim remove later — preserves old questions across interrupted imports; remove after retained stores are migrated.
-func (s *Store) prepareLegacyImport(installGuard func() error) (legacyQuestionState, error) {
-	source := filepath.Join(s.Root, "state.json")
-	backup := filepath.Join(s.Root, "state.v1.backup.json")
-	// Version 1 remains authoritative until the guard is installed. Recapture
-	// it after a failed guard write, since an old writer may have accepted work.
-	if !guardInstalled(s.Root) {
-		if _, err := os.Stat(source); os.IsNotExist(err) {
-			if _, err := os.Stat(backup); err == nil {
-				source = backup
-			}
-		}
-		st, err := readLegacy(source)
-		if err != nil {
-			return legacyQuestionState{}, err
-		}
-		data, err := json.Marshal(st)
-		if err != nil {
-			return legacyQuestionState{}, err
-		}
-		if err := s.writeMigrationFile("state.v1.backup.json", append(data, '\n')); err != nil {
-			return legacyQuestionState{}, err
+			return legacyQuestionState{}, fmt.Errorf("question import backup: %w", err)
 		}
 	}
-	st, err := readLegacy(backup)
-	if err != nil {
-		return legacyQuestionState{}, err
+	var st legacyQuestionState
+	if err := json.Unmarshal(raw, &st); err != nil {
+		return st, fmt.Errorf("invalid question state: %w", err)
 	}
-	if _, err := os.Stat(backup); err != nil {
-		return legacyQuestionState{}, fmt.Errorf("question import backup: %w", err)
-	}
-	// The backup is durable before an old reader loses access to version 1.
-	// The guard is durable before the database can commit its import marker.
-	if err := installGuard(); err != nil {
-		return legacyQuestionState{}, err
+	if st.Version != 1 {
+		return st, fmt.Errorf("unsupported question state version %d", st.Version)
 	}
 	return st, nil
-}
-
-func (s *Store) installGuard() error {
-	// TODO: legacy/shim remove later — makes pre-SQLite binaries reject migrated questions; remove when no supported binary reads state.json.
-	return s.writeMigrationFile("state.json", []byte("{\"version\":2}\n"))
-}
-
-// TODO: legacy/shim remove later — preserves the one-time import backup and old-binary guard; remove with the questions JSON reader when requirement 31 ends.
-func (s *Store) writeMigrationFile(name string, data []byte) error {
-	if err := fsutil.WriteFile(filepath.Join(s.Root, name), data, 0600, true); err != nil {
-		return err
-	}
-	directory, err := os.Open(s.Root)
-	if err != nil {
-		return err
-	}
-	defer directory.Close()
-	return directory.Sync()
 }
 
 // legacyQuestionState retains each complete question document during import.
@@ -215,31 +131,6 @@ func importQuestionRows(conn *sql.Conn, st legacyQuestionState) error {
 		}
 	}
 	return nil
-}
-
-// TODO: legacy/shim remove later — reads the old question JSON only for its one-time import; remove after all retained stores are migrated.
-func readLegacy(path string) (legacyQuestionState, error) {
-	st := legacyQuestionState{Version: 1, Next: map[string]int{}, Questions: map[string]json.RawMessage{}}
-	data, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return st, nil
-	}
-	if err != nil {
-		return st, err
-	}
-	if err := json.Unmarshal(data, &st); err != nil {
-		return st, fmt.Errorf("invalid question state: %w", err)
-	}
-	if st.Version != 1 {
-		return st, fmt.Errorf("unsupported question state version %d", st.Version)
-	}
-	if st.Next == nil {
-		st.Next = map[string]int{}
-	}
-	if st.Questions == nil {
-		st.Questions = map[string]json.RawMessage{}
-	}
-	return st, nil
 }
 
 func readState(query state.Reader) (State, error) {
