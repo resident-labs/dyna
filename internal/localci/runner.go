@@ -1,4 +1,4 @@
-// Package localci runs the shared CI suites in isolated containers over SSH.
+// Package localci runs the shared CI suites on bounded local and SSH nodes.
 package localci
 
 import (
@@ -7,7 +7,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,7 +21,6 @@ import (
 	"time"
 
 	"dyna-agent/internal/cibudget"
-	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shellquote"
@@ -42,17 +40,26 @@ type Runner struct {
 	Remote  string
 	DataDir string
 	Command Command
+	Node    *Node
 }
 type Request struct {
 	Repo    string
+	RepoDir string
+	RoomID  string
 	SHA     string
 	Suites  []string
 	Timeout time.Duration
 	MaxTest time.Duration
 	Allowed map[string]bool
+	// OnStart runs after node setup, before the first check starts.
+	OnStart func(context.Context) error
+	// DeferSave lets the scheduler apply room budgets before publishing a result.
+	DeferSave bool
 }
 type SuiteResult struct {
 	Suite     string        `json:"suite"`
+	Node      string        `json:"node,omitempty"`
+	CheckName string        `json:"checkName,omitempty"`
 	Duration  time.Duration `json:"duration"`
 	SlowTests []TestTiming  `json:"slowTests,omitempty"`
 	Status    string        `json:"status"`
@@ -67,11 +74,14 @@ type TestTiming struct {
 }
 type Result struct {
 	Repo     string        `json:"repo"`
+	RoomID   string        `json:"roomID,omitempty"`
+	Node     string        `json:"node,omitempty"`
 	SHA      string        `json:"sha"`
 	Status   string        `json:"status"`
 	Started  time.Time     `json:"started"`
 	Duration time.Duration `json:"duration"`
 	Suites   []SuiteResult `json:"suites"`
+	Checks   []SuiteResult `json:"checks,omitempty"`
 	Error    string        `json:"error,omitempty"`
 }
 
@@ -117,12 +127,7 @@ func (r Runner) Show(repo, sha string) (Result, error) {
 	if err != nil {
 		return result, err
 	}
-	b, err := os.ReadFile(filepath.Join(r.resultDir(common, sha), "result.json"))
-	if err != nil {
-		return result, err
-	}
-	err = json.Unmarshal(b, &result)
-	return result, err
+	return (Store{DataDir: r.root()}).LoadResult(context.Background(), common, sha)
 }
 
 func (r Runner) commonDir(ctx context.Context, repo string) (string, error) {
@@ -140,6 +145,12 @@ func DefaultSuites() []string { return []string{"relay", "frontend", "go", "cros
 // Go requires frontend assets. Cross-build also waits when frontend is selected.
 // Live computer-smoke tests are intentionally excluded.
 func (r Runner) Run(ctx context.Context, req Request) (result Result, err error) {
+	if req.Repo == "" {
+		req.Repo = req.RepoDir
+	}
+	if r.Node != nil {
+		return r.runNode(ctx, req)
+	}
 	suites := append([]string(nil), req.Suites...)
 	if len(suites) == 0 {
 		suites = DefaultSuites()
@@ -181,7 +192,7 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 	if e != nil {
 		return result, e
 	}
-	result = Result{Repo: common, SHA: strings.TrimSpace(sha.String()), Status: "error", Started: time.Now().UTC()}
+	result = Result{Repo: common, RoomID: req.RoomID, SHA: strings.TrimSpace(sha.String()), Status: "error", Started: time.Now().UTC()}
 	if !regexp.MustCompile(`^[0-9a-f]{40,64}$`).MatchString(result.SHA) {
 		return result, fmt.Errorf("git returned invalid commit SHA")
 	}
@@ -195,10 +206,14 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 			result.Error = err.Error()
 			result.Status = "error"
 		}
-		b, e := json.MarshalIndent(result, "", "  ")
-		if e == nil {
-			e = fsutil.WriteFile(filepath.Join(dir, "result.json"), append(b, '\n'), 0600, true)
+		if ctx.Err() != nil {
+			err = errors.Join(err, ctx.Err())
+			return
 		}
+		if req.DeferSave {
+			return
+		}
+		e := (Store{DataDir: r.root()}).SaveResult(context.Background(), result)
 		if e != nil {
 			err = errors.Join(err, e)
 		}
@@ -476,7 +491,8 @@ func readArchive(input io.Reader, dir string) error {
 	}
 }
 func checkReports(sr *SuiteResult, dir string, max time.Duration, allowed map[string]bool) error {
-	if sr.Suite == "cross-build" {
+	switch sr.Suite {
+	case "cross-build", "frontend-check", "go-static", "computer-smoke", "android":
 		return nil
 	}
 	files, err := filepath.Glob(filepath.Join(dir, "reports", sr.Suite, "*.xml"))
@@ -503,12 +519,15 @@ func checkReports(sr *SuiteResult, dir string, max time.Duration, allowed map[st
 		sr.Reports = append(sr.Reports, file)
 	}
 	// Go's JUnit exporter records timing; its JSON stream retains failure details.
-	if sr.Suite == "go" {
+	if sr.Suite == "go" || strings.HasPrefix(sr.Suite, "go-test-shard-") {
 		streams, e := filepath.Glob(filepath.Join(dir, "reports", sr.Suite, "*.json"))
 		if e != nil {
 			return e
 		}
 		for _, file := range streams {
+			if filepath.Base(file) == "execution.json" {
+				continue
+			}
 			f, e := os.Open(file)
 			if e != nil {
 				return e
