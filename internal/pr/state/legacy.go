@@ -23,8 +23,8 @@ func newState() State {
 
 // TODO: legacy/shim remove later — reads the JSON PR store (index.json, records/, closed/, or the version-1 state.json) once to fill dyna.db; remove when no supported store still holds only JSON.
 // found is false when the folder holds no PR state. The files are never changed.
-func readLegacy(root string) (st State, found bool, err error) {
-	st = newState()
+func readLegacy(root string) (st legacyDocuments, found bool, err error) {
+	st.records = map[string]json.RawMessage{}
 	path := filepath.Join(root, "index.json")
 	if _, err = os.Stat(path); os.IsNotExist(err) {
 		path = filepath.Join(root, "state.json")
@@ -40,7 +40,7 @@ func readLegacy(root string) (st State, found bool, err error) {
 		return st, false, err
 	}
 	// A missing version is a version-1 whole-file store.
-	disk := diskIndex{State: st, Format: 1}
+	disk := diskIndex{State: newState(), Format: 1}
 	if err = json.Unmarshal(b, &disk); err != nil {
 		return st, false, fmt.Errorf("invalid PR state: %w", err)
 	}
@@ -52,9 +52,35 @@ func readLegacy(root string) (st State, found bool, err error) {
 	if (disk.Files == nil && disk.Format != 1) || (disk.Files != nil && !combined && disk.Format != 3) {
 		return st, false, fmt.Errorf("unsupported PR state version %d", disk.Format)
 	}
-	st = disk.State
-	if disk.LegacyRate != nil {
-		st.ImportLegacyQuota(*disk.LegacyRate)
+	if err := json.Unmarshal(b, &st.index); err != nil {
+		return st, false, err
+	}
+	if st.index == nil {
+		st.index = map[string]json.RawMessage{}
+	}
+	if disk.Files == nil {
+		var inline, responses map[string]json.RawMessage
+		if raw := st.index["records"]; raw != nil {
+			if err := json.Unmarshal(raw, &inline); err != nil {
+				return st, false, err
+			}
+		}
+		if raw := st.index["httpResponses"]; raw != nil {
+			if err := json.Unmarshal(raw, &responses); err != nil {
+				return st, false, err
+			}
+		}
+		for key, body := range inline {
+			row := map[string]json.RawMessage{"record": body}
+			if responses[key] != nil {
+				row["responses"] = responses[key]
+			}
+			raw, err := json.Marshal(row)
+			if err != nil {
+				return st, false, err
+			}
+			st.records[key] = raw
+		}
 	}
 	files := map[string]string{}
 	for key, name := range disk.Files {
@@ -80,8 +106,6 @@ func readLegacy(root string) (st State, found bool, err error) {
 		}
 	}
 	if disk.Files != nil {
-		st.Records = map[string]*Record{}
-		st.Responses = map[string]map[string]CachedResponse{}
 		for key, name := range files {
 			if filepath.Base(name) != name || !strings.HasSuffix(name, ".json") {
 				return st, false, fmt.Errorf("invalid PR record path %q", name)
@@ -94,12 +118,15 @@ func readLegacy(root string) (st State, found bool, err error) {
 			if err = json.Unmarshal(raw, &record); err != nil {
 				return st, false, fmt.Errorf("invalid PR record %s: %w", key, err)
 			}
-			st.Records[key] = record.Record
-			if record.Responses != nil {
-				st.Responses[key] = record.Responses
-			}
+			st.records[key] = raw
 		}
 	}
-	normalizeState(&st)
+	if err := convertLegacyQuota(st.index, disk); err != nil {
+		return st, false, err
+	}
+	for _, field := range []string{"records", "httpResponses", "recordFiles", "closedIndex", "rateLimit"} {
+		delete(st.index, field)
+	}
+	st.index["version"] = json.RawMessage("1")
 	return st, true, nil
 }
