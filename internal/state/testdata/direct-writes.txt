@@ -188,7 +188,6 @@ not-state internal/profile/migrate.go Migrate 1 # atomic upgrade of hand-edited 
 not-state internal/profile/migrate.go profileV2Backup 1 # checked private backup of hand-edited profile configuration
 not-state internal/profile/profile.go Store.Save 1 # hand-edited worker profile configuration in profiles.json
 not-state internal/profilecheck/probe.go Run 2 # creates and removes temporary probe output.jsonl; persistent health belongs to internal/harness/health
-not-state internal/questions/sqlite.go Store.writeMigrationFile 1 # one-time import backup and old-binary rejection guard; never live question state
 not-state internal/rolesession/session.go lockPath 1 # empty flock coordination file with no persisted record payload
 not-state internal/room/attach.go Store.PutRenderedAttachment 4 # an attachment is a content-addressed blob, written once
 not-state internal/room/records.go removeDir 1 # deletes a room's folder after its rows
