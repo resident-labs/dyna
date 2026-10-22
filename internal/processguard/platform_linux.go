@@ -42,6 +42,21 @@ func reapOrphans(anchor int) {
 	childreaper.Reap(func(pid int) bool { return pid == anchor })
 }
 
+// reapGroup waits for adopted group children to become waitable. A zombie
+// leader can still have exiting threads, so groupLive alone cannot prove
+// that all owned children have been reaped. Other groups may remain live.
+func reapGroup(group int) {
+	for {
+		_, err := unix.Wait4(-group, nil, 0, nil)
+		if err == unix.EINTR {
+			continue
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
 func procFields(pid int) ([]string, error) {
 	b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
 	if err != nil {
