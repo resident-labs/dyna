@@ -32,6 +32,7 @@ func TestStartCallsTheEngine(t *testing.T) {
 	}
 	var room string
 	var got roomsvc.SubagentStart
+	var item string
 	enginetest.Serve(t, store.DataDir(), map[string]websvc.Call{"StartSubagent": func(_ context.Context, args []json.RawMessage) (any, error) {
 		if err := json.Unmarshal(args[0], &room); err != nil {
 			return nil, err
@@ -39,11 +40,40 @@ func TestStartCallsTheEngine(t *testing.T) {
 		if err := json.Unmarshal(args[1], &got); err != nil {
 			return nil, err
 		}
-		return subagent.Info{Meta: subagent.Meta{ID: "ses_20261017-000001-aaaaaaaa", Name: "kid", Room: work.Name, RoomID: work.ID}}, nil
+		return subagent.Info{Meta: subagent.Meta{ID: "ses_20261017-000001-aaaaaaaa", Name: "kid", Room: work.Name, RoomID: work.ID, Goal: "g8", Item: item}}, nil
 	}})
 	cwd := t.TempDir()
 	t.Chdir(cwd)
-	runCLI(t, m, "start", "--room", work.Name, "--goal", "Finish the test task", "--profile", "mock", "--name", "kid", "@"+brief)
+	for _, item = range []string{"i3", ""} {
+		for _, asJSON := range []bool{false, true} {
+			cmd := newCommand(func() *subagent.Manager { return m })
+			var stdout, stderr bytes.Buffer
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+			args := []string{"start", "--room", work.Name, "--goal", "Finish the test task", "--profile", "mock", "--name", "kid", "@" + brief}
+			if asJSON {
+				args = append(args, "--json")
+			}
+			cmd.SetArgs(args)
+			if err := cmd.ExecuteContext(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if asJSON {
+				var out map[string]any
+				if err := json.Unmarshal(stdout.Bytes(), &out); err != nil || out["goal"] != "g8" || item != "" && out["item"] != item || item == "" && out["item"] != nil {
+					t.Fatalf("start JSON = %s, %v", stdout.String(), err)
+				}
+			} else {
+				want := "holds goal g8"
+				if item != "" {
+					want = "assigned item i3 on goal g8"
+				}
+				if !strings.Contains(stderr.String(), want) {
+					t.Fatalf("start status = %q; want %q", stderr.String(), want)
+				}
+			}
+		}
+	}
 	if room != work.ID || got.Task != "Do the task." || got.Goal != "Finish the test task" || got.Profile != "mock" || got.Name != "kid" || got.Cwd != cwd || got.Dir != "" {
 		t.Fatalf("StartSubagent got room %q and %+v; want room %s, the brief text and cwd %s", room, got, work.ID, cwd)
 	}

@@ -40,6 +40,18 @@ func TestGoalMutationsUseAuthenticatedCaller(t *testing.T) {
 	if _, err := e.svc.CheckGoal(ctx, r.ID, g.ID); err != nil {
 		t.Fatal(err)
 	}
+	it, err := e.svc.AddGoalItem(ctx, r.ID, g.ID, "Promote this work", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved, err := e.svc.MoveGoalItem(ctx, r.ID, g.ID, it.ID, "new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	promoted, err := e.svc.Goal(r.ID, moved.To.Goal)
+	if err != nil || promoted.Setter != id || !promoted.HeldBy(id) {
+		t.Fatalf("promotion ignored the authenticated caller: %+v, %v", promoted, err)
+	}
 	actions := []func(context.Context, string) error{
 		func(ctx context.Context, room string) error {
 			_, err := e.svc.AddGoal(ctx, room, "Wrong caller", nil)
@@ -62,6 +74,10 @@ func TestGoalMutationsUseAuthenticatedCaller(t *testing.T) {
 			return err
 		},
 		func(ctx context.Context, room string) error { _, err := e.svc.CheckGoal(ctx, room, g.ID); return err },
+		func(ctx context.Context, room string) error {
+			_, err := e.svc.MoveGoalItem(ctx, room, g.ID, it.ID, "new")
+			return err
+		},
 	}
 	for i, action := range actions {
 		if err := action(ctx, other.ID); err == nil {

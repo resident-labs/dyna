@@ -69,3 +69,41 @@ func TestWritesWithoutEngineFailWithCause(t *testing.T) {
 		}
 	}
 }
+
+func TestMoveItemCallsEngineAndPrintsReferences(t *testing.T) {
+	for _, toItem := range []string{"i4", ""} {
+		moved := goals.ItemMove{From: goals.WorkRef{Goal: "g1", Item: "i2"}, To: goals.WorkRef{Goal: "g3", Item: toItem}}
+		to := "g3"
+		if toItem == "" {
+			to = "new"
+		}
+		enginetest.Serve(t, t.TempDir(), map[string]websvc.Call{"MoveGoalItem": func(_ context.Context, args []json.RawMessage) (any, error) {
+			if len(args) != 4 || string(args[0]) != `"work"` || string(args[1]) != `"g1"` || string(args[2]) != `"i2"` || string(args[3]) != `"`+to+`"` {
+				t.Errorf("move arguments = %s", args)
+			}
+			return moved, nil
+		}})
+		for _, asJSON := range []bool{false, true} {
+			cmd := Command(Options{Service: func() *goalkeeper.Service { t.Fatal("move opened a local goal store"); return nil }})
+			var out bytes.Buffer
+			cmd.SetOut(&out)
+			cmd.SetErr(&out)
+			args := []string{"item", "move", "g1", "i2", "--to", to, "--room", "work"}
+			if asJSON {
+				args = append(args, "--json")
+			}
+			cmd.SetArgs(args)
+			if err := cmd.Execute(); err != nil {
+				t.Fatal(err)
+			}
+			if asJSON {
+				var got goals.ItemMove
+				if err := json.Unmarshal(out.Bytes(), &got); err != nil || got != moved {
+					t.Fatalf("move JSON = %q, %v", out.String(), err)
+				}
+			} else if want := "moved g1/i2 to " + moved.To.String() + "\n"; out.String() != want {
+				t.Fatalf("move output = %q; want %q", out.String(), want)
+			}
+		}
+	}
+}

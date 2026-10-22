@@ -699,6 +699,51 @@ func OpenWithPhase(sessions, key string, phases ...string) ([]string, error) {
 	return ids, err
 }
 
+// MoveSpawnItemTx updates only records that name the exact source item in
+// this room. locked collects session locks before a retry; the caller must
+// roll back when it returns false. SaveTx advances revisions for cached reads.
+func MoveSpawnItemTx(conn *sql.Conn, room, goal, item, toGoal, toItem string, locked func(string) bool) error {
+	ctx := context.Background()
+	rows, err := conn.QueryContext(ctx, "SELECT id, meta FROM session_records WHERE room_id=? AND json_extract(meta,'$.goal')=? AND json_extract(meta,'$.item')=?", room, goal, item)
+	if err != nil {
+		return err
+	}
+	type record struct{ id, meta string }
+	var records []record
+	for rows.Next() {
+		var r record
+		if err := rows.Scan(&r.id, &r.meta); err != nil {
+			rows.Close()
+			return err
+		}
+		records = append(records, r)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, r := range records {
+		if !locked(r.id) {
+			continue
+		}
+		var fields map[string]json.RawMessage
+		if err := decode(r.id, []byte(r.meta), &fields); err != nil {
+			return err
+		}
+		fields["goal"], _ = json.Marshal(toGoal)
+		if toItem == "" {
+			delete(fields, "item")
+		} else {
+			fields["item"], _ = json.Marshal(toItem)
+		}
+		if err := SaveTx(conn, r.id, fields); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // RemapSpawnGoalsTx rewrites session records whose meta names a goal that
 // folded into a parent goal, pointing them at the parent goal and item. It
 // runs inside the caller's transaction and tolerates a missing table.

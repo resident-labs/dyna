@@ -317,11 +317,19 @@ type wake struct {
 // noted: fn runs on as if it woke, so one pass collects every lock it needs,
 // and updateTx rolls the pass back. Other IDs ("owner") need no lock.
 func (w *wake) activate(id string) error {
-	if sessionlife.IsSessionID(id) && !w.locked[id] {
-		w.need = append(w.need, id)
+	if !w.lock(id) {
 		return nil
 	}
 	return sessionlife.ActivateTx(w.conn, w.sessions, id)
+}
+
+// lock collects the locks needed for a metadata change before the next pass.
+func (w *wake) lock(id string) bool {
+	if sessionlife.IsSessionID(id) && !w.locked[id] {
+		w.need = append(w.need, id)
+		return false
+	}
+	return true
 }
 
 // check reads a holder's lifecycle; it needs no lock.
