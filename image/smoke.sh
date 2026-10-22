@@ -28,6 +28,8 @@ run_root tar "${tar_flags[@]}" -xpf "$out/$archive" -C "$machine"
 run_root test ! -e "$machine/var/lib/systemd/linger/dyna"
 run_root mkdir -p "$machine/var/lib/systemd/linger"
 run_root touch "$machine/var/lib/systemd/linger/dyna"
+# The boot check has no network, so skip the first-boot pacman upgrade.
+run_root install -D -m 0644 /dev/null "$machine/var/lib/dyna/pacman-updated"
 cleanup() {
  run_root machinectl terminate "$name" 2>/dev/null || true
  wait "${boot_pid:-}" 2>/dev/null || true
