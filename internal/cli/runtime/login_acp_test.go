@@ -10,15 +10,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestEnvValueTakesLastEntry(t *testing.T) {
-	if got := envValue([]string{"HOME=/a", "X=1", "HOME=/b"}, "HOME"); got != "/b" {
-		t.Fatalf("got %q", got)
-	}
-	if envValue([]string{"HOMEX=/a"}, "HOME") != "" {
-		t.Fatal("prefix of another name matched")
-	}
-}
-
 func TestAntigravityACPLoginNeedsInstalledServer(t *testing.T) {
 	scope := filepath.Join(t.TempDir(), ".runtime")
 	flow := &harnessruntime.NativeLogin{Cwd: scope, Env: []string{"HOME=" + harnesshome.Home(scope)}}

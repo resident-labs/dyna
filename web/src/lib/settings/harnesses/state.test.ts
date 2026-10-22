@@ -601,3 +601,20 @@ test('current harness rows ignore unsupported cached aliases', () => {
   assert.deepEqual(row.accounts, [])
   assert.deepEqual(row.bundles, [])
 })
+
+// The engine names the missing step when Finish fails, for example the agy
+// CLI login an Antigravity grant is saved beside. The pane keeps its words.
+test('finish sign-in shows the engine message', async () => {
+  const message = 'The Antigravity Google sign-in is complete, but this machine has no agy CLI login to save it beside. Run `dyna harness login antigravity` once, then sign in here again.'
+  const context: { [name: string]: unknown } = {
+    ...helpers, busy: false, stopped: false, error: '', notice: '', labelInput: '', pendingLogin: null,
+    login: { accountId: 'a1', terminalId: 't1', harness: 'antigravity' }, loginFlows: [],
+    api: { finishPrivateRuntimeLogin: async () => { throw new Error(message) } },
+  }
+  runFunctions(paneSource, ['finishLogin'], context)
+  await call(context, 'finishLogin')
+  assert.equal(context.error, message)
+  context.api = { finishPrivateRuntimeLogin: async () => { throw null } }
+  await call(context, 'finishLogin')
+  assert.equal(context.error, 'Sign-in is not complete yet. Finish signing in inside the terminal first.')
+})

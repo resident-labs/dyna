@@ -380,8 +380,9 @@
         labelInput = ''
         notice = 'Sign-in finished.'
       }
-    } catch {
-      if (!stopped) error = 'Sign-in is not complete yet. Finish signing in inside the terminal first.'
+    } catch (e) {
+      // The engine names the missing step, so keep its words.
+      if (!stopped) error = failText(e, 'Sign-in is not complete yet. Finish signing in inside the terminal first.')
     } finally {
       if (!stopped) busy = false
     }

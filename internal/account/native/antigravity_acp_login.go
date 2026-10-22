@@ -40,9 +40,32 @@ type AntigravityACPLogin struct {
 	Home string // the server's GEMINI_HOME
 	Out  io.Writer
 	// Expect is the Dyna identity ("google:<sub>") of the account being signed
-	// in. A grant for any other Google account is deleted and refused.
+	// in. A grant for any other Google account is deleted and refused. An empty
+	// Expect means the account has no recorded identity yet, so its first
+	// sign-in binds the account and capture records the identity afterwards.
 	Expect string
 	Client claudeHTTPClient // nil uses a bounded default client
+}
+
+// AntigravityCLIIdentity names the Google account of the agy CLI token in home,
+// or "" when the home has no CLI token. It reads that token file only and never
+// calls Google, so it can pin a new ACP sign-in to the login beside it.
+func AntigravityCLIIdentity(home string) (string, error) {
+	if !filepath.IsAbs(home) {
+		return "", ErrUnsupported
+	}
+	raw, err := (agyFileStore{path: filepath.Join(home, AntigravityAuthFile)}).Read(context.Background())
+	if errors.Is(err, ErrNotSignedIn) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	c, err := agyAccount(raw)
+	if err != nil {
+		return "", err
+	}
+	return c.Identity, nil
 }
 
 // agyEnvValue returns the last assignment of key in an exec environment.
@@ -72,9 +95,6 @@ func agyLoopbackAuthURL(raw string) bool {
 func (l AntigravityACPLogin) Run(ctx context.Context) error {
 	if !filepath.IsAbs(l.Home) || l.Server == "" {
 		return ErrUnsupported
-	}
-	if l.Expect == "" {
-		return ErrNoIdentity
 	}
 	// The overlaid AntigravityACPEnv must point the server at this home; a
 	// silent mismatch would sign in somewhere Run cannot read back.
@@ -166,7 +186,7 @@ func (l AntigravityACPLogin) Run(ctx context.Context) error {
 	}
 	// The grant must belong to the selected account. Never keep one that cannot be proven.
 	identity, err := agyACPIdentity(ctx, l.Client, raw, time.Now())
-	if err != nil || identity != l.Expect {
+	if err != nil || l.Expect != "" && identity != l.Expect {
 		_ = store.remove()
 		if err == nil {
 			err = errors.New("The Google account you signed in with is not this Antigravity account. The ACP sign-in was discarded.")

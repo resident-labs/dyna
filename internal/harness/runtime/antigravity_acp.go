@@ -6,13 +6,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"dyna-agent/internal/account/native"
+	harnesshome "dyna-agent/internal/harness/home"
 )
 
 // These 1.3.0 pins match the official artifacts probed by T3 and Dyna.
@@ -47,6 +50,85 @@ func AntigravityACPEnv(cli, home string) map[string]string {
 		env[name] = ""
 	}
 	return env
+}
+
+// AntigravityACPSignIn runs the ACP server's Google sign-in in the private HOME
+// of one native login scope and writes the sign-in link to out. `dyna harness
+// login antigravity --acp` and the Settings Sign in button both call it, so both
+// show the same link, the same 5-minute timeout and the same account check.
+//
+// scope is the native scope that BeginLogin prepared. The grant belongs in the
+// paired HOME of that scope, where capture and worker turns read it, so env
+// must set exactly that HOME. A nil env is the caller's own environment, as in
+// the helper that runs in the owner terminal.
+//
+// expect is the Dyna identity the grant must belong to. When it is empty, the
+// agy CLI token in the HOME pins its Google account, and a HOME without one
+// binds its first Google sign-in.
+func AntigravityACPSignIn(ctx context.Context, agy, scope string, env []string, expect string, out io.Writer) error {
+	if env == nil {
+		env = os.Environ()
+	}
+	home := harnesshome.Home(scope)
+	if envValue(env, "HOME") != home {
+		return errors.New("the private account home does not match the native scope")
+	}
+	server := AntigravityACPExecutable(agy)
+	if _, err := os.Stat(server); err != nil {
+		return errors.New("the Antigravity ACP server is not installed beside agy")
+	}
+	if expect == "" {
+		// One private HOME never holds two Google accounts. A CLI token with no
+		// readable identity leaves the sign-in unpinned; capture then says why
+		// the account could not be saved.
+		expect, _ = native.AntigravityCLIIdentity(home)
+	}
+	env = append(os.Environ(), env...)
+	// The session adapter overlays the same map, so a sign-in and a worker turn
+	// launch the server with one environment assembly.
+	for key, value := range AntigravityACPEnv(agy, home) {
+		env = append(env, key+"="+value)
+	}
+	login := native.AntigravityACPLogin{Server: server, Env: env, Home: home, Out: out, Expect: expect}
+	return login.Run(ctx)
+}
+
+// envValue returns the last assignment of key in an environment list.
+func envValue(env []string, key string) string {
+	value := ""
+	for _, entry := range env {
+		if v, ok := strings.CutPrefix(entry, key+"="); ok {
+			value = v
+		}
+	}
+	return value
+}
+
+// acpSignInCommand is the hidden command the Settings sign-in runs in the owner
+// terminal: `dyna harness accounts _acp-signin --agy A --scope S --expect I`.
+const acpSignInCommand = "_acp-signin"
+
+// IsACPSignInCommand reports whether args start that hidden command. main
+// dispatches it before RestoreOwner and before the root command is built: it
+// needs the private HOME, and the CLI stores cannot open a data folder inside
+// a harness home.
+func IsACPSignInCommand(args []string) bool {
+	return len(args) >= 3 && args[0] == "harness" && args[1] == "accounts" && args[2] == acpSignInCommand
+}
+
+// ACPSignInCommand runs the hidden sign-in command with its own parser.
+func ACPSignInCommand(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet(acpSignInCommand, flag.ContinueOnError)
+	agy := flags.String("agy", "", "agy executable of the selected runtime bundle")
+	scope := flags.String("scope", "", "native account scope the private HOME belongs to")
+	expect := flags.String("expect", "", "Dyna identity the grant must belong to")
+	if err := flags.Parse(args[3:]); err != nil {
+		return err
+	}
+	if *agy == "" || *scope == "" || flags.NArg() != 0 {
+		return errors.New("the Antigravity ACP sign-in needs --agy and --scope")
+	}
+	return AntigravityACPSignIn(ctx, *agy, *scope, nil, *expect, os.Stdout)
 }
 
 // installAntigravitySessionRuntime retains the account CLI and adds its ACP companion.

@@ -274,11 +274,35 @@ func TestAntigravityACPLoginDiscardsTokenForAnotherGoogleAccount(t *testing.T) {
 	}
 }
 
-func TestAntigravityACPLoginNeedsExpectedIdentity(t *testing.T) {
-	login, _ := agyFakeACPLogin(t)
+// A new Dyna account has no Google identity yet, so its first sign-in binds the
+// account. Capture records the identity afterwards.
+func TestAntigravityACPLoginWithoutExpectedIdentityKeepsTheFirstGrant(t *testing.T) {
+	login, _ := agyFakeACPLogin(t, "LINK="+agyTestAuthLink, "WRITE=1", "TOKEN="+string(agyACPTestToken("login")))
 	login.Expect = ""
-	if err := login.Run(context.Background()); !errors.Is(err, ErrNoIdentity) {
-		t.Fatalf("login ran without an account identity: %v", err)
+	if err := login.Run(context.Background()); err != nil {
+		t.Fatalf("the first sign-in of a new account was refused: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(login.Home, AntigravityACPTokenFile)); err != nil {
+		t.Fatalf("the first grant was not kept: %v", err)
+	}
+}
+
+// A new ACP grant is pinned to the agy CLI login beside it, so one private home
+// never holds two Google accounts.
+func TestAntigravityCLIIdentityNamesTheTokenBesideIt(t *testing.T) {
+	home := t.TempDir()
+	if identity, err := AntigravityCLIIdentity(home); identity != "" || err != nil {
+		t.Fatalf("an empty home named an identity: %q %v", identity, err)
+	}
+	path := filepath.Join(home, AntigravityAuthFile)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, agyTestWrapper(t, "signedin"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if identity, err := AntigravityCLIIdentity(home); err != nil || identity != "google:signedin" {
+		t.Fatalf("the CLI token did not pin the home: %q %v", identity, err)
 	}
 }
 

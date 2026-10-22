@@ -508,36 +508,27 @@ func TestOwnerLoginImportOpenCodePrivateCapture(t *testing.T) {
 	}
 }
 
-func TestOwnerLoginImportAntigravityActivatesPrivateStore(t *testing.T) {
+// Antigravity signs in through its ACP server, so Sign in never offers to copy
+// the owner's agy CLI login.
+func TestPersonalLoginNotOfferedForAntigravity(t *testing.T) {
 	r, ownerHome := ownerImportFixture(t)
 	ownerState := &sharedLoginFixture{current: []native.Captured{fixtureLogin("shared-owner")}}
-	privateState := &sharedLoginFixture{}
-	refreshes, ownerWrites := 0, 0
 	r.Accounts.NativeManager = func(h string, host native.Host) (native.Manager, bool) {
-		state := privateState
-		owner := host.Home == ownerHome
+		state, owner := &sharedLoginFixture{}, host.Home == ownerHome
 		if owner {
 			state = ownerState
-			if host.Getenv("SSH_TTY") != "" {
-				t.Fatal("owner capture can trigger private import")
-			}
 		}
-		return ownerImportReadOnlyManager{sharedLoginManager{h, state}, owner, &refreshes, &ownerWrites}, true
+		return ownerImportReadOnlyManager{sharedLoginManager{h, state}, owner, new(int), new(int)}, true
 	}
-	t.Setenv("SSH_TTY", native.AntigravityFileEnv()["SSH_TTY"])
-	if err := r.copyPersonalLogin(context.Background(), "antigravity"); err != nil {
-		t.Fatal(err)
+	found, err := r.FindPersonalLogin(context.Background(), "antigravity")
+	if err != nil || found != nil {
+		t.Fatalf("Sign in offered a personal Antigravity login: %v %v", found, err)
 	}
-	n, err := r.Accounts.Active("antigravity")
-	if err != nil || n.Identity != "shared-owner" || ownerWrites != 0 {
-		t.Fatal("owner login changed", err)
+	if _, err = r.UsePersonalLogin(context.Background(), "antigravity"); !errors.Is(err, errNoPersonalLogin) {
+		t.Fatalf("UsePersonalLogin did not refuse: %v", err)
 	}
-	if len(privateState.current) != 1 || privateState.current[0].Identity != "shared-owner" {
-		t.Fatal("private store was not activated")
-	}
-	saved, err := readAccountLogin(n.Home)
-	if err != nil || saved.Identity != "shared-owner" {
-		t.Fatal("private login was not saved", err)
+	if accounts, _ := r.Accounts.List(); len(accounts) != 0 {
+		t.Fatalf("a personal Antigravity login was copied: %v", accounts)
 	}
 }
 

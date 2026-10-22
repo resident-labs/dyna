@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
+	"dyna-agent/internal/account/native"
 	"dyna-agent/internal/account/reposcope"
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/harness/config"
@@ -132,7 +134,12 @@ func (a *Runtime) startPrivateLogin(id, exe string) (PrivateLogin, error) {
 	if err != nil {
 		return PrivateLogin{}, err
 	}
-	term, err := a.terminals.OpenCommand(flow.Argv, flow.Env, flow.Cwd, 90, 24)
+	argv, err := a.privateSignInCommand(id, exe, flow)
+	if err != nil {
+		_ = flow.Cancel()
+		return PrivateLogin{}, err
+	}
+	term, err := a.terminals.OpenCommand(argv, flow.Env, flow.Cwd, 90, 24)
 	if err != nil {
 		_ = flow.Cancel()
 		return PrivateLogin{}, err
@@ -147,6 +154,45 @@ func (a *Runtime) startPrivateLogin(id, exe string) (PrivateLogin, error) {
 	go a.watchPrivateLogin(a.lifetimeContext(), login)
 	return PrivateLogin{AccountID: id, TerminalID: term.ID, Warning: flow.Warning}, nil
 }
+
+// privateSignInCommand returns the terminal command for one private sign-in.
+func (a *Runtime) privateSignInCommand(id, exe string, flow *NativeLogin) ([]string, error) {
+	n, err := a.Accounts.Find(id)
+	if err != nil {
+		return nil, err
+	}
+	return privateSignInArgv(n.Harness, exe, flow.Cwd, n.Identity, flow.Argv)
+}
+
+// privateSignInArgv runs Antigravity's sign-in through its ACP server, so the
+// owner sees the Google link and never the agy CLI's color-scheme and Terms
+// screens. Every other harness keeps the command its manager chose. scope is
+// the native login scope; the helper derives the paired HOME from it.
+func privateSignInArgv(harness, exe, scope, identity string, native []string) ([]string, error) {
+	if harness != "antigravity" {
+		return native, nil
+	}
+	dyna, err := os.Executable()
+	if err != nil {
+		return nil, errors.New("Dyna cannot start the Antigravity ACP sign-in.")
+	}
+	return []string{dyna, "harness", "accounts", acpSignInCommand, "--agy", exe, "--scope", scope, "--expect", identity}, nil
+}
+
+// privateSignInFailure names the missing step instead of a raw capture error.
+//
+// TODO: legacy/shim remove later — this message, once an ACP grant alone can be
+// saved into an account without an agy CLI token beside it.
+//
+// Antigravity saves an ACP grant beside the agy CLI token, so a machine that
+// never ran the CLI sign-in has nothing to save the grant beside.
+func (a *Runtime) privateSignInFailure(id string, err error) error {
+	if n, findErr := a.Accounts.Find(id); findErr != nil || n.Harness != "antigravity" || !errors.Is(err, native.ErrNotSignedIn) {
+		return err
+	}
+	return errors.New("The Antigravity Google sign-in is complete, but this machine has no agy CLI login to save it beside. Run `dyna harness login antigravity` once, then sign in here again.")
+}
+
 func (a *Runtime) RestartPrivateRuntimeLogin(ctx context.Context, id string, _ bool) (PrivateLogin, error) {
 	n, err := a.Accounts.Find(id)
 	if err != nil {
@@ -181,7 +227,7 @@ func (a *Runtime) FinishPrivateRuntimeLogin(ctx context.Context, id string) (Pri
 	}
 	result, err := flow.Complete(a.lifetimeContext())
 	if err != nil {
-		return PrivateRuntimeSnapshot{}, err
+		return PrivateRuntimeSnapshot{}, a.privateSignInFailure(id, err)
 	}
 	if result.Status != "ready" {
 		if result.ExpiresAt != nil && !result.ExpiresAt.After(time.Now()) {

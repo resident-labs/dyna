@@ -33,6 +33,9 @@ type RuntimeAdapter struct {
 	// SkillsPinned is true when each generation passes its own skill set,
 	// so a resumed session keeps the skills it started with.
 	SkillsPinned bool
+	// Requires names the files a bundle must hold beside its executable. A
+	// bundle without them is never resolved, selected or reused.
+	Requires []string
 	// Exclusive serializes turns on one account home. Turns share the lease
 	// unless this is set, and ExclusiveReason names the verified conflict.
 	Exclusive       bool
