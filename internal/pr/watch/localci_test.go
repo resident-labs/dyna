@@ -51,6 +51,9 @@ func TestRegisteredCIRaceDoesNotHideFailuresOrBlockHostedRecovery(t *testing.T) 
 	if status, _, _ := registeredResultStatus(infra); status != "pending" {
 		t.Fatalf("infrastructure error blocks fallback: %s", status)
 	}
+	if summaries := registeredCheckSummaries(infra); summaries[0].State != "skipped" {
+		t.Fatalf("infrastructure error displayed as a test failure: %+v", summaries[0])
+	}
 	infra.Checks = append(infra.Checks, localci.SuiteResult{CheckName: "relay", Status: "failed"})
 	if status, _, _ := registeredResultStatus(infra); status != "failed" {
 		t.Fatalf("infrastructure error hid a real test failure: %s", status)

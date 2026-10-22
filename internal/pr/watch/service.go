@@ -318,6 +318,7 @@ func (s *Service) Resume(key string) error {
 		r.CIPaused = false
 		r.Failures = 0
 		r.Polling.Next = time.Time{}
+		r.Polling.FullChecked = time.Time{}
 		r.CIKey = ""
 		r.PauseReason = ""
 		return nil
