@@ -106,7 +106,11 @@ dyna goal wait g1 --until 2h       # waiting on something; not progress
 dyna goal item done g1 i2
 dyna goal item move g1 i2 --to g3
 dyna goal item move g1 i2 --to new
+dyna goal expedite g1 [--replace]  # owner or root: room priority
+dyna goal expedite --off
 ```
+
+Each room has at most one expedited goal. Only the owner or root sets it. It ends when the goal is done or dropped, with `--off`, or after 24 hours. Replacing it needs `--replace`.
 
 Goal changes print one short status line. Add `--json` for the full record and keeper history.
 Edits wake nobody. The goal keeper schedules stale holder nudges and delivers queued notices.

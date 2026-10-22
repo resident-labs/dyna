@@ -55,6 +55,11 @@ Run it again after commits to update the change. Omitted notes remain.
 `dyna git change show <id>`, and `dyna git change close <id>` to manage changes.
 Closing never merges or deletes the branch.
 
+A new change or tracked PR links to your goal, or your nearest ancestor's, when that is
+unambiguous. Pass `--goal <id>` to `dyna git pr track` or `dyna git change open` to
+choose an open goal in the room; it replaces an existing link. Without `--goal`,
+tracking again never changes a link. The owner, root or author can also link in the app.
+
 A reviewer starts on each needed verified head, in parallel with CI.
 Draft PRs get no automatic review, even with required reviewers. Open a PR
 ready for review, or run `gh pr ready <number>` when it should be reviewed.
