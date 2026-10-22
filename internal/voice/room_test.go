@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/questions"
@@ -104,7 +105,7 @@ func newFakeSpeaker() *fakeSpeaker {
 func (f *fakeSpeaker) Speak(_, _, text string) { f.said <- text }
 func (f *fakeSpeaker) Context(text string)     { f.context <- text }
 
-// Room traffic for running work is context and never requests speech. Multiple explicit
+// Root traffic for running work is context and never requests speech. Multiple explicit
 // call posts still reach Voice, including corrections and distinct results.
 func TestWatchKeepsExecutionTrafficAsSilentContext(t *testing.T) {
 	tools, work, _ := toolsFixture(t)
@@ -117,43 +118,95 @@ func TestWatchKeepsExecutionTrafficAsSilentContext(t *testing.T) {
 	if _, err := link.Ask(t.Context(), "Fix CI on PR 7."); err != nil {
 		t.Fatal(err)
 	}
-	post := func(from, text string, to ...string) {
+	postKind := func(from, kind, text string, to ...string) {
 		t.Helper()
-		if _, err := rooms.Post(work.ID, room.PostInput{From: from, To: to, Text: text}); err != nil {
+		if _, err := rooms.Post(work.ID, room.PostInput{From: from, Kind: kind, To: to, Text: text}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	post("work:builder", "Rerunning a different job.", "work")
-	post("work:root", "Check another PR.", "work:builder")
-	post("work", "Check the release.", "work:helper")
-	post("work:builder", "Review the logs.", "work:helper")
-	if _, err := rooms.Post(work.ID, room.PostInput{From: "work:root", Kind: "completed", To: []string{"work"}, Text: "Finished this turn."}); err != nil {
+	post := func(from, text string, to ...string) { postKind(from, "", text, to...) }
+	post("work:builder", "A root-directed result.", "work:root")
+	post("work:root", "Root without an agent recipient.", "work")
+	post("work", "External root status.", "work")
+	post("work:builder", "DROP agent traffic.", "work:helper")
+	post("work:builder", "DROP mixed call traffic.", "work:root", "work:voice-call")
+	postKind("work:root", "voice", "DROP voice transcript.", "work:builder")
+	post("work:root", "Mixed call update.", "work:builder", "work:voice-call")
+	post("work:root", "FIRST HEAD "+strings.Repeat("α", 700), "work")
+	post("work:root", "MIDDLE "+strings.Repeat("漢", 650), "work")
+	if _, err := link.Ask(t.Context(), "Also check the tests."); err != nil {
 		t.Fatal(err)
 	}
-	post("work:builder", "Traffic after the turn.", "work")
+	post("work:root", "MORE "+strings.Repeat("x", 1400), "work")
+	post("work:root", "TAIL "+strings.Repeat("🙂", 600)+" LAST ROOT POINT", "work")
+	postKind("work:root", "completed", "Finished first turn.", "work")
+	post("work:builder", "DROP traffic after completion.", "work")
 	texts := []string{"CI is green.", "Correction: one job is still running.", "The review passed."}
 	for _, text := range texts {
 		post("work", text, "work:voice-call")
 	}
-	// Follow reads the existing log at once; no polling or wall-clock wait
-	// is needed to observe this complete sequence.
-	go func() { ended <- link.Watch(ctx, time.Time{}, call) }()
-	for _, want := range []string{"Rerunning a different job.", "Check another PR.", "Check the release."} {
-		if got := <-call.context; !strings.HasPrefix(got, "[BACKEND] ") || !strings.HasSuffix(got, want) {
-			t.Fatalf("context %q, want %q", got, want)
-		}
+	if _, err := link.Ask(t.Context(), "Check another request."); err != nil {
+		t.Fatal(err)
 	}
-	for _, text := range texts {
+	post("work:root", "SECOND HEAD "+strings.Repeat("é", 2600)+" SECOND TAIL", "work")
+	postKind("work:root", "stopped", "Finished second turn.", "work")
+	post("work", "Second request ended.", "work:voice-call")
+
+	// Follow reads the complete existing log. Spoken posts are ordering
+	// barriers; all earlier context is recorded before Watch stops.
+	go func() { ended <- link.Watch(ctx, time.Time{}, call) }()
+	for _, text := range append([]string{"Mixed call update."}, append(texts, "Second request ended.")...) {
 		if got := <-call.said; !strings.HasSuffix(got, text) {
-			t.Fatalf("said %q, want explicit call post %q", got, text)
+			t.Fatalf("said %q, want call post %q", got, text)
 		}
 	}
 	stop()
-	<-ended // every earlier room post has been handled
-	select {
-	case got := <-call.context:
-		t.Fatalf("unexpected execution context: %q", got)
-	default:
+	<-ended
+	var chunks []string
+	for {
+		select {
+		case text := <-call.context:
+			chunks = append(chunks, text)
+		default:
+			goto collected
+		}
+	}
+collected:
+	var requests [2]string
+	request := 0
+	for _, chunk := range chunks {
+		if !strings.HasPrefix(chunk, "[BACKEND] ") || !utf8.ValidString(chunk) {
+			t.Fatalf("invalid context chunk %q", chunk)
+		}
+		if strings.Contains(chunk, "DROP") || strings.Contains(chunk, "Mixed call update.") {
+			t.Fatalf("unrelated or call post became silent context: %q", chunk)
+		}
+		if request >= len(requests) {
+			t.Fatal("context continued after both requests ended")
+		}
+		requests[request] += chunk
+		if strings.Contains(chunk, "Finished first turn.") || strings.Contains(chunk, "Finished second turn.") {
+			request++
+		}
+	}
+	if request != 2 {
+		t.Fatalf("got %d completed context streams, want 2", request)
+	}
+	for i, text := range requests {
+		if len(text) > 4000 {
+			t.Fatalf("request %d sent %d bytes, exceeding its shared budget", i, len(text))
+		}
+		if strings.Count(text, "\n…output truncated…\n") != 1 {
+			t.Fatalf("request %d lacks one truncation marker", i)
+		}
+	}
+	for _, want := range []string{"A root-directed result.", "Root without an agent recipient.", "External root status.", "FIRST HEAD", "LAST ROOT POINT"} {
+		if !strings.Contains(requests[0], want) {
+			t.Fatalf("first request lost %q", want)
+		}
+	}
+	if !strings.Contains(requests[1], "SECOND HEAD") || !strings.Contains(requests[1], "SECOND TAIL") || strings.Contains(requests[1], "FIRST HEAD") {
+		t.Fatal("second request did not get a fresh head/tail budget")
 	}
 }
 
