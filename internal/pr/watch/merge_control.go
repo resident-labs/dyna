@@ -15,11 +15,12 @@ import (
 )
 
 type MergeControlStatus struct {
-	RoomID string             `json:"roomId"`
-	Paused bool               `json:"paused"`
-	Reason string             `json:"reason,omitempty"`
-	Queue  []MergeQueueItem   `json:"queue"`
-	Trials []MergeTrialStatus `json:"trials"`
+	LocalCIChecks map[string][]CheckSummary `json:"localCIChecks,omitempty"`
+	RoomID        string                    `json:"roomId"`
+	Paused        bool                      `json:"paused"`
+	Reason        string                    `json:"reason,omitempty"`
+	Queue         []MergeQueueItem          `json:"queue"`
+	Trials        []MergeTrialStatus        `json:"trials"`
 }
 
 type mergeControlRoom struct{}
@@ -49,6 +50,9 @@ func (s *Service) MergeControlStatus(roomID string) (MergeControlStatus, error) 
 	out := MergeControlStatus{RoomID: rm.ID, Paused: st.MergePauses[rm.ID] != "", Reason: st.MergePauses[rm.ID], Queue: queue, Trials: []MergeTrialStatus{}}
 	for _, repo := range controlRepositories(st, rm.ID) {
 		out.Trials = append(out.Trials, *trialStatus(st, st.MergeTrials[repo]))
+	}
+	if err := s.mergeLocalCIChecks(context.Background(), st, rm.ID, &out); err != nil {
+		return MergeControlStatus{}, err
 	}
 	return out, nil
 }

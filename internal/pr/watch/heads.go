@@ -143,7 +143,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 					fmt.Fprintf(&query, "b%d:pullRequests(first:1,headRefName:%s,states:OPEN){nodes{number headRefName isCrossRepository headRefOid}}", j, strconv.Quote(r.Branch))
 					continue
 				}
-				fmt.Fprintf(&query, "p%d:pullRequest(number:%d){number title state merged isDraft mergeable updatedAt headRefOid headRefName baseRefOid baseRefName author{login __typename} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{... on CheckRun{completedAt} ... on StatusContext{createdAt}}}}}}}}", r.Number, r.Number)
+				fmt.Fprintf(&query, "p%d:pullRequest(number:%d){number title state merged isDraft mergeable updatedAt headRefOid headRefName headRepository{nameWithOwner} baseRefOid baseRefName author{login __typename} commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{... on CheckRun{completedAt} ... on StatusContext{createdAt}}}}}}}}", r.Number, r.Number)
 			}
 			query.WriteString("}")
 		}
@@ -206,18 +206,21 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 					continue
 				}
 				var node struct {
-					IsDraft   bool   `json:"isDraft"`
-					Mergeable string `json:"mergeable"`
-					Number    int    `json:"number"`
-					Title     string `json:"title"`
-					State     string `json:"state"`
-					Merged    bool   `json:"merged"`
-					Updated   string `json:"updatedAt"`
-					Head      string `json:"headRefOid"`
-					Branch    string `json:"headRefName"`
-					Base      string `json:"baseRefOid"`
-					BaseRef   string `json:"baseRefName"`
-					Author    struct {
+					IsDraft        bool   `json:"isDraft"`
+					Mergeable      string `json:"mergeable"`
+					Number         int    `json:"number"`
+					Title          string `json:"title"`
+					State          string `json:"state"`
+					Merged         bool   `json:"merged"`
+					Updated        string `json:"updatedAt"`
+					Head           string `json:"headRefOid"`
+					HeadRepository struct {
+						Name string `json:"nameWithOwner"`
+					} `json:"headRepository"`
+					Branch  string `json:"headRefName"`
+					Base    string `json:"baseRefOid"`
+					BaseRef string `json:"baseRefName"`
+					Author  struct {
 						Login string `json:"login"`
 						Type  string `json:"__typename"`
 					} `json:"author"`
@@ -252,6 +255,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 					p.Merged = true
 				}
 				p.Head.SHA, p.Head.Ref = node.Head, node.Branch
+				p.Head.Repo.FullName = node.HeadRepository.Name
 				p.Base.SHA, p.Base.Ref, p.Base.Repo.DefaultBranch = node.Base, node.BaseRef, defaultBranch.Name
 				ci := ""
 				var checksAt time.Time
@@ -362,6 +366,7 @@ func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time
 				r.Polling.FullChecked = time.Time{}
 				r.Polling.Next = time.Time{}
 			}
+			r.HeadRepo = pull.Head.Repo.FullName
 			r.IsDraft, r.Mergeable, r.DefaultBranch, r.ChecksAt = probe.IsDraft, probe.Mergeable, pull.Base.Repo.DefaultBranch, probe.ChecksAt
 			r.Title = Sanitize(pull.Title)
 			r.HeadStale, r.Error = false, ""

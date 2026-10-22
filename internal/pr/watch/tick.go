@@ -118,6 +118,9 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 	if err != nil {
 		return retry(errors.Join(headErr, err))
 	}
+	if e := s.scheduleRegisteredCI(ctx, st); e != nil {
+		headErr = errors.Join(headErr, e)
+	}
 	// Local branch reads also precede reconciliation, so a moved local head cannot retain a reviewer.
 	for _, key := range tickKeys(st) {
 		r := st.Records[key]
@@ -492,8 +495,15 @@ func (s *Service) processSnapshot(ctx context.Context, result pollResult, budget
 	if r == nil {
 		return nil
 	}
+	result.snap, err = s.withRegisteredCI(ctx, *r, result.snap, EffectivePolicy(st, *r))
+	if err != nil {
+		return err
+	}
 	state, ciKey, jobs, runs := s.ciStatus(result.snap, *r, EffectivePolicy(st, *r))
 	var logs []string
+	if result.snap.localCI != nil && result.snap.localCI.Logs != "" {
+		logs = append(logs, result.snap.localCI.Logs)
+	}
 	if state == "failed" && ciKey != r.CIKey && !r.CIPaused {
 		for i, run := range runs {
 			if i == 3 {
