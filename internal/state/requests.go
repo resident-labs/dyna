@@ -39,12 +39,17 @@ func MigrateRequests(dataDir string) error {
 	if err != nil {
 		return err
 	}
-	return database.Migrate(db, "state.requests", 2, func(conn *sql.Conn, old int) error {
+	return database.Migrate(db, "state.requests", 3, func(conn *sql.Conn, old int) error {
 		if old == 0 {
 			_, err := conn.ExecContext(context.Background(), requestSchema)
 			return err
 		}
-		_, err := conn.ExecContext(context.Background(), "ALTER TABLE request_ids ADD COLUMN fingerprint BLOB")
+		if old == 1 {
+			if _, err := conn.ExecContext(context.Background(), "ALTER TABLE request_ids ADD COLUMN fingerprint BLOB"); err != nil {
+				return err
+			}
+		}
+		_, err := conn.ExecContext(context.Background(), "UPDATE request_ids SET fingerprint=? WHERE fingerprint IS NULL OR length(fingerprint)=0", []byte("unbound"))
 		return err
 	})
 }
@@ -143,10 +148,6 @@ func (w *Writer) RequestDone(ctx context.Context, id string) (result []byte, don
 // compareRequestFingerprint is shared by cached replies, mutation receipts,
 // and both result finish paths.
 func compareRequestFingerprint(storedMethod string, stored []byte, method string, fingerprint []byte) error {
-	// TODO: legacy/shim remove later — keeps pre-fingerprint request receipts replayable until RequestKeep pruning removes them; remove after the upgrade's 24-hour retention window.
-	if len(stored) == 0 {
-		return nil
-	}
 	if method != storedMethod || !bytes.Equal(stored, fingerprint) {
 		return ErrRequestConflict
 	}
