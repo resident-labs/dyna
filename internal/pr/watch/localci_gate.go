@@ -194,7 +194,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		return snap, nil
 	}
 	hosted := withoutLocalHostedCancellations(snap, saved)
-	hostedState, hostedKey, hostedJobs, hostedRuns := s.ciStatus(hosted, r, policy)
+	hostedState, hostedKey, hostedJobs, hostedRuns := s.registeredHostedStatus(hosted, r, policy)
 	result, err := registry.LoadResult(ctx, repo, r.Head)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return snap, err
@@ -326,4 +326,31 @@ func (s *Service) registeredJobResultComplete(ctx context.Context, job registere
 		suites = registeredSuites(strings.Split(files, "\n"))
 	}
 	return coversRegisteredChecks(result, requiredRegisteredChecks(suites))
+}
+
+// A finished failing check is conclusive even while another hosted job runs.
+func (s *Service) registeredHostedStatus(snap Snapshot, r Record, policy ChangePolicy) (status, key string, jobs []string, runs []Run) {
+	status, key, jobs, runs = s.ciStatus(snap, r, policy)
+	if status != "pending" {
+		return
+	}
+	for _, check := range snap.currentChecks() {
+		if ciCheck(check, policy.RequiredChecks) && checkState(check.Status, check.Conclusion) == "failure" {
+			status = "failed"
+			return
+		}
+	}
+	for _, run := range currentRuns(snap.Runs) {
+		if run.Status == "completed" && run.Conclusion != "" && run.Conclusion != "cancelled" && !success(run.Conclusion) {
+			status = "failed"
+			return
+		}
+	}
+	for _, v := range snap.Statuses {
+		if !localCommitStatus(v) && requiredCheck(v.Context, policy.RequiredChecks) && (v.State == "failure" || v.State == "error") {
+			status = "failed"
+			return
+		}
+	}
+	return
 }
