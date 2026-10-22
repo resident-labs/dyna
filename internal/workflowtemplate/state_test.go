@@ -3,6 +3,7 @@ package workflowtemplate
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,7 +36,7 @@ func writeOldManifest(t *testing.T, registry string, files map[string]string) {
 	if err := os.MkdirAll(registry, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body, err := marshalManifest(managedManifest{Files: files})
+	body, err := json.Marshal(managedManifest{Files: files})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +77,7 @@ func TestStartupImportsLegacyDefaultManifestOnce(t *testing.T) {
 	}
 }
 
-func TestStartupImportsOldBinaryWriteInKnownCustomRegistry(t *testing.T) {
+func TestStartupPreservesCanonicalHashesInKnownCustomRegistry(t *testing.T) {
 	cat := newSeedCatalog(t, filepath.Join(t.TempDir(), "custom"))
 	if _, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 1\n")}}); err != nil {
 		t.Fatal(err)
@@ -89,14 +90,14 @@ func TestStartupImportsOldBinaryWriteInKnownCustomRegistry(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifest := seedRow(t, cat)
-	if manifest.Files["echo"] != contentHash([]byte("return 2\n")) {
+	if manifest.Files["echo"] != contentHash([]byte("return 1\n")) {
 		t.Fatalf("old binary import: %#v", manifest)
 	}
 	if err := os.Remove(manifestPath(cat.RegistryDir)); err != nil {
 		t.Fatal(err)
 	}
 	result, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 3\n")}})
-	if err != nil || len(result.Updated) != 1 {
+	if err != nil || len(result.Preserved) != 1 {
 		t.Fatalf("seed after old binary import: %#v, %v", result, err)
 	}
 }
@@ -160,7 +161,7 @@ func TestSeedDoesNotPublishAndPrunesRemovedStarterHashes(t *testing.T) {
 	}
 }
 
-func TestStartupPrunesRemovedRegistryAndItsMirrorStamp(t *testing.T) {
+func TestStartupPreservesRemovedRegistry(t *testing.T) {
 	cat := newSeedCatalog(t, filepath.Join(t.TempDir(), "templates"))
 	if _, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 1\n")}}); err != nil {
 		t.Fatal(err)
@@ -177,11 +178,10 @@ func TestStartupPrunesRemovedRegistryAndItsMirrorStamp(t *testing.T) {
 		t.Fatal(err)
 	}
 	var count int
-	if err := db.QueryRow("SELECT count(*) FROM workflow_template_seeds").Scan(&count); err != nil || count != 0 {
+	if err := db.QueryRow("SELECT count(*) FROM workflow_template_seeds").Scan(&count); err != nil || count != 1 {
 		t.Fatalf("removed registry rows = %d: %v", count, err)
 	}
-	// Restore the same files, with unchanged manifest identity. Its old stamp
-	// must be gone, so a fresh seed imports the preserved rollback copy.
+	// Restore the same files; the canonical hashes must still manage them.
 	if err := os.Rename(parked, cat.RegistryDir); err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,7 @@ func TestStartupPrunesRemovedRegistryAndItsMirrorStamp(t *testing.T) {
 }
 
 func TestStoreOpenDoesNotMigrateOldOrNewerSchema(t *testing.T) {
-	for _, version := range []string{"0", "2"} {
+	for _, version := range []string{"0", "1", "3"} {
 		t.Run(version, func(t *testing.T) {
 			dir := t.TempDir()
 			t.Cleanup(func() { database.Close(dir) })
@@ -243,35 +243,31 @@ func TestEngineSeedReturnsBusyWithoutWaitingForLegacyWriter(t *testing.T) {
 	}
 }
 
-func TestStartupSkipsBusyRegistryAndSeedImportsItLater(t *testing.T) {
-	cat := newSeedCatalog(t, filepath.Join(t.TempDir(), "templates"))
-	if _, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 1\n")}}); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cat.RegistryDir, "echo.js"), []byte("return 2\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	writeOldManifest(t, cat.RegistryDir, map[string]string{"echo": contentHash([]byte("return 2\n"))})
-	unlock, err := lockDir(cat.RegistryDir)
+func TestStartupRejectsBusyRequiredRegistry(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	registry := DefaultRegistryDir()
+	writeOldManifest(t, registry, map[string]string{"echo": "hash"})
+	dir := t.TempDir()
+	t.Cleanup(func() { database.Close(dir) })
+	unlock, err := lockDir(registry)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = Migrate(cat.store.DataDir)
+	err = Migrate(dir)
 	unlock()
-	if err != nil {
-		t.Fatalf("busy registry blocked engine startup: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "busy") {
+		t.Fatalf("busy required import: %v", err)
 	}
-	result, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 3\n")}})
-	if err != nil || len(result.Updated) != 1 {
-		t.Fatalf("deferred old-binary import: %#v, %v", result, err)
+	if err := Migrate(dir); err != nil {
+		t.Fatal(err)
 	}
-	manifest := seedRow(t, cat)
-	if manifest.Files["echo"] != contentHash([]byte("return 3\n")) {
-		t.Fatalf("old binary content replaced the new seed row: %#v", manifest)
+	cat := seedCatalog{Catalog: New(registry), store: Store{DataDir: dir}}
+	if got := seedRow(t, cat).Files["echo"]; got != "hash" {
+		t.Fatalf("retry imported %q", got)
 	}
 }
 
-func TestSeedImportsOldBinaryBeforeSavingNewHashes(t *testing.T) {
+func TestSeedIgnoresOldBinaryManifest(t *testing.T) {
 	cat := newSeedCatalog(t, filepath.Join(t.TempDir(), "templates"))
 	if _, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 1\n")}}); err != nil {
 		t.Fatal(err)
@@ -282,14 +278,14 @@ func TestSeedImportsOldBinaryBeforeSavingNewHashes(t *testing.T) {
 	writeOldManifest(t, cat.RegistryDir, map[string]string{"echo": contentHash([]byte("return 2\n"))})
 	next := fstest.MapFS{"echo.js": {Data: []byte("return 3\n")}}
 	result, err := cat.Seed(next)
-	if err != nil || len(result.Updated) != 1 {
+	if err != nil || len(result.Preserved) != 1 {
 		t.Fatalf("seed over old binary write: %#v, %v", result, err)
 	}
 	if _, err := cat.Seed(next); err != nil {
 		t.Fatal(err)
 	}
 	manifest := seedRow(t, cat)
-	if manifest.Files["echo"] != contentHash(next["echo.js"].Data) {
+	if manifest.Files["echo"] != contentHash([]byte("return 1\n")) {
 		t.Fatalf("foreign manifest replaced the new seed hashes: %#v", manifest)
 	}
 }
