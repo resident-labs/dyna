@@ -20,6 +20,11 @@ func localStatusNode(s Status) string {
 	}
 	return strings.TrimPrefix(s.Description, localStatusPrefix)
 }
+func replaceableHostedWorkflow(run Run) bool {
+	path, _, _ := strings.Cut(run.Path, "@")
+	return path == ".github/workflows/ci.yml"
+}
+
 func queuedHostedRun(run Run) bool {
 	return run.Status == "queued" || run.Status == "waiting"
 }
@@ -50,7 +55,7 @@ func (s *Service) cancelQueuedHostedCI(ctx context.Context, job registeredCIJob,
 		saved.Attempts = map[int64]int{}
 	}
 	for _, run := range runs {
-		if !hostedRunMatches(job, run) || !queuedHostedRun(run) {
+		if !hostedRunMatches(job, run) || !queuedHostedRun(run) || !replaceableHostedWorkflow(run) {
 			continue
 		}
 		// Fetch the current status just before cancel, since a listed job can start.
@@ -59,7 +64,7 @@ func (s *Service) cancelQueuedHostedCI(ctx context.Context, job registeredCIJob,
 		if err := gh.api(ctx, refRecord(job.record), path, &fresh); err != nil {
 			return err
 		}
-		if fresh.ID != run.ID || !hostedRunMatches(job, fresh) || !queuedHostedRun(fresh) {
+		if fresh.ID != run.ID || !hostedRunMatches(job, fresh) || !queuedHostedRun(fresh) || !replaceableHostedWorkflow(fresh) {
 			continue
 		}
 		if attempt, exists := saved.Attempts[fresh.ID]; exists && fresh.Attempt <= attempt {
