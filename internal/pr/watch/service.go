@@ -31,10 +31,12 @@ import (
 )
 
 type Service struct {
-	tickReads       *tickReadView
-	StewardSessions steward.Sessions
-	LocalCI         localCIRunner
-	localCIRuns     *sync.Map
+	// beforeCloseTransfer lets a test act between CloseSession's snapshot and its transfer.
+	beforeCloseTransfer func(key string)
+	tickReads           *tickReadView
+	StewardSessions     steward.Sessions
+	LocalCI             localCIRunner
+	localCIRuns         *sync.Map
 
 	autoTrackFailures *sync.Map // PR key and remote head; only failed attempts remain.
 	ReviewerProfiles  func() ([]profile.Profile, error)

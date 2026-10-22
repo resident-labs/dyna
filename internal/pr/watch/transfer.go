@@ -9,22 +9,74 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
+// transferOptions tune a transfer that a session close starts.
+type transferOptions struct {
+	// expectAuthor skips the move when another session now holds the author role.
+	expectAuthor string
+	// inheritUnread re-sends delivered notices that the old author never read.
+	inheritUnread bool
+}
+
 // Transfer moves one live PR role and preserves the previous author's markers
 // or the previous review's provenance. Its caller checks who may transfer. dir
 // is the caller's checkout of the PR's repository, or "".
 func (s *Service) Transfer(ctx context.Context, key, role string, to subagent.Info, dir string) error {
+	_, err := s.transfer(ctx, key, role, to, dir, transferOptions{})
+	return err
+}
+
+// queuedUnread returns the IDs of posts to session that sit after its room
+// cursor, so the session has not read them. A paused room queues posts this way.
+func (s *Service) queuedUnread(session string, postIDs map[string]bool) map[string]bool {
+	if s.Notify == nil || s.Notify.Rooms == nil || len(postIDs) == 0 {
+		return nil
+	}
+	meta, err := s.sessionStore().ReadMeta(session)
+	if err != nil {
+		return nil
+	}
+	posts, _, err := s.Notify.Rooms.ReadAll(meta.RoomID, meta.RoomCursor)
+	if err != nil {
+		return nil
+	}
+	unread := map[string]bool{}
+	for _, p := range posts {
+		if postIDs[p.ID] && !meta.ClosedPosts[p.ID] {
+			unread[p.ID] = true
+		}
+	}
+	return unread
+}
+
+// transfer reports whether the role moved. A skipped stale transfer is not an error.
+func (s *Service) transfer(ctx context.Context, key, role string, to subagent.Info, dir string, opts transferOptions) (bool, error) {
 	if role != "author" {
-		return fmt.Errorf("only author transfers are supported; use dyna git pr reviewer --profile or --restart for the managed reviewer")
+		return false, fmt.Errorf("only author transfers are supported; use dyna git pr reviewer --profile or --restart for the managed reviewer")
 	}
 	// git runs here, never under the PR lock.
 	var path string
+	var unread map[string]bool
 	if r, err := s.Store.Get(key); err == nil {
 		path = matchingCheckout(ctx, r, dir)
+		if opts.inheritUnread {
+			posted := map[string]bool{}
+			for _, n := range r.Notices {
+				if n.Done && n.PostID != "" && n.SupersededBy == "" && n.Target == opts.expectAuthor {
+					posted[n.PostID] = true
+				}
+			}
+			unread = s.queuedUnread(opts.expectAuthor, posted)
+		}
 	}
+	moved := false
 	err := s.Store.update(func(st *State) error {
 		r := st.Records[key]
 		if r == nil || !r.Watching || r.State != "open" {
 			return fmt.Errorf("PR is not open and tracked")
+		}
+		if opts.expectAuthor != "" && r.Author != opts.expectAuthor {
+			// An explicit transfer won the race; its author keeps the PR.
+			return nil
 		}
 		if to.ID == "" || to.RoomID != r.RoomID {
 			return fmt.Errorf("target must be an open session in the PR's room")
@@ -44,13 +96,19 @@ func (s *Service) Transfer(ctx context.Context, key, role string, to subagent.In
 		if reviewer {
 			return fmt.Errorf("the reviewer cannot also be the author")
 		}
+		moved = true
 		r.FormerAuthors = append(r.FormerAuthors, r.Author)
 		r.Author, r.Parent = to.ID, to.ParentSession
 
 		var successors []Notice
 		for i := range r.Notices {
 			n := &r.Notices[i]
-			if n.Done || n.SupersededBy != "" || n.Target != old {
+			if n.SupersededBy != "" || n.Target != old {
+				continue
+			}
+			// A delivered notice still counts as pending when its post was queued
+			// and the closing author never read it.
+			if n.Done && !(opts.inheritUnread && unread[n.PostID]) {
 				continue
 			}
 			replacement := *n
@@ -66,7 +124,7 @@ func (s *Service) Transfer(ctx context.Context, key, role string, to subagent.In
 		return nil
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
-	return s.flush(ctx, key)
+	return moved, s.flush(ctx, key)
 }
