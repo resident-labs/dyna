@@ -352,7 +352,7 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	seconds := int64((timeout + time.Second - 1) / time.Second)
 	docker := "docker=(docker); "
 	if node.SSH == "" {
-		docker += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); fi; "
+		docker += "if ! docker info >/dev/null 2>&1; then docker=(sudo -n docker); if ! \"${docker[@]}\" info >/dev/null 2>&1; then echo 'Docker access is unavailable' >&2; exit 69; fi; fi; "
 	}
 	timing := `printf '{"durationNanos":%s}\n' "$(( $(date +%s%N) - started ))" > ` + q(path.Join(reportDir, "execution.json")) + "; "
 	cleanup := "check_status=$?; " + timing + `if [ "$check_entered" = 1 ]; then printf '\nDYNA_CI_CHECK_EXIT=%s\n' "$check_status"; fi; "${docker[@]}" rm -f ` + q(name) + " >/dev/null 2>&1 || true; git --git-dir=" + q(cache) + " worktree remove --force " + q(work) + " >/dev/null 2>&1 || true"
