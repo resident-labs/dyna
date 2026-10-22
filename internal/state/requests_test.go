@@ -36,14 +36,14 @@ func countThings(t *testing.T, w *Writer) int {
 func TestRequestWriteAppliesOnce(t *testing.T) {
 	w, published := requestWriter(t)
 	ev := hub.Event{Topic: "things"}
-	call := ForRequest(context.Background(), "r1")
+	call := ForRequestCall(context.Background(), "r1", "Thing", []byte("thing"))
 	if err := w.Write(call, ev, insertThing); err != nil {
 		t.Fatal(err)
 	}
 	if err := w.Write(call, ev, insertThing); err != nil {
 		t.Fatalf("second write of the same call: %v", err)
 	}
-	retry := ForRequest(context.Background(), "r1")
+	retry := ForRequestCall(context.Background(), "r1", "Thing", []byte("thing"))
 	if err := w.Write(retry, ev, insertThing); !errors.Is(err, ErrRepeated) {
 		t.Fatalf("retry = %v, want ErrRepeated", err)
 	}
@@ -53,7 +53,7 @@ func TestRequestWriteAppliesOnce(t *testing.T) {
 	if result, done, err := w.RequestDone(context.Background(), "r1"); err != nil || !done || result != nil {
 		t.Fatalf("RequestDone = %q, %v, %v; want done with no result yet", result, done, err)
 	}
-	if err := w.FinishRequest(context.Background(), "r1", "Thing", []byte(`{"ok":true}`)); err != nil {
+	if err := w.FinishRequest(call, "r1", "Thing", []byte(`{"ok":true}`)); err != nil {
 		t.Fatal(err)
 	}
 	if result, done, err := w.RequestDone(context.Background(), "r1"); err != nil || !done || string(result) != `{"ok":true}` {
@@ -106,7 +106,7 @@ func TestFinishRequestInCommitsResultWithMutation(t *testing.T) {
 	w, published := requestWriter(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	call := ForRequest(ctx, "claim-1")
+	call := ForRequestCall(ctx, "claim-1", "RunnerClaimInput", []byte("claim-1"))
 	want := []byte(" \n{\"batch\":[\"input-1\"],\"cursor\":7}\t")
 	ev := hub.Event{Topic: "things"}
 	if err := w.Write(call, ev, func(conn *sql.Conn) error {
@@ -142,7 +142,7 @@ func TestFinishRequestInCommitsResultWithMutation(t *testing.T) {
 		t.Fatalf("committed method = %q, %v", method, err)
 	}
 	called := false
-	if err := recovered.Write(ForRequest(ctx, "claim-1"), ev, func(conn *sql.Conn) error {
+	if err := recovered.Write(ForRequestCall(ctx, "claim-1", "RunnerClaimInput", []byte("claim-1")), ev, func(conn *sql.Conn) error {
 		called = true
 		return insertThing(conn)
 	}); !errors.Is(err, ErrRepeated) || called {
@@ -160,7 +160,7 @@ func TestFinishRequestInRollsBackWithMutation(t *testing.T) {
 	w, published := requestWriter(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
 	defer cancel()
-	call := ForRequest(ctx, "claim-rollback")
+	call := ForRequestCall(ctx, "claim-rollback", "RunnerClaimInput", []byte("claim-rollback"))
 	want := []byte(`{"batch":["input-2"],"cursor":8}`)
 	write := func(conn *sql.Conn) error {
 		if err := insertThing(conn); err != nil {

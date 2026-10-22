@@ -57,7 +57,9 @@ func TestRunnerInstructionsSavesTheExactSnapshotAndCoveredNotes(t *testing.T) {
 	}
 	actor := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: info.ID})
 	id := info.ID + "/1/instructions"
-	request := func() context.Context { return state.ForRequest(callspec.WithRequest(actor, id), "runner/"+id) }
+	request := func() context.Context {
+		return state.ForRequestCall(callspec.WithRequest(actor, id), "runner/"+id, "RunnerInstructions", []byte("fixture-call"))
+	}
 	first, err := e.m.RunnerInstructions(request(), 1)
 	if err != nil || !first.Refreshed || first.Frozen.Hash == "" || !slices.Equal(first.Covered, []string{note.ID}) {
 		t.Fatalf("frozen instructions = %+v, error %v", first, err)
@@ -150,7 +152,7 @@ BEGIN SELECT RAISE(ABORT, 'reject instruction snapshot'); END`); err != nil {
 	state.For(db).SetPublish(events.add)
 	actor := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: info.ID})
 	id := info.ID + "/1/freeze"
-	ctx := state.ForRequest(callspec.WithRequest(actor, id), "runner/"+id)
+	ctx := state.ForRequestCall(callspec.WithRequest(actor, id), "runner/"+id, "RunnerInstructions", []byte("fixture-call"))
 	got, err := e.m.RunnerInstructions(ctx, 1)
 	if err == nil || got.Frozen.Hash != "" || len(got.Covered) != 0 {
 		t.Fatalf("failed snapshot returned a result: %+v, error %v", got, err)
@@ -169,7 +171,7 @@ BEGIN SELECT RAISE(ABORT, 'reject instruction snapshot'); END`); err != nil {
 	if err != nil || got.Frozen.Hash == "" || !got.Refreshed || published != 1 {
 		t.Fatalf("retry snapshot = %+v, events %d, error %v", got, published, err)
 	}
-	replay := state.ForRequest(callspec.WithRequest(actor, id), "runner/"+id)
+	replay := state.ForRequestCall(callspec.WithRequest(actor, id), "runner/"+id, "RunnerInstructions", []byte("fixture-call"))
 	if _, err := e.m.RunnerInstructions(replay, 1); !errors.Is(err, state.ErrRepeated) {
 		t.Fatalf("replayed snapshot = %v; want ErrRepeated", err)
 	}
