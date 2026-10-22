@@ -24,7 +24,6 @@ package websvc
 import (
 	"bytes"
 	"context"
-	"dyna-agent/internal/callspec"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -317,13 +316,11 @@ func (s *Server) UnixHandler() http.Handler {
 			jsonError(w, http.StatusForbidden, "the engine refused this call: "+id.refused.Error())
 			return
 		}
-		// TODO: legacy/shim remove later — reads the old CLI guard only for unverified local callers; remove with caller enforcement (g3419).
-		ctx, err := unverifiedClaim(r.Context(), id.caller, r.Header.Get(callspec.ClaimHeader))
-		if err != nil {
-			jsonError(w, http.StatusBadRequest, err.Error())
+		if id.caller.Kind == "" || id.caller.Kind == Unverified {
+			jsonError(w, http.StatusForbidden, "the engine refused this call: caller is unverified")
 			return
 		}
-		handler.ServeHTTP(w, r.WithContext(context.WithValue(ctx, localContextKey{}, true)))
+		handler.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), localContextKey{}, true)))
 	})
 }
 
