@@ -2,6 +2,8 @@ package native
 
 import (
 	"context"
+	"dyna-agent/internal/account/store"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -52,52 +54,45 @@ func TestMicroUSDExactIntegerBeforeProjection(t *testing.T) {
 		t.Fatalf("large integer rounded before unit conversion %.17g %v", amount, ok)
 	}
 }
-func TestKeyUsageCurrentRouteWithLegacyCapabilityFallback(t *testing.T) {
-	var paths []string
-	stubOpenCodeHTTP(t, func(r *http.Request) (*http.Response, error) {
-		paths = append(paths, r.URL.Path)
-		if len(paths) == 1 {
-			return &http.Response{StatusCode: 404, Body: io.NopCloser(strings.NewReader(""))}, nil
-		}
-		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"usage":{"rolling":{"percent":20}}}`))}, nil
-	})
-	if _, err := (&openCodeManager{}).readOpenCodeKeyUsage(context.Background(), "fixture-private"); err != nil {
-		t.Fatal(err)
-	}
-	if len(paths) != 2 || paths[0] != "/inference/go/v1/usage" || paths[1] != "/zen/go/v1/usage" {
-		t.Fatal(paths)
-	}
-}
-func TestConsoleMissingOrgUsesOnlySoleWorkspace(t *testing.T) {
-	for _, multiple := range []bool{false, true} {
-		t.Run(map[bool]string{false: "sole", true: "ambiguous"}[multiple], func(t *testing.T) {
-			scoped := false
+func TestOpenCodeUsagePreservesCurrentRouteErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name, path string
+		status     int
+	}{
+		{"inference-404", "/inference/go/v1/usage", 404},
+		{"inference-405", "/inference/go/v1/usage", 405},
+		{"console-400", "/console/api/go/status", 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var paths []string
 			stubOpenCodeHTTP(t, func(r *http.Request) (*http.Response, error) {
-				body := ""
-				status := 400
-				switch r.URL.Path {
-				case "/console/api/orgs":
-					status = 200
+				paths = append(paths, r.URL.Path)
+				status, body := 200, `{"usage":{"rolling":{"percent":20}},"access":{"meters":{"fiveHour":{"usedMicroCents":"0","limitMicroCents":"100000000"}}}}`
+				if len(paths) == 1 {
+					status, body = tc.status, ""
+				} else if r.URL.Path == "/console/api/orgs" {
 					body = `[{"id":"org_one"}]`
-					if multiple {
-						body = `[{"id":"org_one"},{"id":"org_two"}]`
-					}
-				case "/console/api/go/status":
-					if r.Header.Get("x-org-id") == "org_one" {
-						scoped = true
-						status = 200
-						body = `{"access":{"meters":{"fiveHour":{"usedMicroCents":"0","limitMicroCents":"100000000"}}}}`
-					}
 				}
 				return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body))}, nil
 			})
-			windows, err := (&openCodeManager{}).readOpenCodeConsoleUsage(context.Background(), "fixture-private", "")
-			if multiple {
-				if scoped || err == nil {
-					t.Fatal("selected ambiguous workspace")
+			var windows []store.Window
+			var err error
+			m := &openCodeManager{}
+			if tc.status == 400 {
+				windows, err = m.readOpenCodeConsoleUsage(context.Background(), "fixture-private", "")
+			} else {
+				windows, err = m.readOpenCodeKeyUsage(context.Background(), "fixture-private")
+			}
+			if len(paths) != 1 || paths[0] != tc.path || len(windows) != 0 {
+				t.Fatalf("paths = %v, windows = %v; want one current route and no windows", paths, windows)
+			}
+			if tc.status == 400 {
+				var status *UsageHTTPError
+				if !errors.As(err, &status) || status.Status != 400 {
+					t.Fatalf("error = %v; want HTTP 400", err)
 				}
-			} else if !scoped || err != nil || len(windows) != 1 {
-				t.Fatalf("sole workspace failed %v", err)
+			} else if !errors.Is(err, ErrUnsupported) {
+				t.Fatalf("error = %v; want unsupported", err)
 			}
 		})
 	}
