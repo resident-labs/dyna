@@ -960,11 +960,19 @@ func (s *Store) named(m Meta, msg room.Message) bool {
 	if !recorded {
 		return true
 	}
+	// Only a consolidation target can own a delivery alias. Every other
+	// session is named by its own ID, address or name, so a broadcast post
+	// costs one string check per mention and never scans the store.
+	aliases := m.Consolidation != nil || m.ConsolidationCharter != "" ||
+		len(m.InheritedInboxes) > 0 || len(m.ConsolidationHistory) > 0
 	for _, ref := range refs {
 		// A bare name is relative to the room; an ID or address is not.
 		for _, c := range []string{ref, m.Room + ":" + ref} {
-			if c == m.ID || msg.IsSession(c, m.ID, m.Address()) {
+			if c == m.ID || c == m.Address() || msg.IsSession(c, m.ID, m.Address()) {
 				return true
+			}
+			if !aliases {
+				continue
 			}
 			if target, err := s.InspectDeliveryTarget(c); err == nil && target.ID == m.ID {
 				return true
