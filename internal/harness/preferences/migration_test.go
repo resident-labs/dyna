@@ -69,7 +69,7 @@ func TestPreferenceIndexImportsOnceAndDoesNotRestoreForgottenAccount(t *testing.
 			if err := MigrateFrom(dataDir, metadata); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok, err := For(metadata, "forgotten"); err != nil || ok {
+			if _, ok, err := For("forgotten"); err != nil || ok {
 				t.Fatalf("forgotten ref restored: %v, %v", ok, err)
 			}
 			if got, err := os.ReadFile(metadata); err != nil || string(got) != string(raw) {
