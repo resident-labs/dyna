@@ -85,7 +85,7 @@ export function createPlayer(ctx, out, receipts) {
 // frame and the context's sample rate; receipts get the player's playback
 // receipts. It rejects with the browser's error when the microphone is
 // refused or missing.
-export async function openAudio(onFrame, receipts) {
+export async function openAudio(onFrame, receipts, ducking = false) {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
   })
@@ -103,21 +103,21 @@ export async function openAudio(onFrame, receipts) {
     throw err
   }
   // Deafen turns out down to silence. Voice's audio still plays through,
-  // so its receipts keep their timing. duck turns Voice down while the owner
-  // talks.
+  // so its receipts keep their timing. Optional ducking adds a separate
+  // gain stage; by default mic energy never changes playback volume.
   const out = ctx.createGain()
-  const duck = ctx.createGain()
-  out.connect(duck)
-  duck.connect(ctx.destination)
-  const ducker = createDucker(duck.gain)
+  const duck = ducking ? ctx.createGain() : null
+  out.connect(duck || ctx.destination)
+  duck?.connect(ctx.destination)
+  const ducker = duck ? createDucker(duck.gain) : null
   const player = createPlayer(ctx, out, receipts)
   return {
     play: player.play,
     done: player.done,
     stopPlayback: player.stop,
     setDeafened(on) { out.gain.value = on ? 0 : 1 },
-    hear: (frame, rate) => ducker.hear(frame, rate, ctx.currentTime),
-    unduck: () => ducker.reset(ctx.currentTime),
+    hear: (frame, rate) => ducker?.hear(frame, rate, ctx.currentTime),
+    unduck: () => ducker?.reset(ctx.currentTime),
     close() {
       player.stop('')
       stream.getTracks().forEach((t) => t.stop())

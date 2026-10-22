@@ -91,3 +91,77 @@ test('barge-in drops a pending started receipt', (t) => {
   // r2 never played: the engine hears 0 ms for it.
   assert.deepEqual(got, [['started', 'r1'], ['cancelled', 'r1', 0], ['cancelled', 'r2', 0]])
 })
+
+// Exercise the real call, microphone and player wiring. Noise must not
+// lower playback by default, and server interruption must still stop it.
+test('ducking is opt-in and ignores background noise and short bursts', async (t) => {
+  const contexts = []
+  let mic
+  const install = (name, value) => {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, name)
+    Object.defineProperty(globalThis, name, { configurable: true, value })
+    t.after(() => { if (previous) Object.defineProperty(globalThis, name, previous); else delete globalThis[name] })
+  }
+  install('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } })
+  install('AudioWorkletNode', class { constructor() { this.port = {}; mic = this } })
+  install('AudioContext', class {
+    constructor() {
+      Object.assign(this, fakeContext())
+      this.sampleRate = 48000
+      this.destination = {}
+      this.audioWorklet = { addModule: async () => {} }
+      this.gains = []
+      contexts.push(this)
+    }
+    resume() {}
+    close() {}
+    createMediaStreamSource() { return { connect() {} } }
+    createGain() {
+      const gain = {
+        value: 1,
+        cancelScheduledValues() {},
+        setTargetAtTime(value) { this.value = value },
+        setValueAtTime(value) { this.value = value },
+        linearRampToValueAtTime(value) { this.value = value },
+      }
+      this.gains.push(gain)
+      return { gain, connect() {} }
+    }
+  })
+  const { openAudio } = await import('./audio.js')
+  const { createCall } = await import('./call.js')
+  const start = async (ducking) => {
+    const ws = { readyState: 0, send() {}, close() {} }
+    const call = createCall({
+      api: { voiceStart: async () => ({}), voiceStop: async () => {} },
+      socket: () => ws,
+      openAudio: (frame, receipts) => openAudio(frame, receipts, ducking),
+    })
+    await call.start('room_1', 'voice-test')
+    ws.readyState = 1
+    ws.onopen()
+    const receive = (event) => ws.onmessage({ data: JSON.stringify(event) })
+    receive({ type: 'state', state: 'speaking' })
+    receive({ type: 'audio', id: 'r1', audio: chunk })
+    return { call, receive, ctx: contexts.at(-1) }
+  }
+  const frame = (ctx, level, ms) => {
+    ctx.currentTime += ms / 1000
+    mic.port.onmessage({ data: new Float32Array(ms * ctx.sampleRate / 1000).fill(level) })
+  }
+  const off = await start(undefined)
+  frame(off.ctx, 0.25, 200)
+  assert.ok(off.ctx.gains.every((g) => g.value === 1), 'default playback was lowered by mic energy')
+  off.receive({ type: 'clear', id: 'r1' })
+  assert.ok(off.ctx.sources.every((s) => s.stopped), 'provider interruption did not stop playback')
+  await off.call.hangup()
+
+  const on = await start(true)
+  frame(on.ctx, 0.04, 1000)
+  frame(on.ctx, 0.2, 100)
+  frame(on.ctx, 0.04, 100)
+  assert.ok(on.ctx.gains.every((g) => g.value === 1), 'background noise or a brief burst lowered playback')
+  frame(on.ctx, 0.2, 160)
+  assert.ok(on.ctx.gains.some((g) => g.value < 1), 'sustained owner speech did not lower playback')
+  await on.call.hangup()
+})
