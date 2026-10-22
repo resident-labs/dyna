@@ -1,0 +1,5 @@
+--ozone-platform=wayland
+--disable-background-networking
+--disable-extensions
+--disable-component-update
+--disable-sync

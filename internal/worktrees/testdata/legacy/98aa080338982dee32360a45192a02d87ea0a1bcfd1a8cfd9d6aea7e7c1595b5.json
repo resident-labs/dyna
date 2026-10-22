@@ -1,0 +1,16 @@
+{
+  "root": "/home/user/.dyna-worktrees",
+  "session": "ses_20261018-231109-78c126b4",
+  "branch": "dm-report-dupes",
+  "createdAt": "2026-10-19T04:38:13.444043954Z",
+  "path": "/home/user/.dyna-worktrees/dyna-agent-34c74d08/dm-report-dupes-698494cc",
+  "runId": "",
+  "agentId": 0,
+  "label": "",
+  "profile": "",
+  "repo": "/home/user/dyna-agent",
+  "base": "origin/main",
+  "head": "",
+  "status": "",
+  "retainedAt": "0001-01-01T00:00:00Z"
+}

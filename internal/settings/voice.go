@@ -1,0 +1,67 @@
+package settings
+
+import (
+	"fmt"
+	"net/url"
+	"slices"
+	"strings"
+)
+
+const (
+	// KeyVoiceProvider names the realtime voice provider a call uses.
+	KeyVoiceProvider = "voice.provider"
+	// KeyVoiceModel names the provider's model; empty means its default.
+	KeyVoiceModel = "voice.model"
+	// KeyVoiceURL is the provider's WebSocket address: required for a
+	// self-hosted server, else it overrides the provider's own.
+	KeyVoiceURL = "voice.url"
+)
+
+// VoiceProviders are the voice.provider values.
+var VoiceProviders = []string{"openai", "speech-to-speech", "dashscope", "google-live", "doubao-seeduplex", "stepfun", "minicpm-o"}
+
+// loadVoice reads the known voice keys. Other voice keys stay in Extra.
+func (v *Values) loadVoice(raw map[string]any) error {
+	section, ok := raw["voice"]
+	if !ok {
+		return nil
+	}
+	values, ok := section.(map[string]any)
+	if !ok {
+		return fmt.Errorf("voice settings must be an object")
+	}
+	for _, key := range []string{KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL} {
+		if value, ok := values[strings.TrimPrefix(key, "voice.")]; ok {
+			if err := v.setVoice(key, fmt.Sprint(value)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (v *Values) setVoice(key, value string) error {
+	value = strings.TrimSpace(value)
+	switch key {
+	case KeyVoiceProvider:
+		if !slices.Contains(VoiceProviders, value) {
+			return fmt.Errorf("voice.provider must be one of %s", strings.Join(VoiceProviders, ", "))
+		}
+		v.VoiceProvider = value
+	case KeyVoiceModel:
+		v.VoiceModel = value
+	case KeyVoiceURL:
+		if u, err := url.Parse(value); value != "" && (err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "") {
+			return fmt.Errorf("voice.url must be a ws:// or wss:// address")
+		}
+		v.VoiceURL = value
+	}
+	v.fromFile[key] = true
+	return nil
+}
+
+func (v Values) saveVoice(raw map[string]any) {
+	values := nested(raw, "voice")
+	values["provider"], values["model"], values["url"] = v.VoiceProvider, v.VoiceModel, v.VoiceURL
+	raw["voice"] = values
+}

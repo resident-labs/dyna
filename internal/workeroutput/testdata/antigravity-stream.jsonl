@@ -1,0 +1,9 @@
+{"event":"init","conversation_id":"conversation-agy","init":{"model":"gemini-3.8-flash-high","cwd":"/home/user/dyna-agent","tools":["run_command"],"permission_mode":"always-proceed"}}
+{"event":"step_update","step_update":{"conversation_id":"conversation-agy","step_index":0,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"conversation_id":"conversation-agy","step_index":1,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"pwd"}}}}
+{"event":"step_update","step_update":{"conversation_id":"conversation-agy","step_index":1,"state":"DONE","step_type":"tool","tool_name":"run_command","duration_seconds":0.05,"tool_info":{"name":"run_command","parameters":{"CommandLine":"pwd"},"output":"/home/user/dyna-agent\r\n"}}}
+{"event":"step_update","step_update":{"conversation_id":"conversation-agy","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"exit 7"}}}}
+{"event":"step_update","step_update":{"conversation_id":"conversation-agy","step_index":2,"state":"DONE","step_type":"tool","tool_name":"run_command","duration_seconds":0.01,"tool_info":{"name":"run_command","parameters":{"CommandLine":"exit 7"},"error":{"type":"EXECUTION_ERROR","message":"command exited with status 7"}}}}
+{"event":"step_update","step_update":{"conversation_id":"conversation-agy","step_index":3,"state":"ACTIVE","step_type":"agent_response","text_delta":"Inspected"}}
+{"event":"step_update","step_update":{"conversation_id":"conversation-agy","step_index":3,"state":"DONE","step_type":"agent_response","text_delta":".\n","duration_seconds":1.1}}
+{"event":"result","result":{"conversation_id":"conversation-agy","status":"SUCCESS","response":"Inspected.\n","duration_seconds":1.2,"num_turns":1}}

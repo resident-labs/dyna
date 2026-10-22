@@ -1,0 +1,48 @@
+package harness
+
+import (
+	"fmt"
+	"regexp"
+	"strings"
+
+	"dyna-agent/internal/harness/sessionhost"
+)
+
+var antigravityACPLogPrefix = regexp.MustCompile(`^[EF][0-9]{4} [0-9:.]+[ \t]+[0-9]+ [^\r\n]+:[0-9]+\] `)
+
+// TODO: legacy/shim remove later — preserve ACP 1.3.0 failures until the server reports structured prompt errors.
+func antigravityACPPromptError(session, stderr string) error {
+	if session == "" {
+		return nil
+	}
+	markers := map[string]bool{
+		"Antigravity SDK error processing prompt for session " + session:                true,
+		"Agent connection lost for session " + session + " after rebuild retry":         true,
+		"Failed to rebuild agent for session " + session + "; connection unrecoverable": true,
+	}
+	for _, line := range strings.Split(stderr, "\n") {
+		message := strings.TrimSpace(line)
+		if location := antigravityACPLogPrefix.FindStringIndex(message); location != nil {
+			message = message[location[1]:]
+		}
+		message = strings.TrimPrefix(message, "ERROR:root:")
+		if markers[message] {
+			return fmt.Errorf("Antigravity ACP prompt failed: %s", tail(strings.TrimSpace(stderr), 2000))
+		}
+	}
+	return nil
+}
+
+// finishStderr closes Antigravity before reading diagnostics. Close must join
+// the host's stderr copy, and StderrTail must retain it until Detach.
+func (s *acpSession) finishStderr() string {
+	if !s.exclusive || s.host == nil {
+		return ""
+	}
+	s.conn.Close()
+	_ = s.host.Close()
+	if local, ok := s.host.(sessionhost.LocalExtension); ok {
+		return local.StderrTail()
+	}
+	return ""
+}

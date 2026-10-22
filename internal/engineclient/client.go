@@ -1,0 +1,208 @@
+// Package engineclient calls the engine's web API over its private Unix socket.
+package engineclient
+
+import (
+	"bytes"
+	"context"
+	"dyna-agent/internal/enginesocket"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"os"
+	"sync"
+	"syscall"
+	"time"
+
+	"dyna-agent/internal/callspec"
+)
+
+var ErrNotRunning = errors.New("Dyna engine is not running; start it with systemctl --user start dyna-engine")
+
+// RemoteError is an error the engine returned for a call, with the reply's
+// HTTP status.
+type RemoteError struct {
+	Status  int
+	Message string
+}
+
+// Final reports whether a retry of the call would get the same answer: the
+// engine refused it or found it invalid (4xx). A 5xx reply (a busy database,
+// a deadline, an engine that is stopping or read-only) may succeed later.
+func (e *RemoteError) Final() bool { return e.Status >= 400 && e.Status < 500 }
+
+// NoMethod reports whether the engine has no such method: an engine of an
+// earlier release than the caller.
+func (e *RemoteError) NoMethod() bool { return e.Status == http.StatusNotFound }
+
+func (e *RemoteError) Error() string { return e.Message }
+
+// SocketPath is shared by the engine listener and the CLI transport.
+func SocketPath() (string, error) { return enginesocket.Path() }
+
+// Running reports whether an engine accepts connections on its socket.
+// path "" means the default socket.
+func Running(path string) bool {
+	if path == "" {
+		var err error
+		if path, err = SocketPath(); err != nil {
+			return false
+		}
+	}
+	conn, err := net.DialTimeout("unix", path, time.Second)
+	if err != nil {
+		return false
+	}
+	_ = conn.Close()
+	return true
+}
+
+// dialTimeout bounds connecting to the socket, and deadline each call.
+// Tests shorten them.
+var (
+	dialTimeout = time.Second
+	deadline    = callspec.Deadline
+)
+
+type Client struct {
+	http        *http.Client
+	restartWait time.Duration
+	notices     io.Writer
+	build       string
+	// warned makes a build gap print one line per client, not per call.
+	warned sync.Once
+}
+
+// Option changes a client made by New.
+type Option func(*Client)
+
+// RestartWait sets how long a call waits for an engine that is down or
+// restarting. New uses 60 s.
+func RestartWait(d time.Duration) Option { return func(c *Client) { c.restartWait = d } }
+
+// Notices sets where the client writes its notices, or nil for nowhere: one
+// line when a call starts to wait for the engine, and one line when the
+// engine's build differs. New uses os.Stderr.
+func Notices(w io.Writer) Option { return func(c *Client) { c.notices = w } }
+
+// Build sets the build the client sends. New uses callspec.Build.
+func Build(v string) Option { return func(c *Client) { c.build = v } }
+
+// New uses the engine socket when path is empty. An explicit path supports
+// isolated callers, including tests that must never reach the owner's engine.
+func New(path string, opts ...Option) *Client {
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			socket := path
+			if socket == "" {
+				var err error
+				socket, err = SocketPath()
+				if err != nil {
+					return nil, ErrNotRunning
+				}
+			}
+			conn, err := (&net.Dialer{Timeout: dialTimeout}).DialContext(ctx, "unix", socket)
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ECONNREFUSED) {
+				return nil, ErrNotRunning
+			}
+			return conn, err
+		},
+	}
+	c := &Client{http: &http.Client{Transport: transport}, restartWait: time.Minute, notices: os.Stderr, build: callspec.Build}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
+}
+
+// Call uses the same method route, argument array and result as the browser.
+// While the engine is down or restarting (no socket, or the connection is
+// refused), it retries for up to the restart wait, every 100 ms rising to
+// 1 s. A call the engine accepted is never retried: past its deadline it
+// fails with "engine did not answer".
+func (c *Client) Call(ctx context.Context, method string, args []any, result any) error {
+	if args == nil {
+		args = []any{}
+	}
+	body, err := json.Marshal(args)
+	if err != nil {
+		return err
+	}
+	deadline := deadline(method)
+	giveUp := time.Now().Add(c.restartWait)
+	for delay := 100 * time.Millisecond; ; delay = min(2*delay, time.Second) {
+		err := c.call(ctx, method, body, deadline, result)
+		if !errors.Is(err, ErrNotRunning) {
+			return err
+		}
+		left := time.Until(giveUp)
+		if left <= 0 {
+			return fmt.Errorf("%w (waited %g s)", ErrNotRunning, c.restartWait.Seconds())
+		}
+		if c.notices != nil && delay == 100*time.Millisecond {
+			fmt.Fprintln(c.notices, "dyna: waiting for the engine to start")
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(min(delay, left)):
+		}
+	}
+}
+
+func (c *Client) call(ctx context.Context, method string, body []byte, deadline time.Duration, result any) error {
+	callCtx, cancel := context.WithTimeout(ctx, deadline)
+	defer cancel()
+	err := c.send(callCtx, method, body, result)
+	if err != nil && ctx.Err() == nil && errors.Is(callCtx.Err(), context.DeadlineExceeded) {
+		return callspec.Late(method, deadline)
+	}
+	return err
+}
+
+func (c *Client) send(ctx context.Context, method string, body []byte, result any) error {
+	target := url.URL{Scheme: "http", Host: "engine", Path: "/api/" + method}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	// TODO: legacy/shim remove later — preserves the CLI guard only for unverified report-only calls; remove with caller enforcement (g3419).
+	req.Header.Set(callspec.ClaimHeader, processClaim())
+	if c.build != "" {
+		req.Header.Set(callspec.VersionHeader, c.build)
+	}
+	if id := callspec.RequestOf(ctx); id != "" {
+		req.Header.Set(callspec.RequestHeader, id)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		if errors.Is(err, ErrNotRunning) {
+			return ErrNotRunning
+		}
+		return err
+	}
+	defer res.Body.Close()
+	// A gap alone is no failure: worktree and QA builds differ from the
+	// engine's all the time. Say it once.
+	if engine := res.Header.Get(callspec.VersionHeader); engine != "" && c.build != "" && engine != c.build && c.notices != nil {
+		c.warned.Do(func() { fmt.Fprintln(c.notices, "dyna: "+callspec.VersionGap(engine, c.build)) })
+	}
+	if res.StatusCode != http.StatusOK {
+		var reply struct {
+			Error string `json:"error"`
+		}
+		if err := json.NewDecoder(res.Body).Decode(&reply); err != nil {
+			return fmt.Errorf("engine: %s", res.Status)
+		}
+		return &RemoteError{Status: res.StatusCode, Message: reply.Error}
+	}
+	if result == nil {
+		return nil
+	}
+	return json.NewDecoder(res.Body).Decode(result)
+}

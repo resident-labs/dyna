@@ -1,0 +1,8 @@
+{"event": "step_update", "step_update": {"step_index": 3, "state": "ACTIVE", "step_type": "agent_response", "text_delta": "The trans"}}
+{"event": "step_update", "step_update": {"step_index": 3, "state": "ACTIVE", "step_type": "agent_response", "text_delta": "cript preserves words, even when a long fragment arrives in the middle of a wor"}}
+{"event": "step_update", "step_update": {"step_index": 3, "state": "ACTIVE", "step_type": "agent_response", "text_delta": "d.\n"}}
+{"event": "step_update", "step_update": {"step_index": 3, "state": "ACTIVE", "step_type": "agent_response", "text_delta": "\n"}}
+{"event": "step_update", "step_update": {"step_index": 3, "state": "ACTIVE", "step_type": "agent_response", "text_delta": "A second para"}}
+{"event": "step_update", "step_update": {"step_index": 3, "state": "ACTIVE", "step_type": "agent_response", "text_delta": "graph\nkeeps its line break."}}
+{"event": "step_update", "step_update": {"step_index": 3, "state": "DONE", "step_type": "agent_response", "text_delta": "\n"}}
+{"event": "step_update", "step_update": {"step_index": 4, "state": "DONE", "step_type": "agent_response", "text_delta": "Next message."}}

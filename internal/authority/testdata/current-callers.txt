@@ -1,0 +1,14 @@
+# Code that reads the process's own actor with authority.Current. In the
+# engine that actor is the engine's, never the caller's, so code a call reaches
+# reads authority.Of(ctx) (requirements item 3). TestCurrentOnlyShrinks fails on
+# a file that is not listed, and on a count above or below the one listed.
+# These lines may only shrink: move a check to authority.Of, then lower or
+# remove its line. Format: <file> <count>
+internal/cli/room/room.go 1
+internal/cli/workflows/workflows.go 2
+internal/engine/callers.go 1
+internal/ghclient/policy.go 1
+internal/subagent/consolidation.go 1
+internal/subagent/manager.go 1
+internal/subagent/transfer.go 1
+internal/workflowsvc/run.go 1

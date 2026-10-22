@@ -1,0 +1,87 @@
+// Workflow runs and their templates. Sources: internal/roomsvc/runs.go and
+// internal/workflowtemplate/catalog.go.
+import type { Doing } from './room.ts'
+
+// RunSummary is roomsvc.RunSummary. endedAt is omitted while a run goes.
+export interface RunSummary {
+  id: string
+  name: string
+  status: string // running|ok|error|canceled
+  startedAt: string
+  endedAt?: string
+  roomId: string
+  parent?: string
+  parentId?: string
+  detached?: boolean
+  paused?: boolean
+  error?: string
+  agents: number
+  done: number
+  failed: number
+  working: number
+}
+
+// RunList is roomsvc.RunList.
+export interface RunList {
+  runs: RunSummary[]
+  total: number
+  running: number
+}
+
+// RunAgent is roomsvc.RunAgent. started is unix milliseconds.
+export interface RunAgent {
+  id: number
+  label: string
+  profile?: string
+  phase?: string
+  status: string
+  started?: number
+  durMs?: number
+  preview?: string
+  doing?: Doing
+  error?: string
+  cached?: boolean
+}
+
+// RunLog is roomsvc.RunLog.
+export interface RunLog {
+  ts: number
+  msg: string
+}
+
+// RunDetail is roomsvc.RunDetail.
+export interface RunDetail {
+  run: RunSummary
+  agents: RunAgent[]
+  agentTotal: number
+  agentRunning: number
+  agentFailed: number
+  phases?: string[]
+  logs: RunLog[]
+  resultSummary?: string
+  resultBytes?: number
+}
+
+// RunJournalEntry is roomsvc.RunJournalEntry.
+export interface RunJournalEntry {
+  ts: number
+  kind: string
+  message: string
+  next?: string
+}
+
+// RunResultView is roomsvc.RunResultView.
+export interface RunResultView {
+  result: string
+  bytes: number
+  truncatedKB?: number
+  journal?: RunJournalEntry[]
+}
+
+// TemplateInfo is workflowtemplate.Info.
+export interface TemplateInfo {
+  name: string
+  description?: string
+  source: string
+  path: string
+}

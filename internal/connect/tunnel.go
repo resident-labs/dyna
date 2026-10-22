@@ -1,0 +1,166 @@
+package connect
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"dyna-agent/internal/childenv"
+)
+
+// RunTunnel runs cloudflared for the managed tunnel until ctx ends, and
+// starts it again with backoff when it exits. The token goes in by file
+// (--token-file), never on the command line, so ps does not show it.
+// cloudflared's own output goes to <connect dir>/cloudflared.log.
+func RunTunnel(ctx context.Context, st *Store, bin string, logf func(string, ...any)) {
+	if bin == "" {
+		bin = "cloudflared"
+	}
+	wait := 5 * time.Second
+	for ctx.Err() == nil {
+		if _, err := os.Stat(st.TunnelTokenPath()); err != nil {
+			logf("connect: no tunnel token yet; the tunnel waits for the relay")
+		} else {
+			start := time.Now()
+			err := runOnce(ctx, st, bin)
+			if ctx.Err() != nil {
+				return
+			}
+			if time.Since(start) > 2*time.Minute {
+				wait = 5 * time.Second
+			}
+			logf("connect: cloudflared stopped (%v); starting it again in %s", err, wait)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
+		}
+		wait = min(wait*2, time.Minute)
+	}
+}
+
+func runOnce(ctx context.Context, st *Store, bin string) error {
+	logf, err := os.OpenFile(filepath.Join(st.Dir(), "cloudflared.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer logf.Close()
+	cmd := exec.CommandContext(ctx, bin, "tunnel", "--no-autoupdate", "run", "--token-file", st.TunnelTokenPath())
+	cmd.Stdout, cmd.Stderr = logf, logf
+	// Keep only what cloudflared needs; never pass a Dyna stamp along.
+	cmd.Env = []string{"HOME=" + os.Getenv("HOME"), "PATH=" + os.Getenv("PATH")}
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	// If serve dies without a clean shutdown, take cloudflared with it, so
+	// a restart never leaves an old connector running.
+	dieWithParent(cmd)
+	cmd.WaitDelay = 10 * time.Second
+	return childenv.Clean(cmd).Run()
+}
+
+// TailscaleRoute finds a tailscale serve setup that points at both
+// loopback ports, and returns it as a route. ok is false when there is
+// none: Tailscale is not running, or serve is not set up for Dyna.
+func TailscaleRoute(ctx context.Context, appPort, cardPort int) (Route, bool) {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	out, err := childenv.Clean(exec.CommandContext(ctx, "tailscale", "serve", "status", "--json")).Output()
+	if err != nil {
+		return Route{}, false
+	}
+	return parseTailscaleServe(out, appPort, cardPort)
+}
+
+func parseTailscaleServe(out []byte, appPort, cardPort int) (Route, bool) {
+	var st struct {
+		Web map[string]struct {
+			Handlers map[string]struct{ Proxy string }
+		}
+	}
+	if json.Unmarshal(out, &st) != nil {
+		return Route{}, false
+	}
+	find := func(port int) (host, hostport string) {
+		for hp, w := range st.Web {
+			p := w.Handlers["/"].Proxy
+			for _, want := range []string{"http://127.0.0.1:" + strconv.Itoa(port), "http://localhost:" + strconv.Itoa(port), "127.0.0.1:" + strconv.Itoa(port)} {
+				if strings.TrimSuffix(p, "/") == want {
+					h, _, _ := strings.Cut(hp, ":")
+					return h, hp
+				}
+			}
+		}
+		return "", ""
+	}
+	ah, ahp := find(appPort)
+	ch, chp := find(cardPort)
+	if ah == "" || ch == "" || ah != ch {
+		return Route{}, false
+	}
+	origin := func(hp string) string { return "https://" + strings.TrimSuffix(hp, ":443") }
+	r := Route{Kind: "tailscale"}
+	r.App, r.Cards = origin(ahp), origin(chp)
+	return r, true
+}
+
+// ErrUnlinked means the relay no longer knows this machine.
+var ErrUnlinked = errors.New("the relay says this machine was unlinked; run dyna engine connect unlink --local, then link again")
+
+// Sync is the start-up check with the relay: refresh the key set, read the
+// link's state, report the loopback ports and routes, and fetch the tunnel
+// token when it is missing. It returns an error the caller logs; nothing
+// here blocks the server.
+func (s *Service) Sync(ctx context.Context, appPort, cardPort int) error {
+	l, ok := s.link()
+	if !ok {
+		return nil
+	}
+	rl := s.relay(l)
+	if ks, err := rl.FetchKeys(ctx); err == nil {
+		_ = s.o.Store.SaveKeySet(ks)
+		s.mu.Lock()
+		s.keys = ks
+		s.mu.Unlock()
+	}
+	info, err := rl.Status(ctx, l.Machine)
+	var re *RelayError
+	if errors.As(err, &re) && re.Status == 410 {
+		l.Unlinked = true
+		_ = s.o.Store.SaveLink(l)
+		s.endSessions(func(Session) bool { return true }, "the relay says this machine was unlinked")
+		return ErrUnlinked
+	}
+	if err != nil {
+		return fmt.Errorf("relay status: %w", err)
+	}
+	if info.Epoch > l.Epoch {
+		l = s.bumpEpoch(l, info.Epoch)
+	}
+	if info.Owner.Name != l.Owner.Name || info.Name != l.Name {
+		l.Owner.Name, l.Name = info.Owner.Name, info.Name
+		_ = s.o.Store.SaveLink(l)
+	}
+	if err := rl.ReportOrigin(ctx, l.Machine, appPort, cardPort); err != nil {
+		return fmt.Errorf("report ports: %w", err)
+	}
+	if err := rl.ReportRoutes(ctx, l.Machine, s.RelayRoutes()); err != nil {
+		return fmt.Errorf("report routes: %w", err)
+	}
+	if _, err := os.Stat(s.o.Store.TunnelTokenPath()); err != nil {
+		tok, err := rl.TunnelToken(ctx, l.Machine)
+		if err != nil {
+			return fmt.Errorf("tunnel token: %w", err)
+		}
+		if err := s.o.Store.SaveTunnelToken(tok); err != nil {
+			return err
+		}
+	}
+	return nil
+}

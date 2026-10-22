@@ -1,0 +1,19 @@
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "compact"}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "Here's a summary"}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "tool_call", "toolCallId": "call_1", "title": "Read", "kind": "read", "status": "pending", "content": [], "locations": []}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "tool_call_update", "toolCallId": "call_1", "status": "successful", "content": [{"type": "text", "text": "42 lines"}], "rawOutput": {"lines": 42}, "locations": []}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "compaction", "status": "completed"}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "compact"}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Analyzing the directory structure..."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Analyzing the directory structure..."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "compact"}]}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Analyzing the directory structure..."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Analyzing the directory structure..."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Analyzing the directory structure..."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Analyzing the directory structure..."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Analyzing the directory structure..."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Analyzing the directory structure..."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "agent_thought_chunk", "content": {"type": "text", "text": "Analyzing the directory structure..."}}}}
+{"jsonrpc": "2.0", "method": "session/update", "params": {"sessionId": "s1", "update": {"sessionUpdate": "available_commands_update", "availableCommands": [{"name": "compact"}]}}}
+{"jsonrpc": "2.0", "method": "_x.ai/session_notification", "params": {"sessionId": "s1", "update": {"sessionUpdate": "response_completed", "usage": {"input_tokens": 15442, "output_tokens": 384, "cache_read_input_tokens": 2176, "cache_creation_input_tokens": 0, "reasoning_tokens": 383}, "signature": "sig"}}}
+{"jsonrpc": "2.0", "method": "_x.ai/session_notification", "params": {"sessionId": "s1", "update": {"sessionUpdate": "turn_completed", "prompt_id": "p1", "stop_reason": "end_turn"}}}

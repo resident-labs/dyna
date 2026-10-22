@@ -1,0 +1,275 @@
+package subagent
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"testing"
+	"time"
+
+	"dyna-agent/internal/database"
+	"dyna-agent/internal/sessionlife/recordtest"
+	"dyna-agent/internal/store"
+)
+
+func turnStore(t *testing.T) (*Store, string) {
+	t.Helper()
+	s := &Store{Root: filepath.Join(t.TempDir(), "sessions")}
+	t.Cleanup(func() { database.Close(filepath.Dir(s.Root)) })
+	id := NewID()
+	if err := os.MkdirAll(filepath.Join(s.Root, id, "turns"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return s, id
+}
+
+func turnFile(t *testing.T, s *Store, id string, n int) string {
+	t.Helper()
+	path, err := s.turnPath(id, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func prompt(t *testing.T, s *Store, id string, n int) string {
+	t.Helper()
+	turn, err := s.ReadTurn(id, n)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return turn.Prompt
+}
+
+// The row is the turn. The file is the previous release's copy: it matches
+// the row after a write, and this code never reads it back.
+func TestTurnRowIsTheRecordAndTheFileOnlyItsCopy(t *testing.T) {
+	s, id := turnStore(t)
+	if err := s.writeTurn(id, Turn{N: 1, Prompt: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(turnFile(t, s, id, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var copied Turn
+	if err := json.Unmarshal(b, &copied); err != nil || copied.Prompt != "first" {
+		t.Fatalf("copy = %+v, %v; want the row's turn", copied, err)
+	}
+	if err := os.Remove(turnFile(t, s, id, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if got := prompt(t, s, id, 1); got != "first" {
+		t.Fatalf("without its copy, the turn reads %q", got)
+	}
+}
+
+// This code's own copy never counts as another binary's write.
+func TestOwnTurnCopyIsNotImported(t *testing.T) {
+	s, id := turnStore(t)
+	if _, err := s.UpdateTurn(id, 1, func(*Turn) {}); err == nil {
+		t.Fatal("updated a turn that does not exist")
+	}
+	if err := s.writeTurn(id, Turn{N: 1, Prompt: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.turnVersion(id, 1)
+	if _, err := s.UpdateTurn(id, 1, func(turn *Turn) { turn.Prompt = "second" }); err != nil {
+		t.Fatal(err)
+	}
+	written, _ := s.turnVersion(id, 1)
+	prompt(t, s, id, 1)
+	after, _ := s.turnVersion(id, 1)
+	if written == before || after != written {
+		t.Fatalf("versions %s, %s, then %s after a read: a read imported this code's own copy", before, written, after)
+	}
+}
+
+// A runner or command from the previous release still writes the turn file.
+// A read takes the row as it is and never writes; the next write under the
+// session lock imports that file first, and the row follows it.
+func TestTurnFileFromAnOlderBinaryIsImportedByTheNextWrite(t *testing.T) {
+	s, id := turnStore(t)
+	if err := s.writeTurn(id, Turn{N: 1, Prompt: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.turnVersion(id, 1)
+	if err := store.WriteJSON(turnFile(t, s, id, 1), Turn{N: 1, Prompt: "old binary"}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := prompt(t, s, id, 1); got != "first" {
+		t.Fatalf("a read after an old binary's write reads %q; want the row, first", got)
+	}
+	if _, err := s.UpdateTurn(id, 1, func(*Turn) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got := prompt(t, s, id, 1); got != "old binary" {
+		t.Fatalf("after the next write, the turn reads %q; want the old binary's write", got)
+	}
+	after, _ := s.turnVersion(id, 1)
+	if after == before {
+		t.Fatal("the old binary's write did not move the turn's version")
+	}
+	if again, _ := s.turnVersion(id, 1); again != after {
+		t.Fatalf("an imported file was imported again: %s then %s", after, again)
+	}
+}
+
+// A crash after the row commits and before its copy is written leaves the
+// old copy matching the row's mirror, so the row wins.
+func TestCrashBeforeTheTurnCopyKeepsTheRow(t *testing.T) {
+	s, id := turnStore(t)
+	if err := s.writeTurn(id, Turn{N: 1, Prompt: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := s.turnsDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(Turn{N: 1, Prompt: "second"})
+	if _, err := saveTurnRow(context.Background(), db, id, 1, raw); err != nil {
+		t.Fatal(err)
+	}
+	if got := prompt(t, s, id, 1); got != "second" {
+		t.Fatalf("the stale copy won over the row: %q", got)
+	}
+}
+
+// At the first engine start the engine backs up dyna.db once (requirements
+// 21 and 23). Turn files are then imported when they are read: Turns finds
+// them by the session's turn count, not by a table listing.
+func TestTurnFilesAreImportedOnReadAfterOneBackup(t *testing.T) {
+	s, id := turnStore(t)
+	recordtest.Write(t, s.Root, id, Meta{ID: id, Name: "old", RoomID: "room", Room: "room", Turns: 2})
+	for n := 1; n <= 2; n++ {
+		if err := store.WriteJSON(turnFile(t, s, id, n), Turn{N: n, Prompt: "turn " + strconv.Itoa(n)}, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := Migrate(filepath.Dir(s.Root)); err != nil {
+		t.Fatal(err)
+	}
+	backups, _ := filepath.Glob(filepath.Join(filepath.Dir(s.Root), "backups", database.PreMigrationFolder, "dyna-*.db"))
+	if len(backups) != 1 {
+		t.Fatalf("backups at the first start: %v", backups)
+	}
+	turns, err := s.Turns(id)
+	if err != nil || len(turns) != 2 || turns[0].Prompt != "turn 1" || turns[1].Prompt != "turn 2" {
+		t.Fatalf("Turns = %+v, %v; want both old turns", turns, err)
+	}
+	for n := 1; n <= 2; n++ {
+		if err := os.Remove(turnFile(t, s, id, n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if turns, err := s.Turns(id); err != nil || len(turns) != 2 {
+		t.Fatalf("after the files go, Turns = %+v, %v; want the imported rows", turns, err)
+	}
+	if err := Migrate(filepath.Dir(s.Root)); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := filepath.Glob(filepath.Join(filepath.Dir(s.Root), "backups", database.PreMigrationFolder, "dyna-*.db")); len(again) != 1 {
+		t.Fatalf("a later start backed up again: %v", again)
+	}
+}
+
+// The largest session today has 1,534 turns. Its first read, which imports
+// every file, and a full read stay well inside the test budget.
+func TestLargeSessionTurnsImportAndRead(t *testing.T) {
+	const turns = 1534
+	s, id := turnStore(t)
+	recordtest.Write(t, s.Root, id, Meta{ID: id, Name: "large", RoomID: "room", Room: "room", Turns: turns})
+	for n := 1; n <= turns; n++ {
+		b, _ := json.Marshal(Turn{N: n, Status: TurnOK, Prompt: fmt.Sprintf("turn %d", n)})
+		if err := os.WriteFile(turnFile(t, s, id, n), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	start := time.Now()
+	all, err := s.Turns(id) // The first read imports every file.
+	if err != nil || len(all) != turns || all[turns-1].Prompt != fmt.Sprintf("turn %d", turns) {
+		t.Fatalf("Turns = %d turns, %v", len(all), err)
+	}
+	imported := time.Since(start)
+	start = time.Now()
+	if all, err := s.Turns(id); err != nil || len(all) != turns {
+		t.Fatalf("second Turns = %d turns, %v", len(all), err)
+	}
+	t.Logf("%d turns: first read with imports %v, full read %v", turns, imported, time.Since(start))
+}
+
+// The stamps that #1470 kept in the mirror column move to state_mirrors, so
+// a stale copy that its old stamp still covers is not imported over the row.
+func TestTurnStampsMoveFromTheMirrorColumn(t *testing.T) {
+	s, id := turnStore(t)
+	dataDir := filepath.Dir(s.Root)
+	db, err := database.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(db, "subagent.turns", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), turnSchema)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := turnFile(t, s, id, 1)
+	if err := store.WriteJSON(path, Turn{N: 1, Prompt: "stale copy"}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(Turn{N: 1, Prompt: "row"})
+	if _, err := db.Exec("INSERT INTO session_turns(session, n, revision, turn, mirror) VALUES (?, 1, 1, ?, ?)", id, raw, store.VersionOf(info).Key()); err != nil {
+		t.Fatal(err)
+	}
+	if got := prompt(t, s, id, 1); got != "row" {
+		t.Fatalf("the stale copy was imported over the row: %q", got)
+	}
+}
+
+// An update imports an old binary's write first, so the update keeps its
+// own value and is built on the old binary's turn (the import-first order).
+func TestTurnUpdateImportsAnOldBinaryWriteFirst(t *testing.T) {
+	s, id := turnStore(t)
+	if err := s.writeTurn(id, Turn{N: 1, Prompt: "first"}); err != nil {
+		t.Fatal(err)
+	}
+	path := turnFile(t, s, id, 1)
+	if err := store.WriteJSON(path, Turn{N: 1, Prompt: "old binary", Status: TurnOK}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateTurn(id, 1, func(turn *Turn) { turn.Prompt = "update" }); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := s.ReadTurn(id, 1)
+	if err != nil || turn.Prompt != "update" || turn.Status != TurnOK {
+		t.Fatalf("turn after the update = %+v, %v; want the update on the old binary's turn", turn, err)
+	}
+}
+
+// A damaged turn file from another binary is skipped once
+// (state.ErrSkipForeign): the turn keeps its row.
+func TestDamagedTurnFileKeepsTheRow(t *testing.T) {
+	s, id := turnStore(t)
+	if err := s.writeTurn(id, Turn{N: 1, Prompt: "row"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(turnFile(t, s, id, 1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(turnFile(t, s, id, 1), []byte("not JSON"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if got := prompt(t, s, id, 1); got != "row" {
+			t.Fatalf("after a damaged file, the turn reads %q", got)
+		}
+	}
+}

@@ -1,0 +1,19 @@
+[Unit]
+Description=Bring the Arch system up to date once after install
+# The image ships packages from a dated build snapshot. This first full
+# upgrade moves the system to the live mirrors, so that later
+# 'pacman -S <package>' installs never mix old and new libraries.
+ConditionPathExists=!/var/lib/dyna/pacman-updated
+Wants=network-online.target
+After=network-online.target dyna-pacman-keyring.service
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/bin/pacman -Syu --noconfirm
+ExecStartPost=/usr/bin/install -D -m 0644 /dev/null /var/lib/dyna/pacman-updated
+TimeoutStartSec=1h
+
+[Install]
+WantedBy=multi-user.target

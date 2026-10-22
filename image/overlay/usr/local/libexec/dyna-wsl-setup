@@ -1,0 +1,22 @@
+#!/bin/sh
+# Adapts the Dyna distro to the WSL2 kernel that all distros share.
+set -u
+# binfmt_misc entries are global to the WSL2 VM. systemd-shutdown clears every
+# entry while binfmt_misc is mounted here, which breaks Windows interop in all
+# distros. Interop works without this mount.
+while mountpoint -q /proc/sys/fs/binfmt_misc; do
+  umount /proc/sys/fs/binfmt_misc || break
+done
+# WSLg binds a read-only /tmp/.X11-unix again after systemd mounts /tmp.
+# It cannot be unmounted here, so cover it with a writable tmpfs for agent
+# computer sockets. Without WSLg, the loop ends after 30 seconds.
+i=0
+while [ "$i" -lt 30 ]; do
+  if mountpoint -q /tmp/.X11-unix && [ ! -w /tmp/.X11-unix ]; then
+    # A slave mount keeps the cover from propagating to /mnt/wslg.
+    mount --make-slave /tmp/.X11-unix
+    exec mount -t tmpfs -o mode=1777,nosuid,nodev,size=1m dyna-x11 /tmp/.X11-unix
+  fi
+  sleep 1
+  i=$((i + 1))
+done

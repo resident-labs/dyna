@@ -1,0 +1,246 @@
+# Direct state writes outside internal/state. TestStateWritesGoThroughHelper fails on
+# any write that is not listed here, and on a line whose count is now too high.
+# Format: <violation|not-state> <file> <func> <count> [# reason]
+# violation: state written directly today. These lines may only shrink: move the write
+#   behind internal/state, then run the test with -update (it never adds a line).
+# not-state: files that are not shared Dyna state. Each needs a reason.
+not-state internal/account/store/active.go Store.activeLock 1 # a harness's .active.lock flock lock file, not state
+not-state internal/account/store/registry.go Store.removeCredential 1 # deletes an account's private credential file after its row is removed; secrets stay out of dyna.db and its backups
+not-state internal/account/store/registry.go Store.writeCredential 2 # the one writer of an account's private 0600 credential file (login, refresh, switch checkpoint, import); secrets stay out of dyna.db and its backups
+not-state internal/account/store/store.go Store.lock 1 # accounts.lock, the registry's flock lock file, not state
+not-state internal/account/native/antigravity.go agyFileStore.Write 1 # a harness CLI's own credential and config files
+not-state internal/account/native/antigravity_acp.go agyFileStore.remove 1 # a harness CLI's own credential and config files
+not-state internal/account/native/antigravity_acp_login.go AntigravityACPLogin.Run 1 # creates the ACP server's folders in a harness CLI's private home
+not-state internal/account/native/claude.go claudeAtomicJSON 2 # a harness CLI's own credential and config files
+not-state internal/account/native/claude.go claudeDirLock.close 1 # a harness CLI's own credential and config files
+not-state internal/account/native/codex.go codexManager.activate 3 # a harness CLI's own credential and config files
+not-state internal/account/native/muse.go museLock 1 # a harness CLI's own credential and config files
+not-state internal/account/native/muse.go museManager.Activate 2 # a harness CLI's own credential and config files
+not-state internal/account/native/opencode.go lockOpenCode 1 # a harness CLI's own credential and config files
+violation internal/agentslice/agentslice.go WriteSlice 1
+not-state internal/cli/ci/ci.go NewCommand 1 # exports a JUnit report to a caller-selected artifact path
+not-state internal/cli/computer/browser_deps.go playwrightModule 2 # browser launcher files of one computer
+not-state internal/cli/computer/browser_holder.go holderPID 1 # browser launcher files of one computer
+not-state internal/cli/computer/browser_holder.go startHolder 3 # browser launcher files of one computer
+not-state internal/cli/managed/managed.go runner.write 1 # removes its temporary staging file after installing host configuration
+not-state internal/cli/managed/managed.go stageImage 1 # removes a temporary downloaded root filesystem tarball
+not-state internal/cli/room/room.go AttachmentCmd 1 # writes a downloaded attachment to the path the user named
+not-state internal/cli/room/visual_check.go VisualCmd 1 # temporary WebP output under DYNA_SCRATCH or the system temporary directory
+not-state internal/computers/browser_device_linux.go logSignInFailure 1 # one computer's browser profile files
+not-state internal/computers/browser_merge_linux.go mergeBrowserProfile 2 # one computer's browser profile files
+not-state internal/computers/browser_profile_linux.go browserFileLock 1 # one computer's browser profile files
+not-state internal/computers/browser_profile_linux.go copyBrowserFile 1 # one computer's browser profile files
+not-state internal/computers/browser_profile_linux.go prepareBrowserProfile 2 # one computer's browser profile files
+not-state internal/computers/browser_profile_linux.go saveBrowserProfile 1 # one computer's browser profile files
+not-state internal/computers/browser_profile_linux.go stageBrowserProfile 6 # one computer's browser profile files
+not-state internal/computers/browser_profile_linux.go withBrowserMaster 1 # one computer's browser profile files
+not-state internal/computers/cgroup_linux.go cgroupManager.computer 2 # cgroup control files
+not-state internal/computers/cgroup_linux.go supervisor.killCgroup 3 # cgroup control files
+not-state internal/computers/cgroup_linux.go writeCgroup 1 # cgroup control files
+not-state internal/computers/child_shims_linux.go supervisor.childShims 1 # one computer's tool shims
+not-state internal/computers/chromium.go prepareChromium 1 # one computer's browser launch files
+not-state internal/computers/chromium_launch_linux.go LaunchChromium 1 # one computer's browser launch files
+not-state internal/computers/chromium_launch_linux.go joinBrowserCgroup 1 # one computer's browser launch files
+not-state internal/computers/chromium_launch_linux.go markBrowserCleanExit 1 # one computer's browser launch files
+not-state internal/computers/daemon_linux.go RunDaemon 3 # the computer daemon's runtime files
+not-state internal/computers/diagnostics.go RecordFailure 2 # diagnostic dumps
+not-state internal/computers/input_linux.go supervisor.act 1 # one computer's input device files
+not-state internal/computers/input_linux.go supervisor.capture 3 # one computer's input device files
+not-state internal/computers/process_linux.go destroyOffline 4 # one computer's process files
+not-state internal/computers/process_linux.go startDaemon 1 # one computer's process files
+not-state internal/computers/process_linux.go startProcess 1 # one computer's process files
+not-state internal/computers/store.go Ensure 2 # removes failure.json, the computer's diagnostic dump, after a successful start
+not-state internal/computers/store.go browserShims 2 # one computer's browser launch files: the Chromium wrapper, tool shims and profile folders
+not-state internal/computers/stream_linux.go wayVNCBackend.Command 1 # one computer's stream files
+not-state internal/computers/supervisor_linux.go newComputer 3 # one computer's folders and its cgroup runtime file; its registration lives in dyna.db
+not-state internal/computers/supervisor_linux.go supervisor.cleanup 6 # removes one computer's process files: runtime folder, locks, browser sockets, profiles and cgroup
+not-state internal/computers/supervisor_linux.go supervisor.listenX11 6 # the X11 display's own lock files and sockets
+not-state internal/computers/supervisor_linux.go supervisor.record 1 # appends to the computer's append-only events.jsonl (rule r10); its status lives in dyna.db
+not-state internal/computers/supervisor_linux.go supervisor.startDesktop 4 # one computer's desktop process files: compositor config, ready script and desktop.env
+not-state internal/computers/supervisor_linux.go supervisor.startStream 2 # one computer's stream socket (rfb.sock)
+not-state internal/computers/supervisor_linux.go supervisor.stopStream 1 # one computer's stream socket (rfb.sock)
+violation internal/connect/store.go Store.Audit 1
+violation internal/connect/store.go Store.ClearLink 1
+violation internal/connect/store.go Store.ResetKey 1
+violation internal/connect/store.go Store.locked 1
+violation internal/connect/store.go Store.write 1
+violation internal/connect/tunnel.go runOnce 1
+not-state internal/database/backup.go copyDatabase 2 # dyna.db backup files made by VACUUM INTO, copies of state, not state
+not-state internal/database/backup.go prune 1 # removes old dyna.db backup files
+not-state internal/database/database.go Migrate 1 # the schema and meta bootstrap primitive under internal/state; only the engine migrates (item 41)
+not-state internal/database/database.go openDatabase 2 # the schema and meta bootstrap primitive under internal/state; only the engine migrates (item 41)
+not-state internal/database/outside.go appendLine 1 # outside-writes.jsonl, the item 41 report of dyna.db writes outside the engine; a log file, one line per call site, capped at 1 MB
+not-state internal/database/slow.go Read 1 # a read-only transaction (state.Read's snapshot); it writes nothing
+violation internal/devicegrant/grant.go Store.Delete 1
+violation internal/devicegrant/grant.go Store.ImportLegacy 1
+violation internal/devicegrant/grant.go Store.Put 1
+violation internal/doctor/samples.go Samples.Record 1
+not-state internal/engine/runner_spool.go reserve 1 # reserves an empty frozen spool or rejected-artifact name with O_EXCL before the rename fills it; the spool is a transport log, not state
+not-state internal/engine/runner_spool.go runnerSpool.apply 1 # removes a taken runner spool file once every line went through the runner calls; the spool is a transport log, not state
+not-state internal/engine/runner_spool.go runnerSpool.reject 2 # renames a taken spool file to its rejected artifact and removes its own empty reservation when that rename fails; the spool is a transport log, not state
+not-state internal/engine/runner_spool.go runnerSpool.take 2 # renames a runner spool file under the runner's spool lock before reading it, and removes its own empty reservation when that rename fails; the spool is a transport log, not state
+violation internal/engine/socket.go listenSocket 1
+not-state internal/fsutil/atomic.go WriteFile 2 # the atomic file write primitive itself
+not-state internal/ghclient/session.go SessionEnvironment 2 # private session gh launcher symlink; no queried runtime state
+not-state internal/harness/cliversion/cliversion.go outputFile 1 # an unlinked temporary output file, not state
+not-state internal/harness/config/config.go ConfigManager.update 1 # a harness CLI's own config files
+not-state internal/harness/config/config_edit.go ConfigManager.generateWithPreferences 2 # a harness CLI's own config files
+not-state internal/harness/config/config_edit.go copyGenerationSkill 1 # a harness CLI's own config files
+not-state internal/harness/config/mcp_exec.go RunGeneratedMCP 1 # a harness CLI's own config files
+not-state internal/harness/config/skill_view.go PublishSkillView 5 # a harness CLI's own config files
+not-state internal/harness/fakeruntime/fakeruntime.go installClaude 4 # test fixture runtime
+not-state internal/harness/home/home.go atomicFile 2 # a harness CLI's private home
+not-state internal/harness/home/prepare.go removeWorktreesLink 1 # a harness CLI's private home
+not-state internal/harness/home/publication.go publish 2 # a harness CLI's private home
+not-state internal/harness/inprocess.go runInProcess 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
+not-state internal/harness/instructions.go writeFileOnce 2 # instruction input file for a harness CLI, written once by content hash
+not-state internal/harness/mock.go runMockSession 2 # mock harness for tests
+not-state internal/harness/opencodefixture/fixture.go New 1 # test fixture runtime
+not-state internal/harness/process.go runOnce 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
+not-state internal/harness/acp_run.go runAcpAttempt 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
+not-state internal/harness/codex_run.go runCodexTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
+not-state internal/harness/pi_rpc.go runPiTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
+not-state internal/harness/sessionhost/client.go socketHost.connect 1 # removes a dead session host's socket before it starts a new host
+not-state internal/harness/sessionhost/wire.go lockFile 1 # flock lock file for one session host, not state
+not-state internal/harness/steerhook.go steerHook.argv 1 # per-turn Muse hook launch configuration, removed after the turn; no queried state
+not-state internal/harness/runtime/accounts_switch.go Accounts.Remove 2 # removes a harness CLI's private homes; the account record goes through the accounts store
+not-state internal/harness/runtime/accounts_switch.go Accounts.SwitchWithProgress 1 # creates the harness's private home folder; the account registry and selection live in dyna.db
+not-state internal/harness/runtime/accounts_switch.go Accounts.dropNewEntries 1 # removes the private homes a failed switch created
+not-state internal/harness/runtime/accounts_switch.go openAccountLock 1 # flock lock file, not state
+not-state internal/harness/runtime/accounts_switch.go writePrivateAccountJSONChecked 2 # the one writer of a harness CLI's private home files (login markers, leases, service config, provider keys); the account selection lives in dyna.db
+not-state internal/harness/runtime/adapter_antigravity.go installAntigravityArchive 2 # a harness CLI's own runtime files
+not-state internal/harness/runtime/antigravity_acp.go installAntigravityACPArchive 2 # a harness CLI's own runtime files
+not-state internal/harness/runtime/adapter_muse.go installMuseArtifact 2 # a harness CLI's own runtime files
+not-state internal/harness/runtime/bundle.go BundleManager.InstallAndSelect 1 # publishes the staged candidate under the manager lock
+not-state internal/harness/runtime/bundle.go BundleManager.Rollback 1 # installed harness bundles: clears the rollback marker it consumed
+not-state internal/harness/runtime/bundle.go BundleManager.Uninstall 2 # installed harness bundles
+not-state internal/harness/runtime/bundle.go BundleManager.activeLeases 1 # installed harness bundles
+not-state internal/harness/runtime/bundle.go BundleManager.installCandidate 5 # installed harness bundles
+not-state internal/harness/runtime/bundle.go BundleManager.writeMarker 2 # the one writer of the selection and rollback marker files
+not-state internal/harness/runtime/bundle.go downloadManifest 1 # installed harness bundles
+not-state internal/harness/runtime/bundle.go removeBundle 1 # installed harness bundles
+not-state internal/harness/runtime/claude_pin.go Accounts.adoptSharedCredentials 1 # installed harness version pin
+not-state internal/harness/runtime/claude_pin.go Accounts.switchPinned 1 # installed harness version pin
+not-state internal/harness/runtime/generation.go copyRuntimeSkill 1 # installed harness generations
+not-state internal/harness/runtime/generation.go materializeNative 2 # installed harness generations
+not-state internal/harness/runtime/generation.go writeNativeGeneration 1 # installed harness generations
+not-state internal/harness/runtime/generation_lifecycle.go GenerationLease.Close 1 # installed harness generations
+not-state internal/harness/runtime/generation_lifecycle.go Runtime.GCGenerationsWithProbe 1 # installed harness generations
+not-state internal/harness/runtime/generation_lifecycle.go Runtime.generateLocked 2 # installed harness generations
+not-state internal/harness/runtime/generation_lifecycle.go Runtime.leaseGenerationLocked 1 # installed harness generations
+not-state internal/harness/runtime/generation_lifecycle.go publishGenerationFile 1 # installed harness generations
+not-state internal/harness/runtime/generation_lifecycle.go removeLegacyGlobalRules 1 # installed harness generations
+not-state internal/harness/runtime/native_files.go nativeFilesManager.Activate 1 # a harness CLI's own native files
+not-state internal/harness/runtime/owner_login_import.go Runtime.copyPersonalLogin 1 # copies the owner's login into a harness CLI's private home
+not-state internal/harness/runtime/preferences.go Runtime.ImportPreferences 2 # writes an immutable settings-layer blob; its index lives in dyna.db
+not-state internal/harness/runtime/probe.go BundleManager.Probe 1 # removes the throwaway probe scope and its private HOME
+not-state internal/harness/runtime/provider_keys.go lockPiAuth 1 # the Pi CLI's own lock protocol beside its auth.json
+not-state internal/harness/runtime/provider_keys.go piLock.release 1 # the Pi CLI's own lock protocol beside its auth.json
+not-state internal/harness/runtime/provider_keys.go restorePiAuth 1 # restores the Pi CLI's own login file
+not-state internal/harness/runtime/resource_lease.go ResourceLease.Bind 1 # flock-held process lease; a crash frees a flock, a row could not
+not-state internal/harness/runtime/resource_lease.go ResourceLease.Close 1 # flock-held process lease; a crash frees a flock, a row could not
+not-state internal/harness/runtime/resource_lease.go newResourceLease 3 # flock-held process lease; a crash frees a flock, a row could not
+not-state internal/harness/runtime/resource_lease.go removeResourceLease 2 # flock-held process lease; a crash frees a flock, a row could not
+not-state internal/harness/runtime/runtime.go Runtime.EnsureCatalog 1 # removes a stale skill folder from a harness CLI's own config
+not-state internal/harness/steerhook.go RunSteerHook 1 # per-run steer-hook handoff folder between the runner and the hook process
+not-state internal/harness/steerhook.go newSteerHook 1 # per-run steer-hook handoff folder between the runner and the hook process
+not-state internal/harness/steerhook.go steerHook.cleanup 1 # per-run steer-hook handoff folder between the runner and the hook process
+not-state internal/harness/steerhook.go steerHook.offer 2 # per-run steer-hook handoff folder between the runner and the hook process
+not-state internal/harness/steerhook.go steerHook.withdraw 2 # per-run steer-hook handoff folder between the runner and the hook process
+not-state internal/hookinstall/install.go Service.Locked 5 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/install.go copyFile 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/install.go driver.run 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/install.go pruneBackups 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/store.go Store.Archive 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/store.go Store.Update 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/unit.go Log 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/unit.go Service.CleanupUnit 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/unit.go Service.InspectUnit 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/unit.go Service.Start 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/unit.go Service.Worker 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hooks/events.go cleanupSnapshot 1 # removes a private Git execution worktree directory
+not-state internal/hooks/events.go snapshot 1 # removes a failed private Git execution worktree directory
+not-state internal/hooks/runs.go Service.newRun 1 # raw command output stays in log files
+not-state internal/hooks/spool.go Service.Drain 1 # allowed inbox, requirement 2: the git hook spool the engine drains
+not-state internal/hooks/spool.go Service.Enqueue 1 # allowed inbox, requirement 2: the git hook spool the engine drains
+not-state internal/hooks/spool.go quarantineSpoolFile 1 # allowed inbox, requirement 2: the git hook spool the engine drains
+not-state internal/localci/runner.go Runner.Run 2 # local CI runner work files
+not-state internal/localci/runner.go readArchive 1 # local CI runner work files
+not-state internal/maintenance/retention.go removeClosedSession 1 # Deletes an expired session file bundle; sessionlife.Delete removes its SQLite record through the state writer.
+not-state internal/maintenance/retention.go sweepRejectedSpools 1 # removes rejected runner spool lines after their retention; a bug-report log, not state
+not-state internal/maintenance/review_inputs.go sweepReviewInputs 1 # Deletes expired reviewer input blobs; PR state stays in SQLite.
+not-state internal/nodedeps/nodedeps.go copyNodeModules 2 # node_modules copies in worktrees
+not-state internal/nodedeps/nodedeps.go writeStamp 1 # node_modules copies in worktrees
+not-state internal/parentoutput/output.go Save 1 # complete report blob linked from a bounded result; no queried runtime state
+not-state internal/plan/plan.go writeGraph 1 # immutable generated graph blob, written once (r10)
+not-state internal/pr/state/write.go update 1 # opens the cross-process lock file, which holds no data
+not-state internal/pr/state/write.go write 1 # creates the lock file for shared readers; it holds no data
+not-state internal/pr/trial/git.go Client.PrepareReview 2 # reviewer input patches, written read-only into the review folder
+not-state internal/pr/trial/git.go Client.repository 1 # a temporary git clone under the trial scratch folder, removed on return
+not-state internal/pr/view/testfixture/fixture.go FakeGHWithPull 3 # test fixture files: a fake gh script and its data
+not-state internal/pr/watch/github.go Service.PostReview 1 # a temporary JSON payload for gh api --input, removed after the call
+not-state internal/pr/watch/merge_failure_report.go Service.mergeFailureCandidates 1 # a temporary git work folder, removed on return
+not-state internal/pr/watch/merge_review_legacy.go Service.clearLegacyMergeReview 1 # removes a legacy review folder, an old blob (r6 marker)
+not-state internal/pr/watch/review_context.go Service.prepareReviewTask 1 # reviewer input JSON for a review task
+not-state internal/pr/watch/review_context.go writeDiff 1 # a diff file that a reviewer reads
+not-state internal/pr/watch/sync_operations.go Service.publishLaneExport 2 # a temporary folder and PR body file for gh, removed on return
+not-state internal/processguard/helper.go runGuard 2 # removes the temporary Unix-socket control directory for one process group
+not-state internal/profile/profile.go Store.Save 1 # hand-edited worker profile configuration in profiles.json
+not-state internal/profilecheck/probe.go Run 2 # creates and removes temporary probe output.jsonl; persistent health belongs to internal/harness/health
+not-state internal/questions/sqlite.go Store.writeMigrationFile 1 # one-time import backup and old-binary rejection guard; never live question state
+not-state internal/rolesession/session.go lockPath 1 # empty flock coordination file with no persisted record payload
+not-state internal/room/attach.go Store.PutRenderedAttachment 4 # an attachment is a content-addressed blob, written once
+not-state internal/room/records.go removeDir 1 # deletes a room's folder after its rows
+not-state internal/room/room.go createLog 1 # creates a new room's empty message log
+not-state internal/runstore/meta_db.go removeRunLocks 1 # a removed run's lock files; not state
+not-state internal/runstore/archive.go UnarchiveRun 1 # removes the archive pointer symlink; whether a run is archived is where its folder is
+not-state internal/runstore/archive.go copyFile 1 # copies a run folder's files into the archive
+not-state internal/runstore/archive.go copyVerifyMove 9 # moves a run folder across filesystems: stage, verify, rename, delete
+not-state internal/runstore/archive.go removeArchived 2 # deletes an archived run's folder and its pointer, after its rows
+not-state internal/runstore/runstore.go RemoveWith 1 # deletes a run's folder of blobs and logs, after its rows
+not-state internal/runstore/runstore.go Run.Finish 1 # result.json, a blob written once
+not-state internal/runstore/runstore.go Run.FinishWorkflow 1 # a sub-workflow's result.json, a blob written once
+not-state internal/runstore/runstore.go Run.StartWorkflow 1 # a sub-workflow's script.js, a blob written once
+not-state internal/runstore/runstore.go Run.recordDirs 1 # removes a directory list (a log) that a write left broken
+violation internal/runstore/meta_db.go changeMeta 2 # TODO: legacy/shim remove later — copies the row pause state for earlier-release runners; remove with item 31
+not-state internal/runstore/runstore.go create 1 # script.js, a blob written once
+not-state internal/sessionlife/lifecycle.go WithPublication 1 # a non-blocking flock that serializes one session's publication; a crash frees it, a row could not
+not-state internal/settings/settings.go writeAtomic 1 # settings.json is hand-edited config, item 20
+not-state internal/shells/events.go Store.Notify 3 # a change nudge file for the room watch (#1399), created and removed at once; goes when the bus carries shell events (item 16)
+not-state internal/shells/shells.go StartSupervisor 3 # the supervisor's own error log, and supervisor.pid, a process-liveness file like turn.lock; until item 2 moves the shell supervisor's writes into engine calls, with liveness from the recorded process and a pidfd watch
+not-state internal/shells/shells.go Store.Supervise 3 # the job's append-only output.log (rule r10), and the empty exited wake marker for Wait, written after the exit is saved in dyna.db
+not-state internal/shells/shells.go Store.create 1 # creates the job's empty append-only output.log
+not-state internal/shells/shells.go Store.logStop 1 # appends a stop reason to the job's append-only log
+not-state internal/store/store.go WriteJSON 1 # the JSON write primitives themselves
+not-state internal/store/store.go flock 1 # the JSON write primitives themselves
+not-state internal/store/store.go flockOpened 1 # the JSON write primitives themselves
+not-state internal/subagent/consolidation.go Manager.consolidationWorkerLock 1 # a non-blocking flock for the one consolidation worker of a session
+not-state internal/subagent/lock_owner.go Store.recoverTurnLock 1 # removes a stale turn.lock file left by a dead runner
+not-state internal/subagent/manager.go ExecSpawner.Spawn 1 # daemon.log, the append-only log of the detached turn runner
+not-state internal/subagent/manager.go Manager.start 3 # a new session's folder, its two empty journal logs and output-config.json, a snapshot written once
+not-state internal/subagent/room_controls.go Manager.runRoomResume 1 # a non-blocking flock for one room resume worker
+# Item 2 exception: internal/subagent/runner.go Manager.RunTurn appends turn_end through state.Append after the turn lock closes, so completion sees an idle session.
+not-state internal/subagent/runner_calls.go Manager.recordCompaction 1 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
+not-state internal/subagent/store.go Store.tryTurnLock 1 # turn.lock, held by a runner while it lives; the pidfd watch and the legacy probe read it
+not-state internal/subagent/transfer.go Manager.runTransfer 1 # a non-blocking flock for one transfer worker
+not-state internal/subagent/turngate.go writeGateState 1 # gate.json, the turn runner's identity and gate, written only by the runner for its steering hook and liveness probes; until g3458 moves the liveness readers to the SessionPid row and #1514's pidfd watch
+not-state internal/testsafe/testsafe.go init 1 # marks a temporary test root for child test binaries; test-only process coordination, not runtime state
+not-state internal/turnlock/turnlock.go Held 1 # opens an existing empty turn.lock for a shared flock probe without writing content
+not-state internal/update/update.go Config.acquireLock 3 # self-update binary files
+not-state internal/update/update.go Config.replace 2 # self-update binary files
+not-state internal/update/update.go Config.saveState 2 # self-update binary files
+not-state internal/userservices/install.go ClearRestartPending 1 # removes the restart-pending marker beside the systemd units
+not-state internal/userservices/install.go ComputerEnvironment 1 # systemd unit files
+not-state internal/userservices/install.go Install 2 # systemd unit files
+not-state internal/userservices/install.go MarkRestartPending 1 # the restart-pending marker beside the systemd units is one transient control file read at the next boot, not a queried Dyna record
+not-state internal/userservices/install.go Write 1 # systemd unit files
+not-state internal/visual/inspect.go Inspect 1 # removes the fresh temporary Chromium profile after one render
+not-state internal/webpush/webpush.go writeFile0600 1 # immutable VAPID signing-key blob, created once for the application identity
+violation internal/websvc/devicestore/store.go Store.Pair 3
+violation internal/websvc/devicestore/store.go Store.locked 1
+violation internal/websvc/devicestore/store.go Store.write 1
+not-state internal/workflowsvc/launch.go Launch 3 # immutable script and launch input snapshots plus the runner raw daemon log; blobs stay files (item 20)
+not-state internal/workflowtemplate/catalog.go replaceRegularFile 1 # only editable .js source blobs; seed metadata is written to SQLite through internal/state
+not-state internal/worktrees/lifecycle.go CreateForRun 2 # Removes failed git worktree allocations; registry records stay in SQLite.
+not-state internal/worktrees/worktrees.go Remove 1 # Removes an orphaned git worktree directory; MarkRemoved deletes its SQLite registry record through state.Write.
+not-state internal/goals/sqlite.go Store.convertJournals 2 # one-time schema-2 migration rewrites the room's append-only journal JSONL in place; the file is a log, not shared SQLite state (r10)

@@ -1,0 +1,17 @@
+{
+  "root": "/home/user/.dyna-worktrees",
+  "session": "ses_20261019-171514-a98e7902",
+  "branch": "voice-engine-protocol",
+  "createdAt": "2026-10-20T01:08:59.156556248Z",
+  "path": "/home/user/.dyna-worktrees/dyna-agent-34c74d08/voice-engine-protocol-dc7e3ab5",
+  "runId": "",
+  "agentId": 0,
+  "label": "",
+  "profile": "",
+  "repo": "/home/user/dyna-agent",
+  "base": "origin/voice-speak-ring",
+  "head": "",
+  "port": 24730,
+  "status": "",
+  "retainedAt": "0001-01-01T00:00:00Z"
+}

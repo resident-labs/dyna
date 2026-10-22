@@ -1,0 +1,23 @@
+{
+  "pageToEngine": [
+    {"type": "audio", "audio": "AQI="},
+    {"type": "mute", "muted": true},
+    {"type": "cancel"},
+    {"type": "playback", "id": "i1", "state": "started"},
+    {"type": "playback", "id": "i1", "state": "ended", "played_ms": 40},
+    {"type": "hangup"}
+  ],
+  "engineToPage": [
+    {"type": "state", "state": "listening"},
+    {"type": "audio", "id": "i1", "audio": "AQI="},
+    {"type": "audio_done", "id": "i1"},
+    {"type": "clear", "id": "i1"},
+    {"type": "transcript", "text": "fix"},
+    {"type": "transcript", "text": "fix CI", "final": true},
+    {"type": "unspoken", "post": "msg_1"},
+    {"type": "tool", "id": "c1", "name": "pr_status", "text": "{\"number\":1091}", "state": "running"},
+    {"type": "tool", "id": "c1", "name": "pr_status", "state": "done"},
+    {"type": "error", "message": "boom"}
+  ],
+  "closeTakenOver": 4001
+}

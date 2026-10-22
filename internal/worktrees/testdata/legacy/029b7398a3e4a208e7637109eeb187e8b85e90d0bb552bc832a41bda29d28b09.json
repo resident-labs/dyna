@@ -1,0 +1,16 @@
+{
+  "root": "/home/user/.dyna-worktrees",
+  "session": "ses_20261019-091635-41d80380",
+  "branch": "fix/junit-cancelled-run-noise",
+  "createdAt": "2026-10-19T17:58:50.151258767Z",
+  "path": "/home/user/.dyna-worktrees/dyna-agent-34c74d08/fix-junit-cancelled-run-noise-0f0c6102",
+  "runId": "",
+  "agentId": 0,
+  "label": "",
+  "profile": "",
+  "repo": "/home/user/dyna-agent",
+  "base": "origin/main",
+  "head": "",
+  "status": "",
+  "retainedAt": "0001-01-01T00:00:00Z"
+}

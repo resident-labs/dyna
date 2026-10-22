@@ -1,0 +1,536 @@
+package store
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+
+	"dyna-agent/internal/account/reposcope"
+	"dyna-agent/internal/database"
+	"dyna-agent/internal/harness/preferences"
+	"dyna-agent/internal/hub"
+	statewrite "dyna-agent/internal/state"
+)
+
+// The account registry lives in dyna.db (rule r10): one row per account
+// holds its Metadata and its credential's schema, never a credential
+// payload. Every payload is a secret or a reference to one, so it stays in
+// one private 0600 file per account (credentialPath), outside dyna.db and
+// its daily backups. The engine and a runner's failover switch write the
+// registry; the switch writes from outside the engine until item 2 moves it
+// into engine calls.
+const registrySchema = `CREATE TABLE accounts (
+ id TEXT PRIMARY KEY,
+ ord INTEGER NOT NULL,
+ metadata BLOB NOT NULL CHECK(json_valid(metadata)),
+ credential_schema TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE accounts_registry (
+ id INTEGER PRIMARY KEY CHECK(id = 1),
+ version INTEGER NOT NULL,
+ opencode_cleaned INTEGER NOT NULL
+);`
+
+// registryKey names accounts.json in state_mirrors.
+const registryKey = "accounts/registry"
+
+// Migrate creates the account registry tables. Only the engine runs it, at
+// start.
+func Migrate(dataDir string) error {
+	_, err := openRegistry(dataDir)
+	return err
+}
+
+func openRegistry(dataDir string) (*sql.DB, error) {
+	db, err := database.Open(dataDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := statewrite.MigrateMirrors(dataDir); err != nil {
+		return nil, err
+	}
+	err = database.Migrate(db, "account.registry", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old < 1 {
+			if _, err := conn.ExecContext(ctx, registrySchema); err != nil {
+				return err
+			}
+		}
+		_, err := conn.ExecContext(ctx, activeSchema)
+		return err
+	})
+	return db, err
+}
+
+// Topic is the committed event of a changed account registry. The engine's
+// account timer wakes on it.
+const Topic = "accounts"
+
+// db is the registry's database: dyna.db in the folder above the accounts.
+func (s *Store) db() (*sql.DB, error) { return openRegistry(filepath.Dir(s.Root)) }
+
+func (s *Store) registryPath() string { return filepath.Join(s.Root, "accounts.json") }
+
+// credentialDir holds one private file per account's credential.
+func (s *Store) credentialDir() string { return filepath.Join(s.Root, "credentials") }
+
+func (s *Store) credentialPath(id string) string {
+	return filepath.Join(s.credentialDir(), id+".json")
+}
+
+// credentialStep runs between the steps of a registry write. Tests replace
+// it to stop the write there, as a crash would.
+var credentialStep = func(step string) error { return nil }
+
+// clone copies st's entry list, so a later change to it does not alter a
+// committed state.
+func (st State) clone() State {
+	st.Entries = append([]Entry(nil), st.Entries...)
+	return st
+}
+
+// load reads the registry rows and each account's credential file. A row
+// whose credential file is missing or damaged reads as signed out.
+func (s *Store) load(ctx context.Context, db *sql.DB) (State, error) {
+	st := State{Version: 1, Entries: []Entry{}}
+	err := statewrite.For(db).Read(ctx, func(q statewrite.Reader) error {
+		var cleaned int
+		err := q.QueryRowContext(ctx, "SELECT version, opencode_cleaned FROM accounts_registry WHERE id = 1").Scan(&st.Version, &cleaned)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		st.OpenCodeProvidersCleaned = cleaned != 0
+		rows, err := q.QueryContext(ctx, "SELECT metadata, credential_schema FROM accounts ORDER BY ord")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			meta, schema, err := scanMetadata(rows)
+			if err != nil {
+				return err
+			}
+			e := Entry{Metadata: meta}
+			if schema != "" {
+				c, ok := s.readCredential(e.ID)
+				if ok && c.Schema == schema {
+					e.Credential = c
+				} else {
+					e.NeedsLogin = true
+				}
+			}
+			st.Entries = append(st.Entries, e)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return State{}, errors.New("Saved accounts could not be read.")
+	}
+	return st, nil
+}
+
+// ReadMetadata reads saved metadata through the caller's database snapshot.
+// It does not read credential files or import the previous release's registry.
+func ReadMetadata(ctx context.Context, q statewrite.Reader, id string) (Metadata, error) {
+	meta, _, err := scanMetadata(q.QueryRowContext(ctx, "SELECT metadata, credential_schema FROM accounts WHERE id = ?", id))
+	return meta, err
+}
+
+func scanMetadata(row interface{ Scan(...any) error }) (Metadata, string, error) {
+	var meta Metadata
+	var raw []byte
+	var schema string
+	if err := row.Scan(&raw, &schema); err != nil {
+		return meta, "", err
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return Metadata{}, "", err
+	}
+	return meta, schema, nil
+}
+
+// readCredential reads account id's credential file; ok is false when it is
+// missing or damaged.
+func (s *Store) readCredential(id string) (Credential, bool) {
+	f, err := os.OpenFile(s.credentialPath(id), os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return Credential{}, false
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, maxStoreBytes+1))
+	if err != nil || len(raw) > maxStoreBytes {
+		return Credential{}, false
+	}
+	var c Credential
+	if json.Unmarshal(raw, &c) != nil || c.Schema == "" {
+		return Credential{}, false
+	}
+	return c, true
+}
+
+// writeCredential is the one writer of an account's credential file: login,
+// refresh, a switch checkpoint, legacy grant moves and an import all go
+// through save, which calls it under accounts.lock. The folder is made 0700
+// and the file 0600 at creation, and the file is replaced atomically.
+func (s *Store) writeCredential(id string, c Credential) error {
+	if c.Schema == "" {
+		return s.removeCredential(id)
+	}
+	if err := os.Mkdir(s.credentialDir(), 0700); err != nil && !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(s.credentialDir(), ".credential-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(f.Name()) // Gone after the rename.
+	if _, err = f.Write(raw); err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		return err
+	}
+	if err := os.Rename(f.Name(), s.credentialPath(id)); err != nil {
+		return err
+	}
+	return s.syncCredentialDir()
+}
+
+func (s *Store) removeCredential(id string) error {
+	if err := os.Remove(s.credentialPath(id)); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return s.syncCredentialDir()
+}
+
+// syncCredentialDir makes a credential file's rename or removal durable
+// before save commits the row that describes it. SQLite makes the row
+// durable; without this sync, a power loss could keep the row and lose the
+// rename, leaving metadata newer than its secret.
+func (s *Store) syncCredentialDir() error {
+	dir, err := os.Open(s.credentialDir())
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+// save commits next over committed. The order keeps two rules: never a
+// secret without a row, and never metadata newer than its secret.
+//   - An account whose credential changed writes its new secret, then its row.
+//   - A new account writes its row, then its secret, so a crash between the
+//     two leaves a row that reads as signed out.
+//   - A removed account loses its row, then its secret.
+//
+// The rollback copy is rewritten only when a field the previous release acts
+// on changes.
+func (s *Store) save(ctx context.Context, db *sql.DB, committed, next State) error {
+	old := map[string]Entry{}
+	for _, e := range committed.Entries {
+		old[e.ID] = e
+	}
+	keep := map[string]bool{}
+	changed, err := s.rowsChanged(ctx, db, next)
+	if err != nil {
+		return errors.New("Saved accounts could not be written.")
+	}
+	for _, e := range next.Entries {
+		keep[e.ID] = true
+		if prior, ok := old[e.ID]; ok && !sameCredential(prior.Credential, e.Credential) {
+			changed = true
+			if err := s.writeCredential(e.ID, e.Credential); err != nil {
+				return errors.New("Saved accounts could not be written.")
+			}
+		}
+	}
+	if err := credentialStep("updated secrets"); err != nil {
+		return err
+	}
+	var removed []string
+	for id := range old {
+		if !keep[id] {
+			removed = append(removed, id)
+		}
+	}
+	// Only a changed registry wakes the engine, so a pass that finds nothing
+	// to do does not wake the next one.
+	var event hub.Event
+	if changed && !s.Quiet {
+		event.Topic = Topic
+	}
+	if err := statewrite.For(db).Write(ctx, event, func(conn *sql.Conn) error {
+		if err := writeRows(ctx, conn, next); err != nil {
+			return err
+		}
+		return forgetAccounts(ctx, conn, removed)
+	}); err != nil {
+		if errors.Is(err, statewrite.ErrRepeated) || errors.Is(err, statewrite.ErrRequestConflict) {
+			return err
+		}
+		return errors.New("Saved accounts could not be written.")
+	}
+	for _, e := range next.Entries {
+		if _, ok := old[e.ID]; !ok {
+			if err := s.writeCredential(e.ID, e.Credential); err != nil {
+				return errors.New("Saved accounts could not be written.")
+			}
+		}
+	}
+	for _, id := range removed {
+		if err := s.removeCredential(id); err != nil {
+			return errors.New("Saved accounts could not be written.")
+		}
+	}
+	if actedOn(committed) == actedOn(next) {
+		return nil
+	}
+	return s.mirror(ctx, db)
+}
+
+// rowsChanged reports whether next differs from the stored account rows.
+func (s *Store) rowsChanged(ctx context.Context, db *sql.DB, next State) (bool, error) {
+	type row struct {
+		metadata string
+		schema   string
+	}
+	var stored []row
+	err := statewrite.For(db).Read(ctx, func(q statewrite.Reader) error {
+		rows, err := q.QueryContext(ctx, "SELECT metadata, credential_schema FROM accounts ORDER BY ord")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var r row
+			if err := rows.Scan(&r.metadata, &r.schema); err != nil {
+				return err
+			}
+			stored = append(stored, r)
+		}
+		return rows.Err()
+	})
+	if err != nil || len(stored) != len(next.Entries) {
+		return true, err
+	}
+	for i, e := range next.Entries {
+		raw, err := json.Marshal(e.Metadata)
+		if err != nil {
+			return false, err
+		}
+		if stored[i].metadata != string(raw) || stored[i].schema != e.Credential.Schema {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func writeRows(ctx context.Context, conn *sql.Conn, st State) error {
+	if _, err := conn.ExecContext(ctx, "DELETE FROM accounts"); err != nil {
+		return err
+	}
+	for i, e := range st.Entries {
+		raw, err := json.Marshal(e.Metadata)
+		if err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES (?, ?, ?, ?)", e.ID, i, raw, e.Credential.Schema); err != nil {
+			return err
+		}
+	}
+	cleaned := 0
+	if st.OpenCodeProvidersCleaned {
+		cleaned = 1
+	}
+	version := st.Version
+	if version == 0 {
+		version = 1
+	}
+	_, err := conn.ExecContext(ctx, `INSERT INTO accounts_registry(id, version, opencode_cleaned) VALUES (1, ?, ?)
+ON CONFLICT(id) DO UPDATE SET version = excluded.version, opencode_cleaned = excluded.opencode_cleaned`, version, cleaned)
+	return err
+}
+
+func sameCredential(a, b Credential) bool {
+	return a.Schema == b.Schema && bytes.Equal(a.Payload, b.Payload)
+}
+
+// actedOn is what the previous release acts on in accounts.json: the
+// account set, each credential, NeedsLogin and RefreshPending, and the
+// OpenCode cleanup flag.
+func actedOn(st State) string {
+	type fields struct {
+		ID, Schema             string
+		Payload                json.RawMessage
+		NeedsLogin, Refreshing bool
+	}
+	out := struct {
+		Cleaned bool
+		Entries []fields
+	}{Cleaned: st.OpenCodeProvidersCleaned}
+	for _, e := range st.Entries {
+		out.Entries = append(out.Entries, fields{e.ID, e.Credential.Schema, e.Credential.Payload, e.NeedsLogin, e.RefreshPending})
+	}
+	raw, _ := json.Marshal(out)
+	return string(raw)
+}
+
+// mirror writes accounts.json, the previous release's registry, from the
+// rows merged with each account's credential file. It is 0600, like each
+// credential file.
+//
+// TODO: legacy/shim remove later — the previous release reads every account
+// and credential from accounts.json, so each secret lives in two files until
+// requirement 31 (item 31) removes this copy and importRegistry. The copy is
+// rewritten only when a field that release acts on changes (actedOn), so
+// usage observations, labels and times in it may be stale.
+func (s *Store) mirror(ctx context.Context, db *sql.DB) error {
+	err := statewrite.For(db).Mirror(ctx, registryKey, s.registryPath(), func(out io.Writer) error {
+		st, err := s.load(ctx, db)
+		if err != nil {
+			return err
+		}
+		raw, err := json.MarshalIndent(st, "", "  ")
+		if err != nil || len(raw) > maxStoreBytes {
+			return errors.New("Saved accounts exceed the supported size or format.")
+		}
+		_, err = out.Write(raw)
+		return err
+	})
+	if err != nil {
+		return fmt.Errorf("Saved accounts were written, but the previous release's copy could not be written.")
+	}
+	return nil
+}
+
+// importRegistry imports accounts.json when another binary wrote it. The
+// caller holds accounts.lock, which the previous release also takes, so the
+// file cannot change while it runs. Its secrets are written first, outside
+// dyna.db's writer; then one transaction commits its rows and the stamp. A
+// crash before that commit leaves the file unstamped, so the next read
+// imports it again and rewrites the same secrets. After the commit, the
+// credential file of any account the file no longer has is deleted. A file
+// this release cannot read (wrong version or invalid) stays an error, as
+// before, so a newer release's registry is never replaced.
+//
+// TODO: legacy/shim remove later — remove with mirror, in requirement 31.
+func (s *Store) importRegistry(ctx context.Context, db *sql.DB) error {
+	w := statewrite.For(db)
+	if foreign, err := w.Foreign(ctx, registryKey, s.registryPath()); err != nil || !foreign {
+		return err
+	}
+	raw, err := os.ReadFile(s.registryPath())
+	if err != nil {
+		return errors.New("Saved accounts could not be read.")
+	}
+	st, err := parseRegistry(raw)
+	if err != nil {
+		return err
+	}
+	for _, e := range st.Entries {
+		if err := s.writeCredential(e.ID, e.Credential); err != nil {
+			return errors.New("Saved accounts could not be written.")
+		}
+	}
+	imported, err := w.ImportIfForeign(ctx, registryKey, s.registryPath(), func(conn *sql.Conn, raw []byte) error {
+		st, err := parseRegistry(raw)
+		if err != nil {
+			return err
+		}
+		return writeRows(ctx, conn, st)
+	})
+	if err != nil || !imported {
+		return err
+	}
+	return s.dropOrphanCredentials(ctx, db)
+}
+
+func parseRegistry(raw []byte) (State, error) {
+	if len(raw) > maxStoreBytes {
+		return State{}, errors.New("Saved accounts could not be read.")
+	}
+	var st State
+	if json.Unmarshal(raw, &st) != nil || st.Version != 1 {
+		return State{}, errors.New("Saved accounts have an unsupported or invalid format.")
+	}
+	return st, nil
+}
+
+// dropOrphanCredentials deletes the credential file of every account that
+// has no row, such as one the previous release removed.
+func (s *Store) dropOrphanCredentials(ctx context.Context, db *sql.DB) error {
+	ids := map[string]bool{}
+	err := statewrite.For(db).Read(ctx, func(q statewrite.Reader) error {
+		rows, err := q.QueryContext(ctx, "SELECT id FROM accounts")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				return err
+			}
+			ids[id] = true
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return errors.New("Saved accounts could not be read.")
+	}
+	entries, err := os.ReadDir(s.credentialDir())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return errors.New("Saved accounts could not be read.")
+	}
+	for _, e := range entries {
+		id, ok := strings.CutSuffix(e.Name(), ".json")
+		if !ok || ids[id] {
+			continue
+		}
+		if err := s.removeCredential(id); err != nil {
+			return errors.New("Saved accounts could not be written.")
+		}
+	}
+	return nil
+}
+
+// forgetters delete the rows that each store keeps per account. A removal
+// runs them in the account's own write (rule 6), and each owner keeps its
+// table names.
+var forgetters = []func(ctx context.Context, conn *sql.Conn, id string) error{
+	forgetActive,
+	reposcope.Forget,
+	preferences.Forget,
+}
+
+func forgetAccounts(ctx context.Context, conn *sql.Conn, ids []string) error {
+	for _, id := range ids {
+		for _, forget := range forgetters {
+			if err := forget(ctx, conn, id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

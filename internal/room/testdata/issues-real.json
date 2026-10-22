@@ -1,0 +1,44 @@
+[
+ {
+  "id": "msg_e580f033c363a4d2",
+  "title": "Remove the unused qwen voice gateway after the Go call switch",
+  "file": "internal/voice/gateway.go",
+  "line": 90,
+  "filer": "dyna-agent:reviewer-1116",
+  "filedAt": 1792477148098,
+  "state": "open",
+  "reason": "",
+  "goalId": "",
+  "githubUrl": "",
+  "changedBy": "",
+  "changedAt": 0
+ },
+ {
+  "id": "msg_14eee2f5cb4b32b4",
+  "title": "Slow test over the CI limit: test/the PR page has no reviewer bar and no review strip at the top",
+  "file": "test/the PR page has no reviewer bar and no review strip at the top",
+  "line": 0,
+  "filer": "dyna-agent",
+  "filedAt": 1792477122920,
+  "state": "open",
+  "reason": "",
+  "goalId": "",
+  "githubUrl": "",
+  "changedBy": "",
+  "changedAt": 0
+ },
+ {
+  "id": "msg_c1be45bb15204a1b",
+  "title": "Room issue board keeps queried state in a JSON file",
+  "file": "internal/room/issues.go",
+  "line": 97,
+  "filer": "dyna-agent:librarian",
+  "filedAt": 1792477100609,
+  "state": "open",
+  "reason": "",
+  "goalId": "",
+  "githubUrl": "",
+  "changedBy": "",
+  "changedAt": 0
+ }
+]

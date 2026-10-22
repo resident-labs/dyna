@@ -1,0 +1,812 @@
+// Package shells runs dyna-managed background commands. A shell is stamped
+// with a room and immediate parent session, so its exit can be reported as
+// one normal room completion message.
+//
+// A shell's record lives in the shell_jobs table of dyna.db. Its combined
+// stdout and stderr live in <data>/shells/<id>/output.log. A detached supervisor
+// process (`dyna shell _run <id>`) owns the command's process group, so a
+// shell outlives an agent turn, but closes with its owner unless Keep is set.
+package shells
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"crypto/rand"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"syscall"
+	"time"
+
+	"dyna-agent/internal/callerid"
+	"dyna-agent/internal/childenv"
+	"dyna-agent/internal/harness/home"
+	"dyna-agent/internal/procident"
+	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/store"
+)
+
+// JobEnv names the shell job a process runs in. A session that finishes
+// itself from inside a job does not count that job as unfinished work.
+const JobEnv = "DYNA_SHELL_JOB"
+
+const (
+	// MaxOutputBytes caps output.log; past it, output is dropped (the command
+	// keeps running) and one notice is written.
+	MaxOutputBytes = 64 << 20
+	idPrefix       = "sh_"
+)
+
+var idPattern = regexp.MustCompile(`^sh_[0-9]{8}-[0-9]{6}-[0-9a-f]{8}$`)
+
+// ValidID reports whether id has the shell id shape.
+func ValidID(id string) bool { return idPattern.MatchString(id) }
+
+// Root is <data>/shells.
+func Root() string { return filepath.Join(store.DataDir(), "shells") }
+
+// Meta is a shell job's launch record.
+type Meta struct {
+	ID     string   `json:"id"`
+	Name   string   `json:"name,omitempty"`
+	Cmd    []string `json:"cmd"`
+	Cwd    string   `json:"cwd"`
+	Owner  string   `json:"owner,omitempty"`
+	Keep   bool     `json:"keep,omitempty"`
+	RoomID string   `json:"roomId,omitempty"`
+	Room   string   `json:"room,omitempty"`
+	Pid    int      `json:"pid,omitempty"` // the command (process group leader)
+	// Supervisor is the detached `dyna shell _run` process.
+	Supervisor int `json:"supervisor,omitempty"`
+	// SupervisorStartTime is Linux /proc/<pid>/stat field 22 (clock ticks).
+	SupervisorStartTime uint64    `json:"supervisorStartTime,omitempty"`
+	Started             time.Time `json:"started"`
+	// BackgroundAt is when a foreground command outlived its limit.
+	BackgroundAt *time.Time `json:"backgroundAt,omitempty"`
+	// StopBy is who stopped the job: agent, owner or cleanup.
+	StopBy string `json:"stopBy,omitempty"`
+	// OutputLines is how many lines a finished job wrote to output.log.
+	// Save does not write these three fields; their own setters do.
+	OutputLines int `json:"outputLines,omitempty"`
+}
+
+// Exit records how a shell job ended.
+type Exit struct {
+	Code   int       `json:"code"`
+	Signal string    `json:"signal,omitempty"`
+	Error  string    `json:"error,omitempty"`
+	Ended  time.Time `json:"ended"`
+}
+
+// Info is a shell as listed.
+type Info struct {
+	Meta
+	Status string `json:"status"` // running|exited|lost
+	Exit   *Exit  `json:"exit,omitempty"`
+	// legacyExit marks an exit that only exit.json holds. A read reports it;
+	// a write path imports it through importLegacyExit.
+	legacyExit bool
+}
+
+// Store addresses the shells directory.
+type Store struct {
+	Root string
+	// startTime reads a process start time; nil uses procident.StartTime. A
+	// test sets it to act as a system without /proc.
+	startTime func(int) (uint64, error)
+}
+
+// processStartTime reads pid's start time, or 0 when this system has none. A
+// record without one keeps the plain PID probe, and a check that needs it
+// fails closed.
+func (s *Store) processStartTime(pid int) (uint64, error) {
+	if s.startTime != nil {
+		return s.startTime(pid)
+	}
+	return procident.StartTime(pid)
+}
+
+func DefaultStore() *Store { return &Store{Root: Root()} }
+
+func (s *Store) dir(id string) (string, error) {
+	if !ValidID(id) {
+		return "", fmt.Errorf("invalid shell id %q", id)
+	}
+	return filepath.Join(s.Root, id), nil
+}
+
+// StartOptions describes a new shell.
+type StartOptions struct {
+	// Keep leaves the command running when its owning session closes.
+	Keep bool
+	Name string
+	Cmd  []string
+	Cwd  string
+	// Owner overrides the owning agent session (default runstore.OwnerFromEnv).
+	Owner  string
+	RoomID string
+	Room   string
+}
+
+// Create records a new shell (not started yet) and returns its id.
+func (s *Store) Create(opts StartOptions) (out Meta, err error) {
+	err = sessionlife.WithPublication(context.Background(), s.Root, "publication.lock", func() error {
+		owner := strings.TrimSpace(opts.Owner)
+		if owner == "" {
+			owner = runstore.OwnerFromEnv()
+		}
+		if e := sessionlife.Activate(filepath.Join(filepath.Dir(s.Root), "sessions"), owner); e != nil {
+			return e
+		}
+		out, err = s.create(opts)
+		return err
+	})
+	return out, err
+}
+func (s *Store) create(opts StartOptions) (Meta, error) {
+	if len(opts.Cmd) == 0 || strings.TrimSpace(opts.Cmd[0]) == "" {
+		return Meta{}, errors.New("a command is required")
+	}
+	// Open dyna.db first: its one-time legacy import must not see this
+	// job's folder before the job has a row.
+	if _, err := s.db(); err != nil {
+		return Meta{}, err
+	}
+	cwd := opts.Cwd
+	if cwd == "" {
+		cwd, _ = os.Getwd()
+	}
+	cwd, err := filepath.Abs(cwd)
+	if err != nil {
+		return Meta{}, err
+	}
+	if st, err := os.Stat(cwd); err != nil || !st.IsDir() {
+		return Meta{}, fmt.Errorf("working directory %q is not a directory", cwd)
+	}
+	var b [4]byte
+	_, _ = rand.Read(b[:])
+	id := idPrefix + time.Now().Format("20060102-150405") + "-" + hex.EncodeToString(b[:])
+	dir := filepath.Join(s.Root, id)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return Meta{}, err
+	}
+	owner := strings.TrimSpace(opts.Owner)
+	if owner == "" {
+		owner = runstore.OwnerFromEnv()
+	}
+	if err := os.WriteFile(filepath.Join(dir, "output.log"), nil, 0o600); err != nil {
+		return Meta{}, err
+	}
+	m := Meta{Keep: opts.Keep, ID: id, Name: opts.Name, Cmd: opts.Cmd, Cwd: cwd, Owner: owner, RoomID: opts.RoomID, Room: opts.Room, Started: time.Now()}
+	return m, s.Save(m, nil)
+}
+
+// Supervise runs the shell's command to completion (the detached `_run`
+// process). It records the pid, streams output to output.log, and writes
+// exit.json.
+func (s *Store) Supervise(ctx context.Context, id string) error {
+	dir, err := s.dir(id)
+	if err != nil {
+		return err
+	}
+	m, err := s.ReadMeta(id)
+	if err != nil {
+		return err
+	}
+	m.Supervisor = os.Getpid()
+	m.SupervisorStartTime, err = s.processStartTime(m.Supervisor)
+	if err != nil {
+		return fmt.Errorf("record supervisor identity: %w", err)
+	}
+	if err := s.Save(m, nil); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(filepath.Join(dir, "output.log"), os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if !m.Keep {
+		closed, err := s.ownerClosed(m.Owner)
+		if err != nil {
+			return err
+		}
+		if closed {
+			_, _ = out.WriteString("\n[dyna: shell stopped before start because its owner is closed or missing]\n")
+			return s.Save(m, &Exit{Code: -1, Error: "owner is closed or missing", Ended: time.Now()})
+		}
+	}
+	// A stop that arrived while the supervisor waited for dyna.db wins: the
+	// command never starts, so a caller that saw the job stop cannot run it twice.
+	if ctx.Err() != nil {
+		_, _ = out.WriteString("\n[dyna: shell stopped before start]\n")
+		if err := s.Save(m, &Exit{Code: -1, Error: "stopped before start", Ended: time.Now()}); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dir, exitedMarker), nil, 0o600)
+	}
+	cmd := exec.Command(m.Cmd[0], m.Cmd[1:]...)
+	cmd.Dir = m.Cwd
+	// Without a terminal, a pager or color codes only get in the way.
+	cmd.Env = append(home.LaunchEnv(), "PAGER=cat", "GIT_PAGER=cat", "NO_COLOR=1", JobEnv+"="+m.ID)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	pr, pw := io.Pipe()
+	cmd.Stdout, cmd.Stderr = pw, pw
+	cmd.Stdin = nil
+	if err := childenv.Clean(cmd).Start(); err != nil {
+		_ = s.Save(m, &Exit{Code: -1, Error: err.Error(), Ended: time.Now()})
+		return err
+	}
+	redact := newRedactor(cmd.Env)
+	m.Pid = cmd.Process.Pid
+	_ = s.Save(m, nil)
+
+	copied := make(chan struct{})
+	var lines int
+	grew := &outputEvents{send: func() { s.Notify(id) }}
+	go func() {
+		defer close(copied)
+		r := bufio.NewReaderSize(pr, 64*1024)
+		var written int64
+		capped := false
+		for {
+			line, err := r.ReadString('\n')
+			if len(line) > 0 {
+				if written < MaxOutputBytes {
+					n, _ := out.WriteString(redact.line(line))
+					written += int64(n)
+					lines++
+					grew.grew()
+				} else if !capped {
+					capped = true
+					_, _ = out.WriteString("\n[dyna: output.log reached its cap; further output dropped]\n")
+				}
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	waitErr := make(chan error, 1)
+	go func() { waitErr <- cmd.Wait() }()
+	var werr error
+	select {
+	case werr = <-waitErr:
+	case <-ctx.Done():
+		_ = syscall.Kill(-m.Pid, syscall.SIGTERM)
+		select {
+		case werr = <-waitErr:
+		case <-time.After(5 * time.Second):
+			_ = syscall.Kill(-m.Pid, syscall.SIGKILL)
+			werr = <-waitErr
+		}
+	}
+	pw.Close()
+	<-copied
+	grew.stop()
+	ex := Exit{Ended: time.Now()}
+	if werr != nil {
+		var ee *exec.ExitError
+		if errors.As(werr, &ee) {
+			if st, ok := ee.Sys().(syscall.WaitStatus); ok && st.Signaled() {
+				ex.Code, ex.Signal = -1, st.Signal().String()
+			} else {
+				ex.Code = ee.ExitCode()
+			}
+		} else {
+			ex.Code, ex.Error = -1, werr.Error()
+		}
+	}
+	// The exit goes first: a failed line count must not lose it, or the job
+	// shows as lost once this process ends.
+	if err := s.Save(m, &ex); err != nil {
+		return err
+	}
+	return errors.Join(s.setOutputLines(id, lines), os.WriteFile(filepath.Join(dir, exitedMarker), nil, 0o600))
+}
+
+// ReadMeta loads a job's launch record.
+func (s *Store) ReadMeta(id string) (Meta, error) {
+	m, _, err := s.load(id)
+	return m, err
+}
+
+// ReadExit loads a job's exit, if it has ended.
+func (s *Store) ReadExit(id string) (*Exit, error) {
+	_, ex, err := s.load(id)
+	return ex, err
+}
+
+// Info resolves a shell's live status from its current record.
+func (s *Store) Info(id string) (Info, error) {
+	m, ex, err := s.load(id)
+	if err != nil {
+		return Info{}, err
+	}
+	return s.status(Info{Meta: m, Exit: ex}), nil
+}
+
+// status resolves a shell's live status from its current record, including an
+// exit that only an older supervisor's exit.json holds. It never writes:
+// List and Info run while a session builds its instructions, so the import
+// belongs to a write path (importLegacyExit).
+func (s *Store) status(in Info) Info {
+	if in.Exit == nil {
+		// TODO: legacy/shim remove later — a supervisor from an older release records its exit only in exit.json; remove with importLegacy.
+		if dir, err := s.dir(in.ID); err == nil {
+			if ex, err := readLegacyExit(dir); err == nil && ex != nil {
+				in.Exit, in.legacyExit = ex, true
+			}
+		}
+	}
+	switch {
+	case in.Exit != nil:
+		in.Status = "exited"
+	case in.SupervisorAlive():
+		in.Status = "running"
+	case in.Supervisor == 0 && (time.Since(in.Started) < 10*time.Second || s.launchedSupervisor(in.ID) > 0):
+		// A live supervisor that has not recorded itself yet may be waiting
+		// for dyna.db's write lock; it is starting, not lost.
+		in.Status = "starting"
+	default:
+		// The supervisor died without recording an exit; re-check once in
+		// case it recorded one just now.
+		if ex, _ := s.ReadExit(in.ID); ex != nil {
+			in.Exit, in.Status = ex, "exited"
+		} else {
+			in.Status = "lost"
+		}
+	}
+	return in
+}
+
+// importLegacyExit keeps an exit that only an older supervisor's exit.json
+// recorded. It sets the exit columns only, in one statement that refuses when
+// a canonical exit already exists, so a concurrent supervisor or a second
+// waiter cannot lose a newer exit or the job's metadata. It returns the
+// effective record, canonical exit included.
+// TODO: legacy/shim remove later — an older release's supervisor records only exit.json; remove with importLegacy.
+func (s *Store) importLegacyExit(m Meta, ex *Exit) (Info, error) {
+	if ex == nil {
+		return s.Info(m.ID)
+	}
+	if !ValidID(m.ID) {
+		return Info{}, fmt.Errorf("invalid shell id %q", m.ID)
+	}
+	if _, err := s.exec(m.ID, `UPDATE shell_jobs SET ended=?, exit_code=?, exit_signal=?, exit_error=? WHERE id=? AND ended IS NULL`,
+		ex.Ended.UTC().Format(time.RFC3339Nano), ex.Code, ex.Signal, ex.Error, m.ID); err != nil {
+		return Info{}, err
+	}
+	return s.Info(m.ID)
+}
+
+// SupervisorAlive reports whether the job's recorded supervisor still runs.
+func (in Info) SupervisorAlive() bool {
+	return in.Supervisor > 0 && syscall.Kill(in.Supervisor, 0) == nil
+}
+
+// Resolve finds a shell by id or by its name (newest wins).
+func (s *Store) Resolve(ref string) (Info, error) {
+	if ValidID(ref) {
+		return s.Info(ref)
+	}
+	list, err := s.List(true)
+	if err != nil {
+		return Info{}, err
+	}
+	for _, in := range list {
+		if in.Name == ref {
+			return in, nil
+		}
+	}
+	return Info{}, fmt.Errorf("no shell with id or name %q", ref)
+}
+
+// List returns shells newest first; all=false keeps running ones only.
+func (s *Store) List(all bool) ([]Info, error) {
+	where := ""
+	if !all {
+		where = "WHERE ended IS NULL"
+	}
+	list, err := s.loadAll(where)
+	if err != nil {
+		return nil, err
+	}
+	var out []Info
+	for _, in := range list {
+		in = s.status(in)
+		if all || in.Status == "running" || in.Status == "starting" {
+			out = append(out, in)
+		}
+	}
+	return out, nil
+}
+
+// ListOwner returns every shell the owner started, newest first.
+func (s *Store) ListOwner(owner string) ([]Info, error) {
+	list, err := s.loadAll("WHERE owner=?", owner)
+	for i := range list {
+		list[i] = s.status(list[i])
+	}
+	return list, err
+}
+
+// Tail returns the last n lines of output.log.
+func (s *Store) Tail(id string, n int) (string, error) {
+	dir, err := s.dir(id)
+	if err != nil {
+		return "", err
+	}
+	f, err := os.Open(filepath.Join(dir, "output.log"))
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	// A window of lines holds about 1 KB each; a longer line is cut at its start.
+	window := int64(256 * 1024)
+	if n > 0 {
+		window = min(window, max(int64(n)*1024, 4096))
+	}
+	off := st.Size() - window
+	if off < 0 {
+		off = 0
+	}
+	buf := make([]byte, st.Size()-off)
+	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
+		return "", err
+	}
+	lines := strings.Split(strings.TrimRight(strings.ReplaceAll(string(buf), "\r\n", "\n"), "\n"), "\n")
+	if off > 0 && len(lines) > 1 {
+		lines = lines[1:] // the window starts inside a line
+	}
+	if n > 0 && len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// OutputPath is the shell's output.log.
+func (s *Store) OutputPath(id string) (string, error) {
+	dir, err := s.dir(id)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "output.log"), nil
+}
+
+// ClaimNotice waits while a foreground caller still waits for this finished
+// job, then claims its exit. True means the owner has not seen the exit and
+// the caller must tell it.
+func (s *Store) ClaimNotice(id string) (bool, error) {
+	for {
+		until, delivered, err := s.hold(id)
+		if err != nil || delivered {
+			return false, err
+		}
+		left := time.Until(until)
+		if left <= 0 {
+			return s.ClaimExit(id)
+		}
+		// The waiter claims the exit when it sees it, or its hold lapses if
+		// its process dies. This runs only in the detached supervisor.
+		time.Sleep(min(left, 250*time.Millisecond))
+	}
+}
+
+// exitedMarker is created after the exit is recorded, so waiters wake.
+const exitedMarker = "exited"
+
+// Wait blocks until the shell ends, ready reports true, ctx ends, or the
+// timeout passes (0 = no limit). ready may be nil. It reports whether the
+// shell ended or became ready. Waiters wake on job directory changes.
+func (s *Store) Wait(ctx context.Context, id string, timeout time.Duration, ready func() bool) (Info, bool, error) {
+	dir, err := s.dir(id)
+	if err != nil {
+		return Info{}, false, err
+	}
+	w, err := watchDir(dir)
+	if err != nil {
+		return Info{}, false, err
+	}
+	defer w.close()
+	// A cancelled caller must not wait out the current poll step.
+	defer context.AfterFunc(ctx, w.wake)()
+	deadline := time.Now().Add(timeout)
+	for {
+		in, err := s.Info(id)
+		if err != nil {
+			return Info{}, false, err
+		}
+		if in.legacyExit {
+			if ctx.Err() != nil {
+				return in, true, nil // report it without a write the caller no longer waits for
+			}
+			info, err := s.importLegacyExit(in.Meta, in.Exit)
+			if err != nil {
+				return in, true, err
+			}
+			return info, true, nil
+		}
+		if in.Status == "exited" {
+			return in, true, nil
+		}
+		if in.Status == "lost" || ready != nil && ready() {
+			return in, true, nil
+		}
+		if err := ctx.Err(); err != nil {
+			return in, false, err
+		}
+		// A supervisor that dies without a record changes no file, so
+		// re-check its liveness at least once a second.
+		step := time.Second
+		if timeout > 0 {
+			left := time.Until(deadline)
+			if left <= 0 {
+				return in, false, nil
+			}
+			step = min(step, left)
+		}
+		if err := w.next(step); err != nil {
+			return in, false, err
+		}
+	}
+}
+
+// Stop ends a running shell: SIGTERM to its process group, SIGKILL after 5 s.
+// For an exited shell, it also stops a verified supervisor stuck in completion delivery.
+// by says who asked: agent, owner or cleanup.
+func (s *Store) Stop(id, by string) (Info, error) {
+	in, err := s.Info(id)
+	if err != nil {
+		return Info{}, err
+	}
+	// The supervisor publishes its identity before it starts the child.
+	// Wait for that child PID too, so Stop cannot miss a shell during startup.
+	for deadline := time.Now().Add(10 * time.Second); (in.Status == "starting" || in.Status == "running" && in.Pid <= 0) && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+		in, err = s.Info(id)
+		if err != nil {
+			return Info{}, err
+		}
+	}
+	if in.Status == "exited" {
+		return in, s.stopExitedSupervisor(in)
+	}
+	if in.Status == "starting" {
+		// Still waiting to record itself. SIGTERM makes it record a stop
+		// instead of starting the command.
+		if pid := s.launchedSupervisor(id); pid > 0 {
+			_ = syscall.Kill(pid, syscall.SIGTERM)
+		}
+		in, _, err = s.Wait(context.Background(), id, 10*time.Second, nil)
+		return in, err
+	}
+	if in.Status != "running" || in.Pid <= 0 {
+		return in, nil
+	}
+	// A log failure must not leave the process running.
+	logErr := errors.Join(s.markStopped(id, by), s.logStop(id, "stop requested; sending SIGTERM to the process group"))
+	_ = syscall.Kill(-in.Pid, syscall.SIGTERM)
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if syscall.Kill(in.Pid, 0) != nil {
+			break
+		}
+	}
+	if syscall.Kill(in.Pid, 0) == nil {
+		logErr = errors.Join(logErr, s.logStop(id, "shell did not stop within 5 seconds; sending SIGKILL"))
+		_ = syscall.Kill(-in.Pid, syscall.SIGKILL)
+	}
+	in, _, err = s.Wait(context.Background(), id, 10*time.Second, nil)
+	return in, errors.Join(logErr, err)
+}
+
+// Spawn launches the detached supervisor through `exe shell _spawn <id>`,
+// which starts it and exits at once, so the supervisor is reparented to init.
+// Some harnesses (Muse) kill an MCP server's whole live process tree when a
+// run ends, whatever its sessions; an orphan is outside that tree. A launch
+// error comes back as _spawn's error.
+func Spawn(exe, id string) error {
+	cmd := exec.Command(exe, "shell", "_spawn", id)
+	cmd.Env = home.LaunchEnv()
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := childenv.Clean(cmd).Run(); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return fmt.Errorf("start shell supervisor: %s", msg)
+		}
+		return fmt.Errorf("start shell supervisor: %w", err)
+	}
+	return nil
+}
+
+// supervisorLog holds a supervisor's own errors, in the job folder.
+const supervisorLog = "supervisor.log"
+
+// SupervisorErrors returns the end of a supervisor's own error output, or ""
+// when it wrote none.
+func (s *Store) SupervisorErrors(id string) string {
+	dir, err := s.dir(id)
+	if err != nil {
+		return ""
+	}
+	raw, err := os.ReadFile(filepath.Join(dir, supervisorLog))
+	if err != nil {
+		return ""
+	}
+	if len(raw) > 2048 {
+		raw = raw[len(raw)-2048:]
+	}
+	return strings.TrimSpace(strings.ToValidUTF8(string(raw), ""))
+}
+
+// StartSupervisor starts exe (dyna) `shell _run <id>` in its own session and
+// returns once it runs; `dyna shell _spawn` calls it. A job a session owns
+// runs in its own agent scope, recorded for that session (requirements
+// item 3), so its commands' engine calls act for the session.
+func StartSupervisor(exe, id string) error {
+	m, err := DefaultStore().ReadMeta(id)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(exe, "shell", "_run", id)
+	// The supervisor restores the owner's roots for itself and starts the
+	// command with this launch environment.
+	cmd.Env = home.LaunchEnv()
+	devnull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer devnull.Close()
+	// A supervisor that fails before it records an exit leaves its error
+	// here, so a lost job can say why.
+	dir, err := DefaultStore().dir(id)
+	if err != nil {
+		return err
+	}
+	errLog, err := os.OpenFile(filepath.Join(dir, supervisorLog), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer errLog.Close()
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = devnull, devnull, errLog
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if sessionlife.IsSessionID(m.Owner) {
+		err = callerid.Start(context.Background(), childenv.Clean(cmd), callerid.Launch{DataDir: store.DataDir(), Name: m.Owner, Actor: callerid.Identity{Kind: callerid.Session, Session: m.Owner}, Launcher: "shell"})
+	} else {
+		err = childenv.Clean(cmd).Start()
+	}
+	if err != nil {
+		return err
+	}
+	// Record the supervisor outside dyna.db, which may be busy: status must
+	// tell a supervisor still waiting to record itself from a dead one.
+	started, _ := procident.StartTime(cmd.Process.Pid)
+	launched := fmt.Sprintf("%d %d\n", cmd.Process.Pid, started)
+	if err := os.WriteFile(filepath.Join(dir, supervisorPID), []byte(launched), 0o600); err != nil {
+		return err
+	}
+	return cmd.Process.Release()
+}
+
+// supervisorPID holds the launched supervisor's PID and start time.
+const supervisorPID = "supervisor.pid"
+
+// launchedSupervisor returns the PID of the job's launched supervisor while
+// that same process is alive, or 0.
+func (s *Store) launchedSupervisor(id string) int {
+	dir, err := s.dir(id)
+	if err != nil {
+		return 0
+	}
+	var pid int
+	var started uint64
+	raw, err := os.ReadFile(filepath.Join(dir, supervisorPID))
+	if err != nil {
+		return 0
+	}
+	if _, err := fmt.Sscan(string(raw), &pid, &started); err != nil || pid <= 0 || syscall.Kill(pid, 0) != nil {
+		return 0
+	}
+	// A reused PID is another process.
+	if now, err := s.processStartTime(pid); started != 0 && (err != nil || now != started) {
+		return 0
+	}
+	return pid
+}
+
+// StopOwner stops non-keep shells belonging to exactly this session.
+// Session metadata is already closed before this runs. Stop also waits for
+// supervisors that have not yet published their process ID.
+func (s *Store) StopOwner(owner string) error {
+	if owner == "" {
+		return nil
+	}
+	list, err := s.List(false)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, in := range list {
+		if in.Owner != owner || in.Keep {
+			continue
+		}
+		if err := s.logStop(in.ID, "owner "+owner+" is closed or missing; stopping shell"); err != nil {
+			errs = append(errs, err)
+		}
+		if _, err := s.Stop(in.ID, "cleanup"); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// Sweep stops shells whose session owner has closed or no longer exists.
+// Empty and external harness owners do not identify a Dyna session.
+// Unreadable or malformed owner records return an error and do not stop work.
+func (s *Store) Sweep() error {
+	list, err := s.List(false)
+	if err != nil {
+		return err
+	}
+	owners := map[string]bool{}
+	var errs []error
+	for _, in := range list {
+		if in.Keep || owners[in.Owner] {
+			continue
+		}
+		closed, err := s.ownerClosed(in.Owner)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if closed {
+			owners[in.Owner] = true
+			errs = append(errs, s.StopOwner(in.Owner))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Store) ownerClosed(owner string) (bool, error) {
+	if !runstore.IsSessionDirID(owner) {
+		return false, nil
+	}
+	meta, err := sessionlife.Read(filepath.Join(filepath.Dir(s.Root), "sessions"), owner)
+	if errors.Is(err, os.ErrNotExist) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if meta.ID != owner {
+		return false, fmt.Errorf("cannot verify shell owner %s: stored session ID does not match", owner)
+	}
+	return meta.IsClosed(), nil
+}
+
+func (s *Store) logStop(id, reason string) error {
+	path, err := s.OutputPath(id)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "\n[dyna: %s]\n", reason)
+	return err
+}

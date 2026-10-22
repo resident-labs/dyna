@@ -1,0 +1,185 @@
+package watch
+
+import (
+	"context"
+	"fmt"
+	"sort"
+)
+
+type commitRollup struct {
+	State    string `json:"state"`
+	Contexts struct {
+		TotalCount int `json:"totalCount"`
+	} `json:"contexts"`
+}
+
+type defaultCommit struct {
+	Head   string        `json:"oid"`
+	Rollup *commitRollup `json:"statusCheckRollup"`
+}
+
+func defaultHeadConfirmed(p defaultBranchProbe) bool {
+	return p.Name != "" && (len(p.Head) == 40 || len(p.Head) == 64) && headSHAPattern.MatchString(p.Head)
+}
+
+func defaultVerification(p defaultBranchProbe) string {
+	if !defaultHeadConfirmed(p) {
+		return "pending"
+	}
+	if p.NoPushCI && p.CheckCount == 0 {
+		return "passed"
+	}
+	if p.CheckCount > 0 {
+		switch p.CI {
+		case "SUCCESS":
+			return "passed"
+		case "FAILURE", "ERROR":
+			return "failed"
+		}
+	}
+	return "pending"
+}
+
+func defaultRepo(r Record) string {
+	if changeKind(r) == "local" {
+		return r.RepoPath
+	}
+	return r.Host + "/" + r.Repo
+}
+
+// Missing observations remain pending until the shared writer confirms them.
+func storedDefault(st State, r Record) (defaultBranchProbe, string) {
+	f := st.RepositoryFacts[defaultRepo(r)]
+	p := defaultBranchProbe{Name: f.DefaultBranch, Head: f.Head, NoPushCI: f.NoPushCI}
+	if f.CheckedAt.IsZero() {
+		return p, "pending"
+	}
+	switch f.Verdict {
+	case "passed", "failed":
+		return p, f.Verdict
+	default:
+		return p, "pending"
+	}
+}
+
+// Default branches are repository facts. One representative per unpaused
+// repository keeps idle repositories covered without saving merge state.
+func repositoryRepresentatives(st State, paused func(string) (bool, error)) ([]Record, error) {
+	keys := make([]string, 0, len(st.Records))
+	for key := range st.Records {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	active := map[string]map[string]Record{}
+	latest := map[string]Record{}
+	for _, key := range keys {
+		r := st.Records[key]
+		if changeKind(*r) != "github" || r.Number < 1 {
+			continue
+		}
+		repo := defaultRepo(*r)
+		if !r.Watching || r.State != "open" {
+			if r.State == "merged" {
+				old, found := latest[repo]
+				if !found || r.ClosedAt.After(old.ClosedAt) {
+					latest[repo] = *r
+				}
+			}
+			continue
+		}
+		if active[repo] == nil {
+			active[repo] = map[string]Record{}
+		}
+		if _, found := active[repo][r.RoomID]; !found {
+			active[repo][r.RoomID] = *r
+		}
+	}
+	for repo, r := range latest {
+		if active[repo] == nil {
+			active[repo] = map[string]Record{r.RoomID: r}
+		}
+	}
+	byRoom := map[string][]Record{}
+	for _, rooms := range active {
+		for room, r := range rooms {
+			byRoom[room] = append(byRoom[room], r)
+		}
+	}
+	rooms := make([]string, 0, len(byRoom))
+	for room := range byRoom {
+		rooms = append(rooms, room)
+	}
+	sort.Strings(rooms)
+	byRepo := map[string]Record{}
+	for _, room := range rooms {
+		isPaused, err := paused(room)
+		if err != nil {
+			return nil, err
+		}
+		if isPaused {
+			continue
+		}
+		for _, r := range byRoom[room] {
+			repo := defaultRepo(r)
+			if _, found := byRepo[repo]; !found {
+				byRepo[repo] = r
+			}
+		}
+	}
+	repos := make([]string, 0, len(byRepo))
+	for repo := range byRepo {
+		repos = append(repos, repo)
+	}
+	sort.Strings(repos)
+	result := make([]Record, 0, len(repos))
+	for _, repo := range repos {
+		result = append(result, byRepo[repo])
+	}
+	return result, nil
+}
+
+func (s *Service) refreshRepositoryFacts(ctx context.Context, st State) ([]Record, error) {
+	pauses := map[string]bool{}
+	selected, err := repositoryRepresentatives(st, func(room string) (bool, error) { return s.roomPausedCached(room, pauses) })
+	if err != nil {
+		return nil, err
+	}
+	inputs := make([]*Record, 0, len(selected))
+	for i := range selected {
+		if !selected[i].Watching || selected[i].State != "open" {
+			inputs = append(inputs, &selected[i])
+		}
+	}
+	if len(inputs) == 0 {
+		return selected, nil
+	}
+	_, err = s.observeHeadBatch(ctx, st, inputs, nil)
+	return selected, err
+}
+
+func defaultReason(p defaultBranchProbe, status string) string {
+	if p.NoPushCI {
+		return "no default-branch CI; using PR checks"
+	}
+	if p.Name == "" || p.Head == "" {
+		return "waiting for GitHub CI on the default branch"
+	}
+	if status == "passed" {
+		return fmt.Sprintf("GitHub CI passed on %s at %s", p.Name, p.Head)
+	}
+	if status == "failed" {
+		return fmt.Sprintf("GitHub CI failed on %s at %s", p.Name, p.Head)
+	}
+	return fmt.Sprintf("Waiting for completed GitHub CI on %s at %s", p.Name, p.Head)
+}
+
+func defaultQueueState(status string) string {
+	switch status {
+	case "passed":
+		return "main-passed"
+	case "failed":
+		return "main-failed"
+	default:
+		return "main-pending"
+	}
+}

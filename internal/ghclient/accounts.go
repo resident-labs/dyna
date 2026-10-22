@@ -1,0 +1,416 @@
+package ghclient
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/url"
+	"os/exec"
+	"strings"
+	"sync"
+	"time"
+
+	"dyna-agent/internal/boundedio"
+	"dyna-agent/internal/repoid"
+)
+
+type repositoryContextKey struct{}
+
+// WithRepository supplies repository scope for calls such as GraphQL batches.
+func WithRepository(ctx context.Context, host, repo string) context.Context {
+	return context.WithValue(ctx, repositoryContextKey{}, repository{host, repo})
+}
+
+// AccountFor selects an account without exposing its token.
+func AccountFor(ctx context.Context, executable, host, repo string) (string, error) {
+	cmd := Command(ctx, executable, "")
+	if _, err := roomFor(ctx, "", repository{host, repo}); err != nil {
+		return "", err
+	}
+	login, _, err := selectAccount(ctx, cmd, repository{host, repo})
+	return login, err
+}
+
+type repository struct{ host, name string }
+
+const accountCacheTTL = 30 * time.Minute
+
+type accountFlight struct {
+	done  chan struct{}
+	login string
+	err   error
+}
+
+type choice struct {
+	login string
+	until time.Time
+}
+
+var accounts = struct {
+	sync.Mutex
+	choices map[string]choice
+	flights map[string]*accountFlight
+}{choices: make(map[string]choice), flights: make(map[string]*accountFlight)}
+
+func repositoryFor(ctx context.Context, cmd *exec.Cmd) repository {
+	if r, ok := ctx.Value(repositoryContextKey{}).(repository); ok && r.name != "" {
+		return r
+	}
+
+	host := "github.com"
+	for _, entry := range cmd.Env {
+		if value, ok := strings.CutPrefix(entry, "GH_HOST="); ok && value != "" {
+			host = value
+		}
+	}
+	repo := ""
+	args := cmd.Args[1:]
+	flags := true
+	var command []string
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if flags && arg == "--" {
+			flags = false
+			continue
+		}
+		if flags && strings.HasPrefix(arg, "-") {
+			if !strings.HasPrefix(arg, "--") {
+				for j := 1; j < len(arg); j++ {
+					flag := arg[j : j+1]
+					if flag != "R" && !repositoryFlagTakesValue(command, "-"+flag) {
+						continue
+					}
+					value := strings.TrimPrefix(arg[j+1:], "=")
+					if j+1 == len(arg) && i+1 < len(args) {
+						i++
+						value = args[i]
+					}
+					if flag == "R" {
+						repo = value
+					}
+					break
+				}
+				continue
+			}
+			flag, value, attached := strings.Cut(arg, "=")
+			if flag == "--repo" || flag == "--hostname" {
+				if !attached && i+1 < len(args) {
+					i++
+					value = args[i]
+				}
+				if flag == "--hostname" {
+					host = value
+				} else {
+					repo = value
+				}
+			} else if !attached && repositoryFlagTakesValue(command, flag) && i+1 < len(args) {
+				// A data value can itself look like a flag, URL, or API path.
+				i++
+			}
+			continue
+		}
+		if len(command) == 2 && command[0] == "repo" && command[1] == "view" && !strings.HasPrefix(arg, "-") {
+			repo = arg
+		}
+		if len(command) < 2 {
+			command = append(command, arg)
+		}
+		if strings.HasPrefix(arg, "https://") || strings.HasPrefix(arg, "http://") {
+			if u, err := url.Parse(arg); err == nil {
+				parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+				if len(parts) >= 2 {
+					return repository{u.Hostname(), parts[0] + "/" + parts[1]}
+				}
+			}
+		}
+		if path := strings.TrimPrefix(arg, "/"); strings.HasPrefix(path, "repos/") {
+			parts := strings.Split(path, "/")
+			if len(parts) >= 3 {
+				repo = parts[1] + "/" + parts[2]
+			}
+		}
+	}
+	if repo != "" {
+		parts := strings.Split(repo, "/")
+		if len(parts) == 3 {
+			host, repo = parts[0], strings.Join(parts[1:], "/")
+		}
+		return repository{host, repo}
+	}
+	if cmd.Dir == "" {
+		return repository{}
+	}
+	remote, err := repoid.Git(ctx, cmd.Dir, "remote", "get-url", "origin")
+	if err != nil {
+		return repository{}
+	}
+	identity, err := repoid.RemoteIdentity(cmd.Dir, remote)
+	if err != nil {
+		return repository{}
+	}
+	parts := strings.Split(identity, "/")
+	if len(parts) != 3 || parts[0] == "" {
+		return repository{}
+	}
+	return repository{parts[0], parts[1] + "/" + parts[2]}
+}
+
+// These gh flags consume the next argument even when it starts with a dash.
+func repositoryFlagTakesValue(command []string, flag string) bool {
+	commandName := strings.Join(command, " ")
+	if len(command) > 0 && command[0] == "api" {
+		commandName = "api"
+	}
+	if flag == "--comment" {
+		return commandName == "pr close" || commandName == "issue close"
+	}
+	if len(flag) == 2 && flag[0] == '-' {
+		// Short flags are command-specific: -s is a merge strategy for
+		// pr merge, but a state value for pr list.
+		var short string
+		switch commandName {
+		case "api":
+			short = "FfHXpqt"
+		case "pr merge":
+			short = "AbFt"
+		case "pr create":
+			short = "aBbFHlmprTt"
+		case "issue create":
+			short = "abFlmpTt"
+		case "pr edit", "issue edit":
+			short = "BbFmt"
+		case "pr list", "issue list":
+			short = "aABHqlLmSst"
+		case "pr view", "issue view":
+			short = "qt"
+		case "repo view":
+			short = "bqt"
+		case "pr checks":
+			short = "iqt"
+		case "pr comment", "issue comment", "pr review":
+			short = "bF"
+		case "pr close":
+			short = "c"
+		case "issue close":
+			short = "cr"
+		case "pr checkout":
+			short = "b"
+		case "run view":
+			short = "ajqt"
+		case "run list":
+			short = "bceLqstuw"
+		}
+		return strings.ContainsRune(short, rune(flag[1]))
+	}
+	switch flag {
+	case "--title", "--body", "--body-file",
+		"--field", "--raw-field", "--input", "--header",
+		"--method", "--jq", "--template", "--json",
+		"--search", "--label", "--assignee",
+		"--reviewer", "--milestone", "--project",
+		"--base", "--head", "--state", "--limit",
+		"--author", "--mention", "--app", "--match-head-commit",
+		"--subject", "--author-email", "--delete-label", "--remove-label", "--add-label",
+		"--add-assignee", "--remove-assignee", "--add-reviewer", "--remove-reviewer",
+		"--add-project", "--remove-project", "--color", "--attempt",
+		"--cache", "--preview", "--attach", "--recover", "--blocked-by", "--blocking",
+		"--parent", "--type", "--add-blocked-by", "--add-blocking", "--add-sub-issue",
+		"--remove-blocked-by", "--remove-blocking", "--remove-sub-issue", "--branch",
+		"--interval", "--duplicate-of", "--reason", "--worktree", "--job",
+		"--commit", "--created", "--event", "--status", "--workflow":
+		return true
+	}
+	return false
+}
+
+func withoutTokens(env []string) []string {
+	clean := make([]string, 0, len(env))
+	for _, entry := range env {
+		key, _, _ := strings.Cut(entry, "=")
+		if key != "GH_TOKEN" && key != "GITHUB_TOKEN" && key != "GH_ENTERPRISE_TOKEN" && key != "GITHUB_ENTERPRISE_TOKEN" {
+			clean = append(clean, entry)
+		}
+	}
+	return clean
+}
+
+// authOutput never exposes stderr or token contents in an error.
+func authOutput(ctx context.Context, original *exec.Cmd, token string, args ...string) ([]byte, error) {
+	raw, _, err := authResult(ctx, original, token, args...)
+	return raw, err
+}
+
+func authResult(ctx context.Context, original *exec.Cmd, token string, args ...string) ([]byte, []byte, error) {
+	cmd := Command(ctx, original.Path, original.Dir, args...)
+	cmd.Env = withoutTokens(original.Env)
+	if token != "" {
+		cmd.Env = append(cmd.Env, "GH_TOKEN="+token, "GH_ENTERPRISE_TOKEN="+token)
+	}
+	out := boundedio.New(1024 * 1024)
+	stderr := boundedio.New(8192)
+	cmd.Stdout, cmd.Stderr = out, stderr
+	err := cmd.Run()
+	if err != nil || out.Truncated() || stderr.Truncated() {
+		err = errors.New("GitHub account check failed")
+	}
+	return append([]byte(nil), out.Bytes()...), append([]byte(nil), stderr.Bytes()...), err
+}
+
+func accountToken(ctx context.Context, cmd *exec.Cmd, host, login string) (string, error) {
+	raw, err := authOutput(ctx, cmd, "", "auth", "token", "--hostname", host, "--user", login)
+	return strings.TrimSpace(string(raw)), err
+}
+
+func accountKey(cmd *exec.Cmd, r repository) string {
+	// Different gh installations and config directories must never share a choice.
+	config := ""
+	for _, entry := range cmd.Env {
+		if strings.HasPrefix(entry, "GH_CONFIG_DIR=") || strings.HasPrefix(entry, "HOME=") || strings.HasPrefix(entry, "XDG_CONFIG_HOME=") {
+			config += entry + "\n"
+		}
+	}
+	return cmd.Path + "\n" + config + strings.ToLower(r.host+"/"+r.name)
+}
+
+func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, string, error) {
+	rec, err := roomFor(ctx, cmd.Dir, r)
+	if err != nil {
+		return "", "", err
+	}
+	write := Access(ctx, rec) == ReadWrite
+	key := accountKey(cmd, r) + rec.ID + Access(ctx, rec)
+	for {
+		accounts.Lock()
+		cached := accounts.choices[key]
+		if time.Now().Before(cached.until) {
+			accounts.Unlock()
+			if token, err := accountToken(ctx, cmd, r.host, cached.login); err == nil && token != "" {
+				return cached.login, token, nil
+			}
+			if ctx.Err() != nil {
+				return "", "", ctx.Err()
+			}
+			accounts.Lock()
+			if accounts.choices[key] == cached {
+				delete(accounts.choices, key)
+			}
+			accounts.Unlock()
+			continue
+		}
+		flight := accounts.flights[key]
+		if flight == nil {
+			flight = &accountFlight{done: make(chan struct{})}
+			accounts.flights[key] = flight
+			original := &exec.Cmd{Path: cmd.Path, Dir: cmd.Dir, Env: append([]string(nil), cmd.Env...)}
+			// One cancelled caller must not cancel the probe for other callers.
+			go func() {
+				probeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+				defer cancel()
+				login, err := refreshAccount(probeCtx, original, r, key, cached, write)
+				accounts.Lock()
+				flight.login, flight.err = login, err
+				delete(accounts.flights, key)
+				close(flight.done)
+				accounts.Unlock()
+			}()
+		}
+		accounts.Unlock()
+		select {
+		case <-ctx.Done():
+			return "", "", ctx.Err()
+		case <-flight.done:
+			if flight.err != nil || flight.login == "" {
+				return "", "", flight.err
+			}
+			token, err := accountToken(ctx, cmd, r.host, flight.login)
+			return flight.login, token, err
+		}
+	}
+}
+
+func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string, cached choice, write bool) (login string, err error) {
+	// Read the fallback token before the probe can exhaust its deadline.
+	knownToken := ""
+	if cached.login != "" {
+		knownToken, _ = accountToken(ctx, cmd, r.host, cached.login)
+	}
+	defer func() {
+		if errors.Is(err, context.DeadlineExceeded) {
+			err = &accountProbeError{"GitHub API account probe timed out; retrying", true}
+		}
+		var cause *accountProbeError
+		if errors.As(err, &cause) && cause.transient && cached.login != "" && knownToken != "" {
+			cacheAccount(key, cached.login)
+			login, err = cached.login, nil
+		}
+	}()
+	raw, _ := authOutput(ctx, cmd, "", "auth", "status", "--hostname", r.host, "--json", "hosts")
+	if ctx.Err() != nil {
+		return "", context.Cause(ctx)
+	}
+	var status struct {
+		Hosts map[string][]struct {
+			Login string `json:"login"`
+		} `json:"hosts"`
+	}
+	// gh can report a nonzero status when one of several saved accounts expired.
+	// Ask auth token for each saved account that remains available.
+	if len(raw) == 0 || json.Unmarshal(raw, &status) != nil || len(status.Hosts[r.host]) == 0 {
+		return "", nil
+	}
+	// Recheck the last good account first, before considering another account.
+	list := status.Hosts[r.host]
+	for i := range list {
+		if list[i].Login == cached.login {
+			list[0], list[i] = list[i], list[0]
+			break
+		}
+	}
+	for _, account := range list {
+		token := knownToken
+		if account.Login != cached.login || token == "" {
+			token, err = accountToken(ctx, cmd, r.host, account.Login)
+		}
+		if err != nil || token == "" {
+			continue
+		}
+		if account.Login == cached.login {
+			knownToken = token
+		}
+		denied, err := probeRepository(ctx, cmd, token, r, write)
+		if err != nil {
+			return "", err
+		}
+		if denied {
+			if account.Login == cached.login {
+				cached = choice{}
+				forgetAccount(key)
+			}
+			continue
+		}
+		cacheAccount(key, account.Login)
+		return account.Login, nil
+	}
+	if ctx.Err() != nil {
+		return "", context.Cause(ctx)
+	}
+	operation := "read"
+	if write {
+		operation = "write"
+	}
+	return "", errors.New("no logged-in GitHub account can " + operation + " " + r.host + "/" + r.name)
+}
+
+// Account reports the cached account for the same repository command context.
+func Account(ctx context.Context, executable, dir string, args ...string) string {
+	cmd := Command(ctx, executable, dir, args...)
+	r := repositoryFor(ctx, cmd)
+	rec, err := roomFor(ctx, dir, r)
+	if err != nil {
+		return ""
+	}
+	key := accountKey(cmd, r) + rec.ID + Access(ctx, rec)
+	accounts.Lock()
+	defer accounts.Unlock()
+	return accounts.choices[key].login
+}

@@ -1,0 +1,63 @@
+package roomsvc
+
+import (
+	"dyna-agent/internal/callrequests"
+	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
+	"dyna-agent/internal/state"
+	"encoding/json"
+	"testing"
+)
+
+func TestCallRequestViewsDeliveryAndEvents(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("calls")
+	db, err := database.Open(e.svc.Notify.CallRequestStore().Root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var published []hub.Event
+	state.For(db).SetPublish(func(ev hub.Event) { published = append(published, ev) })
+	sig := map[string]string{}
+	e.svc.scanCallRequests(sig, true, func(Event) { t.Fatal("initial event") })
+	row, _, err := e.svc.Notify.CallRequestStore().Ask(rec.ID, "CI needs a sign-in", "root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []Event
+	e.svc.scanCallRequests(sig, false, func(ev Event) { events = append(events, ev) })
+	if len(events) != 1 || events[0].Kind != "call-requests" || events[0].RoomID != rec.ID || events[0].Change == nil {
+		t.Fatalf("events: %+v", events)
+	}
+	if len(published) != 0 {
+		t.Fatalf("one request produced %d events; want only the room watch event", len(events)+len(published))
+	}
+	var wire callrequests.Request
+	if err := json.Unmarshal(events[0].Change.Item, &wire); err != nil || wire.ID != row.ID || wire.Reason != row.Reason {
+		t.Fatalf("row: %+v %v", wire, err)
+	}
+	e.svc.scanCallRequests(sig, false, func(Event) { t.Fatal("unchanged event") })
+	rows, err := e.svc.CallRequests("")
+	if err != nil || len(rows[rec.ID]) != 1 {
+		t.Fatalf("open view: %+v %v", rows, err)
+	}
+	shown, err := e.svc.CallRequestShown(rec.ID, row.ID)
+	if err != nil || shown.ShownAt == nil {
+		t.Fatalf("shown: %+v %v", shown, err)
+	}
+	closed, err := e.svc.DeclineCallRequest(rec.ID, row.ID)
+	if err != nil || closed.State != "declined" || closed.ClosedBy != "owner" {
+		t.Fatalf("declined: %+v %v", closed, err)
+	}
+	rows, err = e.svc.CallRequests("")
+	if err != nil || len(rows[rec.ID]) != 0 {
+		t.Fatalf("closed in open view: %+v %v", rows, err)
+	}
+	rows, err = e.svc.CallRequests(rec.ID)
+	if err != nil || len(rows[rec.ID]) != 1 || rows[rec.ID][0].State != "declined" {
+		t.Fatalf("history: %+v %v", rows, err)
+	}
+	if _, err := e.svc.CallRequestShown(rec.ID, "c404"); err == nil {
+		t.Fatal("unknown request accepted")
+	}
+}

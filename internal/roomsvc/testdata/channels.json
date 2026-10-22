@@ -1,0 +1,391 @@
+{
+  "members": [
+    {
+      "owner": true,
+      "address": "repo"
+    },
+    {
+      "id": "lead",
+      "address": "repo:lead"
+    },
+    {
+      "id": "peer",
+      "address": "repo:peer"
+    },
+    {
+      "id": "child",
+      "address": "repo:child",
+      "parent": "lead"
+    },
+    {
+      "id": "sibling",
+      "address": "repo:sibling",
+      "parent": "lead"
+    },
+    {
+      "id": "grandchild",
+      "address": "repo:grandchild",
+      "parent": "child",
+      "closed": true
+    }
+  ],
+  "cases": [
+    {
+      "name": "lead discussion",
+      "post": {
+        "from": "repo:lead",
+        "to": [
+          "repo:peer"
+        ]
+      },
+      "views": [
+        "general"
+      ]
+    },
+    {
+      "name": "child completion",
+      "post": {
+        "from": "repo:child",
+        "to": [
+          "repo"
+        ],
+        "completion": true,
+        "kind": "completed"
+      },
+      "views": [
+        "channel:lead"
+      ]
+    },
+    {
+      "name": "closed grandchild completion",
+      "post": {
+        "from": "repo:grandchild",
+        "to": [
+          "repo"
+        ],
+        "completion": true,
+        "kind": "completed"
+      },
+      "views": [
+        "channel:child"
+      ]
+    },
+    {
+      "name": "lead to children",
+      "post": {
+        "from": "repo:lead",
+        "to": [
+          "repo:child",
+          "repo:sibling"
+        ]
+      },
+      "views": [
+        "channel:lead"
+      ]
+    },
+    {
+      "name": "child to own child",
+      "post": {
+        "from": "repo:child",
+        "to": [
+          "repo:grandchild"
+        ]
+      },
+      "views": [
+        "channel:child"
+      ]
+    },
+    {
+      "name": "child to parent",
+      "post": {
+        "from": "repo:child",
+        "to": [
+          "repo:lead"
+        ]
+      },
+      "views": [
+        "channel:lead"
+      ]
+    },
+    {
+      "name": "child to parent and sibling",
+      "post": {
+        "from": "repo:child",
+        "to": [
+          "repo:lead",
+          "repo:sibling"
+        ]
+      },
+      "views": [
+        "channel:lead"
+      ]
+    },
+    {
+      "name": "explicit owner",
+      "post": {
+        "from": "repo:child",
+        "to": [
+          "repo:lead",
+          "repo"
+        ]
+      },
+      "views": [
+        "channel:lead",
+        "general"
+      ]
+    },
+    {
+      "name": "other team",
+      "post": {
+        "from": "repo:grandchild",
+        "to": [
+          "repo:sibling"
+        ]
+      },
+      "views": [
+        "channel:child",
+        "channel:lead"
+      ]
+    },
+    {
+      "name": "unknown sender",
+      "post": {
+        "from": "system",
+        "to": []
+      },
+      "views": [
+        "general"
+      ]
+    },
+    {
+      "name": "unknown completion",
+      "post": {
+        "from": "system",
+        "to": [
+          "repo:child"
+        ],
+        "completion": true,
+        "kind": "completed"
+      },
+      "views": [
+        "general"
+      ]
+    },
+    {
+      "name": "mixed known and unknown recipients",
+      "post": {
+        "from": "repo:lead",
+        "to": [
+          "repo:child",
+          "unknown"
+        ]
+      },
+      "views": [
+        "channel:lead",
+        "general"
+      ]
+    },
+    {
+      "name": "lead completion",
+      "post": {
+        "from": "repo:lead",
+        "to": [
+          "repo"
+        ],
+        "completion": true,
+        "kind": "completed"
+      },
+      "views": [
+        "general"
+      ]
+    },
+    {
+      "name": "child to sibling",
+      "post": {
+        "from": "repo:child",
+        "to": [
+          "repo:sibling"
+        ]
+      },
+      "views": [
+        "channel:lead"
+      ]
+    },
+    {
+      "name": "owner to child",
+      "post": {
+        "from": "repo",
+        "to": [
+          "repo:child"
+        ]
+      },
+      "views": [
+        "channel:lead"
+      ]
+    },
+    {
+      "name": "owner to owner",
+      "post": {
+        "from": "repo",
+        "to": [
+          "repo"
+        ]
+      },
+      "views": [
+        "general"
+      ]
+    },
+    {
+      "name": "child to other lead",
+      "post": {
+        "from": "repo:child",
+        "to": [
+          "repo:peer"
+        ]
+      },
+      "views": [
+        "channel:lead",
+        "general"
+      ]
+    },
+    {
+      "name": "child question to parent",
+      "post": {
+        "from": "repo:child",
+        "to": [
+          "repo:lead"
+        ],
+        "kind": "question",
+        "text": "[QUESTION q1] Which fix?"
+      },
+      "views": [
+        "channel:lead"
+      ]
+    },
+    {
+      "name": "parent answer to child",
+      "post": {
+        "from": "repo:lead",
+        "to": [
+          "repo:child"
+        ],
+        "text": "[ANSWER q1] Use the small fix."
+      },
+      "views": [
+        "channel:lead"
+      ]
+    },
+    {
+      "name": "voice: owner spoken line",
+      "post": {
+        "from": "repo",
+        "to": [
+          "repo:voice-call"
+        ],
+        "human": true,
+        "spoken": true,
+        "kind": "voice",
+        "source": "voice"
+      },
+      "views": [
+        "voice-call"
+      ]
+    },
+    {
+      "name": "voice: Voice spoken line",
+      "post": {
+        "from": "repo:voice-call",
+        "to": [
+          "repo"
+        ],
+        "spoken": true,
+        "kind": "voice",
+        "source": "voice"
+      },
+      "views": [
+        "voice-call"
+      ]
+    },
+    {
+      "name": "voice: relayed root answer",
+      "post": {
+        "from": "repo:voice-call",
+        "to": [
+          "repo"
+        ],
+        "relayOf": "msg_root",
+        "kind": "voice",
+        "source": "voice"
+      },
+      "views": [
+        "voice-call"
+      ]
+    },
+    {
+      "name": "voice: relay to root",
+      "post": {
+        "from": "repo:voice-call",
+        "to": [
+          "repo:root"
+        ],
+        "kind": "message",
+        "source": "voice"
+      },
+      "views": [
+        "voice-call"
+      ]
+    },
+    {
+      "name": "keeper nudge to a holder",
+      "post": {
+        "from": "goal-keeper",
+        "to": [
+          "repo:lead"
+        ],
+        "kind": "goal"
+      },
+      "views": [
+        "dm"
+      ]
+    },
+    {
+      "name": "keeper escalation to root",
+      "post": {
+        "from": "goal-keeper",
+        "to": [
+          "repo:root"
+        ],
+        "kind": "goal"
+      },
+      "views": [
+        "dm"
+      ]
+    },
+    {
+      "name": "keeper failed-pass alert to root",
+      "post": {
+        "from": "goal-keeper",
+        "to": [
+          "repo:root"
+        ],
+        "kind": "goal"
+      },
+      "views": [
+        "dm"
+      ]
+    },
+    {
+      "name": "quiet keeper journal entry to the owner",
+      "post": {
+        "from": "goal-keeper",
+        "to": [
+          "repo"
+        ],
+        "kind": "goal"
+      },
+      "views": [
+        "dm"
+      ]
+    }
+  ]
+}

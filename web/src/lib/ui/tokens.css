@@ -1,0 +1,51 @@
+/* Shared design tokens: the pieces every surface uses, so the app reads as
+   one design. Color and surface vars stay in app.css. */
+:root {
+  /* Hairline borders: a quiet edge, and a firmer one for controls. */
+  --hair: rgba(236, 233, 228, 0.09);
+  --hair-strong: rgba(236, 233, 228, 0.18);
+
+  /* Radius: rows, chips and controls; cards; floating glass. Pills and dots
+     are fully round. */
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-lg: 16px;
+
+  /* Spacing: one scale for padding and gaps. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+
+  /* Type: one size per job. Weights are 400 and 600. Pick the nearest
+     size; do not write a literal font-size. */
+  --t-cap: 11px;
+  --t-sm: 12.5px;
+  --t-ui: 13px;
+  --t-body: 14px;
+  --t-lead: 15px;
+  --t-title: 16px;
+  --t-head: 18px;
+  --t-page: 20px;
+  --t-display: 24px;
+
+  /* Line height: tight for headings and chips, normal for running text. */
+  --leading-tight: 1.25;
+  --leading: 1.45;
+
+  /* Three glass levels. The glass gets more opaque as the surface grows, so
+     text stays readable over a bright page. */
+  --glass-ink: 26, 25, 28;
+  --glass-pill: 0.86;
+  --glass-composer: 0.93;
+  --glass-panel: 0.95;
+}
+
+/* A small-caps state label, such as LIVE or YOU ARE DRIVING. */
+.section-label { font-size: var(--t-cap); font-weight: 500; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); margin: var(--s5) 0 var(--s2); }
+.state-label { font-size: var(--t-cap); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+
+/* An agent action as one compact mono line. */
+.act-line { font: var(--t-cap) var(--mono); color: var(--faint); }

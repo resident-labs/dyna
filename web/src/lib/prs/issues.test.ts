@@ -1,0 +1,156 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { rm } from 'node:fs/promises'
+import { bundle, domNames, importBundle, installDom } from './prDetailHarness.ts'
+import { issueGroups, issueChip } from './github.ts'
+import type { GitHubItem } from '../api/github.ts'
+import { element, elements, need } from '../../../test/need.ts'
+
+const settle = () => new Promise((r) => setTimeout(r, 0))
+const issue = (number: number, group: string, extra: Partial<GitHubItem> = {}): GitHubItem => ({ number, title: `Issue ${number}`, state: group === 'closed-today' || group === '' ? 'CLOSED' : 'OPEN', group, workingSessionLive: false, author: { login: 'sam' }, labels: [], createdAt: '2026-10-19T00:00:00Z', updatedAt: '2026-10-19T00:00:00Z', url: `https://github.com/o/r/issues/${number}`, ...extra })
+
+test('issueGroups orders the groups and puts older closed issues in Closed', () => {
+  const items = [issue(1, 'has-pr'), issue(2, 'needs-owner'), issue(3, ''), issue(4, 'working'), issue(5, 'closed-today')]
+  const groups = issueGroups(items)
+  assert.deepEqual(groups.map((g) => g.label), ['Needs an owner', 'An agent is working', 'Has a PR open', 'Closed today', 'Closed'])
+  assert.deepEqual(groups.map((g) => g.rows.map((r) => r.number)), [[2], [4], [1], [5], [3]])
+  assert.deepEqual(issueGroups([issue(2, 'needs-owner')]).map((g) => g.id), ['needs-owner'])
+})
+
+const API = `export const api = {
+  githubList: () => Promise.resolve({ repo: 'o/r', items: globalThis.issueItems }),
+  githubView: (_r, _k, n) => globalThis.issueViewFails ? Promise.reject(new Error('Issue not found')) : Promise.resolve({ number: n, title: 'Issue ' + n, ...globalThis.issueItems.find((i) => i.number === n), body: 'Body text', comments: [] }),
+  roomMergeStatus: () => { globalThis.issueMergeCalls++; return Promise.resolve([]) },
+  startIssueWork: (...a) => { globalThis.startCalls.push(a); return globalThis.startFails ? Promise.reject(new Error('no default profile')) : Promise.resolve(globalThis.startResult) },
+}; export const openExternal = () => {}`
+
+// Bundle outside the test clock: only the mounted view is measured.
+const listCode = await bundle({ component: 'GitHub', api: API })
+const pageCode = await bundle({ component: 'IssuePage', api: API })
+
+async function render(items: GitHubItem[], props: object = {}) {
+  const dom = installDom({ ResizeObserver: class { observe() {} unobserve() {} disconnect() {} }, issueItems: items, issueMergeCalls: 0, startCalls: [], startResult: { member: { id: 's9', name: 'issue-839' } } })
+  dom.reconfigure({ url: 'http://localhost/' })
+  Object.assign(globalThis, { history: dom.window.history, location: dom.window.location })
+  const { dir, default: GitHub, mount } = await importBundle(listCode, 'GitHub')
+  const target = need(document.getElementById('app'), '#app')
+  mount(GitHub, { target, props: { roomId: 'r', kind: 'issue', ...props } })
+  await settle()
+  await settle()
+  return { target, done: () => { dom.window.close(); for (const n of [...domNames, 'history', 'location', 'issueMergeCalls', 'issueItems', 'startCalls', 'startResult', 'startFails', 'issueViewFails']) Reflect.deleteProperty(globalThis, n); return rm(dir, { recursive: true, force: true }) } }
+}
+
+test('a failed Ask an agent shows its error on the issue page, where the list is hidden', async () => {
+  const r = await render([issue(839, 'needs-owner')])
+  try {
+    Object.assign(globalThis, { startFails: true })
+    element(r.target, '.row').click()
+    await settle()
+    assert.equal(r.target.querySelector('.list'), null)
+    need(elements(r.target, 'button').find((b) => b.textContent === 'Ask an agent')).click()
+    await settle()
+    assert.match(element(r.target, '.detail').textContent, /no default profile/)
+  } finally {
+    await r.done()
+  }
+})
+
+test('the Has a PR open chip names the open PR, not an older closed one', () => {
+  const it = issue(836, 'has-pr', { linkedPRs: [{ number: 8, state: 'CLOSED', isDraft: false, url: 'u8' }, { number: 9, state: 'OPEN', isDraft: true, url: 'u9' }] })
+  assert.equal(issueChip(it)?.label, 'PR #9 draft')
+})
+
+test('the issue page has the shared facts line and a Work on this issue card that opens the session and the PR', async () => {
+  const dom = installDom()
+  const { dir, default: IssuePage, mount } = await importBundle(pageCode, 'IssuePage')
+  const calls: string[] = []
+  const it = issue(842, 'working', { workingSession: 's1', workingSessionName: 'ui-feed-jump', workingSessionLive: true, linkedPRs: [{ number: 852, state: 'OPEN', isDraft: true, url: 'u852' }], labels: [{ name: 'bug', color: 'd73a4a' }] })
+  const target = need(document.getElementById('app'), '#app')
+  mount(IssuePage, { target, props: { it, detail: { ...it, body: 'Body', comments: [] }, onstart: () => calls.push('start'), onsession: () => calls.push('session'), onpr: (n: number) => calls.push(`pr${n}`) } })
+  await settle()
+  try {
+    const facts = element(target, '.factsline')
+    assert.equal(element(facts, '.author').textContent, 'sam')
+    assert.match(facts.textContent, /bug/)
+    assert.match(element(target, 'h4').textContent, /Work on this issue\s*2/)
+    for (const b of elements(target, 'button')) {
+      if (/^Session ui-feed-jump/.test(b.textContent) || b.textContent === 'PR #852' || b.textContent === 'Ask an agent') b.click()
+    }
+    assert.deepEqual(calls, ['session', 'pr852', 'start'])
+    assert.equal(element(target, '.name + span').textContent, 'Working')
+  } finally {
+    dom.window.close()
+    for (const n of domNames) Reflect.deleteProperty(globalThis, n)
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+
+test('opening an issue records its link; Back and Forward follow issue links', async () => {
+  const r = await render([issue(839, 'needs-owner')])
+  try {
+    element(r.target, '.row').click()
+    await settle()
+    assert.equal(location.hash, '#room=r&issue=839')
+    history.replaceState(null, '', '/')
+    window.dispatchEvent(new window.PopStateEvent('popstate'))
+    await settle()
+    assert.equal(r.target.querySelector('.dscroll'), null)
+    history.replaceState(null, '', '#room=r&issue=839')
+    window.dispatchEvent(new window.PopStateEvent('popstate'))
+    await settle()
+    assert.match(element(r.target, '.dscroll').textContent, /Issue 839/)
+    history.replaceState(null, '', '#room=r&issue=900')
+    window.dispatchEvent(new window.HashChangeEvent('hashchange'))
+    await settle()
+    assert.match(element(r.target, '.dscroll').textContent, /Issue 900/)
+  } finally { await r.done() }
+})
+
+test('an issue link opens even when the list filter excludes it', async () => {
+  const r = await render([issue(839, 'needs-owner')], { link: { roomId: 'r', issue: 900 } })
+  try {
+    assert.match(r.target.querySelector('.dscroll')?.textContent ?? '', /#900/)
+  } finally { await r.done() }
+})
+
+
+test('a failed issue deep link shows its error and a way back to the list', async () => {
+  Object.assign(globalThis, { issueViewFails: true })
+  const r = await render([issue(839, 'needs-owner')], { link: { roomId: 'r', issue: 900 } })
+  try {
+    assert.match(r.target.querySelector('.dscroll')?.textContent ?? '', /Issue not found/)
+    need(elements(r.target, '.dscroll button').find((b) => b.textContent.trim() === 'Issues')).click()
+    await settle()
+    assert.ok(r.target.querySelector('.list'))
+    assert.equal(r.target.querySelector('.dscroll'), null)
+  } finally { await r.done() }
+})
+
+
+test('opening Issues from a previous PR address makes Back return to the Issues list', async () => {
+  const r = await render([issue(839, 'needs-owner')])
+  try {
+    history.replaceState(null, '', '#room=r&pr=800')
+    element(r.target, '.row').click()
+    await settle()
+    const popped = new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true }))
+    history.back()
+    await popped
+    await settle()
+    assert.equal(location.hash, '')
+    assert.ok(r.target.querySelector('.list'))
+    assert.equal(r.target.querySelector('.dscroll'), null)
+  } finally { await r.done() }
+})
+
+
+test('Issues never loads PR merge status, on mount or focus', async () => {
+  const r = await render([issue(839, 'needs-owner')])
+  try {
+    assert.equal(Reflect.get(globalThis, 'issueMergeCalls'), 0)
+    window.dispatchEvent(new window.Event('focus'))
+    await settle()
+    assert.equal(Reflect.get(globalThis, 'issueMergeCalls'), 0)
+  } finally { await r.done() }
+})

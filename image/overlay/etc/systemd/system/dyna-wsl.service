@@ -1,0 +1,13 @@
+[Unit]
+Description=Adapt the Dyna distro to the shared WSL2 kernel
+ConditionVirtualization=wsl
+DefaultDependencies=no
+After=local-fs.target proc-sys-fs-binfmt_misc.mount
+
+[Service]
+# The script waits up to 30 seconds for WSLg. It does not delay boot.
+Type=exec
+ExecStart=/usr/local/libexec/dyna-wsl-setup
+
+[Install]
+WantedBy=sysinit.target

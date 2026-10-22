@@ -1,0 +1,278 @@
+<script lang="ts">
+  // Worker profiles: list, edit, add, make default, enable or disable, and
+  // remove. Changes that can stop work elsewhere ask first.
+  import { errorText } from '../errorText.ts'
+  import { onMount } from 'svelte'
+  import Skeleton from '../ui/Skeleton.svelte'
+  import EmptyState from '../ui/EmptyState.svelte'
+  import { slide } from 'svelte/transition'
+  import { BASE, motion } from '../ui/motion.js'
+  import TabHeader from '../rooms/TabHeader.svelte'
+  import { api } from '../../api.js'
+  import ProfileEditor from './ProfileEditor.svelte'
+  import ProfileUses from './ProfileUses.svelte'
+  import ProfileWizard from './ProfileWizard.svelte'
+  import Confirm from '../ui/Confirm.svelte'
+  import Menu from '../ui/Menu.svelte'
+  import SupportBrief from './SupportBrief.svelte'
+  import { healthChip } from './support.ts'
+  import type { ProfileCheck, ProfileList, ProfileView } from '../api/profile.ts'
+  import type { EditableProfile, ModelSelection } from './profiles/state.ts'
+
+  type ConfirmKind = 'default' | 'disable' | 'enable' | 'remove'
+  // The list with every part present, so a view reads it without a null check.
+  type Loaded = { [K in keyof ProfileList]-?: NonNullable<ProfileList[K]> }
+  interface Props {
+    onmodal?: (open: boolean) => void
+    initialSelection?: ModelSelection | null
+    initialProfile?: string
+    roomId?: string
+    onusage?: (accountId: string) => void
+  }
+
+  let { onmodal, initialSelection = null, initialProfile = '', roomId = '', onusage }: Props = $props()
+
+  let creating = $state(false)
+  let wizardSelection = $state<ModelSelection | null>(null)
+  let lastSelection: ModelSelection | null = null
+  let lastProfile = ''
+  $effect(() => {
+    if (initialSelection && initialSelection !== lastSelection) {
+      lastSelection = initialSelection
+      wizardSelection = initialSelection
+      editing = null
+      creating = true
+    }
+  })
+
+  let list = $state<Loaded | null>(null)
+  let error = $state('')
+  let editing = $state<{ original: string; profile: ProfileView } | null>(null)
+  let confirm = $state<{ kind: ConfirmKind; p: ProfileView; busy?: boolean; error?: string } | null>(null)
+  let menu = $state<{ p: ProfileView; x: number; y: number } | null>(null)
+  let note = $state('')
+  let asking = $state<EditableProfile | null>(null) // the profile whose harness needs support
+
+  // One color per harness, from the name palette, so a list reads at a glance.
+  const harnessHue: Record<string, number> = { 'claude-code': 7, codex: 3, antigravity: 4, opencode: 6, muse: 2, custom: 5, mock: 0 }
+  const short: Record<string, string> = { 'claude-code': 'CC', codex: 'CX', antigravity: 'AG', opencode: 'OC', muse: 'MU', custom: 'SH', mock: 'MK' }
+
+  $effect(() => {
+    if (initialProfile && initialProfile !== lastProfile && list) {
+      lastProfile = initialProfile
+      const profile = list.profiles.find(p => p.name === initialProfile)
+      if (profile) {
+        creating = false
+        editing = { original: profile.name, profile: structuredClone($state.snapshot(profile)) }
+      } else error = `Profile “${initialProfile}” is no longer available.`
+    }
+  })
+
+  let enabled = $derived((list?.profiles ?? []).filter((p) => !p.disabled))
+
+  $effect(() => { onmodal?.(!!(creating || editing || confirm || menu || asking)); return () => onmodal?.(false) })
+
+  async function load() {
+    try {
+      const loaded: ProfileList = await api.configProfiles()
+      list = { ...loaded, profiles: loaded.profiles ?? [], harnesses: loaded.harnesses ?? [], unready: loaded.unready ?? {} }
+      error = ''
+    } catch (e) {
+      error = String(e)
+    }
+  }
+
+  function say(text: string) {
+    note = text
+    setTimeout(() => { if (note === text) note = '' }, 2600)
+  }
+
+  function items(p: ProfileView) {
+    const out: { label: string; danger?: boolean; gap?: boolean; run: () => void }[] = [{ label: 'Edit', run: () => (editing = { original: p.name, profile: structuredClone($state.snapshot(p)) }) }]
+    if (!p.default && !p.disabled) out.push({ label: 'Make default', run: () => (confirm = { kind: 'default', p }) })
+    out.push({ label: p.disabled ? 'Enable' : 'Disable', danger: !p.disabled, gap: true, run: () => (p.disabled ? act('enable', p) : (confirm = { kind: 'disable', p })) })
+    out.push({ label: 'Remove', danger: true, run: () => (confirm = { kind: 'remove', p }) })
+    return out
+  }
+
+  // Confirm text names what else changes: the default moves, or nothing is
+  // left enabled.
+  let confirmText = $derived.by(() => {
+    if (!confirm) return null
+    const p = confirm.p
+    const last = !p.disabled && enabled.length === 1
+    const isDefault = list?.default === p.name
+    if (confirm.kind === 'default') {
+      return { title: `Make ${p.name} the default?`, lines: [`New sessions and workflow agents that name no profile will use ${p.name}${list?.default ? ` instead of ${list.default}` : ''}.`], action: 'Make default', danger: false }
+    }
+    const lines: string[] = []
+    if (confirm.kind === 'remove') lines.push(`This deletes ${p.name} from your profiles. Sessions that already use it keep running.`)
+    else lines.push(`Workflows can no longer use ${p.name}, and / no longer offers it. Its settings stay saved.`)
+    if (isDefault) lines.push(`${p.name} is your default profile. Dyna will fall back to the first enabled profile.`)
+    if (last) lines.push(`It is your only enabled profile. Nothing can start a session until you enable or add one.`)
+    return { title: confirm.kind === 'remove' ? `Remove ${p.name}?` : `Disable ${p.name}?`, lines, action: confirm.kind === 'remove' ? 'Remove profile' : 'Disable profile', danger: true }
+  })
+
+  async function act(kind: ConfirmKind, p: ProfileView) {
+    if (kind === 'default') await api.setDefaultProfile(p.name)
+    else if (kind === 'disable') await api.setProfileDisabled(p.name, true)
+    else if (kind === 'enable') await api.setProfileDisabled(p.name, false)
+    else if (kind === 'remove') await api.removeProfile(p.name)
+    await load()
+    say({ default: `${p.name} is now the default.`, disable: `${p.name} is disabled.`, enable: `${p.name} is enabled.`, remove: `${p.name} was removed.` }[kind])
+  }
+
+  async function runConfirm() {
+    const asked = confirm
+    if (!asked) return
+    const { kind, p } = asked
+    confirm = { ...asked, busy: true, error: '' }
+    try {
+      await act(kind, p)
+      confirm = null
+    } catch (e) {
+      confirm = { ...asked, busy: false, error: errorText(e) }
+    }
+  }
+
+  // One checkbox in the uses grid saves that profile through the editor's
+  // save. Its row stays locked until the save and the reload finish, so the
+  // next change starts from the saved uses. A save error outlives the reload.
+  let saving = $state<string[]>([]) // names of profiles whose uses are saving
+  async function setUses(p: ProfileView, uses: string[]) {
+    saving = [...saving, p.name]
+    let failed = ''
+    try {
+      await api.saveProfile({ original: p.name, profile: { ...$state.snapshot(p), uses } })
+    } catch (e) {
+      failed = errorText(e)
+    }
+    await load()
+    if (failed) error = failed
+    saving = saving.filter((n) => n !== p.name)
+  }
+
+  // A test updates the row's chip without reloading the list.
+  function checked(c: ProfileCheck) {
+    if (!list || !c?.support) return
+    list.profiles = list.profiles.map((p) => (p.name === c.name ? { ...p, support: c.support } : p))
+  }
+
+  async function saved(v: ProfileView) {
+    editing = null
+    creating = false
+    await load()
+    say(`Saved ${v.name}.`)
+  }
+
+  onMount(load)
+</script>
+
+<section>
+  <TabHeader flush title="Profiles" blurb="A profile is a harness and a model that sessions and workflow agents run on. Type /name in a room to start a session with one.">
+    {#snippet action()}<button class="btn fill" onclick={() => { wizardSelection = null; creating = true }}>New profile</button>{/snippet}
+  </TabHeader>
+  {#if error}<p class="err">{error}</p>{/if}
+  {#if note}<p class="note" role="status">{note}</p>{/if}
+  {#if !list && !error}<Skeleton label="Loading profiles" rows={3} />{/if}
+  {#if list && !list.profiles.length}
+    <EmptyState title="No profiles yet">A profile is a harness and a model. Create one to start sessions on it.</EmptyState>
+  {/if}
+  {#if list}
+    <div class="list">
+      {#each list.profiles as p (p.name)}
+        {@const h = healthChip(p)}
+        <div class="prof" class:off={p.disabled} transition:slide={{ duration: motion(BASE) }}>
+          <span class="glyph bg-{harnessHue[p.harness] ?? 0}" aria-hidden="true">{short[p.harness] ?? '?'}</span>
+          <div class="main">
+            <div class="name">
+              <span>{p.name}</span>
+              {#if list.default === p.name}<span class="badge def">default</span>{/if}
+              {#if p.disabled}<span class="badge">disabled</span>{/if}
+              {#if p.safeMode}<span class="badge">safe mode</span>{/if}
+              {#if h}<span class="badge {h.tone}" title={h.title}>{h.text}</span>{/if}
+            </div>
+            <div class="sub" title={(p.models?.length ?? 0) > 1 ? (p.models ?? []).join(' → ') : undefined}>{p.harness}{p.model ? ' · ' + p.model : ''}{#if (p.models?.length ?? 0) > 1}&nbsp;→ +{(p.models?.length ?? 0) - 1} fallback{/if}{#if p.envKeys?.length}&nbsp;· {p.envKeys.length} env {p.envKeys.length === 1 ? 'value' : 'values'}{/if}</div>
+            {#if p.description}<div class="desc">{p.description}</div>{/if}
+          </div>
+          <div class="stats" aria-label="taste {p.taste}, intelligence {p.intelligence}, cost-efficiency {p.cost} out of 10">
+            {#each ([['taste', p.taste], ['smarts', p.intelligence], ['thrift', p.cost]] as const) as [label, v]}
+              <div class="stat"><span>{label}</span><span class="bar"><span style="width:{v * 10}%"></span></span></div>
+            {/each}
+          </div>
+          <button class="more" aria-label="Actions for {p.name}" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); menu = { p, x: r.right - 210, y: r.bottom + 4 } }}>
+            <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="5" cy="10" r="1.6" fill="currentColor" /><circle cx="10" cy="10" r="1.6" fill="currentColor" /><circle cx="15" cy="10" r="1.6" fill="currentColor" /></svg>
+          </button>
+        </div>
+      {/each}
+    </div>
+    <div class="usegrid">
+      <h3>Who may use each profile</h3>
+      <ProfileUses profiles={list.profiles} busy={saving} onchange={setUses} />
+    </div>
+  {/if}
+</section>
+
+{#if menu}
+  <Menu x={menu.x} y={menu.y} title={menu.p.name} items={items(menu.p)} onclose={() => (menu = null)} />
+{/if}
+{#if confirm && confirmText}
+  <Confirm {...confirmText} busy={confirm.busy} error={confirm.error} onconfirm={runConfirm} oncancel={() => (confirm = null)} />
+{/if}
+{#if creating}
+  {#key wizardSelection}
+  <ProfileWizard harnesses={list?.harnesses ?? []} unready={list?.unready ?? {}} initialSelection={wizardSelection} {onusage} onsaved={saved} oncancel={() => (creating = false)} />
+  {/key}
+{/if}
+{#if asking}
+  <SupportBrief profile={asking} profiles={list?.profiles ?? []} {roomId} onstarted={(by) => { asking = null; say(`Started a support session on ${by}.`) }} oncancel={() => (asking = null)} />
+{/if}
+{#if editing}
+  <ProfileEditor original={editing.original} profile={editing.profile} harnesses={list?.harnesses ?? []} profiles={list?.profiles ?? []} onasksupport={(p) => (asking = p)} onchecked={checked} onsaved={saved} oncancel={() => (editing = null)} />
+{/if}
+
+<style>
+  .usegrid { margin-top: var(--s5); }
+  .usegrid h3 { margin: 0 0 var(--s2); font-size: var(--t-sm); font-weight: 600; color: var(--muted); }
+  .err { color: var(--coral); }
+  .note { color: var(--sage); font-size: var(--t-ui); margin: 0 0 10px; }
+  .list { display: flex; flex-direction: column; gap: var(--s2); }
+  .prof { display: flex; align-items: center; gap: 14px; background: var(--side); border: 1px solid var(--line-soft); border-radius: 10px; padding: 14px var(--s3) 14px var(--s4); transition: border-color var(--motion-fast) var(--ease); }
+  @media (hover: hover) {
+    .prof:hover { border-color: var(--line); }
+  }
+  .prof.off { opacity: 0.55; }
+  .glyph { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: var(--t-ui); font-weight: 700; color: #17161a; flex: none; background: var(--h); }
+  .main { flex: 1; min-width: 0; }
+  .name { display: flex; align-items: center; gap: var(--s2); font-weight: 600; font-size: var(--t-lead); }
+  .badge { font-size: var(--t-cap); font-weight: 600; color: var(--muted); background: var(--raise); border-radius: 4px; padding: 1px 6px; }
+  .badge.bad { color: var(--coral); background: rgba(239, 138, 128, 0.1); }
+  .badge.warn { color: var(--gold); background: var(--gold-wash); }
+  .badge.def { color: #18161d; background: var(--gold); }
+  .sub { font-size: var(--t-ui); color: var(--muted); margin-top: 2px; }
+  .desc { font-size: var(--t-ui); color: var(--faint); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .stats { display: flex; flex-direction: column; gap: var(--s1); width: 150px; flex: none; }
+  .stat { display: grid; grid-template-columns: 44px 1fr; align-items: center; gap: var(--s2); font-size: var(--t-cap); color: var(--faint); }
+  .bar { height: 5px; background: var(--rail); border-radius: 3px; overflow: hidden; }
+  .bar span { display: block; height: 100%; background: var(--iris); border-radius: 3px; opacity: 0.85; }
+  .more { width: 32px; height: 32px; border-radius: 6px; color: var(--muted); display: grid; place-items: center; flex: none; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
+  @media (hover: hover) {
+    .more:hover { background: var(--hover); color: var(--ink); }
+  }
+  .more:active { background: var(--select); }
+
+  /* A phone: the meters move under the name as one row of three, so the
+     name, model and badges get the full width and wrap instead of
+     squeezing. The menu button stays at the top right, 44 px. */
+  @media (max-width: 760px) {
+    .btn { min-height: 44px; }
+    .prof { display: grid; grid-template-columns: 40px minmax(0, 1fr) 44px; grid-template-areas: 'glyph main more' 'stats stats stats'; column-gap: var(--s3); row-gap: var(--s3); align-items: start; padding: var(--s3) 6px 14px 14px; }
+    .glyph { grid-area: glyph; }
+    .main { grid-area: main; }
+    .more { grid-area: more; width: 44px; height: 44px; margin-top: -4px; }
+    .name { flex-wrap: wrap; row-gap: var(--s1); }
+    .desc { white-space: normal; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; }
+    .stats { grid-area: stats; width: auto; flex-direction: row; gap: var(--s3); padding-right: var(--s2); }
+    .stat { flex: 1; grid-template-columns: 1fr; gap: var(--s1); }
+  }
+</style>

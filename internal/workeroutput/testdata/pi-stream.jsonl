@@ -1,0 +1,11 @@
+{"type":"session","version":3,"id":"00000000-0000-4000-8000-000000000001","timestamp":"2024-12-03T14:00:00.000Z","cwd":"/path"}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"tool_execution_start","toolCallId":"call_abc123","toolName":"bash","args":{"command":"ls -la"}}
+{"type":"tool_execution_update","toolCallId":"call_abc123","toolName":"bash","args":{"command":"ls -la"},"partialResult":{"content":[{"type":"text","text":"partial output"}],"details":{}}}
+{"type":"tool_execution_end","toolCallId":"call_abc123","toolName":"bash","result":{"content":[{"type":"text","text":"complete output"}],"details":{}},"isError":false}
+{"type":"message_update","usage":{"input":100,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":101,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Hello "}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Hello world"}],"stopReason":"stop","usage":{"input":100,"output":5,"cacheRead":10,"cacheWrite":2,"totalTokens":117,"cost":{"input":0.01,"output":0.02,"cacheRead":0.001,"cacheWrite":0.002,"total":0.033}}}}
+{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"Hello world"}],"stopReason":"stop","usage":{"input":100,"output":5,"cacheRead":10,"cacheWrite":2,"totalTokens":117}},"toolResults":[]}
+{"type":"agent_end","messages":[],"willRetry":false}
+{"type":"agent_settled","aborted":false}

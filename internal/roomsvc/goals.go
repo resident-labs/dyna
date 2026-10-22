@@ -1,0 +1,353 @@
+package roomsvc
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"dyna-agent/internal/goalkeeper"
+	"dyna-agent/internal/goals"
+	"dyna-agent/internal/listchange"
+	"dyna-agent/internal/listpage"
+	"dyna-agent/internal/subagent"
+)
+
+func (s *Service) goalService() *goalkeeper.Service {
+	service := goalkeeper.New()
+	service.Notify = s.Notify
+	root := s.sessions().Root
+	if root == "" {
+		root = subagent.DefaultStore().Root
+	}
+	service.Store = &goals.Store{Root: filepath.Join(filepath.Dir(root), "goals")}
+	return service
+}
+func (s *Service) Goals(roomRef, before string, limit int) (listpage.Page[goals.Goal], error) {
+	r, err := s.rooms().Resolve(roomRef)
+	if err != nil {
+		return listpage.Page[goals.Goal]{}, err
+	}
+	items, err := s.goalService().Store.List(r.ID)
+	if err != nil {
+		return listpage.Page[goals.Goal]{}, err
+	}
+	return goalPage(items, before, limit)
+}
+
+// Goal reads one goal by ID, so a link opens a goal that no loaded page
+// holds.
+func (s *Service) Goal(roomRef, id string) (goals.Goal, error) {
+	r, err := s.rooms().Resolve(roomRef)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	return s.goalService().Store.Get(r.ID, id)
+}
+
+// GoalJournal returns keeper journal entries, newest first. The cursor is
+// the ID of the last returned entry; pass it as before for older entries.
+func (s *Service) GoalJournal(roomRef, before string, limit int) (listpage.Page[goals.JournalEntry], error) {
+	r, err := s.rooms().Resolve(roomRef)
+	if err != nil {
+		return listpage.Page[goals.JournalEntry]{}, err
+	}
+	items, older, err := s.goalService().Store.Journal(r.ID, before, listpage.Limit(limit))
+	if err != nil {
+		return listpage.Page[goals.JournalEntry]{}, err
+	}
+	page := listpage.Page[goals.JournalEntry]{Items: items, Older: older}
+	if older {
+		page.Cursor = items[len(items)-1].ID
+	}
+	return page, nil
+}
+
+// GoalStatus returns one goal's mechanical status from live facts.
+func (s *Service) GoalStatus(roomRef, id string) (goals.Status, error) {
+	r, err := s.rooms().Resolve(roomRef)
+	if err != nil {
+		return goals.Status{}, err
+	}
+	return s.goalService().GoalStatus(r.ID, id)
+}
+
+// GoalEvents returns a goal's journal events, newest first. The cursor is
+// the ID of the last returned event; pass it as before for older events.
+func (s *Service) GoalEvents(roomRef, goal, before string, limit int) (listpage.Page[goals.Event], error) {
+	r, err := s.rooms().Resolve(roomRef)
+	if err != nil {
+		return listpage.Page[goals.Event]{}, err
+	}
+	items, older, err := s.goalService().Store.EventsPage(r.ID, goal, before, listpage.Limit(limit))
+	if err != nil {
+		return listpage.Page[goals.Event]{}, err
+	}
+	page := listpage.Page[goals.Event]{Items: items, Older: older}
+	if older {
+		page.Cursor = items[len(items)-1].ID
+	}
+	return page, nil
+}
+
+func goalPage(items []goals.Goal, before string, limit int) (listpage.Page[goals.Goal], error) {
+	return listpage.Select(items, before, limit, time.Now(), func(g goals.Goal) listpage.Meta {
+		at := g.UpdatedAt
+		if g.Done != nil {
+			at = g.Done.At
+		}
+		return listpage.Meta{ID: g.ID, At: at, Open: g.Open()}
+	})
+}
+func (s *Service) validGoalHolders(roomID string, in goals.Input) error {
+	if in.Shared && len(in.Holders) > 0 {
+		return fmt.Errorf("choose Room or named holders")
+	}
+	if !in.Shared && len(in.Holders) == 0 {
+		return fmt.Errorf("choose Room or at least one holder")
+	}
+	for _, id := range in.Holders {
+		m, err := s.sessions().Info(id)
+		if err != nil || m.RoomID != roomID || m.Status == subagent.StatusClosed {
+			return fmt.Errorf("goal holders must be open sessions in this room")
+		}
+	}
+	return nil
+}
+func (s *Service) AddGoal(ctx context.Context, roomRef, text string, selectors []string) (goals.Goal, error) {
+	r, author, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	service := s.goalService()
+	holders, shared, err := service.ResolveHolders(r.ID, author.ResolveAs, selectors)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	g, err := service.Store.Add(r.ID, author.ID, goals.Input{Text: text, Holders: holders, Shared: shared})
+	if err != nil {
+		return g, err
+	}
+	return g, service.Milestone(g, author.ID, "added")
+}
+
+func (s *Service) EditGoal(ctx context.Context, roomRef, id, text string, holders []string, shared bool) (goals.Goal, error) {
+	return s.editGoal(ctx, roomRef, id, text, &holders, shared)
+}
+
+// EditGoalSelectors accepts CLI selectors; EditGoal accepts holder IDs from the web.
+// Both use editGoal for validation, the store mutation and its milestone.
+func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text string, selectors *[]string) (goals.Goal, error) {
+	r, author, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	var holders *[]string
+	shared := false
+	if selectors != nil {
+		h, sh, err := s.goalService().ResolveHolders(r.ID, author.ResolveAs, *selectors)
+		if err != nil {
+			return goals.Goal{}, err
+		}
+		holders, shared = &h, sh
+	}
+	return s.editGoal(ctx, r.ID, id, text, holders, shared)
+}
+
+func (s *Service) editGoal(ctx context.Context, roomRef, id, text string, holders *[]string, shared bool) (goals.Goal, error) {
+	r, author, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	if holders != nil {
+		if err = s.validGoalHolders(r.ID, goals.Input{Holders: *holders, Shared: shared}); err != nil {
+			return goals.Goal{}, err
+		}
+	}
+	service := s.goalService()
+	before, err := service.Store.Get(r.ID, id)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	g, err := service.Store.Edit(r.ID, id, author.ID, text, holders, shared)
+	if err != nil {
+		return g, err
+	}
+	if before.Text != g.Text {
+		err = service.Milestone(g, author.ID, "edited")
+	}
+	return g, err
+}
+func (s *Service) FinishGoal(ctx context.Context, roomRef, id, summary string, drop bool) (goals.Goal, error) {
+	r, author, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	service := s.goalService()
+	g, err := service.Store.Finish(r.ID, id, author.ID, summary, drop)
+	if err != nil {
+		return g, err
+	}
+	verb := "finished"
+	if drop {
+		verb = "dropped"
+	}
+	return g, service.Milestone(g, author.ID, verb)
+}
+func (s *Service) CheckGoal(ctx context.Context, roomRef, id string) (goals.Goal, error) {
+	r, _, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	return s.goalService().Store.Check(r.ID, id)
+}
+func (s *Service) WaitGoal(ctx context.Context, roomRef, id string, until time.Time) (goals.Goal, error) {
+	r, author, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	return s.goalService().Store.Wait(r.ID, id, author.ID, until)
+}
+
+// resolveAssignee turns one selector into one session id. An empty selector
+// or "none" means no assignee; a group selector is not one session.
+func (s *Service) resolveAssignee(roomID, by, sel string) (string, error) {
+	if sel == "" || sel == "none" {
+		return "", nil
+	}
+	holders, shared, err := s.goalService().ResolveHolders(roomID, by, []string{sel})
+	if err != nil {
+		return "", err
+	}
+	if shared || len(holders) != 1 {
+		return "", fmt.Errorf("an item assignee is one session, not a group")
+	}
+	return holders[0], nil
+}
+
+// GoalItems lists a goal's items in suffix order.
+func (s *Service) GoalItems(roomRef, goal string) ([]goals.Item, error) {
+	r, err := s.rooms().Resolve(roomRef)
+	if err != nil {
+		return nil, err
+	}
+	return s.goalService().Store.Items(r.ID, goal)
+}
+
+// GoalItemCounts reports each goal's open and total item counts.
+func (s *Service) GoalItemCounts(roomRef string) (map[string][2]int, error) {
+	r, err := s.rooms().Resolve(roomRef)
+	if err != nil {
+		return nil, err
+	}
+	return s.goalService().Store.ItemCounts(r.ID)
+}
+
+func (s *Service) AddGoalItem(ctx context.Context, roomRef, goal, text, assigneeSel string) (goals.Item, error) {
+	r, author, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Item{}, err
+	}
+	assignee, err := s.resolveAssignee(r.ID, author.ResolveAs, assigneeSel)
+	if err != nil {
+		return goals.Item{}, err
+	}
+	return s.goalService().Store.AddItem(r.ID, goal, author.ID, text, assignee)
+}
+
+func (s *Service) EditGoalItem(ctx context.Context, roomRef, goal, item, text string, assigneeSel *string) (goals.Item, error) {
+	r, author, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Item{}, err
+	}
+	var assignee *string
+	if assigneeSel != nil {
+		id, err := s.resolveAssignee(r.ID, author.ResolveAs, *assigneeSel)
+		if err != nil {
+			return goals.Item{}, err
+		}
+		assignee = &id
+	}
+	return s.goalService().Store.EditItem(r.ID, goal, item, author.ID, text, assignee)
+}
+
+func (s *Service) SetGoalItemState(ctx context.Context, roomRef, goal, item, state string) (goals.Item, error) {
+	r, author, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Item{}, err
+	}
+	return s.goalService().Store.SetItemState(r.ID, goal, item, author.ID, state)
+}
+
+// NoteGoal appends one holder note to the room's goal journal.
+func (s *Service) NoteGoal(ctx context.Context, roomRef, goal, text string) (goals.Event, error) {
+	r, author, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Event{}, err
+	}
+	if err := goals.CheckText(text); err != nil {
+		return goals.Event{}, err
+	}
+	if _, err := s.goalService().Store.Get(r.ID, goal); err != nil {
+		return goals.Event{}, err
+	}
+	return s.goalService().Store.AddEvent(r.ID, goals.Event{Goal: goal, By: author.ID, Event: "note", Text: strings.TrimSpace(text)})
+}
+func (s *Service) scanGoals(signatures, work map[string]string, version *string, first bool, emit func(Event)) {
+	service := s.goalService()
+	current, err := service.Store.Revision()
+	if err != nil || current == *version {
+		return
+	}
+	state, err := service.Store.Read()
+	if err != nil {
+		return
+	}
+	rows := []listchange.Item{}
+	wake, metadata := map[string]bool{}, map[string]bool{}
+	for roomID, room := range state.Rooms {
+		items := make([]goals.Goal, 0, len(room.Goals))
+		inputs := map[string]goals.Goal{}
+		for id, goal := range room.Goals {
+			items = append(items, *goal)
+			inputs[id] = *goal
+		}
+		page, err := goalPage(items, "", 0)
+		if err != nil {
+			return
+		}
+		id := func(g goals.Goal) string { return g.ID }
+		rows = append(rows, listchange.Rows("goals", roomID, items, listchange.HeadIDs(page.Items, id), id)...)
+		data, _ := json.Marshal(inputs)
+		wake[roomID] = work[roomID] != string(data)
+		work[roomID] = string(data)
+		rules, _ := json.Marshal(struct {
+			Global *goals.RuleSet
+			Room   goals.RuleSet
+		}{state.Global, room.RuleSet})
+		key := "rules\x00" + roomID
+		metadata[roomID] = work[key] != string(rules)
+		work[key] = string(rules)
+	}
+	changes, err := listchange.Sync(signatures, rows, first)
+	if err != nil {
+		return
+	}
+	*version = current
+	emitted := map[string]bool{}
+	for _, change := range changes {
+		value := change.Change
+		emit(Event{Kind: "goals", RoomID: change.RoomID, Change: &value, WorkerWake: wake[change.RoomID]})
+		wake[change.RoomID] = false
+		emitted[change.RoomID] = true
+	}
+	if !first {
+		for roomID, changed := range metadata {
+			if changed && !emitted[roomID] {
+				emit(Event{Kind: "goals", RoomID: roomID, WorkerWake: wake[roomID]})
+			}
+		}
+	}
+}

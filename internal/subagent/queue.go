@@ -1,0 +1,319 @@
+package subagent
+
+import (
+	"database/sql"
+	"dyna-agent/internal/database"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"path/filepath"
+
+	"dyna-agent/internal/room"
+)
+
+// Queue tracking stores only claimed and cancelled post IDs. Room logs
+// remain append-only. A claim and a cancellation share the gate lock.
+type queueClaims struct {
+	Claimed   map[string]int  `json:"claimed"`
+	Cancelled map[string]bool `json:"cancelled"`
+	Dismissed map[string]bool `json:"dismissed,omitempty"`
+}
+
+// claim records the turn that owns a stored post before the runner reads it.
+func (q *queueClaims) claim(messageID string, turn int) {
+	q.Claimed[messageID] = turn
+}
+
+// readQueue reads the queue claims of the session whose folder is dir, from
+// dyna.db.
+func readQueue(dir string) (queueClaims, error) {
+	b, _, err := readQueueRow(dir)
+	if err != nil {
+		return queueClaims{}, err
+	}
+	return decodeQueue(b)
+}
+
+// readCanonicalQueue never imports a retained queue file or opens a writer.
+// The engine prepares the canonical rows before it serves runner calls.
+func readCanonicalQueue(dir string) (queueClaims, error) {
+	db, err := database.Open(filepath.Dir(filepath.Dir(dir)))
+	if err != nil {
+		return queueClaims{}, err
+	}
+	raw, _, err := queryQueueRow(db, filepath.Base(dir))
+	if errors.Is(err, sql.ErrNoRows) {
+		return decodeQueue(nil)
+	}
+	if err != nil {
+		return queueClaims{}, err
+	}
+	return decodeQueue(raw)
+}
+
+func decodeQueue(b []byte) (queueClaims, error) {
+	q := queueClaims{Claimed: map[string]int{}, Cancelled: map[string]bool{}, Dismissed: map[string]bool{}}
+	if b == nil {
+		return q, nil
+	}
+	err := json.Unmarshal(b, &q)
+	if q.Claimed == nil {
+		q.Claimed = map[string]int{}
+	}
+	if q.Dismissed == nil {
+		q.Dismissed = map[string]bool{}
+	}
+	if q.Cancelled == nil {
+		q.Cancelled = map[string]bool{}
+	}
+	return q, err
+}
+
+// writeQueue stores the queue claims of the session whose folder is dir in
+// dyna.db, then writes the previous release's copy (see storeQueue).
+func writeQueue(dir string, q queueClaims) error {
+	b, err := json.Marshal(q)
+	if err != nil {
+		return err
+	}
+	return storeQueue(dir, b)
+}
+
+type QueueOrigin struct {
+	Session         string `json:"session"`
+	Address         string `json:"address"`
+	State           string `json:"state"`
+	TargetDelivered bool   `json:"targetDelivered,omitempty"`
+}
+type QueueItem struct {
+	Human       bool          `json:"human,omitempty"`
+	Origins     []QueueOrigin `json:"origins,omitempty"`
+	ID          string        `json:"id"`
+	Text        string        `json:"text"`
+	From        string        `json:"from"`
+	TS          int64         `json:"ts"`
+	Turn        int           `json:"turn"`
+	State       string        `json:"state"`
+	Cancellable bool          `json:"cancellable"`
+}
+
+func (s *Store) SessionQueue(rooms *room.Store, ref string) ([]QueueItem, error) {
+	info, err := s.Resolve(ref)
+	if err != nil {
+		return nil, err
+	}
+	out := []QueueItem{}
+	dismissed := map[string]bool{}
+	err = s.withGateLock(info.ID, func(dir string) error {
+		q, err := readQueue(dir)
+		if err != nil {
+			return err
+		}
+		dismissed = q.Dismissed
+		delivered := map[string]int{}
+		dispatched := map[string]int{}
+		steers, err := s.steering(info.ID, info.Turns)
+		if err != nil {
+			return err
+		}
+		for _, st := range steers {
+			dispatched[st.ID] = st.Turn
+			if st.Delivered {
+				delivered[st.ID] = st.Turn
+			}
+		}
+		msgs, err := rooms.Messages(info.RoomID)
+		if err != nil {
+			return err
+		}
+		for _, msg := range forSession(rooms, info.Meta, msgs) {
+			if msg.TS < info.Created.UnixMilli() && dispatched[msg.ID] == 0 && q.Claimed[msg.ID] == 0 {
+				continue
+			}
+			item := QueueItem{ID: msg.ID, Text: msg.Text, From: msg.From, Human: msg.Human, TS: msg.TS, State: "waiting", Cancellable: msg.From == info.Room}
+			if n := dispatched[msg.ID]; n > 0 {
+				item.State, item.Turn, item.Cancellable = "delivering", n, false
+			}
+			if n := q.Claimed[msg.ID]; n > 0 {
+				item.State, item.Turn, item.Cancellable = "delivering", n, false
+			}
+			if n := delivered[msg.ID]; n > 0 {
+				item.State, item.Turn, item.Cancellable = "delivered", n, false
+			}
+			if q.Cancelled[msg.ID] {
+				item.State, item.Cancellable = "cancelled", false
+			}
+			if q.Dismissed[msg.ID] {
+				item.State, item.Cancellable = "dismissed", false
+			}
+			out = append(out, item)
+		}
+		return nil
+	})
+	if err != nil || len(info.InheritedInboxes) == 0 {
+		return out, err
+	}
+	index := map[string]int{}
+	received, err := s.deliveredIDs(info.ID, info.Turns)
+	if err != nil {
+		return nil, err
+	}
+	for id, done := range info.InheritedReceipts {
+		received[id] = received[id] || done
+	}
+	for i, item := range out {
+		index[item.ID] = i
+		out[i].Origins = []QueueOrigin{{Session: info.ID, Address: info.Address(), State: item.State, TargetDelivered: received[item.ID]}}
+	}
+	for _, in := range info.InheritedInboxes {
+		items, e := s.SessionQueue(rooms, in.Session)
+		if e != nil {
+			return nil, e
+		}
+		for _, item := range items {
+			msg, e := rooms.Message(info.RoomID, item.ID)
+			if e != nil {
+				return nil, e
+			}
+			if !msg.SessionAddressed(in.Session, in.Address) {
+				continue
+			}
+			at, exists := index[item.ID]
+			if !exists {
+				at = len(out)
+				index[item.ID] = at
+				copy := item
+				copy.Origins = nil
+				copy.Cancellable = false
+				out = append(out, copy)
+			}
+			if received[item.ID] {
+				out[at].State = "delivered"
+				out[at].Cancellable = false
+			} else if item.State == "waiting" || item.State == "delivering" {
+				out[at].State = "waiting"
+			}
+			origin := QueueOrigin{Session: in.Session, Address: in.Address, State: item.State, TargetDelivered: received[item.ID]}
+			found := false
+			for _, old := range out[at].Origins {
+				if old.Session == origin.Session {
+					found = true
+				}
+			}
+			if !found {
+				out[at].Origins = append(out[at].Origins, origin)
+			}
+		}
+	}
+	for i := range out {
+		if dismissed[out[i].ID] {
+			out[i].State, out[i].Cancellable = "dismissed", false
+		}
+	}
+	return out, nil
+}
+
+// DeletePendingSteer cancels only the owner's posts before the runner claims
+// them. This never removes history or changes delivery to other recipients.
+func (s *Store) DeletePendingSteer(rooms *room.Store, ref, id string) error {
+	info, err := s.Resolve(ref)
+	if err != nil {
+		return err
+	}
+	return s.deletePendingSteer(rooms, info.Meta, id)
+}
+
+// deletePendingSteer accepts an already verified snapshot, including callers
+// holding session.lock. It must not resolve/repair that session recursively.
+func (s *Store) deletePendingSteer(rooms *room.Store, info Meta, id string) error {
+	return s.withGateLock(info.ID, func(dir string) error {
+		q, err := readQueueForUpdate(dir)
+		if err != nil {
+			return err
+		}
+		msg, err := rooms.Message(info.RoomID, id)
+		if err != nil {
+			return err
+		}
+		if msg.From != info.Room || !msg.SessionAddressed(info.ID, info.Address()) || msg.TS < info.Created.UnixMilli() {
+			return fmt.Errorf("only an owner's waiting post to this session can be deleted")
+		}
+		if q.Cancelled[id] {
+			return nil
+		}
+		if q.Claimed[id] > 0 {
+			return fmt.Errorf("message was already claimed for delivery")
+		}
+		for n := 1; n <= info.Turns; n++ {
+			t, err := s.ReadTurn(info.ID, n)
+			if err != nil {
+				return err
+			}
+			for _, st := range t.Steering {
+				if st.ID == id {
+					return fmt.Errorf("message was already dispatched")
+				}
+			}
+		}
+		q.Cancelled[id] = true
+		if err = writeQueue(dir, q); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+// queueSig is the version of session id's queue row, or "" without one.
+func (s *Store) queueSig(id string) string {
+	dir, err := s.Dir(id)
+	if err != nil {
+		return ""
+	}
+	_, version, err := readQueueRow(dir)
+	if err != nil {
+		return ""
+	}
+	return version
+}
+
+// QueueSignature changes when claim, cancellation or delivery state changes.
+func (s *Store) QueueSignature(id string) string { return s.queueSig(id) }
+
+// TurnSignature changes when turn number turns of session id is written,
+// which changes the transcript or queue display: it is the turn row's
+// revision. turns comes from the session's record, which the caller has
+// already read; 0 has no turn.
+func (s *Store) TurnSignature(id string, turns int) string {
+	if turns < 1 {
+		return ""
+	}
+	version, ok := s.turnVersion(id, turns)
+	if !ok {
+		return ""
+	}
+	return "/" + version
+}
+
+// deliveredPostTurn uses the existing claim index and the acknowledged
+// steering record. Claiming alone does not prove delivery to the harness.
+func (s *Store) deliveredPostTurn(id, messageID string) (Turn, bool, error) {
+	var turn Turn
+	delivered := false
+	err := s.withGateLock(id, func(dir string) error {
+		q, err := readQueue(dir)
+		if err != nil {
+			return err
+		}
+		n := q.Claimed[messageID]
+		if n == 0 {
+			return nil
+		}
+		turn, err = s.ReadTurn(id, n)
+		if err != nil {
+			return err
+		}
+		delivered = turn.DeliveredPost(messageID)
+		return nil
+	})
+	return turn, delivered, err
+}

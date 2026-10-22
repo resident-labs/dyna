@@ -1,0 +1,69 @@
+{
+  "machineSeed": "nWGxne_9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A",
+  "machinePublic": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+  "relaySeed": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "relayPublic": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+  "fingerprints": [
+    {
+      "publicKey": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo",
+      "fingerprint": "B8T9-BWCB-CM2W-ERUH"
+    },
+    {
+      "publicKey": "A6EHv_POEL4dcN0Y50vAmWfk1jCbpQ1fHdyGZBJVMbg",
+      "fingerprint": "YH4H-WDHN-CF97-9MLZ"
+    },
+    {
+      "publicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "fingerprint": "GJ4P-2C7Z-NRBM-Q9QA"
+    }
+  ],
+  "machineRequest": {
+    "body": "{\"machine\":\"m_vector\"}",
+    "claims": {
+      "aud": "https://relay.test",
+      "bh": "qof1f3AVO_XMCN5vkGT2cxvp_uFporVpWRyx-ufm_dM",
+      "exp": 1700000060,
+      "htm": "POST",
+      "htu": "/v1/machine/status",
+      "iat": 1700000000,
+      "iss": "m_vector",
+      "jti": "fixed-jti-1234567890"
+    },
+    "jws": "eyJhbGciOiJFZERTQSIsInR5cCI6ImR5bmEtbWFjaGluZStqd3MifQ.eyJhdWQiOiJodHRwczovL3JlbGF5LnRlc3QiLCJiaCI6InFvZjFmM0FWT19YTUNONXZrR1QyY3h2cF91RnBvclZwV1J5eC11Zm1fZE0iLCJleHAiOjE3MDAwMDAwNjAsImh0bSI6IlBPU1QiLCJodHUiOiIvdjEvbWFjaGluZS9zdGF0dXMiLCJpYXQiOjE3MDAwMDAwMDAsImlzcyI6Im1fdmVjdG9yIiwianRpIjoiZml4ZWQtanRpLTEyMzQ1Njc4OTAifQ._wyNM48tUBZXqiOYZy6rDVOMbQVHOo6x2omiRIYDTVqoXj8314hKOFVyyOfpA2fe3ml7ScNvvteS-xNgakHjCg"
+  },
+  "relayRequest": {
+    "claims": {
+      "op": "mint",
+      "sub": "usr_vector",
+      "dev": "dev_vector",
+      "epoch": 2,
+      "jkt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "origin": "https://m-vector.test",
+      "iss": "https://relay.test",
+      "aud": "m_vector",
+      "nonce": "fixed-nonce-1234567890",
+      "iat": 1700000000,
+      "exp": 1700000060
+    },
+    "jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImNvbXBhdC0xIiwidHlwIjoiZHluYS1jb25uZWN0K2p3cyJ9.eyJvcCI6Im1pbnQiLCJzdWIiOiJ1c3JfdmVjdG9yIiwiZGV2IjoiZGV2X3ZlY3RvciIsImVwb2NoIjoyLCJqa3QiOiJhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhIiwib3JpZ2luIjoiaHR0cHM6Ly9tLXZlY3Rvci50ZXN0IiwiaXNzIjoiaHR0cHM6Ly9yZWxheS50ZXN0IiwiYXVkIjoibV92ZWN0b3IiLCJub25jZSI6ImZpeGVkLW5vbmNlLTEyMzQ1Njc4OTAiLCJpYXQiOjE3MDAwMDAwMDAsImV4cCI6MTcwMDAwMDA2MH0._uCdx-4rS0cvjiLpqO0ZMVnDyTHWNRq7EE5DdTWqnww6ulBEVBadGtZYd7NgqM8fvUM1Z3dFkNK8dZ2xwOWoCg"
+  },
+  "mint": {
+    "nonce": "fixed-nonce-1234567890",
+    "code": "fixed-code-1234567890",
+    "message": "dyna-connect-mint.v1\nfixed-nonce-1234567890\nxSm5KdUC4xCKbIMent_2DbmpJTXC2WoYwsS95M0Cd90",
+    "sig": "KnYMMsqDGd-E3vXbuaCJTC1udyRR_5qYIT1A4rrMnSlDHjkozL0g3TmQUgfm7yIwGoq9CrVPO2PUcvGcGHS6CA"
+  },
+  "machineInfo": {
+    "id": "m_vector",
+    "name": "Vector machine",
+    "owner": {
+      "id": "usr_vector",
+      "name": "Vector owner"
+    },
+    "epoch": 2,
+    "status": "active",
+    "app": "https://m-vector.test",
+    "cards": "https://mc-vector.test",
+    "relay": "https://relay.test"
+  }
+}

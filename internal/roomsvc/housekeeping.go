@@ -1,0 +1,72 @@
+package roomsvc
+
+import (
+	"context"
+	"dyna-agent/internal/authority"
+	"fmt"
+	"strings"
+
+	"dyna-agent/internal/room"
+	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/shells"
+)
+
+func (s *Service) ArchiveRoom(ref string) error        { return s.rooms().SetArchived(ref, true) }
+func (s *Service) UnarchiveRoom(ref string) error      { return s.rooms().SetArchived(ref, false) }
+func (s *Service) RenameRoom(ref, name string) error   { return s.rooms().Rename(ref, name) }
+func (s *Service) PinRoom(ref string, order int) error { return s.rooms().SetPinned(ref, true, order) }
+func (s *Service) UnpinRoom(ref string) error          { return s.rooms().SetPinned(ref, false, 0) }
+
+// DeleteRoom refuses deletion while open sessions or live work pin the room.
+// Closed session records remain readable after the room is deleted.
+func (s *Service) DeleteRoom(ctx context.Context, ref string) error {
+	if err := authority.Check("room delete", authority.Of(ctx), nil); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	_, err := s.rooms().Delete(ref, s.deleteBlockers)
+	return err
+}
+
+// deleteBlockers lists the open sessions and live work that pin a room.
+func (s *Service) deleteBlockers(rec room.Record) error {
+	var blockers []string
+	// Read metadata only: Info/List can report repaired turns while Delete
+	// holds the room root lock, which a report may need again.
+	sessions, err := s.sessions().ListOpenMeta()
+	if err != nil {
+		return err
+	}
+	for _, meta := range sessions {
+		if meta.RoomID == rec.ID {
+			blockers = append(blockers, fmt.Sprintf("session %s (open)", meta.Address()))
+		}
+	}
+	runs, err := runstore.List()
+	if err != nil {
+		return err
+	}
+	for _, r := range runs {
+		if r.RoomID == rec.ID && r.Status == "running" && runstore.Alive(r) {
+			blockers = append(blockers, fmt.Sprintf("run %s (running)", r.ID))
+		}
+	}
+	shellList, err := shells.DefaultStore().List(false)
+	if err != nil {
+		return err
+	}
+	for _, sh := range shellList {
+		if sh.RoomID == rec.ID {
+			blockers = append(blockers, fmt.Sprintf("shell %s (%s)", sh.ID, sh.Status))
+		}
+	}
+	if len(blockers) == 0 && s.Notify.ActiveRoomIDs()[rec.ID] {
+		blockers = append(blockers, "live work")
+	}
+	if len(blockers) == 0 {
+		return nil
+	}
+	return fmt.Errorf("room %s is in use; close or stop these first:\n  %s", rec.Name, strings.Join(blockers, "\n  "))
+}

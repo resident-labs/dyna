@@ -1,0 +1,550 @@
+package watch
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"dyna-agent/internal/authority"
+	"dyna-agent/internal/hooks"
+	"dyna-agent/internal/localci"
+	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
+	"dyna-agent/internal/settings"
+	statewrite "dyna-agent/internal/state"
+	"dyna-agent/internal/store"
+)
+
+func TestLocalMergeQueueUsesExactApproval(t *testing.T) {
+	e, _, _ := mergeEnv(t, 1)
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range st.Records {
+		r.Kind = "local"
+		r.RepoPath = "/repo/.git"
+		r.CI = ""
+		st.RepositoryFacts = map[string]state.RepositoryFacts{defaultRepo(*r): {DefaultBranch: "dyna/integration", MergeTrialCI: true, CheckedAt: e.clock}}
+	}
+	rows := mergeQueue(st)
+	if len(rows) != 1 || rows[0].State != "ready" {
+		t.Fatalf("local queue = %+v", rows)
+	}
+	for _, r := range st.Records {
+		r.RoundHead = "old-head"
+	}
+	if rows := mergeQueue(st); len(rows) != 1 || rows[0].State != "review" {
+		t.Fatalf("stale approval = %+v", rows)
+	}
+}
+
+type fakeLocalCI struct {
+	mu        sync.Mutex
+	results   map[string]localci.Result
+	completed chan struct{}
+	bad       bool
+	started   chan struct{}
+	release   chan struct{}
+}
+
+func (f *fakeLocalCI) Show(repo, sha string) (localci.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if result, ok := f.results[sha]; ok {
+		return result, nil
+	}
+	return localci.Result{}, os.ErrNotExist
+}
+func (f *fakeLocalCI) Run(ctx context.Context, req localci.Request) (localci.Result, error) {
+	if f.started != nil {
+		f.started <- struct{}{}
+		select {
+		case <-f.release:
+		case <-ctx.Done():
+			return localci.Result{}, ctx.Err()
+		}
+	}
+	status := "passed"
+	if f.bad {
+		// The fake tests the actual trial tree, rather than the original change SHA.
+		cmd := gitCommand(ctx, req.Repo, "cat-file", "-e", req.SHA+":bad.txt")
+		if cmd.Run() == nil {
+			status = "failed"
+		}
+	}
+	var suites []localci.SuiteResult
+	for _, name := range localci.DefaultSuites() {
+		suites = append(suites, localci.SuiteResult{Suite: name, Status: status})
+	}
+	result := localci.Result{Repo: req.Repo, SHA: req.SHA, Status: status, Suites: suites, Error: map[string]string{"failed": "bad change failed"}[status]}
+	f.mu.Lock()
+	f.results[req.SHA] = result
+	f.mu.Unlock()
+	f.completed <- struct{}{}
+	return result, nil
+}
+
+func localMergeEnv(t *testing.T, bad bool) (*testEnv, string, []Record, *fakeLocalCI) {
+	t.Helper()
+	return localMergeEnvFor(t, bad, "good", "bad", "later")
+}
+
+// localMergeEnvFor opens one approved local change per name. Fewer changes mean fewer git processes.
+func localMergeEnvFor(t *testing.T, bad bool, names ...string) (*testEnv, string, []Record, *fakeLocalCI) {
+	t.Helper()
+	e, _, _ := mergeEnv(t)
+	dir, base := changeRepo(t)
+	changeGit(t, dir, "update-ref", "refs/remotes/origin/main", base)
+	v, err := settings.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.LocalLaneRepos = []string{dir}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	ci := &fakeLocalCI{results: map[string]localci.Result{}, completed: make(chan struct{}, 20), bad: bad}
+	e.s.LocalCI = ci
+	e.s.GH.run = func(context.Context, *exec.Cmd) error {
+		t.Error("local merge contacted GitHub")
+		return fmt.Errorf("unexpected GitHub call")
+	}
+	var records []Record
+	for i, name := range names {
+		changeGit(t, dir, "checkout", "-b", name, "main")
+		if err := os.WriteFile(filepath.Join(dir, name+".txt"), []byte(name), 0600); err != nil {
+			t.Fatal(err)
+		}
+		changeGit(t, dir, "add", ".")
+		changeGit(t, dir, "commit", "-m", name)
+		r, _, err := e.s.OpenChange(context.Background(), authority.Actor{Role: authority.Owner}, e.author, OpenChangeOptions{Dir: dir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := e.s.Store.update(func(st *State) error {
+			live := st.Records[r.Key]
+			live.Verdict = "approve"
+			live.RoundHead = live.Head
+			live.Created = e.clock.Add(time.Duration(i) * time.Second)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		r, _ = e.s.Store.Get(r.Key)
+		records = append(records, r)
+	}
+	return e, dir, records, ci
+}
+
+func localTick(t *testing.T, e *testEnv) {
+	t.Helper()
+	if _, err := e.s.MergeTick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+func finishLocalTrials(t *testing.T, e *testEnv, ci *fakeLocalCI, bisect bool) {
+	t.Helper()
+	deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for i := 0; i < 20; i++ {
+		localTick(t, e)
+		st, _ := e.s.Store.Read()
+		if len(st.MergeTrials) == 0 {
+			return
+		}
+		if bisect {
+			for _, b := range st.MergeTrials {
+				if b.Phase != "awaiting-root" {
+					continue
+				}
+				if st.MergePauses[e.author.RoomID] == "" || len(b.Stacks) != 0 || !b.Notified {
+					t.Fatalf("failed local batch did not stop and notify root: %+v", b)
+				}
+				localTick(t, e)
+				if err := e.s.MergeControl(t.Context(), e.author.RoomID, "bisect", nil, nil); err != nil {
+					t.Fatal(err)
+				}
+				bisect = false
+			}
+		}
+		// Wait only when the current tick started asynchronous CI work.
+		pending := false
+		e.s.localRuns().Range(func(_, v any) bool {
+			run := v.(*localCIRun)
+			select {
+			case <-run.done:
+			default:
+				pending = true
+			}
+			return true
+		})
+		if pending {
+			select {
+			case <-ci.completed:
+			case <-deadline.Done():
+				t.Fatal("local CI did not complete")
+			}
+		}
+	}
+	t.Fatal("local trials did not finish")
+}
+
+func TestLocalTrialPublishesBatchWithoutGitHub(t *testing.T) {
+	e, dir, records, ci := localMergeEnv(t, false)
+	if err := statewrite.MigrateMirrors(store.DataDir()); err != nil {
+		t.Fatal(err)
+	}
+	h := hooks.New()
+	if err := h.Add(context.Background(), dir, hooks.Hook{Name: "after", Cwd: "worktree", Event: hooks.PRMerged, Command: "true", Timeout: "1m", OnFail: "alert"}); err != nil {
+		t.Fatal(err)
+	}
+	localTick(t, e)
+	base := changeGit(t, dir, "rev-parse", "dyna/integration")
+	localTick(t, e)
+	if got := changeGit(t, dir, "rev-parse", "dyna/integration"); got != base {
+		t.Fatal("integration moved before CI result")
+	}
+	finishLocalTrials(t, e, ci, false)
+	head := changeGit(t, dir, "rev-parse", "dyna/integration")
+	for _, r := range records {
+		saved, _ := e.s.Store.Get(r.Key)
+		if saved.State != "merged" || saved.Watching {
+			t.Fatalf("change not merged: %+v", saved)
+		}
+		changeGit(t, dir, "merge-base", "--is-ancestor", r.Head, head)
+	}
+	if refs := changeGit(t, dir, "for-each-ref", "--format=%(refname)", "refs/heads/dyna/merge-trial/"); refs != "" {
+		t.Fatalf("trial refs remain: %s", refs)
+	}
+	spool, err := os.ReadDir(filepath.Join(store.DataDir(), "hook-spool"))
+	if err != nil || len(spool) == 0 {
+		t.Fatalf("hook spool: %v, %v", spool, err)
+	}
+	if len(e.sent) != 3 {
+		t.Fatalf("author notices = %d", len(e.sent))
+	}
+}
+func TestLocalTrialRootBisectPublishesPrefixAndReturnsBadChange(t *testing.T) {
+	e, dir, records, ci := localMergeEnvFor(t, true, "good", "bad")
+	localTick(t, e)
+	finishLocalTrials(t, e, ci, true)
+	good, _ := e.s.Store.Get(records[0].Key)
+	bad, _ := e.s.Store.Get(records[1].Key)
+	if good.State != "merged" || bad.State != "open" || bad.MergeTrialFailure == nil {
+		t.Fatalf("prefix states: %s %+v", good.State, bad)
+	}
+	if got := changeGit(t, dir, "ls-tree", "--name-only", "dyna/integration"); strings.Contains(got, "bad.txt") {
+		t.Fatalf("bad change published: %s", got)
+	}
+	found := false
+	for _, n := range e.sent {
+		if strings.Contains(n.Text, "bad change failed") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("failure notice missing: %+v", e.sent)
+	}
+}
+
+func TestLocalTrialRootBisectKeepsChangeAfterBadOpen(t *testing.T) {
+	e, dir, records, ci := localMergeEnvFor(t, true, "bad", "later")
+	localTick(t, e)
+	finishLocalTrials(t, e, ci, true)
+	bad, _ := e.s.Store.Get(records[0].Key)
+	later, _ := e.s.Store.Get(records[1].Key)
+	if bad.State != "open" || bad.MergeTrialFailure == nil || later.State != "open" {
+		t.Fatalf("states: %+v %s", bad, later.State)
+	}
+	if got := changeGit(t, dir, "ls-tree", "--name-only", "dyna/integration"); strings.Contains(got, "later.txt") || strings.Contains(got, "bad.txt") {
+		t.Fatalf("change published: %s", got)
+	}
+}
+
+func TestLocalTrialOutsideIntegrationMoveDiscardsTrial(t *testing.T) {
+	e, dir, records, _ := localMergeEnv(t, false)
+	localTick(t, e)
+	changeGit(t, dir, "update-ref", "refs/heads/dyna/integration", records[0].Head)
+	localTick(t, e)
+	st, _ := e.s.Store.Read()
+	if len(st.MergeTrials) != 0 {
+		t.Fatalf("outside move retained trial: %+v", st.MergeTrials)
+	}
+	if got := changeGit(t, dir, "rev-parse", "dyna/integration"); got != records[0].Head {
+		t.Fatalf("outside move overwritten: %s", got)
+	}
+	for _, r := range records {
+		saved, _ := e.s.Store.Get(r.Key)
+		if saved.State != "open" {
+			t.Fatal("change marked merged after outside move")
+		}
+	}
+}
+
+func TestLocalMergeGuardsAndGitHubLane(t *testing.T) {
+	for _, guard := range []string{"read-only", "paused", "github-lane"} {
+		t.Run(guard, func(t *testing.T) {
+			e, dir, _, _ := localMergeEnv(t, false)
+			changeGit(t, dir, "branch", "-D", "dyna/integration")
+			switch guard {
+			case "read-only":
+				if err := e.s.Notify.Rooms.UpdatePreferences(e.author.RoomID, func(r *room.Record) error { r.GitHubAccess = "read-only"; return nil }); err != nil {
+					t.Fatal(err)
+				}
+			case "paused":
+				if _, err := e.s.Notify.Rooms.SetSessionsPaused(context.Background(), e.author.RoomID, true); err != nil {
+					t.Fatal(err)
+				}
+			case "github-lane":
+				v, err := settings.Load("")
+				if err != nil {
+					t.Fatal(err)
+				}
+				v.LocalLaneRepos = nil
+				if err := v.Save(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			localTick(t, e)
+			st, _ := e.s.Store.Read()
+			if len(st.MergeTrials) != 0 {
+				t.Fatal("held local change started a trial")
+			}
+			if refs := changeGit(t, dir, "for-each-ref", "--format=%(refname)", "refs/heads/dyna/integration"); refs != "" {
+				t.Fatal("held local lane created integration")
+			}
+		})
+	}
+}
+
+func TestGitHubLaneQueueIsUnchanged(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	if _, err := f.e.s.refreshMergeFacts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := f.e.s.Store.Read()
+	rows := mergeQueue(st)
+	if len(rows) != 1 || rows[0].State != "ready" {
+		t.Fatalf("GitHub queue: %+v", rows)
+	}
+	localTick(t, f.e)
+	f.ci = "completed"
+	localTick(t, f.e)
+	if len(*f.merged) != 1 || (*f.merged)[0] != 1 {
+		t.Fatalf("GitHub publication: %v", *f.merged)
+	}
+}
+
+func TestLocalTrialCIStartsOnceAndOutlivesTickContext(t *testing.T) {
+	e, _, records, ci := localMergeEnv(t, false)
+	ci.started = make(chan struct{}, 2)
+	ci.release = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	r := records[0]
+	status, _, _, err := e.s.mergeTrialCI(ctx, r, "dyna/merge-trial/1", r.Head)
+	if err != nil || status != "pending" {
+		t.Fatalf("start = %s %v", status, err)
+	}
+	deadline, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	select {
+	case <-ci.started:
+	case <-deadline.Done():
+		t.Fatal("CI did not start")
+	}
+	cancel()
+	status, _, _, err = e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
+	if err != nil || status != "pending" {
+		t.Fatalf("running = %s %v", status, err)
+	}
+	close(ci.release)
+	value, ok := e.s.localRuns().Load(r.RepoPath + "\x00" + r.Head)
+	if !ok {
+		t.Fatal("missing active run")
+	}
+	select {
+	case <-value.(*localCIRun).done:
+	case <-deadline.Done():
+		t.Fatal("CI did not finish")
+	}
+	select {
+	case <-ci.started:
+		t.Fatal("CI started twice")
+	default:
+	}
+	status, _, _, err = e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
+	if err != nil || status != "passed" {
+		t.Fatalf("completed = %s %v", status, err)
+	}
+}
+
+func TestLocalTrialDoesNotReusePartialCachedCI(t *testing.T) {
+	e, _, records, ci := localMergeEnv(t, false)
+	ci.started = make(chan struct{}, 1)
+	ci.release = make(chan struct{})
+	r := records[0]
+	ci.results[r.Head] = localci.Result{Repo: r.RepoPath, SHA: r.Head, Status: "passed", Suites: []localci.SuiteResult{{Suite: "frontend", Status: "passed"}}}
+	status, _, _, err := e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
+	if err != nil || status != "pending" {
+		t.Fatalf("partial cached result authorized trial: %s %v", status, err)
+	}
+	deadline, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	select {
+	case <-ci.started:
+	case <-deadline.Done():
+		t.Fatal("full trial CI did not start")
+	}
+	value, _ := e.s.localRuns().Load(r.RepoPath + "\x00" + r.Head)
+	close(ci.release)
+	select {
+	case <-value.(*localCIRun).done:
+	case <-deadline.Done():
+		t.Fatal("full CI did not finish")
+	}
+	status, _, _, err = e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
+	if err != nil || status != "passed" {
+		t.Fatalf("full CI result = %s %v", status, err)
+	}
+}
+
+func TestGitHubLaneLocalChangesDoNotWriteRepositoryFacts(t *testing.T) {
+	e, _, records, _ := localMergeEnv(t, false)
+	v, err := settings.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.LocalLaneRepos = nil
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	githubFacts := state.RepositoryFacts{DefaultBranch: "main", Head: records[0].Base, MergeTrialCI: true, CheckedAt: e.clock}
+	if err := e.s.Store.update(func(st *State) error {
+		st.RepositoryFacts = map[string]state.RepositoryFacts{"github.com/owner/repo": githubFacts}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.s.refreshLocalMergeFacts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := e.s.Store.Read()
+	if len(st.RepositoryFacts) != 1 || st.RepositoryFacts["github.com/owner/repo"] != githubFacts {
+		t.Fatalf("local path changed GitHub-lane facts: %+v", st.RepositoryFacts)
+	}
+}
+
+func TestLocalLaneGitHubFactsAndPublicationAreHeld(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	dir, base := changeRepo(t)
+	changeGit(t, dir, "remote", "add", "origin", "https://github.com/owner/repo.git")
+	v, err := settings.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.LocalLaneRepos = []string{dir}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	var record Record
+	if err := f.e.s.Store.update(func(st *State) error {
+		for _, r := range st.Records {
+			r.RepoPath = dir
+			record = *r
+		}
+		st.RepositoryFacts = map[string]state.RepositoryFacts{defaultRepo(record): {DefaultBranch: "dyna/integration", Head: base, MergeTrialCI: true, CheckedAt: f.e.clock}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.e.s.refreshMergeFacts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := f.e.s.Store.Read()
+	if got := st.RepositoryFacts[defaultRepo(record)]; got.DefaultBranch != "dyna/integration" || got.Head != base {
+		t.Fatalf("GitHub overwrote local-lane facts: %+v", got)
+	}
+	if _, ready, err := f.e.s.mergeReady(context.Background(), record); err != nil || ready {
+		t.Fatalf("GitHub path can merge in local lane: %v %v", ready, err)
+	}
+	// A GitHub record without a retained checkout still uses the configured repo's lane.
+	record.RepoPath = ""
+	if err := f.e.s.Store.update(func(st *State) error { st.Records[record.Key].RepoPath = ""; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if why, err := f.e.s.trialRoomHold(context.Background(), record); err != nil || why == "" {
+		t.Fatalf("checkout-free GitHub trial is not held: %q %v", why, err)
+	}
+	if _, err := f.e.s.refreshMergeFacts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = f.e.s.Store.Read()
+	if got := st.RepositoryFacts[defaultRepo(record)]; got.DefaultBranch != "dyna/integration" || got.Head != base {
+		t.Fatalf("checkout-free refresh overwrote facts: %+v", got)
+	}
+
+}
+
+func TestLocalCIRequiresEachDefaultSuiteToPass(t *testing.T) {
+	result := localci.Result{Repo: "repo", SHA: "head", Status: "passed"}
+	for _, suite := range localci.DefaultSuites() {
+		result.Suites = append(result.Suites, localci.SuiteResult{Suite: suite, Status: "passed"})
+	}
+	result.Suites[0].Status = "failed"
+	if status, _, _, err := localCIStatus(result, "repo", "head"); err != nil || status != "failed" {
+		t.Fatalf("failed suite accepted: %s %v", status, err)
+	}
+}
+
+func TestBrokenLocalCheckoutDoesNotBlockHealthyGitHubTrial(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	repo, _ := changeRepo(t)
+	v, err := settings.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v.LocalLaneRepos = []string{repo}
+	if err := v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.e.s.Store.update(func(st *State) error {
+		broken := *st.Records["github.com/owner/repo#1"]
+		broken.Key, broken.ChangeID, broken.Kind = "change_broken", "change_broken", "local"
+		broken.Number, broken.RepoPath, broken.Branch = 0, filepath.Join(t.TempDir(), "missing"), "local"
+		if !localMergeReady(broken) {
+			t.Fatal("fixture must start with verified local facts")
+		}
+		st.Records[broken.Key] = &broken
+		st.RepositoryFacts[defaultRepo(broken)] = state.RepositoryFacts{DefaultBranch: "dyna/integration", MergeTrialCI: true}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f.ci = "completed"
+	if _, err := f.e.s.MergeTick(t.Context()); err == nil {
+		t.Fatal("missing checkout error was discarded")
+	}
+	if len(*f.merged) != 1 || (*f.merged)[0] != 1 {
+		t.Fatalf("healthy GitHub trial did not advance: %v", *f.merged)
+	}
+	broken, err := f.e.s.Store.Get("change_broken")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if broken.Error == "" || localMergeReady(broken) {
+		t.Fatalf("broken local record remains ready: %+v", broken)
+	}
+	if _, ready, err := f.e.s.mergeReady(t.Context(), broken); ready {
+		t.Fatalf("broken local publication: ready=%v err=%v", ready, err)
+	}
+}

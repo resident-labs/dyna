@@ -1,0 +1,241 @@
+package engine
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"dyna-agent/internal/authority"
+	"dyna-agent/internal/callerid"
+	"dyna-agent/internal/hub"
+	"dyna-agent/internal/mode"
+	"dyna-agent/internal/sessionlife/recordtest"
+	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/websvc"
+)
+
+// startRunner starts a process whose command line is dyna's with args.
+func startRunner(t *testing.T, args ...string) int {
+	t.Helper()
+	cmd := exec.Command(os.Args[0])
+	cmd.Args = append([]string{os.Args[0]}, args...)
+	cmd.Env = append(os.Environ(), runnerEnv+"=1")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stdin.Close(); _ = cmd.Wait() })
+	return cmd.Process.Pid
+}
+
+// Sessions running when part 3 deploys started before launches were
+// recorded. The engine records their live runners at start, so their agents
+// are not refused; a row whose PID now names another program is skipped,
+// and an idle session gets nothing.
+func TestEngineStartRecordsLiveUnrecordedRunners(t *testing.T) {
+	data := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	store := &subagent.Store{Root: filepath.Join(data, "sessions")}
+	live, reused, idle := "ses_20261020-000000-0000live", "ses_20261020-000000-00reused", "ses_20261020-000000-0000idle"
+	runner := startRunner(t, "subagent", "_turn", live)
+	other := startRunner(t, "shell", "_run", "job")
+	for id, pid := range map[string]int{live: runner, reused: other, idle: 0} {
+		recordtest.Write(t, store.Root, id, subagent.Meta{ID: id, Name: id[len(id)-6:], RoomID: "room", Room: "room", Profile: "mock", Turns: 1, Pid: pid})
+	}
+	callers, err := identifyCallers(context.Background(), data, false, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := callers.resolver
+	if got := r.Resolve(runner); got.Kind != callerid.Session || got.Session != live {
+		t.Fatalf("a live runner from before the records = %+v, want %s", got, live)
+	}
+	if got := r.Resolve(other); got.Kind == callerid.Session {
+		t.Fatalf("a PID that names another program became session %s", got.Session)
+	}
+}
+
+// An idle session has no live runner at engine start, so nothing is
+// backfilled for it. Its next turn is recorded by the launcher before its
+// first call, and the running engine's resolver sees that record.
+func TestIdleSessionNextTurnIsRecordedAfterStart(t *testing.T) {
+	data := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	store := &subagent.Store{Root: filepath.Join(data, "sessions")}
+	idle := "ses_20261020-000000-0000idle"
+	recordtest.Write(t, store.Root, idle, subagent.Meta{ID: idle, Name: "idle", RoomID: "room", Room: "room", Profile: "mock", Turns: 1})
+	callers, err := identifyCallers(context.Background(), data, false, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0])
+	cmd.Args = []string{os.Args[0], "subagent", "_turn", idle, "2"}
+	cmd.Env = append(os.Environ(), runnerEnv+"=1")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := callerid.Start(context.Background(), cmd, callerid.Launch{DataDir: data, Name: idle, Actor: callerid.Identity{Kind: callerid.Session, Session: idle}, Launcher: "turn"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stdin.Close(); _ = cmd.Wait() })
+	if got := callers.resolver.Resolve(cmd.Process.Pid); got.Kind != callerid.Session || got.Session != idle {
+		t.Fatalf("the idle session's next turn = %+v, want %s", got, idle)
+	}
+}
+
+// A read-only engine cannot write records, so it keeps its backfill in
+// memory for this start.
+func TestReadOnlyEngineBackfillsInMemory(t *testing.T) {
+	data := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	store := &subagent.Store{Root: filepath.Join(data, "sessions")}
+	live := "ses_20261020-000000-0000live"
+	runner := startRunner(t, "subagent", "_turn", live)
+	recordtest.Write(t, store.Root, live, subagent.Meta{ID: live, Name: "live", RoomID: "room", Room: "room", Profile: "mock", Turns: 1, Pid: runner})
+	callers, err := identifyCallers(context.Background(), data, true, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := callers.resolver.Resolve(runner); got.Kind != callerid.Session || got.Session != live {
+		t.Fatalf("a live runner seen by a read-only engine = %+v, want %s", got, live)
+	}
+}
+
+// Report-only, the first release's mode: a caller the rules refuse is
+// logged with its rule, counted in Health, and still served as before.
+// Enforcing refuses it with the same line.
+func TestReportOnlyServesAndCountsARefusedCaller(t *testing.T) {
+	refused := callerid.Identity{Kind: callerid.Refused, Reason: "rule (b): the caller runs in dyna-x.scope, under dyna.slice, which Dyna did not record for a session"}
+	var logged []string
+	callers := &socketCallers{resolve: func(net.Conn) callerid.Identity { return refused }, logf: func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }}
+	caller, err := callers.identify(nil)
+	if err != nil || caller.Kind != websvc.Unverified {
+		t.Fatalf("report-only identify = %+v, %v; want served, as unverified and never as the owner", caller, err)
+	}
+	if len(logged) != 1 || !strings.Contains(logged[0], "rule (b)") || callers.Refused() != 1 {
+		t.Fatalf("logged %q, counted %d; want one line with the rule and one count", logged, callers.Refused())
+	}
+	if h := engineHealth("", "", time.Now(), nil, hub.New(1), callers, nil)(); h.CallersRefused != 1 {
+		t.Fatalf("Health callersRefused = %d, want 1", h.CallersRefused)
+	}
+	callers.enforce = true
+	if _, err := callers.identify(nil); err == nil || err.Error() != refused.Reason {
+		t.Fatalf("enforced identify = %v, want the refusal", err)
+	}
+	if enforceCallers {
+		t.Fatal("the first release of item 3 must be report-only")
+	}
+}
+
+// Each call acts for its caller (requirements item 3). A session acts with
+// its stored role, so the room's root seat is Root, and a paired device is
+// the owner's. Report-only, a session that cannot act and an unverified
+// caller keep today's actor; enforcing refuses the session.
+func TestCallsActForTheirCaller(t *testing.T) {
+	store := &subagent.Store{Root: filepath.Join(t.TempDir(), "sessions")}
+	agent, root, closed := "ses_20261020-000000-000agent", "ses_20261020-000000-0000root", "ses_20261020-000000-00closed"
+	recordtest.Write(t, store.Root, agent, subagent.Meta{ID: agent, Name: "agent", RoomID: "room", Room: "room", Profile: "mock"})
+	recordtest.Write(t, store.Root, root, subagent.Meta{ID: root, Name: "root", RoomID: "room", Room: "room", Profile: "mock", Role: subagent.RoleRoot})
+	recordtest.Write(t, store.Root, closed, subagent.Meta{ID: closed, Name: "closed", RoomID: "room", Room: "room", Profile: "mock", Closed: time.Now()})
+	var logged []string
+	// A worker's room comes from its run's stored row; run_lost has no row.
+	runRoom := func(run string) (string, error) {
+		if run == "run_lost" {
+			return "", errors.New("no such run")
+		}
+		return "room", nil
+	}
+	callers := &socketCallers{sessions: store, runRoom: runRoom, logf: func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) }}
+	today := authority.Current()
+	for _, tc := range []struct {
+		caller websvc.Caller
+		want   authority.Actor
+	}{
+		{websvc.Caller{Kind: websvc.Owner}, authority.Actor{Role: authority.Owner}},
+		{websvc.Caller{Kind: websvc.Session, Session: agent}, authority.Actor{Role: authority.Session, Session: agent, Room: "room"}},
+		{websvc.Caller{Kind: websvc.Session, Session: root}, authority.Actor{Role: authority.Root, Session: root, Room: "room"}},
+		{websvc.Caller{Kind: websvc.Worker, Run: "run_a"}, authority.Actor{Role: authority.Worker, Run: "run_a", Room: "room"}},
+		{websvc.Caller{Kind: websvc.Worker, Run: "run_a", Agent: 2}, authority.Actor{Role: authority.Worker, Run: "run_a", Agent: 2, Room: "room"}},
+		{websvc.Caller{Kind: websvc.Worker, Run: "run_lost"}, authority.Actor{Role: authority.Worker, Run: "run_lost"}},
+		{websvc.Caller{Kind: websvc.Session, Session: closed}, today},
+		{websvc.Caller{Kind: websvc.Unverified}, today},
+	} {
+		if got, err := callers.actor(tc.caller); err != nil || got != tc.want {
+			t.Errorf("actor(%+v) = %+v, %v; want %+v", tc.caller, got, err, tc.want)
+		}
+	}
+	if callers.Refused() != 2 || len(logged) != 2 || !strings.Contains(strings.Join(logged, "\n"), "is closed") || !strings.Contains(strings.Join(logged, "\n"), "worker of run run_lost") {
+		t.Fatalf("counted %d, logged %q; want the closed session and the lost run once each", callers.Refused(), logged)
+	}
+	for _, bad := range []websvc.Caller{{Kind: "admin"}, {Kind: websvc.Worker}, {Kind: websvc.Worker, Run: "run_a", Agent: -1}} {
+		if _, err := callers.actor(bad); err == nil {
+			t.Errorf("caller %+v was served", bad)
+		}
+	}
+	callers.enforce = true
+	if _, err := callers.actor(websvc.Caller{Kind: websvc.Worker, Run: "run_lost"}); err == nil {
+		t.Fatal("enforcing served a worker whose run has no row")
+	}
+	if _, err := callers.actor(websvc.Caller{Kind: websvc.Session, Session: closed}); err == nil {
+		t.Fatal("enforcing served a closed session")
+	}
+	// A device's call carries the owner, whatever the engine process is.
+	t.Setenv(mode.EnvMode, mode.Workflow)
+	calls := map[string]websvc.Call{"Who": func(ctx context.Context, _ []json.RawMessage) (any, error) { return authority.Of(ctx), nil }}
+	callers.actForCallers(calls)
+	if got, err := calls["Who"](context.Background(), nil); err != nil || got != (authority.Actor{Role: authority.Owner}) {
+		t.Fatalf("a device call acts for %+v, %v; want the owner", got, err)
+	}
+}
+
+// A workflow agent's harness process is recorded for its agent number, so
+// the agent acts as itself with no claim at all: a pin, which carries no
+// claim, names agent 2, even when callers are enforced.
+func TestARecordedAgentActsAsItsOwnNumber(t *testing.T) {
+	data := t.TempDir()
+	cmd := exec.Command("/bin/sh", "-c", "read line")
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stdin.Close(); _ = cmd.Wait() })
+	agent := callerid.Identity{Kind: callerid.Worker, Run: "wf_1", Agent: 2}
+	if err := callerid.RecordStarted(context.Background(), cmd.Process.Pid, callerid.Launch{DataDir: data, Name: "wf_1", Actor: agent, Launcher: "workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := callerid.OpenStore(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := callerid.New("/proc", os.Getpid(), store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	callers := &socketCallers{resolve: func(net.Conn) callerid.Identity { return r.Resolve(cmd.Process.Pid) }, runRoom: func(string) (string, error) { return "room", nil }, enforce: true, logf: t.Logf}
+	caller, err := callers.identify(nil)
+	if err != nil || caller != (websvc.Caller{Kind: websvc.Worker, Run: "wf_1", Agent: 2}) {
+		t.Fatalf("identify = %+v, %v; want agent 2 of wf_1", caller, err)
+	}
+	actor, err := callers.actor(caller)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if by, err := pinnedBy(caller, true, actor, true, t.Logf, nil); err != nil || by != "run wf_1 agent 2" {
+		t.Fatalf("pinned by %q, %v; want run wf_1 agent 2", by, err)
+	}
+}

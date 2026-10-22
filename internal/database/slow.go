@@ -1,0 +1,90 @@
+package database
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
+)
+
+// A writer transaction held longer than slowWrite, or a read transaction
+// held longer than slowRead, is logged with its process and caller, so a
+// stall names its holder (R3.2).
+const (
+	slowWrite = 100 * time.Millisecond
+	slowRead  = time.Second
+)
+
+// now and logf are replaced by tests.
+var (
+	now  = time.Now
+	logf = log.Printf
+)
+
+// Read runs fn on one read-only transaction and logs it when it is held
+// longer than slowRead.
+func Read(ctx context.Context, db *sql.DB, fn func(*sql.Tx) error) error {
+	start := now()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	defer func() {
+		if held := now().Sub(start); held > slowRead {
+			logf("database: slow read held %s (%s)", held.Round(time.Millisecond), holder())
+		}
+	}()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// logSlowWrite logs a writer transaction whose body and COMMIT together held
+// the lock longer than slowWrite. The wait for BEGIN is shown apart: a wait
+// in whole multiples of busy_timeout points to another process, and a long
+// COMMIT to the automatic checkpoint that runs inside it.
+func logSlowWrite(wait, body, commit time.Duration) {
+	if body+commit <= slowWrite {
+		return
+	}
+	logf("database: slow write held %s (body %s, commit %s) after waiting %s for BEGIN (%s)",
+		(body + commit).Round(time.Millisecond), body.Round(time.Millisecond), commit.Round(time.Millisecond), wait.Round(time.Millisecond), holder())
+}
+
+// holder names this process and the first caller outside this package and
+// internal/state. It runs only on the slow path.
+func holder() string {
+	return fmt.Sprintf("%s[%d], caller %s", process(), os.Getpid(), caller())
+}
+
+// caller is the first function on the stack outside this package and
+// internal/state: the store that asked for the transaction.
+func caller() string {
+	pcs := make([]uintptr, 32)
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(3, pcs)])
+	for {
+		frame, more := frames.Next()
+		if !strings.HasPrefix(frame.Function, "dyna-agent/internal/database.") && !strings.HasPrefix(frame.Function, "dyna-agent/internal/state.") {
+			return frame.Function
+		}
+		if !more {
+			return "unknown"
+		}
+	}
+}
+
+// process is the program and its subcommand, such as "dyna _turn".
+func process() string {
+	p := filepath.Base(os.Args[0])
+	if len(os.Args) > 1 && !strings.HasPrefix(os.Args[1], "-") {
+		p += " " + os.Args[1]
+	}
+	return p
+}

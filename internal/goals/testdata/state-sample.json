@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "global": {
+    "rules": {
+      "u1": {"id": "u1", "text": "One implementation per job.", "setter": "owner", "setterName": "owner", "createdAt": "2026-10-17T10:00:00Z", "updatedAt": "2026-10-17T10:00:00Z"}
+    },
+    "nextRuleId": 1
+  },
+  "rooms": {
+    "room_a": {
+      "rules": {
+        "r1": {"id": "r1", "text": "Keep tests fast.", "setter": "owner", "setterName": "owner", "createdAt": "2026-10-17T10:00:00Z", "updatedAt": "2026-10-17T11:00:00Z", "edits": [{"at": "2026-10-17T11:00:00Z", "by": "owner", "oldText": "Keep tests quick."}]}
+      },
+      "nextRuleId": 1,
+      "keeper": {"session": "ses_keeper", "assignments": 2, "failedProfiles": {"mimo": "2026-10-18T03:32:25Z"}, "lastCheckIn": "2026-10-19T20:00:00Z"},
+      "nextId": 4,
+      "nudgeDay": "2026-10-19",
+      "nudgesToday": 3,
+      "goals": {
+        "g1": {"id": "g1", "room": "room_a", "text": "Ship the parser.", "setter": "owner", "holders": [], "shared": true, "parent": "", "state": "done", "createdAt": "2026-10-17T14:08:30Z", "updatedAt": "2026-10-17T15:57:17Z", "edits": [], "done": {"at": "2026-10-17T15:57:17Z", "by": "owner", "summary": "Merged."}, "keeper": {"verdict": "stalled"}},
+        "g2": {"id": "g2", "room": "room_a", "text": "Fix the lexer.", "detail": "Own internal/lex.", "setter": "ses_lead", "holders": ["ses_worker"], "shared": false, "parent": "g1", "state": "active", "createdAt": "2026-10-18T09:00:00Z", "waitAt": "2026-10-18T10:00:00Z", "waitUntil": "2026-10-18T12:00:00Z", "updatedAt": "2026-10-18T10:00:00Z", "edits": [{"waitUntil": "2026-10-18T12:00:00Z", "at": "2026-10-18T10:00:00Z", "by": "ses_worker", "oldText": "Fix the lexer."}]},
+        "g3": {"id": "g3", "room": "room_a", "text": "Old idea.", "setter": "owner", "holders": [], "shared": true, "parent": "", "state": "dropped", "createdAt": "2026-10-18T09:30:00Z", "updatedAt": "2026-10-18T09:40:00Z", "edits": [], "done": {"at": "2026-10-18T09:40:00Z", "by": "owner", "summary": "Not needed."}},
+        "g4": {"id": "g4", "room": "room_a", "text": "Paused work.", "setter": "owner", "holders": ["ses_worker"], "shared": false, "parent": "", "state": "resting", "createdAt": "2026-10-18T09:50:00Z", "updatedAt": "2026-10-18T09:50:00Z", "edits": []}
+      },
+      "notices": [{"kind": "holder_closed", "id": "goal_g2_holder_closed_1", "room": "room_a", "goal": "g2", "to": "ses_lead", "text": "Goal g2 lost its holder."}]
+    },
+    "room_b": {"keeper": {}, "nextId": 1, "goals": {"g1": {"id": "g1", "room": "room_b", "text": "Small task.", "setter": "owner", "holders": [], "shared": true, "parent": "", "state": "done", "createdAt": "2026-10-18T21:00:00Z", "updatedAt": "2026-10-18T21:10:00Z", "edits": []}}, "notices": []}
+  }
+}

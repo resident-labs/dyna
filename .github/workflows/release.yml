@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      # Keep in sync with go.mod and ci.yml.
+      image: golang:1.26.3
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install release tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq gh shellcheck
+      - name: Check release tools
+        run: |
+          for tool in bash git go gcc gh shellcheck sha256sum; do
+            command -v "$tool"
+          done
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # The container runs as root, but the runner user owns the workspace.
+      - name: Trust workspace
+        run: |
+          echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
+          echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
+
+      - name: Validate release tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$GITHUB_REF_NAME"
+          if [[ ! "$version" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]]; then
+            echo "release tag must be semantic version vMAJOR.MINOR.PATCH[-PRERELEASE], got $version" >&2
+            exit 1
+          fi
+          git fetch origin main --no-tags
+          tag_commit="$(git rev-list -n 1 "$version")"
+          git merge-base --is-ancestor "$tag_commit" origin/main || {
+            echo "$version does not point to a commit on main" >&2
+            exit 1
+          }
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+      - name: Build frontend assets
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Verify source
+        run: |
+          go mod verify
+          go test -race ./...
+          go vet ./...
+          shellcheck install.sh
+
+      - name: Build release binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          version="$GITHUB_REF_NAME"
+          ldflags="-s -w -X main.version=$version"
+          while IFS=/ read -r goos goarch; do
+            name="dyna_${goos}_${goarch}"
+            echo "building $name"
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
+              go build -trimpath -ldflags "$ldflags" -o "dist/$name" ./cmd/dyna
+          done < .github/release-targets
+          (cd dist && sha256sum dyna_* > checksums.txt)
+
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version="$GITHUB_REF_NAME"
+          release_flags=()
+          if [[ "$version" == *-* ]]; then
+            release_flags+=(--prerelease --latest=false)
+          fi
+          gh release create "$version" dist/* \
+            --verify-tag \
+            --generate-notes \
+            --title "$version" \
+            "${release_flags[@]}"

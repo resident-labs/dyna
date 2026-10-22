@@ -1,0 +1,2 @@
+# Existing unchecked Write bindings. This list may only shrink.
+# No unchecked bindings remain. New writes need an explicit caller policy.

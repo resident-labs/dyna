@@ -1,0 +1,13 @@
+[Unit]
+Description=Initialize the local Arch package keyring
+ConditionPathExists=!/etc/pacman.d/gnupg/pubring.gpg
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/pacman-key --init
+ExecStart=/usr/bin/pacman-key --populate archlinux
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

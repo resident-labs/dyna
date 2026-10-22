@@ -1,0 +1,425 @@
+package callerid
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"dyna-agent/internal/agentslice"
+	"dyna-agent/internal/authority"
+	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
+	"dyna-agent/internal/state"
+)
+
+// recordsSchema keeps a workflow agent's number in the worker column as text
+// ("" in old rows); reads cast it to an integer, so "" is 0, the run itself.
+const recordsSchema = `CREATE TABLE IF NOT EXISTS caller_records (
+ unit TEXT NOT NULL, pid INTEGER NOT NULL, start INTEGER NOT NULL,
+ actor TEXT NOT NULL, session TEXT NOT NULL, run TEXT NOT NULL, worker TEXT NOT NULL,
+ launcher TEXT NOT NULL, recorded INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS caller_records_unit ON caller_records(unit);
+CREATE INDEX IF NOT EXISTS caller_records_process ON caller_records(pid, start);`
+
+// recordsKept is how long a record outlives its process. A scope can outlive
+// its runner, for example while a background job started in it still runs.
+const recordsKept = 24 * time.Hour
+
+// Store keeps the launch records in dyna.db: the scope and the process that
+// each launch started, and the identity they act for.
+type Store struct{ db *sql.DB }
+
+// StoreFormat says how the binary that records a launch stores session state.
+// 2 means it writes turns and queue claims as dyna.db rows (#1470, #1506).
+// Records made by an earlier release have format 0.
+const StoreFormat = 2
+
+// formatSchema adds the launching binary's StoreFormat. It migrates under its
+// own key, so an earlier release still finds caller_records at the version it
+// knows; its inserts name their columns and leave format at 0.
+const formatSchema = `ALTER TABLE caller_records ADD COLUMN format INTEGER NOT NULL DEFAULT 0`
+
+// Migrate brings the launch records in dataDir's dyna.db to this version.
+// Only the engine calls it, at start (requirement 41).
+func Migrate(dataDir string) error {
+	_, err := OpenStore(dataDir)
+	return err
+}
+
+// OpenStore opens the launch records in dataDir.
+func OpenStore(dataDir string) (Store, error) {
+	db, err := database.Open(dataDir)
+	if err != nil {
+		return Store{}, err
+	}
+	err = database.Migrate(db, "caller_records.version", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), recordsSchema)
+		return err
+	})
+	if err != nil {
+		return Store{db}, err
+	}
+	err = database.Migrate(db, "caller_records.format", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(context.Background(), formatSchema)
+		return err
+	})
+	return Store{db}, err
+}
+
+func (s Store) ScopeIdentity(unit string) (Identity, bool, error) {
+	if unit == "" {
+		return Identity{}, false, nil
+	}
+	return s.identity(`SELECT actor, session, run, CAST(worker AS INTEGER) FROM caller_records WHERE unit=? LIMIT 1`, unit)
+}
+
+func (s Store) ProcessIdentity(p Process) (Identity, bool, error) {
+	return s.identity(`SELECT actor, session, run, CAST(worker AS INTEGER) FROM caller_records WHERE pid=? AND start=? LIMIT 1`, p.PID, int64(p.Start))
+}
+
+// Launched is a process's launch record: who it acts for, and the
+// StoreFormat of the binary that launched it.
+type Launched struct {
+	Identity
+	Format int
+}
+
+// ProcessLaunch returns p's launch record.
+func (s Store) ProcessLaunch(p Process) (Launched, bool, error) {
+	var l Launched
+	err := s.db.QueryRow(`SELECT actor, session, run, CAST(worker AS INTEGER), format FROM caller_records WHERE pid=? AND start=? LIMIT 1`, p.PID, int64(p.Start)).
+		Scan(&l.Kind, &l.Session, &l.Run, &l.Agent, &l.Format)
+	if err == sql.ErrNoRows {
+		return Launched{}, false, nil
+	}
+	return l, err == nil, err
+}
+
+func (s Store) identity(query string, args ...any) (Identity, bool, error) {
+	var id Identity
+	err := s.db.QueryRow(query, args...).Scan(&id.Kind, &id.Session, &id.Run, &id.Agent)
+	if err == sql.ErrNoRows {
+		return Identity{}, false, nil
+	}
+	return id, err == nil, err
+}
+
+// record stores one launch made at time at. It drops the records of
+// processes that ended more than recordsKept before, so the table holds only
+// live work.
+func (s Store) record(ctx context.Context, at time.Time, unit string, p Process, actor Identity, launcher string) error {
+	event := hub.Event{Topic: "callers"}
+	if actor.Kind == Worker && actor.Agent == 0 {
+		event.Key = actor.Run
+	}
+	return state.For(s.db).Write(ctx, event, func(conn *sql.Conn) error {
+		rows, err := conn.QueryContext(ctx, `SELECT rowid, pid, start FROM caller_records WHERE recorded < ?`, at.Add(-recordsKept).Unix())
+		if err != nil {
+			return err
+		}
+		var ended []int64
+		for rows.Next() {
+			var id int64
+			var old Process
+			var start int64
+			if err := rows.Scan(&id, &old.PID, &start); err != nil {
+				rows.Close()
+				return err
+			}
+			old.Start = uint64(start)
+			if live, _, err := readStat("/proc", old.PID); err != nil || live != old {
+				ended = append(ended, id)
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		for _, id := range ended {
+			if _, err := conn.ExecContext(ctx, `DELETE FROM caller_records WHERE rowid=?`, id); err != nil {
+				return err
+			}
+		}
+		_, err = conn.ExecContext(ctx, `INSERT INTO caller_records(unit,pid,start,actor,session,run,worker,launcher,recorded,format) VALUES(?,?,?,?,?,?,?,?,?,?)`,
+			unit, p.PID, int64(p.Start), actor.Kind, actor.Session, actor.Run, actor.Agent, launcher, at.Unix(), StoreFormat)
+		return err
+	})
+}
+
+// ownerLaunchers are the only launches recorded for the owner: detached
+// processes that run a command for whoever ran it. Any other owner record
+// would hand the owner's power to a process that should have none.
+var ownerLaunchers = map[string]bool{"consolidate": true, "transfer": true, "resume-room": true}
+
+// Launch says what a started process acts for. Launcher names the launch
+// path, for example "turn", "workflow", "shell" or "transfer".
+type Launch struct {
+	DataDir  string
+	Name     string // labels the scope, for example the session ID
+	Actor    Identity
+	Launcher string
+}
+
+// check refuses a launch that would record a wrong identity.
+func (l Launch) check() error { return l.checkActor(ownerLaunchers[l.Launcher]) }
+
+func (l Launch) checkActor(owner bool) error {
+	a := l.Actor
+	switch {
+	case a.Kind == Session && a.Session != "" && a.Run == "" && a.Agent == 0:
+	case a.Kind == Worker && a.Run != "" && a.Session == "" && a.Agent >= 0:
+	case a.Kind == Owner && owner && a.Session == "" && a.Run == "" && a.Agent == 0:
+	default:
+		return fmt.Errorf("a %s launch cannot be recorded for %+v", l.Launcher, a)
+	}
+	return nil
+}
+
+// LaunchGate names the inherited pipe that holds a started dyna process until
+// its launch is recorded. It names a file descriptor, never an identity.
+const LaunchGate = "DYNA_LAUNCH_GATE"
+
+// Start starts cmd in a new agent scope, when the systemd user manager runs,
+// and records the scope and the process for l.Actor, so the engine can
+// tell that actor's callers (requirements item 3). Every launch of work
+// for a session uses Start, and cmd runs dyna. The child waits in
+// WaitForLaunch until the record commits, so its first engine call is never
+// refused. When the record fails, Start stops the process.
+func Start(ctx context.Context, cmd *exec.Cmd, l Launch) error {
+	if err := l.check(); err != nil {
+		return err
+	}
+	// TODO: legacy/shim remove later — launchers outside the engine (the CLI and detached processes) write their own launch records; remove when item 2 moves each launch into the engine, which then records it.
+	unit := agentslice.Wrap(cmd, l.Name)
+	gate, held, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	cmd.ExtraFiles = append(cmd.ExtraFiles, gate)
+	cmd.Env = append(cmd.Environ(), fmt.Sprintf("%s=%d", LaunchGate, 2+len(cmd.ExtraFiles)))
+	err = cmd.Start()
+	gate.Close()
+	if err != nil {
+		held.Close()
+		return err
+	}
+	s, err := OpenStore(l.DataDir)
+	if err == nil {
+		var p Process
+		if p, _, err = readStat("/proc", cmd.Process.Pid); err == nil {
+			err = s.record(ctx, time.Now(), unit, p, l.Actor, l.Launcher)
+		}
+	}
+	if err = release(held, err); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("record the %s launch: %w", l.Launcher, err)
+	}
+	return nil
+}
+
+// RecordStarted records a process that its launcher already started and that
+// does not run dyna, so it cannot wait in WaitForLaunch: a workflow agent's
+// harness CLI (requirements item 3). A dyna command that the process runs
+// before the record commits resolves through its ancestors to the
+// launcher's own record, for an agent its run with agent 0. A harness takes
+// seconds to start before its agent runs a command, so in practice the
+// record is in place.
+func RecordStarted(ctx context.Context, pid int, l Launch) error {
+	if err := l.check(); err != nil {
+		return err
+	}
+	return recordStarted(ctx, pid, l)
+}
+
+// RecordHook records the live anchor of a stored hook while processguard's
+// native gate is closed. Only the engine may use this path, including for an
+// explicit request acting for its authenticated caller. Generic launchers
+// retain their existing owner restrictions.
+func RecordHook(ctx context.Context, process Process, dataDir, name string, actor Identity) error {
+	if !authority.IsEngine() {
+		return errors.New("only the verified engine may record a hook launch")
+	}
+	l := Launch{DataDir: dataDir, Actor: actor, Launcher: "hook " + name}
+	if err := l.checkActor(true); err != nil {
+		return err
+	}
+	current, _, err := readStat("/proc", process.PID)
+	if err != nil {
+		return err
+	}
+	if current != process {
+		return errors.New("hook anchor process changed before its launch was recorded")
+	}
+	return recordProcess(ctx, process, l)
+}
+
+func recordStarted(ctx context.Context, pid int, l Launch) error {
+	p, _, err := readStat("/proc", pid)
+	if err != nil {
+		return err
+	}
+	return recordProcess(ctx, p, l)
+}
+
+func recordProcess(ctx context.Context, p Process, l Launch) error {
+	s, err := OpenStore(l.DataDir)
+	if err != nil {
+		return err
+	}
+	return s.record(ctx, time.Now(), "", p, l.Actor, l.Launcher)
+}
+
+// release opens the gate of a held child once its record committed, and
+// closes it. After a failed record the child gets no byte and exits in
+// WaitForLaunch. A child that already exited needs no byte.
+func release(held *os.File, recorded error) error {
+	defer held.Close()
+	if recorded != nil {
+		return recorded
+	}
+	if _, err := held.Write([]byte{1}); err != nil && !errors.Is(err, syscall.EPIPE) {
+		return err
+	}
+	return nil
+}
+
+// WaitForLaunch holds a process that Start launched until its launcher has
+// recorded it. A process the launcher could not record exits. Every dyna
+// process calls it first; it returns at once for any other start.
+func WaitForLaunch() {
+	value, ok := os.LookupEnv(LaunchGate)
+	if !ok {
+		return
+	}
+	// Children of this process are not held.
+	os.Unsetenv(LaunchGate)
+	fd, err := strconv.Atoi(value)
+	if err == nil {
+		gate := os.NewFile(uintptr(fd), "launch gate")
+		var b [1]byte
+		_, err = io.ReadFull(gate, b[:])
+		gate.Close()
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "dyna: this process was not recorded for its session, so the engine would refuse it:", err)
+		os.Exit(1)
+	}
+}
+
+// TODO: legacy/shim remove later — records the live runners, workflow workers and shell supervisors that started before launches were recorded (#1418); remove with item 31's legacy scan, when no such process is alive.
+// Backfill records a live process that the engine knows from its own rows,
+// for example a session's runner PID, checked against cmdline by the caller.
+// Like Start, it never records the owner.
+func (s Store) Backfill(ctx context.Context, pid int, actor Identity, launcher string) error {
+	p, unit, err := backfillEntry(pid, actor, launcher)
+	if err != nil {
+		return err
+	}
+	if _, ok, err := s.ProcessIdentity(p); err != nil || ok {
+		return err
+	}
+	return s.record(ctx, time.Now(), unit, p, actor, launcher)
+}
+
+// backfillEntry reads a live process for a backfill. Its scope comes from
+// its own cgroup, never from a name alone, and only when that scope is the
+// one its launcher made for the actor (the unit name carries the session or
+// run ID), so a scope it shares with other work is not recorded.
+func backfillEntry(pid int, actor Identity, launcher string) (Process, string, error) {
+	if err := (Launch{Actor: actor, Launcher: launcher}).check(); err != nil {
+		return Process{}, "", err
+	}
+	if actor.Kind == Owner {
+		return Process{}, "", fmt.Errorf("a backfill never records the owner")
+	}
+	p, _, err := readStat("/proc", pid)
+	if err != nil {
+		return Process{}, "", err
+	}
+	group, err := Cgroup("/proc", pid)
+	if err != nil {
+		return Process{}, "", err
+	}
+	unit := ""
+	parts := strings.Split(group, "/")
+	if last, id := parts[len(parts)-1], actor.Session+actor.Run; strings.Contains(group, "/"+agentslice.Slice+"/") &&
+		strings.HasPrefix(last, "dyna-"+id+"-") && strings.HasSuffix(last, ".scope") {
+		unit = last
+	}
+	return p, unit, nil
+}
+
+// TODO: legacy/shim remove later — Memory and Layered exist only so a read-only engine can backfill work that started before launches were recorded (#1418); remove both in the same change that removes Store.Backfill (item 31).
+// Memory holds backfilled records for an engine that cannot write them,
+// such as a read-only engine, for as long as it runs.
+type Memory struct {
+	mu        sync.Mutex
+	scopes    map[string]Identity
+	processes map[Process]Identity
+}
+
+// Backfill records a live process in memory, with the same checks as
+// Store.Backfill.
+func (m *Memory) Backfill(pid int, actor Identity, launcher string) error {
+	p, unit, err := backfillEntry(pid, actor, launcher)
+	if err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.processes == nil {
+		m.scopes, m.processes = map[string]Identity{}, map[Process]Identity{}
+	}
+	m.processes[p] = actor
+	if unit != "" {
+		m.scopes[unit] = actor
+	}
+	return nil
+}
+
+func (m *Memory) ScopeIdentity(unit string) (Identity, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, ok := m.scopes[unit]
+	return id, ok && unit != "", nil
+}
+
+func (m *Memory) ProcessIdentity(p Process) (Identity, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	id, ok := m.processes[p]
+	return id, ok, nil
+}
+
+// TODO: legacy/shim remove later — see Memory: remove with Store.Backfill (item 31).
+// Layered looks in each Records in turn; the first that knows wins, and an
+// error from any of them refuses the caller.
+type Layered []Records
+
+func (l Layered) ScopeIdentity(unit string) (Identity, bool, error) {
+	for _, r := range l {
+		if id, ok, err := r.ScopeIdentity(unit); err != nil || ok {
+			return id, ok, err
+		}
+	}
+	return Identity{}, false, nil
+}
+
+func (l Layered) ProcessIdentity(p Process) (Identity, bool, error) {
+	for _, r := range l {
+		if id, ok, err := r.ProcessIdentity(p); err != nil || ok {
+			return id, ok, err
+		}
+	}
+	return Identity{}, false, nil
+}

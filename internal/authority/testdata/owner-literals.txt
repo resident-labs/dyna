@@ -1,0 +1,8 @@
+# Fixed authority.Actor{Role: authority.Owner} values outside internal/engine
+# and internal/authority. TestOwnerLiteralsOnlyShrink fails on a file that is
+# not listed, and on a count above or below the one listed. These lines may
+# only shrink: code that an engine call reaches takes its actor from
+# authority.Of(ctx). Format: <file> <count>
+# Engine background work that is not a caller's call: auto-tracking a PR found
+# in the room's repos, and moving authorship off a closed session.
+internal/pr/watch/auto_track.go 1

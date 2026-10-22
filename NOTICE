@@ -1,0 +1,9 @@
+Dyna
+Copyright (c) 2026 Resident Labs
+
+This product includes software ported from qwen-audio-agent
+(internal/voice/realtime: the realtime provider contract, the GA protocol
+mapping and the tool loop bounds).
+Copyright 2026 qwen-audio-agent contributors
+Licensed under the Apache License, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0).

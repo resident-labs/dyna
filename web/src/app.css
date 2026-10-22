@@ -1,0 +1,211 @@
+/* Warm ink on quiet dark surfaces. Color is
+   reserved for names and state: gold is live (and, as a faint wash, a post
+   for you), sage is done, coral is error, iris marks focus. Everything else
+   is type weight, size, and spacing. */
+:root {
+  --rail: #151416;
+  --side: #1c1b1e;
+  --main: #232225;
+  --raise: #2b2a2d;
+  --hover: #29282b;
+  --select: #323035;
+  --raise-hover: #343236;
+  --field: #2e2d31;
+  --line: #34322f;
+  --line-soft: #2c2b2d;
+
+  --ink: #ece9e4;
+  --ink-2: #cfcbc4;
+  --muted: #9a958c;
+  --faint: #918a80;
+
+  --iris: #b7a8ff;
+  --iris-hover: #c7bbff;
+  --ink-hover: #fff;
+  --scrollbar-hover: #4a474c;
+  --scrollbar-active: rgba(236, 233, 228, 0.3);
+  --iris-wash: rgba(183, 168, 255, 0.10);
+  --iris-edge: rgba(183, 168, 255, 0.45);
+  --gold: #e6c07b;
+  --gold-wash: rgba(230, 192, 123, 0.07);
+  --gold-wash-hover: rgba(230, 192, 123, 0.11);
+  --sage: #97c995;
+  --coral: #ef8a80;
+
+  /* Stable name hues, index = roomsvc.NameHue. */
+  --hue-0: #b7a8ff;
+  --hue-1: #8dc5e3;
+  --hue-2: #e4a3c9;
+  --hue-3: #7fcfc0;
+  --hue-4: #9db4ff;
+  --hue-5: #d7a8f0;
+  --hue-6: #a8d5a2;
+  --hue-7: #d2b48c;
+
+  --sans: 'IBM Plex Sans', 'Adwaita Sans', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', 'Adwaita Mono', ui-monospace, monospace;
+
+  /* Motion: short and calm. lib/ui/motion.js mirrors the durations. */
+  --motion-fast: 150ms;
+  --motion: 200ms;
+  --motion-slow: 250ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--main);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--t-lead);
+  line-height: var(--leading);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+/* The one settings button. pri: the main action in a form. fill: the one
+   create action of a pane. quiet: secondary. danger: removes something. */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 0 var(--s3); border: 1px solid var(--line); border-radius: var(--r-xs); background: var(--raise); color: var(--ink); font-size: var(--t-sm); font-weight: 500; white-space: nowrap; transition: background-color var(--motion-fast) var(--ease); }
+.btn.pri { background: var(--iris-wash); border-color: var(--iris-edge); color: var(--iris); }
+.btn.quiet { background: transparent; color: var(--ink-2); }
+.btn.danger { background: transparent; border-color: color-mix(in srgb, var(--coral) 45%, transparent); color: var(--coral); }
+.btn.fill { background: var(--iris); border-color: transparent; color: #18161d; font-weight: 600; }
+/* lg: the main actions of a full-screen modal. */
+.btn.lg { min-height: 36px; padding: 0 var(--s4); font-size: var(--t-ui); }
+@media (hover: hover) {
+  .btn:hover { background: var(--raise-hover); }
+}
+.btn:active { background: var(--select); }
+.btn:disabled { opacity: .6; cursor: default; pointer-events: none; }
+@media (hover: hover) {
+  .btn.fill:hover { background: var(--iris-hover); }
+}
+.btn.fill:active { background: var(--iris-hover); }
+/* Text fields can keep their local border focus style. Non-text controls and
+   selects need enough specificity to override component outline resets. */
+button:focus-visible, textarea:focus-visible, [tabindex]:focus-visible,
+a:focus-visible, summary:focus-visible, :root select:focus-visible,
+input:focus-visible,
+:root input:where([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="file"], [type="button"], [type="submit"], [type="reset"], [type="image"]):focus-visible {
+  outline: 2px solid var(--iris-edge);
+  outline-offset: 1px;
+}
+
+code, pre, .mono { font-family: var(--mono); font-size: 0.86em; font-variant-ligatures: none; }
+
+::selection { background: rgba(183, 168, 255, 0.28); }
+
+/* Thin scrollbars that stay out of the way. */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #3a383c;
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+  transition: background-color var(--motion-fast) var(--ease);
+}
+@media (hover: hover) {
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); background-clip: content-box; }
+}
+
+.hue-0 { color: var(--hue-0); } .hue-1 { color: var(--hue-1); }
+.hue-2 { color: var(--hue-2); } .hue-3 { color: var(--hue-3); }
+.hue-4 { color: var(--hue-4); } .hue-5 { color: var(--hue-5); }
+.hue-6 { color: var(--hue-6); } .hue-7 { color: var(--hue-7); }
+.bg-0 { --h: var(--hue-0); } .bg-1 { --h: var(--hue-1); }
+.bg-2 { --h: var(--hue-2); } .bg-3 { --h: var(--hue-3); }
+.bg-4 { --h: var(--hue-4); } .bg-5 { --h: var(--hue-5); }
+.bg-6 { --h: var(--hue-6); } .bg-7 { --h: var(--hue-7); }
+
+/* Rendered markdown inside posts and transcripts. */
+.prose { color: var(--ink-2); overflow-wrap: anywhere; }
+.prose > :first-child { margin-top: 0; }
+.prose > :last-child { margin-bottom: 0; }
+.prose p { margin: 0 0 0.5em; }
+.prose ul, .prose ol { margin: 0.2em 0 0.5em; padding-left: 1.4em; }
+.prose li { margin: 0.1em 0; }
+.prose li::marker { color: var(--faint); }
+.prose h1, .prose h2, .prose h3, .prose h4 {
+  color: var(--ink);
+  font-weight: 600;
+  line-height: var(--leading-tight);
+  margin: 0.7em 0 0.3em;
+}
+.prose h1 { font-size: 1.25em; }
+.prose h2 { font-size: 1.12em; }
+.prose h3, .prose h4 { font-size: 1em; }
+.prose strong { color: var(--ink); font-weight: 600; }
+.prose a { color: var(--hue-1); text-decoration: none; }
+.prose a:hover { text-decoration: underline; }
+.prose code {
+  background: #1a191b;
+  border: 1px solid var(--line-soft);
+  border-radius: 4px;
+  padding: 0.08em 0.32em;
+  color: var(--ink);
+}
+.prose pre {
+  background: #19181a;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  padding: 10px var(--s3);
+  overflow-x: auto;
+  margin: 0.4em 0 0.6em;
+}
+.prose pre code { background: none; border: 0; padding: 0; font-size: 0.84em; }
+.prose blockquote {
+  margin: 0.3em 0;
+  padding-left: var(--s3);
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+}
+.prose table { border-collapse: collapse; margin: 0.4em 0; font-size: 0.93em; }
+.prose th, .prose td { border: 1px solid var(--line); padding: 3px var(--s2); text-align: left; }
+.prose th { color: var(--ink); font-weight: 600; }
+.prose hr { border: 0; border-top: 1px solid var(--line); margin: 0.8em 0; }
+.prose .mention {
+  color: var(--iris);
+  background: var(--iris-wash);
+  border-radius: 3px;
+  padding: 0 2px;
+  font-weight: 500;
+}
+
+/* Syntax colors for code in the file viewer, from the same palette: iris
+   for keywords, sage for strings, gold for numbers, quiet for comments. */
+.hl .hljs-keyword, .hl .hljs-selector-tag, .hl .hljs-literal, .hl .hljs-doctag { color: var(--iris); }
+.hl .hljs-string, .hl .hljs-regexp, .hl .hljs-addition, .hl .hljs-template-tag { color: var(--sage); }
+.hl .hljs-number, .hl .hljs-symbol, .hl .hljs-bullet, .hl .hljs-variable.constant_ { color: var(--gold); }
+.hl .hljs-comment, .hl .hljs-quote { color: var(--faint); font-style: italic; }
+.hl .hljs-title, .hl .hljs-title.function_, .hl .hljs-section { color: var(--hue-1); }
+.hl .hljs-type, .hl .hljs-title.class_, .hl .hljs-built_in { color: var(--hue-3); }
+.hl .hljs-attr, .hl .hljs-attribute, .hl .hljs-property, .hl .hljs-selector-class, .hl .hljs-selector-id { color: var(--hue-2); }
+.hl .hljs-name, .hl .hljs-tag { color: var(--hue-4); }
+.hl .hljs-meta, .hl .hljs-params, .hl .hljs-subst { color: var(--ink-2); }
+.hl .hljs-deletion { color: var(--coral); }
+.hl .hljs-emphasis { font-style: italic; }
+.hl .hljs-strong { font-weight: 600; }
+
+/* A row that arrives in an open list rises in once. See arrivals() in
+   lib/ui/motion.js. */
+.enter { animation: enter var(--motion) var(--ease); }
+@keyframes enter { from { opacity: 0; transform: translateY(4px); } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+}

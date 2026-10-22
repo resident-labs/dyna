@@ -1,0 +1,50 @@
+// Resident Labs Connect relay. Deploy: npx wrangler deploy (needs the
+// deploy token; see docs/desktop/CONNECT.md). Secrets, set with
+// npx wrangler secret put <NAME>:
+//   CF_API_TOKEN           runtime token: Account Cloudflare Tunnel Edit, Zone DNS Edit
+//   RELAY_SIGNING_KEYS     JSON list of Ed25519 private JWKs with kid (npm run keygen)
+//   BOOTSTRAP_INVITE_HASH  base64url SHA-256 of the bootstrap invite token
+{
+  "name": "resident-labs-connect",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "rules": [{ "type": "Text", "globs": ["**/browser/app.js"], "fallthrough": true }],
+  "routes": [{ "pattern": "connect.residentlabs.dev", "custom_domain": true }],
+  "durable_objects": { "bindings": [{ "name": "DIRECTORY", "class_name": "Directory" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Directory"] }],
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "vars": {
+    "RELAY_ORIGIN": "https://connect.residentlabs.dev",
+    "RP_ID": "connect.residentlabs.dev",
+    "RP_NAME": "Resident Labs Connect",
+    "MACHINE_ZONE": "residentlabs.dev",
+    "MACHINE_URL": "https://m-{id}.residentlabs.dev",
+    "CF_API_BASE": "https://api.cloudflare.com/client/v4",
+    "CF_ACCOUNT_ID": "",
+    "CF_ZONE_ID": "",
+    "BOOTSTRAP_NAME": "Owner"
+  }
+,
+  // A second, separate relay for end-to-end tests: its own Directory, its
+  // own accounts. Deploy with: ./deploy.sh test
+  "env": {
+    "test": {
+      "name": "resident-labs-connect-test",
+      "routes": [{ "pattern": "connect-test.residentlabs.dev", "custom_domain": true }],
+      "durable_objects": { "bindings": [{ "name": "DIRECTORY", "class_name": "Directory" }] },
+      "vars": {
+        "RELAY_ORIGIN": "https://connect-test.residentlabs.dev",
+        "RP_ID": "connect-test.residentlabs.dev",
+        "RP_NAME": "Resident Labs Connect (test)",
+        "MACHINE_ZONE": "residentlabs.dev",
+        "MACHINE_URL": "https://m-{id}.residentlabs.dev",
+        "CF_API_BASE": "https://api.cloudflare.com/client/v4",
+        "CF_ACCOUNT_ID": "",
+        "CF_ZONE_ID": "",
+        "BOOTSTRAP_NAME": "Test admin"
+      }
+    }
+  }
+}

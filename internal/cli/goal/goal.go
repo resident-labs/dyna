@@ -1,0 +1,368 @@
+// Package goal exposes room goals to agents and the owner.
+package goal
+
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"dyna-agent/internal/engineclient"
+	"dyna-agent/internal/goalkeeper"
+	"dyna-agent/internal/goals"
+	"dyna-agent/internal/mode"
+	"dyna-agent/internal/room"
+	"github.com/spf13/cobra"
+)
+
+type Options struct {
+	Service func() *goalkeeper.Service
+	Client  *engineclient.Client
+}
+
+func NewCommand() *cobra.Command { return Command(Options{}) }
+func Command(o Options) *cobra.Command {
+	if o.Service == nil {
+		o.Service = goalkeeper.New
+	}
+
+	if o.Client == nil {
+		o.Client = engineclient.New("")
+	}
+	var roomRef string
+	var all, asJSON bool
+	var selectors []string
+	root := &cobra.Command{Use: "goal [plain English text]", Args: cobra.MaximumNArgs(1), Short: "Set, hold and finish long-lasting room goals"}
+	root.PersistentFlags().StringVar(&roomRef, "room", "", "room name or ID (default: the stamped room or the current repo's room)")
+	root.Flags().BoolVar(&all, "all", false, "include every goal in the room, including done goals")
+	root.PersistentFlags().BoolVar(&asJSON, "json", false, "print full goal data as JSON")
+	root.Flags().StringArrayVar(&selectors, "for", nil, "holder selector, repeatable: @name, @children, @siblings or @room")
+
+	listGoals := func(c *cobra.Command, _ []string) error {
+		s, rec, by, err := Caller(o.Service(), roomRef)
+		if err != nil {
+			return err
+		}
+		records, err := s.Store.List(rec.ID)
+		if err != nil {
+			return err
+		}
+		counts, err := s.Store.ItemCounts(rec.ID)
+		if err != nil {
+			return err
+		}
+		sessions, _ := s.Notify.Sessions.Store.List(true)
+		names := map[string]string{"owner": "owner"}
+		for _, m := range sessions {
+			names[m.ID] = m.Name
+		}
+		var yours, others []goals.Goal
+		for _, g := range records {
+			if !all && !g.Open() {
+				continue
+			}
+			if g.Concerns(by) {
+				yours = append(yours, g)
+			} else {
+				others = append(others, g)
+			}
+		}
+		if asJSON {
+			return json.NewEncoder(c.OutOrStdout()).Encode(struct {
+				Yours  []goals.Goal `json:"yours"`
+				Others []goals.Goal `json:"others"`
+			}{append([]goals.Goal{}, yours...), append([]goals.Goal{}, others...)})
+		}
+		line := func(g goals.Goal) {
+			holders := []string{}
+			for _, id := range g.Holders {
+				name := names[id]
+				if name == "" {
+					name = id
+				}
+				holders = append(holders, name)
+			}
+			if g.Shared {
+				holders = []string{"room"}
+			}
+			items := ""
+			if n := counts[g.ID]; n[1] > 0 {
+				items = fmt.Sprintf(" · %d/%d items", n[0], n[1])
+			}
+			setter := names[g.Setter]
+			if setter == "" {
+				setter = g.Setter
+			}
+			fmt.Fprintf(c.OutOrStdout(), "%s ◎ %s · held by %s · from %s · %s%s\n", g.ID, goals.Clip(g.Text, 160), strings.Join(holders, ", "), setter, g.State, items)
+		}
+		for _, section := range []struct {
+			title string
+			goals []goals.Goal
+		}{{"Your goals", yours}, {"Other open goals in this room", others}} {
+			fmt.Fprintf(c.OutOrStdout(), "%s:\n", section.title)
+			if len(section.goals) == 0 {
+				fmt.Fprintln(c.OutOrStdout(), "  none")
+			}
+			for _, g := range section.goals {
+				line(g)
+			}
+		}
+		return nil
+	}
+	root.RunE = func(c *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			return listGoals(c, args)
+		}
+		if isGoalCommandWord(root, args[0]) {
+			return fmt.Errorf("%q looks like a goal command; use 'dyna goal list' to list goals, 'dyna goal --help' for commands, or write a descriptive goal sentence", strings.TrimSpace(args[0]))
+		}
+		var g goals.Goal
+		err := o.Client.Call(c.Context(), "AddGoal", []any{MutationRoom(roomRef), args[0], selectors}, &g)
+		if err != nil {
+			return err
+		}
+		return printGoal(c, g)
+	}
+	list := &cobra.Command{Use: "list", Short: "List room goals", Args: cobra.NoArgs, RunE: listGoals}
+	list.Flags().BoolVar(&all, "all", false, "include every goal in the room, including done goals")
+
+	show := &cobra.Command{Use: "show <id>", Short: "Show goal status; use --json for full keeper history", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
+		s, r, _, err := Caller(o.Service(), roomRef)
+		if err != nil {
+			return err
+		}
+		g, err := s.Store.Get(r.ID, a[0])
+		if err != nil {
+			return err
+		}
+		items, err := s.Store.Items(r.ID, a[0])
+		if err != nil {
+			return err
+		}
+		status, err := s.GoalStatus(r.ID, a[0])
+		if err != nil {
+			return err
+		}
+		if asJSON {
+			return json.NewEncoder(c.OutOrStdout()).Encode(struct {
+				goals.Goal
+				Status goals.Status `json:"status"`
+				Items  []goals.Item `json:"items"`
+			}{g, status, items})
+		}
+		if _, err = fmt.Fprintf(c.OutOrStdout(), "%s %s · %s — %s\n", g.ID, g.State, status.Label, status.Reason); err != nil {
+			return err
+		}
+		for _, it := range items {
+			mark := " "
+			if it.State != goals.ItemOpen {
+				mark = it.State[:1]
+			}
+			line := strings.SplitN(it.Text, "\n", 2)[0]
+			who := ""
+			if it.Assignee != "" {
+				who = " · @" + it.Assignee
+			}
+			if _, err = fmt.Fprintf(c.OutOrStdout(), "  [%s] %s %s%s\n", mark, it.ID, goals.Clip(line, 120), who); err != nil {
+				return err
+			}
+		}
+		return nil
+	}}
+	edit := &cobra.Command{Use: "edit <id> [new text]", Short: "Edit a goal's text or holders and reopen it", Args: cobra.RangeArgs(1, 2)}
+	var editFor []string
+	edit.Flags().StringArrayVar(&editFor, "for", nil, "replace holders with these selectors (repeatable)")
+	edit.RunE = func(c *cobra.Command, a []string) error {
+		var selected *[]string
+		if c.Flags().Changed("for") {
+			selected = &editFor
+		}
+		text := ""
+		if len(a) == 2 {
+			text = a[1]
+		}
+		var g goals.Goal
+		err := o.Client.Call(c.Context(), "EditGoalSelectors", []any{MutationRoom(roomRef), a[0], text, selected}, &g)
+		if err != nil {
+			return err
+		}
+		return printGoal(c, g)
+	}
+	finish := func(drop bool) *cobra.Command {
+		use, short := "done <id> <summary>", "Mark a goal done"
+		args := cobra.ExactArgs(2)
+		if drop {
+			use, short, args = "drop <id> [why]", "Drop a goal", cobra.RangeArgs(1, 2)
+		}
+		cmd := &cobra.Command{Use: use, Short: short, Args: args, RunE: func(c *cobra.Command, a []string) error {
+			summary := ""
+			if len(a) == 2 {
+				summary = a[1]
+			}
+			var g goals.Goal
+			err := o.Client.Call(c.Context(), "FinishGoal", []any{MutationRoom(roomRef), a[0], summary, drop}, &g)
+			if err != nil {
+				return err
+			}
+			return printGoal(c, g)
+		}}
+		return cmd
+	}
+	note := &cobra.Command{Use: "note <id> <text>", Short: "Append a progress note to a goal's journal", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, a []string) error {
+		var e goals.Event
+		err := o.Client.Call(c.Context(), "NoteGoal", []any{MutationRoom(roomRef), a[0], a[1]}, &e)
+		if err != nil {
+			return err
+		}
+		asJSON, err := c.Flags().GetBool("json")
+		if err != nil {
+			return err
+		}
+		if asJSON {
+			return json.NewEncoder(c.OutOrStdout()).Encode(e)
+		}
+		_, err = fmt.Fprintln(c.OutOrStdout(), e.ID, e.Event)
+		return err
+	}}
+	item := &cobra.Command{Use: "item", Short: "Add and change a goal's checklist items"}
+	itemAddFor := ""
+	itemAdd := &cobra.Command{Use: "add <goal> <text>", Short: "Append a checklist item to a goal", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, a []string) error {
+		var it goals.Item
+		err := o.Client.Call(c.Context(), "AddGoalItem", []any{MutationRoom(roomRef), a[0], a[1], itemAddFor}, &it)
+		if err != nil {
+			return err
+		}
+		return printItem(c, it)
+	}}
+	itemAdd.Flags().StringVar(&itemAddFor, "for", "", "assignee selector, such as @name")
+	itemState := func(use, short, state string) *cobra.Command {
+		return &cobra.Command{Use: use, Short: short, Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, a []string) error {
+			var it goals.Item
+			err := o.Client.Call(c.Context(), "SetGoalItemState", []any{MutationRoom(roomRef), a[0], a[1], state}, &it)
+			if err != nil {
+				return err
+			}
+			return printItem(c, it)
+		}}
+	}
+	itemEditFor := ""
+	itemEdit := &cobra.Command{Use: "edit <goal> <item> [text]", Short: "Edit an item's text or assignee", Args: cobra.RangeArgs(2, 3), RunE: func(c *cobra.Command, a []string) error {
+		text := ""
+		if len(a) == 3 {
+			text = a[2]
+		}
+		var assignee *string
+		if c.Flags().Changed("for") {
+			assignee = &itemEditFor
+		}
+		var it goals.Item
+		err := o.Client.Call(c.Context(), "EditGoalItem", []any{MutationRoom(roomRef), a[0], a[1], text, assignee}, &it)
+		if err != nil {
+			return err
+		}
+		return printItem(c, it)
+	}}
+	itemEdit.Flags().StringVar(&itemEditFor, "for", "", "assignee selector, or none to clear")
+	item.AddCommand(itemAdd, itemState("done <goal> <item>", "Mark an item done", goals.ItemDone), itemState("drop <goal> <item>", "Drop an item", goals.ItemDropped), itemState("reopen <goal> <item>", "Reopen an item", goals.ItemOpen), itemEdit)
+	root.AddCommand(list, show, edit, waitCommand(o, &roomRef), journalCommand(o, &roomRef), finish(false), finish(true), note, item)
+	return root
+}
+
+func printItem(c *cobra.Command, it goals.Item) error {
+	asJSON, err := c.Flags().GetBool("json")
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		return json.NewEncoder(c.OutOrStdout()).Encode(it)
+	}
+	_, err = fmt.Fprintln(c.OutOrStdout(), it.ID, it.State)
+	return err
+}
+
+func printGoal(c *cobra.Command, g goals.Goal) error {
+	asJSON, err := c.Flags().GetBool("json")
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		return json.NewEncoder(c.OutOrStdout()).Encode(g)
+	}
+	_, err = fmt.Fprintln(c.OutOrStdout(), g.ID, g.State)
+	return err
+}
+
+// isGoalCommandWord keeps likely command attempts out of goal creation.
+func isGoalCommandWord(root *cobra.Command, text string) bool {
+	words := strings.Fields(text)
+	if len(words) != 1 {
+		return false
+	}
+	word := strings.ToLower(words[0])
+	switch word {
+	case "list", "ls", "show", "done", "drop", "edit", "help", "status", "watch":
+		return true
+	}
+	for _, cmd := range root.Commands() {
+		if word == cmd.Name() || cmd.HasAlias(word) {
+			return true
+		}
+	}
+	return false
+}
+
+// Caller resolves the room and caller shared by goal and rules commands.
+func Caller(s *goalkeeper.Service, roomRef string) (*goalkeeper.Service, room.Record, string, error) {
+	ref := roomRef
+	by := "owner"
+	if cur, ok := mode.CurrentSession(); ok {
+		info, err := s.Notify.Sessions.Store.Info(cur.ID)
+		if err != nil {
+			return s, room.Record{}, "", err
+		}
+		by = info.ID
+		if ref == "" {
+			ref = info.RoomID
+		}
+	}
+	if ref == "" {
+		if stamp, ok := mode.StampFromEnv(); ok {
+			ref = stamp.RoomID
+			if ref == "" {
+				ref = stamp.Room
+			}
+		}
+	}
+	var rec room.Record
+	var err error
+	if ref == "" {
+		rec, err = s.Notify.Rooms.CurrentRepoRoom()
+	} else {
+		rec, err = s.Notify.Rooms.Resolve(ref)
+	}
+	if err == nil && by != "owner" {
+		info, _ := s.Notify.Sessions.Store.Info(by)
+		if info.RoomID != rec.ID {
+			err = fmt.Errorf("use the current session's room")
+		}
+	}
+	return s, rec, by, err
+}
+
+// MutationRoom selects a room hint. The engine checks it against the caller.
+func MutationRoom(ref string) string {
+	if ref != "" {
+		return ref
+	}
+	if stamp, ok := mode.StampFromEnv(); ok {
+		if stamp.RoomID != "" {
+			return stamp.RoomID
+		}
+		if stamp.Room != "" {
+			return stamp.Room
+		}
+	}
+	if rec, err := room.DefaultStore().CurrentRepoRoom(); err == nil {
+		return rec.ID
+	}
+	return ""
+}
