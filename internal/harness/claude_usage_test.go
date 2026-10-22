@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -43,11 +44,28 @@ func writeClaudeUsageAuth(t *testing.T, home, uuid string) {
 	}
 }
 
+// clearClaudeEnvironment removes the Claude and Anthropic variables of the
+// process that runs the test binary. A live Dyna session exports the private
+// runtime home through them (CLAUDE_CONFIG_DIR, CLAUDE_SECURESTORAGE_CONFIG_DIR,
+// ANTHROPIC_CONFIG_DIR), and a signed-in account there would make every
+// capture look admitted. With them empty, only the fixture's own home gets
+// read.
+func clearClaudeEnvironment(t *testing.T) {
+	t.Helper()
+	for _, entry := range os.Environ() {
+		key, _, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(key, "CLAUDE_") || strings.HasPrefix(key, "ANTHROPIC_") || key == "XDG_CONFIG_HOME" {
+			t.Setenv(key, "")
+		}
+	}
+}
+
 func newClaudeUsageCaptureFixture(t *testing.T) *claudeUsageCaptureFixture {
 	t.Helper()
 	// Isolate's test-name directory can exceed the Unix socket path limit.
 	socketBase := os.TempDir()
 	storetest.Isolate(t)
+	clearClaudeEnvironment(t)
 	f := &claudeUsageCaptureFixture{home: t.TempDir()}
 	writeClaudeUsageAuth(t, f.home, "aaaaaaaa-bbbb-cccc-dddd-000000000001")
 	f.p = profile.Profile{Harness: profile.HarnessClaudeCode, Env: map[string]string{"HOME": f.home}}
@@ -116,8 +134,8 @@ func TestClaudeUsageCaptureSendsTheLiveReading(t *testing.T) {
 		t.Fatalf("engine received %d observations, want the rate_limit_event", len(seen))
 	}
 	one := seen[0]
-	if one.Identity == "" || one.ExecutionRef != f.ref || one.ObservedAt.IsZero() {
-		t.Fatalf("observation lost its identity, attempt or time: %+v", one)
+	if one.Identity != "anthropic:aaaaaaaa-bbbb-cccc-dddd-000000000001" || one.ExecutionRef != f.ref || one.ObservedAt.IsZero() {
+		t.Fatalf("observation lost the fixture account, attempt or time: %+v", one)
 	}
 	if len(one.Windows) != 2 || one.Windows[0].ID != "five_hour" || one.Windows[0].UsedPercent != 18 || one.Windows[1].ID != "seven_day" || one.Windows[1].UsedPercent != 15 {
 		t.Fatalf("windows = %+v, want five_hour 18%% and seven_day 15%%", one.Windows)
