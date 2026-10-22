@@ -298,3 +298,16 @@ func TestTrackPRRefChecksTheCheckoutAndTheCaller(t *testing.T) {
 		t.Fatalf("track from the room's checkout = %+v, %v", got, err)
 	}
 }
+
+// Root names no session when it tracks, because the CLI sends its own empty
+// author and the engine already authenticated root. Root acts as its session.
+func TestTrackPRRefRootTracksAsItsOwnSession(t *testing.T) {
+	e, rec, root := workspaceEnv(t)
+	prfixture.FakeGH(t)
+	seat := e.start(rec, "root-seat", nil)
+	asRoot := authority.WithActor(context.Background(), authority.Actor{Role: authority.Root, Session: seat.ID, Room: rec.ID})
+	got, err := e.svc.PRs.TrackPRRef(asRoot, rec.ID, "", "7", root)
+	if err != nil || got.PR.Author != seat.ID || !got.Created {
+		t.Fatalf("root track = %+v, %v", got, err)
+	}
+}
