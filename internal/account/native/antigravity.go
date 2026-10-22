@@ -51,6 +51,12 @@ type antigravityManager struct {
 
 func init()                                 { register("antigravity", func(h Host) Manager { return &antigravityManager{host: h} }) }
 func (*antigravityManager) Harness() string { return "antigravity" }
+// SupportsCredentialRefresh is true only for a legacy saved CLI token. The ACP
+// server refreshes an ACP-only account's grant itself.
+func (*antigravityManager) SupportsCredentialRefresh(c Captured) bool {
+	return c.Credential.Schema == agyAuthSchema
+}
+
 func (*antigravityManager) Caps() Caps {
 	return Caps{Activate: true, IsolatedLogin: true, Refresh: true, Scope: "Antigravity credentials in the selected home", RunningEffect: "New turns use the active native login after the harness gate drains."}
 }
@@ -210,6 +216,39 @@ func (h agyHome) write(ctx context.Context, token json.RawMessage, a agyACPAccou
 		return err
 	}
 	return h.account.Write(ctx, raw)
+}
+
+// RecordAntigravityACPAccount records identity and label for the grant in home
+// when the HOME predates recorded identities. It writes only when a grant
+// exists and no record does, so it never renames a recorded sign-in.
+//
+// TODO: legacy/shim remove later — once every HOME signed in before ACP-only accounts has its record.
+func RecordAntigravityACPAccount(home, identity, label string) error {
+	a := agyACPAccount{Identity: identity, Label: label}
+	if !filepath.IsAbs(home) || !a.valid() {
+		return ErrUnsupported
+	}
+	agyNativeMu.Lock()
+	defer agyNativeMu.Unlock()
+	if _, err := (agyFileStore{filepath.Join(home, AntigravityACPTokenFile)}).Read(context.Background()); err != nil {
+		if errors.Is(err, ErrNotSignedIn) {
+			return nil
+		}
+		return err
+	}
+	raw, _ := json.Marshal(a)
+	f, err := os.OpenFile(filepath.Join(home, AntigravityAccountFile), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if os.IsExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err = f.Write(raw); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func (m *antigravityManager) Capture(ctx context.Context, root string) ([]Captured, error) {

@@ -276,8 +276,9 @@ func TestCredentialRefreshSupportIsSharedAndConservative(t *testing.T) {
 			t.Fatalf("operation=%v credential=%v: %v", tc.operation, tc.credential, got)
 		}
 	}
-	// Existing adapters without a credential-specific gate retain their capability.
-	for _, harness := range []string{"claude-code", "codex", "antigravity", "muse", "opencode"} {
+	// Existing adapters without a credential-specific gate retain their
+	// capability. Antigravity gates on the credential (see its own test).
+	for _, harness := range []string{"claude-code", "codex", "muse", "opencode"} {
 		manager, ok := For(harness, Host{})
 		if !ok {
 			t.Fatal(harness)
