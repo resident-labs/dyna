@@ -22,15 +22,16 @@ jobs:
       - uses: actions/checkout@v6
       - name: Give the checkout to the build user
         run: chown -R builder "$GITHUB_WORKSPACE"
+      # runner.temp names a host path, which does not exist inside the container.
       - name: Build root filesystem
-        run: sudo -u builder image/build.sh "${{ runner.temp }}/dyna-image-${{ github.run_id }}-${{ github.run_attempt }}"
+        run: sudo -u builder image/build.sh "/tmp/dyna-image"
       - name: Boot and smoke test
-        run: sudo -u builder image/smoke.sh "${{ runner.temp }}/dyna-image-${{ github.run_id }}-${{ github.run_attempt }}"
+        run: sudo -u builder image/smoke.sh "/tmp/dyna-image"
       - uses: actions/upload-artifact@v4
         with:
           name: dyna-linux-x86_64
           path: |
-            ${{ runner.temp }}/dyna-image-${{ github.run_id }}-${{ github.run_attempt }}/dyna.tar.zst
-            ${{ runner.temp }}/dyna-image-${{ github.run_id }}-${{ github.run_attempt }}/dyna.tar.zst.sha256
-            ${{ runner.temp }}/dyna-image-${{ github.run_id }}-${{ github.run_attempt }}/packages.lock
+            /tmp/dyna-image/dyna.tar.zst
+            /tmp/dyna-image/dyna.tar.zst.sha256
+            /tmp/dyna-image/packages.lock
           compression-level: 0
