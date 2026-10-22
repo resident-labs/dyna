@@ -78,16 +78,18 @@ case "$suite" in
       modules) ci_diag_go mod verify ;;
       build) ci_diag_go build -o "$RUNNER_TEMP/dyna-ci" ./cmd/dyna ;;
       test)
-        race=() isolate=()
-        if [[ ${CI_EVENT:-push} != pull_request ]]; then race=(-race) isolate=(--isolate-race); fi
+        # No -race here: pull requests and merge trials run the same flags and share
+        # cached results. The nightly workflow runs the race phase below.
         # CI_SHARD=INDEX/COUNT tests one slice of the packages; no value tests all.
         pkgs=(./...)
         if [[ -n ${CI_SHARD:-} ]]; then
           mapfile -t pkgs < <(bash scripts/ci-shard.sh "${CI_SHARD%/*}" "${CI_SHARD#*/}")
           if ((${#pkgs[@]} == 0)); then echo "Shard $CI_SHARD has no packages" >&2; exit 1; fi
         fi
-        ci_diag_go test "${race[@]}" -json -timeout 5m "${pkgs[@]}" | tee "$RUNNER_TEMP/go-test.json" | "$RUNNER_TEMP/dyna-ci" git ci tests --isolate-over 1s "${isolate[@]}" --junit-output "$RUNNER_TEMP/go-test.xml"
+        ci_diag_go test -json -timeout 5m "${pkgs[@]}" | tee "$RUNNER_TEMP/go-test.json" | "$RUNNER_TEMP/dyna-ci" git ci tests --isolate-over 1s --junit-output "$RUNNER_TEMP/go-test.xml"
         ;;
+      # The nightly race run on main. It has no time budget and no checker.
+      race) ci_diag_go test -race -timeout 10m ./... ;;
       vet) ci_diag_go vet ./... ;;
       desktop)
         cd desktop
