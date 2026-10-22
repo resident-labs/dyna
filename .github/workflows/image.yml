@@ -8,13 +8,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # pacstrap and systemd-nspawn need Arch Linux and a privileged container.
+    # The tools match the host packages in image/README.md.
     container:
       image: archlinux:latest
       options: --privileged
     steps:
       - name: Install image tools
         run: |
-          pacman -Syu --noconfirm --needed arch-install-scripts git go npm pkgconf curl zstd sudo
+          pacman -Syu --noconfirm --needed arch-install-scripts git go nodejs npm gcc pkgconf gtk3 webkit2gtk-4.1 curl gnupg zstd sudo
           # uid 1001 is the runner user on GitHub-hosted machines, so the
           # runner can still read the workspace and its temp folder.
           useradd -m -u 1001 builder
