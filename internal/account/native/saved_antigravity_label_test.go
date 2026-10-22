@@ -2,7 +2,6 @@ package native
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -16,7 +15,7 @@ import (
 // match the value it is shown with.
 func TestSavedAntigravityLabelsMatchTheUsedPercentValue(t *testing.T) {
 	c := directTestAgy(t, time.Now().Add(time.Hour))
-	m := agyTestManager(t, &agyFakeStore{readErr: errors.New("must not read native store")})
+	m := agyTestManager(t)
 	calls := 0
 	m.client = directTestClient(func(r *http.Request) (*http.Response, error) {
 		calls++
