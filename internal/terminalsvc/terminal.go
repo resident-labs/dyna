@@ -9,6 +9,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,8 +20,10 @@ import (
 	"github.com/creack/pty"
 	"golang.org/x/sys/unix"
 
+	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/store"
 )
 
 const ScrollbackBytes = 256 << 10
@@ -147,7 +150,7 @@ func (s *Service) Open(roomID, sessionID, cwd string, cols, rows uint16) (Info, 
 		}
 	}
 	cmd.Env = append(cmd.Env, "TERM=xterm-256color")
-	return s.start(cmd, roomID, sessionID, cwd, shell, cols, rows)
+	return s.start(cmd, roomID, sessionID, cwd, shell, cols, rows, true)
 }
 
 // OpenCommand runs a host-selected login command directly in a terminal. The
@@ -177,10 +180,10 @@ func (s *Service) OpenCommand(argv, env []string, cwd string, cols, rows uint16)
 	for _, key := range keys {
 		cmd.Env = append(cmd.Env, key+"="+merged[key])
 	}
-	return s.start(cmd, "", "", cwd, argv[0], cols, rows)
+	return s.start(cmd, "", "", cwd, argv[0], cols, rows, false)
 }
 
-func (s *Service) start(cmd *exec.Cmd, roomID, sessionID, cwd, shell string, cols, rows uint16) (Info, error) {
+func (s *Service) start(cmd *exec.Cmd, roomID, sessionID, cwd, shell string, cols, rows uint16, owner bool) (Info, error) {
 	var id [12]byte
 	if _, err := rand.Read(id[:]); err != nil {
 		return Info{}, err
@@ -196,8 +199,23 @@ func (s *Service) start(cmd *exec.Cmd, roomID, sessionID, cwd, shell string, col
 		s.mu.Unlock()
 		return Info{}, errors.New("too many terminals; close an existing terminal")
 	}
-	file, err := pty.StartWithSize(childenv.Clean(cmd), &pty.Winsize{Cols: cols, Rows: rows})
+	var file *os.File
+	var err error
+	cmd = childenv.Clean(cmd)
+	start := func() error { file, err = pty.StartWithSize(cmd, &pty.Winsize{Cols: cols, Rows: rows}); return err }
+	if owner {
+		dataDir := store.DataDir()
+		if s.options.SessionRoot != "" {
+			dataDir = filepath.Dir(s.options.SessionRoot)
+		}
+		err = callerid.StartTerminal(context.Background(), cmd, dataDir, start)
+	} else {
+		err = start()
+	}
 	if err != nil {
+		if file != nil {
+			file.Close()
+		}
 		s.mu.Unlock()
 		return Info{}, err
 	}
@@ -361,6 +379,7 @@ func (s *Service) List(roomID string) []Info {
 	sort.Slice(out, func(i, j int) bool { return out[i].Created.Before(out[j].Created) })
 	return out
 }
+
 // Close sends SIGKILL to the terminal's session groups, waits for its shell to
 // be reaped, and removes the terminal. A background job blocked in kernel I/O
 // can remain alive with SIGKILL pending until that I/O completes.

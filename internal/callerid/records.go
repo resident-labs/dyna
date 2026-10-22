@@ -227,6 +227,42 @@ func Start(ctx context.Context, cmd *exec.Cmd, l Launch) error {
 	return nil
 }
 
+// StartTerminal holds an owner terminal's requested shell until its exact
+// process record commits. Only the engine's authenticated terminal path may
+// use it; the shared engine cgroup never receives owner authority.
+func StartTerminal(ctx context.Context, cmd *exec.Cmd, dataDir string, start func() error) error {
+	if !authority.IsEngine() {
+		return errors.New("only the verified engine may start an owner terminal")
+	}
+	if len(cmd.ExtraFiles) != 0 {
+		return errors.New("owner terminal cannot inherit extra files")
+	}
+	gate, held, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	defer gate.Close()
+	defer held.Close()
+	args := append([]string{"/bin/sh", "-c", `IFS= read -r ready <&3 && [ "$ready" = ready ] && exec 3<&- && exec "$@"`, "dyna-terminal", cmd.Path}, cmd.Args[1:]...)
+	cmd.Path, cmd.Args, cmd.ExtraFiles = "/bin/sh", args, []*os.File{gate}
+	if err := start(); err != nil {
+		return err
+	}
+	process, err := ProcessOf(cmd.Process.Pid)
+	if err == nil {
+		err = recordProcess(ctx, process, Launch{DataDir: dataDir, Actor: Identity{Kind: Owner}, Launcher: "terminal"})
+	}
+	if err == nil {
+		_, err = held.Write([]byte("ready\n"))
+	}
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return fmt.Errorf("record the owner terminal launch: %w", err)
+	}
+	return nil
+}
+
 // RecordStarted records a process that its launcher already started and that
 // does not run dyna, so it cannot wait in WaitForLaunch: a workflow agent's
 // harness CLI (requirements item 3). A dyna command that the process runs

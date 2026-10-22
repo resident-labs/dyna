@@ -2,6 +2,8 @@ package terminalsvc
 
 import (
 	"context"
+	"dyna-agent/internal/authority"
+	"dyna-agent/internal/store/storetest"
 	"errors"
 	"os"
 	"regexp"
@@ -14,6 +16,8 @@ import (
 
 func terminalTest(t *testing.T, o Options) (*Service, Info) {
 	t.Helper()
+	storetest.DataDir(t)
+	t.Cleanup(authority.InEngine())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("DYNA_SESSION", "must-not-enter-owner-shell")
 	o.Shell = "/bin/sh"

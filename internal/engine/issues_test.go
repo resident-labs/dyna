@@ -157,7 +157,7 @@ func testIssueCallerPower(t *testing.T, method string) {
 			} else if (err == nil) != tc.allow {
 				t.Fatalf("allowed = %v, want %v: %v", err == nil, tc.allow, err)
 			}
-			if !tc.allow && !strings.HasPrefix(err.Error(), "ChangeIssue is ") && !strings.Contains(err.Error(), "only in its own room") {
+			if !tc.allow && !strings.HasPrefix(err.Error(), "ChangeIssue is ") && !strings.Contains(err.Error(), "only in its own room") && !(tc.caller.Kind == websvc.Unverified && strings.Contains(err.Error(), "could not verify")) {
 				t.Fatalf("wrong refusal: %v", err)
 			}
 			rows, err := s.rooms.Notify.Rooms.Issues(rec.ID, true)

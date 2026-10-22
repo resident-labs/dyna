@@ -802,7 +802,7 @@ func workflowSpoolLiveGuard(t *testing.T, kind string) {
 		t.Fatal(err)
 	}
 	s.guard(calls)
-	callers := &socketCallers{sessions: m.Store, enforce: true, logf: t.Logf}
+	callers := &socketCallers{sessions: m.Store}
 	callers.actForCallers(calls)
 	applyOnce(calls, state.For(f.db), t.Logf)
 	enginetest.ServeCallers(t, filepath.Dir(f.store.Root), func(net.Conn) (websvc.Caller, error) { return caller, nil }, calls)

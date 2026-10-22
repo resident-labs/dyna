@@ -9,7 +9,7 @@ import (
 	"dyna-agent/internal/callspec"
 )
 
-func TestClaimHeaderOnlyAppliesToUnverifiedLocalCallers(t *testing.T) {
+func TestClaimHeaderDoesNotGrantCallerAuthority(t *testing.T) {
 	e := newEnv(t)
 	e.srv.o.Calls["Claim"] = func(ctx context.Context, _ []json.RawMessage) (any, error) { return callspec.ClaimOf(ctx), nil }
 	e.srv.o.CallScopes["Claim"] = ScopeRead
@@ -22,13 +22,14 @@ func TestClaimHeaderOnlyAppliesToUnverifiedLocalCallers(t *testing.T) {
 		status      int
 		want        callspec.Claim
 	}{
-		{"unverified local", asCaller(e.srv.UnixHandler(), identified{caller: Caller{Kind: Unverified}}), "", raw, http.StatusOK, callspec.Claim{Session: "ses_claimed", Room: "room_claimed"}},
+		{"empty identity", asCaller(e.srv.UnixHandler(), identified{}), "", raw, http.StatusForbidden, callspec.Claim{}},
+		{"unverified local", asCaller(e.srv.UnixHandler(), identified{caller: Caller{Kind: Unverified}}), "", raw, http.StatusForbidden, callspec.Claim{}},
 		{"verified owner", asCaller(e.srv.UnixHandler(), owner), "", raw, http.StatusOK, callspec.Claim{}},
 		{"verified session", asCaller(e.srv.UnixHandler(), identified{caller: Caller{Kind: Session, Session: "ses_verified"}}), "", raw, http.StatusOK, callspec.Claim{}},
 		{"verified worker", asCaller(e.srv.UnixHandler(), identified{caller: Caller{Kind: Worker, Run: "wf_verified"}}), "", raw, http.StatusOK, callspec.Claim{}},
 		{"paired device", e.app, cookie, raw, http.StatusOK, callspec.Claim{}},
-		{"no claim", asCaller(e.srv.UnixHandler(), identified{caller: Caller{Kind: Unverified}}), "", "", http.StatusOK, callspec.Claim{}},
-		{"bad unverified claim", asCaller(e.srv.UnixHandler(), identified{caller: Caller{Kind: Unverified}}), "", "{", http.StatusBadRequest, callspec.Claim{}},
+		{"no claim", asCaller(e.srv.UnixHandler(), identified{caller: Caller{Kind: Unverified}}), "", "", http.StatusForbidden, callspec.Claim{}},
+		{"bad unverified claim", asCaller(e.srv.UnixHandler(), identified{caller: Caller{Kind: Unverified}}), "", "{", http.StatusForbidden, callspec.Claim{}},
 		{"bad verified claim ignored", asCaller(e.srv.UnixHandler(), owner), "", "{", http.StatusOK, callspec.Claim{}},
 		{"bad paired claim ignored", e.app, cookie, "{", http.StatusOK, callspec.Claim{}},
 	} {
