@@ -234,4 +234,16 @@ func TestNodeScriptWritesValidExecutionTiming(t *testing.T) {
 	if err != nil || !json.Valid(data) {
 		t.Fatalf("invalid timing: %q %v", data, err)
 	}
+	for _, name := range []string{"docker", "sudo"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd = exec.Command("bash", "-c", script)
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
+	output, err = cmd.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 69 || strings.Contains(string(output), "DYNA_CI_CHECK_EXIT") {
+		t.Fatalf("denied Docker access became a test failure: %v: %s", err, output)
+	}
 }
