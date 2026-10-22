@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,12 +33,61 @@ const steeringSchema = `CREATE TABLE run_agent_steering (
  PRIMARY KEY(run, agent)
 );`
 
-// migrateSteering creates the steering table. openRuns calls it, so it
-// migrates with the runs table.
-func migrateSteering(db *sql.DB) error {
-	return database.Migrate(db, "runs.steering", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), steeringSchema)
-		return err
+// migrateSteering imports retained state once, with the schema version.
+func migrateSteering(db *sql.DB, dataDir string) error {
+	return database.Migrate(db, "runs.steering", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old < 1 {
+			if _, err := conn.ExecContext(ctx, steeringSchema); err != nil {
+				return err
+			}
+		}
+		roots := []string{filepath.Join(dataDir, "runs"), filepath.Join(dataDir, "archive", "runs")}
+		if strings.TrimSpace(os.Getenv(ArchiveDirEnv)) != "" {
+			if archive := ArchiveDir(); archive != roots[1] {
+				roots = append(roots, archive)
+			}
+		}
+		for _, root := range roots {
+			entries, err := os.ReadDir(root)
+			if os.IsNotExist(err) {
+				continue
+			}
+			if err != nil {
+				return err
+			}
+			for _, entry := range entries {
+				if !entry.IsDir() || validateRunID(entry.Name()) != nil {
+					continue
+				}
+				agentsDir := filepath.Join(root, entry.Name(), "agents")
+				agents, err := os.ReadDir(agentsDir)
+				if os.IsNotExist(err) {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				for _, agent := range agents {
+					id, err := strconv.Atoi(agent.Name())
+					if !agent.IsDir() || err != nil || validateAgentID(id) != nil || strconv.Itoa(id) != agent.Name() {
+						continue
+					}
+					var exists bool
+					if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM run_agent_steering WHERE run=? AND agent=?)", entry.Name(), id).Scan(&exists); err != nil {
+						return err
+					}
+					if exists {
+						continue
+					}
+					path := filepath.Join(agentsDir, agent.Name(), "steering-state.json")
+					if _, err := state.ImportMigration(ctx, conn, steeringKey(entry.Name(), id), path, importSteering(entry.Name(), id)); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		return nil
 	})
 }
 
@@ -60,8 +108,7 @@ func steeringKey(runID string, agentID int) string {
 }
 
 // withAgentSteeringLock holds a worker's steering lock across processes: the
-// worker, the CLI and the engine all change its state, so each imports,
-// writes and copies it under this lock.
+// worker, the CLI and the engine check and change its state under this lock.
 func withAgentSteeringLock(runID string, agentID int, fn func(string) error) error {
 	dir, err := agentSteeringDir(runID, agentID)
 	if err != nil {
@@ -89,19 +136,14 @@ func withAgentSteeringLock(runID string, agentID int, fn func(string) error) err
 // errNoSteering is a worker with no steering state.
 var errNoSteering = errors.New("worker does not support live steering or is no longer active")
 
-// readSteeringState imports a steering-state.json that an earlier release
-// wrote, then reads the worker's row. The caller holds the steering lock.
-func readSteeringState(dir, runID string, agentID int) (steeringState, error) {
+// readSteeringState reads the worker's row. The caller holds the steering lock.
+func readSteeringState(_ string, runID string, agentID int) (steeringState, error) {
 	var s steeringState
 	db, err := runsDB()
 	if err != nil {
 		return s, err
 	}
 	ctx := context.Background()
-	path := filepath.Join(dir, "steering-state.json")
-	if _, err := state.For(db).ImportIfForeign(ctx, steeringKey(runID, agentID), path, importSteering(runID, agentID)); err != nil {
-		return s, err
-	}
 	var active int
 	err = db.QueryRowContext(ctx, "SELECT pid, started, active, queue_start FROM run_agent_steering WHERE run=? AND agent=?", runID, agentID).
 		Scan(&s.Pid, &s.StartedAt, &active, &s.QueueStart)
@@ -124,7 +166,9 @@ func importSteering(runID string, agentID int) func(*sql.Conn, []byte) error {
 		}
 		// An earlier release truncates the queue when it activates and
 		// writes no queueStart, so its file reads from the start.
-		return putSteering(context.Background(), conn, s)
+		_, err := conn.ExecContext(context.Background(), "INSERT INTO run_agent_steering(run,agent,pid,started,active,queue_start) VALUES(?,?,?,?,?,?) ON CONFLICT(run,agent) DO NOTHING",
+			s.RunID, s.AgentID, s.Pid, s.StartedAt, s.Active, s.QueueStart)
+		return err
 	}
 }
 
@@ -135,26 +179,14 @@ ON CONFLICT(run,agent) DO UPDATE SET pid=excluded.pid, started=excluded.started,
 	return err
 }
 
-// writeSteeringState stores the worker's row, then writes the earlier
-// release's copy. The caller holds the steering lock and has read the state
-// first, which imports an earlier release's file.
-func writeSteeringState(dir string, s steeringState) error {
+// writeSteeringState stores the worker's row. The caller holds the steering lock.
+func writeSteeringState(_ string, s steeringState) error {
 	db, err := runsDB()
 	if err != nil {
 		return err
 	}
-	w, ctx := state.For(db), context.Background()
-	if err := w.Write(ctx, hub.Event{}, func(conn *sql.Conn) error { return putSteering(ctx, conn, s) }); err != nil {
-		return err
-	}
-	// TODO: legacy/shim remove later — an earlier release's worker and CLI read steering state only from steering-state.json; remove with item 31.
-	return w.Mirror(ctx, steeringKey(s.RunID, s.AgentID), filepath.Join(dir, "steering-state.json"), func(out io.Writer) error {
-		b, err := json.Marshal(s)
-		if err == nil {
-			_, err = out.Write(append(b, '\n'))
-		}
-		return err
-	})
+	ctx := context.Background()
+	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error { return putSteering(ctx, conn, s) })
 }
 
 // steeringQueue is a worker's queue path and its size, 0 when it does not
@@ -192,11 +224,6 @@ func ActivateAgentSteering(runID string, agentID int) error {
 		}
 		if err := createLog(queue); err != nil {
 			return fmt.Errorf("create agent steering queue: %w", err)
-		}
-		// Reading first imports an earlier release's file, so the write
-		// below is not overwritten by it (the rollback helper's order).
-		if _, err := readSteeringState(dir, runID, agentID); err != nil && !errors.Is(err, errNoSteering) {
-			return err
 		}
 		return writeSteeringState(dir, steeringState{
 			RunID: runID, AgentID: agentID, Pid: meta.Pid,
