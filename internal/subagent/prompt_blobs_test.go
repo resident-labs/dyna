@@ -1,11 +1,18 @@
 package subagent
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/state"
 )
 
 func TestSessionDeletionPreservesSharedPromptBlobUntilLastReference(t *testing.T) {
@@ -67,4 +74,82 @@ INSERT INTO prompt_blobs VALUES ('shared','shared text'), ('unique','unique text
 	if n := count("SELECT count(*) FROM prompt_blobs"); n != 0 {
 		t.Fatalf("remaining blobs = %d", n)
 	}
+	// Exercise the staged helpers in the same deletion regression. Ordinary
+	// turn readers and writers do not call these helpers until format 3.
+	ctx := context.Background()
+	write := func(id string, raw []byte) []byte {
+		t.Helper()
+		var encoded []byte
+		err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+			var err error
+			encoded, err = storeTurnPrompts(ctx, conn, id, 1, raw)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return encoded
+	}
+	shared := []byte(`{"prompt":"shared text","heldPrompt":"unique text","other":42}`)
+	encoded := write(first, shared)
+	other := write(second, []byte(`{"prompt":"shared text"}`))
+	if n := count("SELECT count(*) FROM prompt_blobs"); n != 2 {
+		t.Fatalf("deduplicated blobs = %d", n)
+	}
+	read := func(id string, raw []byte) ([]byte, error) {
+		var resolved []byte
+		err := state.For(db).Read(ctx, func(r state.Reader) error {
+			var err error
+			resolved, err = resolveRowPrompts(ctx, r, id, 1, raw)
+			return err
+		})
+		return resolved, err
+	}
+	resolved, err := read(first, encoded)
+	var fields map[string]any
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(resolved, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if fields["prompt"] != "shared text" || fields["heldPrompt"] != "unique text" || fields["other"] != float64(42) {
+		t.Fatalf("resolved fields = %v", fields)
+	}
+	// A hash in another session is still ordinary inline text.
+	inline, err := read(NewID(), other)
+	if err != nil || string(inline) != string(other) {
+		t.Fatalf("inline hash changed: %s, %v", inline, err)
+	}
+	abort := errors.New("rollback")
+	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		if _, err := storeTurnPrompts(ctx, conn, first, 1, []byte(`{"prompt":"rolled back"}`)); err != nil {
+			return err
+		}
+		return abort
+	})
+	if !errors.Is(err, abort) {
+		t.Fatal(err)
+	}
+	if n := count("SELECT count(*) FROM prompt_blobs WHERE text='rolled back'"); n != 0 {
+		t.Fatal("rollback left a blob")
+	}
+	resolved, err = read(first, encoded)
+	if err != nil || !strings.Contains(string(resolved), "unique text") {
+		t.Fatalf("rollback lost old text: %s, %v", resolved, err)
+	}
+	write(first, []byte(`{"prompt":"replacement"}`))
+	if n := count("SELECT count(*) FROM prompt_blobs WHERE text='unique text'"); n != 0 {
+		t.Fatal("replacement left unused text")
+	}
+	if _, err := read(second, other); err != nil {
+		t.Fatalf("replacement lost shared text: %v", err)
+	}
+	if _, err := db.Exec("DELETE FROM prompt_blobs WHERE text='shared text'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := read(second, other); err == nil || !strings.Contains(err.Error(), "is missing") {
+		t.Fatalf("missing blob error = %v", err)
+	}
+
 }
