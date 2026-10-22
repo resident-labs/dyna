@@ -68,7 +68,7 @@ func TestClosedSessionKeeperKeepsConsolidationSources(t *testing.T) {
 	if err != nil || source.Closed.IsZero() || source.ConsumedBy != a.ID {
 		t.Fatalf("source after consolidation = %+v, %v; want closed and consumed by %s", source, err, a.ID)
 	}
-	if _, err := e.m.Close(e.ctx, plain.ID); err != nil {
+	if _, err := e.m.CloseWithOptions(e.ctx, plain.ID, CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	old := time.Now().Add(-40 * 24 * time.Hour)

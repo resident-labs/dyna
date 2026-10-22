@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
+	"os"
 
 	"dyna-agent/internal/runstore"
 )
@@ -16,6 +16,9 @@ func (m *Manager) closeHeir(info Info) (Info, error) {
 	for id := info.ParentSession; id != "" && !seen[id]; {
 		seen[id] = true
 		parent, err := m.store().ResolveSnapshot(id)
+		if errors.Is(err, ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+			break
+		}
 		if err != nil {
 			return Info{}, err
 		}
@@ -60,22 +63,13 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]string, 
 				summary = append(summary, "Workflow "+item.ID+" canceled")
 			}
 		case "goal":
-			if heir.ID == "" {
-				continue
+			if m.checkpoint != nil {
+				m.checkpoint("close-before-goal-handoff")
 			}
-			g, err := m.goalStore().Get(info.RoomID, item.ID)
-			if err == nil {
-				holders := slices.Clone(g.Holders)
-				for i := range holders {
-					if holders[i] == info.ID {
-						holders[i] = heir.ID
-					}
-				}
-				_, err = m.goalStore().Edit(info.RoomID, g.ID, heir.ID, "", &holders, false)
-			}
+			moved, err := m.goalStore().HandoffHolder(info.RoomID, item.ID, info.ID, heir.ID)
 			if err != nil {
 				errs = append(errs, err)
-			} else {
+			} else if moved {
 				summary = append(summary, "Goal "+item.ID+" → "+heir.Name)
 			}
 		case "item":

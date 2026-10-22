@@ -370,7 +370,7 @@ func TestExplicitBadRecipientsRejectGroupMembersSkip(t *testing.T) {
 		t.Fatalf("stored after a resolution error: %#v", msgs)
 	}
 	// Closed explicit name: no open session has it.
-	if _, err := f.mgr.Close(f.ctx, f.crc.ID); err != nil {
+	if _, err := f.mgr.CloseWithOptions(f.ctx, f.crc.ID, subagent.CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.svc.Post(f.ctx, PostInput{Sender: lead, Mentions: []string{"@crc"}, Text: "x"}); err == nil || !strings.Contains(err.Error(), "no open session") {
