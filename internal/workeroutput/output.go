@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 )
@@ -129,6 +131,9 @@ func NormalizeLine(decl *Declaration, line string) []Event {
 // success/failure. Callers deliberately ignore errors so observability can
 // never change the worker's final result.
 type Normalizer struct {
+	mu          sync.Mutex
+	boundary    int64
+	known       bool
 	decl        *Declaration
 	w           io.Writer
 	antigravity *antigravityStreamState
@@ -136,12 +141,60 @@ type Normalizer struct {
 	Now func() time.Time
 }
 
+// NewNormalizer appends to w. The caller must give it exclusive write access.
+// A seekable writer is positioned at its absolute end. Retained output must
+// end in a verified newline before its boundary can be reported.
 func NewNormalizer(decl *Declaration, w io.Writer) *Normalizer {
 	n := &Normalizer{decl: CloneDeclaration(decl), w: w}
 	if decl != nil && strings.TrimSpace(decl.Dialect) == DialectAntigravityStreamJSON {
 		n.antigravity = &antigravityStreamState{}
 	}
+	if seeker, ok := w.(io.Seeker); ok {
+		if end, err := seeker.Seek(0, io.SeekEnd); err == nil && end >= 0 {
+			n.boundary = end
+			n.known = end == 0 || endsLine(w, end)
+		}
+	}
 	return n
+}
+
+func endsLine(w io.Writer, end int64) bool {
+	r, ok := w.(io.ReaderAt)
+	if f, isFile := w.(*os.File); isFile {
+		// Output files are normally opened write-only. Verify the read handle
+		// still names the same file before inspecting the last byte.
+		read, err := os.Open(f.Name())
+		if err != nil {
+			return false
+		}
+		defer read.Close()
+		original, err := f.Stat()
+		if err != nil {
+			return false
+		}
+		opened, err := read.Stat()
+		if err != nil || !os.SameFile(original, opened) {
+			return false
+		}
+		r, ok = read, true
+	}
+	if !ok {
+		return false
+	}
+	var last [1]byte
+	n, err := r.ReadAt(last[:], end-1)
+	return n == 1 && err == nil && last[0] == '\n'
+}
+
+// Boundary returns the absolute end of complete normalized lines. Unknown
+// initial positions and failed writes remain unknown for this normalizer.
+func (n *Normalizer) Boundary() (int64, bool) {
+	if n == nil {
+		return 0, false
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.boundary, n.known
 }
 
 func (n *Normalizer) WriteLine(line string) error {
@@ -156,6 +209,8 @@ func (n *Normalizer) WriteRecord(record Record) error {
 	if n == nil || n.w == nil {
 		return nil
 	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	events := record.Events
 	if n.antigravity != nil {
 		events = n.antigravity.deduplicate(events)
@@ -170,8 +225,17 @@ func (n *Normalizer) WriteRecord(record Record) error {
 		if err != nil {
 			return err
 		}
-		if _, err := n.w.Write(append(b, '\n')); err != nil {
+		line := append(b, '\n')
+		written, err := n.w.Write(line)
+		if err == nil && written != len(line) {
+			err = io.ErrShortWrite
+		}
+		if err != nil {
+			n.known = false
 			return err
+		}
+		if n.known {
+			n.boundary += int64(written)
 		}
 	}
 	return nil
