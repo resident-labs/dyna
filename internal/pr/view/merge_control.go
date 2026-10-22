@@ -28,3 +28,8 @@ func (s *Service) MergeControlStatus(roomRef string) (watch.MergeControlStatus, 
 	}
 	return s.Watcher().MergeControlStatus(rm.ID)
 }
+
+// MergeStatus preserves the full CLI queue response and the engine counters.
+func (s *Service) MergeStatus(ctx context.Context) ([]watch.MergeQueueItem, error) {
+	return s.Watcher().MergeStatus(ctx)
+}
