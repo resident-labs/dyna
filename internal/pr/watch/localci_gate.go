@@ -131,7 +131,13 @@ func applyLocalBudgets(result *localci.Result, policy ChangePolicy) string {
 			}
 		}
 	}
-	if result.Status == "failed" {
+	goFailed := false
+	for _, check := range result.Checks {
+		if check.Status == "failed" && (check.CheckName == "frontend" || check.CheckName == "frontend-check" || check.CheckName == "go-static" || strings.HasPrefix(check.CheckName, "go-test-shard (")) {
+			goFailed = true
+		}
+	}
+	if goFailed {
 		for i := range result.Checks {
 			if result.Checks[i].CheckName == "go-test" && result.Checks[i].Status == "passed" {
 				result.Checks[i].Status = "failed"
@@ -346,7 +352,13 @@ func (s *Service) registeredHostedStatus(snap Snapshot, r Record, policy ChangeP
 			return
 		}
 	}
+	latest := map[string]Status{}
 	for _, v := range snap.Statuses {
+		if old, ok := latest[v.Context]; !ok || v.ID > old.ID {
+			latest[v.Context] = v
+		}
+	}
+	for _, v := range latest {
 		if !localCommitStatus(v) && requiredCheck(v.Context, policy.RequiredChecks) && (v.State == "failure" || v.State == "error") {
 			status = "failed"
 			return

@@ -30,6 +30,11 @@ func TestRegisteredCIRaceDoesNotHideFailuresOrBlockHostedRecovery(t *testing.T) 
 	if ci, _, _, _ := (&Service{}).registeredHostedStatus(pending, Record{}, ChangePolicy{}); ci != "failed" {
 		t.Fatalf("pending hosted job hid current failure: %s", ci)
 	}
+	pending.Checks = []Check{actionsCheck(Check{Name: "go-test", Status: "in_progress"})}
+	pending.Statuses = []Status{{ID: 1, Context: "security", State: "failure"}, {ID: 2, Context: "security", State: "success"}}
+	if ci, _, _, _ := (&Service{}).registeredHostedStatus(pending, Record{}, ChangePolicy{RequiredChecks: []string{"security"}}); ci != "pending" {
+		t.Fatalf("old hosted status blocked successful replacement: %s", ci)
+	}
 	// A successful replacement hosted attempt clears its earlier failure.
 	failed := chooseRegisteredCI("head", "failed", "attempt-1", nil, nil, "pending", nil, "")
 	recovered := chooseRegisteredCI("head", "passed", "attempt-2", nil, nil, "pending", nil, "")
