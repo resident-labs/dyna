@@ -91,7 +91,7 @@ func (r Runner) nodeCommand(ctx context.Context, out, stderr io.Writer, scope, s
 	name, args := "bash", []string{"-o", "pipefail", "-c", script}
 	if scope != "" {
 		name = "systemd-run"
-		args = append([]string{"--user", "--scope", "--quiet", "--unit", scope, "-p", "CPUQuota=200%", "-p", "MemoryMax=5G", "-p", "TasksMax=768", "--", "nice", "-n", "10", "bash", "-o", "pipefail", "-c"}, script)
+		args = append([]string{"--user", "--scope", "--quiet", "--expand-environment=no", "--unit", scope, "-p", "CPUQuota=200%", "-p", "MemoryMax=5G", "-p", "TasksMax=768", "--", "nice", "-n", "10", "bash", "-o", "pipefail", "-c"}, script)
 	}
 	if r.Node.SSH != "" {
 		remote := shellquote.Quote(name)
