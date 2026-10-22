@@ -36,17 +36,11 @@ import (
 // ArchiveDirEnv overrides the archive location (default
 // $XDG_DATA_HOME/dyna/archive/runs). It must be set consistently for every
 // dyna invocation that should resolve archived ids.
-const ArchiveDirEnv = "DYNA_ARCHIVE_DIR"
+const ArchiveDirEnv = store.RunArchiveDirEnv
 
 // ArchiveDir is where archived run directories live.
 func ArchiveDir() string {
-	if x := strings.TrimSpace(os.Getenv(ArchiveDirEnv)); x != "" {
-		if abs, err := filepath.Abs(x); err == nil {
-			return filepath.Clean(abs)
-		}
-		return filepath.Clean(x)
-	}
-	return filepath.Join(store.DataDir(), "archive", "runs")
+	return store.RunArchiveDir(store.DataDir())
 }
 
 // IsFinishedStatus reports whether a run status is terminal and archivable.
