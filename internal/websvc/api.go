@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"path/filepath"
@@ -105,6 +107,23 @@ func Transient(err error) bool {
 		errors.Is(err, ErrReadOnly) || errors.Is(err, callspec.ErrRetryable) || database.Busy(err)
 }
 
+var (
+	transientLogMu   sync.Mutex
+	transientLogLast = map[string]time.Time{}
+)
+
+// logTransient records the error behind a 503 at most once per method per
+// minute, so a retry loop leaves a trace without flooding the log.
+func logTransient(method string, err error) {
+	transientLogMu.Lock()
+	defer transientLogMu.Unlock()
+	if time.Since(transientLogLast[method]) < time.Minute {
+		return
+	}
+	transientLogLast[method] = time.Now()
+	log.Printf("websvc: %s answered 503 (transient error): %v", method, err)
+}
+
 func (s *Server) call(w http.ResponseWriter, r *http.Request, rt Route, p Principal, name string) {
 	if err := csrf(r, rt); err != nil {
 		jsonError(w, http.StatusForbidden, err.Error())
@@ -155,7 +174,11 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request, rt Route, p Princi
 	}
 	res, err := c(ctx, args)
 	if err != nil {
-		jsonError(w, methodStatus(err), err.Error())
+		status := methodStatus(err)
+		if status == http.StatusServiceUnavailable {
+			logTransient(name, err)
+		}
+		jsonError(w, status, err.Error())
 		return
 	}
 	if result, ok := res.(PrincipalResult); ok {
