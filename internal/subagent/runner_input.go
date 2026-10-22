@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	"time"
 
 	"dyna-agent/internal/room"
@@ -57,8 +58,8 @@ func (m *Manager) RunnerClaimInput(ctx context.Context, input InputClaim) (Claim
 	return m.claimInput(ctx, id, input)
 }
 
-// claimInput is the one startup/live selection and claim boundary. It holds
-// only the engine's gate lock; callers never hold their gate across the call.
+// claimInput is the one startup/live selection and claim boundary. Callers
+// never hold their gate across the call.
 func (m *Manager) claimInput(ctx context.Context, id string, input InputClaim) (ClaimedInput, error) {
 	return m.selectInput(ctx, id, input, false)
 }
@@ -69,6 +70,45 @@ func (m *Manager) selectInput(ctx context.Context, id string, input InputClaim, 
 	if input.Turn <= 0 || input.Startup && input.Final || !input.Startup && len(input.Covered) > 0 {
 		return ClaimedInput{}, errors.New("invalid runner input claim")
 	}
+	frames := inputFrames{}
+	for {
+		reply, err := m.selectPreparedInput(ctx, id, input, readOnly, &frames)
+		if !errors.Is(err, errInputFrames) {
+			return reply, err
+		}
+		// Delivery aliases and reply addresses can read other sessions. Resolve
+		// them with the gate released, then recheck eligibility before claiming.
+		for _, msg := range frames.pending {
+			options := m.store().frameOptions(frames.meta, msg)
+			frame := msg.Frame(options)
+			if !input.Startup {
+				frame, _ = msg.SteeringFrame(options, runstore.MaxSteeringMessageBytes)
+			}
+			post := ClaimedPost{Steer: Steer{ID: msg.ID, TS: msg.TS, Message: frame}, From: msg.From}
+			if m.store().Owes(frames.meta, msg) {
+				post.Owed = msg.From
+			}
+			frames.posts[msg.ID] = post
+		}
+		frames.pending = nil
+		if frames.needHierarchy {
+			frames.hierarchy = m.store().SelectorContext(frames.meta)
+			frames.needHierarchy = false
+		}
+	}
+}
+
+var errInputFrames = errors.New("input frames need delivery resolution")
+
+type inputFrames struct {
+	meta          Meta
+	posts         map[string]ClaimedPost
+	pending       []room.Message
+	hierarchy     string
+	needHierarchy bool
+}
+
+func (m *Manager) selectPreparedInput(ctx context.Context, id string, input InputClaim, readOnly bool, frames *inputFrames) (ClaimedInput, error) {
 	store := m.store()
 	var reply ClaimedInput
 	err := store.withGateLockContext(ctx, id, func(dir string) error {
@@ -97,6 +137,11 @@ func (m *Manager) selectInput(ctx context.Context, id string, input InputClaim, 
 			}
 		}
 
+		// A rename, transfer or consolidation can change framing while the gate
+		// is released. Discard prepared frames when session metadata changes.
+		if !readOnly && !reflect.DeepEqual(frames.meta, meta) {
+			*frames = inputFrames{meta: meta, posts: map[string]ClaimedPost{}}
+		}
 		reply = ClaimedInput{Cursor: input.Cursor, Depth: meta.Depth, ParentSession: meta.ParentSession, roomID: meta.RoomID}
 		var q queueClaims
 		if readOnly {
@@ -181,7 +226,11 @@ func (m *Manager) selectInput(ctx context.Context, id string, input InputClaim, 
 				if readOnly {
 					reply.Posts = append(reply.Posts, ClaimedPost{})
 				} else {
-					reply.Posts = append(reply.Posts, ClaimedPost{Steer: Steer{TS: time.Now().UnixMilli(), Message: "[DYNA HIERARCHY CHANGED] This replaces earlier parent and depth instructions. Continue your active task. Use the current hierarchy below. The CLI checks the current depth limit when you start a child.\n" + store.SelectorContext(meta)}})
+					if frames.hierarchy == "" {
+						frames.needHierarchy = true
+						return errInputFrames
+					}
+					reply.Posts = append(reply.Posts, ClaimedPost{Steer: Steer{TS: time.Now().UnixMilli(), Message: "[DYNA HIERARCHY CHANGED] This replaces earlier parent and depth instructions. Continue your active task. Use the current hierarchy below. The CLI checks the current depth limit when you start a child.\n" + frames.hierarchy}})
 				}
 			}
 			if paused {
@@ -200,6 +249,7 @@ func (m *Manager) selectInput(ctx context.Context, id string, input InputClaim, 
 		if err != nil {
 			return err
 		}
+		var eligible []room.Message
 		for _, msg := range selected {
 			if q.Dismissed[msg.ID] || !input.Startup && q.Claimed[msg.ID] == input.Turn {
 				continue
@@ -211,17 +261,18 @@ func (m *Manager) selectInput(ctx context.Context, id string, input InputClaim, 
 				reply.Posts = append(reply.Posts, ClaimedPost{})
 				return commit()
 			}
+			eligible = append(eligible, msg)
+			if _, ok := frames.posts[msg.ID]; !ok {
+				frames.pending = append(frames.pending, msg)
+			}
+		}
+		if len(frames.pending) > 0 {
+			return errInputFrames
+		}
+		for _, msg := range eligible {
 			q.claim(msg.ID, input.Turn)
 			changed = true
-			frame := msg.Frame(store.frameOptions(meta, msg))
-			if !input.Startup {
-				frame, _ = msg.SteeringFrame(store.frameOptions(meta, msg), runstore.MaxSteeringMessageBytes)
-			}
-			post := ClaimedPost{Steer: Steer{ID: msg.ID, TS: msg.TS, Message: frame}, From: msg.From}
-			if store.Owes(meta, msg) {
-				post.Owed = msg.From
-			}
-			reply.Posts = append(reply.Posts, post)
+			reply.Posts = append(reply.Posts, frames.posts[msg.ID])
 		}
 		return commit()
 	})
