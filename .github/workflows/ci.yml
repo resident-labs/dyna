@@ -366,7 +366,7 @@ jobs:
         id: apt-debs
         uses: actions/cache/restore@v4
         with:
-          path: ~/.apt-debs
+          path: ~/.apt-debs/*.deb
           key: apt-debs-${{ runner.os }}-labwc-xwayland-sqlite3-v1
       - name: Install GUI tools
         shell: bash
@@ -403,12 +403,12 @@ jobs:
           # eight at a time. apt skips whatever is already in its archive
           # directory, so this only ever removes work from the install below.
           packages=(labwc xwayland sqlite3)
-          uris=$(sudo apt-get "${apt_opts[@]}" install -y -qq --print-uris \
+          uris=$(bounded 40 sudo apt-get "${apt_opts[@]}" install -y -qq --print-uris \
             --no-install-recommends "${packages[@]}" |
-            sed -n "s/^'\(https\?:\/\/[^']*\.deb\)'.*/\1/p")
+            sed -n "s/^'\(https\?:\/\/[^']*\.deb\)'.*/\1/p") || uris=""
           if [ -n "$uris" ]; then
             printf '%s\n' "$uris" |
-              xargs -P 8 -n 1 timeout 45 curl -fsSL -O --output-dir "$arch" ||
+              bounded 90 xargs -P 8 -n 1 timeout 45 curl -fsSL -O --output-dir "$arch" ||
               echo "parallel fetch incomplete; apt will fetch the rest"
           fi
           retry 120 sudo apt-get "${apt_opts[@]}" install -y -qq --no-install-recommends "${packages[@]}" >/dev/null
@@ -418,7 +418,7 @@ jobs:
         if: steps.apt-debs.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
-          path: ~/.apt-debs
+          path: ~/.apt-debs/*.deb
           key: apt-debs-${{ runner.os }}-labwc-xwayland-sqlite3-v1
       - name: Live computer and cleanup tests
         shell: bash
