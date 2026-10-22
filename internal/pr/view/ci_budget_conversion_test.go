@@ -79,7 +79,7 @@ func TestRoomCIBudgetConversion(t *testing.T) {
 	// Invalid writes must preserve the last saved settings.
 	before, _ := a.RoomCIBudget(rec.ID)
 	for _, bad := range []prview.CIBudgetSettings{
-		{CIWarnAfter: "5m", CIFailAfter: "4m"}, {CITestMax: "0s"}, {CITestMax: "bad"}, {CITestAllow: []string{" trailing "}},
+		{CITimeBudget: "warn", CIWarnAfter: "5m", CIFailAfter: "4m"}, {CITimeBudget: "warn", CITestMax: "0s"}, {CITimeBudget: "warn", CITestMax: "bad"}, {CITimeBudget: "warn", CITestAllow: []string{" trailing "}},
 	} {
 		if err := a.SetRoomCIBudget(ownerCtx, rec.ID, bad); err == nil {
 			t.Fatalf("accepted invalid budget: %#v", bad)
