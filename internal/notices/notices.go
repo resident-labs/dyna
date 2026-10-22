@@ -2,7 +2,6 @@
 package notices
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"path/filepath"
@@ -61,9 +60,6 @@ func (s Store) List() ([]Notice, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.importForeign(db); err != nil {
-		return nil, err
-	}
 	return s.snapshot(db)
 }
 
@@ -79,16 +75,5 @@ func (s Store) update(fn func(*[]Notice)) error {
 	if err != nil {
 		return err
 	}
-	unlock, err := s.lock(context.Background())
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	if err := s.importLocked(db); err != nil {
-		return err
-	}
-	if err := s.write(db, fn); err != nil {
-		return err
-	}
-	return s.mirror(db)
+	return s.write(db, fn)
 }
