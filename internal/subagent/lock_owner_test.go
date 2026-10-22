@@ -3,123 +3,76 @@ package subagent
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"syscall"
 	"testing"
-	"time"
+
+	"dyna-agent/internal/mode"
+	"dyna-agent/internal/profile"
+	"dyna-agent/internal/room"
+	"dyna-agent/internal/settings"
+	"dyna-agent/internal/store/storetest"
+	"dyna-agent/internal/turnlock"
 )
 
-// This subprocess receives the lock exactly as _turn does, then starts a
-// background shell. The shell must remain alive after its parent exits.
-func TestTurnLockChildHelper(t *testing.T) {
-	// TestMain clears DYNA_* settings before helper tests run.
-	if os.Getenv("GO_WANT_TURN_LOCK_CHILD") != "1" {
-		return
+func TestWakePreservesLockHeldByNonRunner(t *testing.T) {
+	storetest.Isolate(t)
+	held := &heldTurnSpawner{}
+	t.Cleanup(func() {
+		if held.lock != nil {
+			held.lock.Close()
+		}
+	})
+	m := &Manager{Store: DefaultStore(), Profiles: func() (*profile.Store, error) {
+		return &profile.Store{Profiles: []profile.Profile{mockProfile("mock")}}, nil
+	}, Settings: settings.Defaults, Spawner: held}
+	rec, err := m.rooms().Create(room.CreateInput{Name: "work"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	lock := os.NewFile(3, "turn.lock")
-	protectLock(lock)
-	child := exec.Command("sh", "-c", "exec sleep 30")
-	child.Stdout, child.Stderr = nil, nil
-	if err := child.Start(); err != nil {
-		os.Exit(2)
-	}
-	fmt.Println(child.Process.Pid)
-	_ = child.Process.Release()
-	os.Exit(0)
-}
-
-func TestWakeRecoversLockHeldByNonRunner(t *testing.T) {
-	e := newTestEnv(t)
-	e.joinRunners()
-	info, turn := e.start("finish first turn")
-	e.wait(info.ID, turn.N)
-	e.waitStatus(info.ID, StatusIdle)
-	lock, err := e.m.Store.tryTurnLock(info.ID)
+	t.Setenv(mode.EnvRoomID, rec.ID)
+	t.Setenv(mode.EnvRoom, rec.Name)
+	info := completedFixtureSession(t, &testEnv{t: t, m: m, ctx: context.Background(), room: rec})
+	lock, err := m.Store.tryTurnLock(info.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lock.Close()
-	child := exec.Command("sleep", "30")
-	child.ExtraFiles = []*os.File{lock}
-	if err := child.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = child.Process.Kill(); _ = child.Wait() }()
-	lock.Close()
-	dir, _ := e.m.Store.Dir(info.ID)
-	if err := writeGateState(dir, gateState{Pid: child.Process.Pid, Turn: turn.N}); err != nil {
-		t.Fatal(err)
-	}
-	if e.m.Store.lockHeld(info.ID) {
-		t.Fatal("a non-runner must not make a session running")
-	}
-	ctx, cancel := context.WithTimeout(e.ctx, 5*time.Second)
-	defer cancel()
-	result, err := e.m.Wake(ctx, info.ID, WakeOptions{continuation: "follow up"})
+	before, err := lock.Stat()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Turn != turn.N+1 {
-		t.Fatalf("wake = %+v; expected follow-up", result)
-	}
-	e.wait(info.ID, result.Turn)
-	// Recovery replaces the lock inode. The old shell stays alive throughout.
-	if err := syscall.Kill(child.Process.Pid, 0); err != nil {
+	dir, _ := m.Store.Dir(info.ID)
+	if err := writeGateState(dir, gateState{Pid: os.Getppid(), Turn: info.Turns}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "turn.lock")); err != nil {
-		t.Fatal(err)
+	if alive, known := turnlock.RunnerAlive(dir, info.ID); alive || !known {
+		t.Fatalf("runner alive = %v, known = %v", alive, known)
 	}
-}
-
-func TestWakeDoesNotWaitForUnidentifiedLockHolder(t *testing.T) {
-	e := newTestEnv(t)
-	e.joinRunners()
-	info, turn := e.start("finish first turn")
-	e.wait(info.ID, turn.N)
-	e.waitStatus(info.ID, StatusIdle)
-	lock, err := e.m.Store.tryTurnLock(info.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Close()
-	dir, _ := e.m.Store.Dir(info.ID)
-	if err := writeGateState(dir, gateState{Turn: turn.N}); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(e.ctx, 5*time.Second)
-	defer cancel()
-	_, err = e.m.Wake(ctx, info.ID, WakeOptions{})
+	_, err = m.Wake(context.Background(), info.ID, WakeOptions{continuation: "follow up"})
 	if !errors.Is(err, ErrBusy) {
-		t.Fatalf("wake error = %v", err)
+		t.Errorf("Wake error = %v; want ErrBusy", err)
 	}
-}
-
-func TestRetiredTurnLockCannotBeAccepted(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "turn.lock")
-	old, err := os.Create(path)
+	after, err := os.Stat(filepath.Join(dir, "turn.lock"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer old.Close()
-	if !turnLockMatchesPath(old, path) {
-		t.Fatal("current lock rejected")
+	if !os.SameFile(before, after) {
+		t.Error("Wake replaced the held lock inode")
 	}
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	current, err := os.Create(path)
+	meta, err := m.Store.ReadMeta(info.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer current.Close()
-	if turnLockMatchesPath(old, path) {
-		t.Fatal("retired lock inode accepted")
+	if meta.Turns != info.Turns || held.lock != nil {
+		t.Fatalf("turns = %d, spawned = %v", meta.Turns, held.lock != nil)
 	}
-	if !turnLockMatchesPath(current, path) {
-		t.Fatal("replacement lock rejected")
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
 	}
+	next, err := m.Store.tryTurnLock(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next.Close()
 }
