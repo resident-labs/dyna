@@ -493,6 +493,9 @@ func TestCIStreakBatchesLogsAndPausesOnlyCIWakes(t *testing.T) {
 	// Stored author comments are noise. Owner comments on the very same login wake it.
 	e.addComment(1, "issue-comments", Marker(e.author.ID)+" agent reply", "owner")
 	if err := e.s.Store.update(func(st *State) error {
+		if st.CommentSessions == nil {
+			st.CommentSessions = map[string]string{}
+		}
 		st.CommentSessions["issue-comments:1"] = e.author.ID
 		return nil
 	}); err != nil {
@@ -735,6 +738,15 @@ func TestVerdictsPushesAndMerge(t *testing.T) {
 	e.addComment(10, "reviews", Marker(r.Reviewer)+" Fix the parser.", "owner")
 	e.addComment(11, "comments", Marker(r.Reviewer)+" Bounds check at line 7.", "owner")
 	e.f.Comments[1].ReviewID = 10
+	if err := e.s.Store.update(func(st *State) error {
+		if st.CommentSessions == nil {
+			st.CommentSessions = map[string]string{}
+		}
+		st.CommentSessions["reviews:10"] = r.Reviewer
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	e.f.Pull.Updated = e.clock.Add(time.Minute).Format(time.RFC3339)
 	e.tick()
 	if len(e.sent) != 1 || !strings.Contains(e.sent[0].Text, "Fix the parser") || !strings.Contains(e.sent[0].Text, "Bounds check at line 7") {
