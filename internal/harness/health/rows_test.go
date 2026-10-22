@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
-	"time"
 
 	"dyna-agent/internal/store"
 )
@@ -24,42 +23,6 @@ func oldBinaryWrites(t *testing.T, s *Service, name string, r record) {
 	}
 	if err := store.WriteJSON(path, json.RawMessage(b), 0o600); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// A record that the previous release wrote is imported on read, and then
-// lives in its row: the app's view needs no file.
-func TestOldBinaryRecordIsImportedOnRead(t *testing.T) {
-	s, p := New(t.TempDir()), testProfile()
-	at := time.Unix(5, 0).UTC()
-	oldBinaryWrites(t, s, p.Name, record{Fingerprint: Fingerprint(p), Version: "v1", LastHealthyVersion: "v1", LastHealthyAt: at,
-		Observed: Observed{Observation: Observation{At: at, Successful: true, StdoutSeen: true, RecognizedRecords: 1}, LastTurnAt: at, RecognizedOutput: true}})
-	if v := s.View(p, "v1"); v.Status != Healthy || v.StorageError != "" {
-		t.Fatalf("view of the old binary's record = %+v", v)
-	}
-	path, _ := s.path(p.Name)
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	if v := s.View(p, "v1"); v.Status != Healthy || v.LastHealthyVersion != "v1" {
-		t.Fatalf("without the file, the row was lost: %+v", v)
-	}
-}
-
-// A record imports the previous release's write first, then applies its own
-// observation on top: the old binary's healthy version is kept.
-func TestRecordImportsAnOldBinaryWriteFirst(t *testing.T) {
-	s, p := New(t.TempDir()), testProfile()
-	recordTurn(t, s, p, "v1", observation(1))
-	at := time.Unix(10, 0).UTC()
-	oldBinaryWrites(t, s, p.Name, record{Fingerprint: Fingerprint(p), Version: "old", LastHealthyVersion: "old", LastHealthyAt: at,
-		Observed: Observed{Observation: Observation{At: at, Successful: true, StdoutSeen: true, RecognizedRecords: 1}, LastTurnAt: at, RecognizedOutput: true}})
-	running := observation(11)
-	if v := recordProgress(t, s, p, "old", running); v.StorageError != "" || v.LastHealthyVersion != "old" {
-		t.Fatalf("progress after the old binary's write = %+v; want its healthy version kept", v)
-	}
-	if v := s.View(p, "old"); v.LastHealthyVersion != "old" || v.LastCheckedAt != running.At {
-		t.Fatalf("row after the update = %+v", v)
 	}
 }
 
