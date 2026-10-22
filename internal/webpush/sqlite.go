@@ -4,9 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
-	"io"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -31,17 +28,22 @@ func openDB(dataDir string) (*sql.DB, error) {
 	if err := state.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "webpush.version", 2, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "webpush.version", 3, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, schema); err != nil {
 				return err
 			}
 		}
-		// TODO: legacy/shim remove later — moves the stamp that #1483 kept in meta into state_mirrors; remove with the copy, when requirement 31 ends.
-		_, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO state_mirrors(key, version)
-SELECT ?, value FROM meta WHERE key = 'webpush.mirror' AND value != 'absent'`, mirrorKey)
-		return err
+		if old < 2 {
+			// Preserve the stamp from version 1, including an owned empty set.
+			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO state_mirrors(key, version)
+SELECT ?, value FROM meta WHERE key = 'webpush.mirror' AND value != 'absent'`, mirrorKey); err != nil {
+				return err
+			}
+		}
+		return importLegacy(conn, legacyDir(dataDir))
+
 	})
 	return db, err
 }
@@ -49,13 +51,10 @@ SELECT ?, value FROM meta WHERE key = 'webpush.mirror' AND value != 'absent'`, m
 // mirrorKey names the subscription copy in state_mirrors.
 const mirrorKey = "webpush/subscriptions"
 
-// Migrate creates the subscription table and imports the old file at engine start.
+// Migrate prepares subscriptions and imports retained state once.
 func Migrate(dataDir string) error {
-	db, err := openDB(dataDir)
-	if err != nil {
-		return err
-	}
-	return importLegacy(db, legacyDir(dataDir))
+	_, err := openDB(dataDir)
+	return err
 }
 
 func scanEntry(row interface{ Scan(...any) error }) (Entry, error) {
@@ -80,42 +79,22 @@ func saveEntry(conn *sql.Conn, e Entry) error {
 // TODO: legacy/shim remove later — old releases store subscriptions under connect/push; remove when requirement 31 ends.
 func legacyDir(dataDir string) string { return filepath.Join(dataDir, "connect", "push") }
 
-// TODO: legacy/shim remove later — reads the subscription file when an old binary wrote it; remove when requirement 31 ends.
-func importLegacy(db *sql.DB, dir string) error {
-	_, err := state.For(db).ImportIfForeign(context.Background(), mirrorKey, filepath.Join(dir, subsFile), func(conn *sql.Conn, data []byte) error {
-		// A damaged file is skipped once; the rows stay.
+// TODO: legacy/shim remove later — imports retained push.json during schema upgrade;
+// remove when all supported data directories have passed webpush.version 3.
+func importLegacy(conn *sql.Conn, dir string) error {
+	_, err := state.ImportMigration(context.Background(), conn, mirrorKey, filepath.Join(dir, subsFile), func(conn *sql.Conn, data []byte) error {
 		var entries []Entry
-		if err := json.Unmarshal(data, &entries); err != nil {
-			return fmt.Errorf("webpush: subscription file is damaged: %w", state.ErrSkipForeign)
-		}
-		if _, err := conn.ExecContext(context.Background(), "DELETE FROM push_subscriptions"); err != nil {
-			return err
+		// Damaged retained data must not block startup or replace canonical rows.
+		if json.Unmarshal(data, &entries) != nil {
+			return nil
 		}
 		for _, e := range entries {
-			if err := saveEntry(conn, e); err != nil {
+			if _, err := conn.ExecContext(context.Background(), `INSERT OR IGNORE INTO push_subscriptions (`+entryColumns+`)
+VALUES(?,?,?,?,?,?)`, e.DeviceID, e.Endpoint, e.P256dh, e.Auth, e.Names, e.Created.Format(time.RFC3339Nano)); err != nil {
 				return err
 			}
 		}
 		return nil
 	})
 	return err
-}
-
-// TODO: legacy/shim remove later — write-only rollback copy for the previous release; remove when requirement 31 ends.
-func (s *Store) mirror() error {
-	if err := os.MkdirAll(s.dir, 0700); err != nil {
-		return err
-	}
-	return state.For(s.db).Mirror(context.Background(), mirrorKey, filepath.Join(s.dir, subsFile), func(out io.Writer) error {
-		entries, err := s.List()
-		if err != nil {
-			return err
-		}
-		data, err := json.MarshalIndent(entries, "", "  ")
-		if err != nil {
-			return err
-		}
-		_, err = out.Write(data)
-		return err
-	})
 }
