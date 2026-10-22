@@ -77,7 +77,7 @@ func (s Store) Seed(ctx context.Context, c Catalog, fsys fs.FS) (SeedResult, err
 	if err != nil {
 		return result, err
 	}
-	if err := importSeedManifest(ctx, db, c.RegistryDir); err != nil {
+	if err := importCustomRegistry(ctx, db, c.RegistryDir); err != nil {
 		return result, err
 	}
 	manifest, err := readSeedRecord(ctx, db, c.RegistryDir)
@@ -115,9 +115,6 @@ func (s Store) Seed(ctx context.Context, c Catalog, fsys fs.FS) (SeedResult, err
 	})
 	if err != nil {
 		return result, err
-	}
-	if err := mirrorSeedManifest(context.WithoutCancel(ctx), db, c.RegistryDir); err != nil {
-		return result, fmt.Errorf("seed committed, but rollback manifest failed: %w", err)
 	}
 	return result, nil
 }
@@ -208,18 +205,6 @@ func decodeManagedManifest(data []byte) (managedManifest, error) {
 // TODO: legacy/shim remove later — locates the previous release rollback manifest; remove with requirement 31.
 func manifestPath(dir string) string {
 	return filepath.Join(dir, ManagedManifestName)
-}
-
-// TODO: legacy/shim remove later — encodes the previous release rollback manifest; remove with requirement 31.
-func marshalManifest(manifest managedManifest) ([]byte, error) {
-	if manifest.Files == nil {
-		manifest.Files = map[string]string{}
-	}
-	data, err := json.MarshalIndent(manifest, "", "  ")
-	if err != nil {
-		return nil, err
-	}
-	return append(data, '\n'), nil
 }
 
 func contentHash(data []byte) string {
