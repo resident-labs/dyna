@@ -344,6 +344,25 @@ func dynaShellOp(lower string) string {
 // shellmcp.exitLine). Results from before that lead name no job.
 var jobLead = regexp.MustCompile(`^\s*Job (sh_\d{8}-\d{6}-[0-9a-f]{8})\b`)
 
+// mcpResultText extracts the first text block from an MCP result envelope.
+// Plain results and invalid envelopes keep their original interpretation.
+func mcpResultText(output string) string {
+	var result struct {
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal([]byte(output), &result) == nil {
+		for _, block := range result.Content {
+			if block.Type == "text" {
+				return block.Text
+			}
+		}
+	}
+	return output
+}
+
 // Summarize condenses one tool event.
 func Summarize(e workeroutput.Event) Tool {
 	// TODO: legacy/shim remove later — renders old normalized Muse envelopes; remove after affected artifacts expire or migrate
@@ -433,7 +452,7 @@ func Summarize(e workeroutput.Event) Tool {
 		t.Target = firstLine(e.Input)
 	}
 	if t.JobOp = dynaShellOp(lower); t.JobOp == "run" {
-		if m := jobLead.FindStringSubmatch(e.Output); m != nil {
+		if m := jobLead.FindStringSubmatch(mcpResultText(e.Output)); m != nil {
 			t.JobID = m[1]
 		}
 	} else if t.JobOp != "" && shells.ValidID(str("job_id")) {
