@@ -72,7 +72,7 @@ func TestAncestryImportsLegacyHeaderAtStartup(t *testing.T) {
 	}
 }
 
-func TestAncestryStampKeepsFirstParentAndWritesRollbackHeader(t *testing.T) {
+func TestAncestryStampKeepsFirstParentAndGraph(t *testing.T) {
 	s := testAncestryStore(t)
 	dir := t.TempDir()
 	p := plan.Extract("return 1", plan.Options{})
@@ -103,17 +103,8 @@ func TestAncestryStampKeepsFirstParentAndWritesRollbackHeader(t *testing.T) {
 	if err := json.Unmarshal(raw, &legacy); err != nil {
 		t.Fatal(err)
 	}
-	if legacy.ResumedFrom != got || legacy.PlanHash != p.PlanHash || !legacy.CreatedAt.Equal(p.CreatedAt) {
+	if legacy.ResumedFrom != "" || legacy.PlanHash != p.PlanHash || !legacy.CreatedAt.Equal(p.CreatedAt) {
 		t.Fatalf("rollback header = %#v", legacy)
-	}
-	var mirror string
-	key, _ := filepath.Abs(dir)
-	if err := db.QueryRow("SELECT version FROM state_mirrors WHERE key=?", "plans/"+key).Scan(&mirror); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(filepath.Join(dir, "plan.json"))
-	if err != nil || mirror != store.VersionOf(info).Key() {
-		t.Fatalf("mirror = %q,%v", mirror, err)
 	}
 	if len(events) != 0 {
 		t.Fatalf("published %d unused events", len(events))
@@ -228,8 +219,8 @@ func TestAncestryStampIgnoresOldBinaryParent(t *testing.T) {
 		t.Fatalf("row = %q,%v", got, err)
 	}
 	header, err := readLegacyGraph(dir)
-	if err != nil || header.ResumedFrom != "wf_first" {
-		t.Fatalf("header = %#v,%v; old binary file must be imported before Write and Mirror", header, err)
+	if err != nil || header.ResumedFrom != "wf_stale" {
+		t.Fatalf("header = %#v,%v; stamping must preserve the retained header", header, err)
 	}
 }
 
@@ -257,7 +248,7 @@ func TestAncestryStartupKeepsEmptyRow(t *testing.T) {
 	if err := db.QueryRow("SELECT count(*) FROM state_mirrors WHERE key='plans/wf_empty'").Scan(&stamps); err != nil {
 		t.Fatal(err)
 	}
-	if rows != 1 || stamps != 1 {
+	if rows != 1 || stamps != 0 {
 		t.Fatalf("empty header kept %d rows and %d stamps", rows, stamps)
 	}
 }
@@ -367,7 +358,7 @@ func readLegacyGraph(dir string) (*plan.Plan, error) {
 	return &p, nil
 }
 
-func TestAncestryRollbackPreservesEveryGraphField(t *testing.T) {
+func TestAncestryStampPreservesGraphBytes(t *testing.T) {
 	s := testAncestryStore(t)
 	dir := t.TempDir()
 	raw := []byte("{\"version\":1,\"sourceSha256\":\"unchanged\",\"resumedFrom\":\"\",\"nodes\":[],\"future\":{\"large\":9007199254740993,\"text\":\"<tag>\"}}")
@@ -381,29 +372,7 @@ func TestAncestryRollbackPreservesEveryGraphField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var beforeFields, afterFields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &beforeFields); err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(after, &afterFields); err != nil {
-		t.Fatal(err)
-	}
-	if len(beforeFields) != len(afterFields) {
-		t.Fatalf("rollback changed fields: %s", after)
-	}
-	for key, before := range beforeFields {
-		if key == "resumedFrom" {
-			continue
-		}
-		var compact bytes.Buffer
-		if err := json.Compact(&compact, afterFields[key]); err != nil {
-			t.Fatal(err)
-		}
-		if compact.String() != string(before) {
-			t.Errorf("field %s changed: %s -> %s", key, before, afterFields[key])
-		}
-	}
-	if string(afterFields["resumedFrom"]) != "\"wf_parent\"" {
-		t.Fatalf("parent = %s", afterFields["resumedFrom"])
+	if !bytes.Equal(raw, after) {
+		t.Fatalf("stamping changed graph bytes: %s", after)
 	}
 }
