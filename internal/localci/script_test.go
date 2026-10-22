@@ -32,7 +32,7 @@ cat >/dev/null
 			}
 			run := func(fail bool) error {
 				cmd := exec.Command("bash", "../../scripts/ci.sh", "go", "test")
-				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "CI_EVENT="+event, "CALL_LOG="+log)
+				cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "CI_EVENT="+event, "CALL_LOG="+log, "CI_SHARD=")
 				if fail {
 					cmd.Env = append(cmd.Env, "FAIL_GO=1")
 				}

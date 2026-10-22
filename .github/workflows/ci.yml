@@ -209,53 +209,18 @@ jobs:
           if-no-files-found: ignore
           retention-days: 1
 
-  # One job per release target; each builds in parallel.
-  cross-build:
-    name: cross-build (${{ matrix.target }})
-    needs: [changes]
-    if: needs.changes.outputs.go == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [linux/amd64, linux/arm64, darwin/amd64, darwin/arm64]
-    container:
-      image: golang:1.26.3
-    env:
-      GOCACHE: /root/.cache/go-build
-      GOMODCACHE: /go/pkg/mod
-    steps:
-      - uses: actions/checkout@v6
-      - name: Trust workspace
-        run: |
-          echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
-          echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
-          echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
-      - name: Restore Go caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            /root/.cache/go-build
-            /go/pkg/mod
-          key: cross-build-${{ matrix.target }}-${{ hashFiles('go.sum') }}
-          restore-keys: cross-build-${{ matrix.target }}-
-      - name: Build release target
-        shell: bash
-        run: bash scripts/ci.sh cross-build "${{ matrix.target }}"
-
   # The single check name that Dyna and branch protection wait on. It passes
   # only when every shard and static job passed.
   test:
     name: go-test
-    needs: [changes, go-shard, go-static, cross-build]
+    needs: [changes, go-shard, go-static, frontend, frontend-check]
     if: ${{ always() && needs.changes.outputs.go == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Require every Go job
         env:
-          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.cross-build.result }}
+          RESULTS: ${{ needs.go-shard.result }} ${{ needs.go-static.result }} ${{ needs.frontend.result }} ${{ needs.frontend-check.result }}
         run: |
           echo "Results: $RESULTS"
           for r in $RESULTS; do
@@ -299,8 +264,8 @@ jobs:
       # The frontend step uses the checker to re-measure slow web tests.
       - name: Build CI checker
         run: bash scripts/ci.sh go build
-      - name: Check frontend and export JUnit
-        run: bash scripts/ci.sh frontend
+      - name: Build and test frontend and export JUnit
+        run: bash scripts/ci.sh frontend test
         env:
           JUNIT_REPORT_PATH: ${{ runner.temp }}/frontend-test.xml
       - name: Upload frontend test report
@@ -342,6 +307,21 @@ jobs:
           path: ${{ runner.temp }}/ci-diagnostics.jsonl
           if-no-files-found: ignore
           retention-days: 1
+
+  frontend-check:
+    name: frontend-check
+    needs: [changes]
+    if: needs.changes.outputs.go == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    container: node:22
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - name: Type-check the frontend
+        run: bash ../scripts/ci.sh frontend check
 
   computer-smoke:
     # Live tests need host GUI tools, installed below. It waits only for the

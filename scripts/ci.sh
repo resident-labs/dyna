@@ -17,18 +17,31 @@ case "$suite" in
     npm test -- --reporter=default --reporter=junit --outputFile="${JUNIT_REPORT_PATH:-$RUNNER_TEMP/relay-test.xml}"
     ;;
   frontend)
+    # Phases: check (type checks only), test (build, tests, clean tree), all.
     cd web
     npm ci --prefer-offline --no-audit
-    npm run check
-    npm run build
-    TEST_FILES_PATH="$RUNNER_TEMP/frontend-test-files.jsonl" npm run test:ci
-    # A loaded runner makes fast web tests look slow. Re-measure each one alone and
-    # keep the shorter time in the report. The local lane has no checker binary.
-    if [[ -x "$RUNNER_TEMP/dyna-ci" ]]; then
-      "$RUNNER_TEMP/dyna-ci" git ci tests --junit "$JUNIT_REPORT_PATH" --test-files "$RUNNER_TEMP/frontend-test-files.jsonl" --isolate-over 1s --junit-output "$JUNIT_REPORT_PATH"
+    if [[ $phase == all || $phase == check ]]; then
+      # The four checks do not depend on each other, so they run side by side.
+      pids=()
+      node scripts/check-typescript.ts & pids+=($!)
+      npx svelte-check --tsconfig ./tsconfig.json & pids+=($!)
+      npx tsc --project ./tsconfig.json & pids+=($!)
+      npx tsc --project ./tsconfig.worker.json & pids+=($!)
+      failed=0
+      for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+      if ((failed)); then echo "Frontend type check failed" >&2; exit 1; fi
     fi
-    git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --short
-    test -z "$(git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --porcelain)"
+    if [[ $phase == all || $phase == test ]]; then
+      npm run build
+      TEST_FILES_PATH="$RUNNER_TEMP/frontend-test-files.jsonl" npm run test:ci
+      # A loaded runner makes fast web tests look slow. Re-measure each one alone and
+      # keep the shorter time in the report. The local lane has no checker binary.
+      if [[ -x "$RUNNER_TEMP/dyna-ci" ]]; then
+        "$RUNNER_TEMP/dyna-ci" git ci tests --junit "$JUNIT_REPORT_PATH" --test-files "$RUNNER_TEMP/frontend-test-files.jsonl" --isolate-over 1s --junit-output "$JUNIT_REPORT_PATH"
+      fi
+      git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --short
+      test -z "$(git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --porcelain)"
+    fi
     ;;
   android)
     sdk=${ANDROID_HOME:?set ANDROID_HOME}
