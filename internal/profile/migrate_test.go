@@ -2,6 +2,7 @@ package profile
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -67,4 +68,55 @@ func TestProfileV3MigrationPreservesUnknownFieldsAndACP(t *testing.T) {
 	if err != nil || string(replay) != string(after) {
 		t.Fatalf("replay changed bytes: %v", err)
 	}
+	t.Run("linked", func(t *testing.T) {
+		target := filepath.Join(t.TempDir(), "target.json")
+		link := filepath.Join(t.TempDir(), "profiles.json")
+		if err := os.WriteFile(target, raw, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+		for range 2 {
+			if err := Migrate(link); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := os.Readlink(link); err != nil || got != target {
+				t.Fatalf("link changed: %q, %v", got, err)
+			}
+		}
+		if got, err := os.ReadFile(target); err != nil || string(got) != string(after) {
+			t.Fatalf("target differs: %v", err)
+		}
+		if got, err := os.ReadFile(target + ".v2.bak"); err != nil || string(got) != string(raw) {
+			t.Fatalf("target backup differs: %v", err)
+		}
+	})
+	t.Run("failed-backup", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "profiles.json")
+		if err := os.WriteFile(path, raw, 0644); err != nil {
+			t.Fatal(err)
+		}
+		original := profileBackupWrite
+		t.Cleanup(func() { profileBackupWrite = original })
+		failed := errors.New("injected partial backup write")
+		profileBackupWrite = func(f *os.File, b []byte) (int, error) { n, _ := f.Write(b[:3]); return n, failed }
+		if err := Migrate(path); !errors.Is(err, failed) {
+			t.Fatalf("migration error = %v", err)
+		}
+		if _, err := os.Lstat(path + ".v2.bak"); !os.IsNotExist(err) {
+			t.Errorf("partial backup published: %v", err)
+		}
+		if got, err := os.ReadFile(path); err != nil || string(got) != string(raw) {
+			t.Fatalf("failed migration changed source: %v", err)
+		}
+		profileBackupWrite = original
+		if err := Migrate(path); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := os.ReadFile(path + ".v2.bak"); err != nil || string(got) != string(raw) {
+			t.Fatalf("retry backup differs: %v", err)
+		}
+	})
+
 }
