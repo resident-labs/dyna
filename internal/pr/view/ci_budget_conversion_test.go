@@ -100,7 +100,7 @@ func TestRoomCIBudgetConversion(t *testing.T) {
 	if err := svc.SetRoomChangePolicy(rec.ID, authority.Actor{Role: authority.Session, Session: "agent", Room: rec.ID}, base); err == nil {
 		t.Fatal("agent bypassed owner gate")
 	}
-	if err := a.SetRoomCIBudget(ownerCtx, rec.ID, prview.CIBudgetSettings{}); err != nil {
+	if err := a.SetRoomCIBudget(ownerCtx, rec.ID, prview.CIBudgetSettings{CITimeBudget: "warn"}); err != nil {
 		t.Fatal(err)
 	}
 	reset, err := a.RoomCIBudget(rec.ID)
