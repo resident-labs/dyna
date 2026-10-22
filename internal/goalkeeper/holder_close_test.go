@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"dyna-agent/internal/subagent"
+	"strings"
 	"testing"
 )
 
@@ -68,5 +70,47 @@ func TestDeferredHandbackSchedulesRetry(t *testing.T) {
 	fresh, _ := e.s.Store.Read()
 	if len(fresh.Room(e.rec.ID).Notices) == 0 {
 		t.Fatal("the deferred handback was dropped")
+	}
+}
+
+func TestCloseGoalHandoffNotifiesIdleAncestorAndRoot(t *testing.T) {
+	for _, root := range []bool{false, true} {
+		t.Run(map[bool]string{false: "ancestor", true: "root"}[root], func(t *testing.T) {
+			e := newEscalationEnv(t)
+			if root {
+				if _, err := e.mgr.Store.UpdateMeta(setterID, func(m *subagent.Meta) { m.Role = subagent.RoleRoot; m.Name = "root" }); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := e.mgr.Store.UpdateMeta(holderID, func(m *subagent.Meta) { m.ParentSession = "" }); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := e.mgr.CloseForEngine(context.Background(), holderID, "test handoff", subagent.CloseOptions{}); err != nil {
+				t.Fatal(err)
+			}
+			// One tick drains durable notices. Repeating it must not duplicate delivery.
+			for range 2 {
+				if _, err := e.s.Tick(context.Background()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			heir, err := e.mgr.Store.Info(setterID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			posts, err := e.rooms.Messages(e.rec.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := 0
+			for _, post := range posts {
+				if post.SessionIDs[heir.Address()] == heir.ID && post.Wake && strings.Contains(post.Text, e.goal.ID) && strings.Contains(post.Text, holderID) {
+					found++
+				}
+			}
+			if found != 1 {
+				t.Fatalf("heir should receive one handoff notice: %+v", posts)
+			}
+		})
 	}
 }

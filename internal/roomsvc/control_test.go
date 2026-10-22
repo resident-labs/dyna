@@ -26,13 +26,13 @@ func TestStopAndCloseAreRoomScoped(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(e.ctx, 60*time.Second)
 	defer cancel()
-	if _, err := e.svc.CloseSession(ctx, "alpha", other.ID); err == nil {
+	if _, err := e.svc.ForceCloseSession(ctx, "alpha", other.ID); err == nil {
 		t.Fatal("CloseSession closed a session in another room")
 	}
 	if _, err := e.svc.StopSession(ctx, "alpha", lead.ID); err == nil {
 		t.Fatal("StopSession on an idle session must fail")
 	}
-	m, err := e.svc.CloseSession(ctx, "alpha", lead.ID)
+	m, err := e.svc.ForceCloseSession(ctx, "alpha", lead.ID)
 	if err != nil || !m.Closed || m.State != StateClosed {
 		t.Fatalf("CloseSession = %+v, %v", m, err)
 	}
@@ -220,13 +220,13 @@ func TestPromotionIsRoomScopedAndCloseHandsChildrenUp(t *testing.T) {
 	if _, err := e.svc.PromoteSession(context.Background(), "alpha", other.ID); err == nil {
 		t.Fatal("promoted across rooms")
 	}
-	if _, err := e.svc.CloseSession(e.ctx, "beta", lead.ID); err == nil {
+	if _, err := e.svc.ForceCloseSession(e.ctx, "beta", lead.ID); err == nil {
 		t.Fatal("closed across rooms")
 	}
 	if m, err := e.svc.PromoteSession(context.Background(), "alpha", grandchild.ID); err != nil || m.Parent != "" {
 		t.Fatalf("promote = %+v, %v", m, err)
 	}
-	if m, err := e.svc.CloseSession(e.ctx, "alpha", lead.ID); err != nil || !m.Closed {
+	if m, err := e.svc.ForceCloseSession(e.ctx, "alpha", lead.ID); err != nil || !m.Closed {
 		t.Fatalf("close = %+v, %v", m, err)
 	}
 	current, _ := e.mgr.Store.ReadMeta(child.ID)
@@ -302,7 +302,7 @@ func TestFinishedSessionStaysMessageableAndReopenIsRoomScoped(t *testing.T) {
 	if !slices.Contains(choices, "@lead") {
 		t.Fatalf("a message must reach a dormant session: %v", choices)
 	}
-	if _, err := e.mgr.Close(e.ctx, other.ID); err != nil {
+	if _, err := e.mgr.CloseWithOptions(e.ctx, other.ID, subagent.CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.svc.ReopenSession(context.Background(), alpha.ID, other.ID); err == nil {
@@ -487,7 +487,7 @@ func TestSessionControlsLetASessionActOnlyOnItsDescendants(t *testing.T) {
 	for name, act := range map[string]func(context.Context) error{
 		"stop":    func(ctx context.Context) error { _, err := e.svc.StopSession(ctx, "alpha", child.ID); return err },
 		"promote": func(ctx context.Context) error { _, err := e.svc.PromoteSession(ctx, "alpha", child.ID); return err },
-		"close":   func(ctx context.Context) error { _, err := e.svc.CloseSession(ctx, "alpha", child.ID); return err },
+		"close":   func(ctx context.Context) error { _, err := e.svc.ForceCloseSession(ctx, "alpha", child.ID); return err },
 		"dismiss": func(ctx context.Context) error { _, err := e.svc.DismissSession(ctx, "alpha", child.ID); return err },
 	} {
 		if err := act(as(stranger)); err == nil || !strings.Contains(err.Error(), "may act only on itself and its descendants") {
@@ -504,14 +504,14 @@ func TestSessionControlsLetASessionActOnlyOnItsDescendants(t *testing.T) {
 	// The root seat runs in root mode, which the CLI's Target never limited:
 	// it closes a top-level session outside its own tree.
 	rootSeat := authority.WithActor(e.ctx, authority.Actor{Role: authority.Root, Session: lead.ID, Room: alpha.ID})
-	if m, err := e.svc.CloseSession(rootSeat, "alpha", stranger.ID); err != nil || !m.Closed {
+	if m, err := e.svc.ForceCloseSession(rootSeat, "alpha", stranger.ID); err != nil || !m.Closed {
 		t.Fatalf("the root seat could not close a session outside its tree: %+v, %v", m, err)
 	}
 	if _, err := e.svc.ReopenSession(as(lead), "alpha", stranger.ID); err == nil || !strings.Contains(err.Error(), "may act only on itself and its descendants") {
 		t.Fatalf("a session reopened another lead's session: %v", err)
 	}
 	owner := authority.WithActor(e.ctx, authority.Actor{Role: authority.Owner})
-	if m, err := e.svc.CloseSession(owner, "alpha", lead.ID); err != nil || !m.Closed {
+	if m, err := e.svc.ForceCloseSession(owner, "alpha", lead.ID); err != nil || !m.Closed {
 		t.Fatalf("the owner could not close a session: %+v, %v", m, err)
 	}
 }
@@ -574,12 +574,12 @@ func TestFinishSessionChecksTheCaller(t *testing.T) {
 	as := func(info subagent.Info) context.Context {
 		return authority.WithActor(e.ctx, authority.Actor{Role: authority.Session, Session: info.ID, Room: alpha.ID})
 	}
-	if _, err := e.svc.FinishSession(as(stranger), "alpha", child.ID); err == nil || !strings.Contains(err.Error(), "may act only on itself and its descendants") {
+	if _, err := e.svc.FinishSession(as(stranger), "alpha", child.ID, ""); err == nil || !strings.Contains(err.Error(), "may act only on itself and its descendants") {
 		t.Fatalf("a stranger finished a session outside its tree: %v", err)
 	}
 	// The child still holds its spawn goal, so the finish that passes the
 	// caller check stops at the responsibility check.
-	if _, err := e.svc.FinishSession(as(lead), "alpha", child.ID); err == nil || !strings.Contains(err.Error(), "responsibilities: cannot finish") {
+	if _, err := e.svc.FinishSession(as(lead), "alpha", child.ID, ""); err == nil || !strings.Contains(err.Error(), "responsibilities: cannot finish") {
 		t.Fatalf("the parent's finish of its child = %v; want it past the caller check", err)
 	}
 }

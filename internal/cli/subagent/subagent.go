@@ -593,7 +593,7 @@ func closeCommand(newManager func() *subagent.Manager) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "close <session>",
 		Short: "End the session: stop any running turn and accept no further turns",
-		Long:  "End a session and stop any running turn. For your own session, use dyna subagent finish instead. Close refuses while the session owns open PR roles or live workflow runs; --force closes it anyway, and dyna subagent show lists its linked PRs. Held goals pass to the goal setter, open questions are withdrawn and non-kept shell jobs stop. Children that own nothing close too; the rest move to the closed session's parent. --keep-worktrees locks the session's worktrees after its turn stops and before the close commits, so a manual handoff keeps them: cleanup keeps a locked tree until git worktree unlock releases it, and a lock that fails leaves the session open.",
+		Long:  "End a session and stop any running turn. For your own session, use dyna subagent finish instead. Close transfers PR authorship and held goals to the nearest open ancestor, or root. Reviewer roles return to the pool. Live workflow runs are canceled. A failed handoff keeps the session open; --force closes it anyway. Open questions are withdrawn and non-kept shell jobs stop. Children that own nothing close too; the rest move to the nearest open ancestor. --keep-worktrees locks the session's worktrees after its turn stops and before the close commits, so a manual handoff keeps them: cleanup keeps a locked tree until git worktree unlock releases it, and a lock that fails leaves the session open.",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			ctx, stop := waitContext(c)
@@ -606,14 +606,18 @@ func closeCommand(newManager func() *subagent.Manager) *cobra.Command {
 			// running turn, then keeps the worktrees, so a refused close never
 			// changes a lock.
 			opts := roomsvc.CloseOptions{Force: force, KeepWorktrees: keepWorktrees}
-			if err := engineClient().Call(ctx, "CloseSessionOptions", []any{info.RoomID, info.ID, opts}, nil); err != nil {
+			var result roomsvc.Member
+			if err := engineClient().Call(ctx, "CloseSessionOptions", []any{info.RoomID, info.ID, opts}, &result); err != nil {
 				return err
 			}
 			fmt.Fprintf(c.OutOrStdout(), "closed %s (%s)\n", info.Address(), info.ID)
+			for _, item := range result.CloseSummary {
+				fmt.Fprintln(c.OutOrStdout(), item)
+			}
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&force, "force", false, "close even when this session owns PR roles or live workflow runs")
+	cmd.Flags().BoolVar(&force, "force", false, "close even if a responsibility handoff fails")
 	cmd.Flags().BoolVar(&keepWorktrees, "keep-worktrees", false, "lock the session's worktrees so cleanup keeps them, as a manual handoff needs")
 	return cmd
 }

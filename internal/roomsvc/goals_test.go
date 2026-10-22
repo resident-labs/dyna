@@ -87,7 +87,7 @@ func TestSessionCloseHandsGoalsBackAndGoalsEmitEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	g, err = store.Get(r.ID, g.ID)
-	if err != nil || g.State != "dropped" || g.Done == nil {
+	if err != nil || !g.Open() || !g.HeldBy(lead.ID) || g.HeldBy(child.ID) {
 		t.Fatal(g, err)
 	}
 	e.svc.scanGoals(goalRows, work, &version, false, emit)
@@ -106,16 +106,16 @@ func TestSessionCloseHandsGoalsBackAndGoalsEmitEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 		if item.ID == g.ID {
-			if item.State != "dropped" || item.Done == nil {
+			if !item.Open() || !item.HeldBy(lead.ID) {
 				t.Fatalf("own goal close item: %+v", item)
 			}
 		} else if !item.HeldBy(lead.ID) {
 			t.Fatalf("delegated goal handback item: %+v", item)
 		}
 	}
-	// The lead keeps its spawn goal; the child's item returned to it.
+	// The lead keeps its spawn goal and inherits the child's held goal.
 	held, err := store.OpenHeldBy(r.ID, lead.ID)
-	if err != nil || len(held) != 1 || held[0].ID != lead.Goal {
+	if err != nil || len(held) != 2 || held[0].ID != lead.Goal {
 		t.Fatal(held, err)
 	}
 	items, err := store.Items(r.ID, lead.Goal)

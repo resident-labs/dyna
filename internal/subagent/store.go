@@ -325,8 +325,9 @@ func (t Turn) Done() bool {
 // Info is a session as listed: stored meta plus live status.
 type Info struct {
 	Meta
-	Status      string `json:"status"`
-	CurrentTurn int    `json:"currentTurn,omitempty"`
+	CloseSummary []string `json:"closeSummary,omitempty"`
+	Status       string   `json:"status"`
+	CurrentTurn  int      `json:"currentTurn,omitempty"`
 }
 
 // Store addresses the sessions directory. The zero value uses the data dir.

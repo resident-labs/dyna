@@ -643,15 +643,19 @@ func TestFinishIgnoresTheShellJobThatRunsIt(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv(shells.JobEnv, own)
-	_, err := e.m.Finish(e.ctx, info.ID)
+	// The engine process has no job of its own, so the finish call names its job.
+	ctx, err := WithCallerJob(e.ctx, own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.m.Finish(ctx, info.ID)
 	if err == nil || strings.Contains(err.Error(), own) || !strings.Contains(err.Error(), "live shell job "+other) {
 		t.Fatalf("finish error = %v, want only the other job", err)
 	}
 	if err := st.Save(shells.Meta{ID: other, Owner: info.ID, Cmd: []string{"true"}, Started: time.Now()}, &shells.Exit{Ended: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.m.Finish(e.ctx, info.ID); err != nil {
+	if _, err := e.m.Finish(ctx, info.ID); err != nil {
 		t.Fatalf("finish from inside its own job: %v", err)
 	}
 }

@@ -7,6 +7,7 @@ export type BulkAction = 'stop' | 'close' | 'promote' | 'adopt' | 'transfer'
 export interface ResultLike {
   ok: boolean
   error?: string
+  member?: { closeSummary?: string[] }
   transfer?: Pick<TransferState, 'phase'> & Partial<TransferState>
 }
 // A result row, with the note a failed progress check leaves on it.
@@ -20,6 +21,7 @@ const TRANSFER_TEXT: Record<string, string> = { completed: 'New model ready', fa
 const ACTION_TEXT: Record<string, string> = { stop: 'Stop accepted', close: 'Close accepted', promote: 'Promoted to lead', adopt: 'Moved' }
 export function bulkResultText(r: ResultLike, action: string): string {
   if (!r.ok) return r.error || 'The host refused this action.'
+  if (action === 'close' && r.member?.closeSummary?.length) return r.member.closeSummary.join('; ')
   if (action === 'transfer') return TRANSFER_TEXT[r.transfer?.phase ?? ''] ?? 'Transfer accepted'
   return ACTION_TEXT[action] ?? 'Accepted'
 }
@@ -55,7 +57,7 @@ export interface BulkApi {
   bulkSessionAction(roomId: string, options: BulkOptions): Promise<BulkSessionResult>
   sessionTransfer(roomId: string, session: string): Promise<TransferState | null>
 }
-// What the request sends. Close never bypasses a tracked PR unless force is set.
+// What the request sends. Close hands work up the parent chain; force permits failed handoffs.
 export interface BulkOptions {
   action: string
   profile?: string

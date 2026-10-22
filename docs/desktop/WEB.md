@@ -320,8 +320,11 @@ The default is one hour without input or output, even with a view attached.
 
 The member menu offers **Promote to lead** for an open subagent. Promotion
 keeps active work, children and history intact. Closing a session closes its
-children that own no work and moves the rest up to its parent. The PR and
-workflow confirmation still applies. `PromoteSession`, `CloseSession` and
+children that own no work and moves the rest to its nearest open ancestor.
+PR authorship and held goals move to that ancestor, or the room's root.
+Reviewer roles return to the pool, and live workflow runs are canceled.
+The returned member has `closeSummary` lines that the app keeps visible until dismissed.
+Force close is offered only after a handoff fails. `PromoteSession`, `CloseSession` and
 `ForceCloseSession` are on the engine call table (`internal/engine/calls.go`), so web and Connect clients can use them. They use the same write gates as other session controls.
 
 ## Transfer to a new model
@@ -405,8 +408,8 @@ Member selection uses highlighted rows on desktop, paired web and Connect.
 Choose shared options once for Stop, Transfer model, Promote, Move under…, or
 Close. Move under… picks one open parent; targets that would make a cycle,
 sit under a service, or pass `subagent.maxDepth` are disabled with the reason. Message addresses the normal composer to the selected sessions. A close
-confirmation applies to the selection; tracked PRs still refuse closure unless
-the owner explicitly chooses force close. Each session reports its own result,
+confirmation applies to the selection. Each close hands work up the parent chain.
+Only a failed handoff needs a retry or explicit force close. Each session reports its own result,
 so a refusal does not cancel successful actions on other sessions.
 
 `BulkSessionAction(roomID, options)` uses the individual session services.

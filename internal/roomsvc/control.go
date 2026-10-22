@@ -64,7 +64,7 @@ func (s *Service) StopSession(ctx context.Context, roomRef, ref string) (Member,
 }
 
 // CloseSession closes a session: it stops a running turn first and frees the
-// name. Children that own nothing close with it; the rest move to its parent.
+// name. It hands work to the nearest open ancestor, or root.
 // CloseOptions are the choices a close makes explicit.
 type CloseOptions struct {
 	Force         bool `json:"force"`
@@ -75,13 +75,13 @@ func (s *Service) CloseSession(ctx context.Context, roomRef, ref string) (Member
 	return s.closeSession(ctx, roomRef, ref, CloseOptions{})
 }
 
-// ForceCloseSession is the explicit confirmation path for PR roles and live runs.
+// ForceCloseSession closes even when an automatic handoff fails.
 func (s *Service) ForceCloseSession(ctx context.Context, roomRef, ref string) (Member, error) {
 	return s.closeSession(ctx, roomRef, ref, CloseOptions{Force: true})
 }
 
-// CloseSessionOptions is close with the CLI's choices: force past open
-// responsibilities, and keep the session's worktrees for a manual handoff.
+// CloseSessionOptions is close with the CLI's choices: force past failed
+// handoffs, and keep the session's worktrees for a manual handoff.
 // Only the CLI uses it, so the two plain calls the web app uses stay as they
 // are, and the worktree locks stay behind this call's authority check.
 func (s *Service) CloseSessionOptions(ctx context.Context, roomRef, ref string, opts CloseOptions) (Member, error) {
@@ -93,10 +93,13 @@ func (s *Service) closeSession(ctx context.Context, roomRef, ref string, opts Cl
 	if err != nil {
 		return Member{}, err
 	}
-	if _, err := s.Notify.Sessions.CloseWithOptions(ctx, info.ID, subagent.CloseOptions{Force: opts.Force, KeepWorktrees: opts.KeepWorktrees}); err != nil {
+	closed, err := s.Notify.Sessions.CloseWithOptions(ctx, info.ID, subagent.CloseOptions{Force: opts.Force, KeepWorktrees: opts.KeepWorktrees})
+	if err != nil {
 		return Member{}, err
 	}
-	return s.memberByID(info.ID)
+	member, err := s.memberByID(info.ID)
+	member.CloseSummary = closed.CloseSummary
+	return member, err
 }
 
 func (s *Service) memberByID(id string) (Member, error) {
@@ -168,8 +171,14 @@ func (s *Service) StartSubagent(ctx context.Context, roomRef string, in Subagent
 	return info, err
 }
 
-// FinishSession makes an open session dormant when it owns nothing.
-func (s *Service) FinishSession(ctx context.Context, roomRef, ref string) (Member, error) {
+// FinishSession makes an open session dormant when it owns nothing. shellJob
+// names the shell job that runs the finish call, or is empty; that job does not
+// count as unfinished work.
+func (s *Service) FinishSession(ctx context.Context, roomRef, ref, shellJob string) (Member, error) {
+	ctx, err := subagent.WithCallerJob(ctx, shellJob)
+	if err != nil {
+		return Member{}, err
+	}
 	info, err := s.actOnSession(ctx, roomRef, ref)
 	if err != nil {
 		return Member{}, err

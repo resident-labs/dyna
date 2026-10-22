@@ -174,6 +174,7 @@ export interface Member {
   ended?: string
   doing?: Doing
   closed?: boolean
+  closeSummary?: string[]
   emoji?: string
   seat?: Seat
 }

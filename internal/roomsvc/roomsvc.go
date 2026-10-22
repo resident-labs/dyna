@@ -147,6 +147,9 @@ func New(n *notify.Service) *Service {
 	}
 	s := &Service{Notify: n, prWake: make(chan struct{}, 1), sessionWake: make(chan struct{}, 1), coordinatorWake: make(chan struct{}, 1)}
 	s.PRs = &prview.Service{Notify: n, SessionInRoom: s.SessionInRoom, WorkspaceRoot: s.files().WorkspaceRoot}
+	n.Sessions.ClosePRs = func(ctx context.Context, from, heir subagent.Info) ([]string, error) {
+		return s.PRs.Watcher().CloseSession(ctx, from, heir)
+	}
 	return s
 }
 
@@ -639,6 +642,7 @@ type Member struct {
 	// finishing on its own (subagent.Responsibility.Kind). Empty when the
 	// session owns nothing, is closed, or its lists cannot be read.
 	Responsibilities map[string]int `json:"responsibilities,omitempty"`
+	CloseSummary     []string       `json:"closeSummary,omitempty"`
 	Closed           bool           `json:"closed,omitempty"`
 	Hue              int            `json:"hue"`
 	Emoji            string         `json:"emoji,omitempty"` // avatar; empty for the owner
