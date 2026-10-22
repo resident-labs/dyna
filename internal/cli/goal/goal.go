@@ -262,7 +262,21 @@ func Command(o Options) *cobra.Command {
 		return printItem(c, it)
 	}}
 	itemEdit.Flags().StringVar(&itemEditFor, "for", "", "assignee selector, or none to clear")
-	item.AddCommand(itemAdd, itemState("done <goal> <item>", "Mark an item done", goals.ItemDone), itemState("drop <goal> <item>", "Drop an item", goals.ItemDropped), itemState("reopen <goal> <item>", "Reopen an item", goals.ItemOpen), itemEdit)
+	var itemMoveTo string
+	itemMove := &cobra.Command{Use: "move <goal> <item> --to <goal|new>", Short: "Move an open item to an open goal, or promote it to a standalone goal", Long: "Move one open item between open goals in this room, preserving its text and assignee. Use --to new to create a standalone goal held by the assignee, or by you if unassigned. Matching spawn instructions and completion commands follow the work. Session hierarchy stays the same.", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, a []string) error {
+		var moved goals.ItemMove
+		if err := o.Client.Call(c.Context(), "MoveGoalItem", []any{MutationRoom(roomRef), a[0], a[1], itemMoveTo}, &moved); err != nil {
+			return err
+		}
+		if asJSON {
+			return json.NewEncoder(c.OutOrStdout()).Encode(moved)
+		}
+		_, err := fmt.Fprintf(c.OutOrStdout(), "moved %s to %s\n", moved.From, moved.To)
+		return err
+	}}
+	itemMove.Flags().StringVar(&itemMoveTo, "to", "", "destination goal ID, or new to promote the item (required)")
+	_ = itemMove.MarkFlagRequired("to")
+	item.AddCommand(itemAdd, itemState("done <goal> <item>", "Mark an item done", goals.ItemDone), itemState("drop <goal> <item>", "Drop an item", goals.ItemDropped), itemState("reopen <goal> <item>", "Reopen an item", goals.ItemOpen), itemEdit, itemMove)
 	root.AddCommand(list, show, edit, waitCommand(o, &roomRef), journalCommand(o, &roomRef), finish(false), finish(true), note, item)
 	return root
 }

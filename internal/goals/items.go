@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -282,7 +283,7 @@ func scanItems(query reader, sqlText string, each func(Item) error, args ...any)
 
 // EffectiveGoal picks the goal a session delegates from: an explicit goal
 // ID first, then the goal of the item it is assigned, then its single held
-// goal. It fails when the choice is ambiguous.
+// goal set by someone else. It fails when the choice is ambiguous.
 func (s *Store) EffectiveGoal(room, session, explicit string) (string, error) {
 	if explicit != "" {
 		if _, err := s.Get(room, explicit); err != nil {
@@ -295,7 +296,7 @@ func (s *Store) EffectiveGoal(room, session, explicit string) (string, error) {
 		return "", err
 	}
 	var assigned []string
-	rows, err := db.Query("SELECT DISTINCT goal FROM goal_items WHERE room=? AND assignee=? AND state='open'", room, session)
+	rows, err := db.Query("SELECT DISTINCT i.goal FROM goal_items i JOIN goals g ON g.room=i.room AND g.id=i.goal WHERE i.room=? AND i.assignee=? AND i.state='open' AND g.state='active' ORDER BY i.goal", room, session)
 	if err != nil {
 		return "", err
 	}
@@ -314,12 +315,13 @@ func (s *Store) EffectiveGoal(room, session, explicit string) (string, error) {
 		return assigned[0], nil
 	}
 	if len(assigned) > 1 {
-		return "", fmt.Errorf("item assignment spans goals %s; pass the goal to delegate from", strings.Join(assigned, ", "))
+		return "", fmt.Errorf("item assignment spans goals %s; pass --under with the goal to delegate from", strings.Join(assigned, ", "))
 	}
 	held, err := s.OpenHeldBy(room, session)
 	if err != nil {
 		return "", err
 	}
+	held = slices.DeleteFunc(held, func(g Goal) bool { return g.Setter == session })
 	if len(held) == 1 {
 		return held[0].ID, nil
 	}
@@ -328,7 +330,7 @@ func (s *Store) EffectiveGoal(room, session, explicit string) (string, error) {
 		for i, g := range held {
 			ids[i] = g.ID
 		}
-		return "", fmt.Errorf("goal choice is ambiguous between %s; pass the goal to delegate from", strings.Join(ids, ", "))
+		return "", fmt.Errorf("goal choice is ambiguous between %s; pass --under with the goal to delegate from", strings.Join(ids, ", "))
 	}
 	return "", nil
 }

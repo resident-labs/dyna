@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/structuredoutput"
 )
 
@@ -130,7 +131,9 @@ func TestSpawnGoalUsesEffectiveGoal(t *testing.T) {
 		wantErr string
 	}{
 		{name: "top-level"},
-		{name: "none", parent: "parent", wantErr: "no goal"},
+		{name: "top-level explicit", active: 2, under: "g2"},
+		{name: "none", parent: "parent"},
+		{name: "self-set", active: 1, parent: "parent"},
 		{name: "one", active: 1, parent: "parent"},
 		{name: "ambiguous", active: 2, parent: "parent", wantErr: "ambiguous"},
 		{name: "explicit under", active: 2, parent: "parent", under: "g2"},
@@ -156,7 +159,14 @@ func TestSpawnGoalUsesEffectiveGoal(t *testing.T) {
 			}
 			want := ""
 			for i := 0; i < tc.active; i++ {
-				g := add("r", goals.Input{Text: "Active work", Holders: []string{"parent"}})
+				setter := "owner"
+				if tc.name == "self-set" {
+					setter = "parent"
+				}
+				g, err := store.Add("r", setter, goals.Input{Text: "Active work", Holders: []string{"parent"}})
+				if err != nil {
+					t.Fatal(err)
+				}
 				if tc.active == 1 {
 					want = g.ID
 				}
@@ -164,7 +174,7 @@ func TestSpawnGoalUsesEffectiveGoal(t *testing.T) {
 			if tc.under != "" {
 				want = tc.under
 			}
-			if tc.parent == "" {
+			if tc.parent == "" && tc.under == "" {
 				meta := Meta{ID: "child", RoomID: "r"}
 				goalID, itemID, err := m.addSpawnGoal(meta, tc.under, "Child work", "Brief")
 				if err != nil {
@@ -190,6 +200,13 @@ func TestSpawnGoalUsesEffectiveGoal(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			if tc.active == 0 || tc.name == "self-set" {
+				g, err := store.Get("r", goalID)
+				if err != nil || itemID != "" || !g.HeldBy("child") || g.Setter != tc.parent || g.Detail != "Brief" {
+					t.Fatalf("standalone child goal = %+v, item=%q, err=%v", g, itemID, err)
+				}
+				return
+			}
 			if goalID != want || itemID == "" {
 				t.Fatalf("spawn: goal=%q item=%q want goal %q", goalID, itemID, want)
 			}
@@ -207,6 +224,75 @@ func TestSpawnGoalUsesEffectiveGoal(t *testing.T) {
 				t.Fatalf("child holds goals: %v err=%v", held, err)
 			}
 		})
+	}
+}
+
+func TestMovedSpawnInstructionsAndResponsibilities(t *testing.T) {
+	e := newTestEnv(t)
+	gs := e.m.goalStore()
+	meta := Meta{ID: NewID(), Name: "worker", Room: "work", RoomID: "r", Depth: 2, ParentSession: "parent", Resumable: true, HarnessSession: "mock"}
+	recordtest.Write(t, e.m.Store.Root, meta.ID, meta)
+	source, err := gs.Add("r", "owner", goals.Input{Text: "Source", Holders: []string{"parent"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dest, err := gs.Add("r", "owner", goals.Input{Text: "Destination", Holders: []string{"parent"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	it, err := gs.AddItem("r", source.ID, "owner", "Fix it\n\nBrief:\nKeep context", meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gs.AddItem("r", source.ID, "owner", "Already complete", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gs.SetItemState("r", source.ID, "i2", "owner", goals.ItemDone); err != nil {
+		t.Fatal(err)
+	}
+	meta.Goal, meta.Item = source.ID, it.ID
+	recordtest.Write(t, e.m.Store.Root, meta.ID, meta)
+	// Warm the metadata cache before moving the work.
+	if _, err := e.m.Store.Info(meta.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []string{dest.ID, "new"} {
+		moved, err := gs.MoveItem("r", meta.Goal, meta.Item, "owner", to)
+		if err != nil {
+			t.Fatal(err)
+		}
+		info, err := e.m.Store.Info(meta.ID)
+		if err != nil || info.Goal != moved.To.Goal || info.Item != moved.To.Item || info.ParentSession != "parent" || info.Depth != 2 {
+			t.Fatalf("cached placement = %+v, %v", info, err)
+		}
+		block, hasBrief := e.m.spawnGoalBlock(info.Meta)
+		command := "dyna goal item done " + moved.To.Goal + " " + moved.To.Item
+		if to == "new" {
+			command = "dyna goal done " + moved.To.Goal
+		}
+		if !hasBrief || !strings.Contains(block, command) || !strings.Contains(block, "Keep context") {
+			t.Fatalf("spawn prompt did not follow the work: %s", block)
+		}
+		owned, err := e.m.itemOwned(map[string]Info{info.ID: info})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if to == "new" {
+			held, err := e.m.goalOwned(map[string]Info{info.ID: info})
+			if err != nil || len(owned) != 0 || len(held) != 1 || held[0].r.ID != moved.To.Goal {
+				t.Fatalf("promoted responsibilities: items=%+v goals=%+v err=%v", owned, held, err)
+			}
+		} else if len(owned) != 1 || owned[0].r.ID != moved.To.String() {
+			t.Fatalf("moved responsibility = %+v", owned)
+		}
+		meta = info.Meta
+	}
+	items, err := gs.Items("r", source.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status := goals.ComputeStatus(source, items, goals.Facts{}, source.CreatedAt); status.Label != goals.StatusReadyToClose || status.Open != 0 {
+		t.Fatalf("moved item still blocks the source: %+v", status)
 	}
 }
 

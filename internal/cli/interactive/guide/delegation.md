@@ -13,7 +13,7 @@ Address sessions by full address (`<room>:<name>`), ID (`ses_...`), or open name
 Names must be unique among open sessions in a room.
 
 ```bash
-dyna subagent start --goal "<outcome; done when>" --profile <name> --name <label> [--dir <path>] [--schema <file>] <brief | @file>
+dyna subagent start --goal "<outcome; done when>" --profile <name> --name <label> [--dir <path>] [--schema <file>] [--under gN] <brief | @file>
 dyna subagent output <session> [--turn N] [--transcript | --raw | --json]
 dyna subagent show <session> [--turns N | --all] [--tools] [--json]
 dyna subagent list [--all]
@@ -27,7 +27,8 @@ dyna subagent reopen <address|session-id>
 Run a command with `--help` for flags. Start requires a goal and non-empty brief.
 It prints the address and starts a detached turn. Inside a session, `--dir` defaults to the parent session's directory; elsewhere it defaults to cwd. Without `--dir`, a start outside a git work tree fails when the room has a repository.
 The goal states the outcome and completion test; the brief states how.
-Dyna restores both after compaction. `start --json` returns the goal ID as `goal`.
+Dyna restores both after compaction. Start prints `assigned item iN on goal gN` for an item, or `holds goal gN` for a standalone goal.
+`start --json` returns the goal ID as `goal` and adds `item` when assigned.
 Writers use `dyna git worktrees new <branch>`; never edit the main checkout.
 
 Output prints a finished turn; `--raw` prints harness stdout. Show includes prompts, steering, deferred deliveries, and results.
@@ -85,8 +86,14 @@ One answer covers matching room questions. Continue useful work; follow turn rul
 
 ## Goals
 
-Start creates the child's goal. For other work across turns, use `dyna goal "<outcome; done when>"`.
-The caller holds it by default. Select holders with `--for @name`, `@children`, `@siblings`, or `@room`; `--under g1` sets its parent.
+Start uses explicit `--under gN` first. Otherwise it uses the starter's unique open goal with an open assigned item.
+If none exists, it uses the starter's single open held goal set by someone else.
+It ignores self-set held goals. Multiple assigned item goals or eligible held goals require `--under gN`.
+If no goal is eligible, the child holds a new standalone goal, for any parent role.
+Placement does not change session hierarchy.
+
+For other work across turns, use `dyna goal "<outcome; done when>"`.
+The caller holds it by default. Select holders with `--for @name`, `@children`, `@siblings`, or `@room`.
 
 ```bash
 dyna goal                         # your goals and other open room goals
@@ -96,15 +103,22 @@ dyna goal edit g1 "New outcome"
 dyna goal done g1 "Summary"
 dyna goal drop g1
 dyna goal wait g1 --until 2h       # waiting on something; not progress
+dyna goal item done g1 i2
+dyna goal item move g1 i2 --to g3
+dyna goal item move g1 i2 --to new
 ```
 
 Goal changes print one short status line. Add `--json` for the full record and keeper history.
-Edits wake nobody. The goal keeper gives each goal a progress deadline.
-Progress is a head or state change on a tracked PR tied to the goal, a child goal change, or a goal edit.
-A holder with one goal gets credit for its tracked PRs automatically.
-A post that names the goal ID moves the deadline once but is not progress.
-When the deadline passes, the keeper sends a check-in, then a judge, then escalates up the agent chain, never to the owner.
+Edits wake nobody. The goal keeper schedules stale holder nudges and delivers queued notices.
+Goal status uses running turns, turn failures, tracked PRs, item counts, and recent journal events.
+Use `dyna goal note <id> "<progress>"` to record progress.
 While you wait on something, run `dyna goal wait <id> --until <duration>`.
+
+Move repairs one open item between open goals in the same room. It preserves the full text, brief, and assignee under a fresh destination item ID.
+`--to new` promotes the item to a standalone goal held by its assignee, or by the caller when unassigned.
+Matching spawn instructions follow the work. The assignee receives a queued notice with the new completion command.
+History stays at the source, and both locations get cross-linked move events.
+The command returns both references in plain output and JSON. It does not move sessions or other items.
 
 ## A complete brief
 
@@ -133,7 +147,8 @@ dyna subagent start --name decoder --profile sol --dir /src/app-decoder \
 Do not wait or poll for children. Use a foreground workflow for a join.
 Read `dyna guide steering` for reports and handoffs.
 Close accepted children unless a follow-up is likely.
-When done, run `dyna goal done <id> "Summary"`.
+When an assigned item is done, run `dyna goal item done <goal> <item>`.
+When a held goal is done, run `dyna goal done <id> "Summary"`.
 End or move PR roles, other goals, questions, children, shells, and runs. Then run `dyna subagent finish`.
 It lists remaining responsibilities and commands to resolve them. The shell job running finish does not block it.
 Finish keeps the session available. Close ends it and automatically hands work up the parent chain.
