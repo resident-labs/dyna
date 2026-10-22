@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/scope"
+	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/terminalsvc"
 	"dyna-agent/internal/websvc/devicestore"
 )
@@ -42,6 +44,8 @@ func TestTerminalAttachAuthAndCSRF(t *testing.T) {
 }
 
 func TestTerminalAttachStreamResume(t *testing.T) {
+	storetest.DataDir(t)
+	t.Cleanup(authority.InEngine())
 	t.Setenv("HOME", t.TempDir())
 	e := newEnv(t)
 	s := terminalsvc.New(terminalsvc.Options{Shell: "/bin/sh"})
