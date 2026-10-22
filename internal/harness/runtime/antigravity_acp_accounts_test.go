@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/account/native"
 	harnesshome "dyna-agent/internal/harness/home"
@@ -76,5 +78,72 @@ func TestAntigravityACPGrantAloneSavesAndActivatesAccounts(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(harnesshome.Home(scope), ".gemini")); !os.IsNotExist(err) {
 		t.Fatal("an agy CLI token was written")
+	}
+}
+
+// A HOME signed in before ACP-only accounts has the active account's grant but
+// no recorded identity. The upgrade records it from the active account, so
+// that account stays signed in and selectable.
+func TestAntigravityUpgradeRecordsTheActiveAccount(t *testing.T) {
+	a := testAccounts(t)
+	n, err := a.Create("antigravity", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, err := a.BeginLogin(context.Background(), n.ID, "/fake/agy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agySignInFixture(t, flow, "legacy")
+	if _, err = flow.Complete(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	scope, _ := a.HarnessHome("antigravity")
+	record := filepath.Join(harnesshome.Home(scope), native.AntigravityAccountFile)
+	if err = os.Remove(record); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.MigrateLegacyGrants(); err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Switch(context.Background(), n.ID, "/fake/agy"); err != nil {
+		t.Fatalf("the active account was lost in the upgrade: %v", err)
+	}
+	raw, err := os.ReadFile(record)
+	var got struct{ Identity, Label string }
+	if err != nil || json.Unmarshal(raw, &got) != nil || got.Identity != "google:legacy" || got.Label != "legacy@example.test" {
+		t.Fatalf("the upgrade recorded %s: %v", raw, err)
+	}
+}
+
+// ACP-only accounts have nothing to refresh, so a refresh never takes the
+// switch gate that new turns wait on.
+func TestAntigravityACPAccountSkipsCredentialRefresh(t *testing.T) {
+	a := testAccounts(t)
+	signIn := func(sub string) (NativeAccount, *NativeLogin) {
+		t.Helper()
+		n, err := a.Create("antigravity", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		flow, err := a.BeginLogin(context.Background(), n.ID, "/fake/agy")
+		if err != nil {
+			t.Fatal(err)
+		}
+		agySignInFixture(t, flow, sub)
+		return n, flow
+	}
+	first, flow := signIn("first")
+	if _, err := flow.Complete(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// An open sign-in holds the switch gate; a refresh that took it would block.
+	_, open := signIn("second")
+	defer func() { _ = open.Cancel() }()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	result, err := a.RefreshCredentials(ctx, first.ID, "/fake/agy")
+	if result.Supported || ctx.Err() != nil || !errors.Is(err, native.ErrUnsupported) {
+		t.Fatalf("an ACP-only account was refreshed: %+v %v", result, err)
 	}
 }
