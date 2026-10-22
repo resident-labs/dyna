@@ -27,8 +27,8 @@ func TestAntigravityAdapterPrivateFileScope(t *testing.T) {
 	if a.Harness != "antigravity" || a.Binary != "agy" || a.NPMPackage != "" || !a.Exclusive || a.ExclusiveReason == "" || a.Install == nil {
 		t.Fatalf("wrong Antigravity contract: %+v", a)
 	}
-	// Native login and turns share the private token file.
-	if a.AccountBlocked != "" || !reflect.DeepEqual(a.AuthFiles, []string{".gemini/antigravity-cli/antigravity-oauth-token"}) || a.ConfigFile != "" || a.SkillDir != "config/skills" {
+	// Sign-in and turns share the private ACP grant and its recorded identity.
+	if a.AccountBlocked != "" || !reflect.DeepEqual(a.AuthFiles, []string{"antigravity-acp/acp_token.json", "antigravity-acp/account.json"}) || a.ConfigFile != "" || a.SkillDir != "config/skills" {
 		t.Fatal("adapter invented a private credential or config scope")
 	}
 	wantEnv := map[string]string{

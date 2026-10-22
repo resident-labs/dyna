@@ -54,7 +54,7 @@ func AntigravityACPEnv(cli, home string) map[string]string {
 
 // AntigravityACPSignIn runs the ACP server's Google sign-in in the private HOME
 // of one native login scope and writes the sign-in link to out. `dyna harness
-// login antigravity --acp` and the Settings Sign in button both call it, so both
+// login antigravity` and the Settings Sign in button both call it, so both
 // show the same link, the same 5-minute timeout and the same account check.
 //
 // scope is the native scope that BeginLogin prepared. The grant belongs in the
@@ -63,7 +63,7 @@ func AntigravityACPEnv(cli, home string) map[string]string {
 // the helper that runs in the owner terminal.
 //
 // expect is the Dyna identity of the account being signed in, or "" for a new
-// account. antigravityACPExpect pins the grant to the agy CLI token in the HOME.
+// account, which the first Google sign-in binds.
 func AntigravityACPSignIn(ctx context.Context, agy, scope string, env []string, expect string, out io.Writer) error {
 	if env == nil {
 		env = os.Environ()
@@ -76,10 +76,6 @@ func AntigravityACPSignIn(ctx context.Context, agy, scope string, env []string, 
 	if _, err := os.Stat(server); err != nil {
 		return errors.New("the Antigravity ACP server is not installed beside agy")
 	}
-	expect, err := antigravityACPExpect(home, expect)
-	if err != nil {
-		return err
-	}
 	env = append(os.Environ(), env...)
 	// The session adapter overlays the same map, so a sign-in and a worker turn
 	// launch the server with one environment assembly.
@@ -88,28 +84,6 @@ func AntigravityACPSignIn(ctx context.Context, agy, scope string, env []string, 
 	}
 	login := native.AntigravityACPLogin{Server: server, Env: env, Home: home, Out: out, Expect: expect}
 	return login.Run(ctx)
-}
-
-// antigravityACPExpect returns the Google account a new ACP grant must belong
-// to. Capture saves the grant beside the agy CLI token in the same HOME and
-// names the account from that token, so the grant must match it: otherwise one
-// account would be saved with another account's identity. A HOME without a CLI
-// token binds the selected account, or the first sign-in of a new one.
-//
-// TODO: legacy/shim remove later — this pin, once an ACP grant alone can be
-// saved into an account without an agy CLI token beside it.
-func antigravityACPExpect(home, expect string) (string, error) {
-	cli, err := native.AntigravityCLIIdentity(home)
-	if err != nil {
-		return "", err
-	}
-	if cli == "" {
-		return expect, nil
-	}
-	if expect != "" && expect != cli {
-		return "", errors.New("This Antigravity account is not the one signed in to agy on this machine. Switch to this account first, then sign in again.")
-	}
-	return cli, nil
 }
 
 // envValue returns the last assignment of key in an environment list.

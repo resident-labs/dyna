@@ -29,15 +29,3 @@ func TestAntigravityACPLoginRefusesHomeOutsidePairedScope(t *testing.T) {
 		}
 	}
 }
-
-func TestLoginAcpFlagNeedsAntigravityAndAccount(t *testing.T) {
-	for _, args := range [][]string{{"login", "codex", "--acp", "--account", "x"}, {"login", "antigravity", "--acp"}} {
-		root := NewCommand()
-		root.SetArgs(args)
-		root.SilenceUsage, root.SilenceErrors = true, true
-		err := root.Execute()
-		if err == nil || !strings.Contains(err.Error(), "--acp") {
-			t.Fatalf("%v: %v", args, err)
-		}
-	}
-}

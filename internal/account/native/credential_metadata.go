@@ -137,6 +137,12 @@ func credentialMetadata(c store.Credential) (Captured, error) {
 			return Captured{}, err
 		}
 		return rows[0], nil
+	case agyACPSchema:
+		_, a, err := agyACPUnpack(c)
+		if err != nil {
+			return Captured{}, err
+		}
+		return Captured{Identity: a.Identity, Label: a.Label, Credential: c}, nil
 	case agyAuthSchema:
 		cli, _, err := agyPayload(c.Payload)
 		if err != nil {
@@ -255,10 +261,6 @@ func (m *museManager) RecoverCredential(ctx context.Context, c Captured) (Captur
 	return recoverNative(ctx, m, c, time.Now(), nil)
 }
 
-func (m *antigravityManager) RecoverCredential(ctx context.Context, c Captured) (Captured, error) {
-	return recoverNative(ctx, m, c, directNow(m.now), nil)
-}
-
 func (m *antigravityManager) RefreshActive(ctx context.Context, c Captured, checkpoint func(Captured) error) (Captured, error) {
 	if checkpoint == nil {
 		return c, ErrUnsupported
@@ -270,9 +272,16 @@ func (m *antigravityManager) RefreshActive(ctx context.Context, c Captured, chec
 	if parsed.Identity != c.Identity || parsed.Integration != c.Integration {
 		return c, ErrNoIdentity
 	}
-	r := &activeRefresh{current: c, result: c, checkpoint: checkpoint}
-	_, err = m.activate(ctx, c.Integration, c.Credential, r)
-	return r.result, err
+	// The ACP server refreshes its own grant, and the native files hold no CLI
+	// token, so only a legacy saved payload has anything to refresh.
+	next, err := m.Refresh(ctx, c)
+	if err != nil || sameJSON(next.Credential.Payload, c.Credential.Payload) {
+		return c, err
+	}
+	if err = checkpoint(next); err != nil {
+		return c, err
+	}
+	return next, nil
 }
 
 // CredentialLabel derives the default label from a validated saved credential.

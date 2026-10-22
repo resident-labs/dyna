@@ -24,9 +24,8 @@ func (r *Runtime) FindPersonalLogin(ctx context.Context, harness string) (*Perso
 	if err != nil {
 		return nil, err
 	}
-	// Antigravity signs in through its ACP server, which keeps its own grant
-	// beside the agy CLI token. The owner's CLI token is a different grant, so
-	// there is nothing Sign in could copy.
+	// Antigravity signs in through its ACP server. The owner's agy CLI token is
+	// a different grant, so there is nothing Sign in could copy.
 	if h == "antigravity" {
 		return nil, nil
 	}
