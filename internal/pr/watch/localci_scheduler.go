@@ -268,6 +268,9 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 		result.Checks = []localci.SuiteResult{{Suite: "changes", CheckName: "changes", Node: node.Name, Status: "passed"}}
 	}
 	if ctx.Err() != nil {
+		if err := s.recoverInterruptedCI(ctx, job, repo, node, result); err != nil {
+			log.Printf("restore interrupted local CI: %v", err)
+		}
 		return
 	}
 	result.Repo, result.SHA, result.RoomID, result.Node = repo, job.head, job.record.RoomID, node.Name
@@ -357,4 +360,33 @@ func registeredSuites(files []string) []string {
 		suites = append(suites, "android")
 	}
 	return suites
+}
+
+// Cancellation of a still-current head restores the hosted work we removed.
+// Superseded heads stay cancelled. A timeout also saves an infrastructure error.
+func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob, repo string, node localci.Node, result localci.Result) error {
+	st, err := s.Store.Read()
+	if err != nil {
+		return err
+	}
+	current := false
+	for _, candidate := range registeredCIJobs(st) {
+		if registeredJobKey(candidate) == registeredJobKey(job) {
+			job = candidate
+			current = true
+			break
+		}
+	}
+	if !current {
+		return nil
+	}
+	recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), s.recordBudget())
+	defer cancel()
+	var saveErr error
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		result.Repo, result.SHA, result.RoomID, result.Node = repo, job.head, job.record.RoomID, node.Name
+		result.Status, result.Error = "error", "local CI exceeded its overall time limit"
+		saveErr = s.ciRegistry().SaveResult(recoveryCtx, result)
+	}
+	return errors.Join(saveErr, s.resumeHostedCI(recoveryCtx, job, repo))
 }
