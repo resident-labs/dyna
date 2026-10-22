@@ -247,7 +247,7 @@ func TestCrossBuildWaitsForSelectedFrontend(t *testing.T) {
 		}
 		done := make(chan outcome, 1)
 		go func() {
-			result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []string{"cross-build", "frontend"}})
+			result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []string{"cross-build", "frontend"}, DeferSave: true})
 			done <- outcome{result, err}
 		}()
 		select {
@@ -456,7 +456,7 @@ func TestAdmissionQueueDoesNotConsumeExecutionBudget(t *testing.T) {
 			return nil
 		}}
 		go func() {
-			result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []string{"cross-build"}, Timeout: 30 * time.Second})
+			result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []string{"cross-build"}, Timeout: 30 * time.Second, DeferSave: true})
 			if err != nil {
 				result.Status = "error"
 				result.Error = err.Error()
