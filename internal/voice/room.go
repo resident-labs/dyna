@@ -3,7 +3,6 @@ package voice
 import (
 	"context"
 	"errors"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -56,24 +55,6 @@ func (r *RoomLink) toRoot(ctx context.Context, in notify.PostInput) (string, err
 	return res.Message.ID, err
 }
 
-// reportHeader and reportPointer are the parts notify.CompletionText adds
-// around a turn's result: "<address> turn <n> <kind>. Result:" and the
-// "Full output: …" line.
-var (
-	reportHeader  = regexp.MustCompile(`^\S+ turn \d+ \w+\.(?: Result:)?\s*`)
-	reportPointer = regexp.MustCompile(`\s*Full output: dyna subagent output \S+\s*$`)
-)
-
-// resultText is a turn report's result without its header and pointer. A
-// post without the header stays as it is.
-func resultText(text string) string {
-	result := reportPointer.ReplaceAllString(reportHeader.ReplaceAllString(text, ""), "")
-	if result == "" {
-		return text
-	}
-	return result
-}
-
 // Spoken records one transcript line of the call: the owner's when owner is
 // true, otherwise Voice's.
 func (r *RoomLink) Spoken(owner bool, text string) error {
@@ -98,50 +79,28 @@ func (r *RoomLink) callPost(owner bool, in room.PostInput) room.PostInput {
 // Speaker is the call's side of Watch.
 type Speaker interface {
 	Speak(key, topic, text string)
-	Progress(task string, started time.Time, text string)
-	EndProgress(task string)
 }
 
 // Watch hands the call what root says to the owner: each post to
 // @voice-call from since on, and each of root's questions to the owner
 // while it is open, the oldest first. A question's topic is its ID, so a
-// newer post of the same question replaces one not yet said. While a
-// request Voice dispatched is open, each post between root and its agents
-// is that work's progress; root's answer to the call, or the end of root's
-// turn, closes the requests. It runs until ctx ends.
+// newer post of the same question replaces one not yet said. Other room
+// traffic is not progress for the call. It runs until ctx ends.
 func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) error {
 	voice := r.rec.Name + ":" + room.VoiceAgent
-	open := map[string]time.Time{} // requests Voice dispatched, and when
-	closeAll := func() {
-		for task := range open {
-			call.EndProgress(task)
-		}
-		clear(open)
-	}
 	return r.svc.Rooms.Follow(ctx, r.rec.ID, func(msg room.Message) (bool, error) {
-		at := time.UnixMilli(msg.TS)
 		if id := msg.QuestionID(); id != "" && r.fromRoot(msg) {
 			if q, ok := r.openQuestion(id); ok {
 				call.Speak(msg.ID, "question/"+id, questionPrompt(q))
 			}
 			return false, nil
 		}
-		if at.Before(since) {
+		if time.UnixMilli(msg.TS).Before(since) {
 			return false, nil
 		}
-		switch {
-		case msg.From == voice && msg.Kind != "voice":
-			open[msg.ID] = at
 		// Only root may post to Voice; the call's own transcript is kind voice.
-		case msg.Kind != "voice" && slices.Contains(msg.To, voice):
+		if msg.Kind != "voice" && slices.Contains(msg.To, voice) {
 			call.Speak(msg.ID, "", tellPrompt(msg.Text, msg.Attachments))
-			closeAll()
-		case msg.From == r.rec.Name+":"+room.RootAgent && slices.Contains([]string{"completed", "failed", "stopped"}, msg.Kind):
-			closeAll()
-		case r.rootAgentPost(msg):
-			for task, started := range open {
-				call.Progress(task, started, resultText(msg.Text))
-			}
 		}
 		return false, nil
 	})

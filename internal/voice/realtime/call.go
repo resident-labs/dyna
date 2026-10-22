@@ -572,7 +572,9 @@ func (c *Call) event(ctx context.Context, ev Event) {
 					return // a dropped connection asked; the new one does not wait for its output
 				}
 				c.send(c.provider.Protocol.FunctionOutput(ev.CallID, out))
-				c.owed = true
+				// Accepted work answers later. Keep its receipt as context
+				// without requesting an acknowledgement response.
+				c.owed = !c.waiting
 			})
 		}()
 	case OwnerPartial:

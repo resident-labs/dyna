@@ -134,35 +134,13 @@ func mergeQueueText(status watch.MergeControlStatus) string {
 	return spoken(out)
 }
 
-// rootAgentPost reports whether msg is a message or turn report between
-// root and an agent. Root's address is the room's own, which it shares
-// with the owner: a post from it that no person typed is root's, and an
-// agent's post to it goes to root.
-func (r *RoomLink) rootAgentPost(msg room.Message) bool {
-	switch msg.Kind {
-	case "", "message", "completed", "failed", "stopped":
-	default:
-		return false // service notices: PRs, issues, goals and instructions
-	}
-	toRoot := slices.ContainsFunc(msg.To, func(a string) bool { return a == r.rec.Name || a == r.rec.Name+":"+room.RootAgent })
-	toAgent := slices.ContainsFunc(msg.To, r.agent)
-	return r.fromRoot(msg) && toAgent || r.agent(msg.From) && toRoot
-}
-
-// agent reports whether addr names one of the room's agents: not root, not
-// Voice and not the owner.
-func (r *RoomLink) agent(addr string) bool {
-	name, ok := strings.CutPrefix(addr, r.rec.Name+":")
-	return ok && name != "" && name != room.RootAgent && name != room.VoiceAgent
-}
-
 // Dispatch's receipts. accepted means the agents have the request, and
 // duplicate that the same request is still under way; neither means it is
 // done. Its answer is spoken in the call when it comes, so Voice must not
 // guess it.
 const (
-	workStarted   = "accepted. The request is under way; its answer comes later in this call. Say one short line, such as \"I've started that\", then stop and wait quietly. Say nothing about the result."
-	workDuplicate = "duplicate. The same request is already under way, so it was not sent again. Say one short line, such as \"That's already under way\", then stop and wait quietly."
+	workStarted   = "accepted. The request is under way; its answer comes later in this call. Wait quietly without another acknowledgement."
+	workDuplicate = "duplicate. The same request is already under way and was not sent again. Wait quietly without another acknowledgement."
 )
 
 // Dispatch hands the owner's request to Dyna's agents: a post from Voice

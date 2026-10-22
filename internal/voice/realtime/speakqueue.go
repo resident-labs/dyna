@@ -28,8 +28,8 @@ const (
 // batchHeader leads a batch of more than one item, and foldHeader a batch
 // sent right after Voice stopped mid-reply for it.
 const (
-	batchHeader = "Several updates for the owner. Tell them together in one short reply, the most important first:"
-	foldHeader  = "You stopped mid-reply because new information came in. Say the rest of what you were saying, briefly, and fold in this:"
+	batchHeader = "Pending context for the owner. Combine related updates into one short reply with only new facts; preserve distinct results and questions. For corrections, use the latest facts:"
+	foldHeader  = "New context arrived while you spoke. Continue briefly with only information the owner has not heard. Correct only the changed point; do not restart the reply:"
 )
 
 // speakQueue says what Voice must say for Dyna, oldest first. Every item

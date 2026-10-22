@@ -183,20 +183,19 @@ func runCall(ctx context.Context, link *RoomLink, p realtime.Provider) (*session
 	return sess, nil
 }
 
-// tellPrompt asks Voice to pass on what root says to the owner. The files
-// root shared show in the call, where the owner opens them; Voice only says,
-// in one short line, that it shared them.
+// tellPrompt gives Voice context for a concise update. Shared files show
+// in the call, where the owner opens them; Voice cannot see their contents.
 func tellPrompt(text string, shared []room.Attachment) string {
 	var parts []string
 	if strings.TrimSpace(text) != "" || len(shared) == 0 {
-		parts = append(parts, "A work result for the owner. Tell the owner in your own words, in one to three short sentences, as your own work: say \"I\", and keep what was done accurate: "+text)
+		parts = append(parts, "Update context for the owner. Speak only facts not already said: "+text)
 	}
 	if len(shared) > 0 {
 		names := make([]string, len(shared))
 		for i, a := range shared {
 			names[i] = sharedName(a)
 		}
-		parts = append(parts, "Shared in the call, where the owner can open it: "+strings.Join(names, "; ")+`. Say one short line that you shared it, such as "I sent you a comparison card." You cannot see inside it, so never describe what it holds.`)
+		parts = append(parts, "Shared in the call, where the owner can open it: "+strings.Join(names, "; ")+`. Mention newly shared items briefly. You cannot see inside them, so never describe what they hold.`)
 	}
 	return strings.Join(parts, "\n\n")
 }

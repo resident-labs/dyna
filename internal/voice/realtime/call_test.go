@@ -1047,18 +1047,20 @@ func TestCallRefusesOtherToolsOnceATurnIsDispatched(t *testing.T) {
 	cf.f.reply <- `{"type":"response.created","response":{"id":"r1"}}`
 	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r1","call_id":"c1","name":"dispatch","arguments":"{}"}`
 	cf.wantOutput(t, "c1", "Started.")
-	cf.f.reply <- `{"type":"response.done","response":{"id":"r1","status":"completed"}}`
-	cf.serverGets(t, "response.create") // "I've started that"
-	cf.f.reply <- `{"type":"response.created","response":{"id":"r2"}}`
-	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r2","call_id":"c2","name":"recent","arguments":"{}"}`
+	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r1","call_id":"c2","name":"recent","arguments":"{}"}`
 	cf.wantOutput(t, "c2", "already being answered")
-	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r2","call_id":"c3","name":"dispatch","arguments":"{}"}`
+	cf.f.reply <- `{"type":"response.function_call_arguments.done","response_id":"r1","call_id":"c3","name":"dispatch","arguments":"{}"}`
 	cf.wantOutput(t, "c3", "already being answered")
-	cf.f.reply <- `{"type":"response.done","response":{"id":"r2","status":"completed"}}`
-	cf.mark(t) // no reply is asked for the refused calls
+	cf.f.reply <- `{"type":"response.done","response":{"id":"r1","status":"completed"}}`
+	cf.sync(t)
+	cf.mark(t) // accepted work waits silently; refused tools ask for no reply
 	if checks != 0 {
 		t.Fatalf("the check ran %d times after the dispatch", checks)
 	}
+	cf.call.Speak("result", "", "CI passed.")
+	cf.wantSpoken(t, "result", "CI passed.")
+	cf.f.reply <- `{"type":"response.created","response":{"id":"r2","metadata":{"dyna_speak":"result"}}}`
+	cf.f.reply <- `{"type":"response.done","response":{"id":"r2","status":"completed"}}`
 	cf.f.reply <- `{"type":"input_audio_buffer.committed","item_id":"u2"}`
 	cf.serverGets(t, "response.create") // the owner's new turn is answered
 	cf.f.reply <- `{"type":"response.created","response":{"id":"r3"}}`
