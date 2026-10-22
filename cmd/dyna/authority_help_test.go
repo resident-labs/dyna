@@ -24,6 +24,7 @@ var serviceAuthorityActions = map[string]bool{
 	"DismissSession":          true,
 	"ChangeIssue":             true,
 	"SetChangePolicyOverride": true,
+	"SetPRGoal":               true,
 	"UpdateChangeNotes":       true,
 	"post @voice-call":        true,
 }
