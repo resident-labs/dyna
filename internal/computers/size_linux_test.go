@@ -19,7 +19,7 @@ func TestComputerSizeSurvivesSupervisorRestart(t *testing.T) {
 	if err := os.MkdirAll(Dir(id), 0700); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := json.Marshal(Status{Width: 390, Height: 844})
+	data, _ := json.Marshal(Status{SessionID: id, Width: 390, Height: 844})
 	if err := os.WriteFile(filepath.Join(Dir(id), "state.json"), data, 0600); err != nil {
 		t.Fatal(err)
 	}
