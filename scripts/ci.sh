@@ -17,18 +17,31 @@ case "$suite" in
     npm test -- --reporter=default --reporter=junit --outputFile="${JUNIT_REPORT_PATH:-$RUNNER_TEMP/relay-test.xml}"
     ;;
   frontend)
+    # Phases: check (type checks only), test (build, tests, clean tree), all.
     cd web
     npm ci --prefer-offline --no-audit
-    npm run check
-    npm run build
-    TEST_FILES_PATH="$RUNNER_TEMP/frontend-test-files.jsonl" npm run test:ci
-    # A loaded runner makes fast web tests look slow. Re-measure each one alone and
-    # keep the shorter time in the report. The local lane has no checker binary.
-    if [[ -x "$RUNNER_TEMP/dyna-ci" ]]; then
-      "$RUNNER_TEMP/dyna-ci" git ci tests --junit "$JUNIT_REPORT_PATH" --test-files "$RUNNER_TEMP/frontend-test-files.jsonl" --isolate-over 1s --junit-output "$JUNIT_REPORT_PATH"
+    if [[ $phase == all || $phase == check ]]; then
+      # The four checks do not depend on each other, so they run side by side.
+      pids=()
+      npm exec -- node scripts/check-typescript.ts & pids+=($!)
+      npm exec -- svelte-check --tsconfig ./tsconfig.json & pids+=($!)
+      npm exec -- tsc --project ./tsconfig.json & pids+=($!)
+      npm exec -- tsc --project ./tsconfig.worker.json & pids+=($!)
+      failed=0
+      for pid in "${pids[@]}"; do wait "$pid" || failed=1; done
+      if ((failed)); then echo "Frontend type check failed" >&2; exit 1; fi
     fi
-    git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --short
-    test -z "$(git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --porcelain)"
+    if [[ $phase == all || $phase == test ]]; then
+      npm run build
+      TEST_FILES_PATH="$RUNNER_TEMP/frontend-test-files.jsonl" npm run test:ci
+      # A loaded runner makes fast web tests look slow. Re-measure each one alone and
+      # keep the shorter time in the report. The local lane has no checker binary.
+      if [[ -x "$RUNNER_TEMP/dyna-ci" ]]; then
+        "$RUNNER_TEMP/dyna-ci" git ci tests --junit "$JUNIT_REPORT_PATH" --test-files "$RUNNER_TEMP/frontend-test-files.jsonl" --isolate-over 1s --junit-output "$JUNIT_REPORT_PATH"
+      fi
+      git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --short
+      test -z "$(git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --porcelain)"
+    fi
     ;;
   android)
     sdk=${ANDROID_HOME:?set ANDROID_HOME}
@@ -46,7 +59,9 @@ case "$suite" in
     ;;
   cross-build)
     started=$SECONDS
+    # An optional target (goos/goarch) builds only that one.
     while IFS=/ read -r goos goarch; do
+      if [[ -n $phase && $phase != all && $phase != "$goos/$goarch" ]]; then continue; fi
       echo "Building $goos/$goarch"
       CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" ci_diag_go build -buildvcs=false ./...
     done < .github/release-targets
@@ -63,10 +78,18 @@ case "$suite" in
       modules) ci_diag_go mod verify ;;
       build) ci_diag_go build -o "$RUNNER_TEMP/dyna-ci" ./cmd/dyna ;;
       test)
-        race=() isolate=()
-        if [[ ${CI_EVENT:-push} != pull_request ]]; then race=(-race) isolate=(--isolate-race); fi
-        ci_diag_go test "${race[@]}" -json -timeout 5m ./... | tee "$RUNNER_TEMP/go-test.json" | "$RUNNER_TEMP/dyna-ci" git ci tests --isolate-over 1s "${isolate[@]}" --junit-output "$RUNNER_TEMP/go-test.xml"
+        # No -race here: pull requests and merge trials run the same flags and share
+        # cached results. The nightly workflow runs the race phase below.
+        # CI_SHARD=INDEX/COUNT tests one slice of the packages; no value tests all.
+        pkgs=(./...)
+        if [[ -n ${CI_SHARD:-} ]]; then
+          mapfile -t pkgs < <(bash scripts/ci-shard.sh "${CI_SHARD%/*}" "${CI_SHARD#*/}")
+          if ((${#pkgs[@]} == 0)); then echo "Shard $CI_SHARD has no packages" >&2; exit 1; fi
+        fi
+        ci_diag_go test -json -timeout 5m "${pkgs[@]}" | tee "$RUNNER_TEMP/go-test.json" | "$RUNNER_TEMP/dyna-ci" git ci tests --isolate-over 1s --junit-output "$RUNNER_TEMP/go-test.xml"
         ;;
+      # The nightly race run on main. It has no time budget and no checker.
+      race) ci_diag_go test -race -timeout 10m ./... ;;
       vet) ci_diag_go vet ./... ;;
       desktop)
         cd desktop

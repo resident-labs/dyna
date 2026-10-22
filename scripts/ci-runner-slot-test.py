@@ -140,7 +140,7 @@ class SlotTest(unittest.TestCase):
     def test_keeper_outlasts_the_job_timeout_and_the_wait_ends_inside_it(self):
         script = SLOT.read_text()
         workflow = (SLOT.parent.parent / ".github/workflows/ci.yml").read_text()
-        job = workflow[workflow.index("  test:\n    name: go-test"):]
+        job = workflow[workflow.index("  go-shard:\n"):]
         timeout = int(re.search(r"timeout-minutes: (\d+)", job).group(1)) * 60
         hold = int(re.search(r"CI_SLOT_HOLD:-(\d+)", script).group(1))
         wait = int(re.search(r"CI_SLOT_WAIT:-(\d+)", script).group(1))
