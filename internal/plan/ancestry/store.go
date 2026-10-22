@@ -56,7 +56,7 @@ func Migrate(dataDir string) error {
 				if err != nil {
 					return err
 				}
-				if entry.IsDir() || entry.Name() != "plan.json" {
+				if entry.Name() != "plan.json" {
 					return nil
 				}
 				key, err := planKey(filepath.Dir(path))
