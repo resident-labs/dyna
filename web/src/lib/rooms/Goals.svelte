@@ -56,9 +56,10 @@
 <style>
   .goals { display: flex; flex-direction: column; min-height: 0; flex: 1; }
   .list { overflow-y: auto; padding: 0 var(--s4) var(--s5); flex: 1; }
-  .branch { position: relative; }
+  .branch { display: flex; align-items: start; }
+  .branch :global(.row) { flex: 1; min-width: 0; width: auto; }
   .branch.child { border-left: 1px solid var(--line); }
-  .xp { position: absolute; top: var(--s2); right: var(--s2); font-size: var(--t-cap); color: var(--muted); background: var(--raise); border-radius: 5px; padding: 3px 8px; opacity: 0; transition: color var(--motion-fast) var(--ease), opacity var(--motion-fast) var(--ease); }
+  .xp { flex: none; max-width: 110px; margin: var(--s3) 0; font-size: var(--t-cap); color: var(--muted); background: var(--raise); border-radius: 5px; padding: 3px 8px; opacity: 0; transition: color var(--motion-fast) var(--ease), opacity var(--motion-fast) var(--ease); }
   .branch:hover .xp, .xp:focus-visible { opacity: 1; }
   @media (hover: hover) { .xp:hover { color: var(--ink); } }
   @media (hover: none) { .xp { opacity: 1; } }
