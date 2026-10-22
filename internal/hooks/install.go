@@ -42,7 +42,7 @@ func SelfUpdateRecipe(ctx context.Context, repo, exe, name string) (Hook, error)
 		dirs = append(dirs, filepath.Dir(path))
 	}
 	toolPath := capturedToolPath(append(dirs, filepath.SplitList(os.Getenv("PATH"))...), store.DataDir())
-	h := Hook{Name: name, Label: "Update Dyna", Event: MainUpdated, Command: shellquote.Quote(exe) + " hooks _install --main " + shellquote.Quote(r.Main) + " --name " + shellquote.Quote(name) + " --tool-path " + shellquote.Quote(toolPath), Cwd: "main", Timeout: "1m", OnFail: "alert"}
+	h := Hook{Name: name, Label: "Update Dyna", Event: MainUpdated, Command: shellquote.Quote(exe) + " git hooks _install --main " + shellquote.Quote(r.Main) + " --name " + shellquote.Quote(name) + " --tool-path " + shellquote.Quote(toolPath), Cwd: "main", Timeout: "1m", OnFail: "alert"}
 	return h, Validate(h)
 }
 

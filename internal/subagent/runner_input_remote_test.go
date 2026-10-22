@@ -252,7 +252,7 @@ func (s *claimEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	key := "runner/" + rid
 	actor := authority.WithActor(r.Context(), authority.Actor{Role: authority.Session, Session: s.sessionID})
-	reqCtx := state.ForRequest(callspec.WithRequest(actor, rid), key)
+	reqCtx := state.ForRequestCall(callspec.WithRequest(actor, rid), key, "RunnerClaimInput", []byte("fixture-call"))
 	if result, done, err := writer.RequestDone(reqCtx, key); err != nil || done {
 		s.finishReplay(w, result, err)
 		return
@@ -806,7 +806,7 @@ END`); err != nil {
 	}
 	actor := authority.WithActor(context.Background(), authority.Actor{Role: authority.Session, Session: fix.info.ID})
 	rid := fix.info.ID + "/claim/rollback"
-	ctx := state.ForRequest(callspec.WithRequest(actor, rid), "runner/"+rid)
+	ctx := state.ForRequestCall(callspec.WithRequest(actor, rid), "runner/"+rid, "RunnerClaimInput", []byte("fixture-call"))
 	input := InputClaim{Turn: 1, Startup: true}
 	before := fix.events.members(fix.info.ID)
 	changesBefore := fix.events.count("sessions", fix.info.ID)
@@ -848,7 +848,7 @@ END`); err != nil {
 	if got := fix.events.count("sessions", fix.info.ID) - changesBefore; got != 1 {
 		t.Fatalf("committed retry published %d session changes; want one", got)
 	}
-	replayCtx := state.ForRequest(callspec.WithRequest(actor, rid), "runner/"+rid)
+	replayCtx := state.ForRequestCall(callspec.WithRequest(actor, rid), "runner/"+rid, "RunnerClaimInput", []byte("fixture-call"))
 	if _, err := fix.e.m.RunnerClaimInput(replayCtx, input); !errors.Is(err, state.ErrRepeated) {
 		t.Fatalf("replayed claim = %v; want ErrRepeated", err)
 	}

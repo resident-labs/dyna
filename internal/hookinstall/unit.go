@@ -34,7 +34,7 @@ func (s Service) Start(ctx context.Context, j Job, out io.Writer) error {
 	}); err != nil {
 		return err
 	}
-	args := []string{"systemd-run", "--user", "--unit", j.Unit, "--property=Type=exec", "--property=RemainAfterExit=yes", "--property=RuntimeMaxSec=4500", "--property=Nice=10", "--", j.Config.Executable, "hooks", "_install-worker", j.ID, "--jobs-root", s.Jobs.Root}
+	args := []string{"systemd-run", "--user", "--unit", j.Unit, "--property=Type=exec", "--property=RemainAfterExit=yes", "--property=RuntimeMaxSec=4500", "--property=Nice=10", "--", j.Config.Executable, "git", "hooks", "_install-worker", j.ID, "--jobs-root", s.Jobs.Root}
 	fmt.Fprintln(out, "Install unit: "+j.Unit)
 	err := s.Exec(ctx, processguard.Process{Dir: "/", Args: args, Env: processguard.MetadataEnv(), Timeout: 30 * time.Second, Output: out})
 	if err != nil {
@@ -66,7 +66,7 @@ func (s Service) Worker(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	args := []string{"flock", "-w", "1800", j.Config.Lock, j.Config.Executable, "hooks", "_install-locked", id, "--jobs-root", s.Jobs.Root}
+	args := []string{"flock", "-w", "1800", j.Config.Lock, j.Config.Executable, "git", "hooks", "_install-locked", id, "--jobs-root", s.Jobs.Root}
 	runErr := s.Exec(ctx, processguard.Process{Dir: j.Config.Main, Args: args, Env: append(processguard.MetadataEnv(), "DYNA_HOOK_EVENT=install-worker", "DYNA_HOOK_LOG="+log.Name()), Timeout: timeout, Output: log})
 	runErr = errors.Join(runErr, log.Close())
 	result := "pass"

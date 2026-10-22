@@ -2,7 +2,6 @@ package engine
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"dyna-agent/internal/database"
@@ -19,14 +18,17 @@ func TestSyncStatusCallReadsSavedStatusInReadOnlyMode(t *testing.T) {
 	if err := os.MkdirAll(store.DataDir(), 0700); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(store.DataDir(), "sync.json")
-	if err := store.WriteJSON(path, map[string]any{"repositories": lanesync.RemoteStatus{"/repo": {"origin": {Ahead: 2, Behind: 3, Head: "remote-head"}}}}, 0600); err != nil {
-		t.Fatal(err)
-	}
 	if err := lanesync.Migrate(store.DataDir()); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { database.Close(store.DataDir()) })
+	sync := &lanesync.Service{Dir: store.DataDir()}
+	if err := sync.Update(func(s *lanesync.Snapshot) error {
+		s.Repositories = lanesync.RemoteStatus{"/repo": {"origin": {Ahead: 2, Behind: 3, Head: "remote-head"}}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	result, err := call(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)

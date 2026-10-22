@@ -2,9 +2,11 @@ package hooks
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sync"
@@ -50,40 +52,66 @@ func TestHookDocumentSurvivesRemovalOfLegacyFile(t *testing.T) {
 	}
 }
 
-func TestHookDocumentsImportLazilyOnRead(t *testing.T) {
+func TestHookDocumentImportMakesSQLAuthoritative(t *testing.T) {
 	s := documentTestService(t)
-	path := filepath.Join(s.dir("repo"), "hooks.json")
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	db, err := database.Open(s.DataDir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	old := document{Repo: "/main/repo", Hooks: []Hook{hook("imported", AfterLand)}}
-	if err := store.WriteJSON(path, old, 0600); err != nil {
+	if err := database.Migrate(db, "hooks.documents", 1, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(t.Context(), documentsSchema)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	write := func(key, raw string) string {
+		path := filepath.Join(s.DataDir, "repos", key, "hooks.json")
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	raw := `{"repo":"/main/imported","future":9007199254740993,"hooks":[{"name":"imported","event":"after-land","command":"true"}]}`
+	path := write("imported", raw)
+	empty := `{"repo":"/main/empty","hooks":[]}`
+	if _, err := db.Exec("INSERT INTO hook_documents(repo,body) VALUES('empty',?)", empty); err != nil {
+		t.Fatal(err)
+	}
+	write("empty", "{obsolete malformed source")
+	owned := write("owned", "{}")
+	if err := os.Remove(owned); err != nil {
+		t.Fatal(err)
+	}
+	if err := statewrite.For(db).Mirror(t.Context(), documentMirrorKey("owned"), owned, func(out io.Writer) error { _, err := io.WriteString(out, raw); return err }); err != nil {
+		t.Fatal(err)
+	}
+	var stamp string
+	if err := db.QueryRow("SELECT version FROM state_mirrors WHERE key=?", documentMirrorKey("owned")).Scan(&stamp); err != nil {
 		t.Fatal(err)
 	}
 	if err := MigrateDocuments(s.DataDir); err != nil {
 		t.Fatal(err)
 	}
-	db, err := s.documentsDB()
-	if err != nil {
-		t.Fatal(err)
+	var got string
+	if err := db.QueryRow("SELECT body FROM hook_documents WHERE repo='imported'").Scan(&got); err != nil || got != raw {
+		t.Fatalf("immediate import = %s, %v", got, err)
+	}
+	if err := db.QueryRow("SELECT body FROM hook_documents WHERE repo='empty'").Scan(&got); err != nil || got != empty {
+		t.Fatalf("empty row replaced: %s, %v", got, err)
 	}
 	var count int
-	if err := db.QueryRow("SELECT count(*) FROM hook_documents").Scan(&count); err != nil || count != 0 {
-		t.Fatalf("startup imported %d hook documents: %v", count, err)
+	if err := db.QueryRow("SELECT count(*) FROM hook_documents WHERE repo='owned'").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("owned absence restored: %d, %v", count, err)
 	}
-	if err := db.QueryRow("SELECT count(*) FROM meta WHERE key='hooks.documents.import'").Scan(&count); err != nil || count != 0 {
-		t.Fatalf("startup wrote %d legacy import flags: %v", count, err)
+	if got, err := os.ReadFile(path); err != nil || string(got) != raw {
+		t.Fatalf("source changed: %s, %v", got, err)
 	}
-	list, err := s.load(t.Context(), "repo")
-	if err != nil || len(list) != 1 || list[0].Name != "imported" {
-		t.Fatalf("lazy document import: %+v, %v", list, err)
-	}
-	writes := statewrite.For(db).Health().Writes
-	if _, err := s.load(t.Context(), "repo"); err != nil {
-		t.Fatal(err)
-	}
-	if after := statewrite.For(db).Health().Writes; after != writes {
-		t.Fatalf("same file imported twice: %d -> %d", writes, after)
+	var after string
+	if err := db.QueryRow("SELECT version FROM state_mirrors WHERE key=?", documentMirrorKey("owned")).Scan(&after); err != nil || after != stamp {
+		t.Fatalf("stamp changed: %s, %v", after, err)
 	}
 }
 
@@ -115,7 +143,7 @@ func TestDocumentCurrentReadCreatesNoLock(t *testing.T) {
 	}
 }
 
-func TestMalformedLegacyHookConfigBlocksReadAfterMigration(t *testing.T) {
+func TestMalformedLegacyHookConfigBlocksMigration(t *testing.T) {
 	s := documentTestService(t)
 	path := filepath.Join(s.dir("repo"), "hooks.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
@@ -124,11 +152,8 @@ func TestMalformedLegacyHookConfigBlocksReadAfterMigration(t *testing.T) {
 	if err := os.WriteFile(path, []byte("{"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := MigrateDocuments(s.DataDir); err != nil {
-		t.Fatalf("schema migration parsed hook config: %v", err)
-	}
-	if list, err := s.load(t.Context(), "repo"); err == nil {
-		t.Fatalf("malformed config became an empty successful read: %+v", list)
+	if err := MigrateDocuments(s.DataDir); err == nil {
+		t.Fatal("migration accepted malformed hook configuration")
 	}
 }
 

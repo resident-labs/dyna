@@ -88,17 +88,6 @@ func (s *Service) Devices() (DeviceList, error) {
 	if err != nil {
 		return nil, err
 	}
-	pairedIDs := make([]string, len(paired))
-	for i, d := range paired {
-		pairedIDs[i] = d.ID
-	}
-	connectIDs := make([]string, len(sessions))
-	for i, d := range sessions {
-		connectIDs[i] = d.ID
-	}
-	if err := grants.ImportLegacy(pairedIDs, connectIDs); err != nil {
-		return nil, err
-	}
 	pairedGrants, err := grants.Map("paired")
 	if err != nil {
 		return nil, err

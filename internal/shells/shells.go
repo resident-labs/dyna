@@ -91,9 +91,6 @@ type Info struct {
 	Meta
 	Status string `json:"status"` // running|exited|lost
 	Exit   *Exit  `json:"exit,omitempty"`
-	// legacyExit marks an exit that only exit.json holds. A read reports it;
-	// a write path imports it through importLegacyExit.
-	legacyExit bool
 }
 
 // Store addresses the shells directory.
@@ -334,19 +331,8 @@ func (s *Store) Info(id string) (Info, error) {
 	return s.status(Info{Meta: m, Exit: ex}), nil
 }
 
-// status resolves a shell's live status from its current record, including an
-// exit that only an older supervisor's exit.json holds. It never writes:
-// List and Info run while a session builds its instructions, so the import
-// belongs to a write path (importLegacyExit).
+// status resolves a shell's live status from its canonical record.
 func (s *Store) status(in Info) Info {
-	if in.Exit == nil {
-		// TODO: legacy/shim remove later — a supervisor from an older release records its exit only in exit.json; remove with importLegacy.
-		if dir, err := s.dir(in.ID); err == nil {
-			if ex, err := readLegacyExit(dir); err == nil && ex != nil {
-				in.Exit, in.legacyExit = ex, true
-			}
-		}
-	}
 	switch {
 	case in.Exit != nil:
 		in.Status = "exited"
@@ -366,26 +352,6 @@ func (s *Store) status(in Info) Info {
 		}
 	}
 	return in
-}
-
-// importLegacyExit keeps an exit that only an older supervisor's exit.json
-// recorded. It sets the exit columns only, in one statement that refuses when
-// a canonical exit already exists, so a concurrent supervisor or a second
-// waiter cannot lose a newer exit or the job's metadata. It returns the
-// effective record, canonical exit included.
-// TODO: legacy/shim remove later — an older release's supervisor records only exit.json; remove with importLegacy.
-func (s *Store) importLegacyExit(m Meta, ex *Exit) (Info, error) {
-	if ex == nil {
-		return s.Info(m.ID)
-	}
-	if !ValidID(m.ID) {
-		return Info{}, fmt.Errorf("invalid shell id %q", m.ID)
-	}
-	if _, err := s.exec(m.ID, `UPDATE shell_jobs SET ended=?, exit_code=?, exit_signal=?, exit_error=? WHERE id=? AND ended IS NULL`,
-		ex.Ended.UTC().Format(time.RFC3339Nano), ex.Code, ex.Signal, ex.Error, m.ID); err != nil {
-		return Info{}, err
-	}
-	return s.Info(m.ID)
 }
 
 // SupervisorAlive reports whether the job's recorded supervisor still runs.
@@ -528,16 +494,6 @@ func (s *Store) Wait(ctx context.Context, id string, timeout time.Duration, read
 		in, err := s.Info(id)
 		if err != nil {
 			return Info{}, false, err
-		}
-		if in.legacyExit {
-			if ctx.Err() != nil {
-				return in, true, nil // report it without a write the caller no longer waits for
-			}
-			info, err := s.importLegacyExit(in.Meta, in.Exit)
-			if err != nil {
-				return in, true, err
-			}
-			return info, true, nil
 		}
 		if in.Status == "exited" {
 			return in, true, nil

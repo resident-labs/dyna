@@ -4,7 +4,6 @@
 # violation: state written directly today. These lines may only shrink: move the write
 #   behind internal/state, then run the test with -update (it never adds a line).
 # not-state: files that are not shared Dyna state. Each needs a reason.
-not-state internal/account/store/active.go Store.activeLock 1 # a harness's .active.lock flock lock file, not state
 not-state internal/account/store/registry.go Store.removeCredential 1 # deletes an account's private credential file after its row is removed; secrets stay out of dyna.db and its backups
 not-state internal/account/store/registry.go Store.writeCredential 2 # the one writer of an account's private 0600 credential file (login, refresh, switch checkpoint, import); secrets stay out of dyna.db and its backups
 not-state internal/account/store/store.go Store.lock 1 # accounts.lock, the registry's flock lock file, not state
@@ -72,7 +71,6 @@ not-state internal/database/database.go openDatabase 2 # the schema and meta boo
 not-state internal/database/outside.go appendLine 1 # outside-writes.jsonl, the item 41 report of dyna.db writes outside the engine; a log file, one line per call site, capped at 1 MB
 not-state internal/database/slow.go Read 1 # a read-only transaction (state.Read's snapshot); it writes nothing
 violation internal/devicegrant/grant.go Store.Delete 1
-violation internal/devicegrant/grant.go Store.ImportLegacy 1
 violation internal/devicegrant/grant.go Store.Put 1
 violation internal/doctor/samples.go Samples.Record 1
 not-state internal/engine/runner_spool.go reserve 1 # reserves an empty frozen spool or rejected-artifact name with O_EXCL before the rename fills it; the spool is a transport log, not state
@@ -186,9 +184,10 @@ not-state internal/pr/watch/review_context.go Service.prepareReviewTask 1 # revi
 not-state internal/pr/watch/review_context.go writeDiff 1 # a diff file that a reviewer reads
 not-state internal/pr/watch/sync_operations.go Service.publishLaneExport 2 # a temporary folder and PR body file for gh, removed on return
 not-state internal/processguard/helper.go runGuard 2 # removes the temporary Unix-socket control directory for one process group
+not-state internal/profile/migrate.go Migrate 1 # atomic upgrade of hand-edited profile configuration
+not-state internal/profile/migrate.go profileV2Backup 1 # checked private backup of hand-edited profile configuration
 not-state internal/profile/profile.go Store.Save 1 # hand-edited worker profile configuration in profiles.json
 not-state internal/profilecheck/probe.go Run 2 # creates and removes temporary probe output.jsonl; persistent health belongs to internal/harness/health
-not-state internal/questions/sqlite.go Store.writeMigrationFile 1 # one-time import backup and old-binary rejection guard; never live question state
 not-state internal/rolesession/session.go lockPath 1 # empty flock coordination file with no persisted record payload
 not-state internal/room/attach.go Store.PutRenderedAttachment 4 # an attachment is a content-addressed blob, written once
 not-state internal/room/records.go removeDir 1 # deletes a room's folder after its rows
@@ -216,7 +215,6 @@ not-state internal/store/store.go WriteJSON 1 # the JSON write primitives themse
 not-state internal/store/store.go flock 1 # the JSON write primitives themselves
 not-state internal/store/store.go flockOpened 1 # the JSON write primitives themselves
 not-state internal/subagent/consolidation.go Manager.consolidationWorkerLock 1 # a non-blocking flock for the one consolidation worker of a session
-not-state internal/subagent/lock_owner.go Store.recoverTurnLock 1 # removes a stale turn.lock file left by a dead runner
 not-state internal/subagent/manager.go ExecSpawner.Spawn 1 # daemon.log, the append-only log of the detached turn runner
 not-state internal/subagent/manager.go Manager.start 3 # a new session's folder, its two empty journal logs and output-config.json, a snapshot written once
 not-state internal/subagent/room_controls.go Manager.runRoomResume 1 # a non-blocking flock for one room resume worker

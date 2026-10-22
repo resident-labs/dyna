@@ -271,7 +271,7 @@ func TestGenerationPreferencesAndCatalogOrder(t *testing.T) {
 	if a.Directory != b.Directory {
 		t.Fatal("catalog order invalidated effective content")
 	}
-	root, metadata, err := r.preferencePaths()
+	root, err := r.preferenceRoot()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +279,7 @@ func TestGenerationPreferencesAndCatalogOrder(t *testing.T) {
 	if err = writeGenerationJSON(settings, map[string]any{"tui.animations": false, "history.persistence": "none"}, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err = writeGenerationJSON(metadata, map[string]preferences.Ref{id: {Settings: settings, Harness: "codex"}}, 0600); err != nil {
+	if err = preferences.Save(id, preferences.Ref{Settings: settings, Harness: "codex"}); err != nil {
 		t.Fatal(err)
 	}
 	withPrefs := buildGeneration(t, r, "codex", home, id)

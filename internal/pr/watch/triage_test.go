@@ -36,8 +36,8 @@ func TestRuleTriage(t *testing.T) {
 		action, reason    string
 	}{
 		{"owner", "Rate limit exceeded", "owner", true, "keep", "owner"},
-		{"author", Marker("ses_author") + " reply", "owner", false, "drop", "author_marker"},
-		{"reviewer", Marker("ses_reviewer") + " fix parser", "owner", false, "keep", "possibly_useful_feedback"},
+		{"author", Marker("ses_author") + " reply", "owner", false, "keep", "owner"},
+		{"reviewer", Marker("ses_reviewer") + " fix parser", "owner", false, "keep", "owner"},
 		{"known rate limit", "Rate limit exceeded", "coderabbitai[bot]", true, "drop", "known_rate_limit_noise"},
 		{"placeholder", "Review in progress", "coderabbitai[bot]", true, "drop", "known_review_placeholder"},
 		{"known bot useful", "bounds issue", "coderabbitai[bot]", true, "keep", "possibly_useful_feedback"},

@@ -158,6 +158,7 @@ func TestLoadDoesNotRefreshManagedProfile(t *testing.T) {
 		Command: []string{"old"}, Env: map[string]string{"OLD": "1"}, TimeoutSec: 1,
 		Default: true, Managed: true, Disabled: true,
 	}
+	want.DeclareOutput()
 	store := &Store{Path: path, Version: storeVersion, Profiles: []Profile{want}}
 	if err := store.Save(); err != nil {
 		t.Fatal(err)
@@ -195,6 +196,7 @@ func TestLoadLeavesUnmanagedProfilesAlone(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	want := Profile{Name: "custom", Description: "mine", Harness: HarnessMock, Taste: 5, Intelligence: 6, Cost: 7}
+	want.DeclareOutput()
 	store := &Store{Path: path, Version: storeVersion, Profiles: []Profile{want}}
 	if err := store.Save(); err != nil {
 		t.Fatal(err)

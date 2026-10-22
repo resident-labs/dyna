@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -50,7 +49,11 @@ func TestActionStatusSavedAndReadDoesNotReplaceIt(t *testing.T) {
 	if _, err := s.act(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(Dir(id), "state.json"))
+	db, err := recordsDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := column(t.Context(), db, id, statusRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +73,7 @@ func TestActionStatusSavedAndReadDoesNotReplaceIt(t *testing.T) {
 	if _, err := s.act(context.Background(), req); err != nil {
 		t.Fatal(err)
 	}
-	after, err := os.ReadFile(filepath.Join(Dir(id), "state.json"))
+	after, err := column(t.Context(), db, id, statusRecord)
 	if err != nil {
 		t.Fatal(err)
 	}

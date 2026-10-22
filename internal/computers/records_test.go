@@ -35,11 +35,13 @@ func oldBinaryWrites(t *testing.T, path string, v any) {
 	}
 }
 
-// A registration that the previous release wrote is imported on read, then
-// lives in its row: ReadMeta needs no file.
-func TestOldBinaryMetaIsImportedOnRead(t *testing.T) {
+// A retained registration is imported during startup and then lives in SQLite.
+func TestOldBinaryMetaIsImportedAtStartup(t *testing.T) {
 	id := recordTestID(t)
 	oldBinaryWrites(t, metaRecord.path(id), Meta{SessionID: id, Room: "old-room"})
+	if err := Migrate(filepath.Dir(Root())); err != nil {
+		t.Fatal(err)
+	}
 	if m, err := ReadMeta(id); err != nil || m.Room != "old-room" {
 		t.Fatalf("ReadMeta = %+v, %v", m, err)
 	}
@@ -59,7 +61,7 @@ func TestReadMetaOfAnUnknownComputerIsNotFound(t *testing.T) {
 	}
 }
 
-// The status row and its copy are written only when the status changes in
+// The status row is written only when the status changes in
 // more than its sampled metrics.
 func TestStatusIsWrittenOnlyWhenItChanges(t *testing.T) {
 	id := recordTestID(t)
@@ -72,7 +74,7 @@ func TestStatusIsWrittenOnlyWhenItChanges(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := state.For(db).Health().Writes
-	first, err := os.ReadFile(statusRecord.path(id))
+	first, err := column(t.Context(), db, id, statusRecord)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,8 +85,8 @@ func TestStatusIsWrittenOnlyWhenItChanges(t *testing.T) {
 	if got := state.For(db).Health().Writes - before; got != 0 {
 		t.Fatalf("a sample-only change made %d state writes, want 0", got)
 	}
-	if same, _ := os.ReadFile(statusRecord.path(id)); !bytes.Equal(same, first) {
-		t.Fatal("a sample-only change rewrote the copy")
+	if same, _ := column(t.Context(), db, id, statusRecord); !bytes.Equal(same, first) {
+		t.Fatal("a sample-only change rewrote the row")
 	}
 	s.State = StateIdleStopped
 	if err := saveStatus(s); err != nil {
@@ -93,27 +95,25 @@ func TestStatusIsWrittenOnlyWhenItChanges(t *testing.T) {
 	if got := savedStatus(id); got.State != StateIdleStopped {
 		t.Fatalf("status after a change = %+v", got)
 	}
-	var copied Status
-	if err := store.ReadJSON(statusRecord.path(id), &copied); err != nil || copied.State != StateIdleStopped {
-		t.Fatalf("copy after a change = %+v, %v", copied, err)
+	if _, err := os.Stat(statusRecord.path(id)); !os.IsNotExist(err) {
+		t.Fatalf("save wrote retained file: %v", err)
 	}
+
 }
 
-// A status write imports the previous release's file first, so the next
-// change is compared with, and replaces, the old binary's status.
-func TestStatusWriteImportsAnOldBinaryWriteFirst(t *testing.T) {
+// A status write compares only the canonical row and leaves retained files alone.
+func TestStatusWriteIgnoresRetainedFile(t *testing.T) {
 	id := recordTestID(t)
-	if err := saveStatus(Status{SessionID: id, State: StateRunning}); err != nil {
+	current := Status{SessionID: id, State: StateRunning}
+	if err := saveStatus(current); err != nil {
 		t.Fatal(err)
 	}
-	oldBinaryWrites(t, statusRecord.path(id), Status{SessionID: id, State: StateIdleStopped, Reason: "old binary"})
-	// The same status as the old binary's: the import makes it current, so
-	// nothing more is written.
-	if err := saveStatus(Status{SessionID: id, State: StateIdleStopped, Reason: "old binary"}); err != nil {
+	oldBinaryWrites(t, statusRecord.path(id), Status{SessionID: id, State: StateIdleStopped, Reason: "stale"})
+	if err := saveStatus(current); err != nil {
 		t.Fatal(err)
 	}
-	if got := savedStatus(id); got.Reason != "old binary" {
-		t.Fatalf("status = %+v; want the old binary's", got)
+	if got := savedStatus(id); got.State != StateRunning || got.Reason != "" {
+		t.Fatalf("status = %+v", got)
 	}
 }
 
@@ -122,9 +122,6 @@ func TestStatusWriteImportsAnOldBinaryWriteFirst(t *testing.T) {
 func TestDamagedRecordFileKeepsTheRow(t *testing.T) {
 	id := recordTestID(t)
 	if err := saveMeta(Meta{SessionID: id, Room: "row"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(metaRecord.path(id)); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(metaRecord.path(id), []byte("not JSON"), 0o600); err != nil {

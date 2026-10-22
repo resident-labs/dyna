@@ -5,13 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
 	"path/filepath"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
-	"dyna-agent/internal/store"
 )
 
 // One row holds the current snapshot. Updates replace it, so this table
@@ -19,28 +17,16 @@ import (
 const schema = `CREATE TABLE lane_sync (
  id INTEGER PRIMARY KEY CHECK(id=1),
  snapshot BLOB NOT NULL,
- revision INTEGER NOT NULL,
- legacy_version TEXT NOT NULL DEFAULT ''
-);
-INSERT INTO lane_sync(id,snapshot,revision) VALUES(1,'{}',0);`
+ revision INTEGER NOT NULL
+);`
 
-// Migrate prepares lane sync at engine start, then imports sync.json once.
-// Later starts only import a file changed by a binary from before SQLite.
+// Migrate prepares lane sync and imports retained state once.
 func Migrate(dataDir string) error {
-	s := &Service{Dir: dataDir}
-	db, err := s.open()
-	if err != nil {
-		return err
-	}
 	if !database.OwnsSchema() {
-		return fmt.Errorf("only the engine imports lane sync state")
+		return fmt.Errorf("only the engine migrates lane sync state")
 	}
-	unlock, err := store.Lock(s.lockPath())
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	return s.importLegacy(context.Background(), db)
+	_, err := (&Service{Dir: dataDir}).open()
+	return err
 }
 
 func (s *Service) open() (*sql.DB, error) {
@@ -48,31 +34,46 @@ func (s *Service) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The copy's stamp lives in the shared table, which the version 2 step
-	// fills from the old legacy_version column.
 	if err := state.MigrateMirrors(s.Dir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "lanesync.schema", 2, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "lanesync.schema", 3, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, schema); err != nil {
 				return err
 			}
+		} else {
+			// Preserve ownership from releases that kept their stamp on the row.
+			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO state_mirrors(key, version)
+SELECT ?, legacy_version FROM lane_sync WHERE id=1 AND legacy_version != ''`, mirrorKey); err != nil {
+				return err
+			}
 		}
-		// TODO: legacy/shim remove later — moves the stamp that #1484 kept in legacy_version into state_mirrors; remove with the column and the copy, when requirement 31 ends.
-		_, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO state_mirrors(key, version)
-SELECT ?, legacy_version FROM lane_sync WHERE id=1 AND legacy_version != ''`, mirrorKey)
-		return err
+		var count int
+		if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM lane_sync WHERE id=1").Scan(&count); err != nil {
+			return err
+		}
+		// An existing row is canonical, even when its snapshot and revision are empty.
+		if count == 0 {
+			if err := s.importLegacy(ctx, conn); err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO lane_sync(id,snapshot,revision) VALUES(1,'{}',0)"); err != nil {
+				return err
+			}
+		}
+		if old > 0 {
+			_, err := conn.ExecContext(ctx, "ALTER TABLE lane_sync DROP COLUMN legacy_version")
+			return err
+		}
+		return nil
 	})
 	return db, err
 }
 
 // mirrorKey names sync.json in state_mirrors.
 const mirrorKey = "lanesync/state"
-
-// TODO: legacy/shim remove later — shares the previous binary's sync.lock path; remove with requirement 31.
-func (s *Service) lockPath() string { return filepath.Join(s.Dir, "sync.lock") }
 
 // Read reads only SQLite. The rollback copy is never a read fallback.
 func (s *Service) Read() (Snapshot, error) {
@@ -112,21 +113,10 @@ func (s *Service) update(ctx context.Context, fn func(*Snapshot) error) error {
 	if err != nil {
 		return err
 	}
-	// TODO: legacy/shim remove later — the previous binary uses this lock.
-	// Keep rollback copies in commit order across Service instances and keep
-	// old writes out of the copy. Remove with requirement 31.
-	unlock, err := store.Lock(s.lockPath())
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	if err := s.importLegacy(ctx, db); err != nil {
-		return err
-	}
 	var st Snapshot
 	// Room watch still sends sync changes. Its later bus migration will move
 	// that event here; publishing now would send every change twice.
-	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		var raw []byte
 		if err := conn.QueryRowContext(ctx, "SELECT snapshot FROM lane_sync WHERE id=1").Scan(&raw); err != nil {
 			return err
@@ -146,72 +136,30 @@ func (s *Service) update(ctx context.Context, fn func(*Snapshot) error) error {
 		_, err = conn.ExecContext(ctx, "UPDATE lane_sync SET snapshot=?, revision=revision+1 WHERE id=1", raw)
 		return err
 	})
-	if err != nil {
-		return err
-	}
-	if err := s.mirror(ctx, db); err != nil {
-		return fmt.Errorf("lane sync state committed, but rollback copy failed: %w", err)
-	}
-	return nil
 }
 
-// TODO: legacy/shim remove later — sync.json remains a write-only copy for
-// the previous release. That release drops dynaRevision when it writes its
-// typed Snapshot, which identifies its writes. Remove with requirement 31,
-// when no binary from before this release remains.
+// TODO: legacy/shim remove later — imports sync.json only during schema upgrade;
+// remove when all supported data directories have passed lanesync.schema 3.
 type legacySnapshot struct {
 	Snapshot
 	Revision int64 `json:"dynaRevision,omitempty"`
 }
 
-// TODO: legacy/shim remove later — the previous release reads sync.json;
-// remove this path with its rollback copy when requirement 31 ends.
 func (s *Service) path() string { return filepath.Join(s.Dir, "sync.json") }
 
-// TODO: legacy/shim remove later — import old sync.json at engine start or
-// before an update, through state.ImportIfForeign. A copy this code wrote
-// before its stamps moved to state_mirrors carries dynaRevision, so it is
-// stamped without an import. Remove this reader and legacy_version with
-// requirement 31.
-func (s *Service) importLegacy(ctx context.Context, db *sql.DB) error {
-	_, err := state.For(db).ImportIfForeign(ctx, mirrorKey, s.path(), func(conn *sql.Conn, data []byte) error {
-		// A damaged file is skipped once; the row stays.
+func (s *Service) importLegacy(ctx context.Context, conn *sql.Conn) error {
+	_, err := state.ImportMigration(ctx, conn, mirrorKey, s.path(), func(conn *sql.Conn, data []byte) error {
 		var old legacySnapshot
-		if err := json.Unmarshal(data, &old); err != nil {
-			return fmt.Errorf("import lane sync: %v: %w", err, state.ErrSkipForeign)
-		}
-		if old.Revision > 0 {
+		// Preserve the former behavior: damaged JSON does not prevent startup.
+		if json.Unmarshal(data, &old) != nil || old.Revision > 0 {
 			return nil
 		}
 		raw, err := json.Marshal(old.Snapshot)
 		if err != nil {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, "UPDATE lane_sync SET snapshot=?, revision=revision+1 WHERE id=1", raw)
+		_, err = conn.ExecContext(ctx, "INSERT INTO lane_sync(id,snapshot,revision) VALUES(1,?,1)", raw)
 		return err
 	})
 	return err
-}
-
-// TODO: legacy/shim remove later — write the previous release's rollback
-// copy after the SQL commit, from the committed row. New code reads only
-// SQLite. Remove this copy and its embedded revision with requirement 31.
-func (s *Service) mirror(ctx context.Context, db *sql.DB) error {
-	return state.For(db).Mirror(ctx, mirrorKey, s.path(), func(out io.Writer) error {
-		var raw []byte
-		var revision int64
-		if err := db.QueryRowContext(ctx, "SELECT snapshot, revision FROM lane_sync WHERE id=1").Scan(&raw, &revision); err != nil {
-			return err
-		}
-		st, err := decode(raw)
-		if err != nil {
-			return err
-		}
-		data, err := json.MarshalIndent(legacySnapshot{Snapshot: st, Revision: revision}, "", "  ")
-		if err != nil {
-			return err
-		}
-		_, err = out.Write(append(data, '\n'))
-		return err
-	})
 }

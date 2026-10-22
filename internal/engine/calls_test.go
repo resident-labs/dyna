@@ -199,8 +199,8 @@ func TestHookActionsUseRequestPrincipal(t *testing.T) {
 		t.Fatalf("run actor: %+v %v", runs, err)
 	}
 	copies, err := filepath.Glob(filepath.Join(store.DataDir(), "repos", "*", "runs", runs[0].ID+".json"))
-	if err != nil || len(copies) != 1 {
-		t.Fatalf("engine run has no previous-release copy: %v, %v", copies, err)
+	if err != nil || len(copies) != 0 {
+		t.Fatalf("engine run wrote retired receipt copies: %v, %v", copies, err)
 	}
 
 }

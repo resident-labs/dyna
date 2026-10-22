@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -327,26 +326,9 @@ func (s *Service) Resume(key string) error {
 func commentKey(c Comment) string     { return fmt.Sprintf("%s:%d", c.Kind, c.ID) }
 func commentVersion(c Comment) string { return digest(c.Body + c.Updated + c.Submitted + c.State) }
 
-// TODO: legacy/shim remove later — reads the body markers written by Dyna
-// versions before comment-ID routing, so comments on old PRs keep their
-// routing; drop when no tracked PR has marker-era comments left.
-// TODO: legacy/shim remove later — reads pre-#189 session-only PR markers; remove after new writers deploy and no tracked PR retains that format
-var markerPattern = regexp.MustCompile(`<!--\s*dyna:(ses_[A-Za-z0-9_-]+)\s*-->`)
-
-// Marker renders the legacy comment marker. Tests use it to build comments
-// from older Dyna versions.
-func Marker(session string) string { return "<!-- dyna:" + session + " -->" }
-func commentSession(c Comment) string {
-	m := markerPattern.FindStringSubmatch(c.Body)
-	if len(m) > 1 {
-		return m[1]
-	}
-	return ""
-}
-
 // commentOwner resolves the Dyna session that posted a GitHub comment. The
 // comment IDs stored when Dyna posted win, and comments from a known review
-// belong to its reviewer. Legacy body markers still route older comments.
+// belong to its reviewer.
 func commentOwner(owned map[string]string, c Comment) string {
 	if session := owned[commentKey(c)]; session != "" {
 		return session
@@ -356,7 +338,7 @@ func commentOwner(owned map[string]string, c Comment) string {
 			return session
 		}
 	}
-	return commentSession(c)
+	return ""
 }
 
 // claimComment records which session posted a GitHub comment or review, so
@@ -747,7 +729,7 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 		if decision.Action == "drop" && !toReviewer {
 			continue
 		}
-		text := fmt.Sprintf("GitHub %s from %s (comment %s):\n%s\n%s", e.Kind, e.Commenter, e.ID, clip(strings.TrimSpace(markerPattern.ReplaceAllString(e.Text, "")), 4000), commentLink(snap, e.ID))
+		text := fmt.Sprintf("GitHub %s from %s (comment %s):\n%s\n%s", e.Kind, e.Commenter, e.ID, clip(strings.TrimSpace(e.Text), 4000), commentLink(snap, e.ID))
 		if decision.Action != "drop" {
 			n.add(r.Author, text)
 		}
@@ -1145,7 +1127,7 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 		if verdict == "changes" {
 			for _, c := range snap.Comments {
 				if commentOwner(st.CommentSessions, c) == actor && (c.Commit == "" || c.Commit == head) && c.State != "PENDING" && r.Seen[commentKey(c)] != commentVersion(c) {
-					text += "\n\n" + clip(markerPattern.ReplaceAllString(c.Body, ""), 4000) + "\n" + c.URL
+					text += "\n\n" + clip(c.Body, 4000) + "\n" + c.URL
 					r.Seen[commentKey(c)] = commentVersion(c)
 				}
 			}

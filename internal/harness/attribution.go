@@ -30,10 +30,7 @@ import (
 // claudeAttributionSettings is the --settings layer that hides Claude Code's
 // commit and pull request attribution. An empty string hides that attribution;
 // the object form is used because older builds reject "attribution": false.
-// TODO: legacy/shim remove later — includeCoAuthoredBy is the deprecated key
-// that covers Claude Code builds older than the attribution object; drop it
-// when every supported Claude Code build understands attribution.
-const claudeAttributionSettings = `{"includeCoAuthoredBy":false,"attribution":{"commit":"","pr":"","sessionUrl":false,"commitTrailers":false}}`
+const claudeAttributionSettings = `{"attribution":{"commit":"","pr":"","sessionUrl":false,"commitTrailers":false}}`
 
 // claudeArgsWithoutAttribution returns args with one final --settings layer
 // that turns attribution off. A profile --settings file or JSON object merges

@@ -917,10 +917,8 @@ func Sanitize(s string) string {
 	return s
 }
 
-// publicationBody keeps published text sanitized and free of old routing markers.
+// publicationBody keeps published text sanitized.
 func publicationBody(body string) string {
-	// TODO: legacy/shim remove later — strip markers from old bodies until callers no longer submit them.
-	body = markerPattern.ReplaceAllString(body, "")
 	return Sanitize(strings.TrimSpace(body))
 }
 

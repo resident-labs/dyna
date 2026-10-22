@@ -104,3 +104,25 @@ func TestComputersUnitIsRefused(t *testing.T) {
 		}
 	}
 }
+
+type exitedConnPeer struct{ closed bool }
+
+func (*exitedConnPeer) PID() int       { return 300 }
+func (*exitedConnPeer) Pinned() bool   { return true }
+func (*exitedConnPeer) Alive() bool    { return false }
+func (p *exitedConnPeer) Close() error { p.closed = true; return nil }
+
+func TestResolveConnRefusesExitedUnreapedPeer(t *testing.T) {
+	r, proc := newResolver(t, engineCG)
+	proc.add(300, 1, 30, turnCG)
+	peer := &exitedConnPeer{}
+	original := resolveConnPeer
+	resolveConnPeer = func(net.Conn) (connPeer, error) { return peer, nil }
+	t.Cleanup(func() { resolveConnPeer = original })
+	if got := r.ResolveConn(nil); got.Kind != Refused {
+		t.Errorf("exited unreaped peer = %+v, want refused", got)
+	}
+	if !peer.closed {
+		t.Fatal("peer handle was not closed")
+	}
+}

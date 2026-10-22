@@ -98,14 +98,13 @@ func TestPreferenceImportClaudeSafeAndImmutable(t *testing.T) {
 	if len(values) != 5 || values["language"] != "English" {
 		t.Fatal(values)
 	}
-	metadata := filepath.Join(filepath.Dir(r.Config.Path), "harness-preferences.json")
-	var refs map[string]preferences.Ref
-	if err := store.ReadJSON(metadata, &refs); err != nil {
-		t.Fatal(err)
+	ref, ok, err := preferences.For(a.ID)
+	if err != nil || !ok {
+		t.Fatalf("reference = %+v, %v, %v", ref, ok, err)
 	}
-	old := refs[a.ID].Settings
+	old := ref.Settings
 	raw, _ := os.ReadFile(old)
-	for path, mode := range map[string]os.FileMode{old: 0600, filepath.Dir(old): 0700, filepath.Dir(filepath.Dir(old)): 0700, metadata: 0600} {
+	for path, mode := range map[string]os.FileMode{old: 0600, filepath.Dir(old): 0700, filepath.Dir(filepath.Dir(old)): 0700} {
 		info, err := os.Stat(path)
 		if err != nil || info.Mode().Perm() != mode {
 			t.Fatalf("mode %s: %v", path, err)
@@ -119,9 +118,11 @@ func TestPreferenceImportClaudeSafeAndImmutable(t *testing.T) {
 	if err := r.ImportPreferences(a.ID, p2.Hash); err != nil {
 		t.Fatal(err)
 	}
-	refs = nil
-	_ = store.ReadJSON(metadata, &refs)
-	if refs[a.ID].Settings == old {
+	ref, _, err = preferences.For(a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ref.Settings == old {
 		t.Fatal("reimport reused layer")
 	}
 	oldRaw, _ := os.ReadFile(old)
@@ -140,7 +141,7 @@ func TestPreferenceImportClaudeSafeAndImmutable(t *testing.T) {
 	if before.Mode().Perm() != 0600 {
 		t.Fatal("fixture mode")
 	}
-	metaRaw, _ := os.ReadFile(metadata)
+	metaRaw, _ := json.Marshal(ref)
 	if strings.Contains(string(metaRaw), "French") || strings.Contains(string(metaRaw), "secret-value") {
 		t.Fatal("metadata contains values")
 	}
@@ -283,19 +284,18 @@ func TestPreferenceValuesRevalidateAndConfineReference(t *testing.T) {
 	if err := r.ImportPreferences(a.ID, p.Hash); err != nil {
 		t.Fatal(err)
 	}
-	metadata := filepath.Join(filepath.Dir(r.Config.Path), "harness-preferences.json")
-	var refs map[string]preferences.Ref
-	_ = store.ReadJSON(metadata, &refs)
-	if err := store.WriteJSON(refs[a.ID].Settings, map[string]any{"language": "~/private"}, 0600); err != nil {
+	ref, ok, err := preferences.For(a.ID)
+	if err != nil || !ok {
+		t.Fatalf("reference = %+v, %v, %v", ref, ok, err)
+	}
+	if err := store.WriteJSON(ref.Settings, map[string]any{"language": "~/private"}, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.PreferenceValues(a.ID); err == nil {
 		t.Fatal("unsafe stored preference accepted")
 	}
-	ref := refs[a.ID]
 	ref.Settings = filepath.Join(home, ".claude/settings.json")
-	refs[a.ID] = ref
-	if err := store.WriteJSON(metadata, refs, 0600); err != nil {
+	if err := preferences.Save(a.ID, ref); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.PreferenceValues(a.ID); err == nil {

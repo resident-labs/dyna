@@ -2,8 +2,11 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -11,6 +14,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
+	appstate "dyna-agent/internal/state"
 )
 
 func bigState(n int) State {
@@ -297,5 +304,151 @@ func TestFailedCommitLeavesDurableStateForReadAndRetry(t *testing.T) {
 	forgetSnapshot()
 	if got, err = Read(root); err != nil || got.Records[key].Title != "lost" {
 		t.Fatalf("retry skipped the change: %q, %v", got.Records[key].Title, err)
+	}
+}
+
+func TestPRImportPreservesRawDocumentsAndCanonicalOwnership(t *testing.T) {
+	for _, version := range []int{1, 2, 3} {
+		t.Run(fmt.Sprintf("layout-%d", version), func(t *testing.T) {
+			root := newRoot(t)
+			t.Cleanup(func() {
+				if err := database.Close(filepath.Dir(root)); err != nil {
+					t.Error(err)
+				}
+			})
+			record := json.RawMessage(`{"key":"p","roomId":"room","repo":"acme/widgets","number":7,"state":"open","futureRecord":6}`)
+			responses := json.RawMessage(`{"pull":{"etag":"tag","body":{"title":"cached","futureBody":9},"futureResponse":8}}`)
+			index := map[string]any{"version": version, "futureIndex": 5, "mergePauses": map[string]string{"room": "saved"},
+				"rateLimits": map[string]any{"github.com\nocto\ncore": map[string]any{"remaining": 12, "futureQuota": 10, "pauseScope": map[string]any{"host": "github.com", "account": "octo", "resource": "core", "futureScope": 11}}},
+				"rateLimit":  map[string]any{"pauseUntil": "2030-01-01T00:00:00Z", "reason": "saved pause", "pauseScope": map[string]string{"host": "github.com", "account": "legacy", "resource": "core"}},
+			}
+			files := map[string][]byte{}
+			put := func(name string, value any) {
+				body, err := json.Marshal(value)
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(root, name)
+				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, body, 0600); err != nil {
+					t.Fatal(err)
+				}
+				files[path] = body
+			}
+			if version == 1 {
+				index["records"] = map[string]json.RawMessage{"p": record}
+				index["httpResponses"] = map[string]json.RawMessage{"p": responses}
+				put("state.json", index)
+			} else {
+				index["recordFiles"] = map[string]string{"p": "p.json"}
+				if version == 3 {
+					index["recordFiles"] = map[string]string{}
+					index["closedIndex"] = "archive.json"
+					put("closed/archive.json", map[string]string{"p": "p.json"})
+				}
+				put("records/p.json", map[string]any{"record": record, "responses": responses, "futureEnvelope": 7})
+				put("index.json", index)
+			}
+			if err := Migrate(filepath.Dir(root)); err != nil {
+				t.Fatal(err)
+			}
+			st, err := Read(root)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if st.Records["p"] == nil || st.Records["p"].Number != 7 || st.MergePauses["room"] != "saved" {
+				t.Fatalf("known state: %+v", st)
+			}
+			response := st.Responses["p"]["pull"]
+			if response.ETag != "tag" || !bytes.Contains(response.Body, []byte(`"futureBody":9`)) {
+				t.Fatalf("cached response: %+v", response)
+			}
+			if st.RateLimits["github.com\nlegacy\ncore"].Reason != "saved pause" {
+				t.Fatalf("mixed quota: %+v", st.RateLimits)
+			}
+			db := mustOpen(t, root)
+			var body []byte
+			if err := db.QueryRow("SELECT body FROM pr_state").Scan(&body); err != nil {
+				t.Fatal(err)
+			}
+			var rawIndex map[string]json.RawMessage
+			if err := json.Unmarshal(body, &rawIndex); err != nil {
+				t.Fatal(err)
+			}
+			var quotas map[string]map[string]json.RawMessage
+			if err := json.Unmarshal(rawIndex["rateLimits"], &quotas); err != nil {
+				t.Fatal(err)
+			}
+			if string(rawIndex["futureIndex"]) != "5" || string(quotas["github.com\nocto\ncore"]["futureQuota"]) != "10" || !bytes.Contains(quotas["github.com\nocto\ncore"]["pauseScope"], []byte(`"futureScope":11`)) {
+				t.Fatalf("unknown index fields: %s", body)
+			}
+			var recordField, responseField, bodyField int
+			if err := db.QueryRow(`SELECT json_extract(body,'$.record.futureRecord'),json_extract(body,'$.responses.pull.futureResponse'),json_extract(body,'$.responses.pull.body.futureBody') FROM pr_records WHERE key='p'`).Scan(&recordField, &responseField, &bodyField); err != nil || recordField != 6 || responseField != 8 || bodyField != 9 {
+				t.Fatalf("unknown record fields: %d,%d,%d, %v", recordField, responseField, bodyField, err)
+			}
+			if version != 1 {
+				var envelope int
+				if err := db.QueryRow(`SELECT json_extract(body,'$.futureEnvelope') FROM pr_records WHERE key='p'`).Scan(&envelope); err != nil || envelope != 7 {
+					t.Fatalf("unknown envelope: %d, %v", envelope, err)
+				}
+			}
+			for path, want := range files {
+				if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, want) {
+					t.Errorf("source changed: %s, %v", path, err)
+				}
+			}
+		})
+	}
+	for _, table := range []string{"pr_state", "pr_records"} {
+		t.Run(table, func(t *testing.T) {
+			root := newRoot(t)
+			db, err := database.Open(filepath.Dir(root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := database.Close(filepath.Dir(root)); err != nil {
+					t.Error(err)
+				}
+			})
+			err = appstate.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+				if _, err := conn.ExecContext(context.Background(), schema); err != nil {
+					return err
+				}
+				if table == "pr_state" {
+					_, err = conn.ExecContext(context.Background(), `INSERT INTO pr_state VALUES(1,17,'{"version":1,"future":42}')`)
+				} else {
+					_, err = conn.ExecContext(context.Background(), `INSERT INTO pr_records VALUES('saved','room','acme/widgets',7,0,17,'{"record":{"number":7},"future":42}')`)
+				}
+				return err
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := []byte("{malformed stale input")
+			path := filepath.Join(root, "index.json")
+			if err := os.WriteFile(path, source, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := Migrate(filepath.Dir(root)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Read(root); err != nil {
+				t.Fatal(err)
+			}
+			var revision, future int
+			column := "revision"
+			if table == "pr_records" {
+				column = "rev"
+			}
+			if err := db.QueryRow("SELECT "+column+",json_extract(body,'$.future') FROM "+table).Scan(&revision, &future); err != nil || revision != 17 || future != 42 {
+				t.Fatalf("canonical state: revision=%d future=%d, %v", revision, future, err)
+			}
+			if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, source) {
+				t.Fatalf("source changed: %q, %v", got, err)
+			}
+		})
 	}
 }
