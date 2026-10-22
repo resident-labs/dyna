@@ -222,6 +222,42 @@ Noise-only polls do not wake anyone. Their counts carry forward to the next
 wake, so quiet filtering remains visible. Counts and kept comments appear
 before the collapsible log tail.
 
+## Registered CI nodes
+
+Dyna can run CI on this machine or registered SSH machines. Nodes are separate
+from GitHub runners. The engine gives merge trials priority, then takes PR
+heads in oldest-first order. It cancels work for superseded heads and never
+runs fork PRs on these machines.
+
+```sh
+dyna git ci node add local --slots 1
+dyna git ci node add omarchy --ssh ari@omarchy --slots 2
+dyna git ci node add hermeslab --ssh pip@hermeslab --jump ari@omarchy --slots 2
+dyna git ci node list
+dyna git ci mode local
+dyna git ci node disable omarchy
+dyna git ci node rm omarchy
+```
+
+The mode applies to the current room. The default, `github`, keeps hosted CI.
+`local` and `both` let local and GitHub results race. A conclusive pass permits
+progress, but an observed failure from either source blocks it. No enabled
+nodes means GitHub remains the source. Review approval remains required.
+
+When a node starts a PR head or merge trial, Dyna cancels that head's hosted
+runs that are still queued or waiting. Running jobs finish. An infrastructure
+error makes Dyna rerun those cancelled runs. A test
+failure remains a failure. Dyna never cancels main pushes or fork PR runs.
+The GitHub workflow stays unchanged and always checks landed code on main.
+
+Each node limits concurrent checks with its slot count. Local work runs with
+systemd CPU and memory limits and a lower process priority. Containers also
+limit CPU, memory, and process counts. Nodes reuse Go and package caches.
+Results and node settings live in SQLite; report files remain on disk.
+Dyna publishes named commit statuses, including `go-test`, using the room's
+GitHub credentials. The PR Checks tab and `dyna git merge status` show nodes.
+Use `dyna git ci show <sha> --json` for saved results and durations.
+
 ## Host watcher and stored state
 
 The engine runs PR watching, goal keeping, and question delivery in one worker
