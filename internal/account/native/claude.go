@@ -162,20 +162,6 @@ func (m *claudeManager) paths(root string) (claudePaths, error) {
 		}
 		p.config = filepath.Join(configRoot, ".claude.json")
 	}
-	// The shipped program selects a populated legacy config before .claude.json.
-	// TODO: legacy/shim remove later — reads the old Claude .config.json location; remove after supported Claude versions and stored configs use .claude.json
-	legacy := filepath.Join(p.dir, ".config.json")
-	if st, e := os.Lstat(legacy); e == nil {
-		if !st.Mode().IsRegular() {
-			return p, ErrUnsupported
-		}
-		_, modernErr := os.Lstat(p.config)
-		if st.Size() > 0 || st.Mode().Perm()&0222 != 0 && os.IsNotExist(modernErr) {
-			p.config = legacy
-		}
-	} else if !os.IsNotExist(e) {
-		return p, claudeFileError()
-	}
 	p.credentials = filepath.Join(p.secretDir, ".credentials.json")
 	return p, nil
 }
