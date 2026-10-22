@@ -402,3 +402,14 @@ test('an identical row with non-serializable view data needs no field comparison
  const previous=[row]
  assert.equal(reconcileRows(previous,[row]),previous)
 })
+
+test('PR and agent badges receive goal updates with the members panel closed', async () => {
+  const state = { room: 'a', visit: 1, view: 'github', drill: null, memberChips: false, sidebarChips: false }
+  const gate = createReloadGate(() => state, (name) => listVisible(name, state))
+  const updated = []
+  for (const patch of [{ view: 'github' }, { view: 'files', drill: { id: 'worker' } }, { drill: null, sidebarChips: true }]) {
+    Object.assign(state, patch)
+    await gate.patch('goals', (current) => { if (current()) updated.push(state.view) })
+  }
+  assert.deepEqual(updated, ['github', 'files', 'files'])
+})

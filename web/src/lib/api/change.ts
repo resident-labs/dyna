@@ -47,6 +47,7 @@ export interface ChangeView {
   checks: CheckSummary[] | null
   hasPolicyOverride?: boolean
   changeId?: string
+  goalId?: string // the goal this change belongs to; omitted when none
   kind?: string
   branch?: string
   baseRef?: string
