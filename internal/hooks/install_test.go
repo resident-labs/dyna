@@ -105,15 +105,15 @@ func TestMainMovedAliasReadsAndEmitsCanonicalEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(s.dir(r.ID), "hooks.json")
-	b, err := os.ReadFile(path)
+	db, err := s.documentsDB()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Simulate a document written by the first hooks release.
-	if err = os.WriteFile(path, []byte(strings.ReplaceAll(string(b), MainUpdated, MainMoved)), 0600); err != nil {
+	// Simulate an imported document written by the first hooks release.
+	if _, err := db.Exec("UPDATE hook_documents SET body=replace(CAST(body AS TEXT),?,?) WHERE repo=?", MainUpdated, MainMoved, filepath.Base(s.dir(r.ID))); err != nil {
 		t.Fatal(err)
 	}
+
 	hs, err := s.List(ctx, repo)
 	if err != nil || len(hs) != 1 || hs[0].Event != MainUpdated {
 		t.Fatalf("alias: %#v %v", hs, err)
