@@ -28,10 +28,10 @@ function feed(ducker: Ducker, frames: Float32Array[]): number {
   return t
 }
 
-test('the owner speaking ducks Voice by 10 dB within one frame, as ChatGPT does', () => {
+test('sustained speech above the noise floor ducks Voice by 10 dB', () => {
   const gain = fakeGain()
   const ducker = createDucker(gain)
-  feed(ducker, [quiet, speech])
+  feed(ducker, [quiet, speech, speech, speech, speech])
   assert.ok(Math.abs(DUCKED - 10 ** (-10 / 20)) < 1e-9)
   assert.deepEqual(gain.calls.find((c) => c[0] === 'target')?.slice(0, 2), ['target', DUCKED])
 })
@@ -49,13 +49,13 @@ test('after 800 ms of quiet Voice comes back: a 300 ms hold, then a 1 s ramp to 
   const gain = fakeGain()
   const ducker = createDucker(gain)
   // 1 s of speech, then 1 s of quiet.
-  const t = feed(ducker, [...new Array<Float32Array>(25).fill(speech), ...new Array<Float32Array>(25).fill(quiet)])
-  assert.ok(Math.abs(t - 2) < 1e-9)
+  const t = feed(ducker, [quiet, ...new Array<Float32Array>(25).fill(speech), ...new Array<Float32Array>(25).fill(quiet)])
+  assert.ok(Math.abs(t - 2.04) < 1e-9)
   const set = gain.calls.find((c) => c[0] === 'set')
   const ramp = gain.calls.find((c) => c[0] === 'ramp')
   assert.ok(set && ramp, 'restored')
-  // Quiet began at 1 s; release ends at 1.8 s; the hold ends at 2.1 s.
-  assert.ok(Math.abs((set[2] ?? NaN) - 2.1) < 0.05, `hold ends at ${set[2]}`)
+  // Quiet began at 1.04 s; release ends at 1.84 s; the hold ends at 2.14 s.
+  assert.ok(Math.abs((set[2] ?? NaN) - 2.14) < 0.05, `hold ends at ${set[2]}`)
   assert.ok(Math.abs((ramp[2] ?? NaN) - (set[2] ?? NaN) - 1) < 1e-9)
   assert.equal(ramp[1], 1)
 })
@@ -63,25 +63,25 @@ test('after 800 ms of quiet Voice comes back: a 300 ms hold, then a 1 s ramp to 
 test('a short burst stays ducked for at least 750 ms', () => {
   const gain = fakeGain()
   const ducker = createDucker(gain)
-  feed(ducker, [speech, ...new Array<Float32Array>(30).fill(quiet)])
+  feed(ducker, [quiet, speech, speech, speech, speech, ...new Array<Float32Array>(30).fill(quiet)])
   const set = gain.calls.find((c) => c[0] === 'set')
   assert.ok(set)
   assert.ok((set[2] ?? NaN) >= 0.04 + 0.75 - 1e-9)
 })
 
-test('speech during the restore ducks again at once', () => {
+test('sustained speech during the restore ducks again', () => {
   const gain = fakeGain()
   const ducker = createDucker(gain)
-  const t = feed(ducker, [speech, ...new Array<Float32Array>(25).fill(quiet)])
+  const t = feed(ducker, [quiet, speech, speech, speech, speech, ...new Array<Float32Array>(25).fill(quiet)])
   gain.calls.length = 0
-  ducker.hear(speech, RATE, t + 0.04)
+  ducker.hear(new Float32Array(160).fill(0.1), RATE, t + 0.16)
   assert.deepEqual(gain.calls.map((c) => c[0]), ['cancel', 'target'])
 })
 
 test('reset brings Voice back to full at once', () => {
   const gain = fakeGain()
   const ducker = createDucker(gain)
-  feed(ducker, [speech])
+  feed(ducker, [quiet, speech, speech, speech, speech])
   gain.calls.length = 0
   ducker.reset(5)
   assert.deepEqual(gain.calls, [['cancel', 5], ['set', 1, 5]])

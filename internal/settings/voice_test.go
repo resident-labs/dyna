@@ -8,10 +8,10 @@ import (
 func TestVoiceSettingsDefaultSetSaveAndLoad(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
 	v, err := Load(path)
-	if err != nil || v.VoiceProvider != "openai" || v.VoiceURL != "" {
+	if err != nil || v.VoiceProvider != "openai" || v.VoiceURL != "" || v.VoiceDucking {
 		t.Fatalf("defaults = %q %q, %v", v.VoiceProvider, v.VoiceURL, err)
 	}
-	for key, value := range map[string]string{KeyVoiceProvider: "speech-to-speech", KeyVoiceModel: "m1", KeyVoiceURL: "ws://box:8000/v1/realtime"} {
+	for key, value := range map[string]string{KeyVoiceDucking: "true", KeyVoiceProvider: "speech-to-speech", KeyVoiceModel: "m1", KeyVoiceURL: "ws://box:8000/v1/realtime"} {
 		if err := v.Set(key, value); err != nil {
 			t.Fatal(key, err)
 		}
@@ -20,10 +20,10 @@ func TestVoiceSettingsDefaultSetSaveAndLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := Load(path)
-	if err != nil || got.VoiceProvider != "speech-to-speech" || got.VoiceModel != "m1" || got.VoiceURL != "ws://box:8000/v1/realtime" || got.Source(KeyVoiceProvider) != SourceFile {
+	if err != nil || !got.VoiceDucking || got.VoiceProvider != "speech-to-speech" || got.VoiceModel != "m1" || got.VoiceURL != "ws://box:8000/v1/realtime" || got.Source(KeyVoiceProvider) != SourceFile {
 		t.Fatalf("loaded %q %q, %v", got.VoiceProvider, got.VoiceURL, err)
 	}
-	for key, bad := range map[string]string{KeyVoiceProvider: "qwen", KeyVoiceURL: "http://box:8000"} {
+	for key, bad := range map[string]string{KeyVoiceDucking: "maybe", KeyVoiceProvider: "qwen", KeyVoiceURL: "http://box:8000"} {
 		if err := v.Set(key, bad); err == nil {
 			t.Errorf("%s accepted %q", key, bad)
 		}

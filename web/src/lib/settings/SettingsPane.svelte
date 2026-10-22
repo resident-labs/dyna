@@ -25,6 +25,7 @@
   let drafts = $state<Record<string, string | undefined>>({}) // key -> text being typed
 
   const titles: Record<string, string> = {
+    'voice.ducking': 'Lower Voice while I talk',
     'browser.path': 'Chromium path',
     'browser.extraFlags': 'Extra flags',
     'browser.useFlagsFile': 'Use my chromium-flags.conf',
@@ -42,6 +43,7 @@
     'steering.maxToolWait': 'Interrupt a busy tool after',
   }
   const groups = [
+    { title: 'Voice', keys: ['voice.ducking'] },
     { title: 'Browser', keys: ['browser.path', 'browser.extraFlags', 'browser.useFlagsFile', 'browser.profileMode', 'browser.ownerProfile', 'browser.saveBack'] },
     { title: 'Cards and files', keys: ['content.maxCardBytes', 'content.maxFileBytes'] },
     { title: 'Sessions', keys: ['root.profile', 'subagent.maxDepth', 'steering.maxToolWait'] },

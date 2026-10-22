@@ -91,9 +91,11 @@ type Values struct {
 	VoiceProvider string
 	VoiceModel    string
 	VoiceURL      string
-	Extra         map[string]any
-	path          string
-	fromFile      map[string]bool
+	// VoiceDucking optionally lowers playback while the owner speaks.
+	VoiceDucking bool
+	Extra        map[string]any
+	path         string
+	fromFile     map[string]bool
 }
 
 func DefaultPath() string {
@@ -388,7 +390,7 @@ func (v *Values) Set(key, value string) error {
 		v.fromFile[key] = true
 	case KeyGoalKeeperTimeout, KeyGoalKeeperProfile:
 		return v.setGoal(key, value)
-	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL:
+	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking:
 		return v.setVoice(key, value)
 	case KeyLibraryEnabled, KeyLibraryProfile, KeyLibraryReadmeMaxLines:
 		return v.setLibrary(key, value)

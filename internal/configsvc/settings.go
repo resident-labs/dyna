@@ -34,6 +34,7 @@ type Item struct {
 }
 
 var help = map[string]string{
+	settings.KeyVoiceDucking:          "Lower Voice by 10 dB after sustained speech above the microphone noise floor. Off by default. Applies to the next call; server speech detection still controls interruption.",
 	settings.KeyVoiceProvider:         "The realtime voice provider for the next call: openai (the Codex sign-in), speech-to-speech (a self-hosted server), dashscope (Alibaba Cloud, with DASHSCOPE_API_KEY) google-live (Gemini Live, with GOOGLE_API_KEY or GEMINI_API_KEY) doubao-seeduplex (Volcengine, with DOUBAO_API_KEY) stepfun (StepFun, with STEPFUN_API_KEY) or minicpm-o (a self-hosted MiniCPM-o server at voice.url; it cannot use tools, so Voice cannot dispatch work on it).",
 	settings.KeyVoiceModel:            "The voice provider's model, such as qwen3.5-omni-plus-realtime for dashscope. Empty uses the provider's default.",
 	settings.KeyVoiceURL:              "The voice provider's WebSocket address. Required for speech-to-speech, such as ws://host:8000/v1/realtime; for dashscope it overrides the public endpoint, as a Model Studio workspace model needs.",
@@ -89,6 +90,7 @@ func Items() ([]Item, error) {
 	stewardOptions = slices.Insert(stewardOptions, 1, settings.StewardProfileOff)
 	stewardLabels = slices.Insert(stewardLabels, 1, "Off · failed batches go to root")
 	items := []Item{
+		{Key: settings.KeyVoiceDucking, Value: v.VoiceDucking, Source: v.Source(settings.KeyVoiceDucking), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeyLocalLaneRepos, Value: v.LocalLaneRepos, Source: v.Source(settings.KeyLocalLaneRepos), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of absolute repository paths using the local lane. Fetches every five minutes."},
 		{Key: settings.KeyComputersEnabled, Value: v.ComputersEnabled, Source: v.Source(settings.KeyComputersEnabled), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeyGoalKeeperTimeout, Value: v.GoalKeeperTimeout.String(), Source: v.Source(settings.KeyGoalKeeperTimeout), LiveVsRestart: settings.LiveNextOperation, Kind: "duration"},
