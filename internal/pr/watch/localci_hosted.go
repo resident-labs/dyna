@@ -20,7 +20,7 @@ func localStatusNode(s Status) string {
 	return strings.TrimPrefix(s.Description, localStatusPrefix)
 }
 func queuedHostedRun(run Run) bool {
-	return run.Status == "queued" || run.Status == "waiting" || run.Status == "pending" || run.Status == "requested"
+	return run.Status == "queued" || run.Status == "waiting"
 }
 func hostedRunMatches(job registeredCIJob, run Run) bool {
 	if run.HeadSHA != job.head || run.HeadBranch != job.branch {

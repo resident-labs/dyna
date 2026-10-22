@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"reflect"
 	"strings"
@@ -24,6 +25,10 @@ func TestRegisteredCIRaceDoesNotHideFailuresOrBlockHostedRecovery(t *testing.T) 
 		if got.Status != tc.want {
 			t.Fatalf("hosted %s/local %s = %s, want %s", tc.hosted, tc.local, got.Status, tc.want)
 		}
+	}
+	pending := Snapshot{Checks: []Check{actionsCheck(Check{Name: "go-static", Status: "completed", Conclusion: "failure"}), actionsCheck(Check{Name: "go-test", Status: "in_progress"})}}
+	if ci, _, _, _ := (&Service{}).registeredHostedStatus(pending, Record{}, ChangePolicy{}); ci != "failed" {
+		t.Fatalf("pending hosted job hid current failure: %s", ci)
 	}
 	// A successful replacement hosted attempt clears its earlier failure.
 	failed := chooseRegisteredCI("head", "failed", "attempt-1", nil, nil, "pending", nil, "")
@@ -120,6 +125,8 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 		makeRun(3, "queued", "push", "main", head),
 		makeRun(4, "queued", "pull_request", "feature", strings.Repeat("b", 40)),
 		makeRun(5, "queued", "pull_request", "feature", head),
+		makeRun(6, "pending", "pull_request", "feature", head),
+		makeRun(7, "requested", "pull_request", "feature", head),
 	}
 	registry := &hostedCIRegistry{}
 	var cancelled, rerun []int64
@@ -201,5 +208,33 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 	snap = withoutLocalHostedCancellations(Snapshot{Runs: []Run{cancelledRun}}, registry.hosted)
 	if ci, _, _, _ := snap.CIStatus(); ci != "failed" {
 		t.Fatalf("new hosted attempt failure hidden: %s", ci)
+	}
+}
+
+type occupiedCIRegistry struct{ hostedCIRegistry }
+
+func (r *occupiedCIRegistry) Nodes(context.Context) ([]localci.Node, error) {
+	return []localci.Node{{Name: "node", Slots: 1, Enabled: true}}, nil
+}
+func (r *occupiedCIRegistry) Mode(context.Context, string) (string, error) {
+	return localci.ModeLocal, nil
+}
+func (r *occupiedCIRegistry) LoadResult(context.Context, string, string) (localci.Result, error) {
+	return localci.Result{}, os.ErrNotExist
+}
+func TestRegisteredCICancellationKeepsSlotUntilExecutionStops(t *testing.T) {
+	repo := t.TempDir()
+	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
+		t.Fatalf("init repository: %v: %s", err, raw)
+	}
+	r := &Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: strings.Repeat("a", 40), Branch: "feature", RepoPath: repo, Watching: true, State: "open"}
+	cancelled := 0
+	old := &registeredCIRun{node: "node", cancel: func() { cancelled++ }}
+	s := &Service{LocalCIRegistry: &occupiedCIRegistry{}, registeredRuns: &registeredCIRuns{runs: map[string]*registeredCIRun{"old-head": old}}}
+	if err := s.scheduleRegisteredCI(context.Background(), State{Records: map[string]*Record{r.Key: r}}); err != nil {
+		t.Fatal(err)
+	}
+	if cancelled != 1 || len(s.registeredRuns.runs) != 1 || s.registeredRuns.runs["old-head"] != old {
+		t.Fatalf("cancellation freed a live slot: cancelled=%d runs=%v", cancelled, s.registeredRuns.runs)
 	}
 }

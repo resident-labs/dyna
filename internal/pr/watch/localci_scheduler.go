@@ -160,7 +160,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	for key, run := range runs.runs {
 		if _, ok := desired[key]; !ok {
 			run.cancel()
-			delete(runs.runs, key)
+			active[run.node]++
 			continue
 		}
 		found := false
@@ -171,7 +171,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		}
 		if !found {
 			run.cancel()
-			delete(runs.runs, key)
+			active[run.node]++
 			continue
 		}
 		active[run.node]++
@@ -187,6 +187,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		}
 		result, err := registry.LoadResult(ctx, repo, job.head)
 		if err == nil && s.registeredJobResultComplete(ctx, job, result) {
+			applyLocalBudgets(&result, EffectivePolicy(st, job.record))
 			if localInfrastructureError(result) {
 				if err := s.resumeHostedCI(ctx, job, repo); err != nil {
 					return err
@@ -250,7 +251,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 	suites, err := s.prepareRegisteredCI(ctx, job)
 	result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: node.Name, Started: s.now(), Status: "error"}
 	if err == nil && len(suites) > 0 {
-		req := localci.Request{Repo: job.record.RepoPath, SHA: job.head, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed}
+		req := localci.Request{Repo: job.record.RepoPath, SHA: job.head, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true}
 		req.OnStart = func(startCtx context.Context) error {
 			if err := s.cancelQueuedHostedCI(startCtx, job, repo); err != nil {
 				log.Printf("cancel queued hosted CI: %v", err)
