@@ -40,7 +40,7 @@ interface App {
 const closed: Member = { id: 'one', name: 'worker', closed: true, resumable: true }
 function app(reopen: (room: string, id: string) => unknown) {
   const calls: string[] = []
-  const c: App = { loadComputers() {}, soonRooms() {}, hierarchy: [], reconcileRows, isFinished, api: { reopenSession: reopen }, reopening: '', dismissing: '', roomId: 'a', roomRequest: 1, sessionVisit: 1, drill: closed, session: { member: closed, turns: [1] }, members: [], feed: null, loadSession: async () => calls.push('transcript'), loadMembers: async () => calls.push('members'), say: (text: string) => calls.push(text) }
+  const c: App = { loadComputers() {}, soonRooms() {}, expediteItems: () => [], hierarchy: [], reconcileRows, isFinished, api: { reopenSession: reopen }, reopening: '', dismissing: '', roomId: 'a', roomRequest: 1, sessionVisit: 1, drill: closed, session: { member: closed, turns: [1] }, members: [], feed: null, loadSession: async () => calls.push('transcript'), loadMembers: async () => calls.push('members'), say: (text: string) => calls.push(text) }
   c.routedParents ??= ''; c.selectableSession = selectableSession
   runFunctions(source, names, c)
   return { c, calls }
