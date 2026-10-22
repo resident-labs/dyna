@@ -33,6 +33,7 @@ func defaultSignal(sig syscall.Signal) error {
 // provides crash notification; kernel process inspection provides drain proof.
 func becomeSubreaper() error { return nil }
 func reapOrphans(int)        {}
+func reapGroup(int)          {} // Adopted grandchildren belong to the system reaper.
 func processBirth(pid int) (string, error) {
 	p, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 	if err != nil {
