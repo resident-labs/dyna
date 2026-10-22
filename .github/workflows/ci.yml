@@ -357,11 +357,37 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
+      # A slow mirror once left apt-get update hanging until the job timeout and
+      # failed a whole merge batch. Every network install below is bounded and
+      # shares one deadline, so a stuck download fails this step in about three
+      # minutes instead of holding the runner.
       - name: Install GUI tools
+        shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq labwc xwayland sqlite3 >/dev/null
-          npm install -g agent-browser
+          set -euo pipefail
+          deadline=$((SECONDS + 200))
+          apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
+          # bounded <cap-seconds> <command...> never runs past the deadline.
+          bounded() {
+            local cap=$1 left
+            shift
+            left=$((deadline - SECONDS))
+            if [ "$left" -le 0 ]; then
+              echo "install budget exhausted before: $*" >&2
+              return 1
+            fi
+            [ "$cap" -lt "$left" ] && left=$cap
+            timeout --kill-after=5 "$left" "$@"
+          }
+          # retry <cap-seconds> <command...> retries once, inside the deadline.
+          retry() {
+            local cap=$1
+            shift
+            bounded "$cap" "$@" || { echo "retrying: $*" >&2; bounded "$cap" "$@"; }
+          }
+          retry 45 sudo apt-get "${apt_opts[@]}" update -qq
+          retry 70 sudo apt-get "${apt_opts[@]}" install -y -qq --no-install-recommends labwc xwayland sqlite3 >/dev/null
+          bounded 60 npm install -g agent-browser
           sudo loginctl enable-linger "$USER"
       - name: Live computer and cleanup tests
         shell: bash
