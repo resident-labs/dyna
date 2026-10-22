@@ -84,17 +84,21 @@ func (s Service) validateStartupSpool() error {
 			if err := json.Unmarshal(raw, &event); err != nil {
 				return fmt.Errorf("validate hook spool %s: %w", source, err)
 			}
-			marker, present := fields["snapshot"]
-			if !present {
-				continue
-			}
-			switch string(bytes.TrimSpace(marker)) {
-			case "false":
-				continue
-			case "true":
+			if event.Snapshot {
 				return fmt.Errorf("validate hook spool %s: retained snapshot requires the approved old-emitter drain before startup", source)
-			default:
-				return fmt.Errorf("validate hook spool %s: snapshot marker is not a boolean", source)
+			}
+			for key, marker := range fields {
+				if !strings.EqualFold(key, "snapshot") {
+					continue
+				}
+				switch string(bytes.TrimSpace(marker)) {
+				case "false":
+					continue
+				case "true":
+					return fmt.Errorf("validate hook spool %s: retained snapshot requires the approved old-emitter drain before startup", source)
+				default:
+					return fmt.Errorf("validate hook spool %s: snapshot marker is not a boolean", source)
+				}
 			}
 		}
 		if readErr == io.EOF || len(entries) == 0 {
