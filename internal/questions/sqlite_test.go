@@ -394,3 +394,27 @@ func TestAskCrashBetweenPostAndRecord(t *testing.T) {
 		t.Fatalf("next question = %+v, %v; want q2", q, err)
 	}
 }
+
+func TestQuestionImportPreservesRawSourceAndCanonicalState(t *testing.T) {
+	root := questionRoot(t)
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	source := []byte(`{"version":1,"next":{"room":7},"questions":{"room/q7":{"id":"q7","room":"room","state":"open","asker":"owner","text":"Keep this","future":{"answer":42}}}}`)
+	if err := os.WriteFile(filepath.Join(root, "state.json"), source, 0600); err != nil {
+		t.Fatal(err)
+	}
+	s := &Store{Root: root}
+	st, err := s.Read()
+	if err != nil || st.Next["room"] != 7 || st.Questions["room/q7"].Text != "Keep this" {
+		t.Fatalf("import: %+v, %v", st, err)
+	}
+	db, err := s.open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var future int
+	if err := db.QueryRow("SELECT json_extract(body,'$.future.answer') FROM questions WHERE key='room/q7'").Scan(&future); err != nil || future != 42 {
+		t.Fatalf("unknown question field: %d, %v", future, err)
+	}
+}
