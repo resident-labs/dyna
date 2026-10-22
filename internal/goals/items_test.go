@@ -230,6 +230,12 @@ func TestItemEvents(t *testing.T) {
 
 func TestEffectiveGoal(t *testing.T) {
 	s := itemStore(t)
+	if _, err := s.Add("r", "worker", Input{Text: "Self-set work", Holders: []string{"worker"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.EffectiveGoal("r", "worker", ""); err != nil || got != "" {
+		t.Fatalf("self-set goal became an implicit parent: %q %v", got, err)
+	}
 	g2, err := s.Add("r", "owner", Input{Text: "Second"})
 	if err != nil {
 		t.Fatal(err)
@@ -257,6 +263,24 @@ func TestEffectiveGoal(t *testing.T) {
 	}
 	if got, err := s.EffectiveGoal("r", "worker", ""); err != nil || got != held.ID {
 		t.Fatalf("held after item done: %q %v", got, err)
+	}
+	if _, err := s.AddItem("r", held.ID, "owner", "another assignment", "worker"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddItem("r", g2.ID, "owner", "second assignment", "worker"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.EffectiveGoal("r", "worker", ""); err == nil || !strings.Contains(err.Error(), "spans goals") {
+		t.Fatalf("ambiguous assigned goals: %v", err)
+	}
+	if _, err := s.Finish("r", g2.ID, "owner", "Done", false); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.EffectiveGoal("r", "worker", ""); err != nil || got != held.ID {
+		t.Fatalf("closed assigned goal must be ignored: %q %v", got, err)
+	}
+	if _, err := s.SetItemState("r", held.ID, "i1", "owner", ItemDone); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := s.Add("r", "owner", Input{Text: "Two", Holders: []string{"worker"}}); err != nil {
 		t.Fatal(err)
