@@ -62,11 +62,12 @@ tracking again never changes a link. The owner, root, author or author's ancesto
 also link in the app.
 
 Only the owner or root can expedite one goal per room with `dyna goal expedite`.
-Linked changes get the next available review slot in their room. Eligible expedited
-PRs get an isolated merge trial, with merge priority per repository. When normal work
-is waiting, it gets a slot after three expedited selections. Review fairness is per
-room; merge fairness is per repository. Existing gates still apply. Running reviews,
-merge trials and CI continue. Expedite does not change session, workflow or CI scheduling.
+Queue ordering is planned for a separate update. Linked changes will get the next
+available review slot in their room. Eligible expedited PRs will get an isolated merge
+trial, with merge priority per repository. When normal work is waiting, it will get a
+slot after three expedited selections. Review fairness will be per room; merge fairness
+will be per repository. Existing gates will still apply. Running reviews, merge trials
+and CI will continue. Expedite will not change session, workflow or CI scheduling.
 
 A reviewer starts on each needed verified head, in parallel with CI.
 Draft PRs get no automatic review, even with required reviewers. Open a PR
