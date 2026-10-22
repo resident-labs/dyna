@@ -618,3 +618,7 @@ test('finish sign-in shows the engine message', async () => {
   await call(context, 'finishLogin')
   assert.equal(context.error, 'Sign-in is not complete yet. Finish signing in inside the terminal first.')
 })
+
+test('Antigravity sign-in does not promise a personal login copy', () => {
+  assert.match(paneSource, /\{#if r\.id !== 'antigravity'\}\s*<p class="muted small">If you already use \{r\.meta\.name\}, Dyna can copy that login once\.<\/p>/)
+})
