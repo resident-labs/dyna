@@ -51,7 +51,7 @@ func TestPublicationUsesAuthenticatedSession(t *testing.T) {
 			// session attribution. Root and session callers keep their real session.
 			actor := authority.Actor{Role: role, Room: rec.ID, Session: "ses_authenticated", Run: "run_worker"}
 			ctx := authority.WithActor(t.Context(), actor)
-			body := watch.Marker("ses_forged") + " feedback"
+			body := "<!-- dyna:ses_forged -->" + " feedback"
 			if err := e.svc.PRs.CommentPR(ctx, rec.ID, ref, body, true); err != nil {
 				t.Fatal(err)
 			}
