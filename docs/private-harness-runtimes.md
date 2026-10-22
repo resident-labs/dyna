@@ -36,7 +36,7 @@ Old repair backups remain unchanged under the harness data directory. `dyna harn
 
 ## Native session processes
 
-Pi RPC, Codex app-server, Grok ACP and Antigravity ACP use one child per
+Pi RPC, Codex app-server, Grok ACP, Antigravity ACP and Claude stream-json use one child per
 Dyna session. A detached host keeps that child across turns and engine
 restarts. Each turn attaches over a private Unix socket and binds its
 runtime leases again. A second active attachment to the same key is refused.

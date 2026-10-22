@@ -37,14 +37,16 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 	if execution.ProcessRunner != nil {
 		return runInProcess(ctx, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, state, execution.ProcessRunner)
 	}
+	if spec.streamInput {
+		return runClaudeTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
+	}
 	if spec.codex {
 		return runCodexTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
 	}
-	// Persistent-input bookkeeping rides on every returned attempt.
-	streamNudges := 0
+	// Hook steering bookkeeping rides on every returned attempt.
 	streamSteered := false
 	defer func() {
-		out.streamNudges, out.streamSteered = streamNudges, streamSteered
+		out.streamSteered = streamSteered
 	}()
 	argv := spec.argv
 	hook := steering.hookValue()
@@ -69,15 +71,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 		}
 		hook.failed = false
 	}
-	var stream *streamInput
-	if spec.streamInput {
-		w, err := cmd.StdinPipe()
-		if err != nil {
-			return finishAttempt(spec, "", "", err, false, ctx.Err() != nil, false, false, nil, nil)
-		}
-		stream = newStreamInput(w)
-		defer stream.close()
-	} else if spec.stdinPrompt {
+	if spec.stdinPrompt {
 		cmd.Stdin = strings.NewReader(spec.prompt)
 	}
 	state.beginProcess()
@@ -108,7 +102,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 		emptyLimit = execution.emptyStepLimit
 	}
 	noProgress := make(chan struct{}, 1)
-	observeLine := func(line string, stdoutEnd int) {
+	observeLine := func(line string) {
 		record := workeroutput.DecodeLine(output, line)
 		tracker.observeRecord(record, line)
 		if tracker.idValue() != "" {
@@ -121,9 +115,6 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 			default:
 			}
 		}
-		if stream != nil {
-			stream.observe(line, stdoutEnd, state.currentUsage())
-		}
 		_ = normalizer.WriteRecord(record)
 		if tools.ObserveSignals(record.Signals) {
 			select {
@@ -132,13 +123,11 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 			}
 		}
 	}
-	stdoutEnd := 0
 	onLine := func(line string) {
-		stdoutEnd += len(line) + 1
 		if liveLine != nil {
 			liveLine(line)
 		}
-		observeLine(line, stdoutEnd)
+		observeLine(line)
 	}
 	stdout := newObservedBuffer(onLine, liveOutput)
 	defer stdout.FlushPending(func(line string) {
@@ -162,62 +151,16 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 		}
 		return finishAttempt(spec, stdout.String(), stderr.String(), err, false, ctx.Err() != nil, false, false, nil, nil)
 	}
-	if !spec.streamInput && steering != nil && steering.opts.OnStart != nil {
+	if steering != nil && steering.opts.OnStart != nil {
 		steering.opts.OnStart()
 	}
-	if !spec.streamInput && steering != nil && steering.opts.OnMessage != nil {
+	if steering != nil && steering.opts.OnMessage != nil {
 		for _, message := range spec.steering {
 			steering.opts.OnMessage(message)
 		}
 	}
 	if spec.journalReminderReason != "" && journal != nil {
 		journal.markNudged(true, spec.journalReminderReason)
-	}
-	var streamSig <-chan struct{}
-	var streamTick <-chan time.Time
-	stallLimit := streamStallLimit
-	if execution.streamStallLimit > 0 {
-		stallLimit = execution.streamStallLimit
-	}
-	if stream != nil {
-		t := time.NewTicker(min(time.Second, stallLimit))
-		defer t.Stop()
-		streamTick = t.C
-		streamSig = stream.signal
-		if steering != nil && steering.opts.BeforeStart != nil {
-			if err := steering.opts.BeforeStart(ctx, spec.prompt); err != nil {
-				_ = signalProcessGroup(cmd, syscall.SIGTERM)
-				_ = waitCommand()
-				return finishAttempt(spec, stdout.String(), stderr.String(), err, true, true, false, false, nil, nil)
-			}
-		}
-		writePrompt := func() error {
-			if !stream.write(streamItemPrompt, spec.prompt, nil, 0) {
-				return errors.New("worker input closed before prompt delivery")
-			}
-			return nil
-		}
-		var promptErr error
-		if steering != nil && steering.opts.StartGate != nil {
-			promptErr = steering.opts.StartGate(ctx, spec.prompt, writePrompt)
-		} else {
-			promptErr = writePrompt()
-		}
-		if promptErr != nil {
-			_ = signalProcessGroup(cmd, syscall.SIGTERM)
-			_ = waitCommand()
-			return finishAttempt(spec, stdout.String(), stderr.String(), promptErr, true, ctx.Err() != nil, false, false, nil, nil)
-		}
-		if steering != nil {
-			if steering.opts.OnStart != nil {
-				steering.opts.OnStart()
-			}
-			if steering.opts.OnMessage != nil {
-				for _, msg := range spec.steering {
-					steering.opts.OnMessage(msg)
-				}
-			}
-		}
 	}
 	done := make(chan error, 1)
 	go func() { done <- waitCommand() }()
@@ -296,48 +239,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 		}
 		return false
 	}
-	// poll is shared by the ticker and tool-completion wakeups. It returns a
-	// finished attempt when a delivery interrupted the worker.
-	// writeSteering hands pending steering to a persistent-input worker; Claude
-	// takes it in at its next tool boundary, so dyna does not gate or interrupt.
 	paused := func() bool { return steering != nil && steering.opts.Paused != nil && steering.opts.Paused() }
-	writeSteering := func() error {
-		if paused() {
-			return nil
-		}
-		if stream == nil || steering == nil || !steering.hasPending() || !stream.open() {
-			return nil
-		}
-		messages := steering.take()
-		if err := steering.dispatch(messages); err != nil {
-			return fmt.Errorf("record steering dispatch for worker %s: %w", p.Name, err)
-		}
-		if journal != nil {
-			journal.noteExternalResume()
-		}
-		if paused() {
-			steering.pending = append(messages, steering.pending...)
-			return nil
-		}
-		write := func() error {
-			if !stream.write(streamItemSteering, steeringPrompt(messages), messages, tools.InFlight()) {
-				return errors.New("worker input closed")
-			}
-			return nil
-		}
-		var deliveryErr error
-		if steering.opts.DeliveryGate != nil {
-			deliveryErr = steering.opts.DeliveryGate(write)
-		} else {
-			deliveryErr = write()
-		}
-		if deliveryErr != nil {
-			steering.pending = append(messages, steering.pending...)
-		} else {
-			streamSteered = true
-		}
-		return nil
-	}
 	// deliverHooked records messages the post-tool hook handed to the worker
 	// inside its running turn.
 	deliverHooked := func(messages []runstore.SteeringMessage, since time.Time) error {
@@ -408,6 +310,8 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 		}
 		return nil
 	}
+	// poll is shared by the ticker and tool-completion wakeups. It returns a
+	// finished attempt when a delivery interrupted the worker.
 	poll := func(readInput bool) (attempt, bool) {
 		if steering != nil {
 			_ = steering.activateIfReady(tracker.idValue())
@@ -418,12 +322,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 				runErr := stopCanceledProcess(cmd, done)
 				return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, steering.errValue()), true
 			}
-			if stream != nil {
-				if err := writeSteering(); err != nil {
-					runErr := stopCanceledProcess(cmd, done)
-					return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, err), true
-				}
-			} else if hook.usable() {
+			if hook.usable() {
 				if err := hookSteering(); err != nil {
 					runErr := stopCanceledProcess(cmd, done)
 					return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, err), true
@@ -445,13 +344,6 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 			if !journal.reminderDue() {
 				return attempt{}, false
 			}
-			if stream != nil {
-				if stream.write(streamItemJournal, journalNudgePrompt, nil, tools.InFlight()) {
-					journal.noteStreamNudge()
-					streamNudges++
-				}
-				return attempt{}, false
-			}
 			if resumable {
 				if tracker.idValue() == "" || !canDeliver(DeliveryJournal) {
 					return attempt{}, false
@@ -468,80 +360,6 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 		return attempt{}, false
 	}
 
-	// A sealed protocol result commits this turn. Process retirement is a
-	// separate, synchronous phase; native background tasks cannot extend it or
-	// replace its output. Durable delegated work belongs to
-	// subagents, which have their own lifecycle and completion delivery.
-	finishStream := func(terminal *streamTerminal, messages []runstore.SteeringMessage, journalPending bool, continuation bool) attempt {
-		state.sealUsage(terminal.usage)
-		stream.close()
-		retireErr := retireClaudeProcess(cmd, done)
-		runErr := workeroutput.ClaudeResultError(terminal.line)
-		if runErr == nil {
-			runErr = retireErr
-		}
-		logical := stdout.String()[:terminal.stdoutEnd]
-		a := finishAttempt(spec, logical, stderr.String(), runErr, true, ctx.Err() != nil, journalPending, continuation, messages, nil)
-		// Keep the full transport trace, including anything printed during
-		// retirement. Only parsing and usage use the sealed terminal boundary.
-		a.stdout = stdout.String()
-		return a
-	}
-	handleStream := func() (attempt, bool) {
-		for _, n := range stream.drain() {
-			if c := n.consumed; c != nil {
-				switch c.kind {
-				case streamItemSteering:
-					if steering != nil && steering.opts.OnMessage != nil {
-						for _, message := range c.messages {
-							steering.opts.OnMessage(message)
-						}
-					}
-					if c.inFlight > 0 {
-						gate.report(DeliverySteering, DeliveryBoundary, time.Since(c.written), tools.InFlight())
-					}
-				case streamItemJournal:
-					if c.inFlight > 0 {
-						gate.report(DeliveryJournal, DeliveryBoundary, time.Since(c.written), tools.InFlight())
-					}
-				}
-			}
-			terminal := n.terminal
-			if !stream.canSeal(terminal) {
-				continue
-			}
-			if steering != nil {
-				if err := steering.activateIfReady(tracker.idValue()); err != nil {
-					runErr := stopCanceledProcess(cmd, done)
-					return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, err), true
-				}
-				// Already-read input must be written before an empty final read
-				// can seal the source. finish() itself makes the final empty
-				// read and gate closure atomic with concurrent senders.
-				if !steering.hasPending() {
-					messages, err := steering.finish()
-					if err != nil {
-						runErr := stopCanceledProcess(cmd, done)
-						return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, err), true
-					}
-					steering.pending = append(steering.pending, messages...)
-				}
-				if steering.hasPending() {
-					if err := writeSteering(); err != nil {
-						runErr := stopCanceledProcess(cmd, done)
-						return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, err), true
-					}
-					if steering.hasPending() { // write failed: resume after retiring this process
-						return finishStream(terminal, steering.take(), false, true), true
-					}
-					continue // newly written input needs its own result
-				}
-			}
-			return finishStream(terminal, nil, false, false), true
-		}
-		return attempt{}, false
-	}
-
 	for {
 		var inputWake <-chan struct{}
 		if sourceDoorbell != nil {
@@ -552,37 +370,13 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 		}
 		select {
 		case runErr := <-done:
-			var streamMessages []runstore.SteeringMessage
-			streamJournal := false
-			if stream != nil {
-				// EOF can terminate a valid final JSON record without a newline.
-				// Wait has joined the reader, so observing that tail is ordered
-				// after every complete line and cannot race stdoutEnd.
-				stdout.FlushPending(func(line string) {
-					stdoutEnd += len(line)
-					observeLine(line, stdoutEnd)
-				})
-				// Wait includes stdout reader completion. A result already in
-				// the notice queue has the same authority whichever select wins.
-				done <- runErr
-				if a, finished := handleStream(); finished {
-					return a
-				}
-				if retireErr := retireClaudeProcess(cmd, done); runErr == nil {
-					runErr = retireErr
-				}
-				streamMessages, streamJournal = stream.pending()
-				if stream.awaitingResult() && len(streamMessages) == 0 && !streamJournal {
-					runErr = fmt.Errorf("Claude exited without a result covering acknowledged input")
-				}
-			}
 			if journal != nil {
 				journal.poll()
 			}
 			if ctx.Err() != nil {
 				return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, true, false, false, nil, nil)
 			}
-			messages := streamMessages
+			var messages []runstore.SteeringMessage
 			if steering != nil {
 				_ = steering.activateIfReady(tracker.idValue())
 				steering.poll()
@@ -606,7 +400,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 				messages = append(messages, steering.take()...)
 			}
 			reportDeferred(DeliveryTurnEnd)
-			return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, streamJournal, len(streamMessages) > 0, messages, steering.errValue())
+			return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, messages, steering.errValue())
 		case <-ctx.Done():
 			if execution.KillOnCancel {
 				_ = signalProcessGroup(cmd, syscall.SIGKILL)
@@ -632,28 +426,6 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 			a.startupStalled = true
 			a.runErr = fmt.Errorf("no harness event within %s of startup", startupWait)
 			return a
-		case <-streamSig:
-			if a, finished := handleStream(); finished {
-				return a
-			}
-		case <-streamTick:
-			// Only a protocol terminal with uncovered input arms this bound.
-			// Quiet tools on other harnesses are unaffected. The state lives
-			// in streamInput so stale/empty notice drains cannot clear it.
-			if stream.awaitingAcknowledgment() && tools.InFlight() == 0 && stream.quietFor() >= stallLimit {
-				messages, journalPending := stream.pending()
-				if steering != nil {
-					messages = append(messages, steering.take()...)
-				}
-				terminal := stream.lastTerminal()
-				a := finishStream(terminal, messages, journalPending, len(messages) > 0)
-				// An acknowledged input with no subsequent result still needs
-				// exact-session recovery, rather than returning an older answer.
-				if len(messages) == 0 && !journalPending {
-					a.runErr = fmt.Errorf("Claude produced no result covering acknowledged input")
-				}
-				return a
-			}
 		case <-boundary:
 			hook.noteBoundary()
 			if result, ok := poll(inputWake == nil); ok {
@@ -830,11 +602,13 @@ func startGuarded(ctx context.Context, p profile.Profile, cmd *exec.Cmd, prompt 
 	release := func() {}
 	// Own process group so a timeout/cancel kills the whole worker tree.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if execution.KillOnCancel {
-			return signalProcessGroup(cmd, syscall.SIGKILL)
+	if execution.KillOnCancel || cmd.Cancel == nil {
+		cmd.Cancel = func() error {
+			if execution.KillOnCancel {
+				return signalProcessGroup(cmd, syscall.SIGKILL)
+			}
+			return signalProcessGroup(cmd, syscall.SIGTERM)
 		}
-		return signalProcessGroup(cmd, syscall.SIGTERM)
 	}
 	if steering != nil && steering.opts.BeforeStart != nil {
 		if err := steering.opts.BeforeStart(ctx, prompt); err != nil {

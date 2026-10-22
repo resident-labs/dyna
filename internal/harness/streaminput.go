@@ -1,9 +1,11 @@
 package harness
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"dyna-agent/internal/runstore"
@@ -17,14 +19,22 @@ import (
 // interrupted) and starts a new turn in the same process for one written
 // while idle. With --replay-user-messages it echoes each message back when it
 // takes it, so dyna knows what was consumed. When a turn ends with nothing
-// left unconsumed, Dyna seals steering admission and retires the process.
+// left unconsumed, Dyna seals steering admission and detaches the idle process.
 // EOF alone does not stop Claude while harness-native background tasks exist.
+// Cancel writes a control_request interrupt on this same stdin; a profile
+// model is written as set_model before the first user message.
 
 const (
 	streamItemPrompt   = "prompt"
 	streamItemSteering = "steering"
 	streamItemJournal  = "journal"
 )
+
+var claudeControlSeq atomic.Uint64
+
+func nextClaudeControlID() string {
+	return fmt.Sprintf("dyna-%d", claudeControlSeq.Add(1))
+}
 
 type streamItem struct {
 	kind     string
@@ -91,6 +101,19 @@ func newStreamInput(w io.WriteCloser) *streamInput {
 	return &streamInput{w: w, signal: make(chan struct{}, 1), acked: map[string]bool{}}
 }
 
+// writeControl sends one control_request. It is not a user message, so it
+// does not enter the acknowledgment queue. It returns false when stdin is
+// closed.
+func (s *streamInput) writeControl(line []byte) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed || len(line) == 0 {
+		return false
+	}
+	_, err := s.w.Write(line)
+	return err == nil
+}
+
 // write sends one user message. It returns false when stdin is closed.
 func (s *streamInput) write(kind, text string, messages []runstore.SteeringMessage, inFlight int) bool {
 	s.mu.Lock()
@@ -111,6 +134,9 @@ func (s *streamInput) observe(line string, stdoutEnd int, usage workeroutput.Usa
 	s.mu.Lock()
 	s.last = time.Now()
 	s.mu.Unlock()
+	if _, _, ok := workeroutput.ClaudeControlResponse(line); ok {
+		return // control responses are not conversation input
+	}
 	replay, result := workeroutput.ClaudeInputSignal(line)
 	if !replay && !result {
 		if workeroutput.ClaudeGenerationStarted(line) {
