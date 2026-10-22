@@ -2,7 +2,6 @@ package workflowtemplate
 
 import (
 	"context"
-	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -20,7 +19,8 @@ func TestSeedFreshInstallWritesBundledStarters(t *testing.T) {
 		"alpha.js": {Data: []byte("export const meta = { description: 'alpha' }\nreturn 1\n")},
 		"beta.js":  {Data: []byte("return {ok: true}\n")},
 	}
-	result, err := newSeedCatalog(t, registry).Seed(fsys)
+	cat := newSeedCatalog(t, registry)
+	result, err := cat.Seed(fsys)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestSeedFreshInstallWritesBundledStarters(t *testing.T) {
 	if err != nil || info.Mode().Perm() != 0o644 {
 		t.Fatalf("beta mode = %v %v", info, err)
 	}
-	assertManagedHash(t, registry, "alpha", fsys["alpha.js"].Data)
+	assertManagedHash(t, cat, "alpha", fsys["alpha.js"].Data)
 }
 
 func TestSeedIdempotentWhenBundleUnchanged(t *testing.T) {
@@ -80,7 +80,7 @@ func TestSeedUpdatesUnchangedManagedCopy(t *testing.T) {
 	if err != nil || string(got) != "return {v: 2}\n" {
 		t.Fatalf("updated bytes = %q %v", got, err)
 	}
-	assertManagedHash(t, registry, "echo", next["echo.js"].Data)
+	assertManagedHash(t, cat, "echo", next["echo.js"].Data)
 }
 
 func TestSeedPreservesUserModifiedFile(t *testing.T) {
@@ -158,8 +158,8 @@ func TestSeedRefusesSymlinkDestinationAndManifest(t *testing.T) {
 	if err := os.Symlink(filepath.Join(dir, "outside-manifest.json"), filepath.Join(registry, ManagedManifestName)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 1\n")}}); err == nil {
-		t.Fatalf("symlink manifest error = %v", err)
+	if _, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 1\n")}}); err != nil {
+		t.Fatalf("unused symlink manifest error = %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(dir, "outside-manifest.json")); !os.IsNotExist(err) {
 		t.Fatal("seed wrote through a symlink manifest")
@@ -242,16 +242,9 @@ func TestSeedShippedMatchesRepositoryExamplesAndLists(t *testing.T) {
 	}
 }
 
-func assertManagedHash(t *testing.T, registry, name string, data []byte) {
+func assertManagedHash(t *testing.T, cat seedCatalog, name string, data []byte) {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(registry, ManagedManifestName))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var manifest managedManifest
-	if err := json.Unmarshal(raw, &manifest); err != nil {
-		t.Fatal(err)
-	}
+	manifest := seedRow(t, cat)
 	if manifest.Files[name] != contentHash(data) {
 		t.Fatalf("managed hash for %s = %q, want %s", name, manifest.Files[name], contentHash(data))
 	}
@@ -263,7 +256,7 @@ func TestSeedKeepsHashesWhenRollbackManifestIsRemoved(t *testing.T) {
 	if _, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 1\n")}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(manifestPath(registry)); err != nil {
+	if err := os.Remove(manifestPath(registry)); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	result, err := cat.Seed(fstest.MapFS{"echo.js": {Data: []byte("return 2\n")}})

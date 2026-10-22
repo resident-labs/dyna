@@ -6,13 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"log"
-	"os"
 	"path/filepath"
 
 	"dyna-agent/internal/database"
-	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
 )
 
@@ -25,13 +21,14 @@ func Migrate(dataDir string) error {
 	if err != nil {
 		return err
 	}
-	if err := database.Migrate(db, "workflowtemplate.version", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), "CREATE TABLE workflow_template_seeds (registry TEXT PRIMARY KEY, hashes TEXT NOT NULL)")
-		return err
-	}); err != nil {
-		return err
-	}
-	return importRegistries(context.Background(), db)
+	return database.Migrate(db, "workflowtemplate.version", 2, func(conn *sql.Conn, old int) error {
+		if old < 1 {
+			if _, err := conn.ExecContext(context.Background(), "CREATE TABLE workflow_template_seeds (registry TEXT PRIMARY KEY, hashes TEXT NOT NULL)"); err != nil {
+				return err
+			}
+		}
+		return importRegistries(context.Background(), conn)
+	})
 }
 
 func (s Store) db() (*sql.DB, error) {
@@ -43,8 +40,8 @@ func (s Store) db() (*sql.DB, error) {
 	if err := db.QueryRow("SELECT value FROM meta WHERE key='workflowtemplate.version'").Scan(&version); err != nil {
 		return nil, fmt.Errorf("template seed store needs engine migration: %w", err)
 	}
-	if version != 1 {
-		return nil, fmt.Errorf("template seed store is version %d; this dyna needs 1", version)
+	if version != 2 {
+		return nil, fmt.Errorf("template seed store is version %d; this dyna needs 2", version)
 	}
 	return db, nil
 }
@@ -87,9 +84,53 @@ func saveSeedRecord(ctx context.Context, conn *sql.Conn, registry string, manife
 // TODO: legacy/shim remove later — keys the shared helper's previous-release copy; remove with requirement 31.
 func seedMirrorKey(registry string) string { return "templates/" + registry }
 
-// TODO: legacy/shim remove later — imports previous binary writes through the shared mirror helper; remove with requirement 31.
-func importSeedManifest(ctx context.Context, db *sql.DB, registry string) error {
-	_, err := state.For(db).ImportIfForeign(ctx, seedMirrorKey(registry), manifestPath(registry), func(conn *sql.Conn, raw []byte) error {
+// TODO: legacy/shim remove later — imports old default and known custom manifests at engine start; remove with requirement 31.
+func importRegistries(ctx context.Context, conn *sql.Conn) error {
+	defaultDir, err := filepath.Abs(DefaultRegistryDir())
+	if err != nil {
+		return err
+	}
+	registries := map[string]bool{defaultDir: true}
+	rows, err := conn.QueryContext(ctx, "SELECT registry FROM workflow_template_seeds")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var registry string
+		if err := rows.Scan(&registry); err != nil {
+			rows.Close()
+			return err
+		}
+		registries[registry] = true
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	for registry := range registries {
+		if err := importRegistry(ctx, conn, registry); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// TODO: legacy/shim remove later — imports an unowned manifest only during migration.
+func importRegistry(ctx context.Context, conn *sql.Conn, registry string) error {
+	var exists bool
+	if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM workflow_template_seeds WHERE registry=?)", registry).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	unlock, err := tryLockDir(registry)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	_, err = state.ImportMigration(ctx, conn, seedMirrorKey(registry), manifestPath(registry), func(conn *sql.Conn, raw []byte) error {
 		manifest, err := decodeManagedManifest(raw)
 		if err != nil {
 			return err
@@ -97,81 +138,4 @@ func importSeedManifest(ctx context.Context, db *sql.DB, registry string) error 
 		return saveSeedRecord(ctx, conn, registry, manifest)
 	})
 	return err
-}
-
-// TODO: legacy/shim remove later — supplies the previous release a copy of the current committed row; remove with requirement 31.
-func mirrorSeedManifest(ctx context.Context, db *sql.DB, registry string) error {
-	return state.For(db).Mirror(ctx, seedMirrorKey(registry), manifestPath(registry), func(out io.Writer) error {
-		manifest, err := readSeedRecord(ctx, db, registry)
-		if err != nil {
-			return err
-		}
-		body, err := marshalManifest(manifest)
-		if err != nil {
-			return err
-		}
-		_, err = out.Write(body)
-		return err
-	})
-}
-
-// TODO: legacy/shim remove later — imports old default and known custom manifests at engine start; remove with requirement 31.
-func importRegistries(ctx context.Context, db *sql.DB) error {
-	defaultDir, err := filepath.Abs(DefaultRegistryDir())
-	if err != nil {
-		return err
-	}
-	registries := map[string]bool{defaultDir: true}
-	err = state.For(db).Read(ctx, func(query state.Reader) error {
-		rows, err := query.QueryContext(ctx, "SELECT registry FROM workflow_template_seeds")
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var registry string
-			if err := rows.Scan(&registry); err != nil {
-				return err
-			}
-			registries[registry] = true
-		}
-		return rows.Err()
-	})
-	if err != nil {
-		return err
-	}
-	for registry := range registries {
-		if err := importRegistry(ctx, db, registry); err != nil {
-			if errors.Is(err, ErrBusy) {
-				log.Printf("template seed import skipped: %v", err)
-				continue
-			}
-			return err
-		}
-	}
-	return nil
-}
-
-// TODO: legacy/shim remove later — serializes startup import with previous binary seed writes; remove with requirement 31.
-func importRegistry(ctx context.Context, db *sql.DB, registry string) error {
-	unlock, err := tryLockDir(registry)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	if _, err := os.Stat(registry); os.IsNotExist(err) {
-		// Metadata is bounded to registries that still exist. Source is untouched.
-		if err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-			if _, err := conn.ExecContext(ctx, "DELETE FROM workflow_template_seeds WHERE registry=?", registry); err != nil {
-				return err
-			}
-			return state.ForgetMirrors(ctx, conn, seedMirrorKey(registry))
-		}); err != nil {
-			return err
-		}
-		return nil
-	} else if err != nil {
-		return err
-	}
-	return importSeedManifest(ctx, db, registry)
 }
