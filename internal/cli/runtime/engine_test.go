@@ -55,9 +55,55 @@ func TestAccountWritesHaveNoLocalFallback(t *testing.T) {
 	engineClient = func() *engineclient.Client {
 		return engineclient.New("/nonexistent/engine.sock", engineclient.RestartWait(0), engineclient.Notices(nil))
 	}
-	for _, args := range [][]string{{"accounts", "rm", "account-1", "--confirm"}, {"login", "codex", "--use-personal"}} {
+	for _, args := range [][]string{
+		{"accounts", "rm", "account-1", "--confirm"},
+		{"login", "codex", "--use-personal"},
+		{"accounts", "activate", "account-1"},
+		{"config-import", "--account", "account-1", "--preview-hash", "abc"},
+		{"gc"},
+	} {
 		if err := runHarness(t, args...); !errors.Is(err, engineclient.ErrNotRunning) {
 			t.Errorf("%v: err = %v, want the engine not running", args, err)
+		}
+	}
+}
+
+// A command that changes an account or the runtime sends one engine call with
+// its arguments, so the engine does the write and publishes the change.
+func TestRuntimeWritesAreEngineCalls(t *testing.T) {
+	storetest.Isolate(t)
+	t.Setenv("HOME", t.TempDir())
+	type request struct {
+		method string
+		args   string
+	}
+	requests := make(chan request, 1)
+	calls := map[string]websvc.Call{}
+	for _, method := range []string{"ActivatePrivateRuntimeAccount", "ImportPrivateConfig", "GCPrivateRuntime"} {
+		calls[method] = func(_ context.Context, args []json.RawMessage) (any, error) {
+			raw, err := json.Marshal(args)
+			if err != nil {
+				return nil, err
+			}
+			requests <- request{method, string(raw)}
+			return nil, nil
+		}
+	}
+	enginetest.Serve(t, store.DataDir(), calls)
+	for _, tc := range []struct {
+		args   []string
+		method string
+		want   string
+	}{
+		{[]string{"accounts", "activate", "account-1"}, "ActivatePrivateRuntimeAccount", `["account-1"]`},
+		{[]string{"config-import", "--account", "account-1", "--preview-hash", "abc"}, "ImportPrivateConfig", `["account-1","abc"]`},
+		{[]string{"gc"}, "GCPrivateRuntime", `[]`},
+	} {
+		if err := runHarness(t, tc.args...); err != nil {
+			t.Fatalf("%v: %v", tc.args, err)
+		}
+		if got := <-requests; got.method != tc.method || got.args != tc.want {
+			t.Fatalf("%v sent %+v, want %s %s", tc.args, got, tc.method, tc.want)
 		}
 	}
 }

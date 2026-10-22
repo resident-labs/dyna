@@ -102,18 +102,9 @@ func NewCommand() *cobra.Command {
 	}}
 	doctor.Flags().StringVar(&name, "profile", "", "one profile name")
 	gc := &cobra.Command{Use: "gc", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
-		pins, err := harnessruntime.OpenPins()
-		if err != nil {
-			return err
-		}
-		bundles := harnessruntime.NewBundleManager()
-		if err := bundles.GC(pins); err != nil {
-			return err
-		}
-		if err := harnessruntime.RemoveRetiredHarnesses(harnessruntime.NewAccounts(), bundles); err != nil {
-			return err
-		}
-		return harnessruntime.New().GCGenerations(c.Context())
+		// The engine removes the runtime's unused parts, so an account record it
+		// drops publishes the account change from the engine process.
+		return engineClient().Call(c.Context(), "GCPrivateRuntime", nil, nil)
 	}}
 	accounts := &cobra.Command{Use: "accounts", Short: "Manage private native login homes"}
 	accounts.AddCommand(&cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
@@ -242,22 +233,7 @@ func NewCommand() *cobra.Command {
 	}}
 	remove.Flags().BoolVar(&confirmed, "confirm", false, "confirm deletion of this private native account home")
 	activate := &cobra.Command{Use: "activate <account-id>", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
-		accounts := harnessruntime.NewAccounts()
-		if err := accounts.MigrateLegacyGrants(); err != nil {
-			return err
-		}
-		n, err := accounts.Find(args[0])
-		if err != nil {
-			return err
-		}
-		bundle, err := harnessruntime.NewBundleManager().Resolve(n.Harness, "")
-		if err != nil {
-			return err
-		}
-		if err := accounts.SwitchIfIdle(c.Context(), n.ID, bundle.Executable); err != nil {
-			return err
-		}
-		return harnessruntime.New().Regenerate(n.Harness)
+		return engineClient().Call(c.Context(), "ActivatePrivateRuntimeAccount", []any{args[0]}, nil)
 	}}
 	var importAccount, previewHash string
 	preview := &cobra.Command{Use: "config-preview", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
@@ -270,15 +246,7 @@ func NewCommand() *cobra.Command {
 	preview.Flags().StringVar(&importAccount, "account", "", "saved account ID")
 	_ = preview.MarkFlagRequired("account")
 	apply := &cobra.Command{Use: "config-import", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
-		r := harnessruntime.New()
-		if err := r.ImportPreferences(importAccount, previewHash); err != nil {
-			return err
-		}
-		n, err := r.Accounts.Find(importAccount)
-		if err != nil {
-			return err
-		}
-		return r.Regenerate(n.Harness)
+		return engineClient().Call(c.Context(), "ImportPrivateConfig", []any{importAccount, previewHash}, nil)
 	}}
 	apply.Flags().StringVar(&importAccount, "account", "", "saved account ID")
 	apply.Flags().StringVar(&previewHash, "preview-hash", "", "hash from config-preview")
