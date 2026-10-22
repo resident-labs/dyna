@@ -167,15 +167,18 @@ func claudeHostedTestSetup(t *testing.T) *claudeFakeHost {
 	return host
 }
 
-func claudeHostedTurn(ctx context.Context, t *testing.T, prompt string, steering *steeringSupervisor, liveLine func(string)) <-chan attempt {
+func claudeHostedTurn(ctx context.Context, t *testing.T, dir, prompt string, steering *steeringSupervisor, liveLine func(string)) <-chan attempt {
 	t.Helper()
-	dir := t.TempDir()
 	spec := commandSpec{prompt: prompt, streamInput: true, argv: []string{"/bin/sh", "-c", "exit 0"}}
 	p := profile.Profile{Harness: profile.HarnessCustom, Model: "haiku"}
 	execution := ExecutionOptions{SkipComputer: true, SessionKey: "claude-hosted-test"}
 	done := make(chan attempt, 1)
+	// The engine's tracker learns the id dyna itself passed (--session-id); a
+	// fixed parser mirrors that. Without it the steering source never
+	// activates, because activateIfReady needs the session id.
+	tracker := newSessionTracker(func(string) string { return "claude-hosted-test" })
 	go func() {
-		done <- runOnce(ctx, p, dir, spec, newSessionTracker(nil), nil, steering, true, "", "",
+		done <- runOnce(ctx, p, dir, spec, tracker, nil, steering, true, "", "",
 			&workeroutput.Declaration{Dialect: workeroutput.DialectClaudeStreamJSON}, liveLine,
 			newDeliveryGate(JournalOptions{}), &runState{}, execution)
 	}()
@@ -196,8 +199,9 @@ func awaitClaudeTurn(t *testing.T, done <-chan attempt, what string) attempt {
 func TestClaudeHostedTurnsReuseOneProcess(t *testing.T) {
 	host := claudeHostedTestSetup(t)
 	ctx := t.Context()
+	dir := t.TempDir() // one working directory: the fingerprint must not drift between turns
 	for _, prompt := range []string{"first turn", "second turn"} {
-		got := awaitClaudeTurn(t, claudeHostedTurn(ctx, t, prompt, nil, nil), prompt)
+		got := awaitClaudeTurn(t, claudeHostedTurn(ctx, t, dir, prompt, nil, nil), prompt)
 		if got.runErr != nil {
 			t.Fatalf("%s failed: %v\n%s", prompt, got.runErr, got.stdout)
 		}
@@ -226,12 +230,13 @@ func TestClaudeHostedInterruptKeepsIdleProcess(t *testing.T) {
 	host := claudeHostedTestSetup(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	first := awaitClaudeTurn(t, claudeHostedTurn(ctx, t, "first turn", nil, nil), "first turn")
+	dir := t.TempDir()
+	first := awaitClaudeTurn(t, claudeHostedTurn(ctx, t, dir, "first turn", nil, nil), "first turn")
 	if first.runErr != nil {
 		t.Fatalf("first turn failed: %v", first.runErr)
 	}
 	replayed := make(chan struct{}, 1)
-	done := claudeHostedTurn(ctx, t, "hold turn", nil, func(line string) {
+	done := claudeHostedTurn(ctx, t, dir, "hold turn", nil, func(line string) {
 		if strings.Contains(line, `"isReplay":true`) {
 			select {
 			case replayed <- struct{}{}:
@@ -271,8 +276,9 @@ func TestClaudeHostedUnacknowledgedInterruptKillsChild(t *testing.T) {
 	t.Cleanup(func() { claudeInterruptGrace = prev })
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	dir := t.TempDir()
 	replayed := make(chan struct{}, 1)
-	done := claudeHostedTurn(ctx, t, "hold turn", nil, func(line string) {
+	done := claudeHostedTurn(ctx, t, dir, "hold turn", nil, func(line string) {
 		if strings.Contains(line, `"isReplay":true`) {
 			select {
 			case replayed <- struct{}{}:
@@ -306,7 +312,7 @@ func TestClaudeHostedSteeringUsesSameProcess(t *testing.T) {
 		pollEvery: 10 * time.Millisecond,
 		OnMessage: func(m runstore.SteeringMessage) { delivered = append(delivered, m.Message) },
 	}, true)
-	got := awaitClaudeTurn(t, claudeHostedTurn(t.Context(), t, "first turn", steering, nil), "steered turn")
+	got := awaitClaudeTurn(t, claudeHostedTurn(t.Context(), t, t.TempDir(), "first turn", steering, nil), "steered turn")
 	if got.runErr != nil {
 		t.Fatalf("steered turn failed: %v\n%s", got.runErr, got.stdout)
 	}
