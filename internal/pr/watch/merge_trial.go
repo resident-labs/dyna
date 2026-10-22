@@ -564,8 +564,11 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 	if err != nil {
 		return "", "", "", err
 	}
-	if snap.localCI != nil && conclusiveCI(snap.localCI.Status) {
-		return snap.localCI.Status, snap.localCI.Logs, "", nil
+	if snap.localCI != nil {
+		if conclusiveCI(snap.localCI.Status) {
+			return snap.localCI.Status, snap.localCI.Logs, "", nil
+		}
+		return "pending", "", snap.localCI.Reason, nil
 	}
 	ci := "pending"
 	var failed []Run
