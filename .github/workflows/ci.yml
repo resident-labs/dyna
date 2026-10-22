@@ -96,26 +96,32 @@ jobs:
     runs-on: ubuntu-latest
     # Go's own test timeout is 5 minutes. The runner slot hooks expect 30.
     timeout-minutes: 30
+    container:
+      image: golang:1.26.3
     strategy:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6]
     env:
-      GOCACHE: /home/runner/.cache/go-build
-      GOMODCACHE: /home/runner/go/pkg/mod
+      GOCACHE: /root/.cache/go-build
+      GOMODCACHE: /go/pkg/mod
       CI_SHARD: ${{ matrix.shard }}/7
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
+      # The container runs as root, but the runner user owns the workspace.
+      # Git then refuses the repo, and go build fails with
+      # "error obtaining VCS status".
+      - name: Trust workspace
+        run: |
+          echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
+          echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       - name: Restore Go caches
         uses: actions/cache/restore@v4
         with:
           path: |
-            /home/runner/.cache/go-build
-            /home/runner/go/pkg/mod
+            /root/.cache/go-build
+            /go/pkg/mod
           key: go-shard-${{ matrix.shard }}-${{ github.sha }}
           restore-keys: go-shard-${{ matrix.shard }}-
       # go test pipes its results through the checker.
@@ -149,8 +155,8 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            /home/runner/.cache/go-build
-            /home/runner/go/pkg/mod
+            /root/.cache/go-build
+            /go/pkg/mod
           key: go-shard-${{ matrix.shard }}-${{ github.sha }}
       - name: Upload Go test report
         if: always()
@@ -192,23 +198,31 @@ jobs:
     if: needs.changes.outputs.go == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    container:
+      image: golang:1.26.3
     env:
-      GOCACHE: /home/runner/.cache/go-build
-      GOMODCACHE: /home/runner/go/pkg/mod
+      GOCACHE: /root/.cache/go-build
+      GOMODCACHE: /go/pkg/mod
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: false
+      # The container runs as root, but the runner user owns the workspace.
+      # Git then refuses the repo, and go build fails with
+      # "error obtaining VCS status".
+      - name: Trust workspace
+        run: |
+          echo 'GIT_CONFIG_COUNT=1' >> "$GITHUB_ENV"
+          echo 'GIT_CONFIG_KEY_0=safe.directory' >> "$GITHUB_ENV"
+          echo "GIT_CONFIG_VALUE_0=$GITHUB_WORKSPACE" >> "$GITHUB_ENV"
       - name: Restore Go caches
         uses: actions/cache/restore@v4
         with:
           path: |
-            /home/runner/.cache/go-build
-            /home/runner/go/pkg/mod
+            /root/.cache/go-build
+            /go/pkg/mod
           key: go-static-${{ github.sha }}
           restore-keys: go-static-
+      - name: Install shellcheck
+        run: apt-get update -qq && apt-get install -y -qq shellcheck >/dev/null
       - name: Verify modules
         run: bash scripts/ci.sh go modules
       - name: Vet
@@ -220,8 +234,8 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: |
-            /home/runner/.cache/go-build
-            /home/runner/go/pkg/mod
+            /root/.cache/go-build
+            /go/pkg/mod
           key: go-static-${{ github.sha }}
       - name: Upload Go diagnostics
         if: always()
