@@ -36,7 +36,7 @@ func TestRegisteredCIRaceDoesNotHideFailuresOrBlockHostedRecovery(t *testing.T) 
 	if status, _, _, _ := snap.CIStatus("go-test"); status != "pending" {
 		t.Fatalf("local status fed hosted gate: %s", status)
 	}
-	infra := localci.Result{Node: "node-a", Status: "error", Checks: []localci.SuiteResult{{CheckName: "go-test", Status: "error"}}}
+	infra := localci.Result{Node: "node-a", Status: "error", Checks: []localci.SuiteResult{{CheckName: "go-static", Status: "error"}, {CheckName: "go-test", Status: "failed"}}}
 	if status, _, _ := registeredResultStatus(infra); status != "pending" {
 		t.Fatalf("infrastructure error blocks fallback: %s", status)
 	}
@@ -97,6 +97,9 @@ type hostedCIRegistry struct {
 	hosted localci.HostedRuns
 }
 
+func (r *hostedCIRegistry) Mode(context.Context, string) (string, error) {
+	return localci.ModeGitHub, nil
+}
 func (r *hostedCIRegistry) LoadHostedRuns(context.Context, string, string) (localci.HostedRuns, error) {
 	return r.hosted, nil
 }
@@ -175,6 +178,23 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 	snap := withoutLocalHostedCancellations(Snapshot{Runs: []Run{cancelledRun}, Checks: []Check{check}}, registry.hosted)
 	if ci, _, _, _ := snap.CIStatus(); ci != "pending" {
 		t.Fatalf("our cancellation became a failure: %s", ci)
+	}
+	// Turning local CI off must restore our cancelled hosted run too.
+	repo := t.TempDir()
+	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
+		t.Fatalf("init repository: %v: %s", err, raw)
+	}
+	registry.hosted.Resumed = false
+	job.record.Kind, job.record.Head, job.record.RepoPath = "github", head, repo
+	fallback := Snapshot{Runs: []Run{cancelledRun}, Checks: []Check{check}}
+	fallback.Pull.Head.SHA = head
+	fallback.Pull.Head.Repo.FullName = job.record.Repo
+	fallback, err := s.withRegisteredCI(context.Background(), job.record, fallback, ChangePolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ci, _, _, _ := fallback.CIStatus(); ci != "pending" || !registry.hosted.Resumed {
+		t.Fatalf("disabled local CI did not restore hosted CI: %s %+v", ci, registry.hosted)
 	}
 	cancelledRun.Attempt = 2
 	cancelledRun.Conclusion = "failure"
