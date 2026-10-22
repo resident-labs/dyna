@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -16,11 +15,10 @@ const agyUserInfoURL = "https://www.googleapis.com/oauth2/v2/userinfo"
 // Refresh contract for the ACP grant. acp_token.json holds client_id,
 // client_secret and a long-lived refresh_token, and no access token. The ACP
 // server exchanges the refresh token with Google on every launch and rewrites
-// the file itself if Google rotates it. Dyna therefore never calls Google for
-// this grant. It saves the file verbatim at capture, restores it byte for byte
-// on activation, removes it for an account that has none, and re-captures it
-// after each use so a rotated token replaces the saved copy. Refresh of the
-// CLI token leaves the saved ACP token unchanged.
+// the file itself if Google rotates it. Dyna calls Google for this grant only
+// at sign-in, to confirm its account. It saves the file verbatim at capture,
+// restores it byte for byte on activation, and re-captures it after each use so
+// a rotated token replaces the saved copy.
 
 // AntigravityACPTokenFile is relative to the native HOME. The ACP server runs
 // with GEMINI_HOME set to that HOME and keeps its own OAuth grant here. This
@@ -35,7 +33,7 @@ const AntigravityACPSettingsFile = "antigravity-acp/settings.json"
 const agyACPRole = "file:" + AntigravityACPTokenFile
 const agyMaxACPToken = 64 << 10
 
-// agyPayload splits a saved payload into the CLI wrapper and the optional ACP
+// agyPayload splits a legacy saved payload into the CLI wrapper and the optional ACP
 // token file. Any other entry is a schema error.
 func agyPayload(payload []byte) (cli, acp json.RawMessage, err error) {
 	var p map[string]json.RawMessage
@@ -78,19 +76,8 @@ func agyACPValidate(raw []byte) error {
 	return nil
 }
 
-// acpStore is the private ACP token file in the selected native HOME.
-func (m *antigravityManager) acpStore(root string) (agyFileStore, error) {
-	home := root
-	if home == "" {
-		home = m.host.HomeDir()
-	}
-	if !filepath.IsAbs(home) {
-		return agyFileStore{}, ErrUnsupported
-	}
-	return agyFileStore{path: filepath.Join(home, AntigravityACPTokenFile)}, nil
-}
-
-// remove deletes the token so a switch never leaves another account's grant behind.
+// remove deletes one sign-in file, so a sign-in or a switch never keeps
+// another account's grant.
 func (s agyFileStore) remove() error {
 	info, err := os.Lstat(s.path)
 	if os.IsNotExist(err) {
@@ -102,58 +89,44 @@ func (s agyFileStore) remove() error {
 	return os.Remove(s.path)
 }
 
-// agyWithACP adds the ACP token, when the home has one, to a captured CLI login.
-func agyWithACP(ctx context.Context, c Captured, acp agyFileStore) (Captured, error) {
-	raw, err := acp.Read(ctx)
-	if errors.Is(err, ErrNotSignedIn) {
-		return c, nil
-	}
-	if err != nil {
-		return c, err
-	}
-	if err = agyACPValidate(raw); err != nil {
-		return c, err
-	}
-	cli, _, err := agyPayload(c.Credential.Payload)
-	if err != nil {
-		return c, err
-	}
-	c.Credential.Payload = agyPack(cli, raw)
-	return c, nil
-}
-
-// agyACPIdentity names the Google account an ACP grant signs in as, in the same
-// "google:<sub>" form as the CLI token. It exchanges the refresh token with the
-// grant's own OAuth client and asks Google who the access token belongs to.
-func agyACPIdentity(ctx context.Context, client claudeHTTPClient, raw []byte, now time.Time) (string, error) {
+// agyACPIdentity names the Google account an ACP grant signs in as, in the
+// "google:<sub>" form, with its email as the label. It exchanges the refresh
+// token with the grant's own OAuth client and asks Google who the access token
+// belongs to. Only sign-in calls it.
+func agyACPIdentity(ctx context.Context, client claudeHTTPClient, raw []byte, now time.Time) (agyACPAccount, error) {
 	var token struct {
 		ClientID     string `json:"client_id"`
 		ClientSecret string `json:"client_secret"`
 		RefreshToken string `json:"refresh_token"`
 	}
 	if agyACPValidate(raw) != nil || json.Unmarshal(raw, &token) != nil {
-		return "", ErrSchema
+		return agyACPAccount{}, ErrSchema
 	}
 	form := url.Values{"grant_type": {"refresh_token"}, "refresh_token": {token.RefreshToken}, "client_id": {token.ClientID}, "client_secret": {token.ClientSecret}}
 	body, err := directRequest(ctx, client, http.MethodPost, agyTokenURL, form.Encode(), map[string]string{"Content-Type": "application/x-www-form-urlencoded"}, now, http.StatusBadRequest)
 	if err != nil {
-		return "", err
+		return agyACPAccount{}, err
 	}
 	var access struct {
 		AccessToken string `json:"access_token"`
 	}
 	if json.Unmarshal(body, &access) != nil || access.AccessToken == "" {
-		return "", ErrSchema
+		return agyACPAccount{}, ErrSchema
 	}
 	body, err = directRequest(ctx, client, http.MethodGet, agyUserInfoURL, "", map[string]string{"Authorization": "Bearer " + access.AccessToken}, now)
 	if err != nil {
-		return "", err
+		return agyACPAccount{}, err
 	}
 	var info struct {
-		ID string `json:"id"`
+		ID    string `json:"id"`
+		Email string `json:"email"`
 	}
-	if json.Unmarshal(body, &info) != nil || info.ID == "" || len(info.ID) > 512 {
-		return "", ErrNoIdentity
+	if json.Unmarshal(body, &info) != nil {
+		return agyACPAccount{}, ErrNoIdentity
 	}
-	return "google:" + info.ID, nil
+	a := agyACPAccount{Identity: "google:" + info.ID, Label: info.Email}
+	if !a.valid() {
+		return agyACPAccount{}, ErrNoIdentity
+	}
+	return a, nil
 }
