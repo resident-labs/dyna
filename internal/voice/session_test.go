@@ -29,7 +29,7 @@ func TestCallSessionGivesVoiceItsToolsAndSettings(t *testing.T) {
 			t.Errorf("tool %s has no description or bad parameters", tool.Name)
 		}
 	}
-	if want := []string{"dispatch", "remain_silent"}; !slices.Equal(names, want) {
+	if want := []string{"dispatch", "check_pr", "check_merge_queue", "answer_question"}; !slices.Equal(names, want) {
 		t.Errorf("tools = %v, want %v", names, want)
 	}
 	if s.Voice != "marin" || s.Language != "en" || s.TranscriptionPrompt != TranscriptionPrompt || !strings.Contains(s.Instructions, "dispatch") {
@@ -37,10 +37,10 @@ func TestCallSessionGivesVoiceItsToolsAndSettings(t *testing.T) {
 	}
 }
 
-func TestDispatchToolRequiresTheOwnersPrompt(t *testing.T) {
+func TestPRStatusToolAsksForANumber(t *testing.T) {
 	tools, _, _ := toolsFixture(t)
-	if _, err := run(t, tools.Realtime(context.Background()), context.Background(), "dispatch", `{}`); err == nil {
-		t.Fatal("dispatch without a prompt answered, want an error")
+	if _, err := run(t, tools.Realtime(context.Background()), context.Background(), "check_pr", `{}`); err == nil {
+		t.Fatal("check_pr without a number answered, want an error")
 	}
 }
 
@@ -77,7 +77,7 @@ func TestCallRedialsWhenTheProviderDropsAfterAToolCall(t *testing.T) {
 			}
 			return
 		}
-		_ = ws.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.function_call_arguments.done","call_id":"c1","name":"dispatch","arguments":"{\"prompt\":\"check CI\"}"}`))
+		_ = ws.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.function_call_arguments.done","call_id":"c1","name":"dispatch","arguments":"{\"text\":\"check CI\"}"}`))
 		for ws.ReadJSON(&m) == nil {
 			if m["type"] == "conversation.item.create" {
 				return // dispatch ran; the connection drops
@@ -102,7 +102,11 @@ func TestCallRedialsWhenTheProviderDropsAfterAToolCall(t *testing.T) {
 	<-sess.done
 }
 
-// Voice's context never describes handing the work to someone else.
+// Voice acts itself: nothing it reads tells it to pass work to root or ask
+// anyone. Each tool call has a lead-in. A check is answered at once, and a
+// question no check answers is dispatched. Only dispatch gets one line on
+// what Voice did and a quiet wait. Voice waits for a result before calling
+// anything done, without saying so.
 func TestVoiceSpeaksAsTheOneDoingTheWork(t *testing.T) {
 	tools, _, _ := toolsFixture(t)
 	s := CallSession(context.Background(), tools)
@@ -115,6 +119,29 @@ func TestVoiceSpeaksAsTheOneDoingTheWork(t *testing.T) {
 		for _, bad := range []string{"root", "pass it on", "passed it on", "passed to", "pass that along", "can't confirm"} {
 			if strings.Contains(lower, bad) {
 				t.Errorf("Voice reads %q, which contains %q", text, bad)
+			}
+		}
+	}
+	for _, want := range []string{"Dispatch answers accepted or duplicate", "Neither means the work is done", "That's already under way", "call answer_question with the owner's own words", "never speak an empty result", "Call no other tool for that question", "it is your own task", "and nothing more", "Let me check", "Let me look into that", "Let me think that through", "A check answers at once", "dispatch the question right away", "any question your checks cannot answer", "until a result says so", "Keep this rule to yourself", "Find out with dispatch", "Greet the owner once", "Do not dispatch them"} {
+		if !strings.Contains(s.Instructions, want) {
+			t.Errorf("Voice's instructions lack %q", want)
+		}
+	}
+	// The line on what Voice did and the quiet wait belong to dispatch only:
+	// a check's answer is already there.
+	var waits []string
+	for _, line := range strings.Split(s.Instructions, "\n") {
+		if strings.Contains(line, "wait quietly") {
+			waits = append(waits, line)
+		}
+	}
+	if len(waits) != 1 || !strings.HasPrefix(waits[0], "- Dispatch answers") || !strings.Contains(waits[0], "I've started that") || !strings.Contains(waits[0], "Say it once") {
+		t.Errorf("the quiet wait is not dispatch's alone: %q", waits)
+	}
+	for _, text := range []string{s.Instructions, workStarted} {
+		for _, bad := range []string{"I'll do that", "Say only what", "before you say anything", "I've asked for the PR status", "Every tool call follows one pattern"} {
+			if strings.Contains(text, bad) {
+				t.Errorf("Voice reads %q, which contains the old pattern %q", text, bad)
 			}
 		}
 	}
