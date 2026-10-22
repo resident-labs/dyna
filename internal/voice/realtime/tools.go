@@ -6,7 +6,6 @@ package realtime
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,11 +18,10 @@ type Tool struct {
 	Description string
 	Parameters  json.RawMessage // a JSON Schema object
 	Run         func(ctx context.Context, args json.RawMessage) (string, error)
-	// Later marks a tool whose answer comes later in the call, such as
-	// work Voice started. Once it runs, the owner's turn is answered: the
-	// call refuses every other tool call until the owner speaks again, so a
-	// quick check cannot speak over the coming answer.
+	// Later marks work whose answer comes later, without a receipt reply.
 	Later bool
+	// Silent returns an empty tool output and asks for no follow-up reply.
+	Silent bool
 }
 
 // laterTool reports whether the tool named name answers later.
@@ -36,9 +34,14 @@ func laterTool(tools []Tool, name string) bool {
 	return false
 }
 
-// answerComing is the output of a tool call refused while the owner's turn
-// waits for a later answer. No reply is asked for it.
-var answerComing = toolOutput("", errors.New("not run: this question is already being answered, and the answer comes in this call; say nothing more about it"))
+func silentTool(tools []Tool, name string) bool {
+	for _, t := range tools {
+		if t.Name == name {
+			return t.Silent
+		}
+	}
+	return false
+}
 
 // ToolTimeout bounds one tool run, and MaxToolOutput the bytes of its
 // answer, so a slow or chatty tool cannot hold up or flood the call.
@@ -47,9 +50,8 @@ const (
 	MaxToolOutput = 4096
 )
 
-// RunTool runs the tool that call names and returns its JSON output. An
-// unknown tool, an error or a timeout is the output too, so the model can
-// tell the owner.
+// RunTool returns a tool's JSON result or error. A successful Silent tool
+// returns empty output. Unknown tools and timeouts are errors too.
 func RunTool(ctx context.Context, tools []Tool, call Event) string {
 	var tool *Tool
 	for i := range tools {
@@ -73,6 +75,9 @@ func RunTool(ctx context.Context, tools []Tool, call Event) string {
 	}()
 	select {
 	case r := <-done:
+		if tool.Silent && r.err == nil {
+			return ""
+		}
 		return toolOutput(r.text, r.err)
 	case <-ctx.Done():
 		return toolOutput("", fmt.Errorf("%s did not answer in time", call.Name))
