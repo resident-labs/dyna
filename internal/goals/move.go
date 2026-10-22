@@ -1,7 +1,6 @@
 package goals
 
 import (
-	"context"
 	"fmt"
 	"strings"
 	"unicode/utf8"
@@ -68,7 +67,7 @@ func (s *Store) MoveItem(room, goal, item, by, to string) (ItemMove, error) {
 			g := &Goal{ID: fmt.Sprintf("g%d", r.NextID), Room: room, Text: text, Detail: detail, Setter: by, Holders: []string{holder}, State: "active", CreatedAt: now, UpdatedAt: now, Edits: []Edit{}}
 			r.Goals[g.ID] = g
 			out.To = WorkRef{Goal: g.ID}
-			if _, err := w.conn.ExecContext(context.Background(), "DELETE FROM goal_items WHERE room=? AND goal=? AND id=?", room, goal, item); err != nil {
+			if err := deleteItemRow(w.conn, room, goal, item); err != nil {
 				return err
 			}
 		} else {

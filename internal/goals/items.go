@@ -499,6 +499,12 @@ func clearItemAssignee(conn *sql.Conn, room, goal, item string, now time.Time) e
 	return err
 }
 
+// deleteItemRow removes one item inside the caller's state transaction.
+func deleteItemRow(conn *sql.Conn, room, goal, item string) error {
+	_, err := conn.ExecContext(context.Background(), "DELETE FROM goal_items WHERE room=? AND goal=? AND id=?", room, goal, item)
+	return err
+}
+
 // moveItemRow moves one item row to another goal under a fresh ID.
 func moveItemRow(conn *sql.Conn, room, fromGoal, oldItem, toGoal, newItem string, now time.Time) error {
 	_, err := conn.ExecContext(context.Background(), "UPDATE goal_items SET goal=?, id=?, updated_at=? WHERE room=? AND goal=? AND id=?", toGoal, newItem, now.UnixMilli(), room, fromGoal, oldItem)
