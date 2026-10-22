@@ -29,10 +29,12 @@
   let host = $state<HTMLElement>()
   let failed = $state('')
   let term = $state<GhosttyTerminalSurface | null>(null)
-  // ready turns true once the terminal is drawn and attached; until then there
-  // is nothing to click.
-  let ready = $state(false)
+  // The attach stream reports a missing terminal or a refused attachment later,
+  // as an exit event, so readiness follows both flags instead of one assignment.
+  let attached = $state(false)
+  let exited = $state(false)
   let focused = $state(false)
+  const ready = $derived(terminalReady({ attached, failed: failed !== '', exited }))
   const takesFocus = $derived(terminalFocusOnOpen(autofocus, narrow))
   const showHint = $derived(terminalFocusHint({ ready, focused }))
 
@@ -112,7 +114,6 @@
 
   onMount(() => {
     let gone = false
-    let attached = false
     let detach: () => void = () => {}
     let dropFocusListeners: () => void = () => {}
     ;(async () => {
@@ -157,7 +158,12 @@
           if (ev.reset || !replayed) made.resetAndWrite(data)
           else if (data.length) made.write(data)
           replayed = true
-          if (ev.exited) onexit(ev.exitCode ?? 0)
+          // A terminal that is gone, or an attachment this host refused, shows
+          // up here; typing then goes nowhere, so drop readiness at once.
+          if (ev.exited) {
+            exited = true
+            onexit(ev.exitCode ?? 0)
+          }
         })
         if (gone) detach()
         attached = true
@@ -170,10 +176,7 @@
       }
       // Focus first, so a pane that takes focus never flashes the hint. A pane
       // whose surface or attach failed has nothing to type into, so no hint.
-      if (!gone) {
-        if (takesFocus && term) term.focus()
-        ready = terminalReady({ attached, failed: failed !== '' })
-      }
+      if (!gone && takesFocus && term) term.focus()
     })()
     return () => {
       gone = true
@@ -181,7 +184,8 @@
       dropFocusListeners()
       term?.dispose()
       term = null
-      ready = false
+      attached = false
+      exited = false
       focused = false
     }
   })

@@ -4,11 +4,23 @@ import { readFileSync } from 'node:fs'
 import { terminalFocusHint, terminalFocusOnOpen, terminalReady } from './terminalFocus.ts'
 
 test('a terminal that failed to attach is not ready, so it shows no hint', () => {
-  assert.equal(terminalReady({ attached: true, failed: false }), true)
-  assert.equal(terminalReady({ attached: false, failed: false }), false)
-  assert.equal(terminalReady({ attached: true, failed: true }), false)
-  const ready = terminalReady({ attached: true, failed: true })
+  assert.equal(terminalReady({ attached: true, failed: false, exited: false }), true)
+  assert.equal(terminalReady({ attached: false, failed: false, exited: false }), false)
+  assert.equal(terminalReady({ attached: true, failed: true, exited: false }), false)
+  const ready = terminalReady({ attached: true, failed: true, exited: false })
   assert.equal(terminalFocusHint({ ready, focused: false }), false)
+})
+
+// api.termAttach starts its stream and returns at once; a missing terminal or a
+// refused attachment arrives later as an exit event. Readiness must follow that
+// event, or the pane advertises typing on a terminal that cannot take it.
+test('an attach that fails after the pane is ready stops being ready', () => {
+  const opened = { attached: true, failed: false, exited: false }
+  assert.equal(terminalReady(opened), true)
+  assert.equal(terminalFocusHint({ ready: terminalReady(opened), focused: false }), true)
+  const gone = { ...opened, exited: true }
+  assert.equal(terminalReady(gone), false)
+  assert.equal(terminalFocusHint({ ready: terminalReady(gone), focused: false }), false)
 })
 
 test('the hint appears once the terminal is ready and typing would go nowhere', () => {
@@ -40,4 +52,8 @@ test('the sign-in terminal asks for focus and the pane shows the hint', () => {
   assert.match(pane, /addEventListener\('focus'/, 'the pane follows the terminal input focus')
   assert.match(pane, /addEventListener\('blur'/, 'the pane follows the terminal input blur')
   assert.match(pane, /Click to type/)
+  // Readiness is derived from attached, failed and exited, so no later
+  // assignment can revive it after the attach stream reported an exit.
+  assert.match(pane, /exited = true/, 'an exit event marks the terminal gone')
+  assert.doesNotMatch(pane, /^\s*ready = /m, 'readiness is derived, never assigned')
 })
