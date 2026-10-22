@@ -16,7 +16,7 @@ import (
 	"dyna-agent/internal/state"
 )
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 const schema = `CREATE TABLE shell_jobs (
 	id TEXT PRIMARY KEY,
@@ -84,8 +84,12 @@ func (s *Store) db() (*sql.DB, error) {
 				return err
 			}
 		}
-		_, err := conn.ExecContext(ctx, schemaV3)
-		return err
+		if old < 3 {
+			if _, err := conn.ExecContext(ctx, schemaV3); err != nil {
+				return err
+			}
+		}
+		return importLegacyExits(ctx, conn, s.Root)
 	})
 	if err != nil {
 		return nil, err
@@ -292,8 +296,9 @@ func legacyUnpublished(dir, id string) (bool, error) {
 	return true, nil
 }
 
-// readLegacyExit reads exit.json, which an old supervisor writes when its
-// command ends, even after the import.
+// TODO: legacy/shim remove later — reads exits only during schema upgrade;
+// remove when supported data directories have passed shells.version 4.
+// Supervisors from before the SQLite cutover must be drained before upgrade.
 func readLegacyExit(dir string) (*Exit, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, "exit.json"))
 	if errors.Is(err, os.ErrNotExist) {
@@ -307,6 +312,46 @@ func readLegacyExit(dir string) (*Exit, error) {
 		return nil, fmt.Errorf("shell %s has an invalid exit.json: %w", filepath.Base(dir), err)
 	}
 	return &ex, nil
+}
+
+// TODO: legacy/shim remove later — imports retained exits for existing jobs;
+// remove when supported data directories have passed shells.version 4.
+func importLegacyExits(ctx context.Context, conn *sql.Conn, root string) error {
+	rows, err := conn.QueryContext(ctx, "SELECT id FROM shell_jobs WHERE ended IS NULL")
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	err = errors.Join(rows.Err(), rows.Close())
+	if err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if !ValidID(id) {
+			return fmt.Errorf("invalid shell id %q", id)
+		}
+		ex, err := readLegacyExit(filepath.Join(root, id))
+		if err != nil {
+			return err
+		}
+		if ex == nil {
+			continue
+		}
+		// Only exit columns change; canonical metadata and delivery fields survive.
+		if _, err := conn.ExecContext(ctx, `UPDATE shell_jobs SET ended=?,exit_code=?,exit_signal=?,exit_error=? WHERE id=? AND ended IS NULL`,
+			ex.Ended.UTC().Format(time.RFC3339Nano), ex.Code, ex.Signal, ex.Error, id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // exec runs one statement against the row of job id and reports whether it
