@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 
@@ -13,7 +12,7 @@ import (
 )
 
 // These golden bytes pin the immutable graph format, including struct field
-// order, escaping and the final newline. Rollback copies preserve graph values.
+// order, escaping and the final newline. Ancestry stamps preserve these bytes.
 func TestStorageGoldenBytes(t *testing.T) {
 	testAncestryEngine(t)
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
@@ -70,12 +69,7 @@ func TestStorageGoldenBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var rollback plan.Plan
-	if err := json.Unmarshal(raw, &rollback); err != nil {
-		t.Fatal(err)
-	}
-	p.ResumedFrom = parent
-	if !reflect.DeepEqual(p, &rollback) {
-		t.Fatalf("rollback changed graph values: got %#v; want %#v", rollback, p)
+	if string(raw) != string(got) {
+		t.Fatalf("ancestry stamp changed graph bytes: %s", raw)
 	}
 }

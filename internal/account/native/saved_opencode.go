@@ -65,19 +65,6 @@ func (m *openCodeManager) readOpenCodeConsoleUsage(ctx context.Context, token, o
 		} `json:"access"`
 	}
 	err := m.openCodeJSON(ctx, "/console/api/go/status", token, orgID, &response)
-	var quotaErr *QuotaError
-	// TODO: legacy/shim remove later — retries old OpenCode user tokens with a workspace header; remove when supported tokens no longer require it
-	if err != nil && orgID == "" && !errors.As(err, &quotaErr) {
-		// Older user tokens need a workspace header. Native Console source exposes
-		// /api/orgs; only a sole workspace is unambiguous without stored metadata.
-		// /orgs/current has a proven subscription flag, not a proven workspace ID.
-		var orgs []struct {
-			ID string `json:"id"`
-		}
-		if m.openCodeJSON(ctx, "/console/api/orgs", token, "", &orgs) == nil && len(orgs) == 1 && orgs[0].ID != "" {
-			err = m.openCodeJSON(ctx, "/console/api/go/status", token, orgs[0].ID, &response)
-		}
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -147,13 +134,7 @@ func (m *openCodeManager) readOpenCodeKeyUsage(ctx context.Context, token string
 			ResetsAt string   `json:"resetsAt"`
 		} `json:"usage"`
 	}
-	// The current public inference prefix is pinned by infra/console.ts;
-	// the source keeps /zen/go/v1/usage as an explicit compatibility proxy.
 	err := m.openCodeJSON(ctx, "/inference/go/v1/usage", token, "", &response)
-	if err == ErrUnsupported {
-		// TODO: legacy/shim remove later — retries the old OpenCode usage route; remove when supported endpoints serve the inference route
-		err = m.openCodeJSON(ctx, "/zen/go/v1/usage", token, "", &response)
-	}
 	if err != nil {
 		return nil, err
 	}

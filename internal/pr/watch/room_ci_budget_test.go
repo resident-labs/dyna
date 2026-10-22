@@ -34,7 +34,7 @@ func TestSetRoomCIBudgetUpdatesLivePolicyAndNotes(t *testing.T) {
 		})
 	}()
 	<-held
-	budget := ChangePolicy{CIWarnAfter: "4m", CIFailAfter: "5m", CITestMax: "20s", CITestAllow: []string{"legacy", "pkg/new"}, CITestAllowNotes: map[string]string{"pkg/new": " 12 seconds: service setup ", "removed": "old debt"}}
+	budget := ChangePolicy{CITimeBudget: "warn", CIWarnAfter: "4m", CIFailAfter: "5m", CITestMax: "20s", CITestAllow: []string{"legacy", "pkg/new"}, CITestAllowNotes: map[string]string{"pkg/new": " 12 seconds: service setup ", "removed": "old debt"}}
 	saved := make(chan error, 1)
 	go func() { saved <- e.s.SetRoomCIBudget(id, authority.Actor{Role: authority.Owner}, budget) }()
 	close(release)
@@ -66,7 +66,7 @@ func TestSetRoomCIBudgetUpdatesLivePolicyAndNotes(t *testing.T) {
 		t.Fatal("missing room accepted")
 	}
 	before := again
-	for _, bad := range []ChangePolicy{{CIWarnAfter: "5m", CIFailAfter: "4m"}, {CITestMax: "0s"}, {CITestAllow: []string{"new-without-note"}}} {
+	for _, bad := range []ChangePolicy{{CITimeBudget: "warn", CIWarnAfter: "5m", CIFailAfter: "4m"}, {CITimeBudget: "warn", CITestMax: "0s"}, {CITimeBudget: "warn", CITestAllow: []string{"new-without-note"}}} {
 		if err := e.s.SetRoomCIBudget(id, authority.Actor{Role: authority.Owner}, bad); err == nil {
 			t.Fatalf("invalid budget accepted: %+v", bad)
 		}
@@ -87,34 +87,39 @@ func TestSetRoomCIBudgetUpdatesLivePolicyAndNotes(t *testing.T) {
 	}
 }
 
-func TestSetRoomCIBudgetWorkflowExemptions(t *testing.T) {
-	e := newEnv(t)
-	id := e.author.RoomID
-	budget := changepolicy.Default()
-	budget.CIBudgetExempt = []string{"Weekly audit"}
-	if err := e.s.SetRoomCIBudget(id, authority.Actor{Role: authority.Owner}, budget); err != nil {
+func TestRoomBudgetReplacementClearsExemptions(t *testing.T) {
+	s := &Service{Store: &Store{Root: t.TempDir()}}
+	id := "room"
+	original := changepolicy.Default()
+	original.CITimeBudget = "enforce"
+	original.CIBudgetExempt = []string{"Weekly audit"}
+	original.Review, original.Land = "off", "branch-only"
+	original.RequiredChecks = []string{"special"}
+	if err := s.Store.update(func(st *State) error {
+		st.Policies = map[string]ChangePolicy{id: original}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
-	budget.CIBudgetExempt[0] = "changed input"
-	got, err := e.s.RoomChangePolicy(id)
-	if err != nil || !reflect.DeepEqual(got.CIBudgetExempt, []string{"Weekly audit"}) {
-		t.Fatalf("exemptions: %+v %v", got, err)
-	}
-	budget.CIBudgetExempt = nil
-	if err := e.s.SetRoomCIBudget(id, authority.Actor{Role: authority.Owner}, budget); err != nil {
+	budget := ChangePolicy{CITimeBudget: "warn"}
+	if err := s.SetRoomCIBudget(id, authority.Actor{Role: authority.Owner}, budget); err != nil {
 		t.Fatal(err)
 	}
-	got, _ = e.s.RoomChangePolicy(id)
-	if len(got.CIBudgetExempt) != 1 {
-		t.Fatal("old client cleared exemptions")
-	}
-	budget.CIBudgetExempt = []string{}
-	if err := e.s.SetRoomCIBudget(id, authority.Actor{Role: authority.Owner}, budget); err != nil {
+	got, err := s.RoomChangePolicy(id)
+	if err != nil {
 		t.Fatal(err)
 	}
-	got, _ = e.s.RoomChangePolicy(id)
-	if len(got.CIBudgetExempt) != 0 {
-		t.Fatal("explicit clear failed")
+	if len(got.CIBudgetExempt) != 0 || got.CITimeBudget != "warn" ||
+		got.Review != original.Review || got.Land != original.Land ||
+		!reflect.DeepEqual(got.RequiredChecks, original.RequiredChecks) {
+		t.Errorf("budget replacement lost or retained fields: %+v", got)
+	}
+	if err := s.SetRoomCIBudget(id, authority.Actor{Role: authority.Owner}, ChangePolicy{}); err == nil {
+		t.Error("empty mode accepted")
+	}
+	again, err := s.RoomChangePolicy(id)
+	if err != nil || !reflect.DeepEqual(again, got) {
+		t.Fatalf("invalid write changed policy: %+v %v", again, err)
 	}
 }
 

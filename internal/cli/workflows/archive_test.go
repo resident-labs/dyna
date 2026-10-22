@@ -176,8 +176,8 @@ func TestRunResumeFromArchivedRun(t *testing.T) {
 	// each run to finish, so no turn needs to hold.
 	defer func(previous time.Duration) { harness.MockDefaultDelay = previous }(harness.MockDefaultDelay)
 	harness.MockDefaultDelay = 0
-	_, ancestryCalls := enginetest.PlanAncestryCalls(t)
-	serveRunEngine(t, ancestryCalls)
+	ancestryStore, ancestryCalls := enginetest.PlanAncestryCalls(t)
+	serveRunEngineAt(t, ancestryStore.DataDir, ancestryCalls)
 	t.Setenv(runstore.ArchiveDirEnv, "")
 	t.Setenv(runstore.AgentJournalRootEnv, "")
 	mockProfile(t)
@@ -224,6 +224,6 @@ func TestRunResumeFromArchivedRun(t *testing.T) {
 		t.Fatalf("resume from archived run replayed nothing: %#v", events)
 	}
 	if got, err := runstore.ResumedFrom(childID); err != nil || got != sourceID {
-		t.Fatal("child plan lost resumedFrom")
+		t.Fatalf("child plan resumedFrom = %q, %v; want %q", got, err, sourceID)
 	}
 }

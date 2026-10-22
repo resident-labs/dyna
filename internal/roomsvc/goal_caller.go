@@ -17,7 +17,7 @@ func WithGoalAuthor(ctx context.Context, by string) context.Context {
 
 // goalAuthor keeps the recorded author separate from the rule guard and holder lookup.
 type goalAuthor struct {
-	ID, Name, Address, AuthorizeAs, ResolveAs string
+	ID, Name, Address, ResolveAs string
 }
 
 // goalCaller resolves the authenticated caller and enforces its room restriction.
@@ -26,11 +26,7 @@ func (s *Service) goalCaller(ctx context.Context, ref string) (room.Record, goal
 	author := goalAuthor{ID: "owner", Name: "owner", Address: "owner", ResolveAs: "owner"}
 	callerRoom := ""
 	switch actor.Role {
-	case authority.Owner:
-		author.AuthorizeAs = "owner"
-	case authority.Worker:
-		// TODO: legacy/shim remove later — workflow rule writes keep their prior owner-rule authority; remove when an explicit rule-authority policy replaces the old CLI role behavior.
-		author.AuthorizeAs = "owner"
+	case authority.Owner, authority.Worker:
 	case authority.Root, authority.Session, authority.Steward:
 		if actor.Session == "" {
 			return room.Record{}, goalAuthor{}, fmt.Errorf("goal and rule changes need an authenticated session")
@@ -39,11 +35,7 @@ func (s *Service) goalCaller(ctx context.Context, ref string) (room.Record, goal
 		if err != nil {
 			return room.Record{}, goalAuthor{}, err
 		}
-		author = goalAuthor{ID: info.ID, Name: info.Name, Address: info.Address(), AuthorizeAs: info.ID, ResolveAs: info.ID}
-		// TODO: legacy/shim remove later — root rule writes keep their prior owner-rule authority; remove when an explicit rule-authority policy replaces the old CLI role behavior.
-		if actor.Role == authority.Root {
-			author.AuthorizeAs = "owner"
-		}
+		author = goalAuthor{ID: info.ID, Name: info.Name, Address: info.Address(), ResolveAs: info.ID}
 		callerRoom = info.RoomID
 		if ref == "" {
 			ref = callerRoom

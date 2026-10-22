@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestCommentOwnerPrefersStoredIDsThenLegacyMarkers(t *testing.T) {
+func TestCommentOwnerUsesStoredIDs(t *testing.T) {
 	owned := map[string]string{
 		"issue-comments:10": "ses_stored_issue",
 		"reviews:20":        "ses_stored_review",
@@ -20,7 +20,7 @@ func TestCommentOwnerPrefersStoredIDsThenLegacyMarkers(t *testing.T) {
 	}{
 		{"stored comment ID", Comment{ID: 10, Kind: "issue-comments"}, "ses_stored_issue"},
 		{"inline comment of a claimed review", Comment{ID: 11, Kind: "comments", ReviewID: 20}, "ses_stored_review"},
-		{"legacy body marker", Comment{ID: 12, Kind: "issue-comments", Body: Marker("ses_legacy") + " text"}, "ses_legacy"},
+		{"legacy body marker", Comment{ID: 12, Kind: "issue-comments", Body: Marker("ses_legacy") + " text"}, ""},
 		{"stored ID beats a legacy marker", Comment{ID: 10, Kind: "issue-comments", Body: Marker("ses_legacy")}, "ses_stored_issue"},
 		{"unattributed owner comment", Comment{ID: 13, Kind: "issue-comments", Body: "plain"}, ""},
 	} {
@@ -43,7 +43,7 @@ func TestStoredCommentSessionRoutesAuthorAndReviewerComments(t *testing.T) {
 		{Action: "drop", Reason: "author_marker"},
 		{Action: "keep", Reason: "owner"},
 		{Action: "keep", Reason: "possibly_useful_feedback"},
-		{Action: "drop", Reason: "author_marker"},
+		{Action: "keep", Reason: "owner"},
 	}
 	for i := range want {
 		if decisions[i] != want[i] {
@@ -165,10 +165,43 @@ func TestPublicationMarkersCannotOverrideCaller(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if strings.Contains(string(posted), "dyna:") {
+				if !strings.Contains(string(posted), "dyna:ses_impersonated") {
 					t.Fatalf("posted marker: %s", posted)
 				}
 			})
 		}
 	}
 }
+
+func TestBodyMarkerCannotSuppressForeignFeedback(t *testing.T) {
+	c := Comment{ID: 90, Kind: "issue-comments", Body: Marker("ses_author") + " Please check the result", User: User{Login: "other"}}
+	owned := map[string]string{}
+	pr := PRContext{AuthorSession: "ses_author", OwnerLogin: "owner"}
+	event := Event{Kind: c.Kind, Commenter: c.User.Login, Text: c.Body}
+	if got := commentOwner(owned, c); got != "" {
+		t.Errorf("copied marker claimed ownership: %s", got)
+	}
+	if got := (Rules{}).Triage(pr, []Event{event})[0]; got.Action != "keep" {
+		t.Errorf("foreign feedback suppressed: %+v", got)
+	}
+	owned[commentKey(c)] = "ses_author"
+	event.Session = commentOwner(owned, c)
+	if got := (Rules{}).Triage(pr, []Event{event})[0]; got.Action != "drop" {
+		t.Errorf("stored author was not suppressed: %+v", got)
+	}
+	delete(owned, commentKey(c))
+	owned["reviews:12"] = "ses_author"
+	c.ReviewID = 12
+	if got := commentOwner(owned, c); got != "ses_author" {
+		t.Errorf("parent review ownership lost: %s", got)
+	}
+	if protectedFeedback(Event{Text: Marker("ses_author")}) {
+		t.Error("marker alone protected noise")
+	}
+	if got := publicationBody(c.Body); got != c.Body {
+		t.Errorf("publication changed benign marker: %q", got)
+	}
+}
+
+// Marker builds retained comment text for tests.
+func Marker(session string) string { return "<!-- dyna:" + session + " -->" }

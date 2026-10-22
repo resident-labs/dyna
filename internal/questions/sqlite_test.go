@@ -2,6 +2,8 @@ package questions
 
 import (
 	"bufio"
+	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -15,6 +17,8 @@ import (
 	"time"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
+	"dyna-agent/internal/state"
 )
 
 func questionRoot(t *testing.T) string {
@@ -45,7 +49,7 @@ func legacyQuestions(t *testing.T, root string) {
 	}
 }
 
-func importedMarker(t *testing.T, root string) {
+func migratedQuestions(t *testing.T, root string) {
 	t.Helper()
 	path := filepath.Join(filepath.Dir(root), "dyna.db")
 	if _, err := os.Stat(path); err != nil {
@@ -57,8 +61,8 @@ func importedMarker(t *testing.T, root string) {
 	}
 	defer db.Close()
 	var value int
-	if err := db.QueryRow("SELECT value FROM meta WHERE key = 'questions.imported'").Scan(&value); err != nil || value != 1 {
-		t.Fatalf("import marker: %d, %v", value, err)
+	if err := db.QueryRow("SELECT value FROM meta WHERE key = 'questions.schema'").Scan(&value); err != nil || value != 2 {
+		t.Fatalf("schema version: %d, %v", value, err)
 	}
 }
 
@@ -70,7 +74,7 @@ func TestQuestionsImportLegacyOnce(t *testing.T) {
 	if err != nil || st.Next["room"] != 7 || st.Questions["room/q7"].Text != sample("owner").Text {
 		t.Fatalf("import: %+v, %v", st, err)
 	}
-	importedMarker(t, root)
+	migratedQuestions(t, root)
 	if err := os.WriteFile(filepath.Join(root, "state.json"), []byte(`{"version":1,"next":{"room":999}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +82,7 @@ func TestQuestionsImportLegacyOnce(t *testing.T) {
 	if err != nil || st.Next["room"] != 7 || len(st.Questions) != 1 {
 		t.Fatalf("legacy state imported twice: %+v, %v", st, err)
 	}
-	importedMarker(t, root)
+	migratedQuestions(t, root)
 }
 
 // This is the version check from the old JSON reader. Keep it independent of
@@ -98,22 +102,14 @@ func oldQuestionReader(root string) error {
 	return nil
 }
 
-func TestOldQuestionReaderRejectsMigrationGuard(t *testing.T) {
+func TestQuestionImportLeavesSourceReadable(t *testing.T) {
 	root := questionRoot(t)
 	legacyQuestions(t, root)
 	if _, err := (&Store{Root: root}).Read(); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(root, "state.json"))
-	if err != nil || string(data) != "{\"version\":2}\n" {
-		t.Fatalf("guard contents: %q, %v", data, err)
-	}
-	info, err := os.Stat(filepath.Join(root, "state.json"))
-	if err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("guard permissions: %v, %v", info, err)
-	}
-	if err := oldQuestionReader(root); err == nil || !strings.Contains(err.Error(), "unsupported question state version 2") {
-		t.Fatalf("old reader accepted migrated state: %v", err)
+	if err := oldQuestionReader(root); err != nil {
+		t.Fatalf("retained source: %v", err)
 	}
 }
 
@@ -205,7 +201,7 @@ func TestQuestionRollbackAndNoopKeepRevision(t *testing.T) {
 	}
 }
 
-func TestQuestionImportFailureAndGuardRepair(t *testing.T) {
+func TestQuestionImportFailurePreservesSource(t *testing.T) {
 	root := questionRoot(t)
 	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
@@ -231,10 +227,10 @@ func TestQuestionImportFailureAndGuardRepair(t *testing.T) {
 	}
 	st, err := (&Store{Root: root}).Read()
 	if err != nil || st.Next["room"] != 7 || len(st.Questions) != 1 {
-		t.Fatalf("guard repair changed imported rows: %+v, %v", st, err)
+		t.Fatalf("missing source changed imported rows: %+v, %v", st, err)
 	}
-	if err := oldQuestionReader(root); err == nil {
-		t.Fatal("missing guard was not repaired")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("missing source was recreated: %v", err)
 	}
 }
 
@@ -263,50 +259,7 @@ func TestQuestionDatabaseSettingsAndJSONBodies(t *testing.T) {
 	}
 }
 
-func TestQuestionGuardFailureKeepsAcceptedLegacyUpdates(t *testing.T) {
-	root := questionRoot(t)
-	legacyQuestions(t, root)
-	s := &Store{Root: root}
-	db, err := database.Open(filepath.Dir(root))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer database.Close(filepath.Dir(root))
-	guardFailure := fmt.Errorf("guard replacement failed")
-	if err := s.importLegacy(db, func() error { return guardFailure }); err != guardFailure {
-		t.Fatalf("guard failure: %v", err)
-	}
-	// An old writer still accepts version 1 while guard installation has failed.
-	if err := oldQuestionReader(root); err != nil {
-		t.Fatalf("old writer cannot inspect its state: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(root, "state.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var legacy State
-	if err := json.Unmarshal(data, &legacy); err != nil {
-		t.Fatal(err)
-	}
-	accepted := sample("old-writer")
-	accepted.ID = "q8"
-	accepted.State = "open"
-	legacy.Questions["room/q8"] = accepted
-	legacy.Next["room"] = 8
-	data, err = json.Marshal(legacy)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "state.json"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
-	recovered, err := s.Read()
-	if err != nil || recovered.Next["room"] != 8 || len(recovered.Questions) != 2 || recovered.Questions["room/q8"].Text != accepted.Text {
-		t.Fatalf("recovery lost an accepted legacy update: %+v, %v", recovered, err)
-	}
-}
-
-func TestInterruptedQuestionImportRecoversBehindGuard(t *testing.T) {
+func TestInterruptedQuestionImportRetriesUnchangedSource(t *testing.T) {
 	root := questionRoot(t)
 	legacyQuestions(t, root)
 	s := &Store{Root: root}
@@ -316,23 +269,23 @@ func TestInterruptedQuestionImportRecoversBehindGuard(t *testing.T) {
 	}
 	defer database.Close(filepath.Dir(root))
 	if _, err := db.Exec(`CREATE TRIGGER interrupt_import BEFORE INSERT ON meta
-WHEN NEW.key='questions.imported' BEGIN SELECT RAISE(ABORT,'interrupted import'); END`); err != nil {
+WHEN NEW.key='questions.schema' AND NEW.value='2' BEGIN SELECT RAISE(ABORT,'interrupted import'); END`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Read(); err == nil || !strings.Contains(err.Error(), "interrupted import") {
 		t.Fatalf("import interruption: %v", err)
 	}
-	if err := oldQuestionReader(root); err == nil {
-		t.Fatal("old writer accepted state after interrupted database import")
+	if err := oldQuestionReader(root); err != nil {
+		t.Fatalf("interrupted import changed retained source: %v", err)
 	}
 	if _, err := db.Exec("DROP TRIGGER interrupt_import"); err != nil {
 		t.Fatal(err)
 	}
 	recovered, err := s.Read()
 	if err != nil || recovered.Next["room"] != 7 || len(recovered.Questions) != 1 || recovered.Questions["room/q7"].Text != sample("owner").Text {
-		t.Fatalf("backup recovery: %+v, %v", recovered, err)
+		t.Fatalf("source recovery: %+v, %v", recovered, err)
 	}
-	importedMarker(t, root)
+	migratedQuestions(t, root)
 }
 
 func TestRepeatedRevisionDoesNotReopenOrReimport(t *testing.T) {
@@ -346,9 +299,6 @@ func TestRepeatedRevisionDoesNotReopenOrReimport(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer database.Close(filepath.Dir(root))
-	if err := os.Remove(filepath.Join(root, "state.json")); err != nil {
-		t.Fatal(err)
-	}
 	for range 3 {
 		if _, err := s.Revision(); err != nil {
 			t.Fatal(err)
@@ -392,5 +342,127 @@ func TestAskCrashBetweenPostAndRecord(t *testing.T) {
 	}
 	if q, err := s.Ask(sample("crasher"), nil); err != nil || q.ID != "q2" {
 		t.Fatalf("next question = %+v, %v; want q2", q, err)
+	}
+}
+
+func TestQuestionImportPreservesRawSourceAndCanonicalState(t *testing.T) {
+	const source = `{"version":1,"next":{"room":7},"questions":{"room/q7":{"id":"q7","room":"room","state":"open","asker":"owner","text":"Keep this","future":{"answer":42}}}}`
+	for _, tc := range []struct {
+		name, source, backup, canonical string
+		wantError                       bool
+	}{
+		{name: "source", source: source},
+		{name: "missing-source", backup: source},
+		{name: "guard", source: `{"version":2}`, backup: source},
+		{name: "empty"},
+		{name: "marker", source: "{stale", canonical: `INSERT INTO meta VALUES('questions.imported','1')`},
+		{name: "rows", source: "{stale", canonical: `INSERT INTO questions VALUES('saved','room','open','owner','{"id":"saved","room":"room"}')`},
+		{name: "counters", source: "{stale", canonical: `INSERT INTO question_next VALUES('saved',17)`},
+		{name: "revision", source: "{stale", canonical: `INSERT INTO meta VALUES('questions.revision','17')`},
+		{name: "guard-without-backup", source: `{"version":2}`, wantError: true},
+		{name: "invalid-backup", backup: "{broken", wantError: true},
+		{name: "invalid-row", source: `{"version":1,"next":{"room":7},"questions":{"bad":{"room":17}}}`, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := questionRoot(t)
+			if err := os.MkdirAll(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			files := map[string]string{"state.json": tc.source, "state.v1.backup.json": tc.backup}
+			for name, body := range files {
+				if body != "" {
+					if err := os.WriteFile(filepath.Join(root, name), []byte(body), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			db, err := database.Open(filepath.Dir(root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+				if _, err := conn.ExecContext(context.Background(), questionsSchema); err != nil {
+					return err
+				}
+				if tc.canonical != "" {
+					if _, err := conn.ExecContext(context.Background(), `INSERT INTO meta VALUES('questions.schema','1')`); err != nil {
+						return err
+					}
+					if _, err := conn.ExecContext(context.Background(), tc.canonical); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			s := &Store{Root: root}
+			st, err := s.Read()
+			if (err != nil) != tc.wantError {
+				t.Fatalf("import error: %v", err)
+			}
+			var version, rows, counters, markers int
+			if err := db.QueryRow(`SELECT COALESCE((SELECT value FROM meta WHERE key='questions.schema'),0), (SELECT count(*) FROM questions), (SELECT count(*) FROM question_next), (SELECT count(*) FROM meta WHERE key='questions.imported')`).Scan(&version, &rows, &counters, &markers); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantError {
+				if version == 2 || rows != 0 || counters != 0 {
+					t.Fatalf("failed import committed: version=%d rows=%d counters=%d", version, rows, counters)
+				}
+			} else {
+				if version != 2 || markers != 0 {
+					t.Fatalf("migration: version=%d markers=%d", version, markers)
+				}
+				if tc.canonical == "" && tc.name != "empty" {
+					if st.Next["room"] != 7 || st.Questions["room/q7"].Text != "Keep this" {
+						t.Fatalf("import: %+v", st)
+					}
+					var future int
+					if err := db.QueryRow(`SELECT json_extract(body,'$.future.answer') FROM questions WHERE key='room/q7'`).Scan(&future); err != nil || future != 42 {
+						t.Fatalf("unknown field: %d, %v", future, err)
+					}
+				} else if tc.canonical != "" {
+					wantRows, wantCounters := 0, 0
+					if tc.name == "rows" {
+						wantRows = 1
+					}
+					if tc.name == "counters" {
+						wantCounters = 1
+					}
+					if rows != wantRows || counters != wantCounters || (tc.name == "rows" && st.Questions["saved"].ID != "saved") || (tc.name == "counters" && st.Next["saved"] != 17) {
+						t.Fatalf("canonical state replaced: %+v", st)
+					}
+					revision, err := s.Revision()
+					want := "0"
+					if tc.name == "revision" {
+						want = "17"
+					}
+					if err != nil || revision != want {
+						t.Fatalf("revision %s, %v; want %s", revision, err, want)
+					}
+				}
+				if err := s.update(func(st *State) error { st.Next = map[string]int{}; st.Questions = map[string]Question{}; return nil }); err != nil {
+					t.Fatal(err)
+				}
+				if err := database.Close(filepath.Dir(root)); err != nil {
+					t.Fatal(err)
+				}
+				st, err = (&Store{Root: root}).Read()
+				if err != nil || len(st.Questions) != 0 || len(st.Next) != 0 {
+					t.Fatalf("retained input restored deleted state: %+v, %v", st, err)
+				}
+			}
+			for name, body := range files {
+				got, err := os.ReadFile(filepath.Join(root, name))
+				if body == "" {
+					if !os.IsNotExist(err) {
+						t.Errorf("created %s: %v", name, err)
+					}
+				} else if err != nil || !bytes.Equal(got, []byte(body)) {
+					t.Errorf("changed %s: %q, %v", name, got, err)
+				}
+			}
+		})
 	}
 }

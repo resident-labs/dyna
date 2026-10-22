@@ -8,7 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,10 +38,72 @@ func (s Store) db() (*sql.DB, error) {
 	return db, err
 }
 
-// Migrate creates the ancestry table at engine start.
-// Legacy headers are imported on read; startup never inspects graph files.
+// Migrate imports retained ancestry once at engine start. Imported rows and
+// the version commit together; source headers and ownership stamps stay intact.
+// Both the default archive and any configured archive root are scanned.
 func Migrate(dataDir string) error {
-	_, err := (Store{DataDir: dataDir}).db()
+	db, err := (Store{DataDir: dataDir}).db()
+	if err != nil {
+		return err
+	}
+	return database.Migrate(db, "plan.ancestry.import", 1, func(conn *sql.Conn, _ int) error {
+		ctx := context.Background()
+		roots := []string{filepath.Join(dataDir, "runs"), filepath.Join(dataDir, "archive", "runs")}
+		if archive := store.RunArchiveDir(dataDir); archive != roots[1] {
+			roots = append(roots, archive)
+		}
+		for _, root := range roots {
+			if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+				if os.IsNotExist(err) && path == root {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				if entry.Name() != "plan.json" {
+					return nil
+				}
+				key, err := planKey(filepath.Dir(path))
+				if err != nil {
+					return err
+				}
+				var exists bool
+				if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM plan_ancestry WHERE plan=?)", key).Scan(&exists); err != nil {
+					return err
+				}
+				if exists {
+					return nil
+				}
+				imported, err := state.ImportMigration(ctx, conn, "plans/"+key, path, func(conn *sql.Conn, raw []byte) error {
+					return importRetainedHeader(ctx, conn, key, raw)
+				})
+				if err == nil && !imported {
+					// Older readers stamped empty headers without storing a row.
+					// Preserve that empty value without reading an owned copy.
+					_, err = conn.ExecContext(ctx, "INSERT INTO plan_ancestry(plan,resumed_from) VALUES(?, '') ON CONFLICT(plan) DO NOTHING", key)
+				}
+				return err
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// TODO: legacy/shim remove later — decodes retained ancestry only at startup.
+func importRetainedHeader(ctx context.Context, conn *sql.Conn, key string, raw []byte) error {
+	fields, err := decodeHeader(raw)
+	if err != nil {
+		return err
+	}
+	var parent string
+	if raw, ok := fields["resumedFrom"]; ok {
+		if err := json.Unmarshal(raw, &parent); err != nil {
+			return err
+		}
+	}
+	_, err = conn.ExecContext(ctx, "INSERT INTO plan_ancestry(plan,resumed_from) VALUES(?,?) ON CONFLICT(plan) DO NOTHING", key, strings.TrimSpace(parent))
 	return err
 }
 
@@ -62,7 +124,7 @@ func planKey(dir string) (string, error) {
 	return absolute, nil
 }
 
-// Parent imports a foreign legacy header, then reads the authoritative row.
+// Parent reads the authoritative row without inspecting graph files.
 func (s Store) Parent(ctx context.Context, dir string) (string, error) {
 	key, err := planKey(dir)
 	if err != nil {
@@ -70,9 +132,6 @@ func (s Store) Parent(ctx context.Context, dir string) (string, error) {
 	}
 	db, err := s.db()
 	if err != nil {
-		return "", err
-	}
-	if err := s.importForeign(ctx, db, dir); err != nil {
 		return "", err
 	}
 	return parentRow(ctx, db, key)
@@ -103,8 +162,7 @@ func lockID(key string) string {
 	return strings.Split(key, string(filepath.Separator))[0]
 }
 
-// beforePlanLock lets tests hold contenders after their foreign-header checks,
-// before either can acquire the record lock.
+// beforePlanLock lets tests observe contenders before they acquire the record lock.
 var beforePlanLock = func() {}
 
 func (s Store) lock(ctx context.Context, dir string) (func(), error) {
@@ -120,25 +178,7 @@ func (s Store) lock(ctx context.Context, dir string) (func(), error) {
 	return store.LockContext(ctx, path)
 }
 
-// TODO: legacy/shim remove later — import an older binary's plan header on its first read; remove with item 31 after all older workflow runners exit.
-func (s Store) importForeign(ctx context.Context, db *sql.DB, dir string) error {
-	key, err := planKey(dir)
-	if err != nil {
-		return err
-	}
-	foreign, err := state.For(db).Foreign(ctx, "plans/"+key, filepath.Join(dir, "plan.json"))
-	if err != nil || !foreign {
-		return err
-	}
-	unlock, err := s.lock(ctx, dir)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	return s.importHeader(ctx, db, dir)
-}
-
-// Stamp records the first nonempty parent, then updates the downgrade header.
+// Stamp records the first nonempty parent without changing the graph.
 func (s Store) Stamp(ctx context.Context, dir, parent string) (string, error) {
 	parent = strings.TrimSpace(parent)
 	if parent == "" {
@@ -157,9 +197,6 @@ func (s Store) Stamp(ctx context.Context, dir, parent string) (string, error) {
 		return "", err
 	}
 	defer unlock()
-	if err := s.importHeader(ctx, db, dir); err != nil {
-		return "", err
-	}
 	var saved string
 	// No consumer reads an ancestry event. Publish nothing.
 	err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
@@ -168,68 +205,7 @@ func (s Store) Stamp(ctx context.Context, dir, parent string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := s.mirror(ctx, db, key, dir); err != nil {
-		return saved, fmt.Errorf("plan ancestry committed; rollback header: %w", err)
-	}
 	return saved, nil
-}
-
-// TODO: legacy/shim remove later — import a previous binary's first parent before reads or writes; remove with item 31 after all older workflow runners exit.
-func (s Store) importHeader(ctx context.Context, db *sql.DB, dir string) error {
-	key, err := planKey(dir)
-	if err != nil {
-		return err
-	}
-	_, err = state.For(db).ImportIfForeign(ctx, "plans/"+key, filepath.Join(dir, "plan.json"), func(conn *sql.Conn, raw []byte) error {
-		fields, err := decodeHeader(raw)
-		if err != nil {
-			// A damaged graph is an unreadable plan. Skipping it would falsely
-			// report no parent and let archive selection remove a needed run.
-			return err
-		}
-		var parent string
-		if raw, ok := fields["resumedFrom"]; ok {
-			if err := json.Unmarshal(raw, &parent); err != nil {
-				return err
-			}
-		}
-		parent = strings.TrimSpace(parent)
-		if parent == "" {
-			return nil // ImportIfForeign still stamps this file version.
-		}
-		// A nonempty row wins over a stale header, including a crash before
-		// its rollback copy was written. Old binaries can only fill an empty row.
-		_, err = conn.ExecContext(ctx, "INSERT INTO plan_ancestry(plan,resumed_from) VALUES(?,?) ON CONFLICT(plan) DO UPDATE SET resumed_from=excluded.resumed_from WHERE plan_ancestry.resumed_from=''", key, parent)
-		return err
-	})
-	return err
-}
-
-// TODO: legacy/shim remove later — plan.json is a write-only rollback copy of resume ancestry for item 24; remove with item 31 after all older workflow runners exit.
-func (s Store) mirror(ctx context.Context, db *sql.DB, key, dir string) error {
-	return state.For(db).Mirror(ctx, "plans/"+key, filepath.Join(dir, "plan.json"), func(w io.Writer) error {
-		raw, err := os.ReadFile(filepath.Join(dir, "plan.json"))
-		if err != nil {
-			return err
-		}
-		fields, err := decodeHeader(raw)
-		if err != nil {
-			return err
-		}
-		parent, err := parentRow(ctx, db, key)
-		if err != nil {
-			return err
-		}
-		encoded, err := json.Marshal(parent)
-		if err != nil {
-			return err
-		}
-		fields["resumedFrom"] = encoded
-		enc := json.NewEncoder(w)
-		enc.SetEscapeHTML(false)
-		enc.SetIndent("", "  ")
-		return enc.Encode(fields)
-	})
 }
 
 // ForgetAncestry removes a run's lineage and import stamps in its caller's

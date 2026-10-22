@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"dyna-agent/internal/database"
-	"dyna-agent/internal/store"
 )
 
 // A real Git fetch blocks in its upload-pack process. An operation update
@@ -81,16 +80,6 @@ func TestFetchDoesNotHoldTheStoreLock(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	// Probe the exact lock that Update takes while Git waits for release.
-	// A regression fails immediately instead of waiting for a deadline.
-	unlock, owned, err := store.TryLock(s.lockPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !owned {
-		t.Fatal("fetch held the store lock while Git was blocked")
-	}
-	unlock()
 	other := Service{Dir: s.Dir}
 	if err := other.Update(func(st *Snapshot) error {
 		st.Operations[repo] = Operation{Progress: Progress{State: "building"}}

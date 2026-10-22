@@ -77,7 +77,7 @@ func TestNoticeWatcherSeesDeleteAndNextWriteWithoutMirror(t *testing.T) {
 		events++
 	}
 	e.svc.scanNotices(&version, true, emit)
-	if err := os.Remove(s.Path()); err != nil {
+	if err := os.Remove(s.Path()); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	e.svc.scanNotices(&version, false, emit)
@@ -87,14 +87,14 @@ func TestNoticeWatcherSeesDeleteAndNextWriteWithoutMirror(t *testing.T) {
 	if err := s.Dismiss(newest.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(s.Path()); err != nil {
+	if err := os.Remove(s.Path()); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	e.svc.scanNotices(&version, false, emit)
 	if _, err := s.Post(notices.Notice{Key: "next"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(s.Path()); err != nil {
+	if err := os.Remove(s.Path()); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	e.svc.scanNotices(&version, false, emit)

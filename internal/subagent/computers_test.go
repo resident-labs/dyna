@@ -60,6 +60,9 @@ func TestCloseContinuesAfterStaleComputerSocket(t *testing.T) {
 	e.wait(info.ID, 1)
 	os.MkdirAll(computers.Dir(info.ID), 0700)
 	os.WriteFile(filepath.Join(computers.Dir(info.ID), "meta.json"), []byte(fmt.Sprintf(`{"session_id":%q}`, info.ID)), 0600)
+	if err := computers.Migrate(filepath.Dir(computers.Root())); err != nil {
+		t.Fatal(err)
+	}
 	socket := computers.ControlSocket(info.ID)
 	os.MkdirAll(filepath.Dir(socket), 0700)
 	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
@@ -72,9 +75,9 @@ func TestCloseContinuesAfterStaleComputerSocket(t *testing.T) {
 	if err != nil || closed.Status != StatusClosed {
 		t.Fatalf("close: %+v %v", closed, err)
 	}
-	b, err := os.ReadFile(filepath.Join(computers.Dir(info.ID), "state.json"))
-	if err != nil || !strings.Contains(string(b), "destroyed") {
-		t.Fatalf("offline cleanup: %s %v", b, err)
+	status, err := computers.GetStatus(e.ctx, info.ID)
+	if err != nil || status.State != computers.StateDestroyed {
+		t.Fatalf("offline cleanup: %+v %v", status, err)
 	}
 	dir, _ := e.m.Store.Dir(info.ID)
 	events, _ := os.ReadFile(filepath.Join(dir, "events.jsonl"))
