@@ -41,15 +41,18 @@ func (s Store) db() (*sql.DB, error) {
 
 // Migrate imports retained ancestry once at engine start. Imported rows and
 // the version commit together; source headers and ownership stamps stay intact.
-// archiveDirs adds configured archive locations to the default retained roots.
-func Migrate(dataDir string, archiveDirs ...string) error {
+// Both the default archive and any configured archive root are scanned.
+func Migrate(dataDir string) error {
 	db, err := (Store{DataDir: dataDir}).db()
 	if err != nil {
 		return err
 	}
 	return database.Migrate(db, "plan.ancestry.import", 1, func(conn *sql.Conn, _ int) error {
 		ctx := context.Background()
-		roots := append([]string{filepath.Join(dataDir, "runs"), filepath.Join(dataDir, "archive", "runs")}, archiveDirs...)
+		roots := []string{filepath.Join(dataDir, "runs"), filepath.Join(dataDir, "archive", "runs")}
+		if archive := store.RunArchiveDir(dataDir); archive != roots[1] {
+			roots = append(roots, archive)
+		}
 		for _, root := range roots {
 			if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 				if os.IsNotExist(err) && path == root {
