@@ -512,10 +512,16 @@ func (s *Service) authorIn(ctx context.Context, roomRef, sessionRef, doing strin
 	if err != nil {
 		return room.Record{}, authority.Actor{}, subagent.Info{}, err
 	}
-	// The authenticated owner has no session ID. Its work belongs to the
-	// room owner and uses the room's workspace.
-	if actor.Role == authority.Owner && sessionRef == "" {
-		return rec, actor, subagent.Info{Meta: subagent.Meta{RoomID: rec.ID, Room: rec.Name, Dir: rec.Repo}}, nil
+	// A caller that names no session acts as itself. The authenticated owner
+	// has no session ID, so its work belongs to the room owner and uses the
+	// room's workspace. Root acts as its own session when its stamp has one.
+	if sessionRef == "" {
+		if actor.Role == authority.Root {
+			sessionRef = actor.Session
+		}
+		if actor.Role == authority.Owner || (actor.Role == authority.Root && sessionRef == "") {
+			return rec, actor, subagent.Info{Meta: subagent.Meta{RoomID: rec.ID, Room: rec.Name, Dir: rec.Repo}}, nil
+		}
 	}
 	info, err := s.SessionInRoom(rec.ID, sessionRef)
 	if err != nil {
