@@ -156,30 +156,42 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 	if err != nil {
 		return snap, err
 	}
-	if mode == localci.ModeGitHub {
-		return snap, nil
-	}
-	nodes, err := registry.Nodes(ctx)
-	if err != nil {
-		return snap, err
-	}
 	enabled := false
-	for _, node := range nodes {
-		enabled = enabled || node.Enabled && node.Slots > 0
-	}
-	if !enabled {
-		return snap, nil
+	if mode == localci.ModeLocal || mode == localci.ModeBoth {
+		nodes, err := registry.Nodes(ctx)
+		if err != nil {
+			return snap, err
+		}
+		for _, node := range nodes {
+			enabled = enabled || node.Enabled && node.Slots > 0
+		}
 	}
 	if r.RepoPath == "" {
 		return snap, nil
 	}
 	repo, err := localci.CanonicalRepo(ctx, r.RepoPath)
 	if err != nil {
+		if !enabled {
+			return snap, nil
+		}
 		return snap, err
 	}
 	saved, err := registry.LoadHostedRuns(ctx, repo, r.Head)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return snap, err
+	}
+	if !enabled {
+		if len(saved.IDs) == 0 {
+			return snap, nil
+		}
+		job := registeredCIJob{record: r, head: r.Head, branch: r.Branch, trial: strings.HasPrefix(r.Branch, "dyna/merge-trial/")}
+		if err := s.resumeHostedCI(ctx, job, repo); err != nil {
+			return snap, err
+		}
+		hosted := withoutLocalHostedCancellations(snap, saved)
+		ci, key, jobs, runs := hosted.CIStatus(policy.RequiredChecks...)
+		snap.localCI = &registeredCIObservation{Status: ci, Key: key, Jobs: jobs, Runs: runs}
+		return snap, nil
 	}
 	hosted := withoutLocalHostedCancellations(snap, saved)
 	hostedState, hostedKey, hostedJobs, hostedRuns := s.ciStatus(hosted, r, policy)
