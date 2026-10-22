@@ -566,13 +566,18 @@ func (c *Call) event(ctx context.Context, ev Event) {
 				if gen != c.gen {
 					return // a dropped connection asked; the new one does not wait for its output
 				}
-				c.send(c.provider.Protocol.FunctionOutput(ev.CallID, out))
+				quiet := !failed(out) && (silent || laterTool(c.tools, ev.Name))
+				output := c.provider.Protocol.FunctionOutput
+				if p, ok := c.provider.Protocol.(interface{ QuietFunctionOutput(string, string) any }); quiet && ok {
+					output = p.QuietFunctionOutput
+				}
+				c.send(output(ev.CallID, out))
 				if silent && !failed(out) {
 					c.queue.acknowledged(key)
 				}
 				// Accepted work answers later. Keep its receipt as context
 				// without requesting an acknowledgement response.
-				if failed(out) || !laterTool(c.tools, ev.Name) && !silent {
+				if !quiet {
 					c.owed = true
 				}
 			})

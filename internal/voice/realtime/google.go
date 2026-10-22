@@ -87,7 +87,11 @@ func googleSession(model string, s Session) any {
 	}
 	var decls []msg
 	for _, t := range s.Tools {
-		decls = append(decls, msg{"name": t.Name, "description": t.Description, "parameters": t.Parameters})
+		decl := msg{"name": t.Name, "description": t.Description, "parameters": t.Parameters}
+		if t.Later || t.Silent {
+			decl["behavior"] = "NON_BLOCKING"
+		}
+		decls = append(decls, decl)
 	}
 	tools := []msg{}
 	if len(decls) > 0 {
@@ -178,17 +182,33 @@ func (*Google) UserText(text string) any {
 func (g *Google) Context(text string) any { return g.UserText(text) }
 
 func (g *Google) FunctionOutput(callID, output string) any {
+	return g.functionOutput(callID, output, false)
+}
+
+// QuietFunctionOutput completes a non-blocking tool without resuming model
+// generation. Scheduling belongs to FunctionResponse, not its result map.
+func (g *Google) QuietFunctionOutput(callID, output string) any {
+	return g.functionOutput(callID, output, true)
+}
+
+func (g *Google) functionOutput(callID, output string, quiet bool) any {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.automatic = true // a tool response resumes generation itself
+	if !quiet {
+		g.automatic = true // an ordinary tool response resumes generation itself
+	}
 	name := g.names[callID]
 	delete(g.names, callID)
-	var response any = msg{"result": output}
-	var parsed map[string]any
+	response := msg{"result": output}
+	var parsed msg
 	if json.Unmarshal([]byte(output), &parsed) == nil {
 		response = parsed
 	}
-	return msg{"toolResponse": msg{"functionResponses": []msg{{"id": callID, "name": name, "response": response}}}}
+	result := msg{"id": callID, "name": name, "response": response}
+	if quiet {
+		result["scheduling"], result["willContinue"] = "SILENT", false
+	}
+	return msg{"toolResponse": msg{"functionResponses": []msg{result}}}
 }
 
 // ResponseCreate completes the turn, which starts a reply; after a tool
