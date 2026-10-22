@@ -214,6 +214,14 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		localState = "pending"
 	}
 	observation := chooseRegisteredCI(r.Head, hostedState, hostedKey, hostedJobs, hostedRuns, localState, localJobs, logs)
+	if observation.Status == "passed" {
+		missing := missingRequiredCIChecks(policy.RequiredChecks, result, hosted)
+		if len(missing) > 0 {
+			observation.Status = "pending"
+			observation.Key = "required:" + r.Head + ":" + digest(strings.Join(missing, "\n"))
+			observation.Jobs = missing
+		}
+	}
 	observation.Checks = registeredCheckSummaries(result)
 	observation.BudgetNote = budgetNote
 	snap.localCI = observation
@@ -336,6 +344,13 @@ func (s *Service) registeredJobResultComplete(ctx context.Context, job registere
 
 // A finished failing check is conclusive even while another hosted job runs.
 func (s *Service) registeredHostedStatus(snap Snapshot, r Record, policy ChangePolicy) (status, key string, jobs []string, runs []Run) {
+	var hostedStatuses []Status
+	for _, v := range snap.Statuses {
+		if !localCommitStatus(v) {
+			hostedStatuses = append(hostedStatuses, v)
+		}
+	}
+	snap.Statuses = hostedStatuses
 	status, key, jobs, runs = s.ciStatus(snap, r, policy)
 	if status != "pending" {
 		return
@@ -365,4 +380,47 @@ func (s *Service) registeredHostedStatus(snap Snapshot, r Record, policy ChangeP
 		}
 	}
 	return
+}
+
+// A provider's pass cannot replace an extra required check that never passed.
+// Posted local statuses stay separate from current hosted check/status evidence.
+func missingRequiredCIChecks(required []string, result localci.Result, hosted Snapshot) []string {
+	passed := map[string]bool{}
+	if result.Node != "" {
+		for _, check := range result.Checks {
+			name := check.CheckName
+			if name == "" {
+				name = check.Suite
+			}
+			if check.Status == "passed" {
+				passed[name] = true
+			}
+		}
+	}
+	for _, check := range hosted.currentChecks() {
+		if checkState(check.Status, check.Conclusion) == "success" {
+			passed[check.Name] = true
+		}
+	}
+	latest := map[string]Status{}
+	for _, v := range hosted.Statuses {
+		if localCommitStatus(v) {
+			continue
+		}
+		if old, ok := latest[v.Context]; !ok || v.ID > old.ID {
+			latest[v.Context] = v
+		}
+	}
+	for name, status := range latest {
+		if status.State == "success" {
+			passed[name] = true
+		}
+	}
+	var missing []string
+	for _, name := range required {
+		if !passed[name] {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
