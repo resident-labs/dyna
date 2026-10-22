@@ -7,8 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/goals"
+	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/room"
 )
 
 func setTestExpedite(t *testing.T, s *Service, room string, until time.Time) {
@@ -117,6 +120,15 @@ func TestExpeditedMergeTrialsAreIsolatedAndFair(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
+		if i == 3 {
+			rows, err := s.MergeStatus(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(rows) == 0 || rows[0].ChangeID != "github.com/owner/repo#1" {
+				t.Fatalf("status after three grants = %+v", rows)
+			}
+		}
 		if _, err := s.MergeTick(t.Context()); err != nil {
 			t.Fatal(err)
 		}
@@ -158,5 +170,81 @@ func TestExpeditedMergeTrialsAreIsolatedAndFair(t *testing.T) {
 			t.Fatal(err)
 		}
 		f.ci = "in_progress"
+	}
+}
+
+func TestMergeFairnessDoesNotCountHeldRooms(t *testing.T) {
+	for _, hold := range []string{"paused", "read-only"} {
+		t.Run(hold, func(t *testing.T) {
+			f := mergeTrialEnv(t, 1, 2, 3, 4, 5)
+			s := f.e.s
+			held, err := s.Notify.Rooms.Create(room.CreateInput{Name: "held"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if hold == "paused" {
+				if err := ghclient.SetAccess(s.Notify.Rooms, held.ID, ghclient.ReadWrite); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := s.Notify.Rooms.SetSessionsPaused(t.Context(), held.ID, true); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := ghclient.SetAccess(s.Notify.Rooms, held.ID, ghclient.ReadOnly); err != nil {
+				t.Fatal(err)
+			}
+			setTestExpedite(t, s, held.ID, f.e.clock.Add(time.Hour))
+			setTestExpedite(t, s, f.e.author.RoomID, f.e.clock.Add(time.Hour))
+			if err := s.Store.update(func(st *State) error {
+				st.RepositoryFacts = map[string]prstate.RepositoryFacts{"github.com/owner/repo": {Head: f.main, DefaultBranch: "main", MergeTrialCI: true, CheckedAt: f.e.clock}}
+				for _, r := range st.Records {
+					yes := true
+					r.Mergeable, r.DefaultBranch = &yes, "main"
+					if r.Number < 5 {
+						r.GoalID = "g1"
+					}
+					if r.Number == 1 {
+						r.RoomID = held.ID
+					}
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			check := func(rows []MergeQueueItem) {
+				t.Helper()
+				var got []string
+				for _, r := range rows {
+					if r.RoomID == f.e.author.RoomID && r.State == "ready" {
+						got = append(got, r.ChangeID)
+					}
+				}
+				want := []string{"github.com/owner/repo#2", "github.com/owner/repo#3", "github.com/owner/repo#4", "github.com/owner/repo#5"}
+				if !reflect.DeepEqual(got, want) {
+					t.Fatalf("active order=%v, want %v; rows=%+v", got, want, rows)
+				}
+			}
+			rows, err := s.RoomMergeQueue(f.e.author.RoomID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(rows)
+			rows, err = s.MergeStatus(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			check(rows)
+			found := false
+			for _, r := range rows {
+				if r.RoomID == held.ID && r.ChangeID == "github.com/owner/repo#1" {
+					found = true
+					if r.State != hold {
+						t.Fatalf("held state=%s, want %s", r.State, hold)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("held work disappeared from status")
+			}
+		})
 	}
 }

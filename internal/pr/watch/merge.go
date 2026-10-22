@@ -202,35 +202,15 @@ func (s *Service) RoomMergeQueue(roomID string) ([]MergeQueueItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	paused, err := s.RoomPaused(roomID)
+	ordered, err := s.prioritizedMergeQueue(context.Background(), st)
 	if err != nil {
 		return nil, err
 	}
 	rows := []MergeQueueItem{}
-	ordered, err := s.prioritizedMergeQueue(st)
-	if err != nil {
-		return nil, err
-	}
 	for _, item := range ordered {
-		if item.RoomID != roomID {
-			continue
+		if item.RoomID == roomID {
+			rows = append(rows, item)
 		}
-		if paused {
-			markPaused(&item)
-		} else if r := recordByID(&st, item.ChangeID); r != nil {
-			why, err := s.trialRoomHold(context.Background(), *r)
-			if err != nil {
-				return nil, err
-			}
-			if why != "" {
-				if st.MergePauses[r.RoomID] != "" {
-					item.State, item.Reason = "merge-paused", why
-				} else {
-					item.State, item.Reason = "read-only", why
-				}
-			}
-		}
-		rows = append(rows, item)
 	}
 	return rows, nil
 }
@@ -248,27 +228,9 @@ func (s *Service) MergeStatus(ctx context.Context) ([]MergeQueueItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.prioritizedMergeQueue(st)
+	rows, err := s.prioritizedMergeQueue(ctx, st)
 	if err != nil {
 		return nil, err
-	}
-	for i := range rows {
-		r := recordByID(&st, rows[i].ChangeID)
-		paused, err := s.RoomPaused(r.RoomID)
-		if err != nil {
-			return nil, err
-		}
-		if paused {
-			markPaused(&rows[i])
-		} else if why, err := s.trialRoomHold(ctx, *r); err != nil {
-			return nil, err
-		} else if why != "" {
-			if st.MergePauses[r.RoomID] != "" {
-				rows[i].State, rows[i].Reason = "merge-paused", why
-			} else {
-				rows[i].State, rows[i].Reason = "read-only", why
-			}
-		}
 	}
 	for _, r := range records {
 		p, status := storedDefault(st, r)

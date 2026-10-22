@@ -162,6 +162,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "SetChangePolicyOverride", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.PRs.SetChangePolicyOverride},
 		{Name: "Changes", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.Changes},
 		{Name: "ChangeDetail", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.ChangeDetail},
+		{Name: "MergeStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.MergeStatus},
 		{Name: "MergeControlStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.MergeControlStatus},
 		{Name: "RoomMergeStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.RoomMergeStatus},
 		{Name: "RoomMergeHistory", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.RoomMergeHistory},

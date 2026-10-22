@@ -164,3 +164,30 @@ func TestMergeCommandMutationsUseEngine(t *testing.T) {
 		t.Fatalf("CLI changed local state: %+v, %v", st, err)
 	}
 }
+
+func TestPRMergeStatusUsesEngineFairnessOrder(t *testing.T) {
+	storetest.Isolate(t)
+	// The engine owes normal work a turn after three expedited grants. A new
+	// CLI process has no grants; it must retain the engine response verbatim.
+	want := []watch.MergeQueueItem{{ChangeID: "normal", State: "ready"}, {ChangeID: "expedited", State: "ready", GoalID: "g1", Expedited: true}}
+	called := false
+	calls, err := websvc.Bind([]websvc.Binding{{Name: "MergeStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: func(context.Context) ([]watch.MergeQueueItem, error) { called = true; return want, nil }}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	enginetest.Serve(t, store.DataDir(), calls)
+	cmd := Command(Options{Service: func() *watch.Service { t.Fatal("merge-status read local counters"); return nil }})
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"merge-status"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var got []watch.MergeQueueItem
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if !called || !reflect.DeepEqual(got, want) {
+		t.Fatalf("called=%v, rows=%+v", called, got)
+	}
+}
