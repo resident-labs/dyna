@@ -12,8 +12,7 @@ import (
 )
 
 // A post through the engine is from its caller, not from what the posting
-// process claims (requirement 3). Until callers are enforced, a mismatch is
-// logged and the post is stored as the caller; then it is refused.
+// process claims (requirement 3). Claims supply only the target room.
 func TestPostSenderComesFromTheCaller(t *testing.T) {
 	senderOf := func(c notify.Claim) (notify.Sender, error) {
 		if c.Run != "" {
@@ -48,22 +47,22 @@ func TestPostSenderComesFromTheCaller(t *testing.T) {
 		logged  string
 	}{
 		{"a session posts as itself", alice, true, aliceActor, notify.Claim{Session: "ses_alice", Room: "dyna-agent"}, false, "session ses_alice", ""},
-		{"a session claiming another session is stored as itself", alice, true, aliceActor, asBob, false, "session ses_alice", "session ses_alice claimed to be session ses_bob"},
-		{"a session claiming the owner is stored as itself", alice, true, aliceActor, asOwner, false, "session ses_alice", "session ses_alice claimed to be the owner"},
-		{"enforced: a session claiming another session is refused", alice, true, aliceActor, asBob, true, "error", ""},
+		{"a session claiming another session is stored as itself", alice, true, aliceActor, asBob, false, "session ses_alice", ""},
+		{"a session claiming the owner is stored as itself", alice, true, aliceActor, asOwner, false, "session ses_alice", ""},
+		{"enforced: a session claiming another session is stored as itself", alice, true, aliceActor, asBob, true, "session ses_alice", ""},
 		{"the owner posts as the owner", owner, true, authority.Actor{Role: authority.Owner}, asOwner, false, "owner", ""},
-		{"the owner claiming a session is stored as the owner", owner, true, authority.Actor{Role: authority.Owner}, asBob, false, "owner", "the owner claimed to be session ses_bob"},
+		{"the owner claiming a session is stored as the owner", owner, true, authority.Actor{Role: authority.Owner}, asBob, false, "owner", ""},
 		{"a paired device is the owner", websvc.Caller{}, false, authority.Actor{Role: authority.Owner}, asOwner, false, "owner", ""},
-		{"report-only: an unverified caller is its claim", unverified, true, authority.Actor{Role: authority.Owner}, asBob, false, "session ses_bob", "an unverified caller posted as session ses_bob"},
+		{"an unverified caller is refused", unverified, true, authority.Actor{Role: authority.Owner}, asBob, false, "error", ""},
 		{"enforced: an unverified caller is refused", unverified, true, authority.Actor{}, asBob, true, "error", ""},
-		{"a session the engine could not verify is its claim", alice, true, authority.Actor{Role: authority.Owner}, asBob, false, "session ses_bob", "an unverified caller posted as session ses_bob"},
+		{"a session the engine could not verify is refused", alice, true, authority.Actor{Role: authority.Owner}, asBob, false, "error", ""},
 		{"a workflow worker posts as itself", worker, true, workerActor, asWorker, false, "worker 2 of run wf_1", ""},
-		{"a worker claiming another agent is stored as itself", worker, true, workerActor, notify.Claim{Run: "wf_1", Agent: 3, Room: "dyna-agent"}, false, "worker 2 of run wf_1", "worker 2 of run wf_1 claimed to be worker 3 of run wf_1"},
-		{"enforced: a worker claiming a session is refused", worker, true, workerActor, asBob, true, "error", ""},
-		{"the run itself never takes an agent number from its claim", runWorker, true, runActor, asWorker, false, "worker 0 of run wf_1", "worker 0 of run wf_1 claimed to be worker 2 of run wf_1"},
-		{"a worker claiming another run is stored as its run", runWorker, true, runActor, notify.Claim{Run: "wf_2", Agent: 2, Room: "dyna-agent"}, false, "worker 0 of run wf_1", "worker 0 of run wf_1 claimed to be worker 2 of run wf_2"},
-		{"enforced: a worker claiming another run is refused", runWorker, true, runActor, notify.Claim{Run: "wf_2", Agent: 2, Room: "dyna-agent"}, true, "error", ""},
-		{"a worker the engine could not verify is its claim", worker, true, authority.Actor{Role: authority.Owner}, asWorker, false, "worker 2 of run wf_1", "an unverified caller posted as worker 2 of run wf_1"},
+		{"a worker claiming another agent is stored as itself", worker, true, workerActor, notify.Claim{Run: "wf_1", Agent: 3, Room: "dyna-agent"}, false, "worker 2 of run wf_1", ""},
+		{"enforced: a worker claiming a session is stored as itself", worker, true, workerActor, asBob, true, "worker 2 of run wf_1", ""},
+		{"the run itself never takes an agent number from its claim", runWorker, true, runActor, asWorker, false, "worker 0 of run wf_1", ""},
+		{"a worker claiming another run is stored as its run", runWorker, true, runActor, notify.Claim{Run: "wf_2", Agent: 2, Room: "dyna-agent"}, false, "worker 0 of run wf_1", ""},
+		{"enforced: a worker claiming another run is stored as its run", runWorker, true, runActor, notify.Claim{Run: "wf_2", Agent: 2, Room: "dyna-agent"}, true, "worker 0 of run wf_1", ""},
+		{"a worker the engine could not verify is refused", worker, true, authority.Actor{Role: authority.Owner}, asWorker, false, "error", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs []string

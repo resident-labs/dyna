@@ -12,7 +12,7 @@ import (
 	"dyna-agent/internal/websvc"
 )
 
-func TestCatalogCallsKeepClaimedSessionPower(t *testing.T) {
+func TestCatalogCallsRejectUnverifiedClaims(t *testing.T) {
 	storetest.Isolate(t)
 	calls := testCalls(t, false)
 	ctx := callspec.WithClaim(
@@ -36,7 +36,7 @@ func TestCatalogCallsKeepClaimedSessionPower(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := calls[tc.name](ctx, tc.args)
-			if err == nil || !strings.Contains(err.Error(), "is owner or root only") {
+			if err == nil || !strings.Contains(err.Error(), "could not verify") {
 				t.Fatalf("claimed session reached catalog mutation: %v", err)
 			}
 		})

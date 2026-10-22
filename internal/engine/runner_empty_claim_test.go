@@ -262,7 +262,7 @@ func TestWireCannotSuppressInputClaimReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	applyOnce(calls, f.w, t.Logf)
-	callers := &socketCallers{sessions: f.manager.Store, enforce: true, logf: t.Logf}
+	callers := &socketCallers{sessions: f.manager.Store}
 	callers.actForCallers(calls)
 	path := enginetest.ServeCallers(t, f.dir, func(net.Conn) (websvc.Caller, error) {
 		return websvc.Caller{Kind: websvc.Session, Session: f.meta.ID}, nil
