@@ -5,6 +5,13 @@ cd "$(dirname "$0")/.."
 suite=${1:?usage: scripts/ci.sh relay|frontend|go|cross-build|android [phase]}
 phase=${2:-all}
 export RUNNER_TEMP=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
+# web/embed.go embeds all:dist, but only the frontend suite builds it. Every
+# other Go command needs the directory to exist, so give it one empty,
+# git-ignored file. A real frontend build replaces it.
+if [[ ! -d web/dist || -z "$(ls -A web/dist 2>/dev/null)" ]]; then
+  mkdir -p web/dist
+  : > web/dist/.placeholder
+fi
 if [[ $suite == go || $suite == cross-build ]]; then
   source scripts/ci-diagnostics.sh
   ci_diagnostics_begin "$suite" "$phase"
