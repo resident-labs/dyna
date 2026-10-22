@@ -490,8 +490,14 @@ func TestCIStreakBatchesLogsAndPausesOnlyCIWakes(t *testing.T) {
 	if len(e.sent) != 3 || e.sent[2].Target != e.author.ID || !r.CIPaused || !strings.Contains(r.PauseReason, "3 consecutive failures") {
 		t.Fatalf("streak: %+v sent=%+v", r, e.sent)
 	}
-	// Author markers are noise. Owner comments on the very same login wake it.
+	// Stored author comments are noise. Owner comments on the very same login wake it.
 	e.addComment(1, "issue-comments", Marker(e.author.ID)+" agent reply", "owner")
+	if err := e.s.Store.update(func(st *State) error {
+		st.CommentSessions["issue-comments:1"] = e.author.ID
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	e.addComment(2, "issue-comments", "Rate limit exceeded", "coderabbitai[bot]")
 	e.addComment(3, "issue-comments", "useful bot diagnostic", "other[bot]")
 	e.addComment(4, "issue-comments", "Please inspect this too.", "owner")
@@ -934,7 +940,7 @@ func TestMarkedCommentAndSanitization(t *testing.T) {
 	}
 }
 
-func TestLegacyMarkedCommentUsesCallerAndStripsItsMarker(t *testing.T) {
+func TestLegacyMarkedCommentUsesCallerAndPreservesItsMarker(t *testing.T) {
 	e := newEnv(t)
 	r := e.track()
 	legacy := Marker(e.author.ID) + " an older agent reply"
@@ -942,8 +948,8 @@ func TestLegacyMarkedCommentUsesCallerAndStripsItsMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := os.ReadFile(os.Getenv("PR_POSTED"))
-	if strings.Contains(string(body), "dyna:") || !strings.Contains(string(body), "an older agent reply") {
-		t.Fatalf("legacy marker leaked into the comment: %s", body)
+	if !strings.Contains(string(body), legacy) {
+		t.Fatalf("legacy marker missing from the comment: %s", body)
 	}
 	st, err := e.s.Store.Read()
 	if err != nil {
