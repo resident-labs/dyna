@@ -8,9 +8,10 @@ cd "$(dirname "$0")/.."
 index=${1:?usage: scripts/ci-shard.sh INDEX COUNT}
 count=${2:?usage: scripts/ci-shard.sh INDEX COUNT}
 mod=$(go list -m)
-# Package suffix, shard index. Keep COUNT at 7 or higher for these to apply.
+# Package suffix, shard indexes (comma-separated). A package on two shards runs
+# half its tests on each (see CI_SLICE in scripts/ci.sh). Use COUNT 8.
 pinned=(
-  internal/pr/watch=0
+  internal/pr/watch=0,7
   internal/subagent=1
   internal/notify=3
   internal/harness/runtime=3
@@ -28,5 +29,7 @@ while read -r pkg; do
     want=${spread[$((n % ${#spread[@]}))]}
     n=$((n + 1))
   fi
-  if ((want % count == index)); then echo "$pkg"; fi
+  for w in ${want//,/ }; do
+    if ((w % count == index)); then echo "$pkg"; fi
+  done
 done < <(go list ./... | sort)
