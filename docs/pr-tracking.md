@@ -33,14 +33,12 @@ it is stopped, or after 24 hours. Goal reads and live events remove expired
 priority. Goal holders and their descendants share the goal's priority.
 PRs and changes use their saved goal link.
 
-Queue ordering is planned for a separate update. Linked changes will get
-priority for the next available review slot in their room. Merge priority
-will apply per repository: an eligible expedited PR will get a trial of its
-own. Existing review, dependency, draft, mergeability, and CI gates will
-still apply. When normal work is waiting, it will get a slot after three
-expedited selections. Review fairness will be per room; merge fairness will
-be per repository. Running reviews, merge trials, and CI will continue.
-Expedite will not change session, workflow, or CI scheduling.
+Linked changes get priority for the next available review slot in their room.
+Eligible expedited PRs get an isolated merge trial, with merge priority per repository.
+When normal work is waiting, it gets a slot after three expedited selections.
+Review fairness is per room; merge fairness is per repository. Existing review,
+dependency, draft, mergeability, and CI gates still apply. Running reviews, merge
+trials, and CI continue. Expedite does not change session, workflow, or CI scheduling.
 
 ## Polling and GitHub rate limits
 
