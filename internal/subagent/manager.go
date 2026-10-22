@@ -80,6 +80,9 @@ type Manager struct {
 	TransferNow         func() time.Time
 	TransferSleep       func(context.Context, time.Duration) error
 
+	// ClosePRs hands live PR roles to the heir through the PR service.
+	ClosePRs func(context.Context, Info, Info) ([]string, error)
+
 	WrapUpProviders []WrapUpProvider
 
 	// InstructionsChanged is called after NoteRoomInstructions stores a
@@ -965,14 +968,15 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 			m.startWorktreeCleanup(info, opts.KeepWorktrees)
 		}
 	}()
-	if !opts.Force {
+	// A standalone manager cannot move PR roles without the PR service.
+	if !opts.Force && m.ClosePRs == nil {
 		items, err := m.Responsibilities(ctx, info)
 		if err != nil {
-			return info, fmt.Errorf("cannot check responsibilities before closing: %w; use --force to close anyway", err)
+			return info, fmt.Errorf("responsibilities: cannot close: %w; use --force to close anyway", err)
 		}
-		kept := slices.DeleteFunc(items, Responsibility.closeMoves)
-		if len(kept) > 0 {
-			return info, fmt.Errorf("%w\n- or close anyway: dyna subagent close %s --force", responsibilityError("close", kept), info.ID)
+		items = slices.DeleteFunc(items, func(r Responsibility) bool { return r.Kind != "pr" })
+		if len(items) > 0 {
+			return info, fmt.Errorf("%w\n- PR handoff service is unavailable; use dyna subagent close %s --force to close anyway", responsibilityError("close", items), info.ID)
 		}
 	}
 	if !opts.DormantBefore.IsZero() && (info.Status == StatusRunning || info.Status == StatusQueued) {
@@ -988,6 +992,25 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		if _, err := m.stopSession(ctx, info.ID, "", "close"); err != nil && !errors.As(err, &noRunningTurn) {
 			return info, err
 		}
+	}
+	// Fence new assignments before reading and moving existing work.
+	if opts.DormantBefore.IsZero() {
+		opts.closingToken = NewID()
+		if err := m.reserveFinish(ctx, info.ID, opts.closingToken); err != nil {
+			return info, err
+		}
+		defer m.releaseDormant(info.ID, opts.closingToken)
+	}
+	heir, err := m.closeHeir(info)
+	if err != nil {
+		return info, err
+	}
+	summary, err := m.handoffClose(ctx, info, heir)
+	if err != nil {
+		if !opts.Force {
+			return info, fmt.Errorf("responsibilities: cannot close: %w; retry or use --force to close anyway", err)
+		}
+		summary = append(summary, "Handoff failed: "+err.Error())
 	}
 	// Serialize the final close with child creation and promotion. Children
 	// created while Stop was in progress are included in this choice.
@@ -1039,17 +1062,22 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	}
 	// The session is closed now. A hand-over failure leaves that child open
 	// under a closed parent, so record it and finish the close.
-	if cascade, err = m.handOverChildren(ctx, fresh); err != nil {
+	var children []string
+	if cascade, children, err = m.handOverChildren(ctx, fresh, heir); err != nil {
 		store.appendEvent(info.ID, map[string]any{"t": "child_handover_failed", "error": err.Error()})
+		summary = append(summary, "Child handoff failed: "+err.Error())
 	}
+	summary = append(summary, children...)
 	destroyComputer(info.ID)
 	closedForCleanup = true
 	if err := m.withdrawClosedQuestions(info); err != nil {
 		return info, err
 	}
-	m.closeGoals(info, info.ParentSession)
-	store.appendEvent(info.ID, map[string]any{"t": "session_closed", "by": opts.by})
-	return store.Info(info.ID)
+	m.closeGoals(info, heir.ID)
+	store.appendEvent(info.ID, map[string]any{"t": "session_closed", "by": opts.by, "handoff": summary})
+	closed, err := store.Info(info.ID)
+	closed.CloseSummary = summary
+	return closed, err
 }
 
 // ExecSpawner runs each turn in a detached `dyna subagent _turn` process.

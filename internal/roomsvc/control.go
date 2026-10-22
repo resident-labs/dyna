@@ -93,10 +93,13 @@ func (s *Service) closeSession(ctx context.Context, roomRef, ref string, opts Cl
 	if err != nil {
 		return Member{}, err
 	}
-	if _, err := s.Notify.Sessions.CloseWithOptions(ctx, info.ID, subagent.CloseOptions{Force: opts.Force, KeepWorktrees: opts.KeepWorktrees}); err != nil {
+	closed, err := s.Notify.Sessions.CloseWithOptions(ctx, info.ID, subagent.CloseOptions{Force: opts.Force, KeepWorktrees: opts.KeepWorktrees})
+	if err != nil {
 		return Member{}, err
 	}
-	return s.memberByID(info.ID)
+	member, err := s.memberByID(info.ID)
+	member.CloseSummary = closed.CloseSummary
+	return member, err
 }
 
 func (s *Service) memberByID(id string) (Member, error) {

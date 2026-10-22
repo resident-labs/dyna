@@ -1,0 +1,108 @@
+package roomsvc
+
+import (
+	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/subagent"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"dyna-agent/internal/goals"
+	prfixture "dyna-agent/internal/pr/view/testfixture"
+	"dyna-agent/internal/pr/watch"
+)
+
+func TestCloseHandsAuthorshipAndGoalsToAncestor(t *testing.T) {
+	for _, ancestry := range []string{"parent", "closed parent", "root"} {
+		t.Run(ancestry, func(t *testing.T) {
+			e := newEnv(t)
+			rec := e.room("alpha")
+			parent := e.start(rec, "lead", nil)
+			author := e.start(rec, "author", &parent)
+			if ancestry == "closed parent" {
+				middle := e.start(rec, "middle", &parent)
+				if _, err := e.mgr.Store.UpdateMeta(middle.ID, func(m *subagent.Meta) { m.Closed = time.Now() }); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := e.mgr.Store.UpdateMeta(author.ID, func(m *subagent.Meta) { m.ParentSession = middle.ID }); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if ancestry == "root" {
+				if _, err := e.mgr.Store.UpdateMeta(parent.ID, func(m *subagent.Meta) { m.Role = subagent.RoleRoot; m.Name = "root" }); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := e.mgr.Store.UpdateMeta(author.ID, func(m *subagent.Meta) { m.ParentSession = ""; m.Depth = 1 }); err != nil {
+					t.Fatal(err)
+				}
+				parent.Name = "root"
+			}
+			const key = "github.com/owner/repo#17"
+			prfixture.SaveState(t, e.svc.PRs.Watcher().Store.Root, watch.State{Version: 1, Records: map[string]*watch.Record{
+				key: {Key: key, Number: 17, RoomID: rec.ID, Author: author.ID, State: "open", Watching: true, Notices: []watch.Notice{{ID: "pending", Target: author.ID, Text: "Continue this work"}}},
+			}})
+			g, err := goals.DefaultStore().Add(rec.ID, author.ID, goals.Input{Text: "Keep this work", Holders: []string{author.ID}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			closed, err := e.svc.CloseSession(e.ctx, rec.ID, author.ID)
+			if err != nil || !closed.Closed {
+				t.Fatalf("close = %+v, %v", closed, err)
+			}
+			r, err := e.svc.PRs.Watcher().Store.Get(key)
+			if err != nil || r.Author != parent.ID || len(r.FormerAuthors) != 1 || r.FormerAuthors[0] != author.ID {
+				t.Fatalf("author handoff = %+v, %v", r, err)
+			}
+			got, err := goals.DefaultStore().Get(rec.ID, g.ID)
+			if err != nil || !got.Open() || !got.HeldBy(parent.ID) || got.HeldBy(author.ID) {
+				t.Fatalf("goal handoff = %+v, %v", got, err)
+			}
+			// The result must tell the app where the work went.
+			if !strings.Contains(strings.Join(closed.CloseSummary, "\n"), "PR #17 author → "+parent.Name) {
+				t.Fatalf("missing close summary: %+v", closed.CloseSummary)
+			}
+
+		})
+	}
+}
+
+// No runner is started: cancel finalizes this run from its stored metadata.
+func TestCloseCancelsWorkflowFromSQLite(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	author := e.start(rec, "author", nil)
+	const runID = "wf_close-handoff"
+	dir := filepath.Join(runstore.RunsDir(), runID)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(runstore.Meta{ID: runID, Session: author.ID, ParentSession: author.ID, Status: "running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "meta.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Import a runner fixture with no live process into the canonical store.
+	if _, err := runstore.ReadMeta(runID); err != nil {
+		t.Fatal(err)
+	}
+	// The workflow reader must not depend on the rollback file.
+	if err := os.Remove(filepath.Join(dir, "meta.json")); err != nil {
+		t.Fatal(err)
+	}
+	closed, err := e.svc.CloseSession(e.ctx, rec.ID, author.ID)
+	if err != nil || !closed.Closed {
+		t.Fatalf("close = %+v, %v", closed, err)
+	}
+	got, err := runstore.ReadMeta(runID)
+	if err != nil || got.Status != "canceled" {
+		t.Fatalf("run = %+v, %v", got, err)
+	}
+	if !strings.Contains(strings.Join(closed.CloseSummary, "\n"), "Workflow "+runID+" canceled") {
+		t.Fatalf("missing run result: %+v", closed.CloseSummary)
+	}
+}
