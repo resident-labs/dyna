@@ -770,21 +770,7 @@ func (s *Store) tryTurnLock(id string) (*os.File, error) {
 		}
 		return nil, err
 	}
-	if !turnLockMatchesPath(f, path) {
-		f.Close()
-		return nil, ErrBusy
-	}
 	return f, nil
-}
-
-// turnLockMatchesPath rejects an inode retired by orphan recovery.
-func turnLockMatchesPath(f *os.File, path string) bool {
-	held, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	current, err := os.Stat(path)
-	return err == nil && os.SameFile(held, current)
 }
 
 // Info resolves the live status of a session, repairing a turn whose runner
