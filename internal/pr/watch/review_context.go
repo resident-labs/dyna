@@ -225,7 +225,7 @@ func (s *Service) reviewComments(ctx context.Context, st State, r Record) ([]Com
 			decision = (Rules{Learned: repoNoise(st, ref)}).Triage(pr, []Event{event})[0]
 		}
 		if reviewerHears(decision) {
-			c.Body = clip(Sanitize(markerPattern.ReplaceAllString(c.Body, "")), 4000)
+			c.Body = clip(Sanitize(c.Body), 4000)
 			out = append(out, c)
 		}
 	}
