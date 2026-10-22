@@ -407,8 +407,12 @@ jobs:
             --no-install-recommends "${packages[@]}" |
             sed -n "s/^'\(https\?:\/\/[^']*\.deb\)'.*/\1/p") || uris=""
           if [ -n "$uris" ]; then
+            # curl's own caps, not an inner timeout: a nested timeout would put
+            # each worker in its own process group, where the outer bounded
+            # cannot reach it.
             printf '%s\n' "$uris" |
-              bounded 90 xargs -P 8 -n 1 timeout 45 curl -fsSL -O --output-dir "$arch" ||
+              bounded 90 xargs -P 8 -n 1 curl -fsSL --connect-timeout 15 --max-time 45 \
+                -O --output-dir "$arch" ||
               echo "parallel fetch incomplete; apt will fetch the rest"
           fi
           retry 120 sudo apt-get "${apt_opts[@]}" install -y -qq --no-install-recommends "${packages[@]}" >/dev/null
