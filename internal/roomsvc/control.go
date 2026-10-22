@@ -171,8 +171,14 @@ func (s *Service) StartSubagent(ctx context.Context, roomRef string, in Subagent
 	return info, err
 }
 
-// FinishSession makes an open session dormant when it owns nothing.
-func (s *Service) FinishSession(ctx context.Context, roomRef, ref string) (Member, error) {
+// FinishSession makes an open session dormant when it owns nothing. shellJob
+// names the shell job that runs the finish call, or is empty; that job does not
+// count as unfinished work.
+func (s *Service) FinishSession(ctx context.Context, roomRef, ref, shellJob string) (Member, error) {
+	ctx, err := subagent.WithCallerJob(ctx, shellJob)
+	if err != nil {
+		return Member{}, err
+	}
 	info, err := s.actOnSession(ctx, roomRef, ref)
 	if err != nil {
 		return Member{}, err

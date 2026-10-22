@@ -3,8 +3,10 @@ package subagent
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"dyna-agent/internal/mode"
+	"dyna-agent/internal/shells"
 	"dyna-agent/internal/subagent"
 	"github.com/spf13/cobra"
 )
@@ -29,7 +31,9 @@ func finishCommand(newManager func() *subagent.Manager) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if err := engineClient().Call(c.Context(), "FinishSession", []any{info.RoomID, info.ID}, nil); err != nil {
+			// The engine cannot read this process's shell job, so the call names it.
+			job := os.Getenv(shells.JobEnv)
+			if err := engineClient().Call(c.Context(), "FinishSession", []any{info.RoomID, info.ID, job}, nil); err != nil {
 				return err
 			}
 			fmt.Fprintf(c.OutOrStdout(), "finished %s (%s); dormant until a message wakes it\n", info.Address(), info.ID)

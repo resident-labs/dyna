@@ -574,12 +574,12 @@ func TestFinishSessionChecksTheCaller(t *testing.T) {
 	as := func(info subagent.Info) context.Context {
 		return authority.WithActor(e.ctx, authority.Actor{Role: authority.Session, Session: info.ID, Room: alpha.ID})
 	}
-	if _, err := e.svc.FinishSession(as(stranger), "alpha", child.ID); err == nil || !strings.Contains(err.Error(), "may act only on itself and its descendants") {
+	if _, err := e.svc.FinishSession(as(stranger), "alpha", child.ID, ""); err == nil || !strings.Contains(err.Error(), "may act only on itself and its descendants") {
 		t.Fatalf("a stranger finished a session outside its tree: %v", err)
 	}
 	// The child still holds its spawn goal, so the finish that passes the
 	// caller check stops at the responsibility check.
-	if _, err := e.svc.FinishSession(as(lead), "alpha", child.ID); err == nil || !strings.Contains(err.Error(), "responsibilities: cannot finish") {
+	if _, err := e.svc.FinishSession(as(lead), "alpha", child.ID, ""); err == nil || !strings.Contains(err.Error(), "responsibilities: cannot finish") {
 		t.Fatalf("the parent's finish of its child = %v; want it past the caller check", err)
 	}
 }
