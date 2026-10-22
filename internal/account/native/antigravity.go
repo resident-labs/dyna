@@ -237,19 +237,12 @@ func RecordAntigravityACPAccount(home, identity, label string) error {
 		}
 		return err
 	}
+	record := agyFileStore{filepath.Join(home, AntigravityAccountFile)}
+	if _, err := os.Lstat(record.path); !os.IsNotExist(err) {
+		return err
+	}
 	raw, _ := json.Marshal(a)
-	f, err := os.OpenFile(filepath.Join(home, AntigravityAccountFile), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
-	if os.IsExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	if _, err = f.Write(raw); err != nil {
-		f.Close()
-		return err
-	}
-	return f.Close()
+	return record.Write(context.Background(), raw)
 }
 
 func (m *antigravityManager) Capture(ctx context.Context, root string) ([]Captured, error) {
