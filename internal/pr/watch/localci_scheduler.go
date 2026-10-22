@@ -178,9 +178,6 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	}
 	for _, job := range jobs {
 		key := registeredJobKey(job)
-		if runs.runs[key] != nil {
-			continue
-		}
 		repo, err := localci.CanonicalRepo(ctx, job.record.RepoPath)
 		if err != nil {
 			return err
@@ -203,6 +200,9 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
+		if runs.runs[key] != nil {
+			continue
+		}
 		var chosen *localci.Node
 		for i := range enabled {
 			node := &enabled[i]
@@ -211,7 +211,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 			}
 		}
 		if chosen == nil {
-			break
+			continue
 		}
 		settled, err := s.scheduledCIConclusive(ctx, job, repo)
 		if err != nil {
