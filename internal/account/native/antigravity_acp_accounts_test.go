@@ -190,3 +190,34 @@ func TestAntigravityACPLoginNeverReusesTheOutgoingGrant(t *testing.T) {
 		t.Fatalf("the outgoing identity was kept: %v", err)
 	}
 }
+
+func TestAntigravityRefreshIsOnlyForLegacyCLIPayloads(t *testing.T) {
+	m := agyOfflineManager(t)
+	if SupportsRefresh(m, agyACPTestSaved(t, "acp")) {
+		t.Fatal("an ACP-only account is refreshed")
+	}
+	if !SupportsRefresh(m, agyACPTestCredential(t, "legacy", nil)) {
+		t.Fatal("a legacy CLI payload lost its refresh")
+	}
+}
+
+// The upgrade names an existing grant once and never renames a recorded one.
+func TestRecordAntigravityACPAccountWritesOnlyAMissingRecord(t *testing.T) {
+	home := t.TempDir()
+	if err := RecordAntigravityACPAccount(home, "google:a", "a@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, AntigravityAccountFile)); !os.IsNotExist(err) {
+		t.Fatal("a HOME without a grant got a record")
+	}
+	testWrite(t, filepath.Join(home, AntigravityACPTokenFile), json.RawMessage(agyACPTestToken("a")))
+	for _, sub := range []string{"a", "b"} {
+		if err := RecordAntigravityACPAccount(home, "google:"+sub, sub+"@example.test"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rows, err := (&antigravityManager{host: Host{Home: home}}).Capture(context.Background(), "")
+	if err != nil || rows[0].Identity != "google:a" {
+		t.Fatalf("the record was %v %v", rows, err)
+	}
+}
