@@ -221,3 +221,24 @@ func TestRecordAntigravityACPAccountWritesOnlyAMissingRecord(t *testing.T) {
 		t.Fatalf("the record was %v %v", rows, err)
 	}
 }
+
+// A sign-in can confirm a record while the upgrade is publishing one. The
+// upgrade must never overwrite the record that appeared first.
+func TestRecordAntigravityACPAccountLosesTheRaceToASignIn(t *testing.T) {
+	home := t.TempDir()
+	testWrite(t, filepath.Join(home, AntigravityACPTokenFile), json.RawMessage(agyACPTestToken("b")))
+	agyBeforeCreate = func() {
+		testWrite(t, filepath.Join(home, AntigravityAccountFile), map[string]string{"identity": "google:b"})
+	}
+	t.Cleanup(func() { agyBeforeCreate = func() {} })
+	if err := RecordAntigravityACPAccount(home, "google:a", "a@example.test"); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := (&antigravityManager{host: Host{Home: home}}).Capture(context.Background(), "")
+	if err != nil || rows[0].Identity != "google:b" {
+		t.Fatalf("the upgrade overwrote the sign-in's record: %v %v", rows, err)
+	}
+	if entries, _ := os.ReadDir(filepath.Dir(filepath.Join(home, AntigravityAccountFile))); len(entries) != 2 {
+		t.Fatalf("a temporary file was left: %v", entries)
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -174,6 +175,27 @@ var errAgyNeedsACPSignIn = errors.New("This Antigravity account was saved withou
 // agyHome holds the two files of one ACP sign-in in a native HOME.
 type agyHome struct{ token, account agyFileStore }
 
+// agyBeforeCreate runs between writing and publishing in create. Tests use it
+// to make another writer win the race.
+var agyBeforeCreate = func() {}
+
+// create publishes raw only when no file is at the path, atomically across
+// processes: it writes a temporary file and links it into place, and a link
+// onto an existing file fails. A file that is already there wins, and that is
+// success.
+func (s agyFileStore) create(ctx context.Context, raw []byte) error {
+	tmp := agyFileStore{fmt.Sprintf("%s.new-%d-%d", s.path, os.Getpid(), time.Now().UnixNano())}
+	if err := tmp.Write(ctx, raw); err != nil {
+		return err
+	}
+	defer func() { _ = tmp.remove() }()
+	agyBeforeCreate()
+	if err := os.Link(tmp.path, s.path); err != nil && !os.IsExist(err) {
+		return err
+	}
+	return nil
+}
+
 func (m *antigravityManager) home(root string) (agyHome, error) {
 	home := root
 	if home == "" {
@@ -237,12 +259,8 @@ func RecordAntigravityACPAccount(home, identity, label string) error {
 		}
 		return err
 	}
-	record := agyFileStore{filepath.Join(home, AntigravityAccountFile)}
-	if _, err := os.Lstat(record.path); !os.IsNotExist(err) {
-		return err
-	}
 	raw, _ := json.Marshal(a)
-	return record.Write(context.Background(), raw)
+	return agyFileStore{filepath.Join(home, AntigravityAccountFile)}.create(context.Background(), raw)
 }
 
 func (m *antigravityManager) Capture(ctx context.Context, root string) ([]Captured, error) {
