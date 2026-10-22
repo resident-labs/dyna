@@ -20,7 +20,13 @@ import (
 
 // serveRunEngine serves the engine calls that change runs, as the owner on
 // the engine's Unix socket, with any extra calls the test needs.
-func serveRunEngine(t *testing.T, extra ...map[string]websvc.Call) {
+func serveRunEngine(t *testing.T) {
+	t.Helper()
+	serveRunEngineAt(t, storetest.DataDir(t))
+}
+
+// serveRunEngineAt keeps pre-bound calls and engine migrations on the same store.
+func serveRunEngineAt(t *testing.T, dataDir string, extra ...map[string]websvc.Call) {
 	t.Helper()
 	calls, err := websvc.Bind([]websvc.Binding{
 		{Name: "PauseRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: runsvc.Pause},
@@ -40,7 +46,7 @@ func serveRunEngine(t *testing.T, extra ...map[string]websvc.Call) {
 	for _, more := range extra {
 		maps.Copy(calls, more)
 	}
-	enginetest.Serve(t, storetest.DataDir(t), calls)
+	enginetest.Serve(t, dataDir, calls)
 }
 
 func TestRunDeletionReportsEngineFailure(t *testing.T) {

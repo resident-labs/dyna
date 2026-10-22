@@ -68,6 +68,10 @@ func newEnv(t *testing.T) *env {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Engine startup migrates grants before any test can issue a new device.
+	if err := devicegrant.Migrate(filepath.Dir(store.Dir())); err != nil {
+		t.Fatal(err)
+	}
 	e := &env{t: t, store: store, hub: hub.New(1), api: &fakeAPI{}}
 	calls, err := Bind([]Binding{{Name: "Echo", Access: Read, Scope: ScopeRead, Method: e.api.Echo}, {Name: "FeedTail", Access: Read, Scope: ScopeRead, Method: e.api.FeedTail}, {Name: "Fail", Access: Read, Scope: ScopeRead, Method: e.api.Fail}, {Name: "Rooms", Access: Read, Scope: ScopeRead, Method: e.api.Rooms}})
 	if err != nil {

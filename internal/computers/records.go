@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -38,14 +37,14 @@ func openRecords(dataDir string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	// As every store on the rollback helper does, so a process that opens a
-	// fresh data folder has the stamp table too.
-	if err := state.MigrateMirrors(dataDir); err != nil {
-		return nil, err
-	}
-	err = database.Migrate(db, "computers.records", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), recordSchema)
-		return err
+	err = database.Migrate(db, "computers.records", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old < 1 {
+			if _, err := conn.ExecContext(ctx, recordSchema); err != nil {
+				return err
+			}
+		}
+		return importComputerFiles(ctx, conn, filepath.Join(dataDir, "computers"))
 	})
 	return db, err
 }
@@ -64,20 +63,56 @@ var (
 func (r record) path(id string) string { return filepath.Join(Dir(id), r.file) }
 func (r record) key(id string) string  { return "computers/" + id + "/" + r.column }
 
-// importRecord imports r's file when the previous release wrote it.
-//
-// TODO: legacy/shim remove later — the previous release reads and writes
-// meta.json and state.json in each computer's folder; remove importRecord
-// and the copy in saveRecord with requirement 31, when no binary from
-// before dyna.db is alive.
-func importRecord(ctx context.Context, db *sql.DB, id string, r record) error {
-	_, err := state.For(db).ImportIfForeign(ctx, r.key(id), r.path(id), func(conn *sql.Conn, raw []byte) error {
-		if !json.Valid(raw) {
-			return fmt.Errorf("computer %s %s: %w", id, r.file, state.ErrSkipForeign)
+// TODO: legacy/shim remove later — imports retained computer files only during
+// schema upgrade; remove once supported stores have passed computers.records 2.
+func importComputerFiles(ctx context.Context, conn *sql.Conn, root string) error {
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || ValidateID(entry.Name()) != nil {
+			continue
 		}
-		return setColumn(ctx, conn, id, r, raw)
-	})
-	return err
+		id := entry.Name()
+		for _, r := range []record{metaRecord, statusRecord} {
+			var canonical bool
+			if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM computers WHERE session=? AND "+r.column+" IS NOT NULL)", id).Scan(&canonical); err != nil {
+				return err
+			}
+			if canonical {
+				continue
+			}
+			path := filepath.Join(root, id, r.file)
+			_, err := state.ImportMigration(ctx, conn, r.key(id), path, func(conn *sql.Conn, raw []byte) error {
+				var session string
+				if r == metaRecord {
+					var value Meta
+					if err := json.Unmarshal(raw, &value); err != nil {
+						return fmt.Errorf("import computer %s: %w", path, err)
+					}
+					session = value.SessionID
+				} else {
+					var value Status
+					if err := json.Unmarshal(raw, &value); err != nil {
+						return fmt.Errorf("import computer %s: %w", path, err)
+					}
+					session = value.SessionID
+				}
+				if session != id {
+					return fmt.Errorf("import computer %s: session ID does not match directory", path)
+				}
+				return setColumn(ctx, conn, id, r, raw)
+			})
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func setColumn(ctx context.Context, conn *sql.Conn, id string, r record, raw []byte) error {
@@ -87,32 +122,13 @@ ON CONFLICT(session) DO UPDATE SET `+r.column+` = excluded.`+r.column, id, raw)
 	return err
 }
 
-// readRecord reads r for computer id into v, importing the previous
-// release's file first; ok is false when there is none. The foreign check
-// takes no lock, so a computer whose file is our own copy costs one stat
-// and one stamp read; only a foreign file takes the record lock to import.
+// readRecord reads a canonical SQLite column; ok is false when absent.
 func readRecord(id string, r record, v any) (ok bool, err error) {
 	db, err := recordsDB()
 	if err != nil {
 		return false, err
 	}
-	ctx := context.Background()
-	foreign, err := state.For(db).Foreign(ctx, r.key(id), r.path(id))
-	if err != nil {
-		return false, err
-	}
-	if foreign {
-		unlock, err := lockRecord(id)
-		if err != nil {
-			return false, err
-		}
-		err = importRecord(ctx, db, id, r)
-		unlock()
-		if err != nil {
-			return false, err
-		}
-	}
-	raw, err := column(ctx, db, id, r)
+	raw, err := column(context.Background(), db, id, r)
 	if err != nil || raw == nil {
 		return false, err
 	}
@@ -131,11 +147,8 @@ func column(ctx context.Context, db *sql.DB, id string, r record) ([]byte, error
 	return raw, err
 }
 
-// saveRecord stores v as r for computer id in the order state.Mirror needs:
-// import the previous release's file, write the row, then copy it. The
-// computer daemon and an offline destroy can both write a computer, so a
-// per-computer flock covers the three steps. same, when set, reports
-// whether the stored value already matches, so the write is skipped.
+// saveRecord stores a canonical column. Its lock orders status comparisons
+// across daemon and offline writers. same can skip sample-only changes.
 func saveRecord(id string, r record, v any, same func(stored []byte) bool) error {
 	unlock, err := lockRecord(id)
 	if err != nil {
@@ -145,9 +158,6 @@ func saveRecord(id string, r record, v any, same func(stored []byte) bool) error
 	ctx := context.Background()
 	db, err := recordsDB()
 	if err != nil {
-		return err
-	}
-	if err := importRecord(ctx, db, id, r); err != nil {
 		return err
 	}
 	raw, err := json.Marshal(v)
@@ -163,21 +173,10 @@ func saveRecord(id string, r record, v any, same func(stored []byte) bool) error
 			return nil
 		}
 	}
-	if err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		return setColumn(ctx, conn, id, r, raw)
-	}); err != nil {
-		return err
-	}
-	// TODO: legacy/shim remove later — meta.json and state.json are the
-	// previous release's copies; remove with requirement 31.
-	return state.For(db).Mirror(ctx, r.key(id), r.path(id), func(out io.Writer) error {
-		stored, err := column(ctx, db, id, r)
-		if err != nil {
-			return err
-		}
-		_, err = out.Write(stored)
-		return err
 	})
+
 }
 
 // lockWait bounds the wait for another writer of the same computer, so a
@@ -185,7 +184,7 @@ func saveRecord(id string, r record, v any, same func(stored []byte) bool) error
 const lockWait = 10 * time.Second
 
 // lockRecord takes the per-computer flock that orders this release's
-// writers and importers of a computer's records.
+// writers of a computer's records.
 func lockRecord(id string) (func(), error) {
 	if err := os.MkdirAll(Dir(id), 0o700); err != nil {
 		return nil, err

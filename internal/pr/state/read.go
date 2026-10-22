@@ -66,12 +66,18 @@ func open(root string) (*sql.DB, error) {
 		if _, err := conn.ExecContext(context.Background(), schema); err != nil {
 			return err
 		}
+		var owned bool
+		if err := conn.QueryRowContext(context.Background(), `SELECT EXISTS(SELECT 1 FROM pr_state) OR EXISTS(SELECT 1 FROM pr_records)`).Scan(&owned); err != nil {
+			return err
+		}
+		if owned {
+			return nil
+		}
 		st, found, err := readLegacy(root)
 		if err != nil || !found {
 			return err
 		}
-		_, err = writeRows(conn, newState(), nil, st, 1)
-		return err
+		return importLegacyRows(conn, st)
 	})
 	if err != nil {
 		return db, err

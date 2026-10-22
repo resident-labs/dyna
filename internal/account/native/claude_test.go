@@ -104,8 +104,8 @@ func TestClaudeCapturePathsAndNoMutation(t *testing.T) {
 			if !before.ModTime().Equal(after.ModTime()) || string(beforeConfig) != string(afterConfig) {
 				t.Fatal("Capture changed native files")
 			}
-			if mode == "legacy" && filepath.Base(p.config) != ".config.json" {
-				t.Fatal("Legacy config was not selected")
+			if mode == "legacy" && p.config != filepath.Join(m.host.HomeDir(), ".claude.json") {
+				t.Fatal("Current metadata path was not selected")
 			}
 			if mode == "config-override" && p.config != filepath.Join(env["CLAUDE_CONFIG_DIR"], ".claude.json") {
 				t.Fatal("Custom metadata path was not selected")

@@ -34,7 +34,12 @@ func TestCachedRunnerReplyRequiresItsVerifiedSession(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			_, w, dir := thingsStore(t)
 			const rid = "ses_alice/1/2/3/4"
-			if err := w.FinishRequest(t.Context(), runnerRequestKey(rid), "RunnerTurnEnd", []byte(`"private input"`)); err != nil {
+			fingerprint, err := requestFingerprint("RunnerTurnEnd", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := state.ForRequestCall(t.Context(), runnerRequestKey(rid), "RunnerTurnEnd", fingerprint)
+			if err := w.FinishRequest(request, runnerRequestKey(rid), "RunnerTurnEnd", []byte(`"private input"`)); err != nil {
 				t.Fatal(err)
 			}
 			called := false
@@ -45,7 +50,7 @@ func TestCachedRunnerReplyRequiresItsVerifiedSession(t *testing.T) {
 			applyOnce(calls, w, t.Logf)
 			enginetest.ServeCallers(t, dir, func(net.Conn) (websvc.Caller, error) { return tc.caller, nil }, calls)
 			var result string
-			err := engineclient.New("").Call(callspec.WithRequest(t.Context(), rid), "RunnerTurnEnd", nil, &result)
+			err = engineclient.New("").Call(callspec.WithRequest(t.Context(), rid), "RunnerTurnEnd", nil, &result)
 			if tc.allow {
 				if err != nil || result != "private input" {
 					t.Fatalf("own cached reply = %q, %v", result, err)

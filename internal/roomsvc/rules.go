@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/room"
 )
@@ -48,7 +49,7 @@ func (s *Service) EditRule(ctx context.Context, roomRef string, global bool, id,
 	if global {
 		scope = goals.Global
 	}
-	rule, err := s.goalService().Store.EditRule(scope, id, author.ID, author.AuthorizeAs, text)
+	rule, err := s.goalService().Store.EditRule(scope, id, author.ID, ruleAuthority(ctx), text)
 	return rule, s.ruleNotice(ctx, r, scope, rule, author.Address, "edited", err)
 }
 func (s *Service) RemoveRule(ctx context.Context, roomRef string, global bool, id string) (goals.Rule, error) {
@@ -60,8 +61,19 @@ func (s *Service) RemoveRule(ctx context.Context, roomRef string, global bool, i
 	if global {
 		scope = goals.Global
 	}
-	rule, err := s.goalService().Store.RemoveRule(scope, id, author.AuthorizeAs)
+	rule, err := s.goalService().Store.RemoveRule(scope, id, ruleAuthority(ctx))
 	return rule, s.ruleNotice(ctx, r, scope, rule, author.Address, "removed", err)
+}
+
+// ruleAuthority keeps owner-rule permission separate from the recorded author.
+// The goal store grants owner permission only for its "owner" sentinel.
+func ruleAuthority(ctx context.Context) string {
+	switch authority.Of(ctx).Role {
+	case authority.Owner, authority.Root:
+		return "owner"
+	default:
+		return ""
+	}
 }
 
 // ruleNotice posts the caller's saved change in the room and tells the

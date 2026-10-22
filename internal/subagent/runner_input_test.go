@@ -87,7 +87,9 @@ func TestClaimReplySurvivesDatabaseReopenBeforeFinishRequest(t *testing.T) {
 	}
 	actor := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: info.ID})
 	rid := info.ID + "/claim/1"
-	request := func() context.Context { return state.ForRequest(callspec.WithRequest(actor, rid), "runner/"+rid) }
+	request := func() context.Context {
+		return state.ForRequestCall(callspec.WithRequest(actor, rid), "runner/"+rid, "RunnerClaimInput", []byte("fixture-call"))
+	}
 	calls := e.m
 	reply, err := calls.RunnerClaimInput(request(), InputClaim{Turn: 1, Startup: true})
 	if err != nil || len(reply.Posts) != 1 || reply.Posts[0].Steer.ID != msg.ID {

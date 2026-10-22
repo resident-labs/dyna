@@ -64,7 +64,7 @@ func writeOldSubscriptions(t *testing.T, dir string, entries []Entry) {
 	}
 }
 
-func TestLegacySubscriptionsImportOnceAndOldBinaryChangesImport(t *testing.T) {
+func TestLegacySubscriptionsImportOnce(t *testing.T) {
 	dir := t.TempDir()
 	t.Cleanup(func() { database.Close(dir) })
 	_, _, sub := newReceiver(t)
@@ -94,17 +94,17 @@ func TestLegacySubscriptionsImportOnceAndOldBinaryChangesImport(t *testing.T) {
 	if got, _ := mustGet(t, s, "phone"); got.Names {
 		t.Fatal("own copy replaced the row")
 	}
-	// An old binary replaces the whole file, including deletions.
+	// Retained file replacements cannot change canonical subscriptions.
 	old.DeviceID = "tablet"
 	writeOldSubscriptions(t, dir, []Entry{old})
 	if err := Migrate(dir); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := mustGet(t, s, "phone"); ok {
-		t.Fatal("old binary deletion was lost")
+	if _, ok := mustGet(t, s, "phone"); !ok {
+		t.Fatal("retained file replaced canonical row")
 	}
-	if got, ok := mustGet(t, s, "tablet"); !ok || got != old {
-		t.Fatalf("old binary change: %+v, %v", got, ok)
+	if got, ok := mustGet(t, s, "tablet"); ok {
+		t.Fatalf("retained file was imported again: %+v", got)
 	}
 	before = state.For(s.db).Health().Writes
 	if err := Migrate(dir); err != nil {
@@ -164,18 +164,10 @@ func TestSubscriptionHandlesShareRowsAndWritePublishesNothing(t *testing.T) {
 	if events != 0 {
 		t.Fatalf("web push has no event consumer, but published %d events", events)
 	}
-	// The old release must still see all current rows after a downgrade.
-	data, err := os.ReadFile(filepath.Join(dir, "connect", "push", subsFile))
-	if err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(dir, "connect", "push", subsFile)); !os.IsNotExist(err) {
+		t.Fatalf("subscription write created a retained file: %v", err)
 	}
-	var copied []Entry
-	if err := json.Unmarshal(data, &copied); err != nil {
-		t.Fatal(err)
-	}
-	if !reflect.DeepEqual(copied, mustList(t, first)) {
-		t.Fatalf("rollback copy differs: %+v", copied)
-	}
+
 }
 
 func TestPruneCallbackRunsBeforeWriteAndPreservesNewSubscribe(t *testing.T) {
@@ -225,6 +217,9 @@ func TestDamagedLegacyFileLeavesRowsUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "connect", "push", subsFile)
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := fsutil.WriteFile(path, []byte("broken"), 0600, false); err != nil {
 		t.Fatal(err)
 	}
@@ -262,9 +257,8 @@ func TestOpenSubscriptionStoreDoesNotMigrateOutsideEngine(t *testing.T) {
 	}
 }
 
-// A subscribe after an old binary's write imports that write first, then
-// adds its own device: both stay.
-func TestSubscribeAfterOldBinaryWriteKeepsBoth(t *testing.T) {
+// A subscribe ignores retained files and preserves current subscriptions.
+func TestSubscribeIgnoresRetainedFile(t *testing.T) {
 	s, dir := openStore(t)
 	_, _, sub := newReceiver(t)
 	if err := s.Subscribe("phone", sub, true); err != nil {
@@ -278,8 +272,8 @@ func TestSubscribeAfterOldBinaryWriteKeepsBoth(t *testing.T) {
 	for _, e := range mustList(t, s) {
 		ids = append(ids, e.DeviceID)
 	}
-	if !reflect.DeepEqual(ids, []string{"laptop", "tablet"}) {
-		t.Fatalf("devices after the old binary's write and a subscribe = %v, want [laptop tablet]", ids)
+	if !reflect.DeepEqual(ids, []string{"laptop", "phone"}) {
+		t.Fatalf("devices after the old binary's write and a subscribe = %v, want [laptop phone]", ids)
 	}
 }
 

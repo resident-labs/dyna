@@ -56,6 +56,9 @@ SELECT 'turns/' || session || '/' || n, mirror FROM session_turns WHERE mirror !
 	if err != nil {
 		return nil, err
 	}
+	if err := migratePromptBlobs(db); err != nil {
+		return nil, err
+	}
 	// TODO: legacy/shim remove later — earlier runners require subagent.turns version 2; keep the additive report index on its own key until those runners exit.
 	err = database.Migrate(db, "subagent.reports", 1, func(conn *sql.Conn, _ int) error {
 		_, err := conn.ExecContext(context.Background(), `CREATE INDEX session_turns_pending_reports ON session_turns(session, n)

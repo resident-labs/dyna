@@ -21,10 +21,7 @@ func TestQueueReadNeverWritesAnOlderCopyOverTheRow(t *testing.T) {
 	if err := writeQueue(dir, queueClaims{Claimed: map[string]int{}, Cancelled: map[string]bool{}, Dismissed: map[string]bool{}}); err != nil {
 		t.Fatal(err)
 	}
-	stale, err := os.ReadFile(filepath.Join(dir, queueFile))
-	if err != nil {
-		t.Fatal(err)
-	}
+	stale := []byte(`{"claimed":{}}`)
 	if err := writeQueue(dir, queueClaims{Claimed: map[string]int{"msg_kept": 1}, Cancelled: map[string]bool{}, Dismissed: map[string]bool{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -40,8 +37,8 @@ func TestQueueReadNeverWritesAnOlderCopyOverTheRow(t *testing.T) {
 	}
 }
 
-// A watcher import cannot refill an intentionally empty canonical queue.
-func TestWatcherQueueImportKeepsTheEmptyCanonicalRow(t *testing.T) {
+// A retained file cannot refill an intentionally empty canonical queue.
+func TestQueueReadKeepsTheEmptyCanonicalRow(t *testing.T) {
 	e := newTestEnv(t)
 	info := completedFixtureSession(t, e)
 	dir, err := e.m.Store.Dir(info.ID)
@@ -52,11 +49,8 @@ func TestWatcherQueueImportKeepsTheEmptyCanonicalRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	olderCopy(t, filepath.Join(dir, queueFile), []byte(`{"claimed":{"msg_old":1}}`))
-	if err := e.m.Store.ImportLegacyQueue(info.ID); err != nil {
-		t.Fatal(err)
-	}
 	if q, err := readQueue(dir); err != nil || len(q.Claimed) != 0 {
-		t.Fatalf("after the probe the queue claims %v, %v; want the canonical empty queue", q.Claimed, err)
+		t.Fatalf("the queue claims %v, %v; want the canonical empty queue", q.Claimed, err)
 	}
 }
 

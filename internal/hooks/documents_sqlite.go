@@ -27,15 +27,19 @@ func (s Service) documentsDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "hooks.documents", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), documentsSchema)
-		return err
+	err = database.Migrate(db, "hooks.documents", 2, func(conn *sql.Conn, old int) error {
+		if old < 1 {
+			if _, err := conn.ExecContext(context.Background(), documentsSchema); err != nil {
+				return err
+			}
+		}
+		return s.importDocuments(conn)
 	})
 	return db, err
 }
 
 // MigrateDocuments creates the hook configuration table before serving calls.
-// Previous-release files import lazily when their configuration is read.
+// Previous-release files import once in the versioned migration.
 func MigrateDocuments(dataDir string) error {
 	_, err := (Service{DataDir: dataDir}).documentsDB()
 	return err

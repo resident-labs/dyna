@@ -126,43 +126,83 @@ func TestRequestFinishPathsPreserveFingerprint(t *testing.T) {
 	}
 }
 
-func TestRequestFingerprintMigrationKeepsLegacyReplay(t *testing.T) {
-	dir := t.TempDir()
-	t.Cleanup(func() { database.Close(dir) })
-	db, err := database.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// This is the genuine version-one schema, before the fingerprint column.
-	err = database.Migrate(db, "state.requests", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(t.Context(), "CREATE TABLE request_ids(id TEXT PRIMARY KEY,method TEXT NOT NULL DEFAULT '',result BLOB,done_at INTEGER NOT NULL); CREATE INDEX request_ids_done ON request_ids(done_at)")
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	first := time.Unix(1_800_000_000, 0)
-	if _, err := db.Exec("INSERT INTO request_ids(id,method,result,done_at) VALUES('old','Thing',?,?)", []byte("true"), first.UnixMilli()); err != nil {
-		t.Fatal(err)
-	}
-	if err := MigrateRequests(dir); err != nil {
-		t.Fatal(err)
-	}
-	w := newWriter(db)
-	call := ForRequestCall(t.Context(), "old", "Thing", []byte("new-call-fingerprint"))
-	if result, done, err := w.RequestDone(call, "old"); err != nil || !done || string(result) != "true" {
-		t.Fatalf("genuine old replay: %q %v %v", result, done, err)
-	}
-	w.Now = func() time.Time { return first.Add(RequestKeep + time.Minute) }
-	if err := w.FinishRequest(call, "old", "Thing", []byte("false")); err != nil {
-		t.Fatal(err)
-	}
-	var fingerprint []byte
-	if err := db.QueryRow("SELECT fingerprint FROM request_ids WHERE id='old'").Scan(&fingerprint); err != nil || len(fingerprint) != 0 {
-		t.Fatalf("old receipt was relabeled as protected: %q %v", fingerprint, err)
-	}
-	if n, err := w.PruneRequests(t.Context(), w.Now().Add(-RequestKeep)); err != nil || n != 1 {
-		t.Fatalf("legacy retention: %d %v", n, err)
+func TestRequestFingerprintMigrationRejectsUnboundReplay(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		version     int
+		fingerprint []byte
+	}{
+		{"v1", 1, nil}, {"v2-null", 2, nil}, {"v2-empty", 2, []byte{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Cleanup(func() { database.Close(dir) })
+			db, err := database.Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := time.Unix(1_800_000_000, 0)
+			if err := database.Migrate(db, "state.requests", tc.version, func(conn *sql.Conn, _ int) error {
+				schema := "CREATE TABLE request_ids(id TEXT PRIMARY KEY,method TEXT NOT NULL DEFAULT '',result BLOB,done_at INTEGER NOT NULL); CREATE INDEX request_ids_done ON request_ids(done_at)"
+				if tc.version == 2 {
+					schema = requestSchema
+				}
+				if _, err := conn.ExecContext(t.Context(), schema); err != nil {
+					return err
+				}
+				if tc.version == 1 {
+					_, err := conn.ExecContext(t.Context(), "INSERT INTO request_ids(id,method,result,done_at) VALUES('old','Thing',?,?)", []byte("true"), first.UnixMilli())
+					return err
+				}
+				_, err := conn.ExecContext(t.Context(), "INSERT INTO request_ids(id,method,result,fingerprint,done_at) VALUES('old','Thing',?,?,?)", []byte("true"), tc.fingerprint, first.UnixMilli())
+				return err
+			}); err != nil {
+				t.Fatal(err)
+			}
+			for pass := 0; pass < 2; pass++ {
+				if err := MigrateRequests(dir); err != nil {
+					t.Fatal(err)
+				}
+				if err := database.Close(dir); err != nil {
+					t.Fatal(err)
+				}
+				db, err = database.Open(dir)
+				if err != nil {
+					t.Fatal(err)
+				}
+				w := newWriter(db)
+				w.Now = func() time.Time { return first.Add(RequestKeep) }
+				call := ForRequestCall(t.Context(), "old", "Thing", []byte("fresh-fingerprint"))
+				if _, _, err := w.RequestDone(call, "old"); !errors.Is(err, ErrRequestConflict) {
+					t.Errorf("bound replay accepted: %v", err)
+				}
+				ran := false
+				if err := w.Write(call, hub.Event{}, func(*sql.Conn) error { ran = true; return nil }); !errors.Is(err, ErrRequestConflict) || ran {
+					t.Errorf("write replay: %v callback=%v", err, ran)
+				}
+				if err := w.FinishRequest(call, "old", "Thing", []byte("false")); !errors.Is(err, ErrRequestConflict) {
+					t.Errorf("finish replay accepted: %v", err)
+				}
+				var method string
+				var result, fingerprint []byte
+				var doneAt int64
+				if err := db.QueryRow("SELECT method,result,fingerprint,done_at FROM request_ids WHERE id='old'").Scan(&method, &result, &fingerprint, &doneAt); err != nil {
+					t.Fatal(err)
+				}
+				if method != "Thing" || string(result) != "true" || string(fingerprint) != "unbound" || doneAt != first.UnixMilli() {
+					t.Errorf("receipt evidence changed: %s %q %q %d", method, result, fingerprint, doneAt)
+				}
+				if pass == 1 {
+					if n, err := w.PruneRequests(t.Context(), w.Now().Add(-RequestKeep)); err != nil || n != 0 {
+						t.Fatalf("pruned at cutoff: %d %v", n, err)
+					}
+					w.Now = func() time.Time { return first.Add(RequestKeep + time.Millisecond) }
+					if n, err := w.PruneRequests(t.Context(), w.Now().Add(-RequestKeep)); err != nil || n != 1 {
+						t.Fatalf("retention: %d %v", n, err)
+					}
+				}
+			}
+		})
 	}
 }
 

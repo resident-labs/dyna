@@ -379,10 +379,7 @@ func (s *Service) refreshHeads(ctx context.Context, st State, polledAt time.Time
 			// The normal snapshot path still owns end notices, hooks and cleanup.
 			// Mark the known state now so closed PRs cannot acquire a new review.
 			if pull.State == "closed" {
-				r.State = "closed"
-				if pull.Merged {
-					r.State = "merged"
-				}
+				endRecord(r, pull.Merged, s.now())
 				r.Polling.Next = time.Time{}
 			}
 			observation := facts.FromRecord(*r)

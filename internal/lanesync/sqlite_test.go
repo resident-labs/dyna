@@ -33,9 +33,9 @@ func TestUpdateUsesStateWriter(t *testing.T) {
 	if len(events) != 0 {
 		t.Fatalf("published %v; room watch owns sync events", events)
 	}
-	// The update, then the rollback copy's pending and final stamps.
-	if got := state.For(db).Health().Writes; got != 3 {
-		t.Fatalf("state writer saw %d writes, want 3: the update bypassed it", got)
+	// The update uses the shared state writer.
+	if got := state.For(db).Health().Writes; got != 1 {
+		t.Fatalf("state writer saw %d writes, want 1: the update bypassed it", got)
 	}
 	failed := errors.New("stop")
 	if err := s.Update(func(st *Snapshot) error { delete(st.Operations, "repo"); return failed }); !errors.Is(err, failed) {
@@ -54,77 +54,29 @@ func TestUpdateUsesStateWriter(t *testing.T) {
 	}
 }
 
-func TestMigrationAndRollbackCopy(t *testing.T) {
+func TestMigrationLeavesRetainedSourceUnchanged(t *testing.T) {
 	s := Service{Dir: t.TempDir()}
 	t.Cleanup(func() { database.Close(s.Dir) })
-	old := Snapshot{Operations: map[string]Operation{"repo": {Progress: Progress{State: "testing"}}}, Exports: map[string]Export{"repo": {Commit: "export"}}}
-	if err := store.WriteJSON(s.path(), old, 0600); err != nil {
+	source := []byte(`{"operations":{"repo":{"state":"testing"}}}`)
+	if err := os.WriteFile(s.path(), source, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := Migrate(s.Dir); err != nil {
 		t.Fatal(err)
 	}
-	db, err := s.open()
-	if err != nil {
+	if err := s.Update(func(st *Snapshot) error { st.Events["current"] = "row"; return nil }); err != nil {
 		t.Fatal(err)
-	}
-	revision := func() int64 {
-		t.Helper()
-		var n int64
-		if err := db.QueryRow("SELECT revision FROM lane_sync WHERE id=1").Scan(&n); err != nil {
-			t.Fatal(err)
-		}
-		return n
-	}
-	first := revision()
-	if err := Migrate(s.Dir); err != nil {
-		t.Fatal(err)
-	}
-	if revision() != first {
-		t.Fatal("unchanged legacy file was imported twice")
-	}
-	if err := s.Update(func(st *Snapshot) error {
-		st.Operations["repo"] = Operation{Progress: Progress{State: "done"}}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	var copy legacySnapshot
-	if err := store.ReadJSON(s.path(), &copy); err != nil {
-		t.Fatal(err)
-	}
-	if copy.Revision == 0 || copy.Operations["repo"].State != "done" || copy.Exports["repo"].Commit != "export" {
-		t.Fatalf("rollback copy: %+v", copy)
-	}
-	written := revision()
-	if err := Migrate(s.Dir); err != nil {
-		t.Fatal(err)
-	}
-	if revision() != written {
-		t.Fatal("own rollback copy was imported")
-	}
-	// The previous release rewrites its typed Snapshot and drops the stamp.
-	old.Operations["repo"] = Operation{Progress: Progress{State: "failed"}}
-	if err := store.WriteJSON(s.path(), old, 0600); err != nil {
-		t.Fatal(err)
-	}
-	st, err := s.Read()
-	if err != nil || st.Operations["repo"].State != "done" {
-		t.Fatalf("read used the file: %+v, %v", st, err)
 	}
 	if err := Migrate(s.Dir); err != nil {
 		t.Fatal(err)
 	}
-	st, err = s.Read()
-	if err != nil || st.Operations["repo"].State != "failed" || revision() <= written {
-		t.Fatalf("old binary's write was not imported: %+v, %v", st, err)
+	got, err := s.Read()
+	if err != nil || got.Events["current"] != "row" {
+		t.Fatalf("snapshot: %+v, %v", got, err)
 	}
-	if err := os.Remove(s.path()); err != nil {
-		t.Fatal(err)
-	}
-	st, err = s.Read()
-	if err != nil || st.Exports["repo"].Commit != "export" {
-		t.Fatalf("missing copy changed SQLite read: %+v, %v", st, err)
+	after, err := os.ReadFile(s.path())
+	if err != nil || !bytes.Equal(source, after) {
+		t.Fatalf("source changed: %q, %v", after, err)
 	}
 }
 
@@ -175,14 +127,14 @@ func TestCancelledUpdateDoesNotChangeStateOrCopy(t *testing.T) {
 	if err := s.Update(func(st *Snapshot) error { st.Events["old"] = "value"; return nil }); err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.ReadFile(s.path())
-	if err != nil {
+	before := []byte("retained source")
+	if err := os.WriteFile(s.path(), before, 0600); err != nil {
 		t.Fatal(err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	called := false
-	err = s.update(ctx, func(st *Snapshot) error { called = true; st.Events["new"] = "value"; return nil })
+	err := s.update(ctx, func(st *Snapshot) error { called = true; st.Events["new"] = "value"; return nil })
 	if !errors.Is(err, context.Canceled) || called {
 		t.Fatalf("cancelled update: %v, called=%v", err, called)
 	}
@@ -207,29 +159,6 @@ func TestReadAtOldSchemaDoesNotMigrate(t *testing.T) {
 	var count int
 	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE name='lane_sync'").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("read migrated schema: %d, %v", count, err)
-	}
-}
-
-func TestRollbackCopyFailureReportsCommittedState(t *testing.T) {
-	s := Service{Dir: t.TempDir()}
-	t.Cleanup(func() { database.Close(s.Dir) })
-	if err := s.Update(func(st *Snapshot) error { st.Events["before"] = "old"; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	err := s.Update(func(st *Snapshot) error {
-		st.Events["after"] = "committed"
-		// Make the post-commit copy fail, after the legacy import has finished.
-		if err := os.Remove(s.path()); err != nil {
-			return err
-		}
-		return os.Mkdir(s.path(), 0700)
-	})
-	if err == nil || !strings.Contains(err.Error(), "state committed, but rollback copy failed") {
-		t.Fatalf("copy failure: %v", err)
-	}
-	st, err := s.Read()
-	if err != nil || st.Events["after"] != "committed" {
-		t.Fatalf("copy failure lost committed state: %+v, %v", st, err)
 	}
 }
 

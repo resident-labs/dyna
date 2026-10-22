@@ -63,6 +63,9 @@ func runtimeKey(repo string) string { return "hooks/runtime/" + repo }
 // Only the engine calls it at start.
 func Migrate(dataDir string) error {
 	s := Service{DataDir: dataDir}
+	if err := s.validateStartupSpool(); err != nil {
+		return err
+	}
 	db, err := s.runtimeDB()
 	if err != nil {
 		return err

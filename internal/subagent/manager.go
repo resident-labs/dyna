@@ -501,7 +501,7 @@ func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, m
 		if transferID != "" && (meta.Transfer == nil || meta.Transfer.ID != transferID || meta.Transfer.Turn != meta.Turns+1) {
 			return errors.New("stale transfer turn")
 		}
-		lock, err = store.recoverTurnLock(id)
+		lock, err = store.tryTurnLock(id)
 		if err != nil {
 			return err
 		}
