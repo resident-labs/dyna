@@ -171,6 +171,7 @@ Manual CI can also run one commit over the configured SSH destination:
 ```sh
 dyna git ci run <sha>
 dyna git ci run <sha> --suite go
+dyna git ci run <sha> --node local --suite relay
 dyna git ci show <sha> --json
 ```
 
