@@ -217,7 +217,7 @@ func newEngineCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		o := userservices.Options{Binary: exe, Dir: units, RestartComputers: restartComputers, Quiet: computerrestart.QuietNow, Output: c.OutOrStdout(),
+		o := userservices.Options{Binary: exe, Dir: units, RestartComputers: restartComputers, Quiet: computerrestart.QuietNow, EngineQuiet: userservices.VoiceQuietNow, Output: c.OutOrStdout(),
 			Healthy: func(ctx context.Context) error { return engine.WaitHealthy(ctx, engineclient.New("").Call, nil) }}
 		if writeOnly {
 			return userservices.Write(o)
@@ -228,6 +228,12 @@ func newEngineCommand() *cobra.Command {
 	services.Flags().BoolVar(&writeOnly, "write-only", false, "write unit files without enabling services or contacting systemd")
 	services.Flags().BoolVar(&restartComputers, "restart-computers", false, "restart the computer service when its runtime changed")
 	cmd.AddCommand(services)
+	var restartUnits string
+	finishRestart := &cobra.Command{Use: "finish-restart", Hidden: true, Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+		return userservices.WaitEngineRestart(c.Context(), userservices.Options{Dir: restartUnits, EngineQuiet: userservices.VoiceQuietNow})
+	}}
+	finishRestart.Flags().StringVar(&restartUnits, "unit-dir", "", "unit directory")
+	cmd.AddCommand(finishRestart)
 	cmd.AddCommand(&cobra.Command{Use: "connect", Short: "Manage Resident Labs Connect", DisableFlagParsing: true, RunE: func(cmd *cobra.Command, args []string) error {
 		if code := engine.ConnectMain(args); code != 0 {
 			return fmt.Errorf("engine connect exited with code %d", code)
