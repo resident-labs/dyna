@@ -79,7 +79,7 @@ func TestGoalWritesRecordCaller(t *testing.T) {
 				t.Fatal(err)
 			}
 			target := ownerRule.ID
-			if actor.Role == authority.Session {
+			if actor.Role == authority.Session || actor.Role == authority.Worker {
 				if _, err := svc.EditRule(ctx, rec.ID, false, ownerRule.ID, "Forbidden"); err == nil {
 					t.Fatal("claimed session edited an owner rule")
 				}
@@ -89,7 +89,7 @@ func TestGoalWritesRecordCaller(t *testing.T) {
 				if tc.want == "unverified" && !strings.Contains(strings.Join(logs, "\n"), "recorded as unverified") {
 					t.Fatalf("refusal audit log = %v", logs)
 				}
-				if !g.HeldBy(id) {
+				if actor.Role == authority.Session && !g.HeldBy(id) {
 					t.Fatalf("holder lookup ignored authorization session: %+v", g)
 				}
 				target = rule.ID
