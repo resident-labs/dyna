@@ -3,9 +3,12 @@ package subagent
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"dyna-agent/internal/callerid"
+	"dyna-agent/internal/database"
+	"dyna-agent/internal/turnlock"
 )
 
 func TestPromptCutoverRequiresQuiescentOldWriters(t *testing.T) {
@@ -115,4 +118,42 @@ func TestPromptCutoverRequiresQuiescentOldWriters(t *testing.T) {
 			}
 		})
 	}
+	t.Run("gate source requires an explicit pid", func(t *testing.T) {
+		dataDir := t.TempDir()
+		db, err := database.Open(dataDir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { database.Close(dataDir) })
+		id := NewID()
+		sessions := filepath.Join(dataDir, "sessions")
+		dir := filepath.Join(sessions, id)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		// Session metadata may omit PID when it has no runner.
+		if _, err := db.Exec("CREATE TABLE session_records(id TEXT, meta TEXT); INSERT INTO session_records VALUES (?, '{}')", id); err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			gate   string
+			reject bool
+		}{
+			{`{"active":true,"turn":1}`, true},
+			{`{"active":true,"turn":1,"pid":null}`, true},
+			{`{"active":true,"turn":1,"pid":0}`, false},
+		} {
+			if err := os.WriteFile(filepath.Join(dir, turnlock.GateFile), []byte(tc.gate), 0600); err != nil {
+				t.Fatal(err)
+			}
+			candidates, err := promptRunners(db, sessions)
+			if (err != nil) != tc.reject {
+				t.Fatalf("gate %s: error = %v; reject = %v", tc.gate, err, tc.reject)
+			}
+			if len(candidates) != 0 {
+				t.Fatalf("unexpected candidates: %v", candidates)
+			}
+		}
+	})
+
 }
