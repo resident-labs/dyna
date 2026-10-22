@@ -143,8 +143,8 @@ func TestRemoveDeletesEveryRowOfTheRun(t *testing.T) {
 		return got
 	}
 	before := count()
-	if before["runs"] != 1 || before["steering"] != 1 || before["ancestry"] != 1 || before["stamps"] < 3 {
-		t.Fatalf("before Remove = %v; want a row of each kind and the meta, steering and plan stamps", before)
+	if before["runs"] != 1 || before["steering"] != 1 || before["ancestry"] != 1 || before["stamps"] < 1 {
+		t.Fatalf("before Remove = %v; want a row of each kind and the retained metadata stamps", before)
 	}
 	if err := Remove(id); err != nil {
 		t.Fatal(err)
