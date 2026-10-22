@@ -380,8 +380,9 @@
         labelInput = ''
         notice = 'Sign-in finished.'
       }
-    } catch {
-      if (!stopped) error = 'Sign-in is not complete yet. Finish signing in inside the terminal first.'
+    } catch (e) {
+      // The engine names the missing step, so keep its words.
+      if (!stopped) error = failText(e, 'Sign-in is not complete yet. Finish signing in inside the terminal first.')
     } finally {
       if (!stopped) busy = false
     }
@@ -729,7 +730,10 @@
               {:else if !r.accounts.length}
                 <div class="signin-card">
                   <p>Sign in to start using {r.meta.name}.</p>
-                  <p class="muted small">If you already use {r.meta.name}, Dyna can copy that login once.</p>
+                  <!-- Antigravity signs in through its ACP server and never copies a personal login. -->
+                  {#if r.id !== 'antigravity'}
+                    <p class="muted small">If you already use {r.meta.name}, Dyna can copy that login once.</p>
+                  {/if}
                   <button class="btn pri" disabled={busy || !!login} onclick={() => signIn(r)}>{scanning === r.id ? 'Looking for your login…' : 'Sign in'}</button>
                 </div>
               {:else}

@@ -223,7 +223,28 @@ type hashKey struct {
 // executableHashes memoizes executableHash for this process.
 var executableHashes sync.Map
 
+// errBundleUnusable marks a published bundle that lacks a file its harness
+// runs beside the executable, such as Antigravity's ACP server.
+var errBundleUnusable = errors.New("bundle cannot be used")
+
+// read returns a verified published bundle. A bundle without the files its
+// adapter requires comes back with errBundleUnusable, so Resolve, Select,
+// Rollback, Lease and install reuse all refuse it.
 func (m *BundleManager) read(h, v string) (Bundle, error) {
+	b, err := m.readManifest(h, v)
+	if err != nil {
+		return Bundle{}, err
+	}
+	a, _ := Adapter(h)
+	for _, name := range a.Requires {
+		if info, err := os.Stat(filepath.Join(filepath.Dir(b.Executable), name)); err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+			return b, fmt.Errorf("%w: %s %s has no %s beside its executable; install %s again", errBundleUnusable, h, v, name, h)
+		}
+	}
+	return b, nil
+}
+
+func (m *BundleManager) readManifest(h, v string) (Bundle, error) {
 	dir, err := filepath.Abs(filepath.Join(m.Root, h, v))
 	if err != nil {
 		return Bundle{}, failure()
@@ -528,7 +549,24 @@ func (m *BundleManager) published(ctx context.Context, h, version, parent, final
 	}
 	if _, err := os.Lstat(final); err == nil {
 		b, err := m.read(h, version)
-		return b, true, err
+		if !errors.Is(err, errBundleUnusable) {
+			return b, true, err
+		}
+		// An incomplete bundle cannot run, so the install replaces it, unless
+		// an open session still holds it.
+		live, lerr := m.activeLeases()
+		if lerr != nil {
+			return Bundle{}, true, lerr
+		}
+		for _, lease := range live {
+			if lh, _ := bundleHarness(lease.Harness); lh == h && lease.Version == version {
+				return Bundle{}, true, fmt.Errorf("%w; an open session uses it, so close that session first", err)
+			}
+		}
+		if removeBundle(final) != nil {
+			return Bundle{}, true, failure()
+		}
+		return Bundle{}, false, nil
 	} else if !os.IsNotExist(err) {
 		return Bundle{}, true, failure()
 	}
@@ -597,10 +635,10 @@ func removeBundle(root string) error {
 	})
 	return os.RemoveAll(root)
 }
-func (m *BundleManager) list() ([]Bundle, error) {
+func (m *BundleManager) list(unusable bool) ([]Bundle, error) {
 	bundles := []Bundle{}
 	for _, adapter := range RuntimeAdapters() {
-		found, err := m.listHarness(adapter.Harness)
+		found, err := m.listHarness(adapter.Harness, unusable)
 		if err != nil {
 			return nil, err
 		}
@@ -629,7 +667,8 @@ func sortBundles(bundles []Bundle) {
 
 // listHarness reads one harness's installed bundles. Each read hashes the
 // bundle's executable, so callers that need one harness must not read all.
-func (m *BundleManager) listHarness(h string) ([]Bundle, error) {
+// Unusable bundles are skipped unless unusable is set, for cleanup.
+func (m *BundleManager) listHarness(h string, unusable bool) ([]Bundle, error) {
 	dir := filepath.Join(m.Root, h)
 	if _, err := os.Lstat(dir); os.IsNotExist(err) {
 		return nil, nil
@@ -647,7 +686,11 @@ func (m *BundleManager) listHarness(h string) ([]Bundle, error) {
 			continue
 		}
 		b, err := m.read(h, entry.Name())
-		if err != nil {
+		if errors.Is(err, errBundleUnusable) {
+			if !unusable {
+				continue
+			}
+		} else if err != nil {
 			return nil, err
 		}
 		bundles = append(bundles, b)
@@ -658,7 +701,7 @@ func (m *BundleManager) List() ([]Bundle, error) {
 	if _, err := os.Stat(m.Root); os.IsNotExist(err) {
 		return []Bundle{}, nil
 	}
-	return m.list()
+	return m.list(false)
 }
 func (m *BundleManager) selected(h string) string {
 	return m.markerValue("." + h + "-selected")
@@ -677,7 +720,7 @@ func (m *BundleManager) effectiveDefault(h string) string {
 	if v := m.selected(h); v != "" {
 		return v
 	}
-	bundles, err := m.listHarness(h)
+	bundles, err := m.listHarness(h, false)
 	if err != nil || len(bundles) == 0 {
 		return ""
 	}
@@ -725,7 +768,7 @@ func (m *BundleManager) Resolve(harness, version string) (Bundle, error) {
 	if version != "" {
 		return m.read(h, version)
 	}
-	bundles, err := m.listHarness(h)
+	bundles, err := m.listHarness(h, false)
 	if err != nil {
 		return Bundle{}, err
 	}
@@ -786,7 +829,7 @@ func (m *BundleManager) GC(pinned []Bundle) error {
 		return err
 	}
 	defer unlock()
-	bundles, err := m.list()
+	bundles, err := m.list(true)
 	if err != nil {
 		return err
 	}
@@ -984,7 +1027,7 @@ func (m *BundleManager) Uninstall(ctx context.Context, harness string, pinned []
 		return err
 	}
 	defer unlock()
-	bundles, err := m.listHarness(h)
+	bundles, err := m.listHarness(h, true)
 	if err != nil {
 		return err
 	}
