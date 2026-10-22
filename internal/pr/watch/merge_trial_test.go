@@ -156,7 +156,7 @@ func mergeTrialEnv(t *testing.T, numbers ...int) *trialFixture {
 			if strings.Contains(joined, "check-runs?") {
 				return json.NewEncoder(cmd.Stdout).Encode(map[string]any{"check_runs": []Check{}})
 			}
-			return json.NewEncoder(cmd.Stdout).Encode(map[string]any{"statuses": []Status{}})
+			return json.NewEncoder(cmd.Stdout).Encode([]Status{})
 		}
 		if strings.Contains(joined, "graphql") {
 			var body bytes.Buffer

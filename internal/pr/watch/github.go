@@ -205,8 +205,14 @@ func (s Snapshot) CheckSummaries(ref Ref) []CheckSummary {
 	}
 	statuses := map[string]Status{}
 	for _, v := range s.Statuses {
-		if old, ok := statuses[v.Context]; !ok || v.ID > old.ID {
-			statuses[v.Context] = v
+		key := v.Context
+		if localCommitStatus(v) {
+			key = "local:" + key
+		} else {
+			key = "hosted:" + key
+		}
+		if old, ok := statuses[key]; !ok || v.ID > old.ID {
+			statuses[key] = v
 		}
 	}
 	for _, v := range statuses {
@@ -539,13 +545,14 @@ func (g GitHub) readCommitChecks(ctx context.Context, r Ref, sha string, s *Snap
 }
 
 func (g GitHub) readCommitStatuses(ctx context.Context, r Ref, sha string, s *Snapshot) error {
-	var statuses struct {
-		Statuses []Status `json:"statuses"`
-	}
-	if err := g.api(ctx, r, "repos/"+r.Repo+"/commits/"+sha+"/status?per_page=100", &statuses); err != nil {
+	var pages [][]Status
+	if err := g.pages(ctx, r, "repos/"+r.Repo+"/commits/"+sha+"/statuses?per_page=100", &pages); err != nil {
 		return err
 	}
-	s.Statuses = statuses.Statuses
+	s.Statuses = nil
+	for _, page := range pages {
+		s.Statuses = append(s.Statuses, page...)
+	}
 	return nil
 }
 
@@ -674,6 +681,9 @@ func (s Snapshot) CIStatus(required ...string) (state, key string, jobs []string
 	}
 	statuses := map[string]Status{}
 	for _, v := range s.Statuses {
+		if localCommitStatus(v) {
+			continue
+		}
 		if old, ok := statuses[v.Context]; !ok || v.ID > old.ID {
 			statuses[v.Context] = v
 		}

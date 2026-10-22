@@ -121,7 +121,7 @@ func TestTickCommentChangeReusesSettledCIAndStillDelivers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(calls), "/check-runs?") || strings.Contains(string(calls), "/actions/runs?") || strings.Contains(string(calls), "/status?") {
+	if strings.Contains(string(calls), "/check-runs?") || strings.Contains(string(calls), "/actions/runs?") || strings.Contains(string(calls), "/statuses?") {
 		t.Fatalf("comment-only change respawned settled CI requests: %s", calls)
 	}
 	if strings.Count(string(calls), "\n") != 4 || len(e.sent) != 1 || !strings.Contains(e.sent[0].Text, "Please check the new note.") {
@@ -178,7 +178,7 @@ func TestCommentRefreshDoesNotReuseIncompleteSavedCI(t *testing.T) {
 	e.tick()
 	if err := e.s.Store.update(func(st *State) error {
 		for path := range st.Responses[r.Key] {
-			if strings.Contains(path, "/status?") {
+			if strings.Contains(path, "/statuses?") {
 				delete(st.Responses[r.Key], path)
 			}
 		}
@@ -193,7 +193,7 @@ func TestCommentRefreshDoesNotReuseIncompleteSavedCI(t *testing.T) {
 	e.f.Pull.Updated = e.clock.Add(time.Minute).Format(time.RFC3339)
 	e.tick()
 	calls, err := os.ReadFile(e.calls)
-	if err != nil || !strings.Contains(string(calls), "/check-runs?") || !strings.Contains(string(calls), "/actions/runs?") || !strings.Contains(string(calls), "/status?") {
+	if err != nil || !strings.Contains(string(calls), "/check-runs?") || !strings.Contains(string(calls), "/actions/runs?") || !strings.Contains(string(calls), "/statuses?") {
 		t.Fatalf("partial saved CI bypassed a fresh read: %s, %v", calls, err)
 	}
 }

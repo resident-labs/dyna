@@ -45,7 +45,7 @@ func TestSaveDropsResponsesForPreviousHeads(t *testing.T) {
 				}
 				st.Responses[key] = map[string]cachedResponse{
 					prefix + "commits/old/check-runs?per_page=100":    {},
-					prefix + "commits/new/status?per_page=100":        {},
+					prefix + "commits/new/statuses?per_page=100":      {},
 					prefix + "actions/runs?head_sha=old&per_page=100": {},
 					prefix + "actions/runs?per_page=100&head_sha=new": {},
 					prefix + "issues/1/comments?per_page=100":         {},
