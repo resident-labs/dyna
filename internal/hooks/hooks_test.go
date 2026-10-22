@@ -83,8 +83,8 @@ func TestScopeIdentityAndNoRepoTraces(t *testing.T) {
 	if id.ID != "github.com/example/project" || id.Main != repo {
 		t.Fatalf("identity: %#v", id)
 	}
-	if _, err := os.Stat(filepath.Join(s.dir(id.ID), "hooks.json")); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(s.dir(id.ID), "hooks.json")); !os.IsNotExist(err) {
+		t.Fatalf("created legacy copy: %v", err)
 	}
 	if status := git(t, repo, "status", "--porcelain", "--ignored"); status != "" {
 		t.Fatalf("repo traces: %s", status)
@@ -440,7 +440,11 @@ func TestBeforeLandSetupErrorsBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(s.dir(r.ID), "hooks.json"), []byte("broken JSON"), 0600); err != nil {
+	db, err := s.documentsDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE hook_documents SET body=? WHERE repo=?", []byte("broken JSON"), filepath.Base(s.dir(r.ID))); err != nil {
 		t.Fatal(err)
 	}
 	var blocked *BlockError
