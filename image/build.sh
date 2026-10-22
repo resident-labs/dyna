@@ -31,7 +31,7 @@ export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git -C "$repo" show -s --format=
 git_commit=$(git -C "$repo" rev-parse HEAD)
 build_date=$(date -u -d "@$SOURCE_DATE_EPOCH" +%Y-%m-%dT%H:%M:%SZ)
 if [[ ${2:-} == --finalize-only ]]; then
- run_root systemd-nspawn --machine="$build_name" --register=no --resolv-conf=off --timezone=off -D "$out/rootfs" \
+ run_root systemd-nspawn --machine="$build_name" --register=no --keep-unit --resolv-conf=off --timezone=off -D "$out/rootfs" \
   --bind-ro="$recipe:/recipe" --bind="$out:/output" \
   --setenv="BUILD_DATE=$build_date" --setenv="GIT_COMMIT=$git_commit" \
   /bin/bash -c 'cp -r --preserve=mode,timestamps /recipe/overlay/. /; /bin/bash /recipe/finalize.sh'
@@ -71,11 +71,11 @@ done
 run_root pacstrap -C "$out/pacman.conf" -G -M "$out/rootfs" "${packages[@]}" --hookdir "$out/empty-hooks"
 # Keep the archive repositories inside the image for later package operations.
 # /recipe and /output are temporary mounts, excluded from the archive.
-run_root systemd-nspawn --machine="$build_name" --register=no --resolv-conf=copy-host --timezone=off -D "$out/rootfs" \
+run_root systemd-nspawn --machine="$build_name" --register=no --keep-unit --resolv-conf=copy-host --timezone=off -D "$out/rootfs" \
  --bind-ro="$recipe:/recipe" --bind="$out:/output" \
  --setenv="BUILD_DATE=$build_date" --setenv="GIT_COMMIT=$git_commit" /bin/bash /recipe/provision.sh
 fi
-run_root systemd-nspawn --machine="$build_name" --register=no --resolv-conf=off --timezone=off -D "$out/rootfs" \
+run_root systemd-nspawn --machine="$build_name" --register=no --keep-unit --resolv-conf=off --timezone=off -D "$out/rootfs" \
  --bind="$out:/output" /bin/bash -c ': > /etc/machine-id; exec tar "$@"' bash --sort=name --numeric-owner --xattrs --acls \
  --mtime="@$SOURCE_DATE_EPOCH" --clamp-mtime -cpf /output/dyna.tar \
  --exclude=./output --exclude=./recipe --exclude=./proc --exclude=./sys \
