@@ -1,7 +1,6 @@
 package runtime
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -41,27 +40,6 @@ func TestPreferenceIndexLivesInRows(t *testing.T) {
 	}
 	if values, err := r.PreferenceValues(a.ID); err != nil || values["language"] != "English" {
 		t.Fatalf("without the copy, values = %v, %v", values, err)
-	}
-}
-
-// An import first takes in an old binary's index, then writes its own
-// account: both accounts are in the rows and the copy.
-func TestPreferenceImportKeepsAnOldBinaryWrite(t *testing.T) {
-	r, a, home := preferenceFixture(t, "claude-code")
-	importClaudePreferences(t, r, a, home)
-	var copied map[string]preferences.Ref
-	if err := store.ReadJSON(preferenceIndexPath(r), &copied); err != nil {
-		t.Fatal(err)
-	}
-	copied["other-account"] = copied[a.ID]
-	b, _ := json.Marshal(copied)
-	if err := store.WriteJSON(preferenceIndexPath(r), json.RawMessage(b), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	importClaudePreferences(t, r, a, home)
-	var after map[string]preferences.Ref
-	if err := store.ReadJSON(preferenceIndexPath(r), &after); err != nil || after["other-account"].Settings == "" || after[a.ID].Settings == "" {
-		t.Fatalf("copy after the import = %+v, %v; want both accounts", after, err)
 	}
 }
 

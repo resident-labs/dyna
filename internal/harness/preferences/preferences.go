@@ -8,8 +8,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"path/filepath"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
@@ -36,11 +36,16 @@ type Ref struct {
 // Migrate creates the preference index table. Only the engine runs it, at
 // start.
 func Migrate(dataDir string) error {
-	_, err := open(dataDir)
+	return MigrateFrom(dataDir, filepath.Join(store.ConfigDir(), "harness-preferences.json"))
+}
+
+// MigrateFrom imports the index beside a custom catalog before its version advances.
+func MigrateFrom(dataDir, metadata string) error {
+	_, err := open(dataDir, metadata)
 	return err
 }
 
-func open(dataDir string) (*sql.DB, error) {
+func open(dataDir, metadata string) (*sql.DB, error) {
 	db, err := database.Open(dataDir)
 	if err != nil {
 		return nil, err
@@ -48,27 +53,32 @@ func open(dataDir string) (*sql.DB, error) {
 	if err := state.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "harness.preferences", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), schema)
-		return err
+	err = database.Migrate(db, "harness.preferences", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old < 1 {
+			if _, err := conn.ExecContext(ctx, schema); err != nil {
+				return err
+			}
+		}
+		return importIndex(ctx, conn, metadata)
 	})
 	return db, err
 }
 
-// importIndex imports harness-preferences.json when the previous release
-// wrote it. Its file holds every account, so it replaces the index.
-//
-// TODO: legacy/shim remove later — the previous release reads and writes
-// harness-preferences.json; remove this import and the copy in Save with
-// requirement 31, when no binary from before dyna.db is alive.
-func importIndex(ctx context.Context, db *sql.DB, metadata string) error {
-	_, err := state.For(db).ImportIfForeign(ctx, mirrorKey, metadata, func(conn *sql.Conn, raw []byte) error {
+// TODO: legacy/shim remove later — import the retained whole index only at migration.
+func importIndex(ctx context.Context, conn *sql.Conn, metadata string) error {
+	var canonical bool
+	if err := conn.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM harness_preferences) OR EXISTS(SELECT 1 FROM state_mirrors WHERE key = ? AND (version != '' OR COALESCE(pending, '') != ''))`, mirrorKey).Scan(&canonical); err != nil {
+		return err
+	}
+	// A missing account in a canonical index is a deletion, not a gap to fill.
+	if canonical {
+		return nil
+	}
+	_, err := state.ImportMigration(ctx, conn, mirrorKey, metadata, func(conn *sql.Conn, raw []byte) error {
 		var refs map[string]Ref
-		if err := json.Unmarshal(raw, &refs); err != nil {
-			return fmt.Errorf("preference index %s: %v: %w", metadata, err, state.ErrSkipForeign)
-		}
-		if _, err := conn.ExecContext(ctx, "DELETE FROM harness_preferences"); err != nil {
-			return err
+		if json.Unmarshal(raw, &refs) != nil {
+			return nil
 		}
 		for account, ref := range refs {
 			if err := saveRow(ctx, conn, account, ref); err != nil {
@@ -90,10 +100,7 @@ ON CONFLICT(account) DO UPDATE SET ref = excluded.ref`, account, raw)
 	return err
 }
 
-// Save records account's layer in the order state.Mirror needs: import the
-// previous release's file at metadata, write the row, then copy the whole
-// index. The CLI and the engine both import preferences, so the index lock
-// covers all three steps.
+// Save records account's layer and copies the whole index for the previous release.
 func Save(metadata, account string, ref Ref) error {
 	ctx := context.Background() // Until callers pass one.
 	unlock, err := store.LockContext(ctx, metadata+".lock")
@@ -101,11 +108,8 @@ func Save(metadata, account string, ref Ref) error {
 		return err
 	}
 	defer unlock()
-	db, err := open(store.DataDir())
+	db, err := open(store.DataDir(), metadata)
 	if err != nil {
-		return err
-	}
-	if err := importIndex(ctx, db, metadata); err != nil {
 		return err
 	}
 	if err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
@@ -155,20 +159,13 @@ func readIndex(ctx context.Context, db *sql.DB) (map[string]Ref, error) {
 	return refs, err
 }
 
-// For reads account's layer, importing the previous release's file at
-// metadata first; ok is false when the account has none. It imports without
-// the index lock. That is safe: ImportIfForeign checks the stamp again in its
-// own transaction, and every writer imports first, so a reader can only
-// import a file that a writer would have imported too.
+// For reads account's layer; ok is false when the account has none.
 func For(metadata, account string) (ref Ref, ok bool, err error) {
-	db, err := open(store.DataDir())
+	db, err := open(store.DataDir(), metadata)
 	if err != nil {
 		return ref, false, err
 	}
 	ctx := context.Background()
-	if err := importIndex(ctx, db, metadata); err != nil {
-		return ref, false, err
-	}
 	err = state.For(db).Read(ctx, func(q state.Reader) error {
 		var raw []byte
 		err := q.QueryRowContext(ctx, "SELECT ref FROM harness_preferences WHERE account = ?", account).Scan(&raw)
