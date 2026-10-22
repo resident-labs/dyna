@@ -16,6 +16,8 @@ jobs:
       - name: Install image tools
         run: |
           pacman -Syu --noconfirm --needed arch-install-scripts git go nodejs npm gcc pkgconf gtk3 webkit2gtk-4.1 curl gnupg zstd sudo
+          # systemd-nspawn needs a machine ID, which the container lacks.
+          systemd-machine-id-setup
           # uid 1001 is the runner user on GitHub-hosted machines, so the
           # runner can still read the workspace and its temp folder.
           useradd -m -u 1001 builder
@@ -26,8 +28,6 @@ jobs:
       # runner.temp names a host path, which does not exist inside the container.
       - name: Build root filesystem
         run: sudo -u builder image/build.sh "/tmp/dyna-image"
-      - name: Boot and smoke test
-        run: sudo -u builder image/smoke.sh "/tmp/dyna-image"
       - uses: actions/upload-artifact@v4
         with:
           name: dyna-linux-x86_64
@@ -36,3 +36,23 @@ jobs:
             /tmp/dyna-image/dyna.tar.zst.sha256
             /tmp/dyna-image/packages.lock
           compression-level: 0
+
+  # Booting the image needs systemd as PID 1 and machinectl, so this runs on
+  # the runner host, not in a container.
+  smoke:
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install boot tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq systemd-container zstd >/dev/null
+          sudo mkdir -p /var/lib/machines
+      - uses: actions/download-artifact@v4
+        with:
+          name: dyna-linux-x86_64
+          path: /tmp/dyna-image
+      - name: Boot and smoke test
+        run: image/smoke.sh /tmp/dyna-image
