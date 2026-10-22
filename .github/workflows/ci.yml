@@ -358,14 +358,16 @@ jobs:
         with:
           go-version-file: go.mod
       # A slow mirror once left apt-get update hanging until the job timeout and
-      # failed a whole merge batch. Every network install below is bounded and
-      # shares one deadline, so a stuck download fails this step in about three
-      # minutes instead of holding the runner.
+      # failed a whole merge batch, and this step has legitimately taken 185 s.
+      # apt now gives up on a stalled connection, and the calls share one 230 s
+      # deadline, so a hang fails the step near four minutes with a reason. The
+      # caps are looser than the slowest good run (about 155 s) and only stop a
+      # call that is stuck.
       - name: Install GUI tools
         shell: bash
         run: |
           set -euo pipefail
-          deadline=$((SECONDS + 200))
+          deadline=$((SECONDS + 230))
           apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20)
           # bounded <cap-seconds> <command...> never runs past the deadline.
           bounded() {
@@ -376,7 +378,9 @@ jobs:
               echo "install budget exhausted before: $*" >&2
               return 1
             fi
-            [ "$cap" -lt "$left" ] && left=$cap
+            if [ "$cap" -lt "$left" ]; then
+              left=$cap
+            fi
             timeout --kill-after=5 "$left" "$@"
           }
           # retry <cap-seconds> <command...> retries once, inside the deadline.
@@ -385,8 +389,8 @@ jobs:
             shift
             bounded "$cap" "$@" || { echo "retrying: $*" >&2; bounded "$cap" "$@"; }
           }
-          retry 45 sudo apt-get "${apt_opts[@]}" update -qq
-          retry 70 sudo apt-get "${apt_opts[@]}" install -y -qq --no-install-recommends labwc xwayland sqlite3 >/dev/null
+          retry 75 sudo apt-get "${apt_opts[@]}" update -qq
+          retry 180 sudo apt-get "${apt_opts[@]}" install -y -qq --no-install-recommends labwc xwayland sqlite3 >/dev/null
           bounded 60 npm install -g agent-browser
           sudo loginctl enable-linger "$USER"
       - name: Live computer and cleanup tests
