@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/questions"
@@ -91,6 +92,66 @@ type Speaker interface {
 func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) error {
 	voice := r.rec.Name + ":" + room.VoiceAgent
 	open := false
+	// One open request shares the budget, including every prefix and marker.
+	const budget = 4000
+	const prefix = "[BACKEND] "
+	const marker = "\n…output truncated…\n"
+	headLimit := (budget - len(marker) - len(prefix)) / 2
+	tailLimit := budget - headLimit - len(marker) - len(prefix)
+	sent := 0
+	buffered, tail := "", ""
+	truncated := false
+	first := func(text string, limit int) string {
+		if len(text) <= limit {
+			return text
+		}
+		for limit > 0 && !utf8.RuneStart(text[limit]) {
+			limit--
+		}
+		return text[:limit]
+	}
+	last := func(text string, limit int) string {
+		start := max(0, len(text)-limit)
+		for start < len(text) && !utf8.RuneStart(text[start]) {
+			start++
+		}
+		return text[start:]
+	}
+	contextNote := func(msg room.Message) {
+		note := prefix + msg.From + ": " + msg.Text + "\n"
+		if truncated {
+			tail = last(tail+note, tailLimit)
+			return
+		}
+		buffered += note
+		available := headLimit - sent
+		if available < len(prefix) {
+			available = 0
+		}
+		if len(buffered) > budget-sent-len(prefix) {
+			tail = last(buffered, tailLimit)
+			buffered = first(buffered, available)
+			truncated = true
+		}
+		chunk := first(buffered, available)
+		if chunk != "" {
+			call.Context(chunk)
+			sent += len(chunk)
+			buffered = buffered[len(chunk):]
+		}
+	}
+	finish := func() {
+		text := buffered
+		if truncated {
+			text += marker + tail
+		}
+		if text != "" {
+			if !strings.HasPrefix(text, prefix) {
+				text = prefix + text
+			}
+			call.Context(text)
+		}
+	}
 	return r.svc.Rooms.Follow(ctx, r.rec.ID, func(msg room.Message) (bool, error) {
 		if id := msg.QuestionID(); id != "" && r.fromRoot(msg) {
 			if q, ok := r.openQuestion(id); ok {
@@ -103,13 +164,18 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 		}
 		switch {
 		case msg.From == voice && msg.Kind != "voice":
+			if !open {
+				sent, buffered, tail, truncated = 0, "", "", false
+			}
 			open = true
 		case r.fromRoot(msg) && msg.Kind != "voice" && slices.Contains(msg.To, voice):
 			call.Speak(msg.ID, "", tellPrompt(msg.Text, msg.Attachments))
-		case r.fromRoot(msg) && slices.Contains([]string{"completed", "failed", "stopped"}, msg.Kind):
-			open = false
 		case open && r.rootAgentPost(msg):
-			call.Context("[BACKEND] " + msg.From + ": " + msg.Text)
+			contextNote(msg)
+		}
+		if open && r.fromRoot(msg) && slices.Contains([]string{"completed", "failed", "stopped"}, msg.Kind) {
+			finish()
+			open = false
 		}
 		return false, nil
 	})
@@ -118,17 +184,16 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 // rootAgentPost selects execution messages, excluding service notices and
 // the owner's unrelated conversation. These messages never request speech.
 func (r *RoomLink) rootAgentPost(msg room.Message) bool {
+	if msg.Kind == "voice" || slices.Contains(msg.To, r.rec.Name+":"+room.VoiceAgent) {
+		return false
+	}
 	switch msg.Kind {
 	case "", "message", "completed", "failed", "stopped":
 	default:
 		return false
 	}
-	agent := func(addr string) bool {
-		name, ok := strings.CutPrefix(addr, r.rec.Name+":")
-		return ok && name != "" && name != room.RootAgent && name != room.VoiceAgent
-	}
 	toRoot := slices.ContainsFunc(msg.To, func(addr string) bool { return addr == r.rec.Name || addr == r.rec.Name+":"+room.RootAgent })
-	return r.fromRoot(msg) && slices.ContainsFunc(msg.To, agent) || agent(msg.From) && toRoot
+	return r.fromRoot(msg) || toRoot
 }
 
 // fromRoot reports whether root posted msg: the internal root, or an
