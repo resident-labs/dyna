@@ -116,7 +116,7 @@ func (s *Store) importLegacy(db *sql.DB, installGuard func() error) error {
 		if err != nil {
 			return err
 		}
-		if _, err := saveState(conn, State{Next: map[string]int{}, Questions: map[string]Question{}}, st); err != nil {
+		if err := importQuestionRows(conn, st); err != nil {
 			return err
 		}
 		_, err = conn.ExecContext(ctx, "INSERT INTO meta(key,value) VALUES ('questions.imported','1'),('questions.revision','0')")
@@ -131,7 +131,7 @@ func (s *Store) importLegacy(db *sql.DB, installGuard func() error) error {
 }
 
 // TODO: legacy/shim remove later — preserves old questions across interrupted imports; remove after retained stores are migrated.
-func (s *Store) prepareLegacyImport(installGuard func() error) (State, error) {
+func (s *Store) prepareLegacyImport(installGuard func() error) (legacyQuestionState, error) {
 	source := filepath.Join(s.Root, "state.json")
 	backup := filepath.Join(s.Root, "state.v1.backup.json")
 	// Version 1 remains authoritative until the guard is installed. Recapture
@@ -144,27 +144,27 @@ func (s *Store) prepareLegacyImport(installGuard func() error) (State, error) {
 		}
 		st, err := readLegacy(source)
 		if err != nil {
-			return State{}, err
+			return legacyQuestionState{}, err
 		}
 		data, err := json.Marshal(st)
 		if err != nil {
-			return State{}, err
+			return legacyQuestionState{}, err
 		}
 		if err := s.writeMigrationFile("state.v1.backup.json", append(data, '\n')); err != nil {
-			return State{}, err
+			return legacyQuestionState{}, err
 		}
 	}
 	st, err := readLegacy(backup)
 	if err != nil {
-		return State{}, err
+		return legacyQuestionState{}, err
 	}
 	if _, err := os.Stat(backup); err != nil {
-		return State{}, fmt.Errorf("question import backup: %w", err)
+		return legacyQuestionState{}, fmt.Errorf("question import backup: %w", err)
 	}
 	// The backup is durable before an old reader loses access to version 1.
 	// The guard is durable before the database can commit its import marker.
 	if err := installGuard(); err != nil {
-		return State{}, err
+		return legacyQuestionState{}, err
 	}
 	return st, nil
 }
@@ -187,9 +187,39 @@ func (s *Store) writeMigrationFile(name string, data []byte) error {
 	return directory.Sync()
 }
 
+// legacyQuestionState retains each complete question document during import.
+type legacyQuestionState struct {
+	Version   int                        `json:"version"`
+	Next      map[string]int             `json:"next"`
+	Questions map[string]json.RawMessage `json:"questions"`
+}
+
+func importQuestionRows(conn *sql.Conn, st legacyQuestionState) error {
+	ctx := context.Background()
+	for key, body := range st.Questions {
+		var routing struct {
+			Room  string `json:"room"`
+			State string `json:"state"`
+			Asker string `json:"asker"`
+		}
+		if err := json.Unmarshal(body, &routing); err != nil {
+			return fmt.Errorf("invalid question %s: %w", key, err)
+		}
+		if _, err := conn.ExecContext(ctx, "INSERT INTO questions(key,room,state,asker,body) VALUES(?,?,?,?,?)", key, routing.Room, routing.State, routing.Asker, string(body)); err != nil {
+			return err
+		}
+	}
+	for room, next := range st.Next {
+		if _, err := conn.ExecContext(ctx, "INSERT INTO question_next(room,next) VALUES(?,?)", room, next); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // TODO: legacy/shim remove later — reads the old question JSON only for its one-time import; remove after all retained stores are migrated.
-func readLegacy(path string) (State, error) {
-	st := State{Version: 1, Next: map[string]int{}, Questions: map[string]Question{}}
+func readLegacy(path string) (legacyQuestionState, error) {
+	st := legacyQuestionState{Version: 1, Next: map[string]int{}, Questions: map[string]json.RawMessage{}}
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return st, nil
@@ -207,7 +237,7 @@ func readLegacy(path string) (State, error) {
 		st.Next = map[string]int{}
 	}
 	if st.Questions == nil {
-		st.Questions = map[string]Question{}
+		st.Questions = map[string]json.RawMessage{}
 	}
 	return st, nil
 }
