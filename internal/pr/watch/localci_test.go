@@ -128,7 +128,7 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 	head := strings.Repeat("a", 40)
 	job := registeredCIJob{record: Record{Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Branch: "feature"}, head: head, branch: "feature"}
 	makeRun := func(id int64, status, event, branch, sha string) Run {
-		return Run{ID: id, Attempt: 1, HeadSHA: sha, HeadBranch: branch, Event: event, Status: status}
+		return Run{ID: id, Attempt: 1, HeadSHA: sha, HeadBranch: branch, Event: event, Status: status, Path: ".github/workflows/ci.yml"}
 	}
 	runs := []Run{
 		makeRun(1, "queued", "pull_request", "feature", head),
@@ -139,6 +139,10 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 		makeRun(6, "pending", "pull_request", "feature", head),
 		makeRun(7, "requested", "pull_request", "feature", head),
 	}
+	security := makeRun(8, "queued", "pull_request", "feature", head)
+	security.Path, security.Name = ".github/workflows/security.yml", "CI"
+	changed := makeRun(9, "queued", "pull_request", "feature", head)
+	runs = append(runs, security, changed)
 	registry := &hostedCIRegistry{}
 	var cancelled, rerun []int64
 	s := &Service{LocalCIRegistry: registry}
@@ -162,6 +166,10 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 			if len(cancelled) > 0 {
 				fresh.Status, fresh.Conclusion = "completed", "cancelled"
 			}
+			body = fresh
+		case strings.HasSuffix(path, "/9"):
+			fresh := runs[len(runs)-1]
+			fresh.Path = ".github/workflows/security.yml"
 			body = fresh
 		case strings.HasSuffix(path, "/5"):
 			fresh := runs[4]
@@ -392,5 +400,83 @@ func TestRegisteredCISkipsCurrentConclusiveHeadsAndTrials(t *testing.T) {
 	}
 	if cancelled || s.registeredRuns.runs[registeredJobKey(activeJob)] != active {
 		t.Fatal("settled hosted result stopped an active local run")
+	}
+}
+
+type requiredCIRegistry struct {
+	hostedCIRegistry
+	result localci.Result
+}
+
+func (r *requiredCIRegistry) Mode(context.Context, string) (string, error) {
+	return localci.ModeLocal, nil
+}
+func (r *requiredCIRegistry) Nodes(context.Context) ([]localci.Node, error) {
+	return []localci.Node{{Name: "node", Slots: 1, Enabled: true}}, nil
+}
+func (r *requiredCIRegistry) LoadResult(context.Context, string, string) (localci.Result, error) {
+	return r.result, nil
+}
+
+func TestRegisteredCIPreservesRequiredCheckCoverage(t *testing.T) {
+	repo := t.TempDir()
+	if raw, err := exec.Command("git", "init", "--quiet", repo).CombinedOutput(); err != nil {
+		t.Fatalf("init repository: %v: %s", err, raw)
+	}
+	common, err := localci.CanonicalRepo(context.Background(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	head := strings.Repeat("a", 40)
+	r := Record{Kind: "github", Host: "github.com", Repo: "owner/repo", Head: head, Branch: "dyna/merge-trial/1", RepoPath: repo}
+	var checks []localci.SuiteResult
+	for _, name := range requiredRegisteredChecks([]string{"relay", "go", "cross-build", "computer-smoke", "android"}) {
+		checks = append(checks, localci.SuiteResult{CheckName: name, Status: "passed"})
+	}
+	for _, tc := range []struct {
+		name, want                          string
+		check                               *Check
+		statuses                            []Status
+		localExtra, hostedOnly, localFailed bool
+	}{
+		{name: "missing", want: "pending"},
+		{name: "pending", want: "pending", check: &Check{ID: 1, Name: "security", Status: "in_progress"}},
+		{name: "failure", want: "failed", check: &Check{ID: 1, Name: "security", Status: "completed", Conclusion: "failure"}},
+		{name: "hosted check success", want: "passed", check: &Check{ID: 1, Name: "security", Status: "completed", Conclusion: "success"}},
+		{name: "new pending status", want: "pending", statuses: []Status{{ID: 1, Context: "security", State: "success"}, {ID: 2, Context: "security", State: "pending"}}},
+		{name: "new successful status", want: "passed", statuses: []Status{{ID: 1, Context: "security", State: "failure"}, {ID: 2, Context: "security", State: "success"}}},
+		{name: "posted local status is not hosted", want: "pending", statuses: []Status{{ID: 1, Context: "security", State: "success", Description: localStatusPrefix + "node"}}},
+		{name: "hosted failure cannot be hidden by local status", want: "failed", localExtra: true, statuses: []Status{{ID: 1, Context: "security", State: "failure"}, {ID: 2, Context: "security", State: "success", Description: localStatusPrefix + "node"}}},
+		{name: "local exact check success", want: "passed", localExtra: true, check: &Check{ID: 1, Name: "security", Status: "in_progress"}},
+		{name: "hosted pass cannot bypass missing", want: "pending", hostedOnly: true},
+		{name: "failure still vetoes missing", want: "failed", localFailed: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := localci.Result{Repo: common, SHA: head, Node: "node", Status: "passed", Checks: append([]localci.SuiteResult(nil), checks...)}
+			if tc.localExtra {
+				result.Checks = append(result.Checks, localci.SuiteResult{CheckName: "security", Status: "passed"})
+			}
+			if tc.localFailed {
+				result.Status = "failed"
+				result.Checks[0].Status = "failed"
+			}
+			if tc.hostedOnly {
+				result = localci.Result{}
+			}
+			snap := Snapshot{Runs: []Run{{ID: 1, Status: "completed", Conclusion: "success"}}, Statuses: tc.statuses}
+			snap.Pull.Head.SHA = head
+			snap.Pull.Head.Repo.FullName = r.Repo
+			if tc.check != nil {
+				snap.Checks = []Check{*tc.check}
+			}
+			s := &Service{LocalCIRegistry: &requiredCIRegistry{result: result}}
+			got, err := s.withRegisteredCI(context.Background(), r, snap, ChangePolicy{RequiredChecks: []string{"security"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ci, _, _, _ := got.CIStatus(); ci != tc.want {
+				t.Fatalf("CI=%s, want %s", ci, tc.want)
+			}
+		})
 	}
 }
