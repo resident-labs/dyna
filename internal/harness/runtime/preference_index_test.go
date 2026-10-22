@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"dyna-agent/internal/harness/preferences"
-	"dyna-agent/internal/store"
 )
 
 // importClaudePreferences imports one safe Claude Code preference for a.
@@ -26,37 +25,18 @@ func preferenceIndexPath(r *Runtime) string {
 	return filepath.Join(filepath.Dir(r.Config.Path), "harness-preferences.json")
 }
 
-// The index lives in dyna.db. harness-preferences.json is only the previous
-// release's copy: preferences still load without it.
+// The index lives in dyna.db and creates no retained metadata file.
 func TestPreferenceIndexLivesInRows(t *testing.T) {
 	r, a, home := preferenceFixture(t, "claude-code")
 	importClaudePreferences(t, r, a, home)
-	var copied map[string]preferences.Ref
-	if err := store.ReadJSON(preferenceIndexPath(r), &copied); err != nil || copied[a.ID].Settings == "" {
-		t.Fatalf("copy = %+v, %v; want the account's layer", copied, err)
+	ref, ok, err := preferences.For(a.ID)
+	if err != nil || !ok || ref.Settings == "" {
+		t.Fatalf("reference = %+v, %v, %v", ref, ok, err)
 	}
-	if err := os.Remove(preferenceIndexPath(r)); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(preferenceIndexPath(r)); !os.IsNotExist(err) {
+		t.Fatalf("retained index exists: %v", err)
 	}
 	if values, err := r.PreferenceValues(a.ID); err != nil || values["language"] != "English" {
-		t.Fatalf("without the copy, values = %v, %v", values, err)
-	}
-}
-
-// A damaged index from another binary is skipped once (state.ErrSkipForeign):
-// the rows stay, and preferences still load.
-func TestDamagedPreferenceIndexKeepsTheRows(t *testing.T) {
-	r, a, home := preferenceFixture(t, "claude-code")
-	importClaudePreferences(t, r, a, home)
-	if err := os.Remove(preferenceIndexPath(r)); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(preferenceIndexPath(r), []byte("not JSON"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for range 2 {
-		if values, err := r.PreferenceValues(a.ID); err != nil || values["language"] != "English" {
-			t.Fatalf("after a damaged index, values = %v, %v", values, err)
-		}
+		t.Fatalf("values = %v, %v", values, err)
 	}
 }
