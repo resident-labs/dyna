@@ -129,6 +129,7 @@
   let agentsNav = $state(false)
   let agentMembers = $state(null) // room id -> members, for the agents list; null until first loaded
   let agentsRequest = 0
+  let agentGoals = $state({}) // room id -> goals, to badge expedited agents in every listed room
   function agentsVisible() { return pageVisible && agentsNav && (narrow ? navOpen : showSide) }
   const reloadAgents = createReloadGate(() => ({ room: 'agents', visit: 0 }), agentsVisible)
   let home = $state() // the home screen, which takes live events
@@ -141,7 +142,9 @@
     const request = ++agentsRequest
     const open = list.filter((r) => !r.archived && r.members > 0)
     const lists = await Promise.all(open.map((r) => api.members(r.id).catch(() => null)))
+    const goalLists = await Promise.all(open.map((r) => api.goals(r.id).then((page) => page?.items ?? [], () => null)))
     if (!current() || request !== agentsRequest) return
+    agentGoals = Object.fromEntries(open.map((r, i) => [r.id, goalLists[i] ?? agentGoals[r.id] ?? []]))
     agentMembers = Object.fromEntries(open.map((r, i) => [r.id, reconcileRows(agentMembers?.[r.id] ?? [], lists[i] ?? agentMembers?.[r.id] ?? [])]))
   }) }
   let feed = $state(null)
@@ -243,9 +246,13 @@
   let knownGoals = $derived(fetchedGoal && !goals.some((g) => g.id === fetchedGoal.id) ? [...goals, fetchedGoal] : goals)
   $effect(() => {
     const scope = expediteScope(knownGoals, hierarchy, expireTick)
-    expedite.set(scope)
-    if (!scope.goalId) return
-    const timer = setTimeout(() => (expireTick = Date.now()), Math.min(scope.until - Date.now() + 50, 2 ** 31 - 1))
+    // The agents list shows other rooms too: their expedited agents carry the badge as well.
+    const others = Object.entries(agentGoals).filter(([id]) => id !== roomId).map(([id, list]) => expediteScope(list, agentMembers?.[id] ?? [], expireTick))
+    const agents = new Set([scope, ...others].flatMap((x) => [...x.agents]))
+    expedite.set({ ...scope, agents })
+    const until = Math.min(...[scope, ...others].filter((x) => x.goalId).map((x) => x.until))
+    if (!Number.isFinite(until)) return
+    const timer = setTimeout(() => (expireTick = Date.now()), Math.min(until - Date.now() + 50, 2 ** 31 - 1))
     return () => clearTimeout(timer)
   })
   // A goal opened by a link but held by no loaded page; list refreshes keep it.
@@ -1768,6 +1775,7 @@
       }
     }
     if (ev.kind === 'goals' && ev.roomId === roomId) { if (!item) loadGoals(); loadRules() }
+    if (ev.kind === 'goals' && ev.roomId !== roomId && agentsVisible()) loadAgents(rooms)
     if (ev.kind === 'pins' && ev.roomId === roomId) loadPins()
     if (ev.kind === 'issues' && ev.roomId === roomId) { loadIssues(); if (showIssues) loadIssues(true) }
     if (['room.paused', 'room.resumed'].includes(ev.kind) && (!ev.roomId || ev.roomId === roomId)) roomSessionController?.load()
