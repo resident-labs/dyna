@@ -50,6 +50,7 @@ import (
 	"dyna-agent/internal/engine"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/harness/home"
+	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/userservices"
@@ -60,6 +61,19 @@ var version = "dev"
 
 func main() {
 	callerid.WaitForLaunch()
+	// The Settings sign-in runs this in a private harness HOME. It needs that
+	// HOME, so it runs before RestoreOwner and before the root command, whose
+	// stores cannot open a data folder inside a harness home.
+	if harnessruntime.IsACPSignInCommand(os.Args[1:]) {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		err := harnessruntime.ACPSignInCommand(ctx, os.Args[1:])
+		cancel()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := home.RestoreOwner(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "dyna:", err)
 		os.Exit(2)

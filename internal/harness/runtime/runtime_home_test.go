@@ -133,8 +133,11 @@ func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
 			if err = os.MkdirAll(filepath.Join(dir, "bin"), 0700); err != nil {
 				t.Fatal(err)
 			}
-			if err = os.WriteFile(filepath.Join(dir, "bin", "harness"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
-				t.Fatal(err)
+			a, _ := Adapter(h)
+			for _, name := range append([]string{"harness"}, a.Requires...) {
+				if err = os.WriteFile(filepath.Join(dir, "bin", name), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+					t.Fatal(err)
+				}
 			}
 			hash, err := executableHash(dir, "bin/harness")
 			if err != nil {
