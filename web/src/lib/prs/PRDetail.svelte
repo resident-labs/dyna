@@ -72,7 +72,8 @@
     try {
       if (link) await onlinkgoal?.(change, link)
       const g = goal ?? goals.find((x) => x.id === link)
-      if (g) await onexpedite?.(g)
+      // Linking to the current priority preserves it; the separate button can still stop it.
+      if (g && (!link || !goalExpedited($expedite, g))) await onexpedite?.(g)
       linking = false
     } catch (e) { xpError = String((e as Error)?.message || e) } finally { xpBusy = false }
   }
