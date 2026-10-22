@@ -317,6 +317,11 @@ func (s *Service) saveRecord(work context.Context, db *sql.DB, name, path string
 	if !fresh && actedOn(before) == actedOn(*r) {
 		return nil
 	}
+	// Claim only the retained copy's stamp. Its bytes must never replace the SQL row.
+	// TODO: legacy/shim remove later — remove this claim with the health mirror.
+	if _, err := state.For(db).ImportIfForeign(work, mirrorKey(name), path, func(*sql.Conn, []byte) error { return nil }); err != nil {
+		return err
+	}
 	err = state.For(db).Mirror(work, mirrorKey(name), path, func(out io.Writer) error {
 		var raw []byte
 		if err := db.QueryRowContext(work, "SELECT record FROM harness_health WHERE profile = ?", key(name)).Scan(&raw); err != nil {
