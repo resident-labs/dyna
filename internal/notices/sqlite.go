@@ -5,14 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"io"
-	"path/filepath"
 	"time"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
-	"dyna-agent/internal/store"
 )
 
 const schema = `CREATE TABLE notices (
@@ -30,22 +27,50 @@ INSERT INTO notices_revision(n) VALUES (0);`
 
 const mirrorKey = "notices/list"
 
-// Migrate creates tables only. Legacy notices are imported on first read.
+// Migrate imports retained notices before the engine serves calls.
 func Migrate(dataDir string) error {
 	_, err := (Store{Dir: dataDir}).open()
 	return err
 }
 
 func (s Store) open() (*sql.DB, error) {
-	if err := state.MigrateMirrors(s.Dir); err != nil {
-		return nil, err
-	}
 	db, err := database.Open(s.Dir)
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "notices.schema", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), schema)
+	err = database.Migrate(db, "notices.schema", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old == 0 {
+			if _, err := conn.ExecContext(ctx, schema); err != nil {
+				return err
+			}
+		}
+		// Rows and committed empty revisions take precedence over retained files.
+		var owned bool
+		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM notices) OR EXISTS(SELECT 1 FROM notices_revision WHERE n>0)").Scan(&owned); err != nil {
+			return err
+		}
+		if owned {
+			return nil
+		}
+		// TODO: legacy/shim remove later — read notices.json once during startup migration.
+		_, err := state.ImportMigration(ctx, conn, mirrorKey, s.Path(), func(conn *sql.Conn, raw []byte) error {
+			var list []Notice
+			if err := json.Unmarshal(raw, &list); err != nil {
+				return fmt.Errorf("invalid notices: %w", err)
+			}
+			ids, keys := map[string]bool{}, map[string]bool{}
+			for _, n := range list {
+				if ids[n.ID] || keys[n.Key] {
+					return fmt.Errorf("duplicate notice ID or key")
+				}
+				ids[n.ID], keys[n.Key] = true, true
+			}
+			if len(list) == 0 {
+				return nil
+			}
+			return saveNotices(conn, list)
+		})
 		return err
 	})
 	return db, err
@@ -84,9 +109,6 @@ func (s Store) snapshot(db *sql.DB) (list []Notice, err error) {
 func (s Store) Revision() (int64, error) {
 	db, err := s.open()
 	if err != nil {
-		return 0, err
-	}
-	if err := s.importForeign(db); err != nil {
 		return 0, err
 	}
 	var rev int64
@@ -141,59 +163,4 @@ func (s Store) write(db *sql.DB, fn func(*[]Notice)) error {
 		fn(&list)
 		return saveNotices(conn, list)
 	})
-}
-
-// TODO: legacy/shim remove later — import notices.json when an old binary
-// replaces it; remove with the rollback mirror after item 31.
-func (s Store) importForeign(db *sql.DB) error {
-	foreign, err := state.For(db).Foreign(context.Background(), mirrorKey, s.Path())
-	if err != nil || !foreign {
-		return err
-	}
-	unlock, err := s.lock(context.Background())
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	return s.importLocked(db)
-}
-
-// TODO: legacy/shim remove later — old binaries write notices.json under
-// notices.lock; keep import, write, and mirror under that lock until item 31.
-func (s Store) importLocked(db *sql.DB) error {
-	_, err := state.For(db).ImportIfForeign(context.Background(), mirrorKey, s.Path(), func(conn *sql.Conn, raw []byte) error {
-		var list []Notice
-		if err := json.Unmarshal(raw, &list); err != nil {
-			return fmt.Errorf("%w: notices: %v", state.ErrSkipForeign, err)
-		}
-		ids, keys := map[string]bool{}, map[string]bool{}
-		for _, n := range list {
-			if ids[n.ID] || keys[n.Key] {
-				return fmt.Errorf("%w: duplicate notice ID or key", state.ErrSkipForeign)
-			}
-			ids[n.ID], keys[n.Key] = true, true
-		}
-		return saveNotices(conn, list)
-	})
-	return err
-}
-
-// TODO: legacy/shim remove later — keep notices.json readable by the previous
-// release for rollback; remove with foreign-file import after item 31.
-func (s Store) mirror(db *sql.DB) error {
-	return state.For(db).Mirror(context.Background(), mirrorKey, s.Path(), func(out io.Writer) error {
-		list, err := s.snapshot(db)
-		if err != nil {
-			return err
-		}
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		return enc.Encode(list)
-	})
-}
-
-// Callers that receive a request context can cancel before entering the writer queue.
-// TODO: legacy/shim remove later — retain the previous release's notices.lock until all writers use the engine.
-func (s Store) lock(ctx context.Context) (func(), error) {
-	return store.LockContext(ctx, filepath.Join(s.Dir, "notices.lock"))
 }
