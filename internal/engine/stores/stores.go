@@ -22,6 +22,7 @@ import (
 	"dyna-agent/internal/lanesync"
 	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/library"
+	"dyna-agent/internal/localci"
 	"dyna-agent/internal/maintenance"
 	"dyna-agent/internal/notices"
 	"dyna-agent/internal/plan/ancestry"
@@ -64,6 +65,7 @@ var migrations = []func(dataDir string) error{
 	lanesync.Migrate,
 	librarianstate.Migrate,
 	library.Migrate,
+	localci.Migrate,
 	maintenance.Migrate,
 	notices.Migrate,
 	ancestry.Migrate,
