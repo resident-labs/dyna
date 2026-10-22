@@ -237,7 +237,11 @@ The state also stores request validators and cached responses, per-PR due
 times, shared rate-limit state, repo-scoped learned noise templates, and pending
 drop counts. Cached responses contain GitHub data and use the store's private
 file permissions. Read-only session link queries use `internal/pr/links` to avoid a
-dependency cycle between the watcher and the session close guard.
+dependency cycle between the watcher and session responsibility checks.
+The room service connects session close to the normal PR transfer path.
+Closing transfers author roles to the nearest open ancestor, or root, with
+author history and pending notices intact. Reviewer roles return to the pool.
+A failed handoff keeps the session open unless force close is chosen.
 The engine service owns the single worker process and its restart policy.
 Worker errors go to the engine log. The database serializes writes.
 
@@ -258,8 +262,8 @@ Desktop, paired web clients, and Connect clients share these calls:
 | `SetPRSettings(roomRef, settings)` | Validates and atomically saves the whole setting, returning canonical session IDs. |
 | `UntrackPR(roomRef, key)` | Stops watching that room's PR. |
 | `ResumePR(roomRef, key)` | Resumes watching and clears the CI pause. |
-| `CloseSession(roomRef, sessionRef)` | Normal close with the PR guard. |
-| `ForceCloseSession(roomRef, sessionRef)` | Explicit close after the client confirms the override. |
+| `CloseSession(roomRef, sessionRef)` | Closes after automatic handoff; returns `closeSummary` lines. |
+| `ForceCloseSession(roomRef, sessionRef)` | Closes despite a failed handoff; reports unresolved work. |
 
 Rows include `key`, `repo`, `number`, `url`, `title`, `roomId`, `authorSession`,
 `reviewerSession`, `reviewerMode`, `reviewPublishing`, `reviewerName`, `leadSession`, `state`,
