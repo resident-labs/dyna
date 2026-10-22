@@ -361,7 +361,7 @@ jobs:
       # megabytes these packages need sometimes arrive at 38 kB/s, which took the
       # install to 186 s and failed a merge trial, while the unpack itself is 3 s.
       # So keep the .deb files in a cache, fetch a cold cache in parallel, and
-      # bound every call so a real stall fails with a reason near four minutes.
+      # bound every call so a real stall fails with a reason near three minutes.
       - name: Restore apt package cache
         id: apt-debs
         uses: actions/cache/restore@v4
