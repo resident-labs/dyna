@@ -156,7 +156,7 @@ func TestSessionInfoFollowsChangesThroughTheCache(t *testing.T) {
 	if got := state(); got != "done/2/false" {
 		t.Fatalf("after turn 2: %s", got)
 	}
-	if _, err := e.svc.CloseSession(e.ctx, "alpha", lead.ID); err != nil {
+	if _, err := e.svc.ForceCloseSession(e.ctx, "alpha", lead.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got := state(); got != "closed/2/true" {

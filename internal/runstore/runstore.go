@@ -720,11 +720,20 @@ func ReadJournalFrom(id string, offset int64) ([]JournalEntry, int64, error) {
 
 // ReadMeta reads one run's meta from dyna.db.
 func ReadMeta(id string) (Meta, error) {
-	db, err := runsDB()
+	return ReadMetaIn(RunsDir(), id)
+}
+
+// ReadMetaIn reads a run from the SQLite store beside runsRoot. The existing
+// legacy importer handles a meta.json written by an earlier release once.
+func ReadMetaIn(runsRoot, id string) (Meta, error) {
+	if err := ValidateRunID(id); err != nil {
+		return Meta{}, err
+	}
+	db, err := openRuns(filepath.Dir(runsRoot))
 	if err != nil {
 		return Meta{}, err
 	}
-	return metaAt(db, RunDir(id), id)
+	return metaAt(db, filepath.Join(runsRoot, id), id)
 }
 
 // Finish closes the run, writing result.json and final meta.
