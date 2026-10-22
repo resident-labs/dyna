@@ -35,3 +35,21 @@ test('the button stops its own goal and replaces another', () => {
   assert.equal(expediteAction(scope, { id: 'g2' }), 'replace')
   assert.equal(expediteAction(none, { id: 'g2' }), 'start')
 })
+
+test('linking an untracked PR first creates its owner record; tracked changes keep their key', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { runFunctions, call } = await import('../../../test/svelte-source.ts')
+  const calls: unknown[][] = []
+  const c = {
+    roomId: 'r',
+    api: {
+      trackPR: async (...args: unknown[]) => { calls.push(['track', ...args]); return { key: 'tracked' } },
+      setPRGoal: async (...args: unknown[]) => { calls.push(['link', ...args]) },
+    },
+    loadChanges: async () => {},
+  }
+  runFunctions(readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8'), ['linkPRGoal'], c)
+  await call(c, 'linkPRGoal', { number: 42 }, 'g1')
+  await call(c, 'linkPRGoal', { key: 'existing', number: 43 }, 'g2')
+  assert.deepEqual(calls, [['track', 'r', '', 42], ['link', 'r', 'tracked', 'g1'], ['link', 'r', 'existing', 'g2']])
+})
