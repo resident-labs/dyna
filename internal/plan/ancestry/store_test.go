@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/engine/stores"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/plan"
 	"dyna-agent/internal/plan/ancestry"
@@ -279,7 +280,9 @@ func TestAncestryStartupRejectsUnreadableHeader(t *testing.T) {
 func TestAncestryReadKeepsReadOnlyArtifactTimes(t *testing.T) {
 	s := ancestry.Store{DataDir: storetest.DataDir(t)}
 	t.Cleanup(func() { database.Close(s.DataDir) })
-	dir := filepath.Join(s.DataDir, "archive", "runs", "wf_readonly")
+	archive := t.TempDir()
+	t.Setenv(store.RunArchiveDirEnv, archive)
+	dir := filepath.Join(archive, "wf_readonly", "workflows", "nested")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -294,8 +297,16 @@ func TestAncestryReadKeepsReadOnlyArtifactTimes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := ancestry.Migrate(s.DataDir); err != nil {
+	if err := stores.Migrate(s.DataDir); err != nil {
 		t.Fatal(err)
+	}
+	db, err := database.Open(s.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var imported string
+	if err := db.QueryRow("SELECT resumed_from FROM plan_ancestry WHERE plan='wf_readonly/workflows/nested'").Scan(&imported); err != nil || imported != "wf_parent" {
+		t.Fatalf("ordered engine migration missed custom archive: %q, %v", imported, err)
 	}
 	parent, err := s.Parent(context.Background(), dir)
 	if err != nil || parent != "wf_parent" {
