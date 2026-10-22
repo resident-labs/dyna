@@ -8,25 +8,28 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	accountstore "dyna-agent/internal/account/store"
-	"dyna-agent/internal/boundedio"
-	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/fsutil"
 )
 
-// TODO: legacy/shim remove later — retain saved Secret Service payloads until all saved accounts use a new schema.
+// Antigravity accounts sign in through the ACP server only. A saved account is
+// the ACP grant plus the Google identity that sign-in confirmed once.
+const agyACPSchema = "antigravity/acp@1"
+
+// TODO: legacy/shim remove later — read accounts saved before ACP-only sign-in (the agy CLI wrapper and an optional ACP grant) until they sign in again.
 const agyAuthSchema = "antigravity/secret-service@1"
 const agyRole = "keyring:gemini/antigravity"
 const agyMaxAuth = 4 << 20
 
-// AntigravityAuthFile is relative to the native HOME.
-const AntigravityAuthFile = ".gemini/antigravity-cli/antigravity-oauth-token"
+// AntigravityAccountFile records the Google identity and label of the ACP grant
+// beside it, relative to the native HOME. Sign-in writes it once after Google
+// confirms the account; capture and activation read and restore it offline.
+const AntigravityAccountFile = "antigravity-acp/account.json"
 
 // AntigravityFileEnv selects agy 1.4.2's native SSH file-store branch.
 func AntigravityFileEnv() map[string]string {
@@ -39,27 +42,11 @@ func AntigravityFileEnv() map[string]string {
 
 var agyNativeMu sync.Mutex
 
-// Tests replace the token store to inject read and write failures.
-type agyTokenStore interface {
-	Read(context.Context) ([]byte, error)
-	Write(context.Context, []byte) error
-}
 type antigravityManager struct {
-	host          Host
-	storeOverride agyTokenStore
-	legacy        agySecretReader
-	client        claudeHTTPClient
-	now           func() time.Time
-	clientSecret  func(context.Context) (string, error)
-}
-type agySecretReader interface {
-	Read(context.Context) ([]byte, error)
-}
-
-// TODO: legacy/shim remove later — read old shared grants until existing Dyna homes have private token files.
-type agySecretTool struct {
-	path string
-	host Host
+	host         Host
+	client       claudeHTTPClient
+	now          func() time.Time
+	clientSecret func(context.Context) (string, error)
 }
 
 func init()                                 { register("antigravity", func(h Host) Manager { return &antigravityManager{host: h} }) }
@@ -68,81 +55,12 @@ func (*antigravityManager) Caps() Caps {
 	return Caps{Activate: true, IsolatedLogin: true, Refresh: true, Scope: "Antigravity credentials in the selected home", RunningEffect: "New turns use the active native login after the harness gate drains."}
 }
 
-func (s agySecretTool) command(ctx context.Context, args ...string) (*exec.Cmd, error) {
-	st, err := os.Stat(s.path)
-	if err != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0111 == 0 {
-		return nil, ErrUnsupported
-	}
-	cmd := exec.CommandContext(ctx, s.path, args...)
-	cmd.WaitDelay = time.Second
-	cmd.Env = []string{"HOME=" + s.host.HomeDir(), "LANG=C.UTF-8"}
-	for _, key := range []string{"DBUS_SESSION_BUS_ADDRESS", "XDG_RUNTIME_DIR", "DISPLAY", "WAYLAND_DISPLAY"} {
-		if v := s.host.Getenv(key); v != "" {
-			cmd.Env = append(cmd.Env, key+"="+v)
-		}
-	}
-	return cmd, nil
-}
-func (s agySecretTool) Read(ctx context.Context) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	cmd, err := s.command(ctx, "lookup", "service", "gemini", "username", "antigravity")
-	if err != nil {
-		return nil, err
-	}
-	out := boundedio.New(agyMaxAuth)
-	stderr := boundedio.New(16 << 10)
-	cmd.Stdout = out
-	cmd.Stderr = stderr
-	if err = childenv.Clean(cmd).Run(); err != nil {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		var exit *exec.ExitError
-		if errors.As(err, &exit) && exit.ExitCode() == 1 && out.Len() == 0 && stderr.Len() == 0 {
-			return nil, ErrNotSignedIn
-		}
-		return nil, errors.New("Antigravity credentials could not be read from Secret Service.")
-	}
-	if out.Truncated() {
-		return nil, ErrSchema
-	}
-	raw := bytes.TrimSpace(out.Bytes())
-	if len(raw) == 0 {
-		return nil, ErrNotSignedIn
-	}
-	return append([]byte(nil), raw...), nil
-}
-
-type agyFileStore struct {
-	path         string
-	legacy       agySecretReader
-	importLegacy bool
-}
+type agyFileStore struct{ path string }
 
 func (s agyFileStore) Read(ctx context.Context) ([]byte, error) {
 	info, err := os.Lstat(s.path)
 	if os.IsNotExist(err) {
-		// TODO: legacy/shim remove later — import the old shared grant once, until existing Dyna homes have private token files.
-		if s.legacy == nil {
-			return nil, ErrNotSignedIn
-		}
-		raw, err := s.legacy.Read(ctx)
-		if errors.Is(err, ErrUnsupported) {
-			return nil, ErrNotSignedIn
-		}
-		if err != nil {
-			return nil, err
-		}
-		if _, err = agyAccount(raw); err != nil {
-			return nil, err
-		}
-		if s.importLegacy {
-			if err = s.Write(ctx, raw); err != nil {
-				return nil, err
-			}
-		}
-		return raw, nil
+		return nil, ErrNotSignedIn
 	}
 	if err != nil || !info.Mode().IsRegular() {
 		return nil, errors.New("Antigravity credentials could not be read safely.")
@@ -177,36 +95,187 @@ func (s agyFileStore) Write(ctx context.Context, raw []byte) error {
 	}
 	return fsutil.WriteFile(s.path, raw, 0600, true)
 }
-func (m *antigravityManager) store(root string) (agyTokenStore, error) {
+
+// agyACPAccount is the identity sign-in confirmed for an ACP grant.
+type agyACPAccount struct {
+	Identity string `json:"identity"`
+	Label    string `json:"label,omitempty"`
+}
+
+func (a agyACPAccount) valid() bool {
+	sub, ok := strings.CutPrefix(a.Identity, "google:")
+	return ok && sub != "" && len(sub) <= 512 && !strings.ContainsAny(sub, "@\r\n\x00") && len(a.Label) <= 512
+}
+
+// agyACPCaptured is the saved form of an ACP-only account.
+func agyACPCaptured(token []byte, a agyACPAccount) (Captured, error) {
+	if !a.valid() || agyACPValidate(token) != nil {
+		return Captured{}, ErrSchema
+	}
+	payload, err := json.Marshal(struct {
+		agyACPAccount
+		Token json.RawMessage `json:"token"`
+	}{a, token})
+	if err != nil {
+		return Captured{}, ErrSchema
+	}
+	return Captured{Identity: a.Identity, Label: a.Label, Credential: accountstore.Credential{Schema: agyACPSchema, Payload: payload}}, nil
+}
+
+// agyACPUnpack returns the ACP grant and identity of a saved account.
+func agyACPUnpack(c accountstore.Credential) (json.RawMessage, agyACPAccount, error) {
+	if len(c.Payload) > agyMaxAuth {
+		return nil, agyACPAccount{}, ErrSchema
+	}
+	switch c.Schema {
+	case agyACPSchema:
+		var p map[string]json.RawMessage
+		var a agyACPAccount
+		if json.Unmarshal(c.Payload, &p) != nil || json.Unmarshal(c.Payload, &a) != nil || !a.valid() {
+			return nil, a, ErrSchema
+		}
+		for key := range p {
+			if key != "identity" && key != "label" && key != "token" {
+				return nil, a, ErrSchema
+			}
+		}
+		if agyACPValidate(p["token"]) != nil {
+			return nil, a, ErrSchema
+		}
+		return p["token"], a, nil
+	case agyAuthSchema:
+		// TODO: legacy/shim remove later — an account saved before ACP-only
+		// sign-in names its identity in the saved agy CLI wrapper.
+		cli, acp, err := agyPayload(c.Payload)
+		if err != nil {
+			return nil, agyACPAccount{}, err
+		}
+		legacy, err := agyAccount(cli)
+		if err != nil {
+			return nil, agyACPAccount{}, err
+		}
+		if len(acp) == 0 {
+			return nil, agyACPAccount{}, errAgyNeedsACPSignIn
+		}
+		return acp, agyACPAccount{Identity: legacy.Identity, Label: legacy.Label}, nil
+	}
+	return nil, agyACPAccount{}, ErrSchema
+}
+
+var errAgyNeedsACPSignIn = errors.New("This Antigravity account was saved without an ACP sign-in. Sign in to it again.")
+
+// agyHome holds the two files of one ACP sign-in in a native HOME.
+type agyHome struct{ token, account agyFileStore }
+
+func (m *antigravityManager) home(root string) (agyHome, error) {
 	home := root
 	if home == "" {
 		home = m.host.HomeDir()
 	}
 	if !filepath.IsAbs(home) {
-		return nil, ErrUnsupported
+		return agyHome{}, ErrUnsupported
 	}
-	if root == "" {
-		for key := range AntigravityFileEnv() {
-			if key != "SSH_TTY" && m.host.Getenv(key) != "" {
-				return nil, ErrUnsupported
-			}
-		}
-		if m.storeOverride != nil {
-			return m.storeOverride, nil
-		}
-	}
-	var legacy agySecretReader
-	if root == "" {
-		legacy = m.legacy
-		if legacy == nil {
-			legacy = agySecretTool{path: "/usr/bin/secret-tool", host: m.host}
-		}
-	}
-	return agyFileStore{
-		path: filepath.Join(home, AntigravityAuthFile), legacy: legacy,
-		importLegacy: root == "" && m.host.Getenv("SSH_TTY") == AntigravityFileEnv()["SSH_TTY"],
-	}, nil
+	return agyHome{agyFileStore{filepath.Join(home, AntigravityACPTokenFile)}, agyFileStore{filepath.Join(home, AntigravityAccountFile)}}, nil
 }
+
+// capture reads the grant and the identity recorded at sign-in. It never asks
+// Google. A grant without its recorded identity is not a Dyna sign-in.
+func (h agyHome) capture(ctx context.Context) ([]Captured, error) {
+	token, err := h.token.Read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := h.account.Read(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var a agyACPAccount
+	if json.Unmarshal(raw, &a) != nil {
+		return nil, ErrSchema
+	}
+	c, err := agyACPCaptured(token, a)
+	if err != nil {
+		return nil, err
+	}
+	return []Captured{c}, nil
+}
+
+// write makes the HOME hold exactly one account's grant and identity.
+func (h agyHome) write(ctx context.Context, token json.RawMessage, a agyACPAccount) error {
+	raw, err := json.Marshal(a)
+	if err != nil {
+		return ErrSchema
+	}
+	if err = h.token.Write(ctx, token); err != nil {
+		return err
+	}
+	return h.account.Write(ctx, raw)
+}
+
+func (m *antigravityManager) Capture(ctx context.Context, root string) ([]Captured, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	h, err := m.home(root)
+	if err != nil {
+		return nil, err
+	}
+	agyNativeMu.Lock()
+	defer agyNativeMu.Unlock()
+	return h.capture(ctx)
+}
+
+// Activate writes one saved account's grant and identity into the HOME and
+// verifies them. It makes no network call: the ACP server refreshes its own
+// grant when it starts.
+func (m *antigravityManager) Activate(ctx context.Context, integration string, c accountstore.Credential) ([]Captured, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if integration != "" {
+		return nil, ErrSchema
+	}
+	token, target, err := agyACPUnpack(c)
+	if err != nil {
+		return nil, err
+	}
+	h, err := m.home("")
+	if err != nil {
+		return nil, err
+	}
+	agyNativeMu.Lock()
+	defer agyNativeMu.Unlock()
+	// The service holds Dyna's cross-process harness gate while switching files.
+	previous, err := h.capture(ctx)
+	if err != nil && !errors.Is(err, ErrNotSignedIn) {
+		return previous, err
+	}
+	rollback := func(cause error) ([]Captured, error) {
+		bg := context.WithoutCancel(ctx)
+		if len(previous) > 0 {
+			oldToken, old, e := agyACPUnpack(previous[0].Credential)
+			if e != nil || h.write(bg, oldToken, old) != nil {
+				return previous, errors.Join(errors.New("Antigravity account update and rollback failed."), ErrPartialActivation)
+			}
+		} else if h.token.remove() != nil || h.account.remove() != nil {
+			return previous, errors.Join(errors.New("Antigravity account update and rollback failed."), ErrPartialActivation)
+		}
+		return previous, errors.Join(cause, ErrPartialActivation)
+	}
+	if err = h.write(ctx, token, target); err != nil {
+		return rollback(err)
+	}
+	after, err := h.capture(ctx)
+	if err != nil {
+		return rollback(err)
+	}
+	got, gotAccount, err := agyACPUnpack(after[0].Credential)
+	if err != nil || gotAccount.Identity != target.Identity || !sameJSON(got, token) {
+		return rollback(errors.New("Antigravity credentials could not be verified after writing."))
+	}
+	return previous, nil
+}
+
 func agyAccount(raw []byte) (Captured, error) {
 	if len(raw) > agyMaxAuth {
 		return Captured{}, ErrSchema
@@ -260,128 +329,6 @@ func agyAccount(raw []byte) (Captured, error) {
 		}
 	}
 	return Captured{Identity: "google:" + id.Sub, Label: identityLabel(id.Email, wrapper.UserTier), Credential: accountstore.Credential{Schema: agyAuthSchema, Payload: agyPack(raw, nil)}, ExpiresAt: expiry}, nil
-}
-func agyCapture(ctx context.Context, store agyTokenStore, acp agyFileStore) ([]Captured, error) {
-	raw, err := store.Read(ctx)
-	if err != nil {
-		return nil, err
-	}
-	c, err := agyAccount(raw)
-	if err != nil {
-		return nil, err
-	}
-	if c, err = agyWithACP(ctx, c, acp); err != nil {
-		return nil, err
-	}
-	return []Captured{c}, nil
-}
-func (m *antigravityManager) Capture(ctx context.Context, root string) ([]Captured, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	store, err := m.store(root)
-	if err != nil {
-		return nil, err
-	}
-	acp, err := m.acpStore(root)
-	if err != nil {
-		return nil, err
-	}
-	agyNativeMu.Lock()
-	defer agyNativeMu.Unlock()
-	return agyCapture(ctx, store, acp)
-}
-func (m *antigravityManager) Activate(ctx context.Context, integration string, c accountstore.Credential) ([]Captured, error) {
-	return m.activate(ctx, integration, c, nil)
-}
-func (m *antigravityManager) activate(ctx context.Context, integration string, c accountstore.Credential, refresh *activeRefresh) ([]Captured, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if integration != "" || c.Schema != agyAuthSchema || len(c.Payload) > agyMaxAuth {
-		return nil, ErrSchema
-	}
-	raw, acpRaw, err := agyPayload(c.Payload)
-	if err != nil {
-		return nil, err
-	}
-	target, err := agyAccount(raw)
-	if err != nil {
-		return nil, err
-	}
-	store, err := m.store("")
-	if err != nil {
-		return nil, err
-	}
-	acp, err := m.acpStore("")
-	if err != nil {
-		return nil, err
-	}
-	agyNativeMu.Lock()
-	defer agyNativeMu.Unlock()
-	// The service holds Dyna's cross-process harness gate while switching files.
-	previous, err := agyCapture(ctx, store, acp)
-	if err != nil && !errors.Is(err, ErrNotSignedIn) {
-		return previous, err
-	}
-	if refresh != nil {
-		if len(previous) != 1 || previous[0].Identity != refresh.current.Identity || previous[0].Integration != refresh.current.Integration {
-			return previous, ErrNoIdentity
-		}
-		source := previous[0]
-		if NewerCredential(refresh.current, source) {
-			source = refresh.current
-		}
-		next, e := m.Refresh(ctx, source)
-		if e != nil {
-			return previous, e
-		}
-		refresh.result = next
-		if e = refresh.checkpoint(next); e != nil {
-			return previous, e
-		}
-		if raw, acpRaw, e = agyPayload(next.Credential.Payload); e != nil {
-			return previous, e
-		}
-		target = next
-	}
-	// writeACP makes the home match a payload: an account without an ACP grant
-	// must not inherit the previous account's.
-	writeACP := func(ctx context.Context, grant json.RawMessage) error {
-		if len(grant) == 0 {
-			return acp.remove()
-		}
-		return acp.Write(ctx, grant)
-	}
-	rollback := func(cause error) ([]Captured, error) {
-		if len(previous) > 0 {
-			old, oldACP, e := agyPayload(previous[0].Credential.Payload)
-			bg := context.WithoutCancel(ctx)
-			if e != nil || store.Write(bg, old) != nil || writeACP(bg, oldACP) != nil {
-				return previous, errors.Join(errors.New("Antigravity account update and rollback failed."), ErrPartialActivation)
-			}
-		}
-		return previous, errors.Join(cause, ErrPartialActivation)
-	}
-	if err = store.Write(ctx, raw); err != nil {
-		return rollback(err)
-	}
-	if err = writeACP(ctx, acpRaw); err != nil {
-		return rollback(err)
-	}
-	after, err := agyCapture(ctx, store, acp)
-	if err != nil {
-		return rollback(err)
-	}
-	if len(after) != 1 || after[0].Identity != target.Identity {
-		return rollback(ErrNoIdentity)
-	}
-	// Compare both files as well as identity, without exposing either.
-	got, gotACP, err := agyPayload(after[0].Credential.Payload)
-	if err != nil || !sameJSON(raw, got) || !sameJSON(acpRaw, gotACP) {
-		return rollback(errors.New("Antigravity credentials could not be verified after writing."))
-	}
-	return previous, nil
 }
 
 // sameJSON compares two JSON documents by value; two absent documents match.

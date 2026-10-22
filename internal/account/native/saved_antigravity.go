@@ -55,10 +55,18 @@ func (m *antigravityManager) CachedPlan(c Captured) *store.Plan {
 	}
 	return &store.Plan{ID: tier, Label: tier}
 }
+
+// errAgyUsageUnavailable is the usage of an ACP-only account: Antigravity's
+// quota API takes the agy CLI token, which such an account does not have.
+var errAgyUsageUnavailable = errors.New("Usage is not available for an Antigravity account signed in through ACP.")
+
 func (m *antigravityManager) ProbeSaved(ctx context.Context, c Captured) (store.Observation, error) {
 	var o store.Observation
 	if err := ctx.Err(); err != nil {
 		return o, err
+	}
+	if c.Credential.Schema == agyACPSchema {
+		return o, errAgyUsageUnavailable
 	}
 	wrapper, token, validated, err := savedAgy(c)
 	if err != nil {
@@ -167,9 +175,17 @@ func (m *antigravityManager) ProbeSaved(ctx context.Context, c Captured) (store.
 }
 
 // Refresh changes only the returned saved payload. The service checkpoints it
-// under the account-store lock before probing. Native Secret Service is untouched.
+// under the account-store lock before probing. An ACP-only account has nothing
+// to refresh: the ACP server refreshes its own grant when it starts.
 func (m *antigravityManager) Refresh(ctx context.Context, c Captured) (Captured, error) {
 	if err := ctx.Err(); err != nil {
+		return c, err
+	}
+	if c.Credential.Schema == agyACPSchema {
+		_, a, err := agyACPUnpack(c.Credential)
+		if err == nil && a.Identity != c.Identity {
+			err = ErrNoIdentity
+		}
 		return c, err
 	}
 	wrapper, token, validated, err := savedAgy(c)

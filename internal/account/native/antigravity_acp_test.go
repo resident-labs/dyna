@@ -18,21 +18,6 @@ func agyACPTestToken(sub string) []byte {
 	return []byte(`{"client_id":"fake-acp-client-` + sub + `","client_secret":"fake-acp-secret-` + sub + `","refresh_token":"fake-acp-refresh-` + sub + `"}`)
 }
 
-func agyACPTestPath(m *antigravityManager) string {
-	return filepath.Join(m.host.HomeDir(), AntigravityACPTokenFile)
-}
-
-func agyACPTestWrite(t *testing.T, m *antigravityManager, raw []byte) {
-	t.Helper()
-	path := agyACPTestPath(m)
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, raw, 0600); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func agyACPTestCredential(t *testing.T, sub string, acp []byte) Captured {
 	t.Helper()
 	c, err := agyAccount(agyTestWrapper(t, sub))
@@ -43,77 +28,6 @@ func agyACPTestCredential(t *testing.T, sub string, acp []byte) Captured {
 		c.Credential.Payload = agyPack(agyTestWrapper(t, sub), acp)
 	}
 	return c
-}
-
-func TestAntigravityCaptureIncludesACPToken(t *testing.T) {
-	m := agyTestManager(t, &agyFakeStore{raw: agyTestWrapper(t, "source")})
-	token := agyACPTestToken("source")
-	agyACPTestWrite(t, m, token)
-	rows, err := m.Capture(context.Background(), "")
-	if err != nil || len(rows) != 1 {
-		t.Fatal("capture failed", err)
-	}
-	cli, acp, err := agyPayload(rows[0].Credential.Payload)
-	if err != nil || !bytes.Equal(acp, token) || !sameJSON(cli, agyTestWrapper(t, "source")) {
-		t.Fatal("capture dropped the CLI wrapper or the ACP token", err)
-	}
-}
-
-func TestAntigravityCaptureWithoutACPTokenKeepsCLIPayload(t *testing.T) {
-	m := agyTestManager(t, &agyFakeStore{raw: agyTestWrapper(t, "source")})
-	rows, err := m.Capture(context.Background(), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var p map[string]json.RawMessage
-	if json.Unmarshal(rows[0].Credential.Payload, &p) != nil || len(p) != 1 || p[agyRole] == nil {
-		t.Fatal("a home without an ACP token must capture exactly the CLI entry")
-	}
-}
-
-func TestAntigravityCaptureRejectsIncompleteACPToken(t *testing.T) {
-	m := agyTestManager(t, &agyFakeStore{raw: agyTestWrapper(t, "source")})
-	agyACPTestWrite(t, m, []byte(`{"client_id":"fake","refresh_token":"fake"}`))
-	if _, err := m.Capture(context.Background(), ""); !errors.Is(err, ErrSchema) {
-		t.Fatalf("incomplete ACP token was accepted: %v", err)
-	}
-}
-
-func TestAntigravityActivateWritesPrivateACPTokenAndRemovesStaleOne(t *testing.T) {
-	m := agyTestManager(t, &agyFakeStore{raw: agyTestWrapper(t, "source")})
-	agyACPTestWrite(t, m, agyACPTestToken("source"))
-	withACP := agyACPTestCredential(t, "target", agyACPTestToken("target"))
-	if _, err := m.Activate(context.Background(), "", withACP.Credential); err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(agyACPTestPath(m))
-	info, statErr := os.Stat(agyACPTestPath(m))
-	if err != nil || statErr != nil || !bytes.Equal(got, agyACPTestToken("target")) || info.Mode().Perm() != 0600 {
-		t.Fatal("activation did not write the ACP token with a private mode")
-	}
-	withoutACP := agyACPTestCredential(t, "other", nil)
-	if _, err := m.Activate(context.Background(), "", withoutACP.Credential); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(agyACPTestPath(m)); !os.IsNotExist(err) {
-		t.Fatal("an account without an ACP token inherited the previous account's token")
-	}
-}
-
-func TestAntigravityActivateRollbackRestoresACPToken(t *testing.T) {
-	s := &agyFakeStore{raw: agyTestWrapper(t, "source"), failReadAt: 2}
-	m := agyTestManager(t, s)
-	previousToken := agyACPTestToken("source")
-	agyACPTestWrite(t, m, previousToken)
-	target := agyACPTestCredential(t, "target", agyACPTestToken("target"))
-	_, err := m.Activate(context.Background(), "", target.Credential)
-	if !errors.Is(err, ErrPartialActivation) {
-		t.Fatalf("verification failure was not reported: %v", err)
-	}
-	got, readErr := os.ReadFile(agyACPTestPath(m))
-	if readErr != nil || !bytes.Equal(got, previousToken) {
-		t.Fatal("rollback did not restore the previous ACP token")
-	}
 }
 
 func TestAntigravityPayloadRejectsUnknownEntryAndBadACPToken(t *testing.T) {
@@ -139,7 +53,7 @@ func TestSavedAntigravityRefreshKeepsACPToken(t *testing.T) {
 	}
 	token := agyACPTestToken("saved")
 	c.Credential.Payload = agyPack(cli, token)
-	m := agyTestManager(t, &agyFakeStore{})
+	m := &antigravityManager{host: testHost(t, nil)}
 	m.now = func() time.Time { return now }
 	m.clientSecret = func(context.Context) (string, error) { return "fake-client-secret", nil }
 	m.client = directTestClient(func(*http.Request) (*http.Response, error) {
@@ -284,25 +198,6 @@ func TestAntigravityACPLoginWithoutExpectedIdentityKeepsTheFirstGrant(t *testing
 	}
 	if _, err := os.Stat(filepath.Join(login.Home, AntigravityACPTokenFile)); err != nil {
 		t.Fatalf("the first grant was not kept: %v", err)
-	}
-}
-
-// A new ACP grant is pinned to the agy CLI login beside it, so one private home
-// never holds two Google accounts.
-func TestAntigravityCLIIdentityNamesTheTokenBesideIt(t *testing.T) {
-	home := t.TempDir()
-	if identity, err := AntigravityCLIIdentity(home); identity != "" || err != nil {
-		t.Fatalf("an empty home named an identity: %q %v", identity, err)
-	}
-	path := filepath.Join(home, AntigravityAuthFile)
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, agyTestWrapper(t, "signedin"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if identity, err := AntigravityCLIIdentity(home); err != nil || identity != "google:signedin" {
-		t.Fatalf("the CLI token did not pin the home: %q %v", identity, err)
 	}
 }
 

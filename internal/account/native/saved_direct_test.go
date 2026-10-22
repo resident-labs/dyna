@@ -62,8 +62,7 @@ func TestSavedClaudeUsesSavedTokenAndCurrentParsing(t *testing.T) {
 }
 func TestSavedAntigravityLoadsPlanAndGroupedQuotaWithoutNativeStore(t *testing.T) {
 	c := directTestAgy(t, time.Now().Add(time.Hour))
-	store := &agyFakeStore{readErr: errors.New("must not read native store")}
-	m := agyTestManager(t, store)
+	m := agyTestManager(t)
 	calls := 0
 	m.client = directTestClient(func(r *http.Request) (*http.Response, error) {
 		calls++
@@ -86,8 +85,8 @@ func TestSavedAntigravityLoadsPlanAndGroupedQuotaWithoutNativeStore(t *testing.T
 	if err != nil || calls != 2 || o.Plan == nil || o.Plan.ID != "g1-pro-tier" || o.Plan.Label != "Google AI Pro" || len(o.Windows) != 3 || *o.Windows[0].UsedPercent != 75 || *o.Windows[1].UsedPercent != 0 || *o.Windows[2].UsedPercent != 100 {
 		t.Fatalf("unexpected Antigravity observation: %+v, %v", o, err)
 	}
-	if store.reads != 0 || store.writes != 0 {
-		t.Fatal("probe accessed native credentials")
+	if entries, _ := os.ReadDir(m.host.Home); len(entries) != 0 {
+		t.Fatal("probe wrote native credentials")
 	}
 	if plan := m.CachedPlan(c); plan == nil || plan.ID != "fake-tier" {
 		t.Fatal("cached tier unavailable")
@@ -98,7 +97,7 @@ func TestSavedProbesRejectExpiredAndMismatchedCredentialsWithoutRequests(t *test
 	cm := claudeTestManager(t, nil)
 	claude := Captured{Identity: "anthropic:" + claudeTestAccountA, Credential: claudeTestPayload(t, cm, claudeTestAccountA, "expired", 30*time.Second)}
 	agy := directTestAgy(t, now.Add(-time.Hour))
-	am := agyTestManager(t, &agyFakeStore{})
+	am := agyTestManager(t)
 	deny := directTestClient(func(*http.Request) (*http.Response, error) {
 		t.Error("probe must not refresh or request quota")
 		return nil, errors.New("unexpected request")
@@ -125,7 +124,7 @@ func TestSavedProbesReturnTypedRetryErrorsAndHideProviderText(t *testing.T) {
 	now := time.Now().UTC()
 	cm := claudeTestManager(t, nil)
 	claude := Captured{Identity: "anthropic:" + claudeTestAccountA, Credential: claudeTestPayload(t, cm, claudeTestAccountA, "saved", time.Hour)}
-	am := agyTestManager(t, &agyFakeStore{})
+	am := agyTestManager(t)
 	for _, status := range []int{429, 500, 503} {
 		for _, tc := range []struct {
 			name string
@@ -152,8 +151,7 @@ func TestSavedAntigravityRefreshPreservesRefreshAndUnknownFields(t *testing.T) {
 	now := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
 	c := directTestAgy(t, now.Add(-time.Hour))
 	before := append([]byte(nil), c.Credential.Payload...)
-	store := &agyFakeStore{}
-	m := agyTestManager(t, store)
+	m := agyTestManager(t)
 	m.now = func() time.Time { return now }
 	m.clientSecret = func(context.Context) (string, error) { return "fake-client-secret", nil }
 	m.client = directTestClient(func(r *http.Request) (*http.Response, error) {
@@ -176,14 +174,14 @@ func TestSavedAntigravityRefreshPreservesRefreshAndUnknownFields(t *testing.T) {
 	if err != nil || jsonString(token["access_token"]) != "new-access" || jsonString(token["refresh_token"]) != "fake-refresh-saved" || wrapper["future_field"] == nil || !next.ExpiresAt.Equal(now.Add(3599*time.Second)) {
 		t.Fatal("refresh lost wrapper fields, refresh token, or expiry")
 	}
-	if !reflect.DeepEqual(before, []byte(c.Credential.Payload)) || store.reads != 0 || store.writes != 0 {
+	if !reflect.DeepEqual(before, []byte(c.Credential.Payload)) {
 		t.Fatal("refresh changed input or native credentials")
 	}
 }
 func TestSavedAntigravityRefreshErrorsAndFreshGrant(t *testing.T) {
 	now := time.Now().UTC()
 	c := directTestAgy(t, now.Add(-time.Hour))
-	m := agyTestManager(t, &agyFakeStore{})
+	m := agyTestManager(t)
 	m.now = func() time.Time { return now }
 	m.clientSecret = func(context.Context) (string, error) { return "fake", nil }
 	for _, tc := range []struct {
@@ -262,7 +260,7 @@ func TestSavedClaudeRefreshReturnsTypedRetryError(t *testing.T) {
 func TestSavedProbesKeepMalformedQuotaUnknown(t *testing.T) {
 	cm := claudeTestManager(t, nil)
 	claude := Captured{Identity: "anthropic:" + claudeTestAccountA, Credential: claudeTestPayload(t, cm, claudeTestAccountA, "saved", time.Hour)}
-	am := agyTestManager(t, &agyFakeStore{})
+	am := agyTestManager(t)
 	cases := []struct {
 		name     string
 		captured Captured
@@ -302,7 +300,7 @@ func TestSavedProbesKeepMalformedQuotaUnknown(t *testing.T) {
 func TestSavedAntigravityRefreshAcceptsRotationAndRejectsChangedIdentity(t *testing.T) {
 	now := time.Now().UTC()
 	c := directTestAgy(t, now.Add(-time.Hour))
-	m := agyTestManager(t, &agyFakeStore{})
+	m := agyTestManager(t)
 	m.now = func() time.Time { return now }
 	m.clientSecret = func(context.Context) (string, error) { return "fake", nil }
 	for _, sub := range []string{"saved", "other"} {
