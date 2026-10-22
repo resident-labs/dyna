@@ -148,10 +148,10 @@ jobs:
           touch ../web/dist/index.html
           bash ../scripts/ci.sh go desktop
       - name: Compile non-race objects for the cache
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || github.head_ref == 'ci/shard-go-test'
         run: go test -run '^$' $(bash scripts/ci-shard.sh ${{ matrix.shard }} 7) >/dev/null
       - name: Save Go caches
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || github.head_ref == 'ci/shard-go-test'
         uses: actions/cache/save@v4
         with:
           path: |
@@ -230,7 +230,7 @@ jobs:
       - name: Check installer
         run: bash scripts/ci.sh go installer
       - name: Save Go caches
-        if: github.ref == 'refs/heads/main'
+        if: github.ref == 'refs/heads/main' || github.head_ref == 'ci/shard-go-test'
         uses: actions/cache/save@v4
         with:
           path: |
