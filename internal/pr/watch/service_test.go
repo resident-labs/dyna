@@ -459,11 +459,14 @@ func TestTrackIdempotentAndKeepsOriginalAuthor(t *testing.T) {
 	if err != nil || created || got.Watching {
 		t.Fatalf("track reactivated old link: %+v %v %v", got, created, err)
 	}
+	if err = e.s.Store.update(func(st *State) error { st.Records[r.Key].Polling.FullChecked = e.clock; return nil }); err != nil {
+		t.Fatal(err)
+	}
 	if err = e.s.Resume(r.Key); err != nil {
 		t.Fatal(err)
 	}
-	if !e.record().Watching {
-		t.Fatal("resume failed")
+	if got := e.record(); !got.Watching || !got.Polling.FullChecked.IsZero() {
+		t.Fatal("resume must force a full snapshot")
 	}
 }
 
