@@ -187,8 +187,9 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 					if !reportsCopied || !sawCleanup || !strings.Contains(script, "/runs/") {
 						t.Errorf("run directory removed before the reports or the cleanup, or by the wrong path: %s", script)
 					}
-					// The keeper is stopped before its process ID can go away.
-					if !strings.Contains(script, "kill -TERM -- -") {
+					// The keeper is stopped before its process ID can go away,
+					// and the run's own lock acknowledges that it is gone.
+					if !strings.Contains(script, "kill -TERM -- -") || !strings.Contains(script, "flock -n ") {
 						t.Errorf("run directory removed without stopping its keeper: %s", script)
 					}
 				}
