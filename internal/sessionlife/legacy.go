@@ -1,7 +1,6 @@
 package sessionlife
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -11,12 +10,10 @@ import (
 	"sync"
 	"syscall"
 
-	"dyna-agent/internal/hub"
-	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 )
 
-// TODO: legacy/shim remove later — session records lived in session.json before dyna.db; remove legacyName, legacyLoadRaw, legacyVersion and ImportLegacy once every store has run ImportLegacy (PR 4 of the session record move).
+// TODO: legacy/shim remove later — session records lived in session.json before dyna.db; remove legacyName, legacyLoadRaw, legacyVersion once every store has run sessions.import (PR 4 of the session record move).
 const legacyName = "session.json"
 
 // legacyLoadRaw reads a session.json written before the record moved into
@@ -79,46 +76,7 @@ func legacyVersion(sessions, id string) (Version, bool) {
 	return fileVersion(info), true
 }
 
-// ImportLegacy copies every session.json that has no record yet into dyna.db,
-// one short transaction per session and no session lock, so it never holds
-// up a session for long. A record written meanwhile wins. Damaged files are
-// skipped and returned; the files themselves are never moved or deleted.
-func ImportLegacy(sessions string) (imported int, damaged error) {
-	ids, err := SafeIDs(sessions)
-	if err != nil {
-		return 0, err
-	}
-	db, err := records(sessions)
-	if err != nil {
-		return 0, err
-	}
-	for _, id := range ids {
-		if checkID(id) != nil {
-			continue
-		}
-		var exists int
-		if db.QueryRow("SELECT 1 FROM session_records WHERE id = ?", id).Scan(&exists) == nil {
-			continue
-		}
-		raw, _, err := legacyLoadRaw(sessions, id)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err == nil {
-			err = state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-				return writeRow(conn, id, raw, "ON CONFLICT(id) DO NOTHING")
-			})
-		}
-		if err != nil {
-			damaged = errors.Join(damaged, fmt.Errorf("import session %s: %w", id, err))
-			continue
-		}
-		imported++
-	}
-	return imported, damaged
-}
-
-// TODO: legacy/shim remove later — open listings find session folders with no row (a session.json not imported yet) through this folder scan; remove legacyFolders and legacyScans with legacyLoadRaw once every store has run ImportLegacy.
+// TODO: legacy/shim remove later — open listings find session folders with no row (a session.json not imported yet) through this folder scan; remove legacyFolders and legacyScans with legacyLoadRaw once every store has run sessions.import.
 var legacyScans sync.Map // sessions folder -> legacyScan
 
 type legacyScan struct {
