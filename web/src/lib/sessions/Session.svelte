@@ -14,7 +14,6 @@
   import DmRows from './DmRows.svelte'
   import { dmView, groupMessages, threadList } from './dm.ts'
   import { api } from '../../api.js'
-  import { statusMeta } from '../prs/pr.ts'
   import { short, ago } from '../ui/format.ts'
   import MessageInput from '../ui/MessageInput.svelte'
   import { unreadableOutput, unreadableNotice } from '../settings/support.ts'
@@ -28,7 +27,6 @@
   import type { QueueItem, Session as SessionData } from '../api/session.ts'
   import type { ShellJob } from '../api/terminal.ts'
   import type { ProfileView } from '../settings/support.ts'
-  import type { Row } from '../prs/prlist.ts'
   import type { DmRow, MessageRow, Receipt, Thread, ThreadPost } from './dm.ts'
 
   interface Props {
@@ -51,14 +49,12 @@
     onnewer?: ((near?: () => boolean) => Promise<boolean>) | null
     onpresent?: (() => Promise<boolean>) | null
     members?: Member[]
-    prs?: Row[]
     jobs?: ShellJob[]
     contextError?: string
     onopenfile: (attachment: Attachment) => void
     onpost?: ((postId: string) => void) | null
     onissue?: ((number: number) => void) | null
     onchild: (member: Member) => void
-    onpr: (pr: Row) => void
     onjob: (job: ShellJob) => void
     threadsOpen?: boolean
     contextOpen?: boolean
@@ -66,7 +62,7 @@
     draft?: string
     readingHistory?: boolean
   }
-  let { readOnly = false, onreopen = null, reopening = '', ondismisssession = null, dismissing = '', session = null, error = '', room, onharness = null, onsend, queue = [], onunqueue = null, ondismiss = null, focusedTurn = 0, onrecent = null, onearlier = null, onnewer = null, onpresent = null, members = [], prs = [], jobs = [], contextError = '', onopenfile, onpost = null, onissue = null, onchild, onpr, onjob, threadsOpen = $bindable(false), contextOpen = $bindable(false), selectedThread = $bindable(''), draft = $bindable(''), readingHistory = $bindable(false) }: Props = $props()
+  let { readOnly = false, onreopen = null, reopening = '', ondismisssession = null, dismissing = '', session = null, error = '', room, onharness = null, onsend, queue = [], onunqueue = null, ondismiss = null, focusedTurn = 0, onrecent = null, onearlier = null, onnewer = null, onpresent = null, members = [], jobs = [], contextError = '', onopenfile, onpost = null, onissue = null, onchild, onjob, threadsOpen = $bindable(false), contextOpen = $bindable(false), selectedThread = $bindable(''), draft = $bindable(''), readingHistory = $bindable(false) }: Props = $props()
   // One selected post for the message list and one for the open thread (postSelect.ts).
   const listSelection = createSelection()
   const threadSelection = createSelection()
@@ -344,11 +340,8 @@
       <button class="context-scrim" aria-label="Close context" onclick={() => (contextOpen = false)}></button>
       <div class="context-pop" role="dialog" aria-label={`Around ${m.name}`}>
         {#if contextError}<p class="err">{contextError}</p>{/if}
-        {#if prs.length}<h3>Pull requests</h3>{/if}
-        {#each prs as pr (pr.key)}<button class="context-row" onclick={() => { contextOpen = false; onpr?.(pr) }}><span class="symbol">⑂</span><span>#{pr.number} · {pr.title || pr.repo}</span><small>{statusMeta(pr).label}</small></button>{/each}
-        {#if ownJobs.length}<h3>Shell jobs</h3>{/if}
         {#each ownJobs as job (job.id)}<button class="context-row" onclick={() => { contextOpen = false; onjob?.(job) }}><span class="symbol">▶</span><span>{job.name || job.id}</span><small>{job.state}</small></button>{/each}
-        {#if !prs.length && !ownJobs.length}<EmptyState title="No tracked PRs or shell jobs" />{/if}
+        {#if !ownJobs.length}<EmptyState title="No shell jobs" />{/if}
       </div>
     {/if}
   {/if}

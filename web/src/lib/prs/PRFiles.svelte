@@ -6,26 +6,24 @@
   import { parseDiff, diffTotals, split } from '../files/repo.ts'
   import { code, setWrap } from '../files/codeprefs.svelte.ts'
   import SendBar from '../files/SendBar.svelte'
-  import { addComment, type DiffComment } from '../files/diffComments.ts'
+  import { addComment, formatComments, type DiffComment } from '../files/diffComments.ts'
   import type { DiffFile } from '../files/repo.ts'
   import { errorText } from '../errorText.ts'
 
   interface Props {
     roomId: string
     number: number
-    changeId?: string
+    authorSession?: string
     author?: string
-    onsent?: () => void | Promise<void>
   }
-  // With changeId (an open, tracked change), the owner can comment on lines and send them to the author.
-  let { roomId, number, changeId = '', author = '', onsent = () => {} }: Props = $props()
+  // With an author session, the owner can comment on lines and send them to the author.
+  let { roomId, number, authorSession = '', author = '' }: Props = $props()
   // The parsed files, or the error that stopped the diff.
   let diff = $state<{ files?: DiffFile[]; truncated?: boolean; error?: string } | null>(null)
   let openFiles = $state(new Set<string>())
   let pending = $state<DiffComment[]>([])
   const deliver = async (comments: DiffComment[]) => {
-    await api.sendDiffComments(roomId, changeId, comments)
-    await onsent()
+    await api.sendToSession(authorSession, formatComments(comments))
   }
 
   $effect(() => {
@@ -73,7 +71,7 @@
           <span class="path"><bdi><span class="dir">{dir}</span><span class="fname">{name}</span></bdi></span>
           <span class="counts">{#if f.adds}<span class="plus">+{f.adds}</span>{/if}{#if f.dels}<span class="minus">−{f.dels}</span>{/if}</span>
         </button>
-        {#if openFiles.has(f.path)}<div class="fbody"><DiffView file={f} oncomment={changeId ? (c: DiffComment) => (pending = addComment(pending, c)) : null} /></div>{/if}
+        {#if openFiles.has(f.path)}<div class="fbody"><DiffView file={f} oncomment={authorSession ? (c: DiffComment) => (pending = addComment(pending, c)) : null} /></div>{/if}
       </div>
     {/each}
   </div>

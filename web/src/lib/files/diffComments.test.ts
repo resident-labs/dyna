@@ -72,20 +72,3 @@ test('comments added while Send runs stay pending', async () => {
   await done
   assert.deepEqual(pending, [c(2)])
 })
-
-test('Changes comments through the one worktree call', () => {
-  const src = readFileSync(new URL('./Changes.svelte', import.meta.url), 'utf8')
-  assert.match(src, /oncomment=\{\(c\) =>/)
-  assert.doesNotMatch(src, /oncomment=\{session/)
-  assert.match(src, /api\.sendWorktreeComments\(roomId, session,/)
-  assert.match(src, /<SendBar[^>]*author=\{sessionName \|\| session\}/)
-  assert.match(readFileSync(new URL('../../api.js', import.meta.url), 'utf8'), /sendWorktreeComments:.*app\.SendWorktreeComments/)
-})
-
-test('the session view mounts Changes with that session', () => {
-  const app = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-  assert.match(app, /sessionTab === 'changes'[\s\S]{0,200}<Changes roomId=\{room\.id\} session=\{drill\.id\} sessionName=\{drill\.name\}/)
-  assert.doesNotMatch(app, /view === 'changes'/)
-  assert.match(app, /trackChanges\(load\)/)
-  assert.match(app, /ev\.kind === 'session'[^\n]*changesTracker\?\.poke\(\)/, 'session activity refreshes the tab count')
-})

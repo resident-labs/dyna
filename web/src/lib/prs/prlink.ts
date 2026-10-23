@@ -13,8 +13,9 @@ export interface Link {
   issue?: number
 }
 
-export function prHash(roomId: string, pr: string | number, tab = 'conversation'): string {
+export function prHash(roomId: string, pr: string | number, tab = 'conversation', session = ''): string {
   const q = new URLSearchParams({ room: roomId, pr: String(pr) })
+  if (session) q.set('session', session)
   if (tab !== 'conversation') q.set('tab', tab)
   return `#${q}`
 }
@@ -53,8 +54,9 @@ export function parseIssueHash(hash?: string | null): { roomId: string; issue: n
 
 // A file in code > Files: #room=<id>&file=<path>, plus &at=<commit> while an
 // old version of the file is shown. If the file had another path then, &was=<that path>.
-export function fileHash(roomId: string, file: string, at = '', was = ''): string {
+export function fileHash(roomId: string, file: string, at = '', was = '', session = ''): string {
   const q = new URLSearchParams({ room: roomId, file })
+  if (session) q.set('session', session)
   if (at) q.set('at', at)
   if (at && was) q.set('was', was)
   return `#${q}`

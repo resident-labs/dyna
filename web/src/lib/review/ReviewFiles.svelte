@@ -5,23 +5,23 @@
 </script>
 
 <script>
-  // The Files view: a folder tree next to the file viewer on a wide screen;
+  // The workspace Files tab: a folder tree next to the file viewer on a wide screen;
   // on a phone, one folder list at a time with a path bar, and the file
   // full width. Folders load one level at a time, when opened.
-  import { filterLoaded } from './filterLoaded.ts'
+  import { filterLoaded } from '../files/filterLoaded.ts'
   import { untrack, onDestroy } from 'svelte'
   import { api } from '../../api.js'
-  import FileView from './FileView.svelte'
-  import { base, crumbs, isDir, parent, STATUS, statusLetter, treeRows } from './repo.ts'
+  import FileView from '../files/FileView.svelte'
+  import { base, crumbs, isDir, parent, STATUS, statusLetter, treeRows } from '../files/repo.ts'
   import { fileHash, parseFileHash } from '../prs/prlink.ts'
-  import { roomHash } from '../ui/route.ts'
+  import { routeHash } from '../ui/route.ts'
   import { ago } from '../ui/format.ts'
   import Chip from '../ui/Chip.svelte'
-  import Document from './Document.svelte'
-  import History from './History.svelte'
-  import { markdownDocument } from './preview.ts'
+  import Document from '../files/Document.svelte'
+  import History from '../files/History.svelte'
+  import { markdownDocument } from '../files/preview.ts'
 
-  let { roomId, session = '', narrow = false, reveal = '', folder = null, onpr } = $props()
+  let { roomId, session = '', narrow = false, active = true, reveal = '', folder = null, onpr } = $props()
 
   const key = untrack(() => `${roomId}|${session}`) // the view is keyed by room and session
   const saved = memory.get(key) ?? { open: [''], file: '', dir: '', hidden: false }
@@ -131,16 +131,18 @@
   // later changes add one, so Back returns to the earlier file or to home.
   let synced = false
   $effect(() => {
-    const want = file ? fileHash(roomId, file, at, was) : ''
+    if (!active) return
+    const want = file ? fileHash(roomId, file, at, was, session) : ''
     untrack(() => {
       const l = window.location
       const has = parseFileHash(l.hash)
-      if (want ? l.hash !== want : has) window.history[synced ? 'pushState' : 'replaceState'](null, '', want || l.pathname + l.search + roomHash(roomId, 'files'))
+      if (want ? l.hash !== want : has) window.history[synced ? 'pushState' : 'replaceState'](null, '', want || l.pathname + l.search + routeHash({ room: roomId, view: 'general', session, turn: 0, run: '', review: 'files' }))
       synced = true
     })
   })
   // Back and Forward bring the address back to a file, a version or home.
   function follow() {
+    if (!active || new URLSearchParams(window.location.hash.slice(1)).has('pr')) return
     const l = parseFileHash(window.location.hash)
     if (l && l.roomId !== roomId) return
     if (!l) file = ''
