@@ -10,6 +10,9 @@
   let journal = $derived(value?.journal ?? [])
 </script>
 
+{#if value && !value.result && !journal.length}
+  <p class="quiet">No output has been recorded for this worker.</p>
+{/if}
 {#if value?.result}
   <JsonView value={parse(value.result)} />
   {#if value.truncatedKB}<p class="quiet">The result is truncated at {value.truncatedKB} KB; this shows its start.</p>{/if}

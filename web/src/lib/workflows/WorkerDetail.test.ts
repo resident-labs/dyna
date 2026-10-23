@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createTestServer } from '../../../test/ssr-server.ts'
 
-test('worker detail shows the result and then the journal, newest first', async (t) => {
+test('worker detail preserves journal order and distinguishes loaded empty output', async (t) => {
   const vite = await createTestServer(t)
   const { render } = await vite.ssrLoadModule('svelte/server')
   const { default: WorkerDetail } = await vite.ssrLoadModule('/src/lib/workflows/WorkerDetail.svelte')
@@ -21,4 +21,13 @@ test('worker detail shows the result and then the journal, newest first', async 
   const running = render(WorkerDetail, { props: { value: { result: '', journal: value.journal } } }).body
   assert.doesNotMatch(running, /Done\./)
   assert.match(running, /Journal/)
+  assert.doesNotMatch(body, /No output has been recorded/)
+  assert.doesNotMatch(running, /No output has been recorded/)
+  const absent = render(WorkerDetail, { props: {} }).body
+  assert.doesNotMatch(absent, /No output has been recorded/)
+  const empty = render(WorkerDetail, { props: { value: { result: '', journal: [] } } }).body
+  assert.match(empty, /No output has been recorded for this worker\./)
+  const resultOnly = render(WorkerDetail, { props: { value: { result: 'Result only', journal: [] } } }).body
+  assert.match(resultOnly, /Result only/)
+  assert.doesNotMatch(resultOnly, /No output has been recorded/)
 })
