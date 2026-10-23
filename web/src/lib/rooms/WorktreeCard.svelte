@@ -2,13 +2,14 @@
   // The card for a worktree event: one quiet line in the feed, and the props a
   // session DM row will pass in PR 3. It reads the typed payload of the post,
   // never its text, and keeps no feed-only state.
-  import type { Message, PRNotice } from '../api/room.ts'
-  import type { EventSurface } from './eventRenderers.ts'
+  import type { EventNotice } from '../api/room.ts'
+  import type { EventPost, EventSurface } from './eventRenderers.ts'
   import { worktreeEvent } from './eventPayloads.ts'
   import type { WorktreeReason } from './events.gen.ts'
+  import EventDetails from './EventDetails.svelte'
   import { clock } from '../ui/format.ts'
 
-  let { post, notice = post.notice, surface = 'feed' }: { post: Message; notice?: PRNotice; surface?: EventSurface } = $props()
+  let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
   const reasonLabel: Record<WorktreeReason, string> = {
     'not-merged': 'HEAD is not merged into origin/main, so cleanup kept it.',
@@ -50,7 +51,7 @@
     <span class="title">{#if branch}<span class="what">Worktree kept</span><span class="branch">{branch}</span>{:else}<span class="what alone">Worktree cleanup</span>{/if}</span>
     {#if ahead > 0}<span class="fact">ahead <b>{ahead}</b></span>{/if}
     <span class="fact dirty">dirty <b>{dirty.length ? dirty.join(', ') : 'none'}</b></span>
-    <time title={new Date(post.ts).toLocaleString()}>{clock(post.ts)}</time>
+    <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
   </button>
   <div class="body">
     {#if path}<p class="path" title={path}>{shortPath}</p>{/if}
@@ -59,6 +60,7 @@
       {#if path}<button class="btn" type="button" onclick={copyPath}>Copy path</button>{/if}
       <span class="status" role="status">{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed. Try again.' : ''}</span>
     </div>
+    {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
   </div>
 </div>
 

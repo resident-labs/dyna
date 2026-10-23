@@ -4,14 +4,15 @@
   // the typed payload of the post, never its text, and keeps no feed-only
   // state. The start of a run folds into its result, so the card shows the
   // newest state of the run it belongs to.
-  import type { Message, PRNotice } from '../api/room.ts'
-  import type { EventSurface } from './eventRenderers.ts'
+  import type { EventNotice } from '../api/room.ts'
+  import type { EventPost, EventSurface } from './eventRenderers.ts'
   import { hookEvent } from './eventPayloads.ts'
   import type { HookState } from './events.gen.ts'
   import { openHookLog } from '../settings/hookLog.ts'
+  import EventDetails from './EventDetails.svelte'
   import { clock } from '../ui/format.ts'
 
-  let { post, notice = post.notice, surface = 'feed' }: { post: Message; notice?: PRNotice; surface?: EventSurface } = $props()
+  let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
   const stateWords: Record<HookState, string> = {
     running: 'running',
@@ -53,9 +54,10 @@
     </span>
     {#if elapsed}<span class="fact">{elapsed}</span>{/if}
     <button class="btn" type="button" onclick={viewLog} aria-label="View the log of {name}">View log</button>
-    <time title={new Date(post.ts).toLocaleString()}>{clock(post.ts)}</time>
+    <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
   </div>
   {#if payload?.detail}<p class="detail">{payload.detail}</p>{/if}
+  {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
 </div>
 
 <style>

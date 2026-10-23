@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { feedRows, feedPRDetail, feedPREvents, feedPRRepos, isShellResult, rowPost, rowPosts } from './feedRows.ts'
+import { feedRows, feedPRRepos, isShellResult, rowPost, rowPosts } from './feedRows.ts'
 import type { FeedInput, FeedRow } from './feedRows.ts'
 import { need } from '../../../test/need.ts'
 
@@ -80,32 +80,17 @@ test('PR folding stops at other messages, repos, days, unread markers and post c
   assert.equal(content(feedRows([a, b], b.id)).length, 2)
 })
 
-test('feed PR presentation keeps noise in detail and shortens standalone SHAs', () => {
-  const p = prPost('p1', 542, 'acme/app', { text: need(prPost('p1').text) + '\n\nComment filter: dropped 2 comments (noise)\n\nApprove `3bc9bc0b55e28c82dd4eacd8ba063315c223ea0e`.' })
-  const detail = feedPRDetail(p)
-  assert.equal(detail.body.includes('`3bc9bc0`'), true)
-  assert.equal(detail.dropped, 2)
-  assert.equal(detail.events.some((event) => event.kind === 'noise'), false)
+test('feed PR rows name the repositories of the page', () => {
+  const p = prPost('p1')
   assert.deepEqual([...feedPRRepos([p, prPost('p2')])], ['acme/app'])
   assert.equal(feedPRRepos([p, prPost('p2', 1, 'other/app')]).size, 2)
-})
-
-test('a folded PR header retains approval through a generic update, and replaces old review states', () => {
-  const notice = (body: string, head = 'a'.repeat(40)) => feedPRDetail({ text: `https://github.com/acme/app/pull/542\nHead: ${head}\n\n${body}` })
-  const approved = notice(`acme/app PR at ${'a'.repeat(40)} approved by its Dyna reviewer:\n\nNo open findings.`)
-  const update = notice('The next step is ready.')
-  const changes = notice('Reviewer requests changes for PR #542.')
-  assert.deepEqual(feedPREvents([approved, update]).map((e) => e.kind), ['approved'])
-  assert.deepEqual(feedPREvents([approved, changes]).map((e) => e.kind), ['changes'])
-  assert.deepEqual(feedPREvents([approved, notice('New head.', 'b'.repeat(40))]).map((e) => e.kind), ['update'])
-  assert.deepEqual(feedPREvents([approved, notice('PR merged.')]).map((e) => e.kind), ['merged'])
 })
 
 test('held comment notices stay separate from grouped PR updates', () => {
   const common = { kind: 'pr', from: 'dyna', to: [], text: 'https://github.com/acme/app/pull/7\n\nPR update.' }
   const posts: FeedInput[] = [
     { ...common, id: 'one', ts: 1000 },
-    { ...common, id: 'held', ts: 2000, notice: { kind: 'held-comment', number: 7, head: '', changeId: 'acme/app#7', commentId: 'issue:19' } },
+    { ...common, id: 'held', ts: 2000, notice: { kind: 'held-comment' } },
     { ...common, id: 'three', ts: 3000 },
   ]
   assert.deepEqual(content(feedRows(posts)).map((row) => row.post.id), ['one', 'held', 'three'])
@@ -115,7 +100,7 @@ test('held comment notices stay separate from grouped PR updates', () => {
 // the start folds into the result of the same run ID.
 const hookPost = (id: string, type: 'started' | 'result', runId: string, state: 'running' | 'passed' | 'failed'): FeedInput => ({
   id, ts: start, from: 'dyna', kind: 'hook', text: 'hook',
-  notice: { kind: type, number: 0, head: '', changeId: '' },
+  notice: { kind: type },
   payload: { runId, repo: '/repo', hook: 'self-update', event: 'main-updated', state },
 })
 
