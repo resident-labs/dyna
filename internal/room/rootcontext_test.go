@@ -50,16 +50,6 @@ func TestRootContext(t *testing.T) {
 			decision: RootWake,
 		},
 		{
-			name:     "a quiet keeper journal post is goal context",
-			msg:      Message{ID: "journal", From: GoalKeeperSender, Kind: "goal", To: []string{roomName}},
-			decision: RootQuiet, category: RootGoalJournal,
-		},
-		{
-			name:     "a keeper post that needs action reaches root as goal context",
-			msg:      Message{ID: "act", From: GoalKeeperSender, Kind: "goal", Wake: true, To: []string{rootAddr}},
-			decision: RootQuiet, category: RootGoalJournal,
-		},
-		{
 			name:     "a merge steward decision is merge context",
 			msg:      Message{ID: "merge", From: roomName + ":merge-steward", Kind: "merge-decision", To: []string{roomName}},
 			decision: RootQuiet, category: RootMergeNote,

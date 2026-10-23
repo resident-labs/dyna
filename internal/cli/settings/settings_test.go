@@ -49,7 +49,7 @@ func TestSettingsListJSON(t *testing.T) {
 	}
 	for _, key := range []string{
 		settings.KeyComputersEnabled,
-		settings.KeyGoalKeeperTimeout, settings.KeyGoalKeeperProfile,
+		settings.KeySessionCheckInInterval,
 		settings.KeyMaxCardBytes, settings.KeyMaxFileBytes, settings.KeyAutoCheck,
 		settings.KeyRunsRetention, settings.KeyWorktreesRetention, settings.KeyLocalCIRemote, settings.KeyLocalLaneRepos,
 		settings.KeyWorktreesRoot, settings.KeyWorktreesMinFreeBytes, settings.KeyRootProfile,
@@ -66,8 +66,8 @@ func TestSettingsListJSON(t *testing.T) {
 	if lane.Source != settings.SourceDefault || lane.LiveVsRestart != settings.LiveNextOperation {
 		t.Fatalf("local lane repositories = %#v", lane)
 	}
-	if keys[settings.KeyGoalKeeperTimeout].Value != "5m0s" || keys[settings.KeyGoalKeeperTimeout].Display != "5m" {
-		t.Fatalf("keeper timeout = %#v", keys[settings.KeyGoalKeeperTimeout])
+	if keys[settings.KeySessionCheckInInterval].Value != "15m0s" || keys[settings.KeySessionCheckInInterval].Display != "15m" {
+		t.Fatalf("parent check-in interval = %#v", keys[settings.KeySessionCheckInInterval])
 	}
 	if keys[settings.KeyBrowserProfileMode].Value != "shared" {
 		t.Fatalf("browser profile mode = %#v", keys[settings.KeyBrowserProfileMode])

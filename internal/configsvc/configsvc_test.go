@@ -130,7 +130,7 @@ func TestDefaultDisableRemove(t *testing.T) {
 func TestSettingsItemsAndSet(t *testing.T) {
 	isolate(t)
 	items, err := Items()
-	if err != nil || len(items) != 30 {
+	if err != nil || len(items) != 29 {
 		t.Fatalf("Items = %d, %v", len(items), err)
 	}
 	for _, it := range items {
@@ -161,8 +161,8 @@ func TestSettingsItemsAndSet(t *testing.T) {
 	}
 }
 
-// The steward profile select offers Off next to Auto; the keeper and
-// librarian selects do not, because they have no off mode.
+// The steward profile select offers Off next to Auto; the
+// librarian select does not, because they have no off mode.
 func TestStewardOffSettingOption(t *testing.T) {
 	isolate(t)
 	seed(t, mock("sol"))
@@ -184,7 +184,7 @@ func TestStewardOffSettingOption(t *testing.T) {
 	if !strings.Contains(steward.Help, "Off") {
 		t.Fatalf("steward help lacks Off: %q", steward.Help)
 	}
-	for _, key := range []string{settings.KeyGoalKeeperProfile, settings.KeyLibraryProfile} {
+	for _, key := range []string{settings.KeyLibraryProfile} {
 		if slices.Contains(byKey[key].Options, "off") {
 			t.Fatalf("%s offers off", key)
 		}

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"dyna-agent/internal/goalkeeper"
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/goalservice"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/store/storetest"
@@ -28,7 +28,7 @@ func TestJournalCommandShowsTailOldestFirst(t *testing.T) {
 	mgr := subagent.NewManager()
 	mgr.Store = &subagent.Store{Root: filepath.Join(root, "sessions")}
 	mgr.Rooms = rooms
-	s := goalkeeper.New()
+	s := goalservice.New()
 	s.Store = &goals.Store{Root: filepath.Join(root, "goals")}
 	s.Notify = notify.New(rooms, mgr)
 	var ids []string
@@ -40,7 +40,7 @@ func TestJournalCommandShowsTailOldestFirst(t *testing.T) {
 		ids = append(ids, entry.ID)
 	}
 	run := func(args ...string) string {
-		cmd := Command(Options{Service: func() *goalkeeper.Service { return s }})
+		cmd := Command(Options{Service: func() *goalservice.Service { return s }})
 		var out bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetArgs(append(args, "--room", rec.Name))

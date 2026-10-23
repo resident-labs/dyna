@@ -513,7 +513,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	if !readOnly {
 		load.Record = doctor.Samples{DataDir: filepath.Dir(cstore.Dir())}.Recorder(log.Printf)
 	}
-	calls, callScopes, err := callsFor(services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, hooks: hooks.New(), sync: lanesync.New(), health: health, load: load}, readOnly)
+	calls, callScopes, err := callsFor(services{settingsChanged: func() { wakeWorker(signals.channels["checkins"]) }, git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, hooks: hooks.New(), sync: lanesync.New(), health: health, load: load}, readOnly)
 	if err != nil {
 		return err
 	}
