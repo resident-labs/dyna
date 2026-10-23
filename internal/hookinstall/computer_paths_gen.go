@@ -34,6 +34,7 @@ var computerCodePaths = []string{
 	"internal/state",
 	"internal/store",
 	"internal/testsafe",
+	"internal/textutil",
 	"internal/turnlock",
 	"internal/userservices",
 	"internal/websvc/devicestore",
