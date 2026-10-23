@@ -59,6 +59,8 @@ type Service struct {
 	// prWake asks Watch to scan PRs now, after the engine's own PR state
 	// write. It holds one pending wake.
 	prWake chan struct{}
+	// callRequestWake asks Watch to read committed local call-request changes.
+	callRequestWake chan struct{}
 	// RunnerExited, when set, runs after a watched turn runner exits, with
 	// its session ID: the engine applies what the runner spooled.
 	RunnerExited func(session string)
@@ -96,6 +98,15 @@ type ownerPostIDs struct {
 func (s *Service) PRsChanged() {
 	select {
 	case s.prWake <- struct{}{}:
+	default:
+	}
+}
+
+// CallRequestsChanged wakes the sole frontend publisher after a local commit.
+// Other engines detect that commit through the SQLite revision on their tick.
+func (s *Service) CallRequestsChanged() {
+	select {
+	case s.callRequestWake <- struct{}{}:
 	default:
 	}
 }
@@ -145,7 +156,7 @@ func New(n *notify.Service) *Service {
 	if n == nil {
 		n = notify.Default()
 	}
-	s := &Service{Notify: n, prWake: make(chan struct{}, 1), sessionWake: make(chan struct{}, 1), coordinatorWake: make(chan struct{}, 1)}
+	s := &Service{Notify: n, prWake: make(chan struct{}, 1), callRequestWake: make(chan struct{}, 1), sessionWake: make(chan struct{}, 1), coordinatorWake: make(chan struct{}, 1)}
 	s.PRs = &prview.Service{Notify: n, SessionInRoom: s.SessionInRoom, WorkspaceRoot: s.files().WorkspaceRoot}
 	n.Sessions.ClosePRs = func(ctx context.Context, from, heir subagent.Info) ([]string, error) {
 		return s.PRs.Watcher().CloseSession(ctx, from, heir)

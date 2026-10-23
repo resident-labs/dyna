@@ -265,6 +265,10 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 				wakeWorker(signals.channels["merges"])
 			}
 			return
+		case "call-requests":
+			wakeWorker(signals.channels["call-requests"])
+			rooms.CallRequestsChanged()
+			return
 		case "callers":
 			if ev.Key != "" {
 				rooms.CoordinatorChanged(ev.Key)
@@ -450,6 +454,8 @@ func Run(ctx context.Context, f Options) (runErr error) {
 	started := time.Now()
 	events := hub.New(started.UnixMilli())
 	signals := newWorkerSignals()
+	callRing := make(chan struct{}, 1)
+	signals.channels["call-requests"] = callRing
 	rooms.Notify.Sessions.InputEvents = events
 	// writer is the one state write path (internal/state). Stores move onto
 	// it one per PR; until then it only reports write health. A read-only
@@ -510,7 +516,6 @@ func Run(ctx context.Context, f Options) (runErr error) {
 	if writer != nil {
 		pruneRequests(ctx, engineTimers, writer)
 	}
-	callRing := make(chan struct{}, 1)
 	if !readOnly {
 		var sender pushNotifier
 		if notify != nil {

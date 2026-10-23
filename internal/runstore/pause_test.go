@@ -86,8 +86,8 @@ func TestForceStatusClearsPausedFile(t *testing.T) {
 	}
 }
 
-// TODO: legacy/shim remove later — a pre-upgrade pause exists only as a file; remove with the paused file (item 31).
-func TestIsPausedReadsLegacyPausedFile(t *testing.T) {
+// Pause files cannot overwrite canonical state after startup import.
+func TestIsPausedIgnoresStalePausedFile(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("DYNA_RUN_ID", "wf_pause-legacy")
 	run, err := Create("pause", "return 1", nil)
@@ -100,8 +100,8 @@ func TestIsPausedReadsLegacyPausedFile(t *testing.T) {
 	if m, err := ReadMeta(run.Meta.ID); err != nil || m.Paused {
 		t.Fatalf("want file-only pause: meta %+v, err %v", m, err)
 	}
-	if !IsPaused(run.Meta.ID) {
-		t.Fatal("the earlier release's file-only pause is invisible")
+	if IsPaused(run.Meta.ID) {
+		t.Fatal("a stale file overwrote canonical pause state")
 	}
 	if err := SetPaused(run.Meta.ID, false); err != nil {
 		t.Fatal(err)

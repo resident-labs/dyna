@@ -21,6 +21,7 @@ import (
 	"dyna-agent/internal/plan/ancestry"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/workeroutput/projection"
 )
 
 // runsSchema holds each run's meta (rule r10). body is the meta's JSON.
@@ -44,26 +45,30 @@ CREATE INDEX runs_by_rev ON runs(rev);
 CREATE INDEX runs_by_status ON runs(status);`
 
 // Migrate creates the runs table. Only the engine calls it, at start
-// (requirement 41). A run's meta.json from an earlier release is imported
-// when the run is first read.
+// (requirement 41). Retained metadata is imported before normal readers.
 func Migrate(dataDir string) error {
-	_, err := openRuns(dataDir)
-	return err
+	if _, err := openRuns(dataDir); err != nil {
+		return err
+	}
+	return projection.Migrate(dataDir)
 }
 
 // openRuns opens the runs table and the rollback helper's stamp table. Both
 // migrate only in the engine and in tests; elsewhere an unmigrated store
 // fails with its name (item 41).
 func openRuns(dataDir string) (*sql.DB, error) {
-	if err := ancestry.Migrate(dataDir); err != nil {
-		return nil, err
-	}
-	if err := state.MigrateMirrors(dataDir); err != nil {
-		return nil, err
-	}
 	db, err := database.Open(dataDir)
 	if err != nil {
 		return nil, err
+	}
+	if err := backUpRunImport(db); err != nil {
+		return db, err
+	}
+	if err := ancestry.Migrate(dataDir); err != nil {
+		return db, err
+	}
+	if err := state.MigrateMirrors(dataDir); err != nil {
+		return db, err
 	}
 	err = database.Migrate(db, "runs.schema", 2, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
@@ -76,6 +81,9 @@ func openRuns(dataDir string) (*sql.DB, error) {
 		return err
 	})
 	if err != nil {
+		return db, err
+	}
+	if err := migrateMeta(db, dataDir); err != nil {
 		return db, err
 	}
 	return db, migrateSteering(db, dataDir)
@@ -122,10 +130,8 @@ func removeRunLocks(id string) error {
 // lockTaken runs each time a run's lock is taken. Tests count it.
 var lockTaken = func() {}
 
-// changeMeta imports a meta.json that an earlier release wrote, runs fn on
-// the run's row in one write, then writes the earlier release's copy. That
-// order keeps fn's write when an old file is present (the rule for the
-// rollback helper). A failed copy is logged; the row is committed.
+// changeMeta updates the canonical row and writes a rollback copy.
+// A failed copy is logged; the row is committed.
 func changeMeta(dir, id string, fn func(ctx context.Context, conn *sql.Conn) error) (Meta, error) {
 	db, err := runsDB()
 	if err != nil {
@@ -138,9 +144,6 @@ func changeMeta(dir, id string, fn func(ctx context.Context, conn *sql.Conn) err
 	defer unlock()
 	w, ctx := state.For(db), context.Background()
 	path := filepath.Join(dir, "meta.json")
-	if _, err := w.ImportIfForeign(ctx, metaKey(id), path, importMeta(id)); err != nil {
-		return Meta{}, err
-	}
 	if err := w.Write(ctx, hub.Event{}, func(conn *sql.Conn) error { return fn(ctx, conn) }); err != nil {
 		return Meta{}, err
 	}
@@ -236,12 +239,8 @@ func LoadStored(ctx context.Context, reader state.Reader, id string) (Meta, erro
 	return m, json.Unmarshal([]byte(body), &m)
 }
 
-// metaAt reads a run's meta from its row, after importing a meta.json that
-// an earlier release wrote.
+// metaAt reads a run's canonical row. Missing rows stay missing.
 func metaAt(db *sql.DB, dir, id string) (Meta, error) {
-	if err := importForeignMeta(db, dir, id); err != nil {
-		return Meta{}, err
-	}
 	m, ok, err := storedMeta(db, id)
 	if err == nil && !ok {
 		err = &os.PathError{Op: "read", Path: filepath.Join(dir, "meta.json"), Err: os.ErrNotExist}
@@ -249,54 +248,10 @@ func metaAt(db *sql.DB, dir, id string) (Meta, error) {
 	return m, err
 }
 
-// importForeignMeta imports the run's meta.json when an earlier release
-// wrote it. The check takes no lock, so a run whose file is our own copy
-// costs one stat and one stamp read.
-func importForeignMeta(db *sql.DB, dir, id string) error {
-	w, ctx := state.For(db), context.Background()
-	path := filepath.Join(dir, "meta.json")
-	if foreign, err := w.Foreign(ctx, metaKey(id), path); err != nil || !foreign {
-		return err
-	}
-	unlock, err := lockMeta(id)
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	_, err = w.ImportIfForeign(ctx, metaKey(id), path, importMeta(id))
-	return err
-}
-
-// runFolders lists the run folders in root, after importing the meta.json
-// that an earlier release wrote for a run with no row yet or a row still
-// running. An earlier release writes a run's meta.json only while the run
-// runs, so a finished row is final and its file is not checked.
-//
-// The run index calls this on every web call, so the walk over every folder
-// is cached until root itself changes (see cachedFolders). The folders with
-// no row and the running rows are few, and are checked on every call, so an
-// earlier release's write is still seen at once.
+// runFolders lists retained run folders without importing state during reads.
 func runFolders(db *sql.DB, root string) ([]string, error) {
 	list, err := cachedFolders(db, root)
-	if err != nil {
-		return nil, err
-	}
-	running, err := queryIDs(db, "SELECT id FROM runs WHERE status = 'running'")
-	if err != nil {
-		return nil, err
-	}
-	live := make(map[string]bool, len(list.ids))
-	for _, id := range list.ids {
-		live[id] = true
-	}
-	for _, id := range append(running, list.rowless...) {
-		if live[id] {
-			if err := importForeignMeta(db, filepath.Join(root, id), id); err != nil {
-				log.Printf("run %s: %v", id, err)
-			}
-		}
-	}
-	return slices.Clone(list.ids), nil
+	return slices.Clone(list.ids), err
 }
 
 // folders caches each root's run folders with root's modification time
@@ -519,9 +474,7 @@ func setPaused(dir, id string, paused bool) error {
 	return err
 }
 
-// IsPaused reads a run's paused field. The runner asks before each worker
-// launch, and every 100 ms while paused, so it reads only that field
-// before checking for an earlier-release pause file.
+// IsPaused reads the canonical pause state of a running run.
 func IsPaused(id string) bool {
 	db, err := runsDB()
 	if err != nil {
@@ -529,12 +482,7 @@ func IsPaused(id string) bool {
 	}
 	var paused bool
 	err = db.QueryRow(`SELECT coalesce(json_extract(body,'$.paused'),0) FROM runs WHERE id=? AND status='running'`, id).Scan(&paused)
-	if err != nil || paused {
-		return err == nil && paused
-	}
-	// TODO: legacy/shim remove later — a pre-upgrade pause exists only in the paused file; remove with item 31, when no run from before this release is alive.
-	_, err = os.Stat(pausePath(id))
-	return err == nil
+	return err == nil && paused
 }
 
 // deleteMeta removes a run's rows (meta, steering and ancestry) and their
