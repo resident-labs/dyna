@@ -239,6 +239,8 @@
   // Every Sign in button starts here. A saved account signs in again; a new
   // account first offers the user's personal login when Dyna finds one.
   function signIn(row: HarnessRow, add = false) {
+    // Pi keeps every provider in one login, so its sign-in never picks an account.
+    if (row?.id === 'pi') return requestBeginLogin(row)
     return !add && row?.activeAccount ? requestRestartLogin(row, row.activeAccount) : findPersonalLogin(row)
   }
 
@@ -675,7 +677,7 @@
           {#if error}<p class="error" role="alert">{error}</p>{/if}
           {#if notice}<p class="notice" role="status">{notice}</p>{/if}
 
-          {#if hasSubscriptionLogin(r.id) || (login && login.harness === r.id)}
+          {#if r.id !== 'pi' && (hasSubscriptionLogin(r.id) || (login && login.harness === r.id))}
             <AccountsSection
               row={r}
               {busy}
@@ -704,6 +706,12 @@
               row={r}
               providers={providers[r.id] ?? []}
               {busy}
+              signingIn={!!login}
+              login={login && login.harness === r.id ? login : null}
+              {signInState}
+              onsignin={() => signIn(r, true)}
+              oncancel={cancelLogin}
+              onpaste={respondPaste}
               bind:removingProvider
               onremove={(provider) => removeProvider(r.id, provider)}
               onadd={() => (addingProvider = true)}
