@@ -22,8 +22,9 @@ var mergeFailedPackage = regexp.MustCompile(`(?:^|\s)FAIL[ \t]+([^\s]+)[ \t]+(?:
 var mergeFailedTest = regexp.MustCompile(`--- FAIL:[ \t]+([^\s]+)`)
 
 // mergeFailureReport uses frozen inputs and reads source as data. Missing
-// evidence must not prevent the owner from receiving the failure report.
-func (s *Service) mergeFailureReport(ctx context.Context, r Record, b state.MergeTrial) (string, error) {
+// evidence must not prevent the owner from receiving the failure report. The ci
+// read names the failed checks when the saved logs carry no job of their own.
+func (s *Service) mergeFailureReport(ctx context.Context, r Record, b state.MergeTrial, ci trialCI) (string, error) {
 	st, err := s.Store.Read()
 	if err != nil {
 		return "", err
@@ -47,12 +48,22 @@ func (s *Service) mergeFailureReport(ctx context.Context, r Record, b state.Merg
 	}
 	packages, tests, frontend, logJobs := mergeFailureLines(b.Logs)
 	jobs, links := s.mergeFailureJobs(ctx, r, b)
+	if len(jobs) == 0 && len(ci.Failed) > 0 {
+		jobs = append(jobs, ci.Failed...)
+		links = append(links, fmt.Sprintf("https://%s/%s/commit/%s/checks", r.Host, r.Repo, b.Head))
+	}
 	if len(jobs) == 0 {
 		jobs = logJobs
 	}
 	out.WriteString("Failed jobs:\n")
 	if len(jobs) == 0 {
-		out.WriteString("- unknown; job evidence unavailable.\n")
+		// A cancelled or unproven run is an infrastructure cause, not a test
+		// failure, and the report says so instead of stopping at "unknown".
+		if ci.Status == "failed" {
+			out.WriteString("- none: CI reported a failure with no failed check and no failed run, so the checks were cancelled or never proved this commit.\n")
+		} else {
+			out.WriteString("- unknown; job evidence unavailable.\n")
+		}
 	}
 	for _, job := range jobs {
 		fmt.Fprintf(&out, "- %s\n", job)
