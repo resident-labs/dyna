@@ -113,6 +113,7 @@
   import { parsePRHash, parseIssueHash, parseFileHash } from './lib/prs/prlink.ts'
   import { ROOT_SESSION, parseRoute, routeHash, routeSession } from './lib/ui/route.ts'
   import { bindRouter, router } from './lib/app/router.svelte.ts'
+  import { bundleReloadSafe, createBundleReload } from './lib/app/bundleReload.ts'
   import type { Drill } from './lib/app/router.svelte.ts'
   import { paletteTargets } from './lib/ui/paletteTargets.ts'
   import MachinePage from './lib/machines/MachinePage.svelte'
@@ -459,6 +460,22 @@
   let pinnedIds = $derived(new Set(pins.map((p) => p.id)))
   let reply = $state<Post | null>(null)
   let drafts = $state<Record<string, string>>({})
+  let composerWork = $state<Record<string, boolean>>({})
+  let composerPending = $derived(Object.values(composerWork).some(Boolean))
+  function noteComposerWork(key: string, pending: boolean) {
+    composerWork[key] = pending
+  }
+  const bundleReload = createBundleReload(() => location.reload())
+  let bundleReloadPending = $state(false)
+  const bundleSafety = () => bundleReloadSafe({ drafts, composerPending, voicePhase: $voiceCall.phase, visible: pageVisible })
+  function offerBundleReload(version: string) {
+    bundleReloadPending = true
+    if (bundleReload.offer(version, bundleSafety())) bundleReloadPending = false
+  }
+  $effect(() => {
+    const safe = bundleReloadSafe({ drafts, composerPending, voicePhase: $voiceCall.phase, visible: pageVisible })
+    if (bundleReloadPending && bundleReload.retry(safe)) bundleReloadPending = false
+  })
   let dataDir = $state('')
   let loadError = $state('')
   let health = $state('')
@@ -1986,6 +2003,10 @@
   }
 
   function handle(ev: StreamEvent) {
+    if (ev.kind === 'build') {
+      offerBundleReload(ev.version)
+      return
+    }
     const evRoom = 'roomId' in ev ? ev.roomId : undefined
     if (['prs', 'changes', 'resync'].includes(ev.kind)) refreshHeldComments()
     const item = applyItemEvent(ev)
@@ -2256,7 +2277,7 @@
     const link = watch((r) => (route = r))
     // The call widget lives outside every view; it takes the same events.
     const engine = engineWatch((s) => (engineStatus = s), browserEngine(engineCheck))
-    const off = (onEvent as (event: (ev: StreamEvent) => void, state: (up: boolean) => void) => () => void)((ev) => { handle(ev); voiceWidget?.event(ev) }, (up) => { link.streamState(up); engine.state(up) })
+    const off = (onEvent as (event: (ev: StreamEvent) => void, state: (up: boolean) => void) => () => void)((ev) => { handle(ev); if (ev.kind !== 'build') voiceWidget?.event(ev) }, (up) => { link.streamState(up); engine.state(up) })
     registerWorker()
     const fromWorker = (e: MessageEvent) => {
       if (e.data?.type !== 'open') return
@@ -2423,7 +2444,7 @@
       {#key viewIdentity({ roomId, view, drill })}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="center" inert={narrow && reviewOpen} in:fade={{ duration: prView ? 0 : motion(FAST) }} ondragover={dragOver} ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget instanceof Node ? e.relatedTarget : null)) dropping = false }} ondrop={drop}>
-        <PageNotices {dropping} {dropTarget} {engineStatus} {health} {update} {updateHidden} {roomId} {loadError} onupdatehidden={() => (updateHidden = true)} />
+        <PageNotices {dropping} {dropTarget} {engineStatus} {health} {update} {updateHidden} {roomId} {loadError} {bundleReloadPending} onupdatehidden={() => (updateHidden = true)} onbundlereload={() => { if (bundleReload.retry(true)) bundleReloadPending = false }} />
         {#if !roomId && machineId}
           <MachinePage machine={machineDetail} error={machineError} busy={machineBusy} probing={machineProbing} onback={closeMachine} onagent={openAgent} onsave={saveMachine} onprobe={probeMachine} />
         {:else if !roomId}
@@ -2435,14 +2456,14 @@
           {#if narrow && !readOnlyDm}<SessionTabs bind:tab={sessionTab} media={session?.media ?? []} computer={sessionComputer} shells={drillShells.length} />{/if}
           {#key drill.id}
             {#if sessionTab === 'computer' && computers}
-              <ComputerPane c={computerOf(drill.id) ?? { session: drill.id, name: drill.name, state: 'none', apps: [], stream: {}, viewers: 0, rssKiB: 0, streamRssKiB: 0 }} room={room.id} feed={computerFeed[drill.id] ?? []} chat={{ computerCount: 1, draft: drafts['computer:' + roomId + ':' + drill.id] ?? '', ondraft: computerDraft, session, room, members: hierarchy, onsend: sendToSession, onopenfile: (a: Attachment) => (viewing = a), onpost: jumpTo, onmessages: () => (sessionTab = 'chat') }} />
+              <ComputerPane c={computerOf(drill.id) ?? { session: drill.id, name: drill.name, state: 'none', apps: [], stream: {}, viewers: 0, rssKiB: 0, streamRssKiB: 0 }} room={room.id} feed={computerFeed[drill.id] ?? []} chat={{ computerCount: 1, draft: drafts['computer:' + roomId + ':' + drill.id] ?? '', ondraft: computerDraft, onpending: (pending: boolean) => noteComposerWork('computer:' + drill.id, pending), session, room, members: hierarchy, onsend: sendToSession, onopenfile: (a: Attachment) => (viewing = a), onpost: jumpTo, onmessages: () => (sessionTab = 'chat') }} />
             {:else if sessionTab === 'shell'}
               <ShellGrid jobs={drillShells} onjob={(job) => { router.openJob = job.id; router.drill = null; router.view = 'jobs' }} />
             {:else if sessionTab === 'media'}
               <SessionMedia onpost={jumpTo} {room} posts={session?.media ?? []} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
             {:else}
               <div class="sess-wrap" style:--shift={threadsOpen && !narrow ? '360px' : '0px'}>
-              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} onchild={openSession} onjob={(job) => { router.openJob = job.id; router.drill = null; router.view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} />
+              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} onchild={openSession} onjob={(job) => { router.openJob = job.id; router.drill = null; router.view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} onpending={(pending) => noteComposerWork('session:' + drill.id, pending)} />
               {#if showPreview}<ComputerPreview c={drillComputer} session={drill.id} name={drill.name} onopen={() => (sessionTab = 'computer')} />{/if}
               </div>
             {/if}
@@ -2475,7 +2496,7 @@
           <Feed {goals} bind:this={feedView} bind:stuck={feedAtBottom} label={viewLabel} {room} posts={shownPosts} onreveal={revealPost} {questions} calls={view === GENERAL ? roomCalls : []} onacceptcall={acceptCall} ondeclinecall={declineCall} {view} earlier={feed?.earlier ?? 0} onearlier={(near: () => boolean) => loadEarlier('older', '', near)} newer={feed?.newer ?? 0} onnewer={(near: () => boolean) => loadEarlier('newer', '', near)} onpresent={() => loadEarlier('present')} onaround={(id: string) => loadEarlier('around', id)} {unreadFrom} pinned={pinnedIds} onaddress={openAddress} onreply={startReply} onforward={(p: Post) => composer?.forward(p)} onpin={togglePin} ondetail={openDetail} onquestion={openQuestion} ongoal={openGoal} onissue={openIssues} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
           <!-- Keyed: staged files belong to one room and never follow a switch. -->
           {#key room.id + view}
-            <Composer onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} bind:this={composer} label={viewLabel} prepareText={(text: string) => prepareFeedText(text, viewLead ?? null, feedViews, (value) => api.preview(room.id, value))} {room} {choices} {profiles} commands={composerCommands} onslash={() => { loadProfiles(); loadTemplates() }} {reply} bind:draft={draft.value} onsend={send} oncancelreply={() => (reply = null)} />
+            <Composer onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} bind:this={composer} label={viewLabel} prepareText={(text: string) => prepareFeedText(text, viewLead ?? null, feedViews, (value) => api.preview(room.id, value))} {room} {choices} {profiles} commands={composerCommands} onslash={() => { loadProfiles(); loadTemplates() }} {reply} bind:draft={draft.value} onsend={send} oncancelreply={() => (reply = null)} onpending={(pending) => noteComposerWork('feed:' + room.id + ':' + view, pending)} />
           {/key}
         {/if}
         {/if}

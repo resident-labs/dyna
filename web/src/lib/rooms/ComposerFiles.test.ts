@@ -3,12 +3,15 @@ import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 import { bundle, domNames, importBundle, installDom } from '../prs/prDetailHarness.ts'
 import { element, need } from '../../../test/need.ts'
+import { bundleReloadSafe } from '../app/bundleReload.ts'
 
 const code = await bundle({ component: '../rooms/Composer',
   format: `export const short = x => x; export const roomLabel = r => r.name; export const ago = () => ''; export const markdown = x => x; export const stamp = () => '';`,
   api: `export const api = {
     preview: async () => ({mentions: [], wakes: []}),
     listEntries: async (_room, _session, path) => ({entries: path === 'web' ? [{path: 'web/main.ts', name: 'main.ts', kind: 'file'}] : path === 'web docs' ? [{path: 'web docs/odd\`file.txt', name: 'odd\`file.txt', kind: 'file'}] : [{path: 'web', name: 'web', kind: 'dir'}, {path: 'lead', name: 'lead', kind: 'file'}, {path: 'web docs', name: 'web docs', kind: 'dir'}]}),
+    settings: async () => [{key: 'content.maxFileBytes', value: 100000}],
+    attach: async (_room, name) => ({id: 'attachment-1', name}),
   }`,
 })
 const settle = () => new Promise<void>(resolve => setImmediate(resolve))
@@ -126,6 +129,35 @@ test('a new session mention or line break ends folder completion', async () => {
   })
 })
 
+
+test('an attachment-only composer blocks reload until its file is removed', async () => {
+  const dom = installDom()
+  Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
+  const ui = await importBundle(code, 'Composer')
+  const target = need(document.getElementById('app'))
+  let pending = false
+  const component = ui.mount(ui.default, { target, props: {
+    room: { id: 'r', name: 'room' }, onsend: async () => ({}), onpending: (value: boolean) => { pending = value },
+  } })
+  try {
+    await settle()
+    const input = element<HTMLTextAreaElement>(target, 'textarea')
+    component.addFiles([new dom.window.File(['draft'], 'note.txt', { type: 'text/plain' })])
+    ui.flushSync()
+    assert.equal(input.value, '')
+    assert.equal(pending, true, 'the composer reports its staged file as unsent work')
+    assert.equal(bundleReloadSafe({ drafts: {}, composerPending: pending, voicePhase: 'idle', visible: true }), false)
+    element<HTMLButtonElement>(target, '[aria-label="Remove note.txt"]').click()
+    ui.flushSync()
+    assert.equal(pending, false)
+    assert.equal(bundleReloadSafe({ drafts: {}, composerPending: pending, voicePhase: 'idle', visible: true }), true)
+  } finally {
+    await ui.unmount(component)
+    dom.window.close()
+    for (const name of [...domNames, 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
 
 test('profiles start sessions through slash completion without a toolbar picker', async () => {
   await withFileComposer(async (target, input, type) => {

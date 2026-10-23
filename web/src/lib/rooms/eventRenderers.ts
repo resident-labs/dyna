@@ -34,6 +34,7 @@ import type { EventNotice, Room } from '../api/room.ts'
 import type { EventPayload } from './events.gen.ts'
 import type { HookFold } from './feedRows.ts'
 import type { PostSelection } from '../ui/postSelect.ts'
+import { systemEvent } from './eventPayloads.ts'
 
 export type EventSurface = 'feed' | 'dm'
 
@@ -108,7 +109,7 @@ export function eventKey(family?: string, type?: string): string {
 // sealedEvent reports a post of a family that only the engine posts. The feed
 // draws it as a card, never as a message bubble.
 export function sealedEvent(post: EventPost): boolean {
-  return eventSpecs.some((spec) => spec.family === post.kind)
+  return systemEvent(post) || eventSpecs.some((spec) => spec.family === post.kind)
 }
 
 // registeredEvent reports a post whose family and type the registry knows. A

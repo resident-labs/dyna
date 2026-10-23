@@ -75,6 +75,25 @@ test('a PR event that woke the turn draws its card, not the prompt text', () => 
   assert.equal(rows[0].kind, 'system-event')
 })
 
+test('an unknown event from a newer engine shows a neutral reload row, not raw text', () => {
+  const future: Message = { ...post, kind: 'future-family', notice: { kind: 'created' }, payload: undefined, text: 'secret-looking raw event text' }
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.DmRows, {
+    target,
+    props: {
+      dm: web.dmView({ address: 'room_1:author', posts: [future], turns: [] }, { name: 'room_1' }),
+      room: { id: 'room_1', name: 'room_1' }, member: { name: 'author', address: 'room_1:author', hue: 0 },
+      onthread: () => {}, onopenfile: () => {},
+    },
+  })
+  web.flushSync()
+  assert.match(target.textContent ?? '', /reload to see this event/i)
+  assert.doesNotMatch(target.textContent ?? '', /secret-looking raw event text/)
+  web.unmount(mounted)
+  target.remove()
+})
+
 test('the DM shows the PR card and hides the agent text until Details opens', () => {
   const target = document.createElement('div')
   document.body.append(target)

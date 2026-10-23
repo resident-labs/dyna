@@ -3,7 +3,7 @@ import type { Item, SessionReference, Turn, Usage } from '../api/session.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { isSessionReference } from '../api/guards.ts'
 import { isNote, noteData } from '../ui/notices.ts'
-import { legacyEvent, registeredEvent, shellEvent } from '../rooms/eventPayloads.ts'
+import { shellEvent, systemEvent } from '../rooms/eventPayloads.ts'
 import { userText } from './userText.ts'
 import { duration, short, tokens } from '../ui/format.ts'
 
@@ -329,7 +329,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
           delivered.set(it.postId, { delivery: it.delivered ? 'read' : 'delivered', pending: it.delivered ? undefined : receipt })
           continue
         }
-        if (post && (registeredEvent(post) || legacyEvent(post))) {
+        if (post && systemEvent(post)) {
           // A notice that opened or steered this turn draws its card, the same
           // one the feed shows, instead of its raw text.
           matched.add(it.postId)
@@ -386,7 +386,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
     // it opens no thread and names no member. A shell's result is the exception:
     // it joins the step of the job it ends, so the timeline keeps one step per
     // command with its output and who it woke.
-    const engine = registeredEvent(p) || legacyEvent(p)
+    const engine = systemEvent(p)
     const shell = shellEvent(p)
     const keys = shell ? [`shell:${shell.shellId}`] : engine ? [] : threadKeys(p, address, room.name)
     for (const key of keys) threadFor(key).posts.push(receiptOf(p))
@@ -397,7 +397,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   for (const q of receipts.values()) {
     if (matched.has(q.id) || carried.has(q.id) || q.state === 'delivered') continue
     const post = posts.get(q.id)
-    if (post && (registeredEvent(post) || legacyEvent(post))) {
+    if (post && systemEvent(post)) {
       // A queued engine event draws its card, not a bubble with the raw text
       // and not a thread with the engine as a peer.
       events.push({ kind: 'system-event', key: `post:${q.id}`, ts: post.ts ?? q.ts, post, author: post.from, text: post.text, delivery: q.state === 'waiting' ? 'queued' : 'delivered' })
@@ -468,7 +468,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
     if (event.kind === 'post') {
       const p = event.post
       if (!event.suppressMessage && (!event.threads.length || (p.from === address && (p.to || []).includes(room.name)))) {
-        if (registeredEvent(p) || legacyEvent(p)) {
+        if (systemEvent(p)) {
           // A registered event is a card, not a message. The agent text stays
           // on the card, behind its Details toggle.
           rows.push({ kind: 'system-event', key: `post:${p.id}`, ts: p.ts, post: p, author: p.from, text: p.text })

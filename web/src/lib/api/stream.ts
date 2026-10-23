@@ -21,7 +21,7 @@
 // stays. In long-poll mode, a wake ends the backoff sleep, or cuts short a
 // poll in flight, which a dead network can hold open, and polls again.
 
-import { isBoolean, isNumber, isRecord, optional } from './guards.ts'
+import { isBoolean, isNumber, isRecord, isString, optional } from './guards.ts'
 
 // StreamMessage is the part of a MessageEvent the client reads.
 export interface StreamMessage {
@@ -59,12 +59,13 @@ const silenceWait = 30000
 interface PollReply {
   epoch: number
   seq: number
+  version?: string
   events?: unknown[]
   reset?: boolean
 }
 
 function isPollReply(v: unknown): v is PollReply {
-  return isRecord(v) && isNumber(v.epoch) && isNumber(v.seq) && optional(v.events, Array.isArray) && optional(v.reset, isBoolean)
+  return isRecord(v) && isNumber(v.epoch) && isNumber(v.seq) && optional(v.version, isString) && optional(v.events, Array.isArray) && optional(v.reset, isBoolean)
 }
 
 // openStream delivers each event to fn as parsed JSON, and {kind: "resync"}
@@ -90,6 +91,20 @@ export function openStream(fn: (ev: unknown) => void, state: (up: boolean) => vo
   let nap = () => {}
   let abortPoll = () => {}
   let woken = false
+  let build = ''
+  const reportBuild = (version: string | undefined) => {
+    if (!version) return
+    if (build && build !== version) fn({ kind: 'build', version })
+    build = version
+  }
+  const helloBuild = (e: StreamMessage) => {
+    try {
+      const data: unknown = JSON.parse(e.data)
+      if (isRecord(data) && isString(data.version)) reportBuild(data.version)
+    } catch {
+      // A hello without a valid build still proves that the stream flows.
+    }
+  }
   const setLost = (v: boolean) => {
     if (lost !== v) state(!v)
     lost = v
@@ -135,6 +150,7 @@ export function openStream(fn: (ev: unknown) => void, state: (up: boolean) => vo
     source.addEventListener('hello', (e) => {
       clearTimeout(helloTimer)
       at(e)
+      helloBuild(e)
       heard()
       setLost(false)
       wait = 3000
@@ -182,6 +198,7 @@ export function openStream(fn: (ev: unknown) => void, state: (up: boolean) => vo
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         const body: unknown = await r.json()
         if (!isPollReply(body)) throw new Error('bad poll reply')
+        reportBuild(body.version)
         if (body.reset) resync()
         else for (const ev of body.events ?? []) fn(ev)
         setLost(false)
