@@ -72,5 +72,5 @@ func Frame(all []Goal, id string, names map[string]string, counts map[string][2]
 		extra := len(lines) - 3
 		lines = append(lines[:3], fmt.Sprintf("+%d more: dyna goal", extra))
 	}
-	return "[DYNA GOALS] `dyna goal show <id> --json` for detail. Name the goal ID in progress posts; use `dyna goal wait <id> --until <duration>` while waiting; `dyna goal done <id> \"<summary>\"` when finished.\n" + strings.Join(lines, "\n")
+	return "[DYNA GOALS] `dyna goal show <id> --json` for detail. Name the goal ID in progress posts; `dyna goal done <id> \"<summary>\"` when finished.\n" + strings.Join(lines, "\n")
 }
