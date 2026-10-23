@@ -2,9 +2,11 @@ package watch
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The merge queue re-reads every ready PR on each poll. A reply that did not
@@ -48,5 +50,50 @@ func TestMergeReadyRevalidatesSavedResponses(t *testing.T) {
 	}
 	if fresh != 1 {
 		t.Fatalf("%d of %d merge readiness reads were unconditional, want only the pull body", fresh, reads)
+	}
+}
+
+// A rate limit on the first read of a merge check saves no response, but it
+// still proves the pause. Losing it would let the next merge check send the
+// same blocked request again.
+func TestMergeReadyKeepsThePauseWhenTheFirstRequestFails(t *testing.T) {
+	e, _, _ := mergeEnv(t, 1)
+	expected, err := e.s.Store.Get("github.com/owner/repo#1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reset := e.clock.Add(time.Hour)
+	e.f.Raw[refRecord(expected).path("")] = fmt.Sprintf("HTTP/2.0 403 Forbidden\r\nX-Ratelimit-Remaining: 0\r\nX-Ratelimit-Reset: %d\r\n\r\n{\"message\":\"API rate limit exceeded\"}", reset.Unix())
+	e.write()
+	if _, _, err := e.s.mergeReady(t.Context(), expected); err == nil {
+		t.Fatal("a rate-limited read reported readiness")
+	}
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	paused := false
+	for key, rate := range st.RateLimits {
+		if strings.HasSuffix(key, "core") && rate.PauseUntil.After(e.clock) {
+			paused = true
+		}
+	}
+	if !paused {
+		t.Fatalf("saved quota pauses = %+v, want the paused core scope", st.RateLimits)
+	}
+	// The saved pause must stop the next check before it sends the request.
+	var calls []string
+	run := e.s.GH.run
+	e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
+		calls = append(calls, strings.Join(cmd.Args[1:], " "))
+		return run(ctx, cmd)
+	}
+	if _, _, err := e.s.mergeReady(t.Context(), expected); err == nil {
+		t.Fatal("a paused merge check reported readiness")
+	}
+	for _, call := range calls {
+		if strings.HasSuffix(call, "pulls/1 --include") {
+			t.Fatalf("repeated the blocked request during the pause: %s", call)
+		}
 	}
 }
