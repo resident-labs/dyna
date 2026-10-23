@@ -140,6 +140,12 @@ func (w WorktreeEvent) eventDedupe() string {
 // HookEvent tells a room that a hook run started and how it ended. The two
 // types share the payload: a running state is the start, every other state is
 // the result. One card per run shows the start folding into the result.
+//
+// Every start is followed by its own result, so a card never stays running.
+// A start posts only where the run already has a room (the event's room or the
+// repo's), and a routine run never creates one. A failing alert hook may
+// create the repo's room, so the first failure of a repo nobody uses as a room
+// shows its result without the start that came before it.
 type HookEvent struct {
 	// RunID names the stored run. The card opens the run's log with it, so no
 	// filesystem path reaches the web.
