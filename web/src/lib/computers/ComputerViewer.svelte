@@ -8,12 +8,12 @@
   import { api } from '../../api.js'
   import { openStream, savedStreamMode } from './computerStream.js'
   import { stateWord, hintText, escTwice, viewKey, popOut } from './computers.js'
-  import { statsLine } from './rfbStats.js'
+  import { statsLine } from './rfbStats.ts'
   import ComputerShot from './ComputerShot.svelte'
   import ComputerChat from './ComputerChat.svelte'
-  import { badgeText } from './preview.js'
+  import { badgeText } from './preview.ts'
   import PhoneKeys from '../ui/PhoneKeys.svelte'
-  import { phoneKeyboard } from './phoneKeyboard.js'
+  import { phoneKeyboard } from './phoneKeyboard.ts'
 
   // c: the computer's status. feed: its recent actions [{line, at}].
   // room: the room ID, for Post shot. popout: this is its own window.
