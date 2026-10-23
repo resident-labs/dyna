@@ -106,8 +106,11 @@
   import { prHash, parsePRHash, parseIssueHash, parseFileHash } from './lib/prs/prlink.ts'
   import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from './lib/ui/route.ts'
   import { paletteTargets } from './lib/ui/paletteTargets.ts'
-  import { activeAgents, agentsHeader, roomsWorking } from './lib/rooms/agents.ts'
+  import MachinePage from './lib/machines/MachinePage.svelte'
+  import { machinesSub } from './lib/machines/machines.ts'
+  import { LOAD_POLL_MS } from './lib/rooms/systemLoad.ts'
   import { roomIDPattern as ROOM, postIDPattern as POST } from './lib/ui/posts.ts'
+  import type { MachineDetail, MachinePatch, MachineSummary } from './lib/api/machine.ts'
   import type { Room, Member, Post, Feed as FeedPage, Question, Visual, ProfileChoice, Attachment } from './lib/api/room.ts'
   import type { AttachmentRef } from './lib/api/engine.ts'
   import type { Session as SessionData, QueueItem, MemberProfile } from './lib/api/session.ts'
@@ -134,6 +137,16 @@
   import type { RunAgent } from './lib/api/workflow.ts'
 
   // A member the open view drills into. The root conversation is one made from the seat.
+  // AgentRef is the part of a session that opening its view needs. The member
+  // list gives a Member and a machine's usage rows give a load owner.
+  interface AgentRef {
+    id?: string
+    name: string
+    hue: number
+    address?: string
+    room?: string
+    roomId?: string
+  }
   interface Drill extends Member {
     id: string
     rootSeat?: boolean
@@ -242,32 +255,86 @@
   const acceptCall = (req: CallRequest) => voiceWidget?.accept(req)
   const declineCall = (req: CallRequest) => voiceWidget?.decline(req)
   let pageVisible = $state(document.visibilityState === 'visible')
-  // agentsNav: the rail's agents tile is open, so the sidebar lists the awake
-  // agents of every room. Picking one opens its room and keeps the list.
-  let agentsNav = $state(false)
-  let agentMembers = $state<Record<string, Member[]> | null>(null) // room id -> members, for the agents list; null until first loaded
-  let agentsRequest = 0
-  let agentGoals = $state<Record<string, Goal[]>>({}) // room id -> goals, to badge expedited agents in every listed room
-  function agentsVisible() { return pageVisible && agentsNav && (narrow ? navOpen : showSide) }
-  const reloadAgents = createReloadGate(() => ({ room: 'agents', visit: 0 }), agentsVisible)
+  // machinesNav: the rail's machines tile is open, so the sidebar lists the
+  // machines of this engine. Picking one opens its page in the main area. A
+  // room in the link opens that room instead, so the list starts closed then.
+  let machinesNav = $state(!new URLSearchParams(location.hash.slice(1)).has('room'))
+  let machines = $state<MachineSummary[] | null>(null) // null until the first answer
+  let machinesRequest = 0
+  let machineId = $state('') // the machine whose page is open, or ''
+  let machineDetail = $state<MachineDetail | null>(null)
+  let machineError = $state('')
+  let machineBusy = $state(false)
+  let machineRequest = 0
+  function machinesVisible() { return pageVisible && machinesNav && (narrow ? navOpen : showSide) }
+  function machineVisible() { return pageVisible && machineId !== '' }
+  // The figures move on their own, so the list and the open page read again at
+  // the load card's cadence. A phone keeps the page while the drawer is shut,
+  // so the page reads on its own terms, not the sidebar's.
+  $effect(() => {
+    const list = machinesVisible()
+    const page = machineVisible()
+    if (!list && !page) return
+    const tick = () => {
+      if (list) loadMachines()
+      if (page && !machineBusy) loadMachine(machineId)
+    }
+    tick()
+    const timer = setInterval(tick, LOAD_POLL_MS)
+    return () => clearInterval(timer)
+  })
   let home = $state<ReturnType<typeof Home>>() // the home screen, which takes live events
-  let agents = $derived(activeAgents(rooms, agentMembers))
-  // The rail count comes from room summaries. Only the active-agents
-  // view needs member lists from every room.
-  let workingAgents = $derived(roomsWorking(rooms))
-  $effect(() => { if (agentsVisible()) loadAgents(rooms) })
-  function loadAgents(list: Room[]) { return reloadAgents('members', async (current: () => boolean) => {
-    const request = ++agentsRequest
-    const open = list.filter((r) => !r.archived && r.members > 0)
-    // Goals includes all active goals on the first page, regardless of its closed-item limit.
-    const [lists, goalLists] = await Promise.all([
-      Promise.all(open.map((r) => api.members(r.id).catch(() => null))),
-      Promise.all(open.map((r) => api.goals(r.id).then((page: Page<Goal> | null) => page?.items ?? [], () => null))),
-    ])
-    if (!current() || request !== agentsRequest) return
-    agentGoals = Object.fromEntries(open.map((r, i) => [r.id, goalLists[i] ?? agentGoals[r.id] ?? []]))
-    agentMembers = Object.fromEntries(open.map((r, i) => [r.id, reconcileRows(agentMembers?.[r.id] ?? [], lists[i] ?? agentMembers?.[r.id] ?? [])]))
-  }) }
+  // loadMachines reads the machine list now. A slow answer never replaces a
+  // newer one.
+  function loadMachines() {
+    const request = ++machinesRequest
+    return api.machines().then((list) => { if (request === machinesRequest) machines = list }, () => {})
+  }
+  // loadMachine reads the open machine's page. A slow answer never replaces a
+  // newer one, and an answer for a machine that closed is dropped.
+  function loadMachine(id: string) {
+    const request = ++machineRequest
+    if (machineId !== id) machineDetail = null
+    return api.machine(id).then((detail) => {
+      if (request === machineRequest && machineId === id) machineDetail = detail
+    }, (e) => {
+      if (request === machineRequest && machineId === id) machineError = errorText(e)
+    })
+  }
+  // openMachine shows one machine's page in the main area. On a phone the tap
+  // closes the drawer, as every other view does.
+  function openMachine(id: string) {
+    machineId = id
+    navOpen = false
+    machineError = ''
+    machineBusy = false
+    loadMachine(id)
+  }
+  function closeMachine() {
+    machineId = ''
+    machineDetail = null
+    machineError = ''
+    if (narrow) navOpen = true
+  }
+  // saveMachine writes one setting and shows the machine's next state. A
+  // refused change keeps the old values and shows the engine's reason.
+  async function saveMachine(patch: MachinePatch) {
+    const id = machineId
+    if (!id || machineBusy) return
+    machineBusy = true
+    machineError = ''
+    // A read that started before this write may not land after it.
+    machineRequest++
+    try {
+      const detail = await api.saveMachine(id, patch)
+      if (machineId === id) machineDetail = detail
+      loadMachines()
+    } catch (e) {
+      if (machineId === id) machineError = errorText(e)
+    } finally {
+      machineBusy = false
+    }
+  }
   // SavedFeed is the feed the page keeps: the server's page plus the client's history flag.
   type SavedFeed = FeedPage & { historyLoaded?: boolean }
   let feed = $state<SavedFeed | null>(null)
@@ -381,10 +448,6 @@
     const wanted = []
     const here = knownGoals.find((x) => isExpedited(x))
     if (here) wanted.push({ room: roomId, goal: here })
-    for (const [id, list] of Object.entries(agentGoals)) {
-      const g = id === roomId ? undefined : (list ?? []).find((x) => isExpedited(x))
-      if (g) wanted.push({ room: id, goal: g })
-    }
     for (const { room, goal } of wanted) {
       const key = room + ':' + goal.id
       const cached = untrack(() => expediteGoalItems[key])
@@ -395,11 +458,8 @@
   $effect(() => {
     const now = Math.max(expireTick, Date.now())
     const scope = expediteScope(withItems(roomId, knownGoals), hierarchy, now)
-    // The agents list shows other rooms too: their expedited agents carry the badge as well.
-    const others = Object.entries(agentGoals).filter(([id]) => id !== roomId).map(([id, list]) => expediteScope(withItems(id, list), agentMembers?.[id] ?? [], now))
-    const agents = new Set([scope, ...others].flatMap((x) => [...x.agents]))
-    expedite.set({ ...scope, agents })
-    const until = Math.min(...[scope, ...others].filter((x) => x.goalId).map((x) => x.until))
+    expedite.set({ ...scope, agents: new Set(scope.agents) })
+    const until = scope.goalId ? scope.until : Number.POSITIVE_INFINITY
     if (!Number.isFinite(until)) return
     const timer = setTimeout(() => (expireTick = Date.now()), Math.min(until - Date.now() + 50, 2 ** 31 - 1))
     return () => clearTimeout(timer)
@@ -578,7 +638,7 @@
   }
 
   let memberChips = $derived(showMembers && !showPins && !drill)
-  let sidebarChips = $derived((narrow ? navOpen : showSide) && (agentsNav || live.length > 0))
+  let sidebarChips = $derived((narrow ? navOpen : showSide) && (machinesNav || live.length > 0))
   function visibleList(name: string) {
     return consolidationAlive && pageVisible && listVisible(name, {
       view, drill, reviewOpen, showRoomSettings, memberChips, sidebarChips,
@@ -1301,7 +1361,10 @@
     const request = ++detailRequest
     roomRequest++
     navOpen = false
-    agentsNav = !id
+    machineId = ''
+    machineDetail = null
+    machineError = ''
+    machinesNav = !id
     if (id !== roomId) {
       showRoomSettings = false
       selectionMenu = null
@@ -1372,21 +1435,20 @@
     }
   }
 
-  // openAgent opens a session from the sidebar. An agent from the agents list
-  // may live in another room; its room opens first and the list stays.
-  async function openAgent(m: Member & { roomId?: string }) {
+  // openAgent opens a session from a machine's usage rows and from the
+  // sidebar. A session in another room opens that room first.
+  async function openAgent(m: AgentRef) {
     navOpen = false
     if (m.roomId && m.roomId !== roomId) {
       const selecting = selectRoom(m.roomId)
       const request = detailRequest
-      agentsNav = true
       if (!await selecting || request !== detailRequest) return
     }
     openSession(m)
   }
 
   // openSession drills into a member's full session view.
-  function openSession(source: Member | ChannelMember | { rootSeat: true } | null, turn = 0, initial: SessionData | null = null, readOnly = false) {
+  function openSession(source: Member | ChannelMember | AgentRef | { rootSeat: true } | null, turn = 0, initial: SessionData | null = null, readOnly = false) {
     if (!source) return
     const m = ('rootSeat' in source && source.rootSeat ? rootMember() : source) as Drill
     clearItemLink()
@@ -1933,7 +1995,7 @@
       }
     }
     if (ev.kind === 'goals' && evRoom === roomId) { if (!item) loadGoals(); loadRules() }
-    if (ev.kind === 'goals' && evRoom !== roomId && agentsVisible()) loadAgents(rooms)
+    if (ev.kind === 'machines') { if (machinesVisible()) loadMachines(); if (machineId) loadMachine(machineId) }
     if (ev.kind === 'pins' && evRoom === roomId) loadPins()
     if (ev.kind === 'issues' && evRoom === roomId) { loadIssues(); loadIssues(true) }
     if (['room.paused', 'room.resumed'].includes(ev.kind) && (!evRoom || evRoom === roomId)) roomSessionController?.load()
@@ -2402,9 +2464,9 @@
 <div class="app" class:narrow>
   <!-- On a wide screen this wrapper adds no box; on a narrow one it is the drawer. -->
   <div class="nav" class:open={navOpen}>
-    <RoomRail {rooms} working={workingAgents} selected={agentsNav ? '' : roomId} onselect={selectRoom} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} />
+    <RoomRail {rooms} selected={machinesNav ? '' : roomId} onselect={selectRoom} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} />
     {#if showSide || narrow}
-      <Sidebar agents={agentsNav ? agents : null} selected={drill?.address ?? ''} onroom={(id: string) => selectRoom(id)} {computers} channelUnread={feed?.channelUnread ?? {}} room={current ?? room} prs={openPRMap} onroommenu={(x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }} view={view as typeof GENERAL} questions={questions.filter((q) => q.state === 'open' && q.to === 'owner').length} {live} {runs} {dataDir} {ownerHue} {route} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onview={openView} onmember={openAgent} />
+      <Sidebar machines={machines} machinesOpen={machinesNav} machineId={machineId} onmachine={openMachine} selected={drill?.address ?? ''} onroom={(id: string) => selectRoom(id)} {computers} channelUnread={feed?.channelUnread ?? {}} room={current ?? room} prs={openPRMap} onroommenu={(x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }} view={view as typeof GENERAL} questions={questions.filter((q) => q.state === 'open' && q.to === 'owner').length} {live} {runs} {dataDir} {ownerHue} {route} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onview={openView} onmember={openAgent} />
     {/if}
   </div>
   {#if narrow && navOpen}
@@ -2422,9 +2484,8 @@
       </button>
       {/if}
       {#if !roomId}
-        <span class="title">Dyna</span>
-        {@const head = agentsHeader(agents)}
-        <span class="meta">{head.rooms}{#if head.rooms && head.working}&nbsp;·&nbsp;{/if}{#if head.working}<em>{head.working} working</em>{/if}</span>
+        <span class="title">{machineDetail ? machineDetail.name : 'Machines'}</span>
+        {#if !machineId}<span class="meta">{machinesSub(machines)}</span>{/if}
       {:else if room}
         {#if drill}
           {#if readOnlyDm}
@@ -2518,8 +2579,10 @@
         {#if loadError}
           <p class="load-err">{loadError}</p>
         {/if}
-        {#if !roomId}
-          <Home bind:this={home} {rooms} {update} onroom={selectRoom} onaccount={(id: string) => openSettings('usage', false, '', id)} onagent={openAgent} />
+        {#if !roomId && machineId}
+          <MachinePage machine={machineDetail} error={machineError} busy={machineBusy} onback={closeMachine} onagent={openAgent} onsave={saveMachine} />
+        {:else if !roomId}
+          <Home bind:this={home} {rooms} {update} onroom={selectRoom} onaccount={(id: string) => openSettings('usage', false, '', id)} />
         {:else if !room}
           <Skeleton label="Loading room" />
         {:else if drill}

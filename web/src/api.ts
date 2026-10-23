@@ -6,6 +6,7 @@ import { openStream } from './lib/api/stream.ts'
 import type { StreamSource } from './lib/api/stream.ts'
 import { isRecord, isString } from './lib/api/guards.ts'
 import type { AttachmentRef, Engine, ProfileSave } from './lib/api/engine.ts'
+import type { MachinePatch } from './lib/api/machine.ts'
 import type { ChangePolicy, CIBudgetSettings, PolicyOverride, PRConfig } from './lib/api/change.ts'
 import type { CreateRoomInput } from './lib/api/file.ts'
 import type { ManagedMCP, ManagedSkill } from './lib/api/harness.ts'
@@ -116,6 +117,10 @@ export const api = {
   dataDir: () => app.DataDir(),
   health: () => app.Health(),
   systemLoad: () => app.SystemLoad(),
+  // machines is the registry behind the Machines list and the Machine page.
+  machines: () => app.Machines(),
+  machine: (id: string) => app.Machine(id),
+  saveMachine: (id: string, patch: MachinePatch) => app.SaveMachine(id, patch),
   rooms: () => app.Rooms(),
   feedTail: (roomId: string, before = '', keep = 0) => app.FeedTail(roomId, before, keep),
   feedAfter: (roomId: string, after = '', keep = 50) => app.FeedAfter(roomId, after, keep),

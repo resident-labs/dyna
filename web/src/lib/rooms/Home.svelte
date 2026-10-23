@@ -11,14 +11,12 @@
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
-  import SystemLoadCard from './SystemLoadCard.svelte'
-  import { pollLoad } from './systemLoad.ts'
   import { accountRows, allClear, updateRows, rootQuestions } from './home.ts'
   // update: the dyna update notice ({current, latest}) or null.
-  let { rooms = [], update = null, onroom, onaccount, onagent } = $props()
+  // The machine list owns the load card now: Home shows what needs the owner.
+  let { rooms = [], update = null, onroom, onaccount } = $props()
 
   let usage = $state(null)
-  let load = $state(null)
   let runtimes = $state(null)
   let notices = $state([])
   let questionAlive = true
@@ -39,8 +37,7 @@
     refresh()
     loadNotices()
     refreshHeldComments()
-    const stopLoad = pollLoad(() => api.systemLoad(), (v) => { load = v })
-    return () => { questionAlive = false; stopLoad() }
+    return () => { questionAlive = false }
   })
 
   // event takes App's live events: one stream feeds the whole app.
@@ -189,8 +186,6 @@
       {/each}
     </Card>
   {/if}
-
-  {#if load}<SystemLoadCard {load} {onagent} />{/if}
 
   {#if $heldComments.error}<p class="err" role="alert">Could not load held PR comments: {$heldComments.error}</p>{/if}
   {#if clear}<EmptyState title="All clear">No questions, alerts or updates need you.</EmptyState>{/if}
