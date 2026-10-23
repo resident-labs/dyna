@@ -183,31 +183,25 @@ function hookFold(posts: readonly FeedInput[]): HookFold | undefined {
 }
 
 // hiddenHookStarts lists the starts of hook runs that show nowhere. A start
-// shows only while its run is the newest thing of its hook: the engine posts a
-// result for every start, so a start whose run ended in a failure or an error
-// is already told by that failure's own card, and a start with no result while
-// a later run of the same hook posted belongs to a run that ended unrecorded.
-// Either way no stale "running" card is left behind.
+// shows its run's running state, and the engine posts a result for every start
+// that reaches one. So a start shows nowhere only when its own run ended in a
+// failure or an error: that run's card tells the story, and the start would
+// only repeat it. A start with no result of its own stays visible, because
+// runs can overlap: a scheduled run and a manual run of one hook can be live at
+// the same time, and another run's result says nothing about this one.
 function hiddenHookStarts(posts: readonly FeedInput[]): Set<string> {
   const resultState = new Map<string, HookState>()
-  const lastOfHook = new Map<string, number>()
-  posts.forEach((post, i) => {
+  for (const post of posts) {
     const hook = hookEvent(post)
-    if (!hook) return
-    if (hook.state !== 'running') resultState.set(hook.runId, hook.state)
-    lastOfHook.set(hookIdentity(hook), i)
-  })
+    if (hook && hook.state !== 'running') resultState.set(hook.runId, hook.state)
+  }
   const hidden = new Set<string>()
-  posts.forEach((post, i) => {
+  for (const post of posts) {
     const hook = hookEvent(post)
-    if (hook?.state !== 'running') return
+    if (hook?.state !== 'running') continue
     const result = resultState.get(hook.runId)
-    if (result !== undefined) {
-      if (result !== 'passed') hidden.add(post.id)
-      return
-    }
-    if ((lastOfHook.get(hookIdentity(hook)) ?? 0) > i) hidden.add(post.id)
-  })
+    if (result !== undefined && result !== 'passed') hidden.add(post.id)
+  }
   return hidden
 }
 
@@ -259,11 +253,14 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
       continue
     }
     if (!post) continue
-    if (hidden.has(post.id)) continue
+    // The unread marker stays where the first unread post is, also when that
+    // post shows nowhere and when it folds into a row above: a reader must
+    // still see where the unread posts begin.
     if (post.id === unreadFrom) {
       out.push({ kind: 'new', key: 'new' })
       prev = null
     }
+    if (hidden.has(post.id)) continue
     const gap = prev ? post.ts - prev.ts : Infinity
     const cont = prev && !post.completion && !prev.completion && post.kind !== 'pr' && prev.kind !== 'pr' &&
       !post.replyTo && prev.from === post.from && !!prev.human === !!post.human && gap < senderGap &&

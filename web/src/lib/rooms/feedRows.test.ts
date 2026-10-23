@@ -202,18 +202,50 @@ test('passes more than the fold window apart start a new row', () => {
   assert.deepEqual(rows.map((row) => row.post.id), ['pass-librarian-1', 'pass-late'])
 })
 
-test('a running run shows on its hook row, and a stale start shows nowhere', () => {
+test('a running run shows on its hook row, and an older start keeps its place', () => {
   const running = hookPost('start-r', 'started', 'librarian-run-r', 'running', start + 2 * 60_000, 'librarian')
   const live = content(feedRows([pass(1), running]))
   assert.equal(live.length, 1)
   assert.equal(rowPost(need(live[0]))?.id, 'start-r')
   assert.deepEqual(need(live[0]).hook, { count: 1, lastTs: start + 60_000 })
-  // A later run of the same hook proves the older start ended: no result will
-  // come, and its card must not stay running.
-  const stale = content(feedRows([pass(1), running, pass(3)]))
-  assert.equal(stale.length, 1)
-  assert.deepEqual(rowPosts(need(stale[0])).map((post) => post.id), ['pass-librarian-1', 'pass-librarian-3'])
-  assert.deepEqual(need(stale[0]).hook, { count: 2, lastTs: start + 3 * 60_000 })
+  // A later pass takes the row's state, so the older start never leaves a
+  // stale running card behind it.
+  const later = content(feedRows([pass(1), running, pass(3)]))
+  assert.equal(later.length, 1)
+  assert.deepEqual(rowPosts(need(later[0])).map((post) => post.id), ['pass-librarian-1', 'start-r', 'pass-librarian-3'])
+  assert.equal(rowPost(need(later[0]))?.notice?.kind, 'result')
+  assert.deepEqual(need(later[0]).hook, { count: 2, lastTs: start + 3 * 60_000 })
+})
+
+test('an overlapping run stays visible when a newer run finishes first', () => {
+  const posts = [
+    hookPost('start-a', 'started', 'librarian-run-a', 'running', start, 'librarian'),
+    hookPost('start-b', 'started', 'librarian-run-b', 'running', start + 60_000, 'librarian'),
+    hookPost('pass-b', 'result', 'librarian-run-b', 'passed', start + 90_000, 'librarian'),
+  ]
+  const rows = content(feedRows(posts))
+  assert.equal(rows.length, 1)
+  assert.deepEqual(rowPosts(need(rows[0])).map((post) => post.id), ['start-a', 'start-b', 'pass-b'])
+  assert.deepEqual(need(rows[0]).hook, { count: 1, lastTs: start + 90_000 })
+})
+
+test('the start of a run that ended badly shows nowhere', () => {
+  const posts = [
+    pass(1),
+    hookPost('start-x', 'started', 'librarian-run-x', 'running', start + 2 * 60_000, 'librarian'),
+    hookPost('fail-x', 'result', 'librarian-run-x', 'error', start + 3 * 60_000, 'librarian'),
+    pass(4),
+  ]
+  const rows = content(feedRows(posts))
+  assert.deepEqual(rows.map((row) => row.post.id), ['pass-librarian-1', 'fail-x', 'pass-librarian-4'])
+})
+
+test('the unread marker stays on a hidden first unread start', () => {
+  const at = start + 600_000
+  const first = hookPost('start-u', 'started', 'librarian-run-u', 'running', at, 'librarian')
+  const fail = hookPost('fail-u', 'result', 'librarian-run-u', 'failed', at + 60_000, 'librarian')
+  const message: FeedInput = { id: 'chat', ts: at + 120_000, from: 'dyna:root', kind: 'message', text: 'Hello' }
+  assert.deepEqual(feedRows([first, fail, message], first.id).map((row) => row.kind), ['day', 'new', 'post', 'post'])
 })
 
 // A merge trial posts its progress and its end. One card shows the trial, so
