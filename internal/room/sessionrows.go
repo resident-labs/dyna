@@ -47,7 +47,7 @@ func (s *Store) SessionDeliveries(roomID string, keys, postIDs []string) (map[st
 	out := make(map[string]Delivery, len(postIDs))
 	postArgs := strings.Repeat(",?", len(keys)-1)
 	for chunk := range slices.Chunk(postIDs, sessionRowChunk) {
-		query := "SELECT post_id, session_id, mode, category FROM post_deliveries WHERE post_id IN (?" +
+		query := "SELECT " + deliveryColumns + " FROM post_deliveries WHERE post_id IN (?" +
 			strings.Repeat(",?", len(chunk)-1) + ") AND session_id IN (?" + postArgs + ")"
 		args := make([]any, 0, len(chunk)+len(keys))
 		for _, id := range chunk {
@@ -61,14 +61,11 @@ func (s *Store) SessionDeliveries(roomID string, keys, postIDs []string) (map[st
 			return nil, err
 		}
 		for rows.Next() {
-			var sessionID, mode string
-			var d Delivery
-			if err := rows.Scan(&d.PostID, &sessionID, &mode, &d.Category); err != nil {
+			d, err := scanDelivery(rows)
+			if err != nil {
 				rows.Close()
 				return nil, err
 			}
-			d.SessionID = sessionID
-			d.Mode = DeliveryMode(mode)
 			out[d.PostID] = d
 		}
 		if err := rows.Err(); err != nil {
@@ -78,4 +75,85 @@ func (s *Store) SessionDeliveries(roomID string, keys, postIDs []string) (map[st
 		rows.Close()
 	}
 	return out, nil
+}
+
+// SessionDeliveryRows reads every delivery row of one session in roomID, in no
+// particular order. It is the read that replaced the session_queues blob: the
+// rows hold the claim, cancellation and dismissal state of every post the
+// session was sent in this room.
+func (s *Store) SessionDeliveryRows(roomID string, keys []string) ([]Delivery, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	db, err := s.postIndexDB()
+	if err != nil {
+		return nil, err
+	}
+	query := "SELECT " + deliveryColumns + " FROM post_deliveries WHERE room_id=? AND session_id IN (?" +
+		strings.Repeat(",?", len(keys)-1) + ")"
+	args := make([]any, 0, len(keys)+1)
+	args = append(args, roomID)
+	for _, key := range keys {
+		args = append(args, key)
+	}
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Delivery
+	for rows.Next() {
+		d, err := scanDelivery(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}
+
+// DeliverySignature is the newest write of one session's delivery rows that
+// claims, cancels, dismisses or delivers a post, and 0 when it has none. A post
+// stored for the session does not move it: the queue version it replaces moved
+// only when a delivery's state changed, and the app reads it to see that. It
+// cannot move backwards: a row keeps the turn that claimed it, and a cancelled,
+// dismissed or failed row counts even when no turn claimed it.
+func (s *Store) DeliverySignature(roomID string, keys []string) (int64, error) {
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	db, err := s.postIndexDB()
+	if err != nil {
+		return 0, err
+	}
+	query := "SELECT COALESCE(MAX(updated_at), 0) FROM post_deliveries WHERE room_id=? AND session_id IN (?" +
+		strings.Repeat(",?", len(keys)-1) + ") AND (claimed_turn > 0 OR state IN ('cancelled','dismissed','failed'))"
+	args := make([]any, 0, len(keys)+1)
+	args = append(args, roomID)
+	for _, key := range keys {
+		args = append(args, key)
+	}
+	var signature int64
+	err = db.QueryRow(query, args...).Scan(&signature)
+	return signature, err
+}
+
+// deliveryColumns is the column list every delivery read scans, in the order
+// scanDelivery reads them.
+const deliveryColumns = "post_id, session_id, mode, category, state, claimed_turn"
+
+// rowScanner is the part of *sql.Rows and *sql.Row a delivery read needs.
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+// scanDelivery reads one row of deliveryColumns.
+func scanDelivery(row rowScanner) (Delivery, error) {
+	var sessionID, mode, category, state string
+	var d Delivery
+	if err := row.Scan(&d.PostID, &sessionID, &mode, &category, &state, &d.ClaimedTurn); err != nil {
+		return Delivery{}, err
+	}
+	d.SessionID, d.Mode, d.Category, d.State = sessionID, DeliveryMode(mode), category, DeliveryState(state)
+	return d, nil
 }

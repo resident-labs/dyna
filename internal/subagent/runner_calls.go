@@ -308,6 +308,22 @@ func (m *Manager) noteTurn(ctx context.Context, id string, n TurnNote) error {
 			return err
 		}
 	}
+	// The turn's receipt records what the harness read; the delivery rows say
+	// the same, so both agree on how far each delivery got. A note for a session
+	// that is gone writes nothing.
+	if n.Accepted || n.Delivered != nil {
+		if meta, err := store.ReadMeta(id); err != nil {
+			if !errors.Is(err, ErrNotFound) {
+				log.Printf("delivery note: %v", err)
+			}
+		} else if turn, err := store.ReadTurn(id, n.Turn); err != nil {
+			if !errors.Is(err, ErrNotFound) {
+				log.Printf("delivery note: %v", err)
+			}
+		} else {
+			m.markTurnDelivered(ctx, meta, turn)
+		}
+	}
 	// Notice delivery is best effort after commit; a replay returns above.
 	if n.AccountSwitch != nil {
 		if meta, err := store.ReadMeta(id); err != nil {

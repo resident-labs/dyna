@@ -293,17 +293,7 @@ func TestConsolidationInheritedInboxClaimsAndCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir, _ := e.m.Store.Dir(b.ID)
-	if err = e.m.Store.withGateLock(b.ID, func(_ string) error {
-		q, e := readQueue(dir)
-		if e != nil {
-			return e
-		}
-		q.Claimed[pending.ID] = 1
-		return writeQueue(dir, q)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	claimPostsFor(t, e, b.ID, 1, pending.ID)
 	// A stopping runner may have advanced its cursor without acknowledgement.
 	_, at, _ := e.m.rooms().ReadFrom(a.RoomID, 0)
 	_, _ = e.m.Store.UpdateMeta(b.ID, func(meta *Meta) { meta.RoomCursor = at })
@@ -509,17 +499,7 @@ func TestConsolidationDoesNotReplayUnacknowledgedHandoffRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir, _ := e.m.Store.Dir(b.ID)
-	if err = e.m.Store.withGateLock(b.ID, func(_ string) error {
-		q, e := readQueue(dir)
-		if e != nil {
-			return e
-		}
-		q.Claimed[request.ID] = 1
-		return writeQueue(dir, q)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	claimPostsFor(t, e, b.ID, 1, request.ID)
 	*now = c.Deadline
 	finishConsolidation(t, e, c)
 	*now = now.Add(time.Minute)

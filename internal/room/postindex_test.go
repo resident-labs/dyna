@@ -245,8 +245,8 @@ func TestPostIndexImportAndCursorCatchUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	home, _, deliveries = postIndexRows(t, s, rec.ID, dm.ID)
-	if home != string(DMConversation(ownerSession)) || deliveries[0].state != string(DeliveryDelivered) {
-		t.Fatalf("imported home %q, deliveries %+v: want the DM and delivered rows", home, deliveries)
+	if home != string(DMConversation(ownerSession)) || deliveries[0].state != string(DeliveryImported) {
+		t.Fatalf("imported home %q, deliveries %+v: want the DM and imported rows", home, deliveries)
 	}
 	if offset, ok := storedPostCursor(t, s, rec.ID); !ok || offset != size {
 		t.Fatalf("imported cursor = %d (%v), want %d", offset, ok, size)

@@ -98,10 +98,7 @@ func (e *testEnv) postTo(meta Meta) room.Message {
 
 func claim(t *testing.T, e *testEnv, dir, messageID string, turn int) {
 	t.Helper()
-	if err := writeQueue(dir, queueClaims{Claimed: map[string]int{messageID: turn},
-		Cancelled: map[string]bool{}, Dismissed: map[string]bool{}}); err != nil {
-		t.Fatal(err)
-	}
+	claimPostsFor(t, e, filepath.Base(dir), turn, messageID)
 }
 
 func (e *testEnv) info(id string) Info {
