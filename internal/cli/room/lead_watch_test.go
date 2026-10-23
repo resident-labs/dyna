@@ -56,7 +56,7 @@ func TestRootWatchReceivesLeadPosts(t *testing.T) {
 			var quiet []room.Message
 			for _, in := range []room.PostInput{
 				{From: lead, Kind: "notice", To: []string{root}, Text: "Quiet lead note"},
-				{From: lead, Kind: "merge-decision", To: []string{rec.Name}, Text: "Keep the failed trial"},
+				{From: lead, Kind: "notice", To: []string{rec.Name}, Text: "Keep the failed trial"},
 				{From: lead, Kind: "issue", To: []string{rec.Name}, Text: "Repair the test"},
 			} {
 				msg := post(in)
@@ -67,7 +67,7 @@ func TestRootWatchReceivesLeadPosts(t *testing.T) {
 			}
 			for _, in := range []room.PostInput{
 				{From: lead, Kind: "alert", To: []string{rec.Name + ":worker"}, Text: "Another recipient"},
-				{From: lead, Kind: "merge-decision", To: []string{"another-room"}, Text: "Another room"},
+				{From: lead, Kind: "notice", To: []string{"another-room"}, Text: "Another room"},
 				{From: rec.Name, To: []string{rec.Name}, Text: "Own owner post"},
 			} {
 				post(in)

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/room"
 )
 
 func cloneFixture(entries int) State {
@@ -41,6 +43,12 @@ func TestCloneStateCopiesFlatValuesInBulk(t *testing.T) {
 
 func TestCloneStateSharesNoMutableMemory(t *testing.T) {
 	st := cloneFixture(2)
+	// A notice that carries a merge event deep-copies the event, so a clone
+	// cannot change the trial the original names.
+	st.Records["pr"].Notices[0].Merge = &room.MergeEvent{
+		Type: room.MergeQueued, TrialID: "dyna/merge-trial/1", Repo: "a/b", Base: "main",
+		PRs: []room.MergePR{{Number: 1, Title: "Fix", URL: "https://github.com/a/b/pull/1"}},
+	}
 	before, err := json.Marshal(st)
 	if err != nil {
 		t.Fatal(err)
@@ -55,6 +63,7 @@ func TestCloneStateSharesNoMutableMemory(t *testing.T) {
 	r.ReviewAssignments["head"][0] = "other"
 	r.ReviewHistory[0]["reviewHead"][1] = 'b'
 	r.Notices[0].Text = "changed"
+	r.Notices[0].Merge.PRs[0].Title = "other"
 	r.Checks[0].Conclusion = "failure"
 	c.Responses["pr"]["/pulls/1"].Body[0] = '['
 	c.Reviewers["room"].FailedProfiles["p"] = time.Unix(1, 0)

@@ -1333,14 +1333,22 @@ func (s *Service) flush(ctx context.Context, key string) error {
 	return first
 }
 func (s *Service) deliver(ctx context.Context, r Record, n Notice) (string, error) {
-	ev := prEventOf(r, n)
+	var event room.Event = prEventOf(r, n)
+	if n.Merge != nil {
+		merge := *n.Merge
+		// The pending notice's text is the evidence the author reads today,
+		// bounded when the notice was queued. The card shows the typed facts and
+		// the agent text keeps this evidence.
+		merge.Detail = n.Text
+		event = merge
+	}
 	if n.Kind == "held-comment" {
 		rec, err := s.roomsStore().Resolve(r.RoomID)
 		if err != nil {
 			return "", err
 		}
 		// A held comment waits for the owner in the feed; it wakes nobody.
-		post, err := s.roomsStore().PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: ev, ID: n.ID, To: []string{rec.Name}, RoomService: true, NoWake: true})
+		post, err := s.roomsStore().PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: event, ID: n.ID, To: []string{rec.Name}, RoomService: true, NoWake: true})
 		return post.ID, err
 	}
 	rec, err := s.Notify.Rooms.Resolve(r.RoomID)
@@ -1379,7 +1387,7 @@ func (s *Service) deliver(ctx context.Context, r Record, n Notice) (string, erro
 			sender = notify.Sender{Kind: notify.SenderSession, Session: author}
 		}
 	}
-	result, err := s.Notify.Post(ctx, notify.PostInput{NeedsRoot: n.NeedsRoot, NoWake: n.Kind == "informational" || address == rec.Name && !n.NeedsRoot, ID: n.ID, Event: ev, Sender: sender, Mentions: []string{"@" + address}})
+	result, err := s.Notify.Post(ctx, notify.PostInput{NeedsRoot: n.NeedsRoot, NoWake: n.Kind == "informational" || address == rec.Name && !n.NeedsRoot, ID: n.ID, Event: event, Sender: sender, Mentions: []string{"@" + address}})
 	return result.Message.ID, err
 }
 
