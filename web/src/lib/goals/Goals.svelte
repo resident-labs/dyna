@@ -4,15 +4,15 @@
   import LoadOlder from '../ui/LoadOlder.svelte'
   import Avatar from '../ui/Avatar.svelte'
   import GoalGlyph from './GoalGlyph.svelte'
-  import TabHeader from './TabHeader.svelte'
+  import TabHeader from '../rooms/TabHeader.svelte'
   import Row from '../ui/Row.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import { goalTree, goalStatus, goalTone, goalFilter, itemCountLabel } from './goals.ts'
   import GoalJournal from './GoalJournal.svelte'
   import { createGoalEvents } from './goalEvents.ts'
   import type { GoalEvent } from './goalEvents.ts'
-  import ExpediteBadge from './ExpediteBadge.svelte'
-  import { expedite, goalExpedited } from './expedite.ts'
+  import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
+  import { expedite, goalExpedited } from '../rooms/expedite.ts'
   import { api } from '../../api.ts'
   interface Props {
     older?: boolean
