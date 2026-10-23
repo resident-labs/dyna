@@ -131,7 +131,7 @@ func TestPassiveRootInputHasOneHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	posts := []room.Message{note}
-	if input := forSession(rooms, meta, posts); len(input) != 1 || input[0].ID != note.ID {
+	if input := mustForSession(t, rooms, meta, posts); len(input) != 1 || input[0].ID != note.ID {
 		t.Fatalf("passive engine note must remain turn input: %+v", input)
 	}
 	if digest := quietRootPosts(meta.Room, posts, seatRowsFor(meta.Room, posts)); digest != "" {
@@ -161,7 +161,7 @@ func TestRootGateRequiresActionIntentForDirectWorkerCopies(t *testing.T) {
 		}
 		messages = append(messages, msg)
 	}
-	got := forSession(rooms, meta, messages)
+	got := mustForSession(t, rooms, meta, messages)
 	if len(got) != 4 || got[0].Text != "action" || got[1].Text != "notice" || got[2].Text != "human" || got[3].Text != "failure" {
 		t.Fatalf("root gate input: %+v", got)
 	}
