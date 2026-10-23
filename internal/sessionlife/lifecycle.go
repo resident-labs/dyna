@@ -55,7 +55,7 @@ func Check(sessions, id string) error {
 		return fmt.Errorf("cannot verify session ownership: %w", err)
 	}
 	if !ok {
-		return check(legacyOnly{}, sessions, id)
+		return fmt.Errorf("cannot verify session ownership: %w", os.ErrNotExist)
 	}
 	return check(db, sessions, id)
 }

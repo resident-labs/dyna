@@ -5,7 +5,7 @@ import (
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/questions"
 	"errors"
-	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -618,7 +618,7 @@ func TestConsolidationSkipsUnassignedLegacyHistory(t *testing.T) {
 		t.Fatalf("consolidation: %+v", c)
 	}
 	for path, raw := range paths {
-		got, err := os.ReadFile(path)
+		got, err := storedRawForTest(t, e.m.Store.Root, filepath.Base(filepath.Dir(path)))
 		if err != nil || string(got) != string(raw) {
 			t.Fatalf("legacy record changed: %s, %v", got, err)
 		}
@@ -639,7 +639,7 @@ func TestConsolidationRejectsDamagedRoomEvidence(t *testing.T) {
 			if err == nil || errors.Is(err, ErrNotFound) {
 				t.Fatalf("damaged record ignored: %v", err)
 			}
-			after, _ := os.ReadFile(recordtest.Path(t, s.Root, id))
+			after, _ := storedRawForTest(t, s.Root, id)
 			if string(after) != raw {
 				t.Fatal("damaged record rewritten")
 			}

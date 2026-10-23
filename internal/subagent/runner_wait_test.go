@@ -511,7 +511,12 @@ func TestRunnerWaitInputNeverImportsInheritedState(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				recordtest.WriteRaw(t, e.m.Store.root(), origin.ID, raw)
+				if err := os.WriteFile(recordtest.Path(t, e.m.Store.root(), origin.ID), raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec("DELETE FROM session_records WHERE id=?", origin.ID); err != nil {
+					t.Fatal(err)
+				}
 			} else {
 				if missing == "target historical turn" {
 					deletedID = target.ID

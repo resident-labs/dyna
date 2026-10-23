@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife/recordtest"
 )
@@ -65,7 +66,7 @@ func TestRoomControlsIgnoreLegacyUnassignedHistory(t *testing.T) {
 	if err != nil || result.Succeeded != 1 || len(result.Results) != 1 || result.Results[0].Session != valid.ID {
 		t.Fatalf("clear: %+v %v", result, err)
 	}
-	if current, err := os.ReadFile(path); err != nil || !bytes.Equal(current, raw) {
+	if current, err := storedRawForTest(t, e.m.Store.Root, filepath.Base(filepath.Dir(path))); err != nil || !bytes.Equal(current, raw) {
 		t.Fatalf("legacy record was changed: %s %v", current, err)
 	}
 	if current, err := os.ReadFile(history); err != nil || string(current) != "preserved old transcript" {
@@ -134,7 +135,7 @@ func TestRoomControlsRefuseMalformedAndPartialRoomEvidence(t *testing.T) {
 			if err != nil || !meta.Closed.IsZero() {
 				t.Fatal("clear closed current work despite damaged evidence", err)
 			}
-			current, err := os.ReadFile(path)
+			current, err := storedRawForTest(t, e.m.Store.Root, filepath.Base(filepath.Dir(path)))
 			if err != nil || !bytes.Equal(current, raw) {
 				t.Fatal("damaged record was rewritten", err)
 			}
@@ -179,4 +180,16 @@ func TestOpenMetaRechecksClosureAfterFullRead(t *testing.T) {
 			t.Fatalf("a session that closed during the scan is listed as open: %+v", meta)
 		}
 	}
+}
+
+// storedRawForTest inspects even damaged canonical metadata without decoding.
+func storedRawForTest(t *testing.T, sessions, id string) ([]byte, error) {
+	t.Helper()
+	db, err := database.Open(filepath.Dir(sessions))
+	if err != nil {
+		return nil, err
+	}
+	var raw []byte
+	err = db.QueryRow("SELECT meta FROM session_records WHERE id=?", id).Scan(&raw)
+	return raw, err
 }
