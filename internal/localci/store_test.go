@@ -12,6 +12,7 @@ import (
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/state"
 )
 
@@ -22,7 +23,7 @@ func fixtureStore(t *testing.T) Store {
 	return s
 }
 
-func TestStoreNodesAndRoomModes(t *testing.T) {
+func TestStoreRoomModes(t *testing.T) {
 	ctx := context.Background()
 	s := fixtureStore(t)
 	db, err := s.open()
@@ -31,18 +32,6 @@ func TestStoreNodesAndRoomModes(t *testing.T) {
 	}
 	var events []hub.Event
 	state.For(db).SetPublish(func(ev hub.Event) { events = append(events, ev) })
-	n := Node{Name: "hermes", SSH: "pip@hermeslab", Slots: 2, Enabled: true}
-	if err := s.PutNode(ctx, n); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.DisableNode(ctx, n.Name); err != nil {
-		t.Fatal(err)
-	}
-	n.Enabled = false
-	nodes, err := s.Nodes(ctx)
-	if err != nil || !reflect.DeepEqual(nodes, []Node{n}) {
-		t.Fatalf("nodes = %#v, %v", nodes, err)
-	}
 	if mode, err := s.Mode(ctx, "room-a"); err != nil || mode != ModeGitHub {
 		t.Fatalf("default mode = %q, %v", mode, err)
 	}
@@ -52,7 +41,7 @@ func TestStoreNodesAndRoomModes(t *testing.T) {
 	if mode, err := s.Mode(ctx, "room-b"); err != nil || mode != ModeGitHub {
 		t.Fatalf("another room inherited mode = %q, %v", mode, err)
 	}
-	if len(events) != 3 || events[2].Topic != Topic || events[2].Room != "room-a" {
+	if len(events) != 1 || events[0].Topic != Topic || events[0].Room != "room-a" {
 		t.Fatalf("committed events = %#v", events)
 	}
 	if err := database.Close(s.DataDir); err != nil {
@@ -61,15 +50,43 @@ func TestStoreNodesAndRoomModes(t *testing.T) {
 	if mode, err := s.Mode(ctx, "room-a"); err != nil || mode != ModeLocal {
 		t.Fatalf("persisted mode = %q, %v", mode, err)
 	}
-	if err := s.RemoveNode(ctx, n.Name); err != nil {
+}
+
+// Nodes reads the machines with the ci role, and the local machine runs on
+// this host, so it carries no SSH destination.
+func TestStoreNodesReadsCIMachines(t *testing.T) {
+	ctx := context.Background()
+	s := fixtureStore(t)
+	registry := machines.Store{DataDir: s.DataDir}
+	if _, err := registry.Save(ctx, machines.Machine{Name: "hermes", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DisableNode(ctx, n.Name); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("disable missing node = %v", err)
+	other, err := registry.Save(ctx, machines.Machine{Name: "build-only", Roles: []machines.Role{machines.RoleAgents}, CISlots: 0, Enabled: true, SSH: "ari@build"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if other.HasRole(machines.RoleCI) {
+		t.Fatalf("agents machine gained the ci role: %#v", other)
+	}
+	nodes, err := s.Nodes(ctx)
+	if err != nil || !reflect.DeepEqual(nodes, []Node{{Name: "hermes", SSH: "pip@hermeslab", Slots: 2, Enabled: true}}) {
+		t.Fatalf("nodes = %#v, %v", nodes, err)
+	}
+	local, err := registry.GetLocal(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	local.Roles = append(local.Roles, machines.RoleCI)
+	local.CISlots = 4
+	if _, err := registry.Save(ctx, local); err != nil {
+		t.Fatal(err)
 	}
 	nodes, err = s.Nodes(ctx)
-	if err != nil || len(nodes) != 0 {
-		t.Fatalf("removed node remains = %#v, %v", nodes, err)
+	if err != nil || len(nodes) != 2 {
+		t.Fatalf("nodes with local CI = %#v, %v", nodes, err)
+	}
+	if got := nodes[0]; got.SSH != "" || got.Slots != 4 || !got.Enabled {
+		t.Fatalf("local CI node = %#v", got)
 	}
 }
 
@@ -190,23 +207,5 @@ func TestStoreHostedAttemptsPersist(t *testing.T) {
 	}
 	if _, err := s.LoadHostedRuns(ctx, repo, strings.Repeat("b", 40)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("another head inherited hosted attempts = %v", err)
-	}
-}
-
-func TestStoreDropsVersionOneJumpColumn(t *testing.T) {
-	s := fixtureStore(t)
-	db, err := database.Open(s.DataDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	v1 := strings.Replace(storeSchema, " ssh TEXT NOT NULL,\n", " ssh TEXT NOT NULL,\n jump TEXT NOT NULL,\n", 1)
-	if _, err := db.Exec(v1 + `
-INSERT INTO local_ci_nodes(name,ssh,jump,slots,enabled) VALUES('hermes','pip@hermeslab','ari@omarchy',2,1);
-INSERT INTO meta(key,value) VALUES('localci.schema','1');`); err != nil {
-		t.Fatal(err)
-	}
-	nodes, err := s.Nodes(t.Context())
-	if err != nil || !reflect.DeepEqual(nodes, []Node{{Name: "hermes", SSH: "pip@hermeslab", Slots: 2, Enabled: true}}) {
-		t.Fatalf("migrated nodes = %#v, %v", nodes, err)
 	}
 }

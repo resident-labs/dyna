@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
@@ -25,7 +26,7 @@ const (
 	Topic      = "localci"
 )
 
-// Node names a local or SSH runner. Empty SSH runs on this machine.
+// Node names a machine that runs CI checks. Empty SSH runs on this machine.
 type Node struct {
 	Name    string `json:"name"`
 	SSH     string `json:"ssh,omitempty"`
@@ -44,13 +45,7 @@ type HostedRuns struct {
 	PublishedKey string        `json:"publishedKey,omitempty"`
 }
 
-const storeSchema = `CREATE TABLE local_ci_nodes (
- name TEXT PRIMARY KEY,
- ssh TEXT NOT NULL,
- slots INTEGER NOT NULL CHECK(slots > 0),
- enabled INTEGER NOT NULL CHECK(enabled IN (0,1))
-);
-CREATE TABLE local_ci_modes (
+const storeSchema = `CREATE TABLE local_ci_modes (
  room_id TEXT PRIMARY KEY,
  mode TEXT NOT NULL CHECK(mode IN ('github','local','both'))
 );
@@ -88,7 +83,12 @@ func (s Store) open() (*sql.DB, error) {
 	err = database.Migrate(db, "localci.schema", 2, func(conn *sql.Conn, old int) error {
 		if old == 1 {
 			// Version 1 had a jump host column; nodes are now reached directly.
-			_, err := conn.ExecContext(context.Background(), "ALTER TABLE local_ci_nodes DROP COLUMN jump")
+			// The machines migration drops this table, so it may be gone already.
+			present, err := database.HasTable(context.Background(), conn, "local_ci_nodes")
+			if err != nil || !present {
+				return err
+			}
+			_, err = conn.ExecContext(context.Background(), "ALTER TABLE local_ci_nodes DROP COLUMN jump")
 			return err
 		}
 		_, err := conn.ExecContext(context.Background(), storeSchema)
@@ -97,84 +97,41 @@ func (s Store) open() (*sql.DB, error) {
 	return db, err
 }
 
-var nodeName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
-var sshTarget = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*(@[a-zA-Z0-9][a-zA-Z0-9_.-]*)?$`)
 var commitSHA = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
 
+// Validate reports whether a runner can use this node.
 func (n Node) Validate() error {
-	if !nodeName.MatchString(n.Name) {
-		return fmt.Errorf("node name must contain only letters, numbers, dots, underscores or hyphens, and start with a letter or number")
+	if err := machines.ValidateName(n.Name); err != nil {
+		return err
 	}
 	if n.Slots < 1 {
-		return fmt.Errorf("node slots must be positive")
+		return errors.New("CI node slots must be positive")
 	}
-	if n.SSH != "" && !sshTarget.MatchString(n.SSH) {
-		return fmt.Errorf("SSH destination must be a host or user@host")
+	if n.SSH != "" {
+		return machines.ValidateSSH(n.SSH)
 	}
 	return nil
 }
 
+// Nodes returns the machines with the ci role, as the scheduler reads them.
+// The engine host maps to an empty SSH destination, which runs on this machine.
 func (s Store) Nodes(ctx context.Context) ([]Node, error) {
-	db, err := s.open()
+	list, err := s.machines().List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, "SELECT name,ssh,slots,enabled FROM local_ci_nodes ORDER BY name")
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
 	nodes := []Node{}
-	for rows.Next() {
-		var n Node
-		if err := rows.Scan(&n.Name, &n.SSH, &n.Slots, &n.Enabled); err != nil {
-			return nil, err
+	for _, m := range list {
+		if !m.HasRole(machines.RoleCI) {
+			continue
 		}
-		nodes = append(nodes, n)
+		nodes = append(nodes, Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled})
 	}
-	return nodes, rows.Err()
+	return nodes, nil
 }
 
-func (s Store) PutNode(ctx context.Context, n Node) error {
-	if err := n.Validate(); err != nil {
-		return err
-	}
-	db, err := s.open()
-	if err != nil {
-		return err
-	}
-	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "node:" + n.Name}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES(?,?,?,?)
-ON CONFLICT(name) DO UPDATE SET ssh=excluded.ssh,slots=excluded.slots,enabled=excluded.enabled`, n.Name, n.SSH, n.Slots, n.Enabled)
-		return err
-	})
-}
-
-func (s Store) RemoveNode(ctx context.Context, name string) error {
-	return s.changeNode(ctx, name, "DELETE FROM local_ci_nodes WHERE name=?")
-}
-
-func (s Store) DisableNode(ctx context.Context, name string) error {
-	return s.changeNode(ctx, name, "UPDATE local_ci_nodes SET enabled=0 WHERE name=?")
-}
-
-func (s Store) changeNode(ctx context.Context, name, query string) error {
-	db, err := s.open()
-	if err != nil {
-		return err
-	}
-	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "node:" + name}, func(conn *sql.Conn) error {
-		result, err := conn.ExecContext(ctx, query, name)
-		if err != nil {
-			return err
-		}
-		count, err := result.RowsAffected()
-		if err == nil && count == 0 {
-			return fmt.Errorf("CI node %q: %w", name, os.ErrNotExist)
-		}
-		return err
-	})
-}
+// machines is the registry that holds the CI machines.
+func (s Store) machines() machines.Store { return machines.Store{DataDir: s.root()} }
 
 func ValidateMode(mode string) error {
 	switch mode {

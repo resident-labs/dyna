@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/pr/state"
 )
 
@@ -25,7 +26,8 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 		t.Fatal(err)
 	}
 	registry := localci.Store{DataDir: dataDir}
-	if err := registry.PutNode(ctx, localci.Node{Name: "worker", Slots: 1, Enabled: true}); err != nil {
+	ciMachine := machines.Store{DataDir: dataDir}
+	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", Roles: []machines.Role{machines.RoleCI}, SSH: "ari@worker", CISlots: 1, Enabled: true}); err != nil {
 		t.Fatal(err)
 	}
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {

@@ -1,11 +1,14 @@
 package ci
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"text/tabwriter"
 
 	"dyna-agent/internal/cli/jsonout"
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/pr/watch"
 	"github.com/spf13/cobra"
 )
@@ -18,18 +21,42 @@ func registryCommands() []*cobra.Command {
 	})}
 }
 
+// nodeCommand is the old CI node command. Each subcommand forwards to the
+// machines registry, where a CI node is a machine with the ci role.
+//
+// TODO: legacy/shim remove later — dyna git ci node forwards to dyna machine
 func nodeCommand(s localci.Store) *cobra.Command {
-	root := &cobra.Command{Use: "node", Short: "Manage shared local CI runners", Args: cobra.NoArgs}
+	root := &cobra.Command{Use: "node", Short: "Manage shared local CI machines (use dyna machine)", Args: cobra.NoArgs}
 	var ssh string
 	var slots int
 	add := &cobra.Command{
-		Use: "add <name>", Short: "Add or update an enabled CI runner", Args: cobra.ExactArgs(1),
+		Use: "add <name>", Short: "Add or update an enabled CI machine", Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			n := localci.Node{Name: args[0], SSH: ssh, Slots: slots, Enabled: true}
-			if err := s.PutNode(c.Context(), n); err != nil {
+			store := machines.Store{DataDir: s.DataDir}
+			m, err := store.Get(c.Context(), args[0])
+			if errors.Is(err, os.ErrNotExist) {
+				if ssh == "" {
+					local, err := store.GetLocal(c.Context())
+					if err != nil {
+						return err
+					}
+					return fmt.Errorf("CI machine %q needs --ssh user@host; this machine is the local machine %q, so add its CI slots with: dyna machine edit %s --ci-slots %d", args[0], local.Name, local.Name, slots)
+				}
+				m = machines.Machine{Name: args[0], Enabled: true}
+			} else if err != nil {
 				return err
 			}
-			fmt.Fprintf(c.OutOrStdout(), "Saved CI node %s with %d slots.\n", n.Name, n.Slots)
+			if !m.HasRole(machines.RoleCI) {
+				m.Roles = append(m.Roles, machines.RoleCI)
+			}
+			if ssh != "" {
+				m.SSH = ssh
+			}
+			m.CISlots, m.Enabled = slots, true
+			if _, err := store.Save(c.Context(), m); err != nil {
+				return err
+			}
+			fmt.Fprintf(c.OutOrStdout(), "Saved CI machine %s with %d slots.\n", m.Name, m.CISlots)
 			return nil
 		},
 	}
@@ -37,7 +64,7 @@ func nodeCommand(s localci.Store) *cobra.Command {
 	add.Flags().IntVar(&slots, "slots", 1, "maximum concurrent CI checks")
 	var asJSON bool
 	list := &cobra.Command{
-		Use: "list", Short: "List enabled and disabled CI runners", Args: cobra.NoArgs,
+		Use: "list", Short: "List enabled and disabled CI machines", Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			nodes, err := s.Nodes(c.Context())
 			if err != nil {
@@ -58,14 +85,26 @@ func nodeCommand(s localci.Store) *cobra.Command {
 			return out.Flush()
 		},
 	}
-	list.Flags().BoolVar(&asJSON, "json", false, "print nodes as JSON")
+	list.Flags().BoolVar(&asJSON, "json", false, "print machines as JSON")
 	remove := &cobra.Command{
-		Use: "rm <name>", Short: "Remove a CI runner", Args: cobra.ExactArgs(1),
-		RunE: func(c *cobra.Command, args []string) error { return s.RemoveNode(c.Context(), args[0]) },
+		Use: "rm <name>", Short: "Remove a CI machine, or only its ci role", Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			return (machines.Store{DataDir: s.DataDir}).RemoveRole(c.Context(), args[0], machines.RoleCI)
+		},
 	}
 	disable := &cobra.Command{
-		Use: "disable <name>", Short: "Stop scheduling new runs on a CI runner", Args: cobra.ExactArgs(1),
-		RunE: func(c *cobra.Command, args []string) error { return s.DisableNode(c.Context(), args[0]) },
+		Use: "disable <name>", Short: "Stop scheduling new runs on a CI machine", Args: cobra.ExactArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			store := machines.Store{DataDir: s.DataDir}
+			m, err := store.Get(c.Context(), args[0])
+			if err != nil {
+				return err
+			}
+			if !m.HasRole(machines.RoleCI) {
+				return fmt.Errorf("machine %q: %w", args[0], os.ErrNotExist)
+			}
+			return store.SetEnabled(c.Context(), args[0], false)
+		},
 	}
 	root.AddCommand(add, list, remove, disable)
 	return root
