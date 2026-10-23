@@ -103,6 +103,10 @@ func open(root string) (*sql.DB, error) {
 		return db, err
 	}
 	err = database.Migrate(db, "pr.policy_defaults", 1, migratePolicyDefaults)
+	if err != nil {
+		return db, err
+	}
+	err = database.Migrate(db, "pr.step_budget_verdicts", 1, migrateWallBudget)
 	return db, err
 }
 
