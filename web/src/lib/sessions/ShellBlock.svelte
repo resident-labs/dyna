@@ -3,7 +3,7 @@
   // a dark output well that shows while the job runs, when it fails, or when
   // the reader opens it. The job is the snapshot of the transcript item with
   // the live row laid over it.
-  import { api } from '../../api.js'
+  import { api, copyText } from '../../api.js'
   import { blockState, bytesOf, commandOf, finishedText, isLogChunk, isOpen, jumpOf, metaOf, plainLog, sizeOf, tailLines, titleOf } from './shellBlock.ts'
   import type { Finished, ShellJob } from './shellBlock.ts'
 
@@ -62,10 +62,30 @@
     }
   }
   let copied = $state(false)
+  let copyError = $state(false)
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
+  let copyGeneration = 0
+  $effect(() => {
+    command
+    copyGeneration++
+    copied = false
+    copyError = false
+    return () => clearTimeout(copyTimer)
+  })
   async function copy() {
-    await navigator.clipboard.writeText(command)
-    copied = true
-    setTimeout(() => (copied = false), 1500)
+    const current = ++copyGeneration
+    clearTimeout(copyTimer)
+    copied = false
+    copyError = false
+    try {
+      await copyText(command)
+      if (current !== copyGeneration) return
+      copied = true
+    } catch {
+      if (current !== copyGeneration) return
+      copyError = true
+    }
+    copyTimer = setTimeout(() => { copied = false; copyError = false }, 2000)
   }
 </script>
 
@@ -77,10 +97,11 @@
       <span class="meta" class:gold={live} class:coral={kind === 'failed'}>{metaOf(job, now, !!finished)}</span>
     </button>
     <span class="acts">
-      <button onclick={copy} title="Copy the command" aria-label="Copy the command">⧉<span class="lbl">{copied ? ' Copied' : ' Copy'}</span></button>
+      <button class:copied onclick={copy} title="Copy the command" aria-label="Copy the command"><span aria-hidden="true">{copied ? '✓' : '⧉'}</span><span class="lbl">{copied ? ' Copied' : ' Copy'}</span></button>
       {#if onjob}<button onclick={() => onjob?.(job)} title="Open the log" aria-label="Open the log">▤<span class="lbl"> Log</span></button>{/if}
     </span>
   </div>
+  <div class="copy-status" class:coral={copyError} role="status">{copyError ? 'Could not copy' : copied ? 'Copied command' : ''}</div>
   <div class="cmd"><b>$</b>{command}</div>
   {#if finished}
     {@const where = jumpOf(job, finished)}
@@ -120,6 +141,9 @@
   .acts button { background: none; border: 0; padding: 0; color: inherit; font: inherit; cursor: pointer; transition: color var(--motion-fast); }
   .acts button:hover, .acts button:focus-visible { color: var(--ink); }
   .blk:hover .acts, .blk:focus-within .acts, .blk.live .acts { opacity: 1; }
+  .copy-status { color: var(--sage); font-size: var(--t-sm); padding-left: 22px; }
+  .copy-status.coral { color: var(--coral); }
+  .acts button.copied { color: var(--sage); }
   .cmd { font: var(--t-sm)/1.6 var(--mono, ui-monospace, monospace); color: var(--faint); padding-left: 22px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 9.6em; overflow-y: auto; }
   .fin { padding-left: 22px; font-size: var(--t-sm); color: var(--faint); }
   .fin .coral { color: var(--coral); }
@@ -143,7 +167,8 @@
     .hd { flex-wrap: wrap; row-gap: 0; }
     .title { flex-wrap: wrap; flex: 1 1 0; }
     .meta { order: 3; flex-basis: 100%; padding-left: 22px; }
-    .acts { opacity: 1; gap: 14px; }
+    .acts { opacity: 1; gap: 2px; }
+    .acts button { min-width: 44px; min-height: 44px; }
     .acts .lbl { display: none; }
     .well { margin-left: 0; }
     .foot .note { margin-left: 0; }
