@@ -3,8 +3,6 @@ package roomsvc
 import (
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
@@ -329,18 +327,12 @@ func TestTranscriptPostsUseOmittedTurnEnd(t *testing.T) {
 	if _, err := e.mgr.Store.UpdateTurn(lead.ID, 1, func(turn *subagent.Turn) { turn.Started = base; turn.Ended = base.Add(time.Minute) }); err != nil {
 		t.Fatal(err)
 	}
-	dir, err := e.mgr.Store.Dir(lead.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	second := subagent.Turn{N: 2, Status: subagent.TurnOK, Started: base.Add(2*time.Minute + 72*time.Millisecond), Ended: base.Add(3 * time.Minute)}
 	data, err := json.Marshal(second)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "turns", "2.json"), data, 0600); err != nil {
-		t.Fatal(err)
-	}
+	seedTurnRow(t, e.mgr.Store, lead.ID, 2, data)
 	if _, err := e.mgr.Store.UpdateMeta(lead.ID, func(meta *subagent.Meta) { meta.Turns = 2 }); err != nil {
 		t.Fatal(err)
 	}

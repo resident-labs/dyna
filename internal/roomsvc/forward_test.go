@@ -101,10 +101,6 @@ func TestTranscriptForwardPageIncludesLiveArrivals(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("forward-turns")
 	lead := e.start(rec, "lead", nil)
-	dir, err := e.mgr.Store.Dir(lead.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	base := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
 	write := func(n int) {
 		t.Helper()
@@ -112,9 +108,7 @@ func TestTranscriptForwardPageIncludesLiveArrivals(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "turns", fmt.Sprint(n)+".json"), data, 0600); err != nil {
-			t.Fatal(err)
-		}
+		seedTurnRow(t, e.mgr.Store, lead.ID, n, data)
 		if _, err := e.mgr.Store.UpdateMeta(lead.ID, func(m *subagent.Meta) { m.Turns = n }); err != nil {
 			t.Fatal(err)
 		}
