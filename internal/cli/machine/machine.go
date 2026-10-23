@@ -136,7 +136,7 @@ func writeCapabilities(out io.Writer, m machines.Machine) {
 		system, caps.CPUs, size(caps.MemTotal), size(caps.MemAvailable))
 	fmt.Fprintf(out, "GPU:      %t\n", caps.GPU)
 	fmt.Fprintf(out, "Runtime:  %s\n", joinOr(caps.Containers.Names(), "none"))
-	fmt.Fprintf(out, "Computers: %t\n", caps.Computers.Ready())
+	fmt.Fprintf(out, "Computers: %t, stream: %t\n", caps.Computers.Ready(), caps.Computers.Stream)
 	fmt.Fprintf(out, "Dyna:     %s\n", orNone(caps.DynaVersion))
 	if load.CPUPercent != nil {
 		fmt.Fprintf(out, "Load:     %.2f %.2f %.2f, CPU %.0f%%, %s free\n",

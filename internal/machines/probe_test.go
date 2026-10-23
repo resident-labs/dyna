@@ -38,7 +38,7 @@ func TestParseProbe(t *testing.T) {
 		MemTotal: 66897960960, MemAvailable: 44691999744,
 		GPU:         true,
 		Containers:  Containers{Docker: true},
-		Computers:   Computers{Labwc: true, Xwayland: true, Wayvnc: true},
+		Computers:   Computers{Labwc: true, Xwayland: true, Stream: true},
 		DynaVersion: "dyna 0.9.412",
 	}
 	if !reflect.DeepEqual(caps, want) {
@@ -55,7 +55,12 @@ func TestParseProbe(t *testing.T) {
 		t.Fatalf("CPU percent = %v", load.CPUPercent)
 	}
 	if !caps.Computers.Ready() {
-		t.Fatal("a machine with every computer dependency is not ready")
+		t.Fatal("a machine with labwc and Xwayland cannot run a computer")
+	}
+	// Streaming is a separate capability: a machine without wayvnc still runs
+	// computers, and this one has it.
+	if !caps.Computers.Stream {
+		t.Fatal("a machine with wayvnc does not report streaming")
 	}
 }
 
