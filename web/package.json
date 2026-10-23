@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test \"src/**/*.test.js\" \"src/**/*.test.mjs\" \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
-    "test:ci": "node --test --test-reporter=spec --test-reporter=junit --test-reporter=./scripts/test-files-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=\"$JUNIT_REPORT_PATH\" --test-reporter-destination=\"${TEST_FILES_PATH:-/dev/null}\" \"src/**/*.test.js\" \"src/**/*.test.mjs\" \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
+    "test": "node --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
+    "test:ci": "node --test --test-reporter=spec --test-reporter=junit --test-reporter=./scripts/test-files-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=\"$JUNIT_REPORT_PATH\" --test-reporter-destination=\"${TEST_FILES_PATH:-/dev/null}\" \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "check": "node scripts/check-typescript.ts && svelte-check --tsconfig ./tsconfig.json && tsc --project ./tsconfig.json && tsc --project ./tsconfig.worker.json"
   },
   "devDependencies": {
