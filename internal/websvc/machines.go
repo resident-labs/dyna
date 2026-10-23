@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"dyna-agent/internal/machines"
 )
@@ -29,6 +30,19 @@ const (
 type MachineCISlots struct {
 	Used  int `json:"used"`
 	Slots int `json:"slots"`
+}
+
+// MachineCIRun is one local CI run in flight on a machine. Title and URL name
+// the PR it checks, so the page shows the PR and not only a number.
+type MachineCIRun struct {
+	Machine string    `json:"machine"`
+	Number  int       `json:"number"`
+	Title   string    `json:"title"`
+	URL     string    `json:"url"`
+	Slots   int       `json:"slots"`
+	Trial   bool      `json:"trial"`
+	Suites  []string  `json:"suites,omitempty"`
+	Started time.Time `json:"started"`
 }
 
 // MachineAgent is a session that runs on this engine's machine now.
@@ -72,6 +86,9 @@ type MachineDetail struct {
 
 	Harnesses []MachineHarness `json:"harnesses,omitempty"`
 	Running   []MachineAgent   `json:"running,omitempty"`
+	// CIRuns lists the CI runs in flight on this machine, so the page shows
+	// what it checks now. The count of them is ci.used.
+	CIRuns []MachineCIRun `json:"ciRuns,omitempty"`
 }
 
 // MachinePatch is one change to a machine. A nil field keeps its value; the
@@ -104,6 +121,10 @@ type MachineAPI struct {
 	// Running lists the sessions that run on this engine's machine now. Only
 	// the page reads it: it costs one session listing.
 	Running func() []MachineAgent
+	// CI lists the local CI runs in flight on every machine, which the engine
+	// takes from its scheduler. nil means the engine runs no local CI, so a CI
+	// machine keeps showing its slots and no use.
+	CI func() []MachineCIRun
 }
 
 // Machines lists every machine, the engine host first.
@@ -113,8 +134,9 @@ func (a MachineAPI) Machines(ctx context.Context) ([]MachineSummary, error) {
 		return nil, err
 	}
 	out := make([]MachineSummary, 0, len(list))
+	runs := a.ciRuns()
 	for _, m := range list {
-		out = append(out, a.machine(ctx, m).MachineSummary)
+		out = append(out, a.machine(ctx, m, runs).MachineSummary)
 	}
 	return out, nil
 }
@@ -125,7 +147,7 @@ func (a MachineAPI) Machine(ctx context.Context, id string) (MachineDetail, erro
 	if err != nil {
 		return MachineDetail{}, err
 	}
-	return a.machine(ctx, m), nil
+	return a.machine(ctx, m, a.ciRuns()), nil
 }
 
 // SaveMachine writes the fields a change names and answers with the page the
@@ -151,7 +173,7 @@ func (a MachineAPI) SaveMachine(ctx context.Context, id string, patch MachinePat
 	if err != nil {
 		return MachineDetail{}, err
 	}
-	return a.machine(ctx, saved), nil
+	return a.machine(ctx, saved, a.ciRuns()), nil
 }
 
 // find reads the machine with this ID. The registry is small, so one list
@@ -170,9 +192,15 @@ func (a MachineAPI) find(ctx context.Context, id string) (machines.Machine, erro
 }
 
 // machine builds one machine's page. The live figures belong to this engine's
-// machine, so only the local row reads them.
-func (a MachineAPI) machine(ctx context.Context, m machines.Machine) MachineDetail {
+// machine, so only the local row reads them. The CI runs belong to whichever
+// machine holds their slots, so a CI machine reports them wherever it runs.
+func (a MachineAPI) machine(ctx context.Context, m machines.Machine, ci map[string][]MachineCIRun) MachineDetail {
 	out := MachineDetail{MachineSummary: machineSummary(m), SSH: m.SSH}
+	if m.HasRole(machines.RoleCI) {
+		runs := ci[m.Name]
+		out.CI = &MachineCISlots{Used: ciUsedSlots(runs), Slots: m.CISlots}
+		out.CIRuns = runs
+	}
 	if !m.Local {
 		return out
 	}
@@ -186,6 +214,28 @@ func (a MachineAPI) machine(ctx context.Context, m machines.Machine) MachineDeta
 		out.Running = a.Running()
 	}
 	return out
+}
+
+// ciRuns reads the runs in flight once, grouped by machine name, so a list of
+// machines takes one snapshot instead of one per row.
+func (a MachineAPI) ciRuns() map[string][]MachineCIRun {
+	if a.CI == nil {
+		return nil
+	}
+	byMachine := map[string][]MachineCIRun{}
+	for _, run := range a.CI() {
+		byMachine[run.Machine] = append(byMachine[run.Machine], run)
+	}
+	return byMachine
+}
+
+// ciUsedSlots adds the slots the runs in flight reserved on one machine.
+func ciUsedSlots(runs []MachineCIRun) int {
+	used := 0
+	for _, run := range runs {
+		used += run.Slots
+	}
+	return used
 }
 
 // machineSummary is the row a machine's stored state alone gives.

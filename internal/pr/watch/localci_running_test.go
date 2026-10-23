@@ -54,7 +54,7 @@ func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
 	head := commit("main.go", "package main\n")
 
 	root := filepath.Join(t.TempDir(), "prs")
-	record := &Record{Key: "pr", Kind: "github", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Number: 17, Head: head, Base: base, Branch: "feature", RepoPath: repo, Watching: true, State: "open", Created: time.Unix(2, 0)}
+	record := &Record{Key: "pr", Kind: "github", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Number: 17, Title: "Show running local CI per machine", URL: "https://github.com/owner/repo/pull/17", Head: head, Base: base, Branch: "feature", RepoPath: repo, Watching: true, State: "open", Created: time.Unix(2, 0)}
 	saved := State{Version: 1, Records: map[string]*Record{record.Key: record}}
 	if err := state.Write(root, saved); err != nil {
 		t.Fatal(err)
@@ -94,6 +94,9 @@ func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
 	got := list[0]
 	if got.Machine != "hermes" || got.Slots != registeredCIRunSlots || got.Repo != "owner/repo" || got.Number != 17 || got.Head != head[:7] || got.Trial || !got.Started.Equal(started) {
 		t.Fatalf("running CI = %+v", got)
+	}
+	if got.Title != record.Title || got.URL != record.URL {
+		t.Fatalf("running CI names %q at %q, want the PR", got.Title, got.URL)
 	}
 	if suites := strings.Join(got.Suites, ","); suites != "go,cross-build" {
 		t.Fatalf("running CI suites = %q", suites)
