@@ -97,36 +97,6 @@ func TestInstallReceiptSurvivesRestartAndFinishesHookLog(t *testing.T) {
 	}
 }
 
-func TestMainMovedAliasReadsAndEmitsCanonicalEvent(t *testing.T) {
-	s, repo := setup(t)
-	ctx := context.Background()
-	add(t, s, repo, hook("alias", MainMoved))
-	r, err := repoid.Resolve(ctx, repo)
-	if err != nil {
-		t.Fatal(err)
-	}
-	db, err := s.documentsDB()
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Simulate an imported document written by the first hooks release.
-	if _, err := db.Exec("UPDATE hook_documents SET body=replace(CAST(body AS TEXT),?,?) WHERE repo=?", MainUpdated, MainMoved, filepath.Base(s.dir(r.ID))); err != nil {
-		t.Fatal(err)
-	}
-
-	hs, err := s.List(ctx, repo)
-	if err != nil || len(hs) != 1 || hs[0].Event != MainUpdated {
-		t.Fatalf("alias: %#v %v", hs, err)
-	}
-	if err = s.Emit(ctx, Event{Repo: repo, Event: MainMoved}); err != nil {
-		t.Fatal(err)
-	}
-	events := queuedEvents(t, s)
-	if len(events) != 1 || events[0].Event != MainUpdated {
-		t.Fatalf("events: %#v", events)
-	}
-}
-
 func TestSelfUpdateRecipeCapturesToolsAndRejectsMissingTools(t *testing.T) {
 	_, repo := setup(t)
 	ctx := context.Background()

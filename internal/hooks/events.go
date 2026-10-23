@@ -24,7 +24,7 @@ func (e *BlockError) Unwrap() error { return e.Err }
 // Callers may ignore errors except for before-land.
 func Emit(ctx context.Context, e Event) error { return New().Emit(ctx, e) }
 func (s Service) Emit(ctx context.Context, e Event) error {
-	e.Event = NormalizeEvent(e.Event)
+
 	r, err := repoid.Resolve(ctx, e.Repo)
 	if err != nil {
 		if e.Event == BeforeLand {
@@ -79,7 +79,7 @@ func (s Service) Dispatch(ctx context.Context, e Event) error {
 }
 
 func (s Service) dispatch(ctx context.Context, e Event, preparationErr error) error {
-	e.Event = NormalizeEvent(e.Event)
+
 	hooks, err := s.List(ctx, e.Repo)
 	if err != nil {
 		return err

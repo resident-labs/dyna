@@ -105,9 +105,6 @@ func (s Service) load(ctx context.Context, id string) ([]Hook, error) {
 	if err != nil {
 		return nil, err
 	}
-	for i := range d.Hooks {
-		d.Hooks[i].Event = NormalizeEvent(d.Hooks[i].Event)
-	}
 	return d.Hooks, nil
 }
 
