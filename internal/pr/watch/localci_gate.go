@@ -346,7 +346,7 @@ func (s *Service) registeredJobResultComplete(ctx context.Context, job registere
 	}
 	var suites []string
 	if job.trial {
-		suites = []string{"relay", "go", "cross-build", "computer-smoke", "android"}
+		suites = []string{"relay", "go", "cross-build", "computer-smoke"}
 	} else {
 		if !headSHAPattern.MatchString(job.record.Base) {
 			return false

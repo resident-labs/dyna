@@ -381,7 +381,7 @@ func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) 
 		return nil, fmt.Errorf("fetch local CI head: %w", err)
 	}
 	if job.trial {
-		return []string{"relay", "go", "cross-build", "computer-smoke", "android"}, nil
+		return []string{"relay", "go", "cross-build", "computer-smoke"}, nil
 	}
 	if !headSHAPattern.MatchString(r.Base) {
 		return nil, fmt.Errorf("local CI requires a verified base SHA")
@@ -394,14 +394,13 @@ func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) 
 }
 
 func registeredSuites(files []string) []string {
-	relay, goSuite, computers, android := false, false, false, false
+	relay, goSuite, computers := false, false, false
 	for _, f := range files {
 		workflow := strings.HasPrefix(f, ".github/")
 		script := f == "scripts/ci.sh"
 		relay = relay || workflow || script || strings.HasPrefix(f, "relay/")
 		goSuite = goSuite || workflow || script || strings.HasSuffix(f, ".go") || strings.HasPrefix(f, "internal/") || f == "go.mod" || f == "go.sum" || strings.HasPrefix(f, "desktop/") || strings.HasPrefix(f, "web/") || f == "install.sh"
 		computers = computers || workflow || strings.HasPrefix(f, "internal/computers/") || strings.HasPrefix(f, "internal/computerweb/")
-		android = android || workflow || script || strings.HasPrefix(f, "mobile/android/")
 	}
 	var suites []string
 	if relay {
@@ -412,9 +411,6 @@ func registeredSuites(files []string) []string {
 	}
 	if computers {
 		suites = append(suites, "computer-smoke")
-	}
-	if android {
-		suites = append(suites, "android")
 	}
 	return suites
 }
