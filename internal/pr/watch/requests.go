@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/ghquota"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -139,7 +140,7 @@ func (g GitHub) requestBody(ctx context.Context, r Ref, path, method string, raw
 		return nil, "", fmt.Errorf("invalid GitHub HTTP status")
 	}
 	// A 304 reply validates a saved copy and costs no REST quota.
-	engineGHQuota.record(path, status == http.StatusNotModified)
+	ghquota.Record(path, status == http.StatusNotModified)
 	headers, err := textproto.NewReader(reader).ReadMIMEHeader()
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid GitHub HTTP headers")

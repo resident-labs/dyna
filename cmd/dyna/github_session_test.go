@@ -67,7 +67,7 @@ esac
 		t.Fatal(err)
 	}
 	env := append([]string{}, inherited...)
-	for key, value := range session {
+	for key, value := range session.Env {
 		env = append(env, key+"="+value)
 	}
 	env = append(env, mode.EnvRoomID+"="+rec.ID)
