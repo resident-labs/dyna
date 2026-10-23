@@ -532,9 +532,24 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 		}
 		emit(ev)
 	}
+	scanStores := func() {
+		for topic := range s.takeStoreTopics() {
+			switch topic {
+			case "goals":
+				s.scanGoals(goalRows, goalWork, &goalVersion, false, emit)
+			case "questions":
+				s.scanQuestions(questionSig, &questionVersion, false, emit)
+			case "notices":
+				s.scanNotices(&noticeVersion, false, emit)
+			case "sync":
+				s.scanSync(&syncVersion, false, emit)
+			}
+		}
+	}
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for n := 0; ; n++ {
+		// TODO: legacy/shim remove later — fallback scans detect external writers until all mutations run in this engine.
 		s.scanSync(&syncVersion, first, emit)
 		s.scanHookSpool(&hookVersion, first, emit)
 		s.scan(offsets, &roomSig, memberSig, pinSig, first, liveEmit)
@@ -554,7 +569,7 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 		if s.AfterFirstScan != nil {
 			s.AfterFirstScan()
 		}
-		if !s.waitTick(ctx, tick.C, func() { s.scanPRs(prSig, prWork, &prVersion, false, emit) }, func() { s.scanDirtyMembers(memberSig, liveEmit) }, func() { scanCoordinators(s.takeCoordinatorHints()) }, func() { s.scanCallRequests(callRequestSig, &callRequestVersion, false, emit) }) {
+		if !s.waitTick(ctx, tick.C, func() { s.scanPRs(prSig, prWork, &prVersion, false, emit) }, func() { s.scanDirtyMembers(memberSig, liveEmit) }, func() { scanCoordinators(s.takeCoordinatorHints()) }, func() { s.scanCallRequests(callRequestSig, &callRequestVersion, false, emit) }, scanStores) {
 			return
 		}
 	}
@@ -563,7 +578,7 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 // waitTick waits for the next tick. Local state wakes scan only the affected
 // store between ticks. It
 // returns false when ctx ends.
-func (s *Service) waitTick(ctx context.Context, tick <-chan time.Time, scanPRs, scanSessions, scanCoordinators, scanCallRequests func()) bool {
+func (s *Service) waitTick(ctx context.Context, tick <-chan time.Time, scanPRs, scanSessions, scanCoordinators, scanCallRequests, scanStores func()) bool {
 	for {
 		select {
 		case <-ctx.Done():
@@ -574,6 +589,8 @@ func (s *Service) waitTick(ctx context.Context, tick <-chan time.Time, scanPRs, 
 			scanCoordinators()
 		case <-s.callRequestWake:
 			scanCallRequests()
+		case <-s.storeWake:
+			scanStores()
 		case <-s.prWake:
 			scanPRs()
 		case <-s.sessionWake:

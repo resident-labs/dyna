@@ -256,7 +256,7 @@ func TestQuestionWriteEmitsOneCanonicalEvent(t *testing.T) {
 	count := 0
 	state.For(db).SetPublish(func(event hub.Event) {
 		if event.Topic == "questions" {
-			count++
+			e.svc.StoreChanged(event.Topic)
 		}
 	})
 	if _, err := e.svc.Notify.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: "owner", Text: "Which region?", Meanwhile: "check data"}, nil); err != nil {

@@ -114,9 +114,7 @@ func (s *Service) update(ctx context.Context, fn func(*Snapshot) error) error {
 		return err
 	}
 	var st Snapshot
-	// Room watch still sends sync changes. Its later bus migration will move
-	// that event here; publishing now would send every change twice.
-	return state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+	return state.For(db).Write(ctx, hub.Event{Topic: "sync"}, func(conn *sql.Conn) error {
 		var raw []byte
 		if err := conn.QueryRowContext(ctx, "SELECT snapshot FROM lane_sync WHERE id=1").Scan(&raw); err != nil {
 			return err

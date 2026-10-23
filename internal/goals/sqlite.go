@@ -457,8 +457,7 @@ func (s *Store) updateTx(fn func(*wake, *State) error, where string, args ...any
 		}
 		var need []string
 		err := sessionlife.WithSessionLocks(s.sessions(), ids, func() error {
-			// TODO: legacy/shim remove later — roomsvc.Watch publishes goals changes; publish here after item 16 removes that scan.
-			return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+			return state.For(db).Write(context.Background(), hub.Event{Topic: "goals"}, func(conn *sql.Conn) error {
 				st, stored, err := readState(conn, where, args...)
 				if err != nil {
 					return err

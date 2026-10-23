@@ -58,7 +58,10 @@ type Service struct {
 	snap           sessionSnapshot
 	// prWake asks Watch to scan PRs now, after the engine's own PR state
 	// write. It holds one pending wake.
-	prWake chan struct{}
+	prWake      chan struct{}
+	storeWake   chan struct{}
+	storeMu     sync.Mutex
+	storeTopics map[string]bool
 	// callRequestWake asks Watch to read committed local call-request changes.
 	callRequestWake chan struct{}
 	// RunnerExited, when set, runs after a watched turn runner exits, with
@@ -100,6 +103,29 @@ func (s *Service) PRsChanged() {
 	case s.prWake <- struct{}{}:
 	default:
 	}
+}
+
+// StoreChanged queues a committed store topic for the sole room watcher.
+// A burst keeps one wake and one scan per topic.
+func (s *Service) StoreChanged(topic string) {
+	s.storeMu.Lock()
+	if s.storeTopics == nil {
+		s.storeTopics = map[string]bool{}
+	}
+	s.storeTopics[topic] = true
+	s.storeMu.Unlock()
+	select {
+	case s.storeWake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Service) takeStoreTopics() map[string]bool {
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+	topics := s.storeTopics
+	s.storeTopics = nil
+	return topics
 }
 
 // CallRequestsChanged wakes the sole frontend publisher after a local commit.
@@ -156,7 +182,7 @@ func New(n *notify.Service) *Service {
 	if n == nil {
 		n = notify.Default()
 	}
-	s := &Service{Notify: n, prWake: make(chan struct{}, 1), callRequestWake: make(chan struct{}, 1), sessionWake: make(chan struct{}, 1), coordinatorWake: make(chan struct{}, 1)}
+	s := &Service{Notify: n, prWake: make(chan struct{}, 1), storeWake: make(chan struct{}, 1), callRequestWake: make(chan struct{}, 1), sessionWake: make(chan struct{}, 1), coordinatorWake: make(chan struct{}, 1)}
 	s.PRs = &prview.Service{Notify: n, SessionInRoom: s.SessionInRoom, WorkspaceRoot: s.files().WorkspaceRoot}
 	n.Sessions.ClosePRs = func(ctx context.Context, from, heir subagent.Info) ([]string, error) {
 		return s.PRs.Watcher().CloseSession(ctx, from, heir)

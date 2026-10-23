@@ -40,7 +40,7 @@ func TestCallRequestViewsDeliveryAndEvents(t *testing.T) {
 		if consumers[0].waitTick(ctx, nil, unexpected, unexpected, unexpected, func() {
 			consumers[0].scanCallRequests(signatures[0], &versions[0], false, func(ev Event) { received[0] = append(received[0], ev) })
 			cancel()
-		}) {
+		}, nil) {
 			t.Fatal("local call-request change required a tick")
 		}
 		select {
