@@ -602,7 +602,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 			return resumeTurnReports(ctx, rooms.Notify, "")
 		})
 	}
-	workerDone = begin(watch, rooms, accounts, load, readOnly, signals, engineTimers, events, started, func(ev roomsvc.Event) {
+	workerDone = begin(watch, rooms, accounts, load, readOnly, signals, engineTimers, events, hookService, started, func(ev roomsvc.Event) {
 		if ev.Kind == "call-requests" {
 			wakeWorker(callRing)
 		}
@@ -661,7 +661,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	go func() { errs <- servers[1].Serve(cardLn) }()
 	go func() { errs <- servers[2].Serve(socketLn) }()
 	if !readOnly {
-		startService(func() { maintenance.Loop(ctx, log.Printf, hookService, rooms.Notify.Sessions.RetainClosedSession) })
+		startService(func() { maintenance.Loop(ctx, log.Printf, rooms.Notify.Sessions.RetainClosedSession) })
 	}
 
 	fmt.Printf("Dyna web app on http://%s (cards on http://%s)\n", f.Addr, f.CardAddr)

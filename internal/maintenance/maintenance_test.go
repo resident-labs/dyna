@@ -10,11 +10,9 @@ import (
 	"dyna-agent/internal/store/storetest"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 )
@@ -120,7 +118,7 @@ func TestLowSpaceJudgesInMemoryFileSystemsByShare(t *testing.T) {
 func TestLoopCanceledDoesNotRunMaintenance(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	Loop(ctx, func(string, ...any) { t.Fatal("canceled loop logged or ran") }, shutdownHooks{}, nil)
+	Loop(ctx, func(string, ...any) { t.Fatal("canceled loop logged or ran") }, nil)
 }
 
 func TestScratchOwnerReadsSessionAndRunLifecycle(t *testing.T) {
@@ -213,62 +211,6 @@ func TestOwnerAlertPostsDiskNotice(t *testing.T) {
 	// One notice per key, with the newest facts, and its line built from them.
 	if list[0].Disk == nil || list[0].Disk.Paths[0].FreeBytes != 1024 || list[0].Line() == "" {
 		t.Fatalf("notice = %+v", list[0])
-	}
-}
-
-type shutdownHooks struct {
-	cancel context.CancelFunc
-	phase  string
-	fail   error
-}
-
-func (h shutdownHooks) ReconcileInstall(context.Context) error {
-	if h.phase == "install" {
-		h.cancel()
-		return context.Canceled
-	}
-	if h.phase == "real-error" {
-		return h.fail
-	}
-	return nil
-}
-func (h shutdownHooks) Repositories(context.Context) ([]string, error) { return []string{"repo"}, nil }
-func (h shutdownHooks) Tick(context.Context, string, time.Time) error {
-	if h.phase == "real-hook-error" {
-		return h.fail
-	}
-	h.cancel()
-	return context.Canceled
-}
-func (h shutdownHooks) TickGlobal(context.Context, time.Time) error { return nil }
-
-func TestLoopReportsShutdownOnce(t *testing.T) {
-	for _, phase := range []string{"install", "hooks", "real-error", "real-hook-error"} {
-		t.Run(phase, func(t *testing.T) {
-			t.Setenv("XDG_DATA_HOME", t.TempDir())
-			t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			var lines []string
-			hooks := shutdownHooks{cancel: cancel, phase: phase, fail: errors.New("install disk failure")}
-			loop(ctx, func(format string, args ...any) {
-				line := fmt.Sprintf(format, args...)
-				lines = append(lines, line)
-				if phase == "real-hook-error" && strings.HasPrefix(line, "hooks:") {
-					cancel()
-				}
-			}, hooks, nil)
-			want := []string{"maintenance: stopped for engine shutdown"}
-			if phase == "real-error" {
-				want = append([]string{"install hook results: install disk failure"}, want...)
-			}
-			if phase == "real-hook-error" {
-				want = append([]string{"hooks: install disk failure"}, want...)
-			}
-			if strings.Join(lines, "\n") != strings.Join(want, "\n") {
-				t.Fatalf("logs=%q want=%q", lines, want)
-			}
-		})
 	}
 }
 

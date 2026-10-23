@@ -19,6 +19,7 @@ const (
 	timerLaneFetch           = "lane-fetch"
 	timerQuestions           = "questions"
 	timerHooks               = "hooks"
+	timerHookSchedule        = "hook-schedule"
 	timerRootFlush           = "root-flush"
 	timerPRs                 = "prs"
 	timerMerges              = "merges"
