@@ -53,7 +53,8 @@ func (s *Store) postNormalizationsDB() (*sql.DB, error) {
 			}
 			var kind string
 			if err := json.Unmarshal(source["kind"], &kind); err != nil && source["kind"] != nil {
-				return false, err
+				// The message reader skips invalid records; migration must do the same.
+				return false, nil
 			}
 			current["wake"] = json.RawMessage("true")
 			if kind == "instructions" {
