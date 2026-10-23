@@ -13,10 +13,14 @@ import (
 type MachineStatus string
 
 const (
-	// MachineOnline is this engine's own machine: the call runs on it.
+	// MachineOnline is this engine's own machine, or a machine the probe
+	// reached: the engine knows it is up.
 	MachineOnline MachineStatus = "online"
-	// MachineOff is a machine switched off in the registry.
-	MachineOff MachineStatus = "off"
+	// MachineDisabled is a machine switched off in the registry. It takes no
+	// new work, but it is not known to be down.
+	MachineDisabled MachineStatus = "disabled"
+	// MachineOffline is a machine the probe could not reach.
+	MachineOffline MachineStatus = "offline"
 	// MachineUnknown is a machine the engine does not probe yet.
 	MachineUnknown MachineStatus = "unknown"
 )
@@ -25,6 +29,16 @@ const (
 type MachineCISlots struct {
 	Used  int `json:"used"`
 	Slots int `json:"slots"`
+}
+
+// MachineAgent is a session that runs on this engine's machine now.
+type MachineAgent struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Address string `json:"address,omitempty"`
+	Room    string `json:"room,omitempty"`
+	RoomID  string `json:"roomId,omitempty"`
+	Hue     int    `json:"hue"`
 }
 
 // MachineSummary is one row of the Machines list. A figure the engine does not
@@ -36,6 +50,7 @@ type MachineSummary struct {
 	Local     bool            `json:"local"`
 	Enabled   bool            `json:"enabled"`
 	Status    MachineStatus   `json:"status"`
+	CISlots   int             `json:"ciSlots"`
 	CPU       *int            `json:"cpu,omitempty"`
 	Agents    *int            `json:"agents,omitempty"`
 	Computers *int            `json:"computers,omitempty"`
@@ -49,13 +64,14 @@ type MachineHarness struct {
 }
 
 // MachineDetail is the Machine page: the summary, how the engine reaches the
-// machine, and the versions this machine runs.
+// machine, the versions this machine runs and the sessions that run on it.
 type MachineDetail struct {
 	MachineSummary
-	SSH         string           `json:"ssh"`
-	CISlots     int              `json:"ciSlots"`
-	DynaVersion string           `json:"dynaVersion,omitempty"`
-	Harnesses   []MachineHarness `json:"harnesses,omitempty"`
+	SSH         string `json:"ssh"`
+	DynaVersion string `json:"dynaVersion,omitempty"`
+
+	Harnesses []MachineHarness `json:"harnesses,omitempty"`
+	Running   []MachineAgent   `json:"running,omitempty"`
 }
 
 // MachinePatch is one change to a machine. A nil field keeps its value; the
@@ -85,6 +101,9 @@ type MachineAPI struct {
 	Version string
 	// Live reads this engine's machine. It runs for the local row only.
 	Live func(ctx context.Context) MachineLive
+	// Running lists the sessions that run on this engine's machine now. Only
+	// the page reads it: it costs one session listing.
+	Running func() []MachineAgent
 }
 
 // Machines lists every machine, the engine host first.
@@ -153,17 +172,19 @@ func (a MachineAPI) find(ctx context.Context, id string) (machines.Machine, erro
 // machine builds one machine's page. The live figures belong to this engine's
 // machine, so only the local row reads them.
 func (a MachineAPI) machine(ctx context.Context, m machines.Machine) MachineDetail {
-	out := MachineDetail{MachineSummary: machineSummary(m), SSH: m.SSH, CISlots: m.CISlots}
+	out := MachineDetail{MachineSummary: machineSummary(m), SSH: m.SSH}
 	if !m.Local {
 		return out
 	}
 	out.DynaVersion = a.Version
-	if a.Live == nil {
-		return out
+	if a.Live != nil {
+		live := a.Live(ctx)
+		out.CPU, out.Agents, out.Computers = live.CPU, live.Agents, live.Computers
+		out.Harnesses = live.Harnesses
 	}
-	live := a.Live(ctx)
-	out.CPU, out.Agents, out.Computers = live.CPU, live.Agents, live.Computers
-	out.Harnesses = live.Harnesses
+	if a.Running != nil {
+		out.Running = a.Running()
+	}
 	return out
 }
 
@@ -176,15 +197,16 @@ func machineSummary(m machines.Machine) MachineSummary {
 		Local:   m.Local,
 		Enabled: m.Enabled,
 		Status:  machineStatus(m),
+		CISlots: m.CISlots,
 	}
 }
 
 // machineStatus words a stored machine: this one runs the engine, a switched
-// off one runs nothing, and a remote one is not probed yet.
+// off one takes no new work, and a remote one is not probed yet.
 func machineStatus(m machines.Machine) MachineStatus {
 	switch {
 	case !m.Enabled:
-		return MachineOff
+		return MachineDisabled
 	case m.Local:
 		return MachineOnline
 	default:

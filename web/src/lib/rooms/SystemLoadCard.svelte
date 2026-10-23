@@ -5,15 +5,15 @@
   import Avatar from '../ui/Avatar.svelte'
   import { loadView } from './systemLoad.ts'
   // load: one SystemLoad answer. onagent opens a top row's session.
-  // title names the card: the Home card shows this computer, the Machine page
-  // shows the same figures as that machine's usage.
-  let { load, onagent, title = 'This computer' } = $props()
+  // title names the card. rows=false leaves the busy sessions out, for a page
+  // that lists the sessions that run there itself.
+  let { load, onagent = undefined, title = 'This computer', rows = true } = $props()
   let v = $derived(loadView(load))
 </script>
 
 <Card {title}>
   <div class="head">
-    <span class="cpu">{v.cpu === null ? '–' : `${v.cpu}%`}</span>
+    <span class="cpu"><span class="what">CPU</span><span class="big">{v.cpu === null ? '–' : `${v.cpu}%`}</span></span>
     <span class="load" class:hot={v.hot}>{v.loadText}</span>
   </div>
   {#if v.known}
@@ -33,17 +33,21 @@
     {#each v.mem as s (s.key)}<span><i class="dot m-{s.key}"></i>{s.label} {s.text}</span>{/each}
     <span class="total">{v.memText}</span>
   </div>
-  {#each v.top as t (t.id)}
-    <Row dense text={t.name} onclick={t.address ? () => onagent?.(t) : null}>
-      {#snippet lead()}<Avatar name={t.name} hue={t.hue} size={24} />{/snippet}
-      {#snippet trail()}{#if t.room}<Chip>{t.room}</Chip>{/if}<span class="cores mono">{t.cores}</span>{/snippet}
-    </Row>
-  {/each}
+  {#if rows}
+    {#each v.top as t (t.id)}
+      <Row dense text={t.name} onclick={t.address ? () => onagent?.(t) : null}>
+        {#snippet lead()}<Avatar name={t.name} hue={t.hue} size={24} />{/snippet}
+        {#snippet trail()}{#if t.room}<Chip>{t.room}</Chip>{/if}<span class="cores mono">{t.cores}</span>{/snippet}
+      </Row>
+    {/each}
+  {/if}
 </Card>
 
 <style>
   .head { display: flex; align-items: baseline; gap: var(--s3); }
-  .cpu { font-size: var(--t-display); font-weight: 600; color: var(--ink); line-height: 1; }
+  .cpu { display: inline-flex; align-items: baseline; gap: 6px; }
+  .what { font-size: var(--t-sm); font-weight: 600; color: var(--muted); }
+  .big { font-size: var(--t-display); font-weight: 600; color: var(--ink); line-height: 1; }
   .load { font-size: var(--t-sm); color: var(--muted); }
   .load.hot { color: var(--gold); }
   .bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--raise); }

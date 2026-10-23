@@ -6,13 +6,14 @@
   import Card from '../ui/Card.svelte'
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
+  import Avatar from '../ui/Avatar.svelte'
   import Switch from '../ui/Switch.svelte'
   import Skeleton from '../ui/Skeleton.svelte'
   import SystemLoadCard from '../rooms/SystemLoadCard.svelte'
   import { pollLoad } from '../rooms/systemLoad.ts'
   import { api } from '../../api.ts'
-  import type { LoadOwnerCores, SystemLoad } from '../api/system.ts'
-  import type { MachineDetail, MachinePatch, MachineRole } from '../api/machine.ts'
+  import type { SystemLoad } from '../api/system.ts'
+  import type { MachineAgent, MachineDetail, MachinePatch, MachineRole } from '../api/machine.ts'
   import { roleLabel, routeText, statusText } from './machines.ts'
 
   let { machine, error = '', busy = false, onback, onagent, onsave }: {
@@ -20,7 +21,7 @@
     error?: string
     busy?: boolean
     onback: () => void
-    onagent?: (owner: LoadOwnerCores) => void
+    onagent?: (agent: MachineAgent) => void
     onsave: (patch: MachinePatch) => void
   } = $props()
 
@@ -90,10 +91,20 @@
       {#if machine.local}
         <div class="usage">
           {#if load}
-            <SystemLoadCard title="Usage" {load} {onagent} />
+            <SystemLoadCard title="Usage" {load} rows={false} />
           {:else}
             <Card title="Usage"><p class="note">Reading this machine…</p></Card>
           {/if}
+          <Card title="Running now" count={machine.running?.length || null}>
+            {#each machine.running ?? [] as agent (agent.id)}
+              <Row dense text={agent.name} onclick={() => onagent?.(agent)}>
+                {#snippet lead()}<Avatar name={agent.name} hue={agent.hue} size={24} />{/snippet}
+                {#snippet trail()}{#if agent.room}<Chip>{agent.room}</Chip>{/if}{/snippet}
+              </Row>
+            {:else}
+              <p class="note">No agent runs here now.</p>
+            {/each}
+          </Card>
         </div>
       {/if}
 
@@ -154,7 +165,8 @@
   .back:active { background: var(--select); }
   .status { margin-left: auto; flex: none; font-size: var(--t-sm); color: var(--faint); }
   .status.online { color: var(--sage); }
-  .status.off { color: var(--coral); }
+  .status.offline { color: var(--coral); }
+  .status.disabled { color: var(--muted); }
   .body { padding: var(--s2) var(--s4) var(--s4); display: grid; gap: var(--s3); align-content: start; max-width: 900px; }
   .usage { display: grid; gap: var(--s3); }
   .value { color: var(--ink-2); }
