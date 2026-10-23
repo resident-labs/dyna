@@ -83,8 +83,15 @@ func (s Store) Read(id string) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
+	if err := s.finishLegacyJob(db, id); err != nil {
+		return Job{}, err
+	}
+	return readJob(db, id)
+}
+
+func readJob(db *sql.DB, id string) (Job, error) {
 	var body []byte
-	err = db.QueryRow("SELECT body FROM hook_install_jobs WHERE id=?", id).Scan(&body)
+	err := db.QueryRow("SELECT body FROM hook_install_jobs WHERE id=?", id).Scan(&body)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, os.ErrNotExist
 	}
@@ -108,12 +115,19 @@ func (s Store) Update(id string, fn func(*Job) error) error {
 	if err = os.MkdirAll(s.Root, 0700); err != nil {
 		return err
 	}
+	db, err := s.db()
+	if err != nil {
+		return err
+	}
 	unlock, err := store.Lock(p + ".lock")
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	j, err := s.Read(id)
+	if err := s.finishLegacyJobLocked(db, id); err != nil {
+		return err
+	}
+	j, err := readJob(db, id)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -124,13 +138,10 @@ func (s Store) Update(id string, fn func(*Job) error) error {
 	if err != nil {
 		return err
 	}
-	db, err := s.db()
-	if err != nil {
-		return err
-	}
 	return statewrite.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
 		_, err := conn.ExecContext(context.Background(), `INSERT INTO hook_install_jobs(id,body) VALUES(?,?)
-ON CONFLICT(id) DO UPDATE SET body=excluded.body`, id, body)
+ON CONFLICT(id) DO UPDATE SET body=excluded.body,
+legacy_pending=CASE WHEN ? THEN 0 ELSE hook_install_jobs.legacy_pending END`, id, body, j.Status == "finished" || j.Recorded)
 		return err
 	})
 }
@@ -145,12 +156,19 @@ func (s Store) Archive(id string) error {
 	if err := os.MkdirAll(s.Root, 0700); err != nil {
 		return err
 	}
+	db, err := s.db()
+	if err != nil {
+		return err
+	}
 	unlock, err := store.Lock(p + ".lock")
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	j, err := s.Read(id)
+	if err := s.finishLegacyJobLocked(db, id); err != nil {
+		return err
+	}
+	j, err := readJob(db, id)
 	if os.IsNotExist(err) {
 		return nil
 	}
@@ -160,12 +178,8 @@ func (s Store) Archive(id string) error {
 	if !j.Recorded {
 		return fmt.Errorf("cannot archive an unrecorded install")
 	}
-	db, err := s.db()
-	if err != nil {
-		return err
-	}
 	return statewrite.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(context.Background(), "UPDATE hook_install_jobs SET archived=1 WHERE id=?", id)
+		_, err := conn.ExecContext(context.Background(), "UPDATE hook_install_jobs SET archived=1,legacy_pending=0 WHERE id=?", id)
 		return err
 	})
 }
@@ -175,6 +189,30 @@ func (s Store) List() ([]Job, error) {
 	db, err := s.db()
 	if err != nil {
 		return nil, err
+	}
+	// Only imported unfinished jobs can read a final legacy receipt.
+	pendingRows, err := db.Query("SELECT id FROM hook_install_jobs WHERE legacy_pending=1 AND archived=0")
+	if err != nil {
+		return nil, err
+	}
+	var pendingIDs []string
+	for pendingRows.Next() {
+		var id string
+		if err := pendingRows.Scan(&id); err != nil {
+			pendingRows.Close()
+			return nil, err
+		}
+		pendingIDs = append(pendingIDs, id)
+	}
+	err = pendingRows.Err()
+	pendingRows.Close()
+	if err != nil {
+		return nil, err
+	}
+	for _, id := range pendingIDs {
+		if err := s.finishLegacyJob(db, id); err != nil {
+			return nil, err
+		}
 	}
 	rows, err := db.Query("SELECT body FROM hook_install_jobs WHERE archived=0 ORDER BY id")
 	if err != nil {

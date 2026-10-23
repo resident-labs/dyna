@@ -4,17 +4,22 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
+	statewrite "dyna-agent/internal/state"
+	"dyna-agent/internal/store"
 )
 
 const jobsSchema = `CREATE TABLE hook_install_jobs (
  id TEXT PRIMARY KEY,
  archived INTEGER NOT NULL DEFAULT 0,
+ legacy_pending INTEGER NOT NULL DEFAULT 0,
  body BLOB NOT NULL
 )`
 
@@ -57,31 +62,125 @@ func (s Store) importJobs(conn *sql.Conn) error {
 				log.Printf("skip install receipt %s: invalid job ID", path)
 				continue
 			}
-			info, err := os.Lstat(path)
+			// Old installers share this lock while they finish their receipt.
+			unlock, err := store.Lock(filepath.Join(s.Root, id+".json.lock"))
 			if err != nil {
 				return err
 			}
-			if !info.Mode().IsRegular() {
-				log.Printf("skip install receipt %s: not a regular file", path)
-				continue
-			}
-			raw, err := os.ReadFile(path)
-			if err != nil {
+			err = func() error {
+				raw, err := readLegacyJob(path, id)
+				if err != nil {
+					return err
+				}
+				if raw == nil {
+					return nil
+				}
+				j, err := decodeJob(raw)
+				if err != nil {
+					return err
+				}
+				pending := dir.archived == 0 && j.Status != "finished" && !j.Recorded
+				_, err = conn.ExecContext(ctx, "INSERT OR IGNORE INTO hook_install_jobs(id,archived,legacy_pending,body) VALUES(?,?,?,?)", id, dir.archived, pending, raw)
 				return err
-			}
-			var j Job
-			if err := json.Unmarshal(raw, &j); err != nil {
-				log.Printf("skip install receipt %s: %v", path, err)
-				continue
-			}
-			if j.ID != id {
-				log.Printf("skip install receipt %s: job ID does not match filename", path)
-				continue
-			}
-			if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO hook_install_jobs(id,archived,body) VALUES(?,?,?)", id, dir.archived, raw); err != nil {
+			}()
+			unlock()
+			if err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// TODO: legacy/shim remove later — reads only receipts selected by the one-time import.
+func readLegacyJob(path, id string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		log.Printf("skip install receipt %s: not a regular file", path)
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var j Job
+	if err := json.Unmarshal(raw, &j); err != nil {
+		log.Printf("skip install receipt %s: %v", path, err)
+		return nil, nil
+	}
+	if j.ID != id {
+		log.Printf("skip install receipt %s: job ID does not match filename", path)
+		return nil, nil
+	}
+	return raw, nil
+}
+
+// TODO: legacy/shim remove later — unfinished imported jobs get one terminal handoff.
+// The caller holds the old job lock. Only the finite set marked at import can
+// read a source; a terminal receipt or canonical completion retires its flag.
+func (s Store) finishLegacyJobLocked(db *sql.DB, id string) error {
+	var pending bool
+	err := db.QueryRow("SELECT legacy_pending FROM hook_install_jobs WHERE id=?", id).Scan(&pending)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !pending) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	path, err := s.path(id)
+	if err != nil {
+		return err
+	}
+	raw, err := readLegacyJob(path, id)
+	if err != nil {
+		return err
+	}
+	if raw == nil {
+		raw, err = readLegacyJob(filepath.Join(s.Root, "done", id+".json"), id)
+		if err != nil {
+			return err
+		}
+	}
+	if raw == nil {
+		return nil
+	}
+	j, err := decodeJob(raw)
+	if err != nil {
+		return err
+	}
+	if j.Status != "finished" && !j.Recorded {
+		return nil
+	}
+	return statewrite.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(context.Background(), "UPDATE hook_install_jobs SET body=?,legacy_pending=0 WHERE id=? AND legacy_pending=1", raw, id)
+		return err
+	})
+}
+
+// TODO: legacy/shim remove later — checks only unfinished imported job identities.
+func (s Store) finishLegacyJob(db *sql.DB, id string) error {
+	var pending bool
+	err := db.QueryRow("SELECT legacy_pending FROM hook_install_jobs WHERE id=?", id).Scan(&pending)
+	if errors.Is(err, sql.ErrNoRows) || (err == nil && !pending) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	path, err := s.path(id)
+	if err != nil {
+		return err
+	}
+	unlock, err := store.Lock(path + ".lock")
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return s.finishLegacyJobLocked(db, id)
 }
