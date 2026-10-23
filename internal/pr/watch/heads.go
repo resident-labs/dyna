@@ -491,9 +491,11 @@ type mainCIResult struct {
 }
 
 // mainCIVerdict judges every context of a commit the way the default-branch
-// rollup does, so a recheck never ignores an external check or a commit status
-// that the rollup counted: the latest result of each check and status decides,
-// and a cancelled context that a later result replaced does not count.
+// rollup does, so a recheck never ignores a fact the rollup counted: the latest
+// result of each check and status decides, and a cancelled context that a later
+// result replaced does not count. Runs are evidence of their own, because a
+// replacement that has not created job checks yet, or that fails before it
+// creates them, exists only as a run.
 func mainCIVerdict(snap Snapshot) string {
 	failed, pending, passed := false, false, false
 	for _, check := range snap.currentChecks() {
@@ -506,6 +508,16 @@ func mainCIVerdict(snap Snapshot) string {
 			pending = true
 		case "success":
 			passed = true
+		}
+	}
+	// currentRuns already drops a cancellation that a later run of the same
+	// workflow replaced, so a queued replacement reads as unfinished here.
+	for _, run := range currentRuns(snap.Runs) {
+		switch {
+		case run.Status != "completed" || run.Conclusion == "":
+			pending = true
+		case run.Conclusion == "cancelled" || !success(run.Conclusion):
+			failed = true
 		}
 	}
 	latest := map[string]Status{}

@@ -442,22 +442,39 @@ func TestDefaultVerificationWaitsForUnfinishedChecks(t *testing.T) {
 // a later run of the same workflow passed. The latest completed result of each
 // check must decide for every PR of the repository, from one read.
 func TestMainCIUsesTheLatestCompletedRunForEachCheck(t *testing.T) {
-	e, reads := cancelledMainCIEnv(t, []int{1, 2}, nil, nil)
+	e, reads := mainCIEnv(t, mainCIFixture{numbers: []int{1, 2}})
 	if err := e.s.ConfirmHeads(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	st, err := e.s.Store.Read()
-	if err != nil {
 		t.Fatal(err)
 	}
 	if got := reads.Load(); got != 1 {
 		t.Fatalf("commit CI reads = %d, want one shared read", got)
 	}
 	for _, number := range []int{1, 2} {
-		p, status := storedDefault(st, *st.Records[fmt.Sprintf("github.com/owner/repo#%d", number)])
-		if status != "passed" {
-			t.Fatalf("PR #%d main CI = %s (%s); a superseded cancellation failed main", number, status, defaultReason(p, status))
+		if status := mainCIStatus(t, e, number); status != "passed" {
+			t.Fatalf("PR #%d main CI = %s; a superseded cancellation failed main", number, status)
 		}
+	}
+}
+
+// A cancelled run whose replacement is queued has not created its job checks
+// yet. The run itself is the evidence, so another workflow passing cannot make
+// main green while the replacement is unfinished.
+func TestMainCIWaitsForAQueuedReplacementRun(t *testing.T) {
+	passing := actionsCheck(Check{ID: 500, Name: "go-static", Status: "completed", Conclusion: "success"})
+	passing.CheckSuite.ID = 2
+	e, _ := mainCIEnv(t, mainCIFixture{
+		numbers: []int{1},
+		checks:  []Check{passing},
+		runs: []Run{
+			{ID: 1, Attempt: 1, WorkflowID: 7, CheckSuiteID: 1, Event: "push", Status: "completed", Conclusion: "cancelled"},
+			{ID: 2, Attempt: 1, WorkflowID: 7, CheckSuiteID: 3, Event: "push", Status: "queued"},
+		},
+	})
+	if err := e.s.ConfirmHeads(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if status := mainCIStatus(t, e, 1); status != "pending" {
+		t.Fatalf("main CI = %s; a queued replacement run did not hold main", status)
 	}
 }
 
@@ -477,17 +494,12 @@ func TestMainCIKeepsExternalChecksAndStatuses(t *testing.T) {
 		{name: "passed external check and status", extra: []Check{externalCheck("greptile", "completed", "success")}, statuses: []Status{{ID: 1, Context: "ci/security", State: "success"}}, want: "passed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			e, _ := cancelledMainCIEnv(t, []int{1}, tc.extra, tc.statuses)
+			e, _ := mainCIEnv(t, mainCIFixture{numbers: []int{1}, extra: tc.extra, statuses: tc.statuses})
 			if err := e.s.ConfirmHeads(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			st, err := e.s.Store.Read()
-			if err != nil {
-				t.Fatal(err)
-			}
-			p, status := storedDefault(st, *st.Records["github.com/owner/repo#1"])
-			if status != tc.want {
-				t.Fatalf("main CI = %s, want %s (%s)", status, tc.want, defaultReason(p, status))
+			if status := mainCIStatus(t, e, 1); status != tc.want {
+				t.Fatalf("main CI = %s, want %s", status, tc.want)
 			}
 		})
 	}
@@ -501,13 +513,23 @@ func externalCheck(name, status, conclusion string) Check {
 	return c
 }
 
-// cancelledMainCIEnv serves a red default rollup with cancelled check runs, an
-// older cancelled run superseded by a passing one at the same head, and the
-// given extra checks and commit statuses. It returns the environment and a
-// count of the commit CI reads.
-func cancelledMainCIEnv(t *testing.T, numbers []int, extra []Check, statuses []Status) (*testEnv, *atomic.Int64) {
+// mainCIFixture is one red-rollup main commit. A nil Checks or Runs field gets
+// the default: eight cancelled checks with passing replacements, from a
+// cancelled run superseded by a passing one.
+type mainCIFixture struct {
+	numbers  []int
+	checks   []Check
+	runs     []Run
+	extra    []Check
+	statuses []Status
+}
+
+// mainCIEnv serves a red default rollup with cancelled check runs, the fixture's
+// commit CI, and the given extra checks and statuses. It returns the environment
+// and a count of the commit CI reads.
+func mainCIEnv(t *testing.T, f mainCIFixture) (*testEnv, *atomic.Int64) {
 	t.Helper()
-	e, _, _ := mergeEnv(t, numbers...)
+	e, _, _ := mergeEnv(t, f.numbers...)
 	head := ""
 	rewriteMergeDefault(e, func(target map[string]any) {
 		head, _ = target["oid"].(string)
@@ -522,32 +544,46 @@ func cancelledMainCIEnv(t *testing.T, numbers []int, extra []Check, statuses []S
 			},
 		}
 	})
-	var checks []Check
-	for i := range 8 {
-		name := fmt.Sprintf("job-%d", i)
-		cancelled := actionsCheck(Check{ID: int64(i + 1), Name: name, Status: "completed", Conclusion: "cancelled"})
-		cancelled.CheckSuite.ID = 1
-		passed := actionsCheck(Check{ID: int64(i + 101), Name: name, Status: "completed", Conclusion: "success"})
-		passed.CheckSuite.ID = 2
-		checks = append(checks, cancelled, passed)
+	checks := f.checks
+	if checks == nil {
+		for i := range 8 {
+			name := fmt.Sprintf("job-%d", i)
+			cancelled := actionsCheck(Check{ID: int64(i + 1), Name: name, Status: "completed", Conclusion: "cancelled"})
+			cancelled.CheckSuite.ID = 1
+			passed := actionsCheck(Check{ID: int64(i + 101), Name: name, Status: "completed", Conclusion: "success"})
+			passed.CheckSuite.ID = 2
+			checks = append(checks, cancelled, passed)
+		}
 	}
-	checks = append(checks, extra...)
+	checks = append(checks, f.extra...)
 	reads := &atomic.Int64{}
 	base := e.s.GH.run
 	e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
 		joined := strings.Join(cmd.Args, " ")
+		runs := f.runs
+		if runs == nil {
+			runs = []Run{
+				{ID: 1, Attempt: 1, WorkflowID: 7, CheckSuiteID: 1, Event: "push", Status: "completed", Conclusion: "cancelled"},
+				{ID: 2, Attempt: 1, WorkflowID: 7, CheckSuiteID: 2, Event: "push", Status: "completed", Conclusion: "success"},
+			}
+		}
+		for i := range runs {
+			if runs[i].HeadSHA == "" {
+				runs[i].HeadSHA = head
+			}
+			if runs[i].HeadBranch == "" {
+				runs[i].HeadBranch = "main"
+			}
+		}
 		var body any
 		switch {
 		case strings.Contains(joined, "/check-runs?"):
 			reads.Add(1)
 			body = mainCheckRuns{Checks: checks}
 		case strings.Contains(joined, "/statuses?"):
-			body = statuses
+			body = f.statuses
 		case strings.Contains(joined, "/actions/runs?head_sha="):
-			body = mainWorkflowRuns{Runs: []Run{
-				{ID: 1, Attempt: 1, WorkflowID: 7, CheckSuiteID: 1, Event: "push", HeadSHA: head, HeadBranch: "main", Status: "completed", Conclusion: "cancelled"},
-				{ID: 2, Attempt: 1, WorkflowID: 7, CheckSuiteID: 2, Event: "push", HeadSHA: head, HeadBranch: "main", Status: "completed", Conclusion: "success"},
-			}}
+			body = mainWorkflowRuns{Runs: runs}
 		default:
 			return base(ctx, cmd)
 		}
@@ -555,6 +591,21 @@ func cancelledMainCIEnv(t *testing.T, numbers []int, extra []Check, statuses []S
 		return json.NewEncoder(cmd.Stdout).Encode(body)
 	}
 	return e, reads
+}
+
+// mainCIStatus reads the saved main verdict of the room's first PR.
+func mainCIStatus(t *testing.T, e *testEnv, number int) string {
+	t.Helper()
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, status := storedDefault(st, *st.Records[fmt.Sprintf("github.com/owner/repo#%d", number)])
+	if status != "passed" && status != "failed" && status != "pending" {
+		t.Fatalf("unknown verdict %q", status)
+	}
+	_ = p
+	return status
 }
 
 // mainCheckRuns is the GitHub check-runs response of one commit.
