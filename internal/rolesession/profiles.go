@@ -36,8 +36,9 @@ func notReadyKey(profileName string) string { return profileName + " (not ready)
 
 // RankProfiles excludes disabled profiles, profiles whose runtime is not ready,
 // and profiles that are unavailable until a later time. Multi-model profiles
-// remain available while any model is healthy.
-func RankProfiles(profiles []profile.Profile, failures map[string]time.Time, now time.Time) []profile.Profile {
+// remain available while any model is healthy. role orders the result; see
+// rankBefore.
+func RankProfiles(profiles []profile.Profile, failures map[string]time.Time, now time.Time, role string) []profile.Profile {
 	out := []profile.Profile{}
 	accounts := runtime.NewAccounts()
 	busy := map[string]bool{}
@@ -68,25 +69,33 @@ func RankProfiles(profiles []profile.Profile, failures map[string]time.Time, now
 			out = append(out, p)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := out[i], out[j]
-		if a.Taste+a.Cost != b.Taste+b.Cost {
-			return a.Taste+a.Cost > b.Taste+b.Cost
-		}
-		if a.Intelligence != b.Intelligence {
-			return a.Intelligence > b.Intelligence
-		}
-		return a.Name < b.Name
-	})
+	sort.Slice(out, func(i, j int) bool { return rankBefore(role, out[i], out[j]) })
 	return out
 }
 
-// ChooseProfile honors an available pin, then uses the shared ranking.
-// role is used only in the error message.
+// rankBefore reports whether a outranks b for role. A reviewer checks finished
+// work, so it ranks by diagnostics plus cost. Other roles choose solutions, so
+// they rank by taste plus cost. Both then take higher intelligence, then name.
+func rankBefore(role string, a, b profile.Profile) bool {
+	score := func(p profile.Profile) int { return p.Taste + p.Cost }
+	if role == subagent.RoleReviewer {
+		score = func(p profile.Profile) int { return p.EffectiveDiagnostics() + p.Cost }
+	}
+	if sa, sb := score(a), score(b); sa != sb {
+		return sa > sb
+	}
+	if a.Intelligence != b.Intelligence {
+		return a.Intelligence > b.Intelligence
+	}
+	return a.Name < b.Name
+}
+
+// ChooseProfile honors an available pin, then uses the shared ranking for role.
+// role orders the result and names the profile kind in the error message.
 func ChooseProfile(profiles []profile.Profile, pinned string, failures map[string]time.Time, now time.Time, role string) (string, string, error) {
 	// Services never run subagents-only profiles.
 	profiles = slices.DeleteFunc(slices.Clone(profiles), func(p profile.Profile) bool { return !p.ForServices() })
-	ranked := RankProfiles(profiles, failures, now)
+	ranked := RankProfiles(profiles, failures, now, role)
 	if pinned != "" {
 		for _, p := range ranked {
 			if p.Name == pinned {
@@ -98,6 +107,9 @@ func ChooseProfile(profiles []profile.Profile, pinned string, failures map[strin
 		return "", "", fmt.Errorf("no enabled %s profile is available; all profiles are disabled or recently failed", role)
 	}
 	reason := "auto: best taste + cost"
+	if role == subagent.RoleReviewer {
+		reason = "auto: best diagnostics + cost"
+	}
 	if pinned != "" {
 		reason = "pinned profile unavailable; using best available profile"
 	}

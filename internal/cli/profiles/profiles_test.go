@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"reflect"
 	"slices"
 	"strings"
@@ -66,6 +67,58 @@ func TestProfilesAddUseFlagAndJSON(t *testing.T) {
 	runProfilesCommand(t, "set", "solo", "--use", "workflows,agents,services")
 	if got := uses(); got != nil {
 		t.Fatalf("all three uses saved %v, want none", got)
+	}
+}
+
+func TestProfilesAddDiagnostics(t *testing.T) {
+	isolateProfiles(t)
+	runProfilesCommand(t, "add", "--name", "rated", "--harness", "mock", "--diagnostics", "9")
+	store, err := profile.Load(profile.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := store.Get("rated"); !ok || p.Diagnostics != 9 {
+		t.Fatalf("saved profile = %+v, want diagnostics 9", p)
+	}
+	if list := runProfilesCommand(t, "list"); !strings.Contains(list, "diagnostics: 9/10") {
+		t.Fatalf("list output missing diagnostics: %s", list)
+	}
+	// A plain add keeps the neutral default of 5, and an old profile shows it.
+	runProfilesCommand(t, "add", "--name", "plain", "--harness", "mock")
+	plain, _ := profile.Load(profile.DefaultPath())
+	if q, _ := plain.Get("plain"); q.Diagnostics != 5 {
+		t.Fatalf("default diagnostics = %d, want 5", q.Diagnostics)
+	}
+	raw, err := os.ReadFile(profile.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file map[string]any
+	if err := json.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+	// Drop the key, as a profile saved before the rating existed would lack it.
+	for _, item := range file["profiles"].([]any) {
+		delete(item.(map[string]any), "diagnostics")
+	}
+	if raw, err = json.Marshal(file); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(profile.DefaultPath(), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	list := runProfilesCommand(t, "list", "--all", "--json")
+	if !strings.Contains(list, `"diagnostics": 5`) {
+		t.Fatalf("list --json did not show the neutral rating: %s", list)
+	}
+	var one struct {
+		Diagnostics int `json:"diagnostics"`
+	}
+	if err := json.Unmarshal([]byte(runProfilesCommand(t, "show", "plain")), &one); err != nil {
+		t.Fatal(err)
+	}
+	if one.Diagnostics != 5 {
+		t.Fatalf("show diagnostics = %d, want 5", one.Diagnostics)
 	}
 }
 

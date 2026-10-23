@@ -45,7 +45,7 @@ func NewCommand() *cobra.Command {
 			if asJSON {
 				rows := make([]profileListRow, 0, len(visible))
 				for _, p := range visible {
-					rows = append(rows, profileListRow{Profile: p, EffectiveDialect: p.EffectiveDialect()})
+					rows = append(rows, newProfileListRow(p))
 				}
 				b, _ := json.MarshalIndent(rows, "", "  ")
 				fmt.Fprintln(c.OutOrStdout(), string(b))
@@ -83,8 +83,8 @@ func NewCommand() *cobra.Command {
 				if p.Fallback != "" {
 					limits += "  fallback: " + p.Fallback
 				}
-				fmt.Fprintf(c.OutOrStdout(), "%s%s\n  harness: %s  model: %s  effective dialect: %s%s\n  taste: %d/10  intelligence: %d/10  cost-efficiency: %d/10\n  %s\n\n",
-					p.Name, def, p.Harness, orDash(p.Model), orDash(p.EffectiveDialect()), limits, p.Taste, p.Intelligence, p.Cost, p.Description)
+				fmt.Fprintf(c.OutOrStdout(), "%s%s\n  harness: %s  model: %s  effective dialect: %s%s\n  taste: %d/10  diagnostics: %d/10  intelligence: %d/10  cost-efficiency: %d/10\n  %s\n\n",
+					p.Name, def, p.Harness, orDash(p.Model), orDash(p.EffectiveDialect()), limits, p.Taste, p.EffectiveDiagnostics(), p.Intelligence, p.Cost, p.Description)
 			}
 			return nil
 		},
@@ -105,7 +105,7 @@ func NewCommand() *cobra.Command {
 			if !ok {
 				return fmt.Errorf("no profile named %q", a[0])
 			}
-			b, _ := json.MarshalIndent(p, "", "  ")
+			b, _ := json.MarshalIndent(newProfileListRow(*p), "", "  ")
 			fmt.Fprintln(c.OutOrStdout(), string(b))
 			return nil
 		},
@@ -144,6 +144,7 @@ func NewCommand() *cobra.Command {
 	f.IntVar(&p.Taste, "taste", 5, "1..10, higher better")
 	f.IntVar(&p.Intelligence, "intelligence", 5, "1..10, higher better")
 	f.IntVar(&p.Cost, "cost", 5, "cost efficiency 1..10, higher better (10 = very cheap)")
+	f.IntVar(&p.Diagnostics, "diagnostics", 5, "finding what is wrong in a given solution 1..10, higher better")
 	f.StringArrayVar(&p.ExtraArgs, "extra-arg", nil, "extra CLI arg for the harness (repeatable)")
 	f.StringArrayVar(&command, "command", nil, "custom harness argv (repeatable; {{prompt}}/{{model}} placeholders)")
 	f.IntVar(&p.TimeoutSec, "timeout", 0, "per-call timeout in seconds (default: 5 hours; explicit values have a 30-minute minimum)")
@@ -220,8 +221,14 @@ func orDash(s string) string {
 	return s
 }
 
-// profileListRow adds the resolved dialect without changing stored overrides.
+// profileListRow adds the resolved dialect and ratings without changing stored
+// values. An unset rating (0) shows its neutral 5.
 type profileListRow struct {
 	profile.Profile
+	Diagnostics      int    `json:"diagnostics"`
 	EffectiveDialect string `json:"effectiveDialect"`
+}
+
+func newProfileListRow(p profile.Profile) profileListRow {
+	return profileListRow{Profile: p, Diagnostics: p.EffectiveDiagnostics(), EffectiveDialect: p.EffectiveDialect()}
 }
