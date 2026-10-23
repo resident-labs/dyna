@@ -8,7 +8,7 @@ import (
 	"dyna-agent/internal/store/storetest"
 )
 
-func TestPendingReportIndexKeepsEarlierRunnerTurnSchema(t *testing.T) {
+func TestPendingReportIndexKeepsPromptFormatBoundary(t *testing.T) {
 	data := storetest.DataDir(t)
 	store := DefaultStore()
 	if _, err := store.PendingReports(t.Context(), ""); err != nil {
@@ -26,13 +26,18 @@ func TestPendingReportIndexKeepsEarlierRunnerTurnSchema(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	// Reopen before asking as an earlier runner, so a process-local migration
-	// cache cannot hide an incompatible version in the actual database.
-	if err := database.Migrate(db, "subagent.turns", 2, func(*sql.Conn, int) error {
-		t.Error("the earlier runner unexpectedly needed a turn migration")
+	// Reopen so a process-local cache cannot hide the actual format boundary.
+	if err := database.Migrate(db, "subagent.turns", promptStoreFormat, func(*sql.Conn, int) error {
+		t.Error("the current reader unexpectedly needed a turn migration")
 		return nil
 	}); err != nil {
-		t.Fatalf("earlier runner cannot read turns after report-index migration: %v", err)
+		t.Fatalf("current reader cannot read turns after report-index migration: %v", err)
+	}
+	if err := database.Migrate(db, "subagent.turns", 2, func(*sql.Conn, int) error {
+		t.Error("the earlier runner unexpectedly changed the turn schema")
+		return nil
+	}); err == nil {
+		t.Fatal("earlier runner accepted prompt references it cannot resolve")
 	}
 	var count int
 	if err := db.QueryRow("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'session_turns_pending_reports'").Scan(&count); err != nil || count != 1 {

@@ -163,5 +163,5 @@ func (s *Store) preparedTurn(ctx context.Context, conn *sql.Conn, id string, wan
 	if revision != want.Revision || !reflect.DeepEqual(current, want.Turn) {
 		return nil, Turn{}, ErrSteeringChanged
 	}
-	return raw, current, nil
+	return resolved, current, nil
 }

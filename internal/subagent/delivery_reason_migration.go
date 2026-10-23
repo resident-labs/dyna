@@ -50,7 +50,11 @@ func (s *Store) migrateDeliveryReasons() error {
 			return err
 		}
 		for _, turn := range pending {
-			if _, err := saveTurnConn(ctx, conn, turn.id, turn.n, turn.raw); err != nil {
+			resolved, err := resolveRowPrompts(ctx, conn, turn.id, turn.n, turn.raw)
+			if err != nil {
+				return err
+			}
+			if _, err := saveTurnConn(ctx, conn, turn.id, turn.n, resolved); err != nil {
 				return err
 			}
 		}

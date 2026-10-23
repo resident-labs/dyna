@@ -13,7 +13,8 @@ import (
 )
 
 // These golden bytes pin the previous writeJSONAtomic format through real
-// subagent callers, including struct field order, escaping and the final newline.
+// subagent callers, including escaping and the final newline. Turn prompt
+// encoding sorts object keys; other records retain their struct field order.
 func TestStorageGoldenBytes(t *testing.T) {
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	s := &Store{Root: t.TempDir()}
@@ -65,12 +66,17 @@ func TestStorageGoldenBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	want = "{\n  \"deadline\": \"0001-01-01T00:00:00Z\",\n  \"profile\": \"mock\",\n  \"n\": 1,\n  \"prompt\": \"RESPOND: ready\",\n  \"status\": \"ok\",\n  \"created\": \"2026-01-02T03:04:05Z\",\n  \"started\": \"2026-01-02T03:04:05Z\",\n  \"ended\": \"2026-01-02T03:04:05Z\",\n  \"usage\": {},\n  \"usageNormalization\": {\n    \"version\": 0,\n    \"source\": \"\",\n    \"input\": \"\",\n    \"cachedInput\": \"\",\n    \"output\": \"\",\n    \"cost\": \"\"\n  },\n  \"rawStart\": 0,\n  \"normStart\": 3,\n  \"normEnd\": 9,\n  \"reportTo\": [\n    \"@parent\"\n  ]\n}\n"
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(want), &fields); err != nil {
+		t.Fatal(err)
+	}
+	sorted, err := json.MarshalIndent(fields, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = string(append(sorted, '\n'))
 	if string(got) != want {
 		t.Fatalf("turn bytes = %q; want %q", got, want)
-	}
-	old, err = json.MarshalIndent(tr, "", "  ")
-	if err != nil || string(got) != string(append(old, '\n')) {
-		t.Fatal("old turn encoder differs")
 	}
 	for _, path := range []string{turnPath} {
 		info, err := os.Stat(path)
