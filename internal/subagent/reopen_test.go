@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/room"
 )
 
@@ -80,15 +81,38 @@ func TestReopenRefusesNameConflictAndMissingHistory(t *testing.T) {
 	}
 }
 
+// A post that named the session's address gets a row for that session when it
+// was stored, so a later holder of the same address never inherits it, and a
+// post the session already closed stays out.
 func TestExactRecipientSurvivesReopenWithoutClockAmbiguity(t *testing.T) {
-	meta := Meta{ID: "original", Room: "room", Name: "worker", ClosedPosts: map[string]bool{"legacy-replacement": true}}
-	posts := []room.Message{
-		{ID: "original-work", From: "room", To: []string{meta.Address()}, SessionIDs: map[string]string{meta.Address(): meta.ID}},
-		{ID: "replacement-work", From: "room", To: []string{meta.Address()}, SessionIDs: map[string]string{meta.Address(): "replacement"}},
-		{ID: "legacy-replacement", From: "room", To: []string{meta.Address()}},
+	rooms := &room.Store{Root: filepath.Join(t.TempDir(), "rooms")}
+	t.Cleanup(func() { database.Close(filepath.Dir(rooms.Root)) })
+	rec, err := rooms.Create(room.CreateInput{Name: "recipient"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	got := forSession(nil, meta, posts)
-	if len(got) != 1 || got[0].ID != "original-work" {
+	meta := Meta{ID: "original", Room: rec.Name, RoomID: rec.ID, Name: "worker"}
+	addr := meta.Address()
+	post := func(bound, text string) room.Message {
+		t.Helper()
+		ids := map[string]string{}
+		if bound != "" {
+			ids = map[string]string{addr: bound}
+		}
+		msg, err := rooms.Post(rec.ID, room.PostInput{Wake: true, From: rec.Name, To: []string{addr}, SessionIDs: ids, Text: text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return msg
+	}
+	posts := []room.Message{
+		post(meta.ID, "original work"),
+		post("replacement", "work for the replacement"),
+		post("", "closed before the reopen"),
+	}
+	meta.ClosedPosts = map[string]bool{posts[2].ID: true}
+	got := forSession(rooms, meta, posts)
+	if len(got) != 1 || got[0].ID != posts[0].ID {
 		t.Fatalf("session IDs lost recipient identity: %+v", got)
 	}
 }

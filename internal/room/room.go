@@ -234,9 +234,14 @@ func (m Message) Addressed(addr string) bool {
 	return false
 }
 
-// SessionAddressed reports whether post m is addressed to session id, which
-// is currently named addr. A recipient bound to the session by ID keeps
-// matching after a rename. An unbound recipient matches its address text.
+// SessionAddressed reports whether post m names session id, which is currently
+// named addr. A recipient bound to the session by ID keeps matching after a
+// rename. An unbound recipient matches its address text.
+//
+// Who a post reached is no longer read from this: a session's input and its
+// wakes come from its delivery rows (see DeliveriesFor and SessionDeliveries).
+// This answers what the post names, which decides what a turn owes, not what it
+// was delivered.
 func (m Message) SessionAddressed(id, addr string) bool {
 	for _, to := range m.To {
 		if m.IsSession(to, id, addr) {

@@ -58,13 +58,16 @@ func (m *Manager) Reopen(ctx context.Context, ref string) (Info, error) {
 			}
 		}
 		// Keep unread posts from this session's lifetime. Exclude only posts
-		// from the closed interval, which can belong to a reused address.
+		// from the closed interval, which can belong to a reused address: those
+		// named this address without binding a session to it, so their row
+		// carries the address and no session ID.
 		messages, _, err := m.rooms().ReadAll(meta.RoomID, meta.RoomCursor)
 		if err != nil {
 			return err
 		}
+		byAddress := inputRows(m.rooms(), meta.RoomID, "", meta.Address(), postIDs(messages))
 		for _, msg := range messages {
-			if msg.SessionIDs[meta.Address()] == "" && msg.TS > meta.Closed.UnixMilli() && msg.Addressed(meta.Address()) {
+			if _, namedAddress := byAddress[msg.ID]; namedAddress && msg.TS > meta.Closed.UnixMilli() {
 				if meta.ClosedPosts == nil {
 					meta.ClosedPosts = map[string]bool{}
 				}

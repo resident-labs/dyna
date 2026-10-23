@@ -9,21 +9,34 @@ import (
 	"time"
 )
 
-// A bound recipient gets one row with the post's mode, an address without a
-// binding gets none, and the root seat gets its own row with its category.
+// A bound recipient gets one row with the post's mode, an agent address without
+// a binding gets a row keyed by the address, and the root seat gets its own row
+// with its category.
 func TestDeliveriesFor(t *testing.T) {
 	bound := Message{
-		From: "alpha:lead", Wake: true,
+		From: "alpha:lead", Wake: true, RoomID: "room_x",
 		To:         []string{"alpha:bea", "alpha:oldname"},
 		SessionIDs: map[string]string{"alpha:bea": otherSession},
 	}
 	got := DeliveriesFor(bound, "alpha")
-	if len(got) != 1 || got[0].SessionID != otherSession || got[0].Mode != DeliveryWake || got[0].Category != "" {
-		t.Fatalf("deliveries = %+v, want one wake row for %s", got, otherSession)
+	if len(got) != 2 || got[0].SessionID != otherSession || got[0].Mode != DeliveryWake || got[0].Category != "" {
+		t.Fatalf("deliveries = %+v, want a wake row for %s and one for the unbound address", got, otherSession)
+	}
+	// A post that names an agent address without binding a session to it still
+	// reaches the session that holds that address, so it gets a row of its own.
+	// The bare room address names the owner, who is no session, and gets none.
+	if got[1].SessionID != "alpha:oldname" || got[1].Mode != DeliveryWake {
+		t.Fatalf("unbound row = %+v, want a wake row keyed by alpha:oldname", got[1])
+	}
+
+	toRoom := Message{From: "alpha:lead", Wake: true, RoomID: "room_x", To: []string{"alpha"}}
+	got = DeliveriesFor(toRoom, "alpha")
+	if len(got) != 1 || got[0].SessionID != SeatSessionID("room_x") {
+		t.Fatalf("deliveries = %+v, want only the seat row: a room address is no session", got)
 	}
 	bound.Wake = false
-	if got = DeliveriesFor(bound, "alpha"); len(got) != 1 || got[0].Mode != DeliveryQuiet {
-		t.Fatalf("deliveries = %+v, want one quiet row", got)
+	if got = DeliveriesFor(bound, "alpha"); len(got) != 2 || got[0].Mode != DeliveryQuiet || got[1].Mode != DeliveryQuiet {
+		t.Fatalf("deliveries = %+v, want two quiet rows", got)
 	}
 
 	ownerDM := Message{From: "alpha", Human: true, RoomID: "room_x", To: []string{"alpha:lead"}, SessionIDs: map[string]string{"alpha:lead": ownerSession}}
@@ -40,8 +53,13 @@ func TestDeliveriesFor(t *testing.T) {
 
 	needsRoot := Message{From: "alpha", Human: true, Wake: true, NeedsRoot: true, RoomID: "room_x", To: []string{"alpha", "alpha:" + RootAgent}}
 	got = DeliveriesFor(needsRoot, "alpha")
-	if len(got) != 1 || got[0].SessionID != "seat:room_x" || got[0].Mode != DeliveryWake || got[0].Category != "" {
-		t.Fatalf("deliveries = %+v, want one waking seat row", got)
+	// The root agent's address gets a row like any other address the post named
+	// without a binding; the seat's row is the one that wakes root.
+	if len(got) != 2 || got[0].SessionID != "alpha:"+RootAgent || got[0].Mode != DeliveryWake {
+		t.Fatalf("deliveries = %+v, want a wake row for the root agent's address", got)
+	}
+	if seat := got[1]; seat.SessionID != "seat:room_x" || seat.Mode != DeliveryWake || seat.Category != "" {
+		t.Fatalf("seat row = %+v, want one waking seat row", seat)
 	}
 }
 
