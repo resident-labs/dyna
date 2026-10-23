@@ -336,7 +336,7 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 	if a.privateLogins == nil {
 		a.privateLogins = map[string]*privateRuntimeLogin{}
 	}
-	login := &privateRuntimeLogin{flow: flow, signIn: signIn}
+	login := &privateRuntimeLogin{flow: flow, signIn: signIn, harness: harness}
 	a.privateLogins[id] = login
 	a.privateLoginMu.Unlock()
 	go func() {

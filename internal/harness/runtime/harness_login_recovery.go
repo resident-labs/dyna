@@ -10,7 +10,7 @@ func (a *Runtime) PrivateRuntimeLogins() []PrivateLogin {
 	out := []PrivateLogin{}
 	for id, login := range a.privateLogins {
 		state := login.signIn.snapshot()
-		row := PrivateLogin{AccountID: id, SignIn: &state}
+		row := PrivateLogin{AccountID: id, Harness: login.harness, SignIn: &state}
 		if login.flow != nil {
 			row.Warning = login.flow.Warning
 		}

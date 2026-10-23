@@ -87,12 +87,16 @@ type privateRuntimeLogin struct {
 	control sync.Mutex
 	flow    *NativeLogin
 	signIn  *privateSignIn
+	// harness is set for a sign-in that has no account of its own.
+	harness string
 }
 
 type PrivateLogin struct {
-	AccountID string       `json:"accountId"`
-	Warning   string       `json:"warning,omitempty"`
-	SignIn    *SignInState `json:"signIn,omitempty"`
+	AccountID string `json:"accountId"`
+	// Harness names the harness of a sign-in that has no account of its own.
+	Harness string       `json:"harness,omitempty"`
+	Warning string       `json:"warning,omitempty"`
+	SignIn  *SignInState `json:"signIn,omitempty"`
 }
 
 func (a *Runtime) BeginPrivateRuntimeLogin(ctx context.Context, harness, version, label string, _ bool) (PrivateLogin, error) {
@@ -103,6 +107,9 @@ func (a *Runtime) BeginPrivateRuntimeLogin(ctx context.Context, harness, version
 	b, err := EnsureBundle(ctx, h, version)
 	if err != nil {
 		return PrivateLogin{}, err
+	}
+	if h == "pi" {
+		return a.beginPiProviderSignIn(b.Executable)
 	}
 	n, err := a.Accounts.Create(harness, label)
 	if err != nil {
@@ -177,13 +184,20 @@ func privateSignInArgv(harness, exe, scope, identity string, native []string) ([
 }
 
 func (a *Runtime) RestartPrivateRuntimeLogin(ctx context.Context, id string, _ bool) (PrivateLogin, error) {
-	n, err := a.Accounts.Find(id)
+	harness := "pi"
+	if id != piProviderSignInID {
+		n, err := a.Accounts.Find(id)
+		if err != nil {
+			return PrivateLogin{}, err
+		}
+		harness = n.Harness
+	}
+	b, err := EnsureBundle(ctx, harness, "")
 	if err != nil {
 		return PrivateLogin{}, err
 	}
-	b, err := EnsureBundle(ctx, n.Harness, "")
-	if err != nil {
-		return PrivateLogin{}, err
+	if harness == "pi" {
+		return a.beginPiProviderSignIn(b.Executable)
 	}
 	return a.startPrivateLogin(id, b.Executable)
 }

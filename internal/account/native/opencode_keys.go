@@ -13,6 +13,9 @@ import (
 type ProviderKey struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+	// Auth says how the provider is signed in: "api_key" or "oauth". It is
+	// empty for a catalog choice.
+	Auth string `json:"auth,omitempty"`
 }
 
 // OpenCodeKeys reads, adds and removes API-key providers in a prepared
