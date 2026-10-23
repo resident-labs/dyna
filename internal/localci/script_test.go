@@ -3,6 +3,8 @@ package localci
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -260,5 +262,18 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 				t.Fatalf("cleanup refused Dyna's own path %s: %v: %s", inside, err, out)
 			}
 		})
+	}
+	// The daily worker has no node on the runner, only one per machine.
+	runner := Runner{DataDir: t.TempDir()}
+	runner.Command = func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if name != "bash" || !strings.Contains(args[len(args)-1], "dyna-ci-clean") {
+			t.Fatalf("cleanup ran %s %v", name, args)
+		}
+		fmt.Fprint(out, "DYNA_CI_CACHE_CLEAN_ITEM 2048 /var/tmp/dyna-local-ci-1000/local/runs/gone\nDYNA_CI_CACHE_CLEAN_FREED_KB=2048\n")
+		return nil
+	}
+	cleaned, err := runner.CleanCaches(t.Context(), Node{Name: "local", Slots: 1, Enabled: true}, true)
+	if err != nil || cleaned.FreedBytes != 2<<20 || len(cleaned.Paths) != 1 {
+		t.Fatalf("cleaned = %+v, err = %v", cleaned, err)
 	}
 }
