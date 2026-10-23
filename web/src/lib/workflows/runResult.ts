@@ -28,19 +28,22 @@ export type WorkerRows = Record<number, WorkerRow>
 // clears the result when the run changes or has none.
 export function createResultLoader(api: ResultApi, set: (value: LoadedResult) => void) {
   let key = ''
-  return (detail: Pick<RunDetail, 'run' | 'resultBytes'> | null | undefined): void => {
+  let request = 0
+  function load(detail: Pick<RunDetail, 'run' | 'resultBytes'> | null | undefined, retry = false): void {
     const id = detail?.run?.id
     const bytes = detail?.resultBytes ?? 0
     const next = bytes ? `${id}:${bytes}` : ''
-    if (next === key) return
+    if (next === key && !retry) return
+    const current = ++request
     if (key) set(null)
     key = next
     if (!next || !id) return
     api.runResult(id, 0).then(
-      (value) => { if (key === next) set(value) },
-      (e: unknown) => { if (key === next) set({ error: errorText(e) }) },
+      (value) => { if (key === next && request === current) set(value) },
+      (e: unknown) => { if (key === next && request === current) set({ error: errorText(e) }) },
     )
   }
+  return Object.assign(load, { retry: (detail: Pick<RunDetail, 'run' | 'resultBytes'>) => load(detail, true) })
 }
 
 // createWorkerResults keeps the open worker rows of one run view. A row
@@ -53,14 +56,16 @@ export function createResultLoader(api: ResultApi, set: (value: LoadedResult) =>
 export function createWorkerResults(api: ResultApi, set: (rows: WorkerRows) => void) {
   let rows: WorkerRows = {}
   let run = ''
+  let generation = 0
   const publish = () => set({ ...rows })
   function fetch(runId: string, agent: number, final: boolean) {
-    rows[agent] = { ...rows[agent], loading: true }
+    const current = generation
+    rows[agent] = { ...rows[agent], loading: true, error: undefined }
     publish()
     api.runResult(runId, agent).then(
       (value) => {
         const row = rows[agent]
-        if (run !== runId || !row) return
+        if (run !== runId || generation !== current || !row) return
         const queued = row.queued
         rows[agent] = { ...row, loading: false, value, error: undefined, final, queued: undefined }
         // A newer status came in during this load: fetch for it now.
@@ -69,18 +74,23 @@ export function createWorkerResults(api: ResultApi, set: (rows: WorkerRows) => v
       },
       (e: unknown) => {
         const row = rows[agent]
-        if (run === runId && row) { rows[agent] = { ...row, loading: false, error: errorText(e), final: false }; publish() }
+        if (run === runId && generation === current && row) { rows[agent] = { ...row, loading: false, error: errorText(e), final: false }; publish() }
       },
     )
   }
   return {
     toggle(runId: string, agent: number, status = 'ok') {
-      if (runId !== run) { rows = {}; run = runId }
+      if (runId !== run) { rows = {}; run = runId; generation++ }
       const row = rows[agent]
       if (row?.open) { rows[agent] = { ...row, open: false }; publish(); return }
       rows[agent] = { ...row, open: true }
       if (!row || (!row.final && !row.loading)) fetch(runId, agent, status !== 'running')
       else publish()
+    },
+    retry(runId: string, agent: number, status = 'ok') {
+      const row = rows[agent]
+      if (runId !== run || !row?.open || row.loading) return
+      fetch(runId, agent, status !== 'running')
     },
     refresh(runId: string, agents: readonly { id: number; status: string }[] = []) {
       if (runId !== run) return
@@ -91,7 +101,7 @@ export function createWorkerResults(api: ResultApi, set: (rows: WorkerRows) => v
         else fetch(runId, a.id, a.status !== 'running')
       }
     },
-    sync(runId: string) { if (runId !== run) { rows = {}; run = runId; publish() } },
-    reset() { rows = {}; run = ''; publish() },
+    sync(runId: string) { if (runId !== run) { rows = {}; run = runId; generation++; publish() } },
+    reset() { rows = {}; run = ''; generation++; publish() },
   }
 }
