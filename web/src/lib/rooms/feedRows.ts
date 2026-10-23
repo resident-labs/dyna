@@ -1,9 +1,8 @@
 import { parsePRPost } from '../prs/pr.ts'
-import type { ParsedPost, PREvent } from '../prs/pr.ts'
-import type { PRNotice } from '../api/room.ts'
+import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
 import type { EventPayload } from './events.gen.ts'
-import { hookEvent } from './eventPayloads.ts'
+import { hookEvent, prEvent } from './eventPayloads.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
 // fixtures of a test both fit it.
@@ -13,7 +12,7 @@ export interface FeedInput {
   from: string
   text?: string | null
   kind?: string
-  notice?: PRNotice | null
+  notice?: EventNotice | null
   // payload is the typed JSON of a sealed system event.
   payload?: EventPayload
   to?: string[] | null
@@ -96,6 +95,10 @@ export function rowPosts<P extends FeedInput>(row: FeedRow<P> | undefined): P[] 
 function foldKey(post: FeedInput): string {
   const hook = hookEvent(post)
   if (hook) return `hook:${hook.runId}`
+  const pr = prEvent(post)
+  if (pr) return pr.type === 'held-comment' ? '' : `pr:${pr.changeId || pr.url || ''}`
+  // TODO: legacy/shim remove later — a PR post stored before the typed events
+  // names its change in text only; remove when that history ages out.
   if (post.kind === 'pr' && post.notice?.kind !== 'held-comment') {
     const url = parsePRPost(post.text, post.notice).url
     if (url) return `pr:${url}`
@@ -164,30 +167,14 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
   return out
 }
 
-// Use the same parser as the PR screen. Noise counts belong in expanded detail.
-export function feedPRDetail(post: { text?: string | null; notice?: PRNotice | null }): ParsedPost {
-  const pr = parsePRPost(post.text, post.notice)
-  return {
-    ...pr, events: pr.events.filter((event) => event.kind !== 'noise'),
-    body: pr.body.replace(/(?<![\w/])([a-f0-9]{40})(?![\w/])/gi, (sha) => sha.slice(0, 7)),
-  }
-}
-
+// feedPRRepos lists the repositories of the PR rows on the page, so a row
+// shows its repository only when the page holds more than one.
 export function feedPRRepos(posts: readonly FeedInput[]): Set<string> {
-  return new Set(posts.filter((post) => post.kind === 'pr').map((post) => parsePRPost(post.text, post.notice).repo).filter(Boolean))
-}
-
-// A generic watcher update must not erase a known review of the same head.
-// CI can change in an update, so only review state carries forward.
-export function feedPREvents(details: readonly ParsedPost[]): PREvent[] {
-  const last = details[details.length - 1]
-  if (!last) return []
-  if (!last.head || last.events.some((event) => event.kind !== 'update')) return last.events
-  for (let i = details.length - 2; i >= 0; i--) {
-    const detail = details[i]
-    if (!detail || detail.head !== last.head) break
-    const review = detail.events.filter((event) => ['approved', 'changes', 'review'].includes(event.kind))
-    if (review.length) return review
+  const out = new Set<string>()
+  for (const post of posts) {
+    if (post.kind !== 'pr') continue
+    const repo = prEvent(post)?.repo || parsePRPost(post.text, post.notice).repo
+    if (repo) out.add(repo)
   }
-  return last.events
+  return out
 }

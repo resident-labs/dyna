@@ -13,7 +13,6 @@
   import ForwardQuote from '../ui/ForwardQuote.svelte'
   import HistoryList from './HistoryList.svelte'
   import { focusWhen } from '../ui/focusWhen.ts'
-  import PRPost from '../prs/PRPost.svelte'
   import GoalPost from './GoalPost.svelte'
   import CallRequestRow from '../voice/CallRequestRow.svelte'
   import CompletionBody from '../ui/CompletionBody.svelte'
@@ -227,7 +226,7 @@
       {:else if sealedEvent(p)}
         {@const Card = rendererFor(p)}
         {#if Card}
-          <Card post={p} notice={p.notice} surface="feed" />
+          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} {showRepo} {room} {pinned} {selection} {onreply} {onforward} {onpin} to={recipients(p).names} {onaddress} focus={flash?.key === row.key ? flash.id : ''} />
         {:else}
           <p class="unknown-event" role="status">Unknown event {p.kind}/{p.notice?.kind ?? '?'}</p>
         {/if}
@@ -241,8 +240,6 @@
           </div>
       {:else if p.notice?.kind === 'held-comment'}
           <HeldCommentNotice roomId={room.id} prKey={p.notice.changeId} commentId={p.notice.commentId ?? ''} />
-      {:else if p.kind === 'pr'}
-          <PRPost post={p} posts={row.posts} {showRepo} focus={flash?.key === row.key ? flash.id : ''} to={recipients(p).names} {onaddress} {room} {pinned} {selection} {onreply} {onforward} {onpin} />
       {:else if p.completion}
         {@render completionPost(p)}
       {:else}

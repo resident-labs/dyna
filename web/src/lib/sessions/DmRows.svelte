@@ -9,6 +9,7 @@
   import CompactionDivider from './CompactionDivider.svelte'
   import { createSelection } from '../ui/selection.svelte.ts'
   import VoiceRelay from '../voice/VoiceRelay.svelte'
+  import { rendererFor } from '../rooms/eventRenderers.ts'
   import { done, plain, turnHead, turnTail } from './dm.ts'
   import { stamp, short, ago } from '../ui/format.ts'
   import type { Attachment, Member, Room } from '../api/room.ts'
@@ -58,6 +59,15 @@
       <p class="turn-end" class:enter={isNew(row.key)}><b class={row.turn.status}>{turnText[row.turn.status ?? ''] || row.turn.status}</b>{turnTail(row.turn) ? ` · ${turnTail(row.turn)}` : ''}</p>
     {:else if row.kind === 'message'}
       <DmMessage {row} {room} {onforward} {member} address={dm.address} {members} {compact} {onopenfile} {onpost} {removing} {onunqueue} {ondismiss} {selection} enter={isNew(row.key)} />
+    {:else if row.kind === 'system-event'}
+      {@const Card = rendererFor(row.post)}
+      <div class="event-row" class:enter={isNew(row.key)}>
+        {#if Card}
+          <Card post={row.post} notice={row.post.notice} surface="dm" />
+        {:else}
+          <p class="note event-note">Unknown event {row.post.kind}/{row.post.notice?.kind ?? '?'}</p>
+        {/if}
+      </div>
     {:else if row.kind === 'voice'}
       <VoiceRelay icon="mic" label="Sent by Voice for you" text={row.text} state={row.delivery === 'read' ? '' : row.delivery || ''} />
     {:else if row.kind === 'timeline' || row.kind === 'thought'}
@@ -118,6 +128,7 @@
   .activity-body { min-width: 0; }
   .activity-head { display: flex; align-items: baseline; gap: var(--s2); font-size: var(--t-body); }
   .activity-head time { font-size: var(--t-cap); color: var(--faint); }
+  .event-row { margin: 6px var(--s4) 2px var(--gutter); }
   .thread-row { display: flex; margin: 6px var(--s4) 2px var(--gutter); }
   .thread-row :global(.thread-chip) { flex: 1; }
   .event-note { margin-left: var(--gutter); }

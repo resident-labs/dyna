@@ -207,9 +207,14 @@ type PostInput struct {
 	NeedsRoot bool
 	// ID is a stable post ID for a retrying integration; empty generates one.
 	ID string
+	// Event is a typed system event. The registry then decides the post kind,
+	// its text, its quiet flag and its wake rule, so the caller passes no Kind,
+	// Notice or Text with it. A sealed family needs this field: Store.Post
+	// rejects it.
+	Event room.Event
 	// Kind identifies an integration post; empty uses the normal message kind.
 	Kind     string
-	Notice   room.PRNotice
+	Notice   room.EventNotice
 	Sender   Sender
 	Mentions []string
 	Text     string
@@ -365,6 +370,22 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		}
 		in.Sender.Session.Meta = meta
 	}
+	// A typed event carries its own kind, notice, text and quiet flag: the
+	// registry sets them and the caller cannot.
+	wake := !in.NoWake
+	if in.Event != nil {
+		if in.Kind != "" || in.Notice.Kind != "" || in.Text != "" {
+			return Result{}, errors.New("an event post carries no kind, notice or text of its own")
+		}
+		desc, ok := room.DescribeEvent(in.Event)
+		if !ok {
+			return Result{}, errors.New("the event is not registered in internal/room/events.go")
+		}
+		in.Kind, in.Notice.Kind, in.Text = desc.Kind, string(desc.Type), desc.Text
+		// A post that needs root wakes the root seat, as it always has. The
+		// spec decides for every other post.
+		wake = !in.NoWake && (in.NeedsRoot || desc.Wake == room.WakeTarget)
+	}
 	text := strings.TrimSpace(in.Text)
 	if text == "" && len(in.References) == 0 && len(in.Attachments) == 0 && len(in.Files) == 0 && in.ForwardOf == "" {
 		return Result{}, errors.New("post text is required")
@@ -463,11 +484,18 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		}
 		sessionIDs[res.from] = in.Sender.Session.ID
 	}
-	msg, err := s.Rooms.Post(res.rec.ID, room.PostInput{Wake: !in.NoWake, SessionIDs: sessionIDs,
-		ID: in.ID, NeedsRoot: in.NeedsRoot,
-		From: res.from, Kind: in.Kind, Notice: in.Notice, Human: in.Sender.Kind == SenderOwner && in.Sender.Human, Source: in.Sender.source(), To: res.addrs(), Via: res.via, ReplyTo: in.ReplyTo, Forward: fwd, Turn: turn, Text: text,
-		Attachments: atts, References: in.References,
-	})
+	var msg room.Message
+	if in.Event != nil {
+		// A notice without a stable ID is a fresh post, as Store.Post makes it.
+		msg, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: res.rec.ID, Event: in.Event, ID: in.ID, FreshID: in.ID == "", To: res.addrs(), Via: res.via,
+			NeedsRoot: in.NeedsRoot, RoomService: in.Sender.Kind == SenderOwner && !in.Sender.Human, SessionIDs: sessionIDs, NoWake: !wake})
+	} else {
+		msg, err = s.Rooms.Post(res.rec.ID, room.PostInput{Wake: wake, SessionIDs: sessionIDs,
+			ID: in.ID, NeedsRoot: in.NeedsRoot,
+			From: res.from, Kind: in.Kind, Notice: in.Notice, Human: in.Sender.Kind == SenderOwner && in.Sender.Human, Source: in.Sender.source(), To: res.addrs(), Via: res.via, ReplyTo: in.ReplyTo, Forward: fwd, Turn: turn, Text: text,
+			Attachments: atts, References: in.References,
+		})
+	}
 	if err != nil {
 		return Result{}, err
 	}

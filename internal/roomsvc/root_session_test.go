@@ -42,7 +42,7 @@ func TestRootSessionOfAnExternalRootHasPostsAndNoTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	want[unrelated.ID] = false
-	post(false, notify.PostInput{Kind: "pr", Sender: external, Mentions: []string{"@root"}, Text: "PR notice"})
+	post(false, notify.PostInput{Event: room.PREvent{Type: room.PRReady, Label: "PR #1", Location: "github.com/o/r#1", ChangeID: "github.com/o/r#1", Number: 1}, Sender: external, Mentions: []string{"@root"}})
 	keeper, err := store.Post(rec.ID, room.PostInput{From: "goal-keeper", To: []string{rec.Name}, Text: "Keeper nudge"})
 	if err != nil {
 		t.Fatal(err)

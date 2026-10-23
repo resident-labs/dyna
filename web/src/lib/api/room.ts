@@ -53,12 +53,10 @@ export interface Attachment {
   checks?: Check[]
 }
 
-export interface PRNotice {
-  commentId?: string
+// EventNotice is room.EventNotice: the registered type of a system event
+// post. The facts of the event are in its typed payload (see events.gen.ts).
+export interface EventNotice {
   kind: string
-  number: number
-  head: string
-  changeId: string
 }
 
 // Forward is room.Forward, the snapshot kept in a forwarding post.
@@ -69,7 +67,7 @@ export interface Forward {
   from: string
   text: string
   kind?: string
-  notice?: PRNotice
+  notice?: EventNotice
   human?: boolean
   references?: Reference[]
   attachments?: Attachment[]
@@ -86,7 +84,7 @@ export interface Message {
   text: string
   sessionIds?: Record<string, string>
   kind?: string
-  notice?: PRNotice
+  notice?: EventNotice
   // payload is the typed JSON of a sealed system event, generated from the Go
   // registry in events.gen.ts. Read it with an event helper, not by hand.
   payload?: EventPayload
