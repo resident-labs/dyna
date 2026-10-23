@@ -27,7 +27,7 @@ import (
 // their command line (-c) and add the hook's additionalContext to the running
 // turn before the next model call. For those harnesses dyna installs its own
 // hook for each worker run: a pending steering message goes into a per-run
-// handoff directory, and the hook (`dyna hook steer --dir <dir>`) hands it to the model
+// handoff directory, and the hook (`dyna harness-hook steer --dir <dir>`) hands it to the model
 // at the next tool boundary. The worker is never stopped or resumed for it.
 //
 // If the hook does not take the message before the turn ends, the message is
@@ -70,7 +70,7 @@ var steerHookCommand = func(dir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return shellquote.Quote(exe) + " hook steer --dir " + shellquote.Quote(dir), nil
+	return shellquote.Quote(exe) + " harness-hook steer --dir " + shellquote.Quote(dir), nil
 }
 
 // steerHook is one worker run's hook handoff directory. Only the run's event loop uses it.
