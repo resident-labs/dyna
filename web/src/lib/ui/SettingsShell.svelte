@@ -90,7 +90,10 @@
     .navin { width: 100%; flex-direction: row; flex-wrap: wrap; padding: 0 var(--s2) var(--s2); gap: var(--s1); }
     nav h2 { position: absolute; top: 18px; left: 16px; margin: 0; }
     .foot { display: none; }
-    nav button { flex: 1 1 calc(25% - 4px); min-width: 0; justify-content: center; padding: 10px var(--s1); min-height: 44px; white-space: nowrap; font-size: var(--t-body); }
+    /* A long label wraps inside its tab instead of ending in an ellipsis, so
+       "Review & landing" is never cut to "Review & lan…". */
+    nav button { flex: 1 1 calc(25% - 4px); min-width: 0; justify-content: center; padding: 10px var(--s1); min-height: 44px; white-space: normal; line-height: 1.25; text-align: center; font-size: var(--t-body); }
+    .label { overflow: visible; }
     main { flex: 1; min-height: 0; }
     .pane { width: 100%; padding: 20px var(--s4) 40px; }
     .close { position: absolute; top: calc(env(safe-area-inset-top) + 6px); right: 6px; margin: 0; width: 44px; height: 44px; justify-content: center; }

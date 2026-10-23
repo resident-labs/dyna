@@ -13,6 +13,7 @@
   import { allParts, emptyData, loadServiceData } from './load.ts'
   import { applyControl } from './control.ts'
   import { openHookLog } from '../settings/hookLog.ts'
+  import { scrollFade } from '../ui/scrollFade.ts'
 
   // A change read here is only what the page shows: its verdict, its number,
   // its overlaps and the watcher's last poll, so the page takes the list rows
@@ -99,7 +100,7 @@
 <section class="services" aria-label="Services">
   <TabHeader title="Services" blurb="What each service is doing and what it just did." />
   <div class="page">
-    <div class="strip" role="tablist" aria-label="Services">
+    <div class="strip" role="tablist" aria-label="Services" use:scrollFade>
       {#each tabs as t (t.id)}
         <button role="tab" class="tab" class:sel={t.id === selected} aria-selected={t.id === selected} onclick={() => choose(t.id)}>
           <span class="dot {t.tone}" aria-hidden="true"></span>{t.name}

@@ -14,6 +14,7 @@
   //   actions    extra footer buttons
   import { tick } from 'svelte'
   import { ago } from '../ui/format.ts'
+  import { scrollFade } from '../ui/scrollFade.ts'
   import MergeBox from './MergeBox.svelte'
   import PRChip from './PRChip.svelte'
   import Chip from '../ui/Chip.svelte'
@@ -170,7 +171,7 @@
   </header>
   <ChangeDetail row={change} {roomId} bind:detail={changeDetail}>
     {#snippet children(full, fullError, fullLoading, refresh)}
-      <div class="tabs" role="tablist">
+      <div class="tabs" role="tablist" use:scrollFade>
         <button role="tab" aria-selected={tab === 'conversation'} class:on={tab === 'conversation'} onclick={() => show('conversation')}>Conversation<span>{events.length}</span></button>
         {#if number}<button role="tab" aria-selected={tab === 'commits'} class:on={tab === 'commits'} onclick={() => show('commits')}>Commits<span>{detail?.commits?.length || ''}</span></button>{/if}
         <button role="tab" aria-selected={tab === 'checks'} class:on={tab === 'checks'} onclick={() => show('checks')}>Checks<span>{checks.length + bots.length}</span></button>
@@ -207,8 +208,10 @@
   .detail { padding: var(--s4) var(--s5) var(--s6); min-width: 0; }
   .back { display: inline-flex; align-items: center; gap: 4px; margin: 0 0 var(--s3) -6px; padding: 6px; font-size: 13px; font-weight: 600; color: var(--muted); border-radius: 6px; }
   .back:hover { color: var(--ink); background: var(--hover); }
-  .title { display: flex; align-items: flex-start; gap: var(--s3); }
-  h1 { flex: 1; min-width: 0; margin: 0; font-size: 22px; line-height: 1.25; font-weight: 700; overflow-wrap: anywhere; }
+  /* The title takes a whole line when the buttons beside it would leave it
+     too narrow to read, as in the review drawer and on a phone. */
+  .title { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--s2) var(--s3); }
+  h1 { flex: 1 1 24rem; min-width: 0; margin: 0; font-size: 22px; line-height: 1.25; font-weight: 700; overflow-wrap: anywhere; }
   h1 .num { color: var(--faint); font-weight: 500; }
   .ghb { flex: none; font-size: 12.5px; font-weight: 600; color: var(--ink-2); background: var(--raise); border-radius: 6px; padding: 5px 10px; }
   .ghb:hover { background: var(--raise-hover); color: var(--ink); }

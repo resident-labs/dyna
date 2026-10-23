@@ -105,13 +105,13 @@
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m6 4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
     </button>
   {/if}
-  <button class="row" class:sel={selecting ? pickedSet.has(m.id) : selected === m.address} class:closed={m.closed} class:finished={finished(m)} class:off={offSeat} class:fresh={fresh === m.id} class:pc={hasComputer(pc)} onclick={(e) => rowClick(e, m)} aria-pressed={selecting ? pickedSet.has(m.id) : undefined} aria-disabled={selecting && !selectableSession(m) ? true : undefined} title="{m.address} · {m.profile} · {sessionStatus(m, true)} · active {ago(m.lastActivity)}" oncontextmenu={(e) => { e.preventDefault(); onmenu(m, e.clientX, e.clientY, e.currentTarget) }} onkeydown={(e) => menuKey(e, m)}>
+  <button class="row" class:sel={selecting ? pickedSet.has(m.id) : selected === m.address} class:closed={m.closed} class:finished={finished(m)} class:off={offSeat} class:fresh={fresh === m.id} class:pc={hasComputer(pc)} onclick={(e) => rowClick(e, m)} aria-pressed={selecting ? pickedSet.has(m.id) : undefined} aria-disabled={selecting && !selectableSession(m) ? true : undefined} title="{m.name} · {m.profile} · {sessionStatus(m, true)} · active {ago(m.lastActivity)}" oncontextmenu={(e) => { e.preventDefault(); onmenu(m, e.clientX, e.clientY, e.currentTarget) }} onkeydown={(e) => menuKey(e, m)}>
     {#if m.depth > 0}
       <span class="guide" aria-hidden="true"></span>
     {/if}
     <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={32} state={finished(m) ? 'finished' : m.state} status={m.status} ring="var(--side)" />
     <span class="text">
-      <span class="name hue-{m.hue}">{offSeat ? 'root (internal)' : m.name}{#if row.folded}<span class="kids" title="{row.hidden} folded subagent{row.hidden === 1 ? '' : 's'}">{row.hidden}</span>{/if}{#if agentExpedited($expedite, m)} <ExpediteBadge short />{/if}</span>
+      <span class="name hue-{m.hue}"><span class="nm">{offSeat ? 'root (internal)' : m.name}</span>{#if row.folded}<span class="kids" title="{row.hidden} folded subagent{row.hidden === 1 ? '' : 's'}">{row.hidden}</span>{/if}{#if agentExpedited($expedite, m)} <ExpediteBadge short />{/if}</span>
       <span class="sub {finished(m) ? 'finished' : m.state}">{#if offSeat}off seat{:else if finished(m)}dormant · {ago(m.lastActivity)}{:else}{#if status}<span class="now" class:working={status === 'working'}>{status}</span> · {/if}{#if m.state === 'live' && m.doing?.text}<DoingLine doing={m.doing} {now} />{:else}{m.profile}{/if}{/if}</span>
       <ResponsibilityCount counts={m.responsibilities} />
     </span>
@@ -316,12 +316,18 @@
   }
   .more:focus-visible { display: grid; }
   .item:hover .more { display: grid; }
-  /* Touch: the actions button is always there, and a long press on a row
-     opens the same menu without the system text callout. */
+  /* Touch: the actions button is always there, every control is as big as a
+     thumb, and a long press on a row opens the same menu without the system
+     text callout. */
   @media (hover: none) {
     .more { display: grid; width: 40px; height: 40px; }
-    .pc-glyph { right: 50px; }
-    .row.pc { padding-right: 76px; }
+    .pc-glyph { right: 46px; width: 40px; height: 40px; }
+    .row.pc { padding-right: 92px; }
+    /* The chevron keeps its 12 px glyph and takes a taller target in the
+       gutter left of the avatar. */
+    .fold { width: 24px; height: 44px; }
+    .select-mode, .room-actions { min-width: 44px; min-height: 44px; }
+    .group-toggle, .group-clear, .toggle { min-height: 44px; }
     .row { -webkit-touch-callout: none; user-select: none; }
   }
   @media (hover: hover) {
@@ -344,12 +350,18 @@
   .name {
     font-weight: 600;
     font-size: var(--t-body);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
+  }
+  /* The name is the flex item that gives way: it ends in an ellipsis, where
+     the badges after it keep their size. */
+  .nm {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .kids {
     font-size: var(--t-cap);

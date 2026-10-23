@@ -50,6 +50,17 @@
   let destroyed = false
   onDestroy(() => (destroyed = true))
 
+  // below puts a control in the row after the scroller, where it takes its own
+  // space instead of covering the list. A node Svelte tears down is already
+  // gone, so destroy only clears one that is left over.
+  function below(node: HTMLElement, target: HTMLElement | null) {
+    const place = (next: HTMLElement | null): void => {
+      if (next?.parentNode) next.after(node)
+    }
+    place(target)
+    return { update: place, destroy: () => node.remove() }
+  }
+
   // edgeKey is a page edge's key; an empty list has none.
   const edgeKey = (item: T | undefined): RowKey | null => (item === undefined ? null : key(item))
 
@@ -207,12 +218,14 @@
   {#snippet children(item: T, index: number)}{@render renderRow(item, index)}{/snippet}
 </VirtualList>
 {#if onpresent && !atBottom}
-  <div class="jump-slot"><button class="btn jump-present" aria-label="Jump to present" disabled={busy} onclick={present}>Jump to present <span aria-hidden="true">↓</span></button></div>
+  <div class="jump-bar" use:below={scroller}><button class="btn jump-present" aria-label="Jump to present" disabled={busy} onclick={present}>Jump to present <span aria-hidden="true">↓</span></button></div>
 {/if}
 
 <style>
-  .jump-slot { height: 0; position: sticky; bottom: 12px; display: flex; align-items: flex-start; justify-content: center; z-index: 2; }
-  .jump-present { transform: translateY(-100%); border-radius: 99px; box-shadow: 0 2px 10px #0003; white-space: nowrap; }
+  /* The pill gets its own row under the list instead of floating over the
+     last post, so it never covers a row or one of its buttons. */
+  .jump-bar { flex: none; display: flex; justify-content: center; padding: var(--s1) 0 var(--s2); background: var(--main); }
+  .jump-present { min-height: 44px; border-radius: 99px; box-shadow: 0 2px 10px #0003; white-space: nowrap; }
   .history { height: 36px; display: flex; align-items: center; justify-content: center; color: var(--faint); font-size: var(--t-sm); }
   .history button { color: var(--muted); font-size: inherit; }
   .skeleton { width: 120px; height: 8px; border-radius: 4px; background: var(--line); }

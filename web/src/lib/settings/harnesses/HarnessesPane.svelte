@@ -1049,7 +1049,10 @@
   .toolbar { margin-bottom: var(--s4); }
   .acct { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s1) var(--s3); min-height: 38px; font-size: var(--t-ui); }
   .acct-name { display: flex; flex: 1 1 15rem; flex-wrap: wrap; align-items: center; gap: var(--s1) var(--s2); min-width: 0; }
-  .acct .btn-group { flex-wrap: nowrap; }
+  .acct .btn-group { flex-wrap: nowrap; margin-left: auto; justify-content: flex-end; }
+  /* One fixed column per action, so the buttons of every account line up
+     under each other even when a row has no Use button. */
+  .acct .btn-group .btn { min-width: 4.4rem; padding: 0 10px; }
   .acct-name .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; border: 1px solid var(--line); }
   .dot.on { background: var(--sage); border-color: var(--sage); }
