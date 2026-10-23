@@ -193,6 +193,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "SetServiceProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.SetServiceProfile},
 		{Name: "RestartReviewer", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.RestartReviewer},
 		{Name: "ListHooks", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.List},
+		{Name: "HookSummary", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.Summaries},
 		{Name: "HookRuns", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.Runs},
 		{Name: "HookRepos", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.rooms.HookRepos},
 		{Name: "RunHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, repo, name string) (hooks.Run, error) {

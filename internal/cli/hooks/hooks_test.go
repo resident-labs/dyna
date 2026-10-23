@@ -59,6 +59,19 @@ func TestLifecycleCLI(t *testing.T) {
 	if out, err := run("list"); err != nil || !strings.Contains(out, `"timeout":"3s"`) || !strings.Contains(out, `"editedBy":"owner"`) || !strings.Contains(out, `"editedAt":`) || !strings.Contains(out, `"addedBy":"owner"`) {
 		t.Fatalf("edit: %s %v", out, err)
 	}
+	for _, disabled := range []string{"true", "false"} {
+		if _, err := run("edit", "show", "--disabled="+disabled); err != nil {
+			t.Fatal(err)
+		}
+		out, err := run("list")
+		var list []hooks.Hook
+		if err != nil || json.Unmarshal([]byte(out), &list) != nil || len(list) != 1 {
+			t.Fatalf("list after switch: %s %v", out, err)
+		}
+		if list[0].Disabled != (disabled == "true") || list[0].Timeout != "3s" || list[0].AddedBy != "owner" {
+			t.Fatalf("switch changed hook settings: %+v", list[0])
+		}
+	}
 	for _, args := range [][]string{{"edit", "show"}, {"edit", "show", "--command", ""}, {"edit", "show", "--timeout", "0s"}, {"edit", "show", "--slot", "invalid"}, {"edit", "missing", "--command", "true"}} {
 		if _, err := run(args...); err == nil {
 			t.Fatalf("invalid edit accepted: %v", args)
