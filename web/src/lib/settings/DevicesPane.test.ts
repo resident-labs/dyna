@@ -41,12 +41,14 @@ interface ScopeSave {
 }
 const saves = (): ScopeSave[] => Reflect.get(globalThis, 'scopeSaves')
 
-async function pane(run: (pane: Pane) => Promise<void>, deferReads = false) {
+const DEFAULT_ROWS = [
+  { kind: 'paired', id: 'a', name: 'Phone A', scopes: ['read', 'operate'], scopeLabel: 'read, operate', lastSeen: '' },
+  { kind: 'paired', id: 'b', name: 'Phone B', scopes: ['read'], scopeLabel: 'read', lastSeen: '' },
+]
+
+async function pane(run: (pane: Pane) => Promise<void>, deferReads = false, rows: object[] = DEFAULT_ROWS) {
   const dom = installDom({
-    deviceRows: [
-      { kind: 'paired', id: 'a', name: 'Phone A', scopes: ['read', 'operate'], scopeLabel: 'read, operate', lastSeen: '' },
-      { kind: 'paired', id: 'b', name: 'Phone B', scopes: ['read'], scopeLabel: 'read', lastSeen: '' },
-    ],
+    deviceRows: rows,
     scopeSaves: [],
     deviceReads: deferReads ? [] : null,
   })
@@ -161,4 +163,28 @@ test('device reads retry failures and keep loaded rows during a single refresh',
     need(reads.shift()).ok(rows)
     await settle(); flushSync()
   }, true)
+})
+
+// A browser the engine signed in by itself has no host and no name of its own,
+// only the session stamp. Two of them can be seen in the same minute, so the
+// row must carry an identity the owner can open with a touch or a keyboard.
+test('two browsers with one name stay apart by their computer session', async () => {
+  const stamps = ['20261023-112744-931569b1', '20261023-114307-3ebe2b45'] as const
+  await pane(async ({ target, flushSync }) => {
+    assert.deepEqual(elements(target, '.name .label').map((el) => textOf(el)), ['dyna browser', 'dyna browser'], 'the stamp stays out of the name')
+    assert.deepEqual(elements(target, '.seen').map((el) => textOf(el)), ['seen never', 'seen never'], 'the last-seen line cannot tell them apart')
+    const ids = () => elements<HTMLButtonElement>(target, '.name .id')
+    assert.equal(ids().length, 2)
+    assert.match(need(ids()[0]).getAttribute('aria-label') ?? '', new RegExp(stamps[0]))
+    assert.match(need(ids()[1]).getAttribute('aria-label') ?? '', new RegExp(stamps[1]))
+    assert.equal(need(ids()[0]).getAttribute('aria-expanded'), 'false')
+    need(ids()[0]).click()
+    flushSync()
+    assert.equal(need(ids()[0]).getAttribute('aria-expanded'), 'true')
+    assert.match(textOf(need(elements(target, '.stamp')[0])), new RegExp(stamps[0]))
+    assert.equal(elements(target, '.stamp').length, 1, 'only the row that was asked opens')
+    need(ids()[0]).click()
+    flushSync()
+    assert.equal(elements(target, '.stamp').length, 0, 'asking again closes it')
+  }, false, stamps.map((stamp, i) => ({ kind: 'paired', id: `browser-${i}`, name: `dyna browser · ${stamp}`, scopes: ['read'], lastSeen: '' })))
 })
