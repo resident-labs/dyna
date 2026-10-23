@@ -1042,9 +1042,6 @@ func (s *Store) OwnerReadIDs(roomID string) (map[string]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.importOwnerReads(db, roomID, false); err != nil {
-		return nil, err
-	}
 	return storedOwnerReads(db, roomID)
 }
 
@@ -1060,54 +1057,11 @@ func (s *Store) MarkOwnerReadMany(roomID string, messageIDs []string) error {
 		if err != nil {
 			return err
 		}
-		if err := s.importOwnerReads(db, roomID, true); err != nil {
-			return err
+		if len(messageIDs) == 0 {
+			return nil
 		}
-		ctx, w := context.Background(), state.For(db)
-		if len(messageIDs) > 0 {
-			if err := w.Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-				added, err := putOwnerReads(ctx, conn, roomID, messageIDs)
-				if err != nil || !added {
-					return err
-				}
-				// The canonical commit must leave an interrupted copy dirty.
-				return invalidateOwnerReadMirror(ctx, conn, roomID)
-			}); err != nil {
-				return err
-			}
-		}
-		dir, err := s.dir(roomID)
-		if err != nil {
-			return err
-		}
-		path := filepath.Join(dir, ownerReadsFile)
-		version, err := w.MirrorVersion(ctx, ownerReadsKey(roomID), path)
-		if err != nil {
-			return err
-		}
-		if version != "" {
-			var complete bool
-			if err := db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM meta WHERE key=? AND value=?)", ownerReadsMirrorKey(roomID), version).Scan(&complete); err != nil {
-				return err
-			}
-			if complete {
-				return nil
-			}
-		}
-		ids, err := storedOwnerReads(db, roomID)
-		if err != nil {
-			return err
-		}
-		// TODO: legacy/shim remove later — the earlier release counts unread posts only from owner-read.json; remove with item 31.
-		if err := s.mirror(w, roomID, ownerReadsKey(roomID), ownerReadsFile, sortedIDs(ids)); err != nil {
-			return nil // The canonical marks committed; the copy stays dirty.
-		}
-		version, err = w.MirrorVersion(ctx, ownerReadsKey(roomID), path)
-		if err != nil || version == "" {
-			return err
-		}
-		return w.Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
-			_, err := conn.ExecContext(ctx, "INSERT INTO meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", ownerReadsMirrorKey(roomID), version)
+		return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+			_, err := putOwnerReads(context.Background(), conn, roomID, messageIDs)
 			return err
 		})
 	})
