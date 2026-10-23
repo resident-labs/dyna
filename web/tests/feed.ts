@@ -15,6 +15,6 @@ import { need } from '../test/need.ts'
 const q = new URLSearchParams(location.search)
 for (const id of ['highlight', 'finished']) {
   const value = q.get(id)
-  if (value) choose(null, id, value)
+  if (value) choose(id, value)
 }
 mount(Feed, { target: need(document.getElementById('app'), 'app'), props: { room, posts, view: 'general', label: 'general', onearlier: undefined, onnewer: undefined, onpresent: undefined, onaround: undefined, onacceptcall: undefined, ondeclinecall: undefined, onaddress: () => {}, onreveal: () => {}, onreply: () => {}, onforward: () => {}, onpin: () => {}, onopenfile: () => {}, ondetail: () => {}, onquestion: () => {}, ongoal: () => {} } })

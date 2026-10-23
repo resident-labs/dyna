@@ -6,7 +6,6 @@ import { readFileSync } from 'node:fs'
 // rules a phone needs: no layout engine runs here. Live QA with a real browser
 // reports the measurements for the pull request.
 const app: string = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const lookMenu: string = readFileSync(new URL('./LookMenu.svelte', import.meta.url), 'utf8')
 const toast: string = readFileSync(new URL('../voice/IncomingToast.svelte', import.meta.url), 'utf8')
 const callButton: string = readFileSync(new URL('../voice/CallButton.svelte', import.meta.url), 'utf8')
 
@@ -41,14 +40,15 @@ test('a phone puts Members last in the bar and keeps the menu for pinned posts',
   const search = header.indexOf('aria-label="Search sessions and messages"')
   const members = header.indexOf("aria-label={showMembers ? 'Hide member list'")
   assert.ok(search > 0 && members > search, 'the Members button follows Search')
+  assert.match(header.slice(header.lastIndexOf('{#if', members), members), /room && !drill/, 'Members renders only inside a room, never on the home page')
   assert.equal(header.slice(members).includes('class="icon"'), false, 'Members is the bar\'s last button')
   assert.match(app, /label: 'Pinned posts'/, 'the menu opens the pinned posts')
-  assert.match(app, /label: 'Channel look'/, 'the menu opens the channel look')
-  // The menu itself must not repeat a header button.
+  // The menu itself must not repeat a header button or a look control.
   const menuStart = app.indexOf('function channelMenuItems()')
   const menu = app.slice(menuStart, app.indexOf('\n  }', menuStart))
   assert.doesNotMatch(menu, /label: 'Members'/, 'Members is not repeated in the menu')
   assert.doesNotMatch(menu, /label: 'Issues'/, 'Issues is not repeated in the menu')
+  assert.doesNotMatch(menu, /Channel look/, 'the look is set only in Settings')
 })
 
 test('a phone title keeps a readable width and its buttons never shrink', () => {
@@ -65,13 +65,9 @@ test('the room header shows its name and moves room tabs below the bar on phones
   assert.doesNotMatch(header, /channelTrail|>general<|>Channels</)
 })
 
-test('the channel look popover stays inside a 390 px viewport', () => {
-  const pop = rule(lookMenu, '.pop')
-  assert.match(pop, /position: fixed/, 'the popover is pinned to the viewport, not to a button near the edge')
-  assert.match(pop, /left: 8px/, 'the popover keeps 8 px on the left')
-  assert.match(pop, /right: 8px/, 'the popover keeps 8 px on the right')
-  assert.doesNotMatch(pop, /right: 0/, 'the popover no longer hangs off the button')
-  assert.match(pop, /max-height:/, 'a long popover scrolls instead of leaving the screen')
+test('the room header keeps no per-channel look control', () => {
+  assert.doesNotMatch(header, /Customize this channel|LookMenu/, 'the bar has no channel look button')
+  assert.doesNotMatch(app, /LookMenu|scopeOf|lookOpen/, 'nothing in the app scopes the look to one channel')
 })
 
 test('the incoming call card docks above the composer instead of over the top bar', () => {
