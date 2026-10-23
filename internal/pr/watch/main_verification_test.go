@@ -118,7 +118,8 @@ func TestDefaultBranchIdleReadsHonorSavedRatePause(t *testing.T) {
 		r := st.Records["github.com/owner/repo#1"]
 		r.Watching = false
 		r.State = "merged"
-		st.LegacyPause = e.clock.Add(time.Hour)
+		// The intercepted transport uses an empty fixture account.
+		st.RateLimits = map[string]RateLimit{(RateLimitScope{Host: "github.com", Account: "", Resource: "core"}).Key(): {PauseUntil: e.clock.Add(time.Hour)}, (RateLimitScope{Host: "github.com", Account: "", Resource: "graphql"}).Key(): {PauseUntil: e.clock.Add(time.Hour)}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)

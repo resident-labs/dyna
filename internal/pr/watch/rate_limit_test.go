@@ -291,10 +291,11 @@ func TestSuccessfulServiceCallResumesAllWatchedPRsAfterOutage(t *testing.T) {
 
 func TestExplicitCallWithoutAvailableQuotaKeepsPollingPause(t *testing.T) {
 	e := newEnv(t)
+	accountGH(t, e)
 	r := e.track()
 	until := e.clock.Add(time.Hour)
 	if err := e.s.Store.update(func(st *State) error {
-		st.LegacyPause = until
+		st.RateLimits = map[string]RateLimit{(RateLimitScope{Host: "github.com", Account: "fixture", Resource: "core"}).Key(): {PauseUntil: until}, (RateLimitScope{Host: "github.com", Account: "fixture", Resource: "graphql"}).Key(): {PauseUntil: until}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
