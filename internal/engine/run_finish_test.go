@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,8 +35,9 @@ func TestFinishRunPreservesFirstOutcomeAndReceipt(t *testing.T) {
 	}
 	(&socketCallers{runRoom: func(string) (string, error) { return "", nil }}).actForCallers(calls)
 	applyOnce(calls, state.For(db), t.Logf)
-	caller := websvc.Caller{Kind: websvc.Worker, Run: run}
-	enginetest.ServeCallers(t, dir, func(net.Conn) (websvc.Caller, error) { return caller, nil }, calls)
+	var caller atomic.Pointer[websvc.Caller]
+	caller.Store(&websvc.Caller{Kind: websvc.Worker, Run: run})
+	enginetest.ServeCallers(t, dir, func(net.Conn) (websvc.Caller, error) { return *caller.Load(), nil }, calls)
 	client := engineclient.New("", engineclient.RestartWait(0), engineclient.Notices(nil))
 	ended := time.Unix(123, 0).UTC()
 	input := map[string]any{"run": run, "status": "ok", "endedAt": ended, "directoriesComplete": true}
@@ -92,7 +94,9 @@ func TestFinishRunPreservesFirstOutcomeAndReceipt(t *testing.T) {
 	if string(a) != string(b) {
 		t.Fatalf("receipt changed: %s != %s", a, b)
 	}
-	caller.Agent = 1
+	other := *caller.Load()
+	other.Agent = 1
+	caller.Store(&other)
 	if _, err := finish(id); err == nil {
 		t.Fatal("wrong worker replayed coordinator receipt")
 	}
