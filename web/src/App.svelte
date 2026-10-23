@@ -256,10 +256,9 @@
   const declineCall = (req: CallRequest) => voiceWidget?.decline(req)
   let pageVisible = $state(document.visibilityState === 'visible')
   // machinesNav: the rail's machines tile is open, so the sidebar lists the
-  // machines of this engine. Picking one opens its page in the main area. It
-  // starts open because Home, the first screen, is the machines list until a
-  // room opens.
-  let machinesNav = $state(true)
+  // machines of this engine. Picking one opens its page in the main area. A
+  // room in the link opens that room instead, so the list starts closed then.
+  let machinesNav = $state(!new URLSearchParams(location.hash.slice(1)).has('room'))
   let machines = $state<MachineSummary[] | null>(null) // null until the first answer
   let machinesRequest = 0
   let machineId = $state('') // the machine whose page is open, or ''
@@ -268,12 +267,20 @@
   let machineBusy = $state(false)
   let machineRequest = 0
   function machinesVisible() { return pageVisible && machinesNav && (narrow ? navOpen : showSide) }
-  // The list reads again at the load card's cadence while it shows, so its
-  // figures stay close without a timer of its own.
+  function machineVisible() { return pageVisible && machineId !== '' }
+  // The figures move on their own, so the list and the open page read again at
+  // the load card's cadence. A phone keeps the page while the drawer is shut,
+  // so the page reads on its own terms, not the sidebar's.
   $effect(() => {
-    if (!machinesVisible()) return
-    loadMachines()
-    const timer = setInterval(loadMachines, LOAD_POLL_MS)
+    const list = machinesVisible()
+    const page = machineVisible()
+    if (!list && !page) return
+    const tick = () => {
+      if (list) loadMachines()
+      if (page && !machineBusy) loadMachine(machineId)
+    }
+    tick()
+    const timer = setInterval(tick, LOAD_POLL_MS)
     return () => clearInterval(timer)
   })
   let home = $state<ReturnType<typeof Home>>() // the home screen, which takes live events
@@ -316,6 +323,8 @@
     if (!id || machineBusy) return
     machineBusy = true
     machineError = ''
+    // A read that started before this write may not land after it.
+    machineRequest++
     try {
       const detail = await api.saveMachine(id, patch)
       if (machineId === id) machineDetail = detail

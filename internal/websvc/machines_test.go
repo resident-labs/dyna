@@ -25,6 +25,7 @@ func machineAPI(t *testing.T) MachineAPI {
 		Live: func(context.Context) MachineLive {
 			return MachineLive{CPU: &cpu, Agents: &agents, Computers: &computers, Harnesses: []MachineHarness{{Name: "pi", Version: "1.4.0"}}}
 		},
+		Running: func() []MachineAgent { return []MachineAgent{{ID: "ses_a", Name: "lead", Address: "dyna:lead", Room: "dyna", RoomID: "room_1", Hue: 3}} },
 	}
 }
 
@@ -59,6 +60,9 @@ func TestMachinesListAndPatch(t *testing.T) {
 	if detail.DynaVersion != "1.2.3" || len(detail.Harnesses) != 1 || detail.SSH != "" || detail.CISlots != 0 {
 		t.Fatalf("detail = %+v, want the version, one harness and no route", detail)
 	}
+	if len(detail.Running) != 1 || detail.Running[0].Name != "lead" || detail.Running[0].Address != "dyna:lead" {
+		t.Fatalf("running = %+v, want the named session", detail.Running)
+	}
 
 	// A machine other than this one stores its route and reports no figure the
 	// engine has not probed.
@@ -73,6 +77,9 @@ func TestMachinesListAndPatch(t *testing.T) {
 	if got.Status != MachineUnknown || got.Agents != nil || got.CPU != nil || got.CISlots != 4 || got.SSH != "pip@hermes" {
 		t.Fatalf("remote = %+v, want unknown with its stored route and slots", got)
 	}
+	if got.Running != nil {
+		t.Fatalf("remote running = %+v; this engine cannot name its sessions", got.Running)
+	}
 
 	// A patch takes the fields it names and the store refuses a machine that no
 	// longer validates.
@@ -81,8 +88,8 @@ func TestMachinesListAndPatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if disabled.Enabled || disabled.Status != MachineOff {
-		t.Fatalf("disabled = %+v, want off", disabled)
+	if disabled.Enabled || disabled.Status != MachineDisabled {
+		t.Fatalf("disabled = %+v, want the disabled status", disabled)
 	}
 	if _, err := api.SaveMachine(t.Context(), local.ID, MachinePatch{Roles: &[]machines.Role{machines.RoleAgents}}); !errors.Is(err, machines.ErrLocal) {
 		t.Fatalf("removing the engine role = %v, want ErrLocal", err)

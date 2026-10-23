@@ -7,9 +7,10 @@
 // on a machine that has the agents role.
 export type MachineRole = 'engine' | 'agents' | 'ci'
 
-// MachineStatus is what the engine knows about a machine right now. "unknown"
-// is a machine the engine has not probed yet.
-export type MachineStatus = 'online' | 'off' | 'unknown'
+// MachineStatus is what the engine knows about a machine right now.
+// "disabled" means switched off in the registry, "offline" means the probe
+// could not reach it, and "unknown" means the engine has not probed it yet.
+export type MachineStatus = 'online' | 'disabled' | 'offline' | 'unknown'
 
 // MachineCISlots is the CI work this machine runs now, out of its slots.
 export interface MachineCISlots {
@@ -26,12 +27,25 @@ export interface MachineSummary {
   local: boolean
   enabled: boolean
   status: MachineStatus
+  // ciSlots is the machine's setting; ci is its use now, which the CI work
+  // reports in a later version.
+  ciSlots: number
   // cpu is the machine's share of its cores in percent, known for this
   // engine's machine only.
   cpu?: number
   agents?: number
   computers?: number
   ci?: MachineCISlots
+}
+
+// MachineAgent is a session that runs on this engine's machine now.
+export interface MachineAgent {
+  id: string
+  name: string
+  hue: number
+  address?: string
+  room?: string
+  roomId?: string
 }
 
 // MachineHarness is one agent harness installed on a machine and its version.
@@ -41,13 +55,12 @@ export interface MachineHarness {
 }
 
 // MachineDetail is the Machine page. ssh is the route to a remote machine, or
-// "" for this engine's own machine. ciSlots is the machine's setting, while
-// ci in the summary is its use now.
+// "" for this engine's own machine.
 export interface MachineDetail extends MachineSummary {
   ssh: string
-  ciSlots: number
   dynaVersion?: string
   harnesses?: MachineHarness[]
+  running?: MachineAgent[]
 }
 
 // MachinePatch is a change to one machine. An absent field keeps its value.
