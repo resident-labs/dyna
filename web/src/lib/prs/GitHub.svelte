@@ -21,6 +21,8 @@
   import TabHeader from '../rooms/TabHeader.svelte'
   import PRDetail from './PRDetail.svelte'
   import IssueList from './IssueList.svelte'
+  import type { Row as ChangeRow } from './prlist.ts'
+  import MentionInChat from './MentionInChat.svelte'
   import { roomIssueLabel, unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
   import { location as issueLocation } from '../rooms/issues.ts'
   import IssuePage from './IssuePage.svelte'
@@ -110,7 +112,9 @@
   let trackMenu = $state<TrackMenu | null>(null)
   let linkedItem = $state<GitHubDetail | null>(null) // a linked PR the GitHub list does not hold
   let followed = $state<Link | null>(null) // the last address-bar link the screen opened
-  let width = $state(1200) // this screen's own width, from its box
+  // Start narrow: the workspace measures its box a moment after mounting,
+  // and a two-column guess would squeeze the list in a small panel.
+  let width = $state(0) // this screen's own width, from its box
   let mergeStatus = $state<MergeControlStatus | null>(null)
   let mergeError = $state('')
   let resuming = $state(false)
@@ -336,6 +340,11 @@
   function mentionPR() {
     if (chg) onmention?.({ kind: 'pr', number: chg.number || 0, title: changeTitle(chg), state: String(chg.state || 'OPEN'), url: chg.url || '' })
   }
+
+  // A list row mentions its own PR, including one Dyna only knows locally.
+  function mentionRow(row: ChangeRow) {
+    onmention?.({ kind: 'pr', number: row.number || 0, title: changeTitle(row), state: String(row.state || 'OPEN'), url: row.url || '' })
+  }
   // Track and review: a PR that Dyna tracked before keeps its author session;
   // any other PR needs a session to wake.
   function trackRow(c: Row, e: MouseEvent) {
@@ -413,9 +422,6 @@
     <input class="search" type="search" bind:value={search} oninput={typed} onkeydown={(e) => e.key === 'Enter' && (clearTimeout(timer), (query = search.trim()), load())} placeholder="Search, for example author:@me label:bug" aria-label="Search {inPRs ? 'pull requests' : 'issues'}" />
   </header>
 {/snippet}
-{#snippet mentionAction()}
-  {#if onmention && !isLocal(chg) && chg?.url}<button class="act" onclick={mentionPR} title="Add this PR to a chat message">Mention in chat</button>{/if}
-{/snippet}
 <svelte:window onkeydown={keys} />
 <section class="gh" class:narrow class:pr-list={inPRs ? !chg : !sel && !localSelected} bind:clientWidth={width}>
   {#if inPRs}
@@ -430,13 +436,16 @@
               {@const ci = ciLabel(row)}{@const review = reviewLabel(row)}
               {@const item = merge?.find((entry) => entry.changeId === row.changeId)}
               {@const state = mergeState(row, item)}
-              <RowItem selected={row.changeId === selId} onclick={() => openRow(row)}>
-                {#snippet lead()}<PRGlyph it={row} />{/snippet}
-                <div class="row-title">{changeTitle(row)} {#if row.isDraft}<Chip>Draft</Chip>{/if} {#if prExpedited($expedite, row)}<ExpediteBadge />{/if}</div>
-                <div class="row-author">#{row.number}{#if authorName(row, names)}{` by ${authorName(row, names)}`}{/if}</div>
-                <div class="row-facts"><Chip tone={ci.tone}>{ci.label}</Chip><Chip tone={review.tone} title={row.reviewBlocked}>{review.label}</Chip><span>{mergePosition(row.changeId ?? '', merge ?? [])}</span></div>
-                {#if item && !item.trial && item.state !== 'ready'}<div class="row-author">{state.reason || state.label}</div>{/if}
-              </RowItem>
+              <div class="item" class:stack={narrow}>
+                <RowItem selected={row.changeId === selId} onclick={() => openRow(row)}>
+                  {#snippet lead()}<PRGlyph it={row} />{/snippet}
+                  <div class="row-title">{changeTitle(row)} {#if row.isDraft}<Chip>Draft</Chip>{/if} {#if prExpedited($expedite, row)}<ExpediteBadge />{/if}</div>
+                  <div class="row-author">#{row.number}{#if authorName(row, names)}{` by ${authorName(row, names)}`}{/if}</div>
+                  <div class="row-facts"><Chip tone={ci.tone}>{ci.label}</Chip><Chip tone={review.tone} title={row.reviewBlocked}>{review.label}</Chip><span>{mergePosition(row.changeId ?? '', merge ?? [])}</span></div>
+                  {#if item && !item.trial && item.state !== 'ready'}<div class="row-author">{state.reason || state.label}</div>{/if}
+                </RowItem>
+                {#if onmention}<MentionInChat onmention={() => mentionRow(row)} />{/if}
+              </div>
             {/each}
             <LoadOlder auto {older} loading={loadingOlder} failed={failedOlder} onclick={onolder} />
           </div>
@@ -451,7 +460,7 @@
     {#if chg}
       <div class="dscroll" role="presentation" ontouchstart={narrow ? swipeStart : null} ontouchend={narrow ? swipeEnd : null}>
         {#key chg.changeId}
-          <PRDetail change={chg} {detail} {detailError} {roomId} {names} review={reviewer?.enabled ?? true} merge={merge?.find((m) => m.changeId === chg.changeId) ?? null} standing={view.states[chg.changeId ?? '']} bind:tab ontab={showTab} onback={back} {onuntrack} {onresume} ontrack={trackRow} onchange={onreviewer} onauthor={chgAuthor ? () => onsession?.(chgAuthor, 'prs') : null} onreviewer={chgReviewer ? () => onsession?.(chgReviewer) : null} actions={mentionAction} {goals} {onexpedite} {onlinkgoal} />
+          <PRDetail change={chg} {detail} {detailError} {roomId} {names} review={reviewer?.enabled ?? true} merge={merge?.find((m) => m.changeId === chg.changeId) ?? null} standing={view.states[chg.changeId ?? '']} bind:tab ontab={showTab} onback={back} {onuntrack} {onresume} ontrack={trackRow} onchange={onreviewer} onauthor={chgAuthor ? () => onsession?.(chgAuthor, 'prs') : null} onreviewer={chgReviewer ? () => onsession?.(chgReviewer) : null} onmention={onmention ? mentionPR : null} {goals} {onexpedite} {onlinkgoal} />
         {/key}
       </div>
     {/if}
@@ -509,6 +518,10 @@
 
 <style>
   .rows { padding: 0 var(--s4) var(--s4); }
+  .item { display: flex; align-items: center; gap: var(--s2); }
+  .item :global(.row) { flex: 1; min-width: 0; }
+  .item.stack { flex-wrap: wrap; padding-bottom: var(--s2); }
+  .item.stack :global(.row) { flex-basis: 100%; }
   .rows :global(.row) { border-bottom: 1px solid var(--line-soft); border-radius: 0; padding: var(--s4) 0; }
   .row-title { font-size: var(--t-body); font-weight: 600; overflow-wrap: anywhere; }
   .row-author { margin-top: var(--s1); color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }

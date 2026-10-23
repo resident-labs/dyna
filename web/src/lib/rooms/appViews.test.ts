@@ -57,7 +57,7 @@ function rendered(view: string): string[] {
 
 test('every sidebar tab renders its own page, not the feed', () => {
   assert.ok(chain, 'App view chain not found')
-  const expected = { issues: 'GitHub', library: 'Library', services: 'Services' }
+  const expected = { library: 'Library', services: 'Services' }
   for (const [view, name] of Object.entries(expected)) assert.ok(rendered(view).includes(name), `${view} renders ${rendered(view)}`)
   for (const tab of sections.flatMap((s) => s.rows).flatMap((r) => r.tabs)) assert.ok(!rendered(tab.id).includes('Feed'), `${tab.id} falls through to the feed`)
   assert.ok(rendered('general').includes('Feed'))

@@ -14,6 +14,7 @@
   import Card from '../ui/Card.svelte'
   import Chip from '../ui/Chip.svelte'
   import FactsLine from './FactsLine.svelte'
+  import MentionInChat from './MentionInChat.svelte'
   import PRGlyph from './PRGlyph.svelte'
   import Thread from './Thread.svelte'
   import { itemState, sortThread, timeline } from './github.ts'
@@ -69,7 +70,7 @@
     {/each}
     {#if !it.workingSession && !prs.length}<p class="quiet">No agent is working on this yet.</p>{/if}
     <div class="acts">
-      {#if onmention}<button class="act primary" onclick={() => onmention?.({ kind: 'issue', number: it.number, title: it.title, state: it.state, url: it.url })}>Mention in chat</button>{/if}
+      {#if onmention}<MentionInChat onmention={() => onmention?.({ kind: 'issue', number: it.number, title: it.title, state: it.state, url: it.url })} />{/if}
       <button class="act" onclick={() => openExternal(it.url)}>Open on GitHub</button>
     </div>
   </Card>
