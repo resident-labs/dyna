@@ -486,11 +486,11 @@ func TestTestBudgetFailureIgnoresExplicitOldHeadRun(t *testing.T) {
 	}
 }
 
-func TestReportArtifactsSkipUnrelatedXML(t *testing.T) {
+func TestReportArtifactsBoundCustomNameDiscovery(t *testing.T) {
 	e := newEnv(t)
 	testReportFixture(t, e, map[string]string{"report.xml": `<testsuite><testcase name="slow" time="12"/></testsuite>`})
 	unrelated := testReportZip(t, map[string]string{"settings.xml": "unrelated"})
-	e.f.Raw["repos/owner/repo/actions/runs/81/artifacts?per_page=100"] = fmt.Sprintf("HTTP/2.0 200 OK\r\n\r\n{\"artifacts\":[{\"id\":90,\"name\":\"screenshots\",\"size_in_bytes\":%d},{\"id\":91,\"name\":\"junit-report\",\"size_in_bytes\":%d}]}", len(unrelated), len(e.f.Blobs["repos/owner/repo/actions/artifacts/91/zip"]))
+	e.f.Raw["repos/owner/repo/actions/runs/81/artifacts?per_page=100"] = fmt.Sprintf("HTTP/2.0 200 OK\r\n\r\n{\"artifacts\":[{\"id\":90,\"name\":\"screenshots\",\"size_in_bytes\":%d},{\"id\":91,\"name\":\"reports\",\"size_in_bytes\":%d}]}", maxTestArtifact+1, len(e.f.Blobs["repos/owner/repo/actions/artifacts/91/zip"]))
 	e.f.Blobs["repos/owner/repo/actions/artifacts/90/zip"] = unrelated
 	e.track()
 	e.tick()
