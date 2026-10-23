@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -109,14 +110,19 @@ func parseCacheClean(output string) ([]string, int64) {
 	return paths, freed
 }
 
-// runKeeper is the shell command that keeps a run's lock held on the node for
-// as long as the run lasts, and no longer: the keeper goes away with its lock
-// when the run directory is removed, and it gives up after the longest run
-// anyway. A crashed run therefore leaves only the lock file, never a held lock.
+// runLocks is the shell command that takes a run's own lock and its base's
+// shared cache lock, and leaves both held by a keeper that ends with the run:
+// the keeper goes away when the run directory is removed, or after the longest
+// run anyway. The setup holds the shared cache lock before it returns, so a
+// cleanup that is trimming caches is never overtaken by a run that starts while
+// it works, and a run that already runs makes that cleanup skip every entry. A
+// crashed run therefore leaves only the lock files, never a held lock.
 // A caller starts it as its own background statement.
-func runKeeper(active string) string {
+func runLocks(base, active string) string {
 	wait := "end=$((SECONDS+10800)); while [ -e " + shellquote.Quote(active) + " ] && [ $SECONDS -lt $end ]; do sleep 5; done"
-	return "setsid flock -n " + shellquote.Quote(active) + " bash -c " + shellquote.Quote(wait) + " >/dev/null 2>&1 </dev/null"
+	return "exec 6>>" + shellquote.Quote(active) + "; flock -n -w 60 6; " +
+		"exec 7>>" + shellquote.Quote(path.Join(base, "caches.lock")) + "; flock -s -w 60 7; " +
+		"setsid bash -c " + shellquote.Quote(wait) + " 6>&6 7>&7 >/dev/null 2>&1 </dev/null & exec 6>&-; exec 7>&-"
 }
 
 // diskFullNote is the text the kernel and the tools print when a check runs

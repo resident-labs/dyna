@@ -121,20 +121,29 @@ prune_runs() {
   done
 }
 
-# base_idle BASE: no run in BASE holds its lock, so no run reads its caches.
-base_idle() {
-  local run
-  for run in "$1"/runs/*; do
-    live_run "$run" && return 1
+# trim_caches BASE: the cache entries that nothing has used for longer than the
+# age limit, removed while holding BASE's cache lock exclusively. A run takes
+# that lock shared before it mounts a cache and holds it until it ends, so a run
+# that already runs makes the lock fail here and keeps every entry, and a run
+# that starts now waits for these few seconds instead. Entries younger than the
+# limit always stay, so builds keep their warm cache.
+trim_caches() {
+  local path
+  exec 8>>"$1/caches.lock" || return 1
+  if ! flock -n 8; then
+    exec 8>&-
+    return 0
+  fi
+  for path in "$1"/go-build/* "$1"/go-mod/* "$1"/npm/*; do
+    [ -d "$path" ] && [ ! -L "$path" ] || continue
+    older "$path" || continue
+    remove "$path"
   done
-  return 0
+  exec 8>&-
 }
 
-# prune_tree BASE: the finished runs and the diagnostics of old runs, and, only
-# while no run uses the base, the cache entries that nothing has used for longer
-# than the age limit. A run mounts these caches (go-build, go-mod, npm) and its
-# reads do not touch the parent directory, so its base is never trimmed under it.
-# Entries younger than the limit always stay, so builds keep their warm cache.
+# prune_tree BASE: the finished runs and the diagnostics of old runs, then the
+# old cache entries, which the cache lock keeps away from a live run.
 prune_tree() {
   local path
   [ -d "$1" ] && [ ! -L "$1" ] || return 0
@@ -144,12 +153,7 @@ prune_tree() {
     older "$path" || continue
     remove "$path"
   done
-  base_idle "$1" || return 0
-  for path in "$1"/go-build/* "$1"/go-mod/* "$1"/npm/*; do
-    [ -d "$path" ] && [ ! -L "$path" ] || continue
-    older "$path" || continue
-    remove "$path"
-  done
+  trim_caches "$1"
 }
 
 for base in "${bases[@]}"; do
