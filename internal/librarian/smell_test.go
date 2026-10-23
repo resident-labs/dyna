@@ -22,10 +22,10 @@ func (f *fakeIssues) Issues(string, bool) ([]room.Issue, error) {
 	defer f.mu.Unlock()
 	return append([]room.Issue{}, f.open...), nil
 }
-func (f *fakeIssues) FileIssue(roomID, title, note, file string, line int, by string) (room.Issue, error) {
+func (f *fakeIssues) FileIssue(roomID string, in room.IssueInput) (room.Issue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	i := room.Issue{ID: "iss" + string(rune('a'+len(f.open))), Title: title, File: file, Line: line, Filer: by, State: "open"}
+	i := room.Issue{ID: "iss" + string(rune('a'+len(f.open))), Title: in.Title, File: in.File, Line: in.Line, Filer: in.Filer, State: "open"}
 	f.open = append(f.open, i)
 	return i, nil
 }

@@ -57,7 +57,7 @@ func TestRootWatchReceivesLeadPosts(t *testing.T) {
 			for _, in := range []room.PostInput{
 				{From: lead, Kind: "notice", To: []string{root}, Text: "Quiet lead note"},
 				{From: lead, Kind: "notice", To: []string{rec.Name}, Text: "Keep the failed trial"},
-				{From: lead, Kind: "issue", To: []string{rec.Name}, Text: "Repair the test"},
+				{From: lead, Kind: "notice", To: []string{rec.Name}, Text: "Repair the test"},
 			} {
 				msg := post(in)
 				quiet = append(quiet, msg)

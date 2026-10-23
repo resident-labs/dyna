@@ -99,20 +99,29 @@ func TestSlowTestCrossingPostsOneQuietLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var lines []string
+	var events []room.SlowTestEvent
 	for _, msg := range msgs {
-		if msg.Kind != "test-health" {
+		ev, ok := msg.SlowTest()
+		if !ok {
 			continue
 		}
-		lines = append(lines, msg.Text)
-		if room.WakesRoot(msg, rec.Name) {
+		events = append(events, ev)
+		if msg.Notice.Kind != "slow-test" || room.WakesRoot(msg, rec.Name) {
 			t.Fatalf("the crossing line woke root: %+v", msg)
 		}
 	}
-	if len(lines) != 1 {
-		t.Fatalf("crossing lines = %d:\n%s", len(lines), strings.Join(lines, "\n---\n"))
+	if len(events) != 1 {
+		t.Fatalf("crossing events = %d", len(events))
 	}
-	if line := lines[0]; !strings.Contains(line, "TestOtherSlow") || !strings.Contains(line, "#81") || !strings.Contains(line, "#80") || !strings.Contains(line, "limit 1 s") {
+	ev := events[0]
+	if ev.Count != 1 || len(ev.Crossings) != 1 || ev.Run != "#81" {
+		t.Fatalf("crossing event: %+v", ev)
+	}
+	crossing := ev.Crossings[0]
+	if crossing.Test != "dyna-agent/internal/y/TestOtherSlow" || crossing.Run != "#81" || crossing.OtherRun != "#80" || crossing.LimitMS != 1000 {
+		t.Fatalf("crossing: %+v", crossing)
+	}
+	if line := ev.Detail; !strings.Contains(line, "TestOtherSlow") || !strings.Contains(line, "#81") || !strings.Contains(line, "#80") || !strings.Contains(line, "limit 1 s") {
 		t.Fatalf("crossing line: %q", line)
 	}
 	// The same test does not report again on the next tick.
@@ -123,7 +132,7 @@ func TestSlowTestCrossingPostsOneQuietLine(t *testing.T) {
 	}
 	count := 0
 	for _, msg := range msgs {
-		if msg.Kind == "test-health" {
+		if _, ok := msg.SlowTest(); ok {
 			count++
 		}
 	}
