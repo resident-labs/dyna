@@ -423,3 +423,34 @@ func TestMergeControlRepeatedPublishReportsAlreadyPublished(t *testing.T) {
 		})
 	}
 }
+
+// Returning the only PR of a failed batch leaves no batch to recover from, so
+// the batch-failure pause must not keep the queue stopped until root resumes it
+// by hand.
+func TestReturnClearsThePauseWhenNoFailedBatchRemains(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	f.ci, f.conclusion = "completed", "failure"
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	st, err := f.e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.MergePauses[f.e.author.RoomID] != mergeBatchFailedReason {
+		t.Fatalf("pauses = %v, want the failed-batch pause", st.MergePauses)
+	}
+	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "return", []string{"1", "Fix the go-static error"}, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	st, err = f.e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.MergeTrials) != 0 || st.MergePauses[f.e.author.RoomID] != "" {
+		t.Fatalf("trials=%d pauses=%v; a return left the queue paused with nothing to recover", len(st.MergeTrials), st.MergePauses)
+	}
+}
