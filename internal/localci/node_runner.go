@@ -243,7 +243,11 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	}
 	close(jobs)
 	var wg sync.WaitGroup
-	for worker := 0; worker < min(node.Slots, len(checks)); worker++ {
+	workers := min(node.Slots, len(checks))
+	if req.Parallelism > 0 {
+		workers = min(workers, req.Parallelism)
+	}
+	for worker := 0; worker < workers; worker++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
