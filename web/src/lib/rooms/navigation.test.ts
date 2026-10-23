@@ -22,7 +22,7 @@ import { reloadsUnread } from '../ui/unreadReload.ts'
 import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from '../ui/route.ts'
 import { sourceRange, stripTypes, moduleFunctions } from '../../../test/svelte-source.ts'
 import { installRoomLoader } from '../../../test/appRoomLoader.ts'
-import { goalsCode, installGoals, installMachines, machinesCode } from '../../../test/appModules.ts'
+import { goalsCode, installGoals, installIssues, installMachines, installPins, installPRs, installQuestions, installSync, machinesCode } from '../../../test/appModules.ts'
 
 // Run the actual App navigation functions with controlled API responses.
 // The Svelte parser selects complete declarations without copying their logic.
@@ -123,6 +123,7 @@ interface NavApi {
   transcript: (id: string) => Promise<{ member: NavMember }>
   transcriptTurn: (id: string, turn: number) => Promise<{ member: NavMember }>
   goal: (room: string, id: string) => Promise<NavGoal>
+  [name: string]: unknown
 }
 
 interface NavState {
@@ -310,6 +311,14 @@ function navigation() {
       transcriptTurn() { calls.push('transcript'); return Promise.resolve({ member: {} }) },
       transcript() { calls.push('transcript'); return Promise.resolve({ member: {} }) },
       goal: async () => ({ id: '' }),
+      goalItems: async () => [],
+      changes: async () => ({ items: [], older: false, cursor: '' }),
+      reviewerStatus: async () => null,
+      pins: async () => [],
+      questions: async () => ({}),
+      visuals: async () => [],
+      issues: async () => [],
+      syncStatus: async () => ({}),
     },
   }
   // The room data the sliced functions write lives in the loader now.
@@ -318,6 +327,11 @@ function navigation() {
   // modules now; their functions run here over the same state.
   installMachines(state)
   installGoals(state)
+  installQuestions(state)
+  installPins(state)
+  installIssues(state)
+  installSync(state)
+  installPRs(state)
   // The router asks the page for the side of a screen change it does not own.
   Reflect.set(state, 'host', {
     started: () => state.started,

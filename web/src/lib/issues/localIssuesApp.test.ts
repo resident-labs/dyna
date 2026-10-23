@@ -2,9 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { parse } from 'svelte/compiler'
-import vm from 'node:vm'
-import { createReloadGate, reconcileRows } from '../ui/reloadGate.ts'
-import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { createReloadGate } from '../ui/reloadGate.ts'
+import { sourceRange } from '../../../test/svelte-source.ts'
+import { installIssues } from '../../../test/appModules.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const body = parse(source, { modern: true }).instance?.content.body ?? []
@@ -12,17 +12,6 @@ const fn = (name: string) => {
   const node = body.find((n) => n.type === 'FunctionDeclaration' && n.id?.name === name)
   if (!node) throw new Error(`App has no ${name}`)
   return sourceRange(node)
-}
-function app(names: readonly string[], c: object): void {
-  vm.createContext(c)
-  for (const n of names) {
-    const { start, end } = fn(n)
-    vm.runInContext(stripTypes(source.slice(start, end)), c)
-  }
-}
-// vm runs untyped JavaScript, so each test names the App functions it calls.
-function functionsOf<T>(c: object, names: readonly string[]): T {
-  return vm.runInContext(`({ ${names.join(', ')} })`, c) as T
 }
 
 interface IssueRow {
@@ -37,9 +26,16 @@ interface IssuesState {
   issueHistory: IssueRow[]
   showIssues: boolean
   loadError: string
-  reconcileRows: typeof reconcileRows
   reload?: ReturnType<typeof createReloadGate>
-  api: { issues: () => Promise<IssueRow[]> }
+  api: { issues?: () => Promise<IssueRow[]>; closeIssue?: (...args: unknown[]) => Promise<unknown> }
+  [name: string]: unknown
+}
+
+// The issue lists live in lib/app/issues.svelte.ts now, so a test installs that
+// module over its own state, as appRoomLoader.ts installs the room data.
+function app(c: IssuesState): IssuesState {
+  installIssues(c)
+  return c
 }
 
 test('opening a room loads its issues, so a first open and a reconnect both show them', () => {
@@ -48,14 +44,12 @@ test('opening a room loads its issues, so a first open and a reconnect both show
 })
 
 test('the History list drops open issues that the all=true call returns', async () => {
-  const c: IssuesState = {
-    roomId: 'a', issues: [], issueHistory: [], showIssues: true, loadError: '', reconcileRows,
+  const c = app({
+    roomId: 'a', issues: [], issueHistory: [], showIssues: true, loadError: '',
     api: { issues: async () => [{ id: 'o', state: 'open', changedAt: 0 }, { id: 'c', state: 'closed', changedAt: 5 }, { id: 'g', state: 'goal', changedAt: 6 }] },
-  }
+  })
   c.reload = createReloadGate(() => ({ room: 'a', visit: 1 }), () => true)
-  app(['loadIssues'], c)
-  const { loadIssues } = functionsOf<{ loadIssues: (all?: boolean) => Promise<void> }>(c, ['loadIssues'])
-  await loadIssues(true)
+  await (c.loadIssues as (all?: boolean) => Promise<void>)(true)
   assert.deepEqual(c.issueHistory.map((i) => i.id), ['c', 'g'])
 })
 
@@ -66,17 +60,15 @@ test('Close asks for a reason and sends it', async () => {
     label: string
     submit: (reason: string) => Promise<void>
   }
-  const c = {
-    roomId: 'a', ask: null as Ask | null, loadError: '', showIssues: false, say() {},
+  const c = app({
+    roomId: 'a', issues: [], issueHistory: [], ask: null as Ask | null, loadError: '', showIssues: false, say() {},
     api: { closeIssue: async (...a: unknown[]) => { calls.push(a) } },
     loadIssues() {},
-  }
-  app(['triageIssue', 'askCloseIssue'], c)
-  const { askCloseIssue } = functionsOf<{ askCloseIssue: (issue: { id: string; title: string }) => void }>(c, ['askCloseIssue'])
-  askCloseIssue({ id: 'i1', title: 'Pin menu loses focus' })
-  assert.equal(c.ask?.action, 'Close')
-  assert.equal(c.ask?.label, 'Reason')
-  await c.ask?.submit('duplicate of i0')
+  })
+  ;(c.askCloseIssue as (issue: { id: string; title: string }) => void)({ id: 'i1', title: 'Pin menu loses focus' })
+  const ask = c.ask as Ask | null
+  assert.equal(ask?.action, 'Close')
+  assert.equal(ask?.label, 'Reason')
+  await ask?.submit('duplicate of i0')
   assert.deepEqual(calls, [['a', 'i1', 'duplicate of i0']])
-  assert.equal(c.ask, null)
 })

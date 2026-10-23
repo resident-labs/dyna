@@ -174,6 +174,10 @@ function app(rows: AppRow[]): AppSandbox {
   installGoals(c)
   c.loadGoals = () => { c.goalFetches++ }
   c.loadRules = () => {}
+  // The questions and pull request lists moved to lib/app modules; their views
+  // answer from this state.
+  c.questionView = { setQuestions: (rows: AppRow[]) => { c.questions = rows } }
+  c.changeView = { bumpVersion: () => { c.mergeVersion = Number(c.mergeVersion ?? 0) + 1 }, setChanges: (rows: AppRow[]) => { c.changes = rows } }
   const installed = appFunctions(c)
   const roomData = createRoomData({ members: async () => { c.memberFetches++; return [] }, mentions: async () => [] }, {
     current: () => ({ room: c.roomId, visit: c.roomRequest }),

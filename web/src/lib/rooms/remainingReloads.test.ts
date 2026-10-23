@@ -17,6 +17,7 @@ import { inRoomFeed } from './feedViews.ts'
 import { call, runFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { installRoomLoader } from '../../../test/appRoomLoader.ts'
+import { ISSUES_FUNCTIONS, PINS_FUNCTIONS, PRS_FUNCTIONS, QUESTIONS_FUNCTIONS, SYNC_FUNCTIONS, installIssues, installPins, installPRs, installQuestions, installSync } from '../../../test/appModules.ts'
 import { need } from '../../../test/need.ts'
 import { member } from '../../../test/session-fixtures.ts'
 import type { Member } from '../api/room.ts'
@@ -95,6 +96,16 @@ function sessionDataFor(api: unknown, hooks: unknown) {
   return createSessionData(api as Parameters<typeof createSessionData>[0], hooks as Parameters<typeof createSessionData>[1])
 }
 
+// The lists moved to lib/app modules; a test that names one of their loaders
+// installs that module over the same state, as appRoomLoader.ts does the room data.
+const MODULES: readonly [readonly string[], (state: object) => void][] = [
+  [QUESTIONS_FUNCTIONS, installQuestions],
+  [PINS_FUNCTIONS, installPins],
+  [ISSUES_FUNCTIONS, installIssues],
+  [SYNC_FUNCTIONS, installSync],
+  [PRS_FUNCTIONS, installPRs],
+]
+
 function appFunctions(c: AppState, names: string[]): void {
   c.hasItemChange = hasItemChange
   c.reloadsUnread = reloadsUnread
@@ -105,7 +116,21 @@ function appFunctions(c: AppState, names: string[]): void {
   c.refreshHeldComments ??= () => {}
   // The screen state lives in the router now, so the sliced functions write through it.
   installRouterShim(c)
-  runFunctions(source, names, c)
+  const moved = new Set<string>()
+  for (const [functions, install] of MODULES) {
+    if (!functions.some((name) => names.includes(name))) continue
+    install(c)
+    for (const name of functions) moved.add(name)
+  }
+  // The views a sliced App function reads stay simple unless its module is installed.
+  c.changeView ??= { bumpVersion: () => { c.mergeVersion = Number(c.mergeVersion ?? 0) + 1 } }
+  c.questionView ??= { setQuestions: (rows: unknown) => { c.questions = rows } }
+  c.pinView ??= { setPins: (rows: unknown) => { c.pins = rows }, clear: () => { c.pins = [] } }
+  c.issueView ??= { clear: () => { c.issues = []; c.issueHistory = [] } }
+  c.syncView ??= {}
+  c.goalView ??= { clear: () => { c.goals = [] }, setGoals: (rows: unknown) => { c.goals = rows }, trackFetchedGoal: () => {} }
+  c.machineView ??= { clear: () => {}, changed: () => {} }
+  runFunctions(source, names.filter((name) => !moved.has(name)), c)
 }
 
 test('room summary bursts share one request plus one trailing request', async () => {
