@@ -59,7 +59,7 @@ type workerSignals struct {
 
 func newWorkerSignals(rooms *room.Store) *workerSignals {
 	return &workerSignals{rooms: rooms, channels: map[string]chan struct{}{
-		"prs": make(chan struct{}, 1), "checkins": make(chan struct{}, 1),
+		"prs":       make(chan struct{}, 1),
 		"questions": make(chan struct{}, 1), "hooks": make(chan struct{}, 1),
 		"sessions": make(chan struct{}, 1), "merges": make(chan struct{}, 1),
 		"sync": make(chan struct{}, 1), "instructions": make(chan struct{}, 1),
@@ -93,10 +93,6 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 	}
 	if ev.Kind == "goals" && ev.WorkerWake {
 		wakeWorker(s.channels["prs"])
-	}
-	// A paused room's check-ins wait for its resume.
-	if ev.Kind == "room.resumed" || ev.Kind == "members" || ev.Kind == "settings" {
-		wakeWorker(s.channels["checkins"])
 	}
 	// The room's root seat takes a post when its stored delivery row wakes it;
 	// every other recipient takes the post by its address.
@@ -138,7 +134,6 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 			// event names the session whose turn ended; an older completion names
 			// it in the sender.
 			if post.Turn > 0 {
-				wakeWorker(s.channels["checkins"])
 				id := post.SessionIDs[post.From]
 				if ev, ok := post.TurnResult(); ok {
 					id = ev.SessionID
@@ -284,12 +279,12 @@ func wakeWorker(signal chan struct{}) {
 type workers struct {
 	sweep, sessions func(context.Context) error
 	// Timed workers return when they next have work, or zero, and a timer
-	// wakes them then: checkins runs parent check-ins, instructions sends due
-	// instruction notes, fetch fetches local lane remotes, questions
-	// retries failed answer deliveries, hooks retries a hook spool drain
-	// that could not finish, and prs, merges and sync poll GitHub, merge
-	// trials and sync operations while they have work.
-	checkins, instructions, fetch, questions, hooks, prs, merges, sync func(context.Context) (time.Time, error)
+	// wakes them then: instructions sends due instruction notes, fetch fetches
+	// local lane remotes, questions retries failed answer deliveries, hooks
+	// retries a hook spool drain that could not finish, and prs, merges and
+	// sync poll GitHub, merge trials and sync operations while they have work.
+	// Parent check-ins run as the parent-checkins built-in hook, not here.
+	instructions, fetch, questions, hooks, prs, merges, sync func(context.Context) (time.Time, error)
 	// probe reads every enabled machine, and returns when to read them again.
 	probe func(context.Context) (time.Time, error)
 	// caches cleans the own CI caches of a CI machine once a day.
@@ -316,10 +311,6 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 	spool := hooks.New()
 	return workers{
 		prs: prs.Tick,
-		checkins: func(ctx context.Context) (time.Time, error) {
-			_, next, err := RunParentCheckIns(ctx, rooms)
-			return next, err
-		},
 		questions: func(ctx context.Context) (time.Time, error) {
 			sweep := signals.takeSweep("questions")
 			var delivered []string
@@ -340,12 +331,19 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 			sweep := signals.takeSweep("hooks")
 			// A turn end fires its event before the spool drains, so a job for
 			// it starts in this pass and not one interval later.
-			turnEnds := fireTurnEnds(ctx, rooms.Notify.Sessions.Store, spool, signals.takeTurnEnds())
+			ids := signals.takeTurnEnds()
+			turnEnds := fireTurnEnds(ctx, rooms.Notify.Sessions.Store, spool, ids)
+			// A turn end can make a check-in due at once, and the hook owns the
+			// schedule, so one pass runs here, through the same switch.
+			var checkins error
+			if len(ids) > 0 {
+				_, _, checkins = RunParentCheckIns(ctx, rooms)
+			}
 			ran, next, err := spool.Drain(ctx, time.Now())
 			if sweep {
 				signals.found("hook spool", ran)
 			}
-			return next, errors.Join(turnEnds, err)
+			return next, errors.Join(turnEnds, checkins, err)
 		},
 		sessions: func(ctx context.Context) error { return deliverSessions(ctx, rooms.Notify.Sessions, signals) },
 		merges:   prs.MergeTick,
@@ -476,7 +474,6 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	timed("PR watcher", signals.channels["prs"], timerPRs, w.prs)
 	timed("Merge service", signals.channels["merges"], timerMerges, w.merges)
 	timed("CI cache cleanup", signals.channels["caches"], timerCaches, w.caches)
-	timed("Parent check-ins", signals.channels["checkins"], timerParentCheckins, w.checkins)
 	timed("Question delivery", signals.channels["questions"], timerQuestions, w.questions)
 	timed("Machine probe", signals.channels["probe"], timerProbe, w.probe)
 	start("Dormant session sweep", sweep, w.sweep)
@@ -497,7 +494,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	var safety, daily func()
 	safety = func() {
 		signals.sweep("sessions")
-		wake("checkins", "instructions", "prs", "merges", "sync")
+		wake("instructions", "prs", "merges", "sync")
 		signals.sweep("questions")
 		signals.sweep("hooks")
 		t.at(timerSafetySweep, t.now().Add(safetySweepEvery), safety)
@@ -505,7 +502,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	daily = func() { wakeWorker(sweep); t.at(timerSweep, t.now().Add(sweepEvery), daily) }
 	// Catch writes made while the engine was down.
 	signals.recoverSessions()
-	wake("checkins", "instructions", "fetch", "questions", "hooks", "prs", "merges", "sync", "probe", "caches")
+	wake("instructions", "fetch", "questions", "hooks", "prs", "merges", "sync", "probe", "caches")
 	wakeWorker(sweep)
 	t.at(timerSafetySweep, t.now().Add(safetySweepEvery), safety)
 	t.at(timerSweep, t.now().Add(sweepEvery), daily)

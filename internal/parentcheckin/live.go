@@ -12,15 +12,15 @@ import (
 	"dyna-agent/internal/notify"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/settings"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
 )
 
-// New connects the scheduler to the engine's session and room services.
+// New connects the scheduler to the engine's session and room services. The
+// caller sets Interval: the parent check-ins hook owns the interval now.
 func New(n *notify.Service) *Scheduler {
 	s := &Scheduler{Root: store.DataDir()}
-	s.Interval = func() (time.Duration, error) { cfg, err := settings.Load(""); return cfg.SessionCheckInInterval, err }
+	s.Interval = func() (time.Duration, error) { return DefaultInterval, nil }
 	s.Targets = func() ([]Target, error) {
 		live, err := n.Sessions.Store.ListSnapshot(false)
 		if err != nil {

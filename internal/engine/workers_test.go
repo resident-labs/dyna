@@ -69,7 +69,7 @@ func TestWorkersStartupStoreEventsSafetyAndDailySweep(t *testing.T) {
 		w.run(ctx, signals, set, func(string, error) { t.Error("unexpected worker error") })
 	}()
 	defer func() { cancel(); <-done }()
-	awaitWorker(t, calls, "prs", "checkins", "questions", "sweep", "hooks", "sessions", "merges", "instructions", "sync", "fetch", "probe", "caches")
+	awaitWorker(t, calls, "prs", "questions", "sweep", "hooks", "sessions", "merges", "instructions", "sync", "fetch", "probe", "caches")
 	// The daily sweep's deadline counts from when it is set, so the clock
 	// moves only after both sweep timers exist.
 	awaitTimer(t, set, timerSafetySweep)
@@ -102,7 +102,7 @@ func TestWorkersStartupStoreEventsSafetyAndDailySweep(t *testing.T) {
 	clock.advance(safetySweepEvery - 3*time.Second - instructionRecheck - time.Second)
 	expectNoWorker(t, calls)
 	clock.advance(time.Second)
-	awaitWorker(t, calls, "checkins", "sessions", "instructions", "questions", "hooks", "prs", "merges", "sync")
+	awaitWorker(t, calls, "sessions", "instructions", "questions", "hooks", "prs", "merges", "sync")
 	for _, worker := range []string{"sessions", "questions", "hooks"} {
 		if !signals.takeSweep(worker) {
 			t.Fatalf("the safety sweep did not mark the %s pass", worker)
@@ -216,7 +216,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	first := run(ctx, "first")
-	awaitWorker(t, calls, "first-settle", "first-prs", "first-checkins", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch", "first-probe", "first-caches")
+	awaitWorker(t, calls, "first-settle", "first-prs", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch", "first-probe", "first-caches")
 	// A second engine on the same store runs no workers at all.
 	secondCtx, cancelSecond := context.WithCancel(context.Background())
 	secondDone := make(chan bool, 1)
@@ -249,7 +249,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	// takes over the store workers.
 	ctx, cancel = context.WithCancel(context.Background())
 	third := run(ctx, "third")
-	awaitWorker(t, calls, "third-settle", "third-prs", "third-checkins", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch", "third-probe", "third-caches")
+	awaitWorker(t, calls, "third-settle", "third-prs", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch", "third-probe", "third-caches")
 	cancel()
 	stop(third, "third")
 	select {
@@ -295,7 +295,7 @@ func TestEngineHookWorkerDrainsStartupSpoolOnce(t *testing.T) {
 	idle := func(context.Context) error { return nil }
 	w.sweep, w.sessions = idle, idle
 	idleTimed := func(context.Context) (time.Time, error) { return time.Time{}, nil }
-	w.checkins, w.questions, w.prs = idleTimed, idleTimed, idleTimed
+	w.questions, w.prs = idleTimed, idleTimed
 	signals := newWorkerSignals(nil)
 	done := make(chan struct{})
 	go func() {
