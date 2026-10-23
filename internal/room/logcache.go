@@ -212,13 +212,11 @@ func (s *Store) scanMessageLines(roomID string, input io.Reader, offset int64, v
 			if decode(canonical, &entry.msg) != nil {
 				entry.msg = Message{}
 			}
-			if err := refs.canonical(roomID, entry.msg.References); err != nil {
-				return entry.start, err
-			}
+			// A label is cosmetic: a failed lookup keeps the stored message ID
+			// instead of failing the room read.
+			_ = refs.canonical(roomID, entry.msg.References)
 			if f := entry.msg.Forward; f != nil {
-				if err := refs.canonical(f.RoomID, f.References); err != nil {
-					return entry.start, err
-				}
+				_ = refs.canonical(f.RoomID, f.References)
 			}
 		}
 		visit(entry)
