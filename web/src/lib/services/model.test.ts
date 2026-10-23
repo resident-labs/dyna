@@ -6,10 +6,11 @@ test('the queue separates trials, ready changes, failures and drafts', () => {
   assert.equal(queueLine(null), 'The queue could not be read')
   assert.equal(queueLine([]), 'No open changes')
   assert.equal(queueLine([
-    { state: 'trial-running', reason: '', batch: 1 },
-    { state: 'ready', reason: '', batch: 0 },
-    { state: 'ci-failed', reason: '', batch: 0 },
-    { state: 'held', reason: 'draft', batch: 0 },
+    { state: 'trial-running', reason: '', trial: { branch: 'dyna/merge-trial/1', batch: ['a', 'b'] } },
+    { state: 'trial-running', reason: '', trial: { branch: 'dyna/merge-trial/1', batch: ['a', 'b'] } },
+    { state: 'ready', reason: '' },
+    { state: 'ci-failed', reason: '' },
+    { state: 'held', reason: 'draft' },
   ]), '1 trial running · 1 ready · 1 CI failed · 1 held by drafts')
 })
 
