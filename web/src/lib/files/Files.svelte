@@ -1,4 +1,5 @@
 <script>
+  import { untrack } from 'svelte'
   import { fileURL } from '../../api.js'
   import { human, extOf } from './attach.js'
   import { previewKind, previewLabel } from './preview.ts'
@@ -21,6 +22,17 @@
     return { att: v?.attachment ?? a, at: v?.post.ts ?? 0, chip: false }
   }))
   let images = $derived(items.filter(image))
+  let failedImages = $state(new Set())
+  const imageKey = (a) => JSON.stringify([roomId, a.id, a.sha256 || '', fileURL(roomId, a.id)])
+  $effect(() => {
+    const current = new Set(images.map(imageKey))
+    untrack(() => {
+      failedImages = new Set([...failedImages].filter((key) => current.has(key)))
+    })
+  })
+  function imageFailed(key) {
+    failedImages = new Set(failedImages).add(key)
+  }
   let files = $derived(items.filter((a) => !image(a) && !rich(a)))
 </script>
 
@@ -30,23 +42,32 @@
 
 {#if images.length}
   <div class="images" class:many={images.length > 1}>
-    {#each images as a, i (a.id + ':' + i)}
-      <button class="img" onclick={() => open(a)} title="{a.name} · {human(a.size)}">
-        <img src={fileURL(roomId, a.id)} alt={a.name} loading="lazy" />
-      </button>
+    {#each images as a, i (imageKey(a) + ':' + i)}
+      {@const key = imageKey(a)}
+      {#if failedImages.has(key)}
+        {@render fileCard(a, true)}
+      {:else}
+        <button class="img" onclick={() => open(a)} title="{a.name} · {human(a.size)}">
+          <img src={fileURL(roomId, a.id)} alt={a.name} loading="lazy" onerror={() => imageFailed(key)} />
+        </button>
+      {/if}
     {/each}
   </div>
 {/if}
 {#each files as a, i (a.id + ':' + i)}
+  {@render fileCard(a)}
+{/each}
+
+{#snippet fileCard(a, unavailable = false)}
   <button class="file" onclick={() => open(a)} title={`Open ${a.name}`}>
     <span class="ext" class:document={['markdown', 'word', 'pdf'].includes(previewKind(a))} class:table={previewKind(a) === 'table'}>{extOf(a.name)}</span>
     <span class="meta">
       <span class="name">{a.name}</span>
-      <span class="sub">{previewLabel(previewKind(a))} · {human(a.size)}</span>
+      <span class="sub">{unavailable ? 'Preview unavailable' : previewLabel(previewKind(a))} · {human(a.size)}</span>
     </span>
-    <span class="open" aria-hidden="true">↗</span>
+    <span class="open" aria-hidden="true">{unavailable ? 'Open' : '↗'}</span>
   </button>
-{/each}
+{/snippet}
 
 <style>
   .images { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
@@ -95,7 +116,7 @@
   .ext.document { color: var(--iris); background: var(--iris-wash); }
   .ext.table { color: var(--sage); background: rgba(151, 201, 149, 0.08); }
   .open { margin-left: auto; color: var(--faint); font-size: 16px; }
-  .file .open { transition: color var(--motion-fast) var(--ease); }
+  .file .open { flex: none; transition: color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .file:hover .open { color: var(--ink); }
   }
