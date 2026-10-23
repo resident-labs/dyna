@@ -192,20 +192,15 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 	for _, page := range pages {
 		artifacts = append(artifacts, page.Artifacts...)
 	}
-	sort.SliceStable(artifacts, func(i, j int) bool {
-		return likelyTestArtifact(artifacts[i].Name) && !likelyTestArtifact(artifacts[j].Name)
-	})
 	remaining := int64(maxTestArtifact)
 	junit := false
 	var problems []string
 	for _, artifact := range artifacts {
-		if artifact.Expired || artifact.ID <= 0 {
+		if artifact.Expired || artifact.ID <= 0 || !likelyTestArtifact(artifact.Name) {
 			continue
 		}
 		if artifact.Size < 0 || artifact.Size > maxTestArtifact {
-			if likelyTestArtifact(artifact.Name) {
-				problems = append(problems, "report unreadable: "+boundedTestName(artifact.Name)+" exceeds artifact size limit")
-			}
+			problems = append(problems, "report unreadable: "+boundedTestName(artifact.Name)+" exceeds artifact size limit")
 			continue
 		}
 		if run.Attempt > 1 {
@@ -306,7 +301,8 @@ func (s *Service) enforceTestBudget(ctx context.Context, gh GitHub, r Record, sn
 		}
 		report, junit, problems, inspectErr := inspectTestRun(ctx, gh, r, run)
 		if inspectErr != nil {
-			canceled := testInspectionCanceled(ctx, inspectErr)
+			// Shutdown cancellation leaves work pending; timeouts consume a retry.
+			canceled := errors.Is(ctx.Err(), context.Canceled) || errors.Is(inspectErr, context.Canceled)
 			retry := true
 			if err := s.Store.update(func(st *State) error {
 				live := st.Records[r.Key]
@@ -333,6 +329,7 @@ func (s *Service) enforceTestBudget(ctx context.Context, gh GitHub, r Record, sn
 			if retry {
 				continue
 			}
+			problems = append(problems, "report unreadable: stopped after 3 failed inspection attempts")
 		}
 		report.Tests = report.BudgetTests()
 		var allowWarnings []string

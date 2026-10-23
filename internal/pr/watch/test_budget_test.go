@@ -44,7 +44,7 @@ func testReportFixture(t *testing.T, e *testEnv, entries map[string]string) {
 	data := testReportZip(t, entries)
 	e.f.Checks = nil
 	e.f.Runs = []Run{{ID: 81, Attempt: 1, Status: "completed", Conclusion: "success", Event: "pull_request", Name: "CI", Started: e.clock.Format(time.RFC3339)}}
-	e.f.Raw = map[string]string{"repos/owner/repo/actions/runs/81/artifacts?per_page=100": fmt.Sprintf("HTTP/2.0 200 OK\r\n\r\n{\"artifacts\":[{\"id\":91,\"size_in_bytes\":%d,\"created_at\":%q}]}", len(data), e.clock.Format(time.RFC3339))}
+	e.f.Raw = map[string]string{"repos/owner/repo/actions/runs/81/artifacts?per_page=100": fmt.Sprintf("HTTP/2.0 200 OK\r\n\r\n{\"artifacts\":[{\"id\":91,\"name\":\"junit-report\",\"size_in_bytes\":%d,\"created_at\":%q}]}", len(data), e.clock.Format(time.RFC3339))}
 	e.f.Blobs = map[string][]byte{"repos/owner/repo/actions/artifacts/91/zip": data}
 	// A changed test file without a patch makes every reported test the PR's own.
 	e.f.Raw["repos/owner/repo/pulls/17/files?per_page=100"] = "HTTP/2.0 200 OK\r\n\r\n[{\"filename\":\"web/all.test.js\"}]"
@@ -486,10 +486,10 @@ func TestTestBudgetFailureIgnoresExplicitOldHeadRun(t *testing.T) {
 	}
 }
 
-func TestLikelyReportArtifactsRunBeforeUnrelatedXML(t *testing.T) {
+func TestReportArtifactsSkipUnrelatedXML(t *testing.T) {
 	e := newEnv(t)
 	testReportFixture(t, e, map[string]string{"report.xml": `<testsuite><testcase name="slow" time="12"/></testsuite>`})
-	unrelated := testReportZip(t, map[string]string{"settings.xml": strings.Repeat("x", maxTestArtifact)})
+	unrelated := testReportZip(t, map[string]string{"settings.xml": "unrelated"})
 	e.f.Raw["repos/owner/repo/actions/runs/81/artifacts?per_page=100"] = fmt.Sprintf("HTTP/2.0 200 OK\r\n\r\n{\"artifacts\":[{\"id\":90,\"name\":\"screenshots\",\"size_in_bytes\":%d},{\"id\":91,\"name\":\"junit-report\",\"size_in_bytes\":%d}]}", len(unrelated), len(e.f.Blobs["repos/owner/repo/actions/artifacts/91/zip"]))
 	e.f.Blobs["repos/owner/repo/actions/artifacts/90/zip"] = unrelated
 	e.track()
@@ -499,7 +499,7 @@ func TestLikelyReportArtifactsRunBeforeUnrelatedXML(t *testing.T) {
 	}
 	calls, _ := os.ReadFile(e.calls)
 	text := string(calls)
-	if strings.Index(text, "actions/artifacts/91/zip") > strings.Index(text, "actions/artifacts/90/zip") {
-		t.Fatalf("report downloaded last: %s", text)
+	if !strings.Contains(text, "actions/artifacts/91/zip") || strings.Contains(text, "actions/artifacts/90/zip") {
+		t.Fatalf("wrong artifacts downloaded: %s", text)
 	}
 }
