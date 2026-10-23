@@ -43,6 +43,8 @@ type hookReceiptTransport struct {
 	current     *hookOffer
 	serial      uint64
 	stopped     bool
+	// killPeer retires a granted peer. Tests replace it.
+	killPeer func(context.Context, *processguard.Peer) error
 }
 
 func startHookReceiptTransport(dir string) (*hookReceiptTransport, error) {
@@ -224,12 +226,16 @@ func (t *hookReceiptTransport) retire(ctx context.Context) (back, delivered []ru
 	if offer != nil && (offer.state == "granted" || offer.state == "unresolved") {
 		peer = offer.peer
 	}
+	kill := t.killPeer
 	t.mu.Unlock()
+	if kill == nil {
+		kill = func(ctx context.Context, p *processguard.Peer) error { return p.KillAndWait(ctx) }
+	}
 	if listener != nil {
 		listener.Close()
 	}
 	if peer != nil {
-		err = peer.KillAndWait(ctx)
+		err = kill(ctx, peer)
 	}
 	t.mu.Lock()
 	for conn := range t.connections {
@@ -259,8 +265,7 @@ func (t *hookReceiptTransport) retire(ctx context.Context) (back, delivered []ru
 	return back, delivered, nil
 }
 
-// runHookReceipt writes output only after a grant. Activation will call this
-// from RunSteerHook; the existing pending-file transport remains in use for now.
+// runHookReceipt writes output only after a grant. RunSteerHook calls it.
 func runHookReceipt(dir, session string, out io.Writer, event string) error {
 	conn, err := net.DialTimeout("unix", filepath.Join(dir, hookSocket), 30*time.Second)
 	if err != nil {
