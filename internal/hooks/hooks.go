@@ -388,8 +388,9 @@ func commandLabel(command string) string {
 			continue
 		}
 		word = strings.Trim(word, `"'`)
-		if len(word) > 24 {
-			word = word[:24]
+		// Cut by rune, so a word outside ASCII stays valid UTF-8.
+		if runes := []rune(word); len(runes) > 24 {
+			word = string(runes[:24])
 		}
 		return word
 	}

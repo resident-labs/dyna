@@ -2,8 +2,8 @@ import { parsePRPost } from '../prs/pr.ts'
 import type { ParsedPost, PREvent } from '../prs/pr.ts'
 import type { PRNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
-import { isHookEvent } from './events.gen.ts'
-import type { EventPayload, HookEvent } from './events.gen.ts'
+import type { EventPayload } from './events.gen.ts'
+import { hookEvent } from './eventPayloads.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
 // fixtures of a test both fit it.
@@ -91,16 +91,10 @@ export function rowPosts<P extends FeedInput>(row: FeedRow<P> | undefined): P[] 
   return row?.kind === 'post' ? row.posts ?? [row.post] : []
 }
 
-// hookEventOf returns the typed payload of a hook run post.
-function hookEventOf(post: FeedInput): HookEvent | undefined {
-  if (post.kind !== 'hook') return undefined
-  return isHookEvent(post.payload) ? post.payload : undefined
-}
-
 // foldKey names what a row folds on: one card per PR, and one card per hook
 // run, so a run's start folds into its result. An empty key never folds.
 function foldKey(post: FeedInput): string {
-  const hook = hookEventOf(post)
+  const hook = hookEvent(post)
   if (hook) return `hook:${hook.runId}`
   if (post.kind === 'pr' && post.notice?.kind !== 'held-comment') {
     const url = parsePRPost(post.text, post.notice).url
