@@ -1,5 +1,5 @@
-// Package handoff builds the bounded review paragraph shared by session handoffs.
-package handoff
+// Review builds the bounded review paragraph shared by session handoffs.
+package subagent
 
 import (
 	"fmt"

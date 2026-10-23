@@ -1,5 +1,5 @@
-// Package goalservice provides goal operations shared by CLI and room services.
-package goalservice
+// Package goalsvc provides goal operations shared by CLI and room services.
+package goalsvc
 
 import (
 	"fmt"

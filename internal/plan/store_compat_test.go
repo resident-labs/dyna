@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"dyna-agent/internal/plan"
-	"dyna-agent/internal/planclient"
 )
 
 // These golden bytes pin the immutable graph format, including struct field
@@ -62,7 +61,7 @@ func TestStorageGoldenBytes(t *testing.T) {
 		t.Fatalf("plan mode = %o", info.Mode().Perm())
 	}
 	parent := "ses_20260101-000000-aaaaaaaa"
-	if _, err := planclient.StampAncestry(t.Context(), dir, parent); err != nil {
+	if _, err := plan.StampAncestry(t.Context(), dir, parent); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := os.ReadFile(path)

@@ -11,7 +11,7 @@ import (
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/goals"
-	"dyna-agent/internal/goalservice"
+	"dyna-agent/internal/goalsvc"
 	"dyna-agent/internal/websvc"
 )
 
@@ -35,7 +35,7 @@ func TestWritesCallEngine(t *testing.T) {
 				}
 				return goals.Goal{ID: "g1"}, nil
 			}})
-			cmd := Command(Options{Service: func() *goalservice.Service { t.Fatal("write opened a local goal store"); return nil }})
+			cmd := Command(Options{Service: func() *goalsvc.Service { t.Fatal("write opened a local goal store"); return nil }})
 			var out bytes.Buffer
 			cmd.SetOut(&out)
 			cmd.SetErr(&out)
@@ -58,7 +58,7 @@ func TestWritesWithoutEngineFailWithCause(t *testing.T) {
 		{"done", "g1", "Shipped"},
 		{"drop", "g1"},
 	} {
-		cmd := Command(Options{Client: client, Service: func() *goalservice.Service { t.Fatal("write opened a local goal store"); return nil }})
+		cmd := Command(Options{Client: client, Service: func() *goalsvc.Service { t.Fatal("write opened a local goal store"); return nil }})
 		cmd.SetOut(&bytes.Buffer{})
 		cmd.SetErr(&bytes.Buffer{})
 		cmd.SetArgs(append(args, "--room", "work"))
@@ -82,7 +82,7 @@ func TestMoveItemCallsEngineAndPrintsReferences(t *testing.T) {
 			return moved, nil
 		}})
 		for _, asJSON := range []bool{false, true} {
-			cmd := Command(Options{Service: func() *goalservice.Service { t.Fatal("move opened a local goal store"); return nil }})
+			cmd := Command(Options{Service: func() *goalsvc.Service { t.Fatal("move opened a local goal store"); return nil }})
 			var out bytes.Buffer
 			cmd.SetOut(&out)
 			cmd.SetErr(&out)

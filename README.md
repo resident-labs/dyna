@@ -175,7 +175,7 @@ off. Updates never touch your profiles.
 - `internal/room`, `internal/roomsvc` — rooms, posts and the room API
 - `internal/subagent` — long-lived sessions
 - `internal/workflow` — the workflow JavaScript runtime
-- `internal/goals`, `internal/goalservice` — goal records and operations
+- `internal/goals`, `internal/goalsvc` — goal records and operations
 - `internal/pr` — pull request tracking, review and merging
 - `internal/computers` — agent desktops
 - `internal/harness`, `internal/profile`, `internal/workeroutput` — harness

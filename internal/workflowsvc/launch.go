@@ -16,7 +16,6 @@ import (
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/plan"
-	"dyna-agent/internal/planclient"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store"
 )
@@ -71,7 +70,7 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 	if launch.Foreground == nil {
 		// Detached callers need their plan before returning. Foreground execution
 		// keeps plan errors and warnings in Execute's existing run lifecycle.
-		if _, err := plan.Ensure(dir, opts.ScriptSrc, plan.Options{WriteAncestry: planclient.StampAncestry, SourcePath: opts.ScriptPath, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir, ResumedFrom: opts.ResumeFrom}); err != nil {
+		if _, err := plan.Ensure(dir, opts.ScriptSrc, plan.Options{WriteAncestry: plan.StampAncestry, SourcePath: opts.ScriptPath, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir, ResumedFrom: opts.ResumeFrom}); err != nil {
 			if errors.Is(err, plan.ErrAncestry) {
 				return "", err
 			}

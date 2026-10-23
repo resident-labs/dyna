@@ -14,7 +14,6 @@ import (
 
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/goals"
-	"dyna-agent/internal/handoff"
 	"dyna-agent/internal/pr/links"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/workeroutput"
@@ -242,7 +241,7 @@ func (m *Manager) sourceReview(meta Meta, turn int) string {
 		first, _ := m.store().ReadTurn(meta.ID, 1)
 		summary = first.Prompt
 	}
-	return handoff.Review(meta.ID, summary,
+	return Review(meta.ID, summary,
 		fmt.Sprintf("`dyna subagent output %s --turn 1 --transcript` (the original brief)", meta.ID),
 		fmt.Sprintf("`dyna subagent output %s --turn %d --transcript` (any turn's transcript)", meta.ID, max(1, turn)),
 		fmt.Sprintf("`dyna subagent history %s --search '<pattern>'`", meta.ID),
