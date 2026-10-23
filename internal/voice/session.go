@@ -129,6 +129,12 @@ func runCall(ctx context.Context, link *RoomLink, p realtime.Provider) (*session
 	started := time.Now()
 	ctx, end := context.WithCancel(ctx)
 	s := CallSession(ctx, NewTools(link))
+	saved, err := link.resumeContext()
+	if err != nil {
+		end()
+		return nil, fmt.Errorf("restore voice context: %w", err)
+	}
+	s.Instructions += saved
 	conn, err := realtime.Dial(ctx, p, s)
 	if err != nil {
 		end()
@@ -142,9 +148,16 @@ func runCall(ctx context.Context, link *RoomLink, p realtime.Provider) (*session
 			fmt.Fprintln(os.Stderr, "voice: could not record the transcript:", err)
 		}
 	})
-	call.Greeting = "[BACKEND] The call has started. Greet the owner briefly once. If a request or question is pending, include its key point."
+	call.ServiceContext = link.engineContext
+	if link.resumeStarted.IsZero() {
+		call.Greeting = "[BACKEND] The call has started. Greet the owner briefly once. If a request or question is pending, include its key point."
+	} else {
+		started = link.resumeStarted
+	}
 	call.Redial = func(ctx context.Context) (*realtime.Conn, error) { return realtime.Dial(ctx, p, s) }
-	link.joinRequestedCall(call)
+	if link.resumeStarted.IsZero() {
+		link.joinRequestedCall(call)
+	}
 	sess := &session{call: call, done: make(chan struct{})}
 	go func() {
 		if err := link.Watch(ctx, started, call); err != nil && ctx.Err() == nil {

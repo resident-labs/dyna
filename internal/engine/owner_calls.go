@@ -29,6 +29,7 @@ var ownerCalls = []string{
 	"SteerRun",
 	"DeclineCallRequest",
 	"VoiceStart",
+	"VoiceResume",
 	"VoiceStop",
 	"TermClose",
 	"TermResize",

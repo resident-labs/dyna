@@ -387,6 +387,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "Computers", Access: websvc.Read, Scope: websvc.ScopeComputers, Method: s.computers.Computers},
 		{Name: "Computer", Access: websvc.Read, Scope: websvc.ScopeComputers, Method: s.computers.Computer},
 		{Name: "ComputerControl", Access: websvc.Write, Scope: websvc.ScopeComputers, Method: s.computers.Control},
+		{Name: "VoiceResume", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voice.Resume},
 		{Name: "VoiceStart", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voice.Start},
 		{Name: "VoiceStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.voice.Status},
 		{Name: "VoiceStop", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.voice.Stop},

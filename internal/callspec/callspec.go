@@ -77,7 +77,7 @@ var LongCalls = map[string]time.Duration{
 	// Provider and model requests, hooks and updates.
 	"AccountUsage": 2 * time.Minute, "ProfileModels": 2 * time.Minute, "ConfigCheckProfile": 2 * time.Minute,
 	"RunHook": 2 * time.Minute, "TestHook": 2 * time.Minute, "UpdateDyna": 2 * time.Minute,
-	"VoiceStart": 2 * time.Minute, "VoiceStop": 30 * time.Second,
+	"VoiceStart": 2 * time.Minute, "VoiceResume": 2 * time.Minute, "VoiceStop": 30 * time.Second,
 	// Stopping a shell waits up to 10 s for it to start, 5 s for SIGTERM
 	// before SIGKILL, and 10 s for the exit record: 25 s at most. The stop
 	// does not follow the call's context, because a shell that got SIGTERM

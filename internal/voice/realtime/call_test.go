@@ -5,11 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 type line struct {
@@ -1095,5 +1098,35 @@ func TestCallGreetsOnFirstPage(t *testing.T) {
 	attach()
 	if _, queued := state(); queued != 1 {
 		t.Fatalf("reattach queued another greeting: %d items", queued)
+	}
+}
+
+func TestServiceShutdownAllowsPageReconnect(t *testing.T) {
+	for _, shutdown := range []bool{false, true} {
+		t.Run(fmt.Sprint(shutdown), func(t *testing.T) {
+			f := newFakeServer(t)
+			conn, _ := dial(t, f)
+			call := NewCall(conn, nil, nil)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if shutdown {
+				call.ServiceContext = ctx
+			}
+			closed := make(chan int, 1)
+			done := make(chan error, 1)
+			go func() { done <- call.Run(ctx) }()
+			call.Attach(&Page{Send: func(PageEvent) {}, Close: func(code int, _ string) { closed <- code }})
+			cancel()
+			if err := <-done; err != nil {
+				t.Fatal(err)
+			}
+			want := websocket.CloseNormalClosure
+			if shutdown {
+				want = websocket.CloseServiceRestart
+			}
+			if got := <-closed; got != want {
+				t.Fatalf("close code = %d, want %d", got, want)
+			}
+		})
 	}
 }
