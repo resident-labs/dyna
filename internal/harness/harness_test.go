@@ -75,7 +75,7 @@ func TestCancellationDuringNativeJournalSteerNeverResumes(t *testing.T) {
 		})
 		done <- outcome{result: result, err: err}
 	}()
-	held := awaitDoorbell(t, steers)
+	held := awaitDoorbell(t, "the live input channel", steers)
 	cancel()
 	// Release the steer only after cancellation. Otherwise the interrupt waits
 	// behind the held steer until its timeout.
