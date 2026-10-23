@@ -72,6 +72,8 @@
 
   function onkey(e) {
     const t = e.target
+    // A preview or other modal owns its keys, even when portaled outside the dock.
+    if (t?.closest?.('[aria-modal="true"]')) return
     const r = chatKey(state, {
       key: e.key, ctrl: e.ctrlKey, meta: e.metaKey, alt: e.altKey,
       editable: !!t?.closest?.('input, textarea, select, [contenteditable]'),
