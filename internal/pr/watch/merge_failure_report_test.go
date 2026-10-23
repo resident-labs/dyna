@@ -64,7 +64,7 @@ func TestMergeFailureReportFrozenEvidence(t *testing.T) {
 		}
 		return nil
 	}
-	report, err := f.e.s.mergeFailureReport(t.Context(), member, b)
+	report, err := f.e.s.mergeFailureReport(t.Context(), member, b, trialCI{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestMergeFailureReportFrozenEvidence(t *testing.T) {
 func TestMergeFailureReportUnknownAndBounded(t *testing.T) {
 	s := &Service{Store: &Store{Root: t.TempDir()}}
 	b := state.MergeTrial{Branch: "dyna/merge-trial/1", Changes: []state.MergeTrialChange{{Key: "missing", Head: "frozen"}}, Logs: strings.Repeat("unrelated noise\n", 10000)}
-	report, err := s.mergeFailureReport(t.Context(), Record{}, b)
+	report, err := s.mergeFailureReport(t.Context(), Record{}, b, trialCI{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestMergeFailureReportRejectsOtherRunEvidence(t *testing.T) {
 				member = *r
 				break
 			}
-			report, err := f.e.s.mergeFailureReport(t.Context(), member, state.MergeTrial{Branch: f.branch, Head: f.head, Logs: "--- FAIL: TestBroken (0.01s)"})
+			report, err := f.e.s.mergeFailureReport(t.Context(), member, state.MergeTrial{Branch: f.branch, Head: f.head, Logs: "--- FAIL: TestBroken (0.01s)"}, trialCI{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -142,7 +142,7 @@ func TestMergeFailureReportBoundsFailureDetails(t *testing.T) {
 	for i := range 500 {
 		fmt.Fprintf(&logs, "--- FAIL: Test%d%s (0.01s)\n", i, strings.Repeat("x", 1000))
 	}
-	report, err := s.mergeFailureReport(t.Context(), Record{}, state.MergeTrial{Logs: logs.String()})
+	report, err := s.mergeFailureReport(t.Context(), Record{}, state.MergeTrial{Logs: logs.String()}, trialCI{})
 	if err != nil {
 		t.Fatal(err)
 	}

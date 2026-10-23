@@ -34,6 +34,9 @@ type trialFixture struct {
 	commitHeads                                     map[string][]string
 	trialCI                                         map[int]string
 	jobs                                            []budgetJob
+	// checks are the hosted checks of the trial head, as a failed job leaves
+	// them while the rest of its run is still going.
+	checks []Check
 }
 
 func mergeTrialEnv(t *testing.T, numbers ...int) *trialFixture {
@@ -154,6 +157,9 @@ func mergeTrialEnv(t *testing.T, numbers ...int) *trialFixture {
 				return json.NewEncoder(cmd.Stdout).Encode(map[string]any{"workflow_runs": []Run{{ID: 81, Attempt: 1, Event: event, HeadBranch: branch, HeadSHA: head, Status: status, Conclusion: conclusion}}})
 			}
 			if strings.Contains(joined, "check-runs?") {
+				if len(f.checks) > 0 {
+					return json.NewEncoder(cmd.Stdout).Encode(map[string]any{"check_runs": f.checks})
+				}
 				return json.NewEncoder(cmd.Stdout).Encode(map[string]any{"check_runs": []Check{}})
 			}
 			return json.NewEncoder(cmd.Stdout).Encode([]Status{})

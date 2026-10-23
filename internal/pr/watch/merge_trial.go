@@ -356,7 +356,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		}
 	}
 	if b.Phase == "awaiting-root" || ((b.Phase == "failed" || b.Phase == "stacking") && !b.Bisect) {
-		return s.stopMergeBatch(ctx, repo, *r, b, nil)
+		return s.stopMergeBatch(ctx, repo, *r, b, trialCI{})
 	}
 	// The access and pause checks also apply to a resumed publishing attempt.
 	for _, change := range b.Changes {
@@ -423,7 +423,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		if ci.Status == "failed" {
 			b.Phase, b.Reason, b.Logs = "failed", "batch trial failed; waiting for root", ci.Logs
 			s.noteMergeHistory(st, repo, b, "trial", "failed", b.Head, ci.Logs)
-			return s.stopMergeBatch(ctx, repo, *r, b, mergeChecksOf(ci))
+			return s.stopMergeBatch(ctx, repo, *r, b, ci)
 		}
 		if ci.Status != "passed" {
 			if b.Reason != ci.Reason {
@@ -481,7 +481,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 					b.Phase, b.Reason, b.Logs = "failed", "batch trial failed; waiting for root", logs
 				}
 				if !b.Bisect {
-					return s.stopMergeBatch(ctx, repo, *r, b, mergeChecksOf(ci))
+					return s.stopMergeBatch(ctx, repo, *r, b, ci)
 				}
 				return s.saveMergeTrial(repo, b)
 			}
@@ -613,10 +613,11 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 		return trialCI{}, err
 	}
 	if snap.localCI != nil {
-		if conclusiveCI(snap.localCI.Status) {
-			return trialCI{Status: snap.localCI.Status, Logs: snap.localCI.Logs}, nil
+		if !conclusiveCI(snap.localCI.Status) {
+			return trialCI{Status: "pending", Reason: snap.localCI.Reason}, nil
 		}
-		return trialCI{Status: "pending", Reason: snap.localCI.Reason}, nil
+		// The failed jobs of a hosted read are the evidence a failure records.
+		return withTrialEvidence(r, head, trialCI{Status: snap.localCI.Status, Logs: snap.localCI.Logs, Failed: snap.localCI.Jobs}), nil
 	}
 	out := trialCI{Status: "pending"}
 	var failed []Run
@@ -654,8 +655,34 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 		for _, run := range failed {
 			out.Logs += s.github(r.RoomID).Logs(ctx, refRecord(r), run) + "\n"
 		}
+		out = withTrialEvidence(r, head, out)
 	}
 	return out, nil
+}
+
+// withTrialEvidence makes every failed read name its cause, so a batch never
+// fails without a recorded reason. A failed check of a run that is still going,
+// and a cancelled run, give no run log; the failed check names are then the
+// evidence. A read that names nothing says so, and calls it an infrastructure
+// cause rather than a test failure.
+func withTrialEvidence(r Record, head string, ci trialCI) trialCI {
+	if ci.Status != "failed" {
+		return ci
+	}
+	if strings.TrimSpace(ci.Logs) == "" {
+		where := fmt.Sprintf("https://%s/%s/commit/%s/checks", r.Host, r.Repo, head)
+		if len(ci.Failed) > 0 {
+			ci.Logs = fmt.Sprintf("Failed checks at %s: %s\n", where, strings.Join(ci.Failed, ", "))
+		} else {
+			ci.Logs = fmt.Sprintf("CI for %s failed at %s with no failed check and no failed run: the checks were cancelled or never proved this commit.\n", head, where)
+		}
+	}
+	if len(ci.Failed) > 0 {
+		ci.Reason = "checks failed: " + strings.Join(ci.Failed, ", ")
+	} else {
+		ci.Reason = "CI gave no failed check or run, so this is an infrastructure cause (cancelled or unproven), not a test failure"
+	}
+	return ci
 }
 
 // confirmTrialProbes scopes a failed observation to trials that contain it.
