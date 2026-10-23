@@ -380,6 +380,12 @@ func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string
 		if !cause.until.IsZero() {
 			accounts.Lock()
 			accounts.limited[key] = cause.until
+			now := time.Now()
+			for older, until := range accounts.limited {
+				if !now.Before(until) {
+					delete(accounts.limited, older)
+				}
+			}
 			accounts.Unlock()
 		}
 		if cached.login != "" && knownToken != "" {

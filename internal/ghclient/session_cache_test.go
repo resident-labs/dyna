@@ -27,7 +27,7 @@ func probeCount(t *testing.T, path string) int {
 	if err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
-	return strings.Count(string(raw), "probe")
+	return strings.Count(string(raw), "\n")
 }
 
 // An engine restart empties the memory cache, so the room's proved account must
