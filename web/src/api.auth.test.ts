@@ -2,28 +2,54 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
 // Renewal signs with a real temporary key. The IndexedDB fake holds no data.
-globalThis.location = { origin: 'https://dyna.test' }
-globalThis.document = { querySelector: () => ({ content: '{}' }) }
+Object.assign(globalThis, {
+  location: { origin: 'https://dyna.test' },
+  document: { querySelector: () => ({ content: '{}' }) },
+})
 const pair = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign'])
-const request = (result) => {
-  const req = { result }
-  queueMicrotask(() => req.onsuccess())
+interface FakeRequest {
+  result: unknown
+  onsuccess?: () => void
+}
+const request = (result: unknown): FakeRequest => {
+  const req: FakeRequest = { result }
+  queueMicrotask(() => req.onsuccess?.())
   return req
 }
-globalThis.indexedDB = { open: () => request({ transaction: () => ({ objectStore: () => ({ get: () => request(pair) }) }) }) }
-const json = (body, status = 200) => Response.json(body, { status })
+Object.assign(globalThis, { indexedDB: { open: () => request({ transaction: () => ({ objectStore: () => ({ get: () => request(pair) }) }) }) } })
+const json = (body: unknown, status = 200) => Response.json(body, { status })
+
+interface AuthModule {
+  authenticatedFetch: (path: string, options?: RequestInit) => Promise<Response>
+  onRenewed: (fn: () => void) => void
+  onUnauthorized: (fn: () => void) => void
+  api: { dataDir: () => Promise<string> }
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
+const hasFunctions = (value: Record<string, unknown>, keys: readonly string[]): boolean => keys.every((key) => typeof value[key] === 'function')
+// Each test loads its own copy, so the loaded module is checked before use.
+const isAuthModule = (value: unknown): value is AuthModule =>
+  isRecord(value) && hasFunctions(value, ['authenticatedFetch', 'onRenewed', 'onUnauthorized']) && isRecord(value.api) && hasFunctions(value.api, ['dataDir'])
+
+async function loadAuth(tag: string): Promise<AuthModule> {
+  const module: unknown = await import(`./api.ts?${tag}`)
+  assert.ok(isAuthModule(module))
+  return module
+}
 
 test('concurrent binary requests share renewal and retain their response bodies', async () => {
-  const { authenticatedFetch, onRenewed } = await import('./api.ts?auth-shared')
+  const { authenticatedFetch, onRenewed } = await loadAuth('auth-shared')
   let renewals = 0, renewed = 0
-  const attempts = new Map()
+  const attempts = new Map<string, number>()
   const controller = new AbortController()
   onRenewed(() => renewed++)
-  globalThis.fetch = async (path, options) => {
-    assert.equal(options.credentials, 'same-origin')
+  globalThis.fetch = async (input, init) => {
+    const path = String(input)
+    assert.equal(init?.credentials, 'same-origin')
     if (path === '/api/connect/renew') { renewals++; return json({ expires: '2026-10-23T13:00:00Z', grantEnd: '2026-10-24T13:00:00Z', grace: false }) }
-    assert.equal(options.signal, controller.signal)
-    assert.equal(options.cache, 'no-store')
+    assert.equal(init?.signal, controller.signal)
+    assert.equal(init?.cache, 'no-store')
     const count = (attempts.get(path) || 0) + 1
     attempts.set(path, count)
     return count === 1 ? json({ code: 'renew' }, 401) : new Response(new Uint8Array([0, 255, 123]))
@@ -36,10 +62,11 @@ test('concurrent binary requests share renewal and retain their response bodies'
 })
 
 test('a second 401 ends renewal and reports unauthorized once', async () => {
-  const { authenticatedFetch, onUnauthorized } = await import('./api.ts?auth-bounded')
+  const { authenticatedFetch, onUnauthorized } = await loadAuth('auth-bounded')
   let renewals = 0, attempts = 0, refused = 0
   onUnauthorized(() => refused++)
-  globalThis.fetch = async (path) => {
+  globalThis.fetch = async (input) => {
+    const path = String(input)
     if (path === '/api/connect/renew') { renewals++; return json({}) }
     attempts++
     return json({ code: 'renew' }, 401)
@@ -51,7 +78,7 @@ test('a second 401 ends renewal and reports unauthorized once', async () => {
 })
 
 test('renewal refusal cannot recursively renew itself', async () => {
-  const { authenticatedFetch, onUnauthorized } = await import('./api.ts?auth-refused')
+  const { authenticatedFetch, onUnauthorized } = await loadAuth('auth-refused')
   let calls = 0, refused = 0
   onUnauthorized(() => refused++)
   globalThis.fetch = async () => { calls++; return json({ code: 'renew', error: 'Pair again' }, 401) }
@@ -61,10 +88,11 @@ test('renewal refusal cannot recursively renew itself', async () => {
 })
 
 test('cancellation during renewal prevents replay', async () => {
-  const { authenticatedFetch } = await import('./api.ts?auth-aborted')
+  const { authenticatedFetch } = await loadAuth('auth-aborted')
   const controller = new AbortController()
   let attempts = 0
-  globalThis.fetch = async (path) => {
+  globalThis.fetch = async (input) => {
+    const path = String(input)
     if (path === '/api/connect/renew') { controller.abort(); return json({}) }
     attempts++
     return json({ code: 'renew' }, 401)
@@ -74,7 +102,7 @@ test('cancellation during renewal prevents replay', async () => {
 })
 
 test('ordinary 401 and non-JSON failures keep the body readable', async () => {
-  const { authenticatedFetch, onUnauthorized } = await import('./api.ts?auth-errors')
+  const { authenticatedFetch, onUnauthorized } = await loadAuth('auth-errors')
   let refused = 0
   onUnauthorized(() => refused++)
   for (const status of [401, 500]) {
@@ -87,21 +115,21 @@ test('ordinary 401 and non-JSON failures keep the body readable', async () => {
 })
 
 test('the data folder comes from the server for every client', async () => {
-  const { api } = await import('./api.ts?data-folder')
-  globalThis.fetch = async (path, options) => {
-    assert.equal(path, '/api/DataDir')
-    assert.deepEqual(JSON.parse(options.body), [])
+  const { api } = await loadAuth('data-folder')
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), '/api/DataDir')
+    assert.deepEqual(JSON.parse(String(init?.body)), [])
     return json('/home/test/.local/share/dyna')
   }
   assert.equal(await api.dataDir(), '/home/test/.local/share/dyna')
 })
 
 test('a refused renewal (403) reports unauthorized instead of looping silently', async () => {
-  const { authenticatedFetch, onUnauthorized } = await import('./api.ts?auth-renew-refused')
+  const { authenticatedFetch, onUnauthorized } = await loadAuth('auth-renew-refused')
   let refused = 0, renewals = 0
   onUnauthorized(() => refused++)
-  globalThis.fetch = async (path) => {
-    if (path === '/api/connect/renew') { renewals++; return json({ error: 'the proof is from another key' }, 403) }
+  globalThis.fetch = async (input) => {
+    if (String(input) === '/api/connect/renew') { renewals++; return json({ error: 'the proof is from another key' }, 403) }
     return json({ code: 'renew' }, 401)
   }
   await assert.rejects(authenticatedFetch('/attachments/a/one'), (error) => error === 'the proof is from another key')
@@ -110,10 +138,10 @@ test('a refused renewal (403) reports unauthorized instead of looping silently',
 })
 
 test('a busy relay (503) keeps the session and shows nothing', async () => {
-  const { authenticatedFetch, onUnauthorized } = await import('./api.ts?auth-renew-busy')
+  const { authenticatedFetch, onUnauthorized } = await loadAuth('auth-renew-busy')
   let refused = 0
   onUnauthorized(() => refused++)
-  globalThis.fetch = async (path) => path === '/api/connect/renew'
+  globalThis.fetch = async (input) => String(input) === '/api/connect/renew'
     ? json({ error: 'the Resident Labs relay cannot be reached' }, 503)
     : json({ code: 'renew' }, 401)
   await assert.rejects(authenticatedFetch('/attachments/a/one'))
