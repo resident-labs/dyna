@@ -18,7 +18,7 @@ import (
 )
 
 const piSignInCommand = "_pi-signin"
-const piSignInPrefix = "DYNA_PI_SIGNIN "
+const piSignInPrefix = "PI_SIGNIN "
 
 func piOAuthArgv(argv []string) []string {
 	exe, err := os.Executable()
@@ -113,7 +113,7 @@ export default async function () {
   let view = {url: "", code: "", message: "", choices: [], acceptsPaste: true};
   function publish(patch) {
     view = {...view, ...patch};
-    console.log("DYNA_PI_SIGNIN " + JSON.stringify(view));
+    console.log("PI_SIGNIN " + JSON.stringify(view));
   }
   rl.on("line", line => {
     if (pending.length) pending.shift().resolve(line.trim());

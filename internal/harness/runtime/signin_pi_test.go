@@ -24,7 +24,7 @@ func TestPiSignInReadsNativeOAuthSteps(t *testing.T) {
 		"acceptsPaste": true,
 	}
 	raw, _ := json.Marshal(selectStep)
-	spec.Parse(&st, "DYNA_PI_SIGNIN "+string(raw))
+	spec.Parse(&st, "PI_SIGNIN "+string(raw))
 	if st.Phase != signInWaiting || len(st.Choices) != 2 || st.Choices[0].ID != "anthropic" {
 		t.Fatalf("provider selection = %+v", st)
 	}
@@ -33,14 +33,14 @@ func TestPiSignInReadsNativeOAuthSteps(t *testing.T) {
 		"message":      "Paste the code Anthropic shows after you sign in.",
 		"acceptsPaste": true,
 	})
-	spec.Parse(&st, "DYNA_PI_SIGNIN "+string(raw))
+	spec.Parse(&st, "PI_SIGNIN "+string(raw))
 	if st.URL != "https://claude.ai/oauth/authorize?state=test" || len(st.Choices) != 0 || !st.AcceptsPaste {
 		t.Fatalf("authorization step = %+v", st)
 	}
 	for _, line := range []string{
-		"DYNA_PI_SIGNIN {broken",
-		"DYNA_PI_SIGNIN " + `{"url":"https://user@example.com/","acceptsPaste":true}`,
-		"DYNA_PI_SIGNIN " + `{"url":"http://example.com/","acceptsPaste":true}`,
+		"PI_SIGNIN {broken",
+		"PI_SIGNIN " + `{"url":"https://user@example.com/","acceptsPaste":true}`,
+		"PI_SIGNIN " + `{"url":"http://example.com/","acceptsPaste":true}`,
 	} {
 		spec.Parse(&st, line)
 		if st.URL != "https://claude.ai/oauth/authorize?state=test" {
@@ -51,7 +51,7 @@ func TestPiSignInReadsNativeOAuthSteps(t *testing.T) {
 		"url": "https://github.com/login/device", "code": "ABCD-EFGH",
 		"message": "Open the link and enter this code.", "acceptsPaste": false,
 	})
-	spec.Parse(&st, "DYNA_PI_SIGNIN "+string(raw))
+	spec.Parse(&st, "PI_SIGNIN "+string(raw))
 	if st.URL != "https://github.com/login/device" || st.Code != "ABCD-EFGH" || st.AcceptsPaste {
 		t.Fatalf("device-code step = %+v", st)
 	}
