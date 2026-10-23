@@ -54,6 +54,8 @@
   import Goals from './lib/rooms/Goals.svelte'
   import GoalDetail from './lib/rooms/GoalDetail.svelte'
   import { expedite, expediteScope, expediteAction, heldGoals, isExpedited } from './lib/rooms/expedite.ts'
+  import { expediteMenuItem } from './lib/rooms/expediteMenu.ts'
+  import ExpediteGoal from './lib/rooms/ExpediteGoal.svelte'
   import Rules from './lib/rooms/Rules.svelte'
   import { nextRules } from './lib/rooms/rules.ts'
   import PinIcon from './lib/ui/PinIcon.svelte'
@@ -507,6 +509,7 @@
   let consolidationView = 0
   let consolidationAlive = true
   let transferring = $state<Member | null>(null) // {kind: 'stop'|'close', m, busy, error}
+  let expediting = $state<{ member: Member; goals: Goal[] } | null>(null) // the goal picker for a session with several goals
   let toast = $state('')
   let toastDetail = $state<ToastDetail | null>(null)
   let toastDetailOpen = $state(false)
@@ -1625,14 +1628,22 @@
     await api.setPRGoal(id, row.key, goalId)
     if (id === roomId) await loadChanges()
   }
-  // Menu items for the goal an agent holds, or its nearest ancestor holds; with several goals, one item for each.
-  function expediteItems(m: Member) {
+  // One menu item for the goals an agent holds, or its nearest ancestor holds.
+  // A session with one goal expedites it at once; several goals open a picker.
+  function expediteItems(m: Member): MenuItem[] {
     if (m.closed) return []
     const held = heldGoals(m, hierarchy, knownGoals)
-    return held.map((g) => ({
-      label: expediteAction($expedite, g) === 'stop' ? `Stop expediting${held.length > 1 ? ` ${g.id}` : ' goal'}` : held.length > 1 ? `Expedite goal ${g.id}: ${g.text.slice(0, 40)}` : 'Expedite goal',
-      run: () => expediteGoal(g).catch((e) => say(errorText(e))),
-    }))
+    const item = expediteMenuItem(held, $expedite.goalId)
+    if (!item) return []
+    if (item.mode === 'choose') return [{ label: item.label, hint: item.hint, run: () => (expediting = { member: m, goals: held }) }]
+    const only = held[0]
+    if (!only) return []
+    return [{ label: item.label, run: () => expediteGoal(only).catch((e) => say(errorText(e))) }]
+  }
+  // Stop expediting the room's goal, from the picker.
+  function stopExpediting(goals: Goal[]) {
+    const g = goals.find((x) => x.id === $expedite.goalId)
+    if (g) expediteGoal(g).catch((e) => say(errorText(e)))
   }
 
   // Session menu: safe actions first, then the two that stop work, set
@@ -2760,6 +2771,10 @@
 {/if}
 {#if transferring && room}
   <ModelTransfer member={transferring} roomId={room.id} {profiles} onclose={() => { transferring = null; loadMembers(); if (drill) loadSession() }} />
+{/if}
+{#if expediting && room}
+  {@const context = { ...expediting }}
+  <ExpediteGoal goals={context.goals} roomId={room.id} session={context.member.address} expeditedId={$expedite.goalId} onpick={(g: Goal) => { expediting = null; expediteGoal(g).catch((e) => say(errorText(e))) }} onstop={() => { expediting = null; stopExpediting(context.goals) }} onclose={() => (expediting = null)} />
 {/if}
 {#if confirm && confirmText}
   <Confirm {...confirmText} busy={confirm.busy} error={confirm.error} onconfirm={() => runConfirm()} oncancel={() => (confirm = null)} />
