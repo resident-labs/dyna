@@ -1,13 +1,16 @@
 package runtime
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
-	"dyna-agent/internal/account/store"
+	"dyna-agent/internal/account/native"
+	harnesshome "dyna-agent/internal/harness/home"
 )
 
 func TestOpenCodeSignInParserReadsDevicePrompt(t *testing.T) {
@@ -20,31 +23,6 @@ func TestOpenCodeSignInParserReadsDevicePrompt(t *testing.T) {
 	if got := spec.Argv(argv); !reflect.DeepEqual(got, want) {
 		t.Fatalf("argv = %q, want %q", got, want)
 	}
-	t.Run("saved Go account keeps terminal", func(t *testing.T) {
-		r := testPrivateRuntime(t)
-		a, _, account := setupSharedLogin(t, "opencode")
-		r.Accounts = a
-		if err := a.transaction(func(st *store.State) error {
-			entry := st.Find(account.ID)
-			entry.Integration = "opencode-go"
-			entry.Identity = "opencode:opencode-go:fixture"
-			return nil
-		}, true); err != nil {
-			t.Fatal(err)
-		}
-		exe := filepath.Join(t.TempDir(), "opencode")
-		if err := os.WriteFile(exe, []byte("#!/bin/sh\nread held\n"), 0700); err != nil {
-			t.Fatal(err)
-		}
-		login, err := r.startPrivateLogin(account.ID, exe)
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = r.CancelPrivateRuntimeLogin(account.ID) })
-		if login.TerminalID == "" || login.SignIn != nil {
-			t.Fatalf("login = %+v, want the native terminal for Go's key method", login)
-		}
-	})
 	for _, prefix := range []string{"", "● "} {
 		st := SignInState{Phase: signInStarting}
 		for _, line := range strings.Split("│\n  "+prefix+"Enter code: ABCD-EF12\n  \x1b[32m"+prefix+"https://opencode.ai/console/device?user_code=ABCD-EF12&client_id=opencode-cli\x1b[0m\n", "\n") {
@@ -65,5 +43,53 @@ func TestOpenCodeSignInParserReadsDevicePrompt(t *testing.T) {
 				t.Fatalf("%q changed state: %+v", line, st)
 			}
 		}
+	}
+}
+
+func TestOpenCodeGoSignInImportsKeyWithoutExposingIt(t *testing.T) {
+	scope := t.TempDir()
+	home := harnesshome.Home(scope)
+	if err := os.MkdirAll(home, 0700); err != nil {
+		t.Fatal(err)
+	}
+	exe := filepath.Join(t.TempDir(), "opencode")
+	// Echo the import on both streams: neither may reach the card or an error.
+	script := `#!/bin/sh
+[ "$#" -eq 2 ] && [ "$1" = auth ] && [ "$2" = import ] || exit 3
+cat > "$HOME/import.json"
+cat "$HOME/import.json"
+cat "$HOME/import.json" >&2
+exit "${SIGNIN_TEST_EXIT:-0}"
+`
+	if err := os.WriteFile(exe, []byte(script), 0700); err != nil {
+		t.Fatal(err)
+	}
+	env := map[string]string{"OPENCODE_CONFIG_DIR": scope, "OPENCODE_DB": filepath.Join(scope, "opencode.db")}
+	host := native.Host{Executable: exe, Home: home, OpenCodeService: true, Env: func(key string) string { return env[key] }}
+	key := "fixture-secret-" + strings.Repeat("k", 5000)
+	var out bytes.Buffer
+	if err := runOpenCodeGoSignIn(t.Context(), host, strings.NewReader(key+"\n"), &out); err != nil {
+		t.Fatal(err)
+	}
+	var imported []struct {
+		Integration string                     `json:"integrationID"`
+		Value       struct{ Type, Key string } `json:"value"`
+	}
+	raw, err := os.ReadFile(filepath.Join(home, "import.json"))
+	if err != nil || json.Unmarshal(raw, &imported) != nil || len(imported) != 1 || imported[0].Integration != "opencode-go" || imported[0].Value.Type != "key" || imported[0].Value.Key != key {
+		t.Fatal("the private provider-key importer did not receive the key")
+	}
+	st := SignInState{Phase: signInStarting, AcceptsPaste: openCodeGoSignInSpec.AcceptsPaste}
+	for _, line := range strings.Split(out.String(), "\n") {
+		openCodeGoSignInSpec.Parse(&st, line)
+	}
+	if out.String() != openCodeGoKeyPrompt+"\n" || st.Phase != signInWaiting || !st.SecretInput || !st.AcceptsPaste {
+		t.Fatal("key entry must show only a secret-input prompt")
+	}
+	t.Setenv("SIGNIN_TEST_EXIT", "1")
+	out.Reset()
+	err = runOpenCodeGoSignIn(t.Context(), host, strings.NewReader(key+"\n"), &out)
+	if err == nil || strings.Contains(err.Error(), key) || out.String() != openCodeGoKeyPrompt+"\n" {
+		t.Fatal("a failed key import must not expose its input or native output")
 	}
 }

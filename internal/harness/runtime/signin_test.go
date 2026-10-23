@@ -73,17 +73,11 @@ func TestPrivateSignInSettlesWithoutTerminal(t *testing.T) {
 		Cancel: func() error { runs["cancel"]++; return nil },
 	}
 	spec := signInSpec{Argv: printSampleArgv, Parse: parseCodexSignIn}
-	login, err := a.startPrivateSignIn("acct", "codex", spec, flow)
+	_, err := a.startPrivateSignIn("acct", "codex", spec, flow)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("acct") })
-	if login.TerminalID != "" {
-		t.Fatalf("runner opened a terminal %q", login.TerminalID)
-	}
-	if terms := a.terminals.List(""); len(terms) != 0 {
-		t.Fatalf("runner started %d terminals, want none", len(terms))
-	}
 	running := a.findPrivateLogin("acct")
 	if running == nil || running.signIn == nil {
 		t.Fatal("runner flow is not registered")
@@ -218,5 +212,31 @@ func TestPrivateSignInPasteReachesStdin(t *testing.T) {
 	<-running.signIn.done
 	if state, err := a.PrivateRuntimeLoginState("paste"); err != nil || state.Phase != signInSucceeded {
 		t.Fatalf("state = %+v (%v), want %q after the code", state, err, signInSucceeded)
+	}
+}
+
+// A newly supported harness without a card adapter must show a clear failure
+// before preparing native credentials or starting a process.
+func TestPrivateLoginMissingSpecShowsCardFailure(t *testing.T) {
+	a, _, account := setupSharedLogin(t, "pi")
+	r := testPrivateRuntime(t)
+	r.Accounts = a
+	spec := signInSpecs["pi"]
+	delete(signInSpecs, "pi")
+	t.Cleanup(func() { signInSpecs["pi"] = spec })
+	login, err := r.startPrivateLogin(account.ID, "/missing/pi")
+	if err != nil {
+		t.Fatalf("missing adapter returned an error instead of a card: %v", err)
+	}
+	t.Cleanup(func() { _ = r.CancelPrivateRuntimeLogin(account.ID) })
+	if login.SignIn == nil || login.SignIn.Phase != signInFailed || login.SignIn.Message != "Sign-in is not available for pi." {
+		t.Fatalf("missing adapter card = %+v", login.SignIn)
+	}
+	if pending, running := a.SwitchStatus("pi"); pending || running != 0 {
+		t.Fatal("missing adapter started native work")
+	}
+	state, err := r.PrivateRuntimeLoginState(account.ID)
+	if err != nil || state.Phase != signInFailed {
+		t.Fatalf("failed card cannot be recovered: %+v, %v", state, err)
 	}
 }

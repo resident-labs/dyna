@@ -82,14 +82,13 @@ export interface SignInState {
   code?: string
   message?: string
   acceptsPaste?: boolean
+  secretInput?: boolean
   choices?: { id: string; label: string }[]
 }
 
 // PrivateLogin is runtime.PrivateLogin: the flow a harness account waits on.
-// A runner flow has no terminalId and carries its signIn state instead.
 export interface PrivateLogin {
   accountId: string
-  terminalId: string
   warning?: string
   signIn?: SignInState
 }

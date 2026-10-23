@@ -1,8 +1,8 @@
 <script module lang="ts">
   import type { PrivateLogin } from '../../api/harness.ts'
-  // A sign-in terminal that a harness account is waiting on.
+  // A sign-in card that a harness account is waiting on.
   export type LoginFlow = PrivateLogin & { harness: string }
-  // Keep a running terminal reachable when Settings closes or changes panes.
+  // Keep a running sign-in reachable when Settings closes or changes panes.
   let pendingLogin: LoginFlow | null = null
 </script>
 
@@ -15,7 +15,6 @@
   import { api } from '../../../api.js'
   import HarnessIcon from './HarnessIcon.svelte'
   import ToolEditor from './ToolEditor.svelte'
-  import TermPane from '../../sessions/TermPane.svelte'
   import SignInCard from './SignInCard.svelte'
   import Confirm from '../../ui/Confirm.svelte'
   import TabHeader from '../../rooms/TabHeader.svelte'
@@ -79,7 +78,7 @@
   let removing = $state('') // the account ID, or 'copy', waiting for an inline confirm
   let login = $state<LoginFlow | null>(pendingLogin)
   let loginFlows = $state<LoginFlow[]>(pendingLogin ? [pendingLogin] : [])
-  // signInState is the live step of a sign-in that runs without a terminal.
+  // signInState is the live step of a sign-in running in the engine.
   let signInState = $state<SignInState | null>(pendingLogin?.signIn ?? null)
   let preview = $state<PreferencePreview | null>(null)
   let confirm = $state<Confirmation | null>(null)
@@ -118,11 +117,10 @@
     if (r && takesProviderKeys(r.id) && !r.needsInstall && !r.installing && !providers[r.id]) loadProviders(r.id)
   })
 
-  // A sign-in with no terminal runs in the engine, so the pane polls its step
-  // and collects the account through the same finish call the terminal uses.
+  // The pane polls the native sign-in step and collects the completed account.
   $effect(() => {
     const flow = login
-    if (!flow || flow.terminalId) {
+    if (!flow) {
       signInState = null
       return
     }
@@ -350,7 +348,7 @@
         loginFlows = [...loginFlows.filter((other) => other.accountId !== flow.accountId), flow]
         confirm = null
         showSignInForm = false
-        notice = loginNotice(flow)
+        notice = 'Follow the sign-in steps below.'
       }
     } catch (e) {
       const message = e == null ? '' : errorText(e)
@@ -389,7 +387,7 @@
         login = flow
         loginFlows = [...loginFlows.filter((other) => other.accountId !== flow.accountId), flow]
         confirm = null
-        notice = loginNotice(flow)
+        notice = 'Follow the sign-in steps below.'
       }
     } catch {
       if (!stopped) error = 'Could not restart sign-in. Try again.'
@@ -417,15 +415,10 @@
       }
     } catch (e) {
       // The engine names the missing step, so keep its words.
-      if (!stopped) error = failText(e, login?.terminalId ? 'Sign-in is not complete yet. Finish signing in inside the terminal first.' : 'Sign-in is not complete yet.')
+      if (!stopped) error = failText(e, 'Sign-in is not complete yet.')
     } finally {
       if (!stopped) busy = false
     }
-  }
-
-  // loginNotice words the next step for the flow the engine started.
-  function loginNotice(flow: LoginFlow): string {
-    return flow.terminalId ? 'Complete sign-in in the terminal below, then click Finish sign-in.' : 'Follow the sign-in steps below.'
   }
 
   function openLogin(flow: LoginFlow) {
@@ -770,17 +763,7 @@
               <h3 class="section-label">Accounts</h3>
               {#if login && login.harness === r.id}
                 <div class="login-box">
-                  {#if login.terminalId}
-                    {#if login.warning}<p class="muted small" style="margin:0 0 var(--s2)">{login.warning}</p>{/if}
-                    <p class="muted small" style="margin:0 0 var(--s2)">Complete sign-in in the terminal below, then click Finish sign-in.</p>
-                    <div class="terminal">{#key login.terminalId}<TermPane id={login.terminalId} narrow autofocus />{/key}</div>
-                    <div class="btn-group" style="margin-top:10px">
-                      <button class="btn" disabled={busy} onclick={finishLogin}>Finish sign-in</button>
-                      {#if snapshot?.selectedVersions}<button class="btn quiet" disabled={busy} onclick={cancelLogin}>Cancel sign-in</button>{/if}
-                    </div>
-                  {:else}
-                    <SignInCard signIn={signInState ?? { phase: 'starting' }} warning={login.warning} {busy} oncancel={cancelLogin} onpaste={respondPaste} />
-                  {/if}
+                  <SignInCard signIn={signInState ?? { phase: 'starting' }} warning={login.warning} {busy} oncancel={cancelLogin} onpaste={respondPaste} />
                 </div>
               {:else if r.needsInstall || r.installing}
                 <p class="muted small" style="margin:0">Install Dyna’s copy to sign in.{r.accounts.length ? ' Saved accounts stay.' : ''}</p>
@@ -1059,7 +1042,6 @@
   .progress.wide { width: 100%; }
   .progress::after { content: ''; position: absolute; inset: 0 auto 0 0; width: 40%; border-radius: inherit; background: var(--iris); animation: sweep 1.2s var(--ease) infinite; }
   @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
-  .terminal { display: flex; height: 240px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
   .login-box { margin-top: var(--s1); }
   .signin-card { display: grid; gap: 6px; justify-items: start; padding: 14px; background: var(--main); border: 1px solid var(--line-soft); border-radius: 8px; }
   .signin-card p { margin: 0; font-size: var(--t-ui); }
