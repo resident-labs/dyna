@@ -168,10 +168,11 @@ const time = (ts?: Time | null): number => Math.max(0, (typeof ts === 'number' ?
 export const sessionAddress = (session: { address?: string; member?: Partial<Pick<Member, 'address' | 'name'>> } | null | undefined, room: { name: string }): string => session?.address || session?.member?.address || `${room.name}:${session?.member?.name || ''}`
 // postedTo is the "posted to" chip of a DM row. A post written in a DM is to
 // that conversation's reader, so the chip says nothing there; any other post
-// names the recipients it was addressed to.
+// names the room's chat and the recipients it was addressed to. Rooms carry no
+// '#' prefix, as the reference rows' "from Room chat" does.
 export function postedTo(post: Pick<ThreadPost, 'to' | 'conversation'>, roomName: string): string {
   if ((post.conversation || '').startsWith('dm:')) return ''
-  return `#${roomName} · ${(post.to || []).map((a) => '@' + short(a, roomName)).join(', ')}`
+  return `Room chat · ${(post.to || []).map((a) => '@' + short(a, roomName)).join(', ')}`
 }
 // referenceHome names the conversation a reference row comes from, for a reader
 // without IDs: the room's chat, the voice call, or the DM the post was written
