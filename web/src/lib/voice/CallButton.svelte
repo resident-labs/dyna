@@ -21,11 +21,11 @@
 </script>
 
 {#if offer === 'live'}
-  <span class="callbtn live" title="You are in a call with Voice"><span class="dot"></span>In call · {clock(now - $voiceCall.startedAt)}</span>
+  <span class="callbtn live" title="You are in a call with Voice"><span class="dot"></span><span class="live-label">In call · </span>{clock(now - $voiceCall.startedAt)}</span>
 {:else if offer}
-  <button class="callbtn" disabled={offer === 'calling'} title="Talk to root through Voice" onclick={() => voiceCall.call(room.id, room.name)}>
+  <button class="callbtn" disabled={offer === 'calling'} title="Talk to root through Voice" aria-label={offer === 'calling' ? 'Calling Voice' : 'Call Voice'} onclick={() => voiceCall.call(room.id, room.name)}>
     <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d={icons.phone} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" /></svg>
-    {offer === 'calling' ? 'Calling…' : 'Call Voice'}
+    <span class="call-label">{offer === 'calling' ? 'Calling…' : 'Call Voice'}</span>
   </button>
 {/if}
 
@@ -50,6 +50,13 @@
   .callbtn:active { background: var(--select); }
   .callbtn:disabled { pointer-events: none; color: var(--gold); }
   .callbtn.live { color: var(--gold); font-variant-numeric: tabular-nums; }
+  /* A phone keeps the call icon only, so Search and Members fit in the bar.
+     The timer stays visible during a call, because it is live information. */
+  @media (max-width: 760px) {
+    .callbtn { width: 44px; height: 44px; padding: 0; gap: 0; justify-content: center; }
+    .call-label, .live-label { display: none; }
+    .callbtn.live { width: auto; padding: 0 8px; gap: 5px; }
+  }
   .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); animation: live 1.6s ease-in-out infinite; }
   @keyframes live { 50% { opacity: 0.6; } }
   @media (prefers-reduced-motion: reduce) { .dot { animation: none; } }

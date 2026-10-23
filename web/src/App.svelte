@@ -1567,14 +1567,12 @@
     return roomActionItems(actionRegistry(r))
   }
 
-  // The phone bar's overflow: the panel toggles and the channel look, which
-  // the desktop bar shows as separate buttons.
+  // The phone bar's overflow: the pinned posts and the channel look. Members
+  // and Issues have their own header button, so they are not repeated here.
   function channelMenuItems() {
     const items: MenuItem[] = [
-      { label: 'Members', run: () => { showMembers = true; showPins = false } },
       { label: 'Pinned posts', hint: pins.length ? String(pins.length) : '', run: () => { showPins = true; showMembers = false } },
     ]
-    items.push({ label: 'Issues', hint: issues.length ? String(issues.length) : '', run: openIssues })
     if (isChannel(view)) items.push({ label: 'Channel look', gap: true, run: () => (lookOpen = true) })
     return items
   }
@@ -2464,9 +2462,6 @@
           <PinIcon size={21} />
           {#if pins.length}<span class="badge">{pins.length}</span>{/if}
         </button>
-        <button class="icon" class:on={showMembers} onclick={() => { showMembers = !showMembers }} title={showMembers ? 'Hide member list' : 'Show member list'} aria-label={showMembers ? 'Hide member list' : 'Show member list'} aria-expanded={showMembers}>
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><circle cx="16.5" cy="9" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6" /><path d="M16 13.6c2.4 0 4 1.5 4.5 4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
-        </button>
         {/if}
         {/if}
       {/if}
@@ -2474,6 +2469,13 @@
       {#if !roomId}<span class="spacer"></span>{/if}
       {#if narrow}
         <button class="icon" onclick={() => openSearch()} title="Search (Ctrl+K)" aria-label="Search sessions and messages"><SearchIcon size={22} /></button>
+      {/if}
+      <!-- Members closes the pinned panel, so the two panels never share the
+           side area. The button is the bar's last one, on a phone and a desktop. -->
+      {#if !drill}
+        <button class="icon" class:on={showMembers} onclick={() => { showMembers = !showMembers; if (showMembers) showPins = false }} title={showMembers ? 'Hide member list' : 'Show member list'} aria-label={showMembers ? 'Hide member list' : 'Show member list'} aria-expanded={showMembers}>
+          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><circle cx="16.5" cy="9" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6" /><path d="M16 13.6c2.4 0 4 1.5 4.5 4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+        </button>
       {/if}
     </header>
     <div class="content">
@@ -2833,8 +2835,10 @@
     .dm-bar .dm-back::before { content: '←'; font-size: 18px; }
     .dm-threads, .dm-back { min-height: 44px; }
     .dm-bar > .icon:last-child { display: none; }
-    /* Keep the page title readable while the bar buttons keep their width. */
-    .title, .crumb { min-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* Keep the page title readable while the bar buttons keep their width.
+       The room bar now holds Search and Members too, so the title gives way
+       first and ends in an ellipsis on the narrowest phones. */
+    .title, .crumb { min-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .trail { gap: 4px; }
     .crumb { flex: 0 1 auto; max-width: 40%; }
     /* A phone shows only the nearest parent of the breadcrumb. In a session,
