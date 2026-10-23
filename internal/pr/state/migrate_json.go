@@ -8,6 +8,7 @@ import (
 )
 
 type legacyDocuments struct {
+	source  string
 	index   map[string]json.RawMessage
 	records map[string]json.RawMessage
 }
@@ -58,7 +59,7 @@ func importLegacyRows(conn *sql.Conn, docs legacyDocuments) error {
 	for key, body := range docs.records {
 		var row diskRecord
 		if err := json.Unmarshal(body, &row); err != nil {
-			return fmt.Errorf("invalid PR record %s: %w", key, err)
+			return fmt.Errorf("invalid PR record %s in %s: %w", key, docs.source, err)
 		}
 		r := row.Record
 		room, repo, number, closed := "", "", 0, false
