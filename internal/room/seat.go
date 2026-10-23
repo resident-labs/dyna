@@ -71,6 +71,23 @@ func OwnerRequest(msg Message, roomName string) bool {
 // name, so no other session can take it, and @root names the seat, not it.
 const RootAgent = "root"
 
+// RootSeatTarget reports whether m was posted to the root seat: it is
+// addressed to the room, and its mentions name the seat. Both "@root" and
+// "@<room>:root" resolve to the room's own address, so the seat is in To as
+// the room name rather than as an agent address.
+func (m Message) RootSeatTarget(roomName string) bool {
+	if !m.Addressed(roomName) {
+		return false
+	}
+	for _, tok := range m.Via {
+		switch strings.TrimPrefix(tok, "@") {
+		case RootAgent, roomName + ":" + RootAgent:
+			return true
+		}
+	}
+	return false
+}
+
 // WakesRoot reports whether a post requires the root seat to act. Worker
 // copies remain quiet unless marked. Human requests, Voice, alerts, failed
 // reports and root-owned shell/workflow results keep their wake behavior.
