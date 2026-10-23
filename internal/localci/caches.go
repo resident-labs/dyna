@@ -64,7 +64,9 @@ func (r Runner) CleanCaches(ctx context.Context, node Node, dryRun bool) (CacheC
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	var out, stderr tailBuffer
-	if err := r.nodeCommand(ctx, &out, &stderr, "", cacheCleanCommand(dryRun, ciCacheCleanAge)); err != nil {
+	nodeRunner := r
+	nodeRunner.Node = &node
+	if err := nodeRunner.nodeCommand(ctx, &out, &stderr, "", cacheCleanCommand(dryRun, ciCacheCleanAge)); err != nil {
 		return result, fmt.Errorf("clean %s caches: %w: %s", node.Name, err, stderr.String())
 	}
 	result.Paths, result.FreedBytes = parseCacheClean(out.String())
@@ -126,7 +128,9 @@ func (r Runner) freeSpaceBytes(ctx context.Context, node Node, path string) (int
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	var out, stderr tailBuffer
-	if err := r.nodeCommand(ctx, &out, &stderr, "", "df -Pk "+shellquote.Quote(path)); err != nil {
+	nodeRunner := r
+	nodeRunner.Node = &node
+	if err := nodeRunner.nodeCommand(ctx, &out, &stderr, "", "df -Pk "+shellquote.Quote(path)); err != nil {
 		return 0, fmt.Errorf("read free space of %s: %w: %s", path, err, stderr.String())
 	}
 	return parseDFAvailable(out.String())
