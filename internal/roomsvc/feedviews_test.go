@@ -2,6 +2,7 @@ package roomsvc
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"reflect"
 	"slices"
@@ -186,6 +187,62 @@ func TestRoomChatListsOnlyTheRoomsOwnPosts(t *testing.T) {
 	}
 	if got := roomUnreadCount(t, e.svc, rec.ID); got != 1 {
 		t.Fatalf("room rail unread = %d, want 1", got)
+	}
+}
+
+// A full page of DM posts between two room posts must not stall paging or empty
+// a page: the feed pages over the room's own posts, whatever the log holds
+// between them.
+func TestRoomChatPagesPastAFullPageOfDMPosts(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	first := e.say(rec, "lead", "before the DMs")
+	var dm room.Message
+	for i := range 60 {
+		m, err := e.svc.rooms().Post(rec.ID, room.PostInput{From: lead.Address(), To: []string{rec.Name}, Conversation: room.DMConversation(lead.ID), Text: fmt.Sprintf("dm %d", i)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		dm = m
+	}
+	last := e.say(rec, "lead", "after the DMs")
+
+	ids := func(page Feed) []string {
+		out := make([]string, 0, len(page.Posts))
+		for _, p := range page.Posts {
+			out = append(out, p.ID)
+		}
+		return out
+	}
+	tail, err := e.svc.FeedTail(rec.ID, "", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(tail); !reflect.DeepEqual(got, []string{last.ID}) || tail.Earlier != 1 || tail.Newer != 0 {
+		t.Fatalf("tail page = %v, earlier %d, newer %d; want the newest room post only", got, tail.Earlier, tail.Newer)
+	}
+	forward, err := e.svc.FeedAfter(rec.ID, first.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(forward); !reflect.DeepEqual(got, []string{last.ID}) || forward.Newer != 0 {
+		t.Fatalf("forward page = %v, newer %d; want the next room post", got, forward.Newer)
+	}
+	older, err := e.svc.FeedTail(rec.ID, last.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(older); !reflect.DeepEqual(got, []string{first.ID}) || older.Earlier != 0 || older.Newer != 1 {
+		t.Fatalf("older page = %v, earlier %d, newer %d; want the older room post", got, older.Earlier, older.Newer)
+	}
+	// A jump to a post of the DM lands on the room posts around it.
+	around, err := e.svc.FeedAround(rec.ID, dm.ID, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(around); !reflect.DeepEqual(got, []string{first.ID, last.ID}) {
+		t.Fatalf("page around a DM post = %v, want the room's posts", got)
 	}
 }
 
