@@ -88,27 +88,24 @@ export function reviewMeta(pr?: Facts | null): Meta | null {
   }
 }
 
-// Older hosts expose only the first reviewer. A present list is authoritative.
-// TODO: legacy/shim remove later — single-reviewer state
 // The reviewer fields these helpers read; ReviewerStatus has them all.
 export interface SlotLike {
   session?: { id?: string } | null
   current?: object | null
 }
-export interface ReviewerLike extends SlotLike {
+export interface ReviewerLike {
   reviewers?: SlotLike[] | null
   helpers?: { id: string }[] | null
 }
 export function reviewerSlots(r?: ReviewerLike | null): SlotLike[] {
-  if (Array.isArray(r?.reviewers)) return r.reviewers
-  return r && (r.session || r.current) ? [r] : []
+  return r?.reviewers ?? []
 }
 
 // The room's reviewers show only on the PR screen. A reviewer session has the
 // role marker "reviewer". The pool status also names them, and their helpers
 // are the sessions below them.
 export function withoutReviewers<T extends { id?: string; role?: string; parent?: string }>(members: T[] | null | undefined, reviewer: ReviewerLike | null = null): T[] {
-  const ids = new Set([...reviewerSlots(reviewer).map((s) => s.session?.id), reviewer?.session?.id, ...(reviewer?.helpers ?? []).map((h) => h.id)].filter((id) => !!id))
+  const ids = new Set([...reviewerSlots(reviewer).map((s) => s.session?.id), ...(reviewer?.helpers ?? []).map((h) => h.id)].filter((id) => !!id))
   const hidden = new Set((members ?? []).filter((m) => m.role === 'reviewer' || (m.id !== undefined && ids.has(m.id))).map((m) => m.id))
   // A session under a hidden one is hidden too; repeat until nothing changes.
   for (let grew = true; grew;) {
