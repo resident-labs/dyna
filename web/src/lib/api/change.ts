@@ -38,6 +38,7 @@ export interface Overlap {
 
 // Owner-only HeldPRComments response; never part of ChangeView.
 export interface HeldComment {
+  version: string
   key: string
   roomId: string
   number: number

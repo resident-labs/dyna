@@ -11,7 +11,7 @@ import { installDom, domNames } from './prDetailHarness.ts'
 import type { HeldComment } from '../api/change.ts'
 
 test('owner-only held comments render as text and resolve in the right room without stale reappearance', async () => {
-  const first: HeldComment = { roomId: 'a', key: 'repo#7', number: 7, id: 'issue:19', commenter: 'outside', body: '<img src=x onerror=alert(1)>\n**quoted**', url: '' }
+  const first: HeldComment = { version: 'displayed-version', roomId: 'a', key: 'repo#7', number: 7, id: 'issue:19', commenter: 'outside', body: '<img src=x onerror=alert(1)>\n**quoted**', url: '' }
   const second = { ...first, roomId: 'b' }
   const calls: unknown[][] = []
   let read: () => Promise<HeldComment[]> = async () => [first, second]
@@ -85,7 +85,7 @@ test('owner-only held comments render as text and resolve in the right room with
     await Promise.resolve()
     await Promise.resolve()
     m.flushSync()
-    assert.deepEqual(calls.at(-1), ['admit', 'b', 'repo#7', 'issue:19'])
+    assert.deepEqual(calls.at(-1), ['admit', 'b', 'repo#7', 'issue:19', 'displayed-version'])
     assert.equal(m.get(m.heldComments).comments.length, 0)
   } finally {
     for (const component of mounted) m.unmount(component)
