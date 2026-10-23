@@ -62,7 +62,7 @@ func (e *fixesEnv) mergedRecord(fixes ...state.IssueRef) Record {
 
 func TestMergedPRClosesItsLinkedIssues(t *testing.T) {
 	e := newFixesEnv(t)
-	issue, err := e.rooms.FileIssue(e.room.ID, "Parser drops the last line", "", "internal/parser.go", 12, e.room.Name)
+	issue, err := e.rooms.FileIssue(e.room.ID, room.IssueInput{Title: "Parser drops the last line", File: "internal/parser.go", Line: 12, Filer: e.room.Name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestMergedPRClosesItsLinkedIssues(t *testing.T) {
 
 func TestClosedPRClosesNoIssues(t *testing.T) {
 	e := newFixesEnv(t)
-	issue, err := e.rooms.FileIssue(e.room.ID, "Parser drops the last line", "", "", 0, e.room.Name)
+	issue, err := e.rooms.FileIssue(e.room.ID, room.IssueInput{Title: "Parser drops the last line", Filer: e.room.Name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +148,7 @@ func TestAutomaticMergeClosesTheLinkedRoomIssue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issue, err := e.s.Notify.Rooms.FileIssue(r.ID, "Parser drops the last line", "", "", 0, r.Name)
+	issue, err := e.s.Notify.Rooms.FileIssue(r.ID, room.IssueInput{Title: "Parser drops the last line", Filer: r.Name})
 	if err != nil {
 		t.Fatal(err)
 	}

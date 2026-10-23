@@ -146,7 +146,7 @@ func (s *Service) finishFlakyPublish(ctx context.Context, roomID, repo string, b
 		return err
 	}
 	for _, test := range flaky {
-		_, err := s.Notify.Rooms.FileIssue(roomID, "Flaky test: "+test.Name, flakyIssueNote(b, test), "", 0, rm.Name+":"+room.RootAgent)
+		_, err := s.Notify.Rooms.FileIssue(roomID, room.IssueInput{Title: "Flaky test: " + test.Name, Note: flakyIssueNote(b, test), Filer: rm.Name + ":" + room.RootAgent})
 		if err != nil {
 			return fmt.Errorf("the trial published, but its flaky issue could not be filed: %w", err)
 		}

@@ -17,7 +17,7 @@ func TestConcurrentIssueNumbersAreUnique(t *testing.T) {
 	errors := make(chan error, count)
 	for range count {
 		go func() {
-			i, err := s.FileIssue(rec.ID, "Concurrent", "", "", 0, rec.Name)
+			i, err := s.FileIssue(rec.ID, IssueInput{Title: "Concurrent", Note: "", File: "", Line: 0, Filer: rec.Name})
 			results <- i
 			errors <- err
 		}()
@@ -74,7 +74,7 @@ func TestIssueNumbersUpgradeUsesCreationOrderOnce(t *testing.T) {
 
 func TestIssueReferenceNumbersReachPostsAndAgentFrames(t *testing.T) {
 	s, rec, _ := pinFixture(t)
-	i, err := s.FileIssue(rec.ID, "Remember me", "", "", 0, rec.Name)
+	i, err := s.FileIssue(rec.ID, IssueInput{Title: "Remember me", Note: "", File: "", Line: 0, Filer: rec.Name})
 	if err != nil {
 		t.Fatal(err)
 	}

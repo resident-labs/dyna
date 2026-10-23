@@ -1,7 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { changeLines, noteGroups, sameChanges } from './notices.ts'
-import type { NoticePost } from './notices.ts'
 
 const notice = (lines: string): string => `[DYNA INSTRUCTIONS CHANGED] Since this conversation started, your standing instructions changed. These changes apply now:\n${lines}`
 
@@ -54,34 +53,4 @@ test('an attach handoff preserves quoted detach context in its body', () => {
  const body = '[DYNA ROOT SEAT HANDOFF]\nRecent input:\n[ROOT SEAT HANDOFF] The external orchestrator left this note:\n\nEarlier note.'
  const groups = noteGroups([{ post: { id: 'attach', kind: 'seat', text: 'codex (external) took the root seat\n\n' + body } }], 'alpha')
  assert.equal(groups.get(0)?.[0]?.body, body)
-})
-
-// The watcher files each repeated slow test as a room issue post
-// (internal/pr/watch/test_budget_scope.go). Its first note lines are facts.
-const slowPost = (id: string, test: string, facts = 'Time: 2.47 s, limit 1 s\nPRs: #1104, #1138\nArea: internal/pr/watch\n\n') => ({ id, kind: 'issue', from: 'work', to: ['work'], ts: '2026-10-20T03:10:00Z', text: `Slow test over the CI limit: ${test}\n\n${facts}This test ran over the room's per-test limit.` })
-
-test('a slow-test issue is a quiet note with its test, time, limit, PRs and area', async () => {
-  const { isNote, noteData } = await import('./notices.ts')
-  const p = slowPost('m1', 'dyna-agent/internal/pr/watch/TestMergePublishers/outer')
-  assert.equal(isNote(p), true)
-  assert.deepEqual(noteData(p).slow, { issue: 'm1', id: 'dyna-agent/internal/pr/watch/TestMergePublishers/outer', name: 'TestMergePublishers/outer', time: '2.47 s', limit: '1 s', prs: [1104, 1138], area: 'internal/pr/watch' })
-  // A web test keeps its name; an older post without facts keeps only the name.
-  assert.deepEqual(noteData(slowPost('m2', 'test/the sidebar renders', '')).slow, { issue: 'm2', id: 'test/the sidebar renders', name: 'the sidebar renders', time: '', limit: '', prs: [], area: '' })
-  // Other issues stay ordinary posts.
-  assert.equal(isNote({ kind: 'issue', text: 'Service profile menu bug' }), false)
-})
-
-test('a run of slow-test notes groups into one row, apart from other notices', () => {
-  const rows: { post?: NoticePost | null }[] = [
-    { post: slowPost('a', 'x/TestA') },
-    { post: slowPost('b', 'x/TestB') },
-    { post: null },
-    { post: slowPost('c', 'x/TestC') },
-  ]
-  rows.splice(2, 0, { post: { id: 'i', kind: 'instructions', to: ['work:lead'], text: notice('- Goal and brief: removed.') } })
-  const groups = noteGroups(rows, 'work')
-  assert.deepEqual(groups.get(0)?.map((n) => n.slow?.name), ['TestA', 'TestB'])
-  assert.equal(groups.get(1), null)
-  assert.equal(groups.get(2)?.length, 1)
-  assert.deepEqual(groups.get(4)?.map((n) => n.slow?.name), ['TestC'])
 })

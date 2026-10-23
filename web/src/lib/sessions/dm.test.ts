@@ -347,12 +347,19 @@ test('a compaction divider is one row that the compaction setting hides', () => 
   assert.deepEqual(rows({ compaction: false }).map((r) => r.kind), ['turn', 'message', 'message'])
   assert.equal(need(rows({}).find((r) => r.kind === 'compaction')).key, 'item:1:1')
 })
-test('slow-test issues in a row fold into one note row; other notes stay apart', () => {
-  const slow = (id: string, s: number) => post(id, 'room', ['room'], s, { kind: 'issue', text: `Slow test over the CI limit: x/Test${id}\n\nTime: 2 s, limit 1 s\nPRs: #1\nArea: x\n\nnote` })
-  const ins = post('ins', 'dyna', [address], 3, { kind: 'instructions', text: '[DYNA INSTRUCTIONS CHANGED] x' })
-  const session = { address, turns: [], posts: [slow('A', 1), slow('B', 2), ins, slow('C', 4)] }
-  const rows = dmView(session, room).rows
-  assert.deepEqual(rows.map((r) => [r.kind, (r.kind === 'instructions' ? r.notes ?? [] : []).map((n) => n.slow?.name)]), [['instructions', ['TestA', 'TestB']], ['instructions', []], ['instructions', ['TestC']]])
+test('a queued check-in draws its card, not a bubble with its raw text', () => {
+	const checkin = {
+		...post('c1', 'dyna', [address], 5, { kind: 'checkin', notice: { kind: 'summary', producer: 'parent-checkin' }, text: 'Check on your children.' }),
+		payload: {
+			parent: 'ses_1', windowStart: 1, counts: { running: 0, queued: 0, idle: 1 },
+			children: [{ name: 'lead', state: 'idle' as const, age: '5m', goal: 'g1: work', pr: 'no open PRs' }],
+		},
+	}
+	const receipt: Receipt = { id: 'c1', from: 'dyna', text: 'Check on your children.', ts: ts(5), state: 'waiting' }
+	const rows = dmView({ address, turns: [], posts: [checkin] }, room, undefined, [receipt]).rows
+	const row = need(rows.find((r) => r.key === 'post:c1'))
+	assert.equal(row.kind, 'system-event')
+	if (row.kind === 'system-event') assert.equal(row.post.kind, 'checkin')
 })
 
 // Voice's request is the owner's words: it shows inline as one voice row in

@@ -2,7 +2,6 @@
 package goalsvc
 
 import (
-	"fmt"
 	"time"
 
 	"dyna-agent/internal/goals"
@@ -34,7 +33,8 @@ func (s *Service) now() time.Time {
 	return time.Now()
 }
 
-// Milestone stores a quiet feed row without waking anyone.
+// Milestone stores a quiet feed row without waking anyone. The row is a typed
+// goal event, so the web reads the goal and the verdict from the payload.
 func (s *Service) Milestone(g goals.Goal, by, verb string) error {
 	rec, err := s.Notify.Rooms.Resolve(g.Room)
 	if err != nil {
@@ -44,10 +44,15 @@ func (s *Service) Milestone(g goals.Goal, by, verb string) error {
 	if info, err := s.Notify.Sessions.Store.Info(by); err == nil {
 		who = info.Name
 	}
-	text := fmt.Sprintf("%s %s goal %s: %s", who, verb, g.ID, g.Text)
-	if verb == "finished" && g.Done != nil {
-		text = fmt.Sprintf("Goal %s %s is done: %s", g.ID, goals.Clip(g.Text, 60), g.Done.Summary)
+	change := room.GoalChange(verb)
+	title := g.Text
+	if change == room.GoalFinished {
+		title = goals.Clip(g.Text, 60)
 	}
-	_, err = s.Notify.Rooms.Post(rec.ID, room.PostInput{From: who, Kind: "goal", To: []string{rec.Name}, Text: text})
+	ev := room.GoalEvent{Type: change, GoalID: g.ID, Title: title, Actor: who, State: room.GoalState(g.State)}
+	if change == room.GoalFinished && g.Done != nil {
+		ev.Summary = g.Done.Summary
+	}
+	_, err = s.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: ev, To: []string{rec.Name}})
 	return err
 }

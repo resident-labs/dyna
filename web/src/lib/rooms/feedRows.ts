@@ -2,7 +2,8 @@ import { parsePRPost } from '../prs/pr.ts'
 import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
 import type { EventPayload } from './events.gen.ts'
-import { hookEvent, mergeEvent, prEvent } from './eventPayloads.ts'
+import { hookEvent, issueEvent, mergeEvent, prEvent } from './eventPayloads.ts'
+import { eventSpecs } from './events.gen.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
 // fixtures of a test both fit it.
@@ -90,9 +91,24 @@ export function rowPosts<P extends FeedInput>(row: FeedRow<P> | undefined): P[] 
   return row?.kind === 'post' ? row.posts ?? [row.post] : []
 }
 
+// roomPosts keeps the posts of the room's own conversation. A session-audience
+// event belongs to the one session it names and lives in that session's DM;
+// the room lists it only when the owner is a recipient. The decision reads the
+// typed audience, never the addresses it was posted to.
+//
+// TODO: the conversation series replaces this with the stored home
+// (Message.Conversation and post_homes).
+export function roomPosts<P extends FeedInput>(posts: readonly P[], owner: string): P[] {
+  return posts.filter((post) => {
+    const spec = eventSpecs.find((entry) => entry.family === post.kind && entry.type === post.notice?.kind)
+    return spec?.audience !== 'session' || (post.to ?? []).includes(owner)
+  })
+}
+
 // foldKey names a row that folds on one subject: one card per PR, one card
-// per hook run, and one card per merge trial, so a trial's progress and its
-// end stay one card. An empty key never folds.
+// per hook run, one card per merge trial, so a trial's progress and its end
+// stay one card, and one card per issue, so a filing, a change and a close
+// fold together. An empty key never folds.
 function foldKey(post: FeedInput): string {
   const hook = hookEvent(post)
   if (hook) return `hook:${hook.runId}`
@@ -100,6 +116,10 @@ function foldKey(post: FeedInput): string {
   if (merge) return `merge:${merge.trialId}`
   const pr = prEvent(post)
   if (pr) return pr.type === 'held-comment' ? '' : `pr:${pr.changeId || pr.url || ''}`
+  // One card per issue: filed, changed and closed fold together. A filing has
+  // no issue ID yet, so it folds on its own post ID, which is the issue's ID.
+  const issue = issueEvent(post)
+  if (issue) return `issue:${issue.issueId || post.id}`
   // TODO: legacy/shim remove later — a PR post stored before the typed events
   // names its change in text only; remove when that history ages out.
   if (post.kind === 'pr' && post.notice?.kind !== 'held-comment') {

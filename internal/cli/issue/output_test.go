@@ -46,7 +46,7 @@ func (f issueFixture) run(args ...string) (string, error) {
 }
 func (f issueFixture) file(t *testing.T) room.Issue {
 	t.Helper()
-	i, err := f.rooms.FileIssue(f.rec.ID, "Fix parser", "details", "parser.go", 12, f.rec.Name)
+	i, err := f.rooms.FileIssue(f.rec.ID, room.IssueInput{Title: "Fix parser", Note: "details", File: "parser.go", Line: 12, Filer: f.rec.Name})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,7 @@ import (
 	"context"
 	"hash/fnv"
 	"log"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -491,6 +492,9 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	channels := newChannelIndex(members)
 	counts := map[string]int{}
 	page, err := read(rec.ID, cursor, keep, func(m room.Message) bool {
+		if !roomConversationPost(rec, m) {
+			return false
+		}
 		unread := countsUnread(m, rec.Name) && !reads[m.ID]
 		if unread {
 			for _, view := range channels.views(m) {
@@ -502,6 +506,7 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	if err != nil {
 		return Feed{}, err
 	}
+	page.Messages = slices.DeleteFunc(page.Messages, func(m room.Message) bool { return !roomConversationPost(rec, m) })
 	out, err := s.feedOf(rec, page.Messages, page.Offset, book, reads)
 	for i := range out.Posts {
 		out.Posts[i].Channels = channels.views(out.Posts[i].Message)
@@ -510,6 +515,18 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	out.Unread, out.FirstUnread = page.Unread, page.FirstUnread
 	out.ChannelUnread = counts
 	return out, err
+}
+
+// roomConversationPost reports whether a post belongs in the room's own
+// conversation. A session-audience event belongs to the one session it names
+// and lives in that session's DM; the room lists it only when the owner is a
+// recipient. The decision reads the typed audience, never the addresses it was
+// posted to.
+//
+// TODO: the conversation series replaces this with the stored home
+// (Message.Conversation and post_homes).
+func roomConversationPost(rec room.Record, msg room.Message) bool {
+	return msg.EventAudience() == room.AudienceRoom || msg.Addressed(rec.Name)
 }
 
 // feedOf decorates already selected room or session messages through one path.

@@ -150,15 +150,25 @@ func (s *Service) postSlowTestCrossings(ctx context.Context, r Record, run Run, 
 		return
 	}
 	entries := s.libraryEntries(ctx, rec.Repo)
+	ev := room.SlowTestEvent{Run: runLabel(token), Count: len(crossings)}
 	lines := make([]string, 0, len(crossings))
 	reported := make([]string, 0, len(crossings))
 	for _, crossing := range crossings {
-		lines = append(lines, slowTestLine(crossing, library.PackageOwners(entries, crossing.Now.Package)))
+		features := library.PackageOwners(entries, crossing.Now.Package)
+		lines = append(lines, slowTestLine(crossing, features))
 		reported = append(reported, crossing.Test)
+		ev.Crossings = append(ev.Crossings, room.SlowTestCrossing{
+			Test: crossing.Test, Package: crossing.Now.Package, Features: features,
+			DurationMS: int(crossing.Now.Duration / time.Millisecond), Run: runLabel(crossing.Now.Token),
+			OtherMS: int(crossing.Other.Duration / time.Millisecond), OtherRun: runLabel(crossing.Other.Token),
+			LimitMS: int(crossing.Now.Limit / time.Millisecond),
+		})
 	}
-	text := "Slow test over the CI limit, twice: " + strings.Join(lines, "\n")
-	if _, err := s.roomsStore().Post(rec.ID, room.PostInput{
-		From: rec.Name + ":ci-health", Kind: "test-health", To: []string{rec.Name}, Text: text,
+	ev.Detail = strings.Join(lines, "\n")
+	// The line is quiet: it reaches the owner feed as a card and starts no
+	// session.
+	if _, err := s.roomsStore().PostEventInput(room.PostEventInput{
+		RoomID: rec.ID, Event: ev, To: []string{rec.Name}, RoomService: true,
 	}); err != nil {
 		log.Printf("PR #%d run %s: posting CI health line: %v", r.Number, token, err)
 		return

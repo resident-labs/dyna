@@ -75,15 +75,26 @@ func TestSelectorContextResolvesSelectorsNow(t *testing.T) {
 func TestReplyAddressForSenderClasses(t *testing.T) {
 	e := newTestEnv(t)
 	for from, want := range map[string]string{
-		"work:lead":              "work:lead",
-		"work":                   "work",
-		"run:wf_x/agent:2":       "run:wf_x/agent:2",
-		"shell:42":               "",
-		room.ParentCheckInSender: "",
-		"run:wf_missing":         "",
+		"work:lead":        "work:lead",
+		"work":             "work",
+		"run:wf_x/agent:2": "run:wf_x/agent:2",
+		"shell:42":         "",
+		"run:wf_missing":   "",
 	} {
 		if got := e.m.Store.ReplyAddress(room.Message{From: from}); got != want {
 			t.Fatalf("ReplyAddress(%q) = %q, want %q", from, got, want)
+		}
+	}
+	// An engine event has no one to reply to, whatever its sender.
+	for _, msg := range []room.Message{
+		{From: room.EngineSender, Kind: "checkin", Notice: room.EventNotice{Kind: "summary"}},
+		// TODO: legacy/shim remove later — a check-in stored before the typed
+		// events came from the invented system sender. Remove when that
+		// history ages out.
+		{From: "system:parent-checkin", Kind: "checkin"},
+	} {
+		if got := e.m.Store.ReplyAddress(msg); got != "" {
+			t.Fatalf("ReplyAddress(%+v) = %q, want no reply address", msg, got)
 		}
 	}
 }
