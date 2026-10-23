@@ -2,7 +2,6 @@ package watch
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os/exec"
 	"path/filepath"
@@ -82,10 +81,9 @@ func TestLocalCancellationAggregateResumesAfterInfrastructureError(t *testing.T)
 						endpoint = arg
 					}
 				}
-				var body any
 				switch {
 				case strings.HasSuffix(endpoint, "/runs/10"):
-					body = run
+					return writeFakeJSON(cmd.Stdout, run)
 				case strings.Contains(endpoint, "/attempts/1/jobs?"):
 					var jobs []budgetJob
 					for _, name := range []string{"go-test-shard (0)", "go-static", "frontend", "frontend-check", "go-test"} {
@@ -98,19 +96,13 @@ func TestLocalCancellationAggregateResumesAfterInfrastructureError(t *testing.T)
 						}
 						jobs = append(jobs, j)
 					}
-					body = map[string]any{"jobs": jobs}
+					return writeFakeJSON(cmd.Stdout, jobsResponse{Jobs: jobs})
 				case strings.HasSuffix(endpoint, "/rerun"):
 					reruns++
-					body = map[string]any{}
+					return writeFakeJSON(cmd.Stdout, emptyResponse{})
 				default:
 					return fmt.Errorf("unexpected endpoint %s", endpoint)
 				}
-				raw, err := json.Marshal(body)
-				if err != nil {
-					return err
-				}
-				_, err = fmt.Fprintf(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n%s", raw)
-				return err
 			}
 			job := registeredCIJob{record: Record{Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo"}, head: head, branch: "feature"}
 			if err := s.resumeHostedCI(context.Background(), job, "repo"); err != nil {
@@ -177,23 +169,16 @@ func TestLocalCancellationReachesFactsAndTrialGate(t *testing.T) {
 							endpoint = arg
 						}
 					}
-					var body any
 					switch {
 					case strings.Contains(endpoint, "/check-runs?"):
-						body = map[string]any{"check_runs": snap.Checks}
+						return writeFakeJSON(cmd.Stdout, checkRunsResponse{CheckRuns: snap.Checks})
 					case strings.Contains(endpoint, "/actions/runs?"):
-						body = map[string]any{"workflow_runs": snap.Runs}
+						return writeFakeJSON(cmd.Stdout, workflowRunsResponse{WorkflowRuns: snap.Runs})
 					case strings.Contains(endpoint, "/statuses?"):
-						body = []Status{}
+						return writeFakeJSON(cmd.Stdout, []Status{})
 					default:
 						return fmt.Errorf("unexpected endpoint %s", endpoint)
 					}
-					raw, err := json.Marshal(body)
-					if err != nil {
-						return err
-					}
-					_, err = fmt.Fprintf(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n%s", raw)
-					return err
 				}
 				normalized, err := s.withRegisteredCI(ctx, r, snap, ChangePolicy{})
 				if err != nil {
