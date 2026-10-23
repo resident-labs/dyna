@@ -21,6 +21,8 @@ const fixture = `<script>
   import SessionMedia from './SessionMedia.svelte';
   let { room, session, post, media } = $props();
   let roomId = room.id, detailRequest = 0, drill = null, card = null, viewing = null, feedAtBottom = true, view = '', openJob = '';
+  // The screen state lives in the router now; the sliced jumpTo writes it there.
+  const router = { get roomId() { return roomId }, set roomId(v) { roomId = v }, get view() { return view }, set view(v) { view = v }, get drill() { return drill }, set drill(v) { drill = v }, get detailRequest() { return detailRequest }, set detailRequest(v) { detailRequest = v }, get openJob() { return openJob }, set openJob(v) { openJob = v } };
   const feed = { posts: [post] }, jumps = [], feedView = { jump: id => jumps.push(id) };
   const GENERAL = 'general', VOICE = 'voice-call';
   const clearItemLink = () => {}, loadEarlier = async () => false, questionID = () => '', openQuestion = () => {}, isShellResult = () => false, inView = () => false, homeView = () => GENERAL;
