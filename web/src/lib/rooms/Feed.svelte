@@ -13,7 +13,6 @@
   import ForwardQuote from '../ui/ForwardQuote.svelte'
   import HistoryList from './HistoryList.svelte'
   import { focusWhen } from '../ui/focusWhen.ts'
-  import GoalPost from './GoalPost.svelte'
   import CallRequestRow from '../voice/CallRequestRow.svelte'
   import CompletionBody from '../ui/CompletionBody.svelte'
   import { feedRows, feedPRRepos, callsInWindow, rowPost } from './feedRows.ts'
@@ -259,16 +258,14 @@
           {/if}
       {#if notes.has(index)}
         {@const note = notes.get(index)}
-        {#if note}<SystemNote notes={note} roomId={room.id} {onopenfile} {onissue} />{/if}
+        {#if note}<SystemNote notes={note} roomId={room.id} {onopenfile} />{/if}
       {:else if sealedEvent(p)}
         {@const Card = rendererFor(p)}
         {#if Card}
-          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} focus={flash?.key === row.key ? flash.id : ''} />
+          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} {goals} {ongoal} onissue={onissue ?? undefined} focus={flash?.key === row.key ? flash.id : ''} />
         {:else}
           <p class="unknown-event" role="status">Unknown event {p.kind}/{p.notice?.kind ?? '?'}</p>
         {/if}
-      {:else if p.kind === 'goal'}
-        <GoalPost post={p} {goals} {ongoal} />
       {:else if ownerQuestion(p)}
         {@const q = questionsById[ownerQuestion(p)]}
           <div class="sysline"><span class="question-mark" class:quiet={q && q.state !== 'open'}>?</span><button class="name hue-{p.fromHue}" onclick={() => onaddress?.(p.from)}>{who(p)}</button><span class="what">asked: {p.text.replace(/^\[QUESTION q\d+\] /, '').split('\n')[0]}</span><span>·</span>

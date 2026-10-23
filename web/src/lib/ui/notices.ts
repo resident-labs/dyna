@@ -7,19 +7,8 @@ export type NoticePost = Partial<Pick<Post, 'id' | 'kind' | 'text' | 'to' | 'att
   ts?: Post['ts'] | string
 }
 
-export interface SlowTest {
-  issue: NoticePost['id']
-  id: string
-  name: string
-  time: string
-  limit: string
-  prs: number[]
-  area: string
-}
-
 export interface NoteData extends Pick<NoticePost, 'id' | 'text' | 'ts' | 'attachments'> {
   target: string | undefined
-  slow?: SlowTest
   label?: string
   body?: string
 }
@@ -46,39 +35,15 @@ export function changeLines(text?: string | null) {
 // fullText is the notice without its standard first line.
 export const fullText = (text?: string | null) => (text || '').replace(HEAD, '').trim()
 
-const SLOW = 'Slow test over the CI limit: '
-
-// slowTest reads a slow-test issue that the PR watcher files
-// (internal/pr/watch/test_budget_scope.go): the title names the test, and
-// the note starts with "Time:", "PRs:" and "Area:" lines. An older post
-// without those lines keeps only the test.
-export function slowTest(post: NoticePost | null | undefined): SlowTest | null {
-  if (post?.kind !== 'issue' || !post.text?.startsWith(SLOW)) return null
-  const [title = '', ...rest] = post.text.split('\n')
-  const id = title.slice(SLOW.length).trim()
-  const fact = (key: string) => rest.find((l) => l.startsWith(key + ': '))?.slice(key.length + 2).trim() ?? ''
-  const [time = '', limit = ''] = fact('Time').split(', limit ')
-  const at = id.indexOf('/Test')
-  return {
-    issue: post.id, id,
-    name: at >= 0 ? id.slice(at + 1) : id.replace(/^test\//, ''),
-    time, limit,
-    prs: fact('PRs').split(', ').map((n) => Number(n.replace('#', ''))).filter(Boolean),
-    area: fact('Area'),
-  }
-}
-
-export const isNote = (post: NoticePost | null | undefined): post is NoticePost & { kind: 'instructions' | 'seat' | 'issue' } => ['instructions', 'seat'].includes(post?.kind ?? '') || !!slowTest(post)
+export const isNote = (post: NoticePost | null | undefined): post is NoticePost & { kind: 'instructions' | 'seat' } => ['instructions', 'seat'].includes(post?.kind ?? '')
 
 // Notes of one family fold into one row when they follow each other.
-const family = (post: NoticePost | null | undefined) => (slowTest(post) ? 'slow' : post?.kind === 'instructions' ? 'instructions' : '')
+const family = (post: NoticePost | null | undefined) => (post?.kind === 'instructions' ? 'instructions' : '')
 
 // Seat text starts with its display label. Detach retains root input context
 // behind that line; only the written handoff belongs in the expanded panel.
 export function noteData(post: NoticePost, target?: string): NoteData {
   const note: NoteData = { id: post.id, target, text: post.text, ts: post.ts, attachments: post.attachments }
-  const slow = slowTest(post)
-  if (slow) note.slow = slow
   if (post.kind === 'seat') {
     const [label, ...rest] = (post.text || '').split('\n')
     const text = rest.join('\n').trim()

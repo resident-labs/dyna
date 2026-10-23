@@ -2,14 +2,11 @@
   // SystemNote is a quiet, expandable line for Dyna's own notices, in the
   // channel feed and in DMs. notes: [{ id, target, text, ts }]; a run of
   // notices shares one line. Opening it lists what changed, one line per
-  // change; the full instructions stay behind a second toggle. Slow-test
-  // issues open to one line per test: name, time against the limit, area,
-  // the PRs that hit it, and the issue (onissue opens the Issues panel).
+  // change; the full instructions stay behind a second toggle.
   import PostFiles from './PostFiles.svelte'
   import { clock } from './format.ts'
   import { fullText, sameChanges } from './notices.ts'
-  import { prHash } from '../prs/prlink.ts'
-  import type { NoteData, SlowTest } from './notices.ts'
+  import type { NoteData } from './notices.ts'
   import type { Attachment } from '../api/room.ts'
 
   // notes are one run of notice posts. target names the session a note is
@@ -20,43 +17,18 @@
     notes?: Note[]
     roomId: string
     onopenfile?: (attachment: Attachment) => void
-    onissue?: ((issue: string) => void) | null
   }
-  let { notes = [], roomId, onopenfile, onissue = null }: Props = $props()
+  let { notes = [], roomId, onopenfile }: Props = $props()
   let first = $derived(notes[0])
   // sameChanges groups the notes by the changes they name; only those fields matter.
   let changed = $derived(sameChanges(notes.map((n) => ({ id: n.id, target: n.target, text: n.text }))))
-  let slow = $derived(notes[0]?.slow ? notes.map((n) => n.slow).filter((t): t is SlowTest => !!t) : null)
-  let limit = $derived(slow?.find((t) => t.limit)?.limit ?? '')
-  const prs = (t: SlowTest) => t.prs.map((n) => `#${n}`).join(', ')
-
-  function openIssue(t: SlowTest) {
-    if (onissue && t.issue) onissue(t.issue)
-  }
-  let title = $derived.by(() => {
-    const one = slow?.[0]
-    if (slow && one) {
-      return slow.length > 1
-        ? `${slow.length} slow tests over the ${limit || 'CI'} limit`
-        : [`Slow test ${one.name}`, one.time && `${one.time} of ${one.limit}`, prs(one)].filter(Boolean).join(' · ')
-    }
-    return first?.label ?? (notes.length > 1 ? `Dyna updated standing instructions for ${notes.length} sessions` : `Dyna updated ${first?.target}'s standing instructions`)
-  })
+  let title = $derived(first?.label ?? (notes.length > 1 ? `Dyna updated standing instructions for ${notes.length} sessions` : `Dyna updated ${first?.target}'s standing instructions`))
 </script>
 
 <details class="note">
   <summary><span class="mark" aria-hidden="true">✦</span><span class="label">{title}</span><time>{clock(notes.at(-1)?.ts)}</time><span class="chev" aria-hidden="true">›</span></summary>
   <div class="panel">
-    {#if slow}
-      {#each slow as t (t.issue)}
-        <div class="slow">
-          <span class="name" title={t.id}>{t.name}</span>
-          {#if t.time}<span class="time">{t.time} / {t.limit}</span>{/if}
-          <span class="meta">{t.area}{#if t.area && t.prs.length}{' · '}{/if}{#each t.prs as n, i}{#if i}{', '}{/if}<a href={prHash(roomId, n)}>#{n}</a>{/each}</span>
-          {#if onissue}<button class="go" onclick={() => openIssue(t)}>Issue ›</button>{/if}
-        </div>
-      {/each}
-    {:else if first?.label}
+    {#if first?.label}
       {#if first.body}<p class="text handoff">{first.body}</p>{/if}
       {#if first.attachments?.length}<PostFiles {roomId} post={first} onopen={onopenfile} />{/if}
     {:else}
@@ -85,13 +57,7 @@
   @media (hover: hover) { summary:hover .label { color: var(--ink-2); } }
   .panel { margin: 6px 0 2px 24px; padding: 2px 0 2px 12px; border-left: 2px solid var(--line); }
   .handoff { white-space: pre-wrap; color: var(--ink-2); line-height: 1.5; margin: 0; }
-  .slow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px var(--s3); padding: 6px 0; }
-  .slow + .slow { border-top: 1px solid var(--hair); }
-  .slow .name { font: var(--t-sm) var(--mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .slow .time { color: var(--coral); text-align: right; }
-  .slow .meta a { color: var(--iris); }
-  .slow .go { grid-column: 2; color: var(--iris); font-weight: 600; font-size: var(--t-sm); text-align: right; }
-  .one + .one { margin-top: 10px; }
+              .one + .one { margin-top: 10px; }
   .one b { display: block; color: var(--muted); font-weight: 600; margin-bottom: 2px; }
   .one p { margin: 0; color: var(--ink-2); line-height: 1.5; }
   .full { margin-top: 4px; }

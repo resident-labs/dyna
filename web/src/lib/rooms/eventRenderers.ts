@@ -12,6 +12,11 @@ import WorktreeCard from './WorktreeCard.svelte'
 import HookCard from './HookCard.svelte'
 import MergeCard from './MergeCard.svelte'
 import PRCard from '../prs/PRCard.svelte'
+import IssueCard from './IssueCard.svelte'
+import GoalPost from './GoalPost.svelte'
+import CheckinCard from './CheckinCard.svelte'
+import SlowTestCard from './SlowTestCard.svelte'
+import RuleCard from './RuleCard.svelte'
 import { eventSpecs } from './events.gen.ts'
 import type { EventSpecEntry } from './events.gen.ts'
 import type { EventNotice, Room } from '../api/room.ts'
@@ -27,6 +32,8 @@ export interface EventPost {
   ts?: string | number
   text?: string
   kind?: string
+  from?: string
+  fromHue?: number
   notice?: EventNotice
   payload?: EventPayload
   to?: string[] | null
@@ -48,13 +55,24 @@ export interface EventProps {
   onaddress?: (to: string) => void
   showRepo?: boolean
   focus?: string
+  // goals and ongoal open a goal from its row, as the feed does.
+  goals?: readonly GoalRef[]
+  ongoal?: (id: string) => void
+  // onissue opens the room's Issues panel, where an issue's actions live.
+  onissue?: (issue: string) => void
+}
+
+// GoalRef is the part of a goal a card reads.
+export interface GoalRef {
+  id: string
+  text?: string
 }
 
 export type EventRenderer = Component<EventProps>
 
 // Components by the name a spec gives in its renderer field. A name with no
 // component here draws the unknown event row, and the test fails.
-export const eventComponents: Record<string, EventRenderer> = { WorktreeCard, HookCard, PRCard, MergeCard }
+export const eventComponents: Record<string, EventRenderer> = { WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard }
 
 // The post key of a registered event: its family and its event type.
 export function eventKey(family?: string, type?: string): string {
@@ -89,5 +107,17 @@ export const eventRenderers: Readonly<Record<string, EventRenderer>> = renderers
 // rendererFor returns the card of a registered event, or undefined for a type
 // that has no renderer yet.
 export function rendererFor(post: EventPost): EventRenderer | undefined {
-  return eventRenderers[eventKey(post.kind, post.notice?.kind)]
+  const exact = eventRenderers[eventKey(post.kind, post.notice?.kind)]
+  if (exact) return exact
+  // TODO: legacy/shim remove later — a post stored before its family was
+  // typed has no event type; its family's card reads the stored text instead.
+  // Remove when retained room history ages out.
+  if (!post.notice?.kind) return familyRenderer(post.kind)
+  return undefined
+}
+
+// familyRenderer is the card of a family, for a post that names no type.
+function familyRenderer(family?: string): EventRenderer | undefined {
+  const spec = eventSpecs.find((entry) => entry.family === family)
+  return spec ? eventComponents[spec.renderer] : undefined
 }
