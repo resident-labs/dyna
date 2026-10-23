@@ -21,7 +21,7 @@ test('concurrent binary requests share renewal and retain their response bodies'
   onRenewed(() => renewed++)
   globalThis.fetch = async (path, options) => {
     assert.equal(options.credentials, 'same-origin')
-    if (path === '/api/connect/renew') { renewals++; return json({ expires: 123 }) }
+    if (path === '/api/connect/renew') { renewals++; return json({ expires: '2026-10-23T13:00:00Z', grantEnd: '2026-10-24T13:00:00Z', grace: false }) }
     assert.equal(options.signal, controller.signal)
     assert.equal(options.cache, 'no-store')
     const count = (attempts.get(path) || 0) + 1
