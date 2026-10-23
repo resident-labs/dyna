@@ -367,27 +367,62 @@ func (s *Store) ReplyHome(db *sql.DB, roomID, postID string) Conversation {
 	return parent.Conversation
 }
 
-// indexPost writes the rows of one post that the room store just appended and
-// moves the cursor past it. It runs inside the post's room lock and takes an
-// error that must not fail the stored post: the log already holds it, so the
-// cursor catch-up at the next engine start fills what this write missed.
-func (s *Store) indexPost(roomID, roomName string, msg Message, logStart int64) error {
+// indexPostRows writes the home and delivery rows of a post the store is
+// about to append. It runs before the append, so a reader that finds the post
+// in the log also finds its rows: they are what decide who reads the post, and
+// a reader that saw the line first would miss them. The store removes the rows
+// again when the append fails (dropPostRows); a crash between the two steps
+// leaves them behind, and a row reader skips a row whose post the log does not
+// hold (see NewestSeatDelivery).
+func (s *Store) indexPostRows(roomID, roomName string, msg Message) error {
 	db, err := s.postIndexDB()
 	if err != nil {
 		return err
 	}
 	parent := s.ReplyHome(db, roomID, msg.ReplyTo)
+	at := s.now().UnixMilli()
+	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		ctx := context.Background()
+		return putPostRows(ctx, conn, roomID, roomName, msg, HomeFor(msg, roomName, parent), DeliveryQueued, at)
+	})
+}
+
+// dropPostRows removes the index rows of a post the store could not append, so
+// no reader acts on a delivery for a post the log does not hold. A failed
+// removal leaves the row where it looks like the crash case: a reader skips a
+// row whose post is not in the log.
+func (s *Store) dropPostRows(roomID, postID string) {
+	db, err := s.postIndexDB()
+	if err != nil {
+		log.Printf("room %s: post %s: index rows of a failed append are left in place: %v", roomID, postID, err)
+		return
+	}
+	err = state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		ctx := context.Background()
+		if _, err := conn.ExecContext(ctx, "DELETE FROM post_deliveries WHERE room_id=? AND post_id=?", roomID, postID); err != nil {
+			return err
+		}
+		_, err := conn.ExecContext(ctx, "DELETE FROM post_homes WHERE room_id=? AND post_id=?", roomID, postID)
+		return err
+	})
+	if err != nil {
+		log.Printf("room %s: post %s: index rows of a failed append are left in place: %v", roomID, postID, err)
+	}
+}
+
+// advancePostIndex moves the cursor past the post the store just appended at
+// logStart, so the catch-up at the next engine start leaves its rows alone.
+func (s *Store) advancePostIndex(roomID string, logStart int64) error {
+	db, err := s.postIndexDB()
+	if err != nil {
+		return err
+	}
 	end, err := s.FileSize(roomID)
 	if err != nil {
 		return err
 	}
-	at := s.now().UnixMilli()
 	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-		ctx := context.Background()
-		if err := putPostRows(ctx, conn, roomID, roomName, msg, HomeFor(msg, roomName, parent), DeliveryQueued, at); err != nil {
-			return err
-		}
-		return advancePostCursor(ctx, conn, roomID, logStart, end)
+		return advancePostCursor(context.Background(), conn, roomID, logStart, end)
 	})
 }
 

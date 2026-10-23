@@ -36,7 +36,10 @@ func directPostReplacesUnusableRoot(t *testing.T, role authority.Role) {
 	}
 	t.Cleanup(authority.InEngine())
 	ctx := authority.WithActor(e.ctx, authority.Actor{Role: role, Session: agent.ID, Room: rec.ID})
-	msg := room.Message{ID: "msg_00000000000000aa", From: agent.Address(), To: []string{rec.Name + ":" + room.RootAgent}, Kind: "message", NeedsRoot: true, Text: "RESPOND: hi"}
+	msg, err := e.svc.Rooms.Post(rec.ID, room.PostInput{ID: "msg_00000000000000aa", Wake: true, From: agent.Address(), To: []string{rec.Name + ":" + room.RootAgent}, Kind: "message", NeedsRoot: true, Text: "RESPOND: hi"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	d, handled := e.svc.deliverRoot(ctx, msg, rec)
 	if !handled || d.Delivery == "failed" {
 		t.Fatalf("delivery = %+v, %v; want the root replaced", d, handled)

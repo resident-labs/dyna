@@ -6,7 +6,7 @@ import (
 )
 
 func TestMergeWorkerSignalsOnlyEligibilityChanges(t *testing.T) {
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	signals.wake(roomsvc.Event{Kind: "prs"})
 	select {
 	case <-signals.channels["merges"]:

@@ -506,7 +506,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	// The epoch is the engine start: events of one run share it.
 	started := time.Now()
 	events := hub.New(started.UnixMilli())
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(rooms.Notify.Rooms)
 	callRing := make(chan struct{}, 1)
 	signals.channels["call-requests"] = callRing
 	rooms.Notify.Sessions.InputEvents = events

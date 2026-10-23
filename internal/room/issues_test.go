@@ -25,7 +25,7 @@ func TestIssuesRoundTripAndTriage(t *testing.T) {
 		t.Fatalf("issues: %+v %v", rows, err)
 	}
 	post, err := s.Message(rec.ID, a.ID)
-	if err != nil || post.Kind != "issue" || post.Notice.Kind != "filed" || WakesRoot(post, rec.Name) {
+	if err != nil || post.Kind != "issue" || post.Notice.Kind != "filed" || rootWakes(post, rec.Name) {
 		t.Fatalf("post: %+v %v", post, err)
 	}
 	if ev, ok := post.Issue(); !ok || ev.Number != 1 || ev.Title != "First" || ev.Detail != "detail" || ev.State != IssueStateOpen {
