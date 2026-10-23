@@ -2,13 +2,13 @@ package engine
 
 import (
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife"
@@ -91,14 +91,11 @@ func testIssueCallerPower(t *testing.T, method string) {
 			t.Fatal(err)
 		}
 	}
-	turns := filepath.Join(s.rooms.Notify.Sessions.Store.Root, root.ID, "turns")
-	if err := os.MkdirAll(turns, 0700); err != nil {
+	db, err := database.Open(filepath.Dir(s.rooms.Notify.Sessions.Store.Root))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(turns, "1.json"), []byte(`{"n":1,"status":"running"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.rooms.Notify.Sessions.Store.ImportLegacyTurn(root.ID, 1); err != nil {
+	if _, err := db.Exec("INSERT INTO session_turns(session,n,revision,turn) VALUES (?,1,1,?)", root.ID, []byte(`{"n":1,"status":"running"}`)); err != nil {
 		t.Fatal(err)
 	}
 	repairs := 0
