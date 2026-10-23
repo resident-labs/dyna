@@ -33,7 +33,11 @@ func sessionControlsCmd(action string) *cobra.Command {
 			return printJSON(c.OutOrStdout(), result)
 		}
 		for _, row := range result.Results {
-			fmt.Fprintf(c.OutOrStdout(), "%s: %s", row.Session, row.Status)
+			name := row.Name
+			if name == "" {
+				name = row.Session
+			}
+			fmt.Fprintf(c.OutOrStdout(), "%s: %s", name, row.Status)
 			if row.Error != "" {
 				fmt.Fprintf(c.OutOrStdout(), " (%s)", row.Error)
 			}
