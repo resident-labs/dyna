@@ -3,21 +3,28 @@
 // web also checks the time and removes badges by itself at the deadline.
 import { writable } from 'svelte/store'
 
+interface ItemLike {
+  state?: string
+  assignee?: string
+}
 interface GoalLike {
   id: string
   state: string
   holders?: string[] | null
   shared?: boolean
   expediteUntil?: string
+  items?: ItemLike[] | null
 }
 interface MemberLike {
   id?: string
   address?: string
   parent?: string
+  role?: string
+  owner?: boolean
 }
 
-// Scope is what carries the Expedited badge: the goal, the agents that hold
-// it with their descendants, and the PRs linked to it (by goalId).
+// Scope is what carries the Expedited badge: the goal, the agents that do it
+// with their descendants, and the PRs linked to it (by goalId).
 export interface Scope {
   goalId: string
   until: number
@@ -36,11 +43,19 @@ export function isExpedited(g: GoalLike | null | undefined, now = Date.now()): b
   return until > now
 }
 
+// top is root or the owner: the session that leads the whole room, so its
+// children are not one goal's work.
+const top = (m: MemberLike): boolean => !!m.owner || m.role === 'root'
+
 // expediteScope finds the room's expedited goal and the agents it covers.
+// A goal with items hands its work to the item assignees: they and their
+// children carry the badge, never the holder's other children. A goal without
+// items covers the holder and its children, except for a root or owner holder.
 export function expediteScope(goals: GoalLike[], members: MemberLike[], now = Date.now()): Scope {
   const g = goals.find((x) => isExpedited(x, now))
   if (!g) return none
   const holders = g.shared ? [] : g.holders ?? []
+  const items = g.items ?? []
   const agents = new Set<string>()
   const add = (m: MemberLike) => {
     if (m.id && !agents.has(m.id)) {
@@ -48,7 +63,22 @@ export function expediteScope(goals: GoalLike[], members: MemberLike[], now = Da
       for (const child of members) if (child.parent === m.id) add(child)
     }
   }
-  for (const m of members) if (holders.includes(m.id ?? '') || holders.includes(m.address ?? '')) add(m)
+  const addSelf = (m: MemberLike) => {
+    if (m.id) agents.add(m.id)
+  }
+  const assigned = (m: MemberLike): boolean =>
+    items.some((i) => i.state === 'open' && !!i.assignee && (i.assignee === m.id || i.assignee === m.address))
+  for (const m of members) {
+    // Root or the owner leads the whole room, so even as an item assignee it
+    // keeps the badge to itself.
+    if (assigned(m)) {
+      if (top(m)) addSelf(m)
+      else add(m)
+    } else if (holders.includes(m.id ?? '') || holders.includes(m.address ?? '')) {
+      if (items.length || top(m)) addSelf(m)
+      else add(m)
+    }
+  }
   return { goalId: g.id, until: Date.parse(g.expediteUntil as string), agents }
 }
 
