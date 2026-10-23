@@ -1078,12 +1078,12 @@
     untrack(() => { if (drill && sessionVisible(tab)) loadSession() })
   })
 
-  function loadEarlierSession(_cursor = '', near = () => true) {
+  function loadEarlierSession(near = () => true) {
     if (!session?.earlier || sessionTurn) return Promise.resolve(false)
     return sessionData.earlier(session.cursor ?? '', near)
   }
 
-  function loadNewerSession(_cursor = '', near = () => true) {
+  function loadNewerSession(near = () => true) {
     if (!session?.newer || sessionTurn) return Promise.resolve(false)
     return sessionData.newer(String(session.turns?.at(-1)?.n ?? ''), near)
   }
@@ -2520,14 +2520,14 @@
             {:else if sessionTab === 'shell'}
               <ShellGrid jobs={drillShells} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} />
             {:else if sessionTab === 'media'}
-              <SessionMedia onpost={(post) => jumpTo(post.id)} {room} posts={session?.media ?? []} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
+              <SessionMedia onpost={jumpTo} {room} posts={session?.media ?? []} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
             {:else if sessionTab === 'changes'}
               <Changes roomId={room.id} session={drill.id} sessionName={drill.name} />
             {:else if sessionTab === 'prs'}
               <PRPanel prs={prMap[drill.id] ?? []} error={prError} names={Object.fromEntries(members.filter((x) => x.id).map((x) => [x.id, x.name]))} onuntrack={untrackPR} onresume={resumePR} />
             {:else}
               <div class="sess-wrap" style:--shift={threadsOpen && !narrow ? '360px' : '0px'}>
-              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={(post) => jumpTo(post.id)} bind:this={sessionView} bind:threadsOpen bind:contextOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} prs={prMap[drill.id] ?? []} jobs={jobs ?? []} contextError={jobsError} onchild={openSession} onpr={() => (sessionTab = 'prs')} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} />
+              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:contextOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} prs={prMap[drill.id] ?? []} jobs={jobs ?? []} contextError={jobsError} onchild={openSession} onpr={() => (sessionTab = 'prs')} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} />
               {#if showPreview}<ComputerPreview c={drillComputer} session={drill.id} name={drill.name} onopen={() => (sessionTab = 'computer')} />{/if}
               </div>
             {/if}
