@@ -27,7 +27,7 @@ async function load(name: string, width = 1200) {
         if (path.endsWith('/GitHub.svelte')) source = source.replace('let width = $state(1200)', `let width = $state(${width})`)
         return { contents: compile(source, { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }
       })
-      builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: 'export const api = {}; export const openExternal = () => {}', loader: 'js' }))
+      builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: 'export const api = {}; export const copyText = async () => {}; export const openExternal = () => {}', loader: 'js' }))
     } }],
   })
   const file = join(dir, `${name}.mjs`)

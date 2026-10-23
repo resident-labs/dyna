@@ -20,7 +20,7 @@ async function cardRenderer(name = 'PRCard') {
     plugins: [{ name: 'svelte-test', setup(builder) {
       builder.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({ contents: compile(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
       builder.onLoad({ filter: /[/\\]format\.js$/ }, () => ({ contents: "import { marked } from 'marked'; export const markdown = text => marked.parse(text || ''); export const ago = () => 'now';", loader: 'js', resolveDir: new URL('.', import.meta.url).pathname }))
-      builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: 'export const api = {}; export const openExternal = () => { throw new Error("unexpected navigation") }', loader: 'js' }))
+      builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: 'export const api = {}; export const copyText = async () => {}; export const openExternal = () => { throw new Error("unexpected navigation") }', loader: 'js' }))
     } }],
   })
   // Bundle Svelte's matching server renderer together with the component so
