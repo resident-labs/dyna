@@ -184,37 +184,62 @@ func prepareDirectoryMigration(ctx context.Context, dataDir string) (map[string]
 // directoryEvidence is the one eager converter for the retained index and
 // source journals. It never changes their bytes or offsets.
 func directoryEvidence(ctx context.Context, root *os.Root, id string) ([]string, bool, error) {
+	dirs, found, err := directoryFileEvidence(ctx, root, id, DirsFile)
+	if err == nil && found {
+		return dirs, true, nil
+	}
+	if ctx.Err() != nil {
+		return nil, false, ctx.Err()
+	}
+	dirs = []string{}
+	known, incomplete := false, false
+	for _, name := range []string{"journal.jsonl", "events.jsonl"} {
+		paths, found, err := directoryFileEvidence(ctx, root, id, name)
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		dirs = append(dirs, paths...)
+		known = known || found
+		incomplete = incomplete || err != nil
+	}
+	dirs, err = directoryPaths(dirs)
+	return dirs, known && !incomplete, err
+}
+
+// directoryFileEvidence preserves validated paths even when a later record
+// cannot be read. The caller marks such fallback evidence incomplete.
+func directoryFileEvidence(ctx context.Context, root *os.Root, id, name string) ([]string, bool, error) {
 	dirs := []string{}
-	known := false
-	for _, name := range []string{DirsFile, "journal.jsonl", "events.jsonl"} {
+	found := false
+	readErr := func() error {
 		path := filepath.Join(id, name)
 		info, err := root.Lstat(path)
 		if errors.Is(err, os.ErrNotExist) {
-			continue
+			return nil
 		}
 		if err != nil {
-			return nil, false, err
+			return err
 		}
 		if !info.Mode().IsRegular() {
-			return nil, false, fmt.Errorf("directory evidence is not a regular file: %s", path)
+			return fmt.Errorf("directory evidence is not a regular file: %s", path)
 		}
 		f, err := root.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 		if err != nil {
-			return nil, false, err
+			return err
 		}
 		actual, err := f.Stat()
 		if err != nil || !actual.Mode().IsRegular() || !os.SameFile(info, actual) {
 			f.Close()
-			return nil, false, fmt.Errorf("unsafe directory evidence: %s", path)
+			return fmt.Errorf("unsafe directory evidence: %s", path)
 		}
-		known = true
+		found = true
 		limited := &io.LimitedReader{R: f, N: 256<<20 + 1}
 		scan := bufio.NewScanner(limited)
 		scan.Buffer(make([]byte, 64<<10), 16<<20)
 		for scan.Scan() {
 			if err := ctx.Err(); err != nil {
 				f.Close()
-				return nil, false, err
+				return err
 			}
 			line := bytes.TrimSpace(scan.Bytes())
 			if len(line) == 0 {
@@ -224,39 +249,53 @@ func directoryEvidence(ctx context.Context, root *os.Root, id string) ([]string,
 				var dir string
 				if err := json.Unmarshal(line, &dir); err != nil {
 					f.Close()
-					return nil, false, fmt.Errorf("invalid retained directory index: %w", err)
+					return fmt.Errorf("invalid retained directory index: %w", err)
 				}
-				dirs = append(dirs, dir)
+				paths, err := directoryPaths([]string{dir})
+				if err != nil {
+					f.Close()
+					return err
+				}
+				dirs = append(dirs, paths...)
 			} else {
 				var entry struct{ Dir, Cwd string }
 				if len(line) == 0 || line[0] != '{' {
 					f.Close()
-					return nil, false, fmt.Errorf("directory evidence needs a JSON object")
+					return fmt.Errorf("directory evidence needs a JSON object")
 				}
 				if err := json.Unmarshal(line, &entry); err != nil {
 					f.Close()
-					return nil, false, fmt.Errorf("invalid source journal: %w", err)
+					return fmt.Errorf("invalid source journal: %w", err)
 				}
-				if entry.Dir != "" {
-					dirs = append(dirs, entry.Dir)
-				}
-				if entry.Cwd != "" {
-					dirs = append(dirs, entry.Cwd)
+				for _, dir := range []string{entry.Dir, entry.Cwd} {
+					if dir == "" {
+						continue
+					}
+					paths, err := directoryPaths([]string{dir})
+					if err != nil {
+						f.Close()
+						return err
+					}
+					dirs = append(dirs, paths...)
 				}
 			}
 		}
 		scanErr := scan.Err()
 		closeErr := f.Close()
 		if scanErr != nil {
-			return nil, false, scanErr
+			return scanErr
 		}
 		if closeErr != nil {
-			return nil, false, closeErr
+			return closeErr
 		}
 		if limited.N <= 0 {
-			return nil, false, fmt.Errorf("directory evidence exceeds size limit")
+			return fmt.Errorf("directory evidence exceeds size limit")
 		}
-	}
+		return nil
+	}()
 	dirs, err := directoryPaths(dirs)
-	return dirs, known, err
+	if readErr != nil {
+		return dirs, found, readErr
+	}
+	return dirs, found, err
 }
