@@ -50,3 +50,29 @@ test('steps expand independently, retain failures and load shell logs only when 
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('an active tool stays running when the API omits its false done flag', async () => {
+  const dom = installDom()
+  Reflect.set(globalThis, 'HTMLMediaElement', dom.window.HTMLMediaElement)
+  const { dir, default: C, mount, unmount, flushSync } = await load({ component: '../sessions/ActivityTimeline', format })
+  let app
+  try {
+    for (const status of ['running', 'ok']) {
+      const row: TimelineRow = { kind: 'timeline', key: 'timeline:1', turn: { n: 1, status, started: '2026-10-23T07:00:00Z' }, steps: [
+        { kind: 'tool', key: 'active', tool: 'read', target: 'active.ts', aside: '2 files' },
+        { kind: 'tool', key: 'complete', tool: 'read', target: 'complete.ts', done: true },
+      ] }
+      flushSync(() => app = mount(C, { target: need(document.getElementById('app')), props: { row } }))
+      const states = [...document.querySelectorAll('.timeline li')].map((li) => li.querySelector('.dot')?.getAttribute('aria-label'))
+      assert.deepEqual(states, [status === 'running' ? 'running' : 'done', 'done'])
+      assert.equal(document.querySelector('.running .meta')?.textContent, status === 'running' ? '2 files · running' : undefined)
+      if (app) unmount(app)
+      app = undefined
+    }
+  } finally {
+    if (app) unmount(app)
+    dom.window.close()
+    for (const key of [...domNames, 'HTMLMediaElement']) Reflect.deleteProperty(globalThis, key)
+    await rm(dir, { recursive: true, force: true })
+  }
+})
