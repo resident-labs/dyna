@@ -5,9 +5,9 @@ import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { compile } from 'svelte/compiler'
 import { build } from 'esbuild'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
+import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { need } from '../../../test/need.ts'
 
 // Render the real PRChecks on the server and read the text.
@@ -17,8 +17,7 @@ async function load() {
     bundle: true, write: false,
     stdin: { contents: `export { default } from './PRChecks.svelte'; export { render } from 'svelte/server'`, resolveDir: new URL('.', import.meta.url).pathname, loader: 'js' },
     format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
-    plugins: [{ name: 'svelte-test', setup(builder) {
-      builder.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({ contents: compile(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
+    plugins: [svelteEsbuildPlugin('server'), { name: 'checks-fixture', setup(builder) {
       builder.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: 'export const copyText = async () => {}; export const openExternal = () => { throw new Error("unexpected browser request") }', loader: 'js' }))
     } }],
   })

@@ -6,8 +6,9 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import vm from 'node:vm'
-import { compile, compileModule, parse } from 'svelte/compiler'
+import { compile, parse } from 'svelte/compiler'
 import { build } from 'esbuild'
+import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { normalizePolicy, budgetForm, checksText, saveRoomPolicy, DEFAULT_POLICY } from '../prs/pr.ts'
 import { errorText } from '../errorText.ts'
 import { stripTypes, topLevelFunctions } from '../../../test/svelte-source.ts'
@@ -22,12 +23,10 @@ async function load() {
     bundle: true, write: false,
     stdin: { contents: "export { default } from './RoomSettings.svelte'; export { render } from 'svelte/server'; export { createRawSnippet } from 'svelte'", resolveDir: new URL('.', import.meta.url).pathname, loader: 'js' },
     format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
-    plugins: [{ name: 'svelte-test', setup(builder) {
+    plugins: [{ name: 'settings-fixture', setup(builder) {
       builder.onLoad({ filter: /[/\\]ServiceHeader\.svelte$/ }, ({ path }) => ({ contents: compile('<script>let { roomId, role } = $props()</script><b>service {role} in {roomId}</b>', { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
-      builder.onLoad({ filter: /\.svelte\.js$/ }, ({ path }) => ({ contents: compileModule(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
-      builder.onLoad({ filter: /\.svelte$/ }, ({ path }) => ({ contents: compile(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
       builder.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: 'export const api = {}; export const openExternal = () => {}; export const features = {}', loader: 'js' }))
-    } }],
+    } }, svelteEsbuildPlugin('server')],
   })
   const output = result.outputFiles?.[0]
   assert.ok(output, 'the room settings modal built')

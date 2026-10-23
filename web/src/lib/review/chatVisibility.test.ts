@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { build } from 'esbuild'
-import { compileModule, parse } from 'svelte/compiler'
+import { parse } from 'svelte/compiler'
+import { compileSvelteModule } from '../../../test/svelte-esbuild.ts'
 import { importBundle } from '../prs/prDetailHarness.ts'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { need } from '../../../test/need.ts'
@@ -17,7 +18,7 @@ const codeOf = (node: object | undefined) => {
 const visible = codeOf(nodes.find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'sessionVisible'))
 const effect = codeOf(nodes.find((node) => node.type === 'ExpressionStatement' && node.expression.type === 'CallExpression' && node.expression.callee.type === 'Identifier' && node.expression.callee.name === '$effect' && codeOf(node).includes('const tab = sessionTab')))
 // Run App's actual visibility effect with Svelte's dependency tracking.
-const compiled = compileModule(`
+const compiled = compileSvelteModule(`
   import { untrack } from 'svelte'; export { flushSync } from 'svelte';
   export function create() {
     let sessionTab = $state('chat'), pageVisible = $state(true), narrow = $state(true), reviewOpen = $state(true), drill = $state(null);
@@ -27,7 +28,7 @@ const compiled = compileModule(`
     const cleanup = $effect.root(() => { ${effect} });
     return { loads, cleanup, select() { drill = { id: 'idle-session' }; loadSession() }, close() { reviewOpen = false } };
   }
-`, { filename: 'chat-visibility.svelte.js' }).js.code
+`, 'chat-visibility.svelte.js')
 const built = await build({ stdin: { contents: compiled, resolveDir: new URL('../../', import.meta.url).pathname }, bundle: true, write: false, format: 'esm', platform: 'node', conditions: ['browser', 'production'] })
 
 test('closing mobile Review loads the idle session selected while chat was hidden', async () => {
