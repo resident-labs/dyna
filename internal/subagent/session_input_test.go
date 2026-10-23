@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -71,12 +72,12 @@ func TestSessionInputFromDeliveryRows(t *testing.T) {
 		{"reopened session", closed, true, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			rows := inputRows(rooms, meta.RoomID, meta.ID, addr, []string{tc.msg.ID})
+			rows := mustInputRows(t, rooms, meta.RoomID, meta.ID, addr, []string{tc.msg.ID})
 			_, delivered := rows[tc.msg.ID]
 			if delivered != tc.delivered {
 				t.Fatalf("delivered = %v, want %v", delivered, tc.delivered)
 			}
-			input := len(forSession(rooms, meta, []room.Message{tc.msg})) == 1
+			input := len(mustForSession(t, rooms, meta, []room.Message{tc.msg})) == 1
 			if input != tc.input {
 				t.Fatalf("input = %v, want %v", input, tc.input)
 			}
@@ -84,5 +85,66 @@ func TestSessionInputFromDeliveryRows(t *testing.T) {
 				t.Fatalf("wakes = %v, want %v", wakes, tc.wakes)
 			}
 		})
+	}
+}
+
+// mustForSession is forSession for a test whose row read cannot fail.
+func mustForSession(t *testing.T, rooms *room.Store, meta Meta, msgs []room.Message) []room.Message {
+	t.Helper()
+	got, err := forSession(rooms, meta, msgs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// mustInputRows is inputRows for a test whose row read cannot fail.
+func mustInputRows(t *testing.T, rooms *room.Store, roomID, sessionID, addr string, postIDs []string) map[string]room.Delivery {
+	t.Helper()
+	rows, err := inputRows(rooms, roomID, sessionID, addr, postIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rows
+}
+
+// A failed delivery-row read is not an empty inbox. The turn reads nothing and
+// keeps its room cursor, so the post that asked for the turn is still there for
+// the next read instead of being skipped for good.
+func TestSessionInputReadFailureKeepsThePost(t *testing.T) {
+	rooms := &room.Store{Root: filepath.Join(t.TempDir(), "rooms")}
+	t.Cleanup(func() { database.Close(filepath.Dir(rooms.Root)) })
+	rec, err := rooms.Create(room.CreateInput{Name: "dialogue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta := Meta{ID: NewID(), Name: "worker", Room: rec.Name, RoomID: rec.ID}
+	post, err := rooms.Post(rec.ID, room.PostInput{Wake: true, From: rec.Name, To: []string{meta.Address()}, SessionIDs: map[string]string{meta.Address(): meta.ID}, Text: "for the worker"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &Manager{Store: &Store{Root: filepath.Join(filepath.Dir(rooms.Root), "sessions")}, Rooms: rooms}
+	drain := func() ([]room.Message, int64, error) {
+		t.Helper()
+		return m.drainRoomMessages(meta, Turn{N: 1})
+	}
+	read := sessionRows
+	sessionRows = func(*room.Store, string, []string, []string) (map[string]room.Delivery, error) {
+		return nil, errors.New("the post index is unreadable")
+	}
+	t.Cleanup(func() { sessionRows = read })
+	if got, next, err := drain(); err == nil || len(got) != 0 || next != meta.RoomCursor {
+		t.Fatalf("failed read: input %+v, cursor %d, err %v: want no input, the same cursor and an error", got, next, err)
+	}
+	sessionRows = read
+	got, next, err := drain()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != post.ID {
+		t.Fatalf("later read = %+v, want the post that was kept", got)
+	}
+	if next <= meta.RoomCursor {
+		t.Fatalf("later read cursor = %d, want it past %d", next, meta.RoomCursor)
 	}
 }

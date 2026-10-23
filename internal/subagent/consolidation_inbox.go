@@ -246,6 +246,10 @@ func (s *Store) cachedInboxMessages(rooms *room.Store, meta Meta, ordinary []roo
 	// Each origin's own deliveries decide which posts the target inherits: a row
 	// names the source's session, so a post that named the source's address
 	// without binding it reaches the source and no other holder of the name.
+	//
+	// The rows are read before any origin's pending posts are filtered, so a read
+	// that fails leaves every cached inbox as it was and the posts are read
+	// again on the next poll.
 	inherited := make(map[string]map[string]room.Delivery, len(meta.InheritedInboxes))
 	inboxMsgs := make(map[string][]room.Message, len(meta.InheritedInboxes))
 	for _, in := range meta.InheritedInboxes {
@@ -253,8 +257,11 @@ func (s *Store) cachedInboxMessages(rooms *room.Store, meta Meta, ordinary []roo
 		if err != nil {
 			return nil, err
 		}
+		inherited[in.Session], err = inputRows(rooms, meta.RoomID, in.Session, in.Address, postIDs(msgs))
+		if err != nil {
+			return nil, err
+		}
 		inboxMsgs[in.Session] = msgs
-		inherited[in.Session] = inputRows(rooms, meta.RoomID, in.Session, in.Address, postIDs(msgs))
 	}
 	for _, in := range meta.InheritedInboxes {
 		source, err := reader.ReadMeta(in.Session)

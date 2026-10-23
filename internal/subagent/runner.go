@@ -564,7 +564,11 @@ func (m *Manager) drainRoomMessages(meta Meta, current Turn) ([]room.Message, in
 		return nil, meta.RoomCursor, err
 	}
 	// Unrelated room traffic needs no previous-turn receipt reads.
-	if len(forSession(m.rooms(), meta, msgs)) == 0 && len(q.Claimed) == 0 && len(meta.InheritedInboxes) == 0 {
+	input, err := forSession(m.rooms(), meta, msgs)
+	if err != nil {
+		return nil, meta.RoomCursor, err
+	}
+	if len(input) == 0 && len(q.Claimed) == 0 && len(meta.InheritedInboxes) == 0 {
 		return nil, next, nil
 	}
 	// One read covers the previous turn and every claimed turn.
@@ -622,7 +626,12 @@ func (m *Manager) drainRoomMessages(meta Meta, current Turn) ([]room.Message, in
 			return nil, meta.RoomCursor, err
 		}
 	}
-	selected, err := m.store().inboxMessages(m.rooms(), meta, forSession(m.rooms(), meta, msgs))
+	// The recovered claims are input too, so they are selected with the posts
+	// read from the room log.
+	if input, err = forSession(m.rooms(), meta, msgs); err != nil {
+		return nil, meta.RoomCursor, err
+	}
+	selected, err := m.store().inboxMessages(m.rooms(), meta, input)
 	if err != nil {
 		return nil, meta.RoomCursor, err
 	}

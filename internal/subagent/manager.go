@@ -683,10 +683,14 @@ func (m *Manager) Wake(ctx context.Context, ref string, opts WakeOptions) (WakeR
 		if _, e := m.rooms().Message(info.RoomID, opts.MessageID); e != nil {
 			return WakeResult{}, e
 		}
-		if _, mine := inputRow(m.rooms(), info.RoomID, info.ID, info.Address(), opts.MessageID); !mine {
+		if _, mine, e := inputRow(m.rooms(), info.RoomID, info.ID, info.Address(), opts.MessageID); e != nil {
+			return WakeResult{}, e
+		} else if !mine {
 			matched := false
 			for _, in := range info.InheritedInboxes {
-				if _, theirs := inputRow(m.rooms(), info.RoomID, in.Session, in.Address, opts.MessageID); theirs {
+				if _, theirs, e := inputRow(m.rooms(), info.RoomID, in.Session, in.Address, opts.MessageID); e != nil {
+					return WakeResult{}, e
+				} else if theirs {
 					matched = true
 				}
 			}

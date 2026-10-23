@@ -149,7 +149,10 @@ func (m *Manager) pendingWakePosts(meta Meta, previous ...Turn) ([]room.Message,
 	selected := posts[:0]
 	// The post's stored delivery says whether it asks for a turn: a wake row
 	// does, and a quiet row waits for the next turn the session takes anyway.
-	rows := inputRows(m.rooms(), meta.RoomID, meta.ID, meta.Address(), postIDs(posts))
+	rows, err := inputRows(m.rooms(), meta.RoomID, meta.ID, meta.Address(), postIDs(posts))
+	if err != nil {
+		return nil, err
+	}
 	for _, post := range posts {
 		if meta.Consolidating != "" && !handoffPost(meta, post.ID) {
 			continue
