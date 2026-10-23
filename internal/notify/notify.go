@@ -217,6 +217,8 @@ type PostInput struct {
 	// ForwardOf is the ID of a post in the recipients' room to forward. The
 	// stored post carries a snapshot of it; its files are referenced, not copied.
 	ForwardOf string
+	// References are snapshots of the PRs and issues selected for the post.
+	References []room.Reference
 	// Attachments are already saved in the recipients' room.
 	Attachments []room.Attachment
 	// Files are saved in the recipients' room after the mentions resolve
@@ -264,19 +266,20 @@ func (s *Service) SenderOf(c Claim) (Sender, error) {
 // PostRequest is one post that a CLI process asks the engine to store and
 // deliver. It has no sender: the engine decides it from the caller.
 type PostRequest struct {
-	NeedsRoot bool
-	Kind      string
-	Mentions  []string
-	Text      string
-	ReplyTo   string
-	ForwardOf string
-	Files     []File
-	Claim     Claim
+	NeedsRoot  bool
+	Kind       string
+	Mentions   []string
+	Text       string
+	ReplyTo    string
+	ForwardOf  string
+	References []room.Reference
+	Files      []File
+	Claim      Claim
 }
 
 // Input is the post that req asks for, from snd.
 func (req PostRequest) Input(snd Sender) PostInput {
-	return PostInput{NeedsRoot: req.NeedsRoot, Kind: req.Kind, Sender: snd, Mentions: req.Mentions, Text: req.Text, ReplyTo: req.ReplyTo, ForwardOf: req.ForwardOf, Files: req.Files}
+	return PostInput{NeedsRoot: req.NeedsRoot, Kind: req.Kind, Sender: snd, Mentions: req.Mentions, Text: req.Text, ReplyTo: req.ReplyTo, ForwardOf: req.ForwardOf, References: req.References, Files: req.Files}
 }
 
 // File is one attachment to save with a post.
@@ -363,7 +366,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 		in.Sender.Session.Meta = meta
 	}
 	text := strings.TrimSpace(in.Text)
-	if text == "" && len(in.Attachments) == 0 && len(in.Files) == 0 && in.ForwardOf == "" {
+	if text == "" && len(in.References) == 0 && len(in.Attachments) == 0 && len(in.Files) == 0 && in.ForwardOf == "" {
 		return Result{}, errors.New("post text is required")
 	}
 	if !utf8.ValidString(text) {
@@ -463,7 +466,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 	msg, err := s.Rooms.Post(res.rec.ID, room.PostInput{Wake: !in.NoWake, SessionIDs: sessionIDs,
 		ID: in.ID, NeedsRoot: in.NeedsRoot,
 		From: res.from, Kind: in.Kind, Notice: in.Notice, Human: in.Sender.Kind == SenderOwner && in.Sender.Human, Source: in.Sender.source(), To: res.addrs(), Via: res.via, ReplyTo: in.ReplyTo, Forward: fwd, Turn: turn, Text: text,
-		Attachments: atts,
+		Attachments: atts, References: in.References,
 	})
 	if err != nil {
 		return Result{}, err

@@ -273,7 +273,7 @@
           </div>
       {/if}
       {#if p.forward}<ForwardQuote {room} post={p.forward} author={byId[p.forward.id]} onpost={jump} {onopenfile} />{/if}
-      {#if parts.attachments.length}<div class="post-files"><PostFiles roomId={room.id} post={p} {parts} onopen={onopenfile} /></div>{/if}
+      {#if parts.attachments.length || p.references?.length}<div class="post-files"><PostFiles roomId={room.id} post={p} {parts} onopen={onopenfile} /></div>{/if}
           {#if !notes.has(index) && p.kind !== 'pr'}<PostActions {room} {p} pinned={pinned.has(p.id)} show={selection.get() === p.id} {onreply} {onforward} {onpin} />{/if}
       </article>
     {/if}

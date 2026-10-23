@@ -355,7 +355,15 @@ type SendResult struct {
 // and anything else posts as Post does. Files sent with a new task are
 // recorded as an owner post before the session starts.
 func (s *Service) Send(ctx context.Context, roomRef, draft, replyTo, forwardOf string, atts ...room.Attachment) (SendResult, error) {
+	return s.SendWithReferences(ctx, roomRef, draft, replyTo, forwardOf, nil, atts...)
+}
+
+// SendWithReferences sends composer references with the post.
+func (s *Service) SendWithReferences(ctx context.Context, roomRef, draft, replyTo, forwardOf string, refs []room.Reference, atts ...room.Attachment) (SendResult, error) {
 	if _, _, ok := splitSpawn(draft); ok {
+		if len(refs) > 0 {
+			return SendResult{}, errors.New("remove references before starting a new session")
+		}
 		if forwardOf != "" {
 			return SendResult{}, errors.New("a new session cannot start with a forwarded post. Remove the forwarded post first")
 		}
@@ -368,6 +376,6 @@ func (s *Service) Send(ctx context.Context, roomRef, draft, replyTo, forwardOf s
 		}
 		return SendResult{Kind: "spawn", Spawn: &res}, nil
 	}
-	res, err := s.post(ctx, roomRef, draft, replyTo, forwardOf, atts...)
+	res, err := s.post(ctx, roomRef, draft, replyTo, forwardOf, refs, atts...)
 	return SendResult{Kind: "post", Post: &res}, err
 }

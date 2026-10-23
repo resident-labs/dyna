@@ -26,6 +26,8 @@ var ownerCalls = []string{
 	"ConfirmPrivateRuntimeAccountSwitch",
 	"StartIssueWork",
 	"Send",
+	"SendWithReferences",
+	"SendToSessionWithReferences",
 	"SendToSession",
 	"SteerRun",
 	"DeclineCallRequest",
