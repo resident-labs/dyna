@@ -133,9 +133,9 @@ func sweepClosedSessionLogs(ctx context.Context, now time.Time, dry bool, logf f
 }
 
 // sweepClosedSessions removes the folder and record of each session closed
-// longer than closedSessionRetention, unless keep says it still matters (open
-// children, goals, PR roles, kept worktrees). Dry only measures.
-func sweepClosedSessions(ctx context.Context, now time.Time, dry bool, keeper Keeper, logf func(string, ...any)) (Pruned, error) {
+// longer than closedSessionRetention, unless retain reports that it still
+// matters (open children, goals, PR roles, kept worktrees). Dry only measures.
+func sweepClosedSessions(ctx context.Context, now time.Time, dry bool, retainer ClosedSessionRetainer, logf func(string, ...any)) (Pruned, error) {
 	sessions := runstore.SessionsDir()
 	old := func(raw []byte) bool {
 		var meta sessionlife.Snapshot
@@ -154,7 +154,7 @@ func sweepClosedSessions(ctx context.Context, now time.Time, dry bool, keeper Ke
 	if len(ids) == 0 {
 		return Pruned{}, nil
 	}
-	keep, err := keeper(ctx)
+	retain, err := retainer(ctx)
 	if err != nil {
 		return Pruned{}, err
 	}
@@ -164,7 +164,7 @@ func sweepClosedSessions(ctx context.Context, now time.Time, dry bool, keeper Ke
 		if err := ctx.Err(); err != nil {
 			return freed, errors.Join(append(errs, err)...)
 		}
-		bytes, removed, err := removeClosedSession(ctx, sessions, id, old, keep, dry)
+		bytes, removed, err := removeClosedSession(ctx, sessions, id, old, retain, dry)
 		if removed {
 			freed.Items++
 			freed.Bytes += bytes
@@ -179,14 +179,14 @@ func sweepClosedSessions(ctx context.Context, now time.Time, dry bool, keeper Ke
 	return freed, errors.Join(errs...)
 }
 
-// removeClosedSession asks keep first, before the session's locks: keep takes
+// removeClosedSession asks retain first, before the session's locks: retain takes
 // other stores' locks (PR state, shell and run publication), which the
 // dormant close also takes before the session lock. Work cannot be added to a
 // closed session, so under the session's locks only the record is checked
 // again. It then removes the folder and, last, the record, so a stop between
 // the two leaves a record that the next pass removes.
-func removeClosedSession(ctx context.Context, sessions, id string, old func([]byte) bool, keep func(context.Context, string) (bool, error), dry bool) (int64, bool, error) {
-	if kept, err := keep(ctx, id); err != nil || kept {
+func removeClosedSession(ctx context.Context, sessions, id string, old func([]byte) bool, retain func(context.Context, string) (bool, error), dry bool) (int64, bool, error) {
+	if retained, err := retain(ctx, id); err != nil || retained {
 		return 0, false, err
 	}
 	dir := filepath.Join(sessions, id)

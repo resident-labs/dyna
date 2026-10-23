@@ -2,7 +2,7 @@
 // room lists, feeds, member trees, posting, live watching, and read-only
 // session transcripts, starting and stopping sessions, and workflow runs. It
 // returns plain data and draws nothing. The desktop client binds it directly,
-// and a later web client can serve the same calls over HTTP.
+// and the web app serves the same calls over HTTP.
 package roomsvc
 
 import (
