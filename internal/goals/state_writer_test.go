@@ -51,8 +51,8 @@ func TestGoalChangesUseSharedWriterWithoutDuplicateEvents(t *testing.T) {
 	if got := w.Health().Writes - before; got != 5 {
 		t.Fatalf("shared writer recorded %d transactions; want 5 including two lifecycle barriers", got)
 	}
-	// roomsvc.Watch still publishes the goals topic until its own move.
-	if len(events) != 0 {
-		t.Fatalf("goal writes published duplicate events: %+v", events)
+	// Reads and the failed change publish nothing.
+	if len(events) != 2 {
+		t.Fatalf("goal writes published unexpected events: %+v", events)
 	}
 }

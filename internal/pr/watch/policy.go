@@ -14,15 +14,11 @@ import (
 type ChangePolicy = changepolicy.Policy
 type PolicyOverride = changepolicy.Override
 
-// RoomPolicy preserves the old review switch until a room writes its policy.
-// TODO: legacy/shim remove later — reads the old reviewer disabled switch before a room has policy; remove after all rooms persist policy
+// RoomPolicy returns the stored policy or the defaults for a new room.
 func RoomPolicy(st State, roomID string) ChangePolicy {
 	p, ok := st.Policies[roomID]
 	if !ok {
 		p = changepolicy.Default()
-		if st.Reviewers[roomID].Disabled {
-			p.Review = "off"
-		}
 	}
 	if p.CITimeBudget == "" {
 		p.CITimeBudget = "warn"
