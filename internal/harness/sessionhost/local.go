@@ -128,6 +128,7 @@ type child struct {
 	guardRef   processguard.Reference
 	exited     chan struct{}
 	stderr     stderrWindow
+	stderrPipe *stderrPipe
 }
 
 // stderrWindow keeps the last stderrTailLimit bytes a child wrote to stderr
@@ -405,13 +406,16 @@ func (s *localSession) KillGroup() {
 	}
 }
 
-// StderrTail returns the stderr written since this turn's attach, bounded.
+// StderrTail drains pending pipe bytes before returning this turn's bounded stderr.
 func (s *localSession) StderrTail() string {
 	s.mu.Lock()
 	c := s.last
 	s.mu.Unlock()
 	if c == nil {
 		return ""
+	}
+	if c.stderrPipe != nil {
+		c.stderrPipe.drain()
 	}
 	return c.stderr.tail(false)
 }
@@ -471,7 +475,20 @@ func (s *localSession) startChild(launch Launch) error {
 	}
 	c := &child{stdin: stdin, exited: make(chan struct{})}
 	cmd.Stdout = &lineWriter{s: s}
-	cmd.Stderr = &c.stderr
+	c.stderrPipe, err = newStderrPipe(&c.stderr)
+	if err != nil {
+		_ = stdin.Close()
+		return err
+	}
+	cmd.Stderr = c.stderrPipe.writer
+	c.stderrPipe.start()
+	started := false
+	defer func() {
+		_ = c.stderrPipe.writer.Close()
+		if !started {
+			c.stderrPipe.finish()
+		}
+	}()
 	controller, err := processguard.Wrap(cmd)
 	if err != nil {
 		_ = stdin.Close()
@@ -486,6 +503,7 @@ func (s *localSession) startChild(launch Launch) error {
 		_ = stdin.Close()
 		return err
 	}
+	started = true
 	c.controller = controller
 	c.guardRef = controller.Reference()
 	s.mu.Lock()
@@ -509,6 +527,7 @@ func (s *localSession) startChild(launch Launch) error {
 // entry when that child was still the current one.
 func (s *localSession) supervise(c *child) {
 	err := c.controller.Wait()
+	c.stderrPipe.finish()
 	exit := exitError(err, c.stderr.tail(true))
 	s.mu.Lock()
 	current := s.child == c
