@@ -3,9 +3,11 @@ package profiles
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -83,38 +85,39 @@ func TestProfilesAddDiagnostics(t *testing.T) {
 	if list := runProfilesCommand(t, "list"); !strings.Contains(list, "diagnostics: 9/10") {
 		t.Fatalf("list output missing diagnostics: %s", list)
 	}
-	// A plain add keeps the neutral default of 5, and an old profile shows it.
+	// A plain add keeps the neutral default of 5.
 	runProfilesCommand(t, "add", "--name", "plain", "--harness", "mock")
 	plain, _ := profile.Load(profile.DefaultPath())
 	if q, _ := plain.Get("plain"); q.Diagnostics != 5 {
 		t.Fatalf("default diagnostics = %d, want 5", q.Diagnostics)
 	}
-	raw, err := os.ReadFile(profile.DefaultPath())
-	if err != nil {
+}
+
+// A store written before the rating existed has no diagnostics key, so the CLI
+// must show the neutral 5 for it rather than a zero.
+func TestProfilesShowNeutralDiagnosticsForOldProfiles(t *testing.T) {
+	isolateProfiles(t)
+	legacy := `{"version":3,"profiles":[{"name":"old","harness":"mock","taste":5,"intelligence":5,"cost":5}]}`
+	if err := os.MkdirAll(filepath.Dir(profile.DefaultPath()), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	var file map[string]any
-	if err := json.Unmarshal(raw, &file); err != nil {
+	if err := os.WriteFile(profile.DefaultPath(), []byte(legacy), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// Drop the key, as a profile saved before the rating existed would lack it.
-	for _, item := range file["profiles"].([]any) {
-		delete(item.(map[string]any), "diagnostics")
+	type ratingRow struct {
+		Name        string `json:"name"`
+		Diagnostics int    `json:"diagnostics"`
 	}
-	if raw, err = json.Marshal(file); err != nil {
+	var rows []ratingRow
+	if err := json.Unmarshal([]byte(runProfilesCommand(t, "list", "--all", "--json")), &rows); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(profile.DefaultPath(), raw, 0o600); err != nil {
-		t.Fatal(err)
+	i := slices.IndexFunc(rows, func(r ratingRow) bool { return r.Name == "old" })
+	if i < 0 || rows[i].Diagnostics != 5 {
+		t.Fatalf("list --json ratings = %+v, want old at 5", rows)
 	}
-	list := runProfilesCommand(t, "list", "--all", "--json")
-	if !strings.Contains(list, `"diagnostics": 5`) {
-		t.Fatalf("list --json did not show the neutral rating: %s", list)
-	}
-	var one struct {
-		Diagnostics int `json:"diagnostics"`
-	}
-	if err := json.Unmarshal([]byte(runProfilesCommand(t, "show", "plain")), &one); err != nil {
+	var one ratingRow
+	if err := json.Unmarshal([]byte(runProfilesCommand(t, "show", "old")), &one); err != nil {
 		t.Fatal(err)
 	}
 	if one.Diagnostics != 5 {
