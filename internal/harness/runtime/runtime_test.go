@@ -39,7 +39,7 @@ func runtimeFixture(t *testing.T, h string) (*Runtime, profile.Profile) {
 		t.Fatal(err)
 	}
 	r := &Runtime{Bundles: bundles, Accounts: accounts, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(store.DataDir(), "harnesses", "generations")}
-	return r, profile.Profile{Name: "private", Harness: n.Harness, RuntimeAccount: n.ID}
+	return r, profile.Profile{Name: "private", Harness: n.Harness}
 }
 func TestPreparePrivateProfilePinsGenerationAndIsolatesHome(t *testing.T) {
 	for _, h := range []string{"claude-code", "codex"} {
@@ -148,6 +148,10 @@ func TestSameAccountAllowsConcurrentPrepare(t *testing.T) {
 	for _, h := range []string{"claude-code", "codex"} {
 		t.Run(h, func(t *testing.T) {
 			r, p := runtimeFixture(t, h)
+			active, err := r.Accounts.Active(p.Harness)
+			if err != nil {
+				t.Fatal(err)
+			}
 			var wg sync.WaitGroup
 			for range 8 {
 				wg.Go(func() {
@@ -156,7 +160,7 @@ func TestSameAccountAllowsConcurrentPrepare(t *testing.T) {
 						t.Error(err)
 						return
 					}
-					if pin.AccountID != p.RuntimeAccount {
+					if pin.AccountID != active.ID {
 						t.Error("wrong account")
 					}
 				})

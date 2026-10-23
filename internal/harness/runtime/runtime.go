@@ -308,7 +308,6 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	p.RuntimeSkillPaths = paths
 	p.RuntimeExecutable = b.Executable
 	p.Env = env
-	p.RuntimeAccount = ""
 	p.RuntimePermissionArgs = append([]string{}, p.ExtraArgs...)
 	p.ExtraArgs = append(append([]string{}, p.ExtraArgs...), gen.Args...)
 	if leaseOut != nil {
