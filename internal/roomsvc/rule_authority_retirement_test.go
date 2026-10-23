@@ -61,8 +61,9 @@ func TestOwnerRulesUseRoleAuthorityAndRecordedAuditIdentity(t *testing.T) {
 					t.Fatalf("success notices = %+v", notices)
 				}
 				for _, notice := range notices[len(messages):] {
-					if notice.From != tc.recorded {
-						t.Fatalf("notice audit identity = %q, want %q", notice.From, tc.recorded)
+					ev, ok := notice.Rule()
+					if !ok || ev.Actor != tc.recorded {
+						t.Fatalf("notice audit identity = %q, want %q", ev.Actor, tc.recorded)
 					}
 				}
 			} else {

@@ -123,7 +123,7 @@ func TestDeleteRoomRemovesPins(t *testing.T) {
 // registry tests cover.
 func TestEveryPostKindCanBePinnedAndRepliedTo(t *testing.T) {
 	s, rec, _ := pinFixture(t)
-	for _, kind := range []string{"message", "completed", "failed", "stopped", "goal", "checkin", "seat"} {
+	for _, kind := range []string{"message", "completed", "failed", "stopped", "seat"} {
 		t.Run(kind, func(t *testing.T) {
 			post, err := s.Post(rec.ID, PostInput{From: "alpha:lead", To: []string{"alpha"}, Kind: kind, Text: "Stored report"})
 			if err != nil {

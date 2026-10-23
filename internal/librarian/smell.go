@@ -22,7 +22,7 @@ const SmellsPerDay = 3
 // Issues is the room issue board that smells use.
 type Issues interface {
 	Issues(roomID string, all bool) ([]room.Issue, error)
-	FileIssue(roomID, title, note, file string, line int, by string) (room.Issue, error)
+	FileIssue(roomID string, in room.IssueInput) (room.Issue, error)
 }
 
 // Smell is an architectural problem where a design change would make the
@@ -51,6 +51,7 @@ func (s Service) FileSmell(ctx context.Context, actor authority.Actor, repoDir, 
 		return room.Issue{}, fmt.Errorf("a smell needs file references; pass --at file[:line]")
 	}
 	file, line := "", 0
+	var files []room.IssueFile
 	for i, at := range sm.At {
 		f, n, err := splitAt(at)
 		if err != nil {
@@ -59,6 +60,7 @@ func (s Service) FileSmell(ctx context.Context, actor authority.Actor, repoDir, 
 		if f, err = repoFile(r.Root, f); err != nil {
 			return room.Issue{}, err
 		}
+		files = append(files, room.IssueFile{Path: f, Line: n})
 		if n > 0 {
 			sm.At[i] = fmt.Sprintf("%s:%d", f, n)
 		} else {
@@ -98,7 +100,10 @@ func (s Service) FileSmell(ctx context.Context, actor authority.Actor, repoDir, 
 	}
 	note := "Files: " + strings.Join(sm.At, ", ") + "\nSymbols: " + strings.Join(sm.Symbols, ", ") +
 		"\nCost: " + strings.TrimSpace(sm.Cost) + "\nDirection: " + strings.TrimSpace(sm.Direction) + "\n\nFiled by the librarian."
-	issue, err := s.Issues.FileIssue(st.RoomID, sm.Title, note, file, line, by)
+	issue, err := s.Issues.FileIssue(st.RoomID, room.IssueInput{
+		Title: sm.Title, Note: note, File: file, Line: line, Filer: by,
+		Files: files, Symbols: sm.Symbols, Cost: strings.TrimSpace(sm.Cost), Direction: strings.TrimSpace(sm.Direction),
+	})
 	if err != nil {
 		return issue, err
 	}

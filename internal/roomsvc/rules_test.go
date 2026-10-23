@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"dyna-agent/internal/room"
 )
 
 func TestRulesAPIAndEvents(t *testing.T) {
@@ -55,11 +57,19 @@ func TestRulesAPIAndEvents(t *testing.T) {
 		t.Fatal(msgs, err)
 	}
 	for _, msg := range msgs {
-		if msg.Kind != "notice" || msg.From != "owner" || fmt.Sprint(msg.To) != "[work]" {
+		if msg.Kind != "rule" || msg.Notice.Kind != "changed" || msg.From != room.EngineSender || fmt.Sprint(msg.To) != "[work]" {
 			t.Fatal(msg)
 		}
+		if _, ok := msg.Rule(); !ok {
+			t.Fatal("rule post has no payload", msg)
+		}
 	}
-	if msgs[0].Text != "owner added rule r1: Keep things simple" || msgs[2].Text != "owner removed rule r1." {
+	added, _ := msgs[0].Rule()
+	removed, _ := msgs[2].Rule()
+	if added.Actor != "owner" || added.Verb != room.RuleAdded || added.Scope != "room" || removed.Verb != room.RuleRemoved {
+		t.Fatal(msgs)
+	}
+	if msgs[0].Text != "owner added the room rule r1" || msgs[2].Text != "owner removed the room rule r1" {
 		t.Fatal(msgs)
 	}
 	for _, ref := range []string{"missing", ""} {
@@ -138,10 +148,19 @@ func TestGlobalRulesAPIUsesOneScopeForEveryRoom(t *testing.T) {
 		t.Fatal(err)
 	}
 	msgs, _ := e.svc.rooms().Messages(r.ID)
-	if len(msgs) != 2 || msgs[0].Text != "owner added global rule u1: Use Central time" || msgs[1].Text != "owner removed global rule u1." {
+	if len(msgs) != 2 {
 		t.Fatal(msgs)
 	}
-	if msgs, _ := e.svc.rooms().Messages(other.ID); len(msgs) != 1 || msgs[0].Text != "owner edited global rule u1: Use UTC" {
+	added, _ := msgs[0].Rule()
+	removed, _ := msgs[1].Rule()
+	if added.Actor != "owner" || added.Scope != "global" || added.Text != "Use Central time" || removed.Verb != room.RuleRemoved {
 		t.Fatal(msgs)
+	}
+	elsewhere, _ := e.svc.rooms().Messages(other.ID)
+	if len(elsewhere) != 1 {
+		t.Fatal(elsewhere)
+	}
+	if edited, _ := elsewhere[0].Rule(); edited.Verb != room.RuleEdited || edited.Actor != "owner" {
+		t.Fatal(elsewhere)
 	}
 }

@@ -96,7 +96,7 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 			if err != nil {
 				return err
 			}
-			in.Detail = issueDetail(*i, post.Text)
+			in.Detail = issueDetail(*i, issueText(post))
 			setter := "owner"
 			if by != r.Name {
 				members, err := s.sessions().ListSnapshot(false)
@@ -127,6 +127,7 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 						return fmt.Errorf("goal holder must belong to this room")
 					}
 					in.Holders = append(in.Holders, m.ID)
+					i.Assignee = m.Address()
 				}
 				if err = s.validGoalHolders(r.ID, in); err != nil {
 					return err
@@ -177,8 +178,17 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 	})
 }
 
-func issueDetail(i room.Issue, text string) string {
-	detail := fmt.Sprintf("Local issue %s\n\n%s", i.Label(), text)
+// issueText is the issue's own body: the note it was filed with, without the
+// event's one-line summary. An issue filed before the typed events still
+// carries its note in the post text.
+func issueText(msg room.Message) string {
+	if ev, ok := msg.Issue(); ok && ev.Detail != "" {
+		return ev.Detail
+	}
+	return msg.Text
+}
+
+func issueDetail(i room.Issue, text string) string {	detail := fmt.Sprintf("Local issue %s\n\n%s", i.Label(), text)
 	if i.File != "" {
 		detail += "\n\nLocation: " + i.File
 		if i.Line > 0 {

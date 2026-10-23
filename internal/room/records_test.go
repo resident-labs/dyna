@@ -106,7 +106,7 @@ func TestDeleteRemovesTheRoomsRows(t *testing.T) {
 	if _, _, err := s.SetSeat(context.Background(), rec.ID, Seat{External: true}, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.FileIssue(rec.ID, "a smell", "", "x.go", 1, "alpha:a"); err != nil {
+	if _, err := s.FileIssue(rec.ID, IssueInput{Title: "a smell", Note: "", File: "x.go", Line: 1, Filer: "alpha:a"}); err != nil {
 		t.Fatal(err)
 	}
 	post, err := s.Post(rec.ID, PostInput{From: "alpha:a", To: []string{"alpha"}, Text: "pinned"})

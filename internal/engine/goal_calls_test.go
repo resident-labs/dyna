@@ -109,7 +109,8 @@ func TestGoalWritesRecordCaller(t *testing.T) {
 			if tc.want == id {
 				who = rec.Name + ":helper"
 			}
-			if messages[len(messages)-1].From != who {
+			removal, ok := messages[len(messages)-1].Rule()
+			if messages[len(messages)-1].From != room.EngineSender || !ok || removal.Actor != who {
 				t.Fatalf("removal notice = %+v", messages[len(messages)-1])
 			}
 			saved, err := svc.Goal(rec.ID, g.ID)
