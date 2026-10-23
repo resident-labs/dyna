@@ -36,3 +36,38 @@ test('inline rules preserve composition, restore focus, and keep failed edits op
   await rm(ui.dir, { recursive: true, force: true })
  }
 })
+
+test('a delayed saved-rule refresh does not take focus from a newer edit or another control', async () => {
+ for (const scenario of ['new edit', 'outside control']) {
+ const dom = installDom(); globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
+ const ui = await importBundle(code, '../rooms/Rules')
+ globalThis.saveRule = async () => {}
+ let resolveRefresh, enteredRefresh
+ const started = new Promise(resolve => { enteredRefresh = resolve })
+ const refresh = new Promise(resolve => { resolveRefresh = resolve })
+ const app = ui.mount(ui.default, { target: document.getElementById('app'), props: { roomId: 'global', view: {
+  room: { rules: [{ id: 'r1', text: 'First rule', setter: 'owner' }, { id: 'r2', text: 'Second rule', setter: 'owner' }] }, global: { rules: [] },
+ }, onchanged: () => { enteredRefresh(); return refresh } } })
+ const settle = async () => { await Promise.resolve(); ui.flushSync(); await Promise.resolve(); ui.flushSync() }
+ try {
+  ui.flushSync(); document.getElementById('rule-control-r1').click(); await settle()
+  document.getElementById('rule-edit-r1').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+  await started; ui.flushSync()
+  let target
+  if (scenario === 'new edit') {
+   document.getElementById('rule-control-r2').click(); await settle()
+   target = document.getElementById('rule-edit-r2')
+   target.value = 'Keep this draft'; target.dispatchEvent(new Event('input', { bubbles: true })); ui.flushSync()
+  } else {
+   target = document.querySelector('[aria-label="Rule text"]'); target.focus()
+  }
+  resolveRefresh(); await settle(); await settle()
+  assert.equal(document.activeElement, target, scenario)
+  if (scenario === 'new edit') assert.equal(target.value, 'Keep this draft')
+ } finally {
+  await ui.unmount(app); dom.window.close()
+  for (const name of [...domNames, 'HTMLMediaElement', 'saveRule']) Reflect.deleteProperty(globalThis, name)
+  await rm(ui.dir, { recursive: true, force: true })
+ }
+ }
+})
