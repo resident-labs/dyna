@@ -356,9 +356,6 @@ type MergeEvent struct {
 	// Detail is the evidence the agent reads: CI logs, a root report, or the
 	// child URLs a rollback could not restore.
 	Detail string `json:"detail,omitempty"`
-	// Retries counts the trial rebuilds the steward recorded. Zero means none,
-	// because the steward keeps no other retry counter.
-	Retries int `json:"retries,omitempty"`
 }
 
 func (MergeEvent) eventFamily() EventFamily { return FamilyMerge }

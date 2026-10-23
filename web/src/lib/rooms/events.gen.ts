@@ -64,7 +64,6 @@ export interface MergeEvent {
   label?: string
   key?: string
   detail?: string
-  retries?: number
 }
 
 // MergeDecisionEvent is the payload of the merge/decision events.
@@ -416,8 +415,7 @@ export function isMergeEvent(v: unknown): v is MergeEvent {
     (v.summary === undefined || typeof v.summary === "string") &&
     (v.label === undefined || typeof v.label === "string") &&
     (v.key === undefined || typeof v.key === "string") &&
-    (v.detail === undefined || typeof v.detail === "string") &&
-    (v.retries === undefined || Number.isInteger(v.retries))
+    (v.detail === undefined || typeof v.detail === "string")
 }
 
 export function isMergeDecisionEvent(v: unknown): v is MergeDecisionEvent {

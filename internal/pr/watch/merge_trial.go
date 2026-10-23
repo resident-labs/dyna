@@ -356,7 +356,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		}
 	}
 	if b.Phase == "awaiting-root" || ((b.Phase == "failed" || b.Phase == "stacking") && !b.Bisect) {
-		return s.stopMergeBatch(ctx, repo, *r, b)
+		return s.stopMergeBatch(ctx, repo, *r, b, nil)
 	}
 	// The access and pause checks also apply to a resumed publishing attempt.
 	for _, change := range b.Changes {
@@ -423,7 +423,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		if ci.Status == "failed" {
 			b.Phase, b.Reason, b.Logs = "failed", "batch trial failed; waiting for root", ci.Logs
 			s.noteMergeHistory(st, repo, b, "trial", "failed", b.Head, ci.Logs)
-			return s.stopMergeBatch(ctx, repo, *r, b)
+			return s.stopMergeBatch(ctx, repo, *r, b, mergeChecksOf(ci))
 		}
 		if ci.Status != "passed" {
 			if b.Reason != ci.Reason {
@@ -481,7 +481,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 					b.Phase, b.Reason, b.Logs = "failed", "batch trial failed; waiting for root", logs
 				}
 				if !b.Bisect {
-					return s.stopMergeBatch(ctx, repo, *r, b)
+					return s.stopMergeBatch(ctx, repo, *r, b, mergeChecksOf(ci))
 				}
 				return s.saveMergeTrial(repo, b)
 			}
