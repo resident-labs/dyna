@@ -1,8 +1,8 @@
 // The app's one Voice call. It lives outside every view, so the call goes on
 // while the owner moves between rooms and views.
 import { api } from '../../api.ts'
-import { openAudio } from './audio.js'
-import { createCall } from './call.js'
+import { openAudio } from './audio.ts'
+import { createCall } from './call.ts'
 import { createCallRequests } from './callRequests.ts'
 import type { SettingItem } from '../api/settings.ts'
 

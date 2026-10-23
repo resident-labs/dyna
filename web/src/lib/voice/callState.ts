@@ -1,4 +1,4 @@
-// The Voice call's state, as a plain reducer over app events. wire.js turns
+// The Voice call's state, as a plain reducer over app events. wire.ts turns
 // gateway messages into these events; the controller adds its own (start,
 // started, closed, hangup and the controls). The view only reads.
 //
@@ -8,30 +8,95 @@
 // resumable is a call the engine still runs after a page load: Rejoin
 // starts it here (starting), End hangs it up (ending → idle).
 
-export const initial = Object.freeze({
+// Phase is where the call is in its life.
+export type Phase = 'idle' | 'starting' | 'connecting' | 'live' | 'ending' | 'error' | 'resumable'
+
+// VoiceTool is one tool Voice called during the call, by its place in time.
+export interface VoiceTool {
+  id: string
+  name: string
+  args: string
+  state: string
+  ts: number
+}
+
+// SwitchTo is the room the owner asked to call from instead.
+export interface SwitchTo {
+  roomId: string
+  room: string
+}
+
+export interface CallState {
+  phase: Phase
+  activity: string // listening, thinking, speaking or idle, while live
+  roomId: string
+  room: string
+  startedAt: number // unix ms, from the engine: the call's posts come after it
+  connected: boolean // Voice has answered at least once in this call
+  error: string
+  busyRoom: string // the room whose call blocked a start
+  muted: boolean
+  deafened: boolean
+  pushToTalk: boolean
+  talking: boolean // push to talk is held
+  holdMuted: boolean // the phone bubble is held, and the mic was muted before
+  partial: string // the owner's words as they are heard
+  available: boolean // VoiceStatus.available: voice is set up
+  unspoken: string[] // post IDs the engine never got Voice to say
+  tools: VoiceTool[] // Voice's tool calls in this call
+  switchTo: SwitchTo | null // the owner asked to call from another room
+}
+
+// CallEvent is one change to the call: an app event from wire.ts, or one the
+// controller raises itself.
+export type CallEvent =
+  | { type: 'start'; roomId: string; room: string }
+  | { type: 'status'; available: boolean; live?: boolean; roomId?: string; room?: string; startedAt?: number }
+  | { type: 'askSwitch'; roomId: string; room: string }
+  | { type: 'cancelSwitch' }
+  | { type: 'started'; startedAt?: number }
+  | { type: 'startFailed'; error: string; busyRoom?: string }
+  | { type: 'voiceReady' }
+  | { type: 'voiceLost'; message?: string }
+  | { type: 'activity'; value: string }
+  | { type: 'partial'; text: string }
+  | { type: 'serverError'; code?: string; message: string }
+  | { type: 'closed'; occupied?: boolean; reason?: string }
+  | { type: 'hangup' }
+  | { type: 'ended' }
+  | { type: 'unspoken'; post: string }
+  | { type: 'tool'; id: string; name: string; args: string; state: string; ts: number }
+  | { type: 'dismiss' }
+  | { type: 'toggleMute' }
+  | { type: 'toggleDeafen' }
+  | { type: 'hold'; on: boolean }
+  | { type: 'pushToTalk'; on: boolean }
+  | { type: 'talk'; on: boolean }
+
+export const initial: CallState = Object.freeze({
   phase: 'idle',
-  activity: 'idle', // listening, thinking, speaking or idle, while live
+  activity: 'idle',
   roomId: '',
   room: '',
-  startedAt: 0, // unix ms, from the engine: the call's posts come after it
-  connected: false, // Voice has answered at least once in this call
+  startedAt: 0,
+  connected: false,
   error: '',
-  busyRoom: '', // the room whose call blocked a start
+  busyRoom: '',
   muted: false,
   deafened: false,
   pushToTalk: false,
-  talking: false, // push to talk is held
-  holdMuted: false, // the phone bubble is held, and the mic was muted before
-  partial: '', // the owner's words as they are heard
-  available: false, // VoiceStatus.available: voice is set up
-  unspoken: [], // post IDs the engine never got Voice to say
-  tools: [], // Voice's tool calls in this call: {id, name, args, state, ts}
-  switchTo: null, // {roomId, room}: the owner asked to call from another room
+  talking: false,
+  holdMuted: false,
+  partial: '',
+  available: false,
+  unspoken: [],
+  tools: [],
+  switchTo: null,
 })
 
-const inCall = (s) => ['starting', 'connecting', 'live'].includes(s.phase)
+const inCall = (s: CallState): boolean => ['starting', 'connecting', 'live'].includes(s.phase)
 
-export function reduce(s, e) {
+export function reduce(s: CallState, e: CallEvent): CallState {
   switch (e.type) {
     case 'start':
       if (inCall(s) || s.phase === 'ending') return s
@@ -40,7 +105,7 @@ export function reduce(s, e) {
       // A page load finds a call the engine still runs (a reload): offer to
       // resume it. Rejoin is the owner's choice; a load never starts audio.
       const next = s.available === e.available ? s : { ...s, available: e.available }
-      if (s.phase === 'idle' && e.live) return { ...next, phase: 'resumable', roomId: e.roomId, room: e.room, startedAt: e.startedAt || 0 }
+      if (s.phase === 'idle' && e.live) return { ...next, phase: 'resumable', roomId: e.roomId ?? '', room: e.room ?? '', startedAt: e.startedAt || 0 }
       if (s.phase === 'resumable' && !e.live) return { ...next, phase: 'idle' }
       return next
     }
@@ -80,7 +145,8 @@ export function reduce(s, e) {
       if (!inCall(s)) return s
       const i = s.tools.findIndex((t) => t.id === e.id)
       if (i < 0) return { ...s, tools: [...s.tools, { id: e.id, name: e.name, args: e.args, state: e.state, ts: e.ts }] }
-      return { ...s, tools: s.tools.with(i, { ...s.tools[i], state: e.state }) }
+      const old = s.tools[i]
+      return old ? { ...s, tools: s.tools.with(i, { ...old, state: e.state }) } : s
     }
     case 'dismiss':
       return s.phase === 'error' ? { ...s, phase: 'idle', error: '', busyRoom: '' } : s
@@ -114,11 +180,11 @@ export const DROPPED = 'The call dropped.'
 const occupied = 'Voice is open in another window or app. Close it there, then call again.'
 
 // capturing says whether the microphone's audio goes to Voice now.
-export const capturing = (s) => s.phase === 'live' && !s.muted && (!s.pushToTalk || s.talking)
+export const capturing = (s: CallState): boolean => s.phase === 'live' && !s.muted && (!s.pushToTalk || s.talking)
 
 // statusLine is the one line under Voice's name. During a call it is
 // Listening, Speaking, Thinking or Muted.
-export function statusLine(s) {
+export function statusLine(s: CallState): string {
   switch (s.phase) {
     case 'resumable': return 'Call in progress'
     case 'starting': return 'Starting Voice…'
@@ -134,13 +200,32 @@ export function statusLine(s) {
   return ''
 }
 
+// Offer is the room header's call button: no button, or what it shows.
+export type Offer = '' | 'live' | 'calling' | 'call'
+
 // offerCall decides the room header's call button: 'live' or 'calling' for
 // this room's call, 'call' when voice is set up (VoiceStatus.available) or a
 // call runs elsewhere, else nothing, so the header stays as it was.
-export function offerCall(s, roomId) {
+export function offerCall(s: CallState, roomId: string): Offer {
   if (s.roomId === roomId && s.phase === 'live') return 'live'
   if (s.roomId === roomId && ['starting', 'connecting'].includes(s.phase)) return 'calling'
   return s.available || inCall(s) ? 'call' : ''
+}
+
+// TalkTarget is what a key, blur or visibility event targets: the element
+// with focus, or the page.
+export interface TalkTarget {
+  hidden?: boolean
+  isContentEditable?: boolean
+  closest?: (selector: string) => unknown
+}
+
+// TalkKey is the part of a key, blur or visibility event push to talk reads.
+export interface TalkKey {
+  type: string
+  code?: string
+  repeat?: boolean
+  target?: TalkTarget | null
 }
 
 // spaceTalk reads a key, blur or visibility event for push to talk: true
@@ -149,7 +234,7 @@ export function offerCall(s, roomId) {
 // editable text), so typing a space never opens the microphone. Any Space
 // release stops talking, wherever focus went, and so does leaving the
 // window or hiding the page, which lose the release.
-export function spaceTalk(e, s) {
+export function spaceTalk(e: TalkKey, s: CallState): boolean | null {
   if (!s.pushToTalk || s.phase !== 'live') return null
   if (e.type === 'blur' || (e.type === 'visibilitychange' && e.target?.hidden)) return s.talking ? false : null
   if (e.code !== 'Space') return null

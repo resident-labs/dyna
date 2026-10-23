@@ -2,7 +2,7 @@
   // Root's call request in the room feed. It reads like an open question:
   // one quiet line that ends in the request's state. While it rings, the
   // row offers Accept and Decline.
-  import { icons } from './icons.js'
+  import { icons } from './icons.ts'
   import type { CallRequest } from './callRequests.ts'
 
   let { request, onaccept, ondecline }: { request: CallRequest; onaccept: (r: CallRequest) => void; ondecline: (r: CallRequest) => void } = $props()

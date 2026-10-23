@@ -6,8 +6,8 @@
   import type { Attachment, Post } from '../api/room.ts'
   import { extOf } from '../files/attach.ts'
   import VisualPlaceholder from '../files/VisualPlaceholder.svelte'
-  import { NAMES, shareKind, shareTitle, shareWhat } from './conversation.js'
-  import { icons } from './icons.js'
+  import { NAMES, shareKind, shareTitle, shareWhat } from './conversation.ts'
+  import { icons } from './icons.ts'
 
   // Share is one file shared in the call, as sharedItems lists it: its key,
   // its post's ID and time, who shared it, and the attachment.

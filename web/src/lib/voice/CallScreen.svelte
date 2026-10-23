@@ -3,15 +3,15 @@
   // conversation in a bottom sheet, and a bubble while minimized. It shows the
   // same call state as the floating widget, with touch-sized controls.
   import { voiceCall } from './voiceCall.ts'
-  import { micControl, micModes, orb } from './phone.js'
+  import { micControl, micModes, orb } from './phone.ts'
   import VoiceBubble from './VoiceBubble.svelte'
   import Menu from '../ui/Menu.svelte'
-  import { DROPPED } from './callState.js'
+  import { DROPPED } from './callState.ts'
   import CallThread from './CallThread.svelte'
   import SharedBanner from './SharedBanner.svelte'
-  import { NAMES, shareLine } from './conversation.js'
+  import { NAMES, shareLine } from './conversation.ts'
   import QuestionCard from './QuestionCard.svelte'
-  import { icons } from './icons.js'
+  import { icons } from './icons.ts'
   import { dialog } from '../ui/dialog.ts'
 
   // shared: the unseen shared items, oldest first; the banner shows the newest.
