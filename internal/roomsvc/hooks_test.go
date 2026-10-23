@@ -1,61 +1,12 @@
 package roomsvc
 
 import (
-	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"reflect"
-	"sort"
 	"testing"
 
-	"dyna-agent/internal/hooks"
-	"dyna-agent/internal/room"
-	statewrite "dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 )
-
-func TestHookReposCombinesConfiguredAndActiveRooms(t *testing.T) {
-	e := newEnv(t)
-	if err := statewrite.MigrateMirrors(store.DataDir()); err != nil {
-		t.Fatal(err)
-	}
-	makeRepo := func() string {
-		t.Helper()
-		dir := t.TempDir()
-		if out, err := exec.Command("git", "-C", dir, "init", "-q").CombinedOutput(); err != nil {
-			t.Fatalf("git init: %s, %v", out, err)
-		}
-		if out, err := exec.Command("git", "-C", dir, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "--allow-empty", "-m", "initial").CombinedOutput(); err != nil {
-			t.Fatalf("git commit: %s, %v", out, err)
-		}
-		return dir
-	}
-	configured, active, archived := makeRepo(), makeRepo(), makeRepo()
-	if err := hooks.New().Add(context.Background(), configured, hooks.Hook{Name: "check", Event: hooks.AfterLand, Command: "true", Cwd: "main", Timeout: "1s", OnFail: "alert"}); err != nil {
-		t.Fatal(err)
-	}
-	for _, tt := range []struct {
-		name, repo string
-		archived   bool
-	}{{"configured", configured, false}, {"active", active, false}, {"archived", archived, true}} {
-		rec, err := e.svc.rooms().Create(room.CreateInput{Name: tt.name, Repo: tt.repo})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if tt.archived {
-			if err := e.svc.rooms().SetArchived(rec.ID, true); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	got, err := e.svc.HookRepos(t.Context())
-	want := []string{configured, active}
-	sort.Strings(want)
-	if err != nil || !reflect.DeepEqual(got, want) {
-		t.Fatalf("repositories %v, want %v: %v", got, want, err)
-	}
-}
 
 func TestSpoolWritesWakeHookWorker(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())

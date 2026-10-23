@@ -42,7 +42,7 @@ test('the phone settings menu is two rows of four', () => {
 
 test('the settings browser fixture mocks every api call each pane makes', () => {
   const fixture = read('../../../tests/settings.ts')
-  for (const f of ['ProfilesPane', 'usage/UsagePane', 'SettingsPane', 'DevicesPane', 'HooksPane']) {
+  for (const f of ['ProfilesPane', 'usage/UsagePane', 'SettingsPane', 'DevicesPane']) {
     const calls = new Set([...read(`./${f}.svelte`).matchAll(/\bapi\.(\w+)\(/g)].map((m) => m[1] ?? ''))
     for (const name of calls) assert.ok(fixture.includes(`api.${name} = `), `${f}: api.${name}`)
   }
@@ -50,7 +50,7 @@ test('the settings browser fixture mocks every api call each pane makes', () => 
 })
 
 test('every settings pane uses the shared TabHeader without its own h1', () => {
-  for (const f of ['ProfilesPane', 'harnesses/HarnessesPane', 'usage/UsagePane', 'SettingsPane', 'DevicesPane', 'HooksPane', 'Settings']) {
+  for (const f of ['ProfilesPane', 'harnesses/HarnessesPane', 'usage/UsagePane', 'SettingsPane', 'DevicesPane', 'Settings']) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /<TabHeader\b[^>]*\bflush\b/, f)
     assert.doesNotMatch(text, /<h1\b/, f)

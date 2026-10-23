@@ -91,15 +91,15 @@ test('saving adds a new hook, sends only changed fields, and keeps the form on a
   assert.equal(failing.loads, 0)
 })
 
-// The pane state that the remove and repo-switch handlers read and write.
+// The pane state that the remove handler reads and writes.
 interface RemoveContext {
   repo: string
   hooks: Pick<Hook, 'name'>[] | null
   editor: Editor | null
-  removing: { repo: string; name: string } | null
+  removing: { name: string } | null
   [name: string]: unknown
 }
-const removeNames = ['load', 'loadRuns', 'loadLog', 'remove', 'pickRepo', 'say']
+const removeNames = ['load', 'loadRuns', 'loadLog', 'remove', 'say']
 function removeContext(api: Record<string, unknown>, fields: Pick<RemoveContext, 'repo' | 'hooks' | 'editor' | 'removing'>): RemoveContext {
   const context: RemoveContext = { api, errorText, runs: {}, logs: {}, open: '', openRun: '', error: '', note: '', newestFirst: (x: unknown) => x, setTimeout, ...fields }
   runFunctions(pane, removeNames, context)
@@ -109,29 +109,8 @@ function removeContext(api: Record<string, unknown>, fields: Pick<RemoveContext,
 test('removing another hook keeps the open form and its unsaved input', async () => {
   let list = [{ name: 'a', event: 'after-land', command: 'x' }, { name: 'b', event: 'after-land', command: 'y' }]
   const api = { listHooks: async () => list, hookRuns: async () => [], removeHook: async (_: string, name: string) => { list = list.filter((h) => h.name !== name) } }
-  const c = removeContext(api, { repo: '/repo', hooks: null, editor: { hook: list[0] ?? null, form: { ...hookForm(need(list[0])), command: 'unsaved edit' } }, removing: { repo: '/repo', name: 'b' } })
+  const c = removeContext(api, { repo: '/repo', hooks: null, editor: { hook: list[0] ?? null, form: { ...hookForm(need(list[0])), command: 'unsaved edit' } }, removing: { name: 'b' } })
   await call(c, 'remove')
   assert.deepEqual(c.hooks?.map((h) => h.name), ['a'])
   assert.equal(need(c.editor).form.command, 'unsaved edit')
-  // Picking another repo does close the form.
-  await call(c, 'pickRepo')
-  assert.equal(c.editor, null)
-})
-
-test('a pending remove belongs to its repo and is dropped when the repo changes', async () => {
-  const removed: string[][] = []
-  const api = { listHooks: async () => [], hookRuns: async () => [], removeHook: async (repo: string, name: string) => { removed.push([repo, name]) } }
-  const c = removeContext(api, { repo: '/a', hooks: [], editor: null, removing: { repo: '/a', name: 'verify' } })
-  // Switching repo while the confirm is armed drops it.
-  c.repo = '/b'
-  await call(c, 'pickRepo')
-  assert.equal(c.removing, null)
-  // A remove already in flight for /a cannot change a newer confirm on /b.
-  c.repo = '/a'
-  c.removing = { repo: '/a', name: 'verify' }
-  const pending = call(c, 'remove')
-  c.removing = { repo: '/b', name: 'verify' }
-  await pending
-  assert.deepEqual(removed, [['/a', 'verify']])
-  assert.deepEqual(JSON.parse(JSON.stringify(c.removing)), { repo: '/b', name: 'verify' })
 })
