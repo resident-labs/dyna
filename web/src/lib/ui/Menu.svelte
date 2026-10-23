@@ -1,29 +1,76 @@
 <script>
   // A small context menu drawn in the DOM, so the web client can reuse it.
   // items: [{ label, hint?, danger?, gap? (separator above), run }].
-  import { onMount, tick } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
 
   let { x = 0, y = 0, title = '', items = [], onclose } = $props()
 
   let box = $state()
+  let list = $state()
   let pick = $state(0)
   let pos = $state({ left: x, top: y })
 
-  // Keep the menu inside the window: flip it left or up near an edge.
-  onMount(async () => {
-    await tick()
+  // The visual viewport excludes the software keyboard and reflects zoom.
+  function place() {
+    if (!box) return
+    const viewport = window.visualViewport
+    const left = viewport?.offsetLeft ?? 0
+    const top = viewport?.offsetTop ?? 0
+    const width = viewport?.width ?? window.innerWidth
+    const height = viewport?.height ?? window.innerHeight
+    box.style.maxWidth = Math.max(0, Math.min(280, width - 16)) + 'px'
+    box.style.minWidth = Math.max(0, Math.min(208, width - 16)) + 'px'
+    box.style.maxHeight = Math.max(0, height - 16) + 'px'
     const r = box.getBoundingClientRect()
     pos = {
-      left: Math.max(8, Math.min(x, window.innerWidth - r.width - 8)),
-      top: Math.max(8, y + r.height > window.innerHeight - 8 ? y - r.height : y),
+      left: Math.max(left + 8, Math.min(x, left + width - r.width - 8)),
+      top: Math.max(top + 8, Math.min(y + r.height > top + height - 8 ? y - r.height : y, top + height - r.height - 8)),
     }
-    focusAt(0)
+  }
+  function reveal(item) {
+    if (!item || !list) return
+    const itemRect = item.getBoundingClientRect()
+    const listRect = list.getBoundingClientRect()
+    if (itemRect.top < listRect.top) list.scrollTop -= listRect.top - itemRect.top
+    else if (itemRect.bottom > listRect.bottom) list.scrollTop += itemRect.bottom - listRect.bottom
+  }
+  $effect(() => {
+    x; y; items; title; box
+    untrack(place)
+  })
+  onMount(() => {
+    let alive = true
+    const viewport = window.visualViewport
+    const resize = () => {
+      place()
+      reveal(box.querySelectorAll('[role=menuitem]')[pick])
+    }
+    window.addEventListener('resize', resize)
+    viewport?.addEventListener('resize', resize)
+    viewport?.addEventListener('scroll', resize)
+    tick().then(() => {
+      if (!alive) return
+      place()
+      focusAt(0)
+    })
+    return () => {
+      alive = false
+      window.removeEventListener('resize', resize)
+      viewport?.removeEventListener('resize', resize)
+      viewport?.removeEventListener('scroll', resize)
+    }
   })
 
   function focusAt(i, direction = 1) {
     let next = (i + items.length) % items.length
     for (let n = 0; n < items.length; n++, next = (next + direction + items.length) % items.length) {
-      if (!items[next].disabled) { pick = next; box.querySelectorAll('[role=menuitem]')[pick]?.focus(); return }
+      if (!items[next].disabled) {
+        pick = next
+        const item = box.querySelectorAll('[role=menuitem]')[pick]
+        item?.focus({ preventScroll: true })
+        reveal(item)
+        return
+      }
     }
   }
 
@@ -44,8 +91,9 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="catch" onclick={onclose} oncontextmenu={(e) => { e.preventDefault(); onclose() }}></div>
-<div class="menu" role="menu" aria-label={title} tabindex="-1" bind:this={box} style="left:{pos.left}px; top:{pos.top}px" onkeydown={keydown}>
+<div class="menu" role="menu" aria-label={title} tabindex="-1" bind:this={box} style:left={pos.left + 'px'} style:top={pos.top + 'px'} onkeydown={keydown}>
   {#if title}<div class="head">{title}</div>{/if}
+  <div class="items" bind:this={list}>
   {#each items as it, i}
     {#if it.gap}<div class="sep" role="separator"></div>{/if}
     <button role="menuitem" disabled={it.disabled} class:danger={it.danger} tabindex={i === pick ? 0 : -1} onfocus={() => (pick = i)} onmouseenter={() => focusAt(i)} onclick={() => choose(it)}>
@@ -53,6 +101,7 @@
       {#if it.hint}<span class="hint">{it.hint}</span>{/if}
     </button>
   {/each}
+  </div>
 </div>
 
 <style>
@@ -60,12 +109,15 @@
      from a sheet row shows on top of it; below Confirm (60), which Stop and
      Close open next. */
   button:disabled { opacity: .5; cursor: default; }
-  .catch { position: fixed; inset: 0; z-index: 57; }
+  .catch { position: fixed; inset: 0; z-index: 57; touch-action: none; }
   .menu {
     position: fixed;
     z-index: 58;
     min-width: 208px;
     max-width: 280px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     background: #121113;
     border: 1px solid var(--line-soft);
     border-radius: 8px;
@@ -73,7 +125,9 @@
     box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
     outline: none;
   }
+  .items { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
   .head {
+    flex: none;
     font-size: var(--t-sm);
     font-weight: 600;
     color: var(--muted);
