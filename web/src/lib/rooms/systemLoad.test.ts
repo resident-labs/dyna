@@ -36,11 +36,11 @@ test('before two samples the card shows a dash, not 0%', async (t) => {
   assert.doesNotMatch(body, /0%/)
 })
 
-test('Home polls the load only while mounted and passes the agent callback', () => {
-  const src = readFileSync(new URL('./Home.svelte', import.meta.url), 'utf8')
-  assert.match(src, /const stopLoad = pollLoad\(/)
-  assert.match(src, /return \(\) => \{[^}]*stopLoad\(\)/)
-  assert.match(src, /<SystemLoadCard \{load\} \{onagent\}/)
+test('the machine page polls the load only while it shows the local machine', () => {
+  const src = readFileSync(new URL('../machines/MachinePage.svelte', import.meta.url), 'utf8')
+  assert.match(src, /return pollLoad\(\(\) => api\.systemLoad\(\)/)
+  assert.match(src, /<SystemLoadCard title="Usage" \{load\} \{onagent\}/)
+  assert.match(src, /if \(!machine\?\.local\) return/, 'a remote machine has no sampler on this engine')
 })
 
 test('polling reads every 5 s and stops on unmount', async () => {
