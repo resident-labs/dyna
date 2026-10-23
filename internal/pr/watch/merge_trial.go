@@ -575,6 +575,12 @@ type trialCI struct {
 	Done   int
 	Total  int
 	Failed []string
+	// Runs counts the failed completed runs of a failed read. A run can fail
+	// without a named check, so the count is evidence of its own.
+	Runs int
+	// Cancelled reports a cancelled check or run. That CI never tested the
+	// commit, so its failure is an infrastructure cause, not a test failure.
+	Cancelled bool
 }
 
 // mergeTrialCI accepts only push evidence for the frozen trial branch and head.
@@ -608,7 +614,8 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 	if err != nil {
 		return trialCI{}, err
 	}
-	snap, err = s.withRegisteredCI(ctx, trialRecord, snap, EffectivePolicy(st, r))
+	policy := EffectivePolicy(st, r)
+	snap, err = s.withRegisteredCI(ctx, trialRecord, snap, policy)
 	if err != nil {
 		return trialCI{}, err
 	}
@@ -617,7 +624,13 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 			return trialCI{Status: "pending", Reason: snap.localCI.Reason}, nil
 		}
 		// The failed jobs of a hosted read are the evidence a failure records.
-		return withTrialEvidence(r, head, trialCI{Status: snap.localCI.Status, Logs: snap.localCI.Logs, Failed: snap.localCI.Jobs}), nil
+		return withTrialEvidence(r, head, trialCI{
+			Status:    snap.localCI.Status,
+			Logs:      snap.localCI.Logs,
+			Failed:    snap.localCI.Jobs,
+			Runs:      len(snap.localCI.Runs),
+			Cancelled: snap.ciCancelled(policy.RequiredChecks...),
+		}), nil
 	}
 	out := trialCI{Status: "pending"}
 	var failed []Run
@@ -652,6 +665,7 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 		out.Failed = nil
 	}
 	if out.Status == "failed" {
+		out.Runs, out.Cancelled = len(failed), snap.ciCancelled(policy.RequiredChecks...)
 		for _, run := range failed {
 			out.Logs += s.github(r.RoomID).Logs(ctx, refRecord(r), run) + "\n"
 		}
@@ -660,27 +674,34 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 	return out, nil
 }
 
-// withTrialEvidence makes every failed read name its cause, so a batch never
-// fails without a recorded reason. A failed check of a run that is still going,
-// and a cancelled run, give no run log; the failed check names are then the
-// evidence. A read that names nothing says so, and calls it an infrastructure
-// cause rather than a test failure.
+// withTrialEvidence makes every failed read name what it observed, so a batch
+// never fails without a cause. A read that observed nothing keeps an unknown
+// cause instead of guessing one: a failed run without a named check is a test
+// failure, and only an observed cancellation is an infrastructure cause.
 func withTrialEvidence(r Record, head string, ci trialCI) trialCI {
 	if ci.Status != "failed" {
 		return ci
 	}
 	if strings.TrimSpace(ci.Logs) == "" {
 		where := fmt.Sprintf("https://%s/%s/commit/%s/checks", r.Host, r.Repo, head)
-		if len(ci.Failed) > 0 {
+		switch {
+		case len(ci.Failed) > 0:
 			ci.Logs = fmt.Sprintf("Failed checks at %s: %s\n", where, strings.Join(ci.Failed, ", "))
-		} else {
-			ci.Logs = fmt.Sprintf("CI for %s failed at %s with no failed check and no failed run: the checks were cancelled or never proved this commit.\n", head, where)
+		case ci.Runs > 0:
+			ci.Logs = fmt.Sprintf("%d failed CI run(s) at %s, with no run log.\n", ci.Runs, where)
+		case ci.Cancelled:
+			ci.Logs = fmt.Sprintf("CI for %s was cancelled at %s before it tested the commit.\n", head, where)
+		default:
+			ci.Logs = fmt.Sprintf("CI for %s failed at %s with no failed check, failed run or cancellation.\n", head, where)
 		}
 	}
-	if len(ci.Failed) > 0 {
+	switch {
+	case len(ci.Failed) > 0:
 		ci.Reason = "checks failed: " + strings.Join(ci.Failed, ", ")
-	} else {
-		ci.Reason = "CI gave no failed check or run, so this is an infrastructure cause (cancelled or unproven), not a test failure"
+	case ci.Runs > 0:
+		ci.Reason = "a CI run failed without a named check; read its logs for the failing test"
+	case ci.Cancelled:
+		ci.Reason = "CI was cancelled before it tested the commit, so this is an infrastructure cause, not a test failure"
 	}
 	return ci
 }

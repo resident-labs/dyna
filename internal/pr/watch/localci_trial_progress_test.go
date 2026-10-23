@@ -189,18 +189,18 @@ func TestTrialCINamesAFailedCheckWithoutARunLog(t *testing.T) {
 				endpoint = arg
 			}
 		}
-		var body any = map[string]any{}
+		var raw []byte
+		var err error
 		switch {
 		case strings.Contains(endpoint, "/check-runs?"):
-			body = map[string]any{"check_runs": []Check{check}}
+			raw, err = json.Marshal(trialChecks{Checks: []Check{check}})
 		case strings.Contains(endpoint, "/statuses?"):
-			body = []Status{}
+			raw, err = json.Marshal([]Status{})
 		case strings.Contains(endpoint, "/actions/runs?"):
-			body = map[string]any{"workflow_runs": []Run{run}}
+			raw, err = json.Marshal(trialRuns{Runs: []Run{run}})
 		default:
 			return fmt.Errorf("unexpected endpoint %s", endpoint)
 		}
-		raw, err := json.Marshal(body)
 		if err != nil {
 			return err
 		}
@@ -220,4 +220,9 @@ func TestTrialCINamesAFailedCheckWithoutARunLog(t *testing.T) {
 	if !strings.Contains(got.Logs, "frontend-check") || !strings.Contains(got.Reason, "frontend-check") {
 		t.Fatalf("evidence logs=%q reason=%q", got.Logs, got.Reason)
 	}
+}
+
+// trialRuns is the GitHub workflow-runs response of the trial head.
+type trialRuns struct {
+	Runs []Run `json:"workflow_runs"`
 }

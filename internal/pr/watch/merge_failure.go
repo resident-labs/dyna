@@ -18,6 +18,9 @@ func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b s
 	if b.Phase == "awaiting-root" && b.Notified {
 		return nil
 	}
+	if ci.Status == "failed" {
+		b.FailReason, b.FailChecks = ci.Reason, append([]string(nil), ci.Failed...)
+	}
 	b.Phase, b.Reason = "awaiting-root", mergeBatchFailedReason
 	if err := s.Store.update(func(st *State) error {
 		if current := st.MergeTrials[repo]; current == nil || trialIdentity(*current) != trialIdentity(b) {
@@ -64,9 +67,14 @@ func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b s
 		anchor.Head = b.Head
 		ev := mergeTrialEvent(st, b, room.MergeFailed)
 		ev.Repo, ev.Checks = mergeRepo(anchor), mergeChecksOf(ci)
+		// A retry after a delivery error has no CI read of its own, so the typed
+		// facts saved with the pause keep the cause and the failed checks.
+		if ev.Checks == nil && len(b.FailChecks) > 0 {
+			ev.Checks = &room.MergeCheckSummary{Failed: b.FailChecks}
+		}
 		ev.Reason = mergeBatchFailedReason
-		if ci.Status == "failed" {
-			ev.Reason = ci.Reason
+		if b.FailReason != "" {
+			ev.Reason = b.FailReason
 		}
 		if err := s.postMergeNotice(ctx, anchor, "merge-batch-failed/"+trialIdentity(b), Notice{NeedsRoot: true, Kind: "ci", Merge: &ev, Text: b.RootReport}); err != nil {
 			return err

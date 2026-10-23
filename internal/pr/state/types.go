@@ -299,6 +299,11 @@ type MergeTrial struct {
 		Session string `json:"session,omitempty"`
 	} `json:"review,omitempty"`
 
+	// FailReason and FailChecks are the typed facts of the failure that paused
+	// this batch. They are saved with the pause, so a delivery retry, a restart
+	// or a fresh tick posts the same cause and failed checks to root.
+	FailReason    string             `json:"failReason,omitempty"`
+	FailChecks    []string           `json:"failChecks,omitempty"`
 	RootReport    string             `json:"rootReport,omitempty"`
 	Notified      bool               `json:"notified,omitempty"`
 	Bisect        bool               `json:"bisect,omitempty"`
