@@ -5,6 +5,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"dyna-agent/internal/localci"
 )
 
 // shortHeadLength is how much of a head SHA names the commit to a reader. The
@@ -85,13 +87,13 @@ func (r *registeredCIRun) runningCI() RunningCI {
 	return RunningCI{
 		Machine: r.node, Slots: r.slots, Repo: r.repo, Number: r.number,
 		Trial: r.trial, Head: head, Title: r.title, URL: r.url,
-		Suites: slices.Clone(r.suites), Started: r.started,
+		Suites: localci.SuiteNames(r.suites), Started: r.started,
 	}
 }
 
 // setRunningCISuites records the suites a run started, so a reader can name
 // them while the run is in flight.
-func (s *Service) setRunningCISuites(key string, run *registeredCIRun, suites []string) {
+func (s *Service) setRunningCISuites(key string, run *registeredCIRun, suites []localci.Suite) {
 	runs := s.nodeRuns()
 	runs.Lock()
 	if runs.runs[key] == run {

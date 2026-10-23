@@ -142,7 +142,7 @@ func localCIStatus(result localci.Result, repo, head string) (CIVerdict, string,
 	}
 	logs := result.Error
 	for _, suite := range result.Suites {
-		logs += "\n" + suite.Suite + " (" + string(suite.Status) + "): " + suite.LogTail + "\n" + suite.Error + "\n" + strings.Join(suite.Failures, "\n")
+		logs += "\n" + string(suite.Suite) + " (" + string(suite.Status) + "): " + suite.LogTail + "\n" + suite.Error + "\n" + strings.Join(suite.Failures, "\n")
 	}
 	switch result.Status {
 	case localci.OutcomePassed:
@@ -231,8 +231,8 @@ func returnedLocalFailure(logs string) (string, string) {
 	excerpt := logs
 	for _, name := range localci.DefaultSuites() {
 		for _, status := range []string{"failed", "error"} {
-			if at := strings.Index(logs, name+" ("+status+"):"); at >= 0 {
-				suite = name
+			if at := strings.Index(logs, string(name)+" ("+status+"):"); at >= 0 {
+				suite = string(name)
 				excerpt = logs[at:]
 				break
 			}
