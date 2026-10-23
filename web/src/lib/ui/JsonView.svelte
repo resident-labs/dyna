@@ -4,9 +4,21 @@
   // as paragraphs. A closed record renders nothing inside it, so large
   // results stay fast. See readable.js.
   import JsonView from './JsonView.svelte'
+  import Segmented from './Segmented.svelte'
   import { fieldLabel, kindOf, recordTitle, recordLine, linkOf, paragraphs } from './readable.js'
   let { value, depth = 0 } = $props()
   const LONG = 4000
+  let mode = $state('readable')
+  let inspectable = $derived(depth === 0 && value !== null && typeof value === 'object')
+  let raw = $derived.by(() => {
+    if (!inspectable || mode !== 'json') return null
+    try {
+      const text = JSON.stringify(value, null, 2)
+      return typeof text === 'string' ? { text } : { error: 'Could not show JSON.' }
+    } catch {
+      return { error: 'Could not show JSON.' }
+    }
+  })
   let kind = $derived(kindOf(value))
   let opened = $state({})
   let more = $state(false)
@@ -21,6 +33,17 @@
   {#if s.length > LONG && !more}<button type="button" class="more" onclick={() => (more = true)}>Show all {s.length.toLocaleString()} characters</button>{/if}
 {/snippet}
 
+{#if inspectable}
+  <div class="view-mode"><Segmented options={[['readable', 'Readable'], ['json', 'JSON']]} value={mode} label="Result view" small onchange={(value) => mode = value} /></div>
+  <div hidden={mode !== 'readable'}>{@render readable()}</div>
+  {#if mode === 'json'}
+    {#if raw?.error}<p class="raw-error" role="status">{raw.error}</p>{:else}<pre class="raw">{raw?.text}</pre>{/if}
+  {/if}
+{:else}
+  {@render readable()}
+{/if}
+
+{#snippet readable()}
 {#if depth > 6}
   <code class="deep">{JSON.stringify(value)}</code>
 {:else if kind === 'empty'}
@@ -54,7 +77,13 @@
   </dl>
 {/if}
 
+{/snippet}
+
 <style>
+  .view-mode { margin-bottom: var(--s2); }
+  .raw { margin: 0; max-height: min(60vh, 560px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--mono); font-size: var(--t-sm); line-height: 1.5; padding: var(--s3); border-radius: var(--r-sm); background: var(--side); color: var(--ink-2); }
+  .raw-error { color: var(--coral); font-size: var(--t-sm); }
+
   .kv { display: grid; grid-template-columns: minmax(110px, 180px) 1fr; gap: 8px 16px; margin: 0; }
   .kv dt { color: var(--muted); font-size: var(--t-sm); padding-top: 2px; overflow-wrap: anywhere; }
   .kv dd { margin: 0; min-width: 0; }
