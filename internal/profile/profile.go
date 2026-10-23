@@ -51,9 +51,7 @@ func (p Profile) EffectiveOutput() *workeroutput.Declaration {
 
 // Profile describes one registered worker.
 type Profile struct {
-	Name string `json:"name"`
-	// TODO: legacy/shim remove later — retains the earlier per-profile account field while all profiles migrate to one active account per harness.
-	RuntimeAccount    string   `json:"runtimeAccount,omitempty"`
+	Name              string   `json:"name"`
 	RuntimeVersion    string   `json:"runtimeVersion,omitempty"`
 	RuntimeSkillPaths []string `json:"-"`
 	// RuntimeRepo is the repository identity of the turn, set by the runner.

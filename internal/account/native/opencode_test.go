@@ -327,3 +327,43 @@ func TestOpenCodeReferenceExpiry(t *testing.T) {
 		t.Fatal("OAuth login reported as static key")
 	}
 }
+
+func TestOpenCodeUsageRequiresNativeAuthExport(t *testing.T) {
+	for _, tc := range []struct {
+		name, script string
+		want         error
+	}{
+		{"command failure", "echo private-error >&2; exit 1", errors.New("OpenCode account command failed.")},
+		{"malformed output", "echo malformed", ErrSchema},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := openCodeTestManager(t)
+			s, err := m.scope()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(s.Executable, []byte("#!/bin/sh\n"+tc.script+"\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(s.Database), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(s.Database, nil, 0600); err != nil {
+				t.Fatal(err)
+			}
+			bin := t.TempDir()
+			marker := filepath.Join(bin, "invoked")
+			if err := os.WriteFile(filepath.Join(bin, "sqlite3"), []byte("#!/bin/sh\necho invoked > '"+marker+"'\necho '[]'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+			got, err := m.usageCredentials(context.Background(), s, "opencode-go")
+			if got != nil || err == nil || err.Error() != tc.want.Error() {
+				t.Errorf("credentials = %v, error = %v; want nil and %v", got, err, tc.want)
+			}
+			if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+				t.Error("sqlite3 fallback ran")
+			}
+		})
+	}
+}

@@ -18,7 +18,7 @@ func TestFullProfileOperationsPreserveFields(t *testing.T) {
 	isolate(t)
 	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Root})
 	p := profile.Profile{
-		Name: "custom", Harness: profile.HarnessCustom, RuntimeAccount: "saved-account",
+		Name: "custom", Harness: profile.HarnessCustom,
 		Description: "keep spacing ", Model: "first", Models: []string{"first", "second"},
 		Taste: 8, Intelligence: 7, Cost: 6, ExtraArgs: []string{"--flag", " spaced "},
 		Command: []string{"fixture", "{{prompt}}"}, Env: map[string]string{"SECRET": "private"},
