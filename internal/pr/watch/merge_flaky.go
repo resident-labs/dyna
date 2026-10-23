@@ -120,11 +120,11 @@ func (s *Service) finishFlakyPublish(ctx context.Context, roomID, repo string, b
 	if err != nil {
 		return err
 	}
-	if current := st.MergeTrials[repo]; current != nil && current.Branch == b.Branch && current.Phase != "published" {
+	if current := st.MergeTrials[repo]; current != nil && current.Branch == b.Branch && current.Phase != state.MergeTrialPhasePublished {
 		return fmt.Errorf("trial %s did not publish; it is %s: %s", b.Branch, current.Phase, current.Reason)
 	}
 	if err := s.Store.update(func(st *State) error {
-		if st.MergePauses[roomID] == mergeBatchFailedReason {
+		if st.MergePauses[roomID].Cause == state.MergePauseCauseBatchFailed {
 			delete(st.MergePauses, roomID)
 		}
 		return nil

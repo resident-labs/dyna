@@ -19,21 +19,21 @@ func trialIdentity(b state.MergeTrial) string {
 // Prefix CI runs overlap on GitHub. Only the configured number may be active.
 // The failed full batch is already the final prefix, so it never runs twice.
 func (s *Service) advanceMergeStacks(ctx context.Context, repo string, r Record, b state.MergeTrial) error {
-	if b.Phase == "failed" {
+	if b.Phase == state.MergeTrialPhaseFailed {
 		b.RootBranch, b.OriginalHead = b.Branch, b.Head
 		b.StackChanges = append([]state.MergeTrialChange(nil), b.Changes...)
 
 		if err := s.Store.update(func(st *State) error {
 			for n := 1; n < len(b.Changes); n++ {
 				st.NextMergeTrial++
-				b.Stacks = append(b.Stacks, state.MergeTrialStack{Branch: fmt.Sprintf("dyna/merge-trial/%d", st.NextMergeTrial), Count: n, Phase: "queued"})
+				b.Stacks = append(b.Stacks, state.MergeTrialStack{Branch: fmt.Sprintf("dyna/merge-trial/%d", st.NextMergeTrial), Count: n, Phase: state.MergeTrialPhaseQueued})
 			}
 			return nil
 		}); err != nil {
 			return err
 		}
-		b.Stacks = append(b.Stacks, state.MergeTrialStack{Branch: b.RootBranch, Head: b.Head, Count: len(b.Changes), Phase: "failed", Logs: b.Logs})
-		b.Phase, b.Reason = "stacking", "testing batch prefixes"
+		b.Stacks = append(b.Stacks, state.MergeTrialStack{Branch: b.RootBranch, Head: b.Head, Count: len(b.Changes), Phase: state.MergeTrialPhaseFailed, Logs: b.Logs})
+		b.Phase, b.Reason = state.MergeTrialPhaseStacking, "testing batch prefixes"
 		if err := s.saveMergeTrial(repo, b); err != nil {
 			return err
 		}
@@ -56,7 +56,7 @@ func (s *Service) advanceMergeStacks(ctx context.Context, repo string, r Record,
 	active := 0
 	for i := range b.Stacks {
 		stack := &b.Stacks[i]
-		if stack.Phase != "running" {
+		if stack.Phase != state.MergeTrialPhaseRunning {
 			continue
 		}
 		ci, err := s.mergeTrialCI(ctx, r, stack.Branch, stack.Head)
@@ -65,7 +65,11 @@ func (s *Service) advanceMergeStacks(ctx context.Context, repo string, r Record,
 		}
 		stack.Reason = ci.Reason
 		if ci.Status == "passed" || ci.Status == "failed" {
-			stack.Phase, stack.Logs = ci.Status, ci.Logs
+			stack.Phase = state.MergeTrialPhaseFailed
+			if ci.Status == "passed" {
+				stack.Phase = state.MergeTrialPhasePassed
+			}
+			stack.Logs = ci.Logs
 			prefix := b
 			prefix.Branch, prefix.Changes = stack.Branch, b.Changes[:stack.Count]
 			s.noteMergeHistory(st, repo, prefix, "trial", ci.Status, stack.Head, ci.Logs)
@@ -77,13 +81,13 @@ func (s *Service) advanceMergeStacks(ctx context.Context, repo string, r Record,
 		return err
 	}
 	for i := range b.Stacks {
-		if b.Stacks[i].Phase != "queued" && b.Stacks[i].Phase != "building" {
+		if b.Stacks[i].Phase != state.MergeTrialPhaseQueued && b.Stacks[i].Phase != state.MergeTrialPhaseBuilding {
 			continue
 		}
 		if active >= limit {
 			break
 		}
-		b.Stacks[i].Phase = "building"
+		b.Stacks[i].Phase = state.MergeTrialPhaseBuilding
 		if err := s.saveMergeTrial(repo, b); err != nil {
 			return err
 		}
@@ -100,7 +104,7 @@ func (s *Service) advanceMergeStacks(ctx context.Context, repo string, r Record,
 		if len(result.Included) != len(prefix.Changes) || len(result.Conflicts) != 0 {
 			return s.discardMergeTrial(ctx, repo, r, b)
 		}
-		b.Stacks[i].Phase = "running"
+		b.Stacks[i].Phase = state.MergeTrialPhaseRunning
 		active++
 		if err := s.saveMergeTrial(repo, b); err != nil {
 			return err
@@ -111,10 +115,10 @@ func (s *Service) advanceMergeStacks(ctx context.Context, repo string, r Record,
 	}
 	longest := 0
 	for _, stack := range b.Stacks {
-		if stack.Phase == "queued" || stack.Phase == "building" {
+		if stack.Phase == state.MergeTrialPhaseQueued || stack.Phase == state.MergeTrialPhaseBuilding {
 			return nil
 		}
-		if stack.Phase == "passed" && stack.Count > longest {
+		if stack.Phase == state.MergeTrialPhasePassed && stack.Count > longest {
 			longest = stack.Count
 		}
 	}
@@ -137,7 +141,7 @@ func (s *Service) advanceMergeStacks(ctx context.Context, repo string, r Record,
 		}
 	}
 	b.Changes = b.Changes[:longest]
-	b.Phase, b.Reason = "publishing", "publishing longest passing prefix"
+	b.Phase, b.Reason = state.MergeTrialPhasePublishing, "publishing longest passing prefix"
 	if err := s.saveMergeTrial(repo, b); err != nil {
 		return err
 	}
