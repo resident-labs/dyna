@@ -194,23 +194,28 @@ review belong to its reviewer.
 
 See `dyna guide git`.
 
-The author's own replies are ignored. A comment Dyna cannot attribute to a
-session belongs to the owner and always reaches the author. Reviewer comments and useful bot comments also reach
-the author.
+Dyna admits comments from the signed-in GitHub owner and authors whose
+`author_association` is `OWNER`, `MEMBER`, or `COLLABORATOR`. It also admits
+configured trusted bots. The default list is `coderabbitai` and
+`copilot-pull-request-reviewer`. Set `pr.trustedBots` to a JSON list of bot
+logins; an empty list trusts no bots.
 
-The filter only decides `keep` or `drop`, with a reason, for each new comment.
-It receives commenter identity, a bot flag, and comment text in one PR batch.
-It never reads a diff or judges code. The first version uses rules and keeps
-uncertain comments. It drops exact known CodeRabbit rate-limit or progress
-placeholders, the exact Copilot quota notice, and duplicate bot issue/review
-comments within one batch.
-Repeated inline text can refer to different code locations, so it is kept.
-The implementation stays on rules, with the batch `Triage` interface intact.
-A malformed batch falls back to rules; it cannot override an owner keep
-decision or a required rule drop.
-All kept changes for a recipient become one room post, rather than one post
-per comment. Edits are detected by their content and update time. Reactions
-are not polled and never wake the author in this version.
+All other comments are held in SQLite. They never enter author notices or
+reviewer context. Each held comment appears in the home alerts card and as
+a quiet notice in its PR room, with owner-only **Admit** and **Dismiss** actions.
+The PR page shows only the held count. The owner can also run
+`dyna git pr admit <pr> <kind:id>` or `dyna git pr dismiss <pr> <kind:id>`.
+Admission covers only the exact held version; an edit is held again.
+
+Non-owner comments are quoted as data, never instructions. Trusted comments
+still pass the noise filter, which drops exact known rate-limit messages,
+progress placeholders, and duplicate bot issue/review comments. Repeated
+inline text can refer to different code locations, so it is kept.
+
+The batch `Triage` interface cannot override a hold, an owner keep, or a
+required rule drop. Kept comments for a recipient share one room post.
+Edits are detected by content and update time. Reactions are not polled.
+See [PR comment trust](pr-comment-trust.md) for configuration and controls.
 
 ## Teach the filter
 

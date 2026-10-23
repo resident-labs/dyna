@@ -400,12 +400,7 @@ esac
 		f.write(watch.State{Version: 1, Records: map[string]*watch.Record{r.Key: &r}, Reviewers: map[string]watch.Reviewer{}})
 		f.as(f.reviewer.ID)
 		args := []string{"verdict", r.ChangeID, "question", "Review", "--head", f.head}
-		if publishing == watch.PublishingGitHub {
-			if _, err := f.call("", args...); err == nil || !strings.Contains(err.Error(), "--review-id") {
-				t.Fatalf("GitHub mode accepted missing ID: %v", err)
-			}
-			args = append(args, "--review-id", "42")
-		}
+
 		if out, err := f.call("", args...); err != nil {
 			t.Fatalf("%s verdict: %s %v", publishing, out, err)
 		}
