@@ -6,13 +6,18 @@ import { parse } from 'svelte/compiler'
 import { callTarget } from '../voice/callRequests.ts'
 import { parsePRHash, parseIssueHash, parseFileHash, prHash, issueHash } from './prlink.ts'
 import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from '../ui/route.ts'
-import { call, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { call, moduleFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { installRouterShim } from '../../../test/appRouterShim.ts'
 
 const A = 'room_20261017-100000-aaaaaaaa'
 const B = 'room_20261017-100000-bbbbbbbb'
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
+// The screen's own navigation lives in lib/app/router.svelte.ts now.
+const routerSource = readFileSync(new URL('../app/router.svelte.ts', import.meta.url), 'utf8')
 const names = ['openReview', 'clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'openView', 'selectRoom', 'openSession', 'openTarget', 'hashTarget', 'openPR']
-const handlers = (parse(source, { modern: true }).instance?.content.body ?? []).filter((n) => n.type === 'FunctionDeclaration' && names.includes(n.id.name)).map((n) => { const { start, end } = sourceRange(n); return stripTypes(source.slice(start, end)) }).join('\n')
+const routerHandlers = moduleFunctions(routerSource, names)
+const appHandlers = (parse(source, { modern: true }).instance?.content.body ?? []).filter((n) => n.type === 'FunctionDeclaration' && names.includes(n.id.name) && !routerHandlers.has(n.id.name)).map((n) => { const { start, end } = sourceRange(n); return stripTypes(source.slice(start, end)) })
+const handlers = [...appHandlers, ...routerHandlers.values()].join('\n')
 // The slice of App's state the handlers read and write.
 interface Harness {
   location: { hash: string; pathname: string; search: string }
@@ -40,6 +45,25 @@ function app(hash: string): Harness {
   }
   vm.createContext(c)
   vm.runInContext(handlers, c)
+  // The screen state lives in the router now, and the router asks the page for
+  // the side of a screen change it does not own.
+  installRouterShim(c)
+  Reflect.set(c, 'host', {
+    started: () => c.started,
+    pop: () => !!c.pop,
+    followHash: () => (c.hashTarget as () => boolean)(),
+    leaveRoom: () => { void (c.selectRoom as (id: string) => Promise<boolean>)('') },
+    closePanels: () => {},
+    closeDrawer: () => {},
+    resolveView: (v: string) => (c.feedViews as { resolveView: (view: string) => string }).resolveView(v),
+    trimFeedAtView: () => {},
+    leaveScreen: () => {},
+    clearRunDetail: () => {},
+    loadChanges: () => {},
+    loadReviewer: () => {},
+    loadRuns: () => {},
+    loadRun: () => {},
+  })
   return c
 }
 

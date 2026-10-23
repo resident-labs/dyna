@@ -20,25 +20,32 @@ import { trimFeed } from './feedWindow.ts'
 import { mergeFeedPage, rerouteAnchors, withViews } from './feedPages.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from '../ui/route.ts'
-import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { sourceRange, stripTypes, moduleFunctions } from '../../../test/svelte-source.ts'
+import { installRouterShim } from '../../../test/appRouterShim.ts'
 
 // Run the actual App navigation functions with controlled API responses.
 // The Svelte parser selects complete declarations without copying their logic.
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
+// The screen's own navigation moved to lib/app/router.svelte.ts; the room,
+// detail and selection functions still live in App.
+const routerSource = readFileSync(new URL('../app/router.svelte.ts', import.meta.url), 'utf8')
 const declarations = parse(source, { modern: true }).instance?.content.body ?? []
 const names = ['openReview', 'clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'hashChanged', 'setPicked', 'selectRoom', 'openTarget', 'hashTarget', 'openDetail', 'openView', 'jumpTo', 'showRun', 'openPR']
-const picked = declarations.filter((node) => node.type === 'FunctionDeclaration' && names.includes(node.id?.name ?? ''))
-assert.equal(picked.length, names.length)
-const code = picked.map((node) => {
+const routerCode = moduleFunctions(routerSource, names)
+const appCode = (name: string): string | undefined => {
+  const node = declarations.find((entry) => entry.type === 'FunctionDeclaration' && entry.id?.name === name)
+  if (!node) return undefined
   const { start, end } = sourceRange(node)
   return source.slice(start, end)
-}).join('\n')
+}
+const picked = names.flatMap((name) => appCode(name) ?? [])
+assert.equal(picked.length + routerCode.size, names.length)
+const code = [...picked, ...routerCode.values()].join('\n')
 // The tests add the functions they call by slicing the same declarations.
 function runDeclaration(target: object, name: string): void {
-  const node = declarations.find((entry) => entry.type === 'FunctionDeclaration' && entry.id?.name === name)
-  assert.ok(node, name)
-  const { start, end } = sourceRange(node)
-  vm.runInContext(stripTypes(source.slice(start, end)), target)
+  const text = appCode(name) ?? routerCode.get(name)
+  assert.ok(text, name)
+  vm.runInContext(stripTypes(text), target)
 }
 
 const A = 'room_20261017-100000-aaaaaaaa'
@@ -307,6 +314,28 @@ function navigation() {
     error: (error: string) => (state.loadError = error),
   }
   state.roomData = createRoomData(roomApi as Parameters<typeof createRoomData>[0], roomHooks as Parameters<typeof createRoomData>[1])
+  // The screen state the sliced functions write lives in the router now.
+  installRouterShim(state)
+  // The router asks the page for the side of a screen change it does not own.
+  Reflect.set(state, 'host', {
+    started: () => state.started,
+    pop: () => !!state.pop,
+    followHash: () => (Reflect.get(state, 'hashTarget') as () => boolean)(),
+    leaveRoom: () => { void (Reflect.get(state, 'selectRoom') as (id: string) => Promise<boolean>)('') },
+    closePanels: () => {},
+    closeDrawer: () => {},
+    resolveView: (v: string) => (state.feedViews as { resolveView: (view: string) => string }).resolveView(v),
+    trimFeedAtView: (next: string, previous: string) => {
+      if (next === previous && !state.feedAtBottom) return
+      state.feed = Reflect.apply(state.trimFeed, undefined, [state.feed]) as NavFeed | null
+    },
+    leaveScreen: () => {},
+    clearRunDetail: () => { Reflect.set(state, 'runDetail', null) },
+    loadChanges: () => (state.loadChanges as () => void)(),
+    loadReviewer: () => (state.loadReviewer as () => void)(),
+    loadRuns: () => (state.loadRuns as () => void)(),
+    loadRun: () => (state.loadRun as () => void)(),
+  })
   // entries records each address write: ['push' | 'replace', hash].
   const write = (kind: string, url: string) => { state.location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; state.entries.push([kind, state.location.hash]) }
   state.history = { replaceState(_state: unknown, _title: string, url: string) { write('replace', url) }, pushState(_state: unknown, _title: string, url: string) { write('push', url) } }
