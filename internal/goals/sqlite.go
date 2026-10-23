@@ -195,6 +195,9 @@ func (s *Store) migrate(db *sql.DB) error {
 	if err := database.Migrate(db, "goals.service", 1, s.migrateServiceGoals); err != nil {
 		return err
 	}
+	if err := database.Migrate(db, "goals.owner_held", 1, migrateOwnerHeldGoals); err != nil {
+		return err
+	}
 	return nil
 }
 

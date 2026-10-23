@@ -2,7 +2,6 @@ package goals
 
 import (
 	"fmt"
-	"slices"
 )
 
 // HandoffHolder replaces one holder only while the goal is still open and
@@ -37,32 +36,4 @@ func (s *Store) HandoffHolder(room, id, from, to string) (moved bool, err error)
 		return nil
 	}, where, args...)
 	return moved && err == nil, err
-}
-
-// ReleaseHolder hands a goal to no session: it stays open and unheld, and the
-// owner takes it, reassigns it, or closes it. Root never holds goals, so a
-// close that would hand work to root releases the goal instead.
-// The goal remains visible to the owner.
-func (s *Store) ReleaseHolder(room, id, from string) (released bool, err error) {
-	where, args := named(room, id)
-	err = s.updateTx(func(_ *wake, st *State) error {
-		released = false
-		r := st.Rooms[room]
-		if r == nil {
-			return nil
-		}
-		g := r.Goals[id]
-		if g == nil || !g.Open() || !g.HeldBy(from) {
-			return nil
-		}
-		g.Holders = slices.DeleteFunc(g.Holders, func(h string) bool { return h == from })
-		if g.Setter == from {
-			g.Setter = "owner"
-		}
-		now := s.now()
-		g.UpdatedAt = now
-		released = true
-		return nil
-	}, where, args...)
-	return released && err == nil, err
 }
