@@ -1,7 +1,6 @@
 package sessionlife
 
 import (
-	"encoding/json"
 	"time"
 )
 
@@ -13,18 +12,10 @@ type Snapshot struct {
 	Closed      time.Time `json:"closed"`
 	Closing     *Closing  `json:"closing"`
 	Turns       int       `json:"turns"`
-	// TODO: legacy/shim remove later — old done sessions are dormant, not closed; remove when no retained session.json has done.
-	LegacyDone json.RawMessage `json:"done"`
 }
 
-// ClosedAt returns the actual close time, including the legacy dormancy rule.
-func (s Snapshot) ClosedAt() time.Time {
-	var done bool
-	if json.Unmarshal(s.LegacyDone, &done) == nil && done {
-		return time.Time{}
-	}
-	return s.Closed
-}
+// ClosedAt returns the stored close time.
+func (s Snapshot) ClosedAt() time.Time { return s.Closed }
 
 func (s Snapshot) IsClosed() bool { return !s.ClosedAt().IsZero() }
 

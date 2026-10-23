@@ -13,9 +13,6 @@ func TestSnapshotClosedState(t *testing.T) {
 	}{
 		{"open", `{}`, false},
 		{"closed", `{"closed":"2026-10-01T00:00:00Z"}`, true},
-		{"legacy dormant", `{"closed":"2026-10-01T00:00:00Z","done":true}`, false},
-		{"legacy false", `{"closed":"2026-10-01T00:00:00Z","done":false}`, true},
-		{"legacy invalid", `{"closed":"2026-10-01T00:00:00Z","done":"true"}`, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var s Snapshot

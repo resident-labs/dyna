@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
-	"time"
 )
 
 // All metadata readers share parsed snapshots. The display paths also keep
@@ -72,11 +71,7 @@ func (s *Store) metaSnapshot(id string) (*infoEntry, error) {
 		return nil, err
 	}
 	entry := &infoEntry{metaKey: key, raw: data}
-	var record struct {
-		Meta
-		// TODO: legacy/shim remove later — passes old done records to the shared lifecycle snapshot; remove when no retained session.json has done.
-		Done json.RawMessage `json:"done"`
-	}
+	var record Meta
 	decode := s.decodeMeta
 	if decode == nil {
 		decode = json.Unmarshal
@@ -84,11 +79,7 @@ func (s *Store) metaSnapshot(id string) (*infoEntry, error) {
 	if err := decode(data, &record); err != nil {
 		entry.err = fmt.Errorf("parse session %s: %w", id, err)
 	} else {
-		entry.meta = record.Meta
-		lifecycle := sessionlife.Snapshot{Closed: entry.meta.Closed, LegacyDone: record.Done}
-		if !entry.meta.Closed.IsZero() && !lifecycle.IsClosed() {
-			entry.meta.Finished, entry.meta.Closed = entry.meta.Closed, time.Time{}
-		}
+		entry.meta = record
 		if !entry.meta.Closed.IsZero() {
 			entry.meta.Status = StatusClosed
 		} else if entry.meta.Status == "" {
