@@ -436,13 +436,15 @@
   }
 
   async function respondPaste(code: string) {
-    if (busy || stopped || !login?.accountId) return
+    if (busy || stopped || !login?.accountId) return false
     busy = true
     error = ''
     try {
       await api.respondPrivateRuntimeLogin(login.accountId, code)
+      return true
     } catch (e) {
       if (!stopped) error = failText(e, 'Could not send the code.')
+      return false
     } finally {
       if (!stopped) busy = false
     }

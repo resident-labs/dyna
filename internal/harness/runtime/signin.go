@@ -34,14 +34,21 @@ const signInTimeout = 15 * time.Minute
 // signInMessageLimit keeps a login error short enough for a phone card.
 const signInMessageLimit = 200
 
+// SignInChoice is one native OAuth provider or login-method choice.
+type SignInChoice struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
 // SignInState is the in-app view of one native sign-in. It holds the link and
 // the one-time user code, which the owner needs, and never token contents.
 type SignInState struct {
-	Phase        string `json:"phase"`
-	URL          string `json:"url,omitempty"`
-	Code         string `json:"code,omitempty"`
-	Message      string `json:"message,omitempty"`
-	AcceptsPaste bool   `json:"acceptsPaste,omitempty"`
+	Choices      []SignInChoice `json:"choices,omitempty"`
+	Phase        string         `json:"phase"`
+	URL          string         `json:"url,omitempty"`
+	Code         string         `json:"code,omitempty"`
+	Message      string         `json:"message,omitempty"`
+	AcceptsPaste bool           `json:"acceptsPaste,omitempty"`
 }
 
 // final reports a phase the runner and the owner can no longer change.
@@ -70,6 +77,7 @@ type signInSpec struct {
 // signInSpecs lists the harnesses that sign in through the runner rather than a
 // terminal. Every other harness keeps its terminal.
 var signInSpecs = map[string]signInSpec{
+	"pi":          {Argv: piOAuthArgv, Parse: parsePiSignIn, AcceptsPaste: true, GracefulStop: true},
 	"antigravity": {Parse: parseAntigravitySignIn, AcceptsPaste: true, Respond: respondAntigravitySignIn, GracefulStop: true, Timeout: 5 * time.Minute},
 	"claude-code": {Parse: parseClaudeCodeSignIn, AcceptsPaste: true},
 	"codex":       {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},

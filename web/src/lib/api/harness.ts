@@ -82,6 +82,7 @@ export interface SignInState {
   code?: string
   message?: string
   acceptsPaste?: boolean
+  choices?: { id: string; label: string }[]
 }
 
 // PrivateLogin is runtime.PrivateLogin: the flow a harness account waits on.
