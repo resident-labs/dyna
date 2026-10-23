@@ -15,6 +15,7 @@
   import { ago } from '../ui/format.ts'
   import Confirm from '../ui/Confirm.svelte'
   import PairDevice from './PairDevice.svelte'
+  import { SCOPES, deviceName, scopeChips } from './devices.ts'
   import type { Device } from '../api/settings.ts'
 
   // A revoke the owner is asked about: all of a kind, or one row inline.
@@ -39,7 +40,6 @@
   }
   interface Detail {
     text: string
-    mono?: boolean
     warn?: boolean
   }
 
@@ -55,7 +55,7 @@
   let editing = $state<ScopeEdit | null>(null) // one row: {token, key, id, scopes, busy, error}
   let editToken = 0
 
-  const scopeNames = ['read', 'operate', 'files', 'terminal', 'computers', 'admin']
+  const scopeNames = SCOPES.map((chip) => chip.name)
 
   $effect(() => { onmodal(pairing || !!confirm); return () => onmodal(false) })
 
@@ -95,23 +95,20 @@
     return `expires in ${Math.round(h / 24)} days`
   }
 
-  function host(origin?: string) {
-    try {
-      return new URL(origin ?? '').host
-    } catch {
-      return origin || ''
-    }
+  // Last use, on the name line: it is what tells two browsers of the same
+  // name apart.
+  function seenLine(d: Device) {
+    const iso = d.lastSeen ?? ''
+    return `seen ${iso && !iso.startsWith('0001') ? ago(iso) : 'never'}`
   }
 
-  // The quiet line under a device name: browser, address, last use, expiry.
+  // The quiet line under a device name: expiry, and why an old grant is wide.
+  // The scopes are chips on their own line, and the address is part of the name.
   function details(d: Device) {
     const out: Detail[] = []
-    if (d.device) out.push({ text: d.device })
-    if (d.origin) out.push({ text: host(d.origin), mono: true })
-    out.push({ text: `seen ${d.lastSeen && !d.lastSeen.startsWith('0001') ? ago(d.lastSeen) : 'never'}` })
+    if (d.legacy) out.push({ text: 'full access from an older sign-in', warn: true })
     const u = until(d.expires)
     if (u) out.push({ text: u, warn: u === 'expired' })
-    if (d.scopeLabel) out.unshift({ text: d.scopeLabel, warn: !!d.legacy })
     return out
   }
 
@@ -194,20 +191,29 @@
 {#snippet rows(items: Device[], kind: string)}
   <div class="table">
     {#each items as d (d.kind + d.id)}
+      {@const named = deviceName(d)}
+      {@const meta = details(d)}
       <div class="item" transition:slide={{ duration: motion(BASE) }}>
         {@render glyph(kindOf(d))}
         <span class="main">
-          <span class="name">{d.name || 'Unnamed device'}{#if d.current}<span class="here">this device</span>{/if}</span>
-          <span class="sub">
-            {#each details(d) as part, i}{#if i}<span class="dot" aria-hidden="true">·</span>{/if}<span class:mono={part.mono} class:warn={part.warn}>{part.text}</span>{/each}
+          <span class="name" title={named.tooltip || undefined}>{named.title}{#if d.current}<span class="here">this device</span>{/if}<span class="seen">{seenLine(d)}</span></span>
+          <span class="chips">
+            {#each scopeChips(d) as chip (chip.name)}
+              <span class="chip" class:none={chip.name === 'none'} title={chip.about || undefined}>{chip.label}</span>
+            {/each}
           </span>
+          {#if meta.length}
+            <span class="sub">
+              {#each meta as part, i}{#if i}<span class="dot" aria-hidden="true">·</span>{/if}<span class:warn={part.warn}>{part.text}</span>{/each}
+            </span>
+          {/if}
           {#if revoking?.key === d.kind + d.id && revoking.error}<span class="err" role="alert">{revoking.error}</span>{/if}
           {#if editing?.key === d.kind + d.id && editing.error}<span class="err" role="alert">{editing.error}</span>{/if}
         </span>
         {#if editing?.key === d.kind + d.id}
           <span class="scopes">
-            {#each scopeNames as name}
-              <label><input type="checkbox" checked={editing.scopes[name]} disabled={editing.busy} onchange={(event) => toggleScope(name, event)} /> {name}</label>
+            {#each SCOPES as scope (scope.name)}
+              <label title={scope.about}><input type="checkbox" checked={editing.scopes[scope.name]} disabled={editing.busy} onchange={(event) => toggleScope(scope.name, event)} /> {scope.label}</label>
             {/each}
             <button class="btn quiet" type="button" disabled={editing.busy} onclick={saveScopes}>Save</button>
             <button class="btn quiet" type="button" disabled={editing.busy} onclick={() => (editing = null)}>Cancel</button>
@@ -216,8 +222,10 @@
           {@const asked = revoking}
           <InlineConfirm ask={d.current ? 'Revoke? You will be signed out.' : 'Revoke?'} action="Revoke" busy={revoking.busy} onconfirm={() => revoke(asked, (v) => (revoking = v))} oncancel={() => (revoking = null)} />
         {:else}
-          <button class="btn quiet" type="button" onclick={() => startScopes(d)} aria-label="Change scopes for {d.name || 'device'}">Scopes</button>
-          <button class="btn quiet" type="button" onclick={() => { editing = null; revoking = { key: d.kind + d.id, kind: d.kind, id: d.id } }} aria-label="Revoke {d.name || 'device'}">Revoke</button>
+          <span class="acts">
+            <button class="btn quiet" type="button" onclick={() => startScopes(d)} aria-label="Change scopes for {named.title}">Scopes</button>
+            <button class="btn quiet" type="button" onclick={() => { editing = null; revoking = { key: d.kind + d.id, kind: d.kind, id: d.id } }} aria-label="Revoke {named.title}">Revoke</button>
+          </span>
         {/if}
       </div>
     {/each}
@@ -228,7 +236,7 @@
 {/snippet}
 
 <section>
-  <TabHeader flush title="Devices" blurb="Phones and browsers that can use this Dyna. The line under each name is what that device is allowed to do.">
+  <TabHeader flush title="Devices" blurb="Phones and browsers that can use this Dyna. The chips on a row are the scopes that device holds, and the last-seen time tells two browsers of the same name apart.">
     {#snippet action()}
       <div class="list-actions">
         {#if list !== null}
@@ -285,10 +293,14 @@
   .item + .item { border-top: 1px solid var(--line-soft); }
   .dev { width: 36px; height: 36px; border-radius: 9px; background: var(--raise); color: var(--muted); display: grid; place-items: center; flex: none; }
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-  .name { font-weight: 600; font-size: var(--t-body); color: var(--ink); display: flex; align-items: center; gap: var(--s2); }
-  .here { font-size: var(--t-cap); font-weight: 600; color: var(--sage); background: rgba(151, 201, 149, 0.12); border-radius: 4px; padding: 0 6px; }
+  .name { font-weight: 600; font-size: var(--t-body); color: var(--ink); display: flex; align-items: center; flex-wrap: wrap; gap: 2px var(--s2); min-width: 0; }
+  .seen { font-size: var(--t-sm); font-weight: 400; color: var(--faint); white-space: nowrap; }
+  .here { font-size: var(--t-cap); font-weight: 600; color: var(--sage); background: rgba(151, 201, 149, 0.12); border-radius: 4px; padding: 0 6px; flex: none; }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 2px 0; }
+  .chip { font-size: var(--t-cap); font-weight: 600; color: var(--muted); background: var(--raise); border: 1px solid var(--line-soft); border-radius: 999px; padding: 1px 8px; }
+  .chip.none { color: var(--coral); border-color: rgba(224, 122, 95, 0.4); }
+  .acts { display: flex; align-items: center; gap: var(--s2); flex: none; }
   .sub { font-size: var(--t-sm); color: var(--faint); overflow-wrap: anywhere; }
-  .sub .mono { font-size: var(--t-sm); }
   .warn { color: var(--coral); }
   .dot { margin: 0 6px; }
   .all { margin: var(--s2) 2px 0; font-size: var(--t-sm); color: var(--faint); text-decoration: underline; transition: color var(--motion-fast) var(--ease); }
@@ -300,8 +312,10 @@
   .err { color: var(--coral); }
   @media (max-width: 760px) {
     .btn { min-height: 44px; }
-    .item { flex-wrap: wrap; }
-    .main { min-width: 160px; }
+    .item { flex-wrap: wrap; row-gap: var(--s2); }
+    .main { flex: 1 1 200px; }
+    .dev { align-self: flex-start; }
+    .acts { flex-basis: 100%; }
     .all { min-height: 44px; }
   }
 </style>
