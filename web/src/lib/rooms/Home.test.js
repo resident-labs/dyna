@@ -6,6 +6,7 @@ import { setImmediate } from 'node:timers/promises'
 import { createReloadGate } from '../ui/reloadGate.ts'
 import { hasItemChange, patchListRows } from '../ui/listChanges.ts'
 import { parse } from 'svelte/compiler'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 // Run the real refresh code from Home.svelte and the real Settings onclose
 // handler from App.svelte. The Svelte parser selects them without copying.
@@ -39,14 +40,14 @@ test('closing Settings reloads the home screen accounts and runtimes', async () 
     privateRuntimes: () => Promise.resolve({ v: 'new' }),
   }
   vm.createContext(c)
-  vm.runInContext(refreshCode, c)
+  vm.runInContext(stripTypes(refreshCode), c)
 
   // Settings is where the owner signs in to Codex, so the
   // header's Call Voice rereads whether voice is set up.
   let voiceRefreshed = 0
   const app = { showSettings: true, loadProfiles: () => {}, home: { refresh: () => c.refresh() }, voiceCall: { refresh: () => voiceRefreshed++ } }
   vm.createContext(app)
-  vm.runInContext(`(${onclose})()`, app)
+  vm.runInContext(stripTypes(`(${onclose})()`), app)
   await setImmediate()
   assert.equal(app.showSettings, false)
   assert.equal(voiceRefreshed, 1)
@@ -63,7 +64,7 @@ test('a late account answer cannot replace a newer one', async () => {
     privateRuntimes: () => new Promise(() => {}),
   } }
   vm.createContext(c)
-  vm.runInContext(refreshCode, c)
+  vm.runInContext(stripTypes(refreshCode), c)
   c.refresh()
   c.refresh()
   await setImmediate()
@@ -86,7 +87,7 @@ test('home uses one grouped question request and ignores post events', async () 
   c.patchListRows = patchListRows
   c.questionReload ??= createReloadGate(() => ({ room: 'home', visit: c.questionRooms }))
   vm.createContext(c)
-  vm.runInContext(questionCode, c)
+  vm.runInContext(stripTypes(questionCode), c)
   await c.loadQuestions()
   assert.deepEqual(calls, [''])
   assert.equal(c.questions, grouped)
@@ -110,7 +111,7 @@ test('unarchiving a room reloads its existing question without refetching for ac
   c.patchListRows = patchListRows
   c.questionReload ??= createReloadGate(() => ({ room: 'home', visit: c.questionRooms }))
   vm.createContext(c)
-  vm.runInContext(questionCode, c)
+  vm.runInContext(stripTypes(questionCode), c)
   await c.refreshQuestionRooms()
   assert.deepEqual(Object.keys(c.questions), [])
   c.rooms = [{ id: 'room', archived: false, lastActivity: 1 }]
@@ -132,7 +133,7 @@ test('home applies question items after an in-flight grouped snapshot without re
   c.patchListRows = patchListRows
   c.questionReload ??= createReloadGate(() => ({ room: 'home', visit: c.questionRooms }))
   vm.createContext(c)
-  vm.runInContext(questionCode, c)
+  vm.runInContext(stripTypes(questionCode), c)
   const loading = c.loadQuestions()
   const finishInitial = finish
   c.event(JSON.parse('{"kind":"questions","roomId":"a","change":{"op":"upsert","id":"q1","item":{"id":"q1","state":"answered","text":"Done"}}}'))
@@ -153,7 +154,7 @@ test('home counts questions as loaded only after a successful grouped request', 
     c.patchListRows = patchListRows
     c.questionReload ??= createReloadGate(() => ({ room: 'home', visit: c.questionRooms }))
     vm.createContext(c)
-    vm.runInContext(questionCode, c)
+    vm.runInContext(stripTypes(questionCode), c)
     const pending = c.loadQuestions()
     assert.equal(c.questionsLoaded, false, `${name}: not loaded while the request runs`)
     await pending
@@ -170,7 +171,7 @@ test('a failed notice refresh keeps the last notices and is not counted as loade
   let answer = async () => alert
   const c = { notices: [], noticesLoaded: false, api: { notices: () => answer() } }
   vm.createContext(c)
-  vm.runInContext(noticeCode, c)
+  vm.runInContext(stripTypes(noticeCode), c)
   await c.loadNotices()
   assert.equal(c.noticesLoaded, true)
   answer = async () => { throw new Error('offline') }
@@ -187,7 +188,7 @@ test('a room membership change invalidates questions until the new load succeeds
   c.patchListRows = patchListRows
   c.questionReload ??= createReloadGate(() => ({ room: 'home', visit: c.questionRooms }))
   vm.createContext(c)
-  vm.runInContext(questionCode, c)
+  vm.runInContext(stripTypes(questionCode), c)
   await c.refreshQuestionRooms()
   assert.equal(c.questionsLoaded, true)
   c.api.questions = async () => { throw new Error('offline') }

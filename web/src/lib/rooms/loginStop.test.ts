@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { parse } from 'svelte/compiler'
 import vm from 'node:vm'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const ast = parse(source, { modern: true })
@@ -46,7 +47,7 @@ function mounted() {
     roomControlsVisit: 0, consolidationAlive: true,
     roomData: controller('rooms'), sessionData: controller('session'), workflowData: controller('workflow'),
   }
-  const unmount: () => void = vm.runInNewContext(`(${mountSource})()`, state)
+  const unmount: () => void = vm.runInNewContext(stripTypes(`(${mountSource})()`), state)
   return {
     state, intervals, listeners, destroyed, unmount,
     unauthorized: () => unauthorized(),
