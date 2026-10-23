@@ -180,22 +180,19 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 					return err
 				}
 				event := Event{Event: MainUpdated, Repo: j.Config.Main, Room: j.Room, Session: j.Session, SHA: j.SHA}
-				// The unit's result ends the run the hook started. Warnings from
-				// the checkout stay on one card with it, and its log holds them
-				// too.
-				if len(j.Warnings) > 0 || j.Result != "pass" {
-					state := room.HookPassed
-					if j.Result != "pass" {
-						state = room.HookError
-					}
-					cause := "install unit " + j.Result
-					if text := warningText(j.Warnings); text != "" {
-						cause += ": " + j.Warnings[0].Cause
-					}
-					s.alert(r, event, h, ev, state, cause, warningText(j.Warnings))
+				// The unit's result always ends the run the hook started, passing or
+				// not. Warnings from the checkout stay on the same card, and the
+				// run's log holds them too.
+				state := room.HookPassed
+				if j.Result != "pass" {
+					state = room.HookError
 				}
-				if j.Result == "pass" {
+				detail := warningText(j.Warnings)
+				if state == room.HookPassed {
+					s.emit(event, hookEvent(event, h, ev, state, detail))
 					s.clearNotices(r.ID, h)
+				} else {
+					s.alert(r, event, h, ev, state, installCause(j), detail)
 				}
 			}
 			j.Recorded = true
@@ -211,6 +208,17 @@ func (s Service) ReconcileInstall(ctx context.Context) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// installCause names why an install unit ended a run, for the claim that may
+// create the repo's room. Every warning cause counts, so two different
+// checkouts do not collapse into one claim.
+func installCause(j *hookinstall.Job) string {
+	cause := "install unit " + j.Result
+	for _, w := range j.Warnings {
+		cause += " " + w.Cause
+	}
+	return cause
 }
 
 // warningText joins the checkout warnings of one install unit into the one

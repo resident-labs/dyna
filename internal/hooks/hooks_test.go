@@ -166,18 +166,22 @@ func TestRunnerEventEnvCwdAndStoredResults(t *testing.T) {
 		t.Fatalf("log: %s %v", b, err)
 	}
 }
-func TestFailureAlertDeduplicatesCauses(t *testing.T) {
+
+// Every failed run ends its own card, and the claim that may create the repo's
+// room stays one per cause until a passing run clears it. A retried failure
+// must not leave a card running, and a new cause is new news.
+func TestFailureEndsEveryRunAndClaimsEachCauseOnce(t *testing.T) {
 	s, repo := setup(t)
 	ctx := context.Background()
 	cause := "first failure"
-	alerts := 0
+	var results []room.HookEvent
 	s.Post = func(_ Event, ev room.HookEvent) error {
 		if ev.State == room.HookRunning || ev.State == room.HookPassed {
 			return nil
 		}
-		alerts++
+		results = append(results, ev)
 		if ev.RunID == "" || ev.Repo != repo || ev.Hook != "fail" || ev.Event != AfterLand || ev.Command != "true" {
-			t.Errorf("alert payload: %+v", ev)
+			t.Errorf("result payload: %+v", ev)
 		}
 		return nil
 	}
@@ -199,21 +203,46 @@ func TestFailureAlertDeduplicatesCauses(t *testing.T) {
 			t.Fatal("failure lost")
 		}
 	}
-	if alerts != 1 {
-		t.Fatalf("alerts %d", alerts)
+	if len(results) != 2 || results[0].RunID == results[1].RunID {
+		t.Fatalf("a retried failure must end its own card: %+v", results)
+	}
+	if claims := claimKeys(t, s, repo); len(claims) != 1 {
+		t.Fatalf("claims after a retried failure = %v, want one", claims)
 	}
 	cause = "second failure"
 	_, _ = s.Run(ctx, Event{Repo: repo}, "fail")
-	if alerts != 2 {
-		t.Fatalf("causes lost: %d", alerts)
+	if len(results) != 3 || len(claimKeys(t, s, repo)) != 2 {
+		t.Fatalf("a new cause must post and claim: %d results, %v claims", len(results), claimKeys(t, s, repo))
 	}
 	cause = "success"
 	_, _ = s.Run(ctx, Event{Repo: repo}, "fail")
+	if claims := claimKeys(t, s, repo); len(claims) != 0 {
+		t.Fatalf("a passing run did not clear the claims: %v", claims)
+	}
 	cause = "first failure"
 	_, _ = s.Run(ctx, Event{Repo: repo}, "fail")
-	if alerts != 3 {
-		t.Fatalf("success did not reset the alert: %d", alerts)
+	if len(results) != 4 || len(claimKeys(t, s, repo)) != 1 {
+		t.Fatalf("the next failure must be new news: %d results, %v claims", len(results), claimKeys(t, s, repo))
 	}
+}
+
+// claimKeys lists the alert claims the runtime state holds for a repo.
+func claimKeys(t *testing.T, s Service, repo string) []string {
+	t.Helper()
+	r, err := repoid.Resolve(t.Context(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	if err := s.runtime(r.ID, func(st *state) error {
+		for key := range st.Notices {
+			keys = append(keys, key)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return keys
 }
 func TestBlockingHooksAndQueuedAlerts(t *testing.T) {
 	s, repo := setup(t)

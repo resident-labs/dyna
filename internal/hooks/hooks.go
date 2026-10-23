@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -270,11 +271,13 @@ func (s Service) Runs(ctx context.Context, repo, name string) ([]Run, error) {
 	return s.runs(ctx, r.ID, name)
 }
 
-// alert tells the owner that a run failed, once per hook, command and cause,
-// even when the run is retried. The post is the run's own result event, so the
-// card opens its log. A passing run clears the claim in clearNotices, so the
-// next failure posts again.
+// alert posts a failed run's result for an alert hook. The first failure of a
+// hook, command and cause may create the repo's room for the owner; every run
+// still ends its own card, quietly, so a retried failure never leaves one
+// running. A passing run clears the claim in clearNotices, so a later failure
+// is new news and may reach the owner again.
 func (s Service) alert(r repoid.Repo, e Event, h Hook, run Run, result room.HookState, cause, detail string) {
+	ev := hookEvent(e, h, run, result, detail)
 	key := noticePrefix(h) + cause
 	claimed := false
 	if err := s.runtime(r.ID, func(st *state) error {
@@ -284,9 +287,10 @@ func (s Service) alert(r repoid.Repo, e Event, h Hook, run Run, result room.Hook
 		}
 		return nil
 	}); err != nil || !claimed {
+		s.emit(e, ev)
 		return
 	}
-	if err := s.postEvent(e, hookEvent(e, h, run, result, detail), true); err != nil {
+	if err := s.postEvent(e, ev, true); err != nil {
 		_ = s.runtime(r.ID, func(st *state) error { delete(st.Notices, key); return nil })
 	}
 }
@@ -341,16 +345,20 @@ func postRoomEvent(e Event, ev room.HookEvent, create bool) error {
 
 // spoolAlert tells the owner that a queued hook never reached the spool. It
 // stores the failure as a run, so the card opens a log that holds the cause.
+// When even that record cannot be stored, the spool error itself is still on
+// its way to the caller, and this line names why no card followed it.
 func (s Service) spoolAlert(ctx context.Context, r repoid.Repo, e Event, h Hook, cause error) {
-	run, log, err := s.newRun(ctx, r.ID, h, e.Session)
+	run, file, err := s.newRun(ctx, r.ID, h, e.Session)
 	if err != nil {
+		log.Printf("hook spool alert for %s: cannot record the run: %v (spool error: %v)", h.Name, err, cause)
 		return
 	}
 	run.Result = "error"
 	run.FinishedAt = time.Now().UTC()
-	_, _ = fmt.Fprintln(log, "spool write error:", cause)
-	_ = log.Close()
+	_, _ = fmt.Fprintln(file, "spool write error:", cause)
+	_ = file.Close()
 	if _, err := s.saveRun(ctx, run); err != nil {
+		log.Printf("hook spool alert for %s: cannot store the run: %v (spool error: %v)", h.Name, err, cause)
 		return
 	}
 	s.alert(r, e, h, run, room.HookError, "spool write error", "spool write error: "+cause.Error())
@@ -485,16 +493,19 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 		if runErr == nil {
 			ev, runErr = s.pendingInstall(ctx, ev)
 		}
-		// Alert only after the result and log are durable. A failed hook posts
-		// its result once per cause; a passing run posts it once per run, and a
-		// handoff to an install unit posts it when that unit finishes.
+		// Every started run posts its result, so no card stays running. A failed
+		// run of an alert hook also reaches the owner: the claim there covers the
+		// repo room the first failure may create, not the run's own card. A
+		// handoff to an install unit posts its result when that unit finishes.
 		if runErr != nil {
+			cause := failureClass(runErr)
+			if preparationErr != nil {
+				cause = "snapshot"
+			}
 			if h.OnFail == "alert" {
-				cause := failureClass(runErr)
-				if preparationErr != nil {
-					cause = "snapshot"
-				}
 				s.alert(r, e, h, ev, resultState(ev), cause, cause)
+			} else {
+				s.emit(e, hookEvent(e, h, ev, resultState(ev), cause))
 			}
 		} else if ev.Result != "pending" {
 			s.emit(e, hookEvent(e, h, ev, room.HookPassed, ""))
