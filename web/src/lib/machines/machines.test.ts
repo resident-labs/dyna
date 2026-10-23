@@ -17,6 +17,8 @@ test('a CI machine shows its slots, and its use once the CI work reports it', ()
   const ci = machine({ roles: ['ci'], ciSlots: 16, agents: 0 })
   assert.equal(summaryText(ci), '0 agents · CI 16 slots')
   assert.equal(summaryText({ ...ci, ci: { used: 6, slots: 16 } }), '0 agents · CI 6/16 slots')
+  assert.equal(summaryText({ ...ci, ciSlots: 1, ci: { used: 1, slots: 1 } }), '0 agents · CI 1/1 slot', 'the noun follows the total')
+  assert.equal(summaryText({ ...ci, enabled: false, status: 'disabled', ciSlots: 2, ci: { used: 0, slots: 2 } }), '0 agents · CI off', 'a disabled machine takes no CI work')
 })
 
 test('the header counts machines by status and leaves out what is zero', () => {
