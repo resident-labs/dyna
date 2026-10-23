@@ -123,3 +123,28 @@ func TestRootContext(t *testing.T) {
 		})
 	}
 }
+
+// A room named after the engine holds engine posts under the room's own
+// address. A session note addressed to a worker is that worker's, never the
+// owner's DM, so the root's [OWNER DMS] block keeps the owner's words.
+func TestRootContextEngineNoteIsNoOwnerDM(t *testing.T) {
+	const roomName = EngineSender
+	for _, note := range []struct {
+		family EventFamily
+		typ    EventType
+	}{
+		{FamilySession, EventType(SessionInstructions)},
+		{FamilySession, EventType(SessionRenamed)},
+		{FamilyWorktree, TypeKept},
+	} {
+		msg := Message{ID: "note", From: EngineSender, Kind: string(note.family), Notice: EventNotice{Kind: string(note.typ)}, To: []string{roomName + ":worker"}}
+		if decision, category := RootContext(msg, roomName); decision != RootSkip || category != "" {
+			t.Fatalf("an engine %s/%s to a worker = %d, %q; want no root context", note.family, note.typ, decision, category)
+		}
+	}
+	// The owner's own DM keeps its quiet owner-DM category.
+	owner := Message{ID: "dm", From: roomName, Human: true, Kind: "message", To: []string{roomName + ":worker"}}
+	if decision, category := RootContext(owner, roomName); decision != RootQuiet || category != RootOwnerDM {
+		t.Fatalf("the owner's DM = %d, %q; want quiet %q", decision, category, RootOwnerDM)
+	}
+}
