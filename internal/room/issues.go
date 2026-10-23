@@ -342,33 +342,41 @@ func (s *Store) FileIssue(roomID string, in IssueInput) (Issue, error) {
 	}
 	var out Issue
 	// The number is allocated before the post, because the event carries it:
-	// the card shows D-N without a second read. The issue lock keeps two
-	// filings from taking the same number.
-	err = s.withIssuesLock(rec.ID, func() error {
-		number, err := s.nextIssueNumber(rec.ID)
-		if err != nil {
-			return err
-		}
-		msg, err := s.PostEventInput(PostEventInput{
-			RoomID: rec.ID,
-			Event: IssueEvent{
-				Type: IssueFiled, Number: number, Title: title, Files: files, Symbols: in.Symbols,
-				Cost: strings.TrimSpace(in.Cost), Direction: strings.TrimSpace(in.Direction),
-				State: IssueStateOpen, Filer: by, Detail: note,
-			},
-			To: []string{rec.Name},
-		})
-		if err != nil {
-			return err
-		}
-		out = Issue{ID: msg.ID, Number: number, Title: title, File: in.File, Line: in.Line, Filer: by, FiledAt: msg.TS, State: string(IssueStateOpen)}
-		db, err := s.issuesDB()
-		if err != nil {
-			return err
-		}
-		return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-			return insertIssue(context.Background(), conn, rec.ID, &out)
-		})
+	// the card shows D-N without a second read. A filing takes the numbering
+	// lock, not the issue lock: an export holds that one while `gh issue create`
+	// runs, and filing must not wait for GitHub. The numbering lock covers the
+	// post and the insert, so two filings cannot take the same number.
+	unlockNumbers, err := s.lockIssueNumbers(rec.ID)
+	if err != nil {
+		return Issue{}, err
+	}
+	defer unlockNumbers()
+	number, err := s.nextIssueNumber(rec.ID)
+	if err != nil {
+		return Issue{}, err
+	}
+	// The post comes first, so a crash before the insert leaves a post without
+	// an issue row rather than an issue no one can see. A retry takes the next
+	// number, so the lost filing still posts.
+	msg, err := s.PostEventInput(PostEventInput{
+		RoomID: rec.ID,
+		Event: IssueEvent{
+			Type: IssueFiled, Number: number, Title: title, Files: files, Symbols: in.Symbols,
+			Cost: strings.TrimSpace(in.Cost), Direction: strings.TrimSpace(in.Direction),
+			State: IssueStateOpen, Filer: by, Detail: note,
+		},
+		To: []string{rec.Name},
+	})
+	if err != nil {
+		return Issue{}, err
+	}
+	out = Issue{ID: msg.ID, Number: number, Title: title, File: in.File, Line: in.Line, Filer: by, FiledAt: msg.TS, State: string(IssueStateOpen)}
+	db, err := s.issuesDB()
+	if err != nil {
+		return Issue{}, err
+	}
+	err = state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		return insertIssue(context.Background(), conn, rec.ID, &out)
 	})
 	return out, err
 }
@@ -381,6 +389,16 @@ func (s *Store) CloseIssue(roomID, id, by, reason string, origin CloseOrigin) (I
 		i.Reason = reason
 		return nil
 	})
+}
+
+// lockIssueNumbers serializes number allocation for one room. It is separate
+// from withIssuesLock, which an export holds while GitHub answers.
+func (s *Store) lockIssueNumbers(roomID string) (func(), error) {
+	path, err := s.issuesPath(roomID)
+	if err != nil {
+		return nil, err
+	}
+	return store.Lock(path + ".numbers.lock")
 }
 
 // nextIssueNumber reads the number a new issue takes in its room.
@@ -465,6 +483,10 @@ func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, chang
 			if err != nil {
 				return err
 			}
+			// The change is committed before the event is posted, so a post
+			// failure reports an error that a retry cannot repeat: the issue
+			// is already closed. The event is a quiet feed row, and the next
+			// change posts again.
 			if err := state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
 				ctx := context.Background()
 				if _, err := conn.ExecContext(ctx, `UPDATE room_issues SET state=?, body=? WHERE room_id=? AND id=?`, i.State, string(body), rec.ID, i.ID); err != nil {

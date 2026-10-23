@@ -159,7 +159,7 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 			}
 			ctx = ghclient.WithRoom(ghclient.WithRooms(ctx, s.rooms()), r.ID)
 			ctx = ghclient.WithRepository(ctx, parts[0], parts[1]+"/"+parts[2])
-			cmd := ghclient.Command(ctx, "", r.Repo, "issue", "create", "--repo", repository.ID, "--title", i.Title, "--body", issueDetail(*i, post.Text))
+			cmd := ghclient.Command(ctx, "", r.Repo, "issue", "create", "--repo", repository.ID, "--title", i.Title, "--body", issueDetail(*i, issueText(post)))
 			var out, stderr strings.Builder
 			cmd.Stdout, cmd.Stderr = &out, &stderr
 			if err = ghclient.Run(ctx, cmd); err != nil {
@@ -188,7 +188,8 @@ func issueText(msg room.Message) string {
 	return msg.Text
 }
 
-func issueDetail(i room.Issue, text string) string {	detail := fmt.Sprintf("Local issue %s\n\n%s", i.Label(), text)
+func issueDetail(i room.Issue, text string) string {
+	detail := fmt.Sprintf("Local issue %s\n\n%s", i.Label(), text)
 	if i.File != "" {
 		detail += "\n\nLocation: " + i.File
 		if i.Line > 0 {
