@@ -54,14 +54,16 @@
   // unreadable JUnit report, the test budget), not the output of one check.
   let note = $derived((pr?.ciTestReportNote ?? '').trim())
   // Main CI is informational. Only a passing batch trial permits publication.
+  // It says the fact from the typed wait kind, never a service sentence.
   let mainRow = $derived.by(() => {
-    const reason = main?.reason ? main.reason.charAt(0).toUpperCase() + main.reason.slice(1) : ''
-    if (main?.state === 'paused') return { tone: 'gold', text: reason || 'Merging paused in this room' }
+    if (main?.state === 'paused') return { tone: 'gold', text: 'Merging paused in this room' }
     if (main?.state !== 'pending' && main?.state !== 'failed') return null
+    if (main?.wait?.kind === 'no-push-ci') return { tone: '', text: 'No default-branch CI; the PR checks decide' }
+    if (main?.wait?.kind === 'no-head') return { tone: 'run', text: 'Waiting for main branch CI; the batch trial must pass' }
     const pending = main.state === 'pending'
     const tone = pending ? 'run' : 'coral'
-    if (!main.head) return { tone, text: reason || (pending ? 'Waiting for main branch CI; the batch trial must pass' : 'Main branch CI failed; the batch trial must pass') }
-    return { tone, text: pending ? `main branch CI is running at ${shortSha(main.head)}; the batch trial must pass` : `main branch CI failed at ${shortSha(main.head)}; the batch trial must pass` }
+    const at = main.head ? ` at ${shortSha(main.head)}` : ''
+    return { tone, text: pending ? `main branch CI is running${at}; the batch trial must pass` : `main branch CI failed${at}; the batch trial must pass` }
   })
   let folds = $derived([
     { id: 'running', label: 'running', items: buckets.running, open: true },

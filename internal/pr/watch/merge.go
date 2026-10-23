@@ -66,12 +66,34 @@ func trialStatus(st State, b *state.MergeTrial) *MergeTrialStatus {
 	return status
 }
 
+// MainWaitKind names why the queue waits on the default branch's CI. The web
+// writes the words from the kind; the service never formats a sentence.
+type MainWaitKind string
+
+// Main wait kinds.
+const (
+	MainWaitNoPushCI MainWaitKind = "no-push-ci"
+	MainWaitNoHead   MainWaitKind = "no-head"
+	MainWaitPassed   MainWaitKind = "passed"
+	MainWaitFailed   MainWaitKind = "failed"
+	MainWaitPending  MainWaitKind = "pending"
+	MainWaitPaused   MainWaitKind = "paused"
+)
+
+// MainWait is why the queue waits on the default branch, as facts. The commit
+// is MainCI.Head; a screen shortens it and words the kind.
+type MainWait struct {
+	Kind MainWaitKind `json:"kind"`
+	// Base is the default branch name, when the probe knows it.
+	Base string `json:"base,omitempty"`
+}
+
 // MainCI is the saved CI result of the repository's default branch. State is
 // passed, failed, pending or paused. Every item carries it, so a screen reads one field.
 type MainCI struct {
-	State  string `json:"state"`
-	Head   string `json:"head"`
-	Reason string `json:"reason"`
+	State string    `json:"state"`
+	Head  string    `json:"head"`
+	Wait  *MainWait `json:"wait,omitempty"`
 }
 
 // MergeQueueSnapshot derives queue facts from a saved PR snapshot without GitHub requests.
@@ -92,7 +114,7 @@ func mergeQueue(st State) []MergeQueueItem {
 		item.Overlaps = state.SharedOverlaps(r.Overlaps)
 		p, status := storedDefault(st, *r)
 		if changeKind(*r) == "github" {
-			item.Main = &MainCI{State: status, Head: p.Head, Reason: defaultReason(p, status)}
+			item.Main = &MainCI{State: status, Head: p.Head, Wait: defaultWait(p, status)}
 		}
 		switch {
 		case r.MergeTrialFailure != nil && r.MergeTrialFailure.Change.Head == r.Head:
@@ -191,7 +213,7 @@ func ciFailedReason(r Record) string {
 func markPaused(item *MergeQueueItem) {
 	item.State, item.Reason = "paused", "room sessions are paused"
 	if item.Main != nil {
-		item.Main.State, item.Main.Reason = "paused", "merging paused in this room"
+		item.Main.State, item.Main.Wait = "paused", &MainWait{Kind: MainWaitPaused}
 	}
 }
 
@@ -234,7 +256,10 @@ func (s *Service) MergeStatus(ctx context.Context) ([]MergeQueueItem, error) {
 	}
 	for _, r := range records {
 		p, status := storedDefault(st, r)
-		rows = append(rows, MergeQueueItem{RoomID: r.RoomID, ChangeID: defaultRepo(r), URL: "https://" + defaultRepo(r), Head: p.Head, State: defaultQueueState(status), Reason: defaultReason(p, status)})
+		// A repository row carries the same typed main facts as a PR row, so a
+		// screen words them and no service sentence reaches it.
+		rows = append(rows, MergeQueueItem{RoomID: r.RoomID, ChangeID: defaultRepo(r), URL: "https://" + defaultRepo(r), Head: p.Head, State: defaultQueueState(status),
+			Main: &MainCI{State: status, Head: p.Head, Wait: defaultWait(p, status)}})
 	}
 	return rows, nil
 }

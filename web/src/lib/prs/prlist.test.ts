@@ -346,8 +346,8 @@ test('the merge box has a checks, a review and a merge row', () => {
 test('the queue header says how main CI stands in a few words, and nothing when it passed', () => {
   const q = (main?: MergeItem['main']) => [{ item: { state: 'ready', main } }]
   assert.equal(queueLine(q({ state: 'passed', head: '47a5ff71c0ffee' })), null)
-  assert.deepEqual(queueLine(q({ state: 'pending', head: 'a', reason: 'Automatic merging is waiting for completed GitHub CI on main' })), { text: 'waiting for main CI', tone: 'gold' })
-  assert.deepEqual(queueLine(q({ state: 'failed', head: 'a', reason: '' })), { text: 'main CI failed', tone: 'coral' })
+  assert.deepEqual(queueLine(q({ state: 'pending', head: 'a', wait: { kind: 'pending', base: 'main' } })), { text: 'waiting for main CI', tone: 'gold' })
+  assert.deepEqual(queueLine(q({ state: 'failed', head: 'a', wait: { kind: 'failed', base: 'main' } })), { text: 'main CI failed', tone: 'coral' })
   assert.equal(queueLine([]), null)
   assert.equal(queueLine(q(undefined)), null)
 })
