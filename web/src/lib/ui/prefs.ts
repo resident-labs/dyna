@@ -62,7 +62,7 @@ export function saveChannelList(value: string) {
 // lastRoom is the room the owner had open: {room, view}, or null when none
 // was saved. room is '' for the all-rooms page.
 // The views a room reopens on: the feed filters and the workspace views.
-const VIEWS = ['general', 'files', 'github', 'issues', 'cihealth', 'library', 'terminal', 'jobs']
+const VIEWS = ['general', 'files', 'github', 'issues', 'library', 'terminal', 'jobs']
 
 const viewOrGeneral = (view: unknown) => (typeof view === 'string' && (VIEWS.includes(view) || /^channel:[^\s]+$/.test(view)) ? view : 'general')
 
