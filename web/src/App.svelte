@@ -2176,8 +2176,10 @@
   // A hook card asks for its run's log. Hooks belong to the repository, and
   // Room settings manages them for every room on it, so the modal opens on
   // Hooks with the repo and the run already in front, as `dyna git hooks log` reads.
+  // The pane reports a run this room's repository does not hold.
   function openHookLog(target: HookLogTarget) {
     navOpen = false
+    if (!room) { say('Open a room to see its hook runs.'); return }
     showSettings = false
     roomSettingsAt = { start: 'hooks', hookRun: target }
     roomSettingsKey++
