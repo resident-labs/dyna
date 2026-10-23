@@ -4,6 +4,7 @@ package childenv
 import (
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -40,4 +41,30 @@ func WithoutLocks(env []string) []string {
 func Clean(cmd *exec.Cmd) *exec.Cmd {
 	cmd.Env = WithoutLocks(cmd.Environ())
 	return cmd
+}
+
+// Merge returns base with overrides applied, without DYNA_* entries, with term
+// as TERM, sorted by key. A later entry replaces an earlier one. It reads no
+// process state, so a caller passes the host environment as base.
+func Merge(base, overrides []string, term string) []string {
+	merged := map[string]string{}
+	for _, list := range [][]string{base, overrides} {
+		for _, item := range list {
+			key, value, ok := strings.Cut(item, "=")
+			if ok && !strings.HasPrefix(key, "DYNA_") {
+				merged[key] = value
+			}
+		}
+	}
+	merged["TERM"] = term
+	keys := make([]string, 0, len(merged))
+	for key := range merged {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key+"="+merged[key])
+	}
+	return out
 }
