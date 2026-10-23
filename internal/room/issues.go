@@ -138,12 +138,15 @@ func (s *Store) Issues(roomID string, all bool) ([]Issue, error) {
 	return out, rows.Err()
 }
 
-// Migrate brings the room record, issue, pin and owner-read tables in
-// dataDir's dyna.db to this version.
+// Migrate brings the room record, issue, pin, owner-read and post-index
+// tables in dataDir's dyna.db to this version.
 // Only the engine calls it, at start (requirement 41).
 func Migrate(dataDir string) error {
 	s := &Store{Root: filepath.Join(dataDir, "rooms")}
 	if err := s.migrateRecords(); err != nil {
+		return err
+	}
+	if err := s.migratePostIndex(); err != nil {
 		return err
 	}
 	if _, err := s.issuesDB(); err != nil {
