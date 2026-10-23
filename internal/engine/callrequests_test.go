@@ -4,7 +4,6 @@ import (
 	"context"
 	"runtime"
 	"slices"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -56,8 +55,18 @@ func TestCallRequestPushFallbackAndCloseDelivery(t *testing.T) {
 	deliver(row.AskedAt.Add(24 * time.Hour))
 	deliver(row.AskedAt.Add(24 * time.Hour))
 	posts, err := s.rooms.Notify.Rooms.Messages(rec.ID)
-	if err != nil || len(posts) != 1 || posts[0].Text != "The owner declined the call (c1)" || !posts[0].Addressed(rec.Name) {
+	if err != nil || len(posts) != 1 || !posts[0].Addressed(rec.Name) {
 		t.Fatalf("close posts: %+v, %v", posts, err)
+	}
+	ev, ok := posts[0].Call()
+	if !ok || ev.Type != room.CallDeclined || ev.Call != row.ID {
+		t.Fatalf("close event = %+v, %v", ev, ok)
+	}
+	if posts[0].Kind != string(room.FamilyCall) || posts[0].From != rec.Name || posts[0].Human {
+		t.Fatalf("close post is not a typed call event: %+v", posts[0])
+	}
+	if posts[0].Text != "The owner declined the call c1." {
+		t.Fatalf("close text = %q", posts[0].Text)
 	}
 	saved, err := st.Get(rec.ID, row.ID)
 	if err != nil || !saved.CloseDelivered {
@@ -82,13 +91,16 @@ func TestCallRequestPushFallbackAndCloseDelivery(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := questions.PostID(rec.ID, second.ID, "call-closed")
-	if _, err := s.rooms.Notify.Rooms.Post(rec.ID, room.PostInput{Wake: true, ID: id, From: rec.Name + ":voice-call", To: []string{rec.Name}, Text: "Withdrawn (" + second.ID + ")", Source: room.SourceVoice}); err != nil {
+	if _, err := s.rooms.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: rec.ID, ID: id, Event: room.CallEvent{Type: room.CallWithdrawn, Call: second.ID}, To: []string{rec.Name}}); err != nil {
 		t.Fatal(err)
 	}
 	deliver(second.AskedAt.Add(5 * time.Second))
 	posts, err = s.rooms.Notify.Rooms.Messages(rec.ID)
-	if err != nil || len(posts) != 2 || !strings.Contains(posts[1].Text, "Withdrawn") {
+	if err != nil || len(posts) != 2 {
 		t.Fatalf("retry duplicated close: %+v, %v", posts, err)
+	}
+	if withdrawn, ok := posts[1].Call(); !ok || withdrawn.Type != room.CallWithdrawn {
+		t.Fatalf("retried close = %+v, %v", withdrawn, ok)
 	}
 }
 

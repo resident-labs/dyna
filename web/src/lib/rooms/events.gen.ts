@@ -4,7 +4,7 @@
 export type PRType = "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "returned" | "merged" | "closed" | "comment" | "held-comment" | "review-assigned" | "update"
 
 // MergeStep is a named string type of an event payload.
-export type MergeStep = "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision"
+export type MergeStep = "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested"
 
 // IssueChange is a named string type of an event payload.
 export type IssueChange = "filed" | "updated" | "closed"
@@ -22,7 +22,7 @@ export type GoalState = "active" | "done" | "dropped"
 export type CheckinState = "running" | "queued" | "idle"
 
 // SessionChange is a named string type of an event payload.
-export type SessionChange = "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned"
+export type SessionChange = "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "transfer-request"
 
 // AccountReason is a named string type of an event payload.
 export type AccountReason = "usage-limit" | "fallback"
@@ -68,6 +68,9 @@ export type ReviewSeverity = "blocking" | "should-fix" | "nit"
 
 // ReviewStopReason is a named string type of an event payload.
 export type ReviewStopReason = "superseded" | "duplicate" | "empty" | "too-large"
+
+// CallState is a named string type of an event payload.
+export type CallState = "joined" | "declined" | "withdrawn"
 
 // MergePR is a struct of an event payload.
 export interface MergePR {
@@ -190,7 +193,7 @@ export interface RuleEvent {
   text?: string
 }
 
-// MergeEvent is the payload of the merge/queued and merge/trial and merge/checks and merge/landed and merge/failed and merge/returned and merge/conflict and merge/rolled-back events.
+// MergeEvent is the payload of the merge/queued and merge/trial and merge/checks and merge/landed and merge/failed and merge/returned and merge/conflict and merge/rolled-back and merge/fix-requested events.
 export interface MergeEvent {
   type: MergeStep
   trialId: string
@@ -205,6 +208,8 @@ export interface MergeEvent {
   label?: string
   member?: number
   key?: string
+  head?: string
+  actor?: string
   detail?: string
 }
 
@@ -220,6 +225,12 @@ export interface MachineEvent {
   floorBytes: number
   summary: string
   atMs: number
+}
+
+// CallEvent is the payload of the call/joined and call/declined and call/withdrawn events.
+export interface CallEvent {
+  type: CallState
+  call: string
 }
 
 // ReviewEvent is the payload of the review/result events.
@@ -266,7 +277,7 @@ export interface PREvent {
   dropped?: number
 }
 
-// SessionEvent is the payload of the session/renamed and session/promoted and session/adopted and session/account and session/instructions and session/seat and session/spawned events.
+// SessionEvent is the payload of the session/renamed and session/promoted and session/adopted and session/account and session/instructions and session/seat and session/spawned and session/transfer-request events.
 export interface SessionEvent {
   type: SessionChange
   session: string
@@ -276,6 +287,7 @@ export interface SessionEvent {
   to?: string
   reason?: AccountReason
   profile?: string
+  transfer?: string
   dir?: string
   seat?: string
   sections?: InstructionChange[]
@@ -358,10 +370,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | ReviewEvent | PREvent | SessionEvent | AlertEvent | ServiceFailedEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | CallEvent | ReviewEvent | PREvent | SessionEvent | AlertEvent | ServiceFailedEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
 
-export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "low-disk" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "doctor" | "engine" | "root-flush" | "withdrawn" | "completed" | "stopped"
+export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "root-flush" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -601,6 +613,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     text: "{note}",
   },
   {
+    family: "merge",
+    type: "fix-requested",
+    renderer: "MergeCard",
+    quiet: false,
+    wake: "root-if-needed",
+    once: true,
+    audience: "room",
+    text: "Merge fix requested by {actor} for {label} at {head}. This one merge bypasses main CI; fresh PR checks and approval remain required.",
+  },
+  {
     family: "machine",
     type: "low-disk",
     renderer: "MachineDiskCard",
@@ -609,6 +631,36 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     once: true,
     audience: "room",
     text: "Machine {name} is low on disk: {summary}. Dyna starts no CI there until space is freed.",
+  },
+  {
+    family: "call",
+    type: "joined",
+    renderer: "CallCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "room",
+    text: "The owner joined the call {call}.",
+  },
+  {
+    family: "call",
+    type: "declined",
+    renderer: "CallCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "room",
+    text: "The owner declined the call {call}.",
+  },
+  {
+    family: "call",
+    type: "withdrawn",
+    renderer: "CallCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "room",
+    text: "The call request {call} was withdrawn.",
   },
   {
     family: "review",
@@ -831,6 +883,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     text: "Started @{name} ({profile}) in {dir}:",
   },
   {
+    family: "session",
+    type: "transfer-request",
+    renderer: "SessionNoteCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "session",
+    text: "[DYNA MODEL TRANSFER] Prepare a handoff for transfer {transfer}:",
+  },
+  {
     family: "alert",
     type: "doctor",
     renderer: "AlertCard",
@@ -933,13 +995,13 @@ export const eventSpecs: readonly EventSpecEntry[] = [
 ]
 
 const P_R_TYPE: ReadonlySet<unknown> = new Set(["opened", "ready", "approved", "changes", "ci-failed", "ci-paused", "ci-passed", "returned", "merged", "closed", "comment", "held-comment", "review-assigned", "update"])
-const MERGE_STEP: ReadonlySet<unknown> = new Set(["queued", "trial", "checks", "landed", "failed", "returned", "conflict", "rolled-back", "decision"])
+const MERGE_STEP: ReadonlySet<unknown> = new Set(["queued", "trial", "checks", "landed", "failed", "returned", "conflict", "rolled-back", "decision", "fix-requested"])
 const ISSUE_CHANGE: ReadonlySet<unknown> = new Set(["filed", "updated", "closed"])
 const ISSUE_STATE: ReadonlySet<unknown> = new Set(["open", "goal", "exported", "closed"])
 const GOAL_CHANGE: ReadonlySet<unknown> = new Set(["added", "edited", "finished", "dropped"])
 const GOAL_STATE: ReadonlySet<unknown> = new Set(["active", "done", "dropped"])
 const CHECKIN_STATE: ReadonlySet<unknown> = new Set(["running", "queued", "idle"])
-const SESSION_CHANGE: ReadonlySet<unknown> = new Set(["renamed", "promoted", "adopted", "account", "instructions", "seat", "spawned"])
+const SESSION_CHANGE: ReadonlySet<unknown> = new Set(["renamed", "promoted", "adopted", "account", "instructions", "seat", "spawned", "transfer-request"])
 const ACCOUNT_REASON: ReadonlySet<unknown> = new Set(["usage-limit", "fallback"])
 const INSTRUCTION_ACTION: ReadonlySet<unknown> = new Set(["items", "body", "removed"])
 const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine"])
@@ -955,6 +1017,7 @@ const MERGE_REASON_KIND: ReadonlySet<unknown> = new Set(["checks-failed", "confl
 const REVIEW_KIND: ReadonlySet<unknown> = new Set(["approve", "changes", "approve-fast", "stop-early"])
 const REVIEW_SEVERITY: ReadonlySet<unknown> = new Set(["blocking", "should-fix", "nit"])
 const REVIEW_STOP_REASON: ReadonlySet<unknown> = new Set(["superseded", "duplicate", "empty", "too-large"])
+const CALL_STATE: ReadonlySet<unknown> = new Set(["joined", "declined", "withdrawn"])
 
 export function isMergePR(v: unknown): v is MergePR {
   return isRecord(v) &&
@@ -1112,6 +1175,8 @@ export function isMergeEvent(v: unknown): v is MergeEvent {
     (v.label === undefined || typeof v.label === "string") &&
     (v.member === undefined || Number.isInteger(v.member)) &&
     (v.key === undefined || typeof v.key === "string") &&
+    (v.head === undefined || typeof v.head === "string") &&
+    (v.actor === undefined || typeof v.actor === "string") &&
     (v.detail === undefined || typeof v.detail === "string")
 }
 
@@ -1127,6 +1192,12 @@ export function isMachineEvent(v: unknown): v is MachineEvent {
     Number.isInteger(v.floorBytes) &&
     typeof v.summary === "string" &&
     Number.isInteger(v.atMs)
+}
+
+export function isCallEvent(v: unknown): v is CallEvent {
+  return isRecord(v) &&
+    CALL_STATE.has(v.type) &&
+    typeof v.call === "string"
 }
 
 export function isReviewEvent(v: unknown): v is ReviewEvent {
@@ -1183,6 +1254,7 @@ export function isSessionEvent(v: unknown): v is SessionEvent {
     (v.to === undefined || typeof v.to === "string") &&
     (v.reason === undefined || ACCOUNT_REASON.has(v.reason)) &&
     (v.profile === undefined || typeof v.profile === "string") &&
+    (v.transfer === undefined || typeof v.transfer === "string") &&
     (v.dir === undefined || typeof v.dir === "string") &&
     (v.seat === undefined || typeof v.seat === "string") &&
     (v.sections === undefined || isInstructionChangeList(v.sections)) &&
@@ -1287,7 +1359,11 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "merge" && type === "conflict") return isMergeEvent(v)
   if (family === "merge" && type === "rolled-back") return isMergeEvent(v)
   if (family === "merge" && type === "decision") return isMergeDecisionEvent(v)
+  if (family === "merge" && type === "fix-requested") return isMergeEvent(v)
   if (family === "machine" && type === "low-disk") return isMachineEvent(v)
+  if (family === "call" && type === "joined") return isCallEvent(v)
+  if (family === "call" && type === "declined") return isCallEvent(v)
+  if (family === "call" && type === "withdrawn") return isCallEvent(v)
   if (family === "review" && type === "result") return isReviewEvent(v)
   if (family === "pr" && type === "opened") return isPREvent(v)
   if (family === "pr" && type === "ready") return isPREvent(v)
@@ -1310,6 +1386,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "session" && type === "instructions") return isSessionEvent(v)
   if (family === "session" && type === "seat") return isSessionEvent(v)
   if (family === "session" && type === "spawned") return isSessionEvent(v)
+  if (family === "session" && type === "transfer-request") return isSessionEvent(v)
   if (family === "alert" && type === "doctor") return isAlertEvent(v)
   if (family === "alert" && type === "engine") return isAlertEvent(v)
   if (family === "service" && type === "failed") return isServiceFailedEvent(v)

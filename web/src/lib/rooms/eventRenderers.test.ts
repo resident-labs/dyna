@@ -192,8 +192,21 @@ const fixtures: Record<string, EventPayload> = {
     ]),
   ),
   'merge/decision': { note: 'Keep the queue paused until the flake is fixed' },
+  'merge/fix-requested': {
+    type: 'fix-requested',
+    trialId: 'github.com/acme/app#242',
+    repo: 'acme/app',
+    base: 'main',
+    prs: [{ number: 242, title: 'Tidy the composer', url: 'https://github.com/acme/app/pull/242' }],
+    head: 'c'.repeat(40),
+    actor: 'the room owner (ari)',
+    label: 'PR #242',
+  },
   ...Object.fromEntries(
-    (['renamed', 'promoted', 'adopted', 'account', 'instructions', 'seat', 'spawned'] as const).map((type) => [
+    (['joined', 'declined', 'withdrawn'] as const).map((type) => [`call/${type}`, { type, call: 'c1' }]),
+  ),
+  ...Object.fromEntries(
+    (['renamed', 'promoted', 'adopted', 'account', 'instructions', 'seat', 'spawned', 'transfer-request'] as const).map((type) => [
       `session/${type}`,
       {
         type,
@@ -206,8 +219,11 @@ const fixtures: Record<string, EventPayload> = {
         profile: type === 'spawned' ? 'deepseek' : undefined,
         dir: type === 'spawned' ? '/home/a/Work/app' : undefined,
         seat: type === 'seat' ? 'Internal root took back the seat' : undefined,
+        transfer: type === 'transfer-request' ? 'tr_ab12cd34' : undefined,
         sections: type === 'instructions' ? [{ name: 'Room rules', action: 'items', added: ['Rule 4'], removed: ['Rule 2'] }] : undefined,
-        detail: `The ${type} note body.`,
+        detail: type === 'transfer-request'
+          ? 'Prepare a handoff for the replacement model. Submit it with `dyna subagent transfer handoff ses_20261023-120000-00000000 --token tr_ab12cd34`.'
+          : `The ${type} note body.`,
       },
     ]),
   ),
@@ -347,16 +363,87 @@ function fixtureTip(payload: EventPayload): string {
   if ('questionId' in payload) return payload.questionId
   if ('shellId' in payload) return payload.label
   if ('runId' in payload) return payload.name
+  if ('call' in payload) return payload.call
   if ('session' in payload) {
     // A turn end names its session and carries no session change of its own.
     if (!('type' in payload)) return payload.session
     if (payload.type === 'account') return payload.to ?? payload.session
     if (payload.type === 'renamed' || payload.type === 'spawned') return payload.name ?? payload.session
     if (payload.type === 'seat') return payload.seat ?? payload.session
+    if (payload.type === 'transfer-request') return payload.transfer ?? payload.session
     return payload.session
   }
   return payload.detail || payload.reason
 }
+
+test('a call row says how the owner answered, with the call it answers', () => {
+  for (const [type, words] of [['joined', /Owner joined the call/], ['declined', /Owner declined the call/], ['withdrawn', /Call request withdrawn/]] as const) {
+    const payload = fixtures[`call/${type}`]
+    assert.ok(payload, `the call/${type} fixture is missing`)
+    for (const surface of ['feed', 'dm'] as const) {
+      const post = postFor('call', type, payload, `The owner ${type} the call c1.`)
+      const target = document.createElement('div')
+      document.body.append(target)
+      const mounted = web.mount(web.eventComponents.CallCard, { target, props: { post, notice: post.notice, surface } })
+      web.flushSync()
+      const text = (target.textContent ?? '').trim()
+      assert.match(text, words, `call/${type} on ${surface}: ${text}`)
+      // The request's own ID is a fact of the row, never a label inside the
+      // agent text.
+      assert.equal(need(target.querySelector('.id'), 'the call ID').textContent, 'c1')
+      web.unmount(mounted)
+      target.remove()
+    }
+  }
+})
+
+test('a transfer request names the transfer and keeps the instructions', () => {
+  const payload = fixtures['session/transfer-request']
+  assert.ok(payload && 'transfer' in payload, 'the transfer-request fixture is missing')
+  const feed = postFor('session', 'transfer-request', payload, '[DYNA MODEL TRANSFER] Prepare a handoff for transfer tr_ab12cd34:')
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.SessionNoteCard, { target, props: { post: feed, notice: feed.notice, surface: 'feed' } })
+  web.flushSync()
+  let text = (target.textContent ?? '').trim()
+  assert.match(text, /Handoff requested for model transfer/)
+  assert.equal(need(target.querySelector('.id'), 'the transfer ID').textContent, 'tr_ab12cd34')
+  // The feed keeps the instructions behind Details; the row states the fact.
+  assert.match(need(target.querySelector('details'), 'the instructions fold').textContent ?? '', /dyna subagent transfer handoff/)
+  web.unmount(mounted)
+  target.remove()
+
+  const dm = postFor('session', 'transfer-request', payload, '[DYNA MODEL TRANSFER] Prepare a handoff for transfer tr_ab12cd34:')
+  const dmTarget = document.createElement('div')
+  document.body.append(dmTarget)
+  const mountedDm = web.mount(web.eventComponents.SessionNoteCard, { target: dmTarget, props: { post: dm, notice: dm.notice, surface: 'dm' } })
+  web.flushSync()
+  text = (dmTarget.textContent ?? '').trim()
+  // The DM already belongs to the session, so its row names neither the
+  // session nor a second copy of the instructions.
+  assert.doesNotMatch(text, /dyna:notice-session:/)
+  assert.doesNotMatch(text, /dyna subagent transfer handoff/)
+  assert.match(text, /Handoff requested for model transfer/)
+  web.unmount(mountedDm)
+  dmTarget.remove()
+})
+
+test('a merge-fix request names who asked and shows no trial progress', () => {
+  const payload = fixtures['merge/fix-requested']
+  assert.ok(payload && 'actor' in payload, 'the fix-requested fixture is missing')
+  const post = postFor('merge', 'fix-requested', payload, 'Merge fix requested by the room owner (ari) for PR #242.')
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.MergeCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+  web.flushSync()
+  const text = (target.textContent ?? '').trim()
+  assert.match(text, /Merge fix requested for #242 into main/)
+  assert.match(text, /Requested by the room owner \(ari\)/)
+  // A request has no trial, so the card shows no progress bar for one.
+  assert.equal(target.querySelector('.steps'), null, 'a merge-fix request drew a trial progress bar')
+  web.unmount(mounted)
+  target.remove()
+})
 
 test('a post stored before the typed events still draws its family card', () => {
   // Old history names no event type. The family's card reads the stored text,
