@@ -22,6 +22,7 @@ import (
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/textutil"
 )
 
 type Ref struct {
@@ -881,11 +882,18 @@ func workflowPREvent(body []byte) (bool, error) {
 }
 
 func success(s string) bool { return s == "success" || s == "neutral" || s == "skipped" }
+
+// clipNote marks text that this package's clip cut. Its readers find the
+// remaining text on GitHub.
+const clipNote = "\n[truncated; read the full text on GitHub]"
+
+// clip bounds s to n bytes, cut back to a whole rune, and names where the
+// rest lives.
 func clip(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return strings.ToValidUTF8(s[:n], "") + "\n[truncated; read the full text on GitHub]"
+	return textutil.Prefix(s, n) + clipNote
 }
 
 var blankRuns = regexp.MustCompile(`\n{3,}`)

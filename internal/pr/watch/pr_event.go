@@ -141,9 +141,3 @@ func reviewSummary(summary string) string {
 	line, _, _ := strings.Cut(strings.TrimSpace(keepLines(summary)), "\n")
 	return clip(line, 300)
 }
-
-// firstLine is the short facts line of a notice body.
-func firstLine(text string) string {
-	line, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
-	return clip(line, 200)
-}

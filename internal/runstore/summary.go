@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"dyna-agent/internal/textutil"
 )
 
 // summaryRunes bounds a summary line.
@@ -20,18 +22,18 @@ func Summary(raw string) string {
 	var v any
 	if json.Unmarshal([]byte(raw), &v) != nil {
 		line, _, _ := strings.Cut(raw, "\n")
-		return clip(line)
+		return textutil.ClipOneLine(line, summaryRunes)
 	}
 	switch x := v.(type) {
 	case string:
 		line, _, _ := strings.Cut(strings.TrimSpace(x), "\n")
-		return clip(line)
+		return textutil.ClipOneLine(line, summaryRunes)
 	case []any:
 		return listLine(len(x), "items", x)
 	case map[string]any:
 		for _, k := range []string{"summary", "title", "name", "description"} {
 			if s, ok := x[k].(string); ok && strings.TrimSpace(s) != "" {
-				return clip(s)
+				return textutil.ClipOneLine(s, summaryRunes)
 			}
 		}
 		fields := orderedFields(raw)
@@ -44,21 +46,21 @@ func Summary(raw string) string {
 		}
 		for _, f := range fields {
 			if s, ok := x[f].(string); ok && strings.TrimSpace(s) != "" {
-				return clip(s)
+				return textutil.ClipOneLine(s, summaryRunes)
 			}
 		}
 		for _, f := range fields {
 			switch x[f].(type) {
 			case map[string]any, []any, nil:
 			default:
-				return clip(fmt.Sprint(x[f]))
+				return textutil.ClipOneLine(fmt.Sprint(x[f]), summaryRunes)
 			}
 		}
 		return ""
 	case nil:
 		return ""
 	default:
-		return clip(fmt.Sprint(x))
+		return textutil.ClipOneLine(fmt.Sprint(x), summaryRunes)
 	}
 }
 
@@ -72,7 +74,7 @@ func listLine(n int, noun string, list []any) string {
 	if first == "" {
 		return fmt.Sprintf("%d %s", n, noun)
 	}
-	return clip(fmt.Sprintf("%d %s: %s", n, noun, first))
+	return textutil.ClipOneLine(fmt.Sprintf("%d %s: %s", n, noun, first), summaryRunes)
 }
 
 // orderedFields lists a JSON object's top-level keys in source order.
@@ -95,12 +97,4 @@ func orderedFields(raw string) []string {
 		keys = append(keys, key)
 	}
 	return keys
-}
-
-func clip(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if r := []rune(s); len(r) > summaryRunes {
-		return string(r[:summaryRunes]) + "…"
-	}
-	return s
 }

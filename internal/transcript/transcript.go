@@ -18,6 +18,7 @@ import (
 
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/textutil"
 	"dyna-agent/internal/workeroutput"
 )
 
@@ -221,7 +222,7 @@ func fromEventsWithSteering(events []workeroutput.Event, steers []Item) ([]Item,
 			}
 			items = append(items, Item{Kind: Reply, TS: ts, Text: text, source: e.SourceOffset})
 		case "reasoning":
-			if line := firstLine(stripEmphasis(e.Text)); line != "" {
+			if line := textutil.FirstLine(stripEmphasis(e.Text)); line != "" {
 				// A run of thoughts reads as one line: the latest, with a count.
 				if n := len(items); n > 0 && items[n-1].Kind == Thought {
 					items[n-1].Text, items[n-1].TS = line, ts
@@ -499,7 +500,7 @@ func Summarize(e workeroutput.Event) Tool {
 		t.Target = str("command", "file_path", "path", "query", "pattern", "description")
 	}
 	if t.Target == "" && t.Verb == "ran" {
-		t.Target = firstLine(e.Input)
+		t.Target = textutil.FirstLine(e.Input)
 	}
 	if t.JobOp = dynaShellOp(lower); t.JobOp == "run" {
 		if m := jobLead.FindStringSubmatch(mcpResultText(e.Output)); m != nil {
@@ -520,7 +521,7 @@ func Summarize(e workeroutput.Event) Tool {
 
 // shellSummary recognizes dyna's own commands; anything else "ran".
 func shellSummary(cmd, output string) (verb, target string) {
-	line := firstLine(cmd)
+	line := textutil.FirstLine(cmd)
 	trimmed := strings.TrimSpace(line)
 	for _, prefix := range []string{"cd ", "export "} {
 		if strings.HasPrefix(trimmed, prefix) {
@@ -537,7 +538,7 @@ func shellSummary(cmd, output string) (verb, target string) {
 				break
 			}
 			if arg == "--help" || arg == "-h" {
-				return "ran", truncate(trimmed, 160)
+				return "ran", textutil.Clip(trimmed, 160)
 			}
 		}
 		sub := strings.Join(fields[1:min(3, len(fields))], " ")
@@ -551,7 +552,7 @@ func shellSummary(cmd, output string) (verb, target string) {
 			}
 			return "started a dyna workflow", id
 		case strings.HasPrefix(sub, "subagent start"):
-			name := argAt(strings.Fields(firstLine(output)), 0)
+			name := argAt(strings.Fields(textutil.FirstLine(output)), 0)
 			if !strings.Contains(name, ":") {
 				name = ""
 			}
@@ -567,13 +568,13 @@ func shellSummary(cmd, output string) (verb, target string) {
 		case fields[1] == "msg":
 			return "messaged", argAt(fields, 2)
 		case fields[1] == "shell" && len(fields) > 2 && fields[2] == "start":
-			return "started a background shell", truncate(trimmed, 120)
+			return "started a background shell", textutil.Clip(trimmed, 120)
 		}
 	}
 	if strings.HasPrefix(trimmed, "apply_patch") {
 		return "edited", "files"
 	}
-	if m := sshWrap.FindStringSubmatch(firstLine(cmd)); m != nil {
+	if m := sshWrap.FindStringSubmatch(textutil.FirstLine(cmd)); m != nil {
 		inner := m[3]
 		if inner == "" {
 			inner = m[4]
@@ -583,9 +584,9 @@ func shellSummary(cmd, output string) (verb, target string) {
 			host = host[i+1:]
 		}
 		inner = strings.ReplaceAll(strings.ReplaceAll(inner, `'\''`, `'`), `'"'"'`, `'`)
-		return "ran on " + host, truncate(strings.TrimRight(strings.TrimSpace(inner), `'"\`), 160)
+		return "ran on " + host, textutil.Clip(strings.TrimRight(strings.TrimSpace(inner), `'"\`), 160)
 	}
-	target = truncate(trimmed, 160)
+	target = textutil.Clip(trimmed, 160)
 	if n := strings.Count(strings.TrimSpace(cmd), "\n"); n > 0 {
 		target += fmt.Sprintf("  (+%d lines)", n)
 	}
@@ -667,9 +668,9 @@ var quoted = regexp.MustCompile(`'([^']*)'|"((?:[^"\\]|\\.)*)"`)
 func quotedArg(s string) string {
 	if m := quoted.FindStringSubmatch(s); m != nil {
 		if m[1] != "" {
-			return truncate(m[1], 160)
+			return textutil.Clip(m[1], 160)
 		}
-		return truncate(m[2], 160)
+		return textutil.Clip(m[2], 160)
 	}
 	return ""
 }
@@ -687,25 +688,8 @@ func shortPath(p string) string {
 	return parent + "/" + base
 }
 
-func firstLine(s string) string {
-	for _, line := range strings.Split(s, "\n") {
-		if t := strings.TrimSpace(line); t != "" {
-			return t
-		}
-	}
-	return ""
-}
-
 func stripEmphasis(s string) string {
 	return strings.NewReplacer("**", "", "__", "").Replace(s)
-}
-
-func truncate(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n-1]) + "…"
 }
 
 // ---- session turns ---------------------------------------------------------
@@ -917,13 +901,13 @@ func Activity(t Turn) string {
 			}
 			target := it.Tool.Target
 			if target != "" {
-				target = " " + truncate(target, 60)
+				target = " " + textutil.Clip(target, 60)
 			}
 			return it.Tool.Verb + target
 		case Reply:
 			return "writing"
 		case Thought:
-			return truncate(it.Text, 60)
+			return textutil.Clip(it.Text, 60)
 		case Compaction:
 			if it.Compaction.State == CompactionStarted {
 				return "compacting context"

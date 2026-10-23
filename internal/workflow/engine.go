@@ -41,6 +41,7 @@ import (
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/structuredoutput"
+	"dyna-agent/internal/textutil"
 	"dyna-agent/internal/workeroutput"
 	"dyna-agent/internal/workerprompt"
 	"dyna-agent/internal/workflowresolve"
@@ -371,7 +372,7 @@ func (p callPlan) apply(ev *runstore.Event) {
 func (e *engine) emitLog(provenance, msg string) {
 	e.emit(runstore.Event{
 		T:          "log",
-		Msg:        truncate(msg, 4000),
+		Msg:        textutil.ClipOneLine(msg, 4000),
 		Provenance: runstore.CanonicalLogProvenance(provenance),
 	})
 }
@@ -536,7 +537,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		cp.apply(&ev)
 		e.emit(ev)
 	}
-	emitA(runstore.Event{T: "agent_start", ID: id, Label: label, Profile: prof.Name, Phase: phase, Preview: truncate(prompt, 160)})
+	emitA(runstore.Event{T: "agent_start", ID: id, Label: label, Profile: prof.Name, Phase: phase, Preview: textutil.ClipOneLine(prompt, 160)})
 
 	// Resume: replay a cached result without consuming a worker slot.
 	if e.opts.Cache != nil && isolation == "" {
@@ -594,16 +595,16 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		if err == nil {
 			err = fmt.Errorf("workflow is already finishing")
 		}
-		emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", Error: truncate(err.Error(), 2000)})
+		emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", Error: textutil.ClipOneLine(err.Error(), 2000)})
 		reject(err)
 		return vm.ToValue(promise)
 	}
 	journalPath := ""
 	failBeforeRun := func(err error) {
 		if e.opts.Run != nil && journalPath != "" {
-			_ = e.opts.Run.AppendAgentJournal(id, runstore.AgentJournalEntry{Kind: "error", Message: truncate(err.Error(), 4000)})
+			_ = e.opts.Run.AppendAgentJournal(id, runstore.AgentJournalEntry{Kind: "error", Message: textutil.ClipOneLine(err.Error(), 4000)})
 		}
-		emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", Error: truncate(err.Error(), 2000)})
+		emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", Error: textutil.ClipOneLine(err.Error(), 2000)})
 		reject(err)
 	}
 	go func() {
@@ -634,7 +635,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 			var journalErr error
 			journalPath, journalErr = e.opts.Run.StartAgentJournal(id, label, prof.Name, phase, prompt)
 			if journalErr != nil {
-				emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", Error: truncate(journalErr.Error(), 2000)})
+				emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", Error: textutil.ClipOneLine(journalErr.Error(), 2000)})
 				reject(fmt.Errorf("start work journal for %s: %w", label, journalErr))
 				return
 			}
@@ -716,9 +717,9 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 			wt, baseCommit, cleanup, werr := worktrees.CreateForRun(actx, cwd, worktreeRetention, e.runID(), owner)
 			if werr != nil {
 				if e.opts.Run != nil && journalPath != "" {
-					_ = e.opts.Run.AppendAgentJournal(id, runstore.AgentJournalEntry{Kind: "error", Message: truncate(werr.Error(), 4000)})
+					_ = e.opts.Run.AppendAgentJournal(id, runstore.AgentJournalEntry{Kind: "error", Message: textutil.ClipOneLine(werr.Error(), 4000)})
 				}
-				emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", Error: truncate(werr.Error(), 2000)})
+				emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", Error: textutil.ClipOneLine(werr.Error(), 2000)})
 				reject(werr)
 				return
 			}
@@ -747,7 +748,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 				nudgeSent[harness.JournalNudgeIdle] = false
 				emitA(runstore.Event{
 					T: "agent_journal", ID: id, Label: label, Profile: prof.Name, Phase: phase,
-					Kind: entry.Kind, Preview: truncate(entry.Message, 240),
+					Kind: entry.Kind, Preview: textutil.ClipOneLine(entry.Message, 240),
 				})
 			}
 			journalOpts.OnNudge = func(nudge harness.JournalNudge) {
@@ -792,7 +793,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 				OnMessage: func(message runstore.SteeringMessage, _ *int64) {
 					emitA(runstore.Event{
 						T: "agent_steer", ID: id, Label: label, Profile: prof.Name, Phase: phase,
-						Status: "delivered", Msg: truncate(message.Message, 2000), Preview: truncate(message.Message, 240),
+						Status: "delivered", Msg: textutil.ClipOneLine(message.Message, 2000), Preview: textutil.ClipOneLine(message.Message, 240),
 					})
 				},
 			}
@@ -857,7 +858,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 		if e.opts.Run != nil && journalPath != "" {
 			kind, msg := "complete", "Agent completed the task."
 			if err != nil {
-				kind, msg = "error", truncate(err.Error(), 4000)
+				kind, msg = "error", textutil.ClipOneLine(err.Error(), 4000)
 			}
 			_ = e.opts.Run.AppendAgentJournal(id, runstore.AgentJournalEntry{Kind: kind, Message: msg})
 		}
@@ -870,7 +871,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 			e.opts.Run.Journal(runstore.JournalEntry{ID: id, Label: label, Profile: prof.Name, Key: key, Cwd: cacheCwd, Prompt: prompt, Result: resultAny, Error: errStr, Dir: retainedDir, Worktree: worktreeStatus, Workflow: e.workflowID})
 		}
 		if err != nil {
-			emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", DurMs: dur.Milliseconds(), Error: truncate(err.Error(), 2000), Dir: retainedDir, Worktree: worktreeStatus})
+			emitA(runstore.Event{T: "agent_end", ID: id, Label: label, Profile: prof.Name, Phase: phase, Status: "error", DurMs: dur.Milliseconds(), Error: textutil.ClipOneLine(err.Error(), 2000), Dir: retainedDir, Worktree: worktreeStatus})
 			reject(err)
 			return
 		}
@@ -1007,7 +1008,7 @@ func errorString(err error) string {
 	if err == nil {
 		return ""
 	}
-	return truncate(err.Error(), 2000)
+	return textutil.ClipOneLine(err.Error(), 2000)
 }
 
 func (e *engine) resolveWorkflow(ref string) (string, string, error) {
@@ -1171,7 +1172,7 @@ func (e *engine) recordDelivery(emit func(runstore.Event), id int, label, profil
 		Kind: note.Kind, Status: note.Outcome, DurMs: note.Waited.Milliseconds(), Msg: msg,
 	})
 	if e.opts.Run != nil && journalPath != "" && note.Outcome == harness.DeliveryInterrupted {
-		_ = e.opts.Run.AppendAgentJournal(id, runstore.AgentJournalEntry{Kind: "delivery", Message: truncate(msg, 400)})
+		_ = e.opts.Run.AppendAgentJournal(id, runstore.AgentJournalEntry{Kind: "delivery", Message: textutil.ClipOneLine(msg, 400)})
 	}
 }
 
@@ -1277,14 +1278,6 @@ func optInt(o map[string]any, key string) (int, bool) {
 		return 0, false
 	}
 	return int(f), true
-}
-
-func truncate(s string, n int) string {
-	s = strings.Join(strings.Fields(s), " ") // collapse whitespace for one-line previews
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
 }
 
 func prepareScript(o Options, workflowID string) (string, string, error) {
@@ -1411,7 +1404,7 @@ func resumeNondeterminismWarning(src string) string {
 func cachedSummary(v any) string {
 	b, err := json.Marshal(v)
 	if err != nil {
-		return truncate(fmt.Sprintf("%v", v), 200)
+		return textutil.ClipOneLine(fmt.Sprintf("%v", v), 200)
 	}
 	return runstore.Summary(string(b))
 }
