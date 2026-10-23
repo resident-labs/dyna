@@ -353,6 +353,11 @@ func TestBatchTrialExcludesConflictAndNotifiesAuthor(t *testing.T) {
 	for _, n := range f.e.sent {
 		if n.Target == f.e.author.ID && strings.Contains(n.Text, "/pull/2 conflicts") {
 			found = true
+			// The event names the conflicting member, so its card does not
+			// claim that the PRs which did merge are in conflict too.
+			if n.Merge == nil || n.Merge.Member != 2 {
+				t.Fatalf("conflict event = %+v, want member 2", n.Merge)
+			}
 		}
 	}
 	if !found {
