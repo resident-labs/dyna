@@ -405,6 +405,15 @@ func (s *Store) ListOwner(owner string) ([]Info, error) {
 	return list, err
 }
 
+// ListRoom returns only the room's shells, newest first.
+func (s *Store) ListRoom(roomID string) ([]Info, error) {
+	list, err := s.loadAll("WHERE room_id=?", roomID)
+	for i := range list {
+		list[i] = s.status(list[i])
+	}
+	return list, err
+}
+
 // Tail returns the last n lines of output.log.
 func (s *Store) Tail(id string, n int) (string, error) {
 	dir, err := s.dir(id)
