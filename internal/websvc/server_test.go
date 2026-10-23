@@ -527,16 +527,16 @@ func TestEventsStreamAndRevoke(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Type") != "text/event-stream" {
 		t.Fatalf("events = %d %v", resp.StatusCode, resp.Header)
 	}
-	for e.hub.Stats().Streams == 0 {
-		time.Sleep(time.Millisecond)
-	}
-	e.hub.Publish(hub.Event{Topic: "pins", Room: roomID})
+	// The handler subscribes before it writes hello, so a publish after
+	// hello is registered and cannot be missed.
 	sc := bufio.NewScanner(resp.Body)
 	got := ""
 	sawHello := false
 	for sc.Scan() {
 		if sc.Text() == "event: hello" {
 			sawHello = true
+			e.hub.Publish(hub.Event{Topic: "pins", Room: roomID})
+			continue
 		}
 		if strings.HasPrefix(sc.Text(), "data: ") && sc.Text() != "data: {}" {
 			got = sc.Text()

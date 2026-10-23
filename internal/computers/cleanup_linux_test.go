@@ -4,14 +4,14 @@ package computers
 
 import (
 	"context"
-	"golang.org/x/sys/unix"
 	"net"
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
+	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/store"
+	"golang.org/x/sys/unix"
 )
 
 func TestForkSetsidCleanupHelper(t *testing.T) {
@@ -26,41 +26,32 @@ func TestForkSetsidCleanupHelper(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := mergeEnvironment(os.Environ(), map[string]string{"DYNA_COMPUTER_PROCESS": id})
-	p, err := startProcess(env, filepath.Join(Dir(id), "child.log"), "/bin/sh", "-c", "setsid /bin/sh -c 'sleep 600 & wait' & wait")
+	// The shell writes the FIFO only after it starts the setsid descendant and
+	// the extra sleep, so reading it proves the process tree exists.
+	ready := readyFIFO(t)
+	script := "setsid /bin/sh -c 'sleep 600 & wait' & sleep 600 & printf ready > " + shellquote.Quote(ready) + "; wait"
+	p, err := startProcess(env, filepath.Join(Dir(id), "child.log"), "/bin/sh", "-c", script)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer p.stop()
 	s := &supervisor{ctx: context.Background(), meta: Meta{SessionID: id}, compositor: p, apps: map[int]string{}, relayConns: map[*net.UnixConn]bool{}, viewers: map[string]string{}, state: Status{SessionID: id}}
-	var owned map[int]string
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		owned = s.owned()
-		if len(owned) >= 3 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	awaitReady(t, ready)
+	owned := s.owned()
 	if len(owned) < 3 {
 		t.Fatalf("fork/setsid descendants not created: %+v", owned)
 	}
 	s.stop()
-	deadline = time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		reapAdopted(owned)
-		remaining := 0
-		all := processes()
-		for pid, start := range owned {
-			if all[pid].start == start {
-				remaining++
-			}
-		}
-		if remaining == 0 {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	for pid := range owned {
+		waitProcessGone(t, pid, "processes survived cleanup")
 	}
-	t.Fatalf("processes survived cleanup: %+v", owned)
+	reapAdopted(owned)
+	all := processes()
+	for pid, start := range owned {
+		if all[pid].start == start {
+			t.Fatalf("processes survived cleanup: %+v", owned)
+		}
+	}
 }
 func TestDestroyOfflineKeepsHistory(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())

@@ -30,7 +30,11 @@ func TestProcessGuardFixture(t *testing.T) {
 	case "":
 		return
 	case "runner":
-		c, err := Wrap(fixture("tree", root))
+		tree := fixture("tree", root)
+		// Carry the caller's stdout through the guard, so it can read the tree's
+		// ready line and see the group's pipe end when the group is gone.
+		tree.Stdout = os.Stdout
+		c, err := Wrap(tree)
 		if err != nil {
 			os.Exit(101)
 		}
@@ -49,19 +53,29 @@ func TestProcessGuardFixture(t *testing.T) {
 		}
 		os.Exit(0)
 	case "tree", "background":
-		// This shell owns a background sleep and repeatedly writes tokens.
-		cmd := exec.Command("/bin/sh", "-c", `sleep 60 & echo $! > "$PG_ROOT/sleep"; while :; do printf x >> "$PG_ROOT/tokens"; sleep 0.01; done`)
+		// This shell owns a background sleep and repeatedly writes tokens. It
+		// signals on fd 3 once both exist, so no one has to poll for them.
+		readyIn, readyOut, err := os.Pipe()
+		if err != nil {
+			os.Exit(104)
+		}
+		cmd := exec.Command("/bin/sh", "-c", `sleep 60 & echo $! > "$PG_ROOT/sleep"; printf x >> "$PG_ROOT/tokens"; printf ready >&3; while :; do printf x >> "$PG_ROOT/tokens"; sleep 0.01; done`)
+		cmd.ExtraFiles = []*os.File{readyOut}
 		if err := cmd.Start(); err != nil {
 			os.Exit(104)
 		}
+		readyOut.Close()
 		_ = os.WriteFile(filepath.Join(root, "child"), []byte(strconv.Itoa(cmd.Process.Pid)), 0600)
+		var ready [5]byte
+		if _, err := io.ReadFull(readyIn, ready[:]); err != nil {
+			os.Exit(108)
+		}
+		readyIn.Close()
 		if mode == "background" {
-			deadline := time.Now().Add(2 * time.Second)
-			for (!fileExists(filepath.Join(root, "sleep")) || !fileExists(filepath.Join(root, "tokens"))) && time.Now().Before(deadline) {
-				time.Sleep(time.Millisecond)
-			}
 			os.Exit(37)
 		}
+		// The parent test waits for this byte instead of the child files.
+		_, _ = os.Stdout.WriteString("ready\n")
 		select {}
 	case "bytes":
 		_, _ = io.Copy(os.Stdout, os.Stdin)
@@ -88,6 +102,8 @@ func TestProcessGuardFixture(t *testing.T) {
 			os.Exit(107)
 		}
 		if mode == "group-signal" {
+			// The parent waits for this line instead of the proof file.
+			_, _ = os.Stdout.WriteString("ready\n")
 			select {}
 		}
 		_ = syscall.Kill(os.Getpid(), sig)
@@ -110,17 +126,6 @@ func wrapTest(t *testing.T, cmd *exec.Cmd) *Controller {
 	}
 	return c
 }
-func await(t *testing.T, what string, f func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(8 * time.Second)
-	for time.Now().Before(deadline) {
-		if f() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("timed out: " + what)
-}
 func waitTest(t *testing.T, c *Controller) error {
 	t.Helper()
 	done := make(chan error, 1)
@@ -134,6 +139,15 @@ func waitTest(t *testing.T, c *Controller) error {
 	}
 }
 func fileExists(path string) bool { _, err := os.Stat(path); return err == nil }
+
+// awaitLine blocks until the fixture writes its one ready line on stdout. It is
+// a real event, not an interval.
+func awaitLine(t *testing.T, r io.Reader, what string) {
+	t.Helper()
+	if _, err := io.ReadFull(r, make([]byte, len("ready\n"))); err != nil {
+		t.Fatalf("%s: %v", what, err)
+	}
+}
 func deadReference(t *testing.T, r Reference) {
 	t.Helper()
 	alive, err := Probe(r)
@@ -201,16 +215,22 @@ func TestNormalExitKillsBackgroundGrandchild(t *testing.T) {
 		t.Fatalf("native exit status: %v", err)
 	}
 	deadReference(t, c.Reference())
-	assertTokensStopped(t, root)
+	assertGroupMembersDead(t, root)
 }
 
-func assertTokensStopped(t *testing.T, root string) {
+// assertGroupMembersDead checks the group's own pids, including the token
+// writer, so a stopped writer is a process fact and not a timing sample.
+func assertGroupMembersDead(t *testing.T, root string) {
 	t.Helper()
-	before, _ := os.ReadFile(filepath.Join(root, "tokens"))
-	time.Sleep(40 * time.Millisecond)
-	after, _ := os.ReadFile(filepath.Join(root, "tokens"))
-	if !bytes.Equal(before, after) {
-		t.Fatal("background grandchild still writes tokens")
+	for _, name := range []string{"child", "sleep"} {
+		b, err := os.ReadFile(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		pid, _ := strconv.Atoi(strings.TrimSpace(string(b)))
+		if state, err := procFieldsForTest(pid); err == nil && state != "Z" && state != "X" {
+			t.Fatalf("%s still alive: %d %s", name, pid, state)
+		}
 	}
 }
 
@@ -221,13 +241,20 @@ func TestRunnerAndGuardianSIGKILL(t *testing.T) {
 			cmd := fixture("runner", root)
 			var stderr bytes.Buffer
 			cmd.Stderr = &stderr
+			// Every group member inherits stdout. The tree writes one ready
+			// line after its setup, and the pipe ends only when the whole group
+			// is gone, so both waits are real events.
+			out, err := cmd.StdoutPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = cmd.Process.Kill() })
-			await(t, "native grandchild", func() bool {
-				return fileExists(filepath.Join(root, "child")) && fileExists(filepath.Join(root, "sleep")) && fileExists(filepath.Join(root, "tokens"))
-			})
+			if _, err := io.ReadFull(out, make([]byte, len("ready\n"))); err != nil {
+				t.Fatalf("native grandchild: %v: %s", err, stderr.String())
+			}
 			data, err := os.ReadFile(filepath.Join(root, "ref"))
 			if err != nil {
 				t.Fatal(err)
@@ -243,26 +270,27 @@ func TestRunnerAndGuardianSIGKILL(t *testing.T) {
 			if err := syscall.Kill(pid, syscall.SIGKILL); err != nil {
 				t.Fatal(err)
 			}
-			done := make(chan error, 1)
-			go func() { done <- cmd.Wait() }()
+			// Read the pipe to its end before Wait, which closes it: EOF means
+			// every process that held the group's stdout has exited.
+			drained := make(chan error, 1)
+			go func() {
+				_, err := io.Copy(io.Discard, out)
+				drained <- err
+			}()
 			select {
-			case <-done:
+			case err := <-drained:
+				if err != nil {
+					t.Fatalf("group drain: %v: %s", err, stderr.String())
+				}
 			case <-time.After(8 * time.Second):
-				t.Fatalf("runner did not exit: %s", stderr.String())
+				t.Fatalf("group did not drain: %s", stderr.String())
 			}
-			await(t, "group drain", func() bool { live, e := Probe(ref); return e == nil && !live })
-			assertTokensStopped(t, root)
-			// The group includes the native vendor, shell, sleep, and token writer.
-			for _, name := range []string{"child", "sleep"} {
-				b, e := os.ReadFile(filepath.Join(root, name))
-				if e != nil {
-					t.Fatal(e)
-				}
-				p, _ := strconv.Atoi(strings.TrimSpace(string(b)))
-				if f, e := procFieldsForTest(p); e == nil && f != "Z" && f != "X" {
-					t.Fatalf("%s still alive: %d %s", name, p, f)
-				}
+			// The runner's own status is the kill, so only reap it.
+			_ = cmd.Wait()
+			if live, err := Probe(ref); err != nil || live {
+				t.Fatalf("group still live: %v %v", live, err)
 			}
+			assertGroupMembersDead(t, root)
 		})
 	}
 }
@@ -364,7 +392,6 @@ func TestCancelDuringBindKeepsNativeGateClosed(t *testing.T) {
 	go func() { done <- c.Start(func(r Reference) error { bound <- r; <-release; return nil }) }()
 	ref := <-bound
 	cancel()
-	await(t, "canceled bind group drain", func() bool { live, err := Probe(ref); return err == nil && !live })
 	close(release)
 	select {
 	case err := <-done:
@@ -376,6 +403,10 @@ func TestCancelDuringBindKeepsNativeGateClosed(t *testing.T) {
 	}
 	if err := waitTest(t, c); err == nil {
 		t.Fatal("Wait lost canceled bind error")
+	}
+	// Cleanup finishes before Start returns, so the group must be drained now.
+	if live, err := Probe(ref); err != nil || live {
+		t.Fatalf("canceled bind group still live: %v %v", live, err)
 	}
 	if fileExists(filepath.Join(root, "native")) {
 		t.Fatal("native ran after cancellation in bind")
@@ -413,10 +444,15 @@ func TestBirthMismatchNeverSignalsReusedGroup(t *testing.T) {
 }
 
 func TestHardContextCancelWithIgnoredTERM(t *testing.T) {
-	root := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", `trap '' TERM; echo ready > "$1"; while :; do sleep 60; done`, "sh", filepath.Join(root, "ready"))
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", `trap '' TERM; echo ready; while :; do sleep 60; done`)
+	readyIn, readyOut, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyIn.Close()
+	cmd.Stdout = readyOut
 	c := wrapTest(t, cmd)
 	if err := c.SetCancelSignal(syscall.SIGINT); err == nil {
 		t.Fatal("invalid cancel signal accepted")
@@ -427,12 +463,13 @@ func TestHardContextCancelWithIgnoredTERM(t *testing.T) {
 	if err := c.Start(nil); err != nil {
 		t.Fatal(err)
 	}
+	readyOut.Close()
 	if err := c.SetCancelSignal(syscall.SIGTERM); err == nil {
 		t.Fatal("late cancel signal accepted")
 	}
-	await(t, "TERM handler", func() bool { return fileExists(filepath.Join(root, "ready")) })
+	awaitLine(t, readyIn, "TERM handler")
 	cancel()
-	err := waitTest(t, c)
+	err = waitTest(t, c)
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
 		t.Fatalf("hard cancel status: %v", err)
@@ -475,16 +512,23 @@ func TestOtherGroupTerminationSignal(t *testing.T) {
 	cmd := fixture("group-signal", root)
 	cmd.Env = append(cmd.Env, "PG_SIGNAL="+strconv.Itoa(int(syscall.SIGXCPU)))
 	cmd.Dir = root
+	readyIn, readyOut, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyIn.Close()
+	cmd.Stdout = readyOut
 	c := wrapTest(t, cmd)
 	if err := c.Start(nil); err != nil {
 		t.Fatal(err)
 	}
-	await(t, "dump suppression after native exec", func() bool { return fileExists(filepath.Join(root, "dump-proof")) })
+	readyOut.Close()
+	awaitLine(t, readyIn, "dump suppression after native exec")
 	pid := assertDumpProof(t, root)
 	if err := c.Signal(syscall.SIGXCPU); err != nil {
 		t.Fatal(err)
 	}
-	err := waitTest(t, c)
+	err = waitTest(t, c)
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGXCPU {
 		t.Fatalf("group SIGXCPU status: %v", err)
