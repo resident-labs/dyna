@@ -4,6 +4,7 @@ import (
 	"context"
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -77,7 +78,7 @@ func TestMergeControlReturnHoldsOnlyExactHead(t *testing.T) {
 	if r.MergeTrialFailure == nil || r.MergeTrialFailure.Change.Head != r.Head || len(f.branches) != 0 {
 		t.Fatal("return failed to hold frozen head or discard its active batch")
 	}
-	if len(f.e.sent) != 1 || f.e.sent[0].Target != r.Author || !strings.Contains(f.e.sent[0].Text, "TestBroken") {
+	if returned := mergeNotices(f.e.sent, room.MergeReturned); len(returned) != 1 || returned[0].Target != r.Author || !strings.Contains(returned[0].Text, "TestBroken") {
 		t.Fatalf("author notices=%+v", f.e.sent)
 	}
 	rows, err := f.e.s.RoomMergeQueue(f.e.author.RoomID)

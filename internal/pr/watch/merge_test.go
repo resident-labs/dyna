@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,6 +22,18 @@ import (
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
+
+// mergeNotices keeps the notices of the given merge steps, so a test that
+// counts one notice is not confused by the trial's progress events.
+func mergeNotices(sent []Notice, steps ...room.MergeStep) []Notice {
+	var out []Notice
+	for _, n := range sent {
+		if n.Merge != nil && slices.Contains(steps, n.Merge.Type) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
 
 // The regular HTTP fixture builds each response. This runner only adds remote
 // merge/edit effects and selects one fixture per PR in the batched observation.

@@ -44,6 +44,8 @@ const (
 	FamilyHook  EventFamily = "hook"
 	TypeStarted EventType   = "started"
 	TypeResult  EventType   = "result"
+
+	FamilyMerge EventFamily = "merge"
 )
 
 // The PR family posts one event per fact the watcher observed about a change.
@@ -79,6 +81,48 @@ const (
 var prTypes = []PRType{
 	PROpened, PRReady, PRApproved, PRChanges, PRCIFailed, PRCIPaused, PRCIPassed,
 	PRReturned, PRMerged, PRClosed, PRComment, PRHeldComment, PRReviewAssigned, PRUpdate,
+}
+
+// MergeStep is the step of a merge trial that a merge event reports, or the
+// steward's recorded decision about the queue. A trial reports its progress
+// and how it ended; the web card picks its chip and its progress bar from it.
+type MergeStep string
+
+// Merge steps and the recorded decision.
+const (
+	MergeQueued     MergeStep = "queued"
+	MergeTrial      MergeStep = "trial"
+	MergeChecks     MergeStep = "checks"
+	MergeLanded     MergeStep = "landed"
+	MergeFailed     MergeStep = "failed"
+	MergeReturned   MergeStep = "returned"
+	MergeConflict   MergeStep = "conflict"
+	MergeRolledBack MergeStep = "rolled-back"
+	// MergeDecision is root's recorded decision about the queue, not a trial
+	// step: it has no trial and its own payload.
+	MergeDecision MergeStep = "decision"
+)
+
+// mergeSteps lists every merge step the web needs as a union type.
+var mergeSteps = []MergeStep{
+	MergeQueued, MergeTrial, MergeChecks, MergeLanded, MergeFailed,
+	MergeReturned, MergeConflict, MergeRolledBack, MergeDecision,
+}
+
+// MergePR is one member PR of a merge trial, as the card names it.
+type MergePR struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	URL    string `json:"url"`
+}
+
+// MergeCheckSummary is the CI summary of a merge trial. It never holds raw logs: the
+// agent text keeps those. Done counts the checks that finished; passed and
+// failed checks are both finished, and only a failed trial names its failures.
+type MergeCheckSummary struct {
+	Done   int      `json:"done"`
+	Total  int      `json:"total,omitempty"`
+	Failed []string `json:"failed,omitempty"`
 }
 
 // WorktreeReason is the class of a kept worktree. It keys the dedupe of the
@@ -282,6 +326,67 @@ func (h HookEvent) eventDedupe() string {
 	return h.RunID + "\x00" + string(h.eventType())
 }
 
+// MergeEvent tells how one merge trial stands: its member PRs, its CI, and the
+// commit it landed. Every event of a trial folds into one card by TrialID, so
+// the trial reports its progress and its end on the same card.
+type MergeEvent struct {
+	Type MergeStep `json:"type"`
+	// TrialID is the fold and dedupe subject: the trial branch, or the change
+	// a fact belongs to when no trial exists.
+	TrialID string `json:"trialId"`
+	Repo    string `json:"repo"`
+	// Base is the branch the trial merges into.
+	Base string    `json:"base"`
+	PRs  []MergePR `json:"prs"`
+	// Checks is the CI summary, when the steward has it.
+	Checks *MergeCheckSummary `json:"checks,omitempty"`
+	// Commit is the commit the trial landed on the base branch.
+	Commit string `json:"commit,omitempty"`
+	// Reason is the short cause of a failure, a return or a conflict.
+	Reason string `json:"reason,omitempty"`
+	// Summary is the short facts line the agent text reads, such as a checks
+	// count. It never holds raw log lines.
+	Summary string `json:"summary,omitempty"`
+	// Label names the change a fact is about, as "PR #12". A trial's own
+	// events name every member in PRs instead.
+	Label string `json:"label,omitempty"`
+	// Key is the steward's own identity of this event within a type, such as
+	// one checks progress step. One fact per trial needs no key.
+	Key string `json:"key,omitempty"`
+	// Detail is the evidence the agent reads: CI logs, a root report, or the
+	// child URLs a rollback could not restore.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (MergeEvent) eventFamily() EventFamily { return FamilyMerge }
+func (m MergeEvent) eventType() EventType   { return EventType(m.Type) }
+
+// eventSubject folds every event of one trial into one card.
+func (m MergeEvent) eventSubject() string { return m.TrialID }
+
+// eventDedupe keys one post per fact of a trial. The type and the steward's
+// own key make a queued trial post once and each checks step post once.
+func (m MergeEvent) eventDedupe() string {
+	return string(m.Type) + "\x00" + m.Key
+}
+
+// MergeDecisionEvent is root's recorded decision about the merge queue. It has
+// no trial: each decision is its own post and its own card.
+type MergeDecisionEvent struct {
+	// Note is the one line root recorded.
+	Note string `json:"note"`
+}
+
+func (MergeDecisionEvent) eventFamily() EventFamily { return FamilyMerge }
+func (MergeDecisionEvent) eventType() EventType     { return EventType(MergeDecision) }
+
+// eventSubject keeps a decision out of any trial's card.
+func (MergeDecisionEvent) eventSubject() string { return "decision" }
+
+// eventDedupe keys a decision by its own line. Each decision posts as a new
+// event with a fresh ID, so two equal notes stay two decisions.
+func (d MergeDecisionEvent) eventDedupe() string { return d.Note }
+
 // EventSpec is one entry of the system event registry. The web app draws the
 // event with Renderer and reads its typed payload; Text is the one-line
 // summary that agents and `dyna room log` read.
@@ -338,6 +443,88 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeNever,
 		Once:     true,
 		Text:     "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}).",
+	},
+	// The merge family reports a trial's progress and how it ended. A progress
+	// event goes to the member rooms as a quiet card, because the separate PR
+	// merged notice wakes each author. A failure, a conflict and a root return
+	// reach the author, so agents act on them.
+	{
+		Family:   FamilyMerge,
+		Type:     EventType(MergeQueued),
+		Renderer: "MergeCard",
+		Payload:  reflect.TypeOf(MergeEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Text:     "Merge trial {trialId} queued for {base} in {repo}.",
+	},
+	{
+		Family:   FamilyMerge,
+		Type:     EventType(MergeTrial),
+		Renderer: "MergeCard",
+		Payload:  reflect.TypeOf(MergeEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Text:     "Merge trial {trialId} started for {base} in {repo}.",
+	},
+	{
+		Family:   FamilyMerge,
+		Type:     EventType(MergeChecks),
+		Renderer: "MergeCard",
+		Payload:  reflect.TypeOf(MergeEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Text:     "Merge trial {trialId} checks: {summary}.",
+	},
+	{
+		Family:   FamilyMerge,
+		Type:     EventType(MergeLanded),
+		Renderer: "MergeCard",
+		Payload:  reflect.TypeOf(MergeEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Text:     "Merge trial {trialId} landed {commit} on {base}.",
+	},
+	{
+		Family:   FamilyMerge,
+		Type:     EventType(MergeFailed),
+		Renderer: "MergeCard",
+		Payload:  reflect.TypeOf(MergeEvent{}),
+		Wake:     WakeTarget,
+		Text:     "Merge trial {trialId} failed: {reason}.",
+	},
+	{
+		Family:   FamilyMerge,
+		Type:     EventType(MergeReturned),
+		Renderer: "MergeCard",
+		Payload:  reflect.TypeOf(MergeEvent{}),
+		Wake:     WakeTarget,
+		Text:     "Merge trial {trialId} returned by root: {reason}.",
+	},
+	{
+		Family:   FamilyMerge,
+		Type:     EventType(MergeConflict),
+		Renderer: "MergeCard",
+		Payload:  reflect.TypeOf(MergeEvent{}),
+		Wake:     WakeTarget,
+		Text:     "Merge conflict for {label} on {base}.",
+	},
+	{
+		Family:   FamilyMerge,
+		Type:     EventType(MergeRolledBack),
+		Renderer: "MergeCard",
+		Payload:  reflect.TypeOf(MergeEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Text:     "Merge rollback for {label} on {base}.",
+	},
+	{
+		Family:   FamilyMerge,
+		Type:     EventType(MergeDecision),
+		Renderer: "MergeCard",
+		Payload:  reflect.TypeOf(MergeDecisionEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Text:     "{note}",
 	},
 	// PR events reach the change's author, but they do not all wake it: the
 	// watcher marks an informational notice NoWake, and a notice that falls
@@ -465,12 +652,21 @@ type eventEnum struct {
 
 var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(PRType("")), Values: prTypeValues()},
+	{Type: reflect.TypeOf(MergeStep("")), Values: mergeStepValues()},
 	{Type: reflect.TypeOf(WorktreeReason("")), Values: []string{
 		string(WorktreeNotMerged), string(WorktreeDirty), string(WorktreeManualHandoff), string(WorktreeKeepFailed), string(WorktreeOther),
 	}},
 	{Type: reflect.TypeOf(HookState("")), Values: []string{
 		string(HookRunning), string(HookPassed), string(HookFailed), string(HookError),
 	}},
+}
+
+// eventObjects are the struct types that an event payload embeds. The
+// generator writes an interface and a guard for each, so a card reads a typed
+// list instead of a stringly field.
+var eventObjects = []reflect.Type{
+	reflect.TypeOf(MergePR{}),
+	reflect.TypeOf(MergeCheckSummary{}),
 }
 
 // legacyFamilies are the post kinds that still go through Store.Post with a
@@ -484,7 +680,6 @@ var legacyFamilies = []string{
 	"hierarchy",
 	"instructions",
 	"issue",
-	"merge-decision",
 	"notice",
 	"seat",
 	"spawn",
@@ -648,6 +843,15 @@ func prTypeValues() []string {
 	return values
 }
 
+// mergeStepValues lists the merge steps for the generated web union.
+func mergeStepValues() []string {
+	values := make([]string, len(mergeSteps))
+	for i, step := range mergeSteps {
+		values[i] = string(step)
+	}
+	return values
+}
+
 // eventBlocks are the payload fields that the agent text appends as their own
 // paragraph after the spec's one-line template, in this order. A block that the
 // event leaves empty adds nothing, so the text has no empty section.
@@ -788,6 +992,37 @@ func (m Message) Worktree() (WorktreeEvent, bool) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil {
 		return WorktreeEvent{}, false
+	}
+	return ev, true
+}
+
+// Merge returns the payload of a merge trial event. It decodes the stored bytes
+// strictly, so an unknown field is a failed read rather than a silent mismatch.
+func (m Message) Merge() (MergeEvent, bool) {
+	if m.Kind != string(FamilyMerge) || m.Notice.Kind == string(MergeDecision) || len(m.Payload.raw) == 0 {
+		return MergeEvent{}, false
+	}
+	var ev MergeEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
+		return MergeEvent{}, false
+	}
+	return ev, true
+}
+
+// MergeDecision returns the payload of a recorded merge decision. It decodes the
+// stored bytes strictly, so an unknown field is a failed read rather than a
+// silent mismatch.
+func (m Message) MergeDecision() (MergeDecisionEvent, bool) {
+	if m.Kind != string(FamilyMerge) || m.Notice.Kind != string(MergeDecision) || len(m.Payload.raw) == 0 {
+		return MergeDecisionEvent{}, false
+	}
+	var ev MergeDecisionEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil {
+		return MergeDecisionEvent{}, false
 	}
 	return ev, true
 }

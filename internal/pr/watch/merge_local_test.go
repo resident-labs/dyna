@@ -227,8 +227,9 @@ func TestLocalTrialPublishesBatchWithoutGitHub(t *testing.T) {
 	if err != nil || len(spool) == 0 {
 		t.Fatalf("hook spool: %v, %v", spool, err)
 	}
-	if len(e.sent) != 3 {
-		t.Fatalf("author notices = %d", len(e.sent))
+	// One landed event for the trial and one per local change that merged.
+	if landed := mergeNotices(e.sent, room.MergeLanded); len(landed) != len(records)+1 {
+		t.Fatalf("landed notices = %d, want one per change and one for the trial", len(landed))
 	}
 }
 func TestLocalTrialRootBisectPublishesPrefixAndReturnsBadChange(t *testing.T) {
@@ -348,9 +349,9 @@ func TestLocalTrialCIStartsOnceAndOutlivesTickContext(t *testing.T) {
 	ci.release = make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
 	r := records[0]
-	status, _, _, err := e.s.mergeTrialCI(ctx, r, "dyna/merge-trial/1", r.Head)
-	if err != nil || status != "pending" {
-		t.Fatalf("start = %s %v", status, err)
+	trial, err := e.s.mergeTrialCI(ctx, r, "dyna/merge-trial/1", r.Head)
+	if err != nil || trial.Status != "pending" {
+		t.Fatalf("start = %s %v", trial.Status, err)
 	}
 	deadline, stop := context.WithTimeout(context.Background(), time.Second)
 	defer stop()
@@ -360,9 +361,9 @@ func TestLocalTrialCIStartsOnceAndOutlivesTickContext(t *testing.T) {
 		t.Fatal("CI did not start")
 	}
 	cancel()
-	status, _, _, err = e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
-	if err != nil || status != "pending" {
-		t.Fatalf("running = %s %v", status, err)
+	trial, err = e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
+	if err != nil || trial.Status != "pending" {
+		t.Fatalf("running = %s %v", trial.Status, err)
 	}
 	close(ci.release)
 	value, ok := e.s.localRuns().Load(r.RepoPath + "\x00" + r.Head)
@@ -379,9 +380,9 @@ func TestLocalTrialCIStartsOnceAndOutlivesTickContext(t *testing.T) {
 		t.Fatal("CI started twice")
 	default:
 	}
-	status, _, _, err = e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
-	if err != nil || status != "passed" {
-		t.Fatalf("completed = %s %v", status, err)
+	trial, err = e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
+	if err != nil || trial.Status != "passed" {
+		t.Fatalf("completed = %s %v", trial.Status, err)
 	}
 }
 
@@ -391,9 +392,9 @@ func TestLocalTrialDoesNotReusePartialCachedCI(t *testing.T) {
 	ci.release = make(chan struct{})
 	r := records[0]
 	ci.results[r.Head] = localci.Result{Repo: r.RepoPath, SHA: r.Head, Status: "passed", Suites: []localci.SuiteResult{{Suite: "frontend", Status: "passed"}}}
-	status, _, _, err := e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
-	if err != nil || status != "pending" {
-		t.Fatalf("partial cached result authorized trial: %s %v", status, err)
+	trial, err := e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
+	if err != nil || trial.Status != "pending" {
+		t.Fatalf("partial cached result authorized trial: %s %v", trial.Status, err)
 	}
 	deadline, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -409,9 +410,9 @@ func TestLocalTrialDoesNotReusePartialCachedCI(t *testing.T) {
 	case <-deadline.Done():
 		t.Fatal("full CI did not finish")
 	}
-	status, _, _, err = e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
-	if err != nil || status != "passed" {
-		t.Fatalf("full CI result = %s %v", status, err)
+	trial, err = e.s.mergeTrialCI(context.Background(), r, "dyna/merge-trial/1", r.Head)
+	if err != nil || trial.Status != "passed" {
+		t.Fatalf("full CI result = %s %v", trial.Status, err)
 	}
 }
 

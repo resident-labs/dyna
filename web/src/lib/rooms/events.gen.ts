@@ -3,11 +3,28 @@
 // PRType is a named string type of an event payload.
 export type PRType = "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "returned" | "merged" | "closed" | "comment" | "held-comment" | "review-assigned" | "update"
 
+// MergeStep is a named string type of an event payload.
+export type MergeStep = "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision"
+
 // WorktreeReason is a named string type of an event payload.
 export type WorktreeReason = "not-merged" | "dirty" | "manual-handoff" | "keep-failed" | "other"
 
 // HookState is a named string type of an event payload.
 export type HookState = "running" | "passed" | "failed" | "error"
+
+// MergePR is a struct of an event payload.
+export interface MergePR {
+  number: number
+  title: string
+  url: string
+}
+
+// MergeCheckSummary is a struct of an event payload.
+export interface MergeCheckSummary {
+  done: number
+  total?: number
+  failed?: string[]
+}
 
 // WorktreeEvent is the payload of the worktree/kept events.
 export interface WorktreeEvent {
@@ -31,6 +48,27 @@ export interface HookEvent {
   state: HookState
   durationMs?: number
   detail?: string
+}
+
+// MergeEvent is the payload of the merge/queued and merge/trial and merge/checks and merge/landed and merge/failed and merge/returned and merge/conflict and merge/rolled-back events.
+export interface MergeEvent {
+  type: MergeStep
+  trialId: string
+  repo: string
+  base: string
+  prs: MergePR[]
+  checks?: MergeCheckSummary
+  commit?: string
+  reason?: string
+  summary?: string
+  label?: string
+  key?: string
+  detail?: string
+}
+
+// MergeDecisionEvent is the payload of the merge/decision events.
+export interface MergeDecisionEvent {
+  note: string
 }
 
 // PREvent is the payload of the pr/opened and pr/ready and pr/approved and pr/changes and pr/ci-failed and pr/ci-paused and pr/ci-passed and pr/returned and pr/merged and pr/closed and pr/comment and pr/held-comment and pr/review-assigned and pr/update events.
@@ -58,10 +96,10 @@ export interface PREvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | PREvent
+export type EventPayload = WorktreeEvent | HookEvent | MergeEvent | MergeDecisionEvent | PREvent
 
-export type EventFamily = "worktree" | "hook" | "pr"
-export type EventType = "kept" | "started" | "result" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "returned" | "merged" | "closed" | "comment" | "held-comment" | "review-assigned" | "update"
+export type EventFamily = "worktree" | "hook" | "merge" | "pr"
+export type EventType = "kept" | "started" | "result" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "closed" | "comment" | "held-comment" | "review-assigned" | "update"
 export type WakeRule = "never" | "target" | "root-if-needed"
 
 export interface EventSpecEntry {
@@ -103,6 +141,87 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     wake: "never",
     once: true,
     text: "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}).",
+  },
+  {
+    family: "merge",
+    type: "queued",
+    renderer: "MergeCard",
+    quiet: true,
+    wake: "never",
+    once: false,
+    text: "Merge trial {trialId} queued for {base} in {repo}.",
+  },
+  {
+    family: "merge",
+    type: "trial",
+    renderer: "MergeCard",
+    quiet: true,
+    wake: "never",
+    once: false,
+    text: "Merge trial {trialId} started for {base} in {repo}.",
+  },
+  {
+    family: "merge",
+    type: "checks",
+    renderer: "MergeCard",
+    quiet: true,
+    wake: "never",
+    once: false,
+    text: "Merge trial {trialId} checks: {summary}.",
+  },
+  {
+    family: "merge",
+    type: "landed",
+    renderer: "MergeCard",
+    quiet: true,
+    wake: "never",
+    once: false,
+    text: "Merge trial {trialId} landed {commit} on {base}.",
+  },
+  {
+    family: "merge",
+    type: "failed",
+    renderer: "MergeCard",
+    quiet: false,
+    wake: "target",
+    once: false,
+    text: "Merge trial {trialId} failed: {reason}.",
+  },
+  {
+    family: "merge",
+    type: "returned",
+    renderer: "MergeCard",
+    quiet: false,
+    wake: "target",
+    once: false,
+    text: "Merge trial {trialId} returned by root: {reason}.",
+  },
+  {
+    family: "merge",
+    type: "conflict",
+    renderer: "MergeCard",
+    quiet: false,
+    wake: "target",
+    once: false,
+    text: "Merge conflict for {label} on {base}.",
+  },
+  {
+    family: "merge",
+    type: "rolled-back",
+    renderer: "MergeCard",
+    quiet: true,
+    wake: "never",
+    once: false,
+    text: "Merge rollback for {label} on {base}.",
+  },
+  {
+    family: "merge",
+    type: "decision",
+    renderer: "MergeCard",
+    quiet: true,
+    wake: "never",
+    once: false,
+    text: "{note}",
   },
   {
     family: "pr",
@@ -233,8 +352,31 @@ export const eventSpecs: readonly EventSpecEntry[] = [
 ]
 
 const P_R_TYPE: ReadonlySet<unknown> = new Set(["opened", "ready", "approved", "changes", "ci-failed", "ci-paused", "ci-passed", "returned", "merged", "closed", "comment", "held-comment", "review-assigned", "update"])
+const MERGE_STEP: ReadonlySet<unknown> = new Set(["queued", "trial", "checks", "landed", "failed", "returned", "conflict", "rolled-back", "decision"])
 const WORKTREE_REASON: ReadonlySet<unknown> = new Set(["not-merged", "dirty", "manual-handoff", "keep-failed", "other"])
 const HOOK_STATE: ReadonlySet<unknown> = new Set(["running", "passed", "failed", "error"])
+
+export function isMergePR(v: unknown): v is MergePR {
+  return isRecord(v) &&
+    Number.isInteger(v.number) &&
+    typeof v.title === "string" &&
+    typeof v.url === "string"
+}
+
+export function isMergePRList(v: unknown): v is MergePR[] {
+  return Array.isArray(v) && v.every((item: unknown) => isMergePR(item))
+}
+
+export function isMergeCheckSummary(v: unknown): v is MergeCheckSummary {
+  return isRecord(v) &&
+    Number.isInteger(v.done) &&
+    (v.total === undefined || Number.isInteger(v.total)) &&
+    (v.failed === undefined || isStringList(v.failed))
+}
+
+export function isMergeCheckSummaryList(v: unknown): v is MergeCheckSummary[] {
+  return Array.isArray(v) && v.every((item: unknown) => isMergeCheckSummary(item))
+}
 
 export function isWorktreeEvent(v: unknown): v is WorktreeEvent {
   return isRecord(v) &&
@@ -258,6 +400,27 @@ export function isHookEvent(v: unknown): v is HookEvent {
     HOOK_STATE.has(v.state) &&
     (v.durationMs === undefined || Number.isInteger(v.durationMs)) &&
     (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isMergeEvent(v: unknown): v is MergeEvent {
+  return isRecord(v) &&
+    MERGE_STEP.has(v.type) &&
+    typeof v.trialId === "string" &&
+    typeof v.repo === "string" &&
+    typeof v.base === "string" &&
+    isMergePRList(v.prs) &&
+    (v.checks === undefined || isMergeCheckSummary(v.checks)) &&
+    (v.commit === undefined || typeof v.commit === "string") &&
+    (v.reason === undefined || typeof v.reason === "string") &&
+    (v.summary === undefined || typeof v.summary === "string") &&
+    (v.label === undefined || typeof v.label === "string") &&
+    (v.key === undefined || typeof v.key === "string") &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isMergeDecisionEvent(v: unknown): v is MergeDecisionEvent {
+  return isRecord(v) &&
+    typeof v.note === "string"
 }
 
 export function isPREvent(v: unknown): v is PREvent {
@@ -288,6 +451,15 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "worktree" && type === "kept") return isWorktreeEvent(v)
   if (family === "hook" && type === "started") return isHookEvent(v)
   if (family === "hook" && type === "result") return isHookEvent(v)
+  if (family === "merge" && type === "queued") return isMergeEvent(v)
+  if (family === "merge" && type === "trial") return isMergeEvent(v)
+  if (family === "merge" && type === "checks") return isMergeEvent(v)
+  if (family === "merge" && type === "landed") return isMergeEvent(v)
+  if (family === "merge" && type === "failed") return isMergeEvent(v)
+  if (family === "merge" && type === "returned") return isMergeEvent(v)
+  if (family === "merge" && type === "conflict") return isMergeEvent(v)
+  if (family === "merge" && type === "rolled-back") return isMergeEvent(v)
+  if (family === "merge" && type === "decision") return isMergeDecisionEvent(v)
   if (family === "pr" && type === "opened") return isPREvent(v)
   if (family === "pr" && type === "ready") return isPREvent(v)
   if (family === "pr" && type === "approved") return isPREvent(v)

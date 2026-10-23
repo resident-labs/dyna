@@ -24,7 +24,7 @@ func TestFailedBatchWakesRootOnce(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.s.stopMergeBatch(t.Context(), "repo", r, b); err != nil {
+	if err := e.s.stopMergeBatch(t.Context(), "repo", r, b, nil); err != nil {
 		t.Fatal(err)
 	}
 	saved, err := e.s.Store.Read()
@@ -39,7 +39,7 @@ func TestFailedBatchWakesRootOnce(t *testing.T) {
 		t.Fatalf("notices = %+v", e.sent)
 	}
 	restarted := *e.s
-	if err := restarted.stopMergeBatch(t.Context(), "repo", r, *got); err != nil {
+	if err := restarted.stopMergeBatch(t.Context(), "repo", r, *got, nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(e.sent) != 1 {
