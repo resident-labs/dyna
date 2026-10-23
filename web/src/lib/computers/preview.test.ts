@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { freshDue, previewVisible, inUse, snapCorner, loadPreview, savePreview, streamWanted, badgeText, DEFAULT_PREVIEW } from './preview.js'
+import { freshDue, previewVisible, inUse, snapCorner, loadPreview, savePreview, streamWanted, badgeText, DEFAULT_PREVIEW } from './preview.ts'
 
 const running = { state: 'running', shotAt: '2026-10-17T18:00:00Z' }
 const base = { c: running, tab: 'chat', view: 'general', width: 1400, hidden: null }
@@ -44,9 +44,10 @@ test('corners', () => {
   assert.equal(snapCorner(500, 300, 1000, 600), 'br', 'the exact middle goes bottom right')
 })
 
-function fakeStore(init = {}) {
-  const m = { ...init }
-  return { getItem: (k) => m[k] ?? null, setItem: (k, v) => { m[k] = v }, m }
+// fakeStore is a minimal in-memory stand-in for localStorage.
+function fakeStore(init: Record<string, string> = {}) {
+  const m: Record<string, string> = { ...init }
+  return { getItem: (k: string) => m[k] ?? null, setItem: (k: string, v: string) => { m[k] = v }, m }
 }
 
 test('saved choices round trip per session and bad data gives defaults', () => {
@@ -90,4 +91,3 @@ test('fresh pictures: only running, only visible, at most every interval', () =>
   assert.equal(freshDue({ ...base, last: 1000, now: 5500 }), false)
   assert.equal(freshDue({ ...base, last: 1000, now: 6000 }), true)
 })
-

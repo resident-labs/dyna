@@ -7,7 +7,7 @@
   import { onMount } from 'svelte'
   import ComputerViewer from './ComputerViewer.svelte'
   import ComputerShot from './ComputerShot.svelte'
-  import { streamWanted, loadPreview, savePreview } from './preview.js'
+  import { streamWanted, loadPreview, savePreview } from './preview.ts'
   import { stateText } from './computers.js'
 
   let { c, room, feed = [], chat = null } = $props()
