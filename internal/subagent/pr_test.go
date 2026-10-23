@@ -110,6 +110,7 @@ func TestGuardedCloseDoesNotStopTheActiveTurn(t *testing.T) {
 			}
 			resumeOnce.Do(func() { close(resume) })
 			e.wait(info.ID, 1)
+			e.doneGoals()
 			if _, err := e.m.CloseWithOptions(e.ctx, info.ID, CloseOptions{Force: true}); err != nil {
 				t.Fatal(err)
 			}

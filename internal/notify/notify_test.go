@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/goals"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/questions"
@@ -152,6 +153,21 @@ func (e *testEnv) start(rec room.Record, name string, parent *subagent.Info) sub
 		e.t.Fatalf("Start %s: %v", name, err)
 	}
 	return e.wait(info.ID, 1)
+}
+
+// doneGoal finishes the goal info holds, as a worker does before it finishes.
+func (e *testEnv) doneGoal(info subagent.Info) {
+	e.t.Helper()
+	store := goals.DefaultStore()
+	held, err := store.OpenHeldBy(info.RoomID, info.ID)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for _, g := range held {
+		if _, err := store.Finish(info.RoomID, g.ID, "owner", "Fixture completed", false); err != nil {
+			e.t.Fatal(err)
+		}
+	}
 }
 
 func (e *testEnv) wait(id string, turn int) subagent.Info {
@@ -363,6 +379,7 @@ func TestExplicitBadRecipientsRejectGroupMembersSkip(t *testing.T) {
 		t.Fatalf("stored after a resolution error: %#v", msgs)
 	}
 	// Closed explicit name: no open session has it.
+	f.doneGoal(f.crc)
 	if _, err := f.mgr.CloseWithOptions(f.ctx, f.crc.ID, subagent.CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}

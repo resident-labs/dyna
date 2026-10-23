@@ -419,7 +419,9 @@ Choose shared options once for Stop, Transfer model, Promote, Move under…, or
 Close. Move under… picks one open parent; targets that would make a cycle,
 sit under a service, or pass `subagent.maxDepth` are disabled with the reason. Message addresses the normal composer to the selected sessions. A close
 confirmation applies to the selection. Each close hands work up the parent chain.
-Goals must be resolved before a close would hand them to root or the owner.
+Goals must be resolved before a close would hand them to root: root asks the owner with
+`dyna ask` when only the owner can unblock the work, then the goal is finished, dropped,
+or handed to an open agent. A forced close does not move goals to the owner.
 A refused close needs resolution, a retry, or explicit force close. Each session reports its own result,
 so a refusal does not cancel successful actions on other sessions.
 

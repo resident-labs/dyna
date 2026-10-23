@@ -69,8 +69,8 @@
     if (id) { loadStatus(id, room); loadItems(id, room) }
     return () => { statusRequest++; itemsRequest++ }
   })
-  const TONES: Record<string, string> = { on_track: 'sage', waiting: 'muted', stuck: 'coral', errored: 'coral', ready_to_close: 'gold', unowned: 'gold' }
-  const LABELS: Record<string, string> = { on_track: 'On track', waiting: 'Waiting', stuck: 'Stuck', errored: 'Errored', ready_to_close: 'Ready to close', unowned: 'Unowned' }
+  const TONES: Record<string, string> = { on_track: 'sage', waiting: 'muted', stuck: 'coral', errored: 'coral', ready_to_close: 'gold', unowned: 'gold', needs_root: 'gold' }
+  const LABELS: Record<string, string> = { on_track: 'On track', waiting: 'Waiting', stuck: 'Stuck', errored: 'Errored', ready_to_close: 'Ready to close', unowned: 'Unowned', needs_root: 'Needs root' }
   const mark = (state: string): string => (state === 'done' ? '✓' : state === 'dropped' ? '×' : '•')
   const member = (id: string) => members.find((m) => m.id === id || m.address === id)
   const name = (id: string): string => member(id)?.name ?? id

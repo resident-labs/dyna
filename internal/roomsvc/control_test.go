@@ -34,6 +34,7 @@ func TestStopAndCloseAreRoomScoped(t *testing.T) {
 	if _, err := e.svc.StopSession(ctx, "alpha", lead.ID); err == nil {
 		t.Fatal("StopSession on an idle session must fail")
 	}
+	e.doneGoal(lead)
 	m, err := e.svc.ForceCloseSession(ctx, "alpha", lead.ID)
 	if err != nil || !m.Closed || m.State != StateClosed {
 		t.Fatalf("CloseSession = %+v, %v", m, err)
@@ -228,6 +229,7 @@ func TestPromotionIsRoomScopedAndCloseHandsChildrenUp(t *testing.T) {
 	if m, err := e.svc.PromoteSession(context.Background(), "alpha", grandchild.ID); err != nil || m.Parent != "" {
 		t.Fatalf("promote = %+v, %v", m, err)
 	}
+	e.doneGoal(lead)
 	if m, err := e.svc.ForceCloseSession(e.ctx, "alpha", lead.ID); err != nil || !m.Closed {
 		t.Fatalf("close = %+v, %v", m, err)
 	}
@@ -308,6 +310,7 @@ func TestFinishedSessionStaysMessageableAndReopenIsRoomScoped(t *testing.T) {
 	if !slices.Contains(choices, "@lead") {
 		t.Fatalf("a message must reach a dormant session: %v", choices)
 	}
+	e.doneGoal(other)
 	if _, err := e.mgr.CloseWithOptions(e.ctx, other.ID, subagent.CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -506,6 +509,7 @@ func TestSessionControlsLetASessionActOnlyOnItsDescendants(t *testing.T) {
 	// The root seat runs in root mode, which the CLI's Target never limited:
 	// it closes a top-level session outside its own tree.
 	rootSeat := authority.WithActor(e.ctx, authority.Actor{Role: authority.Root, Session: lead.ID, Room: alpha.ID})
+	e.doneGoal(stranger)
 	if m, err := e.svc.ForceCloseSession(rootSeat, "alpha", stranger.ID); err != nil || !m.Closed {
 		t.Fatalf("the root seat could not close a session outside its tree: %+v, %v", m, err)
 	}
@@ -513,6 +517,7 @@ func TestSessionControlsLetASessionActOnlyOnItsDescendants(t *testing.T) {
 		t.Fatalf("a session reopened another lead's session: %v", err)
 	}
 	owner := authority.WithActor(e.ctx, authority.Actor{Role: authority.Owner})
+	e.doneGoal(lead)
 	if m, err := e.svc.ForceCloseSession(owner, "alpha", lead.ID); err != nil || !m.Closed {
 		t.Fatalf("the owner could not close a session: %+v, %v", m, err)
 	}

@@ -73,13 +73,20 @@ func TestCloseHandsAuthorshipAndGoalsToAncestor(t *testing.T) {
 			}
 			closed, err := e.svc.CloseSession(e.ctx, rec.ID, author.ID)
 			if ancestry == "root" || ancestry == "pruned parent" {
-				// A close only reaches root or the owner: the goal must be resolved
-				// first, and --force releases it to the owner.
+				// A close only reaches root: the goal must be resolved first, and a
+				// forced close does not hand it to the owner either.
 				if err == nil || !strings.Contains(err.Error(), "dyna goal done "+g.ID) {
 					t.Fatalf("close with root above = %+v, %v; want the goal refusal", closed, err)
 				}
-				if closed, err = e.svc.ForceCloseSession(e.ctx, rec.ID, author.ID); err != nil || !closed.Closed {
-					t.Fatalf("forced close = %+v, %v", closed, err)
+				if _, err = e.svc.ForceCloseSession(e.ctx, rec.ID, author.ID); err == nil || !strings.Contains(err.Error(), "dyna ask") {
+					t.Fatalf("forced close = %v; want the goal refusal", err)
+				}
+				// Root asks the owner, then finishes the goal and closes.
+				if _, err = e.svc.goalService().Store.Finish(rec.ID, g.ID, "owner", "Fixture completed", false); err != nil {
+					t.Fatal(err)
+				}
+				if closed, err = e.svc.CloseSession(e.ctx, rec.ID, author.ID); err != nil || !closed.Closed {
+					t.Fatalf("close after the ownered goal resolved = %+v, %v", closed, err)
 				}
 			} else if err != nil || !closed.Closed {
 				t.Fatalf("close = %+v, %v", closed, err)
@@ -90,9 +97,9 @@ func TestCloseHandsAuthorshipAndGoalsToAncestor(t *testing.T) {
 			}
 			got, err := goals.DefaultStore().Get(rec.ID, g.ID)
 			if ancestry == "root" || ancestry == "pruned parent" {
-				// Root holds no goals, so this one stays unheld for the owner.
-				if err != nil || !got.Open() || got.HeldBy(parent.ID) || len(got.Holders) != 0 || got.Setter != "owner" {
-					t.Fatalf("goal handoff to root = %+v, %v", got, err)
+				// Root holds no goals, and the finished goal waits for nobody.
+				if err != nil || got.Open() || len(got.Holders) != 0 {
+					t.Fatalf("goal after the close = %+v, %v", got, err)
 				}
 			} else if err != nil || !got.Open() || !got.HeldBy(parent.ID) || got.HeldBy(author.ID) {
 				t.Fatalf("goal handoff = %+v, %v", got, err)

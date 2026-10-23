@@ -23,7 +23,8 @@ type ItemStatus struct {
 
 // Labels. A merged PR with the goal still open means ready to close, not
 // stuck; an open goal with no holders, or an open item with no assignee, is
-// unowned. A finished checklist needs a result, so it also reads ready.
+// unowned. A goal an old build left with the owner needs root. A finished
+// checklist needs a result, so it also reads ready.
 const (
 	StatusOnTrack      = "on_track"
 	StatusErrored      = "errored"
@@ -31,6 +32,7 @@ const (
 	StatusWaiting      = "waiting"
 	StatusStuck        = "stuck"
 	StatusUnowned      = "unowned"
+	StatusNeedsRoot    = "needs_root"
 )
 
 // Facts carries what a status needs about the sessions working a goal: one
@@ -45,10 +47,10 @@ type Facts struct {
 // ComputeStatus labels a goal from facts, checked in this order: a running
 // turn is on_track (working beats a pending PR, and errored needs nothing
 // running), a failed last turn is errored, a closed checklist or a merged PR
-// with no open items is ready_to_close, an open goal with no holders is
-// unowned, a pending PR is waiting, and other held goals are on_track.
-// Unassigned open items surface in the reason and counts without making a
-// held goal unowned.
+// with no open items is ready_to_close, a goal an old build left with the
+// owner needs root, an open goal with no holders is unowned, a pending PR is
+// waiting, and other held goals are on_track. Unassigned open items surface
+// in the reason and counts without making a held goal unowned.
 func ComputeStatus(g Goal, items []Item, f Facts, now time.Time) Status {
 	var s Status
 	for _, it := range items {
@@ -84,6 +86,8 @@ func ComputeStatus(g Goal, items []Item, f Facts, now time.Time) Status {
 		if f.MergedPR {
 			s.Reason = "merged PR with no open items; finish the goal"
 		}
+	case g.NeedsRoot():
+		s.Label, s.Reason = StatusNeedsRoot, "root asks the owner, then drops or finishes the goal"
 	case len(g.Holders) == 0:
 		s.Label, s.Reason = StatusUnowned, "open goal with no holder"
 	case f.OpenPR:

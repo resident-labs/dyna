@@ -41,6 +41,7 @@ func TestBulkCloseKeepsOrderAndIndependentPRAndRoomGuards(t *testing.T) {
 			t.Fatalf("guarded session %s was closed", id)
 		}
 	}
+	e.doneGoal(author)
 	forced, err := e.svc.BulkSessionAction(e.ctx, alpha.ID, BulkSessionOptions{Action: "close", Sessions: []string{author.ID}, Force: true})
 	if err != nil || forced.Succeeded != 1 {
 		t.Fatalf("explicit force = %+v, %v", forced, err)
@@ -115,6 +116,8 @@ func TestBulkCloseHandsSurvivingChildrenUpWithoutLosingHistory(t *testing.T) {
 	lead := e.start(rec, "lead", nil)
 	child := e.start(rec, "child", &lead)
 	leaf := e.start(rec, "leaf", &child)
+	e.doneGoal(lead)
+	e.doneGoal(child)
 	got, err := e.svc.BulkSessionAction(e.ctx, rec.ID, BulkSessionOptions{Action: "close", Sessions: []string{lead.ID, child.ID}, Force: true})
 	if err != nil || got.Succeeded != 2 {
 		t.Fatalf("close hierarchy = %+v, %v", got, err)
