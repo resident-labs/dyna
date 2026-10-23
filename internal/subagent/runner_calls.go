@@ -158,8 +158,8 @@ type TurnNote struct {
 	RoomHeld bool `json:"roomHeld,omitempty"`
 	// Dispatched is a live post handed to the harness.
 	Dispatched *DrainedPost `json:"dispatched,omitempty"`
-	// Delivered is a dispatched post the harness read, matched by its time
-	// and text.
+	// Delivered is a dispatched post the harness read, matched by post ID.
+	// Receipts from older runners omit IDs and use timestamp and text.
 	Delivered      *Steer                 `json:"delivered,omitempty"`
 	Delivery       *Delivery              `json:"delivery,omitempty"`
 	Fallback       *harness.ModelFallback `json:"fallback,omitempty"`
@@ -206,8 +206,18 @@ func (n TurnNote) apply(t *Turn) bool {
 		t.Owe(n.Dispatched.Owed)
 	case n.Delivered != nil:
 		for i := range t.Steering {
-			if t.Steering[i].TS == n.Delivered.TS && t.Steering[i].Message == n.Delivered.Message {
-				t.Steering[i].Delivered = true
+			steer := &t.Steering[i]
+			matches := steer.ID != "" && steer.ID == n.Delivered.ID
+			// TODO: legacy/shim remove later — older active runners omit receipt IDs.
+			if n.Delivered.ID == "" {
+				matches = steer.TS == n.Delivered.TS && steer.Message == n.Delivered.Message
+			}
+			if matches {
+				steer.Delivered = true
+				if steer.SourceOffset == nil && n.Delivered.SourceOffset != nil {
+					offset := *n.Delivered.SourceOffset
+					steer.SourceOffset = &offset
+				}
 			}
 		}
 	case n.Delivery != nil:
