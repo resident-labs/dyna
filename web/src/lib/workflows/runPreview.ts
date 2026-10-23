@@ -2,7 +2,7 @@
 // often JSON. The row reads it the way the full view does (readable.js), so the
 // preview is a sentence and not a brace. A preview that a JSON value was cut
 // short of stays empty: the row's own toggle opens the readable result.
-import { recordLine } from '../ui/readable.js'
+import { recordLine } from '../ui/readable.ts'
 
 export function previewLine(text: string): string {
   if (!text) return ''

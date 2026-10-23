@@ -8,7 +8,7 @@
   // onstop(job) stops a running job and resolves when it has ended.
   import { onMount, untrack } from 'svelte'
   import { api } from '../../api.js'
-  import { ago, duration } from '../ui/format.js'
+  import { ago, duration } from '../ui/format.ts'
   import { runningJob } from '../rooms/workViews.ts'
   import type { ShellJob, ShellLog } from '../api/terminal.ts'
   import { errorText } from '../errorText.ts'

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { swipeReply } from './swipeReply.js'
+import { swipeReply } from './swipeReply.ts'
 
 function fixture({ coarse = true, interactive = false, selected = false } = {}) {
   globalThis.window = { matchMedia: () => ({ matches: coarse }), getSelection: () => selected ? 'selected text' : '' }

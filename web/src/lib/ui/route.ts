@@ -2,8 +2,8 @@
 // #room=<id>, plus one of view=<view>, session=<id>[&turn=<n>] or run=<id>.
 // The all-rooms page has no address. PR, issue and file links keep their own
 // format (prlink.js); a completion link (details.js) names a session or run.
-import { roomIDPattern } from './posts.js'
-import { detailIDs } from './details.js'
+import { roomIDPattern } from './posts.ts'
+import { detailIDs } from './details.ts'
 import { GENERAL } from '../rooms/channels.ts'
 
 export interface Route {

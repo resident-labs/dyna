@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { changeLines, noteGroups, sameChanges } from './notices.js'
+import { changeLines, noteGroups, sameChanges } from './notices.ts'
 
 const notice = (lines) => `[DYNA INSTRUCTIONS CHANGED] Since this conversation started, your standing instructions changed. These changes apply now:\n${lines}`
 
@@ -60,7 +60,7 @@ test('an attach handoff preserves quoted detach context in its body', () => {
 const slowPost = (id, test, facts = 'Time: 2.47 s, limit 1 s\nPRs: #1104, #1138\nArea: internal/pr/watch\n\n') => ({ id, kind: 'issue', from: 'work', to: ['work'], ts: '2026-10-20T03:10:00Z', text: `Slow test over the CI limit: ${test}\n\n${facts}This test ran over the room's per-test limit.` })
 
 test('a slow-test issue is a quiet note with its test, time, limit, PRs and area', async () => {
-  const { isNote, noteData } = await import('./notices.js')
+  const { isNote, noteData } = await import('./notices.ts')
   const p = slowPost('m1', 'dyna-agent/internal/pr/watch/TestMergePublishers/outer')
   assert.equal(isNote(p), true)
   assert.deepEqual(noteData(p).slow, { issue: 'm1', id: 'dyna-agent/internal/pr/watch/TestMergePublishers/outer', name: 'TestMergePublishers/outer', time: '2.47 s', limit: '1 s', prs: [1104, 1138], area: 'internal/pr/watch' })

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { dialog } from './dialog.js'
+  import { dialog } from './dialog.ts'
   // A small dialog that asks for one value: a new name, a steering message,
   // or a typed name that confirms a delete. With `match`, the action stays
   // off until the value equals it exactly. onsubmit(value) may return a

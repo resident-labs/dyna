@@ -4,7 +4,7 @@ import { rm } from 'node:fs/promises'
 import test from 'node:test'
 import { bundle, domNames, importBundle, installDom } from '../prs/prDetailHarness.ts'
 
-const format = readFileSync(new URL('../ui/format.js', import.meta.url), 'utf8')
+const format = readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8')
 const now = Date.now()
 const iso = (ms: number) => new Date(now - ms).toISOString()
 const members = [

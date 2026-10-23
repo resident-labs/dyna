@@ -9,7 +9,7 @@
   import Card from '../ui/Card.svelte'
   import Row from '../ui/Row.svelte'
   import Avatar from '../ui/Avatar.svelte'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import { commitDays } from './github.ts'
   import { shortSha } from './pr.ts'
   import type { GitHubCommit } from '../api/github.ts'

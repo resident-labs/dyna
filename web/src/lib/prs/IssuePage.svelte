@@ -11,7 +11,7 @@
   //   note       a snippet with what Start said, a warning or an error
   //   onsession  opens the working session, or null; onpr opens a linked PR
   //   onback     the back link, on a narrow screen only
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import Card from '../ui/Card.svelte'
   import Chip from '../ui/Chip.svelte'
   import FactsLine from './FactsLine.svelte'

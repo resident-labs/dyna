@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { parseDiff, diffTotals, statusLetter, split, crumbs, parent, treeRows, type RepoEntry, type TreeRow } from './repo.ts'
-import { splitLines } from '../ui/highlight.js'
+import { splitLines } from '../ui/highlight.ts'
 
 const diff = `diff --git a/a.js b/a.js
 index 1..2 100644

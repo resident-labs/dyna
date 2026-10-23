@@ -1,6 +1,6 @@
 // The terminal block of a Dyna shell command in a DM. Source of the job
 // shape: terminalsvc.ShellJob (internal/terminalsvc/rooms.go).
-import { duration, elapsed } from '../ui/format.js'
+import { duration, elapsed } from '../ui/format.ts'
 import type { ShellJob } from '../api/terminal.ts'
 
 export type { ShellJob }

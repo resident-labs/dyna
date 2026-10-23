@@ -1,6 +1,6 @@
 <script lang="ts">
   import Segmented from '../ui/Segmented.svelte'
-  import { dialog } from '../ui/dialog.js'
+  import { dialog } from '../ui/dialog.ts'
   // Start a workflow run in the room: pick a template (or give a script
   // path on the host) and an input. The input goes as JSON when it parses
   // as JSON, else as a plain string; a chip says which.
@@ -9,7 +9,7 @@
   import type { TemplateInfo } from '../api/workflow.ts'
   import { errorText } from '../errorText.ts'
   import { api } from '../../api.js'
-  import { roomLabel } from '../ui/format.js'
+  import { roomLabel } from '../ui/format.ts'
 
   interface Props {
     room: Room

@@ -1,4 +1,4 @@
-import { createReloadGate } from '../ui/reloadGate.js'
+import { createReloadGate } from '../ui/reloadGate.ts'
 
 // Read writes share the reload gate, but retain IDs: a trailing batch must
 // include every newly visible post, rather than only the last caller's list.

@@ -1,7 +1,7 @@
 <script>
-  import { speaker } from './posts.js'
-  import { markdown, stamp } from './format.js'
-  import { postParts } from './postParts.js'
+  import { speaker } from './posts.ts'
+  import { markdown, stamp } from './format.ts'
+  import { postParts } from './postParts.ts'
   import PostFiles from './PostFiles.svelte'
   import PostLink from './PostLink.svelte'
 

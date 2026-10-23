@@ -1,6 +1,6 @@
 <script>
   import Files from '../files/Files.svelte'
-  import { postParts } from './postParts.js'
+  import { postParts } from './postParts.ts'
   // The file cards of one post. Feed, Pins, forwards and the session view
   // all use this, so a post shows the same cards in every view.
   let { roomId, post, parts: given = null, onopen } = $props()

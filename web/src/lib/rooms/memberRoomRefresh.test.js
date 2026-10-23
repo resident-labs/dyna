@@ -5,8 +5,8 @@ import { readFileSync } from 'node:fs'
 import { parse } from 'svelte/compiler'
 import { setImmediate } from 'node:timers/promises'
 import { createRoomData } from './roomData.js'
-import { patchListRows, hasItemChange } from '../ui/listChanges.js'
-import { reconcileRows } from '../ui/reloadGate.js'
+import { patchListRows, hasItemChange } from '../ui/listChanges.ts'
+import { reconcileRows } from '../ui/reloadGate.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')

@@ -5,7 +5,7 @@
   // results stay fast. See readable.js.
   import JsonView from './JsonView.svelte'
   import Segmented from './Segmented.svelte'
-  import { fieldLabel, kindOf, recordTitle, recordLine, linkOf, paragraphs } from './readable.js'
+  import { fieldLabel, kindOf, recordTitle, recordLine, linkOf, paragraphs } from './readable.ts'
   let { value, depth = 0 } = $props()
   const LONG = 4000
   let mode = $state('readable')

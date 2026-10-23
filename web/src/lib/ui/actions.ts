@@ -1,10 +1,55 @@
 import { api } from '../../api.js'
-import { roomLabel } from './format.js'
+import { roomLabel } from './format.ts'
+import type { Room } from '../api/room.ts'
+
+export type ActionRoom = Pick<Room, 'id' | 'name'> &
+  Partial<Pick<Room, 'displayName' | 'repo' | 'pinned' | 'archived' | 'pinOrder'>>
+
+interface ActionRun { id: string; name: string; status: string }
+type Handler = (arg?: string) => unknown
+interface Option { value: string; hint: string }
+interface Surfaces {
+  palette: { label: string; hint?: string; icon?: string; terms: string; danger?: boolean }
+  slash: { name: string; arg?: string; listTitle?: string; hint: string; pickRuns?: boolean; options?: () => Option[] }
+  menu: { label: string; hint?: string }
+}
+export type Action = { id: string; run: Handler } & {
+  [K in keyof Surfaces]?: Surfaces[K] | null
+}
+export interface ActionContext {
+  room: ActionRoom | null
+  rooms: Partial<Pick<Room, 'pinOrder'>>[]
+  icons: Partial<Record<'files' | 'github' | 'terminal' | 'jobs' | 'run' | 'stop' | 'flows' | 'pin' | 'find' | 'gear' | 'rename' | 'archive' | 'trash' | 'device' | 'side', string>>
+  hasTerminal: boolean
+  narrow?: boolean
+  runs?: { runs?: ActionRun[] | null } | null
+  session?: { name: string } | null
+  sessionPRs?: readonly unknown[] | null
+  roomOptions?: () => Option[]
+  templateOptions?: () => Option[]
+  switchRoom: Handler
+  newRoom: Handler
+  openFiles: Handler
+  startWorkflow: Handler
+  openPins: Handler
+  openFind: Handler
+  openSessionPRs: Handler
+  toggleSidebar: Handler
+  openView: (view: string) => unknown
+  openSettings: (section?: string, pairNow?: boolean) => unknown
+  cancelRun: (run: ActionRun) => unknown
+  openRoomSettings: (room: ActionRoom) => unknown
+  renameRoom: (room: ActionRoom) => unknown
+  deleteRoom: (room: ActionRoom) => unknown
+  say: (message: string) => unknown
+  loadRooms: () => unknown
+  roomAction: (run: () => Promise<unknown>, note: string) => unknown
+}
 
 // Each action owns its handler and availability. The three surfaces only
 // choose presentation metadata; they never infer behavior from a label.
-export function actions(c) {
-  const out = []
+export function actions(c: ActionContext): Action[] {
+  const out: Action[] = []
   const r = c.room
   const icon = c.icons
   if (r) {
@@ -56,11 +101,17 @@ export function actions(c) {
   return out
 }
 
-export function actionItems(registry, surface) {
-  return registry.filter((action) => action[surface]).map((action) => ({ id: action.id, ...action[surface], run: action.run }))
+export function actionItems<K extends keyof Surfaces>(registry: Action[], surface: K) {
+  return registry.flatMap((action) => {
+    const metadata = action[surface]
+    return metadata ? [{ id: action.id, ...metadata, run: action.run }] : []
+  })
 }
 
-export function roomMenu(registry) {
+export function roomMenu(registry: Action[]) {
   const items = actionItems(registry, 'menu')
-  return ['rename', 'room-pin', 'room-archive', 'roomsettings'].map((id) => items.find((item) => item.id === id)).filter(Boolean)
+  return ['rename', 'room-pin', 'room-archive', 'roomsettings'].flatMap((id) => {
+    const item = items.find((item) => item.id === id)
+    return item ? [item] : []
+  })
 }

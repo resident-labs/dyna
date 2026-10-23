@@ -2,9 +2,9 @@
   // The commits of one file, or of the whole repository when `path` is empty.
   // A side panel on a wide screen, a bottom sheet on a phone. A file's rows
   // can be selected to show that version; repository rows are only a list.
-  import { dialog } from '../ui/dialog.js'
+  import { dialog } from '../ui/dialog.ts'
   import { api } from '../../api.js'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
   import LoadOlder from '../ui/LoadOlder.svelte'

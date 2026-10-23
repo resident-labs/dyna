@@ -1,5 +1,5 @@
 <script>
-  import { dialog as modal } from './dialog.js'
+  import { dialog as modal } from './dialog.ts'
   // The command palette: one box for rooms and commands, on the desktop and
   // on a phone. "New room" pushes a path view: type a folder path, see the
   // folders below it, and make a room for the repo there. Backspace on an
@@ -17,9 +17,9 @@
   //   onclose   the palette should close
   import { onMount, tick } from 'svelte'
   import { api } from '../../api.js'
-  import { isPathText, splitPath, folderRows, parentOf, atRoot, showHome, matches } from './palette.js'
+  import { isPathText, splitPath, folderRows, parentOf, atRoot, showHome, matches } from './palette.ts'
   import { findTargets, GROUPS } from './paletteTargets.ts'
-  import { roomLabel } from './format.js'
+  import { roomLabel } from './format.ts'
 
   // path, when set, opens straight in the New room path view with that
   // text ("" for the home folder).

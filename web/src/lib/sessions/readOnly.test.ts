@@ -5,7 +5,7 @@ import { rm } from 'node:fs/promises'
 import { bundle, domNames, importBundle, installDom } from '../prs/prDetailHarness.ts'
 import { need } from '../../../test/need.ts'
 
-const format = readFileSync(new URL('../ui/format.js', import.meta.url), 'utf8')
+const format = readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8')
 const session = { member: { id: 's1', name: 'lead', address: 'repo:lead', hue: 1, state: 'idle', status: 'idle', turns: 1 }, posts: [], turns: [] }
 
 const code = await bundle({ component: '../sessions/Session', format })

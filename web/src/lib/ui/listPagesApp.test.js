@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
-import { mergeListPage } from './listPages.js'
-import { reconcileRows } from './reloadGate.js'
+import { mergeListPage } from './listPages.ts'
+import { reconcileRows } from './reloadGate.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const node = parse(source).instance.content.body.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'applyListPage')

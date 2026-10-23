@@ -10,7 +10,7 @@
   import { onMount, onDestroy, tick } from 'svelte'
   import { errorText } from '../../errorText.ts'
   import { fade, fly, slide } from 'svelte/transition'
-  import { BASE, motion } from '../../ui/motion.js'
+  import { BASE, motion } from '../../ui/motion.ts'
   import Loading from '../Loading.svelte'
   import { api } from '../../../api.js'
   import HarnessIcon from './HarnessIcon.svelte'

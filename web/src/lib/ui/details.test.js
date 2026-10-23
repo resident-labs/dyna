@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { detailHref, parseDetailHref } from './details.js'
+import { detailHref, parseDetailHref } from './details.ts'
 
 test('completion links round-trip stored job, run, and exact session turn IDs', () => {
   for (const [kind, prefix] of [['shell', 'sh'], ['run', 'wf'], ['session', 'ses']]) {

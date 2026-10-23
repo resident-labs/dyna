@@ -47,7 +47,7 @@ export async function bundle({ component = 'PRDetail', api = DETAIL_API, format 
     stdin: { contents: `export { default } from './${component}.svelte'; export { mount, flushSync, unmount } from 'svelte'`, resolveDir: new URL('.', import.meta.url).pathname, loader: 'js' },
     format: 'esm', platform: 'node', conditions: ['browser', 'production'], logLevel: 'silent',
     plugins: [svelteEsbuildPlugin(), { name: 'pr-detail-stubs', setup(builder) {
-      builder.onLoad({ filter: /[/\\]format\.js$/ }, () => ({ contents: format, loader: 'js' }))
+      builder.onLoad({ filter: /[/\\]format\.ts$/ }, () => ({ contents: format, loader: 'ts' }))
       // Keep new production exports available when a fixture replaces only a few.
       builder.onResolve({ filter: /^actual-api:/ }, ({ path }) => ({ path: path.slice('actual-api:'.length), namespace: 'actual-api' }))
       builder.onLoad({ filter: /.*/, namespace: 'actual-api' }, ({ path }) => ({ contents: readFileSync(path, 'utf8'), loader: 'js', resolveDir: resolve(path, '..') }))

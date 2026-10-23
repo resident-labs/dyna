@@ -1,9 +1,9 @@
 <script lang="ts">
   import { fileURL } from '../../api.js'
-  import { dayLabel, short } from '../ui/format.js'
+  import { dayLabel, short } from '../ui/format.ts'
   import Files from '../files/Files.svelte'
   import PostLink from '../ui/PostLink.svelte'
-  import { postAttachment, speaker } from '../ui/posts.js'
+  import { postAttachment, speaker } from '../ui/posts.ts'
   import type { Attachment, Post, Room } from '../api/room.ts'
 
   interface Props {

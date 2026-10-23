@@ -1,6 +1,6 @@
 <script>
-  import { markdown, turnText } from './format.js'
-  import { detailHref, detailLabels } from './details.js'
+  import { markdown, turnText } from './format.ts'
+  import { detailHref, detailLabels } from './details.ts'
 
   let { post, trimLead = false, onopen = null } = $props()
   let href = $derived(detailHref(post.detail, post.roomId))

@@ -5,7 +5,7 @@
   // cancels it, the next closes the dialog. Cancel takes focus so Escape
   // reaches it.
   import { slide } from 'svelte/transition'
-  import { BASE, motion } from './motion.js'
+  import { BASE, motion } from './motion.ts'
   interface Props {
     ask?: string
     action?: string

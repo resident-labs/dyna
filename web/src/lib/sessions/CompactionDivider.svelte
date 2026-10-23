@@ -4,7 +4,7 @@
   // replaces the rule's text; a failure shows the reason in the error color.
   import { compactionText } from './compaction.ts'
   import type { CompactionItem } from './compaction.ts'
-  import { clock } from '../ui/format.js'
+  import { clock } from '../ui/format.ts'
 
   interface Props {
     row: CompactionItem & { ts?: number | string }

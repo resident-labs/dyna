@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { createReloadGate, reconcileRows } from '../ui/reloadGate.js'
+import { createReloadGate, reconcileRows } from '../ui/reloadGate.ts'
 import { createRoomData } from '../rooms/roomData.js'
 import { bulkRetryable } from './bulkSessions.ts'
 import { pruneSelection, toggleSelection } from './consolidation.ts'

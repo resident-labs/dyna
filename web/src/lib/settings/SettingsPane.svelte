@@ -14,7 +14,7 @@
   import { look } from '../rooms/look.svelte.js'
   import { visibleTo, scopeOf } from '../rooms/look.ts'
   import { showReasoning, saveShowReasoning, showCompaction, saveShowCompaction, channelList, saveChannelList, CHANNEL_LISTS } from '../ui/prefs.ts'
-  import { FAST, motion } from '../ui/motion.js'
+  import { FAST, motion } from '../ui/motion.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
   import type { SettingItem } from '../api/settings.ts'
 

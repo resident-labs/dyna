@@ -1,4 +1,4 @@
-import { ago } from '../ui/format.js'
+import { ago } from '../ui/format.ts'
 
 // Pure helpers for the sync badge. The saved status of one repo is {remotes:
 // {name: {ahead, behind, checkedAt, lastError, rewrite}}, integration:

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { dialog } from '../ui/dialog.js'
+  import { dialog } from '../ui/dialog.ts'
   // Pair a new phone or browser: a one-time code, and a QR code of the web
   // app link that carries it (#pair=CODE). The QR is drawn here, so the link
   // never leaves the page. The web app address is editable, for a
