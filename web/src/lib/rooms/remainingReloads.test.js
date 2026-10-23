@@ -21,7 +21,7 @@ function appFunctions(c, names) {
   c.reloadsUnread = reloadsUnread
   if (names.includes('handle') && !names.includes('applyItemEvent')) names = ['applyItemEvent', ...names]
   c.changesVisuals = changesVisuals
-  for (const [k, v] of Object.entries({ routedParents: "", feed: null, roomId: "" })) if (!(k in c)) c[k] = v
+  for (const [k, v] of Object.entries({ mergeVersion: 0, routedParents: "", feed: null, roomId: "" })) if (!(k in c)) c[k] = v
   c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   for (const name of names) {
