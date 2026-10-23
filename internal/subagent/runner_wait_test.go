@@ -3,6 +3,7 @@ package subagent
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -780,5 +781,48 @@ func TestLiveInputDoorbellDeliversPastRoomPages(t *testing.T) {
 	_, afterClaims, replayed, _, _, _, _ := eng.snapshot()
 	if !sameClaim(want, replay) || len(replay.Posts) != 1 || replay.Posts[0].Steer.ID != message.ID || afterClaims != claims || replayed != 1 || eng.w.Health().Writes != before {
 		t.Fatalf("later input replay=%+v, claims=%d, replays=%d, writes=%d", replay, afterClaims, replayed, eng.w.Health().Writes-before)
+	}
+}
+
+// countedRecords distinguishes revision checks from full record loads.
+type countedRecords struct {
+	state.Reader
+	loads int
+}
+
+func (r *countedRecords) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	if strings.Contains(query, "SELECT meta") {
+		r.loads++
+	}
+	return r.Reader.QueryRowContext(ctx, query, args...)
+}
+
+func TestWaitRecordCacheTracksRevision(t *testing.T) {
+	e, info, _, ctx, _ := newInputWaitFixture(t)
+	db, err := database.Open(filepath.Dir(e.m.Store.root()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	counted := &countedRecords{Reader: db}
+	reader := canonicalInputReader{Store: e.m.Store, ctx: ctx, db: counted}
+	for range 3 {
+		if _, err := reader.ReadMeta(info.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if counted.loads != 1 {
+		t.Fatalf("unchanged record loaded %d times, want 1", counted.loads)
+	}
+	meta := info.Meta
+	meta.Name = "renamed"
+	recordtest.Write(t, e.m.Store.root(), info.ID, meta)
+	for range 2 {
+		got, err := reader.ReadMeta(info.ID)
+		if err != nil || got.Name != meta.Name {
+			t.Fatalf("updated record: name %q, error %v", got.Name, err)
+		}
+	}
+	if counted.loads != 2 {
+		t.Fatalf("updated record loaded %d times, want 2 total", counted.loads)
 	}
 }
