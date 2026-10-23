@@ -46,7 +46,6 @@
   import SyncBadge from './lib/rooms/SyncBadge.svelte'
   import { remoteList, syncDelay } from './lib/rooms/sync.ts'
   import Library from './lib/library/Library.svelte'
-  import CIHealth from './lib/cihealth/CIHealth.svelte'
   import Questions from './lib/rooms/Questions.svelte'
   import Visuals from './lib/rooms/Visuals.svelte'
   import Services from './lib/services/Services.svelte'
@@ -2688,16 +2687,14 @@
           {/key}
         {:else}
         {#if workTabs && narrow}<Tabs tabs={workTabs} tab={view} label={workRow?.label ?? ''} onselect={openView} />{/if}
-        {#if view === 'cihealth'}
-          {#key room.id}<CIHealth roomId={room.id} {narrow} {changes} onpr={openPR} />{/key}
-        {:else if view === 'library'}
+        {#if view === 'library'}
           {#key room.id}<Library roomId={room.id} {narrow} onopen={({ path, dir }) => { openView('files'); if (dir) revealFolder = { path }; else reveal = path }} />{/key}
         {:else if view === 'terminal' && hasTerminal}
           {#key room.id}<Terminal roomId={room.id} ref={room.id} noRepo={!room.repo} {narrow} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
         {:else if view === 'questions'}
           {#key room.id}<Questions roomId={room.id} {questions} focusId={questionFocus} focusRequest={questionFocusRequest} onanswer={answerQuestion} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />{/key}
         {:else if view === 'services'}
-          {#key room.id}<Services roomId={room.id} repo={room.repo ?? ''} members={hierarchy} changes={changes ?? []} onopen={(m: Member) => openSession(m, 0, null, true)} onopenhealth={() => openView('cihealth')} />{/key}
+          {#key room.id}<Services roomId={room.id} repo={room.repo ?? ''} members={hierarchy} changes={changes ?? []} onopen={(m: Member) => openSession(m, 0, null, true)} onpr={openPR} />{/key}
         {:else if view === 'visuals'}
           {#key room.id}<Visuals roomId={room.id} {visuals} onopen={(v: Visual) => (viewing = { ...v.attachment, postId: v.post.id })} />{/key}
         {:else if view === 'computers' && computers}
