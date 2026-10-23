@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildRows, buildSchedule, type Inputs, elapsed, nextAt, queueLine, readableDuration, testLine } from './model.ts'
+import { buildActivity, buildRows, buildSchedule, type Inputs, elapsed, nextAt, queueLine, readableDuration, testLine } from './model.ts'
 
 test('the queue separates trials, ready changes, failures and drafts', () => {
   assert.equal(queueLine(null), 'The queue could not be read')
@@ -102,4 +102,26 @@ test('a pending update reports running until it has a real result', () => {
   assert.equal(update.detail, 'When main updates · running')
   assert.equal(update.value, '')
   assert.equal(row({ hooks: [{ hook, lastRun: { ...lastRun, result: 'pass' } }] }, 'update').detail, 'When main updates · last passed')
+})
+
+test('activity keeps one review result, merge details, and accurate hook states', () => {
+  const at = '2026-10-21T22:49:00Z'
+  const hook = { name: 'self-update', label: 'Update Dyna', event: 'main-updated', everyMinutes: 0, disabled: false }
+  const lines = buildActivity(inputs({
+    changes: [
+      { key: 'repo#9', number: 9, verdict: 'approve', reviewAt: at, reviewerSession: 'reviewer-session' },
+      { key: 'local:1', title: 'Local fix', reviewAt: at, verdict: 'changes' },
+      { key: 'bad', reviewAt: 'bad date' },
+    ],
+    history: [{ at, kind: 'trial', outcome: 'failed', changes: 2, detail: 'go-test failed' }],
+    hooks: [{ hook, lastRun: { result: 'pending', startedAt: at, finishedAt: '' } }],
+  }), Date.parse(at))
+  assert.equal(lines.length, 4)
+  assert.equal(lines[0]?.text, 'approve #9')
+  assert.equal(lines[0]?.session, 'reviewer-session')
+  assert.equal(lines[1]?.text, 'changes Local fix')
+  assert.equal(lines[2]?.text, 'trial failed: go-test failed')
+  assert.equal(lines[3]?.text, 'Update Dyna · running')
+  assert.equal(lines[3]?.tone, 'live')
+  assert.equal(new Set(lines.map((l) => l.key)).size, lines.length)
 })
