@@ -58,7 +58,10 @@ export const api = {
   roomCIBudget: () => Promise.resolve({ ciWarnAfter: '3m0s', ciFailAfter: '4m0s', ciTestMax: '1s' }),
   accountUsageCached: () => Promise.resolve({ accounts: [{ observedAt: iso(12), stale: true }] }),
   syncStatus: () => Promise.resolve({ '/repo': { remotes: { origin: { ahead: 0, behind: 0, checkedAt: iso(3), lastError: '' } }, operation: null } }),
-  ciHealth: () => Promise.resolve({ limitMs: 1000, tests: [{ test: 'TestWorse', limitMs: 1000, runs: [{ durationMs: 1200 }, { durationMs: 900 }] }] }),
+  ciHealth: () => Promise.resolve({ limitMs: 1000, warnMs: 60000, failMs: 120000, runs: [
+    { token: '2/1', pr: 2, busyMs: 190000, queueMs: 40000, warnMs: 60000, failMs: 120000, conclusion: 'success', jobs: [{ id: 1, name: 'go-test', busyMs: 150000 }, { id: 2, name: 'frontend', busyMs: 30000 }] },
+    { token: '1/1', pr: 1, busyMs: 50000, queueMs: 0, warnMs: 60000, failMs: 120000, conclusion: 'success', jobs: [{ id: 1, name: 'go-test', busyMs: 45000 }] },
+  ], tests: [{ test: 'TestWorse', limitMs: 1000, runs: [{ durationMs: 1200 }, { durationMs: 900 }] }] }),
   setReviewEnabled: (room, on) => { globalThis.__writes = (globalThis.__writes || []).concat('review.enabled ' + on); return Promise.reject(new Error('engine said no')) },
 }
 export const openExternal = () => {}
@@ -142,15 +145,19 @@ test('the reviews tab states a provider limit once and keeps its controls on the
   } finally { await page.done() }
 })
 
-test('the CI health tab shows the slow-test state and opens the CI view', async () => {
-  let opened = 0
-  const page = await mountPage({ onopenhealth: () => { opened++ } })
+test('the CI health tab holds the status line, the run chart, the slowest jobs and the slow tests', async () => {
+  const page = await mountPage()
   try {
     await settle(page)
     const panel = open(page, 'CI health')
-    assert.match(textOf(panel), /1 test over 1 s/)
-    need([...panel.querySelectorAll<HTMLElement>('button.health')][0], 'open link').click()
-    assert.equal(opened, 1)
+    await settle(page)
+    const text = textOf(panel)
+    assert.match(text, /1 test over 1 s/)
+    assert.match(text, /Last run: 3m 10s, over the 2m limit, queued 40 s/)
+    assert.equal(panel.querySelectorAll('.plot .col').length, 2, 'one bar per run')
+    assert.match(text, /Slowest jobs/)
+    assert.match(text, /go-test/)
+    assert.match(text, /Slow tests/)
   } finally { await page.done() }
 })
 

@@ -59,28 +59,6 @@ export interface CIHealth {
   tests: CIHealthTest[]
 }
 
-export interface CIHealthStep {
-  name: string
-  ms: number
-}
-
-export interface CIHealthJob {
-  id: number
-  name: string
-  status: string
-  conclusion: string
-  started: string
-  completed: string
-  busyMs: number
-  steps: CIHealthStep[]
-}
-
-export interface CIHealthRunDetail {
-  run: CIHealthRun
-  jobs: CIHealthJob[]
-  tests: CIHealthTestRun[]
-}
-
 const rows = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isRecord) : [])
 const str = (v: unknown): string => (isString(v) ? v : '')
 const num = (v: unknown): number => (isNumber(v) && Number.isFinite(v) ? v : 0)
@@ -128,19 +106,6 @@ const readTest = (v: Record<string, unknown>): CIHealthTest => ({
   runs: rows(v.runs).map(readTestRun),
 })
 
-const readStep = (v: Record<string, unknown>): CIHealthStep => ({ name: str(v.name), ms: num(v.ms) })
-
-const readJob = (v: Record<string, unknown>): CIHealthJob => ({
-  id: num(v.id),
-  name: str(v.name),
-  status: str(v.status),
-  conclusion: str(v.conclusion),
-  started: str(v.started),
-  completed: str(v.completed),
-  busyMs: num(v.busyMs),
-  steps: rows(v.steps).map(readStep),
-})
-
 // readCIHealth returns the room's graph and tests, or null for a shape this
 // client cannot read.
 export function readCIHealth(v: unknown): CIHealth | null {
@@ -152,15 +117,6 @@ export function readCIHealth(v: unknown): CIHealth | null {
     failMs: num(v.failMs),
     runs: rows(v.runs).map(readRun),
     tests: rows(v.tests).map(readTest),
-  }
-}
-
-export function readRunDetail(v: unknown): CIHealthRunDetail | null {
-  if (!isRecord(v) || !isRecord(v.run)) return null
-  return {
-    run: readRun(v.run),
-    jobs: rows(v.jobs).map(readJob),
-    tests: rows(v.tests).map(readTestRun),
   }
 }
 
@@ -219,21 +175,6 @@ export function filterTests(tests: CIHealthTest[], filter: TestFilter): CIHealth
   return filter === 'all' ? sorted : sorted.filter((test) => test.state === filter)
 }
 
-// bandNames is the jobs the graph draws, in the order they first appear, so
-// every column and the legend name the same job with the same shade.
-export function bandNames(runs: CIHealthRun[]): string[] {
-  const names: string[] = []
-  for (const run of runs) {
-    for (const job of run.jobs) if (!names.includes(job.name)) names.push(job.name)
-  }
-  return names
-}
-
-// jobMs is one job's time in a run, or zero when that job did not run there.
-export function jobMs(run: CIHealthRun, name: string): number {
-  return run.jobs.find((job) => job.name === name)?.busyMs ?? 0
-}
-
 // rowLimit is how many test rows the view draws. A room whose limit is 1 s
 // has hundreds over it, and drawing them all costs a long frame and a large
 // heap for rows nobody reads past the first screen.
@@ -270,23 +211,7 @@ export function graphRuns(runs: CIHealthRun[], max: number): { shown: CIHealthRu
   return { shown: [...picked].reverse(), newest }
 }
 
-// bandShare is one job's part of the run's measured busy time. Parallel jobs
-// overlap, so their times sum to more than the busy time; the bands divide the
-// column the run actually used instead of adding up past it.
-export function bandShare(run: CIHealthRun, name: string): number {
-  let total = 0
-  for (const job of run.jobs) total += job.busyMs
-  if (total <= 0) return 0
-  return jobMs(run, name) / total
-}
-
-// bandPx is one band's height in the chart, so a column reads as time.
-export function bandPx(ms: number, scale: number, chart: number): number {
-  if (scale <= 0) return 0
-  return Math.max((ms / scale) * chart, 0)
-}
-
-// barPct is a job or step bar's width against the longest of its run.
+// barPct is a bar's size, as a percent of the chart scale.
 export function barPct(ms: number, longest: number): number {
   if (longest <= 0) return 0
   return Math.min(Math.max((ms / longest) * 100, 0), 100)
@@ -315,11 +240,77 @@ export function failed(run: CIHealthRun): boolean {
   return run.conclusion === 'failure' || run.conclusion === 'cancelled' || run.conclusion === 'timed_out'
 }
 
-// budgetWord says where a run sits against its own budget lines.
-export function budgetWord(busyMs: number, warnMs: number, failMs: number): string {
-  if (failMs > 0 && busyMs >= failMs) return 'over fail'
-  if (warnMs > 0 && busyMs >= warnMs) return 'over warn'
+export type BudgetState = 'within' | 'warn' | 'over'
+
+// budgetState says where a run sits against its own budget lines. It is the
+// only thing that colours a bar.
+export function budgetState(busyMs: number, warnMs: number, failMs: number): BudgetState {
+  if (failMs > 0 && busyMs >= failMs) return 'over'
+  if (warnMs > 0 && busyMs >= warnMs) return 'warn'
   return 'within'
+}
+
+const stateWords: Record<BudgetState, string> = { within: 'within budget', warn: 'warning', over: 'over budget' }
+export const budgetWord = (state: BudgetState): string => stateWords[state]
+
+// statusLine is the one line above the chart: how the newest run went.
+export function statusLine(run: CIHealthRun | null): string {
+  if (!run) return ''
+  const state = budgetState(run.busyMs, run.warnMs, run.failMs)
+  const parts = [`Last run: ${duration(run.busyMs)}`]
+  if (failed(run)) parts.push('failed')
+  if (state === 'over') parts.push(`over the ${duration(run.failMs)} limit`)
+  else if (state === 'warn') parts.push(`over the ${duration(run.warnMs)} warning`)
+  else if (run.failMs > 0) parts.push(`within the ${duration(run.failMs)} limit`)
+  if (run.queueMs > 0) parts.push(`queued ${duration(run.queueMs)}`)
+  return parts.join(', ')
+}
+
+// slowestJobs is a run's longest jobs, longest first.
+export function slowestJobs(run: CIHealthRun, max = 3): CIHealthJobBand[] {
+  return run.jobs.filter((job) => job.busyMs > 0).sort((a, b) => b.busyMs - a.busyMs).slice(0, max)
+}
+
+export type JobTrend = 'slower' | 'faster' | 'steady'
+
+export interface JobRank {
+  name: string
+  typicalMs: number
+  trend: JobTrend
+  changePct: number
+}
+
+const median = (values: number[]): number => {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  return sorted.length % 2 ? (sorted[mid] ?? 0) : ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2
+}
+
+// jobRanking ranks the jobs by their typical (median) time across the runs,
+// longest first. The trend compares the newer half of a job's runs with the
+// older half; a change under 10% is steady. runs are newest first, and a run
+// that has not finished is left out.
+export function jobRanking(runs: CIHealthRun[], max = 5): JobRank[] {
+  const series = new Map<string, number[]>()
+  for (const run of runs) {
+    // A running run saves partial job times; they would read as a speed-up.
+    if (run.conclusion === '' && run.status !== 'completed') continue
+    for (const job of run.jobs) {
+      if (job.busyMs > 0) series.set(job.name, [...(series.get(job.name) ?? []), job.busyMs])
+    }
+  }
+  const ranks: JobRank[] = []
+  for (const [name, values] of series) {
+    let changePct = 0
+    if (values.length >= 4) {
+      const half = Math.floor(values.length / 2)
+      const older = median(values.slice(half))
+      if (older > 0) changePct = Math.round(((median(values.slice(0, half)) - older) / older) * 100)
+    }
+    const trend: JobTrend = changePct >= 10 ? 'slower' : changePct <= -10 ? 'faster' : 'steady'
+    ranks.push({ name, typicalMs: median(values), trend, changePct })
+  }
+  return ranks.sort((a, b) => b.typicalMs - a.typicalMs).slice(0, max)
 }
 
 // budgetWithAllow returns the room's budget with the test allowed and its
