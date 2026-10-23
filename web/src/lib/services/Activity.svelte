@@ -13,10 +13,11 @@
   }
   let { lines, selected, onSelect, onOpen }: Props = $props()
 
-  const today = new Date().toDateString()
+  // A tab left open past midnight must date a line the next day, so the
+  // comparison uses the day the line is drawn.
   const when = (at: number): string => {
     const d = new Date(at)
-    return d.toDateString() === today ? clock(at) : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    return d.toDateString() === new Date().toDateString() ? clock(at) : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
   }
 </script>
 
@@ -56,6 +57,8 @@
     .open:hover { color: var(--ink); }
   }
   .svc { margin-left: var(--s2); font-size: var(--t-cap); letter-spacing: 0.05em; text-transform: uppercase; color: var(--faint); }
-  .svc:hover { color: var(--muted); }
+  @media (hover: hover) {
+    .svc:hover { color: var(--muted); }
+  }
   .none { margin: var(--s2) 0; color: var(--faint); font-size: var(--t-ui); }
 </style>

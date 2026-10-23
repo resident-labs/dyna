@@ -16,41 +16,35 @@
   let { rows, selected, onSelect, onWrite, onRun }: Props = $props()
 
   let errors = $state<Record<string, string>>({})
-  let busy = $state('')
+  // Each line tracks its own write, so a write that ends on one line never
+  // reopens the controls on another line that is still saving.
+  let saving = $state<string[]>([])
+  const isSaving = (id: string): boolean => saving.includes(id)
 
   const fail = (e: unknown): string => String((e as { message?: string })?.message || e)
 
-  async function write(row: Row, id: string, value: string | boolean) {
-    busy = row.id
+  // save reports a refusal on the line it belongs to and then frees that line.
+  async function save(row: Row, work: () => Promise<string>) {
+    saving = [...saving, row.id]
     try {
-      await onWrite(id, value)
-      errors[row.id] = ''
+      errors[row.id] = await work()
     } catch (e) {
       errors[row.id] = fail(e)
     } finally {
-      busy = ''
+      saving = saving.filter((id) => id !== row.id)
     }
   }
+
+  const write = (row: Row, id: string, value: string | boolean): Promise<void> =>
+    save(row, async () => { await onWrite(id, value); return '' })
 
   // A profile that did not save goes back to the stored choice, so the menu
   // never shows a choice that was not saved.
-  async function pick(event: Event & { currentTarget: HTMLSelectElement }, row: Row, profile: { id: string; value: string }) {
-    busy = row.id
-    errors[row.id] = await pickProfile(event.currentTarget, (chosen: string) => onWrite(profile.id, chosen), profile.value)
-    busy = ''
-  }
+  const pick = (event: Event & { currentTarget: HTMLSelectElement }, row: Row, profile: { id: string; value: string }): Promise<void> =>
+    save(row, () => pickProfile(event.currentTarget, (chosen: string) => onWrite(profile.id, chosen), profile.value))
 
-  async function run(row: Row) {
-    busy = row.id
-    try {
-      await onRun()
-      errors[row.id] = ''
-    } catch (e) {
-      errors[row.id] = fail(e)
-    } finally {
-      busy = ''
-    }
-  }
+  const run = (row: Row): Promise<void> =>
+    save(row, async () => { await onRun(); return '' })
 </script>
 
 <ul class="list" aria-label="Services">
@@ -64,7 +58,7 @@
           {@const toggle = row.toggle}
           <button
             class="sw" class:on={toggle.on} role="switch" aria-checked={toggle.on}
-            aria-label="{row.name} on" disabled={busy === row.id}
+            aria-label="{row.name} on" disabled={isSaving(row.id)}
             onclick={() => write(row, toggle.id, !toggle.on)}
           ><i aria-hidden="true"></i><span>{toggle.on ? 'on' : 'off'}</span></button>
         {:else if !row.profile}
@@ -74,7 +68,7 @@
           {@const profile = row.profile}
           {#if profile.options.length}
             <select
-              class="sel" aria-label="{row.name} profile" value={profile.value} disabled={busy === row.id}
+              class="sel" aria-label="{row.name} profile" value={profile.value} disabled={isSaving(row.id)}
               onchange={(e) => pick(e, row, profile)}
             >
               {#each profile.options as option}<option value={option}>{option || 'auto'}</option>{/each}
@@ -84,7 +78,7 @@
           {/if}
         {/if}
         {#if row.id === 'update' && row.toggle}
-          <button class="run" disabled={busy === row.id} onclick={() => run(row)}>run now</button>
+          <button class="run" disabled={isSaving(row.id)} onclick={() => run(row)}>run now</button>
         {/if}
         <span class="detail">{row.detail}</span>
         {#if row.profileStatus}<span class="pstat">{row.profileStatus}</span>{/if}
