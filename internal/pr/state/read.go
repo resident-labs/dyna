@@ -94,6 +94,10 @@ func open(root string) (*sql.DB, error) {
 	if err != nil {
 		return db, err
 	}
+	err = database.Migrate(db, "pr.landing_history", 1, migrateLanding)
+	if err != nil {
+		return db, err
+	}
 	err = database.Migrate(db, "pr.policy_retirement", 1, migratePolicy)
 	if err != nil {
 		return db, err

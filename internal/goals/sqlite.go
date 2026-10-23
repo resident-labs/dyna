@@ -114,7 +114,10 @@ func (s *Store) migrate(db *sql.DB) error {
 	}); err != nil {
 		return err
 	}
-	return database.Migrate(db, "goals.resting", 1, migrateResting)
+	if err := database.Migrate(db, "goals.resting", 1, migrateResting); err != nil {
+		return err
+	}
+	return database.Migrate(db, "goals.service", 1, s.migrateServiceGoals)
 }
 
 // TODO: legacy/shim remove later — copies goals/state.json into dyna.db once and leaves the file in place so an older binary can roll back; remove after every host has run a SQLite build for a while.
