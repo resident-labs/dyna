@@ -119,15 +119,12 @@ func (s *Service) ShellJobs(roomID, before string, limit int) (listpage.Page[She
 		return listpage.Page[ShellJob]{}, err
 	}
 	store := ShellStore(s.options.SessionRoot)
-	list, err := store.List(true)
+	list, err := store.ListRoom(rec.ID)
 	if err != nil {
 		return listpage.Page[ShellJob]{}, err
 	}
 	out := []ShellJob{}
 	for _, in := range list {
-		if in.RoomID != rec.ID {
-			continue
-		}
 		out = append(out, ShellJobRow(store, in))
 	}
 	return ShellJobPage(out, before, limit)
