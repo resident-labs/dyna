@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createRoomSessionControls, roomControlResult } from './roomSessionControls.ts'
+import { createRoomSessionControls, roomControlResult, roomControlSummary, sessionName } from './roomSessionControls.ts'
 import type { RoomControlValue, RoomControlsApi } from './roomSessionControls.ts'
 import { need } from '../../../test/need.ts'
 
@@ -65,6 +65,26 @@ test('finite backend statuses use readable labels and keep explicit refusal reas
   assert.equal(roomControlResult({ ok: true, status: 'closed' }, 'clearDormant'), 'Closed')
   assert.equal(roomControlResult({ ok: false, status: 'kept', error: 'Open children' }, 'clearDormant'), 'Open children')
   assert.equal(roomControlResult({ ok: false, status: 'kept' }, 'clearDormant'), 'Kept open')
+})
+
+test('clear dormant reports one short line, and a kept session is not an error', () => {
+  const results = [
+    { session: 's1', name: 'dyna:fix-flaky-tests', ok: true, status: 'closed' },
+    { session: 's2', name: 'dyna:ts-guard', ok: true, status: 'kept', reason: 'started-work' as const },
+    { session: 's3', name: 'dyna:ts-leftovers', ok: true, status: 'kept', reason: 'started-work' as const },
+    { session: 's4', name: 'dyna:member-status', ok: false, status: 'kept', reason: 'failed' as const, error: 'the store lock is gone' },
+  ]
+  const value: RoomControlValue = { state: null, loading: false, busy: false, action: 'clearDormant', results, error: '', statusError: '' }
+  const summary = roomControlSummary(value)
+  assert.equal(summary.text, 'Closed 1 dormant session. 2 kept because they had new work. 1 session could not be closed.')
+  assert.deepEqual(summary.details.filter((detail) => detail.error).map((detail) => detail.name), ['dyna:member-status'])
+  assert.equal(summary.details[1]?.text, 'Kept open · it gained new work')
+})
+
+test('a result shows a session by name and never shows a raw session ID', () => {
+  assert.equal(sessionName({ session: 'ses_20261023-105413-cc5dd68c', ok: false, status: 'kept' }), 'session cc5dd68c')
+  assert.equal(sessionName({ session: 'ses_1', ok: true, status: 'closed' }, [{ id: 'ses_1', address: 'dyna:lead' }]), 'dyna:lead')
+  assert.equal(sessionName({ session: 'ses_2', name: 'dyna:root', ok: true, status: 'closed' }), 'dyna:root')
 })
 
 test('missing or invalid status counts cannot enable a destructive action', async () => {

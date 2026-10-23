@@ -983,7 +983,7 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		}
 	}
 	if !opts.DormantBefore.IsZero() && (info.Status == StatusRunning || info.Status == StatusQueued) {
-		return info, errors.New("session has an active or held turn")
+		return info, keptForWork("the session has an active or held turn")
 	}
 	if info.Status == StatusRunning || info.Status == StatusQueued {
 		if m.checkpoint != nil {
@@ -1047,6 +1047,9 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		return info, errors.New("cancel or finish consolidation before closing this session")
 	}
 	if fresh.Closing == nil || fresh.Closing.Token != opts.closingToken || !fresh.Closing.Active() {
+		if !opts.DormantBefore.IsZero() {
+			return info, keptForWork("the close reservation changed or expired")
+		}
 		return info, errors.New("close reservation changed or expired; retry")
 	}
 	// Every check that can refuse this close has passed, and a running turn is

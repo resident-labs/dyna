@@ -35,7 +35,10 @@
   import Feed from './lib/rooms/Feed.svelte'
   import Composer from './lib/rooms/Composer.svelte'
   import Members from './lib/rooms/Members.svelte'
-  import { createRoomSessionControls } from './lib/rooms/roomSessionControls.ts'
+  import { createRoomSessionControls, roomControlLabels, roomControlSummary } from './lib/rooms/roomSessionControls.ts'
+  import type { RoomControlSummary, RoomControlValue } from './lib/rooms/roomSessionControls.ts'
+  import { TOAST_DETAIL_MS, TOAST_MS } from './lib/ui/toast.ts'
+  import type { ToastDetail } from './lib/ui/toast.ts'
   import Pins from './lib/rooms/Pins.svelte'
   import SearchIcon from './lib/ui/SearchIcon.svelte'
   import SyncBadge from './lib/rooms/SyncBadge.svelte'
@@ -492,7 +495,8 @@
   let selectionRevision = 0
   let currentBulk = $derived(bulkBatches.find((b) => b.key === activeBulk))
   let roomSessionController: ReturnType<typeof createRoomSessionControls> | null = null
-  let roomControls = $state<{ busy?: boolean; loading?: boolean; state?: { dormant?: number; paused?: boolean } | null } | null>(null)
+  let roomControls = $state<RoomControlValue | null>(null)
+  let controlsReported = ''
   let roomControlsMenu = $state<(RoomContext & { x: number; y: number; anchor?: HTMLElement }) | null>(null)
   let clearDormantConfirm = $state<(RoomContext & { count: number }) | null>(null)
   let roomControlsVisit = 0
@@ -504,6 +508,8 @@
   let consolidationAlive = true
   let transferring = $state<Member | null>(null) // {kind: 'stop'|'close', m, busy, error}
   let toast = $state('')
+  let toastDetail = $state<ToastDetail | null>(null)
+  let toastDetailOpen = $state(false)
   let closeResult = $state<{ name: string; items: string[] } | null>(null)
   let runs = $state<RunList | null>(null) // roomsvc.RunList for the room
   let runsError = $state('')
@@ -744,6 +750,19 @@
   function roomSessionActions(x: number, y: number, anchor?: HTMLElement) {
     roomControlsMenu = { x, y, anchor, roomId, visit: roomControlsVisit }
   }
+  // A finished room control reports once, as one short line. The per-session
+  // list stays behind Details, so it never pushes the member rows out of view.
+  $effect(() => {
+    const value = roomControls
+    if (!value) return
+    if (value.busy) { controlsReported = ''; return }
+    if (value.loading || !value.action) return
+    const signature = `${roomControlsVisit}|${value.action}|${value.error}|${value.results.map((r) => `${r.session}:${r.ok}:${r.reason ?? ''}`).join(',')}`
+    if (signature === controlsReported) return
+    controlsReported = signature
+    if (value.error) { say(`${roomControlLabels[value.action] ?? 'The action'} failed: ${value.error}`); return }
+    sayDetails(roomControlSummary(value, hierarchy))
+  })
   function closeRoomSessionMenu() { const anchor = roomControlsMenu?.anchor; roomControlsMenu = null; anchor?.focus?.() }
   function currentRoomControls(context: RoomContext | null | undefined) { return consolidationAlive && context?.roomId === roomId && context.visit === roomControlsVisit }
   function askClearDormant(count?: number) {
@@ -1718,10 +1737,36 @@
   }
 
   let toastTimer: ReturnType<typeof setTimeout> | undefined
+  function hideToast() {
+    toast = ''
+    toastDetail = null
+    toastDetailOpen = false
+  }
   function say(text: string) {
+    hideToast()
     toast = text
     clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => (toast = ''), 3200)
+    toastTimer = setTimeout(hideToast, TOAST_MS)
+  }
+  // sayDetails reports a finished bulk action in one line. The per-session
+  // list stays behind Details, so it never pushes the members out of view.
+  function sayDetails(summary: RoomControlSummary) {
+    hideToast()
+    toast = summary.text
+    toastDetail = { title: summary.title, items: summary.details }
+    clearTimeout(toastTimer)
+    toastTimer = setTimeout(hideToast, TOAST_DETAIL_MS)
+  }
+  function toggleToastDetail() {
+    if (toastDetailOpen) { closeToastDetail(); return }
+    toastDetailOpen = true
+    clearTimeout(toastTimer)
+  }
+  // closeToastDetail leaves the one line on screen for its normal time again.
+  function closeToastDetail() {
+    toastDetailOpen = false
+    clearTimeout(toastTimer)
+    toastTimer = setTimeout(hideToast, TOAST_MS)
   }
 
   // guardItems lists what a close-guard error names: "responsibilities: cannot close:\n- ...".
@@ -2661,7 +2706,7 @@
       {:else if roomId && room && showPins}
         <Pins {room} {pins} ondetail={openDetail} onjump={(id: string) => { if (narrow) showPins = false; jumpTo(id) }} onunpin={togglePin} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} onclose={() => (showPins = false)} />
       {:else if roomId && room && showMembers && !drill}
-        <Members computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} controlMembers={hierarchy} onroomactions={roomSessionActions} onresumeroom={() => roomSessionController?.run('resume')} onreloadcontrols={() => roomSessionController?.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${errorText(e)}`))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
+        <Members computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} onroomactions={roomSessionActions} onresumeroom={() => roomSessionController?.run('resume')} onreloadcontrols={() => roomSessionController?.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${errorText(e)}`))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
       {/if}
       </div>
     </div>
@@ -2732,7 +2777,13 @@
     <button onclick={() => (closeResult = null)}>Dismiss</button>
   </section>
 {:else if toast}
-  <div class="toast" role="status">{toast}</div>
+  <div class="toast" role="status">{toast}{#if toastDetail}<button type="button" class="toast-action" aria-expanded={toastDetailOpen} onclick={toggleToastDetail}>Details</button>{/if}</div>
+{/if}
+{#if !closeResult && toast && toastDetail && toastDetailOpen}
+  <div class="toast-details" role="region" aria-label={toastDetail.title}>
+    <header><strong>{toastDetail.title}</strong><button type="button" onclick={closeToastDetail}>Dismiss</button></header>
+    <ul>{#each toastDetail.items as item, i (i)}<li class:error={item.error}><strong>{item.name}</strong><span>{item.text}</span></li>{/each}</ul>
+  </div>
 {/if}
 {#if card && room}
   <ProfileModal {goals} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} ongoal={(id) => { card = null; openGoal(id) }} onpost={jumpTo} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {profile} error={profileError} {room} ondetail={openDetail} onclose={() => (card = null)} onmessage={openSession} onmention={mentionMember} />
@@ -2846,6 +2897,31 @@
   .close-result { max-width: min(640px, calc(100vw - 32px)); max-height: 50vh; overflow: auto; overflow-wrap: anywhere; }
   .close-result ul { margin: 8px 0; padding-left: 20px; }
   .close-result button { margin-top: 8px; }
+  .toast-action { margin-left: 10px; color: var(--iris); font-size: inherit; text-decoration: underline; }
+  .toast-details {
+    position: fixed;
+    left: 50%;
+    bottom: 132px;
+    transform: translateX(-50%);
+    z-index: 71;
+    width: min(560px, calc(100vw - 32px));
+    max-height: 50vh;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    background: #121113;
+    border: 1px solid var(--line-soft);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .toast-details header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .toast-details header strong { color: var(--ink-2); font-weight: 600; }
+  .toast-details ul { margin: 0; padding: 0; list-style: none; }
+  .toast-details li { display: grid; gap: 2px; margin: 6px 0; }
+  .toast-details li strong { color: var(--ink-2); font-weight: 500; }
+  .toast-details li.error span { color: var(--coral); }
 
   .toast {
     position: fixed;
@@ -2925,5 +3001,6 @@
     .icon { width: 44px; height: 44px; flex: none; }
     .center { padding-bottom: env(safe-area-inset-bottom); }
     .toast { bottom: calc(96px + env(safe-area-inset-bottom)); max-width: calc(100vw - 32px); }
+    .toast-details { bottom: calc(146px + env(safe-area-inset-bottom)); max-height: 54vh; }
   }
 </style>

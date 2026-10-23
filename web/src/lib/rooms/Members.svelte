@@ -17,7 +17,7 @@
   import { isLive, hasComputer, appName, ageText } from '../computers/computers.ts'
   import { finishedTrees, foldMembers, isFinished, openTrail, orderMemberSessions } from './memberOrder.ts'
 
-  let { members = [], focus = '', scope = '', selected = '', fresh = '', closed = false, computers = [], onopencomputer = () => {}, onselect, onclosed, onmenu, selecting = false, picked = [], onselection = () => {}, onpick = () => {}, onactions = () => {}, roomControls = null, controlMembers = members, onroomactions = () => {}, onresumeroom = () => {}, onreloadcontrols = () => {}, oncleardormant = null, ondismiss = null, dismissing = '', ontakeseat = null } = $props()
+  let { members = [], focus = '', scope = '', selected = '', fresh = '', closed = false, computers = [], onopencomputer = () => {}, onselect, onclosed, onmenu, selecting = false, picked = [], onselection = () => {}, onpick = () => {}, onactions = () => {}, roomControls = null, onroomactions = () => {}, onresumeroom = () => {}, onreloadcontrols = () => {}, oncleardormant = null, ondismiss = null, dismissing = '', ontakeseat = null } = $props()
 
   // The session menu opens by right click, the Menu key or Shift+F10 on a
   // focused row, or the ⋯ button. Keyboard opens anchor it under the row.
@@ -156,7 +156,7 @@
       {/if}
     {/if}
     <h2>Sessions <span class="n">{sessions.length}</span>{#if liveCount}<span class="livecount">{liveCount} live</span>{/if}<button class="select-mode" aria-pressed={selecting} onclick={onselection}>Select</button><button class="room-actions" aria-label="Session controls" aria-haspopup="menu" title="Session controls" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onroomactions(r.left, r.bottom + 4, e.currentTarget) }}><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="5" cy="10" r="1.6" fill="currentColor" /><circle cx="10" cy="10" r="1.6" fill="currentColor" /><circle cx="15" cy="10" r="1.6" fill="currentColor" /></svg></button></h2>
-    <RoomSessionStatus value={roomControls} members={controlMembers} onresume={onresumeroom} onreload={onreloadcontrols} />
+    <RoomSessionStatus value={roomControls} onresume={onresumeroom} onreload={onreloadcontrols} />
     {#if selecting}<p class="selection-hint">Click rows to select sessions.</p>{/if}
     {#if sessions.length === 0}
       <p class="none">No sessions in this room yet.</p>
