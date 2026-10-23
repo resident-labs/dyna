@@ -43,8 +43,8 @@ interface IssuesState {
 }
 
 test('opening a room loads its issues, so a first open and a reconnect both show them', () => {
-  const applyOpened = fn('applyOpened')
-  assert.match(source.slice(applyOpened.start, applyOpened.end), /loadIssues\(\)/)
+  const applyRoomOpened = fn('applyRoomOpened')
+  assert.match(source.slice(applyRoomOpened.start, applyRoomOpened.end), /loadIssues\(\)/)
 })
 
 test('the History list drops open issues that the all=true call returns', async () => {
