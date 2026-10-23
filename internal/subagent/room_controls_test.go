@@ -381,6 +381,33 @@ func TestClearDormantSkipsWokenSession(t *testing.T) {
 	}
 }
 
+func TestClearDormantReportsGainedWorkAsANeutralKeptSession(t *testing.T) {
+	e := roomControlEnv(t)
+	info, _ := e.start("SLEEP:1 RESPOND: idle")
+	info, _ = e.wait(info.ID, 1)
+	if _, err := e.m.rooms().Post(info.RoomID, room.PostInput{Wake: true, From: info.Room, Kind: "message", To: []string{info.Address()}, Text: "new work"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Store.UpdateMeta(info.ID, func(m *Meta) {
+		m.LastActivity, m.Finished = time.Now().Add(-time.Hour), time.Now().Add(-time.Hour)
+		m.Status = StatusDormant
+	}); err != nil {
+		t.Fatal(err)
+	}
+	e.doneGoals()
+	cleared, err := e.m.ClearDormantSessions(e.ctx, info.RoomID)
+	if err != nil || len(cleared.Results) != 1 {
+		t.Fatalf("clear dormant: %+v %v", cleared, err)
+	}
+	row := cleared.Results[0]
+	if row.OK != true || row.Status != "kept" || row.Reason != RoomSessionKeptStartedWork || row.Name != info.Address() {
+		t.Fatalf("kept row = %+v; want a neutral started-work reason and a name", row)
+	}
+	if cleared.Succeeded != 0 || cleared.Kept != 1 || cleared.Failed != 0 {
+		t.Fatalf("clear counts = %+v; want one kept session and no failure", cleared)
+	}
+}
+
 // testIdleAfter is the dormant age these tests treat as long dormant.
 const testIdleAfter = 30 * time.Minute
 
