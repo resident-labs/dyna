@@ -2,6 +2,7 @@ import type { EventPayload } from '../rooms/events.gen.ts'
 
 import type { RunList } from './workflow.ts'
 import type { Reference } from '../rooms/references.ts'
+import type { Responsibilities } from '../rooms/responsibilities.ts'
 
 // Rooms, posts and sessions. Sources: internal/roomsvc/roomsvc.go,
 // internal/roomsvc/spawn.go, internal/room/room.go, internal/room/attach.go.
@@ -40,7 +41,8 @@ export interface Attachment {
   name: string
   mime: string
   size: number
-  sha256: string
+  // Prompt manifests omit checksums; stored API attachments include them.
+  sha256?: string
   render?: string
   title?: string
   height?: number
@@ -189,6 +191,7 @@ export interface Member {
   closeSummary?: string[]
   emoji?: string
   seat?: Seat
+  responsibilities?: Responsibilities
 }
 
 // Delivery is notify.Delivery.

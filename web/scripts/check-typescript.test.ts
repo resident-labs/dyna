@@ -68,7 +68,7 @@ test("parses tsx files", () => {
   assert.deepEqual(checkSource("const a = <div>{x as any}</div>;", "x.tsx").map((v) => v.rule), ["no-explicit-any"]);
 });
 
-test("checks only lang=ts svelte scripts and keeps original positions", () => {
+test("requires lang=ts on svelte scripts and keeps original positions", () => {
   const svelte = [
     "<script module>",
     "  let a = b!;",
@@ -83,6 +83,7 @@ test("checks only lang=ts svelte scripts and keeps original positions", () => {
   assert.deepEqual(
     violations.map((v) => [v.file, v.rule, v.line, v.column]),
     [
+      ["A.svelte", "no-javascript-script", 1, 1],
       ["A.svelte", "no-explicit-any", 6, 10],
       ["A.svelte", "no-explicit-any", 8, 10],
     ],
@@ -115,8 +116,20 @@ test("checks template expressions of a lang=ts svelte file", () => {
   );
 });
 
-test("skips the template of a javascript svelte component", () => {
-  assert.deepEqual(checkSvelte("<script>let a = 1;</script>\n{a!}", "J.svelte"), []);
+test("reports a javascript svelte component without checking its template", () => {
+  assert.deepEqual(checkSvelte("<script>let a = 1;</script>\n{a}", "J.svelte").map((v) => v.rule), ["no-javascript-script"]);
+});
+
+test("rejects every plain JavaScript script block and ignores commented script tags", () => {
+  const source = [
+    '<!-- <script>let ignored = 1;</script> -->',
+    '  <script module>let moduleValue = 1;</script>',
+    '    <script>let value = 1;</script>',
+  ].join("\n");
+  assert.deepEqual(
+    checkSvelte(source, "Plain.svelte").map((v) => [v.rule, v.line, v.column]),
+    [["no-javascript-script", 2, 3], ["no-javascript-script", 3, 5]],
+  );
 });
 
 test("defaultRoots finds source directories and root config files", () => {
