@@ -96,8 +96,13 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		}
 		current := active.Add(1)
 		defer active.Add(-1)
-		if current > peak.Load() {
-			peak.Store(current)
+		// A plain Load then Store loses the highest value when checks overlap,
+		// so raise the peak with a CAS loop.
+		for {
+			high := peak.Load()
+			if current <= high || peak.CompareAndSwap(high, current) {
+				break
+			}
 		}
 		if current == slots {
 			if !crossStarted.Load() {
