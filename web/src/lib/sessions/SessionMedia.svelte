@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fileURL } from '../../api.js'
   import { dayLabel, short } from '../ui/format.ts'
+  import EmptyState from '../ui/EmptyState.svelte'
   import Files from '../files/Files.svelte'
   import PostLink from '../ui/PostLink.svelte'
   import { postAttachment, speaker } from '../ui/posts.ts'
@@ -17,6 +18,7 @@
   let days = $derived.by(() => {
     const groups = new Map<string, { key: string; post: Post; att: Attachment }[]>()
     for (const post of posts) {
+      if (!post.attachments?.length) continue
       const day = dayLabel(post.ts)
       const items = groups.get(day) ?? []
       for (const [i, att] of (post.attachments || []).entries()) {
@@ -30,7 +32,7 @@
 
 <div class="media">
   {#if !days.length}
-    <p class="empty">No media in this conversation yet.</p>
+    <EmptyState title="No media">Attachments from this conversation appear here.</EmptyState>
   {/if}
   {#each days as day (day.label)}
     <section aria-label={day.label}>
@@ -83,6 +85,5 @@
   .card-kind { color: var(--muted); font-size: var(--t-cap); }
   .filename { color: var(--ink-2); font-size: var(--t-sm); margin-top: var(--s2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .route { font-size: var(--t-cap); color: var(--muted); margin: 6px 0 0; overflow-wrap: anywhere; }
-  .empty { color: var(--muted); font-size: var(--t-body); text-align: center; margin: 40px 0; }
   @media (max-width: 760px) { .media { padding: 18px var(--s4); } .gallery { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: var(--s4) var(--s3); } }
 </style>
