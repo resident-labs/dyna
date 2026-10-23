@@ -506,13 +506,7 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 			return Result{}, notReady(ctx, p, err)
 		}
 		p = withRepo
-		if p.Harness == profile.HarnessAntigravity {
-			key, err := sessionKey(p, exec)
-			if err != nil {
-				return Result{}, notReady(ctx, p, err)
-			}
-			ctx = context.WithValue(ctx, nativeTurnKey{}, key)
-		}
+
 		selected, pin, release, err := PrepareRuntime(ctx, p, session.RuntimePin)
 		if err != nil {
 			return Result{}, notReady(ctx, p, err)

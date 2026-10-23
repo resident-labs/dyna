@@ -483,29 +483,3 @@ func (q *frameQueue) pop(ctx context.Context) ([]byte, error) {
 		}
 	}
 }
-
-func (h *socketHost) RetainedReference(ctx context.Context, launch Launch) (processguard.Reference, bool, error) {
-	id := launch.id()
-	h.waitDetached(ctx, id)
-	dir, err := h.privateDir()
-	if err != nil {
-		return processguard.Reference{}, false, err
-	}
-	socket, _ := hostPaths(dir, id)
-	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
-	if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED) {
-		return processguard.Reference{}, false, nil
-	}
-	if err != nil {
-		return processguard.Reference{}, false, err
-	}
-	defer conn.Close()
-	reply, err := newRemote(conn).call(ctx, message{Op: opRetained, Launch: toWire(launch)}, handshakeWait, nil)
-	if err != nil {
-		return processguard.Reference{}, false, err
-	}
-	if reply.Ref == nil {
-		return processguard.Reference{}, false, nil
-	}
-	return *reply.Ref, true, nil
-}
