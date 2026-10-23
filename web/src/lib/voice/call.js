@@ -25,7 +25,7 @@ export function createCall(deps) {
   // every(ms, fn) repeats fn and returns a cancel; tests drive it.
   const every = deps.every ?? ((ms, fn) => { const t = setInterval(fn, ms); return () => clearInterval(t) })
   const after = deps.after ?? ((ms, fn) => { const t = setTimeout(fn, ms); return () => clearTimeout(t) })
-  const now = deps.now ?? Date.now
+  let resumeCursor = '' // issued by the engine; independent of the browser clock
   let reconnect = null
   let watch = null // re-reads VoiceStatus while a found call waits
   let state = initial
@@ -67,7 +67,7 @@ export function createCall(deps) {
 
   function retryConnection(mine) {
     if (!reconnect) {
-      reconnect = { cutoff: now(), tries: 0 }
+      reconnect = { tries: 0 }
       reconnect.cancelDeadline = after(RECONNECT_MS, () => {
         if (mine !== attempt) return
         const old = ws
@@ -85,7 +85,7 @@ export function createCall(deps) {
     pending.cancelRetry = after(Math.min(500 * 2 ** pending.tries++, 4000), async () => {
       if (mine !== attempt || reconnect !== pending) return
       try {
-        await api.voiceResume(state.roomId, state.startedAt, pending.cutoff)
+        await api.voiceResume(state.roomId, state.startedAt, resumeCursor)
         if (mine !== attempt || reconnect !== pending) return
         connectSocket(mine, state.room)
       } catch {
@@ -126,6 +126,10 @@ export function createCall(deps) {
     try { msg = JSON.parse(raw) } catch { return }
     const e = fromWire(msg)
     if (!e) return
+    if (e.type === 'resumeCursor') {
+      resumeCursor = e.cursor
+      return
+    }
     if (e.type === 'voiceReady' || e.type === 'engineState') stopReconnect()
     switch (e.type) {
       case 'audio':
@@ -154,6 +158,7 @@ export function createCall(deps) {
   async function start(roomId, room) {
     if (!['idle', 'error', 'resumable'].includes(state.phase)) return
     const mine = ++attempt
+    resumeCursor = ''
     set({ type: 'start', roomId, room })
     let opened
     try {
@@ -180,6 +185,7 @@ export function createCall(deps) {
       return
     }
     if (mine !== attempt) return
+    resumeCursor = st?.resumeCursor || ''
     set({ type: 'started', startedAt: st?.startedAt || 0 })
     connectSocket(mine, room)
   }

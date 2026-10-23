@@ -319,7 +319,7 @@ export const api = {
   // The owner's Voice call: the engine runs the gateway, and the page's
   // socket reaches it through the app origin.
   voiceStart: (roomId) => app.VoiceStart(roomId),
-  voiceResume: (roomId, startedAt, replayCutoff) => app.VoiceResume(roomId, startedAt, replayCutoff),
+  voiceResume: (roomId, startedAt, cursor) => app.VoiceResume(roomId, startedAt, cursor),
   voiceStatus: () => app.VoiceStatus(),
   voiceStop: () => app.VoiceStop(),
   voiceURL: () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/voice/realtime`,
