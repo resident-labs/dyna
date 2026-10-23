@@ -7,6 +7,7 @@ import { parse } from 'svelte/compiler'
 import vm from 'node:vm'
 import { mergeListPage } from './listPages.ts'
 import { createReloadGate, listVisible, reconcileRows } from './reloadGate.ts'
+import { installGoals } from '../../../test/appModules.ts'
 import { reloadsUnread } from './unreadReload.ts'
 import { topLevelFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { need } from '../../../test/need.ts'
@@ -299,7 +300,10 @@ test('room entry and channel events refresh visible PR and goal chips', async ()
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), (name) => listVisible(name, c))
   c.fetchedGoal ??= null; c.fetchedGoalVersion ??= 0
   c.refreshHeldComments ??= () => {}
-  runApp(app, c, ['applyListItem', 'applyListPage', 'loadReviewer', 'loadChanges', 'loadGoals', 'trackFetchedGoal', 'refreshFetchedGoal', 'applyItemEvent', 'handle'])
+  runApp(app, c, ['applyListItem', 'applyListPage', 'loadReviewer', 'loadChanges', 'applyItemEvent', 'handle'])
+  // The room's goals live in lib/app/goals.svelte.ts now; their functions run
+  // here over the same state.
+  installGoals(c)
   const declarations = parse(app, { modern: true }).instance?.content.body ?? []
   const entry = declarations.find((n) => {
     if (n.type !== 'ExpressionStatement' || n.expression.type !== 'CallExpression') return false

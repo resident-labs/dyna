@@ -9,6 +9,9 @@
   import { viewIdentity } from './lib/ui/viewIdentity.ts'
   import { createReadMarker } from './lib/rooms/readMarker.ts'
   import { bindRoomLoader, roomData } from './lib/app/roomLoader.svelte.ts'
+  import { bindMachines, machineView, watchMachines } from './lib/app/machines.svelte.ts'
+  import { bindGoals, goalView } from './lib/app/goals.svelte.ts'
+  import { closeToastDetail, hideToast, runToastAction, say, sayDetails, sayLine, toasts, toggleToastDetail } from './lib/app/toasts.svelte.ts'
   import { createSessionData } from './lib/sessions/sessionData.ts'
   import { mergeListPage } from './lib/ui/listPages.ts'
   import { patchListRows } from './lib/ui/listChanges.ts'
@@ -36,11 +39,9 @@
   import Composer from './lib/rooms/Composer.svelte'
   import Members from './lib/rooms/Members.svelte'
   import Toast from './lib/ui/Toast.svelte'
-  import { clipText, dismissDelay, makeToast } from './lib/ui/toast.ts'
-  import type { Toast as ToastLine, ToastDetail, ToastInput } from './lib/ui/toast.ts'
+  import { clipText } from './lib/ui/toast.ts'
   import { createRoomSessionControls, roomControlLabels, roomControlSummary } from './lib/rooms/roomSessionControls.ts'
-  import type { RoomControlSummary, RoomControlValue } from './lib/rooms/roomSessionControls.ts'
-  import { TOAST_DETAIL_MS, TOAST_MS } from './lib/ui/toast.ts'
+  import type { RoomControlValue } from './lib/rooms/roomSessionControls.ts'
   import Pins from './lib/rooms/Pins.svelte'
   import SearchIcon from './lib/ui/SearchIcon.svelte'
   import SyncBadge from './lib/lanesync/SyncBadge.svelte'
@@ -54,11 +55,9 @@
   import { changesVisuals } from './lib/files/visuals.ts'
   import Goals from './lib/goals/Goals.svelte'
   import GoalDetail from './lib/goals/GoalDetail.svelte'
-  import { expedite, expediteScope, expediteAction, heldGoals, isExpedited } from './lib/rooms/expedite.ts'
-  import { expediteMenuItem } from './lib/rooms/expediteMenu.ts'
+  import { expedite, expediteScope, isExpedited } from './lib/rooms/expedite.ts'
   import ExpediteGoal from './lib/rooms/ExpediteGoal.svelte'
   import Rules from './lib/rooms/Rules.svelte'
-  import { nextRules } from './lib/rooms/rules.ts'
   import PinIcon from './lib/ui/PinIcon.svelte'
   import { isFinished } from './lib/rooms/memberOrder.ts'
   import Session from './lib/sessions/Session.svelte'
@@ -118,9 +117,7 @@
   import { paletteTargets } from './lib/ui/paletteTargets.ts'
   import MachinePage from './lib/machines/MachinePage.svelte'
   import { machinesSub } from './lib/machines/machines.ts'
-  import { LOAD_POLL_MS } from './lib/system/systemLoad.ts'
   import { roomIDPattern as ROOM, postIDPattern as POST } from './lib/ui/posts.ts'
-  import type { MachineDetail, MachinePatch, MachineSummary } from './lib/api/machine.ts'
   import type { Room, Member, Post, Opened, Question, Visual, ProfileChoice, Attachment } from './lib/api/room.ts'
   import type { AttachmentRef } from './lib/api/engine.ts'
   import type { Session as SessionData, QueueItem, MemberProfile } from './lib/api/session.ts'
@@ -184,14 +181,6 @@
     danger?: boolean
     gap?: boolean
     disabled?: boolean
-  }
-  interface RuleList {
-    hash: string
-  }
-  interface RuleSet {
-    room: RuleList
-    global: RuleList
-    hash: string
   }
   interface BulkRecord {
     key: number
@@ -263,119 +252,18 @@
   // machines of this engine. Picking one opens its page in the main area. A
   // room in the link opens that room instead, so the list starts closed then.
   let machinesNav = $state(!new URLSearchParams(location.hash.slice(1)).has('room'))
-  let machines = $state<MachineSummary[] | null>(null) // null until the first answer
-  let machinesRequest = 0
-  let machineId = $state('') // the machine whose page is open, or ''
-  let machineDetail = $state<MachineDetail | null>(null)
-  let machineError = $state('')
-  let machineBusy = $state(false)
-  let machineProbing = $state(false)
-  let machineRequest = 0
   function machinesVisible() { return pageVisible && machinesNav && (narrow ? navOpen : showSide) }
-  function machineVisible() { return pageVisible && machineId !== '' }
-  // The figures move on their own, so the list and the open page read again at
-  // the load card's cadence. A phone keeps the page while the drawer is shut,
-  // so the page reads on its own terms, not the sidebar's.
-  $effect(() => {
-    const list = machinesVisible()
-    const page = machineVisible()
-    if (!list && !page) return
-    const tick = () => {
-      if (list) loadMachines()
-      if (page && !machineBusy && !machineProbing) loadMachine(machineId)
-    }
-    tick()
-    const timer = setInterval(tick, LOAD_POLL_MS)
-    return () => clearInterval(timer)
-  })
+  // The machine list and one machine's page live in
+  // lib/app/machines.svelte.ts. The page reads them through these aliases, so
+  // the template and the code below name them as they always have.
+  const machines = $derived(machineView.machines)
+  const machineId = $derived(machineView.machineId)
+  const machineDetail = $derived(machineView.machineDetail)
+  const machineError = $derived(machineView.machineError)
+  const machineBusy = $derived(machineView.machineBusy)
+  const machineProbing = $derived(machineView.machineProbing)
+  const { openMachine, closeMachine, saveMachine, probeMachine } = machineView
   let home = $state<ReturnType<typeof Home>>() // the home screen, which takes live events
-  // loadMachines reads the machine list now. A slow answer never replaces a
-  // newer one.
-  function loadMachines() {
-    const request = ++machinesRequest
-    return api.machines().then((list) => { if (request === machinesRequest) machines = list }, () => {})
-  }
-  // loadMachine reads the open machine's page. A slow answer never replaces a
-  // newer one, and an answer for a machine that closed is dropped.
-  function loadMachine(id: string) {
-    const request = ++machineRequest
-    if (machineId !== id) machineDetail = null
-    return api.machine(id).then((detail) => {
-      if (request === machineRequest && machineId === id) machineDetail = detail
-    }, (e) => {
-      if (request === machineRequest && machineId === id) machineError = errorText(e)
-    })
-  }
-  // openMachine shows one machine's page in the main area. On a phone the tap
-  // closes the drawer, as every other view does.
-  function openMachine(id: string) {
-    machineId = id
-    navOpen = false
-    machineError = ''
-    machineBusy = false
-    loadMachine(id)
-  }
-  function closeMachine() {
-    machineId = ''
-    machineDetail = null
-    machineError = ''
-    if (narrow) navOpen = true
-  }
-  // probeResult words what one probe found as a typed toast. A degraded machine
-  // answered, so it never reads as unreachable: it holds its CI work instead.
-  function probeResult(detail: MachineDetail): ToastInput {
-    if (detail.status === 'degraded') {
-      if (detail.statusReason === 'low-disk') {
-        return { tone: 'error', subject: `${detail.name} is low on disk`, text: 'Dyna starts no CI work here until space is freed.' }
-      }
-      return { tone: 'error', subject: `${detail.name} needs attention`, text: 'Open the machine page to see why.' }
-    }
-    if (detail.status === 'offline' || detail.status === 'unknown') {
-      return { tone: 'error', subject: `${detail.name} did not answer the probe`, text: 'Check the SSH route, then probe again.' }
-    }
-    return { tone: 'success', subject: `Probed ${detail.name}` }
-  }
-  // saveMachine writes one setting and shows the machine's next state. A
-  // refused change keeps the old values and shows the engine's reason.
-  async function saveMachine(patch: MachinePatch) {
-    const id = machineId
-    if (!id || machineBusy) return
-    machineBusy = true
-    machineError = ''
-    // A read that started before this write may not land after it.
-    machineRequest++
-    try {
-      const detail = await api.saveMachine(id, patch)
-      if (machineId === id) machineDetail = detail
-      loadMachines()
-    } catch (e) {
-      if (machineId === id) machineError = errorText(e)
-    } finally {
-      machineBusy = false
-    }
-  }
-  // probeMachine reads the open machine now and shows its next health. A probe
-  // that could not reach the machine says so in the page's status; the toast
-  // words the result in one line and never repeats the engine's error text.
-  async function probeMachine() {
-    const id = machineId
-    if (!id || machineBusy || machineProbing) return
-    machineProbing = true
-    machineError = ''
-    // A read that started before this probe may not land after it.
-    machineRequest++
-    const name = machineDetail?.name ?? 'The machine'
-    try {
-      const detail = await api.probeMachine(id)
-      if (machineId === id) machineDetail = detail
-      loadMachines()
-      say(probeResult(detail))
-    } catch {
-      if (machineId === id) say({ tone: 'error', subject: `Could not probe ${name}` })
-    } finally {
-      machineProbing = false
-    }
-  }
   // The open room's data lives in lib/app/roomLoader.svelte.ts. The page reads
   // it through these aliases and writes it through the loader, so the template
   // and the code below name the room data as they always have.
@@ -491,58 +379,34 @@
   let fresh = $state('') // a session just started from the composer: its row flashes
   let menu = $state<{ m: Member; x: number; y: number; anchor?: HTMLElement } | null>(null) // {m, x, y, anchor}: the open session menu
   let roomMenu = $state<{ r: Room; x: number; y: number; anchor?: HTMLElement } | null>(null) // {r, x, y, anchor}: the open room menu
-  let goals = $state<Goal[]>([])
   let goalId = $state('')
+  // The room's goals live in lib/app/goals.svelte.ts. The page reads them
+  // through these aliases, so the template and the code below name them as
+  // they always have.
+  const goals = $derived(goalView.goals)
+  const knownGoals = $derived(goalView.knownGoals)
+  const { loadGoals, loadRules, openGoal, expediteGoal, expediteItems, stopExpediting } = goalView
   // The room's one expedited goal, kept for the badges. A timer wakes it at the
   // deadline, so the badges leave on time without a server event.
   let expireTick = $state(Date.now())
-  let fetchedGoal = $state<Goal | null>(null)
-  let knownGoals = $derived.by(() => {
-    const fetched = fetchedGoal
-    return fetched && !goals.some((g) => g.id === fetched.id) ? [...goals, fetched] : goals
-  })
-  // Items carry the expedite scope's assignees. They load for each room's
-  // expedited goal, room:goal -> {at, items}, and load again when the goal
-  // changes, so a new assignee gets the badge without a reload.
-  let expediteGoalItems = $state<Record<string, { at: string; items: { state?: string; assignee?: string }[] }>>({})
-  // withItems attaches the loaded items to the expedited goal, so the scope
-  // can cover item assignees.
-  function withItems(room: string, list: Goal[]) {
-    const g = list.find((x) => isExpedited(x))
-    const items = g && expediteGoalItems[room + ':' + g.id]?.items
-    return g && items ? list.map((x) => (x.id === g.id ? { ...x, items } : x)) : list
-  }
   $effect(() => {
-    const wanted = []
-    const here = knownGoals.find((x) => isExpedited(x))
-    if (here) wanted.push({ room: roomId, goal: here })
-    for (const { room, goal } of wanted) {
-      const key = room + ':' + goal.id
-      const cached = untrack(() => expediteGoalItems[key])
-      if (cached && cached.at === goal.updatedAt) continue
-      api.goalItems(room, goal.id).then((items: { state?: string; assignee?: string }[] | null) => { expediteGoalItems = { ...expediteGoalItems, [key]: { at: goal.updatedAt, items: items ?? [] } } }, () => {})
-    }
+    const here = goalView.knownGoals.find((x) => isExpedited(x))
+    if (here) goalView.loadItems(roomId, here)
   })
   $effect(() => {
     const now = Math.max(expireTick, Date.now())
-    const scope = expediteScope(withItems(roomId, knownGoals), hierarchy, now)
+    const scope = expediteScope(goalView.withItems(roomId, goalView.knownGoals), hierarchy, now)
     expedite.set({ ...scope, agents: new Set(scope.agents) })
     const until = scope.goalId ? scope.until : Number.POSITIVE_INFINITY
     if (!Number.isFinite(until)) return
     const timer = setTimeout(() => (expireTick = Date.now()), Math.min(until - Date.now() + 50, 2 ** 31 - 1))
     return () => clearTimeout(timer)
   })
-  // A goal opened by a link but held by no loaded page; list refreshes keep it.
-  // Counts change events applied to fetchedGoal, so a slower reload answer
-  // never replaces a newer event.
-  let fetchedGoalVersion = 0
-  let selectedGoal = $derived(goalById(goalId))
-  // rules is the list in the Room settings Rules section; rulesPending waits while an inline edit
-  // is open (rulesEditing) and replaces it when the edit closes.
-  let rules = $state<RuleSet | null>(null)
-  let rulesPending = $state<RuleSet | null>(null)
-  let rulesEditing = $state(false)
-  $effect(() => { if (!rulesEditing && rulesPending) { rules = rulesPending; rulesPending = null } })
+  let selectedGoal = $derived(goalView.goalById(goalId))
+  // rules is the list in the Room settings Rules section.
+  const rules = $derived(goalView.rules)
+  // An inline rules edit keeps the list it started from until the edit closes.
+  $effect(() => { goalView.applyPendingRules() })
   let reviewer = $state<ReviewerStatus | null>(null) // the room's reviewer (ReviewerStatus)
   let changes = $state<ChangeRow[] | null>(null) // the room's changes, local and PR (Changes); null before they load or on a host without the API
   let mergeVersion = $state(0)
@@ -573,9 +437,10 @@
   let consolidationAlive = true
   let transferring = $state<Member | null>(null) // {kind: 'stop'|'close', m, busy, error}
   let expediting = $state<{ member: Member; goals: Goal[] } | null>(null) // the goal picker for a session with several goals
-  let toast = $state<ToastLine | null>(null)
-  let toastDetail = $state<ToastDetail | null>(null)
-  let toastDetailOpen = $state(false)
+  // The toast line and its detail list live in lib/app/toasts.svelte.ts.
+  const toast = $derived(toasts.line)
+  const toastDetail = $derived(toasts.detail)
+  const toastDetailOpen = $derived(toasts.detailOpen)
   let closeResult = $state<{ name: string; items: string[] } | null>(null)
   let runs = $state<RunList | null>(null) // roomsvc.RunList for the room
   let runsError = $state('')
@@ -740,6 +605,29 @@
     loadComputers,
     refreshCounts: () => soonRooms(),
   })
+  // The page's side of the goals, which lib/app/goals.svelte.ts asks for.
+  bindGoals({
+    reload,
+    error: (message) => (loadError = message),
+    openView: (name) => openView(name),
+    selectGoal: (id) => (goalId = id),
+    hidePins: () => (showPins = false),
+    goalId: () => goalId,
+    askReplace: (goal) => (confirm = { kind: 'expedite', goal, roomId }),
+    pickGoal: (member, held) => (expediting = { member, goals: held }),
+    hierarchy: () => hierarchy,
+    applyPage: (value, append = false) => applyListPage('goals', value, append),
+    say,
+  })
+  // The page's side of the machine views, which lib/app/machines.svelte.ts asks for.
+  bindMachines({
+    listShown: () => machinesVisible(),
+    screenShown: () => pageVisible,
+    narrow: () => narrow,
+    setDrawer: (open) => (navOpen = open),
+    say,
+  })
+  watchMachines()
   function loadRooms() { return roomData.loadRooms() }
   function loadMembers() { return roomData.loadMembers() }
   // applyRoomOpened shows the opened room's other lists, which the page owns.
@@ -962,63 +850,6 @@
     openView('questions')
     questionFocus = questionID(post)
     questionFocusRequest++
-  }
-
-  function loadGoals() { return reload('goals', async (current: () => boolean) => {
-    const id = roomId
-    if (!id) return
-    try { const list = await api.goals(id); if (current() && roomId === id) { goals = applyListPage('goals', list); await refreshFetchedGoal(current) } }
-    catch (e) { if (current() && roomId === id) loadError = String(e) }
-  }) }
-
-  function loadRules() { return reload('rules', async (current: () => boolean) => {
-    const id = roomId
-    if (!id) return
-    try {
-      const [room, global] = await Promise.all([api.rules(id, false), api.rules(id, true)])
-      if (!current() || roomId !== id) return
-      const v = { room, global, hash: `${global.hash}:${room.hash}` }
-      const next = nextRules(rules, v, rulesEditing)
-      rules = next.shown
-      rulesPending = next.pending
-    } catch (e) { if (current() && roomId === id) loadError = String(e) }
-  }) }
-
-  // A goal link may name a goal that no loaded page holds, such as an old
-  // done goal: load it, then select it.
-  // It resolves to the goal, or null when it cannot load.
-  async function openGoal(id: string) {
-    openView('goals'); goalId = id; showPins = false
-    const have = goalById(id)
-    if (!id || have) return have ?? null
-    const rid = roomId
-    try {
-      const g = await api.goal(rid, id)
-      if (rid !== roomId || !g) return null
-      fetchedGoal = g
-      return g
-    } catch (e) {
-      if (rid === roomId) say({ tone: 'error', subject: 'Could not open the goal', text: errorText(e) })
-      return null
-    }
-  }
-  function goalById(id: string) {
-    return goals.find((g) => g.id === id) ?? (fetchedGoal?.id === id ? fetchedGoal : undefined)
-  }
-  // The fetched goal follows its change events, as listed goals do.
-  function trackFetchedGoal(change: ListChange | undefined) {
-    if (!fetchedGoal || change?.id !== fetchedGoal.id) return
-    fetchedGoalVersion++
-    fetchedGoal = change.op === 'delete' ? null : (change.item as Goal | undefined) ?? fetchedGoal
-  }
-  // After a goals reload (also after a detail action), read it again.
-  async function refreshFetchedGoal(current = () => true) {
-    const g = fetchedGoal, rid = roomId, version = fetchedGoalVersion
-    if (!g || goals.some((x) => x.id === g.id)) return
-    try {
-      const fresh = await api.goal(rid, g.id)
-      if (current() && rid === roomId && fetchedGoal?.id === g.id && version === fetchedGoalVersion) fetchedGoal = fresh
-    } catch { /* Keep the last copy; the next reload tries again. */ }
   }
 
   // Quiet: the server fetches on its own; this only reads the saved counts.
@@ -1260,7 +1091,7 @@
           if (kind === 'goals') {
             const next = await api.goals(id, selected.cursor)
             if (!current() || id !== roomId || visit !== roomRequest) return
-            goals = applyListPage('goals', next, true)
+            goalView.setGoals(applyListPage('goals', next, true))
           } else if (kind === 'changes') {
             const next = await api.changes(id, selected.cursor)
             if (!current() || id !== roomId || visit !== roomRequest) return
@@ -1337,9 +1168,7 @@
     const request = ++router.detailRequest
     roomData.newVisit()
     navOpen = false
-    machineId = ''
-    machineDetail = null
-    machineError = ''
+    machineView.clear()
     machinesNav = !id
     if (id !== roomId) {
       showRoomSettings = false
@@ -1354,7 +1183,7 @@
     if (id !== roomId) { computers = null; computerFeed = {} }
     router.roomId = id
     // Goal IDs are per room; a goal fetched for a link belongs to the old one.
-    fetchedGoal = null
+    goalView.clear()
     visitRoomControls(id)
     router.drill = null
     card = null
@@ -1382,10 +1211,7 @@
     prs = []
     reviewer = null
     changes = null
-    goals = []
     goalId = ''
-    rules = null
-    rulesPending = null
     if (!id) {
       roomData.clearFeed()
       return true
@@ -1563,18 +1389,6 @@
     } finally { dismissing = '' }
   }
 
-  // Expedite gives the goal's agents and PRs the first review and merge.
-  // A goal that would replace another asks first.
-  async function expediteGoal(g: Goal) {
-    if (g.room && g.room !== roomId) return
-    const action = expediteAction($expedite, g)
-    if (action === 'replace') { confirm = { kind: 'expedite', goal: g, roomId }; return }
-    await api.expediteGoal(roomId, action === 'stop' ? '' : g.id, false)
-    say(action === 'stop'
-      ? { tone: 'success', subject: 'Stopped expediting the goal', text: clipText(g.text) }
-      : { tone: 'success', subject: 'Expedited the goal', text: clipText(g.text), action: { label: 'Open', run: () => openGoal(g.id) } })
-    loadGoals()
-  }
   async function linkPRGoal(change: ChangeRow, goalId: string) {
     const id = roomId
     // A GitHub-only row has no record to hold its goal yet. Track it for the owner first.
@@ -1584,27 +1398,11 @@
     await api.setPRGoal(id, row.key, goalId)
     if (id === roomId) await loadChanges()
   }
-  // One menu item for the goals an agent holds, or its nearest ancestor holds.
-  // A session with one goal expedites it at once; several goals open a picker.
-  function expediteItems(m: Member): MenuItem[] {
-    if (m.closed) return []
-    const held = heldGoals(m, hierarchy, knownGoals)
-    const item = expediteMenuItem(held, $expedite.goalId)
-    if (!item) return []
-    if (item.mode === 'choose') return [{ label: item.label, hint: item.hint, run: () => (expediting = { member: m, goals: held }) }]
-    const only = held[0]
-    if (!only) return []
-    return [{ label: item.label, run: () => expediteGoal(only).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) })) }]
-  }
-  // Stop expediting the room's goal, from the picker.
-  function stopExpediting(goals: Goal[]) {
-    const g = goals.find((x) => x.id === $expedite.goalId)
-    if (g) expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) }))
-  }
-
   // Session menu: safe actions first, then the two that stop work, set
   // apart in coral. Both of those ask first.
-  function menuItems(m: Member) {
+  // The session menu reads the page's expedited goal as the menu is drawn, so
+  // a goal that expires while the menu is open changes its item.
+  function menuItems(m: Member, expeditedId: string) {
     const items: MenuItem[] = [
       { label: m.closed ? 'Open transcript' : 'Message', run: () => openSession(m) },
       { label: 'Open profile', run: () => openMember(m) },
@@ -1614,7 +1412,7 @@
     // The internal root holds the root seat, so it is never consolidated.
     if (!m.closed && m.role !== 'root') items.push({ label: 'Consolidate sessions…', run: () => { selectingSessions = true; setPicked(m.id ? [m.id] : []); showMembers = true; showPins = false } })
     if (!m.closed) items.push({ label: 'Mention in composer', run: () => mentionMember(m) })
-    items.push(...expediteItems(m))
+    items.push(...expediteItems(m, expeditedId))
     items.push({ label: 'Copy address', hint: m.address, run: () => copyText(m.address).then(
       () => say({ tone: 'success', subject: 'Copied the address', text: `Paste it to mention ${m.name}.` }),
       (e) => say({ tone: 'error', subject: 'Could not copy the address', text: errorText(e) }),
@@ -1704,53 +1502,6 @@
     const anchor = menu?.anchor
     menu = null
     anchor?.focus?.()
-  }
-
-  let toastTimer: ReturnType<typeof setTimeout> | undefined
-  // A toast reports the result of one action the user just took: a subject, one
-  // sentence, and at most one thing to do next. Call sites pass display names.
-  function say(input: ToastInput) {
-    const next = makeToast(input)
-    hideToast()
-    toast = next
-    clearTimeout(toastTimer)
-    toastTimer = setTimeout(hideToast, dismissDelay(next))
-  }
-  function hideToast() {
-    toast = null
-    toastDetail = null
-    toastDetailOpen = false
-    clearTimeout(toastTimer)
-  }
-  // runToastAction closes the toast, then follows the reader's choice.
-  function runToastAction(run: () => void) {
-    hideToast()
-    run()
-  }
-  // sayLine lets the command registry report a finished command as one
-  // success line, as it did before toasts had a tone.
-  function sayLine(message: string) {
-    say({ tone: 'success', subject: message })
-  }
-  // sayDetails reports a finished bulk action in one line. The per-session
-  // list stays behind Details, so it never pushes the members out of view.
-  function sayDetails(summary: RoomControlSummary) {
-    say({ subject: summary.text })
-    toastDetail = { title: summary.title, items: summary.details }
-    clearTimeout(toastTimer)
-    toastTimer = setTimeout(hideToast, TOAST_DETAIL_MS)
-  }
-  // toggleToastDetail keeps the one line on screen while its list is open.
-  function toggleToastDetail() {
-    if (toastDetailOpen) { closeToastDetail(); return }
-    toastDetailOpen = true
-    clearTimeout(toastTimer)
-  }
-  // closeToastDetail leaves the one line on screen for its normal time again.
-  function closeToastDetail() {
-    toastDetailOpen = false
-    clearTimeout(toastTimer)
-    toastTimer = setTimeout(hideToast, toast?.action ? dismissDelay(toast) : TOAST_MS)
   }
 
   // guardItems lists what a close-guard error names: "responsibilities: cannot close:\n- ...".
@@ -1994,8 +1745,8 @@
     if (ev.kind === 'goals') {
       reload.patch('goals', (current) => {
         if (!current()) return
-        goals = applyListItem('goals', change, goals)
-        trackFetchedGoal(change)
+        goalView.setGoals(applyListItem('goals', change, goals))
+        goalView.trackFetchedGoal(change)
       })
       return true
     }
@@ -2021,7 +1772,7 @@
     }
     if (ev.kind === 'posts' && feed && evRoom === feed.room.id) roomData.applyPosts(ev)
     if (ev.kind === 'goals' && evRoom === roomId) { if (!item) loadGoals(); loadRules() }
-    if (ev.kind === 'machines') { if (machinesVisible()) loadMachines(); if (machineId) loadMachine(machineId) }
+    if (ev.kind === 'machines') machineView.changed()
     if (ev.kind === 'pins' && evRoom === roomId) loadPins()
     if (ev.kind === 'issues' && evRoom === roomId) { loadIssues(); loadIssues(true) }
     if (['room.paused', 'room.resumed'].includes(ev.kind) && (!evRoom || evRoom === roomId)) roomSessionController?.load()
@@ -2547,8 +2298,8 @@
 {/if}
 {#if showRoomSettings && room}
   {#key roomSettingsKey}
-  {#snippet roomRules()}<Rules roomId={room.id} view={rules} members={hierarchy} {ownerHue} bind:editing={rulesEditing} onchanged={loadRules} />{/snippet}
-  <RoomSettings {room} start={roomSettingsAt.start} hookRun={roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => roomSessionController?.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={rulesEditing} onopenglobal={() => { showRoomSettings = false; openSettings('hooks') }} onclose={() => (showRoomSettings = false)} />
+  {#snippet roomRules()}<Rules roomId={room.id} view={rules} members={hierarchy} {ownerHue} bind:editing={goalView.rulesEditing} onchanged={loadRules} />{/snippet}
+  <RoomSettings {room} start={roomSettingsAt.start} hookRun={roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => roomSessionController?.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={goalView.rulesEditing} onopenglobal={() => { showRoomSettings = false; openSettings('hooks') }} onclose={() => (showRoomSettings = false)} />
   {/key}
 {/if}
 {#if roomMenu}
@@ -2567,7 +2318,7 @@
   <Menu x={context.x} y={context.y} title={`${context.ids.length} selected`} items={selectionItems(context)} onclose={closeSelectionMenu} />
 {/if}
 {#if menu}
-  <Menu x={menu.x} y={menu.y} title={menu.m.address} items={menuItems(menu.m)} onclose={closeMenu} />
+  <Menu x={menu.x} y={menu.y} title={menu.m.address} items={menuItems(menu.m, $expedite.goalId)} onclose={closeMenu} />
 {/if}
 {#if currentBulk?.value && currentBulk.roomId === roomId}
   {@const batch = { ...currentBulk, value: currentBulk.value }}
