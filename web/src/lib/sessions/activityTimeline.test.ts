@@ -19,9 +19,9 @@ test('steps expand independently, retain failures and load shell logs only when 
   })
   const started = '2026-10-23T07:00:00Z'
   const row: TimelineRow = { kind: 'timeline', key: 'timeline:14', turn: { n: 14, started, ended: '2026-10-23T07:02:10Z', status: 'ok' }, steps: [
-    { kind: 'tool', key: 'read', tool: 'read', target: 'web/src/a/very/long/path/with/the/full/target.ts' },
+    { kind: 'tool', key: 'read', step: 'read', label: 'target.ts', durationMs: 12, tool: 'read', target: 'web/src/a/very/long/path/with/the/full/target.ts' },
     { kind: 'shell', key: 'shell', jobId: 'sh_1', waits: 0, posts: [], job: { id: 'sh_1', command: ['bash', '-c', 'npm test'], name: 'Run tests', cwd: '/', state: 'exited', code: 0, started, ended: '2026-10-23T07:00:01Z' } },
-    { kind: 'tool', key: 'failed', tool: 'ran', target: 'npm test', failed: true, command: 'npm test', output: 'expected 1 call, got 0', exit: 1 },
+    { kind: 'tool', key: 'failed', step: 'run', label: 'npm', tool: 'ran', target: 'npm test', failed: true, command: 'npm test', output: 'expected 1 call, got 0', exit: 1 },
   ] }
   let app
   try {
@@ -30,11 +30,19 @@ test('steps expand independently, retain failures and load shell logs only when 
     assert.match(document.body.textContent ?? '', /expected 1 call, got 0/)
     assert.deepEqual(calls, [])
     const steps = document.querySelectorAll('details')
+    // A tool step shows a designed kind, a short label and a state chip; the
+    // raw tool name, the full target and the exit code wait in its details.
+    assert.equal(need(steps[0]).querySelector('.label')?.textContent, 'target.ts')
+    assert.ok(need(steps[0]).querySelector('svg'), 'the step lost its kind icon')
+    assert.doesNotMatch(need(steps[0]).querySelector('summary')?.textContent ?? '', /web\/src/)
     // A shell step names what ran and how it ended, not the tool name and code.
     const shellStep = need(steps[1])
     assert.equal(need(shellStep.querySelector('.verb')).textContent, 'Shell command')
     assert.equal(need(shellStep.querySelector('.meta')).textContent, 'succeeded in 1s')
     assert.doesNotMatch(shellStep.textContent ?? '', /exit 0/)
+    // A failure is a state chip, never a bare exit code.
+    assert.equal(need(steps[2]).querySelector('.chip')?.textContent, 'failed')
+    assert.doesNotMatch(need(steps[2]).querySelector('summary')?.textContent ?? '', /exit 1/)
     const expand = (index: number) => flushSync(() => {
       const step = need(steps[index])
       step.open = true
@@ -64,15 +72,16 @@ test('an active tool stays running when the API omits its false done flag', asyn
   try {
     for (const status of ['running', 'ok']) {
       const row: TimelineRow = { kind: 'timeline', key: 'timeline:1', turn: { n: 1, status, started: '2026-10-23T07:00:00Z' }, steps: [
-        { kind: 'tool', key: 'active', tool: 'read', target: 'active.ts', aside: '2 files' },
-        { kind: 'tool', key: 'complete', tool: 'read', target: 'complete.ts', done: true },
-        { kind: 'tool', key: 'failed', tool: 'ran', target: 'npm test', failed: true },
+        { kind: 'tool', key: 'active', step: 'read', label: 'active.ts', tool: 'read', target: 'active.ts', aside: '2 files' },
+        { kind: 'tool', key: 'complete', step: 'read', label: 'complete.ts', tool: 'read', target: 'complete.ts', done: true },
+        { kind: 'tool', key: 'failed', step: 'run', label: 'npm', tool: 'ran', target: 'npm test', failed: true },
       ] }
       flushSync(() => app = mount(C, { target: need(document.getElementById('app')), props: { row } }))
       const states = [...document.querySelectorAll('.timeline li')].map((li) => li.querySelector('.dot')?.getAttribute('aria-label'))
       assert.deepEqual(states, [status === 'running' ? 'running' : 'done', 'done', 'failed'])
-      assert.equal(document.querySelector('.running .meta')?.textContent, status === 'running' ? '2 files · running' : undefined)
-      assert.equal(document.querySelector('.failed .meta')?.textContent, 'failed')
+      // Every step carries its own state chip, so a reader never reads an exit
+      // code to learn whether a call worked.
+      assert.deepEqual([...document.querySelectorAll('.chip')].map((chip) => chip.textContent), [status === 'running' ? 'running' : 'done', 'done', 'failed'])
       if (app) unmount(app)
       app = undefined
     }

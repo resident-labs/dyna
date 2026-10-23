@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 
@@ -18,6 +19,13 @@ type ReportPlan struct {
 	// the report stores that event instead of the post's free text, so the
 	// alert is one typed card from the engine, not a session's message.
 	Service *room.ServiceFailedEvent `json:"service,omitempty"`
+	// Payload is the typed event of a system post, as PostEvent stored it. A
+	// replay decodes it with Post.Kind and Post.Notice.Kind, so the same event
+	// is stored once.
+	Payload json.RawMessage `json:"payload,omitempty"`
+	// Producer names the service that observed the event, when its spec lists
+	// producers.
+	Producer room.EventProducer `json:"producer,omitempty"`
 }
 
 // LockReport serializes preparation and replay of session reports without

@@ -179,11 +179,11 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 			}
 			call.Speak(msg.ID, "", tellPrompt(msg.Text, msg.Attachments))
 		case !past && r.turnResult(msg) && !relayed[msg.Turn]:
-			result = resultPrompt(msg.Text)
+			result = resultPrompt(turnReportText(msg))
 		case open && r.rootAgentPost(msg):
 			contextNote(msg)
 		}
-		if open && r.fromRoot(msg) && slices.Contains([]string{"completed", "failed", "stopped"}, msg.Kind) {
+		if open && r.fromRoot(msg) && turnEnd(msg) {
 			finish()
 			open = false
 		}
@@ -194,6 +194,29 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 	})
 }
 
+// turnState is how a turn end says it ended: the typed turn event's own state,
+// or the kind of a completion stored before the typed events.
+func turnState(msg room.Message) room.TurnState {
+	if ev, ok := msg.TurnResult(); ok {
+		return ev.State
+	}
+	// TODO: legacy/shim remove later — a completion stored before the typed
+	// turn events carries its state as the post kind. Remove when retained room
+	// history ages out.
+	switch msg.Kind {
+	case "completed":
+		return room.TurnCompleted
+	case "failed":
+		return room.TurnFailed
+	case "stopped":
+		return room.TurnStopped
+	}
+	return ""
+}
+
+// turnEnd reports whether a post ends a turn.
+func turnEnd(msg room.Message) bool { return turnState(msg) != "" }
+
 // turnResult reports whether msg is the final result of a root turn that
 // reports to the owner. Progress, agent reports, and a turn the owner
 // stopped say nothing new, so only a finished or failed root turn qualifies.
@@ -201,7 +224,24 @@ func (r *RoomLink) turnResult(msg room.Message) bool {
 	if !msg.OwnerReport || msg.Turn == 0 || !r.fromRoot(msg) {
 		return false
 	}
-	return msg.Kind == "completed" || msg.Kind == "failed"
+	state := turnState(msg)
+	return state == room.TurnCompleted || state == room.TurnFailed
+}
+
+// turnReportText is the report a turn gave: the typed event's own summary or
+// error, else the text of a completion stored before the typed events.
+func turnReportText(msg room.Message) string {
+	ev, ok := msg.TurnResult()
+	if !ok {
+		return msg.Text
+	}
+	if ev.Summary != "" {
+		return ev.Summary
+	}
+	if ev.Error != "" {
+		return "Error: " + ev.Error
+	}
+	return ""
 }
 
 // rootAgentPost selects execution messages, excluding service notices and
@@ -210,8 +250,11 @@ func (r *RoomLink) rootAgentPost(msg room.Message) bool {
 	if msg.Kind == "voice" || slices.Contains(msg.To, r.rec.Name+":"+room.VoiceAgent) {
 		return false
 	}
+	// TODO: legacy/shim remove later — the kinds completed, failed and stopped
+	// are completions stored before the typed turn events. Remove them when
+	// retained room history ages out.
 	switch msg.Kind {
-	case "", "message", "completed", "failed", "stopped":
+	case "", "message", "completed", "failed", "stopped", string(room.FamilyTurn), string(room.FamilyShell), string(room.FamilyRun):
 	default:
 		return false
 	}
@@ -220,8 +263,12 @@ func (r *RoomLink) rootAgentPost(msg room.Message) bool {
 }
 
 // fromRoot reports whether root posted msg: the internal root, or an
-// external one, which posts as the owner without a person.
+// external one, which posts as the owner without a person. A typed turn event
+// names the session whose turn ended, so it comes from root the same way.
 func (r *RoomLink) fromRoot(msg room.Message) bool {
+	if ev, ok := msg.TurnResult(); ok {
+		return ev.Session == r.rec.Name+":"+room.RootAgent || ev.Session == r.rec.Name
+	}
 	return msg.From == r.rec.Name+":"+room.RootAgent || msg.From == r.rec.Name && !msg.Human
 }
 

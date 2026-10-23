@@ -15,7 +15,7 @@ func forwardFixture(t *testing.T) (*Store, Record, Message) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orig, err := s.Post(rec.ID, PostInput{From: "alpha:worker", Kind: "completed", To: []string{"alpha"}, Text: "Tests pass.\nTwo files changed.", Attachments: []Attachment{a}})
+	orig, err := s.Post(rec.ID, PostInput{From: "alpha:worker", Kind: "message", To: []string{"alpha"}, Text: "Tests pass.\nTwo files changed.", Attachments: []Attachment{a}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestForwardStoresReferenceToTheOriginal(t *testing.T) {
 		t.Fatal(err)
 	}
 	f := got.Forward
-	if f == nil || f.ID != orig.ID || f.RoomID != rec.ID || f.From != "alpha:worker" || f.TS != orig.TS || f.Kind != "completed" || f.Text != orig.Text {
+	if f == nil || f.ID != orig.ID || f.RoomID != rec.ID || f.From != "alpha:worker" || f.TS != orig.TS || f.Kind != "message" || f.Text != orig.Text {
 		t.Fatalf("forward = %#v", f)
 	}
 	if len(got.Attachments) != 0 || !reflect.DeepEqual(f.Attachments, orig.Attachments) {

@@ -134,10 +134,16 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 				}
 			}
 			// Bound turn-end senders recover queued input and wrap-up work.
-			// Unbound senders use the exact IDs from member changes.
-			if post.Turn > 0 && (post.Kind == "completed" || post.Kind == "failed" || post.Kind == "stopped") {
+			// Unbound senders use the exact IDs from member changes. A typed turn
+			// event names the session whose turn ended; an older completion names
+			// it in the sender.
+			if post.Turn > 0 {
 				wakeWorker(s.channels["checkins"])
-				if id := post.SessionIDs[post.From]; id != "" {
+				id := post.SessionIDs[post.From]
+				if ev, ok := post.TurnResult(); ok {
+					id = ev.SessionID
+				}
+				if id != "" {
 					s.sessions.targets[id] = true
 					// A bound session's turn end fires the session-turn-ended
 					// hook event, so a job that reacts to it starts at once.

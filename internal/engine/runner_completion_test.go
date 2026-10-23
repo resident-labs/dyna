@@ -265,7 +265,7 @@ func waitCompletion(t *testing.T, rooms *room.Store, roomID, from string) room.M
 	defer cancel()
 	var found room.Message
 	err := rooms.Follow(ctx, roomID, func(msg room.Message) (bool, error) {
-		if msg.Kind == "completed" && msg.From == from {
+		if ev, ok := msg.TurnResult(); ok && ev.State == room.TurnCompleted && ev.Session == from {
 			found = msg
 			return true, nil
 		}
@@ -285,7 +285,7 @@ func completionCount(t *testing.T, rooms *room.Store, roomID, from string) int {
 	}
 	n := 0
 	for _, msg := range msgs {
-		if msg.Kind == "completed" && msg.From == from {
+		if ev, ok := msg.TurnResult(); ok && ev.State == room.TurnCompleted && ev.Session == from {
 			n++
 		}
 	}

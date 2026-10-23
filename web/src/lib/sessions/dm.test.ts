@@ -471,3 +471,25 @@ test('each turn has one timeline with tools, shell output and child sessions', (
   assert.equal(dm.threads.some((t) => t.key.startsWith('shell:')), false)
   assert.equal(dm.rows.filter(isKind('message')).length, 2, 'messages remain outside the steps')
 })
+
+test('a typed shell result joins its job step, and steps keep their typed kind', () => {
+  const id = 'sh_20261020-100000-cccccccc'
+  const job: ShellJob = { id, command: ['bash', '-c', 'make'], name: 'Build', cwd: '/', state: 'exited', code: 2, started: ts(1), ended: ts(9) }
+  const typed = (s: number): ThreadPost => post('typed', 'dyna', [address], s, {
+    kind: 'shell', notice: { kind: 'result' }, completion: true,
+    payload: { shellId: id, label: 'make · build', state: 'failed', exitCode: 2, output: ['FAIL'], parent: address },
+  })
+  const session = { address, turns: [{ n: 1, started: ts(0), items: [
+    { kind: 'tool', step: 'run' as const, label: 'make', durationMs: 8000, tool: 'ran', target: 'make -j4', jobOp: 'run', jobId: id, job, ts: ts(1) },
+    { kind: 'steering', postId: 'typed', from: 'dyna', text: 'done', ts: ts(9), delivered: true },
+  ] }], posts: [typed(9)] }
+  const dm = dmView(session, room)
+  const steps = dm.rows.filter(isKind('timeline')).flatMap((r) => r.steps)
+  // One step per command: the result joins the call that started it.
+  assert.deepEqual(steps.map((s) => s.kind), ['shell'])
+  const shell = need(steps[0])
+  assert.equal(shell.kind === 'shell' ? shell.jobId : '', id)
+  assert.deepEqual(shell.kind === 'shell' ? shell.finished : undefined, { at: ts(9), turn: 1, woke: false })
+  assert.equal(dm.rows.some((r) => r.kind === 'system-event'), false)
+  assert.equal(dm.threads.some((t) => t.key.startsWith('shell:')), false)
+})

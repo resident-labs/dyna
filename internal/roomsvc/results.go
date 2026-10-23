@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/subagent"
 )
@@ -25,6 +26,15 @@ type fullResult struct {
 // result, read from the session store like `dyna subagent output`. Only the
 // UI calls it; the stored post, and what agents read, stay short.
 func (s *Service) expand(p Post, book avatarBook) Post {
+	if ev, ok := p.Shell(); ok {
+		return s.expandShellEvent(p, ev)
+	}
+	if ev, ok := p.RunResult(); ok {
+		return s.expandRunEvent(p, ev)
+	}
+	// TODO: legacy/shim remove later — a completion stored before the typed
+	// shell, run and turn events names its job in the sender. Remove when
+	// retained room history ages out.
 	if p.Completion && strings.HasPrefix(p.From, "shell:") {
 		return s.expandShell(p)
 	}
@@ -33,6 +43,12 @@ func (s *Service) expand(p Post, book avatarBook) Post {
 	}
 	if !p.Completion || p.Turn <= 0 {
 		return p
+	}
+	// A typed turn event names its session in the payload; an older completion
+	// names it in the sender.
+	author := p.From
+	if ev, ok := p.TurnResult(); ok {
+		author = ev.Session
 	}
 	if v, ok := s.results.Load(p.ID); ok {
 		r := v.(fullResult)
@@ -44,7 +60,7 @@ func (s *Service) expand(p Post, book avatarBook) Post {
 	var turn subagent.Turn
 	var sessionID string
 	found := false
-	for _, id := range book.sessionsFor(p.From) {
+	for _, id := range book.sessionsFor(author) {
 		t, err := s.sessions().ReadTurn(id, p.Turn)
 		if err != nil || !t.Done() || t.Ended.UnixMilli() > p.TS {
 			continue
@@ -64,7 +80,7 @@ func (s *Service) expand(p Post, book avatarBook) Post {
 			result = text
 		}
 	}
-	r.text, r.cut = FullCompletionText(p.From, p.Turn, p.Kind, result, turn.Error)
+	r.text, r.cut = FullCompletionText(author, p.Turn, completionState(p.Message), result, turn.Error)
 	s.results.Store(p.ID, r)
 	return withFull(p, r)
 }
@@ -151,6 +167,60 @@ func (s *Service) expandRun(p Post) Post {
 	s.results.Store(p.ID, r)
 	p.Speaker = r.speaker
 	return withFull(p, r)
+}
+
+// completionState names the state a completion post reports: the typed turn
+// event's own state, or the kind of a completion stored before it.
+func completionState(m room.Message) string {
+	if ev, ok := m.TurnResult(); ok {
+		return string(ev.State)
+	}
+	return m.Kind
+}
+
+// expandShellEvent links a typed shell result to its stored job and writes the
+// row's own sentence over the agent text: the command's label, how it ended,
+// and its output. The shell ID stays out of what the owner reads.
+func (s *Service) expandShellEvent(p Post, ev room.ShellEvent) Post {
+	p.Detail = &PostDetail{Kind: "shell", ID: ev.ShellID}
+	if ev.Label != "" {
+		p.Speaker = ev.Label
+	}
+	text := fmt.Sprintf("%s with exit code %d", ev.State, ev.ExitCode)
+	if len(ev.Output) > 0 {
+		text += "\nLast output:\n```\n" + strings.Join(ev.Output, "\n") + "\n```"
+	}
+	p.Text, p.Preview, p.Hidden = text, "", 0
+	return p
+}
+
+// expandRunEvent links a typed run result to its run view and writes the run's
+// own result over the agent text.
+func (s *Service) expandRunEvent(p Post, ev room.RunEvent) Post {
+	p.Detail = &PostDetail{Kind: "run", ID: ev.RunID}
+	if ev.Name != "" {
+		p.Speaker = "workflow " + ev.Name
+	}
+	p.Text = runResultText(ev)
+	p.FullResult, p.Preview, p.Hidden = true, "", 0
+	return p
+}
+
+// runResultText is what a feed shows for a run: how it ended and its result.
+func runResultText(ev room.RunEvent) string {
+	switch ev.State {
+	case room.RunStopped:
+		return "Canceled"
+	case room.RunFailed:
+		if ev.Summary != "" {
+			return "Error: " + ev.Summary
+		}
+		return "Error"
+	}
+	if ev.Summary == "" {
+		return "No result."
+	}
+	return ev.Summary
 }
 
 // expandShell keeps the exit result and links to its stored log. Agent-facing

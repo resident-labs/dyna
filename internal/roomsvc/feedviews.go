@@ -59,6 +59,11 @@ func (c feedViews) viewsFor(post room.Message, home room.Conversation) []string 
 		return nil
 	}
 	sender, known := c.byAddress[post.From]
+	// A typed turn event names the session whose turn ended, which the engine
+	// posted on its behalf, so the post stays in that session's team view.
+	if ev, ok := post.TurnResult(); ok {
+		sender, known = c.byAddress[ev.Session]
+	}
 	// Automatic results stay with the sender's peers, despite delivery to root.
 	if IsCompletion(post) {
 		return []string{c.home(sender)}

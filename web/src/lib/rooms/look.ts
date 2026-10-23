@@ -1,3 +1,5 @@
+import type { EventPayload } from './events.gen.ts'
+
 type ChoiceID = 'highlight' | 'finished' | 'prs' | 'goals'
 type ChoiceValue = string | boolean | null
 interface Choice {
@@ -14,6 +16,10 @@ interface FeedPost {
   id?: string
   speaker?: string
   kind?: string
+  notice?: { kind?: string } | null
+  // payload is the typed JSON of a sealed system event. The one field this
+  // file reads is its state, which names a failed or stopped result.
+  payload?: EventPayload | null
   completion?: boolean
   owner?: boolean
   to?: string[]
@@ -51,11 +57,30 @@ export function readLook(raw: string | null): Look {
 
 const fromRoot = (post: FeedPost) => post.speaker === 'root'
 
+// resultState is how an automatic result says it ended: the state of its typed
+// payload, or none for a post that carries no payload.
+const resultState = (post: FeedPost): string => {
+  const payload = post.payload
+  if (!payload || typeof payload !== 'object' || !('state' in payload)) return ''
+  return String(payload.state)
+}
+
+// failedCompletion reports a turn or result that failed or was stopped. Both
+// always show in full, whatever the Finished turns setting says. A typed event
+// keeps its state in the payload; an older completion names it as its kind.
+// TODO: legacy/shim remove later — the kind form reads a completion stored
+// before the typed turn events. Remove when that history ages out.
+const failedCompletion = (post: FeedPost) => {
+  const state = resultState(post)
+  return state === 'failed' || state === 'stopped' ||
+    post.notice?.kind === 'failed' || post.notice?.kind === 'stopped' || post.kind === 'failed' || post.kind === 'stopped'
+}
+
 // kindOf names the choice that controls a post, or '' for a post that always shows.
 export function kindOf(post: FeedPost): ChoiceID | '' {
   if (post.kind === 'pr') return 'prs'
   if (post.kind === 'goal') return 'goals'
-  if (post.completion && post.kind !== 'failed' && !fromRoot(post)) return 'finished'
+  if (post.completion && !failedCompletion(post) && !fromRoot(post)) return 'finished'
   return ''
 }
 

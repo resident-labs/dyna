@@ -123,9 +123,9 @@ func TestDeleteRoomRemovesPins(t *testing.T) {
 // registry tests cover.
 func TestEveryPostKindCanBePinnedAndRepliedTo(t *testing.T) {
 	s, rec, _ := pinFixture(t)
-	// The agent and turn kinds are the ones a person or a session writes; a
-	// system event is a sealed family and is covered by its own tests.
-	for _, kind := range []string{"message", "completed", "failed", "stopped"} {
+	// The agent kinds are the ones a person or a session writes; a system
+	// event, a turn end included, is a sealed family with its own tests.
+	for _, kind := range []string{"message", "service-alert"} {
 		t.Run(kind, func(t *testing.T) {
 			post, err := s.Post(rec.ID, PostInput{From: "alpha:lead", To: []string{"alpha"}, Kind: kind, Text: "Stored report"})
 			if err != nil {

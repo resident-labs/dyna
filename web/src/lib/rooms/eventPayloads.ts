@@ -1,8 +1,8 @@
 // Typed readers for the payload of a sealed system event. They read the
 // stored payload only, never the post text, so a card and its event cannot
 // disagree. The types come from events.gen.ts, which the Go registry writes.
-import { eventSpecs, isAlertEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHookEvent, isIssueEvent, isMachineEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isServiceFailedEvent, isSessionEvent, isSlowTestEvent, isWorktreeEvent } from './events.gen.ts'
-import type { AlertEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HookEvent, IssueEvent, MachineEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, ServiceFailedEvent, SessionEvent, SlowTestEvent, WorktreeEvent } from './events.gen.ts'
+import { eventSpecs, isAlertEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHookEvent, isIssueEvent, isMachineEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTurnEvent, isWorktreeEvent } from './events.gen.ts'
+import type { AlertEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HookEvent, IssueEvent, MachineEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, RunEvent, ServiceFailedEvent, SessionEvent, ShellEvent, SlowTestEvent, TurnEvent, WorktreeEvent } from './events.gen.ts'
 
 // A post of one event family, with the fields its reader needs. A feed row, a
 // stored message and a test fixture all fit it.
@@ -50,6 +50,24 @@ export function mergeEvent(post: EventPost): MergeEvent | undefined {
 export function mergeDecision(post: EventPost): MergeDecisionEvent | undefined {
   if (post.kind !== 'merge' || post.notice?.kind !== 'decision') return undefined
   return isMergeDecisionEvent(post.payload) ? post.payload : undefined
+}
+
+// shellEvent returns the typed payload of a detached shell's result.
+export function shellEvent(post: EventPost): ShellEvent | undefined {
+  if (post.kind !== 'shell' || post.notice?.kind !== 'result') return undefined
+  return isShellEvent(post.payload) ? post.payload : undefined
+}
+
+// runEvent returns the typed payload of a workflow run's result.
+export function runEvent(post: EventPost): RunEvent | undefined {
+  if (post.kind !== 'run' || post.notice?.kind !== 'result') return undefined
+  return isRunEvent(post.payload) ? post.payload : undefined
+}
+
+// turnEvent returns the typed payload of the end of a turn, in any state.
+export function turnEvent(post: EventPost): TurnEvent | undefined {
+  if (post.kind !== 'turn') return undefined
+  return isTurnEvent(post.payload) ? post.payload : undefined
 }
 
 // legacyEvent reports a post that names no event type but is still an engine

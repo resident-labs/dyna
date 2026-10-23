@@ -72,10 +72,9 @@ func TestWatchHoldsLoneQuietPostUntilWake(t *testing.T) {
 }
 
 func TestWatchAllKeepsRawQuietPosts(t *testing.T) {
-	seat, post, _ := watchFixture(t)
+	seat, post, event := watchFixture(t)
 	for _, in := range []room.PostInput{
 		{From: "work:lead", Kind: "message", To: []string{"work"}, Text: "Cleanup complete"},
-		{From: "work:root", Kind: "completed", To: []string{"work"}, Text: "Root history"},
 	} {
 		msg := post(in)
 		var out bytes.Buffer
@@ -86,6 +85,16 @@ func TestWatchAllKeepsRawQuietPosts(t *testing.T) {
 		if err := json.Unmarshal(out.Bytes(), &got); err != nil || !reflect.DeepEqual(got, msg) {
 			t.Fatalf("raw --all post = %s, %v", out.Bytes(), err)
 		}
+	}
+	// A typed event is a raw post too, never reworded by the watch.
+	turn := event(room.TurnEvent{Session: "work:root", SessionID: "ses_root", Turn: 1, State: room.TurnCompleted, Summary: "Root history"}, "work")
+	var out bytes.Buffer
+	if err := watchWriter(&out, seat, true, false)(turn); err != nil {
+		t.Fatal(err)
+	}
+	var got room.Message
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil || !reflect.DeepEqual(got, turn) {
+		t.Fatalf("raw --all event = %s, %v", out.Bytes(), err)
 	}
 }
 
@@ -99,7 +108,7 @@ func TestWatchWakeAndOwnerEchoRules(t *testing.T) {
 		// The owner's DM to an agent is quiet context for both roots: the
 		// agent answers it, and root reads what was said with the next wake.
 		{"owner DM to an agent", room.PostInput{Wake: true, From: "work", Human: true, Kind: "message", Via: []string{"@worker"}, To: []string{"work:worker"}, Text: "Fix it"}, false},
-		{"owner failure", room.PostInput{Wake: true, From: "work:worker", Kind: "failed", OwnerReport: true, To: []string{"work"}, Text: "It failed"}, true},
+		{"owner failure", room.PostInput{Wake: true, From: "work:worker", Kind: "message", NeedsRoot: true, To: []string{"work"}, Text: "It failed"}, true},
 		// The owner's own shell and API posts name the room as the sender. Only
 		// the NeedsRoot mark says that one asks the seat to act.
 		{"own owner post that needs root", room.PostInput{Wake: true, From: "work", Kind: "message", NeedsRoot: true, To: []string{"work"}, Text: "Choose the merge order"}, true},
@@ -134,15 +143,19 @@ func TestWatchWakeAndOwnerEchoRules(t *testing.T) {
 }
 
 func TestWatchHoldsQuietContextThroughRootSelfPosts(t *testing.T) {
-	seat, post, _ := watchFixture(t)
+	seat, post, event := watchFixture(t)
 	var out bytes.Buffer
 	write := watchWriter(&out, seat, false, false)
 	quiet := post(room.PostInput{From: "work:lead", Kind: "message", To: []string{"work"}, Text: "Keep the queue paused"})
 	if err := write(quiet); err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{"message", "completed", "failed"} {
-		self := post(room.PostInput{From: "work:root", Kind: kind, To: []string{"work"}, Text: "Root history"})
+	selfs := []room.Message{
+		post(room.PostInput{From: "work:root", Kind: "message", To: []string{"work"}, Text: "Root history"}),
+		event(room.TurnEvent{Session: "work:root", SessionID: "ses_root", Turn: 1, State: room.TurnCompleted, Summary: "Root history"}, "work"),
+		event(room.TurnEvent{Session: "work:root", SessionID: "ses_root", Turn: 2, State: room.TurnFailed, Summary: "Root history", Error: "boom"}, "work"),
+	}
+	for _, self := range selfs {
 		if err := write(self); err != nil {
 			t.Fatal(err)
 		}

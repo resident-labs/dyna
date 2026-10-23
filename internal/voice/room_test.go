@@ -136,6 +136,13 @@ func TestWatchKeepsExecutionTrafficAsSilentContext(t *testing.T) {
 		}
 	}
 	post := func(from, text string, to ...string) { postKind(from, "", text, to...) }
+	postTurn := func(state room.TurnState, turn int, summary string) {
+		t.Helper()
+		if _, err := rooms.PostEventInput(room.PostEventInput{RoomID: work.ID, OwnerReport: true, To: []string{work.Name},
+			Event: room.TurnEvent{Session: work.Name + ":root", SessionID: "ses_root", Turn: turn, State: state, Summary: summary}}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	post("work:builder", "A root-directed result.", "work:root")
 	post("work:root", "Root without an agent recipient.", "work")
 	post("work", "External root status.", "work")
@@ -150,7 +157,7 @@ func TestWatchKeepsExecutionTrafficAsSilentContext(t *testing.T) {
 	}
 	post("work:root", "MORE "+strings.Repeat("x", 1400), "work")
 	post("work:root", "TAIL "+strings.Repeat("🙂", 600)+" LAST ROOT POINT", "work")
-	postKind("work:root", "completed", "Finished first turn.", "work")
+	postTurn(room.TurnCompleted, 1, "Finished first turn.")
 	post("work:builder", "DROP traffic after completion.", "work")
 	texts := []string{"CI is green.", "Correction: one job is still running.", "The review passed."}
 	for _, text := range texts {
@@ -160,7 +167,7 @@ func TestWatchKeepsExecutionTrafficAsSilentContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	post("work:root", "SECOND HEAD "+strings.Repeat("é", 2600)+" SECOND TAIL", "work")
-	postKind("work:root", "stopped", "Finished second turn.", "work")
+	postTurn(room.TurnStopped, 2, "Finished second turn.")
 	post("work", "Second request ended.", "work:voice-call")
 
 	// Follow reads the complete existing log. Spoken posts are ordering
@@ -226,21 +233,21 @@ collected:
 func TestWatchSaysRootTurnResultsOnlyWhileLive(t *testing.T) {
 	tools, work, _ := toolsFixture(t)
 	link, rooms := tools.link, room.DefaultStore()
-	result := func(turn int, text string) {
+	result := func(turn int, summary string) {
 		t.Helper()
-		if _, err := rooms.Post(work.ID, room.PostInput{From: work.Name + ":root", Kind: "completed",
-			OwnerReport: true, Turn: turn, To: []string{work.Name}, Text: text}); err != nil {
+		if _, err := rooms.PostEventInput(room.PostEventInput{RoomID: work.ID, OwnerReport: true, Turn: turn, To: []string{work.Name},
+			Event: room.TurnEvent{Session: work.Name + ":root", SessionID: "ses_root", Turn: turn, State: room.TurnCompleted, Summary: summary}}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	call := newFakeSpeaker()
 	stop := watchRoom(t, link, time.Time{}, call)
-	result(1, "work:root turn 1 completed. Result: CI is green.")
-	if got := <-call.said; !strings.HasPrefix(got, "[BACKEND] ") || !strings.Contains(got, "Result: CI is green.") {
+	result(1, "CI is green.")
+	if got := <-call.said; !strings.HasPrefix(got, "[BACKEND] ") || !strings.Contains(got, "CI is green.") {
 		t.Fatalf("said %q, want root's turn result", got)
 	}
 	stop()
-	result(2, "work:root turn 2 completed. Result: The review passed.")
+	result(2, "The review passed.")
 	select {
 	case got := <-call.said:
 		t.Fatalf("a call that ended said %q", got)
@@ -262,8 +269,10 @@ func TestWatchSkipsTurnResultRootAlreadyRelayed(t *testing.T) {
 		}
 	}
 	post(room.PostInput{Turn: 3, To: []string{work.Name + ":voice-call"}, Text: "The merge is done."})
-	post(room.PostInput{Kind: "completed", OwnerReport: true, Turn: 3, To: []string{work.Name},
-		Text: "work:root turn 3 completed. Result: The merge is done."})
+	if _, err := rooms.PostEventInput(room.PostEventInput{RoomID: work.ID, OwnerReport: true, Turn: 3, To: []string{work.Name},
+		Event: room.TurnEvent{Session: work.Name + ":root", SessionID: "ses_root", Turn: 3, State: room.TurnCompleted, Summary: "The merge is done."}}); err != nil {
+		t.Fatal(err)
+	}
 	// A later call post is the barrier: Watch says it only after it has read
 	// the completion, so a broken skip would speak between the two.
 	post(room.PostInput{Turn: 4, To: []string{work.Name + ":voice-call"}, Text: "The review passed."})
@@ -288,15 +297,15 @@ func TestWatchSaysTheWholeSavedResult(t *testing.T) {
 	call := newFakeSpeaker()
 	watchRoom(t, link, time.Time{}, call)
 	path := filepath.Join(t.TempDir(), "parent-output", "turn-5.txt")
-	post, err := parentoutput.Text(path, "work:root turn 5 completed. Result: FIRST POINT "+strings.Repeat("detail ", 400)+"LAST POINT")
+	post, err := parentoutput.Text(path, "FIRST POINT "+strings.Repeat("detail ", 400)+"LAST POINT")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(post, "LAST POINT") {
 		t.Fatal("the test post was not bounded, so it proves nothing about reading the report")
 	}
-	if _, err := rooms.Post(work.ID, room.PostInput{From: work.Name + ":root", Kind: "completed", OwnerReport: true,
-		Turn: 5, To: []string{work.Name}, Text: post}); err != nil {
+	if _, err := rooms.PostEventInput(room.PostEventInput{RoomID: work.ID, OwnerReport: true, Turn: 5, To: []string{work.Name},
+		Event: room.TurnEvent{Session: work.Name + ":root", SessionID: "ses_root", Turn: 5, State: room.TurnCompleted, Summary: post}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := <-call.said; !strings.Contains(got, "FIRST POINT") || !strings.Contains(got, "LAST POINT") {
@@ -313,12 +322,12 @@ func TestWatchClipsLongTurnResults(t *testing.T) {
 	watchRoom(t, link, time.Time{}, call)
 	path := filepath.Join(t.TempDir(), "parent-output", "turn-4.txt")
 	head, tail := "FIRST POINT "+strings.Repeat("α", 3000), strings.Repeat("漢", 3000)+" LAST POINT"
-	post, err := parentoutput.Text(path, "work:root turn 4 completed. Result: "+head+" "+tail)
+	post, err := parentoutput.Text(path, head+" "+tail)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rooms.Post(work.ID, room.PostInput{From: work.Name + ":root", Kind: "completed", OwnerReport: true,
-		Turn: 4, To: []string{work.Name}, Text: post}); err != nil {
+	if _, err := rooms.PostEventInput(room.PostEventInput{RoomID: work.ID, OwnerReport: true, Turn: 4, To: []string{work.Name},
+		Event: room.TurnEvent{Session: work.Name + ":root", SessionID: "ses_root", Turn: 4, State: room.TurnCompleted, Summary: post}}); err != nil {
 		t.Fatal(err)
 	}
 	got := <-call.said

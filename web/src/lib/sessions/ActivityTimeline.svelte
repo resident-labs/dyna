@@ -2,6 +2,8 @@
   import DoingLine from './DoingLine.svelte'
   import FailedCall from './FailedCall.svelte'
   import ShellOutput from './ShellOutput.svelte'
+  import ShellResultRow from '../rooms/ShellResultRow.svelte'
+  import StepIcon from './StepIcon.svelte'
   import { blockState, mergeJob, metaOf, titleOf } from './shell.ts'
   import { elapsed, stamp } from '../ui/format.ts'
   import type { Doing } from '../api/room.ts'
@@ -16,6 +18,20 @@
     onthread?: ((key: string) => void) | null
   }
   let { row, jobs = [], doing, onjob = null, onthread = null }: Props = $props()
+
+  // stepWord names a step that has no label of its own, so a row never shows a
+  // raw tool ID.
+  const stepWords: Record<string, string> = {
+    read: 'Read', edit: 'Edit', write: 'Write', search: 'Search', list: 'List', run: 'Command',
+    fetch: 'Fetch', delegate: 'Delegate', plan: 'Plan', monitor: 'Monitor', tool: 'Tool',
+  }
+  const stepWord = (kind?: string) => stepWords[kind ?? ''] ?? 'Tool'
+  // stepTime reads a step's own duration. A call under a second reads in
+  // milliseconds, so a quick step does not look like a clock that failed to move.
+  const stepTime = (ms?: number): string => {
+    if (!ms || ms <= 0) return ''
+    return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
+  }
   let opened = $state<Record<string, boolean>>({})
   let now = $state(Date.now())
   let running = $derived(row.turn?.status === 'running' || !!doing || row.steps.some((s) => s.kind === 'shell' && ['starting', 'running'].includes((jobs.find((j) => j.id === s.jobId) ?? s.job)?.state ?? '')))
@@ -43,27 +59,38 @@
         <details open={expanded} ontoggle={(event) => opened[step.key] = event.currentTarget.open}>
           <summary>
             <span class="dot" aria-label={state}></span>
-            <span class="verb">{step.kind === 'shell' ? 'Shell command' : step.kind === 'child' ? 'child' : step.tool || 'tool'}</span>
-            <span class="target" title={job ? titleOf(job) : step.kind === 'child' ? step.member.name : step.target}>{job ? titleOf(job) : step.kind === 'child' ? step.member.name : step.target || (step.kind === 'shell' ? 'outside this transcript' : '')}</span>
-            {#if job}<span class="meta">{metaOf(job, now)}</span>
-            {:else if step.kind === 'child'}<span class="meta">{step.member.state === 'live' ? 'running' : step.member.status}</span>
-            {:else if step.aside || step.failed || activeTool}<span class="meta">{step.aside}{#if activeTool}{step.aside ? ' · ' : ''}running{:else if step.failed && !step.aside}failed{/if}</span>{/if}
+            {#if step.kind === 'shell'}
+              <span class="verb">Shell command</span>
+              <span class="target" title={job ? titleOf(job) : undefined}>{job ? titleOf(job) : 'outside this transcript'}</span>
+              {#if job}<span class="meta">{metaOf(job, now)}</span>{/if}
+            {:else if step.kind === 'child'}
+              <span class="verb">child</span>
+              <span class="target" title={step.member.name}>{step.member.name}</span>
+              <span class="meta">{step.member.state === 'live' ? 'running' : step.member.status}</span>
+            {:else}
+              <StepIcon kind={step.step} />
+              <span class="label" title={step.target || step.label}>{step.label || step.target || stepWord(step.step)}</span>
+              <span class="chip {state}">{state === 'running' ? 'running' : state === 'failed' ? 'failed' : 'done'}</span>
+              {#if stepTime(step.durationMs)}<span class="meta">{stepTime(step.durationMs)}</span>{/if}
+            {/if}
             <span class="chevron" aria-hidden="true">›</span>
           </summary>
           {#if expanded}
             <div class="detail">
               {#if step.kind === 'shell'}
                 {#if job}<ShellOutput {job} {onjob} />
-                {:else}<p class="muted">The shell command is outside this transcript page.</p>{/if}
+                {:else}{#each step.posts as post (post.id)}{#if post.kind === 'shell'}<ShellResultRow post={post} surface="dm" />{:else}<p class="muted">{post.text || 'The shell command is outside this transcript page.'}</p>{/if}{/each}{/if}
                 {#if step.finished}<p class="muted">Finished at {stamp(step.finished.at)}{#if step.finished.woke && step.finished.turn} · woke turn {step.finished.turn}{:else} · told the agent during the turn{/if}</p>{/if}
-                {#if !job}{#each step.posts as post (post.id)}<pre>{post.text || 'Shell job finished.'}</pre>{/each}{/if}
               {:else if step.kind === 'child'}
                 <p class="muted">{step.member.profile || 'Session'} · created {stamp(step.member.created)}</p>
                 {#each step.posts as post (post.id)}<pre>{post.text}</pre>{/each}
                 {#if onthread}<button class="link" onclick={() => onthread?.(step.member.address)}>Open {step.member.name} thread</button>{/if}
               {:else}
+                <!-- The raw tool name, the full target and the exit code stay
+                     here: the row above shows the designed step only. -->
+                <p class="muted">{stepWord(step.step)}{#if step.toolName} · {step.toolName}{/if}{#if step.tool && step.tool !== step.label} · {step.tool}{/if}</p>
                 {#if step.target}<pre class="full-target">{step.target}</pre>{/if}
-                {#if step.failed}<FailedCall command={step.command} output={step.output} exit={step.exit} />
+                {#if step.failed}<FailedCall command={step.command ?? step.target} output={step.output} exit={step.exit} />
                 {:else if step.command || step.output}<pre>{[step.command, step.output].filter(Boolean).join('\n\n')}</pre>
                 {:else if !step.target}<p class="muted">No more details were captured.</p>{/if}
               {/if}
@@ -90,6 +117,10 @@
   .failed .dot { background: var(--coral); }
   .stopped .dot { background: var(--gold); }
   .verb { flex: none; color: var(--faint); }
+  .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+  .chip { flex: none; padding: 0 6px; border-radius: var(--r-xs); background: var(--raise); color: var(--muted); font: var(--t-cap)/1.7 var(--sans); }
+  .chip.failed { background: var(--coral-wash, var(--raise)); color: var(--coral); }
+  .chip.running { color: var(--iris); }
   .target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .meta { margin-left: auto; flex: none; color: var(--faint); font: var(--t-cap)/1.5 var(--sans); font-variant-numeric: tabular-nums; }
   .failed .meta { color: var(--coral); }
