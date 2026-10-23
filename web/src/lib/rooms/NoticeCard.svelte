@@ -5,6 +5,7 @@
   // can go about it. A notice saved before the typed facts shows its line.
   import { formatBytes } from '../settings/display.ts'
   import { ago } from '../ui/format.ts'
+  import { resetLine } from './noticeTime.ts'
   import type { Notice } from '../api/settings.ts'
 
   interface Props {
@@ -25,16 +26,13 @@
   let title = $derived(notice.kind === 'sync' && notice.sync?.rewritten ? 'Remote history rewritten' : titles[notice.kind] ?? 'Dyna alert')
   let tone = $derived(notice.severity === 'error' ? 'coral' : 'gold')
 
-  // resets says when a provider window opens again, counting from now.
+  // resets says how long a provider window has left, counting from now.
   let resets = $derived.by(() => {
     const at = notice.provider?.resetsAt
     if (!at) return ''
     const ms = new Date(at).getTime()
     if (!Number.isFinite(ms)) return ''
-    const minutes = Math.round((ms - Date.now()) / 60000)
-    if (minutes <= 0) return 'resets now'
-    if (minutes < 90) return `resets in ${minutes}m`
-    return `resets ${new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
+    return resetLine(ms - Date.now())
   })
 </script>
 
