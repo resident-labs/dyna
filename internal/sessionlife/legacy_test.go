@@ -62,7 +62,7 @@ func TestReadsInsideAnotherTransactionNeverWait(t *testing.T) {
 		go func() {
 			var s Snapshot
 			err := Load(sessions, "ses_a", &s)
-			if err == nil {
+			if errors.Is(err, os.ErrNotExist) {
 				_, err = IDs(sessions)
 			}
 			if err == nil {
