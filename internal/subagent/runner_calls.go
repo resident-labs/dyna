@@ -336,8 +336,6 @@ type TurnEnd struct {
 	HarnessSession     string                          `json:"harnessSession,omitempty"`
 	RawEnd             int64                           `json:"rawEnd"`
 	NormEnd            int64                           `json:"normEnd"`
-	// TODO: legacy/shim remove later — older runners omit this capability and retain their direct report callback; remove after those runners exit.
-	CompletionPending bool `json:"completionPending,omitempty"`
 	// CutoffPending asks the engine to measure the input cutoff itself because
 	// the runner could not. The terminal facts still go to the durable queue,
 	// so a transient room-log error cannot drop the completed turn.
@@ -399,7 +397,7 @@ func (m *Manager) endTurn(ctx context.Context, id string, e TurnEnd) error {
 			t.HarnessSession = e.HarnessSession
 		}
 		t.RawEnd, t.NormEnd = e.RawEnd, e.NormEnd
-		if e.CompletionPending && !t.Reported {
+		if !t.Reported {
 			t.ReportPending = true
 		}
 	})
