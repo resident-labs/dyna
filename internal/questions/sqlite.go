@@ -262,8 +262,7 @@ func (s *Store) updateTx(fn func(*sql.Conn, *State) error) error {
 	if err != nil {
 		return err
 	}
-	// TODO: legacy/shim remove later — the room watcher publishes questions; remove when requirement 16 moves this topic to the write.
-	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+	return state.For(db).Write(context.Background(), hub.Event{Topic: "questions"}, func(conn *sql.Conn) error {
 		st, err := readState(conn)
 		if err != nil {
 			return err

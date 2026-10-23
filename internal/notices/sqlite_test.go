@@ -106,7 +106,11 @@ func TestPostDoesNotRewriteUnchangedNotice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state.For(db).SetPublish(func(event hub.Event) { t.Errorf("unexpected bare event: %+v", event) })
+	state.For(db).SetPublish(func(event hub.Event) {
+		if event.Topic != "notices" {
+			t.Errorf("unexpected event: %+v", event)
+		}
+	})
 	if _, err := db.Exec("CREATE TRIGGER keep_older BEFORE UPDATE ON notices WHEN OLD.key='older' BEGIN SELECT RAISE(ABORT,'rewrote unchanged notice'); END; CREATE TRIGGER retain_older BEFORE DELETE ON notices WHEN OLD.key='older' BEGIN SELECT RAISE(ABORT,'deleted unchanged notice'); END;"); err != nil {
 		t.Fatal(err)
 	}

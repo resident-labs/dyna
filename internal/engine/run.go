@@ -284,6 +284,9 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 			if ev.Key != "" {
 				rooms.CoordinatorChanged(ev.Key)
 			}
+		case "goals", "questions", "notices", "sync":
+			rooms.StoreChanged(ev.Topic)
+			return
 		case prstate.Topic:
 			rooms.PRsChanged()
 			return
