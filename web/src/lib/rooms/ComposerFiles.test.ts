@@ -8,7 +8,7 @@ const code = await bundle({ component: '../rooms/Composer',
   format: `export const short = x => x; export const roomLabel = r => r.name; export const ago = () => ''; export const markdown = x => x; export const stamp = () => '';`,
   api: `export const api = {
     preview: async () => ({mentions: [], wakes: []}),
-    listEntries: async (_room, _session, path) => ({entries: path === 'web' ? [{path: 'web/main.ts', name: 'main.ts', kind: 'file'}] : [{path: 'web', name: 'web', kind: 'dir'}]}),
+    listEntries: async (_room, _session, path) => ({entries: path === 'web' ? [{path: 'web/main.ts', name: 'main.ts', kind: 'file'}] : path === 'web docs' ? [{path: 'web docs/odd\`file.txt', name: 'odd\`file.txt', kind: 'file'}] : [{path: 'web', name: 'web', kind: 'dir'}, {path: 'lead', name: 'lead', kind: 'file'}, {path: 'web docs', name: 'web docs', kind: 'dir'}]}),
   }`,
 })
 const settle = () => new Promise<void>(resolve => setImmediate(resolve))
@@ -62,4 +62,62 @@ test('file choices browse folders, keep paths out of recipients, and preserve te
     for (const name of [...domNames, 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.deleteProperty(globalThis, name)
     await rm(ui.dir, { recursive: true, force: true })
   }
+})
+
+async function withFileComposer(run: (target: Element, input: HTMLTextAreaElement, type: (text: string) => Promise<void>) => Promise<void>) {
+  const dom = installDom()
+  Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
+  const ui = await importBundle(code, 'Composer')
+  const target = need(document.getElementById('app'))
+  const component = ui.mount(ui.default, { target, props: { room: { id: 'r', name: 'room' }, choices: ['@lead'], onsend: async () => ({}) } })
+  try {
+    await settle()
+    const input = element<HTMLTextAreaElement>(target, 'textarea')
+    await run(target, input, async (text) => {
+      input.value = text
+      input.setSelectionRange(text.length, text.length)
+      input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+      await settle()
+    })
+  } finally {
+    await ui.unmount(component)
+    dom.window.close()
+    for (const name of [...domNames, 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+}
+
+test('a file and session with the same name keep separate completion targets', async () => {
+  await withFileComposer(async (target, input, type) => {
+    await type('Review @lead')
+    const file = element<HTMLButtonElement>(target, '[role="option"][title="Insert file path"]')
+    const session = element<HTMLButtonElement>(target, '[role="option"][title="member"]')
+    assert.notEqual(file.id, session.id)
+    file.click()
+    await settle()
+    assert.equal(input.value, 'Review `lead` ')
+    await type('Review @lead')
+    element<HTMLButtonElement>(target, '[role="option"][title="member"]').click()
+    await settle()
+    assert.equal(input.value, 'Review @lead ')
+  })
+})
+
+test('browsing a folder with a space keeps file completion active while typing', async () => {
+  await withFileComposer(async (target, input, type) => {
+    await type('Review @web')
+    const folder = need([...target.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(option => option.textContent?.includes('web docs/')))
+    folder.click()
+    await settle()
+    assert.equal(input.value, 'Review @web docs/')
+    assert.match(element(target, '[role="option"]').textContent ?? '', /web docs\/odd`file.txt/)
+    await type(input.value + 'odd')
+    element<HTMLButtonElement>(target, '[role="option"]').click()
+    await settle()
+    assert.equal(input.value, 'Review ``web docs/odd`file.txt`` ')
+    await type(input.value + '@lead')
+    element<HTMLButtonElement>(target, '[role="option"][title="member"]').click()
+    await settle()
+    assert.equal(input.value, 'Review ``web docs/odd`file.txt`` @lead ')
+  })
 })

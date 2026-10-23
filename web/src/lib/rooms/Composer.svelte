@@ -112,7 +112,7 @@
   let pick = $state(0)
   let completionList = $state()
   const completionID = $props.id()
-  const optionID = (option) => completionID + '-option-' + encodeURIComponent(option.value)
+  const optionID = (option) => completionID + '-option-' + (option.file ? 'file-' : option.reference ? 'reference-' : 'text-') + encodeURIComponent(option.value)
   let preview = $state(null) // roomsvc.Draft for the current text: who it wakes
   let token = $state(null) // {start, end, text} of the @token at the caret
   const attachments = attachmentDraft({ room: () => room?.id, error: (message) => (error = message), focus: () => field?.focus(), noun: 'post' })
@@ -155,7 +155,7 @@
     tick().then(() => {
       const menu = completionList
       const row = menu?.querySelector('[id="' + optionID(selected) + '"]')
-      if (!menu || !row || matches[pick]?.value !== selected.value) return
+      if (!menu || !row || !matches[pick] || optionID(matches[pick]) !== optionID(selected)) return
       const bounds = menu.getBoundingClientRect()
       const item = row.getBoundingClientRect()
       const top = item.top - bounds.top - menu.clientTop
@@ -199,6 +199,17 @@
   function findToken() {
     const pos = field.selectionStart
     const before = draft.slice(0, pos)
+    // Folder completion already knows the start, including any spaces in
+    // its path. Keep that boundary while the user filters this folder.
+    if (token?.file) {
+      const prefix = token.text.slice(0, token.text.lastIndexOf('/') + 1)
+      const text = before.slice(token.start)
+      if (text.startsWith(prefix)) {
+        token = { ...token, end: pos, text }
+        pick = 0
+        return
+      }
+    }
     const start = Math.max(before.lastIndexOf(' '), before.lastIndexOf('\n'), before.lastIndexOf('\t')) + 1
     const text = before.slice(start)
     const lead = draft.match(/^\/([\w-]+)\s+/)
@@ -213,21 +224,24 @@
     pick = 0
   }
 
-  async function complete(choice) {
-    const file = options.find((option) => option.value === choice)?.file
+  async function complete(option) {
+    if (!token) return
+    const choice = option.value
+    const file = option.file
     if (file) {
       const text = fileMentionText(file)
-      const caret = token.start + text.length
-      draft = draft.slice(0, token.start) + text + draft.slice(token.end)
-      token = null
+      const start = token.start
+      const caret = start + text.length
+      draft = draft.slice(0, start) + text + draft.slice(token.end)
+      token = text.startsWith('@') ? { start, end: caret, text, file: true } : null
+      pick = 0
       await tick()
       field?.focus()
       field?.setSelectionRange(caret, caret)
-      if (text.startsWith('@')) findToken()
       return
     }
     if (token?.reference) {
-      const reference = options.find((option) => option.value === choice)?.reference
+      const reference = option.reference
       if (!reference) return
       addReference(reference)
       const caret = token.start
@@ -321,7 +335,7 @@
       if (e.key === 'ArrowUp') { e.preventDefault(); pick = (pick - 1 + matches.length) % matches.length; return }
       // Enter on a typed command that needs nothing more runs it.
       if (e.key === 'Enter' && !e.shiftKey && command && !command.c.arg && matches[pick].value === '/' + command.c.name) { e.preventDefault(); token = null; send(); return }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); complete(matches[pick].value); return }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); complete(matches[pick]); return }
       if (e.key === 'Escape') { e.preventDefault(); token = null; return }
     }
     if (e.key === 'Escape' && reply) { e.preventDefault(); oncancelreply(); return }
@@ -345,7 +359,7 @@
       {#if !matches[0].group}<div class="pophead">{token?.reference ? 'Attach a PR or issue' : token?.arg ? token.arg.listTitle || token.arg.arg : 'Mention'}</div>{/if}
       {#each matches as m, i}
         {#if m.group && m.group !== matches[i - 1]?.group}<div class="pophead">{m.group}</div>{/if}
-        <button id={optionID(m)} class="opt" title={m.hint} class:on={i === pick} role="option" aria-selected={i === pick} onmousedown={(e) => e.preventDefault()} onclick={() => complete(m.value)}>
+        <button id={optionID(m)} class="opt" title={m.hint} class:on={i === pick} role="option" aria-selected={i === pick} onmousedown={(e) => e.preventDefault()} onclick={() => complete(m)}>
           <span class="mono">{m.label || m.value}{#if m.arg}<span class="argph"> ‹{m.arg}›</span>{/if}</span>
           <span class="kind">{m.hint}</span>
         </button>
