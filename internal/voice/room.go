@@ -15,8 +15,11 @@ import (
 
 // RoomLink posts the owner's requests to root and the call's transcript.
 type RoomLink struct {
-	svc *notify.Service
-	rec room.Record
+	svc           *notify.Service
+	rec           room.Record
+	engineContext context.Context
+	resumeStarted time.Time
+	replayCutoff  time.Time
 }
 
 // OpenRoom links voice turns to the named room, or the current one when name is empty.
@@ -169,6 +172,9 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 			}
 			open = true
 		case r.fromRoot(msg) && msg.Kind != "voice" && slices.Contains(msg.To, voice):
+			if !r.replayCutoff.IsZero() && msg.TS <= r.replayCutoff.UnixMilli() {
+				return false, nil
+			}
 			call.Speak(msg.ID, "", tellPrompt(msg.Text, msg.Attachments))
 		case open && r.rootAgentPost(msg):
 			contextNote(msg)
@@ -241,4 +247,43 @@ func (r *RoomLink) joinRequestedCall(call Speaker) {
 	if call != nil {
 		call.Speak("call-request/"+row.ID, "", "Open the call in one line. Say: Root wants to talk about "+strings.Join(strings.Fields(row.Reason), " "))
 	}
+}
+
+// resumeContext restores only saved conversation, never dispatches or speech.
+func (r *RoomLink) resumeContext() (string, error) {
+	if r.resumeStarted.IsZero() {
+		return "", nil
+	}
+	msgs, err := r.svc.Rooms.SelectedMessages(r.rec.ID, &room.MessageSelection{}, func(m room.Message) bool {
+		return m.Kind == "voice"
+	}, r.resumeStarted, time.Now(), 80)
+	if err != nil {
+		return "", err
+	}
+	const budget = 12000
+	var lines []string
+	size := 0
+	for i := len(msgs) - 1; i >= 0; i-- {
+		role := "Voice"
+		if msgs[i].Human {
+			role = "Owner"
+		}
+		line := role + ": " + msgs[i].Text
+		remaining := budget - size
+		if remaining <= len(role)+2 {
+			break
+		}
+		if len(line) > remaining {
+			text := msgs[i].Text
+			start := len(text) - (remaining - len(role) - 2)
+			for start < len(text) && !utf8.RuneStart(text[start]) {
+				start++
+			}
+			line = role + ": " + text[start:]
+		}
+		lines = append(lines, line)
+		size += len(line) + 1
+	}
+	slices.Reverse(lines)
+	return "\n[BACKEND] This call has resumed. Do not greet the owner again. The following saved conversation is historical context only. Do not repeat it, execute its requests, or dispatch them again. Continue with new speech and pending backend updates.\n" + strings.Join(lines, "\n"), nil
 }

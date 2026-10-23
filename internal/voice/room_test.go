@@ -252,3 +252,59 @@ func TestConnectedCallJoinsRequestAndSaysReasonOnce(t *testing.T) {
 	default:
 	}
 }
+
+// Resume restores the same room's recent transcript without replaying old
+// spoken updates or dispatching the saved owner request again.
+func TestResumeRestoresBoundedContextWithoutReplay(t *testing.T) {
+	tools, work, other := toolsFixture(t)
+	link := tools.link
+	externalRoot(t, work)
+	started := time.Now().Add(-time.Minute).UnixMilli()
+	if err := link.Spoken(true, "Please fix CI."); err != nil {
+		t.Fatal(err)
+	}
+	if err := link.Spoken(false, strings.Repeat("α", 7000)+"saved answer"); err != nil {
+		t.Fatal(err)
+	}
+	rooms := link.svc.Rooms
+	if _, err := rooms.Post(other.ID, room.PostInput{From: other.Name, To: []string{other.Name + ":voice-call"}, Kind: "voice", Text: "OTHER ROOM"}); err != nil {
+		t.Fatal(err)
+	}
+	old, err := rooms.Post(work.ID, room.PostInput{From: work.Name + ":root", To: []string{work.Name + ":voice-call"}, Text: "Already spoken."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := rooms.Messages(work.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := newCalls(t, false)
+	c.Open = func(string) (*RoomLink, error) { return link, nil }
+	st, err := c.Resume(work.ID, started, old.TS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.StartedAt != started || link.replayCutoff.UnixMilli() != old.TS {
+		t.Fatalf("resume changed call timestamps: %+v", st)
+	}
+	saved, err := link.resumeContext()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) > 12500 || !utf8.ValidString(saved) || !strings.Contains(saved, "saved answer") || strings.Contains(saved, "OTHER ROOM") {
+		t.Fatalf("invalid saved context: bytes=%d", len(saved))
+	}
+	call := newFakeSpeaker()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // Follow visits saved posts before observing cancellation.
+	if err := link.Watch(ctx, time.UnixMilli(started), call); err != context.Canceled {
+		t.Fatalf("Watch: %v", err)
+	}
+	if len(call.said) != 0 {
+		t.Fatal("resume replayed a previously spoken update")
+	}
+	after, err := rooms.Messages(work.ID)
+	if err != nil || len(after) != len(before) {
+		t.Fatalf("resume dispatched saved text: posts before=%d after=%d err=%v", len(before), len(after), err)
+	}
+}

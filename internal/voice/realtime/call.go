@@ -54,8 +54,11 @@ var errHangup = errors.New("the owner hung up")
 type Call struct {
 	// Greeting is queued once, when the first page attaches. Set it before Run.
 	Greeting string
-	conn     *Conn // nil while the call redials
-	provider Provider
+	// ServiceContext is canceled when the hosting service shuts down.
+	// Pages receive a restart close code so they can reconnect.
+	ServiceContext context.Context
+	conn           *Conn // nil while the call redials
+	provider       Provider
 	// Redial opens a new connection when the provider drops this one. Nil
 	// ends the call on the first drop.
 	Redial func(context.Context) (*Conn, error)
@@ -252,7 +255,9 @@ func (c *Call) Run(ctx context.Context) (err error) {
 		if c.page == nil {
 			return
 		}
-		if err != nil {
+		if c.ServiceContext != nil && c.ServiceContext.Err() != nil {
+			c.page.Close(websocket.CloseServiceRestart, "the voice service is restarting")
+		} else if err != nil {
 			c.page.Close(websocket.CloseInternalServerErr, err.Error())
 		} else {
 			c.page.Close(websocket.CloseNormalClosure, "the call ended")
