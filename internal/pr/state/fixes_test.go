@@ -35,9 +35,9 @@ func TestParseIssueRefsAndFixLines(t *testing.T) {
 		})
 	}
 
-	body := "This fixes the parser.\n\nFixes D-5, #207\ncloses: D-6\nFixer D-9 stays prose\nresolves #208"
+	body := "This fixes the parser.\n\nFixes D-5, #207\ncloses: D-6\nFixer D-9 stays prose\nresolves #208\n- Fixes D-7.\n* Closes (D-8)"
 	got := ParseFixLines(body)
-	if want := "D-5, #207, D-6, #208"; FixesLabel(got) != want {
+	if want := "D-5, #207, D-6, #208, D-7, D-8"; FixesLabel(got) != want {
 		t.Errorf("ParseFixLines = %s, want %s", FixesLabel(got), want)
 	}
 

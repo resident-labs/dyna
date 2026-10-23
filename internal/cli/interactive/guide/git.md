@@ -15,7 +15,9 @@ linked issue: Dyna closes a room issue with the reason `Fixed by #N (<merge comm
 and closes a GitHub issue with a one-line comment that names the PR. A PR that
 closes without merging closes nothing. A `Fixes D-5` or `Fixes #207` line in the
 PR body links the same issues, and `dyna git change open --pr <n> --fixes ...`
-sets the list too. Re-run track with `--fixes` to replace the list.
+sets the list too. Re-run track with `--fixes` to replace the list; a body line
+that goes away does not remove its link. A PR that is already merged when it is
+first tracked closes nothing.
 `dyna git pr show <pr>` lists the links, and the app shows them as chips.
 `dyna git pr show <pr>` explains pauses; `--history` includes delivered notices.
 `dyna git pr resume <pr>` clears a CI wake pause.
