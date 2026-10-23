@@ -108,8 +108,27 @@ func (s *Service) resumeHostedCI(ctx context.Context, job registeredCIJob, repo 
 		if current.Attempt > saved.Attempts[id] {
 			continue
 		}
-		if current.Status != "completed" || current.Conclusion != "cancelled" {
+		if current.Status != "completed" {
 			return nil
+		}
+		if current.Conclusion != "cancelled" {
+			if current.Conclusion != "failure" || !replaceableHostedWorkflow(current) {
+				return nil
+			}
+			jobs, err := gh.runJobs(ctx, refRecord(job.record), current)
+			if err != nil {
+				return err
+			}
+			var checks []Check
+			for _, job := range jobs {
+				check := Check{Name: job.Name, Status: job.Status, Conclusion: job.Conclusion}
+				check.App.Slug = "github-actions"
+				check.CheckSuite.ID = current.CheckSuiteID
+				checks = append(checks, check)
+			}
+			if !goAggregateCancelled(checks, current.CheckSuiteID) {
+				return nil
+			}
 		}
 		if _, _, err := gh.requestMethod(ctx, refRecord(job.record), path+"/rerun", "POST"); err != nil {
 			return err
@@ -119,15 +138,64 @@ func (s *Service) resumeHostedCI(ctx context.Context, job registeredCIJob, repo 
 	return registry.SaveHostedRuns(ctx, repo, job.head, saved)
 }
 
+// goAggregateCancelled recognizes the repository's dependency-only go-test job.
+// Every observed dependency must have passed or been cancelled; an independent
+// failure, missing dependency group, or unknown failing job keeps hosted CI red.
+func goAggregateCancelled(checks []Check, suite int64) bool {
+	groups := map[string]bool{}
+	cancelled, aggregate := false, false
+	for _, check := range checks {
+		if check.CheckSuite.ID != suite || check.App.Slug != "github-actions" {
+			continue
+		}
+		if check.Name == "go-test" {
+			aggregate = check.Status == "completed" && check.Conclusion == "failure"
+			continue
+		}
+		group := check.Name
+		if strings.HasPrefix(group, "go-test-shard (") {
+			group = "go-test-shard"
+		}
+		switch group {
+		case "go-test-shard", "go-static", "frontend", "frontend-check":
+			if check.Status != "completed" || (check.Conclusion != "success" && check.Conclusion != "cancelled") {
+				return false
+			}
+			groups[group] = true
+			cancelled = cancelled || check.Conclusion == "cancelled"
+		default:
+			if check.Status == "completed" && !success(check.Conclusion) && check.Conclusion != "cancelled" {
+				return false
+			}
+		}
+	}
+	return aggregate && cancelled && len(groups) == 4
+}
+
 func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns) Snapshot {
-	snap.Runs = append([]Run(nil), snap.Runs...)
-	snap.Checks = append([]Check(nil), snap.Checks...)
-	suites := map[int64]bool{}
+	current := snap.currentSuiteChecks()
+	cancelledSuites, aggregates, ignoredSuites := map[int64]bool{}, map[int64]bool{}, map[int64]bool{}
 	var runs []Run
 	for _, run := range snap.Runs {
 		attempt, ours := saved.Attempts[run.ID]
-		if ours && run.Attempt <= attempt && run.Conclusion == "cancelled" {
-			suites[run.CheckSuiteID] = run.CheckSuiteID != 0
+		if !ours || run.Attempt > attempt || run.CheckSuiteID == 0 {
+			runs = append(runs, run)
+			continue
+		}
+		suite := run.CheckSuiteID
+		cancelledSuites[suite] = true
+		aggregate := replaceableHostedWorkflow(run) && goAggregateCancelled(current, suite)
+		aggregates[suite] = aggregate
+		realFailure := false
+		for _, check := range current {
+			if check.CheckSuite.ID == suite && check.Status == "completed" && !success(check.Conclusion) && check.Conclusion != "cancelled" && !(aggregate && check.Name == "go-test") {
+				realFailure = true
+			}
+		}
+		// Cancellation can leave the run active, cancelled, or failed after its
+		// aggregate runs. None is a test failure when only cancelled work caused it.
+		if !realFailure && (run.Conclusion == "cancelled" || aggregate) {
+			ignoredSuites[suite] = true
 			continue
 		}
 		runs = append(runs, run)
@@ -135,7 +203,8 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns) Sn
 	snap.Runs = runs
 	var checks []Check
 	for _, check := range snap.Checks {
-		if suites[check.CheckSuite.ID] {
+		suite := check.CheckSuite.ID
+		if check.App.Slug == "github-actions" && (ignoredSuites[suite] || cancelledSuites[suite] && (check.Conclusion == "cancelled" || (aggregates[suite] && check.Name == "go-test"))) {
 			continue
 		}
 		checks = append(checks, check)
