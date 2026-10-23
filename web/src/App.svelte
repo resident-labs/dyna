@@ -125,7 +125,7 @@
   import type { RunList, RunDetail, RunSummary } from './lib/api/workflow.ts'
   import type { ShellJob } from './lib/api/terminal.ts'
   import type { ComputerInfo, ComputerEvent } from './lib/api/computer.ts'
-  import type { AppEvent, ListChange } from './lib/api/event.ts'
+  import type { StreamEvent, ListChange } from './lib/api/event.ts'
   import type { UpdateNotice } from './lib/api/settings.ts'
   import type { RowChange } from './lib/ui/listChanges.ts'
   import type { Page } from './lib/api/wire.ts'
@@ -245,8 +245,6 @@
     roomId?: string
     turn?: number
   }
-  // The stream's events, with the two the engine sends for a room pause.
-  type StreamEvent = AppEvent | { kind: 'room.paused' | 'room.resumed'; roomId?: string }
   let rooms = $state<Room[]>([])
   // started turns on once the first room is chosen. Before that, the
   // empty room is not the owner's choice and must not overwrite the saved one.
@@ -1447,10 +1445,10 @@
   }
 
   // openMember shows a member's profile card. The owner has no card.
-  async function openMember(m: Member | null | undefined) {
+  async function openMember(m: Member | { rootSeat: true } | null | undefined) {
     if (m && 'rootSeat' in m && m.rootSeat) { openSession(m); return }
     detailRequest++
-    if (!m || m.owner || !m.id) return
+    if (!m || !('name' in m) || m.owner || !m.id) return
     card = m as Drill
     profile = null
     profileError = ''
