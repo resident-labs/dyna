@@ -170,7 +170,9 @@ for base in "${bases[@]}"; do
   for path in "$legacy"/*; do
     [ -d "$path" ] && [ ! -L "$path" ] || continue
     case "$path" in
-    "$legacy/runs" | "$legacy/diagnostics" | "$legacy/go-build" | "$legacy/go-mod" | "$legacy/npm") continue ;;
+    # Bare Git caches are not run folders. Keep them out of this sweep: its
+    # one-day age and run-lock check do not protect a cache with active worktrees.
+    "$legacy"/*.git | "$legacy/runs" | "$legacy/diagnostics" | "$legacy/go-build" | "$legacy/go-mod" | "$legacy/npm") continue ;;
     esac
     live_run "$path" && continue
     older "$path" "$run_age_min" || continue
