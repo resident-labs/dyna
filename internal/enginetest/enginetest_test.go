@@ -14,6 +14,7 @@ import (
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/websvc"
+	"dyna-agent/internal/workflowtemplate"
 )
 
 // A command's default client reaches the fake engine, which answers through
@@ -116,5 +117,19 @@ func TestFakeEngineRefusesARealDataFolder(t *testing.T) {
 	}
 	if _, err := os.Stat(real); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the refused folder was created: %v", err)
+	}
+}
+
+// Each fake engine must leave the caller's template registry untouched.
+func TestFakeEngineIsolatesTemplateRegistry(t *testing.T) {
+	config := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", config)
+	registry := workflowtemplate.DefaultRegistryDir()
+	enginetest.Serve(t, t.TempDir(), map[string]websvc.Call{})
+	if got := workflowtemplate.DefaultRegistryDir(); got == registry {
+		t.Fatalf("fake engine kept caller template registry %s", got)
+	}
+	if _, err := os.Stat(registry); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("fake engine touched caller template registry: %v", err)
 	}
 }
