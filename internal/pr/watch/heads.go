@@ -20,6 +20,10 @@ type defaultBranchProbe struct {
 	ChecksPending bool
 	NoPushCI      bool
 	MergeTrialCI  bool
+	// Rollup is GitHub's own status summary. A red rollup that counted a
+	// cancelled run is re-read from the commit, because GitHub keeps counting a
+	// cancellation that a later run of the same workflow superseded.
+	Rollup *commitRollup
 }
 
 type discoveredPull struct {
@@ -194,6 +198,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 			if rollup := defaultBranch.Target.Rollup; rollup != nil {
 				branch.CI, branch.CheckCount = rollup.State, rollup.Contexts.TotalCount
 				branch.ChecksPending = rollup.pending()
+				branch.Rollup = rollup
 			}
 			branch.NoPushCI = branch.NoPushCI && branch.CheckCount == 0
 
@@ -410,6 +415,7 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 	gh := s.GH
 	gh.requests = &requestCache{rates: st.RateLimits, legacyPause: st.LegacyPause, now: s.now}
 	heads, rates, readErr := gh.readHeads(ctx, records)
+	recheckErr := s.recheckCancelledMainCI(ctx, gh, records, localRepos, heads)
 	saveErr := s.Store.update(func(current *State) error {
 		for key, probe := range heads {
 			if r := current.Records[key]; r != nil && probe.Account != "" {
@@ -443,7 +449,49 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 		applyRateLimits(current, rates, s.now())
 		return nil
 	})
-	return heads, errors.Join(readErr, saveErr)
+	return heads, errors.Join(readErr, recheckErr, saveErr)
+}
+
+// recheckCancelledMainCI replaces a red rollup that counted a cancelled run with
+// the commit's own CI. GitHub keeps counting a cancelled run after a later run of
+// the same workflow passed, so the latest completed result of each check decides
+// and a superseded cancellation does not fail main.
+func (s *Service) recheckCancelledMainCI(ctx context.Context, gh GitHub, records []*Record, localRepos map[string]bool, heads map[string]headProbe) error {
+	done := map[string]bool{}
+	var failures []error
+	for _, r := range records {
+		probe, ok := heads[r.Key]
+		if !ok || probe.Err != nil || localRepos[defaultRepo(*r)] || !probe.Default.cancelledFailure() {
+			continue
+		}
+		identity := defaultRepo(*r) + "@" + probe.Default.Head
+		if done[identity] {
+			continue
+		}
+		done[identity] = true
+		var snap Snapshot
+		if err := gh.readCommitCI(ctx, refRecord(*r), probe.Default.Head, &snap); err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		snap.Pull.Head.SHA, snap.Pull.Head.Repo.FullName = probe.Default.Head, r.Repo
+		ci, _, _, _ := snap.CIStatus()
+		probe.Default.CI, probe.Default.CheckCount = rollupState(ci), len(snap.currentChecks())
+		probe.Default.ChecksPending = ci == "pending"
+		heads[r.Key] = probe
+	}
+	return errors.Join(failures...)
+}
+
+// rollupState spells a computed CI state the way the default-branch verdict reads it.
+func rollupState(ci string) string {
+	switch ci {
+	case "passed":
+		return "SUCCESS"
+	case "failed":
+		return "FAILURE"
+	}
+	return "PENDING"
 }
 
 // ConfirmHeads refreshes remote facts through their single batched writer.
