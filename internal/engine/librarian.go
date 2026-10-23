@@ -27,6 +27,17 @@ func (s services) addHook(ctx context.Context, repo string, hook hooks.Hook) err
 	return s.hooks.Add(ctx, repo, hook)
 }
 
+// addGlobalHook stores a hook that belongs to no repository.
+func (s services) addGlobalHook(ctx context.Context, hook hooks.Hook) error {
+	by, err := actor(ctx)
+	if err != nil {
+		return err
+	}
+	hook.AddedBy = by
+	hook.EditedBy, hook.EditedAt = "", nil
+	return s.hooks.AddGlobal(ctx, hook)
+}
+
 func (s services) librarianService() librarian.Service {
 	n := s.rooms.Notify
 	return librarian.Service{

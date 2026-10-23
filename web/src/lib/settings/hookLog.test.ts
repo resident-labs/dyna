@@ -54,7 +54,7 @@ test('the room Hooks section opens the run of the hook this repository holds', a
     hookRuns: async (repo: string, name: string) => { asked.push(['runs', repo, name]); return runs },
     hookRunLog: async (repo: string, name: string, id: string): Promise<HookRunLog> => { asked.push(['log', repo, name, id]); return log },
   }
-  const state: Record<string, unknown> = { api, repo: '/repo', hooks: [{ name: 'verify' }], runs: {}, logs: {}, open: '', openRun: '', error: '', newestFirst: <T>(x: T): T => x, errorText: String }
+  const state: Record<string, unknown> = { api, repo: '/repo', isGlobal: () => false, hooks: [{ name: 'verify' }], runs: {}, logs: {}, open: '', openRun: '', error: '', newestFirst: <T>(x: T): T => x, errorText: String }
   runFunctions(pane, ['loadRuns', 'loadLog', 'showFocus'], state)
 
   // A card names the engine's repository root, and the room may store another

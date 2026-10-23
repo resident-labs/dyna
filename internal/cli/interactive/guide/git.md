@@ -344,6 +344,24 @@ dyna git hooks rm verify
 `run` uses Git values. Timeouts bound each command. Edits preserve
 unsupplied fields; removal preserves logs. Commands accept `--repo`; see help.
 
+## Global and built-in hooks
+
+A hook has a scope. A repository hook belongs to one repository. A global hook
+belongs to the machine, has no repository, and runs even when no checkout is
+open. Global hooks need an absolute `--cwd`, and `--global` selects them:
+
+```sh
+dyna git hooks list --global
+dyna git hooks run maintenance --global
+dyna git hooks edit maintenance --global --every-minutes 30
+```
+
+A built-in hook is a global hook that the engine seeds from its own table, such
+as the hourly maintenance pass. Its name, event and action are fixed, so it
+cannot be removed and its command cannot change. The owner may change its
+interval, timeout and switch, and can reset it to the defaults. Settings →
+Hooks shows the built-ins and the hooks you added for the machine.
+
 Merge hooks alert on failure. On failure, inspect `list` and the exact log from the notice,
 fix the cause, then test before retrying. Tell the owner about hook changes.
 

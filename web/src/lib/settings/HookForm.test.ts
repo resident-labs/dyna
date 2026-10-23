@@ -9,7 +9,7 @@ import { build } from 'esbuild'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
 import { need } from '../../../test/need.ts'
-import { hookForm, hookOf, hookPatch, newHook, type HookFields } from './hooks.ts'
+import { hookForm, hookOf, hookPatch, isBuiltin, newHook, timeoutLabel, type HookFields } from './hooks.ts'
 import { errorText } from '../errorText.ts'
 import type { Hook } from '../api/settings.ts'
 
@@ -59,7 +59,7 @@ interface SaveContext {
   [name: string]: unknown
 }
 function paneWith(api: Record<string, unknown>, editor: Editor): SaveContext {
-  const context: SaveContext = { api, errorText, repo: '/repo', editor, hookOf, hookPatch, notes: [], loads: 0 }
+  const context: SaveContext = { api, errorText, repo: '/repo', isGlobal: () => false, isBuiltin, timeoutLabel, editor, hookOf, hookPatch, notes: [], loads: 0 }
   context.say = (t: string) => context.notes.push(t)
   context.load = async () => { context.loads++ }
   runFunctions(pane, ['saveHook'], context)
@@ -101,7 +101,7 @@ interface RemoveContext {
 }
 const removeNames = ['load', 'loadRuns', 'loadLog', 'remove', 'say']
 function removeContext(api: Record<string, unknown>, fields: Pick<RemoveContext, 'repo' | 'hooks' | 'editor' | 'removing'>): RemoveContext {
-  const context: RemoveContext = { api, errorText, runs: {}, logs: {}, open: '', openRun: '', error: '', note: '', newestFirst: (x: unknown) => x, setTimeout, ...fields }
+  const context: RemoveContext = { api, errorText, isGlobal: () => false, runs: {}, logs: {}, open: '', openRun: '', error: '', note: '', newestFirst: (x: unknown) => x, setTimeout, ...fields }
   runFunctions(pane, removeNames, context)
   return context
 }
