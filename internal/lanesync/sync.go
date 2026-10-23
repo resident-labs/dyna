@@ -33,7 +33,16 @@ type Snapshot struct {
 	Operations   map[string]Operation `json:"operations,omitempty"`
 	Exports      map[string]Export    `json:"exports,omitempty"`
 }
-type Service struct{ Dir string }
+type Service struct {
+	Dir string
+	// git runs one Git read; nil runs read. Tests count the calls through it.
+	git func(context.Context, string, ...string) (string, error)
+
+	mu sync.Mutex
+	// views keeps one repository's Git view while its refs and export stay
+	// the same. Status is a web read, so it must not spawn Git per call.
+	views map[string]*repoView
+}
 
 // fetchMu is an operation lease shared by the engine timer and fetch calls.
 // It serializes Git work; snapshot reads and writes never wait on it.
