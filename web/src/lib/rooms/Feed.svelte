@@ -20,7 +20,7 @@
   import type { FeedRow } from './feedRows.ts'
   import PostFiles from '../ui/PostFiles.svelte'
   import { postParts } from '../ui/postParts.ts'
-  import { questionID } from './questions.ts'
+  import { questionID } from '../questions/questions.ts'
   import { swipeReply } from '../ui/swipeReply.ts'
   import { markdown, clock, stamp, dayLabel, short, resultLine } from '../ui/format.ts'
   import { arrivals, motion, FAST } from '../ui/motion.ts'
