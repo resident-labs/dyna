@@ -1,6 +1,6 @@
 // The shells a session runs now. Jobs name their owner by session id or address.
-import { isOpen } from './shellBlock.ts'
-import type { ShellJob } from './shellBlock.ts'
+import { isOpen } from './shell.ts'
+import type { ShellJob } from './shell.ts'
 
 export interface ShellOwner {
   id?: string
