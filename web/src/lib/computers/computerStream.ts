@@ -82,8 +82,6 @@ let loading: Promise<RfbClass> | null = null
 // h264Off is true once H.264 failed in this page. It is page-wide because
 // the engine that failed once will fail again.
 let h264Off = false
-export const h264Disabled = (): boolean => h264Off
-
 // Each socket keeps its own preference, including when several viewers are open.
 const socketModes = new WeakMap<object, boolean>()
 export const savedStreamMode = (value: unknown): StreamMode => (value === 'sharp' || value === 'smooth' ? value : 'auto')

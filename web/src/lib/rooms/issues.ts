@@ -20,10 +20,6 @@ export function areas(list: readonly IssueView[]): string[] {
   return [...n].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k]) => k)
 }
 
-export const byArea = <I extends IssueView>(list: readonly I[], a: string): readonly I[] => (a ? list.filter((i) => area(i) === a) : list)
 
 // file:line, the file alone when the line is unknown, or empty.
 export const location = (i: IssueView): string => (i.file ? (i.line && i.line > 0 ? `${i.file}:${i.line}` : i.file) : '')
-
-// How an issue left the open list.
-export const historyLabel = (i: IssueView): string | undefined => (i.state === 'goal' && i.goalId ? `goal ${i.goalId}` : i.state)

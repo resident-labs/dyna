@@ -144,32 +144,6 @@ export function saveFilters(f: { state: string }): void {
   } catch {}
 }
 
-// The merge queue and Blocked folds persist per room: {queue, blocked}, each
-// true, false, or missing while the reader has not chosen.
-const FOLDS = 'dyna.prFolds'
-export interface Folds {
-  queue?: boolean
-  blocked?: boolean
-}
-const isFolds = (v: unknown): v is Folds => isRecord(v) && (v.queue === undefined || typeof v.queue === 'boolean') && (v.blocked === undefined || typeof v.blocked === 'boolean')
-const readFolds = (): Record<string, unknown> => {
-  try {
-    const folds: unknown = JSON.parse(localStorage.getItem(FOLDS) || '{}')
-    return isRecord(folds) ? folds : {}
-  } catch {
-    return {}
-  }
-}
-export const loadFolds = (roomId: string): Folds => {
-  const folds = readFolds()[roomId]
-  return isFolds(folds) ? folds : {}
-}
-export function saveFolds(roomId: string, folds: Folds): void {
-  try {
-    localStorage.setItem(FOLDS, JSON.stringify({ ...readFolds(), [roomId]: folds }))
-  } catch {}
-}
-
 // commitDays groups a PR's commits by local day for the Commits tab: the
 // newest day first, and the newest commit first in a day. Ancestry does not
 // order author dates, so it sorts by date rather than trusting the input.

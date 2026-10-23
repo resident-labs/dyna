@@ -8,7 +8,7 @@ import { build } from 'esbuild'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import type { Finding } from '../api/change.ts'
 import { need } from '../../../test/need.ts'
-import { verdictMeta, statusMeta, refName, repoName, changeName, changeTitle, groupFindings } from './pr.ts'
+import { verdictMeta, statusMeta, refName, changeName, changeTitle, groupFindings } from './pr.ts'
 
 // Render the real ChangeReview on the server and read the text.
 async function load(name: string) {
@@ -59,8 +59,6 @@ test('local changes show branch and base, not a PR number', () => {
   assert.equal(changeName({ ...local, base: sha, baseRef: 'main' }), 'feat/x → main')
   assert.equal(changeName({ ...local, base: sha }), 'feat/x → fc3cd54')
   assert.equal(refName('main'), 'main')
-  assert.equal(repoName('/home/me/work/repo/.git'), 'repo')
-  assert.equal(repoName('o/r'), 'o/r')
   // A local draft shows source approval; merging requires an attached PR and GitHub CI.
   assert.equal(statusMeta({ kind: 'local', state: 'open', reviewState: 'approved', verdict: 'approve' }).label, 'Approved')
   assert.equal(statusMeta({ ...local, ci: 'passed', state: 'open', reviewState: 'approved', verdict: 'approve' }).label, 'Approved')
