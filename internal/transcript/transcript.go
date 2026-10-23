@@ -76,6 +76,7 @@ type Tool struct {
 // Item is one entry of the conversation.
 type Item struct {
 	source    int64
+	anchor    *int64
 	Kind      Kind
 	PostID    string    // original room post
 	TS        time.Time // zero when the source carried no time
@@ -135,6 +136,39 @@ func FromEvents(events []workeroutput.Event) (items []Item, hidden int) {
 // fromEvents also returns the item indexes where a resumed continuation
 // starts (a new harness process: steering or a reminder was delivered).
 func fromEvents(events []workeroutput.Event) ([]Item, int, []int) {
+	return fromEventsWithSteering(events, nil)
+}
+
+// fromEventsWithSteering inserts source boundaries before coalescing. Tool
+// results can still pair with starts across a boundary, while adjacent prose,
+// thoughts and tool groups cannot absorb the steering between them.
+func fromEventsWithSteering(events []workeroutput.Event, steers []Item) ([]Item, int, []int) {
+	if len(steers) > 0 {
+		ordered := append([]Item(nil), steers...)
+		sort.SliceStable(ordered, func(i, j int) bool {
+			if ordered[i].anchor == nil {
+				return false
+			}
+			return ordered[j].anchor == nil || *ordered[i].anchor < *ordered[j].anchor
+		})
+		steers = ordered
+		merged := make([]workeroutput.Event, 0, len(events)+len(steers))
+		next := 0
+		insert := func() {
+			merged = append(merged, workeroutput.Event{Kind: "transcript_steering", ID: strconv.Itoa(next)})
+			next++
+		}
+		for _, e := range events {
+			for next < len(steers) && steers[next].anchor != nil && *steers[next].anchor <= e.SourceOffset {
+				insert()
+			}
+			merged = append(merged, e)
+		}
+		for next < len(steers) {
+			insert()
+		}
+		events = merged
+	}
 	events = workeroutput.CoalesceNormalizedEvents(events)
 	paired, ended := workeroutput.PairTools(events)
 	var items []Item
@@ -148,6 +182,11 @@ func fromEvents(events []workeroutput.Event) ([]Item, int, []int) {
 			ts = time.UnixMilli(e.TS)
 		}
 		switch e.Kind {
+		case "transcript_steering":
+			if index, err := strconv.Atoi(e.ID); err == nil && index >= 0 && index < len(steers) {
+				items = append(items, steers[index])
+				deltaReply = -1
+			}
 		case "message":
 			if strings.EqualFold(e.Role, "user") {
 				continue // prompts and steering come from the turn record
@@ -266,7 +305,11 @@ func repeated(items []Item, text string) bool {
 	if len(t) < 40 {
 		return false
 	}
-	for _, it := range items {
+	for i := len(items) - 1; i >= 0; i-- {
+		it := items[i]
+		if it.Kind == Steering {
+			break
+		}
 		if it.Kind == Reply && strings.TrimSpace(it.Text) == t {
 			return true
 		}
@@ -759,49 +802,8 @@ func SessionTurn(t subagent.Turn, events []workeroutput.Event, omitted bool) Tur
 			started[e.ID] = true
 		}
 	}
-	items, hidden, conts := fromEvents(events)
+	items, hidden, _ := fromEventsWithSteering(events, steeringItems(t))
 	out.Hidden = hidden
-
-	// Steering: place each message before the first item that is newer than
-	// it; without timestamps, at the continuation it resumed into.
-	steers := steeringItems(t)
-	if len(steers) > 0 {
-		timed := false
-		for _, it := range items {
-			if !it.TS.IsZero() {
-				timed = true
-				break
-			}
-		}
-		positions := make([]int, len(steers))
-		for i, s := range steers {
-			pos := len(items)
-			if timed {
-				for j, it := range items {
-					if !it.TS.IsZero() && it.TS.After(s.TS) {
-						pos = j
-						break
-					}
-				}
-			} else if i < len(conts) {
-				// TODO: legacy/shim remove later — places steering in old output without timestamps; remove after all retained output has timestamps
-				pos = conts[i]
-			}
-			positions[i] = pos
-		}
-		merged := make([]Item, 0, len(items)+len(steers))
-		next := 0
-		for j := 0; j <= len(items); j++ {
-			for next < len(steers) && positions[next] == j {
-				merged = append(merged, steers[next])
-				next++
-			}
-			if j < len(items) {
-				merged = append(merged, items[j])
-			}
-		}
-		items = merged
-	}
 
 	hasReply := false
 	for _, it := range items {
@@ -852,12 +854,15 @@ func steeringItems(t subagent.Turn) []Item {
 	var out []Item
 	for i, s := range steers {
 		from, text := SplitSender(s.Message)
-		it := Item{Kind: Steering, PostID: s.ID, TS: time.UnixMilli(s.TS), From: from, Text: text, Delivered: s.Delivered}
+		it := Item{Kind: Steering, anchor: s.SourceOffset, PostID: s.ID, TS: time.UnixMilli(s.TS), From: from, Text: text, Delivered: s.Delivered}
 		var d *subagent.Delivery
 		if i < len(deliveries) {
 			d = &deliveries[i]
 		}
 		it.Status = DeliveryText(s.Delivered, d, t.Done())
+		if s.SourceOffset == nil && (s.Delivered || t.Done()) {
+			it.Status += "; source position unavailable"
+		}
 		out = append(out, it)
 	}
 	return out

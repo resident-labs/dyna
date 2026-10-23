@@ -290,11 +290,16 @@ func ReadProjectedNormalizedOutputTailPath(dataDir, key, path string, offset, li
 	defer reader.Close()
 	return readJSONLinesDecoded(path, offset, limit, normalizedOutputMaxRecordBytes, jsonLinesPolicy{keepLast: maxEvents}, func(start, end int64, raw []byte) (event workeroutput.Event, ok bool, err error) {
 		event, ok, err = reader.Event(start, end, raw)
-		if err != nil || ok {
-			return event, ok, err
+		if err != nil {
+			return event, false, err
 		}
-		err = json.Unmarshal(raw, &event)
-		return event, err == nil, nil
+		if !ok {
+			if err := json.Unmarshal(raw, &event); err != nil {
+				return event, false, nil
+			}
+		}
+		event.SourceOffset = start
+		return event, true, nil
 	}, workeroutput.IsCompactionEvent)
 }
 
