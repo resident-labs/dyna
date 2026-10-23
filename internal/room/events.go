@@ -36,6 +36,17 @@ const (
 	// ProducerParentCheckin is the scheduler that reminds a parent to look at
 	// its children.
 	ProducerParentCheckin EventProducer = "parent-checkin"
+	// ProducerDoctor is the machine doctor that reports what it found.
+	ProducerDoctor EventProducer = "doctor"
+	// ProducerEngine is the engine itself, as when migration keeps it
+	// read-only and it tells every room so.
+	ProducerEngine EventProducer = "engine"
+	// ProducerLibrarian is the librarian service.
+	ProducerLibrarian EventProducer = "librarian"
+	// ProducerReviewer is a reviewer service.
+	ProducerReviewer EventProducer = "reviewer"
+	// ProducerHelper is a helper service.
+	ProducerHelper EventProducer = "helper"
 )
 
 // Audience is who an event's post belongs to. A room event is part of the
@@ -60,6 +71,9 @@ const (
 	WakeTarget WakeRule = "target"
 	// WakeRootIfNeeded starts the root seat only when the post needs root.
 	WakeRootIfNeeded WakeRule = "root-if-needed"
+	// WakeRoot always starts the root seat, because the event needs root to
+	// act now. Only an event addressed to the root seat may use it.
+	WakeRoot WakeRule = "root"
 )
 
 // Event families and types.
@@ -77,6 +91,11 @@ const (
 	FamilyCheckin  EventFamily = "checkin"
 	FamilyCIHealth EventFamily = "ci-health"
 	FamilyRule     EventFamily = "rule"
+	FamilySession  EventFamily = "session"
+	FamilyAlert    EventFamily = "alert"
+	FamilyService  EventFamily = "service"
+	FamilyEngine   EventFamily = "engine"
+	FamilyQuestion EventFamily = "question"
 
 	// TypeSummary tells a check-in apart from any other event of its family.
 	TypeSummary EventType = "summary"
@@ -87,6 +106,12 @@ const (
 
 	FamilyMachine EventFamily = "machine"
 	TypeLowDisk   EventType   = "low-disk"
+
+	// TypeRootFlush is the engine's nudge that delivers the quiet posts a room
+	// held for its root seat.
+	TypeRootFlush EventType = "root-flush"
+	// TypeWithdrawn is a question that was withdrawn before it was answered.
+	TypeWithdrawn EventType = "withdrawn"
 )
 
 // The issue family posts one event per fact about a room issue. Every filer
@@ -700,6 +725,301 @@ func (m MachineEvent) eventDedupe() string {
 	return strconv.Itoa(m.AtMS)
 }
 
+// SessionChange is what a session note reports about its subject.
+type SessionChange string
+
+// Session changes.
+const (
+	// SessionRenamed is a session that took a new name.
+	SessionRenamed SessionChange = "renamed"
+	// SessionPromoted is a session that moved to the top level.
+	SessionPromoted SessionChange = "promoted"
+	// SessionAdopted is a session that moved under another session.
+	SessionAdopted SessionChange = "adopted"
+	// SessionAccount is a turn that moved to another account or profile.
+	SessionAccount SessionChange = "account"
+	// SessionInstructions is a standing-instruction change that a session
+	// must apply from its next turn.
+	SessionInstructions SessionChange = "instructions"
+	// SessionSeat is a change of who holds the room's root seat.
+	SessionSeat SessionChange = "seat"
+	// SessionSpawned is a session the owner started from the composer.
+	SessionSpawned SessionChange = "spawned"
+)
+
+// sessionChanges lists every session change the web needs as a union type.
+var sessionChanges = []SessionChange{
+	SessionRenamed, SessionPromoted, SessionAdopted, SessionAccount,
+	SessionInstructions, SessionSeat, SessionSpawned,
+}
+
+// AccountReason is why a turn moved to another account or profile.
+type AccountReason string
+
+// Account reasons.
+const (
+	// AccountUsageLimit is an account that reached its provider limit.
+	AccountUsageLimit AccountReason = "usage-limit"
+	// AccountFallback is a profile that reached its provider limit, whose
+	// session moved to the profile's fallback.
+	AccountFallback AccountReason = "fallback"
+)
+
+// accountReasons lists every account reason the web needs as a union type.
+var accountReasons = []AccountReason{AccountUsageLimit, AccountFallback}
+
+// InstructionAction is what happened to one section of the standing
+// instructions. It picks the wording of the note's row.
+type InstructionAction string
+
+// Instruction actions.
+const (
+	// InstructionItems is a section whose tracked lines changed.
+	InstructionItems InstructionAction = "items"
+	// InstructionBody is a section whose whole text changed.
+	InstructionBody InstructionAction = "body"
+	// InstructionRemoved is a section that is gone.
+	InstructionRemoved InstructionAction = "removed"
+)
+
+// instructionActions lists every instruction action the web needs as a union.
+var instructionActions = []InstructionAction{InstructionItems, InstructionBody, InstructionRemoved}
+
+// InstructionChange is one section that a standing-instruction note names.
+type InstructionChange struct {
+	Name   string            `json:"name"`
+	Action InstructionAction `json:"action"`
+	// Added and Removed are the tracked lines the section gained and lost.
+	Added   []string `json:"added,omitempty"`
+	Removed []string `json:"removed,omitempty"`
+	// Body is the section's new text, for a whole-text change.
+	Body string `json:"body,omitempty"`
+}
+
+// SessionEvent is one note about a session: a rename, a move, an account
+// change, a standing-instruction change, a root-seat change or a spawn. Every
+// field is typed, so the note's row and the agent text carry the same facts.
+//
+// Session is the address of the session the note is about. A seat change is
+// about the room's root seat, so it names the room.
+type SessionEvent struct {
+	Type    SessionChange `json:"type"`
+	Session string        `json:"session"`
+	// Name and OldName are the session's name before and after a rename.
+	Name    string `json:"name,omitempty"`
+	OldName string `json:"oldName,omitempty"`
+	// From and To are the parents a move left and joined, or the account and
+	// profile an account change left and joined. "top level" means no parent.
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
+	// Reason is why an account change happened.
+	Reason AccountReason `json:"reason,omitempty"`
+	// Profile is the profile a spawned session runs on.
+	Profile string `json:"profile,omitempty"`
+	// Dir is the directory a spawned session works in.
+	Dir string `json:"dir,omitempty"`
+	// Seat is the label of a root-seat change.
+	Seat string `json:"seat,omitempty"`
+	// Sections lists the instruction sections that changed.
+	Sections []InstructionChange `json:"sections,omitempty"`
+	// Occurrence counts the notes about one kind of change, so a change that
+	// reverts to an earlier state is still a new note. A poster without an
+	// occurrence of its own asks for a fresh post ID instead.
+	Occurrence int `json:"occurrence,omitempty"`
+	// Detail is the evidence the agent reads: the instruction lines, the root
+	// handoff, the clipped task of a spawn, or the transfer note.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (SessionEvent) eventFamily() EventFamily { return FamilySession }
+func (s SessionEvent) eventType() EventType   { return EventType(s.Type) }
+
+// eventSubject keeps every note of one session in that session's rows.
+func (s SessionEvent) eventSubject() string { return s.Session }
+
+// eventDedupe keys a note by the facts of its change, so a retried note posts
+// once and a second change posts again.
+func (s SessionEvent) eventDedupe() string {
+	switch s.Type {
+	case SessionRenamed:
+		return s.OldName + "\x00" + s.Name
+	case SessionPromoted, SessionAdopted:
+		return s.From + "\x00" + s.To
+	case SessionAccount:
+		return s.From + "\x00" + s.To + "\x00" + string(s.Reason)
+	case SessionInstructions:
+		// The occurrence comes first, so a change that reverts to an earlier
+		// state is still a new note while a retry of one change keeps its post.
+		// The sections and the body follow it, because two different changes
+		// to one section are two notes.
+		lines := make([]string, len(s.Sections)+1)
+		lines[0] = strconv.Itoa(s.Occurrence)
+		for i, change := range s.Sections {
+			lines[i+1] = string(change.Action) + " " + change.Name + "\x00" + strings.Join(change.Added, "\x01") + "\x00" + strings.Join(change.Removed, "\x01") + "\x02" + change.Body
+		}
+		return strings.Join(lines, "\x00")
+	case SessionSeat:
+		return s.Seat
+	}
+	return s.Profile
+}
+
+// AlertSource is what observed the condition an alert reports.
+type AlertSource string
+
+// Alert sources.
+const (
+	// AlertDoctor is a doctor report.
+	AlertDoctor AlertSource = "doctor"
+	// AlertEngine is the engine itself, as when it stays read-only.
+	AlertEngine AlertSource = "engine"
+)
+
+// alertSources lists every alert source the web needs as a union type.
+var alertSources = []AlertSource{AlertDoctor, AlertEngine}
+
+// AlertSeverity is how urgent one finding of an alert is. A doctor ranks its
+// causes, so its first finding is the one to act on now.
+type AlertSeverity string
+
+// Alert severities.
+const (
+	// AlertWarning is a cause the owner should fix soon.
+	AlertWarning AlertSeverity = "warning"
+	// AlertCritical is the cause that needs the owner now.
+	AlertCritical AlertSeverity = "critical"
+)
+
+// alertSeverities lists every severity the web needs as a union type.
+var alertSeverities = []AlertSeverity{AlertWarning, AlertCritical}
+
+// AlertFinding is one cause an alert names, with the numbers behind it.
+type AlertFinding struct {
+	Severity AlertSeverity `json:"severity"`
+	// Title states the cause in a few words, such as "machine is overloaded".
+	Title string `json:"title"`
+	// Cause is the evidence the title rests on, with its numbers.
+	Cause string `json:"cause,omitempty"`
+}
+
+// AlertEvent tells the root seat that something needs the owner now: a doctor
+// report, or the engine stuck read-only.
+type AlertEvent struct {
+	Source AlertSource `json:"source"`
+	// ReportID names the doctor report in the machine's report list.
+	ReportID string `json:"reportId,omitempty"`
+	// Trigger names what started the check, such as "hook main-updated".
+	Trigger string `json:"trigger,omitempty"`
+	// Summary is the one line the alert states.
+	Summary string `json:"summary,omitempty"`
+	// Findings are the causes the doctor ranked, worst first.
+	Findings []AlertFinding `json:"findings,omitempty"`
+	// NextCommand is the one command the owner can run about the first doctor
+	// finding, as a chip the card copies.
+	NextCommand string `json:"nextCommand,omitempty"`
+	// Remedy is the one command that fixes what an engine alert reports, as a
+	// chip the card copies.
+	Remedy string `json:"remedy,omitempty"`
+	// Detail is the evidence the agent reads: the report text or the
+	// migration failure.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (AlertEvent) eventFamily() EventFamily { return FamilyAlert }
+
+// eventType reads the source: one alert type per observer.
+func (a AlertEvent) eventType() EventType { return EventType(a.Source) }
+
+func (a AlertEvent) eventSubject() string {
+	if a.Source == AlertDoctor {
+		return a.ReportID
+	}
+	return string(a.Source)
+}
+
+// eventDedupe keys one alert per report, and one per failure otherwise.
+func (a AlertEvent) eventDedupe() string {
+	if a.Source == AlertDoctor {
+		return a.ReportID
+	}
+	return a.Detail
+}
+
+// ServiceRole is the kind of built-in service that failed.
+type ServiceRole string
+
+// Service roles.
+const (
+	ServiceLibrarian ServiceRole = "librarian"
+	ServiceReviewer  ServiceRole = "reviewer"
+	ServiceHelper    ServiceRole = "helper"
+)
+
+// serviceRoles lists every service role the web needs as a union type.
+var serviceRoles = []ServiceRole{ServiceLibrarian, ServiceReviewer, ServiceHelper}
+
+// ServiceFailedEvent tells the root seat that a service's turn failed. The
+// service posts it once per turn, so a failing loop cannot flood the feed.
+type ServiceFailedEvent struct {
+	Service ServiceRole `json:"service"`
+	Session string      `json:"session"`
+	Turn    int         `json:"turn,omitempty"`
+	Error   string      `json:"error"`
+	Profile string      `json:"profile,omitempty"`
+	Model   string      `json:"model,omitempty"`
+	// Detail is the evidence the agent reads: the failure report with the
+	// session and how to inspect the service. The card shows Error.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (ServiceFailedEvent) eventFamily() EventFamily { return FamilyService }
+func (ServiceFailedEvent) eventType() EventType     { return TypeFailed }
+
+func (s ServiceFailedEvent) eventSubject() string { return s.Session }
+
+// eventDedupe keys one alert per service turn.
+func (s ServiceFailedEvent) eventDedupe() string { return strconv.Itoa(s.Turn) }
+
+// TypeFailed is the service family's only type: a failed turn.
+const TypeFailed EventType = "failed"
+
+// EngineEvent is a note from the engine itself. The timed flush uses it to
+// deliver the quiet posts a room held for its root seat.
+type EngineEvent struct {
+	// Minutes is how long the room held quiet posts for the root seat.
+	Minutes int `json:"minutes"`
+	// Detail is the cause, when the engine has one to add.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (EngineEvent) eventFamily() EventFamily { return FamilyEngine }
+func (EngineEvent) eventType() EventType     { return TypeRootFlush }
+
+// eventSubject keeps the flush out of any other engine note's rows.
+func (EngineEvent) eventSubject() string { return "flush" }
+
+func (e EngineEvent) eventDedupe() string { return strconv.Itoa(e.Minutes) }
+
+// QuestionEvent is a note about a question. A withdrawn question keeps its
+// place on the question's own card instead of arriving as a message from the
+// session that withdrew it.
+type QuestionEvent struct {
+	// QuestionID is the question's short ID, such as q1.
+	QuestionID string `json:"questionId"`
+	// Post is the question's own post, which the note folds into.
+	Post string `json:"post"`
+	// By is who withdrew the question: the owner, root, or a session address.
+	By     string `json:"by,omitempty"`
+	Reason string `json:"reason,omitempty"`
+	// Detail is the note the agent read.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (QuestionEvent) eventFamily() EventFamily { return FamilyQuestion }
+func (QuestionEvent) eventType() EventType     { return TypeWithdrawn }
+func (q QuestionEvent) eventSubject() string   { return q.Post }
+func (q QuestionEvent) eventDedupe() string    { return q.QuestionID }
+
 // EventSpec is one entry of the system event registry. The web app draws the
 // event with Renderer and reads its typed payload; Text is the one-line
 // summary that agents and `dyna room log` read.
@@ -1081,6 +1401,137 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeTarget,
 		Text:     "{location}\nHead: {head}",
 	},
+	// A session note tells a parent or the session itself what changed about
+	// it. Every note is quiet: no note asks anyone to act now.
+	{
+		Family:   FamilySession,
+		Type:     EventType(SessionRenamed),
+		Renderer: "SessionNoteCard",
+		Payload:  reflect.TypeOf(SessionEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Audience: AudienceSession,
+		Once:     true,
+		Text:     "Session {oldName} is now {name}.",
+	},
+	{
+		Family:   FamilySession,
+		Type:     EventType(SessionPromoted),
+		Renderer: "SessionNoteCard",
+		Payload:  reflect.TypeOf(SessionEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Audience: AudienceSession,
+		Once:     true,
+		Text:     "{session} moved from {from} to {to}.",
+	},
+	{
+		Family:   FamilySession,
+		Type:     EventType(SessionAdopted),
+		Renderer: "SessionNoteCard",
+		Payload:  reflect.TypeOf(SessionEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Audience: AudienceSession,
+		Once:     true,
+		Text:     "{session} moved from {from} to {to}.",
+	},
+	{
+		Family:   FamilySession,
+		Type:     EventType(SessionAccount),
+		Renderer: "SessionNoteCard",
+		Payload:  reflect.TypeOf(SessionEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "{session}: {from} moved to {to} ({reason}).",
+	},
+	{
+		Family:   FamilySession,
+		Type:     EventType(SessionInstructions),
+		Renderer: "SessionNoteCard",
+		Payload:  reflect.TypeOf(SessionEvent{}),
+		// The session applies this note from its next turn, so it is agent
+		// input. It wakes nobody: the running turn reads it as it arrives.
+		Wake:     WakeNever,
+		Audience: AudienceSession,
+		Once:     true,
+		Text:     "[DYNA INSTRUCTIONS CHANGED] Since this conversation started, your standing instructions changed. These changes apply now:",
+	},
+	{
+		Family:   FamilySession,
+		Type:     EventType(SessionSeat),
+		Renderer: "SessionNoteCard",
+		Payload:  reflect.TypeOf(SessionEvent{}),
+		// A seat note is root input whether or not it carries a handoff, and it
+		// wakes root only when one asks for action. A seat can change more than
+		// once with the same label, so each note is its own post.
+		Wake: WakeRootIfNeeded,
+		Text: "{seat}",
+	},
+	{
+		Family:   FamilySession,
+		Type:     EventType(SessionSpawned),
+		Renderer: "SessionNoteCard",
+		Payload:  reflect.TypeOf(SessionEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Text:     "Started @{name} ({profile}) in {dir}:",
+	},
+	// An alert needs the root seat now, so it always wakes it. The doctor and
+	// the engine are the only posters.
+	{
+		Family:    FamilyAlert,
+		Type:      EventType(AlertDoctor),
+		Renderer:  "AlertCard",
+		Payload:   reflect.TypeOf(AlertEvent{}),
+		Wake:      WakeRoot,
+		Once:      true,
+		Text:      "Doctor report {reportId} ({trigger}):",
+		Producers: []EventProducer{ProducerDoctor},
+	},
+	{
+		Family:    FamilyAlert,
+		Type:      EventType(AlertEngine),
+		Renderer:  "AlertCard",
+		Payload:   reflect.TypeOf(AlertEvent{}),
+		Wake:      WakeRoot,
+		Once:      true,
+		Text:      "The engine has been read-only for more than 2 minutes because migration failed:",
+		Producers: []EventProducer{ProducerEngine},
+	},
+	// A failed service turn needs the root seat, once per turn.
+	{
+		Family:    FamilyService,
+		Type:      TypeFailed,
+		Renderer:  "ServiceAlertCard",
+		Payload:   reflect.TypeOf(ServiceFailedEvent{}),
+		Wake:      WakeRoot,
+		Once:      true,
+		Text:      "The {service} service failed on turn {turn} ({session}): {error}",
+		Producers: []EventProducer{ProducerLibrarian, ProducerReviewer, ProducerHelper},
+	},
+	// The timed flush is the engine asking the root seat to read the held
+	// batch, so it wakes root and nothing else.
+	{
+		Family:   FamilyEngine,
+		Type:     TypeRootFlush,
+		Renderer: "EngineNoticeCard",
+		Payload:  reflect.TypeOf(EngineEvent{}),
+		Wake:     WakeRoot,
+		Text:     "[TIMED FLUSH] No post woke the root seat for {minutes} minutes, so this notice delivers the held quiet posts as one batch. They did not ask for action; act only where one of them needs a root decision. The full posts stay in the room log.",
+	},
+	// A withdrawn question is a quiet note on the question's own card.
+	{
+		Family:   FamilyQuestion,
+		Type:     TypeWithdrawn,
+		Renderer: "QuestionNoteCard",
+		Payload:  reflect.TypeOf(QuestionEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "Question {questionId} was withdrawn: {reason}",
+	},
 }
 
 // eventEnum is a named string type whose values the web needs as a union.
@@ -1101,6 +1552,12 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(GoalChange("")), Values: enumValues(goalChanges)},
 	{Type: reflect.TypeOf(GoalState("")), Values: enumValues(goalStates)},
 	{Type: reflect.TypeOf(CheckinState("")), Values: enumValues(checkinStates)},
+	{Type: reflect.TypeOf(SessionChange("")), Values: enumValues(sessionChanges)},
+	{Type: reflect.TypeOf(AccountReason("")), Values: enumValues(accountReasons)},
+	{Type: reflect.TypeOf(InstructionAction("")), Values: enumValues(instructionActions)},
+	{Type: reflect.TypeOf(AlertSource("")), Values: enumValues(alertSources)},
+	{Type: reflect.TypeOf(AlertSeverity("")), Values: enumValues(alertSeverities)},
+	{Type: reflect.TypeOf(ServiceRole("")), Values: enumValues(serviceRoles)},
 	{Type: reflect.TypeOf(RuleVerb("")), Values: enumValues([]RuleVerb{RuleAdded, RuleEdited, RuleRemoved})},
 	{Type: reflect.TypeOf(WorktreeReason("")), Values: []string{
 		string(WorktreeNotMerged), string(WorktreeDirty), string(WorktreeManualHandoff), string(WorktreeKeepFailed), string(WorktreeOther),
@@ -1116,26 +1573,22 @@ var eventEnums = []eventEnum{
 var eventObjects = []reflect.Type{
 	reflect.TypeOf(MergePR{}),
 	reflect.TypeOf(MergeCheckSummary{}),
+	reflect.TypeOf(InstructionChange{}),
+	reflect.TypeOf(AlertFinding{}),
 }
 
 // legacyFamilies are the post kinds that still go through Store.Post with a
 // free text. Each later PR seals one family through PostEvent and deletes its
 // entry here, until the list is empty.
 var legacyFamilies = []string{
-	"account",
-	"alert",
-	"hierarchy",
-	"instructions",
 	"merge-decision",
-	"notice",
-	"seat",
-	"spawn",
 	"voice",
 }
 
-// agentKinds are the posts a person or an agent writes, and the session turn
-// results the engine records for them.
-var agentKinds = []string{"message", "completed", "failed", "stopped"}
+// agentKinds are the posts a person or a session writes, and the session turn
+// results the engine records for them. A service's own alert is a session
+// post too: the service session writes it to its owner or parent.
+var agentKinds = []string{"message", "completed", "failed", "stopped", "service-alert"}
 
 // EventPost is the registry's description of the post one event makes. notify
 // reads it so a poster never chooses the post kind, text, quiet flag or wake.
@@ -1209,9 +1662,12 @@ type PostEventInput struct {
 	// Producer names the service that observed the event. A spec that lists
 	// producers accepts only one of them, and requires one.
 	Producer EventProducer
-	// SessionIDs binds participant addresses to exact sessions.
+	// SessionId binds participant addresses to exact sessions.
 	SessionIDs map[string]string
 	ReplyTo    string
+	// Attachments are the files the poster stored for this post, such as the
+	// full text of a truncated root handoff.
+	Attachments []Attachment
 	// NoWake stores an informational post for the recipient's next turn.
 	NoWake bool
 }
@@ -1255,6 +1711,25 @@ func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
 		}
 		from = rec.Name
 	}
+	// An event that wakes the root seat is addressed to that seat and to no
+	// one else, so a later card cannot claim root was woken by a post to a
+	// session.
+	if spec.Wake == WakeRoot {
+		rec, err := s.readRecord(in.RoomID)
+		if err != nil {
+			return Message{}, err
+		}
+		switch len(in.To) {
+		case 0:
+			return Message{}, fmt.Errorf("a %s/%s event wakes the root seat, so it needs the root seat as its recipient", spec.Family, spec.Type)
+		default:
+			for _, addr := range in.To {
+				if addr != rec.Name && addr != rec.Name+":"+RootAgent {
+					return Message{}, fmt.Errorf("a %s/%s event wakes only the root seat, so it is addressed to %s or %s, not %q", spec.Family, spec.Type, rec.Name, rec.Name+":"+RootAgent, addr)
+				}
+			}
+		}
+	}
 	template := spec.Text
 	if ev.eventSubject() == "" && spec.TextNoSubject != "" {
 		template = spec.TextNoSubject
@@ -1268,18 +1743,19 @@ func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
 		id = eventID(ev)
 	}
 	msg, err := s.post(in.RoomID, PostInput{
-		ID:         id,
-		From:       from,
-		Kind:       string(spec.Family),
-		Notice:     EventNotice{Kind: string(spec.Type), Producer: in.Producer},
-		payload:    EventPayload{raw: payload},
-		To:         in.To,
-		Via:        in.Via,
-		NeedsRoot:  in.NeedsRoot,
-		SessionIDs: in.SessionIDs,
-		ReplyTo:    in.ReplyTo,
-		Text:       text,
-		Wake:       spec.Wake != WakeNever && !in.NoWake,
+		ID:          id,
+		From:        from,
+		Kind:        string(spec.Family),
+		Notice:      EventNotice{Kind: string(spec.Type), Producer: in.Producer},
+		payload:     EventPayload{raw: payload},
+		To:          in.To,
+		Via:         in.Via,
+		NeedsRoot:   in.NeedsRoot,
+		SessionIDs:  in.SessionIDs,
+		ReplyTo:     in.ReplyTo,
+		Text:        text,
+		Attachments: in.Attachments,
+		Wake:        spec.Wake != WakeNever && !in.NoWake,
 	}, true)
 	if errors.Is(err, ErrPostIDConflict) && spec.Once {
 		return Message{}, nil
@@ -1505,9 +1981,10 @@ func (m Message) Rule() (RuleEvent, bool) {
 }
 
 // EventAudience returns the audience of a stored event. A post that is not a
-// registered event, and every agent message, belongs to the room.
+// registered event, and every agent message, belongs to the room. A spec that
+// names no audience is part of the room's own conversation.
 func (m Message) EventAudience() Audience {
-	if spec, ok := eventSpecFor(m.Kind, m.Notice.Kind); ok {
+	if spec, ok := eventSpecFor(m.Kind, m.Notice.Kind); ok && spec.Audience != "" {
 		return spec.Audience
 	}
 	return AudienceRoom
@@ -1579,6 +2056,76 @@ func (m Message) Machine() (MachineEvent, bool) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil {
 		return MachineEvent{}, false
+	}
+	return ev, true
+}
+
+// Session returns the payload of a session note.
+func (m Message) Session() (SessionEvent, bool) {
+	if m.Kind != string(FamilySession) || len(m.Payload.raw) == 0 {
+		return SessionEvent{}, false
+	}
+	var ev SessionEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
+		return SessionEvent{}, false
+	}
+	return ev, true
+}
+
+// Alert returns the payload of an alert.
+func (m Message) Alert() (AlertEvent, bool) {
+	if m.Kind != string(FamilyAlert) || len(m.Payload.raw) == 0 {
+		return AlertEvent{}, false
+	}
+	var ev AlertEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.Source == "" {
+		return AlertEvent{}, false
+	}
+	return ev, true
+}
+
+// ServiceFailed returns the payload of a failed service turn.
+func (m Message) ServiceFailed() (ServiceFailedEvent, bool) {
+	if m.Kind != string(FamilyService) || m.Notice.Kind != string(TypeFailed) || len(m.Payload.raw) == 0 {
+		return ServiceFailedEvent{}, false
+	}
+	var ev ServiceFailedEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.Service == "" {
+		return ServiceFailedEvent{}, false
+	}
+	return ev, true
+}
+
+// Engine returns the payload of a note from the engine itself.
+func (m Message) Engine() (EngineEvent, bool) {
+	if m.Kind != string(FamilyEngine) || m.Notice.Kind != string(TypeRootFlush) || len(m.Payload.raw) == 0 {
+		return EngineEvent{}, false
+	}
+	var ev EngineEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil {
+		return EngineEvent{}, false
+	}
+	return ev, true
+}
+
+// Question returns the payload of a note about a question.
+func (m Message) Question() (QuestionEvent, bool) {
+	if m.Kind != string(FamilyQuestion) || m.Notice.Kind != string(TypeWithdrawn) || len(m.Payload.raw) == 0 {
+		return QuestionEvent{}, false
+	}
+	var ev QuestionEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.QuestionID == "" {
+		return QuestionEvent{}, false
 	}
 	return ev, true
 }

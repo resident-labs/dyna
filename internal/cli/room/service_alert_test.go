@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
 )
 
@@ -19,7 +20,7 @@ func TestPostAlertFlagStoresExplicitAlert(t *testing.T) {
 		t.Fatal(err)
 	}
 	posts, err := rooms.Messages(rec.ID)
-	if err != nil || len(posts) != 1 || posts[0].Kind != "alert" {
+	if err != nil || len(posts) != 1 || posts[0].Kind != notify.ServiceAlertKind {
 		t.Fatalf("alert flag: %+v %v", posts, err)
 	}
 }

@@ -13,7 +13,7 @@ func TestServiceAlertAfterParentChange(t *testing.T) {
 	p := markService(t, e, e.start(rec, "p", nil), "reviewer")
 	q := markService(t, e, e.start(rec, "q", nil), "reviewer")
 	h := e.start(rec, "h", &p)
-	in := PostInput{Sender: Sender{Kind: SenderSession, Room: rec.Name, Session: h}, Mentions: []string{"@parent"}, Kind: "alert", Text: "Dependency failed"}
+	in := PostInput{Sender: Sender{Kind: SenderSession, Room: rec.Name, Session: h}, Mentions: []string{"@parent"}, Kind: ServiceAlertKind, Text: "Dependency failed"}
 	first, err := e.svc.Post(e.ctx, in)
 	if err != nil {
 		t.Fatal(err)
