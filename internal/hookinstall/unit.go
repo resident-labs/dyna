@@ -49,7 +49,7 @@ func (s Service) Start(ctx context.Context, j Job, out io.Writer) error {
 	return err
 }
 
-// Worker runs in the independent systemd unit, including the flock wait. The inner command owns the exact lock used by dyna-sync-main.
+// Worker runs in the independent systemd unit, including the captured flock wait.
 func (s Service) Worker(ctx context.Context, id string) error {
 	j, err := s.read(ctx, id)
 	if err != nil {
@@ -60,6 +60,9 @@ func (s Service) Worker(ctx context.Context, id string) error {
 	}
 	logs := filepath.Join(s.Jobs.Root, "logs")
 	if err = os.MkdirAll(logs, 0700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(j.Config.Lock), 0700); err != nil {
 		return err
 	}
 	log, err := os.CreateTemp(logs, "install-"+id+"-*.log")

@@ -178,8 +178,8 @@ func TestInstallRequiresCommandLayout(t *testing.T) {
 				if err == nil {
 					t.Fatal("installed a root-only tree after the cmd/dyna move")
 				}
-				if _, statErr := os.Stat(j.Config.State); !os.IsNotExist(statErr) {
-					t.Fatalf("failed root-only build advanced install state: %v", statErr)
+				if state, statErr := s.Jobs.installState(j.Config.State); statErr != nil || state.Installed != "" {
+					t.Fatalf("failed root-only build advanced install state: %#v %v", state, statErr)
 				}
 				return
 			}
@@ -193,7 +193,7 @@ func TestInstallRequiresCommandLayout(t *testing.T) {
 	}
 }
 
-func TestInstallPreservesLegacyStateAndBackups(t *testing.T) {
+func TestInstallPreservesStateAndBackups(t *testing.T) {
 	s, j := fixture(t)
 	var calls []string
 	s.Exec = fakeInstaller(t, j, "main", "", &calls)
@@ -214,9 +214,9 @@ func TestInstallPreservesLegacyStateAndBackups(t *testing.T) {
 	if err := s.Locked(context.Background(), j.ID, "", &out); err != nil {
 		t.Fatal(err)
 	}
-	state, err := os.ReadFile(j.Config.State)
-	if err != nil || strings.TrimSpace(string(state)) != testSHA {
-		t.Fatalf("state: %s %v", state, err)
+	state, err := s.Jobs.installState(j.Config.State)
+	if err != nil || state.Installed != testSHA {
+		t.Fatalf("state: %#v %v", state, err)
 	}
 	for name, want := range map[string]string{"dyna": "new dyna", "dyna-desktop": "new desktop"} {
 		target := filepath.Join(j.Config.Bin, name)
@@ -247,7 +247,7 @@ func TestInstallPreservesLegacyStateAndBackups(t *testing.T) {
 		t.Fatal("rebuilt installed commit")
 	}
 }
-func TestCheckoutWarningsShareTimerMarker(t *testing.T) {
+func TestCheckoutWarningsPersistOnce(t *testing.T) {
 	for _, tc := range []struct{ name, branch, fail, cause string }{{"branch", "feature", "", "branch:feature"}, {"dirty", "main", "diff --quiet", "dirty"}, {"index", "main", "diff --cached --quiet", "dirty"}, {"diverged", "main", "merge -q --ff-only", "diverged"}} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, j := fixture(t)
@@ -256,7 +256,7 @@ func TestCheckoutWarningsShareTimerMarker(t *testing.T) {
 			if err := os.MkdirAll(filepath.Dir(j.Config.State), 0700); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(j.Config.State, []byte(testSHA), 0600); err != nil {
+			if err := s.Jobs.saveInstallState(j.Config.State, installState{Installed: testSHA}); err != nil {
 				t.Fatal(err)
 			}
 			for n := 0; n < 2; n++ {
@@ -268,9 +268,9 @@ func TestCheckoutWarningsShareTimerMarker(t *testing.T) {
 			if err != nil || len(got.Warnings) != 1 || got.Warnings[0].Cause != tc.cause {
 				t.Fatalf("warnings: %#v %v", got, err)
 			}
-			marker, _ := os.ReadFile(filepath.Join(filepath.Dir(j.Config.State), "alerted"))
-			if strings.TrimSpace(string(marker)) != tc.cause {
-				t.Fatalf("marker %s", marker)
+			state, err := s.Jobs.installState(j.Config.State)
+			if err != nil || state.Alerted != tc.cause {
+				t.Fatalf("state %#v: %v", state, err)
 			}
 			if tc.branch != "main" && strings.Contains(strings.Join(calls, "\n"), "merge -q") {
 				t.Fatal("changed non-main checkout")
@@ -288,8 +288,8 @@ func TestBuildOrRestartFailureDoesNotAdvanceState(t *testing.T) {
 			if err == nil {
 				t.Fatal("failure lost")
 			}
-			if _, err := os.Stat(j.Config.State); !os.IsNotExist(err) {
-				t.Fatalf("state advanced: %v", err)
+			if state, err := s.Jobs.installState(j.Config.State); err != nil || state.Installed != "" {
+				t.Fatalf("state advanced: %#v %v", state, err)
 			}
 		})
 	}
@@ -365,7 +365,7 @@ func TestOlderQueuedUnitCannotDowngradeInstalledCommit(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(j.Config.State), 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(j.Config.State, []byte(testSHA), 0600); err != nil {
+	if err := s.Jobs.saveInstallState(j.Config.State, installState{Installed: testSHA}); err != nil {
 		t.Fatal(err)
 	}
 	s.Exec = fakeInstaller(t, j, "main", "", &calls)
@@ -377,9 +377,9 @@ func TestOlderQueuedUnitCannotDowngradeInstalledCommit(t *testing.T) {
 			t.Fatalf("older unit rebuilt: %s", command)
 		}
 	}
-	got, _ := os.ReadFile(j.Config.State)
-	if string(got) != testSHA {
-		t.Fatalf("downgraded: %s", got)
+	got, err := s.Jobs.installState(j.Config.State)
+	if err != nil || got.Installed != testSHA {
+		t.Fatalf("downgraded: %#v %v", got, err)
 	}
 	if len(calls) == 0 || !strings.Contains(calls[0], "fetch -q origin main") {
 		t.Fatal("worker did not refresh main under the lock")
@@ -443,7 +443,7 @@ func TestSameLockInteroperatesWithLegacyFlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := DefaultConfig("/home/user/dyna-agent", "/home/user/.local/bin/dyna")
-	if c.Lock != "/tmp/dyna-agent-install.lock" || c.Build != "/home/user/dyna-agent-autoinstall" || c.State != filepath.Join(os.Getenv("HOME"), ".local/share/dyna-sync/installed-commit") {
+	if c.Lock != filepath.Join(store.DataDir(), "hooks", "install", "install.lock") || c.Build != "/home/user/dyna-agent-autoinstall" || c.State != filepath.Join(os.Getenv("HOME"), ".local/share/dyna-sync/installed-commit") {
 		t.Fatalf("legacy paths: %#v", c)
 	}
 }
