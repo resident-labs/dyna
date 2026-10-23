@@ -2,7 +2,6 @@ package transcript
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -245,30 +244,4 @@ func fileSize(path string) int64 {
 		return info.Size()
 	}
 	return 0
-}
-
-// RawTail returns the last max bytes of the session's raw harness stdout.
-func RawTail(store *subagent.Store, id string, max int64) (string, error) {
-	path, err := store.RawOutputPath(id)
-	if err != nil {
-		return "", err
-	}
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	st, err := f.Stat()
-	if err != nil {
-		return "", err
-	}
-	off := st.Size() - max
-	if off < 0 {
-		off = 0
-	}
-	buf := make([]byte, st.Size()-off)
-	if _, err := f.ReadAt(buf, off); err != nil && err != io.EOF {
-		return "", err
-	}
-	return string(buf), nil
 }

@@ -134,11 +134,6 @@ func TestStartWithInvalidGoalLeavesNoSession(t *testing.T) {
 	e.wait(svc.ID, 1)
 }
 
-func (e *testEnv) openGoals(roomID string) []goals.Goal {
-	all, _ := e.m.goalStore().List(roomID)
-	return slices.DeleteFunc(all, func(g goals.Goal) bool { return !g.Open() })
-}
-
 func TestSpawnGoalUsesEffectiveGoal(t *testing.T) {
 	for _, tc := range []struct {
 		name    string

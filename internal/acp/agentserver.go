@@ -1,41 +1,8 @@
 package acp
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
-	"net"
-	"net/url"
 )
-
-// RandomServerSecret makes the token a spawned agent server requires.
-func RandomServerSecret() (string, error) {
-	var b [24]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b[:]), nil
-}
-
-// ReserveLocalPort picks a free loopback port the same way the OpenCode
-// service does: bind, close, and let the caller race for it.
-func ReserveLocalPort() (int, error) {
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return 0, err
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	if err := listener.Close(); err != nil {
-		return 0, err
-	}
-	return port, nil
-}
-
-// AgentURL builds the serve endpoint URL for a port and secret.
-func AgentURL(port int, secret string) string {
-	return (&url.URL{Scheme: "ws", Host: fmt.Sprintf("127.0.0.1:%d", port), Path: "/ws", RawQuery: "server-key=" + secret}).String()
-}
 
 // McpServer is one session-scoped stdio or HTTP MCP definition.
 type McpServer struct {

@@ -244,16 +244,6 @@ ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, body=excluded.body`, r
 	return err
 }
 
-// writeRows prepares and stores the initial import in its migration transaction.
-// Runtime writes prepare before entering their writer transaction.
-func writeRows(conn *sql.Conn, old State, oldIndex []byte, st State, revision int64) ([]byte, error) {
-	rows, err := prepareRows(old, oldIndex, st)
-	if err != nil {
-		return nil, err
-	}
-	return rows.index, rows.apply(conn, revision)
-}
-
 // sameStored compares two records as they are stored. The quota display is
 // derived from the store's rate limits on every read and write, so a new
 // quota alone stores no row.

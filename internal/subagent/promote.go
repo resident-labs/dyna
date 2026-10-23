@@ -45,12 +45,9 @@ func (m *Manager) Promote(ctx context.Context, ref string) (Info, error) {
 	return m.promoteLockedContext(ctx, info.ID)
 }
 
-// promoteLocked shares the names lock with Start and the final close step.
-// Recompute every descendant from its parent, including closed history.
-func (m *Manager) promoteLocked(id string) (Info, error) {
-	return m.promoteLockedContext(context.Background(), id)
-}
-
+// promoteLockedContext shares the names lock with Start and the final close
+// step. It recomputes every descendant from its parent, including closed
+// history.
 func (m *Manager) promoteLockedContext(ctx context.Context, id string) (Info, error) {
 	return m.moveLockedContext(ctx, id, "", 1)
 }
