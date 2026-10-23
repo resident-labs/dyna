@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/goals"
 	harnesshealth "dyna-agent/internal/harness/health"
 	"dyna-agent/internal/harness/preferences"
+	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/lanesync"
 	"dyna-agent/internal/librarianstate"
@@ -61,6 +62,7 @@ var migrations = []func(dataDir string) error{
 	hooks.Migrate,
 	hooks.MigrateRuns,
 	hooks.MigrateDocuments,
+	hookinstall.Migrate,
 	cihealth.Migrate,
 	lanesync.Migrate,
 	librarianstate.Migrate,

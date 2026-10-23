@@ -149,8 +149,6 @@ not-state internal/hookinstall/install.go Service.Locked 5 # self-update install
 not-state internal/hookinstall/install.go copyFile 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/install.go driver.run 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/install.go pruneBackups 1 # self-update install jobs and unit files (an inbox the engine does not own)
-not-state internal/hookinstall/store.go Store.Archive 1 # self-update install jobs and unit files (an inbox the engine does not own)
-not-state internal/hookinstall/store.go Store.Update 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/unit.go Log 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/unit.go Service.CleanupUnit 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/unit.go Service.InspectUnit 1 # self-update install jobs and unit files (an inbox the engine does not own)
