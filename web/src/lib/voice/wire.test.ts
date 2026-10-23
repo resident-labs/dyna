@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { RATE, audioMsg, cancelMsg, fromWire, hangupMsg, muteMsg, playbackMsg } from './wire.js'
+import { RATE, audioMsg, cancelMsg, fromWire, hangupMsg, muteMsg, playbackMsg } from './wire.ts'
 
 test('engine messages become app events', () => {
   assert.deepEqual(fromWire({ type: 'state', state: 'thinking' }), { type: 'engineState', value: 'thinking' })

@@ -23,7 +23,7 @@ const result = await build({
   plugins: [svelteEsbuildPlugin(), { name: 'call-fixture', setup(b) {
     b.onLoad({ filter: /[/\\]voiceCall\.ts$/ }, ({ path }) => ({
       contents: `import { writable } from 'svelte/store'
-        import { initial } from './callState.js'
+        import { initial } from './callState.ts'
         import { createCallRequests } from './callRequests.ts'
         export const calls = []
         export const callRequests = createCallRequests({

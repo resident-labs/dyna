@@ -3,8 +3,8 @@
   // up (VoiceStatus.available). During this room's call it shows the call's
   // length instead; during a call elsewhere it asks to move the call here.
   import { voiceCall, clock } from './voiceCall.ts'
-  import { offerCall } from './callState.js'
-  import { icons } from './icons.js'
+  import { offerCall } from './callState.ts'
+  import { icons } from './icons.ts'
 
   let { room } = $props()
   let now = $state(Date.now())
