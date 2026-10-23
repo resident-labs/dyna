@@ -1,7 +1,7 @@
 // What the Pull requests screen shows: the list groups, one chip per row, and
 // the detail's status box. The functions are pure; GitHub.svelte and
 // PRDetail.svelte draw the result.
-import type { BotReview, ChangePolicy, Finding, MainCI, MergeQueueItem, MergeTrialStatus, Overlap } from '../api/change.ts'
+import type { BotReview, ChangePolicy, Finding, MainCI, MergeQueueItem, MergeTrialStatus } from '../api/change.ts'
 import type { GitHubItem, GitHubUser } from '../api/github.ts'
 import { ordinal, verdictMeta, isLocal, prTracks, withCI, checkSummary, checkMeta, type Facts, type Meta } from './pr.ts'
 
@@ -135,49 +135,6 @@ export function mergeState(c: Row, item: MergeItem | null = null, pos = 0): Merg
   return state
 }
 
-// queueLine is the few words after "Merge queue · n": how the batch trial
-// stands, or main CI between batches. Passed main CI says nothing.
-export function queueLine(queue?: { item: MergeItem }[] | null): { text: string; tone: string } | null {
-  const trial = (queue ?? []).find((q) => q.item.trial)?.item.trial
-  if (trial) {
-    if (trial.phase === 'failed') return { text: 'batch failed', tone: 'coral' }
-    if (['publishing', 'published'].includes(trial.phase)) return { text: 'merging', tone: 'sage' }
-    return { text: 'batch running', tone: 'gold' }
-  }
-  const m = (queue ?? []).find((q) => q.item.main)?.item.main
-  if (!m || m.state === 'passed') return null
-  return m.state === 'failed' ? { text: 'main CI failed', tone: 'coral' } : { text: 'waiting for main CI', tone: 'gold' }
-}
-
-// checksLine counts a row's passed checks, for example "5/6 checks", only
-// when they are not all green. Skipped and neutral checks count as green.
-export function checksLine(c?: Row | null): string {
-  const sum = checkSummary(c?.checks)
-  return sum.state === 'none' || sum.state === 'passed' ? '' : `${sum.passed.length}/${sum.total} checks`
-}
-
-// overlapName names the other change in a radar chip. A numbered change shows
-// its PR number; a local change has none, so it shows a short title, or a
-// phrase when it has no title either.
-export function overlapName(o: Overlap): string {
-  if (o.number) return `#${o.number}`
-  const title = (o.title ?? '').trim()
-  if (!title) return 'a local change'
-  return title.length > 28 ? `${title.slice(0, 27).trimEnd()}…` : title
-}
-
-// overlapChip is the row's conflict radar chip: gold for the first change
-// whose merge conflicts with this one ("+K" for more), grey for shared files,
-// or null when the change overlaps nothing.
-export function overlapChip(c?: Row | null): { tone: string; text: string } | null {
-  const all = c?.overlaps ?? []
-  const hit = all.filter((o) => o.conflicts?.length)
-  const first = hit[0]
-  if (first) return { tone: 'gold', text: `conflicts with ${overlapName(first)}${hit.length > 1 ? ` +${hit.length - 1}` : ''}` }
-  const files = new Set(all.flatMap((o) => o.files ?? []))
-  return files.size ? { tone: '', text: `${files.size} shared ${files.size === 1 ? 'file' : 'files'}` } : null
-}
-
 // The list groups under the merge queue. Merged rows start folded; PRs Dyna
 // does not watch fold away at the end.
 export interface Group {
@@ -225,23 +182,6 @@ export function listView<T extends Row>(rows: T[] | null | undefined, merge: (Me
   return { queue, groups: out.filter((g) => g.rows.length), states }
 }
 
-// groupOpen says whether a group shows its rows: a fold only when opened,
-// and Blocked unless the reader folded it.
-export interface OpenFolds {
-  doneOpen?: boolean
-  untrackedOpen?: boolean
-  blockedOpen?: boolean
-}
-export const groupOpen = (g: Group, { doneOpen = false, untrackedOpen = false, blockedOpen = true }: OpenFolds = {}): boolean => (g.fold ? untrackedOpen : g.foldable ? blockedOpen : !g.collapsed || doneOpen)
-
-// navOrder is the visible rows in list order, for the j and k keys and swipes.
-export const navOrder = <T extends Row>(groups: (Group & { rows: T[] })[], open: OpenFolds = {}): T[] => groups.filter((g) => groupOpen(g, open)).flatMap((g) => g.rows)
-
-// stateFilter keeps the rows a filter shows. Closed includes merged PRs.
-export function stateFilter<T extends Row>(rows: T[] | null | undefined, state: string): T[] {
-  return (rows ?? []).filter((c) => state === 'all' || (state === 'open' ? !isDone(c) : isDone(c)))
-}
-
 // rowsFromGitHub makes a row for each GitHub PR that no change covers. Dyna
 // does not watch it, so it falls under "Not tracked".
 export function rowsFromGitHub(items: GitHubRow[] | null | undefined, changes: Row[] | null | undefined, repo = ''): Row[] {
@@ -273,14 +213,6 @@ export function rowsFromGitHub(items: GitHubRow[] | null | undefined, changes: R
 // owner's login, so the session name is the useful one.
 export function authorName(c: Row, names: Names = {}): string {
   return (c.authorSession ? names[c.authorSession] : undefined) || c.author || ''
-}
-
-// listLine is the grey line under a row's title: number, author session or
-// author name, and the branch.
-export function listLine(c: Row, names: Names = {}): string {
-  const who = authorName(c, names)
-  const num = isLocal(c) ? 'Local' : c.number ? `#${c.number}` : ''
-  return [num, who].filter(Boolean).join(' · ')
 }
 
 // botNote is the one short line when a bot asked for changes. Bots never block.

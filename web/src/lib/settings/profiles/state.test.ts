@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { filterModels, selectedAccount, routeModel, blankProfile, normalizeModels, formatModelChain, withEffort, effortIn, routeEffort, profileEffort, chooseEffort, compactBlock, compactFor, compactWindows, compactHint } from './state.ts'
+import { filterModels, selectedAccount, routeModel, blankProfile, normalizeModels, withEffort, effortIn, routeEffort, profileEffort, chooseEffort, compactBlock, compactFor, compactWindows, compactHint } from './state.ts'
 import { catalogModel as model, effortOf as effort, usageAccount } from '../../../../test/account-fixtures.ts'
 import { need } from '../../../../test/need.ts'
 
@@ -56,13 +56,6 @@ test('normalizeModels trims, drops blanks and keeps the first of each duplicate'
   assert.deepEqual(normalizeModels('', []), [])
   assert.deepEqual(normalizeModels('x', ['', '  ']), ['x'])
   assert.deepEqual(normalizeModels(undefined, undefined), [])
-})
-test('formatModelChain summarizes the fallback chain', () => {
-  assert.equal(formatModelChain({ model: 'a', models: ['a', 'b', 'c'] }), 'a (+2 fallback)')
-  assert.equal(formatModelChain({ model: 'a', models: ['a'] }), 'a')
-  assert.equal(formatModelChain({ model: 'a' }), 'a')
-  assert.equal(formatModelChain({ model: '', models: [] }), '')
-  assert.equal(formatModelChain(null), '')
 })
 test('blankProfile carries a model chain', () => {
   const p = blankProfile('opencode', 'ignored', ['a', 'b', 'a'])

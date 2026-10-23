@@ -1,15 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Facts } from './pr.ts'
-import { parsePRPost, statusMeta, prTracks, reviewerSlots, withoutReviewers, prsBySession, checkMeta, commentFilterText, checkSummary, checkTime } from './pr.ts'
-
-test('comment filter count names comments and reviews and ignores pending notices', () => {
-  const pending = { filteredComments: 1, pendingDroppedComments: { spam: 99 } }
-  assert.equal(commentFilterText(pending), 'Comment filter: 1 comment or review skipped.')
-  assert.equal(commentFilterText({ filteredComments: 2 }), 'Comment filter: 2 comments or reviews skipped.')
-  assert.equal(commentFilterText({ filteredComments: 0 }), 'Comment filter: 0 comments or reviews skipped.')
-  assert.equal(commentFilterText({}), 'Comment filter: 0 comments or reviews skipped.')
-})
+import { parsePRPost, statusMeta, prTracks, reviewerSlots, withoutReviewers, prsBySession, checkMeta, checkSummary, checkTime } from './pr.ts'
 
 const url = 'https://github.com/resident-labs/dyna/pull/17'
 
