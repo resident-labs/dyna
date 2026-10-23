@@ -22,6 +22,7 @@ import { reloadsUnread } from '../ui/unreadReload.ts'
 import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from '../ui/route.ts'
 import { sourceRange, stripTypes, moduleFunctions } from '../../../test/svelte-source.ts'
 import { installRoomLoader } from '../../../test/appRoomLoader.ts'
+import { goalsCode, installGoals, installMachines, machinesCode } from '../../../test/appModules.ts'
 
 // Run the actual App navigation functions with controlled API responses.
 // The Svelte parser selects complete declarations without copying their logic.
@@ -46,8 +47,11 @@ assert.equal(picked.length + routerCode.size, names.length)
 const code = [...picked, ...routerCode.values()].join('\n')
 // The tests add the functions they call by slicing the same declarations.
 function runDeclaration(target: object, name: string): void {
-  const text = appCode(name) ?? routerCode.get(name) ?? loaderCode.get(name)
-  assert.ok(text, name)
+  const text = appCode(name) ?? routerCode.get(name) ?? loaderCode.get(name) ?? goalsCode.get(name) ?? machinesCode.get(name)
+  if (text === undefined) {
+    assert.equal(typeof Reflect.get(target, name), 'function', name)
+    return
+  }
   vm.runInContext(stripTypes(text), target)
 }
 
@@ -310,6 +314,10 @@ function navigation() {
   }
   // The room data the sliced functions write lives in the loader now.
   installRoomLoader(state, state.api)
+  // The machine list, the room's goals and the toast line live in lib/app
+  // modules now; their functions run here over the same state.
+  installMachines(state)
+  installGoals(state)
   // The router asks the page for the side of a screen change it does not own.
   Reflect.set(state, 'host', {
     started: () => state.started,
