@@ -1,28 +1,33 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { build } from 'esbuild'
-import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
-import { renderedBody } from '../../../test/svelte-render.ts'
-import { call } from '../../../test/svelte-source.ts'
-import type { RunResultView } from '../api/workflow.ts'
+import { createTestServer } from '../../../test/ssr-server.ts'
 
-test('worker detail distinguishes a confirmed empty result from absent or populated output', async () => {
-  const built = await build({
-    bundle: true, write: false, format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
-    stdin: { contents: "export { default } from './WorkerDetail.svelte'; export { render } from 'svelte/server'", resolveDir: new URL('.', import.meta.url).pathname, loader: 'js' },
-    plugins: [svelteEsbuildPlugin('server')],
-  })
-  const output = built.outputFiles?.[0]
-  assert.ok(output)
-  const module = await import('data:text/javascript;base64,' + Buffer.from(output.contents).toString('base64'))
-  const body = (value?: RunResultView) => renderedBody(call(module, 'render', module.default, { props: { value } }))
-  const empty = 'No output has been recorded for this worker.'
-  assert.doesNotMatch(body(), /No output/)
-  assert.ok(body({ result: '', bytes: 0, journal: [] }).includes(empty))
-  const journal = [{ ts: 1, kind: 'progress', message: 'First entry' }]
-  for (const value of [
-    { result: 'Result text', bytes: 11 },
-    { result: '', bytes: 0, journal },
-    { result: 'Result text', bytes: 11, journal },
-  ]) assert.ok(!body(value).includes(empty))
+test('worker detail preserves journal order and distinguishes loaded empty output', async (t) => {
+  const vite = await createTestServer(t)
+  const { render } = await vite.ssrLoadModule('svelte/server')
+  const { default: WorkerDetail } = await vite.ssrLoadModule('/src/lib/workflows/WorkerDetail.svelte')
+  const value = {
+    result: '{"summary":"Done."}',
+    journal: [
+      { ts: 2000, kind: 'progress', message: 'Searched the docs', next: 'Write the summary' },
+      { ts: 1000, kind: 'orient', message: 'Read the task' },
+    ],
+  }
+  const body = render(WorkerDetail, { props: { value } }).body.replace(/<!--[\s\S]*?-->/g, '')
+  assert.match(body, /Done\./)
+  assert.match(body, /<h3[^>]*>Journal<span[^>]*>2<\/span><\/h3>/)
+  assert.ok(body.indexOf('Searched the docs') < body.indexOf('Read the task'), 'newest first')
+  assert.match(body, /Next: Write the summary/)
+  const running = render(WorkerDetail, { props: { value: { result: '', journal: value.journal } } }).body
+  assert.doesNotMatch(running, /Done\./)
+  assert.match(running, /Journal/)
+  assert.doesNotMatch(body, /No output has been recorded/)
+  assert.doesNotMatch(running, /No output has been recorded/)
+  const absent = render(WorkerDetail, { props: {} }).body
+  assert.doesNotMatch(absent, /No output has been recorded/)
+  const empty = render(WorkerDetail, { props: { value: { result: '', journal: [] } } }).body
+  assert.match(empty, /No output has been recorded for this worker\./)
+  const resultOnly = render(WorkerDetail, { props: { value: { result: 'Result only', journal: [] } } }).body
+  assert.match(resultOnly, /Result only/)
+  assert.doesNotMatch(resultOnly, /No output has been recorded/)
 })
