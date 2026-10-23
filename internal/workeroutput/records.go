@@ -200,10 +200,12 @@ func decodeMuse(line []byte) Record {
 		return Record{}
 	}
 	events, known := adaptMuseJSONL(p)
-	r := Record{Events: events, Signals: museToolSignals(p), valid: true, recognized: known, recordUsage: recordUsage{Type: p.PayloadType}}
+	r := Record{Events: events, Signals: museToolSignals(p), valid: true, recognized: known, recordUsage: recordUsage{Type: p.PayloadType, Usage: p.Payload.Usage}}
 	if p.Stream.Kind == "session" {
 		r.SessionID = p.Stream.ID
 	}
+	r.ContextTokens = p.Payload.ContextTokens
+	r.Generation = p.PayloadType == "run.reasoning.delta" || p.PayloadType == "run.lifecycle.started" || p.PayloadType == "run.usage"
 	return r
 }
 

@@ -31,6 +31,10 @@ func adaptMuseJSONL(record *museRecord) ([]Event, bool) {
 			return []Event{{Kind: "message", Role: "user", Text: payload.Prompt}}, true
 		}
 		return []Event{}, true
+	case "run.reasoning.delta":
+		return []Event{{Kind: "reasoning", Text: payload.Text, State: "delta"}}, true
+	case "run.usage", "run.context":
+		return []Event{}, true
 	case "run.output.delta":
 		if payload.Text != "" {
 			return []Event{{Kind: "message", Role: "assistant", State: "delta", Text: payload.Text}}, true
@@ -260,12 +264,14 @@ func UpgradeLegacyEvent(e Event) Event {
 }
 
 type musePayload struct {
-	raw      json.RawMessage
-	Prompt   string `json:"prompt"`
-	Text     string `json:"text"`
-	Terminal string `json:"terminal"`
-	CallID   string `json:"call_id"`
-	Event    struct {
+	Usage         map[string]json.RawMessage `json:"usage"`
+	ContextTokens int64                      `json:"context_tokens"`
+	raw           json.RawMessage
+	Prompt        string `json:"prompt"`
+	Text          string `json:"text"`
+	Terminal      string `json:"terminal"`
+	CallID        string `json:"call_id"`
+	Event         struct {
 		Kind           string `json:"kind"`
 		TaskKind       string `json:"task_kind"`
 		TaskID         string `json:"task_id"`
