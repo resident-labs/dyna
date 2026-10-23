@@ -37,6 +37,7 @@ import (
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/transcript"
 	"dyna-agent/internal/webpush"
 	"dyna-agent/internal/websvc/devicestore"
 	"dyna-agent/internal/workflowtemplate"
@@ -85,6 +86,7 @@ var migrations = []func(dataDir string) error{
 	subagent.Migrate,
 	migrateQuestionWithdrawals,
 	runstore.Migrate,
+	transcript.MigrateSteeringAnchors,
 	attempts.Migrate,
 	webpush.Migrate,
 	worktrees.Migrate,
