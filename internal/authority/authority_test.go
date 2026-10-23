@@ -104,6 +104,8 @@ func TestRoleLimits(t *testing.T) {
 		{"root attach", []Role{Owner}},
 		{"root detach", []Role{Owner}},
 		{"subagent start", []Role{Owner, Root, Session, Steward}},
+		{"doctor examine", []Role{Owner, Root, Session}},
+		{"doctor report", []Role{Owner, Root, Session}},
 	} {
 		for _, role := range []Role{Owner, Root, Session, Worker, Steward} {
 			want := false
