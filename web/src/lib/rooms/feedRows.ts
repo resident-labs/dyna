@@ -1,7 +1,7 @@
 import { parsePRPost } from '../prs/pr.ts'
 import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
-import type { EventPayload, HookEvent, HookState } from './events.gen.ts'
+import type { EventPayload, HookEvent } from './events.gen.ts'
 import { hookEvent, issueEvent, mergeEvent, prEvent } from './eventPayloads.ts'
 import { eventSpecs } from './events.gen.ts'
 
@@ -176,7 +176,8 @@ interface FeedItem<P extends FeedInput> {
 
 // hookFold reads the passes a row of a hook holds: how many, when the last one
 // ended, and the run that is still going. The card draws these typed facts,
-// never the post text.
+// never the post text. Only a start of an open run is ever in a row (see
+// hiddenHookStarts), so a start in the row means its run has not ended.
 function hookFold(posts: readonly FeedInput[]): HookFold | undefined {
   let count = 0
   let lastTs = 0
@@ -187,36 +188,32 @@ function hookFold(posts: readonly FeedInput[]): HookFold | undefined {
       count++
       lastTs = Math.max(lastTs, post.ts)
     }
-    // A start whose own run has no result is still going, whatever another run
-    // of the hook reported. The newest such start is the one the card names.
-    if (hook?.state === 'running' && !posts.some((other) => {
-      const result = hookEvent(other)
-      return result?.runId === hook.runId && result.state !== 'running'
-    })) active = { runId: hook.runId, ts: post.ts }
+    // Two runs of one hook can be live together, so the newest start names the
+    // run whose log the card opens.
+    if (hook?.state === 'running') active = { runId: hook.runId, ts: post.ts }
   }
   if (!count && !active) return undefined
   return { count, lastTs, ...(active ? { active } : {}) }
 }
 
 // hiddenHookStarts lists the starts of hook runs that show nowhere. A start
-// shows its run's running state, and the engine posts a result for every start
-// that reaches one. So a start shows nowhere only when its own run ended in a
-// failure or an error: that run's card tells the story, and the start would
-// only repeat it. A start with no result of its own stays visible, because
-// runs can overlap: a scheduled run and a manual run of one hook can be live at
-// the same time, and another run's result says nothing about this one.
+// shows only while its run is open: the engine posts a result for every start
+// that reaches one, and that result is the card's state and its log. So a
+// start whose run has a result anywhere on the page shows nowhere, also when
+// the result lands in another row after a message. A start with no result of
+// its own stays visible, because runs can overlap: a scheduled run and a
+// manual run of one hook can be live together, and another run's result says
+// nothing about this one.
 function hiddenHookStarts(posts: readonly FeedInput[]): Set<string> {
-  const resultState = new Map<string, HookState>()
+  const ended = new Set<string>()
   for (const post of posts) {
     const hook = hookEvent(post)
-    if (hook && hook.state !== 'running') resultState.set(hook.runId, hook.state)
+    if (hook && hook.state !== 'running') ended.add(hook.runId)
   }
   const hidden = new Set<string>()
   for (const post of posts) {
     const hook = hookEvent(post)
-    if (hook?.state !== 'running') continue
-    const result = resultState.get(hook.runId)
-    if (result !== undefined && result !== 'passed') hidden.add(post.id)
+    if (hook?.state === 'running' && ended.has(hook.runId)) hidden.add(post.id)
   }
   return hidden
 }
