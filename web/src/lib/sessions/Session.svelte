@@ -45,15 +45,15 @@
     ondismiss?: ((sessionId: string, postId: string) => Promise<void>) | null
     focusedTurn?: number
     onrecent?: (() => void) | null
-    onearlier?: ((cursor: string, near?: () => boolean) => Promise<boolean>) | null
-    onnewer?: ((cursor: string, near?: () => boolean) => Promise<boolean>) | null
+    onearlier?: ((near?: () => boolean) => Promise<boolean>) | null
+    onnewer?: ((near?: () => boolean) => Promise<boolean>) | null
     onpresent?: (() => Promise<boolean>) | null
     members?: Member[]
     prs?: Row[]
     jobs?: ShellJob[]
     contextError?: string
     onopenfile: (attachment: Attachment) => void
-    onpost?: ((post: ThreadPost) => void) | null
+    onpost?: ((postId: string) => void) | null
     onissue?: ((number: number) => void) | null
     onchild: (member: Member) => void
     onpr: (pr: Row) => void
