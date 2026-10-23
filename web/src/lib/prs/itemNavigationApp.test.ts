@@ -40,7 +40,7 @@ function app(hash: string): Harness {
     selectionRevision: 0, consolidationRequest: 0, consolidationView: 0, questionsRequest: 0,
     rooms: [{ id: A }, { id: B }], ROOM: /^room_/, POST: /^msg_/,
     feedViews: { resolveView: (v: string) => v }, trimFeed: (v: unknown) => v, setPicked() {}, visitRoomControls() {},
-    roomData: { open: async () => true }, narrow: false, sessionTurn: 0,
+    roomData: { newVisit() {}, open: async () => true, clearMembers() {}, clearFeed() {} }, narrow: false, sessionTurn: 0,
     loadSession() {}, setTimeout() {}, loadRuns() {}, jumpTo() {},
   }
   vm.createContext(c)

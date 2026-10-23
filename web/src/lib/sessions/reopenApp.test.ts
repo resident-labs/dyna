@@ -8,11 +8,12 @@ import { reconcileRows } from '../ui/reloadGate.ts'
 import { mergeFeedPage, rerouteAnchors, withViews } from '../rooms/feedPages.ts'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
+import { installRoomLoader } from '../../../test/appRoomLoader.ts'
 import { isRecord } from '../api/guards.ts'
 import { need } from '../../../test/need.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const names = ['reopenSession', 'dismissSession', 'menuItems', 'memberRoster', 'roomCountKey', 'showMemberRows', 'parentKey', 'noteParents', 'rerouteLoaded', 'applyOpened', 'applyMembers']
+const names = ['reopenSession', 'dismissSession', 'menuItems']
 // The slice of App's state these handlers read and write.
 interface Member {
   id: string
@@ -46,6 +47,8 @@ function app(reopen: (room: string, id: string) => unknown) {
   // The screen state lives in the router now, so the sliced functions write through it.
   installRouterShim(c)
   runFunctions(source, names, c)
+  // The member rows and the opened room's feed live in the room loader now.
+  installRoomLoader(c, c.api)
   return { c, calls }
 }
 function deferred<T = never>() { let resolve: (value: T) => void = () => {}, reject: (error: Error) => void = () => {}; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } }
