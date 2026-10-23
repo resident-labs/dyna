@@ -225,6 +225,21 @@ function fixtureTip(payload: EventPayload): string {
   return payload.detail || payload.reason
 }
 
+test('a post stored before the typed events still draws its family card', () => {
+  // Old history names no event type. The family's card reads the stored text,
+  // so a sealed family never falls to the unknown-event row on old posts.
+  for (const [family, renderer] of [
+    ['goal', 'GoalPost'], ['issue', 'IssueCard'], ['checkin', 'CheckinCard'],
+    ['ci-health', 'SlowTestCard'], ['rule', 'RuleCard'], ['pr', 'PRCard'], ['hook', 'HookCard'],
+  ] as const) {
+    const legacy = { id: 'msg_0123456789abcdef', ts: 1, kind: family, text: 'stored text' }
+    assert.ok(web.sealedEvent(legacy), `${family} is not a sealed family`)
+    assert.equal(web.rendererFor(legacy), web.eventComponents[renderer], `${family} lost its legacy card`)
+  }
+  // A type the registry does not know is still a visible gap, not an old post.
+  assert.equal(web.rendererFor({ id: 'msg_0123456789abcdef', ts: 1, kind: 'goal', notice: { kind: 'unregistered' } }), undefined)
+})
+
 test('a hook card shows its state and opens the log of its own run', () => {
   const payload = fixtures['hook/result']
   assert.ok(payload && 'runId' in payload, 'the hook result fixture is missing')
