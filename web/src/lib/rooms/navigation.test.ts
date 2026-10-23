@@ -22,7 +22,7 @@ import { reloadsUnread } from '../ui/unreadReload.ts'
 import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from '../ui/route.ts'
 import { sourceRange, stripTypes, moduleFunctions } from '../../../test/svelte-source.ts'
 import { installRoomLoader } from '../../../test/appRoomLoader.ts'
-import { goalsCode, installGoals, installIssues, installMachines, installPins, installPRs, installQuestions, installSync, machinesCode } from '../../../test/appModules.ts'
+import { goalsCode, installGoals, installIssues, installMachines, installPins, installPRs, installQuestions, installSessionView, installSync, machinesCode } from '../../../test/appModules.ts'
 
 // Run the actual App navigation functions with controlled API responses.
 // The Svelte parser selects complete declarations without copying their logic.
@@ -331,6 +331,7 @@ function navigation() {
   installPins(state)
   installIssues(state)
   installSync(state)
+  installSessionView(state)
   installPRs(state)
   // The router asks the page for the side of a screen change it does not own.
   Reflect.set(state, 'host', {

@@ -17,7 +17,7 @@ import { inRoomFeed } from './feedViews.ts'
 import { call, runFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { installRoomLoader } from '../../../test/appRoomLoader.ts'
-import { ISSUES_FUNCTIONS, PINS_FUNCTIONS, PRS_FUNCTIONS, QUESTIONS_FUNCTIONS, SYNC_FUNCTIONS, installIssues, installPins, installPRs, installQuestions, installSync } from '../../../test/appModules.ts'
+import { ISSUES_FUNCTIONS, PINS_FUNCTIONS, PRS_FUNCTIONS, QUESTIONS_FUNCTIONS, SESSION_VIEW_FUNCTIONS, SYNC_FUNCTIONS, installIssues, installPins, installPRs, installQuestions, installSessionView, installSync } from '../../../test/appModules.ts'
 import { need } from '../../../test/need.ts'
 import { member } from '../../../test/session-fixtures.ts'
 import type { Member } from '../api/room.ts'
@@ -104,6 +104,7 @@ const MODULES: readonly [readonly string[], (state: object) => void][] = [
   [ISSUES_FUNCTIONS, installIssues],
   [SYNC_FUNCTIONS, installSync],
   [PRS_FUNCTIONS, installPRs],
+  [SESSION_VIEW_FUNCTIONS, installSessionView],
 ]
 
 function appFunctions(c: AppState, names: string[]): void {
@@ -550,14 +551,17 @@ function sessionApp(tab: string, api: unknown) {
     session: null, sessionError: '', queue: [],
     untrack: (fn: () => void) => fn(), $effect: (fn: () => void) => { effect = fn },
   }
-  const helpers = ['loadSession', 'showSession']
-  if (body.some((n) => n.type === 'FunctionDeclaration' && n.id.name === 'sessionVisible')) helpers.push('sessionVisible')
-  appFunctions(c, helpers)
-  const dataInit = initOf(body, 'sessionData')
-  if (!dataInit || !isCallTo(dataInit, 'createSessionData')) throw new Error('App.svelte does not create sessionData')
-  const hooks = dataInit.arguments[1]
-  if (!hooks) throw new Error('App.svelte has no sessionData hooks')
-  c.sessionData = sessionDataFor(api, runExpression(c, hooks, true))
+  // The transcript and its controller live in lib/app/sessionView.svelte.ts now.
+  // The test builds the controller over the same state and gives it to the module.
+  const data = sessionDataFor(api, {
+    current: () => ({ room: c.roomId, visit: c.roomRequest, id: c.drill?.id, root: false, selection: String(c.sessionVisit ?? 0), turn: 0, visible: !!call(c, 'sessionVisible', c.sessionTab) }),
+    transcript: (value: unknown, older: unknown) => call(c, 'showSession', value, older),
+    queue: (value: unknown[]) => { c.queue = value },
+    error: (error: string) => { c.sessionError = error },
+  })
+  const view = installSessionView(c, data)
+  view.loadSession
+  c.sessionData = data
   const entry = findStatement('$effect', 'const tab = sessionTab')
   if (!entry) throw new Error('App.svelte has no session tab effect')
   runExpression(c, entry)
