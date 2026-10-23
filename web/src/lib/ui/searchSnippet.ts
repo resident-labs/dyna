@@ -1,4 +1,4 @@
-// Text rules for find-in-feed. The server finds the posts (roomsvc.SearchFeed);
+// Text rules for palette messages. The server finds the posts (roomsvc.SearchFeed);
 // these functions only cut the text a result row shows.
 
 export interface Part {
