@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-func TestLegacyServiceSessionAndHelperFlags(t *testing.T) {
+func TestStoredServiceSessionAndHelperFlags(t *testing.T) {
 	store := &Store{Root: t.TempDir()}
 	for _, role := range []string{"reviewer", "keeper"} {
-		parent := Meta{ID: NewID(), RoomID: "room", Room: "room", Role: role}
-		child := Meta{ID: NewID(), RoomID: "room", Room: "room", ParentSession: parent.ID}
+		parent := Meta{ID: NewID(), RoomID: "room", Room: "room", Role: role, Service: true}
+		child := Meta{ID: NewID(), RoomID: "room", Room: "room", ParentSession: parent.ID, Service: true}
 		for _, meta := range []Meta{parent, child} {
 			dir, _ := store.Dir(meta.ID)
 			if err := os.MkdirAll(dir, 0700); err != nil {
@@ -20,7 +20,7 @@ func TestLegacyServiceSessionAndHelperFlags(t *testing.T) {
 			}
 			got, err := store.ReadMeta(meta.ID)
 			if err != nil || !got.Service {
-				t.Fatalf("legacy %s: %+v %v", role, got, err)
+				t.Fatalf("stored %s: %+v %v", role, got, err)
 			}
 		}
 	}
