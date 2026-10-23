@@ -26,6 +26,24 @@ type Options struct {
 	Session func(string) (subagent.Info, error)
 }
 
+// budgetView is the JSON body `dyna git pr budget` prints. CI budget lists
+// print as an empty array when unset, never null.
+type budgetView struct {
+	RoomID         string   `json:"roomId"`
+	WarnAfter      string   `json:"warnAfter"`
+	FailAfter      string   `json:"failAfter"`
+	CIBudgetExempt []string `json:"ciBudgetExempt"`
+	TestMax        string   `json:"testMax"`
+	TestAllow      []string `json:"testAllow"`
+	NoJUnitWarning bool     `json:"noJUnitWarning"`
+}
+
+// reviewIDView hands the recorded GitHub review ID back to the caller, which
+// passes it to `dyna git pr verdict --review-id`.
+type reviewIDView struct {
+	ReviewID int64 `json:"reviewId"`
+}
+
 func NewCommand() *cobra.Command { return Command(Options{}) }
 func Command(o Options) *cobra.Command {
 	if o.Service == nil {
@@ -345,7 +363,11 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		if err != nil {
 			return err
 		}
-		return output(c, map[string]any{"roomId": roomID, "warnAfter": w.String(), "failAfter": f.String(), "ciBudgetExempt": append([]string{}, p.CIBudgetExempt...), "testMax": max.String(), "testAllow": p.CITestAllow, "noJUnitWarning": p.WarnNoJUnit()})
+		return output(c, budgetView{
+			RoomID: roomID, WarnAfter: w.String(), FailAfter: f.String(),
+			CIBudgetExempt: append([]string{}, p.CIBudgetExempt...), TestMax: max.String(),
+			TestAllow: p.CITestAllow, NoJUnitWarning: p.WarnNoJUnit(),
+		})
 	}
 
 	reviewer.RunE = func(c *cobra.Command, _ []string) error {
@@ -423,7 +445,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 			if err != nil {
 				return err
 			}
-			return output(c, map[string]any{"reviewId": id})
+			return output(c, reviewIDView{ReviewID: id})
 		}
 		if a[0] != "on" && a[0] != "off" {
 			return fmt.Errorf("review must be on or off, or give a PR number or URL with --body-file")

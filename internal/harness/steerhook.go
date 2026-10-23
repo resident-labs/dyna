@@ -51,12 +51,29 @@ var steerHookGrace = 20 * time.Second
 // is known to run PostToolUse hooks headless.
 var museHookMinVersion = [3]int{1, 4, 7}
 
+// hookCommand is one command a harness runs at a hook event.
+type hookCommand struct {
+	Type    string `json:"type"`
+	Command string `json:"command"`
+}
+
+// hookMatcher groups the commands a harness runs for one tool matcher.
+type hookMatcher struct {
+	Matcher string        `json:"matcher"`
+	Hooks   []hookCommand `json:"hooks"`
+}
+
+// museHooksDoc is the managed hooks file Muse loads for one launch.
+type museHooksDoc struct {
+	Hooks map[string][]hookMatcher `json:"hooks"`
+}
+
 // museMemoryDenyHook denies Muse's native memory tools in the managed hooks
 // file. Dyna sessions keep no native memory. The command is a fixed printf,
 // so no script file is needed.
-var museMemoryDenyHook = map[string]any{
-	"matcher": "read_memory|add_memory|edit_memory",
-	"hooks":   []any{map[string]any{"type": "command", "command": `printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Dyna sessions keep no native memory; use your goal, the room or files you own."}}'`}},
+var museMemoryDenyHook = hookMatcher{
+	Matcher: "read_memory|add_memory|edit_memory",
+	Hooks:   []hookCommand{{Type: "command", Command: `printf '%s' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Dyna sessions keep no native memory; use your goal, the room or files you own."}}'`}},
 }
 
 // steerHookSupport reports whether the CLI at executable, Dyna's private copy
@@ -147,9 +164,9 @@ func (h *steerHook) argv(argv, launchEnv []string) ([]string, error) {
 		extra = []string{"-c", fmt.Sprintf(`hooks.PostToolUse=[{matcher="*",hooks=[{type="command",command=%s,timeout=%d}]}]`, tomlString(h.command), steerHookTimeout),
 			"--dangerously-bypass-hook-trust"}
 	case profile.HarnessMuse:
-		hooks := map[string]any{"PreToolUse": []any{museMemoryDenyHook}}
+		hooks := map[string][]hookMatcher{"PreToolUse": {museMemoryDenyHook}}
 		if h.steer {
-			hooks["PostToolUse"] = []any{map[string]any{"matcher": "*", "hooks": []any{map[string]any{"type": "command", "command": h.command}}}}
+			hooks["PostToolUse"] = []hookMatcher{{Matcher: "*", Hooks: []hookCommand{{Type: "command", Command: h.command}}}}
 		}
 		// Muse clears user-hook environments. A managed hook can request names
 		// from the final launch without putting values in argv. Limit the grant to
@@ -161,7 +178,7 @@ func (h *steerHook) argv(argv, launchEnv []string) ([]string, error) {
 			}
 		}
 		path := filepath.Join(h.dir, "hooks.json")
-		data, err := json.Marshal(map[string]any{"hooks": hooks})
+		data, err := json.Marshal(museHooksDoc{Hooks: hooks})
 		if err != nil {
 			return nil, err
 		}
