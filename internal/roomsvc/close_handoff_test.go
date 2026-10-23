@@ -80,7 +80,12 @@ func TestCloseHandsAuthorshipAndGoalsToAncestor(t *testing.T) {
 				t.Fatalf("author handoff = %+v, %v", r, err)
 			}
 			got, err := goals.DefaultStore().Get(rec.ID, g.ID)
-			if err != nil || !got.Open() || !got.HeldBy(parent.ID) || got.HeldBy(author.ID) {
+			if ancestry == "root" || ancestry == "pruned parent" {
+				// Root holds no goals, so this one stays unheld for the owner.
+				if err != nil || !got.Open() || got.HeldBy(parent.ID) || len(got.Holders) != 0 || got.Setter != "owner" {
+					t.Fatalf("goal handoff to root = %+v, %v", got, err)
+				}
+			} else if err != nil || !got.Open() || !got.HeldBy(parent.ID) || got.HeldBy(author.ID) {
 				t.Fatalf("goal handoff = %+v, %v", got, err)
 			}
 			// The result must tell the app where the work went.
