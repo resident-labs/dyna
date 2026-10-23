@@ -9,7 +9,7 @@ const run = 'wf_20261017-100000-cccccccc'
 const at = (r: Partial<Route>): Route => ({ room, view: 'general', session: '', turn: 0, run: '', ...r })
 
 test('every screen address round-trips', () => {
-  for (const r of [at({}), at({ view: 'files' }), at({ view: `channel:${session}` }), at({ view: 'voice-call' }), at({ session }), at({ session, turn: 4 }), at({ session: 'root' }), at({ view: 'runs', run })]) {
+  for (const r of [at({}), at({ review: 'files' }), at({ session, review: 'changes' }), at({ view: 'files' }), at({ view: `channel:${session}` }), at({ view: 'voice-call' }), at({ session }), at({ session, turn: 4 }), at({ session: 'root' }), at({ view: 'runs', run })]) {
     assert.deepEqual(parseRoute(routeHash(r)), r, routeHash(r))
   }
   assert.equal(routeHash(at({})), `#room=${room}`)

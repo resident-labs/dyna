@@ -20,7 +20,7 @@ function app(view) {
     memberChips: true, consolidationAlive: true,
     roomControls: null, loadQuestions() {}, loadVisuals() {}, soonRooms: (kind = 'rooms') => kind === 'controls' ? c.roomSessionController.load() : calls.push(kind),
     sessionData: { load: async () => calls.push('transcript') },
-    changesTracker: { poke: () => calls.push('changes') },
+    reviewVersion: 0,
     api: {
       members: async () => { calls.push('members'); return [] },
       sessionConsolidations: async () => { calls.push('consolidations'); return [] },
@@ -51,8 +51,9 @@ for (const view of ['github', 'channel:general']) {
     assert.deepEqual(calls, [])
     c.handle({ kind: 'session', roomId: 'a', change: { op: 'upsert', id: 'one' } })
     await new Promise(setImmediate)
-    // Activity in the open session also asks for a refresh of its Changes tab count.
-    assert.deepEqual(calls.sort(), ['changes', 'transcript'])
+    // The review workspace can refresh without a second status-count loader.
+    assert.deepEqual(calls.sort(), ['transcript'])
+    assert.equal(c.reviewVersion, 1)
     close()
   })
 }
@@ -88,7 +89,7 @@ test('reconnect refreshes visible controls without consolidation history', async
   close()
 })
 
-test('reconnect refreshes the open session and its Changes count', async () => {
+test('reconnect refreshes the open session and its review workspace', async () => {
   const { c, calls, close } = app('github')
   c.loadRooms = () => {}
   c.roomData.open = async () => true
@@ -99,7 +100,8 @@ test('reconnect refreshes the open session and its Changes count', async () => {
   vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
   await c.resync()
   await new Promise(setImmediate)
-  assert.ok(calls.includes('transcript') && calls.includes('changes'), `calls: ${calls}`)
+  assert.equal(c.reviewVersion, 1)
+  assert.ok(calls.includes('transcript'), `calls: ${calls}`)
   close()
 })
 

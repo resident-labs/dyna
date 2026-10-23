@@ -8,9 +8,14 @@
   // history entry with its link (prlink.js), so Back returns to the list.
   // Issues come from GitHub through gh on the host, grouped by who is on them
   // (IssueList) and opened as an IssuePage.
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { api } from '../../api.js'
-  import RoomPRList from './RoomPRList.svelte'
+  import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
+  import { expedite, prExpedited } from '../rooms/expedite.ts'
+  import RowItem from '../ui/Row.svelte'
+  import PRGlyph from './PRGlyph.svelte'
+  import Chip from '../ui/Chip.svelte'
+  import { ciLabel, reviewLabel, mergePosition } from './roomPRs.ts'
   import MergingStrip from './MergingStrip.svelte'
   import { openPRs } from './roomPRs.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
@@ -21,10 +26,10 @@
   import IssuePage from './IssuePage.svelte'
   import Menu from '../ui/Menu.svelte'
   import { changeTitle, isLocal, withoutReviewers } from './pr.ts'
-  import { listView, rowsFromGitHub, moveKey, type Names, type Row } from './prlist.ts'
+  import { authorName, mergeState, listView, rowsFromGitHub, moveKey, type Names, type Row } from './prlist.ts'
   import { neighbor } from './prboard.ts'
   import { prHash, parsePRHash, prRef, findPR, lookupNumber, issueHash, parseIssueHash, type Link } from './prlink.ts'
-  import { roomHash } from '../ui/route.ts'
+  import { roomHash, routeHash } from '../ui/route.ts'
   import { trackedFor, loadFilters, saveFilters } from './github.ts'
   import type { MergeQueueItem, MergeControlStatus, ReviewerStatus } from '../api/change.ts'
   import type { Goal } from '../api/goal.ts'
@@ -58,6 +63,8 @@
     failedOlder?: boolean
     onolder?: () => void
     roomId: string
+    session?: string
+    active?: boolean
     kind?: string
     integration?: Integration | null
     changes?: Row[] | null
@@ -81,7 +88,7 @@
   // kind is 'pr' or 'issue': the Pull requests tab and the Issues tab each mount this view.
   // onpr opens a PR by number in the Pull requests tab, from an issue's linked PRs.
   // link is a PR link ({pr, tab}) or issue link ({issue}) to open, from the address bar.
-  let { onmention, localIssues = [], oncloseissue, onexportissue, ondismississue, mergeVersion = 0, older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, kind = 'pr', integration = null, changes = null, members = [], link = null, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
+  let { onmention, localIssues = [], oncloseissue, onexportissue, ondismississue, mergeVersion = 0, older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, session = '', active = true, kind = 'pr', integration = null, changes = null, members = [], link = null, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
 
   const saved = loadFilters()
   let listState = $state(kind === 'issue' ? 'open' : saved.state)
@@ -206,7 +213,7 @@
   $effect(() => {
     moved
     mergeVersion
-    loadMerge()
+    if (active) untrack(loadMerge)
   })
 
   // openRow opens a PR row and records it in the address bar: a click adds
@@ -214,7 +221,7 @@
   function openRow(c: Row, push = true) {
     selId = c.changeId ?? ''
     tab = 'conversation'
-    const h = prHash(roomId, prRef(c))
+    const h = prHash(roomId, prRef(c), 'conversation', session)
     if (push) history.pushState({ pr: true }, '', h)
     else history.replaceState(history.state, '', h)
   }
@@ -226,7 +233,7 @@
     if (number) onpr(number)
   }
   // The list's own address, for the entry Back returns to.
-  const listAddress = () => location.pathname + location.search + roomHash(roomId, inPRs ? 'github' : 'issues')
+  const listAddress = () => location.pathname + location.search + (inPRs ? routeHash({ room: roomId, view: 'general', session, turn: 0, run: '', review: 'prs' }) : roomHash(roomId, 'issues'))
   function openIssue(n: number) {
     // A tab switch can leave a PR address behind. Back must return to this list.
     if (parseIssueHash(location.hash)?.issue !== sel) history.replaceState(null, '', listAddress())
@@ -239,7 +246,7 @@
     history.replaceState(null, '', listAddress())
   }
   function showTab(t: string) {
-    if (chg) history.replaceState(history.state, '', prHash(roomId, prRef(chg), t))
+    if (chg) history.replaceState(history.state, '', prHash(roomId, prRef(chg), t, session))
   }
   // back leaves the open PR: through history when the screen added the entry.
   function back() {
@@ -349,7 +356,7 @@
   }
   // j and k move to the next and the previous PR, outside of text fields.
   function keys(e: KeyboardEvent) {
-    if (!inPRs || e.ctrlKey || e.metaKey || e.altKey || trackMenu) return
+    if (!active || !inPRs || e.ctrlKey || e.metaKey || e.altKey || trackMenu) return
     if (e.target instanceof Element && e.target.closest('input, textarea, select, [contenteditable], [role="dialog"]')) return
     const step = e.key === 'j' ? 1 : e.key === 'k' ? -1 : 0
     const next = step && neighbor(order, selId, step)
@@ -372,10 +379,9 @@
     if (next) openRow(next, false)
   }
   onMount(() => {
-    load()
     // Main CI moves no row, so a return to the window also reloads the merge state.
-    const again = () => document.visibilityState === 'visible' && (load(), loadMerge())
-    const popped = () => followLink(inPRs ? parsePRHash(location.hash) : parseIssueHash(location.hash))
+    const again = () => active && document.visibilityState === 'visible' && (load(), loadMerge())
+    const popped = () => active && followLink(inPRs ? parsePRHash(location.hash) : parseIssueHash(location.hash))
     window.addEventListener('focus', again)
     window.addEventListener('popstate', popped)
     window.addEventListener('hashchange', popped)
@@ -388,6 +394,13 @@
       window.removeEventListener('hashchange', popped)
       clearTimeout(timer)
     }
+  })
+  $effect(() => {
+    if (!active) return
+    untrack(() => {
+      load()
+      if (inPRs && chg) history.replaceState(history.state, '', prHash(roomId, prRef(chg), tab, session))
+    })
   })
   const STATES = ['open', 'closed', 'all']
 </script>
@@ -412,7 +425,21 @@
         {@render filters()}
         {#if error}<p class="more err">GitHub did not answer: {error}</p>{:else if list?.more}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
         {#if anyRows}
-          <RoomPRList rows={listRows} queue={merge ?? []} {selId} {names} {older} {loadingOlder} {failedOlder} {onolder} onpick={(c) => openRow(c)} />
+          <div class="rows">
+            {#each listRows as row (row.changeId)}
+              {@const ci = ciLabel(row)}{@const review = reviewLabel(row)}
+              {@const item = merge?.find((entry) => entry.changeId === row.changeId)}
+              {@const state = mergeState(row, item)}
+              <RowItem selected={row.changeId === selId} onclick={() => openRow(row)}>
+                {#snippet lead()}<PRGlyph it={row} />{/snippet}
+                <div class="row-title">{changeTitle(row)} {#if row.isDraft}<Chip>Draft</Chip>{/if} {#if prExpedited($expedite, row)}<ExpediteBadge />{/if}</div>
+                <div class="row-author">#{row.number}{#if authorName(row, names)} by {authorName(row, names)}{/if}</div>
+                <div class="row-facts"><Chip tone={ci.tone}>{ci.label}</Chip><Chip tone={review.tone} title={row.reviewBlocked}>{review.label}</Chip><span>{mergePosition(row.changeId ?? '', merge ?? [])}</span></div>
+                {#if item && !item.trial && item.state !== 'ready'}<div class="row-author">{state.reason || state.label}</div>{/if}
+              </RowItem>
+            {/each}
+            <LoadOlder auto {older} loading={loadingOlder} failed={failedOlder} onclick={onolder} />
+          </div>
         {:else}
           <div class="empty">
             <strong>No pull requests</strong>
@@ -481,6 +508,11 @@
 {/if}
 
 <style>
+  .rows { padding: 0 var(--s4) var(--s4); }
+  .rows :global(.row) { border-bottom: 1px solid var(--line-soft); border-radius: 0; padding: var(--s4) 0; }
+  .row-title { font-size: var(--t-body); font-weight: 600; overflow-wrap: anywhere; }
+  .row-author { margin-top: var(--s1); color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
+  .row-facts { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); color: var(--muted); font-size: var(--t-sm); }
   .local-detail { padding: var(--s5); overflow-wrap: anywhere; }
   .local-body { white-space: pre-wrap; margin: var(--s4) 0; }
   .gh { flex: 1; display: flex; min-height: 0; min-width: 0; }

@@ -25,7 +25,7 @@ import { stripTypes } from '../../../test/svelte-source.ts'
 // The Svelte parser selects complete declarations without copying their logic.
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const declarations = parse(source).instance.content.body
-const names = ['clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'hashChanged', 'setPicked', 'selectRoom', 'openTarget', 'hashTarget', 'openDetail', 'openView', 'jumpTo', 'showRun', 'openPR']
+const names = ['openReview', 'clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'hashChanged', 'setPicked', 'selectRoom', 'openTarget', 'hashTarget', 'openDetail', 'openView', 'jumpTo', 'showRun', 'openPR']
 const code = declarations.filter((node) => node.type === 'FunctionDeclaration' && names.includes(node.id.name)).map((node) => source.slice(node.start, node.end)).join('\n')
 assert.equal(declarations.filter((n) => n.type === 'FunctionDeclaration' && names.includes(n.id.name)).length, names.length)
 
@@ -45,7 +45,7 @@ function navigation() {
   const calls = []
   const applied = []
   const c = {
-    mergeVersion: 0, roomId: B, roomRequest: 0, questionsRequest: 0, detailRequest: 0, narrow: false, hasTerminal: true,
+    reviewOpen: false, reviewTab: 'files', reviewVersion: 0, mergeVersion: 0, roomId: B, roomRequest: 0, questionsRequest: 0, detailRequest: 0, narrow: false, hasTerminal: true,
     selectionRevision: 0, consolidationView: 0, consolidationAlive: true, memberRequest: 0, pickedSessions: [], pruneSelection,
     showClosed: false, rooms: [{ id: A }, { id: B }], needPair: false,
     ROOM, POST, GENERAL, VOICE, routedParents: '', isChannel, inChannel, homeChannel, isShellResult, trimFeed, mergeFeedPage, questionID, channels: channelModel([]), posts: [],
@@ -53,7 +53,7 @@ function navigation() {
     started: true, routing: 0, routeFix: false, pop: null, readOnlyDm: false, sessionTurn: 0, entries: [],
     ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute, parseDetailHref, prHash, parsePRHash, parseIssueHash, parseFileHash, callTarget, callPush: null, URLSearchParams, tick: () => Promise.resolve(),
     loadRooms() {}, visitRoomControls() {}, loadConsolidations() {}, markShown() {}, loadEarlier() {}, say() {},
-    loadRuns() {}, loadRun() { calls.push('run') },
+    loadChanges() {}, loadReviewer() {}, loadRuns() {}, loadRun() { calls.push('run') },
     feedView: { jump() { calls.push('post') } },
     openSession() { calls.push('session') },
     applyOpened(o) { c.feed = o.feed; applied.push(o.feed.room.id) },
@@ -89,7 +89,7 @@ for (const kind of ['shell', 'run', 'session']) {
       pending.resolve(opened(A))
       await opening
       assert.equal(c.roomId, later === 'room' ? B : A)
-      assert.equal(c.view, later === 'room' ? GENERAL : 'files')
+      assert.equal(c.view, GENERAL)
       assert.equal(c.openJob, '')
       assert.deepEqual(calls, [])
       assert.deepEqual(applied, [later === 'room' ? B : A])
@@ -107,7 +107,7 @@ for (const later of ['room', 'view']) {
     pending.resolve(opened(A))
     await setImmediate()
     assert.equal(c.roomId, later === 'room' ? B : A)
-    assert.equal(c.view, later === 'room' ? GENERAL : 'files')
+    assert.equal(c.view, GENERAL)
     assert.equal(c.openJob, '')
     assert.deepEqual(calls, [])
   })
@@ -125,7 +125,8 @@ test('the copied-hash continuation also stops after its room target has resolved
   c.hashTarget()
   pending.resolve(opened(A))
   await setImmediate()
-  assert.equal(c.view, 'files')
+  assert.equal(c.view, GENERAL)
+  assert.equal(c.reviewTab, 'files')
   assert.equal(c.openJob, '')
   assert.deepEqual(calls, [])
 })
@@ -137,7 +138,8 @@ test('a PR link opens the Pull requests view on that PR and stays in the address
   pending.resolve(opened(A))
   await setImmediate()
   assert.equal(c.roomId, A)
-  assert.equal(c.view, 'github')
+  assert.equal(c.view, GENERAL)
+  assert.equal(c.reviewTab, 'prs')
   assert.deepEqual({ ...c.prLink }, { roomId: A, pr: '741', tab: 'checks' })
   assert.equal(c.location.hash, prHash(A, 741, 'checks'))
   // A later view choice drops the link, so the PR screen does not reopen it.
@@ -147,7 +149,7 @@ test('a PR link opens the Pull requests view on that PR and stays in the address
 
 test('Back and Forward between PR links stay with the open Pull requests view', () => {
   const { c } = navigation()
-  c.view = 'github'
+  c.view = GENERAL; c.reviewOpen = true; c.reviewTab = 'prs'
   let opened = false
   c.openTarget = () => { opened = true; return Promise.resolve(false) }
   c.location.hash = prHash(B, 742)
@@ -193,7 +195,8 @@ test('a later same-room selection wins over an older room response', async () =>
   assert.equal(await c.selectRoom(A, 'files'), true)
   pending.resolve(opened(A))
   assert.equal(await first, false)
-  assert.equal(c.view, 'files')
+  assert.equal(c.view, GENERAL)
+  assert.equal(c.reviewTab, 'files')
   assert.deepEqual(applied, [A])
 })
 
@@ -204,7 +207,7 @@ for (const workspace of ['files', 'github', 'jobs']) {
     const marked = []
     c.markShown = (posts) => { marked.push(...posts) }
     assert.equal(await c.selectRoom(B, workspace), true)
-    assert.equal(c.view, workspace)
+    assert.equal(c.view, workspace === 'jobs' ? 'jobs' : GENERAL)
     assert.deepEqual(marked, [])
   })
 }
@@ -259,7 +262,8 @@ test('a pin waiting for history preserves a later workspace selection', async ()
   c.openView('files')
   history.resolve()
   await jumping
-  assert.equal(c.view, 'files')
+  assert.equal(c.view, GENERAL)
+  assert.equal(c.reviewTab, 'files')
   assert.deepEqual(calls, [])
 })
 
@@ -428,7 +432,8 @@ test('an issue timeline PR link records the PR address for reload and Back', () 
   c.view = 'issues'
   c.location.hash = issueHash(B, 839)
   c.openPR(841)
-  assert.equal(c.view, 'github')
+  assert.equal(c.view, GENERAL)
+  assert.equal(c.reviewTab, 'prs')
   assert.equal(c.location.hash, prHash(B, 841))
   assert.deepEqual({ ...c.prLink }, { roomId: B, pr: '841', tab: 'conversation' })
 })
@@ -510,8 +515,10 @@ test('a reloaded session address reopens the session and keeps one history entry
 
 test('a followed address that cannot open is corrected in place', async () => {
   const { c } = navigation()
-  c.location.hash = `#room=${B}&view=files`
-  c.view = 'files'
+  c.location.hash = `#room=${B}`
+  c.view = GENERAL
+  c.reviewOpen = true
+  c.reviewTab = 'files'
   c.routeFix = false
   // The run address names a run; the screen lands on the room instead.
   c.showRun = () => {}
@@ -519,18 +526,18 @@ test('a followed address that cannot open is corrected in place', async () => {
   c.hashTarget()
   await setImmediate()
   c.syncRoute()
-  assert.deepEqual(c.entries.at(-1), ['replace', `#room=${B}&view=files`])
+  assert.deepEqual(c.entries.at(-1), ['replace', `#room=${B}`])
 })
 
 test('an open PR keeps its own address; the route waits until the view leaves it', () => {
   const { c } = navigation()
-  c.view = 'github'
+  c.view = GENERAL; c.reviewOpen = true; c.reviewTab = 'prs'
   c.location.hash = prHash(B, 9)
   c.syncRoute()
   assert.deepEqual(c.entries, [])
   c.openView('files')
   c.syncRoute()
-  assert.deepEqual(c.entries, [['push', `#room=${B}&view=files`]])
+  assert.deepEqual(c.entries, [['push', `#room=${B}&review=files`]])
 })
 
 test('successful read batches refresh channel counts through the existing room debounce', () => {
@@ -671,12 +678,13 @@ test('Back reopens a PR that a link or reload opened: the next screen pushes its
   c.location.hash = prHash(B, 844)
   assert.equal(c.hashTarget(), true)
   await setImmediate()
-  assert.equal(c.view, 'github')
+  assert.equal(c.view, GENERAL)
+  assert.equal(c.reviewTab, 'prs')
   c.syncRoute()
   assert.deepEqual(c.entries, [], 'the PR address is already the entry')
   c.openView('files')
   c.syncRoute()
-  assert.deepEqual(c.entries, [['push', `#room=${B}&view=files`]])
+  assert.deepEqual(c.entries, [['push', `#room=${B}&review=files`]])
 })
 
 test('a shell link followed in the open room still opens its log', async () => {
