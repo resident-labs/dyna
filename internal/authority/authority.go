@@ -187,6 +187,8 @@ var Rules = []Rule{
 	{Action: "subagent transfer", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control sessions"},
 	{Action: "subagent consolidate", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control sessions"},
 	{Action: "run", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to start work"},
+	{Action: "doctor examine", Allowed: []Role{Owner, Root, Session}, Instead: "post the problem to @root; root or a session runs the doctor"},
+	{Action: "doctor report", Allowed: []Role{Owner, Root, Session}, Instead: "post the problem to @root; root or a session reads doctor reports"},
 	{Action: "demo", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to start work"},
 	{Action: "room pause", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control work"},
 	{Action: "room resume", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control work"},
