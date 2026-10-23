@@ -409,7 +409,7 @@ test('a call found on page load that ends elsewhere leaves the resume state', as
   assert.equal(timers[0].on, false, 'it stops asking once the call is gone')
 })
 
-function reconnectSetup() {
+function reconnectSetup(initialCursor = '') {
   const t = setup()
   const timers = []
   const sockets = []
@@ -418,14 +418,18 @@ function reconnectSetup() {
   let resume = async () => ({ startedAt: 42 })
   const call = createCall({
     ...t.deps,
-    now: () => time,
+    now: () => { throw new Error('the browser clock must not set the resume cursor') },
     after: (ms, fn) => {
       const timer = { at: time + ms, fn, active: true }
       timers.push(timer)
       return () => { timer.active = false }
     },
     socket: () => { const ws = fakeSocket(); sockets.push(ws); return ws },
-    api: { ...t.deps.api, voiceResume: (...args) => { resumes.push(args); return resume() } },
+    api: {
+      ...t.deps.api,
+      voiceStart: async (...args) => ({ ...await t.deps.api.voiceStart(...args), resumeCursor: initialCursor }),
+      voiceResume: (...args) => { resumes.push(args); return resume() },
+    },
   })
   return {
     ...t, call, sockets, resumes,
@@ -457,6 +461,7 @@ async function reconnectLive() {
   await t.call.start('room_1', 'voice-test')
   t.sockets[0].open()
   t.sockets[0].recv({ type: 'state', state: 'listening' })
+  t.sockets[0].recv({ type: 'resume_cursor', cursor: 'engine-delivery-1' })
   return t
 }
 
@@ -472,9 +477,10 @@ test('an engine restart resumes the same call with its microphone, controls and 
   t.call.toggleDeafen()
   t.mic()
   await t.advance(500)
-  assert.deepEqual(t.resumes, [['room_1', 42, 1000]])
+  assert.deepEqual(t.resumes, [['room_1', 42, 'engine-delivery-1']])
   const next = t.sockets[1]
   old.recv({ type: 'state', state: 'listening' })
+  old.recv({ type: 'resume_cursor', cursor: 'stale-cursor' })
   assert.equal(t.call.state.phase, 'connecting', 'stale socket cannot complete reconnect')
   next.open()
   assert.equal(spoken(next).length, 1)
@@ -482,7 +488,22 @@ test('an engine restart resumes the same call with its microphone, controls and 
   assert.equal(t.call.state.phase, 'live')
   await t.advance(30000)
   assert.equal(t.audio.closed, 0, 'successful recovery cancels its deadline')
+  next.recv({ type: 'resume_cursor', cursor: 'engine-delivery-2' })
+  next.drop(1012)
+  await t.advance(500)
+  assert.deepEqual(t.resumes[1], ['room_1', 42, 'engine-delivery-2'])
   await t.call.hangup()
+})
+
+test('a disconnect before the first socket message uses the engine status cursor or an empty cursor', async () => {
+  for (const cursor of ['', 'engine-initial']) {
+    const t = reconnectSetup(cursor)
+    await t.call.start('room_1', 'voice-test')
+    t.sockets[0].drop(1006)
+    await t.advance(500)
+    assert.deepEqual(t.resumes, [['room_1', 42, cursor]])
+    await t.call.hangup()
+  }
 })
 
 test('reconnect backs off and releases the microphone after 30 seconds, even if a request hangs', async () => {
@@ -491,7 +512,7 @@ test('reconnect backs off and releases the microphone after 30 seconds, even if 
   t.sockets[0].drop(1012)
   await t.advance(1500)
   assert.equal(t.resumes.length, 2)
-  assert.deepEqual(t.resumes[1], ['room_1', 42, 1000])
+  assert.deepEqual(t.resumes[1], ['room_1', 42, 'engine-delivery-1'])
   t.stallResume()
   await t.advance(2000)
   assert.equal(t.resumes.length, 3)

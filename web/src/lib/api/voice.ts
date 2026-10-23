@@ -10,6 +10,7 @@ export interface CallStatus {
   roomId?: string
   room?: string
   startedAt?: number // unix milliseconds
+  resumeCursor?: string // engine-issued delivery position
   error?: string
 }
 
@@ -17,6 +18,7 @@ export interface CallStatus {
 // page. Go sends one struct and omits unused fields; each member lists the
 // fields its type sets.
 export type VoicePageEvent =
+  | { type: 'resume_cursor'; cursor: string }
   | { type: 'state'; state: string } // listening, thinking, speaking, reconnecting
   | { type: 'audio'; audio: string; id?: string }
   | { type: 'audio_done'; id?: string }
