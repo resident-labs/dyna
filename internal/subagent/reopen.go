@@ -65,7 +65,10 @@ func (m *Manager) Reopen(ctx context.Context, ref string) (Info, error) {
 		if err != nil {
 			return err
 		}
-		byAddress := inputRows(m.rooms(), meta.RoomID, "", meta.Address(), postIDs(messages))
+		byAddress, err := inputRows(m.rooms(), meta.RoomID, "", meta.Address(), postIDs(messages))
+		if err != nil {
+			return err
+		}
 		for _, msg := range messages {
 			if _, namedAddress := byAddress[msg.ID]; namedAddress && msg.TS > meta.Closed.UnixMilli() {
 				if meta.ClosedPosts == nil {

@@ -242,8 +242,13 @@ func (m *Manager) selectPreparedInput(ctx context.Context, id string, input Inpu
 				cache := store.inputInbox(id, input.Turn)
 				cache.Lock()
 				defer cache.Unlock()
-				cache.cache.turn, cache.cache.roomEnd = input.Turn, reply.Cursor
-				selected, err = store.cachedInboxMessages(m.rooms(), meta, forSession(m.rooms(), meta, messages), &cache.cache, reader)
+				// The cache moves only once its rows are read, so a failed read
+				// leaves the cached pending posts where they are.
+				var ordinary []room.Message
+				if ordinary, err = forSession(m.rooms(), meta, messages); err == nil {
+					cache.cache.turn, cache.cache.roomEnd = input.Turn, reply.Cursor
+					selected, err = store.cachedInboxMessages(m.rooms(), meta, ordinary, &cache.cache, reader)
+				}
 			}
 		}
 		if err != nil {

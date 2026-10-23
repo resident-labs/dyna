@@ -1,8 +1,6 @@
 package subagent
 
 import (
-	"log"
-
 	"dyna-agent/internal/room"
 )
 
@@ -13,28 +11,33 @@ import (
 // is the one write-time rule that stores the rows, so a reader here always
 // agrees with the writer.
 
+// sessionRows reads one session's delivery rows for postIDs. A test replaces it
+// to see what a reader does when the post index cannot be read.
+var sessionRows = func(rooms *room.Store, roomID string, keys, postIDs []string) (map[string]room.Delivery, error) {
+	return rooms.SessionDeliveries(roomID, keys, postIDs)
+}
+
 // inputRows reads the delivery rows of one session for postIDs, keyed by post
 // ID. A post without a row is not this session's.
 //
-// A failed read leaves the session with no input for this read, and logs why:
-// the posts keep their rows for the next read, which is safer than acting on a
-// guess about who the post reached.
-func inputRows(rooms *room.Store, roomID, sessionID, addr string, postIDs []string) map[string]room.Delivery {
+// A read that fails is not an empty inbox: the caller must leave the room
+// cursor and its cached pending posts where they are, so the same posts are
+// read again instead of being skipped for good.
+func inputRows(rooms *room.Store, roomID, sessionID, addr string, postIDs []string) (map[string]room.Delivery, error) {
 	if rooms == nil || len(postIDs) == 0 {
-		return nil
+		return nil, nil
 	}
-	rows, err := rooms.SessionDeliveries(roomID, room.DeliveryKeys(sessionID, addr), postIDs)
-	if err != nil {
-		log.Printf("session %s: read its delivery rows: %v", sessionID, err)
-		return nil
-	}
-	return rows
+	return sessionRows(rooms, roomID, room.DeliveryKeys(sessionID, addr), postIDs)
 }
 
 // inputRow reads one post's delivery row for one session.
-func inputRow(rooms *room.Store, roomID, sessionID, addr, postID string) (room.Delivery, bool) {
-	row, ok := inputRows(rooms, roomID, sessionID, addr, []string{postID})[postID]
-	return row, ok
+func inputRow(rooms *room.Store, roomID, sessionID, addr, postID string) (room.Delivery, bool, error) {
+	rows, err := inputRows(rooms, roomID, sessionID, addr, []string{postID})
+	if err != nil {
+		return room.Delivery{}, false, err
+	}
+	row, ok := rows[postID]
+	return row, ok, nil
 }
 
 // postIDs lists the post IDs of one log read, in log order.

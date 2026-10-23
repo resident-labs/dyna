@@ -115,10 +115,10 @@ func TestRenamedSessionKeepsPendingDelivery(t *testing.T) {
 		}
 		return out
 	}
-	if got := texts(forSession(rooms, metaA, msgs)); len(got) != 1 || got[0] != "for a under old name" {
+	if got := texts(mustForSession(t, rooms, metaA, msgs)); len(got) != 1 || got[0] != "for a under old name" {
 		t.Fatalf("renamed session a got %q", got)
 	}
-	if got := texts(forSession(rooms, metaB, msgs)); len(got) != 1 || got[0] != "for b under reused name" {
+	if got := texts(mustForSession(t, rooms, metaB, msgs)); len(got) != 1 || got[0] != "for b under reused name" {
 		t.Fatalf("session b got %q", got)
 	}
 }

@@ -111,7 +111,7 @@ func TestExactRecipientSurvivesReopenWithoutClockAmbiguity(t *testing.T) {
 		post("", "closed before the reopen"),
 	}
 	meta.ClosedPosts = map[string]bool{posts[2].ID: true}
-	got := forSession(rooms, meta, posts)
+	got := mustForSession(t, rooms, meta, posts)
 	if len(got) != 1 || got[0].ID != posts[0].ID {
 		t.Fatalf("session IDs lost recipient identity: %+v", got)
 	}
