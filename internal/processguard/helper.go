@@ -168,7 +168,11 @@ func runGuard(parent *wire, config message) {
 			// The anchor owns the native command's Wait and reports its status
 			// over the socket. Keep the anchor waitable, even after it exits,
 			// to pin the group ID until cleanup sends the group kill below.
-			reapOrphans(group)
+			// Publish each live reap, so the runner can account for adopted
+			// children instead of reading the process table.
+			if reaped := reapOrphans(group); reaped > 0 {
+				_ = parent.send(message{Op: "reaped", Code: reaped})
+			}
 		case <-parents: // EOF is the runner's crash signal.
 			running = false
 		case m, ok := <-anchors:
