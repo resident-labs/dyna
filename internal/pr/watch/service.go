@@ -1369,9 +1369,9 @@ func (s *Service) escalate(ctx context.Context, r Record, n Notice) (subagent.In
 		req.Goal = fmt.Sprintf("Resolve %s; done when it is merged or closed.", changeLabel(r))
 		req.Brief = fmt.Sprintf("Review the status of %s (%s). Dyna merges automatically when approved and green. Dyna made you its author.", changeLabel(r), changeLocation(r))
 	}
-	// Completion follows the same recipient rule as readiness, but never
-	// starts a new agent for an ended change.
-	if n.Kind == "land" || n.Kind == "merged" || n.Kind == "closed" {
+	// Readiness goes to a child author's parent. Completion wakes the author
+	// so it can finish its goal and end its turn.
+	if n.Kind == "land" {
 		if author, err := m.Store.Info(r.Author); err == nil && author.ParentSession != "" {
 			req.Skip = []string{r.Author}
 		}

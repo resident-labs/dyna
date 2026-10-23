@@ -93,6 +93,6 @@ func outcomeNotice(r *Record) {
 	}
 	r.Notices = append(r.Notices, Notice{
 		ID: id, Target: r.Author, Kind: r.State,
-		Text: fmt.Sprintf("%s %s. Wrap up the work for this change. %s", changeLabel(*r), r.State, changeLocation(*r)),
+		Text: fmt.Sprintf("%s %s. Mark its goal done if it has no other open PRs. Clean up its worktree and end your turn. %s", changeLabel(*r), r.State, changeLocation(*r)),
 	})
 }
