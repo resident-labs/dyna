@@ -7,7 +7,7 @@ Keep small or tightly coupled changes yourself. Run read-only scouts in parallel
 
 ## Choosing a profile
 
-Ratings are out of 10, and higher is better: `taste` is choosing the solution, `diagnostics` is finding what is wrong with a solution (reviews, debugging), with few false positives, `intelligence` is executing a given solution on hard multi-step work, and `cost` means higher is cheaper. Reviews go by diagnostics, design by taste, and bulk work by cost.
+Ratings are out of 10, and higher is better. `taste` is choosing the solution. `diagnostics` is finding what is wrong with a solution (reviews, debugging), with few false positives. `intelligence` is executing a given solution on hard multi-step work. `cost` means higher is cheaper. Send reviews by diagnostics, design by taste, and bulk work by cost.
 
 ## Commands
 
