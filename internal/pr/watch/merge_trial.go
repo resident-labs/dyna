@@ -356,7 +356,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		}
 	}
 	if b.Phase == "awaiting-root" || ((b.Phase == "failed" || b.Phase == "stacking") && !b.Bisect) {
-		return s.stopMergeBatch(ctx, repo, *r, b, nil)
+		return s.stopMergeBatch(ctx, repo, *r, b, trialCI{})
 	}
 	// The access and pause checks also apply to a resumed publishing attempt.
 	for _, change := range b.Changes {
@@ -423,7 +423,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		if ci.Status == "failed" {
 			b.Phase, b.Reason, b.Logs = "failed", "batch trial failed; waiting for root", ci.Logs
 			s.noteMergeHistory(st, repo, b, "trial", "failed", b.Head, ci.Logs)
-			return s.stopMergeBatch(ctx, repo, *r, b, mergeChecksOf(ci))
+			return s.stopMergeBatch(ctx, repo, *r, b, ci)
 		}
 		if ci.Status != "passed" {
 			if b.Reason != ci.Reason {
@@ -481,7 +481,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 					b.Phase, b.Reason, b.Logs = "failed", "batch trial failed; waiting for root", logs
 				}
 				if !b.Bisect {
-					return s.stopMergeBatch(ctx, repo, *r, b, mergeChecksOf(ci))
+					return s.stopMergeBatch(ctx, repo, *r, b, ci)
 				}
 				return s.saveMergeTrial(repo, b)
 			}
@@ -575,6 +575,12 @@ type trialCI struct {
 	Done   int
 	Total  int
 	Failed []string
+	// Runs counts the failed completed runs of a failed read. A run can fail
+	// without a named check, so the count is evidence of its own.
+	Runs int
+	// Cancelled reports a cancelled check or run. That CI never tested the
+	// commit, so its failure is an infrastructure cause, not a test failure.
+	Cancelled bool
 }
 
 // mergeTrialCI accepts only push evidence for the frozen trial branch and head.
@@ -608,15 +614,23 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 	if err != nil {
 		return trialCI{}, err
 	}
-	snap, err = s.withRegisteredCI(ctx, trialRecord, snap, EffectivePolicy(st, r))
+	policy := EffectivePolicy(st, r)
+	snap, err = s.withRegisteredCI(ctx, trialRecord, snap, policy)
 	if err != nil {
 		return trialCI{}, err
 	}
 	if snap.localCI != nil {
-		if conclusiveCI(snap.localCI.Status) {
-			return trialCI{Status: snap.localCI.Status, Logs: snap.localCI.Logs}, nil
+		if !conclusiveCI(snap.localCI.Status) {
+			return trialCI{Status: "pending", Reason: snap.localCI.Reason}, nil
 		}
-		return trialCI{Status: "pending", Reason: snap.localCI.Reason}, nil
+		// The failed jobs of a hosted read are the evidence a failure records.
+		return withTrialEvidence(r, head, trialCI{
+			Status:    snap.localCI.Status,
+			Logs:      snap.localCI.Logs,
+			Failed:    snap.localCI.Jobs,
+			Runs:      len(snap.localCI.Runs),
+			Cancelled: snap.ciCancelled(policy.RequiredChecks...),
+		}), nil
 	}
 	out := trialCI{Status: "pending"}
 	var failed []Run
@@ -651,11 +665,45 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 		out.Failed = nil
 	}
 	if out.Status == "failed" {
+		out.Runs, out.Cancelled = len(failed), snap.ciCancelled(policy.RequiredChecks...)
 		for _, run := range failed {
 			out.Logs += s.github(r.RoomID).Logs(ctx, refRecord(r), run) + "\n"
 		}
+		out = withTrialEvidence(r, head, out)
 	}
 	return out, nil
+}
+
+// withTrialEvidence makes every failed read name what it observed, so a batch
+// never fails without a cause. A read that observed nothing keeps an unknown
+// cause instead of guessing one: a failed run without a named check is a test
+// failure, and only an observed cancellation is an infrastructure cause.
+func withTrialEvidence(r Record, head string, ci trialCI) trialCI {
+	if ci.Status != "failed" {
+		return ci
+	}
+	if strings.TrimSpace(ci.Logs) == "" {
+		where := fmt.Sprintf("https://%s/%s/commit/%s/checks", r.Host, r.Repo, head)
+		switch {
+		case len(ci.Failed) > 0:
+			ci.Logs = fmt.Sprintf("Failed checks at %s: %s\n", where, strings.Join(ci.Failed, ", "))
+		case ci.Runs > 0:
+			ci.Logs = fmt.Sprintf("%d failed CI run(s) at %s, with no run log.\n", ci.Runs, where)
+		case ci.Cancelled:
+			ci.Logs = fmt.Sprintf("CI for %s was cancelled at %s before it tested the commit.\n", head, where)
+		default:
+			ci.Logs = fmt.Sprintf("CI for %s failed at %s with no failed check, failed run or cancellation.\n", head, where)
+		}
+	}
+	switch {
+	case len(ci.Failed) > 0:
+		ci.Reason = "checks failed: " + strings.Join(ci.Failed, ", ")
+	case ci.Runs > 0:
+		ci.Reason = "a CI run failed without a named check; read its logs for the failing test"
+	case ci.Cancelled:
+		ci.Reason = "CI was cancelled before it tested the commit, so this is an infrastructure cause, not a test failure"
+	}
+	return ci
 }
 
 // confirmTrialProbes scopes a failed observation to trials that contain it.
