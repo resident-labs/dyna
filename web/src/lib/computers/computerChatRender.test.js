@@ -1,6 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { build } from 'esbuild'
+import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
+import { installDom, importBundle, domNames } from '../prs/prDetailHarness.ts'
+import { rm } from 'node:fs/promises'
 
 test('ComputerChat uses DmRows and the shared composer, with no renderer of its own', () => {
   const src = readFileSync(new URL('./ComputerChat.svelte', import.meta.url), 'utf8')
