@@ -1,8 +1,8 @@
 // Loads what the service cards need, each call on its own: one that fails
 // (a caller without admin scope cannot read settings) leaves its part null
 // and the others still show.
-import type { AccountsInfo, BudgetInfo, HookRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, ServiceInfo as ServiceRow, TestHealth, UsageRow } from './model.ts'
-import { readAccounts, readBudget, readHookSummary, readMergeState, readNotices, readTestHealth, readHistory, readReviewer, readServices, readSettings, readUsage, readVoice } from './read.ts'
+import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, ServiceInfo as ServiceRow, TestHealth, UsageRow } from './model.ts'
+import { readAccounts, readBudget, readHookRuns, readHookSummary, readMergeState, readNotices, readTestHealth, readHistory, readReviewer, readServices, readSettings, readUsage, readVoice } from './read.ts'
 
 export interface ServiceApi {
   listServices(room: string): Promise<unknown>
@@ -32,13 +32,14 @@ export interface ServiceData {
   usage: UsageRow[] | null
   voice: string | null
   hooks: HookRow[] | null
+  runs: Record<string, HookRunRow[]>
   notices: NoticeRow[] | null
   budget: BudgetInfo | null
   accounts: AccountsInfo | null
   testHealth: TestHealth | null
 }
 
-export const emptyData: ServiceData = { pending: allParts, services: [], reviewer: null, queue: null, mergePaused: null, history: [], settings: null, usage: null, voice: null, hooks: null, notices: null, budget: null, accounts: null, testHealth: null }
+export const emptyData: ServiceData = { pending: allParts, services: [], reviewer: null, queue: null, mergePaused: null, history: [], settings: null, usage: null, voice: null, hooks: null, runs: {}, notices: null, budget: null, accounts: null, testHealth: null }
 
 // A call that does not answer in this time counts as failed, so a card shows an error and never loads forever.
 export const CALL_TIMEOUT_MS = 20000
@@ -60,6 +61,8 @@ export async function loadServiceData(
   onData: (d: ServiceData) => void = () => {}, timeoutMs: number = CALL_TIMEOUT_MS,
   // The page supplies a repository-scoped hook call only when it has a repository.
   hookSummary: (() => Promise<unknown>) | null = null,
+  // The run list of one hook; the page supplies it with the summary call.
+  hookRuns: ((name: string) => Promise<unknown>) | null = null,
 ): Promise<ServiceData> {
   const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()))
   let data: ServiceData = { ...previous }
@@ -77,6 +80,14 @@ export async function loadServiceData(
   const hooks = hookSummary
     ? load('hooks', hookSummary, readHookSummary, (d, v) => ({ ...d, hooks: v }))
     : Promise.resolve(settle('hooks', (d) => ({ ...d, hooks: [] })))
+  // Each hook's recent runs follow the summary, which names the hooks. A failed
+  // list keeps that hook's previous runs.
+  const runs = hooks.then(() => Promise.all((hookRuns ? data.hooks ?? [] : []).map((h) =>
+    withTimeout(() => hookRuns?.(h.hook.name) ?? Promise.resolve(null), timeoutMs).then(
+      (raw) => settle('hooks', (d) => ({ ...d, runs: { ...d.runs, [h.hook.name]: readHookRuns(raw) } })),
+      () => {},
+    ),
+  )))
   await Promise.all([
     load('services', () => api.listServices(room), readServices, (d, v) => ({ ...d, services: v })),
     load('reviewer', () => api.reviewerStatus(room), readReviewer, (d, v) => ({ ...d, reviewer: v })),
@@ -89,7 +100,7 @@ export async function loadServiceData(
     load('budget', () => api.roomCIBudget(room), readBudget, (d, v) => ({ ...d, budget: v })),
     load('accounts', () => api.accountUsageCached(), readAccounts, (d, v) => ({ ...d, accounts: v })),
     load('tests', () => api.ciHealth(room, 30), readTestHealth, (d, v) => ({ ...d, testHealth: v })),
-    hooks,
+    runs,
   ])
   return data
 }

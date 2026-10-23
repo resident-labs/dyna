@@ -50,6 +50,18 @@ export interface MergeHistoryRow {
   outcome: string
   at: string
   changes: number
+  // branch is the trial branch that a trial row and its publish row share, and
+  // labels name the changes in it. head is the tested or published commit.
+  branch: string
+  head: string
+  labels: string[]
+}
+
+// HookRunRow is one run of a hook, as the hook run list gives it.
+export interface HookRunRow {
+  result: string
+  startedAt: string
+  finishedAt: string
 }
 
 export interface UsageRow {
@@ -98,6 +110,9 @@ export interface Inputs {
   services: ServiceInfo[] | null
   notices: NoticeRow[] | null
   hooks: HookRow[] | null
+  // runs holds each hook's recent runs by hook name; a hook with none listed
+  // falls back to its newest run.
+  runs: Record<string, HookRunRow[]>
   settings: Record<string, string> | null
   budget: BudgetInfo | null
   accounts: AccountsInfo | null
@@ -118,9 +133,6 @@ export interface Row {
   // detail is the plain status line under the switch: what the service is
   // doing, or why it has no switch.
   detail: string
-  // profileStatus is plain status beside the profile, such as a rate limit.
-  // It is never an alert: recovering from it is the engine's job.
-  profileStatus: string
   toggle: { id: string; on: boolean } | null
   profile: { id: string; value: string; options: string[] } | null
   value: string
@@ -247,22 +259,24 @@ function libraryRepos(settings: Inputs['settings']): string[] | null {
 export function buildRows(i: Inputs): Row[] {
   const svc = (role: string): ServiceInfo | undefined => i.services?.find((s) => s.role === role)
   const rows: Row[] = []
-  const base = { profileStatus: '', toggle: null, profile: null, value: '', last: '', nextAt: '', nextText: '', filterable: true }
+  const base = { toggle: null, profile: null, value: '', last: '', nextAt: '', nextText: '', filterable: true }
 
   // PR reviewers: one session per ready change, with a switch and a profile
   // the owner can change without opening anything.
+  // A provider limit only matters while there is work, so an idle reviewer
+  // says idle. With work it says the limit once, in its one status.
   const rev = i.reviewer
   const reviewerSvc = svc('reviewer')
+  const limited = !!rev && (!!rev.current || rev.queued > 0) && !!rateLimit(i.notices, reviewerSvc?.profile ?? rev.profile)
   rows.push({
     ...base,
     id: 'reviewer',
     name: 'PR reviewers',
-    state: !rev ? 'unreadable' : !rev.enabled ? 'off' : rev.lastError ? 'error' : rev.current ? 'running' : 'waiting',
+    state: !rev ? 'unreadable' : !rev.enabled ? 'off' : rev.lastError ? 'error' : limited ? 'rate-limited' : rev.current ? 'running' : rev.queued ? 'waiting' : 'idle',
     tone: !rev ? 'off' : !rev.enabled ? 'off' : rev.lastError ? 'error' : rev.current ? 'live' : 'on',
     detail: !rev
       ? 'Reviewer state could not be read'
       : rev.lastError || (rev.current ? `reviewing #${rev.current.pr} · ${rev.current.title}` : rev.queued ? `${rev.queued} waiting for review` : 'nothing to review now'),
-    profileStatus: rateLimit(i.notices, reviewerSvc?.profile ?? rev?.profile ?? ''),
     toggle: rev ? { id: 'review.enabled', on: rev.enabled } : null,
     profile: reviewerSvc ? { id: 'review.profile', value: reviewerSvc.pinned, options: ['', ...reviewerSvc.profiles] } : null,
     value: turnsOf(i.usage, 'reviewer'),
@@ -291,7 +305,7 @@ export function buildRows(i: Inputs): Row[] {
     ...base,
     id: 'radar',
     name: 'Conflict radar',
-    state: 'always on',
+    state: 'on',
     tone: 'on',
     detail: overlaps ? `${overlaps} open ${overlaps === 1 ? 'change overlaps' : 'changes overlap'} another` : 'No overlaps between open changes',
     nextText: 'each push',
@@ -350,7 +364,7 @@ export function buildRows(i: Inputs): Row[] {
     ...base,
     id: 'maintenance',
     name: 'Maintenance',
-    state: 'always on',
+    state: 'on',
     tone: 'on',
     detail: i.settings ? `Keeps runs ${readableDuration(i.settings['runs.retention'] ?? '')} · worktrees ${i.settings['worktrees.retention'] ?? unknown}` : 'Settings need admin access',
     nextText: 'each min',
@@ -375,7 +389,7 @@ export function buildRows(i: Inputs): Row[] {
     ...base,
     id: 'ci',
     name: 'CI admission',
-    state: 'always on',
+    state: 'on',
     tone: 'on',
     detail: i.budget
       ? `Warn after ${shortDuration(i.budget.warnAfter)} · fail after ${shortDuration(i.budget.failAfter)} · tests ${shortDuration(i.budget.testMax)}`
@@ -396,76 +410,9 @@ export function buildRows(i: Inputs): Row[] {
   return rows
 }
 
-// Next is one thing that runs on a timer.
-export interface Next {
-  id: string
-  name: string
-  when: string
-  at: number
-}
-
-// buildSchedule lists what runs next, soonest first. A row with a time comes
-// before a row that only names its trigger.
-export function buildSchedule(rows: Row[], now: number): Next[] {
-  return rows
-    .filter((r) => r.nextAt || r.nextText)
-    .map((r) => ({ id: r.id, name: r.name, when: r.nextAt ? until(r.nextAt, now) : r.nextText, at: r.nextAt ? new Date(r.nextAt).getTime() : Number.POSITIVE_INFINITY }))
-    .sort((a, b) => a.at - b.at || a.name.localeCompare(b.name))
-}
-
 // until turns a future time into "in 6 m", "in 2 h" or "due".
 export function until(iso: string, now: number): string {
   const minutes = Math.round((new Date(iso).getTime() - now) / 60000)
   if (!Number.isFinite(minutes)) return ''
   return minutes <= 0 ? 'due' : minutes < 60 ? `in ${minutes} m` : `in ${Math.round(minutes / 60)} h`
-}
-
-// Activity is one service result or one current operation.
-export interface Activity {
-  key: string
-  at: number
-  service: string
-  text: string
-  tone: Tone
-  session: string
-}
-
-export function buildActivity(i: Inputs, now: number): Activity[] {
-  const out: Activity[] = []
-  if (i.reviewer?.current) {
-    out.push({ key: 'review:now', at: now, service: 'reviewer', text: `reviewing #${i.reviewer.current.pr} · ${i.reviewer.current.title}`, tone: 'live', session: '' })
-  }
-  i.changes.forEach((c, n) => {
-    if (!c.reviewAt) return
-    const verdict = c.verdict ? c.verdict.replaceAll('-', ' ') : 'reviewed'
-    const name = c.number ? `#${c.number}` : c.title || c.key || 'local change'
-    out.push({
-      key: `verdict:${c.key ?? c.number ?? n}:${c.reviewAt}`,
-      at: Date.parse(c.reviewAt), service: 'reviewer',
-      text: `${verdict} ${name}${c.number && c.title ? ` · ${c.title}` : ''}`,
-      tone: c.verdict === 'changes' ? 'error' : 'on', session: c.reviewerSession ?? '',
-    })
-  })
-  i.history.forEach((h, n) => {
-    out.push({
-      key: `merge:${h.at}:${n}`, at: Date.parse(h.at), service: 'merge',
-      text: h.kind === 'publish' ? `published main · ${h.changes} ${h.changes === 1 ? 'change' : 'changes'}` : h.kind === 'decision' ? `decision${h.detail ? `: ${h.detail}` : ''}` : `trial ${h.outcome}${h.detail ? `: ${h.detail}` : ''}`,
-      tone: h.kind === 'decision' || h.outcome === 'published' || h.outcome === 'passed' ? 'on' : 'error', session: '',
-    })
-  })
-  for (const row of i.hooks ?? []) {
-    if (!row.lastRun) continue
-    const { hook, lastRun } = row
-    const pending = lastRun.result === 'pending'
-    const failed = lastRun.result === 'error'
-    const took = pending ? '' : elapsed(lastRun.startedAt, lastRun.finishedAt)
-    const result = pending ? 'running' : failed ? 'failed' : lastRun.result === 'pass' ? 'passed' : lastRun.result || 'unknown'
-    out.push({
-      key: `hook:${hook.name}:${lastRun.startedAt}`, at: Date.parse(lastRun.startedAt),
-      service: hook.name === 'self-update' ? 'update' : hook.name.startsWith('librarian-') ? 'librarian' : hook.name,
-      text: `${hook.label || hook.name} · ${result}${took ? ` in ${took}` : ''}`,
-      tone: pending ? 'live' : failed ? 'error' : 'on', session: '',
-    })
-  }
-  return out.filter((a) => Number.isFinite(a.at) && a.at > 0).sort((a, b) => b.at - a.at)
 }
