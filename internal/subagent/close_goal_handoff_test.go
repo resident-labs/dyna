@@ -8,6 +8,57 @@ import (
 	"dyna-agent/internal/goals"
 )
 
+// A close whose heir is root, or the owner, keeps the goals where they are and
+// names the commands that resolve them. --force closes and moves them to the
+// owner.
+func TestCloseRefusesGoalsThatWouldReachRoot(t *testing.T) {
+	e := newTestEnv(t)
+	holder := completedFixtureSession(t, e)
+	rootID := NewID()
+	if err := e.m.Store.writeMeta(Meta{ID: rootID, Name: RoleRoot, Role: RoleRoot, Service: true,
+		RoomID: e.room.ID, Room: e.room.Name, Depth: 1}); err != nil {
+		t.Fatal(err)
+	}
+	goal, err := e.m.goalStore().Add(holder.RoomID, holder.ID, goals.Input{Text: "Unfinished work", Holders: []string{holder.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.m.Close(e.ctx, holder.ID)
+	if err == nil {
+		t.Fatal("close moved a goal to root")
+	}
+	for _, want := range []string{
+		"responsibilities: cannot close:",
+		"holds goal " + goal.ID,
+		"dyna goal done " + goal.ID,
+		"dyna goal drop " + goal.ID,
+		"dyna goal edit " + goal.ID + " --for @",
+		"close with --force to move them to the owner",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("refusal %q misses %q", err, want)
+		}
+	}
+	info, err := e.m.Store.Info(holder.ID)
+	if err != nil || !info.Closed.IsZero() {
+		t.Fatalf("refused close closed the session: %+v, %v", info, err)
+	}
+	if got, err := e.m.goalStore().Get(holder.RoomID, goal.ID); err != nil || !got.HeldBy(holder.ID) {
+		t.Fatalf("refused close moved the goal: %+v, %v", got, err)
+	}
+	closed, err := e.m.CloseWithOptions(e.ctx, holder.ID, CloseOptions{Force: true})
+	if err != nil {
+		t.Fatalf("forced close: %v", err)
+	}
+	got, err := e.m.goalStore().Get(holder.RoomID, goal.ID)
+	if err != nil || !got.Open() || got.HeldBy(holder.ID) || got.HeldBy(rootID) || got.Setter != "owner" {
+		t.Fatalf("forced close left goal = %+v, %v; want it unheld for the owner", got, err)
+	}
+	if !slices.Contains(closed.CloseSummary, "Goal "+goal.ID+" → the owner") {
+		t.Fatalf("forced close summary = %+v; want it to report the owner", closed.CloseSummary)
+	}
+}
+
 func TestCloseWithoutHeirKeepsHeldGoalOpen(t *testing.T) {
 	e := newTestEnv(t)
 	holder := completedFixtureSession(t, e)
@@ -15,7 +66,8 @@ func TestCloseWithoutHeirKeepsHeldGoalOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.m.Close(e.ctx, holder.ID); err == nil || !strings.Contains(err.Error(), "no open ancestor or root") {
+	// No open ancestor and no root session: the heir is the owner.
+	if _, err := e.m.Close(e.ctx, holder.ID); err == nil || !strings.Contains(err.Error(), "dyna goal done "+goal.ID) {
 		t.Fatalf("close without heir: %v", err)
 	}
 	info, err := e.m.Store.Info(holder.ID)
@@ -25,33 +77,6 @@ func TestCloseWithoutHeirKeepsHeldGoalOpen(t *testing.T) {
 	got, err := e.m.goalStore().Get(holder.RoomID, goal.ID)
 	if err != nil || !got.Open() || !got.HeldBy(holder.ID) {
 		t.Fatalf("goal changed: %+v, %v", got, err)
-	}
-}
-
-// Close hands a goal to the nearest open ancestor, never to root: a goal that
-// would reach root stays with the owner instead.
-func TestCloseKeepsGoalsOffRoot(t *testing.T) {
-	e := newTestEnv(t)
-	rootID := NewID()
-	if err := e.m.Store.writeMeta(Meta{ID: rootID, Name: RoleRoot, Role: RoleRoot, Service: true,
-		RoomID: e.room.ID, Room: e.room.Name, Depth: 1}); err != nil {
-		t.Fatal(err)
-	}
-	holder := completedFixtureSession(t, e)
-	goal, err := e.m.goalStore().Add(holder.RoomID, "owner", goals.Input{Text: "Unfinished work", Holders: []string{holder.ID}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	closed, err := e.m.Close(e.ctx, holder.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := e.m.goalStore().Get(holder.RoomID, goal.ID)
-	if err != nil || !got.Open() || got.HeldBy(rootID) || len(got.Holders) != 0 || got.Setter != "owner" {
-		t.Fatalf("goal after close = %+v, %v; want it open and unheld for the owner", got, err)
-	}
-	if !slices.Contains(closed.CloseSummary, "Goal "+goal.ID+" → the owner") {
-		t.Fatalf("close summary = %+v; want it to report the owner", closed.CloseSummary)
 	}
 }
 

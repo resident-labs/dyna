@@ -142,7 +142,16 @@ func TestCloseGoalHandoffNotifiesIdleAncestorAndRoot(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			if _, err := e.mgr.CloseForEngine(context.Background(), holderID, "test handoff", subagent.CloseOptions{}); err != nil {
+			// Root takes no goals, so this close is refused until the goal is
+			// resolved; --force releases it to the owner and still notifies root.
+			opts := subagent.CloseOptions{}
+			if root {
+				if _, err := e.mgr.CloseForEngine(context.Background(), holderID, "test handoff", opts); err == nil || !strings.Contains(err.Error(), "dyna goal done "+e.goal.ID) {
+					t.Fatalf("close with root above = %v; want the goal refusal", err)
+				}
+				opts = subagent.CloseOptions{Force: true}
+			}
+			if _, err := e.mgr.CloseForEngine(context.Background(), holderID, "test handoff", opts); err != nil {
 				t.Fatal(err)
 			}
 			// One tick drains durable notices. Repeating it must not duplicate delivery.

@@ -40,6 +40,29 @@ func (m *Manager) closeHeir(info Info) (Info, error) {
 	return Info{}, nil
 }
 
+// refuseGoalsForTopHeir refuses a close whose heir is root, or the owner when
+// no ancestor is open. The message names each open goal with the commands that
+// resolve it, so the caller finishes, drops or transfers the work first. PR
+// roles and other responsibilities still move up as before.
+func (m *Manager) refuseGoalsForTopHeir(info Info) error {
+	held, err := m.goalOwned(map[string]Info{info.ID: info})
+	if err != nil || len(held) == 0 {
+		return nil
+	}
+	heir, err := m.closeHeir(info)
+	if err != nil {
+		return err
+	}
+	if heir.ID != "" && heir.Role != RoleRoot {
+		return nil
+	}
+	goals := make([]Responsibility, len(held))
+	for i, o := range held {
+		goals[i] = o.r
+	}
+	return fmt.Errorf("%w\nRoot and the owner take no goals: run one command above for each goal, or close with --force to move them to the owner.", responsibilityError("close", goals))
+}
+
 // handoffClose runs after the turn stops and new assignments are fenced off.
 // Each move commits through its existing store, so a retry moves only work left.
 func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]string, error) {
@@ -66,10 +89,10 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]string, 
 			if m.checkpoint != nil {
 				m.checkpoint("close-before-goal-handoff")
 			}
-			// Root holds no goals, so a goal that would reach root stays with
-			// the owner, unheld, instead.
-			if heir.Role == RoleRoot {
-				released, err := m.goalStore().ReleaseHolder(info.RoomID, item.ID, info.ID)
+			// Root and the owner take no goals, so a goal that would reach them is
+			// released to the owner instead.
+			if heir.ID == "" || heir.Role == RoleRoot {
+				released, err := m.goalStore().ReleaseHolder(info.RoomID, item.ID, info.ID, m.completedResult(info))
 				if err != nil {
 					errs = append(errs, err)
 				} else if released {
