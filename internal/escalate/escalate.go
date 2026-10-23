@@ -135,7 +135,11 @@ func spawn(ctx context.Context, m *subagent.Manager, start Start, r Request, pro
 
 // startWithFallback tries the subject's profile, then the default profile.
 func startWithFallback(m *subagent.Manager, start Start, r Request, profile string) (subagent.Info, error) {
-	opts := subagent.StartOptions{Room: r.Room, Profile: profile, Goal: r.Goal, Task: r.Brief}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return subagent.Info{}, fmt.Errorf("get escalation working directory: %w", err)
+	}
+	opts := subagent.StartOptions{Room: r.Room, Profile: profile, Goal: r.Goal, Task: r.Brief, Cwd: cwd}
 	info, err := start(opts)
 	if err != nil && profile != "" {
 		opts.Profile = ""
