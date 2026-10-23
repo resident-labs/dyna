@@ -1,14 +1,54 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { actions, actionItems, roomMenu } from './actions.ts'
+import type { ActionContext, ActionRoom } from './actions.ts'
+import { need } from '../../../test/need.ts'
 
-function context(room = { id: 'room_test', name: 'test', repo: '/tmp/repo' }) {
-  const calls = []
-  const context = { room, rooms: [room], icons: { pin: 'pin-icon', archive: 'archive-icon' }, hasTerminal: true,
-    roomAction: async (run, note) => { calls.push(note); await run() },
+interface TestRoom extends ActionRoom {
+  id: string
+  name: string
+  repo?: string
+  pinned?: boolean
+  archived?: boolean
+}
+
+interface TestContext extends ActionContext {
+  room: TestRoom | null
+  rooms: { pinOrder?: number }[]
+}
+
+// The registry always carries the actions these tests name.
+function pick<T extends { id: string }>(items: readonly T[], id: string): T {
+  return need(items.find((item) => item.id === id), id)
+}
+
+function pickName<T extends { name?: string }>(items: readonly T[], name: string): T {
+  return need(items.find((item) => item.name === name), name)
+}
+
+function context(room: TestRoom = { id: 'room_test', name: 'test', repo: '/tmp/repo' }) {
+  const calls: unknown[] = []
+  const handler = (name: string) => (...args: unknown[]) => calls.push({ name, args })
+  const context: TestContext = { room, rooms: [room], icons: { pin: 'pin-icon', archive: 'archive-icon' }, hasTerminal: true,
+    roomAction: async (run: () => Promise<unknown>, note: string) => { calls.push(note); await run() },
+    switchRoom: handler('switchRoom'),
+    newRoom: handler('newRoom'),
+    openFiles: handler('openFiles'),
+    openView: handler('openView'),
+    openSettings: handler('openSettings'),
+    startWorkflow: handler('startWorkflow'),
+    openPins: handler('openPins'),
+    openSearch: handler('openSearch'),
+    openRoomSettings: handler('openRoomSettings'),
+    openSessionPRs: handler('openSessionPRs'),
+    cancelRun: handler('cancelRun'),
+    renameRoom: handler('renameRoom'),
+    deleteRoom: handler('deleteRoom'),
+    say: handler('say'),
+    loadRooms: handler('loadRooms'),
+    toggleSidebar: handler('toggleSidebar'),
   }
-  for (const name of ['switchRoom', 'newRoom', 'openFiles', 'openView', 'openSettings', 'startWorkflow', 'openPins', 'openSearch', 'openRoomSettings', 'openSessionPRs', 'cancelRun', 'renameRoom', 'deleteRoom', 'say', 'loadRooms', 'toggleSidebar']) context[name] = (...args) => calls.push({ name, args })
-  return { context, calls }
+  return { context, calls, room }
 }
 
 test('shared surfaces use one handler per action with stable IDs', () => {
@@ -16,13 +56,13 @@ test('shared surfaces use one handler per action with stable IDs', () => {
   const registry = actions(c)
   const palette = actionItems(registry, 'palette'), slash = actionItems(registry, 'slash'), menu = roomMenu(registry)
   for (const id of ['rename', 'room-pin', 'room-archive']) {
-    const handler = registry.find((a) => a.id === id).run
-    assert.equal(palette.find((a) => a.id === id).run, handler)
-    assert.equal(slash.find((a) => a.id === id).run, handler)
-    assert.equal(menu.find((a) => a.id === id).run, handler)
+    const handler = pick(registry, id).run
+    assert.equal(pick(palette, id).run, handler)
+    assert.equal(pick(slash, id).run, handler)
+    assert.equal(pick(menu, id).run, handler)
   }
-  palette.find((a) => a.id === 'files').run()
-  slash.find((a) => a.name === 'files').run('src/file.js')
+  pick(palette, 'files').run()
+  pick(slash, 'files').run('src/file.js')
   assert.deepEqual(calls, [{ name: 'openFiles', args: [] }, { name: 'openFiles', args: ['src/file.js'] }])
   assert.equal(new Set(registry.map((a) => a.id)).size, registry.length)
 })
@@ -30,9 +70,9 @@ test('shared surfaces use one handler per action with stable IDs', () => {
 test('the room menu opens Room settings; delete stays in the palette only', () => {
   const { context: c, calls } = context()
   const registry = actions(c)
-  roomMenu(registry).find((a) => a.id === 'roomsettings').run()
+  pick(roomMenu(registry), 'roomsettings').run()
   assert.deepEqual(calls, [{ name: 'openRoomSettings', args: [c.room] }])
-  assert.equal(actionItems(registry, 'palette').find((a) => a.id === 'roomsettings').label, 'Room settings…')
+  assert.equal(pick(actionItems(registry, 'palette'), 'roomsettings').label, 'Room settings…')
   assert.equal(roomMenu(registry).some((a) => a.id === 'delete' || a.id === 'prsettings'), false)
   assert.equal(actionItems(registry, 'palette').some((a) => a.id === 'delete'), true)
 })
@@ -41,21 +81,21 @@ test('/find opens unified search with its text; the palette has no separate find
   const { context: c, calls } = context()
   const registry = actions(c)
   assert.equal(actionItems(registry, 'palette').some((a) => a.id === 'find'), false)
-  actionItems(registry, 'slash').find((a) => a.name === 'find').run('deploy failed')
+  pickName(actionItems(registry, 'slash'), 'find').run('deploy failed')
   assert.deepEqual(calls, [{ name: 'openSearch', args: ['deploy failed'] }])
 })
 
 test('there is no room Changes command', () => {
   const { context: c } = context({ id: 'room_test', name: 'test', repo: '/repo' })
   c.hasTerminal = true
-  for (const surface of ['palette', 'slash']) assert.equal(actionItems(actions(c), surface).some((a) => a.id === 'changes'), false)
+  for (const surface of ['palette', 'slash'] as const) assert.equal(actionItems(actions(c), surface).some((a) => a.id === 'changes'), false)
 })
 
 test('availability matches across palette and slash input', () => {
   const { context: c } = context({ id: 'room_test', name: 'test', repo: '' })
   c.hasTerminal = false
   const registry = actions(c)
-  for (const surface of ['palette', 'slash']) {
+  for (const surface of ['palette', 'slash'] as const) {
     const ids = actionItems(registry, surface).map((a) => a.id)
     for (const id of ['files', 'github', 'issues', 'terminal']) assert.equal(ids.includes(id), false)
     for (const id of ['jobs', 'run', 'workflows']) assert.equal(ids.includes(id), true)
@@ -65,25 +105,25 @@ test('availability matches across palette and slash input', () => {
 })
 
 test('room toggles preserve IDs, icons, order, and shared pin calculation', async () => {
-  const { context: c, calls } = context()
-  const sent = []
-  const names = { PinRoom: 'pin', UnpinRoom: 'unpin', ArchiveRoom: 'archive', UnarchiveRoom: 'unarchive' }
+  const { context: c, calls, room } = context()
+  const sent: unknown[] = []
+  const names: Record<string, string> = { PinRoom: 'pin', UnpinRoom: 'unpin', ArchiveRoom: 'archive', UnarchiveRoom: 'unarchive' }
   globalThis.fetch = async (path, options) => {
-    sent.push([names[path.slice('/api/'.length)], ...JSON.parse(options.body)])
+    sent.push([names[String(path).slice('/api/'.length)], ...JSON.parse(String(options?.body))])
     return Response.json(null)
   }
   c.rooms.push({ pinOrder: 4 })
   for (const pinned of [false, true]) {
-    c.room.pinned = pinned
-    c.room.archived = pinned
+    room.pinned = pinned
+    room.archived = pinned
     const registry = actions(c)
     const menu = roomMenu(registry)
     assert.deepEqual(menu.map((a) => a.id), ['rename', 'room-pin', 'room-archive', 'roomsettings'])
     const palette = actionItems(registry, 'palette'), slash = actionItems(registry, 'slash')
-    assert.equal(palette.find((a) => a.id === 'room-archive').icon, 'archive-icon')
-    assert.equal(slash.find((a) => a.id === 'room-pin').name, pinned ? 'unpin' : 'pin')
-    await menu.find((a) => a.id === 'room-pin').run()
-    await menu.find((a) => a.id === 'room-archive').run()
+    assert.equal(pick(palette, 'room-archive').icon, 'archive-icon')
+    assert.equal(pick(slash, 'room-pin').name, pinned ? 'unpin' : 'pin')
+    await pick(menu, 'room-pin').run()
+    await pick(menu, 'room-archive').run()
   }
   assert.deepEqual(sent, [['pin', 'room_test', 5], ['archive', 'room_test'], ['unpin', 'room_test'], ['unarchive', 'room_test']])
   assert.equal(calls[0], 'test is pinned to the rail.')
@@ -92,8 +132,8 @@ test('room toggles preserve IDs, icons, order, and shared pin calculation', asyn
 test('the issues action opens the Issues tab and the prs action opens Pull requests', () => {
   const { context: c, calls } = context()
   const slash = actionItems(actions(c), 'slash')
-  slash.find((a) => a.name === 'issues').run()
-  slash.find((a) => a.name === 'prs').run()
+  pickName(slash, 'issues').run()
+  pickName(slash, 'prs').run()
   assert.deepEqual(calls, [{ name: 'openView', args: ['issues'] }, { name: 'openView', args: ['github'] }])
 })
 

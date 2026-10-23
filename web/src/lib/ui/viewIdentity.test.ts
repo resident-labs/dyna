@@ -6,8 +6,10 @@ import { viewIdentity } from './viewIdentity.ts'
 
 test('data refreshes preserve the view identity', () => {
   const state = { roomId: 'room-1', view: 'channel:general', drill: { id: 'session-1' }, posts: [], session: null }
-  assert.equal(viewIdentity(state), viewIdentity({ ...state, drill: { id: 'session-1', name: 'New name' }, posts: [{ id: 1 }], session: { turns: [1, 2] } }))
-  assert.equal(viewIdentity({ roomId: 'room-1', view: 'goals' }), viewIdentity({ roomId: 'room-1', view: 'goals', drill: null, goals: [1] }))
+  const refilled = { ...state, drill: { id: 'session-1', name: 'New name' }, posts: [{ id: 1 }], session: { turns: [1, 2] } }
+  assert.equal(viewIdentity(state), viewIdentity(refilled))
+  const goals = { roomId: 'room-1', view: 'goals', drill: null, goals: [1] }
+  assert.equal(viewIdentity({ roomId: 'room-1', view: 'goals' }), viewIdentity(goals))
 })
 
 test('room, view and open session changes each change the identity', () => {

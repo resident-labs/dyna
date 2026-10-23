@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { frameKey } from './rich.ts'
+import type { CardAction, CardGuard } from './rich.ts'
 
 test('a card frame reloads when the same bytes change network policy', () => {
   const closed = { id: 'same-bytes', render: 'html' }
@@ -14,9 +15,9 @@ test('a policy change starts a fresh guard, so the new document is not a navigat
   const { guard, onLoad, forKey } = await import('./rich.ts')
   const closed = frameKey({ id: 'same-bytes' })
   const open = frameKey({ id: 'same-bytes', net: true })
-  const load = (g, key) => onLoad(forKey(g, key))
+  const load = (g: CardGuard, key: string): [CardGuard, CardAction] => onLoad(forKey(g, key))
   let g = forKey(guard(), closed)
-  let act
+  let act: CardAction
   ;[g, act] = load(g, closed)
   assert.equal(g.state, 'shown')
   // A real navigation inside the closed card uses its one restore.
