@@ -52,6 +52,13 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 		}()
 		recoveryDone := make(chan struct{})
 		if !readOnly {
+			sessions, err := rooms.Notify.Sessions.Store.ListSnapshot(false)
+			if err == nil {
+				err = retireGoalKeepers(watch, sessions, rooms.Notify.Sessions.CloseForEngine)
+			}
+			if err != nil {
+				log.Printf("goal keeper retirement: %v", err)
+			}
 			if err := rooms.Notify.Sessions.ResumeWorkersForEngine(); err != nil {
 				log.Printf("session workers not resumed: %v", err)
 			}
