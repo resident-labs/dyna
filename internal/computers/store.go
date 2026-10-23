@@ -76,7 +76,7 @@ func Ensure(ctx context.Context, id, room string) (Meta, error) {
 		return Meta{}, fmt.Errorf("%s", why)
 	}
 	if m, err := NewClient(id).Register(ctx, room); err == nil {
-		_ = os.Remove(filepath.Join(Dir(id), "failure.json"))
+		clearFailedSetup(id)
 		return m, nil
 	}
 	if err := ctx.Err(); err != nil {
@@ -101,7 +101,7 @@ func Ensure(ctx context.Context, id, room string) (Meta, error) {
 			return Meta{}, fmt.Errorf("computer daemon did not start; inspect %s", filepath.Join(Root(), "daemon.log"))
 		case <-tick.C:
 			if m, err := NewClient(id).Register(ctx, room); err == nil {
-				_ = os.Remove(filepath.Join(Dir(id), "failure.json"))
+				clearFailedSetup(id)
 				return m, nil
 			}
 		}
@@ -253,7 +253,7 @@ func GetStatus(ctx context.Context, id string) (Status, error) {
 		return Status{}, err
 	}
 	if s, err := NewClient(id).Status(ctx); err == nil {
-		if why := failureReason(id); why != "" {
+		if why, ferr := storedFailure(id); ferr == nil && why != "" {
 			s.Reason = why
 		}
 		if ok, why := Enabled(); !ok {
@@ -272,7 +272,7 @@ func GetStatus(ctx context.Context, id string) (Status, error) {
 	s.StreamRSSKiB = 0
 	s.Viewers = 0
 	s.Control = ControlAgent
-	if why := failureReason(id); why != "" {
+	if why, ferr := storedFailure(id); ferr == nil && why != "" {
 		s.Reason = why
 	}
 	if ok, why := Enabled(); !ok {
