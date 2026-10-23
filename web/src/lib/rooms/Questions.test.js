@@ -50,3 +50,47 @@ test('a delayed question snapshot cannot replace a newer answer', async () => {
   assert.equal(calls, 2)
   assert.equal(c.questions[0].state, 'answered')
 })
+
+const { bundle, importBundle, installDom, domNames } = await import('../prs/prDetailHarness.ts')
+const { rm } = await import('node:fs/promises')
+const renderedCode = await bundle({ component: '../rooms/Questions' })
+
+test('free-text Send requires content, submits once, and keeps a failed draft for retry', async () => {
+  const dom = installDom()
+  globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
+  const ui = await importBundle(renderedCode, '../rooms/Questions')
+  let finish, fail
+  const sent = []
+  const component = ui.mount(ui.default, { target: document.getElementById('app'), props: {
+    roomId: 'r', questions: [{ id: 'q1', to: 'owner', state: 'open', askerName: 'agent', askerHue: 1, text: 'What should we do?', meanwhile: 'Reviewing', askedAt: '2026-10-22T00:00:00Z', options: [] }],
+    onanswer: (...args) => { sent.push(args); return new Promise((resolve, reject) => { finish = resolve; fail = reject }) },
+  } })
+  const settle = async () => { for (let i = 0; i < 4; i++) { await Promise.resolve(); ui.flushSync() } }
+  try {
+    ui.flushSync()
+    const input = document.querySelector('input')
+    const button = document.querySelector('button[type=submit]')
+    assert.ok(input && button)
+    assert.equal(button.disabled, true)
+    input.value = '  '; input.dispatchEvent(new Event('input', { bubbles: true })); ui.flushSync()
+    assert.equal(button.disabled, true)
+    input.value = 'Keep the draft'; input.dispatchEvent(new Event('input', { bubbles: true })); ui.flushSync()
+    assert.equal(button.disabled, false)
+    button.click(); button.click(); ui.flushSync()
+    assert.deepEqual(sent, [['q1', '', 'Keep the draft']])
+    assert.equal(button.disabled, true)
+    fail(new Error('Try again')); await settle()
+    assert.equal(input.value, 'Keep the draft')
+    assert.equal(button.disabled, false)
+    document.querySelector('form').requestSubmit(); ui.flushSync()
+    assert.equal(sent.length, 2)
+    finish(); await settle()
+    assert.equal(input.value, '')
+    assert.equal(button.disabled, true)
+  } finally {
+    await ui.unmount(component)
+    dom.window.close()
+    for (const name of [...domNames, 'HTMLMediaElement']) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
