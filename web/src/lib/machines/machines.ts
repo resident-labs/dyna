@@ -7,7 +7,16 @@ export function roleLabel(role: MachineRole): string {
 
 // statusText words a machine's status for a title or a row.
 export function statusText(status: MachineStatus): string {
-  return status === 'online' ? 'Online' : status === 'off' ? 'Off' : 'Not probed'
+  switch (status) {
+    case 'online':
+      return 'Online'
+    case 'disabled':
+      return 'Disabled'
+    case 'offline':
+      return 'Offline'
+    default:
+      return 'Not probed'
+  }
 }
 
 // count is one named figure: "3 agents", "1 computer".
@@ -16,12 +25,13 @@ export function count(n: number, noun: string): string {
 }
 
 // summaryParts lists the counts a machine row shows. A machine reports only
-// what it has: no CI slots means no CI part, and a remote machine reports no
-// live figures until the probe reads them.
+// what it has: no CI role means no CI part, and a remote machine reports no
+// live figure until the probe reads it. A CI machine always shows its slots,
+// with the used count once the CI work reports one.
 export function summaryParts(machine: MachineSummary): string[] {
   const parts: string[] = []
   if (machine.agents !== undefined) parts.push(count(machine.agents, 'agent'))
-  if (machine.ci) parts.push(`CI ${machine.ci.used}/${machine.ci.slots} slots`)
+  if (machine.roles.includes('ci')) parts.push(machine.ci ? `CI ${machine.ci.used}/${machine.ci.slots} slots` : `CI ${machine.ciSlots} slots`)
   if (machine.computers !== undefined) parts.push(count(machine.computers, 'computer'))
   return parts
 }
@@ -36,17 +46,18 @@ export function statusCounts(machines: readonly MachineSummary[]): { status: Mac
   const of = (status: MachineStatus) => machines.filter((m) => m.status === status).length
   return [
     { status: 'online', n: of('online') },
-    { status: 'off', n: of('off') },
+    { status: 'disabled', n: of('disabled') },
+    { status: 'offline', n: of('offline') },
     { status: 'unknown', n: of('unknown') },
   ]
 }
 
-// machinesSub is the Machines header's subline: "2 online · 1 off". It leaves
-// out a count of zero, and says so when there is no machine at all.
+// machinesSub is the Machines header's subline: "2 online · 1 disabled". It
+// leaves out a status with no machine, and says so when there is none at all.
 export function machinesSub(machines: readonly MachineSummary[] | null): string {
   if (!machines) return ''
   if (!machines.length) return 'No machines yet'
-  const words: Record<MachineStatus, string> = { online: 'online', off: 'off', unknown: 'not probed' }
+  const words: Record<MachineStatus, string> = { online: 'online', disabled: 'disabled', offline: 'offline', unknown: 'not probed' }
   return statusCounts(machines)
     .filter((c) => c.n > 0)
     .map((c) => `${c.n} ${words[c.status]}`)
@@ -54,7 +65,7 @@ export function machinesSub(machines: readonly MachineSummary[] | null): string 
 }
 
 // loadPct is a machine's CPU use for its load bar. A machine without a figure
-// has an empty bar, not one at zero.
+// has no bar, not one at zero.
 export function loadPct(machine: MachineSummary): number | null {
   return machine.cpu === undefined ? null : Math.max(0, Math.min(100, machine.cpu))
 }

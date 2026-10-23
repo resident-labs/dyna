@@ -15,7 +15,7 @@
   let counts = $derived(summaryText(machine))
 </script>
 
-<button class="row" class:sel={selected} onclick={onopen} aria-current={selected ? 'true' : undefined} title="{machine.name} · {statusText(machine.status)}">
+<button class="row" class:sel={selected} class:quiet={machine.status === 'disabled'} onclick={onopen} aria-current={selected ? 'true' : undefined} title="{machine.name} · {statusText(machine.status)}">
   <span class="dot {machine.status}" aria-hidden="true"></span>
   <span class="body">
     <span class="top">
@@ -47,9 +47,14 @@
   }
   .row:active { background: var(--select); }
   .row.sel { background: var(--select); color: var(--ink); }
+  /* A switched off machine is quiet, not a fault: only an unreachable one is red. */
+  .row.quiet .name { color: var(--muted); font-weight: 500; }
   .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--faint); }
   .dot.online { background: var(--sage); }
-  .dot.off { background: var(--coral); }
+  .dot.disabled { background: var(--faint); }
+  .dot.offline { background: var(--coral); }
+  /* Not probed yet: a ring, so it reads as unknown rather than quiet. */
+  .dot.unknown { background: transparent; box-shadow: inset 0 0 0 1.5px var(--faint); }
   .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
   .top { display: flex; align-items: center; gap: 5px; min-width: 0; }
   .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
