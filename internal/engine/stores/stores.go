@@ -83,6 +83,7 @@ var migrations = []func(dataDir string) error{
 	shells.Migrate,
 	state.MigrateRequests,
 	subagent.Migrate,
+	migrateQuestionWithdrawals,
 	runstore.Migrate,
 	attempts.Migrate,
 	webpush.Migrate,
