@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,7 +16,6 @@ import (
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/lanesync"
 	"dyna-agent/internal/machines"
-	"dyna-agent/internal/parentcheckin"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/roomsvc"
@@ -37,6 +37,10 @@ type workerSignals struct {
 	channels map[string]chan struct{}
 	mu       sync.Mutex
 	sessions sessionInputs
+	// turnEnds holds the bound sessions whose turn ended since the hooks
+	// worker last fired their session-turn-ended events. One event per session
+	// per pass, however many turns it ran in between.
+	turnEnds map[string]bool
 	// recheckInstructions is set while the worker loop runs.
 	recheckInstructions func()
 	// sweeps marks the workers whose next pass is a safety sweep. An event
@@ -74,6 +78,10 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 		s.sessions.rooms = map[string]bool{}
 		s.sessions.roots = map[string]bool{}
 	}
+	if s.turnEnds == nil {
+		s.turnEnds = map[string]bool{}
+	}
+	turnEnded := false
 	switch ev.Kind {
 	case "posts":
 		add := func(address string, ids map[string]string) {
@@ -99,6 +107,10 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 				wakeWorker(s.channels["checkins"])
 				if id := post.SessionIDs[post.From]; id != "" {
 					s.sessions.targets[id] = true
+					// A bound session's turn end fires the session-turn-ended
+					// hook event, so a job that reacts to it starts at once.
+					s.turnEnds[id] = true
+					turnEnded = true
 				}
 			}
 		}
@@ -113,6 +125,9 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 	s.mu.Unlock()
 	if pending {
 		wakeWorker(s.channels["sessions"])
+	}
+	if turnEnded {
+		wakeWorker(s.channels["hooks"])
 	}
 	kind := ev.Kind
 	if kind == "changes" {
@@ -158,6 +173,20 @@ func (s *workerSignals) takeSessions() sessionInputs {
 	batch := s.sessions
 	s.sessions = sessionInputs{}
 	return batch
+}
+
+// takeTurnEnds returns the bound sessions whose turn ended since the last
+// hooks pass.
+func (s *workerSignals) takeTurnEnds() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]string, 0, len(s.turnEnds))
+	for id := range s.turnEnds {
+		ids = append(ids, id)
+	}
+	clear(s.turnEnds)
+	sort.Strings(ids)
+	return ids
 }
 
 // recoverSessions asks for a pass over every session, to catch up on writes
@@ -241,10 +270,12 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 	}
 	syncer := lanesync.New()
 	spool := hooks.New()
-	checkins := parentcheckin.New(rooms.Notify)
 	return workers{
-		prs:      prs.Tick,
-		checkins: checkins.Tick,
+		prs: prs.Tick,
+		checkins: func(ctx context.Context) (time.Time, error) {
+			_, next, err := RunParentCheckIns(ctx, rooms)
+			return next, err
+		},
 		questions: func(ctx context.Context) (time.Time, error) {
 			sweep := signals.takeSweep("questions")
 			var delivered []string
@@ -263,11 +294,14 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 		sweep: rooms.Notify.Sessions.SweepDormantSessions,
 		hooks: func(ctx context.Context) (time.Time, error) {
 			sweep := signals.takeSweep("hooks")
+			// A turn end fires its event before the spool drains, so a job for
+			// it starts in this pass and not one interval later.
+			turnEnds := fireTurnEnds(ctx, rooms.Notify.Sessions.Store, spool, signals.takeTurnEnds())
 			ran, next, err := spool.Drain(ctx, time.Now())
 			if sweep {
 				signals.found("hook spool", ran)
 			}
-			return next, err
+			return next, errors.Join(turnEnds, err)
 		},
 		sessions: func(ctx context.Context) error { return deliverSessions(ctx, rooms.Notify.Sessions, signals) },
 		merges:   prs.MergeTick,
@@ -312,6 +346,21 @@ func deliverSessions(ctx context.Context, m *subagent.Manager, signals *workerSi
 		signals.found("session delivery", started)
 	}
 	return errors.Join(failures...)
+}
+
+// fireTurnEnds runs the session-turn-ended event for each session whose turn
+// just ended. The event names the session's own working directory, and Emit
+// resolves it to the repository that holds the hooks for it.
+func fireTurnEnds(ctx context.Context, sessions *subagent.Store, h hooks.Service, ids []string) error {
+	var errs []error
+	for _, id := range ids {
+		info, err := sessions.Inspect(id)
+		if err != nil {
+			continue // a session that is gone has no turn to report
+		}
+		errs = append(errs, h.Emit(ctx, hooks.Event{Event: hooks.SessionTurnEnded, Repo: info.Dir, Worktree: info.Dir, Session: info.Address(), Room: info.RoomID}))
+	}
+	return errors.Join(errs...)
 }
 
 // runWorker keeps one worker serial with itself. Other workers never wait for

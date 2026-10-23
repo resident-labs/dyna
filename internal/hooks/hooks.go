@@ -30,6 +30,9 @@ const (
 	MainUpdated     = "main-updated"
 	SessionFinish   = "session-finish"
 	Schedule        = "schedule"
+	// SessionTurnEnded fires when a bound session's turn ends, so a job that
+	// reacts to a turn can start at once instead of at its next interval.
+	SessionTurnEnded = "session-turn-ended"
 )
 
 type Hook struct {
@@ -105,7 +108,7 @@ func Validate(h Hook) error {
 		return fmt.Errorf("hook name must use 1 to 64 letters, digits, underscores, or hyphens")
 	}
 	switch h.Event {
-	case WorktreeCreated, BeforeLand, AfterLand, PRMerged, MainUpdated, SessionFinish, Schedule:
+	case WorktreeCreated, BeforeLand, AfterLand, PRMerged, MainUpdated, SessionFinish, Schedule, SessionTurnEnded:
 	default:
 		return fmt.Errorf("unknown hook event %q", h.Event)
 	}
