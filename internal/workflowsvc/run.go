@@ -5,14 +5,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
+	"sync"
 	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/callspec"
+	"dyna-agent/internal/database"
+	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/plan"
 	"dyna-agent/internal/planclient"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/state"
+	datastore "dyna-agent/internal/store"
 	"dyna-agent/internal/workflow"
 )
 
@@ -46,6 +54,10 @@ type Result struct {
 
 // Execute owns the run lifecycle, including final status and completion delivery.
 func Execute(ctx context.Context, opts Options, store *profile.Store, observer Observer) (Result, error) {
+	return executeWithOutbox(ctx, opts, store, observer, newCoordinatorOutbox)
+}
+
+func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, observer Observer, factory func(string) coordinatorOutbox) (Result, error) {
 	if err := authority.Check("run", authority.Current(), nil); err != nil {
 		return Result{}, err
 	}
@@ -82,6 +94,8 @@ func Execute(ctx context.Context, opts Options, store *profile.Store, observer O
 	if err != nil {
 		return Result{}, err
 	}
+	prefix := fmt.Sprintf("%s/%d/%d", run.Meta.ID, os.Getpid(), time.Now().UnixNano())
+	defer installRunWriters(ctx, run, factory(prefix))()
 	if _, planErr := plan.Ensure(run.Dir, opts.ScriptSrc, plan.Options{WriteAncestry: planclient.StampAncestry, SourcePath: opts.ScriptPath, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir, ResumedFrom: opts.ResumeFrom}); planErr != nil {
 		if errors.Is(planErr, plan.ErrAncestry) {
 			err = planErr
@@ -115,9 +129,19 @@ func Execute(ctx context.Context, opts Options, store *profile.Store, observer O
 			status = "error"
 		}
 	}
-	run.Append(runstore.Event{T: "run_end", Status: status, DurMs: time.Since(start).Milliseconds()})
-	run.Finish(status, value, err)
-	if run.Meta.Detached {
+	duration := time.Since(start)
+	err = errors.Join(err, run.Finish(status, value, err))
+	finished := runstore.IsFinishedStatus(run.Meta.Status) && !run.Meta.EndedAt.IsZero()
+	if finished {
+		status = run.Meta.Status
+		if status != "ok" && err == nil {
+			err = fmt.Errorf("run finished %s: %s", status, run.Meta.Error)
+		}
+	} else {
+		status = "error"
+	}
+	run.Append(runstore.Event{T: "run_end", Status: status, DurMs: duration.Milliseconds()})
+	if finished && run.Meta.Detached {
 		if _, nerr := notify.Default().CompleteRun(context.Background(), run.Meta.ID); nerr != nil {
 			warning("completion message: " + nerr.Error())
 		}
@@ -126,4 +150,54 @@ func Execute(ctx context.Context, opts Options, store *profile.Store, observer O
 		observer.OnCache(cache.Stats())
 	}
 	return Result{ID: run.Meta.ID, Status: status, Value: value}, err
+}
+
+// coordinatorOutbox keeps directory writes and terminal acknowledgement ordered.
+// Native admission uses a separate path until the old #1834 integration is ported.
+type coordinatorOutbox interface {
+	CallResultWithinID(context.Context, any, string, ...any) (string, error)
+	CallResult(context.Context, any, string, ...any) error
+	ArmTerminal(context.Context)
+	Close(context.Context)
+}
+
+func newCoordinatorOutbox(prefix string) coordinatorOutbox {
+	out := engineclient.NewOutbox(engineclient.New(""), prefix)
+	dataDir := datastore.DataDir()
+	out.Spool = func(queued []engineclient.Queued) error {
+		db, err := database.Open(dataDir)
+		if err != nil {
+			return err
+		}
+		runID := strings.SplitN(prefix, "/", 2)[0]
+		return engineclient.AppendRunnerSpool(context.Background(), state.For(db), dataDir, runID, queued)
+	}
+	return out
+}
+
+// installRunWriters runs before plan or workflow artifacts can name directories.
+func installRunWriters(ctx context.Context, run *runstore.Run, out coordinatorOutbox) func() {
+	var once sync.Once
+	var terminal context.Context
+	var stop context.CancelFunc
+	arm := func() context.Context {
+		once.Do(func() {
+			terminal, stop = context.WithTimeout(context.Background(), 10*time.Minute)
+			out.ArmTerminal(terminal)
+		})
+		return terminal
+	}
+	run.SetWriters(func(dirs []string) error {
+		_, err := out.CallResultWithinID(ctx, nil, "AddRunDirectories", callspec.RunDirectories{Run: run.Meta.ID, Directories: dirs})
+		return err
+	}, func(in callspec.RunFinish) (runstore.Meta, error) {
+		arm()
+		var meta runstore.Meta
+		err := out.CallResult(context.WithoutCancel(ctx), &meta, "FinishRun", in)
+		if err == nil && (meta.ID != in.Run || !runstore.IsFinishedStatus(meta.Status) || meta.EndedAt.IsZero()) {
+			err = errors.New("engine did not acknowledge the run's terminal state")
+		}
+		return meta, err
+	})
+	return func() { terminal := arm(); defer stop(); out.Close(terminal) }
 }

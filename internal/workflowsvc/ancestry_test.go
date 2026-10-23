@@ -42,7 +42,7 @@ func TestExecuteStopsWhenAncestryWriteFails(t *testing.T) {
 	source.Finish("ok", "1", nil)
 	t.Setenv("DYNA_RUN_ID", "wf_failed")
 	profiles := &profile.Store{Profiles: []profile.Profile{{Name: "mock", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 5}}}
-	result, err := Execute(context.Background(), Options{ScriptSrc: "return 7", ResumeFrom: source.Meta.ID, WorkDir: t.TempDir()}, profiles, Observer{})
+	result, err := executeWithOutbox(context.Background(), Options{ScriptSrc: "return 7", ResumeFrom: source.Meta.ID, WorkDir: t.TempDir()}, profiles, Observer{}, func(string) coordinatorOutbox { return &lifecycleOutbox{} })
 	if err == nil || !strings.Contains(err.Error(), "engine refused ancestry") {
 		t.Fatalf("execute = %+v,%v", result, err)
 	}
@@ -89,7 +89,7 @@ func TestExecuteGraphFailureOnlyStopsResumedRun(t *testing.T) {
 			}
 			profiles := &profile.Store{Profiles: []profile.Profile{{Name: "mock", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 5}}}
 			warnings := 0
-			result, err := Execute(context.Background(), Options{ScriptSrc: "return 7", ResumeFrom: parent, WorkDir: t.TempDir()}, profiles, Observer{OnWarning: func(string) { warnings++ }})
+			result, err := executeWithOutbox(context.Background(), Options{ScriptSrc: "return 7", ResumeFrom: parent, WorkDir: t.TempDir()}, profiles, Observer{OnWarning: func(string) { warnings++ }}, func(string) coordinatorOutbox { return &lifecycleOutbox{} })
 			if resume {
 				if !errors.Is(err, plan.ErrAncestry) || result.Status != "error" {
 					t.Fatalf("resumed graph failure = %+v,%v", result, err)
