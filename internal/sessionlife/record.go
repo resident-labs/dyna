@@ -203,14 +203,33 @@ func loadRaw(q querier, sessions, id string) ([]byte, Version, error) {
 // LoadStored decodes a canonical record from the caller's database snapshot.
 // It never imports or reads a legacy file; a missing row returns sql.ErrNoRows.
 func LoadStored(ctx context.Context, q state.Reader, id string, v any) error {
+	_, err := LoadStoredVersion(ctx, q, id, v)
+	return err
+}
+
+// LoadStoredVersion is LoadStored that also returns the version it decoded.
+func LoadStoredVersion(ctx context.Context, q state.Reader, id string, v any) (Version, error) {
 	if err := checkID(id); err != nil {
-		return err
+		return "", err
 	}
-	raw, _, err := loadStored(ctx, q, id)
+	raw, version, err := loadStored(ctx, q, id)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return decode(id, raw, v)
+	return version, decode(id, raw, v)
+}
+
+// StoredVersion reads only the version of a canonical record, so a caller
+// that caches decoded records can skip the load and decode while it holds.
+func StoredVersion(ctx context.Context, q state.Reader, id string) (Version, error) {
+	if err := checkID(id); err != nil {
+		return "", err
+	}
+	var revision int64
+	if err := q.QueryRowContext(ctx, "SELECT revision FROM session_records WHERE id = ?", id).Scan(&revision); err != nil {
+		return "", err
+	}
+	return rowVersion(revision), nil
 }
 
 func loadStored(ctx context.Context, q querier, id string) ([]byte, Version, error) {
