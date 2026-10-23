@@ -72,6 +72,10 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		if strings.Contains(script, "tar -C") {
 			return fakeNodeReports(out, checks, true)
 		}
+		// Every node script must parse: a setup that does not stops each run.
+		if output, err := exec.Command("bash", "-n", "-c", script).CombinedOutput(); name == "bash" && err != nil {
+			return fmt.Errorf("invalid script: %w: %s", err, output)
+		}
 		if name != "systemd-run" {
 			return nil
 		}
@@ -131,7 +135,11 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		result, err := runner.Run(t.Context(), Request{RepoDir: t.TempDir(), Suites: []string{"go", "cross-build"}, Parallelism: slots, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
 		done <- outcome{result, err}
 	}()
-	<-slotsStarted
+	select {
+	case <-slotsStarted:
+	case got := <-done:
+		t.Fatalf("run ended before its checks started: result=%+v err=%v", got.result, got.err)
+	}
 	close(release)
 	got := <-done
 	if got.err != nil || got.result.Status != "failed" || peak.Load() != slots {
