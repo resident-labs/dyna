@@ -173,6 +173,13 @@
     if (push) history.pushState({ pr: true }, '', h)
     else history.replaceState(history.state, '', h)
   }
+  // A running trial can include a PR outside the loaded list page.
+  function openMerge(id: string) {
+    const row = allRows.find((r) => r.changeId === id)
+    if (row) return openRow(row)
+    const number = Number(id.match(/#(\d+)$/)?.[1])
+    if (number) onpr(number)
+  }
   // The list's own address, for the entry Back returns to.
   const listAddress = () => location.pathname + location.search + roomHash(roomId, inPRs ? 'github' : 'issues')
   function openIssue(n: number) {
@@ -376,7 +383,7 @@
   {#if inPRs}
       <div class="list prlist" hidden={narrow && !!chg}>
         <TabHeader title="Pull requests" usage={`${listRows.length} open`} />
-        <MergingStrip status={mergeStatus} error={mergeError} onpick={(id) => { const row = allRows.find((r) => r.changeId === id); if (row) openRow(row) }} />
+        <MergingStrip status={mergeStatus} error={mergeError} onpick={openMerge} />
         {@render filters()}
         {#if error}<p class="more err">GitHub did not answer: {error}</p>{:else if list?.more}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
         {#if anyRows}
