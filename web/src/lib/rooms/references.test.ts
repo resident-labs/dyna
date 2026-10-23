@@ -10,7 +10,7 @@ const code = await bundle({
   api: `export const api = {
     preview: () => Promise.resolve({mentions: [], wakes: []}),
     githubList: (_room, kind) => Promise.resolve({items: kind === 'pr' ? [{number: 123, title: 'Fix composer focus', state: 'OPEN', url: 'https://github.com/o/r/pull/123'}] : [{number: 123, title: 'Old composer issue', state: 'CLOSED', url: 'https://github.com/o/r/issues/123'}]}),
-    issues: () => Promise.resolve([{id: 'msg_f05fdb28f01d83', title: 'Keep the fixture running', state: 'open'}]),
+    issues: () => Promise.resolve([{id: 'msg_f05fdb28f01d83', number: 12, title: 'Keep the fixture running', state: 'open'}]),
   }`,
 })
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
@@ -34,7 +34,7 @@ test('the attach picker accepts a typed number and sends a reference-only post',
     assert.equal(rows.length, 3)
     for (const [index, title, label, state] of [
       [0, 'Fix composer focus', 'PR #123', 'open'],
-      [1, 'Keep the fixture running', 'Issue', 'open'],
+      [1, 'Keep the fixture running', 'Issue D-12', 'open'],
       [2, 'Old composer issue', 'Issue #123', 'closed'],
     ] as const) {
       const row = need(rows[index])
@@ -45,6 +45,18 @@ test('the attach picker accepts a typed number and sends a reference-only post',
       assert.doesNotMatch(row.textContent ?? '', /msg_/)
     }
     assert.equal(element(need(rows[1]), '.room-tag').textContent, 'room')
+    // The compact spelling finds the same room issue, and its chip keeps D-12.
+    input.value = '#d12'
+    input.setSelectionRange(4, 4)
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
+    await settle()
+    const roomOption = element<HTMLButtonElement>(target, '[role="option"]')
+    assert.match(roomOption.textContent ?? '', /Keep the fixture running.*Issue D-12/)
+    roomOption.click()
+    await settle()
+    assert.match(element(target, '.references').textContent ?? '', /Issue D-12: Keep the fixture running/)
+    element<HTMLButtonElement>(target, '[aria-label="Remove Issue D-12"]').click()
+    await settle()
     input.value = '#123'
     input.setSelectionRange(4, 4)
     input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
