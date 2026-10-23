@@ -634,8 +634,7 @@ func (s *Store) deliveredIDs(id string, turns int) (map[string]bool, error) {
 
 // writeTurn stores turn t of session id in dyna.db, then writes the
 // previous release's copy of it (see mirrorTurn). Callers hold the session
-// lock. It imports an older binary's file first, so the import, this write
-// and the copy follow the order state.Mirror needs.
+// lock. Existing canonical state takes priority over retained turn files.
 func (s *Store) writeTurn(id string, t Turn) error {
 	return s.writeTurnContext(context.Background(), id, t)
 }
@@ -651,7 +650,7 @@ func (s *Store) writeTurnContext(ctx context.Context, id string, t Turn) error {
 	if err != nil {
 		return err
 	}
-	db, err := s.importTurnFile(id, t.N, true)
+	db, err := s.turnsDB()
 	if err != nil {
 		return err
 	}
@@ -722,7 +721,7 @@ func (s *Store) Turns(id string) ([]Turn, error) {
 	unreadable := map[int]error{}
 	for n := 1; n <= m.Turns; n++ {
 		if !present[n] {
-			_, unreadable[n] = s.importTurnFile(id, n, false)
+			_, unreadable[n] = s.importTurnFile(id, n)
 		}
 	}
 	turns := make([]Turn, 0, m.Turns)
