@@ -199,8 +199,7 @@ type steeringState struct {
 	QueueStart int64 `json:"queueStart,omitempty"`
 }
 
-// Meta is a run's record. It lives in dyna.db, with a meta.json copy for the
-// previous release.
+// Meta is a run's record. It lives in dyna.db.
 type Meta struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
@@ -391,8 +390,7 @@ func create(name, scriptSrc string, args any) (*Run, error) {
 	return r, nil
 }
 
-// saveMeta stores the run's meta in its row, then the earlier release's
-// meta.json copy.
+// saveMeta stores the run's meta in its row.
 func (r *Run) saveMeta() error {
 	_, err := changeMeta(r.Dir, r.Meta.ID, func(ctx context.Context, conn *sql.Conn) error { return upsertMeta(ctx, conn, r.Meta) })
 	return err
