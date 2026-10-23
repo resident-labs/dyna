@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { openPRs, mergePosition, reviewLabel, trialProgress, waitingReason } from './roomPRs.ts'
+import { openPRs, mergePosition, reviewLabel, trialProgress, waitingReason, waitingWords } from './roomPRs.ts'
 import type { MergeControlStatus, MergeQueueItem } from '../api/change.ts'
 
 // Do not give a blocked PR a queue place or show a merged PR as open.
@@ -34,5 +34,25 @@ test('trial progress uses only its exact head and pause wins over main CI', () =
   assert.equal(progress.nodes, 'hermeslab')
   assert.equal(progress.total, 2)
   assert.equal(progress.completed, 1)
-  assert.equal(waitingReason(status), status.reason)
+  assert.equal(waitingReason(status), null, 'a paused room has its own block, not a waiting line')
+})
+
+// The waiting line is typed facts: the kind of wait, the branch, the commit
+// and the PRs it holds. It never carries the service's sentence or a full
+// commit to the screen.
+test('the waiting line carries the wait kind, the PR numbers and the commit', () => {
+  const head = 'e1d554e3f2a52ea46a2d575803f412b2cbac2514'
+  const main = { state: 'failed', head, wait: { kind: 'failed' as const, base: 'main' } }
+  const status: MergeControlStatus = { roomId: 'r', paused: false, queue: [
+    { roomId: 'r', changeId: 'github.com/o/r#281', url: '', head: 'h1', state: 'trial-running', main },
+    { roomId: 'r', changeId: 'github.com/o/r#280', url: '', head: 'h2', state: 'trial-running', main },
+    { roomId: 'r', changeId: 'github.com/o/r#279', url: '', head: 'h3', state: 'review', main: { state: 'passed', head, wait: { kind: 'passed' as const, base: 'main' } } },
+  ], trials: [] }
+  const reason = waitingReason(status)
+  assert.ok(reason, 'a failed main CI holds the queue')
+  assert.deepEqual(reason, { kind: 'failed', base: 'main', sha: head, prs: [281, 280] })
+  assert.equal(waitingWords(reason), 'Default branch CI failed')
+  for (const value of Object.values(reason)) {
+    assert.ok(typeof value !== 'string' || !value.includes('GitHub CI'), 'no service sentence is stored')
+  }
 })

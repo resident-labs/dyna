@@ -127,7 +127,7 @@ test('a trial PR outside the loaded page opens through the existing PR route', a
 test('mergeVersion refreshes main CI without a changed PR row', async () => {
   await screen(async ({ open, text, flushSync, settle }) => {
     const t = await open()
-    assert.match(text(t), /Main CI is running/)
+    assert.match(text(t), /Waiting for default branch CI/)
     Reflect.get(globalThis, 'answers').mergeControlStatus = {
       roomId: 'r', paused: false, queue: [{ changeId: 'c1', state: 'ready', main: { state: 'passed' } }], trials: [], localCIChecks: {},
     }
@@ -135,10 +135,10 @@ test('mergeVersion refreshes main CI without a changed PR row', async () => {
     flushSync()
     await settle()
     flushSync()
-    assert.doesNotMatch(text(t), /Main CI is running|Merge status unavailable|Loading merge status/)
+    assert.doesNotMatch(text(t), /Waiting for default branch CI|Merge status unavailable|Loading merge status/)
     assert.match(text(t), /No merge running/)
     assert.equal(elements(t, '.rows .row').length, 3)
-  }, { merge: [{ changeId: 'c1', state: 'ready', main: { state: 'pending', reason: 'Main CI is running' } }] })
+  }, { merge: [{ changeId: 'c1', state: 'ready', main: { state: 'pending', head: 'e1d554e3f2a52ea46a2d575803f412b2cbac2514', wait: { kind: 'pending', base: 'main' } } }] })
 })
 
 test('the PR list has no reviewer bar, account name or reload button', async () => {
