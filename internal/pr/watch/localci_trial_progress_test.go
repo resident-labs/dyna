@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -225,4 +226,91 @@ func TestTrialCINamesAFailedCheckWithoutARunLog(t *testing.T) {
 // trialRuns is the GitHub workflow-runs response of the trial head.
 type trialRuns struct {
 	Runs []Run `json:"workflow_runs"`
+}
+
+// writeFakeJSON answers one fake GitHub read with a concrete response.
+func writeFakeJSON[T any](stdout io.Writer, value T) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(stdout, "HTTP/2.0 200 OK\r\n\r\n%s", raw)
+	return err
+}
+
+// A saved local pass decides a head on its own. A host that is briefly
+// unavailable must not restart the hosted run that local CI replaced: that wait
+// costs a full hosted run and holds work the local pass already released.
+func TestSavedLocalPassNeedsNoHostedFallback(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	if raw, err := exec.Command("git", "init", "--quiet", repoDir).CombinedOutput(); err != nil {
+		t.Fatalf("init repository: %v: %s", err, raw)
+	}
+	repo, err := localci.CanonicalRepo(ctx, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := localci.Store{DataDir: dataDir}
+	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
+		t.Fatal(err)
+	}
+	// No CI machine is registered, so the host is unavailable for this read.
+	head, prHead := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	branch := "dyna/merge-trial/1"
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
+	s := &Service{Store: &Store{Root: state.Root(dataDir)}, LocalCIRegistry: registry}
+	if err := s.Store.update(func(st *State) error {
+		st.Records[r.Key] = &r
+		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Head: head, Branch: branch, Phase: "publishing", Changes: []state.MergeTrialChange{{Key: r.Key, Head: prHead}}}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.SaveHostedRuns(ctx, repo, head, localci.HostedRuns{IDs: []int64{81}, Attempts: map[int64]int{81: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	result := localci.Result{Repo: repo, SHA: head, RoomID: r.RoomID, Node: "worker", Status: "passed"}
+	for _, name := range requiredRegisteredChecks(localci.WorkflowSuites()) {
+		result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: "passed"})
+	}
+	if err := registry.SaveResult(ctx, result); err != nil {
+		t.Fatal(err)
+	}
+	run := Run{ID: 81, Attempt: 1, CheckSuiteID: 9, Path: ".github/workflows/ci.yml", HeadSHA: head, HeadBranch: branch, Event: "push", Status: "completed", Conclusion: "cancelled"}
+	reruns := 0
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		endpoint := ""
+		for _, arg := range cmd.Args {
+			if strings.HasPrefix(arg, "repos/") {
+				endpoint = arg
+			}
+		}
+		switch {
+		case strings.HasSuffix(endpoint, "/rerun"):
+			reruns++
+			return writeFakeJSON(cmd.Stdout, struct{}{})
+		case strings.HasSuffix(endpoint, "/actions/runs/81"):
+			return writeFakeJSON(cmd.Stdout, run)
+		case strings.Contains(endpoint, "/check-runs?"):
+			return writeFakeJSON(cmd.Stdout, trialChecks{})
+		case strings.Contains(endpoint, "/statuses?"):
+			return writeFakeJSON(cmd.Stdout, []Status{})
+		case strings.Contains(endpoint, "/actions/runs?"):
+			return writeFakeJSON(cmd.Stdout, trialRuns{Runs: []Run{run}})
+		default:
+			return fmt.Errorf("unexpected endpoint %s", endpoint)
+		}
+	}
+	got, err := s.mergeTrialCI(ctx, r, branch, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "passed" {
+		t.Fatalf("ci=%s reason=%q; a saved local pass waited for hosted CI", got.Status, got.Reason)
+	}
+	if reruns != 0 {
+		t.Fatalf("reran hosted CI %d times for a head that local CI already passed", reruns)
+	}
 }
