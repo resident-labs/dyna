@@ -128,26 +128,6 @@ type Message struct {
 	Attachments []Attachment `json:"attachments,omitempty"`
 }
 
-// TODO: legacy/shim remove later — posts without a wake field keep their old pending-input behavior; remove when retained room logs all have explicit wake intent.
-func (m *Message) UnmarshalJSON(data []byte) error {
-	type messageValue Message
-	var value messageValue
-	wire := struct {
-		*messageValue
-		Wake *bool `json:"wake"`
-	}{messageValue: &value}
-	if err := json.Unmarshal(data, &wire); err != nil {
-		return err
-	}
-	*m = Message(value)
-	if wire.Wake != nil {
-		m.Wake = *wire.Wake
-	} else {
-		m.Wake = m.Kind != "instructions"
-	}
-	return nil
-}
-
 // OwnerLabel names the room owner as a speaker. Root and the human both use
 // the room's name as their address; the human flag tells them apart.
 func OwnerLabel(human bool) string {
@@ -1031,7 +1011,7 @@ func (s *Store) readFromUncached(roomID string, offset int64) ([]Message, int64,
 		return nil, offset, err
 	}
 	var out []Message
-	next, err := s.scanMessageLines(io.LimitReader(f, 4<<20), offset, func(line messageLine) {
+	next, err := s.scanMessageLines(roomID, io.LimitReader(f, 4<<20), offset, func(line messageLine) {
 		if line.msg.ID != "" {
 			out = append(out, line.msg)
 		}
