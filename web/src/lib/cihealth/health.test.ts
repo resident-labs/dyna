@@ -168,6 +168,11 @@ test('the job ranking sorts by typical time and reads the trend from the newer h
   assert.equal(ranks[1]?.trend, 'steady')
   // Fewer than four runs is too little to call a trend.
   assert.equal(jobRanking(runs.slice(0, 3))[0]?.trend, 'steady')
+  // Two running runs with partial 5 s times must not read as a speed-up.
+  const running = [5, 5].map((ms, i) => ciRun(`p${i}`, { status: 'in_progress', conclusion: '', jobs: [{ id: 1, name: 'go-test', busyMs: ms * 1000 }] }))
+  const mixed = jobRanking([...running, ...runs])[0]
+  assert.equal(mixed?.typicalMs, 45000)
+  assert.equal(mixed?.trend, 'slower')
 })
 
 test('allowing a test keeps every other budget field and adds the reason', () => {
