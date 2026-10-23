@@ -253,6 +253,9 @@ func Install(ctx context.Context, o Options) error {
 	}
 	// TODO: legacy/shim remove later — preserves the pre-unit transient computer service until it stops and is collected; remove after all installs use the persistent unit.
 	transient := strings.Contains(state, "Transient=yes")
+	if err := retireEngineRestart(ctx, o.Dir, run); err != nil {
+		return err
+	}
 	if err := Write(o); err != nil {
 		return err
 	}
