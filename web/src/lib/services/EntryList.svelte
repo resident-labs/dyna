@@ -1,6 +1,7 @@
 <script lang="ts">
-  // One tab's results, newest first. An entry opens the session behind it when
-  // there is one. A trial lists its outcomes under its name.
+  // One tab's results, newest first. An entry opens the session behind it, or
+  // the hook run's log, when there is one. A trial lists its outcomes under its
+  // name.
   import { clock } from '../ui/format.ts'
   import type { Entry } from './tabs.ts'
 
@@ -8,8 +9,9 @@
     entries: Entry[]
     empty: string
     onOpen: (session: string) => void
+    onRun: (run: { hook: string; id: string }) => void
   }
-  let { entries, empty, onOpen }: Props = $props()
+  let { entries, empty, onOpen, onRun }: Props = $props()
 
   // A tab left open past midnight must date a line the next day, so the
   // comparison uses the day the line is drawn.
@@ -25,7 +27,10 @@
       <li class="it {entry.tone}">
         <time datetime={new Date(entry.at).toISOString()}>{when(entry.at)}</time>
         <span class="what">
-          {#if entry.session}
+          {#if entry.run}
+            {@const run = entry.run}
+            <button class="open" onclick={() => onRun(run)}>{entry.text}</button>
+          {:else if entry.session}
             <button class="open" onclick={() => onOpen(entry.session)}>{entry.text}</button>
           {:else}
             {entry.text}

@@ -16,7 +16,7 @@ test('the queue separates trials, ready changes, failures and drafts', () => {
 
 test('only enabled schedule hooks with a valid run have a next time', () => {
   const hook = { name: 'self-update', label: '', event: 'schedule', everyMinutes: 60, disabled: false }
-  const lastRun = { result: 'pass', startedAt: '2026-10-21T22:49:00Z', finishedAt: '2026-10-21T22:49:36Z' }
+  const lastRun = { id: 'run-1', result: 'pass', startedAt: '2026-10-21T22:49:00Z', finishedAt: '2026-10-21T22:49:36Z' }
   assert.equal(nextAt({ hook, lastRun }), '2026-10-21T23:49:00.000Z')
   assert.equal(nextAt({ hook: { ...hook, disabled: true }, lastRun }), '')
   assert.equal(nextAt({ hook: { ...hook, event: 'pr-merged' }, lastRun }), '')
@@ -35,7 +35,7 @@ test('durations keep zero retention off and test health hides at zero', () => {
 
 const inputs = (over: Partial<Inputs> = {}): Inputs => ({
   reviewer: null, queue: null, mergePaused: null, history: [], services: null, notices: null,
-  hooks: null, runs: {}, settings: null, budget: null, accounts: null, usage: null, voice: null,
+  hooks: null, runs: {}, reasons: {}, settings: null, budget: null, accounts: null, usage: null, voice: null,
   changes: [], testHealth: null, laneSync: null, repo: '/repo', ...over,
 })
 const row = (over: Partial<Inputs>, id: string) => {
@@ -73,7 +73,7 @@ test('profiles preserve Auto and partial cost falls back to turns', () => {
 })
 
 test('the radar counts each overlapping change once', () => {
-  const hooks = [{ hook: { name: 'self-update', label: '', event: 'schedule', everyMinutes: 60, disabled: false }, lastRun: { result: 'pass', startedAt: '2026-10-21T22:49:00Z', finishedAt: '2026-10-21T22:49:36Z' } }]
+  const hooks = [{ hook: { name: 'self-update', label: '', event: 'schedule', everyMinutes: 60, disabled: false }, lastRun: { id: 'run-1', result: 'pass', startedAt: '2026-10-21T22:49:00Z', finishedAt: '2026-10-21T22:49:36Z' } }]
   const rows = buildRows(inputs({ hooks, changes: [{ overlaps: 2 }, { overlaps: 1 }] }))
   // The count is already in the line, so the row carries no second number.
   assert.equal(rows.find((r) => r.id === 'radar')?.detail, '2 open changes overlap another')
@@ -91,7 +91,7 @@ test('the built-in update hook names its main-updated trigger', () => {
 
 test('a pending update reports running until it has a real result', () => {
   const hook = { name: 'self-update', label: 'Update Dyna', event: 'main-updated', everyMinutes: 0, disabled: false }
-  const lastRun = { result: 'pending', startedAt: '2026-10-21T22:49:00Z', finishedAt: '' }
+  const lastRun = { id: 'run-1', result: 'pending', startedAt: '2026-10-21T22:49:00Z', finishedAt: '' }
   const update = row({ hooks: [{ hook, lastRun }] }, 'update')
   assert.equal(update.state, 'running')
   assert.equal(update.tone, 'live')
