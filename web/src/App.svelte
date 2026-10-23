@@ -111,8 +111,10 @@
   import { dmView } from './lib/sessions/dm.ts'
   import { roomLabel } from './lib/ui/format.ts'
   import { parseDetailHref } from './lib/ui/details.ts'
-  import { prHash, parsePRHash, parseIssueHash, parseFileHash } from './lib/prs/prlink.ts'
-  import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from './lib/ui/route.ts'
+  import { parsePRHash, parseIssueHash, parseFileHash } from './lib/prs/prlink.ts'
+  import { ROOT_SESSION, parseRoute, routeHash, routeSession } from './lib/ui/route.ts'
+  import { bindRouter, router } from './lib/app/router.svelte.ts'
+  import type { Drill } from './lib/app/router.svelte.ts'
   import { paletteTargets } from './lib/ui/paletteTargets.ts'
   import MachinePage from './lib/machines/MachinePage.svelte'
   import { machinesSub } from './lib/machines/machines.ts'
@@ -140,7 +142,6 @@
   import type { CallRequest } from './lib/voice/callRequests.ts'
   import type { BulkAction, BulkValue } from './lib/sessions/bulkSessions.ts'
   import type { BootResult, RouteNotice } from './lib/settings/link.ts'
-  import type { Route } from './lib/ui/route.ts'
   import type { ModelSelection } from './lib/settings/profiles/state.ts'
   import type { RunAgent } from './lib/api/workflow.ts'
 
@@ -154,10 +155,6 @@
     address?: string
     room?: string
     roomId?: string
-  }
-  interface Drill extends Member {
-    id: string
-    rootSeat?: boolean
   }
   interface PromptSpec {
     title: string
@@ -250,7 +247,23 @@
   // started turns on once the first room is chosen. Before that, the
   // empty room is not the owner's choice and must not overwrite the saved one.
   let started = $state(false)
-  let roomId = $state('')
+  // The open screen's state lives in lib/app/router.svelte.ts. The page reads
+  // it through these aliases and writes it through router, so the template and
+  // the code below name the screen as they always have.
+  const roomId = $derived(router.roomId) // the open room, or '' for the all-rooms page
+  const view = $derived(router.view) // the open view of the room
+  const drill = $derived(router.drill) // the member whose transcript is open
+  const sessionTurn = $derived(router.sessionTurn) // a completion link opens its exact stored turn
+  const openJob = $derived(router.openJob) // the shell job whose detail is open, in the jobs view
+  const openRun = $derived(router.openRun) // the run whose detail is open, in the runs view
+  const reviewOpen = $derived(router.reviewOpen)
+  const reviewTab = $derived(router.reviewTab)
+  const reviewVersion = $derived(router.reviewVersion)
+  const readOnlyDm = $derived(router.readOnlyDm) // the open transcript came from Services: no header tabs, no composer
+  const prLink = $derived(router.prLink) // a PR link from the address bar, for the Pull requests view
+  const detailRequest = $derived(router.detailRequest) // the newest detail request
+  // The router's navigation functions, called as they were when they lived here.
+  const { openView, openReview, closeReview, routeHere, showRun, openPR, syncRoute, hashChanged, clearItemLink } = router
   let voiceWidget = $state<ReturnType<typeof VoiceWidget>>()
   let callPush = $state<ReturnType<typeof callLink>>(null) // the call request a push tap opened
   let roomCalls = $derived($callRequests.filter((r) => r.room === roomId))
@@ -386,18 +399,11 @@
   let members = $state<Member[]>([])
   let hierarchy = $state<Member[]>([])
   let choices = $state<string[]>([])
-  let view = $state<string>(GENERAL)
-  let prLink = $state<ReturnType<typeof parsePRHash> | ReturnType<typeof parseIssueHash>>(null) // a PR link from the address bar, for the Pull requests view
   let unreadFrom = $state('')
-  let drill = $state<Drill | null>(null) // the member whose transcript is open
-  let readOnlyDm = $state(false) // the open transcript came from Services: no header tabs, no composer
   let session = $state<SessionData | null>(null)
   let sessionReadingHistory = $state(false)
   let threadCount = $derived(dmView(session, room || { name: '' }).threads.length)
-  let sessionTurn = $state(0) // a completion link opens its exact stored turn
-  let openJob = $state('')
   let sessionVisit = 0
-  let detailRequest = 0
   let roomRequest = 0 // room data can still load after a later view choice
   let queue = $state<QueueItem[]>([]) // steering that waits for the open session's turn
   let sessionError = $state('')
@@ -426,9 +432,24 @@
     const v = view
     if (started) saveLastRoom(id, v)
   })
+  // The page's side of a screen change, which the router asks for.
+  bindRouter({
+    started: () => started,
+    pop: () => !!pop,
+    followHash: () => hashTarget(),
+    leaveRoom: () => { selectRoom('') },
+    closePanels: () => { threadsOpen = false; showMembers = false; showPins = false; navOpen = false },
+    closeDrawer: () => (navOpen = false),
+    resolveView: (v) => feedViews.resolveView(v),
+    trimFeedAtView: (next, previous) => { if (next !== previous || feedAtBottom) feed = trimFeed(feed) },
+    leaveScreen: (v, previous) => { reveal = ''; revealFolder = null; if (previous !== v) reply = null; if (v !== 'goals') goalId = '' },
+    clearRunDetail: () => (runDetail = null),
+    loadChanges,
+    loadReviewer,
+    loadRuns,
+    loadRun,
+  })
   // The address bar follows the open screen; see syncRoute.
-  let routing = $state(0) // links being followed
-  let routeFix = true
   $effect(() => syncRoute())
   let needPair = $state(new URLSearchParams(location.hash.slice(1)).has('pair')) // a pairing link or a server 401 opens the pairing screen
   let halt = $state<BootResult | null>(null) // {key} or {error}: Connect stopped the app before it started
@@ -554,7 +575,6 @@
   let closeResult = $state<{ name: string; items: string[] } | null>(null)
   let runs = $state<RunList | null>(null) // roomsvc.RunList for the room
   let runsError = $state('')
-  let openRun = $state('') // the run whose detail is open, in the runs view
   let runDetail = $state<RunDetail | null>(null)
   let runError = $state('')
   let showSettings = $state(false)
@@ -568,9 +588,6 @@
   let update = $state<UpdateNotice | null>(null) // configsvc.UpdateNotice: a newer dyna release
   let updateHidden = $state(false)
   let sessionTab = $state('chat') // the open tab of a session view
-  let reviewOpen = $state(false)
-  let reviewTab = $state('files')
-  let reviewVersion = $state(0)
   let prView = $derived(view === 'issues')
   // Agent computers of the open room (null when the feature is unavailable),
   // each session's recent actions, and whether the viewer is open.
@@ -768,7 +785,7 @@
     hierarchy = rows
     setPicked(pruneSelection(pickedSessions, hierarchy))
     members = hierarchy.filter((m) => showClosed || !m.closed)
-    view = feedViews.resolveView(view)
+    router.view = feedViews.resolveView(view)
     if (rosterChanged) loadComputers()
     if (previousCounts !== roomCountKey(rows)) soonRooms()
   }
@@ -846,7 +863,7 @@
     if (!currentSelection(context)) return
     const sessions = context.ids.map((id) => hierarchy.find((m) => m.id === id)).filter((m): m is Member & { id: string } => !!m?.id && selectableSession(m)).map((m) => ({ ...m }))
     if (!sessions.length) return
-    detailRequest++
+    router.detailRequest++
     const record = { key: ++bulkSerial, roomId, roomRequest, selectionRevision, sessions, action }
     const controller = createBulkSessionAction(api, record, (value) => bulkChanged(record, value))
     bulkControllers.set(record.key, controller)
@@ -887,8 +904,8 @@
     if (!currentSelection(context)) return
     const selected = context.ids.map((id) => hierarchy.find((m) => m.id === id)).filter((m): m is Member => !!m && selectableSession(m))
     clearItemLink()
-    const focusRequest = ++detailRequest
-    drill = null; card = null; reply = null; view = GENERAL
+    const focusRequest = ++router.detailRequest
+    router.drill = null; card = null; reply = null; router.view = GENERAL
     const key = roomId + ':' + GENERAL
     const text = (drafts[key] ?? '').replace(/^\s*(?:@\S+(?:\s+|$))*/, '')
     drafts = { ...drafts, [key]: selected.map((m) => '@' + m.address).join(' ') + ' ' + text }
@@ -904,7 +921,7 @@
   function openConsolidation() {
     const ids = pruneSelection(pickedSessions, hierarchy)
     if (ids.length < 2 || ids.length > 16) return
-    detailRequest++
+    router.detailRequest++
     const sessions = ids.flatMap((id) => { const member = hierarchy.find((m) => m.id === id); return member ? [member] : [] })
     consolidating = { roomId, sessions, key: ++consolidationView }
     menu = null
@@ -953,16 +970,6 @@
     await api.stopShell(roomId, job.id)
     say({ tone: 'success', subject: 'Stopped the shell job', text: clipText(job.name || job.command.join(' ')) })
     workflowData.loadJobs()
-  }
-
-  function showRun(r: { id: string }) {
-    clearItemLink()
-    detailRequest++
-    drill = null
-    view = 'runs'
-    if (openRun !== r.id) runDetail = null
-    openRun = r.id
-    loadRun()
   }
 
   function loadQuestions() { return reload('questions', async (current: () => boolean) => {
@@ -1141,9 +1148,9 @@
 
   // Pins and links open the feed view that contains the requested post.
   async function jumpTo(id: string) {
-    const request = ++detailRequest
+    const request = ++router.detailRequest
     const rid = roomId
-    drill = null
+    router.drill = null
     card = null
     viewing = null
     // Leave the bottom first, so a live post does not trim what this loads.
@@ -1153,10 +1160,10 @@
     clearItemLink()
     const post = (feed?.posts ?? []).find((p) => p.id === id)
     if (post && questionID(post)) { openQuestion(post); return }
-    if (post && isShellResult(post)) { openJob = post.from.slice('shell:'.length); view = 'jobs'; return }
+    if (post && isShellResult(post)) { router.openJob = post.from.slice('shell:'.length); router.view = 'jobs'; return }
     // A voice call line has no feed view; Voice's call widget shows it.
     if (post && inView(post, VOICE)) return
-    view = post ? homeView(post) : GENERAL
+    router.view = post ? homeView(post) : GENERAL
     await tick()
     if (request === detailRequest && rid === roomId) feedView?.jump(id)
   }
@@ -1173,7 +1180,7 @@
     // The root seat opened before root had a session of its own. Once RootSession returns the real
     // session (root started, or the seat was released), continue as that member: its queue, paging and events.
     if (drill?.rootSeat && value.member?.id) {
-      drill = { ...value.member, id: value.member.id }
+      router.drill = { ...value.member, id: value.member.id }
       loadSession()
     }
   }
@@ -1368,7 +1375,7 @@
     hierarchy = o.members ?? []
     noteParents(hierarchy)
     setPicked(pruneSelection(pickedSessions, hierarchy))
-    view = feedViews.resolveView(view)
+    router.view = feedViews.resolveView(view)
     members = hierarchy.filter((m) => showClosed || !m.closed)
     choices = o.choices ?? []
     pins = o.pins ?? []
@@ -1421,7 +1428,7 @@
   // One call brings the first screen; the room list refreshes beside it.
   async function selectRoom(id: string, startView = GENERAL) {
     clearItemLink(id, startView)
-    const request = ++detailRequest
+    const request = ++router.detailRequest
     roomRequest++
     navOpen = false
     machineId = ''
@@ -1439,26 +1446,26 @@
       consolidationView++
     }
     if (id !== roomId) { computers = null; computerFeed = {} }
-    roomId = id
+    router.roomId = id
     // Goal IDs are per room; a goal fetched for a link belongs to the old one.
     fetchedGoal = null
     visitRoomControls(id)
-    drill = null
+    router.drill = null
     card = null
     session = null
-    sessionTurn = 0
-    openJob = ''
+    router.sessionTurn = 0
+    router.openJob = ''
     reply = null
-    reviewOpen = startView === 'files' || startView === 'github' || startView === 'issues'
-    reviewTab = startView === 'github' ? 'prs' : startView === 'issues' ? 'issues' : 'files'
-    view = ['all', 'owner', 'turns', 'files', 'github'].includes(startView) || (startView === 'terminal' && !hasTerminal) ? GENERAL : startView
+    router.reviewOpen = startView === 'files' || startView === 'github' || startView === 'issues'
+    router.reviewTab = startView === 'github' ? 'prs' : startView === 'issues' ? 'issues' : 'files'
+    router.view = ['all', 'owner', 'turns', 'files', 'github'].includes(startView) || (startView === 'terminal' && !hasTerminal) ? GENERAL : startView
     members = []
     hierarchy = []
     runs = null
     listPages = {}
     jobs = null
     jobsError = ''
-    openRun = ''
+    router.openRun = ''
     runDetail = null
     pins = []
     issues = []
@@ -1485,7 +1492,7 @@
   // openMember shows a member's profile card. The owner has no card.
   async function openMember(m: Member | { rootSeat: true } | null | undefined) {
     if (m && 'rootSeat' in m && m.rootSeat) { openSession(m); return }
-    detailRequest++
+    router.detailRequest++
     if (!m || !('name' in m) || m.owner || !m.id) return
     card = m as Drill
     profile = null
@@ -1515,7 +1522,7 @@
     if (!source) return
     const m = ('rootSeat' in source && source.rootSeat ? rootMember() : source) as Drill
     clearItemLink()
-    detailRequest++
+    router.detailRequest++
     sessionVisit++
     card = null
     showPins = false
@@ -1527,9 +1534,9 @@
       selectedThread = ''
       queue = []
     }
-    drill = m
-    readOnlyDm = readOnly
-    sessionTurn = turn
+    router.drill = m
+    router.readOnlyDm = readOnly
+    router.sessionTurn = turn
     if (initial) {
       session = initial
       sessionError = ''
@@ -1548,7 +1555,7 @@
 
   function openAddress(addr: string) {
     if (!room || addr === room.name) {
-      drill = null
+      router.drill = null
       return
     }
     const m = members.find((x) => x.address === addr)
@@ -1557,7 +1564,7 @@
 
   function mentionMember(m: Member) {
     card = null
-    drill = null
+    router.drill = null
     const cur = draft.value.trim()
     draft.value = `@${m.name} ${cur.startsWith('@') ? cur.replace(/^(@\S+\s*)+/, '') : cur}`.trimEnd() + ' '
     setTimeout(() => composer?.focus(), 0)
@@ -1611,7 +1618,7 @@
       const member = await api.reopenSession(rid, m.id)
       if (rid !== roomId || visit !== roomRequest) return
       if (drill?.id === m.id && selection === sessionVisit) {
-        drill = member as Drill
+        router.drill = member as Drill
         if (session && session.member?.id === m.id) session = { ...session, member }
         await loadSession()
       }
@@ -1642,7 +1649,7 @@
       const member = await api.dismissSession(rid, m.id)
       if (rid !== roomId || visit !== roomRequest) return
       if (drill?.id === m.id && selection === sessionVisit) {
-        drill = member as Drill
+        router.drill = member as Drill
         if (session && session.member?.id === m.id) session = { ...session, member }
         await loadSession()
       }
@@ -1983,7 +1990,7 @@
     // Keep loaded history on screen when the event stream reconnects.
     if (!await roomData.open(Math.max(feed?.posts?.length ?? 0, 50) + 20)) return
     roomSessionController?.load()
-    if (drill) { loadSession(); reviewVersion++ } // events may have been missed while the stream was down
+    if (drill) { loadSession(); router.reviewVersion++ } // events may have been missed while the stream was down
     if (openRun) loadRun()
     loadChanges()
     loadReviewer()
@@ -2024,7 +2031,7 @@
     // An item link stays in the address bar, so a reload opens the same item.
     // Any other link becomes the address of the screen it opens.
     if (!item && location.hash !== routeHash(r)) history.replaceState(null, '', location.pathname + location.search + routeHash(r))
-    routing++
+    router.routing++
     // A shell link names no screen of its own, so it always reaches openDetail.
     const opening = id === roomId && !post && !item && target?.kind !== 'shell' ? Promise.resolve(routeHere(r)) : openTarget(id, post, issue ? 'issues' : pr ? 'github' : file ? 'files' : r.view)
     opening.then(async (opened) => {
@@ -2036,11 +2043,11 @@
       if (file) openReview('files')
       if (pr || issue) {
         openView(issue ? 'issues' : 'github')
-        prLink = issue || pr
+        router.prLink = issue || pr
       }
     }).finally(() => {
-      routing--
-      routeFix = true
+      router.routing--
+      router.routeFix = true
     })
     return true
   }
@@ -2127,7 +2134,7 @@
       reviewerSoon()
       if (ev.kind === 'changes' && !item) loadChanges()
     }
-    if (ev.kind === 'session' && evRoom === roomId && ev.change?.id === drill?.id) { loadSession(); reviewVersion++ }
+    if (ev.kind === 'session' && evRoom === roomId && ev.change?.id === drill?.id) { loadSession(); router.reviewVersion++ }
     if (ev.kind === 'members' && evRoom === roomId) {
       if (!item) loadMembers()
       if (ev.change?.controls) soonRooms('controls')
@@ -2201,114 +2208,9 @@
     side: 'M3.5 4.5h13v11h-13ZM8 4.5v11',
   }
 
-  function openPR(n: number | string) {
-    history.pushState({ pr: true }, '', prHash(roomId, n, 'conversation', routeSession(drill)))
-    openView('github')
-    prLink = { roomId, pr: String(n), tab: 'conversation' }
-  }
-
-  // Leaving an item's room or view drops its link. The item's history entry
-  // stays, so Back reopens it; syncRoute gives the new screen its own entry.
-  function clearItemLink(nextRoom = '', nextView = '') {
-    const issue = parseIssueHash(location.hash)
-    const link = issue || parsePRHash(location.hash)
-    if (link && (link.roomId !== nextRoom || nextView !== (issue ? 'issues' : 'github'))) prLink = null
-  }
-
-  // An open PR, issue or file keeps its own, more exact address.
-  function holdsItemLink() {
-    if ((new URLSearchParams(location.hash.slice(1)).get('session') ?? '') !== routeSession(drill)) return false
-    const issue = parseIssueHash(location.hash)
-    const pr = parsePRHash(location.hash)
-    const file = parseFileHash(location.hash)
-    const link: [string, { roomId: string }] | null = issue ? ['issues', issue] : pr ? ['github', pr] : file ? ['files', file] : null
-    return !!link && link[1].roomId === roomId && (link[0] === 'issues' ? view === 'issues' : reviewOpen && reviewTab === (link[0] === 'files' ? 'files' : 'prs'))
-  }
-
-  // syncRoute puts the open screen's address in the address bar
-  // (lib/ui/route.ts). A followed link passes through other screens while it
-  // loads, so routing holds the address until it lands. The first write, and
-  // the one after a followed link, correct the current entry instead of adding one.
-  function syncRoute() {
-    // A service's read-only conversation keeps the Services address.
-    const session = readOnlyDm ? '' : routeSession(drill)
-    const hash = routeHash({ room: roomId, view, session, turn: session ? sessionTurn : 0, run: view === 'runs' ? openRun : '', review: reviewOpen ? reviewTab : undefined })
-    if (!started || routing || pop) return
-    // An item link is already the right entry; the next screen adds its own.
-    if (!holdsItemLink()) writeRoute(hash, routeFix, location, history)
-    routeFix = false
-  }
-
-  // Back or Forward to the all-rooms page leaves no address. The hash is read
-  // first: hashTarget drops a pairing code from it.
-  function hashChanged() {
-    const empty = !location.hash
-    if (!hashTarget() && empty && roomId) selectRoom('')
-  }
-
-  // routeHere follows an address in the open room without reloading the room.
-  // It returns false when the screen already shows the address.
-  function routeHere(r: Route): { roomId: string; request: number } | false {
-    // A followed address always ends a detail navigation that is still loading:
-    // its older response must not open over the screen the reader asked for.
-    detailRequest++
-    const sameChat = r.session ? routeSession(drill) === r.session && sessionTurn === r.turn : r.run ? !drill && view === 'runs' && openRun === r.run : !drill && !openRun && view === r.view
-    if (sameChat && (r.review ?? '') === (reviewOpen && r.view !== 'issues' ? reviewTab : '')) return false
-    reviewOpen = false
-    if (!r.session && !r.run) openView(r.view)
-    if (r.review) openReview(r.review)
-    return { roomId, request: detailRequest }
-  }
-
-  function openReview(tab = reviewTab) {
-    detailRequest++
-    if (tab !== reviewTab) prLink = null
-    reviewTab = tab
-    reviewOpen = true
-    threadsOpen = false
-    reviewVersion++
-    showMembers = false
-    showPins = false
-    navOpen = false
-    if (!drill && tab === 'issues') view = 'issues'
-    else if (!drill && !isFeedView(view)) view = GENERAL
-    loadChanges()
-    loadReviewer()
-  }
-
-  function closeReview() {
-    reviewOpen = false
-    prLink = null
-    if (view === 'issues') view = GENERAL
-    writeRoute(routeHash({ room: roomId, view, session: routeSession(drill), turn: sessionTurn, run: '' }), true, location, history)
-  }
-
-  function openView(v: string) {
-    if (v === 'files' || v === 'github') { openReview(v === 'files' ? 'files' : 'prs'); return }
-    reviewOpen = false
-    clearItemLink(roomId, v)
-    detailRequest++
-    prLink = null
-    drill = null
-    openRun = ''
-    reveal = ''
-    revealFolder = null
-    openJob = ''
-    if (view !== v) reply = null
-    // A new view opens at the bottom, so older posts can go. Selecting the
-    // open view again keeps the reader's place, so it trims only at the bottom.
-    const next = feedViews.resolveView(v)
-    if (next !== view || feedAtBottom) feed = trimFeed(feed)
-    view = next
-    if (next === 'issues') openReview('issues')
-    if (v !== 'goals') goalId = ''
-    navOpen = false
-    if (v === 'runs') loadRuns()
-  }
-
   // Completion links open stored UI details. They never invoke a command.
   async function openDetail(target: DetailTarget) {
-    let request = ++detailRequest
+    let request = ++router.detailRequest
     const rid = target.roomId || roomId
     card = null
     navOpen = false
@@ -2323,7 +2225,7 @@
     }
     if (target.kind === 'shell') {
       openView('jobs')
-      openJob = target.id
+      router.openJob = target.id
     } else if (target.kind === 'run') {
       showRun({ id: target.id })
     } else if (target.kind === 'session') {
@@ -2611,11 +2513,11 @@
       {:else if room}
         {#if drill}
           {#if readOnlyDm}
-            <button class="dm-back" aria-label="Back to Services" title="Back to Services" onclick={() => (drill = null)}><span class="back-arrow" aria-hidden="true">‹</span><span class="back-name">Services</span></button>
+            <button class="dm-back" aria-label="Back to Services" title="Back to Services" onclick={() => (router.drill = null)}><span class="back-arrow" aria-hidden="true">‹</span><span class="back-name">Services</span></button>
             <span class="dm-sep" aria-hidden="true">/</span>
             <span class="title">{drill.name}</span>
           {:else}
-          <button class="dm-back" aria-label={`Back to ${roomLabel(current ?? room)}`} title={`Back to ${roomLabel(current ?? room)}`} onclick={() => (drill = null)}><span class="back-arrow" aria-hidden="true">‹</span><span class="back-name">{roomLabel(current ?? room)}</span></button>
+          <button class="dm-back" aria-label={`Back to ${roomLabel(current ?? room)}`} title={`Back to ${roomLabel(current ?? room)}`} onclick={() => (router.drill = null)}><span class="back-arrow" aria-hidden="true">‹</span><span class="back-name">{roomLabel(current ?? room)}</span></button>
           {#if sessionTrail.length}
             <nav class="trail" aria-label="Parent sessions">
               {#each sessionTrail as m (m.id)}
@@ -2633,7 +2535,7 @@
           <button class="dm-threads threads" class:on={threadsOpen} aria-expanded={threadsOpen} aria-label="Threads" title="Threads" onclick={() => { threadsOpen = !threadsOpen; selectedThread = ''; if (threadsOpen) sessionTab = 'chat' }}><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v6a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><b>{threadCount}</b></button>
           {/if}
         {:else if view === 'runs' && openRun}
-          <button class="crumb" onclick={() => (openRun = '')}><span class="hash">#</span>runs</button>
+          <button class="crumb" onclick={() => (router.openRun = '')}><span class="hash">#</span>runs</button>
           <span class="trail">
             {#each runTrail as m (m.id)}
               <span class="slash" aria-hidden="true">/</span>
@@ -2715,12 +2617,12 @@
             {#if sessionTab === 'computer' && computers}
               <ComputerPane c={computerOf(drill.id) ?? { session: drill.id, name: drill.name, state: 'none', apps: [], stream: {}, viewers: 0, rssKiB: 0, streamRssKiB: 0 }} room={room.id} feed={computerFeed[drill.id] ?? []} chat={{ computerCount: 1, draft: drafts['computer:' + roomId + ':' + drill.id] ?? '', ondraft: computerDraft, session, room, members: hierarchy, onsend: sendToSession, onopenfile: (a: Attachment) => (viewing = a), onpost: jumpTo, onmessages: () => (sessionTab = 'chat') }} />
             {:else if sessionTab === 'shell'}
-              <ShellGrid jobs={drillShells} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} />
+              <ShellGrid jobs={drillShells} onjob={(job) => { router.openJob = job.id; router.drill = null; router.view = 'jobs' }} />
             {:else if sessionTab === 'media'}
               <SessionMedia onpost={jumpTo} {room} posts={session?.media ?? []} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
             {:else}
               <div class="sess-wrap" style:--shift={threadsOpen && !narrow ? '360px' : '0px'}>
-              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} onchild={openSession} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} />
+              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} onchild={openSession} onjob={(job) => { router.openJob = job.id; router.drill = null; router.view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} />
               {#if showPreview}<ComputerPreview c={drillComputer} session={drill.id} name={drill.name} onopen={() => (sessionTab = 'computer')} />{/if}
               </div>
             {/if}
@@ -2761,7 +2663,7 @@
       {/key}
       {#if room && reviewOpen}
         {#key room.id + ':' + (drill?.rootSeat ? '' : drill?.id ?? '')}
-          <ReviewWorkspace roomId={room.id} session={drill?.rootSeat ? '' : drill?.id ?? ''} sessionName={drill?.name ?? ''} members={hierarchy} bind:tab={reviewTab} {reveal} folder={revealFolder} version={reviewVersion} onpr={openPR} onclose={closeReview} onselect={(id) => { const member = hierarchy.find((m) => m.id === id); if (member) openSession(member); else { drill = null; view = GENERAL } }}>
+          <ReviewWorkspace roomId={room.id} session={drill?.rootSeat ? '' : drill?.id ?? ''} sessionName={drill?.name ?? ''} members={hierarchy} bind:tab={router.reviewTab} {reveal} folder={revealFolder} version={reviewVersion} onpr={openPR} onclose={closeReview} onselect={(id) => { const member = hierarchy.find((m) => m.id === id); if (member) openSession(member); else { router.drill = null; router.view = GENERAL } }}>
             {#snippet prs()}
               <GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="pr" active={reviewTab === 'prs'} session={routeSession(drill)} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m) => openSession(m)} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />
             {/snippet}

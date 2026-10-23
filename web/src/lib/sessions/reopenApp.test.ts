@@ -7,6 +7,7 @@ import { appLoaderStubs } from '../rooms/appStubs.ts'
 import { reconcileRows } from '../ui/reloadGate.ts'
 import { mergeFeedPage, rerouteAnchors, withViews } from '../rooms/feedPages.ts'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
+import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { isRecord } from '../api/guards.ts'
 import { need } from '../../../test/need.ts'
 
@@ -42,6 +43,8 @@ function app(reopen: (room: string, id: string) => unknown) {
   const calls: string[] = []
   const c: App = { loadComputers() {}, soonRooms() {}, expediteItems: () => [], hierarchy: [], reconcileRows, isFinished, api: { reopenSession: reopen }, reopening: '', dismissing: '', roomId: 'a', roomRequest: 1, sessionVisit: 1, drill: closed, session: { member: closed, turns: [1] }, members: [], feed: null, loadSession: async () => calls.push('transcript'), loadMembers: async () => calls.push('members'), say: (text: string) => calls.push(text) }
   c.routedParents ??= ''; c.selectableSession = selectableSession
+  // The screen state lives in the router now, so the sliced functions write through it.
+  installRouterShim(c)
   runFunctions(source, names, c)
   return { c, calls }
 }
