@@ -104,14 +104,15 @@ desktop/build/bin/dyna-desktop    # opens the window on the running server
 | Column | What it shows |
 |---|---|
 | Room rail | Rooms as tiles, unread badge, gold dot for live work; the top tile opens the room list |
-| Room sidebar | Room name (click for the room menu) and repo, Messages and PRs, Work and Machine views, sessions working now, the Settings gear |
+| Room sidebar | Room name (click for the room menu) and repo, Messages, PRs and Issues, Work and Machine views, sessions working now, the Settings gear |
 | Feed | Day dividers, a New line, sender groups, replies, full completion results, a `Message #room` composer with `@` and `/` completion |
 | Members | The owner, with the room's root seat under it: the internal root session (labeled `root`; open it to see its turns and tool calls) and a line naming the seat holder, "internal root" or "external orchestrator since <time>" with a Take back seat button. Then sessions as a tree with gold/green/red status, each with a context menu. Finished (dormant) sessions sort after their other siblings, with each subtree kept together, and fold into a Finished group with coral status dots, a Dismiss action, and a confirmed Clear finished action. A post still wakes a finished session with its full conversation. Dismissal preserves transcripts and reports retained dirty or unmerged worktrees in the room. Subagents fold under their parent; see below |
 | Drill-down | A member's profile card and session view in the center column, with Messages, Media, and Pull requests tabs |
 
-The room has **Messages** and **PRs** tabs. Messages shows top-level
+The room has **Messages**, **PRs** and **Issues** tabs. Messages shows top-level
 agents speaking to each other, their final results, and explicit messages
-to the owner. PRs shows open pull requests and saved merge progress.
+to the owner. PRs shows open pull requests and saved merge progress. Issues
+shows the repository's GitHub issues.
 
 The member list folds subagents under their parent, like categories in
 Discord. A chevron left of the avatar opens or closes a subtree. By default,
@@ -136,7 +137,7 @@ mentions inside code do not override the default recipients.
 The header's left button, or `Ctrl+B`, hides the room sidebar and gives the
 feed its width; the rail stays. The app keeps that choice and the member list
 choice in the webview's local storage (`dyna.layout`). The same key holds
-the last open room and its view (Messages, PRs, files, terminal, shell jobs). After a
+the last open room and its view (Messages, PRs, Issues, files, terminal, shell jobs). After a
 restart the app opens that room again, in the desktop and in the web app (each
 browser keeps its own). If the room no longer exists, the app opens the first
 active room. A link that names a room (`#room=…`) wins.
@@ -573,7 +574,7 @@ item also has `job`, the job's row with its tail.
 ## PR tracking
 
 Open the room's **PRs** tab to browse its open GitHub pull requests and merge
-progress. Open **Issues** under Code to browse issues. Search narrows the lists.
+progress. Open the room's **Issues** tab to browse issues. Search narrows the lists.
 Read descriptions, comments, reviews, checks, and PR diffs.
 This uses the host's `gh` login; install the GitHub CLI and run `gh auth login`
 if needed. Lists show up to 60 results; search narrows larger lists.
