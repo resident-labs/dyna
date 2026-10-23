@@ -5,7 +5,8 @@ const KEY = 'dyna.code'
 
 function load() {
   try {
-    return JSON.parse(localStorage.getItem(KEY) || '{}')
+    const value: unknown = JSON.parse(localStorage.getItem(KEY) || '{}')
+    return value && typeof value === 'object' && 'wrap' in value && typeof value.wrap === 'boolean' ? { wrap: value.wrap } : {}
   } catch {
     return {}
   }
@@ -13,7 +14,7 @@ function load() {
 
 export const code = $state({ wrap: load().wrap ?? true })
 
-export function setWrap(on) {
+export function setWrap(on: boolean) {
   code.wrap = on
   try {
     localStorage.setItem(KEY, JSON.stringify({ wrap: on }))

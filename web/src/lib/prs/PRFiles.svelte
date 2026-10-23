@@ -4,7 +4,7 @@
   import { api } from '../../api.js'
   import DiffView from '../files/DiffView.svelte'
   import { parseDiff, diffTotals, split } from '../files/repo.ts'
-  import { code, setWrap } from '../files/codeprefs.svelte.js'
+  import { code, setWrap } from '../files/codeprefs.svelte.ts'
   import SendBar from '../files/SendBar.svelte'
   import { addComment, type DiffComment } from '../files/diffComments.ts'
   import type { DiffFile } from '../files/repo.ts'
