@@ -45,7 +45,7 @@ const post: Message = {
   id: 'msg_0123456789abcdef', ts: 1, roomId: 'room_1', from: 'room_1', to: ['room_1:author'], wake: true,
   kind: 'pr', notice: { kind: 'ci-failed' },
   payload: {
-    type: 'ci-failed', label: 'PR #542', number: 542, changeId: 'github.com/acme/app#542', repo: 'acme/app',
+    type: 'ci-failed', label: 'PR #542', number: 542, location: 'https://github.com/acme/app/pull/542', changeId: 'github.com/acme/app#542', repo: 'acme/app',
     head: 'head1', url: 'https://github.com/acme/app/pull/542', ciAttempt: 2, ciMax: 3, summary: 'unit, build', detail: RAW,
   },
   text: RAW,

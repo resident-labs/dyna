@@ -20,6 +20,7 @@ func prEventOf(r Record, n Notice) room.PREvent {
 	ev := room.PREvent{
 		Type:      typ,
 		Label:     changeLabel(r),
+		Location:  changeLocation(r),
 		Number:    r.Number,
 		ChangeID:  changeID(r),
 		Key:       n.ID,
@@ -32,7 +33,7 @@ func prEventOf(r Record, n Notice) room.PREvent {
 		Commenter: n.Commenter,
 		CommentID: n.CommentID,
 		Verdict:   n.Verdict,
-		Detail:    body,
+		Detail:    noticeDetail(typ, body),
 		LogTail:   tail,
 	}
 	if typ == room.PRCIFailed || typ == room.PRCIPaused {
@@ -44,9 +45,42 @@ func prEventOf(r Record, n Notice) room.PREvent {
 // cimax is the number of CI failures that pause the author's wakes.
 const cimax = 3
 
+// noticeDetail keeps the part of the watcher's body that the spec's fact line
+// does not state, so the agent text says each fact once. A type whose agent
+// text is the body itself keeps the whole body.
+func noticeDetail(typ room.PRType, body string) string {
+	switch typ {
+	case room.PRApproved, room.PRCIFailed, room.PRCIPaused, room.PRCIPassed, room.PRReady, room.PROpened:
+		return afterFirstParagraph(body)
+	case room.PRChanges:
+		return afterFirstLine(body)
+	}
+	return body
+}
+
+// afterFirstParagraph drops the fact paragraph of a notice body.
+func afterFirstParagraph(body string) string {
+	_, rest, found := strings.Cut(strings.TrimSpace(body), "\n\n")
+	if !found {
+		return ""
+	}
+	return strings.TrimSpace(rest)
+}
+
+// afterFirstLine drops the fact line of a notice body.
+func afterFirstLine(body string) string {
+	_, rest, found := strings.Cut(strings.TrimSpace(body), "\n")
+	if !found {
+		return ""
+	}
+	return strings.TrimSpace(rest)
+}
+
 // noticeTypeOf reads the event type of a notice that was stored before the
-// typed events existed. A new notice always carries its type, so this is the
-// legacy reader for notices still pending in an older store.
+// typed events existed. A new notice always carries its type.
+//
+// TODO: legacy/shim remove later — a notice pending in a store written before
+// this change has no type; remove when those stores age out.
 func noticeTypeOf(r Record, n Notice) room.PRType {
 	switch {
 	case n.Kind == "held-comment":
@@ -100,7 +134,6 @@ func noticeParts(r Record, text string) (body, tail string) {
 	}
 	return text, ""
 }
-
 
 // reviewSummary is the short facts line of a reviewer verdict: its first
 // sentence, without the markdown body.

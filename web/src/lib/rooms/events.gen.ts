@@ -37,6 +37,7 @@ export interface HookEvent {
 export interface PREvent {
   type: PRType
   label: string
+  location: string
   number?: number
   changeId: string
   key?: string
@@ -110,7 +111,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "{label} opened in {repo}. Review it at {url}",
+    text: "{location}\nHead: {head}\n\n{label} opened in {repo}. Review it at {url}",
   },
   {
     family: "pr",
@@ -119,7 +120,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "{label} is ready to land at {head}.",
+    text: "{location}\nHead: {head}\n\n{label} is ready to land at {head}.",
   },
   {
     family: "pr",
@@ -128,7 +129,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "{label} at {head} approved by its Dyna reviewer.",
+    text: "{location}\nHead: {head}\n\n{label} at {head} approved by its Dyna reviewer:",
   },
   {
     family: "pr",
@@ -137,7 +138,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "Reviewer requests changes for {label} at {head}. Fix the findings and push to this PR.",
+    text: "{location}\nHead: {head}\n\nReviewer requests changes for {label} at {head}:",
   },
   {
     family: "pr",
@@ -146,7 +147,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "CI failed ({ciAttempt}/{ciMax}) on {label} at {head}: {summary}. Fix the failure and push to this PR.",
+    text: "{location}\nHead: {head}\n\nCI failed ({ciAttempt}/{ciMax}): {summary}. Fix the failure and push to this PR.",
   },
   {
     family: "pr",
@@ -155,7 +156,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "{label} failed CI three times in a row. Later CI failures will not wake the author. Failed jobs: {summary}.",
+    text: "{location}\nHead: {head}\n\n{label} failed CI three times in a row. Later CI failures will not wake the author. Inspect dyna git pr show {url}. Failed jobs: {summary}.",
   },
   {
     family: "pr",
@@ -164,7 +165,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "CI passed on {label} at {head}.",
+    text: "{location}\nHead: {head}\n\nCI passed on {label} at {head}.",
   },
   {
     family: "pr",
@@ -173,7 +174,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "{label} at {head} was returned to you. {summary}",
+    text: "{location}\nHead: {head}\n\n{label} at {head} was returned to you.",
   },
   {
     family: "pr",
@@ -182,7 +183,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "{label} merged.",
+    text: "{location}\nHead: {head}",
   },
   {
     family: "pr",
@@ -191,7 +192,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "{label} closed.",
+    text: "{location}\nHead: {head}",
   },
   {
     family: "pr",
@@ -200,7 +201,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "{label} at {head}: {summary}",
+    text: "{location}\nHead: {head}",
   },
   {
     family: "pr",
@@ -209,7 +210,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "{label}: Held: comment from {commenter}, who is outside the trusted set. Review this comment in Dyna to admit or dismiss it.",
+    text: "{location}\nHead: {head}",
   },
   {
     family: "pr",
@@ -218,16 +219,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
-    text: "Review {label} at {head}.",
+    text: "{location}\nHead: {head}",
   },
   {
     family: "pr",
     type: "update",
     renderer: "PRCard",
     quiet: false,
-    wake: "root-if-needed",
+    wake: "target",
     once: false,
-    text: "{label} at {head}.",
+    text: "{location}\nHead: {head}",
   },
 ]
 
@@ -263,6 +264,7 @@ export function isPREvent(v: unknown): v is PREvent {
   return isRecord(v) &&
     P_R_TYPE.has(v.type) &&
     typeof v.label === "string" &&
+    typeof v.location === "string" &&
     (v.number === undefined || Number.isInteger(v.number)) &&
     typeof v.changeId === "string" &&
     (v.key === undefined || typeof v.key === "string") &&

@@ -28,7 +28,7 @@ func TestRoomLogFilters(t *testing.T) {
 	}
 	post("shell:42", "completed", "work")
 	post("run:42", "failed", "work")
-	pr, err := st.PostEvent(work.ID, room.PREvent{Type: room.PRReady, Label: "PR #1", ChangeID: "github.com/o/r#1", Number: 1}, "work")
+	pr, err := st.PostEvent(work.ID, room.PREvent{Type: room.PRReady, Label: "PR #1", Location: "github.com/o/r#1", ChangeID: "github.com/o/r#1", Number: 1}, "work")
 	if err != nil {
 		t.Fatal(err)
 	}

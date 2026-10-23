@@ -147,7 +147,7 @@ func TestEveryPostKindCanBePinnedAndRepliedTo(t *testing.T) {
 // A sealed event post is a post like any other for pins and replies.
 func TestEventPostCanBePinnedAndRepliedTo(t *testing.T) {
 	s, rec, _ := pinFixture(t)
-	post, err := s.PostEvent(rec.ID, PREvent{Type: PRReady, Label: "PR #1", ChangeID: "https://github.com/a/b/pull/1", Number: 1}, "alpha")
+	post, err := s.PostEvent(rec.ID, PREvent{Type: PRReady, Label: "PR #1", Location: "https://github.com/a/b/pull/1", ChangeID: "https://github.com/a/b/pull/1", Number: 1}, "alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
