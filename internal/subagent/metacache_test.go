@@ -64,7 +64,7 @@ func TestMetadataReadsShareSnapshotAndSeeAtomicWrites(t *testing.T) {
 	}
 }
 
-func TestMetadataCacheChecksServiceAncestor(t *testing.T) {
+func TestMetadataCacheUsesStoredServiceFlag(t *testing.T) {
 	s := &Store{Root: t.TempDir()}
 	parent := Meta{ID: NewID(), RoomID: "room", Room: "room"}
 	child := Meta{ID: NewID(), RoomID: "room", Room: "room", ParentSession: parent.ID}
@@ -87,7 +87,7 @@ func TestMetadataCacheChecksServiceAncestor(t *testing.T) {
 	parent.Service = true
 	write(parent)
 	after, err := s.ReadMeta(child.ID)
-	if err != nil || !after.Service {
+	if err != nil || after.Service {
 		t.Fatalf("changed ancestor: %+v, %v", after, err)
 	}
 }

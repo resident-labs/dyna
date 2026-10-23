@@ -96,9 +96,9 @@ func TestCommittedMemberViewSharedByFiveSubscribers(t *testing.T) {
 	}
 }
 
-// Service classification follows ancestors, even when only the ancestor has
-// a new record revision. Requests and targeted watch scans must agree.
-func TestCommittedMemberViewRefreshesInheritedService(t *testing.T) {
+// Service classification uses stored flags when an ancestor changes.
+// Requests and targeted watch scans must agree.
+func TestCommittedMemberViewPreservesStoredService(t *testing.T) {
 	for _, requestFirst := range []bool{false, true} {
 		t.Run(fmt.Sprintf("request-first=%t", requestFirst), func(t *testing.T) {
 			e := newEnv(t)
@@ -106,8 +106,8 @@ func TestCommittedMemberViewRefreshesInheritedService(t *testing.T) {
 			parent, child, grandchild, unrelated := subagent.NewID(), subagent.NewID(), subagent.NewID(), subagent.NewID()
 			for i, meta := range []subagent.Meta{
 				{ID: parent, Name: "parent"},
-				{ID: child, Name: "child", ParentSession: parent},
-				{ID: grandchild, Name: "grandchild", ParentSession: child},
+				{ID: child, Name: "child", ParentSession: parent, Service: true},
+				{ID: grandchild, Name: "grandchild", ParentSession: child, Service: true},
 				{ID: unrelated, Name: "unrelated"},
 			} {
 				meta.RoomID, meta.Room, meta.Created = rec.ID, rec.Name, time.Unix(int64(i+1), 0)
@@ -138,7 +138,7 @@ func TestCommittedMemberViewRefreshesInheritedService(t *testing.T) {
 					t.Fatalf("lost descendant members: %+v", members)
 				}
 			}
-			assertMembers(false) // Warm the rendered tree before the ancestor write.
+			assertMembers(true) // Warm the rendered tree before the ancestor write.
 			reads := map[string]int{}
 			read := readSnapshotSession
 			readSnapshotSession = func(fn func(string) (subagent.Info, error), id string) (subagent.Info, error) {
@@ -147,10 +147,9 @@ func TestCommittedMemberViewRefreshesInheritedService(t *testing.T) {
 			}
 			t.Cleanup(func() { readSnapshotSession = read })
 			for _, change := range []struct {
-				service   bool
-				role      string
-				inherited bool
-			}{{true, "", true}, {true, subagent.RoleRoot, false}, {false, "", false}} {
+				service bool
+				role    string
+			}{{true, ""}, {true, subagent.RoleRoot}, {false, ""}} {
 				clear(reads)
 				if _, err := e.mgr.Store.UpdateMeta(parent, func(meta *subagent.Meta) {
 					meta.Service, meta.Role = change.service, change.role
@@ -158,7 +157,7 @@ func TestCommittedMemberViewRefreshesInheritedService(t *testing.T) {
 					t.Fatal(err)
 				}
 				if requestFirst {
-					assertMembers(change.inherited)
+					assertMembers(true)
 				}
 				ids := map[string]bool{parent: true}
 				fresh, err := w.refresh(e.svc, ids)
@@ -171,11 +170,11 @@ func TestCommittedMemberViewRefreshesInheritedService(t *testing.T) {
 						seen[event.Change.ID] = true
 					}
 				})
-				// The last transition does not change descendants' effective flag.
-				if change.service && (!seen[child] || !seen[grandchild]) {
-					t.Errorf("ancestor change did not publish descendant members: %v", seen)
+				// Ancestor changes must not change descendants' stored flags.
+				if seen[child] || seen[grandchild] {
+					t.Errorf("ancestor change published unchanged descendant members: %v", seen)
 				}
-				assertMembers(change.inherited)
+				assertMembers(true)
 				if reads[parent] != 1 || reads[child] != 1 || reads[grandchild] != 1 || reads[unrelated] != 0 {
 					t.Errorf("ancestor refresh reads=%v; want each affected record once and no unrelated read", reads)
 				}

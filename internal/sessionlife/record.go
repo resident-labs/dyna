@@ -73,6 +73,9 @@ func Migrate(dataDir string) error {
 	if err := migrateSessionImport(db, sessions); err != nil {
 		return err
 	}
+	if err := migrateService(db); err != nil {
+		return err
+	}
 	if err := migrateHistory(db); err != nil {
 		return err
 	}
