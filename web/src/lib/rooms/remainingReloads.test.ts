@@ -17,7 +17,7 @@ import { inRoomFeed } from './feedViews.ts'
 import { call, runFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { installRoomLoader } from '../../../test/appRoomLoader.ts'
-import { ISSUES_FUNCTIONS, PINS_FUNCTIONS, PRS_FUNCTIONS, QUESTIONS_FUNCTIONS, SESSION_VIEW_FUNCTIONS, SYNC_FUNCTIONS, installIssues, installPins, installPRs, installQuestions, installSessionView, installSync } from '../../../test/appModules.ts'
+import { ISSUES_FUNCTIONS, PINS_FUNCTIONS, PRS_FUNCTIONS, QUESTIONS_FUNCTIONS, SESSION_VIEW_FUNCTIONS, SYNC_FUNCTIONS, installIssues, installPins, installPRs, installQuestions, installSelection, installSessionView, installSync } from '../../../test/appModules.ts'
 import { need } from '../../../test/need.ts'
 import { member } from '../../../test/session-fixtures.ts'
 import type { Member } from '../api/room.ts'
@@ -506,6 +506,8 @@ test('App polling leaves visible and hidden control panels unchanged', async () 
   }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), (name: string) => listVisible(name, c))
   c.roomSessionController = createRoomSessionControls(c.api, 'a', () => {}, () => listVisible('roomControls', c))
+  // The transfer poll asks the selection module, which owns the batch controllers.
+  installSelection(c)
   c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   const transferPoll = initOf(onMountBody(), 'transferPoll')

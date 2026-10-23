@@ -16,6 +16,7 @@
   import { bindPins, pinView } from './lib/app/pins.svelte.ts'
   import { bindPRs, changeView } from './lib/app/prs.svelte.ts'
   import { bindQuestions, questionView } from './lib/app/questions.svelte.ts'
+  import { bindSelection, selectionView } from './lib/app/selection.svelte.ts'
   import { bindSync, syncView } from './lib/app/sync.svelte.ts'
   import { closeToastDetail, hideToast, runToastAction, say, sayDetails, sayLine, toasts, toggleToastDetail } from './lib/app/toasts.svelte.ts'
   import { mergeListPage } from './lib/ui/listPages.ts'
@@ -72,9 +73,8 @@
   import Menu from './lib/ui/Menu.svelte'
   import Confirm from './lib/ui/Confirm.svelte'
   import BulkSessionAction from './lib/sessions/BulkSessionAction.svelte'
-  import { createBulkSessionAction, bulkRetryable, bulkTitles } from './lib/sessions/bulkSessions.ts'
   import SessionConsolidation from './lib/sessions/SessionConsolidation.svelte'
-  import { pruneSelection, toggleSelection, selectionKey, selectableSession } from './lib/sessions/consolidation.ts'
+  import { selectableSession } from './lib/sessions/consolidation.ts'
   import ModelTransfer from './lib/sessions/ModelTransfer.svelte'
   import Runs from './lib/workflows/Runs.svelte'
   import Run from './lib/workflows/Run.svelte'
@@ -138,7 +138,6 @@
   import type { Target as PaletteTarget } from './lib/ui/paletteTargets.ts'
   import type { Row as ChangeRow } from './lib/prs/prlist.ts'
   import type { CallRequest } from './lib/voice/callRequests.ts'
-  import type { BulkAction, BulkValue } from './lib/sessions/bulkSessions.ts'
   import type { BootResult, RouteNotice } from './lib/settings/link.ts'
   import type { ModelSelection } from './lib/settings/profiles/state.ts'
   import type { RunAgent } from './lib/api/workflow.ts'
@@ -170,11 +169,6 @@
     roomId: string
     visit: number
   }
-  interface SelectionContext {
-    roomId: string
-    ids: string[]
-    key: string
-  }
   interface MenuItem {
     label: string
     run: () => unknown
@@ -182,15 +176,6 @@
     danger?: boolean
     gap?: boolean
     disabled?: boolean
-  }
-  interface BulkRecord {
-    key: number
-    roomId: string
-    roomRequest: number
-    selectionRevision: number
-    sessions: (Member & { id: string })[]
-    action: BulkAction
-    value?: BulkValue
   }
   type Confirming =
     | { kind: 'promote' | 'stop' | 'close'; m: Member; busy?: boolean; error?: string }
@@ -423,24 +408,22 @@
   // An inline rules edit keeps the list it started from until the edit closes.
   $effect(() => { goalView.applyPendingRules() })
   let confirm = $state<Confirming | null>(null)
-  const bulkControllers = new Map<number, ReturnType<typeof createBulkSessionAction>>()
-  let bulkSerial = 0
-  let activeBulk = $state(0)
-  let bulkBatches = $state<BulkRecord[]>([])
-  let selectionRevision = 0
-  let currentBulk = $derived(bulkBatches.find((b) => b.key === activeBulk))
   let roomSessionController: ReturnType<typeof createRoomSessionControls> | null = null
   let roomControls = $state<RoomControlValue | null>(null)
   let controlsReported = ''
   let roomControlsMenu = $state<(RoomContext & { x: number; y: number; anchor?: HTMLElement }) | null>(null)
   let clearDormantConfirm = $state<(RoomContext & { count: number }) | null>(null)
   let roomControlsVisit = 0
-  let selectionMenu = $state<(SelectionContext & { x: number; y: number; anchor?: HTMLElement }) | null>(null)
-  let selectingSessions = $state(false)
-  let pickedSessions = $state<string[]>([])
-  let consolidating = $state<{ roomId: string; sessions: Member[]; key: number } | null>(null)
-  let consolidationView = 0
   let consolidationAlive = true
+  // The member selection, its bulk panels and the consolidation screen live in
+  // lib/app/selection.svelte.ts. The page reads them through these aliases, so
+  // the template and the code below name them as they always have.
+  const selectingSessions = $derived(selectionView.selectingSessions)
+  const pickedSessions = $derived(selectionView.pickedSessions)
+  const selectionMenu = $derived(selectionView.selectionMenu)
+  const currentBulk = $derived(selectionView.currentBulk)
+  const consolidating = $derived(selectionView.consolidating)
+  const { selectionActions, closeSelectionMenu, selectionItems, moveUnder, selectForConsolidation, toggleSessionSelection, pickSession, closeConsolidation, consolidationChanged, runBulk, configureBulk, loadBulk, selectBulkFailures, closeBulk } = selectionView
   let transferring = $state<Member | null>(null) // {kind: 'stop'|'close', m, busy, error}
   let expediting = $state<{ member: Member; goals: Goal[] } | null>(null) // the goal picker for a session with several goals
   // The toast line and its detail list live in lib/app/toasts.svelte.ts.
@@ -607,7 +590,7 @@
     error: (message) => (loadError = message),
     rooms: (value) => { rooms = value; loadError = '' },
     opened: applyRoomOpened,
-    picked: (rows) => setPicked(pruneSelection(pickedSessions, rows)),
+    picked: (rows) => selectionView.applyRows(rows),
     loadComputers,
     refreshCounts: () => soonRooms(),
   })
@@ -665,6 +648,33 @@
     applyPage: (value) => applyListPage('changes', value),
     alive: () => consolidationAlive,
     say,
+  })
+  // The page's side of the member selection, which lib/app/selection.svelte.ts
+  // asks for.
+  bindSelection({
+    visit: () => roomRequest,
+    alive: () => consolidationAlive,
+    hierarchy: () => hierarchy,
+    people: () => people,
+    newDetail: () => { router.detailRequest++ },
+    // message writes the picked addresses into the room's draft and returns the
+    // detail request it started, so a later focus can tell it is still current.
+    message: (selected) => {
+      clearItemLink()
+      const focusRequest = ++router.detailRequest
+      router.drill = null; card = null; reply = null; router.view = GENERAL
+      const key = roomId + ':' + GENERAL
+      const text = (drafts[key] ?? '').replace(/^\s*(?:@\S+(?:\s+|$))*/, '')
+      drafts = { ...drafts, [key]: selected.map((m) => '@' + m.address).join(' ') + ' ' + text }
+      if (narrow) showMembers = false
+      return focusRequest
+    },
+    focusMessage: (request, alive) => { tick().then(() => { if (alive() && request === router.detailRequest) composer?.focus() }) },
+    closeSessionMenu: () => (menu = null),
+    showMembers: () => { showMembers = true; showPins = false },
+    loadMembers,
+    loadChanges,
+    loadSession: () => { if (drill) loadSession() },
   })
   function loadRooms() { return roomData.loadRooms() }
   function loadMembers() { return roomData.loadMembers() }
@@ -731,100 +741,6 @@
     if (!currentRoomControls(context) || clearDormantConfirm?.visit !== context.visit) return
     clearDormantConfirm = null
     roomSessionController?.run('clearDormant')
-  }
-
-  function setPicked(ids: string[]) {
-    if (JSON.stringify(ids) !== JSON.stringify(pickedSessions)) { pickedSessions = ids; selectionRevision++ }
-  }
-  function bulkChanged(record: BulkRecord, value: BulkValue) {
-    if (!consolidationAlive) return
-    const old = bulkBatches.find((b) => b.key === record.key)?.value
-    const next = { ...record, value }
-    bulkBatches = bulkBatches.some((b) => b.key === record.key) ? bulkBatches.map((b) => b.key === record.key ? next : b) : [next, ...bulkBatches]
-    if (record.roomId === roomId && record.roomRequest === roomRequest && record.selectionRevision === selectionRevision && value.started) {
-      const byId = new Map(value.results.map((r) => [r.session, r]))
-      setPicked(record.sessions.map((m) => m.id).filter((id) => { const result = byId.get(id); return !result || bulkRetryable(result, record.action) }))
-      record.selectionRevision = selectionRevision
-    }
-    if (old?.busy && !value.busy && value.started && record.roomId === roomId && record.roomRequest === roomRequest) { loadMembers(); loadChanges() }
-  }
-  function openBulkAction(action: BulkAction, context: SelectionContext) {
-    if (!currentSelection(context)) return
-    const sessions = context.ids.map((id) => hierarchy.find((m) => m.id === id)).filter((m): m is Member & { id: string } => !!m?.id && selectableSession(m)).map((m) => ({ ...m }))
-    if (!sessions.length) return
-    router.detailRequest++
-    const record = { key: ++bulkSerial, roomId, roomRequest, selectionRevision, sessions, action }
-    const controller = createBulkSessionAction(api, record, (value) => bulkChanged(record, value))
-    bulkControllers.set(record.key, controller)
-    activeBulk = record.key
-    controller.load()
-  }
-  function runBulk(key: number, force = false) { bulkControllers.get(key)?.run(force) }
-  function selectBulkFailures(batch: BulkRecord) {
-    if (batch.roomId !== roomId) return
-    const failed = (batch.value?.results ?? []).filter((r) => bulkRetryable(r, batch.action)).map((r) => r.session)
-    setPicked(pruneSelection(failed, hierarchy)); selectingSessions = true
-    activeBulk = 0
-  }
-  function selectionActions(x: number, y: number, anchor?: HTMLElement) {
-    selectionMenu = { x, y, anchor, roomId, ids: [...pickedSessions], key: selectionKey(roomId, pickedSessions) }
-  }
-  function closeSelectionMenu() { const anchor = selectionMenu?.anchor; selectionMenu = null; anchor?.focus?.() }
-  function currentSelection(context: SelectionContext | null | undefined) { return context?.roomId === roomId && context.key === selectionKey(roomId, pickedSessions) }
-  function selectionItems(context: SelectionContext) {
-    return [
-      { label: 'Select all sessions', run: () => { if (currentSelection(context)) setPicked(people.filter(selectableSession).flatMap((m) => m.id ? [m.id] : [])) } },
-      { label: 'Message', run: () => messageSelection(context) },
-      { label: 'Stop', run: () => openBulkAction('stop', context) },
-      { label: 'Transfer model…', run: () => openBulkAction('transfer', context) },
-      { label: 'Promote to lead', run: () => openBulkAction('promote', context) },
-      { label: 'Move under…', run: () => openBulkAction('adopt', context) },
-      { label: 'Close sessions…', danger: true, run: () => openBulkAction('close', context) },
-      { label: 'Consolidate…', hint: '2–16 sessions', disabled: context.ids.length < 2 || context.ids.length > 16, run: () => { if (currentSelection(context)) openConsolidation() } },
-    ]
-  }
-  // moveUnder opens the bulk "Move under…" panel for one session.
-  function moveUnder(m: Member) {
-    if (!m.id) return
-    setPicked(m.id ? [m.id] : [])
-    openBulkAction('adopt', { roomId, ids: [m.id], key: selectionKey(roomId, [m.id]) })
-  }
-  function messageSelection(context: SelectionContext) {
-    if (!currentSelection(context)) return
-    const selected = context.ids.map((id) => hierarchy.find((m) => m.id === id)).filter((m): m is Member => !!m && selectableSession(m))
-    clearItemLink()
-    const focusRequest = ++router.detailRequest
-    router.drill = null; card = null; reply = null; router.view = GENERAL
-    const key = roomId + ':' + GENERAL
-    const text = (drafts[key] ?? '').replace(/^\s*(?:@\S+(?:\s+|$))*/, '')
-    drafts = { ...drafts, [key]: selected.map((m) => '@' + m.address).join(' ') + ' ' + text }
-    selectingSessions = false; setPicked([])
-    if (narrow) showMembers = false
-    tick().then(() => { if (consolidationAlive && context.roomId === roomId && focusRequest === detailRequest) composer?.focus() })
-  }
-  function toggleSessionSelection() {
-    selectingSessions = !selectingSessions
-    if (!selectingSessions) { setPicked([]); selectionRevision++ }
-  }
-  function pickSession(m: Member, checked: boolean, begin = false) { if (!m.id) return; if (begin) selectingSessions = true; setPicked(toggleSelection(pickedSessions, { ...m, id: m.id }, checked)) }
-  function openConsolidation() {
-    const ids = pruneSelection(pickedSessions, hierarchy)
-    if (ids.length < 2 || ids.length > 16) return
-    router.detailRequest++
-    const sessions = ids.flatMap((id) => { const member = hierarchy.find((m) => m.id === id); return member ? [member] : [] })
-    consolidating = { roomId, sessions, key: ++consolidationView }
-    menu = null
-  }
-  function consolidationChanged(context: { key: number; roomId: string }, operation: { roomId: string }) {
-    if (!consolidationAlive || (!consolidating || context.key !== consolidating.key) || context.roomId !== roomId || operation.roomId !== roomId) return
-    selectingSessions = false
-    setPicked([])
-  }
-  function closeConsolidation() {
-    consolidating = null
-    consolidationView++
-    loadMembers()
-    if (drill) loadSession()
   }
 
   // Profiles change from the CLI or the Settings view; the composer asks
@@ -993,13 +909,7 @@
     machinesNav = !id
     if (id !== roomId) {
       showRoomSettings = false
-      selectionMenu = null
-      selectingSessions = false
-      setPicked([])
-      selectionRevision++
-      activeBulk = 0
-      consolidating = null
-      consolidationView++
+      selectionView.clear()
     }
     if (id !== roomId) { computers = null; computerFeed = {} }
     router.roomId = id
@@ -1221,7 +1131,7 @@
     if (isFinished(m)) items.push({ label: dismissing === m.id ? 'Dismissing…' : 'Dismiss', run: () => dismissSession(m).catch((e) => say({ tone: 'error', subject: `Could not dismiss ${m.name}`, text: errorText(e) })) })
     if (m.closed && m.resumable) items.push({ label: reopening === m.id ? 'Reopening…' : 'Reopen', run: () => reopenSession(m).catch((e) => say({ tone: 'error', subject: `Could not reopen ${m.name}`, text: errorText(e) })) })
     // The internal root holds the root seat, so it is never consolidated.
-    if (!m.closed && m.role !== 'root') items.push({ label: 'Consolidate sessions…', run: () => { selectingSessions = true; setPicked(m.id ? [m.id] : []); showMembers = true; showPins = false } })
+    if (!m.closed && m.role !== 'root') items.push({ label: 'Consolidate sessions…', run: () => selectForConsolidation(m) })
     if (!m.closed) items.push({ label: 'Mention in composer', run: () => mentionMember(m) })
     items.push(...expediteItems(m, expeditedId))
     items.push({ label: 'Copy address', hint: m.address, run: () => copyText(m.address).then(
@@ -1908,7 +1818,7 @@
     })
     const transferPoll = setInterval(() => {
       if (needPair || !pageVisible) return
-      for (const controller of bulkControllers.values()) controller.refreshTransfers()
+      selectionView.refreshTransfers()
     }, 5000)
     // A refused session opens login and stops all background work.
     // Unmount uses the same cleanup, including a pending boot.
@@ -1922,7 +1832,7 @@
       clearInterval(syncPoll)
       roomSessionController?.destroy()
       roomControlsVisit++
-      for (const controller of bulkControllers.values()) controller.destroy()
+      selectionView.destroy()
       consolidationAlive = false
       clearInterval(transferPoll)
       roomData.destroy()
@@ -2133,7 +2043,7 @@
 {/if}
 {#if currentBulk?.value && currentBulk.roomId === roomId}
   {@const batch = { ...currentBulk, value: currentBulk.value }}
-  {#key batch.key}<BulkSessionAction {batch} members={hierarchy} onclose={() => (activeBulk = 0)} onrun={(force) => runBulk(batch.key, force)} onconfigure={(patch) => bulkControllers.get(batch.key)?.configure(patch)} onreload={() => bulkControllers.get(batch.key)?.load()} onselectfailed={() => selectBulkFailures(batch)} />{/key}
+  {#key batch.key}<BulkSessionAction {batch} members={hierarchy} onclose={closeBulk} onrun={(force) => runBulk(batch.key, force)} onconfigure={(patch) => configureBulk(batch.key, patch)} onreload={() => loadBulk(batch.key)} onselectfailed={() => selectBulkFailures(batch)} />{/key}
 {/if}
 {#if consolidating && room && consolidating.roomId === roomId}
   {@const context = { ...consolidating }}
