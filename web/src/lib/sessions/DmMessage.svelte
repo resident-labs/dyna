@@ -43,16 +43,26 @@
   let name = $derived(speaker(row.post ?? { from: row.author, human: row.human }, room.name))
   let sentTo = $derived(row.post ? postedTo(row.post, address, room.name) : '')
   let hue = $derived(row.post?.fromHue ?? person?.hue ?? 0)
+  const timeDescriptionId = $props.id()
+  let exactTime = $derived.by(() => {
+    if (row.ts === undefined) return undefined
+    const date = new Date(row.ts)
+    if (Number.isNaN(date.getTime())) return undefined
+    return date.toLocaleString(undefined, {
+      year: 'numeric', month: 'long', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', second: '2-digit', timeZoneName: 'long',
+    })
+  })
   let typed = $derived(postParts({ text: row.text, attachments: row.post?.attachments }))
 </script>
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_tabindex -->
-<article class="message" class:post={actionable} class:cont={row.cont} class:enter tabindex={actionable ? 0 : undefined} data-select-id={post?.id} {...(post && actionable ? postHandlers(selection, post.id) : {})}>
+<article class="message" class:post={actionable} class:cont={row.cont} class:selected={!!post && selection.get() === post.id} class:enter tabindex={actionable ? 0 : undefined} data-select-id={post?.id} {...(post && actionable ? postHandlers(selection, post.id) : {})}>
   <div class="gutter">
     {#if row.cont}<span class="side-time">{@render when(clock(row.ts))}</span>
     {:else}<Avatar {name} {hue} {owner} emoji={row.post?.fromEmoji || person?.emoji} size={compact ? 28 : 40} />{/if}
   </div>
   <div class="body">
-    {#if !row.cont}<div class="head"><span class="from hue-{hue}" class:owner>{name}</span><time title={row.ts === undefined ? undefined : String(row.ts)}>{@render when(stamp(row.ts))}</time>{#if row.post && !delivery && !inThread && !row.ownerAttachments && sentTo}<span class="tag posted">posted to {sentTo}</span>{/if}</div>{/if}
+    {#if !row.cont}<div class="head"><span class="from hue-{hue}" class:owner>{name}</span>{@render when(stamp(row.ts))}{#if row.post && !delivery && !inThread && !row.ownerAttachments && sentTo}<span class="tag posted">posted to {sentTo}</span>{/if}</div>{/if}
     {#if row.post?.kind === 'pr'}<PRPost post={row.post} {room} {onforward} selection={actionable ? selection : null} />
     {:else if row.folded}<details class="folded"><summary>Turn result (same as the post above)</summary><div class="prose">{@html markdown(typed.text)}</div></details>
     {:else if typed.text}<div class="prose">{@html markdown(typed.text)}</div>{/if}
@@ -63,7 +73,12 @@
   {#if actionable && row.post && row.post.kind !== 'pr'}<PostActions {room} p={row.post} {onforward} show={selection.get() === row.post.id} />{/if}
 </article>
 <!-- A posted message's time opens the original room post. -->
-{#snippet when(text: string)}{#if post?.id}<PostLink roomId={room.id} postId={post.id} onopen={onpost}>{text}</PostLink>{:else}{text}{/if}{/snippet}
+{#snippet when(text: string)}
+  {#if exactTime}<time title={exactTime} aria-describedby={exactTime ? timeDescriptionId : undefined}>
+    {#if post?.id}<PostLink roomId={room.id} postId={post.id} onopen={onpost}><span title={exactTime} aria-label={exactTime}>{text}</span></PostLink>{:else}{text}{/if}
+  </time>
+  <span class="time-description" id={timeDescriptionId}>{exactTime}</span>{/if}
+{/snippet}
 {#snippet receipt()}
   {#if delivery && !row.quietReceipt}
     {@const pending = row.pending}
@@ -88,9 +103,10 @@
   .head { display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
   .from { font-size: var(--t-body); font-weight: 600; }
   .from.owner { color: var(--iris); }
+  .time-description { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   time { font-size: var(--t-cap); color: var(--faint); }
   .side-time { opacity: 0; padding-top: var(--s1); font-size: var(--t-cap); }
-  .message:focus-within .side-time { opacity: 1; }
+  .message:focus-within .side-time, .message.selected .side-time { opacity: 1; }
   .message:hover .side-time { opacity: 1; }
   .tag { font-size: var(--t-cap); font-weight: 600; color: var(--muted); background: var(--raise); border-radius: 4px; padding: 0 5px; }
   .receipt { display: flex; align-items: center; gap: var(--s1); margin: 2px 0 var(--s1); color: var(--faint); font-size: var(--t-cap); }
