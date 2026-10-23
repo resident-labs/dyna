@@ -2,7 +2,7 @@
 // voice-call channel (roomsvc.VoiceChannel), and root's posts to
 // @voice-call, since this call started. Each
 // call is a fresh conversation, so earlier calls never show here.
-import { VOICE } from '../rooms/channels.ts'
+import { VOICE } from '../rooms/feedViews.ts'
 import { rootToVoice } from './attention.ts'
 import { postParts } from '../ui/postParts.ts'
 import { isRecord } from '../api/guards.ts'
@@ -24,7 +24,7 @@ export interface CallPost {
   to?: string[] | null
   text?: string
   kind?: string
-  channels?: string[]
+  views?: string[]
   spoken?: boolean
   human?: boolean
   source?: string
@@ -90,7 +90,7 @@ export function callPosts(posts: CallPost[], startedAt: number): CallPost[] {
   if (!startedAt) return []
   const seen = new Set<string>()
   return posts
-    .filter((p) => (p.channels?.includes(VOICE) || rootToVoicePost(p)) && p.ts >= startedAt && !seen.has(p.id) && seen.add(p.id))
+    .filter((p) => (p.views?.includes(VOICE) || rootToVoicePost(p)) && p.ts >= startedAt && !seen.has(p.id) && seen.add(p.id))
     .sort((a, b) => a.ts - b.ts)
 }
 

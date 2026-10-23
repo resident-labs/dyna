@@ -397,9 +397,9 @@ type Post struct {
 	ResultCut bool `json:"resultCut,omitempty"`
 	// Pinned marks a post in the room's pin list. PinnedAt (unix ms) and
 	// PinnedBy (an address) are set only on posts that Pins returns.
-	// Channels lists the web channels the post shows in, the sender's home
-	// first. Only room feed pages and live posts set it.
-	Channels []string `json:"channels,omitempty"`
+	// Views lists the feed views the post shows in, the sender's home first.
+	// Only room feed pages and live posts set it.
+	Views    []string `json:"views,omitempty"`
 	Pinned   bool     `json:"pinned,omitempty"`
 	PinnedAt int64    `json:"pinnedAt,omitempty"`
 	PinnedBy string   `json:"pinnedBy,omitempty"`
@@ -419,12 +419,12 @@ type Feed struct {
 	Offset int64  `json:"offset"`
 	// Earlier counts posts before this page. Zero means the page reached
 	// the start of the retained log.
-	Earlier       int            `json:"earlier,omitempty"`
-	Newer         int            `json:"newer,omitempty"`
-	Cursor        string         `json:"cursor,omitempty"`
-	Unread        int            `json:"unread"`
-	FirstUnread   string         `json:"firstUnread,omitempty"`
-	ChannelUnread map[string]int `json:"channelUnread"`
+	Earlier     int            `json:"earlier,omitempty"`
+	Newer       int            `json:"newer,omitempty"`
+	Cursor      string         `json:"cursor,omitempty"`
+	Unread      int            `json:"unread"`
+	FirstUnread string         `json:"firstUnread,omitempty"`
+	ViewUnread  map[string]int `json:"viewUnread"`
 }
 
 // FeedTail returns a bounded page in append order. An empty cursor selects
@@ -489,7 +489,7 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	if err != nil {
 		return Feed{}, err
 	}
-	channels := newChannelIndex(members)
+	views := newFeedViews(members)
 	counts := map[string]int{}
 	page, err := read(rec.ID, cursor, keep, func(m room.Message) bool {
 		if !roomConversationPost(rec, m) {
@@ -497,7 +497,7 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 		}
 		unread := countsUnread(m, rec.Name) && !reads[m.ID]
 		if unread {
-			for _, view := range channels.views(m) {
+			for _, view := range views.viewsFor(m) {
 				counts[view]++
 			}
 		}
@@ -509,11 +509,11 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	page.Messages = slices.DeleteFunc(page.Messages, func(m room.Message) bool { return !roomConversationPost(rec, m) })
 	out, err := s.feedOf(rec, page.Messages, page.Offset, book, reads)
 	for i := range out.Posts {
-		out.Posts[i].Channels = channels.views(out.Posts[i].Message)
+		out.Posts[i].Views = views.viewsFor(out.Posts[i].Message)
 	}
 	out.Earlier, out.Newer, out.Cursor = page.Earlier, page.Newer, page.Cursor
 	out.Unread, out.FirstUnread = page.Unread, page.FirstUnread
-	out.ChannelUnread = counts
+	out.ViewUnread = counts
 	return out, err
 }
 
@@ -656,11 +656,11 @@ func (s *Service) FeedSince(roomID string, offset int64) ([]Post, int64, error) 
 	}
 	all, rev := s.snapshot()
 	book := s.avatarBook(rec.ID, all, rev)
-	channels := newChannelIndex(s.membersOf(rec, all, rev, true))
+	views := newFeedViews(s.membersOf(rec, all, rev, true))
 	var out []Post
 	for _, m := range msgs {
 		post := s.expand(decorate(m, rec.Name, reads, book), book)
-		post.Channels = channels.views(m)
+		post.Views = views.viewsFor(m)
 		out = append(out, post)
 	}
 	return out, next, nil

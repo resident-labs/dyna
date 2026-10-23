@@ -54,7 +54,7 @@ function composer() {
   const calls: Call[] = []
   const c: ComposerState = {
     references: [], command: null, forwarding: null, canSend: true, busy: false, error: '', note: '',
-    $attachments: { atts: [] }, attachments: { destroy() {} }, draft: 'old channel draft', currentRoom: 'old-room',
+    $attachments: { atts: [] }, attachments: { destroy() {} }, draft: 'old view draft', currentRoom: 'old-room',
     prepareText: () => pending,
     onDestroy: (fn: () => void) => cleanup.push(fn),
     onsend: async (text: string, atts: Attachment[]) => { calls.push({ room: c.currentRoom, text, atts }); return {} },
@@ -67,13 +67,13 @@ function composer() {
   return { c: Object.assign(c, fns), calls, resolve, destroy: () => cleanup.forEach((fn) => fn()) }
 }
 
-for (const navigation of ['room', 'channel']) {
+for (const navigation of ['room', 'view']) {
   test(`pending preparation cannot send after ${navigation} navigation unmounts its composer`, async () => {
     const { c, calls, resolve, destroy } = composer()
     const sending = c.send()
     destroy()
     c.currentRoom = navigation === 'room' ? 'new-room' : 'old-room'
-    c.draft = 'new channel draft'
+    c.draft = 'new view draft'
     resolve('@child old channel draft')
     await sending
     assert.deepEqual(calls, [])

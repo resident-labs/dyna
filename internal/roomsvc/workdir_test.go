@@ -10,7 +10,7 @@ func TestRoomNeedsRepository(t *testing.T) {
 	e := newEnv(t)
 	t.Setenv("HOME", t.TempDir())
 	rec := e.room("bare")
-	if _, err := e.svc.Send(e.ctx, rec.ID, "/mock RESPOND: ready", "", ""); err == nil || !strings.Contains(err.Error(), "#bare has no repo") {
+	if _, err := e.svc.Send(e.ctx, rec.ID, "/mock RESPOND: ready", "", ""); err == nil || !strings.Contains(err.Error(), "room bare has no repo") {
 		t.Fatalf("bare spawn: %v", err)
 	}
 	if _, err := e.svc.files().WorkspaceRoot(rec.ID, ""); err == nil || err.Error() != "this room has no repository directory" {

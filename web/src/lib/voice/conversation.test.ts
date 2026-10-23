@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { askState, callPosts, callRow, callRows, shareLine, sharedItems, shareWhat, toolLabel, unseen, type CallPost, type CallRow, type SharedItem } from './conversation.ts'
 import type { Attachment } from '../api/room.ts'
 
-const post = (id: string, ts: number, more: Partial<CallPost> = {}): CallPost => ({ id, ts, channels: ['voice-call'], ...more })
+const post = (id: string, ts: number, more: Partial<CallPost> = {}): CallPost => ({ id, ts, views: ['voice-call'], ...more })
 // att is a post's file: the fields the call reads, and the stored ones it
 // needs to be a real attachment.
 const att = (a: Pick<Attachment, 'id' | 'name' | 'mime'> & Partial<Attachment>): Attachment => ({ size: 0, sha256: '', ...a })
@@ -15,7 +15,7 @@ const shareAt = (rows: CallRow[], i: number): SharedItem => {
 }
 
 test('only this call: voice-call posts since it started, in order, once', () => {
-  const posts = [post('a', 900), post('c', 1200), post('b', 1100), post('g', 1150, { channels: ['general'] }), post('b', 1100)]
+  const posts = [post('a', 900), post('c', 1200), post('b', 1100), post('g', 1150, { views: ['general'] }), post('b', 1100)]
   assert.deepEqual(callPosts(posts, 1000).map((p) => p.id), ['b', 'c'])
   assert.deepEqual(callPosts(posts, 0), [])
 })
@@ -31,7 +31,7 @@ test('rows: spoken lines, requests to root and relayed answers', () => {
 // part of the call: it shows in the conversation as root's.
 test("root's post to @voice-call shows in the call as root's", () => {
   const room = 'voice-test'
-  const ring = { id: 'r1', ts: 1500, channels: ['general'], from: `${room}:root`, to: [`${room}:voice-call`], text: 'CI is red on PR 978.' }
+  const ring = { id: 'r1', ts: 1500, views: ['general'], from: `${room}:root`, to: [`${room}:voice-call`], text: 'CI is red on PR 978.' }
   assert.deepEqual(callPosts([ring, post('a', 1200)], 1000).map((p) => p.id), ['a', 'r1'])
   assert.deepEqual(callRow(ring, room), { who: 'root', to: 'you', tag: 'for Voice' })
   // An external root posts as the owner, but not as the owner's speech.

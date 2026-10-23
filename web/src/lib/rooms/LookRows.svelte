@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The feed choices for every channel. Settings is the one place that sets
+  // The feed choices for every feed view. Settings is the one place that sets
   // them, so each row writes the same shared value.
   import Switch from '../ui/Switch.svelte'
   import Segmented from '../ui/Segmented.svelte'

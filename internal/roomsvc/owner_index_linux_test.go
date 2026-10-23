@@ -50,12 +50,12 @@ func TestWarmRoomsReadsOnlyNewLogBytes(t *testing.T) {
 	}
 }
 
-func TestChannelUnreadReusesWarmRoomLogIndex(t *testing.T) {
+func TestFeedViewUnreadReusesWarmRoomLogIndex(t *testing.T) {
 	e := newEnv(t)
 	rec := largeOwnerLog(t, e)
 	lead := e.start(rec, "lead", nil)
 	e.start(rec, "child", &lead)
-	e.say(rec, "child", "channel unread")
+	e.say(rec, "child", "feed view unread")
 	if got := roomUnreadCount(t, e.svc, rec.ID); got != 121 {
 		t.Fatalf("room unread = %d", got)
 	}
@@ -64,12 +64,12 @@ func TestChannelUnreadReusesWarmRoomLogIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if feed.ChannelUnread["channel:"+lead.ID] != 1 || feed.Unread != 121 {
+	if feed.ViewUnread["channel:"+lead.ID] != 1 || feed.Unread != 121 {
 		t.Fatalf("feed unread: %+v", feed)
 	}
-	// The large log was warmed by Rooms. Channel counts must share that index,
+	// The large log was warmed by Rooms. View counts must share that index,
 	// rather than reading the retained log again for a separate unread system.
 	if read := processReadBytes(t) - before; read > 64<<10 {
-		t.Fatalf("channel unread read %d bytes, want at most 64 KiB", read)
+		t.Fatalf("view unread read %d bytes, want at most 64 KiB", read)
 	}
 }

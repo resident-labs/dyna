@@ -127,7 +127,7 @@ export interface Post extends Message {
   fromEmoji?: string
   fullResult?: boolean
   resultCut?: boolean
-  channels?: string[]
+  views?: string[]
   pinned?: boolean
   pinnedAt?: number // unix milliseconds
   pinnedBy?: string
@@ -143,7 +143,7 @@ export interface Feed {
   cursor?: string
   unread: number
   firstUnread?: string
-  channelUnread: Record<string, number> | null
+  viewUnread: Record<string, number> | null
 }
 
 // FeedSearch is roomsvc.FeedSearch: matching posts, newest first.

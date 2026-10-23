@@ -20,7 +20,7 @@ interface FeedPost {
 }
 
 // How a feed looks. The owner sets these choices once in Settings, and every
-// channel follows them. A choice with options picks one of them; one without
+// feed view follows them. A choice with options picks one of them; one without
 // is on or off.
 export const CHOICES: Choice[] = [
   { id: 'highlight', label: 'Highlight', hint: 'Posts that get the gold mark', options: [['root', 'Root only'], ['all', 'Everyone to you'], ['off', 'Off']] },
@@ -37,8 +37,9 @@ export function setting(look: Look, id: ChoiceID) {
 }
 
 // readLook reads the look a browser saved. An older version also saved
-// per-channel overrides under "channels"; they no longer apply, so only the
-// choices for every channel are kept.
+// per-view overrides under "channels"; they no longer apply, so only the
+// choices for every feed view are kept.
+// TODO: legacy/shim remove later — the old "channels" key is dropped, not read.
 export function readLook(raw: string | null): Look {
   try {
     const saved = JSON.parse(raw || '{}')

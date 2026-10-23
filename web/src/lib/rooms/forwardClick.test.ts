@@ -78,7 +78,7 @@ for (const view of ['DM thread']) {
     const original = { id: 'msg_original', from: 'alpha:peer', text: 'Original result', ts: Date.now(), to: ['alpha'] }
     const member = { id: 'worker', name: 'worker', address: 'alpha:worker', state: 'idle' }
     const forwarded = { id: 'msg_forward', from: 'alpha', human: true, owner: true, ts: Date.now(), to: ['alpha:worker'], text: 'Please check', forward: { ...original, roomId: room.id } }
-    assert.ok(callback, 'App wires the channel Forward action')
+    assert.ok(callback, 'App wires the feed view Forward action')
     let instance: FlowInstance | undefined, unmount: ((instance: FlowInstance) => Promise<void>) | undefined, dir: string | undefined
     try {
       const mod = await importBundle(flowCode, 'ForwardFlow')

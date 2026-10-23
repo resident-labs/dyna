@@ -322,7 +322,7 @@ interface ComputersApp extends AppState {
   members: Member[]
   showClosed: boolean
   pickedSessions: unknown[]
-  channels: { resolveView(value: string): string }
+  feedViews: { resolveView(value: string): string }
   computerRequest: number
   computers: Computer[]
   computerFeed: unknown
@@ -341,7 +341,7 @@ test('a channel roster change refreshes computers once and its later computer ev
   const c: ComputersApp = {
     roomId: 'a', roomRequest: 1, view: 'channel:general', drill: null, memberChips: true,
     hierarchy: [one], members: [one], showClosed: false, pickedSessions: [],
-    channels: { resolveView: (value: string) => value }, setPicked() {}, pruneSelection: () => [],
+    feedViews: { resolveView: (value: string) => value }, setPicked() {}, pruneSelection: () => [],
     soonRooms() {}, computerRequest: 0, computers: [...computerRows], computerFeed: {}, computerError: '',
     reconcileRows, applyEvent, openedApps, pushAction,
     api: { computers: async () => { calls++; return computerRows } },
