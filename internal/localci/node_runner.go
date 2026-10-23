@@ -381,7 +381,8 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	}
 	// A stable source path lets Go reuse build and test results across run IDs.
 	// The host worktree and reports stay separate for each check.
-	args := `"${docker[@]}" run --rm --init --cpus=2 --memory=4g --memory-swap=4g --pids-limit=512 --name ` + q(name) + user +
+	// Temporary SQLite fixtures need no disk flushes and share the memory cap.
+	args := `"${docker[@]}" run --rm --init --cpus=2 --memory=4g --memory-swap=4g --pids-limit=512 --tmpfs /tmp:rw,nosuid,nodev,size=1g --name ` + q(name) + user +
 		" -v " + q(work+":/workspace") + " -v " + q(cache+":"+cache) + " -v " + q(reportDir+":/reports") + " -w /workspace"
 	for _, mount := range [][2]string{{"go-build", "build"}, {"go-mod", "mod"}, {"npm", "npm"}, {"android", "android"}, {"gradle", "gradle"}} {
 		args += " -v " + q(path.Join(base, mount[0])+":/cache/"+mount[1])
