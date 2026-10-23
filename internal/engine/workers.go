@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"dyna-agent/internal/goalkeeper"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/lanesync"
+	"dyna-agent/internal/parentcheckin"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/roomsvc"
@@ -46,7 +46,7 @@ type workerSignals struct {
 
 func newWorkerSignals() *workerSignals {
 	return &workerSignals{channels: map[string]chan struct{}{
-		"prs": make(chan struct{}, 1), "goals": make(chan struct{}, 1),
+		"prs": make(chan struct{}, 1), "checkins": make(chan struct{}, 1),
 		"questions": make(chan struct{}, 1), "hooks": make(chan struct{}, 1),
 		"sessions": make(chan struct{}, 1), "merges": make(chan struct{}, 1),
 		"sync": make(chan struct{}, 1), "instructions": make(chan struct{}, 1),
@@ -62,8 +62,8 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 		wakeWorker(s.channels["prs"])
 	}
 	// A paused room's check-ins wait for its resume.
-	if ev.Kind == "room.resumed" {
-		wakeWorker(s.channels["goals"])
+	if ev.Kind == "room.resumed" || ev.Kind == "members" || ev.Kind == "settings" {
+		wakeWorker(s.channels["checkins"])
 	}
 	s.mu.Lock()
 	if s.sessions.targets == nil {
@@ -93,6 +93,7 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 			// Bound turn-end senders recover queued input and wrap-up work.
 			// Unbound senders use the exact IDs from member changes.
 			if post.Turn > 0 && (post.Kind == "completed" || post.Kind == "failed" || post.Kind == "stopped") {
+				wakeWorker(s.channels["checkins"])
 				if id := post.SessionIDs[post.From]; id != "" {
 					s.sessions.targets[id] = true
 				}
@@ -213,12 +214,12 @@ func wakeWorker(signal chan struct{}) {
 type workers struct {
 	sweep, sessions func(context.Context) error
 	// Timed workers return when they next have work, or zero, and a timer
-	// wakes them then: goals runs goal check-ins, instructions sends due
+	// wakes them then: checkins runs parent check-ins, instructions sends due
 	// instruction notes, fetch fetches local lane remotes, questions
 	// retries failed answer deliveries, hooks retries a hook spool drain
 	// that could not finish, and prs, merges and sync poll GitHub, merge
 	// trials and sync operations while they have work.
-	goals, instructions, fetch, questions, hooks, prs, merges, sync func(context.Context) (time.Time, error)
+	checkins, instructions, fetch, questions, hooks, prs, merges, sync func(context.Context) (time.Time, error)
 }
 
 func engineWorkers(rooms *roomsvc.Service, signals *workerSignals) workers {
@@ -227,11 +228,10 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals) workers {
 	prs.GH.Rooms = rooms.Notify.Rooms
 	syncer := lanesync.New()
 	spool := hooks.New()
-	goals := goalkeeper.New()
-	goals.Notify = rooms.Notify
+	checkins := parentcheckin.New(rooms.Notify)
 	return workers{
-		prs:   prs.Tick,
-		goals: goals.Tick,
+		prs:      prs.Tick,
+		checkins: checkins.Tick,
 		questions: func(ctx context.Context) (time.Time, error) {
 			sweep := signals.takeSweep("questions")
 			var delivered []string
@@ -301,7 +301,7 @@ func deliverSessions(ctx context.Context, m *subagent.Manager, signals *workerSi
 }
 
 // runWorker keeps one worker serial with itself. Other workers never wait for
-// this tick, including when a keeper pass waits for its judge.
+// this tick, including when a check-in pass is delivering a post.
 func runWorker(ctx context.Context, signal <-chan struct{}, tick func(context.Context) error, report func(error)) {
 	for ctx.Err() == nil {
 		select {
@@ -362,7 +362,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	sweep := make(chan struct{}, 1)
 	timed("PR watcher", signals.channels["prs"], timerPRs, w.prs)
 	timed("Merge service", signals.channels["merges"], timerMerges, w.merges)
-	timed("Goal keeper", signals.channels["goals"], timerGoals, w.goals)
+	timed("Parent check-ins", signals.channels["checkins"], timerParentCheckins, w.checkins)
 	timed("Question delivery", signals.channels["questions"], timerQuestions, w.questions)
 	start("Dormant session sweep", sweep, w.sweep)
 	timed("Hook spool", signals.channels["hooks"], timerHooks, w.hooks)
@@ -382,7 +382,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	var safety, daily func()
 	safety = func() {
 		signals.sweep("sessions")
-		wake("goals", "instructions", "prs", "merges", "sync")
+		wake("checkins", "instructions", "prs", "merges", "sync")
 		signals.sweep("questions")
 		signals.sweep("hooks")
 		t.at(timerSafetySweep, t.now().Add(safetySweepEvery), safety)
@@ -390,7 +390,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	daily = func() { wakeWorker(sweep); t.at(timerSweep, t.now().Add(sweepEvery), daily) }
 	// Catch writes made while the engine was down.
 	signals.recoverSessions()
-	wake("goals", "instructions", "fetch", "questions", "hooks", "prs", "merges", "sync")
+	wake("checkins", "instructions", "fetch", "questions", "hooks", "prs", "merges", "sync")
 	wakeWorker(sweep)
 	t.at(timerSafetySweep, t.now().Add(safetySweepEvery), safety)
 	t.at(timerSweep, t.now().Add(sweepEvery), daily)
