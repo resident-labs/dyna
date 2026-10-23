@@ -13,7 +13,7 @@ test('goal views never read keeper fields', () => {
 
 // The web goal views show the checklist, the mechanical status and events.
 test('goal views render items, status and events', () => {
-  const read = (file) => readFileSync(new URL(file, import.meta.url), 'utf8')
+  const read = (file: string) => readFileSync(new URL(file, import.meta.url), 'utf8')
   const detail = read('./GoalDetail.svelte')
   assert.match(detail, /checklist/, 'GoalDetail names a checklist region')
   assert.match(detail, /status\.label|statusLabel/, 'GoalDetail shows the status label')
