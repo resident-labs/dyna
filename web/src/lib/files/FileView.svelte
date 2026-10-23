@@ -21,6 +21,14 @@
   let html = $state('')
   let mode = $state('rendered') // markdown: rendered or source
   let copied = $state(false)
+  let copyError = $state(false)
+  let copyTimer
+  $effect(() => {
+    path
+    copied = false
+    copyError = false
+    return () => clearTimeout(copyTimer)
+  })
   let historyOpen = $state(false)
   // A linked version starts as its commit alone; a History row adds the details.
   const stub = (hash, path) => (hash ? { hash, shortHash: hash.slice(0, 7), path } : null)
@@ -93,9 +101,19 @@
   let blameStarts = $derived(new Map((blame?.ranges ?? []).map((r) => [r.startLine, r.commit])))
 
   async function copyPath() {
-    await copyText(path)
-    copied = true
-    setTimeout(() => (copied = false), 1400)
+    const selectedPath = path
+    clearTimeout(copyTimer)
+    copied = false
+    copyError = false
+    try {
+      await copyText(selectedPath)
+      if (path !== selectedPath) return
+      copied = true
+    } catch {
+      if (path !== selectedPath) return
+      copyError = true
+    }
+    copyTimer = setTimeout(() => { copied = false; copyError = false }, 2000)
   }
 </script>
 
@@ -127,8 +145,14 @@
     {/if}
     <button class="tool" class:on={blameOn} aria-pressed={blameOn} disabled={!!version} onclick={() => (blameOn = !blameOn)} title={version ? 'Blame shows the file now. Show the current version first.' : 'Show who last changed each line'}>Blame</button>
     <button class="tool" class:on={historyOpen} aria-pressed={historyOpen} onclick={() => (historyOpen = !historyOpen)} title="Show the commits of this file">History</button>
-    <button class="tool copy" onclick={copyPath} title="Copy the path">{copied ? 'Copied' : 'Copy path'}</button>
+    <button class="tool copy" class:copied onclick={copyPath} title="Copy the path" aria-label="Copy the path">
+      <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true">
+        {#if copied}<path d="m4 10 4 4 8-9" fill="none" stroke="currentColor" stroke-width="1.8" />
+        {:else}<rect x="7" y="7" width="9" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M13 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="1.8" />{/if}
+      </svg><span class="copy-label">{copied ? 'Copied' : 'Copy path'}</span>
+    </button>
   </header>
+  <div class="copy-status" class:error={copyError} role="status">{copyError ? 'Could not copy' : copied ? 'Copied path' : ''}</div>
   {#if version}
     <p class="version">Showing {version.shortHash}{#if version.author} · {version.author} · {ago(version.time)}{/if}<button onclick={() => show(null)}>Show current</button></p>
   {/if}
@@ -176,6 +200,10 @@
 <style>
   .with-history { flex: 1; display: flex; min-width: 0; min-height: 0; }
   .view { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .copy { display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .copy.copied, .copy-status { color: var(--sage); }
+  .copy-status { min-height: 18px; padding: 0 16px; font-size: 12px; text-align: right; }
+  .copy-status.error { color: var(--coral); }
   header { display: flex; align-items: center; gap: 8px; padding: 10px 16px 4px; min-width: 0; }
   .back { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 6px; color: var(--muted); flex: none; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
@@ -222,13 +250,15 @@
   .err { color: var(--coral); padding: 8px 4px; }
 
   @media (max-width: 760px) {
-    header { padding: 6px 8px 2px; }
+    header { padding: 6px 8px 2px; flex-wrap: wrap; }
     .back { width: 44px; height: 44px; }
     /* The back button returns to the folder; the name is enough here. */
     .crumbs button, .sep { display: none; }
     .leaf { overflow: hidden; text-overflow: ellipsis; }
-    .crumbs { overflow: hidden; }
-    .tool.copy { display: none; }
+    .crumbs { overflow: hidden; flex: 1; min-width: 80px; }
+    .spacer { display: none; }
+    .tool.copy { width: 44px; height: 44px; padding: 0; }
+    .copy-label { display: none; }
     .tool { padding: 10px 12px; }
     .meta { padding: 0 14px 6px; }
     .body { padding: 0 8px 12px; }
