@@ -3,10 +3,8 @@ package harness
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,7 +40,6 @@ import (
 const EnvSteerHooks = "DYNA_STEER_HOOKS"
 
 const (
-	steerHookPending = "pending.json"
 	steerHookTimeout = 10 // seconds the harness gives the hook
 )
 
@@ -76,11 +73,6 @@ var steerHookCommand = func(dir string) (string, error) {
 	return shellquote.Quote(exe) + " hook steer --dir " + shellquote.Quote(dir), nil
 }
 
-type steerHookRecord struct {
-	Session string `json:"session"`
-	Context string `json:"context"`
-}
-
 // steerHook is one worker run's hook handoff directory. Only the run's event loop uses it.
 type steerHook struct {
 	harness string
@@ -92,6 +84,7 @@ type steerHook struct {
 	// later messages use the interrupt path until the next attempt.
 	failed      bool
 	outstanding []runstore.SteeringMessage
+	transport   *hookReceiptTransport
 	offeredAt   time.Time
 	boundaryAt  time.Time // first tool completion after the offer
 }
@@ -128,6 +121,11 @@ func newSteerHook(p profile.Profile) (*steerHook, error) {
 
 func (h *steerHook) cleanup() {
 	if h != nil {
+		if h.transport != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_, _, _ = h.transport.retire(ctx)
+			cancel()
+		}
 		os.RemoveAll(h.dir)
 	}
 }
@@ -189,58 +187,62 @@ func (h *steerHook) argv(argv, launchEnv []string) ([]string, error) {
 	return append(out, argv[at:]...), nil
 }
 
-func (h *steerHook) pendingPath() string { return filepath.Join(h.dir, steerHookPending) }
-
-// offer puts messages in the handoff directory for the hook of the given session. since
-// is when the oldest of them was first offered.
+// offer reserves messages for the hook of the given session. since is when the
+// oldest of them was first offered.
 func (h *steerHook) offer(session string, messages []runstore.SteeringMessage, since time.Time) error {
-	b, err := json.Marshal(steerHookRecord{Session: session, Context: steeringPrompt(messages)})
-	if err != nil {
-		return err
+	if h.transport == nil {
+		t, err := startHookReceiptTransport(h.dir)
+		if err != nil {
+			return err
+		}
+		h.transport = t
 	}
-	tmp := filepath.Join(h.dir, "pending.tmp")
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return err
-	}
-	if err := os.Rename(tmp, h.pendingPath()); err != nil {
+	if err := h.transport.offer(session, messages); err != nil {
 		return err
 	}
 	h.outstanding, h.offeredAt, h.boundaryAt = messages, since, time.Time{}
 	return nil
 }
 
-// taken returns the outstanding messages once the hook has claimed them.
+// taken returns the outstanding messages once the hook proved a complete write.
 func (h *steerHook) taken() []runstore.SteeringMessage {
-	if h == nil || len(h.outstanding) == 0 {
+	if h == nil || h.transport == nil || len(h.outstanding) == 0 {
 		return nil
 	}
-	if _, err := os.Stat(h.pendingPath()); !errors.Is(err, fs.ErrNotExist) {
-		return nil
+	messages := h.transport.taken()
+	if len(messages) > 0 {
+		h.outstanding = nil
 	}
-	messages := h.outstanding
-	h.outstanding = nil
 	return messages
 }
 
-// withdraw takes back the outstanding messages the hook has not claimed. It
-// returns those taken back and those the hook delivered meanwhile.
+// withdraw takes back the outstanding messages the hook has not been granted. It
+// returns those taken back and those the hook delivered meanwhile. Messages a
+// hook process may still be writing stay reserved until retire resolves them.
 func (h *steerHook) withdraw() (back, delivered []runstore.SteeringMessage) {
-	if h == nil || len(h.outstanding) == 0 {
+	if h == nil || h.transport == nil || len(h.outstanding) == 0 {
 		return nil, nil
 	}
-	messages := h.outstanding
-	h.outstanding = nil
-	err := os.Rename(h.pendingPath(), filepath.Join(h.dir, "withdrawn.json"))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, messages
+	back, delivered = h.transport.withdraw()
+	if len(back) > 0 || len(delivered) > 0 {
+		h.outstanding = nil
 	}
+	return back, delivered
+}
+
+// retire stops the hook transport after the harness stopped. It joins or kills a
+// granted hook process first. On error nothing is returned for replay, because
+// the hook may have delivered it. A later offer starts a new transport.
+func (h *steerHook) retire(ctx context.Context) (back, delivered []runstore.SteeringMessage, err error) {
+	if h == nil || h.transport == nil {
+		return nil, nil, nil
+	}
+	back, delivered, err = h.transport.retire(ctx)
 	if err != nil {
-		// Never leave a message both in the handoff directory and in the continuation.
-		if rmErr := os.Remove(h.pendingPath()); rmErr != nil && !errors.Is(rmErr, fs.ErrNotExist) {
-			return nil, messages
-		}
+		return nil, nil, err
 	}
-	return messages, nil
+	h.transport, h.outstanding = nil, nil
+	return back, delivered, nil
 }
 
 // noteBoundary records a tool completion while a message is outstanding.
@@ -252,7 +254,7 @@ func (h *steerHook) noteBoundary() {
 
 // stale reports an offer that a completed tool call's hook should have taken.
 func (h *steerHook) stale() bool {
-	return h != nil && len(h.outstanding) > 0 && !h.boundaryAt.IsZero() && time.Since(h.boundaryAt) >= steerHookGrace
+	return h != nil && len(h.outstanding) > 0 && !h.boundaryAt.IsZero() && !h.transport.reserved() && time.Since(h.boundaryAt) >= steerHookGrace
 }
 
 // RunSteerHook delivers pending steering as additionalContext after tool calls.
@@ -266,34 +268,13 @@ func RunSteerHook(dir string, in io.Reader, out io.Writer) error {
 	if event.HookEventName != "" && event.HookEventName != "PostToolUse" {
 		return nil
 	}
-	pending := filepath.Join(dir, steerHookPending)
-	raw, err := os.ReadFile(pending)
-	if err != nil {
-		return nil
-	}
-	var rec steerHookRecord
-	if json.Unmarshal(raw, &rec) != nil || rec.Context == "" {
-		return nil
-	}
 	// A harness can run hooks for helper sessions (Muse's reminder agents);
 	// only the worker's own session takes the message.
-	if rec.Session != "" && event.SessionID != "" && rec.Session != event.SessionID {
-		return nil
-	}
-	claimed := filepath.Join(dir, fmt.Sprintf("taken-%d-%d.json", os.Getpid(), time.Now().UnixNano()))
-	if os.Rename(pending, claimed) != nil {
-		return nil // dyna withdrew it, or another hook took it
-	}
 	name := event.HookEventName
 	if name == "" {
 		name = "PostToolUse"
 	}
-	enc, err := json.Marshal(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": name, "additionalContext": rec.Context}})
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintln(out, string(enc))
-	return err
+	return runHookReceipt(dir, event.SessionID, out, name)
 }
 
 // steerHooksOn reports whether the owner kept steering hooks on. When it is off,
