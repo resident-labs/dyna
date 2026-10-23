@@ -51,9 +51,10 @@ func (w *Writer) appendCounted(ctx context.Context, c hub.Event, path string, bu
 }
 
 // appendRecord writes one line under the log's file lock and this Writer's
-// append lock. Without sync it closes and publishes under both. With sync
-// it releases the append lock, then fsyncs and publishes under only the
-// file lock, which still orders that log's lines and events.
+// append lock. Without sync it closes and queues its event under the append
+// lock. With sync it releases the append lock, then fsyncs and queues under
+// only the file lock, which still orders that log's lines and events. Both
+// publish after releasing those locks.
 func (w *Writer) appendRecord(ctx context.Context, c hub.Event, path string, build func(io.ReaderAt, int64) ([]byte, error), sync bool) (bool, error) {
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
@@ -112,12 +113,21 @@ func (w *Writer) appendRecord(ctx context.Context, c hub.Event, path string, bui
 		if err := syncFile(f); err != nil {
 			return true, err
 		}
-		w.notify(c)
-		return true, f.Close()
+		publish := w.queue(c)
+		err := f.Close()
+		if publish != nil {
+			publish()
+		}
+		return true, err
 	}
 	if err := f.Close(); err != nil {
 		return true, err
 	}
-	w.notify(c)
+	publish := w.queue(c)
+	w.appendMu.Unlock()
+	locked = false
+	if publish != nil {
+		publish()
+	}
 	return true, nil
 }
