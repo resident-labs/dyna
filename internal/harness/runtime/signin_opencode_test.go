@@ -79,7 +79,7 @@ exit "${SIGNIN_TEST_EXIT:-0}"
 	if err != nil || json.Unmarshal(raw, &imported) != nil || len(imported) != 1 || imported[0].Integration != "opencode-go" || imported[0].Value.Type != "key" || imported[0].Value.Key != key {
 		t.Fatal("the private provider-key importer did not receive the key")
 	}
-	st := SignInState{Phase: signInStarting, AcceptsPaste: openCodeGoSignInSpec.AcceptsPaste}
+	st := SignInState{Phase: signInStarting, AcceptsPaste: openCodeGoSignInSpec.AcceptsPaste, SecretInput: openCodeGoSignInSpec.SecretInput}
 	for _, line := range strings.Split(out.String(), "\n") {
 		openCodeGoSignInSpec.Parse(&st, line)
 	}
@@ -91,5 +91,22 @@ exit "${SIGNIN_TEST_EXIT:-0}"
 	err = runOpenCodeGoSignIn(t.Context(), host, strings.NewReader(key+"\n"), &out)
 	if err == nil || strings.Contains(err.Error(), key) || out.String() != openCodeGoKeyPrompt+"\n" {
 		t.Fatal("a failed key import must not expose its input or native output")
+	}
+}
+
+func TestOpenCodeGoSignInMasksInitialInput(t *testing.T) {
+	r := testPrivateRuntime(t)
+	spec := openCodeGoSignInSpec
+	// Keep the child silent so the returned state precedes its first prompt.
+	spec.Argv = func([]string) []string { return []string{"/bin/sh", "-c", "read response"} }
+	login, err := r.startPrivateSignIn("go-account", "opencode", spec, &NativeLogin{
+		Cwd: t.TempDir(), Cancel: func() error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = r.CancelPrivateRuntimeLogin("go-account") })
+	if login.SignIn == nil || login.SignIn.Phase != signInStarting || !login.SignIn.AcceptsPaste || !login.SignIn.SecretInput {
+		t.Fatalf("initial key card must mask its input before a prompt: %+v", login.SignIn)
 	}
 }
