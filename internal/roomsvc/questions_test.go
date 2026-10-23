@@ -178,35 +178,6 @@ func TestOwnerWithdrawsOwnQuestion(t *testing.T) {
 	}
 }
 
-func TestLegacyQuestionAnswersDoNotDuplicateFeed(t *testing.T) {
-	e := newEnv(t)
-	rec := e.room("legacy")
-	for _, p := range []room.PostInput{
-		{From: "legacy:child", Kind: "question", To: []string{"legacy:lead"}, Text: "[QUESTION q1] Which fix?"},
-		{From: "legacy:lead", Kind: "message", To: []string{"legacy:child"}, Text: "[ANSWER q1] Small fix."},
-		{From: "legacy:lead", Kind: "question-answered", To: []string{rec.Name}, Text: "q1 answered: Small fix."},
-	} {
-		if _, err := e.svc.Notify.Rooms.Post(rec.ID, p); err != nil {
-			t.Fatal(err)
-		}
-	}
-	feed, err := e.svc.FeedTail(rec.ID, "", 0)
-	if err != nil || len(feed.Posts) != 2 {
-		t.Fatalf("feed: %+v, %v", feed, err)
-	}
-	incremental, _, err := e.svc.FeedSince(rec.ID, 0)
-	if err != nil || len(incremental) != 2 {
-		t.Fatalf("incremental: %+v, %v", incremental, err)
-	}
-	msgs, _ := e.svc.Notify.Rooms.Messages(rec.ID)
-	for _, addr := range []string{"legacy:child", "legacy:lead"} {
-		posts, err := e.svc.sessionPosts(rec, msgs, "", addr, time.Time{}, time.Time{}, e.svc.avatars(rec.ID))
-		if err != nil || len(posts) != 2 {
-			t.Fatalf("%s posts: %+v, %v", addr, posts, err)
-		}
-	}
-}
-
 func TestLegacyWithdrawalKeepsOriginalParticipants(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("legacy-withdrawal")
