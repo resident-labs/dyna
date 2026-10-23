@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"dyna-agent/internal/database"
@@ -213,5 +214,71 @@ func TestQuietStoreChangesPublishNothing(t *testing.T) {
 	rename(s, "external write")
 	if len(topics) != 2 {
 		t.Fatalf("an external change published %d events, want 1 more", len(topics)-1)
+	}
+}
+
+func TestRegistryWritesOnlyChangedRows(t *testing.T) {
+	s := registryStore(t)
+	first := saveAccount(t, s, "first")
+	var second Metadata
+	if err := s.Update(func(st *State) error {
+		var err error
+		second, err = st.Save("fixture", "", "second", "Second", grant("second"))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := s.db()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{
+		"CREATE TABLE writes (operation TEXT, id TEXT)",
+		"CREATE TRIGGER track_insert AFTER INSERT ON accounts BEGIN INSERT INTO writes VALUES ('insert', new.id); END",
+		"CREATE TRIGGER track_update AFTER UPDATE ON accounts BEGIN INSERT INTO writes VALUES ('update', new.id); END",
+		"CREATE TRIGGER track_delete AFTER DELETE ON accounts BEGIN INSERT INTO writes VALUES ('delete', old.id); END",
+		"CREATE TRIGGER track_registry AFTER UPDATE ON accounts_registry BEGIN INSERT INTO writes VALUES ('registry', '1'); END",
+	} {
+		if _, err := db.Exec(query); err != nil {
+			t.Fatal(err)
+		}
+	}
+	steps := []struct {
+		name   string
+		change func(*State) error
+		want   []string
+	}{
+		{"unchanged", func(*State) error { return nil }, nil},
+		{"rename", func(st *State) error { st.Find(second.ID).Label = "Renamed"; return nil }, []string{"update " + second.ID}},
+		{"remove and reorder", func(st *State) error { st.Remove(first.ID); return nil }, []string{"update " + second.ID, "delete " + first.ID}},
+	}
+	for _, step := range steps {
+		if err := s.Update(step.change); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := db.Query("SELECT operation || ' ' || id FROM writes ORDER BY rowid")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				rows.Close()
+				t.Fatal(err)
+			}
+			got = append(got, line)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(got, step.want) {
+			t.Fatalf("%s wrote %v, want %v", step.name, got, step.want)
+		}
+		if _, err := db.Exec("DELETE FROM writes"); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
