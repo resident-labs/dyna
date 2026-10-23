@@ -898,7 +898,7 @@ func TestOutboxRetryStoresOnlyOneRoomPost(t *testing.T) {
 	}
 }
 
-func TestOwnerPRNoticeComesFromAuthorForUnreadAndOwnerWatches(t *testing.T) {
+func TestOwnerEventNoticeComesFromAuthorForUnreadAndOwnerWatches(t *testing.T) {
 	root := t.TempDir()
 	rooms := &room.Store{Root: filepath.Join(root, "rooms")}
 	rec, err := rooms.Create(room.CreateInput{Name: "owner-alert"})
@@ -916,8 +916,10 @@ func TestOwnerPRNoticeComesFromAuthorForUnreadAndOwnerWatches(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// The engine posts a PR event, never a session: a session sender would
+	// make the alert look like the author's own message.
 	posts, err := rooms.Messages(rec.ID)
-	if err != nil || len(posts) != 1 || posts[0].From != meta.Address() || !posts[0].Addressed(rec.Name) || posts[0].Human || posts[0].Kind != "pr" {
+	if err != nil || len(posts) != 1 || posts[0].From != room.EngineSender || !posts[0].Addressed(rec.Name) || posts[0].Human || posts[0].Kind != "pr" {
 		t.Fatalf("owner PR alert was hidden as an owner message: %+v %v", posts, err)
 	}
 }

@@ -11,7 +11,7 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
-func TestEndedPRNoticesWakeAuthorOrOpenAncestor(t *testing.T) {
+func TestEndedEventNoticesWakeAuthorOrOpenAncestor(t *testing.T) {
 	for _, merged := range []bool{false, true} {
 		outcome := map[bool]string{false: "closed", true: "merged"}[merged]
 		for _, route := range []string{"child", "top-level", "closed-author", "closed-parent", "closed-chain"} {
@@ -84,7 +84,7 @@ func TestEndedPRNoticesWakeAuthorOrOpenAncestor(t *testing.T) {
 	}
 }
 
-func TestInformationalPRNoticeDoesNotWakeDormantAuthor(t *testing.T) {
+func TestInformationalEventNoticeDoesNotWakeDormantAuthor(t *testing.T) {
 	e := newEscalationEnv(t)
 	e.track()
 	e.session(e.author.ID, e.author.ParentSession, true)
@@ -122,7 +122,7 @@ func TestInformationalPRNoticeDoesNotWakeDormantAuthor(t *testing.T) {
 	}
 }
 
-func TestUntargetedPRNoticeIsQuietUnlessRootMustAct(t *testing.T) {
+func TestUntargetedEventNoticeIsQuietUnlessRootMustAct(t *testing.T) {
 	e := newEscalationEnv(t)
 	e.track()
 	r := e.record()

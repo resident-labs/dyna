@@ -35,16 +35,19 @@ func TestReadyNoticeStoresStructuredFields(t *testing.T) {
 		var post struct {
 			Kind   string `json:"kind"`
 			Notice struct {
-				Kind     string `json:"kind"`
+				Kind string `json:"kind"`
+			} `json:"notice"`
+			Payload struct {
+				Type     string `json:"type"`
 				Number   int    `json:"number"`
 				Head     string `json:"head"`
 				ChangeID string `json:"changeId"`
-			} `json:"notice"`
+			} `json:"payload"`
 		}
 		if err := json.Unmarshal(data, &post); err != nil {
 			t.Fatal(err)
 		}
-		if post.Kind != "pr" || post.Notice.Kind != "ready" || post.Notice.Number != 17 || post.Notice.Head != head || post.Notice.ChangeID != r.Key {
+		if post.Kind != "pr" || post.Notice.Kind != "ready" || post.Payload.Type != "ready" || post.Payload.Number != 17 || post.Payload.Head != head || post.Payload.ChangeID != r.Key {
 			t.Fatalf("structured ready fields missing: %s", data)
 		}
 		if !strings.Contains(message.Text, "PR #17 is ready to land at "+head+".") || strings.Contains(message.Text, "Land it with:") {

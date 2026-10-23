@@ -154,7 +154,7 @@ func TestDormantInheritedMessageDeliveryState(t *testing.T) {
 	}
 }
 
-func TestDormantInformationalPRNoticeDoesNotBlockClose(t *testing.T) {
+func TestDormantInformationalEventNoticeDoesNotBlockClose(t *testing.T) {
 	for _, claimed := range []bool{false, true} {
 		name := "unclaimed"
 		if claimed {
@@ -164,7 +164,8 @@ func TestDormantInformationalPRNoticeDoesNotBlockClose(t *testing.T) {
 			e := roomControlEnv(t)
 			info, _ := e.start("SLEEP:0\nRESPOND: complete")
 			info, _ = e.wait(info.ID, 1)
-			msg, err := e.m.rooms().Post(info.RoomID, room.PostInput{From: info.Room, Kind: "pr", To: []string{info.Address()}, Text: "PR merged. Watching stopped.", Wake: false})
+			msg, err := e.m.rooms().PostEventInput(room.PostEventInput{RoomID: info.RoomID, To: []string{info.Address()}, NoWake: true,
+				Event: room.PREvent{Type: room.PRUpdate, Label: "PR #1", ChangeID: "github.com/owner/repo#1", Detail: "Watching stopped."}})
 			if err != nil {
 				t.Fatal(err)
 			}
