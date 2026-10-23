@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { speaker } from '../ui/posts.ts'
-import { postedTo, turnHead, turnTail, activitySummary, dmView, groupMessages, sameText, sessionAddress, threadKeys, threadList, plain, voiceRequest, type DmItem, type DmRow, type DmSession, type Receipt, type Thread, type ThreadPost } from './dm.ts'
+import { postedTo, turnHead, turnTail, dmView, groupMessages, sameText, sessionAddress, threadKeys, threadList, plain, voiceRequest, type DmItem, type DmRow, type DmSession, type Receipt, type Thread, type ThreadPost } from './dm.ts'
 import type { Attachment } from '../api/room.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { need } from '../../../test/need.ts'
@@ -110,7 +110,7 @@ test('sameText ignores whitespace only', () => {
   ]) assert.equal(sameText(a, b), false, `${a} | ${b}`)
   assert.equal(sameText('', ''), false)
 })
-test('activity folds adjacent tools while thoughts, failures, and steering remain visible', () => {
+test('one timeline retains tool failures while thoughts and steering remain visible', () => {
   const items = [
     { kind: 'prompt', from: 'room (human)', text: 'start', ts: ts(0) },
     { kind: 'tool', tool: 'read 6 files', ts: ts(1) },
@@ -121,14 +121,13 @@ test('activity folds adjacent tools while thoughts, failures, and steering remai
     { kind: 'tool', tool: 'edited', ts: ts(51) }, { kind: 'error', text: 'failed', ts: ts(52) },
   ]
   const dm = dmView({ address, turns: [{ n: 1, started: ts(0), items }] }, room)
-  assert.deepEqual(dm.rows.map((r) => r.kind), ['turn', 'message', 'activity', 'thought', 'activity', 'message', 'message', 'activity', 'error'])
-  assert.equal(need(expectKind('activity', dm.rows[4]).items[0]).failed, true)
-  assert.equal(activitySummary(expectKind('activity', dm.rows[2]).items, ts(49)), 'Worked for 48s · read 6 files')
-  assert.equal(need(dm.rows[6]).itemKind, 'steering')
+  assert.deepEqual(dm.rows.map((r) => r.kind), ['turn', 'message', 'timeline', 'thought', 'message', 'message', 'error'])
+  assert.deepEqual(expectKind('timeline', dm.rows[2]).steps.map((s) => s.failed), [undefined, true, undefined])
+  assert.equal(need(dm.rows[5]).itemKind, 'steering')
 })
 test('grouping uses author and a seven minute window and resets at turn boundaries', () => {
   const message = (author: string, s: number): DmRow => ({ kind: 'message', key: `${author}:${s}`, author, ts: ts(s) })
-  const activity: DmRow = { kind: 'activity', key: 'activity', items: [] }
+  const activity: DmRow = { kind: 'timeline', key: 'timeline', steps: [] }
   const turnStart: DmRow = { kind: 'turn', key: 'turn', turn: { n: 1, started: ts(0) } }
   const rows = groupMessages([message(address, 0), activity, message(address, 60), message('room', 61), message('room', 481), turnStart, message('room', 482)])
   assert.deepEqual(rows.filter(isKind('message')).map((r) => r.cont), [false, true, false, false, false])
@@ -253,12 +252,6 @@ test('the thread list gives every child a row and keeps child threads out of rec
   assert.deepEqual(recent.map((t) => t.key), ['room:peer'])
   assert.deepEqual(children.map((c) => [c.member.name, c.thread?.key]), [['busy', 'room:busy'], ['asleep', undefined], ['quiet', undefined]])
 })
-test('activity summary reads like the turn divider and skips a zero duration', () => {
-  const tool = (s: number, name = 'Read'): Pick<DmRow, 'tool' | 'ts'> => ({ tool: name, ts: ts(s) })
-  assert.equal(activitySummary([tool(0), tool(10)], new Date(Date.UTC(2026, 9, 17, 16, 4, 0)).toISOString()), 'Worked for 4m00s · read 2 files')
-  assert.equal(activitySummary([tool(5, 'Edit')]), 'edited 1 file')
-})
-
 test('a finished turn ends with a footer row at its end time; a running turn has none', () => {
   const session = { address, turns: [
     { n: 1, status: 'ok', started: ts(0), ended: ts(30), items: [{ kind: 'reply', text: 'done', ts: ts(30) }] },
@@ -314,7 +307,7 @@ test('the root DM labels its rows you and root, and drops the posted-to chip tha
   assert.equal(postedTo({ to: ['room:lead', owner] }, root, owner), '#room · @lead, @root')
 })
 
-test('a compaction divider never folds into the activity block around it', () => {
+test('compaction dividers stay visible beside the turn timeline', () => {
   const items = [
     { kind: 'tool', tool: 'ran', target: 'go test ./...', ts: ts(1) },
     { kind: 'compaction', state: 'started', ts: ts(2) },
@@ -323,8 +316,8 @@ test('a compaction divider never folds into the activity block around it', () =>
   ]
   const session = { member: { name: 'lead' }, turns: [{ n: 1, status: 'running', started: ts(1), items }] }
   const rows = dmView(session, room).rows
-  assert.deepEqual(rows.map((r) => r.kind), ['turn', 'activity', 'compaction', 'compaction', 'activity'])
-  assert.deepEqual(rows.filter(isKind('activity')).map((r) => r.items.length), [1, 1])
+  assert.deepEqual(rows.map((r) => r.kind), ['turn', 'timeline', 'compaction', 'compaction'])
+  assert.deepEqual(rows.filter(isKind('timeline')).map((r) => r.steps.length), [2])
 })
 
 test('a compaction divider is one row that the compaction setting hides', () => {
@@ -372,7 +365,7 @@ test("Voice's request to root is one voice row, never a thread", () => {
   assert.equal(voiceRequest({ ...p, from: 'room:peer' }, room.name), false)
 })
 
-test('a Dyna shell call is one terminal row; waits and stops fold into it', () => {
+test('a shell call is one step; waits and stops update it', () => {
   const job: ShellJob = { id: 'sh_1', command: ['bash', '-c', 'make'], name: 'Build', cwd: '/', state: 'running', code: 0, started: ts(1) }
   const call = (s: number, extra: Partial<DmItem> = {}): DmItem => ({ kind: 'tool', ts: ts(s), tool: 'ran', target: 'make', ...extra })
   const session = { address, turns: [{ n: 1, started: ts(0), items: [
@@ -385,36 +378,17 @@ test('a Dyna shell call is one terminal row; waits and stops fold into it', () =
     call(6, { jobOp: 'run' }),
   ] }] }
   const rows = dmView(session, room).rows
-  const shells = rows.filter(isKind('shell'))
+  const steps = rows.filter(isKind('timeline')).flatMap((r) => r.steps)
+  const shells = steps.filter((s) => s.kind === 'shell')
   assert.equal(shells.length, 1)
   const first = need(shells[0])
-  assert.deepEqual([first.job?.id, first.waits, first.author], ['sh_1', 2, address])
-  const lines = rows.filter(isKind('activity')).flatMap((r) => r.items)
+  assert.deepEqual([first.jobId, first.waits], ['sh_1', 2])
+  const lines = steps.filter((s) => s.kind === 'tool')
   assert.deepEqual(lines.map((it) => it.target), ['make', 'a.go', 'make'])
   assert.equal(lines.some((it) => it.jobId === 'sh_1'), false)
 })
 
-test('three or more quiet shell commands in a row fold into one line; others never fold', () => {
-  const job = (id: string, extra: Partial<ShellJob> = {}): ShellJob => ({ id, command: ['bash', '-c', id], name: id, cwd: '/', state: 'exited', code: 0, started: ts(1), ended: ts(2), ...extra })
-  const run = (j: ShellJob): DmItem => ({ kind: 'tool', ts: ts(1), tool: 'ran', target: j.id, jobOp: 'run', jobId: j.id, job: j })
-  const rowsOf = (jobs: ShellJob[], ...between: DmItem[]) => dmView({ address, turns: [{ n: 1, started: ts(0), items: [...jobs.slice(0, 2).map(run), ...between, ...jobs.slice(2).map(run)] }] }, room).rows.filter((r) => r.kind === 'shell' || r.kind === 'shellGroup')
-  const quiet3 = [job('a'), job('b'), job('c')]
-  const folded = rowsOf(quiet3)
-  assert.deepEqual(folded.map((r) => [r.kind, r.kind === 'shellGroup' ? r.jobs.map((j) => j.id) : undefined]), [['shellGroup', ['a', 'b', 'c']]])
-  assert.equal(need(folded[0]).author, address)
-  // Two do not fold.
-  assert.deepEqual(rowsOf(quiet3.slice(0, 2)).map((r) => r.kind), ['shell', 'shell'])
-  // A failed, stopped, running or background job breaks the run and stays visible.
-  for (const odd of [job('x', { code: 1 }), job('x', { code: -1, stopBy: 'agent' }), job('x', { state: 'running', ended: undefined }), job('x', { backgroundAt: ts(1) })]) {
-    assert.deepEqual(rowsOf([job('a'), job('b'), odd, job('c'), job('d')]).map((r) => r.kind), ['shell', 'shell', 'shell', 'shell', 'shell'])
-    assert.deepEqual(rowsOf([job('a'), job('b'), job('c'), odd]).map((r) => r.kind), ['shellGroup', 'shell'])
-  }
-  // Something between them, such as a reply, ends the run.
-  const reply = { kind: 'reply', ts: ts(1), text: 'Looking at it.' }
-  assert.deepEqual(rowsOf([job('a'), job('b'), job('c')], reply).map((r) => r.kind), ['shell', 'shell', 'shell'])
-})
-
-test('a job-end notice folds into the block of its call, and names the turn it woke', () => {
+test('a shell completion updates its step with the turn it woke', () => {
   const job: ShellJob = { id: 'sh_20261020-100000-aaaaaaaa', command: ['bash', '-c', 'make'], name: 'Build', cwd: '/', state: 'exited', code: 0, started: ts(1), ended: ts(9), backgroundAt: ts(2) }
   const other = { ...job, id: 'sh_20261020-100000-bbbbbbbb', name: 'Test' }
   const run = (j: ShellJob, s: number): DmItem => ({ kind: 'tool', ts: ts(s), tool: 'ran', target: j.name, jobOp: 'run', jobId: j.id, job: j })
@@ -425,28 +399,41 @@ test('a job-end notice folds into the block of its call, and names the turn it w
     { n: 2, started: ts(30), items: [item('prompt', 'n1', 30)] },
   ], posts: [notice(job, 29, 'n1'), notice(other, 20, 'n2')] }
   const rows = dmView(session, room).rows
-  const blocks = rows.filter(isKind('shell'))
-  const byId = Object.fromEntries(blocks.map((r) => [r.job.id, r.finished]))
+  const blocks = rows.filter(isKind('timeline')).flatMap((r) => r.steps).filter((s) => s.kind === 'shell')
+  const byId = Object.fromEntries(blocks.map((r) => [r.jobId, r.finished]))
   assert.deepEqual(byId[job.id], { at: ts(29), turn: 2, woke: true })
   assert.deepEqual(byId[other.id], { at: ts(20), turn: 1, woke: false })
-  // No chip for either notice; a mid-turn one leaves a pointer; a waking one names its turn.
   assert.equal(rows.filter(isKind('thread')).length, 0)
-  assert.deepEqual(rows.filter(isKind('shellNote')).map((r) => r.job.id), [other.id])
-  const turns = rows.filter(isKind('turn'))
-  assert.equal(need(need(turns.find((r) => r.turn.n === 2)).wokeBy).id, job.id)
-  assert.equal(need(turns.find((r) => r.turn.n === 1)).wokeBy, undefined)
+  assert.equal(rows.filter(isKind('timeline')).length, 1, 'notices stay with their original calls')
 })
 
-test('a job-end notice whose call is not on the page stays a chip that names its job', () => {
+test('a shell completion outside the page remains an expandable shell step', () => {
   const id = 'sh_20261019-164000-cccccccc'
   const session = { address, turns: [{ n: 9, started: ts(0), items: [] }], posts: [post('old', `shell:${id}`, [address], 5, { completion: true, kind: 'completed' })] }
-  const chips = dmView(session, room).rows.filter(isKind('thread'))
-  assert.deepEqual(chips.map((c) => c.shell), [id])
+  const steps = dmView(session, room).rows.filter(isKind('timeline')).flatMap((r) => r.steps)
+  assert.deepEqual(steps.filter((s) => s.kind === 'shell').map((s) => s.jobId), [id])
 })
 
-test('a turn of calls that are not reads, runs, edits or searches still has a summary', () => {
-  const items = [{ tool: 'messaged', target: '@root', failed: true, ts: ts(1) }]
-  assert.equal(activitySummary(items, ts(1)), '1 other call · 1 failed')
-  assert.equal(activitySummary([{ tool: 'ran', ts: ts(1) }, { tool: 'messaged', ts: ts(1) }], ts(1)), 'ran 1 command · 1 other call')
-  assert.notEqual(activitySummary([{ tool: 'loaded tools', ts: ts(1) }], ts(1)), '')
+test('each turn has one timeline with tools, shell output and child sessions', () => {
+  const job: ShellJob = { id: 'sh_1', command: ['bash', '-c', 'npm test'], cwd: '/', state: 'exited', code: 1, started: ts(2), ended: ts(8) }
+  const child = { id: 'child-1', name: 'test-helper', address: 'room:test-helper', parent: 'lead-1', created: ts(4), state: 'live', status: 'running' }
+  const session = { address, turns: [
+    { n: 14, started: ts(0), ended: ts(10), status: 'ok', items: [
+      { kind: 'prompt', text: 'Fix the test.', ts: ts(0) },
+      { kind: 'tool', tool: 'read', target: 'test.ts', ts: ts(1) },
+      { kind: 'tool', tool: 'ran', jobOp: 'run', jobId: job.id, job, ts: ts(2) },
+      { kind: 'reply', text: 'Checking the failure.', ts: ts(3) },
+      { kind: 'tool', tool: 'waited', jobOp: 'output', jobId: job.id, ts: ts(5) },
+      { kind: 'tool', tool: 'edited', target: 'test.ts', ts: ts(6) },
+    ] },
+    { n: 15, started: ts(20), status: 'running', items: [{ kind: 'tool', tool: 'read', target: 'next.ts', ts: ts(21) }] },
+  ], posts: [post('finished', `shell:${job.id}`, [address], 8, { completion: true })] }
+  const dm = dmView(session, room, {}, [], [child])
+  const timelines = dm.rows.filter(isKind('timeline'))
+  assert.deepEqual(timelines.map((r) => [r.turn?.n, r.steps.map((s) => s.kind)]), [[14, ['tool', 'shell', 'child', 'tool']], [15, ['tool']]])
+  const shell = need(timelines[0]?.steps.find((s) => s.kind === 'shell'))
+  assert.equal(shell.waits, 1)
+  assert.deepEqual(shell.posts.map((p) => p.id), ['finished'])
+  assert.equal(dm.rows.some((r) => ['activity', 'shell', 'shellGroup', 'shellNote'].includes(r.kind)), false)
+  assert.equal(dm.rows.filter(isKind('message')).length, 2, 'messages remain outside the steps')
 })

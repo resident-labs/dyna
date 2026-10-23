@@ -4,7 +4,6 @@ import type { ShellJob } from '../api/terminal.ts'
 import { isNote, noteData } from '../ui/notices.ts'
 import { userText } from './userText.ts'
 import { duration, short, tokens } from '../ui/format.ts'
-import { FOLD_AT, quiet, type Finished } from './shellBlock.ts'
 
 type Time = string | number
 
@@ -71,7 +70,6 @@ interface RowFields extends Omit<Partial<Item>, 'ts' | 'kind'> {
 export interface TurnRow extends RowFields {
   kind: 'turn'
   turn: DmTurn
-  wokeBy?: ShellJob
 }
 export interface TurnEndRow extends RowFields {
   kind: 'turnEnd'
@@ -98,30 +96,33 @@ export interface ThreadRow extends RowFields {
   thread: Thread
   posts: ThreadPost[]
   queued: boolean
-  shell?: string
 }
-// One call of the agent's tools; adjacent calls fold into an activity row.
+// A turn has one list of steps. Shell reads and completion notices update the
+// original step; a child session keeps its messages in the same step.
 export interface ToolRow extends RowFields {
   kind: 'tool'
 }
-export interface ActivityRow extends RowFields {
-  kind: 'activity'
-  items: ToolRow[]
-}
-export interface ShellRow extends RowFields {
+export interface ShellStep extends RowFields {
   kind: 'shell'
-  job: ShellJob
+  jobId: string
+  job?: ShellJob
   waits: number
-  finished?: Finished
+  posts: ThreadPost[]
+  finished?: { at: Time; turn?: number; woke: boolean }
 }
-export interface ShellGroupRow extends RowFields {
-  kind: 'shellGroup'
-  jobs: ShellJob[]
+export interface ChildStep extends RowFields {
+  kind: 'child'
+  member: TimelineChild
+  thread: Thread
+  posts: ThreadPost[]
 }
-export interface ShellNoteRow extends RowFields {
-  kind: 'shellNote'
-  job: ShellJob
+export type TimelineStep = ToolRow | ShellStep | ChildStep
+export interface TimelineRow extends RowFields {
+  kind: 'timeline'
+  turn?: DmTurn
+  steps: TimelineStep[]
 }
+export type TimelineChild = Pick<Member, 'id' | 'name' | 'address' | 'created' | 'state' | 'status'> & Partial<Member>
 export interface InstructionsRow extends RowFields {
   kind: 'instructions'
   note: DmNote
@@ -132,7 +133,7 @@ export interface ItemRow extends RowFields {
   kind: 'thought' | 'error' | 'note' | 'compaction'
 }
 // One row of the DM.
-export type DmRow = TurnRow | TurnEndRow | MessageRow | VoiceRow | ThreadRow | ActivityRow | ShellRow | ShellGroupRow | ShellNoteRow | InstructionsRow | ItemRow
+export type DmRow = TurnRow | TurnEndRow | MessageRow | VoiceRow | ThreadRow | TimelineRow | InstructionsRow | ItemRow
 // A post waiting to become a row or a chip.
 interface PostEvent extends RowFields {
   kind: 'post'
@@ -140,7 +141,7 @@ interface PostEvent extends RowFields {
   threads: string[]
   suppressMessage?: boolean
 }
-type DmEvent = DmRow | ToolRow | PostEvent
+type DmEvent = DmRow | TimelineStep | PostEvent
 
 export interface DmView {
   address: string
@@ -176,75 +177,10 @@ export function voiceRequest(post: Pick<ThreadPost, 'from' | 'kind'>, roomName: 
   return post.from === `${roomName}:voice-call` && post.kind !== 'voice'
 }
 
-export function activitySummary(items: Pick<ToolRow, 'tool' | 'failed' | 'ts'>[], end?: Time): string {
-  let read = 0, ran = 0, edited = 0, searched = 0, other = 0, failed = 0
-  for (const it of items) {
-    const verb = (it.tool || '').toLowerCase()
-    const n = Number(verb.match(/\b(\d+) (?:files|patterns)\b/)?.[1] || 1)
-    if (/^read/.test(verb)) read += n
-    else if (/^ran|^run|^exec|^bash|^shell/.test(verb)) ran += n
-    else if (/^edit|^wrote|^write|^patch/.test(verb)) edited += n
-    else if (/^search|^listed/.test(verb)) searched += n
-    else other += n
-    if (it.failed) failed++
-  }
-  const start = time(items[0]?.ts), stop = Math.max(start, time(end || items.at(-1)?.ts))
-  return [stop - start >= 1000 && `Worked for ${duration(start, stop)}`, read && `read ${read} file${read === 1 ? '' : 's'}`, ran && `ran ${ran} command${ran === 1 ? '' : 's'}`, edited && `edited ${edited} file${edited === 1 ? '' : 's'}`, searched && `searched ${searched} time${searched === 1 ? '' : 's'}`, other && `${other} other call${other === 1 ? '' : 's'}`, failed && `${failed} failed`].filter(Boolean).join(' · ')
-}
-
-// foldShell turns a call of Dyna's shell tool into a terminal row, and folds a
-// wait or a stop into the row of its job. It reports whether the event was
-// taken; any other call, and one whose job is not on this page, stays an
-// ordinary activity line.
-function foldShell(rows: DmRow[], shells: Map<string, ShellRow>, event: ToolRow, address: string): boolean {
-  if (event.jobOp === 'run' && event.job) {
-    const row: ShellRow = { kind: 'shell', author: address, key: `shell:${event.job.id}`, ts: event.ts, job: event.job, waits: 0 }
-    shells.set(event.job.id, row)
-    rows.push(row)
-    return true
-  }
-  const row = event.jobId ? shells.get(event.jobId) : undefined
-  if (!row) return false
-  row.waits++
-  return true
-}
-
-// How the end of a job reached the agent: the turn a notice opened, if any.
+// A shell completion can wake a later turn or arrive during the current turn.
 interface Wake {
   n: number
   woke: boolean
-}
-
-// foldNotice puts a job's end notice on the block of the call that started the
-// job. A notice that woke the agent is named on its turn's rule; one that
-// arrived mid-turn leaves a short pointer where it landed.
-function foldNotice(rows: DmRow[], block: ShellRow, post: ThreadPost, wake: Wake | undefined, wokeBy: Map<number, ShellJob>, address: string): void {
-  block.finished = { at: post.ts ?? 0, turn: wake?.n, woke: !!wake?.woke }
-  if (wake?.woke) wokeBy.set(wake.n, block.job)
-  else rows.push({ kind: 'shellNote', author: address, key: `note:${post.id}`, ts: post.ts, job: block.job })
-}
-
-// foldQuietShells folds each run of FOLD_AT or more quiet shell rows into one
-// row. Only a job that is already over and succeeded folds, so a fold never
-// hides a job that later fails, and a running one stays in view.
-function foldQuietShells(rows: DmRow[]): DmRow[] {
-  const out: DmRow[] = []
-  let run: ShellRow[] = []
-  const flush = () => {
-    const first = run[0]
-    if (first && run.length >= FOLD_AT) out.push({ kind: 'shellGroup', author: first.author, key: `shells:${first.job.id}`, ts: first.ts, jobs: run.map((r) => r.job) })
-    else out.push(...run)
-    run = []
-  }
-  for (const row of rows) {
-    if (row.kind === 'shell' && quiet(row.job)) run.push(row)
-    else {
-      flush()
-      out.push(row)
-    }
-  }
-  flush()
-  return out
 }
 
 // The fields of a row that grouping reads.
@@ -259,7 +195,7 @@ export function groupMessages<R extends GroupFields>(rows: R[]): (R & { cont?: b
   let prev: R | null = null
   return rows.map((row, i) => {
     if (row.kind === 'turn' || row.kind === 'turnEnd') prev = null
-    if (row.kind !== 'message' && !(['activity', 'thought', 'shell', 'shellGroup', 'shellNote'].includes(row.kind) && row.author)) return row
+    if (row.kind !== 'message' && !(['timeline', 'thought'].includes(row.kind) && row.author)) return row
     const delta = time(row.ts) - time(prev?.ts)
     const ownerAttachment = row.ownerAttachments || row.attachmentOnly
     const adjacent = rows[i - 1]
@@ -293,7 +229,7 @@ const ITEM_KINDS = ['thought', 'error', 'note', 'compaction'] as const
 const isItemKind = (kind: string): kind is ItemRow['kind'] => (ITEM_KINDS as readonly string[]).includes(kind)
 
 // show hides reasoning or compaction dividers when set to false.
-export function dmView(session: DmSession | null | undefined, room: { name: string }, show: { reasoning?: boolean; compaction?: boolean } = {}, queue: Receipt[] = []): DmView {
+export function dmView(session: DmSession | null | undefined, room: { name: string }, show: { reasoning?: boolean; compaction?: boolean } = {}, queue: Receipt[] = [], children: TimelineChild[] = []): DmView {
   const address = sessionAddress(session, room)
   const events: DmEvent[] = [], threads = new Map<string, Thread>(), peerItems = new Map<string, PeerItem>(), wakes = new Map<string, Wake>()
   const posts = new Map<string, ThreadPost>((session?.posts || []).map((p): [string, ThreadPost] => [p.id, p]))
@@ -348,6 +284,13 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
       else events.push({ ...row, kind: isItemKind(it.kind) ? it.kind : 'note' })
     }
   }
+  for (const child of children) {
+    const at = time(child.created)
+    const turn = (session?.turns || []).findLast((t) => time(t.started) <= at)
+    // Do not attach a child from outside the loaded transcript to this page.
+    if (!turn || (done.includes(turn.status ?? '') && turn.ended && at > time(turn.ended))) continue
+    events.push({ kind: 'child', key: `child:${turn.n}:${child.id ?? child.address}`, ts: child.created, n: turn.n, member: child, thread: threadFor(child.address), posts: [] })
+  }
   // A thread post carries its receipt for the thread panel: the transcript's
   // delivery first, then the queue's.
   const receiptOf = (p: ThreadPost): ThreadPost => {
@@ -395,53 +338,94 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   const order: Record<string, number> = { turn: -1, turnEnd: 1 }
   events.sort((a, b) => time(a.ts) - time(b.ts) || (order[a.kind] || 0) - (order[b.kind] || 0))
   const rows: DmRow[] = []
-  const shells = new Map<string, ShellRow>()
-  const wokeBy = new Map<number, ShellJob>()
+  const shells = new Map<string, ShellStep>()
+  const timelines = new Map<number, TimelineRow>()
+  const turns = session?.turns || []
+  let current: DmTurn | undefined
+  const timeline = (n: number | undefined, at?: Time): TimelineRow => {
+    const id = n ?? current?.n ?? 0
+    let row = timelines.get(id)
+    if (!row) {
+      row = { kind: 'timeline', author: address, key: `timeline:${id}`, ts: at, turn: turns.find((t) => t.n === id), steps: [] }
+      timelines.set(id, row)
+      rows.push(row)
+    }
+    return row
+  }
+  const shellNotice = (id: string, post: ThreadPost): void => {
+    let step = shells.get(id)
+    if (!step) {
+      step = { kind: 'shell', key: `shell:${id}`, ts: post.ts, jobId: id, waits: 0, posts: [] }
+      shells.set(id, step)
+      timeline(undefined, post.ts).steps.push(step)
+    }
+    step.posts.push(post)
+    const wake = wakes.get(post.id)
+    step.finished = { at: post.ts ?? 0, turn: wake?.n, woke: !!wake?.woke }
+  }
+  const childStep = (child: TimelineChild, at?: Time, n?: number): ChildStep => {
+    const row = timeline(n, at)
+    const found = row.steps.find((s): s is ChildStep => s.kind === 'child' && s.member.address === child.address)
+    if (found) return found
+    const step: ChildStep = { kind: 'child', key: `child:${row.turn?.n ?? 0}:${child.id ?? child.address}`, ts: at, member: child, thread: threadFor(child.address), posts: [] }
+    row.steps.push(step)
+    return step
+  }
   const waiting = (p: ThreadPost) => receipts.get(p.id)?.state === 'waiting'
   for (const event of events) {
+    if (event.kind === 'turn') current = event.turn
     if (event.kind === 'post') {
       const p = event.post
       if (!event.suppressMessage && (!event.threads.length || (p.from === address && (p.to || []).includes(room.name)))) {
         const ownerAttachments = (p.owner || p.from === room.name) && !!p.attachments?.length
         rows.push({ ...event, kind: 'message', author: p.from, text: p.text, human: !!p.human, ownerAttachments, attachmentOnly: false, post: p })
       }
-      // A chip holds a run of posts where they arrived. A post joins a chip
-      // directly above it; after any other row it starts a new chip.
       for (const key of event.threads) {
-        // A job's end folds into the block of its call, when that is on the page.
-        const block = shells.get(key.replace(/^shell:/, ''))
-        if (key.startsWith('shell:') && block) {
-          foldNotice(rows, block, p, wakes.get(p.id), wokeBy, address)
+        if (key.startsWith('shell:')) {
+          shellNotice(key.slice('shell:'.length), p)
+          continue
+        }
+        const child = children.find((c) => c.address === key)
+        if (child) {
+          childStep(child, p.ts).posts.push(p)
           continue
         }
         let chip: ThreadRow | undefined
         for (let i = rows.length - 1; !chip; i--) {
           const row = rows[i]
           if (row?.kind !== 'thread') break
-          if (row.thread?.key === key) chip = row
+          if (row.thread.key === key) chip = row
         }
         if (!chip) {
-          chip = { kind: 'thread', key: `thread:${key}:${p.id}`, thread: threads.get(key) ?? { key, posts: [] }, posts: [], ts: p.ts, queued: false }
+          chip = { kind: 'thread', key: `thread:${key}:${p.id}`, thread: threadFor(key), posts: [], ts: p.ts, queued: false }
           rows.push(chip)
         }
         chip.posts.push(p)
-        if (key.startsWith('shell:')) chip.shell = key.slice('shell:'.length)
         chip.queued ||= waiting(p)
       }
-    } else if (event.kind === 'tool' && foldShell(rows, shells, event, address)) {
-      // A Dyna shell call is a terminal block, or a wait or stop on one.
     } else if (event.kind === 'tool') {
-      const last = rows.at(-1)
-      if (last?.kind === 'activity') last.items.push(event)
-      else rows.push({ kind: 'activity', author: address, key: `activity:${event.key}`, ts: event.ts, items: [event] })
+      if (event.jobOp === 'run' && event.job) {
+        // A completion can precede a clipped run item. Reuse its step.
+        const prior = shells.get(event.job.id)
+        if (prior) prior.job = event.job
+        else {
+          const step: ShellStep = { kind: 'shell', key: `shell:${event.job.id}`, ts: event.ts, job: event.job, jobId: event.job.id, waits: 0, posts: [] }
+          shells.set(event.job.id, step)
+          timeline(event.n, event.ts).steps.push(step)
+        }
+      } else {
+        const step = event.jobId ? shells.get(event.jobId) : undefined
+        if (step) step.waits++
+        else timeline(event.n, event.ts).steps.push(event)
+      }
+    } else if (event.kind === 'child') {
+      childStep(event.member, event.ts, event.n)
     } else if (event.kind === 'instructions' && event.note.slow) {
-      // Slow-test issues that follow each other share one note row.
       const last = rows.at(-1)
       if (last?.kind === 'instructions' && last.notes?.[0]?.slow) last.notes.push(event.note)
       else rows.push({ ...event, notes: [event.note] })
-    } else rows.push(event)
+    } else if (event.kind !== 'shell') rows.push(event)
   }
-  for (const row of rows) if (row.kind === 'turn' && wokeBy.has(row.turn.n)) row.wokeBy = wokeBy.get(row.turn.n)
   // Keep pending or clipped owner instructions visible. Only a returned
   // prompt with the same author and text can replace the post's text.
   const messages = rows.filter(isMessage)
@@ -477,7 +461,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   // show. The delivery itself stays on every row.
   const reads = rows.filter((r) => r.delivery === 'read')
   for (const r of reads.slice(0, -1)) if (r.kind === 'message') r.quietReceipt = true
-  return { address, threads: [...threads.values()], rows: groupMessages(foldQuietShells(rows)) }
+  return { address, threads: [...threads.values()], rows: groupMessages(rows) }
 }
 
 // threadList orders the thread panel list newest first. Shell job
