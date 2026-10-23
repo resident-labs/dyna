@@ -229,7 +229,7 @@ test('status box draws the steps, the sentence and the main button', async () =>
   const { dir, component, render } = await load('StatusBox')
   try {
     const show = (change: Row, props: object = {}) => render(component, { props: { change, roomId: 'r', ...props } }).body
-    const html = show(ready({ botReviews: [bot('rabbit', 'changes_requested')], policy: { requiredChecks: [], review: 'on', land: 'github-pr' } }), { onrules: () => {} })
+    const html = show(ready({ botReviews: [bot('rabbit', 'changes_requested')], policy: { requiredChecks: [], review: 'on' } }), { onrules: () => {} })
     const t = text(html)
     assert.match(t, /CI passed .*Review approved .*Merge ready/)
     assert.match(t, /The reviewer approved this PR\. It merges cleanly into main\./)

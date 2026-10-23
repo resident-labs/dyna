@@ -8,7 +8,7 @@ import (
 
 func TestDefaultsAndOverrideRoundTrip(t *testing.T) {
 	p := Default()
-	if p.Review != "on" || p.Land != "github-pr" {
+	if p.Review != "on" {
 		t.Fatalf("defaults: %+v", p)
 	}
 	o := Override{Review: "off", RequiredChecks: []string{}, Reason: "Documentation only"}
@@ -32,7 +32,7 @@ func TestDefaultsAndOverrideRoundTrip(t *testing.T) {
 	}
 }
 func TestInvalidPoliciesAndMissingReasons(t *testing.T) {
-	for _, o := range []Override{{Review: "off"}, {Review: "yes", Reason: "x"}, {Land: "push", Reason: "x"}, {RequiredChecks: []string{"go-test", "go-test"}, Reason: "x"}} {
+	for _, o := range []Override{{Review: "off"}, {Review: "yes", Reason: "x"}, {RequiredChecks: []string{"go-test", "go-test"}, Reason: "x"}} {
 		if ValidateOverride(o) == nil {
 			t.Fatalf("accepted invalid override %+v", o)
 		}
@@ -57,7 +57,7 @@ func TestRequiredCheckNamesRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(loaded, policy) {
 		t.Fatalf("policy changed: got %+v, want %+v", loaded, policy)
 	}
-	override := Override{RequiredChecks: names, Review: "off", Land: "github-pr", Reason: "Use named GitHub checks"}
+	override := Override{RequiredChecks: names, Review: "off", Reason: "Use named GitHub checks"}
 	data, err = json.Marshal(override)
 	if err != nil {
 		t.Fatal(err)

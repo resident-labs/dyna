@@ -114,16 +114,78 @@ func (s *Store) migrate(db *sql.DB) error {
 	}); err != nil {
 		return err
 	}
-	return nil
+	return database.Migrate(db, "goals.resting", 1, migrateResting)
 }
 
 // TODO: legacy/shim remove later — copies goals/state.json into dyna.db once and leaves the file in place so an older binary can roll back; remove after every host has run a SQLite build for a while.
 func (s *Store) importLegacy(conn *sql.Conn) error {
-	st, err := readLegacy(filepath.Join(s.Root, "state.json"))
+	data, err := os.ReadFile(filepath.Join(s.Root, "state.json"))
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	_, err = saveState(conn, rows{}, st)
+	var doc struct {
+		Version int                        `json:"version"`
+		Rooms   map[string]json.RawMessage `json:"rooms"`
+		Global  json.RawMessage            `json:"global"`
+	}
+	doc.Version = 1
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return err
+	}
+	if doc.Version != 1 {
+		return fmt.Errorf("unsupported goals state version %d", doc.Version)
+	}
+	ctx := context.Background()
+	for room, raw := range doc.Rooms {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			return err
+		}
+		var goals map[string]json.RawMessage
+		if err := json.Unmarshal(fields["goals"], &goals); err != nil && fields["goals"] != nil {
+			return err
+		}
+		delete(fields, "goals")
+		body, err := json.Marshal(fields)
+		if err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "INSERT INTO goal_rooms(room,body,revision) VALUES (?,?,1)", room, string(body)); err != nil {
+			return err
+		}
+		for id, body := range goals {
+			var g Goal
+			if err := json.Unmarshal(body, &g); err != nil {
+				return err
+			}
+			if g.State == "resting" {
+				var raw map[string]json.RawMessage
+				if err := json.Unmarshal(body, &raw); err != nil {
+					return err
+				}
+				g.State = "active"
+				raw["state"] = json.RawMessage(`"active"`)
+				body, err = json.Marshal(raw)
+				if err != nil {
+					return err
+				}
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO goals(room,id,state,body) VALUES (?,?,?,?)", room, id, g.State, string(body)); err != nil {
+				return err
+			}
+		}
+	}
+	if len(doc.Global) > 0 && string(doc.Global) != "null" {
+		if _, err := conn.ExecContext(ctx, "INSERT INTO goal_rooms(room,body,revision) VALUES ('*',?,1)", string(doc.Global)); err != nil {
+			return err
+		}
+	}
+	if len(doc.Rooms) > 0 || len(doc.Global) > 0 {
+		_, err = conn.ExecContext(ctx, "UPDATE meta SET value='1' WHERE key='goals.revision'")
+	}
 	return err
 }
 
@@ -561,12 +623,18 @@ func (s *Store) foldLegacyChildren(conn *sql.Conn) error {
 	ctx := context.Background()
 	now := s.now()
 	byKey := map[[2]string]*legacyBody{}
+	rawByKey := map[[2]string]map[string]json.RawMessage{}
 	var order [][2]string
 	if err := scan(conn, "SELECT room,body FROM goals", func(room string, body []byte) error {
 		var g legacyBody
 		if err := json.Unmarshal(body, &g); err != nil {
 			return err
 		}
+		var raw map[string]json.RawMessage
+		if err := json.Unmarshal(body, &raw); err != nil {
+			return err
+		}
+		rawByKey[[2]string{room, g.ID}] = raw
 		g.Room = room
 		byKey[[2]string{room, g.ID}] = &g
 		order = append(order, [2]string{room, g.ID})
@@ -607,7 +675,14 @@ func (s *Store) foldLegacyChildren(conn *sql.Conn) error {
 		return ""
 	}
 	writeGoal := func(g *legacyBody) error {
-		body, err := json.Marshal(g.Goal)
+		raw := rawByKey[[2]string{g.Room, g.ID}]
+		delete(raw, "parent")
+		raw["state"], _ = json.Marshal(g.State)
+		raw["nextItem"], _ = json.Marshal(g.NextItem)
+		if g.Done != nil {
+			raw["done"], _ = json.Marshal(g.Done)
+		}
+		body, err := json.Marshal(raw)
 		if err != nil {
 			return err
 		}
