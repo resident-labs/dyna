@@ -54,15 +54,16 @@ func fakeNodeReports(out io.Writer, checks []nodeCheck, failFrontend bool) error
 }
 
 func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T) {
-	checks, _, err := nodeChecks([]string{"go"})
+	const slots = 8
+	checks, _, err := nodeChecks([]string{"go", "cross-build"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	var active, peak atomic.Int32
-	var started atomic.Bool
-	bothStarted := make(chan struct{})
+	var started, crossStarted atomic.Bool
+	slotsStarted := make(chan struct{})
 	release := make(chan struct{})
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 2, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: slots, Enabled: true}}
 	runner.Command = func(ctx context.Context, dir string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
@@ -82,7 +83,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 				t.Errorf("scope lacks %s", want)
 			}
 		}
-		for _, want := range []string{"flock -n 9", "--cpus=2", "--memory=4g", "sudo -n docker", "GOCACHE=/cache/build", "GOMODCACHE=/cache/mod", "GITHUB_STEP_SUMMARY=/reports/step-summary.md"} {
+		for _, want := range []string{"flock -n 9", "--cpus=2", "--memory=4g", "sudo -n docker", "GOCACHE=/cache/build", "GOMODCACHE=/cache/mod", "GITHUB_STEP_SUMMARY=/reports/step-summary.md", ":/workspace", "-w /workspace", "GIT_CONFIG_VALUE_0=/workspace", "npm_config_cache=/cache/npm"} {
 			if !strings.Contains(script, want) {
 				t.Errorf("check lacks %s", want)
 			}
@@ -90,16 +91,22 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		if output, err := exec.Command("bash", "-n", "-c", script).CombinedOutput(); err != nil {
 			return fmt.Errorf("invalid script: %w: %s", err, output)
 		}
+		if strings.Contains(script, "bash scripts/ci.sh cross-build") {
+			crossStarted.Store(true)
+		}
 		current := active.Add(1)
 		defer active.Add(-1)
 		if current > peak.Load() {
 			peak.Store(current)
 		}
-		if current == 2 {
+		if current == slots {
+			if !crossStarted.Load() {
+				t.Error("cross-build did not start beside the other checks")
+			}
 			select {
-			case <-bothStarted:
+			case <-slotsStarted:
 			default:
-				close(bothStarted)
+				close(slotsStarted)
 			}
 		}
 		select {
@@ -116,16 +123,16 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		result, err := runner.Run(t.Context(), Request{RepoDir: t.TempDir(), Suites: []string{"go"}, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
+		result, err := runner.Run(t.Context(), Request{RepoDir: t.TempDir(), Suites: []string{"go", "cross-build"}, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
 		done <- outcome{result, err}
 	}()
-	<-bothStarted
+	<-slotsStarted
 	close(release)
 	got := <-done
-	if got.err != nil || got.result.Status != "failed" || peak.Load() != 2 {
+	if got.err != nil || got.result.Status != "failed" || peak.Load() != slots {
 		t.Fatalf("result=%+v err=%v peak=%d", got.result, got.err, peak.Load())
 	}
-	wanted := map[string]bool{"frontend": true, "frontend-check": true, "go-static": true, "go-test": true}
+	wanted := map[string]bool{"frontend": true, "frontend-check": true, "go-static": true, "go-test": true, "cross-build": true}
 	for i := 0; i < 8; i++ {
 		wanted[fmt.Sprintf("go-test-shard (%d)", i)] = true
 	}

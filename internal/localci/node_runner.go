@@ -230,8 +230,16 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}
 	}()
 	jobs := make(chan int, len(checks))
-	for i := range checks {
-		jobs <- i
+	// Cross-build is the longest cold check. Start it beside the other suites.
+	for i, check := range checks {
+		if check.id == "cross-build" {
+			jobs <- i
+		}
+	}
+	for i, check := range checks {
+		if check.id != "cross-build" {
+			jobs <- i
+		}
 	}
 	close(jobs)
 	var wg sync.WaitGroup
@@ -371,12 +379,14 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		}
 		inner = prepare + "(getent group $CI_GID >/dev/null || groupadd --gid $CI_GID dyna-ci) && (getent passwd $CI_UID >/dev/null || useradd --no-log-init --uid $CI_UID --gid $CI_GID --no-create-home --home-dir /tmp/home dyna-ci) && exec setpriv --reuid=$CI_UID --regid=$CI_GID --clear-groups bash -c " + q(inner)
 	}
+	// A stable source path lets Go reuse build and test results across run IDs.
+	// The host worktree and reports stay separate for each check.
 	args := `"${docker[@]}" run --rm --init --cpus=2 --memory=4g --memory-swap=4g --pids-limit=512 --name ` + q(name) + user +
-		" -v " + q(work+":"+work) + " -v " + q(cache+":"+cache) + " -v " + q(reportDir+":/reports") + " -w " + q(work)
+		" -v " + q(work+":/workspace") + " -v " + q(cache+":"+cache) + " -v " + q(reportDir+":/reports") + " -w /workspace"
 	for _, mount := range [][2]string{{"go-build", "build"}, {"go-mod", "mod"}, {"npm", "npm"}, {"android", "android"}, {"gradle", "gradle"}} {
 		args += " -v " + q(path.Join(base, mount[0])+":/cache/"+mount[1])
 	}
-	args += " -e HOME=/tmp/home -e XDG_DATA_HOME=/tmp/data -e XDG_CONFIG_HOME=/tmp/config -e XDG_CACHE_HOME=/tmp/cache -e RUNNER_TEMP=/reports -e GITHUB_STEP_SUMMARY=/reports/step-summary.md -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod -e npm_config_cache=/cache/npm -e ANDROID_HOME=/cache/android -e GRADLE_USER_HOME=/cache/gradle -e GOMAXPROCS=2 -e GOMEMLIMIT=3GiB -e GOFLAGS=-p=2 -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=" + q(work) + " -e CI_UID=$(id -u) -e CI_GID=$(id -g) -e JUNIT_REPORT_PATH=/reports/" + check.id + "-test.xml " + check.image
+	args += " -e HOME=/tmp/home -e XDG_DATA_HOME=/tmp/data -e XDG_CONFIG_HOME=/tmp/config -e XDG_CACHE_HOME=/tmp/cache -e RUNNER_TEMP=/reports -e GITHUB_STEP_SUMMARY=/reports/step-summary.md -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod -e npm_config_cache=/cache/npm -e ANDROID_HOME=/cache/android -e GRADLE_USER_HOME=/cache/gradle -e GOMAXPROCS=2 -e GOMEMLIMIT=3GiB -e GOFLAGS=-p=2 -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/workspace -e GITHUB_WORKSPACE=/workspace -e CI_UID=$(id -u) -e CI_GID=$(id -g) -e JUNIT_REPORT_PATH=/reports/" + check.id + "-test.xml " + check.image
 	// Both host and container deadlines survive a disconnected SSH client.
 	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner)
 	return nodeSlotScript(base, node.Slots, index, setup)
