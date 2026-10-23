@@ -33,7 +33,7 @@ func NewCommand() *cobra.Command {
 	var h hooks.Hook
 	var timeout time.Duration
 	var recipe string
-	add := &cobra.Command{Use: "add [name]", Short: "Add a repository event hook", Long: "Save a trusted shell command for a repository event. Use --recipe self-update for the Dyna-only Update Dyna recipe. Agents must tell the owner when they add or change a hook.", Args: cobra.MaximumNArgs(1), RunE: func(c *cobra.Command, a []string) error {
+	add := &cobra.Command{Use: "add [name]", Short: "Add a repository event hook", Long: "Save a trusted shell command for a repository event. Use --recipe doctor for a schedule hook that examines the machine every minute while load or memory is high, or --recipe self-update for the Dyna-only Update Dyna recipe. Agents must tell the owner when they add or change a hook.", Args: cobra.MaximumNArgs(1), RunE: func(c *cobra.Command, a []string) error {
 		if len(a) == 0 && recipe == "" {
 			return fmt.Errorf("hook name is required")
 		}
@@ -42,8 +42,9 @@ func NewCommand() *cobra.Command {
 			name = a[0]
 		}
 		if recipe != "" {
-			if recipe != "self-update" {
-				return fmt.Errorf("unknown hook recipe %q", recipe)
+			r, ok := hooks.Recipes[recipe]
+			if !ok {
+				return fmt.Errorf("unknown hook recipe %q; built-in recipes are %s", recipe, hooks.RecipeHelp())
 			}
 			for _, flag := range []string{"event", "command", "cwd", "timeout", "on-fail", "every-minutes"} {
 				if c.Flags().Changed(flag) {
@@ -54,7 +55,7 @@ func NewCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			h, err = hooks.SelfUpdateRecipe(c.Context(), repo, exe, name)
+			h, err = r.Build(c.Context(), repo, exe, name)
 			if err != nil {
 				return err
 			}
@@ -64,7 +65,7 @@ func NewCommand() *cobra.Command {
 		}
 		return engineclient.New("").Call(c.Context(), "AddHook", []any{repo, h}, nil)
 	}}
-	add.Flags().StringVar(&recipe, "recipe", "", "built-in recipe: self-update (Update Dyna)")
+	add.Flags().StringVar(&recipe, "recipe", "", "built-in recipe: "+hooks.RecipeHelp())
 	add.Flags().StringVar(&h.Event, "event", "", "lifecycle event")
 	add.Flags().StringVar(&h.Command, "command", "", "trusted shell command")
 	add.Flags().StringVar(&h.Cwd, "cwd", "worktree", "worktree, main, or an absolute path")
