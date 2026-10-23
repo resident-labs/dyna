@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { feedRows, feedPRRepos, isShellResult, roomPosts, rowPost, rowPosts } from './feedRows.ts'
 import type { FeedInput, FeedRow } from './feedRows.ts'
+import { hookEvent } from './eventPayloads.ts'
 import { need } from '../../../test/need.ts'
 
 const start = new Date(2026, 9, 17, 12).getTime()
@@ -98,10 +99,10 @@ test('held comment notices stay separate from grouped PR updates', () => {
 
 // A hook run posts its start and then its result. One card shows the run, so
 // the start folds into the result of the same run ID.
-const hookPost = (id: string, type: 'started' | 'result', runId: string, state: 'running' | 'passed' | 'failed'): FeedInput => ({
-  id, ts: start, from: 'dyna', kind: 'hook', text: 'hook',
+const hookPost = (id: string, type: 'started' | 'result', runId: string, state: 'running' | 'passed' | 'failed' | 'error', ts = start, hook = 'self-update'): FeedInput => ({
+  id, ts, from: 'dyna', kind: 'hook', text: 'hook',
   notice: { kind: type },
-  payload: { runId, repo: '/repo', hook: 'self-update', event: 'main-updated', state },
+  payload: { runId, repo: '/repo', hook, event: 'main-updated', state },
 })
 
 // A parent check-in belongs to the parent's DM. It is not part of the room's
@@ -145,18 +146,66 @@ test('an issue folds its filing, change and close into one card', () => {
   assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['i4'])
 })
 
-test('a hook run folds its start into its result, and another run is another card', () => {
+// A passing run of a hook, one a minute, as the engine posts them.
+const pass = (n: number, hook = 'librarian') => hookPost(`pass-${hook}-${n}`, 'result', `${hook}-run-${n}`, 'passed', start + n * 60_000, hook)
+
+test('a hook run folds its start into its result', () => {
   const posts = [
     hookPost('h1', 'started', 'run-a', 'running'),
     hookPost('h2', 'result', 'run-a', 'passed'),
-    hookPost('h3', 'started', 'run-b', 'running'),
-    hookPost('h4', 'result', 'run-b', 'failed'),
   ]
   const rows = content(feedRows(posts))
-  assert.deepEqual(rows.map((row) => row.key), ['h1', 'h3'])
-  assert.deepEqual(rowPosts(rows[0]).map((post) => post.id), ['h1', 'h2'])
-  assert.equal(rowPost(rows[0])?.notice?.kind, 'result')
-  assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['h3', 'h4'])
+  assert.equal(rows.length, 1)
+  assert.deepEqual(rowPosts(need(rows[0])).map((post) => post.id), ['h1', 'h2'])
+  assert.equal(rowPost(need(rows[0]))?.notice?.kind, 'result')
+  assert.deepEqual(need(rows[0]).hook, { count: 1, lastTs: start })
+})
+
+test('a dozen passes of one hook fold into one row with the count and the last time', () => {
+  const posts = Array.from({ length: 12 }, (_, i) => pass(i + 1))
+  const rows = content(feedRows(posts))
+  assert.equal(rows.length, 1)
+  assert.deepEqual(need(rows[0]).hook, { count: 12, lastTs: start + 12 * 60_000 })
+  assert.equal(rowPost(need(rows[0]))?.id, 'pass-librarian-12')
+  assert.equal(rowPosts(need(rows[0])).length, 12)
+})
+
+test('a failure splits the fold and shows on its own', () => {
+  const posts = [
+    pass(1), pass(2),
+    hookPost('fail-3', 'result', 'librarian-run-3', 'failed', start + 3 * 60_000, 'librarian'),
+    pass(4),
+  ]
+  const rows = content(feedRows(posts))
+  assert.deepEqual(rows.map((row) => row.post.id), ['pass-librarian-2', 'fail-3', 'pass-librarian-4'])
+  assert.deepEqual(need(rows[0]).hook, { count: 2, lastTs: start + 2 * 60_000 })
+  assert.equal(need(rows[1]).hook, undefined)
+  assert.deepEqual(need(rows[2]).hook, { count: 1, lastTs: start + 4 * 60_000 })
+})
+
+test('two hooks never fold together', () => {
+  const rows = content(feedRows([pass(1), pass(2, 'self-update'), pass(3)]))
+  assert.deepEqual(rows.map((row) => hookEvent(row.post)?.hook), ['librarian', 'self-update', 'librarian'])
+})
+
+test('passes more than the fold window apart start a new row', () => {
+  const late = hookPost('pass-late', 'result', 'librarian-run-late', 'passed', start + 61 * 60_000, 'librarian')
+  const rows = content(feedRows([pass(1), late]))
+  assert.deepEqual(rows.map((row) => row.post.id), ['pass-librarian-1', 'pass-late'])
+})
+
+test('a running run shows on its hook row, and a stale start shows nowhere', () => {
+  const running = hookPost('start-r', 'started', 'librarian-run-r', 'running', start + 2 * 60_000, 'librarian')
+  const live = content(feedRows([pass(1), running]))
+  assert.equal(live.length, 1)
+  assert.equal(rowPost(need(live[0]))?.id, 'start-r')
+  assert.deepEqual(need(live[0]).hook, { count: 1, lastTs: start + 60_000 })
+  // A later run of the same hook proves the older start ended: no result will
+  // come, and its card must not stay running.
+  const stale = content(feedRows([pass(1), running, pass(3)]))
+  assert.equal(stale.length, 1)
+  assert.deepEqual(rowPosts(need(stale[0])).map((post) => post.id), ['pass-librarian-1', 'pass-librarian-3'])
+  assert.deepEqual(need(stale[0]).hook, { count: 2, lastTs: start + 3 * 60_000 })
 })
 
 // A merge trial posts its progress and its end. One card shows the trial, so
