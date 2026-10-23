@@ -1,11 +1,8 @@
 package worktrees
 
 import (
-	"bufio"
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,20 +28,15 @@ type inferredOwners struct {
 	Runs     []ownerRef
 }
 
-const (
-	inferenceMetadataLimit = 4 << 20
-	inferenceLineLimit     = 16 << 20
-	inferenceJournalLimit  = 256 << 20
-)
+const inferenceMetadataLimit = 4 << 20
 
 // inferOwners reads historical ownership without changing stores or worktrees.
 // An error means that ownership is incomplete; callers must keep the trees.
-// runHistory caches what the journals of ended workflow runs say about
-// trees. An ended run never changes, and reading its journals is most of an
-// inference pass. Sessions and running workflows are always read again.
+// runHistory caches completed directory sets. The first terminal transition
+// seals them. Sessions and incomplete runs are always checked again.
 type runHistory struct {
-	read map[string]bool       // ended run IDs whose journals were read
-	refs map[string][]ownerRef // tree path -> owners found in those journals
+	read map[string]bool       // run IDs with a complete directory set
+	refs map[string][]ownerRef // tree path -> owners in complete directory sets
 }
 
 func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[string]inferredOwners, error) {
@@ -132,7 +124,7 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 	}); err != nil {
 		return nil, fmt.Errorf("infer session owners: %w", err)
 	}
-	runs, err := runstore.ListAll()
+	runs, err := runstore.StoredMetadata()
 	if err != nil {
 		return nil, fmt.Errorf("infer run owners: %w", err)
 	}
@@ -140,44 +132,59 @@ func inferOwners(ctx context.Context, paths []string, history *runHistory) (map[
 	for _, m := range runs {
 		metas[m.ID] = m
 	}
-	visitRun := func(root *os.Root, name string) error {
-		// A run folder with no row, such as a broken or starting run, is an
-		// open owner, so its trees are kept.
+	visitRun := func(_ *os.Root, name string) error {
 		meta, ok := metas[name]
 		if !ok {
 			reportRowless(name)
 		}
-		ref := ownerRef{ID: name, Address: name, Closed: ok && meta.Status != "running" && !meta.EndedAt.IsZero()}
+		ref := ownerRef{ID: name, Address: name, Closed: ok && runstore.IsFinishedStatus(meta.Status) && !meta.EndedAt.IsZero()}
 		cached = history != nil && ref.Closed
-		if cached && history.read[meta.ID] {
+		if cached && history.read[name] {
 			return nil
 		}
-		if cached {
-			history.read[meta.ID] = true
+		var set runstore.DirectorySet
+		var found bool
+		var err error
+		if ok {
+			set, found, err = runstore.ReadDirectories(ctx, name)
 		}
-		dirs, found, err := inferenceDirs(ctx, root, filepath.Join(name, runstore.DirsFile))
 		if err != nil {
 			return err
 		}
-		if !found {
-			// TODO: legacy/shim remove later — runs started before runstore kept dirs.jsonl have only their journals. An ended run gets its list built once. Remove when no live or archived run lacks dirs.jsonl.
-			if dirs, err = inferenceJournalDirs(ctx, root, name); err != nil {
-				return err
+		if !found || !set.Complete {
+			// Unknown directories cannot prove that any candidate tree is unused.
+			ref.Closed = false
+			for key, item := range owners {
+				item.Runs = inferenceAddOwner(item.Runs, ref)
+				owners[key] = item
 			}
-			if ref.Closed {
-				// Best effort: a failed write only means the next pass reads the journals again.
-				_ = inferenceWriteDirs(root, name, dirs)
-			}
+			return nil
 		}
-		for _, dir := range dirs {
+		if cached {
+			history.read[name] = true
+		}
+		for _, dir := range set.Directories {
 			if err := match(dir, ref, false); err != nil {
 				return err
 			}
 		}
 		return nil
 	}
+
+	for _, meta := range runs {
+		if err := visitRun(nil, meta.ID); err != nil {
+			return nil, fmt.Errorf("infer stored run owner: %w", err)
+		}
+	}
+	// Physical folders add only rowless owners; canonical owners came from SQL.
+	visitRowless := func(root *os.Root, name string) error {
+		if _, found := metas[name]; found {
+			return nil
+		}
+		return visitRun(root, name)
+	}
 	for _, root := range []string{runstore.RunsDir(), runstore.ArchiveDir()} {
-		if err := inferenceStore(ctx, root, visitRun); err != nil {
+		if err := inferenceStore(ctx, root, visitRowless); err != nil {
 			return nil, fmt.Errorf("infer run owners: %w", err)
 		}
 	}
@@ -348,135 +355,6 @@ func inferenceDecode(data []byte, dest any) error {
 		return errors.New("expected a JSON object")
 	}
 	return json.Unmarshal(data, dest)
-}
-
-func inferenceJournal(ctx context.Context, root *os.Root, path string, visit func(string, string) error) error {
-	file, err := inferenceOpen(root, path)
-	if os.IsNotExist(err) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	limited := &io.LimitedReader{R: inferenceReader{ctx, file}, N: inferenceJournalLimit + 1}
-	scanner := bufio.NewScanner(limited)
-	scanner.Buffer(make([]byte, 64<<10), inferenceLineLimit)
-	for scanner.Scan() {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if len(bytes.TrimSpace(scanner.Bytes())) == 0 {
-			continue
-		}
-		// Omit Result and other large fields: Unmarshal validates them without
-		// allocating their decoded object graphs.
-		var entry struct{ Dir, Cwd string }
-		if err := inferenceDecode(scanner.Bytes(), &entry); err != nil {
-			return fmt.Errorf("invalid ownership journal %s: %w", path, err)
-		}
-		if err := visit(entry.Dir, entry.Cwd); err != nil {
-			return err
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("read ownership journal %s: %w", path, err)
-	}
-	if limited.N <= 0 {
-		return fmt.Errorf("ownership journal exceeds size limit: %s", path)
-	}
-	return ctx.Err()
-}
-
-// inferenceDirs reads a run's worker directory list. found is false when the
-// run has none.
-func inferenceDirs(ctx context.Context, root *os.Root, path string) (dirs []string, found bool, err error) {
-	file, err := inferenceOpen(root, path)
-	if os.IsNotExist(err) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(inferenceReader{ctx, file}, inferenceMetadataLimit+1))
-	if err != nil {
-		return nil, false, err
-	}
-	if len(data) > inferenceMetadataLimit {
-		return nil, false, fmt.Errorf("worker directory list exceeds size limit: %s", path)
-	}
-	for _, line := range bytes.Split(data, []byte("\n")) {
-		if len(bytes.TrimSpace(line)) == 0 {
-			continue
-		}
-		var dir string
-		if err := json.Unmarshal(line, &dir); err != nil {
-			return nil, false, fmt.Errorf("invalid worker directory list %s: %w", path, err)
-		}
-		dirs = append(dirs, dir)
-	}
-	return dirs, true, nil
-}
-
-// inferenceJournalDirs collects the directories a run's journals name.
-func inferenceJournalDirs(ctx context.Context, root *os.Root, run string) ([]string, error) {
-	var dirs []string
-	seen := map[string]bool{}
-	add := func(dir string) {
-		if dir != "" && !seen[dir] {
-			seen[dir] = true
-			dirs = append(dirs, dir)
-		}
-	}
-	for _, filename := range []string{"journal.jsonl", "events.jsonl"} {
-		if err := inferenceJournal(ctx, root, filepath.Join(run, filename), func(dir, cwd string) error {
-			add(dir)
-			add(cwd)
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	}
-	return dirs, nil
-}
-
-// inferenceWriteDirs publishes an ended run's directory list in one rename,
-// so a concurrent reader never sees part of it.
-func inferenceWriteDirs(root *os.Root, run string, dirs []string) error {
-	var b bytes.Buffer
-	for _, dir := range dirs {
-		line, err := json.Marshal(dir)
-		if err != nil {
-			return err
-		}
-		b.Write(append(line, '\n'))
-	}
-	// Each writer owns its temporary file, so a concurrent pass can never
-	// truncate a file that another pass is about to rename.
-	var suffix [8]byte
-	if _, err := rand.Read(suffix[:]); err != nil {
-		return err
-	}
-	tmp := filepath.Join(run, runstore.DirsFile+".tmp-"+hex.EncodeToString(suffix[:]))
-	file, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return err
-	}
-	_, err = file.Write(b.Bytes())
-	if err == nil {
-		err = file.Sync()
-	}
-	if closeErr := file.Close(); err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = root.Rename(tmp, filepath.Join(run, runstore.DirsFile))
-	}
-	if err != nil {
-		_ = root.Remove(tmp)
-	}
-	return err
 }
 
 // sessionWorktreePaths selects possible session trees without reading other

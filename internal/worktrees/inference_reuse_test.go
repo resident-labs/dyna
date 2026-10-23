@@ -60,16 +60,9 @@ func TestRecheckReusesEndedRunHistory(t *testing.T) {
 	if err != nil || len(first) != 1 || len(first[0].inferred.Runs) != 1 {
 		t.Fatalf("first scan = %#v, %v", first, err)
 	}
-	// Without its directory list, an unreadable journal fails a fresh
-	// inference; the cached pass skips it.
-	if err := os.Remove(filepath.Join(run, runstore.DirsFile)); err != nil {
-		t.Fatal(err)
-	}
+	// Canonical evidence remains valid if the legacy journal changes.
 	if err := os.WriteFile(filepath.Join(run, "journal.jsonl"), []byte("not json\n"), 0o600); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := scan(context.Background(), repo, &GCOptions{Path: path}); err == nil {
-		t.Fatal("fresh inference accepted an invalid journal")
 	}
 	again, err := scan(context.Background(), repo, &GCOptions{Path: path, history: history})
 	if err != nil || len(again) != 1 || len(again[0].inferred.Runs) != 1 || again[0].inferred.Runs[0].ID != "wf_ended" {
