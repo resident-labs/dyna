@@ -1,28 +1,12 @@
 package harness
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"dyna-agent/internal/profile"
 )
-
-func openCodeAPIArgs(operation, id string, extra []string) []string {
-	args := []string{"opencode", "api", operation, "--param", "sessionID=" + id}
-	if operation == "session.compact" {
-		args = append(args, "--data", "{}")
-	}
-	if server, ok := argumentValue(extra, "--server"); ok {
-		args = append(args, "--server", server)
-	}
-	if hasArg(extra, "--standalone") {
-		args = append(args, "--standalone")
-	}
-	return args
-}
 
 // OpenCode can replay a fast response without its step-finish usage event.
 // Stored context gives the last completed model call's size in either case.
@@ -30,20 +14,17 @@ func openCodeContextTokens(ctx context.Context, p profile.Profile, cwd, id strin
 	if err := admit(ctx); err != nil {
 		return 0, err
 	}
-	cmd, err := harnessCommand(ctx, p, cwd, openCodeAPIArgs("session.context", id, p.ExtraArgs), execution)
+	key, err := sessionKey(p, execution)
 	if err != nil {
 		return 0, err
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	wait, release, _, err := startGuarded(ctx, p, cmd, "", steering, execution)
-	defer release()
+	spec := commandSpec{argv: []string{"opencode", "serve"}, openCode: true, openCodeKey: key, openCodeSession: id}
+	sess, err := openCodeSessionProcessFor(ctx, p, cwd, spec, execution)
 	if err != nil {
 		return 0, err
 	}
-	if err = wait(); err != nil {
-		return 0, fmt.Errorf("read OpenCode context: %w: %s", err, strings.TrimSpace(stderr.String()))
-	}
+	defer sess.detach()
+
 	var body struct {
 		Data []struct {
 			Type   string `json:"type"`
@@ -56,9 +37,11 @@ func openCodeContextTokens(ctx context.Context, p profile.Profile, cwd, id strin
 			} `json:"tokens"`
 		} `json:"data"`
 	}
-	if err = json.Unmarshal(stdout.Bytes(), &body); err != nil {
-		return 0, fmt.Errorf("read OpenCode context: %w", err)
+	if err = sess.request(ctx, "GET", sess.path("/context"), nil, &body); err != nil {
+		return 0, err
 	}
+	sess.idle = true
+
 	if body.Data == nil {
 		return 0, fmt.Errorf("read OpenCode context: missing message array")
 	}
@@ -81,4 +64,28 @@ func openCodeWaitResponse(output string) error {
 func openCodeCompactError(err error) error {
 	reason, _, _ := strings.Cut(err.Error(), "\n")
 	return fmt.Errorf("Dyna could not confirm OpenCode compaction; native automatic compaction stays enabled: %s", reason)
+}
+
+func runOpenCodeCompact(ctx context.Context, p profile.Profile, cwd string, spec commandSpec, execution ExecutionOptions, admit func(context.Context) error) error {
+	if err := admit(ctx); err != nil {
+		return err
+	}
+	sess, err := openCodeSessionProcessFor(ctx, p, cwd, spec, execution)
+	if err != nil {
+		return err
+	}
+	defer sess.detach()
+	if spec.openCodeOperation == "wait" {
+		var body strings.Builder
+		// Wait has an empty success body. A changed endpoint must fail before compaction.
+		if err = sess.request(ctx, "POST", "/api/experimental/session/"+sess.session+"/wait", nil, &body); err != nil {
+			return err
+		}
+	} else {
+		if err = sess.request(ctx, "POST", sess.path("/compact"), map[string]string{"delivery": "steer"}, nil); err != nil {
+			return err
+		}
+	}
+	sess.idle = true
+	return nil
 }

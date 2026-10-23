@@ -138,12 +138,7 @@ func (r *Runtime) Prepare(ctx context.Context, p profile.Profile, previous *Pin)
 func (r *Runtime) PrepareLeased(ctx context.Context, p profile.Profile, previous *Pin) (profile.Profile, Pin, *GenerationLease, error) {
 	var lease *GenerationLease
 	selected, pin, err := r.prepare(ctx, p, previous, &lease)
-	if err == nil && pin.Bundle.Harness == "opencode" {
-		lease.service, err = prepareOpenCodeService(ctx, selected, pin)
-		if err == nil {
-			err = r.requireAccount(ctx, pin.AccountID, pin.Bundle.Executable)
-		}
-	}
+
 	if err != nil && lease != nil {
 		_ = lease.Close()
 		lease = nil

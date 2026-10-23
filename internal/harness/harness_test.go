@@ -488,7 +488,6 @@ func TestExplicitControlsDisableNudge(t *testing.T) {
 		{"claude-budget", profile.Profile{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--max-budget-usd", "1"}}},
 		{"claude-fork", profile.Profile{Harness: profile.HarnessClaudeCode, ExtraArgs: []string{"--fork-session"}}},
 		{"codex", profile.Profile{Harness: profile.HarnessCodex, ExtraArgs: []string{"--ephemeral"}}},
-		{"opencode", profile.Profile{Harness: profile.HarnessOpenCode, ExtraArgs: []string{"--format", "default"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -783,26 +782,6 @@ func TestOpenCodeExplicitJSONRemainsResumable(t *testing.T) {
 		if inv.sessionID == nil || inv.resume == nil || inv.initial.parseOutput == nil {
 			t.Fatalf("explicit JSON invocation is not resumable: %#v", inv.initial.argv)
 		}
-	}
-}
-
-func TestOpenCodeJSONRequestsThinking(t *testing.T) {
-	inv, err := buildInvocation(profile.Profile{Harness: profile.HarnessOpenCode}, "task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, argv := range map[string][]string{"initial": inv.initial.argv, "resume": inv.resume("ses", "again").argv} {
-		if !hasArg(argv, "--thinking") {
-			t.Fatalf("%s: argv = %v", name, argv)
-		}
-	}
-	// Text output would print thinking into the reply.
-	inv, err = buildInvocation(profile.Profile{Harness: profile.HarnessOpenCode, ExtraArgs: []string{"--format", "default"}}, "task")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if hasArg(inv.initial.argv, "--thinking") {
-		t.Fatalf("text argv = %v", inv.initial.argv)
 	}
 }
 
@@ -1214,7 +1193,7 @@ while :; do sleep 0.05; done
 			fired <- time.Now()
 		}
 	}()
-	p := profile.Profile{Name: "silent", Harness: profile.HarnessOpenCode, Model: "hangs", Env: map[string]string{"DYNA_FAKE_LOG": logPath, "DYNA_FAKE_READY": ready}}
+	p := profile.Profile{Name: "silent", Harness: profile.HarnessCustom, Command: []string{"opencode"}, Model: "hangs", Env: map[string]string{"DYNA_FAKE_LOG": logPath, "DYNA_FAKE_READY": ready}}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	_, err := RunWithOptions(ctx, p, "task", t.TempDir(), true, JournalOptions{}, SteeringOptions{}, SessionOptions{},
@@ -1237,7 +1216,7 @@ while :; do
   sleep 0.05
 done
 `)
-	p := profile.Profile{Name: "free", Harness: profile.HarnessOpenCode, Model: "stuck", Env: map[string]string{"DYNA_FAKE_LOG": logPath}}
+	p := profile.Profile{Name: "free", Harness: profile.HarnessCustom, Command: []string{"opencode"}, Output: &workeroutput.Declaration{Dialect: workeroutput.DialectOpenCodeJSON}, Model: "stuck", Env: map[string]string{"DYNA_FAKE_LOG": logPath}}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	_, err := RunWithOptions(ctx, p, "task", t.TempDir(), true, JournalOptions{}, SteeringOptions{}, SessionOptions{},
@@ -1261,7 +1240,7 @@ func TestProfileKnobsReachEveryTurn(t *testing.T) {
 		{profile.HarnessCodex, "gpt-x", []string{"-c", "model_reasoning_effort=high"}, &profile.Compact{Tokens: 95000}, []string{"-c\x00model_reasoning_effort=high", "-c\x00model_auto_compact_token_limit=95000"}},
 		{profile.HarnessMuse, "muse-x", []string{"--reasoning-effort", "high"}, &profile.Compact{Tokens: 95000, Windows: map[string]int64{"muse-x": 1000000}}, []string{"-c\x00context_compaction.soft_threshold=0.095"}},
 		{profile.HarnessPi, "anthropic/claude-x", []string{"--thinking", "high"}, nil, []string{"--thinking\x00high"}},
-		{profile.HarnessOpenCode, "opencode/beam-free#low", nil, nil, []string{"opencode/beam-free#low"}},
+		{profile.HarnessOpenCode, "opencode/beam-free#low", nil, nil, []string{"opencode", "serve"}},
 	} {
 		inv, err := buildInvocation(profile.Profile{Harness: tc.harness, Model: tc.model, ExtraArgs: tc.extra, Compact: tc.compact}, "task")
 		if err != nil {

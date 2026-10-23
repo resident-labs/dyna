@@ -25,6 +25,7 @@ const (
 	opWrite    = "write"
 	opDetach   = "detach"
 	opClose    = "close"
+	opCloseKey = "close-key"
 	opHalt     = "halt"
 	opKill     = "kill"
 	opStderr   = "stderr"
@@ -38,13 +39,15 @@ const (
 
 // message is one JSON line on the host socket. Frame bytes ride in Data.
 type message struct {
-	Op      string                  `json:"op"`
-	Launch  *wireLaunch             `json:"launch,omitempty"`
-	Ref     *processguard.Reference `json:"ref,omitempty"`
-	Data    []byte                  `json:"data,omitempty"`
-	Reason  DetachReason            `json:"reason,omitempty"`
-	Pid     int                     `json:"pid,omitempty"`
-	Started bool                    `json:"started,omitempty"`
+	Key        string                  `json:"key,omitempty"`
+	Connection []byte                  `json:"connection,omitempty"`
+	Op         string                  `json:"op"`
+	Launch     *wireLaunch             `json:"launch,omitempty"`
+	Ref        *processguard.Reference `json:"ref,omitempty"`
+	Data       []byte                  `json:"data,omitempty"`
+	Reason     DetachReason            `json:"reason,omitempty"`
+	Pid        int                     `json:"pid,omitempty"`
+	Started    bool                    `json:"started,omitempty"`
 	// Fresh marks the reply to a replace: frames and failures queued before
 	// it belong to the old child.
 	Fresh bool   `json:"fresh,omitempty"`
@@ -53,6 +56,7 @@ type message struct {
 
 // wireLaunch is the part of Launch the host process needs.
 type wireLaunch struct {
+	Connection  []byte   `json:"connection,omitempty"`
 	Harness     string   `json:"harness"`
 	Key         string   `json:"key"`
 	Fingerprint string   `json:"fingerprint"`
@@ -62,11 +66,11 @@ type wireLaunch struct {
 }
 
 func toWire(l Launch) *wireLaunch {
-	return &wireLaunch{Harness: l.Harness, Key: l.Key, Fingerprint: l.Fingerprint, Argv: l.Argv, Env: l.Env, Dir: l.Dir}
+	return &wireLaunch{Connection: l.Connection, Harness: l.Harness, Key: l.Key, Fingerprint: l.Fingerprint, Argv: l.Argv, Env: l.Env, Dir: l.Dir}
 }
 
 func (w wireLaunch) launch() Launch {
-	return Launch{Harness: w.Harness, Key: w.Key, Fingerprint: w.Fingerprint, Argv: w.Argv, Env: w.Env, Dir: w.Dir}
+	return Launch{Connection: w.Connection, Harness: w.Harness, Key: w.Key, Fingerprint: w.Fingerprint, Argv: w.Argv, Env: w.Env, Dir: w.Dir}
 }
 
 // id is the registry identity of a launch: the harness namespace and the
