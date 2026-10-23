@@ -361,7 +361,7 @@ test('a folded hook card shows a run that is still going and opens its log', () 
   target.remove()
 })
 
-test('a folded hook card shows how many passes it holds and when the last one ran', () => {
+test('a folded hook card keeps its count and last time outside the name', () => {
   const payload = fixtures['hook/result']
   assert.ok(payload && 'runId' in payload, 'the hook result fixture is missing')
   const post = postFor('hook', 'result', payload)
@@ -376,6 +376,14 @@ test('a folded hook card shows how many passes it holds and when the last one ra
   const text = (target.textContent ?? '').trim()
   assert.match(text, /12 times/)
   assert.match(text, /passed/)
+  // The card shows the count and the last time in an element of its own, never
+  // inside the name, so the narrow stylesheet can give that line its own row
+  // and the name keeps its whole width. The stylesheet decides where the line
+  // sits; this test holds the markup it depends on.
+  const fact = need(target.querySelector('.fact'), 'the fold fact')
+  assert.match(fact.textContent ?? '', /12 times · last/)
+  assert.equal(fact.closest('.title'), null, 'the fold fact is inside the name line')
+  assert.equal(target.querySelector('.title .name')?.textContent, 'Update Dyna', 'the name is cut short')
   web.unmount(mounted)
   target.remove()
 })
