@@ -181,68 +181,94 @@ func (l *piLock) release() {
 	}
 }
 
-func (a *Runtime) piProviderKeys(ctx context.Context, home, action, provider, key string) (ProviderKeysResult, error) {
-	path := filepath.Join(home, "auth.json")
-	if action == "choices" {
-		choices, err := a.piChoices()
-		return ProviderKeysResult{Choices: choices}, err
+// piAuthEdit changes the provider entries of one auth.json. A nil edit only reads.
+type piAuthEdit func(entries map[string]json.RawMessage)
+
+// piActionEdit is the edit for an "add" or "remove" action; any other action reads.
+func piActionEdit(action, provider, key string) (piAuthEdit, error) {
+	switch action {
+	case "list":
+		return nil, nil
+	case "add":
+		entry, _ := json.Marshal(map[string]string{"type": "api_key", "key": key})
+		return func(entries map[string]json.RawMessage) { entries[provider] = entry }, nil
+	case "remove":
+		// An entry that is already gone is fine: the saved snapshot can lack a
+		// provider the runtime home still lists.
+		return func(entries map[string]json.RawMessage) { delete(entries, provider) }, nil
 	}
+	return nil, errors.New("Unknown provider action.")
+}
+
+// piEditAuth applies edit to home's auth.json under Pi's own lock and returns
+// the entries as they stand afterwards.
+func piEditAuth(ctx context.Context, home string, edit piAuthEdit) (map[string]json.RawMessage, error) {
+	path := filepath.Join(home, "auth.json")
 	if err := os.MkdirAll(home, 0700); err != nil {
-		return ProviderKeysResult{}, errors.New("Pi's private home is not available.")
+		return nil, errors.New("Pi's private home is not available.")
 	}
 	unlock, err := lockPiAuth(ctx, path)
 	if err != nil {
-		return ProviderKeysResult{}, err
+		return nil, err
 	}
 	defer unlock.release()
 	if err := checkPrivateAccountFile(path, true); err != nil {
-		return ProviderKeysResult{}, err
+		return nil, err
 	}
 	entries := map[string]json.RawMessage{}
 	raw, err := os.ReadFile(path)
 	if err == nil {
 		// A JSON null decodes without error but leaves a nil map.
 		if len(raw) > 4<<20 || json.Unmarshal(raw, &entries) != nil || entries == nil {
-			return ProviderKeysResult{}, errors.New("Pi's login file is not valid JSON.")
+			return nil, errors.New("Pi's login file is not valid JSON.")
 		}
 	} else if !os.IsNotExist(err) {
-		return ProviderKeysResult{}, errors.New("Pi's login file could not be read.")
+		return nil, errors.New("Pi's login file could not be read.")
 	}
-	switch action {
-	case "list":
-	case "add":
-		entries[provider], _ = json.Marshal(map[string]string{"type": "api_key", "key": key})
-	case "remove":
-		// An entry that is already gone needs no key check: the saved snapshot
-		// can lack a key the runtime home still lists. A present non-key entry
-		// (an OAuth login) stays protected.
-		if raw := entries[provider]; raw != nil && !piKeyEntry(raw) {
-			return ProviderKeysResult{}, errors.New("That provider has no API key.")
-		}
-		delete(entries, provider)
-	default:
-		return ProviderKeysResult{}, errors.New("Unknown provider action.")
+	if edit == nil {
+		return entries, nil
 	}
-	if action != "list" {
-		// Checked again just before the rename: a lock lost during the write keeps Pi's file.
-		lost := func() error {
-			if unlock.held() {
-				return nil
-			}
-			return errors.New("Pi's login file lock was lost. Try again.")
+	edit(entries)
+	// Checked again just before the rename: a lock lost during the write keeps Pi's file.
+	lost := func() error {
+		if unlock.held() {
+			return nil
 		}
-		if err := writePrivateAccountJSONChecked(path, entries, lost); err != nil {
-			return ProviderKeysResult{}, err
-		}
+		return errors.New("Pi's login file lock was lost. Try again.")
 	}
+	if err := writePrivateAccountJSONChecked(path, entries, lost); err != nil {
+		return nil, err
+	}
+	return entries, nil
+}
+
+func (a *Runtime) piProviderKeys(ctx context.Context, home, action, provider, key string) (ProviderKeysResult, error) {
+	if action == "choices" {
+		choices, err := a.piChoices()
+		return ProviderKeysResult{Choices: choices}, err
+	}
+	edit, err := piActionEdit(action, provider, key)
+	if err != nil {
+		return ProviderKeysResult{}, err
+	}
+	entries, err := piEditAuth(ctx, home, edit)
+	if err != nil {
+		return ProviderKeysResult{}, err
+	}
+	return piProviderList(entries), nil
+}
+
+// piProviderList names every provider Pi can use, by API key or by sign-in.
+func piProviderList(entries map[string]json.RawMessage) ProviderKeysResult {
 	var result ProviderKeysResult
 	for id, entry := range entries {
-		if piKeyEntry(entry) {
-			result.Providers = append(result.Providers, native.ProviderKey{ID: id, Name: id})
+		var kind struct{ Type string }
+		if json.Unmarshal(entry, &kind) == nil && (kind.Type == "api_key" || kind.Type == "oauth") {
+			result.Providers = append(result.Providers, native.ProviderKey{ID: id, Name: id, Auth: kind.Type})
 		}
 	}
 	sort.Slice(result.Providers, func(i, j int) bool { return result.Providers[i].ID < result.Providers[j].ID })
-	return result, nil
+	return result
 }
 
 // piKeysMu serializes Dyna's own Pi key edits, so the saved account and the
@@ -257,28 +283,42 @@ func (a *Runtime) piProviderKeysEdit(ctx context.Context, home, action, provider
 	if action != "add" && action != "remove" {
 		return a.piProviderKeys(ctx, home, action, provider, key)
 	}
+	edit, err := piActionEdit(action, provider, key)
+	if err != nil {
+		return ProviderKeysResult{}, err
+	}
+	entries, err := a.piEditAccount(ctx, home, edit)
+	if err != nil {
+		return ProviderKeysResult{}, err
+	}
+	return piProviderList(entries), nil
+}
+
+// piEditAccount applies edit to the active account's login file and to the
+// runtime home, as piProviderKeysEdit describes. It returns the runtime entries.
+func (a *Runtime) piEditAccount(ctx context.Context, home string, edit piAuthEdit) (map[string]json.RawMessage, error) {
 	piKeysMu.Lock()
 	defer piKeysMu.Unlock()
 	// The first lock of an account switch or native login. Holding it keeps the
 	// active account fixed through the edit without waiting for running turns.
 	dir, err := a.Accounts.harnessDirectory("pi")
 	if err != nil {
-		return ProviderKeysResult{}, err
+		return nil, err
 	}
 	gate, err := acquireAccountLock(ctx, filepath.Join(dir, ".switch.lock"), syscall.LOCK_EX)
 	if err != nil {
-		return ProviderKeysResult{}, errors.New("Pi's account is changing. Try again in a moment.")
+		return nil, errors.New("Pi's account is changing. Try again in a moment.")
 	}
 	defer releaseAccountLock(gate)
 	bundle, err := a.Bundles.Resolve("pi", "")
 	if err != nil {
-		return ProviderKeysResult{}, errors.New("Install Dyna's copy of Pi first.")
+		return nil, errors.New("Install Dyna's copy of Pi first.")
 	}
 	account, err := a.Accounts.Active("pi")
 	created := err != nil
 	if created {
-		if account, err = a.Accounts.Create("pi", "API keys"); err != nil {
-			return ProviderKeysResult{}, err
+		if account, err = a.Accounts.Create("pi", "Pi login"); err != nil {
+			return nil, err
 		}
 	}
 	file := filepath.Join(account.Home, "auth.json")
@@ -294,19 +334,19 @@ func (a *Runtime) piProviderKeysEdit(ctx context.Context, home, action, provider
 		}
 		return cause
 	}
-	if _, err = a.piProviderKeys(ctx, account.Home, action, provider, key); err != nil {
-		return ProviderKeysResult{}, err
+	if _, err = piEditAuth(ctx, account.Home, edit); err != nil {
+		return nil, err
 	}
 	if _, err = a.Accounts.Capture(ctx, account.ID, bundle.Executable); err != nil {
-		return ProviderKeysResult{}, restore(errors.New("Pi's login could not be recorded."))
+		return nil, restore(errors.New("Pi's login could not be recorded."))
 	}
-	result, err := a.piProviderKeys(ctx, home, action, provider, key)
+	result, err := piEditAuth(ctx, home, edit)
 	if err != nil {
-		return ProviderKeysResult{}, restore(err)
+		return nil, restore(err)
 	}
 	if created {
 		if err = a.Accounts.setActive("pi", account.ID); err != nil {
-			return ProviderKeysResult{}, err
+			return nil, err
 		}
 	}
 	return result, nil
@@ -362,12 +402,6 @@ func keepPiRecovery(file string, data []byte) error {
 		err = e
 	}
 	return err
-}
-
-// piKeyEntry is true for an auth.json entry that holds an API key. OAuth logins stay out of the list.
-func piKeyEntry(raw json.RawMessage) bool {
-	var entry struct{ Type string }
-	return json.Unmarshal(raw, &entry) == nil && entry.Type == "api_key"
 }
 
 // piChoices reads Pi's own provider catalog from the installed package.
