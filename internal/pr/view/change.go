@@ -40,6 +40,7 @@ type ChangeView struct {
 	RoomID              string               `json:"roomId,omitempty"`
 	AuthorSession       string               `json:"authorSession,omitempty"`
 	ReviewerSession     string               `json:"reviewerSession,omitempty"`
+	HeldCommentCount    int                  `json:"heldCommentCount,omitempty"`
 	ReviewPublishing    string               `json:"reviewPublishing,omitempty"`
 	ReviewerMode        string               `json:"reviewerMode,omitempty"`
 	ReviewerName        string               `json:"reviewerName,omitempty"`

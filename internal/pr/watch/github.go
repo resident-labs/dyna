@@ -42,6 +42,7 @@ type User struct {
 	Type  string `json:"type"`
 }
 type Comment struct {
+	Association  string `json:"author_association"`
 	Path         string `json:"path,omitempty"`
 	Line         int    `json:"line,omitempty"`
 	OriginalLine int    `json:"original_line,omitempty"`
@@ -121,6 +122,7 @@ type Status struct {
 	URL         string `json:"target_url"`
 }
 type Snapshot struct {
+	OwnerLogin    string
 	localCI       *registeredCIObservation
 	ciReused      bool // A discussion refresh does not advance the full CI safety clock.
 	headConfirmed bool
@@ -485,7 +487,7 @@ func (g GitHub) Snapshot(ctx context.Context, r Ref) (Snapshot, error) {
 
 // snapshotFromPull reuses metadata fetched by the cheap poll probe.
 func (g GitHub) snapshotFromPull(ctx context.Context, r Ref, pull Pull, savedCI *Snapshot) (Snapshot, error) {
-	s := Snapshot{Pull: pull}
+	s := Snapshot{Pull: pull, OwnerLogin: g.ownerLogin(ctx, r)}
 	if s.Pull.State == "closed" {
 		return s, nil
 	}
@@ -1099,4 +1101,14 @@ func (g GitHub) openPulls(ctx context.Context, ref Ref) ([]Pull, error) {
 		pulls = append(pulls, page...)
 	}
 	return pulls, nil
+}
+
+func (g GitHub) ownerLogin(ctx context.Context, r Ref) string {
+	if g.Rooms != nil {
+		ctx = ghclient.WithRooms(ctx, g.Rooms)
+	}
+	if g.RoomID != "" {
+		ctx = ghclient.WithRoom(ctx, g.RoomID)
+	}
+	return ghclient.Account(ctx, g.Executable, "", "api", "--hostname", r.Host, r.path(""))
 }

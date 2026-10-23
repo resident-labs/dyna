@@ -213,19 +213,26 @@ func (s *Service) reviewComments(ctx context.Context, st State, r Record) ([]Com
 			return nil, fmt.Errorf("read review comments: %w", err)
 		}
 	}
-	pr := PRContext{URL: r.URL, AuthorSession: r.Author, FormerAuthors: r.FormerAuthors}
+	pr := PRContext{URL: r.URL, AuthorSession: r.Author, FormerAuthors: r.FormerAuthors, OwnerLogin: r.OwnerLogin}
 	for _, c := range comments {
 		owner := commentOwner(st.CommentSessions, c)
 		if strings.TrimSpace(c.Body) == "" || (owner != "" && (owner == r.Reviewer || owner == r.LastReviewer)) {
 			continue
 		}
-		decision, ok := r.CommentDecisions[commentKey(c)]
-		if !ok {
-			event := Event{ID: commentKey(c), Kind: c.Kind, Commenter: c.User.Login, IsBot: isBot(c.User), Text: Sanitize(c.Body), ReviewState: c.State, Session: owner}
-			decision = (Rules{Learned: repoNoise(st, ref)}).Triage(pr, []Event{event})[0]
+		event := Event{ID: commentKey(c), Kind: c.Kind, Commenter: c.User.Login, IsBot: isBot(c.User), Text: Sanitize(c.Body), ReviewState: c.State, Session: owner, Association: c.Association}
+		decision := commentRules(st, ref).Triage(pr, []Event{event})[0]
+		if decision.Action == "hold" && r.AdmittedComments[commentKey(c)] == commentVersion(c) {
+			decision = Decision{Action: "keep", Reason: "owner_admitted"}
+		}
+
+		if saved, ok := r.CommentDecisions[commentKey(c)]; ok && decision.Action == "keep" && saved.Action == "drop" && (r.Seen[commentKey(c)] == "" || r.Seen[commentKey(c)] == commentVersion(c)) {
+			decision = saved
 		}
 		if reviewerHears(decision) {
 			c.Body = clip(Sanitize(c.Body), 4000)
+			if decision.Reason != "owner" {
+				c.Body = quotedComment(c.Body)
+			}
 			out = append(out, c)
 		}
 	}
@@ -233,4 +240,4 @@ func (s *Service) reviewComments(ctx context.Context, st State, r Record) ([]Com
 }
 
 // reviewerHears keeps the author's comments, which the author's own feed drops.
-func reviewerHears(d Decision) bool { return d.Action != "drop" || d.Reason == "author_marker" }
+func reviewerHears(d Decision) bool { return d.Action == "keep" || d.Reason == "author_marker" }

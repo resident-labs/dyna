@@ -19,6 +19,7 @@ type Event struct {
 	ID          string `json:"id"`
 	Kind        string `json:"kind"`
 	Commenter   string `json:"commenter"`
+	Association string `json:"authorAssociation,omitempty"`
 	IsBot       bool   `json:"isBot"`
 	Text        string `json:"text"`
 	ReviewState string `json:"reviewState,omitempty"`
@@ -30,15 +31,20 @@ type Decision = state.Decision
 type Triager interface {
 	Triage(PRContext, []Event) []Decision
 }
-type Rules struct{ Learned []NoiseRule }
+type Rules struct {
+	Learned     []NoiseRule
+	TrustedBots []string
+}
 
-// Rules drops only stored author comments and exact known noise. Everything
-// uncertain stays, because dropping useful feedback is the worse error.
+// Rules admits trusted comments and holds all other external input.
 func (r Rules) Triage(pr PRContext, events []Event) []Decision {
 	out := make([]Decision, len(events))
 	seen := map[string]bool{}
 	for i, e := range events {
 		d := rule(pr, e)
+		if d.Reason != "owner" && d.Reason != "author_marker" && !trustedEvent(e, r.TrustedBots) {
+			d = Decision{Action: "hold", Reason: "outside_commenter"}
+		}
 		if d.Action == "keep" && d.Reason != "owner" {
 			if learned, ok := learnedDecision(pr, e, r.Learned); ok {
 				d = learned
@@ -176,3 +182,20 @@ Review rate limited.
 > Note: CodeRabbit is an incremental review system and does not re-review already reviewed commits. This command is applicable only when automatic reviews are paused.
 
 </details>`
+
+func trustedEvent(e Event, bots []string) bool {
+	switch strings.ToUpper(e.Association) {
+	case "OWNER", "MEMBER", "COLLABORATOR":
+		return true
+	}
+	if bots == nil {
+		bots = []string{"coderabbitai", "copilot-pull-request-reviewer"}
+	}
+	login := strings.TrimSuffix(strings.ToLower(e.Commenter), "[bot]")
+	for _, bot := range bots {
+		if strings.EqualFold(login, strings.TrimSuffix(strings.ToLower(bot), "[bot]")) {
+			return true
+		}
+	}
+	return false
+}
