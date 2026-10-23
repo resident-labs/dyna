@@ -73,9 +73,10 @@ func New(n *notify.Service) *Scheduler {
 				return "", err
 			}
 			// The event wakes the parent and no other session, as the free-text
-			// check-in did. The registry fixes its system sender.
+			// check-in did. It posts from the engine, and names the scheduler as
+			// its producer, so no invented sender reaches the conversation.
 			msg, err := n.Rooms.PostEventInput(room.PostEventInput{
-				RoomID: target.Room, Event: ev, ID: id,
+				RoomID: target.Room, Event: ev, ID: id, Producer: room.ProducerParentCheckin,
 				To: []string{parent.Address()}, SessionIDs: map[string]string{parent.Address(): parent.ID},
 			})
 			return msg.ID, err

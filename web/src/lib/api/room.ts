@@ -57,6 +57,9 @@ export interface Attachment {
 // post. The facts of the event are in its typed payload (see events.gen.ts).
 export interface EventNotice {
   kind: string
+  // producer names the engine service that observed the event (see
+  // room.EventProducer). It is data, never a sender.
+  producer?: string
 }
 
 // Forward is room.Forward, the snapshot kept in a forwarding post.

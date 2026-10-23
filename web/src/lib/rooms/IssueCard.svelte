@@ -124,7 +124,7 @@
     {#if payload?.assignee}<p class="meta">Assigned to {short(payload.assignee, room?.name)}</p>{/if}
     {#if payload?.reason}<p class="reason">{payload.reason}</p>{/if}
     {#if payload?.closedBy?.pr || payload?.closedBy?.commit}
-      <p class="meta">Closed by {#if payload.closedBy.pr}PR #{payload.closedBy.pr}{:else}commit{/if}{#if payload.closedBy.commit} at {payload.closedBy.commit.slice(0, 8)}{/if}</p>
+      <p class="meta">Closed by {#if payload.closedBy.pr}PR #{payload.closedBy.pr}{:else}commit{/if}{#if payload.closedBy.commit}{' at '}{payload.closedBy.commit.slice(0, 8)}{/if}</p>
     {/if}
     {#if actionable}
       <div class="acts">
