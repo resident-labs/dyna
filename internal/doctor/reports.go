@@ -31,8 +31,13 @@ func (s Reports) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return db, database.Migrate(db, "doctor_reports.version", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), reportsSchema)
+	return db, database.Migrate(db, "doctor_reports.version", 2, func(conn *sql.Conn, from int) error {
+		if from < 1 {
+			if _, err := conn.ExecContext(context.Background(), reportsSchema); err != nil {
+				return err
+			}
+		}
+		_, err := conn.ExecContext(context.Background(), "ALTER TABLE doctor_reports ADD COLUMN delivered INTEGER NOT NULL DEFAULT 0")
 		return err
 	})
 }
@@ -95,7 +100,7 @@ func (s Reports) list(where string, args ...any) ([]Report, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.Query(`SELECT id, at, machine, target, fired_by, if_condition, fingerprint, healthy, summary, findings FROM doctor_reports `+where, args...)
+	rows, err := db.Query(`SELECT id, at, machine, target, fired_by, if_condition, fingerprint, healthy, summary, findings, delivered FROM doctor_reports `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +110,7 @@ func (s Reports) list(where string, args ...any) ([]Report, error) {
 		var r Report
 		var at int64
 		var findings string
-		if err := rows.Scan(&r.ID, &at, &r.Machine, &r.Target, &r.Trigger, &r.Condition, &r.Fingerprint, &r.Healthy, &r.Summary, &findings); err != nil {
+		if err := rows.Scan(&r.ID, &at, &r.Machine, &r.Target, &r.Trigger, &r.Condition, &r.Fingerprint, &r.Healthy, &r.Summary, &findings, &r.Delivered); err != nil {
 			return nil, err
 		}
 		r.At = time.Unix(at, 0).UTC()
@@ -115,4 +120,17 @@ func (s Reports) list(where string, args ...any) ([]Report, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// MarkDelivered records a successful room post after its idempotent commit.
+func (s Reports) MarkDelivered(id int64) error {
+	db, err := s.open()
+	if err != nil {
+		return err
+	}
+	ctx := context.Background()
+	return state.For(db).Write(ctx, hub.Event{Topic: "doctor"}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, "UPDATE doctor_reports SET delivered=1 WHERE id=?", id)
+		return err
+	})
 }

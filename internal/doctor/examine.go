@@ -27,6 +27,7 @@ type Finding struct {
 
 // Report is one examination.
 type Report struct {
+	Delivered   bool      `json:"delivered"`
 	ID          int64     `json:"id"`
 	At          time.Time `json:"at"`
 	Machine     string    `json:"machine"`
