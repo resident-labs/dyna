@@ -99,8 +99,8 @@ Agents work in managed worktrees (`dyna git worktrees new`) and track pull
 requests with `dyna git pr track`. A reviewer session reviews each change.
 A change is ready when an approval and green CI are on the same head. Authors
 never merge: the engine tests ready pull requests together on a trial branch
-from main, and main moves only to a commit that passed CI. Room policy can set
-CI time budgets. See `docs/pr-tracking.md`.
+from main. Root can also publish a failed trial after naming every failing
+test as flaky. Room policy can set CI time budgets. See `docs/pr-tracking.md`.
 
 ### Computers
 
