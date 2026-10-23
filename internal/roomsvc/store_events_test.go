@@ -46,7 +46,10 @@ func TestStoreMutationPublishesOnlyAfterCommit(t *testing.T) {
 			_, err := q.Ask(questions.Question{Room: "room", Asker: "owner", Text: "A question?", Meanwhile: "Read code"}, nil)
 			return err
 		}},
-		{"notices", "notices", func() error { _, err := n.Post(notices.Notice{Key: "new", Text: "A notice"}); return err }},
+		{"notices", "notices", func() error {
+			_, err := n.Post(notices.Notice{Key: "new", Kind: notices.KindDisk, Severity: notices.SeverityError, Disk: &notices.DiskFacts{Paths: []notices.DiskPath{{Path: "/tmp", FreeBytes: 1024}}}})
+			return err
+		}},
 		{"sync", "lane_sync", func() error {
 			return sync.Update(func(st *lanesync.Snapshot) error { st.Events["new"] = "committed"; return nil })
 		}},

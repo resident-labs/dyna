@@ -1,7 +1,6 @@
 package subagent
 
 import (
-	"fmt"
 	"log"
 	"path/filepath"
 	"time"
@@ -16,14 +15,16 @@ func (m *Manager) notices() notices.Store {
 }
 
 // postCooldownNotice tells the owner that a profile entered provider cooldown.
-// The key holds one notice per profile; a newer failure replaces its text.
+// The key holds one notice per profile; a newer failure replaces its facts.
 func postCooldownNotice(s notices.Store, profileName, failure string, at time.Time) error {
-	wait := harness.UnavailableUntil(failure, at).Sub(at)
-	text := fmt.Sprintf("%s: provider limit reached, resets in %dh", profileName, int(wait.Round(time.Hour).Hours()))
-	if wait < 90*time.Minute {
-		text = fmt.Sprintf("%s: provider limit reached, resets in %dm", profileName, int(wait.Round(time.Minute).Minutes()))
-	}
-	_, err := s.Post(notices.Notice{Key: "provider:" + profileName, Kind: "provider", Severity: "warn", Text: text, At: at})
+	resets := harness.UnavailableUntil(failure, at)
+	_, err := s.Post(notices.Notice{
+		Key:      "provider:" + profileName,
+		Kind:     notices.KindProvider,
+		Severity: notices.SeverityWarn,
+		Provider: &notices.ProviderFacts{Profile: profileName, ResetsAt: resets},
+		At:       at,
+	})
 	return err
 }
 

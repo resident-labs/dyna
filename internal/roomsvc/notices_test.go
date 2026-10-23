@@ -16,7 +16,7 @@ func TestNoticesListDismissAndEmitEvents(t *testing.T) {
 	version := ""
 	emit := func(ev Event) { events = append(events, ev) }
 	e.svc.scanNotices(&version, true, emit)
-	n, err := e.svc.notices().Post(notices.Notice{Key: "disk", Kind: "disk", Severity: "error", Text: "Disk space is low."})
+	n, err := e.svc.notices().Post(notices.Notice{Key: "disk", Kind: notices.KindDisk, Severity: notices.SeverityError, Disk: &notices.DiskFacts{Paths: []notices.DiskPath{{Path: "/tmp", FreeBytes: 1024}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,10 +61,10 @@ func TestUpdateDynaRunsDynaUpdate(t *testing.T) {
 func TestNoticeWatcherSeesDeleteAndNextWriteWithoutMirror(t *testing.T) {
 	e := newEnv(t)
 	s := e.svc.notices()
-	if _, err := s.Post(notices.Notice{Key: "older"}); err != nil {
+	if _, err := s.Post(syncNoticeForTest("older")); err != nil {
 		t.Fatal(err)
 	}
-	newest, err := s.Post(notices.Notice{Key: "newest"})
+	newest, err := s.Post(syncNoticeForTest("newest"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestNoticeWatcherSeesDeleteAndNextWriteWithoutMirror(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.svc.scanNotices(&version, false, emit)
-	if _, err := s.Post(notices.Notice{Key: "next"}); err != nil {
+	if _, err := s.Post(syncNoticeForTest("next")); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(s.Path()); err != nil && !os.IsNotExist(err) {
@@ -101,4 +101,9 @@ func TestNoticeWatcherSeesDeleteAndNextWriteWithoutMirror(t *testing.T) {
 	if events != 2 {
 		t.Fatalf("delete and next write emitted %d events; want 2", events)
 	}
+}
+
+// syncNoticeForTest is a minimal typed notice with the given key.
+func syncNoticeForTest(key string) notices.Notice {
+	return notices.Notice{Key: key, Kind: notices.KindSync, Severity: notices.SeverityWarn, Sync: &notices.SyncFacts{Repo: "/repo", Lane: "origin", Other: "fork"}}
 }
