@@ -150,6 +150,8 @@ func (s *Service) TrackWithPolicy(ctx context.Context, actor authority.Actor, re
 		rec.Base = snap.Pull.Base.Ref
 	}
 	rec.Title, rec.Checks = Sanitize(snap.Pull.Title), snap.CheckSummaries(ref)
+	// A "Fixes D-5" line in the body links the issues this merge will close.
+	rec.Fixes = state.ParseFixLines(snap.Pull.Body)
 	// Old discussion is the baseline. CI is evaluated at the first watch tick.
 	for _, c := range snap.Comments {
 		rec.Seen[commentKey(c)] = commentVersion(c)
@@ -444,6 +446,7 @@ func (s *Service) process(ctx context.Context, key string, snap Snapshot, ci, ci
 			return nil
 		}
 		r.Title = Sanitize(snap.Pull.Title)
+		r.Fixes = state.MergeFixes(r.Fixes, state.ParseFixLines(snap.Pull.Body))
 		r.HeadRepo = snap.Pull.Head.Repo.FullName
 		baseRetargeted, keepReview := s.observeBase(st, r, snap, pollTime)
 		previousPullHead := s.observePoll(st, r, snap, pollTime)
@@ -634,6 +637,10 @@ func applyHead(r *Record, snap Snapshot, previousPullHead string, n *pollNotices
 
 // closeRecord ends watching a closed or merged PR and tells its author.
 func (s *Service) closeRecord(r *Record, snap Snapshot, n *pollNotices, out *processEffects) {
+	r.MergeCommit = ""
+	if snap.Pull.Merged {
+		r.MergeCommit = snap.Pull.MergeCommit
+	}
 	endRecord(r, snap.Pull.Merged, s.now())
 	if snap.Pull.Merged {
 		copy := *r
@@ -895,14 +902,16 @@ func (s *Service) finishProcess(ctx context.Context, key string, snap Snapshot, 
 		repo = out.merged.Dir
 	}
 	_ = hooks.New().Emit(ctx, hooks.Event{Event: hooks.PRMerged, Repo: repo, Worktree: repo, Branch: snap.Pull.Head.Ref, SHA: snap.Pull.Head.SHA, PR: fmt.Sprint(snap.Pull.Number), Session: out.merged.Author, Room: out.merged.RoomID})
+	// The merged PR closes the issues it names, whichever trigger saw the merge.
+	issueErr := s.closeFixedIssues(ctx, *out.merged, out.merged.MergeCommit)
 	if snap.Pull.Head.Ref == "" {
-		return nil
+		return issueErr
 	}
 	if s.CleanupMerged != nil {
-		return s.CleanupMerged(ctx, *out.merged, snap.Pull.Head.Ref)
+		return errors.Join(issueErr, s.CleanupMerged(ctx, *out.merged, snap.Pull.Head.Ref))
 	}
 	_, err := maintenance.CleanBranch(ctx, []string{repo}, snap.Pull.Head.Ref)
-	return err
+	return errors.Join(issueErr, err)
 }
 
 // ReviewAssignment is independent of publishing and can later describe local branches.

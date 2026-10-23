@@ -68,6 +68,9 @@ type ChangeView struct {
 	Checked             time.Time            `json:"checked,omitempty"`
 	FilteredComments    int                  `json:"filteredComments,omitempty"`
 	Overlaps            []state.Overlap      `json:"overlaps,omitempty"`
+	// Fixes lists the issues that this change closes when it merges.
+	Fixes       []state.IssueRef `json:"fixes,omitempty"`
+	MergeCommit string           `json:"mergeCommit,omitempty"`
 }
 
 type ChangeDetail struct {

@@ -12,6 +12,7 @@ import (
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/notify"
+	prstate "dyna-agent/internal/pr/state"
 	prview "dyna-agent/internal/pr/view"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/profile"
@@ -141,6 +142,16 @@ func TestPRCommandsAndPauseExplanation(t *testing.T) {
 	}
 	if _, err := call("track", url, "--repo", t.TempDir()); err == nil {
 		t.Fatal("accepted invalid explicit checkout")
+	}
+	// --fixes names the issues that the merge will close.
+	if _, err := call("track", url, "--fixes", "D-5,#207"); err != nil {
+		t.Fatalf("track fixes: %v", err)
+	}
+	if saved, err = s.Store.Get(key); err != nil || prstate.FixesLabel(saved.Fixes) != "D-5, #207" {
+		t.Fatalf("saved fixes: %+v %v", saved.Fixes, err)
+	}
+	if _, err := call("track", url, "--fixes", "207"); err == nil {
+		t.Fatal("a bare issue number was accepted")
 	}
 	if out, err := call("show", url); err != nil || !strings.Contains(out, "CI wakes paused after 3 consecutive failures") {
 		t.Fatalf("show pause: %s %v", out, err)

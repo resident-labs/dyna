@@ -21,6 +21,7 @@
   import TabHeader from '../rooms/TabHeader.svelte'
   import PRDetail from './PRDetail.svelte'
   import IssueList from './IssueList.svelte'
+  import { fixesLabel } from './fixes.ts'
   import type { Row as ChangeRow } from './prlist.ts'
   import MentionInChat from './MentionInChat.svelte'
   import { roomIssueLabel, unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
@@ -441,7 +442,7 @@
                   {#snippet lead()}<PRGlyph it={row} />{/snippet}
                   <div class="row-title">{changeTitle(row)} {#if row.isDraft}<Chip>Draft</Chip>{/if} {#if prExpedited($expedite, row)}<ExpediteBadge />{/if}</div>
                   <div class="row-author">#{row.number}{#if authorName(row, names)}{` by ${authorName(row, names)}`}{/if}</div>
-                  <div class="row-facts"><Chip tone={ci.tone}>{ci.label}</Chip><Chip tone={review.tone} title={row.reviewBlocked}>{review.label}</Chip><span>{mergePosition(row.changeId ?? '', merge ?? [])}</span></div>
+                  <div class="row-facts"><Chip tone={ci.tone}>{ci.label}</Chip><Chip tone={review.tone} title={row.reviewBlocked}>{review.label}</Chip>{#if row.fixes?.length}<Chip outline title="Merging this PR closes these issues">Fixes {fixesLabel(row.fixes)}</Chip>{/if}<span>{mergePosition(row.changeId ?? '', merge ?? [])}</span></div>
                   {#if item && !item.trial && item.state !== 'ready'}<div class="row-author">{state.reason || state.label}</div>{/if}
                 </RowItem>
                 {#if onmention}<MentionInChat onmention={() => mentionRow(row)} />{/if}

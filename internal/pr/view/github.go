@@ -5,6 +5,7 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/filesvc"
 	"dyna-agent/internal/gitsvc"
+	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
@@ -420,7 +421,7 @@ func (s *Service) TrackPR(ctx context.Context, roomRef, sessionRef string, numbe
 	if number <= 0 {
 		return ChangeView{}, errors.New("number must be positive")
 	}
-	r, created, err := s.track(ctx, roomRef, sessionRef, strconv.Itoa(number), "", "")
+	r, created, err := s.track(ctx, roomRef, sessionRef, strconv.Itoa(number), "", "", nil)
 	if err != nil {
 		return ChangeView{}, err
 	}
@@ -453,9 +454,10 @@ type TrackedPR struct {
 // TrackPRRef tracks a PR named by number or URL for the CLI. dir is the
 // caller's checkout; the engine accepts it only as a checkout of the room's
 // repository and of the PR's, and "" uses the room's workspace root. A goal
-// ID links the PR to that goal, replacing any link.
-func (s *Service) TrackPRRef(ctx context.Context, roomRef, sessionRef, ref, dir, goal string) (TrackedPR, error) {
-	r, created, err := s.track(ctx, roomRef, sessionRef, ref, dir, goal)
+// ID links the PR to that goal, replacing any link. A non-nil fixes list
+// replaces the issues that a merge closes.
+func (s *Service) TrackPRRef(ctx context.Context, roomRef, sessionRef, ref, dir, goal string, fixes []prstate.IssueRef) (TrackedPR, error) {
+	r, created, err := s.track(ctx, roomRef, sessionRef, ref, dir, goal, fixes)
 	r.HeldComments = nil
 	return TrackedPR{r, created}, err
 }
@@ -463,7 +465,7 @@ func (s *Service) TrackPRRef(ctx context.Context, roomRef, sessionRef, ref, dir,
 // track is the one PR tracking path of the web app and the CLI. The caller
 // acts in the PR's room, and only the owner or root names another author.
 // The gh work runs before the state write, never under the PR lock.
-func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir, goal string) (watch.Record, bool, error) {
+func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir, goal string, fixes []prstate.IssueRef) (watch.Record, bool, error) {
 	rec, actor, info, err := s.authorIn(ctx, roomRef, sessionRef, "tracks a PR")
 	if err != nil {
 		return watch.Record{}, false, err
@@ -499,6 +501,11 @@ func (s *Service) track(ctx context.Context, roomRef, sessionRef, refArg, dir, g
 	r, created, err := p.Track(ctx, actor, ref, info, dir)
 	if err != nil {
 		return watch.Record{}, false, err
+	}
+	if fixes != nil {
+		if r, err = p.SetFixes(r.Key, r.Author, fixes); err != nil {
+			return watch.Record{}, false, err
+		}
 	}
 	if r.RoomID != rec.ID {
 		return watch.Record{}, false, fmt.Errorf("PR #%d is tracked in another room", r.Number)
@@ -566,6 +573,9 @@ func (s *Service) OpenChange(ctx context.Context, roomRef, sessionRef, prRef, di
 	}
 	p := s.Watcher()
 	if prRef == "" {
+		if opts.Fixes != nil {
+			return OpenedChange{}, fmt.Errorf("--fixes links issues only on a GitHub PR; pass --pr")
+		}
 		if dir == "" {
 			return OpenedChange{}, fmt.Errorf("open a change from a checkout of room %s's repository", rec.Name)
 		}
@@ -606,6 +616,11 @@ func (s *Service) OpenChange(ctx context.Context, roomRef, sessionRef, prRef, di
 	r, created, err := p.TrackWithPolicy(ghCtx, actor, ref, info, dir, opts.PolicyOverride, checkedAuthor)
 	if err != nil {
 		return OpenedChange{}, err
+	}
+	if opts.Fixes != nil {
+		if r, err = p.SetFixes(r.Key, r.Author, opts.Fixes); err != nil {
+			return OpenedChange{}, err
+		}
 	}
 	if r.RoomID != rec.ID {
 		return OpenedChange{}, fmt.Errorf("PR #%d is tracked in another room", r.Number)

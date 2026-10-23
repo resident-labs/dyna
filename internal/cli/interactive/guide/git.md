@@ -8,6 +8,14 @@ Run `eval "$(dyna git worktrees env)"` to set `DYNA_PORT`, `DYNA_PORTS` and `POR
 
 After `gh pr create`, run `dyna git pr track <number|url>` from the matching checkout.
 Elsewhere, add `--repo <path>`. Fix CI failures and push. The engine merges automatically when approved and green; agents never run merge commands.
+
+Pass `--fixes D-5,#207` when the PR fixes issues. Merging the PR closes each
+linked issue: Dyna closes a room issue with the reason `Fixed by #N (<merge commit>)`,
+and closes a GitHub issue with a one-line comment that names the PR. A PR that
+closes without merging closes nothing. A `Fixes D-5` or `Fixes #207` line in the
+PR body links the same issues, and `dyna git change open --pr <n> --fixes ...`
+sets the list too. Re-run track with `--fixes` to replace the list.
+`dyna git pr show <pr>` lists the links, and the app shows them as chips.
 `dyna git pr show <pr>` explains pauses; `--history` includes delivered notices.
 `dyna git pr resume <pr>` clears a CI wake pause.
 

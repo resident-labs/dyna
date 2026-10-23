@@ -8,6 +8,28 @@ opened a PR. The engine merges approved PRs with passing CI through batch
 trials (see `dyna guide git`). Root can also publish a failed trial after naming
 every failing test as flaky. Authors never run merge commands.
 
+## Issue links
+
+A tracked PR can link the issues that it fixes. The merge closes them; nobody
+closes them by hand.
+
+```sh
+dyna git pr track 265 --fixes D-5,#207
+dyna git change open --pr 265 --fixes D-5
+dyna git pr show 265
+```
+
+A `Fixes D-5` or `Fixes #207` line in the PR body links the same issues. The
+engine reads the body at track time and on later polls, and adds what it finds.
+Re-running track with `--fixes` replaces the list.
+
+When the PR merges, Dyna closes each linked room issue with the reason
+`Fixed by #N (<merge commit>)` and closes each linked GitHub issue with a
+one-line comment that names the PR. GitHub also closes a `Fixes #N` issue by
+itself, so a closed issue takes no second close. A PR that closes without
+merging closes nothing. The PR row, the PR detail and the issue card show the
+links: `Fixes D-5, #207` on the change, and `Fix in #N` on an open room issue.
+
 ## Goal links and expedited goals
 
 A new change or tracked PR records its author's nearest active goal. Dyna

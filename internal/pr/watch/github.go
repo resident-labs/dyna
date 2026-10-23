@@ -63,10 +63,13 @@ type Pull struct {
 	Updated string `json:"updated_at"`
 	Number  int    `json:"number"`
 	Title   string `json:"title"`
+	Body    string `json:"body"`
 	State   string `json:"state"`
 	Merged  bool   `json:"merged"`
-	User    User   `json:"user"`
-	Head    struct {
+	// MergeCommit is the merge commit of a merged PR; it names the fix in issue closes.
+	MergeCommit string `json:"merge_commit_sha"`
+	User        User   `json:"user"`
+	Head        struct {
 		SHA  string `json:"sha"`
 		Ref  string `json:"ref"`
 		Repo struct {
