@@ -112,6 +112,18 @@ test('a row opens the existing detail and Back returns to the list', async () =>
   })
 })
 
+test('a trial PR outside the loaded page opens through the existing PR route', async () => {
+  const opened: number[] = []
+  await screen(async ({ open, flushSync }) => {
+    const t = await open()
+    element(t, '.merging .batch button').click()
+    flushSync()
+    assert.deepEqual(opened, [99])
+  }, { props: { onpr: (number: number) => opened.push(number) }, answers: { mergeControlStatus: {
+    roomId: 'r', paused: false, queue: [], trials: [{ branch: 'dyna/merge-trial/1', phase: 'running', batch: ['github.com/o/r#99'] }], localCIChecks: {},
+  } } })
+})
+
 test('mergeVersion refreshes main CI without a changed PR row', async () => {
   await screen(async ({ open, text, flushSync, settle }) => {
     const t = await open()
