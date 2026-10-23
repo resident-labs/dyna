@@ -264,8 +264,8 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	var gen harnessmgr.ConfigGeneration
 	if pin.Generation != "" {
 		gen, err = loadNativeGeneration(a.Harness, pin.Generation, lookup)
-		if err == nil && (!privateGenerationRoots(gen.Env, home) || !currentNativeFeaturePolicy(pin.Generation, a.Harness)) {
-			// TODO: legacy/shim remove later — rebuild older pins without private HOME/XDG roots or the current native feature policy.
+		if err == nil && !pinnedGenerationUsable(a.Harness, pin.Generation, gen, home) {
+			// TODO: legacy/shim remove later — rebuild older pins without private HOME/XDG roots, the current native feature policy or a Dyna command that still runs.
 			gen, err = r.generateLocked(a.Harness, home, active.ID, lookup)
 		}
 	} else {
@@ -319,6 +319,19 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 		*leaseOut = lease
 	}
 	return p, pin, nil
+}
+
+// pinnedGenerationUsable reports whether a resumed session may keep this
+// generation. A pin whose Dyna MCP command no longer runs cannot give the next
+// turn any Dyna tools, so the turn rebuilds it instead.
+func pinnedGenerationUsable(harness, dir string, gen harnessmgr.ConfigGeneration, nativeHome string) bool {
+	if !privateGenerationRoots(gen.Env, nativeHome) || !currentNativeFeaturePolicy(dir, harness) {
+		return false
+	}
+	if nativeFeaturePolicies[harness].DynaShell {
+		return harnesshome.Launches(gen.CLI)
+	}
+	return true
 }
 
 func privateGenerationRoots(env map[string]string, nativeHome string) bool {

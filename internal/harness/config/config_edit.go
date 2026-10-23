@@ -248,6 +248,9 @@ type ConfigGeneration struct {
 	Directory string
 	Args      []string
 	Env       map[string]string `json:"-"`
+	// CLI is the Dyna executable the generation names for its MCP servers.
+	// A pinned generation must be rebuilt when that path no longer runs.
+	CLI string
 	// PartialReasons describe remaining personal reads, not generation failures.
 	PartialReasons []string
 	// EnvKeys are the references to resolve again when resuming this generation.
@@ -514,7 +517,7 @@ func (m *ConfigManager) generateWithPreferences(harness, accountHome, generation
 		}
 	}
 	sort.Strings(out.EnvKeys)
-	if err := write("generation.json", generationManifest{Version: 1, Harness: h, AccountHome: accountHome, Args: out.Args, EnvKeys: out.EnvKeys, PartialReasons: out.PartialReasons, EnvReferences: envRefs}); err != nil {
+	if err := write("generation.json", generationManifest{Version: 1, Harness: h, AccountHome: accountHome, CLI: dynaServerCommand(servers), Args: out.Args, EnvKeys: out.EnvKeys, PartialReasons: out.PartialReasons, EnvReferences: envRefs}); err != nil {
 		return ConfigGeneration{}, err
 	}
 	if h == "codex" && destination == nil {
@@ -524,6 +527,18 @@ func (m *ConfigManager) generateWithPreferences(harness, accountHome, generation
 	}
 	complete = true
 	return out, nil
+}
+
+// dynaServerCommand names the Dyna executable a generation's shell MCP server
+// starts. A harness that resumes a generation must rebuild it once that path
+// stops running, or the session loses its Dyna tools.
+func dynaServerCommand(servers map[string]any) string {
+	row, ok := servers["dyna"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	command, _ := row["command"].(string)
+	return command
 }
 
 func pathWithin(parent, child string) bool {
@@ -663,6 +678,7 @@ type generationManifest struct {
 	Version        int               `json:"version"`
 	Harness        string            `json:"harness"`
 	AccountHome    string            `json:"accountHome"`
+	CLI            string            `json:"cli,omitempty"`
 	Args           []string          `json:"args"`
 	EnvKeys        []string          `json:"envKeys"`
 	PartialReasons []string          `json:"partialReasons,omitempty"`
@@ -703,7 +719,7 @@ func LoadGenerationWithEnv(directory string, lookup func(string) (string, bool))
 	if pathWithin(manifest.AccountHome, directory) || pathWithin(directory, manifest.AccountHome) {
 		return ConfigGeneration{}, errors.New("generation and account home overlap")
 	}
-	g := ConfigGeneration{ID: filepath.Base(directory), Directory: directory, Args: manifest.Args, EnvKeys: manifest.EnvKeys, PartialReasons: manifest.PartialReasons, Env: map[string]string{}}
+	g := ConfigGeneration{ID: filepath.Base(directory), Directory: directory, CLI: manifest.CLI, Args: manifest.Args, EnvKeys: manifest.EnvKeys, PartialReasons: manifest.PartialReasons, Env: map[string]string{}}
 	for _, key := range manifest.EnvKeys {
 		if !configEnvKey.MatchString(key) || reservedRuntimeEnvKey(key) {
 			return ConfigGeneration{}, errors.New("invalid generation environment key")

@@ -244,6 +244,57 @@ func resolve(name, path string) (string, error) {
 	return "", fmt.Errorf("executable not found in inherited PATH")
 }
 
+// Launches reports whether a published Dyna command still runs. It follows
+// bridge scripts, because a harness that reuses a generation whose image is
+// gone starts an MCP server that cannot handshake, and the turn has no Dyna
+// tools.
+func Launches(path string) bool {
+	for depth := 0; depth < 4; depth++ {
+		if path == "" {
+			return false
+		}
+		info, err := os.Stat(path)
+		if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0100 == 0 {
+			return false
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return false
+		}
+		if !strings.HasPrefix(string(raw), "#!") {
+			// A real executable needs no further check.
+			return true
+		}
+		target := execTarget(string(raw))
+		if target == "" || target == path {
+			return true
+		}
+		path = target
+	}
+	return false
+}
+
+// execTarget returns the path a bridge script execs.
+func execTarget(script string) string {
+	line := ""
+	for _, candidate := range strings.Split(script, "\n") {
+		if strings.HasPrefix(candidate, "exec ") {
+			line = candidate
+			break
+		}
+	}
+	start := strings.IndexByte(line, '\'')
+	if start < 0 {
+		return ""
+	}
+	rest := line[start+1:]
+	end := strings.IndexByte(rest, '\'')
+	if end < 0 {
+		return ""
+	}
+	return rest[:end]
+}
+
 // stableDynaPath replaces a running-image path with a copy of the same build
 // that outlives its process. A bridge, an MCP server command and $DYNA_BIN are
 // read again on later turns; /proc/<pid>/exe stops existing when that process
