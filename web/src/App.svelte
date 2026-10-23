@@ -77,7 +77,7 @@
   import ShellGrid from './lib/sessions/ShellGrid.svelte'
   import { runningShells } from './lib/sessions/shells.ts'
   import Tabs from './lib/ui/Tabs.svelte'
-  import { rowOf, visibleTabs, roomTabs } from './lib/rooms/workViews.ts'
+  import { rowOf, visibleTabs } from './lib/rooms/workViews.ts'
   import SessionMedia from './lib/sessions/SessionMedia.svelte'
   import ComputerPane from './lib/computers/ComputerPane.svelte'
   import Computers from './lib/computers/Computers.svelte'
@@ -1320,8 +1320,8 @@
     sessionTurn = 0
     openJob = ''
     reply = null
-    reviewOpen = startView === 'files' || startView === 'github'
-    reviewTab = startView === 'github' ? 'prs' : 'files'
+    reviewOpen = startView === 'files' || startView === 'github' || startView === 'issues'
+    reviewTab = startView === 'github' ? 'prs' : startView === 'issues' ? 'issues' : 'files'
     view = ['all', 'owner', 'turns', 'files', 'github'].includes(startView) || (startView === 'terminal' && !hasTerminal) ? GENERAL : startView
     members = []
     hierarchy = []
@@ -2075,8 +2075,8 @@
     // its older response must not open over the screen the reader asked for.
     detailRequest++
     const sameChat = r.session ? routeSession(drill) === r.session && sessionTurn === r.turn : r.run ? !drill && view === 'runs' && openRun === r.run : !drill && !openRun && view === r.view
-    if (sameChat && (r.review ?? '') === (reviewOpen ? reviewTab : '')) return false
-    reviewOpen = !!r.review
+    if (sameChat && (r.review ?? '') === (reviewOpen && r.view !== 'issues' ? reviewTab : '')) return false
+    reviewOpen = false
     if (!r.session && !r.run) openView(r.view)
     if (r.review) openReview(r.review)
     return { roomId, request: detailRequest }
@@ -2092,7 +2092,8 @@
     showMembers = false
     showPins = false
     navOpen = false
-    if (!drill && !isChannel(view)) view = GENERAL
+    if (!drill && tab === 'issues') view = 'issues'
+    else if (!drill && !isChannel(view)) view = GENERAL
     loadChanges()
     loadReviewer()
   }
@@ -2100,6 +2101,7 @@
   function closeReview() {
     reviewOpen = false
     prLink = null
+    if (view === 'issues') view = GENERAL
     writeRoute(routeHash({ room: roomId, view, session: routeSession(drill), turn: sessionTurn, run: '' }), true, location, history)
   }
 
@@ -2120,6 +2122,7 @@
     const next = channels.resolveView(v)
     if (next !== view || feedAtBottom) feed = trimFeed(feed)
     view = next
+    if (next === 'issues') openReview('issues')
     if (v !== 'goals') goalId = ''
     navOpen = false
     channelMenu = null
@@ -2448,7 +2451,6 @@
           {#if workTabs && !narrow}<div class="dm-tabs"><Tabs tabs={workTabs} tab={view} label={workRow?.label ?? ''} onselect={openView} /></div>{/if}
         {:else}
           <span class="title" title={room.repo}><span class="name">{roomLabel(current ?? room)}</span></span>
-          {#if !narrow}<div class="dm-tabs"><Tabs tabs={roomTabs} tab={view === 'issues' ? view : GENERAL} label="Room" onselect={openView} /></div>{/if}
         {/if}
         {#if !drill}
         <span class="spacer"></span>
@@ -2531,14 +2533,11 @@
             {/if}
           {/key}
         {:else}
-        {#if !workRow && narrow}<Tabs tabs={roomTabs} tab={view === 'issues' ? view : GENERAL} label="Room" onselect={openView} />{/if}
         {#if workTabs && narrow}<Tabs tabs={workTabs} tab={view} label={workRow?.label ?? ''} onselect={openView} />{/if}
         {#if view === 'cihealth'}
           {#key room.id}<CIHealth roomId={room.id} {narrow} {changes} onpr={openPR} />{/key}
         {:else if view === 'library'}
           {#key room.id}<Library roomId={room.id} {narrow} onopen={({ path, dir }) => { openView('files'); if (dir) revealFolder = { path }; else reveal = path }} />{/key}
-        {:else if view === 'issues'}
-          {#key `${room.id}:${view}`}<GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="issue" localIssues={[...issues, ...issueHistory]} oncloseissue={askCloseIssue} onexportissue={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} ondismississue={(i) => triageIssue(() => api.closeIssue(roomId, i.id, 'Dismissed'))} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m, tab) => { openSession(m); if (tab === 'prs') openReview('prs'); else if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
         {:else if view === 'terminal' && hasTerminal}
           {#key room.id}<Terminal roomId={room.id} ref={room.id} noRepo={!room.repo} {narrow} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
         {:else if view === 'questions'}
@@ -2574,6 +2573,9 @@
           <ReviewWorkspace roomId={room.id} session={drill?.rootSeat ? '' : drill?.id ?? ''} sessionName={drill?.name ?? ''} members={hierarchy} bind:tab={reviewTab} {reveal} folder={revealFolder} version={reviewVersion} onpr={openPR} onclose={closeReview} onselect={(id) => { const member = hierarchy.find((m) => m.id === id); if (member) openSession(member); else { drill = null; view = GENERAL } }}>
             {#snippet prs()}
               <GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="pr" active={reviewTab === 'prs'} session={routeSession(drill)} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m) => openSession(m)} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />
+            {/snippet}
+            {#snippet issuesTab()}
+              <GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="issue" active={reviewTab === 'issues'} localIssues={[...issues, ...issueHistory]} oncloseissue={askCloseIssue} onexportissue={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} ondismississue={(i) => triageIssue(() => api.closeIssue(roomId, i.id, 'Dismissed'))} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m, tab) => { openSession(m); if (tab === 'prs') openReview('prs'); else if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />
             {/snippet}
           </ReviewWorkspace>
         {/key}

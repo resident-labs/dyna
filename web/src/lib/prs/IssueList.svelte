@@ -13,6 +13,7 @@
   import { ago } from '../ui/format.ts'
   import { labelStyle, issueChip } from './github.ts'
   import { issueReference, roomIssueLabel, type IssueReference, type IssueRow as GitHubItem } from './unifiedIssues.ts'
+  import MentionInChat from './MentionInChat.svelte'
   import { location } from '../rooms/issues.ts'
 
   interface Props {
@@ -25,15 +26,18 @@
     ondismiss?: (item: GitHubItem) => void
   }
   let { groups = [], sel = 0, onpick, onmention, oncloseissue, onexport, ondismiss }: Props = $props()
+  // The list can sit in the review workspace, far narrower than the window.
+  let width = $state(0)
+  let stack = $derived(width < 560)
 </script>
 
-<div class="rows">
+<div class="rows" bind:clientWidth={width}>
   {#each groups as g (g.id)}
     {#each g.rows as it (it.number || it.local?.id)}
       {@const unresolvedExport = it.state === 'UNKNOWN' && !!it.local?.githubUrl}
       {@const chip = unresolvedExport ? { tone: '', label: 'Promoted' } : issueChip(it)}
       {@const open = it.linkedPRs?.find((p) => p.state === 'OPEN') ?? it.linkedPRs?.[0]}
-      <div class="item">
+      <div class="item" class:stack>
         <Row selected={!!it.number && it.number === sel} context={g.id === 'closed'} onclick={() => onpick(it)}>
           {#snippet lead()}{#if unresolvedExport}<span role="img" aria-label="Promoted">↗</span>{:else}<PRGlyph kind="issue" {it} />{/if}{/snippet}
           <div class="title">{it.title}</div>
@@ -47,7 +51,7 @@
           </div>
         </Row>
         {#if it.local?.githubUrl}<a class="start" href={it.local.githubUrl} target="_blank" rel="noreferrer">GitHub ↗</a>{/if}
-        {#if onmention}<button class="start" onclick={() => onmention?.(issueReference(it))}>Mention in chat</button>{/if}
+        {#if onmention}<MentionInChat onmention={() => onmention?.(issueReference(it))} />{/if}
         {#if it.local?.state === 'open' && (onexport || oncloseissue || ondismiss)}
           <div class="actions">
             {#if onexport}<button class="start" onclick={() => onexport?.(it)}>Promote</button>{/if}
@@ -64,6 +68,9 @@
   .rows { flex: 1; overflow-y: auto; padding: 0 var(--s5) var(--s4); }
   .item { display: flex; align-items: center; gap: var(--s2); border-bottom: 1px solid var(--line-soft); }
   .item :global(.row) { flex: 1; min-width: 0; border-radius: 0; padding: var(--s4) 0; }
+  .item.stack { flex-wrap: wrap; padding-bottom: var(--s2); }
+  .item.stack :global(.row) { flex-basis: 100%; }
+  .item.stack .actions { max-width: none; }
   .title { font-size: var(--t-body); font-weight: 600; overflow-wrap: anywhere; }
   .identity { margin-top: var(--s1); color: var(--muted); font-size: var(--t-sm); display: flex; gap: var(--s2); flex-wrap: wrap; }
   .facts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); }
