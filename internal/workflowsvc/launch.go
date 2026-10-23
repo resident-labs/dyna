@@ -14,6 +14,7 @@ import (
 
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/childenv"
+	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/plan"
 	"dyna-agent/internal/planclient"
 	"dyna-agent/internal/runstore"
@@ -85,7 +86,7 @@ func Launch(ctx context.Context, opts Options, launch LaunchOptions) (string, er
 		defer log.Close()
 	}
 	if launch.Executable == "" {
-		launch.Executable, err = os.Executable()
+		launch.Executable, err = fsutil.RunningExecutable()
 		if err != nil {
 			return "", err
 		}

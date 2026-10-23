@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/childenv"
+	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/processguard"
 )
 
@@ -169,7 +170,7 @@ func (h *socketHost) connect(ctx context.Context, id string) (net.Conn, error) {
 
 // spawnHost starts a detached host on socket and waits until it listens.
 func spawnHost(ctx context.Context, socket string) error {
-	exe, err := os.Executable()
+	exe, err := fsutil.RunningExecutable()
 	if err != nil {
 		return err
 	}

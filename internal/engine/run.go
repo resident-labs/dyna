@@ -35,6 +35,7 @@ import (
 	"dyna-agent/internal/devicesvc"
 	"dyna-agent/internal/doctor"
 	"dyna-agent/internal/engineclient"
+	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/lanesync"
@@ -413,7 +414,10 @@ func Run(ctx context.Context, f Options) (runErr error) {
 	dropDynaEnv()
 	rooms := roomsvc.New(nil)
 	files := &filesvc.Service{Rooms: rooms.Notify.Rooms, SessionInRoom: rooms.SessionInRoom, AttachmentBytes: rooms.AttachmentBytes}
-	rooms.Notify.Sessions.Executable = cli
+	rooms.Notify.Sessions.Executable, err = fsutil.RunningExecutable()
+	if err != nil {
+		return err
+	}
 	terminals := terminalsvc.New(terminalOptions(rooms, f.TerminalIdle))
 	var workerDone <-chan struct{}
 	var servers []*http.Server

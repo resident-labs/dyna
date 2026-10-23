@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/childenv"
+	"dyna-agent/internal/fsutil"
 	"golang.org/x/sys/unix"
 )
 
@@ -183,7 +184,7 @@ func (c *Controller) Start(bind func(Reference) error) (retErr error) {
 	if err != nil {
 		return err
 	}
-	exe, err := os.Executable()
+	exe, err := fsutil.RunningExecutable()
 	if err != nil {
 		parent.Close()
 		file.Close()

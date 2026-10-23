@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/childenv"
+	"dyna-agent/internal/fsutil"
 	harnesshome "dyna-agent/internal/harness/home"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
@@ -68,7 +69,7 @@ var steerHookSupport = probeSteerHookSupport
 // steerHookCommand is the shell command line the harness runs as the hook.
 // Tests replace it.
 var steerHookCommand = func(dir string) (string, error) {
-	exe, err := os.Executable()
+	exe, err := fsutil.RunningExecutable()
 	if err != nil {
 		return "", err
 	}
