@@ -2,7 +2,6 @@ package watch
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -179,12 +178,20 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 	}
 	repos := controlRepositories(st, rm.ID)
 	setPaused := func(paused bool) error {
+		actor := authority.Of(ctx)
+		if paused && actor.Role == authority.Session {
+			var err error
+			actor, err = s.Notify.Sessions.AuthorityActor(ctx)
+			if err != nil {
+				return err
+			}
+		}
 		return s.Store.update(func(st *State) error {
 			if st.MergePauses == nil {
 				st.MergePauses = map[string]string{}
 			}
 			if paused {
-				st.MergePauses[rm.ID] = "merging paused by root"
+				st.MergePauses[rm.ID] = "merging paused by " + string(actor.Role)
 			} else {
 				delete(st.MergePauses, rm.ID)
 			}
@@ -261,18 +268,18 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 		if err := discard(repos); err != nil {
 			return err
 		}
-		if err := setPaused(false); err != nil {
-			return err
-		}
+		// Bypass the existing pause while preparing the replacement. The
+		// batch checkpoint clears it atomically before any build can start.
+		ctx = context.WithValue(ctx, mergeControlRoom{}, rm.ID)
 		if _, err := s.mergeTickLocked(ctx, rm.ID, excluded); err != nil {
-			return errors.Join(err, setPaused(true))
+			return err
 		}
 		current, err := s.Store.Read()
 		if err != nil {
-			return errors.Join(err, setPaused(true))
+			return err
 		}
 		if len(controlRepositories(current, rm.ID)) == 0 {
-			return errors.Join(fmt.Errorf("no eligible PRs for this retry; merging remains paused"), setPaused(true))
+			return fmt.Errorf("no eligible PRs for this retry")
 		}
 		return nil
 	case "bisect":
