@@ -49,7 +49,14 @@ func Migrate(dataDir string) error {
 	if _, err := openRuns(dataDir); err != nil {
 		return err
 	}
-	return projection.Migrate(dataDir)
+	if err := projection.Migrate(dataDir); err != nil {
+		return err
+	}
+	db, err := database.Open(dataDir)
+	if err != nil {
+		return err
+	}
+	return migrateOutput(db, dataDir)
 }
 
 // openRuns opens the runs table and the legacy import stamp table. Both
