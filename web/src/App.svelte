@@ -370,11 +370,7 @@
       const detail = await api.probeMachine(id)
       if (machineId === id) machineDetail = detail
       loadMachines()
-      if (detail.status === 'online') {
-        say({ tone: 'success', subject: `Probed ${detail.name}` })
-      } else {
-        say({ tone: 'error', subject: `${name} did not answer the probe`, text: 'Check the SSH route, then probe again.' })
-      }
+      say(probeResult(detail))
     } catch {
       if (machineId === id) say({ tone: 'error', subject: `Could not probe ${name}` })
     } finally {
