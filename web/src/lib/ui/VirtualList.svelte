@@ -9,18 +9,21 @@
   import { Virtualizer, elementScroll, observeElementOffset, observeElementRect } from '@tanstack/virtual-core'
   import type { VirtualizerOptions } from '@tanstack/virtual-core'
 
+  // A row key, as the pager compares it and as the virtualizer stores it.
+  type RowKey = string | number
+
   // An anchor names the row at the top of the scroller, so a page of older
   // rows can load above it and leave the reader in place.
   interface Anchor {
-    key: string
+    key: RowKey
     top: number
   }
 
   interface Props {
     scroller?: HTMLElement | null
     items: T[]
-    key: (item: T) => string
-    estimate: (item: T) => number
+    key: (item: T) => RowKey
+    estimate: (item: T, index: number) => number
     chat?: boolean
     follow?: boolean
     children: Snippet<[T, number]>
@@ -42,7 +45,7 @@
     },
     estimateSize: (i) => {
       const item = items[i]
-      return item === undefined ? 0 : estimate(item)
+      return item === undefined ? 0 : estimate(item, i)
     },
     scrollToFn: elementScroll,
     observeElementRect,
@@ -107,16 +110,28 @@
     return { key: key(item), top: node.getBoundingClientRect().top - top }
   }
 
-  export function restoreAnchor(anchor: Anchor | null) {
-    if (!anchor || !scroller) return
+  export function restoreAnchor(anchor: unknown) {
+    if (!isAnchor(anchor) || !scroller) return
     const index = items.findIndex(item => key(item) === anchor.key)
     if (index < 0) return
     const offset = v.getOffsetForIndex(index, 'start')
     if (offset) scroller.scrollTop = offset[0] - anchor.top
   }
 
-  export function scrollToIndex(i: number, align: 'start' | 'center' | 'end' | 'auto' = 'center') {
-    v.scrollToIndex(i, { align })
+  // The anchor crosses the component boundary as an unknown row, so its shape
+  // is checked before the key and the offset are read.
+  function isAnchor(value: unknown): value is Anchor {
+    if (typeof value !== 'object' || value === null) return false
+    if (!('key' in value) || !('top' in value)) return false
+    const key: unknown = value.key
+    return (typeof key === 'string' || typeof key === 'number') && typeof value.top === 'number'
+  }
+
+  // scrollToIndex takes the alignment as a plain word, from the pager's own state.
+  const ALIGNMENTS: Record<string, 'start' | 'center' | 'end' | 'auto'> = { start: 'start', center: 'center', end: 'end', auto: 'auto' }
+
+  export function scrollToIndex(i: number, align = 'center') {
+    v.scrollToIndex(i, { align: ALIGNMENTS[align] ?? 'center' })
   }
 
   export function scrollToEnd() {
