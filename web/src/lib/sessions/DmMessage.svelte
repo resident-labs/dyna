@@ -67,7 +67,7 @@
     {:else if row.folded}<details class="folded"><summary>Turn result (same as the post above)</summary><div class="prose">{@html markdown(typed.text)}</div></details>
     {:else if typed.text}<div class="prose">{@html markdown(typed.text)}</div>{/if}
     {#if row.post?.forward}<ForwardQuote {room} post={row.post.forward} {onpost} {onopenfile} />{/if}
-    <PostFiles roomId={room.id} post={{ id: row.post?.id, text: row.text, attachments: row.post?.attachments }} onopen={onopenfile} />
+    <PostFiles roomId={room.id} post={{ id: row.post?.id, text: row.text, attachments: row.post?.attachments, references: row.post?.references }} onopen={onopenfile} />
     {@render receipt()}
   </div>
   {#if actionable && row.post && row.post.kind !== 'pr'}<PostActions {room} p={row.post} {onforward} show={selection.get() === row.post.id} />{/if}

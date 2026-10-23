@@ -226,7 +226,7 @@ export const api = {
   profile: (ref) => app.Profile(ref),
   sendToSession: (ref, text, atts = [], forwardOf = '') => app.SendToSession(ref, text, atts, forwardOf),
   // send is the composer's one send path: Go decides post or spawn.
-  send: (roomId, draft, replyTo = '', atts = [], forwardOf = '') => app.Send(roomId, draft, replyTo, atts, forwardOf),
+  send: (roomId, draft, replyTo = '', atts = [], forwardOf = '', references = []) => references.length ? app.SendWithReferences(roomId, draft, replyTo, atts, forwardOf, references) : app.Send(roomId, draft, replyTo, atts, forwardOf),
   profiles: () => app.Profiles(),
   stopSession: (roomId, sessionId) => app.StopSession(roomId, sessionId),
   consolidateSessions: (roomId, options) => app.ConsolidateSessions(roomId, options),

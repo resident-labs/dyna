@@ -1,3 +1,5 @@
+import type { Reference } from '../rooms/references.ts'
+
 // Rooms, posts and sessions. Sources: internal/roomsvc/roomsvc.go,
 // internal/roomsvc/spawn.go, internal/room/room.go, internal/room/attach.go.
 
@@ -66,6 +68,7 @@ export interface Forward {
   kind?: string
   notice?: PRNotice
   human?: boolean
+  references?: Reference[]
   attachments?: Attachment[]
 }
 
@@ -90,6 +93,7 @@ export interface Message {
   forward?: Forward
   turn?: number
   ownerReport?: boolean
+  references?: Reference[]
   attachments?: Attachment[]
 }
 
