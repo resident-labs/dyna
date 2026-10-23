@@ -181,6 +181,65 @@ func TestCacheCleanRemovesOnlyWhatNoRunUses(t *testing.T) {
 	}
 }
 
+// TestCacheCleanFreesCachesRightAfterARunEnds runs the whole lifecycle on a real
+// tree: a run takes its locks, its teardown stops the keeper, and a cleanup
+// called at once frees the caches that run held. Nothing waits for a keeper
+// poll, so a retry after a full disk is not skipped by the run's own keeper.
+func TestCacheCleanFreesCachesRightAfterARunEnds(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the cleanup refuses to run as root")
+	}
+	base := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-lifecycle", os.Getpid()))
+	t.Cleanup(func() { os.RemoveAll(base) })
+	active := filepath.Join(base, "runs", "one", ".active")
+	old := time.Now().Add(-72 * time.Hour)
+	for _, dir := range []string{filepath.Dir(active), filepath.Join(base, "go-mod", "module"), filepath.Join(base, "npm", "package")} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(dir, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Start the run exactly as its setup does: the shared cache lock is held
+	// before setup returns, and the keeper's process is named in its file.
+	if out, err := exec.Command("bash", "-c", "set -e; "+runLocks(base, active)).CombinedOutput(); err != nil {
+		t.Fatalf("run setup: %v: %s", err, out)
+	}
+	t.Cleanup(func() {
+		exec.Command("bash", "-c", stopKeeper(base, active)).Run()
+		os.RemoveAll(base)
+	})
+	if err := exec.Command("flock", "-n", filepath.Join(base, "caches.lock"), "true").Run(); err == nil {
+		t.Fatal("the run did not take the base's cache lock")
+	}
+	if out, err := runCacheClean(t, base, false); err != nil || strings.Contains(string(out), "go-mod") {
+		t.Fatalf("cleanup trimmed caches under a live run: %v: %s", err, out)
+	}
+	// End the run as its teardown does, then clean up at once. A teardown that
+	// leaves the keeper polling would make the cleanup skip the caches for
+	// seconds, so the time this takes is part of the check.
+	started := time.Now()
+	if out, err := exec.Command("bash", "-c", removeRunDir(base, active)).CombinedOutput(); err != nil {
+		t.Fatalf("run teardown: %v: %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Dir(active)); !os.IsNotExist(err) {
+		t.Fatalf("the run directory stayed: %v", err)
+	}
+	out, err := runCacheClean(t, base, false)
+	if err != nil {
+		t.Fatalf("cleanup after the run: %v: %s", err, out)
+	}
+	for _, gone := range []string{"go-mod/module", "npm/package"} {
+		if _, err := os.Stat(filepath.Join(base, gone)); !os.IsNotExist(err) {
+			t.Fatalf("%s stayed after the run ended: %s", gone, out)
+		}
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("teardown and cleanup took %s; a finished run must free its caches at once", elapsed)
+	}
+}
+
 // TestCleanCachesTicksEveryEnabledMachineOnceADay checks the daily worker: an
 // engine with no CI machine gets no deadline, a machine enabled later gets one,
 // and the next cleanup waits a day.
