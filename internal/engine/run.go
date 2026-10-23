@@ -431,9 +431,9 @@ func Run(ctx context.Context, f Options) (runErr error) {
 			}
 		})
 	}
-	runtime, err := newRuntime(ctx, readOnly)
-	if err != nil {
-		return err
+	runtime := newRuntime(ctx)
+	if !readOnly {
+		runtime.Accounts.RepairAntigravityACPAccount()
 	}
 	runtime.SetTerminals(terminals)
 	cleanup = append(cleanup, runtime.CancelPrivateLogins, runtime.CancelPrivateRuntimeSwitches)
