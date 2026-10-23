@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { TUCKED, COMPOSER, CHAT, chatClick, chatKey, chatDriving, lastLine } from './chatState.js'
+import { TUCKED, COMPOSER, CHAT, chatClick, chatKey, chatDriving, lastLine } from './chatState.ts'
 import { dmView, type ThreadPost } from '../sessions/dm.ts'
 
 type KeyEvent = { key: string; ctrl: boolean; meta: boolean; alt: boolean; editable: boolean; inside: boolean }

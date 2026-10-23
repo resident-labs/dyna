@@ -12,22 +12,95 @@
 // Tests and the live computer check cover the encoding switch.
 
 import { Meter } from './rfbStats.ts'
+import type { RfbDecoder, RfbDisplay, RfbMessages } from '@novnc/novnc'
 
-let loading = null
+// NovncModule and RfbClass keep the untyped noVNC package at its import edge.
+type NovncModule = typeof import('@novnc/novnc')
+type RfbClass = NovncModule['default']
+// RfbClient is one noVNC connection.
+export type RfbClient = InstanceType<RfbClass>
+
+// StreamMode is the owner's picture preference.
+export type StreamMode = 'auto' | 'sharp' | 'smooth'
+
+// StreamPhase is the state the viewer shows.
+export type StreamPhase = 'connecting' | 'connected' | 'disconnected' | 'failed' | 'fallback'
+
+// StreamDetail carries the reason or cleanup flag of one phase.
+export interface StreamDetail {
+  clean?: boolean
+  retrying?: boolean
+  reason?: string
+}
+
+// StreamNotify reports progress to the viewer.
+export type StreamNotify = (state: StreamPhase, detail: StreamDetail) => void
+
+// AutoQuality is the still-picture detector autoQuality returns.
+export interface AutoQuality {
+  keepSmooth(): void
+  refreshing(): void
+  refreshed(time: number): void
+  scroll(time: number): void
+  region(x: number, y: number, width: number, height: number, screenWidth: number, screenHeight: number): void
+  sample(fraction: number, time: number): void
+}
+
+// EncodingTarget is the part of a noVNC client setEncodingMode writes.
+export interface EncodingTarget {
+  _sock: object
+  _rfbConnectionState: string
+  _fbWidth: number
+  _fbHeight: number
+  _sendEncodings(): void
+  qualityLevel: number
+  compressionLevel: number
+}
+
+// StreamHandle is the handle openStream returns at once.
+export interface StreamHandle {
+  meter: Meter
+  // onFrame runs after each framebuffer flip; the viewer repaints from it.
+  onFrame: (() => void) | null
+  readonly rfb: RfbClient | null
+  reconnect(): void
+  setMode(next: string): void
+  setControl(on: boolean): void
+  close(): void
+}
+
+// OpenStreamOptions names the element noVNC fills and the URL to connect to.
+export interface OpenStreamOptions {
+  target: HTMLElement
+  url: () => Promise<string> | string
+  on?: StreamNotify
+  mode?: string
+}
+
+let loading: Promise<RfbClass> | null = null
 
 // h264Off is true once H.264 failed in this page. It is page-wide because
 // the engine that failed once will fail again.
 let h264Off = false
-export const h264Disabled = () => h264Off
+export const h264Disabled = (): boolean => h264Off
 
 // Each socket keeps its own preference, including when several viewers are open.
-const socketModes = new WeakMap()
-export const savedStreamMode = (value) => ['sharp', 'smooth'].includes(value) ? value : 'auto'
-export const requestedEncodings = (sock, encs) => h264Off || !socketModes.get(sock) ? encs.filter(e => e !== 50) : encs
+const socketModes = new WeakMap<object, boolean>()
+export const savedStreamMode = (value: unknown): StreamMode => (value === 'sharp' || value === 'smooth' ? value : 'auto')
+export const requestedEncodings = (sock: object, encs: number[]): number[] => h264Off || !socketModes.get(sock) ? encs.filter(e => e !== 50) : encs
+
+// messageText reads a caught error's message, or the error itself as text.
+function messageText(e: unknown): string {
+  if (typeof e === 'object' && e !== null) {
+    const message: unknown = Reflect.get(e, 'message')
+    if (typeof message === 'string' && message) return message
+  }
+  return String(e)
+}
 
 // Two changed samples within 300 ms mean motion. One sample can be a
 // sharper redraw. Ignore small cursor changes. A still picture gets 1.5 s.
-export function autoQuality(change, now = performance.now()) {
+export function autoQuality(change: (smooth: boolean) => void, now: number = performance.now()): AutoQuality {
   let smooth = true
   let lastMotion = now
   let sampledAt = now
@@ -97,37 +170,46 @@ export function autoQuality(change, now = performance.now()) {
 
 // noVNC 1.7.0 keeps the canvas and connection when sending SetEncodings.
 // A full update gives still text its Sharp pixels without waiting for damage.
-export function setEncodingMode(rfb, smooth) {
+export function setEncodingMode(rfb: EncodingTarget, smooth: boolean): void {
   socketModes.set(rfb._sock, smooth)
   rfb.qualityLevel = smooth ? 6 : 9
   rfb.compressionLevel = smooth ? 2 : 4
   if (rfb._rfbConnectionState !== 'connected') return
   rfb._sendEncodings()
-  if (!smooth) rfb.constructor.messages.fbUpdateRequest(rfb._sock, false, 0, 0, rfb._fbWidth, rfb._fbHeight)
+  if (!smooth) {
+    // noVNC stores its message helpers on the class, which the instance does not type.
+    const messages = (rfb.constructor as Function & { messages: RfbMessages }).messages
+    messages.fbUpdateRequest(rfb._sock, false, 0, 0, rfb._fbWidth, rfb._fbHeight)
+  }
 }
 
 // Safe WebCodecs pre-check. noVNC runs its own probe while it loads (a
 // top-level await), and an engine whose probe throws would make the whole
 // import fail, for good. So the page checks first, and hides VideoDecoder
 // from noVNC when the check is not clean.
-async function webCodecsClean() {
+async function webCodecsClean(): Promise<boolean> {
   try {
-    if (typeof VideoDecoder === 'undefined' || typeof EncodedVideoChunk === 'undefined') return false
-    const r = await VideoDecoder.isConfigSupported({ codec: 'avc1.42401f', codedWidth: 640, codedHeight: 480, optimizeForLatency: true })
-    return !!r?.supported
+    const decoder: unknown = Reflect.get(globalThis, 'VideoDecoder')
+    const chunk: unknown = Reflect.get(globalThis, 'EncodedVideoChunk')
+    if (typeof decoder === 'undefined' || typeof chunk === 'undefined') return false
+    if (typeof decoder !== 'function') return false
+    const check: unknown = Reflect.get(decoder, 'isConfigSupported')
+    if (typeof check !== 'function') return false
+    const r: unknown = await check.call(decoder, { codec: 'avc1.42401f', codedWidth: 640, codedHeight: 480, optimizeForLatency: true })
+    return typeof r === 'object' && r !== null && !!Reflect.get(r, 'supported')
   } catch {
     return false
   }
 }
 
-export function loadRFB() {
+export function loadRFB(): Promise<RfbClass> {
   loading ??= (async () => {
-    const hidden = []
+    const hidden: [string, unknown][] = []
     if (!(await webCodecsClean())) {
       for (const k of ['VideoDecoder']) {
         if (k in window) {
-          hidden.push([k, window[k]])
-          try { window[k] = undefined } catch {}
+          hidden.push([k, Reflect.get(window, k)])
+          try { Reflect.set(window, k, undefined) } catch {}
         }
       }
     }
@@ -138,7 +220,7 @@ export function loadRFB() {
       return RFB
     } finally {
       // Hiding it only needs to last through noVNC's load.
-      for (const [k, v] of hidden) { try { window[k] = v } catch {} }
+      for (const [k, v] of hidden) { try { Reflect.set(window, k, v) } catch {} }
     }
   })()
   return loading
@@ -146,7 +228,7 @@ export function loadRFB() {
 
 // patchEncodings drops H.264 from the list the client sends when the page
 // has turned it off.
-function patchEncodings(RFB) {
+function patchEncodings(RFB: RfbClass): void {
   try {
     const orig = RFB.messages.clientEncodings
     RFB.messages.clientEncodings = (sock, encs) => orig.call(RFB.messages, sock, requestedEncodings(sock, encs))
@@ -154,11 +236,11 @@ function patchEncodings(RFB) {
 }
 
 // instrument counts frames and rectangles. It never throws.
-function instrument(rfb, meter, handle, changed, painted) {
+function instrument(rfb: RfbClient, meter: Meter, handle: StreamHandle, changed: (encoding: number, x: number, y: number, w: number, h: number) => void, painted: () => void): void {
   try {
-    const d = rfb._display
+    const d: RfbDisplay = rfb._display
     const flip = d.flip.bind(d)
-    d.flip = (...a) => {
+    d.flip = (...a: unknown[]) => {
       // noVNC calls flip again when a queued image has decoded.
       const paints = a[0] || !d.pending()
       const result = flip(...a)
@@ -168,11 +250,12 @@ function instrument(rfb, meter, handle, changed, painted) {
   } catch {}
   try {
     for (const [enc, dec] of Object.entries(rfb._decoders)) {
-      const orig = dec.decodeRect.bind(dec)
-      dec.decodeRect = (...a) => {
+      const decoder: RfbDecoder = dec
+      const orig = decoder.decodeRect.bind(decoder)
+      decoder.decodeRect = (x: number, y: number, width: number, height: number, ...rest: unknown[]) => {
         meter.rect(Number(enc))
-        const done = orig(...a)
-        if (done) changed(Number(enc), ...a.slice(0, 4))
+        const done = orig(x, y, width, height, ...rest)
+        if (done) changed(Number(enc), x, y, width, height)
         return done
       }
     }
@@ -185,24 +268,24 @@ const DECODE_ERROR = /failed to decode|videodecoder|h\.?264|webcodecs/i
 // handle at once and reports progress through on(state, detail):
 //   'connecting', 'connected', 'disconnected' (detail.clean, detail.reason),
 //   'failed' (detail.reason), 'fallback' (H.264 turned off, reconnecting).
-export function openStream({ target, url, on, mode = 'auto' }) {
-  let rfb = null
-  let ws = null
+export function openStream({ target, url, on = () => {}, mode = 'auto' }: OpenStreamOptions): StreamHandle {
+  let rfb: RfbClient | null = null
+  let ws: WebSocket | null = null
   let closed = false
   let control = false
   let attempt = 0
-  let retryTimer = 0
+  let retryTimer: ReturnType<typeof setTimeout> | undefined
   let retryDelay = 1000
   mode = savedStreamMode(mode)
-  let sampleTimer = 0
-  let quality = null
-  let sharpRefresh = null
+  let sampleTimer: ReturnType<typeof setInterval> | undefined
+  let quality: AutoQuality | null = null
+  let sharpRefresh: { quality: AutoQuality; tight: boolean } | null = null
   const sampler = document.createElement('canvas')
   sampler.width = 64
   sampler.height = 40
   const pixels = sampler.getContext('2d', { willReadFrequently: true })
   const meter = new Meter()
-  const handle = {
+  const handle: StreamHandle = {
     meter,
     // onFrame runs after each framebuffer flip; the viewer repaints from it.
     onFrame: null,
@@ -244,16 +327,20 @@ export function openStream({ target, url, on, mode = 'auto' }) {
   }
 
   const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
-  function scrollInput(event) {
-    if (event.type !== 'keydown' || scrollKeys.has(event.key)) quality?.scroll(performance.now())
+  function scrollInput(event: Event): void {
+    const key: unknown = Reflect.get(event, 'key')
+    if (event.type !== 'keydown' || (typeof key === 'string' && scrollKeys.has(key))) quality?.scroll(performance.now())
   }
   for (const type of ['wheel', 'touchmove', 'keydown']) target.addEventListener(type, scrollInput, { capture: true, passive: true })
 
   let retried = false
-  const onError = (ev) => {
-    const msg = String(ev?.message || ev?.reason?.message || ev?.reason || '')
+  const onError = (event: Event): void => {
+    const message: unknown = Reflect.get(event, 'message')
+    const reason: unknown = Reflect.get(event, 'reason')
+    const reasonMessage: unknown = typeof reason === 'object' && reason !== null ? Reflect.get(reason, 'message') : undefined
+    const msg = String(message || reasonMessage || reason || '')
     if (closed || h264Off || !DECODE_ERROR.test(msg)) return
-    ev.preventDefault?.()
+    event.preventDefault()
     h264Off = true
     on('fallback', { reason: 'H.264 did not decode here; using Tight or ZRLE' })
     if (!retried) {
@@ -264,25 +351,26 @@ export function openStream({ target, url, on, mode = 'auto' }) {
   window.addEventListener('error', onError)
   window.addEventListener('unhandledrejection', onError)
 
-  function watchPicture(mine) {
+  function watchPicture(mine: RfbClient): void {
     clearInterval(sampleTimer)
     quality = null
     sharpRefresh = null
     if (mode !== 'auto' || !pixels) return
-    let before = null
-    quality = autoQuality(on => {
+    let before: Uint8ClampedArray | null = null
+    const q: AutoQuality = autoQuality(on => {
       if (!on) {
-        quality.refreshing()
-        sharpRefresh = { quality, tight: false }
+        q.refreshing()
+        sharpRefresh = { quality: q, tight: false }
       } else sharpRefresh = null
       setEncodingMode(mine, on)
     })
+    quality = q
     sampleTimer = setInterval(() => {
       if (mine !== rfb || mine._rfbConnectionState !== 'connected') return
       // A slow partial frame with low throughput is evidence that Sharp
       // cannot keep up. Keep Auto Smooth until this mode or connection resets.
-      if (meter.slowFrame()) quality.keepSmooth()
-      const canvas = target.querySelector('canvas')
+      if (meter.slowFrame()) q.keepSmooth()
+      const canvas = target.querySelector<HTMLCanvasElement>('canvas')
       if (!canvas?.width) return
       try {
         pixels.drawImage(canvas, 0, 0, 64, 40)
@@ -290,9 +378,11 @@ export function openStream({ target, url, on, mode = 'auto' }) {
         if (before) {
           let changed = 0
           for (let i = 0; i < after.length; i += 4) {
-            if (Math.max(Math.abs(after[i] - before[i]), Math.abs(after[i + 1] - before[i + 1]), Math.abs(after[i + 2] - before[i + 2])) > 12) changed++
+            const a0 = after[i] ?? 0, a1 = after[i + 1] ?? 0, a2 = after[i + 2] ?? 0
+            const b0 = before[i] ?? 0, b1 = before[i + 1] ?? 0, b2 = before[i + 2] ?? 0
+            if (Math.max(Math.abs(a0 - b0), Math.abs(a1 - b1), Math.abs(a2 - b2)) > 12) changed++
           }
-          quality.sample(changed / (64 * 40), performance.now())
+          q.sample(changed / (64 * 40), performance.now())
         }
         before = after
       } catch {
@@ -302,7 +392,7 @@ export function openStream({ target, url, on, mode = 'auto' }) {
     }, 100)
   }
 
-  async function start() {
+  async function start(): Promise<void> {
     if (closed) return
     const mineAttempt = ++attempt
     clearTimeout(retryTimer)
@@ -315,12 +405,12 @@ export function openStream({ target, url, on, mode = 'auto' }) {
     try { if (previous && previous._rfbConnectionState !== 'disconnected') previous.disconnect() } catch {}
     try { ws?.close() } catch {}
     on('connecting', {})
-    let RFB
+    let RFB: RfbClass
     try {
       RFB = await loadRFB()
     } catch (e) {
       if (closed || mineAttempt !== attempt) return
-      on('failed', { reason: `The stream viewer could not load: ${e?.message ?? e}` })
+      on('failed', { reason: `The stream viewer could not load: ${messageText(e)}` })
       return
     }
     if (closed || mineAttempt !== attempt) return
@@ -329,7 +419,7 @@ export function openStream({ target, url, on, mode = 'auto' }) {
       if (closed || mineAttempt !== attempt) return
       target.replaceChildren()
       ws = new WebSocket(endpoint, ['binary'])
-      let closeCode = null
+      let closeCode: number | null = null
       let refused = false
       ws.addEventListener('close', e => { closeCode = e.code })
       ws.binaryType = 'arraybuffer'
@@ -340,9 +430,9 @@ export function openStream({ target, url, on, mode = 'auto' }) {
       const send = ws.send.bind(ws)
       // KeyEvent (4) and PointerEvent (5) are the owner's input. The reply to
       // the next frame update is the delay the owner feels.
-      ws.send = (d) => {
-        if (d?.[0] === 4 || d?.[0] === 5) meter.sent()
-        return send(d)
+      ws.send = (data) => {
+        if (firstMessageType(data) === 4 || firstMessageType(data) === 5) meter.sent()
+        return send(data)
       }
       const mine = (rfb = new RFB(target, ws, { shared: true }))
       instrument(mine, meter, handle, (encoding, x, y, w, h) => {
@@ -385,7 +475,7 @@ export function openStream({ target, url, on, mode = 'auto' }) {
           retryDelay = Math.min(retryDelay * 2, 8000)
         }
       })
-      const refuse = reason => {
+      const refuse = (reason: string): void => {
         if (mine !== rfb || closed) return
         refused = true
         on('failed', { reason })
@@ -394,9 +484,17 @@ export function openStream({ target, url, on, mode = 'auto' }) {
       mine.addEventListener('credentialsrequired', () => refuse('The stream asked for a password'))
     } catch (e) {
       if (closed || mineAttempt !== attempt) return
-      on('failed', { reason: String(e?.message ?? e) })
+      on('failed', { reason: messageText(e) })
     }
   }
   start()
   return handle
+}
+
+// firstMessageType reads the RFB message type of a binary frame. A string or
+// an array buffer is never the owner's input.
+function firstMessageType(data: string | ArrayBufferLike | Blob | ArrayBufferView): number | undefined {
+  if (!ArrayBuffer.isView(data) || data.byteLength === 0) return undefined
+  const first = new Uint8Array(data.buffer, data.byteOffset, 1)[0]
+  return first
 }

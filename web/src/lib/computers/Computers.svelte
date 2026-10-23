@@ -7,9 +7,9 @@
   import Row from '../ui/Row.svelte'
   import TabHeader from '../rooms/TabHeader.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
-  import { clock } from './clock.svelte.js'
+  import { clock } from './clock.svelte.ts'
   import Chip from '../ui/Chip.svelte'
-  import { computerLabel, shotRatio, splitComputers, stateText, uptimeText } from './computers.js'
+  import { computerLabel, shotRatio, splitComputers, stateText, uptimeText } from './computers.ts'
   let { list = [], error = '', onopen } = $props()
   const split = $derived(splitComputers(list))
   let showStopped = $state(false)

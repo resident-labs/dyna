@@ -1,9 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { stateWord, hintText, escTwice, isLive, hasComputer, stateText, ageText, uptimeText, mib, appName, openedApps, streamLine, sizeText, shotRatio, pushAction, applyEvent, sortComputers, viewKey, popOut, FEED_KEEP, splitComputers } from './computers.js'
+import { stateWord, hintText, escTwice, isLive, hasComputer, stateText, ageText, uptimeText, mib, appName, openedApps, streamLine, sizeText, shotRatio, pushAction, applyEvent, sortComputers, viewKey, popOut, FEED_KEEP, splitComputers, type ActionFeed, type Computer } from './computers.ts'
 
 const now = Date.parse('2026-10-17T18:00:00Z')
-const ago = (s) => new Date(now - s * 1000).toISOString()
+const ago = (s: number): string => new Date(now - s * 1000).toISOString()
 
 test('states', () => {
   assert.equal(isLive({ state: 'running' }), true)
@@ -63,13 +63,13 @@ test('stream line', () => {
 })
 
 test('the action feed keeps the newest few', () => {
-  let feed = {}
+  let feed: ActionFeed = {}
   for (let i = 0; i < 10; i++) feed = pushAction(feed, 's', `click ${i}`, 1000 + i)
-  assert.equal(feed.s.length, FEED_KEEP)
-  assert.deepEqual(feed.s.at(-1), { line: 'click 9', at: 1009 })
+  assert.equal(feed.s?.length, FEED_KEEP)
+  assert.deepEqual(feed.s?.at(-1), { line: 'click 9', at: 1009 })
   const same = pushAction(feed, 's', '')
   assert.equal(same, feed, 'an empty line changes nothing')
-  assert.equal(pushAction({}, 'a', 'x').a[0].line, 'x')
+  assert.equal(pushAction({}, 'a', 'x').a?.[0]?.line, 'x')
 })
 
 test('state words and hints', () => {
@@ -93,16 +93,18 @@ test('Esc twice within 600 ms', () => {
 })
 
 test('events patch the list', () => {
-  const list = [{ session: 'a', name: 'alpha', state: 'idle' }, { session: 'b', name: 'beta', state: 'none' }]
+  const list: Computer[] = [{ session: 'a', name: 'alpha', state: 'idle' }, { session: 'b', name: 'beta', state: 'none' }]
   let r = applyEvent(list, { session: 'a', type: 'started', computer: { session: 'a', state: 'running', name: '' } })
-  assert.equal(r.list[0].state, 'running')
-  assert.equal(r.list[0].name, 'alpha', 'the room list keeps the name')
-  assert.equal(list[0].state, 'idle', 'the old list is not changed')
+  assert.equal(r.list[0]?.state, 'running')
+  assert.equal(r.list[0]?.name, 'alpha', 'the room list keeps the name')
+  assert.equal(list[0]?.state, 'idle', 'the old list is not changed')
   assert.equal(r.needsReload, false)
   r = applyEvent(list, { session: 'zzz', type: 'started', computer: { session: 'zzz', state: 'running' } })
   assert.equal(r.list, list)
   assert.equal(applyEvent(list, { session: 'a', type: 'stopped' }).needsReload, true)
   assert.equal(applyEvent(list, { session: 'a', type: 'act', action: 'click' }).needsReload, false)
+  const was = [{ session: 'a', name: 'alpha', state: 'running', streamRssKiB: 2048 }]
+  assert.equal(applyEvent(was, { session: 'a', type: 'stopped', computer: { session: 'a', state: 'stopped' } }).list[0]?.streamRssKiB, undefined, 'a replacing event drops the fields it leaves out')
 })
 
 test('sort', () => {
@@ -111,7 +113,7 @@ test('sort', () => {
 })
 
 test('view keys are the length and alphabet the server accepts', () => {
-  const seen = new Set()
+  const seen = new Set<string>()
   for (let i = 0; i < 50; i++) {
     const k = viewKey()
     assert.match(k, /^[A-Za-z0-9_-]{8,64}$/)
@@ -121,7 +123,7 @@ test('view keys are the length and alphabet the server accepts', () => {
 })
 
 test('openedApps names an app that is new in the list', () => {
-  const a = (id) => ({ appId: id })
+  const a = (id: string): { appId: string } => ({ appId: id })
   assert.deepEqual(openedApps([], [a('org.chromium.Chromium')]), ['Chromium'])
   assert.deepEqual(openedApps([a('foot')], [a('foot'), a('firefox')]), ['Firefox'])
   assert.deepEqual(openedApps([a('foot')], [a('foot')]), [])
@@ -129,22 +131,28 @@ test('openedApps names an app that is new in the list', () => {
 })
 
 test('popOut opens a computer in its own window, including root', () => {
-  const opened = [], events = []
+  const opened: unknown[][] = [], events: { type?: string; detail?: unknown }[] = []
   const saved = { window: globalThis.window, location: globalThis.location, CustomEvent: globalThis.CustomEvent }
-  globalThis.location = { pathname: '/app' }
-  globalThis.CustomEvent = class { constructor(type, init) { this.type = type; this.detail = init?.detail } }
-  globalThis.window = { open: (...a) => (opened.push(a), {}), dispatchEvent: (e) => events.push(e) }
+  Object.assign(globalThis, {
+    location: { pathname: '/app' },
+    CustomEvent: class {
+      type: string
+      detail: unknown
+      constructor(type: string, init?: { detail?: unknown }) { this.type = type; this.detail = init?.detail }
+    },
+    window: { open: (...a: unknown[]) => (opened.push(a), {}), dispatchEvent: (e: { type?: string; detail?: unknown }) => events.push(e) },
+  })
   try {
     popOut('room_20261018-000000-abcdef12', 'root-room_20261018-000000-abcdef12')
   } finally {
     Object.assign(globalThis, saved)
   }
-  assert.deepEqual(opened[0].slice(0, 2), ['/app#pop=room_20261018-000000-abcdef12:root-room_20261018-000000-abcdef12', 'dyna-computer-root-room_20261018-000000-abcdef12'])
-  assert.equal(events[0].type, 'dyna:computer-popped')
+  assert.deepEqual(opened[0]?.slice(0, 2), ['/app#pop=room_20261018-000000-abcdef12:root-room_20261018-000000-abcdef12', 'dyna-computer-root-room_20261018-000000-abcdef12'])
+  assert.equal(events[0]?.type, 'dyna:computer-popped')
 })
 
 test('live computers are tiles; the rest are one-line rows', () => {
-  const list = [
+  const list: Computer[] = [
     { session: 'a', name: 'a', state: 'running' },
     { session: 'b', name: 'b', state: 'idle' },
     { session: 'c', name: 'c', state: 'stopped' },
