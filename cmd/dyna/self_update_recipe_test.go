@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/processguard"
@@ -51,7 +52,9 @@ func TestSelfUpdateAndWorkersResolveThroughGitHooks(t *testing.T) {
 		t.Fatalf("recipe executable: %s", recipe.Command)
 	}
 	routes := map[string][]string{"recipe": strings.Fields(strings.Split(tail, " --main ")[0])}
-	s := hookinstall.Service{Jobs: hookinstall.Store{Root: t.TempDir()}}
+	installData := t.TempDir()
+	t.Cleanup(func() { database.Close(installData) })
+	s := hookinstall.Service{Jobs: hookinstall.Store{Root: filepath.Join(installData, "hooks", "install")}}
 	s.Exec = func(_ context.Context, p processguard.Process) error {
 		i := slices.Index(p.Args, exe)
 		if i < 0 {
