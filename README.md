@@ -81,9 +81,11 @@ correction.
 `dyna goal` records an outcome and its done condition for a session. Root holds
 no goals itself, so the agents that do the work hold them. Every 15 minutes,
 Dyna asks each parent with running, queued, or idle direct children to check
-those children and report its own status. The same rule applies to root.
+those children. The same rule applies to root.
 Dormant and closed children do not count. Each parent remains responsible
-for its children and their work.
+for its children and their work. Check-ins list children stalest first with state,
+duration, goal/item, and PR state. Act on stuck work. If everything is on track,
+end your turn without posting.
 Set `sessions.checkInInterval` to change the interval; `0s` disables check-ins.
 
 ### Questions

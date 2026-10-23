@@ -572,7 +572,7 @@ func renameCommand(newManager func() *subagent.Manager) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rename <session> <new-name>",
 		Short: "Change a session's label without changing its ID or history",
-		Long:  "Give an open session a new label. Its ID, history, goals and PR links stay the same, and the room members list shows the new address. The new name must not be used by another open session in the room, and service names such as keeper and library are reserved. Root, the owner, the session itself or its parent may run it.",
+		Long:  "Give an open session a new label. Its ID, history, goals and PR links stay the same, and the room members list shows the new address. The new name must not be used by another open session in the room, and service names such as library and merge-steward are reserved. Root, the owner, the session itself or its parent may run it.",
 		Args:  cobra.ExactArgs(2),
 		RunE: func(c *cobra.Command, args []string) error {
 			store := newManager().Store

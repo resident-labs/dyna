@@ -23,7 +23,7 @@ func TestInstructionsTeachDynaOnlyDelegation(t *testing.T) {
 		`"$DYNA_BIN" subagent start --name <unique-name> --profile <profile>`,
 		"or pass --room", "Never wait or poll for children", "dyna ask", "goes dormant by itself", "Never auto-merge",
 		"git`: before you create a worktree, open, track, review or comment on a pull request",
-		"dyna git pr comment", clearEnglishPrompt,
+		"dyna git pr comment", clearEnglishPrompt, parentCheckInPrompt,
 		"Turns started only by child, sibling or group posts end silently.",
 		"address the session that asked.",
 		`If dyna is absent from PATH, use "$DYNA_BIN" for all commands, including guides.`,
@@ -97,6 +97,9 @@ func TestSessionCoreBudgetAndGuideTriggers(t *testing.T) {
 // Compare only each role's shared session rules. Room rules, profile data,
 // worker identity, service contracts, and the goal/brief are separate sections.
 func TestSessionRuleSizesStayComparable(t *testing.T) {
+	if !strings.Contains(rootRules(), parentCheckInPrompt) {
+		t.Fatal("root instructions omit parent check-in responsibility")
+	}
 	root, worker := len(rootRules()), len(sessionRules(true))
 	t.Logf("root session part: %d bytes; worker session part: %d bytes", root, worker)
 	shorter, longer := root, worker
