@@ -329,6 +329,10 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 		if h.Name != name {
 			continue
 		}
+		// Reloaded settings can change while an earlier hook is running.
+		if h.Disabled && !requested {
+			return Run{}, nil
+		}
 		if err := Validate(h); err != nil {
 			return Run{}, err
 		}
