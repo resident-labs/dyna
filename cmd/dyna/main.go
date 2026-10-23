@@ -21,6 +21,7 @@ import (
 	"dyna-agent/internal/cli/ask"
 	"dyna-agent/internal/cli/call"
 	"dyna-agent/internal/cli/computer"
+	clidoctor "dyna-agent/internal/cli/doctor"
 	cligit "dyna-agent/internal/cli/git"
 	"dyna-agent/internal/cli/goal"
 	"dyna-agent/internal/cli/hook"
@@ -130,6 +131,7 @@ func newRootCommand() *cobra.Command {
 		rules.NewCommand(),
 		cliroot.NewCommand(),
 		usage.NewCommand(),
+		clidoctor.NewCommand(),
 		cliroom.RoomCmd(),
 		cliroom.PostCmd(),
 		cliroom.VisualCmd(),
