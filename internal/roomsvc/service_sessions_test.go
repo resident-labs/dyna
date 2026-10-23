@@ -1,16 +1,21 @@
 package roomsvc
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"dyna-agent/internal/subagent"
 )
 
-func TestServiceSessionsTeamComposerAndMemberFlag(t *testing.T) {
+// A service and its helper are outside the hierarchy, so they are no member and
+// no @team recipient, but the composer still offers their names, because a post
+// may address a service directly.
+func TestServiceSessionsStayOutOfMembersAndInMentions(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("services")
 	worker := e.start(rec, "worker", nil)
+	var serviceNames []string
 	for _, role := range []string{"reviewer", subagent.RoleLibrarian} {
 		// Persist the service flag with its role; helpers read the canonical parent.
 		info := e.start(rec, role+"-service", nil)
@@ -18,6 +23,7 @@ func TestServiceSessionsTeamComposerAndMemberFlag(t *testing.T) {
 			t.Fatal(err)
 		}
 		e.start(rec, role+"-helper", &info)
+		serviceNames = append(serviceNames, "@"+role+"-service")
 	}
 	draft, err := e.svc.Preview(rec.Name, "@team General room post")
 	if err != nil || len(draft.Wakes) != 1 || !strings.Contains(draft.Wakes[0], worker.Name) {
@@ -27,13 +33,18 @@ func TestServiceSessionsTeamComposerAndMemberFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	count := 0
 	for _, member := range members {
 		if member.Service {
-			count++
+			t.Fatalf("service session appears as a member: %+v", member)
 		}
 	}
-	if count != 4 {
-		t.Fatalf("service members = %d; want 4", count)
+	choices, err := e.svc.MentionChoices(rec.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range serviceNames {
+		if !slices.Contains(choices, name) {
+			t.Fatalf("mention choices %v lack the service %s", choices, name)
+		}
 	}
 }
