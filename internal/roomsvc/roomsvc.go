@@ -51,12 +51,10 @@ type Service struct {
 	// result never changes. It never evicts: each entry is at most 64 KB and
 	// a desktop session views a bounded feed. A long-lived web server will
 	// need an LRU here.
-	results        sync.Map
-	ownerMu        sync.Mutex
-	ownerIDs       map[string]*ownerPostIDs
-	conversationMu sync.Mutex
-	conversations  map[string]*sessionMessages
-	snap           sessionSnapshot
+	results  sync.Map
+	ownerMu  sync.Mutex
+	ownerIDs map[string]*ownerPostIDs
+	snap     sessionSnapshot
 	// prWake asks Watch to scan PRs now, after the engine's own PR state
 	// write. It holds one pending wake.
 	prWake      chan struct{}

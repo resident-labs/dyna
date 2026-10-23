@@ -52,6 +52,11 @@ CREATE TABLE post_index_cursor (
 // imported into the post index.
 const postIndexImportKey = "room.post_index.import"
 
+// postIndexAuthorsKey records that the retained posts of every room were given
+// the author their rows name today. It is a separate versioned key because the
+// schema did not change: only the value one column gets for the seat's posts.
+const postIndexAuthorsKey = "room.post_index.authors"
+
 func (s *Store) postIndexDB() (*sql.DB, error) {
 	db, err := s.recordsDB()
 	if err != nil {
@@ -81,17 +86,95 @@ func (s *Store) migratePostIndex() error {
 		if err := s.importPostIndex(db); err != nil {
 			return err
 		}
-		if err := state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-			_, err := conn.ExecContext(context.Background(), `INSERT INTO meta(key, value) VALUES(?, '1')
-ON CONFLICT(key) DO UPDATE SET value = excluded.value`, postIndexImportKey)
-			return err
-		}); err != nil {
+		// The import writes today's author, so this fresh index needs no
+		// backfill of the authors it just stored.
+		if err := markPostIndex(db, postIndexImportKey, postIndexAuthorsKey); err != nil {
 			return err
 		}
 	case err != nil:
 		return err
 	}
+	if err := s.backfillPostAuthors(db); err != nil {
+		return err
+	}
 	return s.catchUpPostIndex(db)
+}
+
+// markPostIndex records that these one-time steps of the post index ran.
+func markPostIndex(db *sql.DB, keys ...string) error {
+	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		for _, key := range keys {
+			if _, err := conn.ExecContext(context.Background(), `INSERT INTO meta(key, value) VALUES(?, '1')
+ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// backfillPostAuthors gives the retained rows of an older store the author they
+// would get today, once. Rows written before the seat named its own posts hold
+// no author for an external root's post and the root session for the internal
+// root's, so the seat's DM would lose them; INSERT OR IGNORE never repairs a
+// row, so this rewrites it.
+//
+// It runs after the one-time import, and before the cursor catch-up, whose rows
+// already carry today's author.
+func (s *Store) backfillPostAuthors(db *sql.DB) error {
+	var version string
+	err := db.QueryRow("SELECT value FROM meta WHERE key=?", postIndexAuthorsKey).Scan(&version)
+	switch {
+	case err == nil:
+		return nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return err
+	}
+	if err := database.BackUpOnce(db); err != nil {
+		return fmt.Errorf("back up dyna.db before backfilling post authors: %w", err)
+	}
+	records, err := storedRecords(db)
+	if err != nil {
+		return err
+	}
+	for _, rec := range records {
+		if err := s.rewritePostAuthors(db, rec); err != nil {
+			return err
+		}
+	}
+	return markPostIndex(db, postIndexAuthorsKey)
+}
+
+// rewritePostAuthors rewrites the author of every retained post of one room
+// whose row names another author than postAuthor does now, in one write per
+// room. A post that names no author keeps its row as it is.
+func (s *Store) rewritePostAuthors(db *sql.DB, rec Record) error {
+	msgs, err := s.Messages(rec.ID)
+	if err != nil {
+		return err
+	}
+	type row struct {
+		postID, author string
+	}
+	var rows []row
+	for _, msg := range msgs {
+		if author := postAuthor(msg, rec.Name, rec.ID); author != "" {
+			rows = append(rows, row{postID: msg.ID, author: author})
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		ctx := context.Background()
+		for _, r := range rows {
+			if _, err := conn.ExecContext(ctx, `UPDATE post_homes SET author_session_id=? WHERE room_id=? AND post_id=? AND author_session_id<>?`,
+				r.author, rec.ID, r.postID, r.author); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // TODO: legacy/shim remove later — imports posts that were stored before the
@@ -218,7 +301,7 @@ func (s *Store) homesFor(db *sql.DB, roomName, roomID string, msgs []Message) []
 // same post is kept as it is: a post's rows are written once.
 func putPostRows(ctx context.Context, conn *sql.Conn, roomID, roomName string, msg Message, home Conversation, deliveryState DeliveryState, at int64) error {
 	if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO post_homes(room_id, post_id, ts, conversation, author_session_id) VALUES(?, ?, ?, ?, ?)`,
-		roomID, msg.ID, msg.TS, string(home.Home()), msg.AuthorSessionID()); err != nil {
+		roomID, msg.ID, msg.TS, string(home.Home()), postAuthor(msg, roomName, roomID)); err != nil {
 		return err
 	}
 	for _, delivery := range DeliveriesFor(msg, roomName) {
@@ -228,6 +311,30 @@ func putPostRows(ctx context.Context, conn *sql.Conn, roomID, roomName string, m
 		}
 	}
 	return nil
+}
+
+// postAuthor is who wrote msg, as post_homes records it: the session bound to
+// the sender's address, or the room's root seat for a post of the seat itself.
+// The seat's holder can change, so its posts name the seat (see
+// SeatSessionID), the same identity the seat's delivery rows use, and the
+// seat's DM finds them whoever holds it now.
+//
+// An event is the engine's notice rather than the seat's own words, so it names
+// no author. An owner, worker or engine post names none either.
+func postAuthor(msg Message, roomName, roomID string) string {
+	if msg.From == roomName+":"+RootAgent {
+		return SeatSessionID(roomID)
+	}
+	if id := msg.AuthorSessionID(); id != "" {
+		return id
+	}
+	if msg.From != roomName || msg.Human {
+		return ""
+	}
+	if _, event := eventSpecFor(msg.Kind, msg.Notice.Kind); event {
+		return ""
+	}
+	return SeatSessionID(roomID)
 }
 
 // ReplyHome is the home of the post that postID answers, and empty when the

@@ -8,6 +8,8 @@ import (
 	"dyna-agent/internal/room"
 )
 
+// A rename moves the session's address, not its rows: its DM and its media
+// still read the same posts, because the posts name the session by ID.
 func TestRenamedSessionKeepsConversationAndMedia(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
@@ -19,45 +21,48 @@ func TestRenamedSessionKeepsConversationAndMedia(t *testing.T) {
 		t.Fatal(err)
 	}
 	card.Render = room.RenderHTML
-	oldAddr := lead.Address()
-	bound := map[string]string{oldAddr: lead.ID}
-	for _, in := range []room.PostInput{
-		{From: peer.Address(), To: []string{oldAddr}, SessionIDs: bound, Text: "Before rename"},
-		{From: peer.Address(), To: []string{oldAddr}, SessionIDs: bound, Text: "Card for lead", Attachments: []room.Attachment{card}},
-		{From: peer.Address(), To: []string{peer.Address()}, SessionIDs: map[string]string{peer.Address(): peer.ID}, Text: "Other session's post"},
-	} {
-		if _, err := store.Post(rec.ID, in); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err := e.svc.Transcript(lead.ID); err != nil {
+	before, err := e.mgr.Store.ReadTurn(lead.ID, 1)
+	if err != nil {
 		t.Fatal(err)
 	}
+	// The posts of this DM are written before the rename, and its address is
+	// the one the reader no longer knows.
+	store.Now = func() time.Time { return before.Started.Add(-time.Minute) }
+	dm := room.DMConversation(lead.ID)
+	oldAddr := lead.Address()
+	var want []string
+	for _, in := range []room.PostInput{
+		{From: rec.Name, Human: true, Conversation: dm, To: []string{oldAddr}, SessionIDs: map[string]string{oldAddr: lead.ID}, Text: "Before rename"},
+		{From: rec.Name, Human: true, Conversation: dm, To: []string{oldAddr}, SessionIDs: map[string]string{oldAddr: lead.ID}, Text: "Card for lead", Attachments: []room.Attachment{card}},
+		{From: peer.Address(), To: []string{peer.Address()}, SessionIDs: map[string]string{peer.Address(): peer.ID}, Text: "Other session's post"},
+	} {
+		msg, err := store.Post(rec.ID, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if in.Conversation == dm {
+			want = append(want, msg.ID)
+		}
+	}
+	store.Now = nil
 	if _, err := e.mgr.Rename(context.Background(), lead.ID, "captain"); err != nil {
 		t.Fatal(err)
 	}
 	view, err := e.svc.Transcript(lead.ID)
-	if err != nil || len(view.Posts) != 2 || len(view.Media) != 1 {
-		t.Fatalf("renamed indexed conversation: %+v, %v", view, err)
-	}
-	msgs, err := store.Messages(rec.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	newAddr := rec.Name + ":captain"
-	book := e.svc.avatars(rec.ID)
-	posts, err := e.svc.sessionPosts(rec, msgs, lead.ID, newAddr, time.Time{}, time.Time{}, book)
-	if err != nil {
-		t.Fatal(err)
+	var got []string
+	for _, post := range view.Posts {
+		got = append(got, post.ID)
 	}
-	if len(posts) != 2 || posts[0].Text != "Before rename" || posts[1].Text != "Card for lead" {
-		t.Fatalf("renamed lead posts = %+v", posts)
+	if len(view.Media) != 1 {
+		t.Fatalf("renamed media = %+v", view.Media)
 	}
-	media, err := e.svc.sessionMedia(rec, msgs, lead.ID, newAddr, book)
-	if err != nil {
-		t.Fatal(err)
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("renamed DM posts = %v, want %v", got, want)
 	}
-	if len(media) != 1 {
-		t.Fatalf("renamed lead media = %+v", media)
+	if view.Media[0].ID != want[1] {
+		t.Fatalf("renamed media = %+v, want the card post", view.Media)
 	}
 }

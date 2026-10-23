@@ -27,6 +27,13 @@ test('older session pages add turns and posts without replacing live state', () 
   assert.equal(result.cursor, '1')
 })
 
+test('older session pages merge reference rows by post', () => {
+  const current = page([4, 5, 6], { references: [{ postId: 'r6' }] })
+  const old = page([1, 2, 3], { references: [{ postId: 'r1' }] })
+  const result = mergeSessionPage(current, old, true)
+  assert.deepEqual(result.references?.map(r => r.postId), ['r1', 'r6'])
+})
+
 test('a refreshed tail updates live turns while keeping earlier history', () => {
   const current = page([1, 2, 3, 4], { earlier: false, cursor: '1' })
   const fresh = page([3, 4, 5], { earlier: true, cursor: '3' })
