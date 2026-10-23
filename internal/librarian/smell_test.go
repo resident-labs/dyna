@@ -2,6 +2,7 @@ package librarian
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -77,10 +78,11 @@ func TestFileSmellChecks(t *testing.T) {
 	refuse(good("two retry loops in the agent runner"), "open issue D-7")
 	refuse(good("Agent runner has two retry loops"), "open issue D-7")
 
-	for _, title := range []string{"Global state in run", "Run hides its clock", "Run reads env directly"} {
-		i, err := h.svc.FileSmell(ctx, authority.Current(), h.repo, "room:librarian", good(title))
-		if err != nil || i.File != "agents/run.go" || i.Line != 3 {
-			t.Fatalf("FileSmell(%q) = %+v %v", title, i, err)
+	for i := 0; i < 10; i++ {
+		title := fmt.Sprintf("p%d", i)
+		issue, err := h.svc.FileSmell(ctx, authority.Current(), h.repo, "room:librarian", good(title))
+		if err != nil || issue.File != "agents/run.go" || issue.Line != 3 {
+			t.Fatalf("FileSmell(%q) = %+v %v", title, issue, err)
 		}
 	}
 	refuse(good("Run mixes IO and policy"), "daily cap")
@@ -122,8 +124,10 @@ func TestConcurrentSmellsTakeOneSlot(t *testing.T) {
 	if n := race([]string{"Same smell", "Same smell", "Same smell", "Same smell"}); n != 1 {
 		t.Fatalf("identical smells filed %d times", n)
 	}
-	if n := race([]string{"Second smell"}); n != 1 {
-		t.Fatalf("second smell filed %d times", n)
+	for i := 0; i < 8; i++ {
+		if n := race([]string{fmt.Sprintf("p%d", i+1)}); n != 1 {
+			t.Fatalf("smell %d filed %d times", i, n)
+		}
 	}
 	if n := race([]string{"Global clock", "Hidden env reads", "Mixed IO policy", "Retry loop twice"}); n != 1 {
 		t.Fatalf("the last daily slot was taken %d times", n)

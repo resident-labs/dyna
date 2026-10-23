@@ -22,6 +22,9 @@ import (
 // repository. Merges inside it wait for the next wake.
 const Interval = 30 * time.Minute
 
+// SmellInterval limits code-reading passes to four per repository per day.
+const SmellInterval = 6 * time.Hour
+
 // Service runs librarian wakes. Tests replace Sessions, Settings and Now.
 type Service struct {
 	// Hook functions are supplied by the engine's existing hook handlers.
@@ -60,6 +63,21 @@ type Result struct {
 // when all pass: enabled, last turn finished, main moved, interval elapsed,
 // gate, session idle. The whole wake holds the repository's librarian lock.
 func (s Service) Wake(ctx context.Context, repoDir string) (Result, error) {
+	mapped, err := s.wakeMap(ctx, repoDir)
+	if err != nil || mapped.Action == "off" {
+		return mapped, err
+	}
+	smelled, err := s.wakeSmells(ctx, repoDir)
+	if err != nil {
+		return Result{}, err
+	}
+	if mapped.Action == "current" && (smelled.Action == "assigned" || smelled.Action == "started" || smelled.Action == "busy") {
+		return smelled, nil
+	}
+	return mapped, nil
+}
+
+func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 	r, err := repoid.Resolve(ctx, repoDir)
 	if err != nil {
 		return Result{}, err
@@ -131,7 +149,7 @@ func (s Service) Wake(ctx context.Context, repoDir string) (Result, error) {
 		return Result{Action: "skipped", Reason: "no owned file changed beyond whitespace and no source file is unmapped", Head: target}, err
 	}
 
-	lookup := rolesession.Lookup(st.Session, st.RoomID, subagent.RoleLibrarian, s.Sessions.Inspect, func() (subagent.Info, error) { return s.Sessions.Named(st.RoomID) })
+	lookup := rolesession.Lookup(st.Session, st.RoomID, subagent.RoleLibrarian, s.Sessions.Inspect, func() (subagent.Info, error) { return s.Sessions.Named(st.RoomID, false) })
 	info, turn, usable := lookup.Info, lookup.Turn, lookup.Usable
 	if usable && rolesession.Busy(info) {
 		return Result{Action: "busy", Reason: "the librarian session is busy", Head: st.Head}, nil
@@ -165,7 +183,7 @@ func (s Service) Wake(ctx context.Context, repoDir string) (Result, error) {
 			}
 		}
 		action = "started"
-		info, n, err = s.Sessions.Start(st.RoomID, name, tree, Goal(r.Main), task)
+		info, n, err = s.Sessions.Start(st.RoomID, name, tree, Goal(r.Main), task, false)
 	}
 	if err != nil {
 		return Result{}, err
@@ -175,6 +193,111 @@ func (s Service) Wake(ctx context.Context, repoDir string) (Result, error) {
 		return nil
 	})
 	return Result{Action: action, Reason: reason, Head: target}, err
+}
+
+// wakeSmells runs the independent code-reading pass. Its checkout, session,
+// checkpoint and profile failures are separate from the feature map pass.
+func (s Service) wakeSmells(ctx context.Context, repoDir string) (Result, error) {
+	r, err := repoid.Resolve(ctx, repoDir)
+	if err != nil {
+		return Result{}, err
+	}
+	v, err := s.settings()
+	if err != nil {
+		return Result{}, err
+	}
+	states := librarianstate.Store{DataDir: s.DataDir}
+	st, err := states.Get(r.ID)
+	if !v.LibraryOn(r.Main) || errors.Is(err, os.ErrNotExist) {
+		return Result{Action: "off"}, nil
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	lock, err := rolesession.Lock(filepath.Join(s.DataDir, "library"), "librarian-smells", st.RoomID)
+	if err != nil {
+		return Result{}, fmt.Errorf("another librarian smell wake holds the lock: %w", err)
+	}
+	defer rolesession.Unlock(lock)
+	if st, err = states.Get(r.ID); err != nil {
+		return Result{}, err
+	}
+	if st.SmellPending != "" {
+		turn, turnErr := s.Sessions.Turn(st.SmellSession, st.SmellPendingTurn)
+		if turnErr == nil && !turn.Done() {
+			return Result{Action: "busy", Reason: "the librarian smell pass is still on its last turn", Head: st.SmellHead}, nil
+		}
+		ok := turnErr == nil && turn.Status == subagent.TurnOK
+		if st, err = states.Update(r.ID, false, func(st *librarianstate.State) error {
+			if ok {
+				st.SmellHead = st.SmellPending
+			} else if turn.Status == subagent.TurnError && rolesession.ProviderFailure(turn.Error) {
+				info, _, _ := s.Sessions.Inspect(st.SmellSession)
+				st.SmellFailedProfiles = rolesession.RecordFailure(st.SmellFailedProfiles, info, turn, s.now())
+			}
+			st.SmellPending, st.SmellPendingTurn = "", 0
+			return nil
+		}); err != nil {
+			return Result{}, err
+		}
+	}
+	target, err := MainHead(ctx, r.Main)
+	if err != nil {
+		return Result{}, err
+	}
+	if st.SmellHead == "" {
+		_, err = states.Update(r.ID, false, func(st *librarianstate.State) error { st.SmellHead = target; return nil })
+		return Result{Action: "current", Reason: "smell pass baseline recorded", Head: target}, err
+	}
+	if target == st.SmellHead {
+		return Result{Action: "current", Head: target}, nil
+	}
+	if next := st.SmellLastRun.Add(SmellInterval); s.now().Before(next) {
+		return Result{Action: "batched", Reason: "next smell run after " + next.Format(time.RFC3339), Head: st.SmellHead}, nil
+	}
+	lookup := rolesession.Lookup(st.SmellSession, st.RoomID, subagent.RoleLibrarian, s.Sessions.Inspect, func() (subagent.Info, error) { return s.Sessions.Named(st.RoomID, true) })
+	info, turn, usable := lookup.Info, lookup.Turn, lookup.Usable
+	if usable && rolesession.Busy(info) {
+		return Result{Action: "busy", Reason: "the librarian smell session is busy", Head: st.SmellHead}, nil
+	}
+	profiles, err := s.Sessions.Profiles()
+	if err != nil {
+		return Result{}, err
+	}
+	recent, err := s.Sessions.Failures(s.now())
+	if err != nil {
+		return Result{}, err
+	}
+	failed := rolesession.MergeFailures(st.SmellFailedProfiles, recent)
+	name, _, err := rolesession.ChooseProfile(profiles, v.LibrarySmellProfile, failed, s.now(), subagent.RoleReviewer)
+	if err != nil {
+		return Result{}, err
+	}
+	tree := SmellTreePath(s.DataDir, r.ID)
+	if err := syncTree(ctx, r.Main, tree, target); err != nil {
+		return Result{}, err
+	}
+	task := SmellTask(r.Main, tree, st.SmellHead, target)
+	action, n := "assigned", 0
+	if usable && info.Profile == name && !rolesession.NeedsRecreation(info, turn) {
+		n, err = s.Sessions.Assign(ctx, info.ID, task)
+	} else {
+		if usable {
+			if err := s.Sessions.Close(ctx, info.ID); err != nil {
+				return Result{}, err
+			}
+		}
+		action = "started"
+		info, n, err = s.Sessions.Start(st.RoomID, name, tree, SmellGoal(r.Main), task, true)
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	_, err = states.Update(r.ID, false, func(st *librarianstate.State) error {
+		st.SmellSession, st.SmellPending, st.SmellPendingTurn, st.SmellLastRun, st.SmellFailedProfiles = info.ID, target, n, s.now(), failed
+		return nil
+	})
+	return Result{Action: action, Reason: "code-reading smell pass", Head: target}, err
 }
 
 // MainHead returns the commit of the remote default branch, or of the local
@@ -196,6 +319,11 @@ func MainHead(ctx context.Context, main string) (string, error) {
 // before each turn; the librarian edits docs only in its own worktrees.
 func TreePath(dataDir, repo string) string {
 	return filepath.Join(dataDir, "library", fmt.Sprintf("%x", sha256.Sum256([]byte(repo)))[:16], "tree")
+}
+
+// SmellTreePath is the smell pass's checkout, independent of the map checkout.
+func SmellTreePath(dataDir, repo string) string {
+	return filepath.Join(dataDir, "library", fmt.Sprintf("%x", sha256.Sum256([]byte(repo)))[:16], "smell-tree")
 }
 
 func syncTree(ctx context.Context, main, tree, target string) error {
