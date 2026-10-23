@@ -374,7 +374,7 @@ const sessionViewSource = read('sessionView.svelte.ts')
 /** The session view's own functions, which a vm can run in a flat state. */
 export const SESSION_VIEW_FUNCTIONS = [
   'sessionVisible', 'showSession', 'loadSession', 'loadEarlierSession', 'loadNewerSession',
-  'presentSession', 'unqueue', 'dismissPendingPost',
+  'presentSession', 'unqueue', 'dismissPendingPost', 'setSession',
 ] as const
 
 export const sessionViewCode = moduleCode(sessionViewSource, SESSION_VIEW_FUNCTIONS)
@@ -433,7 +433,7 @@ export function installSessionView(state: object, data?: unknown): SessionViewSl
       write(fields, 'queue', [])
     },
     clear() { write(fields, 'session', null) },
-    setSession(value: unknown) { write(fields, 'session', value) },
+    setSession: (value: unknown) => call(fields, 'setSession', value),
     patchMember(member: unknown) {
       const current = read_(fields, 'session') as { member?: { id?: string } } | null | undefined
       if (current && current.member?.id === (member as { id?: string } | null)?.id) write(fields, 'session', { ...current, member })
