@@ -1,6 +1,6 @@
 // Client-side numbers for the viewer's stats line: frames per second,
 // bitrate, input latency and the codec in use. The meter is pure, so node
-// tests can drive it with a fake clock. computerStream.js feeds it from noVNC.
+// tests can drive it with a fake clock. computerStream.ts feeds it from noVNC.
 import type { ComputerStream } from '../api/computer.ts'
 
 // ENCODING names the RFB encodings wayvnc and noVNC use.
