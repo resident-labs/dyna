@@ -71,14 +71,19 @@ func clipped(s string, n int) string {
 	return cut(s, n) + truncationNote
 }
 
+// shownAddressLimit is how much of a session address the packet header and the
+// fallback notice display. Both show the same address, so they share one bound;
+// the session ID stays the reliable handle beyond it.
+const shownAddressLimit = 120
+
 // shownAddress bounds a session address that the packet or a notice displays.
 // A session name may be very long, and the session ID stays the reliable
 // handle, so the header never spends the packet's budget on a name.
 func shownAddress(addr string) string {
-	if len(addr) <= 120 {
+	if len(addr) <= shownAddressLimit {
 		return addr
 	}
-	return cut(addr, 120) + "…"
+	return cut(addr, shownAddressLimit) + "…"
 }
 
 // handoffPacketLimit is the most a replacement model receives. The packet
