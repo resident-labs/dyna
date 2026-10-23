@@ -275,7 +275,11 @@ func TestFinishedSessionStaysMessageableAndReopenIsRoomScoped(t *testing.T) {
 	if _, err := e.svc.FinishGoal(t.Context(), alpha.ID, lead.Goal, "done", false); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.mgr.Finish(e.ctx, lead.ID); err != nil {
+	// A dormant session keeps its conversation: mark it as a turn that ended
+	// with no work left would.
+	if _, err := e.mgr.Store.UpdateMeta(lead.ID, func(m *subagent.Meta) {
+		m.Status, m.Finished = subagent.StatusDormant, time.Now()
+	}); err != nil {
 		t.Fatal(err)
 	}
 	members, err := e.svc.Members(alpha.ID, false)
@@ -560,29 +564,6 @@ func TestRenameAndAdoptSessionCheckTheCaller(t *testing.T) {
 	owner := authority.WithActor(e.ctx, authority.Actor{Role: authority.Owner})
 	if m, err := e.svc.AdoptSession(owner, "alpha", child.ID, stranger.ID); err != nil || m.Parent != stranger.ID {
 		t.Fatalf("the owner could not adopt a session: %+v, %v", m, err)
-	}
-}
-
-// FinishSession acts for the caller in the engine: a session finishes only
-// itself and its descendants. The Manager's own rule names no target, so
-// this check is the one that keeps a session from finishing a stranger.
-func TestFinishSessionChecksTheCaller(t *testing.T) {
-	e := newEnv(t)
-	alpha := e.room("alpha")
-	lead := e.start(alpha, "lead", nil)
-	child := e.start(alpha, "child", &lead)
-	stranger := e.start(alpha, "stranger", nil)
-	t.Cleanup(authority.InEngine())
-	as := func(info subagent.Info) context.Context {
-		return authority.WithActor(e.ctx, authority.Actor{Role: authority.Session, Session: info.ID, Room: alpha.ID})
-	}
-	if _, err := e.svc.FinishSession(as(stranger), "alpha", child.ID, ""); err == nil || !strings.Contains(err.Error(), "may act only on itself and its descendants") {
-		t.Fatalf("a stranger finished a session outside its tree: %v", err)
-	}
-	// The child still holds its spawn goal, so the finish that passes the
-	// caller check stops at the responsibility check.
-	if _, err := e.svc.FinishSession(as(lead), "alpha", child.ID, ""); err == nil || !strings.Contains(err.Error(), "responsibilities: cannot finish") {
-		t.Fatalf("the parent's finish of its child = %v; want it past the caller check", err)
 	}
 }
 

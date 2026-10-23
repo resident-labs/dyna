@@ -9,8 +9,8 @@ import (
 	"time"
 )
 
-// A close check whose holder died, such as 'dyna subagent finish' killed when
-// its turn ended, or one far older than any check takes, must not wedge the
+// A close check whose holder died, such as a dormancy check killed when its
+// turn ended, or one far older than any check takes, must not wedge the
 // session. A live, fresh check still blocks.
 func TestCheckIgnoresAbandonedCloseReservation(t *testing.T) {
 	dead := exec.Command("true")

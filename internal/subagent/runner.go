@@ -170,9 +170,9 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		if m.checkpoint != nil {
 			m.checkpoint("turn-finished")
 		}
-		// Return a temporary dormant wake through the engine while this
-		// runner still owns the turn lock.
-		if werr == nil && meta.DormantWake {
+		// A turn that ends with no work left makes the session dormant, while
+		// this runner still owns the turn lock.
+		if werr == nil {
 			cleanupCtx, stop := context.WithTimeout(finishCtx, 5*time.Second)
 			if err := writes.returnDormant(cleanupCtx); err != nil {
 				log.Printf("return dormant session %s: %v", id, err)

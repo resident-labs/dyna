@@ -134,9 +134,10 @@ workflows and shells continue. `dyna room resume <room>` releases pending posts
 and preserves native identity. Repeat resume after interruption.
 New transfers and consolidations refuse while paused; existing deadlines are preserved.
 
-`dyna room session-controls <room> --json` shows state. Only `dyna subagent finish`
-makes a session dormant; it requires no responsibilities. No idle time makes a
-session dormant. Owner-only `dyna room clear-dormant <room> --json` closes dormant
+`dyna room session-controls <room> --json` shows state. A turn that ends with no
+responsibilities makes its session dormant; the shell job the turn runs in does not
+count, and no idle timer ever makes a session dormant. Owner-only
+`dyna room clear-dormant <room> --json` closes dormant
 sessions after checking responsibilities, pending input, and reservations.
 Maintenance also closes sessions dormant and inactive for 7 days. History and
 files remain; active work continues.

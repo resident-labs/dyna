@@ -109,7 +109,7 @@ func TestGoalWakeIsNotLostToAMetadataUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := e.m.Store.ReadMeta(info.ID)
-	if err != nil || got.Status != StatusIdle || !got.DormantWake || got.Name != "renamed" {
+	if err != nil || got.Status != StatusIdle || got.Name != "renamed" {
 		t.Fatalf("holder after the update and the goal = %+v, %v; want it awake and renamed", got, err)
 	}
 }
