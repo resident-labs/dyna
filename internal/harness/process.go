@@ -257,8 +257,10 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 			return fmt.Errorf("record steering dispatch for worker %s: %w", p.Name, err)
 		}
 		if steering.opts.OnMessage != nil {
+			// The write receipt arrived; the next output is the first to see it.
+			at := normalizedBoundary(normalizer)
 			for _, message := range messages {
-				steering.opts.OnMessage(message, nil)
+				steering.opts.OnMessage(message, at)
 			}
 		}
 		if journal != nil {
@@ -394,8 +396,16 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 				if hook != nil {
 					// A message the hook did not take becomes the continuation.
 					since := hook.offeredAt
+					// A granted hook process may have delivered its context. Retire it
+					// first; if that fails, replay nothing.
+					retireCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 					var delivered []runstore.SteeringMessage
-					back, delivered = hook.withdraw()
+					var retireErr error
+					back, delivered, retireErr = hook.retire(retireCtx)
+					cancel()
+					if retireErr != nil {
+						return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, fmt.Errorf("retire steering hook peer: %w", retireErr))
+					}
 					if err := deliverHooked(delivered, since); err != nil {
 						return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, err)
 					}
