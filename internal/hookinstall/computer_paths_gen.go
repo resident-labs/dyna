@@ -12,6 +12,7 @@ var computerCodePaths = []string{
 	"internal/authority",
 	"internal/browserconfig",
 	"internal/callerid",
+	"internal/callspec",
 	"internal/childenv",
 	"internal/childreaper",
 	"internal/cli/computer",

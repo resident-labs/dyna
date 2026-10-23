@@ -30,7 +30,7 @@ func TestExecuteFinalizesEveryOutcome(t *testing.T) {
 			if tc.cancel {
 				observer.OnStart = func(runstore.Meta) { cancel() }
 			}
-			result, err := Execute(ctx, Options{Name: tc.name, ScriptSrc: tc.src, WorkDir: t.TempDir()}, profiles, observer)
+			result, err := executeWithOutbox(ctx, Options{Name: tc.name, ScriptSrc: tc.src, WorkDir: t.TempDir()}, profiles, observer, func(string) coordinatorOutbox { return &lifecycleOutbox{} })
 			if (err != nil) != (tc.status != "ok") {
 				t.Fatalf("result = %+v, %v", result, err)
 			}

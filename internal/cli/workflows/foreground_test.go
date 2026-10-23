@@ -19,12 +19,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/cli/version"
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store/storetest"
+	"dyna-agent/internal/websvc"
 	"dyna-agent/internal/workflowsvc"
 )
 
@@ -34,7 +36,7 @@ func foregroundFixture(t *testing.T, source string) string {
 	t.Helper()
 	inRepo(t)
 	storetest.Isolate(t)
-	enginetest.ServePlanAncestry(t)
+	serveWorkflowEngine(t)
 	profiles := &profile.Store{Path: profile.DefaultPath(), Profiles: []profile.Profile{{
 		Name: "mock", Harness: profile.HarnessMock, Default: true, Taste: 5, Intelligence: 5, Cost: 5,
 	}}}
@@ -199,7 +201,7 @@ func TestRunCancellationFinalizesBeforeReturning(t *testing.T) {
 func TestDemoLoadsProfilesSavedBeforeLaunch(t *testing.T) {
 	inRepo(t)
 	storetest.Isolate(t)
-	enginetest.ServePlanAncestry(t)
+	serveWorkflowEngine(t)
 	stdout, stderr, err := runForegroundCLI(t, "demo")
 	if err != nil || !strings.HasPrefix(stdout, "registered demo profiles:") || !strings.Contains(stdout, "running demo workflow...") || !strings.Contains(stdout, "open the desktop app") {
 		t.Fatalf("demo = %q, %q, %v", stdout, stderr, err)
@@ -385,4 +387,35 @@ func TestRunResultFormatterReportsReferenceWriteFailure(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "prepare parent result:") {
 		t.Fatalf("formatter error = %v", err)
 	}
+}
+
+// serveWorkflowEngine adds terminal calls to the existing ancestry fixture.
+// The fixture uses local storage because its server models only call transport.
+func serveWorkflowEngine(t *testing.T) {
+	t.Helper()
+	store, calls := enginetest.PlanAncestryCalls(t)
+	lifecycle := workflowLifecycleCalls(t)
+	for name, call := range lifecycle {
+		calls[name] = call
+	}
+	enginetest.Serve(t, store.DataDir, calls)
+}
+
+func workflowLifecycleCalls(t *testing.T) map[string]websvc.Call {
+	t.Helper()
+	lifecycle, err := websvc.Bind([]websvc.Binding{
+		{Name: "FinishRun", Access: websvc.Write, Scope: websvc.ScopeOperate,
+			Method: func(_ context.Context, in callspec.RunFinish) (runstore.Meta, error) {
+				if err := runstore.ForceStatus(in.Run, in.Status, in.Error); err != nil {
+					return runstore.Meta{}, err
+				}
+				return runstore.ReadMeta(in.Run)
+			}},
+		{Name: "AddRunDirectories", Access: websvc.Write, Scope: websvc.ScopeOperate,
+			Method: func(context.Context, callspec.RunDirectories) error { return nil }},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return lifecycle
 }
