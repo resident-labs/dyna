@@ -74,11 +74,23 @@ export interface HarnessSnapshot {
   installing: string[] | null
 }
 
-// PrivateLogin is runtime.PrivateLogin: the sign-in terminal a harness account waits on.
+// SignInState is runtime.SignInState: the step of an in-app sign-in, as the
+// shared card shows it. It never holds credentials, only the link and the code.
+export interface SignInState {
+  phase: string
+  url?: string
+  code?: string
+  message?: string
+  acceptsPaste?: boolean
+}
+
+// PrivateLogin is runtime.PrivateLogin: the flow a harness account waits on.
+// A runner flow has no terminalId and carries its signIn state instead.
 export interface PrivateLogin {
   accountId: string
   terminalId: string
   warning?: string
+  signIn?: SignInState
 }
 
 // PersonalLogin is runtime.PersonalLogin: the owner's own native login. saved
