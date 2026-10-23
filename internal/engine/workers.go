@@ -297,7 +297,8 @@ type workers struct {
 	// settle finishes the hook runs that an earlier engine left running. Only
 	// the engine that owns the worker lock runs it, so a second engine on the
 	// same store cannot fail the first engine's live runs.
-	settle func(context.Context) error}
+	settle func(context.Context) error
+}
 
 func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub, started time.Time) workers {
 	prs := watch.New()
