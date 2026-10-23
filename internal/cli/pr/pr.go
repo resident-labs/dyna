@@ -591,7 +591,16 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		if err != nil {
 			return err
 		}
-		return engineclient.New("").Call(c.Context(), "AdmitPRComment", []any{rec.RoomID, ref.Key(), args[1]}, nil)
+		var comments []prview.HeldPRComment
+		if err := engineclient.New("").Call(c.Context(), "HeldPRComments", []any{rec.RoomID}, &comments); err != nil {
+			return err
+		}
+		for _, comment := range comments {
+			if comment.Key == ref.Key() && comment.ID == args[1] {
+				return engineclient.New("").Call(c.Context(), "AdmitPRComment", []any{rec.RoomID, ref.Key(), args[1], comment.Version}, nil)
+			}
+		}
+		return fmt.Errorf("comment %q is not held", args[1])
 	}}
 	dismiss := &cobra.Command{Use: "dismiss <number|url> <comment-id>", Short: "Owner: dismiss a held outside comment", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, args []string) error {
 		s, ref, err := resolve(c, args[0])

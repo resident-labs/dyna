@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-func (s *Service) AdmitPRComment(ctx context.Context, roomRef, key, id string) error {
+func (s *Service) AdmitPRComment(ctx context.Context, roomRef, key, id, version string) error {
 	p, err := s.prInRoom(roomRef, key)
 	if err != nil {
 		return err
@@ -17,7 +17,10 @@ func (s *Service) AdmitPRComment(ctx context.Context, roomRef, key, id string) e
 	if authority.Of(ctx).Role != authority.Owner {
 		return fmt.Errorf("only the owner can admit held PR comments")
 	}
-	return p.AdmitComment(key, id)
+	if version == "" {
+		return fmt.Errorf("the held comment version is required")
+	}
+	return p.AdmitComment(key, id, version)
 }
 
 func (s *Service) DismissPRComment(ctx context.Context, roomRef, key, id string) error {

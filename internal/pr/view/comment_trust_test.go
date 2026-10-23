@@ -24,7 +24,7 @@ func TestHeldCommentsAreOwnerOnly(t *testing.T) {
 		if _, err := e.svc.PRs.HeldPRComments(ctx, rec.ID); err == nil {
 			t.Fatalf("%s read held text", role)
 		}
-		if err := e.svc.PRs.AdmitPRComment(ctx, rec.ID, key, held.ID); err == nil {
+		if err := e.svc.PRs.AdmitPRComment(ctx, rec.ID, key, held.ID, held.Version); err == nil {
 			t.Fatalf("%s admitted held text", role)
 		}
 		if err := e.svc.PRs.DismissPRComment(ctx, rec.ID, key, held.ID); err == nil {
@@ -34,6 +34,9 @@ func TestHeldCommentsAreOwnerOnly(t *testing.T) {
 	rows, err := e.svc.PRs.HeldPRComments(ownerCtx, rec.ID)
 	if err != nil || len(rows) != 1 || rows[0].Body != held.Body {
 		t.Fatalf("owner rows: %+v, %v", rows, err)
+	}
+	if err := e.svc.PRs.AdmitPRComment(ownerCtx, rec.ID, key, held.ID, "stale-version"); err == nil {
+		t.Fatal("owner admitted unseen replacement text")
 	}
 	shown, err := e.svc.PRs.Watcher().Show(key)
 	if err != nil {
