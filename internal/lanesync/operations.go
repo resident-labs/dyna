@@ -171,15 +171,15 @@ func (s *Service) keepView(repo string, view *repoView) {
 // asked again on the next call. A repository whose common directory is
 // unknown keeps no view.
 func (s *Service) repoView(common, repo, export string) *repoView {
-	refs := ""
+	refs, cacheable := "", false
 	if common != "" {
-		refs = refsFingerprint(common)
+		refs, cacheable = refsFingerprint(common)
 	}
-	if kept := s.keptView(repo); kept != nil && kept.common == common && kept.refs == refs && kept.export == export {
+	if kept := s.keptView(repo); cacheable && kept != nil && kept.common == common && kept.refs == refs && kept.export == export {
 		return kept
 	}
 	view := &repoView{common: common, refs: refs, export: export, commits: []Commit{}}
-	keep := common != ""
+	keep := cacheable
 	head, err := s.gitRead(context.Background(), repo, "rev-parse", "--verify", "--quiet", "refs/heads/dyna/integration")
 	switch {
 	case err == nil:
@@ -227,13 +227,17 @@ func noSuchRef(err error) bool {
 // seen; packed-refs and a reftable list are compared by size and change time,
 // which a pack or a table write always moves. Reading it costs file metadata
 // and two short files, not a Git process.
-func refsFingerprint(common string) string {
+func refsFingerprint(common string) (string, bool) {
 	var b strings.Builder
 	for _, name := range []string{"refs/heads/dyna/integration", "refs/remotes/origin/main"} {
 		value, err := os.ReadFile(filepath.Join(common, name))
 		if err != nil {
 			b.WriteString(name + "-;")
 			continue
+		}
+		// Git must resolve symbolic targets on every read.
+		if strings.HasPrefix(string(value), "ref:") {
+			return "", false
 		}
 		fmt.Fprintf(&b, "%s=%s;", name, value)
 	}
@@ -245,7 +249,7 @@ func refsFingerprint(common string) string {
 		}
 		fmt.Fprintf(&b, "%s%d:%d;", name, st.Size(), st.ModTime().UnixNano())
 	}
-	return b.String()
+	return b.String(), true
 }
 
 func (s *Service) Wait(ctx context.Context, repo string) (Progress, error) {
