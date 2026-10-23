@@ -43,8 +43,8 @@
         <details open={expanded} ontoggle={(event) => opened[step.key] = event.currentTarget.open}>
           <summary>
             <span class="dot" aria-label={state}></span>
-            <span class="verb">{step.kind === 'shell' ? 'shell' : step.kind === 'child' ? 'child' : step.tool || 'tool'}</span>
-            <span class="target" title={job ? titleOf(job) : step.kind === 'child' ? step.member.name : step.target}>{job ? titleOf(job) : step.kind === 'child' ? step.member.name : step.target || (step.kind === 'shell' ? step.jobId : '')}</span>
+            <span class="verb">{step.kind === 'shell' ? 'Shell command' : step.kind === 'child' ? 'child' : step.tool || 'tool'}</span>
+            <span class="target" title={job ? titleOf(job) : step.kind === 'child' ? step.member.name : step.target}>{job ? titleOf(job) : step.kind === 'child' ? step.member.name : step.target || (step.kind === 'shell' ? 'outside this transcript' : '')}</span>
             {#if job}<span class="meta">{metaOf(job, now)}</span>
             {:else if step.kind === 'child'}<span class="meta">{step.member.state === 'live' ? 'running' : step.member.status}</span>
             {:else if step.aside || step.failed || activeTool}<span class="meta">{step.aside}{#if activeTool}{step.aside ? ' · ' : ''}running{:else if step.failed && !step.aside}failed{/if}</span>{/if}

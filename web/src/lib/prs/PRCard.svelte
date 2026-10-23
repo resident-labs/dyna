@@ -5,7 +5,7 @@
   // optional props are the row's actions, which a DM does not pass.
   import { openExternal } from '../../api.ts'
   import { markdown, stamp, clock } from '../ui/format.ts'
-  import { shortSha } from './pr.ts'
+  import { commitUrl, refName, shortSha } from './pr.ts'
   import { prView } from './prCard.ts'
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
@@ -43,6 +43,8 @@
   let more = $state(false)
   // A jump to one of these posts opens the history to show it.
   let open = $derived(more || !!focus)
+  // The head commit's page, so the row's pushed commit is not just a hash.
+  let headUrl = $derived(/^[0-9a-f]{7,40}$/i.test(view.head) ? commitUrl(view.url, view.head) : '')
 </script>
 
 <details class="pr" class:dm={surface === 'dm'} {open} ontoggle={(e) => (more = e.currentTarget.open)}>
@@ -53,13 +55,14 @@
       <span class="headline"><strong>{view.number ? `PR #${view.number}` : view.title || 'PR watcher'}</strong>
         {#each view.chips as chip}<Chip tone={chip.tone}>{chip.label}</Chip>{/each}
       </span>
-      <span class="meta">{[showRepo ? view.repo : '', shortSha(view.head), folded.length > 1 ? `${folded.length} updates` : ''].filter(Boolean).join(' · ')}</span>
+      <span class="meta">{[showRepo ? view.repo : '', view.head ? `pushed ${refName(view.head)}` : '', folded.length > 1 ? `${folded.length} updates` : ''].filter(Boolean).join(' · ')}</span>
     {/snippet}
     {#snippet trail()}<time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time><span class="chevron" aria-hidden="true">›</span>{/snippet}
   </Row>
   </summary>
     <div class="details">
       {#if view.url}<button class="link" onclick={() => openExternal(view.url)}>Open PR #{view.number} on GitHub</button>{/if}
+      {#if headUrl}<button class="link" onclick={() => openExternal(headUrl)}>Open commit {shortSha(view.head)} on GitHub</button>{/if}
       {#if to.length}<span class="to">To {#each to as name, i}<button class="link" onclick={() => { const target = post.to?.[i]; if (target) onaddress?.(target) }}>{name}</button>{/each}</span>{/if}
       {#each view.notices as notice, i}
         {@const source = folded[i] ?? post}

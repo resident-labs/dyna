@@ -1825,14 +1825,15 @@
       }
     }
     const lines = ['The session closes, and its name becomes free.', 'PR authorship moves to its nearest open ancestor, or root. Reviewer roles return to the pool. Live workflows are canceled.']
-    lines.push('Held goals must be done, dropped or transferred first when only root or the owner is left above it; finish it, use --force to move them to the owner.')
+    lines.push('A held goal goes up with the work, but root cannot hold a goal. A goal with only root or the owner above it stops the close.')
+    lines.push('“Close and move goals” closes anyway and gives those goals to the owner. Other unfinished work then stays unresolved.')
     if (m.state === 'live') lines.push('Its running turn stops first.')
     const hasChildren = members.some((child) => !child.closed && child.parent === m.id)
     if (hasChildren) lines.push('Its open children that own no work close too. Children that still own work move to its nearest open ancestor and keep running.')
-    return { title: `Close ${m.name}?`, lines, action: 'Close session' }
+    return { title: `Close ${m.name}?`, lines, action: 'Close session', alternative: 'Close and move goals', onalternative: () => runConfirm(true) }
   })
 
-  async function runConfirm() {
+  async function runConfirm(force = false) {
     const request = confirm
     if (!request) return
     const { kind } = request
@@ -1866,7 +1867,7 @@
       if (kind === 'stop') await api.stopSession(roomId, m.id)
       else if (kind === 'promote') await api.promoteSession(roomId, m.id)
       else {
-        const result = await api.closeSession(roomId, m.id, kind === 'forceclose')
+        const result = await api.closeSession(roomId, m.id, force || kind === 'forceclose')
         closeResult = { name: m.name, items: result?.closeSummary ?? [] }
       }
       confirm = null

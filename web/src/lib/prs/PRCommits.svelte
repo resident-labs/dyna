@@ -11,7 +11,7 @@
   import Avatar from '../ui/Avatar.svelte'
   import { ago } from '../ui/format.ts'
   import { commitDays } from './github.ts'
-  import { shortSha } from './pr.ts'
+  import { commitUrl, shortSha } from './pr.ts'
   import type { GitHubCommit } from '../api/github.ts'
 
   let { commits = [], url = '' }: { commits?: GitHubCommit[] | null; url?: string } = $props()
@@ -27,7 +27,6 @@
       copyStates[sha] = 'failed'
     }
   }
-  const commitUrl = (sha: string) => url.replace(/\/pull\/\d+.*$/, `/commit/${sha}`)
 </script>
 
 {#each days as day (day.key)}
@@ -37,7 +36,7 @@
         <Row dense clamp={false} text={c.headline}>
           {#snippet lead()}<Avatar name={c.author?.login || '?'} size={22} />{/snippet}
           {#snippet meta()}<span>{c.author?.name || c.author?.login || 'unknown'}</span><span>{ago(c.date)}</span>{/snippet}
-          {#snippet trail()}<span class="commit-actions"><button class="sha" onclick={() => openExternal(commitUrl(c.sha))} title="Open this commit on GitHub" aria-label="Open commit {shortSha(c.sha)} on GitHub">{shortSha(c.sha)}</button><button class="copy" onclick={() => copyHash(c.sha)} disabled={copyStates[c.sha] === 'copying'} aria-label="Copy full hash for commit {shortSha(c.sha)}">Copy</button><span class="copy-status" role="status">{copyStates[c.sha] === 'copied' ? 'Copied' : copyStates[c.sha] === 'failed' ? 'Copy failed. Try again.' : ''}</span></span>{/snippet}
+          {#snippet trail()}<span class="commit-actions"><button class="sha" onclick={() => openExternal(commitUrl(url, c.sha))} title="Open this commit on GitHub" aria-label="Open commit {shortSha(c.sha)} on GitHub">{shortSha(c.sha)}</button><button class="copy" onclick={() => copyHash(c.sha)} disabled={copyStates[c.sha] === 'copying'} aria-label="Copy full hash for commit {shortSha(c.sha)}">Copy</button><span class="copy-status" role="status">{copyStates[c.sha] === 'copied' ? 'Copied' : copyStates[c.sha] === 'failed' ? 'Copy failed. Try again.' : ''}</span></span>{/snippet}
         </Row>
       {/each}
     </Card>

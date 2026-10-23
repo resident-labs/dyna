@@ -12,7 +12,7 @@
   import { createSelection } from '../ui/selection.svelte.ts'
   import DmRows from './DmRows.svelte'
   import ThreadChip from './ThreadChip.svelte'
-  import { dmView, groupMessages, plain, threadPanel } from './dm.ts'
+  import { dmView, groupMessages, plain, threadPanel, threadPosts, threadsListed } from './dm.ts'
   import { api } from '../../api.ts'
   import { short, ago } from '../ui/format.ts'
   import ComposerBox from '../ui/ComposerBox.svelte'
@@ -79,6 +79,9 @@
   // The panel keeps the threads it groups, and the threads it leaves to the
   // Children, Parent and Siblings sections are gone from Other threads.
   let panel = $derived(threadPanel(dm.threads, members, m ?? {}))
+  // The panel header counts the threads the panel lists, so its number always
+  // matches the rows below it. A closed child's thread leaves with it.
+  let listed = $derived(threadsListed(panel))
   let folded = $state({ siblings: true, others: true })
   let threadRows = $derived(groupMessages((selected?.posts || []).map((p): MessageRow => ({ kind: 'message', key: p.id, author: p.from, ts: p.ts, text: p.text, post: p, delivery: p.delivery, pending: p.pending }))))
   let isNewInThread = $derived(threadArrived(selected?.key, threadRows.map((r) => r.key)))
@@ -316,10 +319,10 @@
             {/key}
           </div>
         {:else}
-          <header class="panel-head" use:threadHeaderSwipe={{ enabled: threadOverlay, back: backFromThread }}><strong>Threads<small>{m.name} · {dm.threads.length} thread{dm.threads.length === 1 ? '' : 's'}</small></strong><button onclick={() => (threadsOpen = false)} aria-label="Close threads">✕</button></header>
+          <header class="panel-head" use:threadHeaderSwipe={{ enabled: threadOverlay, back: backFromThread }}><strong>Threads<small>{m.name} · {listed} thread{listed === 1 ? '' : 's'}</small></strong><button onclick={() => (threadsOpen = false)} aria-label="Close threads">✕</button></header>
           <div class="thread-list">
             {#if panel.children.length}
-              <h3>Children</h3>
+              <h3>Children<small>{panel.children.length}</small></h3>
               {#each panel.children as row (row.member.id ?? row.member.address)}{@render memberRow(row)}{/each}
             {/if}
             {#if panel.parent}
@@ -351,11 +354,14 @@
 </section>
 
 {#snippet memberRow(row: PanelRow<Member>)}
+  {@const posts = threadPosts(row)}
   <div class="panel-row">
     <ThreadChip name={row.member.name} emoji={row.member.emoji} hue={row.member.hue} state={row.member.state} status={row.member.status} note={sessionStatus(row.member)} title={`Open ${row.member.name}'s messages`} onopen={() => onsession?.(row.member)} />
-    {#if row.thread && row.thread.posts.length}
+    {#if row.thread && posts}
       {@const thread = row.thread}
-      <button class="thread-count" title={`Posts between ${session?.member.name ?? ''} and ${row.member.name}`} onclick={() => openThread(thread.key)}>{thread.posts.length}<span class="when"> · {ago(thread.posts.at(-1)?.ts)}</span> ›</button>
+      <button class="thread-count" title={`Posts between ${session?.member.name ?? ''} and ${row.member.name}`} onclick={() => openThread(thread.key)}>{posts} post{posts === 1 ? '' : 's'}<span class="when"> · {ago(thread.posts.at(-1)?.ts)}</span> ›</button>
+    {:else}
+      <span class="thread-empty" title={`No posts between ${session?.member.name ?? ''} and ${row.member.name} yet`}>No posts</span>
     {/if}
   </div>
 {/snippet}
@@ -392,6 +398,7 @@
   .thread-log { position: relative; overflow-anchor: none; flex: 1; min-height: 80px; overflow-y: auto; padding-bottom: var(--s3); }
   .thread-list { flex: 1; overflow-y: auto; padding: var(--s2); }
   h3 { margin: 6px; font-size: var(--t-cap); text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
+  h3 small { margin-left: var(--s1); font-weight: 400; }
   .section { display: flex; align-items: center; gap: var(--s1); font-size: var(--t-cap); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); padding: 2px 0; transition: color var(--motion-fast) var(--ease); }
   .section small { font-weight: 400; color: var(--faint); transition: color var(--motion-fast) var(--ease); }
   .section .chev { font-size: var(--t-sm); }
@@ -406,6 +413,7 @@
     .thread-count:hover { background: var(--hover); color: var(--ink); }
   }
   .thread-count:active { background: var(--select); }
+  .thread-empty { flex: none; padding: var(--s1) var(--s2); font-size: var(--t-cap); color: var(--faint); white-space: nowrap; }
   .thread-wrap { display: contents; }
   .thread-wrap.overlay { display: block; position: absolute; inset: 0; z-index: 31; }
   .thread-wrap.overlay .panel-head { touch-action: pan-y; }
