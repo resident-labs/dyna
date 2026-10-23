@@ -20,7 +20,7 @@ test('issueGroups orders the groups and puts older closed issues in Closed', () 
 const API = `export const api = {
   githubList: () => Promise.resolve({ repo: 'o/r', items: globalThis.issueItems }),
   githubView: (_r, _k, n) => globalThis.issueViewFails ? Promise.reject(new Error('Issue not found')) : Promise.resolve({ number: n, title: 'Issue ' + n, ...globalThis.issueItems.find((i) => i.number === n), body: 'Body text', comments: [] }),
-  roomMergeStatus: () => { globalThis.issueMergeCalls++; return Promise.resolve([]) },
+  mergeControlStatus: () => { globalThis.issueMergeCalls++; return Promise.resolve({ roomId: 'r', paused: false, queue: [], trials: [], localCIChecks: {} }) },
   startIssueWork: (...a) => { globalThis.startCalls.push(a); return globalThis.startFails ? Promise.reject(new Error('no default profile')) : Promise.resolve(globalThis.startResult) },
 }; export const openExternal = () => {}`
 

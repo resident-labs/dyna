@@ -249,6 +249,7 @@ export const api = {
   changes: (roomRef = '', before = '', limit = 0) => app.Changes(roomRef, before, limit),
   changeDetail: (roomRef, key) => app.ChangeDetail(roomRef, key),
   roomMergeStatus: (roomRef) => app.RoomMergeStatus(roomRef),
+  mergeControlStatus: (roomRef) => app.MergeControlStatus(roomRef),
   roomMergeHistory: (roomRef) => app.RoomMergeHistory(roomRef),
   sendDiffComments: (roomRef, changeId, comments) => app.SendDiffComments(roomRef, changeId, comments),
   sendWorktreeComments: (roomRef, session, comments) => app.SendWorktreeComments(roomRef, session, comments),

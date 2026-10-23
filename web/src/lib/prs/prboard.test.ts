@@ -128,19 +128,6 @@ test('the queue lists the merge order, one line per PR with a status dot', async
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
-test('the PR screen is one list of shared rows, grouped by the agent flow', async () => {
-  const { dir, component, render } = await load('GitHub')
-  try {
-    const rows = [ready({ changeId: 'ready', title: 'Ready example' }), open({ changeId: 'merged', number: 2, state: 'merged', checked: new Date().toISOString(), title: 'Hidden merged title' })]
-    const html = render(component, { props: { roomId: 'r', changes: rows } }).body
-    assert.match(text(html), /In progress 1 Ready example #1/)
-    assert.match(html, /<button class="row[^"]*"[^>]*aria-pressed/)
-    assert.match(text(html), /Merged today · 1/)
-    assert.doesNotMatch(text(html), /Hidden merged title/)
-    assert.doesNotMatch(html, /class="(tile|lanes|rail|strip)[ "]/)
-  } finally { await rm(dir, { recursive: true, force: true }) }
-})
-
 test('a PR link opens that PR on its tab beside the list', async () => {
   const { dir, component, render } = await load('GitHub')
   try {

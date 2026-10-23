@@ -44,7 +44,7 @@ function navigation() {
   const calls = []
   const applied = []
   const c = {
-    roomId: B, roomRequest: 0, questionsRequest: 0, detailRequest: 0, narrow: false, hasTerminal: true,
+    mergeVersion: 0, roomId: B, roomRequest: 0, questionsRequest: 0, detailRequest: 0, narrow: false, hasTerminal: true,
     selectionRevision: 0, consolidationView: 0, consolidationAlive: true, memberRequest: 0, pickedSessions: [], pruneSelection,
     showClosed: false, rooms: [{ id: A }, { id: B }], needPair: false,
     ROOM, POST, GENERAL, VOICE, routedParents: '', isChannel, inChannel, homeChannel, isShellResult, trimFeed, mergeFeedPage, questionID, channels: channelModel([]), posts: [],
