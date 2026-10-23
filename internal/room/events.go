@@ -822,6 +822,10 @@ type SessionEvent struct {
 	Seat string `json:"seat,omitempty"`
 	// Sections lists the instruction sections that changed.
 	Sections []InstructionChange `json:"sections,omitempty"`
+	// Occurrence counts the notes about one kind of change, so a change that
+	// reverts to an earlier state is still a new note. A poster without an
+	// occurrence of its own asks for a fresh post ID instead.
+	Occurrence int `json:"occurrence,omitempty"`
 	// Detail is the evidence the agent reads: the instruction lines, the root
 	// handoff, the clipped task of a spawn, or the transfer note.
 	Detail string `json:"detail,omitempty"`
@@ -844,7 +848,8 @@ func (s SessionEvent) eventDedupe() string {
 	case SessionAccount:
 		return s.From + "\x00" + s.To + "\x00" + string(s.Reason)
 	case SessionInstructions:
-		lines := make([]string, len(s.Sections))
+		lines := make([]string, len(s.Sections)+1)
+		lines[0] = strconv.Itoa(s.Occurrence)
 		for i, change := range s.Sections {
 			// The lines and the body are part of the key: two different changes
 			// to one section are two notes.
@@ -960,6 +965,9 @@ type ServiceFailedEvent struct {
 	Error   string      `json:"error"`
 	Profile string      `json:"profile,omitempty"`
 	Model   string      `json:"model,omitempty"`
+	// Detail is the evidence the agent reads: the failure report with the
+	// session and how to inspect the service. The card shows Error.
+	Detail string `json:"detail,omitempty"`
 }
 
 func (ServiceFailedEvent) eventFamily() EventFamily { return FamilyService }

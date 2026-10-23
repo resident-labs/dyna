@@ -30,6 +30,11 @@
   let summary = $derived(payload?.summary ?? '')
   let showSummary = $derived(!!summary && !(payload?.findings?.[0]?.cause ?? '').startsWith(summary))
   let copyState = $state<'' | 'copied' | 'failed'>('')
+  // An alert stored before the typed events carries no payload: the family
+  // fallback still routes it here, so the card shows its stored line rather
+  // than an empty title.
+  let legacy = $derived(!payload)
+  let legacyText = $derived(legacy ? (post.text ?? '').trim() : '')
 
   async function copyCommand() {
     if (!command || copyState === 'copied') return
@@ -49,6 +54,11 @@
     {#if payload?.trigger}<span class="fact">{payload.trigger}</span>{/if}
     <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
   </div>
+  {#if legacy}
+    <!-- TODO: legacy/shim remove later — an alert stored before the typed
+         events has only its line. Remove when that history ages out. -->
+    <p class="summary legacy">{legacyText}</p>
+  {/if}
   {#if showSummary}<p class="summary">{summary}</p>{/if}
   {#if payload?.findings?.length}
     <ul class="findings">
@@ -98,6 +108,7 @@
   .fact { color: var(--muted); font-size: var(--t-sm); }
   time { margin-left: auto; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
   .summary { margin: 0; padding: 0 12px 6px; color: var(--ink-2); }
+  .summary.legacy { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
   .findings { margin: 0; padding: 0 12px 8px; list-style: none; display: grid; gap: 6px; }
   .findings li { display: flex; gap: 8px; align-items: baseline; }
   .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; transform: translateY(-2px); background: var(--gold); }

@@ -138,7 +138,8 @@ func (m *Manager) noteMove(moved Meta, parent string) {
 	if len(to) == 0 {
 		return
 	}
-	_, _ = m.rooms().PostEvent(moved.RoomID, event, to...)
+	// A session can move back where it came from, so each move is its own note.
+	_, _ = m.rooms().PostEventInput(room.PostEventInput{RoomID: moved.RoomID, Event: event, FreshID: true, To: to})
 }
 
 // reparentLockedContext moves a subtree under an open parent while preserving history.

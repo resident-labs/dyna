@@ -47,13 +47,19 @@ func TestServiceContractQuietSuccessAndFailedAlert(t *testing.T) {
 				t.Fatal(err)
 			}
 			res, err = e.svc.CompleteSessionTurn(e.ctx, info.ID, 1)
-			if err != nil || res.Message.Kind != serviceAlertKind || !reflect.DeepEqual(res.Message.To, []string{rec.Name}) {
+			if err != nil || res.Message.Kind != string(room.FamilyService) || res.Message.Notice.Kind != string(room.TypeFailed) || !reflect.DeepEqual(res.Message.To, []string{rec.Name}) {
 				t.Fatalf("failure alert: %+v %v", res, err)
+			}
+			// The engine posts the typed event: the registry sets its sender,
+			// kind, text and wake rule.
+			payload, ok := res.Message.ServiceFailed()
+			if !ok || payload.Service != serviceRole(role) || payload.Session != info.Address() || payload.Error != "provider failed" {
+				t.Fatalf("failure payload = %+v, %v", payload, ok)
 			}
 			// One alert from the service, never a child-failure report with a
 			// transfer hint: a service changes through `dyna services`.
 			text := res.Message.Text
-			if !strings.HasPrefix(text, "Service "+role+" failed turn 1: provider failed") || !strings.Contains(text, "Session: "+info.Address()) {
+			if !strings.HasPrefix(text, "The ") || !strings.Contains(text, " service failed on turn 1") || !strings.Contains(text, "Session: "+info.Address()) {
 				t.Fatalf("alert text = %q", text)
 			}
 			if strings.Contains(text, "dyna subagent transfer") || strings.Contains(text, "dyna subagent output") {

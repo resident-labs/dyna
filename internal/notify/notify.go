@@ -859,7 +859,21 @@ func (s *Service) appendCompletion(ctx context.Context, plan subagent.ReportPlan
 	if err != nil {
 		return Result{}, err
 	}
-	msg, err := s.Rooms.Post(plan.RoomID, plan.Post)
+	var msg room.Message
+	if plan.Service != nil {
+		// A service failure is one typed alert: the registry sets its kind,
+		// text, quiet flag and wake rule, and the engine is its sender.
+		msg, err = s.Rooms.PostEventInput(room.PostEventInput{
+			RoomID:     plan.RoomID,
+			Event:      *plan.Service,
+			ID:         plan.Post.ID,
+			To:         plan.Post.To,
+			SessionIDs: plan.Post.SessionIDs,
+			Producer:   serviceProducer(plan.Service.Service),
+		})
+	} else {
+		msg, err = s.Rooms.Post(plan.RoomID, plan.Post)
+	}
 	if err != nil {
 		return Result{}, err
 	}
@@ -934,12 +948,17 @@ func silentSessionCompletion(turn subagent.Turn) bool {
 	return turn.WrapUp || turn.StopReason == "transfer" || turn.StopReason == "consolidation" || turn.StopReason == "close"
 }
 
-// ServiceAlertKind is the post kind of a service failure alert: a service
-// session reporting an actionable problem to the owner or its parent. It is
-// not a system event: a session writes it, so it carries the session's own
-// sender. It is named apart from the sealed "alert" family, which only the
-// engine posts through PostEvent.
+// ServiceAlertKind is the post kind of a service alert a session writes: an
+// actionable problem a service session reports to its owner or parent. It is
+// not a system event, so it carries the session's own sender. It is named
+// apart from the sealed "alert" family, which only the engine posts through
+// PostEvent.
 const ServiceAlertKind = "service-alert"
+
+// serviceFailureKind marks the plan of a failed service turn. appendCompletion
+// replaces it with the typed service/failed event, so the kind never reaches
+// the store.
+const serviceFailureKind = "service-failure"
 
 // serviceAlertKind is the short name the notify package uses internally.
 const serviceAlertKind = ServiceAlertKind
@@ -964,6 +983,30 @@ func (s *Service) serviceAlertRole(meta subagent.Meta) (string, bool) {
 		return parent.Role, true
 	}
 	return serviceRoleName(meta), false
+}
+
+// serviceRole maps a service's role name to the typed role of its failure
+// event. A helper has no role of its own, so it reports as a helper.
+func serviceRole(role string) room.ServiceRole {
+	switch room.ServiceRole(role) {
+	case room.ServiceLibrarian:
+		return room.ServiceLibrarian
+	case room.ServiceReviewer:
+		return room.ServiceReviewer
+	}
+	return room.ServiceHelper
+}
+
+// serviceProducer is the producer that posts a service's failure event. The
+// spec accepts the service's own role and no other.
+func serviceProducer(role room.ServiceRole) room.EventProducer {
+	switch role {
+	case room.ServiceLibrarian:
+		return room.ProducerLibrarian
+	case room.ServiceReviewer:
+		return room.ProducerReviewer
+	}
+	return room.ProducerHelper
 }
 
 // serviceFailureText is the alert a failed service turn posts: what failed,
@@ -1085,11 +1128,28 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 		}
 		return nil, nil
 	}
-	// A service is outside the hierarchy, so its failure is one alert from the
-	// service to the room owner, never a child failure report.
+	// A service is outside the hierarchy, so its failure is one typed alert
+	// from the engine to the room owner, never a child failure report.
 	if kind == "failed" && meta.ManagedService() {
 		role, manage := s.serviceAlertRole(meta)
-		return s.prepareCompletion(meta.RoomID, meta.Address(), []string{meta.Room}, serviceAlertKind, serviceFailureText(meta, turn, role, manage), turn.N, true)
+		plan, err := s.prepareCompletion(meta.RoomID, meta.Address(), []string{meta.Room}, serviceFailureKind, serviceFailureText(meta, turn, role, manage), turn.N, true)
+		if err != nil || plan == nil {
+			return plan, err
+		}
+		profile, model := turn.Profile, turn.Model
+		if profile == "" {
+			profile, model = meta.Profile, meta.Model
+		}
+		plan.Service = &room.ServiceFailedEvent{
+			Service: serviceRole(role),
+			Session: meta.Address(),
+			Turn:    turn.N,
+			Error:   strings.TrimSpace(turn.Error),
+			Profile: profile,
+			Model:   model,
+			Detail:  plan.Post.Text,
+		}
+		return plan, nil
 	}
 	if len(turn.ReportTo) == 0 && kind == "completed" {
 		return nil, nil

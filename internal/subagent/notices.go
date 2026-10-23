@@ -29,8 +29,9 @@ func postCooldownNotice(s notices.Store, profileName, failure string, at time.Ti
 
 // postAccountSwitch tells root, quietly, that a turn moved to another account.
 func (m *Manager) postAccountSwitch(meta Meta, sw harness.AccountSwitch) {
+	// The same account pair can recur, so each switch is its own note.
 	event := room.SessionEvent{Type: room.SessionAccount, Session: meta.Address(), From: sw.From, To: sw.To, Reason: room.AccountUsageLimit}
-	if _, err := m.rooms().PostEvent(meta.RoomID, event, meta.Room+":"+RoleRoot); err != nil {
+	if _, err := m.rooms().PostEventInput(room.PostEventInput{RoomID: meta.RoomID, Event: event, FreshID: true, To: []string{meta.Room + ":" + RoleRoot}}); err != nil {
 		log.Printf("account switch note: %v", err)
 	}
 }

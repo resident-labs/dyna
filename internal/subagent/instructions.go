@@ -245,11 +245,14 @@ func (m *Manager) noteInstructionsLocked(meta *Meta, now time.Time) error {
 		meta.InstructionsChangedAt = time.Time{}
 		return nil
 	}
+	// The note count is the change's occurrence: a change that reverts to an
+	// earlier state is a new note, and a retry of this one keeps its post.
 	event := room.SessionEvent{
-		Type:     room.SessionInstructions,
-		Session:  meta.Address(),
-		Sections: instructionChanges(changes),
-		Detail:   instructions.Lines(changes),
+		Type:       room.SessionInstructions,
+		Session:    meta.Address(),
+		Sections:   instructionChanges(changes),
+		Detail:     instructions.Lines(changes),
+		Occurrence: len(meta.InstructionsNotes),
 	}
 	msg, err := m.rooms().PostEvent(meta.RoomID, event, meta.Address())
 	if err != nil {

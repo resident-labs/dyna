@@ -224,6 +224,7 @@ export interface SessionEvent {
   dir?: string
   seat?: string
   sections?: InstructionChange[]
+  occurrence?: number
   detail?: string
 }
 
@@ -247,6 +248,7 @@ export interface ServiceFailedEvent {
   error: string
   profile?: string
   model?: string
+  detail?: string
 }
 
 // EngineEvent is the payload of the engine/root-flush events.
@@ -988,6 +990,7 @@ export function isSessionEvent(v: unknown): v is SessionEvent {
     (v.dir === undefined || typeof v.dir === "string") &&
     (v.seat === undefined || typeof v.seat === "string") &&
     (v.sections === undefined || isInstructionChangeList(v.sections)) &&
+    (v.occurrence === undefined || Number.isInteger(v.occurrence)) &&
     (v.detail === undefined || typeof v.detail === "string")
 }
 
@@ -1010,7 +1013,8 @@ export function isServiceFailedEvent(v: unknown): v is ServiceFailedEvent {
     (v.turn === undefined || Number.isInteger(v.turn)) &&
     typeof v.error === "string" &&
     (v.profile === undefined || typeof v.profile === "string") &&
-    (v.model === undefined || typeof v.model === "string")
+    (v.model === undefined || typeof v.model === "string") &&
+    (v.detail === undefined || typeof v.detail === "string")
 }
 
 export function isEngineEvent(v: unknown): v is EngineEvent {
