@@ -101,7 +101,7 @@
   let dirty = $derived.by(() => {
     if (!form || !policy) return false
     const base = budgetForm(policy)
-    const fields = ['checks', 'review', 'land', 'ciTimeBudget', 'ciWarnAfter', 'ciFailAfter', 'ciTestMax', 'ciNoJUnitWarning']
+    const fields = ['review', 'ciTimeBudget', 'ciWarnAfter', 'ciFailAfter', 'ciTestMax', 'ciNoJUnitWarning']
     return fields.some((k) => form[k] !== base[k]) ||
       parseChecks(form.requiredChecks).join('\n') !== policy.requiredChecks.join('\n') ||
       parseTestAllow(form.ciBudgetExempt).join('\n') !== (policy.ciBudgetExempt ?? []).join('\n') ||
