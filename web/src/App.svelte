@@ -11,6 +11,11 @@
   import { bindRoomLoader, roomData } from './lib/app/roomLoader.svelte.ts'
   import { bindMachines, machineView, watchMachines } from './lib/app/machines.svelte.ts'
   import { bindGoals, goalView } from './lib/app/goals.svelte.ts'
+  import { bindIssues, issueView } from './lib/app/issues.svelte.ts'
+  import { bindPins, pinView } from './lib/app/pins.svelte.ts'
+  import { bindPRs, changeView } from './lib/app/prs.svelte.ts'
+  import { bindQuestions, questionView } from './lib/app/questions.svelte.ts'
+  import { bindSync, syncView } from './lib/app/sync.svelte.ts'
   import { closeToastDetail, hideToast, runToastAction, say, sayDetails, sayLine, toasts, toggleToastDetail } from './lib/app/toasts.svelte.ts'
   import { createSessionData } from './lib/sessions/sessionData.ts'
   import { mergeListPage } from './lib/ui/listPages.ts'
@@ -45,14 +50,13 @@
   import Pins from './lib/rooms/Pins.svelte'
   import SearchIcon from './lib/ui/SearchIcon.svelte'
   import SyncBadge from './lib/lanesync/SyncBadge.svelte'
-  import { remoteList, syncDelay } from './lib/lanesync/sync.ts'
+  import { syncDelay } from './lib/lanesync/sync.ts'
   import Library from './lib/library/Library.svelte'
   import Questions from './lib/questions/Questions.svelte'
   import Visuals from './lib/rooms/Visuals.svelte'
   import Services from './lib/services/Services.svelte'
-  import { questionID, visualKey } from './lib/questions/questions.ts'
-  import { setVisuals } from './lib/files/visuals.svelte.ts'
   import { changesVisuals } from './lib/files/visuals.ts'
+  import { questionID } from './lib/questions/questions.ts'
   import Goals from './lib/goals/Goals.svelte'
   import GoalDetail from './lib/goals/GoalDetail.svelte'
   import { expedite, expediteScope, isExpedited } from './lib/rooms/expedite.ts'
@@ -100,9 +104,8 @@
   import RunWorkflow from './lib/workflows/RunWorkflow.svelte'
   import GitHub from './lib/prs/GitHub.svelte'
   import type { Reference } from './lib/rooms/references.ts'
-  import type { RoomIssue } from './lib/prs/unifiedIssues.ts'
   import RoomSettings from './lib/rooms/RoomSettings.svelte'
-  import { prsBySession, isOpen, withoutReviewers } from './lib/prs/pr.ts'
+  import { withoutReviewers } from './lib/prs/pr.ts'
   import { boot, watch, registerWorker } from './lib/settings/link.ts'
   import { engineWatch, browserEngine, type EngineStatus } from './lib/engineStatus.ts'
   import { loadLayout, saveLayout, lastRoom, saveLastRoom } from './lib/ui/prefs.ts'
@@ -133,9 +136,7 @@
   import type { Receipt } from './lib/sessions/dm.ts'
   import type { ActionRoom } from './lib/ui/actions.ts'
   import type { Target as PaletteTarget } from './lib/ui/paletteTargets.ts'
-  import type { ReviewerStatus } from './lib/api/change.ts'
   import type { Row as ChangeRow } from './lib/prs/prlist.ts'
-  import type { SyncStatus } from './lib/api/lanesync.ts'
   import type { CallRequest } from './lib/voice/callRequests.ts'
   import type { BulkAction, BulkValue } from './lib/sessions/bulkSessions.ts'
   import type { BootResult, RouteNotice } from './lib/settings/link.ts'
@@ -308,6 +309,32 @@
     const v = view
     if (started) saveLastRoom(id, v)
   })
+  // The room's questions, visuals, pins, issues, sync counts and pull requests
+  // live in lib/app modules. The page reads them through these aliases, so the
+  // template and the code below name them as they always have.
+  const questions = $derived(questionView.questions)
+  const visuals = $derived(questionView.visuals)
+  const pins = $derived(pinView.pins)
+  const pinnedIds = $derived(pinView.ids)
+  const syncRepo = $derived(syncView.repo)
+  const syncRemotes = $derived(syncView.remotes)
+  const syncNote = $derived(syncView.note)
+  const issues = $derived(issueView.issues)
+  const issueHistory = $derived(issueView.issueHistory)
+  const { loadQuestions, loadVisuals, answerQuestion, openQuestion } = questionView
+  const { loadPins, togglePin } = pinView
+  const { loadIssues, openIssues, triageIssue, askCloseIssue } = issueView
+  const { loadSync, syncAction } = syncView
+
+  // The room's pull requests live in lib/app/prs.svelte.ts.
+  const reviewer = $derived(changeView.reviewer)
+  const changes = $derived(changeView.changes)
+  const mergeVersion = $derived(changeView.mergeVersion)
+  const prError = $derived(changeView.error)
+  const prMap = $derived(changeView.bySession)
+  const openPRMap = $derived(changeView.openBySession)
+  const { loadReviewer, reviewerSoon, loadChanges, untrackPR, trackPR, resumePR } = changeView
+
   // The page's side of a screen change, which the router asks for.
   bindRouter({
     started: () => started,
@@ -332,20 +359,7 @@
   let route = $state<RouteNotice | null>(null) // the route this page uses, for the sidebar
   let showClosed = $state(false)
   let showPins = $state(false) // the Pinned panel takes the member list's place
-  let questions = $state<Question[]>([])
-  let visuals = $state<Visual[]>([])
-  let questionFocus = $state('')
-  let questionFocusRequest = $state(0)
-  let questionsRequest = 0
-  let pins = $state<Post[]>([]) // the room's pinned posts, newest pin first
-  let syncStatus = $state<SyncStatus>({}) // saved remote counts by repo path
-  let syncRepo = $derived(room?.repo ? syncStatus[room.repo] ?? null : null) // {remotes, integration, operation?}
-  let syncRemotes = $derived(remoteList(syncRepo?.remotes))
-  let syncNote = $state('') // the last Refresh or Export answer that was not a start
-  let issues = $state<RoomIssue[]>([]) // open issues, newest first
-  let issueHistory = $state<RoomIssue[]>([]) // closed and converted issues, newest first
   let feedView = $state<ReturnType<typeof Feed>>()
-  let pinnedIds = $derived(new Set(pins.map((p) => p.id)))
   let reply = $state<Post | null>(null)
   let drafts = $state<Record<string, string>>({})
   let composerWork = $state<Record<string, boolean>>({})
@@ -407,15 +421,6 @@
   const rules = $derived(goalView.rules)
   // An inline rules edit keeps the list it started from until the edit closes.
   $effect(() => { goalView.applyPendingRules() })
-  let reviewer = $state<ReviewerStatus | null>(null) // the room's reviewer (ReviewerStatus)
-  let changes = $state<ChangeRow[] | null>(null) // the room's changes, local and PR (Changes); null before they load or on a host without the API
-  let mergeVersion = $state(0)
-  // The room's pull requests: the Changes rows that are not local changes.
-  let prs = $derived((changes ?? []).filter((c) => c.kind !== 'local'))
-  let prError = $state('')
-  let prMap = $derived(prsBySession(prs))
-  // Agent rows show a chip only while a PR is open; the panel lists them all.
-  let openPRMap = $derived(prsBySession(prs.filter(isOpen)))
   let confirm = $state<Confirming | null>(null)
   const bulkControllers = new Map<number, ReturnType<typeof createBulkSessionAction>>()
   let bulkSerial = 0
@@ -628,11 +633,38 @@
     say,
   })
   watchMachines()
+  // The page's side of the questions, pins, issues, sync counts and pull
+  // requests, which their modules ask for.
+  bindQuestions({
+    reload,
+    error: (message) => (loadError = message),
+    openView: (name) => openView(name),
+  })
+  bindPins({
+    reload,
+    error: (message) => (loadError = message),
+    clearError: () => (loadError = ''),
+  })
+  bindIssues({
+    reload,
+    error: (message) => (loadError = message),
+    openIssuesView: () => { showPins = false; showMembers = false; openView('issues') },
+    ask: (prompt) => (ask = prompt),
+    clearAsk: () => (ask = null),
+    say,
+  })
+  bindSync({ reload })
+  bindPRs({
+    reload,
+    applyPage: (value) => applyListPage('changes', value),
+    alive: () => consolidationAlive,
+    say,
+  })
   function loadRooms() { return roomData.loadRooms() }
   function loadMembers() { return roomData.loadMembers() }
   // applyRoomOpened shows the opened room's other lists, which the page owns.
   function applyRoomOpened(value: Opened) {
-    pins = value.pins ?? []
+    pinView.setPins(value.pins ?? [])
     loadSync()
     loadIssues()
     loadIssues(true)
@@ -823,123 +855,6 @@
     workflowData.loadJobs()
   }
 
-  function loadQuestions() { return reload('questions', async (current: () => boolean) => {
-    const request = ++questionsRequest
-    const id = roomId
-    if (!id) return
-    try {
-      const q = await api.questions(id)
-      if (current() && id === roomId && request === questionsRequest) { questions = reconcileRows(questions, q?.[id] ?? []) }
-    } catch (e) { if (current() && id === roomId && request === questionsRequest) loadError = String(e) }
-  }) }
-  function loadVisuals() { return reload('visuals', async (current: () => boolean) => {
-    try {
-      const list = await api.visuals(roomId)
-      if (current()) {
-        visuals = reconcileRows(visuals, list ?? [], visualKey)
-        setVisuals(roomId, visuals)
-      }
-    } catch (e) { if (current()) loadError = String(e) }
-  }) }
-
-  async function answerQuestion(id: string, choice: string, text: string) {
-    await api.answerQuestion(roomId, id, choice, text)
-    await loadQuestions()
-  }
-  function openQuestion(post: Post) {
-    openView('questions')
-    questionFocus = questionID(post)
-    questionFocusRequest++
-  }
-
-  // Quiet: the server fetches on its own; this only reads the saved counts.
-  // A failure of this background read shows no banner: a device without
-  // the scope, or a busy engine, must not look like a broken room. The
-  // sync popover reports errors when the owner acts.
-  function loadSync() { return reload('sync', async (current: () => boolean) => {
-    try {
-      const s = await api.syncStatus()
-      if (current()) syncStatus = s ?? {}
-    } catch { /* quiet */ }
-  }) }
-
-  // Refresh and Export start in the background; the saved operation shows
-  // the progress. An error, such as one already running, shows in the popover.
-  async function syncAction(call: (roomId: string, repo: string) => Promise<unknown>) {
-    syncNote = ''
-    try {
-      if (!room?.repo) return
-      await call(roomId, room.repo)
-    } catch (e) {
-      syncNote = errorText(e)
-    }
-    loadSync()
-  }
-
-  function loadPins() { return reload('pins', async (current: () => boolean) => {
-    if (!roomId) return
-    const id = roomId
-    try {
-      const list = (await api.pins(id)) ?? []
-      if (current() && id === roomId) pins = reconcileRows(pins, list)
-    } catch (e) {
-      if (current()) loadError = String(e)
-    }
-  }) }
-
-  function loadIssues(history = false) { return reload(history ? 'issueHistory' : 'issues', async (current: () => boolean) => {
-    if (!roomId) return
-    const id = roomId
-    try {
-      const list = (await api.issues(id, history)) ?? []
-      if (!current() || id !== roomId) return
-      if (history) issueHistory = reconcileRows(issueHistory, list.filter((i: RoomIssue) => i.state !== 'open'))
-      else issues = reconcileRows(issues, list)
-    } catch (e) {
-      if (current()) loadError = String(e)
-    }
-  }) }
-
-  // Notices open the same Issues tab as the room navigation.
-  function openIssues() { showPins = false; showMembers = false; openView('issues') }
-
-  // One issue action: run the call, then refresh both lists.
-  async function triageIssue(call: () => Promise<unknown>) {
-    try {
-      await call()
-      loadError = ''
-      loadIssues()
-      loadIssues(true)
-    } catch (e) {
-      say({ tone: 'error', subject: 'Could not update the issue', text: errorText(e) })
-    }
-  }
-
-  // Close needs a reason: the backend rejects an empty one.
-  function askCloseIssue(i: RoomIssue) {
-    ask = {
-      title: 'Close issue',
-      label: 'Reason',
-      lines: [i.title],
-      action: 'Close',
-      submit: async (reason) => {
-        ask = null
-        await triageIssue(() => api.closeIssue(roomId, i.id, reason))
-      },
-    }
-  }
-
-  async function togglePin(p: Post) {
-    try {
-      if (pinnedIds.has(p.id)) await api.unpin(roomId, p.id)
-      else await api.pin(roomId, p.id)
-      loadError = ''
-      loadPins()
-    } catch (e) {
-      loadError = String(e)
-    }
-  }
-
   // Pins and links open the feed view that contains the requested post.
   async function jumpTo(id: string) {
     const request = ++router.detailRequest
@@ -1017,30 +932,6 @@
     if (!drill && isFeedView(view)) markShown(posts)
   })
 
-  function loadReviewer() { return reload('reviewer', async (current: () => boolean) => {
-    const id = roomId
-    if (!id) return
-    const status = await api.reviewerStatus(id).catch(() => null)
-    if (current() && consolidationAlive && id === roomId) reviewer = status
-  }) }
-
-  // A burst of PR events refreshes the reviewer once.
-  let reviewerTimer: ReturnType<typeof setTimeout> | undefined
-  function reviewerSoon() {
-    clearTimeout(reviewerTimer)
-    reviewerTimer = setTimeout(loadReviewer, 250)
-  }
-
-  function loadChanges() { return reload('changes', async (current: () => boolean) => {
-    const id = roomId
-    try {
-      const all = await api.changes(id)
-      if (!current()) return
-      changes = applyListPage('changes', all)
-      prError = ''
-    } catch (e) { if (current()) prError = errorText(e) }
-  }) }
-
   // Read navigation here; list state reads inside loaders must not become
   // dependencies that schedule another refresh after every response.
   $effect(() => {
@@ -1095,7 +986,7 @@
           } else if (kind === 'changes') {
             const next = await api.changes(id, selected.cursor)
             if (!current() || id !== roomId || visit !== roomRequest) return
-            changes = applyListPage('changes', next, true)
+            changeView.setChanges(applyListPage('changes', next, true))
           }
         })
       }
@@ -1119,46 +1010,12 @@
     untrack(() => { if (canLoadMentions) roomData.loadMentions() })
   })
 
-  async function untrackPR(pr: ChangeRow) {
-    if (!pr.key) return
-    try {
-      await api.untrackPR(roomId, pr.key)
-      say({ tone: 'success', subject: `Dyna stopped watching #${pr.number}`, text: 'Its updates no longer arrive here.' })
-    } catch (e) {
-      say({ tone: 'error', subject: 'Could not stop watching that pull request', text: errorText(e) })
-    }
-    loadChanges()
-  }
-
-  // trackPR links a PR to a session from the pull-requests view.
-  async function trackPR(number: number | string | undefined, m: Member) {
-    if (number === undefined || !m.id) return
-    try {
-      await api.trackPR(roomId, m.id, Number(number))
-      say({ tone: 'success', subject: `Dyna watches #${number}`, text: `Review and CI updates go to ${m.name}.` })
-    } catch (e) {
-      say({ tone: 'error', subject: 'Could not watch that pull request', text: errorText(e) })
-    }
-    loadChanges()
-  }
-
   async function mentionReference(reference: Reference) {
     if (reference.kind === 'room_issue' && !reference.url) reference = { ...reference, url: `#room=${encodeURIComponent(roomId)}&view=issues` }
     openView('all')
     await tick()
     composer?.addReference(reference)
     composer?.focus()
-  }
-
-  async function resumePR(pr: ChangeRow) {
-    if (!pr.key) return
-    try {
-      await api.resumePR(roomId, pr.key)
-      say({ tone: 'success', subject: `Dyna watches #${pr.number} again`, text: 'Review and CI updates resume.' })
-    } catch (e) {
-      say({ tone: 'error', subject: 'Could not resume watching that pull request', text: errorText(e) })
-    }
-    loadChanges()
   }
 
   // selectRoom loads a room and returns whether its navigation is still current.
@@ -1201,16 +1058,10 @@
     jobsError = ''
     router.openRun = ''
     runDetail = null
-    pins = []
-    issues = []
-    issueHistory = []
-    questions = []
-    visuals = []
-    questionFocus = ''
-    questionsRequest++
-    prs = []
-    reviewer = null
-    changes = null
+    pinView.clear()
+    issueView.clear()
+    questionView.clear()
+    changeView.clear()
     goalId = ''
     if (!id) {
       roomData.clearFeed()
@@ -1640,7 +1491,7 @@
   // resync reloads what the app shows after the web event stream was lost:
   // events may have been missed while it was down.
   async function resync() {
-    mergeVersion += 1
+    changeView.bumpVersion()
     loadRooms()
     if (!roomId) return
     // Keep loaded history on screen when the event stream reconnects.
@@ -1728,7 +1579,7 @@
     if (ev.kind === 'prs') return true
     if (ev.kind === 'changes') {
       reload.patch('changes', (current) => {
-        if (current()) changes = applyListItem('changes', change, changes)
+        if (current()) changeView.setChanges(applyListItem('changes', change, changes))
       })
       return true
     }
@@ -1738,7 +1589,7 @@
     }
     if (ev.kind === 'questions') {
       reload.patch('questions', (current) => {
-        if (current()) questions = patchListRows(questions, change as RowChange<Question>)
+        if (current()) questionView.setQuestions(patchListRows(questions, change as RowChange<Question>))
       })
       return true
     }
@@ -1778,7 +1629,7 @@
     if (['room.paused', 'room.resumed'].includes(ev.kind) && (!evRoom || evRoom === roomId)) roomSessionController?.load()
     // A prs event without a row says the room's PR settings changed.
     if ((ev.kind === 'prs' || ev.kind === 'changes') && (!evRoom || evRoom === roomId)) {
-      mergeVersion += 1
+      changeView.bumpVersion()
       reviewerSoon()
       if (ev.kind === 'changes' && !item) loadChanges()
     }
@@ -2226,7 +2077,7 @@
         {:else if view === 'terminal' && hasTerminal}
           {#key room.id}<Terminal roomId={room.id} ref={room.id} noRepo={!room.repo} {narrow} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
         {:else if view === 'questions'}
-          {#key room.id}<Questions roomId={room.id} {questions} focusId={questionFocus} focusRequest={questionFocusRequest} onanswer={answerQuestion} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />{/key}
+          {#key room.id}<Questions roomId={room.id} {questions} focusId={questionView.focus} focusRequest={questionView.focusRequest} onanswer={answerQuestion} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />{/key}
         {:else if view === 'services'}
           {#key room.id}<Services roomId={room.id} repo={room.repo ?? ''} members={hierarchy} changes={changes ?? []} onopen={(m: Member) => openSession(m, 0, null, true)} onpr={openPR} />{/key}
         {:else if view === 'visuals'}
