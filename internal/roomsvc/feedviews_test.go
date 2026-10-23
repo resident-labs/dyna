@@ -29,7 +29,8 @@ func TestFeedViewRouting(t *testing.T) {
 	views := newFeedViews(fixture.Members)
 	for _, tc := range fixture.Cases {
 		t.Run(tc.Name, func(t *testing.T) {
-			got := slices.Sorted(slices.Values(views.viewsFor(tc.Post)))
+			// A stored post carries the home the store decided for it.
+			got := slices.Sorted(slices.Values(views.viewsFor(tc.Post, tc.Post.Conversation.Home())))
 			if !reflect.DeepEqual(got, tc.Views) {
 				t.Fatalf("views = %v, want %v", got, tc.Views)
 			}
@@ -137,6 +138,54 @@ func TestFeedAnswersTheFieldsOfAnOldBundle(t *testing.T) {
 	}
 	if !reflect.DeepEqual(old.ChannelUnread, page.ViewUnread) || old.ChannelUnread["channel:"+lead.ID] == 0 {
 		t.Fatalf("old bundle counts = %v, want %v", old.ChannelUnread, page.ViewUnread)
+	}
+}
+
+// Room chat lists the room's own posts only. A post written in a DM or in the
+// owner's voice call has that conversation as its home, so it is not in the room
+// chat and not unread there; its own DM or call lists it.
+func TestRoomChatListsOnlyTheRoomsOwnPosts(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	post := func(in room.PostInput) room.Message {
+		t.Helper()
+		m, err := e.svc.rooms().Post(rec.ID, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	dm := post(room.PostInput{From: lead.Address(), To: []string{rec.Name}, Conversation: room.DMConversation(lead.ID), Text: "in the lead's DM"})
+	call := post(room.PostInput{From: rec.Name + ":" + room.VoiceAgent, To: []string{rec.Name}, Kind: "voice", Source: room.SourceVoice, Spoken: true, Text: "in the call"})
+	here := e.say(rec, "lead", "in the room chat")
+
+	page, err := e.svc.FeedTail(rec.ID, "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := map[string]Post{}
+	for _, p := range page.Posts {
+		listed[p.ID] = p
+	}
+	if _, ok := listed[dm.ID]; ok {
+		t.Fatalf("Room chat lists the post written in the lead's DM: %+v", listed[dm.ID])
+	}
+	if views := listed[call.ID].Views; slices.Contains(views, "general") {
+		t.Fatalf("Room chat lists the voice call line in %v", views)
+	}
+	if listed[call.ID].Unread {
+		t.Fatal("the voice call line is unread in Room chat")
+	}
+	if got := listed[here.ID].Views; !slices.Contains(got, "general") || !listed[here.ID].Unread {
+		t.Fatalf("the room's own post shows in %v, unread %v; want it unread in Room chat", got, listed[here.ID].Unread)
+	}
+	want := map[string]int{"general": 1}
+	if page.Unread != 1 || !reflect.DeepEqual(page.ViewUnread, want) {
+		t.Fatalf("Room chat unread = %d in %v, want 1 in %v", page.Unread, page.ViewUnread, want)
+	}
+	if got := roomUnreadCount(t, e.svc, rec.ID); got != 1 {
+		t.Fatalf("room rail unread = %d, want 1", got)
 	}
 }
 

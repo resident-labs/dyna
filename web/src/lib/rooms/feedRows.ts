@@ -3,7 +3,6 @@ import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
 import type { EventPayload, HookEvent } from './events.gen.ts'
 import { hookEvent, issueEvent, mergeEvent, prEvent } from './eventPayloads.ts'
-import { eventSpecs } from './events.gen.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
 // fixtures of a test both fit it.
@@ -103,20 +102,6 @@ export function callsInWindow(calls: readonly CallRequest[], posts: readonly { t
 // divider or a call request.
 export function rowPost<P extends FeedInput>(row: FeedRow<P> | undefined): P | undefined {
   return row?.kind === 'post' ? row.post : undefined
-}
-
-// roomPosts keeps the posts of the room's own conversation. A session-audience
-// event belongs to the one session it names and lives in that session's DM;
-// the room lists it only when the owner is a recipient. The decision reads the
-// typed audience, never the addresses it was posted to.
-//
-// TODO: the conversation series replaces this with the stored home
-// (Message.Conversation and post_homes).
-export function roomPosts<P extends FeedInput>(posts: readonly P[], owner: string): P[] {
-  return posts.filter((post) => {
-    const spec = eventSpecs.find((entry) => entry.family === post.kind && entry.type === post.notice?.kind)
-    return spec?.audience !== 'session' || (post.to ?? []).includes(owner)
-  })
 }
 
 // hookIdentity names one hook of one repo: the subject a pass folds by.

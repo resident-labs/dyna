@@ -285,7 +285,8 @@
         "human": true,
         "spoken": true,
         "kind": "voice",
-        "source": "voice"
+        "source": "voice",
+        "conversation": "voice"
       },
       "views": [
         "voice-call"
@@ -300,7 +301,8 @@
         ],
         "spoken": true,
         "kind": "voice",
-        "source": "voice"
+        "source": "voice",
+        "conversation": "voice"
       },
       "views": [
         "voice-call"
@@ -315,7 +317,8 @@
         ],
         "relayOf": "msg_root",
         "kind": "voice",
-        "source": "voice"
+        "source": "voice",
+        "conversation": "voice"
       },
       "views": [
         "voice-call"
@@ -329,7 +332,8 @@
           "repo:root"
         ],
         "kind": "message",
-        "source": "voice"
+        "source": "voice",
+        "conversation": "voice"
       },
       "views": [
         "voice-call"

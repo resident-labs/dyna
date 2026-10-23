@@ -28,7 +28,14 @@ export interface FeedMember {
 // The fields feed view routing reads from a feed post.
 export interface RoutedPost {
   views?: string[]
+  conversation?: string
 }
+
+// inRoomFeed reports whether a post belongs in the room feed at all. A post
+// written in a DM lives in that DM, so the room feed never lists it
+// (internal/roomsvc/roomFeedPost). A live post still arrives for the DM, which
+// reads it there.
+export const inRoomFeed = (post: Pick<RoutedPost, 'conversation'>): boolean => !(post.conversation ?? '').startsWith('dm:')
 
 // The server routes each room feed post into its feed views, the sender's home
 // first (internal/roomsvc/feedviews.go). A post without them shows in the room chat.

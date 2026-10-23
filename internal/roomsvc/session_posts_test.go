@@ -527,12 +527,12 @@ func TestTranscriptPostsMatchFeed(t *testing.T) {
 	if sess.Address != lead.Address() || len(sess.Posts) != len(ids) {
 		t.Fatalf("address = %q, posts = %+v", sess.Address, sess.Posts)
 	}
-	feed, err := e.svc.FeedTail(rec.ID, "", 0)
+	feed, _, err := e.svc.FeedSince(rec.ID, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	byID := map[string]Post{}
-	for _, post := range feed.Posts {
+	for _, post := range feed {
 		// Feed views route the room feed only; transcripts have none.
 		post.setViews(nil)
 		byID[post.ID] = post
