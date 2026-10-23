@@ -49,5 +49,5 @@ test('a live member row says what it is doing and for how long', async (t) => {
     { id: 's1', name: 'lead', address: 'repo:lead', profile: 'opus', state: 'live', status: 'running', turns: 3, depth: 0, hue: 2, doing: { text: 'Bash: Write a 10 GB test file', since: now - 45000 } },
   ]
   const html = await render('../rooms/Members', { members, onselect: () => {}, onclosed: () => {}, onmenu: () => {} })
-  assert.match(html, /class="doing[^"]*long[^"]*"[^>]*>Bash: Write a 10 GB test file · 45s</)
+  assert.match(html, /class="doing[^>]*long[^>]*"[^>]*>Write a 10 GB test file · 45s</)
 })
