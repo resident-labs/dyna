@@ -10,7 +10,7 @@ export interface Reference {
 }
 
 export const referenceKey = (reference: Reference) => `${reference.kind}:${reference.number}`
-export const referenceLabel = (reference: Reference) => `${reference.kind === 'pr' ? 'PR' : reference.kind === 'room_issue' ? 'Room issue' : 'Issue'} #${reference.number}`
+export const referenceLabel = (reference: Reference) => reference.kind === 'room_issue' ? 'Issue' : `${reference.kind === 'pr' ? 'PR' : 'Issue'} #${reference.number}`
 
 export function matchReferences(references: Reference[], query: string) {
   const search = query.replace(/^#/, '').trim().toLowerCase()

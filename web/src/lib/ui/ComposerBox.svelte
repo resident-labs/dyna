@@ -39,7 +39,7 @@
     <div class="tools">
       {@render tools?.()}
       {#if model}<span class="chip model" title={model}>{model}</span>{/if}
-      {#if mode}<span class="chip mode">{mode}</span>{/if}
+      {#if mode && mode !== 'Message'}<span class="chip mode">{mode}</span>{/if}
       {#if attachments}
         <button class="tool" type="button" onclick={() => picker.click()} disabled={busy || closed} aria-label="Attach files" title="Attach files">
           <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d="m7 11 5-5a2.1 2.1 0 0 1 3 3l-6 6a3.5 3.5 0 0 1-5-5l6-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>

@@ -27,7 +27,7 @@
   import SystemNote from '../ui/SystemNote.svelte'
   import { noteGroups } from '../ui/notices.ts'
   import { look } from './look.svelte.js'
-  import { highlighted, oneLine, scopeOf } from './look.ts'
+  import { highlighted, oneLine } from './look.ts'
 
   let { room, label = 'general', intro = true, posts = [], questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onacceptcall, ondeclinecall, ongoal, stuck = $bindable(true) } = $props()
 
@@ -136,9 +136,8 @@
     return { groups, names }
   }
 
-  // The feed choices for this channel (Settings, or its top-bar menu) pick
-  // the highlighted posts and the finished turns that fold to one line.
-  const scope = $derived(scopeOf(room.id, view))
+  // The look choices (Settings) pick the highlighted posts and the finished
+  // turns that fold to one line.
   let opened = $state({}) // one-line results the owner opened
 
   function verb(p) {
@@ -160,7 +159,7 @@
 {/snippet}
 
 {#snippet completionPost(p)}
-  {#if oneLine(look, scope, p) && !opened[p.id]}
+  {#if oneLine(look, p) && !opened[p.id]}
     <span class="gutter"><span class="mark" aria-hidden="true">✓</span></span>
     <div class="body line">
       <button class="name hue-{p.fromHue}" onclick={() => onaddress(p.from)}>{who(p)}</button>
@@ -208,7 +207,7 @@
       {@const parts = postParts(p)}
       <!-- Every stored post owns the same actions. Kind selects its body only. -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions, a11y_no_noninteractive_tabindex -->
-      <article class="post {p.completion ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind)} class:after-sys={p.completion && rows[index - 1]?.post?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, scope, p, room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(p)} {...postHandlers(selection, p.id)}>
+      <article class="post {p.completion ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind)} class:after-sys={p.completion && rows[index - 1]?.post?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, p, room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(p)} {...postHandlers(selection, p.id)}>
         {@render replyCue()}
         {#if (row.posts ?? [p]).some((post) => pinned.has(post.id))}<span class="post-pin" title="Pinned" transition:scale={{ start: 0.6, duration: motion(FAST) }}><PinIcon size={13} filled /></span>{/if}
           {#if p.replyTo}
