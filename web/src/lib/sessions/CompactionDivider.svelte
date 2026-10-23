@@ -14,15 +14,44 @@
   let failed = $derived(row.state === 'failed')
   let running = $derived(row.state === 'started')
   let done = $derived(!failed && !running)
+  let recordedAt = $derived(row.ts !== undefined && row.ts !== '' ? new Date(row.ts) : null)
+  let validTime = $derived(recordedAt && Number.isFinite(recordedAt.getTime()) ? recordedAt : null)
+  const hasCount = (value: number | undefined) => typeof value === 'number' && Number.isFinite(value)
+
 </script>
 
+{#if done}
+  <details class="completed" class:enter>
+    <summary><span class="summary-text"><i class="mark" aria-hidden="true">⇣</i> {compactionText(row)}{#if validTime}<time> · {clock(row.ts)}</time>{/if}</span><span class="more">Details</span></summary>
+    <dl>
+      {#if hasCount(row.tokensBefore)}<dt>Tokens before</dt><dd>{row.tokensBefore?.toLocaleString()}</dd>{/if}
+      {#if hasCount(row.tokensAfter)}<dt>Tokens after</dt><dd>{row.tokensAfter?.toLocaleString()}</dd>{/if}
+      {#if row.trigger}<dt>Trigger</dt><dd>{row.trigger}</dd>{/if}
+      {#if validTime}<dt>Recorded at</dt><dd><time datetime={validTime.toISOString()}>{validTime.toLocaleString(undefined, { year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short' })}</time></dd>{/if}
+      {#if !hasCount(row.tokensBefore) && !hasCount(row.tokensAfter) && !row.trigger && !validTime}<dd>No additional details recorded.</dd>{/if}
+    </dl>
+  </details>
+{:else}
 <div class="compaction" class:enter class:failed class:running class:done role="separator" aria-label={compactionText(row)}>
   <span>
     {#if running}<i class="spin" aria-hidden="true"></i>{:else}<i class="mark" aria-hidden="true">{failed ? '!' : '⇣'}</i>{/if}{compactionText(row)}{#if !running && row.ts}<time> · {clock(row.ts)}</time>{/if}
   </span>
 </div>
 
+{/if}
+
 <style>
+  .completed { margin: 22px var(--s4) 10px; }
+  summary { display: flex; align-items: center; gap: var(--s2); cursor: pointer; color: var(--ink-2); font-size: var(--t-sm); list-style: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before, summary::after { content: ''; border-top: 1px solid var(--line); flex: 1; min-width: 8px; }
+  .summary-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .completed .mark, .more { color: var(--iris); }
+  .more { flex: none; font-size: var(--t-cap); }
+  .more::after { content: ' ▸'; }
+  details[open] .more::after { content: ' ▾'; }
+  dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s2) var(--s3); margin: var(--s3) 0 0; padding: var(--s3); border: 1px solid var(--line-soft); border-radius: var(--r-xs); font-size: var(--t-sm); }
+  dt { color: var(--muted); } dd { margin: 0; color: var(--ink-2); overflow-wrap: anywhere; }
   /* Full width, above and below every message and activity row. */
   .compaction {
     display: flex;
@@ -78,6 +107,7 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
   @media (max-width: 760px) {
+    .completed { margin: 18px var(--s3) 8px; }
     .compaction { margin: 18px var(--s3) 8px; }
     .compaction span { font-size: var(--t-cap); }
   }
