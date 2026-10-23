@@ -36,7 +36,7 @@
   <ol>
     {#each row.steps as step (step.key)}
       {@const job = step.kind === 'shell' ? (step.job ? mergeJob(step.job, jobs.find((j) => j.id === step.jobId)) : jobs.find((j) => j.id === step.jobId)) : undefined}
-      {@const activeTool = step.kind === 'tool' && !step.done && row.turn?.status === 'running'}
+      {@const activeTool = step.kind === 'tool' && !step.failed && !step.done && row.turn?.status === 'running'}
       {@const state = job ? blockState(job) : step.kind === 'child' ? (step.member.state === 'live' ? 'running' : step.member.status === 'error' ? 'failed' : 'done') : step.failed ? 'failed' : activeTool ? 'running' : 'done'}
       {@const expanded = opened[step.key] ?? state === 'failed'}
       <li class={state} id={step.kind === 'shell' ? `shell-${step.jobId}` : undefined}>
