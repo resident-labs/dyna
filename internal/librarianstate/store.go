@@ -115,11 +115,14 @@ func get(q rowQuerier, repo string) (State, error) {
 	if err != nil {
 		return st, err
 	}
-	for value, target := range map[string]*time.Time{lastRun: &st.LastRun, smellLastRun: &st.SmellLastRun} {
-		if value != "" {
-			if *target, err = time.Parse(time.RFC3339Nano, value); err != nil {
-				return st, err
-			}
+	if lastRun != "" {
+		if st.LastRun, err = time.Parse(time.RFC3339Nano, lastRun); err != nil {
+			return st, err
+		}
+	}
+	if smellLastRun != "" {
+		if st.SmellLastRun, err = time.Parse(time.RFC3339Nano, smellLastRun); err != nil {
+			return st, err
 		}
 	}
 	if err := json.Unmarshal([]byte(failed), &st.FailedProfiles); err != nil {

@@ -43,7 +43,7 @@ func (s Service) FileSmell(ctx context.Context, actor authority.Actor, repoDir, 
 	if err != nil {
 		return room.Issue{}, err
 	}
-	if err := (librarianstate.Store{DataDir: s.DataDir}).CheckEdit("library smell", r.ID, actor); err != nil {
+	if err := (librarianstate.Store{DataDir: s.DataDir}).CheckSmell("library smell", r.ID, actor); err != nil {
 		return room.Issue{}, err
 	}
 	sm.Title = strings.TrimSpace(sm.Title)
