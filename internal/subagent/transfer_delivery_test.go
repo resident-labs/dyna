@@ -83,7 +83,10 @@ func TestHandoffPacketInlinesNoTranscriptOrRoomText(t *testing.T) {
 	valid := post(info.Room+":reporter", "message", "legitimate pending input")
 	cancelled := post(info.Room, "message", "cancelled input")
 	dismissed := post(info.Room+":reporter", "message", "dismissed input")
-	notice := post(info.Room+":reporter", "notice", "notice input")
+	notice, err := e.m.rooms().PostEvent(info.RoomID, room.SessionEvent{Type: room.SessionInstructions, Session: info.Address(), Detail: "notice input"}, info.Address())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := e.m.Store.DeletePendingSteer(e.m.rooms(), info.ID, cancelled.ID); err != nil {
 		t.Fatal(err)
 	}

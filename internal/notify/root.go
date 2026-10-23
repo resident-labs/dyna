@@ -92,16 +92,17 @@ func (s *Service) AttachSeat(ctx context.Context, rec room.Record, harness strin
 	if name != "" {
 		label = name + " (external) took the root seat"
 	}
-	text := strings.TrimSpace(label + "\n\n" + out.Note)
+	note := out.Note
 	var attachments []room.Attachment
-	if len(text) > room.MaxMessageBytes {
+	// The post text is the label, a blank line, then the note.
+	if len(label)+2+len(note) > room.MaxMessageBytes {
 		file, err := s.Rooms.PutAttachment(rec.ID, "root-handoff.txt", []byte(out.Note))
 		if err != nil {
 			return SeatAttach{}, fmt.Errorf("save the full root handoff: %w", err)
 		}
 		attachments = append(attachments, file)
 		const tail = "\n\n[Full handoff attached as root-handoff.txt.]"
-		text = room.TruncateUTF8(text, room.MaxMessageBytes-len(tail)) + tail
+		note = room.TruncateUTF8(note, max(0, room.MaxMessageBytes-len(label)-2-len(tail))) + tail
 	}
 	seat, changed, err := s.Rooms.SetSeat(ctx, rec.ID, room.Seat{External: true, Harness: name}, nil)
 	if err != nil {
@@ -111,7 +112,13 @@ func (s *Service) AttachSeat(ctx context.Context, rec room.Record, harness strin
 	if !changed {
 		return out, nil
 	}
-	if _, err := s.Rooms.Post(rec.ID, room.PostInput{From: "dyna", Kind: "seat", To: []string{rec.Name, rec.Name + ":" + room.RootAgent}, Text: text, Attachments: attachments}); err != nil {
+	if _, err := s.Rooms.PostEventInput(room.PostEventInput{
+		RoomID:      rec.ID,
+		Event:       room.SessionEvent{Type: room.SessionSeat, Session: rec.Name, Seat: label, Detail: note},
+		FreshID:     true,
+		To:          []string{rec.Name, rec.Name + ":" + room.RootAgent},
+		Attachments: attachments,
+	}); err != nil {
 		return out, err
 	}
 	info, ok, err := s.Sessions.RootSession(rec.ID)
@@ -145,24 +152,38 @@ func (s *Service) ReturnSeat(ctx context.Context, rec room.Record, handoff strin
 		parts = append(parts, "[ROOT SEAT] The external orchestrator held the root seat from "+before.Since.Local().Format(time.RFC3339)+" until "+seat.Since.Local().Format(time.RFC3339)+". When it attached, Dyna stopped your turn if one was running. Read `dyna room log "+rec.ID+" --all` for what happened meanwhile.")
 	}
 	var attachments []room.Attachment
-	text := strings.Join(parts, "\n\n")
+	label := parts[0]
+	note := strings.Join(parts[1:], "\n\n")
 	if handoff != "" {
 		review := subagent.Review("", "The external orchestrator returned its open work in the written handoff", fmt.Sprintf("`dyna room log %s --all`", rec.ID))
-		prefix := text + "\n\n[ROOT SEAT HANDOFF]\n" + review + "\nWritten handoff:\n"
-		text = prefix + handoff
-		if len(text) > room.MaxMessageBytes {
+		prefix := "[ROOT SEAT HANDOFF]\n" + review + "\nWritten handoff:\n"
+		note = strings.Join(parts[1:], "\n\n")
+		if note != "" {
+			prefix = note + "\n\n" + prefix
+		}
+		note = prefix + handoff
+		if len(label)+2+len(note) > room.MaxMessageBytes {
 			const tail = "\n\n[Written handoff continues in root-handoff-rest.txt.]"
-			inline := room.TruncateUTF8(handoff, max(0, room.MaxMessageBytes-len(prefix)-len(tail)))
+			inline := room.TruncateUTF8(handoff, max(0, room.MaxMessageBytes-len(label)-2-len(prefix)-len(tail)))
 			file, err := s.Rooms.PutAttachment(rec.ID, "root-handoff-rest.txt", []byte(handoff[len(inline):]))
 			if err != nil {
 				return seat, changed, nil, err
 			}
 			attachments = append(attachments, file)
-			text = prefix + inline + tail
+			note = prefix + inline + tail
 		}
 	}
 	addr := rec.Name + ":" + room.RootAgent
-	msg, err := s.Rooms.Post(rec.ID, room.PostInput{Wake: handoff != "", NeedsRoot: handoff != "", From: "dyna", Kind: "seat", To: []string{rec.Name, addr}, Via: []string{"@root"}, Text: text, Attachments: attachments})
+	event := room.SessionEvent{Type: room.SessionSeat, Session: rec.Name, Seat: label, Detail: note}
+	msg, err := s.Rooms.PostEventInput(room.PostEventInput{
+		RoomID:      rec.ID,
+		Event:       event,
+		FreshID:     true,
+		To:          []string{rec.Name, addr},
+		Via:         []string{"@root"},
+		NeedsRoot:   handoff != "",
+		Attachments: attachments,
+	})
 	if err != nil || handoff == "" {
 		return seat, changed, nil, err
 	}

@@ -92,7 +92,7 @@ func TestFinishedJobReachesTheSessionAsANote(t *testing.T) {
 		t.Fatalf("the finished job rebuilt the prompt or posted no note: notes %v, turns %d", after.InstructionsNotes, after.Turns)
 	}
 	note, err := e.m.rooms().Message(e.room.ID, after.InstructionsNotes[1])
-	if err != nil || note.Kind != "instructions" || note.Wake || !strings.Contains(note.Text, "Your running jobs: removed \"- "+job.ID) {
+	if err != nil || note.Kind != "session" || note.Notice.Kind != "instructions" || note.Wake || !strings.Contains(note.Text, "Your running jobs: removed \"- "+job.ID) {
 		t.Fatalf("note: %+v %v", note, err)
 	}
 }

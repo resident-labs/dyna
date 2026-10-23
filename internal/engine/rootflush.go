@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -136,9 +135,12 @@ func (f *rootFlush) fire(roomID string) {
 	if err != nil || !held {
 		return
 	}
-	if _, err := f.rooms.Post(roomID, room.PostInput{
-		Wake: true, NeedsRoot: true, From: "dyna", Kind: "notice", To: []string{rec.Name},
-		Text: fmt.Sprintf("[TIMED FLUSH] No post woke the root seat for %d minutes, so this notice delivers the held quiet posts as one batch. They did not ask for action; act only where one of them needs a root decision. The full posts stay in the room log.", int(rootFlushQuiet.Minutes())),
+	if _, err := f.rooms.PostEventInput(room.PostEventInput{
+		RoomID:    roomID,
+		Event:     room.EngineEvent{Minutes: int(rootFlushQuiet.Minutes())},
+		FreshID:   true,
+		NeedsRoot: true,
+		To:        []string{rec.Name},
 	}); err != nil {
 		log.Printf("root flush of %s: %v", rec.Name, err)
 	}

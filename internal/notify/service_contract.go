@@ -19,7 +19,7 @@ func (s *Service) servicePost(in PostInput, res resolved) error {
 	if !contract.Active() {
 		return nil
 	}
-	if in.Kind == "alert" {
+	if in.Kind == serviceAlertKind {
 		if len(res.recipients) == 1 && ((!contract.Helper() && res.recipients[0].kind == toOwner) ||
 			contract.Helper() && res.recipients[0].kind == toSession && res.recipients[0].session.ID == meta.ParentSession) {
 			return nil
@@ -48,7 +48,7 @@ func (s *Service) servicePost(in PostInput, res resolved) error {
 }
 
 func (s *Service) previousServiceAlert(in PostInput, res resolved, text string) (room.Message, error) {
-	if in.Sender.Kind != SenderSession || !in.Sender.Session.Service || in.Kind != "alert" {
+	if in.Sender.Kind != SenderSession || !in.Sender.Session.Service || in.Kind != serviceAlertKind {
 		return room.Message{}, nil
 	}
 	posts, err := s.Rooms.Messages(res.rec.ID)
@@ -61,7 +61,7 @@ func (s *Service) previousServiceAlert(in PostInput, res resolved, text string) 
 		post := posts[i]
 		target := res.recipients[0]
 		sameTarget := len(post.To) == 1 && post.To[0] == target.addr && (target.kind == toOwner || post.SessionIDs[target.addr] == target.session.ID)
-		if sameTarget && post.SessionIDs[res.from] == in.Sender.Session.ID && post.From == res.from && post.Kind == "alert" && post.Text == text && post.TS >= cutoff && post.TS >= created {
+		if sameTarget && post.SessionIDs[res.from] == in.Sender.Session.ID && post.From == res.from && post.Kind == serviceAlertKind && post.Text == text && post.TS >= cutoff && post.TS >= created {
 			return post, nil
 		}
 	}
@@ -79,12 +79,12 @@ func (s *Service) helperCompletion(meta subagent.Meta, turn subagent.Turn) (*sub
 	}
 	for _, post := range posts {
 		if parent.ID != "" && post.From == meta.Address() && post.SessionIDs[meta.Address()] == meta.ID && post.Turn == turn.N && post.SessionIDs[parent.Address()] == parent.ID &&
-			(post.Kind == "message" || post.Kind == "alert") {
+			(post.Kind == "message" || post.Kind == serviceAlertKind) {
 			return nil, nil
 		}
 	}
 	if !available {
-		return s.prepareCompletion(meta.RoomID, meta.Address(), nil, "alert",
+		return s.prepareCompletion(meta.RoomID, meta.Address(), nil, serviceAlertKind,
 			"Service helper finished, but its parent is unavailable. Full output: dyna subagent output "+meta.Address(), turn.N, true)
 	}
 	if resultPreview(turn.Result, 1) != "" {
@@ -94,6 +94,6 @@ func (s *Service) helperCompletion(meta subagent.Meta, turn subagent.Turn) (*sub
 		}
 		return s.prepareCompletion(meta.RoomID, meta.Address(), []string{parent.ID}, "completed", text, turn.N, false)
 	}
-	return s.prepareCompletion(meta.RoomID, meta.Address(), []string{parent.ID}, "alert",
+	return s.prepareCompletion(meta.RoomID, meta.Address(), []string{parent.ID}, serviceAlertKind,
 		"Service turn produced no artifact: helper finished without posting findings to its parent.", turn.N, false)
 }

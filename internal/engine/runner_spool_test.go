@@ -168,7 +168,7 @@ func TestAccountSwitchLiveAndSpoolReplayPostsOnce(t *testing.T) {
 	}
 	notes := 0
 	for _, msg := range msgs {
-		if msg.Kind == "account" {
+		if msg.Kind == "session" && msg.Notice.Kind == "account" {
 			notes++
 			if msg.Wake || len(msg.To) != 1 || msg.To[0] != "work:root" {
 				t.Fatalf("account notice = %+v", msg)

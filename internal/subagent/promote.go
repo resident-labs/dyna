@@ -108,8 +108,8 @@ func (m *Manager) moveLockedContext(ctx context.Context, id, parent string, dept
 	return m.store().Info(id)
 }
 
-// noteMove posts one notice to the old and the new parent sessions that
-// are open. It does not wake them. The move stands even if the post fails.
+// noteMove posts one note to the old and the new parent sessions that are
+// open. It does not wake them. The move stands even if the post fails.
 func (m *Manager) noteMove(moved Meta, parent string) {
 	var to []string
 	name := func(id string) string {
@@ -125,13 +125,20 @@ func (m *Manager) noteMove(moved Meta, parent string) {
 		}
 		return meta.Address()
 	}
-	text := fmt.Sprintf("%s moved from %s to %s.", moved.Address(), name(moved.ParentSession), name(parent))
+	event := room.SessionEvent{
+		Type:    room.SessionPromoted,
+		Session: moved.Address(),
+		From:    name(moved.ParentSession),
+		To:      name(parent),
+	}
 	if parent != "" {
-		text += "\n" + m.sourceReview(moved, moved.Turns)
+		event.Type = room.SessionAdopted
+		event.Detail = m.sourceReview(moved, moved.Turns)
 	}
-	if len(to) > 0 {
-		m.rooms().Post(moved.RoomID, room.PostInput{Wake: false, From: "dyna", Kind: "hierarchy", To: to, Text: text})
+	if len(to) == 0 {
+		return
 	}
+	_, _ = m.rooms().PostEvent(moved.RoomID, event, to...)
 }
 
 // reparentLockedContext moves a subtree under an open parent while preserving history.

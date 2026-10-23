@@ -128,11 +128,11 @@ func TestServiceContractRejectsBroadcastAndAskWithoutNewTurns(t *testing.T) {
 			t.Fatalf("rejected output started work: %+v %v", got, err)
 		}
 	}
-	res, err := e.svc.Post(e.ctx, PostInput{Sender: sender, Mentions: []string{"@root"}, Kind: "alert", Text: "Goal blocked; owner action is needed."})
-	if err != nil || res.Message.Kind != "alert" {
+	res, err := e.svc.Post(e.ctx, PostInput{Sender: sender, Mentions: []string{"@root"}, Kind: ServiceAlertKind, Text: "Goal blocked; owner action is needed."})
+	if err != nil || res.Message.Kind != ServiceAlertKind {
 		t.Fatalf("domain alert rejected: %+v %v", res, err)
 	}
-	again, err := e.svc.Post(e.ctx, PostInput{Sender: sender, Mentions: []string{"@root"}, Kind: "alert", Text: "Goal blocked; owner action is needed."})
+	again, err := e.svc.Post(e.ctx, PostInput{Sender: sender, Mentions: []string{"@root"}, Kind: ServiceAlertKind, Text: "Goal blocked; owner action is needed."})
 	if err != nil || again.Message.ID != res.Message.ID || len(again.Deliveries) != 0 {
 		t.Fatalf("alert not deduplicated: %+v %v", again, err)
 	}
@@ -169,7 +169,7 @@ func TestServiceContractHelperUsesCurrentParentAndCurrentTurn(t *testing.T) {
 			if change == "closed-parent" {
 				want = rec.Name
 			}
-			if err != nil || res.Message.Kind != "alert" || !reflect.DeepEqual(res.Message.To, []string{want}) {
+			if err != nil || res.Message.Kind != ServiceAlertKind || !reflect.DeepEqual(res.Message.To, []string{want}) {
 				t.Fatalf("artifact alert: %+v %v", res, err)
 			}
 			if change != "closed-parent" {
@@ -223,7 +223,7 @@ func TestServiceContractHelperArtifactAndMissingAlert(t *testing.T) {
 				t.Fatalf("findings duplicated: %+v", res)
 			}
 			if !findings {
-				if res.Message.Kind != "alert" || !reflect.DeepEqual(res.Message.To, []string{parent.Address()}) || !strings.Contains(res.Message.Text, "no artifact") {
+				if res.Message.Kind != ServiceAlertKind || !reflect.DeepEqual(res.Message.To, []string{parent.Address()}) || !strings.Contains(res.Message.Text, "no artifact") {
 					t.Fatalf("missing findings: %+v", res)
 				}
 				e.wait(parent.ID, 2)
