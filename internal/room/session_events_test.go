@@ -146,8 +146,8 @@ func TestNewEventWakeAndRecipientRules(t *testing.T) {
 			if msg.Wake != c.wakes {
 				t.Fatalf("stored wake = %v, want %v", msg.Wake, c.wakes)
 			}
-			if got := WakesRoot(msg, rec.Name); got != c.wakesRoot {
-				t.Fatalf("WakesRoot = %v, want %v", got, c.wakesRoot)
+			if got := rootWakes(msg, rec.Name); got != c.wakesRoot {
+				t.Fatalf("rootWakes = %v, want %v", got, c.wakesRoot)
 			}
 			if got := !msg.Deliverable(); got != c.quiet {
 				t.Fatalf("quiet = %v, want %v", got, c.quiet)

@@ -36,6 +36,11 @@ type sessionInputs struct {
 
 type workerSignals struct {
 	channels map[string]chan struct{}
+	// rooms reads the stored delivery rows that decide which session a post
+	// reaches. It is set once, when the signals are created, before any worker
+	// or watch reads a post event; a nil store reads no rows, so no post then
+	// wakes a room's root seat.
+	rooms    *room.Store
 	mu       sync.Mutex
 	sessions sessionInputs
 	// turnEnds holds the bound sessions whose turn ended since the hooks
@@ -52,8 +57,8 @@ type workerSignals struct {
 	sweepFindings atomic.Int64
 }
 
-func newWorkerSignals() *workerSignals {
-	return &workerSignals{channels: map[string]chan struct{}{
+func newWorkerSignals(rooms *room.Store) *workerSignals {
+	return &workerSignals{rooms: rooms, channels: map[string]chan struct{}{
 		"prs": make(chan struct{}, 1), "checkins": make(chan struct{}, 1),
 		"questions": make(chan struct{}, 1), "hooks": make(chan struct{}, 1),
 		"sessions": make(chan struct{}, 1), "merges": make(chan struct{}, 1),
@@ -61,6 +66,25 @@ func newWorkerSignals() *workerSignals {
 		"fetch": make(chan struct{}, 1), "probe": make(chan struct{}, 1),
 		"caches": make(chan struct{}, 1),
 	}, sweeps: map[string]bool{}}
+}
+
+// seatDeliveries reads the root seat's delivery rows of the posts an event
+// reports, so a wake is decided from the stored row and not from the address
+// strings. It reads the database outside the signals lock.
+func (s *workerSignals) seatDeliveries(ev roomsvc.Event) map[string]room.Delivery {
+	if s.rooms == nil || ev.Kind != "posts" || ev.RoomID == "" || len(ev.Posts) == 0 {
+		return nil
+	}
+	ids := make([]string, len(ev.Posts))
+	for i, post := range ev.Posts {
+		ids[i] = post.Message.ID
+	}
+	seats, err := s.rooms.SeatDeliveries(ev.RoomID, ids)
+	if err != nil {
+		log.Printf("sessions: read the root seat's deliveries of room %s: %v", ev.RoomID, err)
+		return nil
+	}
+	return seats
 }
 
 func (s *workerSignals) wake(ev roomsvc.Event) {
@@ -74,6 +98,9 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 	if ev.Kind == "room.resumed" || ev.Kind == "members" || ev.Kind == "settings" {
 		wakeWorker(s.channels["checkins"])
 	}
+	// The room's root seat takes a post when its stored delivery row wakes it;
+	// every other recipient takes the post by its address.
+	seats := s.seatDeliveries(ev)
 	s.mu.Lock()
 	if s.sessions.targets == nil {
 		s.sessions.targets = map[string]bool{}
@@ -93,10 +120,13 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 				s.sessions.targets[address] = true
 			}
 		}
+		// The room's root seat takes a post when its stored delivery row wakes
+		// it; every other recipient takes the post by its address.
 		for _, post := range ev.Posts {
 			if post.Wake {
+				seat := seats[post.Message.ID]
 				for _, address := range post.To {
-					if !strings.Contains(address, ":") && room.WakesRoot(post.Message, address) {
+					if !strings.Contains(address, ":") && seat.Mode == room.DeliveryWake {
 						s.sessions.roots[ev.RoomID] = true
 					} else {
 						add(address, post.SessionIDs)

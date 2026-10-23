@@ -66,7 +66,7 @@ func TestRootWatchReceivesLeadPosts(t *testing.T) {
 			} {
 				msg := post(in)
 				quiet = append(quiet, msg)
-				if msg.Wake || msg.NeedsRoot || room.WakesRoot(msg, rec.Name) {
+				if decision, _ := room.RootContext(msg, rec.Name); msg.Wake || msg.NeedsRoot || decision == room.RootWake {
 					t.Fatalf("quiet post acquired root wake intent: %+v", msg)
 				}
 			}

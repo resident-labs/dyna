@@ -65,8 +65,8 @@ func TestPREventRoutingAndWake(t *testing.T) {
 			if len(msg.To) != 1 || msg.To[0] != tc.wantTo {
 				t.Fatalf("recipients = %v, want %s", msg.To, tc.wantTo)
 			}
-			if msg.Wake != tc.wantWak || room.WakesRoot(msg, e.rec.Name) != tc.needs {
-				t.Fatalf("wake = %v (want %v), wakes root = %v", msg.Wake, tc.wantWak, room.WakesRoot(msg, e.rec.Name))
+			if msg.Wake != tc.wantWak || wakesRoot(msg, e.rec.Name) != tc.needs {
+				t.Fatalf("wake = %v (want %v), wakes root = %v", msg.Wake, tc.wantWak, wakesRoot(msg, e.rec.Name))
 			}
 			ev, ok := msg.PR()
 			if !ok || ev.Head != r.Head || ev.ChangeID != changeID(r) || ev.Label != changeLabel(r) || ev.Location != changeLocation(r) {

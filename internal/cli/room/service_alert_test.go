@@ -50,7 +50,7 @@ func TestPostNeedsRootFlagPersistsWakeIntent(t *testing.T) {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		t.Fatal(err)
 	}
-	if !wire.NeedsRoot || !room.WakesRoot(posts[0], rec.Name) {
+	if decision, _ := room.RootContext(posts[0], rec.Name); !wire.NeedsRoot || decision != room.RootWake {
 		t.Fatalf("missing root wake intent: %s", data)
 	}
 }

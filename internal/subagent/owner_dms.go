@@ -7,8 +7,8 @@ import (
 	"dyna-agent/internal/room"
 )
 
-// The internal root's quiet sections all render from room.RootContext, the
-// one classifier both roots use. Its categories pick the section: owner DMs
+// The internal root's quiet sections all render from the seat's stored quiet
+// delivery rows. Their category picks the section: the owner's DMs to agents,
 // and every other quiet post addressed to the root seat, whatever its kind.
 
 // ownerDMNote lists the owner's DMs to agents in msgs, one line each with the
@@ -16,14 +16,14 @@ import (
 // quiet reports to the owner. The internal root reads it so it knows what the
 // owner approved in DMs. The owner-Voice call lines are not DMs to root and
 // stay out. It is empty when msgs hold no owner DM.
-func ownerDMNote(roomName string, msgs []room.Message) string {
+func ownerDMNote(roomName string, msgs []room.Message, seats map[string]room.Delivery) string {
 	var lines []string
 	dmd := map[string]bool{}
 	replies := map[string][]string{}
 	var order []string
 	for _, msg := range msgs {
-		decision, category := room.RootContext(msg, roomName)
-		if category == room.RootOwnerDM {
+		seat, ok := seats[msg.ID]
+		if ok && seat.Category == room.RootOwnerDM {
 			text := strings.Join(strings.Fields(msg.Text), " ")
 			if r := []rune(text); len(r) > 200 {
 				text = string(r[:200]) + "…"
@@ -39,8 +39,7 @@ func ownerDMNote(roomName string, msgs []room.Message) string {
 			lines = append(lines, fmt.Sprintf("- %s: %s (%s)", strings.Join(names, " "), text, msg.ID))
 			continue
 		}
-		if decision == room.RootQuiet &&
-			category == room.RootQuietPost && dmd[msg.From] && msg.Addressed(roomName) {
+		if ok && seat.Category == room.RootQuietPost && dmd[msg.From] && msg.Addressed(roomName) {
 			replies[msg.From] = append(replies[msg.From], msg.ID)
 		}
 	}
@@ -60,10 +59,10 @@ func ownerDMNote(roomName string, msgs []room.Message) string {
 // all reach root. Waking posts are turn input, and the other categories have
 // their own sections, so none of those appear here. Full posts remain in the
 // room log.
-func quietRootPosts(roomName string, msgs []room.Message) string {
+func quietRootPosts(roomName string, msgs []room.Message, seats map[string]room.Delivery) string {
 	var entries []string
 	for _, msg := range msgs {
-		if decision, category := room.RootContext(msg, roomName); decision == room.RootQuiet && category == room.RootQuietPost {
+		if seat, ok := seats[msg.ID]; ok && seat.Category == room.RootQuietPost {
 			text := strings.Join(strings.Fields(msg.Text), " ")
 			if r := []rune(text); len(r) > 240 {
 				text = string(r[:240]) + "…"
@@ -81,4 +80,25 @@ func quietRootPosts(roomName string, msgs []room.Message) string {
 		entries = entries[len(entries)-limit:]
 	}
 	return fmt.Sprintf("[QUIET ROOT POSTS] Information since your last turn. These posts did not wake you. Read full posts with `dyna room read %s <post-id>`.\n%s", roomName, omitted+strings.Join(entries, "\n"))
+}
+
+// seatNotes renders the root's quiet sections for msgs from the seat's stored
+// delivery rows. A read that fails leaves the sections out: they are context,
+// and the posts themselves stay in the room log.
+func seatNotes(rooms *room.Store, meta Meta, msgs []room.Message) []string {
+	ids := make([]string, len(msgs))
+	for i, msg := range msgs {
+		ids[i] = msg.ID
+	}
+	seats, err := rooms.SeatDeliveries(meta.RoomID, ids)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, note := range []string{ownerDMNote(meta.Room, msgs, seats), quietRootPosts(meta.Room, msgs, seats)} {
+		if note != "" {
+			out = append(out, note)
+		}
+	}
+	return out
 }

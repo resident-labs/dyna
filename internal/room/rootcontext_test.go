@@ -36,7 +36,7 @@ func TestRootContext(t *testing.T) {
 		},
 		{
 			name:     "an issue to the owner is quiet context of every kind",
-			msg:      Message{ID: "issue", From: roomName + ":worker", Kind: "issue", To: []string{roomName}},
+			msg:      Message{ID: "issue", From: roomName + ":worker", Kind: string(FamilyIssue), Notice: EventNotice{Kind: string(IssueFiled)}, To: []string{roomName}},
 			decision: RootQuiet, category: RootQuietPost,
 		},
 		{
@@ -56,7 +56,7 @@ func TestRootContext(t *testing.T) {
 		},
 		{
 			name:     "an alert to root wakes",
-			msg:      Message{Wake: true, ID: "alert", From: roomName + ":worker", Kind: "alert", To: []string{rootAddr}},
+			msg:      Message{Wake: true, ID: "alert", From: roomName + ":worker", Kind: "service-alert", To: []string{rootAddr}},
 			decision: RootWake,
 		},
 		{
@@ -66,17 +66,17 @@ func TestRootContext(t *testing.T) {
 		},
 		{
 			name:     "an engine note to the root session is input",
-			msg:      Message{Wake: true, ID: "seat", From: "dyna", Kind: "seat", To: []string{roomName, rootAddr}},
+			msg:      Message{Wake: true, ID: "seat", From: "dyna", Kind: string(FamilySession), Notice: EventNotice{Kind: string(SessionSeat)}, To: []string{roomName, rootAddr}},
 			decision: RootWake,
 		},
 		{
 			name:     "a passive engine instruction stays quiet turn input",
-			msg:      Message{ID: "passive", From: "dyna", Kind: "instructions", To: []string{rootAddr}},
+			msg:      Message{ID: "passive", From: "dyna", Kind: string(FamilySession), Notice: EventNotice{Kind: string(SessionInstructions)}, To: []string{rootAddr}},
 			decision: RootQuiet,
 		},
 		{
 			name:     "an engine instruction to the owner is quiet",
-			msg:      Message{ID: "instr", From: "dyna", Kind: "instructions", To: []string{roomName}},
+			msg:      Message{ID: "instr", From: "dyna", Kind: string(FamilySession), Notice: EventNotice{Kind: string(SessionInstructions)}, To: []string{roomName}},
 			decision: RootQuiet, category: RootQuietPost,
 		},
 		{
@@ -90,6 +90,16 @@ func TestRootContext(t *testing.T) {
 			decision: RootSkip,
 		},
 		{
+			name:     "the owner's own shell post that needs root wakes",
+			msg:      Message{Wake: true, ID: "cli", From: roomName, Kind: "message", NeedsRoot: true, To: []string{roomName}, Text: "Choose the merge order"},
+			decision: RootWake,
+		},
+		{
+			name:     "the owner's own shell post to the root session is passive input",
+			msg:      Message{ID: "answer", From: roomName, Kind: "message", To: []string{rootAddr}, Text: "Yes, download it"},
+			decision: RootQuiet,
+		},
+		{
 			name:     "voice call lines stay out",
 			msg:      Message{ID: "spoken", From: roomName + ":" + VoiceAgent, Kind: "voice", Source: SourceVoice, To: []string{roomName}},
 			decision: RootSkip,
@@ -101,7 +111,7 @@ func TestRootContext(t *testing.T) {
 		},
 		{
 			name:     "a post between agents is not root context",
-			msg:      Message{Wake: true, ID: "peers", From: roomName + ":a", Kind: "alert", To: []string{roomName + ":b"}},
+			msg:      Message{Wake: true, ID: "peers", From: roomName + ":a", Kind: "service-alert", To: []string{roomName + ":b"}},
 			decision: RootSkip,
 		},
 	} {

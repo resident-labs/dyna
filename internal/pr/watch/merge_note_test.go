@@ -36,7 +36,7 @@ func TestMergeNoteStoresQuietPostAndDecisionHistory(t *testing.T) {
 	for _, post := range posts {
 		if post.Kind == string(room.FamilyMerge) && post.Notice.Kind == string(room.MergeDecision) {
 			decisions = append(decisions, post)
-			if post.Wake || room.WakesRoot(post, rm.Name) || !post.Addressed(rm.Name) || post.Text != line {
+			if post.Wake || wakesRoot(post, rm.Name) || !post.Addressed(rm.Name) || post.Text != line {
 				t.Fatalf("decision did not stay quiet: %+v", post)
 			}
 			if got, ok := post.MergeDecision(); !ok || got.Note != line {

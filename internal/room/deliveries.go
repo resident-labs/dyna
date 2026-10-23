@@ -30,13 +30,22 @@ const (
 )
 
 // Delivery is one recipient of one post, as stored in post_deliveries.
-// Category is the quiet section of a quiet root-seat delivery, such as
-// RootOwnerDM, and empty for every other row.
+// PostID names the post the delivery carries, and is empty in the deliveries
+// that DeliveriesFor builds for a post it is about to index. Category is the
+// quiet section of a quiet root-seat delivery, such as RootOwnerDM, and empty
+// for every other row.
 type Delivery struct {
+	PostID    string
 	SessionID string
 	Mode      DeliveryMode
 	Category  string
 }
+
+// RootInput reports whether a root-seat delivery is turn input: a post that
+// asks the seat to act, or a passive one that only adds context to its next
+// turn. A quiet post with a category has its own section in root's context
+// instead of being turn input.
+func (d Delivery) RootInput() bool { return d.Mode == DeliveryWake || d.Category == "" }
 
 // SeatSessionID is the delivery identity of the room's root seat. The seat is
 // not a session, and its holder can change, so its rows name the seat rather

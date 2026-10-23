@@ -13,14 +13,19 @@ import (
 )
 
 // deliverRoot hands a stored post to the room's internal root while it holds
-// the root seat. The internal root's input is a post to the owner
-// (room.WakesRoot), including an explicitly marked root-seat handoff.
-// The owner's request (room.OwnerRequest), or a handoff, starts the internal root when none is
-// open. It reports false when the post is not the internal root's input.
+// the root seat. The internal root's input is a post the seat's delivery rows
+// mark as its own (room.Delivery.RootInput), including an explicitly marked
+// root-seat handoff. The owner's request (room.OwnerRequest), or a handoff,
+// starts the internal root when none is open. It reports false when the post
+// is not the internal root's input.
 func (s *Service) deliverRoot(ctx context.Context, msg room.Message, rec room.Record) (Delivery, bool) {
 	addr := rec.Name + ":" + room.RootAgent
 	direct := msg.Addressed(addr)
-	if !room.RootInput(msg, rec.Name) || mode.InWorkflow() {
+	seat, ok, err := s.Rooms.SeatDelivery(rec.ID, msg.ID)
+	if err != nil {
+		return Delivery{To: addr, Delivery: "failed", Error: err.Error()}, true
+	}
+	if !ok || !seat.RootInput() || mode.InWorkflow() {
 		return Delivery{}, false
 	}
 	cur, err := s.Rooms.Resolve(rec.ID)

@@ -654,13 +654,18 @@ type watchDelivery struct {
 // watchLineText bounds one --lines post text so a notification stays short.
 const watchLineText = 200
 
-// watchWriter turns posts into monitor output. Both output modes follow
-// room.RootContext, the one classifier both roots use: quiet posts are held,
-// and a waking post delivers them all. The default writes one JSON delivery
-// per waking post; --lines writes one short text line per post and a since
-// line per delivery. Explicit --all keeps its raw, one-post-per-line JSON
-// output.
-func watchWriter(out io.Writer, roomName string, all, lines bool) func(room.Message) error {
+// watchSeat tells how one post reaches the root seat, from its stored delivery
+// rows: the mode of its seat delivery, and false when the post is not the
+// seat's context at all.
+type watchSeat func(msg room.Message) (room.DeliveryMode, bool, error)
+
+// watchWriter turns posts into monitor output. Both output modes follow the
+// root seat's stored delivery rows: quiet posts are held, and a waking post
+// delivers them all. The default writes one JSON delivery per waking post;
+// --lines writes one short text line per post and a since line per delivery.
+// Explicit --all keeps its raw, one-post-per-line JSON output and asks the seat
+// about nothing.
+func watchWriter(out io.Writer, seat watchSeat, all, lines bool) func(room.Message) error {
 	enc := json.NewEncoder(out)
 	var held []room.Message
 	deliver := func(wake room.Message) error {
@@ -676,13 +681,14 @@ func watchWriter(out io.Writer, roomName string, all, lines bool) func(room.Mess
 		if all {
 			return enc.Encode(msg)
 		}
-		switch decision, _ := room.RootContext(msg, roomName); decision {
-		case room.RootQuiet:
-			held = append(held, msg)
-			return nil
-		case room.RootWake:
+		mode, ok, err := seat(msg)
+		if err != nil || !ok {
+			return err
+		}
+		if mode == room.DeliveryWake {
 			return deliver(msg)
 		}
+		held = append(held, msg)
 		return nil
 	}
 }
@@ -723,8 +729,13 @@ func lineText(s string, max int) string {
 // follow streams posts newer than cutoff whose IDs are not in seen. Held
 // context has no printed cursor, so --since replays it after a restart.
 func follow(ctx context.Context, rec room.Record, cutoff time.Time, seen map[string]bool, all, lines bool, out io.Writer) error {
-	write := watchWriter(out, rec.Name, all, lines)
-	return store().Follow(ctx, rec.ID, func(msg room.Message) (bool, error) {
+	st := store()
+	seat := func(msg room.Message) (room.DeliveryMode, bool, error) {
+		d, ok, err := st.SeatDelivery(rec.ID, msg.ID)
+		return d.Mode, ok, err
+	}
+	write := watchWriter(out, seat, all, lines)
+	return st.Follow(ctx, rec.ID, func(msg room.Message) (bool, error) {
 		if seen[msg.ID] || time.UnixMilli(msg.TS).Before(cutoff) {
 			return false, nil
 		}

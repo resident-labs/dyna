@@ -100,7 +100,7 @@ func TestSessionWorkerPostEventBurstNoWakeAndDormant(t *testing.T) {
 	if _, err := m.Store.UpdateMeta(info.ID, func(meta *subagent.Meta) { meta.Finished = time.Now(); meta.Status = subagent.StatusDormant }); err != nil {
 		t.Fatal(err)
 	}
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	ticked := make(chan struct{}, 4)
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -176,7 +176,7 @@ func TestSessionWorkerPostEventBurstNoWakeAndDormant(t *testing.T) {
 	restarted, stopRestart := context.WithCancel(ctx)
 	restartDone := make(chan struct{})
 	w := testWorkers(nil)
-	restartSignals := newWorkerSignals()
+	restartSignals := newWorkerSignals(nil)
 	w.sessions = func(ctx context.Context) error { return deliverSessions(ctx, m, restartSignals) }
 	go func() {
 		defer close(restartDone)
@@ -213,7 +213,7 @@ func TestSessionMemberEventDeliversQueuedPostAfterSilentTurn(t *testing.T) {
 		}
 		return msg
 	}
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	tickPost := func(msg room.Message) {
 		t.Helper()
 		signals.wake(roomsvc.Event{Kind: "posts", Posts: []roomsvc.Post{{Message: msg}}})
@@ -289,7 +289,7 @@ func TestOwnerPostEventStartsInternalRootWithoutFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(m.Rooms)
 	ticked := make(chan struct{}, 1)
 	done := make(chan struct{})
 	go func() {
@@ -359,7 +359,7 @@ func TestSafetySweepCountsInputNoEventDelivered(t *testing.T) {
 		t.Fatal(err)
 	}
 	runSessionTurn(t, ctx, pending, 1)
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	// plant stores a wake post without its event, as a writer that bypassed
 	// the engine would.
 	plant := func() room.Message {

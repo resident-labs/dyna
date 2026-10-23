@@ -36,45 +36,6 @@ func TestSetSeatMovesTheHolderOnce(t *testing.T) {
 	}
 }
 
-func TestWakesRoot(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		msg  Message
-		want bool
-	}{
-		{"human post to root", Message{Wake: true, From: "r", Human: true, Kind: "message", To: []string{"r"}}, true},
-		{"human post to an agent", Message{Wake: true, From: "r", Human: true, Kind: "message", To: []string{"r:a"}}, false},
-		{"root's own post", Message{Wake: true, From: "r", Kind: "message", To: []string{"r"}}, false},
-		{"agent post to root", Message{Wake: true, From: "r:a", Kind: "message", To: []string{"r"}}, false},
-		{"agent notice to root", Message{Wake: true, From: "r:a", Kind: "notice", To: []string{"r"}}, false},
-		{"report owed to the owner", Message{Wake: true, From: "r:a", Kind: "completed", To: []string{"r"}, OwnerReport: true}, false},
-		{"failure owed to the owner", Message{Wake: true, From: "r:a", Kind: "failed", To: []string{"r"}, OwnerReport: true}, true},
-		{"root's shell result", Message{Wake: true, From: "shell:x", Kind: "completed", To: []string{"r"}, OwnerReport: true}, true},
-		{"root's workflow result", Message{From: "run:x", Kind: "completed", To: []string{"r"}, OwnerReport: true}, true},
-		{"report for the desktop only", Message{Wake: true, From: "r:b", Kind: "completed", To: []string{"r"}}, false},
-		{"failure to a parent", Message{Wake: true, From: "r:b", Kind: "failed", To: []string{"r:a", "r"}}, false},
-		{"internal root's report", Message{Wake: true, From: "r:root", Kind: "completed", To: []string{"r"}, OwnerReport: true}, false},
-		{"internal root's post", Message{Wake: true, From: "r:root", Kind: "message", To: []string{"r"}}, false},
-		{"coordination without wake field", Message{From: "r:a", Kind: "message", To: []string{"r"}}, false},
-		{"passive completion", Message{From: "r:a", Kind: "completed", To: []string{"r"}, OwnerReport: true}, false},
-		{"failure remains actionable", Message{From: "r:a", Kind: "failed", To: []string{"r"}, OwnerReport: true}, true},
-		{"stopped remains actionable", Message{From: "r:a", Kind: "stopped", To: []string{"r"}, OwnerReport: true}, true},
-		{"marked action", Message{From: "r:a", Kind: "message", To: []string{"r"}, NeedsRoot: true}, true},
-		{"marked notice", Message{From: "r:a", Kind: "notice", To: []string{"r"}, NeedsRoot: true}, true},
-		{"direct copy", Message{From: "r:a", Kind: "message", To: []string{"r:root"}}, false},
-		{"direct action", Message{From: "r:a", Kind: "message", To: []string{"r:root"}, NeedsRoot: true}, true},
-		{"alert", Message{From: "r:a", Kind: "alert", To: []string{"r"}}, true},
-		{"voice request", Message{From: "r:voice-call", Kind: "message", To: []string{"r"}}, true},
-		{"unmarked PR notice", Message{From: "r:a", Kind: "pr", To: []string{"r"}}, false},
-		{"merge failure", Message{From: "r:a", Kind: "pr", To: []string{"r"}, NeedsRoot: true}, true},
-		{"goal record", Message{Wake: true, From: "r:a", Kind: "goal", To: []string{"r"}}, false},
-	} {
-		if got := WakesRoot(tc.msg, "r"); got != tc.want {
-			t.Errorf("%s: WakesRoot = %v, want %v", tc.name, got, tc.want)
-		}
-	}
-}
-
 // The hook runs under the lock that serializes post append, with the log end
 // it sees, so no post can land between the hook and the new seat.
 func TestSetSeatHookRunsUnderThePostLock(t *testing.T) {

@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
 
@@ -132,7 +131,7 @@ func TestUntargetedPRNoticeIsQuietUnlessRootMustAct(t *testing.T) {
 			t.Fatal(err)
 		}
 		msg, err := e.rooms.Message(e.rec.ID, id)
-		if err != nil || msg.NeedsRoot != needsRoot || msg.Wake != needsRoot || room.WakesRoot(msg, e.rec.Name) != needsRoot {
+		if err != nil || msg.NeedsRoot != needsRoot || msg.Wake != needsRoot || wakesRoot(msg, e.rec.Name) != needsRoot {
 			t.Fatalf("root notice needsRoot=%v: %+v %v", needsRoot, msg, err)
 		}
 	}
