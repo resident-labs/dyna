@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { speaker } from '../ui/posts.js'
+import { speaker } from '../ui/posts.ts'
 import { postedTo, turnHead, turnTail, activitySummary, dmView, groupMessages, sameText, sessionAddress, threadKeys, threadList, plain, voiceRequest, type DmItem, type DmRow, type DmSession, type Receipt, type Thread, type ThreadPost } from './dm.ts'
 import type { Attachment } from '../api/room.ts'
 import type { ShellJob } from '../api/terminal.ts'

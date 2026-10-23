@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { arrivals, motion, FAST, BASE, SLOW } from './motion.js'
+import { arrivals, motion, FAST, BASE, SLOW } from './motion.ts'
 
 test('motion durations follow the shared tokens and drop to zero for reduced motion', (t) => {
   const saved = globalThis.matchMedia

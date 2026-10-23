@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { parse } from 'svelte/compiler'
 import vm from 'node:vm'
-import { createReloadGate, reconcileRows } from '../ui/reloadGate.js'
+import { createReloadGate, reconcileRows } from '../ui/reloadGate.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const body = parse(source).instance.content.body

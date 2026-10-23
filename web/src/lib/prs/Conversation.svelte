@@ -12,7 +12,7 @@
   //   opener names who opened it (authorName)
   //   names, roomId, onchange   for Verdict and the replies in ChangeReview
   import { tick } from 'svelte'
-  import { ago, markdown } from '../ui/format.js'
+  import { ago, markdown } from '../ui/format.ts'
   import Card from '../ui/Card.svelte'
   import Chip from '../ui/Chip.svelte'
   import Thread from './Thread.svelte'

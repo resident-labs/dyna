@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorText } from '../errorText.ts'
-  import { dialog as modal } from '../ui/dialog.js'
+  import { dialog as modal } from '../ui/dialog.ts'
   // Create or edit one profile. Env values are write-only: the editor shows
   // which keys exist, can replace or remove a value, and never receives one.
   import { api } from '../../api.js'

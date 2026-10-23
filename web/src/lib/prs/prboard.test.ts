@@ -75,7 +75,7 @@ async function load(name: string) {
     plugins: [{ name: 'svelte-test', setup(builder) {
       builder.onLoad({ filter: /\.svelte\.js$/ }, ({ path }) => ({ contents: compileModule(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
       builder.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({ contents: compile(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
-      builder.onLoad({ filter: /[/\\]format\.js$/ }, () => ({ contents: "export const markdown = (t) => t || ''; export const ago = () => 'now'; export const initials = (n) => n.slice(0, 2); export const short = (n) => n;", loader: 'js' }))
+      builder.onLoad({ filter: /[/\\]format\.ts$/ }, () => ({ contents: "export const markdown = (t) => t || ''; export const ago = () => 'now'; export const initials = (n) => n.slice(0, 2); export const short = (n) => n;", loader: 'js' }))
       builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: 'export const api = {}; export const copyText = async () => {}; export const openExternal = () => {}', loader: 'js' }))
     } }],
   })

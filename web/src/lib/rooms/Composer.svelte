@@ -1,7 +1,7 @@
 <script>
-  import { speaker } from '../ui/posts.js'
+  import { speaker } from '../ui/posts.ts'
   import { tick, onDestroy } from 'svelte'
-  import { short, roomLabel } from '../ui/format.js'
+  import { short, roomLabel } from '../ui/format.ts'
   import { api } from '../../api.js'
   import MessageInput from '../ui/MessageInput.svelte'
   import { attachmentDraft } from '../files/attachmentDraft.ts'

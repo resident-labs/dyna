@@ -8,7 +8,7 @@
   import MessageInput from '../ui/MessageInput.svelte'
   import { dmView } from '../sessions/dm.ts'
   import { showReasoning, showCompaction } from '../ui/prefs.ts'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import { computerLine } from './summary.ts'
   import { clock } from './clock.svelte.js'
   import { attachmentDraft } from '../files/attachmentDraft.ts'

@@ -3,7 +3,7 @@
   // agents grouped by phase, the log, and the result. Bounds come from
   // roomsvc.RunDetail. A running run can be paused, resumed or canceled;
   // onpause(run) toggles the pause and resolves when the engine has it.
-  import { ago, duration, elapsed, isLongCall } from '../ui/format.js'
+  import { ago, duration, elapsed, isLongCall } from '../ui/format.ts'
   import { api, copyText } from '../../api.js'
   import { createResultLoader, createWorkerResults, type LoadedResult, type WorkerRows } from './runResult.ts'
   import { errorText } from '../errorText.ts'

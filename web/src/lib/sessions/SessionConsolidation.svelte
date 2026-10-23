@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { dialog as modal } from '../ui/dialog.js'
+  import { dialog as modal } from '../ui/dialog.ts'
   import { api } from '../../api.js'
   import { activeConsolidation, consolidationPhase, createConsolidationView, selectionKey, sessionIds, type ConsolidationValue } from './consolidation.ts'
   import type { Member } from '../api/room.ts'

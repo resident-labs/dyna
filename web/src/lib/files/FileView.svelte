@@ -8,11 +8,11 @@
   import { human } from './attach.js'
   import { markdownDocument } from './preview.ts'
   import Document from './Document.svelte'
-  import { highlight, languageOf, escape, splitLines } from '../ui/highlight.js'
+  import { highlight, languageOf, escape, splitLines } from '../ui/highlight.ts'
   import { code, setWrap } from './codeprefs.svelte.js'
   import { crumbs, isMarkdown } from './repo.ts'
   import History from './History.svelte'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
 
   let { roomId, session = '', path, rootLabel = '', narrow = false, at = '', was = '', onat = null, onfolder, onback = null } = $props()
 

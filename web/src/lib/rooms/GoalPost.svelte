@@ -2,7 +2,7 @@
   import GoalGlyph from './GoalGlyph.svelte'
   import ExpediteBadge from './ExpediteBadge.svelte'
   import { expedite, goalExpedited } from './expedite.ts'
-  import { stamp } from '../ui/format.js'
+  import { stamp } from '../ui/format.ts'
   let { post, goals = [], ongoal } = $props()
   let id = $derived(post.text?.match(/\bgoal (g\d+)\b/i)?.[1] ?? '')
   let goal = $derived(goals.find((g) => g.id === id))

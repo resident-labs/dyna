@@ -1,6 +1,6 @@
 import type { QueueItem, Session } from '../api/session.ts'
 import { errorText } from '../errorText.ts'
-import { createReloadGate } from '../ui/reloadGate.js'
+import { createReloadGate } from '../ui/reloadGate.ts'
 
 const TURNS_PER_PAGE = 6
 

@@ -2,7 +2,7 @@
   // One change's own rules, opened from its "Uses room rules" link. The
   // change can override the room rules with a recorded reason (see
   // ChangePolicy). The room's own review settings live in Room settings.
-  import { dialog as modal } from '../ui/dialog.js'
+  import { dialog as modal } from '../ui/dialog.ts'
   import ChangeDetail from './ChangeDetail.svelte'
   import ChangePolicy from './ChangePolicy.svelte'
   import { api } from '../../api.js'

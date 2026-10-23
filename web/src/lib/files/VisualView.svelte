@@ -2,7 +2,7 @@
   import Avatar from '../ui/Avatar.svelte'
   import CardFrame from './CardFrame.svelte'
   import { fileURL } from '../../api.js'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import { visuals } from './visuals.svelte.js'
   import { visualOf, versionOf, checkStatus, checksSummary } from './visuals.js'
 

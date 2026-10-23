@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { dialog } from './dialog.js'
+  import { dialog } from './dialog.ts'
   // A confirm for an action that is hard to undo. Focus starts on Cancel, so
   // a stray Enter or Space never runs the action.
   interface Props {

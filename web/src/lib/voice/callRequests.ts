@@ -3,7 +3,7 @@
 // "call-requests" list events. A post to @voice-call never rings.
 import { writable } from 'svelte/store'
 import { isRecord, isString } from '../api/guards.ts'
-import { roomIDPattern } from '../ui/posts.js'
+import { roomIDPattern } from '../ui/posts.ts'
 
 export type CallState = 'ringing' | 'joined' | 'declined' | 'withdrawn'
 

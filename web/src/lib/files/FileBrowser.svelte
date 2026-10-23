@@ -15,7 +15,7 @@
   import { base, crumbs, isDir, parent, STATUS, statusLetter, treeRows } from './repo.ts'
   import { fileHash, parseFileHash } from '../prs/prlink.ts'
   import { roomHash } from '../ui/route.ts'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import Chip from '../ui/Chip.svelte'
   import Document from './Document.svelte'
   import History from './History.svelte'

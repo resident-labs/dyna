@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { dialog as modal } from '../ui/dialog.js'
+  import { dialog as modal } from '../ui/dialog.ts'
   import { sessionIds } from './consolidation.ts'
   import { bulkTitles, bulkRetryable, bulkResultText, adoptTargets, type BulkAction, type BulkValue } from './bulkSessions.ts'
   import type { Member } from '../api/room.ts'

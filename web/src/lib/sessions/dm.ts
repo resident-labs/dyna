@@ -1,9 +1,9 @@
 import type { Member, Post } from '../api/room.ts'
 import type { Item, Turn, Usage } from '../api/session.ts'
 import type { ShellJob } from '../api/terminal.ts'
-import { isNote, noteData } from '../ui/notices.js'
+import { isNote, noteData } from '../ui/notices.ts'
 import { userText } from './userText.ts'
-import { duration, short, tokens } from '../ui/format.js'
+import { duration, short, tokens } from '../ui/format.ts'
 import { FOLD_AT, quiet, type Finished } from './shellBlock.ts'
 
 type Time = string | number

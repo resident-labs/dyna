@@ -4,7 +4,7 @@
 // call is a fresh conversation, so earlier calls never show here.
 import { VOICE } from '../rooms/channels.ts'
 import { rootToVoice } from './attention.ts'
-import { postParts } from '../ui/postParts.js'
+import { postParts } from '../ui/postParts.ts'
 
 // NAMES is how the call names who speaks.
 export const NAMES = { you: 'you', voice: 'Voice', root: 'root' }

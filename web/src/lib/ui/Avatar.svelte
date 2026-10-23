@@ -1,6 +1,6 @@
 <script>
   import { sessionStatus } from '../sessions/status.ts'
-  import { initials } from './format.js'
+  import { initials } from './format.ts'
   let { name = '', hue = 0, size = 40, state = '', status = '', ring = 'var(--main)', owner = false, emoji = '', image = '' } = $props()
 </script>
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
-import { postHref, postAttachment, speaker } from './posts.js'
+import { postHref, postAttachment, speaker } from './posts.ts'
 
 const room = 'room_20261017-123456-abcdef12'
 test('post links name stored room and post IDs and reject non-post targets', () => {

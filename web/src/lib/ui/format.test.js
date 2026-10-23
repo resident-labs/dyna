@@ -15,7 +15,7 @@ test('markdown renders each text once and reuses the result', async (t) => {
   }
   DOMPurify.sanitize = (html) => html
   t.after(() => { [globalThis.DOMParser, globalThis.NodeFilter, DOMPurify.sanitize] = saved })
-  const { markdown } = await import('./format.js')
+  const { markdown } = await import('./format.ts')
 
   const first = markdown('**cached** post')
   assert.equal(markdown('**cached** post'), first)
@@ -26,13 +26,13 @@ test('markdown renders each text once and reuses the result', async (t) => {
 })
 
 test('a folded result line drops the turn lead-in and folds whitespace', async () => {
-  const { resultLine } = await import('./format.js')
+  const { resultLine } = await import('./format.ts')
   assert.equal(resultLine('dyna-agent:ui-guy-right turn 464 completed. Result: No action needed.\n\n#866 is ready.'), 'No action needed. #866 is ready.')
   assert.equal(resultLine('Plain   text'), 'Plain text')
 })
 
 test('elapsed reads like a stopwatch, and calls over 30 s are long', async () => {
-  const { elapsed, isLongCall } = await import('./format.js')
+  const { elapsed, isLongCall } = await import('./format.ts')
   assert.equal(elapsed(8000), '8s')
   assert.equal(elapsed(65000), '1m 05s')
   assert.equal(elapsed(3720000), '1h 02m')

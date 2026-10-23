@@ -32,7 +32,7 @@ test('all modal surfaces use the common keyboard and focus action', () => {
     const ast = parse(source, { modern: true })
     assert.ok(ast.instance !== null)
     const imports = ast.instance.content.body.flatMap((node) =>
-      node.type === 'ImportDeclaration' && typeof node.source.value === 'string' && node.source.value.endsWith('/dialog.js') ? [node] : [])
+      node.type === 'ImportDeclaration' && typeof node.source.value === 'string' && node.source.value.endsWith('/dialog.ts') ? [node] : [])
     const aliases = imports.flatMap((node) => node.specifiers.flatMap((specifier) => {
       if (specifier.type !== 'ImportSpecifier') return []
       return specifier.imported.type === 'Identifier' && specifier.imported.name === 'dialog' ? [specifier.local.name] : []

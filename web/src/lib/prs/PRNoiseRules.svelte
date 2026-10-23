@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api, openExternal } from '../../api.js'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import type { NoiseRule, PRNoiseList } from '../api/change.ts'
   import { errorText } from '../errorText.ts'
 

@@ -1,4 +1,4 @@
-import { trimHistoryRows } from '../ui/historyWindow.js'
+import { trimHistoryRows } from '../ui/historyWindow.ts'
 
 const SESSION_WINDOW = 18
 const time = (value?: string): number => Math.max(0, Date.parse(value ?? '') || 0)

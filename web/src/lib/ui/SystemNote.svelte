@@ -6,8 +6,8 @@
   // issues open to one line per test: name, time against the limit, area,
   // the PRs that hit it, and the issue (onissue opens the Issues panel).
   import PostFiles from './PostFiles.svelte'
-  import { clock } from './format.js'
-  import { fullText, sameChanges } from './notices.js'
+  import { clock } from './format.ts'
+  import { fullText, sameChanges } from './notices.ts'
   import { prHash } from '../prs/prlink.ts'
   let { notes = [], roomId, onopenfile, onissue = null } = $props()
   let slow = $derived(notes[0]?.slow ? notes.map((n) => n.slow) : null)

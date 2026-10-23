@@ -5,7 +5,7 @@
   import { untrack } from 'svelte'
   import { createGoalEvents } from '../rooms/goalEvents.ts'
   import { api } from '../../api.js'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
   import DoingLine from '../sessions/DoingLine.svelte'
   import ServiceCards from './ServiceCards.svelte'

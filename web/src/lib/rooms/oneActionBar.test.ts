@@ -124,7 +124,7 @@ test('a PR post has one bar per notice and shows only the selected one', async (
 })
 
 // DmRows with two real message rows: they share one selection.
-const dmBuilt = await bundle({ component: '../sessions/DmRows', format: readFileSync(new URL('../ui/format.js', import.meta.url), 'utf8'), api: 'export const api = {}; export const openExternal = () => {}; export const copyText = () => Promise.resolve()' })
+const dmBuilt = await bundle({ component: '../sessions/DmRows', format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8'), api: 'export const api = {}; export const openExternal = () => {}; export const copyText = () => Promise.resolve()' })
 const message = (id: string) => ({ kind: 'message', key: `post:${id}`, ts: '2026-10-20T08:56:00Z', author: 'work:lead', text: id, post: { id, kind: 'message', from: 'work:lead', to: ['work'], ts: '2026-10-20T08:56:00Z', text: id } })
 
 test('tapping DM message A and then B leaves only B with a bar', async () => {

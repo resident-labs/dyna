@@ -7,8 +7,8 @@
   import { isFeedSearch } from '../api/guards.ts'
   import type { Post } from '../api/room.ts'
   import { snippet } from './feedFind.ts'
-  import { speaker } from '../ui/posts.js'
-  import { stamp } from '../ui/format.js'
+  import { speaker } from '../ui/posts.ts'
+  import { stamp } from '../ui/format.ts'
   import SearchIcon from '../ui/SearchIcon.svelte'
 
   interface Props {

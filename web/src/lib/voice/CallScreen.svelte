@@ -12,7 +12,7 @@
   import { NAMES, shareLine } from './conversation.js'
   import QuestionCard from './QuestionCard.svelte'
   import { icons } from './icons.js'
-  import { dialog } from '../ui/dialog.js'
+  import { dialog } from '../ui/dialog.ts'
 
   // shared: the unseen shared items, oldest first; the banner shows the newest.
   let { s, layout, ui, onui, rows, question, length, onclose, shared, onopenshared, ondismissshared } = $props()
