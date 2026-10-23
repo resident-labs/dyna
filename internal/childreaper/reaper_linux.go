@@ -21,7 +21,9 @@ func childPID(info *unix.Siginfo) int {
 // Reap drains available exit statuses until none remain or keep returns true.
 // A kept child stays waitable for its owner. Callers must serialize this call
 // with child registration and other waits for children that are not kept.
-func Reap(keep func(int) bool) {
+// It returns how many children it reaped.
+func Reap(keep func(int) bool) int {
+	reaped := 0
 	for {
 		var info unix.Siginfo
 		err := unix.Waitid(unix.P_ALL, 0, &info, unix.WEXITED|unix.WNOHANG|unix.WNOWAIT, nil)
@@ -29,14 +31,21 @@ func Reap(keep func(int) bool) {
 			continue
 		}
 		if err != nil {
-			return
+			return reaped
 		}
 		pid := childPID(&info)
 		if pid == 0 || keep(pid) {
-			return
+			return reaped
 		}
-		if _, err = unix.Wait4(pid, nil, unix.WNOHANG, nil); err != nil && err != unix.ECHILD && err != unix.EINTR {
-			return
+		n, err := unix.Wait4(pid, nil, unix.WNOHANG, nil)
+		if err == unix.EINTR {
+			continue
+		}
+		if err != nil && err != unix.ECHILD {
+			return reaped
+		}
+		if n == pid {
+			reaped++
 		}
 	}
 }

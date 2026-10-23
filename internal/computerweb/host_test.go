@@ -133,6 +133,7 @@ func TestViewLeaseAndControl(t *testing.T) {
 	}()
 	fake, h := daemon(t)
 	inner := computers.NewFakeSupervisor("ses_a")
+	inner.Changed = make(chan struct{}, 4)
 	fake.Handle = func(ctx context.Context, r computers.Request) (any, error) {
 		v, err := inner.Dispatch(ctx, r)
 		if view, ok := v.(computers.View); ok {
@@ -168,17 +169,20 @@ func TestViewLeaseAndControl(t *testing.T) {
 	}
 	// Closing the view gives control back: the lease ends with its connection.
 	view.Done()
-	deadline := time.Now().Add(2 * time.Second)
+	// Every viewer change reports one token, so the release is an event.
 	for {
+		select {
+		case <-inner.Changed:
+		case <-time.After(2 * time.Second):
+			cur, _ := inner.Dispatch(context.Background(), computers.Request{Op: "status"})
+			status := cur.(computers.Status)
+			t.Fatalf("control %q viewers %d after close", status.Control, status.Viewers)
+		}
 		cur, _ := inner.Dispatch(context.Background(), computers.Request{Op: "status"})
-		ctl, viewers := cur.(computers.Status).Control, cur.(computers.Status).Viewers
-		if ctl == computers.ControlAgent && viewers == 0 {
+		status := cur.(computers.Status)
+		if status.Control == computers.ControlAgent && status.Viewers == 0 {
 			break
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("control %q viewers %d after close", ctl, viewers)
-		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	if _, err := h.Control("ses_a", "pagekey-1", "agent"); err == nil {
 		t.Fatal("a closed viewer still takes control calls")
