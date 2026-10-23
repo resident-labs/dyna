@@ -138,6 +138,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 	var stderr bytes.Buffer
 	cmd.Stdout = stdout
 	cmd.Stderr = &stderr
+	startBoundary := normalizedBoundary(normalizer)
 	waitCommand, release, stage, err := startGuarded(ctx, p, cmd, spec.prompt, steering, execution)
 	defer release()
 	switch stage {
@@ -156,7 +157,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 	}
 	if steering != nil && steering.opts.OnMessage != nil {
 		for _, message := range spec.steering {
-			steering.opts.OnMessage(message)
+			steering.opts.OnMessage(message, startBoundary)
 		}
 	}
 	if spec.journalReminderReason != "" && journal != nil {
@@ -251,7 +252,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 		}
 		if steering.opts.OnMessage != nil {
 			for _, message := range messages {
-				steering.opts.OnMessage(message)
+				steering.opts.OnMessage(message, nil)
 			}
 		}
 		if journal != nil {

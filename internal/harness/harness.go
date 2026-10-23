@@ -156,8 +156,9 @@ type SteeringOptions struct {
 	// OnDispatch records an accepted message before its exact-session
 	// continuation can start. Returning an error prevents that continuation.
 	OnDispatch func(runstore.SteeringMessage) error
-	// OnMessage confirms delivery only after the continuation process starts.
-	OnMessage func(runstore.SteeringMessage)
+	// OnMessage confirms delivery with its captured complete-line output boundary.
+	// A nil boundary is unknown; zero is a proved boundary.
+	OnMessage func(runstore.SteeringMessage, *int64)
 	pollEvery time.Duration
 }
 

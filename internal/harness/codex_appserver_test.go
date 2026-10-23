@@ -93,7 +93,7 @@ func TestCodexAppServerSteersNativeTurn(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var delivered []runstore.SteeringMessage
-	result, err := RunWithOptions(ctx, p, "one", t.TempDir(), false, JournalOptions{}, SteeringOptions{Source: source, OnMessage: func(m runstore.SteeringMessage) { delivered = append(delivered, m) }}, SessionOptions{}, ExecutionOptions{})
+	result, err := RunWithOptions(ctx, p, "one", t.TempDir(), false, JournalOptions{}, SteeringOptions{Source: source, OnMessage: func(m runstore.SteeringMessage, _ *int64) { delivered = append(delivered, m) }}, SessionOptions{}, ExecutionOptions{})
 	if err != nil || !strings.Contains(result.Output, "finish the tests") || len(delivered) != 1 {
 		t.Fatalf("steered result = %+v, %v, deliveries %+v", result, err, delivered)
 	}
