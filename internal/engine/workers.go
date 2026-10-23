@@ -22,6 +22,7 @@ import (
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/sysload"
 )
 
 // Each signal holds one pending tick. Store scans keep running while a worker
@@ -52,7 +53,7 @@ func newWorkerSignals() *workerSignals {
 		"questions": make(chan struct{}, 1), "hooks": make(chan struct{}, 1),
 		"sessions": make(chan struct{}, 1), "merges": make(chan struct{}, 1),
 		"sync": make(chan struct{}, 1), "instructions": make(chan struct{}, 1),
-		"fetch": make(chan struct{}, 1),
+		"fetch": make(chan struct{}, 1), "probe": make(chan struct{}, 1),
 	}, sweeps: map[string]bool{}}
 }
 
@@ -222,9 +223,11 @@ type workers struct {
 	// that could not finish, and prs, merges and sync poll GitHub, merge
 	// trials and sync operations while they have work.
 	checkins, instructions, fetch, questions, hooks, prs, merges, sync func(context.Context) (time.Time, error)
+	// probe reads every enabled machine, and returns when to read them again.
+	probe func(context.Context) (time.Time, error)
 }
 
-func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, events *hub.Hub) workers {
+func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub) workers {
 	prs := watch.New()
 	prs.Notify = rooms.Notify
 	prs.GH.Rooms = rooms.Notify.Rooms
@@ -269,6 +272,7 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, events *hub.H
 		sessions: func(ctx context.Context) error { return deliverSessions(ctx, rooms.Notify.Sessions, signals) },
 		merges:   prs.MergeTick,
 		sync:     prs.SyncTick,
+		probe:    func(ctx context.Context) (time.Time, error) { return probeMachines(ctx, load) },
 		fetch:    func(ctx context.Context) (time.Time, error) { return syncer.Tick(ctx, time.Now()) },
 		instructions: func(ctx context.Context) (time.Time, error) {
 			return rooms.Notify.Sessions.FlushInstructionNotes(ctx, time.Now())
@@ -374,6 +378,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	timed("Merge service", signals.channels["merges"], timerMerges, w.merges)
 	timed("Parent check-ins", signals.channels["checkins"], timerParentCheckins, w.checkins)
 	timed("Question delivery", signals.channels["questions"], timerQuestions, w.questions)
+	timed("Machine probe", signals.channels["probe"], timerProbe, w.probe)
 	start("Dormant session sweep", sweep, w.sweep)
 	timed("Hook spool", signals.channels["hooks"], timerHooks, w.hooks)
 	start("Session delivery", signals.channels["sessions"], w.sessions)
@@ -400,7 +405,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	daily = func() { wakeWorker(sweep); t.at(timerSweep, t.now().Add(sweepEvery), daily) }
 	// Catch writes made while the engine was down.
 	signals.recoverSessions()
-	wake("checkins", "instructions", "fetch", "questions", "hooks", "prs", "merges", "sync")
+	wake("checkins", "instructions", "fetch", "questions", "hooks", "prs", "merges", "sync", "probe")
 	wakeWorker(sweep)
 	t.at(timerSafetySweep, t.now().Add(safetySweepEvery), safety)
 	t.at(timerSweep, t.now().Add(sweepEvery), daily)
@@ -425,11 +430,11 @@ func runOwned(ctx context.Context, root string, w workers, signals *workerSignal
 	return true, nil
 }
 
-func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, events *hub.Hub) {
+func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, load *sysload.Sampler, events *hub.Hub) {
 	report := func(name string, err error) {
 		log.Print(watch.Sanitize(name + ": " + err.Error()))
 	}
-	owned, err := runOwned(ctx, store.DataDir(), engineWorkers(rooms, signals, events), signals, t, report)
+	owned, err := runOwned(ctx, store.DataDir(), engineWorkers(rooms, signals, load, events), signals, t, report)
 	if err != nil {
 		log.Print(watch.Sanitize("workers: " + err.Error()))
 		return

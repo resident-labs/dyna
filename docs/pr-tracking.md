@@ -323,6 +323,36 @@ flag belongs to the whole machine, so on the local row it covers that machine's
 work, not the engine, which keeps running. `dyna machine add` needs a new name;
 use `dyna machine edit` to change a stored machine.
 
+## Probing machines
+
+Dyna reads what a machine has, and whether it is reachable, with one bounded
+probe. A remote probe runs a fixed POSIX shell script over SSH with
+`BatchMode=yes`, and the whole probe has a 20-second limit. The local row runs
+the same script without SSH. No credential, token or setting goes with it.
+
+The script prints `key=value` lines: OS and architecture, CPU count, MemTotal
+and MemAvailable, the load averages, CPU use over one second, whether `/dev/dri`
+exists, whether docker or podman exists, whether the computer dependencies
+exist, and the remote `dyna --version`. The computer dependencies that
+registration checks are labwc and Xwayland; see
+[Agent computers](computers.md). A machine is shown with computers only when it
+has both. Computers are a capability, not a role. wayvnc only streams a desktop
+to the app, so the probe reports it as a separate `stream` capability.
+
+```sh
+dyna machine probe hermeslab
+dyna machine probe --all
+```
+
+`dyna machine list` has a STATUS column: `online`, `offline`, `disabled` or
+`unknown`. `dyna machine show` prints the capabilities, the load, the time the
+probe last reached the machine, and the error of the last failed probe.
+
+The engine probes every enabled machine when it starts, when a machine row
+changes, and every five minutes. It runs at most four probes at once. A failed
+probe keeps what the last good probe read, and marks the machine offline with
+the error. A disabled machine is not probed, and shows `disabled`.
+
 The mode applies to the current room. The default, `github`, keeps hosted CI.
 `local` and `both` let local and GitHub results race. A conclusive pass permits
 progress when every required check has passed. An observed failure from either

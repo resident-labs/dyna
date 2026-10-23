@@ -292,9 +292,14 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 			rooms.StoreChanged(ev.Topic)
 			return
 		case machines.Topic:
-			// A machine change can add, move or stop CI work.
+			// A machine change can add, move or stop CI work, and the new or
+			// edited machine needs a probe. A probe result changes neither.
+			if machines.IsProbeKey(ev.Key) {
+				break
+			}
 			wakeWorker(signals.channels["prs"])
 			wakeWorker(signals.channels["merges"])
+			wakeWorker(signals.channels["probe"])
 		case prstate.Topic:
 			rooms.PRsChanged()
 			return
