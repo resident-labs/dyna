@@ -1,19 +1,8 @@
 import { writable, type Readable } from 'svelte/store'
-import type { Attachment } from '../api/room.ts'
-import { stage, upload, release, pastedFiles, MAX_FILES } from './attach.js'
+import { stage, upload, release, pastedFiles, MAX_FILES } from './attach.ts'
 
-// One staged file. attach.js is JavaScript, so status stays a string until it converts.
-export interface DraftItem {
-  key: string
-  file: File
-  name: string
-  size: number
-  image: boolean
-  url: string
-  status: string
-  error: string
-  att: Pick<Attachment, 'id'> | null
-}
+import type { DraftItem, PasteEvent } from './attach.ts'
+export type { DraftItem, PasteEvent } from './attach.ts'
 
 export interface DraftState {
   items: DraftItem[]
@@ -21,12 +10,6 @@ export interface DraftState {
   uploading: boolean
   failed: boolean
   atts: { id: string; name: string }[]
-}
-
-// The part of a paste event that the draft reads.
-export interface PasteEvent {
-  clipboardData: { getData(format: string): string; files?: ArrayLike<File> } | null
-  preventDefault(): void
 }
 
 export interface AttachmentDraft extends Readable<DraftState> {

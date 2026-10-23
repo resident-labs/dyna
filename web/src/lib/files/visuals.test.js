@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { byVisual, newestVersion } from './visuals.js'
+import { byVisual, newestVersion } from './visuals.ts'
 
 test('a card shows the newest version of its visual', () => {
   const v1 = { id: 'a1', render: 'html', version: 1 }
@@ -18,7 +18,7 @@ test('a card shows the newest version of its visual', () => {
 })
 
 test('check status is the worst check, and the summary counts them', async () => {
-  const { checkStatus, checksSummary, filterVisuals } = await import('./visuals.js')
+  const { checkStatus, checksSummary, filterVisuals } = await import('./visuals.ts')
   const att = (...s) => ({ checks: s.map((status) => ({ status })) })
   assert.equal(checkStatus(att('pass', 'warn', 'pass')), 'warn')
   assert.equal(checkStatus(att('pass', 'fail', 'warn')), 'fail')
@@ -35,7 +35,7 @@ test('check status is the worst check, and the summary counts them', async () =>
 })
 
 test('an update post shows a chip for its own version; the first post shows the banner', async () => {
-  const { placeholderHue, updates } = await import('./visuals.js')
+  const { placeholderHue, updates } = await import('./visuals.ts')
   assert.equal(updates({ id: 'a1', render: 'html', version: 1 }), false)
   assert.equal(updates({ id: 'a2', render: 'html', visual: 'p1', version: 2 }), true)
   assert.equal(placeholderHue('Merge queue'), placeholderHue('Merge queue'))
@@ -44,7 +44,7 @@ test('an update post shows a chip for its own version; the first post shows the 
 })
 
 test('versions are picked by number, so reverted bytes keep their own version', async () => {
-  const { versionOf } = await import('./visuals.js')
+  const { versionOf } = await import('./visuals.ts')
   const a = { id: 'same-bytes', render: 'html' }
   const versions = [
     { post: { id: 'p3', text: 'Back to the first chart' }, attachment: { ...a, version: 3, checks: [{ name: 'renders', status: 'pass' }] } },
@@ -57,7 +57,7 @@ test('versions are picked by number, so reverted bytes keep their own version', 
 })
 
 test('only posts with HTML attachments invalidate the visual list', async () => {
-  const { changesVisuals } = await import('./visuals.js')
+  const { changesVisuals } = await import('./visuals.ts')
   assert.equal(changesVisuals({ posts: [{ text: 'hello' }] }), false)
   assert.equal(changesVisuals({ posts: [{ attachments: [{ render: 'image' }] }] }), false)
   assert.equal(changesVisuals({ posts: [{ attachments: [{ render: 'html', visual: 'p1' }] }] }), true)

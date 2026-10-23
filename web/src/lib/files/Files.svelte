@@ -1,12 +1,12 @@
 <script>
   import { untrack } from 'svelte'
   import { fileURL } from '../../api.js'
-  import { human, extOf } from './attach.js'
+  import { human, extOf } from './attach.ts'
   import { previewKind, previewLabel } from './preview.ts'
   import VisualBanner from './VisualBanner.svelte'
   import { postAttachment } from '../ui/posts.ts'
-  import { visuals } from './visuals.svelte.js'
-  import { visualOf, updates } from './visuals.js'
+  import { visuals } from './visuals.svelte.ts'
+  import { visualOf, updates } from './visuals.ts'
   let { roomId, items = [], postId = '', onopen } = $props()
   const open = (attachment) => onopen(postAttachment(attachment, postId))
   const image = (a) => /^image\/(png|jpeg|gif|webp)$/.test(a.mime)

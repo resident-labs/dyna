@@ -3,8 +3,8 @@
   import CardFrame from './CardFrame.svelte'
   import { fileURL } from '../../api.js'
   import { ago } from '../ui/format.ts'
-  import { visuals } from './visuals.svelte.js'
-  import { visualOf, versionOf, checkStatus, checksSummary } from './visuals.js'
+  import { visuals } from './visuals.svelte.ts'
+  import { visualOf, versionOf, checkStatus, checksSummary } from './visuals.ts'
 
   // The full view of one card: header with versions and checks, then the card.
   let { roomId, att, ready, onjump = null, ondownload, downloading = false, error = '', onclose } = $props()
