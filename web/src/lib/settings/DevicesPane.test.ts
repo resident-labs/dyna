@@ -6,11 +6,11 @@ import { element, elements, need, textOf } from '../../../test/need.ts'
 
 // DevicesPane with a deferred setDeviceScopes. The test settles each save.
 const API = `export const api = {
-  devices: () => Promise.resolve(structuredClone(globalThis.deviceRows)),
+  devices: () => globalThis.deviceReads ? new Promise((ok, fail) => globalThis.deviceReads.push({ ok, fail })) : Promise.resolve(structuredClone(globalThis.deviceRows)),
   setDeviceScopes: (id, scopes) => new Promise((ok, fail) => globalThis.scopeSaves.push({ id, scopes, ok, fail })),
 }`
 const built = await bundle({ component: '../settings/DevicesPane', api: API })
-const settle = () => new Promise((r) => setTimeout(r, 0))
+const settle = async () => { await Promise.resolve(); await Promise.resolve() }
 
 function row(target: HTMLElement, name: string): HTMLElement {
   return need(elements(target, '.item').find((el) => textOf(el.querySelector('.name')).includes(name)), `row ${name}`)
@@ -41,13 +41,14 @@ interface ScopeSave {
 }
 const saves = (): ScopeSave[] => Reflect.get(globalThis, 'scopeSaves')
 
-async function pane(run: (pane: Pane) => Promise<void>) {
+async function pane(run: (pane: Pane) => Promise<void>, deferReads = false) {
   const dom = installDom({
     deviceRows: [
       { kind: 'paired', id: 'a', name: 'Phone A', scopes: ['read', 'operate'], scopeLabel: 'read, operate', lastSeen: '' },
       { kind: 'paired', id: 'b', name: 'Phone B', scopes: ['read'], scopeLabel: 'read', lastSeen: '' },
     ],
     scopeSaves: [],
+    deviceReads: deferReads ? [] : null,
   })
   const { dir, default: DevicesPane, mount, flushSync } = await importBundle(built, 'DevicesPane')
   try {
@@ -57,7 +58,7 @@ async function pane(run: (pane: Pane) => Promise<void>) {
     await run({ target, flushSync })
   } finally {
     dom.window.close()
-    for (const n of [...domNames, 'deviceRows', 'scopeSaves']) Reflect.deleteProperty(globalThis, n)
+    for (const n of [...domNames, 'deviceRows', 'scopeSaves', 'deviceReads']) Reflect.deleteProperty(globalThis, n)
     await rm(dir, { recursive: true, force: true })
   }
 }
@@ -108,4 +109,56 @@ test('a failed save does not clear a later save on another device', async () => 
     assert.equal(box(still, 'files').checked, true)
     assert.equal(target.textContent.includes('scope refused'), false, 'Phone A error stays off Phone B')
   })
+})
+
+
+test('device reads retry failures and keep loaded rows during a single refresh', async () => {
+  await pane(async ({ target, flushSync }) => {
+    const reads: { ok: (rows: object[]) => void; fail: (error: Error) => void }[] = Reflect.get(globalThis, 'deviceReads')
+    const button = (name: string) => need(elements<HTMLButtonElement>(target, 'button').find((el) => textOf(el).trim() === name), name)
+    need(reads.shift()).fail(new Error('device read failed'))
+    await settle(); flushSync()
+    button('Retry').click()
+    flushSync()
+    assert.equal(reads.length, 1)
+    const rows = [
+      { kind: 'paired', id: 'a', name: 'Phone A', scopes: ['read'], lastSeen: '' },
+      { kind: 'connect', id: 'b', name: 'Connect browser', lastSeen: '' },
+    ]
+    need(reads.shift()).ok(rows)
+    await settle(); flushSync()
+    assert.equal(elements(target, '.item').length, 2)
+    button('Refresh').click()
+    flushSync()
+    const refreshing = button('Refreshing…')
+    assert.equal(refreshing.disabled, true)
+    refreshing.click()
+    assert.equal(reads.length, 1, 'repeated refresh does not start another read')
+    assert.equal(elements(target, '.item').length, 2, 'loaded groups stay visible')
+    need(reads.shift()).fail(new Error('refresh failed'))
+    await settle(); flushSync()
+    assert.equal(elements(target, '.item').length, 2)
+    assert.match(target.textContent, /refresh failed/)
+    button('Retry').click()
+    flushSync()
+    need(reads.shift()).ok(rows)
+    await settle(); flushSync()
+    assert.equal(target.textContent.includes('refresh failed'), false)
+    assert.equal(elements(target, '.item').length, 2)
+
+    button('Refresh').click()
+    flushSync()
+    element(target, '[aria-label="Change scopes for Phone A"]').click()
+    flushSync()
+    saveButton(row(target, 'Phone A')).click()
+    flushSync()
+    need(saves()[0]).ok({})
+    await settle(); flushSync()
+    assert.equal(reads.length, 1)
+    need(reads.shift()).ok(rows)
+    await settle(); flushSync()
+    assert.equal(reads.length, 1, 'a mutation during refresh queues a fresh read')
+    need(reads.shift()).ok(rows)
+    await settle(); flushSync()
+  }, true)
 })

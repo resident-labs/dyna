@@ -46,7 +46,9 @@
   let { pairNow = false, onmodal = () => {} }: { pairNow?: boolean; onmodal?: (open: boolean) => void } = $props()
 
   let list = $state<Device[] | null>(null)
-  let error = $state('')
+  let readError = $state('')
+  let loading = $state(false)
+  let loadAgain = false
   let pairing = $state(untrack(() => pairNow)) // opened from "Pair a device" elsewhere
   let confirm = $state<Revoke | null>(null) // revoke all: {kind, id, title, lines, action, busy, error}
   let revoking = $state<Revoke | null>(null) // one row, asked inline: {key, kind, id, busy, error}
@@ -60,12 +62,24 @@
   let paired = $derived((list ?? []).filter((d) => d.kind === 'paired'))
   let sessions = $derived((list ?? []).filter((d) => d.kind === 'connect'))
 
-  async function load() {
+  async function load(afterChange = false) {
+    if (loading) {
+      loadAgain ||= afterChange
+      return
+    }
+    loading = true
+    readError = ''
     try {
       list = (await api.devices()) ?? []
-      error = ''
     } catch (e) {
-      error = errorText(e)
+      readError = errorText(e)
+    } finally {
+      loading = false
+      // A scope change or revoke may finish during a read of the old list.
+      if (loadAgain) {
+        loadAgain = false
+        load()
+      }
     }
   }
   onMount(load)
@@ -142,7 +156,7 @@
     try {
       await api.setDeviceScopes(current.id, names)
       if (editing?.token === token) editing = null
-      load()
+      load(true)
     } catch (e) {
       if (editing?.token === token) editing = { ...current, busy: false, error: errorText(e) }
     }
@@ -158,7 +172,7 @@
     try {
       await api.revokeDevice(target.kind, target.id)
       set(null)
-      load()
+      load(true)
     } catch (e) {
       set({ ...target, busy: false, error: errorText(e) })
     }
@@ -216,17 +230,26 @@
 <section>
   <TabHeader flush title="Devices" blurb="Phones and browsers that can use this Dyna. The line under each name is what that device is allowed to do.">
     {#snippet action()}
-      <button class="btn fill" onclick={() => (pairing = true)}>
-        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
-        Pair a device
-      </button>
+      <div class="list-actions">
+        {#if list !== null}
+          <button class="btn quiet" disabled={loading} onclick={() => load()}>{loading ? 'Refreshing…' : 'Refresh'}</button>
+        {/if}
+        <button class="btn fill" onclick={() => (pairing = true)}>
+          <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M10 4v12M4 10h12" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>
+          Pair a device
+        </button>
+      </div>
     {/snippet}
   </TabHeader>
 
-  {#if error}
-    <p class="err">{error}</p>
-  {:else if !list}
-    <Skeleton label="Loading devices" rows={3} />
+  {#if readError}
+    <div class="read-error" role="alert">
+      <p class="err">{readError}</p>
+      <button class="btn quiet" disabled={loading} onclick={() => load()}>Retry</button>
+    </div>
+  {/if}
+  {#if list === null}
+    {#if loading}<Skeleton label="Loading devices" rows={3} />{/if}
   {:else}
     <h3 class="section-label">Paired with a code<span>{paired.length}</span></h3>
     {#if paired.length}
@@ -245,7 +268,7 @@
 </section>
 
 {#if pairing}
-  <PairDevice onclose={() => { pairing = false; load() }} />
+  <PairDevice onclose={() => { pairing = false; load(true) }} />
 {/if}
 {#if confirm}
   {@const asked = confirm}
@@ -253,6 +276,9 @@
 {/if}
 
 <style>
+  .list-actions { display: flex; align-items: center; gap: var(--s2); }
+  .read-error { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); margin-bottom: var(--s3); }
+  .read-error p { margin: 0; overflow-wrap: anywhere; }
   .section-label span { margin-left: var(--s2); letter-spacing: 0; }
   .table { background: var(--side); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden; }
   .item { display: flex; align-items: center; gap: 14px; padding: var(--s3) 14px; }
