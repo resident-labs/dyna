@@ -19,8 +19,8 @@ export const HARNESS_ORDER: HarnessMeta[] = [
 // Harnesses that take API keys for providers, kept in their private home.
 export const takesProviderKeys = (id: string): boolean => ['pi', 'opencode'].includes(id)
 
-// Pi has no subscription login of its own: its providers take API keys.
-export const hasSubscriptionLogin = (id: string): boolean => id !== 'pi'
+// Pi offers its providers' OAuth logins alongside the API-key form.
+export const hasSubscriptionLogin = (id: string): boolean => HARNESS_ORDER.some((harness) => harness.id === id)
 
 // filterProviders narrows the picker to names or IDs that contain every typed word.
 export function filterProviders<C extends { name: string; id: string }>(choices: C[] | null | undefined, query?: string | null): C[] {

@@ -31,7 +31,7 @@ func TestGrokSignInParserReadsDevicePrompt(t *testing.T) {
 	} {
 		before := st
 		spec.Parse(&st, line)
-		if st != before {
+		if !reflect.DeepEqual(st, before) {
 			t.Fatalf("%q changed state: %+v", line, st)
 		}
 	}

@@ -153,6 +153,7 @@ not-state internal/hookinstall/unit.go Service.CleanupUnit 1 # self-update insta
 not-state internal/hookinstall/unit.go Service.InspectUnit 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/unit.go Service.Start 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/unit.go Service.Worker 1 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/harness/runtime/signin_pi.go runPiOAuth 2 # temporary OAuth extension source and its cleanup; no queried runtime state
 not-state internal/hooks/events.go cleanupSnapshot 1 # removes a private Git execution worktree directory
 not-state internal/hooks/events.go snapshot 1 # removes a failed private Git execution worktree directory
 not-state internal/hooks/runs.go Service.newRun 1 # raw command output stays in log files

@@ -547,8 +547,8 @@ test('updates follow semantic precedence and keep vendor version ordering', () =
 })
 
 
-test('Pi has no subscription login; OpenCode keeps its login and both take provider keys', () => {
-  assert.equal(hasSubscriptionLogin('pi'), false)
+test('Pi and OpenCode offer OAuth login and both keep their provider-key forms', () => {
+  assert.equal(hasSubscriptionLogin('pi'), true)
   assert.equal(hasSubscriptionLogin('opencode'), true)
   assert.equal(hasSubscriptionLogin('codex'), true)
   assert.deepEqual(HARNESS_ORDER.filter((h) => takesProviderKeys(h.id)).map((h) => h.id), ['opencode', 'pi'])
@@ -558,9 +558,9 @@ test('Pi has no subscription login; OpenCode keeps its login and both take provi
     accounts: [],
   })
   const pi = harnessRowState('pi', snapshot)
-  assert.equal(pi.needsSignIn, false)
-  assert.equal(pi.status, 'ready')
-  assert.equal(rowLine(pi), '1.3.0')
+  assert.equal(pi.needsSignIn, true)
+  assert.equal(pi.status, 'not signed in')
+  assert.equal(rowLine(pi), 'Not signed in · 1.3.0')
   const opencode = harnessRowState('opencode', snapshot)
   assert.equal(opencode.needsSignIn, true)
   assert.equal(rowLine(opencode), 'Not signed in · 2.0.32')
