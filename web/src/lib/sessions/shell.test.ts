@@ -17,10 +17,10 @@ test('the state follows the job: running, background, done, failed, stopped', ()
   assert.equal(blockState(job({ code: -1, signal: 'killed' })), 'failed')
 })
 
-test('the meta says exit and duration, or who stopped the job', () => {
-  assert.equal(metaOf(job(), 0), 'exit 0 · 5s')
-  assert.equal(metaOf(job({ code: 2 }), 0), 'exit 2 · 5s')
-  assert.equal(metaOf(job({ backgroundAt: iso(30), ended: iso(200) }), 0), 'finished in background · exit 0 · 3m20s')
+test('the meta names the outcome and duration, or who stopped the job', () => {
+  assert.equal(metaOf(job(), 0), 'succeeded in 5s')
+  assert.equal(metaOf(job({ code: 2 }), 0), 'failed with exit code 2 · 5s')
+  assert.equal(metaOf(job({ backgroundAt: iso(30), ended: iso(200) }), 0), 'succeeded in the background · 3m 20s')
   assert.equal(metaOf(job({ code: -1, signal: 'terminated', stopBy: 'owner' }), 0), 'stopped by owner · terminated · 5s')
   const running = job({ state: 'running', ended: undefined })
   assert.equal(metaOf(running, Date.parse(iso(7))), '7s')

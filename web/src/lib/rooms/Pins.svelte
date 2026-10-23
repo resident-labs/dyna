@@ -44,7 +44,7 @@
   {/if}
   <div class="scroll">
     {#if pins.length === 0}
-      <p class="none">No pinned posts. Hover a post and press Pin to keep it here.</p>
+      <p class="none">No pinned posts. <span class="mouse">Hover a post and press Pin to keep it here.</span><span class="touch">Tap a post and press Pin to keep it here.</span></p>
     {/if}
     {#if pins.length && !filtered.length}<p class="none">No pinned posts match this filter.</p>{/if}
     {#each filtered as p (p.id)}
@@ -96,6 +96,12 @@
   .matches { color: var(--muted); font-size: var(--t-sm); margin: var(--s2) 0 0; }
   .scroll { flex: 1; overflow-y: auto; padding: var(--s1) 10px var(--s3); }
   .none { margin: var(--s2) 6px; font-size: var(--t-ui); color: var(--faint); line-height: var(--leading); }
+  /* A phone has no hover, so its hint names the tap that shows Pin. */
+  .none .touch { display: none; }
+  @media (hover: none) {
+    .none .mouse { display: none; }
+    .none .touch { display: inline; }
+  }
   .item {
     background: var(--main);
     border: 1px solid var(--line-soft);
