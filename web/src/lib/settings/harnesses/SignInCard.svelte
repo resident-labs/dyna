@@ -21,9 +21,14 @@
   } = $props()
 
   let pasted = $state('')
+  let selectedChoice = $state('')
   let copied = $state(false)
   let copyTimer: ReturnType<typeof setTimeout> | undefined
+  const choices = $derived(signIn.choices ?? [])
   const status = $derived(signInStatus(signIn))
+  $effect(() => {
+    if (!choices.some((choice) => choice.id === selectedChoice)) selectedChoice = choices[0]?.id ?? ''
+  })
   const running = $derived(!['succeeded', 'failed', 'cancelled'].includes(signIn.phase))
 
   onDestroy(() => clearTimeout(copyTimer))
@@ -42,7 +47,7 @@
   }
 
   function send() {
-    const code = pasted.trim()
+    const code = choices.length ? selectedChoice : pasted.trim()
     if (!code || busy) return
     pasted = ''
     onpaste?.(code)
@@ -63,11 +68,20 @@
   <p class="status">{status}</p>
   {#if signIn.acceptsPaste && running}
     <form class="paste" onsubmit={(e) => { e.preventDefault(); send() }}>
-      <label>
-        <span class="muted small">Paste the code or redirect URL from your browser</span>
-        <input bind:value={pasted} autocomplete="off" spellcheck="false" disabled={busy} aria-label="Sign-in response" />
-      </label>
-      <button type="submit" class="btn" disabled={busy || !pasted.trim()}>Continue</button>
+      {#if choices.length}
+        <label>
+          <span class="muted small">Provider or login method</span>
+          <select bind:value={selectedChoice} disabled={busy} aria-label="Sign-in option">
+            {#each choices as choice (choice.id)}<option value={choice.id}>{choice.label}</option>{/each}
+          </select>
+        </label>
+      {:else}
+        <label>
+          <span class="muted small">Paste the code or redirect URL from your browser</span>
+          <input bind:value={pasted} autocomplete="off" spellcheck="false" disabled={busy} aria-label="Sign-in response" />
+        </label>
+      {/if}
+      <button type="submit" class="btn" disabled={busy || (choices.length ? !selectedChoice : !pasted.trim())}>Continue</button>
     </form>
   {/if}
   <div class="row">
@@ -84,7 +98,7 @@
   .status { margin: 0; color: var(--muted); font-size: var(--t-sm); }
   .paste { display: grid; gap: var(--s2); min-width: 0; }
   .paste label { display: grid; gap: var(--s1); min-width: 0; }
-  .paste input { background: var(--field); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 7px 10px; font-size: var(--t-ui); color: var(--ink); font-family: var(--mono); width: 100%; min-width: 0; }
+  .paste input, .paste select { background: var(--field); border: 1px solid var(--line); border-radius: var(--r-xs); padding: 7px 10px; font-size: var(--t-ui); color: var(--ink); font-family: var(--mono); width: 100%; min-width: 0; }
   .row { display: flex; gap: var(--s2); }
   .muted { color: var(--muted); }
   .small { font-size: var(--t-sm); }

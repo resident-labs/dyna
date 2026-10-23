@@ -60,6 +60,16 @@ func main() {
 	// The Settings sign-in runs this in a private harness HOME. It needs that
 	// HOME, so it runs before RestoreOwner and before the root command, whose
 	// stores cannot open a data folder inside a harness home.
+	if harnessruntime.IsPiSignInCommand(os.Args[1:]) {
+		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+		err := harnessruntime.PiSignInCommand(ctx, os.Args[1:])
+		cancel()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if harnessruntime.IsACPSignInCommand(os.Args[1:]) {
 		ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		err := harnessruntime.ACPSignInCommand(ctx, os.Args[1:])
