@@ -7,8 +7,15 @@ import (
 	"dyna-agent/internal/room"
 )
 
-// mergeBatchFailedReason is the merge pause that a failed batch sets.
-const mergeBatchFailedReason = "batch trial failed; merging paused for recovery"
+// mergePhaseHoldsBatchPause defines the phases that can own a batch-failure pause.
+func mergePhaseHoldsBatchPause(phase state.MergeTrialPhase) bool {
+	switch phase {
+	case state.MergeTrialPhaseAwaitingRoot, state.MergeTrialPhaseFailed, state.MergeTrialPhaseStacking:
+		return true
+	default:
+		return false
+	}
+}
 
 // mergeFailCause classifies a failed trial's cause for the card. A failure that
 // names its failing checks is the checks-failed kind: the checks list is the
@@ -29,23 +36,23 @@ func mergeFailCause(checks *room.MergeCheckSummary, reason string) (room.MergeRe
 // read carries the failure evidence; a batch that a restart resumes from carries
 // none, and its saved report keeps the evidence the first failure recorded.
 func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b state.MergeTrial, ci trialCI) error {
-	if b.Phase == "awaiting-root" && b.Notified {
+	if b.Phase == state.MergeTrialPhaseAwaitingRoot && b.Notified {
 		return nil
 	}
 	if ci.Status == "failed" {
 		b.FailReason, b.FailChecks = ci.Reason, append([]string(nil), ci.Failed...)
 	}
-	b.Phase, b.Reason = "awaiting-root", mergeBatchFailedReason
+	b.Phase, b.Reason = state.MergeTrialPhaseAwaitingRoot, state.MergeBatchFailedReason
 	if err := s.Store.update(func(st *State) error {
 		if current := st.MergeTrials[repo]; current == nil || trialIdentity(*current) != trialIdentity(b) {
 			return nil
 		}
 		if st.MergePauses == nil {
-			st.MergePauses = map[string]string{}
+			st.MergePauses = map[string]state.MergePause{}
 		}
 		for _, change := range b.Changes {
 			if member := st.Records[change.Key]; member != nil {
-				st.MergePauses[member.RoomID] = b.Reason
+				st.MergePauses[member.RoomID] = state.MergePause{Cause: state.MergePauseCauseBatchFailed, Reason: b.Reason}
 			}
 		}
 		st.MergeTrials[repo] = &b
@@ -88,7 +95,7 @@ func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b s
 		}
 		reason := b.FailReason
 		if reason == "" {
-			reason = mergeBatchFailedReason
+			reason = state.MergeBatchFailedReason
 		}
 		ev.ReasonKind, ev.Reason = mergeFailCause(ev.Checks, reason)
 		if err := s.postMergeNotice(ctx, anchor, "merge-batch-failed/"+trialIdentity(b), Notice{NeedsRoot: true, Kind: "ci", Merge: &ev, Text: b.RootReport}); err != nil {

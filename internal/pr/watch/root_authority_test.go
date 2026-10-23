@@ -7,6 +7,7 @@ import (
 
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/notify"
+	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/subagent"
@@ -39,7 +40,10 @@ func TestStoredRootResumesOnlyItsRoom(t *testing.T) {
 	}
 	service := &Service{Store: &Store{Root: filepath.Join(root, "prs")}, Notify: notify.New(rooms, manager)}
 	if err := service.Store.update(func(st *State) error {
-		st.MergePauses = map[string]string{own.ID: "paused", other.ID: "paused"}
+		st.MergePauses = map[string]state.MergePause{
+			own.ID:   {Cause: state.MergePauseCauseManual, Reason: "paused"},
+			other.ID: {Cause: state.MergePauseCauseManual, Reason: "paused"},
+		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -62,7 +66,7 @@ func TestStoredRootResumesOnlyItsRoom(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.MergePauses[own.ID] != "" || state.MergePauses[other.ID] != "paused" {
+	if state.MergePauses[own.ID].Reason != "" || state.MergePauses[other.ID].Reason != "paused" {
 		t.Fatalf("pauses = %+v", state.MergePauses)
 	}
 }
