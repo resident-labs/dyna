@@ -79,6 +79,7 @@ var (
 
 // Meta is sessions/<id>/session.json.
 type Meta struct {
+	HistoryOnly bool `json:"historyOnly,omitempty"`
 	// Service marks managed sessions and their helpers for mention routing and member grouping.
 	Service              bool                 `json:"service,omitempty"`
 	Role                 string               `json:"role,omitempty"`
@@ -536,7 +537,7 @@ func (s *Store) ReadMeta(id string) (Meta, error) {
 	if err != nil {
 		return Meta{}, err
 	}
-	if m.RoomID == "" || m.Room == "" {
+	if !m.HistoryOnly && (m.RoomID == "" || m.Room == "") {
 		return Meta{}, fmt.Errorf("%w: session %s has no roomId", ErrNoRoom, id)
 	}
 	return m, nil
