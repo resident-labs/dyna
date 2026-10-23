@@ -316,7 +316,7 @@ type State struct {
 	RateLimit       RateLimit                            `json:"-"`
 	RateLimits      map[string]RateLimit                 `json:"rateLimits,omitempty"`
 	// TODO: legacy/shim remove later — retains unscoped saved pauses until their original deadline.
-	LegacyPause time.Time            `json:"legacyQuotaPause,omitempty"`
+	LegacyPause time.Time            `json:"-"`
 	Version     int                  `json:"version"`
 	Records     map[string]*Record   `json:"records"`
 	Reviewers   map[string]Reviewer  `json:"reviewers"`
