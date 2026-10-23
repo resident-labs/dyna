@@ -552,8 +552,9 @@ func TestRegisteredCIPrefersFreeCapacity(t *testing.T) {
 	}{
 		{map[string]int{}, "hermeslab"},
 		{map[string]int{"local": 1}, "hermeslab"},
-		{map[string]int{"hermeslab": 1}, "local"},
-		{map[string]int{"hermeslab": 1, "local": 1}, ""},
+		{map[string]int{"hermeslab": 4}, "hermeslab"},
+		{map[string]int{"hermeslab": 8}, "local"},
+		{map[string]int{"hermeslab": 8, "local": 1}, ""},
 	} {
 		node := availableCINode(nodes, tc.active)
 		got := ""

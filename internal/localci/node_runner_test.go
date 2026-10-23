@@ -54,7 +54,7 @@ func fakeNodeReports(out io.Writer, checks []nodeCheck, failFrontend bool) error
 }
 
 func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T) {
-	const slots = 8
+	const slots = 4
 	checks, _, err := nodeChecks([]string{"go", "cross-build"})
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	var started, crossStarted atomic.Bool
 	slotsStarted := make(chan struct{})
 	release := make(chan struct{})
-	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: slots, Enabled: true}}
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 8, Enabled: true}}
 	runner.Command = func(ctx context.Context, dir string, _ io.Reader, out, stderr io.Writer, name string, args ...string) error {
 		if fakeNodeGit(dir, out, name, args) {
 			return nil
@@ -123,7 +123,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		result, err := runner.Run(t.Context(), Request{RepoDir: t.TempDir(), Suites: []string{"go", "cross-build"}, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
+		result, err := runner.Run(t.Context(), Request{RepoDir: t.TempDir(), Suites: []string{"go", "cross-build"}, Parallelism: slots, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
 		done <- outcome{result, err}
 	}()
 	<-slotsStarted

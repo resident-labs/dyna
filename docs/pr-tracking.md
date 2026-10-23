@@ -269,6 +269,12 @@ from GitHub runners. The engine gives merge trials priority, then takes PR
 heads in oldest-first order. It cancels work for superseded heads and never
 runs fork PRs on these machines.
 
+Slots limit concurrent checks across all runs on a node. Each scheduled run
+reserves up to six slots, so other heads can start while capacity is free.
+Merge trials take free slots first; they do not interrupt active runs. On a
+node with 16 or more slots, three heads at six slots each finish in about two
+minutes.
+
 ```sh
 dyna git ci node add local --slots 1
 dyna git ci node add omarchy --ssh ari@omarchy --slots 2
