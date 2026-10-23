@@ -7,10 +7,32 @@ import (
 	"dyna-agent/internal/localci"
 )
 
-// executedChecks is what the runner reports for one suite: every check the suite
-// expands into plus the aggregate each check feeds, which is what a saved result
-// holds after a run.
-func executedChecks(t *testing.T, suite localci.Suite) []localci.CheckName {
+// expectedChecks is this test's own statement of the suite graph: the check names
+// each suite must report, with the go suite's eight shards spelled out. It is a
+// literal list and never a read of the description, so a check or a suite the
+// description loses fails here instead of agreeing with itself.
+var expectedChecks = map[localci.Suite][]localci.CheckName{
+	localci.SuiteRelay:         {"relay"},
+	localci.SuiteFrontend:      {"frontend"},
+	localci.SuiteFrontendCheck: {"frontend-check"},
+	localci.SuiteGoStatic:      {"go-static"},
+	localci.SuiteCrossBuild:    {"cross-build"},
+	localci.SuiteComputerSmoke: {"computer-smoke"},
+	localci.SuiteGo: {
+		"frontend", "frontend-check", "go-static", "go-test",
+		"go-test-shard (0)", "go-test-shard (1)", "go-test-shard (2)", "go-test-shard (3)",
+		"go-test-shard (4)", "go-test-shard (5)", "go-test-shard (6)", "go-test-shard (7)",
+	},
+}
+
+// expectedTrials is the suite set a merge trial must run.
+var expectedTrials = []localci.Suite{
+	localci.SuiteRelay, localci.SuiteGo, localci.SuiteCrossBuild, localci.SuiteComputerSmoke,
+}
+
+// reportedChecks is what a run of one suite leaves in a saved result: the name of
+// every check the suite expands into, plus the aggregate each one feeds.
+func reportedChecks(t *testing.T, suite localci.Suite) []localci.CheckName {
 	t.Helper()
 	checks, ok := localci.Checks(suite)
 	if !ok || len(checks) == 0 {
@@ -42,54 +64,94 @@ func passedResult(names []localci.CheckName) localci.Result {
 	return result
 }
 
-// TestOneSuiteDescriptionDrivesExecutionGateAndTrial holds the suite graph to one
-// description. For every suite the description names, the gate demands exactly the
-// checks and aggregates the runner reports for that suite, and it accepts nothing
-// less. Trial selection only names suites the description knows, so a suite added
-// to the description reaches execution, the gate and trial selection together,
-// instead of needing an edit in each place.
-func TestOneSuiteDescriptionDrivesExecutionGateAndTrial(t *testing.T) {
-	described := map[localci.Suite]bool{}
-	for _, suite := range localci.Suites() {
-		described[suite] = true
-		executed := executedChecks(t, suite)
-		suites := []localci.Suite{suite}
-		if !localci.CoversSuites(passedResult(executed), suites) {
-			t.Fatalf("suite %q: the gate rejected the checks the runner reports for it", suite)
+// withoutNames copies names without one check, so a caller can prove the gate
+// rejects an incomplete result.
+func withoutNames(names []localci.CheckName, drop localci.CheckName) []localci.CheckName {
+	out := make([]localci.CheckName, 0, len(names))
+	for _, name := range names {
+		if name != drop {
+			out = append(out, name)
 		}
-		// Every check the runner reports is one the gate insists on.
-		for i := range executed {
-			partial := append(append([]localci.CheckName{}, executed[:i]...), executed[i+1:]...)
-			if localci.CoversSuites(passedResult(partial), suites) {
-				t.Fatalf("suite %q: the gate accepted a result without %q", suite, executed[i])
+	}
+	return out
+}
+
+// sameSet compares two lists as multisets: order does not matter.
+func sameSet[T comparable](got, want []T) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	left := make(map[T]int, len(got))
+	for _, value := range got {
+		left[value]++
+	}
+	for _, value := range want {
+		if left[value] == 0 {
+			return false
+		}
+		left[value]--
+	}
+	return true
+}
+
+// TestOneSuiteDescriptionDrivesExecutionGateAndTrial holds the suite graph to the
+// literal list above. The description must name those suites and no others, the
+// runner must report exactly those check names, the merge gate must demand every
+// one of them, and trial selection must run those suites. A check that leaves the
+// description therefore fails this test in the runner comparison and in the gate
+// comparison, not only in the code that dropped it.
+func TestOneSuiteDescriptionDrivesExecutionGateAndTrial(t *testing.T) {
+	described := localci.Suites()
+	for _, suite := range described {
+		if _, ok := expectedChecks[suite]; !ok {
+			t.Fatalf("the description names suite %q, which this test does not expect", suite)
+		}
+	}
+	for suite := range expectedChecks {
+		if !containsSuite(described, suite) {
+			t.Fatalf("this test expects suite %q, which the description does not name", suite)
+		}
+	}
+	for suite, want := range expectedChecks {
+		if got := reportedChecks(t, suite); !sameSet(got, want) {
+			t.Fatalf("suite %q reports %v, want %v", suite, got, want)
+		}
+		suites := []localci.Suite{suite}
+		if !localci.CoversSuites(passedResult(want), suites) {
+			t.Fatalf("suite %q: the gate rejected a result holding every expected check", suite)
+		}
+		for _, name := range want {
+			if localci.CoversSuites(passedResult(withoutNames(want, name)), suites) {
+				t.Fatalf("suite %q: the gate accepted a result without %q", suite, name)
 			}
 		}
 	}
-	for _, suite := range localci.WorkflowSuites() {
-		if !described[suite] {
-			t.Fatalf("trial selection runs suite %q, which the description does not name", suite)
-		}
+	if got := localci.WorkflowSuites(); !sameSet(got, expectedTrials) {
+		t.Fatalf("trial selection runs %v, want %v", got, expectedTrials)
 	}
-	for _, suite := range localci.DefaultSuites() {
-		if !described[suite] {
-			t.Fatalf("default selection runs suite %q, which the description does not name", suite)
-		}
-	}
-	// The merge gate reaches the same description through its own entry point: a
+	// The merge gate reaches the same graph through its own entry point: a
 	// complete trial passes, and the same trial without one check waits.
 	service := &Service{}
 	job := registeredCIJob{trial: true, head: "0000000000000000000000000000000000000000"}
 	var trial []localci.CheckName
-	for _, suite := range localci.WorkflowSuites() {
-		trial = append(trial, executedChecks(t, suite)...)
+	for _, suite := range expectedTrials {
+		trial = append(trial, expectedChecks[suite]...)
 	}
 	if !service.registeredJobResultComplete(context.Background(), job, passedResult(trial)) {
 		t.Fatal("a complete trial result was rejected")
 	}
-	for i := range trial {
-		partial := append(append([]localci.CheckName{}, trial[:i]...), trial[i+1:]...)
-		if service.registeredJobResultComplete(context.Background(), job, passedResult(partial)) {
-			t.Fatalf("a trial result without %q passed the gate", trial[i])
+	for _, name := range trial {
+		if service.registeredJobResultComplete(context.Background(), job, passedResult(withoutNames(trial, name))) {
+			t.Fatalf("a trial result without %q passed the gate", name)
 		}
 	}
+}
+
+func containsSuite(suites []localci.Suite, want localci.Suite) bool {
+	for _, suite := range suites {
+		if suite == want {
+			return true
+		}
+	}
+	return false
 }
