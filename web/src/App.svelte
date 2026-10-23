@@ -96,6 +96,7 @@
   import RunWorkflow from './lib/workflows/RunWorkflow.svelte'
   import PRPanel from './lib/prs/PRPanel.svelte'
   import GitHub from './lib/prs/GitHub.svelte'
+  import type { RoomIssue } from './lib/prs/unifiedIssues.ts'
   import RoomSettings from './lib/rooms/RoomSettings.svelte'
   import { prsBySession, isOpen, withoutReviewers } from './lib/prs/pr.ts'
   import { boot, watch, registerWorker } from './lib/settings/link.ts'
@@ -166,11 +167,6 @@
     danger?: boolean
     gap?: boolean
     disabled?: boolean
-  }
-  interface RoomIssue {
-    id: string
-    title: string
-    state: string
   }
   interface RuleList {
     hash: string
