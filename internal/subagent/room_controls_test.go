@@ -18,7 +18,7 @@ import (
 func roomControlEnv(t *testing.T) *testEnv {
 	e := newTestEnv(t)
 	e.joinRunners()
-	e.m.ResumeRoomLaunch = func(m *Manager, id string, r uint64) error { return m.ProcessRoomResume(e.ctx, id, r) }
+	e.m.ResumeRoomLaunch = func(m *Manager, id string, r uint64) error { return m.runRoomResume(e.ctx, id, r) }
 	return e
 }
 func TestRoomPauseCoalescesQueueWithNativeIdentity(t *testing.T) {
@@ -149,7 +149,7 @@ func TestRoomResumeCrashReplayAndStaleGeneration(t *testing.T) {
 		t.Fatalf("recovery not durable: %+v", p)
 	}
 	e.m.PauseRoomSessions(e.ctx, a.RoomID)
-	if err := e.m.ProcessRoomResume(e.ctx, a.RoomID, p.Revision); err != nil {
+	if err := e.m.runRoomResume(e.ctx, a.RoomID, p.Revision); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{a.ID, b.ID} {
@@ -158,7 +158,7 @@ func TestRoomResumeCrashReplayAndStaleGeneration(t *testing.T) {
 			t.Fatal("stale resume admitted a turn")
 		}
 	}
-	e.m.ResumeRoomLaunch = func(m *Manager, id string, r uint64) error { return m.ProcessRoomResume(e.ctx, id, r) }
+	e.m.ResumeRoomLaunch = func(m *Manager, id string, r uint64) error { return m.runRoomResume(e.ctx, id, r) }
 	if _, err := e.m.ResumeRoomSessions(e.ctx, a.RoomID); err != nil {
 		t.Fatal(err)
 	}
@@ -253,10 +253,10 @@ func TestRoomHeldPromptSurvivesReleaseBeforeLaunchAndRepair(t *testing.T) {
 				return nil
 			}}
 			p, _ := e.m.rooms().SessionPause(a.RoomID)
-			if err := e.m.ProcessRoomResume(context.Background(), a.RoomID, p.Revision); err != nil {
+			if err := e.m.runRoomResume(context.Background(), a.RoomID, p.Revision); err != nil {
 				t.Fatal(err)
 			}
-			e.m.ProcessRoomResume(context.Background(), a.RoomID, p.Revision)
+			e.m.runRoomResume(context.Background(), a.RoomID, p.Revision)
 			if starts.Load() != 1 {
 				t.Fatal("duplicate recovered turn", starts.Load())
 			}

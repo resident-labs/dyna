@@ -64,7 +64,7 @@ func TestReviewResumeKeepsRecoveryUntilQueuedWorkerAccepts(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := e.m.rooms().SessionPause(a.RoomID)
-	if err := e.m.ProcessRoomResume(e.ctx, a.RoomID, before.Revision); err != nil {
+	if err := e.m.runRoomResume(e.ctx, a.RoomID, before.Revision); err != nil {
 		t.Fatal(err)
 	}
 	p, err := e.m.rooms().SessionPause(a.RoomID)
