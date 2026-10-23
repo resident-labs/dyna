@@ -21,13 +21,6 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 	go func() {
 		defer close(done)
 		if !readOnly {
-			n, err := rooms.Notify.Sessions.Store.ImportLegacyRecords()
-			if n > 0 {
-				log.Printf("imported %d session records into dyna.db", n)
-			}
-			if err != nil {
-				log.Printf("session records not imported: %v", err)
-			}
 			if n, err := runstore.ReconcileLostRuns(); err != nil {
 				log.Printf("lost workflow runs not reconciled: %v", err)
 			} else if n > 0 {
