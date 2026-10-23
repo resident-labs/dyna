@@ -21,6 +21,12 @@ func TestScanPublishesRoomMergeProgress(t *testing.T) {
 	testfixture.SaveState(t, root, st)
 	signatures, work, version := map[string]string{}, map[string]string{}, ""
 	e.svc.PRs.Scan(signatures, work, &version, true, func(string, string, *listchange.Change, bool) {})
+	st.MergeTrials["github.com/org/a"].Logs = "more build output"
+	st.MergeTrials["github.com/org/a"].Notified = true
+	testfixture.SaveState(t, root, st)
+	e.svc.PRs.Scan(signatures, work, &version, false, func(string, string, *listchange.Change, bool) {
+		t.Error("trial logs and notification metadata emitted a refresh")
+	})
 	for _, step := range []struct {
 		name   string
 		change func()

@@ -452,12 +452,12 @@ func (s *Service) Scan(signatures, work map[string]string, version *string, firs
 // Scan publishes its changes through the existing room-scoped prs event.
 type mergeScanStatus struct {
 	Pause  string
-	Trials map[string]*state.MergeTrial
+	Trials map[string]watch.MergeTrialStatus
 	Main   map[string]state.RepositoryFacts
 }
 
 func roomMergeScanStatus(st watch.State, roomID string, records []*watch.Record) mergeScanStatus {
-	out := mergeScanStatus{Pause: st.MergePauses[roomID], Trials: map[string]*state.MergeTrial{}, Main: map[string]state.RepositoryFacts{}}
+	out := mergeScanStatus{Pause: st.MergePauses[roomID], Trials: map[string]watch.MergeTrialStatus{}, Main: map[string]state.RepositoryFacts{}}
 	for _, record := range records {
 		repo := record.Host + "/" + record.Repo
 		if record.Kind == "local" {
@@ -476,7 +476,18 @@ func roomMergeScanStatus(st watch.State, roomID string, records []*watch.Record)
 		}
 		for _, change := range trial.Changes {
 			if record := st.Records[change.Key]; record != nil && record.RoomID == roomID {
-				out.Trials[repo] = trial
+				summary := watch.MergeTrialStatus{Branch: trial.Branch, Head: trial.Head, Phase: trial.Phase, Reason: trial.Reason, MaxParallel: trial.MaxParallel}
+				for _, member := range trial.Changes {
+					id := member.Key
+					if record := st.Records[member.Key]; record != nil && record.ChangeID != "" {
+						id = record.ChangeID
+					}
+					summary.Batch = append(summary.Batch, id)
+				}
+				for _, stack := range trial.Stacks {
+					summary.Stacks = append(summary.Stacks, state.MergeTrialStack{Branch: stack.Branch, Head: stack.Head, Phase: stack.Phase, Count: stack.Count, Reason: stack.Reason})
+				}
+				out.Trials[repo] = summary
 				break
 			}
 		}
