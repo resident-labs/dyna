@@ -3,7 +3,6 @@ package watch
 import (
 	"context"
 	"dyna-agent/internal/authority"
-	"dyna-agent/internal/room"
 	"dyna-agent/internal/store/storetest"
 	"fmt"
 	"os/exec"
@@ -219,8 +218,8 @@ func TestMergeFixAuditWakeFollowsActor(t *testing.T) {
 			for _, message := range messages {
 				if strings.Contains(message.Text, "requested merge-fix") {
 					want := actor == "human"
-					if message.Wake != want || room.WakesRoot(message, "merge-work") != want {
-						t.Fatalf("audit wake for %s: Wake=%v WakesRoot=%v, want %v", actor, message.Wake, room.WakesRoot(message, "merge-work"), want)
+					if message.Wake != want || wakesRoot(message, "merge-work") != want {
+						t.Fatalf("audit wake for %s: Wake=%v wakes root=%v, want %v", actor, message.Wake, wakesRoot(message, "merge-work"), want)
 					}
 					return
 				}

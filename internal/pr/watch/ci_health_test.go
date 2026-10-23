@@ -106,7 +106,7 @@ func TestSlowTestCrossingPostsOneQuietLine(t *testing.T) {
 			continue
 		}
 		events = append(events, ev)
-		if msg.Notice.Kind != "slow-test" || room.WakesRoot(msg, rec.Name) {
+		if msg.Notice.Kind != "slow-test" || wakesRoot(msg, rec.Name) {
 			t.Fatalf("the crossing line woke root: %+v", msg)
 		}
 	}

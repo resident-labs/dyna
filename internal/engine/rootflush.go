@@ -23,8 +23,9 @@ func rootFlushKey(roomID string) string { return timerRootFlush + "/" + roomID }
 // the engine releases the same batch through that existing batching on both
 // paths. One timer per room: the first held post after a delivery arms it,
 // and every delivery restarts it. Rooms with no held input get no timer.
-// What counts as quiet or waking comes from room.RootContext, the one
-// classifier both roots render from, so the flush never disagrees with them.
+// What counts as quiet or waking comes from the seat's stored delivery rows,
+// which RootContext wrote as the one classifier, so the flush never disagrees
+// with the readers of the same rows.
 type rootFlush struct {
 	rooms *room.Store
 	t     *timers
@@ -68,22 +69,30 @@ func (f *rootFlush) events(ev roomsvc.Event) {
 	if ev.Kind != "posts" || len(ev.Posts) == 0 {
 		return
 	}
-	rec, err := f.rooms.Resolve(ev.RoomID)
+	ids := make([]string, len(ev.Posts))
+	for i, p := range ev.Posts {
+		ids[i] = p.Message.ID
+	}
+	seats, err := f.rooms.SeatDeliveries(ev.RoomID, ids)
 	if err != nil {
+		log.Printf("root flush of %s: read the seat's deliveries: %v", ev.RoomID, err)
 		return
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, p := range ev.Posts {
-		decision, _ := room.RootContext(p.Message, rec.Name)
-		if decision == room.RootWake {
+		seat, ok := seats[p.Message.ID]
+		if !ok {
+			continue
+		}
+		if seat.Mode == room.DeliveryWake {
 			if f.armed[ev.RoomID] {
 				f.t.stop(rootFlushKey(ev.RoomID))
 				delete(f.armed, ev.RoomID)
 			}
 			continue
 		}
-		if decision != room.RootQuiet || f.armed[ev.RoomID] {
+		if f.armed[ev.RoomID] {
 			continue
 		}
 		f.armLocked(ev.RoomID)
@@ -146,21 +155,13 @@ func (f *rootFlush) fire(roomID string) {
 	}
 }
 
-// held reports whether the room still holds quiet root context: a quiet
-// post newer than every post that woke the root seat. Posts to other
-// recipients count for neither side.
+// held reports whether the room still holds quiet root context: its newest
+// seat delivery is quiet, so no post that wakes the seat came after it. Posts
+// to other recipients have no seat row and count for neither side.
 func (f *rootFlush) held(rec room.Record) (bool, error) {
-	msgs, err := f.rooms.Messages(rec.ID)
+	seat, ok, err := f.rooms.NewestSeatDelivery(rec.ID)
 	if err != nil {
 		return false, err
 	}
-	for i := len(msgs) - 1; i >= 0; i-- {
-		switch decision, _ := room.RootContext(msgs[i], rec.Name); decision {
-		case room.RootQuiet:
-			return true, nil
-		case room.RootWake:
-			return false, nil
-		}
-	}
-	return false, nil
+	return ok && seat.Mode == room.DeliveryQuiet, nil
 }

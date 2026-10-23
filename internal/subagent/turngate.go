@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -306,20 +307,16 @@ func (s *Store) gateOpen(id string) (int, bool, error) {
 	return turn, open, err
 }
 
-// forSession keeps the posts addressed to the session that it did not write.
-// forSession keeps the posts that are this session's input. The internal
-// root takes posts to the owner (room.WakesRoot) while it holds the root seat,
-// and nothing while an external orchestrator holds it.
+// forSession keeps the posts that are this session's input. The internal root
+// takes the posts its stored seat delivery rows mark as its own input while it
+// holds the root seat, and nothing while an external orchestrator holds it.
+// Every other session keeps the posts addressed to it that it did not write.
 func forSession(rooms *room.Store, meta Meta, msgs []room.Message) []room.Message {
-	addressed := func(msg room.Message) bool { return msg.SessionAddressed(meta.ID, meta.Address()) }
+	keep := func(msg room.Message) bool {
+		return msg.Deliverable() && msg.SessionAddressed(meta.ID, meta.Address()) && !msg.SentBySession(meta.ID, meta.Address())
+	}
 	if meta.Role == RoleRoot {
-		rec, err := rooms.Resolve(meta.RoomID)
-		if err != nil || rec.Seat.External {
-			return nil
-		}
-		addressed = func(msg room.Message) bool {
-			return room.RootInput(msg, meta.Room) && (msg.Addressed(meta.Room) || msg.SessionAddressed(meta.ID, meta.Address()))
-		}
+		keep = seatInput(rooms, meta, msgs)
 	}
 	var out []room.Message
 	for _, msg := range msgs {
@@ -329,11 +326,38 @@ func forSession(rooms *room.Store, meta Meta, msgs []room.Message) []room.Messag
 		if meta.Transfer != nil && meta.Transfer.Phase != "waiting" && msg.ID == meta.Transfer.PostID {
 			continue
 		}
-		if (msg.Deliverable() || meta.Role == RoleRoot && room.WakesRoot(msg, meta.Room)) && addressed(msg) && !msg.SentBySession(meta.ID, meta.Address()) {
+		if keep(msg) {
 			out = append(out, msg)
 		}
 	}
 	return out
+}
+
+// seatInput is the root seat's turn input, read from the seat's stored delivery
+// rows: a post that asks the seat to act, or a passive one that only adds
+// context to its next turn. Quiet posts with their own section in the root's
+// context are not turn input, and the seat's own posts never come back to it.
+func seatInput(rooms *room.Store, meta Meta, msgs []room.Message) func(room.Message) bool {
+	if rooms == nil {
+		return func(room.Message) bool { return false }
+	}
+	rec, err := rooms.Resolve(meta.RoomID)
+	if err != nil || rec.Seat.External {
+		return func(room.Message) bool { return false }
+	}
+	ids := make([]string, len(msgs))
+	for i, msg := range msgs {
+		ids[i] = msg.ID
+	}
+	seats, err := rooms.SeatDeliveries(meta.RoomID, ids)
+	if err != nil {
+		log.Printf("session %s: read the root seat's deliveries: %v", meta.ID, err)
+		return func(room.Message) bool { return false }
+	}
+	return func(msg room.Message) bool {
+		seat, ok := seats[msg.ID]
+		return ok && seat.RootInput() && !msg.SentBySession(meta.ID, meta.Address())
+	}
 }
 
 func (s *Store) frameOptions(meta Meta, msg room.Message) room.FrameOptions {

@@ -57,7 +57,7 @@ func TestWorkerFixtureDefaultsForMissingCallbacks(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		w.run(ctx, newWorkerSignals(), newFakeClock().timers(ctx), func(_ string, err error) { t.Error(err) })
+		w.run(ctx, newWorkerSignals(nil), newFakeClock().timers(ctx), func(_ string, err error) { t.Error(err) })
 	}()
 	defer func() { cancel(); <-done }()
 	select {
