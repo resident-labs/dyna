@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // The floating computer in a session's Messages view: variant A, the glass
   // card. The picture comes first. The caption sits on a dark fade at the
   // bottom: a gold dot, the app name, the window title and the
@@ -11,38 +11,47 @@
   import { clock } from './clock.svelte.ts'
   import { ageText, appName } from './computers.ts'
   import { loadPreview, savePreview, snapCorner } from './preview.ts'
+  import type { ComputerInfo } from '../api/computer.ts'
 
-  let { c, session, name = '', onopen } = $props()
+  interface Props {
+    c?: ComputerInfo | null
+    session: string
+    name?: string
+    onopen: () => void
+  }
+  let { c = null, session, name = '', onopen }: Props = $props()
   // The preview is keyed by session in the app, so the first value is the right one.
   // svelte-ignore state_referenced_locally
   let prefs = $state(loadPreview(session))
-  let box = $state()
-  let drag = $state(null) // {x, y} while dragging, in area pixels
-  const app = $derived(appName(c.apps?.[0]?.appId) || (c.state === 'starting' ? 'Starting' : 'Computer'))
-  const title = $derived(c.apps?.[0]?.title ?? '')
+  let box = $state<HTMLDivElement | undefined>()
+  let drag = $state<{ x: number; y: number } | null>(null) // {x, y} while dragging, in area pixels
+  const app = $derived(appName(c?.apps?.[0]?.appId) || (c?.state === 'starting' ? 'Starting' : 'Computer'))
+  const title = $derived(c?.apps?.[0]?.title ?? '')
 
-  function save(next) {
+  function save(next: ReturnType<typeof loadPreview>) {
     prefs = next
     savePreview(session, next)
   }
   // A hide lasts only while the computer keeps its state.
-  $effect(() => { if (prefs.hidden && prefs.hidden.state !== c.state) save({ ...prefs, hidden: null }) })
+  $effect(() => { if (prefs.hidden && prefs.hidden.state !== c?.state) save({ ...prefs, hidden: null }) })
 
-  function down(e) {
-    if (e.button !== 0 || e.target.closest('button')) return
-    const host = box.offsetParent.getBoundingClientRect()
+  function down(e: PointerEvent) {
+    if (e.button !== 0 || (e.target instanceof Element && e.target.closest('button'))) return
+    const host = box?.offsetParent
+    if (!box || !host) return
+    const h = host.getBoundingClientRect()
     const r = box.getBoundingClientRect()
     const dx = e.clientX - r.left, dy = e.clientY - r.top
     let moved = false
-    const move = (ev) => {
+    const move = (ev: PointerEvent) => {
       moved = moved || Math.abs(ev.clientX - e.clientX) + Math.abs(ev.clientY - e.clientY) > 4
-      if (moved) drag = { x: ev.clientX - host.left - dx, y: ev.clientY - host.top - dy }
+      if (moved) drag = { x: ev.clientX - h.left - dx, y: ev.clientY - h.top - dy }
     }
-    const up = (ev) => {
+    const up = (ev: PointerEvent) => {
       removeEventListener('pointermove', move)
       removeEventListener('pointerup', up)
       if (moved) {
-        const corner = snapCorner(ev.clientX - host.left, ev.clientY - host.top, host.width, host.height)
+        const corner = snapCorner(ev.clientX - h.left, ev.clientY - h.top, h.width, h.height)
         drag = null
         save({ ...prefs, corner })
       } else onopen()
@@ -50,10 +59,10 @@
     addEventListener('pointermove', move)
     addEventListener('pointerup', up)
   }
-  const key = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onopen() } }
+  const key = (e: KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onopen() } }
 </script>
 
-{#if prefs.hidden?.state !== c.state}
+{#if c && prefs.hidden?.state !== c.state}
   <div class="pv {prefs.corner}" class:dragging={!!drag} bind:this={box} style:left={drag ? `${drag.x}px` : null} style:top={drag ? `${drag.y}px` : null} style:right={drag ? 'auto' : null} style:bottom={drag ? 'auto' : null} role="region" aria-label="Computer preview">
     {#if prefs.minimized}
       <div class="peek">
