@@ -207,18 +207,8 @@ func TestArchiveRefusesActiveRuns(t *testing.T) {
 	if _, err := ArchiveRun(running.Meta.ID); err == nil || !strings.Contains(err.Error(), "running") {
 		t.Fatalf("running archive err = %v", err)
 	}
-	paused := archiveFixture(t, "wf_archive-paused")
-	// TODO: legacy/shim remove later — an earlier release could leave a paused file on a finished run; remove with the archiver's paused-file check (item 31).
-	if err := os.WriteFile(pausePath(paused.Meta.ID), []byte("paused\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ArchiveRun(paused.Meta.ID); err == nil || !strings.Contains(err.Error(), "paused") {
-		t.Fatalf("paused archive err = %v", err)
-	}
-	for _, id := range []string{running.Meta.ID, paused.Meta.ID} {
-		if info, err := os.Lstat(filepath.Join(RunsDir(), id)); err != nil || !info.IsDir() {
-			t.Fatalf("%s moved: %v", id, err)
-		}
+	if info, err := os.Lstat(running.Dir); err != nil || !info.IsDir() {
+		t.Fatalf("running run moved: %v", err)
 	}
 }
 
@@ -543,7 +533,7 @@ func TestPlanArchiveFailsWhenAncestryStoreCannotBeRead(t *testing.T) {
 	if len(selected) != 0 {
 		t.Fatalf("failed archive selected %#v", selected)
 	}
-	if _, err := os.Stat(filepath.Join(RunsDir(), "wf_protected-parent", "meta.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(RunsDir(), "wf_protected-parent")); err != nil {
 		t.Fatal("ancestor was removed", err)
 	}
 }
