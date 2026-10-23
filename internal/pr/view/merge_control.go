@@ -2,6 +2,7 @@ package view
 
 import (
 	"context"
+	"slices"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/pr/watch"
@@ -32,4 +33,46 @@ func (s *Service) MergeControlStatus(roomRef string) (watch.MergeControlStatus, 
 // MergeStatus preserves the full CLI queue response and the engine counters.
 func (s *Service) MergeStatus(ctx context.Context) ([]watch.MergeQueueItem, error) {
 	return s.Watcher().MergeStatus(ctx)
+}
+
+// LocalCIResultRooms finds rooms whose visible PR or merge trial uses a saved
+// CI result. It reads only PR state; it does not inspect git or fetch checks.
+func (s *Service) LocalCIResultRooms(head string) ([]string, error) {
+	if head == "" {
+		return nil, nil
+	}
+	st, err := s.Watcher().Store.Read()
+	if err != nil {
+		return nil, err
+	}
+	rooms := map[string]bool{}
+	for _, record := range st.Records {
+		if record.Head == head {
+			rooms[record.RoomID] = true
+		}
+	}
+	for _, trial := range st.MergeTrials {
+		if trial == nil {
+			continue
+		}
+		usesHead := trial.Head == head
+		for _, stack := range trial.Stacks {
+			usesHead = usesHead || stack.Head == head
+		}
+		if !usesHead {
+			continue
+		}
+		for _, change := range trial.Changes {
+			if record := st.Records[change.Key]; record != nil {
+				rooms[record.RoomID] = true
+			}
+		}
+	}
+	delete(rooms, "")
+	result := make([]string, 0, len(rooms))
+	for roomID := range rooms {
+		result = append(result, roomID)
+	}
+	slices.Sort(result)
+	return result, nil
 }
