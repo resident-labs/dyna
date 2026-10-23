@@ -75,6 +75,14 @@ test('a provider notice names the profile and when it resets', () => {
   view.done()
 })
 
+test('a reset days away keeps its days on the card', () => {
+  // Five minutes of margin keeps the reading stable while the test runs.
+  const resetsAt = new Date(Date.now() + 152 * 3600000 + 5 * 60000).toISOString()
+  const view = render(notice({ kind: 'provider', severity: 'warn', provider: { profile: 'deepseek', resetsAt } }))
+  assert.match(view.text, /resets in 6d 8h/)
+  view.done()
+})
+
 test('a sync notice names the repository and both lanes, or the rewrite', () => {
   const split = render(notice({ kind: 'sync', severity: 'warn', sync: { repo: '/repo', lane: 'origin', other: 'fork' } }))
   assert.match(split.text, /Remote history split/)

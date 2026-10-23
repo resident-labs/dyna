@@ -165,20 +165,21 @@ func decodeFacts(n *Notice, facts string) error {
 	return nil
 }
 
-// encodeFacts writes the typed facts of the notice's kind as JSON.
+// encodeFacts writes the typed facts of the notice's kind as JSON. Each kind
+// marshals its own concrete struct, so no field goes through an untyped value.
 func encodeFacts(n Notice) (string, error) {
-	var facts any
+	var raw []byte
+	var err error
 	switch {
 	case n.Disk != nil:
-		facts = n.Disk
+		raw, err = json.Marshal(n.Disk)
 	case n.Provider != nil:
-		facts = n.Provider
+		raw, err = json.Marshal(n.Provider)
 	case n.Sync != nil:
-		facts = n.Sync
+		raw, err = json.Marshal(n.Sync)
 	default:
 		return "", nil
 	}
-	raw, err := json.Marshal(facts)
 	if err != nil {
 		return "", err
 	}
