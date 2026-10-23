@@ -189,6 +189,9 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return snap, err
 	}
+	// A run Dyna cancelled for local CI never tested the head. Drop it here,
+	// so no later step spends an artifact read or a log excerpt on it.
+	snap = withoutLocalHostedCancellations(snap, saved)
 	if !enabled {
 		if len(saved.IDs) == 0 {
 			return snap, nil
@@ -197,13 +200,11 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		if err := s.resumeHostedCI(ctx, job, repo); err != nil {
 			return snap, err
 		}
-		hosted := withoutLocalHostedCancellations(snap, saved)
-		ci, key, jobs, runs := hosted.CIStatus(policy.RequiredChecks...)
-		snap.localCI = &registeredCIObservation{Status: ci, Key: key, Jobs: jobs, Runs: runs, Reason: hostedFallbackReason(hosted)}
+		ci, key, jobs, runs := snap.CIStatus(policy.RequiredChecks...)
+		snap.localCI = &registeredCIObservation{Status: ci, Key: key, Jobs: jobs, Runs: runs, Reason: hostedFallbackReason(snap)}
 		return snap, nil
 	}
-	hosted := withoutLocalHostedCancellations(snap, saved)
-	hostedState, hostedKey, hostedJobs, hostedRuns := s.registeredHostedStatus(hosted, r, policy)
+	hostedState, hostedKey, hostedJobs, hostedRuns := s.registeredHostedStatus(snap, r, policy)
 	result, err := registry.LoadResult(ctx, repo, r.Head)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return snap, err
@@ -220,7 +221,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 	if observation.Status == "pending" {
 		observation.Reason = "waiting for local CI"
 		if localInfrastructureError(result) {
-			observation.Reason = hostedFallbackReason(hosted)
+			observation.Reason = hostedFallbackReason(snap)
 		} else {
 			runs := s.nodeRuns()
 			runs.Lock()
@@ -231,7 +232,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		}
 	}
 	if observation.Status == "passed" {
-		missing := missingRequiredCIChecks(policy.RequiredChecks, result, hosted)
+		missing := missingRequiredCIChecks(policy.RequiredChecks, result, snap)
 		if len(missing) > 0 {
 			observation.Status = "pending"
 			observation.Key = "required:" + r.Head + ":" + digest(strings.Join(missing, "\n"))
