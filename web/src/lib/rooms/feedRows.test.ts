@@ -183,9 +183,17 @@ test('a failure splits the fold and shows on its own', () => {
   assert.deepEqual(need(rows[2]).hook, { count: 1, lastTs: start + 4 * 60_000 })
 })
 
-test('two hooks never fold together', () => {
+test('two hooks never fold into one row', () => {
   const rows = content(feedRows([pass(1), pass(2, 'self-update'), pass(3)]))
-  assert.deepEqual(rows.map((row) => hookEvent(row.post)?.hook), ['librarian', 'self-update', 'librarian'])
+  assert.deepEqual(rows.map((row) => hookEvent(row.post)?.hook), ['librarian', 'self-update'])
+  assert.deepEqual(need(rows[0]).hook, { count: 2, lastTs: start + 3 * 60_000 })
+  assert.deepEqual(need(rows[1]).hook, { count: 1, lastTs: start + 2 * 60_000 })
+})
+
+test('a pass folds across another hook card but not across a message', () => {
+  const message: FeedInput = { id: 'chat', ts: start + 2 * 60_000, from: 'dyna:root', kind: 'message', text: 'Hello' }
+  const rows = content(feedRows([pass(1), message, pass(3)]))
+  assert.deepEqual(rows.map((row) => row.post.id), ['pass-librarian-1', 'chat', 'pass-librarian-3'])
 })
 
 test('passes more than the fold window apart start a new row', () => {
