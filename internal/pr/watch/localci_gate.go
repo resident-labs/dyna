@@ -192,13 +192,6 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 	// A run Dyna cancelled for local CI never tested the head. Drop it here,
 	// so no later step spends an artifact read or a log excerpt on it.
 	snap = withoutLocalHostedCancellations(snap, saved)
-	if mode == localci.ModeLocal || mode == localci.ModeBoth {
-		// GitHub also ends a hosted run on its own, such as when Dyna's CI time
-		// budget stops it. A workflow that only failed through its own
-		// cancellations never tested the head, so it must not veto the local
-		// result that did. A real hosted failure still vetoes.
-		snap = withoutCancelledHostedWorkflows(snap)
-	}
 	if !enabled {
 		job := registeredCIJob{record: r, head: r.Head, branch: r.Branch, trial: strings.HasPrefix(r.Branch, "dyna/merge-trial/")}
 		// In local mode a saved local result can decide the head without a ready
@@ -246,6 +239,13 @@ func (s *Service) registeredLocalObservation(ctx context.Context, r Record, snap
 	localState, localJobs, logs := registeredResultStatus(result)
 	if result.Status == "passed" && !s.registeredJobResultComplete(ctx, job, result) {
 		localState = "pending"
+	}
+	// A hosted failure that only cancellations caused never tested the head, so
+	// it must not veto a complete local pass. Only that case is suppressed: the
+	// cancelled evidence still decides when local CI is missing, pending or
+	// incomplete, so it can neither pass nor fail a head on its own.
+	if localState == "passed" && hostedState == "failed" && hostedCancelledOnly(snap, policy.RequiredChecks) {
+		hostedState, hostedKey, hostedJobs, hostedRuns = "pending", "cancelled-only:"+r.Head, nil, nil
 	}
 	observation := chooseRegisteredCI(r.Head, hostedState, hostedKey, hostedJobs, hostedRuns, localState, localJobs, logs)
 	if observation.Status == "pending" {

@@ -477,6 +477,13 @@ func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob
 	}
 	snap = withoutLocalHostedCancellations(snap, saved)
 	snap.Pull.Head.SHA = job.head
+	// A workflow that only cancellations ended proves nothing about the head, so
+	// the scheduler must still run local CI instead of treating the head as
+	// settled. Without this, a cancellation while the slots were busy would skip
+	// local execution and the trial would wait for CI that never comes.
+	if hostedCancelledOnly(snap, nil) {
+		return false, nil
+	}
 	ci, _, _, _ := s.registeredHostedStatus(snap, Record{}, ChangePolicy{})
 	return conclusiveCI(ci), nil
 }
