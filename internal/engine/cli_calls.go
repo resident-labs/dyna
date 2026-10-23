@@ -15,7 +15,6 @@ var cliCalls = []string{
 	"SaveProfile",
 	"UpsertProfile",
 	"SetProfileUses",
-	"SeedProfiles",
 	"RemoveProfile",
 	"SetDefaultProfile",
 	"SetProfileDisabled",

@@ -31,10 +31,6 @@ import (
 	"dyna-agent/internal/worktreesvc"
 )
 
-func loadStore() (*profile.Store, error) {
-	return profile.Load(profile.DefaultPath())
-}
-
 // applyRunRoom resolves this run's room and stamps it into the process
 // environment for runstore.Create, the engine, and detached children.
 func applyRunRoom(ref string) (room.Record, error) {
@@ -188,7 +184,13 @@ func NewRunWorkerCommand() *cobra.Command {
 		}
 		ctx, cancel := signal.NotifyContext(c.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
-		result, err := workflowsvc.Execute(ctx, opts, nil, runObserver(c, quiet, opts.ResumeFrom))
+		// A demo run gets its mock workers here, in memory, so it never reads or
+		// writes the owner's profile registry.
+		var demo *profile.Store
+		if opts.Demo {
+			demo = &profile.Store{Profiles: demoProfiles()}
+		}
+		result, err := workflowsvc.Execute(ctx, opts, demo, runObserver(c, quiet, opts.ResumeFrom))
 		if err != nil {
 			return err
 		}
@@ -515,46 +517,37 @@ func eventViews(events []runstore.Event) []plan.EventView {
 func NewDemoCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "demo",
-		Short: "Register mock worker profiles and run a sample workflow",
+		Short: "Run a sample workflow on unsaved mock worker profiles",
 		RunE: func(c *cobra.Command, _ []string) error {
 			if err := authority.Check("demo", authority.Current(), nil); err != nil {
 				return err
 			}
-			s, err := loadStore()
-			if err != nil {
-				return err
-			}
-			demos := []profile.Profile{
-				{Name: "mock-workhorse", Harness: profile.HarnessMock, Taste: 4, Intelligence: 10, Cost: 6, Default: true,
-					Description: "Demo worker. Pretend GPT-class workhorse: grinds long tasks alone, correct but unpolished code, weak frontend taste."},
-				{Name: "mock-reviewer", Harness: profile.HarnessMock, Taste: 10, Intelligence: 8, Cost: 4,
-					Description: "Demo worker. Pretend Opus-class reviewer: excellent taste, finds subtle issues, great frontend instincts, pricey."},
-				{Name: "mock-sprinter", Harness: profile.HarnessMock, Taste: 8, Intelligence: 6, Cost: 10,
-					Description: "Demo worker. Pretend GLM-class sprinter: fast and very cheap, great taste, slightly below the big models."},
-			}
-			for _, d := range demos {
-				if _, exists := s.Get(d.Name); !exists {
-					if err := s.Upsert(d); err != nil {
-						return err
-					}
-				}
-			}
-			if err := s.Save(); err != nil {
-				return err
-			}
-			fmt.Fprintln(c.OutOrStdout(), "registered demo profiles: mock-workhorse, mock-reviewer, mock-sprinter")
-			fmt.Fprintln(c.OutOrStdout(), "running demo workflow...")
-
 			if _, err := applyRunRoom(""); err != nil {
 				return err
 			}
 			cwd, _ := os.Getwd()
-			if err := runForeground(c, workflowsvc.Options{Name: "demo-fanout", ScriptSrc: demoScript, WorkDir: cwd}, false, "raw"); err != nil {
+			fmt.Fprintln(c.OutOrStdout(), "running demo workflow on mock workers...")
+			// The worker gets the demo profiles from Options.Demo, so the demo
+			// never reads or writes the owner's profile registry.
+			if err := runForeground(c, workflowsvc.Options{Name: "demo-fanout", ScriptSrc: demoScript, WorkDir: cwd, Demo: true}, false, "raw"); err != nil {
 				return err
 			}
 			fmt.Fprintln(c.OutOrStdout(), stDim.Render("open the desktop app to browse this run"))
 			return nil
 		},
+	}
+}
+
+// demoProfiles are the mock workers the demo run uses. The worker takes them
+// from Options.Demo in memory, so they never reach the owner's profile store.
+func demoProfiles() []profile.Profile {
+	return []profile.Profile{
+		{Name: "mock-workhorse", Harness: profile.HarnessMock, Taste: 4, Intelligence: 10, Cost: 6,
+			Description: "Demo worker. Pretend GPT-class workhorse: grinds long tasks alone, correct but unpolished code, weak frontend taste."},
+		{Name: "mock-reviewer", Harness: profile.HarnessMock, Taste: 10, Intelligence: 8, Cost: 4,
+			Description: "Demo worker. Pretend Opus-class reviewer: excellent taste, finds subtle issues, great frontend instincts, pricey."},
+		{Name: "mock-sprinter", Harness: profile.HarnessMock, Taste: 8, Intelligence: 6, Cost: 10,
+			Description: "Demo worker. Pretend GLM-class sprinter: fast and very cheap, great taste, slightly below the big models."},
 	}
 }
 

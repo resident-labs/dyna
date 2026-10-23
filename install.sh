@@ -163,10 +163,7 @@ if [ "$os" = linux ] && command -v systemctl >/dev/null 2>&1; then
 fi
 
 bold "next steps"
-info "dyna profiles init-codex  # register astra, luna, sol, sol-max, and terra"
-info "dyna profiles init-claude # register opus, fable, sonnet, and haiku"
-info "dyna profiles init-antigravity # register agy"
-info "dyna profiles init-muse # register wonder and wonder-full (Muse)"
-info "dyna demo            # mock workers + sample workflow"
+info "dyna profiles add --name my-builder --harness codex --model <model-id>  # add one profile per model you use"
+info "dyna demo            # sample workflow on mock workers; saves no profiles"
 info "desktop/build.sh     # build the desktop app (from a checkout)"
 info "dyna guide           # scripting guide for agents"

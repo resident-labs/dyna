@@ -182,7 +182,7 @@
   {#if note}<p class="note" role="status">{note}</p>{/if}
   {#if !list && !error}<Skeleton label="Loading profiles" rows={3} />{/if}
   {#if list && !list.profiles.length}
-    <EmptyState title="No profiles yet">A profile is a harness and a model. Create one to start sessions on it.</EmptyState>
+    <EmptyState title="No profiles yet">A profile is a harness and a model. Add one with New profile above, or run <span class="mono">dyna profiles add</span> in a terminal.</EmptyState>
   {/if}
   {#if list}
     {#if list.profiles.length}

@@ -34,6 +34,9 @@ type Options struct {
 	ResumeFrom  string
 	MaxConc     int
 	MaxAgents   int
+	// Demo runs the script on the unsaved mock worker profiles instead of the
+	// saved registry. Only `dyna demo` sets it.
+	Demo bool
 }
 
 // Observer receives progress without choosing a terminal or app presentation.
