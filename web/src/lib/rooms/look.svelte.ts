@@ -13,8 +13,8 @@ function load(): Look {
   try {
     const raw = localStorage.getItem(KEY)
     const saved = readLook(raw)
-    // An older version also saved per-channel overrides. Drop them once, so the
-    // stored look holds the choices for every channel and nothing else.
+    // An older version also saved per-view overrides. Drop them once, so the
+    // stored look holds the choices for every feed view and nothing else.
     if (raw && raw !== JSON.stringify(saved)) localStorage.setItem(KEY, JSON.stringify(saved))
     return saved
   } catch {
@@ -29,7 +29,7 @@ export const look = $state(load())
 export const revealed = $state<Record<string, boolean>>({})
 export const reveal = (id: string) => { revealed[id] = true }
 
-// choose sets one look choice for every channel. A URL fixture still names its
+// choose sets one look choice for every feed view. A URL fixture still names its
 // choice as plain text, so a kind can arrive untyped.
 export function choose(kind: string, value: ChoiceValue) {
   look.all = withChoice(look, kind as ChoiceID, value).all

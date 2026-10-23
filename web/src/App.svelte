@@ -8,7 +8,7 @@
   import { FAST, motion } from './lib/ui/motion.ts'
   import { viewIdentity } from './lib/ui/viewIdentity.ts'
   import { createReadMarker } from './lib/rooms/readMarker.ts'
-  import { mergeFeedPage, rerouteAnchors, withChannels } from './lib/rooms/feedPages.ts'
+  import { mergeFeedPage, rerouteAnchors, withViews } from './lib/rooms/feedPages.ts'
   import { createRoomData } from './lib/rooms/roomData.ts'
   import { createSessionData } from './lib/sessions/sessionData.ts'
   import { mergeListPage } from './lib/ui/listPages.ts'
@@ -24,7 +24,7 @@
   import VoiceWidget from './lib/voice/VoiceWidget.svelte'
   import { voiceCall, callRequests } from './lib/voice/voiceCall.ts'
   import { callLink, callTarget } from './lib/voice/callRequests.ts'
-  import { GENERAL, VOICE, isChannel, inChannel, homeChannel, channelModel, parentTrail, prepareChannelText } from './lib/rooms/channels.ts'
+  import { GENERAL, VOICE, isFeedView, inView, homeView, feedModel, parentTrail, prepareFeedText } from './lib/rooms/feedViews.ts'
   import { isShellResult } from './lib/rooms/feedRows.ts'
   import { HOOK_LOG_EVENT, hookLogFrom } from './lib/settings/hookLog.ts'
   import type { HookLogTarget } from './lib/settings/hookLog.ts'
@@ -129,7 +129,7 @@
   import type { UpdateNotice } from './lib/api/settings.ts'
   import type { RowChange } from './lib/ui/listChanges.ts'
   import type { Page } from './lib/api/wire.ts'
-  import type { ChannelMember } from './lib/rooms/channels.ts'
+  import type { FeedMember } from './lib/rooms/feedViews.ts'
   import type { Receipt } from './lib/sessions/dm.ts'
   import type { ActionRoom } from './lib/ui/actions.ts'
   import type { Target as PaletteTarget } from './lib/ui/paletteTargets.ts'
@@ -611,8 +611,8 @@
   // The sidebar row of the open work view, and its tabs when it has several.
   let workRow = $derived(rowOf(view))
   let workTabs = $derived(visibleTabs(workRow))
-  // The room feed is on screen: a channel view, not a work view or a session.
-  let feedShown = $derived(!!room && !drill && isChannel(view) && !workRow)
+  // The room feed is on screen: a feed view, not a work view or a session.
+  let feedShown = $derived(!!room && !drill && isFeedView(view) && !workRow)
 
   function hasFiles(e: DragEvent) {
     return Array.from(e.dataTransfer?.types || []).includes('Files')
@@ -632,8 +632,8 @@
   }
 
   let current = $derived(rooms.find((r) => r.id === roomId))
-  let channels = $derived(channelModel(hierarchy))
-  let channel = $derived(view.startsWith('channel:') ? channels.byId.get(view.slice(8)) : null)
+  let feedViews = $derived(feedModel(hierarchy))
+  let viewLead = $derived(view.startsWith('channel:') ? feedViews.byId.get(view.slice('channel:'.length)) : null)
   // A phone hides the older crumbs, so the current one carries the whole trail.
   // The root DM is a session view like any other; it keeps the room's voice call button.
   let isRootDm = $derived(!!drill && (drill.rootSeat || drill.role === 'root'))
@@ -647,13 +647,13 @@
     return { id: 'root:' + roomId, rootSeat: true, role: 'root', name: 'root', address: room?.name + ':root', hue: owner?.hue ?? 0, state: 'idle', status: 'seat', profile: holder + ' holds the seat', seat: rootSeat, resumable: false, depth: 0, children: 0, turns: 0, created: '', lastActivity: '' }
   }
   // The breadcrumbs above a session and a run: root, then the parent sessions.
-  let sessionTrail = $derived(drill && !readOnlyDm && !isRootDm ? parentTrail(channels, drill.parent, rootMember()).filter((m) => m.id !== drill?.id) : [])
-  let runTrail = $derived(view === 'runs' && openRun && runDetail?.run?.parentId ? parentTrail(channels, runDetail.run.parentId, rootMember()) : [])
-  let channelLabel = $derived(channel?.name ?? roomLabel(current ?? room))
-  // Shell exit records live in shell-jobs, not in channel feeds.
-  let posts = $derived((feed?.posts ?? []).filter((p) => !isShellResult(p) && (!isChannel(view) || inChannel(p, view))))
-  // What the owner chose to show in this channel; hidden posts still count as read.
-  let shownPosts = $derived(isChannel(view) ? posts.filter(visibleTo(look, revealed) as (post: Post) => boolean) : posts)
+  let sessionTrail = $derived(drill && !readOnlyDm && !isRootDm ? parentTrail(feedViews, drill.parent, rootMember()).filter((m) => m.id !== drill?.id) : [])
+  let runTrail = $derived(view === 'runs' && openRun && runDetail?.run?.parentId ? parentTrail(feedViews, runDetail.run.parentId, rootMember()) : [])
+  let viewLabel = $derived(viewLead?.name ?? roomLabel(current ?? room))
+  // Shell exit records live in shell-jobs, not in feed views.
+  let posts = $derived((feed?.posts ?? []).filter((p) => !isShellResult(p) && (!isFeedView(view) || inView(p, view))))
+  // What the owner chose to show in this feed view; hidden posts still count as read.
+  let shownPosts = $derived(isFeedView(view) ? posts.filter(visibleTo(look, revealed) as (post: Post) => boolean) : posts)
   // The room's reviewers show only on the PR screen, so every other list uses people.
   let people = $derived(withoutReviewers(members, reviewer))
   let live = $derived(people.filter((m) => !m.owner && m.state === 'live'))
@@ -684,14 +684,14 @@
   }
   const reload = createReloadGate(() => ({ room: roomId, visit: roomRequest }), visibleList)
   const readMarker = createReadMarker(api, {
-    current: () => ({ room: roomId, visit: roomRequest + ':' + view, visible: pageVisible && !(narrow && reviewOpen) && consolidationAlive && !drill && isChannel(view) }),
+    current: () => ({ room: roomId, visit: roomRequest + ':' + view, visible: pageVisible && !(narrow && reviewOpen) && consolidationAlive && !drill && isFeedView(view) }),
     read: () => { soonRooms(); soonRooms('feed') },
   })
 
-  // The unread refresh carries channel counts into the open feed.
-  function applyUnread(value: { room: Room; channelUnread?: Record<string, number> | null }) {
+  // The unread refresh carries view counts into the open feed.
+  function applyUnread(value: { room: Room; viewUnread?: Record<string, number> | null }) {
     if (feed?.room.id !== value.room.id) return
-    feed.channelUnread = value.channelUnread ?? {}
+    feed.viewUnread = value.viewUnread ?? {}
   }
   const roomData = createRoomData(api, {
     current: () => ({ room: roomId, visit: roomRequest }),
@@ -712,7 +712,7 @@
   function memberRoster(list: Member[]) {
     return JSON.stringify(list.filter((m) => !m.owner).map((m) => [m.id, m.name, !!m.closed]).sort())
   }
-  // Channels come from the server with each post, so a parent change (a
+  // Feed views come from the server with each post, so a parent change (a
   // promote) rereads the routing of every loaded post. reconcileRows updates
   // rows in place, so the last key is kept, not recomputed.
   let routedParents = ''
@@ -720,7 +720,7 @@
     return JSON.stringify([roomId, list.filter((m) => !m.owner).map((m) => [m.id, m.parent || '']).sort()])
   }
   // noteParents records the member parent tree. When it changed in the same
-  // room, loaded posts reread their channels. Live member updates and room
+  // room, loaded posts reread their views. Live member updates and room
   // opens, including a reconnect, both come through here.
   function noteParents(rows: Member[]) {
     const parents = parentKey(rows)
@@ -733,7 +733,7 @@
     if (!feed?.posts?.length) return
     try {
       const pages = await Promise.all(rerouteAnchors(feed.posts).map((post) => api.feedAround(id, post, 200)))
-      if (id === roomId && request === roomRequest && feed) feed.posts = withChannels(feed.posts ?? [], pages)
+      if (id === roomId && request === roomRequest && feed) feed.posts = withViews(feed.posts ?? [], pages)
     } catch { /* The next room open or reconnect reroutes the posts. */ }
   }
   function roomCountKey(list: Member[]) {
@@ -757,7 +757,7 @@
     hierarchy = rows
     setPicked(pruneSelection(pickedSessions, hierarchy))
     members = hierarchy.filter((m) => showClosed || !m.closed)
-    view = channels.resolveView(view)
+    view = feedViews.resolveView(view)
     if (rosterChanged) loadComputers()
     if (previousCounts !== roomCountKey(rows)) soonRooms()
   }
@@ -1128,7 +1128,7 @@
     }
   }
 
-  // Pins and links open the channel that contains the requested post.
+  // Pins and links open the feed view that contains the requested post.
   async function jumpTo(id: string) {
     const request = ++detailRequest
     const rid = roomId
@@ -1143,9 +1143,9 @@
     const post = (feed?.posts ?? []).find((p) => p.id === id)
     if (post && questionID(post)) { openQuestion(post); return }
     if (post && isShellResult(post)) { openJob = post.from.slice('shell:'.length); view = 'jobs'; return }
-    // A voice call line has no channel view; Voice's call widget shows it.
-    if (post && inChannel(post, VOICE)) return
-    view = post ? homeChannel(post) : GENERAL
+    // A voice call line has no feed view; Voice's call widget shows it.
+    if (post && inView(post, VOICE)) return
+    view = post ? homeView(post) : GENERAL
     await tick()
     if (request === detailRequest && rid === roomId) feedView?.jump(id)
   }
@@ -1200,9 +1200,9 @@
 
   function markShown(list: Post[]) { return readMarker.mark(list) }
 
-  // Only messages visible in the selected channel become read.
+  // Only messages visible in the selected feed view become read.
   $effect(() => {
-    if (!drill && isChannel(view)) markShown(posts)
+    if (!drill && isFeedView(view)) markShown(posts)
   })
 
   function loadReviewer() { return reload('reviewer', async (current: () => boolean) => {
@@ -1357,7 +1357,7 @@
     hierarchy = o.members ?? []
     noteParents(hierarchy)
     setPicked(pruneSelection(pickedSessions, hierarchy))
-    view = channels.resolveView(view)
+    view = feedViews.resolveView(view)
     members = hierarchy.filter((m) => showClosed || !m.closed)
     choices = o.choices ?? []
     pins = o.pins ?? []
@@ -1500,7 +1500,7 @@
   }
 
   // openSession drills into a member's full session view.
-  function openSession(source: Member | ChannelMember | AgentRef | { rootSeat: true } | null, turn = 0, initial: SessionData | null = null, readOnly = false) {
+  function openSession(source: Member | FeedMember | AgentRef | { rootSeat: true } | null, turn = 0, initial: SessionData | null = null, readOnly = false) {
     if (!source) return
     const m = ('rootSeat' in source && source.rootSeat ? rootMember() : source) as Drill
     clearItemLink()
@@ -2257,7 +2257,7 @@
     showPins = false
     navOpen = false
     if (!drill && tab === 'issues') view = 'issues'
-    else if (!drill && !isChannel(view)) view = GENERAL
+    else if (!drill && !isFeedView(view)) view = GENERAL
     loadChanges()
     loadReviewer()
   }
@@ -2283,7 +2283,7 @@
     if (view !== v) reply = null
     // A new view opens at the bottom, so older posts can go. Selecting the
     // open view again keeps the reader's place, so it trims only at the bottom.
-    const next = channels.resolveView(v)
+    const next = feedViews.resolveView(v)
     if (next !== view || feedAtBottom) feed = trimFeed(feed)
     view = next
     if (next === 'issues') openReview('issues')
@@ -2574,7 +2574,7 @@
   <div class="nav" class:open={navOpen}>
     <RoomRail {rooms} selected={machinesNav ? '' : roomId} onselect={selectRoom} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} />
     {#if showSide || narrow}
-      <Sidebar machines={machines} machinesOpen={machinesNav} machineId={machineId} onmachine={openMachine} selected={drill?.address ?? ''} onroom={(id: string) => selectRoom(id)} {computers} channelUnread={feed?.channelUnread ?? {}} room={current ?? room} prs={openPRMap} onroommenu={(x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }} view={view as typeof GENERAL} questions={questions.filter((q) => q.state === 'open' && q.to === 'owner').length} {live} {runs} {dataDir} {ownerHue} {route} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onview={openView} onmember={openAgent} />
+      <Sidebar machines={machines} machinesOpen={machinesNav} machineId={machineId} onmachine={openMachine} selected={drill?.address ?? ''} onroom={(id: string) => selectRoom(id)} {computers} viewUnread={feed?.viewUnread ?? {}} room={current ?? room} prs={openPRMap} onroommenu={(x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }} view={view as typeof GENERAL} questions={questions.filter((q) => q.state === 'open' && q.to === 'owner').length} {live} {runs} {dataDir} {ownerHue} {route} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onview={openView} onmember={openAgent} />
     {/if}
   </div>
   {#if narrow && navOpen}
@@ -2601,7 +2601,7 @@
             <span class="dm-sep" aria-hidden="true">/</span>
             <span class="title">{drill.name}</span>
           {:else}
-          <button class="dm-back" aria-label={`Back to #${roomLabel(current ?? room)}`} title={`Back to #${roomLabel(current ?? room)}`} onclick={() => (drill = null)}><span class="back-arrow" aria-hidden="true">‹</span><span class="back-name">#{roomLabel(current ?? room)}</span></button>
+          <button class="dm-back" aria-label={`Back to ${roomLabel(current ?? room)}`} title={`Back to ${roomLabel(current ?? room)}`} onclick={() => (drill = null)}><span class="back-arrow" aria-hidden="true">‹</span><span class="back-name">{roomLabel(current ?? room)}</span></button>
           {#if sessionTrail.length}
             <nav class="trail" aria-label="Parent sessions">
               {#each sessionTrail as m (m.id)}
@@ -2669,7 +2669,7 @@
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="center" inert={narrow && reviewOpen} in:fade={{ duration: prView ? 0 : motion(FAST) }} ondragover={dragOver} ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget instanceof Node ? e.relatedTarget : null)) dropping = false }} ondrop={drop}>
         {#if dropping}
-          <div class="dropzone"><div><strong>Drop to attach</strong><span>to your next post in {drill ? '@' + drill.name : '#' + roomLabel(current ?? room)}</span></div></div>
+          <div class="dropzone"><div><strong>Drop to attach</strong><span>to your next post in {drill ? '@' + drill.name : roomLabel(current ?? room)}</span></div></div>
         {/if}
         {#if engineStatus}
           <p class="engine-down" class:waiting={engineStatus === 'reconnecting'} role={engineStatus === 'reconnecting' ? 'status' : 'alert'}><strong>Reconnecting…</strong>
@@ -2738,10 +2738,10 @@
             <Runs {room} list={runs} error={runsError} onopen={showRun} onstart={() => (starting = true)} />
           {/if}
         {:else}
-          <Feed {goals} bind:this={feedView} bind:stuck={feedAtBottom} label={channelLabel} {room} posts={shownPosts} onreveal={revealPost} {questions} calls={view === GENERAL ? roomCalls : []} onacceptcall={acceptCall} ondeclinecall={declineCall} {view} earlier={feed?.earlier ?? 0} onearlier={(near: () => boolean) => loadEarlier('older', '', near)} newer={feed?.newer ?? 0} onnewer={(near: () => boolean) => loadEarlier('newer', '', near)} onpresent={() => loadEarlier('present')} onaround={(id: string) => loadEarlier('around', id)} {unreadFrom} pinned={pinnedIds} onaddress={openAddress} onreply={startReply} onforward={(p: Post) => composer?.forward(p)} onpin={togglePin} ondetail={openDetail} onquestion={openQuestion} ongoal={openGoal} onissue={openIssues} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
+          <Feed {goals} bind:this={feedView} bind:stuck={feedAtBottom} label={viewLabel} {room} posts={shownPosts} onreveal={revealPost} {questions} calls={view === GENERAL ? roomCalls : []} onacceptcall={acceptCall} ondeclinecall={declineCall} {view} earlier={feed?.earlier ?? 0} onearlier={(near: () => boolean) => loadEarlier('older', '', near)} newer={feed?.newer ?? 0} onnewer={(near: () => boolean) => loadEarlier('newer', '', near)} onpresent={() => loadEarlier('present')} onaround={(id: string) => loadEarlier('around', id)} {unreadFrom} pinned={pinnedIds} onaddress={openAddress} onreply={startReply} onforward={(p: Post) => composer?.forward(p)} onpin={togglePin} ondetail={openDetail} onquestion={openQuestion} ongoal={openGoal} onissue={openIssues} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
           <!-- Keyed: staged files belong to one room and never follow a switch. -->
           {#key room.id + view}
-            <Composer onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} bind:this={composer} label={channelLabel} prepareText={(text: string) => prepareChannelText(text, channel ?? null, channels, (value) => api.preview(room.id, value))} {room} {choices} {profiles} commands={composerCommands} onslash={() => { loadProfiles(); loadTemplates() }} {reply} bind:draft={draft.value} onsend={send} oncancelreply={() => (reply = null)} />
+            <Composer onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} bind:this={composer} label={viewLabel} prepareText={(text: string) => prepareFeedText(text, viewLead ?? null, feedViews, (value) => api.preview(room.id, value))} {room} {choices} {profiles} commands={composerCommands} onslash={() => { loadProfiles(); loadTemplates() }} {reply} bind:draft={draft.value} onsend={send} oncancelreply={() => (reply = null)} />
           {/key}
         {/if}
         {/if}
@@ -2900,7 +2900,7 @@
   .title .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .hash { color: var(--faint); font-size: 22px; font-weight: 400; margin-right: 6px; line-height: 1; }
   .crumb { display: inline-flex; align-items: center; font-weight: 600; color: var(--muted); font-size: 16px; transition: color var(--motion-fast) var(--ease); }
-  /* The channel trail is one flex item, so a long trail shrinks as a unit. */
+  /* The view trail is one flex item, so a long trail shrinks as a unit. */
   .trail { display: flex; align-items: center; gap: 10px; min-width: 0; }
   @media (hover: hover) {
     .crumb:hover { color: var(--ink); }

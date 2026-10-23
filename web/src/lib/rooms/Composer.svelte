@@ -63,7 +63,7 @@
   }
   let { room, label = '', prepareText = (text) => text, choices = [], profiles = [], commands = [], reply = null, onopenfile, draft = $bindable(''), onsend, onslash, oncancelreply = () => {} }: Props = $props()
 
-  // An asynchronous recipient lookup must not outlive its channel composer.
+  // An asynchronous recipient lookup must not outlive its composer.
   let active = true
   onDestroy(() => { active = false })
 
@@ -457,7 +457,7 @@
   {#if fileDirectory !== null && (fileLoading || fileError)}
     <div class="file-status" role="status">{fileLoading ? 'Loading files…' : 'Files unavailable: ' + fileError}</div>
   {/if}
-  <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message #${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} {activeOption}>
+  <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message ${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} {activeOption}>
     {#snippet context()}<ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />{/snippet}
     {#snippet tools()}
       <button class="command-chip" type="button" aria-label="Browse commands" title="Browse sessions and commands" disabled={busy} onclick={openCommands}>/</button>

@@ -148,10 +148,10 @@ func (s *Service) previewSpawn(rec room.Record, draft string) *SpawnPreview {
 func roomDir(rec room.Record) (string, error) {
 	dir := rec.Repo
 	if dir == "" {
-		return "", fmt.Errorf("#%s has no repo, so a new session has no safe working directory. Use a room made with `dyna room create --repo <path>`", rec.Name)
+		return "", fmt.Errorf("room %s has no repo, so a new session has no safe working directory. Use a room made with `dyna room create --repo <path>`", rec.Name)
 	}
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-		return "", fmt.Errorf("the repo of #%s, %s, is not a directory", rec.Name, dir)
+		return "", fmt.Errorf("the repo of room %s, %s, is not a directory", rec.Name, dir)
 	}
 	return dir, nil
 }

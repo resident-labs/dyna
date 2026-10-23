@@ -193,7 +193,7 @@
     updatePosition(scroller)
   })
 
-  // Channel filters can hide a whole page. Fill the viewport before waiting
+  // Feed view filters can hide a whole page. Fill the viewport before waiting
   // for a scroll the reader cannot make. A failed request waits for a retry.
   // A list that shares another list's pager (a thread panel beside its DM) sets
   // fill to false: filling it would page the whole DM history under the reader.
