@@ -104,6 +104,29 @@ const hookPost = (id: string, type: 'started' | 'result', runId: string, state: 
   payload: { runId, repo: '/repo', hook: 'self-update', event: 'main-updated', state },
 })
 
+// An issue is filed, then changed, then closed. One card shows the issue, so
+// all three posts fold into the filing's row: a filing has no issue ID yet,
+// and its own post ID is the issue's ID.
+const issuePost = (id: string, type: 'filed' | 'updated' | 'closed', issueId: string | undefined, state: 'open' | 'goal' | 'closed'): FeedInput => ({
+  id, ts: start, from: 'dyna', kind: 'issue', text: 'issue',
+  notice: { kind: type },
+  payload: { type, issueId, number: 3, title: 'Two retry loops', state, filer: 'dyna:librarian' },
+})
+
+test('an issue folds its filing, change and close into one card', () => {
+  const posts = [
+    issuePost('i1', 'filed', undefined, 'open'),
+    issuePost('i2', 'updated', 'i1', 'goal'),
+    issuePost('i3', 'closed', 'i1', 'closed'),
+    issuePost('i4', 'filed', undefined, 'open'),
+  ]
+  const rows = content(feedRows(posts))
+  assert.deepEqual(rows.map((row) => row.key), ['i1', 'i4'])
+  assert.deepEqual(rowPosts(rows[0]).map((post) => post.id), ['i1', 'i2', 'i3'])
+  assert.equal(rowPost(rows[0])?.notice?.kind, 'closed')
+  assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['i4'])
+})
+
 test('a hook run folds its start into its result, and another run is another card', () => {
   const posts = [
     hookPost('h1', 'started', 'run-a', 'running'),

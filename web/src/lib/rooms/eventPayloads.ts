@@ -1,8 +1,8 @@
 // Typed readers for the payload of a sealed system event. They read the
 // stored payload only, never the post text, so a card and its event cannot
 // disagree. The types come from events.gen.ts, which the Go registry writes.
-import { eventSpecs, isHookEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isWorktreeEvent } from './events.gen.ts'
-import type { EventPayload, HookEvent, MergeDecisionEvent, MergeEvent, PREvent, WorktreeEvent } from './events.gen.ts'
+import { eventSpecs, isCheckinEvent, isGoalEvent, isHookEvent, isIssueEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isRuleEvent, isSlowTestEvent, isWorktreeEvent } from './events.gen.ts'
+import type { CheckinEvent, EventPayload, GoalEvent, HookEvent, IssueEvent, MergeDecisionEvent, MergeEvent, PREvent, RuleEvent, SlowTestEvent, WorktreeEvent } from './events.gen.ts'
 
 // A post of one event family, with the fields its reader needs. A feed row, a
 // stored message and a test fixture all fit it.
@@ -49,4 +49,38 @@ export function mergeEvent(post: EventPost): MergeEvent | undefined {
 export function mergeDecision(post: EventPost): MergeDecisionEvent | undefined {
   if (post.kind !== 'merge' || post.notice?.kind !== 'decision') return undefined
   return isMergeDecisionEvent(post.payload) ? post.payload : undefined
+}
+
+// issueEvent returns the typed payload of an issue post. A post stored before
+// the typed events has no payload, and returns undefined; the issue card then
+// reads its stored text.
+export function issueEvent(post: EventPost): IssueEvent | undefined {
+  if (post.kind !== 'issue') return undefined
+  return isIssueEvent(post.payload) ? post.payload : undefined
+}
+
+// goalEvent returns the typed payload of a goal post. A post stored before the
+// typed events has no payload, and returns undefined; the goal row then reads
+// its stored text.
+export function goalEvent(post: EventPost): GoalEvent | undefined {
+  if (post.kind !== 'goal') return undefined
+  return isGoalEvent(post.payload) ? post.payload : undefined
+}
+
+// checkinEvent returns the typed payload of a parent check-in.
+export function checkinEvent(post: EventPost): CheckinEvent | undefined {
+  if (post.kind !== 'checkin') return undefined
+  return isCheckinEvent(post.payload) ? post.payload : undefined
+}
+
+// slowTestEvent returns the typed payload of a CI health line about slow tests.
+export function slowTestEvent(post: EventPost): SlowTestEvent | undefined {
+  if (post.kind !== 'ci-health') return undefined
+  return isSlowTestEvent(post.payload) ? post.payload : undefined
+}
+
+// ruleEvent returns the typed payload of a rule change.
+export function ruleEvent(post: EventPost): RuleEvent | undefined {
+  if (post.kind !== 'rule') return undefined
+  return isRuleEvent(post.payload) ? post.payload : undefined
 }

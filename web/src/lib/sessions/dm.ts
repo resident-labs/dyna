@@ -2,7 +2,6 @@ import type { Member, Post } from '../api/room.ts'
 import type { Item, Turn, Usage } from '../api/session.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { isNote, noteData } from '../ui/notices.ts'
-import type { SlowTest } from '../ui/notices.ts'
 import { registeredEvent } from '../rooms/eventPayloads.ts'
 import { userText } from './userText.ts'
 import { duration, short, tokens } from '../ui/format.ts'
@@ -45,14 +44,13 @@ export interface Thread {
   posts: ThreadPost[]
 }
 
-// The note a row carries, such as a slow-test issue or a changed instruction.
+// The note a row carries, such as a changed instruction.
 export interface DmNote {
   id?: string
   target?: string
   text?: string
   ts?: Time
   attachments?: Post['attachments']
-  slow?: SlowTest
   label?: string
   body?: string
 }
@@ -454,10 +452,6 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
       }
     } else if (event.kind === 'child') {
       childStep(event.member, event.ts, event.n)
-    } else if (event.kind === 'instructions' && event.note.slow) {
-      const last = rows.at(-1)
-      if (last?.kind === 'instructions' && last.notes?.[0]?.slow) last.notes.push(event.note)
-      else rows.push({ ...event, notes: [event.note] })
     } else if (event.kind !== 'shell') rows.push(event)
   }
   // Keep pending or clipped owner instructions visible. Only a returned
