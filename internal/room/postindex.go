@@ -148,11 +148,7 @@ func (s *Store) addNamedRows(db *sql.DB, rec Record) error {
 	if err != nil {
 		return err
 	}
-	type named struct {
-		Delivery
-		postID string
-	}
-	var rows []named
+	var rows []Delivery
 	for _, msg := range msgs {
 		mode := deliveryModeFor(msg)
 		for _, to := range msg.To {
@@ -160,7 +156,7 @@ func (s *Store) addNamedRows(db *sql.DB, rec Record) error {
 				continue
 			}
 			if key := deliveryRowKey(msg, rec.Name, to); key != "" {
-				rows = append(rows, named{postID: msg.ID, Delivery: Delivery{SessionID: key, Mode: mode}})
+				rows = append(rows, Delivery{PostID: msg.ID, SessionID: key, Mode: mode})
 			}
 		}
 	}
@@ -172,7 +168,7 @@ func (s *Store) addNamedRows(db *sql.DB, rec Record) error {
 		ctx := context.Background()
 		for _, r := range rows {
 			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO post_deliveries(room_id, post_id, session_id, mode, category, state, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-				rec.ID, r.postID, r.SessionID, string(r.Mode), r.Category, string(DeliveryDelivered), at); err != nil {
+				rec.ID, r.PostID, r.SessionID, string(r.Mode), r.Category, string(DeliveryDelivered), at); err != nil {
 				return err
 			}
 		}
