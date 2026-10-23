@@ -62,6 +62,19 @@ test('a PR event reaches a session DM as a system-event row', () => {
   assert.equal(row.post.id, post.id)
 })
 
+// A notice that opened a turn appears as a transcript prompt item, not as a
+// post row. It still draws the card, not the raw text.
+test('a PR event that woke the turn draws its card, not the prompt text', () => {
+  const dm = web.dmView({
+    address: 'room_1:author',
+    posts: [post],
+    turns: [{ n: 1, started: '2026-10-23T08:00:00Z', items: [{ kind: 'prompt', from: 'room_1', postId: post.id, delivered: true }] }],
+  }, { name: 'room_1' })
+  const rows = dm.rows.filter((r: { kind: string }) => r.kind === 'system-event' || r.kind === 'message')
+  assert.equal(rows.length, 1, `rows: ${rows.map((r: { kind: string }) => r.kind).join()}`)
+  assert.equal(rows[0].kind, 'system-event')
+})
+
 test('the DM shows the PR card and hides the agent text until Details opens', () => {
   const target = document.createElement('div')
   document.body.append(target)

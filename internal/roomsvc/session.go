@@ -350,8 +350,15 @@ func (s *Service) sessionPosts(rec room.Record, msgs []room.Message, id, address
 // sessionPost is the shared conversation filter for indexed and supplied posts.
 func sessionPost(rec room.Record, m room.Message, id, address string) bool {
 	own := m.SentBySession(id, address)
-	if m.Kind == "pr" || own && IsCompletion(m) {
+	if own && IsCompletion(m) {
 		return false
+	}
+	// A typed PR event is part of the conversation: the DM draws its card,
+	// whether the engine posted it or the session's own turn did. A PR post
+	// stored before the typed events stays out, as it always did.
+	if m.Kind == "pr" {
+		_, typed := m.PR()
+		return typed && (own || m.SessionAddressed(id, address))
 	}
 	return own || m.SessionAddressed(id, address) && (m.From != rec.Name || len(m.Attachments) > 0)
 }

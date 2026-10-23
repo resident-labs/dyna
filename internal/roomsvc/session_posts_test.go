@@ -60,15 +60,10 @@ func TestTranscriptPostsMatchFeed(t *testing.T) {
 		}
 	}
 	// A PR event is an engine post; it reaches the feed like any other post.
-	prs := []struct {
-		to   string
-		kind room.PRType
-	}{{rec.Name, room.PRApproved}, {lead.Address(), room.PRReady}}
-	for _, pr := range prs {
-		if _, err := store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{pr.to}, RoomService: true,
-			Event: room.PREvent{Type: pr.kind, Label: "PR #1", Location: "github.com/o/r#1", ChangeID: "github.com/o/r#1", Number: 1, Head: strings.Repeat("a", 40)}}); err != nil {
-			t.Fatal(err)
-		}
+	// A typed PR event reaches the feed like any other post.
+	if _, err := store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{rec.Name}, RoomService: true,
+		Event: room.PREvent{Type: room.PRApproved, Label: "PR #1", Location: "github.com/o/r#1", ChangeID: "github.com/o/r#1", Number: 1, Head: strings.Repeat("a", 40)}}); err != nil {
+		t.Fatal(err)
 	}
 	sess, err := e.svc.transcript(lead.ID, 0, 0)
 	if err != nil {
@@ -389,5 +384,38 @@ func TestTranscriptPostsUseOmittedTurnEnd(t *testing.T) {
 				t.Fatalf("earlier=%v", got.Earlier)
 			}
 		})
+	}
+}
+
+// A typed PR event is a delivered notice the DM draws as a card, so the
+// session's conversation includes it. A PR post stored before the typed events
+// keeps its raw text and stays out, as it always did.
+func TestSessionConversationIncludesTypedPREvents(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	store := e.svc.Notify.Rooms
+	event, err := store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{lead.Address()}, RoomService: true,
+		Event: room.PREvent{Type: room.PRCIFailed, Label: "PR #7", Location: "github.com/o/r#7", ChangeID: "github.com/o/r#7", Number: 7,
+			Head: strings.Repeat("a", 40), CIAttempt: 1, CIMax: 3, Summary: "unit"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Old history keeps PR posts with only text and a notice kind.
+	legacy := room.Message{Kind: "pr", From: rec.Name, To: []string{lead.Address()}, Notice: room.EventNotice{Kind: "ready"}, Text: "PR #7 is ready to land.",
+		SessionIDs: map[string]string{lead.Address(): lead.ID}}
+	if sessionPost(rec, legacy, lead.ID, lead.Address()) {
+		t.Fatal("a stored PR post without a typed payload reached the session conversation")
+	}
+	sess, err := e.svc.transcript(lead.ID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, p := range sess.Posts {
+		ids[p.ID] = true
+	}
+	if !ids[event.ID] {
+		t.Fatalf("typed PR event is missing from the session conversation: %+v", sess.Posts)
 	}
 }
