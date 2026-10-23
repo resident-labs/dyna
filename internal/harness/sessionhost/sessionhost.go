@@ -114,15 +114,3 @@ func Default() Host { return defaultHost }
 // ResetForTest stops the child and host of every session this process
 // attached through Default; tests use it to leave nothing behind.
 func ResetForTest() { defaultHost.shutdownUsed() }
-
-// RetainedReference returns the guarded child of an idle session, without
-// creating a host or attaching a turn. Callers must verify the same reference
-// again when they attach; the child can exit after this lookup.
-func RetainedReference(ctx context.Context, host Host, launch Launch) (processguard.Reference, bool, error) {
-	if h, ok := host.(interface {
-		RetainedReference(context.Context, Launch) (processguard.Reference, bool, error)
-	}); ok {
-		return h.RetainedReference(ctx, launch)
-	}
-	return processguard.Reference{}, false, nil
-}

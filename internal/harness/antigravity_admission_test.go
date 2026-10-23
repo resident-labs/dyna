@@ -5,12 +5,12 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"dyna-agent/internal/acp"
 	harnesshome "dyna-agent/internal/harness/home"
 	harnessruntime "dyna-agent/internal/harness/runtime"
-	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/store/storetest"
 )
 
@@ -28,7 +28,7 @@ func (c cancelAtAccountWait) Done() <-chan struct{} {
 func TestAntigravityRetainedAdmission(t *testing.T) {
 	storetest.DataDir(t)
 	dir := acpScript(t, map[string]string{"task": `{"stopReason":"end_turn"}`})
-	p, _ := antigravityACPTestProfile(t, dir)
+	p, mark := antigravityACPTestProfile(t, dir)
 	scope, err := harnessruntime.NewAccounts().HarnessHome(p.Harness)
 	if err != nil {
 		t.Fatal(err)
@@ -61,31 +61,39 @@ func TestAntigravityRetainedAdmission(t *testing.T) {
 			lease.Close()
 			t.Fatal(err)
 		}
+
+		waitActive, cancelActive := context.WithCancel(ctx)
+		concurrent, blocked := harnessruntime.NewAccounts().TurnLeaseManaged(cancelAtAccountWait{waitActive, cancelActive}, p.Harness)
+		cancelActive()
+		if concurrent != nil {
+			concurrent.Close()
+			t.Fatal("active turn lost exclusive protection")
+		}
+		if !errors.Is(blocked, context.Canceled) {
+			t.Fatalf("active admission: %v", blocked)
+		}
 		s.settled = true
 		s.close()
 		if err := lease.Close(); err != nil {
 			t.Fatal(err)
 		}
+
+		// An unrelated session can acquire the account while this child is idle.
+		wait, cancel := context.WithCancel(ctx)
+		other, err := harnessruntime.NewAccounts().TurnLeaseManaged(cancelAtAccountWait{wait, cancel}, p.Harness)
+		cancel()
+		if err != nil {
+			t.Fatalf("idle child blocks another session: %v", err)
+		}
+		if err := other.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
-	key, err := sessionKey(p, ExecutionOptions{})
+	body, err := os.ReadFile(mark)
 	if err != nil {
 		t.Fatal(err)
 	}
-	home := p.Env["HOME"]
-	_, found, err := sessionhost.RetainedReference(ctx, nativeSessionHost, sessionhost.Launch{
-		Harness: p.Harness, Key: key + "-other" + "\x00" + home + "\x00" + home,
-	})
-	if err != nil || found {
-		t.Fatalf("another session borrowed the retained child: %v, %v", found, err)
-	}
-	wait, cancel := context.WithCancel(ctx)
-	defer cancel()
-	lease, err := harnessruntime.NewAccounts().TurnLeaseManaged(cancelAtAccountWait{wait, cancel}, p.Harness)
-	if lease != nil {
-		lease.Close()
-		t.Fatal("another session bypassed the exclusive account lease")
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("account admission did not block: %v", err)
+	if strings.Count(string(body), "boot ") != 1 {
+		t.Fatalf("same session restarted its retained child: %s", body)
 	}
 }
