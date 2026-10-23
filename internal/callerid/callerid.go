@@ -10,11 +10,9 @@
 // reparented away from it, and in a cgroup it shares with the owner's shell
 // it then counts as the owner. The engine is not a subreaper: reaping
 // adopted orphans would steal exits from its own exec.Cmd.Wait calls. An
-// owner record, which a detached _consolidate, _transfer or _resume-room
-// process gets when the owner launched it, is also a way to become the owner
-// for any same-user process that writes one; Start allows owner records only
-// for those three launch kinds. Identity needs Linux /proc and cgroups: the
-// engine runs only on Linux and WSL, and elsewhere every caller is refused.
+// owner record is permitted only through the engine-authorized hook and
+// terminal launch paths. Identity needs Linux /proc and cgroups: the engine
+// runs only on Linux and WSL, and elsewhere every caller is refused.
 package callerid
 
 import (
