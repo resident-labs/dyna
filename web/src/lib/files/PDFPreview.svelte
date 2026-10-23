@@ -114,7 +114,7 @@
     <div class="paging">
       <button onclick={() => page--} disabled={!pdf || page <= 1} aria-label="Previous page">←</button>
       <form class="page-jump" onsubmit={jump}>
-        <label>Page <input aria-label="Page number" aria-invalid={!!jumpError} aria-describedby={jumpError ? jumpErrorId : undefined} type="text" inputmode="numeric" enterkeyhint="go" bind:value={pageInput} onkeydown={inputKey} oninput={() => jumpError = ''} disabled={!pdf} /></label>
+        <label>Page <input data-esc aria-label="Page number" aria-invalid={!!jumpError} aria-describedby={jumpError ? jumpErrorId : undefined} type="text" inputmode="numeric" enterkeyhint="go" bind:value={pageInput} onkeydown={inputKey} oninput={() => jumpError = ''} disabled={!pdf} /></label>
         <span>of {pages || '…'}</span>
         <button disabled={!pdf}>Go</button>
       </form>
