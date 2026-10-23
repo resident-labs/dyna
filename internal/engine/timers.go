@@ -24,6 +24,7 @@ const (
 	timerPRs                 = "prs"
 	timerMerges              = "merges"
 	timerSync                = "sync"
+	timerProbe               = "machine-probe"
 	timerRequests            = "requests"
 	timerMigrationRetry      = "migration-retry"
 	timerMigrationAlert      = "migration-alert"
