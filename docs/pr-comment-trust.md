@@ -18,6 +18,7 @@ All other comments are held in SQLite and shown in home alerts and the PR room a
 Only the owner can select **Admit** or **Dismiss**, or run:
 
 ```sh
+dyna git pr held <number-or-url>
 dyna git pr admit <number-or-url> <kind:id>
 dyna git pr dismiss <number-or-url> <kind:id>
 ```
