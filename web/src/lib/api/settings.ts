@@ -85,15 +85,43 @@ export interface HookRunLog {
   exitCode: number
 }
 
-// Notice is notices.Notice, a machine alert such as low disk space.
+// Notice is notices.Notice, a machine alert such as low disk space. The facts
+// a card shows are typed per kind: a disk notice carries disk, a provider
+// notice carries provider and a sync notice carries sync. text is the stored
+// line of a notice saved before the typed facts and stays empty on a new one.
+export type NoticeKind = 'disk' | 'provider' | 'sync'
+export type NoticeSeverity = 'warn' | 'error'
+export interface DiskPath {
+  path: string
+  freeBytes: number
+}
+export interface DiskFacts {
+  paths: DiskPath[]
+  freedBytes?: number
+  kept?: string[]
+  maintenanceFailed?: boolean
+}
+export interface ProviderFacts {
+  profile: string
+  resetsAt?: string
+}
+export interface SyncFacts {
+  repo: string
+  lane: string
+  other?: string
+  rewritten?: boolean
+}
 export interface Notice {
   id: string
   key: string
-  kind: string
-  severity: string
-  text: string
-  at: string
+  kind: NoticeKind
+  severity: NoticeSeverity
+  disk?: DiskFacts
+  provider?: ProviderFacts
+  sync?: SyncFacts
   command?: string
+  at: string
+  text?: string
 }
 
 // Pairing is devicesvc.Pairing.
