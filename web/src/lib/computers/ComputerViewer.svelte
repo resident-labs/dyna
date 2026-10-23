@@ -6,8 +6,8 @@
   // when there is no stream to cover, and control cannot be on then.
   import { onMount } from 'svelte'
   import { api } from '../../api.ts'
-  import { openStream, savedStreamMode } from './computerStream.js'
-  import { stateWord, hintText, escTwice, viewKey, popOut } from './computers.js'
+  import { openStream, savedStreamMode } from './computerStream.ts'
+  import { stateWord, hintText, escTwice, viewKey, popOut } from './computers.ts'
   import { statsLine } from './rfbStats.ts'
   import ComputerShot from './ComputerShot.svelte'
   import ComputerChat from './ComputerChat.svelte'

@@ -4,7 +4,7 @@
   import { onMount } from 'svelte'
   import { api, onEvent } from '../../api.ts'
   import ComputerViewer from './ComputerViewer.svelte'
-  import { applyEvent, pushAction } from './computers.js'
+  import { applyEvent, pushAction } from './computers.ts'
   let { room, session } = $props()
   let c = $state(null)
   let feed = $state({})
