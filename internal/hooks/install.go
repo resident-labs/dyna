@@ -298,12 +298,20 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) erro
 		// repository's main checkout even after its last hook is removed.
 		main, _ = s.documentRepo(ctx, run.Repo)
 	}
-	if main == "" {
-		return nil
-	}
 	detail := "the engine stopped during this run, so its result was never recorded"
 	if line := lastLogLine(run.LogPath); line != "" {
 		detail += ": " + line
+	}
+	if file, err := os.OpenFile(run.LogPath, os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+		_, _ = fmt.Fprintln(file, detail)
+		_ = file.Close()
+	}
+	if main == "" {
+		// A global built-in hook belongs to no repository and no room, so its
+		// run ends in the hook store that the Hooks screen reads.
+		run.Result, run.FinishedAt = "error", now
+		_, err := s.saveRun(ctx, run)
+		return err
 	}
 	// The run names the hook as "hook-<name>", and a hook still in place
 	// decides how the card reads. A removed hook still ends its own run from
@@ -331,10 +339,6 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) erro
 		// Nothing names the event, and a result without one is refused. Leave
 		// the run pending so the next start can try again.
 		return fmt.Errorf("hook run %s has no event to report", run.ID)
-	}
-	if file, err := os.OpenFile(run.LogPath, os.O_APPEND|os.O_WRONLY, 0600); err == nil {
-		_, _ = fmt.Fprintln(file, detail)
-		_ = file.Close()
 	}
 	// The result posts before the run is saved, so a post that fails leaves the
 	// run pending for the next start instead of a card that never ends.
