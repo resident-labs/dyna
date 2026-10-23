@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 )
@@ -128,6 +129,11 @@ func (a *Runtime) addPiEntries(ctx context.Context, entries map[string]json.RawM
 	return err
 }
 
+func sameRepos(a, b []string) bool {
+	a, b = slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b))
+	return slices.Equal(a, b)
+}
+
 // piSnapshotEntries reads the provider entries of an account's saved login.
 func piSnapshotEntries(home string) map[string]json.RawMessage {
 	saved, err := readAccountLogin(home)
@@ -151,11 +157,17 @@ func (a *Runtime) MigratePiAccounts(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	if _, err := a.Accounts.Active("pi"); err != nil {
+	active, err := a.Accounts.Active("pi")
+	if err != nil {
 		return
 	}
 	for _, n := range accounts {
 		if n.Harness != "pi" || n.Active || AccountInUse(n.ID) {
+			continue
+		}
+		// An account limited to other repos than the active one would lend its
+		// credentials to repos it was closed to, and removal drops its rules.
+		if !sameRepos(n.Repos, active.Repos) {
 			continue
 		}
 		entries, err := piEditAuth(ctx, n.Home, nil)
