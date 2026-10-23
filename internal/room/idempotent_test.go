@@ -8,7 +8,7 @@ func TestStablePostIDIsIdempotentAndCannotChangeContent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	in := PostInput{ID: "msg_0123456789abcdef", From: r.Name, To: []string{r.Name}, Text: "durable batch", NeedsRoot: true, Notice: PRNotice{Kind: "ready", Number: 17, Head: "head", ChangeID: "change"}}
+	in := PostInput{ID: "msg_0123456789abcdef", From: r.Name, To: []string{r.Name}, Text: "durable batch", NeedsRoot: true, Notice: EventNotice{Kind: "ready"}}
 	first, err := store.Post(r.ID, in)
 	if err != nil {
 		t.Fatal(err)
@@ -26,7 +26,7 @@ func TestStablePostIDIsIdempotentAndCannotChangeContent(t *testing.T) {
 		t.Fatal("post ID changed its root wake intent")
 	}
 	in.NeedsRoot = true
-	in.Notice.Head = "different head"
+	in.Notice.Kind = "changes"
 	if _, err = store.Post(r.ID, in); err == nil {
 		t.Fatal("post ID was reused for different structured content")
 	}

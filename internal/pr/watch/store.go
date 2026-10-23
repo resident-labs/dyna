@@ -9,10 +9,12 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 
 	"dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/store"
 )
 
@@ -236,7 +238,20 @@ func legacyCINotice(text string) bool {
 		(strings.HasPrefix(body, "PR #") && strings.Contains(body, " failed CI three times in a row."))
 }
 
+// noticeFacts are the typed facts a notice carries into its PR event, so the
+// web card reads them instead of the agent text.
+type noticeFacts struct {
+	Type      room.PRType
+	Summary   string
+	Commenter string
+	Verdict   string
+}
+
 func notice(r *Record, target, text, token string, drops ...map[string]int) {
+	noticeTyped(r, target, text, token, noticeFacts{}, drops...)
+}
+
+func noticeTyped(r *Record, target, text, token string, facts noticeFacts, drops ...map[string]int) {
 	id := "msg_" + digest(r.Key + "/" + token + "/" + target)[:16]
 	if token == "merge-conflict" {
 		id = mergeNoticeID(*r, token)
@@ -270,7 +285,40 @@ func notice(r *Record, target, text, token string, drops ...map[string]int) {
 			text += "\n\n" + summary
 		}
 	}
-	r.Notices = append(r.Notices, Notice{ID: id, Kind: noticeKind(token), Target: target, Other: pairOther(token), Text: boundNotice(changeLocation(*r) + "\nHead: " + r.Head + "\n\n" + text)})
+	if facts.Type == "" {
+		facts.Type = typeOfToken(*r, token)
+	}
+	r.Notices = append(r.Notices, Notice{ID: id, Kind: noticeKind(token), Type: facts.Type, Summary: facts.Summary, Commenter: facts.Commenter, Verdict: facts.Verdict, Target: target, Other: pairOther(token), Text: boundNotice(changeLocation(*r) + "\nHead: " + r.Head + "\n\n" + text)})
+}
+
+// typeOfToken reads the PR event type a notice write token names. A new notice
+// carries its type already; the token keeps a caller from repeating it.
+func typeOfToken(r Record, token string) room.PRType {
+	switch {
+	case token == "held-comment":
+		return room.PRHeldComment
+	case strings.HasPrefix(token, "merge-"), strings.HasPrefix(token, "local-merged"):
+		return room.PRUpdate
+	case strings.HasPrefix(token, "land:"):
+		return room.PRReady
+	case strings.HasPrefix(token, "informational:"), strings.HasPrefix(token, "radar:"):
+		return room.PRUpdate
+	case strings.HasPrefix(token, "verdict:"):
+		if strings.HasSuffix(token, ":approve") || strings.HasSuffix(token, ":approve-with-nits") {
+			return room.PRApproved
+		}
+		return room.PRChanges
+	case strings.HasPrefix(token, "owner-comments:"), strings.HasPrefix(token, "review-comments:"):
+		return room.PRComment
+	case strings.HasPrefix(token, "transfer:reviewer:"):
+		return room.PRReviewAssigned
+	case strings.HasPrefix(token, "ci-budget:"), strings.HasPrefix(token, "test-budget"),
+		strings.HasPrefix(token, "test-report-error:"), strings.HasPrefix(token, "no-junit-report"):
+		return room.PRUpdate
+	case strings.HasPrefix(token, "ci:"), len(ciNoticeTokens) > 0 && slices.ContainsFunc(ciNoticeTokens, func(p string) bool { return strings.HasPrefix(token, p) }):
+		return ciType(r)
+	}
+	return ""
 }
 
 // pairOther names the other change of a radar pair token.

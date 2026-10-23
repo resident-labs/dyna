@@ -4,7 +4,7 @@
 // lost. Nothing here fills in or changes data.
 import type { ComputerApp, ComputerInfo, ComputerStream, ActionIntent } from './computer.ts'
 import type { AppEvent, ListChange, ListEvent } from './event.ts'
-import type { Attachment, Check, Delivery, Doing, Draft, FeedSearch, Forward, Member, Message, Post, PostDetail, PostResult, PRNotice, ProfileChoice, Question, QuestionAnswer, QuestionWithdrawal, Seat, SendResult, Shot, Skip, SpawnPreview, SpawnResult, Visual, VisualVersion } from './room.ts'
+import type { Attachment, Check, Delivery, Doing, Draft, FeedSearch, Forward, Member, Message, Post, PostDetail, PostResult, EventNotice, ProfileChoice, Question, QuestionAnswer, QuestionWithdrawal, Seat, SendResult, Shot, Skip, SpawnPreview, SpawnResult, Visual, VisualVersion } from './room.ts'
 import type { CallStatus, VoicePageEvent } from './voice.ts'
 import { eventSpecs, isEventPayload } from '../rooms/events.gen.ts'
 
@@ -42,8 +42,8 @@ function isCheck(v: unknown): v is Check {
   return isRecord(v) && isString(v.name) && isString(v.status) && optional(v.detail, isString)
 }
 
-function isPRNotice(v: unknown): v is PRNotice {
-  return isRecord(v) && isString(v.kind) && isNumber(v.number) && isString(v.head) && isString(v.changeId) && optional(v.commentId, isString)
+function isEventNotice(v: unknown): v is EventNotice {
+  return isRecord(v) && isString(v.kind)
 }
 
 // isEventPayloadField accepts the typed payload of a sealed event. The payload
@@ -91,7 +91,7 @@ function isForward(v: unknown): v is Forward {
     isString(v.from) &&
     isString(v.text) &&
     optional(v.kind, isString) &&
-    optional(v.notice, isPRNotice) &&
+    optional(v.notice, isEventNotice) &&
     optional(v.human, isBoolean) &&
     optional(v.attachments, isAttachments)
   )
@@ -113,7 +113,7 @@ function messageFields(v: Record<string, unknown>): boolean {
     isString(v.text) &&
     optional(v.sessionIds, isStringMap) &&
     optional(v.kind, isString) &&
-    optional(v.notice, isPRNotice) &&
+    optional(v.notice, isEventNotice) &&
     isEventPayloadField(v) &&
     optional(v.human, isBoolean) &&
     optional(v.source, isString) &&

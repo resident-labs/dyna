@@ -3,6 +3,7 @@ package state
 
 import (
 	"dyna-agent/internal/changepolicy"
+	"dyna-agent/internal/room"
 	"encoding/json"
 	"time"
 )
@@ -27,6 +28,17 @@ type Notice struct {
 	CommentID string `json:"commentId,omitempty"`
 	NeedsRoot bool   `json:"needsRoot,omitempty"`
 	System    bool   `json:"system,omitempty"`
+	// Type is the registered PR event type this notice posts as. A notice
+	// stored before the typed events existed leaves it empty, and delivery
+	// then reads the type from its kind and the record.
+	Type room.PRType `json:"type,omitempty"`
+	// Summary is the short facts line of the event: the failed check names or
+	// the commenter's action. It never holds raw log lines.
+	Summary string `json:"summary,omitempty"`
+	// Commenter is the GitHub login of a comment or review author.
+	Commenter string `json:"commenter,omitempty"`
+	// Verdict is the reviewer verdict of a verdict notice.
+	Verdict string `json:"verdict,omitempty"`
 	// Kind is "ci" for CI results and budgets; empty for everything else.
 	Kind         string `json:"kind,omitempty"`
 	SupersededBy string `json:"supersededBy,omitempty"`

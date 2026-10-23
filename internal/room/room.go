@@ -79,13 +79,12 @@ func (r Record) Archived(now time.Time, hasLiveWork bool) bool {
 	return r.ManualArchive || !now.Before(r.LastActivity.Add(ArchiveAfter))
 }
 
-// PRNotice identifies a watcher event without parsing its agent-facing text.
-type PRNotice struct {
-	CommentID string `json:"commentId,omitempty"`
-	Kind      string `json:"kind"`
-	Number    int    `json:"number"`
-	Head      string `json:"head"`
-	ChangeID  string `json:"changeId"`
+// EventNotice names the registered type of a system event post. The facts of
+// the event are in its typed payload (see Message.PR, Message.Hook and
+// Message.Worktree). Older stored posts carry the same field name with the
+// extra facts that now live in the payload; a reader ignores those.
+type EventNotice struct {
+	Kind string `json:"kind"`
 }
 
 // Message is one durable post. It is append-only: once written it never
@@ -101,7 +100,7 @@ type Message struct {
 	RoomID     string            `json:"roomId"`
 	From       string            `json:"from"`
 	Kind       string            `json:"kind,omitempty"`
-	Notice     PRNotice          `json:"notice,omitzero"`
+	Notice     EventNotice       `json:"notice,omitzero"`
 	// Payload is the typed JSON of a sealed system event. Only PostEvent
 	// builds one; read it with the event accessor, such as Worktree().
 	Payload EventPayload `json:"payload,omitzero"`
@@ -165,7 +164,7 @@ type Forward struct {
 	TS          int64        `json:"ts"`
 	From        string       `json:"from"`
 	Kind        string       `json:"kind,omitempty"`
-	Notice      PRNotice     `json:"notice,omitzero"`
+	Notice      EventNotice  `json:"notice,omitzero"`
 	Human       bool         `json:"human,omitempty"`
 	Text        string       `json:"text"`
 	Attachments []Attachment `json:"attachments,omitempty"`
@@ -806,8 +805,8 @@ type PostInput struct {
 	ID   string
 	From string
 	Kind string
-	// Notice is the watcher payload of a post, unchanged until PR 3.
-	Notice PRNotice
+	// Notice names the registered type of a system event post.
+	Notice EventNotice
 	// payload is the typed JSON of a sealed event. Only PostEvent sets it.
 	payload     EventPayload
 	Human       bool

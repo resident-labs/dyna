@@ -3,29 +3,57 @@
 // -run Events`, so the payload types of an event and its card cannot drift.
 //
 // A renderer takes { post, notice, surface } and reads the typed payload only:
-// no text parsing and no feed-only state. The feed draws it now. The session DM
-// row is wired in PR 3 (system-events.md section 3.4.2); the surface prop and
-// the DM-surface render in the test keep the card ready for it.
+// no text parsing and no feed-only state. The feed and a session DM draw the
+// same card (system-events.md section 3.4.2). The optional props carry the
+// room's post bar, so a card in the feed keeps the actions a card in a DM does
+// not need.
 import type { Component } from 'svelte'
 import WorktreeCard from './WorktreeCard.svelte'
 import HookCard from './HookCard.svelte'
+import PRCard from '../prs/PRCard.svelte'
 import { eventSpecs } from './events.gen.ts'
 import type { EventSpecEntry } from './events.gen.ts'
-import type { Message, PRNotice } from '../api/room.ts'
+import type { EventNotice, Room } from '../api/room.ts'
+import type { EventPayload } from './events.gen.ts'
+import type { PostSelection } from '../ui/postSelect.ts'
 
 export type EventSurface = 'feed' | 'dm'
 
+// EventPost is the part of a stored post a card reads. A stored message, a
+// feed row and a DM row all fit it, so one card serves both surfaces.
+export interface EventPost {
+  id: string
+  ts?: string | number
+  text?: string
+  kind?: string
+  notice?: EventNotice
+  payload?: EventPayload
+  to?: string[] | null
+}
+
 export interface EventProps {
-  post: Message
-  notice?: PRNotice
+  post: EventPost
+  notice?: EventNotice
   surface?: EventSurface
+  // posts is the folded posts of one feed row, oldest first.
+  posts?: EventPost[]
+  room?: Room
+  pinned?: Set<string>
+  selection?: PostSelection | null
+  onreply?: (post: EventPost) => void
+  onforward?: ((post: EventPost) => void) | null
+  onpin?: (post: EventPost) => void
+  to?: string[]
+  onaddress?: (to: string) => void
+  showRepo?: boolean
+  focus?: string
 }
 
 export type EventRenderer = Component<EventProps>
 
 // Components by the name a spec gives in its renderer field. A name with no
 // component here draws the unknown event row, and the test fails.
-export const eventComponents: Record<string, EventRenderer> = { WorktreeCard, HookCard }
+export const eventComponents: Record<string, EventRenderer> = { WorktreeCard, HookCard, PRCard }
 
 // The post key of a registered event: its family and its event type.
 export function eventKey(family?: string, type?: string): string {
@@ -34,12 +62,18 @@ export function eventKey(family?: string, type?: string): string {
 
 // sealedEvent reports a post of a family that only the engine posts. The feed
 // draws it as a card, never as a message bubble.
-export function sealedEvent(post: Message): boolean {
+export function sealedEvent(post: EventPost): boolean {
   return eventSpecs.some((spec) => spec.family === post.kind)
 }
 
+// registeredEvent reports a post whose family and type the registry knows. A
+// post of a sealed family with an unknown type draws the unknown event row.
+export function registeredEvent(post: EventPost): boolean {
+  return eventSpecs.some((spec) => spec.family === post.kind && spec.type === post.notice?.kind)
+}
+
 // eventSpec returns the registry entry of a stored post.
-export function eventSpec(post: Message): EventSpecEntry | undefined {
+export function eventSpec(post: EventPost): EventSpecEntry | undefined {
   return eventSpecs.find((spec) => spec.family === post.kind && spec.type === post.notice?.kind)
 }
 
@@ -53,6 +87,6 @@ export const eventRenderers: Readonly<Record<string, EventRenderer>> = renderers
 
 // rendererFor returns the card of a registered event, or undefined for a type
 // that has no renderer yet.
-export function rendererFor(post: Message): EventRenderer | undefined {
+export function rendererFor(post: EventPost): EventRenderer | undefined {
   return eventRenderers[eventKey(post.kind, post.notice?.kind)]
 }

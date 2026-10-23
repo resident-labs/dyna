@@ -6,7 +6,6 @@
   import Avatar from '../ui/Avatar.svelte'
   import PostFiles from '../ui/PostFiles.svelte'
   import PostLink from '../ui/PostLink.svelte'
-  import PRPost from '../prs/PRPost.svelte'
   import { markdown, stamp, clock } from '../ui/format.ts'
   import { postedTo } from './dm.ts'
   import { speaker } from '../ui/posts.ts'
@@ -63,14 +62,13 @@
   </div>
   <div class="body">
     {#if !row.cont}<div class="head"><span class="from hue-{hue}" class:owner>{name}</span>{@render when(stamp(row.ts))}{#if row.post && !delivery && !inThread && !row.ownerAttachments && sentTo}<span class="tag posted">posted to {sentTo}</span>{/if}</div>{/if}
-    {#if row.post?.kind === 'pr'}<PRPost post={row.post} {room} {onforward} selection={actionable ? selection : null} />
-    {:else if row.folded}<details class="folded"><summary>Turn result (same as the post above)</summary><div class="prose">{@html markdown(typed.text)}</div></details>
+    {#if row.folded}<details class="folded"><summary>Turn result (same as the post above)</summary><div class="prose">{@html markdown(typed.text)}</div></details>
     {:else if typed.text}<div class="prose">{@html markdown(typed.text)}</div>{/if}
     {#if row.post?.forward}<ForwardQuote {room} post={row.post.forward} {onpost} {onopenfile} />{/if}
     <PostFiles roomId={room.id} post={{ id: row.post?.id, text: row.text, attachments: row.post?.attachments, references: row.post?.references }} onopen={onopenfile} />
     {@render receipt()}
   </div>
-  {#if actionable && row.post && row.post.kind !== 'pr'}<PostActions {room} p={row.post} {onforward} show={selection.get() === row.post.id} />{/if}
+  {#if actionable && row.post}<PostActions {room} p={row.post} {onforward} show={selection.get() === row.post.id} />{/if}
 </article>
 <!-- A posted message's time opens the original room post. -->
 {#snippet when(text: string)}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,8 +45,6 @@ func TestTranscriptPostsMatchFeed(t *testing.T) {
 		{From: lead.Address(), Kind: "completed", To: []string{rec.Name}, Text: "Finished"},
 		{From: lead.Address(), Kind: "failed", To: []string{rec.Name}, Text: "Failed"},
 		{From: lead.Address(), Kind: "stopped", To: []string{rec.Name}, Text: "Stopped"},
-		{From: lead.Address(), Kind: "pr", To: []string{rec.Name}, Text: "Own PR"},
-		{From: peer.Address(), Kind: "pr", To: []string{lead.Address()}, Text: "Incoming PR"},
 	}
 	ids := []string{before.ID}
 	for i, input := range inputs {
@@ -58,6 +57,17 @@ func TestTranscriptPostsMatchFeed(t *testing.T) {
 		}
 		if i < 4 {
 			ids = append(ids, msg.ID)
+		}
+	}
+	// A PR event is an engine post; it reaches the feed like any other post.
+	prs := []struct {
+		to   string
+		kind room.PRType
+	}{{rec.Name, room.PRApproved}, {lead.Address(), room.PRReady}}
+	for _, pr := range prs {
+		if _, err := store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{pr.to}, RoomService: true,
+			Event: room.PREvent{Type: pr.kind, Label: "PR #1", Location: "github.com/o/r#1", ChangeID: "github.com/o/r#1", Number: 1, Head: strings.Repeat("a", 40)}}); err != nil {
+			t.Fatal(err)
 		}
 	}
 	sess, err := e.svc.transcript(lead.ID, 0, 0)

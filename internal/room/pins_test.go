@@ -123,7 +123,7 @@ func TestDeleteRoomRemovesPins(t *testing.T) {
 // registry tests cover.
 func TestEveryPostKindCanBePinnedAndRepliedTo(t *testing.T) {
 	s, rec, _ := pinFixture(t)
-	for _, kind := range []string{"message", "completed", "failed", "stopped", "pr", "goal", "checkin", "seat"} {
+	for _, kind := range []string{"message", "completed", "failed", "stopped", "goal", "checkin", "seat"} {
 		t.Run(kind, func(t *testing.T) {
 			post, err := s.Post(rec.ID, PostInput{From: "alpha:lead", To: []string{"alpha"}, Kind: kind, Text: "Stored report"})
 			if err != nil {
@@ -141,6 +141,26 @@ func TestEveryPostKindCanBePinnedAndRepliedTo(t *testing.T) {
 				t.Fatalf("reply = %+v, %v", stored, err)
 			}
 		})
+	}
+}
+
+// A sealed event post is a post like any other for pins and replies.
+func TestEventPostCanBePinnedAndRepliedTo(t *testing.T) {
+	s, rec, _ := pinFixture(t)
+	post, err := s.PostEvent(rec.ID, PREvent{Type: PRReady, Label: "PR #1", Location: "https://github.com/a/b/pull/1", ChangeID: "https://github.com/a/b/pull/1", Number: 1}, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Pin(rec.ID, post.ID, "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	reply, err := s.Post(rec.ID, PostInput{From: "alpha", To: []string{"alpha:lead"}, Text: "Reply", ReplyTo: post.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.Message(rec.ID, reply.ID)
+	if err != nil || stored.ReplyTo != post.ID {
+		t.Fatalf("reply = %+v, %v", stored, err)
 	}
 }
 

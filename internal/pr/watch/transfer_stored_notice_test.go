@@ -16,8 +16,8 @@ func TestTransferStoredUndeliveredNoticeUsesNewPostID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	e.s.Deliver = func(_ context.Context, _ Record, n Notice) (string, error) {
-		msg, err := rs.Post(rec.ID, room.PostInput{ID: n.ID, From: "owner", To: []string{n.Target}, Kind: "pr", Text: n.Text})
+	e.s.Deliver = func(_ context.Context, r Record, n Notice) (string, error) {
+		msg, err := rs.PostEventInput(room.PostEventInput{RoomID: rec.ID, ID: n.ID, Event: prEventOf(r, n), To: []string{n.Target}, RoomService: true})
 		if err != nil {
 			return "", err
 		}
