@@ -73,12 +73,12 @@
 
   let m = $derived(session?.member)
   let turns = $derived(session?.turns || [])
-  let dm = $derived(dmView(session, room, { reasoning: $showReasoning, compaction: $showCompaction }, queue))
+  let children = $derived(members.filter((child) => !!m?.id && child.parent === m.id))
+  let dm = $derived(dmView(session, room, { reasoning: $showReasoning, compaction: $showCompaction }, queue, children))
   // Rows that arrive while the DM is open rise in; the rows it opened with stay still.
   const arrived = arrivals(), threadArrived = arrivals()
   let isNew = $derived(arrived(m?.id, dm.rows.map((r) => r.key)))
   let selected = $derived(dm.threads.find((t) => t.key === selectedThread) ?? (selectedThread ? { key: selectedThread, posts: [] } : null))
-  let children = $derived(members.filter((child) => child.parent === m?.id))
   let list = $derived(threadList(dm.threads, children))
   let shellsOpen = $state(false)
   let allRecent = $state(false)
@@ -263,8 +263,8 @@
       {/if}
       {#key m.id + ':' + focusedTurn}
       <HistoryList bind:atBottom={stuck} {scroller} items={dm.rows} key={(r: DmRow) => r.key} estimate={(r: DmRow) => r.kind === 'message' ? 96 : 40} newer={!focusedTurn && session.newer} onnewer={focusedTurn ? null : onnewer} onpresent={focusedTurn || !onpresent ? null : present} earlier={!focusedTurn && session.earlier} onearlier={focusedTurn ? null : onearlier} onhistory={() => (stuck = false)} beginning={focusedTurn ? '' : 'Beginning of @' + m.name}>
-        {#snippet children(row: DmRow, index: number)}
-          <DmRows {dm} {jobs} {onjob} rows={[row]} offset={index} {room} selection={listSelection} onforward={readOnly ? null : forward} member={m} {members} {isNew} selectedKey={threadsOpen ? selected?.key ?? '' : ''} onthread={openThread} {onopenfile} {onpost} {onissue} {removing} onunqueue={onunqueue && !readOnly ? unqueue : null} ondismiss={readOnly ? null : askDismiss} />
+        {#snippet children(row: DmRow)}
+          <DmRows {dm} {jobs} {onjob} rows={[row]} {room} selection={listSelection} onforward={readOnly ? null : forward} member={m} {members} {isNew} selectedKey={threadsOpen ? selected?.key ?? '' : ''} onthread={openThread} {onopenfile} {onpost} {onissue} {removing} onunqueue={onunqueue && !readOnly ? unqueue : null} ondismiss={readOnly ? null : askDismiss} />
         {/snippet}
       </HistoryList>
       {/key}
