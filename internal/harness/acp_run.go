@@ -39,13 +39,13 @@ func validateGrokAcpArgs(p profile.Profile) error {
 
 // acpSession attaches one turn to a hosted native session.
 type acpSession struct {
-	conn      *jsonrpc.Conn
-	agent     *acp.Agent
-	session   string
-	model     string
-	host      sessionhost.Session
-	exclusive bool
-	settled   bool
+	conn        *jsonrpc.Conn
+	agent       *acp.Agent
+	session     string
+	model       string
+	host        sessionhost.Session
+	antigravity bool
+	settled     bool
 }
 
 func (s *acpSession) close() {
@@ -56,7 +56,7 @@ func (s *acpSession) close() {
 		return
 	}
 	// Close already ends the attachment; only a settled shared child detaches.
-	if s.exclusive || !s.settled {
+	if !s.settled {
 		_ = s.host.Close()
 	} else {
 		s.host.Detach(sessionhost.DetachIdle)
@@ -105,7 +105,7 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 	if err != nil {
 		return nil, err
 	}
-	s := &acpSession{host: child, exclusive: p.Harness == profile.HarnessAntigravity}
+	s := &acpSession{host: child, antigravity: p.Harness == profile.HarnessAntigravity}
 
 	handlers := acp.Handlers{Update: onUpdate, Stderr: onStderr, Permission: func(context.Context, acp.PermissionRequest) acp.PermissionResponse {
 		return acp.PermissionResponse{Behavior: "cancelled"}
@@ -116,13 +116,13 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 	s.agent = acp.ConnectedAgent(s.conn)
 	if cold {
 		version := 1
-		if s.exclusive {
+		if s.antigravity {
 			version = 2
 		}
 		s.agent, err = acp.HandshakeVersion(handshakeCtx, s.conn, version)
 		if err == nil {
 			method := s.agent.DefaultAuthMethod()
-			if s.exclusive {
+			if s.antigravity {
 				method = "oauth-personal"
 			}
 			err = s.agent.Authenticate(handshakeCtx, method)
@@ -132,7 +132,7 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 			return nil, err
 		}
 	}
-	if s.exclusive {
+	if s.antigravity {
 		s.agent.SessionMeta = map[string]any{"agy": map[string]any{"disabledTools": harnessruntime.NativeFeatureDenyTools(p.Harness, execution.DynaShell)}}
 	}
 	var setup acp.SessionSetup
@@ -143,7 +143,7 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 	}
 	if sessionID != "" {
 		s.conn.SetNotification(func(jsonrpc.Notification) {})
-		if s.exclusive {
+		if s.antigravity {
 			setup, err = s.agent.ResumeSession(handshakeCtx, sessionID, cwd, servers)
 		} else {
 			setup, err = s.agent.LoadSession(handshakeCtx, sessionID, cwd, servers)
@@ -158,7 +158,7 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 		s.close()
 		return nil, err
 	}
-	if s.exclusive {
+	if s.antigravity {
 		mode := "yolo"
 		if p.SafeMode {
 			mode = "default"
@@ -535,7 +535,7 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 				stderr.line(finalStderr)
 			}
 			runErr := acpStopReasonError(p.Harness, st.res.StopReason)
-			if runErr == nil && s.exclusive {
+			if runErr == nil && s.antigravity {
 				runErr = antigravityACPPromptError(s.session, finalStderr)
 			}
 			at := finishAttempt(spec, rawLines.String(), stderr.String(), runErr, true, ctx.Err() != nil, journalInterrupted, false, nil, nil)
