@@ -18,8 +18,8 @@
     // attachments is the draft's file list, when this box takes files.
     attachments?: AttachmentDraft
     draft?: string
-    // field is the textarea, so a view can focus it or read its height.
-    field?: HTMLTextAreaElement
+    // field is the box's element, so a view can focus it and the box can grow it.
+    field?: HTMLElement
     placeholder?: string
     label?: string
     maxlength?: number
