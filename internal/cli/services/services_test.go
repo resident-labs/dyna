@@ -218,6 +218,36 @@ func TestRoomResolvesToItsName(t *testing.T) {
 	}
 }
 
+// A write resolves the room and its repository exactly as a read does: a
+// caller standing in a worktree switches the librarian of the room's own
+// repository, and a room named by its ID is found. An explicit --repo wins.
+func TestWritesUseTheRoomRepository(t *testing.T) {
+	reader := readerWith(t, map[string]any{
+		"Rooms":           []map[string]any{{"id": "room_1", "name": "dyna", "repo": "/repo/main"}},
+		"EnableLibrarian": map[string]any{"repo": map[string]any{"main": "/repo/main"}, "room": "dyna"},
+	})
+	var out bytes.Buffer
+	if err := setEnabled(context.Background(), reader, refs{Room: "room_1", Repo: "/worktrees/w1"}, Library, true, &out); err != nil {
+		t.Fatal(err)
+	}
+	w, ok := reader.write("EnableLibrarian")
+	if !ok || len(w.args) != 3 {
+		t.Fatalf("librarian enable write = %+v", reader.writes)
+	}
+	if w.args[0] != "/repo/main" || w.args[1] != "dyna" {
+		t.Fatalf("librarian enable args = %v; want the room's repository and name", w.args)
+	}
+
+	reader.writes = nil
+	if err := setEnabled(context.Background(), reader, refs{Room: "dyna", Repo: "/repo/mine", RepoExplicit: true}, Library, false, &out); err != nil {
+		t.Fatal(err)
+	}
+	w, ok = reader.write("DisableLibrarian")
+	if !ok || fmt.Sprint(w.args) != "[/repo/mine]" {
+		t.Fatalf("explicit --repo write = %+v", reader.writes)
+	}
+}
+
 func TestParseServiceIDAcceptsAliases(t *testing.T) {
 	for text, want := range map[string]ServiceID{"librarian": Library, "reviewers": Reviewer, "voice": Voice} {
 		got, err := ParseServiceID(text)
