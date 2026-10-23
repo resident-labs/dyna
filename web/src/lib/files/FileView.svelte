@@ -250,12 +250,13 @@
   .err { color: var(--coral); padding: 8px 4px; }
 
   @media (max-width: 760px) {
-    header { padding: 6px 8px 2px; }
+    header { padding: 6px 8px 2px; flex-wrap: wrap; }
     .back { width: 44px; height: 44px; }
     /* The back button returns to the folder; the name is enough here. */
     .crumbs button, .sep { display: none; }
     .leaf { overflow: hidden; text-overflow: ellipsis; }
-    .crumbs { overflow: hidden; }
+    .crumbs { overflow: hidden; flex: 1; min-width: 80px; }
+    .spacer { display: none; }
     .tool.copy { width: 44px; height: 44px; padding: 0; }
     .copy-label { display: none; }
     .tool { padding: 10px 12px; }
