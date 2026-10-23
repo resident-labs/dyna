@@ -25,7 +25,7 @@
   import { voiceCall, callRequests } from './lib/voice/voiceCall.ts'
   import { callLink, callTarget } from './lib/voice/callRequests.ts'
   import { GENERAL, VOICE, isChannel, inChannel, homeChannel, channelModel, parentTrail, prepareChannelText } from './lib/rooms/channels.ts'
-  import { isShellResult } from './lib/rooms/feedRows.js'
+  import { isShellResult } from './lib/rooms/feedRows.ts'
   import { mergeSessionPage } from './lib/sessions/sessionPages.ts'
   import { trimFeed } from './lib/rooms/feedWindow.ts'
   import { look, revealed, reveal as revealPost } from './lib/rooms/look.svelte.ts'
