@@ -15,3 +15,13 @@ test('mention choices carry the composer hints and match by prefix', () => {
   assert.deepEqual(matchMentions(options, '@').map((o) => o.value), ['@root', '@team', '@lead', '@parent'])
   assert.equal(matchMentions(options, '@', 2).length, 2)
 })
+
+test('file mentions browse folders and insert paths without creating recipients', async () => {
+  const { fileMentionOptions, fileMentionDirectory, fileMentionText } = await import('./mentions.ts')
+  const entries = [{ path: 'web/src', name: 'src', kind: 'dir' as const }, { path: 'web/package.json', name: 'package.json', kind: 'file' as const }] as const
+  assert.equal(fileMentionDirectory('@web/pa'), 'web')
+  assert.deepEqual(fileMentionOptions(entries, '@web/p').map(o => o.value), ['@web/package.json'])
+  assert.equal(fileMentionText(entries[0]), '@web/src/')
+  assert.equal(fileMentionText(entries[1]), '`web/package.json` ')
+  assert.equal(fileMentionText({ path: 'odd`file.txt', name: 'odd`file.txt', kind: 'file' }), '``odd`file.txt`` ')
+})

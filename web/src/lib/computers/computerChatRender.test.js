@@ -9,7 +9,7 @@ import { rm } from 'node:fs/promises'
 test('ComputerChat uses DmRows and the shared composer, with no renderer of its own', () => {
   const src = readFileSync(new URL('./ComputerChat.svelte', import.meta.url), 'utf8')
   assert.match(src, /import DmRows /)
-  assert.match(src, /import MessageInput /)
+  assert.match(src, /import ComposerBox /)
   assert.doesNotMatch(src, /actLines|class="act"/)
 })
 
