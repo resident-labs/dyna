@@ -32,6 +32,7 @@ function mounted() {
     removeEventListener: (name: string) => listeners.delete(name),
   }
   const controller = (name: string) => ({ destroy: () => destroyed.push(name) })
+  const bulkControllers = new Map<string, { destroy(): void }>()
   const state = {
     window: events,
     document: { ...events, visibilityState: 'visible' },
@@ -46,7 +47,10 @@ function mounted() {
     // released with the rest.
     HOOK_LOG_EVENT: 'dyna:hook-log', hookLogFrom: () => null, openHookLog: () => {},
     onUnauthorized: (fn: () => void) => { unauthorized = fn },
-    bulkControllers: new Map(), roomSessionController: controller('controls'),
+    bulkControllers,
+    // The selection module drops the batch controllers on stop.
+    selectionView: { destroy: () => { for (const entry of bulkControllers.values()) entry.destroy() } },
+    roomSessionController: controller('controls'),
     roomControlsVisit: 0, consolidationAlive: true,
     roomData: controller('rooms'), workflowData: controller('workflow'),
     // The open transcript's controller lives in lib/app/sessionView.svelte.ts now.

@@ -23,6 +23,8 @@ import { remoteList } from '../src/lib/lanesync/sync.ts'
 import { mergeSessionPage } from '../src/lib/sessions/sessionPages.ts'
 import { dmView } from '../src/lib/sessions/dm.ts'
 import { prsBySession, isOpen } from '../src/lib/prs/pr.ts'
+import { bulkRetryable, createBulkSessionAction } from '../src/lib/sessions/bulkSessions.ts'
+import { pruneSelection, selectableSession, selectionKey, toggleSelection } from '../src/lib/sessions/consolidation.ts'
 
 const read = (name: string) => readFileSync(new URL('../src/lib/app/' + name, import.meta.url), 'utf8')
 
@@ -446,5 +448,101 @@ export function installSessionView(state: object, data?: unknown): SessionViewSl
     destroy() { (controller as { destroy?(): void }).destroy?.() },
   }
   write(fields, 'transcripts', view)
+  return view
+}
+
+// ---- Part 4: the member selection, its bulk panels and consolidation ----
+
+const selectionSource = read('selection.svelte.ts')
+
+/** The selection module's own functions, which a vm can run in a flat state. */
+export const SELECTION_FUNCTIONS = [
+  'setPicked', 'applyRows', 'bulkChanged', 'openBulkAction', 'runBulk', 'configureBulk', 'loadBulk',
+  'refreshTransfers', 'closeBulk', 'selectBulkFailures', 'selectionActions', 'closeSelectionMenu',
+  'currentSelection', 'selectionItems', 'moveUnder', 'selectForConsolidation', 'messageSelection',
+  'toggleSessionSelection', 'pickSession', 'openConsolidation', 'consolidationChanged',
+  'closeConsolidation', 'clear', 'destroy',
+] as const
+
+export const selectionCode = moduleCode(selectionSource, SELECTION_FUNCTIONS)
+
+/** The member selection, as App reads it through selectionView. */
+export interface SelectionSlice {
+  readonly selectingSessions: boolean
+  readonly pickedSessions: string[]
+  readonly consolidating: unknown
+  setPicked(ids: string[]): void
+  applyRows(rows: unknown[]): void
+  clear(): void
+  destroy(): void
+}
+
+/**
+ * installSelection runs the selection module in the state and gives it the
+ * selectionView object App reads. The page's own side answers from the state's
+ * fields, as App binds them to its own.
+ */
+export function installSelection(state: object): SelectionSlice {
+  const fields = prepare(state, {
+    pruneSelection, toggleSelection, selectionKey, selectableSession, bulkRetryable, createBulkSessionAction,
+    // The module's own state, for a state that does not hold it yet.
+    selectingSessions: false, pickedSessions: [] as string[], selectionRevision: 0, selectionMenu: null,
+    activeBulk: 0, bulkBatches: [] as { key: number }[], bulkSerial: 0, bulkControllers: new Map(),
+    consolidating: null, consolidationView: 0,
+  }, selectionSource, SELECTION_FUNCTIONS)
+  const drafts = (): Record<string, string> => (read_(fields, 'drafts') as Record<string, string> | undefined) ?? {}
+  write(fields, 'selectionHost', {
+    visit: () => Number(read_(fields, 'roomRequest') ?? 0),
+    alive: () => read_(fields, 'consolidationAlive') !== false,
+    hierarchy: () => (read_(fields, 'hierarchy') as unknown[] | undefined) ?? [],
+    people: () => (read_(fields, 'people') as unknown[] | undefined) ?? (read_(fields, 'members') as unknown[] | undefined) ?? [],
+    newDetail: () => write(fields, 'detailRequest', Number(read_(fields, 'detailRequest') ?? 0) + 1),
+    message: (selected: unknown) => {
+      const members = selected as { address?: string }[]
+      const request = Number(read_(fields, 'detailRequest') ?? 0) + 1
+      write(fields, 'detailRequest', request)
+      const key = `${String(read_(fields, 'roomId') ?? '')}:${String(read_(fields, 'GENERAL') ?? 'general')}`
+      write(fields, 'drafts', { ...drafts(), [key]: members.map((m) => '@' + (m.address ?? '')).join(' ') })
+      return request
+    },
+    focusMessage: (request: number, alive: () => boolean) => {
+      const composer = read_(fields, 'composer') as { focus?(): void } | undefined
+      void Promise.resolve().then(() => { if (alive() && request === Number(read_(fields, 'detailRequest') ?? 0)) composer?.focus?.() })
+    },
+    closeSessionMenu: () => write(fields, 'menu', null),
+    showMembers: () => { write(fields, 'showMembers', true); write(fields, 'showPins', false) },
+    loadMembers: () => call(fields, 'loadMembers'),
+    loadChanges: () => call(fields, 'loadChanges'),
+    loadSession: () => { if (read_(fields, 'drill')) call(fields, 'loadSession') },
+  })
+  const view: SelectionSlice & Record<string, unknown> = {
+    get selectingSessions(): boolean { return !!read_(fields, 'selectingSessions') },
+    get pickedSessions(): string[] { return (read_(fields, 'pickedSessions') as string[] | undefined) ?? [] },
+    get selectionMenu(): unknown { return read_(fields, 'selectionMenu') },
+    get currentBulk(): unknown {
+      const batches = (read_(fields, 'bulkBatches') as { key: number }[] | undefined) ?? []
+      return batches.find((b) => b.key === read_(fields, 'activeBulk'))
+    },
+    get consolidating(): unknown { return read_(fields, 'consolidating') },
+    setPicked: (ids: string[]) => call(fields, 'setPicked', ids),
+    applyRows: (rows: unknown[]) => call(fields, 'applyRows', rows),
+    clear: () => call(fields, 'clear'),
+    destroy: () => call(fields, 'destroy'),
+    closeBulk: () => call(fields, 'closeBulk'),
+    configureBulk: (key: number, patch: unknown) => call(fields, 'configureBulk', key, patch),
+    loadBulk: (key: number) => call(fields, 'loadBulk', key),
+    refreshTransfers: () => call(fields, 'refreshTransfers'),
+    runBulk: (key: number, force?: boolean) => call(fields, 'runBulk', key, force),
+    selectionActions: (x: number, y: number, anchor?: unknown) => call(fields, 'selectionActions', x, y, anchor),
+    closeSelectionMenu: () => call(fields, 'closeSelectionMenu'),
+    selectionItems: (context: unknown) => call(fields, 'selectionItems', context),
+    moveUnder: (m: unknown) => call(fields, 'moveUnder', m),
+    selectForConsolidation: (m: unknown) => call(fields, 'selectForConsolidation', m),
+    toggleSessionSelection: () => call(fields, 'toggleSessionSelection'),
+    pickSession: (m: unknown, checked: boolean, begin?: boolean) => call(fields, 'pickSession', m, checked, begin),
+    closeConsolidation: () => call(fields, 'closeConsolidation'),
+    consolidationChanged: (context: unknown, operation: unknown) => call(fields, 'consolidationChanged', context, operation),
+  }
+  write(fields, 'selectionView', view)
   return view
 }
