@@ -68,11 +68,21 @@ func TestMigrationPersistsClosedTimeWithoutLosingEvidence(t *testing.T) {
 		if c.want != "" {
 			want["record"].(map[string]any)["closedAt"] = c.want
 		}
+		if rec := want["record"].(map[string]any); rec["landing"] != nil {
+			// The landing migration archives it after the closure time is set.
+			rec["reviewHistory"] = []any{rec["landing"]}
+			delete(rec, "landing")
+		}
 		if !reflect.DeepEqual(doc, want) {
 			t.Fatalf("%s lost evidence or closure time: %s", c.key, body)
 		}
 		changed := c.key != "explicit" && c.key != "open"
-		if changed && rev != revision || !changed && rev != 41 {
+		wantRev := revision
+		if c.key != "landed" {
+			// Only the landing migration, which runs after this one, touches the landed row again.
+			wantRev--
+		}
+		if changed && rev != wantRev || !changed && rev != 41 {
 			t.Fatalf("%s revision=%d, store=%d", c.key, rev, revision)
 		}
 		var raw struct{ FutureRow json.RawMessage }
