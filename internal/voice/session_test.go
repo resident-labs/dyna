@@ -91,6 +91,7 @@ func TestCallRedialsWhenTheProviderDropsAfterAToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() { hangUp(); <-sess.done }()
 	select {
 	case <-redialed:
 	case <-sess.done:
@@ -98,8 +99,6 @@ func TestCallRedialsWhenTheProviderDropsAfterAToolCall(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the call did not redial")
 	}
-	hangUp()
-	<-sess.done
 }
 
 // Voice's context never describes handing the work to someone else.
