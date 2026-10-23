@@ -101,7 +101,7 @@ func TestCommentDuringPublicationWaitsForReviewerRouting(t *testing.T) {
 		published <- err
 	}()
 	<-entered
-	snap := Snapshot{Pull: e.f.Pull, Comments: []Comment{{ID: 123, Kind: "reviews", Body: "review finding", User: User{Login: "owner", Type: "User"}, State: "COMMENTED"}}}
+	snap := Snapshot{Pull: e.f.Pull, Comments: []Comment{{Association: "COLLABORATOR", ID: 123, Kind: "reviews", Body: "review finding", User: User{Login: "owner", Type: "User"}, State: "COMMENTED"}}}
 	processed := make(chan error, 1)
 	process := func() error { return e.s.process(t.Context(), r.Key, snap, "pending", "pending", nil, nil, false) }
 	go func() { processed <- process() }()

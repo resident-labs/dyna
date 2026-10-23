@@ -114,7 +114,7 @@ func TestTickCommentChangeReusesSettledCIAndStillDelivers(t *testing.T) {
 	if err := os.WriteFile(e.calls, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	e.addComment(88, "issue-comments", "Please check the new note.", "owner")
+	e.addTrustedComment(88, "issue-comments", "Please check the new note.", "owner")
 	e.f.Pull.Updated = e.clock.Add(time.Minute).Format(time.RFC3339)
 	e.tick()
 	calls, err := os.ReadFile(e.calls)
@@ -189,7 +189,7 @@ func TestCommentRefreshDoesNotReuseIncompleteSavedCI(t *testing.T) {
 	if err := os.WriteFile(e.calls, nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	e.addComment(89, "issue-comments", "A new comment with an incomplete CI cache.", "owner")
+	e.addTrustedComment(89, "issue-comments", "A new comment with an incomplete CI cache.", "owner")
 	e.f.Pull.Updated = e.clock.Add(time.Minute).Format(time.RFC3339)
 	e.tick()
 	calls, err := os.ReadFile(e.calls)

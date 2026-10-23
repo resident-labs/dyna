@@ -40,7 +40,7 @@ func TestLearnedNoiseBatchesCountsAndPreservesFindings(t *testing.T) {
 	e.authorFeedOnly()
 	e.f.Checks, e.f.Runs = nil, nil
 	r := e.track()
-	e.addComment(101, "issue-comments", quotaNotice, "reviewer-bot[bot]")
+	e.addTrustedComment(101, "issue-comments", quotaNotice, "reviewer-bot[bot]")
 	e.write()
 	rule, created, err := e.s.LearnNoise(context.Background(), r.Key, "issue-comments:101", "quota notice", e.author.ID)
 	if err != nil || !created || rule.Bot != "reviewer-bot[bot]" || rule.Repo != "owner/repo" || rule.Template == "" {
@@ -53,10 +53,10 @@ func TestLearnedNoiseBatchesCountsAndPreservesFindings(t *testing.T) {
 	if len(e.sent) != 0 || e.record().PendingDrops["learned_noise:"+rule.ID] != 1 {
 		t.Fatalf("noise woke author or lost audit count: %+v %+v", e.sent, e.record())
 	}
-	e.addComment(102, "issue-comments", quotaVariant, "reviewer-bot[bot]")
-	e.addComment(103, "issue-comments", "Please inspect the parser.", "owner")
-	e.addComment(104, "issue-comments", quotaVariant+"\nThe return value disappears here.", "reviewer-bot[bot]")
-	e.addComment(105, "issue-comments", "Rate limit exceeded", "coderabbitai[bot]")
+	e.addTrustedComment(102, "issue-comments", quotaVariant, "reviewer-bot[bot]")
+	e.addTrustedComment(103, "issue-comments", "Please inspect the parser.", "owner")
+	e.addTrustedComment(104, "issue-comments", quotaVariant+"\nThe return value disappears here.", "reviewer-bot[bot]")
+	e.addTrustedComment(105, "issue-comments", "Rate limit exceeded", "coderabbitai[bot]")
 	e.f.Log = "last job diagnostic"
 	e.setCI("failure", 1)
 	e.tick()
@@ -112,7 +112,7 @@ func TestNoiseNormalizationAndWholeTemplateScope(t *testing.T) {
 		{"new review link", "https://github.com/owner/repo/pull/17", rule.Bot, "issue-comments", quotaVariant + " https://github.com/owner/repo/pull/17#discussion_r123", "keep", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d := (Rules{Learned: []NoiseRule{rule}}).Triage(PRContext{URL: tc.url, OwnerLogin: "owner"}, []Event{{Kind: tc.kind, Commenter: tc.bot, IsBot: tc.isBot, Text: tc.body}})[0]
+			d := (Rules{Learned: []NoiseRule{rule}}).Triage(PRContext{URL: tc.url, OwnerLogin: "owner"}, []Event{{Kind: tc.kind, Association: "COLLABORATOR", Commenter: tc.bot, IsBot: tc.isBot, Text: tc.body}})[0]
 			if d.Action != tc.want {
 				t.Fatalf("%+v, want %s", d, tc.want)
 			}
@@ -120,7 +120,7 @@ func TestNoiseNormalizationAndWholeTemplateScope(t *testing.T) {
 	}
 	// An unmarked owner always wins, even over a bad rule loaded from disk.
 	rule.Bot = "owner"
-	d := (Rules{Learned: []NoiseRule{rule}}).Triage(PRContext{URL: "https://github.com/owner/repo/pull/17", OwnerLogin: "owner"}, []Event{{Commenter: "owner", IsBot: true, Text: quotaVariant}})[0]
+	d := (Rules{Learned: []NoiseRule{rule}}).Triage(PRContext{URL: "https://github.com/owner/repo/pull/17", OwnerLogin: "owner"}, []Event{{Association: "COLLABORATOR", Commenter: "owner", IsBot: true, Text: quotaVariant}})[0]
 	if d.Action != "keep" || d.Reason != "owner" {
 		t.Fatalf("owner overridden by learned rule: %+v", d)
 	}
@@ -140,7 +140,7 @@ func TestNoiseLearningRefusesHumanOwnerAndReviewContent(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			id := int64(i + 1)
-			e.addComment(id, tc.kind, tc.body, tc.login)
+			e.addTrustedComment(id, tc.kind, tc.body, tc.login)
 			if tc.name == "owner" {
 				e.f.Comments[len(e.f.Comments)-1].User.Type = "Bot"
 			}
@@ -157,7 +157,7 @@ func TestNoiseLearningRefusesHumanOwnerAndReviewContent(t *testing.T) {
 
 func TestReviewOutcomeNumbersCannotBecomeNoise(t *testing.T) {
 	rule := NoiseRule{ID: "noise_zero", Host: "github.com", Repo: "owner/repo", Bot: "reviewer-bot[bot]", Template: normalizeNoise("Review complete with 0 issues.")}
-	d := (Rules{Learned: []NoiseRule{rule}}).Triage(PRContext{URL: "https://github.com/owner/repo/pull/17"}, []Event{{Kind: "reviews", Commenter: rule.Bot, IsBot: true, Text: "Review complete with 2 issues."}})[0]
+	d := (Rules{Learned: []NoiseRule{rule}}).Triage(PRContext{URL: "https://github.com/owner/repo/pull/17"}, []Event{{Kind: "reviews", Association: "COLLABORATOR", Commenter: rule.Bot, IsBot: true, Text: "Review complete with 2 issues."}})[0]
 	if d.Action != "keep" {
 		t.Fatalf("normalization hid a real issue count: %+v", d)
 	}
@@ -167,7 +167,7 @@ func TestBuiltInWholeNoiseTemplatesKeepAddedFindings(t *testing.T) {
 	for _, rule := range builtinNoise {
 		t.Run(rule.id, func(t *testing.T) {
 			for _, tc := range []struct{ text, want string }{{rule.text, "drop"}, {rule.text + " The return value disappears here.", "keep"}} {
-				d := (Rules{}).Triage(PRContext{}, []Event{{Commenter: rule.bot, IsBot: true, Text: tc.text}})[0]
+				d := (Rules{}).Triage(PRContext{}, []Event{{Association: "COLLABORATOR", Commenter: rule.bot, IsBot: true, Text: tc.text}})[0]
 				if d.Action != tc.want {
 					t.Fatalf("%+v, want %s", d, tc.want)
 				}
@@ -175,7 +175,7 @@ func TestBuiltInWholeNoiseTemplatesKeepAddedFindings(t *testing.T) {
 		})
 	}
 	for _, state := range []string{"COMMENTED", "APPROVED", "CHANGES_REQUESTED"} {
-		d := (Rules{}).Triage(PRContext{}, []Event{{Kind: "reviews", ReviewState: state, IsBot: true, Commenter: "any[bot]"}})[0]
+		d := (Rules{}).Triage(PRContext{}, []Event{{Kind: "reviews", ReviewState: state, IsBot: true, Association: "COLLABORATOR", Commenter: "any[bot]"}})[0]
 		if (d.Action == "drop") != (state == "COMMENTED") {
 			t.Fatalf("empty %s: %+v", state, d)
 		}
@@ -196,7 +196,7 @@ func TestLearnedZeroOutcomeKeepsStructuredNonzeroCounts(t *testing.T) {
 	}
 	for i, format := range formats {
 		id := int64(301 + i)
-		e.addComment(id, "issue-comments", fmt.Sprintf(format, 0), "reviewer-bot[bot]")
+		e.addTrustedComment(id, "issue-comments", fmt.Sprintf(format, 0), "reviewer-bot[bot]")
 		e.write()
 		if _, _, err := e.s.LearnNoise(context.Background(), r.Key, strconv.FormatInt(id, 10), "zero-issue status", e.author.ID); err != nil {
 			t.Fatalf("learn %q: %v", format, err)
@@ -211,7 +211,7 @@ func TestLearnedZeroOutcomeKeepsStructuredNonzeroCounts(t *testing.T) {
 		for j, count := range []int{2, 10} {
 			body := fmt.Sprintf(format, count)
 			useful = append(useful, body)
-			e.addComment(int64(401+i*2+j), "issue-comments", body, "reviewer-bot[bot]")
+			e.addTrustedComment(int64(401+i*2+j), "issue-comments", body, "reviewer-bot[bot]")
 		}
 	}
 	e.tick()
@@ -219,7 +219,7 @@ func TestLearnedZeroOutcomeKeepsStructuredNonzeroCounts(t *testing.T) {
 		t.Fatalf("nonzero outcomes must wake the author in one batch: %+v", e.sent)
 	}
 	for _, body := range useful {
-		if !strings.Contains(e.sent[0].Text, body) {
+		if !strings.Contains(e.sent[0].Text, quotedComment(body)) {
 			t.Errorf("nonzero outcome missing from author batch: %q", body)
 		}
 	}

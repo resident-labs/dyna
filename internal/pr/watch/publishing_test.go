@@ -83,7 +83,7 @@ func TestGitHubAssignmentClaimsPublishedReviewAndKeepsItsMode(t *testing.T) {
 	if err := e.s.Verdict(context.Background(), r.Key, r.Reviewer, r.Head, "approve", "review", 0); err == nil {
 		t.Fatal("accepted GitHub assignment without published review")
 	}
-	e.addComment(88, "reviews", "Review at parser.go:42.", "owner")
+	e.addTrustedComment(88, "reviews", "Review at parser.go:42.", "owner")
 	for _, invalid := range []struct{ body, commit, state string }{
 		{Marker(r.Reviewer) + " wrong head", "old-head", "COMMENTED"},
 		{"Unmarked draft", r.Head, "PENDING"},
@@ -143,7 +143,7 @@ func TestVerdictRefusesReviewsSubmittedBeforeTheRound(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	e.addComment(88, "reviews", "owner review from before the round", "owner")
+	e.addTrustedComment(88, "reviews", "owner review from before the round", "owner")
 	e.f.Comments[0].Body, e.f.Comments[0].Commit, e.f.Comments[0].State = "owner review from before the round", r.Head, "COMMENTED"
 	e.f.Comments[0].Submitted = e.clock.Add(-time.Hour).Format(time.RFC3339)
 	e.write()

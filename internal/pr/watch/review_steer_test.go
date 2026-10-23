@@ -46,10 +46,10 @@ func sentTo(e *testEnv, id string) []string {
 func TestCommentsSteerLiveReviewer(t *testing.T) {
 	e, id := steerEnv(t)
 	before := len(sentTo(e, id))
-	e.addComment(41, "issue-comments", "Owner: please keep the old flag.", "owner")
+	e.addTrustedComment(41, "issue-comments", "Owner: please keep the old flag.", "owner")
 	e.f.Comments = append(e.f.Comments, Comment{ID: 42, Kind: "comments", Body: "Bug: nil map at parser.go:9", User: User{Login: "coderabbitai[bot]", Type: "Bot"}, Commit: e.f.Pull.Head.SHA, Path: "parser.go", Line: 9})
-	e.addComment(43, "issue-comments", "Reviewer note to self", "owner")
-	e.addComment(44, "issue-comments", "Author: fixed in the next push.", "owner")
+	e.addTrustedComment(43, "issue-comments", "Reviewer note to self", "owner")
+	e.addTrustedComment(44, "issue-comments", "Author: fixed in the next push.", "owner")
 	if err := e.s.Store.update(func(st *State) error {
 		claimComment(st, "issue-comments", 43, id)
 		claimComment(st, "issue-comments", 44, e.author.ID)
@@ -79,9 +79,9 @@ func TestCommentsSteerLiveReviewer(t *testing.T) {
 // not only bot inline comments on the head.
 func TestReviewContextHoldsAllComments(t *testing.T) {
 	e, id := steerEnv(t)
-	e.addComment(51, "issue-comments", "Owner question about naming", "owner")
+	e.addTrustedComment(51, "issue-comments", "Owner question about naming", "owner")
 	e.f.Comments = append(e.f.Comments, Comment{ID: 52, Kind: "comments", Body: "Old-head bot finding", User: User{Login: "coderabbitai[bot]", Type: "Bot"}, Commit: "old", Path: "a.go", Line: 1})
-	e.addComment(53, "reviews", "My earlier review", "owner")
+	e.addTrustedComment(53, "reviews", "My earlier review", "owner")
 	if err := e.s.Store.update(func(st *State) error {
 		claimComment(st, "reviews", 53, id)
 		return nil
