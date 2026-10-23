@@ -20,19 +20,15 @@ import (
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/cli/ask"
 	"dyna-agent/internal/cli/call"
-	"dyna-agent/internal/cli/change"
-	"dyna-agent/internal/cli/ci"
 	"dyna-agent/internal/cli/computer"
 	cligit "dyna-agent/internal/cli/git"
 	"dyna-agent/internal/cli/goal"
 	"dyna-agent/internal/cli/hook"
-	clihooks "dyna-agent/internal/cli/hooks"
 	"dyna-agent/internal/cli/interactive"
 	"dyna-agent/internal/cli/journal"
 	clilibrary "dyna-agent/internal/cli/library"
 	climaintenance "dyna-agent/internal/cli/maintenance"
 	"dyna-agent/internal/cli/managed"
-	clipr "dyna-agent/internal/cli/pr"
 	"dyna-agent/internal/cli/profiles"
 	cliroom "dyna-agent/internal/cli/room"
 	cliroot "dyna-agent/internal/cli/root"
@@ -45,7 +41,6 @@ import (
 	"dyna-agent/internal/cli/usage"
 	versioncmd "dyna-agent/internal/cli/version"
 	"dyna-agent/internal/cli/workflows"
-	cliworktrees "dyna-agent/internal/cli/worktrees"
 	"dyna-agent/internal/computerrestart"
 	"dyna-agent/internal/engine"
 	"dyna-agent/internal/engineclient"
@@ -130,15 +125,7 @@ func newRootCommand() *cobra.Command {
 		managed.NewUninstallCommand(),
 		ask.NewCommand(),
 		call.NewCommand(),
-		// TODO: legacy/shim remove later — old command names used in briefs and scripts; remove after one release
-		legacyGitCommand(ci.NewCommand()),
 		cligit.NewCommand(),
-		// TODO: legacy/shim remove later — old command names used in briefs and scripts; remove after one release
-		legacyGitCommand(clihooks.NewCommand()),
-		// TODO: legacy/shim remove later — old command names used in briefs and scripts; remove after one release
-		legacyGitCommand(change.NewCommand()),
-		// TODO: legacy/shim remove later — old command names used in briefs and scripts; remove after one release
-		legacyGitCommand(clipr.NewCommand()),
 		goal.NewCommand(),
 		rules.NewCommand(),
 		cliroot.NewCommand(),
@@ -148,8 +135,6 @@ func newRootCommand() *cobra.Command {
 		cliroom.VisualCmd(),
 		cliroom.AttachmentCmd(),
 		clisettings.NewCommand(),
-		// TODO: legacy/shim remove later — old command names used in briefs and scripts; remove after one release
-		legacyGitCommand(cliworktrees.NewCommand()),
 		profiles.NewCommand(),
 		workflows.NewRunCommand(),
 		workflows.NewRunWorkerCommand(),
@@ -187,12 +172,6 @@ func appendAuthorityHelp(cmd *cobra.Command) {
 	for _, child := range cmd.Commands() {
 		appendAuthorityHelp(child)
 	}
-}
-
-// TODO: legacy/shim remove later — old command names used in briefs and scripts; remove after one release
-func legacyGitCommand(cmd *cobra.Command) *cobra.Command {
-	cmd.Hidden = true
-	return cmd
 }
 
 func newEngineCommand() *cobra.Command {
