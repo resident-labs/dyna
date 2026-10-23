@@ -173,10 +173,12 @@ Dyna reports ready only when the verified head has approval and fresh green CI,
 the PR is not a draft, GitHub confirms mergeability, and the base is its default
 branch. An unknown default branch or mergeability result holds readiness.
 
-Agent reviews stay in Dyna by default.
-Missing and legacy settings mean `local`. A changed setting applies to future
-assignments; an active assignment keeps its assigned mode. Existing GitHub
-feedback remains public. This policy replaces older public-post instructions.
+Agent reviews stay in Dyna, including when a room retains a GitHub publishing
+setting. New reviewer assignments always use `local`. Agents, including root
+and workflow workers, cannot publish GitHub PR comments or reviews through
+the CLI or engine service. Only the owner can publish GitHub feedback or
+select the GitHub publishing setting. Existing GitHub feedback remains public.
+The owner can admit held feedback with `dyna git pr admit <pr> <kind:id>`.
 
 See `dyna guide git`.
 

@@ -9,9 +9,11 @@ import (
 	"dyna-agent/internal/pr/watch"
 )
 
-// publication checks the room before publishing. Ordinary reviewers can publish;
-// the admin rule for review on/off does not apply to a review body.
+// publication allows only the owner to publish GitHub feedback.
 func (s *Service) publication(ctx context.Context, roomRef string, ref watch.Ref, publish bool) (*watch.Service, context.Context, string, error) {
+	if authority.Of(ctx).Role != authority.Owner {
+		return nil, ctx, "", fmt.Errorf("agents cannot publish GitHub PR comments or reviews; record feedback in Dyna")
+	}
 	room, err := s.Notify.Rooms.Resolve(roomRef)
 	if err != nil {
 		return nil, ctx, "", err
