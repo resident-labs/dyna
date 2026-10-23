@@ -257,13 +257,12 @@ button at the right of the header opens it. Esc, the close button on a phone,
 or a click outside closes it.
 
 The root list shows rooms first (name, repo, unread count; archived rooms
-last), then the commands: New room, Open pinned posts, Open workflows, Open
-Settings and Toggle sidebar. Type to filter. Each word you type must appear in
-a room name, a repo path, or a command's name or hidden search terms. Arrow
-keys and Enter pick a row on the desktop. A tap picks a row on a phone.
+last), then matching sessions, runs, PRs, messages in the current room, and
+commands. Type to filter rooms, work and commands, and search the room log.
+Arrow keys and Enter pick a row on the desktop. A tap picks a row on a phone.
 Backspace on an empty input goes back one view. The app's own commands are the
 `paletteCommands` list in `App.svelte`; add a command there. The component is
-`lib/Palette.svelte`, and its text rules are in `lib/palette.js`.
+`web/src/lib/ui/Palette.svelte`, and its text rules are in `web/src/lib/ui/palette.ts`.
 
 **New room** switches the palette to path mode. The input starts as `~/`. Path
 mode is on while the text starts with `/`, `~/` or `~`. A Folders list shows the
