@@ -4,6 +4,8 @@ import { api } from '../../api.ts'
 import { openAudio } from './audio.ts'
 import { createCall } from './call.ts'
 import { createCallRequests } from './callRequests.ts'
+import { createScreenLock } from './wakeLock.ts'
+import { inCall } from './callState.ts'
 import type { SettingItem } from '../api/settings.ts'
 
 async function configuredAudio(...[onFrame, receipts]: Parameters<typeof openAudio>) {
@@ -14,6 +16,11 @@ async function configuredAudio(...[onFrame, receipts]: Parameters<typeof openAud
 
 export const voiceCall = createCall({ api, socket: (room: string) => new WebSocket(`${api.voiceURL()}?v=2&room=${encodeURIComponent(room)}`), openAudio: configuredAudio })
 export const callRequests = createCallRequests(api)
+
+// The screen stays on while a call runs: a phone locks its screen when it sees
+// no touch, and a call has none. The lock follows the call's phase.
+const screenLock = createScreenLock()
+voiceCall.subscribe((s) => { void screenLock.keep(inCall(s)) })
 
 // clock formats a call's length as m:ss, or h:mm:ss.
 export function clock(ms: number) {
