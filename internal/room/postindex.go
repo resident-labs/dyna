@@ -114,15 +114,16 @@ func (s *Store) importPostIndex(db *sql.DB) error {
 }
 
 // catchUpPostIndex indexes the posts that a crash left without rows, from each
-// room's stored cursor. Their deliveries are delivered for the same reason as
-// an import's.
+// room's stored cursor. Their deliveries are queued: nothing knows whether the
+// post that crashed reached its recipients, so a later reader may deliver it
+// again, and no post goes undelivered.
 func (s *Store) catchUpPostIndex(db *sql.DB) error {
 	records, err := storedRecords(db)
 	if err != nil {
 		return err
 	}
 	for _, rec := range records {
-		if err := s.indexPostsFrom(rec.ID, -1, DeliveryDelivered); err != nil {
+		if err := s.indexPostsFrom(rec.ID, -1, DeliveryQueued); err != nil {
 			return err
 		}
 	}
@@ -177,10 +178,7 @@ func storedOffsetCursor(db *sql.DB, roomID string) (int64, error) {
 // writePostIndex stores the rows of msgs in one write and moves the cursor to
 // next, the log offset just past their last line.
 func (s *Store) writePostIndex(db *sql.DB, roomName, roomID string, msgs []Message, next int64, deliveryState DeliveryState) error {
-	homes, err := s.homesFor(db, roomName, roomID, msgs)
-	if err != nil {
-		return err
-	}
+	homes := s.homesFor(db, roomName, roomID, msgs)
 	at := s.now().UnixMilli()
 	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
 		ctx := context.Background()
@@ -198,7 +196,7 @@ ON CONFLICT(room_id) DO UPDATE SET log_offset = excluded.log_offset`, roomID, ne
 // homesFor resolves the home of every post in one log batch, in log order, so
 // a post can look up the home of the post it replies to. It reads outside the
 // write transaction, which keeps log reads out of the SQLite writer.
-func (s *Store) homesFor(db *sql.DB, roomName, roomID string, msgs []Message) ([]Conversation, error) {
+func (s *Store) homesFor(db *sql.DB, roomName, roomID string, msgs []Message) []Conversation {
 	homes := make([]Conversation, len(msgs))
 	batch := make(map[string]Conversation, len(msgs))
 	for i, msg := range msgs {
@@ -213,7 +211,7 @@ func (s *Store) homesFor(db *sql.DB, roomName, roomID string, msgs []Message) ([
 		homes[i] = HomeFor(msg, roomName, parent)
 		batch[msg.ID] = homes[i]
 	}
-	return homes, nil
+	return homes
 }
 
 // putPostRows stores one post's home row and its delivery rows. A row for the
@@ -236,6 +234,11 @@ func putPostRows(ctx context.Context, conn *sql.Conn, roomID, roomName string, m
 // room has no such post. It reads the index first and falls back to the stored
 // post, whose own conversation field older posts may not carry. A nil db skips
 // the index, for a caller that could not open it.
+//
+// The fallback reads the field only, without the rules that decided it, so a
+// reply to a post stored before the field existed and still missing its index
+// row goes to the room feed. The one-time import gives every such post a row,
+// so this only matters before it runs.
 func (s *Store) ReplyHome(db *sql.DB, roomID, postID string) Conversation {
 	if postID == "" {
 		return ""

@@ -369,6 +369,12 @@ type recipient struct {
 // the post is stored, each delivery is best effort; if any fails, the error
 // wraps ErrDelivery and the result names each failure.
 func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
+	// Only the owner's own client says where it writes. A session, worker or
+	// workflow cannot place its post in another session's DM or in the voice
+	// call; for those senders room.HomeFor decides from the post itself.
+	if in.Sender.Kind != SenderOwner {
+		in.Conversation = ""
+	}
 	if in.Sender.Kind == SenderSession {
 		meta, err := s.sessionStore().ReadMeta(in.Sender.Session.ID)
 		if err != nil {

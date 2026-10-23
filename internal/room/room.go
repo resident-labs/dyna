@@ -885,6 +885,17 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 	return s.post(roomID, in, false)
 }
 
+// postConflicts reports whether a retry of in differs from the stored post m
+// with the same ID. The conversation of a post is decided when it is stored,
+// so it only counts when the retry names one itself: a retry of a post stored
+// before the field existed names none and matches the home it resolves to.
+func postConflicts(m Message, in PostInput, supplied Conversation) bool {
+	if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.Kind != in.Kind || m.Notice != in.Notice || !bytes.Equal(m.Payload.raw, in.payload.raw) || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.References, in.References) || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
+		return true
+	}
+	return supplied != "" && m.Conversation.Home() != supplied.Home()
+}
+
 // post appends a message. event lets PostEvent write a sealed family, which
 // no other caller can do.
 func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
@@ -981,11 +992,12 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 			indexDB = nil
 		}
 		parent := s.ReplyHome(indexDB, roomID, in.ReplyTo)
+		supplied := in.Conversation
 		in.Conversation = HomeFor(Message{From: in.From, Kind: in.Kind, Human: in.Human, Source: in.Source, To: in.To, SessionIDs: in.SessionIDs, Conversation: in.Conversation}, rec.Name, parent)
 		if in.ID != "" {
 			for _, m := range msgs {
 				if m.ID == in.ID {
-					if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.Kind != in.Kind || m.Notice != in.Notice || !bytes.Equal(m.Payload.raw, in.payload.raw) || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Conversation.Home() != in.Conversation.Home() || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.References, in.References) || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
+					if postConflicts(m, in, supplied) {
 						return ErrPostIDConflict
 					}
 					out = m

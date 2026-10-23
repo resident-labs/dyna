@@ -84,6 +84,26 @@ func TestPostStoresConversation(t *testing.T) {
 	}
 }
 
+// A retry of a post stored before the conversation field existed is accepted:
+// it resolves to a home, and the stored post has none to compare with.
+func TestPostRetryOfAPostWithoutAConversation(t *testing.T) {
+	s := recordsStore(t)
+	rec, err := s.Create(CreateInput{Name: "alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound := map[string]string{"alpha:lead": ownerSession}
+	stored := Message{ID: "msg_bbbbbbbbbbbbbbbb", TS: 1, RoomID: rec.ID, From: "alpha", Kind: "message", Human: true, To: []string{"alpha:lead"}, SessionIDs: bound, Text: "hello"}
+	appendRawPost(t, s, rec.ID, stored)
+	retry, err := s.Post(rec.ID, PostInput{ID: stored.ID, From: stored.From, Human: stored.Human, To: stored.To, SessionIDs: bound, Text: stored.Text})
+	if err != nil {
+		t.Fatalf("a retry of a post from before the conversation field was refused: %v", err)
+	}
+	if retry.ID != stored.ID {
+		t.Fatalf("retry stored %q, want the stored post %q", retry.ID, stored.ID)
+	}
+}
+
 type storedDelivery struct {
 	session, mode, category, state string
 }
@@ -130,6 +150,27 @@ func storedPostCursor(t *testing.T, s *Store, roomID string) (int64, bool) {
 		t.Fatal(err)
 	}
 	return offset, true
+}
+
+// appendRawPost appends one post straight to the room's log, as a crash
+// between the log append and the row write would leave it.
+func appendRawPost(t *testing.T, s *Store, roomID string, msg Message) {
+	t.Helper()
+	line, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(s.Root, roomID, "messages.jsonl")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Every post gets its rows when it is stored, the one-time import fills the
@@ -192,21 +233,7 @@ func TestPostIndexImportAndCursorCatchUp(t *testing.T) {
 
 	// A post appended before its rows were written is caught up from the
 	// cursor, and the catch-up moves the cursor past it.
-	lost, err := json.Marshal(Message{ID: "msg_0123456789abcdef", TS: 1, RoomID: rec.ID, From: "alpha:lead", Kind: "message", To: []string{"alpha:bea"}, SessionIDs: map[string]string{"alpha:bea": otherSession}, Text: "written by a crash"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(s.Root, rec.ID, "messages.jsonl")
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.Write(append(lost, '\n')); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.Close(); err != nil {
-		t.Fatal(err)
-	}
+	appendRawPost(t, s, rec.ID, Message{ID: "msg_0123456789abcdef", TS: 1, RoomID: rec.ID, From: "alpha:lead", Kind: "message", To: []string{"alpha:bea"}, SessionIDs: map[string]string{"alpha:bea": otherSession}, Text: "written by a crash"})
 
 	if err := Migrate(filepath.Dir(s.Root)); err != nil {
 		t.Fatalf("the catch-up failed: %v", err)
@@ -215,8 +242,8 @@ func TestPostIndexImportAndCursorCatchUp(t *testing.T) {
 	if home != string(ConversationRoom) || author != "" {
 		t.Fatalf("caught-up home = %q, author %q, want the room feed", home, author)
 	}
-	if len(deliveries) != 1 || deliveries[0].session != otherSession || deliveries[0].state != string(DeliveryDelivered) {
-		t.Fatalf("caught-up deliveries = %+v, want one delivered row for %s", deliveries, otherSession)
+	if len(deliveries) != 1 || deliveries[0].session != otherSession || deliveries[0].state != string(DeliveryQueued) {
+		t.Fatalf("caught-up deliveries = %+v, want one queued row for %s: a crash never proves the post arrived", deliveries, otherSession)
 	}
 	size, err = s.FileSize(rec.ID)
 	if err != nil {
