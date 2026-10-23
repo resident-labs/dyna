@@ -23,7 +23,6 @@ import (
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife"
-	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/subagent"
 	"path/filepath"
@@ -946,7 +945,7 @@ func reviewTask(r Record) string {
 	base += "Assignment input: " + string(input) + "\n"
 	base += "You may start at most 3 live helper sessions, one level deep, using your own profile or a cheaper profile (higher cost-efficiency). Helpers report findings to you. Only you may record this assignment's verdict. Keep this reviewer session open between reviews.\n"
 	return base + fmt.Sprintf(`This assignment is Dyna-only. Read GitHub without posting: do not publish GitHub reviews or comments for this assignment.
-Record the full Markdown review and verdict in Dyna: %s approve|approve-with-nits|changes|question --body-file <file> --findings-file <json-file> --head %s. Reviews over 12000 bytes are rejected, never silently clipped. Include findings, file paths, line numbers and suggested fixes in the Markdown. No GitHub review ID is needed. Use changes when fixes are needed. The stored review is visible in Dyna and changes are delivered to the author.`, command, r.Head)
+Record exactly one typed result in Dyna before your turn ends: %s approve|changes|approve-fast|stop-early --body-file <file> --findings-file <json-file> --head %s. A turn that ends without a typed result is an error. Use changes when fixes are needed, with structured findings. Use approve-fast only when the change is safe to land without the batch wait, such as docs, guide text or tests; Dyna's changed-path rules still decide, and a risky path falls back to the normal path. Use stop-early with --reason superseded|duplicate|empty|too-large when you stop before judging the change. Reviews over 12000 bytes are rejected, never silently clipped. Include findings, file paths, line numbers and suggested fixes in the Markdown. No GitHub review ID is needed. The stored result is visible in Dyna and a changes result is delivered to the author.`, command, r.Head)
 }
 func (s *Service) launch(ctx context.Context, r Record, profile, task string) (string, error) {
 	if s.LaunchReviewer != nil {
@@ -958,8 +957,8 @@ func (s *Service) launch(ctx context.Context, r Record, profile, task string) (s
 		Goal: fmt.Sprintf("Review %s at the assigned head; done when its Dyna verdict is recorded.", changeLabel(r)), Task: task})
 	return info.ID, err
 }
-func (s *Service) Verdict(ctx context.Context, key, actor, head, verdict, summary string, reviewID int64) error {
-	return s.VerdictWithFindings(ctx, key, actor, head, verdict, summary, reviewID, nil)
+func (s *Service) Verdict(ctx context.Context, key, actor, head string, verdict state.ReviewVerdict, summary string, reviewID int64) error {
+	return s.RecordReviewResult(ctx, key, actor, ReviewResult{Verdict: verdict, Head: head, Summary: summary, ReviewID: reviewID})
 }
 
 // ErrStaleVerdict means an assigned review ended before its verdict arrived.
@@ -1005,28 +1004,28 @@ func staleVerdict(r Record, actor, head string, pull Pull, reviewID int64, named
 	return &ErrStaleVerdict{Message: message}
 }
 
-func (s *Service) VerdictWithFindings(ctx context.Context, key, actor, head, verdict, summary string, reviewID int64, findings []Finding) error {
-	return s.verdictWithSnapshot(ctx, key, actor, head, verdict, summary, reviewID, findings, nil)
+func (s *Service) VerdictWithFindings(ctx context.Context, key, actor, head string, verdict state.ReviewVerdict, summary string, reviewID int64, findings []Finding) error {
+	return s.RecordReviewResult(ctx, key, actor, ReviewResult{Verdict: verdict, Head: head, Summary: summary, ReviewID: reviewID, Findings: findings})
 }
 
-func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, verdict, summary string, reviewID int64, findings []Finding, confirmed *Snapshot) error {
-	if reviewID < 0 {
-		return fmt.Errorf("review ID cannot be negative")
+// RecordReviewResult records one reviewer turn's typed result. It is the one
+// engine call a reviewer uses, and it rejects anything that is not a registered
+// result.
+func (s *Service) RecordReviewResult(ctx context.Context, key, actor string, in ReviewResult) error {
+	return s.reviewResult(ctx, key, actor, in, nil)
+}
+
+func (s *Service) reviewResult(ctx context.Context, key, actor string, in ReviewResult, confirmed *Snapshot) error {
+	if err := prepareReviewResult(in); err != nil {
+		return err
 	}
-	if verdict != "approve" && verdict != "approve-with-nits" && verdict != "changes" && verdict != "question" {
-		return fmt.Errorf("verdict must be approve, approve-with-nits, changes, or question")
-	}
-	if strings.TrimSpace(summary) == "" {
-		return fmt.Errorf("summary is required")
-	}
-	if len(summary) > MaxReviewBytes {
-		return fmt.Errorf("review exceeds %s; shorten it before recording (nothing was saved)", settings.FormatBytes(int64(MaxReviewBytes)))
-	}
-	summary = Sanitize(summary)
+	reviewID, head, summary, verdict := in.ReviewID, in.Head, in.Summary, in.Verdict
 	r, err := s.Store.Get(key)
 	if err != nil {
 		return err
 	}
+	summary = Sanitize(summary)
+	in.Summary = summary
 	key = r.Key
 	policyState, err := s.Store.Read()
 	if err != nil {
@@ -1055,13 +1054,23 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 	if named && review.RoundHead != head {
 		review.Round++
 	}
-	prepared, err := prepareFindings(review, verdict, findings)
+	prepared, err := prepareFindings(review, verdict, in.Findings)
 	if err != nil {
 		return err
 	}
+	in.Findings = prepared
 	if paused {
-		return s.savePendingVerdict(r.Key, actor, head, verdict, summary, reviewID, prepared)
+		return s.savePendingVerdict(r.Key, actor, head, in)
 	}
+	// The path rule decides a fast landing. A paused submission keeps its
+	// requested result and is classified when it replays.
+	in = s.normalizeReviewResult(ctx, r, in)
+	verdict, summary = in.Verdict, in.Summary
+	prepared, err = prepareFindings(r, verdict, in.Findings)
+	if err != nil {
+		return err
+	}
+	in.Findings = prepared
 	var snap Snapshot
 	if confirmed != nil {
 		snap = *confirmed
@@ -1155,6 +1164,7 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 		if head == "" || head != r.Head || (!named && head != r.RoundHead) || pull.Head.SHA != head {
 			return fmt.Errorf("stale review: PR head changed; review the current head")
 		}
+		in.Head = head
 		if registered != nil {
 			owner := commentOwner(st.CommentSessions, *registered)
 			if (owner != "" && owner != actor) || registered.Commit != head || registered.State == "PENDING" || !submittedAfterRound(*r, *registered) {
@@ -1166,8 +1176,9 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 			r.Round++
 			r.RoundHead = head
 			r.Verdict, r.Summary, r.ReviewID = "", "", 0
+			r.StopReason, r.FastLand = "", nil
 		}
-		submitted := &state.PendingVerdict{Actor: actor, Head: head, Verdict: verdict, Summary: summary, ReviewID: reviewID, Findings: prepared}
+		submitted := &state.PendingVerdict{Actor: actor, Head: head, Verdict: verdict, Summary: summary, ReviewID: reviewID, Findings: prepared, StopReason: in.StopReason, FastLand: in.FastLand}
 		if done, err := recordedVerdict(*r, submitted); done || err != nil {
 			if done {
 				removePendingVerdict(r, submitted)
@@ -1175,20 +1186,31 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 			return err
 		}
 		removePendingVerdict(r, submitted)
-		r.ReviewRounds = append(r.ReviewRounds, state.ReviewRound{Reviewer: actor, ReviewID: reviewID, Round: r.Round, Head: head, Verdict: verdict, Summary: summary, Findings: cloneFindings(prepared), At: s.now()})
+		r.ReviewRounds = append(r.ReviewRounds, state.ReviewRound{Reviewer: actor, ReviewID: reviewID, Round: r.Round, Head: head, Verdict: verdict, Summary: summary, Findings: cloneFindings(prepared), StopReason: in.StopReason, FastLand: in.FastLand, At: s.now()})
 		// Any authorized approval satisfies this head. Further reviews keep
 		// their own audit entry without erasing an existing approval.
-		if !approved(r.Verdict) {
+		if verdict == state.VerdictStopEarly {
+			// A stop-early judges nothing: the head still needs a review.
+			r.StopReason = in.StopReason
+			r.FastLand = nil
+		} else if !approved(r.Verdict) {
 			r.Verdict = verdict
 			r.Summary = summary
 			r.ReviewID = reviewID
+			r.StopReason = ""
+			r.FastLand = in.FastLand
 			r.Findings = append(prepared, ownerFindingsOf(r.Findings)...)
 		}
 
 		target := r.Author
-		text := fmt.Sprintf("Reviewer requests changes for %s at %s:\n%s", changeLabel(*r), head, summary)
-		if verdict == "question" {
-			text = fmt.Sprintf("Reviewer has a question about %s at %s:\n%s", changeLabel(*r), head, summary)
+		detail := summary
+		if verdict == state.VerdictChanges {
+			for _, c := range snap.Comments {
+				if commentOwner(st.CommentSessions, c) == actor && (c.Commit == "" || c.Commit == head) && c.State != "PENDING" && r.Seen[commentKey(c)] != commentVersion(c) {
+					detail += "\n\n" + clip(c.Body, 4000) + "\n" + c.URL
+					r.Seen[commentKey(c)] = commentVersion(c)
+				}
+			}
 		}
 		if approved(verdict) {
 			target = ""
@@ -1196,23 +1218,25 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 			if changeKind(*r) == "github" && (r.CI == "pending" || r.CI == "failed") {
 				status = "CI has not passed on this head yet. Dyna reports ready when it passes."
 			}
-			text = fmt.Sprintf("%s at %s approved by its Dyna reviewer:\n\n%s\n\n%s", changeLabel(*r), head, clip(keepLines(summary), 1500), status)
+			detail = clip(keepLines(summary), 1500) + "\n\n" + status
 		}
-		if verdict == "changes" {
-			for _, c := range snap.Comments {
-				if commentOwner(st.CommentSessions, c) == actor && (c.Commit == "" || c.Commit == head) && c.State != "PENDING" && r.Seen[commentKey(c)] != commentVersion(c) {
-					text += "\n\n" + clip(c.Body, 4000) + "\n" + c.URL
-					r.Seen[commentKey(c)] = commentVersion(c)
-				}
+		if verdict == state.VerdictStopEarly {
+			target = ""
+			detail = fmt.Sprintf("The reviewer stopped early: %s.", in.StopReason)
+			if summary != "" {
+				detail += "\n\n" + clip(keepLines(summary), 1500)
 			}
 		}
-		facts := noticeFacts{Verdict: verdict, Summary: reviewSummary(summary)}
+		detail = Sanitize(detail)
+		ev := reviewEventOf(*r, in, detail)
+		text := fmt.Sprintf("Reviewer requests changes for %s at %s:\n%s", changeLabel(*r), head, detail)
 		if approved(verdict) {
-			facts.Type = room.PRApproved
-		} else {
-			facts.Type = room.PRChanges
+			text = fmt.Sprintf("%s at %s approved by its Dyna reviewer:\n\n%s", changeLabel(*r), head, detail)
 		}
-		noticeTyped(r, target, text, fmt.Sprintf("verdict:%d:%s:%s:%s", r.Round, head, actor, verdict), facts, r.PendingDrops)
+		if verdict == state.VerdictStopEarly {
+			text = fmt.Sprintf("The reviewer stopped early on %s at %s:\n%s", changeLabel(*r), head, detail)
+		}
+		queueReviewNotice(r, target, text, fmt.Sprintf("%d:%s:%s:%s", r.Round, head, actor, verdict), ev)
 		r.PendingDrops = nil
 		noticeIfLandable(*st, r, snap.GitHubFacts(*r, EffectivePolicy(*st, *r).RequiredChecks...))
 		return nil
@@ -1346,6 +1370,9 @@ func (s *Service) flush(ctx context.Context, key string) error {
 }
 func (s *Service) deliver(ctx context.Context, r Record, n Notice) (string, error) {
 	var event room.Event = prEventOf(r, n)
+	if n.Review != nil {
+		event = *n.Review
+	}
 	if n.Merge != nil {
 		merge := *n.Merge
 		// The pending notice's text is the evidence the author reads today,

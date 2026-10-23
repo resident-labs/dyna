@@ -104,8 +104,8 @@ func recordedVerdict(r Record, p *state.PendingVerdict) (bool, error) {
 	return false, nil
 }
 
-func (s *Service) savePendingVerdict(key, actor, head, verdict, summary string, reviewID int64, findings []Finding) error {
-	pending := &state.PendingVerdict{Actor: actor, Head: head, Verdict: verdict, Summary: summary, ReviewID: reviewID, Findings: cloneFindings(findings)}
+func (s *Service) savePendingVerdict(key, actor, head string, in ReviewResult) error {
+	pending := &state.PendingVerdict{Actor: actor, Head: head, Verdict: in.Verdict, Summary: in.Summary, ReviewID: in.ReviewID, Findings: cloneFindings(in.Findings), StopReason: in.StopReason, FastLand: in.FastLand}
 	saved := false
 	err := s.Store.update(func(st *State) error {
 		r := st.Records[key]
@@ -113,7 +113,7 @@ func (s *Service) savePendingVerdict(key, actor, head, verdict, summary string, 
 			return fmt.Errorf("PR is not tracked")
 		}
 		named := s.namedReviewer(*st, *r, actor)
-		if err := validateVerdictReviewer(*r, actor, head, reviewID, named); err != nil {
+		if err := validateVerdictReviewer(*r, actor, head, in.ReviewID, named); err != nil {
 			return err
 		}
 		if head == "" || head != r.Head || (!named && head != r.RoundHead) {
@@ -174,7 +174,7 @@ func (s *Service) replayPendingVerdicts(ctx context.Context, heads map[string]he
 				}
 				snap = &value
 			}
-			e := s.verdictWithSnapshot(recordCtx, key, pending.Actor, pending.Head, pending.Verdict, pending.Summary, pending.ReviewID, pending.Findings, snap)
+			e := s.reviewResult(recordCtx, key, pending.Actor, ReviewResult{Verdict: pending.Verdict, Findings: pending.Findings, StopReason: pending.StopReason, FastLand: pending.FastLand, Summary: pending.Summary, Head: pending.Head, ReviewID: pending.ReviewID}, snap)
 			if e != nil && recordCtx.Err() == nil {
 				// Delivery can fail after commit; reject only a still-saved matching review.
 				fresh, readErr := s.Store.Get(key)

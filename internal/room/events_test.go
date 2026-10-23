@@ -494,6 +494,8 @@ func tsField(typ reflect.Type, expr string) (string, string, error) {
 		return "string", fmt.Sprintf("typeof %s === \"string\"", expr), nil
 	case reflect.Int, reflect.Int64:
 		return "number", fmt.Sprintf("Number.isInteger(%s)", expr), nil
+	case reflect.Bool:
+		return "boolean", fmt.Sprintf("typeof %s === \"boolean\"", expr), nil
 	case reflect.Struct:
 		// An event object gets its own interface and guard; any other struct is
 		// written inline, so a payload can carry a small fact such as a close

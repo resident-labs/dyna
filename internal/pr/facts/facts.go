@@ -27,13 +27,26 @@ func HeadCurrent(r state.Record, head string) bool {
 	return HeadVerified(r) && head == r.Head
 }
 
-func ApprovedVerdict(verdict string) bool {
-	return verdict == "approve" || verdict == "approve-with-nits"
+func ApprovedVerdict(verdict state.ReviewVerdict) bool {
+	switch verdict {
+	case state.VerdictApprove, state.VerdictApproveFast:
+		return true
+	// TODO: legacy/shim remove later — reviews recorded before the typed
+	// results used this value; remove when retained review history ages out.
+	case "approve-with-nits":
+		return true
+	}
+	return false
 }
 func ApprovedAtHead(r state.Record) bool {
 	return r.RoundHead == r.Head && ApprovedVerdict(r.Verdict)
 }
 func NeedsReview(r state.Record) bool {
+	// A stable stop result (too-large, empty, duplicate, superseded) ends review
+	// of this head. A new head, or dyna git pr reviewer --restart, resumes it.
+	if r.RoundHead == r.Head && r.StopReason != "" {
+		return false
+	}
 	return r.Watching && r.State == "open" && !r.IsDraft && HeadVerified(r) && r.CI != "failed" &&
 		!r.HasPendingVerdict(r.Head) && (r.Verdict == "" || r.RoundHead != r.Head)
 }

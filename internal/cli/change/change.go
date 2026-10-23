@@ -161,12 +161,13 @@ func Command(o Options) *cobra.Command {
 		}
 		return record(c, s, a[0])
 	}
-	verdict := &cobra.Command{Use: "verdict <change-id> approve|approve-with-nits|changes|question [Markdown review]", Short: "Record a review for the assigned change head", Long: "Record full Markdown and optional structured findings in Dyna. Supply the assigned --head. Use --body-file for multiline Markdown, or - for stdin. Local reviews need no GitHub review ID. GitHub assignments require --review-id for your published review. This command does not post to GitHub.", Args: cobra.RangeArgs(2, 3)}
+	verdict := &cobra.Command{Use: "verdict <change-id> approve|changes|approve-fast|stop-early [Markdown review]", Short: "Record a typed review result for the assigned change head", Long: "Record one typed review result: approve, changes, approve-fast, or stop-early. Supply the assigned --head. Use --body-file for multiline Markdown, or - for stdin. Local reviews need no GitHub review ID. GitHub assignments require --review-id for your published review. An approve-fast result lands fast only when Dyna's changed-path rules also rate the change low risk. A stop-early result needs --reason: superseded, duplicate, empty, or too-large. This command does not post to GitHub.", Args: cobra.RangeArgs(2, 3)}
 	head := verdict.Flags().String("head", "", "assigned change head SHA (required)")
 	_ = verdict.MarkFlagRequired("head")
 	bodyFile := verdict.Flags().String("body-file", "", fmt.Sprintf("Markdown file (- for stdin), up to %d bytes", watch.MaxReviewBytes))
 	findingsFile := verdict.Flags().String("findings-file", "", fmt.Sprintf("file with a JSON array of findings, up to %d bytes", watch.MaxFindingsBytes))
 	reviewID := verdict.Flags().Int64("review-id", 0, "GitHub ID of your published review, when required")
+	reason := verdict.Flags().String("reason", "", "stop reason for stop-early: superseded, duplicate, empty, or too-large")
 	verdict.RunE = func(c *cobra.Command, a []string) error {
 		if strings.TrimSpace(*head) == "" {
 			return fmt.Errorf("--head is required")
@@ -208,12 +209,13 @@ func Command(o Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		var result prview.VerdictResult
-		if err := engineclient.New("").Call(c.Context(), "RecordPRVerdict", []any{r.RoomID, r.Key, *head, a[1], summary, *reviewID, findings}, &result); err != nil {
+		result := watch.ReviewResult{Verdict: prstate.ReviewVerdict(a[1]), Findings: findings, Summary: summary, Head: *head, ReviewID: *reviewID, StopReason: prstate.StopReason(*reason)}
+		var saved prview.VerdictResult
+		if err := engineclient.New("").Call(c.Context(), "RecordReviewResult", []any{r.RoomID, r.Key, result}, &saved); err != nil {
 			return err
 		}
-		if result.Notice != "" {
-			fmt.Fprintln(c.OutOrStdout(), result.Notice)
+		if saved.Notice != "" {
+			fmt.Fprintln(c.OutOrStdout(), saved.Notice)
 			return nil
 		}
 		return record(c, s, r.Key)

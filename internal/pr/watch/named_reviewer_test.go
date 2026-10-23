@@ -193,7 +193,7 @@ func TestAnyAuthorizedReviewerApprovalCounts(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.s.Verdict(context.Background(), r.Key, namedReviewerID, r.Head, "question", "Question about this head", 0); err != nil {
+	if err := e.s.Verdict(context.Background(), r.Key, namedReviewerID, r.Head, "changes", "Changes for this head", 0); err != nil {
 		t.Fatal(err)
 	}
 	policy, _ := e.s.RoomChangePolicy(r.RoomID)
@@ -226,10 +226,10 @@ func TestNamedReviewerCannotPromoteAnEarlierHeadApproval(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.s.Verdict(context.Background(), r.Key, namedReviewerID, r.Head, "question", "Review the current head", 0); err != nil {
+	if err := e.s.Verdict(context.Background(), r.Key, namedReviewerID, r.Head, "changes", "Changes for the current head", 0); err != nil {
 		t.Fatal(err)
 	}
-	if got := e.record(); got.Verdict != "question" || got.RoundHead != r.Head {
+	if got := e.record(); got.Verdict != "changes" || got.RoundHead != r.Head {
 		t.Fatalf("old approval moved to the new head: verdict=%s head=%s", got.Verdict, got.RoundHead)
 	}
 }
@@ -261,8 +261,8 @@ func TestNamedPendingVerdictReplaysWithoutAssignment(t *testing.T) {
 }
 
 func TestNamedReviewFeedbackAfterApprovalIsDelivered(t *testing.T) {
-	for _, verdict := range []string{"changes", "question"} {
-		t.Run(verdict, func(t *testing.T) {
+	for _, verdict := range []state.ReviewVerdict{state.VerdictChanges} {
+		t.Run(string(verdict), func(t *testing.T) {
 			e, r := namedReviewEnv(t)
 			if err := e.s.Verdict(t.Context(), r.Key, namedReviewerID, r.Head, "approve", "First approval", 0); err != nil {
 				t.Fatal(err)
@@ -307,15 +307,15 @@ func pauseNamedReviews(t *testing.T, e *testEnv, r Record) {
 	}
 }
 
-func TestNamedPendingApprovalAfterQuestion(t *testing.T) {
+func TestNamedPendingApprovalAfterChanges(t *testing.T) {
 	e, r := namedReviewEnv(t)
-	if err := e.s.Verdict(t.Context(), r.Key, namedReviewerID, r.Head, "question", "First question", 0); err != nil {
+	if err := e.s.Verdict(t.Context(), r.Key, namedReviewerID, r.Head, "changes", "First changes", 0); err != nil {
 		t.Fatal(err)
 	}
 	pauseNamedReviews(t, e, r)
 	err := e.s.Verdict(t.Context(), r.Key, "ses_20261017-000006-ffffffff", r.Head, "approve", "Other approval", 0)
 	if _, ok := VerdictNotice(err); !ok {
-		t.Fatalf("pending approval after a question = %v", err)
+		t.Fatalf("pending approval after changes = %v", err)
 	}
 	if err := e.s.Store.update(func(st *State) error { st.RateLimits = nil; return nil }); err != nil {
 		t.Fatal(err)
@@ -330,7 +330,7 @@ func TestTwoNamedPendingReviewersReplayIndependently(t *testing.T) {
 	e, r := namedReviewEnv(t)
 	pauseNamedReviews(t, e, r)
 	for i, actor := range []string{namedReviewerID, "ses_20261017-000006-ffffffff"} {
-		verdict := []string{"question", "approve"}[i]
+		verdict := []state.ReviewVerdict{state.VerdictChanges, state.VerdictApprove}[i]
 		err := e.s.Verdict(t.Context(), r.Key, actor, r.Head, verdict, actor+" review", 0)
 		if _, ok := VerdictNotice(err); !ok {
 			t.Fatalf("pending review %d = %v", i, err)
@@ -341,7 +341,7 @@ func TestTwoNamedPendingReviewersReplayIndependently(t *testing.T) {
 		}
 	}
 	// Retrying the first reviewer still works after a second one was saved.
-	if err := e.s.Verdict(t.Context(), r.Key, namedReviewerID, r.Head, "question", namedReviewerID+" review", 0); err == nil {
+	if err := e.s.Verdict(t.Context(), r.Key, namedReviewerID, r.Head, "changes", namedReviewerID+" review", 0); err == nil {
 		t.Fatal("pending retry was not reported")
 	}
 	saved := e.record()
@@ -413,7 +413,7 @@ func TestPendingReplayConsumesReviewsWithInheritedFindingReplies(t *testing.T) {
 		t.Fatal(err)
 	}
 	pauseNamedReviews(t, e, r)
-	err := e.s.Verdict(t.Context(), r.Key, namedReviewerID, r.Head, "question", "First question", 0)
+	err := e.s.Verdict(t.Context(), r.Key, namedReviewerID, r.Head, "changes", "First changes", 0)
 	if _, ok := VerdictNotice(err); !ok {
 		t.Fatal(err)
 	}

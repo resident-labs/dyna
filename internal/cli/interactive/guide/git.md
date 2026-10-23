@@ -101,7 +101,11 @@ ready only when an approval and green CI are on the same head. CI failures go
 to the author; the final review notes the CI result.
 Source-only reviews of draft changes need no CI evidence. Merging a PR requires passing CI.
 
-Verdicts are `approve`, `approve-with-nits`, `changes`, or `question`.
+Results are `approve`, `changes`, `approve-fast`, or `stop-early`. Every
+reviewer turn ends with exactly one typed result; a turn that ends without one
+is an error. `approve-fast` lands fast only when Dyna's changed-path rules also
+rate the change low risk; otherwise it records as `approve` on the normal path.
+`stop-early` needs `--reason superseded|duplicate|empty|too-large`.
 Approval cannot contain `blocking` or `should-fix` findings.
 Findings JSON is an array with severity (`blocking`, `should-fix`, `nit`), file,
 nonnegative line, why, fix, and optional patch and stable ID. Preserve existing IDs.
@@ -112,9 +116,9 @@ dyna git change verdict <id> changes --head <assigned-sha> \
 dyna git change reply <id> <finding-id> fixed --message "Added bounds check"
 ```
 
-Authors reply `fixed`, `wont-fix`, or `question`. Replies to changes or questions
-queue review again. Reviewers check the delta and earlier findings and replies.
-`dyna git pr verdict` accepts the same verdicts and findings for PRs.
+Authors reply `fixed`, `wont-fix`, or `question`. Replies to changes queue review
+again. Reviewers check the delta and earlier findings and replies.
+`dyna git pr verdict` accepts the same results and findings for PRs.
 
 ## Publishing and comments
 

@@ -108,6 +108,9 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		return retry(errors.Join(append(failures, err)...))
 	}
 	groups := map[string][]Record{}
+	// A fast landing publishes its PR on this tick, so the repository takes no
+	// trial until the next tick reads the new default-branch head.
+	fastLanded := map[string]bool{}
 	repos = nil
 	// An explicit retry may select a replacement while the durable pause
 	// remains in place. Only saving that replacement clears the pause.
@@ -144,6 +147,14 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		if !ready {
 			continue
 		}
+		if fastLandable(current) {
+			if err := s.fastLand(ctx, current); err != nil {
+				failures = append(failures, err)
+			} else {
+				fastLanded[repo] = true
+			}
+			continue
+		}
 		if len(groups[repo]) == 0 {
 			repos = append(repos, repo)
 		}
@@ -154,6 +165,9 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 		return retry(err)
 	}
 	for _, repo := range repos {
+		if fastLanded[repo] {
+			continue
+		}
 		groups[repo] = chooseMergeBatch(groups[repo], active, s.expediteStreak("merge:"+repo))
 		limit := 0
 		for _, member := range groups[repo] {

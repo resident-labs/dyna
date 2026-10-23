@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/pr/state"
 	prfixture "dyna-agent/internal/pr/view/testfixture"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/sessionlife/recordtest"
@@ -38,7 +39,7 @@ func TestVerdictUsesAuthenticatedReviewerAndPreservesPendingNotice(t *testing.T)
 		{authority.Actor{Room: alpha.ID, Session: reviewer}, false},
 	} {
 		ctx := authority.WithActor(context.Background(), tc.actor)
-		got, err := e.svc.PRs.RecordPRVerdict(ctx, alpha.ID, key, "head", "approve", "Reviewed", 0, nil)
+		got, err := e.svc.PRs.RecordReviewResult(ctx, alpha.ID, key, watch.ReviewResult{Verdict: state.VerdictApprove, Head: "head", Summary: "Reviewed"})
 		if tc.allowed {
 			if err != nil || got.Notice != "verdict saved; applies after GitHub refresh" {
 				t.Errorf("verdict as %+v = %+v, %v", tc.actor, got, err)
@@ -62,12 +63,12 @@ func TestVerdictPreservesStaleNoticeAndValidationErrors(t *testing.T) {
 	st.Records["change"] = &watch.Record{Key: "change", RoomID: rec.ID, Kind: "local", State: "merged", Head: "head", Author: "author", LastReviewer: reviewer, LastReviewHead: "head"}
 	prfixture.SaveState(t, p.Store.Root, st)
 	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: reviewer, Room: rec.ID})
-	got, err := e.svc.PRs.RecordPRVerdict(ctx, rec.ID, "change", "head", "approve", "Reviewed", 0, nil)
+	got, err := e.svc.PRs.RecordReviewResult(ctx, rec.ID, "change", watch.ReviewResult{Verdict: state.VerdictApprove, Head: "head", Summary: "Reviewed"})
 	if err != nil || !strings.Contains(got.Notice, "already merged; no verdict needed") {
 		t.Fatalf("stale result = %+v, %v", got, err)
 	}
-	got, err = e.svc.PRs.RecordPRVerdict(ctx, rec.ID, "change", "head", "invalid", "Reviewed", 0, nil)
-	if err == nil || got.Notice != "" || !strings.Contains(err.Error(), "verdict must be") {
+	got, err = e.svc.PRs.RecordReviewResult(ctx, rec.ID, "change", watch.ReviewResult{Verdict: "invalid", Head: "head", Summary: "Reviewed"})
+	if err == nil || got.Notice != "" || !strings.Contains(err.Error(), "review result must be") {
 		t.Fatalf("validation result = %+v, %v", got, err)
 	}
 }
@@ -95,7 +96,7 @@ func TestNamedVerdictUsesAuthenticatedSessionWithoutAssignment(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: reviewer, Room: rec.ID})
-	got, err := e.svc.PRs.RecordPRVerdict(ctx, rec.ID, key, "head", "approve", "Reviewed exact head", 0, nil)
+	got, err := e.svc.PRs.RecordReviewResult(ctx, rec.ID, key, watch.ReviewResult{Verdict: state.VerdictApprove, Head: "head", Summary: "Reviewed exact head"})
 	if err != nil || got.Notice != "verdict saved; applies after GitHub refresh" {
 		t.Fatalf("named verdict = %+v, %v", got, err)
 	}

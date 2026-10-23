@@ -28,7 +28,7 @@ func TestRequiredReviewsUseEachReviewersLatestExactHeadVerdict(t *testing.T) {
 	r.ReviewRounds = append(r.ReviewRounds, state.ReviewRound{Reviewer: "safety", Head: r.Head, Verdict: "approve"})
 	require(nil)
 	// A later question or change replaces this reviewer's earlier approval.
-	for _, verdict := range []string{"changes", "question"} {
+	for _, verdict := range []state.ReviewVerdict{"changes", "question"} {
 		r.ReviewRounds = append(r.ReviewRounds, state.ReviewRound{Reviewer: "safety", Head: r.Head, Verdict: verdict})
 		require([]string{"safety"})
 	}

@@ -69,7 +69,7 @@ func changeKind(r Record) string {
 	}
 	return "github"
 }
-func approved(verdict string) bool { return facts.ApprovedVerdict(verdict) }
+func approved(verdict state.ReviewVerdict) bool { return facts.ApprovedVerdict(verdict) }
 func changeLocation(r Record) string {
 	if r.URL != "" {
 		return r.URL
@@ -228,6 +228,8 @@ func (s *Service) OpenChange(ctx context.Context, actor authority.Actor, author 
 			}
 			if old.Head != head || old.BaseRef != baseRef {
 				resetReview(old, head)
+				// TODO: legacy/shim remove later — a stored review from before the
+				// typed results may still say question; remove when that history ages out.
 			} else if old.Notes != record.Notes && (old.Verdict == "changes" || old.Verdict == "question") {
 				old.Verdict = ""
 				old.Reviewer = ""
@@ -377,6 +379,9 @@ func (s *Service) ReplyFinding(ctx context.Context, key, author, by, findingID, 
 		}
 		// An author reply to requested changes or a question can ask for another
 		// review on the same head. Head changes already reset the assignment.
+		// TODO: legacy/shim remove later — a stored review from before the typed
+		// results may still say question, which also reopens review; remove when
+		// that history ages out.
 		if disposition != "resolved" && (r.Verdict == "changes" || r.Verdict == "question") {
 			r.Verdict = ""
 			r.Reviewer = ""

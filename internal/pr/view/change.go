@@ -58,7 +58,7 @@ type ChangeView struct {
 	Error               string               `json:"error,omitempty"`
 	ReviewRound         int                  `json:"reviewRound,omitempty"`
 	ReviewHead          string               `json:"reviewHead,omitempty"`
-	Verdict             string               `json:"verdict,omitempty"`
+	Verdict             state.ReviewVerdict  `json:"verdict,omitempty"`
 	ReviewAt            time.Time            `json:"reviewAt,omitzero"`
 	FindingCount        int                  `json:"findingCount,omitempty"`
 	HasReviewSummary    bool                 `json:"hasReviewSummary,omitempty"`
