@@ -69,7 +69,7 @@ func TestWorkersStartupStoreEventsSafetyAndDailySweep(t *testing.T) {
 		w.run(ctx, signals, set, func(string, error) { t.Error("unexpected worker error") })
 	}()
 	defer func() { cancel(); <-done }()
-	awaitWorker(t, calls, "prs", "questions", "sweep", "hooks", "sessions", "merges", "instructions", "sync", "fetch", "probe", "caches")
+	awaitWorker(t, calls, "prs", "questions", "sweep", "hooks", "hook-schedule", "sessions", "merges", "instructions", "sync", "fetch", "probe", "caches")
 	// The daily sweep's deadline counts from when it is set, so the clock
 	// moves only after both sweep timers exist.
 	awaitTimer(t, set, timerSafetySweep)
@@ -216,7 +216,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	first := run(ctx, "first")
-	awaitWorker(t, calls, "first-settle", "first-prs", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch", "first-probe", "first-caches")
+	awaitWorker(t, calls, "first-settle", "first-hook-schedule", "first-prs", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch", "first-probe", "first-caches")
 	// A second engine on the same store runs no workers at all.
 	secondCtx, cancelSecond := context.WithCancel(context.Background())
 	secondDone := make(chan bool, 1)
@@ -249,7 +249,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	// takes over the store workers.
 	ctx, cancel = context.WithCancel(context.Background())
 	third := run(ctx, "third")
-	awaitWorker(t, calls, "third-settle", "third-prs", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch", "third-probe", "third-caches")
+	awaitWorker(t, calls, "third-settle", "third-hook-schedule", "third-prs", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch", "third-probe", "third-caches")
 	cancel()
 	stop(third, "third")
 	select {
@@ -284,7 +284,7 @@ func TestEngineHookWorkerDrainsStartupSpoolOnce(t *testing.T) {
 	t.Cleanup(authority.InEngine())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil, time.Now())
+	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil, services.hooks, time.Now())
 	drain := w.hooks
 	ticks := make(chan struct{}, 4)
 	w.hooks = func(ctx context.Context) (time.Time, error) {
@@ -639,11 +639,24 @@ func TestWorkersSettleFromTheEngineStart(t *testing.T) {
 		return nil
 	}
 	t.Cleanup(func() { settleHookRuns = settleFromStart })
-	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil, started)
+	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil, services.hooks, started)
 	if err := w.settle(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	if !cutoff.Equal(started) {
 		t.Fatalf("settle cutoff = %s, want the engine start %s", cutoff, started)
+	}
+}
+
+// Resuming a paused room makes its check-ins due again, as a turn end does: the
+// hooks worker runs one pass through the hook's own switch.
+func TestResumedRoomRunsACheckInPass(t *testing.T) {
+	signals := newWorkerSignals(nil)
+	signals.wake(roomsvc.Event{Kind: "room.resumed", RoomID: "room_1"})
+	if !signals.takeRoomResumed() {
+		t.Fatal("a resumed room did not mark a check-in pass")
+	}
+	if signals.takeRoomResumed() {
+		t.Fatal("the resume mark survived one pass")
 	}
 }

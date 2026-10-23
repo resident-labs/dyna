@@ -47,6 +47,9 @@ type workerSignals struct {
 	// worker last fired their session-turn-ended events. One event per session
 	// per pass, however many turns it ran in between.
 	turnEnds map[string]bool
+	// roomResumed marks that a paused room resumed since the hooks worker last
+	// ran, so its check-ins are due again.
+	roomResumed bool
 	// recheckInstructions is set while the worker loop runs.
 	recheckInstructions func()
 	// sweeps marks the workers whose next pass is a safety sweep. An event
@@ -64,7 +67,7 @@ func newWorkerSignals(rooms *room.Store) *workerSignals {
 		"sessions": make(chan struct{}, 1), "merges": make(chan struct{}, 1),
 		"sync": make(chan struct{}, 1), "instructions": make(chan struct{}, 1),
 		"fetch": make(chan struct{}, 1), "probe": make(chan struct{}, 1),
-		"caches": make(chan struct{}, 1),
+		"caches": make(chan struct{}, 1), "hook-schedule": make(chan struct{}, 1),
 	}, sweeps: map[string]bool{}}
 }
 
@@ -153,11 +156,19 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 		}
 	case "room.resumed":
 		s.sessions.rooms[ev.RoomID] = true
+		// A resumed room's check-ins are due again, as a turn end's are: the
+		// hooks worker runs one pass, through the hook's own switch.
+		s.roomResumed = true
 	}
 	pending := len(s.sessions.targets) > 0 || len(s.sessions.rooms) > 0 || len(s.sessions.roots) > 0
+	// The hooks worker consumes the resume mark with takeRoomResumed.
+	resumed := s.roomResumed
 	s.mu.Unlock()
 	if pending {
 		wakeWorker(s.channels["sessions"])
+	}
+	if resumed {
+		wakeWorker(s.channels["hooks"])
 	}
 	if turnEnded {
 		wakeWorker(s.channels["hooks"])
@@ -241,6 +252,16 @@ func (s *workerSignals) sweep(worker string) {
 	wakeWorker(s.channels[worker])
 }
 
+// takeRoomResumed reports whether a paused room resumed since the hooks
+// worker last ran.
+func (s *workerSignals) takeRoomResumed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	resumed := s.roomResumed
+	s.roomResumed = false
+	return resumed
+}
+
 // takeSweep reports whether this pass of worker is a safety sweep with no
 // event since.
 func (s *workerSignals) takeSweep(worker string) bool {
@@ -293,9 +314,13 @@ type workers struct {
 	// the engine that owns the worker lock runs it, so a second engine on the
 	// same store cannot fail the first engine's live runs.
 	settle func(context.Context) error
+	// hookSchedule is the hook runner's own clock: it finishes install
+	// receipts, ticks each repository's schedule and the global built-ins once
+	// a minute. It runs under the worker lock with the other workers.
+	hookSchedule func(context.Context) (time.Time, error)
 }
 
-func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub, started time.Time) workers {
+func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) workers {
 	prs := watch.New()
 	prs.Notify = rooms.Notify
 	prs.GH.Rooms = rooms.Notify.Rooms
@@ -308,7 +333,8 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 		}
 	}
 	syncer := lanesync.New()
-	spool := hooks.New()
+	spool := hookService
+	var globalSchedule sync.Mutex
 	return workers{
 		prs: prs.Tick,
 		questions: func(ctx context.Context) (time.Time, error) {
@@ -332,11 +358,13 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 			// A turn end fires its event before the spool drains, so a job for
 			// it starts in this pass and not one interval later.
 			ids := signals.takeTurnEnds()
+			resumed := signals.takeRoomResumed()
 			turnEnds := fireTurnEnds(ctx, rooms.Notify.Sessions.Store, spool, ids)
-			// A turn end can make a check-in due at once, and the hook owns the
-			// schedule, so one pass runs here, through the same switch.
+			// A turn end or a resumed room can make a check-in due at once, and
+			// the hook owns the schedule, so one pass runs here, through the
+			// same switch.
 			var checkins error
-			if len(ids) > 0 {
+			if len(ids) > 0 || resumed {
 				_, _, checkins = RunParentCheckIns(ctx, rooms)
 			}
 			ran, next, err := spool.Drain(ctx, time.Now())
@@ -344,6 +372,31 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 				signals.found("hook spool", ran)
 			}
 			return next, errors.Join(turnEnds, checkins, err)
+		},
+		hookSchedule: func(ctx context.Context) (time.Time, error) {
+			errs := []error{hookService.ReconcileInstall(ctx)}
+			repos, err := hookService.Repositories(ctx)
+			if err != nil {
+				errs = append(errs, err)
+			}
+			for _, repo := range repos {
+				if ctx.Err() != nil {
+					return time.Time{}, errors.Join(errs...)
+				}
+				errs = append(errs, hookService.Tick(ctx, repo, time.Now()))
+			}
+			// A built-in pass can take minutes, so the global schedule runs on
+			// its own goroutine instead of holding this worker. The next tick
+			// claims nothing until the interval is due again.
+			if globalSchedule.TryLock() {
+				go func() {
+					defer globalSchedule.Unlock()
+					if err := hookService.TickGlobal(ctx, time.Now()); err != nil && ctx.Err() == nil {
+						log.Print(watch.Sanitize("global hooks: " + err.Error()))
+					}
+				}()
+			}
+			return time.Now().Add(time.Minute), errors.Join(errs...)
 		},
 		sessions: func(ctx context.Context) error { return deliverSessions(ctx, rooms.Notify.Sessions, signals) },
 		merges:   prs.MergeTick,
@@ -478,6 +531,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	timed("Machine probe", signals.channels["probe"], timerProbe, w.probe)
 	start("Dormant session sweep", sweep, w.sweep)
 	timed("Hook spool", signals.channels["hooks"], timerHooks, w.hooks)
+	timed("Hook schedule", signals.channels["hook-schedule"], timerHookSchedule, w.hookSchedule)
 	start("Session delivery", signals.channels["sessions"], w.sessions)
 	// Its own key, so it never moves a note that is due sooner.
 	// TODO: legacy/shim remove later — the recheck for quiet periods that a CLI writes directly; remove with the recheck in workerSignals.wake when item 2 moves those writes into the engine.
@@ -502,7 +556,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	daily = func() { wakeWorker(sweep); t.at(timerSweep, t.now().Add(sweepEvery), daily) }
 	// Catch writes made while the engine was down.
 	signals.recoverSessions()
-	wake("instructions", "fetch", "questions", "hooks", "prs", "merges", "sync", "probe", "caches")
+	wake("instructions", "fetch", "questions", "hooks", "hook-schedule", "prs", "merges", "sync", "probe", "caches")
 	wakeWorker(sweep)
 	t.at(timerSafetySweep, t.now().Add(safetySweepEvery), safety)
 	t.at(timerSweep, t.now().Add(sweepEvery), daily)
@@ -545,11 +599,11 @@ func settleFromStart(ctx context.Context, started time.Time) error {
 // the workers pass.
 var settleHookRuns = settleFromStart
 
-func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, load *sysload.Sampler, events *hub.Hub, started time.Time) {
+func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) {
 	report := func(name string, err error) {
 		log.Print(watch.Sanitize(name + ": " + err.Error()))
 	}
-	owned, err := runOwned(ctx, store.DataDir(), engineWorkers(rooms, signals, load, events, started), signals, t, report)
+	owned, err := runOwned(ctx, store.DataDir(), engineWorkers(rooms, signals, load, events, hookService, started), signals, t, report)
 	if err != nil {
 		log.Print(watch.Sanitize("workers: " + err.Error()))
 		return

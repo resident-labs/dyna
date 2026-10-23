@@ -31,7 +31,8 @@ func testWorkers(tick func(string) func(context.Context) error) workers {
 		func(ctx context.Context) (time.Time, error) { return time.Time{}, fetch(ctx) },
 		func(ctx context.Context) (time.Time, error) { return time.Time{}, questions(ctx) },
 		func(ctx context.Context) (time.Time, error) { return time.Time{}, hooks(ctx) },
-		timed("prs"), timed("merges"), timed("sync"), timed("probe"), timed("caches"), nil}
+		timed("prs"), timed("merges"), timed("sync"), timed("probe"), timed("caches"), nil,
+		timed("hook-schedule")}
 }
 
 func TestWorkerFixtureDefaultsForMissingCallbacks(t *testing.T) {
