@@ -4,12 +4,13 @@ import { readFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { build } from 'esbuild'
+import { stripTypes } from '../../../test/svelte-source.ts'
 import { parse } from 'svelte/compiler'
 import { domNames, importBundle, installDom } from '../prs/prDetailHarness.ts'
 import { compileSvelte, svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 
 const app = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const handlers = parse(app).instance.content.body.filter((n) => n.type === 'FunctionDeclaration' && n.id.name === 'sendToSession').map((n) => app.slice(n.start, n.end)).join('\n')
+const handlers = parse(app).instance.content.body.filter((n) => n.type === 'FunctionDeclaration' && n.id.name === 'sendToSession').map((n) => stripTypes(app.slice(n.start, n.end))).join('\n')
 const callback = app.match(/<Feed[^\n]*onforward=\{([^}]+)\}/)?.[1]
 
 // Bundle outside the test clock: only the mounted flow is measured.

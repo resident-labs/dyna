@@ -183,3 +183,13 @@ test('merge refresh version follows room PR and change events only', () => {
   assert.equal(c.mergeVersion, 2)
   close()
 })
+
+test('a jobs metadata event reloads jobs only for the open room', () => {
+  const { c, calls, close } = app('jobs')
+  c.workflowData = { loadJobs: () => calls.push('jobs') }
+  c.handle({ kind: 'jobs', roomId: 'other' })
+  assert.deepEqual(calls, [])
+  c.handle({ kind: 'jobs', roomId: 'a' })
+  assert.deepEqual(calls, ['members', 'jobs'])
+  close()
+})
