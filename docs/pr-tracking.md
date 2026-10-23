@@ -5,7 +5,8 @@ Dyna links a GitHub pull request to its author session. A host process uses
 Sign in with `gh auth login` first.
 Tracking is explicit because a shared branch does not identify which agent
 opened a PR. The engine merges approved PRs with passing CI through batch
-trials (see `dyna guide git`); agents never run merge commands.
+trials (see `dyna guide git`). Root can also publish a failed trial after naming
+every failing test as flaky. Authors never run merge commands.
 
 ## Goal links and expedited goals
 
