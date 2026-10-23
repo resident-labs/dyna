@@ -53,7 +53,7 @@ function rows(v: unknown, list: boolean): Row[] {
 // number is absent on an engine older than the D-N change. In Go it does not
 // exist at all, so it is optional here.
 function isRoomIssue(v: unknown): v is { id: string; number?: number; title: string; state: string } {
-  return isRecord(v) && isString(v.id) && (v.number === undefined || typeof v.number === 'number') && isString(v.title) && isString(v.state)
+  return isRecord(v) && isString(v.id) && (v.number === undefined || (typeof v.number === 'number' && Number.isInteger(v.number) && v.number > 0)) && isString(v.title) && isString(v.state)
 }
 
 // issueRows reads the room's issues, whose number is shown as D-12.

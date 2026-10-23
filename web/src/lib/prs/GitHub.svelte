@@ -522,7 +522,6 @@
   .item :global(.row) { flex: 1; min-width: 0; }
   .item.stack { flex-wrap: wrap; padding-bottom: var(--s2); }
   .item.stack :global(.row) { flex-basis: 100%; }
-  @media (max-width: 760px) { .item { flex-wrap: wrap; padding-bottom: var(--s2); } .item :global(.row) { flex-basis: 100%; } }
   .rows :global(.row) { border-bottom: 1px solid var(--line-soft); border-radius: 0; padding: var(--s4) 0; }
   .row-title { font-size: var(--t-body); font-weight: 600; overflow-wrap: anywhere; }
   .row-author { margin-top: var(--s1); color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
