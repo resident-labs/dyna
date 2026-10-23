@@ -19,12 +19,15 @@ import (
 )
 
 func TestRunChecksReportsAndSavesResult(t *testing.T) {
-	for _, tc := range []struct{ name, xml, want string }{
-		{"pass", `<testsuite><testcase name="fast" time="0.1"/></testsuite>`, "passed"},
-		{"slow", `<testsuite><testcase name="slow" time="11"/></testsuite>`, "failed"},
-		{"failure", `<testsuite><testcase name="broken"><failure message="bad"/></testcase></testsuite>`, "failed"},
-		{"missing", "", "error"},
-		{"malformed", "<broken>", "error"},
+	for _, tc := range []struct {
+		name, xml string
+		want      Outcome
+	}{
+		{"pass", `<testsuite><testcase name="fast" time="0.1"/></testsuite>`, OutcomePassed},
+		{"slow", `<testsuite><testcase name="slow" time="11"/></testsuite>`, OutcomeFailed},
+		{"failure", `<testsuite><testcase name="broken"><failure message="bad"/></testcase></testsuite>`, OutcomeFailed},
+		{"missing", "", OutcomeError},
+		{"malformed", "<broken>", OutcomeError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var mu sync.Mutex

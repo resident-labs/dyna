@@ -11,34 +11,77 @@ import (
 	"dyna-agent/internal/localci"
 )
 
-type registeredCIObservation struct {
-	Status, Key, Logs string
-	Reason            string
-	BudgetNote        string
-	Jobs              []string
-	Runs              []Run
-	Checks            []CheckSummary
+// CIVerdict is the merge gate's reading of a commit's CI: it proves the commit,
+// fails it, or has not finished. It is a different vocabulary from a localci
+// Outcome, which also reports an infrastructure error that the gate treats as a
+// wait. Its values reach stored records and room posts, so their spelling must
+// not change.
+type CIVerdict string
+
+const (
+	VerdictPending CIVerdict = "pending"
+	VerdictPassed  CIVerdict = "passed"
+	VerdictFailed  CIVerdict = "failed"
+	// VerdictAbsent reports a commit with no CI to read.
+	VerdictAbsent CIVerdict = "absent"
+)
+
+// Conclusive reports a verdict that decides the commit. Only a pass and a
+// failure do; a wait never gates a merge.
+func (v CIVerdict) Conclusive() bool { return v == VerdictPassed || v == VerdictFailed }
+
+// verdictFromOutcome is the one place where a runner outcome becomes a gate
+// verdict. An infrastructure error waits: the run is retried or hosted CI
+// decides instead.
+func verdictFromOutcome(outcome localci.Outcome) CIVerdict {
+	switch outcome {
+	case localci.OutcomePassed:
+		return VerdictPassed
+	case localci.OutcomeFailed:
+		return VerdictFailed
+	}
+	return VerdictPending
 }
 
-func conclusiveCI(status string) bool { return status == "passed" || status == "failed" }
+// verdictFromHosted is the one place where a hosted reading (a state from
+// Snapshot.CIStatus) becomes a gate verdict.
+func verdictFromHosted(state string) CIVerdict {
+	v := CIVerdict(state)
+	switch v {
+	case VerdictPassed, VerdictFailed, VerdictAbsent:
+		return v
+	}
+	return VerdictPending
+}
+
+type registeredCIObservation struct {
+	Status     CIVerdict
+	Key, Logs  string
+	Reason     string
+	BudgetNote string
+	Jobs       []string
+	Runs       []Run
+	Checks     []CheckSummary
+}
+
 func registeredResultComplete(result localci.Result) bool {
-	return result.Node != "" && (result.Status == "error" || len(result.Checks) > 0 && conclusiveCI(result.Status))
+	return result.Node != "" && (result.Status == localci.OutcomeError || len(result.Checks) > 0 && result.Status.Decided())
 }
 func localInfrastructureError(result localci.Result) bool {
-	if result.Status == "error" {
+	if result.Status == localci.OutcomeError {
 		return true
 	}
 	for _, check := range result.Checks {
-		if check.Status == "error" {
+		if check.Status == localci.OutcomeError {
 			return true
 		}
 	}
 	return false
 }
-func registeredResultStatus(result localci.Result) (string, []string, string) {
+func registeredResultStatus(result localci.Result) (CIVerdict, []string, string) {
 	var jobs, logs []string
 	for _, check := range result.Checks {
-		if check.Status != "failed" || !registeredTestFailure(result, check) {
+		if check.Status != localci.OutcomeFailed || !registeredTestFailure(result, check) {
 			continue
 		}
 		name := check.CheckName
@@ -49,17 +92,31 @@ func registeredResultStatus(result localci.Result) (string, []string, string) {
 		logs = append(logs, name+": "+check.Error+"\n"+check.LogTail+"\n"+strings.Join(check.Failures, "\n"))
 	}
 	if len(jobs) > 0 {
-		return "failed", jobs, strings.Join(logs, "\n")
+		return VerdictFailed, jobs, strings.Join(logs, "\n")
 	}
 	if !registeredResultComplete(result) || localInfrastructureError(result) {
-		return "pending", nil, ""
+		return VerdictPending, nil, ""
 	}
 	for _, check := range result.Checks {
-		if check.Status != "passed" {
-			return "pending", nil, ""
+		if check.Status != localci.OutcomePassed {
+			return VerdictPending, nil, ""
 		}
 	}
-	return result.Status, nil, ""
+	return verdictFromOutcome(result.Status), nil, ""
+}
+
+// checkSummaryState is the one conversion from a local CI outcome to the GitHub
+// check state, status and conclusion Dyna publishes.
+func checkSummaryState(outcome localci.Outcome) (state, status, conclusion string) {
+	switch outcome {
+	case localci.OutcomePassed:
+		return "success", "completed", "success"
+	case localci.OutcomeFailed:
+		return "failure", "completed", "failure"
+	case localci.OutcomeError:
+		return "skipped", "completed", "neutral"
+	}
+	return "pending", "in_progress", ""
 }
 func registeredCheckSummaries(result localci.Result) []CheckSummary {
 	var out []CheckSummary
@@ -68,15 +125,7 @@ func registeredCheckSummaries(result localci.Result) []CheckSummary {
 		if name == "" {
 			name = check.Suite
 		}
-		state, status, conclusion := "pending", "in_progress", ""
-		switch check.Status {
-		case "passed":
-			state, status, conclusion = "success", "completed", "success"
-		case "failed":
-			state, status, conclusion = "failure", "completed", "failure"
-		case "error":
-			state, status, conclusion = "skipped", "completed", "neutral"
-		}
+		state, status, conclusion := checkSummaryState(check.Status)
 		excerpt := failureExcerpt(check.Error+"\n"+strings.Join(check.Failures, "\n")+"\n"+check.LogTail, true)
 		if state != "failure" {
 			excerpt = ""
@@ -87,14 +136,14 @@ func registeredCheckSummaries(result localci.Result) []CheckSummary {
 }
 
 func registeredTestFailure(result localci.Result, check localci.SuiteResult) bool {
-	if check.Status != "failed" {
+	if check.Status != localci.OutcomeFailed {
 		return false
 	}
 	if check.CheckName != "go-test" || !localInfrastructureError(result) {
 		return true
 	}
 	for _, other := range result.Checks {
-		if other.CheckName != "go-test" && other.Status == "failed" {
+		if other.CheckName != "go-test" && other.Status == localci.OutcomeFailed {
 			return true
 		}
 	}
@@ -116,10 +165,10 @@ func applyLocalBudgets(result *localci.Result, policy ChangePolicy) string {
 		check := &result.Checks[i]
 		if check.Duration > warn && policy.CIBudgetApplies("CI") {
 			notes = append(notes, fmt.Sprintf("%s ran for %s", check.CheckName, check.Duration))
-			if policy.EnforceCITimeBudget() && check.Status == "passed" && check.Duration > fail {
-				check.Status = "failed"
+			if policy.EnforceCITimeBudget() && check.Status == localci.OutcomePassed && check.Duration > fail {
+				check.Status = localci.OutcomeFailed
 				check.Error = fmt.Sprintf("over CI time budget (%s > %s)", check.Duration, fail)
-				result.Status = "failed"
+				result.Status = localci.OutcomeFailed
 			}
 		}
 		for _, test := range check.SlowTests {
@@ -127,23 +176,23 @@ func applyLocalBudgets(result *localci.Result, policy ChangePolicy) string {
 				continue
 			}
 			notes = append(notes, fmt.Sprintf("%s ran for %s; the test limit is %s", test.Name, test.Duration, maxTest))
-			if policy.EnforceCITimeBudget() && check.Status == "passed" {
-				check.Status = "failed"
+			if policy.EnforceCITimeBudget() && check.Status == localci.OutcomePassed {
+				check.Status = localci.OutcomeFailed
 				check.Error = "tests over " + maxTest.String()
-				result.Status = "failed"
+				result.Status = localci.OutcomeFailed
 			}
 		}
 	}
 	goFailed := false
 	for _, check := range result.Checks {
-		if check.Status == "failed" && (check.CheckName == "frontend" || check.CheckName == "frontend-check" || check.CheckName == "go-static" || strings.HasPrefix(check.CheckName, "go-test-shard (")) {
+		if check.Status == localci.OutcomeFailed && (check.CheckName == "frontend" || check.CheckName == "frontend-check" || check.CheckName == "go-static" || strings.HasPrefix(check.CheckName, "go-test-shard (")) {
 			goFailed = true
 		}
 	}
 	if goFailed {
 		for i := range result.Checks {
-			if result.Checks[i].CheckName == "go-test" && result.Checks[i].Status == "passed" {
-				result.Checks[i].Status = "failed"
+			if result.Checks[i].CheckName == "go-test" && result.Checks[i].Status == localci.OutcomePassed {
+				result.Checks[i].Status = localci.OutcomeFailed
 				result.Checks[i].Error = "a required local CI check failed"
 			}
 		}
@@ -214,7 +263,7 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 			return snap, err
 		}
 		ci, key, jobs, runs := snap.CIStatus(policy.RequiredChecks...)
-		snap.localCI = &registeredCIObservation{Status: ci, Key: key, Jobs: jobs, Runs: runs, Reason: hostedFallbackReason(snap)}
+		snap.localCI = &registeredCIObservation{Status: verdictFromHosted(ci), Key: key, Jobs: jobs, Runs: runs, Reason: hostedFallbackReason(snap)}
 		return snap, nil
 	}
 	result, err := registry.LoadResult(ctx, repo, r.Head)
@@ -237,18 +286,18 @@ func (s *Service) registeredLocalObservation(ctx context.Context, r Record, snap
 	hostedState, hostedKey, hostedJobs, hostedRuns := s.registeredHostedStatus(snap, r, policy)
 	budgetNote := applyLocalBudgets(&result, policy)
 	localState, localJobs, logs := registeredResultStatus(result)
-	if result.Status == "passed" && !s.registeredJobResultComplete(ctx, job, result) {
-		localState = "pending"
+	if result.Status == localci.OutcomePassed && !s.registeredJobResultComplete(ctx, job, result) {
+		localState = VerdictPending
 	}
 	// A hosted failure that only cancellations caused never tested the head, so
 	// it can neither fail nor pass it: the head waits for the local result, which
 	// decides once it is complete. Failing here would freeze the batch before the
 	// local CI that is still queued or running gets to finish.
-	if hostedState == "failed" && hostedCancelledOnly(snap, policy.RequiredChecks) {
-		hostedState, hostedKey, hostedJobs, hostedRuns = "pending", "cancelled-only:"+r.Head, nil, nil
+	if hostedState == VerdictFailed && hostedCancelledOnly(snap, policy.RequiredChecks) {
+		hostedState, hostedKey, hostedJobs, hostedRuns = VerdictPending, "cancelled-only:"+r.Head, nil, nil
 	}
 	observation := chooseRegisteredCI(r.Head, hostedState, hostedKey, hostedJobs, hostedRuns, localState, localJobs, logs)
-	if observation.Status == "pending" {
+	if observation.Status == VerdictPending {
 		observation.Reason = "waiting for local CI"
 		if localInfrastructureError(result) {
 			observation.Reason = hostedFallbackReason(snap)
@@ -261,10 +310,10 @@ func (s *Service) registeredLocalObservation(ctx context.Context, r Record, snap
 			runs.Unlock()
 		}
 	}
-	if observation.Status == "passed" {
+	if observation.Status == VerdictPassed {
 		missing := missingRequiredCIChecks(policy.RequiredChecks, result, snap)
 		if len(missing) > 0 {
-			observation.Status = "pending"
+			observation.Status = VerdictPending
 			observation.Key = "required:" + r.Head + ":" + digest(strings.Join(missing, "\n"))
 			observation.Jobs = missing
 			observation.Reason = "waiting for required CI checks: " + strings.Join(missing, ", ")
@@ -282,10 +331,10 @@ func (s *Service) savedLocalSettles(ctx context.Context, job registeredCIJob, re
 	budgeted := result
 	applyLocalBudgets(&budgeted, policy)
 	state, _, _ := registeredResultStatus(budgeted)
-	if !conclusiveCI(state) {
+	if !state.Conclusive() {
 		return false
 	}
-	return state != "passed" || s.registeredJobResultComplete(ctx, job, budgeted)
+	return state != VerdictPassed || s.registeredJobResultComplete(ctx, job, budgeted)
 }
 
 func (s *Service) mergeLocalCIChecks(ctx context.Context, st State, roomID string, out *MergeControlStatus) error {
@@ -327,19 +376,19 @@ func (s *Service) mergeLocalCIChecks(ctx context.Context, st State, roomID strin
 }
 
 // Either provider can finish first. A failed current attempt vetoes a pass.
-func chooseRegisteredCI(head, hostedState, hostedKey string, hostedJobs []string, hostedRuns []Run, localState string, localJobs []string, logs string) *registeredCIObservation {
-	o := &registeredCIObservation{Status: "pending", Key: "race-wait:" + head}
+func chooseRegisteredCI(head string, hostedState CIVerdict, hostedKey string, hostedJobs []string, hostedRuns []Run, localState CIVerdict, localJobs []string, logs string) *registeredCIObservation {
+	o := &registeredCIObservation{Status: VerdictPending, Key: "race-wait:" + head}
 	switch {
-	case localState == "failed":
-		o.Status, o.Jobs, o.Logs = "failed", localJobs, logs
+	case localState == VerdictFailed:
+		o.Status, o.Jobs, o.Logs = VerdictFailed, localJobs, logs
 		o.Key = "local-failed:" + head
-	case hostedState == "failed":
-		o.Status, o.Jobs, o.Runs = "failed", hostedJobs, hostedRuns
+	case hostedState == VerdictFailed:
+		o.Status, o.Jobs, o.Runs = VerdictFailed, hostedJobs, hostedRuns
 		o.Key = hostedKey
-	case localState == "passed":
-		o.Status, o.Key = "passed", "local-passed:"+head
-	case hostedState == "passed":
-		o.Status, o.Key = "passed", hostedKey
+	case localState == VerdictPassed:
+		o.Status, o.Key = VerdictPassed, "local-passed:"+head
+	case hostedState == VerdictPassed:
+		o.Status, o.Key = VerdictPassed, hostedKey
 	}
 	return o
 }
@@ -365,12 +414,12 @@ func coversRegisteredChecks(result localci.Result, required []string) bool {
 	if !registeredResultComplete(result) {
 		return false
 	}
-	if result.Status != "passed" {
+	if result.Status != localci.OutcomePassed {
 		return true
 	}
 	seen := map[string]bool{}
 	for _, check := range result.Checks {
-		seen[check.CheckName] = check.Status == "passed"
+		seen[check.CheckName] = check.Status == localci.OutcomePassed
 	}
 	for _, name := range required {
 		if !seen[name] {
@@ -380,10 +429,10 @@ func coversRegisteredChecks(result localci.Result, required []string) bool {
 	return true
 }
 func (s *Service) registeredJobResultComplete(ctx context.Context, job registeredCIJob, result localci.Result) bool {
-	if result.Status == "error" && result.Node != "" {
+	if result.Status == localci.OutcomeError && result.Node != "" {
 		return true
 	}
-	if result.Status == "failed" && result.Node != "" {
+	if result.Status == localci.OutcomeFailed && result.Node != "" {
 		return true
 	}
 	var suites []string
@@ -403,7 +452,7 @@ func (s *Service) registeredJobResultComplete(ctx context.Context, job registere
 }
 
 // A finished failing check is conclusive even while another hosted job runs.
-func (s *Service) registeredHostedStatus(snap Snapshot, r Record, policy ChangePolicy) (status, key string, jobs []string, runs []Run) {
+func (s *Service) registeredHostedStatus(snap Snapshot, r Record, policy ChangePolicy) (status CIVerdict, key string, jobs []string, runs []Run) {
 	var hostedStatuses []Status
 	for _, v := range snap.Statuses {
 		if !localCommitStatus(v) {
@@ -411,19 +460,20 @@ func (s *Service) registeredHostedStatus(snap Snapshot, r Record, policy ChangeP
 		}
 	}
 	snap.Statuses = hostedStatuses
-	status, key, jobs, runs = s.ciStatus(snap, r, policy)
-	if status != "pending" {
+	hosted, key, jobs, runs := s.ciStatus(snap, r, policy)
+	status = verdictFromHosted(hosted)
+	if status != VerdictPending {
 		return
 	}
 	for _, check := range snap.currentChecks() {
 		if ciCheck(check, policy.RequiredChecks) && checkState(check.Status, check.Conclusion) == "failure" {
-			status = "failed"
+			status = VerdictFailed
 			return
 		}
 	}
 	for _, run := range currentRuns(snap.Runs) {
 		if run.Status == "completed" && run.Conclusion != "" && run.Conclusion != "cancelled" && !success(run.Conclusion) {
-			status = "failed"
+			status = VerdictFailed
 			return
 		}
 	}
@@ -435,7 +485,7 @@ func (s *Service) registeredHostedStatus(snap Snapshot, r Record, policy ChangeP
 	}
 	for _, v := range latest {
 		if !localCommitStatus(v) && requiredCheck(v.Context, policy.RequiredChecks) && (v.State == "failure" || v.State == "error") {
-			status = "failed"
+			status = VerdictFailed
 			return
 		}
 	}
@@ -452,7 +502,7 @@ func missingRequiredCIChecks(required []string, result localci.Result, hosted Sn
 			if name == "" {
 				name = check.Suite
 			}
-			if check.Status == "passed" {
+			if check.Status == localci.OutcomePassed {
 				passed[name] = true
 			}
 		}

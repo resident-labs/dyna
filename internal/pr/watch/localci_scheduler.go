@@ -456,7 +456,7 @@ func (s *Service) recoverInterruptedCI(ctx context.Context, job registeredCIJob,
 func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob, repo string) (bool, error) {
 	r := job.record
 	if !job.trial {
-		return headVerified(r) && job.head == r.Head && r.Polling.PullHead == r.Head && conclusiveCI(r.CI), nil
+		return headVerified(r) && job.head == r.Head && r.Polling.PullHead == r.Head && verdictFromHosted(r.CI).Conclusive(), nil
 	}
 	var snap Snapshot
 	if err := s.github(r.RoomID).readCommitCI(ctx, refRecord(r), job.head, &snap); err != nil {
@@ -486,5 +486,5 @@ func (s *Service) scheduledCIConclusive(ctx context.Context, job registeredCIJob
 		return false, nil
 	}
 	ci, _, _, _ := s.registeredHostedStatus(snap, Record{}, ChangePolicy{})
-	return conclusiveCI(ci), nil
+	return ci.Conclusive(), nil
 }
