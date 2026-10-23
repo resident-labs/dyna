@@ -36,6 +36,8 @@ import (
 // turns in this process.
 func service(t *testing.T) *notify.Service {
 	t.Helper()
+	// Session scratch must be removed with the fixture after its runners stop.
+	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	ctx, cancel := context.WithCancel(context.Background())
