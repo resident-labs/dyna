@@ -83,7 +83,7 @@ func TestListMetaSkipsUnassignedLegacyHistory(t *testing.T) {
 		if err != nil || saved.Prompt != turn.Prompt {
 			t.Fatalf("history lost: %+v, %v", saved, err)
 		}
-		after, err := os.ReadFile(recordtest.Path(t, s.Root, id))
+		after, err := storedRawForTest(t, s.Root, id)
 		if err != nil || !bytes.Equal(raw, after) {
 			t.Fatalf("legacy record rewritten: %s, %v", after, err)
 		}
