@@ -30,41 +30,67 @@ func fixture(t *testing.T) Store {
 
 func TestMigrateImportsLocalCINodes(t *testing.T) {
 	ctx := context.Background()
+
+	// An enabled local node carries its CI slots into the local row, and every
+	// SSH node becomes its own machine.
+	t.Run("enabled local node", func(t *testing.T) {
+		s := seed(t, `
+INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES
+ ('hermes','pip@hermeslab',2,1),
+ ('local','',3,1);`)
+		list, err := s.List(ctx)
+		if err != nil || len(list) != 2 {
+			t.Fatalf("machines = %#v, %v", list, err)
+		}
+		local := list[0]
+		if !local.Local || !local.HasRole(RoleEngine) || !local.HasRole(RoleAgents) || !local.HasRole(RoleCI) {
+			t.Fatalf("local machine = %#v", local)
+		}
+		if local.SSH != "" || local.CISlots != 3 || !local.Enabled {
+			t.Fatalf("local machine did not take the old local node: %#v", local)
+		}
+		want := Machine{Name: "hermes", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true}
+		if got := list[1]; !sameMachine(got, want) {
+			t.Fatalf("imported machine = %#v, want %#v", got, want)
+		}
+	})
+
+	// A disabled local node stays off: it gives the local row no ci role and no
+	// slots, so the upgrade starts no CI the owner turned off.
+	t.Run("disabled local node", func(t *testing.T) {
+		s := seed(t, `
+INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES ('local','',3,0);`)
+		local, err := s.GetLocal(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if local.HasRole(RoleCI) || local.CISlots != 0 {
+			t.Fatalf("disabled local node became CI work: %#v", local)
+		}
+	})
+}
+
+// seed builds a data folder that still holds the old node table, then migrates
+// it the way an engine start does.
+func seed(t *testing.T, rows string) Store {
+	t.Helper()
 	dir := storetest.DataDir(t)
 	db, err := database.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { database.Close(dir) })
-	if _, err := db.Exec(oldNodesSchema + `
-INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES
- ('hermes','pip@hermeslab',2,1),
- ('Here ','',3,0);`); err != nil {
+	if _, err := db.Exec(oldNodesSchema + rows); err != nil {
 		t.Fatal(err)
 	}
-	s := Store{DataDir: dir}
 	if err := Migrate(dir); err != nil {
 		t.Fatal(err)
 	}
-	list, err := s.List(ctx)
-	if err != nil || len(list) != 2 {
-		t.Fatalf("machines = %#v, %v", list, err)
-	}
-	local := list[0]
-	if !local.Local || !local.HasRole(RoleEngine) || !local.HasRole(RoleAgents) || !local.HasRole(RoleCI) {
-		t.Fatalf("local machine = %#v", local)
-	}
-	if local.SSH != "" || local.CISlots != 3 || !local.Enabled {
-		t.Fatalf("local machine did not take the old local node: %#v", local)
-	}
-	want := Machine{Name: "hermes", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true}
-	if got := list[1]; !sameMachine(got, want) {
-		t.Fatalf("imported machine = %#v, want %#v", got, want)
-	}
-	present, err := database.HasTable(ctx, connOf(t, db), "local_ci_nodes")
+	present, err := database.HasTable(context.Background(), connOf(t, db), "local_ci_nodes")
 	if err != nil || present {
 		t.Fatalf("local_ci_nodes remains: %v, %v", present, err)
 	}
+	return Store{DataDir: dir}
 }
 
 // connOf takes a connection for a table check.
@@ -133,6 +159,9 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	stored, err := s.Get(ctx, "hermeslab")
 	if err != nil || stored.Enabled || stored.CISlots != 2 {
 		t.Fatalf("stored machine = %#v, %v", stored, err)
+	}
+	if _, err := s.Save(ctx, Machine{Name: "hermeslab", Roles: []Role{RoleCI}, SSH: "host", CISlots: 1}); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("a new machine took a stored name: %v", err)
 	}
 	if err := s.RemoveRole(ctx, "hermeslab", RoleCI); err != nil {
 		t.Fatal(err)
