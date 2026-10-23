@@ -21,13 +21,12 @@
 <p id="rp-exempt-help" class="hint">Enter one exact GitHub workflow name per line. These workflows skip the run time budget. The per-test limit still applies. Leave blank to exempt no workflows.</p>
 <label for="rp-ci-allow">Slow-test allowlist</label>
 <textarea id="rp-ci-allow" rows="3" bind:value={form.ciTestAllow} disabled={busy} aria-describedby="rp-allow-help"></textarea>
-<p id="rp-allow-help" class="hint">Enter one exact test name per line. Dyna does not match patterns.</p>
+<p id="rp-allow-help" class="hint">Enter one exact test ID per line, such as package/TestName. For reports without a package, use the literal test name. Dyna does not match patterns.</p>
 {#each parseTestAllow(form.ciTestAllow) as id, index}
   <div class="allow-note">
     <label for="rp-ci-note-{index}"><code>{id}</code>: measured time and reason</label>
     <input id="rp-ci-note-{index}" type="text" bind:value={form.ciTestAllowNotes[id]} disabled={busy} placeholder="12 seconds: external service setup" />
     {#if !form.ciTestAllowNotes[id]?.trim()}<p class="hint">This allowance has no measured time or reason. Add a note for each new allowance.</p>{/if}
-    {#if !id.includes('/')}<p class="hint warning">This name has no package path. It allows this test name in every package. Use package/name to limit it.</p>{/if}
   </div>
 {/each}
 <label for="rp-ci-junit">No-JUnit warning</label>
