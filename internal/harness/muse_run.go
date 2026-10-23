@@ -91,7 +91,9 @@ func runMuseTurn(ctx context.Context, p profile.Profile, cwd string, spec comman
 	if spec.museReasoning != "" {
 		params["reasoningEffort"] = spec.museReasoning
 	}
+	var startBoundary *int64
 	send := func() error {
+		startBoundary = normalizedBoundary(normalizer)
 		var reply struct {
 			TurnID string `json:"turnId"`
 		}
@@ -121,7 +123,7 @@ func runMuseTurn(ctx context.Context, p profile.Profile, cwd string, spec comman
 		}
 		if steering.opts.OnMessage != nil {
 			for _, message := range spec.steering {
-				steering.opts.OnMessage(message)
+				steering.opts.OnMessage(message, startBoundary)
 			}
 		}
 	}
@@ -187,7 +189,11 @@ func runMuseTurn(ctx context.Context, p profile.Profile, cwd string, spec comman
 					steering.pending = append(messages, steering.pending...)
 					return err
 				}
-				send := func() error { return steer(steeringPrompt(messages)) }
+				var sourceOffset *int64
+				send := func() error {
+					sourceOffset = normalizedBoundary(normalizer)
+					return steer(steeringPrompt(messages))
+				}
 				var err error
 				if steering.opts.DeliveryGate != nil {
 					err = steering.opts.DeliveryGate(send)
@@ -208,7 +214,7 @@ func runMuseTurn(ctx context.Context, p profile.Profile, cwd string, spec comman
 				}
 				if steering.opts.OnMessage != nil {
 					for _, message := range messages {
-						steering.opts.OnMessage(message)
+						steering.opts.OnMessage(message, sourceOffset)
 					}
 				}
 				streamSteered = true
