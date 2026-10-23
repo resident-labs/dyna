@@ -29,8 +29,9 @@ const built = await build({
   stdin: {
     contents: `export { default as WorktreeCard } from './WorktreeCard.svelte';
       export { default as HookCard } from './HookCard.svelte';
+      export { default as PRCard } from '../prs/PRCard.svelte';
       export { eventRenderers, eventComponents, eventKey, rendererFor, sealedEvent } from './eventRenderers.ts';
-      export { hookEvent, worktreeEvent } from './eventPayloads.ts';
+      export { hookEvent, prEvent, worktreeEvent } from './eventPayloads.ts';
       export { eventSpecs } from './events.gen.ts';
       export { mount, unmount, flushSync } from 'svelte';`,
     resolveDir: rooms,
@@ -63,12 +64,34 @@ const fixtures: Record<string, EventPayload> = {
     event: 'main-updated', label: 'Update Dyna', command: 'dyna', state: 'failed', durationMs: 4000,
     detail: 'exit 1',
   },
+  ...Object.fromEntries(
+    (['opened', 'ready', 'approved', 'changes', 'ci-failed', 'ci-paused', 'ci-passed', 'returned', 'merged', 'closed', 'comment', 'held-comment', 'review-assigned', 'update'] as const).map((type) => [
+      `pr/${type}`,
+      {
+        type,
+        label: 'PR #542',
+        number: 542,
+        changeId: 'github.com/acme/app#542',
+        repo: 'acme/app',
+        title: 'Fix the parser',
+        head: 'a'.repeat(40),
+        url: 'https://github.com/acme/app/pull/542',
+        ciAttempt: type === 'ci-failed' ? 2 : undefined,
+        ciMax: type === 'ci-failed' ? 3 : undefined,
+        summary: 'unit, build',
+        commenter: 'octocat',
+        commentId: 'c1',
+        verdict: 'approve',
+        detail: `The body of the ${type} event.`,
+      },
+    ]),
+  ),
 }
 
-function postFor(family: string, type: string, payload: EventPayload): Message {
+function postFor(family: string, type: string, payload: EventPayload, text = ''): Message {
   return {
     id: 'msg_0123456789abcdef', ts: 1, roomId: 'room_1', from: 'dyna', to: ['room_1:owner'], wake: false,
-    kind: family, notice: { kind: type, number: 0, head: '', changeId: '' }, payload, text: '',
+    kind: family, notice: { kind: type }, payload, text,
   }
 }
 
@@ -109,6 +132,7 @@ test('every registered event has a renderer and renders on feed and DM', () => {
 // nothing meaningful fails.
 function fixtureTip(payload: EventPayload): string {
   if ('hook' in payload) return payload.label || payload.hook
+  if ('type' in payload) return payload.changeId ? `PR #${payload.number}` : payload.label
   return payload.detail || payload.reason
 }
 
