@@ -36,7 +36,7 @@ test('the attach picker accepts a typed number and sends a reference-only post',
     await settle()
     const option = element<HTMLButtonElement>(target, '[role="option"]')
     assert.match(option.textContent ?? '', /PR #123.*Fix composer focus/)
-    option.dispatchEvent(new dom.window.MouseEvent('mousedown', { bubbles: true }))
+    option.click()
     await settle()
     assert.equal(input.value, '')
     assert.match(element(target, '.references').textContent ?? '', /PR #123: Fix composer focus/)

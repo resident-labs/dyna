@@ -5,7 +5,7 @@
   // Chat: the recent thread grows upward. The rules live in chatState.js.
   import { tick, untrack, onMount, onDestroy } from 'svelte'
   import DmRows from '../sessions/DmRows.svelte'
-  import MessageInput from '../ui/MessageInput.svelte'
+  import ComposerBox from '../ui/ComposerBox.svelte'
   import { dmView } from '../sessions/dm.ts'
   import { showReasoning, showCompaction } from '../ui/prefs.ts'
   import { ago } from '../ui/format.ts'
@@ -141,7 +141,7 @@
         <span class="open">Open chat ↗</span>
       </button>
       <div class="input">
-        <MessageInput skin="glass" {attachments} bind:draft bind:field {placeholder} {busy} {canSend} bad={!!sendError} closed={!!m?.closed} oninput={() => { sendError = '' }} onkeydown={keydown} onsend={send} />
+        <ComposerBox model={m?.profile || m?.model || ''} mode="Direct message" skin="glass" {attachments} bind:draft bind:field {placeholder} {busy} {canSend} bad={!!sendError} closed={!!m?.closed} oninput={() => { sendError = '' }} onkeydown={keydown} onsend={send} />
       </div>
       {#if sendError}<p class="err" role="alert">{sendError}</p>{/if}
     </div>
@@ -157,7 +157,7 @@
         {#if !shown?.rows.length}<p class="empty">Nothing said yet.</p>{/if}
       </div>
       <div class="input">
-        <MessageInput skin="glass" {attachments} bind:draft bind:field {placeholder} {busy} {canSend} bad={!!sendError} closed={!!m?.closed} oninput={() => { sendError = '' }} onkeydown={keydown} onsend={send} />
+        <ComposerBox model={m?.profile || m?.model || ''} mode="Direct message" skin="glass" {attachments} bind:draft bind:field {placeholder} {busy} {canSend} bad={!!sendError} closed={!!m?.closed} oninput={() => { sendError = '' }} onkeydown={keydown} onsend={send} />
       </div>
       {#if sendError}<p class="err" role="alert">{sendError}</p>{/if}
     </div>
