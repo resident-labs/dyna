@@ -10,14 +10,16 @@ export interface ScopeChip {
   about: string
 }
 
-// SCOPES is every scope, in the order the pane lists them.
+// SCOPES is every scope, in the order the pane lists them. Each description
+// follows the contract in internal/websvc/bind.go, so it promises exactly what
+// the engine allows: read views, files only reads the workspace and git.
 export const SCOPES: readonly ScopeChip[] = [
-  { name: 'read', label: 'Read', about: 'See rooms, sessions and files.' },
-  { name: 'operate', label: 'Operate', about: 'Post, start turns and change goals.' },
-  { name: 'files', label: 'Files', about: 'Open and change workspace files.' },
-  { name: 'terminal', label: 'Terminal', about: 'Run shell commands on this computer.' },
-  { name: 'computers', label: 'Computers', about: 'See and drive the desktops and browsers.' },
-  { name: 'admin', label: 'Admin', about: 'Change settings, rules and devices.' },
+  { name: 'read', label: 'Read', about: 'See rooms, transcripts, goals, pull requests and runs.' },
+  { name: 'operate', label: 'Operate', about: 'Post, answer, stop work, and steer sessions and runs that exist.' },
+  { name: 'files', label: 'Files', about: 'Read workspace files, git contents and browse paths.' },
+  { name: 'terminal', label: 'Terminal', about: 'Open a shell on this computer and type into it.' },
+  { name: 'computers', label: 'Computers', about: 'List computers and control their screens.' },
+  { name: 'admin', label: 'Admin', about: 'Change settings, accounts, pairing and hooks, and start a workflow file.' },
 ]
 
 const NO_ACCESS: ScopeChip = { name: 'none', label: 'No access', about: 'The device can do nothing until you give it a scope.' }

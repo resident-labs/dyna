@@ -54,6 +54,9 @@
   let revoking = $state<Revoke | null>(null) // one row, asked inline: {key, kind, id, busy, error}
   let editing = $state<ScopeEdit | null>(null) // one row: {token, key, id, scopes, busy, error}
   let editToken = 0
+  // The row whose computer session is open, by kind + id. A browser device
+  // has no host, so its session stamp is the only identity it carries.
+  let openSession = $state('')
 
   const scopeNames = SCOPES.map((chip) => chip.name)
 
@@ -196,7 +199,17 @@
       <div class="item" transition:slide={{ duration: motion(BASE) }}>
         {@render glyph(kindOf(d))}
         <span class="main">
-          <span class="name" title={named.tooltip || undefined}>{named.title}{#if d.current}<span class="here">this device</span>{/if}<span class="seen">{seenLine(d)}</span></span>
+          <span class="name">
+            <span class="label" title={named.tooltip || undefined}>{named.title}</span>
+            {#if d.current}<span class="here">this device</span>{/if}
+            <span class="seen">{seenLine(d)}</span>
+            {#if named.stamp}
+              <button class="id" type="button" aria-expanded={openSession === d.kind + d.id} aria-label="Computer session {named.stamp}" onclick={() => (openSession = openSession === d.kind + d.id ? '' : d.kind + d.id)}>Session</button>
+            {/if}
+          </span>
+          {#if named.stamp && openSession === d.kind + d.id}
+            <span class="stamp">Computer session {named.stamp}</span>
+          {/if}
           <span class="chips">
             {#each scopeChips(d) as chip (chip.name)}
               <span class="chip" class:none={chip.name === 'none'} title={chip.about || undefined}>{chip.label}</span>
@@ -294,7 +307,13 @@
   .dev { width: 36px; height: 36px; border-radius: 9px; background: var(--raise); color: var(--muted); display: grid; place-items: center; flex: none; }
   .main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
   .name { font-weight: 600; font-size: var(--t-body); color: var(--ink); display: flex; align-items: center; flex-wrap: wrap; gap: 2px var(--s2); min-width: 0; }
+  .label { min-width: 0; overflow-wrap: anywhere; }
   .seen { font-size: var(--t-sm); font-weight: 400; color: var(--faint); white-space: nowrap; }
+  .id { flex: none; font-size: var(--t-sm); font-weight: 600; color: var(--muted); background: none; border: 0; border-radius: 6px; padding: 2px 6px; text-decoration: underline; text-underline-offset: 2px; transition: color var(--motion-fast) var(--ease); }
+  .stamp { font-family: var(--mono); font-size: var(--t-sm); color: var(--faint); overflow-wrap: anywhere; }
+  @media (hover: hover) {
+    .id:hover { color: var(--ink); }
+  }
   .here { font-size: var(--t-cap); font-weight: 600; color: var(--sage); background: rgba(151, 201, 149, 0.12); border-radius: 4px; padding: 0 6px; flex: none; }
   .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 2px 0; }
   .chip { font-size: var(--t-cap); font-weight: 600; color: var(--muted); background: var(--raise); border: 1px solid var(--line-soft); border-radius: 999px; padding: 1px 8px; }
@@ -312,6 +331,7 @@
   .err { color: var(--coral); }
   @media (max-width: 760px) {
     .btn { min-height: 44px; }
+    .id { min-height: 44px; }
     .item { flex-wrap: wrap; row-gap: var(--s2); }
     .main { flex: 1 1 200px; }
     .dev { align-self: flex-start; }
