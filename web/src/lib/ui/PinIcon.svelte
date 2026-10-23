@@ -1,7 +1,11 @@
-<script>
+<script lang="ts">
   // A thumbtack, drawn like the Reply icon: 1.8 stroke, round caps. A filled
   // one marks a pinned post.
-  let { size = 18, filled = false } = $props()
+  interface Props {
+    size?: number
+    filled?: boolean
+  }
+  let { size = 18, filled = false }: Props = $props()
 </script>
 
 <svg viewBox="0 0 20 20" width={size} height={size} aria-hidden="true">
