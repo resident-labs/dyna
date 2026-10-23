@@ -140,6 +140,10 @@ choose **Add to Home screen** or **Install app**. On iPhone, use Safari's
 **Share**, then **Add to Home Screen**. An iPhone home-screen app keeps its
 own storage, so you pair it once more.
 
+An older release also served a small Android call app from `<data dir>/android`
+(`dyna-call.apk` and `version.json`). Dyna no longer serves that app. The engine
+ignores those files as legacy state; delete the folder to get the space back.
+
 A small service worker (`public/sw.js`) shows push notifications and opens
 the right room on a tap. It has no fetch handler and caches nothing, so the
 app still needs the server to load. The bell in the sidebar turns
