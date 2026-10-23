@@ -28,7 +28,7 @@ func (r *commitRollup) pending() bool {
 			continue
 		}
 		switch run.State {
-		case "ACTION_REQUIRED", "CANCELLED", "FAILURE", "NEUTRAL", "SKIPPED", "STALE", "STARTUP_FAILURE", "SUCCESS", "TIMED_OUT":
+		case "ACTION_REQUIRED", "CANCELLED", "COMPLETED", "FAILURE", "NEUTRAL", "SKIPPED", "STALE", "STARTUP_FAILURE", "SUCCESS", "TIMED_OUT":
 		default:
 			return true
 		}

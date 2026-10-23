@@ -404,6 +404,7 @@ func TestDefaultVerificationWaitsForUnfinishedChecks(t *testing.T) {
 		{"replacement waiting", `"checkRunCountsByState":[{"state":"FAILURE","count":1},{"state":"WAITING","count":1}]`, "pending"},
 		{"status pending", `"statusContextCountsByState":[{"state":"FAILURE","count":1},{"state":"PENDING","count":1}]`, "pending"},
 		{"status expected", `"statusContextCountsByState":[{"state":"FAILURE","count":1},{"state":"EXPECTED","count":1}]`, "pending"},
+		{"completed", `"checkRunCountsByState":[{"state":"COMPLETED","count":2}]`, "failed"},
 		{"all final", `"checkRunCountsByState":[{"state":"FAILURE","count":1},{"state":"SUCCESS","count":1}]`, "failed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
