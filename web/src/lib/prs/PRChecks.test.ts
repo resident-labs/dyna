@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { compile } from 'svelte/compiler'
 import { build } from 'esbuild'
+import { call, runFunctions } from '../../../test/svelte-source.ts'
 import { need } from '../../../test/need.ts'
 
 // Render the real PRChecks on the server and read the text.
@@ -18,7 +19,7 @@ async function load() {
     format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
     plugins: [{ name: 'svelte-test', setup(builder) {
       builder.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({ contents: compile(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
-      builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: 'export const openExternal = () => { throw new Error("unexpected browser request") }', loader: 'js' }))
+      builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: 'export const copyText = async () => {}; export const openExternal = () => { throw new Error("unexpected browser request") }', loader: 'js' }))
     } }],
   })
   const file = join(dir, 'PRChecks.mjs')
@@ -57,4 +58,39 @@ test('paused room merging has a warning row even when PR checks passed', async (
   assert.match(html, /Merging paused in this room/)
   assert.match(html, /class="cdot gold/)
   assert.doesNotMatch(html, /class="cdot run/)
+})
+
+test('excerpt copy keeps exact text, catches rejection, and ignores superseded results', async () => {
+  const source = readFileSync(new URL('./PRChecks.svelte', import.meta.url), 'utf8')
+  const written: string[] = []
+  let reject = false
+  let pending = false
+  let release: (() => void) | undefined
+  const context: Record<string, unknown> = {
+    copyGeneration: 0, copyTimer: undefined, feedback: { check: null, text: '' },
+    clearTimeout() {}, setTimeout() { return 1 },
+    copyText: async (text: string) => {
+      if (reject) throw new Error('denied')
+      written.push(text)
+      if (pending) await new Promise<void>((resolve) => { release = resolve })
+    },
+  }
+  runFunctions(source, ['copyExcerpt'], context)
+  const check = { name: 'unit', failureExcerpt: 'FAIL\\n\\texpected ✓ <green>' }
+  await call(context, 'copyExcerpt', check)
+  assert.deepEqual(written, [check.failureExcerpt])
+  assert.equal((context.feedback as { check: unknown }).check, check)
+  assert.equal((context.feedback as { text: string }).text, 'Copied excerpt')
+  reject = true
+  await call(context, 'copyExcerpt', check)
+  assert.equal((context.feedback as { text: string }).text, 'Could not copy')
+  reject = false
+  pending = true
+  const running = call(context, 'copyExcerpt', check)
+  context.copyGeneration = Number(context.copyGeneration) + 1
+  context.feedback = { check: null, text: '' }
+  assert.ok(release)
+  release()
+  await running
+  assert.equal((context.feedback as { text: string }).text, '')
 })
