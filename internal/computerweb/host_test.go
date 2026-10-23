@@ -57,6 +57,19 @@ func TestComputersJoinsSessionsAndSortsRunningFirst(t *testing.T) {
 	}
 }
 
+func TestLiveCountsRunningComputersInEveryRoom(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	fake, h := daemon(t)
+	fake.Current.State = computers.StateRunning
+	if n, err := h.Live(t.Context()); err != nil || n != 1 {
+		t.Fatalf("Live = %d, %v; want the running computer", n, err)
+	}
+	fake.Current.State = computers.StateCreated
+	if n, err := h.Live(t.Context()); err != nil || n != 0 {
+		t.Fatalf("Live = %d, %v; want no running computer", n, err)
+	}
+}
+
 func TestComputersWithDaemonDown(t *testing.T) {
 	h := &Host{
 		Sessions: func(string) ([]Session, error) { return []Session{{"ses_a", "alpha"}}, nil },

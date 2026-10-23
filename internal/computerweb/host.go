@@ -224,6 +224,23 @@ func rank(state string) int {
 	return 3
 }
 
+// Live counts the computers that are running or starting, in every room. The
+// machine list shows this machine's figure. A daemon that does not answer
+// gives an error, so the caller shows no figure instead of zero.
+func (h *Host) Live(ctx context.Context) (int, error) {
+	list, err := h.client("").List(ctx, "")
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, st := range list {
+		if st.State == computers.StateRunning || st.State == computers.StateStarting {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // Computer is one session's status.
 func (h *Host) Computer(session string) (Info, error) {
 	if err := computers.ValidateID(session); err != nil {
