@@ -13,11 +13,10 @@ import (
 // launchers are the functions that start managed work. Each must use its
 // shared recording path before a caller can reach the engine.
 var launchers = map[string]struct{ function, recorder string }{
-	"internal/subagent/manager.go":         {"Spawn", "Start"},
-	"internal/subagent/launch_identity.go": {"startDetached", "Start"},
-	"internal/workflowsvc/launch.go":       {"Launch", "Start"},
-	"internal/shells/shells.go":            {"StartSupervisor", "Start"},
-	"internal/hooks/launch.go":             {"bindHook", "RecordHook"},
+	"internal/subagent/manager.go":   {"Spawn", "Start"},
+	"internal/workflowsvc/launch.go": {"Launch", "Start"},
+	"internal/shells/shells.go":      {"StartSupervisor", "Start"},
+	"internal/hooks/launch.go":       {"bindHook", "RecordHook"},
 }
 
 // Every launch path records its process through its shared protocol, and

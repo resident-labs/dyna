@@ -1,7 +1,6 @@
 package subagent
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -110,12 +109,6 @@ while waiting, before the old turn stops.`, Args: cobra.ExactArgs(1), RunE: func
 	handoff.Flags().StringVar(&branch, "branch", "", "task branch hint")
 	cmd.AddCommand(status, cancel, handoff)
 	return cmd
-}
-
-func transferRunnerCommand(newManager func() *subagent.Manager) *cobra.Command {
-	return &cobra.Command{Use: "_transfer <session> <token>", Hidden: true, Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, args []string) error {
-		return newManager().ProcessTransfer(context.Background(), args[0], args[1])
-	}}
 }
 
 // history gives the replacement a precise search/slice surface for old turns.
