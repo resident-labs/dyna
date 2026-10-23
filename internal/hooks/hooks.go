@@ -457,7 +457,7 @@ func postRoomEvent(e Event, ev room.HookEvent, create bool) error {
 // When even that record cannot be stored, the spool error itself is still on
 // its way to the caller, and this line names why no card followed it.
 func (s Service) spoolAlert(ctx context.Context, r repoid.Repo, e Event, h Hook, cause error) {
-	run, file, err := s.newRun(ctx, r.ID, h, e.Session)
+	run, file, err := s.newRun(ctx, r, e, h)
 	if err != nil {
 		log.Printf("hook spool alert for %s: cannot record the run: %v (spool error: %v)", h.Name, err, cause)
 		return
@@ -579,7 +579,7 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 		if cwd == "main" {
 			cwd = r.Main
 		}
-		ev, log, err := s.newRun(ctx, r.ID, h, e.Session)
+		ev, log, err := s.newRun(ctx, r, e, h)
 		if err != nil {
 			return Run{}, err
 		}
