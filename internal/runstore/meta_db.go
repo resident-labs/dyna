@@ -21,6 +21,7 @@ import (
 	"dyna-agent/internal/plan/ancestry"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
+	"dyna-agent/internal/workeroutput/projection"
 )
 
 // runsSchema holds each run's meta (rule r10). body is the meta's JSON.
@@ -46,8 +47,10 @@ CREATE INDEX runs_by_status ON runs(status);`
 // Migrate creates the runs table. Only the engine calls it, at start
 // (requirement 41). Retained metadata is imported before normal readers.
 func Migrate(dataDir string) error {
-	_, err := openRuns(dataDir)
-	return err
+	if _, err := openRuns(dataDir); err != nil {
+		return err
+	}
+	return projection.Migrate(dataDir)
 }
 
 // openRuns opens the runs table and the rollback helper's stamp table. Both
