@@ -2,7 +2,6 @@ package watch
 
 import (
 	"context"
-	"fmt"
 	"sort"
 )
 
@@ -190,20 +189,21 @@ func (s *Service) refreshRepositoryFacts(ctx context.Context, st State) ([]Recor
 	return selected, err
 }
 
-func defaultReason(p defaultBranchProbe, status string) string {
-	if p.NoPushCI {
-		return "no default-branch CI; using PR checks"
+// defaultWait names why the queue waits on the default branch, as facts. The
+// web words the kind and shortens MainCI.Head, so no sentence or full commit
+// reaches the screen from here.
+func defaultWait(p defaultBranchProbe, status string) *MainWait {
+	switch {
+	case p.NoPushCI:
+		return &MainWait{Kind: MainWaitNoPushCI}
+	case p.Name == "" || p.Head == "":
+		return &MainWait{Kind: MainWaitNoHead}
+	case status == "passed":
+		return &MainWait{Kind: MainWaitPassed, Base: p.Name}
+	case status == "failed":
+		return &MainWait{Kind: MainWaitFailed, Base: p.Name}
 	}
-	if p.Name == "" || p.Head == "" {
-		return "waiting for GitHub CI on the default branch"
-	}
-	if status == "passed" {
-		return fmt.Sprintf("GitHub CI passed on %s at %s", p.Name, p.Head)
-	}
-	if status == "failed" {
-		return fmt.Sprintf("GitHub CI failed on %s at %s", p.Name, p.Head)
-	}
-	return fmt.Sprintf("Waiting for completed GitHub CI on %s at %s", p.Name, p.Head)
+	return &MainWait{Kind: MainWaitPending, Base: p.Name}
 }
 
 func defaultQueueState(status string) string {
