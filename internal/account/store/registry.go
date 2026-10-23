@@ -346,35 +346,54 @@ func (s *Store) rowsChanged(ctx context.Context, db *sql.DB, next State) (bool, 
 	return false, nil
 }
 
+// writeRows changes only new, changed, moved, or removed account rows. The
+// caller holds accounts.lock, and unknown metadata remains in each saved row.
 func writeRows(ctx context.Context, conn *sql.Conn, st State) error {
-	prior := map[string][]byte{}
-	rows, err := conn.QueryContext(ctx, "SELECT id, metadata FROM accounts")
+	type storedRow struct {
+		ord      int
+		metadata []byte
+		schema   string
+	}
+	prior := map[string]storedRow{}
+	rows, err := conn.QueryContext(ctx, "SELECT id, ord, metadata, credential_schema FROM accounts")
 	if err != nil {
 		return err
 	}
 	for rows.Next() {
 		var id string
-		var raw []byte
-		if err := rows.Scan(&id, &raw); err != nil {
+		var row storedRow
+		if err := rows.Scan(&id, &row.ord, &row.metadata, &row.schema); err != nil {
 			rows.Close()
 			return err
 		}
-		prior[id] = raw
+		prior[id] = row
 	}
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
 		return err
 	}
-	if _, err := conn.ExecContext(ctx, "DELETE FROM accounts"); err != nil {
-		return err
-	}
 	for i, e := range st.Entries {
-		raw, err := mergeMetadata(e.Metadata, prior[e.ID])
+		row, exists := prior[e.ID]
+		raw, err := mergeMetadata(e.Metadata, row.metadata)
 		if err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES (?, ?, ?, ?)", e.ID, i, raw, e.Credential.Schema); err != nil {
+		delete(prior, e.ID)
+		if exists && row.ord == i && bytes.Equal(row.metadata, raw) && row.schema == e.Credential.Schema {
+			continue
+		}
+		if exists {
+			_, err = conn.ExecContext(ctx, "UPDATE accounts SET ord = ?, metadata = ?, credential_schema = ? WHERE id = ?", i, raw, e.Credential.Schema, e.ID)
+		} else {
+			_, err = conn.ExecContext(ctx, "INSERT INTO accounts(id, ord, metadata, credential_schema) VALUES (?, ?, ?, ?)", e.ID, i, raw, e.Credential.Schema)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	for id := range prior {
+		if _, err := conn.ExecContext(ctx, "DELETE FROM accounts WHERE id = ?", id); err != nil {
 			return err
 		}
 	}
@@ -387,7 +406,8 @@ func writeRows(ctx context.Context, conn *sql.Conn, st State) error {
 		version = 1
 	}
 	_, err = conn.ExecContext(ctx, `INSERT INTO accounts_registry(id, version, opencode_cleaned) VALUES (1, ?, ?)
-ON CONFLICT(id) DO UPDATE SET version = excluded.version, opencode_cleaned = excluded.opencode_cleaned`, version, cleaned)
+ON CONFLICT(id) DO UPDATE SET version = excluded.version, opencode_cleaned = excluded.opencode_cleaned
+WHERE accounts_registry.version != excluded.version OR accounts_registry.opencode_cleaned != excluded.opencode_cleaned`, version, cleaned)
 	return err
 }
 
