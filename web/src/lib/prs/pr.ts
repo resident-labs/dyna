@@ -115,12 +115,6 @@ export function withoutReviewers<T extends { id?: string; role?: string; parent?
   return (members ?? []).filter((m) => !hidden.has(m.id))
 }
 
-// The API counts latest saved decisions, including reviews and comment edits.
-export function commentFilterText(pr?: Facts | null): string {
-  const n = pr?.filteredComments || 0
-  return `Comment filter: ${n} ${n === 1 ? 'comment or review' : 'comments or reviews'} skipped.`
-}
-
 // open says whether the watcher still acts on this PR.
 export const isOpen = (pr?: Facts | null): boolean => !!pr && pr.state === 'open' && pr.status !== 'untracked'
 
@@ -332,9 +326,8 @@ export function verdictMeta(verdict?: string | null): { label: string; tone: str
 // A local change has a branch and a base but no PR number or link.
 export const isLocal = (c?: Facts | null): boolean => c?.kind === 'local'
 
-// A base can be a commit; show it short. A repo can be a local path; show its folder name.
+// A base can be a commit; show it short.
 export const refName = (r?: string | null): string => (/^[0-9a-f]{40}$/.test(r || '') ? shortSha(r) : r || '')
-export const repoName = (r?: string | null): string => (r?.startsWith('/') ? (r.replace(/\/(\.git)?\/?$/, '').split('/').pop() ?? '') : r || '')
 
 // changeName is the short name of a change: "#12" or "branch → base".
 export const changeName = (c?: Facts | null): string => {
