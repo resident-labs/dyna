@@ -1,4 +1,3 @@
-import { stripTypes } from '../../../test/svelte-source.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -6,8 +5,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { compile, compileModule } from 'svelte/compiler'
 import { build } from 'esbuild'
+import { compileSvelte, svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import type { Facts } from './pr.ts'
 import { need } from '../../../test/need.ts'
 
@@ -19,17 +18,12 @@ async function load(name: string, width = 1200) {
     bundle: true, write: false,
     stdin: { contents: `export { default } from './${name}.svelte'; export { render } from 'svelte/server'`, resolveDir: new URL('.', import.meta.url).pathname, loader: 'js' },
     format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
-    plugins: [{ name: 'svelte-test', setup(builder) {
-      builder.onLoad({ filter: /[/\\]ServiceHeader\.svelte$/ }, ({ path }) => ({ contents: compile('<script>let { roomId, role, onchange } = $props()</script><b class="service-header">{role} in {roomId} {typeof onchange}</b>', { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
-      builder.onLoad({ filter: /\.svelte\.[jt]s$/ }, ({ path }) => ({ contents: compileModule(stripTypes(readFileSync(path, 'utf8')), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
-      builder.onLoad({ filter: /\.svelte$/ }, async ({ path }) => {
-        let source = readFileSync(path, 'utf8')
-        // SSR has no ResizeObserver. Supply the browser's measured PR width.
-        if (path.endsWith('/GitHub.svelte')) source = source.replace('let width = $state(1200)', `let width = $state(${width})`)
-        return { contents: compile(source, { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }
-      })
+    plugins: [{ name: 'review-drawer-fixture', setup(builder) {
+      builder.onLoad({ filter: /[/\\]ServiceHeader\.svelte$/ }, ({ path }) => ({ contents: compileSvelte('<script>let { roomId, role, onchange } = $props()</script><b class="service-header">{role} in {roomId} {typeof onchange}</b>', path, 'server'), loader: 'js', resolveDir: resolve(path, '..') }))
+      // SSR has no ResizeObserver. Supply the browser's measured PR width.
+      builder.onLoad({ filter: /[/\\]GitHub\.svelte$/ }, ({ path }) => ({ contents: compileSvelte(readFileSync(path, 'utf8').replace('let width = $state(1200)', `let width = $state(${width})`), path, 'server'), loader: 'js', resolveDir: resolve(path, '..') }))
       builder.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: 'export const api = {}; export const copyText = async () => {}; export const openExternal = () => {}', loader: 'js' }))
-    } }],
+    } }, svelteEsbuildPlugin('server')],
   })
   const file = join(dir, `${name}.mjs`)
   await writeFile(file, need(result.outputFiles?.[0]).contents)
