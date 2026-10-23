@@ -9,10 +9,9 @@ const base: ServiceInputs = {
   pending: [],
   services: [
     { role: 'reviewer', profile: 'opus', pinned: '', reason: '', profiles: ['opus', 'sonnet'] },
-    { role: 'keeper', profile: 'sonnet', pinned: 'sonnet', reason: '', profiles: ['sonnet'] },
   ],
   reviewer: rev,
-  queue: [], history: [], changes: [], journal: [], checkins: [],
+  queue: [], history: [], changes: [], journal: [],
   settings: setting,
   usage: [], voice: 'idle', members: [],
 }
@@ -23,7 +22,7 @@ const card = (inputs: ServiceInputs, id: string) => {
 }
 
 test('every service has a card, in a fixed order', () => {
-  assert.deepEqual(buildCards(base).map((c) => c.id), ['reviewer', 'merge', 'radar', 'keeper', 'librarian', 'maintenance', 'voice'])
+  assert.deepEqual(buildCards(base).map((c) => c.id), ['reviewer', 'merge', 'radar', 'librarian', 'maintenance', 'voice'])
 })
 
 test('the reviewer card shows running, off and error, with its profile and controls', () => {
@@ -52,23 +51,9 @@ test('cost is unknown, not zero, when a turn has no price or the service has no 
   assert.equal(card(base, 'reviewer').cost, 'none today')
 })
 
-test('the keeper shows its last check-in but no next run, since the journal time is not the schedule', () => {
-  const keeper = card({ ...base, checkins: [{ at: '2026-10-20T11:00:00Z' }] }, 'keeper')
-  assert.equal(keeper.last, '2026-10-20T11:00:00Z')
-  assert.deepEqual(keeper.next, {})
-  assert.deepEqual(keeper.controls.map((c) => c.id), ['profile.keeper'])
-})
-
-test('newer holder events never move the keeper clock', () => {
-  const journal = Array.from({ length: 21 }, (_, i) => ({ at: `2026-10-20T12:${String(i).padStart(2, '0')}:00Z` }))
-  const keeper = card({ ...base, journal, checkins: [{ at: '2026-10-20T11:00:00Z' }] }, 'keeper')
-  assert.equal(keeper.last, '2026-10-20T11:00:00Z')
-})
-
 test('a caller that cannot read settings gets no settings controls', () => {
   const cards = buildCards({ ...base, settings: null })
   for (const id of ['librarian', 'maintenance']) assert.deepEqual(cards.find((c) => c.id === id)?.controls, [])
-  assert.equal(cards.find((c) => c.id === 'keeper')?.controls.some((c) => c.id === 'goals.checkInInterval'), false)
 })
 
 test('the librarian is off until a repository is enabled', () => {

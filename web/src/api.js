@@ -158,7 +158,7 @@ export const api = {
   goals: (room = '', before = '', limit = 0) => app.Goals(room, before, limit),
   // One goal by ID, for links to goals no loaded page holds.
   goal: (room, id) => app.Goal(room, id),
-  // The goal keeper's check-in journal, newest first; before is a cursor.
+  // The goal journal, newest first; before is a cursor.
   goalJournal: (room, before = '', limit = 0) => app.GoalJournal(room, before, limit),
   goalItems: (room, id) => app.GoalItems(room, id),
   goalStatus: (room, id) => app.GoalStatus(room, id),
@@ -166,7 +166,6 @@ export const api = {
   goalItemCounts: (room) => app.GoalItemCounts(room),
   editGoal: (room, id, text, holders, shared) => app.EditGoal(room, id, text, holders, shared),
   finishGoal: (room, id, summary, drop = false) => app.FinishGoal(room, id, summary, drop),
-  checkGoal: (room, id) => app.CheckGoal(room, id),
   // An empty id stops the room's expedite; replace switches from another goal.
   expediteGoal: (room, id, replace = false) => app.ExpediteGoal(room, id, replace),
   // An empty goalId unlinks the change.

@@ -51,7 +51,7 @@ export function formatModelChain(profile?: Pick<ProfileView, 'model' | 'models'>
 }
 // Who may use a profile (internal/profile Uses), each one a switch: workflow
 // agent() calls, subagent sessions, and services (Dyna's PR reviewers
-// and goal keeper). The engine sends every allowed use.
+// and merge steward). The engine sends every allowed use.
 export const USES: [string, string][] = [['workflows', 'Workflows'], ['agents', 'Agents'], ['services', 'Services']]
 // toggleUse turns one use on or off and keeps the display order.
 export const toggleUse = (uses: readonly string[] | null | undefined, use: string, on: boolean): string[] => USES.map(([u]) => u).filter((u) => (u === use ? on : (uses ?? []).includes(u)))

@@ -62,7 +62,7 @@ test('merge trial and publish results are events, tagged with their service', ()
   const merge = events.filter((e) => e.service === 'merge')
   assert.deepEqual(merge.map((e) => e.text), ['published main · 3 changes', 'trial failed: go-test'])
   assert.equal(events.find((e) => e.who === 'reviewer-1162' && e.text.startsWith('gave'))?.service, 'reviewer')
-  assert.equal(events.find((e) => e.who === 'keeper' && e.text.startsWith('keeper-status'))?.service, 'keeper')
+  assert.equal(events.find((e) => e.who === 'keeper' && e.text.startsWith('keeper-status'))?.service, 'agents')
   assert.equal(events.find((e) => e.who === 'lead' && e.text === 'started')?.service, 'agents')
 })
 
