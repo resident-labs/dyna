@@ -155,10 +155,11 @@
 
   // A hook card asks for one run. The pane opens its hook and its log, so the
   // card's "View log" lands on the run that posted it. The card names the
-  // repository too, and a run of another repository cannot show here.
+  // repository as the hook engine recorded it, and a room may hold another
+  // form of the same path, so the hooks loaded for this repository decide.
   async function showFocus(target: HookLogTarget) {
-    if (target.repo !== repo) {
-      error = `That run belongs to ${target.repo}, which is not this room's repository.`
+    if (!hooks?.some((h) => h.name === target.hook)) {
+      error = `No hook named ${target.hook} is on this repository, so that run of ${target.repo} cannot show here.`
       return
     }
     try {
