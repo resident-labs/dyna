@@ -149,12 +149,3 @@ func TestLogExcerptStripsColorsAndGitHubPrefixes(t *testing.T) {
 		t.Fatalf("excerpt kept %d lines:\n%s", kept, got)
 	}
 }
-
-func TestDebugRecordChecks(t *testing.T) {
-	e := newEnv(t)
-	cancelledAggregateFixture(t, e)
-	e.track()
-	e.s.LocalCIRegistry = &cancelledCIRegistry{hosted: localci.HostedRuns{IDs: []int64{81}, Attempts: map[int64]int{81: 1}}}
-	e.tick()
-	t.Logf("ci=%q checks=%+v", e.record().CI, e.record().Checks)
-}
