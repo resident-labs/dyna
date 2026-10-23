@@ -148,6 +148,25 @@ const (
 // issueStates lists every issue state the web needs as a union type.
 var issueStates = []IssueState{IssueStateOpen, IssueStateGoal, IssueStateExported, IssueStateClosed}
 
+// IssueActor is who caused an issue change: the engine itself, or the address
+// of the session that did. The engine is not a session, so a change the engine
+// makes names itself here instead of borrowing a session's name.
+type IssueActor string
+
+// ActorEngine is the engine itself, as when the PR watcher closes an issue
+// because the PR that fixed it merged.
+const ActorEngine IssueActor = "engine"
+
+// String names the actor in a sentence: a session address as it is, and the
+// engine in words, because "engine closed issue D-7" reads badly. The agent
+// text of a system event renders a named string type through String.
+func (a IssueActor) String() string {
+	if a == ActorEngine {
+		return "The engine"
+	}
+	return string(a)
+}
+
 // IssueFile is one place an issue points at. A line of zero means the whole
 // file.
 type IssueFile struct {
@@ -174,13 +193,14 @@ type IssueEvent struct {
 	State     IssueState `json:"state"`
 	Filer     string     `json:"filer"`
 	// Actor is who caused this change: the filer for a filing, the closer for
-	// a close. It is empty when the post itself names nobody else.
-	Actor    string       `json:"actor,omitempty"`
+	// a close. An automatic close names the engine, never the session whose
+	// authority the engine used. It is empty when the post names nobody else.
+	Actor    IssueActor   `json:"actor,omitempty"`
 	Assignee string       `json:"assignee,omitempty"`
 	ClosedBy *CloseOrigin `json:"closedBy,omitempty"`
 	Reason   string       `json:"reason,omitempty"`
-	// Detail is the note body an agent reads: the filed note, or the close
-	// reason it does not fit in one line.
+	// Detail is the note body an agent reads: the filed note. A close reason is
+	// one line, and the close text already carries it.
 	Detail string `json:"detail,omitempty"`
 }
 
@@ -1577,6 +1597,11 @@ var eventObjects = []reflect.Type{
 	reflect.TypeOf(AlertFinding{}),
 }
 
+// eventOpenStrings are named string types whose values are open, such as a
+// session address or the engine that made a change. The generator reads each
+// as a plain string, because a union of its values would be incomplete.
+var eventOpenStrings = []reflect.Type{reflect.TypeOf(IssueActor(""))}
+
 // legacyFamilies are the post kinds that still go through Store.Post with a
 // free text. Each later PR seals one family through PostEvent and deletes its
 // entry here, until the list is empty.
@@ -1856,6 +1881,13 @@ func eventFieldText(value reflect.Value, name string) string {
 		fieldValue := value.Field(i)
 		switch fieldValue.Kind() {
 		case reflect.String:
+			// A named string type may name itself in words, as IssueActor does
+			// for the engine. A plain string names itself.
+			if fieldValue.CanInterface() {
+				if named, ok := fieldValue.Interface().(fmt.Stringer); ok {
+					return named.String()
+				}
+			}
 			return fieldValue.String()
 		case reflect.Int:
 			return strconv.FormatInt(fieldValue.Int(), 10)
@@ -2069,6 +2101,22 @@ func (m Message) Session() (SessionEvent, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
+		return SessionEvent{}, false
+	}
+	return ev, true
+}
+
+// InstructionNote reports a standing-instruction note: the session event that
+// tells one session its instructions changed. One edit reaches every session,
+// so a list that shows these notes folds them; it asks the registry for the
+// audience and the wake rule instead of matching a kind string.
+func (m Message) InstructionNote() (SessionEvent, bool) {
+	ev, ok := m.Session()
+	if !ok || ev.Type != SessionInstructions || m.EventAudience() != AudienceSession {
+		return SessionEvent{}, false
+	}
+	// The note wakes nobody: its session reads it as turn input.
+	if spec, ok := eventSpecFor(m.Kind, m.Notice.Kind); !ok || spec.Wake != WakeNever {
 		return SessionEvent{}, false
 	}
 	return ev, true

@@ -126,12 +126,21 @@ test('Close asks for a reason and sends it', async () => {
 })
 
 test('a closed issue offers no actions and names what closed it', () => {
-  const { target, mounted } = render({ ...filed, type: 'closed', issueId: 'msg_0123456789abcdef', state: 'closed', actor: 'dyna:root', reason: 'Fixed by PR #542', closedBy: { pr: 542, commit: '24c91eb0' } })
+  const { target, mounted } = render({ ...filed, type: 'closed', issueId: 'msg_0123456789abcdef', state: 'closed', actor: 'engine', reason: 'Fixed by #542', closedBy: { pr: 542, commit: '24c91eb0' } })
   const labels = [...target.querySelectorAll('button')].map((button) => button.textContent?.trim())
   assert.ok(!labels.includes('Assign') && !labels.includes('Close') && !labels.includes('Open'), `a closed issue offers actions: ${labels.join(', ')}`)
   assert.match(textOf(target), /closed/)
-  assert.match(textOf(target), /Fixed by PR #542/)
-  assert.match(textOf(target), /Closed by PR #542/)
+  // The merging PR and its commit say it once; the reason repeats the same fact.
+  assert.match(textOf(target), /Closed by PR #542 at 24c91eb0/)
+  assert.doesNotMatch(textOf(target), /Fixed by #542/)
+  web.unmount(mounted)
+  target.remove()
+})
+
+test('a manual close shows the reason the person gave', () => {
+  const { target, mounted } = render({ ...filed, type: 'closed', issueId: 'msg_0123456789abcdef', state: 'closed', actor: 'dyna:root', reason: 'Obsolete: the panel is gone' })
+  assert.match(textOf(target), /Obsolete: the panel is gone/)
+  assert.doesNotMatch(textOf(target), /Closed by/)
   web.unmount(mounted)
   target.remove()
 })
