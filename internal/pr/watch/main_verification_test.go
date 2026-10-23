@@ -282,11 +282,13 @@ func TestOlderGreenObservationCannotReplaceFreshFailedMain(t *testing.T) {
 	}
 }
 
-func TestDefaultReasonDoesNotFormatUnknownBranchOrHead(t *testing.T) {
+// A probe without both a branch name and a head says so as a kind, so no
+// sentence and no empty commit reaches the screen.
+func TestDefaultWaitNamesAnUnknownBranchOrHead(t *testing.T) {
 	for _, probe := range []defaultBranchProbe{{}, {Name: "main"}, {Head: "head"}} {
 		for _, status := range []string{"pending", "passed", "failed"} {
-			if got := defaultReason(probe, status); got != "waiting for GitHub CI on the default branch" {
-				t.Errorf("probe=%+v status=%s reason=%q", probe, status, got)
+			if got := defaultWait(probe, status); got == nil || got.Kind != MainWaitNoHead || got.Base != "" {
+				t.Errorf("probe=%+v status=%s wait=%+v", probe, status, got)
 			}
 		}
 	}
@@ -331,8 +333,8 @@ func TestDefaultBranchWorkflowGate(t *testing.T) {
 			if status != want {
 				t.Fatalf("status=%s; want %s", status, want)
 			}
-			if tc.noPush && defaultReason(p, status) != "no default-branch CI; using PR checks" {
-				t.Fatalf("reason=%s", defaultReason(p, status))
+			if tc.noPush && defaultWait(p, status).Kind != MainWaitNoPushCI {
+				t.Fatalf("wait=%+v", defaultWait(p, status))
 			}
 		})
 	}
@@ -387,8 +389,8 @@ func TestNoPushWorkflowPreservesObservedChecks(t *testing.T) {
 			r := st.Records["github.com/owner/repo#1"]
 			p, status := storedDefault(st, *r)
 			want := map[string]string{"FAILURE": "failed", "PENDING": "pending", "SUCCESS": "passed"}[ci]
-			if status != want || strings.Contains(defaultReason(p, status), "using PR checks") {
-				t.Fatalf("status=%s reason=%s", status, defaultReason(p, status))
+			if status != want || defaultWait(p, status).Kind == MainWaitNoPushCI {
+				t.Fatalf("status=%s wait=%+v", status, defaultWait(p, status))
 			}
 		})
 	}

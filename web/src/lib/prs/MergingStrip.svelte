@@ -1,10 +1,11 @@
 <script lang="ts">
   import Chip from '../ui/Chip.svelte'
   import type { MergeControlStatus } from '../api/change.ts'
-  import { trialProgress, waitingReason } from './roomPRs.ts'
+  import { shortSha } from './pr.ts'
+  import { trialProgress, waitingReason, waitingWords } from './roomPRs.ts'
   let { status, error = '', onpick, onresume, resuming = false, resumeError = '' }: { status: MergeControlStatus | null; error?: string; onpick: (id: string) => void; onresume: () => void; resuming?: boolean; resumeError?: string } = $props()
   let ready = $derived(status?.queue?.filter((q) => q.state === 'ready' && !q.trial) ?? [])
-  let reason = $derived(status && !status.paused ? waitingReason(status) : '')
+  let reason = $derived(status ? waitingReason(status) : null)
 </script>
 <section class="merging" aria-label="Merging">
   <div class="heading"><h2>Merging</h2>{#if status?.paused}<Chip tone="gold">Paused</Chip>{/if}</div>
@@ -33,7 +34,12 @@
     {:else}<p class="muted">No merge running.</p>{/each}
     </div></div>
     <div class="line"><b>Next</b><span>{#if ready.length}{#each ready as q}<button class="next" onclick={() => onpick(q.changeId)}>#{q.changeId.split('#').at(-1)}</button>{/each}{:else}No other PR is ready.{/if}</span></div>
-    {#if reason}<div class="line"><b class="gold">Waiting</b><span>{reason}</span></div>{/if}
+    {#if reason}
+      <div class="line"><b class="gold">Waiting</b><span class="wait">
+        <span>{waitingWords(reason)}{#if reason.base}{' '}on {reason.base}{/if}{#if reason.sha}{' '}at <code>{shortSha(reason.sha)}</code>{/if}</span>
+        {#if reason.prs.length}<span class="wait-prs">{#each reason.prs as n}<span class="pr">#{n}</span>{/each}</span>{/if}
+      </span></div>
+    {/if}
   {/if}
 </section>
 <style>
@@ -53,5 +59,8 @@
   progress::-webkit-progress-bar { background:var(--select); } progress::-webkit-progress-value { background:var(--sage); }
   .line { display:grid; grid-template-columns:55px 1fr; gap:var(--s2); margin-top:var(--s3); } .line b { font-weight:600; } .line > span { min-width:0; overflow-wrap:anywhere; }
   .next { margin-right:var(--s2); }.gold { color:var(--gold); } .error { color:var(--coral); }
+  .wait-prs { display:inline-flex; flex-wrap:wrap; gap:var(--s2); margin-left:var(--s2); }
+  .wait-prs .pr { color:var(--ink-2); font-weight:600; }
+  .wait code { padding:1px 5px; border-radius:4px; background:var(--select); color:var(--ink-2); font-family:var(--mono); font-size:var(--t-sm); }
   @media (max-width:760px) { .merging { margin-left:var(--s4); margin-right:var(--s4); } }
 </style>
