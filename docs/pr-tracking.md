@@ -311,10 +311,11 @@ the same script without SSH. No credential, token or setting goes with it.
 The script prints `key=value` lines: OS and architecture, CPU count, MemTotal
 and MemAvailable, the load averages, CPU use over one second, whether `/dev/dri`
 exists, whether docker or podman exists, whether the computer dependencies
-exist, and the remote `dyna --version`. The computer dependencies are labwc,
-Xwayland and wayvnc; see [Agent computers](computers.md). A machine is shown
-with computers only when it has all three. Computers are a capability, not a
-role.
+exist, and the remote `dyna --version`. The computer dependencies that
+registration checks are labwc and Xwayland; see
+[Agent computers](computers.md). A machine is shown with computers only when it
+has both. Computers are a capability, not a role. wayvnc only streams a desktop
+to the app, so the probe reports it as a separate `stream` capability.
 
 ```sh
 dyna machine probe hermeslab

@@ -71,17 +71,19 @@ func (c Containers) Names() []string {
 	return names
 }
 
-// Computers is whether a machine has what an agent computer needs: the labwc
-// compositor, Xwayland for X11 clients, and wayvnc for the stream. Computers
-// are a capability, not a role.
+// Computers is whether a machine can host an agent computer. That needs the
+// labwc compositor and Xwayland for X11 clients, which registration checks.
+// Stream is separate: wayvnc only streams the desktop to the app, so computers
+// run without it. Computers are a capability, not a role.
 type Computers struct {
 	Labwc    bool `json:"labwc"`
 	Xwayland bool `json:"xwayland"`
-	Wayvnc   bool `json:"wayvnc"`
+	// Stream is whether wayvnc can stream this machine's desktop to the app.
+	Stream bool `json:"stream"`
 }
 
 // Ready reports whether a computer can run on this machine.
-func (c Computers) Ready() bool { return c.Labwc && c.Xwayland && c.Wayvnc }
+func (c Computers) Ready() bool { return c.Labwc && c.Xwayland }
 
 // Capabilities is what one probe read about a machine. A zero field means the
 // probe could not read it, so a machine with no /proc still reports its OS.
@@ -198,7 +200,13 @@ func (p Prober) ProbeAndSave(ctx context.Context, m Machine) (Machine, error) {
 		return m, fmt.Errorf("machine %s: %w", m.Name, ErrDisabled)
 	}
 	result := ProbeResult{At: p.now(), Health: HealthOnline}
-	result.Capabilities, result.Load, result.Err = p.Probe(ctx, m)
+	var err error
+	result.Capabilities, result.Load, result.Err, err = p.Probe(ctx, m)
+	if err != nil {
+		// The caller stopped the probe, so it says nothing about the machine.
+		// Storing it would show a healthy machine as offline after a restart.
+		return m, err
+	}
 	if result.Err != "" {
 		result.Health = HealthOffline
 	}
@@ -209,28 +217,39 @@ func (p Prober) ProbeAndSave(ctx context.Context, m Machine) (Machine, error) {
 }
 
 // Probe runs the probe script on one machine and parses what it printed. A
-// failure is returned as the message to show the owner, not as an error: a
-// machine that cannot be reached is a result, not a broken probe.
-func (p Prober) Probe(ctx context.Context, m Machine) (Capabilities, Load, string) {
-	ctx, cancel := context.WithTimeout(ctx, probeBudget)
+// machine that cannot be reached comes back as the message to show the owner,
+// not as an error. An error means the caller stopped the probe, so there is no
+// result to store.
+func (p Prober) Probe(ctx context.Context, m Machine) (Capabilities, Load, string, error) {
+	budget, cancel := context.WithTimeout(ctx, probeBudget)
 	defer cancel()
 	var out, stderr bytes.Buffer
-	if err := p.run(ctx, m, &out, &stderr); err != nil {
-		return Capabilities{}, Load{}, probeFailure(err, stderr.String(), ctx)
+	err := p.run(budget, m, &out, &stderr)
+	if ctx.Err() != nil {
+		// The probe's own budget gave a real result; the caller ending did not.
+		return Capabilities{}, Load{}, "", ctx.Err()
+	}
+	if err != nil {
+		return Capabilities{}, Load{}, probeFailure(ctx, err, stderr.String()), nil
 	}
 	caps, load, err := parseProbe(out.String())
 	if err != nil {
-		return Capabilities{}, Load{}, probeFailure(err, stderr.String(), ctx)
+		return Capabilities{}, Load{}, probeFailure(ctx, err, stderr.String()), nil
 	}
 	if m.Local {
 		p.localLoad(&load)
 	}
-	return caps, load, ""
+	return caps, load, "", nil
 }
 
 // localLoad replaces the script's reading of this machine with the engine
 // sampler's, which already keeps CPU use and memory. A sampler that has no
 // reading yet leaves the script's values alone.
+//
+// The computer capability is not taken from computers.Enabled(): that also
+// depends on computers.enabled, DYNA_COMPUTERS_ENABLED and XDG_RUNTIME_DIR, so
+// it is false with the feature off or from a shell without a session, and the
+// script's own checks say what the machine has.
 func (p Prober) localLoad(load *Load) {
 	if p.Load == nil {
 		return
@@ -263,16 +282,18 @@ func (p Prober) run(ctx context.Context, m Machine, out, stderr io.Writer) error
 		"-o", "BatchMode=yes", "-o", "ConnectTimeout=10", m.SSH, "sh", "-s")
 }
 
-// execCommand runs a real command.
+// execCommand runs a real command. WaitDelay bounds a child that keeps the
+// output pipe open after the command is killed, such as an ssh ProxyCommand.
 func execCommand(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = in, out, stderr
+	cmd.WaitDelay = 2 * time.Second
 	return cmd.Run()
 }
 
 // probeFailure builds the message to show the owner for a failed probe.
-func probeFailure(err error, stderr string, ctx context.Context) string {
+func probeFailure(ctx context.Context, err error, stderr string) string {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return fmt.Sprintf("probe timed out after %s", probeBudget)
 	}
@@ -280,8 +301,9 @@ func probeFailure(err error, stderr string, ctx context.Context) string {
 	if detail := strings.TrimSpace(stderr); detail != "" && !strings.Contains(message, detail) {
 		message += ": " + detail
 	}
-	if len(message) > 500 {
-		message = message[:500]
+	// Cut by rune, so a long message never ends inside a character.
+	if runes := []rune(message); len(runes) > 500 {
+		message = string(runes[:500])
 	}
 	return message
 }
@@ -372,7 +394,7 @@ func parseProbe(text string) (Capabilities, Load, error) {
 		case "has_Xwayland":
 			caps.Computers.Xwayland = value == "yes"
 		case "has_wayvnc":
-			caps.Computers.Wayvnc = value == "yes"
+			caps.Computers.Stream = value == "yes"
 		case "dyna":
 			caps.DynaVersion = value
 		}
