@@ -480,7 +480,7 @@ func TestGrokAcpSteeringQueuesNativePrompt(t *testing.T) {
 	result, err := RunWithOptions(t.Context(), acpProfile(env), "long task", t.TempDir(), true, JournalOptions{}, SteeringOptions{
 		Source:    source,
 		pollEvery: 15 * time.Millisecond,
-		OnMessage: func(m runstore.SteeringMessage) { delivered <- m },
+		OnMessage: func(m runstore.SteeringMessage, _ *int64) { delivered <- m },
 	}, SessionOptions{RecoveryDelay: &zero}, ExecutionOptions{HealthProbe: true, startupLimit: 30 * time.Second})
 	if err != nil {
 		t.Fatalf("steered turn: %v (result %+v)", err, result)

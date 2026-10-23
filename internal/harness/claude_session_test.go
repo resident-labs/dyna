@@ -310,7 +310,7 @@ func TestClaudeHostedSteeringUsesSameProcess(t *testing.T) {
 	steering := newSteeringSupervisor(SteeringOptions{
 		Source:    src,
 		pollEvery: 10 * time.Millisecond,
-		OnMessage: func(m runstore.SteeringMessage) { delivered = append(delivered, m.Message) },
+		OnMessage: func(m runstore.SteeringMessage, _ *int64) { delivered = append(delivered, m.Message) },
 	}, true)
 	got := awaitClaudeTurn(t, claudeHostedTurn(t.Context(), t, t.TempDir(), "first turn", steering, nil), "steered turn")
 	if got.runErr != nil {

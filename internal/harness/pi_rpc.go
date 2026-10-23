@@ -394,7 +394,9 @@ func runPiTurn(ctx context.Context, p profile.Profile, cwd string, spec commandS
 		}
 	}
 
+	var startBoundary *int64
 	sendPrompt := func() error {
+		startBoundary = normalizedBoundary(normalizer)
 		resp, err := client.command(ctx, map[string]any{"type": "prompt", "message": spec.prompt}, piCommandTimeout)
 		if err != nil {
 			return err
@@ -430,7 +432,7 @@ func runPiTurn(ctx context.Context, p profile.Profile, cwd string, spec commandS
 		}
 		if steering.opts.OnMessage != nil {
 			for _, message := range spec.steering {
-				steering.opts.OnMessage(message)
+				steering.opts.OnMessage(message, startBoundary)
 			}
 		}
 	}
@@ -461,7 +463,9 @@ func runPiTurn(ctx context.Context, p profile.Profile, cwd string, spec commandS
 			steering.pending = append(messages, steering.pending...)
 			return nil
 		}
+		var sourceOffset *int64
 		send := func() error {
+			sourceOffset = normalizedBoundary(normalizer)
 			record := map[string]any{"type": "prompt", "message": steeringPrompt(messages), "streamingBehavior": "steer"}
 			resp, err := client.command(ctx, record, piCommandTimeout)
 			if err != nil {
@@ -484,7 +488,7 @@ func runPiTurn(ctx context.Context, p profile.Profile, cwd string, spec commandS
 		}
 		if steering.opts.OnMessage != nil {
 			for _, message := range messages {
-				steering.opts.OnMessage(message)
+				steering.opts.OnMessage(message, sourceOffset)
 			}
 		}
 		gate.report(DeliverySteering, DeliveryBoundary, 0, tools.InFlight())
