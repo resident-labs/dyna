@@ -6,6 +6,7 @@
   let href = $derived(detailHref(post.detail, post.roomId))
 
   function open(e) {
+    if (!onopen || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
     e.preventDefault()
     e.stopPropagation()
     onopen?.(post.detail)
