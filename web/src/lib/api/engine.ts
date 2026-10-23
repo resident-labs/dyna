@@ -23,7 +23,7 @@ import type { ProfileCheck, ProfileEdit, ProfileList, ProfileView } from './prof
 import type { Attachment, Draft, Feed, FeedSearch, Issue, Member, Opened, Post, PostResult, ProfileChoice, Question, Room, SeatReturn, SendResult, SpawnResult, Visual } from './room.ts'
 import type { ServiceView } from './service.ts'
 import type { BulkSessionOptions, BulkSessionResult, ConsolidationOptions, ConsolidationState, MemberProfile, QueueItem, RoomSessionMutation, RoomSessionState, Session, TransferOptions, TransferState } from './session.ts'
-import type { Device, Hook, HookRun, HookRunLog, Notice, Pairing, SettingItem, UpdateNotice } from './settings.ts'
+import type { Device, Hook, HookRun, HookRunLog, HookSummary, Notice, Pairing, SettingItem, UpdateNotice } from './settings.ts'
 import type { ShellJob, ShellLog, ShellLogChunk, TermEvent, TermInfo } from './terminal.ts'
 import type { Health, SystemLoad } from './system.ts'
 import type { CallStatus } from './voice.ts'
@@ -158,6 +158,7 @@ export interface Engine {
   RoomMergeStatus(roomRef: string): Promise<MergeQueueItem[] | null>
   RoomMergeHistory(roomRef: string): Promise<MergeHistoryEntry[] | null>
   MergeControlStatus(roomRef: string): Promise<MergeControlStatus>
+  SetMergePaused(roomRef: string, paused: boolean): Promise<null>
   ResumeMerging(roomRef: string): Promise<null>
   SendDiffComments(roomRef: string, changeId: string, comments: DiffComment[]): Promise<null>
   SendWorktreeComments(roomRef: string, session: string, comments: DiffComment[]): Promise<null>
@@ -228,6 +229,7 @@ export interface Engine {
   // Hooks.
   HookRepos(): Promise<string[] | null>
   ListHooks(repo: string): Promise<Hook[] | null>
+  HookSummary(repo: string): Promise<HookSummary[] | null>
   HookRuns(repo: string, name: string): Promise<HookRun[] | null>
   HookRunLog(repo: string, name: string, id: string): Promise<HookRunLog>
   RunHook(repo: string, name: string): Promise<HookRun>
