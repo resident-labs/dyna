@@ -7,9 +7,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { api, copyText } from '../../api.ts'
   import { qrPath } from './qr.ts'
-  import AndroidApp from './AndroidApp.svelte'
   import { errorText } from '../errorText.ts'
-  import { appLink, hasApp, pairLink } from './android.ts'
 
   // The one-time pairing the engine makes: its link and when it ends.
   interface Pairing {
@@ -17,8 +15,6 @@
     expires: string
     code?: string
   }
-  type Step = 'choose' | 'web' | 'install' | 'pair'
-
   let { onclose }: { onclose: () => void } = $props()
 
   // In a browser the web app is this page. On the desktop the server picks
@@ -29,9 +25,6 @@
   let busy = $state(false)
   let now = $state(Date.now())
   let copied = $state(false)
-  // The wizard: 'choose' (only when the engine built the Android app), then 'web', or 'install' and 'pair'.
-  // The code is made when the pair step opens, so its five minutes start there.
-  let step = $state<Step | null>(null)
 
   let qr = $derived(pairing?.url ? qrPath(pairing.url) : null)
   let left = $derived(pairing ? Math.max(0, Math.round((Date.parse(pairing.expires) - now) / 1000)) : 0)
@@ -53,19 +46,10 @@
 
   const tick = setInterval(() => (now = Date.now()), 1000)
   onDestroy(() => clearInterval(tick))
-  onMount(async () => {
-    if (await hasApp()) step = 'choose'
-    else go('web')
-  })
+  onMount(() => { void make() })
 
-  function go(next: Step) {
-    step = next
-    if (next === 'web' || next === 'pair') make()
-  }
-
-  let address = $derived(origin.trim() || location.origin)
-  // Update makes a new code only on a step that shows one.
-  const update = () => (step === 'web' || step === 'pair' ? make() : undefined)
+  // Update makes a new code with the address as typed.
+  const update = () => void make()
 
   async function copy() {
     if (!pairing) return
@@ -85,22 +69,7 @@
       <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
     </button>
     <h2>Pair a device</h2>
-    {#if step === 'choose'}
-      <p class="lede">What are you pairing?</p>
-      <div class="choices">
-        <button class="btn fill lg" onclick={() => go('web')}>Web browser</button>
-        <button class="btn fill lg" onclick={() => go('install')}>Android app</button>
-      </div>
-    {:else if step === 'install'}
-      <p class="lede">Step 1 of 2: install the app.</p>
-      <AndroidApp step="install" link={appLink(address)} onnext={() => go('pair')} onback={() => go('choose')} onmake={make} />
-    {:else if step === 'pair'}
-      <p class="lede">Step 2 of 2: pair the app.</p>
-      {#if pairing}
-        <AndroidApp step="pair" link={pairLink(address, pairing.code ?? '')} note={expired ? 'Expired.' : `Works once, for ${mmss(left)}.`} {expired} onnext={() => {}} onback={() => (step = 'install')} onmake={make} />
-      {/if}
-    {:else if step === 'web'}
-      <p class="lede">Scan the code with the phone's camera. Or open the web app on the device and type the pairing code.</p>
+    <p class="lede">Scan the code with the phone's camera. Or open the web app on the device and type the pairing code.</p>
     <div class="pairbox">
       <div class="qr" class:dim={expired || busy}>
         {#if qr}
@@ -124,9 +93,7 @@
         {/if}
       </div>
     </div>
-    {/if}
 
-    {#if step && step !== 'choose'}
     <label class="field">
       <span class="lab">Web app address</span>
       <span class="row">
@@ -135,7 +102,6 @@
       </span>
       <span class="hint">The phone opens this address. Use the name it reaches the computer by, such as a Tailscale or Cloudflare address.</span>
     </label>
-    {/if}
     {#if error}<p class="err">{error}</p>{/if}
     <p class="note">A paired device acts as you, with the same power as a shell on this computer. Revoke it here at any time.</p>
   </div>
@@ -151,8 +117,6 @@
   .x:active { background: var(--select); }
   h2 { margin: 0 0 var(--s1); font-size: var(--t-head); font-weight: 600; }
   .lede { margin: 0 0 var(--s4); color: var(--muted); font-size: var(--t-body); padding-right: var(--s5); }
-  .choices { display: flex; gap: var(--s3); }
-  .choices .btn { flex: 1; }
   .pairbox { display: flex; gap: 20px; align-items: center; background: var(--main); border: 1px solid var(--line-soft); border-radius: 12px; padding: var(--s4); }
   .qr { position: relative; width: 176px; height: 176px; flex: none; }
   .qr svg { width: 100%; height: 100%; display: block; border-radius: 8px; }

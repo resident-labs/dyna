@@ -61,7 +61,7 @@ func TestRegisteredCIRaceDoesNotHideFailuresOrBlockHostedRecovery(t *testing.T) 
 }
 
 func TestRegisteredCIRequiresCompleteWorkflowChecks(t *testing.T) {
-	suites := []string{"relay", "go", "cross-build", "computer-smoke", "android"}
+	suites := []string{"relay", "go", "cross-build", "computer-smoke"}
 	required := requiredRegisteredChecks(suites)
 	result := localci.Result{Node: "node-a", Status: "passed"}
 	for _, name := range required {
@@ -72,7 +72,7 @@ func TestRegisteredCIRequiresCompleteWorkflowChecks(t *testing.T) {
 	}
 	result.Checks = result.Checks[:len(result.Checks)-1]
 	if coversRegisteredChecks(result, required) {
-		t.Fatal("missing Android check passed the trial gate")
+		t.Fatal("missing check passed the trial gate")
 	}
 	result.Node = ""
 	if coversRegisteredChecks(result, []string{"relay"}) {
@@ -81,8 +81,8 @@ func TestRegisteredCIRequiresCompleteWorkflowChecks(t *testing.T) {
 	if got := registeredSuites([]string{"internal/computerweb/handler.go"}); !reflect.DeepEqual(got, []string{"go", "cross-build", "computer-smoke"}) {
 		t.Fatalf("computer suites: %v", got)
 	}
-	if got := registeredSuites([]string{"mobile/android/app/build.gradle"}); !reflect.DeepEqual(got, []string{"android"}) {
-		t.Fatalf("Android suites: %v", got)
+	if got := registeredSuites([]string{"docs/readme.md"}); len(got) != 0 {
+		t.Fatalf("docs suites: %v", got)
 	}
 }
 
@@ -433,7 +433,7 @@ func TestRegisteredCIPreservesRequiredCheckCoverage(t *testing.T) {
 	head := strings.Repeat("a", 40)
 	r := Record{Kind: "github", Host: "github.com", Repo: "owner/repo", Head: head, Branch: "dyna/merge-trial/1", RepoPath: repo}
 	var checks []localci.SuiteResult
-	for _, name := range requiredRegisteredChecks([]string{"relay", "go", "cross-build", "computer-smoke", "android"}) {
+	for _, name := range requiredRegisteredChecks([]string{"relay", "go", "cross-build", "computer-smoke"}) {
 		checks = append(checks, localci.SuiteResult{CheckName: name, Status: "passed"})
 	}
 	for _, tc := range []struct {

@@ -495,7 +495,7 @@ func readArchive(input io.Reader, dir string) error {
 }
 func checkReports(sr *SuiteResult, dir string, max time.Duration, allowed map[string]bool) error {
 	switch sr.Suite {
-	case "cross-build", "frontend-check", "go-static", "computer-smoke", "android":
+	case "cross-build", "frontend-check", "go-static", "computer-smoke":
 		return nil
 	}
 	files, err := filepath.Glob(filepath.Join(dir, "reports", sr.Suite, "*.xml"))

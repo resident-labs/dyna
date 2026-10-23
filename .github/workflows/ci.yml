@@ -29,7 +29,6 @@ jobs:
       relay: ${{ steps.filter.outputs.relay }}
       go: ${{ steps.filter.outputs.go }}
       computers: ${{ steps.filter.outputs.computers }}
-      android: ${{ steps.filter.outputs.android }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -63,25 +62,6 @@ jobs:
           path: ${{ runner.temp }}/relay-test.xml
           if-no-files-found: error
           retention-days: 1
-
-  # The Android call app: compiles it and runs its JVM tests. The emulator scripts in
-  # mobile/android/e2e need KVM and stay manual. The runner image ships the Android
-  # SDK in ANDROID_HOME; scripts/ci.sh installs missing platforms.
-  android:
-    name: android
-    needs: changes
-    if: needs.changes.outputs.android == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-          cache: gradle
-      - name: Build and test the Android app
-        run: bash scripts/ci.sh android
 
   # Saves the shared Go build and module cache on main. Only main caches are
   # readable by every pull request and merge trial. The cache holds the objects
