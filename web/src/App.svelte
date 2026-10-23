@@ -28,9 +28,8 @@
   import { isShellResult } from './lib/rooms/feedRows.js'
   import { mergeSessionPage } from './lib/sessions/sessionPages.ts'
   import { trimFeed } from './lib/rooms/feedWindow.js'
-  import LookMenu from './lib/rooms/LookMenu.svelte'
   import { look, revealed, reveal as revealPost } from './lib/rooms/look.svelte.js'
-  import { visibleTo, scopeOf } from './lib/rooms/look.ts'
+  import { visibleTo } from './lib/rooms/look.ts'
   import Feed from './lib/rooms/Feed.svelte'
   import Composer from './lib/rooms/Composer.svelte'
   import Members from './lib/rooms/Members.svelte'
@@ -331,8 +330,7 @@
   let syncRepo = $derived(room?.repo ? syncStatus[room.repo] ?? null : null) // {remotes, integration, operation?}
   let syncRemotes = $derived(remoteList(syncRepo?.remotes))
   let syncNote = $state('') // the last Refresh or Export answer that was not a start
-  let channelMenu = $state<{ x: number; y: number } | null>(null) // {x, y}: a phone shows the panel toggles in this menu
-  let lookOpen = $state(false) // a phone opens the channel look from that menu
+  let channelMenu = $state<{ x: number; y: number } | null>(null) // {x, y}: a phone shows the pinned posts in this menu
   let issues = $state<RoomIssue[]>([]) // open issues, newest first
   let issueHistory = $state<RoomIssue[]>([]) // closed and converted issues, newest first
   let feedView = $state<ReturnType<typeof Feed>>()
@@ -553,7 +551,7 @@
   // Shell exit records live in shell-jobs, not in channel feeds.
   let posts = $derived((feed?.posts ?? []).filter((p) => !isShellResult(p) && (!isChannel(view) || inChannel(p, view))))
   // What the owner chose to show in this channel; hidden posts still count as read.
-  let shownPosts = $derived(isChannel(view) ? posts.filter(visibleTo(look, scopeOf(roomId, view), revealed) as (post: Post) => boolean) : posts)
+  let shownPosts = $derived(isChannel(view) ? posts.filter(visibleTo(look, revealed) as (post: Post) => boolean) : posts)
   // The room's reviewers show only on the PR screen, so every other list uses people.
   let people = $derived(withoutReviewers(members, reviewer))
   let live = $derived(people.filter((m) => !m.owner && m.state === 'live'))
@@ -1567,13 +1565,12 @@
     return roomActionItems(actionRegistry(r))
   }
 
-  // The phone bar's overflow: the pinned posts and the channel look. Members
-  // and Issues have their own header button, so they are not repeated here.
+  // The phone bar's overflow: the pinned posts. Members and Issues have their
+  // own header button, so they are not repeated here.
   function channelMenuItems() {
     const items: MenuItem[] = [
       { label: 'Pinned posts', hint: pins.length ? String(pins.length) : '', run: () => { showPins = true; showMembers = false } },
     ]
-    if (isChannel(view)) items.push({ label: 'Channel look', gap: true, run: () => (lookOpen = true) })
     return items
   }
 
@@ -2113,7 +2110,6 @@
     if (v !== 'goals') goalId = ''
     navOpen = false
     channelMenu = null
-    lookOpen = false
     if (v === 'runs') loadRuns()
   }
 
@@ -2445,15 +2441,14 @@
         {#if !drill}
         <span class="spacer"></span>
         <CallButton {room} />
-        {#if isChannel(view) && !workRow && !narrow}<LookMenu scope={scopeOf(roomId, view)} />{/if}
         <span class="meta">{Math.max(0, people.length - 1)} session{people.length === 2 ? '' : 's'}{#if live.length}&nbsp;·&nbsp;<em>{live.length} working</em>{/if}</span>
         {#if syncRemotes.length}<SyncBadge remotes={syncRemotes} status={syncRepo} note={syncNote} onrefresh={() => syncAction(api.syncRefresh)} onexport={() => syncAction(api.gitExport)} />{/if}
         {#if !narrow}
           <button class="icon" onclick={() => openSearch()} title="Search (Ctrl+K)" aria-label="Search sessions and messages"><SearchIcon /></button>
         {/if}
         {#if narrow}
-        <!-- A phone keeps the bar for the page title, so the panel toggles and
-             the channel look go into one menu. -->
+        <!-- A phone keeps the bar for the page title, so the pinned posts
+             toggle goes into one menu. -->
         <button class="icon" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); channelMenu = { x: r.right - 240, y: r.bottom + 6 } }} title="Room actions" aria-label="Room actions" aria-haspopup="menu" aria-expanded={!!channelMenu}>
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="5" cy="12" r="1.7" fill="currentColor" /><circle cx="12" cy="12" r="1.7" fill="currentColor" /><circle cx="19" cy="12" r="1.7" fill="currentColor" /></svg>
         </button>
@@ -2472,7 +2467,7 @@
       {/if}
       <!-- Members closes the pinned panel, so the two panels never share the
            side area. The button is the bar's last one, on a phone and a desktop. -->
-      {#if !drill}
+      {#if room && !drill}
         <button class="icon" class:on={showMembers} onclick={() => { showMembers = !showMembers; if (showMembers) showPins = false }} title={showMembers ? 'Hide member list' : 'Show member list'} aria-label={showMembers ? 'Hide member list' : 'Show member list'} aria-expanded={showMembers}>
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><circle cx="16.5" cy="9" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6" /><path d="M16 13.6c2.4 0 4 1.5 4.5 4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
         </button>
@@ -2611,9 +2606,6 @@
 {/if}
 {#if channelMenu}
   <Menu x={channelMenu.x} y={channelMenu.y} title="Room" items={channelMenuItems()} onclose={() => (channelMenu = null)} />
-{/if}
-{#if narrow && room && !drill && isChannel(view) && !workRow}
-  <LookMenu scope={scopeOf(roomId, view)} anchored={false} bind:open={lookOpen} />
 {/if}
 {#if roomControlsMenu}
   {@const context = { ...roomControlsMenu }}

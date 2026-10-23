@@ -1,15 +1,20 @@
 // The look settings live in the webview's localStorage like the layout does:
 // they are view state, so Go never sees them.
-import { withChoice } from './look.ts'
+import { readLook, withChoice } from './look.ts'
 
 const KEY = 'dyna.look'
 
 function load() {
   try {
-    const s = JSON.parse(localStorage.getItem(KEY) || '{}')
-    return { all: s?.all ?? {}, channels: s?.channels ?? {} }
+    const raw = localStorage.getItem(KEY)
+    const saved = readLook(raw)
+    // An older version also saved per-channel overrides. Drop them once, so the
+    // stored look holds the choices for every channel and nothing else.
+    if (raw && raw !== JSON.stringify(saved)) localStorage.setItem(KEY, JSON.stringify(saved))
+    return saved
   } catch {
-    return { all: {}, channels: {} }
+    // No storage here, as in a test or a server render.
+    return readLook(null)
   }
 }
 
@@ -19,12 +24,10 @@ export const look = $state(load())
 export const revealed = $state({})
 export const reveal = (id) => { revealed[id] = true }
 
-// choose sets one toggle for a channel scope, or for every channel when scope is null.
-export function choose(scope, kind, value) {
-  const next = withChoice(look, scope, kind, value)
-  look.all = next.all
-  look.channels = next.channels
+// choose sets one look choice for every channel.
+export function choose(kind, value) {
+  look.all = withChoice(look, kind, value).all
   try {
-    localStorage.setItem(KEY, JSON.stringify({ all: look.all, channels: look.channels }))
+    localStorage.setItem(KEY, JSON.stringify({ all: look.all }))
   } catch {}
 }
