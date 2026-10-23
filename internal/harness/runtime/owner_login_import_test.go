@@ -107,7 +107,7 @@ func TestOwnerLoginImportNativeFiles(t *testing.T) {
 				t.Fatal("snapshot differs from private login")
 			}
 			if requirePrivateAccount(h) {
-				if err := privateAccountProven(n.Home, n.Identity); err != nil {
+				if err := requirePrivateSnapshot(n); err != nil {
 					t.Fatal(err)
 				}
 			}

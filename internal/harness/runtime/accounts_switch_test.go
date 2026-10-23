@@ -494,7 +494,7 @@ func TestFailedSwitchSavesNoNewAccounts(t *testing.T) {
 		}
 		login.Identity = "grok:recorded-by-older-dyna"
 		state.Find(stale.ID).Identity = login.Identity
-		return errors.Join(writeAccountLogin(stale.Home, login), writePrivateAccountOrigin(stale.Home, login.Identity))
+		return writeAccountLogin(stale.Home, login)
 	}, true); err != nil {
 		t.Fatal(err)
 	}

@@ -331,9 +331,7 @@ func (a *Accounts) saveOutgoing(state *store.State, h string, c native.Captured,
 		}
 	}
 	if requirePrivateAccount(h) {
-		if err = writePrivateAccountOrigin(n.Home, c.Identity); err != nil {
-			return err
-		}
+		entry.PrivateProof = &store.PrivateProof{Version: 1, Identity: c.Identity}
 	}
 	entry.NeedsLogin = false
 	entry.UpdatedAt = time.Now().UTC()
@@ -719,7 +717,7 @@ func (a *Accounts) BeginLogin(ctx context.Context, id, executable string) (*Nati
 	if err = prepareAccountLogin(n.Harness, home, overrides); err != nil {
 		return nil, err
 	}
-	freshRequired := requirePrivateAccount(n.Harness) && privateAccountProven(n.Home, n.Identity) != nil
+	freshRequired := requirePrivateAccount(n.Harness) && !privateProofHolds(n.Identity, n.proof)
 	outgoing, err := manager.Capture(ctx, "")
 	if err != nil && !errors.Is(err, native.ErrNotSignedIn) {
 		return nil, err
@@ -837,9 +835,7 @@ func (a *Accounts) BeginLogin(ctx context.Context, id, executable string) (*Nati
 				return e
 			}
 			if requirePrivateAccount(n.Harness) {
-				if e = writePrivateAccountOrigin(n.Home, selected.Identity); e != nil {
-					return e
-				}
+				entry.PrivateProof = &store.PrivateProof{Version: 1, Identity: selected.Identity}
 			}
 			entry.Identity = selected.Identity
 			entry.Integration = selected.Integration

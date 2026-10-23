@@ -20,6 +20,7 @@ import (
 )
 
 type NativeAccount struct {
+	proof     *store.PrivateProof
 	prepared  *preparedAccount
 	ID        string     `json:"id"`
 	Harness   string     `json:"harness"`
@@ -158,7 +159,7 @@ func (a *Accounts) native(e *store.Entry) (NativeAccount, error) {
 		return NativeAccount{}, errAccountPath
 	}
 	status := "ready"
-	if e.NeedsLogin || e.Identity == "" || requirePrivateAccount(h) && privateAccountProven(home, e.Identity) != nil {
+	if e.NeedsLogin || e.Identity == "" || requirePrivateAccount(h) && !privateProofHolds(e.Identity, e.PrivateProof) {
 		status = "not signed in"
 	}
 	var expiresAt *time.Time
@@ -191,7 +192,7 @@ func (a *Accounts) native(e *store.Entry) (NativeAccount, error) {
 			}
 		}
 	}
-	return NativeAccount{ID: e.ID, Harness: h, Label: e.Label, Home: home, Identity: e.Identity, Status: status, Active: active == e.ID, ExpiresAt: expiresAt}, nil
+	return NativeAccount{ID: e.ID, Harness: h, Label: e.Label, Home: home, Identity: e.Identity, Status: status, Active: active == e.ID, ExpiresAt: expiresAt, proof: e.PrivateProof}, nil
 }
 
 func (a *Accounts) Create(harness, label string) (result NativeAccount, err error) {
