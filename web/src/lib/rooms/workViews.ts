@@ -29,7 +29,7 @@ export const sections: Section[] = [
       { id: 'questions', label: 'questions', hint: 'Questions agents ask while they keep working', tabs: [{ id: 'questions', label: 'Questions' }] },
       { id: 'goals', label: 'goals', hint: 'Goals with keeper checks', tabs: [{ id: 'goals', label: 'Goals' }] },
       { id: 'runs', label: 'runs', hint: 'Workflow runs', tabs: [{ id: 'runs', label: 'Workflows' }, { id: 'jobs', label: 'Shell jobs', hidden: true }] },
-      { id: 'services', label: 'services', hint: 'What agents and services did, and their sessions', tabs: [{ id: 'services', label: 'Services' }] },
+      { id: 'services', label: 'services', hint: 'What each service is doing, what it just did, and what runs next', tabs: [{ id: 'services', label: 'Services' }] },
       { id: 'visuals', label: 'visuals', hint: 'Every HTML card in this room', tabs: [{ id: 'visuals', label: 'Visuals' }] },
     ],
   },
