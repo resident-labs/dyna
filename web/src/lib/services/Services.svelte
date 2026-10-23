@@ -17,7 +17,6 @@
   // its overlaps and the watcher's last poll, so the page takes the list rows
   // the room already holds.
   type ChangeLike = Pick<ChangeRow, 'reviewAt' | 'number' | 'title' | 'verdict' | 'reviewerSession' | 'kind' | 'watching' | 'checked' | 'error'> & { overlaps?: { length: number } | number }
-
   let { roomId, repo = '', members = [], changes = [], onopen, onopenhealth }: {
     roomId: string
     repo?: string

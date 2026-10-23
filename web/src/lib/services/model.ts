@@ -100,7 +100,6 @@ export interface ChangeRow {
   verdict?: string
   overlaps?: { length: number } | number
   reviewerSession?: string
-  state?: string
   kind?: string
   // watching is true while the watcher polls this change; checked is when it
   // last polled and error is why that poll could not finish.
@@ -115,12 +114,16 @@ export interface SyncRemote {
   lastError: string
 }
 
-// SyncInfo is what the page reads from the lane sync status: each local lane
-// remote's last check and error, and the error of an export that failed.
+// SyncInfo is what the page reads for one repository from the lane sync status:
+// each local lane remote's last check, and the error of an export that failed.
 export interface SyncInfo {
   remotes: SyncRemote[]
   operationError: string
 }
+
+// SyncInfoByRepo is the lane sync status keyed by the repository's path, as the
+// engine stores it. The page shows the row for the room's own repository.
+export type SyncInfoByRepo = Record<string, SyncInfo>
 
 export interface Inputs {
   reviewer: ReviewerInfo | null
@@ -140,7 +143,7 @@ export interface Inputs {
   voice: string | null
   changes: ChangeRow[]
   testHealth: TestHealth | null
-  laneSync: SyncInfo | null
+  laneSync: SyncInfoByRepo | null
   repo: string
 }
 
@@ -192,6 +195,10 @@ export function hhmm(iso: string): string {
   if (!Number.isFinite(d.getTime())) return ''
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
+
+// seen drops an unset time. The engine sends an unset time as the zero time
+// "0001-01-01T00:00:00Z", not as an empty string.
+const seen = (iso?: string): string => (iso && new Date(iso).getFullYear() > 1 ? iso : '')
 
 // msDuration names a millisecond limit in words: 1000 as "1 s", 10000 as "10 s".
 export function msDuration(ms: number): string {
@@ -341,10 +348,12 @@ export function buildRows(i: Inputs): Row[] {
   })
 
   // PR watcher: the engine polls each open change's pull request, so its last
-  // tick and the error from the newest poll are the row's state. It has no
-  // switch, because the review and merge flow reads what it polls.
-  const watched = i.changes.filter((c) => c.watching === true && c.kind !== 'local')
-  const polled = watched.map((c) => c.checked ?? '').filter(Boolean).sort().at(-1) ?? ''
+  // tick and the error of the newest failed poll are the row's state. It has
+  // no switch, because the review and merge flow reads what it polls.
+  const watched = i.changes
+    .filter((c) => c.watching === true && c.kind !== 'local')
+    .sort((a, b) => seen(b.checked).localeCompare(seen(a.checked)))
+  const polled = watched.map((c) => seen(c.checked)).find(Boolean) ?? ''
   const pollError = watched.find((c) => c.error)?.error?.split('\n')[0] ?? ''
   rows.push({
     ...base,
@@ -359,25 +368,31 @@ export function buildRows(i: Inputs): Row[] {
     nextText: 'each minute',
   })
 
-  // Lane sync fetches each local lane remote on its own timer, and a remote's
-  // last error is the row's error. It has no switch, because integration and
+  // Lane sync fetches this room's lane remotes on its own timer, and a fetch or
+  // export error is the row's error. It has no switch, because integration and
   // the PR gates read what it fetches.
-  const lane = i.laneSync
-  const remoteError = lane?.remotes.find((r) => r.lastError)?.lastError.split('\n')[0] ?? lane?.operationError ?? ''
-  const fetched = lane?.remotes.map((r) => r.checkedAt).filter(Boolean).sort().at(-1) ?? ''
+  const laneStatus = i.laneSync
+  const lane = laneStatus && i.repo ? laneStatus[i.repo] ?? null : null
+  const laneError = [
+    lane?.remotes.find((r) => r.lastError)?.lastError.split('\n')[0] ?? '',
+    lane?.operationError ?? '',
+  ].filter(Boolean).join(' · ')
+  const fetched = lane?.remotes.map((r) => seen(r.checkedAt)).find(Boolean) ?? ''
   rows.push({
     ...base,
     id: 'lanesync',
     name: 'Lane sync',
-    state: 'on',
-    tone: lane === null ? 'off' : remoteError ? 'error' : 'on',
-    detail: lane === null
+    state: laneStatus === null ? unknown : 'on',
+    tone: laneStatus === null ? 'off' : laneError ? 'error' : 'on',
+    detail: laneStatus === null
       ? 'Lane status could not be read'
-      : remoteError
-        ? [remoteError, fetched ? `last fetch ${hhmm(fetched)}` : ''].filter(Boolean).join(' · ')
-        : lane.remotes.length
-          ? `Fetches ${lane.remotes.length} lane ${lane.remotes.length === 1 ? 'remote' : 'remotes'} every 5 min · ${fetched ? `last fetch ${hhmm(fetched)}` : 'no fetch yet'}`
-          : 'No lane remotes set up',
+      : !i.repo
+        ? 'No repository for this room'
+        : !lane
+          ? 'No lane remotes set up for this repository'
+          : laneError
+            ? [laneError, fetched ? `last fetch ${hhmm(fetched)}` : ''].filter(Boolean).join(' · ')
+            : `Fetches ${lane.remotes.length} lane ${lane.remotes.length === 1 ? 'remote' : 'remotes'} every 5 min · ${fetched ? `last fetch ${hhmm(fetched)}` : 'no fetch yet'}`,
     last: fetched,
     nextText: 'every 5 min',
   })

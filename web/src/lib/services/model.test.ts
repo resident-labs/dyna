@@ -111,23 +111,32 @@ test('a busy reviewer names a provider limit once, and an idle one ignores it', 
 test('the watcher and lane sync show their last tick, schedule and error', () => {
   const tick = '2026-10-21T22:52:00Z'
   const changes = [
-    { state: 'open', kind: 'github', watching: true, checked: '2026-10-21T22:49:00Z' },
-    { state: 'open', kind: 'github', watching: true, checked: tick },
-    { state: 'merged', kind: 'github', watching: false, checked: '2026-10-21T22:20:00Z' },
+    { kind: 'github', watching: true, checked: '2026-10-21T22:49:00Z', error: 'old poll failed' },
+    { kind: 'github', watching: true, checked: tick, error: 'rate limited' },
+    { kind: 'github', watching: false, checked: '2026-10-21T22:58:00Z', error: 'merged change' },
   ]
   const watcher = row({ changes }, 'watcher')
   assert.equal(watcher.state, 'on')
-  assert.equal(watcher.tone, 'on')
-  assert.equal(watcher.detail, `Watches 2 open changes each minute · last tick ${hhmm(tick)}`)
-  assert.equal(watcher.nextText, 'each minute')
-  // A failed poll is the row's error and keeps the last good tick.
-  const failed = row({ changes: [{ ...changes[1], error: 'GitHub rate limit\nlater' }] }, 'watcher')
-  assert.equal(failed.tone, 'error')
-  assert.equal(failed.detail, `GitHub rate limit · last tick ${hhmm(tick)}`)
+  assert.equal(watcher.tone, 'error')
+  // The newest failed poll is the row's error, and the last tick still shows.
+  assert.equal(watcher.detail, `rate limited · last tick ${hhmm(tick)}`)
+  const clean = changes.slice(0, 2).map((c) => ({ ...c, error: '' }))
+  assert.equal(row({ changes: clean }, 'watcher').detail, `Watches 2 open changes each minute · last tick ${hhmm(tick)}`)
+  assert.equal(row({ changes: clean }, 'watcher').nextText, 'each minute')
+  // The engine sends an unset time as the zero time, which is not a tick.
+  assert.equal(row({ changes: [{ kind: 'github', watching: true, checked: '0001-01-01T00:00:00Z' }] }, 'watcher').detail, 'Watches 1 open change each minute · no tick yet')
 
-  const lane = row({ laneSync: { remotes: [{ checkedAt: '2026-10-21T22:50:00Z', lastError: '' }], operationError: '' } }, 'lanesync')
-  assert.equal(lane.detail, `Fetches 1 lane remote every 5 min · last fetch ${hhmm('2026-10-21T22:50:00Z')}`)
-  assert.equal(row({ laneSync: { remotes: [{ checkedAt: '', lastError: 'git fetch failed' }], operationError: '' } }, 'lanesync').tone, 'error')
-  assert.equal(row({ laneSync: { remotes: [], operationError: 'export failed' } }, 'lanesync').detail, 'export failed')
-  assert.equal(row({}, 'lanesync').detail, 'Lane status could not be read')
+  const lane = (checkedAt: string, lastError = '') => ({ remotes: [{ checkedAt, lastError }], operationError: '' })
+  const laneSync = { '/repo': lane('2026-10-21T22:50:00Z'), '/other': lane('2026-10-21T22:59:00Z', 'other repo failed') }
+  assert.equal(row({ laneSync }, 'lanesync').detail, `Fetches 1 lane remote every 5 min · last fetch ${hhmm('2026-10-21T22:50:00Z')}`)
+  // A remote error and a failed export both show.
+  assert.equal(row({ laneSync: { '/repo': { remotes: [{ checkedAt: '', lastError: 'git fetch failed' }], operationError: 'export failed' } } }, 'lanesync').detail, 'git fetch failed · export failed')
+  assert.equal(row({ laneSync: { '/repo': { remotes: [], operationError: 'export failed' } } }, 'lanesync').detail, 'export failed')
+  assert.equal(row({ laneSync: { '/repo': lane('0001-01-01T00:00:00Z') } }, 'lanesync').detail, 'Fetches 1 lane remote every 5 min · no fetch yet')
+  // A repository the engine does not fetch, and an unreadable status, say so.
+  assert.equal(row({ laneSync: { '/other': lane('2026-10-21T22:50:00Z') } }, 'lanesync').detail, 'No lane remotes set up for this repository')
+  const unreadable = row({}, 'lanesync')
+  assert.equal(unreadable.state, 'unknown')
+  assert.equal(unreadable.tone, 'off')
+  assert.equal(unreadable.detail, 'Lane status could not be read')
 })
