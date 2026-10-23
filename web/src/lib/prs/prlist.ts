@@ -1,6 +1,6 @@
 // What the Pull requests screen shows: the list groups, one chip per row, and
 // the detail's status box. The functions are pure; GitHub.svelte and
-// StatusBox.svelte draw the result.
+// PRDetail.svelte draw the result.
 import type { BotReview, ChangePolicy, Finding, MainCI, MergeQueueItem, MergeTrialStatus, Overlap } from '../api/change.ts'
 import type { GitHubItem, GitHubUser } from '../api/github.ts'
 import { ordinal, verdictMeta, isLocal, prTracks, withCI, checkSummary, checkMeta, type Facts, type Meta } from './pr.ts'

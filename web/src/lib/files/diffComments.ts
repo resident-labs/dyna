@@ -17,6 +17,13 @@ export const addComment = (pending: DiffComment[], c: DiffComment): DiffComment[
 
 export const sendLabel = (n: number, author?: string): string => `Send ${n} ${n === 1 ? 'comment' : 'comments'}${author ? ` to ${author}` : ''}`
 
+// Keep each line reference and its code with the comment in the agent's chat.
+export function formatComments(comments: DiffComment[]): string {
+  return comments.map(({ file, line, quote, text }) =>
+    `${file}:${line}\n${quote.split('\n').map((part) => '> ' + part).join('\n')}\n\n${text}`,
+  ).join('\n\n')
+}
+
 // sendPending delivers the comments pending now in one call and keeps any added while it runs.
 export async function sendPending(
   deliver: (comments: DiffComment[]) => unknown,

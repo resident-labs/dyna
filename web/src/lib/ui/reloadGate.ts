@@ -57,6 +57,7 @@ export function createReloadGate<S extends Selection>(selection: () => S, visibl
 
 type Visibility = {
   view: string
+  reviewOpen?: boolean
   drill?: Partial<Member> | null
   showRoomSettings?: boolean
   memberChips?: boolean
@@ -65,12 +66,12 @@ type Visibility = {
   controlsOpen?: boolean
 }
 
-export function listVisible(name: string, { view, drill, showRoomSettings, memberChips, sidebarChips, sideVisible, controlsOpen }: Visibility) {
+export function listVisible(name: string, { view, drill, showRoomSettings, memberChips, sidebarChips, sideVisible, controlsOpen, reviewOpen }: Visibility) {
   if (name === 'roomControls') return !!memberChips || !!showRoomSettings || !!controlsOpen
   if (name === 'computers') return !!memberChips || !!sideVisible || !!drill || view === 'computers'
   if (name === 'mentions') return !drill && isChannel(view)
-  // Changes rows feed the PR screen, a session's PR tab and the PR chips.
-  if (name === 'changes' || name === 'reviewer') return (!drill && view === 'github') || !!drill || !!showRoomSettings || !!memberChips || !!sidebarChips
+  // Changes rows feed the PR screen, the review workspace and the PR chips.
+  if (name === 'changes' || name === 'reviewer') return !!reviewOpen || (!drill && view === 'github') || !!drill || !!showRoomSettings || !!memberChips || !!sidebarChips
   // Goal priority also feeds PR controls and the agent and PR badges.
   if (name === 'goals') return !!memberChips || !!sidebarChips || !!drill || view === 'github' || view === 'goals' || isChannel(view)
   // Cards in chat, a session's media and the Visuals view all show the
