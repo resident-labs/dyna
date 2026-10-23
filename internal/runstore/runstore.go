@@ -9,11 +9,12 @@ import (
 	"context"
 	"crypto/rand"
 	"database/sql"
+	"dyna-agent/internal/callspec"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -229,7 +230,11 @@ type Run struct {
 	Dir  string
 	Meta Meta
 
-	mu sync.Mutex
+	mu                sync.Mutex
+	recordDirectories func([]string) error
+	finishRun         func(callspec.RunFinish) (Meta, error)
+	directoryErr      error
+	finishing         bool
 	// dirs is the path of the list of every worker directory that the run's
 	// events and journal name, so worktree owner lookup reads it instead of
 	// the large journals. It is "" when the run keeps no list.
@@ -420,6 +425,15 @@ func (r *Run) SnapshotOutputProfiles(profiles []workeroutput.ProfileSnapshot) er
 	return nil
 }
 
+// SetWriters attaches the coordinator before workflow artifacts are written.
+// Callbacks run under the run lock and must not re-enter this Run.
+func (r *Run) SetWriters(record func([]string) error, finish func(callspec.RunFinish) (Meta, error)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.recordDirectories, r.finishRun = record, finish
+	r.dirsSeen = map[string]bool{}
+}
+
 // recordDirs adds worker directories to the run's list once each, before the
 // entry that names them is written. The caller holds r.mu. A list that misses
 // a directory would hide an owner from cleanup, so a failed write deletes the
@@ -427,6 +441,30 @@ func (r *Run) SnapshotOutputProfiles(profiles []workeroutput.ProfileSnapshot) er
 // stale list cannot be deleted and the entry names a directory: the caller
 // must then not write the entry.
 func (r *Run) recordDirs(dirs ...string) bool {
+	if r.recordDirectories != nil {
+		var pending []string
+		for _, dir := range dirs {
+			if dir != "" && !r.dirsSeen[dir] {
+				pending = append(pending, dir)
+			}
+		}
+		if len(pending) == 0 {
+			return true
+		}
+		var err error
+		if r.finishing {
+			err = fmt.Errorf("run is already finishing")
+		} else {
+			err = r.recordDirectories(pending)
+		}
+		if err != nil {
+			r.directoryErr = errors.Join(r.directoryErr, err)
+			return false
+		}
+	}
+	// TODO: legacy/shim remove later — retain the directory index for the current
+	// worktree ownership reader until it consumes canonical SQLite evidence.
+	// Coordinator writes above acknowledge that evidence before this copy.
 	for _, dir := range dirs {
 		if r.dirsStale {
 			break
@@ -758,21 +796,39 @@ func ReadMetaIn(runsRoot, id string) (Meta, error) {
 	return metaAt(db, filepath.Join(runsRoot, id), id)
 }
 
-// Finish closes the run, writing result.json and final meta.
-func (r *Run) Finish(status string, resultJSON string, runErr error) {
-	errMsg := ""
-	if runErr != nil {
-		errMsg = runErr.Error()
-	}
+// Finish writes the result artifact and returns only after terminal state is acknowledged.
+func (r *Run) Finish(status string, resultJSON string, runErr error) error {
+	var artifactErr error
 	if resultJSON != "" {
-		os.WriteFile(filepath.Join(r.Dir, "result.json"), []byte(resultJSON+"\n"), 0o644)
+		if err := os.WriteFile(filepath.Join(r.Dir, "result.json"), []byte(resultJSON+"\n"), 0o644); err != nil {
+			artifactErr = fmt.Errorf("write run result: %w", err)
+		}
 	}
-	if m, _, err := endRun(r.Dir, r.Meta.ID, status, errMsg, time.Now()); err != nil {
-		log.Printf("run %s: finish: %v", r.Meta.ID, err)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.finishing = true
+	completionErr := errors.Join(artifactErr, r.directoryErr)
+	errMsg := ""
+	if combined := errors.Join(runErr, completionErr); combined != nil {
+		errMsg = combined.Error()
+	}
+	if completionErr != nil && status == "ok" {
+		status = "error"
+	}
+	var meta Meta
+	var err error
+	if r.finishRun != nil {
+		meta, err = r.finishRun(callspec.RunFinish{Run: r.Meta.ID, Status: status, Error: errMsg, EndedAt: time.Now(), DirectoriesComplete: r.directoryErr == nil})
 	} else {
-		// A cancel that ended the run first keeps its status.
-		r.Meta = m
+		// TODO: legacy/shim remove later — standalone callers still finalize locally;
+		// workflow coordinators always attach the engine writer before execution.
+		meta, _, err = endRun(r.Dir, r.Meta.ID, status, errMsg, time.Now())
 	}
+	if err != nil {
+		return errors.Join(completionErr, fmt.Errorf("finish run: %w", err))
+	}
+	r.Meta = meta
+	return completionErr
 }
 
 // List returns metadata for all live runs, newest first. Archived runs, and a

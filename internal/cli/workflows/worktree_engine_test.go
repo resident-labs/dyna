@@ -43,6 +43,9 @@ func serveRunEngineAt(t *testing.T, dataDir string, extra ...map[string]websvc.C
 			return call(authority.WithActor(ctx, authority.Actor{Role: authority.Owner}), args)
 		}
 	}
+	for name, call := range workflowLifecycleCalls(t) {
+		calls[name] = call
+	}
 	for _, more := range extra {
 		maps.Copy(calls, more)
 	}
