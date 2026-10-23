@@ -1,10 +1,11 @@
-<script>
+<script lang="ts">
   import { untrack } from 'svelte'
   import Segmented from '../ui/Segmented.svelte'
   // One repository file: code with line numbers and syntax colors, an
   // image, rendered markdown (with a Source switch), or a note for a binary
   // file. The server caps text at 2 MiB and says when it cut a file.
   import { api, copyText } from '../../api.ts'
+  import { errorText } from '../errorText.ts'
   import { human } from './attach.ts'
   import { markdownDocument } from './preview.ts'
   import Document from './Document.svelte'
@@ -13,16 +14,42 @@
   import { crumbs, isMarkdown } from './repo.ts'
   import History from './History.svelte'
   import { ago } from '../ui/format.ts'
+  import type { GitBlameResult, GitCommit, WorkspaceFile } from '../api/file.ts'
 
-  let { roomId, session = '', path, rootLabel = '', narrow = false, at = '', was = '', onat = null, onfolder, onback = null } = $props()
+  interface Props {
+    roomId: string
+    session?: string
+    path: string
+    rootLabel?: string
+    narrow?: boolean
+    at?: string
+    was?: string
+    onat?: ((hash: string, path: string) => void) | null
+    onfolder: (path: string) => void
+    onback?: (() => void) | null
+  }
+  // A version of the file to show: the now-version is null while one is chosen.
+  interface FileVersion {
+    hash: string
+    shortHash: string
+    path?: string
+    author?: string
+    time?: string
+  }
+  interface LineBlock {
+    start: number
+    lines: string[]
+  }
 
-  let file = $state(null)
+  let { roomId, session = '', path, rootLabel = '', narrow = false, at = '', was = '', onat = null, onfolder, onback = null }: Props = $props()
+
+  let file = $state<WorkspaceFile | null>(null)
   let error = $state('')
   let html = $state('')
   let mode = $state('rendered') // markdown: rendered or source
   let copied = $state(false)
   let copyError = $state(false)
-  let copyTimer
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
   $effect(() => {
     path
     copied = false
@@ -31,9 +58,9 @@
   })
   let historyOpen = $state(false)
   // A linked version starts as its commit alone; a History row adds the details.
-  const stub = (hash, path) => (hash ? { hash, shortHash: hash.slice(0, 7), path } : null)
-  let version = $state(untrack(() => stub(at, was))) // the history row whose version is shown; null shows the file now
-  function show(v) {
+  const stub = (hash: string, path: string): FileVersion | null => (hash ? { hash, shortHash: hash.slice(0, 7), path } : null)
+  let version = $state<FileVersion | null>(untrack(() => stub(at, was))) // the history row whose version is shown; null shows the file now
+  function show(v: FileVersion | null) {
     version = v
     onat?.(v?.hash ?? '', v?.path ?? '')
   }
@@ -44,24 +71,24 @@
     untrack(() => { if ((version?.hash ?? '') !== hash) version = stub(hash, path) })
   })
   let blameOn = $state(false)
-  let blame = $state(null)
+  let blame = $state<GitBlameResult | null>(null)
   let blameError = $state('')
 
-  let name = $derived(path.split('/').pop())
+  let name = $derived(path.split('/').pop() ?? '')
   let lang = $derived(file ? languageOf(name, file.language) : '')
-  let md = $derived(file && !file.binary && isMarkdown(name, file.language))
+  let md = $derived(!!file && !file.binary && isMarkdown(name, file.language))
   let lineCount = $derived(file?.text ? file.text.split('\n').length - (file.text.endsWith('\n') ? 1 : 0) : 0)
   // One row per line, in blocks the browser can skip drawing off screen.
-  let blocks = $derived.by(() => {
+  let blocks = $derived.by((): LineBlock[] => {
     const lines = splitLines(html)
     if (file?.text?.endsWith('\n')) lines.pop()
-    const out = []
+    const out: LineBlock[] = []
     for (let i = 0; i < lines.length; i += 400) out.push({ start: i, lines: lines.slice(i, i + 400) })
     return out
   })
   let digits = $derived(String(Math.max(1, lineCount)).length)
 
-  let metaText = $derived(file ? [file.binary ? (file.url ? 'image' : 'binary') : lang || 'text', human(file.size), ...(file.binary ? [] : [`${lineCount} line${lineCount === 1 ? '' : 's'}`])].join(' · ') : '')
+  let metaText = $derived(file ? [file.binary ? (file.url ? 'image' : 'binary') : String(lang || 'text'), human(file.size), ...(file.binary ? [] : [`${lineCount} line${lineCount === 1 ? '' : 's'}`])].join(' · ') : '')
 
   $effect(() => {
     const p = path
@@ -81,7 +108,7 @@
           if (current) html = h
         }
       },
-      (e) => { if (current) error = String(e?.message || e) },
+      (e: unknown) => { if (current) error = errorText(e) },
     )
     return () => { current = false }
   })
@@ -94,11 +121,11 @@
     blameError = ''
     api.gitBlame(roomId, session, p).then(
       (b) => { if (p === path) blame = b },
-      (e) => { if (p === path) blameError = String(e?.message || e) },
+      (e: unknown) => { if (p === path) blameError = errorText(e) },
     )
   })
   // The commit that last changed each line, keyed by the first line of its range.
-  let blameStarts = $derived(new Map((blame?.ranges ?? []).map((r) => [r.startLine, r.commit])))
+  let blameStarts = $derived(new Map<number, GitCommit>((blame?.ranges ?? []).map((r): [number, GitCommit] => [r.startLine, r.commit])))
 
   async function copyPath() {
     const selectedPath = path
@@ -138,7 +165,7 @@
     </nav>
     <span class="spacer"></span>
     {#if md}
-      <Segmented small label="Markdown view" options={[['rendered', 'Preview'], ['source', 'Source']]} value={mode} onchange={(v) => (mode = v)} />
+      <Segmented small label="Markdown view" options={[['rendered', 'Preview'], ['source', 'Source']]} value={mode} onchange={(v: string) => (mode = v)} />
     {/if}
     {#if file && !file.binary && !(md && mode === 'rendered')}
       <button class="tool" class:on={code.wrap} aria-pressed={code.wrap} onclick={() => setWrap(!code.wrap)} title={code.wrap ? 'Show long lines on one line' : 'Wrap long lines'}>Wrap</button>
