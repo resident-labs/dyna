@@ -356,8 +356,14 @@ func TestReviewerCommandReturnsEveryPoolSlot(t *testing.T) {
 	if status.Reviewers[0].Current == nil || status.Reviewers[1].Current == nil || status.Reviewers[0].Current.PR != 12 || status.Reviewers[1].Current.PR != 13 || status.Reviewers[1].Status != "reviewing" {
 		t.Fatalf("pool status: %s", out.String())
 	}
-	if status.Session == nil || status.Session.ID != "s1" || status.Current == nil || status.Current.PR != 12 {
-		t.Fatalf("legacy first slot: %s", out.String())
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(out.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"session", "current"} {
+		if _, found := fields[key]; found {
+			t.Fatalf("top-level %s must be absent: %s", key, out.String())
+		}
 	}
 }
 
