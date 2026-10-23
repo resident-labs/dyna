@@ -6,10 +6,35 @@ export interface Part {
   hit: boolean
 }
 
-// snippet cuts the post text to about width characters, starting just
-// before the first matched word, on one line, and marks every match of the query words.
+// Goal IDs ("g317", "g317/i4") address work inside Dyna. An excerpt reads as
+// a sentence, so they are left out; a PR number such as "#288" stays. A
+// goal's item number goes too, so "Goal item i12 is done" reads "Goal item
+// is done".
+const GOAL_ID = /\bg\d+(?:\/i\d+)?\b/g
+const GOAL_ITEM = /\b(item\s+)i\d+\b/gi
+
+// plainText drops the markup a post body may hold: code marks, emphasis,
+// link targets, list bullets, headings, quotes, and goal IDs.
+function plainText(text: string): string {
+  return text
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // a link keeps its words
+    .replace(/^\s*(?:#{1,6}\s+|>+\s*)/gm, '') // headings and quotes
+    .replace(/^\s*(?:[-*+]|\d{1,2}[.)])\s+/gm, '') // list bullets and numbers
+    .replace(/```[^\n]*/g, '') // code fence marks
+    .replace(/`+|\*{1,3}|~~/g, '') // code and emphasis marks
+    .replace(GOAL_ID, '')
+    .replace(GOAL_ITEM, '$1')
+    .replace(/\s+([,.;:!?])/g, '$1') // a full stop left behind by a goal ID
+    .replace(/(?:\s*·\s*){2,}/g, ' · ') // separators left around a goal ID
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+// snippet cuts the post text to about width characters, starting at a word
+// just before the first matched word, on one line, and marks every match of
+// the query words.
 export function snippet(text: string, query: string, width = 140): Part[] {
-  const flat = text.replace(/\s+/g, ' ').trim()
+  const flat = plainText(text)
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   const lower = flat.toLowerCase()
   // A post that matched only on its sender shows from its start.
@@ -20,6 +45,10 @@ export function snippet(text: string, query: string, width = 140): Part[] {
   let start = first > lead ? first - lead : 0
   const end = Math.min(flat.length, start + width)
   start = Math.max(0, Math.min(start, end - width))
+  // Cut at a word, not inside one: "…R #288" reads as "…open PR #288". The
+  // move never passes the first match, which must stay on screen.
+  const space = start > 0 ? flat.indexOf(' ', start) : -1
+  if (space > 0 && space < first && space < end) start = space + 1
   const cut = (start > 0 ? '…' : '') + flat.slice(start, end) + (end < flat.length ? '…' : '')
   return marks(cut, words)
 }
