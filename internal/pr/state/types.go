@@ -131,29 +131,33 @@ type Record struct {
 	// CIBudgetSteps marks verdicts measured from runner step execution.
 	CIBudgetSteps map[string]bool `json:"ciBudgetSteps,omitempty"`
 	// CIQueueWait is time jobs waited for a runner, per run. It never counts against the budget.
-	CIQueueWait       map[string]string     `json:"ciQueueWait,omitempty"`
-	PolicyOverride    changepolicy.Override `json:"policyOverride"`
-	Landing           *Landing              `json:"landing,omitempty"`
-	ChangeID          string                `json:"changeId,omitempty"`
-	GoalID            string                `json:"goalId,omitempty"` // goal of the same room that this change serves
-	Kind              string                `json:"kind,omitempty"`
-	RepoPath          string                `json:"repoPath,omitempty"`
-	BaseRef           string                `json:"baseRef,omitempty"`
-	BaseRetargetSeen  time.Time             `json:"baseRetargetSeen,omitempty"` // a base change that waits for the parent's merge
-	Notes             AuthorNotes           `json:"notes"`
-	Category          string                `json:"category,omitempty"`
-	Dependencies      []string              `json:"dependencies,omitempty"`
-	Findings          []Finding             `json:"findings"`
-	RequiredReviewers []string              `json:"requiredReviewers,omitempty"`
-	ReviewRounds      []ReviewRound         `json:"reviewRounds"`
-	CITestPolicy      string                `json:"ciTestPolicy,omitempty"`
-	CITestReportNote  string                `json:"ciTestReportNote,omitempty"`
-	CINoJUnitWarned   bool                  `json:"ciNoJUnitWarned,omitempty"`
-	CITestHead        string                `json:"ciTestHead,omitempty"`
-	CITestErrors      map[string]string     `json:"ciTestErrors,omitempty"`
-	CITestFailures    map[string]string     `json:"ciTestFailures,omitempty"`
-	CITestRuns        map[string]string     `json:"ciTestRuns,omitempty"`
-	CITestRetries     map[string]int        `json:"ciTestRetries,omitempty"`
+	CIQueueWait      map[string]string     `json:"ciQueueWait,omitempty"`
+	PolicyOverride   changepolicy.Override `json:"policyOverride"`
+	Landing          *Landing              `json:"landing,omitempty"`
+	ChangeID         string                `json:"changeId,omitempty"`
+	GoalID           string                `json:"goalId,omitempty"` // goal of the same room that this change serves
+	Kind             string                `json:"kind,omitempty"`
+	RepoPath         string                `json:"repoPath,omitempty"`
+	BaseRef          string                `json:"baseRef,omitempty"`
+	BaseRetargetSeen time.Time             `json:"baseRetargetSeen,omitempty"` // a base change that waits for the parent's merge
+	Notes            AuthorNotes           `json:"notes"`
+	Category         string                `json:"category,omitempty"`
+	Dependencies     []string              `json:"dependencies,omitempty"`
+	// Fixes holds the issues a merge closes: room issues (D-N) and GitHub issues (#N).
+	Fixes []IssueRef `json:"fixes,omitempty"`
+	// MergeCommit is the commit that merged the PR, recorded when it closed the fixes.
+	MergeCommit       string            `json:"mergeCommit,omitempty"`
+	Findings          []Finding         `json:"findings"`
+	RequiredReviewers []string          `json:"requiredReviewers,omitempty"`
+	ReviewRounds      []ReviewRound     `json:"reviewRounds"`
+	CITestPolicy      string            `json:"ciTestPolicy,omitempty"`
+	CITestReportNote  string            `json:"ciTestReportNote,omitempty"`
+	CINoJUnitWarned   bool              `json:"ciNoJUnitWarned,omitempty"`
+	CITestHead        string            `json:"ciTestHead,omitempty"`
+	CITestErrors      map[string]string `json:"ciTestErrors,omitempty"`
+	CITestFailures    map[string]string `json:"ciTestFailures,omitempty"`
+	CITestRuns        map[string]string `json:"ciTestRuns,omitempty"`
+	CITestRetries     map[string]int    `json:"ciTestRetries,omitempty"`
 
 	CIStaleCleanupHead string `json:"ciStaleCleanupHead,omitempty"`
 

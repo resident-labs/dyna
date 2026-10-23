@@ -20,7 +20,7 @@ func TestTrackLinksTheAuthorsGoalOnce(t *testing.T) {
 	if err != nil || mine == "" {
 		t.Fatalf("author has no goal: %q %v", mine, err)
 	}
-	got, err := e.svc.PRs.TrackPRRef(asAuthor, rec.ID, author.ID, "7", "", "")
+	got, err := e.svc.PRs.TrackPRRef(asAuthor, rec.ID, author.ID, "7", "", "", nil)
 	if err != nil || got.PR.GoalID != mine {
 		t.Fatalf("new PR must take the author's goal %s: %+v %v", mine, got.PR, err)
 	}
@@ -34,14 +34,14 @@ func TestTrackLinksTheAuthorsGoalOnce(t *testing.T) {
 		t.Fatalf("cleared link remained in cached detail: %+v %v", detail, err)
 	}
 	// A retrack never backfills or replaces a link unless a goal is named.
-	again, err := e.svc.PRs.TrackPRRef(asAuthor, rec.ID, author.ID, "7", "", "")
+	again, err := e.svc.PRs.TrackPRRef(asAuthor, rec.ID, author.ID, "7", "", "", nil)
 	if err != nil || again.Created || again.PR.GoalID != "" {
 		t.Fatalf("retrack changed the link: %+v %v", again, err)
 	}
-	if _, err := e.svc.PRs.TrackPRRef(asAuthor, rec.ID, author.ID, "7", "", "g999"); err == nil {
+	if _, err := e.svc.PRs.TrackPRRef(asAuthor, rec.ID, author.ID, "7", "", "g999", nil); err == nil {
 		t.Fatal("an unknown goal must be refused")
 	}
-	linked, err := e.svc.PRs.TrackPRRef(asAuthor, rec.ID, author.ID, "7", "", mine)
+	linked, err := e.svc.PRs.TrackPRRef(asAuthor, rec.ID, author.ID, "7", "", mine, nil)
 	if err != nil || linked.PR.GoalID != mine {
 		t.Fatalf("explicit goal must link: %+v %v", linked.PR, err)
 	}
@@ -64,7 +64,7 @@ func TestGoalLinkRequiresTheCurrentAuthor(t *testing.T) {
 			as := func(id string) context.Context {
 				return authority.WithActor(context.Background(), authority.Actor{Role: authority.Session, Session: id, Room: rec.ID})
 			}
-			got, err := e.svc.PRs.TrackPRRef(as(author.ID), rec.ID, author.ID, "7", "", "")
+			got, err := e.svc.PRs.TrackPRRef(as(author.ID), rec.ID, author.ID, "7", "", "", nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -77,7 +77,7 @@ func TestGoalLinkRequiresTheCurrentAuthor(t *testing.T) {
 				if method == "set" {
 					return e.svc.PRs.SetPRGoal(ctx, rec.ID, got.PR.Key, target)
 				}
-				_, err := e.svc.PRs.TrackPRRef(ctx, rec.ID, session, "7", "", target)
+				_, err := e.svc.PRs.TrackPRRef(ctx, rec.ID, session, "7", "", target, nil)
 				return err
 			}
 			if err := call(as(other.ID), other.ID); err == nil {
