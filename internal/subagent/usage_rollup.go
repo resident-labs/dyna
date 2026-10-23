@@ -49,10 +49,14 @@ func Migrate(dataDir string) error {
 	if _, err := s.usageDB(); err != nil {
 		return err
 	}
-	if _, err := s.turnsDB(); err != nil {
+	db, err := s.turnsDB()
+	if err != nil {
 		return err
 	}
 	if err := s.migrateRetainedTurns(); err != nil {
+		return err
+	}
+	if err := migrateStoredPrompts(db); err != nil {
 		return err
 	}
 	if err := s.migrateDeliveryReasons(); err != nil {
