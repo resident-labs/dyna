@@ -318,10 +318,14 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) erro
 			}
 		}
 	}
-	if ev.Event == "" {
-		// A run stored before it carried its event, whose hook is gone: the
-		// run's start post still names the event.
-		ev.Event = startEvent(ev, run)
+	if ev.Event == "" || run.Main == "" {
+		// A run stored before it kept its event, checkout or room: its start
+		// post names the event and the room its card is in, which is the
+		// session's own room for a session hook. Room wins over the event here,
+		// because the start post is the only record of where the card sits.
+		if rec, event := startPost(ev, run); event != "" {
+			ev.Event, ev.Room = event, rec.ID
+		}
 	}
 	if ev.Event == "" {
 		// Nothing names the event, and a result without one is refused. Leave
@@ -342,38 +346,53 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) erro
 	return err
 }
 
-// startEvent recovers the event that a run's start post named. A run stored
-// before it carried its event, whose hook was then removed, has no other source
-// for it, and a result without an event is refused.
-func startEvent(e Event, run Run) string {
+// startPost finds the start card of a run: the room it was posted in, and the
+// event that card names. A run stored before it kept its own room needs both,
+// because a session hook posts in the session's room. The session's address,
+// which the run records, names that room.
+func startPost(e Event, run Run) (room.Record, string) {
 	rooms := room.DefaultStore()
-	var rec room.Record
+	for _, rec := range startRooms(rooms, e, run) {
+		msgs, err := rooms.Messages(rec.ID)
+		if err != nil {
+			continue
+		}
+		for _, m := range msgs {
+			if h, ok := m.Hook(); ok && h.RunID == run.ID && h.State == room.HookRunning {
+				return rec, h.Event
+			}
+		}
+	}
+	return room.Record{}, ""
+}
+
+// startRooms lists the rooms a run's start card can be in: the room its event
+// named, the room of the session it ran for, and the repository's room.
+func startRooms(rooms *room.Store, e Event, run Run) []room.Record {
+	var out []room.Record
+	seen := map[string]bool{}
+	add := func(rec room.Record, ok bool) {
+		if ok && !seen[rec.ID] {
+			seen[rec.ID] = true
+			out = append(out, rec)
+		}
+	}
 	if e.Room != "" {
-		resolved, err := rooms.Resolve(e.Room)
-		if err != nil {
-			return ""
-		}
-		rec = resolved
-	} else {
-		root, err := room.RepoRoot(e.Repo)
-		if err != nil {
-			return ""
-		}
-		found := false
-		if rec, found, err = rooms.RepoRoom(root); err != nil || !found {
-			return ""
+		if rec, err := rooms.Resolve(e.Room); err == nil {
+			add(rec, true)
 		}
 	}
-	msgs, err := rooms.Messages(rec.ID)
-	if err != nil {
-		return ""
-	}
-	for _, m := range msgs {
-		if h, ok := m.Hook(); ok && h.RunID == run.ID && h.State == room.HookRunning {
-			return h.Event
+	// A session's address is its room name and its name, as in "dyna:root".
+	if name, _, ok := strings.Cut(run.RunnerSession, ":"); ok && name != "" {
+		if rec, err := rooms.Resolve(name); err == nil {
+			add(rec, true)
 		}
 	}
-	return ""
+	if root, err := room.RepoRoot(e.Repo); err == nil {
+		rec, found, err := rooms.RepoRoom(root)
+		add(rec, err == nil && found)
+	}
+	return out
 }
 
 // lastLogLine reads the end of a run's log for the line its settled card shows.

@@ -39,6 +39,7 @@ func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 	add(t, s, repo, updater)
 	add(t, s, repo, hook("finish", SessionFinish))
 	add(t, s, repo, hook("legacy", MainUpdated))
+	add(t, s, repo, hook("legacy-kept", MainUpdated))
 	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
 	start := func(h Hook, e Event, at time.Time) Run {
 		t.Helper()
@@ -64,8 +65,9 @@ func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 	// A session-finish run posts in its session's room, not the repository's.
 	session := start(Hook{Name: "finish", Event: SessionFinish, Command: "true", Timeout: "30s"}, Event{Event: SessionFinish, Room: sessionRoom.Name}, now.Add(-30*time.Minute))
 	// A run stored before it kept its event, checkout or room, whose hook is
-	// removed too. Only its start post still names the event.
-	legacy := start(Hook{Name: "legacy", Event: MainUpdated, Command: "true", Timeout: "30s"}, Event{Event: MainUpdated}, now.Add(-2*time.Hour))
+	// removed too and whose start card is in the session's room. Only that
+	// start post still names the event and the room.
+	legacy := start(Hook{Name: "legacy", Event: MainUpdated, Command: "true", Timeout: "30s"}, Event{Event: MainUpdated, Session: sessionRoom.Name + ":hook-runner"}, now.Add(-2*time.Hour))
 	saved, err := s.runs(ctx, r.ID, "legacy")
 	if err != nil || len(saved) != 1 {
 		t.Fatalf("legacy run = %+v, %v", saved, err)
@@ -75,7 +77,22 @@ func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 	if _, err := s.saveRun(ctx, old); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := rooms.PostEvent(repoRoom.ID, room.HookEvent{RunID: legacy.ID, Repo: repo, Hook: "legacy", Event: MainUpdated, State: room.HookRunning}, repoRoom.Name); err != nil {
+	if _, err := rooms.PostEvent(sessionRoom.ID, room.HookEvent{RunID: legacy.ID, Repo: repo, Hook: "legacy", Event: MainUpdated, State: room.HookRunning}, sessionRoom.Name); err != nil {
+		t.Fatal(err)
+	}
+	// A legacy session run whose hook is still configured: its event comes from
+	// the hook, but its room still comes from the start card.
+	kept := start(Hook{Name: "legacy-kept", Event: MainUpdated, Command: "true", Timeout: "30s"}, Event{Event: MainUpdated, Session: sessionRoom.Name + ":kept-runner"}, now.Add(-90*time.Minute))
+	keptSaved, err := s.runs(ctx, r.ID, "legacy-kept")
+	if err != nil || len(keptSaved) != 1 {
+		t.Fatalf("kept run = %+v, %v", keptSaved, err)
+	}
+	keptOld := keptSaved[0]
+	keptOld.Event, keptOld.Label, keptOld.Main, keptOld.Room = "", "", "", ""
+	if _, err := s.saveRun(ctx, keptOld); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rooms.PostEvent(sessionRoom.ID, room.HookEvent{RunID: kept.ID, Repo: repo, Hook: "legacy-kept", Event: MainUpdated, State: room.HookRunning}, sessionRoom.Name); err != nil {
 		t.Fatal(err)
 	}
 	// A run this engine began, which is still live.
@@ -93,7 +110,7 @@ func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 	}
 
 	runs, err := s.runs(ctx, r.ID, "")
-	if err != nil || len(runs) != 4 {
+	if err != nil || len(runs) != 5 {
 		t.Fatalf("runs = %+v, %v", runs, err)
 	}
 	byID := map[string]Run{}
@@ -114,7 +131,7 @@ func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 
 	// Each card ends with one typed result the room accepted.
 	repoResults := results(t, rooms, repoRoom)
-	if len(repoResults) != 2 {
+	if len(repoResults) != 1 {
 		t.Fatalf("repository results = %+v", repoResults)
 	}
 	ev, ok := repoResults[left.ID]
@@ -130,19 +147,24 @@ func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 	if ev.DurationMS != int(time.Hour.Milliseconds()) {
 		t.Fatalf("duration = %d", ev.DurationMS)
 	}
-	// A run with no stored event, checkout or room, whose hook is gone, still
-	// ends from the event its start post named.
-	recovered, ok := repoResults[legacy.ID]
-	if !ok || recovered.Event != MainUpdated || recovered.State != room.HookError {
-		t.Fatalf("recovered result = %+v, %+v", recovered, repoResults)
-	}
 	// A session hook's card ends in its own room.
 	sessionResults := results(t, rooms, sessionRoom)
 	if got, ok := sessionResults[session.ID]; !ok || got.Event != SessionFinish || got.Hook != "finish" || got.State != room.HookError {
 		t.Fatalf("session results = %+v", sessionResults)
 	}
+	// A legacy session run with no metadata ends in the session room its start
+	// card is in, with the event that card named.
+	recovered, ok := sessionResults[legacy.ID]
+	if !ok || recovered.Event != MainUpdated || recovered.Hook != "legacy" || recovered.State != room.HookError {
+		t.Fatalf("recovered result = %+v, %+v", recovered, sessionResults)
+	}
 	if _, ok := sessionResults[left.ID]; ok {
 		t.Fatal("the repository run ended in the session's room")
+	}
+	// A legacy session run whose hook is still configured ends in its session
+	// room, not the repository's.
+	if got, ok := sessionResults[kept.ID]; !ok || got.Event != MainUpdated || got.Hook != "legacy-kept" || got.State != room.HookError {
+		t.Fatalf("kept-hook result = %+v, %+v", got, sessionResults)
 	}
 }
 
