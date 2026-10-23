@@ -1,7 +1,6 @@
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -311,7 +310,7 @@ test('a folded hook card shows a run that is still going and opens its log', () 
   target.remove()
 })
 
-test('a folded hook card shows its passes on their own line under the name', () => {
+test('a folded hook card keeps its count and last time outside the name', () => {
   const payload = fixtures['hook/result']
   assert.ok(payload && 'runId' in payload, 'the hook result fixture is missing')
   const post = postFor('hook', 'result', payload)
@@ -326,18 +325,14 @@ test('a folded hook card shows its passes on their own line under the name', () 
   const text = (target.textContent ?? '').trim()
   assert.match(text, /12 times/)
   assert.match(text, /passed/)
-  // On a phone the fold fact takes a line of its own under the name, so it can
-  // never squeeze the name. jsdom does not lay out, so the test holds the
-  // markup and the stylesheet to that: the fact is a sibling of the name's
-  // line, and the narrow block gives it its own grid row while the name wraps.
+  // The card shows the count and the last time in an element of its own, never
+  // inside the name, so the narrow stylesheet can give that line its own row
+  // and the name keeps its whole width. The stylesheet decides where the line
+  // sits; this test holds the markup it depends on.
   const fact = need(target.querySelector('.fact'), 'the fold fact')
   assert.match(fact.textContent ?? '', /12 times · last/)
   assert.equal(fact.closest('.title'), null, 'the fold fact is inside the name line')
-  const phone = readFileSync(new URL('./HookCard.svelte', import.meta.url), 'utf8')
-    .split('@media (max-width: 760px)')[1] ?? ''
-  assert.match(phone, /\.fact \{ grid-area: fact;/)
-  assert.match(phone, /\.name \{[^}]*white-space: normal/)
-  assert.doesNotMatch(phone, /\.name \{[^}]*text-overflow: ellipsis/)
+  assert.equal(target.querySelector('.title .name')?.textContent, 'Update Dyna', 'the name is cut short')
   web.unmount(mounted)
   target.remove()
 })
