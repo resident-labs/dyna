@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,15 +26,8 @@ func savedCheckSummaries(r Record, snap Snapshot) []CheckSummary {
 }
 
 func failureExcerpt(text string, tail bool) string {
-	lines := strings.Split(strings.TrimSpace(Sanitize(text)), "\n")
+	lines := logLines(Sanitize(text))
 	if tail {
-		for i, line := range lines {
-			if prefix, rest, ok := strings.Cut(line, " "); ok {
-				if _, err := time.Parse(time.RFC3339Nano, prefix); err == nil {
-					lines[i] = rest
-				}
-			}
-		}
 		if blocks := failedGoBlocks(lines); len(blocks) > 0 {
 			return failureExcerpt(strings.Join(blocks, "\n"), false)
 		}
@@ -78,6 +72,51 @@ func failureExcerpt(text string, tail bool) string {
 		}
 	}
 	return strings.ToValidUTF8(text, "")
+}
+
+// ansiColors matches the color and cursor sequences a program writes for a
+// terminal: CSI, OSC and the short escape forms.
+var ansiColors = regexp.MustCompile("\\x1b\\[[0-9;?]*[ -/]*[@-~]|\\x1b\\][^\\x07\\x1b]*(?:\\x07|\\x1b\\\\)|\\x1b[@-Z\\\\-_]")
+
+// logTimestamp reports whether text starts with the time GitHub writes at the
+// start of each log line.
+func logTimestamp(text string) bool {
+	prefix, _, _ := strings.Cut(text, " ")
+	_, err := time.Parse(time.RFC3339Nano, prefix)
+	return err == nil
+}
+
+// logLines drops what a CI log shows only in a terminal: ANSI colors, the job
+// and step columns that gh run view adds, and each line's GitHub timestamp.
+func logLines(text string) []string {
+	lines := strings.Split(strings.TrimSpace(ansiColors.ReplaceAllString(text, "")), "\n")
+	for i, line := range lines {
+		line = strings.TrimSuffix(line, "\r")
+		if _, rest, ok := strings.Cut(line, "\t"); ok {
+			if _, body, ok := strings.Cut(rest, "\t"); ok && logTimestamp(body) {
+				line = body
+			}
+		}
+		if _, rest, ok := strings.Cut(line, " "); ok && logTimestamp(line) {
+			line = rest
+		}
+		lines[i] = line
+	}
+	return lines
+}
+
+// logExcerpt is the notice form of a log tail: cleaned lines, and only the
+// last ones, where a failure is reported.
+func logExcerpt(text string) string {
+	lines := logLines(Sanitize(text))
+	if len(lines) > 30 {
+		lines = lines[len(lines)-30:]
+	}
+	text = strings.Join(lines, "\n")
+	if len(text) > 4096 {
+		text = strings.ToValidUTF8(text[len(text)-4096:], "")
+	}
+	return text
 }
 
 // Go verbose output places the diagnostic between RUN and FAIL. Parent

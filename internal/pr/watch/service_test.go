@@ -253,7 +253,8 @@ func fakeHeadBatch(f fixture, args []string) any {
 			nodes["p"+m[1]] = map[string]any{
 				"number": n, "title": f.Pull.Title, "state": state, "merged": f.Pull.Merged, "isDraft": f.Draft, "mergeable": mergeability,
 				"updatedAt": f.Pull.Updated, "headRefOid": f.Pull.Head.SHA, "headRefName": f.Pull.Head.Ref,
-				"baseRefOid": f.Pull.Base.SHA, "baseRefName": f.Pull.Base.Ref,
+				"headRepository": map[string]string{"nameWithOwner": f.Pull.Head.Repo.FullName},
+				"baseRefOid":     f.Pull.Base.SHA, "baseRefName": f.Pull.Base.Ref,
 				"author":  map[string]string{"login": f.Pull.User.Login, "__typename": f.Pull.User.Type},
 				"commits": map[string]any{"nodes": []any{map[string]any{"commit": map[string]any{"statusCheckRollup": map[string]any{"state": ci, "contexts": map[string]any{"nodes": contexts}}}}}},
 			}
