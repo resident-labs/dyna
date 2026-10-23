@@ -574,6 +574,7 @@ func (s *Service) OpenChange(ctx context.Context, roomRef, sessionRef, prRef, di
 		if err == nil {
 			r.GoalID, err = s.linkGoal(ctx, p, r, info, created, opts.Goal)
 		}
+		r.HeldComments = nil
 		return OpenedChange{r, created}, err
 	}
 	if dir == "" {
@@ -616,6 +617,7 @@ func (s *Service) OpenChange(ctx context.Context, roomRef, sessionRef, prRef, di
 		return OpenedChange{}, err
 	}
 	r, err = p.Store.Get(r.Key)
+	r.HeldComments = nil
 	return OpenedChange{r, created}, err
 }
 

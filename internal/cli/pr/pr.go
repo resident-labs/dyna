@@ -56,8 +56,10 @@ Unknown external CI stays eligible. Agent reviews stay in Dyna.
 Record full Markdown with dyna git pr verdict --head. Agents, including root
 and workflow workers, cannot publish GitHub comments or reviews.
 Only the owner can use dyna git pr comment or publish a GitHub review.
-Comments Dyna cannot attribute to a session are owner/human feedback and wake
-the author. Author comments from dyna git pr comment and exact known bot noise are ignored.
+Comments from the owner, repository owners, members, collaborators and configured
+trusted bots pass the trust gate. Other comments stay held for the owner in
+home alerts and the PR room. Use held to list them, and admit or dismiss to decide.
+Non-owner comments reach agents only as quoted data, not instructions.
 Every kept comment goes to the author in one batch. Mark obvious bot spam with
 dyna git pr noise <pr> <comment-id>; noise list and noise rm inspect or remove
 learned repo-scoped templates. Every wake reports the drop count and rule IDs.
@@ -602,7 +604,28 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		}
 		return engineclient.New("").Call(c.Context(), "DismissPRComment", []any{rec.RoomID, ref.Key(), args[1]}, nil)
 	}}
-	root.AddCommand(admit, dismiss)
+	held := &cobra.Command{Use: "held <number|url>", Short: "Owner: list held outside comments", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
+		s, ref, err := resolve(c, args[0])
+		if err != nil {
+			return err
+		}
+		rec, err := s.Store.Get(ref.Key())
+		if err != nil {
+			return err
+		}
+		var comments []prview.HeldPRComment
+		if err := engineclient.New("").Call(c.Context(), "HeldPRComments", []any{rec.RoomID}, &comments); err != nil {
+			return err
+		}
+		out := []prview.HeldPRComment{}
+		for _, comment := range comments {
+			if comment.Key == ref.Key() {
+				out = append(out, comment)
+			}
+		}
+		return output(c, out)
+	}}
+	root.AddCommand(admit, dismiss, held)
 	root.AddCommand(budget, healthCommand(o, roomFor), track, show, list, untrack, transfer, resume, hold, release, require, reviewer, review, verdict, comment, publishing, noise)
 	return root
 }

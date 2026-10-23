@@ -732,6 +732,9 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 		if r.CommentDecisions == nil {
 			r.CommentDecisions = map[string]Decision{}
 		}
+		if decision.Reason == "owner" && rules[i].Reason != "owner" {
+			decision.Reason = "trusted_comment"
+		}
 		decision.Reason = Sanitize(clip(decision.Reason, 300))
 		r.CommentDecisions[e.ID] = decision
 		if decision.Action == "hold" {
