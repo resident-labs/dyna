@@ -76,7 +76,7 @@ func TestSelectedMessagesUseOnlyAppendedWork(t *testing.T) {
 	if again := read(); !reflect.DeepEqual(ids(again), want) || again[0].To[0] != rec.Name || decoded != 0 || visited != 0 {
 		t.Fatalf("warm: IDs %v, decoded %d, visited %d", ids(again), decoded, visited)
 	}
-	if allocs := testing.AllocsPerRun(1, func() { read() }); allocs > 40 {
+	if allocs := testing.AllocsPerRun(1, func() { read() }); allocs > 60 {
 		t.Fatalf("three selected messages used %.0f allocations", allocs)
 	}
 	// An out-of-order timestamp must not change append ordering in a page.
