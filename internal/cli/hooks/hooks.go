@@ -124,7 +124,7 @@ func NewCommand() *cobra.Command {
 func editCommand(repo *string) *cobra.Command {
 	var h hooks.Hook
 	var timeout time.Duration
-	cmd := &cobra.Command{Use: "edit <name>", Short: "Change selected hook settings", Long: "Change only the supplied fields of an existing repository hook. Keep its creator and creation time, and record who edited it and when. A supplied main-moved event becomes main-updated. Agents must tell the owner about the change.", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "edit <name>", Short: "Change selected hook settings", Long: "Change only the supplied fields of an existing repository hook. Keep its creator and creation time, and record who edited it and when. Agents must tell the owner about the change.", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
 		patch := hooks.Patch{}
 		changed := false
 		for _, field := range []struct {

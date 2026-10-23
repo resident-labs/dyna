@@ -28,7 +28,7 @@ func (s Service) spoolDir() string {
 // Enqueue persists an event without running hooks. A writer lock and sequence
 // names preserve append order, including concurrent writers in other processes.
 func (s Service) Enqueue(e Event) error {
-	e.Event = NormalizeEvent(e.Event)
+
 	source := e.Worktree
 	if source == "" {
 		source = e.Repo
@@ -197,7 +197,7 @@ func (s Service) Drain(ctx context.Context, now time.Time) (ran []string, retry 
 
 // needsSnapshot uses the permanent main checkout that Enqueue stores in Repo.
 func needsSnapshot(e Event) bool {
-	return NormalizeEvent(e.Event) == BeforeLand || e.Worktree != e.Repo
+	return e.Event == BeforeLand || e.Worktree != e.Repo
 }
 
 // dispatchQueued creates a captured commit's execution tree on the worker.
