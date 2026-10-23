@@ -387,6 +387,36 @@ func listIn(root, where string) ([]Meta, error) {
 	return out, nil
 }
 
+// StoredMetadata lists canonical run rows even when their artifact folder is
+// missing. Ownership checks cannot discard those rows based on file presence.
+func StoredMetadata() ([]Meta, error) {
+	db, err := runsDB()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query("SELECT id, body FROM runs")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Meta
+	for rows.Next() {
+		var id, body string
+		if err := rows.Scan(&id, &body); err != nil {
+			return nil, err
+		}
+		var meta Meta
+		if err := json.Unmarshal([]byte(body), &meta); err != nil {
+			return nil, err
+		}
+		if meta.ID != id {
+			return nil, fmt.Errorf("stored run identity does not match %s", id)
+		}
+		out = append(out, meta)
+	}
+	return out, rows.Err()
+}
+
 // Running returns the live runs whose meta says running, newest first.
 func Running() ([]Meta, error) { return listIn(RunsDir(), "status = 'running'") }
 
