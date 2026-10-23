@@ -4,16 +4,18 @@ import { readFileSync } from 'node:fs'
 
 // The top bar is CSS, not behaviour, so these tests read the markup and the
 // rules a phone needs: no layout engine runs here. Live QA with a real browser
-// reports the measurements for the pull request.
+// reports the measurements for the pull request. The bar itself lives in
+// lib/app/shell/PageHeader.svelte; App.svelte holds the rest of the page.
 const app: string = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
+const bar: string = readFileSync(new URL('../app/shell/PageHeader.svelte', import.meta.url), 'utf8')
 const toast: string = readFileSync(new URL('../voice/IncomingToast.svelte', import.meta.url), 'utf8')
 const callButton: string = readFileSync(new URL('../voice/CallButton.svelte', import.meta.url), 'utf8')
 
 // The header markup, from the bar's opening tag to its closing tag.
 const header = (() => {
-  const start = app.indexOf('<header class="bar"')
-  assert.ok(start > 0, 'App.svelte has the top bar')
-  return app.slice(start, app.indexOf('</header>', start))
+  const start = bar.indexOf('<header class="bar"')
+  assert.ok(start > 0, 'PageHeader.svelte has the top bar')
+  return bar.slice(start, bar.indexOf('</header>', start))
 })()
 
 // The declarations of the last rule that matches selector, which is the phone
@@ -43,8 +45,8 @@ test('the bar shows pinned posts as its own button and puts Members last', () =>
 })
 
 test('a phone title keeps a readable width and its buttons never shrink', () => {
-  assert.match(rule(app, '.title, .crumb'), /min-width: 40px/, 'the title gives way before the bar controls')
-  assert.match(rule(app, '.icon'), /flex: none/, 'bar buttons keep their 44 px touch target')
+  assert.match(rule(bar, '.title, .crumb'), /min-width: 40px/, 'the title gives way before the bar controls')
+  assert.match(rule(bar, '.icon'), /flex: none/, 'bar buttons keep their 44 px touch target')
   assert.match(rule(callButton, '.callbtn'), /width: 44px/, 'the call button shrinks to its icon on a phone')
   assert.match(rule(callButton, '.call-label, .live-label'), /display: none/, 'only the call icon remains')
 })
