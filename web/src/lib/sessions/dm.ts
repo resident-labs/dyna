@@ -2,6 +2,7 @@ import type { Member, Post } from '../api/room.ts'
 import type { Item, Turn, Usage } from '../api/session.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { isNote, noteData } from '../ui/notices.ts'
+import { registeredEvent } from '../rooms/eventPayloads.ts'
 import { userText } from './userText.ts'
 import { duration, short, tokens } from '../ui/format.ts'
 
@@ -91,6 +92,12 @@ export interface VoiceRow extends RowFields {
   kind: 'voice'
   post?: ThreadPost
 }
+// A delivered engine notice with a registered event draws the same card as the
+// feed (system-events.md section 3.4.2), with the agent text in its details.
+export interface SystemEventRow extends RowFields {
+  kind: 'system-event'
+  post: ThreadPost
+}
 export interface ThreadRow extends RowFields {
   kind: 'thread'
   thread: Thread
@@ -133,7 +140,7 @@ export interface ItemRow extends RowFields {
   kind: 'thought' | 'error' | 'note' | 'compaction'
 }
 // One row of the DM.
-export type DmRow = TurnRow | TurnEndRow | MessageRow | VoiceRow | ThreadRow | TimelineRow | InstructionsRow | ItemRow
+export type DmRow = TurnRow | TurnEndRow | MessageRow | VoiceRow | SystemEventRow | ThreadRow | TimelineRow | InstructionsRow | ItemRow
 // A post waiting to become a row or a chip.
 interface PostEvent extends RowFields {
   kind: 'post'
@@ -377,8 +384,14 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
     if (event.kind === 'post') {
       const p = event.post
       if (!event.suppressMessage && (!event.threads.length || (p.from === address && (p.to || []).includes(room.name)))) {
-        const ownerAttachments = (p.owner || p.from === room.name) && !!p.attachments?.length
-        rows.push({ ...event, kind: 'message', author: p.from, text: p.text, human: !!p.human, ownerAttachments, attachmentOnly: false, post: p })
+        if (registeredEvent(p)) {
+          // A registered event is a card, not a message. The agent text stays
+          // on the card, behind its Details toggle.
+          rows.push({ kind: 'system-event', key: `post:${p.id}`, ts: p.ts, post: p, author: p.from, text: p.text })
+        } else {
+          const ownerAttachments = (p.owner || p.from === room.name) && !!p.attachments?.length
+          rows.push({ ...event, kind: 'message', author: p.from, text: p.text, human: !!p.human, ownerAttachments, attachmentOnly: false, post: p })
+        }
       }
       for (const key of event.threads) {
         if (key.startsWith('shell:')) {
