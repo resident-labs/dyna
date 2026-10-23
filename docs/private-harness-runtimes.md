@@ -46,8 +46,8 @@ account-wide serve process. A model, account or launch change replaces the
 child, and the adapter resumes the native conversation.
 
 Antigravity uses the pinned ACP 1.3.0 server beside the account-management
-CLI. Its account lease is exclusive, so it closes the ACP child when a turn
-detaches. The next turn resumes the native conversation in a new child.
+CLI. Its account lease is exclusive and remains with the idle ACP child
+after a settled turn. The next turn reuses that child and its account protection.
 Its session metadata blocks Dyna-owned native tools before execution.
 Manual compaction is not supported; native automatic compaction stays enabled.
 
