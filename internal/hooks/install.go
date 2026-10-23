@@ -289,20 +289,9 @@ func (s Service) SettleInterrupted(ctx context.Context, started time.Time) error
 
 // settleLeftRun ends one run that can never finish, writes why into its log,
 // and posts the typed result that ends its card. The run itself keeps the
-// event, the checkout and the room, because the hook may be gone by now.
+// event, the checkout and the room, because the hook may be gone by now. A run
+// stored before it kept those falls back to the hook and to its start post.
 func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) error {
-	detail := "the engine stopped during this run, so its result was never recorded"
-	if line := lastLogLine(run.LogPath); line != "" {
-		detail += ": " + line
-	}
-	if file, err := os.OpenFile(run.LogPath, os.O_APPEND|os.O_WRONLY, 0600); err == nil {
-		_, _ = fmt.Fprintln(file, detail)
-		_ = file.Close()
-	}
-	run.Result, run.FinishedAt = "error", now
-	if _, err := s.saveRun(ctx, run); err != nil {
-		return err
-	}
 	main := run.Main
 	if main == "" {
 		// A run stored before it carried its checkout: the document keeps the
@@ -312,21 +301,79 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) erro
 	if main == "" {
 		return nil
 	}
+	detail := "the engine stopped during this run, so its result was never recorded"
+	if line := lastLogLine(run.LogPath); line != "" {
+		detail += ": " + line
+	}
 	// The run names the hook as "hook-<name>", and a hook still in place
 	// decides how the card reads. A removed hook still ends its own run from
 	// what the run recorded.
+	ev := Event{Event: run.Event, Repo: main, Worktree: main, Room: run.Room}
 	h := Hook{Name: strings.TrimPrefix(run.Name, "hook-"), Event: run.Event, Label: run.Label, Command: run.Command}
 	if hooks, err := s.load(ctx, run.Repo); err == nil {
 		for _, old := range hooks {
 			if "hook-"+old.Name == run.Name {
-				h = old
+				h, ev.Event = old, old.Event
 				break
 			}
 		}
 	}
-	ev := Event{Event: run.Event, Repo: main, Worktree: main, Room: run.Room}
-	s.emit(ev, hookEvent(ev, h, run, room.HookError, detail))
-	return nil
+	if ev.Event == "" {
+		// A run stored before it carried its event, whose hook is gone: the
+		// run's start post still names the event.
+		ev.Event = startEvent(ev, run)
+	}
+	if ev.Event == "" {
+		// Nothing names the event, and a result without one is refused. Leave
+		// the run pending so the next start can try again.
+		return fmt.Errorf("hook run %s has no event to report", run.ID)
+	}
+	if file, err := os.OpenFile(run.LogPath, os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+		_, _ = fmt.Fprintln(file, detail)
+		_ = file.Close()
+	}
+	// The result posts before the run is saved, so a post that fails leaves the
+	// run pending for the next start instead of a card that never ends.
+	run.Result, run.FinishedAt = "error", now
+	if err := s.postEvent(ev, hookEvent(ev, h, run, room.HookError, detail), false); err != nil {
+		return err
+	}
+	_, err := s.saveRun(ctx, run)
+	return err
+}
+
+// startEvent recovers the event that a run's start post named. A run stored
+// before it carried its event, whose hook was then removed, has no other source
+// for it, and a result without an event is refused.
+func startEvent(e Event, run Run) string {
+	rooms := room.DefaultStore()
+	var rec room.Record
+	if e.Room != "" {
+		resolved, err := rooms.Resolve(e.Room)
+		if err != nil {
+			return ""
+		}
+		rec = resolved
+	} else {
+		root, err := room.RepoRoot(e.Repo)
+		if err != nil {
+			return ""
+		}
+		found := false
+		if rec, found, err = rooms.RepoRoom(root); err != nil || !found {
+			return ""
+		}
+	}
+	msgs, err := rooms.Messages(rec.ID)
+	if err != nil {
+		return ""
+	}
+	for _, m := range msgs {
+		if h, ok := m.Hook(); ok && h.RunID == run.ID && h.State == room.HookRunning {
+			return h.Event
+		}
+	}
+	return ""
 }
 
 // lastLogLine reads the end of a run's log for the line its settled card shows.
