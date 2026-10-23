@@ -83,6 +83,20 @@ func (e *BusyError) Error() string {
 // Start starts the call for room ref and returns once it is connected.
 // A start for the room whose call is live returns its status.
 func (c *Calls) Start(ref string) (CallStatus, error) {
+	return c.startOrResume(ref, 0, 0)
+}
+
+// Resume reconnects a lost call while retaining its original transcript window.
+// replayCutoff is the last connected time, in Unix milliseconds.
+func (c *Calls) Resume(ref string, startedAt, replayCutoff int64) (CallStatus, error) {
+	now := time.Now().UnixMilli()
+	if startedAt <= 0 || replayCutoff < startedAt || replayCutoff > now || startedAt > now {
+		return CallStatus{}, errors.New("invalid voice resume timestamps")
+	}
+	return c.startOrResume(ref, startedAt, replayCutoff)
+}
+
+func (c *Calls) startOrResume(ref string, startedAt, replayCutoff int64) (CallStatus, error) {
 	link, err := c.Open(ref)
 	if err != nil {
 		return CallStatus{}, err
@@ -105,7 +119,13 @@ func (c *Calls) Start(ref string) (CallStatus, error) {
 		return c.statusLocked(), nil
 	}
 	ctx, stop := context.WithCancel(c.Ctx)
-	lc := &liveCall{link: link, started: time.Now(), stop: stop, exited: make(chan struct{})}
+	started := time.Now()
+	link.engineContext = c.Ctx
+	if startedAt > 0 {
+		started = time.UnixMilli(startedAt)
+		link.resumeStarted, link.replayCutoff = started, time.UnixMilli(replayCutoff)
+	}
+	lc := &liveCall{link: link, started: started, stop: stop, exited: make(chan struct{})}
 	c.live, c.last = lc, ""
 	c.mu.Unlock()
 
