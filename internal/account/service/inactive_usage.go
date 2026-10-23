@@ -16,16 +16,6 @@ const inactiveUsageTTL = 30 * time.Minute
 // so failover always ranks a current reading.
 const activeUsageRepoll = 5 * time.Minute
 
-// RefreshAccounts shares the engine account timer between credential renewal
-// and saved usage probes. The earliest deadline wakes the next pass.
-func (s *Service) RefreshAccounts(ctx context.Context, now time.Time) time.Time {
-	next := s.RefreshCredentials(ctx, now)
-	if usage := s.RefreshInactiveUsage(ctx, now); usage.Before(next) {
-		next = usage
-	}
-	return next
-}
-
 // clearUsageCache drops the cached snapshot after a timer probe persisted a
 // new reading, without holding the service lock during provider I/O.
 func (s *Service) clearUsageCache() {

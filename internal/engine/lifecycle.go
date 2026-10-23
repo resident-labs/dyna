@@ -31,14 +31,11 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 		go func() {
 			defer close(refreshDone)
 			if !readOnly {
-				refreshAccounts(watch, accounts.RefreshAccounts, t, events)
-			}
-		}()
-		versionsDone := make(chan struct{})
-		go func() {
-			defer close(versionsDone)
-			if !readOnly {
-				harnessruntime.RunVersionChecks(watch)
+				// Renewal stays on the account timer, at the exact expiry deadline:
+				// a late renewal logs the person out. Usage probes run as the
+				// account-usage built-in hook, and harness versions as the
+				// harness-versions hook.
+				refreshAccounts(watch, accounts.RefreshCredentials, t, events)
 			}
 		}()
 		loadDone := make(chan struct{})
@@ -89,7 +86,6 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 		}
 		<-recoveryDone
 		<-refreshDone
-		<-versionsDone
 		<-usageDone
 		<-loadDone
 	}()
