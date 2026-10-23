@@ -5,7 +5,9 @@ import { bundle, domNames, importBundle, installDom } from './prDetailHarness.ts
 import type { Row } from './prlist.ts'
 import { element, elements, need } from '../../../test/need.ts'
 
-const settle = () => new Promise((r) => setTimeout(r, 0))
+// Svelte effects and the stubbed API promises both settle on microtasks, so a
+// few turns of the microtask queue are enough and no timer is involved.
+const settle = async () => { for (let turn = 0; turn < 8; turn++) await Promise.resolve() }
 const API = `export const api = {
   githubList: () => Promise.resolve({ repo: 'o/r', items: [] }),
   githubView: (_r, _k, n) => Promise.resolve({ number: n, title: 'Speed up the parser', body: 'Body', comments: [], commits: [] }),
