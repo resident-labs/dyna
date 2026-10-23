@@ -24,7 +24,7 @@
   import VoiceWidget from './lib/voice/VoiceWidget.svelte'
   import { voiceCall, callRequests } from './lib/voice/voiceCall.ts'
   import { callLink, callTarget } from './lib/voice/callRequests.ts'
-  import { GENERAL, VOICE, isFeedView, inView, homeView, feedModel, parentTrail, prepareFeedText } from './lib/rooms/feedViews.ts'
+  import { GENERAL, VOICE, isFeedView, inView, homeView, inRoomFeed, feedModel, parentTrail, prepareFeedText } from './lib/rooms/feedViews.ts'
   import { seatDMConversation } from './lib/rooms/conversations.ts'
   import { isShellResult } from './lib/rooms/feedRows.ts'
   import { HOOK_LOG_EVENT, hookLogFrom } from './lib/settings/hookLog.ts'
@@ -2105,7 +2105,9 @@
     }
     if (ev.kind === 'posts' && feed && evRoom === feed.room.id) {
       const seen = new Set((feed.posts ?? []).map((p) => p.id))
-      const add = (ev.posts ?? []).filter((p) => !seen.has(p.id))
+      // A live post written in a DM belongs to that DM, so it never joins the
+      // room feed; the event still reloads the open DM.
+      const add = (ev.posts ?? []).filter((p) => !seen.has(p.id) && inRoomFeed(p))
       if (add.length) {
         if (feed.newer || !feedAtBottom) feed = { ...feed, newer: (feed.newer ?? 0) + add.length }
         else {
