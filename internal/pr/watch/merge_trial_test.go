@@ -20,6 +20,11 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
+// trialChecks is the GitHub check-runs response of the trial head.
+type trialChecks struct {
+	Checks []Check `json:"check_runs"`
+}
+
 type trialFixture struct {
 	e                                               *testEnv
 	fs                                              map[int]*fixture
@@ -157,10 +162,7 @@ func mergeTrialEnv(t *testing.T, numbers ...int) *trialFixture {
 				return json.NewEncoder(cmd.Stdout).Encode(map[string]any{"workflow_runs": []Run{{ID: 81, Attempt: 1, Event: event, HeadBranch: branch, HeadSHA: head, Status: status, Conclusion: conclusion}}})
 			}
 			if strings.Contains(joined, "check-runs?") {
-				if len(f.checks) > 0 {
-					return json.NewEncoder(cmd.Stdout).Encode(map[string]any{"check_runs": f.checks})
-				}
-				return json.NewEncoder(cmd.Stdout).Encode(map[string]any{"check_runs": []Check{}})
+				return json.NewEncoder(cmd.Stdout).Encode(trialChecks{Checks: f.checks})
 			}
 			return json.NewEncoder(cmd.Stdout).Encode([]Status{})
 		}
