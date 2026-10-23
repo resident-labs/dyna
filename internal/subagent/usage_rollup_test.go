@@ -35,6 +35,10 @@ func seedRollupSession(t *testing.T, s *Store, id, roomID, role string, turns ..
 	}
 	for i := range turns {
 		turns[i].N = i + 1
+		// Usage fixtures do not model a room log. Give terminal turns a known boundary.
+		if turns[i].InputCutoff == nil {
+			turns[i].InputCutoff = new(int64)
+		}
 		if err := s.writeTurn(id, turns[i]); err != nil {
 			t.Fatal(err)
 		}

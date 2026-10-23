@@ -8,10 +8,11 @@ import (
 // Snapshot is lifecycle metadata shared by readers outside the session manager.
 // It has no recovery callbacks and can be embedded in a larger metadata record.
 type Snapshot struct {
-	ID      string    `json:"id"`
-	Closed  time.Time `json:"closed"`
-	Closing *Closing  `json:"closing"`
-	Turns   int       `json:"turns"`
+	HistoryOnly bool      `json:"historyOnly,omitempty"`
+	ID          string    `json:"id"`
+	Closed      time.Time `json:"closed"`
+	Closing     *Closing  `json:"closing"`
+	Turns       int       `json:"turns"`
 	// TODO: legacy/shim remove later — old done sessions are dormant, not closed; remove when no retained session.json has done.
 	LegacyDone json.RawMessage `json:"done"`
 }
