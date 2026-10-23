@@ -151,7 +151,12 @@ func TestMuseServeReusesHostAndResumesAfterReplacement(t *testing.T) {
 	old := nativeSessionHost
 	nativeSessionHost = host
 	t.Cleanup(func() { nativeSessionHost = old })
-	p := profile.Profile{Harness: profile.HarnessMuse, RuntimeExecutable: "/bin/false", ExtraArgs: []string{"--yolo", "--reasoning-effort", "high"}}
+	// fakeruntime.Prepare resolves the harness binary from the profile PATH.
+	bin := t.TempDir()
+	if err := os.WriteFile(bin+"/muse", []byte("#!/bin/sh\nexit 1\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	p := profile.Profile{Harness: profile.HarnessMuse, Env: map[string]string{"PATH": bin}, RuntimeExecutable: "/bin/false", ExtraArgs: []string{"--yolo", "--reasoning-effort", "high"}}
 	normalized := t.TempDir() + "/normalized.jsonl"
 	if err := os.WriteFile(normalized, nil, 0600); err != nil {
 		t.Fatal(err)
