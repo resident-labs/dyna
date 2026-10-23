@@ -196,6 +196,9 @@ func bindings(s services) []websvc.Binding {
 		{Name: "SetMergeSettings", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.PRs.SetMergeSettings},
 		{Name: "CloseChange", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.CloseChange},
 		{Name: "RecordReviewResult", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.RecordReviewResult},
+		// RecordPRVerdict is the name that older dyna builds still send; its
+		// shim records through RecordReviewResult. See callspec.LegacyCalls.
+		{Name: "RecordPRVerdict", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.RecordPRVerdict},
 		{Name: "OpenChange", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: s.rooms.PRs.OpenChange},
 		{Name: "MergeControl", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.rooms.PRs.MergeControl},
 		{Name: "MergeFixPR", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.rooms.PRs.MergeFixPR},
