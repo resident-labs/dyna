@@ -48,19 +48,61 @@ func TestFailedHookCreatesTheRepoRoom(t *testing.T) {
 	if _, err := s.Run(ctx, Event{Repo: repo}, fail.Name); err == nil {
 		t.Fatal("the second failing hook passed")
 	}
-	// The retried run posts its start, and the failure stays one post.
+	// The retried run ends its own card too: two runs, two results. The first
+	// run has no start, because the repo had no room when it began.
 	posts, err = room.DefaultStore().Messages(rooms[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	results := 0
+	results := map[string]int{}
+	starts := map[string]int{}
 	for _, post := range posts {
+		run, ok := post.Hook()
+		if !ok {
+			t.Fatalf("post %s is not a hook event", post.ID)
+		}
 		if post.Notice.Kind == string(room.TypeResult) {
-			results++
+			results[run.RunID]++
+		} else {
+			starts[run.RunID]++
 		}
 	}
-	if results != 1 {
-		t.Fatalf("a retried failure posted %d results: %+v", results, posts)
+	if len(results) != 2 {
+		t.Fatalf("results = %v, want one per run", results)
+	}
+	for runID := range starts {
+		if results[runID] != 1 {
+			t.Fatalf("run %s started but did not end: %+v", runID, posts)
+		}
+	}
+	if len(starts) != 1 {
+		t.Fatalf("starts = %v, want only the run inside the room to start", starts)
+	}
+}
+
+// A hook that fails without an alert still ends its card, or the feed would
+// show it running forever.
+func TestFailedBlockHookEndsItsCard(t *testing.T) {
+	s, repo := setup(t)
+	block := hook("verify", BeforeLand)
+	block.OnFail = "block"
+	add(t, s, repo, block)
+	var got []room.HookEvent
+	s.Post = func(_ Event, ev room.HookEvent) error { got = append(got, ev); return nil }
+	s.Exec = func(ctx context.Context, p processguard.Process) error {
+		if p.Args[0] == "git" {
+			return processguard.Execute(ctx, p)
+		}
+		return context.DeadlineExceeded
+	}
+	if _, err := s.run(t.Context(), Event{Repo: repo}, block.Name, nil, false); err == nil {
+		t.Fatal("the block hook passed")
+	}
+	if len(got) != 2 || got[0].State != room.HookRunning || got[1].State != room.HookError {
+		t.Fatalf("events = %+v", got)
+	}
+	if got[1].RunID != got[0].RunID || got[1].Detail != "timeout" {
+		t.Fatalf("result = %+v", got[1])
 	}
 }
 
