@@ -147,7 +147,9 @@ export function isPost(v: unknown): v is Post {
     optional(v.fromEmoji, isString) &&
     optional(v.fullResult, isBoolean) &&
     optional(v.resultCut, isBoolean) &&
-    optional(v.channels, isStrings) &&
+    // TODO: legacy/shim — remove after cached feeds expire. A feed cached
+    // before the feed view rename still names its views `channels`.
+    optional(v.views ?? v.channels, isStrings) &&
     optional(v.pinned, isBoolean) &&
     optional(v.pinnedAt, isNumber) &&
     optional(v.pinnedBy, isString)

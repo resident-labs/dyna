@@ -1,5 +1,5 @@
 import type { Member } from '../api/room.ts'
-import { isChannel } from '../rooms/channels.ts'
+import { isFeedView } from '../rooms/feedViews.ts'
 
 type Selection = { room: unknown; visit: unknown }
 type Load = (current: () => boolean) => void | Promise<unknown>
@@ -69,14 +69,14 @@ type Visibility = {
 export function listVisible(name: string, { view, drill, showRoomSettings, memberChips, sidebarChips, sideVisible, controlsOpen, reviewOpen }: Visibility) {
   if (name === 'roomControls') return !!memberChips || !!showRoomSettings || !!controlsOpen
   if (name === 'computers') return !!memberChips || !!sideVisible || !!drill || view === 'computers'
-  if (name === 'mentions') return !drill && isChannel(view)
+  if (name === 'mentions') return !drill && isFeedView(view)
   // Changes rows feed the PR screen, the review workspace and the PR chips.
   if (name === 'changes' || name === 'reviewer') return !!reviewOpen || (!drill && view === 'github') || !!drill || !!showRoomSettings || !!memberChips || !!sidebarChips
   // Goal priority also feeds PR controls and the agent and PR badges.
-  if (name === 'goals') return !!memberChips || !!sidebarChips || !!drill || view === 'github' || view === 'goals' || isChannel(view)
+  if (name === 'goals') return !!memberChips || !!sidebarChips || !!drill || view === 'github' || view === 'goals' || isFeedView(view)
   // Cards in chat, a session's media and the Visuals view all show the
   // newest version of their visual.
-  if (name === 'visuals') return !!drill || view === 'visuals' || isChannel(view)
+  if (name === 'visuals') return !!drill || view === 'visuals' || isFeedView(view)
   if (name === 'rules') return !!showRoomSettings
   // Members, questions, pins, computers and job counts also feed the chrome.
   return true

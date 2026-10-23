@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { setImmediate } from 'node:timers/promises'
 import { parse } from 'svelte/compiler'
-import { GENERAL, VOICE, isChannel, inChannel, homeChannel, channelModel } from './channels.ts'
-import type { ChannelMember } from './channels.ts'
+import { GENERAL, VOICE, isFeedView, inView, homeView, feedModel } from './feedViews.ts'
+import type { FeedMember } from './feedViews.ts'
 import { appLoaderStubs } from './appStubs.ts'
 import { reconcileRows } from '../ui/reloadGate.ts'
 import { createRoomData } from './roomData.ts'
@@ -17,7 +17,7 @@ import { roomIDPattern as ROOM, postIDPattern as POST, postHref } from '../ui/po
 import { questionID } from './questions.ts'
 import { isShellResult } from './feedRows.ts'
 import { trimFeed } from './feedWindow.ts'
-import { mergeFeedPage, rerouteAnchors, withChannels } from './feedPages.ts'
+import { mergeFeedPage, rerouteAnchors, withViews } from './feedPages.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from '../ui/route.ts'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
@@ -55,7 +55,7 @@ interface NavPost {
   id: string
   from?: string
   to?: string[]
-  channels?: string[]
+  views?: string[]
   unread?: boolean
   completion?: boolean
   kind?: string
@@ -68,7 +68,7 @@ interface NavFeed {
   cursor?: string
   newer?: number
   offset?: number
-  channelUnread?: Record<string, number>
+  viewUnread?: Record<string, number>
 }
 
 interface NavGoal {
@@ -161,8 +161,8 @@ interface NavState {
   goalId: string
   fetchedGoal: NavGoal | null
   fetchedGoalVersion: number
-  hierarchy: (ChannelMember & { address?: string })[]
-  channels: ReturnType<typeof channelModel>
+  hierarchy: (FeedMember & { address?: string })[]
+  feedViews: ReturnType<typeof feedModel>
   earlierLoad: unknown
   STEP: number
   workflowData: { loadJobs(): void } | null
@@ -192,19 +192,18 @@ interface NavState {
   applyOpened: (value: unknown) => void
   reconcileRows: typeof reconcileRows
   mergeFeedPage: typeof mergeFeedPage
-  channelsModel?: ReturnType<typeof channelModel>
   ROOM: RegExp
   POST: RegExp
   GENERAL: string
   VOICE: string
-  isChannel: typeof isChannel
-  inChannel: typeof inChannel
-  homeChannel: typeof homeChannel
+  isFeedView: typeof isFeedView
+  inView: typeof inView
+  homeView: typeof homeView
   questionID: typeof questionID
   isShellResult: typeof isShellResult
   trimFeed: typeof trimFeed
   rerouteAnchors: typeof rerouteAnchors
-  withChannels: typeof withChannels
+  withViews: typeof withViews
   pruneSelection: typeof pruneSelection
   reloadsUnread: typeof reloadsUnread
   ROOT_SESSION: string
@@ -271,7 +270,7 @@ function navigation() {
     reviewOpen: false, reviewTab: 'files', reviewVersion: 0, mergeVersion: 0, roomId: B, roomRequest: 0, questionsRequest: 0, detailRequest: 0, narrow: false, hasTerminal: true,
     selectionRevision: 0, consolidationView: 0, consolidationAlive: true, memberRequest: 0, pickedSessions: [], pruneSelection,
     showClosed: false, rooms: [{ id: A }, { id: B }], needPair: false,
-    ROOM, POST, GENERAL, VOICE, routedParents: '', isChannel, inChannel, homeChannel, isShellResult, trimFeed, mergeFeedPage, questionID, channels: channelModel([]), posts: [],
+    ROOM, POST, GENERAL, VOICE, routedParents: '', isFeedView, inView, homeView, isShellResult, trimFeed, mergeFeedPage, questionID, feedViews: feedModel([]), posts: [],
     view: GENERAL, openRun: '', openJob: '', drill: null, feed: null, feedAtBottom: true, location: { hash: '', pathname: '/', search: '' },
     started: true, routing: 0, routeFix: false, pop: null, readOnlyDm: false, sessionTurn: 0, entries: [], prLink: null, unreadFrom: '', loadError: '',
     goals: [], goalId: '', fetchedGoal: null, fetchedGoalVersion: 0, hierarchy: [], earlierLoad: null, STEP: 50, workflowData: null, roomSessionController: null, home: null,
@@ -284,7 +283,7 @@ function navigation() {
     openSession() { calls.push('session') },
     applyOpened(o: unknown) { const value = o as { feed: NavFeed }; state.feed = value.feed; applied.push(value.feed.room.id) },
     applyItemEvent: () => false, applyUnread: () => {}, afterRead: () => {}, handle: () => {},
-    reconcileRows, rerouteAnchors, withChannels, reloadsUnread,
+    reconcileRows, rerouteAnchors, withViews, reloadsUnread,
     api: {
       openRoom(id: string) { return id === A ? pending.promise : Promise.resolve(opened(id)) },
       rooms: async () => [],
@@ -416,12 +415,12 @@ test('a current copied link still opens its exact transcript', async () => {
   assert.deepEqual(calls, ['transcript', 'session'])
 })
 
-test('opening a room or channel does not load the whole history', async () => {
+test('opening a room or a feed view does not load the whole history', async () => {
   const { c } = navigation()
   let loads = 0
   c.loadEarlier = () => { loads++ }
   const lead = { id: 'lead', name: 'lead', address: 'repo:lead' }
-  c.channels = channelModel([lead])
+  c.feedViews = feedModel([lead])
   assert.equal(await c.selectRoom(B), true)
   c.openView('channel:lead')
   assert.equal(loads, 0)
@@ -440,7 +439,7 @@ test('a later same-room selection wins over an older room response', async () =>
 })
 
 for (const workspace of ['files', 'github', 'jobs']) {
-  test(`opening saved ${workspace} does not mark hidden channel messages read`, async () => {
+  test(`opening saved ${workspace} does not mark hidden feed view messages read`, async () => {
     const { c } = navigation()
     c.posts = [{ id: 'hidden-child-result', unread: true }, { id: 'other-channel-result', unread: true }]
     const marked: NavPost[] = []
@@ -455,12 +454,12 @@ test('a pin 10,000 posts back waits for the in-flight page then uses one around 
   const { c, calls } = navigation()
   const lead = { id: 'lead', name: 'lead', address: 'repo:lead' }
   const child = { id: 'child', name: 'child', address: 'repo:child', parent: 'lead' }
-  c.channels = channelModel([lead, child])
+  c.feedViews = feedModel([lead, child])
   c.feed = { room: { id: B }, posts: [], earlier: 10000, cursor: 'first' }
   c.earlierLoad = null
   c.STEP = 100
   const history = deferred()
-  const result = { id: 'old-result', from: child.address, completion: true, channels: ['channel:lead'] }
+  const result = { id: 'old-result', from: child.address, completion: true, views: ['channel:lead'] }
   const pages: unknown[][] = []
   c.api.feedTail = (id, before, limit) => {
     pages.push([id, before, limit])
@@ -506,12 +505,12 @@ test('a pin waiting for history preserves a later workspace selection', async ()
   assert.deepEqual(calls, [])
 })
 
-test('reconnect moves a stale lead channel to general after its last child is promoted', async () => {
+test('reconnect moves a stale lead view to the room chat after its last child is promoted', async () => {
   const { c } = navigation()
   const lead = { id: 'lead', name: 'lead', address: 'repo:lead' }
   const child = { id: 'child', name: 'child', address: 'repo:child', parent: 'lead' }
   c.hierarchy = [lead, child]
-  Object.defineProperty(c, 'channels', { get: () => channelModel(c.hierarchy) })
+  Object.defineProperty(c, 'feedViews', { get: () => feedModel(c.hierarchy) })
   c.view = 'channel:lead'
   c.feed = { room: { id: B }, posts: [] }
   c.openRun = ''
@@ -519,17 +518,17 @@ test('reconnect moves a stale lead channel to general after its last child is pr
   c.api.openRoom = async () => ({ ...opened(B), members: [lead, { ...child, parent: '' }] })
   for (const name of ['parentKey', 'noteParents', 'applyOpened', 'resync']) runDeclaration(c, name)
   await c.resync()
-  assert.deepEqual(c.channels.leads, [])
+  assert.deepEqual(c.feedViews.leads, [])
   assert.equal(c.view, GENERAL)
 })
 
-test('a reconnect after a promote rereads the channels of loaded completions in a history window', async () => {
+test('a reconnect after a promote rereads the views of loaded completions in a history window', async () => {
   const { c } = navigation()
   const lead = { id: 'lead', name: 'lead', address: 'repo:lead' }
   const child = { id: 'child', name: 'child', address: 'repo:child', parent: 'lead' }
-  const done = { id: 'done', from: child.address, completion: true, channels: ['channel:lead'] }
-  Object.defineProperty(c, 'channels', { get: () => channelModel(c.hierarchy) })
-  Object.assign(c, { view: 'channel:lead', openRun: '', reconcileRows, rerouteAnchors, withChannels, routedParents: '', feedAtBottom: false, workflowData: { loadJobs() {} }, ...appLoaderStubs(), roomSessionController: null, drill: null })
+  const done = { id: 'done', from: child.address, completion: true, views: ['channel:lead'] }
+  Object.defineProperty(c, 'feedViews', { get: () => feedModel(c.hierarchy) })
+  Object.assign(c, { view: 'channel:lead', openRun: '', reconcileRows, rerouteAnchors, withViews, routedParents: '', feedAtBottom: false, workflowData: { loadJobs() {} }, ...appLoaderStubs(), roomSessionController: null, drill: null })
   for (const name of ['loadReviewer', 'loadChanges', 'loadGoals', 'loadRules', 'loadVisuals'] as const) c[name] = () => {}
   for (const name of ['parentKey', 'noteParents', 'rerouteLoaded', 'applyOpened', 'resync']) runDeclaration(c, name)
   c.roomId = B
@@ -540,12 +539,12 @@ test('a reconnect after a promote rereads the channels of loaded completions in 
   // While the stream is down, the only child is promoted. The reconnect's tail
   // has neither the loaded post nor the old parent.
   c.api.openRoom = async () => ({ ...opened(B), members: [lead, { ...child, parent: '' }] })
-  c.api.feedAround = async () => ({ room: { id: B }, posts: [{ ...done, channels: ['general'] }] })
+  c.api.feedAround = async () => ({ room: { id: B }, posts: [{ ...done, views: ['general'] }] })
   await c.resync()
   await setImmediate()
   assert.equal(c.view, GENERAL)
   assert.ok(c.feed)
-  assert.deepEqual(c.feed.posts.find((p) => p.id === 'done')?.channels, ['general'])
+  assert.deepEqual(c.feed.posts.find((p) => p.id === 'done')?.views, ['general'])
 })
 
 test('changing rooms resets multi-selection and closes its previous consolidation screen', async () => {
@@ -574,7 +573,7 @@ test('opening a source post closes its transcript and overlays before showing th
 test('a link to a voice call line keeps the current view', async () => {
   const { c, calls } = navigation()
   c.view = 'channel:lead'
-  c.feed = { room: { id: B }, posts: [{ id: 'msg_call', from: 'repo:voice-call', to: ['repo'], channels: ['voice-call'] }] }
+  c.feed = { room: { id: B }, posts: [{ id: 'msg_call', from: 'repo:voice-call', to: ['repo'], views: ['voice-call'] }] }
   await c.jumpTo('msg_call')
   assert.equal(c.view, 'channel:lead')
   assert.deepEqual(calls, [])
@@ -786,7 +785,7 @@ test('an open PR keeps its own address; the route waits until the view leaves it
   assert.deepEqual(c.entries, [['push', `#room=${B}&review=files`]])
 })
 
-test('successful read batches refresh channel counts through the existing room debounce', () => {
+test('successful read batches refresh view counts through the existing room debounce', () => {
   const marker = declarations.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.type === 'Identifier' && d.id.name === 'readMarker'))
   assert.ok(marker && marker.type === 'VariableDeclaration', 'App declares readMarker')
   const argumentsOf = marker.declarations[0]?.init
@@ -836,9 +835,9 @@ test('successful read batches refresh channel counts through the existing room d
 })
 
 
-test('channel count refresh preserves over 200 displayed posts while scrolled up', async () => {
+test('a view count refresh preserves over 200 displayed posts while scrolled up', async () => {
   const posts = Array.from({ length: 250 }, (_, i) => ({ id: `post-${i}` }))
-  interface ChannelState {
+  interface ViewState {
     roomId: string
     roomRequest: number
     feedAtBottom: boolean
@@ -859,9 +858,9 @@ test('channel count refresh preserves over 200 displayed posts while scrolled up
     handle: (event: unknown) => void
     applyUnread: (value: unknown) => void
   }
-  const c: ChannelState = {
+  const c: ViewState = {
     roomId: A, roomRequest: 1, feedAtBottom: false, roomTimer: null, roomRefreshes: new Set(),
-    feed: { room: { id: A }, posts, offset: 900, earlier: 20, cursor: 'post-0', channelUnread: {} },
+    feed: { room: { id: A }, posts, offset: 900, earlier: 20, cursor: 'post-0', viewUnread: {} },
     applyItemEvent: () => false, reloadsUnread, home: null, drill: null, roomSessionController: null, loadMembers() {}, loadRooms() {},
     setTimeout(fn: () => void) { c.timer = fn }, clearTimeout() {},
     handle: () => {}, applyUnread: () => {},
@@ -872,7 +871,7 @@ test('channel count refresh preserves over 200 displayed posts while scrolled up
   runDeclaration(c, 'applyUnread')
   const requests: unknown[][] = []
   const roomApi: object = {
-    feedTail: async (...args: unknown[]) => { requests.push(args); return { room: { id: A }, posts: posts.slice(-1), channelUnread: { 'channel:lead': 3 } } },
+    feedTail: async (...args: unknown[]) => { requests.push(args); return { room: { id: A }, posts: posts.slice(-1), viewUnread: { 'channel:lead': 3 } } },
     openRoom: async () => ({ feed: { room: { id: A }, posts: posts.slice(-200) } }),
   }
   const roomHooks: object = { current: () => ({ room: c.roomId, visit: c.roomRequest }), unread: c.applyUnread,
@@ -887,7 +886,7 @@ test('channel count refresh preserves over 200 displayed posts while scrolled up
   assert.equal(c.feed.cursor, 'post-0')
   assert.equal(c.feed.earlier, 20)
   assert.equal(c.feed.offset, 900)
-  assert.equal(c.feed.channelUnread?.['channel:lead'], 3)
+  assert.equal(c.feed.viewUnread?.['channel:lead'], 3)
   assert.deepEqual(requests, [[A, '', 1]])
   c.roomData.destroy()
 })
@@ -900,7 +899,7 @@ test('unread metadata from an earlier room visit cannot update the current sideb
   const data = createRoomData(roomApi as Parameters<typeof createRoomData>[0], roomHooks as Parameters<typeof createRoomData>[1])
   const loading = data.loadUnread()
   current = { room: A, visit: 2 }
-  wait.resolve({ room: { id: A }, channelUnread: { 'channel:lead': 3 } })
+  wait.resolve({ room: { id: A }, viewUnread: { 'channel:lead': 3 } })
   await loading
   assert.equal(updates, 0)
   data.destroy()

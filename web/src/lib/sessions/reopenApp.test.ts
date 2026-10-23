@@ -5,7 +5,7 @@ import { isFinished } from '../rooms/memberOrder.ts'
 import { selectableSession } from './consolidation.ts'
 import { appLoaderStubs } from '../rooms/appStubs.ts'
 import { reconcileRows } from '../ui/reloadGate.ts'
-import { mergeFeedPage, rerouteAnchors, withChannels } from '../rooms/feedPages.ts'
+import { mergeFeedPage, rerouteAnchors, withViews } from '../rooms/feedPages.ts'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
 import { isRecord } from '../api/guards.ts'
 import { need } from '../../../test/need.ts'
@@ -23,7 +23,7 @@ interface Member {
   role?: string
   parent?: string
   finished?: boolean
-  channels?: string[]
+  views?: string[]
 }
 interface App {
   api: Record<string, (...args: never[]) => unknown>
@@ -101,7 +101,7 @@ test('only closed resumable sessions offer Reopen', async () => {
 test('finished sessions stay visible as open members and offer Dismiss', async () => {
   const finished: Member = { id: 'one', name: 'worker', resumable: true, state: 'idle', status: 'dormant' }
   const { c, calls } = app(async () => ({}))
-  Object.assign(c, { showClosed: false, setPicked() {}, pruneSelection: () => [], pickedSessions: [], channels: { resolveView: (view: string) => view }, view: 'general' })
+  Object.assign(c, { showClosed: false, setPicked() {}, pruneSelection: () => [], pickedSessions: [], feedViews: { resolveView: (view: string) => view }, view: 'general' })
   call(c, 'applyMembers', [finished, { ...closed, id: 'gone' }, { id: 'open', closed: false }], [])
   assert.deepEqual([...c.members].map((m) => m.id), ['one', 'open'])
   assert.equal(menu(c, finished).includes('Dismiss'), true)
@@ -137,19 +137,19 @@ test('the internal root offers Transfer but not Consolidate or Promote', async (
   assert.equal(menu(c, { id: 'one', name: 'worker', state: 'idle' }).includes('Consolidate sessions…'), true)
 })
 
-test('a promote right after opening a room rereads the channels of a history window', async () => {
+test('a promote right after opening a room rereads the views of a history window', async () => {
   const { c } = app(async () => ({}))
   const lead = { id: 'lead', name: 'lead' }, child = { id: 'child', name: 'child', parent: 'lead' }
-  const old = { id: 'old', channels: ['channel:lead'] }
+  const old = { id: 'old', views: ['channel:lead'] }
   const arounds: unknown[][] = []
-  Object.assign(c, { showClosed: false, setPicked() {}, pruneSelection: () => [], pickedSessions: [], channels: { resolveView: (view: string) => view }, view: 'channel:lead', feed: null, feedAtBottom: false,
-    workflowData: { loadJobs() {} }, ...appLoaderStubs(), mergeFeedPage, rerouteAnchors, withChannels, withChannelsCalls: 0 })
-  c.api.feedAround = async (room: string, id: string, keep: number) => { arounds.push([room, id, keep]); return { posts: [{ id: 'old', channels: ['general'] }] } }
+  Object.assign(c, { showClosed: false, setPicked() {}, pruneSelection: () => [], pickedSessions: [], feedViews: { resolveView: (view: string) => view }, view: 'channel:lead', feed: null, feedAtBottom: false,
+    workflowData: { loadJobs() {} }, ...appLoaderStubs(), mergeFeedPage, rerouteAnchors, withViews })
+  c.api.feedAround = async (room: string, id: string, keep: number) => { arounds.push([room, id, keep]); return { posts: [{ id: 'old', views: ['general'] }] } }
   // A history window: newer posts are missing, so a tail read would not reach it.
   call(c, 'applyOpened', { feed: { room: { id: 'a' }, posts: [old], newer: 40 }, members: [lead, child] })
   call(c, 'applyMembers', [lead, { ...child, parent: '' }])
   await new Promise((resolve) => setImmediate(resolve))
   assert.deepEqual(arounds, [['a', 'old', 200]])
-  assert.deepEqual(need(c.feed).posts[0]?.channels, ['general'])
+  assert.deepEqual(need(c.feed).posts[0]?.views, ['general'])
   assert.equal(need(c.feed).newer, 40, 'the window stays where the owner is reading')
 })

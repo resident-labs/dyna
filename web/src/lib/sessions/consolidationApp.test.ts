@@ -27,7 +27,7 @@ interface App {
   [name: string]: unknown
 }
 function app(api: Record<string, unknown>): App {
-  const c: App = { loadComputers() {}, soonRooms() {}, reconcileRows, api, selectionRevision: 0, roomId: 'a', roomRequest: 1, memberRequest: 0, consolidationAlive: true, consolidating: null, hierarchy: [], pickedSessions: ['one'], members: [], choices: [], showClosed: false, view: 'general', channels: { resolveView: (v: string) => v }, pruneSelection, toggleSelection, bulkRetryable, selectingSessions: false, selectionMenu: null }
+  const c: App = { loadComputers() {}, soonRooms() {}, reconcileRows, api, selectionRevision: 0, roomId: 'a', roomRequest: 1, memberRequest: 0, consolidationAlive: true, consolidating: null, hierarchy: [], pickedSessions: ['one'], members: [], choices: [], showClosed: false, view: 'general', feedViews: { resolveView: (v: string) => v }, pruneSelection, toggleSelection, bulkRetryable, selectingSessions: false, selectionMenu: null }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), () => c.consolidationAlive)
   c.routedParents ??= ''; c.feed ??= null
   runFunctions(source, names, c)

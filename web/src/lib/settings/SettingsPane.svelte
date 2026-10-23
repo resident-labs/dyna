@@ -13,7 +13,7 @@
   import { sampleRoom, samplePosts } from '../rooms/feedSample.ts'
   import { look } from '../rooms/look.svelte.ts'
   import { visibleTo } from '../rooms/look.ts'
-  import { showReasoning, saveShowReasoning, showCompaction, saveShowCompaction, channelList, saveChannelList, CHANNEL_LISTS } from '../ui/prefs.ts'
+  import { showReasoning, saveShowReasoning, showCompaction, saveShowCompaction, feedViewList, saveFeedViewList, VIEW_LISTS } from '../ui/prefs.ts'
   import { FAST, motion } from '../ui/motion.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
   import type { SettingItem } from '../api/settings.ts'
@@ -130,9 +130,9 @@
     <div class="row">
       <div class="text">
         <div class="title">Channels in the sidebar</div>
-        <p class="help">Folded keeps #general and folds the other channels into one row. Messages only shows one Messages row that opens #general. Saves in this browser.</p>
+        <p class="help">Folded keeps the room chat and folds the other views into one row. Room chat only hides the agent views. Saves in this browser.</p>
       </div>
-      <Segmented label="Channels in the sidebar" options={CHANNEL_LISTS} value={$channelList} onchange={saveChannelList} />
+      <Segmented label="Channels in the sidebar" options={VIEW_LISTS} value={$feedViewList} onchange={saveFeedViewList} />
     </div>
   </div>
   <h3 class="section-label">Feed</h3>

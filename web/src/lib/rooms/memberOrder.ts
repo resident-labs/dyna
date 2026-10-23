@@ -50,14 +50,14 @@ export function orderMemberSessions<M extends MemberView>(sessions: readonly M[]
 }
 
 // openTrail lists the sessions that show their children by default: the
-// focused session and its ancestors. A channel view focuses its lead, so its
+// focused session and its ancestors. A feed view focuses its lead, so its
 // team is open and every other team stays folded.
 export function openTrail<M extends MemberView>(sessions: readonly M[], focus?: string): Set<string | undefined> {
   return new Set(ancestors(new Map(sessions.map((member): [string | undefined, M] => [member.id, member])), focus).map((member) => member.id))
 }
 
 // ancestors lists a session and its parents by session ID, top level first.
-// The channel list and the member list both walk the agent tree with it. A
+// The feed view list and the member list both walk the agent tree with it. A
 // loop in stored parents stops at the first repeat.
 export function ancestors<M extends MemberView>(byId: MemberLookup<M>, id?: string): M[] {
   const out: M[] = []
