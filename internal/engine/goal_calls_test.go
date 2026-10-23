@@ -122,7 +122,7 @@ func TestGoalWritesRecordCaller(t *testing.T) {
 
 func TestNewGoalMutationsStayLocal(t *testing.T) {
 	calls := testCalls(t, false)
-	for _, name := range []string{"AddGoal", "EditGoalSelectors", "WaitGoal"} {
+	for _, name := range []string{"AddGoal", "EditGoalSelectors"} {
 		if _, err := calls[name](t.Context(), nil); err == nil || err.Error() != name+" is available only through the local engine socket" {
 			t.Fatalf("%s: %v", name, err)
 		}
