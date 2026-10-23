@@ -18,6 +18,7 @@
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
+  import NoticeCard from './NoticeCard.svelte'
   import { accountRows, allClear, updateRows, rootQuestions } from './home.ts'
   // update: the dyna update notice ({current, latest}) or null.
   // The machine list owns the load card now: Home shows what needs the owner.
@@ -26,8 +27,10 @@
     update?: UpdateNotice | null
     onroom: (id: string, view?: string) => void
     onaccount: (id: string) => void
+    // onsettings opens a Settings pane, the place an owner notice sends you.
+    onsettings: (pane: string) => void
   }
-  let { rooms = [], update = null, onroom, onaccount }: Props = $props()
+  let { rooms = [], update = null, onroom, onaccount, onsettings }: Props = $props()
 
   let usage = $state<UsageSnapshot | null>(null)
   let runtimes = $state<HarnessSnapshot | null>(null)
@@ -144,7 +147,19 @@
     }
   }
 
-  const noticeIcon: Record<string, string> = { disk: '⛁', hook: '!', provider: '!' }
+  // noticeAction is where the owner can go about a notice: the worktree disk
+  // floor and the usage list live in Settings, and a sync split opens the room
+  // whose repository it names. A kind with no place gets no action button.
+  function noticeAction(n: Notice) {
+    if (n.kind === 'disk') return { label: 'Open settings', run: () => onsettings('settings') }
+    if (n.kind === 'provider') return { label: 'Open usage', run: () => onsettings('usage') }
+    if (n.kind === 'sync') {
+      const repo = n.sync?.repo ?? ''
+      const room = rooms.find((r) => !r.archived && r.repo === repo)
+      if (room) return { label: 'Open sync', run: () => onroom(room.id) }
+    }
+    return null
+  }
 </script>
 
 <section class="home">
@@ -182,11 +197,7 @@
         <HeldCommentCard {comment} />
       {/each}
       {#each notices as n (n.id)}
-        <Row dense clamp={false} text={n.text}>
-          {#snippet lead()}<span class="ico" class:coral={n.severity === 'error'} class:gold={n.severity === 'warn'}>{noticeIcon[n.kind] ?? '!'}</span>{/snippet}
-          {#snippet meta()}{#if n.command}<code class="mono">{n.command}</code>{/if}{/snippet}
-          {#snippet trail()}<time>{ago(n.at)}</time><button class="x" aria-label="Dismiss" title="Dismiss" onclick={() => dismiss(n.id)}>×</button>{/snippet}
-        </Row>
+        <NoticeCard notice={n} action={noticeAction(n)} ondismiss={() => dismiss(n.id)} />
       {/each}
     </Card>
   {/if}

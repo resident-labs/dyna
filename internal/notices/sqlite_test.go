@@ -14,7 +14,7 @@ import (
 func TestRowsSurviveMissingLegacyFile(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	t.Cleanup(func() { _ = database.Close(s.Dir) })
-	n, err := s.Post(Notice{Key: "disk", Text: "Saved in SQLite."})
+	n, err := s.Post(Notice{Key: "disk", Kind: KindDisk, Severity: SeverityError, Disk: &DiskFacts{Paths: []DiskPath{{Path: "/tmp", FreeBytes: 1024}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestStartupImportIgnoresLaterFileChanges(t *testing.T) {
 	if err := store.WriteJSON(s.Path(), []Notice{old}, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Post(Notice{Key: "provider", Text: "New binary."}); err != nil {
+	if _, err := s.Post(testNotice("provider")); err != nil {
 		t.Fatal(err)
 	}
 	list, err = s.List()
@@ -77,11 +77,11 @@ func TestRevisionIncreasesAfterNewestIsDismissed(t *testing.T) {
 		}
 		previous = next
 	}
-	if _, err := s.Post(Notice{Key: "older"}); err != nil {
+	if _, err := s.Post(testNotice("older")); err != nil {
 		t.Fatal(err)
 	}
 	check()
-	newest, err := s.Post(Notice{Key: "newest"})
+	newest, err := s.Post(testNotice("newest"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestRevisionIncreasesAfterNewestIsDismissed(t *testing.T) {
 		t.Fatal(err)
 	}
 	check()
-	if _, err := s.Post(Notice{Key: "next"}); err != nil {
+	if _, err := s.Post(testNotice("next")); err != nil {
 		t.Fatal(err)
 	}
 	check()
@@ -99,7 +99,7 @@ func TestRevisionIncreasesAfterNewestIsDismissed(t *testing.T) {
 func TestPostDoesNotRewriteUnchangedNotice(t *testing.T) {
 	s := Store{Dir: t.TempDir()}
 	t.Cleanup(func() { _ = database.Close(s.Dir) })
-	if _, err := s.Post(Notice{Key: "older"}); err != nil {
+	if _, err := s.Post(testNotice("older")); err != nil {
 		t.Fatal(err)
 	}
 	db, err := s.open()
@@ -114,11 +114,16 @@ func TestPostDoesNotRewriteUnchangedNotice(t *testing.T) {
 	if _, err := db.Exec("CREATE TRIGGER keep_older BEFORE UPDATE ON notices WHEN OLD.key='older' BEGIN SELECT RAISE(ABORT,'rewrote unchanged notice'); END; CREATE TRIGGER retain_older BEFORE DELETE ON notices WHEN OLD.key='older' BEGIN SELECT RAISE(ABORT,'deleted unchanged notice'); END;"); err != nil {
 		t.Fatal(err)
 	}
-	newest, err := s.Post(Notice{Key: "newest"})
+	newest, err := s.Post(testNotice("newest"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Dismiss(newest.ID); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// testNotice is a minimal typed sync notice with the given key.
+func testNotice(key string) Notice {
+	return Notice{Key: key, Kind: KindSync, Severity: SeverityWarn, Sync: &SyncFacts{Repo: "/repo", Lane: "origin", Other: "fork"}}
 }
