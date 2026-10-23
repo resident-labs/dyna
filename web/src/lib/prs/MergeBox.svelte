@@ -8,7 +8,7 @@
   //   onchecks opens the Checks tab; onread shows the latest review
   //   onresume, ontrack, onreviewer: PRActions' buttons
   //   onauthor opens the author session; onrules the PR's rules; onuntrack stops watching
-  //   actions  extra buttons, such as Ask an agent
+  //   actions  extra buttons, such as Mention in chat
   import PRActions from './PRActions.svelte'
   import type { Snippet } from 'svelte'
   import { isLocal } from './pr.ts'

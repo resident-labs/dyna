@@ -1,13 +1,12 @@
 <script lang="ts">
   // The room's local and GitHub issues, one row each in the PR list style. A row has the state icon, the title, the number,
-  // author, age, one state chip, labels and the linked PR. A row that needs an owner
-  // has a Start button instead, which hands the issue to an agent.
+  // author, age, one state chip, labels and the linked PR.
+  // Mention in chat adds a reference to the room composer.
   //
   // Props:
   //   groups    the issueGroups answer
   //   sel       the open issue's number
-  //   starting  the number Start is working on, or 0
-  //   onpick    opens an issue; onstart starts work on one
+  //   onpick    opens an issue; onmention adds it to the composer
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
   import PRGlyph from './PRGlyph.svelte'
@@ -19,15 +18,13 @@
   interface Props {
     groups?: { id: string; label: string; rows: GitHubItem[] }[]
     sel?: number
-    starting?: number
     onpick: (item: GitHubItem) => void
     onmention?: (reference: IssueReference) => void
-    onstart: (item: GitHubItem) => void
     oncloseissue?: (item: GitHubItem) => void
     onexport?: (item: GitHubItem) => void
     ondismiss?: (item: GitHubItem) => void
   }
-  let { groups = [], sel = 0, starting = 0, onpick, onstart, onmention, oncloseissue, onexport, ondismiss }: Props = $props()
+  let { groups = [], sel = 0, onpick, onmention, oncloseissue, onexport, ondismiss }: Props = $props()
 </script>
 
 <div class="rows">
@@ -57,7 +54,7 @@
             {#if oncloseissue}<button class="start" onclick={() => oncloseissue?.(it)}>Close</button>{/if}
             {#if ondismiss}<button class="start" onclick={() => ondismiss?.(it)}>Dismiss</button>{/if}
           </div>
-        {:else if !onmention && !!it.number && it.group === 'needs-owner'}<button class="start" disabled={starting === it.number} onclick={() => onstart(it)} title="Hand this issue to an agent">Start</button>{/if}
+        {/if}
       </div>
     {/each}
   {/each}

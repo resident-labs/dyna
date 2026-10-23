@@ -226,7 +226,7 @@ export const api = {
   profile: (ref) => app.Profile(ref),
   sendToSession: (ref, text, atts = [], forwardOf = '') => app.SendToSession(ref, text, atts, forwardOf),
   // send is the composer's one send path: Go decides post or spawn.
-  send: (roomId, draft, replyTo = '', atts = [], forwardOf = '') => app.Send(roomId, draft, replyTo, atts, forwardOf),
+  send: (roomId, draft, replyTo = '', atts = [], forwardOf = '', references = []) => references.length ? app.SendWithReferences(roomId, draft, replyTo, atts, forwardOf, references) : app.Send(roomId, draft, replyTo, atts, forwardOf),
   profiles: () => app.Profiles(),
   stopSession: (roomId, sessionId) => app.StopSession(roomId, sessionId),
   consolidateSessions: (roomId, options) => app.ConsolidateSessions(roomId, options),
@@ -279,7 +279,6 @@ export const api = {
   // is 'pr' or 'issue'; state is open, closed, merged or all.
   githubList: (roomRef, kind, state = 'open', search = '') => app.GitHubList(roomRef, kind, state, search),
   githubView: (roomRef, kind, number) => app.GitHubView(roomRef, kind, number),
-  startIssueWork: (roomRef, number) => app.StartIssueWork(roomRef, number),
   githubDiff: (roomRef, number) => app.GitHubDiff(roomRef, number),
   listTemplates: () => app.ListTemplates(),
   startRun: (ref, source, input) => app.StartRun(ref, source, input),

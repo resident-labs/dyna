@@ -7,8 +7,7 @@
   // Props:
   //   it         the issue row, or its GitHubView answer when loaded
   //   detail     the GitHubView answer, null while it loads; detailError
-  //   starting   Start is working; onstart asks an agent to work on it
-  //   note       a snippet with what Start said, a warning or an error
+  //   onmention  adds the issue to the room composer
   //   onsession  opens the working session, or null; onpr opens a linked PR
   //   onback     the back link, on a narrow screen only
   import { ago } from '../ui/format.ts'
@@ -19,21 +18,19 @@
   import Thread from './Thread.svelte'
   import { itemState, sortThread, timeline } from './github.ts'
   import { openExternal } from '../../api.js'
-  import type { Snippet } from 'svelte'
+  import type { Reference } from '../rooms/references.ts'
   import type { GitHubDetail, GitHubItem } from '../api/github.ts'
 
   interface Props {
     it: GitHubItem
     detail?: GitHubDetail | null
     detailError?: string
-    starting?: boolean
-    onstart: () => void
-    note?: Snippet | null
+    onmention?: (reference: Reference) => void
     onsession?: (() => void) | null
     onpr: (number: number) => void
     onback?: (() => void) | null
   }
-  let { it, detail = null, detailError = '', starting = false, onstart, note = null, onsession = null, onpr, onback = null }: Props = $props()
+  let { it, detail = null, detailError = '', onmention, onsession = null, onpr, onback = null }: Props = $props()
   let st = $derived(itemState('issue', it))
   let prs = $derived(it.linkedPRs ?? [])
   let thread = $derived(detail ? sortThread(detail) : [])
@@ -72,11 +69,10 @@
     {/each}
     {#if !it.workingSession && !prs.length}<p class="quiet">No agent is working on this yet.</p>{/if}
     <div class="acts">
-      {#if st.id === 'open'}<button class="act primary" disabled={starting} onclick={onstart}>Ask an agent</button>{/if}
+      {#if onmention}<button class="act primary" onclick={() => onmention?.({ kind: 'issue', number: it.number, title: it.title, state: it.state, url: it.url })}>Mention in chat</button>{/if}
       <button class="act" onclick={() => openExternal(it.url)}>Open on GitHub</button>
     </div>
   </Card>
-  {@render note?.()}
   <h3 class="conv">Conversation <span>{thread.length + 1}</span></h3>
   {#if detailError}
     <p class="err">{detailError}</p>
