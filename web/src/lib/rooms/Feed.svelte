@@ -20,13 +20,13 @@
   import { feedRows, feedPRRepos, callsInWindow } from './feedRows.js'
   import PostFiles from '../ui/PostFiles.svelte'
   import { postParts } from '../ui/postParts.ts'
-  import { questionID } from './questions.js'
+  import { questionID } from './questions.ts'
   import { swipeReply } from '../ui/swipeReply.ts'
   import { markdown, clock, stamp, dayLabel, short, resultLine } from '../ui/format.ts'
   import { arrivals, motion, FAST } from '../ui/motion.ts'
   import SystemNote from '../ui/SystemNote.svelte'
   import { noteGroups } from '../ui/notices.ts'
-  import { look } from './look.svelte.js'
+  import { look } from './look.svelte.ts'
   import { highlighted, oneLine } from './look.ts'
 
   let { room, label = 'general', intro = true, posts = [], questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onacceptcall, ondeclinecall, ongoal, stuck = $bindable(true) } = $props()

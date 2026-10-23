@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { alsoAsked, questionID, answeredLine } from './questions.js'
+import { alsoAsked, questionID, answeredLine } from './questions.ts'
 
 test('group notes show distinct other askers with the same open question', () => {
   const q = { asker: 'one', state: 'open', groupKey: 'same' }
@@ -12,7 +12,7 @@ test('a question link only reads question posts', () => {
   assert.equal(questionID({ kind: 'message', text: '[QUESTION q7] Why?' }), 'q7')
 })
 test('open questions show the oldest first, outcomes show the newest outcome first', async () => {
-  const { orderQuestions } = await import('./questions.js')
+  const { orderQuestions } = await import('./questions.ts')
   const a = { id: 'q1', state: 'open', askedAt: '2026-10-17T12:00:00Z' }
   const b = { id: 'q2', state: 'open', askedAt: '2026-10-17T13:00:00Z' }
   assert.deepEqual(orderQuestions([b, a], 'open').map((q) => q.id), ['q1', 'q2'])
@@ -20,8 +20,8 @@ test('open questions show the oldest first, outcomes show the newest outcome fir
 })
 
 test('questions asked in the same millisecond retain their allocation order', async () => {
-  const { orderQuestions } = await import('./questions.js')
-  const q = (id, nano) => ({ id, state: 'open', askedAt: `2026-10-17T13:54:33.454${nano}-05:00` })
+  const { orderQuestions } = await import('./questions.ts')
+  const q = (id: string, nano: string) => ({ id, state: 'open', askedAt: `2026-10-17T13:54:33.454${nano}-05:00` })
   assert.deepEqual(orderQuestions([q('q3', '863248'), q('q1', '240105'), q('q2', '593121')], 'open').map((q) => q.id), ['q1', 'q2', 'q3'])
 })
 
