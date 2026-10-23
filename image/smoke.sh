@@ -2,7 +2,6 @@
 set -euo pipefail
 out=${1:?Usage: image/smoke.sh BUILD_OUTPUT_DIRECTORY}
 out=$(realpath "$out")
-extract_name="dyna-extract-$(printf %s "$out" | sha256sum | cut -c1-12)"
 run_root() {
  printf 'sudo' >> "$out/sudo-commands.log"
  printf ' %q' "$@" >> "$out/sudo-commands.log"
@@ -22,10 +21,15 @@ fi
 [[ -f "$out/$archive" ]]
 # /tmp can be nosuid. Use the normal machine image location for the boot check.
 # Refuse any existing image before creating this temporary test directory.
-run_root systemd-nspawn --machine="$extract_name" --register=no --resolv-conf=off --timezone=off -D "$out/rootfs" \
- --bind="$out:/output" --bind=/var/lib/machines:/machines \
- /bin/bash -c 'set -e; mkdir /machines/dyna-imgtest; tar "$@"; test ! -e /machines/dyna-imgtest/var/lib/systemd/linger/dyna; mkdir -p /machines/dyna-imgtest/var/lib/systemd/linger; touch /machines/dyna-imgtest/var/lib/systemd/linger/dyna' bash \
- "${tar_flags[@]}" -xpf "/output/$archive" -C /machines/dyna-imgtest
+# The host tar unpacks the archive, so the check needs only the output files.
+machine=/var/lib/machines/$name
+run_root mkdir "$machine"
+run_root tar "${tar_flags[@]}" -xpf "$out/$archive" -C "$machine"
+run_root test ! -e "$machine/var/lib/systemd/linger/dyna"
+run_root mkdir -p "$machine/var/lib/systemd/linger"
+run_root touch "$machine/var/lib/systemd/linger/dyna"
+# The boot check has no network, so skip the first-boot pacman upgrade.
+run_root install -D -m 0644 /dev/null "$machine/var/lib/dyna/pacman-updated"
 cleanup() {
  run_root machinectl terminate "$name" 2>/dev/null || true
  wait "${boot_pid:-}" 2>/dev/null || true
@@ -38,9 +42,11 @@ for ((attempt=0; attempt<60; attempt++)); do
  if run_root machinectl shell "root@$name" /usr/bin/true >> "$out/boot-ready.log" 2>&1; then break; fi
  sleep 1
 done
-run_root machinectl shell "root@$name" /bin/bash -lc '
+# machinectl shell ends at once when stdin is not a terminal, as in CI, so the
+# checks run through systemd-run, which also returns their exit status.
+run_root systemd-run --machine="$name" --pipe --wait --quiet /bin/bash -lc '
 set -euo pipefail
-timeout 120 systemctl is-system-running --wait
+timeout 120 systemctl is-system-running --wait || { systemctl --failed --no-pager; journalctl -b -p err --no-pager | tail -n 40; exit 1; }
 test "$(cat /proc/1/comm)" = systemd
 test "$(id -u dyna)" = 1000
 test "$(id -g dyna)" = 1000
@@ -57,7 +63,7 @@ dyna engine run --help
 echo DYNA_ROOT_SMOKE_OK
 ' | tr -d '\r' | tee "$out/smoke.log"
 grep -Fxq DYNA_ROOT_SMOKE_OK "$out/smoke.log"
-run_root machinectl shell "dyna@$name" /bin/bash -lc '
+run_root systemd-run --machine="dyna@$name" --user --pipe --wait --quiet /bin/bash -lc '
 set -euo pipefail
 sudo -n true
 export XDG_RUNTIME_DIR=/run/user/1000
