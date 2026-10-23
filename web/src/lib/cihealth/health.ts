@@ -288,10 +288,13 @@ const median = (values: number[]): number => {
 
 // jobRanking ranks the jobs by their typical (median) time across the runs,
 // longest first. The trend compares the newer half of a job's runs with the
-// older half; a change under 10% is steady. runs are newest first.
+// older half; a change under 10% is steady. runs are newest first, and a run
+// that has not finished is left out.
 export function jobRanking(runs: CIHealthRun[], max = 5): JobRank[] {
   const series = new Map<string, number[]>()
   for (const run of runs) {
+    // A running run saves partial job times; they would read as a speed-up.
+    if (run.conclusion === '' && run.status !== 'completed') continue
     for (const job of run.jobs) {
       if (job.busyMs > 0) series.set(job.name, [...(series.get(job.name) ?? []), job.busyMs])
     }
