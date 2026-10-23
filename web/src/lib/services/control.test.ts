@@ -8,12 +8,8 @@ const record = () => {
   const calls: string[] = []
   const api: ControlApi = {
     setReviewEnabled: (room, on) => { calls.push(`review ${room} ${on}`); return Promise.resolve() },
-    setMergePaused: (room, paused) => { calls.push(`merge ${room} ${paused}`); return Promise.resolve() },
     setServiceProfile: (room, role, profile) => { calls.push(`service-profile ${room} ${role} ${profile}`); return Promise.resolve() },
     setSetting: (key, value) => { calls.push(`setting ${key} ${value}`); return Promise.resolve() },
-    enableLibrarian: (repo, ref, cwd) => { calls.push(`library-on ${repo} ${ref} ${cwd}`); return Promise.resolve() },
-    disableLibrarian: (repo) => { calls.push(`library-off ${repo}`); return Promise.resolve() },
-    editHook: (repo, name, patch) => { calls.push(`hook-edit ${repo} ${name} ${JSON.stringify(patch)}`); return Promise.resolve() },
     runHook: (repo, name) => { calls.push(`hook-run ${repo} ${name}`); return Promise.resolve() },
   }
   return { calls, api }
@@ -25,28 +21,16 @@ test('every control on the page writes through the call that owns it', async () 
   const { calls, api } = record()
   await applyControl(api, host, 'review.enabled', false)
   await applyControl(api, host, 'review.profile', 'sol')
-  await applyControl(api, host, 'merge.paused', false)
   await applyControl(api, host, 'steward.profile', 'off')
-  await applyControl(api, host, 'keeper.enabled', false)
   await applyControl(api, host, 'keeper.profile', 'luna')
-  await applyControl(api, host, 'library.enabled', true)
-  await applyControl(api, host, 'library.enabled', false)
   await applyControl(api, host, 'library.profile', 'sonnet')
-  await applyControl(api, host, 'update.enabled', false)
-  await applyControl(api, host, 'update.enabled', true)
   await applyControl(api, host, 'update.run', true)
   assert.deepEqual(calls, [
     'review room_1 false',
     'service-profile room_1 reviewer sol',
-    'merge room_1 true',
     'service-profile room_1 merge-steward off',
-    'setting goals.enabled false',
     'service-profile room_1 keeper luna',
-    'library-on /repo room_1 /repo',
-    'library-off /repo',
     'setting library.profile sonnet',
-    'hook-edit /repo self-update {"Disabled":true}',
-    'hook-edit /repo self-update {"Disabled":false}',
     'hook-run /repo self-update',
   ])
 })
