@@ -43,7 +43,7 @@ for (const view of ['DM thread']) {
     for (const name of extraNames) globalThis[name] = dom.window[name]
     const savedFetch = globalThis.fetch
     const savedMedia = globalThis.matchMedia
-    globalThis.matchMedia = () => ({ matches: true })
+    globalThis.matchMedia = () => ({ matches: true, addEventListener() {}, removeEventListener() {} })
     const room = { id: 'room_test', name: 'alpha' }
     const original = { id: 'msg_original', from: 'alpha:peer', text: 'Original result', ts: Date.now(), to: ['alpha'] }
     const member = { id: 'worker', name: 'worker', address: 'alpha:worker', state: 'idle' }

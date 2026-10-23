@@ -14,6 +14,7 @@ const rows = (start, count) => Array.from({ length: count }, (_, i) => ({ id: `p
 
 async function harness(thread = false) {
   const dom = installDom()
+  globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
   const observed = new Set()
   globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
   globalThis.DOMParser = dom.window.DOMParser
@@ -80,7 +81,7 @@ async function harness(thread = false) {
       observer.observe(target, { childList: true, subtree: true, characterData: true })
     }),
     mount: (load) => { component = api.mount(api.default, { target, props: { model, load } }); api.flushSync(); return component },
-    close: async () => { if (component) await api.unmount(component); dom.window.close(); for (const n of [...domNames, 'DOMParser', 'NodeFilter', 'HTMLMediaElement']) delete globalThis[n]; await rm(dir, { recursive: true, force: true }) },
+    close: async () => { if (component) await api.unmount(component); dom.window.close(); for (const n of [...domNames, 'DOMParser', 'NodeFilter', 'HTMLMediaElement', 'matchMedia']) delete globalThis[n]; await rm(dir, { recursive: true, force: true }) },
   }
 }
 
