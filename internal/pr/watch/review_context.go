@@ -53,8 +53,8 @@ func (w *boundedDiff) Write(p []byte) (int, error) {
 	}
 	return n, nil
 }
-func writeDiff(ctx context.Context, repo, from, to, path string) (bool, error) {
-	return writeReviewDiff(ctx, repo, path, "diff", "--no-ext-diff", "--no-textconv", "--no-color", from+".."+to, "--")
+func writeTreeDiff(ctx context.Context, repo, from, to, path string) (bool, error) {
+	return writeDiff(ctx, repo, path, "diff", "--no-ext-diff", "--no-textconv", "--no-color", from+".."+to, "--")
 }
 
 // writeReviewDelta compares only the commits each head adds to the base branch.
@@ -69,12 +69,12 @@ func writeReviewDelta(ctx context.Context, repo, base, from, to, path string) (b
 		return false, fmt.Errorf("current review merge base: %w", err)
 	}
 	if oldBase == newBase {
-		return writeDiff(ctx, repo, from, to, path)
+		return writeTreeDiff(ctx, repo, from, to, path)
 	}
-	return writeReviewDiff(ctx, repo, path, "range-diff", "--no-ext-diff", "--no-textconv", "--no-color", oldBase+".."+from, newBase+".."+to)
+	return writeDiff(ctx, repo, path, "range-diff", "--no-ext-diff", "--no-textconv", "--no-color", oldBase+".."+from, newBase+".."+to)
 }
 
-func writeReviewDiff(ctx context.Context, repo, path string, args ...string) (bool, error) {
+func writeDiff(ctx context.Context, repo, path string, args ...string) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
@@ -113,7 +113,7 @@ func (s *Service) prepareReviewTask(ctx context.Context, r Record, seen string) 
 		if e != nil {
 			diffBase = r.Base
 		}
-		input.DiffTruncated, err = writeDiff(ctx, r.RepoPath, diffBase, r.Head, input.DiffPath)
+		input.DiffTruncated, err = writeTreeDiff(ctx, r.RepoPath, diffBase, r.Head, input.DiffPath)
 		if err != nil {
 			input.DiffError = Sanitize(err.Error())
 			input.DiffPath = ""
