@@ -63,6 +63,14 @@
   })
   let issueID = $derived(payload?.issueId ?? (payload ? post.id : ''))
   let actionable = $derived(!!payload && payload.state === 'open' && issueID !== '')
+  // What closed the issue, named once. An automatic close carries the merging
+  // PR and its commit, so the reason line stays out: it says the same fact.
+  let closedLine = $derived.by(() => {
+    const origin = payload?.closedBy
+    if (!origin?.pr && !origin?.commit) return ''
+    const what = origin?.pr ? `PR #${origin.pr}` : 'commit'
+    return origin?.commit ? `Closed by ${what} at ${origin.commit.slice(0, 8)}` : `Closed by ${what}`
+  })
 
   function openPanel() {
     if (issueID) onissue?.(issueID)
@@ -113,7 +121,8 @@
     {#if files.length}
       <ul class="files">
         {#each files as file, i (i)}
-          <li>{file.path}{file.line ? `:${file.line}` : ''}</li>
+          {@const parts = file.path.split('/')}
+          <li>{#each parts as part, j (j)}{part}{#if j < parts.length - 1}/<wbr />{/if}{/each}{#if file.line}<span class="line">:{file.line}</span>{/if}</li>
         {/each}
       </ul>
     {/if}
@@ -122,9 +131,10 @@
       <p class="meta">{payload.cost}{#if payload.cost && payload.direction}{' · '}{/if}{payload.direction}</p>
     {/if}
     {#if payload?.assignee}<p class="meta">Assigned to {short(payload.assignee, room?.name)}</p>{/if}
-    {#if payload?.reason}<p class="reason">{payload.reason}</p>{/if}
-    {#if payload?.closedBy?.pr || payload?.closedBy?.commit}
-      <p class="meta">Closed by {#if payload.closedBy.pr}PR #{payload.closedBy.pr}{:else}commit{/if}{#if payload.closedBy.commit}{' at '}{payload.closedBy.commit.slice(0, 8)}{/if}</p>
+    {#if closedLine}
+      <p class="meta">{closedLine}</p>
+    {:else if payload?.reason}
+      <p class="reason">{payload.reason}</p>
     {/if}
     {#if actionable}
       <div class="acts">
@@ -185,6 +195,9 @@
   time { flex: none; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
   .body { padding: 0 12px 10px; }
   .files { margin: 0 0 6px; padding: 0; list-style: none; font: var(--t-sm)/1.6 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+  /* A path breaks at its slashes, so the line number stays with the file name
+     and a phone never splits ":41" into ":4" and "1". */
+  .files .line { white-space: nowrap; }
   .meta { margin: 0 0 4px; color: var(--muted); font-size: var(--t-sm); }
   .reason { margin: 0 0 6px; color: var(--ink-2); font-size: var(--t-sm); overflow-wrap: anywhere; }
   .acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }

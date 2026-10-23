@@ -47,7 +47,10 @@ func RootContext(msg Message, roomName string) (RootDecision, string) {
 		return RootSkip, ""
 	}
 	if !msg.Addressed(roomName) && !msg.Addressed(roomName+":"+RootAgent) {
-		if msg.From == roomName && len(msg.To) > 0 {
+		// Only the owner speaks as the room. A room named after the engine holds
+		// engine posts under that same address, so an engine event is never an
+		// owner DM: a quiet session note belongs to the session it names.
+		if msg.From == roomName && !msg.EngineEvent() && len(msg.To) > 0 {
 			return RootQuiet, RootOwnerDM
 		}
 		return RootSkip, ""

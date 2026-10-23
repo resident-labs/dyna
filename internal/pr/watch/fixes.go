@@ -23,11 +23,9 @@ func (s *Service) closeFixedIssues(ctx context.Context, r Record, mergeCommit st
 	if err != nil {
 		return fmt.Errorf("close issues fixed by %s: %w", changeLabel(r), err)
 	}
-	short := shortSha(mergeCommit)
+	// The reason is the fact only. The short commit is the close's origin, which
+	// the card shows beside the PR, so the reason never repeats it.
 	reason := "Fixed by #" + strconv.Itoa(r.Number)
-	if short != "" {
-		reason += " (" + short + ")"
-	}
 	var failures []error
 	for _, fix := range r.Fixes {
 		switch fix.Kind {

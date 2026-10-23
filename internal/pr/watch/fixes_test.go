@@ -81,8 +81,22 @@ func TestMergedPRClosesItsLinkedIssues(t *testing.T) {
 	if len(all) != 1 || all[0].State != "closed" {
 		t.Fatalf("room issue not closed: %+v", all)
 	}
-	if want := "Fixed by #42 (abcdef1)"; all[0].Reason != want {
+	if want := "Fixed by #42"; all[0].Reason != want {
 		t.Errorf("close reason = %q, want %q", all[0].Reason, want)
+	}
+	// The room post names the engine that closed the issue, and the reason once.
+	msgs, err := e.rooms.Messages(e.room.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedText := ""
+	for _, msg := range msgs {
+		if ev, ok := msg.Issue(); ok && ev.State == room.IssueStateClosed {
+			closedText = msg.Text
+		}
+	}
+	if want := fmt.Sprintf("The engine closed issue D-%d: Fixed by #42", issue.Number); closedText != want {
+		t.Errorf("posted close = %q, want %q", closedText, want)
 	}
 	want := []string{
 		"issue view 7 --repo owner/repo --json state --jq .state",
