@@ -44,6 +44,63 @@ const itemsSchema = `CREATE TABLE IF NOT EXISTS goal_items (
 // ready records handles whose goal tables and import are in place.
 var ready sync.Map // *sql.DB -> bool
 
+// pageTime is the layout of a stored page time: nine fraction digits, so text
+// comparison is time comparison.
+const pageTime = "2006-01-02T15:04:05.000000000"
+
+// pageKey renders a time for a page column. It is UTC, so keys of times written
+// in different zones still compare in time order.
+func pageKey(t time.Time) string { return t.UTC().Format(pageTime) }
+
+// sortAt is when a goal places in a page: when it was closed, or its last
+// change while it is open. It is the key the page orders and compares.
+func sortAt(g *Goal) string {
+	at := g.UpdatedAt
+	if g.Done != nil {
+		at = g.Done.At
+	}
+	return pageKey(at)
+}
+
+// backfillSortAt fills the page key of every stored goal from its body, once,
+// when the column is added.
+func backfillSortAt(conn *sql.Conn) error {
+	ctx := context.Background()
+	rows, err := conn.QueryContext(ctx, "SELECT room,id,body FROM goals")
+	if err != nil {
+		return err
+	}
+	type key struct {
+		room, id, at string
+	}
+	var keys []key
+	for rows.Next() {
+		var room, id string
+		var body []byte
+		if err := rows.Scan(&room, &id, &body); err != nil {
+			rows.Close()
+			return err
+		}
+		var g Goal
+		err := json.Unmarshal(body, &g)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		keys = append(keys, key{room, id, sortAt(&g)})
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, k := range keys {
+		if _, err := conn.ExecContext(ctx, "UPDATE goals SET sort_at=? WHERE room=? AND id=?", k.at, k.room, k.id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Migrate brings the goal tables in dataDir's dyna.db to this version.
 // Only the engine calls it, at start (requirement 41).
 func Migrate(dataDir string) error {
@@ -67,7 +124,7 @@ func (s *Store) open() (*sql.DB, error) {
 }
 
 // migrate creates the goal tables, imports state.json once and folds legacy
-// child goals into items, and adds room revisions (goals.schema=3).
+// child goals into items, and adds room revisions (goals.schema=4).
 func (s *Store) migrate(db *sql.DB) error {
 	if err := os.MkdirAll(s.Root, 0700); err != nil {
 		return err
@@ -86,21 +143,26 @@ func (s *Store) migrate(db *sql.DB) error {
 	}); err != nil {
 		return err
 	}
-	if err := database.Migrate(db, "goals.schema", 3, func(conn *sql.Conn, from int) error {
+	if err := database.Migrate(db, "goals.schema", 4, func(conn *sql.Conn, from int) error {
 		ctx := context.Background()
 		if from < 1 {
 			if _, err := conn.ExecContext(ctx, goalsSchema); err != nil {
 				return err
 			}
 		}
-		if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO meta(key,value) VALUES ('goals.revision','0')"); err != nil {
+		if _, err := conn.ExecContext(ctx, "ALTER TABLE goals ADD COLUMN sort_at TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
 		}
-		if _, err := conn.ExecContext(ctx, "ALTER TABLE goal_rooms ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"); err != nil {
-			return err
-		}
-		if _, err := conn.ExecContext(ctx, "UPDATE goal_rooms SET revision=(SELECT CAST(value AS INTEGER) FROM meta WHERE key='goals.revision')"); err != nil {
-			return err
+		if from < 3 {
+			if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO meta(key,value) VALUES ('goals.revision','0')"); err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, "ALTER TABLE goal_rooms ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"); err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, "UPDATE goal_rooms SET revision=(SELECT CAST(value AS INTEGER) FROM meta WHERE key='goals.revision')"); err != nil {
+				return err
+			}
 		}
 		if from < 1 {
 			if err := s.importLegacy(conn); err != nil {
@@ -108,16 +170,32 @@ func (s *Store) migrate(db *sql.DB) error {
 			}
 		}
 		if from < 2 {
-			return s.foldLegacyChildren(conn)
+			if err := s.foldLegacyChildren(conn); err != nil {
+				return err
+			}
 		}
-		return nil
+		// These idempotent legacy folds must precede the page key backfill.
+		if err := migrateResting(conn, 0); err != nil {
+			return err
+		}
+		if err := s.migrateServiceGoals(conn, 0); err != nil {
+			return err
+		}
+		if err := backfillSortAt(conn); err != nil {
+			return err
+		}
+		_, err := conn.ExecContext(ctx, "CREATE INDEX goals_closed_page ON goals(room,sort_at DESC,id) WHERE state<>'active'")
+		return err
 	}); err != nil {
 		return err
 	}
 	if err := database.Migrate(db, "goals.resting", 1, migrateResting); err != nil {
 		return err
 	}
-	return database.Migrate(db, "goals.service", 1, s.migrateServiceGoals)
+	if err := database.Migrate(db, "goals.service", 1, s.migrateServiceGoals); err != nil {
+		return err
+	}
+	return nil
 }
 
 // TODO: legacy/shim remove later — copies goals/state.json into dyna.db once and leaves the file in place so an older binary can roll back; remove after every host has run a SQLite build for a while.
@@ -337,7 +415,7 @@ func saveState(conn *sql.Conn, stored rows, st State) (bool, error) {
 				continue
 			}
 			changedRooms[room] = true
-			if err := exec("INSERT INTO goals(room,id,state,body) VALUES (?,?,?,?) ON CONFLICT(room,id) DO UPDATE SET state=excluded.state,body=excluded.body", room, id, g.State, string(body)); err != nil {
+			if err := exec("INSERT INTO goals(room,id,state,body,sort_at) VALUES (?,?,?,?,?) ON CONFLICT(room,id) DO UPDATE SET state=excluded.state,body=excluded.body,sort_at=excluded.sort_at", room, id, g.State, string(body), sortAt(g)); err != nil {
 				return false, err
 			}
 		}
@@ -874,4 +952,134 @@ func (s *Store) convertJournals() error {
 		}
 	}
 	return nil
+}
+
+// GoalPage bounds the closed goals one page of a room can reach. ClosedAfter
+// is the first page's cutoff; a set BelowAt with BelowID names the boundary of
+// a later page. Count is how many closed goals the page can show.
+type GoalPage struct {
+	ClosedAfter time.Time
+	BelowAt     time.Time
+	BelowID     string
+	Count       int
+}
+
+// Page returns one page of a room's goals: every open goal, and up to
+// page.Count closed goals from the page window, newest first. It reports
+// whether closed goals remain under the window, so the caller keeps the page's
+// older cursor.
+func (s *Store) Page(room string, page GoalPage) ([]Goal, bool, error) {
+	db, err := s.open()
+	if err != nil {
+		return nil, false, err
+	}
+	out := []Goal{}
+	var more bool
+	err = state.For(db).Read(context.Background(), func(query state.Reader) error {
+		var err error
+		if page.BelowAt.IsZero() {
+			if out, err = pageOpen(query, room); err != nil {
+				return err
+			}
+		}
+		out, err = pageClosed(query, room, page, out)
+		if err != nil {
+			return err
+		}
+		more, err = pageMore(query, room, page, out)
+		return err
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return out, more, err
+}
+
+// pageOpen reads the room's open goals, which every first page shows, in the
+// create order the list has always used.
+func pageOpen(query state.Reader, room string) ([]Goal, error) {
+	out := []Goal{}
+	result, err := query.QueryContext(context.Background(), `SELECT body FROM goals WHERE room=? AND state='active'
+ORDER BY id ASC`, room)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+	for result.Next() {
+		var body []byte
+		if err := result.Scan(&body); err != nil {
+			return nil, err
+		}
+		var g Goal
+		err := json.Unmarshal(body, &g)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if !out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out, result.Err()
+}
+
+// pageClosed reads the closed goals of the page window. The order is the
+// page's order: latest page time first, then ID ascending.
+func pageClosed(query state.Reader, room string, page GoalPage, out []Goal) ([]Goal, error) {
+	sqlText := `SELECT body FROM goals WHERE room=? AND state<>'active' AND sort_at >= ?`
+	args := []any{room, pageKey(page.ClosedAfter)}
+	if !page.BelowAt.IsZero() {
+		sqlText += ` AND (sort_at < ? OR (sort_at = ? AND id > ?))`
+		args = append(args, pageKey(page.BelowAt), pageKey(page.BelowAt), page.BelowID)
+	}
+	sqlText += ` ORDER BY sort_at DESC, id ASC LIMIT ?`
+	args = append(args, page.Count)
+	result, err := query.QueryContext(context.Background(), sqlText, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+	for result.Next() {
+		var body []byte
+		if err := result.Scan(&body); err != nil {
+			return nil, err
+		}
+		var g Goal
+		err := json.Unmarshal(body, &g)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, g)
+	}
+	return out, result.Err()
+}
+
+// pageMore reports whether closed goals remain below the last one the page
+// read, or, for a first page that read none, below its cutoff.
+func pageMore(db state.Reader, room string, page GoalPage, goals []Goal) (bool, error) {
+	key, last := pageKey(page.ClosedAfter), ""
+	for i := range goals {
+		if goals[i].Open() {
+			continue
+		}
+		key, last = sortAt(&goals[i]), goals[i].ID
+	}
+	sqlText := `SELECT EXISTS(SELECT 1 FROM goals WHERE room=? AND state<>'active'`
+	args := []any{room}
+	switch {
+	case last != "":
+		sqlText += ` AND (sort_at < ? OR (sort_at = ? AND id > ?))`
+		args = append(args, key, key, last)
+	case !page.BelowAt.IsZero():
+		return false, nil
+	default:
+		sqlText += ` AND sort_at < ?`
+		args = append(args, key)
+	}
+	var more bool
+	err := db.QueryRowContext(context.Background(), sqlText+`)`, args...).Scan(&more)
+	return more, err
 }
