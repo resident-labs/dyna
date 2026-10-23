@@ -74,23 +74,28 @@ func TestFailedBatchWakesRootOnce(t *testing.T) {
 	}
 }
 
-// A failed push run can report failure without naming a check. Its logs are the
-// evidence, so the notice must not call that failure an unknown or a cancel.
+// A failed push run can report failure without naming a check, even beside a
+// cancelled workflow. Its logs are the evidence, so the notice and the report
+// must keep the run failure and must not call it a cancellation.
 func TestFailedBatchKeepsTheCauseOfAFailedRun(t *testing.T) {
 	f := mergeTrialEnv(t, 1, 2)
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	f.ci, f.conclusion = "completed", "failure"
+	f.extraRuns = []Run{{ID: 82, Attempt: 1, WorkflowID: 2, Name: "second", Event: "push", HeadSHA: f.head, HeadBranch: f.branch, Status: "completed", Conclusion: "cancelled"}}
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 	ev, report := failedBatchNotice(t, f)
-	if strings.Contains(ev.Reason, "infrastructure") || strings.Contains(report, "cancelled") {
+	if strings.Contains(ev.Reason, "infrastructure") || strings.Contains(report, "was cancelled") {
 		t.Fatalf("a failed run was called a cancellation: reason=%q\n%s", ev.Reason, report)
 	}
 	if ev.Reason != "a CI run failed without a named check; read its logs for the failing test" {
 		t.Fatalf("reason=%q", ev.Reason)
+	}
+	if !strings.Contains(report, "unknown; job evidence unavailable") {
+		t.Fatalf("report does not keep the unknown job name:\n%s", report)
 	}
 }
 
