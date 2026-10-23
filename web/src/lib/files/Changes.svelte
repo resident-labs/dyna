@@ -232,8 +232,9 @@
   h2 { display: flex; align-items: baseline; gap: 8px; font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 20px 0 8px; }
   h2 span { text-transform: none; letter-spacing: 0; font-weight: 500; color: var(--faint); }
   .files { display: flex; flex-direction: column; gap: 6px; }
-  .file { background: var(--side); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden; }
+  .file { background: var(--side); border: 1px solid var(--line-soft); border-radius: 10px; overflow: clip; }
   .file.open { border-color: var(--line); }
+  .file.open .row { position: sticky; top: 0; z-index: 2; background: var(--side); }
   .row { display: flex; align-items: center; }
   .hit { flex: 1; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 12px; text-align: left; transition: background-color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
