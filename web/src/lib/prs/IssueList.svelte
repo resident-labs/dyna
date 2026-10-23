@@ -1,7 +1,7 @@
 <script lang="ts">
-  // The room's issues, grouped by who is on them (issueGroups in github.js).
-  // Each row is the shared Row: the state icon, the title, the number,
-  // labels, comments and age, and one state chip. A row that needs an owner
+  // The room's issues, one row each in the PRs list style (issueGroups in
+  // github.ts orders them). A row has the state icon, the title, the number,
+  // author, age, one state chip, labels and the linked PR. A row that needs an owner
   // has a Start button instead, which hands the issue to an agent.
   //
   // Props:
@@ -28,19 +28,19 @@
 
 <div class="rows">
   {#each groups as g (g.id)}
-    <h4 class="grp">{g.label} <span>{g.rows.length}</span></h4>
     {#each g.rows as it (it.number)}
       {@const chip = issueChip(it)}
+      {@const open = it.linkedPRs?.find((p) => p.state === 'OPEN') ?? it.linkedPRs?.[0]}
       <div class="item">
-        <Row text={it.title} selected={it.number === sel} context={g.id === 'closed'} onclick={() => onpick(it)}>
+        <Row selected={it.number === sel} context={g.id === 'closed'} onclick={() => onpick(it)}>
           {#snippet lead()}<PRGlyph kind="issue" {it} />{/snippet}
-          {#snippet meta()}
-            <span>#{it.number}</span>
+          <div class="title">{it.title}</div>
+          <div class="identity">#{it.number}{#if it.author?.login} <span>by {it.author.login}</span>{/if}<span>{ago(it.updatedAt)}</span>{#if it.commentCount}<span>{it.commentCount} {it.commentCount === 1 ? 'comment' : 'comments'}</span>{/if}</div>
+          <div class="facts">
+            {#if chip}<Chip tone={chip.tone} outline={!chip.tone}>{chip.label}</Chip>{/if}
             {#each (it.labels ?? []).slice(0, 3) as l}<span class="label" style={labelStyle(l.color)}>{l.name}</span>{/each}
-            {#if it.commentCount !== undefined}<span>{it.commentCount} {it.commentCount === 1 ? 'comment' : 'comments'}</span>{/if}
-            <span>{ago(it.updatedAt)}</span>
-          {/snippet}
-          {#snippet trail()}{#if chip}<Chip tone={chip.tone} outline={!chip.tone}>{chip.label}</Chip>{/if}{/snippet}
+            {#if open && g.id !== 'has-pr'}<span class="pr">PR #{open.number}{open.isDraft ? ' draft' : ''}</span>{/if}
+          </div>
         </Row>
         {#if g.id === 'needs-owner'}<button class="start" disabled={starting === it.number} onclick={() => onstart(it)} title="Hand this issue to an agent">Start</button>{/if}
       </div>
@@ -49,14 +49,17 @@
 </div>
 
 <style>
-  .rows { flex: 1; overflow-y: auto; padding: var(--s2) var(--s2) var(--s4); }
-  .grp { margin: var(--s3) var(--s2) var(--s1); font-size: var(--t-sm); font-weight: 600; color: var(--muted); }
-  .grp span { color: var(--faint); font-weight: 400; margin-left: 4px; }
-  .item { display: flex; align-items: center; gap: var(--s2); }
-  .item :global(.row) { flex: 1; min-width: 0; }
+  .rows { padding: 0 var(--s5) var(--s4); }
+  .item { display: flex; align-items: center; gap: var(--s2); border-bottom: 1px solid var(--line-soft); }
+  .item :global(.row) { flex: 1; min-width: 0; border-radius: 0; padding: var(--s4) 0; }
+  .title { font-size: var(--t-body); font-weight: 600; overflow-wrap: anywhere; }
+  .identity { margin-top: var(--s1); color: var(--muted); font-size: var(--t-sm); display: flex; gap: var(--s2); flex-wrap: wrap; }
+  .facts { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); }
+  .facts:empty { display: none; }
+  .pr { margin-left: auto; color: var(--muted); font-size: var(--t-sm); }
   .label { font-size: 11px; font-weight: 600; padding: 0 7px; border-radius: 9px; line-height: 17px; }
-  .start { flex: none; font-size: 12.5px; font-weight: 600; color: var(--ink-2); background: var(--raise); border-radius: 6px; padding: 5px 12px; margin-right: var(--s2); }
+  .start { flex: none; font-size: 12.5px; font-weight: 600; color: var(--ink-2); background: var(--raise); border-radius: 6px; padding: 5px 12px; }
   .start:hover:not(:disabled) { color: var(--ink); background: var(--raise-hover); }
   .start:disabled { opacity: 0.5; }
-  @media (max-width: 760px) { .start { min-height: 44px; padding: 0 14px; } }
+  @media (max-width: 760px) { .rows { padding-left: var(--s4); padding-right: var(--s4); } .start { min-height: 44px; padding: 0 14px; } .pr { margin-left: 0; } }
 </style>

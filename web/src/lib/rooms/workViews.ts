@@ -36,7 +36,7 @@ export const sections: Section[] = [
   {
     label: 'Machine',
     rows: [
-      { id: 'code', label: 'code', hint: 'Files, issues and CI health', repo: true, tabs: [{ id: 'files', label: 'Files' }, { id: 'issues', label: 'Issues' }, { id: 'cihealth', label: 'CI health' }] },
+      { id: 'code', label: 'code', hint: 'Files and CI health', repo: true, tabs: [{ id: 'files', label: 'Files' }, { id: 'cihealth', label: 'CI health' }] },
       { id: 'library', label: 'library', hint: 'The feature map of this repository', repo: true, tabs: [{ id: 'library', label: 'Library' }] },
       { id: 'terminal', label: 'terminal', hint: 'A shell on the host', terminal: true, tabs: [{ id: 'terminal', label: 'Terminal' }] },
       { id: 'computers', label: 'computers', hint: 'Every agent computer in this room', computers: true, tabs: [{ id: 'computers', label: 'Computers' }] },
@@ -44,7 +44,7 @@ export const sections: Section[] = [
   },
 ]
 
-export const roomTabs: Tab[] = [{ id: 'general', label: 'Messages' }, { id: 'github', label: 'PRs' }]
+export const roomTabs: Tab[] = [{ id: 'general', label: 'Messages' }, { id: 'github', label: 'PRs' }, { id: 'issues', label: 'Issues' }]
 
 // rowOf is the sidebar row that holds a view, or undefined for the feed.
 export function rowOf(view: string): Row | undefined {

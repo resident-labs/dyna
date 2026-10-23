@@ -2304,7 +2304,7 @@
           {#if workTabs && !narrow}<div class="dm-tabs"><Tabs tabs={workTabs} tab={view} label={workRow.label} onselect={openView} /></div>{/if}
         {:else}
           <span class="title" title={room.repo}><span class="name">{roomLabel(current ?? room)}</span></span>
-          {#if !narrow}<div class="dm-tabs"><Tabs tabs={roomTabs} tab={view === 'github' ? 'github' : GENERAL} label="Room" onselect={openView} /></div>{/if}
+          {#if !narrow}<div class="dm-tabs"><Tabs tabs={roomTabs} tab={view === 'github' || view === 'issues' ? view : GENERAL} label="Room" onselect={openView} /></div>{/if}
         {/if}
         {#if !drill}
         <span class="spacer"></span>
@@ -2395,7 +2395,7 @@
             {/if}
           {/key}
         {:else}
-        {#if !workRow && narrow}<Tabs tabs={roomTabs} tab={view === 'github' ? 'github' : GENERAL} label="Room" onselect={openView} />{/if}
+        {#if !workRow && narrow}<Tabs tabs={roomTabs} tab={view === 'github' || view === 'issues' ? view : GENERAL} label="Room" onselect={openView} />{/if}
         {#if workTabs && narrow}<Tabs tabs={workTabs} tab={view} label={workRow.label} onselect={openView} />{/if}
         {#if view === 'files'}
           {#key room.id}<FileBrowser roomId={room.id} {narrow} {reveal} folder={revealFolder} onpr={openPR} />{/key}
