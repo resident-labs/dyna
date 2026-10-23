@@ -93,3 +93,40 @@ func TestMergeControlChecksCallerAndRoom(t *testing.T) {
 		t.Fatalf("decision history = %+v, %v", history, err)
 	}
 }
+
+// The page's pause switch uses the CLI's pause path, and only a caller that may
+// control the room can use it.
+func TestSetMergePausedUsesTheMergeControlPath(t *testing.T) {
+	storetest.Isolate(t)
+	rooms := &room.Store{Root: t.TempDir()}
+	own, err := rooms.Create(room.CreateInput{Name: "pause-own"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := rooms.Create(room.CreateInput{Name: "pause-other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ghclient.SetAccess(rooms, own.ID, ghclient.ReadWrite); err != nil {
+		t.Fatal(err)
+	}
+	manager := &subagent.Manager{Store: &subagent.Store{Root: t.TempDir() + "/sessions"}}
+	s := &Service{Notify: notify.New(rooms, manager)}
+	owner := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
+	if err := s.SetMergePaused(owner, own.Name, true); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := s.Watcher().MergeControlStatus(own.ID); err != nil || !status.Paused {
+		t.Fatalf("pause: %+v %v", status, err)
+	}
+	if err := s.SetMergePaused(owner, own.Name, false); err != nil {
+		t.Fatal(err)
+	}
+	if status, err := s.Watcher().MergeControlStatus(own.ID); err != nil || status.Paused {
+		t.Fatalf("resume: %+v %v", status, err)
+	}
+	session := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Room: other.ID, Session: "elsewhere"})
+	if err := s.SetMergePaused(session, own.Name, true); err == nil {
+		t.Fatal("a session in another room paused this room through the web call")
+	}
+}
