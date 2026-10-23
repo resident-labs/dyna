@@ -21,7 +21,7 @@ profile for each agent CLI and model you use, and start the engine:
 dyna profiles add --name my-builder --harness codex --model <model-id> \
   --taste 7 --intelligence 9 --cost 6 --desc "Your routing notes."
 dyna engine install-services    # engine and computer user services
-dyna demo                       # mock workers for one run + a sample workflow
+dyna demo                       # sample workflow on unsaved mock workers
 ```
 
 Dyna ships no profiles. You add every profile, in Settings > Profiles or with
