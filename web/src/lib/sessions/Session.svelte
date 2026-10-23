@@ -52,7 +52,7 @@
     jobs?: ShellJob[]
     onopenfile: (attachment: Attachment) => void
     onpost?: ((postId: string) => void) | null
-    onissue?: ((number: number) => void) | null
+    onissue?: ((issue: string) => void) | null
     onchild: (member: Member) => void
     // A member row of the thread panel opens that session; the parent row and
     // the sibling rows use the same way in as a child row.
@@ -133,7 +133,7 @@
   let scroller = $state<HTMLElement>()
   let forwarding = $state<ThreadPost | null>(null)
   function forward(post: ThreadPost) { if (busy) return; forwarding = post; threadsOpen = false; field?.focus() }
-  let field = $state<{ focus(): void }>()
+  let field = $state<HTMLTextAreaElement>()
   let busy = $state(false)
   let sendError = $state('')
   let stuck = $state(true)
