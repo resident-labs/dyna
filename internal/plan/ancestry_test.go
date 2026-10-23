@@ -4,7 +4,6 @@ import (
 	"context"
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/plan"
-	"dyna-agent/internal/planclient"
 	"dyna-agent/internal/websvc"
 	"encoding/json"
 	"errors"
@@ -18,7 +17,7 @@ func TestPlanAncestryIgnoresLegacyHeader(t *testing.T) {
 	testAncestryEngine(t)
 	dir := t.TempDir()
 	src := "return 1"
-	p, err := plan.Ensure(dir, src, plan.Options{WriteAncestry: planclient.StampAncestry, ResumedFrom: "wf_parent"})
+	p, err := plan.Ensure(dir, src, plan.Options{WriteAncestry: plan.StampAncestry, ResumedFrom: "wf_parent"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +54,7 @@ func TestAncestryReportsEngineFailureWithoutLocalFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	enginetest.Serve(t, s.DataDir, calls)
-	if _, err := plan.Ensure(dir, "return 1", plan.Options{WriteAncestry: planclient.StampAncestry, ResumedFrom: "wf_parent"}); err == nil || !strings.Contains(err.Error(), "engine refused ancestry") {
+	if _, err := plan.Ensure(dir, "return 1", plan.Options{WriteAncestry: plan.StampAncestry, ResumedFrom: "wf_parent"}); err == nil || !strings.Contains(err.Error(), "engine refused ancestry") {
 		t.Fatalf("failed write = %v", err)
 	}
 	got, err := s.Parent(context.Background(), dir)
@@ -85,7 +84,7 @@ func TestGraphFailureOnlyStopsRequiredAncestry(t *testing.T) {
 				t.Fatal(err)
 			}
 			p := plan.Extract("return 1", plan.Options{ResumedFrom: parent})
-			err := plan.WriteAtomic(dir, p, planclient.StampAncestry)
+			err := plan.WriteAtomic(dir, p, plan.StampAncestry)
 			if err == nil {
 				t.Fatal("graph staging unexpectedly succeeded")
 			}
@@ -103,7 +102,7 @@ func TestEnsureStaleGraphStillPersistsResumeAncestry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	kept, err := plan.Ensure(dir, "return 2", plan.Options{ResumedFrom: "wf_parent", WriteAncestry: planclient.StampAncestry})
+	kept, err := plan.Ensure(dir, "return 2", plan.Options{ResumedFrom: "wf_parent", WriteAncestry: plan.StampAncestry})
 	if err != nil {
 		t.Fatal(err)
 	}

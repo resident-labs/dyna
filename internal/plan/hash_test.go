@@ -2,7 +2,6 @@ package plan_test
 
 import (
 	"dyna-agent/internal/plan"
-	"dyna-agent/internal/planclient"
 	"os"
 	"path/filepath"
 	"strings"
@@ -97,7 +96,7 @@ func TestEnsureStampsResumedFromOnMatchingPlan(t *testing.T) {
 		t.Fatalf("fresh plan should omit resume ancestry: %#v", first)
 	}
 	second, err := plan.Ensure(dir, src, plan.Options{
-		WriteAncestry: planclient.StampAncestry, ResumedFrom: "wf_root",
+		WriteAncestry: plan.StampAncestry, ResumedFrom: "wf_root",
 		Now: time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC),
 	})
 	if err != nil {
@@ -121,7 +120,7 @@ func TestEnsureStampsResumedFromOnMatchingPlan(t *testing.T) {
 		t.Fatalf("empty opts wiped resume ancestry: %#v", kept)
 	}
 	reused, err := plan.Ensure(dir, src, plan.Options{
-		WriteAncestry: planclient.StampAncestry, ResumedFrom: "wf_other",
+		WriteAncestry: plan.StampAncestry, ResumedFrom: "wf_other",
 		Now: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC),
 	})
 	if err != nil {

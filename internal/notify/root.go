@@ -2,7 +2,6 @@ package notify
 
 import (
 	"context"
-	handofftext "dyna-agent/internal/handoff"
 	"fmt"
 	"regexp"
 	"strings"
@@ -148,7 +147,7 @@ func (s *Service) ReturnSeat(ctx context.Context, rec room.Record, handoff strin
 	var attachments []room.Attachment
 	text := strings.Join(parts, "\n\n")
 	if handoff != "" {
-		review := handofftext.Review("", "The external orchestrator returned its open work in the written handoff", fmt.Sprintf("`dyna room log %s --all`", rec.ID))
+		review := subagent.Review("", "The external orchestrator returned its open work in the written handoff", fmt.Sprintf("`dyna room log %s --all`", rec.ID))
 		prefix := text + "\n\n[ROOT SEAT HANDOFF]\n" + review + "\nWritten handoff:\n"
 		text = prefix + handoff
 		if len(text) > room.MaxMessageBytes {
