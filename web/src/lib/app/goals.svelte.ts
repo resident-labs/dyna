@@ -213,10 +213,12 @@ async function expediteGoal(g: Goal) {
 
 // One menu item for the goals an agent holds, or its nearest ancestor holds.
 // A session with one goal expedites it at once; several goals open a picker.
-function expediteItems(m: Member) {
+// expeditedId is the page's own expedited goal, read where the menu is drawn,
+// so a goal that expires while the menu is open changes the item.
+function expediteItems(m: Member, expeditedId: string) {
   if (m.closed) return []
   const held = heldGoals(m, goalHost.hierarchy(), knownGoals)
-  const item = expediteMenuItem(held, get(expedite).goalId)
+  const item = expediteMenuItem(held, expeditedId)
   if (!item) return []
   if (item.mode === 'choose') return [{ label: item.label, hint: item.hint, run: () => goalHost.pickGoal(m, held) }]
   const only = held[0]

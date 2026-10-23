@@ -1383,7 +1383,9 @@
   }
   // Session menu: safe actions first, then the two that stop work, set
   // apart in coral. Both of those ask first.
-  function menuItems(m: Member) {
+  // The session menu reads the page's expedited goal as the menu is drawn, so
+  // a goal that expires while the menu is open changes its item.
+  function menuItems(m: Member, expeditedId: string) {
     const items: MenuItem[] = [
       { label: m.closed ? 'Open transcript' : 'Message', run: () => openSession(m) },
       { label: 'Open profile', run: () => openMember(m) },
@@ -1393,7 +1395,7 @@
     // The internal root holds the root seat, so it is never consolidated.
     if (!m.closed && m.role !== 'root') items.push({ label: 'Consolidate sessions…', run: () => { selectingSessions = true; setPicked(m.id ? [m.id] : []); showMembers = true; showPins = false } })
     if (!m.closed) items.push({ label: 'Mention in composer', run: () => mentionMember(m) })
-    items.push(...expediteItems(m))
+    items.push(...expediteItems(m, expeditedId))
     items.push({ label: 'Copy address', hint: m.address, run: () => copyText(m.address).then(
       () => say({ tone: 'success', subject: 'Copied the address', text: `Paste it to mention ${m.name}.` }),
       (e) => say({ tone: 'error', subject: 'Could not copy the address', text: errorText(e) }),
@@ -2295,7 +2297,7 @@
   <Menu x={context.x} y={context.y} title={`${context.ids.length} selected`} items={selectionItems(context)} onclose={closeSelectionMenu} />
 {/if}
 {#if menu}
-  <Menu x={menu.x} y={menu.y} title={menu.m.address} items={menuItems(menu.m)} onclose={closeMenu} />
+  <Menu x={menu.x} y={menu.y} title={menu.m.address} items={menuItems(menu.m, $expedite.goalId)} onclose={closeMenu} />
 {/if}
 {#if currentBulk?.value && currentBulk.roomId === roomId}
   {@const batch = { ...currentBulk, value: currentBulk.value }}
