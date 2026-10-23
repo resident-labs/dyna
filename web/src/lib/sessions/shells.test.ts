@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { runningShells } from './shells.ts'
-import type { ShellJob } from './shellBlock.ts'
+import type { ShellJob } from './shell.ts'
 
 const job = (id: string, owner: string | undefined, state: ShellJob['state']): ShellJob => ({ id, owner, command: ['bash', '-c', id], cwd: '/', state, code: 0, started: '2026-10-20T12:00:00Z' })
 

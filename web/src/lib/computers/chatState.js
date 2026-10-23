@@ -46,13 +46,22 @@ export const chatDriving = (state, driving) => (driving ? TUCKED : state)
 // lastLine identifies new agent activity for the unread dot.
 // Returns {key, who, text}, or null when there is none.
 export function lastLine(rows, address) {
-  for (let i = (rows?.length ?? 0) - 1; i >= 0; i--) {
-    const r = rows[i]
-    if (r.kind === 'message' && r.author === address && r.text?.trim()) return { key: r.key, who: 'say', text: plain(r.text) }
-    if (r.kind === 'activity') {
-      const t = [...r.items].reverse().find((it) => it.kind === 'tool')
-      if (t) return { key: r.key + ':' + r.items.length, who: 'act', text: '' }
+  // Later steps stay in the turn's first timeline row. Compare their own
+  // times so a tool after a reply can still set the unread dot.
+  const candidates = (rows ?? []).flatMap((row) => {
+    if (row.kind === 'message' && row.author === address && row.text?.trim()) {
+      return [{ line: { key: row.key, who: 'say', text: plain(row.text) }, ts: row.ts }]
     }
+    if (row.kind === 'timeline') return row.steps.map((step) => ({
+      line: { key: `${row.key}:${step.key}:${step.posts?.length ?? 0}`, who: 'act', text: '' },
+      ts: step.posts?.at(-1)?.ts ?? step.ts ?? row.ts,
+    }))
+    return []
+  })
+  let last = null, latest = -1
+  for (const { line, ts } of candidates) {
+    const at = Math.max(0, (typeof ts === 'number' ? ts : Date.parse(ts ?? '')) || 0)
+    if (at >= latest) { last = line; latest = at }
   }
-  return null
+  return last
 }
