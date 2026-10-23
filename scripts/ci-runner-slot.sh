@@ -249,6 +249,9 @@ while :; do
           echo "go-test admission waited $((SECONDS - queued_at)) seconds"
           while [ ! -s "$run/result" ]; do
             if ! kill -0 "$holder" 2>/dev/null; then
+              # The keeper writes its result before exit. It can finish after
+              # the loop condition reads the file but before this liveness check.
+              [ -s "$run/result" ] && break
               echo "admission keeper died; its container reservation remains" >&2
               exit 75
             fi

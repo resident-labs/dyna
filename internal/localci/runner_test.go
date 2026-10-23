@@ -551,3 +551,39 @@ esac
 		})
 	}
 }
+
+// Force the keeper to publish its result and exit between the caller's
+// empty-result observation and its process-liveness check.
+func TestAdmissionAcceptsResultPublishedBeforeKeeperExit(t *testing.T) {
+	dir := t.TempDir()
+	gate := writeTestHostGate(t, dir)
+	bin := filepath.Join(dir, "bin")
+	if err := os.Mkdir(bin, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nexit 0\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	barrier := filepath.Join(dir, "barrier.sh")
+	if err := os.WriteFile(barrier, []byte(`function [() {
+  if [[ $# == 4 && $1 == '!' && $2 == -s && $3 == */result && -z ${observed_result:-} ]]; then
+    observed_result=true
+    wait "$!"
+    echo "injected empty-result observation before keeper exit" >&2
+    return 0
+  fi
+  builtin [ "$@"
+}
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.CommandContext(t.Context(), "bash", gate, "--container", "keeper-race", "30", "--", "docker", "create", "--name", "keeper-race")
+	cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "BASH_ENV="+barrier, "CI_SLOT_DIR="+filepath.Join(dir, "slots"), "CI_SLOT_POLL=0.001")
+	output, err := cmd.CombinedOutput()
+	if !strings.Contains(string(output), "injected empty-result observation") {
+		t.Fatalf("keeper exit barrier was not reached: %v: %s", err, output)
+	}
+	if err != nil {
+		t.Fatalf("completed keeper result was rejected: %v: %s", err, output)
+	}
+}
