@@ -44,6 +44,12 @@ func keptReason(err error) RoomSessionKeptReason {
 	}
 }
 
+// keptRow is one session the dormant close left open.
+func keptRow(meta Meta, err error) RoomSessionResult {
+	reason := keptReason(err)
+	return RoomSessionResult{Session: meta.ID, Name: meta.Address(), Status: "kept", Reason: reason, Error: err.Error(), OK: reason != RoomSessionKeptFailed}
+}
+
 // SweepDormantSessions is the automatic Clear dormant: it closes every session
 // that has stayed dormant, with no activity, for DormantCloseAfter.
 func (m *Manager) SweepDormantSessions(ctx context.Context) error {
@@ -93,10 +99,7 @@ func (m *Manager) closeDormantSessions(ctx context.Context, ref string, cutoff t
 		}
 		row := RoomSessionResult{Session: meta.ID, Name: meta.Address(), Status: "closed", OK: true}
 		if err = m.closeDormant(ctx, meta.ID, cutoff); err != nil {
-			row.Status = "kept"
-			row.Reason = keptReason(err)
-			row.Error = err.Error()
-			row.OK = row.Reason != RoomSessionKeptFailed
+			row = keptRow(meta, err)
 			if row.OK {
 				out.Kept++
 			} else {
