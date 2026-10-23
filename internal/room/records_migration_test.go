@@ -3,6 +3,7 @@ package room
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,6 +91,30 @@ func TestRoomRecordsMigrateBeforeAnyRead(t *testing.T) {
 				if after, err := os.ReadFile(filepath.Join(dir, name)); err != nil || !bytes.Equal(after, []byte(raw)) {
 					t.Fatalf("source %s changed: %q, %v", name, after, err)
 				}
+			}
+			if mode == "embedded seat" {
+				if got, err := s.Resolve(id); err != nil || got.Seat != want.Seat {
+					t.Fatalf("resolved embedded seat = %+v, %v", got.Seat, err)
+				}
+				if after, err := os.ReadFile(filepath.Join(dir, "room.json")); err != nil || string(after) != files["room.json"] {
+					t.Fatalf("read changed the retained room source: %q, %v", after, err)
+				}
+				if err := s.Rename(id, "Renamed room"); err != nil {
+					t.Fatal(err)
+				}
+				raw, err := os.ReadFile(filepath.Join(dir, "seat.json"))
+				var rollback Seat
+				if err != nil {
+					t.Fatalf("embedded seat has no rollback file after record write: %v", err)
+				}
+				if err := json.Unmarshal(raw, &rollback); err != nil || rollback != want.Seat {
+					t.Fatalf("rollback seat = %+v, %v; want %+v", rollback, err, want.Seat)
+				}
+				if err := db.QueryRow("SELECT body,seat FROM room_records WHERE id=?", id).Scan(&body, &seat); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for name := range files {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte("{stale"), 0600); err != nil {
 					t.Fatal(err)
 				}
