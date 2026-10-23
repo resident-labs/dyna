@@ -22,7 +22,7 @@ func Command(o Options) *cobra.Command {
 	}
 	var roomRef, at, note string
 	var asJSON bool
-	root := &cobra.Command{Use: "issue <title>", Short: "File a quiet room issue for later triage", Args: cobra.ExactArgs(1)}
+	root := &cobra.Command{Use: "issue <title>", Short: "File a quiet room issue for later triage", Long: "File a quiet room issue for later triage. Issues have room numbers such as D-12. Triage commands accept D-12, d12 or the original message ID.", Args: cobra.ExactArgs(1)}
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "print full issue data as JSON")
 	root.PersistentFlags().StringVar(&roomRef, "room", "", "room name or ID (default: the current room)")
 	root.Flags().StringVar(&at, "at", "", "source file and line, such as internal/parser.go:12")
@@ -65,7 +65,7 @@ func Command(o Options) *cobra.Command {
 		if link != "" {
 			suffix = " -> " + link
 		}
-		_, err := fmt.Fprintf(c.OutOrStdout(), "%s %s : %s%s\n", action, i.ID, i.Title, suffix)
+		_, err := fmt.Fprintf(c.OutOrStdout(), "%s %s : %s%s\n", action, i.Label(), i.Title, suffix)
 		return err
 	}
 	root.RunE = func(c *cobra.Command, a []string) error {
@@ -101,7 +101,7 @@ func Command(o Options) *cobra.Command {
 			if i.Line > 0 {
 				loc += fmt.Sprintf(":%d", i.Line)
 			}
-			fmt.Fprintf(c.OutOrStdout(), "%s  %s  %s  %s\n", i.ID, i.State, i.Title, loc)
+			fmt.Fprintf(c.OutOrStdout(), "%s  %s  %s  %s\n", i.Label(), i.State, i.Title, loc)
 		}
 		return nil
 	}}
@@ -109,7 +109,7 @@ func Command(o Options) *cobra.Command {
 	root.AddCommand(list)
 	for _, action := range []string{"close", "goal", "export"} {
 		var value string
-		c := &cobra.Command{Use: action + " <id>", Short: action + " an open issue (root or owner)", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
+		c := &cobra.Command{Use: action + " <issue>", Short: action + " an open issue by D-N or message ID (root or owner)", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
 			if action == "close" {
 				if len(a) == 2 {
 					if c.Flags().Changed("reason") && strings.TrimSpace(value) != strings.TrimSpace(a[1]) {
@@ -133,7 +133,7 @@ func Command(o Options) *cobra.Command {
 		}}
 		switch action {
 		case "close":
-			c.Use = "close <id> [reason]"
+			c.Use = "close <issue> [reason]"
 			c.Args = cobra.RangeArgs(1, 2)
 			c.Flags().StringVar(&value, "reason", "", "reason for closing (or supply a second argument)")
 		case "goal":

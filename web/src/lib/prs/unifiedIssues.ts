@@ -2,6 +2,7 @@ import type { GitHubItem } from '../api/github.ts'
 
 export interface RoomIssue {
   id: string
+  number: number
   title: string
   file?: string
   line?: number
@@ -14,7 +15,10 @@ export interface RoomIssue {
   changedAt?: number
 }
 export interface IssueReference { kind: 'pr' | 'issue' | 'room_issue'; number: number | string; title: string; state: string; url: string }
-export const issueReference = (i: IssueRow): IssueReference => ({ kind: i.number ? 'issue' : 'room_issue', number: i.number || i.local?.id || '', title: i.title, state: i.state, url: i.url })
+// A room issue shows its number as D-12. A row without one (an older engine)
+// falls back to the message ID, like the Go Label.
+export const roomIssueLabel = (i: RoomIssue): string => i.number > 0 ? `D-${i.number}` : i.id
+export const issueReference = (i: IssueRow): IssueReference => ({ kind: i.number ? 'issue' : 'room_issue', number: i.number || (i.local ? roomIssueLabel(i.local) : ''), title: i.title, state: i.state, url: i.url })
 export type IssueRow = GitHubItem & { local?: RoomIssue; source?: 'Dyna' | 'GitHub' }
 const urlKey = (url: string) => url.replace(/\/+$/, '').toLowerCase()
 
@@ -31,6 +35,16 @@ export function unifiedIssues(github: readonly GitHubItem[], local: readonly Roo
     rows.push({ number: 0, title: i.title, state: i.githubUrl ? 'UNKNOWN' : i.state === 'open' ? 'OPEN' : 'CLOSED', group: i.state === 'open' ? 'needs-owner' : '', author: { login: i.filer || '' }, labels: [], workingSessionLive: false, createdAt: new Date(i.filedAt).toISOString(), updatedAt: new Date(i.changedAt || i.filedAt).toISOString(), url: i.githubUrl || '', source: 'Dyna', local: i })
   }
   const q = query.trim().toLowerCase()
-  return rows.filter(i => (source === 'all' || i.source?.toLowerCase() === source) && (state === 'all' || i.state === state.toUpperCase()) && (!q || i.source === 'GitHub' || (i.title + ' ' + (i.local?.file || '') + ' ' + (i.local?.filer || '')).toLowerCase().includes(q)))
+  // People type D-12, d12 or 12, so both spellings are searchable. A number
+  // query compares the number, so "12" does not find D-112.
+  const wanted = q.match(/^#?d?-?(\d+)$/)?.[1]
+  const haystack = (i: IssueRow) => {
+    const label = i.local && i.local.number > 0 ? [roomIssueLabel(i.local), `d${i.local.number}`] : []
+    // A number query must not match the label of another issue.
+    return [...(wanted ? [] : label), i.title, i.local?.file || '', i.local?.filer || ''].join(' ').toLowerCase()
+  }
+  const matchesQuery = (i: IssueRow) => !q || i.source === 'GitHub' ||
+    (wanted ? i.local?.number === Number(wanted) || haystack(i).includes(q) : haystack(i).includes(q))
+  return rows.filter(i => (source === 'all' || i.source?.toLowerCase() === source) && (state === 'all' || i.state === state.toUpperCase()) && matchesQuery(i))
     .sort((a, b) => Number(b.state === 'OPEN') - Number(a.state === 'OPEN') || Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
 }

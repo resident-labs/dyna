@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"dyna-agent/internal/authority"
@@ -34,6 +35,7 @@ CREATE TABLE room_issue_revisions (room_id TEXT PRIMARY KEY, revision INTEGER NO
 
 type Issue struct {
 	ID        string `json:"id"`
+	Number    int    `json:"number"`
 	Title     string `json:"title"`
 	File      string `json:"file"`
 	Line      int    `json:"line"`
@@ -45,6 +47,30 @@ type Issue struct {
 	GitHubURL string `json:"githubUrl"`
 	ChangedBy string `json:"changedBy"`
 	ChangedAt int64  `json:"changedAt"`
+}
+
+// Label is the short issue reference people can type within its room.
+func (i Issue) Label() string {
+	if i.Number > 0 {
+		return fmt.Sprintf("D-%d", i.Number)
+	}
+	return i.ID
+}
+
+// issueNumber accepts the canonical label and the compact composer spelling.
+func issueNumber(ref string) (int, bool) {
+	ref = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(ref)), "#")
+	if !strings.HasPrefix(ref, "d") {
+		return 0, false
+	}
+	ref = strings.TrimPrefix(strings.TrimPrefix(ref, "d"), "-")
+	for _, digit := range ref {
+		if digit < '0' || digit > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(ref)
+	return n, err == nil && n > 0
 }
 
 func (s *Store) issuesPath(roomID string) (string, error) {
@@ -64,9 +90,11 @@ func (s *Store) Issues(roomID string, all bool) ([]Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	query := `SELECT body FROM room_issues WHERE room_id=? AND state='open' ORDER BY seq DESC`
+	// A row from an older writer may lack a number; Label then falls back to
+	// its message ID instead of hiding the issue.
+	query := `SELECT i.body, COALESCE(n.number,0) FROM room_issues i LEFT JOIN room_issue_numbers n ON n.room_id=i.room_id AND n.message_id=i.id WHERE i.room_id=? AND i.state='open' ORDER BY i.seq DESC`
 	if all {
-		query = `SELECT body FROM room_issues WHERE room_id=? ORDER BY seq DESC`
+		query = `SELECT i.body, COALESCE(n.number,0) FROM room_issues i LEFT JOIN room_issue_numbers n ON n.room_id=i.room_id AND n.message_id=i.id WHERE i.room_id=? ORDER BY i.seq DESC`
 	}
 	rows, err := db.Query(query, roomID)
 	if err != nil {
@@ -77,12 +105,14 @@ func (s *Store) Issues(roomID string, all bool) ([]Issue, error) {
 	for rows.Next() {
 		var body string
 		var i Issue
-		if err := rows.Scan(&body); err != nil {
+		var number int
+		if err := rows.Scan(&body, &number); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal([]byte(body), &i); err != nil {
 			return nil, err
 		}
+		i.Number = number
 		out = append(out, i)
 	}
 	return out, rows.Err()
@@ -114,14 +144,28 @@ func (s *Store) issuesDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "room.issues.schema", 2, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "room.issues.schema", 3, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, issuesSchema); err != nil {
 				return err
 			}
 		}
-		return s.importLegacyIssues(ctx, conn)
+		if old < 2 {
+			if err := s.importLegacyIssues(ctx, conn); err != nil {
+				return err
+			}
+		}
+		// Keep the mapping after triage. Each room has its own sequence, and
+		// old posts get numbers in creation order, with seq breaking ties.
+		_, err := conn.ExecContext(ctx, `CREATE TABLE room_issue_numbers (
+ room_id TEXT NOT NULL, number INTEGER NOT NULL CHECK(number > 0), message_id TEXT NOT NULL,
+ PRIMARY KEY(room_id, number), UNIQUE(room_id, message_id)
+);
+INSERT INTO room_issue_numbers(room_id, number, message_id)
+ SELECT room_id, ROW_NUMBER() OVER (PARTITION BY room_id ORDER BY COALESCE(json_extract(body,'$.filedAt'),0), seq), id
+ FROM room_issues;`)
+		return err
 	})
 	if err != nil {
 		return nil, err
@@ -190,7 +234,11 @@ func (s *Store) importLegacyIssues(ctx context.Context, conn *sql.Conn) error {
 	return nil
 }
 
-func insertIssue(ctx context.Context, conn *sql.Conn, roomID string, i Issue) error {
+func insertIssue(ctx context.Context, conn *sql.Conn, roomID string, i *Issue) error {
+	if err := conn.QueryRowContext(ctx, `INSERT INTO room_issue_numbers(room_id,number,message_id)
+ SELECT ?,COALESCE(MAX(number),0)+1,? FROM room_issue_numbers WHERE room_id=? RETURNING number`, roomID, i.ID, roomID).Scan(&i.Number); err != nil {
+		return err
+	}
 	body, err := json.Marshal(i)
 	if err != nil {
 		return err
@@ -209,6 +257,9 @@ func bumpIssues(ctx context.Context, conn *sql.Conn, roomID string) error {
 // deleteIssueRows removes a deleted room's issues, in the delete's write.
 func deleteIssueRows(ctx context.Context, conn *sql.Conn, roomID string) error {
 	if _, err := conn.ExecContext(ctx, `DELETE FROM room_issues WHERE room_id=?`, roomID); err != nil {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, `DELETE FROM room_issue_numbers WHERE room_id=?`, roomID); err != nil {
 		return err
 	}
 	_, err := conn.ExecContext(ctx, `DELETE FROM room_issue_revisions WHERE room_id=?`, roomID)
@@ -256,7 +307,7 @@ func (s *Store) FileIssue(roomID, title, note, file string, line int, by string)
 		return Issue{}, err
 	}
 	err = state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-		return insertIssue(context.Background(), conn, rec.ID, out)
+		return insertIssue(context.Background(), conn, rec.ID, &out)
 	})
 	return out, err
 }
@@ -292,11 +343,12 @@ func (s *Store) ChangeIssue(roomID, id, by string, change func(*Issue) error) (I
 			return err
 		}
 		for _, i := range rows {
-			if i.ID != id {
+			number, numbered := issueNumber(id)
+			if i.ID != id && (!numbered || i.Number != number) {
 				continue
 			}
 			if i.State != "open" {
-				return fmt.Errorf("issue %s is already %s", id, i.State)
+				return fmt.Errorf("issue %s is already %s", i.Label(), i.State)
 			}
 			if err = change(&i); err != nil {
 				return err

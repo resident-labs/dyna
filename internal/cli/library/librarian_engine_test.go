@@ -64,7 +64,7 @@ func TestLibrarianCommandOutput(t *testing.T) {
 			return librarian.Result{Action: "current", Reason: "up to date"}, checkRepo(got)
 		}},
 		{Name: "FileLibrarySmell", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(got string, sm librarian.Smell) (room.Issue, error) {
-			return room.Issue{ID: "issue", Title: sm.Title}, checkRepo(got)
+			return room.Issue{ID: "issue", Number: 12, Title: sm.Title}, checkRepo(got)
 		}},
 	})
 	if err != nil {
@@ -79,7 +79,7 @@ func TestLibrarianCommandOutput(t *testing.T) {
 		{[]string{"disable"}, "librarian off for " + repo + "\n"},
 		{[]string{"wake"}, "librarian current up to date\n"},
 		{[]string{"wake", "--json"}, "{\"action\":\"current\",\"reason\":\"up to date\"}\n"},
-		{[]string{"smell", "A smell"}, "filed issue : A smell\n"},
+		{[]string{"smell", "A smell"}, "filed D-12 : A smell\n"},
 	} {
 		var out bytes.Buffer
 		c := Command(Options{DataDir: data})
