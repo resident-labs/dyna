@@ -16,7 +16,6 @@
   import { api } from '../../api.ts'
   import type { SystemLoad } from '../api/system.ts'
   import type { MachineAgent, MachineDetail, MachinePatch, MachineRole } from '../api/machine.ts'
-  import { ago } from '../ui/format.ts'
   import { ciRunDetail, ciRunText, computersText, count, diskText, loadText, memoryPct, reasonText, roleLabel, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
 
   let { machine, error = '', busy = false, probing = false, onback, onagent, onsave, onprobe = () => {} }: {
