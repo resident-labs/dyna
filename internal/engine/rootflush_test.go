@@ -232,7 +232,7 @@ func TestRootFlushRecoversQuietInputFromBeforeTheFirstScan(t *testing.T) {
 // Passive engine input is read on the next real turn. It must neither cancel
 // the first quiet post's deadline nor hide that post from recovery.
 func TestRootFlushPreservesDeadlineThroughPassiveInput(t *testing.T) {
-	for _, kind := range []string{"issue", "owner-dm"} {
+	for _, kind := range []string{"notice", "owner-dm"} {
 		for _, recover := range []bool{false, true} {
 			name := kind + "/live"
 			if recover {
@@ -240,7 +240,7 @@ func TestRootFlushPreservesDeadlineThroughPassiveInput(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				e := newFlushEnv(t)
-				quiet := room.PostInput{From: "work:agent", Kind: "issue", To: []string{"work"}, Text: "Repair the test"}
+				quiet := room.PostInput{From: "work:agent", Kind: "notice", To: []string{"work"}, Text: "Repair the test"}
 				if kind == "owner-dm" {
 					quiet = room.PostInput{Wake: true, From: "work", Human: true, Kind: "message", To: []string{"work:agent"}, Text: "Repair the test"}
 				}

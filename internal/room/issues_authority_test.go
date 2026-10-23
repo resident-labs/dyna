@@ -8,7 +8,7 @@ import (
 
 func TestIssueTriageUsesSenderAuthority(t *testing.T) {
 	s, rec, _ := pinFixture(t)
-	item, err := s.FileIssue(rec.ID, "Triage", "", "", 0, rec.Name)
+	item, err := s.FileIssue(rec.ID, IssueInput{Title: "Triage", Note: "", File: "", Line: 0, Filer: rec.Name})
 	if err != nil {
 		t.Fatal(err)
 	}

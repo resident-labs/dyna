@@ -40,12 +40,8 @@ func New(n *notify.Service) *Scheduler {
 		return n.Sessions.DeliverCheckIn(ctx, target.ID, func() (string, error) {
 			existing, err := n.Rooms.Message(target.Room, id)
 			if err == nil {
-				if existing.Kind == "checkin" && existing.From == room.ParentCheckInSender {
-					for _, recipient := range existing.SessionIDs {
-						if recipient == target.ID {
-							return existing.ID, nil
-						}
-					}
+				if ev, ok := existing.Checkin(); ok && ev.Parent == target.ID {
+					return existing.ID, nil
 				}
 				return "", fmt.Errorf("check-in post ID belongs to another message")
 			}
@@ -72,11 +68,16 @@ func New(n *notify.Service) *Scheduler {
 			if s.Now != nil {
 				now = s.Now()
 			}
-			text, err := summary(kids, goals.DefaultStore(), store.DataDir(), n.Sessions.Store, now)
+			ev, err := checkin(parent, kids, goals.DefaultStore(), store.DataDir(), n.Sessions.Store, now)
 			if err != nil {
 				return "", err
 			}
-			msg, err := n.Rooms.Post(target.Room, room.PostInput{ID: id, From: room.ParentCheckInSender, Kind: "checkin", Text: text, Wake: true, To: []string{parent.Address()}, SessionIDs: map[string]string{parent.Address(): parent.ID}})
+			// The event wakes the parent and no other session, as the free-text
+			// check-in did. The registry fixes its system sender.
+			msg, err := n.Rooms.PostEventInput(room.PostEventInput{
+				RoomID: target.Room, Event: ev, ID: id,
+				To: []string{parent.Address()}, SessionIDs: map[string]string{parent.Address(): parent.ID},
+			})
 			return msg.ID, err
 		})
 	}
@@ -107,24 +108,61 @@ func children(live []subagent.Info) map[string][]subagent.Info {
 	return out
 }
 
-const message = "Check on your children. For each one below, confirm it is making progress. If one is stuck, idle with unfinished work, or waiting for something that already happened, nudge it, restart it, or take over its work. Close children whose work is done. If everything is on track, end your turn without posting."
-
 type childReport struct {
-	name, status, work, prs string
-	since                   time.Time
+	name, work, prs string
+	state           room.CheckinState
+	age             string
+	since           time.Time
 }
 
-func summary(kids []subagent.Info, g *goals.Store, root string, sessions *subagent.Store, now time.Time) (string, error) {
+// checkin builds the typed check-in of one parent: the stalest children first,
+// with the counts the card shows and the child table the agent reads.
+func checkin(parent subagent.Info, kids []subagent.Info, g *goals.Store, root string, sessions *subagent.Store, now time.Time) (room.CheckinEvent, error) {
+	reports, err := readReports(kids, g, root, sessions, now)
+	if err != nil {
+		return room.CheckinEvent{}, err
+	}
+	return checkinEvent(parent, reports, now), nil
+}
+
+// checkinEvent builds the event from the child reports: the stalest first,
+// with the counts the card shows and the table the agent reads.
+func checkinEvent(parent subagent.Info, reports []childReport, now time.Time) room.CheckinEvent {
+	reports = stalestFirst(reports, now)
+	ev := room.CheckinEvent{Parent: parent.ID, WindowStart: now.UnixMilli()}
+	var lines []string
+	for _, child := range reports {
+		switch child.state {
+		case room.CheckinRunning:
+			ev.Counts.Running++
+		case room.CheckinQueued:
+			ev.Counts.Queued++
+		case room.CheckinIdle:
+			ev.Counts.Idle++
+		}
+		ev.Children = append(ev.Children, room.CheckinChild{Name: child.name, State: child.state, Age: child.age, Goal: child.work, PR: child.prs})
+		lines = append(lines, fmt.Sprintf("%s · %s for %s · %s · %s", child.name, child.state, child.age, child.work, child.prs))
+	}
+	ev.Detail = strings.Join(lines, "\n")
+	return ev
+}
+
+// readReports reads what each child is doing and how long it has been doing it.
+func readReports(kids []subagent.Info, g *goals.Store, root string, sessions *subagent.Store, now time.Time) ([]childReport, error) {
 	prs, err := prstate.Read(prstate.Root(root))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	var reports []childReport
 	for _, child := range kids {
+		state, ok := checkinState(child.Status)
+		if !ok {
+			continue
+		}
 		var work []string
 		held, err := g.ListOpen(child.RoomID)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		for _, goal := range held {
 			if goal.HeldBy(child.ID) {
@@ -133,7 +171,7 @@ func summary(kids []subagent.Info, g *goals.Store, root string, sessions *subage
 		}
 		items, err := g.OpenItemsAssignedTo(child.RoomID, child.ID)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		for _, item := range items {
 			work = append(work, item.Goal+"/"+item.Item.ID+": "+goals.Clip(item.Item.Text, 100))
@@ -155,7 +193,7 @@ func summary(kids []subagent.Info, g *goals.Store, root string, sessions *subage
 		if child.Turns > 0 {
 			turn, err := sessions.ReadTurn(child.ID, child.Turns)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			switch child.Status {
 			case subagent.StatusRunning:
@@ -172,30 +210,43 @@ func summary(kids []subagent.Info, g *goals.Store, root string, sessions *subage
 		if since.IsZero() {
 			since = child.Created
 		}
-		reports = append(reports, childReport{child.Name, child.Status, strings.Join(work, ", "), strings.Join(links, ", "), since})
+		reports = append(reports, childReport{name: child.Name, state: state, work: strings.Join(work, ", "), prs: strings.Join(links, ", "), since: since})
 	}
-	return formatSummary(reports, now), nil
+	return stalestFirst(reports, now), nil
 }
 
-func formatSummary(reports []childReport, now time.Time) string {
+// checkinState maps a session state to the state the card names.
+func checkinState(status string) (room.CheckinState, bool) {
+	switch status {
+	case subagent.StatusRunning:
+		return room.CheckinRunning, true
+	case subagent.StatusQueued:
+		return room.CheckinQueued, true
+	case subagent.StatusIdle:
+		return room.CheckinIdle, true
+	}
+	return "", false
+}
+
+// stalestFirst orders the children by how long they have been in their state,
+// and fills in that age, so a parent reads the child most likely to be stuck
+// first.
+func stalestFirst(reports []childReport, now time.Time) []childReport {
 	sort.Slice(reports, func(i, j int) bool {
 		if reports[i].since.Equal(reports[j].since) {
 			return reports[i].name < reports[j].name
 		}
 		return reports[i].since.Before(reports[j].since)
 	})
-	var b strings.Builder
-	b.WriteString(message)
-	for _, child := range reports {
-		elapsed := now.Sub(child.since)
+	for i := range reports {
+		elapsed := now.Sub(reports[i].since)
 		if elapsed < 0 {
 			elapsed = 0
 		}
-		duration := fmt.Sprintf("%dm", int64(elapsed/time.Minute))
+		reports[i].age = fmt.Sprintf("%dm", int64(elapsed/time.Minute))
 		if elapsed < time.Minute {
-			duration = "<1m"
+			reports[i].age = "<1m"
 		}
-		fmt.Fprintf(&b, "\n%s · %s for %s · %s · %s", child.name, child.status, duration, child.work, child.prs)
 	}
-	return b.String()
+	return reports
 }

@@ -46,7 +46,261 @@ const (
 	TypeResult  EventType   = "result"
 
 	FamilyMerge EventFamily = "merge"
+
+	FamilyGoal     EventFamily = "goal"
+	FamilyCheckin  EventFamily = "checkin"
+	FamilyCIHealth EventFamily = "ci-health"
+	FamilyRule     EventFamily = "rule"
+
+	// TypeSummary tells a check-in apart from any other event of its family.
+	TypeSummary EventType = "summary"
+	// TypeSlowTest is the CI health line about a test over the limit.
+	TypeSlowTest EventType = "slow-test"
+	// TypeChanged is a rule that someone added, edited or removed.
+	TypeChanged EventType = "changed"
 )
+
+// The issue family posts one event per fact about a room issue. Every filer
+// ends in room.Store.FileIssue, so the librarian's issue, an agent's and the
+// owner's look the same and differ only in who filed them.
+const FamilyIssue EventFamily = "issue"
+
+// IssueChange is what happened to an issue. The web card picks its state chip
+// from the event, never from the text.
+type IssueChange string
+
+// Issue changes.
+const (
+	IssueFiled   IssueChange = "filed"
+	IssueUpdated IssueChange = "updated"
+	IssueClosed  IssueChange = "closed"
+)
+
+// issueChanges lists every issue change the web needs as a union type.
+var issueChanges = []IssueChange{IssueFiled, IssueUpdated, IssueClosed}
+
+// IssueState is where an issue stands after the event. It is the state the
+// room store records, so the card and the Issues panel cannot disagree.
+type IssueState string
+
+// Issue states.
+const (
+	IssueStateOpen     IssueState = "open"
+	IssueStateGoal     IssueState = "goal"
+	IssueStateExported IssueState = "exported"
+	IssueStateClosed   IssueState = "closed"
+)
+
+// issueStates lists every issue state the web needs as a union type.
+var issueStates = []IssueState{IssueStateOpen, IssueStateGoal, IssueStateExported, IssueStateClosed}
+
+// IssueFile is one place an issue points at. A line of zero means the whole
+// file.
+type IssueFile struct {
+	Path string `json:"path"`
+	Line int    `json:"line,omitempty"`
+}
+
+// IssueEvent tells the room that an issue was filed or changed. It carries
+// every fact the card shows, so the card never reads the post text.
+//
+// A new issue is a backlog item: the event wakes nobody, root included. An
+// update or a close is equally quiet and reaches the owner feed only.
+type IssueEvent struct {
+	Type IssueChange `json:"type"`
+	// IssueID is empty at filing time: the issue's ID is the post's own ID.
+	IssueID string      `json:"issueId,omitempty"`
+	Number  int         `json:"number"`
+	Title   string      `json:"title"`
+	Files   []IssueFile `json:"files,omitempty"`
+	Symbols []string    `json:"symbols,omitempty"`
+	// Cost and Direction are the librarian's short note fields.
+	Cost      string     `json:"cost,omitempty"`
+	Direction string     `json:"direction,omitempty"`
+	State     IssueState `json:"state"`
+	Filer     string     `json:"filer"`
+	// Actor is who caused this change: the filer for a filing, the closer for
+	// a close. It is empty when the post itself names nobody else.
+	Actor    string       `json:"actor,omitempty"`
+	Assignee string       `json:"assignee,omitempty"`
+	ClosedBy *CloseOrigin `json:"closedBy,omitempty"`
+	Reason   string       `json:"reason,omitempty"`
+	// Detail is the note body an agent reads: the filed note, or the close
+	// reason it does not fit in one line.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (IssueEvent) eventFamily() EventFamily { return FamilyIssue }
+func (p IssueEvent) eventType() EventType   { return EventType(p.Type) }
+
+// eventSubject is the issue's room number, so every event of one issue folds
+// into one card.
+func (p IssueEvent) eventSubject() string { return "D-" + strconv.Itoa(p.Number) }
+
+// eventDedupe keys one post per issue and change: a retried filing keeps its
+// post, and a second close of the same issue posts nothing.
+func (p IssueEvent) eventDedupe() string {
+	return string(p.Type) + "\x00" + string(p.State)
+}
+
+// GoalChange is what happened to a goal. The web row reads it instead of
+// parsing the post text.
+type GoalChange string
+
+// Goal changes.
+const (
+	GoalAdded    GoalChange = "added"
+	GoalEdited   GoalChange = "edited"
+	GoalFinished GoalChange = "finished"
+	GoalDropped  GoalChange = "dropped"
+)
+
+// goalChanges lists every goal change the web needs as a union type.
+var goalChanges = []GoalChange{GoalAdded, GoalEdited, GoalFinished, GoalDropped}
+
+// GoalState is where the goal stands after the event.
+type GoalState string
+
+// Goal states.
+const (
+	GoalStateActive  GoalState = "active"
+	GoalStateDone    GoalState = "done"
+	GoalStateDropped GoalState = "dropped"
+)
+
+// goalStates lists every goal state the web needs as a union type.
+var goalStates = []GoalState{GoalStateActive, GoalStateDone, GoalStateDropped}
+
+// GoalEvent tells the owner feed that a goal changed. The owner feed is its
+// only recipient, so it wakes nobody.
+type GoalEvent struct {
+	Type   GoalChange `json:"type"`
+	GoalID string     `json:"goalId"`
+	// Title is the goal text, clipped as the feed row needs it.
+	Title string    `json:"title"`
+	Actor string    `json:"actor"`
+	State GoalState `json:"state"`
+	// Summary is the finishing note of a finished goal.
+	Summary string `json:"summary,omitempty"`
+}
+
+func (GoalEvent) eventFamily() EventFamily { return FamilyGoal }
+func (g GoalEvent) eventType() EventType   { return EventType(g.Type) }
+
+func (g GoalEvent) eventSubject() string { return g.GoalID }
+
+// eventDedupe keys one post per goal and change and text, so a retried edit
+// posts once and a second edit posts again.
+func (g GoalEvent) eventDedupe() string { return string(g.Type) + "\x00" + g.Title }
+
+// CheckinState is a child's activity when the check-in was written.
+type CheckinState string
+
+// Check-in states. They are the session states a parent acts on.
+const (
+	CheckinRunning CheckinState = "running"
+	CheckinQueued  CheckinState = "queued"
+	CheckinIdle    CheckinState = "idle"
+)
+
+// checkinStates lists every check-in state the web needs as a union type.
+var checkinStates = []CheckinState{CheckinRunning, CheckinQueued, CheckinIdle}
+
+// CheckinCounts is how many children were in each state.
+type CheckinCounts struct {
+	Running int `json:"running"`
+	Queued  int `json:"queued"`
+	Idle    int `json:"idle"`
+}
+
+// CheckinChild is one child in a check-in, with the facts a parent acts on.
+type CheckinChild struct {
+	Name  string       `json:"name"`
+	State CheckinState `json:"state"`
+	// Age is how long the child has been in this state, as "12m" or "<1m".
+	Age string `json:"age"`
+	// Goal is the work the child holds, or "no open goal or item".
+	Goal string `json:"goal"`
+	// PR names the child's open pull requests, or "no open PRs".
+	PR string `json:"pr"`
+}
+
+// CheckinEvent is a parent check-in: the stalest children first, so the
+// parent reads the ones most likely to be stuck before the rest.
+//
+// It wakes the parent and no one else, as the free-text check-in did.
+type CheckinEvent struct {
+	Parent string `json:"parent"`
+	// WindowStart is when the check-in window opened, in unix milliseconds.
+	// It keys the post of a window, so a retried delivery posts once.
+	WindowStart int64          `json:"windowStart"`
+	Counts      CheckinCounts  `json:"counts"`
+	Children    []CheckinChild `json:"children"`
+	// Detail is the child table the agent reads, one row per child.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (CheckinEvent) eventFamily() EventFamily { return FamilyCheckin }
+func (CheckinEvent) eventType() EventType     { return TypeSummary }
+func (c CheckinEvent) eventSubject() string   { return c.Parent }
+
+func (c CheckinEvent) eventDedupe() string { return strconv.FormatInt(c.WindowStart, 10) }
+
+// SlowTestEvent reports the tests that newly crossed the CI limit. It is a
+// quiet owner-feed line; the PR watcher files it and nobody wakes.
+type SlowTestEvent struct {
+	// Run is the CI run token, such as "1241/2".
+	Run string `json:"run"`
+	// Count is how many tests crossed the limit in this run.
+	Count     int                `json:"count"`
+	Crossings []SlowTestCrossing `json:"crossings"`
+	// Detail is the one line per crossing that the room log reads.
+	Detail string `json:"detail,omitempty"`
+}
+
+// SlowTestCrossing is one test that crossed the limit, with both of its times.
+type SlowTestCrossing struct {
+	Test       string   `json:"test"`
+	Package    string   `json:"package,omitempty"`
+	Features   []string `json:"features,omitempty"`
+	DurationMS int      `json:"durationMs"`
+	Run        string   `json:"run"`
+	OtherMS    int      `json:"otherMs"`
+	OtherRun   string   `json:"otherRun"`
+	LimitMS    int      `json:"limitMs"`
+}
+
+func (SlowTestEvent) eventFamily() EventFamily { return FamilyCIHealth }
+func (SlowTestEvent) eventType() EventType     { return TypeSlowTest }
+func (s SlowTestEvent) eventSubject() string   { return s.Run }
+func (s SlowTestEvent) eventDedupe() string    { return s.Run }
+
+// RuleVerb is what happened to a rule.
+type RuleVerb string
+
+// Rule verbs.
+const (
+	RuleAdded   RuleVerb = "added"
+	RuleEdited  RuleVerb = "edited"
+	RuleRemoved RuleVerb = "removed"
+)
+
+// RuleEvent tells the owner feed that the room's rules changed. It replaces
+// the free-text notice the rule commands used to post.
+type RuleEvent struct {
+	RuleID string `json:"ruleId"`
+	// Scope is "room" or "global".
+	Scope string   `json:"scope"`
+	Actor string   `json:"actor"`
+	Verb  RuleVerb `json:"verb"`
+	// Text is the rule's own text, empty when it was removed.
+	Text string `json:"text,omitempty"`
+}
+
+func (RuleEvent) eventFamily() EventFamily { return FamilyRule }
+func (RuleEvent) eventType() EventType     { return TypeChanged }
+func (r RuleEvent) eventSubject() string   { return r.RuleID }
+func (r RuleEvent) eventDedupe() string    { return string(r.Verb) }
 
 // The PR family posts one event per fact the watcher observed about a change.
 // Its events wake the change's author, so unlike the quiet families their texts
@@ -405,6 +659,10 @@ type EventSpec struct {
 	// TextNoSubject is the summary for an event that names no subject, such
 	// as a cleanup failure that has no single tree.
 	TextNoSubject string
+	// Sender is the post's sender when the event is not the room's own
+	// service. The check-in keeps its system sender, because a parent reads
+	// it as the scheduler's own input. Empty means the engine sends it.
+	Sender string
 }
 
 // eventSpecs is the registry of every system event that PostEvent may store.
@@ -443,6 +701,113 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeNever,
 		Once:     true,
 		Text:     "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}).",
+	},
+	// Issue events are a backlog: they never wake anyone, root included. The
+	// owner feed keeps them, and the assignee reads a quiet notice there.
+	{
+		Family:   FamilyIssue,
+		Type:     EventType(IssueFiled),
+		Renderer: "IssueCard",
+		Payload:  reflect.TypeOf(IssueEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "{filer} filed issue D-{number}: {title}",
+	},
+	{
+		Family:   FamilyIssue,
+		Type:     EventType(IssueUpdated),
+		Renderer: "IssueCard",
+		Payload:  reflect.TypeOf(IssueEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "{actor} changed issue D-{number} to {state}: {title}",
+	},
+	{
+		Family:   FamilyIssue,
+		Type:     EventType(IssueClosed),
+		Renderer: "IssueCard",
+		Payload:  reflect.TypeOf(IssueEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "{actor} closed issue D-{number}: {reason}",
+	},
+	// A goal change reaches the owner feed only, so it wakes nobody.
+	{
+		Family:   FamilyGoal,
+		Type:     EventType(GoalAdded),
+		Renderer: "GoalPost",
+		Payload:  reflect.TypeOf(GoalEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "{actor} added goal {goalId}: {title}",
+	},
+	{
+		Family:   FamilyGoal,
+		Type:     EventType(GoalEdited),
+		Renderer: "GoalPost",
+		Payload:  reflect.TypeOf(GoalEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "{actor} edited goal {goalId}: {title}",
+	},
+	{
+		Family:   FamilyGoal,
+		Type:     EventType(GoalFinished),
+		Renderer: "GoalPost",
+		Payload:  reflect.TypeOf(GoalEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "Goal {goalId} {title} is done: {summary}",
+	},
+	{
+		Family:   FamilyGoal,
+		Type:     EventType(GoalDropped),
+		Renderer: "GoalPost",
+		Payload:  reflect.TypeOf(GoalEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "{actor} dropped goal {goalId}: {title}",
+	},
+	// A check-in starts the parent, as the free-text check-in always did, and
+	// reaches no other session.
+	{
+		Family:   FamilyCheckin,
+		Type:     TypeSummary,
+		Renderer: "CheckinCard",
+		Payload:  reflect.TypeOf(CheckinEvent{}),
+		Wake:     WakeTarget,
+		Once:     true,
+		Text:     checkinText,
+		Sender:   ParentCheckInSender,
+	},
+	// A slow test is a quiet CI health line in the owner feed.
+	{
+		Family:   FamilyCIHealth,
+		Type:     TypeSlowTest,
+		Renderer: "SlowTestCard",
+		Payload:  reflect.TypeOf(SlowTestEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "{count} slow tests crossed the CI limit in run {run}.",
+	},
+	// A rule change is a quiet note in the owner feed.
+	{
+		Family:   FamilyRule,
+		Type:     TypeChanged,
+		Renderer: "RuleCard",
+		Payload:  reflect.TypeOf(RuleEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "{actor} {verb} the {scope} rule {ruleId}",
 	},
 	// The merge family reports a trial's progress and how it ended. A progress
 	// event goes to the member rooms as a quiet card, because the separate PR
@@ -650,9 +1015,19 @@ type eventEnum struct {
 	Values []string
 }
 
+// checkinText is the instruction a parent receives. The child table follows
+// it as the event's detail block.
+const checkinText = "Check on your children. For each one below, confirm it is making progress. If one is stuck, idle with unfinished work, or waiting for something that already happened, nudge it, restart it, or take over its work. Close children whose work is done. If everything is on track, end your turn without posting."
+
 var eventEnums = []eventEnum{
-	{Type: reflect.TypeOf(PRType("")), Values: prTypeValues()},
-	{Type: reflect.TypeOf(MergeStep("")), Values: mergeStepValues()},
+	{Type: reflect.TypeOf(PRType("")), Values: enumValues(prTypes)},
+	{Type: reflect.TypeOf(MergeStep("")), Values: enumValues(mergeSteps)},
+	{Type: reflect.TypeOf(IssueChange("")), Values: enumValues(issueChanges)},
+	{Type: reflect.TypeOf(IssueState("")), Values: enumValues(issueStates)},
+	{Type: reflect.TypeOf(GoalChange("")), Values: enumValues(goalChanges)},
+	{Type: reflect.TypeOf(GoalState("")), Values: enumValues(goalStates)},
+	{Type: reflect.TypeOf(CheckinState("")), Values: enumValues(checkinStates)},
+	{Type: reflect.TypeOf(RuleVerb("")), Values: enumValues([]RuleVerb{RuleAdded, RuleEdited, RuleRemoved})},
 	{Type: reflect.TypeOf(WorktreeReason("")), Values: []string{
 		string(WorktreeNotMerged), string(WorktreeDirty), string(WorktreeManualHandoff), string(WorktreeKeepFailed), string(WorktreeOther),
 	}},
@@ -675,15 +1050,12 @@ var eventObjects = []reflect.Type{
 var legacyFamilies = []string{
 	"account",
 	"alert",
-	"checkin",
-	"goal",
 	"hierarchy",
 	"instructions",
-	"issue",
+	"merge-decision",
 	"notice",
 	"seat",
 	"spawn",
-	"test-health",
 	"voice",
 }
 
@@ -792,10 +1164,13 @@ func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
-	// A caller cannot choose the sender of an event post: it is the engine or
-	// the room's own service, never a session.
+	// A caller cannot choose the sender of an event post: it is the engine, a
+	// sender the registry fixes for the event, or the room's own service.
 	from := EngineSender
-	if in.RoomService {
+	switch {
+	case spec.Sender != "":
+		from = spec.Sender
+	case in.RoomService:
 		rec, err := s.readRecord(in.RoomID)
 		if err != nil {
 			return Message{}, err
@@ -834,13 +1209,14 @@ func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
 	return msg, err
 }
 
-// prTypeValues lists the PR types for the generated web union.
-func prTypeValues() []string {
-	values := make([]string, len(prTypes))
-	for i, typ := range prTypes {
-		values[i] = string(typ)
+// enumValues lists the values of a named string type for the generated web
+// union.
+func enumValues[T ~string](values []T) []string {
+	out := make([]string, len(values))
+	for i, value := range values {
+		out[i] = string(value)
 	}
-	return values
+	return out
 }
 
 // mergeStepValues lists the merge steps for the generated web union.
@@ -976,6 +1352,76 @@ func (m Message) Hook() (HookEvent, bool) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil {
 		return HookEvent{}, false
+	}
+	return ev, true
+}
+
+// Issue returns the payload of an issue event.
+func (m Message) Issue() (IssueEvent, bool) {
+	if m.Kind != string(FamilyIssue) || len(m.Payload.raw) == 0 {
+		return IssueEvent{}, false
+	}
+	var ev IssueEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
+		return IssueEvent{}, false
+	}
+	return ev, true
+}
+
+// Goal returns the payload of a goal event.
+func (m Message) Goal() (GoalEvent, bool) {
+	if m.Kind != string(FamilyGoal) || len(m.Payload.raw) == 0 {
+		return GoalEvent{}, false
+	}
+	var ev GoalEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
+		return GoalEvent{}, false
+	}
+	return ev, true
+}
+
+// Checkin returns the payload of a parent check-in.
+func (m Message) Checkin() (CheckinEvent, bool) {
+	if m.Kind != string(FamilyCheckin) || m.Notice.Kind != string(TypeSummary) || len(m.Payload.raw) == 0 {
+		return CheckinEvent{}, false
+	}
+	var ev CheckinEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil {
+		return CheckinEvent{}, false
+	}
+	return ev, true
+}
+
+// SlowTest returns the payload of a CI health line about a slow test.
+func (m Message) SlowTest() (SlowTestEvent, bool) {
+	if m.Kind != string(FamilyCIHealth) || m.Notice.Kind != string(TypeSlowTest) || len(m.Payload.raw) == 0 {
+		return SlowTestEvent{}, false
+	}
+	var ev SlowTestEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil {
+		return SlowTestEvent{}, false
+	}
+	return ev, true
+}
+
+// Rule returns the payload of a rule change.
+func (m Message) Rule() (RuleEvent, bool) {
+	if m.Kind != string(FamilyRule) || m.Notice.Kind != string(TypeChanged) || len(m.Payload.raw) == 0 {
+		return RuleEvent{}, false
+	}
+	var ev RuleEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil {
+		return RuleEvent{}, false
 	}
 	return ev, true
 }

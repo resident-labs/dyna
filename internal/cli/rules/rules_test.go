@@ -103,11 +103,14 @@ func TestRulesCommands(t *testing.T) {
 		t.Fatal(msgs, err)
 	}
 	for _, msg := range msgs {
-		if msg.Kind != "notice" || fmt.Sprint(msg.To) != "[work]" {
+		if msg.Kind != "rule" || msg.Notice.Kind != "changed" || fmt.Sprint(msg.To) != "[work]" {
 			t.Fatal(msg)
 		}
 	}
-	if msgs[1].From != "work:helper" || msgs[3].Text != "work:helper removed rule r2." {
+	if helper, _ := msgs[1].Rule(); helper.Actor != "work:helper" {
+		t.Fatal(msgs)
+	}
+	if removed, _ := msgs[3].Rule(); removed.Actor != "work:helper" || removed.Verb != room.RuleRemoved {
 		t.Fatal(msgs)
 	}
 	if out, err := call("add", "Use Central time", "--global", "--room", rec.Name); err != nil || out != "u1  Use Central time\n" {
@@ -119,8 +122,9 @@ func TestRulesCommands(t *testing.T) {
 	if out, err := call("--json", "--room", other.Name); err != nil || !strings.Contains(out, `"rules":[]`) {
 		t.Fatal("a global rule showed as a room rule:", out, err)
 	}
-	if msgs, _ := rooms.Messages(rec.ID); msgs[len(msgs)-1].Text != "owner added global rule u1: Use Central time" {
-		t.Fatal(msgs[len(msgs)-1])
+	recent, _ := rooms.Messages(rec.ID)
+	if added, ok := recent[len(recent)-1].Rule(); !ok || added.Scope != "global" || added.Text != "Use Central time" {
+		t.Fatal(recent[len(recent)-1])
 	}
 }
 

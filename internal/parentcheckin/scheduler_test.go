@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
 
@@ -100,14 +101,33 @@ func TestEligibilityUsesOnlyActiveDirectChildren(t *testing.T) {
 	}
 }
 
-func TestSummaryUsesRequestedTextAndStalestFirst(t *testing.T) {
+func TestCheckinEventIsStalestFirst(t *testing.T) {
 	now := time.Date(2026, 10, 23, 0, 0, 0, 0, time.UTC)
-	got := formatSummary([]childReport{
-		{name: "new", status: "queued", work: "g2/i1: Check parser", prs: "no open PRs", since: now.Add(-10 * time.Minute)},
-		{name: "old", status: "idle", work: "g1: Fix parser", prs: "open PR #42: open", since: now.Add(-12 * time.Minute)},
+	parent := subagent.Info{Meta: subagent.Meta{ID: "parent"}}
+	got := checkinEvent(parent, []childReport{
+		{name: "new", state: room.CheckinQueued, work: "g2/i1: Check parser", prs: "no open PRs", since: now.Add(-10 * time.Minute)},
+		{name: "old", state: room.CheckinIdle, work: "g1: Fix parser", prs: "open PR #42: open", since: now.Add(-12 * time.Minute)},
 	}, now)
-	want := message + "\nold · idle for 12m · g1: Fix parser · open PR #42: open\nnew · queued for 10m · g2/i1: Check parser · no open PRs"
-	if got != want {
-		t.Fatalf("summary:\n%s\nwant:\n%s", got, want)
+	if got.Parent != "parent" || got.WindowStart != now.UnixMilli() {
+		t.Fatalf("check-in identity = %+v", got)
+	}
+	if got.Counts != (room.CheckinCounts{Queued: 1, Idle: 1}) {
+		t.Fatalf("counts = %+v", got.Counts)
+	}
+	want := []room.CheckinChild{
+		{Name: "old", State: room.CheckinIdle, Age: "12m", Goal: "g1: Fix parser", PR: "open PR #42: open"},
+		{Name: "new", State: room.CheckinQueued, Age: "10m", Goal: "g2/i1: Check parser", PR: "no open PRs"},
+	}
+	if len(got.Children) != len(want) {
+		t.Fatalf("children = %+v", got.Children)
+	}
+	for i := range want {
+		if got.Children[i] != want[i] {
+			t.Fatalf("child %d = %+v, want %+v", i, got.Children[i], want[i])
+		}
+	}
+	wantDetail := "old · idle for 12m · g1: Fix parser · open PR #42: open\nnew · queued for 10m · g2/i1: Check parser · no open PRs"
+	if got.Detail != wantDetail {
+		t.Fatalf("detail:\n%s\nwant:\n%s", got.Detail, wantDetail)
 	}
 }

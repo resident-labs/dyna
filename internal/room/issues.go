@@ -34,16 +34,19 @@ CREATE INDEX room_issues_state ON room_issues(room_id, state, seq);
 CREATE TABLE room_issue_revisions (room_id TEXT PRIMARY KEY, revision INTEGER NOT NULL);`
 
 type Issue struct {
-	ID        string `json:"id"`
-	Number    int    `json:"number"`
-	Title     string `json:"title"`
-	File      string `json:"file"`
-	Line      int    `json:"line"`
-	Filer     string `json:"filer"`
-	FiledAt   int64  `json:"filedAt"`
-	State     string `json:"state"`
-	Reason    string `json:"reason"`
-	GoalID    string `json:"goalId"`
+	ID      string `json:"id"`
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	File    string `json:"file"`
+	Line    int    `json:"line"`
+	Filer   string `json:"filer"`
+	FiledAt int64  `json:"filedAt"`
+	State   string `json:"state"`
+	Reason  string `json:"reason"`
+	GoalID  string `json:"goalId"`
+	// Assignee is the session the issue was given to, when triage gave it to a
+	// goal holder.
+	Assignee  string `json:"assignee,omitempty"`
 	GitHubURL string `json:"githubUrl"`
 	// FixPR is the open PR that closes this issue on merge. It is filled at
 	// read time from the PR store, so it is never part of the stored issue.
@@ -258,8 +261,7 @@ func (s *Store) importLegacyIssues(ctx context.Context, conn *sql.Conn) error {
 }
 
 func insertIssue(ctx context.Context, conn *sql.Conn, roomID string, i *Issue) error {
-	if err := conn.QueryRowContext(ctx, `INSERT INTO room_issue_numbers(room_id,number,message_id)
- SELECT ?,COALESCE(MAX(number),0)+1,? FROM room_issue_numbers WHERE room_id=? RETURNING number`, roomID, i.ID, roomID).Scan(&i.Number); err != nil {
+	if _, err := conn.ExecContext(ctx, `INSERT INTO room_issue_numbers(room_id,number,message_id) VALUES(?,?,?)`, roomID, i.Number, i.ID); err != nil {
 		return err
 	}
 	body, err := json.Marshal(i)
@@ -303,10 +305,27 @@ func (s *Store) IssuesRevision(roomID string) (int64, error) {
 	return rev, err
 }
 
-// FileIssue appends a quiet room post and records its initial open state.
-func (s *Store) FileIssue(roomID, title, note, file string, line int, by string) (Issue, error) {
-	title, by = strings.TrimSpace(title), strings.TrimSpace(by)
-	if title == "" || strings.ContainsAny(title, "\r\n") || by == "" || line < 0 {
+// IssueInput is what a filer knows when it files an issue. Note is the free
+// text a person reads; Files, Symbols, Cost and Direction are the same facts
+// in the typed shape the librarian's note carries.
+type IssueInput struct {
+	Title     string
+	Note      string
+	File      string
+	Line      int
+	Filer     string
+	Files     []IssueFile
+	Symbols   []string
+	Cost      string
+	Direction string
+}
+
+// FileIssue appends a quiet room post and records its initial open state. The
+// post is an issue/filed event, so every filer gets the same card, and a new
+// issue wakes nobody: it is backlog.
+func (s *Store) FileIssue(roomID string, in IssueInput) (Issue, error) {
+	title, by := strings.TrimSpace(in.Title), strings.TrimSpace(in.Filer)
+	if title == "" || strings.ContainsAny(title, "\r\n") || by == "" || in.Line < 0 {
 		return Issue{}, errors.New("an issue needs a one-line title, a filer and a nonnegative line")
 	}
 	rec, err := s.Resolve(roomID)
@@ -316,23 +335,53 @@ func (s *Store) FileIssue(roomID, title, note, file string, line int, by string)
 	if by != rec.Name && !strings.HasPrefix(by, rec.Name+":") {
 		return Issue{}, errors.New("issue filer must belong to this room")
 	}
-	text := title
-	if note = strings.TrimSpace(note); note != "" {
-		text += "\n\n" + note
+	note := strings.TrimSpace(in.Note)
+	files := in.Files
+	if len(files) == 0 && in.File != "" {
+		files = []IssueFile{{Path: in.File, Line: in.Line}}
 	}
-	msg, err := s.Post(roomID, PostInput{From: by, To: []string{rec.Name}, Kind: "issue", Text: text})
-	if err != nil {
-		return Issue{}, err
-	}
-	out := Issue{ID: msg.ID, Title: title, File: file, Line: line, Filer: by, FiledAt: msg.TS, State: "open"}
-	db, err := s.issuesDB()
-	if err != nil {
-		return Issue{}, err
-	}
-	err = state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-		return insertIssue(context.Background(), conn, rec.ID, &out)
+	var out Issue
+	// The number is allocated before the post, because the event carries it:
+	// the card shows D-N without a second read. The issue lock keeps two
+	// filings from taking the same number.
+	err = s.withIssuesLock(rec.ID, func() error {
+		number, err := s.nextIssueNumber(rec.ID)
+		if err != nil {
+			return err
+		}
+		msg, err := s.PostEventInput(PostEventInput{
+			RoomID: rec.ID,
+			Event: IssueEvent{
+				Type: IssueFiled, Number: number, Title: title, Files: files, Symbols: in.Symbols,
+				Cost: strings.TrimSpace(in.Cost), Direction: strings.TrimSpace(in.Direction),
+				State: IssueStateOpen, Filer: by, Detail: note,
+			},
+			To: []string{rec.Name},
+		})
+		if err != nil {
+			return err
+		}
+		out = Issue{ID: msg.ID, Number: number, Title: title, File: in.File, Line: in.Line, Filer: by, FiledAt: msg.TS, State: string(IssueStateOpen)}
+		db, err := s.issuesDB()
+		if err != nil {
+			return err
+		}
+		return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+			return insertIssue(context.Background(), conn, rec.ID, &out)
+		})
 	})
 	return out, err
+}
+
+// nextIssueNumber reads the number a new issue takes in its room.
+func (s *Store) nextIssueNumber(roomID string) (int, error) {
+	db, err := s.issuesDB()
+	if err != nil {
+		return 0, err
+	}
+	var number int
+	err = db.QueryRow(`SELECT COALESCE(MAX(number),0)+1 FROM room_issue_numbers WHERE room_id=?`, roomID).Scan(&number)
+	return number, err
 }
 
 // ChangeIssue serializes triage, including its side effect, so concurrent
@@ -343,8 +392,8 @@ func (s *Store) ChangeIssue(roomID, id, by string, change func(*Issue) error) (I
 
 // ChangeIssueFrom is ChangeIssue with the origin of the close. origin names the
 // PR merge that closes an issue automatically; its zero value is a manual
-// close. The store keeps the origin for the typed issue event; until that
-// event exists, the close differs only in its reason.
+// close. The room store posts the typed event after the change, so every path
+// that changes an issue uses it.
 func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, change func(*Issue) error) (Issue, error) {
 	rec, err := s.Resolve(roomID)
 	if err != nil {
@@ -406,17 +455,50 @@ func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, chang
 			if err != nil {
 				return err
 			}
-			return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+			if err := state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
 				ctx := context.Background()
 				if _, err := conn.ExecContext(ctx, `UPDATE room_issues SET state=?, body=? WHERE room_id=? AND id=?`, i.State, string(body), rec.ID, i.ID); err != nil {
 					return err
 				}
 				return bumpIssues(ctx, conn, rec.ID)
-			})
+			}); err != nil {
+				return err
+			}
+			return s.postIssueChange(rec, &i, by, origin)
 		}
 		return fmt.Errorf("issue %q not found", id)
 	})
 	return out, err
+}
+
+// postIssueChange posts the typed event of one issue change. It is quiet: the
+// owner feed and an assignee read it, and no session wakes.
+func (s *Store) postIssueChange(rec Record, i *Issue, by string, origin CloseOrigin) error {
+	state := IssueState(i.State)
+	change := IssueUpdated
+	if state == IssueStateClosed {
+		change = IssueClosed
+	}
+	ev := IssueEvent{
+		Type: change, IssueID: i.ID, Number: i.Number, Title: i.Title, State: state,
+		Filer: i.Filer, Actor: by, Assignee: i.Assignee,
+	}
+	if i.File != "" {
+		ev.Files = []IssueFile{{Path: i.File, Line: i.Line}}
+	}
+	if change == IssueClosed {
+		ev.Reason = i.Reason
+		ev.Detail = i.Reason
+		if origin != (CloseOrigin{}) {
+			ev.ClosedBy = &origin
+		}
+	}
+	to := []string{rec.Name}
+	if i.Assignee != "" && i.Assignee != rec.Name {
+		to = append(to, i.Assignee)
+	}
+	_, err := s.PostEventInput(PostEventInput{RoomID: rec.ID, Event: ev, To: to})
+	return err
 }
 
 // Export can wait for GitHub. Its lock must not delay room posts.
