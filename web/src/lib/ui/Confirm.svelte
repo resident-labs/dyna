@@ -30,7 +30,7 @@
     {#if error}<p class="err">{error}</p>{/if}
     <div class="row">
       <button class="ghost" bind:this={cancel} onclick={oncancel} disabled={busy}>Cancel</button>
-      {#if alternative}<button class="go" onclick={onalternative} disabled={busy}>{alternative}</button>{/if}
+      {#if alternative}<button class="go alt" onclick={onalternative} disabled={busy}>{alternative}</button>{/if}
       <button class="go" class:danger onclick={onconfirm} disabled={busy}>{busy ? 'Working…' : action}</button>
     </div>
   </div>
@@ -66,6 +66,9 @@
     background: var(--select);
 }
   .go { background: var(--iris); color: #18161d; }
+  /* The second choice stays quieter than the main action, which may close
+     something or lose work. */
+  .go.alt { background: var(--raise); color: var(--ink-2); }
   .go.danger { background: #c9564b; color: #fff; }
   .go:disabled, .ghost:disabled { opacity: 0.6; cursor: default; }
 </style>

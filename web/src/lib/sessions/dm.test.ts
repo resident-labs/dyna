@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { speaker } from '../ui/posts.ts'
-import { postedTo, turnHead, turnTail, dmView, groupMessages, sameText, sessionAddress, threadKeys, threadPanel, plain, voiceRequest, type DmItem, type DmRow, type DmSession, type Receipt, type Thread, type ThreadPost } from './dm.ts'
+import { postedTo, threadsListed, turnHead, turnTail, dmView, groupMessages, sameText, sessionAddress, threadKeys, threadPanel, plain, voiceRequest, type DmItem, type DmRow, type DmSession, type Receipt, type Thread, type ThreadPost } from './dm.ts'
 import type { Attachment } from '../api/room.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { need } from '../../../test/need.ts'
@@ -246,9 +246,10 @@ test('the thread panel keeps open direct children, then the parent and siblings,
     member('lead'), member('kid', 'lead'), member('busy', 'lead'), member('gone', 'lead', true),
     member('baby', 'kid'), member('boss'), member('peer', 'boss'), member('else'),
   ]
-  const threads = [thread('room:boss', 1), thread('room:busy', 9), thread('room:gone', 3), thread('room:baby', 5), thread('room:peer', 7), thread('room:else', 6), thread('system:parent-checkin', 11)]
+  // A thread with no posts yet belongs to no row that shows a count.
+  const threads = [thread('room:boss', 1), thread('room:busy', 9), thread('room:gone', 3), thread('room:baby', 5), thread('room:peer', 7), thread('room:else', 6), { key: 'room:kid', posts: [] }, { key: 'system:parent-checkin', posts: [post('c', 'system', [address], 11)] }]
   const panel = threadPanel(threads, members, { id: 'lead', parent: 'boss' })
-  assert.deepEqual(panel.children.map((row) => [row.member.name, row.thread?.key]), [['busy', 'room:busy'], ['kid', undefined]])
+  assert.deepEqual(panel.children.map((row) => [row.member.name, row.thread?.key]), [['busy', 'room:busy'], ['kid', 'room:kid']])
   assert.equal(panel.parent?.member.name, 'boss')
   assert.deepEqual(panel.siblings.map((row) => [row.member.name, row.thread?.key]), [['peer', 'room:peer']])
   assert.deepEqual(panel.others.map((t) => t.key), ['system:parent-checkin', 'room:else', 'room:baby'])
@@ -256,6 +257,10 @@ test('the thread panel keeps open direct children, then the parent and siblings,
   const root = threadPanel(threads, members, { id: 'boss' })
   assert.equal(root.parent, null)
   assert.deepEqual(root.siblings, [])
+  // The panel lists 6 threads with posts: the closed child's thread is gone
+  // with it, and the child's empty thread has no count to show.
+  assert.equal(threads.length, 8)
+  assert.equal(threadsListed(panel), 6)
 })
 test('a finished turn ends with a footer row at its end time; a running turn has none', () => {
   const session = { address, turns: [
@@ -270,9 +275,14 @@ test('a finished turn ends with a footer row at its end time; a running turn has
 })
 test('the turn divider text keeps spaces around its separators', () => {
   const turn = { n: 1, started: '2026-10-18T10:00:00Z', ended: '2026-10-18T10:01:00Z', profile: 'sol', model: 'gpt', usage: { inputTokens: 20, outputTokens: 10 } }
-  assert.equal(turnHead(turn), 'Turn 1 · sol / gpt')
+  assert.equal(turnHead(turn), 'Turn 1 · sol')
   assert.equal(turnHead({ n: 2, profile: 'sol' }), 'Turn 2 · sol')
   assert.equal(turnHead({ n: 3 }), 'Turn 3')
+  // A profile name and its model often match, or the slug repeats the profile.
+  // The divider names the profile once instead of printing both.
+  assert.equal(turnHead({ n: 4, profile: 'opus', model: 'opus' }), 'Turn 4 · opus')
+  assert.equal(turnHead({ n: 5, profile: 'deepseek', model: 'deepseek/deepseek-flash' }), 'Turn 5 · deepseek')
+  assert.equal(turnHead({ n: 6, model: 'deepseek/deepseek-flash' }), 'Turn 6 · deepseek-flash')
   assert.equal(turnTail(turn), '1m00s · 30 tokens')
   assert.doesNotMatch(turnTail({ ...turn, usage: null }), /tokens/)
 })
