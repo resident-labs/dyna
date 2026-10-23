@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { clip, actPhrase, windowPhrase, computerLine, PILL_MAX } from './summary.js'
+import { clip, actPhrase, windowPhrase, computerLine, PILL_MAX } from './summary.ts'
 
 const now = 1_000_000
 const win = { state: 'running', apps: [{ appId: 'org.chromium.Chromium', title: 'Ivan Moskvitin' }] }
@@ -29,7 +29,7 @@ test('actPhrase gives each action its object', () => {
 
 test('actPhrase cuts long typed text at about 24 characters', () => {
   assert.equal(actPhrase('type · "' + 'a'.repeat(24) + '…"'), 'Typed "' + 'a'.repeat(24) + '…"')
-  assert.match(actPhrase('type · "' + 'abcdefghij '.repeat(6) + '"'), /^Typed "[^"]{1,25}"$/)
+  assert.match(String(actPhrase('type · "' + 'abcdefghij '.repeat(6) + '"')), /^Typed "[^"]{1,25}"$/)
 })
 
 test('windowPhrase names the front window', () => {
@@ -47,8 +47,8 @@ test('clip stops at a word and keeps the limit', () => {
 })
 
 test('computerLine keeps saved status regardless of age, with window fallback only', () => {
- const c = { ...win, latestStatus: { text: 'Opening PR #869 to check Forward', at: new Date(now - 86400000).toISOString() } }
- assert.equal(computerLine({ c, now }), 'Opening PR #869 to check Forward')
- assert.equal(computerLine({ c: win }), 'In Chromium · Ivan Moskvitin')
- assert.equal(computerLine(), 'No window yet')
+  const c = { ...win, latestStatus: { text: 'Opening PR #869 to check Forward', at: new Date(now - 86400000).toISOString() } }
+  assert.equal(computerLine({ c }), 'Opening PR #869 to check Forward')
+  assert.equal(computerLine({ c: win }), 'In Chromium · Ivan Moskvitin')
+  assert.equal(computerLine(), 'No window yet')
 })

@@ -11,7 +11,7 @@
 // pinned version (1.7.0): rfb._display, rfb._decoders, rfb._sendEncodings and RFB.messages.
 // Tests and the live computer check cover the encoding switch.
 
-import { Meter } from './rfbStats.js'
+import { Meter } from './rfbStats.ts'
 
 let loading = null
 
