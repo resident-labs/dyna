@@ -49,7 +49,14 @@ export interface ResyncEvent {
   kind: 'resync'
 }
 
+// BuildEvent is made by the client when a stream handshake reports a new
+// engine build. The page can then load the bundle embedded by that engine.
+export interface BuildEvent {
+  kind: 'build'
+  version: string
+}
+
 // The stream also carries the two room pause events.
-export type StreamEvent = AppEvent | { kind: 'room.paused' | 'room.resumed'; roomId?: string }
+export type StreamEvent = AppEvent | BuildEvent | { kind: 'room.paused' | 'room.resumed'; roomId?: string }
 
 export type AppEvent = PostsEvent | RoomsEvent | NoticesEvent | ListEvent | ComputerEvent | MachinesEvent | ResyncEvent

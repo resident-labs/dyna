@@ -15,9 +15,11 @@
     updateHidden: boolean
     roomId: string
     loadError: string
+    bundleReloadPending: boolean
     onupdatehidden: () => void
+    onbundlereload: () => void
   }
-  let { dropping, dropTarget, engineStatus, health, update, updateHidden, roomId, loadError, onupdatehidden }: Props = $props()
+  let { dropping, dropTarget, engineStatus, health, update, updateHidden, roomId, loadError, bundleReloadPending, onupdatehidden, onbundlereload }: Props = $props()
 </script>
 
 {#if dropping}
@@ -30,6 +32,9 @@
     {:else if engineStatus === 'unreachable'}Dyna cannot reach the engine. Check this device's network connection.
     {:else if engineStatus === 'engine'}The engine did not answer. Agents, posts and merges wait until it is back. On the engine's computer, run <code>systemctl --user start dyna-engine</code>.
     {/if}</p>
+{/if}
+{#if bundleReloadPending}
+  <p class="update bundle-update" role="status">Dyna updated. Reload to use the new version. <button onclick={onbundlereload}>Reload</button></p>
 {/if}
 {#if health}
   <p class="notice">Posting is off: {health}</p>

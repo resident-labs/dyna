@@ -11,6 +11,7 @@
   import { createSelection } from '../ui/selection.svelte.ts'
   import VoiceRelay from '../voice/VoiceRelay.svelte'
   import { rendererFor } from '../rooms/eventRenderers.ts'
+  import UnknownEventRow from '../rooms/UnknownEventRow.svelte'
   import { done, plain, turnHead, turnTail } from './dm.ts'
   import { stamp, short, ago } from '../ui/format.ts'
   import type { Attachment, Member, Room } from '../api/room.ts'
@@ -68,7 +69,7 @@
         {#if Card}
           <Card post={row.post} notice={row.post.notice} surface="dm" {room} onissue={onissue ?? undefined} />
         {:else}
-          <p class="note event-note">Unknown event {row.post.kind}/{row.post.notice?.kind ?? '?'}</p>
+          <UnknownEventRow dm />
         {/if}
       </div>
     {:else if row.kind === 'voice'}

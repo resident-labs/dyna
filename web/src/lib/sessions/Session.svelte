@@ -62,8 +62,9 @@
     selectedThread?: string
     draft?: string
     readingHistory?: boolean
+    onpending?: ((pending: boolean) => void) | null
   }
-  let { readOnly = false, onreopen = null, reopening = '', ondismisssession = null, dismissing = '', session = null, error = '', room, onharness = null, onsend, queue = [], onunqueue = null, ondismiss = null, focusedTurn = 0, onrecent = null, onearlier = null, onnewer = null, onpresent = null, members = [], jobs = [], onopenfile, onpost = null, onissue = null, onchild, onsession = onchild, onjob, threadsOpen = $bindable(false), selectedThread = $bindable(''), draft = $bindable(''), readingHistory = $bindable(false) }: Props = $props()
+  let { readOnly = false, onreopen = null, reopening = '', ondismisssession = null, dismissing = '', session = null, error = '', room, onharness = null, onsend, queue = [], onunqueue = null, ondismiss = null, focusedTurn = 0, onrecent = null, onearlier = null, onnewer = null, onpresent = null, members = [], jobs = [], onopenfile, onpost = null, onissue = null, onchild, onsession = onchild, onjob, threadsOpen = $bindable(false), selectedThread = $bindable(''), draft = $bindable(''), readingHistory = $bindable(false), onpending = null }: Props = $props()
   // One selected post for the message list and one for the open thread (postSelect.ts).
   const listSelection = createSelection()
   const threadSelection = createSelection()
@@ -144,7 +145,8 @@
   let failed = $derived($attachments.failed)
   let canSend = $derived(!busy && !$attachments.uploading && !failed && !m?.closed && (draft.trim() !== '' || $attachments.ready.length > 0 || !!forwarding))
   export function addFiles(files: ArrayLike<File>) { attachments.addFiles(files) }
-  onDestroy(() => attachments.destroy())
+  $effect(() => { onpending?.(busy || $attachments.items.length > 0 || !!forwarding) })
+  onDestroy(() => { attachments.destroy(); onpending?.(false) })
 
   let reopenError = $state('')
   $effect(() => { m?.id; reopenError = '' })

@@ -373,6 +373,13 @@ test('a post stored before the typed events still draws its family card', () => 
   assert.equal(web.rendererFor({ id: 'msg_0123456789abcdef', ts: 1, kind: 'goal', notice: { kind: 'unregistered' } }), undefined)
 })
 
+test('an event family from a newer engine is sealed instead of shown as raw text', () => {
+  const post = { id: 'msg_0123456789abcdef', ts: 1, kind: 'future-family', notice: { kind: 'created' }, text: 'raw event text' }
+  assert.equal(web.sealedEvent(post), true)
+  assert.equal(web.rendererFor(post), undefined)
+  assert.equal(web.sealedEvent({ ...post, kind: 'message', notice: undefined }), false)
+})
+
 test('a hook card shows its state and opens the log of its own run', () => {
   const payload = hookFixture('result')
   assert.ok(payload && 'runId' in payload, 'the hook result fixture is missing')

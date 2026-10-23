@@ -37,6 +37,7 @@ interface ComposerState {
   currentRoom: string
   prepareText: () => Promise<string>
   onDestroy: (fn: () => void) => void
+  onpending: (pending: boolean) => void
   onsend: (text: string, atts: Attachment[]) => Promise<unknown>
   tick: () => Promise<void>
   setTimeout: () => void
@@ -57,6 +58,7 @@ function composer() {
     $attachments: { atts: [] }, attachments: { destroy() {} }, draft: 'old view draft', currentRoom: 'old-room',
     prepareText: () => pending,
     onDestroy: (fn: () => void) => cleanup.push(fn),
+    onpending() {},
     onsend: async (text: string, atts: Attachment[]) => { calls.push({ room: c.currentRoom, text, atts }); return {} },
     tick: async () => {}, setTimeout() {},
     field: { focus: () => calls.push('focus') },
