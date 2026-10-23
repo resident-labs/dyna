@@ -506,6 +506,22 @@ func TestStackedTrialsPublishLongestPassingPrefixAndReturnFailure(t *testing.T) 
 	for _, notice := range f.e.sent {
 		if strings.Contains(notice.Text, "/pull/3 failed merge trial CI") && strings.Contains(notice.Text, "CI") {
 			found = true
+			// The passing prefix published first, so the trial no longer lists
+			// the failed member. The event must still carry it: the card names
+			// that PR, and must not fall back to a member that merged.
+			ev := notice.Merge
+			if ev == nil || ev.Member != 3 {
+				t.Fatalf("failed event = %+v, want member 3", ev)
+			}
+			named := false
+			for _, pr := range ev.PRs {
+				if pr.Number == 3 {
+					named = true
+				}
+			}
+			if !named {
+				t.Fatalf("failed event PRs = %+v, want the failed member 3", ev.PRs)
+			}
 		}
 	}
 	if !found {
