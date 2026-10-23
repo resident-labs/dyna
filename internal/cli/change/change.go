@@ -11,6 +11,7 @@ import (
 
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/notify"
+	prstate "dyna-agent/internal/pr/state"
 	prview "dyna-agent/internal/pr/view"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/subagent"
@@ -64,10 +65,21 @@ func Command(o Options) *cobra.Command {
 	open.Flags().StringVar(&opts.Category, "category", "", "change category: fix, small, refactor, or move")
 	skipReview := open.Flags().String("skip-review", "", "skip review with this recorded reason")
 	open.Flags().StringVar(&opts.Goal, "goal", "", "link the change to this open room goal, such as g12 (default: your goal when unambiguous)")
+	fixesText := open.Flags().String("fixes", "", "issues the PR closes on merge, such as D-5,#207 (needs --pr)")
 	open.Flags().StringArrayVar(&opts.Dependencies, "depends-on", nil, "required change ID; repeat for each dependency")
 	open.RunE = func(c *cobra.Command, _ []string) error {
 		if c.Flags().Changed("skip-review") && strings.TrimSpace(*skipReview) == "" {
 			return fmt.Errorf("--skip-review requires a reason")
+		}
+		if c.Flags().Changed("fixes") {
+			fixes, err := prstate.ParseIssueRefs(*fixesText)
+			if err != nil {
+				return err
+			}
+			if len(fixes) == 0 || *pr == "" {
+				return fmt.Errorf("--fixes links issues only on a GitHub PR, so pass --pr and at least one reference such as D-5 or #207")
+			}
+			opts.Fixes = fixes
 		}
 		if *skipReview != "" {
 			opts.PolicyOverride.Review = "off"

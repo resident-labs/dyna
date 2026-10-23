@@ -45,6 +45,9 @@ type Issue struct {
 	Reason    string `json:"reason"`
 	GoalID    string `json:"goalId"`
 	GitHubURL string `json:"githubUrl"`
+	// FixPR is the open PR that closes this issue on merge. It is filled at
+	// read time from the PR store, so it is never part of the stored issue.
+	FixPR     int    `json:"fixPr,omitempty"`
 	ChangedBy string `json:"changedBy"`
 	ChangedAt int64  `json:"changedAt"`
 }
@@ -55,6 +58,23 @@ func (i Issue) Label() string {
 		return fmt.Sprintf("D-%d", i.Number)
 	}
 	return i.ID
+}
+
+// CloseOrigin names the PR merge that closes an issue automatically. Its zero
+// value is a manual close by the owner or root.
+type CloseOrigin struct {
+	PR     int    `json:"pr,omitempty"`
+	Commit string `json:"commit,omitempty"`
+}
+
+// CloseIssue closes an open issue with a reason. origin stays zero for a
+// manual close and names the merging PR for an automatic one.
+func (s *Store) CloseIssue(roomID, id, by, reason string, origin CloseOrigin) (Issue, error) {
+	return s.ChangeIssueFrom(roomID, id, by, origin, func(i *Issue) error {
+		i.State = "closed"
+		i.Reason = reason
+		return nil
+	})
 }
 
 // issueNumber accepts the canonical label and the compact composer spelling.
@@ -315,6 +335,14 @@ func (s *Store) FileIssue(roomID, title, note, file string, line int, by string)
 // ChangeIssue serializes triage, including its side effect, so concurrent
 // requests cannot create two goals or export the same open issue twice.
 func (s *Store) ChangeIssue(roomID, id, by string, change func(*Issue) error) (Issue, error) {
+	return s.ChangeIssueFrom(roomID, id, by, CloseOrigin{}, change)
+}
+
+// ChangeIssueFrom is ChangeIssue with the origin of the close. origin names the
+// PR merge that closes an issue automatically; its zero value is a manual
+// close. The store keeps the origin for the typed issue event; until that
+// event exists, the close differs only in its reason.
+func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, change func(*Issue) error) (Issue, error) {
 	rec, err := s.Resolve(roomID)
 	if err != nil {
 		return Issue{}, err

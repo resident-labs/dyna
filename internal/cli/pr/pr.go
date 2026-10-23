@@ -13,6 +13,7 @@ import (
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/notify"
+	prstate "dyna-agent/internal/pr/state"
 	prview "dyna-agent/internal/pr/view"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/subagent"
@@ -89,11 +90,22 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 	track := &cobra.Command{Use: "track <number|url>", Short: "Link a PR to this session, or to root with no Dyna stamp", Args: cobra.ExactArgs(1)}
 	trackRepo := track.Flags().String("repo", "", "matching repository checkout path")
 	trackGoal := track.Flags().String("goal", "", "link the PR to this open room goal, such as g12 (default: your goal when unambiguous; never replaces a link unless given)")
+	trackFixes := track.Flags().String("fixes", "", "issues the PR closes on merge, such as D-5,#207; replaces the list when given")
 	track.RunE = func(c *cobra.Command, a []string) error {
 		s := o.Service()
 		info, err := subagent.Actor(s.Notify.Rooms, o.Session, "")
 		if err != nil {
 			return err
+		}
+		var fixes []prstate.IssueRef
+		if c.Flags().Changed("fixes") {
+			fixes, err = prstate.ParseIssueRefs(*trackFixes)
+			if err != nil {
+				return err
+			}
+			if len(fixes) == 0 {
+				return fmt.Errorf("--fixes needs at least one issue such as D-5 or #207")
+			}
 		}
 		dir, err := os.Getwd()
 		if err != nil {
@@ -109,7 +121,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		// The engine tracks as this caller (requirements item 3) and checks
 		// that dir is a checkout of the room's and the PR's repository.
 		var tracked prview.TrackedPR
-		if err := engineclient.New("").Call(c.Context(), "TrackPRRef", []any{info.RoomID, info.ID, a[0], dir, *trackGoal}, &tracked); err != nil {
+		if err := engineclient.New("").Call(c.Context(), "TrackPRRef", []any{info.RoomID, info.ID, a[0], dir, *trackGoal, fixes}, &tracked); err != nil {
 			return err
 		}
 		return output(c, tracked)

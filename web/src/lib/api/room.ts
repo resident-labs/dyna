@@ -331,6 +331,8 @@ export interface Issue {
   reason: string
   goalId: string
   githubUrl: string
+  // fixPr is the open PR that closes this issue on merge; 0 or omitted when none.
+  fixPr?: number
   changedBy: string
   changedAt: number
 }

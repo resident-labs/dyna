@@ -16,6 +16,8 @@
   import { ago } from '../ui/format.ts'
   import MergeBox from './MergeBox.svelte'
   import PRChip from './PRChip.svelte'
+  import Chip from '../ui/Chip.svelte'
+  import { fixesLabel } from './fixes.ts'
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
   import { expedite, goalExpedited, prExpedited } from '../rooms/expedite.ts'
   import type { Goal } from '../api/goal.ts'
@@ -138,6 +140,7 @@
     <p class="meta">
       {#if !isLocal(change)}<span class="badge {gh.tone}"><PRGlyph it={change} size={14} />{gh.label}</span>{/if}
       {#if change.state === 'open'}<PRChip pr={change} meta={merged} number={false} badge={false} />{/if}
+      {#if change.fixes?.length}<Chip outline title="Merging this change closes these issues">Fixes {fixesLabel(change.fixes)}</Chip>{/if}
       {#if prExpedited($expedite, change)}<ExpediteBadge />{/if}
       <span class="facts">{factsLine(change, { byline: false, size, ago })}</span>
       {#each labels as l (l.name)}<span class="ghlabel" style={labelStyle(l.color)}>{l.name}</span>{/each}
