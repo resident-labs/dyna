@@ -15,7 +15,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -666,7 +665,7 @@ func (s *Store) createRecordLocked(rec Record) error {
 	if err := createLog(filepath.Join(dir, "messages.jsonl")); err != nil {
 		return err
 	}
-	return s.writeRecord(rec, true)
+	return s.writeRecord(rec)
 }
 
 // createLog creates a new room's empty message log. It is its own function
@@ -674,24 +673,9 @@ func (s *Store) createRecordLocked(rec Record) error {
 func createLog(path string) error { return os.WriteFile(path, nil, 0o600) }
 
 func (s *Store) listRecordsLocked() ([]Record, error) {
-	entries, err := os.ReadDir(s.root())
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
 	db, err := s.recordsDB()
 	if err != nil {
 		return nil, err
-	}
-	for _, e := range entries {
-		if !e.IsDir() || !ValidID(e.Name()) {
-			continue
-		}
-		if err := s.importForeign(db, e.Name(), false); err != nil {
-			log.Printf("room %s: %v", e.Name(), err)
-		}
 	}
 	out, err := storedRecords(db)
 	if err != nil {
@@ -791,7 +775,7 @@ func (s *Store) ListWithActivity(includeArchived bool, live map[string]bool) ([]
 // Touch records activity without posting a message.
 func (s *Store) Touch(roomID string) error {
 	return s.withRoomLock(roomID, func() error {
-		rec, err := s.readRecordHeld(roomID)
+		rec, err := s.readRecord(roomID)
 		if err != nil {
 			return err
 		}
@@ -905,7 +889,7 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 
 	var out Message
 	err := s.withRoomLock(roomID, func() error {
-		rec, err := s.readRecordHeld(roomID)
+		rec, err := s.readRecord(roomID)
 		if err != nil {
 			return err
 		}

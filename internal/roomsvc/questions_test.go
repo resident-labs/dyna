@@ -3,7 +3,6 @@ package roomsvc
 import (
 	"encoding/json"
 	"testing"
-	"time"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
@@ -175,42 +174,6 @@ func TestOwnerWithdrawsOwnQuestion(t *testing.T) {
 	post, err := e.svc.Notify.Rooms.Message(rec.ID, questions.PostID(rec.ID, q.ID, "withdrawn"))
 	if err != nil || post.From != rec.Name || len(post.To) != 1 || post.To[0] != rec.Name || post.ReplyTo != q.Post {
 		t.Fatalf("withdrawal post = %+v, %v", post, err)
-	}
-}
-
-func TestLegacyWithdrawalKeepsOriginalParticipants(t *testing.T) {
-	e := newEnv(t)
-	rec := e.room("legacy-withdrawal")
-	q, err := e.svc.Notify.QuestionStore().Ask(questions.Question{Room: rec.ID, Asker: "child", To: "lead", Text: "Which fix?", Meanwhile: "test"}, func(q questions.Question) (string, error) {
-		p, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: "legacy-withdrawal:child", Kind: "question", To: []string{"legacy-withdrawal:lead"}, Text: "[QUESTION " + q.ID + "] Which fix?"})
-		return p.ID, err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.svc.Notify.QuestionStore().Withdraw(rec.ID, q.ID, "child", false, "done"); err != nil {
-		t.Fatal(err)
-	}
-	event, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: rec.Name, Kind: "question-withdrawn", To: []string{rec.Name}, Text: q.ID + " withdrawn: done"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	feed, err := e.svc.FeedTail(rec.ID, "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	p := feed.Posts[len(feed.Posts)-1]
-	if p.ID != event.ID || p.From != "legacy-withdrawal:child" || p.Addressed(rec.Name) || !p.Addressed("legacy-withdrawal:lead") || p.Kind != "message" {
-		t.Fatal(p)
-	}
-	msgs, _ := e.svc.Notify.Rooms.Messages(rec.ID)
-	posts, err := e.svc.sessionPosts(rec, msgs, "", "legacy-withdrawal:lead", time.Time{}, time.Time{}, e.svc.avatars(rec.ID))
-	if err != nil || len(posts) != 2 {
-		t.Fatalf("posts: %+v, %v", posts, err)
-	}
-	ids, err := e.svc.ownerPosts(rec)
-	if err != nil || len(ids) != 0 {
-		t.Fatalf("owner unread IDs: %v, %v", ids, err)
 	}
 }
 

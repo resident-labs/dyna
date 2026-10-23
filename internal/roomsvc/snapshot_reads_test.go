@@ -44,8 +44,15 @@ func TestWebReadsDoNotRepairSessionsOrChangeRoomFiles(t *testing.T) {
 			repairs := 0
 			report := e.mgr.Store.ReportRepaired
 			e.mgr.Store.ReportRepaired = func(store *subagent.Store, id string, n int) { repairs++; report(store, id, n) }
+			// Retained files remain untouched even when they are stale.
+			for _, name := range []string{"room.json", "seat.json"} {
+				if err := os.WriteFile(filepath.Join(e.svc.rooms().Root, rec.ID, name), []byte("{stale"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
 			paths := []string{
 				filepath.Join(e.svc.rooms().Root, rec.ID, "room.json"),
+				filepath.Join(e.svc.rooms().Root, rec.ID, "seat.json"),
 				filepath.Join(e.svc.rooms().Root, rec.ID, "messages.jsonl"),
 				filepath.Join(e.mgr.Store.Root, id, "turns", "1.json"),
 			}

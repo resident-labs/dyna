@@ -79,12 +79,15 @@ func TestResolveRequiresARoom(t *testing.T) {
 // The removed global room stays readable, listable and deletable until the
 // owner deletes it.
 func TestLegacyGlobalRoomStaysReadable(t *testing.T) {
-	s := &Store{Root: t.TempDir()}
+	s := &Store{Root: filepath.Join(t.TempDir(), "rooms")}
 	now := time.Now()
 	if err := os.MkdirAll(filepath.Join(s.Root, "global"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.WriteJSON(filepath.Join(s.Root, "global", "room.json"), Record{ID: "global", Name: "global", CreatedAt: now, LastActivity: now}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(filepath.Dir(s.Root)); err != nil {
 		t.Fatal(err)
 	}
 	if rec, err := s.Resolve("global"); err != nil || rec.ID != "global" {

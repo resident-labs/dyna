@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -63,33 +62,25 @@ func (s *Store) migrateRecords() error {
 	} else if err != nil {
 		return err
 	}
-	var embeddedSeats []Record
 	err = database.Migrate(db, "room.records.import", 1, func(conn *sql.Conn, _ int) error {
-		var err error
-		embeddedSeats, err = s.importRoomFiles(context.Background(), conn)
-		return err
+		return s.importRoomFiles(context.Background(), conn)
 	})
 	if err != nil {
 		return err
-	}
-	// Preserve rollback attachments only after the entire import commits.
-	for _, rec := range embeddedSeats {
-		s.mirrorSeat(state.For(db), rec)
 	}
 	return nil
 }
 
 // TODO: legacy/shim remove later — imports retained room.json and seat.json
 // only during room.records.import; remove after supported stores have migrated.
-func (s *Store) importRoomFiles(ctx context.Context, conn *sql.Conn) ([]Record, error) {
+func (s *Store) importRoomFiles(ctx context.Context, conn *sql.Conn) error {
 	entries, err := os.ReadDir(s.root())
 	if os.IsNotExist(err) {
-		return nil, nil
+		return nil
 	}
 	if err != nil {
-		return nil, err
+		return err
 	}
-	var embeddedSeats []Record
 	for _, entry := range entries {
 		if !entry.IsDir() || !ValidID(entry.Name()) {
 			continue
@@ -98,7 +89,7 @@ func (s *Store) importRoomFiles(ctx context.Context, conn *sql.Conn) ([]Record, 
 		// A canonical row owns both columns, including an unchanged or detached seat.
 		var canonical bool
 		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM room_records WHERE id=?)", id).Scan(&canonical); err != nil {
-			return nil, err
+			return err
 		}
 		if canonical {
 			continue
@@ -128,11 +119,9 @@ func (s *Store) importRoomFiles(ctx context.Context, conn *sql.Conn) ([]Record, 
 			if err := putSeat(ctx, conn, id, imported.Seat); err != nil {
 				return err
 			}
-			imported.Record.Seat = imported.Seat
-			embeddedSeats = append(embeddedSeats, imported.Record)
 			return nil
 		}); err != nil {
-			return nil, err
+			return err
 		}
 		if _, err := state.ImportMigration(ctx, conn, seatKey(id), seatPath, func(conn *sql.Conn, raw []byte) error {
 			var seat Seat
@@ -141,14 +130,13 @@ func (s *Store) importRoomFiles(ctx context.Context, conn *sql.Conn) ([]Record, 
 			}
 			return putSeat(ctx, conn, id, seat)
 		}); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return embeddedSeats, nil
+	return nil
 }
 
-// recordKey and seatKey name a room's rollback copies; roomKey is the stem
-// both lie under.
+// recordKey and seatKey identify retained import sources; roomKey is their stem.
 func roomKey(id string) string   { return "rooms/" + id }
 func recordKey(id string) string { return roomKey(id) + "/record" }
 func seatKey(id string) string   { return roomKey(id) + "/seat" }
@@ -231,195 +219,42 @@ func storedRecord(db *sql.DB, id string) (Record, error) {
 	return rec, nil
 }
 
-// readRecord returns room id's row, after importing a room.json or
-// seat.json that an earlier release wrote. The check takes no lock, so a
-// room whose files are our own copies costs two stats and two stamp reads;
-// only a foreign file takes the room lock to import. Callers that hold the
-// room lock use readRecordHeld.
+// readRecord returns the canonical room row.
 func (s *Store) readRecord(id string) (Record, error) {
 	db, err := s.recordsDB()
 	if err != nil {
 		return Record{}, err
 	}
-	if err := s.importForeign(db, id, false); err != nil {
-		return Record{}, err
-	}
 	return storedRecord(db, id)
 }
 
-// readRecordHeld is readRecord for a caller that holds the room lock.
-func (s *Store) readRecordHeld(id string) (Record, error) {
-	db, err := s.recordsDB()
-	if err != nil {
-		return Record{}, err
-	}
-	if err := s.importForeign(db, id, true); err != nil {
-		return Record{}, err
-	}
-	return storedRecord(db, id)
-}
-
-// importForeign imports room id's room.json and seat.json when an earlier
-// release wrote them. held says the caller holds the room lock; otherwise
-// it is taken only when a file is foreign.
-//
-// TODO: legacy/shim remove later — the earlier release reads and writes room.json and seat.json only; import its later writes on read as well as at engine start. Remove with item 31, when no binary from before this release is alive.
-func (s *Store) importForeign(db *sql.DB, id string, held bool) error {
-	dir, err := s.dir(id)
-	if err != nil {
-		return err
-	}
-	w, ctx := state.For(db), context.Background()
-	recordPath, seatPath := filepath.Join(dir, "room.json"), filepath.Join(dir, "seat.json")
-	if !held {
-		foreign := false
-		for _, c := range []struct{ key, path string }{{recordKey(id), recordPath}, {seatKey(id), seatPath}} {
-			f, err := w.Foreign(ctx, c.key, c.path)
-			if err != nil {
-				return err
-			}
-			foreign = foreign || f
-		}
-		if !foreign {
-			return nil
-		}
-		return s.withRoomLock(id, func() error { return s.importForeign(db, id, true) })
-	}
-	legacySeat := false
-	if _, err := w.ImportIfForeign(ctx, recordKey(id), recordPath, func(conn *sql.Conn, raw []byte) error {
-		var rec Record
-		if err := json.Unmarshal(raw, &rec); err != nil {
-			return fmt.Errorf("room %s: room.json: %v: %w", id, err, state.ErrSkipForeign)
-		}
-		if rec.ID != id {
-			return fmt.Errorf("room %s: room.json names room %q: %w", id, rec.ID, state.ErrSkipForeign)
-		}
-		if err := putRecord(ctx, conn, rec); err != nil {
-			return err
-		}
-		// TODO: legacy/shim remove later — #540 to #594 saved an attached seat in room.json; it becomes the seat row when the room has no seat.json, and seat.json is written for the earlier release below. Remove once every room with an attached seat has seat.json.
-		var legacy struct {
-			Seat Seat `json:"seat"`
-		}
-		if json.Unmarshal(raw, &legacy) != nil || legacy.Seat == (Seat{}) {
-			return nil
-		}
-		if _, err := os.Lstat(seatPath); !os.IsNotExist(err) {
-			return err
-		}
-		var has bool
-		if err := conn.QueryRowContext(ctx, "SELECT seat IS NOT NULL FROM room_records WHERE id = ?", id).Scan(&has); err != nil || has {
-			return err
-		}
-		legacySeat = true
-		return putSeat(ctx, conn, id, legacy.Seat)
-	}); err != nil {
-		return err
-	}
-	if _, err := w.ImportIfForeign(ctx, seatKey(id), seatPath, func(conn *sql.Conn, raw []byte) error {
-		var seat Seat
-		if err := json.Unmarshal(raw, &seat); err != nil {
-			return fmt.Errorf("room %s: seat.json: %v: %w", id, err, state.ErrSkipForeign)
-		}
-		return putSeat(ctx, conn, id, seat)
-	}); err != nil {
-		return err
-	}
-	if legacySeat {
-		rec, err := storedRecord(db, id)
-		if err != nil {
-			return err
-		}
-		s.mirrorSeat(w, rec)
-	}
-	return nil
-}
-
-// writeRecord stores rec as its room's row. The caller holds the room lock
-// (or the root lock for a new room) and read rec with readRecordHeld, which
-// imported any earlier release's file first. mirror writes room.json for
-// the earlier release after the commit.
-func (s *Store) writeRecord(rec Record, mirror bool) error {
+// writeRecord stores the room row. The caller holds the room or root lock.
+func (s *Store) writeRecord(rec Record) error {
 	db, err := s.recordsDB()
 	if err != nil {
 		return err
 	}
-	w := state.For(db)
-	if err := w.Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
 		return putRecord(context.Background(), conn, rec)
-	}); err != nil {
-		return err
-	}
-	if mirror {
-		s.mirrorRecord(w, rec)
-	}
-	return nil
+	})
 }
 
-// touchRecord records activity on rec, which also revives a manually
-// archived room.
-//
-// TODO: legacy/shim remove later — room.json is copied only when the
-// earlier release acts on the change (ManualArchive), not for every post's
-// activity time. After a rollback the earlier release sees a stale last
-// activity until the room's next mirrored change, a named and harmless loss
-// under item 24; it may show an active room as archived. Remove with item 31.
+// touchRecord records activity and revives a manually archived room.
 func (s *Store) touchRecord(rec Record) error {
-	mirror := rec.ManualArchive
 	rec.LastActivity = s.now()
 	rec.ManualArchive = false
-	return s.writeRecord(rec, mirror)
+	return s.writeRecord(rec)
 }
 
-// writeSeat stores seat as room id's seat row and copies seat.json for the
-// earlier release. The caller holds the room lock.
+// writeSeat stores the canonical seat row. The caller holds the room lock.
 func (s *Store) writeSeat(id string, seat Seat) error {
 	db, err := s.recordsDB()
 	if err != nil {
 		return err
 	}
-	w := state.For(db)
-	if err := w.Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
 		return putSeat(context.Background(), conn, id, seat)
-	}); err != nil {
-		return err
-	}
-	rec, err := storedRecord(db, id)
-	if err != nil {
-		return err
-	}
-	s.mirrorSeat(w, rec)
-	return nil
-}
-
-// TODO: legacy/shim remove later — the earlier release reads a room only from room.json and its seat only from seat.json, so a downgrade still sees every room; remove with item 31.
-func (s *Store) mirrorRecord(w *state.Writer, rec Record) {
-	s.mirror(w, rec.ID, recordKey(rec.ID), "room.json", rec)
-}
-
-// TODO: legacy/shim remove later — see mirrorRecord.
-func (s *Store) mirrorSeat(w *state.Writer, rec Record) {
-	s.mirror(w, rec.ID, seatKey(rec.ID), "seat.json", rec.Seat)
-}
-
-// mirror writes v as file name in room id's folder. A failed copy is
-// logged: the row is committed.
-func (s *Store) mirror(w *state.Writer, id, key, name string, v any) error {
-	dir, err := s.dir(id)
-	if err == nil {
-		// The earlier release's format: indented, with a final newline.
-		err = w.Mirror(context.Background(), key, filepath.Join(dir, name), func(out io.Writer) error {
-			b, err := json.MarshalIndent(v, "", "  ")
-			if err == nil {
-				_, err = out.Write(append(b, '\n'))
-			}
-			return err
-		})
-	}
-	if err != nil {
-		log.Printf("room %s: %s copy for the earlier release: %v", id, name, err)
-	}
-	return err
+	})
 }
 
 // storedRecords is every room's row.

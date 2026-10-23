@@ -4,7 +4,6 @@ import (
 	"dyna-agent/internal/listchange"
 	"dyna-agent/internal/subagent"
 	"errors"
-	"strings"
 
 	"dyna-agent/internal/questions"
 	"dyna-agent/internal/room"
@@ -220,48 +219,4 @@ func (s *Service) scanQuestions(signatures map[string]string, version *string, f
 		emit(Event{Kind: "questions", RoomID: change.RoomID, Change: &change.Change, WorkerWake: !woke[change.RoomID]})
 		woke[change.RoomID] = true
 	}
-}
-
-// legacyQuestionPost restores participant routing on old withdrawal records.
-// TODO: legacy/shim remove later — restores old withdrawal routing; remove after retained room logs migrate.
-func (s *Service) legacyQuestionPost(rec room.Record, m room.Message) room.Message {
-	if m.Kind != "question-withdrawn" {
-		return m
-	}
-	id, _, _ := strings.Cut(m.Text, " ")
-	list, err := s.Notify.QuestionStore().List(rec.ID)
-	if err != nil {
-		return m
-	}
-	for _, q := range list {
-		if q.ID != id || q.Post == "" {
-			continue
-		}
-		original, err := s.rooms().Message(rec.ID, q.Post)
-		if err != nil {
-			return m
-		}
-		m.From, m.To, m.Kind = original.From, append([]string{}, original.To...), "message"
-		if q.Withdrawn != nil && q.Withdrawn.By != q.Asker {
-			if q.Withdrawn.By == "owner" {
-				m.From = rec.Name
-			} else if info, err := s.sessions().Inspect(q.Withdrawn.By); err == nil {
-				m.From = info.Address()
-			}
-			m.To = append(m.To, original.From)
-		}
-		to := m.To[:0]
-		seen := map[string]bool{m.From: true}
-		for _, addr := range m.To {
-			if !seen[addr] {
-				to = append(to, addr)
-				seen[addr] = true
-			}
-		}
-		m.To = to
-		m.ReplyTo = q.Post
-		m.Text = "[WITHDRAWN " + id + "] " + strings.TrimPrefix(m.Text, id+" withdrawn: ")
-		return m
-	}
-	return m
 }

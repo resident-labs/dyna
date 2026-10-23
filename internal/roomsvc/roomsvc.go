@@ -290,7 +290,6 @@ func (s *Service) ownerPosts(rec room.Record) ([]string, error) {
 		s.ownerIDs[rec.ID] = selected
 	}
 	return s.rooms().MessageIDs(rec.ID, &selected.selection, func(message room.Message) bool {
-		message = s.legacyQuestionPost(rec, message)
 		return countsUnread(message, rec.Name)
 	})
 }
@@ -519,7 +518,6 @@ func (s *Service) postsOf(rec room.Record, msgs []room.Message, book avatarBook,
 	}
 	var out []Post
 	for _, m := range msgs {
-		m = s.legacyQuestionPost(rec, m)
 		post := decorate(m, rec.Name, reads, book)
 		if full {
 			post = s.expand(post, book)
@@ -619,7 +617,6 @@ func (s *Service) FeedSince(roomID string, offset int64) ([]Post, int64, error) 
 	channels := newChannelIndex(s.membersOf(rec, all, rev, true))
 	var out []Post
 	for _, m := range msgs {
-		m = s.legacyQuestionPost(rec, m)
 		post := s.expand(decorate(m, rec.Name, reads, book), book)
 		post.Channels = channels.views(m)
 		out = append(out, post)

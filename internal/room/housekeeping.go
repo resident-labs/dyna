@@ -15,14 +15,14 @@ func (s *Store) UpdatePreferences(ref string, fn func(*Record) error) error {
 	}
 	return s.withRootLock(func() error {
 		return s.withRoomLock(rec.ID, func() error {
-			current, err := s.readRecordHeld(rec.ID)
+			current, err := s.readRecord(rec.ID)
 			if err != nil {
 				return err
 			}
 			if err = fn(&current); err != nil {
 				return err
 			}
-			return s.writeRecord(current, true)
+			return s.writeRecord(current)
 		})
 	})
 }
