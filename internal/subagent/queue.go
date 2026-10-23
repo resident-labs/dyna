@@ -170,12 +170,16 @@ func (s *Store) SessionQueue(rooms *room.Store, ref string) ([]QueueItem, error)
 		if e != nil {
 			return nil, e
 		}
+		ids := make([]string, len(items))
+		for i, item := range items {
+			ids[i] = item.ID
+		}
+		inherited := inputRows(rooms, info.RoomID, in.Session, in.Address, ids)
 		for _, item := range items {
-			msg, e := rooms.Message(info.RoomID, item.ID)
-			if e != nil {
+			if _, e := rooms.Message(info.RoomID, item.ID); e != nil {
 				return nil, e
 			}
-			if !msg.SessionAddressed(in.Session, in.Address) {
+			if _, theirs := inherited[item.ID]; !theirs {
 				continue
 			}
 			at, exists := index[item.ID]
@@ -235,7 +239,8 @@ func (s *Store) deletePendingSteer(rooms *room.Store, info Meta, id string) erro
 		if err != nil {
 			return err
 		}
-		if msg.From != info.Room || !msg.SessionAddressed(info.ID, info.Address()) || msg.TS < info.Created.UnixMilli() {
+		_, delivered := inputRow(rooms, info.RoomID, info.ID, info.Address(), id)
+		if msg.From != info.Room || !delivered || msg.TS < info.Created.UnixMilli() {
 			return fmt.Errorf("only an owner's waiting post to this session can be deleted")
 		}
 		if q.Cancelled[id] {

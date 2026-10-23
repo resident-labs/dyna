@@ -310,10 +310,12 @@ func (s *Store) gateOpen(id string) (int, bool, error) {
 // forSession keeps the posts that are this session's input. The internal root
 // takes the posts its stored seat delivery rows mark as its own input while it
 // holds the root seat, and nothing while an external orchestrator holds it.
-// Every other session keeps the posts addressed to it that it did not write.
+// Every other session keeps the posts its stored delivery rows name it in that
+// it did not write.
 func forSession(rooms *room.Store, meta Meta, msgs []room.Message) []room.Message {
+	received := sessionInput(rooms, meta, msgs)
 	keep := func(msg room.Message) bool {
-		return msg.Deliverable() && msg.SessionAddressed(meta.ID, meta.Address()) && !msg.SentBySession(meta.ID, meta.Address())
+		return msg.Deliverable() && received(msg) && !msg.SentBySession(meta.ID, meta.Address())
 	}
 	if meta.Role == RoleRoot {
 		keep = seatInput(rooms, meta, msgs)
@@ -357,6 +359,20 @@ func seatInput(rooms *room.Store, meta Meta, msgs []room.Message) func(room.Mess
 	return func(msg room.Message) bool {
 		seat, ok := seats[msg.ID]
 		return ok && seat.RootInput() && !msg.SentBySession(meta.ID, meta.Address())
+	}
+}
+
+// sessionInput reports which of msgs this session received, from its stored
+// delivery rows. The row replaces the address check: it is stored once, for the
+// recipients the post named when it was written, and it names the session, so a
+// rename keeps the post. Its mode is not the input test: a quiet post is still
+// read on the session's next turn, so the caller keeps the post's own family
+// check (Message.Deliverable).
+func sessionInput(rooms *room.Store, meta Meta, msgs []room.Message) func(room.Message) bool {
+	rows := inputRows(rooms, meta.RoomID, meta.ID, meta.Address(), postIDs(msgs))
+	return func(msg room.Message) bool {
+		_, ok := rows[msg.ID]
+		return ok
 	}
 }
 
