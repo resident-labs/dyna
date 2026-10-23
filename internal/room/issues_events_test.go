@@ -1,6 +1,7 @@
 package room
 
 import (
+	"strconv"
 	"testing"
 )
 
@@ -57,7 +58,8 @@ func TestFileIssuePostsOneQuietEvent(t *testing.T) {
 }
 
 // A close posts its own event, keyed by the issue, so the web folds it into the
-// filing's card. It names what closed the issue and stays quiet.
+// filing's card. An automatic close names the engine, not the session whose
+// authority the engine used, and the agent text carries the reason once.
 func TestCloseIssuePostsTheIssueEvent(t *testing.T) {
 	s, rec, _ := pinFixture(t)
 	issue, err := s.FileIssue(rec.ID, filingInput("alpha:librarian"))
@@ -66,7 +68,7 @@ func TestCloseIssuePostsTheIssueEvent(t *testing.T) {
 	}
 	closed, err := s.ChangeIssueFrom(rec.ID, issue.ID, "alpha:root", CloseOrigin{PR: 542, Commit: "24c91eb"}, func(i *Issue) error {
 		i.State = string(IssueStateClosed)
-		i.Reason = "Fixed by PR #542"
+		i.Reason = "Fixed by #542"
 		return nil
 	})
 	if err != nil {
@@ -77,18 +79,47 @@ func TestCloseIssuePostsTheIssueEvent(t *testing.T) {
 		t.Fatalf("posts = %+v, %v", msgs, err)
 	}
 	msg := msgs[1]
-	if msg.Kind != string(FamilyIssue) || msg.Notice.Kind != string(IssueClosed) || msg.Wake || msg.Deliverable() || rootWakes(msg, rec.Name) {
+	if msg.Kind != string(FamilyIssue) || msg.Notice.Kind != string(IssueClosed) || msg.Wake || msg.Deliverable() || rootWakes(msg, rec.Name) || msg.From != EngineSender {
 		t.Fatalf("close event = %+v", msg)
 	}
 	ev, ok := msg.Issue()
-	if !ok || ev.IssueID != issue.ID || ev.Number != issue.Number || ev.State != IssueStateClosed || ev.Actor != "alpha:root" || ev.Filer != "alpha:librarian" {
+	if !ok || ev.IssueID != issue.ID || ev.Number != issue.Number || ev.State != IssueStateClosed || ev.Actor != ActorEngine || ev.Filer != "alpha:librarian" {
 		t.Fatalf("close payload = %+v, %v", ev, ok)
 	}
-	if ev.ClosedBy == nil || ev.ClosedBy.PR != 542 || ev.ClosedBy.Commit != "24c91eb" || ev.Reason != "Fixed by PR #542" {
+	if ev.ClosedBy == nil || ev.ClosedBy.PR != 542 || ev.ClosedBy.Commit != "24c91eb" || ev.Reason != "Fixed by #542" {
 		t.Fatalf("close origin = %+v", ev.ClosedBy)
+	}
+	// The reason is one fact: the template names it, and no detail block repeats
+	// it. The actor reads as the engine in words.
+	if want := "The engine closed issue D-" + strconv.Itoa(issue.Number) + ": Fixed by #542"; msg.Text != want {
+		t.Fatalf("close text = %q, want %q", msg.Text, want)
 	}
 	if closed.State != string(IssueStateClosed) {
 		t.Fatalf("issue state = %q", closed.State)
+	}
+}
+
+// A manual close names the session that closed the issue, so the card and the
+// text never blame the engine for a person's change.
+func TestManualCloseNamesTheClosingSession(t *testing.T) {
+	s, rec, _ := pinFixture(t)
+	issue, err := s.FileIssue(rec.ID, filingInput("alpha:librarian"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CloseIssue(rec.ID, issue.ID, "alpha:root", "Obsolete: the panel is gone", CloseOrigin{}); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err := s.Messages(rec.ID)
+	if err != nil || len(msgs) != 2 {
+		t.Fatalf("posts = %+v, %v", msgs, err)
+	}
+	ev, ok := msgs[1].Issue()
+	if !ok || ev.Actor != "alpha:root" || ev.ClosedBy != nil {
+		t.Fatalf("manual close payload = %+v, %v", ev, ok)
+	}
+	if want := "alpha:root closed issue D-" + strconv.Itoa(issue.Number) + ": Obsolete: the panel is gone"; msgs[1].Text != want {
+		t.Fatalf("manual close text = %q, want %q", msgs[1].Text, want)
 	}
 }
 

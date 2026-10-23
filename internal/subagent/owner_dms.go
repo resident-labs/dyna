@@ -22,6 +22,11 @@ func ownerDMNote(roomName string, msgs []room.Message, seats map[string]room.Del
 	replies := map[string][]string{}
 	var order []string
 	for _, msg := range msgs {
+		// A standing-instruction note belongs to the one session it names, and
+		// one edit reaches every session. The folded line names the change once.
+		if _, instruction := msg.InstructionNote(); instruction {
+			continue
+		}
 		seat, ok := seats[msg.ID]
 		if ok && seat.Category == room.RootOwnerDM {
 			text := strings.Join(strings.Fields(msg.Text), " ")
@@ -62,6 +67,11 @@ func ownerDMNote(roomName string, msgs []room.Message, seats map[string]room.Del
 func quietRootPosts(roomName string, msgs []room.Message, seats map[string]room.Delivery) string {
 	var entries []string
 	for _, msg := range msgs {
+		// The folded instruction line is the one place a standing-instruction
+		// note reaches the root seat.
+		if _, instruction := msg.InstructionNote(); instruction {
+			continue
+		}
 		if seat, ok := seats[msg.ID]; ok && seat.Category == room.RootQuietPost {
 			text := strings.Join(strings.Fields(msg.Text), " ")
 			if r := []rune(text); len(r) > 240 {
@@ -82,6 +92,57 @@ func quietRootPosts(roomName string, msgs []room.Message, seats map[string]room.
 	return fmt.Sprintf("[QUIET ROOT POSTS] Information since your last turn. These posts did not wake you. Read full posts with `dyna room read %s <post-id>`.\n%s", roomName, omitted+strings.Join(entries, "\n"))
 }
 
+// instructionWindowMS is how long one instruction change lasts: its notes reach
+// every session at once, so they arrive within a minute of each other.
+const instructionWindowMS int64 = 60_000
+
+// instructionLines folds the standing-instruction notes in msgs into one line
+// per change, such as "Instructions changed for 35 sessions: Subagent
+// profiles". One edit reaches every session, so a burst is one fact, not one
+// fact per session. A change is its sections within a minute of its first note;
+// a later edit of the same section is its own change and gets its own line.
+func instructionLines(msgs []room.Message) []string {
+	type change struct {
+		sections []string
+		sessions int
+		firstMS  int64
+	}
+	var order []*change
+	byKey := map[string]*change{}
+	for _, msg := range msgs {
+		ev, ok := msg.InstructionNote()
+		if !ok {
+			continue
+		}
+		names := make([]string, 0, len(ev.Sections))
+		for _, section := range ev.Sections {
+			if section.Name != "" {
+				names = append(names, section.Name)
+			}
+		}
+		fingerprint := strings.Join(names, "\x00")
+		found := byKey[fingerprint]
+		if found == nil || msg.TS-found.firstMS >= instructionWindowMS || msg.TS < found.firstMS {
+			found = &change{sections: names, firstMS: msg.TS}
+			byKey[fingerprint] = found
+			order = append(order, found)
+		}
+		found.sessions++
+	}
+	lines := make([]string, len(order))
+	for i, one := range order {
+		sections, sessions := "their standing instructions", fmt.Sprintf("%d sessions", one.sessions)
+		if one.sessions == 1 {
+			sessions = "1 session"
+		}
+		if len(one.sections) > 0 {
+			sections = strings.Join(one.sections, ", ")
+		}
+		lines[i] = fmt.Sprintf("- Instructions changed for %s: %s.", sessions, sections)
+	}
+	return lines
+}
+
 // seatNotes renders the root's quiet sections for msgs from the seat's stored
 // delivery rows. A read that fails leaves the sections out: they are context,
 // and the posts themselves stay in the room log.
@@ -99,6 +160,9 @@ func seatNotes(rooms *room.Store, meta Meta, msgs []room.Message) []string {
 		if note != "" {
 			out = append(out, note)
 		}
+	}
+	if lines := instructionLines(msgs); len(lines) > 0 {
+		out = append(out, fmt.Sprintf("[INSTRUCTIONS CHANGED] One instruction edit reaches every session, so each change is one line here. Each session reads its own note.\n%s", strings.Join(lines, "\n")))
 	}
 	return out
 }

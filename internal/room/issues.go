@@ -64,7 +64,9 @@ func (i Issue) Label() string {
 }
 
 // CloseOrigin names the PR merge that closes an issue automatically. Its zero
-// value is a manual close by the owner or root.
+// value is a manual close by the owner or root. A non-zero origin makes the
+// close the engine's own: the event names the engine, not the session whose
+// authority the engine used.
 type CloseOrigin struct {
 	PR     int    `json:"pr,omitempty"`
 	Commit string `json:"commit,omitempty"`
@@ -507,15 +509,19 @@ func (s *Store) postIssueChange(rec Record, i *Issue, by string, origin CloseOri
 	}
 	ev := IssueEvent{
 		Type: change, IssueID: i.ID, Number: i.Number, Title: i.Title, State: state,
-		Filer: i.Filer, Actor: by, Assignee: i.Assignee,
+		Filer: i.Filer, Actor: IssueActor(by), Assignee: i.Assignee,
 	}
 	if i.File != "" {
 		ev.Files = []IssueFile{{Path: i.File, Line: i.Line}}
 	}
 	if change == IssueClosed {
+		// The reason is one line, and the close template already names it. A
+		// Detail block would repeat it in the agent text.
 		ev.Reason = i.Reason
-		ev.Detail = i.Reason
 		if origin != (CloseOrigin{}) {
+			// The engine closed the issue because a merged PR fixed it, so the
+			// close names the engine. The card reads the PR and the commit.
+			ev.Actor = ActorEngine
 			ev.ClosedBy = &origin
 		}
 	}

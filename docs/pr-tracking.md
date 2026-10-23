@@ -26,10 +26,10 @@ It never removes a link because a body line went away: run track with
 tracked closes nothing, because no watch saw the merge.
 
 When the PR merges, Dyna closes each linked room issue with the reason
-`Fixed by #N (<merge commit>)` and closes each linked GitHub issue with a
-one-line comment that names the PR. GitHub also closes a `Fixes #N` issue by
-itself, so a closed issue takes no second close. A PR that closes without
-merging closes nothing. The PR row, the PR detail and the issue card show the
+`Fixed by #N` and the merge commit on the close itself, and closes each linked
+GitHub issue with a one-line comment that names the PR. GitHub also closes a
+`Fixes #N` issue by itself, so a closed issue takes no second close. A PR that
+closes without merging closes nothing. The PR row, the PR detail and the issue card show the
 links: `Fixes D-5, #207` on the change, and `Fix in #N` on an open room issue.
 
 ## Goal links and expedited goals
