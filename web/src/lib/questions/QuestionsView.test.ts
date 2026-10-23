@@ -5,6 +5,7 @@ import vm from 'node:vm'
 import { createReloadGate, reconcileRows } from '../ui/reloadGate.ts'
 import { parse } from 'svelte/compiler'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { installQuestions } from '../../../test/appModules.ts'
 
 const source = readFileSync(new URL('./Questions.svelte', import.meta.url), 'utf8')
 const code = (parse(source, { modern: true }).instance?.content.body ?? []).filter((n) =>
@@ -48,10 +49,8 @@ test('live question refreshes preserve the chosen filter and Reply focus', () =>
   assert.deepEqual(calls, ['q1', 'q1'])
 })
 
-const appSource = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const load = (parse(appSource, { modern: true }).instance?.content.body ?? []).find((n) => n.type === 'FunctionDeclaration' && n.id?.name === 'loadQuestions')
-assert.ok(load, 'App has loadQuestions')
-const loadRange = sourceRange(load)
+// The questions list lives in lib/app/questions.svelte.ts now, so the test
+// installs that module over its own state.
 
 interface QuestionsLoadState {
   roomId: string
@@ -73,9 +72,7 @@ test('a delayed question snapshot cannot replace a newer answer', async () => {
     api: { questions: () => ++calls === 1 ? old : Promise.resolve({ room: [{ id: 'q1', state: 'answered' }] }), visuals: () => Promise.resolve([]) },
   }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: 1 }))
-  vm.createContext(c)
-  vm.runInContext(stripTypes(appSource.slice(loadRange.start, loadRange.end)), c)
-  const { loadQuestions } = vm.runInContext('({ loadQuestions })', c) as { loadQuestions: () => Promise<unknown> }
+  const loadQuestions = installQuestions(c).loadQuestions
   const pending = loadQuestions()
   const answered = loadQuestions()
   assert.equal(calls, 1)

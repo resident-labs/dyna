@@ -7,7 +7,7 @@ import { parse } from 'svelte/compiler'
 import vm from 'node:vm'
 import { mergeListPage } from './listPages.ts'
 import { createReloadGate, listVisible, reconcileRows } from './reloadGate.ts'
-import { installGoals } from '../../../test/appModules.ts'
+import { PRS_FUNCTIONS, QUESTIONS_FUNCTIONS, installGoals, installPRs, installQuestions } from '../../../test/appModules.ts'
 import { reloadsUnread } from './unreadReload.ts'
 import { topLevelFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { need } from '../../../test/need.ts'
@@ -155,11 +155,25 @@ function callFunction<A extends unknown[], R>(sandbox: Record<string, unknown>, 
 
 const appSource = () => readFile(new URL('../../App.svelte', import.meta.url), 'utf8')
 
-// runApp installs the named App functions on the sandbox.
+// The PR and visual lists moved to lib/app modules; a test that names one of
+// their loaders installs that module over the same sandbox.
+const MODULES: readonly [readonly string[], (state: object) => void][] = [
+  [PRS_FUNCTIONS, installPRs],
+  [QUESTIONS_FUNCTIONS, installQuestions],
+]
+
+// runApp installs the named App functions and module loaders on the sandbox.
 function runApp(source: string, c: Record<string, unknown>, names: readonly string[]): void {
-  const found = topLevelFunctions(source, names)
-  for (const name of names) assert.ok(found.has(name), name)
   vm.createContext(c)
+  const moved = new Set<string>()
+  for (const [functions, install] of MODULES) {
+    if (!functions.some((name) => names.includes(name))) continue
+    install(c)
+    for (const name of functions) moved.add(name)
+  }
+  const kept = names.filter((name) => !moved.has(name))
+  const found = topLevelFunctions(source, kept)
+  for (const name of kept) assert.ok(found.has(name), name)
   for (const code of found.values()) vm.runInContext(code, c)
 }
 
