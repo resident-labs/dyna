@@ -7,11 +7,13 @@ import (
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/sessionlife"
+	"dyna-agent/internal/store/storetest"
 )
 
 // A PR state change goes to the room service, which publishes its rows; the
 // raw change never reaches clients. Other changes go to the hub.
 func TestPublishStateRoutesPRChanges(t *testing.T) {
+	storetest.Isolate(t)
 	events := hub.New(1)
 	signals := newWorkerSignals()
 	publish := publishState(events, roomsvc.New(nil), signals)
@@ -44,6 +46,37 @@ func TestPublishStateRoutesPRChanges(t *testing.T) {
 		case <-signals.channels[worker]:
 		default:
 			t.Fatalf("local CI completion did not wake %s", worker)
+		}
+	}
+}
+
+func TestPublishLocalCIRefreshesOnlyRoomsUsingHead(t *testing.T) {
+	storetest.Isolate(t)
+	rooms := roomsvc.New(nil)
+	st := prstate.State{Version: 1, Records: map[string]*prstate.Record{
+		"a": {Key: "a", RoomID: "room_a", Head: "pr-head"},
+		"b": {Key: "b", RoomID: "room_b", Head: "other-head"},
+	}, MergeTrials: map[string]*prstate.MergeTrial{"repo": {Head: "trial-head", Changes: []prstate.MergeTrialChange{{Key: "a"}}, Stacks: []prstate.MergeTrialStack{{Head: "stack-head"}}}}}
+	if err := prstate.Write(rooms.PRs.Watcher().Store.Root, st); err != nil {
+		t.Fatal(err)
+	}
+	for _, head := range []string{"pr-head", "trial-head", "stack-head", "unrelated"} {
+		events := hub.New(1)
+		stream, _, closeStream := events.Subscribe()
+		defer closeStream()
+		publishState(events, rooms, newWorkerSignals())(hub.Event{Topic: "localci", Key: "result:" + head})
+		want := uint64(1)
+		if head == "unrelated" {
+			want = 0
+		}
+		if events.Rev() != want {
+			t.Fatalf("head %s: got %d events; want %d", head, events.Rev(), want)
+		}
+		if want == 1 {
+			event := <-stream
+			if event.Topic != "prs" || event.Room != "room_a" {
+				t.Fatalf("head %s: unexpected event %+v", head, event)
+			}
 		}
 	}
 }

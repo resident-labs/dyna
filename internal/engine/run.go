@@ -261,6 +261,16 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 	return func(ev hub.Event) {
 		switch ev.Topic {
 		case "localci":
+			if head, ok := strings.CutPrefix(ev.Key, "result:"); ok {
+				roomIDs, err := rooms.PRs.LocalCIResultRooms(head)
+				if err != nil {
+					log.Printf("local CI room refresh: %v", err)
+				}
+				for _, roomID := range roomIDs {
+					change := roomsvc.Event{Kind: "prs", RoomID: roomID}
+					events.Publish(hub.Event{Topic: "prs", Room: roomID, Body: change})
+				}
+			}
 			if ev.Key == "mode" || strings.HasPrefix(ev.Key, "node:") || strings.HasPrefix(ev.Key, "result:") {
 				wakeWorker(signals.channels["prs"])
 				wakeWorker(signals.channels["merges"])
