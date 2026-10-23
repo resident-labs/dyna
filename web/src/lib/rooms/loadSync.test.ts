@@ -1,28 +1,20 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { parse } from 'svelte/compiler'
-import vm from 'node:vm'
-import { stripTypes } from '../../../test/svelte-source.ts'
+import { installSync } from '../../../test/appModules.ts'
 
-const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const ast = parse(source, { modern: true })
-assert.ok(ast.instance)
-const node = ast.instance.content.body.find((node) => node.type === 'FunctionDeclaration' && node.id?.name === 'loadSync')
-assert.ok(node && 'start' in node && typeof node.start === 'number' && 'end' in node && typeof node.end === 'number')
-const loadSource = source.slice(node.start, node.end)
-
+// The saved sync counts live in lib/app/sync.svelte.ts now, so the test installs
+// that module over its own state, as appRoomLoader.ts installs the room data.
 type Counts = Record<string, { origin: { ahead: number; behind: number } }>
 function loader(syncStatus: () => Promise<Counts>) {
   const state = {
+    roomId: '',
     syncStatus: {} as Counts,
     loadError: '',
     api: { syncStatus },
     reload: (_name: string, run: (current: () => boolean) => Promise<void>) => run(() => true),
   }
-  const context = vm.createContext(state)
-  vm.runInContext(stripTypes(loadSource), context)
-  return { state, load: (): Promise<void> => vm.runInContext(stripTypes('loadSync()'), context) }
+  const view = installSync(state)
+  return { state, load: (): Promise<void> => view.loadSync() }
 }
 
 test('a failed background sync status read shows no error banner', async () => {

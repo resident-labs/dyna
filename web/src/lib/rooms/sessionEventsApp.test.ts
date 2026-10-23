@@ -122,6 +122,12 @@ function app(view: string) {
   const roomData = createRoomData(state.api, { current: () => ({ room: state.roomId, visit: state.roomRequest }), members() {}, choices() {} })
   const roomSessionController = createRoomSessionControls(state.api, 'a', (value: ControlsValue) => { state.roomControls = value }, () => listVisible('roomControls', state))
   const app: SessionEventsApp = Object.assign(state, { reload, roomData, roomSessionController }) as SessionEventsApp
+  // The pull request and question views live in lib/app modules; the sliced
+  // handlers read them, so they answer from this state.
+  Reflect.set(app, 'changeView', { bumpVersion: () => { app.mergeVersion += 1 } })
+  Reflect.set(app, 'questionView', { setQuestions: () => {} })
+  Reflect.set(app, 'pinView', { setPins: () => {}, clear: () => {} })
+  Reflect.set(app, 'issueView', { clear: () => {} })
   // The screen state lives in the router now, so the sliced functions write through it.
   installRouterShim(app)
   vm.createContext(app)
