@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
@@ -19,9 +20,16 @@ import (
 //
 // post_homes is an index, not a second copy of the post: ts and
 // author_session_id let one query list a conversation or a session's own
-// posts. post_deliveries holds one row per recipient and post. The cursor
+// posts. post_deliveries holds one row per recipient and post, and also how
+// far that delivery got: its state, and the turn that claimed it. The cursor
 // remembers how far the indexer reached in the room's log, so a crash between
 // the log append and the row write leaves no post without rows.
+//
+// schemaVersion 1 held the tables as PR 4b part 1 wrote them. Version 2 adds
+// claimed_turn and the dismissed state, which replaced the session_queues
+// JSON blob (see room/deliverystate.go).
+const postIndexVersion = 2
+
 const postIndexSchema = `CREATE TABLE post_homes (
  room_id TEXT NOT NULL,
  post_id TEXT NOT NULL,
@@ -48,6 +56,27 @@ CREATE TABLE post_index_cursor (
  log_offset INTEGER NOT NULL
 );`
 
+// postDeliveriesV2 rebuilds post_deliveries with the claiming turn and the
+// dismissed state. SQLite cannot change a CHECK constraint in place, so the
+// table is copied and replaced; SQLite drops the old table's index with it.
+const postDeliveriesV2 = `CREATE TABLE post_deliveries_v2 (
+ room_id TEXT NOT NULL,
+ post_id TEXT NOT NULL,
+ session_id TEXT NOT NULL,
+ mode TEXT NOT NULL CHECK(mode IN ('wake','quiet')),
+ category TEXT NOT NULL DEFAULT '',
+ state TEXT NOT NULL CHECK(state IN ('queued','claimed','delivered','cancelled','failed','dismissed')),
+ claimed_turn INTEGER NOT NULL DEFAULT 0,
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY(post_id, session_id)
+);
+INSERT INTO post_deliveries_v2(room_id, post_id, session_id, mode, category, state, claimed_turn, updated_at)
+ SELECT room_id, post_id, session_id, mode, category, state, 0, updated_at FROM post_deliveries;
+DROP TABLE post_deliveries;
+ALTER TABLE post_deliveries_v2 RENAME TO post_deliveries;
+CREATE INDEX post_deliveries_session ON post_deliveries(session_id, post_id);
+CREATE INDEX post_deliveries_updated ON post_deliveries(updated_at);`
+
 // postIndexImportKey records that the retained posts of every room were
 // imported into the post index.
 const postIndexImportKey = "room.post_index.import"
@@ -57,14 +86,34 @@ const postIndexImportKey = "room.post_index.import"
 // schema did not change: only the value one column gets for the seat's posts.
 const postIndexAuthorsKey = "room.post_index.authors"
 
+// MigrateDeliveries prepares the post index tables in dataDir's dyna.db
+// without the one-time import, for a reader that keeps its own query on the
+// delivery rows. The engine calls Migrate instead, which creates them and fills
+// them from the room logs.
+func MigrateDeliveries(dataDir string) error {
+	s := &Store{Root: filepath.Join(dataDir, "rooms")}
+	_, err := s.postIndexDB()
+	return err
+}
+
 func (s *Store) postIndexDB() (*sql.DB, error) {
 	db, err := s.recordsDB()
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "room.post_index", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), postIndexSchema)
-		return err
+	err = database.Migrate(db, "room.post_index", postIndexVersion, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old < 1 {
+			if _, err := conn.ExecContext(ctx, postIndexSchema); err != nil {
+				return err
+			}
+		}
+		if old < 2 {
+			if _, err := conn.ExecContext(ctx, postDeliveriesV2); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	return db, err
 }

@@ -46,7 +46,7 @@ func newInputWaitFixture(t *testing.T) (*testEnv, Info, InputClaim, context.Cont
 	if err := gate.Activate(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readQueue(gateDir(t, e, info.ID)); err != nil {
+	if _, err := claimsOf(t, e, info.ID), error(nil); err != nil {
 		t.Fatal(err)
 	}
 	e.m.InputEvents = hub.New(1)
@@ -99,9 +99,8 @@ func TestRunnerWaitInputChecksBeforeWaitingAndNeverClaims(t *testing.T) {
 			if delta := w.Health().Writes - before; delta != postWrites {
 				t.Fatalf("wait wrote %d times beyond %d fixture post writes", delta, postWrites)
 			}
-			queue, err := readCanonicalQueue(gateDir(t, e, info.ID))
-			if err != nil || queue.Claimed[posted] != 0 {
-				t.Fatalf("wait claimed input: %+v, %v", queue, err)
+			if claims := claimsOf(t, e, info.ID); claims.claimedTurn[posted] != 0 {
+				t.Fatalf("wait claimed input: %+v", claims)
 			}
 			if e.m.InputEvents.Stats().Streams != 0 {
 				t.Fatal("completed wait kept its subscription")
@@ -110,16 +109,9 @@ func TestRunnerWaitInputChecksBeforeWaitingAndNeverClaims(t *testing.T) {
 	}
 }
 
-func TestRunnerWaitInputMissingQueueIgnoresRetainedFile(t *testing.T) {
+func TestRunnerWaitInputMissingClaimIgnoresRetainedFile(t *testing.T) {
 	e, info, input, ctx, w := newInputWaitFixture(t)
-	db, err := database.Open(filepath.Dir(e.m.Store.root()))
-	if err != nil {
-		t.Fatal(err)
-	}
 	msg := postClaimInput(t, e, info, "still available")
-	if _, err := db.Exec("DELETE FROM session_queues WHERE session=?", info.ID); err != nil {
-		t.Fatal(err)
-	}
 	path := filepath.Join(gateDir(t, e, info.ID), queueFile)
 	stale := []byte(`{"claimed":{"` + msg.ID + `":1},"cancelled":{}}`)
 	if err := os.WriteFile(path, stale, 0600); err != nil {
@@ -128,14 +120,13 @@ func TestRunnerWaitInputMissingQueueIgnoresRetainedFile(t *testing.T) {
 	before := w.Health().Writes
 	ready, err := e.m.RunnerWaitInput(ctx, input)
 	if err != nil || !ready {
-		t.Fatalf("absent queue wait = %v, %v", ready, err)
+		t.Fatalf("unclaimed input wait = %v, %v", ready, err)
 	}
 	if delta := w.Health().Writes - before; delta != 0 {
-		t.Fatalf("missing queue caused %d writes", delta)
+		t.Fatalf("missing claim caused %d writes", delta)
 	}
-	var rows int
-	if err := db.QueryRow("SELECT COUNT(*) FROM session_queues WHERE session=?", info.ID).Scan(&rows); err != nil || rows != 0 {
-		t.Fatalf("queue row was created: %d, %v", rows, err)
+	if claims := claimsOf(t, e, info.ID); claims.claimedTurn[msg.ID] != 0 {
+		t.Fatalf("wait claimed input: %+v", claims)
 	}
 	if raw, err := os.ReadFile(path); err != nil || !bytes.Equal(raw, stale) {
 		t.Fatalf("retained file changed: %s, %v", raw, err)
@@ -206,8 +197,8 @@ func TestRunnerWaitInputOverflowRechecksWithoutFalseReadiness(t *testing.T) {
 		t.Fatalf("overflow readiness %v, checks %d, error %v", ready, checks, err)
 	}
 	// Only the test's post may write; the wait must not claim it.
-	queue, err := readCanonicalQueue(gateDir(t, e, info.ID))
-	if err != nil || len(queue.Claimed) != 0 {
+	queue := claimsOf(t, e, info.ID)
+	if len(queue.claimedTurn) != 0 {
 		t.Fatalf("wait changed queue %+v, %v", queue, err)
 	}
 	if e.m.InputEvents.Stats().Dropped != 1 {
@@ -405,15 +396,8 @@ func TestFinalReadJoinsWaitAndAllowsEarlierNotes(t *testing.T) {
 	}
 }
 
-func TestRunnerWaitInputAbsentQueueCanStayIdle(t *testing.T) {
+func TestRunnerWaitInputAbsentClaimsCanStayIdle(t *testing.T) {
 	e, info, input, ctx, w := newInputWaitFixture(t)
-	db, err := database.Open(filepath.Dir(e.m.Store.root()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("DELETE FROM session_queues WHERE session=?", info.ID); err != nil {
-		t.Fatal(err)
-	}
 	stale := []byte(`{"claimed":{"not-a-room-post":7},"cancelled":{}}`)
 	path := filepath.Join(gateDir(t, e, info.ID), queueFile)
 	if err := os.WriteFile(path, stale, 0600); err != nil {
@@ -425,11 +409,7 @@ func TestRunnerWaitInputAbsentQueueCanStayIdle(t *testing.T) {
 	before := w.Health().Writes
 	ready, err := e.m.RunnerWaitInput(ctx, input)
 	if err != nil || ready || w.Health().Writes != before {
-		t.Fatalf("absent idle queue: ready %v, writes %d, error %v", ready, w.Health().Writes-before, err)
-	}
-	var rows int
-	if err := db.QueryRow("SELECT COUNT(*) FROM session_queues WHERE session=?", info.ID).Scan(&rows); err != nil || rows != 0 {
-		t.Fatalf("idle read created queue row: %d, %v", rows, err)
+		t.Fatalf("absent idle claim: ready %v, writes %d, error %v", ready, w.Health().Writes-before, err)
 	}
 }
 
@@ -699,9 +679,8 @@ func TestRunnerWaitInputReadsPastRoomPagesWithoutWriting(t *testing.T) {
 	if err != nil || !ready || w.Health().Writes != before {
 		t.Fatalf("later input: ready=%v, err=%v, writes=%d", ready, err, w.Health().Writes-before)
 	}
-	queue, err := readCanonicalQueue(gateDir(t, e, info.ID))
-	if err != nil || queue.Claimed[msg.ID] != 0 {
-		t.Fatalf("readiness claimed later input: %+v, %v", queue, err)
+	if claims := claimsOf(t, e, info.ID); claims.claimedTurn[msg.ID] != 0 {
+		t.Fatalf("readiness claimed later input: %+v", claims)
 	}
 	assertReadOnly()
 }
@@ -762,9 +741,8 @@ func TestLiveInputDoorbellDeliversPastRoomPages(t *testing.T) {
 		}
 		wake = gate.Wake()
 	}
-	queue, err := readCanonicalQueue(f.dir)
-	if err != nil || delivered != 1 || queue.Claimed[message.ID] != 1 {
-		t.Fatalf("later delivery=%d, claim=%d: %v", delivered, queue.Claimed[message.ID], err)
+	if turn := claimsOf(t, f.e, f.info.ID).claimedTurn[message.ID]; delivered != 1 || turn != 1 {
+		t.Fatalf("later delivery=%d, claim turn=%d", delivered, turn)
 	}
 	if err := db.QueryRow("SELECT COUNT(*) FROM request_ids").Scan(&receipts); err != nil || receipts != 1 {
 		t.Fatalf("input receipt count=%d: %v", receipts, err)

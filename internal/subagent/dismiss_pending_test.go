@@ -29,15 +29,7 @@ func TestOwnerDismissPendingFromAnySender(t *testing.T) {
 				t.Fatal(err)
 			}
 			if state == "claimed" {
-				dir, _ := e.m.Store.Dir(info.ID)
-				q, err := readQueue(dir)
-				if err != nil {
-					t.Fatal(err)
-				}
-				q.Claimed[msg.ID] = 1
-				if err := writeQueue(dir, q); err != nil {
-					t.Fatal(err)
-				}
+				claimPostsFor(t, e, info.ID, 1, msg.ID)
 				if _, err := e.m.Store.UpdateTurn(info.ID, 1, func(turn *Turn) { turn.Steering = append(turn.Steering, Steer{ID: msg.ID}) }); err != nil {
 					t.Fatal(err)
 				}
@@ -181,10 +173,8 @@ func TestDismissPendingRejectsSavedHeldPromptWithoutLiveLock(t *testing.T) {
 	if err := e.m.DismissPendingPost(e.ctx, info.ID, msg.ID, true); err == nil || !strings.Contains(err.Error(), "unfinished or held turn") {
 		t.Fatalf("accepted saved input dismissal: %v", err)
 	}
-	dir, _ := e.m.Store.Dir(info.ID)
-	q, err := readQueue(dir)
-	if err != nil || q.Dismissed[msg.ID] {
-		t.Fatalf("rejected dismissal changed queue: %+v %v", q, err)
+	if claims := claimsOf(t, e, info.ID); claims.dismissed[msg.ID] {
+		t.Fatalf("rejected dismissal changed the delivery rows: %+v", claims)
 	}
 	turn, err := e.m.Store.ReadTurn(info.ID, 1)
 	if err != nil || turn.HeldPrompt != msg.Text {

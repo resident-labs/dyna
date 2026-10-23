@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/sessionlife/recordtest"
 )
@@ -15,6 +16,10 @@ func revisionStore(t *testing.T) *Store {
 	t.Helper()
 	s := &Store{Root: filepath.Join(t.TempDir(), "sessions")}
 	t.Cleanup(func() { database.Close(filepath.Dir(s.Root)) })
+	// The members revision reads the delivery rows, so the post index exists.
+	if err := room.Migrate(filepath.Dir(s.Root)); err != nil {
+		t.Fatal(err)
+	}
 	return s
 }
 
@@ -62,10 +67,8 @@ func TestMembersRevisionMovesOnEveryMembersWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	moved("a turn row write")
-	if err := writeQueue(filepath.Join(s.Root, a), claims(1)); err != nil {
-		t.Fatal(err)
-	}
-	moved("a queue row write")
+	touchDelivery(t, s, a)
+	moved("a delivery row write")
 	b := newSession(t, s, "b")
 	moved("a new session")
 	if err := sessionlife.Delete(s.Root, b); err != nil {
@@ -75,7 +78,7 @@ func TestMembersRevisionMovesOnEveryMembersWrite(t *testing.T) {
 	moved("deleting the newest session row, then writing another")
 }
 
-// Deleting a session deletes its turn and queue rows in one transaction
+// Deleting a session deletes its turn and delivery rows in one transaction
 // and leaves other sessions' rows alone.
 func TestDeleteRemovesTheSessionsTurnsAndQueue(t *testing.T) {
 	s := revisionStore(t)
@@ -84,9 +87,7 @@ func TestDeleteRemovesTheSessionsTurnsAndQueue(t *testing.T) {
 		if err := s.writeTurn(id, Turn{N: 1, Prompt: "hello"}); err != nil {
 			t.Fatal(err)
 		}
-		if err := writeQueue(filepath.Join(s.Root, id), claims(1)); err != nil {
-			t.Fatal(err)
-		}
+		touchDelivery(t, s, id)
 	}
 	if err := sessionlife.Delete(s.Root, gone); err != nil {
 		t.Fatal(err)
@@ -105,7 +106,7 @@ func TestDeleteRemovesTheSessionsTurnsAndQueue(t *testing.T) {
 	}
 	for _, c := range []struct{ what, query string }{
 		{"turn rows", "SELECT COUNT(*) FROM session_turns WHERE session = ?"},
-		{"queue rows", "SELECT COUNT(*) FROM session_queues WHERE session = ?"},
+		{"delivery rows", "SELECT COUNT(*) FROM post_deliveries WHERE session_id = ?"},
 	} {
 		if n := count(c.query, gone); n != 0 {
 			t.Errorf("the deleted session kept %d %s", n, c.what)

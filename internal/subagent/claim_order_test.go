@@ -1,12 +1,14 @@
 package subagent
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/room"
 )
 
@@ -49,7 +51,9 @@ func TestRecoveredClaimsDoNotCopyRoomHistory(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeQueue(dir, queueClaims{Claimed: map[string]int{posts[1].ID: 1, posts[0].ID: 1}}); err != nil {
+	if _, err := rooms.ClaimDeliveries(context.Background(), hub.Event{},
+		room.DeliverySet{RoomID: rec.ID, Keys: room.DeliveryKeys(meta.ID, meta.Address())},
+		[]string{posts[1].ID, posts[0].ID}, 1); err != nil {
 		t.Fatal(err)
 	}
 	manager := &Manager{Store: sessions, Rooms: rooms}

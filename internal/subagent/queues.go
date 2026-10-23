@@ -9,18 +9,19 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"dyna-agent/internal/database"
-	"dyna-agent/internal/hub"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/state"
 )
 
-// Queue claims live in dyna.db (rule r10, requirement 20), one row per
-// session. readQueue, writeQueue and queueSig are the only code that reads
-// or writes them. revision grows with every queue write in the table, so a
-// row's revision is the queue's version.
+// The session_queues table holds the retired queue blob of earlier releases.
+// Nothing reads or writes it any more: a session's claim state lives in its
+// delivery rows (see delivery_claims.go and room's deliverystate.go), and
+// migrateDeliveryClaims copies a stored blob into those rows once. What is left
+// here creates the table and imports a retained queue file into it, so that
+// copy has a source on a store that upgraded from a release older than the
+// table.
 const queueSchema = `CREATE TABLE session_queues (
  session TEXT PRIMARY KEY,
  revision INTEGER NOT NULL,
@@ -83,7 +84,7 @@ func importRetainedQueues(ctx context.Context, conn *sql.Conn, sessions string) 
 		}
 		path := filepath.Join(sessions, id, queueFile)
 		_, err = state.ImportMigration(ctx, conn, sessionlife.QueueMirrorKey(id), path, func(conn *sql.Conn, raw []byte) error {
-			var queue queueClaims
+			var queue legacyQueueClaims
 			if err := json.Unmarshal(raw, &queue); err != nil {
 				return err
 			}
@@ -100,36 +101,13 @@ func importRetainedQueues(ctx context.Context, conn *sql.Conn, sessions string) 
 	return nil
 }
 
-// readQueueRow returns the canonical queue and its version.
-// A session with no queue returns nil and an empty version.
-func readQueueRow(dir string) ([]byte, string, error) {
-	sessions, id := filepath.Dir(dir), filepath.Base(dir)
-	db, err := queuesDB(sessions)
-	if err != nil {
-		return nil, "", err
-	}
-	raw, version, err := queryQueueRow(db, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, "", nil
-	}
-	return raw, version, err
-}
-
-func queryQueueRow(db *sql.DB, id string) ([]byte, string, error) {
-	var raw []byte
-	var revision int64
-	if err := db.QueryRow("SELECT queue, revision FROM session_queues WHERE session = ?", id).Scan(&raw, &revision); err != nil {
-		return nil, "", err
-	}
-	return raw, "r" + strconv.FormatInt(revision, 10), nil
-}
-
-// readQueueForUpdate reads the canonical queue while the caller holds the gate lock.
-func readQueueForUpdate(dir string) (queueClaims, error) {
-	return readQueue(dir)
-}
-
-// saveQueueRow writes session id's queue on conn with the next revision.
+// saveQueueRow writes session id's queue on conn with the next revision. It is
+// only the retained-queue import below: nothing reads or writes the queue
+// blob after migrateDeliveryClaims moved its claims into the delivery rows.
+//
+// TODO: legacy/shim remove later — with the session_queues table, once every
+// supported store has run subagent.delivery_claims.import and no binary from
+// before the delivery rows is alive.
 func saveQueueRow(ctx context.Context, conn *sql.Conn, id string, raw []byte) (int64, error) {
 	var revision int64
 	err := conn.QueryRowContext(ctx, `INSERT INTO session_queues(session, revision, queue)
@@ -139,44 +117,8 @@ RETURNING revision`, id, string(raw)).Scan(&revision)
 	return revision, err
 }
 
-// storeQueue commits the canonical queue.
-func storeQueue(dir string, raw []byte) error {
-	return storeQueueContext(context.Background(), dir, raw, nil)
-}
-
-// storeQueueContext commits the queue and, for a claim call, its exact
-// response in the same transaction. A nil queue records only the response.
-// A response-only commit publishes no session change.
-func storeQueueContext(ctx context.Context, dir string, raw, reply []byte) error {
-	sessions, id := filepath.Dir(dir), filepath.Base(dir)
-	db, err := queuesDB(sessions)
-	if err != nil {
-		return err
-	}
-	w := state.For(db)
-	var event hub.Event
-	if raw != nil {
-		event = sessionlife.Changed(id)
-	}
-	if err := w.Write(ctx, event, func(conn *sql.Conn) error {
-		if raw != nil {
-			if _, err := saveQueueRow(ctx, conn, id, raw); err != nil {
-				return err
-			}
-		}
-		if reply != nil {
-			return w.FinishRequestIn(ctx, conn, "RunnerClaimInput", reply)
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	return nil
-}
-
-// migrateQueues prepares the queue table and imports retained queue files
-// before engine readers or watcher recovery can use their claims.
+// migrateQueues prepares the queue table, imports retained queue files, and
+// moves their claims into the delivery rows.
 func migrateQueues(dataDir string) error {
 	db, err := database.Open(dataDir)
 	if err != nil {
@@ -188,6 +130,8 @@ func migrateQueues(dataDir string) error {
 			return fmt.Errorf("back up dyna.db before queue claims move into it: %w", err)
 		}
 	}
-	_, err = queuesDB(filepath.Join(dataDir, "sessions"))
-	return err
+	if _, err = queuesDB(filepath.Join(dataDir, "sessions")); err != nil {
+		return err
+	}
+	return migrateDeliveryClaims(dataDir)
 }
