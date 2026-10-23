@@ -10,7 +10,7 @@
   // full width. Folders load one level at a time, when opened.
   import { filterLoaded } from '../files/filterLoaded.ts'
   import { untrack, onDestroy } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import FileView from '../files/FileView.svelte'
   import { base, crumbs, isDir, parent, STATUS, statusLetter, treeRows } from '../files/repo.ts'
   import { fileHash, parseFileHash } from '../prs/prlink.ts'

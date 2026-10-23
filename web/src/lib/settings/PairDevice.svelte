@@ -5,7 +5,7 @@
   // never leaves the page. The web app address is editable, for a
   // Tailscale or Cloudflare name, or another port.
   import { onMount, onDestroy } from 'svelte'
-  import { api, copyText } from '../../api.js'
+  import { api, copyText } from '../../api.ts'
   import { qrPath } from './qr.ts'
   import AndroidApp from './AndroidApp.svelte'
   import { errorText } from '../errorText.ts'

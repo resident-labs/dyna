@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorText } from '../../errorText.ts'
-  import { api } from '../../../api.js'
+  import { api } from '../../../api.ts'
   import type { HarnessConfig } from '../../api/harness.ts'
   let { kind, onsave, oncancel }: { kind: string; onsave: (catalog: HarnessConfig) => void; oncancel: () => void } = $props()
   let name = $state(''), mode = $state('command'), command = $state(''), args = $state('')

@@ -8,7 +8,7 @@
   //   room      the room's policy, to find what differs from it
   //   roomId    the room, for the host calls
   //   onchange  reload Changes after a save
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { POLICY_REVIEW, normalizePolicy, policyLabel, checksText, overrideKeys, buildOverride, saveOverride, resetOverride, type NormalizedPolicy, type OverrideField, type OverrideForm } from './pr.ts'
   import type { ChangeDetail, ChangePolicy } from '../api/change.ts'
   import { errorText } from '../errorText.ts'

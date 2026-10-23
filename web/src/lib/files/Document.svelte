@@ -1,7 +1,7 @@
 <script>
   import { tick } from 'svelte'
   import { documentCopy } from './documentCopy.ts'
-  import { copyText, openExternal } from '../../api.js'
+  import { copyText, openExternal } from '../../api.ts'
   let { html } = $props()
   let article
   $effect(() => {

@@ -17,7 +17,7 @@
   import PRGlyph from './PRGlyph.svelte'
   import Thread from './Thread.svelte'
   import { itemState, sortThread, timeline } from './github.ts'
-  import { openExternal } from '../../api.js'
+  import { openExternal } from '../../api.ts'
   import type { Reference } from '../rooms/references.ts'
   import type { GitHubDetail, GitHubItem } from '../api/github.ts'
 

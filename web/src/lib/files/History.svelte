@@ -3,7 +3,7 @@
   // A side panel on a wide screen, a bottom sheet on a phone. A file's rows
   // can be selected to show that version; repository rows are only a list.
   import { dialog } from '../ui/dialog.ts'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { ago } from '../ui/format.ts'
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'

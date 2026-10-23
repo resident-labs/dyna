@@ -3,7 +3,7 @@
   import { dialog as modal } from '../ui/dialog.ts'
   // Create or edit one profile. Env values are write-only: the editor shows
   // which keys exist, can replace or remove a value, and never receives one.
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import HarnessIcon from './harnesses/HarnessIcon.svelte'
   import { normalizeModels, profileEffort, chooseEffort, compactBlock, compactFor, compactWindows, compactHint, type EditableProfile, type EditorDraft, type ModelSummary } from './profiles/state.ts'
   import { requestGate } from './usage/state.ts'

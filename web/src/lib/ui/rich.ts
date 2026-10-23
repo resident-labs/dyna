@@ -1,4 +1,4 @@
-import { cardsIsolated } from '../../api.js'
+import { cardsIsolated } from '../../api.ts'
 import { isString } from '../api/guards.ts'
 import type { Attachment } from '../api/room.ts'
 

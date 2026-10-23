@@ -31,7 +31,7 @@ function component(api: Context['api'], transfer: Context['transfer'] = { id: 'o
   const context: Context = { transfer, api, loaded: true, busy: false, error: '', roomId: 'room', member: { id: 'session' }, transferRevision: 0, pollSerial: 0 }
   Object.defineProperty(context, 'active', { get() { return ['waiting', 'stopping', 'starting'].includes(context.transfer?.phase ?? '') } })
   vm.createContext(context)
-  runFunctions(source, ['isCurrent', 'unavailable', 'refresh', 'start', 'resume', 'cancel'], context)
+  runFunctions(source, ['isCurrent', 'unavailable', 'sessionId', 'refresh', 'start', 'resume', 'cancel'], context)
   return context
 }
 

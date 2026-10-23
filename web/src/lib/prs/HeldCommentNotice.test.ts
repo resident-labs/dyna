@@ -33,7 +33,7 @@ test('owner-only held comments render as text and resolve in the right room with
       resolveDir: new URL('.', import.meta.url).pathname,
     },
     plugins: [svelteEsbuildPlugin(), { name: 'held-api', setup(builder) {
-      builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({
+      builder.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({
         contents: `export const api = {
           heldPRComments: room => globalThis.heldRead(room),
           admitPRComment: (...args) => globalThis.heldAction('admit', ...args),

@@ -1,6 +1,6 @@
 <script>
   import { tick } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import Avatar from '../ui/Avatar.svelte'
   import Confirm from '../ui/Confirm.svelte'
   import TabHeader from './TabHeader.svelte'

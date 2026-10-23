@@ -9,7 +9,7 @@ import '@fontsource/jetbrains-mono/500.css'
 import '../src/lib/ui/tokens.css'
 import '../src/app.css'
 import { mount } from 'svelte'
-import { api } from '../src/api.js'
+import { api } from '../src/api.ts'
 import Settings from '../src/lib/settings/Settings.svelte'
 import { fixtureWindow, rollupFixture } from './usageRollupFixture.ts'
 import { usageAccount } from '../test/account-fixtures.ts'
@@ -17,6 +17,7 @@ import { need } from '../test/need.ts'
 import type { Capability, HarnessAccount, HarnessConfig, HarnessSnapshot, Bundle } from '../src/lib/api/harness.ts'
 import type { HarnessSupport } from '../src/lib/settings/support.ts'
 import type { ProfileList, ProfileView } from '../src/lib/api/profile.ts'
+import type { ProfileSave } from '../src/lib/api/engine.ts'
 import type { UsageAccount } from '../src/lib/api/account.ts'
 import type { ActivityRollup } from '../src/lib/settings/usage/activity.ts'
 import type { Device, Hook, HookRun, HookRunLog, SettingItem } from '../src/lib/api/settings.ts'
@@ -102,10 +103,10 @@ const profileList: Listed = {
   ],
 }
 api.configProfiles = () => later(empty ? { ...profileList, profiles: [], default: '' } : profileList)
-api.setDefaultProfile = (name: string) => { profileList.default = name; return later({}) }
-api.setProfileDisabled = (name: string, disabled: boolean) => { profileList.profiles = profileList.profiles.map((p) => p.name === name ? { ...p, disabled } : p); return later({}) }
-api.saveProfile = ({ original, profile: p }: { original: string; profile: ProfileView }) => { profileList.profiles = profileList.profiles.map((x) => x.name === original ? { ...x, ...p } : x); return later(p) }
-api.removeProfile = (name: string) => { profileList.profiles = profileList.profiles.filter((p) => p.name !== name); return later({}) }
+api.setDefaultProfile = (name: string) => { profileList.default = name; return later(null) }
+api.setProfileDisabled = (name: string, disabled: boolean) => { profileList.profiles = profileList.profiles.map((p) => p.name === name ? { ...p, disabled } : p); return later(null) }
+api.saveProfile = ({ original, profile: p }: ProfileSave) => { profileList.profiles = profileList.profiles.map((x) => x.name === original ? { ...x, ...p } : x); return later(need(profileList.profiles.find((x) => x.name === p.name))) }
+api.removeProfile = (name: string) => { profileList.profiles = profileList.profiles.filter((p) => p.name !== name); return later(null) }
 
 const window5 = (id: string, label: string, used: number) => fixtureWindow(id, label, used, inHours(id === 'short' ? 3 : 70))
 const usageAccounts: UsageAccount[] = [
@@ -119,7 +120,7 @@ api.accountUsage = () => later(usage())
 const none = { tokens: null, completeTurns: 0, partialTurns: 0, unknownTurns: 0 }
 const emptyRollup: ActivityRollup = { from: '', to: '', totals: { turns: 0, wallMs: 0, input: none, cached: none, output: none, cost: { usd: null, completeTurns: 0, partialTurns: 0, unknownTurns: 0 }, cachePaired: { input: 0, cached: 0, turns: 0 } }, byDayModel: [], byRoleModel: [] }
 api.usageRollup = (_room: string | undefined, from: string, to: string) => later(empty ? emptyRollup : rollupFixture(Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1)))
-api.rooms = () => later([{ id: 'room-a', name: 'dyna-agent' }])
+api.rooms = () => later([{ id: 'room-a', name: 'dyna-agent', lastActivity: minutes(3), unread: 0, running: 0, members: 2, pinned: false, pinOrder: 0, archived: false }])
 
 const item = (fields: Pick<SettingItem, 'key' | 'kind' | 'value' | 'source' | 'help'> & Partial<SettingItem>): SettingItem => ({ liveVsRestart: '', ...fields })
 const settingItems: SettingItem[] = [
@@ -153,8 +154,8 @@ const deviceList: Device[] = [
   device({ kind: 'connect', id: 'c1', name: 'user@example.com', device: 'Chrome on macOS', origin: 'https://connect.residentlabs.dev', lastSeen: minutes(40), expires: inHours(30) }),
 ]
 api.devices = () => later(empty ? [] : deviceList)
-api.revokeDevice = (kind: string, id: string) => { const keep = deviceList.filter((d) => d.kind !== kind || (id !== 'all' && d.id !== id)); deviceList.splice(0, deviceList.length, ...keep); return later({}) }
-api.setDeviceScopes = (id: string, scopes: string[]) => { const row = deviceList.find((d) => d.id === id); if (row) { row.scopes = scopes; row.legacy = false; row.scopeLabel = scopes.join(', ') }; return later({}) }
+api.revokeDevice = (kind: string, id: string) => { const keep = deviceList.filter((d) => d.kind !== kind || (id !== 'all' && d.id !== id)); deviceList.splice(0, deviceList.length, ...keep); return later(1) }
+api.setDeviceScopes = (id: string, scopes: string[]) => { const row = need(deviceList.find((d) => d.id === id)); row.scopes = scopes; row.legacy = false; row.scopeLabel = scopes.join(', '); return later(row) }
 
 const hookList: Hook[] = [
   { name: 'lint-web', label: 'Lint web', event: 'before-land', command: 'cd web && npm run lint', cwd: 'worktree', timeout: '5m0s', onFail: 'block', addedBy: 'sam', addedAt: minutes(60 * 24 * 6) },
@@ -167,9 +168,9 @@ api.hookRepos = () => later(['/home/user/dyna-agent', '/home/user/resident-site'
 api.listHooks = () => later(empty ? [] : hookList)
 api.hookRuns = (_repo: string, name: string) => later(hookRuns[name] ?? [])
 api.hookRunLog = (_repo: string, _name: string, id: string): Promise<HookRunLog> => later({ tail: id === 'r2' ? 'web/src/App.svelte\n  12:5  error  Unused variable "x"\n' : 'ok\n', exitCode: id === 'r2' ? 1 : 0 })
-api.runHook = () => later({ result: 'pass' })
-api.addHook = (_repo: string, hook: Omit<Hook, 'addedBy' | 'addedAt'>) => { hookList.unshift({ ...hook, addedBy: 'sam', addedAt: new Date().toISOString() }); return later({}) }
-api.editHook = (_repo: string, name: string, patch: Partial<Hook>) => { Object.assign(need(hookList.find((h) => h.name === name)), patch); return later({}) }
-api.removeHook = (_repo: string, name: string) => { hookList.splice(hookList.findIndex((h) => h.name === name), 1); return later({}) }
+api.runHook = () => later(hookRun('r9', 'lint-web', 'pass', 0, 0))
+api.addHook = (_repo: string, hook: Omit<Hook, 'addedBy' | 'addedAt'>) => { hookList.unshift({ ...hook, addedBy: 'sam', addedAt: new Date().toISOString() }); return later(null) }
+api.editHook = (_repo: string, name: string, patch: Partial<Hook>) => { Object.assign(need(hookList.find((h) => h.name === name)), patch); return later(null) }
+api.removeHook = (_repo: string, name: string) => { hookList.splice(hookList.findIndex((h) => h.name === name), 1); return later(null) }
 
 mount(Settings, { target: need(document.getElementById('app'), 'app'), props: { start: pane, dataDir: '/home/user/.local/share/dyna', onclose: () => { document.body.dataset.closed = 'yes' } } })

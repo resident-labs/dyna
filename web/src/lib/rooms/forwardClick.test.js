@@ -15,7 +15,7 @@ const callback = app.match(/<Feed[^\n]*onforward=\{([^}]+)\}/)?.[1]
 
 // Bundle outside the test clock: only the mounted flow is measured.
 const source = `<script>
-  import Session from '../sessions/Session.svelte'; import { api } from '../../api.js';
+  import Session from '../sessions/Session.svelte'; import { api } from '../../api.ts';
   let { room, original, member } = $props();
   let roomId = room.id, view = 'general', reply = null, fresh = '';
   let draft = $state(''), drafts = $state({}), composer = $state();
