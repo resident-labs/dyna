@@ -178,8 +178,14 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns) Sn
 	var runs []Run
 	for _, run := range snap.Runs {
 		attempt, ours := saved.Attempts[run.ID]
-		if !ours || run.Attempt > attempt || run.CheckSuiteID == 0 {
+		if !ours || run.Attempt > attempt {
 			runs = append(runs, run)
+			continue
+		}
+		if run.CheckSuiteID == 0 {
+			if run.Conclusion != "cancelled" {
+				runs = append(runs, run)
+			}
 			continue
 		}
 		suite := run.CheckSuiteID
