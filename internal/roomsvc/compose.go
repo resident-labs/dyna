@@ -108,13 +108,26 @@ func inlineMentions(text string, known map[string]bool, mentions *[]string) stri
 		seen[m] = true
 	}
 	var b strings.Builder
-	code := false
+	codeRun := 0
 	for i := 0; i < len(text); i++ {
 		c := text[i]
 		switch {
 		case c == '`':
-			code = !code
-		case code:
+			// A code span closes only with the same backtick run that
+			// opened it. Filenames can contain shorter backtick runs.
+			j := i + 1
+			for j < len(text) && text[j] == '`' {
+				j++
+			}
+			if codeRun == 0 {
+				codeRun = j - i
+			} else if codeRun == j-i {
+				codeRun = 0
+			}
+			b.WriteString(text[i:j])
+			i = j - 1
+			continue
+		case codeRun > 0:
 		case c == '\\' && i+1 < len(text) && text[i+1] == '@':
 			continue
 		case c == '@' && (i == 0 || strings.IndexByte(" \t\n(", text[i-1]) >= 0):
