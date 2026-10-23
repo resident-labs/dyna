@@ -46,18 +46,25 @@ type Observation struct {
 	Unavailable      bool       `json:"unavailable,omitempty"`
 }
 
+// PrivateProof binds a private sign-in to its account identity.
+type PrivateProof struct {
+	Version  int    `json:"version"`
+	Identity string `json:"identity"`
+}
+
 type Metadata struct {
-	NativeHome     string       `json:"nativeHome,omitempty"`
-	Observation    *Observation `json:"observation,omitempty"`
-	ID             string       `json:"id"`
-	Harness        string       `json:"harness"`
-	Integration    string       `json:"integration,omitempty"`
-	Identity       string       `json:"identity"`
-	Label          string       `json:"label"`
-	NeedsLogin     bool         `json:"needsLogin,omitempty"`
-	RefreshPending bool         `json:"refreshPending,omitempty"`
-	CreatedAt      time.Time    `json:"createdAt"`
-	UpdatedAt      time.Time    `json:"updatedAt"`
+	PrivateProof   *PrivateProof `json:"privateProof,omitempty"`
+	NativeHome     string        `json:"nativeHome,omitempty"`
+	Observation    *Observation  `json:"observation,omitempty"`
+	ID             string        `json:"id"`
+	Harness        string        `json:"harness"`
+	Integration    string        `json:"integration,omitempty"`
+	Identity       string        `json:"identity"`
+	Label          string        `json:"label"`
+	NeedsLogin     bool          `json:"needsLogin,omitempty"`
+	RefreshPending bool          `json:"refreshPending,omitempty"`
+	CreatedAt      time.Time     `json:"createdAt"`
+	UpdatedAt      time.Time     `json:"updatedAt"`
 }
 
 // Credential is adapter-owned JSON. Schema identifies its native format.

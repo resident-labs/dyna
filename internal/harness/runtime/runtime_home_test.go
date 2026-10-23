@@ -106,9 +106,6 @@ func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
 				t.Fatal(err)
 			}
 			if requirePrivateAccount(h) {
-				if err = writePrivateAccountOrigin(n.Home, captured.Identity); err != nil {
-					t.Fatal(err)
-				}
 				for _, path := range privateAccountFiles(h, scope)[:1] {
 					if err = os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 						t.Fatal(err)
@@ -121,6 +118,9 @@ func TestEveryHarnessFinalEnvironmentKeepsCredentialPathsManaged(t *testing.T) {
 			if err = accounts.transaction(func(s *accountstore.State) error {
 				e := s.Find(n.ID)
 				e.Identity, e.NeedsLogin = captured.Identity, false
+				if requirePrivateAccount(h) {
+					e.PrivateProof = &accountstore.PrivateProof{Version: 1, Identity: captured.Identity}
+				}
 				return nil
 			}, true); err != nil {
 				t.Fatal(err)
