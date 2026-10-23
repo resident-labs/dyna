@@ -43,11 +43,8 @@ func validateVerdictReviewer(r Record, actor, head string, reviewID int64, named
 	if named && head == "" {
 		return fmt.Errorf("a named reviewer must supply --head")
 	}
-	if PublishingMode(r.ReviewPublishing) == PublishingLocal && head == "" {
+	if head == "" {
 		return fmt.Errorf("a local review must supply --head from its assignment")
-	}
-	if PublishingMode(r.ReviewPublishing) == PublishingGitHub && reviewID <= 0 {
-		return fmt.Errorf("GitHub publishing requires --review-id for your published review")
 	}
 	return nil
 }

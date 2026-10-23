@@ -681,10 +681,7 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		r.Verdict = ""
 		r.Summary = ""
 		r.ReviewID = 0
-		r.ReviewPublishing = PublishingMode(cfg.ReviewPublishing)
-		if changeKind(r) == "local" {
-			r.ReviewPublishing = PublishingLocal
-		}
+		r.ReviewPublishing = PublishingLocal
 		r.ReviewerName = reviewerChangeName(&r)
 		task, e := s.prepareReviewTask(ctx, r, "")
 		if e != nil {

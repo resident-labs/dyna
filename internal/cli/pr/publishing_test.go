@@ -22,7 +22,7 @@ import (
 	"dyna-agent/internal/websvc"
 )
 
-func TestPublishingCLIAndMarkdownFileStayLocalUnlessExplicit(t *testing.T) {
+func TestPublishingCLIBlocksAgentsAndKeepsMarkdownLocal(t *testing.T) {
 	storetest.Isolate(t)
 	rooms := &room.Store{Root: t.TempDir()}
 	rec, err := rooms.Create(room.CreateInput{Name: "local-review"})
@@ -99,7 +99,7 @@ esac
 	t.Setenv(mode.EnvMode, mode.Subagent)
 	t.Setenv(mode.EnvSession, reviewer)
 	t.Setenv(mode.EnvRoomID, rec.ID)
-	if _, err := call("comment", url, "accidental post"); err == nil || !strings.Contains(err.Error(), "--publish") {
+	if _, err := call("comment", url, "accidental post"); err == nil || !strings.Contains(err.Error(), "agents cannot publish") {
 		t.Fatalf("local comment error = %v", err)
 	}
 	if _, err := os.Stat(writes); !os.IsNotExist(err) {
@@ -135,59 +135,35 @@ esac
 	if _, err := os.Stat(writes); !os.IsNotExist(err) {
 		t.Fatalf("local verdict wrote GitHub: %v", err)
 	}
-	if _, err := call("comment", url, "explicit public post", "--publish"); err != nil {
-		t.Fatal(err)
+
+	for _, agentMode := range []string{mode.Subagent, mode.Root, mode.Workflow} {
+		t.Setenv(mode.EnvMode, agentMode)
+		for _, args := range [][]string{
+			{"comment", url, "explicit public post", "--publish"},
+			{"review", url, "--body-file", file, "--head", head, "--publish"},
+			{"publishing", "github", "--room", rec.Name},
+		} {
+			if _, err := call(args...); err == nil {
+				t.Fatalf("%s accepted %v", agentMode, args)
+			}
+		}
 	}
-	written, _ := os.ReadFile(writes)
-	if !strings.Contains(string(written), "explicit public post") || strings.Contains(string(written), "dyna:") {
-		t.Fatalf("explicit comment must be marker-free: %s", written)
+	if _, err := os.Stat(writes); !os.IsNotExist(err) {
+		t.Fatalf("agent wrote GitHub: %v", err)
 	}
-	if st, err := s.Store.Read(); err != nil || st.CommentSessions["issue-comments:987654"] != reviewer {
-		t.Fatalf("comment ID not recorded for routing: %+v, %v", st.CommentSessions, err)
-	}
-	if _, err := call("comment", url, "--body", "flag body", "--publish"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := call("comment", url, "both", "--body", "flag", "--publish"); err == nil {
-		t.Fatal("accepted both a positional body and --body")
-	}
-	if _, err := call("comment", url); err == nil {
-		t.Fatal("accepted a comment without a body")
-	}
-	reviewFile := filepath.Join(t.TempDir(), "review.md")
-	if err := os.WriteFile(reviewFile, []byte("Review at parser.go:42.\n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	inlineFile := filepath.Join(t.TempDir(), "inline.json")
-	if err := os.WriteFile(inlineFile, []byte(`[{"path":"parser.go","line":42,"body":"bound check"}]`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := call("review", url, "--body-file", reviewFile, "--comments-file", inlineFile, "--head", head, "--publish"); err != nil {
-		t.Fatal(err)
-	}
-	written, _ = os.ReadFile(writes)
-	if !strings.Contains(string(written), "repos/owner/repo/pulls/17/reviews") {
-		t.Fatalf("review was not posted through gh api: %s", written)
-	}
-	if st, err := s.Store.Read(); err != nil || st.CommentSessions["reviews:987654"] != reviewer {
-		t.Fatalf("review ID not recorded for routing: %+v, %v", st.CommentSessions, err)
-	}
-	if _, err := call("verdict", url, "changes", "positional", "--body-file", file, "--head", head); err == nil {
-		t.Fatal("ambiguous Markdown sources accepted")
-	}
-	// Root, with no stamp, publishes too. Its posts stay unattributed, so they
-	// and their replies route as owner feedback.
+	reviewFile := file
+	// The owner can still publish comments and reviews without attribution.
 	storetest.ClearStamp(t)
 	t.Setenv("PR_CLI_ID", "111")
-	if _, err := call("comment", url, "root public post", "--publish"); err != nil {
-		t.Fatalf("root comment: %v", err)
+	if _, err := call("comment", url, "owner public post", "--publish"); err != nil {
+		t.Fatalf("owner comment: %v", err)
 	}
 	if _, err := call("review", url, "--body-file", reviewFile, "--head", head, "--publish"); err != nil {
-		t.Fatalf("root review: %v", err)
+		t.Fatalf("owner review: %v", err)
 	}
-	written, _ = os.ReadFile(writes)
-	if !strings.Contains(string(written), "root public post") {
-		t.Fatalf("root comment was not posted: %s", written)
+	written, _ := os.ReadFile(writes)
+	if !strings.Contains(string(written), "owner public post") {
+		t.Fatalf("owner comment was not posted: %s", written)
 	}
 	st, err = s.Store.Read()
 	if err != nil {
@@ -195,7 +171,7 @@ esac
 	}
 	for _, key := range []string{"issue-comments:111", "reviews:111"} {
 		if owner, ok := st.CommentSessions[key]; ok {
-			t.Fatalf("root post %s attributed to %q", key, owner)
+			t.Fatalf("owner post %s attributed to %q", key, owner)
 		}
 	}
 }

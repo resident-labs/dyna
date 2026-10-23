@@ -140,6 +140,9 @@ func (s *Service) PRSettings(roomRef string) (PRConfig, error) {
 }
 
 func (s *Service) SetPRSettings(ctx context.Context, roomRef string, cfg PRConfig) (PRConfig, error) {
+	if cfg.ReviewPublishing == watch.PublishingGitHub && authority.Of(ctx).Role != authority.Owner {
+		return PRConfig{}, fmt.Errorf("agent reviews stay in Dyna; use local publishing")
+	}
 	rec, err := s.Notify.Rooms.Resolve(roomRef)
 	if err != nil {
 		return PRConfig{}, err
@@ -577,6 +580,9 @@ func (s *Service) SetMergeSettings(ctx context.Context, roomRef string, maxParal
 
 // SetReviewPublishing sets where the room's future reviews are published.
 func (s *Service) SetReviewPublishing(ctx context.Context, roomRef, value string) error {
+	if value == watch.PublishingGitHub && authority.Of(ctx).Role != authority.Owner {
+		return fmt.Errorf("agent reviews stay in Dyna; use local publishing")
+	}
 	rec, err := s.Notify.Rooms.Resolve(roomRef)
 	if err != nil {
 		return err

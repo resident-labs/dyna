@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/notify"
@@ -51,15 +52,10 @@ Use dyna git pr reviewer --profile P to pin a profile,
 --auto for automatic choice, or --restart to recreate the reviewer pool.
 Use dyna git pr review on|off --room R to control automatic review. CodeRabbit review signals remain visible,
 but cannot establish passing CI without another check, workflow or commit status.
-Unknown external CI stays eligible. Reviews stay in Dyna by default.
-Use dyna git pr publishing github --room <room> to opt future assignments into
-GitHub publishing. Local reviewers record full Markdown with dyna git pr verdict
---head; they do not post to GitHub. GitHub assignments publish one comment
-review with dyna git pr review --body-file and record it with dyna git pr verdict
---review-id. All agents share the owner's GitHub
-account, so do not use GitHub approve or request-changes. Post GitHub comments
-with dyna git pr comment <pr> --body "..." so Dyna records the comment ID and can
-route replies; never add HTML markers or agent attribution to comments.
+Unknown external CI stays eligible. Agent reviews stay in Dyna.
+Record full Markdown with dyna git pr verdict --head. Agents, including root
+and workflow workers, cannot publish GitHub comments or reviews.
+Only the owner can use dyna git pr comment or publish a GitHub review.
 Comments Dyna cannot attribute to a session are owner/human feedback and wake
 the author. Author comments from dyna git pr comment and exact known bot noise are ignored.
 Every kept comment goes to the author in one batch. Mark obvious bot spam with
@@ -364,7 +360,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		}
 		return output(c, status)
 	}
-	review := &cobra.Command{Use: "review on|off|<number|url>", Short: "Turn automatic room review on or off, or publish the GitHub comment review", Long: "review on|off controls automatic room review. review <number|url> --body-file <file> [--comments-file <json-file>] [--head <sha>] publishes one GitHub comment review and its inline comments through gh, then records the review ID for routing; pass that ID to dyna git pr verdict --review-id. The comments file is a JSON array of {\"path\", \"line\", \"body\"} objects.", Args: cobra.ExactArgs(1)}
+	review := &cobra.Command{Use: "review on|off|<number|url>", Short: "Turn automatic room review on or off, or publish an owner GitHub review", Long: "review on|off controls automatic room review. review <number|url> --body-file <file> [--comments-file <json-file>] [--head <sha>] publishes one GitHub comment review and its inline comments through gh, then records the review ID for routing; pass that ID to dyna git pr verdict --review-id. The comments file is a JSON array of {\"path\", \"line\", \"body\"} objects.", Args: cobra.ExactArgs(1)}
 	reviewRoom := review.Flags().String("room", "", "room name or ID (default: current stamped room)")
 	reviewBodyFile := review.Flags().String("body-file", "", "publish a GitHub comment review: read the Markdown review from a file (- for stdin)")
 	reviewCommentsFile := review.Flags().String("comments-file", "", "JSON array of inline comments: [{\"path\": \"f.go\", \"line\": 42, \"body\": \"...\"}]")
@@ -372,6 +368,9 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 	reviewPublish := review.Flags().Bool("publish", false, "explicitly publish this review to GitHub even when the room defaults to local")
 	review.RunE = func(c *cobra.Command, a []string) error {
 		if *reviewBodyFile != "" {
+			if authority.Of(c.Context()).Role != authority.Owner {
+				return fmt.Errorf("agents cannot publish GitHub PR comments or reviews; record feedback in Dyna")
+			}
 			s, r, err := resolve(c, a[0])
 			if err != nil {
 				return err
@@ -428,9 +427,12 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		}
 		return output(c, status)
 	}
-	publishing := &cobra.Command{Use: "publishing [local|github]", Short: "Read or set where future room reviews are published", Long: "Missing and legacy settings default to local: Markdown reviews stay in Dyna. github explicitly opts future review assignments into GitHub publishing. Active assignments keep their assigned mode. This setting preserves the reviewer role.", Args: cobra.MaximumNArgs(1)}
+	publishing := &cobra.Command{Use: "publishing [local|github]", Short: "Read or set the owner's publishing policy", Long: "Agent reviews always stay in Dyna. Only the owner can select github for owner publishing. This setting preserves the reviewer role.", Args: cobra.MaximumNArgs(1)}
 	publishingRoom := publishing.Flags().String("room", "", "room name or ID (default: current stamped room)")
 	publishing.RunE = func(c *cobra.Command, a []string) error {
+		if len(a) > 0 && a[0] == watch.PublishingGitHub && authority.Of(c.Context()).Role != authority.Owner {
+			return fmt.Errorf("agent reviews stay in Dyna; use local publishing")
+		}
 		s := o.Service()
 		ref := *publishingRoom
 		if ref == "" {
@@ -524,6 +526,9 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 	commentBody := comment.Flags().String("body", "", "comment body text, as an alternative to the positional body")
 	publishComment := comment.Flags().Bool("publish", false, "explicitly publish this comment to GitHub even when the room defaults to local")
 	comment.RunE = func(c *cobra.Command, a []string) error {
+		if authority.Of(c.Context()).Role != authority.Owner {
+			return fmt.Errorf("agents cannot publish GitHub PR comments or reviews; record feedback in Dyna")
+		}
 		s, r, err := resolve(c, a[0])
 		if err != nil {
 			return err
