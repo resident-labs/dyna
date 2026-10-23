@@ -161,7 +161,9 @@ func runCall(ctx context.Context, link *RoomLink, p realtime.Provider) (*session
 		link.joinRequestedCall(call)
 	}
 	sess := &session{call: call, done: make(chan struct{})}
+	watchDone := make(chan struct{})
 	go func() {
+		defer close(watchDone)
 		if err := link.Watch(ctx, started, call); err != nil && ctx.Err() == nil {
 			fmt.Fprintln(os.Stderr, "voice: could not follow root's posts:", err)
 		}
@@ -170,6 +172,7 @@ func runCall(ctx context.Context, link *RoomLink, p realtime.Provider) (*session
 		defer close(sess.done)
 		sess.err = call.Run(ctx)
 		end()
+		<-watchDone // The session owns the room watch until it has stopped.
 	}()
 	return sess, nil
 }

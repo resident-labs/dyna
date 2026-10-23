@@ -4,15 +4,22 @@ import (
 	"context"
 	"testing"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/store/storetest"
 )
 
 // toolsFixture gives Voice's tools for room "work" in temp stores, with a
 // second room "elsewhere" whose data must never reach them.
 func toolsFixture(t *testing.T) (*Tools, room.Record, room.Record) {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	root := storetest.DataDir(t)
+	t.Cleanup(func() {
+		if err := database.Close(root); err != nil {
+			t.Error(err)
+		}
+	})
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	rooms := room.DefaultStore()
 	work, err := rooms.Create(room.CreateInput{Name: "work", CreatedBy: "owner"})
