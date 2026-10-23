@@ -218,6 +218,81 @@ collected:
 	}
 }
 
+// A live call hears the final result of a root turn that reports to the
+// owner. A call that has ended hears nothing, so the feed never speaks work
+// the owner did not ask Voice about.
+func TestWatchSaysRootTurnResultsOnlyWhileLive(t *testing.T) {
+	tools, work, _ := toolsFixture(t)
+	link, rooms := tools.link, room.DefaultStore()
+	result := func(turn int, text string) {
+		t.Helper()
+		if _, err := rooms.Post(work.ID, room.PostInput{From: work.Name + ":root", Kind: "completed",
+			OwnerReport: true, Turn: turn, To: []string{work.Name}, Text: text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := newFakeSpeaker()
+	stop := watchRoom(t, link, time.Time{}, call)
+	result(1, "work:root turn 1 completed. Result: CI is green.")
+	if got := <-call.said; !strings.HasPrefix(got, "[BACKEND] ") || !strings.Contains(got, "Result: CI is green.") {
+		t.Fatalf("said %q, want root's turn result", got)
+	}
+	stop()
+	result(2, "work:root turn 2 completed. Result: The review passed.")
+	select {
+	case got := <-call.said:
+		t.Fatalf("a call that ended said %q", got)
+	default:
+	}
+}
+
+// A turn whose result root already relayed to @voice-call is not said twice.
+func TestWatchSkipsTurnResultRootAlreadyRelayed(t *testing.T) {
+	tools, work, _ := toolsFixture(t)
+	link, rooms := tools.link, room.DefaultStore()
+	call := newFakeSpeaker()
+	watchRoom(t, link, time.Time{}, call)
+	post := func(in room.PostInput) {
+		t.Helper()
+		in.From = work.Name + ":root"
+		if _, err := rooms.Post(work.ID, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	post(room.PostInput{Turn: 3, To: []string{work.Name + ":voice-call"}, Text: "The merge is done."})
+	post(room.PostInput{Kind: "completed", OwnerReport: true, Turn: 3, To: []string{work.Name},
+		Text: "work:root turn 3 completed. Result: The merge is done."})
+	if got := <-call.said; !strings.HasSuffix(got, "The merge is done.") || strings.Contains(got, "turn 3") {
+		t.Fatalf("said %q, want only root's own relay", got)
+	}
+	select {
+	case got := <-call.said:
+		t.Fatalf("the turn result was said twice: %q", got)
+	default:
+	}
+}
+
+// A long result reaches the call clipped like Codex output: its start and end
+// survive, with one truncation marker, and it stays inside the budget.
+func TestWatchClipsLongTurnResults(t *testing.T) {
+	tools, work, _ := toolsFixture(t)
+	link, rooms := tools.link, room.DefaultStore()
+	call := newFakeSpeaker()
+	watchRoom(t, link, time.Time{}, call)
+	head, tail := "FIRST POINT "+strings.Repeat("α", 3000), strings.Repeat("漢", 3000)+" LAST POINT"
+	if _, err := rooms.Post(work.ID, room.PostInput{From: work.Name + ":root", Kind: "completed", OwnerReport: true,
+		Turn: 4, To: []string{work.Name}, Text: "work:root turn 4 completed. Result: " + head + " " + tail}); err != nil {
+		t.Fatal(err)
+	}
+	got := <-call.said
+	if len(got) > resultBudget+64 || !utf8.ValidString(got) {
+		t.Fatalf("clipped result is %d bytes and valid UTF-8 is %v", len(got), utf8.ValidString(got))
+	}
+	if !strings.Contains(got, "FIRST POINT") || !strings.Contains(got, "LAST POINT") || strings.Count(got, "…output truncated…") != 1 {
+		t.Fatalf("clipped result %q lost its start, its end or its one marker", got)
+	}
+}
+
 // An answer that picks none of the options goes to root in the owner's own
 // words: the prompt offers the options and never forces one.
 func TestQuestionPromptKeepsTheOwnersOwnWords(t *testing.T) {
