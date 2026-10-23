@@ -4,6 +4,7 @@ import (
 	"context"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/pr/trial"
+	"dyna-agent/internal/room"
 	"fmt"
 )
 
@@ -57,16 +58,16 @@ func (s *Service) advanceMergeStacks(ctx context.Context, repo string, r Record,
 		if stack.Phase != "running" {
 			continue
 		}
-		ci, logs, reason, err := s.mergeTrialCI(ctx, r, stack.Branch, stack.Head)
+		ci, err := s.mergeTrialCI(ctx, r, stack.Branch, stack.Head)
 		if err != nil {
 			return err
 		}
-		stack.Reason = reason
-		if ci == "passed" || ci == "failed" {
-			stack.Phase, stack.Logs = ci, logs
+		stack.Reason = ci.Reason
+		if ci.Status == "passed" || ci.Status == "failed" {
+			stack.Phase, stack.Logs = ci.Status, ci.Logs
 			prefix := b
 			prefix.Branch, prefix.Changes = stack.Branch, b.Changes[:stack.Count]
-			s.noteMergeHistory(st, repo, prefix, "trial", ci, stack.Head, logs)
+			s.noteMergeHistory(st, repo, prefix, "trial", ci.Status, stack.Head, ci.Logs)
 		} else {
 			active++
 		}
@@ -149,6 +150,7 @@ func (s *Service) rejectTrialFailure(ctx context.Context, b state.MergeTrial) er
 		return nil
 	}
 	var member Record
+	var prs []room.MergePR
 	if err := s.Store.update(func(st *State) error {
 		r := st.Records[b.Failure.Change.Key]
 		if r == nil || r.Head != b.Failure.Change.Head {
@@ -156,6 +158,7 @@ func (s *Service) rejectTrialFailure(ctx context.Context, b state.MergeTrial) er
 		}
 		r.MergeTrialFailure = b.Failure
 		member = *r
+		prs = mergeTrialPRs(*st, b)
 		return nil
 	}); err != nil {
 		return err
@@ -164,5 +167,9 @@ func (s *Service) rejectTrialFailure(ctx context.Context, b state.MergeTrial) er
 		return nil
 	}
 	text := fmt.Sprintf("%s failed merge trial CI after the preceding tested prefix. %s\n%s", changeLocation(member), b.Failure.Reason, b.Failure.Logs)
-	return s.postMergeNotice(ctx, member, "merge-trial-failed", Notice{Target: member.Author, Text: text})
+	if len(prs) == 0 {
+		prs = []room.MergePR{mergePR(member)}
+	}
+	ev := room.MergeEvent{Type: room.MergeFailed, TrialID: trialIdentity(b), Repo: mergeRepo(member), Base: b.DefaultBranch, PRs: prs, Label: changeLabel(member), Reason: "failed trial CI after the tested prefix"}
+	return s.postMergeNotice(ctx, member, "merge-trial-failed", Notice{Target: member.Author, Merge: &ev, Text: text})
 }

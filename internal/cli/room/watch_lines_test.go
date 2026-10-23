@@ -17,7 +17,7 @@ func TestWatchLinesPrintsOneLinePerPostAndASinceLine(t *testing.T) {
 	var out bytes.Buffer
 	write := watchWriter(&out, "work", false, true)
 	quiet := []room.Message{
-		{ID: "msg_1", From: "work:lead", Kind: "merge-decision", To: []string{"work"}, Text: "Keep the queue paused"},
+		{ID: "msg_1", From: "work:lead", Kind: "notice", To: []string{"work"}, Text: "Keep the queue paused"},
 		{ID: "msg_2", From: "work:worker", Kind: "issue", To: []string{"work"}, Text: "Repair\nthe flaky test"},
 	}
 	for _, msg := range quiet {
@@ -32,7 +32,7 @@ func TestWatchLinesPrintsOneLinePerPostAndASinceLine(t *testing.T) {
 	if err := write(wake); err != nil {
 		t.Fatal(err)
 	}
-	want := "· work:lead [merge-decision] msg_1: Keep the queue paused\n" +
+	want := "· work:lead [notice] msg_1: Keep the queue paused\n" +
 		"· work:worker [issue] msg_2: Repair\n" +
 		"! work:lead [message] msg_3: Choose the recovery\n" +
 		"-- since msg_3\n"

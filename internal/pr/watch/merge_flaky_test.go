@@ -6,6 +6,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"dyna-agent/internal/room"
 )
 
 // A flaky publish takes only failures that root named. Any other failing test
@@ -97,7 +99,7 @@ func failTrial(t *testing.T, f *trialFixture, logs string) {
 	if b == nil || b.Phase != "awaiting-root" || !strings.Contains(b.Logs, "TestFlaky") {
 		t.Fatalf("trial = %+v", b)
 	}
-	if len(f.e.sent) != 1 || !f.e.sent[0].NeedsRoot {
+	if failed := mergeNotices(f.e.sent, room.MergeFailed); len(failed) != 1 || !failed[0].NeedsRoot {
 		t.Fatalf("notices = %+v", f.e.sent)
 	}
 }
