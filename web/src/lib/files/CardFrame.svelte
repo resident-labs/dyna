@@ -1,6 +1,6 @@
 <script>
   import { openExternal, cardURL } from '../../api.js'
-  import { sandbox, guard, onLoad, readCardMessage, frameKey, forKey } from '../ui/rich.js'
+  import { sandbox, guard, onLoad, readCardMessage, frameKey, forKey } from '../ui/rich.ts'
   // One HTML card frame with its link guard and its message channel. See
   // rich.js for the rules.
   let { roomId, att, height = '100%', onheight } = $props()

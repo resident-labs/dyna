@@ -24,7 +24,7 @@ function need<T>(value: T | null | undefined, what: string): T {
 const one = <E extends Element = HTMLElement>(root: ParentNode, selector: string): E => need(root.querySelector<E>(selector), selector)
 const textOf = (node: Node): string => need(node.textContent, 'text')
 
-const format = readFileSync(new URL('../ui/format.js', import.meta.url), 'utf8')
+const format = readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8')
 // The page reads the clock for live durations, so every mounted page sees this instant.
 const now = Date.parse('2026-01-01T01:00:00Z')
 const iso = (ms: number): string => new Date(now - ms).toISOString()

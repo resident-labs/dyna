@@ -1,5 +1,5 @@
 <script>
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import { opRunning, opLine, canExport, popoverPlacement } from './sync.ts'
 
   // The room header's sync badge. remotes comes from remoteList: origin

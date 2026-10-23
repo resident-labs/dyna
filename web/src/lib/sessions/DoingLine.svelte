@@ -2,7 +2,7 @@
   // A live session's running call and how long it has run, such as
   // "Bash: go test · 12s". A call over 30 seconds shows bold. now ticks the
   // timer; the parent owns the clock.
-  import { elapsed, isLongCall } from '../ui/format.js'
+  import { elapsed, isLongCall } from '../ui/format.ts'
   import type { Doing } from '../api/room.ts'
   let { doing, now }: { doing: Doing; now: number } = $props()
   let ms = $derived(doing.since ? now - doing.since : 0)

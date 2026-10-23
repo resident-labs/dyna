@@ -38,7 +38,7 @@ export { flushSync }`)
     plugins: [{ name: 'svelte-test', setup(builder) {
       builder.onLoad({ filter: /\.svelte\.js$/ }, ({ path }) => ({ contents: compileModule(readFileSync(path, 'utf8'), { filename: path }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
       builder.onLoad({ filter: /\.svelte$/ }, ({ path }) => ({ contents: compile(readFileSync(path, 'utf8'), { filename: path }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
-      builder.onLoad({ filter: /[/\\]format\.js$/ }, () => ({ contents: "export const markdown = (t) => t || ''; export const ago = () => 'now'; export const initials = (n) => n.slice(0, 2); export const short = (a) => a; export const clock = () => ''; export const stamp = () => '';", loader: 'js' }))
+      builder.onLoad({ filter: /[/\\]format\.ts$/ }, () => ({ contents: "export const markdown = (t) => t || ''; export const ago = () => 'now'; export const initials = (n) => n.slice(0, 2); export const short = (a) => a; export const clock = () => ''; export const stamp = () => '';", loader: 'js' }))
     } }],
   })
   const file = join(dir, 'PRList.mjs')

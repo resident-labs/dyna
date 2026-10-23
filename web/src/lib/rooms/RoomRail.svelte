@@ -2,8 +2,8 @@
   import { flip } from 'svelte/animate'
   import { fade } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
-  import { motion, BASE, FAST } from '../ui/motion.js'
-  import { initials, roomLabel } from '../ui/format.js'
+  import { motion, BASE, FAST } from '../ui/motion.ts'
+  import { initials, roomLabel } from '../ui/format.ts'
   // working: awake agents mid-turn, the count on the agents tile.
   let { rooms = [], working = 0, selected = '', onselect, onmenu = null } = $props()
   // Pinned rooms first, in pin order, then the rest as Go sorts them. A

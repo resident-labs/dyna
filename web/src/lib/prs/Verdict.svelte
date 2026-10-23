@@ -2,7 +2,7 @@
   // The reviewer's verdict on a change and its summary. PRCard draws it under
   // the status box; the PR screen draws it first in its Review tab. el is the
   // box, so a button can scroll to it.
-  import { markdown } from '../ui/format.js'
+  import { markdown } from '../ui/format.ts'
   import { shortSha, verdictMeta, isLocal, type Facts } from './pr.ts'
   import type { Names } from './prlist.ts'
 

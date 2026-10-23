@@ -1,5 +1,5 @@
 // Keep a few pages on either side of the reader, then release the far end.
-export function trimHistoryRows(rows, keep, older = false) {
+export function trimHistoryRows<T>(rows: T[], keep: number, older = false): { rows: T[]; before: number; after: number } {
  if (rows.length <= keep * 2) return { rows, before: 0, after: 0 }
  const dropped = rows.length - keep
  return older

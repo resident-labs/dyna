@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseRoute, roomHash, routeHash, routeSession, writeRoute, type Route } from './route.ts'
-import { detailHref } from './details.js'
+import { detailHref } from './details.ts'
 
 const room = 'room_20261017-100000-aaaaaaaa'
 const session = 'ses_20261017-100000-bbbbbbbb'

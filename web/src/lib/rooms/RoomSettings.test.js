@@ -154,7 +154,7 @@ test('the room menu opens the modal, for another room after selecting it, and Es
   const mount = /\{#if (showRoomSettings && room)\}\n(?:.*\n)*?\s*<RoomSettings [^\n]*onclose=\{(\(\) => \(showRoomSettings = false\))\} \/>/.exec(app)
   const selected = []
   const state = vm.createContext({ roomId: 'room-1', room, showRoomSettings: false, selectRoom: async (id) => { selected.push(id); state.roomId = id; return true } })
-  const { actions, roomMenu } = await import('../ui/actions.js')
+  const { actions, roomMenu } = await import('../ui/actions.ts')
   const item = (r) => roomMenu(actions({ room: r, rooms: [r], icons: {}, openRoomSettings: vm.runInContext(opener, state) })).find((a) => a.id === 'roomsettings')
 
   await item(room).run()
@@ -163,7 +163,7 @@ test('the room menu opens the modal, for another room after selecting it, and Es
 
   const shell = readFileSync(new URL('../ui/SettingsShell.svelte', import.meta.url), 'utf8')
   assert.match(shell, /role="dialog" aria-modal="true"[^>]*use:modal=\{\{ close: onclose, busy \}\}/)
-  const { dialog } = await import('../ui/dialog.js')
+  const { dialog } = await import('../ui/dialog.ts')
   const listeners = new Set()
   globalThis.window = { addEventListener: (_, fn) => listeners.add(fn), removeEventListener: (_, fn) => listeners.delete(fn) }
   globalThis.document = { activeElement: null }
@@ -191,7 +191,7 @@ test('Esc in a rule edit cancels the edit, and leaving Rules mid-edit frees Esc 
   let cleanup = () => {}
   const rerun = () => { cleanup(); cleanup = vm.runInContext(effect, rules)() }
 
-  const { dialog } = await import('../ui/dialog.js')
+  const { dialog } = await import('../ui/dialog.ts')
   const listeners = new Set()
   globalThis.window = { addEventListener: (_, fn) => listeners.add(fn), removeEventListener: (_, fn) => listeners.delete(fn) }
   globalThis.document = { activeElement: null }
@@ -235,7 +235,7 @@ test('leaving Hooks with a hook editor open frees Esc for the modal', async () =
   const cleanup = vm.runInContext(effect, pane)()
   assert.equal(state.hooksBusy, true) // Add hook: the editor is open
 
-  const { dialog } = await import('../ui/dialog.js')
+  const { dialog } = await import('../ui/dialog.ts')
   const listeners = new Set()
   globalThis.window = { addEventListener: (_, fn) => listeners.add(fn), removeEventListener: (_, fn) => listeners.delete(fn) }
   globalThis.document = { activeElement: null }

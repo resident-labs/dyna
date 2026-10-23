@@ -1,7 +1,7 @@
 <script lang="ts">
   import { sessionStatus } from '../sessions/status.ts'
   import Loading from './Loading.svelte'
-  import { dialog as modal } from '../ui/dialog.js'
+  import { dialog as modal } from '../ui/dialog.ts'
   import Avatar from '../ui/Avatar.svelte'
   import CompletionBody from '../ui/CompletionBody.svelte'
   import PostLink from '../ui/PostLink.svelte'
@@ -14,7 +14,7 @@
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
   import { expedite, agentExpedited, goalExpedited } from '../rooms/expedite.ts'
   import { goalAgo, goalParts, goalTone } from '../rooms/goals.ts'
-  import { markdown, stamp, tokens, roomLabel } from '../ui/format.js'
+  import { markdown, stamp, tokens, roomLabel } from '../ui/format.ts'
 
   import type { Attachment, Member, PostDetail, Room } from '../api/room.ts'
   import type { Goal } from '../api/goal.ts'

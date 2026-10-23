@@ -12,7 +12,7 @@
   import { createSelection } from '../ui/selection.svelte.ts'
   import VoiceRelay from '../voice/VoiceRelay.svelte'
   import { activitySummary, done, plain, turnHead, turnTail } from './dm.ts'
-  import { stamp, short, ago, elapsed, isLongCall } from '../ui/format.js'
+  import { stamp, short, ago, elapsed, isLongCall } from '../ui/format.ts'
   import type { Attachment, Member, Room } from '../api/room.ts'
   import type { ShellJob } from '../api/terminal.ts'
   import type { PostSelection } from '../ui/postSelect.ts'

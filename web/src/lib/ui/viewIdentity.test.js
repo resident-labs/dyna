@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { compile } from 'svelte/compiler'
-import { viewIdentity } from './viewIdentity.js'
+import { viewIdentity } from './viewIdentity.ts'
 
 test('data refreshes preserve the view identity', () => {
   const state = { roomId: 'room-1', view: 'channel:general', drill: { id: 'session-1' }, posts: [], session: null }

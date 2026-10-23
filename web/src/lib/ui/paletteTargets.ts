@@ -1,7 +1,7 @@
 // The palette's go-to rows: the open room's sessions, workflow runs and pull
 // requests. They show only once the owner types, so the empty palette stays
 // a short list of rooms and commands.
-import { matches } from './palette.js'
+import { matches } from './palette.ts'
 import { changeName, changeTitle } from '../prs/pr.ts'
 import { prRef } from '../prs/prlink.ts'
 

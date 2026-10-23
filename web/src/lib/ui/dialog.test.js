@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { tick } from 'svelte'
-import { dialog } from './dialog.js'
+import { dialog } from './dialog.ts'
 
 function setup() {
   globalThis.document = { activeElement: null }

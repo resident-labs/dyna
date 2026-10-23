@@ -4,7 +4,7 @@
   import { human, extOf } from './attach.js'
   import { previewKind, previewLabel } from './preview.ts'
   import VisualBanner from './VisualBanner.svelte'
-  import { postAttachment } from '../ui/posts.js'
+  import { postAttachment } from '../ui/posts.ts'
   import { visuals } from './visuals.svelte.js'
   import { visualOf, updates } from './visuals.js'
   let { roomId, items = [], postId = '', onopen } = $props()
