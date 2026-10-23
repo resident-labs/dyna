@@ -18,6 +18,20 @@ export interface MachineCISlots {
   slots: number
 }
 
+// MachineCIRun is one local CI run in flight on a machine. number, title and
+// url name the PR it checks, so a row shows the PR and not only a number.
+export interface MachineCIRun {
+  machine: string
+  number: number
+  title: string
+  url: string
+  slots: number
+  trial: boolean
+  suites?: string[]
+  // started is when the run took its slots, as the engine's clock reads it.
+  started: string
+}
+
 // MachineSummary is one row of the Machines list.
 export interface MachineSummary {
   id: string
@@ -61,6 +75,9 @@ export interface MachineDetail extends MachineSummary {
   dynaVersion?: string
   harnesses?: MachineHarness[]
   running?: MachineAgent[]
+  // ciRuns lists the CI runs in flight on this machine, so the page shows what
+  // it checks now. Their slots add up to ci.used.
+  ciRuns?: MachineCIRun[]
 }
 
 // MachinePatch is a change to one machine. An absent field keeps its value.

@@ -25,6 +25,10 @@ type RunningCI struct {
 	Trial bool `json:"trial"`
 	// Head is the short head SHA the run checks.
 	Head string `json:"head"`
+	// Title and URL name the PR the run checks, so a client shows the PR and
+	// not only its number. A merge trial carries the PR its batch started from.
+	Title string `json:"title"`
+	URL   string `json:"url"`
 	// Suites is empty until the run has prepared its suites.
 	Suites  []string  `json:"suites,omitempty"`
 	Started time.Time `json:"started"`
@@ -80,7 +84,8 @@ func (r *registeredCIRun) runningCI() RunningCI {
 	}
 	return RunningCI{
 		Machine: r.node, Slots: r.slots, Repo: r.repo, Number: r.number,
-		Trial: r.trial, Head: head, Suites: slices.Clone(r.suites), Started: r.started,
+		Trial: r.trial, Head: head, Title: r.title, URL: r.url,
+		Suites: slices.Clone(r.suites), Started: r.started,
 	}
 }
 

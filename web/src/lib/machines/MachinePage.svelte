@@ -14,7 +14,8 @@
   import { api } from '../../api.ts'
   import type { SystemLoad } from '../api/system.ts'
   import type { MachineAgent, MachineDetail, MachinePatch, MachineRole } from '../api/machine.ts'
-  import { roleLabel, routeText, statusText } from './machines.ts'
+  import { ago } from '../ui/format.ts'
+  import { ciRunDetail, ciRunText, count, roleLabel, routeText, statusText } from './machines.ts'
 
   let { machine, error = '', busy = false, onback, onagent, onsave }: {
     machine: MachineDetail | null
@@ -110,10 +111,26 @@
 
       {#if machine.ci}
         {@const ci = machine.ci}
-        <Card title="CI">
+        {@const runs = machine.ciRuns ?? []}
+        <Card title="CI" count={runs.length || null}>
           <Row dense text="Slots now">
             {#snippet trail()}<span class="value">{ci.used} of {ci.slots} used</span>{/snippet}
           </Row>
+          {#each runs as run (`${run.url}@${run.started}`)}
+            <Row dense text={ciRunText(run)}>
+              {#snippet meta()}
+                {#if run.trial}<Chip>Trial</Chip>{/if}
+                <span>Started {ago(run.started)}</span>
+                {#if ciRunDetail(run)}<span>{ciRunDetail(run)}</span>{/if}
+              {/snippet}
+              {#snippet trail()}
+                <span class="value">{count(run.slots, 'slot')}</span>
+                {#if run.url}<a class="open" href={run.url} target="_blank" rel="noreferrer" title="Open this PR on GitHub">Open ↗</a>{/if}
+              {/snippet}
+            </Row>
+          {:else}
+            <p class="note">No CI run here now.</p>
+          {/each}
         </Card>
       {/if}
 
@@ -172,9 +189,10 @@
   .value { color: var(--ink-2); }
   .chips { display: inline-flex; flex-wrap: wrap; gap: var(--s1); justify-content: flex-end; }
   .note { color: var(--faint); }
+  .open { color: var(--iris); text-decoration: none; }
+  @media (hover: hover) { .open:hover { text-decoration: underline; } }
   .mono { font-family: var(--mono); font-size: var(--t-sm); }
-  .role { flex: none; padding: 2px 9px; border-radius: 9px; background: var(--raise); color: var(--muted); font-size: var(--t-cap); font-weight: 600; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
-  .role.on { background: var(--iris-wash); color: var(--iris); box-shadow: inset 0 0 0 1px var(--iris-edge); }
+  .role { flex: none; padding: 2px 9px; border-radius: 9px; background: var(--raise); color: var(--muted); font-size: var(--t-cap); font-weight: 600; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }  .role.on { background: var(--iris-wash); color: var(--iris); box-shadow: inset 0 0 0 1px var(--iris-edge); }
   .role:disabled { opacity: 0.6; }
   .num { width: 72px; background: var(--field); border: 0; border-radius: var(--r-xs); padding: 4px 8px; color: var(--ink); font: inherit; font-size: var(--t-sm); }
   .ssh { width: 200px; max-width: 100%; background: var(--field); border: 0; border-radius: var(--r-xs); padding: 4px 8px; color: var(--ink); font-size: var(--t-sm); }

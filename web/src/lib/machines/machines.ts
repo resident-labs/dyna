@@ -1,4 +1,4 @@
-import type { MachineRole, MachineStatus, MachineSummary } from '../api/machine.ts'
+import type { MachineCIRun, MachineRole, MachineStatus, MachineSummary } from '../api/machine.ts'
 
 // roleLabel is the short name a role chip shows.
 export function roleLabel(role: MachineRole): string {
@@ -39,6 +39,18 @@ export function summaryParts(machine: MachineSummary): string[] {
 // summaryText is the row's one line of counts.
 export function summaryText(machine: MachineSummary): string {
   return summaryParts(machine).join(' · ')
+}
+
+// ciRunText names one CI run the way its row shows it: the PR's number and
+// title, so a reader never looks a number up.
+export function ciRunText(run: Pick<MachineCIRun, 'number' | 'title'>): string {
+  return run.title ? `#${run.number} ${run.title}` : `#${run.number}`
+}
+
+// ciRunDetail is the run's second line: the suites it checks, when it started
+// them, and whether it is a merge trial.
+export function ciRunDetail(run: Pick<MachineCIRun, 'suites'>): string {
+  return run.suites?.length ? run.suites.join(' · ') : ''
 }
 
 // statusCounts counts machines by status, in the order the subline shows them.

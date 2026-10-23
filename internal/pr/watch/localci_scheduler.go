@@ -50,6 +50,8 @@ type registeredCIRun struct {
 	number  int
 	trial   bool
 	head    string
+	title   string
+	url     string
 	started time.Time
 	suites  []string
 }
@@ -244,7 +246,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		run := &registeredCIRun{
 			node: chosen.Name, slots: slots, cancel: cancel,
 			repo: job.record.Repo, number: job.record.Number, trial: job.trial,
-			head: job.head, started: s.now(),
+			head: job.head, title: job.record.Title, url: job.record.URL, started: s.now(),
 		}
 		runs.runs[key] = run
 		started = true

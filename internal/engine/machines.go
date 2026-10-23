@@ -14,7 +14,25 @@ import (
 // machineAPI answers the machine calls. The registry gives every row; the live
 // figures come from this engine's own machine.
 func (s services) machineAPI() websvc.MachineAPI {
-	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning}
+	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI}
+}
+
+// machineCI lists the local CI runs in flight on every machine. The runs live
+// in the engine's workers, so the PR view reads them from the scheduler's own
+// set and names the PR for the page.
+func (s services) machineCI() []websvc.MachineCIRun {
+	if s.rooms == nil || s.rooms.PRs == nil {
+		return nil
+	}
+	runs := s.rooms.PRs.RunningCI()
+	out := make([]websvc.MachineCIRun, 0, len(runs))
+	for _, run := range runs {
+		out = append(out, websvc.MachineCIRun{
+			Machine: run.Machine, Number: run.Number, Title: run.Title, URL: run.URL,
+			Slots: run.Slots, Trial: run.Trial, Suites: run.Suites, Started: run.Started,
+		})
+	}
+	return out
 }
 
 // machineRunning lists the sessions that run on this machine now: every open
