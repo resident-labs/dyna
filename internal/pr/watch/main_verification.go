@@ -51,6 +51,21 @@ type defaultCommit struct {
 	Rollup *commitRollup `json:"statusCheckRollup"`
 }
 
+// cancelledChecks reports a rollup that counted cancelled check runs.
+func (r *commitRollup) cancelledChecks() bool {
+	for _, check := range r.Contexts.CheckRuns {
+		if check.Count > 0 && check.State == "CANCELLED" {
+			return true
+		}
+	}
+	return false
+}
+
+// cancelledFailure reports a red rollup that counted a cancelled run.
+func (p defaultBranchProbe) cancelledFailure() bool {
+	return p.CI == "FAILURE" && p.Rollup != nil && p.Rollup.cancelledChecks()
+}
+
 func defaultHeadConfirmed(p defaultBranchProbe) bool {
 	return p.Name != "" && (len(p.Head) == 40 || len(p.Head) == 64) && headSHAPattern.MatchString(p.Head)
 }
