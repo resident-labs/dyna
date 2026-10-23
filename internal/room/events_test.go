@@ -35,7 +35,7 @@ func TestEventsFileMatchesRegistry(t *testing.T) {
 
 func TestPostRejectsSealedFamily(t *testing.T) {
 	store, rec := newEventStore(t)
-	for _, family := range []EventFamily{FamilyWorktree, FamilyHook} {
+	for _, family := range []EventFamily{FamilyWorktree, FamilyHook, FamilyPR} {
 		_, err := store.Post(rec.ID, PostInput{From: rec.Name, To: []string{rec.Name}, Kind: string(family), Text: "sealed"})
 		if err == nil || !strings.Contains(err.Error(), "PostEvent") {
 			t.Fatalf("Post accepted the sealed family %q: %v", family, err)
@@ -135,6 +135,57 @@ func TestPostEventRequiresFieldsAndPostsOnce(t *testing.T) {
 	}
 }
 
+// A PR event carries its facts in the typed payload: the card and the agent
+// text read it, and the notice holds only the type.
+func TestPREventStoresItsFactsAndText(t *testing.T) {
+	store, rec := newEventStore(t)
+	ev := PREvent{Type: PRCIFailed, Label: "PR #12", Number: 12, ChangeID: "https://github.com/a/b/pull/12", Key: "msg_0123456789abcdef",
+		Repo: "a/b", Head: "head1", URL: "https://github.com/a/b/pull/12", CIAttempt: 2, CIMax: 3, Summary: "unit, build",
+		Detail: "CI failed (2/3): unit, build.", LogTail: "Log tail:\nboom"}
+	msg, err := store.PostEventInput(PostEventInput{RoomID: rec.ID, Event: ev, To: []string{rec.Name}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Kind != string(FamilyPR) || msg.Notice.Kind != string(PRCIFailed) || !msg.Wake || msg.From != EngineSender {
+		t.Fatalf("stored event = %+v", msg)
+	}
+	stored, ok := msg.PR()
+	if !ok || stored.CIAttempt != 2 || stored.Summary != "unit, build" || stored.ChangeID != ev.ChangeID || stored.Number != 12 {
+		t.Fatalf("stored payload = %+v, %v", stored, ok)
+	}
+	for _, want := range []string{"CI failed (2/3) on PR #12 at head1: unit, build. Fix the failure and push to this PR.", "Log tail:\nboom"} {
+		if !strings.Contains(msg.Text, want) {
+			t.Fatalf("event text %q does not hold %q", msg.Text, want)
+		}
+	}
+	// A retry of the same notice keeps the same post.
+	again, err := store.PostEventInput(PostEventInput{RoomID: rec.ID, Event: ev, To: []string{rec.Name}})
+	if err != nil || again.ID != msg.ID {
+		t.Fatalf("retry = %+v, %v", again, err)
+	}
+	// Another comment on the same head is a second event, not a duplicate.
+	second := ev
+	second.CommentID, second.Key = "c1", "msg_0123456789abcdee"
+	if other, err := store.PostEventInput(PostEventInput{RoomID: rec.ID, Event: second, To: []string{rec.Name}}); err != nil || other.ID == msg.ID {
+		t.Fatalf("second comment = %+v, %v", other, err)
+	}
+}
+
+// A PR event needs the facts every card reads, so an event without a label or
+// a change fails instead of posting a blank card.
+func TestPREventRequiresLabelAndChange(t *testing.T) {
+	store, rec := newEventStore(t)
+	for _, ev := range []PREvent{
+		{Type: PRReady, ChangeID: "github.com/a/b#1"},
+		{Type: PRReady, Label: "PR #1"},
+		{Label: "PR #1", ChangeID: "github.com/a/b#1"},
+	} {
+		if _, err := store.PostEvent(rec.ID, ev, rec.Name); err == nil {
+			t.Fatalf("PostEvent accepted %+v", ev)
+		}
+	}
+}
+
 func newEventStore(t *testing.T) (*Store, Record) {
 	t.Helper()
 	store := &Store{Root: t.TempDir()}
@@ -210,7 +261,7 @@ func generateEvents() ([]byte, error) {
 	}
 	fmt.Fprintf(&b, "export type EventFamily = %s\n", stringUnion(familyList))
 	fmt.Fprintf(&b, "export type EventType = %s\n", stringUnion(typesList))
-	fmt.Fprintf(&b, "export type WakeRule = %s\n\n", stringUnion([]string{string(WakeNever)}))
+	fmt.Fprintf(&b, "export type WakeRule = %s\n\n", stringUnion([]string{string(WakeNever), string(WakeTarget), string(WakeRootIfNeeded)}))
 
 	b.WriteString("export interface EventSpecEntry {\n  family: EventFamily\n  type: EventType\n  renderer: string\n  quiet: boolean\n  wake: WakeRule\n  once: boolean\n  text: string\n  textNoSubject?: string\n}\n\n")
 	b.WriteString("export const eventSpecs: readonly EventSpecEntry[] = [\n")
