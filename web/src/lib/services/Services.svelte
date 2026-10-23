@@ -5,6 +5,7 @@
   import { untrack } from 'svelte'
   import { api } from '../../api.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
+  import CIHealth from '../cihealth/CIHealth.svelte'
   import EntryList from './EntryList.svelte'
   import ServiceLine from './ServiceLine.svelte'
   import type { Member } from '../api/room.ts'
@@ -19,13 +20,13 @@
   // its overlaps and the watcher's last poll, so the page takes the list rows
   // the room already holds.
   type ChangeLike = Pick<ChangeRow, 'reviewAt' | 'number' | 'title' | 'verdict' | 'reviewerSession' | 'kind' | 'watching' | 'checked' | 'error'> & { overlaps?: { length: number } | number }
-  let { roomId, repo = '', members = [], changes = [], onopen, onopenhealth }: {
+  let { roomId, repo = '', members = [], changes = [], onopen, onpr }: {
     roomId: string
     repo?: string
     members?: Member[]
     changes?: ChangeLike[]
     onopen?: (m: Member) => void
-    onopenhealth?: () => void
+    onpr?: (pr: number) => void
   } = $props()
 
   // Every part comes from an existing call; a failed call leaves only its own
@@ -113,7 +114,7 @@
       <div class="panel" role="tabpanel" aria-label={tab.name}>
         <ServiceLine rows={tab.rows} status={tab.line} wrap={tab.id !== 'more'} onWrite={change} onRun={run} />
         {#if tab.id === 'ci'}
-          {#if onopenhealth}<button class="health" onclick={() => onopenhealth?.()}>Open CI health</button>{/if}
+          <CIHealth {roomId} {changes} {onpr} />
         {:else if tab.id !== 'more'}
           <EntryList entries={shown} empty="Nothing here yet." onOpen={openSession} onRun={openRun} />
           {#if left > 0}
@@ -145,7 +146,6 @@
   .panel { display: flex; flex-direction: column; gap: var(--s3); }
   .none, .more { color: var(--faint); font-size: var(--t-ui); }
   .more { display: block; text-align: left; padding: var(--s2) 0; }
-  .health { align-self: flex-start; padding: 3px 9px; border: 1px solid var(--line); border-radius: var(--r-xs); font-size: var(--t-sm); color: var(--muted); }
   @container (max-width: 640px) {
     .page { padding: 0 var(--s3) var(--s4); }
   }

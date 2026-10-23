@@ -5,7 +5,7 @@ import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
 import { sections } from './workViews.ts'
 
-// Walk App's real view chain ({#if view === 'cihealth'} … {:else} Feed) and find
+// Walk App's real view chain ({#if view === 'library'} … {:else} Feed) and find
 // which component each sidebar tab renders. A tab that falls through to the
 // feed is a broken page.
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
@@ -37,7 +37,7 @@ function find(node: unknown, ok: (node: IfNode) => boolean): IfNode | null {
   }
   return null
 }
-const chain = find(ast.fragment, (n) => n.type === 'IfBlock' && source.slice(n.test.start, n.test.end) === "view === 'cihealth'")
+const chain = find(ast.fragment, (n) => n.type === 'IfBlock' && source.slice(n.test.start, n.test.end) === "view === 'library'")
 const components = (node: unknown, out: string[] = []): string[] => {
   if (!node || typeof node !== 'object') return out
   const record = node as Record<string, unknown>
