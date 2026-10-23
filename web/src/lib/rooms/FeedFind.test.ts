@@ -9,6 +9,7 @@ type Mounted = object
 type Harness = {
   dir: string
   default: unknown
+  flushSync: () => void
   mount: (component: unknown, options: { target: Element; props: object }) => Mounted
 }
 
@@ -17,7 +18,8 @@ function need<T>(value: T | null | undefined, what: string): T {
   return value
 }
 
-const settle = () => new Promise((r) => setTimeout(r, 0))
+let flush = () => {}
+const settle = async () => { for (let i = 0; i < 4; i++) { await Promise.resolve(); flush() } }
 const post = (id: string, text: string) => ({ wake: false, id, ts: 1, roomId: 'r', from: 'repo:lead', to: ['repo'], text, owner: false, completion: false, fromHue: 2, speaker: 'lead' })
 // The stub answers from globalThis, so a test can change the answer.
 const api = `export const api = {
@@ -30,7 +32,8 @@ async function render(found: unknown) {
   // jsdom has no scrollIntoView; the test records which row asked for it.
   const scrolled: string[] = []
   Reflect.set(dom.window.Element.prototype, 'scrollIntoView', function (this: Element) { scrolled.push(this.id) })
-  const { dir, default: FeedFind, mount }: Harness = await importBundle(code, '../rooms/FeedFind')
+  const { dir, default: FeedFind, mount, flushSync }: Harness = await importBundle(code, '../rooms/FeedFind')
+  flush = flushSync
   const jumps: string[] = []
   let closed = 0
   const target = need(document.getElementById('app'), 'app element')
@@ -115,6 +118,40 @@ test('Enter waits for a search in flight, and a failed search can be sent again'
   } finally {
     await r.done()
   }
+})
+
+test('visible search controls guard stale results and retry the same query after failure', async () => {
+  const r = await render({ posts: [post('a', 'deploy'), post('b', 'deploy')], more: true })
+  const button = (label: string) => need([...r.target.querySelectorAll('button')].find(b => b.getAttribute('aria-label') === label), label)
+  try {
+    r.type('deploy')
+    r.key('Enter')
+    await settle()
+    assert.match(r.target.textContent ?? '', /1 of 2\+ found/)
+    button('Next match').click()
+    await settle()
+    assert.deepEqual(r.jumps, ['b'])
+    button('Previous match').click()
+    await settle()
+    assert.deepEqual(r.jumps, ['b', 'a'])
+    r.box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }))
+    assert.deepEqual(r.jumps, ['b', 'a'])
+    r.type('different')
+    await settle()
+    assert.equal(button('Next match').disabled, true)
+    r.key('ArrowDown')
+    assert.equal(r.box.getAttribute('aria-activedescendant'), null)
+    Reflect.set(globalThis, 'found', { posts: null })
+    r.key('Enter')
+    await settle()
+    const retry = need([...r.target.querySelectorAll('button')].find(b => b.textContent === 'Retry'), 'Retry')
+    Reflect.set(globalThis, 'found', { posts: [], more: false })
+    retry.click()
+    await settle()
+    assert.match(r.target.textContent ?? '', /Nothing in this room matches “different”/)
+    assert.equal(button('Next match').disabled, true)
+    assert.deepEqual(r.searches(), [['room_x', 'deploy'], ['room_x', 'different'], ['room_x', 'different']])
+  } finally { await r.done() }
 })
 
 const join = (parts: { text: string; hit: boolean }[]) => parts.map((p) => (p.hit ? `[${p.text}]` : p.text)).join('')
