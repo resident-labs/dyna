@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { isFinished } from '../rooms/memberOrder.js'
+  import { isFinished } from '../rooms/memberOrder.ts'
   import { sessionStatus } from './status.ts'
   import { tick, onDestroy } from 'svelte'
   import Avatar from '../ui/Avatar.svelte'

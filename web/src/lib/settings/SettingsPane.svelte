@@ -10,7 +10,7 @@
   import Segmented from '../ui/Segmented.svelte'
   import LookRows from '../rooms/LookRows.svelte'
   import Feed from '../rooms/Feed.svelte'
-  import { sampleRoom, samplePosts } from '../rooms/feedSample.js'
+  import { sampleRoom, samplePosts } from '../rooms/feedSample.ts'
   import { look } from '../rooms/look.svelte.js'
   import { visibleTo, scopeOf } from '../rooms/look.ts'
   import { showReasoning, saveShowReasoning, showCompaction, saveShowCompaction, channelList, saveChannelList, CHANNEL_LISTS } from '../ui/prefs.ts'

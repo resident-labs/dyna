@@ -5,7 +5,7 @@
   import GoalHolders from './GoalHolders.svelte'
   import ExpediteBadge from './ExpediteBadge.svelte'
   import { expedite, goalExpedited } from './expedite.ts'
-  import { goalAgo } from './goals.js'
+  import { goalAgo } from './goals.ts'
   // onexpedite(goal) starts or stops priority; App asks first when it replaces another goal.
   let { roomId, goal: g, members = [], onchanged, onclose, onexpedite = null } = $props()
   let editing = $state(false)

@@ -23,7 +23,7 @@
   import VoiceWidget from './lib/voice/VoiceWidget.svelte'
   import { voiceCall, callRequests } from './lib/voice/voiceCall.ts'
   import { callLink, callTarget } from './lib/voice/callRequests.ts'
-  import { GENERAL, VOICE, isChannel, inChannel, homeChannel, channelModel, parentTrail, prepareChannelText } from './lib/rooms/channels.js'
+  import { GENERAL, VOICE, isChannel, inChannel, homeChannel, channelModel, parentTrail, prepareChannelText } from './lib/rooms/channels.ts'
   import { isShellResult } from './lib/rooms/feedRows.js'
   import { mergeSessionPage } from './lib/sessions/sessionPages.ts'
   import { trimFeed } from './lib/rooms/feedWindow.js'
@@ -54,7 +54,7 @@
   import Rules from './lib/rooms/Rules.svelte'
   import { nextRules } from './lib/rooms/rules.js'
   import PinIcon from './lib/ui/PinIcon.svelte'
-  import { isFinished } from './lib/rooms/memberOrder.js'
+  import { isFinished } from './lib/rooms/memberOrder.ts'
   import Session from './lib/sessions/Session.svelte'
   import DmIdentity from './lib/sessions/DmIdentity.svelte'
   import Home from './lib/rooms/Home.svelte'
@@ -107,7 +107,7 @@
   import { prHash, parsePRHash, parseIssueHash, parseFileHash } from './lib/prs/prlink.ts'
   import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from './lib/ui/route.ts'
   import { paletteTargets } from './lib/ui/paletteTargets.ts'
-  import { activeAgents, agentsHeader, roomsWorking } from './lib/rooms/agents.js'
+  import { activeAgents, agentsHeader, roomsWorking } from './lib/rooms/agents.ts'
   import { roomIDPattern as ROOM, postIDPattern as POST } from './lib/ui/posts.js'
 
   let rooms = $state([])

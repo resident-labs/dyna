@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { channelModel, channelView, GENERAL, parentTrail, prepareChannelText, inChannel, homeChannel } from './channels.js'
+import { channelModel, channelView, GENERAL, parentTrail, prepareChannelText, inChannel, homeChannel, type DraftParse } from './channels.ts'
 
-const owner = { owner: true, address: 'repo' }
+const owner = { owner: true, name: 'repo', address: 'repo' }
 const lead = { id: 'lead-id', name: 'lead', address: 'repo:lead' }
 const peer = { id: 'peer-id', name: 'peer', address: 'repo:peer' }
 const child = { id: 'child-id', name: 'child', address: 'repo:child', parent: lead.id }
@@ -25,8 +25,8 @@ test('a session breadcrumb starts at root and lists each parent session', () => 
 })
 
 test('channel drafts use the shared parser to preserve real recipients and session commands', async () => {
-  const parse = async (text) => {
-    const responses = {
+  const parse = async (text: string) => {
+    const responses: Record<string, DraftParse & { self?: boolean }> = {
       'Please check': { default: true },
       'Please ask @peer': { default: false },
       'Please ask (@peer)': { default: false },
@@ -34,7 +34,9 @@ test('channel drafts use the shared parser to preserve real recipients and sessi
       '/sol task': { spawn: {} },
     }
     assert.ok(Object.hasOwn(responses, text))
-    return responses[text]
+    const response = responses[text]
+    assert.ok(response)
+    return response
   }
   assert.equal(await prepareChannelText('Please check', lead, model, parse), '@child @sibling Please check')
   assert.equal(await prepareChannelText('Please check', grandchild, model, parse), '@grandchild Please check')
@@ -45,7 +47,7 @@ test('channel drafts use the shared parser to preserve real recipients and sessi
 })
 test('unknown, escaped, and code mentions retain channel defaults when the parser finds no recipient', async () => {
   for (const text of ['Example @unknown', 'Example `@peer`', 'Example \\@peer', 'Example ``` @peer ```']) {
-    const parse = async (value) => { assert.equal(value, text); return { default: true } }
+    const parse = async (value: string) => { assert.equal(value, text); return { default: true } }
     assert.equal(await prepareChannelText(text, lead, model, parse), '@child @sibling ' + text)
   }
 })
@@ -55,7 +57,8 @@ test('a parser failure blocks preparation instead of falling back to top-level a
 
 test('only agents with direct children get channels at each depth', () => {
   assert.deepEqual(model.leads.map((m) => m.id), [lead.id, child.id])
-  assert.equal(model.leads.some((m) => [peer.id, sibling.id, grandchild.id].includes(m.id)), false)
+  const leaves: (string | undefined)[] = [peer.id, sibling.id, grandchild.id]
+  assert.equal(model.leads.some((m) => leaves.includes(m.id)), false)
 })
 test('saved channel links resolve to room Messages', () => {
   assert.equal(model.resolveView(channelView(grandchild.id)), GENERAL)
@@ -77,14 +80,18 @@ test('agent questions and answers use the same DM thread as posts', async () => 
     { id: 'ask', kind: 'message', from: child.address, to: [lead.address], ts: 1, text: '[QUESTION q1] Which fix?' },
     { id: 'answer', kind: 'message', from: lead.address, to: [child.address], ts: 2, text: '[ANSWER q1] Use the small fix.' },
   ]
-  for (const [session, other] of [[child, lead], [lead, child]]) {
+  for (const [session, other] of [[child, lead], [lead, child]] satisfies [{ address: string }, { address: string }][]) {
     const dm = dmView({ address: session.address, posts }, { name: owner.address })
     assert.equal(dm.threads.length, 1)
-    assert.equal(dm.threads[0].key, other.address)
-    assert.deepEqual(dm.threads[0].posts.map((p) => p.id), ['ask', 'answer'])
+    const thread = dm.threads[0]
+    assert.ok(thread)
+    assert.equal(thread.key, other.address)
+    assert.deepEqual(thread.posts.map((p) => p.id), ['ask', 'answer'])
   }
-  const ownerQuestion = { ...posts[0], to: [owner.address] }
-  assert.ok(dmView({ address: child.address, posts: [ownerQuestion] }, { name: owner.address }).rows.some((r) => r.post?.id === 'ask'))
+  const first = posts[0]
+  assert.ok(first)
+  const ownerQuestion = { ...first, to: [owner.address] }
+  assert.ok(dmView({ address: child.address, posts: [ownerQuestion] }, { name: owner.address }).rows.some((r) => 'post' in r && r.post?.id === 'ask'))
 })
 
 test('feed posts use the channels the server routed them to, the sender home first', () => {
@@ -99,7 +106,7 @@ test('feed posts use the channels the server routed them to, the sender home fir
 })
 
 test('voice call lines stay out of general and have no channel view', async () => {
-  const { VOICE, isChannel } = await import('./channels.js')
+  const { VOICE, isChannel } = await import('./channels.ts')
   assert.equal(isChannel(VOICE), false)
   assert.equal(inChannel({ channels: [VOICE] }, GENERAL), false)
   assert.equal(inChannel({ channels: [VOICE] }, VOICE), true)

@@ -9,7 +9,7 @@ import '../src/app.css'
 import { mount } from 'svelte'
 import Feed from '../src/lib/rooms/Feed.svelte'
 import { choose } from '../src/lib/rooms/look.svelte.js'
-import { sampleRoom as room, samplePosts as posts } from '../src/lib/rooms/feedSample.js'
+import { sampleRoom as room, samplePosts as posts } from '../src/lib/rooms/feedSample.ts'
 import { need } from '../test/need.ts'
 
 const q = new URLSearchParams(location.search)

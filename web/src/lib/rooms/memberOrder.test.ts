@@ -1,15 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { ancestors, finishedTrees, foldMembers, isFinished, openTrail, orderMemberSessions } from './memberOrder.js'
-import { channelModel } from './channels.js'
+import { ancestors, finishedTrees, foldMembers, isFinished, openTrail, orderMemberSessions, type MemberView } from './memberOrder.ts'
+import { channelModel } from './channels.ts'
 
 const now = Date.parse('2026-10-17T17:00:00Z')
 const minute = 60 * 1000
-function member(id, parent = '', overrides = {}) {
-  return { id, parent, depth: 0, state: 'idle', closed: false, lastActivity: new Date(now - minute).toISOString(), ...overrides }
-}
-const finished = { status: 'dormant' }
-const ids = (members) => members.map((m) => m.id)
+type Fixture = MemberView & { id: string; name: string; parent: string; depth: number; state: string; closed: boolean; lastActivity: string }
+const member = (id: string, parent = '', overrides: Partial<Fixture> = {}): Fixture => ({ id, name: id, parent, depth: 0, state: 'idle', closed: false, lastActivity: new Date(now - minute).toISOString(), ...overrides })
+const finished: Partial<Fixture> = { status: 'dormant' }
+const ids = (members: readonly { id: string }[]): string[] => members.map((m) => m.id)
 
 test('finished siblings move last at every level with their complete subtrees', () => {
   const sessions = [
@@ -55,7 +54,7 @@ test('closed sessions retain their group and omitted parents leave visible roots
     'closed', 'closed-child', 'orphan', 'orphan-active-child', 'orphan-finished-child', 'finished',
   ])
   assert.deepEqual(orderMemberSessions([]), [])
-  const shown = new Map(orderMemberSessions(sessions).map((m) => [m.id, m.depth]))
+  const shown = new Map(orderMemberSessions(sessions).map((m): [string, number] => [m.id, m.depth]))
   assert.equal(shown.get('orphan'), 0, 'an orphan shows at the top level')
   assert.equal(shown.get('orphan-active-child'), 1)
 })
@@ -79,12 +78,12 @@ test('folded sessions hide their subtrees and count hidden live work', () => {
   assert.deepEqual([...open], ['lead-b', 'child-b1'])
   const focused = foldMembers(sessions, (id) => open.has(id))
   assert.deepEqual(focused.map((row) => row.member.id), ['lead-a', 'lead-b', 'child-b1', 'grandchild-b', 'solo'])
-  assert.equal(focused.find((row) => row.member.id === 'child-b1').folded, false)
+  assert.equal(focused.find((row) => row.member.id === 'child-b1')?.folded, false)
 
   // An open child under a folded parent stays hidden with its subtree.
   const deep = foldMembers(sessions, (id) => id === 'child-a1')
   assert.deepEqual(deep.map((row) => row.member.id), ['lead-a', 'lead-b', 'solo'])
-  assert.equal(deep[0].hidden, 3)
+  assert.equal(deep[0]?.hidden, 3)
   assert.equal(foldMembers(sessions, () => true).length, sessions.length)
 })
 
@@ -117,7 +116,7 @@ test('finished sessions sort after open siblings and form finishedTrees when no 
 
 test('channels and the member list walk the same ancestors, and a parent loop stops', () => {
   const sessions = [member('lead'), member('child', 'lead'), member('grandchild', 'child'), member('a', 'b'), member('b', 'a')]
-  const byId = new Map(sessions.map((m) => [m.id, m]))
+  const byId = new Map<string | undefined, Fixture>(sessions.map((m): [string, Fixture] => [m.id, m]))
   assert.deepEqual(ancestors(byId, 'grandchild').map((m) => m.id), ['lead', 'child', 'grandchild'])
   assert.deepEqual(ancestors(byId, 'a').map((m) => m.id), ['b', 'a'])
   assert.deepEqual(ancestors(byId, 'missing'), [])
@@ -125,6 +124,7 @@ test('channels and the member list walk the same ancestors, and a parent loop st
 })
 
 test('dormant status alone groups a finished session', () => {
- assert.equal(isFinished({ status: 'dormant' }), true)
- assert.equal(isFinished({ status: 'idle', finished: true }), false)
+  assert.equal(isFinished({ status: 'dormant' }), true)
+  const idle = { status: 'idle', finished: true }
+  assert.equal(isFinished(idle), false)
 })
