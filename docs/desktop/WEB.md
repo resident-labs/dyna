@@ -321,7 +321,10 @@ The default is one hour without input or output, even with a view attached.
 The member menu offers **Promote to lead** for an open subagent. Promotion
 keeps active work, children and history intact. Closing a session closes its
 children that own no work and moves the rest to its nearest open ancestor.
-PR authorship and held goals move to that ancestor, or the room's root.
+PR authorship moves to that ancestor, or the room's root. Held goals move
+to the nearest open worker. If only root or the owner could inherit them,
+close is refused until each goal is done, dropped, or transferred. Force
+close releases those goals for the owner to resolve.
 Reviewer roles return to the pool, and live workflow runs are canceled.
 The returned member has `closeSummary` lines that the app keeps visible until dismissed.
 Force close is offered only after a handoff fails. `PromoteSession`, `CloseSession` and
@@ -410,7 +413,8 @@ Choose shared options once for Stop, Transfer model, Promote, Move under…, or
 Close. Move under… picks one open parent; targets that would make a cycle,
 sit under a service, or pass `subagent.maxDepth` are disabled with the reason. Message addresses the normal composer to the selected sessions. A close
 confirmation applies to the selection. Each close hands work up the parent chain.
-Only a failed handoff needs a retry or explicit force close. Each session reports its own result,
+Goals must be resolved before a close would hand them to root or the owner.
+A refused close needs resolution, a retry, or explicit force close. Each session reports its own result,
 so a refusal does not cancel successful actions on other sessions.
 
 `BulkSessionAction(roomID, options)` uses the individual session services.
