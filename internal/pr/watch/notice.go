@@ -1,6 +1,9 @@
 package watch
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // staleNotice checks the current record, rather than the snapshot used to queue
 // the notice. SupersededBy keeps the reason visible in PR history.
@@ -76,4 +79,20 @@ func systemReviewNotice(r *Record, target, text, token string) {
 			r.Notices[i].System = true
 		}
 	}
+}
+
+// outcomeNotice queues one waking completion notice per PR outcome.
+// Cleanup remains a separate informational notice. All merge observation
+// paths call endRecord, including publication by the merge engine.
+func outcomeNotice(r *Record) {
+	id := "msg_" + digest(r.Key + "/outcome/" + r.State)[:16]
+	for _, n := range r.Notices {
+		if n.ID == id {
+			return
+		}
+	}
+	r.Notices = append(r.Notices, Notice{
+		ID: id, Target: r.Author, Kind: r.State,
+		Text: fmt.Sprintf("%s %s. Wrap up the work for this change. %s", changeLabel(*r), r.State, changeLocation(*r)),
+	})
 }

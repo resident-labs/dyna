@@ -20,6 +20,12 @@ A stamped session cannot open a change in another room.
 Owner tracking records no session author. Its PR notices go only to the owner;
 CI and land notices never start an agent.
 
+Merged and closed PRs send one outcome notice per PR and outcome, including
+merges published by the engine. Like ready-to-land notices, these wake a child
+author's parent or its nearest open ancestor. A top-level author gets its own
+notice. If no recipient is open, the owner receives it; ended changes never
+start an agent. The separate worktree cleanup notice stays quiet.
+
 Keep authors open while they handle their changes. Closing an author transfers
 its open tracked PRs to its nearest open ancestor, or the room's root.
 The transfer preserves author history and sends pending notices to the heir.
