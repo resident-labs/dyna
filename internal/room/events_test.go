@@ -362,7 +362,7 @@ func generateEvents() ([]byte, error) {
 	}
 	fmt.Fprintf(&b, "export type EventFamily = %s\n", stringUnion(familyList))
 	fmt.Fprintf(&b, "export type EventType = %s\n", stringUnion(typesList))
-	fmt.Fprintf(&b, "export type WakeRule = %s\n\n", stringUnion([]string{string(WakeNever), string(WakeTarget), string(WakeRootIfNeeded)}))
+	fmt.Fprintf(&b, "export type WakeRule = %s\n\n", stringUnion([]string{string(WakeNever), string(WakeTarget), string(WakeRootIfNeeded), string(WakeRoot)}))
 
 	fmt.Fprintf(&b, "export type Audience = %s\n\n", stringUnion([]string{string(AudienceRoom), string(AudienceSession)}))
 	b.WriteString("export interface EventSpecEntry {\n  family: EventFamily\n  type: EventType\n  renderer: string\n  quiet: boolean\n  wake: WakeRule\n  once: boolean\n  audience: Audience\n  text: string\n  textNoSubject?: string\n}\n\n")

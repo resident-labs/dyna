@@ -82,7 +82,11 @@ func agentPost(msg Message, roomName string) bool {
 		return !spec.Quiet
 	}
 	switch msg.Kind {
-	case "", "message", "notice", "seat":
+	case "", "message":
+		return true
+	// TODO: legacy/shim remove later — posts stored before their families were
+	// typed still read by their old kinds. Remove when retained history ages out.
+	case "notice", "seat":
 		return true
 	case "completed", "failed", "stopped":
 		return strings.HasPrefix(msg.From, roomName+":")
