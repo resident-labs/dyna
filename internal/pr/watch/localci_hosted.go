@@ -287,6 +287,18 @@ func (s *Service) publishLocalStatuses(ctx context.Context, job registeredCIJob,
 	return registry.SaveHostedRuns(ctx, result.Repo, job.head, saved)
 }
 
+// hostedCancelledOnly reports a hosted failure that only cancellations caused:
+// ignoring cancelled workflows leaves no failure behind. Such evidence proves
+// nothing about the head, so it must not veto a complete local pass, while it
+// must not become a pass either.
+func hostedCancelledOnly(snap Snapshot, required []string) bool {
+	if state, _, _, _ := snap.CIStatus(required...); state != "failed" {
+		return false
+	}
+	cleared, _, _, _ := withoutCancelledHostedWorkflows(snap).CIStatus(required...)
+	return cleared != "failed"
+}
+
 // withoutCancelledHostedWorkflows drops hosted runs that a cancellation ended
 // without a real test failure, and the checks of their suites. Such a workflow
 // never tested the head: GitHub ends a run when a newer one replaces it, and
