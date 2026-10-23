@@ -2,6 +2,7 @@ package websvc
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -42,7 +43,7 @@ func (s *Server) logged(name string, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sw := &status{ResponseWriter: w, code: 200}
 		h.ServeHTTP(sw, r)
-		if sw.code >= 400 && sw.code != http.StatusNotFound {
+		if sw.code >= 400 && sw.code != http.StatusNotFound && !errors.Is(r.Context().Err(), context.Canceled) {
 			s.o.Logf("web %s: %s %s -> %d", name, r.Method, r.URL.Path, sw.code)
 		}
 	})
