@@ -80,14 +80,6 @@
   }
   const selectedProfile = $derived(profiles.find((profile) => draft.startsWith('/' + profile.name + ' ') || draft === '/' + profile.name))
   const composerMode = $derived(command ? 'Command' : selectedProfile ? 'Start session' : 'Message')
-  async function chooseProfile(name) {
-    const text = selectedProfile ? draft.replace(/^\/[\w-]+\s?/, '') : draft
-    draft = name ? '/' + name + ' ' + text : text
-    token = null
-    await tick()
-    field?.focus()
-    field?.setSelectionRange(draft.length, draft.length)
-  }
   async function openCommands() {
     if (!draft.startsWith('/')) draft = '/' + draft
     await tick()
@@ -360,9 +352,18 @@
       {#if !matches[0].group}<div class="pophead">{token?.reference ? 'Attach a PR or issue' : token?.arg ? token.arg.listTitle || token.arg.arg : 'Mention'}</div>{/if}
       {#each matches as m, i}
         {#if m.group && m.group !== matches[i - 1]?.group}<div class="pophead">{m.group}</div>{/if}
-        <button id={optionID(m)} class="opt" title={m.hint} class:on={i === pick} role="option" aria-selected={i === pick} onmousedown={(e) => e.preventDefault()} onclick={() => complete(m)}>
-          <span class="mono">{m.label || m.value}{#if m.arg}<span class="argph"> ‹{m.arg}›</span>{/if}</span>
-          <span class="kind">{m.hint}</span>
+        <button id={optionID(m)} class="opt" class:reference-opt={!!m.reference} title={m.hint} class:on={i === pick} role="option" aria-selected={i === pick} onmousedown={(e) => e.preventDefault()} onclick={() => complete(m)}>
+          {#if m.reference}
+            <span class="reference-title">{m.reference.title}</span>
+            <span class="reference-meta">
+              <span class="mono">{m.label}</span>
+              {#if m.reference.kind === 'room_issue'}<span class="room-tag">room</span>{/if}
+              <span>{m.reference.state.toLowerCase()}</span>
+            </span>
+          {:else}
+            <span class="mono">{m.label || m.value}{#if m.arg}<span class="argph"> ‹{m.arg}›</span>{/if}</span>
+            <span class="kind">{m.hint}</span>
+          {/if}
         </button>
       {/each}
     </div>
@@ -381,12 +382,6 @@
   <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message #${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} activeOption={matches[pick] ? optionID(matches[pick]) : undefined}>
     {#snippet context()}<ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />{/snippet}
     {#snippet tools()}
-      {#if profiles.length}
-        <select class="profile-chip" aria-label="Session profile" title={selectedProfile?.model || 'Choose a profile to start a session'} value={selectedProfile?.name || ''} disabled={busy} onfocus={onslash} onchange={(event) => chooseProfile(event.currentTarget.value)}>
-          <option value="">Profiles</option>
-          {#each profiles as profile}<option value={profile.name}>{profile.name}</option>{/each}
-        </select>
-      {/if}
       <button class="command-chip" type="button" aria-label="Browse commands" title="Browse sessions and commands" disabled={busy} onclick={openCommands}>/</button>
     {/snippet}
   </ComposerBox>
@@ -413,7 +408,6 @@
 
 <style>
   .file-status { padding: 5px var(--s2); font-size: var(--t-sm); color: var(--muted); }
-  .profile-chip { max-width: 160px; min-height: 30px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--ink-2); font: inherit; font-size: var(--t-sm); }
   .command-chip { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: var(--muted); font-family: var(--mono); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   .command-chip:hover { background: var(--hover); color: var(--ink); }
   .command-chip:active { background: var(--select); }
@@ -421,7 +415,6 @@
   /* A phone: 16 px text stops iOS zooming on focus; wider tap targets. */
   @media (max-width: 760px) {
     .composer { padding: 0 var(--s2) var(--s1); }
-    .profile-chip { min-height: 44px; max-width: 130px; }
     .command-chip { display: none; }
     .opt { min-height: 44px; }
     .foot { display: none; }
@@ -481,6 +474,11 @@
     border-radius: 5px;
     color: var(--ink-2);
   }
+  .opt.reference-opt { display: grid; justify-content: stretch; gap: 3px; }
+  .reference-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-ui); }
+  .reference-meta { display: flex; align-items: center; gap: var(--s2); min-width: 0; color: var(--muted); font-size: var(--t-sm); }
+  .opt .reference-meta .mono { font-size: inherit; }
+  .room-tag { padding: 0 4px; border: 1px solid var(--line); border-radius: 3px; font-size: var(--t-cap); }
   .opt.on { background: var(--select); color: var(--ink); }
   .opt .mono { font-size: var(--t-ui); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .kind { font-size: var(--t-sm); color: var(--faint); max-width: 48%; flex-shrink: 0; text-align: right; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
