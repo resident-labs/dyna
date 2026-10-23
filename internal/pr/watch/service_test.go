@@ -334,14 +334,7 @@ func newEnv(t *testing.T) *testEnv {
 	for _, id := range []string{e.author.ID, e.author.ParentSession, "ses_20261017-000003-cccccccc", "ses_20261017-000004-dddddddd"} {
 		recordtest.Write(t, filepath.Join(dir, "sessions"), id, subagent.Meta{ID: id, RoomID: e.author.RoomID, Room: e.author.Room})
 	}
-	e.f.Pull.Base.Ref = "main"
-	e.f.Pull.Base.Repo.DefaultBranch = "main"
-	e.f.Raw = map[string]string{}
-	e.f.Pull.State = "open"
-	e.f.Pull.Number = 17
-	e.f.Pull.User = User{Login: "owner", Type: "User"}
-	e.f.Pull.Head.SHA = strings.Repeat("a", 40)
-	e.setCI("failure", 1)
+	e.f = defaultFixture()
 	e.s = &Service{Store: &Store{Root: filepath.Join(dir, "prs")}, GH: GitHub{Executable: fake, now: func() time.Time { return e.clock }}, Now: func() time.Time { return e.clock }}
 	// Most watcher tests exercise HTTP parsing and lifecycle state, not process
 	// startup. Keep the real command path for explicit subprocess tests and for
@@ -393,9 +386,30 @@ func newEnv(t *testing.T) *testEnv {
 	e.write()
 	return e
 }
+
+// defaultFixture is the fake GitHub state a watcher fixture starts from: one
+// open pull request on main whose CI failed. Cases that need another state
+// replace the fixture fields they care about.
+func defaultFixture() fixture {
+	f := fixture{Raw: map[string]string{}}
+	f.Pull.Base.Ref = "main"
+	f.Pull.Base.Repo.DefaultBranch = "main"
+	f.Pull.State = "open"
+	f.Pull.Number = 17
+	f.Pull.User = User{Login: "owner", Type: "User"}
+	f.Pull.Head.SHA = strings.Repeat("a", 40)
+	f.Checks, f.Runs = ciFixture("failure", 1)
+	return f
+}
+
+// ciFixture is the one check and workflow run a fake CI result has.
+func ciFixture(conclusion string, attempt int) ([]Check, []Run) {
+	return []Check{actionsCheck(Check{ID: int64(attempt), Name: "test / unit", Status: "completed", Conclusion: conclusion})},
+		[]Run{{ID: 99, WorkflowID: 1, Name: "CI", Attempt: attempt, Status: "completed", Conclusion: conclusion}}
+}
+
 func (e *testEnv) setCI(conclusion string, attempt int) {
-	e.f.Checks = []Check{actionsCheck(Check{ID: int64(attempt), Name: "test / unit", Status: "completed", Conclusion: conclusion})}
-	e.f.Runs = []Run{{ID: 99, WorkflowID: 1, Name: "CI", Attempt: attempt, Status: "completed", Conclusion: conclusion}}
+	e.f.Checks, e.f.Runs = ciFixture(conclusion, attempt)
 }
 func (e *testEnv) write() {
 	e.t.Helper()
