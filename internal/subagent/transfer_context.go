@@ -16,6 +16,7 @@ import (
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/pr/links"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/textutil"
 	"dyna-agent/internal/workeroutput"
 )
 
@@ -51,23 +52,13 @@ func scanTail(path string, after int64, visit func([]byte)) {
 // is reserved when a handoff is clipped, so the bound covers the note too.
 const truncationNote = "\n[truncated; use the recovery commands for the complete text]"
 
-// cut bounds text at a rune boundary, without a note.
-func cut(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	for n > 0 && (s[n]&0xc0) == 0x80 {
-		n--
-	}
-	return s[:n]
-}
-
-// clipped bounds text and says where the complete text lives.
+// clipped bounds text in bytes and says where the complete text lives. The
+// note is this package's own, so the caller reserves its length too.
 func clipped(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
-	return cut(s, n) + truncationNote
+	return textutil.Prefix(s, n) + truncationNote
 }
 
 // shownAddressLimit is how much of a session address the packet header and the
@@ -82,7 +73,7 @@ func shownAddress(addr string) string {
 	if len(addr) <= shownAddressLimit {
 		return addr
 	}
-	return cut(addr, shownAddressLimit) + "…"
+	return textutil.Prefix(addr, shownAddressLimit) + textutil.Ellipsis
 }
 
 // handoffPacketLimit is the most a replacement model receives. The packet
