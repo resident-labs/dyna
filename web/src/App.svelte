@@ -256,8 +256,10 @@
   const declineCall = (req: CallRequest) => voiceWidget?.decline(req)
   let pageVisible = $state(document.visibilityState === 'visible')
   // machinesNav: the rail's machines tile is open, so the sidebar lists the
-  // machines of this engine. Picking one opens its page in the main area.
-  let machinesNav = $state(false)
+  // machines of this engine. Picking one opens its page in the main area. It
+  // starts open because Home, the first screen, is the machines list until a
+  // room opens.
+  let machinesNav = $state(true)
   let machines = $state<MachineSummary[] | null>(null) // null until the first answer
   let machinesRequest = 0
   let machineId = $state('') // the machine whose page is open, or ''
@@ -2474,7 +2476,7 @@
       {/if}
       {#if !roomId}
         <span class="title">{machineDetail ? machineDetail.name : 'Machines'}</span>
-        <span class="meta">{machinesSub(machines)}</span>
+        {#if !machineId}<span class="meta">{machinesSub(machines)}</span>{/if}
       {:else if room}
         {#if drill}
           {#if readOnlyDm}

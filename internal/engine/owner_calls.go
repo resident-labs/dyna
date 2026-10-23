@@ -49,6 +49,8 @@ var ownerCalls = []string{
 	"MarkReadMany",
 	"UpdateNotice",
 	"DismissNotice",
+	// A machine's roles, slots and route decide where the engine sends work.
+	"SaveMachine",
 }
 
 // protectOwnerCalls shares caller resolution with other mutations, then

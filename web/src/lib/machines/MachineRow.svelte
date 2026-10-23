@@ -22,9 +22,9 @@
       <span class="name">{machine.name}</span>
       {#each machine.roles as role (role)}<span class="chip">{roleLabel(role)}</span>{/each}
     </span>
-    <span class="bar" aria-hidden="true" class:idle={pct === null}>
-      {#if pct !== null}<span class="fill" style="width: {pct}%"></span>{/if}
-    </span>
+    {#if pct !== null}
+      <span class="bar" aria-hidden="true"><span class="fill" style="width: {pct}%"></span></span>
+    {/if}
     {#if counts}<span class="counts">{counts}</span>{/if}
   </span>
 </button>
@@ -65,7 +65,6 @@
   }
   .row.sel .chip { background: var(--main); color: var(--muted); }
   .bar { display: block; height: 3px; border-radius: 2px; overflow: hidden; background: var(--raise); }
-  .bar.idle { background: var(--line-soft); }
   .fill { display: block; height: 100%; background: var(--iris); }
   .counts { font-size: var(--t-cap); color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>
