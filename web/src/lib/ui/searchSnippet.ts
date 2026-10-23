@@ -12,19 +12,40 @@ export interface Part {
 // is done".
 const GOAL_ID = /\bg\d+(?:\/i\d+)?\b/g
 const GOAL_ITEM = /\b(item\s+)i\d+\b/gi
+// An inline code span: a run of backticks, the text, the same run again. A
+// shorter run inside a longer one stays part of the code.
+const CODE_SPAN = /(`+)([\s\S]*?)\1/g
 
-// plainText drops the markup a post body may hold: code marks, emphasis,
-// link targets, list bullets, headings, quotes, and goal IDs.
-function plainText(text: string): string {
-  return text
+// prose drops the markup of text outside inline code: link targets, emphasis,
+// and goal IDs. A code span keeps every character it has.
+function prose(part: string): string {
+  return part
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // a link keeps its words
-    .replace(/^\s*(?:#{1,6}\s+|>+\s*)/gm, '') // headings and quotes
-    .replace(/^\s*(?:[-*+]|\d{1,2}[.)])\s+/gm, '') // list bullets and numbers
-    .replace(/```[^\n]*/g, '') // code fence marks
-    .replace(/`+|\*{1,3}|~~/g, '') // code and emphasis marks
+    .replace(/\*{1,3}|~~/g, '') // emphasis marks
+    .replace(/`+/g, '') // an unmatched backtick
     .replace(GOAL_ID, '')
     .replace(GOAL_ITEM, '$1')
-    .replace(/\s+([,.;:!?])/g, '$1') // a full stop left behind by a goal ID
+}
+
+// plainText drops the markup a post body may hold: fence lines, headings,
+// quotes, list bullets, emphasis, link targets and goal IDs. Code keeps its
+// text, so "use `src/**/*.ts`" never reads "use src//.ts".
+function plainText(text: string): string {
+  const lines = text
+    .replace(/^[ \t]*`{3,}.*$/gm, '') // fence lines, not their text
+    .replace(/^[ \t]*(?:#{1,6}\s+|>+\s*)/gm, '') // headings and quotes
+    .replace(/^[ \t]*(?:[-*+]|\d{1,2}[.)])\s+/gm, '') // list bullets and numbers
+  const parts: string[] = []
+  let last = 0
+  for (const match of lines.matchAll(CODE_SPAN)) {
+    const start = match.index ?? 0
+    parts.push(prose(lines.slice(last, start)))
+    parts.push(match[2] ?? '') // the code itself, without its backticks
+    last = start + match[0].length
+  }
+  parts.push(prose(lines.slice(last)))
+  return parts.join('')
+    .replace(/\s+([,.;:])/g, '$1') // punctuation left apart by a goal ID
     .replace(/(?:\s*·\s*){2,}/g, ' · ') // separators left around a goal ID
     .replace(/\s+/g, ' ')
     .trim()
