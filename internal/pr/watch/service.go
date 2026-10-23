@@ -621,7 +621,6 @@ func (s *Service) closeRecord(r *Record, snap Snapshot, n *pollNotices, out *pro
 		out.cleanup = &copy
 	}
 	r.PauseReason = "PR is " + r.State
-	n.informational[r.Author] = append(n.informational[r.Author], "PR "+r.State+". Watching stopped.")
 	n.changes = append(n.changes, r.State)
 }
 
@@ -1369,7 +1368,10 @@ func (s *Service) escalate(ctx context.Context, r Record, n Notice) (subagent.In
 	case "land":
 		req.Goal = fmt.Sprintf("Resolve %s; done when it is merged or closed.", changeLabel(r))
 		req.Brief = fmt.Sprintf("Review the status of %s (%s). Dyna merges automatically when approved and green. Dyna made you its author.", changeLabel(r), changeLocation(r))
-		// A child author was told not to merge. A top-level author lands its own PR.
+	}
+	// Completion follows the same recipient rule as readiness, but never
+	// starts a new agent for an ended change.
+	if n.Kind == "land" || n.Kind == "merged" || n.Kind == "closed" {
 		if author, err := m.Store.Info(r.Author); err == nil && author.ParentSession != "" {
 			req.Skip = []string{r.Author}
 		}
