@@ -68,7 +68,10 @@ func (s Service) Seed(ctx context.Context) error {
 			}
 			kept = append(kept, h)
 		}
-		d.Hooks = kept
+		// A hook the owner added before this release with a built-in's name
+		// keeps running, under a free name, because the engine now owns the
+		// name.
+		d.Hooks = renameBuiltinNames(kept, s.Builtins)
 		for _, spec := range s.Builtins {
 			h := Hook{
 				Name: string(spec.Builtin), Event: Schedule, Command: spec.command(),
@@ -130,4 +133,36 @@ func (s Service) Reset(ctx context.Context, name, editor string) error {
 		}
 		return fmt.Errorf("unknown hook %q", name)
 	})
+}
+
+// renameBuiltinNames gives a free name to a hook the owner added that holds a
+// built-in's name, so seeding never stores two rows with one name. Built-in
+// rows keep their own name.
+func renameBuiltinNames(hooks []Hook, builtins []BuiltinSpec) []Hook {
+	taken := make(map[string]bool, len(hooks))
+	for _, h := range hooks {
+		taken[h.Name] = true
+	}
+	for i, h := range hooks {
+		if h.Builtin != "" {
+			continue
+		}
+		reserved := false
+		for _, spec := range builtins {
+			if string(spec.Builtin) == h.Name {
+				reserved = true
+				break
+			}
+		}
+		if !reserved {
+			continue
+		}
+		name := h.Name + "-user"
+		for n := 2; taken[name]; n++ {
+			name = fmt.Sprintf("%s-user-%d", h.Name, n)
+		}
+		hooks[i].Name = name
+		taken[name] = true
+	}
+	return hooks
 }

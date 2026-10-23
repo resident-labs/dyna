@@ -129,10 +129,14 @@ func Validate(h Hook) error {
 		return fmt.Errorf("unknown hook scope %q", h.Scope)
 	}
 	// A built-in runs in the engine, so its command and directory come from
-	// the built-in table and are never a shell command.
+	// the built-in table and are never a shell command. Its schedule and
+	// timeout are still the owner's to set, so both are checked here.
 	if h.Builtin != "" {
 		if h.Scope != ScopeGlobal {
 			return fmt.Errorf("a built-in hook belongs to no repository")
+		}
+		if h.EveryMinutes < 1 {
+			return fmt.Errorf("schedule requires a positive every-minutes interval")
 		}
 		timeout, err := time.ParseDuration(h.Timeout)
 		if err != nil || timeout <= 0 {
@@ -200,8 +204,12 @@ func (s Service) add(ctx context.Context, repo string, h Hook) error {
 	if h.Builtin != "" {
 		return fmt.Errorf("hook %q is built in, so the engine seeds it", h.Name)
 	}
-	if _, reserved := s.builtinSpec(Builtin(h.Name)); reserved {
-		return fmt.Errorf("hook name %q is reserved for a built-in hook", h.Name)
+	// Only a global hook can collide with a built-in row: a built-in belongs
+	// to the machine, so a repository hook may use the same name.
+	if h.Scope == ScopeGlobal {
+		if _, reserved := s.builtinSpec(Builtin(h.Name)); reserved {
+			return fmt.Errorf("hook name %q is reserved for a built-in hook", h.Name)
+		}
 	}
 	if err := Validate(h); err != nil {
 		return err
