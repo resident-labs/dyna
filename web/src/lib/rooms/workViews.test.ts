@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { sections, rowOf, shown, runningWork, visibleTabs, roomTabs } from './workViews.ts'
+import { sections, rowOf, shown, runningWork, visibleTabs } from './workViews.ts'
 
 test('the sidebar has nine rows in Work and Machine; Room settings is a modal, not a row', () => {
   assert.deepEqual(sections.map((s) => [s.label, s.rows.map((r) => r.id)]), [
@@ -50,8 +50,8 @@ test('Library is its own Machine row after code, repo-scoped, and the library vi
   assert.ok(!shown(machine, {}).some((r) => r.id === 'library'), 'hidden in a room without a repository')
 })
 
-test('room tabs keep the Messages and Issues views outside Code', () => {
-  assert.deepEqual(roomTabs, [{ id: 'general', label: 'Messages' }, { id: 'issues', label: 'Issues' }])
+test('Issues has no room row of its own', () => {
+  // It is the review workspace's fourth tab, beside Files, Changes and PRs.
   assert.equal(rowOf('github'), undefined)
   assert.equal(rowOf('issues'), undefined)
 })
