@@ -2,7 +2,7 @@
   import { openExternal } from '../../api.ts'
   import { markdown, stamp, clock } from '../ui/format.ts'
   import { shortSha } from './pr.ts'
-  import { feedPRDetail, feedPREvents } from '../rooms/feedRows.js'
+  import { feedPRDetail, feedPREvents } from '../rooms/feedRows.ts'
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
   import PostActions from '../ui/PostActions.svelte'

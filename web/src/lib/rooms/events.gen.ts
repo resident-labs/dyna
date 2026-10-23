@@ -3,7 +3,10 @@
 // WorktreeReason is a named string type of an event payload.
 export type WorktreeReason = "not-merged" | "dirty" | "manual-handoff" | "keep-failed" | "other"
 
-// WorktreeEvent is the payload of the worktree/kept event.
+// HookState is a named string type of an event payload.
+export type HookState = "running" | "passed" | "failed" | "error"
+
+// WorktreeEvent is the payload of the worktree/kept events.
 export interface WorktreeEvent {
   owner: string
   path?: string
@@ -14,11 +17,24 @@ export interface WorktreeEvent {
   detail?: string
 }
 
-// EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent
+// HookEvent is the payload of the hook/started and hook/result events.
+export interface HookEvent {
+  runId: string
+  repo: string
+  hook: string
+  event: string
+  label?: string
+  command?: string
+  state: HookState
+  durationMs?: number
+  detail?: string
+}
 
-export type EventFamily = "worktree"
-export type EventType = "kept"
+// EventPayload is the payload of any registered system event.
+export type EventPayload = WorktreeEvent | HookEvent
+
+export type EventFamily = "worktree" | "hook"
+export type EventType = "kept" | "started" | "result"
 export type WakeRule = "never"
 
 export interface EventSpecEntry {
@@ -43,9 +59,28 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     text: "Worktree kept at {path}: branch {branch}, ahead {ahead}, dirty: {dirty}. {detail}",
     textNoSubject: "Worktree cleanup could not keep the session's trees: {detail}",
   },
+  {
+    family: "hook",
+    type: "started",
+    renderer: "HookCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    text: "Hook {hook} started for {event} (run {runId}).",
+  },
+  {
+    family: "hook",
+    type: "result",
+    renderer: "HookCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    text: "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}). {detail}",
+  },
 ]
 
 const WORKTREE_REASON: ReadonlySet<unknown> = new Set(["not-merged", "dirty", "manual-handoff", "keep-failed", "other"])
+const HOOK_STATE: ReadonlySet<unknown> = new Set(["running", "passed", "failed", "error"])
 
 export function isWorktreeEvent(v: unknown): v is WorktreeEvent {
   return isRecord(v) &&
@@ -58,8 +93,23 @@ export function isWorktreeEvent(v: unknown): v is WorktreeEvent {
     (v.detail === undefined || typeof v.detail === "string")
 }
 
+export function isHookEvent(v: unknown): v is HookEvent {
+  return isRecord(v) &&
+    typeof v.runId === "string" &&
+    typeof v.repo === "string" &&
+    typeof v.hook === "string" &&
+    typeof v.event === "string" &&
+    (v.label === undefined || typeof v.label === "string") &&
+    (v.command === undefined || typeof v.command === "string") &&
+    HOOK_STATE.has(v.state) &&
+    (v.durationMs === undefined || Number.isInteger(v.durationMs)) &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
 export function isEventPayload(family: string | undefined, type: string | undefined, v: unknown): v is EventPayload {
   if (family === "worktree" && type === "kept") return isWorktreeEvent(v)
+  if (family === "hook" && type === "started") return isHookEvent(v)
+  if (family === "hook" && type === "result") return isHookEvent(v)
   return false
 }
 

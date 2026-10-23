@@ -92,7 +92,7 @@ func TestSpoolSurvivesRestartAndDispatchesInOrderOnce(t *testing.T) {
 		return nil
 	}
 	// A fresh service reads only durable state from the previous emitter.
-	restarted := Service{DataDir: s.DataDir, Exec: s.Exec, Notify: s.Notify}
+	restarted := Service{DataDir: s.DataDir, Exec: s.Exec, Post: s.Post}
 	if _, _, err := restarted.Drain(ctx, time.Now()); err != nil {
 		t.Fatal(err)
 	}

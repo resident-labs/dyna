@@ -8,9 +8,11 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"log"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"dyna-agent/internal/authority"
@@ -18,7 +20,6 @@ import (
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
 	"dyna-agent/internal/room"
-	"dyna-agent/internal/shellquote"
 )
 
 const (
@@ -81,7 +82,9 @@ type Service struct {
 	DataDir string
 	Exec    processguard.Executor
 	Install *hookinstall.Service
-	Notify  func(Event, string) error
+	// Post is where a run's events go. Tests replace it; the default posts
+	// them through room.PostEvent.
+	Post func(Event, room.HookEvent) error
 	// Fetch refreshes origin/main; tests replace it with a local fake.
 	Fetch func(context.Context, string) error
 }
@@ -267,7 +270,14 @@ func (s Service) Runs(ctx context.Context, repo, name string) ([]Run, error) {
 	}
 	return s.runs(ctx, r.ID, name)
 }
-func (s Service) notice(r repoid.Repo, e Event, h Hook, cause string) {
+
+// alert posts a failed run's result for an alert hook. The first failure of a
+// hook, command and cause may create the repo's room for the owner; every run
+// still ends its own card, quietly, so a retried failure never leaves one
+// running. A passing run clears the claim in clearNotices, so a later failure
+// is new news and may reach the owner again.
+func (s Service) alert(r repoid.Repo, e Event, h Hook, run Run, result room.HookState, cause, detail string) {
+	ev := hookEvent(e, h, run, result, detail)
 	key := noticePrefix(h) + cause
 	claimed := false
 	if err := s.runtime(r.ID, func(st *state) error {
@@ -277,34 +287,122 @@ func (s Service) notice(r repoid.Repo, e Event, h Hook, cause string) {
 		}
 		return nil
 	}); err != nil || !claimed {
+		s.emit(e, ev)
 		return
 	}
-	text := fmt.Sprintf("Hook %s failed for %s: %s. Read its log with `dyna git hooks log %s --repo %s`.", h.Name, e.Event, cause, h.Name, shellquote.Quote(r.Main))
-	notify := s.Notify
-	if notify == nil {
-		notify = ownerNotice
-	}
-	if err := notify(e, text); err != nil {
+	if err := s.postEvent(e, ev, true); err != nil {
 		_ = s.runtime(r.ID, func(st *state) error { delete(st.Notices, key); return nil })
 	}
 }
 
-// ownerNotice posts to the event's room, else to the repo's room, which it
-// creates on first use.
-func ownerNotice(e Event, text string) error {
+// emit posts one routine run event: a start, or a result that passed. It
+// never fails a run, which is already stored, and it never creates a room.
+func (s Service) emit(e Event, ev room.HookEvent) {
+	_ = s.postEvent(e, ev, false)
+}
+
+// postEvent posts one run event. Post is the test seam; the default writes
+// through room.PostEvent.
+func (s Service) postEvent(e Event, ev room.HookEvent, create bool) error {
+	if s.Post != nil {
+		return s.Post(e, ev)
+	}
+	return postRoomEvent(e, ev, create)
+}
+
+// postRoomEvent posts a run event to the event's room, else to the repo's
+// room. A routine event never creates a room, so a repo that is nobody's room
+// stays quiet; a failed hook creates the repo's room, as its alert always has.
+func postRoomEvent(e Event, ev room.HookEvent, create bool) error {
 	rooms := room.DefaultStore()
 	var rec room.Record
+	var found bool
 	var err error
 	if e.Room != "" {
 		rec, err = rooms.Resolve(e.Room)
+		found = err == nil
 	} else {
-		rec, err = rooms.EnsureRepoRoom(e.Repo, "hooks")
+		root, rootErr := room.RepoRoot(e.Repo)
+		if rootErr != nil {
+			return rootErr
+		}
+		rec, found, err = rooms.RepoRoom(root)
 	}
 	if err != nil {
 		return err
 	}
-	_, err = rooms.Post(rec.ID, room.PostInput{From: "hooks", To: []string{rec.Name}, Kind: "hook-failed", Text: text})
+	if !found {
+		if !create {
+			return nil
+		}
+		if rec, err = rooms.EnsureRepoRoom(e.Repo, "hooks"); err != nil {
+			return err
+		}
+	}
+	_, err = rooms.PostEvent(rec.ID, ev, rec.Name)
 	return err
+}
+
+// spoolAlert tells the owner that a queued hook never reached the spool. It
+// stores the failure as a run, so the card opens a log that holds the cause.
+// When even that record cannot be stored, the spool error itself is still on
+// its way to the caller, and this line names why no card followed it.
+func (s Service) spoolAlert(ctx context.Context, r repoid.Repo, e Event, h Hook, cause error) {
+	run, file, err := s.newRun(ctx, r.ID, h, e.Session)
+	if err != nil {
+		log.Printf("hook spool alert for %s: cannot record the run: %v (spool error: %v)", h.Name, err, cause)
+		return
+	}
+	run.Result = "error"
+	run.FinishedAt = time.Now().UTC()
+	_, _ = fmt.Fprintln(file, "spool write error:", cause)
+	_ = file.Close()
+	if _, err := s.saveRun(ctx, run); err != nil {
+		log.Printf("hook spool alert for %s: cannot store the run: %v (spool error: %v)", h.Name, err, cause)
+		return
+	}
+	s.alert(r, e, h, run, room.HookError, "spool write error", "spool write error: "+cause.Error())
+}
+
+// hookEvent describes one run of a hook for the room. The full command can
+// hold a secret, so the room sees its first word only.
+func hookEvent(e Event, h Hook, run Run, state room.HookState, detail string) room.HookEvent {
+	ev := room.HookEvent{
+		RunID: run.ID, Repo: e.Repo, Hook: h.Name, Event: e.Event,
+		Label: h.Label, Command: commandLabel(h.Command), State: state, Detail: detail,
+	}
+	if state != room.HookRunning && !run.StartedAt.IsZero() && !run.FinishedAt.IsZero() {
+		ev.DurationMS = int(run.FinishedAt.Sub(run.StartedAt).Milliseconds())
+	}
+	return ev
+}
+
+// resultState names how a failed run ended: an exit code is a failed hook, and
+// a timeout, a cancellation or a runner fault is an error.
+func resultState(run Run) room.HookState {
+	if run.Result == "fail" {
+		return room.HookFailed
+	}
+	return room.HookError
+}
+
+var envAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
+
+// commandLabel is the first word of a hook command, so a card can name the
+// program without carrying the arguments, which may hold a secret.
+func commandLabel(command string) string {
+	for _, word := range strings.Fields(command) {
+		if envAssignment.MatchString(word) {
+			continue
+		}
+		word = strings.Trim(word, `"'`)
+		// Cut by rune, so a word outside ASCII stays valid UTF-8.
+		if runes := []rune(word); len(runes) > 24 {
+			word = string(runes[:24])
+		}
+		return word
+	}
+	return ""
 }
 
 // Run executes one named hook now. Event values supplied by the emitter win
@@ -359,6 +457,9 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 		if err != nil {
 			return Run{}, err
 		}
+		// The card shows the run as running before the command starts, so a
+		// long hook is never invisible.
+		s.emit(e, hookEvent(e, h, ev, room.HookRunning, ""))
 		env := append(processguard.MetadataEnv(), "DYNA_HOOK_EVENT="+e.Event, "DYNA_HOOK_REPO="+r.ID, "DYNA_HOOK_WORKTREE="+e.Worktree, "DYNA_HOOK_BRANCH="+e.Branch, "DYNA_HOOK_SHA="+e.SHA, "DYNA_HOOK_PR="+e.PR, "DYNA_HOOK_SESSION="+e.Session, "DYNA_HOOK_RUN_ID="+ev.ID, "DYNA_HOOK_LOG="+ev.LogPath)
 		timeout, _ := time.ParseDuration(h.Timeout)
 		runErr := preparationErr
@@ -392,13 +493,22 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 		if runErr == nil {
 			ev, runErr = s.pendingInstall(ctx, ev)
 		}
-		// Alert only after the result and log are durable.
-		if runErr != nil && h.OnFail == "alert" {
+		// Every started run posts its result, so no card stays running. A failed
+		// run of an alert hook also reaches the owner: the claim there covers the
+		// repo room the first failure may create, not the run's own card. A
+		// handoff to an install unit posts its result when that unit finishes.
+		if runErr != nil {
 			cause := failureClass(runErr)
 			if preparationErr != nil {
 				cause = "snapshot"
 			}
-			s.notice(r, e, h, cause)
+			if h.OnFail == "alert" {
+				s.alert(r, e, h, ev, resultState(ev), cause, cause)
+			} else {
+				s.emit(e, hookEvent(e, h, ev, resultState(ev), cause))
+			}
+		} else if ev.Result != "pending" {
+			s.emit(e, hookEvent(e, h, ev, room.HookPassed, ""))
 		}
 		if runErr == nil && ev.Result != "pending" {
 			s.clearNotices(r.ID, h)

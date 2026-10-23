@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { compile } from 'svelte/compiler'
 import { build } from 'esbuild'
-import { callsInWindow, feedRows } from '../rooms/feedRows.js'
+import { callsInWindow, feedRows } from '../rooms/feedRows.ts'
 
 const dir = new URL('.', import.meta.url).pathname
 async function load(name: string) {

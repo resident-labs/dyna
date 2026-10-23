@@ -8,8 +8,9 @@
 // the DM-surface render in the test keep the card ready for it.
 import type { Component } from 'svelte'
 import WorktreeCard from './WorktreeCard.svelte'
-import { eventSpecs, isWorktreeEvent } from './events.gen.ts'
-import type { EventSpecEntry, WorktreeEvent } from './events.gen.ts'
+import HookCard from './HookCard.svelte'
+import { eventSpecs } from './events.gen.ts'
+import type { EventSpecEntry } from './events.gen.ts'
 import type { Message, PRNotice } from '../api/room.ts'
 
 export type EventSurface = 'feed' | 'dm'
@@ -24,7 +25,7 @@ export type EventRenderer = Component<EventProps>
 
 // Components by the name a spec gives in its renderer field. A name with no
 // component here draws the unknown event row, and the test fails.
-export const eventComponents: Record<string, EventRenderer> = { WorktreeCard }
+export const eventComponents: Record<string, EventRenderer> = { WorktreeCard, HookCard }
 
 // The post key of a registered event: its family and its event type.
 export function eventKey(family?: string, type?: string): string {
@@ -54,10 +55,4 @@ export const eventRenderers: Readonly<Record<string, EventRenderer>> = renderers
 // that has no renderer yet.
 export function rendererFor(post: Message): EventRenderer | undefined {
   return eventRenderers[eventKey(post.kind, post.notice?.kind)]
-}
-
-// worktreeEvent returns the typed payload of a kept-worktree post.
-export function worktreeEvent(post: Message): WorktreeEvent | undefined {
-  if (post.kind !== 'worktree' || post.notice?.kind !== 'kept') return undefined
-  return isWorktreeEvent(post.payload) ? post.payload : undefined
 }
