@@ -219,6 +219,10 @@ type PostInput struct {
 	Mentions []string
 	Text     string
 	ReplyTo  string
+	// Conversation is where the writer wrote the post: the room feed, one
+	// session's DM or the owner's voice call. Empty lets the store decide
+	// (see room.HomeFor).
+	Conversation room.Conversation
 	// ForwardOf is the ID of a post in the recipients' room to forward. The
 	// stored post carries a snapshot of it; its files are referenced, not copied.
 	ForwardOf string
@@ -271,20 +275,22 @@ func (s *Service) SenderOf(c Claim) (Sender, error) {
 // PostRequest is one post that a CLI process asks the engine to store and
 // deliver. It has no sender: the engine decides it from the caller.
 type PostRequest struct {
-	NeedsRoot  bool
-	Kind       string
-	Mentions   []string
-	Text       string
-	ReplyTo    string
-	ForwardOf  string
-	References []room.Reference
-	Files      []File
-	Claim      Claim
+	NeedsRoot bool
+	Kind      string
+	Mentions  []string
+	Text      string
+	ReplyTo   string
+	ForwardOf string
+	// Conversation is where the caller wrote the post, empty when it does not say.
+	Conversation room.Conversation
+	References   []room.Reference
+	Files        []File
+	Claim        Claim
 }
 
 // Input is the post that req asks for, from snd.
 func (req PostRequest) Input(snd Sender) PostInput {
-	return PostInput{NeedsRoot: req.NeedsRoot, Kind: req.Kind, Sender: snd, Mentions: req.Mentions, Text: req.Text, ReplyTo: req.ReplyTo, ForwardOf: req.ForwardOf, References: req.References, Files: req.Files}
+	return PostInput{NeedsRoot: req.NeedsRoot, Kind: req.Kind, Sender: snd, Mentions: req.Mentions, Text: req.Text, ReplyTo: req.ReplyTo, ForwardOf: req.ForwardOf, Conversation: req.Conversation, References: req.References, Files: req.Files}
 }
 
 // File is one attachment to save with a post.
@@ -491,7 +497,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 			NeedsRoot: in.NeedsRoot, RoomService: in.Sender.Kind == SenderOwner && !in.Sender.Human, SessionIDs: sessionIDs, NoWake: !wake})
 	} else {
 		msg, err = s.Rooms.Post(res.rec.ID, room.PostInput{Wake: wake, SessionIDs: sessionIDs,
-			ID: in.ID, NeedsRoot: in.NeedsRoot,
+			ID: in.ID, NeedsRoot: in.NeedsRoot, Conversation: in.Conversation,
 			From: res.from, Kind: in.Kind, Notice: in.Notice, Human: in.Sender.Kind == SenderOwner && in.Sender.Human, Source: in.Sender.source(), To: res.addrs(), Via: res.via, ReplyTo: in.ReplyTo, Forward: fwd, Turn: turn, Text: text,
 			Attachments: atts, References: in.References,
 		})
