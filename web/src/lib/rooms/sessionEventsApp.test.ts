@@ -8,6 +8,7 @@ import { createReloadGate, listVisible } from '../ui/reloadGate.ts'
 import { hasItemChange } from '../ui/listChanges.ts'
 import { createRoomData } from './roomData.ts'
 import { createRoomSessionControls } from './roomSessionControls.ts'
+import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 
@@ -121,6 +122,8 @@ function app(view: string) {
   const roomData = createRoomData(state.api, { current: () => ({ room: state.roomId, visit: state.roomRequest }), members() {}, choices() {} })
   const roomSessionController = createRoomSessionControls(state.api, 'a', (value: ControlsValue) => { state.roomControls = value }, () => listVisible('roomControls', state))
   const app: SessionEventsApp = Object.assign(state, { reload, roomData, roomSessionController }) as SessionEventsApp
+  // The screen state lives in the router now, so the sliced functions write through it.
+  installRouterShim(app)
   vm.createContext(app)
   for (const name of ['applyItemEvent', 'handle', 'loadSession', 'loadMembers', 'resync']) {
     const node = functions.find((n) => n.type === 'FunctionDeclaration' && n.id?.name === name)
@@ -206,6 +209,7 @@ test('reconnect refreshes the open session and its review workspace', async () =
 test('the remaining timer refreshes bulk transfers only while the page is visible', () => {
   const calls: string[] = []
   const c = { needPair: false, pageVisible: true, bulkControllers: new Map([['one', { refreshTransfers: () => calls.push('transfer') }]]), changesVisuals }
+  installRouterShim(c)
   vm.createContext(c)
   const mounted = functions.find((n): n is Extract<typeof n, { type: 'ExpressionStatement' }> => n.type === 'ExpressionStatement' && n.expression.type === 'CallExpression' && n.expression.callee.type === 'Identifier' && n.expression.callee.name === 'onMount')
   assert.ok(mounted, 'App mounts onMount')
