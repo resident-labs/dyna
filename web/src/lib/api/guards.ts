@@ -42,7 +42,7 @@ function isCheck(v: unknown): v is Check {
 }
 
 function isPRNotice(v: unknown): v is PRNotice {
-  return isRecord(v) && isString(v.kind) && isNumber(v.number) && isString(v.head) && isString(v.changeId)
+  return isRecord(v) && isString(v.kind) && isNumber(v.number) && isString(v.head) && isString(v.changeId) && optional(v.commentId, isString)
 }
 
 function isAttachment(v: unknown): v is Attachment {

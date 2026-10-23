@@ -49,6 +49,7 @@ export interface Attachment {
 }
 
 export interface PRNotice {
+  commentId?: string
   kind: string
   number: number
   head: string

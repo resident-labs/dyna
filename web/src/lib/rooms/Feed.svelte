@@ -1,6 +1,9 @@
 <script>
   import { speaker } from '../ui/posts.js'
-  import { tick } from 'svelte'
+  import { tick, onMount } from 'svelte'
+  import HeldCommentNotice from '../prs/HeldCommentNotice.svelte'
+  import { refreshHeldComments } from '../prs/heldComments.ts'
+  onMount(() => { refreshHeldComments() })
   import { scale } from 'svelte/transition'
   import Avatar from '../ui/Avatar.svelte'
   import PinIcon from '../ui/PinIcon.svelte'
@@ -229,6 +232,8 @@
             {#if !q || q.state === 'open'}<button class="answer-link" onclick={() => onquestion(p)}>Answer</button>
             {:else}<button class="question-state {q.state}" onclick={() => onquestion(p)}>{q.state}</button>{/if}
           </div>
+      {:else if p.notice?.kind === 'held-comment'}
+          <HeldCommentNotice roomId={room.id} prKey={p.notice.changeId} commentId={p.notice.commentId ?? ''} />
       {:else if p.kind === 'pr'}
           <PRPost post={p} posts={row.posts} {showRepo} focus={flash?.key === row.key ? flash.id : ''} to={recipients(p).names} {onaddress} {room} {pinned} {selection} {onreply} {onforward} {onpin} />
       {:else if p.completion}
