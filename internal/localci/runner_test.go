@@ -68,7 +68,7 @@ func TestRunChecksReportsAndSavesResult(t *testing.T) {
 				}
 				return nil
 			}}
-			result, err := runner.Run(context.Background(), Request{Repo: t.TempDir(), SHA: "HEAD", Suites: []string{"go"}, MaxTest: 10 * time.Second})
+			result, err := runner.Run(context.Background(), Request{Repo: t.TempDir(), SHA: "HEAD", Suites: []Suite{"go"}, MaxTest: 10 * time.Second})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -111,7 +111,7 @@ func TestRunRejectsInvalidSuiteBeforeTransport(t *testing.T) {
 		t.Fatal("transport called")
 		return nil
 	}}
-	_, err := r.Run(context.Background(), Request{Repo: ".", SHA: "HEAD", Suites: []string{"computer-smoke"}})
+	_, err := r.Run(context.Background(), Request{Repo: ".", SHA: "HEAD", Suites: []Suite{"computer-smoke"}})
 	if err == nil {
 		t.Fatal("accepted unsupported suite")
 	}
@@ -159,7 +159,7 @@ func TestRunCleansUpAfterTransportFailure(t *testing.T) {
 		}
 		return nil
 	}}
-	result, err := r.Run(context.Background(), Request{Repo: t.TempDir(), Suites: []string{"cross-build"}})
+	result, err := r.Run(context.Background(), Request{Repo: t.TempDir(), Suites: []Suite{"cross-build"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestCrossBuildWaitsForSelectedFrontend(t *testing.T) {
 		}
 		done := make(chan outcome, 1)
 		go func() {
-			result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []string{"cross-build", "frontend"}, DeferSave: true})
+			result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []Suite{"cross-build", "frontend"}, DeferSave: true})
 			done <- outcome{result, err}
 		}()
 		select {
@@ -308,7 +308,7 @@ func TestCrossBuildAloneDoesNotRequireFrontend(t *testing.T) {
 		}
 		return nil
 	}}
-	result, err := runner.Run(context.Background(), Request{Repo: t.TempDir(), Suites: []string{"cross-build"}})
+	result, err := runner.Run(context.Background(), Request{Repo: t.TempDir(), Suites: []Suite{"cross-build"}})
 	if err != nil || result.Status != "passed" || len(result.Suites) != 1 {
 		t.Fatalf("result=%+v err=%v", result, err)
 	}
@@ -386,7 +386,7 @@ func TestRunArchivesOnlyRequiredReportFiles(t *testing.T) {
 			archived[strings.TrimPrefix(header.Name, "./")] = string(content)
 		}
 	}}
-	result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []string{"relay"}, Timeout: 30 * time.Second, MaxTest: time.Second})
+	result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []Suite{"relay"}, Timeout: 30 * time.Second, MaxTest: time.Second})
 	if err != nil || result.Status != "passed" {
 		t.Fatalf("report retrieval: %+v %v", result, err)
 	}
@@ -417,7 +417,7 @@ func TestRunArchivesOnlyRequiredReportFiles(t *testing.T) {
 
 func TestContainerLimitsAndSharedAdmission(t *testing.T) {
 	for _, suite := range DefaultSuites() {
-		t.Run(suite, func(t *testing.T) {
+		t.Run(string(suite), func(t *testing.T) {
 			script := containerScript("/cache", "/cache/repo.git", "/cache/work", "/cache/reports", "bounded-job", suite, 30*time.Second)
 			for _, want := range []string{
 				"--init", "--cpus=2", "--memory=4g", "--memory-swap=4g", "--pids-limit=512",
@@ -427,7 +427,7 @@ func TestContainerLimitsAndSharedAdmission(t *testing.T) {
 					t.Errorf("%s omits container/resource/deadline contract %q", suite, want)
 				}
 			}
-			goSuite := suite == "go" || suite == "cross-build"
+			goSuite := suite == SuiteGo || suite == SuiteCrossBuild
 			if goSuite {
 				for _, want := range []string{
 					"bash '/var/tmp/dyna-ci/ci-runner-slot.sh' --container 'bounded-job' 30 -- docker create",
@@ -475,7 +475,7 @@ func TestAdmissionQueueDoesNotConsumeExecutionBudget(t *testing.T) {
 			return nil
 		}}
 		go func() {
-			result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []string{"cross-build"}, Timeout: 30 * time.Second, DeferSave: true})
+			result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []Suite{"cross-build"}, Timeout: 30 * time.Second, DeferSave: true})
 			if err != nil {
 				result.Status = "error"
 				result.Error = err.Error()
