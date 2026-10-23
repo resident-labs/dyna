@@ -3,7 +3,7 @@
   import { fade } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
   import { motion, BASE, FAST } from '../ui/motion.js'
-  import { GENERAL, channelView } from './channels.js'
+  import { GENERAL } from './channels.js'
   import Avatar from '../ui/Avatar.svelte'
   import Notify from './Notify.svelte'
   import { features } from '../../api.js'
@@ -16,29 +16,16 @@
   import { available as terminal } from '../sessions/TermPane.svelte'
   import { sections, rowOf, shown, runningWork } from './workViews.ts'
   import { sessionStatus } from '../sessions/status.ts'
-  import Menu from '../ui/Menu.svelte'
-  import { channelList, saveChannelList, CHANNEL_LISTS } from '../ui/prefs.ts'
   // questions: open questions to the owner, the one "needs you" count.
   // computers: the room's computers, or null when the feature is off.
   // runs: the room's workflow runs.
   // agents: {groups, hidden} from activeAgents; set, the sidebar lists the
   // awake agents of every room instead of one room's views.
-  let { agents = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, channels, channelUnread = {}, showClosed = false, questions = 0, live = [], runs = null, dataDir = '', ownerHue = 0, update = false, prs = {}, computers = null, onroommenu = null, onview, onmember, onsettings = null, onlogout = null } = $props()
+  let { agents = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, channelUnread = {}, questions = 0, live = [], runs = null, dataDir = '', ownerHue = 0, update = false, prs = {}, computers = null, onroommenu = null, onview, onmember, onsettings = null, onlogout = null } = $props()
   // Gold marks only what needs the owner or runs now; no totals.
   let liveComputers = $derived(new Set((computers ?? []).filter(isLive).map((c) => c.session)).size)
   let running = $derived(runningWork(runs))
   let open = $derived(rowOf(view)?.id)
-  let leads = $derived(channels?.leads.filter((m) => showClosed || !m.closed) ?? [])
-  // With agent channels folded, the fold stays open while one of them is open.
-  let unfolded = $state(false)
-  let showLeads = $derived($channelList === 'all' || unfolded || leads.some((m) => view === channelView(m.id)))
-  let foldedUnread = $derived(leads.reduce((sum, m) => sum + (channelUnread[channelView(m.id)] ?? 0), 0))
-  let menu = $state(null)
-  function chanMenu(e) {
-    e.preventDefault()
-    const b = e.currentTarget.getBoundingClientRect()
-    menu = { x: b.left, y: b.bottom + 4, anchor: e.currentTarget }
-  }
   const icons = {
     messages: 'M4 4.5h12a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3H4A1.5 1.5 0 0 1 2.5 13V6A1.5 1.5 0 0 1 4 4.5Z',
     questions: 'M10 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14ZM7.9 8.1a2.1 2.1 0 1 1 3 1.9c-.6.3-.9.7-.9 1.3v.4M10 13.9v.1',
@@ -91,31 +78,9 @@
       {#if room.repo}<p class="repo mono" title={room.repo}><bdi>{room.repo}</bdi></p>{/if}
     </header>
     <div class="scroll">
-      {#if $channelList === 'messages'}
-        <button class="chan" class:sel={view === GENERAL} class:unread={channelUnread[GENERAL] > 0} title="Top-level agents and messages to you" onclick={() => onview(GENERAL)} oncontextmenu={chanMenu}>
-          <svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons.messages} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><span class="label">Messages</span>{#if channelUnread[GENERAL]}<span class="count">{channelUnread[GENERAL]}</span>{/if}
-        </button>
-      {:else}
-      <div class="chanhead">
-        <h2>Channels</h2>
-        <button class="more" aria-label="Channel options" title="Channel options" aria-haspopup="menu" onclick={chanMenu} oncontextmenu={chanMenu}>⋯</button>
-      </div>
-      <button class="chan" class:sel={view === GENERAL} title="Top-level agents and messages to the owner" onclick={() => onview(GENERAL)}>
-        <span class="hash" aria-hidden="true">#</span><span class="label">general</span>
+      <button class="chan" class:sel={view === GENERAL || view.startsWith('channel:')} class:unread={channelUnread[GENERAL] > 0} title="Room messages" onclick={() => onview(GENERAL)}>
+        <svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons.messages} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><span class="label">Messages</span>{#if channelUnread[GENERAL]}<span class="count">{channelUnread[GENERAL]}</span>{/if}
       </button>
-      {#if $channelList === 'folded' && leads.length}
-        <button class="chan fold" class:unread={foldedUnread > 0} aria-expanded={showLeads} onclick={() => (unfolded = !showLeads)}>
-          <svg class="chev" class:open={showLeads} viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m6 4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-          <span class="label">More channels</span>{#if foldedUnread}<span class="count">{foldedUnread}</span>{/if}
-        </button>
-      {/if}
-      {#each showLeads ? leads : [] as m (m.id)}
-        <button animate:flip={{ duration: motion(BASE), easing: cubicOut }} in:fade={{ duration: motion(FAST) }} class="chan" class:unread={channelUnread[channelView(m.id)] > 0} class:sel={view === channelView(m.id)} style="padding-left: {8 + Math.min(channels.trail(m.id).length - 1, 6) * 14}px" title="{m.name} and {m.children ?? 0} subagents" onclick={() => onview(channelView(m.id))}>
-          <span class="hash" aria-hidden="true">#</span><span class="label">{m.name}</span>
-          {#if channelUnread[channelView(m.id)]}<span class="count">{channelUnread[channelView(m.id)]}</span>{/if}
-        </button>
-      {/each}
-      {/if}
       {#each sections as section (section.label)}
         {@const rows = shown(section.rows, { repo: !!room.repo, terminal, computers: !!computers })}
         {#if rows.length}
@@ -158,10 +123,6 @@
     {/if}
   </footer>
 </aside>
-
-{#if menu}
-  <Menu x={menu.x} y={menu.y} items={CHANNEL_LISTS.filter(([v]) => v !== $channelList).map(([v, label]) => ({ label: `Show ${label.toLowerCase()}`, run: () => saveChannelList(v) }))} onclose={() => { const a = menu?.anchor; menu = null; a?.focus?.() }} />
-{/if}
 
 <style>
   .side {
@@ -220,17 +181,6 @@
   h2:first-child { margin-top: 6px; }
   .scroll > div > h2.group { margin-top: 14px; }
   .scroll > div:first-child > h2.group { margin-top: 6px; }
-  .chanhead { display: flex; align-items: center; justify-content: space-between; }
-  .chanhead .more { color: var(--faint); width: 24px; height: 22px; border-radius: 5px; margin-right: var(--s1); opacity: 0; transition: opacity var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
-  .chanhead:hover .more, .chanhead .more:focus-visible, .chanhead .more[aria-expanded='true'] { opacity: 1; }
-  @media (hover: hover) {
-    .chanhead .more:hover { background: var(--hover); }
-  }
-  .chanhead .more:active { background: var(--select); }
-  @media (hover: none) { .chanhead .more { opacity: 1; } }
-  .chan.fold { color: var(--faint); }
-  .chev { flex: none; margin: 0 6px 0 2px; transition: transform var(--motion) var(--ease); }
-  .chev.open { transform: rotate(90deg); }
   .chan {
     width: 100%;
     display: flex;
@@ -250,8 +200,6 @@
     background: var(--select);
 }
   .chan.sel { background: var(--select); color: var(--ink); }
-  .hash { font-size: var(--t-page); line-height: 1; color: var(--faint); width: 16px; text-align: center; font-weight: 400; }
-  .chan.sel .hash { color: var(--muted); }
   .wglyph { width: 16px; flex: none; color: var(--faint); }
   .chan.sel .wglyph { color: var(--muted); }
   .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }

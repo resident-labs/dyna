@@ -2,8 +2,7 @@
   import Segmented from '../ui/Segmented.svelte'
   import LoadOlder from '../ui/LoadOlder.svelte'
   // The room's pull requests and issues, as a list and one open item. What
-  // Dyna tracks is grouped by the agent flow; the PRs Dyna does not watch
-  // fold away. On a wide screen the list stays beside the open item; on a
+  // Dyna tracks and untracked PRs share one open-only list. On a wide screen the list stays beside the open item; on a
   // narrow one the open item takes the screen and a back link returns.
   // An open PR has its story and its tabs (PRDetail). Opening a PR adds a
   // history entry with its link (prlink.js), so Back returns to the list.
@@ -11,19 +10,22 @@
   // (IssueList) and opened as an IssuePage.
   import { onMount } from 'svelte'
   import { api } from '../../api.js'
-  import PRList from './PRList.svelte'
+  import RoomPRList from './RoomPRList.svelte'
+  import MergingStrip from './MergingStrip.svelte'
+  import { openPRs } from './roomPRs.ts'
+  import TabHeader from '../rooms/TabHeader.svelte'
   import PRDetail from './PRDetail.svelte'
   import IssueList from './IssueList.svelte'
   import IssuePage from './IssuePage.svelte'
   import Menu from '../ui/Menu.svelte'
   import { changeTitle, isLocal, withoutReviewers } from './pr.ts'
-  import { listView, navOrder, stateFilter, rowsFromGitHub, moveKey, type Names, type Row } from './prlist.ts'
-  import { mergedToday, neighbor } from './prboard.ts'
+  import { listView, rowsFromGitHub, moveKey, type Names, type Row } from './prlist.ts'
+  import { neighbor } from './prboard.ts'
   import { prHash, parsePRHash, prRef, findPR, lookupNumber, issueHash, parseIssueHash, type Link } from './prlink.ts'
   import { roomHash } from '../ui/route.ts'
-  import { trackedFor, issueGroups, loadFilters, saveFilters, loadFolds, saveFolds, type Folds } from './github.ts'
-  import type { MergeQueueItem, ReviewerStatus } from '../api/change.ts'
-import type { Goal } from '../api/goal.ts'
+  import { trackedFor, issueGroups, loadFilters, saveFilters } from './github.ts'
+  import type { MergeQueueItem, MergeControlStatus, ReviewerStatus } from '../api/change.ts'
+  import type { Goal } from '../api/goal.ts'
   import type { GitHubDetail, GitHubItem, GitHubListResult } from '../api/github.ts'
   import type { Integration } from '../api/lanesync.ts'
   import type { Member } from '../api/room.ts'
@@ -43,6 +45,7 @@ import type { Goal } from '../api/goal.ts'
     items: TrackItem[]
   }
   interface Props {
+    mergeVersion?: number
     older?: boolean
     loadingOlder?: boolean
     failedOlder?: boolean
@@ -72,7 +75,7 @@ import type { Goal } from '../api/goal.ts'
   // kind is 'pr' or 'issue': the Pull requests tab and the Issues tab each mount this view.
   // onpr opens a PR by number in the Pull requests tab, from an issue's linked PRs.
   // link is a PR link ({pr, tab}) or issue link ({issue}) to open, from the address bar.
-  let { older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, kind = 'pr', integration = null, changes = null, members = [], link = null, onask, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
+  let { mergeVersion = 0, older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, kind = 'pr', integration = null, changes = null, members = [], link = null, onask, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
 
   const saved = loadFilters()
   let listState = $state(saved.state)
@@ -86,12 +89,11 @@ import type { Goal } from '../api/goal.ts'
   let detail = $state<GitHubDetail | null>(null)
   let detailError = $state('')
   let trackMenu = $state<TrackMenu | null>(null)
-  let foldOpen = $state(false)
-  let doneOpen = $state(false)
-  let folds = $state<Folds>(loadFolds(roomId)) // the reader's queue and Blocked choices for this room
   let linkedItem = $state<GitHubDetail | null>(null) // a linked PR the GitHub list does not hold
   let followed = $state<Link | null>(null) // the last address-bar link the screen opened
   let width = $state(1200) // this screen's own width, from its box
+  let mergeStatus = $state<MergeControlStatus | null>(null)
+  let mergeError = $state('')
   let merge = $state<MergeQueueItem[] | null>(null) // the room's RoomMergeStatus answer
   let starting = $state(0) // the issue number Start is working on
   let startNote = $state('') // a Start warning or error, shown in the list and on the issue page
@@ -114,36 +116,23 @@ import type { Goal } from '../api/goal.ts'
     const q = search.trim().toLowerCase()
     return allRows.filter((c) => !q || `${changeTitle(c)} ${c.branch || ''} ${c.number || ''}`.toLowerCase().includes(q))
   })
-  let rows = $derived(stateFilter(searched, listState))
-  // The Open filter includes today's merges.
-  let listRows = $derived(listState === 'open' ? [...rows, ...mergedToday(searched)] : rows)
-  let doneLabel = $derived(listState === 'open' ? 'Merged today' : 'Closed')
+  let listRows = $derived(openPRs(searched, merge ?? []))
   let view = $derived(listView(listRows, merge))
-  let groups = $derived(view.groups)
-  // The queue card holds rows that the groups do not, so either one fills the list.
-  let anyRows = $derived(view.queue.length > 0 || groups.length > 0 || (integration?.commits?.length ?? 0) > 0)
+  let anyRows = $derived(listRows.length > 0)
   let chg = $derived(inPRs ? allRows.find((c) => c.changeId === selId) ?? null : null)
   let chgAuthor = $derived(chg?.authorSession ? byId[chg.authorSession] : null)
   let chgReviewer = $derived(chg?.reviewerSession ? byId[chg.reviewerSession] : null)
   let rowItems = $derived(list?.items ?? [])
   let item = $derived(detail ?? rowItems.find((it) => it.number === sel) ?? null)
   let workSession = $derived(item?.workingSession ? byId[item.workingSession] : null)
-  let untrackedOpen = $derived(foldOpen || !!search.trim() || chg?.status === 'untracked')
-  // The visible rows in list order, for the j and k keys and swipes.
-  // The queue is open while a batch runs, or when nothing else is in it; a choice wins.
-  let queueOpen = $derived(folds.queue ?? (!view.queue.length || view.queue.some((q) => q.item.trial)))
-  let blockedOpen = $derived(folds.blocked ?? true)
-  let order = $derived([...(queueOpen ? view.queue.map((q) => q.row) : []), ...navOrder(groups, { doneOpen, untrackedOpen, blockedOpen })])
-  function toggleFold(key: string) {
-    folds = { ...folds, [key]: !(key === 'queue' ? queueOpen : blockedOpen) }
-    saveFolds(roomId, folds)
-  }
+  // Keyboard and swipe navigation follow exactly the visible open list.
+  let order = $derived(listRows)
 
   let seq = 0
   async function load() {
     const n = ++seq
     try {
-      const res = await api.githubList(roomId, kind, kind === 'pr' && listState === 'closed' ? 'all' : listState, query)
+      const res = await api.githubList(roomId, kind, kind === 'pr' ? 'open' : listState, query)
       if (n !== seq) return
       list = res
       error = ''
@@ -161,16 +150,17 @@ import type { Goal } from '../api/goal.ts'
     if (!inPRs) return
     const n = ++mseq
     try {
-      const res = (await api.roomMergeStatus(roomId)) ?? []
-      if (n === mseq) merge = res
-    } catch {
-      if (n === mseq) merge = null
+      const res = await api.mergeControlStatus(roomId) as MergeControlStatus
+      if (n === mseq) { mergeStatus = res; merge = res.queue ?? []; mergeError = '' }
+    } catch (e) {
+      if (n === mseq) { mergeStatus = null; merge = null; mergeError = errorText(e) }
     }
   }
-  // A string compares by value, so the effect below runs only when a change moves.
+  // Refresh for row changes and saved merge events, including main CI updates.
   let moved = $derived(moveKey(changes))
   $effect(() => {
     moved
+    mergeVersion
     loadMerge()
   })
 
@@ -182,6 +172,13 @@ import type { Goal } from '../api/goal.ts'
     const h = prHash(roomId, prRef(c))
     if (push) history.pushState({ pr: true }, '', h)
     else history.replaceState(history.state, '', h)
+  }
+  // A running trial can include a PR outside the loaded list page.
+  function openMerge(id: string) {
+    const row = allRows.find((r) => r.changeId === id)
+    if (row) return openRow(row)
+    const number = Number(id.match(/#(\d+)$/)?.[1])
+    if (number) onpr(number)
   }
   // The list's own address, for the entry Back returns to.
   const listAddress = () => location.pathname + location.search + roomHash(roomId, inPRs ? 'github' : 'issues')
@@ -251,12 +248,7 @@ import type { Goal } from '../api/goal.ts'
     const n = chg && !isLocal(chg) && chg.number ? chg.number : 0
     if (n !== sel) pick(n)
   })
-  // A wide screen always shows a PR: the first row until the owner picks one.
-  $effect(() => {
-    if (!inPRs) return
-    if (selId && !chg && changes) selId = ''
-    else if (!selId && !narrow && order.length && (!link || link === followed)) selId = order[0]?.changeId ?? ''
-  })
+  // Opening the tab shows the full list; a PR opens only after a choice or link.
   let dseq = 0
   async function pick(n: number) {
     const d = ++dseq
@@ -374,9 +366,9 @@ import type { Goal } from '../api/goal.ts'
 </script>
 {#snippet filters()}
   <header class="lhead">
-    <div class="filters">
+    {#if !inPRs}<div class="filters">
       <Segmented small label="State" options={STATES.map((s) => [s, s.charAt(0).toUpperCase() + s.slice(1)])} value={listState} onchange={setState} />
-    </div>
+    </div>{/if}
     <input class="search" type="search" bind:value={search} oninput={typed} onkeydown={(e) => e.key === 'Enter' && (clearTimeout(timer), (query = search.trim()), load())} placeholder="Search, for example author:@me label:bug" aria-label="Search {inPRs ? 'pull requests' : 'issues'}" />
   </header>
 {/snippet}
@@ -387,17 +379,19 @@ import type { Goal } from '../api/goal.ts'
   {#if onask && !isLocal(chg) && chg?.url}<button class="act" onclick={ask} title="Start a session with this PR as its task">Ask an agent</button>{/if}
 {/snippet}
 <svelte:window onkeydown={keys} />
-<section class="gh" class:narrow bind:clientWidth={width}>
+<section class="gh" class:narrow class:pr-list={inPRs && !chg} bind:clientWidth={width}>
   {#if inPRs}
-      <div class="list" hidden={narrow && !!chg}>
+      <div class="list prlist" hidden={narrow && !!chg}>
+        <TabHeader title="Pull requests" usage={`${listRows.length} open`} />
+        <MergingStrip status={mergeStatus} error={mergeError} onpick={openMerge} />
         {@render filters()}
         {#if error}<p class="more err">GitHub did not answer: {error}</p>{:else if list?.more}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
         {#if anyRows}
-          <PRList queue={view.queue} {integration} {groups} states={view.states} {selId} {names} {doneLabel} bind:doneOpen {untrackedOpen} {queueOpen} {blockedOpen} ontoggle={toggleFold} {older} {loadingOlder} {failedOlder} {onolder} onfold={() => (foldOpen = !foldOpen)} onpick={(c) => openRow(c)} />
+          <RoomPRList rows={listRows} queue={merge ?? []} {selId} {names} {older} {loadingOlder} {failedOlder} {onolder} onpick={(c) => openRow(c)} />
         {:else}
           <div class="empty">
             <strong>No pull requests</strong>
-            <p>{search.trim() ? 'Nothing matches this search.' : listState === 'open' || listState === 'all' ? 'A session opens a change with dyna git change open, or tracks its PR with dyna git pr track.' : `No ${listState} pull requests in this room.`}</p>
+            <p>{search.trim() ? 'Nothing matches this search.' : 'Open pull requests in this room appear here.'}</p>
           </div>
           <LoadOlder auto {older} loading={loadingOlder} failed={failedOlder} onclick={onolder} />
         {/if}
@@ -405,11 +399,9 @@ import type { Goal } from '../api/goal.ts'
     {#if chg}
       <div class="dscroll" role="presentation" ontouchstart={narrow ? swipeStart : null} ontouchend={narrow ? swipeEnd : null}>
         {#key chg.changeId}
-          <PRDetail change={chg} {detail} {detailError} {roomId} {names} review={reviewer?.enabled ?? true} merge={merge?.find((m) => m.changeId === chg.changeId) ?? null} standing={view.states[chg.changeId ?? '']} bind:tab ontab={showTab} onback={narrow ? back : null} {onuntrack} {onresume} ontrack={trackRow} onchange={onreviewer} onauthor={chgAuthor ? () => onsession?.(chgAuthor, 'prs') : null} onreviewer={chgReviewer ? () => onsession?.(chgReviewer) : null} actions={askAgent} {goals} {onexpedite} {onlinkgoal} />
+          <PRDetail change={chg} {detail} {detailError} {roomId} {names} review={reviewer?.enabled ?? true} merge={merge?.find((m) => m.changeId === chg.changeId) ?? null} standing={view.states[chg.changeId ?? '']} bind:tab ontab={showTab} onback={back} {onuntrack} {onresume} ontrack={trackRow} onchange={onreviewer} onauthor={chgAuthor ? () => onsession?.(chgAuthor, 'prs') : null} onreviewer={chgReviewer ? () => onsession?.(chgReviewer) : null} actions={askAgent} {goals} {onexpedite} {onlinkgoal} />
         {/key}
       </div>
-    {:else if !narrow && anyRows}
-      <div class="detail none"><p class="quiet">Pick a pull request to read it.</p></div>
     {/if}
   {:else}
     {#if !narrow || !sel}
@@ -460,6 +452,8 @@ import type { Goal } from '../api/goal.ts'
 <style>
   .gh { flex: 1; display: flex; min-height: 0; min-width: 0; }
   .list { width: 420px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line-soft); min-height: 0; }
+  .prlist { overflow-y:auto; }
+  .pr-list .list { width:100%; flex:1; border-right:0; }
   .list[hidden] { display: none; }
   .narrow .list { width: auto; flex: 1; min-width: 0; border-right: 0; }
   .lhead { flex: none; padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--line-soft); }

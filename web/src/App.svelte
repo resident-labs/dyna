@@ -23,7 +23,7 @@
   import VoiceWidget from './lib/voice/VoiceWidget.svelte'
   import { voiceCall, callRequests } from './lib/voice/voiceCall.ts'
   import { callLink, callTarget } from './lib/voice/callRequests.ts'
-  import { GENERAL, VOICE, channelView, isChannel, inChannel, homeChannel, channelModel, parentTrail, prepareChannelText } from './lib/rooms/channels.js'
+  import { GENERAL, VOICE, isChannel, inChannel, homeChannel, channelModel, parentTrail, prepareChannelText } from './lib/rooms/channels.js'
   import { isShellResult } from './lib/rooms/feedRows.js'
   import { mergeSessionPage } from './lib/sessions/sessionPages.ts'
   import { trimFeed } from './lib/rooms/feedWindow.js'
@@ -81,7 +81,7 @@
   import { runningShells } from './lib/sessions/shells.ts'
   import { trackChanges, changedCount } from './lib/sessions/changesCount.ts'
   import Tabs from './lib/ui/Tabs.svelte'
-  import { rowOf, visibleTabs } from './lib/rooms/workViews.ts'
+  import { rowOf, visibleTabs, roomTabs } from './lib/rooms/workViews.ts'
   import SessionMedia from './lib/sessions/SessionMedia.svelte'
   import ComputerPane from './lib/computers/ComputerPane.svelte'
   import Computers from './lib/computers/Computers.svelte'
@@ -273,6 +273,7 @@
   let rulesEditing = $state(false)
   $effect(() => { if (!rulesEditing && rulesPending) { rules = rulesPending; rulesPending = null } })
   let reviewer = $state(null) // the room's reviewer (ReviewerStatus)
+  let mergeVersion = $state(0)
   let changes = $state(null) // the room's changes, local and PR (Changes); null before they load or on a host without the API
   // The room's pull requests: the Changes rows that are not local changes.
   let prs = $derived((changes ?? []).filter((c) => c.kind !== 'local'))
@@ -403,9 +404,7 @@
   let current = $derived(rooms.find((r) => r.id === roomId))
   let channels = $derived(channelModel(hierarchy))
   let channel = $derived(view.startsWith('channel:') ? channels.byId.get(view.slice(8)) : null)
-  let channelTrail = $derived(channel ? channels.trail(channel.id) : [])
   // A phone hides the older crumbs, so the current one carries the whole trail.
-  let trailTitle = $derived(['general', ...channelTrail.map((a) => a.name)].join(' / '))
   // The root DM is a session view like any other; it keeps the room's voice call button.
   let isRootDm = $derived(!!drill && (drill.rootSeat || drill.role === 'root'))
   let rootSeat = $derived(hierarchy.find((m) => m.owner)?.seat ?? {})
@@ -1653,6 +1652,7 @@
   // resync reloads what the app shows after the web event stream was lost:
   // events may have been missed while it was down.
   async function resync() {
+    mergeVersion += 1
     loadRooms()
     if (!roomId) return
     // Keep loaded history on screen when the event stream reconnects.
@@ -1791,6 +1791,7 @@
     if (['room.paused', 'room.resumed'].includes(ev.kind) && (!ev.roomId || ev.roomId === roomId)) roomSessionController?.load()
     // A prs event without a row says the room's PR settings changed.
     if ((ev.kind === 'prs' || ev.kind === 'changes') && (!ev.roomId || ev.roomId === roomId)) {
+      mergeVersion += 1
       reviewerSoon()
       if (ev.kind === 'changes' && !item) loadChanges()
     }
@@ -2215,7 +2216,7 @@
   <div class="nav" class:open={navOpen}>
     <RoomRail {rooms} working={workingAgents} selected={agentsNav ? '' : roomId} onselect={selectRoom} onmenu={(r, x, y, anchor) => (roomMenu = { r, x, y, anchor })} />
     {#if showSide || narrow}
-      <Sidebar agents={agentsNav ? agents : null} selected={drill?.address ?? ''} onroom={(id) => selectRoom(id)} {computers} {channels} channelUnread={feed?.channelUnread ?? {}} {showClosed} room={current ?? room} prs={openPRMap} onroommenu={(x, y, anchor) => (roomMenu = { r: current ?? room, x, y, anchor })} {view} questions={questions.filter((q) => q.state === 'open' && q.to === 'owner').length} {live} {runs} {dataDir} {ownerHue} {route} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onview={openView} onmember={openAgent} />
+      <Sidebar agents={agentsNav ? agents : null} selected={drill?.address ?? ''} onroom={(id) => selectRoom(id)} {computers} channelUnread={feed?.channelUnread ?? {}} room={current ?? room} prs={openPRMap} onroommenu={(x, y, anchor) => (roomMenu = { r: current ?? room, x, y, anchor })} {view} questions={questions.filter((q) => q.state === 'open' && q.to === 'owner').length} {live} {runs} {dataDir} {ownerHue} {route} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onview={openView} onmember={openAgent} />
     {/if}
   </div>
   {#if narrow && navOpen}
@@ -2275,14 +2276,8 @@
           <span class="title" title={room.repo}><span class="hash">#</span><span class="name">{workRow.label}</span></span>
           {#if workTabs && !narrow}<div class="dm-tabs"><Tabs tabs={workTabs} tab={view} label={workRow.label} onselect={openView} /></div>{/if}
         {:else}
-          <div class="trail">
-            <button class="crumb" class:current={!channelTrail.length} title={trailTitle} onclick={() => openView(GENERAL)}><span class="hash">#</span>general</button>
-            {#each channelTrail as ancestor, i (ancestor.id)}
-              <span class="slash" aria-hidden="true">/</span>
-              <button class="crumb" class:current={i === channelTrail.length - 1} title={trailTitle} onclick={() => openView(channelView(ancestor.id))}>{ancestor.name}</button>
-            {/each}
-          </div>
-          <span class="topic mono" title={room.repo}>{room.repo || ''}</span>
+          <span class="title" title={room.repo}><span class="name">{roomLabel(current ?? room)}</span></span>
+          {#if !narrow}<div class="dm-tabs"><Tabs tabs={roomTabs} tab={view === 'github' ? 'github' : GENERAL} label="Room" onselect={openView} /></div>{/if}
         {/if}
         {#if !drill}
         <span class="spacer"></span>
@@ -2296,7 +2291,7 @@
         {#if narrow}
         <!-- A phone keeps the bar for the page title, so the panel toggles and
              the channel look go into one menu. -->
-        <button class="icon" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); channelMenu = { x: r.right - 240, y: r.bottom + 6 } }} title="Channel actions" aria-label="Channel actions" aria-haspopup="menu" aria-expanded={!!channelMenu}>
+        <button class="icon" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); channelMenu = { x: r.right - 240, y: r.bottom + 6 } }} title="Room actions" aria-label="Room actions" aria-haspopup="menu" aria-expanded={!!channelMenu}>
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="5" cy="12" r="1.7" fill="currentColor" /><circle cx="12" cy="12" r="1.7" fill="currentColor" /><circle cx="19" cy="12" r="1.7" fill="currentColor" /></svg>
         </button>
         {:else}
@@ -2373,6 +2368,7 @@
             {/if}
           {/key}
         {:else}
+        {#if !workRow && narrow}<Tabs tabs={roomTabs} tab={view === 'github' ? 'github' : GENERAL} label="Room" onselect={openView} />{/if}
         {#if workTabs && narrow}<Tabs tabs={workTabs} tab={view} label={workRow.label} onselect={openView} />{/if}
         {#if view === 'files'}
           {#key room.id}<FileBrowser roomId={room.id} {narrow} {reveal} folder={revealFolder} onpr={openPR} />{/key}
@@ -2381,7 +2377,7 @@
         {:else if view === 'library'}
           {#key room.id}<Library roomId={room.id} {narrow} onopen={({ path, dir }) => { openView('files'); if (dir) revealFolder = { path }; else reveal = path }} />{/key}
         {:else if view === 'github' || view === 'issues'}
-          {#key `${room.id}:${view}`}<GitHub older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind={view === 'issues' ? 'issue' : 'pr'} integration={syncRepo?.integration ?? null} link={prLink} {changes} members={hierarchy} onask={askAgent} onsession={(m, tab) => { openSession(m); if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
+          {#key `${room.id}:${view}`}<GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind={view === 'issues' ? 'issue' : 'pr'} integration={syncRepo?.integration ?? null} link={prLink} {changes} members={hierarchy} onask={askAgent} onsession={(m, tab) => { openSession(m); if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
         {:else if view === 'terminal' && hasTerminal}
           {#key room.id}<Terminal roomId={room.id} ref={room.id} noRepo={!room.repo} {narrow} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
         {:else if view === 'questions'}
@@ -2452,7 +2448,7 @@
   <Menu x={roomMenu.x} y={roomMenu.y} title={roomLabel(roomMenu.r)} items={roomMenuItems(roomMenu.r)} onclose={() => { const a = roomMenu?.anchor; roomMenu = null; a?.focus?.() }} />
 {/if}
 {#if channelMenu}
-  <Menu x={channelMenu.x} y={channelMenu.y} title="Channel" items={channelMenuItems()} onclose={() => (channelMenu = null)} />
+  <Menu x={channelMenu.x} y={channelMenu.y} title="Room" items={channelMenuItems()} onclose={() => (channelMenu = null)} />
 {/if}
 {#if narrow && room && !drill && isChannel(view) && !workRow}
   <LookMenu scope={scopeOf(roomId, view)} anchored={false} bind:open={lookOpen} />
@@ -2556,17 +2552,6 @@
   .trail { display: contents; }
   .dm-crumb { max-width: 140px; }
   .who { display: inline-flex; align-items: center; gap: 8px; }
-  .topic {
-    color: var(--faint);
-    font-size: 12.5px;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    padding-left: 12px;
-    margin-left: 4px;
-    border-left: 1px solid var(--line);
-  }
   .chip { font-size: 12px; color: var(--muted); background: var(--raise); border-radius: 4px; padding: 1px 7px; }
   .spacer { flex: 1; }
   .meta { color: var(--faint); font-size: 13px; white-space: nowrap; }
@@ -2678,7 +2663,7 @@
     .panel > :global(*) { width: 100% !important; flex: 1; }
     .scrim { display: block; position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.5); }
     .bar { height: 52px; padding: 0 6px 0 4px; gap: 4px; }
-    .topic, .meta, .slash, .chip { display: none; }
+    .meta, .slash, .chip { display: none; }
     /* A phone finds through the palette or /find; the bar has no room for a second search icon. */
     .find-btn { display: none; }
     .dm-bar .back-name, .dm-bar .back-arrow, .dm-bar .dm-sep { display: none; }
@@ -2687,13 +2672,9 @@
     .dm-bar .dm-back::before { content: '←'; font-size: 18px; }
     .dm-threads, .dm-back { min-height: 44px; }
     .dm-bar > .icon:last-child { display: none; }
-    /* The page title needs a readable width: on a phone it is the only thing
-       that says which page is open, so it never shrinks past 96 px and the
-       bar's buttons shrink around it. A nested channel shows its current crumb
-       only: the whole trail stays in that crumb's tooltip. */
+    /* Keep the page title readable while the bar buttons keep their width. */
     .title, .crumb { min-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .trail { gap: 4px; }
-    .trail .crumb:not(.current), .trail .slash { display: none; }
     .crumb { flex: 0 1 auto; max-width: 40%; }
     /* A phone shows only the nearest parent of the breadcrumb. In a session,
        its arrow replaces the room arrow and goes up one level. */
