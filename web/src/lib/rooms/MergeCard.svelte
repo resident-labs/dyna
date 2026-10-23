@@ -11,7 +11,7 @@
   import { shortSha, commitUrl } from '../prs/pr.ts'
   import type { EventNotice } from '../api/room.ts'
   import type { EventPost, EventSurface } from './eventRenderers.ts'
-  import type { MergeStep } from './events.gen.ts'
+  import type { MergeReasonKind, MergeStep } from './events.gen.ts'
 
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
@@ -73,10 +73,37 @@
   let first = $derived(prs[0])
   // A local change has no PR number, so the card names it by its title.
   let name = $derived(first ? (first.number ? `#${first.number}` : first.title || 'the change') : '')
-  let title = $derived(type === 'decision' ? verbs.decision : `${verbs[type]} ${name} into ${payload?.base ?? ''}`)
+  // A fact that names one member (a return, a conflict, a member's own
+  // failure) is about that PR alone; a trial-wide fact names every member.
+  let affected = $derived(payload?.member ? prs.find((pr) => pr.number === payload?.member) : undefined)
+  let what = $derived(
+    payload?.member
+      ? affected?.number
+        ? `#${affected.number}`
+        : affected?.title || `#${payload.member}`
+      : prs.length > 1
+        ? `${prs.length} PRs: ${prs.map((pr) => (pr.number ? `#${pr.number}` : pr.title || 'the change')).join(', ')}`
+        : name,
+  )
+  // The card opens the PR it names: the affected member when the fact is about
+  // one, else the first member of the batch. An affected member the payload no
+  // longer lists names its number alone, so the card never points at another PR.
+  let subject = $derived(payload?.member ? affected : first)
+  let title = $derived(type === 'decision' ? verbs.decision : `${verbs[type]} ${what} into ${payload?.base ?? ''}`)
   let failedChecks = $derived(payload?.checks?.failed ?? [])
+  // The card says a cause once. The Go side words a cause the steward
+  // generated as a typed kind and leaves its text empty, so the evidence list
+  // and the reason line never repeat each other.
+  let reason = $derived(reasonLine(payload?.reason, payload?.reasonKind, failedChecks.length))
   let openCommit = $derived(commitUrl(first?.url, payload?.commit))
   let open = $state(false)
+
+  // reasonLine words a cause from its kind when the payload keeps no text.
+  function reasonLine(text: string | undefined, kind: MergeReasonKind | undefined, named: number) {
+    if (text) return text
+    if (kind === 'checks-failed' && !named) return 'Checks failed.'
+    return ''
+  }
 
   function openLink(url?: string) {
     if (url) openExternal(url)
@@ -95,7 +122,7 @@
   <div class="body">
     {#if decision}<p class="note">{decision.note}</p>{/if}
     {#if payload}
-      {#if first?.title}<p class="sub">{first.title}</p>{/if}
+      {#if subject?.title}<p class="sub">{subject.title}</p>{/if}
       <div class="steps" aria-hidden="true">
         {#each progress[type] as segment}<i class={segment}></i>{/each}
       </div>
@@ -105,14 +132,14 @@
         </div>
       {/if}
       <div class="facts">
-        {#if prs.length > 1}<span>{prs.length} PRs</span>{/if}
+        {#if affected && prs.length > 1}<span>batch of {prs.length}</span>{/if}
         {#if payload.checks && (payload.checks.total ?? 0) > 0}<span>checks <b>{payload.checks.done}/{payload.checks.total}</b></span>{/if}
         {#if payload.commit}<span>commit <b class="mono">{shortSha(payload.commit)}</b></span>{/if}
       </div>
-      {#if payload.reason && stepTones[type] === 'coral'}<p class="reason">{payload.reason}</p>{/if}
+      {#if reason && stepTones[type] === 'coral'}<p class="reason">{reason}</p>{/if}
       {#if failedChecks.length}<p class="reason">Failed checks: {failedChecks.join(', ')}</p>{/if}
       <div class="acts">
-        {#if first?.url}<button class="btn" type="button" onclick={() => openLink(first?.url)}>Open PR</button>{/if}
+        {#if subject?.url}<button class="btn" type="button" onclick={() => openLink(subject?.url)}>Open PR</button>{/if}
         {#if openCommit}<button class="btn" type="button" onclick={() => openLink(openCommit)}>Open commit</button>{/if}
       </div>
     {/if}

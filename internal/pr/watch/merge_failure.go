@@ -10,6 +10,20 @@ import (
 // mergeBatchFailedReason is the merge pause that a failed batch sets.
 const mergeBatchFailedReason = "batch trial failed; merging paused for recovery"
 
+// mergeFailCause classifies a failed trial's cause for the card. A failure that
+// names its failing checks is the checks-failed kind: the checks list is the
+// evidence, so the event carries no reason text that would repeat it. Any other
+// cause keeps the steward's or root's own words.
+func mergeFailCause(checks *room.MergeCheckSummary, reason string) (room.MergeReasonKind, string) {
+	if checks != nil && len(checks.Failed) > 0 {
+		return room.MergeChecksFailed, ""
+	}
+	if reason == "" {
+		return "", ""
+	}
+	return room.MergeReasonOther, reason
+}
+
 // A failed batch stays frozen until root chooses recovery. The pause is durable
 // before report preparation, so a reporting error cannot start work. The ci
 // read carries the failure evidence; a batch that a restart resumes from carries
@@ -72,10 +86,11 @@ func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b s
 		if ev.Checks == nil && len(b.FailChecks) > 0 {
 			ev.Checks = &room.MergeCheckSummary{Failed: b.FailChecks}
 		}
-		ev.Reason = mergeBatchFailedReason
-		if b.FailReason != "" {
-			ev.Reason = b.FailReason
+		reason := b.FailReason
+		if reason == "" {
+			reason = mergeBatchFailedReason
 		}
+		ev.ReasonKind, ev.Reason = mergeFailCause(ev.Checks, reason)
 		if err := s.postMergeNotice(ctx, anchor, "merge-batch-failed/"+trialIdentity(b), Notice{NeedsRoot: true, Kind: "ci", Merge: &ev, Text: b.RootReport}); err != nil {
 			return err
 		}

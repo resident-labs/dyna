@@ -552,3 +552,77 @@ test('a review result card shows all four results on feed and DM', () => {
     }
   }
 })
+
+// renderMergeCard mounts the merge card of one typed payload and returns its text.
+function renderMergeCard(payload: EventPayload): string {
+  const post = postFor('merge', 'failed', payload)
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.MergeCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+  web.flushSync()
+  const text = (target.textContent ?? '').trim()
+  web.unmount(mounted)
+  target.remove()
+  return text
+}
+
+test('a failed merge card says its failing checks once and names every member PR', () => {
+  const base = web.mergeEvent({ kind: 'merge', notice: { kind: 'failed' }, payload: fixtures['merge/failed'] })
+  assert.ok(base, 'the failed merge fixture is missing')
+  const batch = {
+    ...base,
+    prs: [
+      { number: 350, title: 'Close the issue once', url: 'https://github.com/acme/app/pull/350' },
+      { number: 352, title: 'Tidy the notice', url: 'https://github.com/acme/app/pull/352' },
+    ],
+    checks: { done: 2, total: 2, failed: ['go-test'] },
+    reason: undefined,
+    reasonKind: 'checks-failed' as const,
+  }
+  const text = renderMergeCard(batch)
+  assert.match(text, /2 PRs: #350, #352 into main/, `the title did not name the batch: ${text}`)
+  assert.equal(text.match(/go-test/g)?.length, 1, `the failed check shows more than once: ${text}`)
+  assert.doesNotMatch(text, /checks failed:/i, `the card repeated the cause: ${text}`)
+  // A kind with no named check still says the cause, worded from the kind.
+  const unnamed = renderMergeCard({ ...batch, checks: { done: 2, total: 2 } })
+  assert.match(unnamed, /Checks failed\./, `the kind did not word the cause: ${unnamed}`)
+  // A cause a person wrote, such as root's, still shows in full.
+  const returned = renderMergeCard({ ...base, type: 'returned', reason: 'root sent it back to fix the flake', reasonKind: 'root-return' })
+  assert.match(returned, /root sent it back to fix the flake/, `a free reason vanished: ${returned}`)
+})
+
+// A fact about one member of a batch, such as root returning that PR or its
+// conflict with another member, names that PR. It must not claim the whole
+// batch, which carries every member in its payload.
+test('a member-scoped merge card names that PR, not the whole batch', () => {
+  const base = web.mergeEvent({ kind: 'merge', notice: { kind: 'returned' }, payload: fixtures['merge/returned'] })
+  assert.ok(base, 'the returned merge fixture is missing')
+  const members = [
+    { number: 1, title: 'First member', url: 'https://github.com/acme/app/pull/1' },
+    { number: 2, title: 'Second member', url: 'https://github.com/acme/app/pull/2' },
+  ]
+  const cases = [
+    { type: 'returned' as const, reasonKind: 'root-return' as const, wants: /Returned by root: #2 into main/ },
+    { type: 'conflict' as const, reasonKind: 'conflict' as const, wants: /Merge conflict: #2 into main/ },
+  ]
+  for (const c of cases) {
+    const text = renderMergeCard({ ...base, ...c, prs: members, member: 2, label: 'PR #2', reason: 'named member' })
+    assert.match(text, c.wants, `${c.type} named the wrong subject: ${text}`)
+    assert.doesNotMatch(text, /#1/, `${c.type} claimed the other member: ${text}`)
+    assert.match(text, /batch of 2/, `${c.type} hid the batch: ${text}`)
+    assert.match(text, /Second member/, `${c.type} named the other member's title: ${text}`)
+    assert.doesNotMatch(text, /First member/, `${c.type} kept the other member's title: ${text}`)
+  }
+  // A published prefix leaves the failed member out of the trial's own list.
+  // The card names it by its typed number and points at no other PR.
+  const missing = renderMergeCard({ ...base, type: 'failed', prs: [members[0]], member: 2, reason: 'failed after the prefix', reasonKind: 'other' })
+  assert.match(missing, /Merge failed: #2 into main/, `an unlisted member lost its number: ${missing}`)
+  assert.doesNotMatch(missing, /#1|First member|Open PR/, `an unlisted member fell back to another PR: ${missing}`)
+})
+
+test('a single-PR merge card keeps the singular title', () => {
+  const base = web.mergeEvent({ kind: 'merge', notice: { kind: 'landed' }, payload: fixtures['merge/landed'] })
+  assert.ok(base, 'the landed merge fixture is missing')
+  const text = renderMergeCard(base)
+  assert.match(text, /Merged #242 into main/, `a one-PR title lost its shape: ${text}`)
+})
