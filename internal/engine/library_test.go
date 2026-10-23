@@ -56,9 +56,10 @@ func TestLibraryEngineTransport(t *testing.T) {
 	invoke("AddLibraryEntry", "repo", library.Entry{ID: "entry", Name: "Entry", Kind: "feature", Summary: "Entry.", Differs: "Old.", Owns: []string{"internal/**"}})
 	summary, empty := "Changed.", ""
 	invoke("UpdateLibraryEntry", "repo", "entry", library.Patch{Summary: &summary, Differs: &empty})
-	invoke("LinkLibraryEntry", "repo", "entry", []string{"README.md", "README.md"}, []string{"internal/*_test.go"})
+	invoke("LinkLibraryEntry", "repo", "entry", library.Links{Docs: []string{"README.md", "README.md"}, Tests: []string{"internal/*_test.go"}}, library.Links{})
+	invoke("LinkLibraryEntry", "repo", "entry", library.Links{}, library.Links{Tests: []string{"internal/*_test.go"}})
 	e := invoke("RetireLibraryEntry", "repo", "entry", "")
-	if !e.Retired || e.Summary != summary || e.Differs != "" || e.Name != "Entry" || len(e.Owns) != 1 || len(e.Docs) != 1 || len(e.Tests) != 1 {
+	if !e.Retired || e.Summary != summary || e.Differs != "" || e.Name != "Entry" || len(e.Owns) != 1 || len(e.Docs) != 1 || len(e.Tests) != 0 {
 		t.Fatalf("mutation result: %+v", e)
 	}
 	saved, err := (library.Store{DataDir: data}).Get("repo", "entry")
