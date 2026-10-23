@@ -49,6 +49,105 @@ func (s *Store) recordsDB() (*sql.DB, error) {
 	return db, err
 }
 
+// migrateRecords imports retained room files once at engine startup.
+func (s *Store) migrateRecords() error {
+	db, err := s.recordsDB()
+	if err != nil {
+		return err
+	}
+	var version string
+	err = db.QueryRow("SELECT value FROM meta WHERE key='room.records.import'").Scan(&version)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err := database.BackUpOnce(db); err != nil {
+			return fmt.Errorf("back up dyna.db before importing room records: %w", err)
+		}
+	} else if err != nil {
+		return err
+	}
+	var embeddedSeats []Record
+	err = database.Migrate(db, "room.records.import", 1, func(conn *sql.Conn, _ int) error {
+		var err error
+		embeddedSeats, err = s.importRoomFiles(context.Background(), conn)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	// Preserve rollback attachments only after the entire import commits.
+	for _, rec := range embeddedSeats {
+		s.mirrorSeat(state.For(db), rec)
+	}
+	return nil
+}
+
+// TODO: legacy/shim remove later — imports retained room.json and seat.json
+// only during room.records.import; remove after supported stores have migrated.
+func (s *Store) importRoomFiles(ctx context.Context, conn *sql.Conn) ([]Record, error) {
+	entries, err := os.ReadDir(s.root())
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var embeddedSeats []Record
+	for _, entry := range entries {
+		if !entry.IsDir() || !ValidID(entry.Name()) {
+			continue
+		}
+		id := entry.Name()
+		// A canonical row owns both columns, including an unchanged or detached seat.
+		var canonical bool
+		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM room_records WHERE id=?)", id).Scan(&canonical); err != nil {
+			return nil, err
+		}
+		if canonical {
+			continue
+		}
+		recordPath := filepath.Join(s.root(), id, "room.json")
+		seatPath := filepath.Join(s.root(), id, "seat.json")
+		if _, err := state.ImportMigration(ctx, conn, recordKey(id), recordPath, func(conn *sql.Conn, raw []byte) error {
+			var imported struct {
+				Record
+				Seat Seat `json:"seat"`
+			}
+			if err := json.Unmarshal(raw, &imported); err != nil {
+				return fmt.Errorf("import room %s: %w", recordPath, err)
+			}
+			if imported.ID != id {
+				return fmt.Errorf("import room %s: record ID does not match its directory", recordPath)
+			}
+			if err := putRecord(ctx, conn, imported.Record); err != nil {
+				return err
+			}
+			if imported.Seat == (Seat{}) {
+				return nil
+			}
+			if _, err := os.Lstat(seatPath); !os.IsNotExist(err) {
+				return err
+			}
+			if err := putSeat(ctx, conn, id, imported.Seat); err != nil {
+				return err
+			}
+			imported.Record.Seat = imported.Seat
+			embeddedSeats = append(embeddedSeats, imported.Record)
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+		if _, err := state.ImportMigration(ctx, conn, seatKey(id), seatPath, func(conn *sql.Conn, raw []byte) error {
+			var seat Seat
+			if err := json.Unmarshal(raw, &seat); err != nil {
+				return fmt.Errorf("import room seat %s: %w", seatPath, err)
+			}
+			return putSeat(ctx, conn, id, seat)
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return embeddedSeats, nil
+}
+
 // recordKey and seatKey name a room's rollback copies; roomKey is the stem
 // both lie under.
 func roomKey(id string) string   { return "rooms/" + id }
@@ -165,7 +264,7 @@ func (s *Store) readRecordHeld(id string) (Record, error) {
 // release wrote them. held says the caller holds the room lock; otherwise
 // it is taken only when a file is foreign.
 //
-// TODO: legacy/shim remove later — the earlier release reads and writes room.json and seat.json only; a file it wrote is imported first, on read, in place of an import walk at engine start. Remove with item 31, when no binary from before this release is alive.
+// TODO: legacy/shim remove later — the earlier release reads and writes room.json and seat.json only; import its later writes on read as well as at engine start. Remove with item 31, when no binary from before this release is alive.
 func (s *Store) importForeign(db *sql.DB, id string, held bool) error {
 	dir, err := s.dir(id)
 	if err != nil {
