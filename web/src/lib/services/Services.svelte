@@ -19,12 +19,6 @@
 
   let journal = $state([])
   $effect(() => createGoalEvents(api, (s) => (journal = s.items)).open(roomId, ''))
-  // The keeper's own check-ins stay in the entry journal; the card's clock reads them.
-  // It loads with the page's data refresh, so a transient failure (a device
-  // pairing mid-load) recovers on the next reload instead of staying empty.
-  let checkins = $state([])
-  const loadCheckins = () => { if (roomId) api.goalJournal(roomId, '', 1).then((p) => (checkins = p.items ?? []), () => {}) }
-
   // A room can hold thousands of sessions, so each list shows its newest
   // PAGE rows and loads the next page when its end scrolls into view.
   const PAGE = 200
@@ -40,7 +34,7 @@
 
   // The cards read the engine's existing calls; a failed call leaves its part empty.
   let data = $state(emptyData)
-  const reload = () => { loadCheckins(); loadServiceData(api, roomId, new Date(), untrack(() => data), (d) => (data = d)) }
+  const reload = () => { loadServiceData(api, roomId, new Date(), untrack(() => data), (d) => (data = d)) }
   $effect(() => {
     reload()
     const t = setInterval(reload, 60 * 1000)
@@ -58,7 +52,7 @@
   let cards = $derived(buildCards({
     now, pending: data.pending, services: data.services, reviewer: data.reviewer, queue: data.queue, history: data.history,
     changes: (changes ?? []).map((c) => ({ reviewAt: c.reviewAt, overlaps: c.overlaps?.length ?? 0 })),
-    journal, checkins, settings: data.settings, usage: data.usage, voice: data.voice, members,
+    journal, settings: data.settings, usage: data.usage, voice: data.voice, members,
   }))
 
   let filters = $state({ ...defaultFilters })
