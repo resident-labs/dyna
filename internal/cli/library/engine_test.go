@@ -30,6 +30,7 @@ func TestLibraryMutationsReturnEngineFailure(t *testing.T) {
 		{"add", "entry", "--name", "Entry", "--summary", "Entry.", "--owns", "agents/**"},
 		{"update", "entry", "--summary", "Changed."},
 		{"link", "entry", "--docs", "README.md"},
+		{"link", "entry", "--remove-docs", "README.md"},
 		{"retire", "entry"},
 	} {
 		c := Command(Options{DataDir: data})
@@ -54,9 +55,9 @@ func serveLibrary(t *testing.T, data string, actor authority.Actor) {
 	calls, err := websvc.Bind([]websvc.Binding{
 		{Name: "AddLibraryEntry", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: st.Add},
 		{Name: "UpdateLibraryEntry", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(repo, id string, p library.Patch) (library.Entry, error) { return st.Update(repo, id, p.Apply) }},
-		{Name: "LinkLibraryEntry", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(repo, id string, docs, tests []string) (library.Entry, error) {
+		{Name: "LinkLibraryEntry", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(repo, id string, add, remove library.Links) (library.Entry, error) {
 			return st.Update(repo, id, func(e *library.Entry) error {
-				e.Docs, e.Tests = library.Union(e.Docs, docs), library.Union(e.Tests, tests)
+				e.Docs, e.Tests = library.Relink(e.Docs, add.Docs, remove.Docs), library.Relink(e.Tests, add.Tests, remove.Tests)
 				return nil
 			})
 		}},
