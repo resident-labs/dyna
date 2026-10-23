@@ -17,14 +17,18 @@
     warning?: string
     busy?: boolean
     oncancel: () => void
-    onpaste?: (code: string) => void
+    onpaste?: (code: string) => boolean | void | Promise<boolean | void>
   } = $props()
 
   let pasted = $state('')
   let selectedChoice = $state('')
+  let submittedChoiceStep = $state('')
   let copied = $state(false)
   let copyTimer: ReturnType<typeof setTimeout> | undefined
   const choices = $derived(signIn.choices ?? [])
+  // Polls return new objects for the same step, so use its displayed content.
+  const choiceStep = $derived(JSON.stringify([signIn.url, signIn.code, signIn.message, choices]))
+  const choicePending = $derived(choices.length > 0 && submittedChoiceStep === choiceStep)
   const status = $derived(signInStatus(signIn))
   $effect(() => {
     if (!choices.some((choice) => choice.id === selectedChoice)) selectedChoice = choices[0]?.id ?? ''
@@ -46,11 +50,17 @@
     }
   }
 
-  function send() {
+  async function send() {
     const code = choices.length ? selectedChoice : pasted.trim()
-    if (!code || busy) return
+    if (!code || busy || choicePending) return
+    const step = choices.length ? choiceStep : ''
+    if (step) submittedChoiceStep = step
     pasted = ''
-    onpaste?.(code)
+    try {
+      if (await onpaste?.(code) === false && submittedChoiceStep === step) submittedChoiceStep = ''
+    } catch {
+      if (submittedChoiceStep === step) submittedChoiceStep = ''
+    }
   }
 </script>
 
@@ -71,7 +81,7 @@
       {#if choices.length}
         <label>
           <span class="muted small">Provider or login method</span>
-          <select bind:value={selectedChoice} disabled={busy} aria-label="Sign-in option">
+          <select bind:value={selectedChoice} disabled={busy || choicePending} aria-label="Sign-in option">
             {#each choices as choice (choice.id)}<option value={choice.id}>{choice.label}</option>{/each}
           </select>
         </label>
@@ -81,7 +91,7 @@
           <input bind:value={pasted} autocomplete="off" spellcheck="false" disabled={busy} aria-label="Sign-in response" />
         </label>
       {/if}
-      <button type="submit" class="btn" disabled={busy || (choices.length ? !selectedChoice : !pasted.trim())}>Continue</button>
+      <button type="submit" class="btn" disabled={busy || choicePending || (choices.length ? !selectedChoice : !pasted.trim())}>Continue</button>
     </form>
   {/if}
   <div class="row">
