@@ -97,6 +97,19 @@ func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 	}
 	// A run this engine began, which is still live.
 	live := start(Hook{Name: "update", Event: MainUpdated, Command: "make update", Timeout: "30s"}, Event{Event: MainUpdated}, now)
+	// A global built-in hook has no repository and no room, so its interrupted
+	// run can only end in the hook store that the Hooks screen reads.
+	global, globalLog, err := s.newRun(ctx, repoid.Repo{ID: globalKey}, Event{Event: Schedule}, Hook{Name: "maintenance", Label: "Maintenance", Event: Schedule, Timeout: "30s"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := globalLog.Close(); err != nil {
+		t.Fatal(err)
+	}
+	global.StartedAt = now.Add(-3 * time.Hour)
+	if _, err := s.saveRun(ctx, global); err != nil {
+		t.Fatal(err)
+	}
 
 	// Every hook is gone before the engine settles these runs.
 	for _, name := range []string{"update", "finish", "legacy"} {
@@ -123,6 +136,17 @@ func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 	}
 	if byID[live.ID].Result != "pending" {
 		t.Fatalf("a live run was settled: %+v", byID[live.ID])
+	}
+	// The global run ends in the hook store, without a room to post in.
+	globals, err := s.runs(ctx, globalKey, "")
+	if err != nil || len(globals) != 1 {
+		t.Fatalf("global runs = %+v, %v", globals, err)
+	}
+	if globals[0].Result != "error" || !globals[0].FinishedAt.Equal(now) {
+		t.Fatalf("global run = %+v", globals[0])
+	}
+	if log, err := os.ReadFile(global.LogPath); err != nil || !strings.Contains(string(log), "the engine stopped during this run") {
+		t.Fatalf("global log = %q, %v", log, err)
 	}
 	log, err := os.ReadFile(left.LogPath)
 	if err != nil || !strings.Contains(string(log), "the engine stopped during this run") {
