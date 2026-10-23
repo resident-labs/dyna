@@ -20,6 +20,7 @@
   import { expedite, goalExpedited, prExpedited } from '../rooms/expedite.ts'
   import type { Goal } from '../api/goal.ts'
   import PRGlyph from './PRGlyph.svelte'
+  import MentionInChat from './MentionInChat.svelte'
   import PROverlaps from './PROverlaps.svelte'
   import PRChecks from './PRChecks.svelte'
   import PRCommits from './PRCommits.svelte'
@@ -48,6 +49,7 @@
     tab?: string
     ontab?: (tab: string) => void
     onback?: (() => void) | null
+    onmention?: (() => void) | null
     onuntrack?: ChangeAction | null
     onresume?: ChangeAction | null
     ontrack?: TrackAction | null
@@ -59,7 +61,7 @@
     onexpedite?: ((goal: Goal) => void | Promise<void>) | null
     onlinkgoal?: ((change: Row, goalId: string) => void | Promise<void>) | null
   }
-  let { change, detail = null, detailError = '', roomId, names = {}, review = true, merge = null, standing = null, tab = $bindable('conversation'), ontab = () => {}, onback = null, onuntrack = null, onresume = null, ontrack = null, onchange = () => {}, onauthor = null, onreviewer = null, actions = null, goals = [], onexpedite = null, onlinkgoal = null }: Props = $props()
+  let { change, detail = null, detailError = '', roomId, names = {}, review = true, merge = null, standing = null, tab = $bindable('conversation'), ontab = () => {}, onback = null, onmention = null, onuntrack = null, onresume = null, ontrack = null, onchange = () => {}, onauthor = null, onreviewer = null, actions = null, goals = [], onexpedite = null, onlinkgoal = null }: Props = $props()
   let linking = $state(false)
   let pick = $state('')
   let xpBusy = $state(false)
@@ -131,6 +133,7 @@
     <div class="title">
       <h1>{changeTitle(change)} <span class="num">{changeName(change)}</span></h1>
       {#if !isLocal(change) && change.url}<button class="ghb" onclick={() => change.url && openExternal(change.url)} title="Open on GitHub">GitHub ↗</button>{/if}
+      {#if onmention}<MentionInChat {onmention} />{/if}
     </div>
     <p class="meta">
       {#if !isLocal(change)}<span class="badge {gh.tone}"><PRGlyph it={change} size={14} />{gh.label}</span>{/if}

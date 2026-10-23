@@ -10,11 +10,23 @@ export interface Reference {
 }
 
 export const referenceKey = (reference: Reference) => `${reference.kind}:${reference.number}`
-export const referenceLabel = (reference: Reference) => reference.kind === 'room_issue' ? 'Issue' : `${reference.kind === 'pr' ? 'PR' : 'Issue'} #${reference.number}`
+// A room issue shows its per-room number as D-12. A stored message ID has no
+// short label, so it shows only "Issue".
+const roomIssueNumber = (number: number | string) => String(number).trim().toLowerCase().match(/^#?d-?([0-9]+)$/)?.[1]
+export const referenceLabel = (reference: Reference) => {
+  if (reference.kind !== 'room_issue') return `${reference.kind === 'pr' ? 'PR' : 'Issue'} #${reference.number}`
+  const number = roomIssueNumber(reference.number)
+  return number ? `Issue D-${number}` : 'Issue'
+}
 
 export function matchReferences(references: Reference[], query: string) {
   const search = query.replace(/^#/, '').trim().toLowerCase()
-  return references.filter((reference) => `${reference.number} ${reference.title}`.toLowerCase().includes(search))
+  // D-12, d12 and 12 all find the same room issue.
+  const text = (reference: Reference) => {
+    const number = reference.kind === 'room_issue' ? roomIssueNumber(reference.number) : ''
+    return [reference.number, number && `D-${number}`, number && `d${number}`, reference.title].filter(Boolean).join(' ').toLowerCase()
+  }
+  return references.filter((reference) => text(reference).includes(search))
     .sort((a, b) => Number(b.state.toLowerCase() === 'open') - Number(a.state.toLowerCase() === 'open'))
     .slice(0, 12)
 }
@@ -38,14 +50,16 @@ function rows(v: unknown, list: boolean): Row[] {
   return v.items.filter(isRow)
 }
 
-function isRoomIssue(v: unknown): v is { id: string; title: string; state: string } {
-  return isRecord(v) && isString(v.id) && isString(v.title) && isString(v.state)
+// number is absent on an engine older than the D-N change. In Go it does not
+// exist at all, so it is optional here.
+function isRoomIssue(v: unknown): v is { id: string; number?: number; title: string; state: string } {
+  return isRecord(v) && isString(v.id) && (v.number === undefined || (typeof v.number === 'number' && Number.isInteger(v.number) && v.number > 0)) && isString(v.title) && isString(v.state)
 }
 
-// issueRows reads the room's issues, whose id stands in for the number.
+// issueRows reads the room's issues, whose number is shown as D-12.
 function issueRows(v: unknown, roomId: string): Row[] {
   if (!Array.isArray(v)) return []
-  return v.filter(isRoomIssue).map((it) => ({ number: it.id, title: it.title, state: it.state, url: `#room=${encodeURIComponent(roomId)}&view=issues` }))
+  return v.filter(isRoomIssue).map((it) => ({ number: it.number ? `D-${it.number}` : it.id, title: it.title, state: it.state, url: `#room=${encodeURIComponent(roomId)}&view=issues` }))
 }
 
 export async function loadReferences(roomId: string, query = ''): Promise<Reference[]> {
