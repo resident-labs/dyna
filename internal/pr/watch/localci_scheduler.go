@@ -261,12 +261,16 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 // on a 16-slot node: three heads took 121 s and gave 14.8 runs per 10 minutes.
 const registeredCIRunSlots = 6
 
-// Prefer the node with the most unreserved check slots.
+// Prefer the node with the most unreserved check slots. A machine that is low
+// on disk takes no new run, so its work waits for a node that has space.
 func availableCINode(nodes []localci.Node, active map[string]int) *localci.Node {
 	var chosen *localci.Node
 	free := 0
 	for i := range nodes {
 		node := &nodes[i]
+		if node.LowDisk {
+			continue
+		}
 		if available := node.Slots - active[node.Name]; node.Enabled && available > free {
 			chosen, free = node, available
 		}

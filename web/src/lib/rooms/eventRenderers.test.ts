@@ -47,6 +47,13 @@ const web = await import(pathToFileURL(app).href)
 // One typed fixture per registered event. A new event fails the test until it
 // gets a fixture and a card.
 const fixtures: Record<string, EventPayload> = {
+  'machine/low-disk': {
+    name: 'hermeslab',
+    freeBytes: 3 * 1024 ** 3,
+    floorBytes: 20 * 1024 ** 3,
+    summary: '3.0 GiB free, needs 20 GiB',
+    atMs: 1792774800000,
+  },
   'worktree/kept': {
     owner: 'session-1',
     path: '/home/a/.dyna-worktrees/dyna-4708ae0b/composer-tidy',
@@ -222,6 +229,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('crossings' in payload) return payload.run
   if ('children' in payload) return payload.children[0]?.name ?? payload.parent
   if ('ruleId' in payload) return payload.ruleId
+  if ('floorBytes' in payload) return payload.name
   return payload.detail || payload.reason
 }
 

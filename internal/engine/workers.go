@@ -310,7 +310,9 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 		sessions: func(ctx context.Context) error { return deliverSessions(ctx, rooms.Notify.Sessions, signals) },
 		merges:   prs.MergeTick,
 		sync:     prs.SyncTick,
-		probe:    func(ctx context.Context) (time.Time, error) { return probeMachines(ctx, load) },
+		probe: func(ctx context.Context) (time.Time, error) {
+			return probeMachines(ctx, load, machineDiskAlerter{notify: rooms.Notify})
+		},
 		caches: func(ctx context.Context) (time.Time, error) {
 			return localci.CleanCachesTick(ctx, store.DataDir())
 		},

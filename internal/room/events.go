@@ -84,6 +84,9 @@ const (
 	TypeSlowTest EventType = "slow-test"
 	// TypeChanged is a rule that someone added, edited or removed.
 	TypeChanged EventType = "changed"
+
+	FamilyMachine EventFamily = "machine"
+	TypeLowDisk   EventType   = "low-disk"
 )
 
 // The issue family posts one event per fact about a room issue. Every filer
@@ -667,6 +670,36 @@ func (MergeDecisionEvent) eventSubject() string { return "decision" }
 // event with a fresh ID, so two equal notes stay two decisions.
 func (d MergeDecisionEvent) eventDedupe() string { return d.Note }
 
+// MachineEvent tells a room's root that a machine stopped taking CI work. It
+// carries the sizes the probe read and the floor it missed, so the card says
+// what to free without reading the post text.
+type MachineEvent struct {
+	Name string `json:"name"`
+	// FreeBytes and FloorBytes are the free space of the machine's /var/tmp and
+	// the floor that free space missed.
+	FreeBytes  int `json:"freeBytes"`
+	FloorBytes int `json:"floorBytes"`
+	// Summary is the short facts line the agent text reads: the two sizes as a
+	// person reads them.
+	Summary string `json:"summary"`
+	// AtMS is when Dyna posted the alert, in milliseconds since the Unix epoch.
+	// Two low-disk periods of one machine are two alerts, because each has its
+	// own time.
+	AtMS int `json:"atMs"`
+}
+
+func (MachineEvent) eventFamily() EventFamily { return FamilyMachine }
+func (MachineEvent) eventType() EventType     { return TypeLowDisk }
+
+// eventSubject is the machine, so the alerts of one machine fold into one card.
+func (m MachineEvent) eventSubject() string { return m.Name }
+
+// eventDedupe keys one alert per machine and probe, so a retried alert of the
+// same transition posts once and a later period posts again.
+func (m MachineEvent) eventDedupe() string {
+	return strconv.Itoa(m.AtMS)
+}
+
 // EventSpec is one entry of the system event registry. The web app draws the
 // event with Renderer and reads its typed payload; Text is the one-line
 // summary that agents and `dyna room log` read.
@@ -920,6 +953,17 @@ var eventSpecs = []EventSpec{
 		Quiet:    true,
 		Wake:     WakeNever,
 		Text:     "{note}",
+	},
+	// A machine that is low on disk warns root once per low-disk period, and
+	// holds its CI work until space is freed.
+	{
+		Family:   FamilyMachine,
+		Type:     TypeLowDisk,
+		Renderer: "MachineDiskCard",
+		Payload:  reflect.TypeOf(MachineEvent{}),
+		Wake:     WakeRootIfNeeded,
+		Once:     true,
+		Text:     "Machine {name} is low on disk: {summary}. Dyna starts no CI there until space is freed.",
 	},
 	// PR events reach the change's author, but they do not all wake it: the
 	// watcher marks an informational notice NoWake, and a notice that falls
@@ -1519,6 +1563,22 @@ func (m Message) MergeDecision() (MergeDecisionEvent, bool) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil {
 		return MergeDecisionEvent{}, false
+	}
+	return ev, true
+}
+
+// Machine returns the payload of a low-disk machine event. It decodes the
+// stored bytes strictly, so an unknown field is a failed read rather than a
+// silent mismatch.
+func (m Message) Machine() (MachineEvent, bool) {
+	if m.Kind != string(FamilyMachine) || m.Notice.Kind != string(TypeLowDisk) || len(m.Payload.raw) == 0 {
+		return MachineEvent{}, false
+	}
+	var ev MachineEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil {
+		return MachineEvent{}, false
 	}
 	return ev, true
 }

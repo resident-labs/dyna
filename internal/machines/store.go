@@ -70,6 +70,7 @@ type Machine struct {
 	// The probe fields are what the last probe read. A machine that has never
 	// been probed has Health unknown and no capabilities.
 	Health       Health       `json:"health"`
+	HealthReason HealthReason `json:"healthReason,omitempty"`
 	Capabilities Capabilities `json:"capabilities"`
 	Load         Load         `json:"load"`
 	// LastProbe is when the last probe started, and LastSeen when a probe last
@@ -151,7 +152,7 @@ func (m Machine) Validate() error {
 	return nil
 }
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -165,6 +166,7 @@ const schema = `CREATE TABLE machines (
 	updated_ms     INTEGER NOT NULL,
 	capabilities   TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(capabilities)),
 	health         TEXT    NOT NULL DEFAULT 'unknown',
+	health_reason  TEXT    NOT NULL DEFAULT '',
 	last_probe_ms  INTEGER NOT NULL DEFAULT 0,
 	last_seen_ms   INTEGER NOT NULL DEFAULT 0,
 	probe_error    TEXT    NOT NULL DEFAULT '',
@@ -183,11 +185,18 @@ var probeColumns = []string{
 	`ALTER TABLE machines ADD COLUMN last_load TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(last_load))`,
 }
 
+// degradedColumns add the reason of a degraded health to a version 2 table.
+// A row stored before the reason existed is online or offline, so it needs
+// none.
+var degradedColumns = []string{
+	`ALTER TABLE machines ADD COLUMN health_reason TEXT NOT NULL DEFAULT ''`,
+}
+
 // registryColumns are the columns a machine edit writes. The probe columns
 // change only through SaveProbe.
 const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load`
+const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -222,22 +231,38 @@ func (s Store) db() (*sql.DB, error) {
 }
 
 // prepare runs inside the migration. Version 1 created the registry and
-// imported the old local CI nodes; version 2 added the probe columns.
+// imported the old local CI nodes; version 2 added the probe columns, and
+// version 3 added the reason of a degraded health.
 func prepare(conn *sql.Conn, old int) error {
 	ctx := context.Background()
 	if old >= schemaVersion {
 		return nil
 	}
+	if old == 0 {
+		if _, err := conn.ExecContext(ctx, schema); err != nil {
+			return err
+		}
+		if err := addLocal(ctx, conn); err != nil {
+			return err
+		}
+		return importLocalCINodes(ctx, conn)
+	}
 	if old == 1 {
-		return addProbeColumns(ctx, conn)
+		if err := addProbeColumns(ctx, conn); err != nil {
+			return err
+		}
 	}
-	if _, err := conn.ExecContext(ctx, schema); err != nil {
-		return err
+	return addDegradedColumn(ctx, conn)
+}
+
+// addDegradedColumn adds the reason of a degraded health to a version 2 table.
+func addDegradedColumn(ctx context.Context, conn *sql.Conn) error {
+	for _, statement := range degradedColumns {
+		if _, err := conn.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("add degradation column: %w", err)
+		}
 	}
-	if err := addLocal(ctx, conn); err != nil {
-		return err
-	}
-	return importLocalCINodes(ctx, conn)
+	return nil
 }
 
 // addProbeColumns adds the probe columns to a version 1 table.
@@ -453,10 +478,10 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var roles, capabilities, health, load, probeError string
+	var roles, capabilities, health, reason, load, probeError string
 	var created, updated, probed, seen int64
 	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &probed, &seen, &probeError, &load); err != nil {
+		&capabilities, &health, &reason, &probed, &seen, &probeError, &load); err != nil {
 		return Machine{}, err
 	}
 	if err := json.Unmarshal([]byte(roles), &m.Roles); err != nil {
@@ -468,7 +493,7 @@ func scan(row scanner) (Machine, error) {
 	if err := json.Unmarshal([]byte(load), &m.Load); err != nil {
 		return Machine{}, fmt.Errorf("machine %s load: %w", m.Name, err)
 	}
-	m.Health, m.ProbeError = parseHealth(health), probeError
+	m.Health, m.HealthReason, m.ProbeError = parseHealth(health), parseHealthReason(reason), probeError
 	m.Created = time.UnixMilli(created)
 	m.Updated = time.UnixMilli(updated)
 	if probed > 0 {
@@ -484,6 +509,11 @@ func scan(row scanner) (Machine, error) {
 // disabled while it is turned off. A machine that comes back starts unknown,
 // so no client reads the last probe of a machine that was off.
 const healthOnToggle = `CASE WHEN ? = 0 THEN 'disabled' WHEN health = 'disabled' THEN 'unknown' ELSE health END`
+
+// reasonOnToggle drops the reason of a degraded health once the machine is off
+// or comes back, so a stored row never claims a reason it no longer holds. It
+// reads the row's old health, as healthOnToggle does.
+const reasonOnToggle = `CASE WHEN ? = 0 OR health IN ('disabled','unknown') THEN '' ELSE health_reason END`
 
 // healthOnCreate is the health a new machine starts with.
 func healthOnCreate(enabled bool) Health {
@@ -501,17 +531,18 @@ func flag(on bool) int {
 	return 0
 }
 
-// SaveProbe stores what one probe read. A failed probe keeps the capabilities
-// and the load of the last good probe, sets the machine offline and records
-// the error. A machine that is off stores disabled and nothing else.
-func (s Store) SaveProbe(ctx context.Context, id string, r ProbeResult) error {
+// SaveProbe stores what one probe read, and returns the stored row. A failed
+// probe keeps the capabilities and the load of the last good probe, sets the
+// machine offline and records the error. A machine that is off stores disabled
+// and nothing else.
+func (s Store) SaveProbe(ctx context.Context, id string, r ProbeResult) (Machine, error) {
 	db, err := s.db()
 	if err != nil {
-		return err
+		return Machine{}, err
 	}
 	stored, err := getByID(ctx, db, id)
 	if err != nil {
-		return err
+		return Machine{}, err
 	}
 	health := r.Health
 	if !stored.Enabled {
@@ -520,17 +551,25 @@ func (s Store) SaveProbe(ctx context.Context, id string, r ProbeResult) error {
 	if r.At.IsZero() {
 		r.At = time.Now()
 	}
+	// A machine that is off or unreachable has no reason of its own: only a
+	// probe that reached it can degrade it.
+	reason := ReasonNone
+	if health == HealthOnline || health == HealthDegraded {
+		reason = r.Reason
+	} else {
+		health = r.Health
+	}
 	// Only a probe that reached the machine replaces what the last good probe
 	// read, so a machine that is off keeps its capabilities for the owner.
 	var capabilities, load string
-	if health == HealthOnline {
+	if health == HealthOnline || health == HealthDegraded {
 		rawCaps, err := json.Marshal(r.Capabilities)
 		if err != nil {
-			return err
+			return Machine{}, err
 		}
 		rawLoad, err := json.Marshal(r.Load)
 		if err != nil {
-			return err
+			return Machine{}, err
 		}
 		capabilities, load = string(rawCaps), string(rawLoad)
 	}
@@ -539,21 +578,36 @@ func (s Store) SaveProbe(ctx context.Context, id string, r ProbeResult) error {
 		probeErr = r.Err
 	}
 	probed := r.At.UnixMilli()
-	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: probeKeyPrefix + stored.Name}, func(conn *sql.Conn) error {
-		if health == HealthOnline {
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET capabilities=?, last_load=?, health=?, last_probe_ms=?, last_seen_ms=?, probe_error='' WHERE id=?`,
-				capabilities, load, string(health), probed, probed, id)
+	// A probe that starts or ends a hold changes where CI work can run, so it
+	// wakes the CI workers. Any other probe result changes no work.
+	key := probeKeyPrefix + stored.Name
+	if heldAfter := holdsCI(health, reason); heldAfter != holdsCI(stored.Health, stored.HealthReason) {
+		key = holdKeyPrefix + stored.Name
+	}
+	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: key}, func(conn *sql.Conn) error {
+		if health == HealthOnline || health == HealthDegraded {
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET capabilities=?, last_load=?, health=?, health_reason=?, last_probe_ms=?, last_seen_ms=?, probe_error='' WHERE id=?`,
+				capabilities, load, string(health), string(reason), probed, probed, id)
 			return err
 		}
 		if health == HealthDisabled {
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, last_probe_ms=?, probe_error='' WHERE id=?`,
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, health_reason='', last_probe_ms=?, probe_error='' WHERE id=?`,
 				string(health), probed, id)
 			return err
 		}
-		_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, last_probe_ms=?, probe_error=? WHERE id=?`,
+		_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, health_reason='', last_probe_ms=?, probe_error=? WHERE id=?`,
 			string(health), probed, probeErr, id)
 		return err
 	})
+	if err != nil {
+		return Machine{}, err
+	}
+	return getByID(ctx, db, id)
+}
+
+// holdsCI reports whether a stored health and reason hold CI work.
+func holdsCI(health Health, reason HealthReason) bool {
+	return health == HealthDegraded && reason == ReasonLowDisk
 }
 
 // Save inserts a machine, or updates the stored row that has this ID, and
@@ -585,8 +639,8 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	}
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+` WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+` WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
