@@ -450,6 +450,9 @@ func storedRecords(db *sql.DB) ([]Record, error) {
 // deleteRows removes room id's record, issue, pin and owner-read rows and the
 // stamps of its rollback copies in one write, and raises rooms.revision.
 func (s *Store) deleteRows(id string) error {
+	if _, err := s.postNormalizationsDB(); err != nil {
+		return err
+	}
 	if _, err := s.issuesDB(); err != nil {
 		return err
 	}
@@ -475,6 +478,7 @@ func (s *Store) deleteRows(id string) error {
 			"DELETE FROM room_pins WHERE room_id = ?",
 			"DELETE FROM room_pin_revisions WHERE room_id = ?",
 			"DELETE FROM room_owner_reads WHERE room_id = ?",
+			"DELETE FROM room_post_normalizations WHERE room_id = ?",
 		} {
 			if _, err := conn.ExecContext(ctx, q, id); err != nil {
 				return err
