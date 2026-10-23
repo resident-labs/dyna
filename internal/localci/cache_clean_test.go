@@ -23,8 +23,8 @@ import (
 func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 	command := cacheCleanCommand("hermeslab", true, ciCacheCleanAge)
 	for _, keep := range []string{
-		"-xdev", `-maxdepth 0 -mmin +"$age_min" ! -type l`, "rm -rf --one-file-system",
-		"DYNA_CI_CLEAN_AGE_MIN=2880", "flock -n \"$1/.active\" true", `exec 8>>"$1/caches.lock"`, "flock -n 8",
+		"-xdev", `-maxdepth 0 -mmin +"$age" ! -type l`, "rm -rf --one-file-system",
+		"DYNA_CI_CLEAN_AGE_MIN=2880", "DYNA_CI_CLEAN_RUN_AGE_MIN=1440", "flock -n \"$1/.active\" true", `exec 8>>"$1/caches.lock"`, "flock -n 8",
 	} {
 		if !strings.Contains(command, keep) {
 			t.Fatalf("cleanup command lacks %q", keep)
@@ -67,13 +67,59 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 // runCacheClean runs the embedded script itself, with the roots a test chooses.
 func runCacheClean(t *testing.T, roots string, dryRun bool) ([]byte, error) {
 	t.Helper()
+	return runCacheCleanBody(t, roots, dryRun, ciCacheCleanBody)
+}
+
+func runCacheCleanBody(t *testing.T, roots string, dryRun bool, body string) ([]byte, error) {
+	t.Helper()
 	dry := "0"
 	if dryRun {
 		dry = "1"
 	}
 	command := "DYNA_CI_CLEAN_DRY=" + dry + " DYNA_CI_CLEAN_ROOTS=" + shellquote.Quote(roots) +
-		" bash -o pipefail -c " + shellquote.Quote(ciCacheCleanBody)
+		" bash -o pipefail -c " + shellquote.Quote(body)
 	return exec.Command("bash", "-c", command).CombinedOutput()
+}
+
+func TestCacheCleanPrunesRunFoldersAfterOneDay(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the cleanup refuses to run as root")
+	}
+	base := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-run-age", os.Getpid()))
+	t.Cleanup(func() { os.RemoveAll(base) })
+	now := time.Now()
+	for name, modified := range map[string]time.Time{
+		"runs/old":      now.Add(-25 * time.Hour),
+		"runs/recent":   now.Add(-23 * time.Hour),
+		"go-mod/module": now.Add(-25 * time.Hour),
+		"repo.git":      now.Add(-25 * time.Hour),
+	} {
+		dir := filepath.Join(base, name)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(dir, modified, modified); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Relocate only the legacy root so the test exercises its top-level sweep
+	// without touching the machine's real legacy tree.
+	body := strings.Replace(ciCacheCleanBody, "legacy=/var/tmp/dyna-local-ci", "legacy="+shellquote.Quote(base), 1)
+	if body == ciCacheCleanBody {
+		t.Fatal("could not relocate the legacy cleanup root")
+	}
+	out, err := runCacheCleanBody(t, base, false, body)
+	if err != nil {
+		t.Fatalf("cleanup failed: %v: %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(base, "runs", "old")); !os.IsNotExist(err) {
+		t.Fatalf("run folder older than a day stayed: %v: %s", err, out)
+	}
+	for _, kept := range []string{"runs/recent", "go-mod/module", "repo.git"} {
+		if _, err := os.Stat(filepath.Join(base, kept)); err != nil {
+			t.Fatalf("cleanup removed %s before its retention age: %v: %s", kept, err, out)
+		}
+	}
 }
 
 // TestCacheCleanRemovesOnlyWhatNoRunUses checks the liveness rule on a real tree

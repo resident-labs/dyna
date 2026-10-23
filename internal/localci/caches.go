@@ -20,10 +20,13 @@ import (
 	"dyna-agent/internal/shellquote"
 )
 
-// ciCacheCleanAge is how long a run directory or a cache entry stays. Runs
-// remove their own directory when they finish, so this only clears leftovers
-// from a run whose engine or SSH client died.
-const ciCacheCleanAge = 48 * time.Hour
+// Runs remove their own directory when they finish, so the sweep only clears
+// leftovers from a run whose engine or SSH client died. Cache entries stay
+// longer because they make later runs faster.
+const (
+	ciRunCleanAge   = 24 * time.Hour
+	ciCacheCleanAge = 48 * time.Hour
+)
 
 // ciDiskFloorGB is the free space below which a run cleans the caches before
 // it starts.
@@ -62,6 +65,7 @@ func cacheCleanCommand(node string, dryRun bool, age time.Duration) string {
 	}
 	return "DYNA_CI_CLEAN_DRY=" + dry +
 		" DYNA_CI_CLEAN_AGE_MIN=" + strconv.FormatInt(int64(age/time.Minute), 10) +
+		" DYNA_CI_CLEAN_RUN_AGE_MIN=" + strconv.FormatInt(int64(ciRunCleanAge/time.Minute), 10) +
 		" DYNA_CI_CLEAN_ROOTS=" + shellquote.Quote(cacheBase(node)+" "+legacyCacheDir) +
 		" bash -o pipefail -c " + shellquote.Quote(ciCacheCleanBody)
 }

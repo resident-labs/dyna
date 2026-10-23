@@ -136,9 +136,18 @@ func TestReadArchiveRejectsPathsAndLinks(t *testing.T) {
 
 func TestRunCleansUpAfterTransportFailure(t *testing.T) {
 	var calls []string
+	reportsCopied := false
 	r := Runner{DataDir: t.TempDir(), Remote: "ci@example:/tmp/cache", Command: func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 		call := name + " " + strings.Join(args, " ")
 		calls = append(calls, call)
+		if strings.Contains(call, "tar -C") {
+			reportsCopied = true
+		}
+		if strings.Contains(call, "rm -rf --one-file-system") {
+			if !reportsCopied || !strings.Contains(call, "/tmp/cache/runs/") {
+				t.Errorf("legacy run folder removed before report retrieval or by the wrong path: %s", call)
+			}
+		}
 		if name == "git" && args[0] == "rev-parse" {
 			fmt.Fprintln(out, strings.Repeat("b", 40))
 		}
@@ -154,8 +163,9 @@ func TestRunCleansUpAfterTransportFailure(t *testing.T) {
 	if result.Status != "error" {
 		t.Fatalf("status=%s", result.Status)
 	}
-	if !strings.Contains(strings.Join(calls, "\n"), "worktree remove") {
-		t.Fatal("no cleanup")
+	all := strings.Join(calls, "\n")
+	if !strings.Contains(all, "worktree remove") || !strings.Contains(all, "rm -rf --one-file-system") {
+		t.Fatal("legacy run did not remove its worktree and run folder")
 	}
 }
 
