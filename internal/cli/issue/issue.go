@@ -1,4 +1,4 @@
-// Package issue exposes the room issue board under dyna git.
+// Package issue exposes the room issue board as `dyna issue`.
 package issue
 
 import (

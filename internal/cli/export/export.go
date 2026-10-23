@@ -1,4 +1,5 @@
-// Package export exposes tested local integration exports.
+// Package export exposes tested local integration exports as
+// `dyna git pr export`.
 package export
 
 import (
