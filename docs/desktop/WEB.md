@@ -229,11 +229,13 @@ the original content type, including `application/wasm`, and set
   pairing request follows the same rules.
 - The page has a strict content security policy: scripts from the app only,
   frames only from the card origin, and no framing of the app.
-- The server keeps its state in `<data dir>/web` (mode 0700): `key` (signs
-  card tickets and pairing codes), `pair.json` (the live code's keyed hash,
-  expiry and tries), and `devices.json` (device hashes). Commands change
-  these files under a lock and by rename. The running server reads them
-  again when they change.
+- The server keeps its key in `<data dir>/web/key` (mode 0700 directory; it
+  signs card tickets and keys pairing codes). Paired devices (token hashes)
+  and the live pairing code (keyed hash, expiry, tries and scopes) are in
+  `dyna.db`. Commands and the server change them in SQLite writer
+  transactions, so a revoke takes effect on the next request. The engine
+  imports an older `devices.json` and `pair.json` once at start and then
+  ignores them.
 
 ### Cards
 

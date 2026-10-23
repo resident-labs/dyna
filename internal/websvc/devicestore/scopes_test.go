@@ -1,10 +1,7 @@
 package devicestore
 
 import (
-	"os"
-	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 )
 
@@ -24,11 +21,8 @@ func TestScopedCodeReturnsScopesAndDoesNotStoreThemOnTheDevice(t *testing.T) {
 	if !reflect.DeepEqual(dev.Scopes, []string{"files", "read"}) {
 		t.Fatalf("scopes = %#v", dev.Scopes)
 	}
-	raw, err := os.ReadFile(filepath.Join(s.Dir(), "devices.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(raw), "files") || strings.Contains(string(raw), "scopes") {
-		t.Fatalf("devices.json stored scopes: %s", raw)
+	list, err := s.Devices()
+	if err != nil || len(list) != 1 || list[0].Scopes != nil {
+		t.Fatalf("stored devices = %+v %v", list, err)
 	}
 }
