@@ -534,7 +534,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 		load.Record = doctor.Samples{DataDir: filepath.Dir(cstore.Dir())}.Recorder(log.Printf)
 	}
 	// The built-in hooks are seeded before any schedule or caller can run one.
-	hookService := hooks.New(automations.Hooks(rooms.Notify)...)
+	hookService := hooks.New(automations.Hooks(rooms.Notify, accounts)...)
 	if !readOnly {
 		if err := hookService.Seed(ctx); err != nil {
 			log.Printf("seed built-in hooks: %v", err)
