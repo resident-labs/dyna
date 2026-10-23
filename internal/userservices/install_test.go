@@ -262,6 +262,9 @@ func TestComputerRestartWaitsForQuiet(t *testing.T) {
 			if got := strings.Contains(strings.Join(calls, "\n"), "try-restart "+Computers); got != tc.wantRestart {
 				t.Fatalf("restart=%v want %v: %v", got, tc.wantRestart, calls)
 			}
+			if !strings.Contains(strings.Join(calls, "\n"), "systemctl --user restart "+Engine) {
+				t.Fatalf("engine restart was deferred: %v", calls)
+			}
 			if RestartIsPending(dir) != tc.wantPending {
 				t.Fatalf("pending=%v want %v", RestartIsPending(dir), tc.wantPending)
 			}
