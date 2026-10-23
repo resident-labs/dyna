@@ -33,11 +33,12 @@
 <div class="rows">
   {#each groups as g (g.id)}
     {#each g.rows as it (it.number || it.local?.id)}
-      {@const chip = issueChip(it)}
+      {@const unresolvedExport = it.state === 'UNKNOWN' && !!it.local?.githubUrl}
+      {@const chip = unresolvedExport ? { tone: '', label: 'Promoted' } : issueChip(it)}
       {@const open = it.linkedPRs?.find((p) => p.state === 'OPEN') ?? it.linkedPRs?.[0]}
       <div class="item">
         <Row selected={!!it.number && it.number === sel} context={g.id === 'closed'} onclick={() => onpick(it)}>
-          {#snippet lead()}<PRGlyph kind="issue" {it} />{/snippet}
+          {#snippet lead()}{#if unresolvedExport}<span role="img" aria-label="Promoted">↗</span>{:else}<PRGlyph kind="issue" {it} />{/if}{/snippet}
           <div class="title">{it.title}</div>
           <div class="identity">{#if it.number}#{it.number}{:else}{it.local?.id}{/if}{#if it.author?.login} <span>by {it.author.login}</span>{/if}<span>{ago(it.updatedAt)}</span>{#if it.commentCount}<span>{it.commentCount} {it.commentCount === 1 ? 'comment' : 'comments'}</span>{/if}</div>
           <div class="facts">
