@@ -265,7 +265,6 @@ runs fork PRs on these machines.
 ```sh
 dyna git ci node add local --slots 1
 dyna git ci node add omarchy --ssh ari@omarchy --slots 2
-dyna git ci node add hermeslab --ssh pip@hermeslab --jump ari@omarchy --slots 2
 dyna git ci node list
 dyna git ci mode local
 dyna git ci node disable omarchy
