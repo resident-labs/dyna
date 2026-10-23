@@ -29,7 +29,7 @@ export interface ReviewerInfo {
 export interface QueueRow {
   state: string
   reason: string
-  batch: number
+  trial?: { branch: string; batch: string[] | null }
 }
 
 export interface NoticeRow {
@@ -196,16 +196,20 @@ function hook(rows: HookRow[] | null, name: string): HookRow | null {
 // queue work, so they count apart from the states that need a worker.
 export function queueCounts(queue: QueueRow[] | null): { running: number; ready: number; failed: number; blocked: number; held: number } {
   const counts = { running: 0, ready: 0, failed: 0, blocked: 0, held: 0 }
+  const trials = new Set<string>()
   for (const q of queue ?? []) {
     switch (q.state) {
-      case 'trial-running': counts.running++; break
+      case 'trial-running':
+        if (q.trial?.branch) trials.add(q.trial.branch)
+        else counts.running++
+        break
       case 'ready': counts.ready++; break
       case 'ci-failed': counts.failed++; break
       case 'held': counts.held++; break
       default: counts.blocked++
     }
   }
-  return counts
+  return { ...counts, running: counts.running + trials.size }
 }
 
 // queueLine says what the queue is doing in one phrase.
