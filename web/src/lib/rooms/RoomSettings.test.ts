@@ -9,6 +9,7 @@ import vm from 'node:vm'
 import { compile, compileModule, parse } from 'svelte/compiler'
 import { build } from 'esbuild'
 import { normalizePolicy, budgetForm, checksText, saveRoomPolicy, DEFAULT_POLICY } from '../prs/pr.ts'
+import { errorText } from '../errorText.ts'
 import { stripTypes, topLevelFunctions } from '../../../test/svelte-source.ts'
 import type { Action } from '../ui/actions.ts'
 
@@ -128,7 +129,7 @@ interface PageState {
 
 function page<K extends keyof PageFns>(api: object, names: readonly K[], extra: Record<string, unknown> = {}): PageState & Pick<PageFns, K> {
   const state: PageState = { roomId: 'r', policy: null, form: null, busy: false, dirty: true, error: '', saved: false, reviewPublishing: 'local', githubAccess: 'read-only', mergeMaxParallel: 3, publishError: '' }
-  const context = Object.assign({ api, $state: (value: unknown) => value, normalizePolicy, budgetForm, checksText, saveRoomPolicy, onreviewer: async () => {}, prSettings: null, ...extra }, state)
+  const context = Object.assign({ api, $state: (value: unknown) => value, normalizePolicy, budgetForm, checksText, saveRoomPolicy, errorText, onreviewer: async () => {}, prSettings: null, ...extra }, state)
   vm.createContext(context)
   vm.runInContext(stripTypes(handlers([...names, 'formOf', 'policyRequest', 'policyRoom', 'policyLoading', 'saveAfterPolicy', 'reviewerBusy'])), context)
   return Object.assign(context, vm.runInContext(`({ ${names.join(', ')} })`, context) as Pick<PageFns, K>)

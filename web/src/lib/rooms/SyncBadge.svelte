@@ -1,24 +1,37 @@
-<script>
+<script lang="ts">
   import { ago } from '../ui/format.ts'
   import { opRunning, opLine, canExport, popoverPlacement } from './sync.ts'
+  import type { Remote, SyncRepository } from './sync.ts'
+  import type { Repository } from '../api/lanesync.ts'
 
   // The room header's sync badge. remotes comes from remoteList: origin
   // first. The badge shows origin only; the popover lists every remote.
   // In sync is a quiet badge; any other state takes a color. status is the
   // repo's saved answer ({integration, operation}); note is the last action
   // error. Refresh merges origin in; Export opens the export PR.
-  let { remotes = [], status = null, note = '', onrefresh, onexport } = $props()
+  interface Props {
+    remotes?: Remote[]
+    status?: Repository | null
+    note?: string
+    onrefresh?: () => void
+    onexport?: () => void
+  }
+  let { remotes = [], status = null, note = '', onrefresh, onexport }: Props = $props()
+
+  // The app passes the engine's Repository (api/lanesync.ts). sync.ts reads the
+  // same saved fields with fewer required ones, so hand it that shape once.
+  let saved = $derived<SyncRepository | null>(status ? { integration: status.integration, operation: status.operation } : null)
 
   let main = $derived(remotes[0])
   let open = $state(false)
-  let box = $state()
+  let box = $state<HTMLDivElement>()
   // Where the popover sits, from the badge's own box, so a narrow header keeps
   // it on screen.
-  let place = $state(null)
+  let place = $state<{ left: number; width: number } | null>(null)
   let op = $derived(status?.operation)
   let running = $derived(opRunning(op))
   let commits = $derived(status?.integration?.commits?.length ?? 0)
-  const tone = { synced: '', ahead: 'iris', behind: 'gold', diverged: 'gold', error: 'coral' }
+  const tone: Record<Remote['state'], string> = { synced: '', ahead: 'iris', behind: 'gold', diverged: 'gold', error: 'coral' }
 
   function placeNow() {
     if (!box) return
@@ -32,7 +45,7 @@
   }
 </script>
 
-<svelte:window onkeydown={(e) => { if (e.key === 'Escape') open = false }} onpointerdown={(e) => { if (open && box && !box.contains(e.target)) open = false }} onresize={() => { if (open) placeNow() }} />
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape') open = false }} onpointerdown={(e) => { if (open && box && e.target instanceof Node && !box.contains(e.target)) open = false }} onresize={() => { if (open) placeNow() }} />
 
 {#if main}
   <div class="sync" bind:this={box}>
@@ -48,15 +61,15 @@
             <span class="st {tone[r.state]}">{r.label}</span>
             {#if r.state === 'diverged'}<p class="note">{r.rewrite ? `The remote rewrote history (${r.rewrite}).` : `${r.name} has ${r.behind} new commits and this repo has ${r.ahead}. Refresh before you export.`}</p>{/if}
             {#if r.lastError}<p class="note err">{r.lastError}</p>{/if}
-            <time>checked {ago(r.checkedAt)}</time>
+            <time>checked {ago(r.checkedAt ?? NaN)}</time>
           </div>
         {/each}
-        {#if opLine(status?.operation) || note}
-          <p class="note" class:err={status?.operation?.state === 'failed' || status?.operation?.state === 'conflict'}>{note || opLine(status?.operation)}{#if status?.operation?.prURL && status.operation.state === 'done'} · <a href={status.operation.prURL} target="_blank" rel="noreferrer">PR</a>{/if}</p>
+        {#if opLine(saved?.operation) || note}
+          <p class="note" class:err={saved?.operation?.state === 'failed' || saved?.operation?.state === 'conflict'}>{note || opLine(saved?.operation)}{#if saved?.operation?.prURL && saved.operation.state === 'done'} · <a href={saved.operation.prURL} target="_blank" rel="noreferrer">PR</a>{/if}</p>
         {/if}
         <div class="acts">
-          <button onclick={onrefresh} disabled={running} class:busy={running && op.kind === 'refresh'} aria-busy={running && op.kind === 'refresh'}>{#if running && op.kind === 'refresh'}<span class="spin" aria-hidden="true"></span>Refreshing… {op.state}{:else}Refresh{/if}</button>
-          <button class="go" onclick={onexport} disabled={!canExport(status)} class:busy={running && op.kind === 'export'} aria-busy={running && op.kind === 'export'}>{#if running && op.kind === 'export'}<span class="spin" aria-hidden="true"></span>Exporting… {op.state}{:else}{commits ? `Export ${commits} ${commits === 1 ? 'commit' : 'commits'}` : 'Export'}{/if}</button>
+          <button onclick={onrefresh} disabled={running} class:busy={running && op?.kind === 'refresh'} aria-busy={running && op?.kind === 'refresh'}>{#if running && op?.kind === 'refresh'}<span class="spin" aria-hidden="true"></span>Refreshing… {op.state}{:else}Refresh{/if}</button>
+          <button class="go" onclick={onexport} disabled={!canExport(saved)} class:busy={running && op?.kind === 'export'} aria-busy={running && op?.kind === 'export'}>{#if running && op?.kind === 'export'}<span class="spin" aria-hidden="true"></span>Exporting… {op.state}{:else}{commits ? `Export ${commits} ${commits === 1 ? 'commit' : 'commits'}` : 'Export'}{/if}</button>
         </div>
       </div>
     {/if}

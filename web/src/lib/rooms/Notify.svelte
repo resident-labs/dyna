@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { pushSupported, pushState, pushOn, pushOff, pushNames, pushTest } from '../settings/link.ts'
   // The bell in the sidebar footer and its small panel: Web Push on or off,
   // whether a notification may show room and sender names, and a test.
@@ -15,7 +15,7 @@
     if (open && supported) pushState().then((s) => ((on = s.on), (names = s.names))).catch(() => {})
   }
 
-  async function run(fn, done = '') {
+  async function run(fn: () => Promise<unknown>, done = '') {
     busy = true
     note = ''
     try {

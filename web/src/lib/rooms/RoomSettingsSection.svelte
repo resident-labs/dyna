@@ -1,8 +1,15 @@
-<script>
+<script lang="ts">
   // One Room settings section in the settings modal's pane: a title, a short
   // lede and its groups, laid out like a Settings pane. Groups use
   // RoomSettingsGroup.
-  let { title, lede = '', children } = $props()
+  import type { Snippet } from 'svelte'
+
+  interface Props {
+    title: string
+    lede?: string
+    children: Snippet
+  }
+  let { title, lede = '', children }: Props = $props()
 </script>
 
 <section aria-label={title}>

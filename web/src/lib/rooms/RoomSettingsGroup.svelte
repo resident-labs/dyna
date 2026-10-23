@@ -1,7 +1,14 @@
-<script>
+<script lang="ts">
   // A titled box of RoomSettingsRow rows, the same look as a Settings group.
   // note is one plain muted line under the box.
-  let { title = '', note = '', children } = $props()
+  import type { Snippet } from 'svelte'
+
+  interface Props {
+    title?: string
+    note?: string
+    children: Snippet
+  }
+  let { title = '', note = '', children }: Props = $props()
 </script>
 
 {#if title}<h3>{title}</h3>{/if}
