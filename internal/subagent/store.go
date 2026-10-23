@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -632,9 +631,7 @@ func (s *Store) deliveredIDs(id string, turns int) (map[string]bool, error) {
 	return out, nil
 }
 
-// writeTurn stores turn t of session id in dyna.db, then writes the
-// previous release's copy of it (see mirrorTurn). Callers hold the session
-// lock. Existing canonical state takes priority over retained turn files.
+// writeTurn stores turn t of session id in dyna.db. Callers hold the session lock.
 func (s *Store) writeTurn(id string, t Turn) error {
 	return s.writeTurnContext(context.Background(), id, t)
 }
@@ -642,7 +639,7 @@ func (s *Store) writeTurn(id string, t Turn) error {
 // writeTurnContext is writeTurn for a call: ctx's request ID is recorded in
 // the same transaction as the row.
 func (s *Store) writeTurnContext(ctx context.Context, id string, t Turn) error {
-	path, err := s.turnPath(id, t.N)
+	_, err := s.turnPath(id, t.N)
 	if err != nil {
 		return err
 	}
@@ -654,16 +651,8 @@ func (s *Store) writeTurnContext(ctx context.Context, id string, t Turn) error {
 	if err != nil {
 		return err
 	}
-	if _, err := saveTurnRow(ctx, db, id, t.N, raw); err != nil {
-		return err
-	}
-	// The row is the turn. A failed copy only leaves the previous release's
-	// view one write behind: its old copy still matches its stamp, so this
-	// code keeps reading the row.
-	if err := mirrorTurn(ctx, db, id, t.N, path); err != nil {
-		log.Printf("turn %d of %s: write the previous release's copy: %v", t.N, id, err)
-	}
-	return nil
+	_, err = saveTurnRow(ctx, db, id, t.N, raw)
+	return err
 }
 
 // UpdateTurn applies fn to a turn record under the session lock.
@@ -700,44 +689,16 @@ func (s *Store) Turns(id string) ([]Turn, error) {
 		return nil, err
 	}
 	ctx := context.Background()
-	// TODO: legacy/shim remove later — import missing retained turns before
-	// opening the listing snapshot, so every row and blob shares that snapshot.
-	rows, err := db.QueryContext(ctx, "SELECT n FROM session_turns WHERE session=? AND n BETWEEN 1 AND ?", id, m.Turns)
-	if err != nil {
-		return nil, err
-	}
-	present := map[int]bool{}
-	for rows.Next() {
-		var n int
-		if err := rows.Scan(&n); err != nil {
-			rows.Close()
-			return nil, err
-		}
-		present[n] = true
-	}
-	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return nil, err
-	}
-	unreadable := map[int]error{}
-	for n := 1; n <= m.Turns; n++ {
-		if !present[n] {
-			_, unreadable[n] = s.importTurnFile(id, n)
-		}
-	}
 	turns := make([]Turn, 0, m.Turns)
 	err = state.For(db).Read(ctx, func(r state.Reader) error {
 		for n := 1; n <= m.Turns; n++ {
 			var turn Turn
-			err := unreadable[n]
+			raw, _, err := resolvedTurn(ctx, r, id, n)
+			if errors.Is(err, sql.ErrNoRows) {
+				err = fmt.Errorf("session %s has no turn %d", id, n)
+			}
 			if err == nil {
-				var raw []byte
-				raw, _, err = resolvedTurn(ctx, r, id, n)
-				if errors.Is(err, sql.ErrNoRows) {
-					err = fmt.Errorf("session %s has no turn %d", id, n)
-				}
-				if err == nil {
-					turn, err = s.decodeTurnRecord(id, n, raw)
-				}
+				turn, err = s.decodeTurnRecord(id, n, raw)
 			}
 			if err != nil {
 				turn = Turn{N: n, Status: TurnUnreadable, Error: err.Error()}

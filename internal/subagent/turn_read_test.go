@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"encoding/json"
 	"os"
 	"slices"
 	"testing"
@@ -20,7 +21,11 @@ func TestReadNeverWritesAnOlderTurnOverTheRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stale, err := os.ReadFile(path)
+	previous, err := store.ReadTurn(info.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, err := json.Marshal(previous)
 	if err != nil {
 		t.Fatal(err)
 	}

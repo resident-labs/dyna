@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -166,17 +164,11 @@ func newCompletionHarness(t *testing.T) *completionHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir, err := mgr.Store.Dir(child.ID)
+	db, err := database.Open(data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(dir, "turns"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "turns", "1.json"), raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := mgr.Store.ImportLegacyTurn(child.ID, 1); err != nil {
+	if _, err := db.Exec("INSERT INTO session_turns(session,n,revision,turn) VALUES (?,1,1,?)", child.ID, raw); err != nil {
 		t.Fatal(err)
 	}
 
@@ -194,7 +186,7 @@ func newCompletionHarness(t *testing.T) *completionHarness {
 	}
 	callers := &socketCallers{sessions: mgr.Store}
 	callers.actForCallers(calls)
-	db, err := database.Open(store.DataDir())
+	db, err = database.Open(store.DataDir())
 	if err != nil {
 		t.Fatal(err)
 	}

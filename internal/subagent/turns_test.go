@@ -45,30 +45,21 @@ func prompt(t *testing.T, s *Store, id string, n int) string {
 	return turn.Prompt
 }
 
-// The row is the turn. The file is the previous release's copy: it matches
-// the row after a write, and this code never reads it back.
-func TestTurnRowIsTheRecordAndTheFileOnlyItsCopy(t *testing.T) {
+// Current turn writes create only canonical rows.
+func TestTurnWritesOnlyCanonicalRecord(t *testing.T) {
 	s, id := turnStore(t)
 	if err := s.writeTurn(id, Turn{N: 1, Prompt: "first"}); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(turnFile(t, s, id, 1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var copied Turn
-	if err := json.Unmarshal(b, &copied); err != nil || copied.Prompt != "first" {
-		t.Fatalf("copy = %+v, %v; want the row's turn", copied, err)
-	}
-	if err := os.Remove(turnFile(t, s, id, 1)); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(turnFile(t, s, id, 1)); !os.IsNotExist(err) {
+		t.Fatalf("turn write created a JSON copy: %v", err)
 	}
 	if got := prompt(t, s, id, 1); got != "first" {
-		t.Fatalf("without its copy, the turn reads %q", got)
+		t.Fatalf("canonical turn reads %q", got)
 	}
 }
 
-// This code's own copy never counts as another binary's write.
+// A read keeps the canonical revision after an update.
 func TestOwnTurnCopyIsNotImported(t *testing.T) {
 	s, id := turnStore(t)
 	if _, err := s.UpdateTurn(id, 1, func(*Turn) {}); err == nil {
@@ -154,6 +145,15 @@ func TestTurnFilesAreImportedAtStartupAfterOneBackup(t *testing.T) {
 	if len(backups) != 1 {
 		t.Fatalf("backups at the first start: %v", backups)
 	}
+	backup, err := sql.Open("sqlite", backups[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backup.Close()
+	var tables int
+	if err := backup.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='session_turns'").Scan(&tables); err != nil || tables != 0 {
+		t.Fatalf("backup was taken after creating the turn table: %d, %v", tables, err)
+	}
 	turns, err := s.Turns(id)
 	if err != nil || len(turns) != 2 || turns[0].Prompt != "turn 1" || turns[1].Prompt != "turn 2" {
 		t.Fatalf("Turns = %+v, %v; want both old turns", turns, err)
@@ -199,38 +199,6 @@ func TestLargeSessionTurnsImportAndRead(t *testing.T) {
 	t.Logf("%d turns: first read with imports %v, full read %v", turns, imported, time.Since(start))
 }
 
-// The stamps that #1470 kept in the mirror column move to state_mirrors, so
-// a stale copy that its old stamp still covers is not imported over the row.
-func TestTurnStampsMoveFromTheMirrorColumn(t *testing.T) {
-	s, id := turnStore(t)
-	dataDir := filepath.Dir(s.Root)
-	db, err := database.Open(dataDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := database.Migrate(db, "subagent.turns", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), turnSchema)
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	path := turnFile(t, s, id, 1)
-	if err := store.WriteJSON(path, Turn{N: 1, Prompt: "stale copy"}, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	raw, _ := json.Marshal(Turn{N: 1, Prompt: "row"})
-	if _, err := db.Exec("INSERT INTO session_turns(session, n, revision, turn, mirror) VALUES (?, 1, 1, ?, ?)", id, raw, store.VersionOf(info).Key()); err != nil {
-		t.Fatal(err)
-	}
-	if got := prompt(t, s, id, 1); got != "row" {
-		t.Fatalf("the stale copy was imported over the row: %q", got)
-	}
-}
-
 // An update changes only the canonical row, even beside a foreign turn file.
 func TestTurnUpdateKeepsTheCanonicalStatus(t *testing.T) {
 	s, id := turnStore(t)
@@ -254,9 +222,6 @@ func TestTurnUpdateKeepsTheCanonicalStatus(t *testing.T) {
 func TestDamagedTurnFileKeepsTheRow(t *testing.T) {
 	s, id := turnStore(t)
 	if err := s.writeTurn(id, Turn{N: 1, Prompt: "row"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(turnFile(t, s, id, 1)); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(turnFile(t, s, id, 1), []byte("not JSON"), 0o600); err != nil {

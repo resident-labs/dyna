@@ -13,8 +13,8 @@ import (
 )
 
 // These golden bytes pin the previous writeJSONAtomic format through real
-// subagent callers, including escaping and the final newline. Turn prompt
-// encoding sorts object keys; other records retain their struct field order.
+// subagent callers. Canonical turn JSON sorts object keys; session records
+// retain their struct field order.
 func TestStorageGoldenBytes(t *testing.T) {
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	s := &Store{Root: t.TempDir()}
@@ -60,8 +60,7 @@ func TestStorageGoldenBytes(t *testing.T) {
 	if err := s.writeTurn(m.ID, tr); err != nil {
 		t.Fatal(err)
 	}
-	turnPath := filepath.Join(dir, "turns", "1.json")
-	got, err = os.ReadFile(turnPath)
+	got, _, err = s.readTurnRow(m.ID, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,22 +69,13 @@ func TestStorageGoldenBytes(t *testing.T) {
 	if err := json.Unmarshal([]byte(want), &fields); err != nil {
 		t.Fatal(err)
 	}
-	sorted, err := json.MarshalIndent(fields, "", "  ")
+	sorted, err := json.Marshal(fields)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want = string(append(sorted, '\n'))
+	want = string(sorted)
 	if string(got) != want {
 		t.Fatalf("turn bytes = %q; want %q", got, want)
-	}
-	for _, path := range []string{turnPath} {
-		info, err := os.Stat(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if info.Mode().Perm() != 0o600 {
-			t.Fatalf("%s mode = %o", path, info.Mode().Perm())
-		}
 	}
 	// output-config.json through the manager caller in Start.
 	e := newTestEnv(t)

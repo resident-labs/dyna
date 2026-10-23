@@ -56,8 +56,8 @@ func TestMigratePersistsCurrentTurnUsageShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := filepath.Join(s.root(), id, "turns", "2.json")
-	before, err := os.ReadFile(source)
-	if err != nil {
+	before := append([]byte(nil), raw...)
+	if err := os.WriteFile(source, before, 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := Migrate(filepath.Dir(s.root())); err != nil {
