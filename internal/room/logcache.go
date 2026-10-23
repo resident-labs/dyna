@@ -2,9 +2,12 @@ package room
 
 import (
 	"bufio"
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"dyna-agent/internal/store"
 	"encoding/json"
+	"fmt"
 	"io"
 	"maps"
 	"os"
@@ -22,12 +25,13 @@ type messageLine struct {
 type messageLogVersion byte
 
 type messageLog struct {
-	version *messageLogVersion
-	file    *os.File
-	info    os.FileInfo
-	offset  int64
-	lines   []messageLine
-	byID    map[string]int
+	version            *messageLogVersion
+	projectionRevision int64
+	file               *os.File
+	info               os.FileInfo
+	offset             int64
+	lines              []messageLine
+	byID               map[string]int
 }
 
 // withMessageLog owns the shared index for every room log reader. Files are
@@ -37,6 +41,11 @@ func (s *Store) withMessageLog(roomID string, use func(*messageLog)) error {
 	if err != nil {
 		return err
 	}
+	revision, err := s.postNormalizationRevision()
+	if err != nil {
+		return err
+	}
+
 	s.logMu.Lock()
 	defer s.logMu.Unlock()
 	if s.logs == nil {
@@ -55,7 +64,7 @@ func (s *Store) withMessageLog(roomID string, use func(*messageLog)) error {
 		return err
 	}
 	log := s.logs[path]
-	if log != nil && (!os.SameFile(log.info, info) || info.Size() < log.info.Size() || (info.Size() == log.info.Size() && !store.VersionOf(info).Equal(store.VersionOf(log.info)))) {
+	if log != nil && (log.projectionRevision != revision || !os.SameFile(log.info, info) || info.Size() < log.info.Size() || (info.Size() == log.info.Size() && !store.VersionOf(info).Equal(store.VersionOf(log.info)))) {
 		s.dropMessageLog(path)
 		log = nil
 	}
@@ -72,7 +81,7 @@ func (s *Store) withMessageLog(roomID string, use func(*messageLog)) error {
 		info = current
 		// Keep the inode open while indexed. Otherwise a rapid replacement can
 		// reuse it and look like an append when the replacement is larger.
-		log = &messageLog{version: new(messageLogVersion), file: f, byID: map[string]int{}}
+		log = &messageLog{version: new(messageLogVersion), projectionRevision: revision, file: f, byID: map[string]int{}}
 		s.logs[path] = log
 	}
 	if log.info == nil || !store.VersionOf(info).Equal(store.VersionOf(log.info)) {
@@ -80,7 +89,7 @@ func (s *Store) withMessageLog(roomID string, use func(*messageLog)) error {
 			s.dropMessageLog(path)
 			return err
 		}
-		next, err := s.scanMessageLines(io.LimitReader(log.file, info.Size()-log.offset), log.offset, func(entry messageLine) {
+		next, err := s.scanMessageLines(roomID, io.LimitReader(log.file, info.Size()-log.offset), log.offset, func(entry messageLine) {
 			if entry.msg.ID != "" {
 				if _, exists := log.byID[entry.msg.ID]; !exists {
 					log.byID[entry.msg.ID] = len(log.lines)
@@ -169,7 +178,11 @@ func cloneMessage(m Message) Message {
 }
 
 // scanMessageLines is the single decoder for indexed and arbitrary-offset reads.
-func (s *Store) scanMessageLines(input io.Reader, offset int64, visit func(messageLine)) (int64, error) {
+func (s *Store) scanMessageLines(roomID string, input io.Reader, offset int64, visit func(messageLine)) (int64, error) {
+	projections, err := s.postNormalizations(roomID, offset)
+	if err != nil {
+		return offset, err
+	}
 	r := bufio.NewReaderSize(input, 64*1024)
 	for {
 		line, err := r.ReadBytes('\n')
@@ -181,12 +194,21 @@ func (s *Store) scanMessageLines(input io.Reader, offset int64, visit func(messa
 		}
 		entry := messageLine{start: offset, end: offset + int64(len(line))}
 		offset = entry.end
-		if len(line) <= maxRecordBytes {
+		canonical := line[:len(line)-1]
+		omitted := false
+		if projection, ok := projections[entry.start]; ok {
+			digest := sha256.Sum256(line)
+			if projection.end != entry.end || !bytes.Equal(projection.digest, digest[:]) {
+				return entry.start, fmt.Errorf("room %s historical post source changed at offset %d", roomID, entry.start)
+			}
+			canonical, omitted = projection.body, projection.omitted
+		}
+		if !omitted && len(line) <= maxRecordBytes {
 			decode := s.decodeMessage
 			if decode == nil {
 				decode = func(b []byte, m *Message) error { return json.Unmarshal(b, m) }
 			}
-			if decode(line[:len(line)-1], &entry.msg) != nil {
+			if decode(canonical, &entry.msg) != nil {
 				entry.msg = Message{}
 			}
 		}

@@ -102,7 +102,10 @@ func Migrate(dataDir string) error {
 	if _, err := s.pinsDB(); err != nil {
 		return err
 	}
-	_, err := s.ownerReadsDB()
+	if _, err := s.ownerReadsDB(); err != nil {
+		return err
+	}
+	_, err := s.postNormalizationsDB()
 	return err
 }
 
