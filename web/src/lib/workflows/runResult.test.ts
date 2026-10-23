@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import type { RunDetail, RunResultView } from '../api/workflow.ts'
 import { createResultLoader, createWorkerResults, type LoadedResult, type WorkerRow, type WorkerRows } from './runResult.ts'
 
-const tick = () => new Promise((r) => setTimeout(r, 0))
+const tick = async () => { await Promise.resolve(); await Promise.resolve() }
 const result = (extra: Partial<RunResultView> = {}): RunResultView => ({ result: '', bytes: 0, ...extra })
 const detailOf = (id: string, resultBytes?: number): Pick<RunDetail, 'run' | 'resultBytes'> => ({
   run: { id, name: id, status: 'ok', startedAt: '', roomId: 'r', agents: 0, done: 0, failed: 0, working: 0 },
@@ -112,4 +112,50 @@ test('a finish that arrives during a load fetches the final result after it', as
   await tick()
   assert.equal(rowOf(state, 1).final, true)
   assert.equal(rowOf(state, 1).value?.result, '{"done":true}')
+})
+
+test('explicit result retries recover failures and reject stale replies after returning to a run', async () => {
+  const requests: { resolve: (value: RunResultView) => void; reject: (error: Error) => void }[] = []
+  const api = { runResult: () => new Promise<RunResultView>((resolve, reject) => requests.push({ resolve, reject })) }
+  let value: LoadedResult = null
+  const load = createResultLoader(api, (next) => { value = next })
+  load(detailOf('a', 10))
+  requests[0]?.reject(new Error('offline'))
+  await tick()
+  assert.deepEqual(value, { error: 'offline' })
+  load(detailOf('a', 10))
+  assert.equal(requests.length, 1)
+  load.retry(detailOf('a', 10))
+  load(detailOf('b', 10))
+  load(detailOf('a', 10))
+  requests[1]?.resolve(result({ result: 'old retry' }))
+  await tick()
+  assert.equal(value, null)
+  requests[3]?.resolve(result({ result: 'current' }))
+  await tick()
+  assert.deepEqual(value, result({ result: 'current' }))
+
+  let rows: WorkerRows = {}
+  const workers = createWorkerResults(api, (next) => { rows = next })
+  workers.sync('a')
+  workers.toggle('a', 1, 'running')
+  requests[4]?.reject(new Error('offline'))
+  await tick()
+  workers.retry('a', 1, 'running')
+  workers.retry('a', 1, 'running')
+  assert.equal(requests.length, 6, 'retry does not overlap a pending read')
+  requests[5]?.resolve(result({ result: 'saved' }))
+  await tick()
+  workers.refresh('a', [{ id: 1, status: 'running' }])
+  assert.equal(rowOf(rows, 1).value?.result, 'saved')
+  assert.equal(rowOf(rows, 1).loading, true)
+  workers.sync('b')
+  workers.sync('a')
+  workers.toggle('a', 1, 'running')
+  requests[6]?.resolve(result({ result: 'stale refresh' }))
+  await tick()
+  assert.equal(rowOf(rows, 1).value, undefined)
+  requests[7]?.resolve(result({ result: 'new worker result' }))
+  await tick()
+  assert.equal(rowOf(rows, 1).value?.result, 'new worker result')
 })

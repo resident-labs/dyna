@@ -209,9 +209,9 @@
             {/if}
             {#if row?.open}
               <div class="full">
-                {#if row.loading}<p class="quiet">Loading the result…</p>
-                {:else if row.error}<p class="err">Could not load the result: {row.error}</p>
-                {:else}<WorkerDetail value={row.value} />{/if}
+                {#if row.value}<WorkerDetail value={row.value} />{/if}
+                {#if row.loading}<p class="quiet" role="status">{row.value ? 'Refreshing the result…' : 'Loading the result…'}</p>{/if}
+                {#if row.error}<div class="retry-row"><p class="err">Could not load the result: {row.error}</p><button class="retry" aria-label="Retry result for {a.label || ('agent ' + a.id)}" onclick={() => workers.retry(run.id, a.id, a.status)}>Retry</button></div>{/if}
               </div>
             {/if}
           </div>
@@ -228,16 +228,22 @@
       </div>
     {/if}
 
-    {#if loadError}<p class="err">Could not load the result: {loadError}</p>{/if}
-    {#if loaded?.result}
-      <div class="rhead"><h2>Result</h2><Segmented label="Result view" options={[['readable', 'Readable'], ['raw', 'Raw JSON']]} value={resultMode} onchange={(v: string) => (resultMode = v)} /><button class="copy" onclick={copy}>{copied ? 'Copied' : 'Copy JSON'}</button></div>
+    {#if detail.resultBytes}
+      <div class="rhead"><h2>Result</h2>{#if loaded?.result}<Segmented label="Result view" options={[['readable', 'Readable'], ['raw', 'Raw JSON']]} value={resultMode} onchange={(v: string) => (resultMode = v)} /><button class="copy" onclick={copy}>{copied ? 'Copied' : 'Copy JSON'}</button>{/if}</div>
+      {#if !full}<p class="quiet" role="status">Loading the result…</p>
+      {:else if loadError}<div class="retry-row"><p class="err">Could not load the result: {loadError}</p><button class="retry" aria-label="Retry run result" onclick={() => loadResult.retry(detail)}>Retry</button></div>
+      {:else if loaded?.result}
       {#if resultMode === 'raw'}<pre class="raw mono">{loaded.result}</pre>{:else}<div class="result"><JsonView value={resultValue} /></div>{/if}
       {#if loaded.truncatedKB}<p class="quiet">The result is truncated at {loaded.truncatedKB} KB; this shows its start. <span class="mono">dyna runs show {run.id}</span> prints all of it.</p>{/if}
+      {/if}
     {/if}
   {/if}
 </section>
 
 <style>
+  .retry-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+  .retry-row .err { overflow-wrap: anywhere; }
+  .retry { min-height: 44px; padding: 8px 14px; border-radius: var(--r-xs); background: var(--raise); color: var(--ink); flex: none; }
   .line.live.long { font-weight: 600; }
   .line.live { color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .open { margin-left: 8px; color: var(--faint); width: 22px; height: 22px; border-radius: 5px; display: inline-grid; place-items: center; transition: transform var(--motion-fast) var(--ease); }
