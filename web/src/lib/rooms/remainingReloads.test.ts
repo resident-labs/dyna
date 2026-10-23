@@ -17,7 +17,7 @@ import { inRoomFeed } from './feedViews.ts'
 import { call, runFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { installRoomLoader } from '../../../test/appRoomLoader.ts'
-import { ISSUES_FUNCTIONS, PINS_FUNCTIONS, PRS_FUNCTIONS, QUESTIONS_FUNCTIONS, SESSION_VIEW_FUNCTIONS, SYNC_FUNCTIONS, installIssues, installPins, installPRs, installQuestions, installSelection, installSessionView, installSync } from '../../../test/appModules.ts'
+import { ISSUES_FUNCTIONS, PINS_FUNCTIONS, PRS_FUNCTIONS, QUESTIONS_FUNCTIONS, SESSION_VIEW_FUNCTIONS, SYNC_FUNCTIONS, installComputers, installIssues, installPins, installPRs, installQuestions, installSelection, installSessionView, installSync } from '../../../test/appModules.ts'
 import { need } from '../../../test/need.ts'
 import { member } from '../../../test/session-fixtures.ts'
 import type { Member } from '../api/room.ts'
@@ -381,7 +381,10 @@ test('a channel roster change refreshes computers once and its later computer ev
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), (name: string) => listVisible(name, c))
   // The member rows live in the room loader now; the computers stay in App.
   installRoomLoader(c, c.api)
-  appFunctions(c, ['loadComputers', 'handleComputer'])
+  // The computers moved to lib/app/computers.svelte.ts. appFunctions still fills
+  // in the state defaults the handlers read.
+  appFunctions(c, [])
+  installComputers(c)
   computerRows = [...computerRows, { session: 'two', name: 'two', state: 'none' }]
   call(c, 'applyMembers', [one, two])
   await new Promise(setImmediate)

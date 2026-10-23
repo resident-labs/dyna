@@ -25,6 +25,8 @@ import { dmView } from '../src/lib/sessions/dm.ts'
 import { prsBySession, isOpen } from '../src/lib/prs/pr.ts'
 import { bulkRetryable, createBulkSessionAction } from '../src/lib/sessions/bulkSessions.ts'
 import { pruneSelection, selectableSession, selectionKey, toggleSelection } from '../src/lib/sessions/consolidation.ts'
+import { applyEvent, openedApps, pushAction } from '../src/lib/computers/computers.ts'
+import { previewVisible } from '../src/lib/computers/preview.ts'
 
 const read = (name: string) => readFileSync(new URL('../src/lib/app/' + name, import.meta.url), 'utf8')
 
@@ -550,5 +552,102 @@ export function installSelection(state: object): SelectionSlice {
     consolidationChanged: (context: unknown, operation: unknown) => call(fields, 'consolidationChanged', context, operation),
   }
   write(fields, 'selectionView', view)
+  return view
+}
+
+// ---- Part 5: the confirm dialog ----
+
+const confirmSource = read('confirm.svelte.ts')
+
+/** The confirm module's own functions, which a vm can run in a flat state. */
+export const CONFIRM_FUNCTIONS = ['askConfirm', 'dismiss', 'guardItems', 'runConfirm'] as const
+
+export const confirmCode = moduleCode(confirmSource, CONFIRM_FUNCTIONS)
+
+/** The confirm dialog, as App reads it through confirmView. */
+export interface ConfirmSlice {
+  readonly confirm: unknown
+  askConfirm(request: unknown): void
+  dismiss(): void
+  runConfirm(force?: boolean): Promise<void>
+}
+
+/**
+ * installConfirm runs the confirm module in the state and gives it the
+ * confirmView object App reads. The page's own side answers from the state's
+ * fields, as App binds them to its own.
+ */
+export function installConfirm(state: object): ConfirmSlice {
+  const fields = prepare(state, { errorText, clipText, confirm: null }, confirmSource, CONFIRM_FUNCTIONS)
+  write(fields, 'confirmHost', {
+    members: () => (read_(fields, 'members') as unknown[] | undefined) ?? [],
+    expedited: () => String(read_(fields, 'expeditedGoalId') ?? ''),
+    closed: (name: string, items: string[]) => write(fields, 'closeResult', { name, items }),
+    loadGoals: () => call(fields, 'loadGoals'),
+    loadRuns: () => call(fields, 'loadRuns'),
+    loadRun: () => call(fields, 'loadRun'),
+    loadMembers: () => call(fields, 'loadMembers'),
+    loadChanges: () => call(fields, 'loadChanges'),
+    say: (input: unknown) => call(fields, 'say', input),
+  })
+  const view: ConfirmSlice = {
+    get confirm(): unknown { return read_(fields, 'confirm') },
+    askConfirm: (request: unknown) => call(fields, 'askConfirm', request),
+    dismiss: () => call(fields, 'dismiss'),
+    runConfirm: (force?: boolean) => call(fields, 'runConfirm', force) as Promise<void>,
+  }
+  write(fields, 'confirmView', view)
+  return view
+}
+
+// ---- Part 5: the open room's computers ----
+
+const computersSource = read('computers.svelte.ts')
+
+/** The computers module's own functions, which a vm can run in a flat state. */
+export const COMPUTERS_FUNCTIONS = ['loadComputers', 'handleComputer', 'computerOf', 'clear'] as const
+
+export const computersCode = moduleCode(computersSource, COMPUTERS_FUNCTIONS)
+
+/** The room's computers, as App reads them through computerView. */
+export interface ComputersSlice {
+  readonly computers: unknown[] | null
+  readonly feed: Record<string, unknown>
+  readonly error: string
+  loadComputers(): Promise<void>
+  handleComputer(ev: unknown): void
+  computerOf(id?: string): unknown
+  clear(): void
+}
+
+/**
+ * installComputers runs the computers module in the state and gives it the
+ * computerView object App reads. The page's own side answers from the state's
+ * fields, as App binds them to its own.
+ */
+export function installComputers(state: object): ComputersSlice {
+  const fields = prepare(state, {
+    reconcileRows, applyEvent, openedApps, pushAction, previewVisible,
+    // The module's own state, for a state that does not hold it yet.
+    computers: null, computerFeed: {}, computerError: '', computerRequest: 0,
+  }, computersSource, COMPUTERS_FUNCTIONS)
+  // Three modules declare clear(), and this flat state holds one name for each,
+  // so the view keeps the function this module installed.
+  const clearOwn = read_(fields, 'clear') as () => void
+  write(fields, 'computersHost', {
+    reload: (name: string, load: (current: () => boolean) => unknown) => gate(fields, name, load),
+    tab: () => String(read_(fields, 'sessionTab') ?? 'chat'),
+    width: () => Number(read_(fields, 'winWidth') ?? 1400),
+  })
+  const view: ComputersSlice = {
+    get computers(): unknown[] | null { return (read_(fields, 'computers') as unknown[] | null | undefined) ?? null },
+    get feed(): Record<string, unknown> { return (read_(fields, 'computerFeed') as Record<string, unknown> | undefined) ?? {} },
+    get error(): string { return String(read_(fields, 'computerError') ?? '') },
+    loadComputers: () => call(fields, 'loadComputers') as Promise<void>,
+    handleComputer: (ev: unknown) => call(fields, 'handleComputer', ev),
+    computerOf: (id?: string) => call(fields, 'computerOf', id),
+    clear: () => clearOwn(),
+  }
+  write(fields, 'computerView', view)
   return view
 }
