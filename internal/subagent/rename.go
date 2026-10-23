@@ -55,10 +55,11 @@ func (m *Manager) noteRename(meta Meta, newName string) {
 	if err != nil || !parent.Closed.IsZero() {
 		return
 	}
-	_, _ = m.rooms().PostEvent(meta.RoomID, room.SessionEvent{
-		Type:    room.SessionRenamed,
-		Session: meta.Address(),
-		OldName: meta.EffectiveName(),
-		Name:    newName,
-	}, parent.Address())
+	// A session can take an old name again, so each rename is its own note.
+	_, _ = m.rooms().PostEventInput(room.PostEventInput{
+		RoomID:  meta.RoomID,
+		Event:   room.SessionEvent{Type: room.SessionRenamed, Session: meta.Address(), OldName: meta.EffectiveName(), Name: newName},
+		FreshID: true,
+		To:      []string{parent.Address()},
+	})
 }
