@@ -1,8 +1,8 @@
-import { hasItemChange, patchListRows } from './listChanges.js'
+import { hasItemChange, patchListRows } from './listChanges.ts'
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mergeListPage } from './listPages.js'
-import { createReloadGate, listVisible, reconcileRows } from './reloadGate.js'
+import { mergeListPage } from './listPages.ts'
+import { createReloadGate, listVisible, reconcileRows } from './reloadGate.ts'
 import { reloadsUnread } from './unreadReload.ts'
 
 const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r }); return { promise, resolve } }

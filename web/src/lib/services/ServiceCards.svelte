@@ -2,7 +2,7 @@
   // One quiet row per service: status, what it is doing, profile, last and
   // next run and cost today. A row opens to its controls. A service with no
   // controls shows only its row; a field with no source reads "unknown".
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import type { Card, Control } from './cards.ts'
 
   interface Props { cards: Card[]; now: number; onchange: (card: Card, control: Control, value: string | boolean) => Promise<string> }

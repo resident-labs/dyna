@@ -4,7 +4,7 @@
   import EmptyState from '../ui/EmptyState.svelte'
   import VisualPlaceholder from '../files/VisualPlaceholder.svelte'
   import { fileURL } from '../../api.js'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import { checkStatus, filterVisuals } from '../files/visuals.js'
   import { visuals as store } from '../files/visuals.svelte.js'
   let { roomId, visuals = [], onopen } = $props()

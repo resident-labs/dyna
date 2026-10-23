@@ -5,7 +5,7 @@
   // share one 18 px grid.
   import { copyText } from '../../api.js'
   import PinIcon from './PinIcon.svelte'
-  import { postHref } from './posts.js'
+  import { postHref } from './posts.ts'
   import type { Room } from '../api/room.ts'
 
   interface Props {

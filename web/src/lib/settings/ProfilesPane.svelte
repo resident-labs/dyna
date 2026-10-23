@@ -6,7 +6,7 @@
   import Skeleton from '../ui/Skeleton.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import { slide } from 'svelte/transition'
-  import { BASE, motion } from '../ui/motion.js'
+  import { BASE, motion } from '../ui/motion.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
   import { api } from '../../api.js'
   import ProfileEditor from './ProfileEditor.svelte'

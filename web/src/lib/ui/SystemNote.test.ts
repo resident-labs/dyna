@@ -9,7 +9,7 @@ import { isRecord } from '../api/guards.ts'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { renderedBody } from '../../../test/svelte-render.ts'
 import { call } from '../../../test/svelte-source.ts'
-import { noteData } from './notices.js'
+import { noteData } from './notices.ts'
 
 const text = (html: string): string => html.replace(/<!--.*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 const slow = (id: string, name: string, time: string, prs: string) => noteData({ id, kind: 'issue', ts: '2026-10-20T03:10:00Z', text: `Slow test over the CI limit: dyna-agent/internal/x/${name}\n\nTime: ${time}, limit 1 s\nPRs: ${prs}\nArea: internal/x\n\nnote` })

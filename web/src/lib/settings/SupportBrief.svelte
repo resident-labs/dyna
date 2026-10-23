@@ -4,7 +4,7 @@
   // "/<profile> <brief>" draft to the current room, the same path the
   // composer uses.
   import { errorText } from '../errorText.ts'
-  import { dialog } from '../ui/dialog.js'
+  import { dialog } from '../ui/dialog.ts'
   import { api } from '../../api.js'
   import { bestProfile, supportBrief, supportDraft } from './support.ts'
   import type { ProfileView } from '../api/profile.ts'

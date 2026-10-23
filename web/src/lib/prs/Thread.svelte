@@ -5,7 +5,7 @@
   // them. The after snippet adds one-line events at the end, then one line per
   // bot. Bots never block, so they are only a note here.
   // opener names who opened it (authorName), when the host knows more than GitHub's login.
-  import { ago, markdown } from '../ui/format.js'
+  import { ago, markdown } from '../ui/format.ts'
   import type { Snippet } from 'svelte'
   import type { BotReview, ReviewRound } from '../api/change.ts'
   import type { GitHubDetail } from '../api/github.ts'

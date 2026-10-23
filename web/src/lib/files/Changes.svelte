@@ -6,7 +6,7 @@
   // file with both kinds of change shows in both.
   import { onMount } from 'svelte'
   import { api } from '../../api.js'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import DiffView from './DiffView.svelte'
   import SendBar from './SendBar.svelte'
   import { addComment } from './diffComments.ts'

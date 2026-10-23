@@ -5,7 +5,7 @@ import { rm } from 'node:fs/promises'
 import { domNames, installDom, load } from '../prs/prDetailHarness.ts'
 import { need } from '../../../test/need.ts'
 
-const format = readFileSync(new URL('../ui/format.js', import.meta.url), 'utf8')
+const format = readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8')
 
 // Mounts a component with the real format helpers and returns its text.
 async function render(component: string, props: object) {

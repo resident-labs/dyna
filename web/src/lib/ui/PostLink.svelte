@@ -1,5 +1,5 @@
 <script>
-  import { postHref } from './posts.js'
+  import { postHref } from './posts.ts'
   // children replaces the "Open post" label, such as a message's time.
   let { roomId, postId, onopen = null, children = null } = $props()
   let href = $derived(postHref(roomId, postId))

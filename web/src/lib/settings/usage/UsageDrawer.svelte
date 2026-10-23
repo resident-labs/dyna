@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
-  import { dialog as modal } from '../../ui/dialog.js'
+  import { dialog as modal } from '../../ui/dialog.ts'
   let { title, eyebrow = 'Account details', onclose, children }: { title: string; eyebrow?: string; onclose: () => void; children: Snippet } = $props()
   let closeButton = $state<HTMLButtonElement>()
 </script>

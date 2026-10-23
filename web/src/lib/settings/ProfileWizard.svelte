@@ -1,6 +1,6 @@
 <script lang="ts">
   import { errorText } from '../errorText.ts'
-  import { dialog as modal } from '../ui/dialog.js'
+  import { dialog as modal } from '../ui/dialog.ts'
   import Loading from './Loading.svelte'
   import { onMount, tick, untrack } from 'svelte'
   import { api } from '../../api.js'

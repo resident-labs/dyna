@@ -1,7 +1,7 @@
 <script lang="ts">
   import Avatar from '../ui/Avatar.svelte'
   import { sessionStatus } from './status.ts'
-  import { tokens } from '../ui/format.js'
+  import { tokens } from '../ui/format.ts'
   // The DM header's name button: one status label shared with member lists.
   import type { Member } from '../api/room.ts'
   import type { Usage } from '../api/session.ts'

@@ -1,7 +1,7 @@
 <script lang="ts">
   // A room's workflow runs: running runs as cards with live progress on top,
   // finished runs as a quiet list under them. Read-only; a click opens a run.
-  import { ago, duration, roomLabel } from '../ui/format.js'
+  import { ago, duration, roomLabel } from '../ui/format.ts'
   import type { Room } from '../api/room.ts'
   import type { RunList, RunSummary } from '../api/workflow.ts'
   import RunIcon from './RunIcon.svelte'

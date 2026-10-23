@@ -9,7 +9,7 @@
   //   roomId    the room, for ReplyToFinding; without it nothing resolves
   //   onchange  reload Changes after a reply
   import { api } from '../../api.js'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import { groupFindings, dispositionMeta, verdictMeta, shortSha } from './pr.ts'
   import type { AuthorNotes, Finding } from '../api/change.ts'
   import type { ReviewChange } from './github.ts'

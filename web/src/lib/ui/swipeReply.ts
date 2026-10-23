@@ -1,9 +1,11 @@
+import type { Action } from 'svelte/action'
+
 // A left swipe replies on release. Listen for touch events so vertical
 // scrolling and pinch zoom keep the browser's normal behavior. Only a
 // clear horizontal gesture cancels the browser's default touch action.
-export function swipeReply(node, reply) {
+export const swipeReply = ((node, reply: () => unknown) => {
   const threshold = 64
-  let start = null
+  let start: { x: number; y: number; id: number; at: number } | null = null
   let dragging = false
   let suppressClickUntil = 0
 
@@ -14,19 +16,21 @@ export function swipeReply(node, reply) {
     node.style.removeProperty('--reply-transform')
   }
 
-  function begin(e) {
+  function begin(e: TouchEvent) {
     reset()
-    if (!window.matchMedia('(pointer: coarse)').matches || e.touches.length !== 1 || e.target.closest('input, textarea, select, iframe, pre, table, [contenteditable="true"]')) return
+    if (!window.matchMedia('(pointer: coarse)').matches || e.touches.length !== 1 || (e.target as Element).closest('input, textarea, select, iframe, pre, table, [contenteditable="true"]')) return
     if (window.getSelection()?.toString()) return
     const touch = e.touches[0]
+    if (!touch) { reset(); return }
     start = { x: touch.clientX, y: touch.clientY, id: touch.identifier, at: performance.now() }
     node.style.setProperty('--reply-cue-y', `${touch.clientY - node.getBoundingClientRect().top}px`)
   }
 
-  function move(e) {
+  function move(e: TouchEvent) {
     if (!start) return
     if (e.touches.length !== 1) { reset(); return }
     const touch = e.touches[0]
+    if (!touch) { reset(); return }
     if (touch.identifier !== start.id) { reset(); return }
     const dx = touch.clientX - start.x
     const dy = touch.clientY - start.y
@@ -46,9 +50,10 @@ export function swipeReply(node, reply) {
     node.classList.toggle('swipe-ready', distance >= threshold)
   }
 
-  function end(e) {
+  function end(e: TouchEvent) {
     if (!start) return
-    const touch = [...e.changedTouches].find((t) => t.identifier === start.id)
+    const id = start.id
+    const touch = [...e.changedTouches].find((t) => t.identifier === id)
     if (!touch) { reset(); return }
     // Releasing after reversing the swipe should not send a reply action.
     const ready = dragging && e.touches.length === 0 && start.x - touch.clientX >= threshold
@@ -60,7 +65,7 @@ export function swipeReply(node, reply) {
     if (ready) reply()
   }
 
-  function click(e) {
+  function click(e: MouseEvent) {
     if (Date.now() >= suppressClickUntil) return
     e.preventDefault()
     e.stopImmediatePropagation()
@@ -74,7 +79,7 @@ export function swipeReply(node, reply) {
   node.addEventListener('contextmenu', reset)
   node.addEventListener('click', click, true)
   return {
-    update(next) { reply = next },
+    update(next: () => unknown) { reply = next },
     destroy() {
       reset()
       node.classList.remove('swipeable')
@@ -87,4 +92,4 @@ export function swipeReply(node, reply) {
       node.removeEventListener('click', click, true)
     },
   }
-}
+}) satisfies Action<HTMLElement, () => unknown>

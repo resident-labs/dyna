@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { actions, actionItems, roomMenu } from './actions.js'
+import { actions, actionItems, roomMenu } from './actions.ts'
 
 function context(room = { id: 'room_test', name: 'test', repo: '/tmp/repo' }) {
   const calls = []

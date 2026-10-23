@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fieldLabel, kindOf, recordTitle, recordLine, linkOf, paragraphs } from './readable.js'
+import { fieldLabel, kindOf, recordTitle, recordLine, linkOf, paragraphs } from './readable.ts'
 
 test('field labels read as words', () => {
   assert.equal(fieldLabel('agents_supported'), 'Agents supported')

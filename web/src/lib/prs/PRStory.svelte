@@ -10,7 +10,7 @@
   //   onread    the "Read the review" button
   //   children  snippet under the status box; actions: extra footer buttons
   import { openExternal } from '../../api.js'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import StatusBox from './StatusBox.svelte'
   import { isLocal, changeName, changeTitle } from './pr.ts'
   import { factsLine } from './prlist.ts'

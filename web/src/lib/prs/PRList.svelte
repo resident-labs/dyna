@@ -27,8 +27,8 @@
   import { crossfade, slide } from 'svelte/transition'
   import { flip } from 'svelte/animate'
   import { cubicOut } from 'svelte/easing'
-  import { motion, BASE } from '../ui/motion.js'
-  import { ago } from '../ui/format.js'
+  import { motion, BASE } from '../ui/motion.ts'
+  import { ago } from '../ui/format.ts'
 
   interface Props {
     queue?: { row: ChangeRow; item: MergeItem; state: MergeState }[]

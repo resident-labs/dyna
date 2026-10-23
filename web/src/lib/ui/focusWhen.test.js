@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { focusWhen, revealWhen } from './focusWhen.js'
+import { focusWhen, revealWhen } from './focusWhen.ts'
 
 function frames(t) {
   const queued = []
