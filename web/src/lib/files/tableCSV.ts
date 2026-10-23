@@ -3,6 +3,6 @@
 export function tableCSV(rows: readonly (readonly string[])[], width: number): string {
   return rows.map((row) => Array.from({ length: width }, (_, column) => {
     const value = row[column] ?? ''
-    return /[",\r\n]/.test(value) ? '"' + value.replace(/"/g, '""') + '"' : value
+    return !value || /[",\r\n]/.test(value) ? '"' + value.replace(/"/g, '""') + '"' : value
   }).join(',')).join('\r\n')
 }
