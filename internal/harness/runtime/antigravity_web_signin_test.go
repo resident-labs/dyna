@@ -82,3 +82,25 @@ func TestOtherHarnessesKeepTheirNativeSignIn(t *testing.T) {
 		}
 	}
 }
+
+// A card must receive the ACP helper command just as the terminal did.
+func TestAntigravityCardKeepsACPCommand(t *testing.T) {
+	a, _, n := setupSharedLogin(t, "antigravity")
+	spec := signInSpecs["antigravity"]
+	t.Cleanup(func() { signInSpecs["antigravity"] = spec })
+	var got []string
+	probe := spec
+	probe.Argv = func(argv []string) []string {
+		got = append([]string(nil), argv...)
+		return nil // Inspect command selection without starting a child.
+	}
+	signInSpecs["antigravity"] = probe
+	r := &Runtime{Accounts: a}
+	if _, err := r.startPrivateLogin(n.ID, "/fake/agy"); err == nil {
+		t.Fatal("the command probe must stop before starting a child")
+	}
+	if len(got) < 3 || got[1] != "harness" || got[2] != "accounts" || !IsACPSignInCommand(got[1:]) ||
+		argAfter(got, "--agy") != "/fake/agy" || argAfter(got, "--scope") != filepath.Join(a.Root, "antigravity", ".runtime") {
+		t.Fatalf("card ran %q, want the scoped ACP helper", got)
+	}
+}

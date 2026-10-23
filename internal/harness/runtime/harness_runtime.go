@@ -142,15 +142,16 @@ func (a *Runtime) startPrivateLogin(id, exe string) (PrivateLogin, error) {
 		_ = flow.Cancel()
 		return PrivateLogin{}, err
 	}
-	// Harnesses with a sign-in spec run without a terminal, so the owner can
-	// finish on any device.
-	if spec, ok := signInSpecs[n.Harness]; ok && !openCodeKeySignIn(n) {
-		return a.startPrivateSignIn(id, n.Harness, spec, flow)
-	}
 	argv, err := a.privateSignInCommand(id, exe, flow)
 	if err != nil {
 		_ = flow.Cancel()
 		return PrivateLogin{}, err
+	}
+	// Prepare the native helper before choosing the card or terminal, so
+	// Antigravity's card uses the same scoped ACP login as its terminal.
+	if spec, ok := signInSpecs[n.Harness]; ok && !openCodeKeySignIn(n) {
+		flow.Argv = argv
+		return a.startPrivateSignIn(id, n.Harness, spec, flow)
 	}
 	term, err := a.terminals.OpenCommand(argv, flow.Env, flow.Cwd, 90, 24)
 	if err != nil {
