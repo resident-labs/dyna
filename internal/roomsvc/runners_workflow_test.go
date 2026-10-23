@@ -213,7 +213,7 @@ func TestCoordinatorHintFindsExternalRegistrationAfterStartup(t *testing.T) {
 			t.Fatal(err)
 		}
 		finish()
-	}) {
+	}, func() { t.Fatal("hint scanned call requests") }) {
 		t.Fatal("coordinator hint required a clock tick")
 	}
 	if scans != 1 {

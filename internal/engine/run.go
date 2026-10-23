@@ -267,6 +267,8 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 			return
 		case "call-requests":
 			wakeWorker(signals.channels["call-requests"])
+			rooms.CallRequestsChanged()
+			return
 		case "callers":
 			if ev.Key != "" {
 				rooms.CoordinatorChanged(ev.Key)
@@ -535,6 +537,9 @@ func Run(ctx context.Context, f Options) (runErr error) {
 		})
 	}
 	workerDone = begin(watch, rooms, accounts, load, readOnly, signals, engineTimers, events, func(ev roomsvc.Event) {
+		if ev.Kind == "call-requests" {
+			wakeWorker(callRing)
+		}
 		events.Publish(hub.Event{Topic: ev.Kind, Room: ev.RoomID, Body: ev})
 		if notify != nil && ev.Kind == "posts" {
 			go pushPosts(watch, rooms, notify, ev)
