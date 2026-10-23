@@ -97,3 +97,31 @@ func TestMigratePiAccountsMovesSignInsIntoTheLogin(t *testing.T) {
 		t.Fatal("the active account lost the migrated sign-in")
 	}
 }
+
+// An account limited to a repo must not lend its login to an unrestricted one.
+func TestMigratePiAccountsKeepsRepoLimitedAccounts(t *testing.T) {
+	r := providerKeysRuntime(t)
+	install(t, r.Bundles, "pi", "1.3.0")
+	ctx := context.Background()
+	if _, err := r.HarnessProviderKeys(ctx, "pi", "add", "zai", testProviderKey); err != nil {
+		t.Fatal(err)
+	}
+	extra, err := r.Accounts.Create("pi", "private")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(extra.Home, "auth.json"), []byte(`{"kimi-coding":{"type":"oauth","access":"fake"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = r.Accounts.SetRepos(extra.ID, []string{"github.com/acme/private"}); err != nil {
+		t.Fatal(err)
+	}
+	r.MigratePiAccounts(ctx)
+	if _, err = r.Accounts.Find(extra.ID); err != nil {
+		t.Fatalf("the limited account was removed: %v", err)
+	}
+	home, _ := r.Accounts.HarnessHome("pi")
+	if _, have := piAuthTypes(t, home)["kimi-coding"]; have {
+		t.Fatal("the limited login reached the unrestricted runtime home")
+	}
+}
