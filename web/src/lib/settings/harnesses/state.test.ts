@@ -26,6 +26,10 @@ import type { HarnessAccount, HarnessSnapshot, PersonalLogin, PrivateLogin, Reco
 // Snapshot data that leaves out fields the engine may omit, so the helpers read it as the engine sends it.
 const loose = (value: object): Partial<HarnessSnapshot> => JSON.parse(JSON.stringify(value))
 const paneSource = readFileSync(new URL('./HarnessesPane.svelte', import.meta.url), 'utf8')
+// The pane and the section components that now hold its markup, for markup checks.
+const paneMarkup = ['HarnessesPane', 'HarnessTabs', 'HarnessList', 'InstallControls', 'AccountsSection', 'ProvidersSection', 'SettingsImportSection', 'HarnessToolsSection', 'ToolsTab']
+  .map((name) => readFileSync(new URL(`./${name}.svelte`, import.meta.url), 'utf8'))
+  .join('\n')
 // The helpers the pane's functions call from their own script.
 const helpers = { errorText, failText: (e: unknown, fallback: string) => (e ? errorText(e) : fallback) }
 // A question the pane asks before a sign-in or switch goes ahead.
@@ -466,8 +470,8 @@ test('a row offers an update only when the recommended version is newer than Dyn
 })
 
 test('the Harnesses pane shows actions, not status chips or warning boxes', () => {
-  assert.doesNotMatch(paneSource, /class="pill|pillLabel|class="note/)
-  for (const action of ['Sign in', 'Add account', 'Remove', 'Uninstall', 'Update to']) assert.match(paneSource, new RegExp(action), action)
+  assert.doesNotMatch(paneMarkup, /class="pill|pillLabel|class="note/)
+  for (const action of ['Sign in', 'Add account', 'Remove', 'Uninstall', 'Update to']) assert.match(paneMarkup, new RegExp(action), action)
   assert.match(paneSource, /api\.uninstallPrivateRuntime\(/)
 })
 
@@ -501,12 +505,12 @@ test('a harness that is not installed offers Install, not Sign in, and installs 
   await call(context, 'install', row)
   assert.deepEqual(calls[1], ['grok', '1.2.3'])
 
-  const rowActions = paneSource.slice(paneSource.indexOf('{#if r.installing}'), paneSource.indexOf('{:else if r.update}'))
+  const rowActions = paneMarkup.slice(paneMarkup.indexOf('{#if r.installing}'), paneMarkup.indexOf('{:else if r.update}'))
   assert.ok(rowActions.indexOf('{:else if r.needsInstall}') < rowActions.indexOf('Sign in'), 'Install comes before Sign in')
   assert.match(rowActions, /role="progressbar"/)
-  const panel = paneSource.slice(paneSource.indexOf('<aside class="panel"'))
+  const panel = paneMarkup.slice(paneMarkup.indexOf('<aside class="panel"'))
   assert.ok(panel.indexOf('{#if !r.needsInstall && !r.installing}') < panel.indexOf('<h3 class="section-label">Settings import</h3>'), 'import and tools wait for the install')
-  assert.doesNotMatch(paneSource, /Sign in or start a session to install/)
+  assert.doesNotMatch(paneMarkup, /Sign in or start a session to install/)
 })
 
 test('a version typed for one harness never installs another', async () => {
@@ -620,7 +624,7 @@ test('finish sign-in shows the engine message', async () => {
 })
 
 test('Antigravity sign-in does not promise a personal login copy', () => {
-  assert.match(paneSource, /\{#if r\.id !== 'antigravity'\}\s*<p class="muted small">If you already use \{r\.meta\.name\}, Dyna can copy that login once\.<\/p>/)
+  assert.match(paneMarkup, /\{#if row\.id !== 'antigravity'\}\s*<p class="muted small">If you already use \{row\.meta\.name\}, Dyna can copy that login once\.<\/p>/)
 })
 
 // The shared card words each step of an in-app sign-in, and repeats the
