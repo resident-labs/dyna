@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { computersText, loadText, machinesSub, memoryPct, reasonText, roleLabel, runtimeText, statusText, summaryText, systemText, versionText } from './machines.ts'
+import { computersText, diskText, loadText, machinesSub, memoryPct, reasonText, roleLabel, runtimeText, statusText, summaryText, systemText, versionText } from './machines.ts'
 import type { MachineCapabilities, MachineRole, MachineSummary } from '../api/machine.ts'
 
 const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
@@ -40,8 +40,15 @@ test('status words separate a switched off machine from one that is not probed',
 })
 
 test('a degraded machine says why in a designed line', () => {
-  assert.equal(reasonText('low-disk'), 'Low disk space. The machine still works, but it needs free space soon.')
+  assert.equal(reasonText('low-disk'), 'Low disk space. Dyna starts no new CI here until space is freed.')
   assert.equal(reasonText(undefined), 'The machine still works, but it needs attention.', 'an unknown reason still reads as a sentence')
+})
+
+test('the Disk row words the free space and the floor Dyna keeps', () => {
+  const GiB = 2 ** 30
+  assert.equal(diskText({ freeDisk: 3 * GiB, diskFloor: 20 * GiB }), '3.0 GiB free · needs 20.0 GiB')
+  assert.equal(diskText({ freeDisk: 40 * GiB }), '40.0 GiB free', 'no floor shows only what is free')
+  assert.equal(diskText({}), '', 'no reading shows no row')
 })
 
 test('role chips name CI in capitals and other roles as they are', () => {

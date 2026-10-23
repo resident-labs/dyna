@@ -23,11 +23,12 @@ export function statusText(status: MachineStatus): string {
 }
 
 // reasonText words why a machine is degraded. It is a designed line, never the
-// probe's own message.
+// probe's own message. Below the disk floor the scheduler starts no CI on the
+// machine, so the line says what stops.
 export function reasonText(reason: MachineStatusReason | undefined): string {
   switch (reason) {
     case 'low-disk':
-      return 'Low disk space. The machine still works, but it needs free space soon.'
+      return 'Low disk space. Dyna starts no new CI here until space is freed.'
     default:
       return 'The machine still works, but it needs attention.'
   }
@@ -161,4 +162,12 @@ export function memoryPct(load: Pick<MachineLoad, 'memTotal' | 'memAvailable'>):
 export function loadText(load: Pick<MachineLoad, 'memAvailable'>): string {
   if (!load.memAvailable) return ''
   return `${sizeText(load.memAvailable)} free`
+}
+
+// diskText words a machine's free disk space, and the floor Dyna keeps for CI
+// work on it. It is empty when the probe read no free space.
+export function diskText(caps: Pick<MachineCapabilities, 'freeDisk' | 'diskFloor'>): string {
+  if (caps.freeDisk === undefined) return ''
+  const free = `${sizeText(caps.freeDisk)} free`
+  return caps.diskFloor ? `${free} · needs ${sizeText(caps.diskFloor)}` : free
 }
