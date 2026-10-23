@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	accountservice "dyna-agent/internal/account/service"
+	accountstore "dyna-agent/internal/account/store"
 	"dyna-agent/internal/automations"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/engine/stores"
@@ -38,7 +40,8 @@ func TestDisabledCheckInHookStopsCheckIns(t *testing.T) {
 	recordtest.Write(t, sessions.Root, child.ID, child)
 
 	n := notify.New(rooms, &subagent.Manager{Store: sessions})
-	service := hooks.New(automations.Hooks(n)...)
+	accounts := accountservice.New(accountservice.Options{Store: accountstore.DefaultStore()})
+	service := hooks.New(automations.Hooks(n, accounts)...)
 	if err := service.Seed(ctx); err != nil {
 		t.Fatal(err)
 	}

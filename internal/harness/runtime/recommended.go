@@ -61,30 +61,18 @@ type recommendedCacheEntry struct {
 	expires time.Time
 }
 
-const versionCheckInterval = 6 * time.Hour
+// VersionCheckInterval is how long a recommended version stays fresh, and the
+// interval the harness-versions hook starts with.
+const VersionCheckInterval = 6 * time.Hour
 
 var defaultRecommendedCache RecommendedVersionCache
 
-// RunVersionChecks keeps the engine cache current while the UI is closed.
-// Normal snapshot reads also populate the cache before the first scheduled check.
-func RunVersionChecks(ctx context.Context) {
-	ticker := time.NewTicker(versionCheckInterval)
-	defer ticker.Stop()
-	runVersionChecks(ctx, ticker.C, (RecommendedVersionResolver{Cache: &defaultRecommendedCache, Refresh: true}).RecommendedVersions)
-}
-
-func runVersionChecks(ctx context.Context, ticks <-chan time.Time, check func(context.Context) []RecommendedVersion) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticks:
-			if ctx.Err() != nil {
-				return
-			}
-			check(ctx)
-		}
-	}
+// CheckVersions runs one version check pass and keeps the engine cache
+// current while the UI is closed: every harness's recommended version is read
+// afresh. The harness-versions built-in hook runs it on its own interval, and
+// normal snapshot reads also populate the cache.
+func CheckVersions(ctx context.Context) []RecommendedVersion {
+	return RecommendedVersionResolver{Cache: &defaultRecommendedCache, Refresh: true}.RecommendedVersions(ctx)
 }
 
 func (c *RecommendedVersionCache) cached(key string) (string, string, bool) {
@@ -118,7 +106,7 @@ func (c *RecommendedVersionCache) remember(key, version, reason string) {
 	if c.entries == nil {
 		c.entries = make(map[string]recommendedCacheEntry)
 	}
-	ttl := versionCheckInterval
+	ttl := VersionCheckInterval
 	if version == "" {
 		ttl = time.Minute
 	}
