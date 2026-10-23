@@ -52,7 +52,7 @@ func TestKeepClosedSession(t *testing.T) {
 // A consolidation source is closed, but its target still reads its record
 // and turn files for delivery. Retention keeps the source while the target's
 // record names it, however old the source is.
-func TestClosedSessionKeeperKeepsConsolidationSources(t *testing.T) {
+func TestRetainClosedSessionKeepsConsolidationSources(t *testing.T) {
 	e, now := consolidationEnv(t)
 	e.m.Store.Now = func() time.Time { return *now }
 	a, _ := e.start("SLEEP:1 RESPOND: target")
@@ -77,15 +77,15 @@ func TestClosedSessionKeeperKeepsConsolidationSources(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	keep, err := e.m.ClosedSessionKeeper(e.ctx)
+	retain, err := e.m.RetainClosedSession(e.ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if kept, err := keep(e.ctx, b.ID); err != nil || !kept {
-		t.Fatalf("keep(consolidation source) = %v, %v; want kept", kept, err)
+	if kept, err := retain(e.ctx, b.ID); err != nil || !kept {
+		t.Fatalf("retain(consolidation source) = %v, %v; want kept", kept, err)
 	}
-	if kept, err := keep(e.ctx, plain.ID); err != nil || kept {
-		t.Fatalf("keep(plain closed session) = %v, %v; want removable", kept, err)
+	if kept, err := retain(e.ctx, plain.ID); err != nil || kept {
+		t.Fatalf("retain(plain closed session) = %v, %v; want removable", kept, err)
 	}
 	target, err := e.m.Store.ReadMeta(a.ID)
 	if err != nil {
