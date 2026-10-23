@@ -33,6 +33,11 @@ export function unifiedIssues(github: readonly GitHubItem[], local: readonly Roo
     rows.push({ number: 0, title: i.title, state: i.githubUrl ? 'UNKNOWN' : i.state === 'open' ? 'OPEN' : 'CLOSED', group: i.state === 'open' ? 'needs-owner' : '', author: { login: i.filer || '' }, labels: [], workingSessionLive: false, createdAt: new Date(i.filedAt).toISOString(), updatedAt: new Date(i.changedAt || i.filedAt).toISOString(), url: i.githubUrl || '', source: 'Dyna', local: i })
   }
   const q = query.trim().toLowerCase()
-  return rows.filter(i => (source === 'all' || i.source?.toLowerCase() === source) && (state === 'all' || i.state === state.toUpperCase()) && (!q || i.source === 'GitHub' || ((i.local ? roomIssueLabel(i.local) + ' ' : '') + i.title + ' ' + (i.local?.file || '') + ' ' + (i.local?.filer || '')).toLowerCase().includes(q)))
+  // People type D-12, d12 or 12, so both spellings are searchable.
+  const haystack = (i: IssueRow) => {
+    const label = i.local ? roomIssueLabel(i.local) : ''
+    return [label, i.local ? `d${i.local.number}` : '', i.title, i.local?.file || '', i.local?.filer || ''].join(' ').toLowerCase()
+  }
+  return rows.filter(i => (source === 'all' || i.source?.toLowerCase() === source) && (state === 'all' || i.state === state.toUpperCase()) && (!q || i.source === 'GitHub' || haystack(i).includes(q)))
     .sort((a, b) => Number(b.state === 'OPEN') - Number(a.state === 'OPEN') || Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
 }
