@@ -36,6 +36,13 @@ func TestCloseDuringStartupClaimRecordsAStoppedTurn(t *testing.T) {
 	}
 	unlock = sync.OnceFunc(unlock)
 	defer unlock()
+	// Keep startup blocked until Close cancels it. Release the artificial
+	// gate before terminal cleanup needs that same gate to return dormant.
+	e.m.checkpoint = func(stage string) {
+		if stage == "turn-finished" {
+			unlock()
+		}
+	}
 	lock, err := e.m.Store.tryTurnLock(info.ID)
 	if err != nil {
 		t.Fatal(err)
