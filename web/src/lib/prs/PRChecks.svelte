@@ -12,7 +12,7 @@
   //   pr      the change, to link a check that has no page of its own
   //   main    the saved CI result of the default branch ({state, head, reason}) from the
   //           change's merge item, or null
-  import { openExternal } from '../../api.js'
+  import { copyText, openExternal } from '../../api.js'
   import Chip from '../ui/Chip.svelte'
   import { checkMeta, checkBuckets, workflowGroups, isLocal, shortSha, checkTime, type CheckRow } from './pr.ts'
   import { botStateWord, type MergeItem, type Row } from './prlist.ts'
@@ -25,6 +25,29 @@
     main?: MergeItem['main'] | null
   }
   let { checks = [], bots = [], pr = null, main = null }: Props = $props()
+  let feedback = $state.raw<{ check: CheckRow | null; text: string }>({ check: null, text: '' })
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
+  let copyGeneration = 0
+  $effect(() => {
+    checks; pr
+    copyGeneration++
+    feedback = { check: null, text: '' }
+    return () => clearTimeout(copyTimer)
+  })
+  async function copyExcerpt(check: CheckRow) {
+    const current = ++copyGeneration
+    clearTimeout(copyTimer)
+    feedback = { check, text: '' }
+    try {
+      await copyText(check.failureExcerpt ?? '')
+      if (current !== copyGeneration) return
+      feedback = { check, text: 'Copied excerpt' }
+    } catch {
+      if (current !== copyGeneration) return
+      feedback = { check, text: 'Could not copy' }
+    }
+    copyTimer = setTimeout(() => { feedback = { check: null, text: '' } }, 2000)
+  }
   let local = $derived(isLocal(pr))
   let buckets = $derived(checkBuckets(checks))
   // The test report note is a warning about the whole change (a missing or
@@ -83,7 +106,11 @@
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (The output region scrolls with the keyboard.) -->
         <pre tabindex="0" role="region" aria-label="Saved failure output: {c.name}">{c.failureExcerpt}</pre>
       {/if}
-      {#if link}<div class="act"><button class="btn" onclick={() => openExternal(link.href)} title={link.title} aria-label="Open the full log: {c.name}">Open the full log</button></div>{/if}
+      {#if link || c.failureExcerpt}<div class="act">
+        {#if c.failureExcerpt}<button class="btn" onclick={() => copyExcerpt(c)} aria-label="Copy excerpt: {c.name}">Copy excerpt</button>{/if}
+        {#if link}<button class="btn" onclick={() => openExternal(link.href)} title={link.title} aria-label="Open the full log: {c.name}">Open the full log</button>{/if}
+        <span class="copy-status" class:error={feedback.text === 'Could not copy'} role="status">{feedback.check === c ? feedback.text : ''}</span>
+      </div>{/if}
     </section>
   {/each}
 
@@ -154,7 +181,9 @@
   .fail header b { font-size: var(--t-body); font-weight: 600; overflow-wrap: anywhere; }
   .fail pre { max-height: 24em; overflow: auto; margin: 0; padding: var(--s3) var(--s4); font: 12px/1.5 var(--mono); color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--side); }
   .note { margin: 0 0 var(--s3); white-space: pre-wrap; overflow-wrap: anywhere; }
-  .act { padding: var(--s2) var(--s3); }
+  .copy-status { color: var(--sage); font-size: var(--t-sm); }
+  .copy-status.error { color: var(--coral); }
+  .act { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); padding: var(--s2) var(--s3); }
   .btn { padding: 6px 14px; border-radius: var(--r-xs); font-size: var(--t-sm); font-weight: 600; background: var(--raise); color: var(--ink-2); }
   .btn:hover { color: var(--ink); background: var(--raise-hover); }
   .fold { margin-top: var(--s3); padding: var(--s2) var(--s3); border-radius: var(--r-sm); background: var(--side); color: var(--muted); font-size: var(--t-sm); }
