@@ -463,8 +463,8 @@ export function buildActivity(i: Inputs, now: number): Activity[] {
   i.history.forEach((h, n) => {
     out.push({
       key: `merge:${h.at}:${n}`, at: Date.parse(h.at), service: 'merge',
-      text: h.kind === 'publish' ? `published main · ${h.changes} ${h.changes === 1 ? 'change' : 'changes'}` : `trial ${h.outcome}${h.detail ? `: ${h.detail}` : ''}`,
-      tone: h.outcome === 'published' || h.outcome === 'passed' ? 'on' : 'error', session: '',
+      text: h.kind === 'publish' ? `published main · ${h.changes} ${h.changes === 1 ? 'change' : 'changes'}` : h.kind === 'decision' ? `decision${h.detail ? `: ${h.detail}` : ''}` : `trial ${h.outcome}${h.detail ? `: ${h.detail}` : ''}`,
+      tone: h.kind === 'decision' || h.outcome === 'published' || h.outcome === 'passed' ? 'on' : 'error', session: '',
     })
   })
   for (const row of i.hooks ?? []) {
