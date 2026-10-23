@@ -667,9 +667,9 @@ type legacyBody struct {
 
 // foldLegacyChildren folds every open child goal into an item on its parent,
 // deepest first in numeric goal order, and rewrites session records and
-// keeper journals in the same transaction. A child whose parent is closed or
-// missing becomes a standalone goal. Rerunning over a folded store changes
-// nothing: no parent links remain.
+// legacy keeper journals in the same transaction. A child whose parent is
+// closed or missing becomes a standalone goal. Rerunning over a folded store
+// changes nothing: no parent links remain.
 func (s *Store) foldLegacyChildren(conn *sql.Conn) error {
 	ctx := context.Background()
 	now := s.now()
@@ -858,6 +858,10 @@ func (s *Store) foldLegacyChildren(conn *sql.Conn) error {
 // convertJournals rewrites each room's journal so every keeper entry becomes
 // one keeper-status event; event lines stay byte-for-byte. A journal without
 // keeper entries is not rewritten.
+//
+// TODO: legacy/shim — keeper entries and the "keeper-status" event name come
+// from the removed goal keeper service. Remove this converter when no stored
+// journal holds a keeper entry.
 func (s *Store) convertJournals() error {
 	files, err := filepath.Glob(filepath.Join(s.Root, "journal", "*.jsonl"))
 	if err != nil || len(files) == 0 {
@@ -896,6 +900,8 @@ func (s *Store) convertJournals() error {
 			for i, l := range e.Entries {
 				texts[i] = l.Agent + " " + l.Status + ": " + l.Summary
 			}
+			// TODO: legacy/shim — the by and event names of the removed goal
+			// keeper stay here so its stored entries convert once.
 			ev := Event{Goal: goal, By: "keeper", Kind: "event", Event: "keeper-status", Text: strings.Join(texts, "; "), At: e.At}
 			body, err := json.Marshal(ev)
 			if err != nil {
