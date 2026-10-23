@@ -57,10 +57,7 @@
 <section class="machine">
   <header class="top">
     <button class="back" onclick={onback} title="Back to the machine list"><span aria-hidden="true">‹</span> Machines</button>
-    {#if machine}
-      <h1>{machine.name}</h1>
-      <span class="status {machine.status}">{statusText(machine.status)}</span>
-    {/if}
+    {#if machine}<span class="status {machine.status}">{statusText(machine.status)}</span>{/if}
   </header>
   {#if error}<p class="err" role="alert">{error}</p>{/if}
   {#if !machine}
@@ -69,23 +66,23 @@
     <div class="body">
       <Card title="Overview">
         <Row dense text="Status">
-          {#snippet meta()}<span class="value">{statusText(machine.status)}</span>{/snippet}
+          {#snippet trail()}<span class="value">{statusText(machine.status)}</span>{/snippet}
         </Row>
         <Row dense text="Roles">
-          {#snippet meta()}{#each machine.roles as role (role)}<Chip>{roleLabel(role)}</Chip>{/each}{/snippet}
+          {#snippet trail()}<span class="chips">{#each machine.roles as role (role)}<Chip>{roleLabel(role)}</Chip>{/each}</span>{/snippet}
         </Row>
         <Row dense text="Route">
-          {#snippet meta()}<span class="value mono">{routeText(machine)}</span>{/snippet}
+          {#snippet trail()}<span class="value mono">{routeText(machine)}</span>{/snippet}
         </Row>
         {#if machine.dynaVersion}
           <Row dense text="Dyna">
-            {#snippet meta()}<span class="value mono">{machine.dynaVersion}</span>{/snippet}
+            {#snippet trail()}<span class="value mono">{machine.dynaVersion}</span>{/snippet}
           </Row>
         {/if}
         {#if machine.harnesses?.length}
           {@const harnesses = machine.harnesses ?? []}
           <Row dense text="Harnesses">
-            {#snippet meta()}<span class="value">{harnesses.map((h) => `${h.name} ${h.version}`).join(' · ')}</span>{/snippet}
+            {#snippet trail()}<span class="value">{harnesses.map((h) => `${h.name} ${h.version}`).join(' · ')}</span>{/snippet}
           </Row>
         {/if}
       </Card>
@@ -104,7 +101,7 @@
         {@const ci = machine.ci}
         <Card title="CI">
           <Row dense text="Slots now">
-            {#snippet meta()}<span class="value">{ci.used} of {ci.slots} used</span>{/snippet}
+            {#snippet trail()}<span class="value">{ci.used} of {ci.slots} used</span>{/snippet}
           </Row>
         </Card>
       {/if}
@@ -115,17 +112,26 @@
           {#snippet trail()}<Switch on={machine.enabled} label="Enabled" disabled={busy} onchange={(on: boolean) => onsave({ enabled: on })} />{/snippet}
         </Row>
         <Row dense text="Roles">
-          {#snippet meta()}
-            {#each ROLES as role (role)}
-              <button class="role" class:on={machine.roles.includes(role)} aria-pressed={machine.roles.includes(role)} disabled={busy} onclick={() => toggleRole(role)}>{roleLabel(role)}</button>
-            {/each}
+          {#snippet trail()}
+            <span class="chips">
+              {#each ROLES as role (role)}
+                <button
+                  class="role"
+                  class:on={machine.roles.includes(role)}
+                  aria-pressed={machine.roles.includes(role)}
+                  disabled={busy || role === 'engine'}
+                  title={role === 'engine' ? (machine.local ? 'This machine always runs the engine' : 'Only this engine\u2019s machine runs the engine') : undefined}
+                  onclick={() => toggleRole(role)}
+                >{roleLabel(role)}</button>
+              {/each}
+            </span>
           {/snippet}
         </Row>
         <Row dense text="CI slots">
           {#snippet trail()}<input class="num" type="number" min="0" step="1" aria-label="CI slots" value={machine.ciSlots} disabled={busy} onchange={setSlots} />{/snippet}
         </Row>
         <Row dense text="SSH route">
-          {#snippet meta()}
+          {#snippet trail()}
             {#if machine.local}
               <span class="value">{routeText(machine)}</span>
             {:else}
@@ -140,19 +146,19 @@
 
 <style>
   .machine { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
-  .top { display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4) 0; min-width: 0; }
+  .top { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) var(--s4) 0; min-width: 0; }
   .back { flex: none; display: inline-flex; align-items: center; gap: 2px; font-size: var(--t-sm); color: var(--faint); padding: var(--s1) var(--s2); border-radius: var(--r-xs); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .back:hover { color: var(--ink); background: var(--hover); }
   }
   .back:active { background: var(--select); }
-  h1 { flex: 1; min-width: 0; margin: 0; font-size: var(--t-title); font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .status { flex: none; font-size: var(--t-sm); color: var(--faint); }
+  .status { margin-left: auto; flex: none; font-size: var(--t-sm); color: var(--faint); }
   .status.online { color: var(--sage); }
   .status.off { color: var(--coral); }
-  .body { padding: var(--s3) var(--s4) var(--s4); display: grid; gap: var(--s3); align-content: start; max-width: 900px; }
+  .body { padding: var(--s2) var(--s4) var(--s4); display: grid; gap: var(--s3); align-content: start; max-width: 900px; }
   .usage { display: grid; gap: var(--s3); }
   .value { color: var(--ink-2); }
+  .chips { display: inline-flex; flex-wrap: wrap; gap: var(--s1); justify-content: flex-end; }
   .note { color: var(--faint); }
   .mono { font-family: var(--mono); font-size: var(--t-sm); }
   .role { flex: none; padding: 2px 9px; border-radius: 9px; background: var(--raise); color: var(--muted); font-size: var(--t-cap); font-weight: 600; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
