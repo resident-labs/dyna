@@ -537,6 +537,18 @@ export function threadPanel<M extends Pick<Member, 'name' | 'address' | 'parent'
   }
 }
 
+// threadPosts is the number of posts a member row links to. A row with no
+// thread yet, or a thread with no posts, has zero.
+export const threadPosts = <M>(row: PanelRow<M>): number => row.thread?.posts.length ?? 0
+
+// threadsListed counts the threads the panel shows: a member row that links to
+// posts, plus every other thread. A closed child leaves the panel and its
+// thread with it, so its thread is not counted.
+export function threadsListed<M>(panel: ThreadPanel<M>): number {
+  const rows: PanelRow<M>[] = [...panel.children, ...(panel.parent ? [panel.parent] : []), ...panel.siblings]
+  return rows.filter((row) => threadPosts(row) > 0).length + panel.others.length
+}
+
 // sameText reports whether two texts are equal apart from whitespace. Any
 // looser match can hide a correction in a word, link or path.
 export function sameText(a?: string | null, b?: string | null): boolean {
@@ -554,10 +566,18 @@ export function plain(text?: string | null): string {
     .trim()
 }
 
-// A turn opens with a short divider, "Turn 1 · sol / gpt", and a finished
-// turn closes with a footer: its status, then turnTail, "1m00s · 30 tokens".
+// modelName is the readable name of a model slug: "deepseek/deepseek-flash"
+// reads as "deepseek-flash". A turn shows one name, never the raw pair.
+export function modelName(model?: string | null): string {
+  return (model || '').split('/').filter(Boolean).pop() ?? ''
+}
+
+// A turn opens with a short divider, "Turn 1 · sol", and a finished turn
+// closes with a footer: its status, then turnTail, "1m00s · 30 tokens".
+// The profile is the display name, so the raw model slug only stands in when
+// a turn has no profile.
 export function turnHead(t: Pick<DmTurn, 'n' | 'profile' | 'model'>): string {
-  return [`Turn ${t.n}`, t.profile && (t.model ? `${t.profile} / ${t.model}` : t.profile)].filter(Boolean).join(' · ')
+  return [`Turn ${t.n}`, t.profile || modelName(t.model)].filter(Boolean).join(' · ')
 }
 export function turnTail(t: { started: string; ended?: string; usage?: Usage | null }): string {
   const output = t.usage?.outputTokens

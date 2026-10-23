@@ -20,7 +20,7 @@ test('steps expand independently, retain failures and load shell logs only when 
   const started = '2026-10-23T07:00:00Z'
   const row: TimelineRow = { kind: 'timeline', key: 'timeline:14', turn: { n: 14, started, ended: '2026-10-23T07:02:10Z', status: 'ok' }, steps: [
     { kind: 'tool', key: 'read', tool: 'read', target: 'web/src/a/very/long/path/with/the/full/target.ts' },
-    { kind: 'shell', key: 'shell', jobId: 'sh_1', waits: 0, posts: [], job: { id: 'sh_1', command: ['bash', '-c', 'npm test'], name: 'Run tests', cwd: '/', state: 'exited', code: 0, started, ended: started } },
+    { kind: 'shell', key: 'shell', jobId: 'sh_1', waits: 0, posts: [], job: { id: 'sh_1', command: ['bash', '-c', 'npm test'], name: 'Run tests', cwd: '/', state: 'exited', code: 0, started, ended: '2026-10-23T07:00:01Z' } },
     { kind: 'tool', key: 'failed', tool: 'ran', target: 'npm test', failed: true, command: 'npm test', output: 'expected 1 call, got 0', exit: 1 },
   ] }
   let app
@@ -30,6 +30,11 @@ test('steps expand independently, retain failures and load shell logs only when 
     assert.match(document.body.textContent ?? '', /expected 1 call, got 0/)
     assert.deepEqual(calls, [])
     const steps = document.querySelectorAll('details')
+    // A shell step names what ran and how it ended, not the tool name and code.
+    const shellStep = need(steps[1])
+    assert.equal(need(shellStep.querySelector('.verb')).textContent, 'Shell command')
+    assert.equal(need(shellStep.querySelector('.meta')).textContent, 'succeeded in 1s')
+    assert.doesNotMatch(shellStep.textContent ?? '', /exit 0/)
     const expand = (index: number) => flushSync(() => {
       const step = need(steps[index])
       step.open = true
