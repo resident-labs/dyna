@@ -1,5 +1,5 @@
 // Shell state and log helpers shared by timeline steps and the Shell tab.
-import { duration, elapsed } from '../ui/format.ts'
+import { elapsed } from '../ui/format.ts'
 import type { ShellJob } from '../api/terminal.ts'
 
 export type { ShellJob }
@@ -39,11 +39,14 @@ export const commandOf = (job: ShellJob): string => job.command.at(-1) ?? ''
 
 export const titleOf = (job: ShellJob): string => job.name || commandOf(job)
 
-// metaOf is the quiet text after the title: exit, duration, who stopped it.
+// metaOf is the quiet text after the title: outcome, duration, who stopped it.
+// A successful command names what happened; "exit 0" is a code a reader has to
+// translate, so only a failure keeps the exit code.
 export function metaOf(job: ShellJob, now: number): string {
   const state = blockState(job)
   const started = Date.parse(job.started)
-  const span = job.ended ? duration(job.started, job.ended) : ''
+  const span = job.ended ? elapsed(Date.parse(job.ended) - started) : ''
+  const inBackground = job.backgroundAt ? 'succeeded in the background' : 'succeeded'
   switch (state) {
     case 'running':
       return elapsed(now - started)
@@ -52,9 +55,9 @@ export function metaOf(job: ShellJob, now: number): string {
     case 'stopped':
       return ['stopped by ' + job.stopBy, job.signal, span].filter(Boolean).join(' · ')
     case 'failed':
-      return job.state === 'lost' ? `lost · ${span}`.replace(/ · $/, '') : `exit ${job.code} · ${span}`
+      return job.state === 'lost' ? `lost · ${span}`.replace(/ · $/, '') : `failed with exit code ${job.code} · ${span}`
     default:
-      return `${job.backgroundAt ? 'finished in background · ' : ''}exit ${job.code} · ${span}`
+      return span ? (job.backgroundAt ? `${inBackground} · ${span}` : `succeeded in ${span}`) : inBackground
   }
 }
 
