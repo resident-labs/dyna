@@ -142,11 +142,8 @@ not-state internal/harness/runtime/resource_lease.go ResourceLease.Close 1 # flo
 not-state internal/harness/runtime/resource_lease.go newResourceLease 3 # flock-held process lease; a crash frees a flock, a row could not
 not-state internal/harness/runtime/resource_lease.go removeResourceLease 2 # flock-held process lease; a crash frees a flock, a row could not
 not-state internal/harness/runtime/runtime.go Runtime.EnsureCatalog 1 # removes a stale skill folder from a harness CLI's own config
-not-state internal/harness/steerhook.go RunSteerHook 1 # per-run steer-hook handoff folder between the runner and the hook process
 not-state internal/harness/steerhook.go newSteerHook 1 # per-run steer-hook handoff folder between the runner and the hook process
 not-state internal/harness/steerhook.go steerHook.cleanup 1 # per-run steer-hook handoff folder between the runner and the hook process
-not-state internal/harness/steerhook.go steerHook.offer 2 # per-run steer-hook handoff folder between the runner and the hook process
-not-state internal/harness/steerhook.go steerHook.withdraw 2 # per-run steer-hook handoff folder between the runner and the hook process
 not-state internal/hookinstall/install.go Service.Locked 2 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/install.go copyFile 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/install.go driver.run 1 # self-update install jobs and unit files (an inbox the engine does not own)
