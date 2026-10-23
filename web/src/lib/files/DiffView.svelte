@@ -3,7 +3,7 @@
   // added or removed lines on a sage or coral wash. Long lines wrap unless
   // the reader turned wrapping off.
   import { tick } from 'svelte'
-  import { code } from './codeprefs.svelte.js'
+  import { code } from './codeprefs.svelte.ts'
   // With oncomment, a + shows on each line and opens a comment box under it.
   import { commentLine } from './diffComments.ts'
   let { file, oncomment = null } = $props()

@@ -1,5 +1,5 @@
 <script>
-  import { placeholderHue } from './visuals.js'
+  import { placeholderHue } from './visuals.ts'
   // Stands in for a preview image: cards posted before previews, or with no
   // browser to render them. It fills its parent box.
   let { title } = $props()

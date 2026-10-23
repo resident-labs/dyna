@@ -1,5 +1,5 @@
 <script>
-  import { human, extOf } from './attach.js'
+  import { human, extOf } from './attach.ts'
   import { dialog } from '../ui/dialog.ts'
   let { items = [], onremove, onretry } = $props()
   const titleId = $props.id()
