@@ -592,13 +592,16 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 				return nil
 			})
 		}
-		request := fmt.Sprintf("[DYNA MODEL TRANSFER] Prepare a handoff for the replacement model. Include the goal, decisions, completed work, next actions, blockers, actual task worktree, branch, dirty files, tests, PRs and recovery commands. Submit it with `dyna subagent transfer handoff %s --token %s --dir <actual-task-directory> --branch <branch> <text-or-@file>`. Or begin your final answer with [DYNA HANDOFF]. Preserve all files. A bounded wait is active. A cancelled transfer can reject a late handoff.", id, token)
+		// The ask is a typed session event, so its card says that a transfer
+		// needs a handoff and the agent text keeps the full instructions.
+		instructions := fmt.Sprintf("Prepare a handoff for the replacement model. Include the goal, decisions, completed work, next actions, blockers, actual task worktree, branch, dirty files, tests, PRs and recovery commands. Submit it with `dyna subagent transfer handoff %s --token %s --dir <actual-task-directory> --branch <branch> <text-or-@file>`. Or begin your final answer with [DYNA HANDOFF]. Preserve all files. A bounded wait is active. A cancelled transfer can reject a late handoff.", id, token)
 		if !t.Posted {
 			err = m.updateTransfer(id, token, func(meta *Meta, t *TransferState) error {
 				if t.Phase != "waiting" {
 					return nil
 				}
-				if _, err := m.rooms().Post(meta.RoomID, room.PostInput{Wake: true, ID: t.PostID, From: meta.Room, To: []string{meta.Address()}, Via: []string{"@" + meta.Address()}, Text: request}); err != nil {
+				event := room.SessionEvent{Type: room.SessionTransfer, Session: meta.Address(), Transfer: token, Detail: instructions}
+				if _, err := m.rooms().PostEventInput(room.PostEventInput{RoomID: meta.RoomID, ID: t.PostID, Event: event, To: []string{meta.Address()}, Via: []string{"@" + meta.Address()}, SessionIDs: map[string]string{meta.Address(): id}}); err != nil {
 					return err
 				}
 				t.Posted = true
