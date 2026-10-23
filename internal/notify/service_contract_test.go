@@ -47,13 +47,19 @@ func TestServiceContractQuietSuccessAndFailedAlert(t *testing.T) {
 				t.Fatal(err)
 			}
 			res, err = e.svc.CompleteSessionTurn(e.ctx, info.ID, 1)
-			if err != nil || res.Message.Kind != serviceAlertKind || !reflect.DeepEqual(res.Message.To, []string{rec.Name}) {
+			if err != nil || res.Message.Kind != string(room.FamilyService) || res.Message.Notice.Kind != string(room.TypeFailed) || !reflect.DeepEqual(res.Message.To, []string{rec.Name}) {
 				t.Fatalf("failure alert: %+v %v", res, err)
+			}
+			// The engine posts the typed event: the registry sets its sender,
+			// kind, text and wake rule.
+			payload, ok := res.Message.ServiceFailed()
+			if !ok || payload.Service != serviceRole(role) || payload.Session != info.Address() || payload.Error != "provider failed" {
+				t.Fatalf("failure payload = %+v, %v", payload, ok)
 			}
 			// One alert from the service, never a child-failure report with a
 			// transfer hint: a service changes through `dyna services`.
 			text := res.Message.Text
-			if !strings.HasPrefix(text, "Service "+role+" failed turn 1: provider failed") || !strings.Contains(text, "Session: "+info.Address()) {
+			if !strings.HasPrefix(text, "The ") || !strings.Contains(text, " service failed on turn 1") || !strings.Contains(text, "Session: "+info.Address()) {
 				t.Fatalf("alert text = %q", text)
 			}
 			if strings.Contains(text, "dyna subagent transfer") || strings.Contains(text, "dyna subagent output") {
@@ -128,11 +134,11 @@ func TestServiceContractRejectsBroadcastAndAskWithoutNewTurns(t *testing.T) {
 			t.Fatalf("rejected output started work: %+v %v", got, err)
 		}
 	}
-	res, err := e.svc.Post(e.ctx, PostInput{Sender: sender, Mentions: []string{"@root"}, Kind: "alert", Text: "Goal blocked; owner action is needed."})
-	if err != nil || res.Message.Kind != "alert" {
+	res, err := e.svc.Post(e.ctx, PostInput{Sender: sender, Mentions: []string{"@root"}, Kind: ServiceAlertKind, Text: "Goal blocked; owner action is needed."})
+	if err != nil || res.Message.Kind != ServiceAlertKind {
 		t.Fatalf("domain alert rejected: %+v %v", res, err)
 	}
-	again, err := e.svc.Post(e.ctx, PostInput{Sender: sender, Mentions: []string{"@root"}, Kind: "alert", Text: "Goal blocked; owner action is needed."})
+	again, err := e.svc.Post(e.ctx, PostInput{Sender: sender, Mentions: []string{"@root"}, Kind: ServiceAlertKind, Text: "Goal blocked; owner action is needed."})
 	if err != nil || again.Message.ID != res.Message.ID || len(again.Deliveries) != 0 {
 		t.Fatalf("alert not deduplicated: %+v %v", again, err)
 	}
@@ -169,7 +175,7 @@ func TestServiceContractHelperUsesCurrentParentAndCurrentTurn(t *testing.T) {
 			if change == "closed-parent" {
 				want = rec.Name
 			}
-			if err != nil || res.Message.Kind != "alert" || !reflect.DeepEqual(res.Message.To, []string{want}) {
+			if err != nil || res.Message.Kind != ServiceAlertKind || !reflect.DeepEqual(res.Message.To, []string{want}) {
 				t.Fatalf("artifact alert: %+v %v", res, err)
 			}
 			if change != "closed-parent" {
@@ -223,7 +229,7 @@ func TestServiceContractHelperArtifactAndMissingAlert(t *testing.T) {
 				t.Fatalf("findings duplicated: %+v", res)
 			}
 			if !findings {
-				if res.Message.Kind != "alert" || !reflect.DeepEqual(res.Message.To, []string{parent.Address()}) || !strings.Contains(res.Message.Text, "no artifact") {
+				if res.Message.Kind != ServiceAlertKind || !reflect.DeepEqual(res.Message.To, []string{parent.Address()}) || !strings.Contains(res.Message.Text, "no artifact") {
 					t.Fatalf("missing findings: %+v", res)
 				}
 				e.wait(parent.ID, 2)

@@ -447,7 +447,7 @@ func PostCmd() *cobra.Command {
 			}
 			kind := ""
 			if alert {
-				kind = "alert"
+				kind = notify.ServiceAlertKind
 			}
 			result, err := sendPost(cmd.Context(), notify.PostRequest{NeedsRoot: needsRoot, Kind: kind, Mentions: mentions, Text: text, ReplyTo: replyTo, ForwardOf: forward, Files: files, Claim: notify.ClaimOf(snd)})
 			if result.Message.ID == "" {

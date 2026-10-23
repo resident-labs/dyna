@@ -334,7 +334,8 @@ func TestSeatChangesPostOneNoticeEach(t *testing.T) {
 	}
 	for i, want := range []string{"codex (external) took the root seat", "Internal root took back the seat"} {
 		p := posts[i]
-		if p.From != "dyna" || p.Kind != "seat" || p.Wake || !p.Addressed("alpha:root") || !p.Addressed("alpha") || !strings.HasPrefix(p.Text, want) {
+		payload, ok := p.Session()
+		if p.From != "dyna" || !ok || payload.Seat != want || p.Wake || !p.Addressed("alpha:root") || !p.Addressed("alpha") || !strings.HasPrefix(p.Text, want) {
 			t.Fatalf("notice %d = %+v; want %q", i, p, want)
 		}
 		if !room.DefaultView(p, rec.Name) {
@@ -350,7 +351,7 @@ func TestSeatChangesPostOneNoticeEach(t *testing.T) {
 	posts, _ = svc.Rooms.Messages(rec.ID)
 	var notices []room.Message
 	for _, p := range posts {
-		if p.Kind == "seat" {
+		if p.Kind == "session" && p.Notice.Kind == "seat" {
 			notices = append(notices, p)
 		}
 	}
@@ -439,7 +440,7 @@ func TestAttachPreservesLargeHandoffs(t *testing.T) {
 			posts, _ := svc.Rooms.Messages(rec.ID)
 			var note room.Message
 			for _, p := range posts {
-				if p.Kind == "seat" {
+				if p.Kind == "session" && p.Notice.Kind == "seat" {
 					note = p
 				}
 			}

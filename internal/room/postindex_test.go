@@ -190,7 +190,7 @@ func TestPostIndexImportAndCursorCatchUp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	notice, err := s.Post(rec.ID, PostInput{From: "dyna", Kind: "notice", To: []string{"alpha"}, Text: "a notice"})
+	notice, err := s.PostEvent(rec.ID, SessionEvent{Type: SessionInstructions, Session: "alpha:lead", Detail: "a note"}, "alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestPostIndexImportAndCursorCatchUp(t *testing.T) {
 		t.Fatalf("owner DM home = %q, want dm:%s", home, ownerSession)
 	}
 	if len(deliveries) != 2 || deliveries[0].state != string(DeliveryQueued) {
-		t.Fatalf("owner DM deliveries = %+v, want a queued session row and a seat row", deliveries)
+		t.Fatalf("owner DM deliveries = %+v, want a queued session row", deliveries)
 	}
 	if home, _, _ := postIndexRows(t, s, rec.ID, notice.ID); home != string(ConversationRoom) {
 		t.Fatalf("notice home = %q, want the room feed", home)

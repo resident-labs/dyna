@@ -1,28 +1,70 @@
 package doctor
 
 import (
-	"dyna-agent/internal/doctor"
-	"dyna-agent/internal/room"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/doctor"
+	"dyna-agent/internal/room"
 )
 
-func TestReportWakesRoot(t *testing.T) {
-	in := reportPost("work", doctor.Report{ID: 1, Summary: "machine is overloaded"})
-	again := reportPost("work", doctor.Report{ID: 1, Summary: "machine is overloaded"})
-	if in.ID == "" || in.ID != again.ID {
-		t.Fatal("report retry changed its stable post ID")
+// A doctor report is one typed alert from the engine. It wakes the root seat,
+// and a retried report of the same ID keeps its single post.
+func TestDoctorReportPostsOneAlertThatWakesRoot(t *testing.T) {
+	store := &room.Store{Root: t.TempDir()}
+	rec, err := store.Create(room.CreateInput{Name: "work"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	decision, _ := room.RootContext(room.Message{From: in.From, To: in.To, Kind: in.Kind, Wake: in.Wake}, "work")
-	if decision != room.RootWake {
-		t.Fatalf("decision = %v, want RootWake", decision)
+	report := doctor.Report{ID: 1, Machine: "laptop", Trigger: "hook main-updated", Summary: "machine is overloaded", Findings: []doctor.Finding{
+		{Cause: "three builds run at once", Evidence: "load 7.9 per 8 cores", Command: "dyna doctor report 1"},
+		{Cause: "the test shard holds the lock", Evidence: "3.1 s over the limit"},
+	}}
+	first, err := postReport(store, rec, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Kind != "alert" || first.Notice.Kind != "doctor" || first.From != room.EngineSender {
+		t.Fatalf("stored alert = %+v", first)
+	}
+	if !first.Wake || len(first.To) != 1 || first.To[0] != rec.Name+":root" {
+		t.Fatalf("alert routing = %+v", first)
+	}
+	if decision, _ := room.RootContext(first, rec.Name); decision != room.RootWake {
+		t.Fatalf("root decision = %v, want RootWake", decision)
+	}
+	payload, ok := first.Alert()
+	if !ok || payload.Source != room.AlertDoctor || payload.ReportID != "1" || payload.Summary != "machine is overloaded" {
+		t.Fatalf("payload = %+v, %v", payload, ok)
+	}
+	// The ranked causes are typed findings: the first is the one to act on
+	// now, and its command is the card's next step.
+	if len(payload.Findings) != 2 || payload.Findings[0].Severity != room.AlertCritical || payload.Findings[1].Severity != room.AlertWarning {
+		t.Fatalf("findings = %+v", payload.Findings)
+	}
+	if payload.Findings[0].Title != "three builds run at once" || payload.NextCommand != "dyna doctor report 1" {
+		t.Fatalf("first finding = %+v, next = %q", payload.Findings[0], payload.NextCommand)
+	}
+	again, err := postReport(store, rec, report)
+	if err != nil || again.ID != first.ID {
+		t.Fatalf("second report of one ID = %+v, %v", again, err)
+	}
+	msgs, err := store.Messages(rec.ID)
+	if err != nil || len(msgs) != 1 {
+		t.Fatalf("stored posts = %d, %v", len(msgs), err)
 	}
 }
 
+// The report's post ID comes from the report ID alone, so a report saved and
+// read back posts the same ID.
 func TestReportPostIDSurvivesPersistence(t *testing.T) {
+	store := &room.Store{Root: t.TempDir()}
+	rec, err := store.Create(room.CreateInput{Name: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	report := doctor.Report{At: time.Unix(123456, 789), Machine: "laptop", Summary: "machine is overloaded"}
 	reports := doctor.Reports{DataDir: t.TempDir()}
-	var err error
 	report.ID, err = reports.Save(report)
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +73,29 @@ func TestReportPostIDSurvivesPersistence(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("load: found=%v, err=%v", found, err)
 	}
-	if before, after := reportPost("work", report).ID, reportPost("work", saved).ID; before != after {
-		t.Fatalf("post ID changed after persistence: %s to %s", before, after)
+	before, err := postReport(store, rec, report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := postReport(store, rec, saved)
+	if err != nil || after.ID != before.ID {
+		t.Fatalf("same report after persistence = %+v, %v (before %s)", after, err, before.ID)
+	}
+}
+
+// A later report with its own ID is a new alert.
+func TestEachReportIPostsItsOwnAlert(t *testing.T) {
+	store := &room.Store{Root: t.TempDir()}
+	rec, err := store.Create(room.CreateInput{Name: "work"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := postReport(store, rec, doctor.Report{ID: 1, Summary: "machine is overloaded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := postReport(store, rec, doctor.Report{ID: 2, Summary: "machine is overloaded"})
+	if err != nil || second.ID == first.ID {
+		t.Fatalf("second report = %+v, %v (first %s)", second, err, first.ID)
 	}
 }

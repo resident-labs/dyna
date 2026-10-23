@@ -2,7 +2,6 @@
 package doctor
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -102,7 +101,7 @@ func trigger() string {
 }
 
 // post sends a report to the stamped room, else to the current repo's room,
-// addressed to its owner and root.
+// addressed to its root seat.
 func post(r doctor.Report) error {
 	rooms := room.DefaultStore()
 	var rec room.Record
@@ -119,12 +118,44 @@ func post(r doctor.Report) error {
 	if err != nil {
 		return err
 	}
-	_, err = rooms.Post(rec.ID, reportPost(rec.Name, r))
+	_, err = postReport(rooms, rec, r)
 	return err
 }
 
-func reportPost(roomName string, r doctor.Report) room.PostInput {
-	text := fmt.Sprintf("Doctor report %d (%s):\n%s", r.ID, r.Trigger, r.Text())
-	sum := sha256.Sum256([]byte(fmt.Sprintf("doctor:%s:%d:%d", r.Machine, r.ID, r.At.Unix())))
-	return room.PostInput{ID: fmt.Sprintf("msg_%x", sum[:8]), From: roomName + ":doctor", To: []string{roomName + ":root"}, Kind: "alert", Wake: true, Text: text}
+// postReport stores the report as one typed alert. Its post ID comes from the
+// report's own ID, so a retried report keeps one post. The report's ranked
+// causes become typed findings: the first one is the cause to act on now, and
+// its command is the card's next step. The full report text stays the agent's
+// evidence.
+func postReport(rooms *room.Store, rec room.Record, r doctor.Report) (room.Message, error) {
+	findings := make([]room.AlertFinding, len(r.Findings))
+	for i, f := range r.Findings {
+		severity := room.AlertWarning
+		if i == 0 {
+			severity = room.AlertCritical
+		}
+		findings[i] = room.AlertFinding{Severity: severity, Title: f.Cause, Cause: f.Evidence}
+	}
+	next := ""
+	for _, f := range r.Findings {
+		if f.Command != "" {
+			next = f.Command
+			break
+		}
+	}
+	event := room.AlertEvent{
+		Source:      room.AlertDoctor,
+		ReportID:    strconv.FormatInt(r.ID, 10),
+		Trigger:     r.Trigger,
+		Summary:     r.Summary,
+		Findings:    findings,
+		NextCommand: next,
+		Detail:      r.Text(),
+	}
+	return rooms.PostEventInput(room.PostEventInput{
+		RoomID:   rec.ID,
+		Event:    event,
+		Producer: room.ProducerDoctor,
+		To:       []string{rec.Name + ":" + room.RootAgent},
+	})
 }

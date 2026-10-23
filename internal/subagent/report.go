@@ -14,6 +14,10 @@ import (
 type ReportPlan struct {
 	RoomID string         `json:"roomId"`
 	Post   room.PostInput `json:"post"`
+	// Service is the typed event a failed service turn posts. When it is set,
+	// the report stores that event instead of the post's free text, so the
+	// alert is one typed card from the engine, not a session's message.
+	Service *room.ServiceFailedEvent `json:"service,omitempty"`
 }
 
 // LockReport serializes preparation and replay of session reports without

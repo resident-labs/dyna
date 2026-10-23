@@ -417,7 +417,7 @@ func rootDetachBoundary(t *testing.T, overflow bool) {
 			t.Fatal(err)
 		}
 		for i := len(messages) - 1; i >= 0; i-- {
-			if messages[i].Kind == "seat" {
+			if messages[i].Kind == "session" && messages[i].Notice.Kind == "seat" {
 				return messages[i]
 			}
 		}

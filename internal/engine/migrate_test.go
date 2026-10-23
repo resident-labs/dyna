@@ -197,6 +197,11 @@ func TestMigrationRecoversAfterOldWriterExits(t *testing.T) {
 	if decision, _ := room.RootContext(posts[0], rec.Name); decision != room.RootWake || !strings.Contains(posts[0].Text, blocker.Reason) {
 		t.Fatalf("alert must wake root and include the cause: %+v", posts[0])
 	}
+	// The card shows the remedy as a command chip, not a block of prose.
+	payload, ok := posts[0].Alert()
+	if !ok || payload.Source != room.AlertEngine || payload.Remedy != "systemctl --user restart dyna-engine.service" {
+		t.Fatalf("alert payload = %+v, %v", payload, ok)
+	}
 	live.Start++ // A new process reused the PID after the old writer exited.
 	clock.advance(15 * time.Second)
 	if readOnly || status != "" || attempts != 2 {

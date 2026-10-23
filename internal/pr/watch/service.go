@@ -1359,8 +1359,10 @@ func (s *Service) deliver(ctx context.Context, r Record, n Notice) (string, erro
 		if err != nil {
 			return "", err
 		}
-		// A held comment waits for the owner in the feed; it wakes nobody.
-		post, err := s.roomsStore().PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: event, ID: n.ID, To: []string{rec.Name}, RoomService: true, NoWake: true})
+		// A held comment waits for the owner in the feed; it wakes nobody. The
+		// sender is the engine: the watcher is the event's producer, not its
+		// author.
+		post, err := s.roomsStore().PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: event, ID: n.ID, To: []string{rec.Name}, NoWake: true})
 		return post.ID, err
 	}
 	rec, err := s.Notify.Rooms.Resolve(r.RoomID)

@@ -86,7 +86,7 @@ func TestAnsweredQuestionReachesRunningRootAsANote(t *testing.T) {
 		t.Fatalf("the answer rebuilt the prompt or posted no note: notes %v, turns %d", after.InstructionsNotes, after.Turns)
 	}
 	note, err := e.m.rooms().Message(e.room.ID, after.InstructionsNotes[0])
-	if err != nil || note.Kind != "instructions" || note.Wake || !strings.Contains(note.Text, "Open questions: removed \"- "+q.ID) {
+	if err != nil || note.Kind != "session" || note.Notice.Kind != "instructions" || note.Wake || !strings.Contains(note.Text, "Open questions: removed \"- "+q.ID) {
 		t.Fatalf("note: %+v %v", note, err)
 	}
 }

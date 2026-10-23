@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"time"
@@ -111,12 +110,14 @@ func migrationAlert(rooms *room.Store, cause error) {
 		log.Printf("dyna engine: read-only alert: %v", err)
 		return
 	}
+	event := room.AlertEvent{
+		Source:  room.AlertEngine,
+		Summary: "The engine has been read-only for more than 2 minutes because migration failed.",
+		Remedy:  "systemctl --user restart dyna-engine.service",
+		Detail:  cause.Error(),
+	}
 	for _, rec := range list {
-		_, err := rooms.Post(rec.ID, room.PostInput{
-			Wake: true, NeedsRoot: true, From: "dyna-engine", Kind: "alert", To: []string{rec.Name},
-			Text: fmt.Sprintf("The engine has been read-only for more than 2 minutes because migration failed: %v", cause),
-		})
-		if err != nil {
+		if _, err := rooms.PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: event, Producer: room.ProducerEngine, NeedsRoot: true, To: []string{rec.Name}}); err != nil {
 			log.Printf("dyna engine: read-only alert to %s: %v", rec.Name, err)
 		}
 	}

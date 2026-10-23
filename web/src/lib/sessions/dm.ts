@@ -364,6 +364,8 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   }
   for (const p of session?.posts || []) {
     // Dyna's notice about changed standing instructions is a note, not a thread.
+    // TODO: legacy/shim remove later — a typed session note draws its card
+    // instead; only posts stored before the typed events reach this row.
     if (isNote(p)) {
       events.push({ kind: 'instructions', key: `post:${p.id}`, ts: p.ts, text: p.text, note: noteData(p) })
       continue

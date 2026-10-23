@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
 
@@ -24,8 +25,14 @@ func TestHelperFailureAlertNamesItsService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The alert is the typed service/failed event: the card names the service,
+	// and the agent text keeps the failure report with its commands.
+	payload, ok := res.Message.ServiceFailed()
+	if !ok || payload.Service != room.ServiceLibrarian || payload.Turn != 1 || payload.Error != "helper tool failed" {
+		t.Fatalf("helper alert payload = %+v, %v", payload, ok)
+	}
 	text := res.Message.Text
-	if !strings.HasPrefix(text, "Service "+subagent.RoleLibrarian+" failed turn 1: helper tool failed") {
+	if !strings.HasPrefix(text, "The librarian service failed on turn 1") {
 		t.Fatalf("helper alert names no service: %q", text)
 	}
 	if !strings.Contains(text, "dyna services log "+subagent.RoleLibrarian) {
@@ -47,7 +54,7 @@ func TestHelperFailureAlertNamesItsService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if text := res.Message.Text; !strings.HasPrefix(text, "Service helper failed turn 1:") || strings.Contains(text, "dyna services") {
+	if text := res.Message.Text; !strings.HasPrefix(text, "The helper service failed on turn 1") || strings.Contains(text, "dyna services") {
 		t.Fatalf("orphan helper alert = %q", text)
 	}
 }

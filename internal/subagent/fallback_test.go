@@ -88,7 +88,7 @@ func TestUsageLimitFallbackMovesSessionAndContinues(t *testing.T) {
 	}
 	var notices []room.Message
 	for _, msg := range msgs {
-		if msg.Kind == "account" {
+		if msg.Kind == "session" && msg.Notice.Kind == "account" {
 			notices = append(notices, msg)
 		}
 	}

@@ -279,21 +279,24 @@ func (s *Service) StartSession(ctx context.Context, roomRef, draft string, atts 
 	}
 	out := SpawnResult{Member: s.member(info, 0, 0)}
 	out.Member.Emoji = s.avatars(rec.ID).byID[info.ID]
-	// Start puts the task only in the turn 1 prompt. This record shows the
-	// owner's request in the feed. It is addressed to the owner alone, so the
-	// turn gate never delivers it to the new session as steering.
+	// Start puts the task only in the turn 1 prompt. This typed record shows
+	// the owner's request in the feed. It is addressed to the owner alone, so
+	// the turn gate never delivers it to the new session as steering.
 	// The desktop shows posts in full, so the record carries a clipped task;
 	// the profile card holds the whole one.
-	text := fmt.Sprintf("Started @%s (%s) in %s:\n\n%s", info.EffectiveName(), info.Profile, info.Dir, clip(p.Task, 3, 280))
-	if _, err := s.rooms().Post(rec.ID, room.PostInput{From: rec.Name, Kind: KindSpawn, Human: true, To: []string{rec.Name}, Text: text}); err != nil {
+	event := room.SessionEvent{
+		Type:    room.SessionSpawned,
+		Session: info.Address(),
+		Name:    info.EffectiveName(),
+		Profile: info.Profile,
+		Dir:     info.Dir,
+		Detail:  clip(p.Task, 3, 280),
+	}
+	if _, err := s.rooms().PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: event, FreshID: true, To: []string{rec.Name}}); err != nil {
 		out.Warning = "the session started, but its feed record failed: " + err.Error()
 	}
 	return out, nil
 }
-
-// KindSpawn marks the owner's feed record of a session started from the
-// composer.
-const KindSpawn = "spawn"
 
 // startNamed starts the session as base, then base-2 .. base-9 while another
 // open session holds the name, then as "" so Dyna picks agent-<id>. Start

@@ -95,15 +95,27 @@ func WakesRoot(msg Message, roomName string) bool {
 	if !msg.Addressed(roomName) && !msg.Addressed(roomName+":"+RootAgent) || msg.From == roomName+":"+RootAgent {
 		return false
 	}
-	// A registered event follows its spec: a quiet family never wakes root, and
-	// one that wakes its target wakes root only when the post needs root.
-	if spec, ok := eventSpecFor(msg.Kind, msg.Notice.Kind); ok && spec.Wake == WakeNever {
-		return false
+	// A registered event follows its spec, so its family decides how it
+	// reaches the root seat: a quiet one never wakes root, one that wakes its
+	// target wakes root only when the post needs root, and an alert wakes it
+	// now.
+	if spec, ok := eventSpecFor(msg.Kind, msg.Notice.Kind); ok {
+		switch spec.Wake {
+		case WakeNever:
+			return false
+		case WakeRoot:
+			return true
+		}
+		return msg.NeedsRoot
 	}
 	switch msg.Kind {
-	case "", "message", "notice":
+	case "", "message":
 		return msg.NeedsRoot || msg.Human || OwnerRequest(msg, roomName) || msg.Source == SourceVoice
-	case "alert":
+	// TODO: legacy/shim remove later — a post stored before its family was
+	// typed still reads by its old kind. Remove when retained history ages out.
+	case "notice":
+		return msg.NeedsRoot || msg.Human || OwnerRequest(msg, roomName) || msg.Source == SourceVoice
+	case "alert", "service-alert":
 		return true
 	case "seat", "pr", "merge":
 		return msg.NeedsRoot
