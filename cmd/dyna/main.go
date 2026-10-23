@@ -26,6 +26,7 @@ import (
 	"dyna-agent/internal/cli/goal"
 	"dyna-agent/internal/cli/harnesshook"
 	"dyna-agent/internal/cli/interactive"
+	cliissue "dyna-agent/internal/cli/issue"
 	"dyna-agent/internal/cli/journal"
 	clilibrary "dyna-agent/internal/cli/library"
 	"dyna-agent/internal/cli/machine"
@@ -154,6 +155,7 @@ func newRootCommand() *cobra.Command {
 		ask.NewCommand(),
 		call.NewCommand(),
 		cligit.NewCommand(),
+		cliissue.NewCommand(),
 		goal.NewCommand(),
 		rules.NewCommand(),
 		cliroot.NewCommand(),
@@ -193,7 +195,7 @@ func newRootCommand() *cobra.Command {
 }
 
 func appendAuthorityHelp(cmd *cobra.Command) {
-	if who := authority.Who(strings.TrimPrefix(cmd.CommandPath(), "dyna ")); who != "" {
+	if who := authorityText(cmd); who != "" {
 		text := cmd.Long
 		if text == "" {
 			text = cmd.Short
@@ -203,6 +205,30 @@ func appendAuthorityHelp(cmd *cobra.Command) {
 	for _, child := range cmd.Commands() {
 		appendAuthorityHelp(child)
 	}
+}
+
+// authorityText returns the Who line for cmd. A group alias can still name the
+// stored rule, as `dyna subagent` does for `dyna session`.
+func authorityText(cmd *cobra.Command) string {
+	path := strings.TrimPrefix(cmd.CommandPath(), "dyna ")
+	if text := authority.Who(path); text != "" {
+		return text
+	}
+	fields := strings.Fields(path)
+	if len(fields) < 2 {
+		return ""
+	}
+	group := cmd
+	for group.Parent() != nil && group.Parent().Parent() != nil {
+		group = group.Parent()
+	}
+	for _, alias := range group.Aliases {
+		aliased := strings.Join(append([]string{alias}, fields[1:]...), " ")
+		if text := authority.Who(aliased); text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 func newEngineCommand() *cobra.Command {

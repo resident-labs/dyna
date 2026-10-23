@@ -45,7 +45,7 @@ func TestAuthorityRulesResolveToCommands(t *testing.T) {
 			continue
 		}
 		cmd, remaining, err := root.Find(strings.Fields(rule.Action))
-		if err != nil || len(remaining) != 0 || cmd.CommandPath() != "dyna "+rule.Action {
+		if err != nil || len(remaining) != 0 || authorityText(cmd) != authority.Who(rule.Action) {
 			t.Errorf("authority action %q has no exact command: remaining=%v, err=%v", rule.Action, remaining, err)
 		}
 	}
