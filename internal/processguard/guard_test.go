@@ -226,7 +226,7 @@ func TestRunnerAndGuardianSIGKILL(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = cmd.Process.Kill() })
 			await(t, "native grandchild", func() bool {
-				return fileExists(filepath.Join(root, "sleep")) && fileExists(filepath.Join(root, "tokens"))
+				return fileExists(filepath.Join(root, "child")) && fileExists(filepath.Join(root, "sleep")) && fileExists(filepath.Join(root, "tokens"))
 			})
 			data, err := os.ReadFile(filepath.Join(root, "ref"))
 			if err != nil {
