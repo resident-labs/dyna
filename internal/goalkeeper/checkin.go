@@ -24,14 +24,6 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, err
 	}
-	if hasServiceGoal(st) {
-		if err = s.dropServiceGoals(); err != nil {
-			return time.Time{}, err
-		}
-		if st, err = s.Store.Read(); err != nil {
-			return time.Time{}, err
-		}
-	}
 	ids := make([]string, 0, len(st.Rooms))
 	for id := range st.Rooms {
 		ids = append(ids, id)
@@ -118,7 +110,7 @@ func roomWork(r *goals.RoomState, now time.Time) (bool, time.Time) {
 func nudgeNext(r *goals.RoomState, now time.Time) time.Time {
 	var next time.Time
 	for _, g := range r.Goals {
-		if !g.Open() || g.Service || len(g.Holders) == 0 {
+		if !g.Open() || len(g.Holders) == 0 {
 			continue
 		}
 		at := g.NudgedAt
@@ -231,34 +223,6 @@ func (s *Service) postToRoot(rec room.Record, wake bool, input room.PostInput) e
 	}
 	_, err := s.Notify.Rooms.Post(rec.ID, input)
 	return err
-}
-
-// TODO: legacy/shim remove later — closes goals that root and service sessions held before they stopped getting goals; remove one release after every store has run it.
-func hasServiceGoal(st goals.State) bool {
-	for _, r := range st.Rooms {
-		for _, g := range r.Goals {
-			if g.Service && g.Open() {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// TODO: legacy/shim remove later — see hasServiceGoal.
-func (s *Service) dropServiceGoals() error {
-	now := s.now()
-	return s.Store.Update(func(st *goals.State) error {
-		for _, r := range st.Rooms {
-			for _, g := range r.Goals {
-				if g.Service && g.Open() {
-					g.State, g.UpdatedAt = "dropped", now
-					g.Done = &goals.Outcome{At: now, By: "owner", Summary: "Root and service sessions no longer hold goals."}
-				}
-			}
-		}
-		return nil
-	})
 }
 
 // checkNotices drains a room's queued notices.
