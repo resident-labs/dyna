@@ -1,5 +1,5 @@
 <script>
-  import { fileURL } from '../../api.js'
+  import { fileURL } from '../../api.ts'
   import { ago } from '../ui/format.ts'
   import VisualPlaceholder from './VisualPlaceholder.svelte'
   // A visualization in chat: the banner image of its newest version, its

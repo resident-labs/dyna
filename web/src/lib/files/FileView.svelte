@@ -4,7 +4,7 @@
   // One repository file: code with line numbers and syntax colors, an
   // image, rendered markdown (with a Source switch), or a note for a binary
   // file. The server caps text at 2 MiB and says when it cut a file.
-  import { api, copyText } from '../../api.js'
+  import { api, copyText } from '../../api.ts'
   import { human } from './attach.ts'
   import { markdownDocument } from './preview.ts'
   import Document from './Document.svelte'

@@ -2,7 +2,7 @@
   // The one line at the top of a service page: the service name, a short
   // status, a plain note when its profile covers all rooms, and the profile
   // menu. A room has one repository, so a room-scoped service needs no note.
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import type { ServiceView } from '../api/service.ts'
   import { serviceStatus, pinNotEnabled, pickProfile, errorText } from './services.ts'
 

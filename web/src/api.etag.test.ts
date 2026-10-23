@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-// api.js reads the page origin and CSP meta tag when it loads.
+// api.ts reads the page origin and CSP meta tag when it loads.
 Object.assign(globalThis, { location: { origin: 'https://dyna.test' }, document: { querySelector: () => ({ content: '{}' }) } })
 
 interface Api {
@@ -15,7 +15,7 @@ function isApi(value: unknown): value is { api: Api } {
 
 // Each test loads its own copy, so the kept replies of one never reach another.
 async function load(tag: string): Promise<Api> {
-  const module: unknown = await import(`./api.js?${tag}`)
+  const module: unknown = await import(`./api.ts?${tag}`)
   assert.ok(isApi(module))
   return module.api
 }

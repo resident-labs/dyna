@@ -8,7 +8,7 @@
   //   change    a Changes row
   //   roomId    the room, for ReplyToFinding; without it nothing resolves
   //   onchange  reload Changes after a reply
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { ago } from '../ui/format.ts'
   import { groupFindings, dispositionMeta, verdictMeta, shortSha } from './pr.ts'
   import type { AuthorNotes, Finding } from '../api/change.ts'
@@ -46,6 +46,7 @@
     busy = f.id
     error = { id: '', text: '' }
     try {
+      if (!change.changeId) throw new Error('this change has no id')
       await api.replyToFinding(roomId, change.changeId, f.id, 'resolved', 'Resolved by the owner')
       await onchange()
     } catch (e) {

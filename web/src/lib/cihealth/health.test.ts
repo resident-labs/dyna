@@ -209,7 +209,7 @@ test('a run says how it ended and where it sat', () => {
 })
 
 test('allowing a test keeps every other budget field and adds the reason', () => {
-  const budget = { ciTimeBudget: 'enforce', ciWarnAfter: '3m', ciFailAfter: '4m', ciTestMax: '1s', ciTestAllow: ['pkg/TestOld'], ciTestAllowNotes: { 'pkg/TestOld': 'old reason' }, ciNoJUnitWarning: true }
+  const budget = { ciTimeBudget: 'enforce', ciBudgetExempt: null, ciWarnAfter: '3m', ciFailAfter: '4m', ciTestMax: '1s', ciTestAllow: ['pkg/TestOld'], ciTestAllowNotes: { 'pkg/TestOld': 'old reason' }, ciNoJUnitWarning: true }
   const next = budgetWithAllow(budget, 'pkg/TestX', 'waits on the trial gate')
   assert.ok(next)
   assert.equal(next.ciTestMax, '1s')

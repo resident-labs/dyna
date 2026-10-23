@@ -10,7 +10,7 @@
   import { createGoalEvents } from './goalEvents.ts'
   import ExpediteBadge from './ExpediteBadge.svelte'
   import { expedite, goalExpedited } from './expedite.ts'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   let { older = false, loadingOlder = false, onolder = () => {}, roomId, goals = [], members = [], selected = '', onselect, ongoal = onselect, onexpedite = null } = $props()
   let filter = $state('active')
   let now = $state(Date.now())

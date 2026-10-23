@@ -7,7 +7,7 @@
   import Segmented from '../ui/Segmented.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import TabHeader from '../rooms/TabHeader.svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import {
     bandNames,
     bandPx,
@@ -46,13 +46,7 @@
   let { roomId, narrow = false, changes = null, onpr = () => {} }: Props = $props()
 
   // The client's call names, typed so the readers get unknown data.
-  interface Calls {
-    ciHealth(room: string, runs: number): Promise<unknown>
-    ciHealthRun(room: string, token: string): Promise<unknown>
-    ciHealthTest(room: string, test: string): Promise<unknown>
-    roomCIBudget(room: string): Promise<unknown>
-    setRoomCIBudget(room: string, budget: Record<string, unknown>): Promise<unknown>
-  }
+  type Calls = Pick<typeof api, 'ciHealth' | 'ciHealthRun' | 'ciHealthTest' | 'roomCIBudget' | 'setRoomCIBudget'>
   const calls: Calls = api
 
   let health = $state<CIHealth | null>(null)

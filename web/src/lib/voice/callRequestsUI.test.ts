@@ -39,7 +39,7 @@ const result = await build({
         export const clock = () => ''`,
       loader: 'js', resolveDir: resolve(path, '..'),
     }))
-    b.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: "export const api = {}; export const fileURL = () => ''", loader: 'js' }))
+    b.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: "export const api = {}; export const fileURL = () => ''", loader: 'js' }))
   } }],
 })
 const source = result.outputFiles[0]?.contents

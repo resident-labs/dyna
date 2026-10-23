@@ -3,7 +3,7 @@
   // show comes from the view's one selected post (postSelect.ts), so a post
   // never shows two bars and two posts never show bars at once. All icons
   // share one 18 px grid.
-  import { copyText } from '../../api.js'
+  import { copyText } from '../../api.ts'
   import PinIcon from './PinIcon.svelte'
   import { postHref } from './posts.ts'
   import type { Room } from '../api/room.ts'

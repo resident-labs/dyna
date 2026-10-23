@@ -4,7 +4,7 @@
   // call's conversation. Drag it by its top line.
   import { untrack } from 'svelte'
   import Avatar from '../ui/Avatar.svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { voiceCall, callRequests, clock } from './voiceCall.ts'
   import { capturing, spaceTalk, statusLine } from './callState.js'
   import { callPosts, callRows, sharedItems, unseen } from './conversation.js'

@@ -12,7 +12,7 @@ const source = `<script>
 <GoalDetail roomId="global" {goal} onchanged={() => {}} onclose={() => {}} />`
 const compiled = await build({ bundle: true, write: false, format: 'esm', platform: 'node', conditions: ['browser', 'production'], logLevel: 'silent',
  stdin: { contents: compileSvelte(source, 'GoalFixture.svelte') + '\nexport { mount, unmount, flushSync } from "svelte"', resolveDir: new URL('.', import.meta.url).pathname },
- plugins: [svelteEsbuildPlugin(), { name: 'goal-api', setup(b) { b.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: 'export const api = globalThis.goalApi', loader: 'js' })) } }],
+ plugins: [svelteEsbuildPlugin(), { name: 'goal-api', setup(b) { b.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: 'export const api = globalThis.goalApi', loader: 'js' })) } }],
 })
 test('goal reads distinguish pending, failure and empty while discarding stale selected-goal replies', async () => {
  const dom = installDom(); globalThis.HTMLMediaElement = dom.window.HTMLMediaElement

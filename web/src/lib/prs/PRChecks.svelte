@@ -12,7 +12,7 @@
   //   pr      the change, to link a check that has no page of its own
   //   main    the saved CI result of the default branch ({state, head, reason}) from the
   //           change's merge item, or null
-  import { copyText, openExternal } from '../../api.js'
+  import { copyText, openExternal } from '../../api.ts'
   import Chip from '../ui/Chip.svelte'
   import { checkMeta, checkBuckets, workflowGroups, isLocal, shortSha, checkTime, type CheckRow } from './pr.ts'
   import { botStateWord, type MergeItem, type Row } from './prlist.ts'

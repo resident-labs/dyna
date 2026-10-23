@@ -1,4 +1,4 @@
-import { api } from '../../api.js'
+import { api } from '../../api.ts'
 import { roomLabel } from './format.ts'
 import type { Room } from '../api/room.ts'
 
