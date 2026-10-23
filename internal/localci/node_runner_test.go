@@ -184,14 +184,23 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 				}
 				if strings.Contains(script, "rm -rf --one-file-system") {
 					sawRemove = true
-					if !reportsCopied || !strings.Contains(script, "/runs/") {
-						t.Errorf("run directory removed early or by the wrong path: %s", script)
+					if !reportsCopied || !sawCleanup || !strings.Contains(script, "/runs/") {
+						t.Errorf("run directory removed before the reports or the cleanup, or by the wrong path: %s", script)
+					}
+					// The keeper is stopped before its process ID can go away.
+					if !strings.Contains(script, "kill -TERM -- -") {
+						t.Errorf("run directory removed without stopping its keeper: %s", script)
 					}
 				}
 				if strings.Contains(script, "systemctl") {
 					sawCleanup = true
 					if strings.Index(script, "inspect") > strings.Index(script, "systemctl") {
 						t.Error("scope releases slot before container is confirmed stopped")
+					}
+					// The keeper's process ID lives in the run directory, so this
+					// cleanup must not take the directory away.
+					if strings.Contains(script, "rm -rf") {
+						t.Errorf("container cleanup removed the run directory: %s", script)
 					}
 				}
 				return nil

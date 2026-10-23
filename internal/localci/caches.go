@@ -133,19 +133,23 @@ func runLocks(base, active string) string {
 func keeperPID(active string) string { return path.Join(path.Dir(active), ".keeper") }
 
 // stopKeeper is the shell command that stops a run's keeper and returns only
-// when the base's shared cache lock is free. A cleanup that follows a finished
-// run therefore frees the run's caches at once, and a retry after a full disk
-// is not skipped by the run's own keeper. The wait is bounded: a lock that some
-// other run holds honestly is not waited for.
+// when the run's own lock is free, which means the keeper is gone and the
+// base's shared cache lock was released with it. A cleanup that follows a
+// finished run therefore frees the run's caches at once, and a retry after a
+// full disk is not skipped by the run's own keeper. The wait is bounded, and
+// another run's cache lock never delays this one.
 func stopKeeper(base, active string) string {
 	keeper := shellquote.Quote(keeperPID(active))
-	lock := shellquote.Quote(path.Join(base, "caches.lock"))
 	// The keeper leads its own process group, and its sleeping child inherits the
 	// lock file descriptors, so the group goes together: killing only the keeper
-	// would leave the lock held until that sleep ends.
+	// would leave the lock held until that sleep ends. The run's own lock is the
+	// acknowledgement: only this run's keeper takes it, so once it is free the
+	// keeper is gone and the base's shared cache lock is released with it. A
+	// cleanup that waits for the base lock itself would wait for other runs.
 	killIt := "k=$(cat " + keeper + "); kill -TERM -- -\"$k\" 2>/dev/null || kill \"$k\" 2>/dev/null || true"
+	lock := shellquote.Quote(active)
 	return "if [ -s " + keeper + " ]; then " + killIt + "; fi; " +
-		"i=0; while [ $i -lt 50 ] && ! flock -n " + lock + " true 2>/dev/null; do sleep 0.1; i=$((i+1)); done; "
+		"if [ -e " + lock + " ]; then i=0; while [ $i -lt 50 ] && ! flock -n " + lock + " true 2>/dev/null; do sleep 0.1; i=$((i+1)); done; fi; "
 }
 
 // removeRunDir is the command that ends a run on its machine: it stops the
