@@ -61,11 +61,13 @@ test('an active tool stays running when the API omits its false done flag', asyn
       const row: TimelineRow = { kind: 'timeline', key: 'timeline:1', turn: { n: 1, status, started: '2026-10-23T07:00:00Z' }, steps: [
         { kind: 'tool', key: 'active', tool: 'read', target: 'active.ts', aside: '2 files' },
         { kind: 'tool', key: 'complete', tool: 'read', target: 'complete.ts', done: true },
+        { kind: 'tool', key: 'failed', tool: 'ran', target: 'npm test', failed: true },
       ] }
       flushSync(() => app = mount(C, { target: need(document.getElementById('app')), props: { row } }))
       const states = [...document.querySelectorAll('.timeline li')].map((li) => li.querySelector('.dot')?.getAttribute('aria-label'))
-      assert.deepEqual(states, [status === 'running' ? 'running' : 'done', 'done'])
+      assert.deepEqual(states, [status === 'running' ? 'running' : 'done', 'done', 'failed'])
       assert.equal(document.querySelector('.running .meta')?.textContent, status === 'running' ? '2 files · running' : undefined)
+      assert.equal(document.querySelector('.failed .meta')?.textContent, 'failed')
       if (app) unmount(app)
       app = undefined
     }
