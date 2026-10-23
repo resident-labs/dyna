@@ -77,8 +77,7 @@ func ownerCount(r *Record) int {
 }
 
 // ownerFindingsOf keeps owner comments across review rounds, which replace reviewer findings.
-func ownerFindingsOf(in []Finding) []Finding  { return filterFindings(in, true) }
-func reviewerFindings(in []Finding) []Finding { return filterFindings(in, false) }
+func ownerFindingsOf(in []Finding) []Finding { return filterFindings(in, true) }
 func filterFindings(in []Finding, owner bool) []Finding {
 	out := []Finding{}
 	for _, f := range in {

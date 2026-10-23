@@ -145,15 +145,6 @@ func collectItems() ([]listItem, error) {
 	return items, nil
 }
 
-func findItem(items []listItem, key string) listItem {
-	for _, item := range items {
-		if item.Key == key {
-			return item
-		}
-	}
-	return listItem{Key: key}
-}
-
 func displayValue(item listItem) any {
 	if item.Display != "" {
 		return item.Display

@@ -53,14 +53,6 @@ type Options struct {
 	RetainClosedSession ClosedSessionRetainer
 }
 
-// RunSession runs the same maintenance pass for a single session.
-func RunSession(ctx context.Context, id string) (Result, error) {
-	if id == "" {
-		return Result{}, errors.New("maintenance session ID is required")
-	}
-	return Run(ctx, Options{Session: id})
-}
-
 // CleanBranch is the merge cleanup: it removes a merged branch's worktrees in
 // repos, and nothing else. The folder-wide sweeps belong to the scheduled
 // pass (Run, from Loop: at start, each hour, and under disk pressure), not to

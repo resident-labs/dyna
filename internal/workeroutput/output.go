@@ -11,7 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
 )
 
 const SchemaVersion = 1
@@ -269,20 +268,6 @@ func compactJSON(raw json.RawMessage) string {
 		return ""
 	}
 	return string(b)
-}
-
-func snakeCase(s string) string {
-	var b strings.Builder
-	for i, r := range s {
-		if unicode.IsUpper(r) {
-			if i > 0 {
-				b.WriteByte('_')
-			}
-			r = unicode.ToLower(r)
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
 }
 
 // PairTools folds each tool completion into its start (matched by ID): the

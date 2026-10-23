@@ -2,87 +2,12 @@ package watch
 
 import (
 	"context"
-	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/subagent"
 )
-
-func checkWatchActorAuthority(t *testing.T, action string, authorAllowed bool, call func(*Service, authority.Actor) error) {
-	t.Helper()
-	s := &Service{Store: &Store{Root: filepath.Join(t.TempDir(), "prs")}}
-	// A successful transfer need not route a real notice to test authorization.
-	s.Deliver = func(_ context.Context, _ Record, n Notice) (string, error) { return n.ID, nil }
-	for _, tc := range []struct {
-		name    string
-		actor   authority.Actor
-		allowed bool
-	}{
-		{"owner", authority.Actor{Role: authority.Owner}, true},
-		{"owner with ID", authority.Actor{Role: authority.Owner, Session: "owner-id"}, true},
-		{"root", authority.Actor{Role: authority.Root, Session: "root-id"}, true},
-		{"author", authority.Actor{Role: authority.Session, Session: "author"}, authorAllowed},
-		{"unrelated", authority.Actor{Role: authority.Session, Session: "other"}, false},
-		{"empty session", authority.Actor{Role: authority.Session}, false},
-		{"worker with author ID", authority.Actor{Role: authority.Worker, Session: "author"}, false},
-		{"empty worker", authority.Actor{Role: authority.Worker}, false},
-		{"unknown with author ID", authority.Actor{Session: "author"}, false},
-		{"unknown", authority.Actor{}, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := Record{Key: "github.com/owner/repo#1", Host: "github.com", Repo: "owner/repo", Number: 1, Kind: "github", RoomID: "room", Author: "author", State: "open", Watching: true, Findings: []Finding{{ID: "f1"}}}
-			if action == "git pr transfer" {
-				// Role transfer also supports local changes; checkout discovery is unrelated here.
-				r.Kind = "local"
-			}
-			if err := s.Store.update(func(st *State) error { st.Records[r.Key] = &r; return nil }); err != nil {
-				t.Fatal(err)
-			}
-			before, err := s.Store.Get(r.Key)
-			if err != nil {
-				t.Fatal(err)
-			}
-			err = call(s, tc.actor)
-			if tc.allowed {
-				// Draft calls stop at the room boundary after authorization.
-				if action == "git pr hold" || action == "git pr release" {
-					if err == nil || err.Error() != "a PR hold or release needs the room store" {
-						t.Fatalf("want room validation after authorization, got %v", err)
-					}
-				} else if err != nil {
-					t.Fatalf("allowed actor refused: %v", err)
-				}
-				if action == "git change reply" || action == "ResolveFinding" {
-					after, err := s.Store.Get(r.Key)
-					if err != nil {
-						t.Fatal(err)
-					}
-					wantAuthor := ""
-					if tc.actor.Role == authority.Session {
-						wantAuthor = tc.actor.Session
-					}
-					if got := after.Findings[0].Replies[0].Author; got != wantAuthor {
-						t.Fatalf("reply author = %q, want %q", got, wantAuthor)
-					}
-				}
-				return
-			}
-			if err == nil || !strings.HasPrefix(err.Error(), action+" is ") {
-				t.Fatalf("want formatted %s authority refusal, got %v", action, err)
-			}
-			after, err := s.Store.Get(r.Key)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !reflect.DeepEqual(after, before) {
-				t.Fatal("refused action changed the record")
-			}
-		})
-	}
-}
 
 func TestTypedRoomPolicyAuthority(t *testing.T) {
 	checkTypedRoomAuthority(t, "SetRoomChangePolicy", func(s *Service, a authority.Actor) error { return s.SetRoomChangePolicy("", a, ChangePolicy{}) })
