@@ -62,6 +62,11 @@ export interface FeedPostRow<P extends FeedInput = FeedInput> {
 export interface HookFold {
   count: number
   lastTs: number
+  // active is a run of the same hook that has started and not ended: its start
+  // is in the row, and no result of that run is. Two runs of one hook can be
+  // live together, so the row takes the newest active run, whose log is the
+  // one the card can open.
+  active?: { runId: string; ts: number }
 }
 
 // HOOK_PASS_WINDOW is how long after one pass of a hook the next pass still
@@ -169,17 +174,28 @@ interface FeedItem<P extends FeedInput> {
   ts: number
 }
 
-// hookFold reads the passes a row of a hook holds: how many, and when the last
-// one ended. The card draws these typed facts, never the post text.
+// hookFold reads the passes a row of a hook holds: how many, when the last one
+// ended, and the run that is still going. The card draws these typed facts,
+// never the post text.
 function hookFold(posts: readonly FeedInput[]): HookFold | undefined {
   let count = 0
   let lastTs = 0
+  let active: HookFold['active']
   for (const post of posts) {
-    if (hookEvent(post)?.state !== 'passed') continue
-    count++
-    lastTs = Math.max(lastTs, post.ts)
+    const hook = hookEvent(post)
+    if (hook?.state === 'passed') {
+      count++
+      lastTs = Math.max(lastTs, post.ts)
+    }
+    // A start whose own run has no result is still going, whatever another run
+    // of the hook reported. The newest such start is the one the card names.
+    if (hook?.state === 'running' && !posts.some((other) => {
+      const result = hookEvent(other)
+      return result?.runId === hook.runId && result.state !== 'running'
+    })) active = { runId: hook.runId, ts: post.ts }
   }
-  return count ? { count, lastTs } : undefined
+  if (!count && !active) return undefined
+  return { count, lastTs, ...(active ? { active } : {}) }
 }
 
 // hiddenHookStarts lists the starts of hook runs that show nowhere. A start

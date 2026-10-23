@@ -278,6 +278,30 @@ test('a hook card shows its state and opens the log of its own run', () => {
   second.remove()
 })
 
+test('a folded hook card shows a run that is still going and opens its log', () => {
+  const payload = fixtures['hook/result']
+  assert.ok(payload && 'runId' in payload, 'the hook result fixture is missing')
+  const post = postFor('hook', 'result', payload)
+  const target = document.createElement('div')
+  document.body.append(target)
+  const asked: unknown[] = []
+  const listen = (event: Event) => asked.push((event as CustomEvent<unknown>).detail)
+  window.addEventListener('dyna:hook-log', listen)
+  // The newest post passed, yet an older run of the hook has no result: the
+  // card says running and its log is the running run's log.
+  const mounted = web.mount(web.eventComponents.HookCard, {
+    target,
+    props: { post, notice: post.notice, surface: 'feed', hookFold: { count: 3, lastTs: 0, active: { runId: 'run-still-going', ts: 0 } } },
+  })
+  web.flushSync()
+  assert.match((target.textContent ?? '').trim(), /running/)
+  need(target.querySelector('button'), 'the View log button').click()
+  assert.deepEqual(asked, [{ repo: payload.repo, hook: payload.hook, runId: 'run-still-going' }])
+  window.removeEventListener('dyna:hook-log', listen)
+  web.unmount(mounted)
+  target.remove()
+})
+
 test('a folded hook card shows how many passes it holds and when the last one ran', () => {
   const payload = fixtures['hook/result']
   assert.ok(payload && 'runId' in payload, 'the hook result fixture is missing')
