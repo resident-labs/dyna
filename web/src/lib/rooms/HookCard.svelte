@@ -135,12 +135,30 @@
   }
   @media (max-width: 760px) {
     .card { margin: var(--s1) var(--s2); }
-    .sum { min-height: 40px; padding: 6px var(--s2); }
-    /* One row on a phone: the glyph, the name, the state and the action. */
+    /* A phone gets two lines: the glyph, the name, the state and the action on
+       the first, and the fact alone under the name. Sharing one line squeezed
+       the name to 'Fol...' as soon as a fold added its count and last time. */
+    .sum {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-areas:
+        "glyph title action"
+        ". fact fact";
+      column-gap: 8px;
+      row-gap: 2px;
+      align-items: center;
+      min-height: 40px;
+      padding: 6px var(--s2);
+    }
+    .glyph { grid-area: glyph; }
+    .title { grid-area: title; }
+    .btn { grid-area: action; margin-left: 0; min-height: 36px; }
     time { display: none; }
+    /* The name keeps its whole width and wraps: it never ellipsizes before the
+       fact, which now has a line of its own. */
+    .name { white-space: normal; overflow: visible; overflow-wrap: anywhere; text-overflow: clip; }
     /* A folded row keeps its count and last time on the phone too; only the
        per-run duration is dropped, since a fold shows the last time instead. */
-    .fact { font-size: var(--t-cap); }
-    .btn { min-height: 36px; }
+    .fact { grid-area: fact; font-size: var(--t-cap); }
   }
 </style>
