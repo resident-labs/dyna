@@ -330,7 +330,7 @@ func (s *Service) publishMerge(ctx context.Context, current Record, children []R
 		}
 		text := fmt.Sprintf("The merge outcome of %s at %s is unknown. Child PRs remain on %s: %s. If the parent stays open and is no longer ready, restore these child bases to %s by hand.", current.URL, current.Head, current.DefaultBranch, strings.Join(urls, ", "), current.Branch)
 		ev := mergeEventOf(current, room.MergeFailed)
-		ev.Base, ev.Reason = current.DefaultBranch, "the merge outcome is unknown"
+		ev.Base, ev.Reason, ev.ReasonKind = current.DefaultBranch, "the merge outcome is unknown", room.MergeReasonOther
 		noticeErr := s.postMergeNotice(ctx, current, "merge-unknown", Notice{Merge: &ev, Text: text})
 		unknownErr := fmt.Errorf("GitHub has not confirmed the merge of %s", current.URL)
 		return false, errors.Join(unknownErr, mergeErr, readErr, noticeErr)
@@ -502,7 +502,7 @@ func (s *Service) postMergeConflict(ctx context.Context, r Record, branch string
 		return nil
 	}
 	ev := mergeEventOf(r, room.MergeConflict)
-	ev.Base, ev.Reason = branch, "conflicts with "+branch
+	ev.Base, ev.Reason, ev.ReasonKind = branch, "conflicts with "+branch, room.MergeConflictReason
 	return s.postMergeNotice(ctx, r, "merge-conflict", Notice{Target: r.Author, Merge: &ev, Text: fmt.Sprintf("%s conflicts with %s at %s; rebase onto %s.", changeLabel(r), branch, r.Head, branch)})
 }
 
@@ -553,7 +553,7 @@ func (s *Service) rollbackMergeChildren(ctx context.Context, r Record, children 
 	// room log also makes the failed child URLs visible to their authors.
 	text := fmt.Sprintf("Dyna could not restore child PR bases after a failed merge of %s at %s. Restore these PRs to %s before merging them: %s", changeLabel(r), r.Head, r.Branch, strings.Join(failed, ", "))
 	ev := mergeEventOf(r, room.MergeRolledBack)
-	ev.Base, ev.Reason = r.Branch, "child PR bases could not be restored"
+	ev.Base, ev.Reason, ev.ReasonKind = r.Branch, "child PR bases could not be restored", room.MergeReasonOther
 	failures = append(failures, s.postMergeNotice(ctx, r, "merge-rollback", Notice{Merge: &ev, Text: text}))
 	return errors.Join(failures...)
 }

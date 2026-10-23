@@ -9,8 +9,12 @@ import (
 	"strings"
 	"testing"
 
+	"dyna-agent/internal/notify"
 	prfacts "dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
+	"dyna-agent/internal/sessionlife/recordtest"
+	"dyna-agent/internal/subagent"
 )
 
 // TestReviewResultRouting keeps today's recipients and wake rules: a changes
@@ -238,5 +242,63 @@ func TestStopEarlyEndsReviewUntilANewHeadOrARestart(t *testing.T) {
 	}
 	if restarted := e.record(); restarted.StopReason != "" || !prfacts.NeedsReview(restarted) {
 		t.Fatalf("restart did not resume review: %+v", restarted)
+	}
+}
+
+// TestReviewResultPostIsTypedForEveryRecipient keeps the one visible shape of a
+// review result: a typed review/result post from the engine on the room feed,
+// and the same typed post in a session's DM. A raw text post would leave the
+// card unable to draw it.
+func TestReviewResultPostIsTypedForEveryRecipient(t *testing.T) {
+	t.Run("approval on the room feed", func(t *testing.T) {
+		e, r := namedReviewEnv(t)
+		e.s.Notify = notify.New(room.DefaultStore(), subagent.NewManager())
+		e.s.Deliver = nil
+		if err := e.s.RecordReviewResult(context.Background(), r.Key, namedReviewerID, ReviewResult{Verdict: state.VerdictApprove, Head: r.Head, Summary: "Looks good."}); err != nil {
+			t.Fatal(err)
+		}
+		assertTypedReviewPost(t, e, r, e.author.Room)
+	})
+	t.Run("changes in the author's DM", func(t *testing.T) {
+		e, r := namedReviewEnv(t)
+		e.s.Notify = notify.New(room.DefaultStore(), subagent.NewManager())
+		e.s.Deliver = nil
+		recordtest.Write(t, e.s.Notify.Sessions.Store.Root, r.Author, subagent.Meta{
+			ID: r.Author, Name: "builder", Room: e.author.Room, RoomID: r.RoomID, Resumable: true, HarnessSession: "builder",
+		})
+		ev := reviewEventOf(r, ReviewResult{Verdict: state.VerdictChanges, Head: r.Head, Summary: "Fix the bounds."}, "Fix the bounds.")
+		if _, err := e.s.deliver(context.Background(), r, Notice{ID: "msg_0123456789abcdef", Kind: "review", Target: r.Author, Review: &ev, Text: "Fix the bounds."}); err != nil {
+			t.Fatal(err)
+		}
+		assertTypedReviewPost(t, e, r, e.author.Room+":builder")
+	})
+}
+
+// assertTypedReviewPost reads the one review post of a room and checks that it is
+// the engine's typed result event addressed to wantTo.
+func assertTypedReviewPost(t *testing.T, e *testEnv, r Record, wantTo string) {
+	t.Helper()
+	posts, err := e.s.Notify.Rooms.Messages(r.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found []room.Message
+	for _, m := range posts {
+		if m.Kind == string(room.FamilyReview) {
+			found = append(found, m)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("review posts = %d, want one", len(found))
+	}
+	post := found[0]
+	if post.Notice.Kind != string(room.TypeResult) || post.From != e.author.Room {
+		t.Fatalf("post = %s/%s from %q, want the typed result from %q", post.Kind, post.Notice.Kind, post.From, e.author.Room)
+	}
+	if len(post.To) != 1 || post.To[0] != wantTo {
+		t.Fatalf("recipients = %v, want %s", post.To, wantTo)
+	}
+	if ev, ok := post.Review(); !ok || string(ev.Kind) == "" {
+		t.Fatalf("payload = %+v, %v", ev, ok)
 	}
 }
