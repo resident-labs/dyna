@@ -2,7 +2,7 @@
 // data and returns a typed value, or null where the call failed or the shape
 // is wrong. Nothing here changes data.
 import { arrayOf, isBoolean, isNumber, isRecord, isString } from '../api/guards.ts'
-import type { AccountsInfo, BudgetInfo, HookRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, ServiceInfo as ServiceRow, TestHealth, UsageRow } from './model.ts'
+import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, ServiceInfo as ServiceRow, TestHealth, UsageRow } from './model.ts'
 
 const rows = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isRecord) : [])
 const num = (v: unknown): number => (isNumber(v) ? v : 0)
@@ -31,7 +31,7 @@ export function readReviewer(v: unknown): ReviewerInfo | null {
 export const readQueue = (v: unknown): QueueRow[] | null => (Array.isArray(v) ? rows(v).map((r) => ({ state: str(r.state), reason: str(r.reason), ...(isRecord(r.trial) ? { trial: { branch: str(r.trial.branch), batch: strings(r.trial.batch) } } : {}) })) : null)
 
 // RoomMergeHistory: a list of watch.MergeHistoryEntry, newest first.
-export const readHistory = (v: unknown): HistoryRow[] => rows(v).map((r) => ({ kind: str(r.kind), outcome: str(r.outcome), at: str(r.at), changes: Array.isArray(r.changes) ? r.changes.length : 0, detail: str(r.detail) }))
+export const readHistory = (v: unknown): HistoryRow[] => rows(v).map((r) => ({ kind: str(r.kind), outcome: str(r.outcome), at: str(r.at), changes: Array.isArray(r.changes) ? r.changes.length : 0, detail: str(r.detail), branch: str(r.branch), head: str(r.head), labels: strings(r.changes) }))
 
 // Settings: configsvc.Item values, a list value shown as its JSON.
 export function readSettings(v: unknown): Record<string, string> | null {
@@ -120,3 +120,8 @@ export function readMergeState(v: unknown): { queue: QueueRow[]; mergePaused: bo
   const queue = readQueue(v.queue)
   return queue ? { queue, mergePaused: v.paused } : null
 }
+
+// HookRuns: a list of settings.HookRun, returned newest first.
+export const readHookRuns = (v: unknown): HookRunRow[] =>
+  rows(v).map((r) => ({ result: str(r.result), startedAt: str(r.startedAt), finishedAt: str(r.finishedAt) }))
+    .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
