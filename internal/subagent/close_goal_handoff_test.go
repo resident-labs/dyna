@@ -3,6 +3,7 @@ package subagent
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/goals"
 )
@@ -129,5 +130,63 @@ func TestCloseGoalHandoffPreservesConcurrentGoalChange(t *testing.T) {
 				t.Fatalf("reassignment overwritten: %+v", got)
 			}
 		})
+	}
+}
+
+// A goal assigned while the close stops the turn is caught by the recheck after
+// the close fence: the close refuses, and root never holds the goal.
+func TestCloseRefusesGoalAssignedDuringStop(t *testing.T) {
+	e := newTestEnv(t)
+	rootID := NewID()
+	if err := e.m.Store.writeMeta(Meta{ID: rootID, Name: RoleRoot, Role: RoleRoot, Service: true,
+		RoomID: e.room.ID, Room: e.room.Name, Depth: 1}); err != nil {
+		t.Fatal(err)
+	}
+	started, atStop, resume := make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
+	e.m.checkpoint = func(stage string) {
+		switch stage {
+		case "turn-started":
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+		case "close-before-stop":
+			close(atStop)
+			<-resume
+		}
+	}
+	holder, _ := e.start("SLEEP:60000 RESPOND: slow")
+	select {
+	case <-started:
+	case <-time.After(30 * time.Second):
+		t.Fatal("mock turn did not start")
+	}
+	// The spawn goal is resolved, so the first refusal sees no held goal.
+	e.doneGoal(holder)
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.m.CloseWithOptions(e.ctx, holder.ID, CloseOptions{Force: true})
+		done <- err
+	}()
+	select {
+	case <-atStop:
+	case err := <-done:
+		t.Fatalf("close ended before the stop: %v", err)
+	}
+	// This assignment lands after the first refusal and before the close fence.
+	goal, err := e.m.goalStore().Add(holder.RoomID, "owner", goals.Input{Text: "Late work", Holders: []string{holder.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(resume)
+	if err := <-done; err == nil || !strings.Contains(err.Error(), "holds goal "+goal.ID) {
+		t.Fatalf("close with a goal assigned during the stop = %v; want the goal refusal", err)
+	}
+	got, err := e.m.goalStore().Get(holder.RoomID, goal.ID)
+	if err != nil || !got.Open() || !got.HeldBy(holder.ID) || got.HeldBy(rootID) {
+		t.Fatalf("goal after the refused close = %+v, %v", got, err)
+	}
+	if info, err := e.m.Store.Info(holder.ID); err != nil || !info.Closed.IsZero() {
+		t.Fatalf("refused close closed the session: %+v, %v", info, err)
 	}
 }
