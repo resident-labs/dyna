@@ -128,3 +128,50 @@ func TestSummariesReturnNewestRunPerHook(t *testing.T) {
 		t.Fatalf("the disabled flag did not reach the summary: %#v", got[1].Hook)
 	}
 }
+
+func TestAutomaticRunRechecksDisabledAfterPreviousHook(t *testing.T) {
+	for _, event := range []string{SessionFinish, BeforeLand} {
+		t.Run(event, func(t *testing.T) {
+			s, repo := setup(t)
+			ctx := context.Background()
+			for _, name := range []string{"first", "second"} {
+				h := hook(name, event)
+				h.Command = name
+				if event == BeforeLand {
+					h.OnFail = "block"
+				}
+				add(t, s, repo, h)
+			}
+			var commands []string
+			s.Exec = func(_ context.Context, p processguard.Process) error {
+				command := p.Args[len(p.Args)-1]
+				commands = append(commands, command)
+				if command == "first" {
+					disabled := true
+					return s.Edit(ctx, repo, "second", "owner", Patch{Disabled: &disabled})
+				}
+				return nil
+			}
+			e := Event{Event: event, Repo: repo}
+			dispatch := s.Dispatch
+			if event == BeforeLand {
+				dispatch = s.Emit
+			}
+			if err := dispatch(ctx, e); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(commands, ","); got != "first" {
+				t.Fatalf("automatic commands = %q; want first", got)
+			}
+			if runs, err := s.Runs(ctx, repo, "second"); err != nil || len(runs) != 0 {
+				t.Fatalf("disabled hook recorded runs: %+v, %v", runs, err)
+			}
+			if _, err := s.Run(ctx, e, "second"); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(commands, ","); got != "first,second" {
+				t.Fatalf("manual command was skipped: %q", got)
+			}
+		})
+	}
+}
