@@ -12,6 +12,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"dyna-agent/internal/database"
 )
@@ -66,7 +67,75 @@ func (s *Store) postNormalizationsDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	return db, err
+	for _, migration := range []struct {
+		name    string
+		convert func(map[string]json.RawMessage, map[string]json.RawMessage) (bool, error)
+	}{
+		{"room.posts.card_versions", historicalCardVersions},
+		{"room.posts.shell_output", historicalShellOutput},
+	} {
+		if err := database.Migrate(db, migration.name, 1, func(conn *sql.Conn, _ int) error {
+			return s.convertHistoricalPosts(context.Background(), conn, migration.convert)
+		}); err != nil {
+			return nil, err
+		}
+	}
+	return db, nil
+}
+
+// TODO: legacy/shim remove later — retained first HTML cards omitted version 1.
+func historicalCardVersions(source, current map[string]json.RawMessage) (bool, error) {
+	var attachments []map[string]json.RawMessage
+	if json.Unmarshal(current["attachments"], &attachments) != nil {
+		return false, nil
+	}
+	changed := false
+	for _, attachment := range attachments {
+		var render, visual string
+		var version int
+		if json.Unmarshal(attachment["render"], &render) != nil || render != "html" {
+			continue
+		}
+		if raw := attachment["visual"]; raw != nil && json.Unmarshal(raw, &visual) != nil {
+			continue
+		}
+		if raw := attachment["version"]; raw != nil && json.Unmarshal(raw, &version) != nil {
+			continue
+		}
+		if visual == "" && version == 0 {
+			attachment["version"] = json.RawMessage("1")
+			changed = true
+		}
+	}
+	if changed {
+		raw, err := json.Marshal(attachments)
+		if err != nil {
+			return false, err
+		}
+		current["attachments"] = raw
+	}
+	return changed, nil
+}
+
+// TODO: legacy/shim remove later — retained shell exits used an inline output pointer.
+func historicalShellOutput(source, current map[string]json.RawMessage) (bool, error) {
+	var from, text string
+	if json.Unmarshal(source["from"], &from) != nil || !strings.HasPrefix(from, "shell:") || from == "shell:" {
+		return false, nil
+	}
+	if json.Unmarshal(current["text"], &text) != nil {
+		return false, nil
+	}
+	suffix := " Output: dyna shell tail " + strings.TrimPrefix(from, "shell:")
+	if !strings.HasSuffix(text, suffix) {
+		return false, nil
+	}
+	raw, err := json.Marshal(strings.TrimSuffix(text, suffix) + "\n" + strings.TrimPrefix(suffix, " "))
+	if err != nil {
+		return false, err
+	}
+	current["text"] = raw
+	return true, nil
 }
 
 // TODO: legacy/shim remove later — remove after retained logs have explicit wake intent.
