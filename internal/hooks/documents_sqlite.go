@@ -153,7 +153,7 @@ func (s Service) documentRepo(ctx context.Context, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	d, err := readDocument(ctx, db, filepath.Base(s.dir(id)))
+	d, err := readDocument(ctx, db, s.key(id))
 	if err != nil {
 		return "", err
 	}
