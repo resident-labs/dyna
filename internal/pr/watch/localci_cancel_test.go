@@ -23,7 +23,7 @@ func TestLocalCancellationAggregateKeepsRealFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, runStatus, conclusion, dependency string
 		savedAttempt                            int
-		want                                    string
+		want                                    CIVerdict
 	}{
 		{"aggregate while run active", "in_progress", "", "cancelled", 2, "passed"},
 		{"aggregate finishes failed", "completed", "failure", "cancelled", 2, "passed"},
@@ -154,11 +154,19 @@ func TestLocalCancellationReachesFactsAndTrialGate(t *testing.T) {
 		snap.Checks = append(snap.Checks, c)
 	}
 	for _, mode := range []string{localci.ModeLocal, localci.ModeBoth} {
-		for _, localState := range []string{"passed", "failed", "pending"} {
-			t.Run(mode+"/"+localState, func(t *testing.T) {
-				result := localci.Result{Repo: common, SHA: head, Node: "node", Status: localState}
+		for _, tc := range []struct {
+			state localci.Outcome
+			want  CIVerdict
+		}{
+			{localci.OutcomePassed, VerdictPassed},
+			{localci.OutcomeFailed, VerdictFailed},
+			// A saved result with no outcome yet waits.
+			{"", VerdictPending},
+		} {
+			t.Run(mode+"/"+string(tc.want), func(t *testing.T) {
+				result := localci.Result{Repo: common, SHA: head, Node: "node", Status: tc.state}
 				for _, name := range requiredRegisteredChecks([]string{"relay", "go", "cross-build", "computer-smoke"}) {
-					result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: localState})
+					result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: tc.state})
 				}
 				registry := &cancellationCIRegistry{mode: mode, requiredCIRegistry: requiredCIRegistry{result: result, hostedCIRegistry: hostedCIRegistry{hosted: localci.HostedRuns{IDs: []int64{10}, Attempts: map[int64]int{10: 1}}}}}
 				s := &Service{Store: &Store{Root: filepath.Join(t.TempDir(), "prs")}, LocalCIRegistry: registry}
@@ -184,15 +192,15 @@ func TestLocalCancellationReachesFactsAndTrialGate(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if facts := normalized.GitHubFacts(r); facts.CI != localState {
-					t.Fatalf("PR facts = %s, want %s", facts.CI, localState)
+				if facts := normalized.GitHubFacts(r); facts.CI != string(tc.want) {
+					t.Fatalf("PR facts = %s, want %s", facts.CI, tc.want)
 				}
 				trial, err := s.mergeTrialCI(ctx, r, branch, head)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if trial.Status != localState {
-					t.Fatalf("trial publication gate = %s, want %s", trial.Status, localState)
+				if trial.Status != tc.want {
+					t.Fatalf("trial publication gate = %s, want %s", trial.Status, tc.want)
 				}
 			})
 		}

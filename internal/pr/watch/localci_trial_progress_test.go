@@ -338,7 +338,7 @@ func TestSavedLocalPassKeepsTheCIGates(t *testing.T) {
 		runs       []Run
 		checks     []Check
 		required   []string
-		want       string
+		want       CIVerdict
 		wantReason string
 	}{
 		{

@@ -124,7 +124,7 @@ func completeLocalCI(result localci.Result) bool {
 	for _, name := range localci.DefaultSuites() {
 		found := false
 		for _, suite := range result.Suites {
-			if suite.Suite == name && (suite.Status == "passed" || suite.Status == "failed" || suite.Status == "error") {
+			if suite.Suite == name && suite.Status.Conclusive() {
 				found = true
 				break
 			}
@@ -136,29 +136,29 @@ func completeLocalCI(result localci.Result) bool {
 	return true
 }
 
-func localCIStatus(result localci.Result, repo, head string) (string, string, string, error) {
+func localCIStatus(result localci.Result, repo, head string) (CIVerdict, string, string, error) {
 	if result.SHA != head || result.Repo != repo {
 		return "", "", "", errors.New("local CI result does not match repository and trial head")
 	}
 	logs := result.Error
 	for _, suite := range result.Suites {
-		logs += "\n" + suite.Suite + " (" + suite.Status + "): " + suite.LogTail + "\n" + suite.Error + "\n" + strings.Join(suite.Failures, "\n")
+		logs += "\n" + suite.Suite + " (" + string(suite.Status) + "): " + suite.LogTail + "\n" + suite.Error + "\n" + strings.Join(suite.Failures, "\n")
 	}
 	switch result.Status {
-	case "passed":
+	case localci.OutcomePassed:
 		if !completeLocalCI(result) {
-			return "pending", "", "waiting for complete local CI", nil
+			return VerdictPending, "", "waiting for complete local CI", nil
 		}
 		for _, suite := range result.Suites {
-			if suite.Status != "passed" || suite.Error != "" || len(suite.Failures) > 0 {
-				return "failed", logs, "local CI failed", nil
+			if suite.Status != localci.OutcomePassed || suite.Error != "" || len(suite.Failures) > 0 {
+				return VerdictFailed, logs, "local CI failed", nil
 			}
 		}
-		return "passed", "", "", nil
-	case "failed", "error":
-		return "failed", logs, "local CI failed", nil
+		return VerdictPassed, "", "", nil
+	case localci.OutcomeFailed, localci.OutcomeError:
+		return VerdictFailed, logs, "local CI failed", nil
 	default:
-		return "pending", "", "waiting for local CI", nil
+		return VerdictPending, "", "waiting for local CI", nil
 	}
 }
 
@@ -187,11 +187,11 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (tria
 		select {
 		case <-run.done:
 			if run.err != nil {
-				return trialCI{Status: "failed", Logs: run.err.Error(), Reason: "local CI failed"}, nil
+				return trialCI{Status: VerdictFailed, Logs: run.err.Error(), Reason: "local CI failed"}, nil
 			}
 			return show(run.result)
 		default:
-			return trialCI{Status: "pending", Reason: "waiting for local CI"}, nil
+			return trialCI{Status: VerdictPending, Reason: "waiting for local CI"}, nil
 		}
 	}
 	go func() {
@@ -200,7 +200,7 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (tria
 		defer cancel()
 		run.result, run.err = runner.Run(runCtx, localci.Request{Repo: r.RepoPath, SHA: head})
 	}()
-	return trialCI{Status: "pending", Reason: "waiting for local CI"}, nil
+	return trialCI{Status: VerdictPending, Reason: "waiting for local CI"}, nil
 }
 
 func (s *Service) publishLocalChange(ctx context.Context, r Record, expected, trialID string) error {

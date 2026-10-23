@@ -16,7 +16,10 @@ import (
 )
 
 func TestRegisteredCIRaceDoesNotHideFailuresOrBlockHostedRecovery(t *testing.T) {
-	for _, tc := range []struct{ hosted, local, want string }{
+	for _, tc := range []struct {
+		hosted, local CIVerdict
+		want          CIVerdict
+	}{
 		{"pending", "passed", "passed"}, {"passed", "pending", "passed"},
 		{"failed", "passed", "failed"}, {"passed", "failed", "failed"},
 		{"pending", "pending", "pending"}, {"passed", "passed", "passed"},
