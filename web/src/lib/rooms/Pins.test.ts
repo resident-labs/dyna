@@ -7,7 +7,7 @@ const code = await bundle({ component: '../rooms/Pins', format: readFileSync(new
 test('pin search matches text, speaker and attachment names without changing pin order', async () => {
   const dom = installDom()
   const extra = ['HTMLMediaElement', 'DOMParser', 'NodeFilter']
-  for (const name of extra) globalThis[name] = dom.window[name]
+  Object.assign(globalThis, Object.fromEntries(extra.map((name) => [name, Reflect.get(dom.window, name)])))
   const ui = await importBundle(code, '../rooms/Pins')
   const pins = [
     { id: 'p1', text: 'Deploy rule', speaker: 'Leo' },
@@ -17,17 +17,18 @@ test('pin search matches text, speaker and attachment names without changing pin
   const component = ui.mount(ui.default, { target: document.getElementById('app'), props: { room: { id: 'global', name: 'work' }, pins, onjump() {}, onunpin() {}, onclose() {} } })
   try {
     ui.flushSync()
-    const field = document.querySelector('input')
-    const filter = query => { field.value = query; field.dispatchEvent(new Event('input', { bubbles: true })); ui.flushSync() }
-    for (const [query, expected] of [['RULE', 'Deploy rule'], ['maya', 'Release checklist'], ['report.csv', 'Weekly data'], ['Quarterly', 'Weekly data']]) {
+    const field = document.querySelector<HTMLInputElement>('input')
+    assert.ok(field)
+    const filter = (query: string) => { field.value = query; field.dispatchEvent(new Event('input', { bubbles: true })); ui.flushSync() }
+    for (const [query, expected] of [['RULE', 'Deploy rule'], ['maya', 'Release checklist'], ['report.csv', 'Weekly data'], ['Quarterly', 'Weekly data']] as const) {
       filter(query); assert.equal(document.querySelectorAll('article').length, 1)
-      assert.ok(document.querySelector('article').textContent.includes(expected))
-      assert.equal(document.querySelector('.matches').textContent, '1 of 3 pinned posts')
+      assert.ok(document.querySelector('article')?.textContent?.includes(expected))
+      assert.equal(document.querySelector('.matches')?.textContent, '1 of 3 pinned posts')
     }
     filter('missing'); assert.equal(document.querySelectorAll('article').length, 0)
-    assert.match(document.querySelector('.none').textContent, /No pinned posts match/)
-    document.querySelector('[aria-label="Clear filter"]').click(); ui.flushSync()
-    assert.deepEqual([...document.querySelectorAll('article .prose')].map(p => p.textContent.trim()), ['Deploy rule', 'Release checklist', 'Weekly data'])
+    assert.match(document.querySelector('.none')?.textContent ?? '', /No pinned posts match/)
+    document.querySelector<HTMLElement>('[aria-label="Clear filter"]')?.click(); ui.flushSync()
+    assert.deepEqual([...document.querySelectorAll('article .prose')].map(p => p.textContent?.trim()), ['Deploy rule', 'Release checklist', 'Weekly data'])
   } finally {
     await ui.unmount(component); dom.window.close()
     for (const name of [...domNames, ...extra]) Reflect.deleteProperty(globalThis, name)

@@ -5,6 +5,7 @@ import vm from 'node:vm'
 import { setImmediate } from 'node:timers/promises'
 import { parse } from 'svelte/compiler'
 import { GENERAL, VOICE, isChannel, inChannel, homeChannel, channelModel } from './channels.ts'
+import type { ChannelMember } from './channels.ts'
 import { appLoaderStubs } from './appStubs.ts'
 import { reconcileRows } from '../ui/reloadGate.ts'
 import { createRoomData } from './roomData.ts'
@@ -19,64 +20,301 @@ import { trimFeed } from './feedWindow.ts'
 import { mergeFeedPage, rerouteAnchors, withChannels } from './feedPages.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from '../ui/route.ts'
-import { stripTypes } from '../../../test/svelte-source.ts'
+import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 
 // Run the actual App navigation functions with controlled API responses.
 // The Svelte parser selects complete declarations without copying their logic.
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const declarations = parse(source).instance.content.body
+const declarations = parse(source, { modern: true }).instance?.content.body ?? []
 const names = ['openReview', 'clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'hashChanged', 'setPicked', 'selectRoom', 'openTarget', 'hashTarget', 'openDetail', 'openView', 'jumpTo', 'showRun', 'openPR']
-const code = declarations.filter((node) => node.type === 'FunctionDeclaration' && names.includes(node.id.name)).map((node) => source.slice(node.start, node.end)).join('\n')
-assert.equal(declarations.filter((n) => n.type === 'FunctionDeclaration' && names.includes(n.id.name)).length, names.length)
+const picked = declarations.filter((node) => node.type === 'FunctionDeclaration' && names.includes(node.id?.name ?? ''))
+assert.equal(picked.length, names.length)
+const code = picked.map((node) => {
+  const { start, end } = sourceRange(node)
+  return source.slice(start, end)
+}).join('\n')
+// The tests add the functions they call by slicing the same declarations.
+function runDeclaration(target: object, name: string): void {
+  const node = declarations.find((entry) => entry.type === 'FunctionDeclaration' && entry.id?.name === name)
+  assert.ok(node, name)
+  const { start, end } = sourceRange(node)
+  vm.runInContext(stripTypes(source.slice(start, end)), target)
+}
 
 const A = 'room_20261017-100000-aaaaaaaa'
 const B = 'room_20261017-100000-bbbbbbbb'
-const target = (kind) => ({ kind, id: `${{ shell: 'sh', run: 'wf', session: 'ses' }[kind]}_20261017-100000-aaaaaaaa`, turn: kind === 'session' ? 3 : 0, roomId: A })
-const opened = (id) => ({ feed: { room: { id }, posts: [] } })
 
-function deferred() {
-  let resolve
-  const promise = new Promise((r) => { resolve = r })
+interface NavTarget {
+  kind: string
+  id: string
+  turn: number
+  roomId: string
+}
+
+interface NavPost {
+  id: string
+  from?: string
+  to?: string[]
+  channels?: string[]
+  unread?: boolean
+  completion?: boolean
+  kind?: string
+}
+
+interface NavFeed {
+  room: { id: string }
+  posts: NavPost[]
+  earlier?: number
+  cursor?: string
+  newer?: number
+  offset?: number
+  channelUnread?: Record<string, number>
+}
+
+interface NavGoal {
+  id: string
+  state?: string
+  text?: string
+  holders?: string[]
+}
+
+interface NavDrill {
+  id?: string
+  name?: string
+}
+
+interface PrLink {
+  roomId?: string
+  pr?: string
+  issue?: number
+  tab?: string
+}
+
+interface NavMember {
+  id?: string
+  name?: string
+  address?: string
+  owner?: boolean
+  parent?: string
+  rootSeat?: boolean
+}
+
+interface NavApi {
+  openRoom: (id: string) => Promise<unknown>
+  rooms: () => Promise<unknown[]>
+  members: (room: string, all?: boolean) => Promise<unknown[]>
+  mentions: (room: string) => Promise<unknown[]>
+  feedTail: (room: string, cursor: string, limit: number) => Promise<unknown>
+  feedAround: (room: string, target: string, limit: number) => Promise<unknown>
+  transcript: (id: string) => Promise<{ member: NavMember }>
+  transcriptTurn: (id: string, turn: number) => Promise<{ member: NavMember }>
+  goal: (room: string, id: string) => Promise<NavGoal>
+}
+
+interface NavState {
+  api: NavApi
+  roomData?: ReturnType<typeof createRoomData>
+  roomRefreshes: Set<unknown>
+  roomTimer: (() => void) | null
+  roomId: string
+  roomRequest: number
+  questionsRequest: number
+  detailRequest: number
+  reviewOpen: boolean
+  reviewTab: string
+  reviewVersion: number
+  mergeVersion: number
+  narrow: boolean
+  hasTerminal: boolean
+  selectionRevision: number
+  consolidationView: number
+  consolidationAlive: boolean
+  memberRequest: number
+  selectingSessions: boolean
+  pickedSessions: string[]
+  consolidating: { roomId: string; sessions: string[] } | null
+  showClosed: boolean
+  needPair: boolean
+  rooms: { id: string }[]
+  posts: NavPost[]
+  view: string
+  openRun: string
+  openJob: string
+  drill: NavDrill | null
+  card?: { id?: string } | null
+  viewing?: { id?: string; postId?: string } | null
+  feed: NavFeed | null
+  feedAtBottom: boolean
+  location: { hash: string; pathname?: string; search?: string }
+  history?: { replaceState(state: unknown, title: string, url: string): void; pushState(state: unknown, title: string, url: string): void }
+  started: boolean
+  routing: number
+  routeFix: boolean
+  pop: unknown
+  readOnlyDm: boolean
+  sessionTurn: number
+  entries: [string, string][]
+  prLink: PrLink | null
+  unreadFrom: string
+  loadError: string
+  goals: NavGoal[]
+  goalId: string
+  fetchedGoal: NavGoal | null
+  fetchedGoalVersion: number
+  hierarchy: (ChannelMember & { address?: string })[]
+  channels: ReturnType<typeof channelModel>
+  earlierLoad: unknown
+  STEP: number
+  workflowData: { loadJobs(): void } | null
+  roomSessionController: unknown
+  home: unknown
+  feedView: { jump(): void }
+  applyItemEvent: (change: unknown) => boolean
+  applyUnread: (value: unknown) => void
+  afterRead: () => void
+  handle: (event: unknown) => void
+  loadEarlier: (...args: unknown[]) => unknown
+  loadRooms: () => void
+  loadMembers: () => void
+  loadChanges: () => void
+  loadGoals: () => void
+  loadRules: () => void
+  loadVisuals: () => void
+  loadReviewer: () => void
+  loadRuns: () => void
+  loadRun: () => void
+  loadConsolidations: () => void
+  loadQuestions: () => void
+  visitRoomControls: () => void
+  markShown: (posts: NavPost[]) => void
+  say: () => void
+  openSession: (member: NavMember) => void
+  applyOpened: (value: unknown) => void
+  reconcileRows: typeof reconcileRows
+  mergeFeedPage: typeof mergeFeedPage
+  channelsModel?: ReturnType<typeof channelModel>
+  ROOM: RegExp
+  POST: RegExp
+  GENERAL: string
+  VOICE: string
+  isChannel: typeof isChannel
+  inChannel: typeof inChannel
+  homeChannel: typeof homeChannel
+  questionID: typeof questionID
+  isShellResult: typeof isShellResult
+  trimFeed: typeof trimFeed
+  rerouteAnchors: typeof rerouteAnchors
+  withChannels: typeof withChannels
+  pruneSelection: typeof pruneSelection
+  reloadsUnread: typeof reloadsUnread
+  ROOT_SESSION: string
+  parseRoute: typeof parseRoute
+  routeHash: typeof routeHash
+  routeSession: typeof routeSession
+  writeRoute: typeof writeRoute
+  parseDetailHref: typeof parseDetailHref
+  prHash: typeof prHash
+  parsePRHash: typeof parsePRHash
+  parseIssueHash: typeof parseIssueHash
+  parseFileHash: typeof parseFileHash
+  callTarget: typeof callTarget
+  callPush: unknown
+  URLSearchParams: typeof URLSearchParams
+  tick: () => Promise<void>
+  routedParents: string
+}
+
+interface NavFns {
+  openReview: (...args: unknown[]) => unknown
+  clearItemLink: () => void
+  holdsItemLink: () => boolean
+  syncRoute: () => void
+  routeHere: () => boolean
+  hashChanged: () => void
+  setPicked: (...args: unknown[]) => unknown
+  selectRoom: (room: string, workspace?: string) => Promise<boolean>
+  openTarget: (...args: unknown[]) => Promise<boolean>
+  hashTarget: () => boolean
+  openDetail: (target: NavTarget) => Promise<unknown>
+  openView: (view: string) => void
+  jumpTo: (id: string) => Promise<unknown>
+  showRun: (run: { id: string }) => void
+  openPR: (number: number) => void
+  resync: () => Promise<void>
+  goalById: (id: string) => NavGoal
+  openGoal: (id: string) => Promise<NavGoal>
+  trackFetchedGoal: (change: { op: string; id: string; item?: NavGoal }) => void
+  refreshFetchedGoal: () => Promise<void>
+  roomSessionItems: (...args: unknown[]) => unknown
+}
+
+interface NavApp extends NavState, NavFns {}
+
+interface Deferred<T> {
+  promise: Promise<T>
+  resolve: (value: T) => void
+}
+function deferred<T = unknown>(): Deferred<T> {
+  let resolve: (value: T) => void = () => { throw new Error('the deferred value is not ready') }
+  const promise = new Promise<T>((r) => { resolve = r })
   return { promise, resolve }
 }
 
+const target = (kind: string): NavTarget => ({ kind, id: `${{ shell: 'sh', run: 'wf', session: 'ses' }[kind]}_20261017-100000-aaaaaaaa`, turn: kind === 'session' ? 3 : 0, roomId: A })
+const opened = (id: string) => ({ feed: { room: { id }, posts: [] } })
+
 function navigation() {
   const pending = deferred()
-  const calls = []
-  const applied = []
-  const c = {
+  const calls: string[] = []
+  const applied: string[] = []
+  const state: NavState = {
     reviewOpen: false, reviewTab: 'files', reviewVersion: 0, mergeVersion: 0, roomId: B, roomRequest: 0, questionsRequest: 0, detailRequest: 0, narrow: false, hasTerminal: true,
     selectionRevision: 0, consolidationView: 0, consolidationAlive: true, memberRequest: 0, pickedSessions: [], pruneSelection,
     showClosed: false, rooms: [{ id: A }, { id: B }], needPair: false,
     ROOM, POST, GENERAL, VOICE, routedParents: '', isChannel, inChannel, homeChannel, isShellResult, trimFeed, mergeFeedPage, questionID, channels: channelModel([]), posts: [],
     view: GENERAL, openRun: '', openJob: '', drill: null, feed: null, feedAtBottom: true, location: { hash: '', pathname: '/', search: '' },
-    started: true, routing: 0, routeFix: false, pop: null, readOnlyDm: false, sessionTurn: 0, entries: [],
+    started: true, routing: 0, routeFix: false, pop: null, readOnlyDm: false, sessionTurn: 0, entries: [], prLink: null, unreadFrom: '', loadError: '',
+    goals: [], goalId: '', fetchedGoal: null, fetchedGoalVersion: 0, hierarchy: [], earlierLoad: null, STEP: 50, workflowData: null, roomSessionController: null, home: null,
+    selectingSessions: false, consolidating: null, roomRefreshes: new Set<unknown>(), roomTimer: null,
     ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute, parseDetailHref, prHash, parsePRHash, parseIssueHash, parseFileHash, callTarget, callPush: null, URLSearchParams, tick: () => Promise.resolve(),
-    loadRooms() {}, visitRoomControls() {}, loadConsolidations() {}, markShown() {}, loadEarlier() {}, say() {},
+    loadRooms() {}, visitRoomControls() {}, loadConsolidations() {}, markShown() {}, loadEarlier() { return false }, say() {},
     loadChanges() {}, loadReviewer() {}, loadRuns() {}, loadRun() { calls.push('run') },
+    loadGoals() {}, loadRules() {}, loadVisuals() {}, loadQuestions() {}, loadMembers() {},
     feedView: { jump() { calls.push('post') } },
     openSession() { calls.push('session') },
-    applyOpened(o) { c.feed = o.feed; applied.push(o.feed.room.id) },
+    applyOpened(o: unknown) { const value = o as { feed: NavFeed }; state.feed = value.feed; applied.push(value.feed.room.id) },
+    applyItemEvent: () => false, applyUnread: () => {}, afterRead: () => {}, handle: () => {},
+    reconcileRows, rerouteAnchors, withChannels, reloadsUnread,
     api: {
-      openRoom(id) { return id === A ? pending.promise : Promise.resolve(opened(id)) },
+      openRoom(id: string) { return id === A ? pending.promise : Promise.resolve(opened(id)) },
+      rooms: async () => [],
+      members: async () => [],
+      mentions: async () => [],
+      feedTail: async () => ({}),
+      feedAround: async () => ({}),
       transcriptTurn() { calls.push('transcript'); return Promise.resolve({ member: {} }) },
       transcript() { calls.push('transcript'); return Promise.resolve({ member: {} }) },
+      goal: async () => ({ id: '' }),
     },
   }
-  c.roomData = createRoomData(c.api, {
-    current: () => ({ room: c.roomId, visit: c.roomRequest }),
-    opened: (value, initial) => {
-      if (initial) c.unreadFrom = (value.feed.posts ?? []).find((p) => p.unread)?.id ?? ''
-      c.applyOpened(value)
+  // The controller calls only the api and hook members this fixture provides.
+  const roomApi: object = state.api
+  const roomHooks: object = {
+    current: () => ({ room: state.roomId, visit: state.roomRequest }),
+    opened: (value: { feed: NavFeed }, initial: boolean) => {
+      if (initial) state.unreadFrom = (value.feed.posts ?? []).find((p) => p.unread)?.id ?? ''
+      state.applyOpened(value)
     },
-    error: (error) => (c.loadError = error),
-  })
+    error: (error: string) => (state.loadError = error),
+  }
+  state.roomData = createRoomData(roomApi as Parameters<typeof createRoomData>[0], roomHooks as Parameters<typeof createRoomData>[1])
   // entries records each address write: ['push' | 'replace', hash].
-  const write = (kind, url) => { c.location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; c.entries.push([kind, c.location.hash]) }
-  c.history = { replaceState(_state, _title, url) { write('replace', url) }, pushState(_state, _title, url) { write('push', url) } }
-  vm.createContext(c)
-  vm.runInContext(stripTypes(code), c)
-  return { c, pending, calls, applied }
+  const write = (kind: string, url: string) => { state.location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; state.entries.push([kind, state.location.hash]) }
+  state.history = { replaceState(_state: unknown, _title: string, url: string) { write('replace', url) }, pushState(_state: unknown, _title: string, url: string) { write('push', url) } }
+  vm.createContext(state)
+  vm.runInContext(stripTypes(code), state)
+  const fns = vm.runInContext(`({ ${names.join(', ')} })`, state) as Pick<NavApp, keyof NavFns>
+  return { c: Object.assign(state, fns) as NavApp, pending, calls, applied }
 }
 
 for (const kind of ['shell', 'run', 'session']) {
@@ -116,7 +354,7 @@ for (const later of ['room', 'view']) {
 test('the copied-hash continuation also stops after its room target has resolved', async () => {
   const { c, pending, calls } = navigation()
   const openTarget = c.openTarget
-  c.openTarget = async (...args) => {
+  c.openTarget = async (...args: unknown[]) => {
     const selected = await openTarget(...args)
     queueMicrotask(() => c.openView('files'))
     return selected
@@ -182,7 +420,8 @@ test('opening a room or channel does not load the whole history', async () => {
   const { c } = navigation()
   let loads = 0
   c.loadEarlier = () => { loads++ }
-  c.channels = channelModel([{ id: 'lead', address: 'repo:lead' }])
+  const lead = { id: 'lead', name: 'lead', address: 'repo:lead' }
+  c.channels = channelModel([lead])
   assert.equal(await c.selectRoom(B), true)
   c.openView('channel:lead')
   assert.equal(loads, 0)
@@ -204,7 +443,7 @@ for (const workspace of ['files', 'github', 'jobs']) {
   test(`opening saved ${workspace} does not mark hidden channel messages read`, async () => {
     const { c } = navigation()
     c.posts = [{ id: 'hidden-child-result', unread: true }, { id: 'other-channel-result', unread: true }]
-    const marked = []
+    const marked: NavPost[] = []
     c.markShown = (posts) => { marked.push(...posts) }
     assert.equal(await c.selectRoom(B, workspace), true)
     assert.equal(c.view, workspace === 'jobs' ? 'jobs' : GENERAL)
@@ -214,14 +453,15 @@ for (const workspace of ['files', 'github', 'jobs']) {
 
 test('a pin 10,000 posts back waits for the in-flight page then uses one around request', async () => {
   const { c, calls } = navigation()
-  const child = { id: 'child', address: 'repo:child', parent: 'lead' }
-  c.channels = channelModel([{ id: 'lead', address: 'repo:lead' }, child])
+  const lead = { id: 'lead', name: 'lead', address: 'repo:lead' }
+  const child = { id: 'child', name: 'child', address: 'repo:child', parent: 'lead' }
+  c.channels = channelModel([lead, child])
   c.feed = { room: { id: B }, posts: [], earlier: 10000, cursor: 'first' }
   c.earlierLoad = null
   c.STEP = 100
   const history = deferred()
   const result = { id: 'old-result', from: child.address, completion: true, channels: ['channel:lead'] }
-  const pages = []
+  const pages: unknown[][] = []
   c.api.feedTail = (id, before, limit) => {
     pages.push([id, before, limit])
     return pages.length === 1 ? history.promise : Promise.resolve({ room: { id: B }, posts: [result], earlier: 0 })
@@ -230,8 +470,7 @@ test('a pin 10,000 posts back waits for the in-flight page then uses one around 
     pages.push([id, target, limit])
     return Promise.resolve({ room: { id: B }, posts: [result], earlier: 1, newer: 9999 })
   }
-  const declaration = declarations.find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'loadEarlier')
-  vm.runInContext(stripTypes(source.slice(declaration.start, declaration.end)), c)
+  runDeclaration(c, 'loadEarlier')
   const loading = c.loadEarlier()
   const jumping = c.jumpTo(result.id)
   await setImmediate()
@@ -260,7 +499,7 @@ test('a pin waiting for history preserves a later workspace selection', async ()
   c.loadEarlier = async () => { await history.promise; return false }
   const jumping = c.jumpTo('old-result')
   c.openView('files')
-  history.resolve()
+  history.resolve(undefined)
   await jumping
   assert.equal(c.view, GENERAL)
   assert.equal(c.reviewTab, 'files')
@@ -278,10 +517,7 @@ test('reconnect moves a stale lead channel to general after its last child is pr
   c.openRun = ''
   c.reconcileRows = reconcileRows
   c.api.openRoom = async () => ({ ...opened(B), members: [lead, { ...child, parent: '' }] })
-  for (const name of ['parentKey', 'noteParents', 'applyOpened', 'resync']) {
-    const node = declarations.find((node) => node.type === 'FunctionDeclaration' && node.id.name === name)
-    vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
-  }
+  for (const name of ['parentKey', 'noteParents', 'applyOpened', 'resync']) runDeclaration(c, name)
   await c.resync()
   assert.deepEqual(c.channels.leads, [])
   assert.equal(c.view, GENERAL)
@@ -294,11 +530,8 @@ test('a reconnect after a promote rereads the channels of loaded completions in 
   const done = { id: 'done', from: child.address, completion: true, channels: ['channel:lead'] }
   Object.defineProperty(c, 'channels', { get: () => channelModel(c.hierarchy) })
   Object.assign(c, { view: 'channel:lead', openRun: '', reconcileRows, rerouteAnchors, withChannels, routedParents: '', feedAtBottom: false, workflowData: { loadJobs() {} }, ...appLoaderStubs(), roomSessionController: null, drill: null })
-  for (const name of ['loadReviewer', 'loadChanges', 'loadGoals', 'loadRules', 'loadVisuals']) c[name] = () => {}
-  for (const name of ['parentKey', 'noteParents', 'rerouteLoaded', 'applyOpened', 'resync']) {
-    const node = declarations.find((node) => node.type === 'FunctionDeclaration' && node.id.name === name)
-    vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
-  }
+  for (const name of ['loadReviewer', 'loadChanges', 'loadGoals', 'loadRules', 'loadVisuals'] as const) c[name] = () => {}
+  for (const name of ['parentKey', 'noteParents', 'rerouteLoaded', 'applyOpened', 'resync']) runDeclaration(c, name)
   c.roomId = B
   c.feed = { room: { id: B }, posts: [] }
   c.applyOpened({ ...opened(B), members: [lead, child] })
@@ -311,6 +544,7 @@ test('a reconnect after a promote rereads the channels of loaded completions in 
   await c.resync()
   await setImmediate()
   assert.equal(c.view, GENERAL)
+  assert.ok(c.feed)
   assert.deepEqual(c.feed.posts.find((p) => p.id === 'done')?.channels, ['general'])
 })
 
@@ -361,8 +595,9 @@ test('opening a view keeps only the newest posts of a long feed', () => {
   const { c } = navigation()
   c.feed = { room: { id: B }, earlier: 0, posts: Array.from({ length: 700 }, (_, i) => ({ id: `p${i}` })) }
   c.openView(GENERAL)
+  assert.ok(c.feed)
   assert.equal(c.feed.posts.length, 300)
-  assert.equal(c.feed.posts[0].id, 'p400')
+  assert.equal(c.feed.posts[0]?.id, 'p400')
   assert.equal(c.feed.earlier, 400)
 })
 
@@ -371,6 +606,7 @@ test('selecting the open view again keeps older posts the reader is looking at',
   c.feed = { room: { id: B }, earlier: 0, posts: Array.from({ length: 700 }, (_, i) => ({ id: `p${i}` })) }
   c.feedAtBottom = false
   c.openView(GENERAL)
+  assert.ok(c.feed)
   assert.equal(c.feed.posts.length, 700)
   // At the bottom, the same view trims as usual.
   c.feedAtBottom = true
@@ -380,7 +616,7 @@ test('selecting the open view again keeps older posts the reader is looking at',
 
 test('a pin leaves the bottom before it loads older posts, so a live post cannot trim them', async () => {
   const { c } = navigation()
-  let atBottom
+  let atBottom = true
   c.feed = { room: { id: B }, posts: [], earlier: 1, cursor: 'newer-result' }
   c.loadEarlier = async () => { atBottom = c.feedAtBottom; return false }
   await c.jumpTo('old-result')
@@ -391,11 +627,21 @@ test('an older page cannot merge after a same-room refresh changes its boundary'
   const pending = deferred()
   const before = { room: { id: B }, posts: [{ id: 'p151' }, { id: 'p200' }], cursor: 'p151', earlier: 150 }
   const refreshed = { room: { id: B }, posts: [{ id: 'p181' }, { id: 'p250' }], cursor: 'p181', earlier: 180 }
-  const c = { roomId: B, roomRequest: 1, earlierLoad: null, feed: before, feedAtBottom: true, STEP: 50, mergeFeedPage,
-    api: { feedTail: (id, cursor) => { assert.equal(cursor, 'p151'); return pending.promise } } }
-  vm.createContext(c)
-  const fn = declarations.find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'loadEarlier')
-  vm.runInContext(stripTypes(source.slice(fn.start, fn.end)), c)
+  interface EarlierState {
+    roomId: string
+    roomRequest: number
+    earlierLoad: unknown
+    feed: NavFeed | null
+    feedAtBottom: boolean
+    STEP: number
+    mergeFeedPage: typeof mergeFeedPage
+    api: { feedTail: (id: string, cursor: string) => Promise<unknown> }
+    loadEarlier: (...args: unknown[]) => unknown
+  }
+  const state: EarlierState = { roomId: B, roomRequest: 1, earlierLoad: null, feed: before, feedAtBottom: true, STEP: 50, mergeFeedPage, api: { feedTail: (id, cursor) => { assert.equal(cursor, 'p151'); return pending.promise } }, loadEarlier() {} }
+  vm.createContext(state)
+  runDeclaration(state, 'loadEarlier')
+  const c = state as EarlierState
   const loading = c.loadEarlier()
   c.feed = refreshed
   pending.resolve({ room: { id: B }, posts: [{ id: 'p51' }, { id: 'p150' }], cursor: 'p51', earlier: 50 })
@@ -482,7 +728,7 @@ test('the address follows a session, and Back to the room address closes it with
 test('Back to the room while a session address still loads keeps the room the reader went back to', async () => {
   const { c, calls } = navigation()
   const id = 'ses_20261017-100000-cccccccc'
-  const loading = deferred()
+  const loading = deferred<{ member: NavMember }>()
   c.api.transcript = () => { calls.push('transcript'); return loading.promise }
   c.location.hash = `#room=${B}&session=${id}`
   assert.equal(c.hashTarget(), true)
@@ -541,16 +787,41 @@ test('an open PR keeps its own address; the route waits until the view leaves it
 })
 
 test('successful read batches refresh channel counts through the existing room debounce', () => {
-  const callback = declarations.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.name === 'readMarker')).declarations[0].init.arguments[1].properties.find((p) => p.key.name === 'read').value
-  const refresh = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'soonRooms')
-  let timer, rooms = 0
-  const tails = []
-  const c = { roomRefreshes: new Set(), roomTimer: null, roomId: A, feed: { posts: [{ id: 'one' }] },
-    setTimeout(fn) { timer = fn; return 1 }, clearTimeout() {},
-    loadRooms() { rooms++ }, roomData: { loadUnread() { tails.push('unread') } },
+  const marker = declarations.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.type === 'Identifier' && d.id.name === 'readMarker'))
+  assert.ok(marker && marker.type === 'VariableDeclaration', 'App declares readMarker')
+  const argumentsOf = marker.declarations[0]?.init
+  assert.ok(argumentsOf && argumentsOf.type === 'CallExpression', 'readMarker is created')
+  const options = argumentsOf.arguments[1]
+  assert.ok(options && options.type === 'ObjectExpression', 'readMarker takes options')
+  const read = options.properties.find((p) => p.type === 'Property' && p.key.type === 'Identifier' && p.key.name === 'read')
+  assert.ok(read && read.type === 'Property' && read.value.type === 'ArrowFunctionExpression', 'read is a handler')
+  const refresh = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id?.name === 'soonRooms')
+  assert.ok(refresh, 'soonRooms')
+  let timer: () => void = () => { throw new Error('no timer') }
+  let rooms = 0
+  const tails: string[] = []
+  interface ReadState {
+    roomRefreshes: Set<unknown>
+    roomTimer: (() => void) | null
+    roomId: string
+    feed: { posts: { id: string }[] }
+    setTimeout(fn: () => void): number
+    clearTimeout(): void
+    loadRooms(): void
+    roomData: { loadUnread(): void }
+    afterRead: () => void
   }
+  const state: ReadState = {
+    roomRefreshes: new Set(), roomTimer: null, roomId: A, feed: { posts: [{ id: 'one' }] },
+    setTimeout(fn: () => void) { timer = fn; return 1 }, clearTimeout() {},
+    loadRooms() { rooms++ }, roomData: { loadUnread() { tails.push('unread') } },
+    afterRead: () => {},
+  }
+  const c = state
   vm.createContext(c)
-  vm.runInContext(stripTypes(source.slice(refresh.start, refresh.end) + '\nvar afterRead = ' + source.slice(callback.start, callback.end)), c)
+  const refreshRange = sourceRange(refresh)
+  const callbackRange = sourceRange(read.value)
+  vm.runInContext(stripTypes(source.slice(refreshRange.start, refreshRange.end) + '\nvar afterRead = ' + source.slice(callbackRange.start, callbackRange.end)), c)
   c.afterRead()
   c.afterRead()
   assert.equal(rooms, 0)
@@ -567,32 +838,56 @@ test('successful read batches refresh channel counts through the existing room d
 
 test('channel count refresh preserves over 200 displayed posts while scrolled up', async () => {
   const posts = Array.from({ length: 250 }, (_, i) => ({ id: `post-${i}` }))
-  const c = { roomId: A, roomRequest: 1, feedAtBottom: false, roomTimer: null, roomRefreshes: new Set(),
+  interface ChannelState {
+    roomId: string
+    roomRequest: number
+    feedAtBottom: boolean
+    roomTimer: (() => void) | null
+    roomRefreshes: Set<unknown>
+    feed: NavFeed
+    applyItemEvent: () => boolean
+    reloadsUnread: typeof reloadsUnread
+    home: null
+    drill: null
+    roomSessionController: null
+    loadMembers(): void
+    loadRooms(): void
+    setTimeout(fn: () => void): void
+    clearTimeout(): void
+    timer?: () => void
+    roomData?: ReturnType<typeof createRoomData>
+    handle: (event: unknown) => void
+    applyUnread: (value: unknown) => void
+  }
+  const c: ChannelState = {
+    roomId: A, roomRequest: 1, feedAtBottom: false, roomTimer: null, roomRefreshes: new Set(),
     feed: { room: { id: A }, posts, offset: 900, earlier: 20, cursor: 'post-0', channelUnread: {} },
     applyItemEvent: () => false, reloadsUnread, home: null, drill: null, roomSessionController: null, loadMembers() {}, loadRooms() {},
-    setTimeout(fn) { c.timer = fn }, clearTimeout() {},
+    setTimeout(fn: () => void) { c.timer = fn }, clearTimeout() {},
+    handle: () => {}, applyUnread: () => {},
   }
   vm.createContext(c)
-  const refresh = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'soonRooms')
-  const hook = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'applyUnread')
-  const handle = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'handle')
-  vm.runInContext(stripTypes(source.slice(refresh.start, refresh.end) + '\n' + source.slice(handle.start, handle.end) + '\n' + source.slice(hook.start, hook.end)), c)
-  const requests = []
-  c.roomData = createRoomData({
-    feedTail: async (...args) => { requests.push(args); return { room: { id: A }, posts: posts.slice(-1), channelUnread: { 'channel:lead': 3 } } },
+  runDeclaration(c, 'soonRooms')
+  runDeclaration(c, 'handle')
+  runDeclaration(c, 'applyUnread')
+  const requests: unknown[][] = []
+  const roomApi: object = {
+    feedTail: async (...args: unknown[]) => { requests.push(args); return { room: { id: A }, posts: posts.slice(-1), channelUnread: { 'channel:lead': 3 } } },
     openRoom: async () => ({ feed: { room: { id: A }, posts: posts.slice(-200) } }),
-  }, { current: () => ({ room: c.roomId, visit: c.roomRequest }), unread: c.applyUnread,
-    opened(value) { c.feed = mergeFeedPage(c.feed, value.feed) }, error(e) { throw e },
-  })
+  }
+  const roomHooks: object = { current: () => ({ room: c.roomId, visit: c.roomRequest }), unread: c.applyUnread,
+    opened(value: { feed: NavFeed }) { c.feed = mergeFeedPage(c.feed, value.feed) }, error(e: unknown): never { throw e },
+  }
+  c.roomData = createRoomData(roomApi as Parameters<typeof createRoomData>[0], roomHooks as Parameters<typeof createRoomData>[1])
   c.handle({ kind: 'members', roomId: A })
-  c.timer()
+  c.timer?.()
   await setImmediate()
   assert.equal(c.feed.posts, posts)
   assert.equal(c.feed.posts.length, 250)
   assert.equal(c.feed.cursor, 'post-0')
   assert.equal(c.feed.earlier, 20)
   assert.equal(c.feed.offset, 900)
-  assert.equal(c.feed.channelUnread['channel:lead'], 3)
+  assert.equal(c.feed.channelUnread?.['channel:lead'], 3)
   assert.deepEqual(requests, [[A, '', 1]])
   c.roomData.destroy()
 })
@@ -600,9 +895,9 @@ test('channel count refresh preserves over 200 displayed posts while scrolled up
 test('unread metadata from an earlier room visit cannot update the current sidebar', async () => {
   const wait = deferred()
   let current = { room: A, visit: 1 }, updates = 0
-  const data = createRoomData({ feedTail: () => wait.promise }, {
-    current: () => current, unread() { updates++ },
-  })
+  const roomHooks: object = { current: () => current, unread() { updates++ } }
+  const roomApi: object = { feedTail: () => wait.promise }
+  const data = createRoomData(roomApi as Parameters<typeof createRoomData>[0], roomHooks as Parameters<typeof createRoomData>[1])
   const loading = data.loadUnread()
   current = { room: A, visit: 2 }
   wait.resolve({ room: { id: A }, channelUnread: { 'channel:lead': 3 } })
@@ -617,8 +912,7 @@ test('an older page cannot trim the post a reader moved to while it was loading'
  const pending=deferred();let near=true
  Object.assign(c,{feed:original,earlierLoad:null,STEP:50})
  c.api.feedTail=()=>pending.promise
- const declaration=declarations.find(n=>n.type==='FunctionDeclaration'&&n.id.name==='loadEarlier')
- vm.runInContext(stripTypes(source.slice(declaration.start,declaration.end)),c)
+ runDeclaration(c,'loadEarlier')
  const loading=c.loadEarlier('older','',()=>near)
  near=false
  pending.resolve({room:{id:B},posts:[{id:'older'}],earlier:0})
@@ -630,16 +924,13 @@ test('opening a goal that no loaded page holds loads it, and a done goal opens u
   const { c } = navigation()
   const { goalFilter } = await import('./goals.ts')
   const old = { id: 'g9', state: 'done', text: 'Old goal' }
-  const calls = []
+  const calls: unknown[][] = []
   c.goals = [{ id: 'g1', state: 'active' }]
   c.openView = () => {}
   c.api.goal = async (room, id) => { calls.push([room, id]); return old }
   c.fetchedGoal = null
   c.fetchedGoalVersion = 0
-  for (const name of ['goalById', 'openGoal', 'trackFetchedGoal', 'refreshFetchedGoal']) {
-    const node = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
-    vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
-  }
+  for (const name of ['goalById', 'openGoal', 'trackFetchedGoal', 'refreshFetchedGoal']) runDeclaration(c, name)
   assert.equal(await c.openGoal('g9'), old)
   assert.equal(c.goalId, 'g9')
   assert.deepEqual(calls, [[B, 'g9']])
@@ -654,14 +945,14 @@ test('opening a goal that no loaded page holds loads it, and a done goal opens u
   assert.equal(c.goalById('g9').text, 'Reloaded')
   // A change event that lands while a refresh is in flight wins over its
   // older answer.
-  let answer
-  c.api.goal = () => new Promise((resolve) => (answer = resolve))
+  let answer: (value: NavGoal) => void = () => { throw new Error('no pending goal read') }
+  c.api.goal = () => new Promise<NavGoal>((resolve) => (answer = resolve))
   const refreshing = c.refreshFetchedGoal()
   c.trackFetchedGoal({ op: 'upsert', id: 'g9', item: { ...old, text: 'From the event', holders: ['lead'] } })
   answer({ ...old, text: 'Older answer' })
   await refreshing
   assert.equal(c.goalById('g9').text, 'From the event')
-  assert.deepEqual([...c.goalById('g9').holders], ['lead'])
+  assert.deepEqual([...c.goalById('g9').holders ?? []], ['lead'])
   calls.length = 1
   c.trackFetchedGoal({ op: 'delete', id: 'g9' })
   assert.equal(c.goalById('g9'), undefined)

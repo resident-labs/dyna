@@ -3,33 +3,68 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
+import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 
 // Run the component's real send handler and teardown registration.
 const source = readFileSync(new URL('./Composer.svelte', import.meta.url), 'utf8')
-const declarations = parse(source).instance.content.body
+const declarations = parse(source, { modern: true }).instance?.content.body ?? []
 const code = declarations.filter((node) =>
-  node.type === 'FunctionDeclaration' && node.id.name === 'send' ||
-  node.type === 'VariableDeclaration' && node.declarations.some((d) => d.id.name === 'active') ||
-  node.type === 'ExpressionStatement' && node.expression.callee?.name === 'onDestroy',
-).map((node) => source.slice(node.start, node.end)).join('\n')
+  node.type === 'FunctionDeclaration' && node.id?.name === 'send' ||
+  node.type === 'VariableDeclaration' && node.declarations.some((d) => d.id.type === 'Identifier' && d.id.name === 'active') ||
+  node.type === 'ExpressionStatement' && node.expression.type === 'CallExpression' && node.expression.callee.type === 'Identifier' && node.expression.callee.name === 'onDestroy',
+).map((node) => {
+  const { start, end } = sourceRange(node)
+  return source.slice(start, end)
+}).join('\n')
+
+interface Attachment {
+  id: string
+}
+
+type Call = string | { room: string; text: string; atts: Attachment[] }
+
+interface ComposerState {
+  references: unknown[]
+  command: null
+  forwarding: null
+  canSend: boolean
+  busy: boolean
+  error: string
+  note: string
+  $attachments: { atts: Attachment[] }
+  attachments: { destroy(): void }
+  draft: string
+  currentRoom: string
+  prepareText: () => Promise<string>
+  onDestroy: (fn: () => void) => void
+  onsend: (text: string, atts: Attachment[]) => Promise<unknown>
+  tick: () => Promise<void>
+  setTimeout: () => void
+  field: { focus: () => void }
+}
+
+interface ComposerApp extends ComposerState {
+  send: () => Promise<void>
+}
 
 function composer() {
-  let resolve
-  const pending = new Promise((r) => { resolve = r })
-  const cleanup = []
-  const calls = []
-  const c = {
+  let resolve: (text: string) => void = () => { throw new Error('no pending preparation') }
+  const pending = new Promise<string>((r) => { resolve = r })
+  const cleanup: (() => void)[] = []
+  const calls: Call[] = []
+  const c: ComposerState = {
     references: [], command: null, forwarding: null, canSend: true, busy: false, error: '', note: '',
     $attachments: { atts: [] }, attachments: { destroy() {} }, draft: 'old channel draft', currentRoom: 'old-room',
     prepareText: () => pending,
-    onDestroy: (fn) => cleanup.push(fn),
-    onsend: async (text, atts) => { calls.push({ room: c.currentRoom, text, atts }); return {} },
+    onDestroy: (fn: () => void) => cleanup.push(fn),
+    onsend: async (text: string, atts: Attachment[]) => { calls.push({ room: c.currentRoom, text, atts }); return {} },
     tick: async () => {}, setTimeout() {},
     field: { focus: () => calls.push('focus') },
   }
   vm.createContext(c)
-  vm.runInContext(code, c)
-  return { c, calls, resolve, destroy: () => cleanup.forEach((fn) => fn()) }
+  vm.runInContext(stripTypes(code), c)
+  const fns = vm.runInContext('({ send })', c) as Pick<ComposerApp, 'send'>
+  return { c: Object.assign(c, fns), calls, resolve, destroy: () => cleanup.forEach((fn) => fn()) }
 }
 
 for (const navigation of ['room', 'channel']) {
