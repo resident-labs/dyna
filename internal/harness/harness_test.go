@@ -733,21 +733,18 @@ func TestMuseInvocationIsResumableAndParsesTerminalText(t *testing.T) {
 		t.Fatalf("muse invocation is not resumable: %#v", inv.initial.argv)
 	}
 	joined := strings.Join(inv.initial.argv, " ")
-	for _, want := range []string{"muse exec --json", "--yolo", "--model muse-wonder-1.0", "--reasoning-effort high", "--session-id", "do the task"} {
+	for _, want := range []string{"muse serve", "--disable-sandbox", "--model muse-wonder-1.0"} {
 		if !strings.Contains(joined, want) {
-			t.Fatalf("initial argv missing %q: %#v", want, inv.initial.argv)
+			t.Fatalf("missing %s: %v", want, inv.initial.argv)
 		}
 	}
-	sessionID := optionValue(inv.initial.argv, "--session-id")
-	if sessionID == "" {
-		t.Fatalf("no preassigned session id: %#v", inv.initial.argv)
+	sessionID := inv.initial.museSession
+	if sessionID == "" || inv.initial.prompt != "do the task" || inv.initial.museReasoning != "high" {
+		t.Fatalf("wrong MSP request: %+v", inv.initial)
 	}
 	resumed := inv.resume(sessionID, "continue please")
-	if got := optionValue(resumed.argv, "--session-id"); got != sessionID {
-		t.Fatalf("resume session id = %q, want %q: %#v", got, sessionID, resumed.argv)
-	}
-	if !strings.Contains(strings.Join(resumed.argv, " "), "continue please") {
-		t.Fatalf("resume argv missing nudge: %#v", resumed.argv)
+	if resumed.museSession != sessionID || !resumed.museResume || resumed.prompt != "continue please" {
+		t.Fatalf("wrong continuation: %+v", resumed)
 	}
 	stdout := strings.Join([]string{
 		`{"payload_type":"turn.input.user","stream":{"kind":"session","id":"` + sessionID + `"},"payload":{"prompt":"do the task"}}`,
@@ -1262,7 +1259,7 @@ func TestProfileKnobsReachEveryTurn(t *testing.T) {
 	}{
 		{profile.HarnessClaudeCode, "haiku", []string{"--effort", "high"}, &profile.Compact{Tokens: 95000}, []string{"--effort\x00high", `"autoCompactWindow":128000`}},
 		{profile.HarnessCodex, "gpt-x", []string{"-c", "model_reasoning_effort=high"}, &profile.Compact{Tokens: 95000}, []string{"-c\x00model_reasoning_effort=high", "-c\x00model_auto_compact_token_limit=95000"}},
-		{profile.HarnessMuse, "muse-x", []string{"--reasoning-effort", "high"}, &profile.Compact{Tokens: 95000, Windows: map[string]int64{"muse-x": 1000000}}, []string{"--reasoning-effort\x00high", "-c\x00context_compaction.soft_threshold=0.095"}},
+		{profile.HarnessMuse, "muse-x", []string{"--reasoning-effort", "high"}, &profile.Compact{Tokens: 95000, Windows: map[string]int64{"muse-x": 1000000}}, []string{"-c\x00context_compaction.soft_threshold=0.095"}},
 		{profile.HarnessPi, "anthropic/claude-x", []string{"--thinking", "high"}, nil, []string{"--thinking\x00high"}},
 		{profile.HarnessOpenCode, "opencode/beam-free#low", nil, nil, []string{"opencode/beam-free#low"}},
 	} {
@@ -1272,6 +1269,9 @@ func TestProfileKnobsReachEveryTurn(t *testing.T) {
 		}
 		if inv.resume == nil {
 			t.Fatalf("%s has no resume turn", tc.harness)
+		}
+		if tc.harness == profile.HarnessMuse && (inv.initial.museReasoning != "high" || inv.resume("ses", "again").museReasoning != "high") {
+			t.Fatal("Muse lost native reasoning effort")
 		}
 		for name, argv := range map[string][]string{"first": inv.initial.argv, "resume": inv.resume("ses", "again").argv} {
 			joined := strings.Join(argv, "\x00")

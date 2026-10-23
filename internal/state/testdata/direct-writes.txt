@@ -99,6 +99,7 @@ not-state internal/harness/opencodefixture/fixture.go New 1 # test fixture runti
 not-state internal/harness/process.go runOnce 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/harness/acp_run.go runAcpAttempt 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/harness/codex_run.go runCodexTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
+not-state internal/harness/muse_run.go runMuseTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/harness/pi_rpc.go runPiTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/harness/sessionhost/client.go socketHost.connect 1 # removes a dead session host's socket before it starts a new host
 not-state internal/harness/sessionhost/wire.go lockFile 1 # flock lock file for one session host, not state

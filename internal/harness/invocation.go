@@ -182,42 +182,7 @@ func buildInvocationInDirExec(p profile.Profile, prompt, cwd string, exec Execut
 		return inv, nil
 
 	case "muse-exec":
-		if hasAnyOption(p.ExtraArgs, "--json", "--session-id", "--model", "--prompt-file", "--output-schema") {
-			return invocation{}, fmt.Errorf("muse profile extraArgs may not set --json/--session-id/--model/--prompt-file/--output-schema; dyna reserves them to capture the worker's streamed response and exact session")
-		}
-		sessionID, serr := newSessionID()
-		if serr != nil {
-			return invocation{}, fmt.Errorf("create muse session id: %w", serr)
-		}
-		baseArgs := func() []string {
-			args := []string{definition.Binary, "exec", "--json"}
-			// Workers run headless and must act autonomously; approval prompts
-			// would hang forever. SafeMode or explicit permission flags opt out.
-			if !p.SafeMode && !museHasExplicitPermissions(p.ExtraArgs) {
-				args = append(args, "--yolo")
-			}
-			if p.Model != "" {
-				args = append(args, "--model", p.Model)
-			}
-			args = append(args, p.ExtraArgs...)
-			return append(args, "--session-id", sessionID)
-		}
-		inv.initial = commandSpec{argv: append(baseArgs(), prompt), parseOutput: museOutput}
-		inv.sessionID = func(string) string { return sessionID }
-		inv.resume = func(id, nudge string) commandSpec {
-			// `muse exec --session-id <same id>` continues the exact session.
-			args := []string{definition.Binary, "exec", "--json"}
-			if !p.SafeMode && !museHasExplicitPermissions(p.ExtraArgs) {
-				args = append(args, "--yolo")
-			}
-			if p.Model != "" {
-				args = append(args, "--model", p.Model)
-			}
-			args = append(args, p.ExtraArgs...)
-			args = append(args, definition.Resume, id, nudge)
-			return commandSpec{argv: args, parseOutput: museOutput}
-		}
-		return inv, nil
+		return museInvocation(p, prompt, exec)
 
 	case "grok-acp", "antigravity-acp":
 		if p.Harness == profile.HarnessGrok {
