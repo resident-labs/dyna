@@ -19,22 +19,45 @@ import (
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/terminalsvc"
+	"dyna-agent/internal/textutil"
 	"dyna-agent/internal/transcript"
 	"dyna-agent/internal/workeroutput"
 )
 
 // Session is a member's drill-down: identity plus transcript.
 type Session struct {
-	Cursor  string             `json:"cursor,omitempty"`
-	Earlier bool               `json:"earlier"`
-	Newer   bool               `json:"newer"`
-	Member  Member             `json:"member"`
-	Address string             `json:"address"`
-	Posts   []Post             `json:"posts"`
-	Media   []Post             `json:"media"`
-	Dir     string             `json:"dir"`
-	Usage   workeroutput.Usage `json:"usage"`
-	Turns   []Turn             `json:"turns"`
+	Cursor  string `json:"cursor,omitempty"`
+	Earlier bool   `json:"earlier"`
+	Newer   bool   `json:"newer"`
+	Member  Member `json:"member"`
+	Address string `json:"address"`
+	Posts   []Post `json:"posts"`
+	// References are the compact rows of the posts of other conversations that
+	// this one received or wrote. Each row names its post, its sender and its
+	// home, so a reader jumps to the post where it lives instead of drawing a
+	// second copy.
+	References []ReferenceRow     `json:"references,omitempty"`
+	Media      []Post             `json:"media"`
+	Dir        string             `json:"dir"`
+	Usage      workeroutput.Usage `json:"usage"`
+	Turns      []Turn             `json:"turns"`
+}
+
+// ReferenceRow is one post of another conversation, as a session's DM shows it:
+// who wrote it, which conversation it is in, a one-line preview and how many
+// files it carries. TS is unix milliseconds, as a stored post keeps it.
+type ReferenceRow struct {
+	PostID string `json:"postId"`
+	From   string `json:"from"`
+	// Speaker is the sender's label (see SpeakerLabel).
+	Speaker string `json:"speaker"`
+	// FromHue is the sender's stable name color index (see NameHue).
+	FromHue int `json:"fromHue"`
+	// Conversation is the home of the post, such as "room" or "voice".
+	Conversation string `json:"conversation"`
+	TS           int64  `json:"ts"`
+	Preview      string `json:"preview"`
+	Attachments  int    `json:"attachments"`
 }
 
 // Turn is one transcript turn.
@@ -261,19 +284,27 @@ func (s *Service) sessionView(sess transcript.Session) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	posts, media, err := s.transcriptMessages(rec, sess.Info, sess.Since, sess.Before)
+	// The seat's DM keeps one conversation when its holder changes, so a view of
+	// the seat reads that one wherever the seat is today.
+	conversation := dmConversation(sess.Info)
+	selected, err := s.dmPosts(rec, conversation, sess.Info, sess.Since, sess.Before)
 	if err != nil {
 		return Session{}, err
 	}
-	out.Posts, err = s.sessionPosts(rec, posts, sess.Info.ID, out.Address, sess.Since, sess.Before, book)
+	out.Posts, err = s.shapeSessionPosts(rec, selected, book)
 	if err != nil {
 		return Session{}, err
 	}
-	out.Posts, err = s.withItemPosts(rec, out.Posts, sess.Info.ID, out.Address, out.Turns, book)
+	out.Posts, err = s.withItemPosts(rec, out.Posts, conversation, sess.Info.ID, sess.Info.Address(), out.Turns, book)
 	if err != nil {
 		return Session{}, err
 	}
-	out.Media, err = s.sessionMedia(rec, media, sess.Info.ID, out.Address, book)
+	rows, err := s.dmReferences(rec, conversation, sess.Since, sess.Before)
+	if err != nil {
+		return Session{}, err
+	}
+	out.References = rows
+	out.Media, err = s.sessionMedia(rec, conversation, book)
 	if err != nil {
 		return Session{}, err
 	}
@@ -300,28 +331,14 @@ func (s *Service) sessionJobs(sess transcript.Session) []shells.Info {
 	return jobs
 }
 
-// sessionMedia includes attachments from the entire conversation, including owner posts.
-func (s *Service) sessionMedia(rec room.Record, msgs []room.Message, id, address string, book avatarBook) ([]Post, error) {
-	return s.mediaWhere(rec, msgs, book, func(m room.Message) bool {
-		return sessionParticipant(rec, m, id, address)
-	})
-}
-
-func sessionParticipant(rec room.Record, m room.Message, id, address string) bool {
-	return m.SentBySession(id, address) || m.SessionAddressed(id, address) || (rootSeat(rec, address) && m.RootSeatTarget(rec.Name))
-}
-
-// mediaWhere is the attachments of the messages `in` selects, newest first.
-func (s *Service) mediaWhere(rec room.Record, msgs []room.Message, book avatarBook, in func(room.Message) bool) ([]Post, error) {
-	selected := make([]room.Message, 0)
-	for _, m := range msgs {
-		if len(m.Attachments) > 0 && in(m) {
-			selected = append(selected, m)
-		}
-	}
-	sort.SliceStable(selected, func(i, j int) bool { return selected[i].TS < selected[j].TS })
-	if len(selected) > maxSessionMedia {
-		selected = selected[len(selected)-maxSessionMedia:]
+// sessionMedia is every file of the whole DM, newest last: the files of the
+// posts written in it, of the posts delivered to it and of the posts the
+// conversation's own side wrote elsewhere. It reads the stored home and
+// delivery rows, so it follows the same conversations the posts do.
+func (s *Service) sessionMedia(rec room.Record, conversation room.Conversation, book avatarBook) ([]Post, error) {
+	selected, err := s.rooms().Files(rec.ID, conversation, conversation.SessionID(), conversation.SessionID(), maxSessionMedia)
+	if err != nil {
+		return nil, err
 	}
 	feed, err := s.feedOf(rec, selected, 0, book, nil)
 	if err != nil {
@@ -337,51 +354,114 @@ func (s *Service) mediaWhere(rec room.Record, msgs []room.Message, book avatarBo
 	return posts, nil
 }
 
-// sessionPosts selects the session's conversation before applying feed shaping.
-func (s *Service) sessionPosts(rec room.Record, msgs []room.Message, id, address string, since, before time.Time, book avatarBook) ([]Post, error) {
-	selected := make([]room.Message, 0)
+// dmConversation is the DM a session view reads. The root seat's DM names the
+// seat (room.SeatDMConversation), so it survives a change of holder; every
+// other DM names its session.
+func dmConversation(info subagent.Info) room.Conversation {
+	if info.Role == subagent.RoleRoot || info.Name == room.RootAgent {
+		return room.SeatDMConversation(info.RoomID)
+	}
+	return room.DMConversation(info.ID)
+}
+
+// dmPosts is the posts written in the session's DM within the loaded window.
+// A completion record of this session is left out: it folds into its turn in
+// the transcript, so the DM does not draw it twice.
+func (s *Service) dmPosts(rec room.Record, conversation room.Conversation, info subagent.Info, since, before time.Time) ([]room.Message, error) {
+	msgs, err := s.rooms().ConversationMessages(rec.ID, conversation, since, before, maxSessionPosts)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]room.Message, 0, len(msgs))
 	for _, m := range msgs {
-		if (!since.IsZero() && time.UnixMilli(m.TS).Before(since)) || (!before.IsZero() && time.UnixMilli(m.TS).After(before)) {
+		if m.SentBySession(info.ID, info.Address()) && IsCompletion(m) {
 			continue
 		}
-		if sessionPost(rec, m, id, address) {
-			selected = append(selected, m)
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+// dmReferences is the compact rows of the posts of other conversations that
+// this one received or wrote. A DM names its own side by the same identity its
+// rows and deliveries use: the session for a session's DM, and the seat for the
+// root DM, so the seat's posts stay in it whoever holds the seat now. Rows a
+// delivery and an author both name stay one row. A completion of the session
+// whose DM this is folds into its turn in the transcript, so it is not a second
+// row; the seat's own records stay, because they are the root's report to the
+// owner and nothing else in this view draws them.
+func (s *Service) dmReferences(rec room.Record, conversation room.Conversation, since, before time.Time) ([]ReferenceRow, error) {
+	author := conversation.SessionID()
+	received, err := s.rooms().ReceivedPosts(rec.ID, author, conversation, since, before, maxSessionPosts)
+	if err != nil {
+		return nil, err
+	}
+	authored, err := s.rooms().AuthoredPosts(rec.ID, author, conversation, since, before, maxSessionPosts)
+	if err != nil {
+		return nil, err
+	}
+	seat := room.SeatDMConversation(rec.ID)
+	kept := make([]room.HomePost, 0, len(authored))
+	for _, post := range authored {
+		if conversation != seat && IsCompletion(post.Message) {
+			continue
+		}
+		kept = append(kept, post)
+	}
+	posts := mergeHomePosts(received, kept)
+	rows := make([]ReferenceRow, 0, len(posts))
+	for _, post := range posts {
+		m := post.Message
+		rows = append(rows, ReferenceRow{
+			PostID:       m.ID,
+			From:         m.From,
+			Speaker:      SpeakerLabel(m, rec.Name),
+			FromHue:      NameHue(m.From),
+			Conversation: post.Home.String(),
+			TS:           m.TS,
+			Preview:      textutil.ClipOneLine(m.Text, maxReferencePreview),
+			Attachments:  len(m.Attachments),
+		})
+	}
+	return rows, nil
+}
+
+// mergeHomePosts keeps the newest posts of both reads, oldest last, each once.
+func mergeHomePosts(first, second []room.HomePost) []room.HomePost {
+	seen := make(map[string]bool, len(first)+len(second))
+	out := make([]room.HomePost, 0, len(first)+len(second))
+	for _, list := range [][]room.HomePost{first, second} {
+		for _, post := range list {
+			if seen[post.Message.ID] {
+				continue
+			}
+			seen[post.Message.ID] = true
+			out = append(out, post)
 		}
 	}
-	return s.shapeSessionPosts(rec, selected, book)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Message.TS < out[j].Message.TS })
+	if len(out) > maxSessionPosts {
+		out = out[len(out)-maxSessionPosts:]
+	}
+	return out
 }
 
-// rootSeat reports whether address is the room's root seat. Only the seat
-// session holds that address, because "root" is a reserved agent name.
-func rootSeat(rec room.Record, address string) bool {
-	return address == rec.Name+":"+room.RootAgent
-}
-
-// sessionPost is the shared conversation filter for indexed and supplied posts.
-func sessionPost(rec room.Record, m room.Message, id, address string) bool {
-	own := m.SentBySession(id, address)
-	if own && IsCompletion(m) {
-		return false
+// homeMessages drops the home of each post, for a reader that only needs the
+// posts.
+func homeMessages(posts []room.HomePost) []room.Message {
+	out := make([]room.Message, 0, len(posts))
+	for _, post := range posts {
+		out = append(out, post.Message)
 	}
-	// The root seat's conversation also holds the posts addressed to the seat:
-	// "@root" on a post to the room reaches the seat, not a worker session.
-	seat := rootSeat(rec, address) && m.RootSeatTarget(rec.Name)
-	// A typed PR event is part of the conversation: the DM draws its card,
-	// whether the engine posted it or the session's own turn did. A PR post
-	// stored before the typed events stays out, as it always did.
-	if m.Kind == "pr" {
-		_, typed := m.PR()
-		return typed && (own || seat || m.SessionAddressed(id, address))
-	}
-	return own || seat || m.SessionAddressed(id, address)
+	return out
 }
 
 // withItemPosts adds the stored post of every turn item the selection left
 // out, such as a post from before the page window. A turn item names the post
 // that carried it, and that post is the message's one source: its text, its
-// attachments, its forward and its references. A post that the room no longer
-// holds stays out, because the room feed does not show it either.
-func (s *Service) withItemPosts(rec room.Record, posts []Post, id, address string, turns []Turn, book avatarBook) ([]Post, error) {
+// attachments, its forward and its references. Only a post of this DM joins
+// the DM's posts: a post of another conversation shows as a reference row.
+func (s *Service) withItemPosts(rec room.Record, posts []Post, conversation room.Conversation, id, address string, turns []Turn, book avatarBook) ([]Post, error) {
 	have := make(map[string]bool, len(posts))
 	for _, p := range posts {
 		have[p.ID] = true
@@ -394,7 +474,10 @@ func (s *Service) withItemPosts(rec room.Record, posts []Post, id, address strin
 			}
 			have[it.PostID] = true
 			m, err := s.rooms().Message(rec.ID, it.PostID)
-			if err != nil || !sessionPost(rec, m, id, address) {
+			if err != nil || s.rooms().HomeOf(rec.ID, it.PostID) != conversation.Home() {
+				continue
+			}
+			if m.SentBySession(id, address) && IsCompletion(m) {
 				continue
 			}
 			missing = append(missing, m)
@@ -413,49 +496,11 @@ func (s *Service) withItemPosts(rec room.Record, posts []Post, id, address strin
 }
 
 const (
-	maxSessionPosts         = 300
-	maxSessionMedia         = 200
-	maxTranscriptSelections = 64
+	maxSessionPosts = 300
+	maxSessionMedia = 200
+	// maxReferencePreview is the longest one-line preview of a reference row.
+	maxReferencePreview = 140
 )
-
-type sessionMessages struct {
-	roomID, roomName, address string
-	questionRevision          string
-	posts, media              room.MessageSelection
-}
-
-// transcriptMessages reuses the room index and only revisits appended records.
-// Page bounds apply to posts; media still covers the whole conversation.
-func (s *Service) transcriptMessages(rec room.Record, info subagent.Info, since, before time.Time) ([]room.Message, []room.Message, error) {
-	s.conversationMu.Lock()
-	defer s.conversationMu.Unlock()
-	if s.conversations == nil {
-		s.conversations = map[string]*sessionMessages{}
-	}
-	address := info.Address()
-	questionRevision, revisionErr := s.Notify.QuestionStore().Revision()
-	selected := s.conversations[info.ID]
-	if selected == nil || selected.roomID != rec.ID || selected.roomName != rec.Name || selected.address != address || selected.questionRevision != questionRevision || revisionErr != nil {
-		if selected == nil && len(s.conversations) >= maxTranscriptSelections {
-			for id := range s.conversations {
-				delete(s.conversations, id)
-				break
-			}
-		}
-		selected = &sessionMessages{roomID: rec.ID, roomName: rec.Name, address: address, questionRevision: questionRevision}
-		s.conversations[info.ID] = selected
-	}
-	posts, err := s.rooms().SelectedMessages(rec.ID, &selected.posts, func(m room.Message) bool {
-		return sessionPost(rec, m, info.ID, address)
-	}, since, before, maxSessionPosts)
-	if err != nil {
-		return nil, nil, err
-	}
-	media, err := s.rooms().LatestSelectedMessages(rec.ID, &selected.media, func(m room.Message) bool {
-		return len(m.Attachments) > 0 && sessionParticipant(rec, m, info.ID, address)
-	}, maxSessionMedia)
-	return posts, media, err
-}
 
 // shapeSessionPosts keeps the newest 300 selected messages and shapes them as feed posts.
 func (s *Service) shapeSessionPosts(rec room.Record, selected []room.Message, book avatarBook) ([]Post, error) {
@@ -472,25 +517,12 @@ func (s *Service) shapeSessionPosts(rec room.Record, selected []room.Message, bo
 	return feed.Posts, nil
 }
 
-// rootConversation selects the posts of the root seat. "@root" resolves to the room's own
-// address, so agent posts to root are addressed to it, and an external root posts as
-// the room (without Human). The internal root's own address is included for its earlier posts.
-// Posts the human owner sent to other agents are not part of it.
-func rootConversation(roomName string) func(room.Message) bool {
-	internal := roomName + ":" + room.RootAgent
-	return func(m room.Message) bool {
-		if m.Kind == "pr" {
-			return false
-		}
-		return m.Addressed(roomName) || m.Addressed(internal) || m.From == internal || m.From == roomName && !m.Human
-	}
-}
-
 // RootSession is the root conversation shaped like any session view. With
 // the internal root running it is that session's transcript. Otherwise
 // (an external orchestrator holds the seat, or the internal root has not
-// started) it has the seat holder and the conversation's posts but no turns:
-// owner posts to root, root's posts, and what agents say to root.
+// started) it has the seat holder and the seat's DM: the owner's posts to the
+// seat, plus a reference row for every post that reaches the seat from another
+// conversation.
 func (s *Service) RootSession(roomRef string) (Session, error) {
 	rec, err := s.rooms().Resolve(roomRef)
 	if err != nil {
@@ -508,29 +540,28 @@ func (s *Service) RootSession(roomRef string) (Session, error) {
 		}
 	}
 	addr := rec.Name + ":" + room.RootAgent
-	msgs, err := s.rooms().Messages(rec.ID)
+	conversation := room.SeatDMConversation(rec.ID)
+	msgs, err := s.rooms().ConversationMessages(rec.ID, conversation, time.Time{}, time.Time{}, maxSessionPosts)
 	if err != nil {
 		return Session{}, err
-	}
-	inRoot := rootConversation(rec.Name)
-	var selected []room.Message
-	for _, m := range msgs {
-		if inRoot(m) {
-			selected = append(selected, m)
-		}
 	}
 	book := s.avatars(rec.ID)
-	posts, err := s.shapeSessionPosts(rec, selected, book)
+	posts, err := s.shapeSessionPosts(rec, msgs, book)
 	if err != nil {
 		return Session{}, err
 	}
-	media, err := s.mediaWhere(rec, msgs, book, inRoot)
+	// The seat reads its own posts as the rows name them: the seat identity.
+	rows, err := s.dmReferences(rec, conversation, time.Time{}, time.Time{})
+	if err != nil {
+		return Session{}, err
+	}
+	media, err := s.sessionMedia(rec, conversation, book)
 	if err != nil {
 		return Session{}, err
 	}
 	seat := rec.Seat
 	member := Member{Role: subagent.RoleRoot, Name: room.RootAgent, Address: addr, Status: "seat", State: StateIdle, Hue: NameHue(rec.Name), Seat: &seat}
-	return Session{Member: member, Address: addr, Posts: posts, Media: media, Dir: rec.Repo, Turns: []Turn{}}, nil
+	return Session{Member: member, Address: addr, Posts: posts, References: rows, Media: media, Dir: rec.Repo, Turns: []Turn{}}, nil
 }
 
 // Event is one live change. Kind is "posts" (new posts in RoomID), "rooms"

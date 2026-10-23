@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // A bound recipient gets one row with the post's mode, an address without a
@@ -183,7 +184,9 @@ func TestPostIndexImportAndCursorCatchUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	bound := map[string]string{"alpha:lead": ownerSession}
-	dm, err := s.Post(rec.ID, PostInput{From: "alpha", Human: true, To: []string{"alpha:lead"}, SessionIDs: bound, Text: "hello"})
+	// The owner's DM composer says where it writes; the store never guesses a DM
+	// from the mentions.
+	dm, err := s.Post(rec.ID, PostInput{From: "alpha", Human: true, Conversation: DMConversation(ownerSession), To: []string{"alpha:lead"}, SessionIDs: bound, Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,5 +254,73 @@ func TestPostIndexImportAndCursorCatchUp(t *testing.T) {
 	}
 	if offset, ok := storedPostCursor(t, s, rec.ID); !ok || offset != size {
 		t.Fatalf("caught-up cursor = %d (%v), want %d", offset, ok, size)
+	}
+}
+
+// A store that imported the index before the seat named its own posts keeps
+// those rows as they were. The seat's DM reads the seat as their author, so a
+// one-time backfill rewrites them: an old external root answer and an old
+// internal root post would otherwise leave the seat's DM, and lose their files.
+func TestPostIndexBackfillsTheSeatAuthor(t *testing.T) {
+	s := recordsStore(t)
+	rec, err := s.Create(CreateInput{Name: "alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	external, err := s.Post(rec.ID, PostInput{From: rec.Name, To: []string{rec.Name}, Text: "Root answers"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := s.Post(rec.ID, PostInput{From: rec.Name + ":" + RootAgent, To: []string{rec.Name}, SessionIDs: map[string]string{rec.Name + ":" + RootAgent: ownerSession}, Text: "Root report"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner, err := s.Post(rec.ID, PostInput{From: rec.Name, Human: true, To: []string{rec.Name}, Text: "Owner asks"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The rows of a store that imported them before the seat named its own
+	// posts: no author for the external root, the root session for the other.
+	db, err := s.postIndexDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE post_homes SET author_session_id='' WHERE room_id=? AND post_id=?`, []any{rec.ID, external.ID}},
+		{`UPDATE post_homes SET author_session_id=? WHERE room_id=? AND post_id=?`, []any{ownerSession, rec.ID, report.ID}},
+		{`DELETE FROM meta WHERE key=?`, []any{postIndexAuthorsKey}},
+		{`INSERT INTO meta(key, value) VALUES(?, '1') ON CONFLICT(key) DO UPDATE SET value='1'`, []any{postIndexImportKey}},
+	} {
+		if _, err := db.Exec(q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, old := range []struct{ post, author string }{{external.ID, ""}, {report.ID, ownerSession}} {
+		if _, author, _ := postIndexRows(t, s, rec.ID, old.post); author != old.author {
+			t.Fatalf("previous index author = %q, want %q", author, old.author)
+		}
+	}
+	if err := Migrate(filepath.Dir(s.Root)); err != nil {
+		t.Fatal(err)
+	}
+	seat := SeatSessionID(rec.ID)
+	for _, id := range []string{external.ID, report.ID} {
+		if _, author, _ := postIndexRows(t, s, rec.ID, id); author != seat {
+			t.Fatalf("backfilled author = %q, want the seat %q", author, seat)
+		}
+	}
+	if _, author, _ := postIndexRows(t, s, rec.ID, owner.ID); author != "" {
+		t.Fatalf("an owner post names an author: %q", author)
+	}
+	// The seat's DM finds both, which is what the backfill is for.
+	found, err := s.AuthoredPosts(rec.ID, seat, SeatDMConversation(rec.ID), time.Time{}, time.Time{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 2 || found[0].Message.ID != external.ID || found[1].Message.ID != report.ID {
+		t.Fatalf("seat authored posts = %+v", found)
 	}
 }

@@ -9,6 +9,11 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
+// The seat's DM reads the stored rows: the posts the owner wrote in it, and one
+// reference row for every post that reached the seat or that the seat wrote in
+// another conversation. So an agent report, a quiet nudge, the owner's message
+// to another agent and the external root's own answers all show there, while an
+// engine event stays the engine's notice.
 func TestRootSessionOfAnExternalRootHasPostsAndNoTurns(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("beta")
@@ -23,6 +28,7 @@ func TestRootSessionOfAnExternalRootHasPostsAndNoTurns(t *testing.T) {
 		return notify.Sender{Kind: notify.SenderSession, Room: rec.Name, Session: info}
 	}
 	want := map[string]bool{}
+	texts := map[string]string{}
 	post := func(kept bool, in notify.PostInput) {
 		t.Helper()
 		in.NoWake = true
@@ -31,23 +37,28 @@ func TestRootSessionOfAnExternalRootHasPostsAndNoTurns(t *testing.T) {
 			t.Fatal(err)
 		}
 		want[res.Message.ID] = kept
+		texts[res.Message.ID] = res.Message.Text
 	}
 	post(true, notify.PostInput{Sender: owner, Mentions: []string{"@root"}, Text: "Owner asks root"})
 	post(true, notify.PostInput{Sender: external, Mentions: []string{"@root"}, Text: "Root answers"})
 	post(true, notify.PostInput{Sender: session(agent), Mentions: []string{"@root"}, Text: "Agent reports to root"})
 	post(true, notify.PostInput{Sender: external, Mentions: []string{"@agent"}, Text: "Root steers agent"})
-	post(false, notify.PostInput{Sender: owner, Mentions: []string{"@agent"}, Text: "Owner prompts the agent"})
+	post(true, notify.PostInput{Sender: owner, Mentions: []string{"@agent"}, Text: "Owner prompts the agent"})
 	unrelated, err := store.Post(rec.ID, room.PostInput{From: agent.Address(), To: []string{rec.Name + ":other"}, Text: "Unrelated to root"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want[unrelated.ID] = false
-	post(false, notify.PostInput{Event: room.PREvent{Type: room.PRReady, Label: "PR #1", Location: "github.com/o/r#1", ChangeID: "github.com/o/r#1", Number: 1}, Sender: external, Mentions: []string{"@root"}})
+	texts[unrelated.ID] = unrelated.Text
+	// The engine gives the root seat every typed event (see RoomRootContext), so
+	// a PR notice reaches the seat's DM as a reference row too.
+	post(true, notify.PostInput{Event: room.PREvent{Type: room.PRReady, Label: "PR #1", Location: "github.com/o/r#1", ChangeID: "github.com/o/r#1", Number: 1}, Sender: external, Mentions: []string{"@root"}})
 	keeper, err := store.Post(rec.ID, room.PostInput{From: "goal-keeper", To: []string{rec.Name}, Text: "Keeper nudge"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	want[keeper.ID] = true
+	texts[keeper.ID] = keeper.Text
 	sess, err := e.svc.RootSession(rec.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -62,9 +73,16 @@ func TestRootSessionOfAnExternalRootHasPostsAndNoTurns(t *testing.T) {
 	for _, p := range sess.Posts {
 		got[p.ID] = true
 	}
+	if len(got) != 0 {
+		t.Errorf("the seat's DM holds posts written in other conversations: %+v", sess.Posts)
+	}
+	references := map[string]bool{}
+	for _, row := range sess.References {
+		references[row.PostID] = true
+	}
 	for id, kept := range want {
-		if got[id] != kept {
-			t.Errorf("post %s: in session = %v, want %v", id, got[id], kept)
+		if references[id] != kept {
+			t.Errorf("post %s (%q): a reference row = %v, want %v", id, texts[id], references[id], kept)
 		}
 	}
 }

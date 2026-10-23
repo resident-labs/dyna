@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { speaker } from '../ui/posts.ts'
-import { postedTo, threadsListed, turnHead, turnTail, dmView, groupMessages, sameText, sessionAddress, threadKeys, threadPanel, plain, voiceRequest, type DmItem, type DmRow, type DmSession, type Receipt, type Thread, type ThreadPost } from './dm.ts'
+import { postedTo, referenceHome, threadsListed, turnHead, turnTail, dmView, groupMessages, sameText, sessionAddress, threadKeys, threadPanel, plain, voiceRequest, type DmItem, type DmRow, type DmSession, type Receipt, type Thread, type ThreadPost } from './dm.ts'
+import type { SessionReference } from '../api/session.ts'
 import type { Attachment } from '../api/room.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { need } from '../../../test/need.ts'
@@ -287,21 +288,28 @@ test('the turn divider text keeps spaces around its separators', () => {
   assert.doesNotMatch(turnTail({ ...turn, usage: null }), /tokens/)
 })
 
-test('the root DM is the owner conversation inline; agent reports and root steering are threads', () => {
-  const owner = 'room', root = 'room:root'
-  const posts = [
-    post('ask', owner, [root], 1, { human: true }),
-    post('answer', owner, [owner], 2), // an external root posts as the room, not human
-    post('report1', 'room:lead', [owner], 3),
-    post('report2', 'room:worker', [owner], 4),
-    post('steer', owner, ['room:lead'], 5), // root steers an agent
-    post('keeper', 'goal-keeper', [owner], 6),
-  ]
-  const view = dmView({ address: root, member: { name: 'root' }, posts, turns: [] }, { name: owner })
+test('the seat DM is its own posts inline; a post of another conversation is one reference row', () => {
+  const owner = 'room', root = 'room:root', seat = `dm:seat:${room.id}`
+  const posts = [post('ask', owner, [root], 1, { human: true, conversation: seat }), post('answer', root, [owner], 2, { conversation: seat })]
+  const design: SessionReference = { postId: 'report1', from: 'room:lead', speaker: 'lead', fromHue: 0, conversation: 'room', ts: Date.parse(ts(3)), preview: 'The parser is fixed', attachments: 1 }
+  const view = dmView({ address: root, member: { name: 'root' }, posts, references: [design], turns: [] }, { name: owner })
   const inline = view.rows.filter(isKind('message')).map((r) => r.post?.id)
-  assert.deepEqual(inline, ['ask', 'answer'], 'the main stream is the owner conversation')
-  assert.deepEqual(view.threads.map((t) => t.key).sort(), ['goal-keeper', 'room:lead', 'room:worker'])
-  assert.deepEqual(need(view.threads.find((t) => t.key === 'room:lead')).posts.map((p) => p.id), ['report1', 'steer'])
+  assert.deepEqual(inline, ['ask', 'answer'], 'the main stream is the seat DM')
+  const reference = view.rows.filter(isKind('reference'))
+  assert.equal(reference.length, 1)
+  assert.equal(need(reference[0]).reference?.postId, 'report1')
+  assert.equal(need(reference[0]).reference?.conversation, 'room')
+  // The agent's post joins that agent's thread, so the panel keeps it.
+  assert.deepEqual(need(view.threads.find((t) => t.key === 'room:lead')).posts.map((p) => p.id), ['report1'])
+})
+
+test('a reference row replaces the transcript copy of a post that lives elsewhere', () => {
+  const elsewhere: SessionReference = { postId: 'p1', from: 'room:lead', speaker: 'lead', fromHue: 0, conversation: 'room', ts: Date.parse(ts(10)), preview: 'Please review', attachments: 0 }
+  const view = dmView({
+    address, posts: [], references: [elsewhere], turns: [{ n: 1, started: ts(0), items: [{ kind: 'prompt', postId: 'p1', from: 'room:lead', text: 'Please review', ts: ts(10), delivered: true }] }],
+  }, room)
+  assert.deepEqual(view.rows.filter(isKind('reference')).map((r) => r.reference?.postId), ['p1'])
+  assert.deepEqual(view.rows.filter(isKind('message')), [], 'the transcript does not draw the post a second time')
 })
 
 test('an agent still sees the owner steering it inline, not as a thread', () => {
@@ -309,17 +317,20 @@ test('an agent still sees the owner steering it inline, not as a thread', () => 
 })
 
 
-test('the root DM labels its rows you and root, and drops the posted-to chip that is true of every row', () => {
+test('the posted-to chip is empty for a post written in a DM and names recipients elsewhere', () => {
   const owner = 'room', root = 'room:root'
-  const posts = [post('ask', owner, [root], 1, { human: true }), post('answer', owner, [owner], 2), post('steer', owner, ['room:lead'], 3)]
-  const view = dmView({ address: root, member: { name: 'root' }, posts, turns: [] }, { name: owner })
-  const rows = view.rows.filter(isKind('message'))
-  assert.deepEqual(rows.map((r) => speaker(r.post, owner)), ['you', 'root'], 'the owner is you; the room address that is not the human is root')
-  assert.equal(postedTo(need(need(rows[0]).post), root, owner), '', 'every root DM row is to root')
-  assert.equal(postedTo(need(need(rows[1]).post), root, owner), '')
-  // Where it adds information it stays: in an agent DM, and in the root DM for a post to someone else.
-  assert.equal(postedTo({ to: [owner] }, 'room:lead', owner), '#room · @root')
-  assert.equal(postedTo({ to: ['room:lead', owner] }, root, owner), '#room · @lead, @root')
+  assert.equal(postedTo({ to: [owner], conversation: `dm:seat:${room.id}` }, owner), '', 'a DM post is to its reader')
+  assert.equal(postedTo({ to: [owner] }, owner), 'Room chat · @root')
+  assert.equal(postedTo({ to: ['room:lead', owner] }, owner), 'Room chat · @lead, @root')
+  assert.equal(postedTo({ to: [root] }, owner), 'Room chat · @root')
+})
+
+test('a reference row names its home conversation without IDs', () => {
+  const members = [{ id: 'ses_a', name: 'lead', address: 'room:lead' }]
+  assert.equal(referenceHome('room', members), 'Room chat')
+  assert.equal(referenceHome('voice', members), 'Voice')
+  assert.equal(referenceHome('dm:ses_a', members), 'the DM with @lead')
+  assert.equal(referenceHome('dm:seat:room_x', members), 'a direct message')
 })
 
 test('compaction dividers stay visible beside the turn timeline', () => {

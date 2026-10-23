@@ -85,7 +85,7 @@ func TestTranscriptPage(t *testing.T) {
 		}
 		seedTurnRow(t, e.mgr.Store, lead.ID, n, data)
 		e.svc.Notify.Rooms.Now = func() time.Time { return base.Add(time.Duration(n)*time.Minute + 10*time.Second) }
-		if _, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: lead.Address(), To: []string{rec.Name}, Text: strconv.Itoa(n)}); err != nil {
+		if _, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: lead.Address(), Conversation: room.DMConversation(lead.ID), To: []string{rec.Name}, Text: strconv.Itoa(n)}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -157,7 +157,8 @@ func TestTranscriptPageWithoutTurnsKeepsConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	post, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: rec.Name + ":peer", To: []string{lead.Address()}, Text: "peer message", Attachments: []room.Attachment{att}})
+	post, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: rec.Name + ":peer", To: []string{lead.Address()},
+		SessionIDs: map[string]string{lead.Address(): lead.ID}, Text: "peer message", Attachments: []room.Attachment{att}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +170,9 @@ func TestTranscriptPageWithoutTurnsKeepsConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Turns) != 0 || len(got.Posts) != 1 || got.Posts[0].ID != post.ID || len(got.Media) != 1 {
+	// A peer's post to the session is a reference row, and its file is still
+	// the session's media, so a page without turns keeps both.
+	if len(got.Turns) != 0 || len(got.Posts) != 0 || len(got.References) != 1 || got.References[0].PostID != post.ID || len(got.Media) != 1 {
 		t.Fatalf("zero-turn page lost conversation: %+v", got)
 	}
 	if got.Dir != want.Dir || got.Member.Emoji != want.Member.Emoji || got.Usage != want.Usage {
