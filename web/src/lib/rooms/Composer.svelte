@@ -3,9 +3,9 @@
   import { tick, onDestroy } from 'svelte'
   import { short, roomLabel } from '../ui/format.ts'
   import { api } from '../../api.js'
-  import MessageInput from '../ui/MessageInput.svelte'
+  import ComposerBox from '../ui/ComposerBox.svelte'
   import { attachmentDraft } from '../files/attachmentDraft.ts'
-  import { mentionOptions, matchMentions } from './mentions.ts'
+  import { mentionOptions, matchMentions, fileMentionDirectory, fileMentionOptions, fileMentionText } from './mentions.ts'
   import { loadReferences, matchReferences, referenceKey, referenceLabel } from './references.ts'
   import ReferenceChips from './ReferenceChips.svelte'
 
@@ -25,6 +25,28 @@
   let references = $state([])
   let referenceOptions = $state([])
   let referenceLoading = $state(false)
+  let fileEntries = $state([])
+  let fileLoading = $state(false)
+  let fileError = $state('')
+  const fileListings = new Map()
+  const fileDirectory = $derived(token && !token.slash && !token.arg && !token.reference ? fileMentionDirectory(token.text) : null)
+  $effect(() => {
+    const directory = fileDirectory
+    const id = room?.id
+    if (directory === null || !id) return
+    let cancelled = false
+    fileLoading = true
+    fileError = ''
+    fileEntries = []
+    const key = id + ':' + directory
+    if (!fileListings.has(key)) fileListings.set(key, api.listEntries(id, '', directory).catch((error) => { fileListings.delete(key); throw error }))
+    fileListings.get(key).then((listing) => {
+      if (!cancelled) fileEntries = listing.entries ?? []
+    }).catch((error) => {
+      if (!cancelled) fileError = String(error?.message || error)
+    }).finally(() => { if (!cancelled) fileLoading = false })
+    return () => { cancelled = true }
+  })
   let referenceLoaded = false
   async function fetchReferences() {
     if (referenceLoading || referenceLoaded) return
@@ -56,6 +78,23 @@
     if (!references.some((item) => referenceKey(item) === referenceKey(reference))) references = [...references, reference]
     field?.focus()
   }
+  const selectedProfile = $derived(profiles.find((profile) => draft.startsWith('/' + profile.name + ' ') || draft === '/' + profile.name))
+  const composerMode = $derived(command ? 'Command' : selectedProfile ? 'Start session' : 'Message')
+  async function chooseProfile(name) {
+    const text = selectedProfile ? draft.replace(/^\/[\w-]+\s?/, '') : draft
+    draft = name ? '/' + name + ' ' + text : text
+    token = null
+    await tick()
+    field?.focus()
+    field?.setSelectionRange(draft.length, draft.length)
+  }
+  async function openCommands() {
+    if (!draft.startsWith('/')) draft = '/' + draft
+    await tick()
+    field?.focus()
+    field?.setSelectionRange(1, 1)
+    findToken()
+  }
   async function openReferences() {
     const pos = field?.selectionStart ?? draft.length
     const prefix = pos && !/\s/.test(draft[pos - 1]) ? ' #' : '#'
@@ -73,7 +112,7 @@
   let pick = $state(0)
   let completionList = $state()
   const completionID = $props.id()
-  const optionID = (option) => completionID + '-option-' + encodeURIComponent(option.value)
+  const optionID = (option) => completionID + '-option-' + (option.file ? 'file-' : option.reference ? 'reference-' : 'text-') + encodeURIComponent(option.value)
   let preview = $state(null) // roomsvc.Draft for the current text: who it wakes
   let token = $state(null) // {start, end, text} of the @token at the caret
   const attachments = attachmentDraft({ room: () => room?.id, error: (message) => (error = message), focus: () => field?.focus(), noun: 'post' })
@@ -102,8 +141,8 @@
       ...profiles.map((p) => ({ value: '/' + p.name, group: 'Start a session with', hint: [p.harness, p.model].filter(Boolean).join(' · ') + (p.default ? ' · default' : '') })),
       ...appCommands.map((c) => ({ value: '/' + c.name, group: 'Commands', arg: c.arg, hint: c.hint })),
     ] :
-    mentionOptions(choices))
-  let matches = $derived(token ? (token.reference ? options : token.arg ? options.filter((o) => `${o.value} ${o.hint}`.toLowerCase().includes(token.text.toLowerCase())).slice(0, 8) : matchMentions(options, token.text, token.slash ? 20 : 8)) : [])
+    [...mentionOptions(choices).map((option) => ({ ...option, group: 'Sessions' })), ...fileMentionOptions(fileEntries, token?.text || '@')])
+  let matches = $derived(token ? (token.reference ? options : token.arg ? options.filter((o) => `${o.value} ${o.hint}`.toLowerCase().includes(token.text.toLowerCase())).slice(0, 8) : token.slash ? matchMentions(options, token.text, 20) : [...matchMentions(options.filter((option) => !option.file), token.text, 6), ...options.filter((option) => option.file)]) : [])
   // Keep the selected option inside this menu without scrolling the feed.
   $effect(() => {
     const options = matches
@@ -111,12 +150,13 @@
       pick = Math.max(0, options.length - 1)
       return
     }
-    const selected = options[pick]
-    if (!selected) return
+    if (!options[pick]) return
     tick().then(() => {
+      const selected = matches[pick]
+      if (!selected) return
       const menu = completionList
       const row = menu?.querySelector('[id="' + optionID(selected) + '"]')
-      if (!menu || !row || matches[pick]?.value !== selected.value) return
+      if (!menu || !row) return
       const bounds = menu.getBoundingClientRect()
       const item = row.getBoundingClientRect()
       const top = item.top - bounds.top - menu.clientTop
@@ -160,6 +200,17 @@
   function findToken() {
     const pos = field.selectionStart
     const before = draft.slice(0, pos)
+    // Folder completion already knows the start, including any spaces in
+    // its path. Keep that boundary while the user filters this folder.
+    if (token?.file) {
+      const prefix = token.text.slice(0, token.text.lastIndexOf('/') + 1)
+      const text = before.slice(token.start)
+      if (text.startsWith(prefix) && !/\s@|[\r\n]/.test(text.slice(prefix.length))) {
+        token = { ...token, end: pos, text }
+        pick = 0
+        return
+      }
+    }
     const start = Math.max(before.lastIndexOf(' '), before.lastIndexOf('\n'), before.lastIndexOf('\t')) + 1
     const text = before.slice(start)
     const lead = draft.match(/^\/([\w-]+)\s+/)
@@ -174,9 +225,24 @@
     pick = 0
   }
 
-  async function complete(choice) {
+  async function complete(option) {
+    if (!token) return
+    const choice = option.value
+    const file = option.file
+    if (file) {
+      const text = fileMentionText(file)
+      const start = token.start
+      const caret = start + text.length
+      draft = draft.slice(0, start) + text + draft.slice(token.end)
+      token = text.startsWith('@') ? { start, end: caret, text, file: true } : null
+      pick = 0
+      await tick()
+      field?.focus()
+      field?.setSelectionRange(caret, caret)
+      return
+    }
     if (token?.reference) {
-      const reference = options.find((option) => option.value === choice)?.reference
+      const reference = option.reference
       if (!reference) return
       addReference(reference)
       const caret = token.start
@@ -264,13 +330,13 @@
   }
 
   function keydown(e) {
-    if (e.key === 'Escape' && token?.reference) { e.preventDefault(); token = null; return }
+    if (e.key === 'Escape' && token) { e.preventDefault(); token = null; return }
     if (matches.length) {
       if (e.key === 'ArrowDown') { e.preventDefault(); pick = (pick + 1) % matches.length; return }
       if (e.key === 'ArrowUp') { e.preventDefault(); pick = (pick - 1 + matches.length) % matches.length; return }
       // Enter on a typed command that needs nothing more runs it.
       if (e.key === 'Enter' && !e.shiftKey && command && !command.c.arg && matches[pick].value === '/' + command.c.name) { e.preventDefault(); token = null; send(); return }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); complete(matches[pick].value); return }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); complete(matches[pick]); return }
       if (e.key === 'Escape') { e.preventDefault(); token = null; return }
     }
     if (e.key === 'Escape' && reply) { e.preventDefault(); oncancelreply(); return }
@@ -290,11 +356,11 @@
     <div class="pop" role="status">{referenceLoading ? 'Loading PRs and issues…' : 'No matching PRs or issues.'}</div>
   {/if}
   {#if matches.length}
-    <div class="pop" role="listbox" bind:this={completionList}>
+    <div class="pop" id={completionID} role="listbox" aria-label="Composer suggestions" bind:this={completionList}>
       {#if !matches[0].group}<div class="pophead">{token?.reference ? 'Attach a PR or issue' : token?.arg ? token.arg.listTitle || token.arg.arg : 'Mention'}</div>{/if}
       {#each matches as m, i}
         {#if m.group && m.group !== matches[i - 1]?.group}<div class="pophead">{m.group}</div>{/if}
-        <button id={optionID(m)} class="opt" title={m.hint} class:on={i === pick} role="option" aria-selected={i === pick} onmousedown={(e) => { e.preventDefault(); complete(m.value) }}>
+        <button id={optionID(m)} class="opt" title={m.hint} class:on={i === pick} role="option" aria-selected={i === pick} onmousedown={(e) => e.preventDefault()} onclick={() => complete(m)}>
           <span class="mono">{m.label || m.value}{#if m.arg}<span class="argph"> ‹{m.arg}›</span>{/if}</span>
           <span class="kind">{m.hint}</span>
         </button>
@@ -309,8 +375,21 @@
       </button>
     </div>
   {/if}
-  <ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />
-  <MessageInput onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message #${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} />
+  {#if fileDirectory !== null && (fileLoading || fileError || !matches.length)}
+    <div class="file-status" role="status">{fileLoading ? 'Loading files…' : fileError ? 'Files unavailable: ' + fileError : 'No matching files or sessions.'}</div>
+  {/if}
+  <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message #${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} activeOption={matches[pick] ? optionID(matches[pick]) : undefined}>
+    {#snippet context()}<ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />{/snippet}
+    {#snippet tools()}
+      {#if profiles.length}
+        <select class="profile-chip" aria-label="Session profile" title={selectedProfile?.model || 'Choose a profile to start a session'} value={selectedProfile?.name || ''} disabled={busy} onfocus={onslash} onchange={(event) => chooseProfile(event.currentTarget.value)}>
+          <option value="">Profiles</option>
+          {#each profiles as profile}<option value={profile.name}>{profile.name}</option>{/each}
+        </select>
+      {/if}
+      <button class="command-chip" type="button" aria-label="Browse commands" title="Browse sessions and commands" disabled={busy} onclick={openCommands}>/</button>
+    {/snippet}
+  </ComposerBox>
   <div class="foot">
     {#if error}
       <span class="err">{error}</span>
@@ -327,16 +406,24 @@
     {:else if note}
       <span class="ok">{note}</span>
     {:else}
-      <span><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line · <span class="mono">@</span> to mention · <span class="mono">#</span> for PRs and issues · <span class="mono">/</span> for sessions and commands</span>
+      <span><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line · <span class="mono">@</span> for files and sessions · <span class="mono">#</span> for PRs and issues · <span class="mono">/</span> for sessions and commands</span>
     {/if}
   </div>
 </div>
 
 <style>
+  .file-status { padding: 5px var(--s2); font-size: var(--t-sm); color: var(--muted); }
+  .profile-chip { max-width: 160px; min-height: 30px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); color: var(--ink-2); font: inherit; font-size: var(--t-sm); }
+  .command-chip { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: var(--muted); font-family: var(--mono); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
+  .command-chip:hover { background: var(--hover); color: var(--ink); }
+  .command-chip:active { background: var(--select); }
   .composer { position: relative; padding: 0 var(--s4) 6px; flex: none; }
   /* A phone: 16 px text stops iOS zooming on focus; wider tap targets. */
   @media (max-width: 760px) {
     .composer { padding: 0 var(--s2) var(--s1); }
+    .profile-chip { min-height: 44px; max-width: 130px; }
+    .command-chip { display: none; }
+    .opt { min-height: 44px; }
     .foot { display: none; }
     .foot:has(.err, .warn, .go) { display: block; }
   }
@@ -395,6 +482,6 @@
     color: var(--ink-2);
   }
   .opt.on { background: var(--select); color: var(--ink); }
-  .opt .mono { font-size: var(--t-ui); flex: none; }
-  .kind { font-size: var(--t-sm); color: var(--faint); text-align: right; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+  .opt .mono { font-size: var(--t-ui); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kind { font-size: var(--t-sm); color: var(--faint); max-width: 48%; flex-shrink: 0; text-align: right; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 </style>

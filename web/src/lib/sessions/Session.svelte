@@ -16,7 +16,7 @@
   import { api } from '../../api.js'
   import { statusMeta } from '../prs/pr.ts'
   import { short, ago } from '../ui/format.ts'
-  import MessageInput from '../ui/MessageInput.svelte'
+  import ComposerBox from '../ui/ComposerBox.svelte'
   import { unreadableOutput, unreadableNotice } from '../settings/support.ts'
   import { attachmentDraft } from '../files/attachmentDraft.ts'
   import { showReasoning, showCompaction } from '../ui/prefs.ts'
@@ -283,7 +283,7 @@
         <p class="notice"><span>Reopen this session to send another message.</span> <button onclick={reopen} disabled={!!reopening || !!dismissing}>{reopening === m.id ? 'Reopening…' : 'Reopen'}</button></p>
       {/if}
       {#if reopenError}<p class="err" role="alert">{reopenError}</p>{/if}
-      <MessageInput {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={m.closed ? `${m.name} is closed` : `Message @${m.name}`} {busy} {canSend} bad={!!sendError} closed={!!m.closed} oninput={() => { sendError = '' }} onkeydown={keydown} onsend={send} />
+      <ComposerBox model={m.profile || m.model || ''} mode="Direct message" {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={m.closed ? `${m.name} is closed` : `Message @${m.name}`} {busy} {canSend} bad={!!sendError} closed={!!m.closed} oninput={() => { sendError = '' }} onkeydown={keydown} onsend={send} />
       <div class="foot">
         {#if sendError}
           <span class="err-t">{sendError}</span>

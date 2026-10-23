@@ -4,7 +4,7 @@
   import Avatar from '../ui/Avatar.svelte'
   import Confirm from '../ui/Confirm.svelte'
   import TabHeader from './TabHeader.svelte'
-  import AddBox from './AddBox.svelte'
+  import ComposerBox from '../ui/ComposerBox.svelte'
   import Row from '../ui/Row.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import { agentRule, globalRule, ruleFilter, ruleUsage, ruleTime, scopeLabels } from './rules.js'
@@ -84,9 +84,9 @@
 </script>
 <section class="rules" aria-label="Rules">
   <TabHeader title="Rules" blurb="Standing rules for agents. Owner rules win over agent rules." filters={[{ id: 'all', label: 'All' }, { id: 'owner', label: 'Owner' }, { id: 'agents', label: `Agents (${agents})` }]} bind:filter {usage} />
-  <AddBox label="Rule text" placeholder="Write a standing rule in plain English…" submit="Add rule" maxlength={500} bind:value={text} {busy} {error} onsubmit={add}>
+  <div class="add-rule"><ComposerBox label="Rule text" placeholder="Write a standing rule in plain English…" submitLabel="Add rule" maxlength={500} bind:draft={text} {busy} canSend={!!text.trim()} bad={!!error} onsend={add} mode="" expand>
     {#snippet tools()}<span class="scope" role="radiogroup" aria-label="Rule scope">{#each ['room', 'global'] as id}<button type="button" role="radio" aria-checked={scope === id} class:sel={scope === id} onclick={() => (scope = id)}>{scopeLabels[id]}</button>{/each}</span>{/snippet}
-  </AddBox>
+  </ComposerBox>{#if error}<p class="error" role="alert">{error}</p>{/if}</div>
   <div class="list">
     {#each sections as sec (sec.id)}
       {@const rows = ruleFilter(sec.rules, filter)}
@@ -116,6 +116,8 @@
 </section>
 {#if removing}<Confirm title="Remove this rule?" lines={[`${removing.id}: ${removing.text}`, globalRule(removing) ? 'The owner wrote it. Agents in every room stop getting it when their harness next starts.' : 'The owner wrote it. Agents stop getting it on their next turn.']} action="Remove" {busy} onconfirm={() => remove(removing)} oncancel={() => (removing = null)} />{/if}
 <style>
+  .add-rule { margin: 0 var(--s4) 18px; }
+  .error { color: var(--coral); font-size: var(--t-ui); margin: var(--s2) 0; }
   .rules { display: flex; flex-direction: column; min-height: 0; flex: 1; }
   .list { overflow-y: auto; padding: 0 var(--s4) var(--s5); flex: 1; }
   h2 { font-size: var(--t-ui); font-weight: 600; margin: 14px var(--s2) 2px; }
