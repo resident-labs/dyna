@@ -91,8 +91,9 @@
   .tool:hover { color: var(--ink); background: var(--raise-hover); }
   .tool.on { color: var(--iris); background: var(--iris-wash); }
   .files { display: flex; flex-direction: column; gap: 6px; }
-  .file { background: var(--side); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden; }
+  .file { background: var(--side); border: 1px solid var(--line-soft); border-radius: 10px; overflow: clip; }
   .file.open { border-color: var(--line); }
+  .file.open .fhit { position: sticky; top: 0; z-index: 2; background: var(--side); }
   .fhit { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 12px; text-align: left; }
   .fhit:hover { background: var(--hover); }
   .chev { color: var(--faint); flex: none; transition: transform 0.12s; }
