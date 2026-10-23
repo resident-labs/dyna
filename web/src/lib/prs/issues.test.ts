@@ -196,9 +196,12 @@ test('local issues remain readable and actionable when GitHub fails', async () =
     assert.match(r.target.textContent || '', /Local issue/)
     assert.match(element(r.target, '.identity').textContent || '', /D-12/)
     assert.doesNotMatch(r.target.textContent || '', /msg_local/)
-    need(elements(r.target, 'button').find(b => b.textContent === 'Mention in chat')).click()
+    need(elements(r.target, 'button').find((b) => b.getAttribute('aria-label') === 'Mention D-12 in chat')).click()
     assert.match(r.target.textContent || '', /No repository/)
-    need(elements(r.target, 'button').find(b => b.textContent === 'Dismiss')).click()
+    // Dismiss sits in the row menu, so the row stays one line.
+    need(elements(r.target, 'button').find((b) => b.getAttribute('aria-label') === 'More actions for D-12')).click()
+    await settle()
+    need(elements(r.target, '[role=menu] button').find((b) => b.textContent?.trim() === 'Dismiss')).click()
     assert.equal(dismissed[0]?.id, localIssue.id)
     element(r.target, '.row').click()
     await settle()
@@ -210,6 +213,30 @@ test('local issues remain readable and actionable when GitHub fails', async () =
   } finally { await r.done() }
 })
 
+
+test('an issue row keeps one compact action group and puts the rest in its menu', async () => {
+  const calls: string[] = []
+  const r = await render([], {
+    localIssues: [localIssue],
+    onmention: () => {},
+    onexportissue: () => calls.push('promote'),
+    oncloseissue: () => calls.push('close'),
+    ondismississue: () => calls.push('dismiss'),
+  })
+  try {
+    const row = element(r.target, '.item')
+    assert.equal(elements(row, 'button').filter((b) => b.textContent?.trim() === 'Mention in chat').length, 0, 'no wide button')
+    const mention = need(elements(row, 'button').find((b) => b.getAttribute('aria-label') === 'Mention D-12 in chat'))
+    assert.equal(mention.getAttribute('title'), 'Mention D-12 in chat', 'the icon has a tooltip')
+    assert.equal(row.textContent?.includes('Promote'), false, 'the row does not show Promote')
+    need(elements(row, 'button').find((b) => b.getAttribute('aria-label') === 'More actions for D-12')).click()
+    await settle()
+    assert.deepEqual(elements(r.target, '[role=menu] button').map((b) => b.textContent?.trim()), ['Promote', 'Close', 'Dismiss'])
+    need(elements(r.target, '[role=menu] button').find((b) => b.textContent?.trim() === 'Promote')).click()
+    assert.deepEqual(calls, ['promote'])
+    await settle()
+  } finally { await r.done() }
+})
 
 test('an unresolved export is history, not a closed GitHub issue', () => {
   const remote = issue(20, 'needs-owner')
