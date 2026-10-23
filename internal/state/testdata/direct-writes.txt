@@ -145,7 +145,7 @@ not-state internal/harness/steerhook.go newSteerHook 1 # per-run steer-hook hand
 not-state internal/harness/steerhook.go steerHook.cleanup 1 # per-run steer-hook handoff folder between the runner and the hook process
 not-state internal/harness/steerhook.go steerHook.offer 2 # per-run steer-hook handoff folder between the runner and the hook process
 not-state internal/harness/steerhook.go steerHook.withdraw 2 # per-run steer-hook handoff folder between the runner and the hook process
-not-state internal/hookinstall/install.go Service.Locked 5 # self-update install jobs and unit files (an inbox the engine does not own)
+not-state internal/hookinstall/install.go Service.Locked 2 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/install.go copyFile 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/install.go driver.run 1 # self-update install jobs and unit files (an inbox the engine does not own)
 not-state internal/hookinstall/install.go pruneBackups 1 # self-update install jobs and unit files (an inbox the engine does not own)

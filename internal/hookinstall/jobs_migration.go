@@ -30,11 +30,16 @@ func (s Store) db() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "hooks.install", 1, func(conn *sql.Conn, _ int) error {
-		if _, err := conn.ExecContext(context.Background(), jobsSchema); err != nil {
-			return err
+	err = database.Migrate(db, "hooks.install", 2, func(conn *sql.Conn, old int) error {
+		if old < 1 {
+			if _, err := conn.ExecContext(context.Background(), jobsSchema); err != nil {
+				return err
+			}
+			if err := s.importJobs(conn); err != nil {
+				return err
+			}
 		}
-		return s.importJobs(conn)
+		return s.importInstallState(conn)
 	})
 	return db, err
 }

@@ -43,9 +43,7 @@ func (d driver) environment() []string {
 	return env
 }
 
-// Locked is called only by the flock child in Worker. It preserves the legacy
-// timer's lock path, state file, warning marker, build order, and restart order.
-// TODO: legacy/shim remove later — shares old install timer state and locking; remove shared-path handling after old timers retire and state migrates
+// Locked installs under the lock captured by the job.
 func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) error {
 	j, err := s.read(ctx, id)
 	if err != nil {
@@ -60,7 +58,8 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 	if skip, err := s.skipSuperseded(j, out); err != nil || skip {
 		return err
 	}
-	if err = os.MkdirAll(filepath.Dir(c.State), 0700); err != nil {
+	state, err := s.Jobs.installState(c.State)
+	if err != nil {
 		return err
 	}
 	d := driver{s, c, out}
@@ -95,11 +94,10 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 	} else if _, err = git("merge", "-q", "--ff-only", "origin/main"); err != nil {
 		warning = Warning{Cause: "diverged", Text: fmt.Sprintf("The main checkout %s has local commits outside origin/main. See: git -C %s log origin/main..main", c.Main, c.Main)}
 	}
-	marker := filepath.Join(filepath.Dir(c.State), "alerted")
 	if warning.Cause != "" {
-		prior, _ := os.ReadFile(marker)
-		if strings.TrimSpace(string(prior)) != warning.Cause {
-			if err = fsutil.WriteFile(marker, []byte(warning.Cause+"\n"), 0600, true); err != nil {
+		if state.Alerted != warning.Cause {
+			state.Alerted = warning.Cause
+			if err = s.Jobs.saveInstallState(c.State, state); err != nil {
 				return err
 			}
 			fmt.Fprintln(out, "alert: "+warning.Text)
@@ -107,18 +105,21 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 				return err
 			}
 		}
-	} else if err = os.Remove(marker); err != nil && !os.IsNotExist(err) {
-		return err
+	} else if state.Alerted != "" {
+		state.Alerted = ""
+		if err = s.Jobs.saveInstallState(c.State, state); err != nil {
+			return err
+		}
 	}
-	installed, _ := os.ReadFile(c.State)
-	if strings.TrimSpace(string(installed)) == head {
+	if state.Installed == head {
 		fmt.Fprintln(out, "Already installed "+head)
 		return s.Jobs.Update(id, func(j *Job) error { j.Installed = head; return nil })
 	}
-	restartComputers, err := d.computersChanged(ctx, strings.TrimSpace(string(installed)), head)
+	restartComputers, err := d.computersChanged(ctx, state.Installed, head)
 	if err != nil {
 		return err
 	}
+
 	fmt.Fprintln(out, "Installing "+head)
 	if _, err = os.Stat(c.Build); os.IsNotExist(err) {
 		if _, err = git("worktree", "add", "-q", "--detach", c.Build, head); err != nil {
@@ -188,7 +189,8 @@ func (s Service) Locked(ctx context.Context, id, log string, out io.Writer) erro
 	if err = d.restartServer(ctx, filepath.Join(c.Bin, "dyna"), restartComputers); err != nil {
 		return err
 	}
-	if err = fsutil.WriteFile(c.State, []byte(head+"\n"), 0600, true); err != nil {
+	state.Installed = head
+	if err = s.Jobs.saveInstallState(c.State, state); err != nil {
 		return err
 	}
 	fmt.Fprintln(out, "Installed "+head)

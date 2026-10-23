@@ -65,9 +65,9 @@ func TestQueuedInstallsRestartOnlyNewestCommit(t *testing.T) {
 	if got := strings.Count(strings.Join(calls, "\n"), "restart dyna-engine.service"); got != 1 {
 		t.Fatalf("engine restart count=%d, want 1 for newest commit; calls:\n%v", got, calls)
 	}
-	installed, err := os.ReadFile(first.Config.State)
-	if err != nil || strings.TrimSpace(string(installed)) != newest.SHA {
-		t.Fatalf("installed=%q error=%v, want newest %s", installed, err, newest.SHA)
+	installed, err := s.Jobs.installState(first.Config.State)
+	if err != nil || installed.Installed != newest.SHA {
+		t.Fatalf("installed=%#v error=%v, want newest %s", installed, err, newest.SHA)
 	}
 	for _, old := range []Job{first, second} {
 		receipt, err := s.Jobs.Read(old.ID)

@@ -34,7 +34,7 @@ type Config struct {
 
 func DefaultConfig(main, exe string) Config {
 	home, _ := os.UserHomeDir()
-	return Config{Main: main, Build: main + "-autoinstall", Bin: filepath.Join(home, ".local", "bin"), State: filepath.Join(home, ".local", "share", "dyna-sync", "installed-commit"), Lock: "/tmp/dyna-agent-install.lock", Executable: exe, Path: os.Getenv("PATH"), Units: userservices.Dir()}
+	return Config{Main: main, Build: main + "-autoinstall", Bin: filepath.Join(home, ".local", "bin"), State: filepath.Join(home, ".local", "share", "dyna-sync", "installed-commit"), Lock: filepath.Join(store.DataDir(), "hooks", "install", "install.lock"), Executable: exe, Path: os.Getenv("PATH"), Units: userservices.Dir()}
 }
 
 type Warning struct {
