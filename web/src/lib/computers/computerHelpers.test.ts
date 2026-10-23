@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { stateWord, hintText, escTwice, isLive, hasComputer, stateText, paneEmpty, ageText, uptimeText, mib, appName, openedApps, streamLine, sizeText, shotRatio, pushAction, applyEvent, sortComputers, viewKey, popOut, FEED_KEEP, splitComputers, type ActionFeed, type Computer } from './computers.ts'
+import { stateWord, hintText, escTwice, isLive, hasComputer, stateText, paneEmpty, ageText, uptimeText, mib, appName, openedApps, streamLine, shotRatio, pushAction, applyEvent, sortComputers, viewKey, popOut, FEED_KEEP, splitComputers, type ActionFeed, type Computer } from './computers.ts'
 
 const now = Date.parse('2026-10-17T18:00:00Z')
 const ago = (s: number): string => new Date(now - s * 1000).toISOString()
@@ -63,8 +63,6 @@ test('stream line', () => {
   assert.equal(streamLine({}), 'off · 0 MiB')
   assert.equal(streamLine({ stream: { running: true, codec: 'H.264', encoder: 'VA-API' }, streamRssKiB: 24 * 1024 }), 'H.264 · VA-API · 24 MiB')
   assert.equal(streamLine({ stream: { running: true }, streamRssKiB: 0 }), 'on · 0 MiB')
-  assert.equal(sizeText({ width: 1280, height: 800 }), '1280×800')
-  assert.equal(sizeText({}), '')
   assert.equal(shotRatio({ width: 1280, height: 800 }), '1280 / 800')
   assert.equal(shotRatio({ width: 1000, height: 1000 }), '1000 / 1000')
   assert.equal(shotRatio({}), '16 / 10')

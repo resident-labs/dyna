@@ -1,6 +1,5 @@
 // Ported from T3 Code (apps/web/src/terminal-links.ts), MIT License,
 // Copyright (c) 2026 T3 Tools Inc. See LICENSE in this folder.
-import { isMacPlatform } from "./shims";
 
 export type TerminalLinkKind = "url" | "path";
 
@@ -150,14 +149,4 @@ export function collectWrappedTerminalLinkLine(
     text: segments.map((segment) => segment.text).join(""),
     segments,
   };
-}
-
-export function isTerminalLinkActivation(
-  event: Pick<MouseEvent, "metaKey" | "ctrlKey">,
-  platform = typeof navigator === "undefined" ? "" : navigator.platform,
-): boolean {
-  if (platform.length === 0) return false;
-  return isMacPlatform(platform)
-    ? event.metaKey && !event.ctrlKey
-    : event.ctrlKey && !event.metaKey;
 }

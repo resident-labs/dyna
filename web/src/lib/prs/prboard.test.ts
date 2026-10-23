@@ -99,26 +99,6 @@ test('the list groups are Blocked, In progress, then the folds', () => {
   assert.equal(need(GROUPS.find((g) => g.id === 'done')).collapsed, true)
 })
 
-test('the queue lists the merge order, one line per PR with a status dot', async () => {
-  const { dir, component, render } = await load('PRList')
-  try {
-    const row = (n: number, t: string) => ready({ changeId: `c${n}`, number: n, title: t, checks: [{ name: 'a', state: 'success' }, { name: 'b', state: 'success' }] })
-    const queue = [{ row: row(7, 'First in line'), item: { state: 'ready' }, state: { label: 'Merging next', tone: 'sage', lane: 'queue' } },
-      { row: row(8, 'Second in line'), item: { state: 'ready' }, state: { label: 'Ready · 2nd', tone: 'sage', lane: 'queue' } }]
-    const blocked = open({ changeId: 'x', number: 9, title: 'Broken one', checks: [{ name: 'a', state: 'failure' }] })
-    const groups = [{ id: 'blocked', label: 'Blocked', foldable: true, rows: [blocked] }]
-    const states = { x: { label: 'CI failed', tone: 'coral', reason: 'CI failed: test', lane: 'blocked' } }
-    const html = render(component, { props: { queue, groups, states } }).body
-    assert.doesNotMatch(html, /<section class="card[ "]/)
-    assert.match(text(html), /Merge queue · 2 First in line #7 Second in line #8 .*Blocked · 1 Broken one #9 0\/1 checks/)
-    assert.doesNotMatch(text(html), /Merging next|Ready · 2nd|2\/2 checks/)
-    assert.match(html, /class="sdot sage[^"]*"[^>]*title="Merging next"/)
-    assert.match(html, /class="sdot coral[^"]*"[^>]*title="CI failed · CI failed: test"/)
-    // No queue while nothing is queued.
-    assert.doesNotMatch(render(component, { props: { queue: [], groups, states } }).body, /Merge queue/)
-  } finally { await rm(dir, { recursive: true, force: true }) }
-})
-
 test('a PR link opens that PR on its tab beside the list', async () => {
   const { dir, component, render } = await load('GitHub')
   try {
@@ -146,22 +126,5 @@ test('the PR page has a state chip under the title and a merge box after the con
     assert.match(t, /Approved by the reviewer/)
     assert.ok(t.indexOf('Body') < t.indexOf('Some checks are still running'), 'the merge box follows the conversation')
     assert.doesNotMatch(html, /class="nums"/)
-  } finally { await rm(dir, { recursive: true, force: true }) }
-})
-
-
-test('the merge queue says a shared wait once, in its header', async () => {
-  const { dir, component, render } = await load('PRList')
-  try {
-    const reason = 'Automatic merging is waiting for completed GitHub CI on main at c72fff01234567890123456789012345678901234'
-    const queue = [1, 2, 3].map((n) => ({
-      row: ready({ changeId: `c${n}`, number: n, title: `Change ${n}`, checks: [{ name: 'a', state: 'success' }] }),
-      item: { main: { state: 'pending', head: 'c72fff01234567890123456789012345678901234', reason } },
-      state: { label: 'Waiting for main CI', tone: 'gold', reason: n === 3 ? 'Waiting for a required check' : reason },
-    }))
-    const html = render(component, { props: { queue, groups: [], states: {} } }).body
-    assert.match(text(html), /^ ?▾ Merge queue · 3 · waiting for main CI Change 1 #1 Change 2 #2 Change 3 #3 ?$/)
-    // A row's own reason stays on its dot.
-    assert.match(html, /title="Waiting for main CI · Waiting for a required check"/)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

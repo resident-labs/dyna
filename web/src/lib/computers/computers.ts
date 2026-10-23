@@ -116,8 +116,6 @@ export function streamLine(c: Computer | null | undefined): string {
 export const shotRatio = (c: Computer | null | undefined): string =>
   (c?.width && c?.height ? `${c.width} / ${c.height}` : '16 / 10')
 
-export const sizeText = (c: Computer | null | undefined): string => (c?.width && c?.height ? `${c.width}×${c.height}` : '')
-
 // Newest actions last; the feed keeps a few per session. Each item is
 // {line, at}, with at in epoch milliseconds.
 export const FEED_KEEP = 6
