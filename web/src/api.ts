@@ -255,7 +255,6 @@ export const api = {
   stopShell: (roomId: string, id: string) => app.StopShell(roomId, id),
   shellLog: (id: string, lines = 200) => app.ShellLog(id, lines),
   shellLogRange: (id: string, offset = 0, limit = 0) => app.ShellLogRange(id, offset, limit),
-  hookRepos: () => app.HookRepos(),
   listHooks: (repo: string) => app.ListHooks(repo),
   hookSummary: (repo: string) => app.HookSummary(repo),
   hookRuns: (repo: string, name: string) => app.HookRuns(repo, name),

@@ -227,7 +227,6 @@ export interface Engine {
   ShellLogRange(id: string, offset: number, limit: number): Promise<ShellLogChunk>
 
   // Hooks.
-  HookRepos(): Promise<string[] | null>
   ListHooks(repo: string): Promise<Hook[] | null>
   HookSummary(repo: string): Promise<HookSummary[] | null>
   HookRuns(repo: string, name: string): Promise<HookRun[] | null>

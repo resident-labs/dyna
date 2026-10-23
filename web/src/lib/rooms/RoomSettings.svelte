@@ -24,7 +24,8 @@
   // state); onsessions runs 'pause' or 'resume'. onaction runs a room action
   // by id: rename, room-pin, room-archive or delete. rules draws the Rules
   // section; busy is true while a rule edit is open, so Esc cancels the edit.
-  let { room, start = 'general', reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onclose } = $props()
+  // hookRun is the hook run a feed card asked to open, or null.
+  let { room, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onclose } = $props()
   const nav = [
     { id: 'general', label: 'General' },
     { id: 'review', label: 'Review & landing' },
@@ -288,7 +289,7 @@
   {@render rules()}
 {:else if section === 'hooks'}
   <Section title="Hooks" lede="Shell commands that Dyna runs on repository events, such as after a pull request merges.">
-    {#if room.repo}<HooksPane repo={room.repo} onmodal={(open) => (hooksBusy = open)} />{:else}<p class="quiet">This room has no repository.</p>{/if}
+    {#if room.repo}<p class="quiet">Shared by every room on this repository.</p><HooksPane repo={room.repo} focus={hookRun} onmodal={(open) => (hooksBusy = open)} />{:else}<p class="quiet">This room has no repository.</p>{/if}
   </Section>
 {:else if section === 'noise'}
   <Section title="Bot noise rules">
