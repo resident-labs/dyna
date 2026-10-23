@@ -9,32 +9,38 @@ import { build } from 'esbuild'
 import { domNames, installDom } from '../prs/prDetailHarness.ts'
 import { compileSvelte, svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 
-const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r }); return { promise, resolve } }
-const rows = (start, count) => Array.from({ length: count }, (_, i) => ({ id: `p${start + i}` }))
+function deferred<T = boolean>() {
+  let resolve: (value: T) => void = () => { throw new Error('the deferred value is not ready') }
+  const promise = new Promise<T>(r => { resolve = r })
+  return { promise, resolve }
+}
+const rows = (start: number, count: number) => Array.from({ length: count }, (_, i) => ({ id: `p${start + i}` }))
 
 async function harness(thread = false) {
   const dom = installDom()
-  globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
-  const observed = new Set()
+  Reflect.set(globalThis, 'matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
+  const observed = new Set<Element>()
   globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
   globalThis.DOMParser = dom.window.DOMParser
   globalThis.NodeFilter = dom.window.NodeFilter
-  globalThis.ResizeObserver = class {
-    observe(el) { observed.add(el); this.cb?.([{ target: el, borderBoxSize: [{ inlineSize: 800, blockSize: el.offsetHeight }] }]) }
-    unobserve(el) { observed.delete(el) }
+  interface SizeEntry { target: Element; borderBoxSize: { inlineSize: number; blockSize: number }[] }
+  Reflect.set(globalThis, 'ResizeObserver', class {
+    cb?: (entries: SizeEntry[]) => void
+    observe(el: Element) { observed.add(el); this.cb?.([{ target: el, borderBoxSize: [{ inlineSize: 800, blockSize: (el as HTMLElement).offsetHeight }] }]) }
+    unobserve(el: Element) { observed.delete(el) }
     disconnect() {}
-    constructor(cb) { this.cb = cb }
-  }
+    constructor(cb: (entries: SizeEntry[]) => void) { this.cb = cb }
+  })
   dom.window.ResizeObserver = globalThis.ResizeObserver
   const proto = dom.window.HTMLElement.prototype
   for (const name of ['offsetHeight', 'clientHeight']) Object.defineProperty(proto, name, { configurable: true, get() { return (this.id === 'app' || this.classList.contains('thread-log') || this.classList.contains('log')) ? 500 : this.classList.contains('vlist') ? parseFloat(this.style.height) || 0 : 40 } })
   for (const name of ['offsetWidth', 'clientWidth']) Object.defineProperty(proto, name, { configurable: true, get: () => 800 })
   Object.defineProperty(proto, 'offsetTop', { configurable: true, get() { return this.classList.contains('vlist') ? 36 : 0 } })
   Object.defineProperty(proto, 'scrollHeight', { configurable: true, get() { if (this.classList.contains('log')) return 2000; return (this.id === 'app' || this.classList.contains('thread-log')) ? 36 + (parseFloat(this.querySelector('.vlist')?.style.height) || 0) : this.offsetHeight } })
-  proto.scrollTo = function({ top }) { this.scrollTop = top; queueMicrotask(() => this.dispatchEvent(new Event('scroll'))) }
+  Reflect.set(proto, 'scrollTo', function(this: HTMLElement, options?: ScrollToOptions) { const top = options?.top ?? 0; this.scrollTop = top; queueMicrotask(() => this.dispatchEvent(new Event('scroll'))) })
   proto.getBoundingClientRect = function() {
-    const y = this.classList.contains('vrow') ? 36 + Number(this.style.transform.match(/translateY\(([-.\d]+)px\)/)?.[1] || 0) - document.getElementById('app').scrollTop : 0
-    return { x: 0, y, top: y, left: 0, width: 800, height: this.offsetHeight, bottom: y + this.offsetHeight, right: 800 }
+    const y = this.classList.contains('vrow') ? 36 + Number(this.style.transform.match(/translateY\(([-.\d]+)px\)/)?.[1] || 0) - (document.getElementById('app')?.scrollTop ?? 0) : 0
+    return { x: 0, y, top: y, left: 0, width: 800, height: this.offsetHeight, bottom: y + this.offsetHeight, right: 800 } as DOMRect
   }
   const dir = await mkdtemp(join(tmpdir(), 'dyna-history-test-'))
   const direct = `<script>
@@ -66,22 +72,25 @@ async function harness(thread = false) {
       b.onLoad({ filter: /.*/, namespace: 'wrapper' }, () => ({ contents: compileSvelte(wrapper, 'wrapper.svelte'), resolveDir: new URL('.', import.meta.url).pathname }))
     } }],
   })
-  const file = join(dir, 'history.mjs'); await writeFile(file, compiled.outputFiles[0].contents)
+  const built = compiled.outputFiles?.[0]
+  assert.ok(built, 'the history list built')
+  const file = join(dir, 'history.mjs'); await writeFile(file, built.contents)
   const api = await import(pathToFileURL(file).href)
   const target = document.getElementById('app')
-  let state = { scroller: target, items: rows(10, 50), earlier: true }
+  assert.ok(target)
+  let state: { scroller: HTMLElement; items: { id: string }[]; earlier: boolean; room?: string; newer?: boolean; onnewer?: () => void; onpresent?: () => void } = { scroller: target, items: rows(10, 50), earlier: true }
   const model = api.writable(state)
-  let component
-  const update = (patch) => { state = { ...state, ...patch }; model.set(state); api.flushSync() }
-  const scroll = (top) => { const el = thread ? target.querySelector('.thread-log') : target; el.scrollTop = top; el.dispatchEvent(new Event('scroll')); api.flushSync() }
+  let component: object | undefined
+  const update = (patch: Partial<typeof state>) => { state = { ...state, ...patch }; model.set(state); api.flushSync() }
+  const scroll = (top: number) => { const el = thread ? target.querySelector<HTMLElement>('.thread-log') : target; assert.ok(el); el.scrollTop = top; el.dispatchEvent(new Event('scroll')); api.flushSync() }
   return { ...api, target, update, scroll, observed,
-    until: (check) => new Promise(resolve => {
+    until: (check: () => boolean) => new Promise<void>(resolve => {
       if (check()) return resolve()
       const observer = new MutationObserver(() => { if (check()) { observer.disconnect(); resolve() } })
       observer.observe(target, { childList: true, subtree: true, characterData: true })
     }),
-    mount: (load) => { component = api.mount(api.default, { target, props: { model, load } }); api.flushSync(); return component },
-    close: async () => { if (component) await api.unmount(component); dom.window.close(); for (const n of [...domNames, 'DOMParser', 'NodeFilter', 'HTMLMediaElement', 'matchMedia']) delete globalThis[n]; await rm(dir, { recursive: true, force: true }) },
+    mount: (load: () => Promise<boolean>) => { component = api.mount(api.default, { target, props: { model, load } }); api.flushSync(); return component },
+    close: async () => { if (component) await api.unmount(component); dom.window.close(); for (const n of [...domNames, 'DOMParser', 'NodeFilter', 'HTMLMediaElement', 'matchMedia']) Reflect.deleteProperty(globalThis, n); await rm(dir, { recursive: true, force: true }) },
   }
 }
 
@@ -346,7 +355,7 @@ test('a page request that outlives its view asks for nothing more', { timeout: 9
   }
   // The request chain runs on promises, so turn the microtask queue until it
   // reaches the wanted state; no timer and no sleep.
-  const settle = async (check) => {
+  const settle = async (check: () => boolean) => {
     for (let i = 0; i < 20 && !check(); i++) {
       await new Promise(setImmediate)
       h.flushSync()

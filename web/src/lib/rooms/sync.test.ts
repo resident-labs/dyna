@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { remoteState, remoteLabel, remoteList, opRunning, opLine, syncDelay, canExport, popoverPlacement } from './sync.ts'
+import type { SyncOperation } from './sync.ts'
 
 test('remoteState names each sync state, error first, diverged when both sides moved', () => {
   assert.equal(remoteState({ ahead: 0, behind: 0 }), 'synced')
@@ -26,7 +27,7 @@ test('remoteList puts origin first and marks it canonical; a missing repo gives 
   assert.deepEqual(remoteList(undefined), [])
 })
 
-const op = (state, kind = 'export') => ({ kind, state, startedAt: new Date(Date.now() - 120000).toISOString() })
+const op = (state: string, kind = 'export'): SyncOperation => ({ kind, state, startedAt: new Date(Date.now() - 120000).toISOString() })
 
 test('opRunning is true while building, testing or publishing', () => {
   for (const s of ['building', 'testing', 'publishing']) assert.equal(opRunning(op(s)), true)
