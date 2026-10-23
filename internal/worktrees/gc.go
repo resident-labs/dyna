@@ -667,6 +667,14 @@ func processUse(ctx context.Context, path string) (string, error) {
 	return "", ctx.Err()
 }
 
+// ReasonDirty and ReasonNotMerged are the stable reasons cleanup gives a tree
+// it keeps. The worktree event reporter maps them to its reason class, so a
+// reword stays in step with the event.
+const (
+	ReasonDirty     = "uncommitted changes or untracked files"
+	ReasonNotMerged = "HEAD is not merged into origin/main"
+)
+
 func decide(t Tree, closed func(string) (bool, error)) Tree {
 	t.Action = "kept"
 	switch {
@@ -675,9 +683,9 @@ func decide(t Tree, closed func(string) (bool, error)) Tree {
 	case t.sessionID == "unverified":
 		t.Reason, t.OwnerOpen = "owning session is unverified", true
 	case t.Dirty:
-		t.Reason = "uncommitted changes or untracked files"
+		t.Reason = ReasonDirty
 	case !t.Merged:
-		t.Reason = "HEAD is not merged into origin/main"
+		t.Reason = ReasonNotMerged
 	default:
 		known := t.sessionID != "" || t.runID != ""
 		isClosed := false
