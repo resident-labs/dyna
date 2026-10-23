@@ -18,6 +18,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/devicegrant"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/scope"
@@ -211,12 +212,22 @@ func TestPairing(t *testing.T) {
 		t.Fatalf("no code = %d %s", w.Code, w.Body)
 	}
 	code, _ := e.store.NewCode("")
-	raw, _ := os.ReadFile(filepath.Join(e.store.Dir(), "pair.json"))
-	if strings.Contains(string(raw), devicestore.NormalizeCode(code)) || strings.Contains(string(raw), code) {
-		t.Fatal("pair.json must not hold the code")
+	db, err := database.Open(filepath.Dir(e.store.Dir()))
+	if err != nil {
+		t.Fatal(err)
 	}
-	if fi, _ := os.Stat(filepath.Join(e.store.Dir(), "pair.json")); fi.Mode().Perm() != 0o600 {
-		t.Fatalf("pair.json mode = %v", fi.Mode())
+	var storedHash string
+	if err := db.QueryRow("SELECT hash FROM web_pairing WHERE slot = 1").Scan(&storedHash); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(storedHash, devicestore.NormalizeCode(code)) || strings.Contains(storedHash, code) {
+		t.Fatal("pairing state must not hold the code")
+	}
+	if _, err := e.store.Key(); err != nil {
+		t.Fatal(err)
+	}
+	if fi, _ := os.Stat(filepath.Join(e.store.Dir(), "key")); fi.Mode().Perm() != 0o600 {
+		t.Fatalf("key mode = %v", fi.Mode())
 	}
 	// CSRF on the pair route itself.
 	for _, q := range []req{
@@ -619,14 +630,13 @@ func TestCleanName(t *testing.T) {
 func TestLastSeenIsThrottled(t *testing.T) {
 	e := newEnv(t)
 	tok := e.paired()
-	p := filepath.Join(e.store.Dir(), "devices.json")
-	before, _ := os.Stat(p)
+	before, _ := e.store.Devices()
 	for i := 0; i < 20; i++ {
 		e.store.Check(tok)
 	}
-	after, _ := os.Stat(p)
-	if !after.ModTime().Equal(before.ModTime()) {
-		t.Fatal("Check rewrote devices.json inside a minute")
+	after, _ := e.store.Devices()
+	if !after[0].LastSeen.Equal(before[0].LastSeen) {
+		t.Fatal("Check wrote LastSeen inside a minute")
 	}
 	e.store.SetClock(func() time.Time { return time.Now().Add(2 * time.Minute) })
 	e.store.Check(tok)
