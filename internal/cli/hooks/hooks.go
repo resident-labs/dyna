@@ -125,6 +125,7 @@ func NewCommand() *cobra.Command {
 func editCommand(repo *string) *cobra.Command {
 	var h hooks.Hook
 	var timeout time.Duration
+	var disabled bool
 	cmd := &cobra.Command{Use: "edit <name>", Short: "Change selected hook settings", Long: "Change only the supplied fields of an existing repository hook. Keep its creator and creation time, and record who edited it and when. Agents must tell the owner about the change.", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {
 		patch := hooks.Patch{}
 		changed := false
@@ -149,6 +150,10 @@ func editCommand(repo *string) *cobra.Command {
 			patch.EveryMinutes = &h.EveryMinutes
 			changed = true
 		}
+		if c.Flags().Changed("disabled") {
+			patch.Disabled = &disabled
+			changed = true
+		}
 		if !changed {
 			return fmt.Errorf("supply at least one field to edit")
 		}
@@ -160,5 +165,6 @@ func editCommand(repo *string) *cobra.Command {
 	cmd.Flags().DurationVar(&timeout, "timeout", 0, "command timeout")
 	cmd.Flags().StringVar(&h.OnFail, "on-fail", "", "alert, or block for before-land")
 	cmd.Flags().IntVar(&h.EveryMinutes, "every-minutes", 0, "schedule interval in minutes")
+	cmd.Flags().BoolVar(&disabled, "disabled", false, "keep the hook and stop automatic runs; --disabled=false turns it back on")
 	return cmd
 }
