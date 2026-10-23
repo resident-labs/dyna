@@ -22,11 +22,11 @@ Apply new instructions while preserving work that does not conflict.
 
 Claude stream-JSON receives messages through stdin at tool boundaries.
 Codex uses native `turn/steer` requests on its session app-server process.
-Muse uses `dyna hook steer` after tool calls.
+Muse uses native `turn/steer` requests on its retained `muse serve` process.
 Undelivered messages become continuations. A stalled hook falls back to interruption after 20 seconds following tool completion.
 Set `DYNA_STEER_HOOKS=off` to disable hooks.
 Codex keeps its configured hook support for the process lifetime. Its hook delivery bypasses trust checks for all configured hooks; use trusted repositories.
-It replaces PostToolUse hooks; Muse delivery replaces the whole hooks setting.
+It replaces PostToolUse hooks. Muse keeps its memory-tool denial hook; steering uses MSP, the Muse session protocol.
 Other harnesses interrupt and resume immediately when no tool runs, or at the next tool-call completion.
 Known tool calls are never killed for steering.
 Plain-text output has no tool boundaries; `steering.maxToolWait` defaults to 120 seconds before interruption.

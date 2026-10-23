@@ -98,9 +98,9 @@ type steerHook struct {
 
 // newSteerHook returns nil when the harness has no usable command hook. Muse
 // always gets one, for its memory denial; the other harnesses need steering.
-// Codex owns its hook for the process lifetime, rather than one turn.
+// Codex and Muse own hooks for the process lifetime, rather than one turn.
 func newSteerHookForTurn(p profile.Profile) (*steerHook, error) {
-	if p.Harness == profile.HarnessCodex {
+	if p.Harness == profile.HarnessCodex || p.Harness == profile.HarnessMuse {
 		return nil, nil
 	}
 	return newSteerHook(p)

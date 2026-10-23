@@ -205,6 +205,12 @@ type commandSpec struct {
 	codexKey    string
 	codexThread string
 	codexPolicy codexTurnPolicy
+	// muse runs MSP on the shared session host.
+	muse                         bool
+	museKey, museSession         string
+	musePermission, museApproval string
+	museReasoning                string
+	museResume                   bool
 	// streamInput keeps stdin open and writes the prompt, steering, and
 	// journal reminders as stream-json user messages (claude-stream-json).
 	streamInput bool

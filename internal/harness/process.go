@@ -40,6 +40,9 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 	if spec.streamInput {
 		return runClaudeTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
 	}
+	if spec.muse {
+		return runMuseTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
+	}
 	if spec.codex {
 		return runCodexTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
 	}
