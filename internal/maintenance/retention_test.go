@@ -191,6 +191,7 @@ func TestClosedSessionLogRetention(t *testing.T) {
 		remove bool
 	}
 	var files []savedFile
+	records := map[string]string{}
 	var wantFreed int64
 	for i, tc := range []struct {
 		name, status   string
@@ -217,7 +218,7 @@ func TestClosedSessionLogRetention(t *testing.T) {
 		}
 		meta, _ := json.Marshal(fields)
 		recordtest.WriteRaw(t, runstore.SessionsDir(), id, meta)
-		files = append(files, savedFile{recordtest.Path(t, runstore.SessionsDir(), id), string(meta), false})
+		records[id] = string(meta)
 		turn, _ := json.Marshal(map[string]any{"n": 1, "status": tc.status})
 		for path, data := range map[string]string{
 			"turns/1.json":        string(turn),
@@ -257,6 +258,12 @@ func TestClosedSessionLogRetention(t *testing.T) {
 	result, err := Run(ctx, Options{Now: now, Repos: []string{}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	for id, want := range records {
+		got, err := recordtest.ReadRaw(t, runstore.SessionsDir(), id)
+		if err != nil || string(got) != want {
+			t.Errorf("retained record changed: %s: %q %v", id, got, err)
+		}
 	}
 	for _, file := range files {
 		got, err := os.ReadFile(file.path)

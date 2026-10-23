@@ -1,7 +1,6 @@
 package sessionlife
 
 import (
-	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,8 +22,7 @@ func TestCheckIgnoresAbandonedCloseReservation(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(sessions, id), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		b, _ := json.Marshal(map[string]any{"id": id, "closing": closing})
-		if err := os.WriteFile(filepath.Join(sessions, id, "session.json"), b, 0o600); err != nil {
+		if err := Save(sessions, id, map[string]any{"id": id, "closing": closing}); err != nil {
 			t.Fatal(err)
 		}
 		return id
