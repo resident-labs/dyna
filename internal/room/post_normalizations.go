@@ -70,12 +70,14 @@ func (s *Store) postNormalizationsDB() (*sql.DB, error) {
 	for _, migration := range []struct {
 		name    string
 		convert func(map[string]json.RawMessage, map[string]json.RawMessage) (bool, error)
+		omit    func(map[string]json.RawMessage) bool
 	}{
-		{"room.posts.card_versions", historicalCardVersions},
-		{"room.posts.shell_output", historicalShellOutput},
+		{"room.posts.card_versions", historicalCardVersions, nil},
+		{"room.posts.shell_output", historicalShellOutput, nil},
+		{"room.posts.questions", historicalQuestionKinds, historicalDuplicateAnswer},
 	} {
 		if err := database.Migrate(db, migration.name, 1, func(conn *sql.Conn, _ int) error {
-			return s.convertHistoricalPosts(context.Background(), conn, migration.convert)
+			return s.convertHistoricalPosts(context.Background(), conn, migration.convert, migration.omit)
 		}); err != nil {
 			return nil, err
 		}
@@ -138,12 +140,32 @@ func historicalShellOutput(source, current map[string]json.RawMessage) (bool, er
 	return true, nil
 }
 
+// TODO: legacy/shim remove later — retained questions used their own kind, and answers repeated as events.
+// The omit hook marks a duplicate answer event in the omitted column.
+func historicalQuestionKinds(source, current map[string]json.RawMessage) (bool, error) {
+	var kind string
+	if json.Unmarshal(source["kind"], &kind) != nil {
+		return false, nil
+	}
+	switch kind {
+	case "question":
+		current["kind"] = json.RawMessage(`"message"`)
+		return true, nil
+	}
+	return false, nil
+}
+
+func historicalDuplicateAnswer(source map[string]json.RawMessage) bool {
+	var kind string
+	return json.Unmarshal(source["kind"], &kind) == nil && kind == "question-answered"
+}
+
 // TODO: legacy/shim remove later — remove after retained logs have explicit wake intent.
 // convertHistoricalPosts runs only inside a versioned startup migration.
 // The original supplies that shape's old input. The current projection supplies
 // output state, so each conversion preserves previous changes and unknown fields.
 // A conversion never changes source bytes, cursor offsets or omitted state.
-func (s *Store) convertHistoricalPosts(ctx context.Context, conn *sql.Conn, convert func(source, current map[string]json.RawMessage) (bool, error)) error {
+func (s *Store) convertHistoricalPosts(ctx context.Context, conn *sql.Conn, convert func(source, current map[string]json.RawMessage) (bool, error), omit ...func(map[string]json.RawMessage) bool) error {
 	entries, err := os.ReadDir(s.root())
 	if os.IsNotExist(err) {
 		return nil
@@ -164,7 +186,7 @@ func (s *Store) convertHistoricalPosts(ctx context.Context, conn *sql.Conn, conv
 		if err != nil {
 			return err
 		}
-		updated, err := convertPostLines(ctx, conn, entry.Name(), f, convert)
+		updated, err := convertPostLines(ctx, conn, entry.Name(), f, convert, omit...)
 		closeErr := f.Close()
 		if err != nil {
 			return fmt.Errorf("convert room %s posts: %w", entry.Name(), err)
@@ -181,7 +203,7 @@ ON CONFLICT(key) DO UPDATE SET value=CAST(value AS INTEGER)+1`, postNormalizatio
 	return err
 }
 
-func convertPostLines(ctx context.Context, conn *sql.Conn, roomID string, input io.Reader, convert func(source, current map[string]json.RawMessage) (bool, error)) (bool, error) {
+func convertPostLines(ctx context.Context, conn *sql.Conn, roomID string, input io.Reader, convert func(source, current map[string]json.RawMessage) (bool, error), omit ...func(map[string]json.RawMessage) bool) (bool, error) {
 	r := bufio.NewReaderSize(input, 64*1024)
 	var offset int64
 	changed := false
@@ -224,16 +246,17 @@ WHERE room_id=? AND source_start=?`, roomID, start).Scan(&old.end, &old.digest, 
 		if err != nil {
 			return false, err
 		}
-		if !updated {
+		hide := len(omit) > 0 && omit[0] != nil && omit[0](source)
+		if !updated && !hide {
 			continue
 		}
 		body, err := json.Marshal(current)
 		if err != nil {
 			return false, err
 		}
-		// Updating only body preserves an earlier migration's omitted state.
-		_, err = conn.ExecContext(ctx, `INSERT INTO room_post_normalizations(room_id,source_start,source_end,digest,body)
-VALUES (?,?,?,?,?) ON CONFLICT(room_id,source_start) DO UPDATE SET body=excluded.body`, roomID, start, offset, digest[:], body)
+		// Updating omitted only on request preserves an earlier migration's omitted state.
+		_, err = conn.ExecContext(ctx, `INSERT INTO room_post_normalizations(room_id,source_start,source_end,digest,body,omitted)
+VALUES (?,?,?,?,?,?) ON CONFLICT(room_id,source_start) DO UPDATE SET body=excluded.body, omitted=omitted OR excluded.omitted`, roomID, start, offset, digest[:], body, hide)
 		if err != nil {
 			return false, err
 		}

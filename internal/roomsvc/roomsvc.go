@@ -309,8 +309,7 @@ func NameHue(addr string) int {
 
 // ForOwner reports a post addressed to the room owner by someone else.
 func ForOwner(m room.Message, roomName string) bool {
-	// TODO(legacy): Duplicate answer events never require owner attention.
-	return m.Kind != "question-answered" && m.Addressed(roomName) && m.From != roomName
+	return m.Addressed(roomName) && m.From != roomName
 }
 
 // countsUnread reports whether a post to the owner can be unread. Shell exit
@@ -433,7 +432,7 @@ func (s *Service) SearchFeed(ref, query string, limit int) (FeedSearch, error) {
 	if err != nil {
 		return FeedSearch{}, err
 	}
-	msgs, more, err := s.rooms().SearchMessages(rec.ID, query, limit, func(m room.Message) bool { return !hiddenAnswer(m) })
+	msgs, more, err := s.rooms().SearchMessages(rec.ID, query, limit, nil)
 	if err != nil {
 		return FeedSearch{}, err
 	}
@@ -520,9 +519,6 @@ func (s *Service) postsOf(rec room.Record, msgs []room.Message, book avatarBook,
 	}
 	var out []Post
 	for _, m := range msgs {
-		if hiddenAnswer(m) {
-			continue
-		}
 		m = s.legacyQuestionPost(rec, m)
 		post := decorate(m, rec.Name, reads, book)
 		if full {
@@ -533,9 +529,6 @@ func (s *Service) postsOf(rec room.Record, msgs []room.Message, book avatarBook,
 	}
 	return out, nil
 }
-
-// TODO: legacy/shim remove later — skips duplicate answer events from old logs; remove after retained logs are migrated
-func hiddenAnswer(m room.Message) bool { return m.Kind == "question-answered" }
 
 func decorate(m room.Message, roomName string, reads map[string]bool, book avatarBook) Post {
 	p := Post{Message: m, Owner: m.From == roomName, Completion: IsCompletion(m), FromHue: NameHue(m.From), Speaker: SpeakerLabel(m, roomName)}
@@ -626,10 +619,6 @@ func (s *Service) FeedSince(roomID string, offset int64) ([]Post, int64, error) 
 	channels := newChannelIndex(s.membersOf(rec, all, rev, true))
 	var out []Post
 	for _, m := range msgs {
-		// TODO(legacy): See feedOf; do not replay duplicate answer events.
-		if m.Kind == "question-answered" {
-			continue
-		}
 		m = s.legacyQuestionPost(rec, m)
 		post := s.expand(decorate(m, rec.Name, reads, book), book)
 		post.Channels = channels.views(m)
