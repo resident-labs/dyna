@@ -454,8 +454,10 @@
   let showSettings = $state(false)
   let showRoomSettings = $state(false)
   let settingsKey = $state(0)
+  let roomSettingsKey = $state(0)
   let palettePath = $state<string | null>(null) // set: the palette opens on New room with this path
-  let settingsAt = $state<{ start: string; pairNow: boolean; profile?: string; accountId?: string; initialSelection?: ModelSelection; hookRun?: HookLogTarget | null }>({ start: 'profiles', pairNow: false }) // where Settings opens
+  let settingsAt = $state<{ start: string; pairNow: boolean; profile?: string; accountId?: string; initialSelection?: ModelSelection }>({ start: 'profiles', pairNow: false }) // where Settings opens
+  let roomSettingsAt = $state<{ start: string; hookRun?: HookLogTarget | null }>({ start: 'general' }) // where Room settings opens
   let showPalette = $state(false) // Ctrl+K, or the search button on a phone
   let update = $state<UpdateNotice | null>(null) // configsvc.UpdateNotice: a newer dyna release
   let updateHidden = $state(false)
@@ -2171,13 +2173,17 @@
     showSettings = true
   }
 
-  // A hook card asks for its run's log. Settings opens on Hooks with the repo
-  // and the run already in front, the same view `dyna git hooks log` reads.
+  // A hook card asks for its run's log. Hooks belong to the repository, and
+  // Room settings manages them for every room on it, so the modal opens on
+  // Hooks with the repo and the run already in front, as `dyna git hooks log` reads.
+  // The pane reports a run this room's repository does not hold.
   function openHookLog(target: HookLogTarget) {
     navOpen = false
-    settingsAt = { start: 'hooks', pairNow: false, hookRun: target }
-    settingsKey++
-    showSettings = true
+    if (!room) { say('Open a room to see its hook runs.'); return }
+    showSettings = false
+    roomSettingsAt = { start: 'hooks', hookRun: target }
+    roomSettingsKey++
+    showRoomSettings = true
   }
 
   function createProfile(selection: ModelSelection) {
@@ -2200,7 +2206,7 @@
       openFiles: (path) => { openView('files'); if (path) reveal = path.replace(/^\.?\//, '') },
       openPins: () => { showPins = true; if (narrow) showMembers = false },
       openSearch: (arg) => openSearch(arg || ''),
-      openRoomSettings: async (target) => { if (target.id === roomId || await selectRoom(target.id)) showRoomSettings = true },
+      openRoomSettings: async (target) => { if (target.id === roomId || await selectRoom(target.id)) { roomSettingsAt = { start: 'general' }; roomSettingsKey++; showRoomSettings = true } },
       openSessionPRs: () => openReview('prs'),
       cancelRun: (run) => (confirm = { kind: 'cancelrun', run }),
       toggleSidebar: () => (narrow ? (navOpen = !navOpen) : (showSide = !showSide)),
@@ -2626,12 +2632,14 @@
 {/if}
 {#if showSettings}
   {#key settingsKey}
-    <Settings {update} {dataDir} start={settingsAt.start} pairNow={settingsAt.pairNow} profile={settingsAt.profile ?? ''} accountId={settingsAt.accountId ?? ''} initialSelection={settingsAt.initialSelection} hookRun={settingsAt.hookRun ?? null} roomId={room?.id ?? ''} oncreateprofile={createProfile} onclose={() => { showSettings = false; loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
+    <Settings {update} {dataDir} start={settingsAt.start} pairNow={settingsAt.pairNow} profile={settingsAt.profile ?? ''} accountId={settingsAt.accountId ?? ''} initialSelection={settingsAt.initialSelection} roomId={room?.id ?? ''} oncreateprofile={createProfile} onclose={() => { showSettings = false; loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
   {/key}
 {/if}
 {#if showRoomSettings && room}
+  {#key roomSettingsKey}
   {#snippet roomRules()}<Rules roomId={room.id} view={rules} members={hierarchy} {ownerHue} bind:editing={rulesEditing} onchanged={loadRules} />{/snippet}
-  <RoomSettings {room} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => roomSessionController?.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={rulesEditing} onclose={() => (showRoomSettings = false)} />
+  <RoomSettings {room} start={roomSettingsAt.start} hookRun={roomSettingsAt.hookRun ?? null} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => roomSessionController?.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={rulesEditing} onclose={() => (showRoomSettings = false)} />
+  {/key}
 {/if}
 {#if roomMenu}
   <Menu x={roomMenu.x} y={roomMenu.y} title={roomLabel(roomMenu.r)} items={roomMenuItems(roomMenu.r)} onclose={() => { const a = roomMenu?.anchor; roomMenu = null; a?.focus?.() }} />
