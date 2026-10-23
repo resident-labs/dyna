@@ -32,7 +32,7 @@ func TestPolicyMigrationPreservesRealChecksAndHistory(t *testing.T) {
 	if err := db.QueryRow("SELECT body,revision FROM pr_state").Scan(&index, &rev); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(index, `"land"`) || strings.Contains(index, `"checks"`) || !strings.Contains(index, `"requiredChecks":["unit"]`) || !strings.Contains(index, "9007199254740993") || rev != 42 {
+	if strings.Contains(index, `"land"`) || strings.Contains(index, `"checks"`) || !strings.Contains(index, `"requiredChecks":["unit"]`) || !strings.Contains(index, "9007199254740993") || rev != 43 {
 		t.Fatal(index, rev)
 	}
 	if err := db.QueryRow("SELECT body FROM pr_records").Scan(&got); err != nil {
