@@ -258,6 +258,9 @@ export interface MergeTrialStatus {
 
 // MergeQueueItem is watch.MergeQueueItem, one row of the room's merge status.
 export interface MergeQueueItem {
+  goalId?: string
+  expedited?: boolean
+  missingRequiredReviewers?: string[]
   title?: string
   author?: string
   roomId: string
@@ -272,6 +275,17 @@ export interface MergeQueueItem {
   excerpt?: string
   trial?: MergeTrialStatus
   overlaps?: Overlap[]
+}
+
+// MergeControlStatus is watch.MergeControlStatus. Local checks are keyed by head SHA.
+export interface MergeControlStatus {
+  roomId: string
+  paused: boolean
+  reason?: string
+  expeditedGoalId?: string
+  queue: MergeQueueItem[] | null
+  trials: MergeTrialStatus[]
+  localCIChecks?: Record<string, CheckSummary[]>
 }
 
 // NoiseRule is state.NoiseRule, a learned bot comment template. created and
