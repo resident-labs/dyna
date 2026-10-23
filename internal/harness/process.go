@@ -393,7 +393,9 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 					// A granted hook process may have delivered its context. Retire it
 					// first; if that fails, replay nothing.
 					retireCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-					back, delivered, retireErr := hook.retire(retireCtx)
+					var delivered []runstore.SteeringMessage
+					var retireErr error
+					back, delivered, retireErr = hook.retire(retireCtx)
 					cancel()
 					if retireErr != nil {
 						return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, fmt.Errorf("retire steering hook peer: %w", retireErr))
