@@ -2,7 +2,6 @@ package watch
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -156,37 +155,32 @@ func TestRegisteredCICancelsOnlyQueuedExactHeadAndResumesAfterInfraError(t *test
 				path = arg
 			}
 		}
-		body := any(map[string]any{})
 		switch {
 		case strings.Contains(path, "actions/runs?"):
-			body = map[string]any{"workflow_runs": runs}
+			return writeFakeJSON(cmd.Stdout, workflowRunsResponse{WorkflowRuns: runs})
 		case strings.HasSuffix(path, "/cancel"):
 			cancelled = append(cancelled, 1)
+			return writeFakeJSON(cmd.Stdout, emptyResponse{})
 		case strings.HasSuffix(path, "/rerun"):
 			rerun = append(rerun, 1)
+			return writeFakeJSON(cmd.Stdout, emptyResponse{})
 		case strings.HasSuffix(path, "/1"):
 			fresh := runs[0]
 			if len(cancelled) > 0 {
 				fresh.Status, fresh.Conclusion = "completed", "cancelled"
 			}
-			body = fresh
+			return writeFakeJSON(cmd.Stdout, fresh)
 		case strings.HasSuffix(path, "/9"):
 			fresh := runs[len(runs)-1]
 			fresh.Path = ".github/workflows/security.yml"
-			body = fresh
+			return writeFakeJSON(cmd.Stdout, fresh)
 		case strings.HasSuffix(path, "/5"):
 			fresh := runs[4]
 			fresh.Status = "in_progress"
-			body = fresh
+			return writeFakeJSON(cmd.Stdout, fresh)
 		default:
 			return fmt.Errorf("unexpected API call %s", path)
 		}
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n%s", raw)
-		return err
 	}
 	if err := s.cancelQueuedHostedCI(context.Background(), job, "repo"); err != nil {
 		t.Fatal(err)
@@ -363,23 +357,17 @@ func TestRegisteredCISkipsCurrentConclusiveHeadsAndTrials(t *testing.T) {
 	job := registeredCIJob{record: Record{Host: "github.com", Repo: "owner/repo"}, head: head, branch: "dyna/merge-trial/1", trial: true}
 	run := Run{ID: 1, HeadSHA: head, HeadBranch: job.branch, Event: "push", Status: "completed", Conclusion: "success"}
 	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
-		var body any = map[string]any{}
 		for _, arg := range cmd.Args {
 			switch {
 			case strings.Contains(arg, "check-runs?"):
-				body = map[string]any{"check_runs": []Check{actionsCheck(Check{Name: "go-test", Status: "completed", Conclusion: "success"})}}
+				return writeFakeJSON(cmd.Stdout, checkRunsResponse{CheckRuns: []Check{actionsCheck(Check{Name: "go-test", Status: "completed", Conclusion: "success"})}})
 			case strings.Contains(arg, "actions/runs?"):
-				body = map[string]any{"workflow_runs": []Run{run}}
+				return writeFakeJSON(cmd.Stdout, workflowRunsResponse{WorkflowRuns: []Run{run}})
 			case strings.Contains(arg, "/statuses?"):
-				body = []Status{}
+				return writeFakeJSON(cmd.Stdout, []Status{})
 			}
 		}
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n%s", raw)
-		return err
+		return writeFakeJSON(cmd.Stdout, emptyResponse{})
 	}
 	if done, err := s.scheduledCIConclusive(context.Background(), job, "repo"); err != nil || !done {
 		t.Fatalf("passing exact trial: %t %v", done, err)

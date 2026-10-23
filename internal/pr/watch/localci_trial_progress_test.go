@@ -2,9 +2,7 @@ package watch
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -57,38 +55,32 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 				endpoint = arg
 			}
 		}
-		var body any = map[string]any{}
 		switch {
 		case strings.Contains(endpoint, "/check-runs?"):
-			body = map[string]any{"check_runs": []Check{}}
+			return writeFakeJSON(cmd.Stdout, checkRunsResponse{CheckRuns: []Check{}})
 		case strings.Contains(endpoint, "/statuses?"):
-			body = []Status{}
+			return writeFakeJSON(cmd.Stdout, []Status{})
 		case strings.Contains(endpoint, "/actions/runs?"):
-			body = map[string]any{"workflow_runs": []Run{run}}
+			return writeFakeJSON(cmd.Stdout, workflowRunsResponse{WorkflowRuns: []Run{run}})
 		case strings.HasSuffix(endpoint, "/rerun"):
 			reruns++
 			run.Attempt = 2
 			run.CheckSuiteID = 10
 			run.Status = "queued"
 			run.Conclusion = ""
+			return writeFakeJSON(cmd.Stdout, emptyResponse{})
 		case strings.HasSuffix(endpoint, "/actions/runs/81"):
-			body = run
+			return writeFakeJSON(cmd.Stdout, run)
 		case strings.Contains(endpoint, "/jobs?"):
 			jobReads++
 			jobs := make([]budgetJob, 17)
 			for i := range jobs {
 				jobs[i] = budgetJob{ID: int64(i + 1), Status: "completed", Conclusion: "cancelled"}
 			}
-			body = map[string]any{"jobs": jobs}
+			return writeFakeJSON(cmd.Stdout, jobsResponse{Jobs: jobs})
 		default:
 			return fmt.Errorf("unexpected endpoint %s", endpoint)
 		}
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n%s", raw)
-		return err
 	}
 	job := registeredCIJob{record: r, head: head, branch: branch, trial: true}
 	s.registeredRuns = &registeredCIRuns{runs: map[string]*registeredCIRun{registeredJobKey(job): {node: "worker", cancel: func() {}}}}
@@ -190,23 +182,16 @@ func TestTrialCINamesAFailedCheckWithoutARunLog(t *testing.T) {
 				endpoint = arg
 			}
 		}
-		var raw []byte
-		var err error
 		switch {
 		case strings.Contains(endpoint, "/check-runs?"):
-			raw, err = json.Marshal(trialChecks{Checks: []Check{check}})
+			return writeFakeJSON(cmd.Stdout, checkRunsResponse{CheckRuns: []Check{check}})
 		case strings.Contains(endpoint, "/statuses?"):
-			raw, err = json.Marshal([]Status{})
+			return writeFakeJSON(cmd.Stdout, []Status{})
 		case strings.Contains(endpoint, "/actions/runs?"):
-			raw, err = json.Marshal(trialRuns{Runs: []Run{run}})
+			return writeFakeJSON(cmd.Stdout, workflowRunsResponse{WorkflowRuns: []Run{run}})
 		default:
 			return fmt.Errorf("unexpected endpoint %s", endpoint)
 		}
-		if err != nil {
-			return err
-		}
-		_, err = fmt.Fprintf(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n%s", raw)
-		return err
 	}
 	got, err := s.mergeTrialCI(ctx, r, branch, head)
 	if err != nil {
@@ -221,21 +206,6 @@ func TestTrialCINamesAFailedCheckWithoutARunLog(t *testing.T) {
 	if !strings.Contains(got.Logs, "frontend-check") || !strings.Contains(got.Reason, "frontend-check") {
 		t.Fatalf("evidence logs=%q reason=%q", got.Logs, got.Reason)
 	}
-}
-
-// trialRuns is the GitHub workflow-runs response of the trial head.
-type trialRuns struct {
-	Runs []Run `json:"workflow_runs"`
-}
-
-// writeFakeJSON answers one fake GitHub read with a concrete response.
-func writeFakeJSON[T any](stdout io.Writer, value T) error {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(stdout, "HTTP/2.0 200 OK\r\n\r\n%s", raw)
-	return err
 }
 
 // savedLocalEnv builds a local-mode service for a saved-result case: no CI node
@@ -304,15 +274,13 @@ func savedLocalEnv(t *testing.T, hosted localci.HostedRuns, result *localci.Resu
 		case strings.HasSuffix(endpoint, "/actions/runs/81"):
 			return writeFakeJSON(cmd.Stdout, runs[0])
 		case strings.Contains(endpoint, "/jobs?"):
-			return writeFakeJSON(cmd.Stdout, struct {
-				Jobs []budgetJob `json:"jobs"`
-			}{})
+			return writeFakeJSON(cmd.Stdout, jobsResponse{})
 		case strings.Contains(endpoint, "/check-runs?"):
-			return writeFakeJSON(cmd.Stdout, trialChecks{Checks: checks})
+			return writeFakeJSON(cmd.Stdout, checkRunsResponse{CheckRuns: checks})
 		case strings.Contains(endpoint, "/statuses?"):
 			return writeFakeJSON(cmd.Stdout, []Status{})
 		case strings.Contains(endpoint, "/actions/runs?"):
-			return writeFakeJSON(cmd.Stdout, trialRuns{Runs: runs})
+			return writeFakeJSON(cmd.Stdout, workflowRunsResponse{WorkflowRuns: runs})
 		default:
 			return fmt.Errorf("unexpected endpoint %s", endpoint)
 		}
@@ -476,11 +444,11 @@ func TestCancelledHostedWorkflowDoesNotFailATrial(t *testing.T) {
 		}
 		switch {
 		case strings.Contains(endpoint, "/check-runs?"):
-			return writeFakeJSON(cmd.Stdout, trialChecks{Checks: checks})
+			return writeFakeJSON(cmd.Stdout, checkRunsResponse{CheckRuns: checks})
 		case strings.Contains(endpoint, "/statuses?"):
 			return writeFakeJSON(cmd.Stdout, []Status{})
 		case strings.Contains(endpoint, "/actions/runs?"):
-			return writeFakeJSON(cmd.Stdout, trialRuns{Runs: []Run{run}})
+			return writeFakeJSON(cmd.Stdout, workflowRunsResponse{WorkflowRuns: []Run{run}})
 		default:
 			return fmt.Errorf("unexpected endpoint %s", endpoint)
 		}
