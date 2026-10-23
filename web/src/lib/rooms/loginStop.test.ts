@@ -42,6 +42,9 @@ function mounted() {
     clearInterval: (id: number) => intervals.delete(id),
     boot: () => boot,
     start: () => { starts++; return () => { stops++ } },
+    // A hook card's window event: this test only checks that it is wired and
+    // released with the rest.
+    HOOK_LOG_EVENT: 'dyna:hook-log', hookLogFrom: () => null, openHookLog: () => {},
     onUnauthorized: (fn: () => void) => { unauthorized = fn },
     bulkControllers: new Map(), roomSessionController: controller('controls'),
     roomControlsVisit: 0, consolidationAlive: true,

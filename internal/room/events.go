@@ -34,6 +34,10 @@ const WakeNever WakeRule = "never"
 const (
 	FamilyWorktree EventFamily = "worktree"
 	TypeKept       EventType   = "kept"
+
+	FamilyHook  EventFamily = "hook"
+	TypeStarted EventType   = "started"
+	TypeResult  EventType   = "result"
 )
 
 // WorktreeReason is the class of a kept worktree. It keys the dedupe of the
@@ -53,6 +57,21 @@ const (
 var worktreeReasons = []WorktreeReason{
 	WorktreeNotMerged, WorktreeDirty, WorktreeManualHandoff, WorktreeKeepFailed, WorktreeOther,
 }
+
+// HookState is how a hook run stands. A running run has just started, and the
+// other states end it.
+type HookState string
+
+// Hook run states.
+const (
+	HookRunning HookState = "running"
+	HookPassed  HookState = "passed"
+	HookFailed  HookState = "failed"
+	HookError   HookState = "error"
+)
+
+// hookStates lists every state the web needs as a union type.
+var hookStates = []HookState{HookRunning, HookPassed, HookFailed, HookError}
 
 // EventPayload is the stored payload of a sealed system event. PostEvent
 // writes it and the per-event accessors on Message read it, so no code
@@ -118,6 +137,50 @@ func (w WorktreeEvent) eventDedupe() string {
 	return w.Owner + "\x00" + w.Path + "\x00" + string(w.Reason)
 }
 
+// HookEvent tells a room that a hook run started and how it ended. The two
+// types share the payload: a running state is the start, every other state is
+// the result. One card per run shows the start folding into the result.
+type HookEvent struct {
+	// RunID names the stored run. The card opens the run's log with it, so no
+	// filesystem path reaches the web.
+	RunID string `json:"runId"`
+	// Repo is the main checkout whose hook ran, which the log read needs too.
+	Repo string `json:"repo"`
+	Hook string `json:"hook"`
+	// Event is the repo event that started the run.
+	Event string `json:"event"`
+	// Label is the hook's own label, when it has one.
+	Label string `json:"label,omitempty"`
+	// Command is the first word of the command only: the full command can
+	// hold a secret, so it never leaves the hooks store.
+	Command string    `json:"command,omitempty"`
+	State   HookState `json:"state"`
+	// DurationMS is how long the run took. A start has none.
+	DurationMS int `json:"durationMs,omitempty"`
+	// Detail is the cause the state cannot carry alone, such as the exit code,
+	// or a checkout warning from an install unit.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (HookEvent) eventFamily() EventFamily { return FamilyHook }
+
+// eventType reads the state: a running run posts the start, any other state
+// posts the result.
+func (h HookEvent) eventType() EventType {
+	if h.State == HookRunning {
+		return TypeStarted
+	}
+	return TypeResult
+}
+
+func (h HookEvent) eventSubject() string { return h.RunID }
+
+// eventDedupe keys one post per run and type, so a start and its result are two
+// posts that the web folds into one card.
+func (h HookEvent) eventDedupe() string {
+	return h.RunID + "\x00" + string(h.eventType())
+}
+
 // EventSpec is one entry of the system event registry. The web app draws the
 // event with Renderer and reads its typed payload; Text is the one-line
 // summary that agents and `dyna room log` read.
@@ -142,18 +205,40 @@ type EventSpec struct {
 // A new event needs an entry here, an event struct in this package and a
 // renderer in web/src/lib/rooms/eventRenderers.ts. TestEventsFileMatchesRegistry
 // writes the web types.
-var eventSpecs = []EventSpec{{
-	Family:   FamilyWorktree,
-	Type:     TypeKept,
-	Renderer: "WorktreeCard",
-	Payload:  reflect.TypeOf(WorktreeEvent{}),
-	Quiet:    true,
-	Wake:     WakeNever,
-	Once:     true,
-	Text:     "Worktree kept at {path}: branch {branch}, ahead {ahead}, dirty: {dirty}. {detail}",
-	// The keep failure names no tree.
-	TextNoSubject: "Worktree cleanup could not keep the session's trees: {detail}",
-}}
+var eventSpecs = []EventSpec{
+	{
+		Family:   FamilyWorktree,
+		Type:     TypeKept,
+		Renderer: "WorktreeCard",
+		Payload:  reflect.TypeOf(WorktreeEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "Worktree kept at {path}: branch {branch}, ahead {ahead}, dirty: {dirty}. {detail}",
+		// The keep failure names no tree.
+		TextNoSubject: "Worktree cleanup could not keep the session's trees: {detail}",
+	},
+	{
+		Family:   FamilyHook,
+		Type:     TypeStarted,
+		Renderer: "HookCard",
+		Payload:  reflect.TypeOf(HookEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "Hook {hook} started for {event} (run {runId}).",
+	},
+	{
+		Family:   FamilyHook,
+		Type:     TypeResult,
+		Renderer: "HookCard",
+		Payload:  reflect.TypeOf(HookEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}). {detail}",
+	},
+}
 
 // eventEnum is a named string type whose values the web needs as a union.
 type eventEnum struct {
@@ -164,6 +249,9 @@ type eventEnum struct {
 var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(WorktreeReason("")), Values: []string{
 		string(WorktreeNotMerged), string(WorktreeDirty), string(WorktreeManualHandoff), string(WorktreeKeepFailed), string(WorktreeOther),
+	}},
+	{Type: reflect.TypeOf(HookState("")), Values: []string{
+		string(HookRunning), string(HookPassed), string(HookFailed), string(HookError),
 	}},
 }
 
@@ -176,7 +264,6 @@ var legacyFamilies = []string{
 	"checkin",
 	"goal",
 	"hierarchy",
-	"hook-failed",
 	"instructions",
 	"issue",
 	"merge-decision",
@@ -280,7 +367,9 @@ func eventID(ev Event) string {
 	return fmt.Sprintf("msg_%x", sum[:8])
 }
 
-var eventPlaceholder = regexp.MustCompile(`\{([a-z]+)\}`)
+// eventPlaceholder matches a {field} of a spec's text template. A json name
+// can hold capitals, such as {runId}.
+var eventPlaceholder = regexp.MustCompile(`\{([A-Za-z]+)\}`)
 
 // renderEventText fills a spec's text template from the event's json fields.
 func renderEventText(text string, ev Event) string {
@@ -321,6 +410,25 @@ func eventFieldText(value reflect.Value, name string) string {
 		}
 	}
 	return ""
+}
+
+// Hook returns the payload of a hook run event, of either type. It decodes the
+// stored bytes strictly, so an unknown field is a failed read rather than a
+// silent mismatch.
+func (m Message) Hook() (HookEvent, bool) {
+	if m.Kind != string(FamilyHook) || len(m.Payload.raw) == 0 {
+		return HookEvent{}, false
+	}
+	if m.Notice.Kind != string(TypeStarted) && m.Notice.Kind != string(TypeResult) {
+		return HookEvent{}, false
+	}
+	var ev HookEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil {
+		return HookEvent{}, false
+	}
+	return ev, true
 }
 
 // Worktree returns the payload of a kept-worktree event. It decodes the stored

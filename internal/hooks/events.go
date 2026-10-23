@@ -65,7 +65,7 @@ func (s Service) Emit(ctx context.Context, e Event) error {
 	if err := s.Enqueue(e); err != nil {
 		for _, h := range hooks {
 			if h.Event == e.Event && h.OnFail == "alert" && !h.Disabled {
-				s.notice(r, e, h, "spool write error")
+				s.spoolAlert(ctx, r, e, h, err)
 			}
 		}
 		return err

@@ -35,9 +35,56 @@ func TestEventsFileMatchesRegistry(t *testing.T) {
 
 func TestPostRejectsSealedFamily(t *testing.T) {
 	store, rec := newEventStore(t)
-	_, err := store.Post(rec.ID, PostInput{From: rec.Name, To: []string{rec.Name}, Kind: string(FamilyWorktree), Text: "kept"})
-	if err == nil || !strings.Contains(err.Error(), "PostEvent") {
-		t.Fatalf("Post accepted a sealed family: %v", err)
+	for _, family := range []EventFamily{FamilyWorktree, FamilyHook} {
+		_, err := store.Post(rec.ID, PostInput{From: rec.Name, To: []string{rec.Name}, Kind: string(family), Text: "sealed"})
+		if err == nil || !strings.Contains(err.Error(), "PostEvent") {
+			t.Fatalf("Post accepted the sealed family %q: %v", family, err)
+		}
+	}
+}
+
+// A run posts its start and then its result as two events of one run: the web
+// folds them into one card, so both carry the same run ID and their own type.
+func TestHookRunPostsStartAndResult(t *testing.T) {
+	store, rec := newEventStore(t)
+	run := HookEvent{RunID: "ab12", Repo: "/repo", Hook: "self-update", Event: "main-updated", Label: "Update Dyna", Command: "dyna", State: HookRunning}
+	start, err := store.PostEvent(rec.ID, run, rec.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start.Kind != string(FamilyHook) || start.Notice.Kind != string(TypeStarted) || start.Wake || start.Deliverable() {
+		t.Fatalf("stored start = %+v", start)
+	}
+	if !strings.Contains(start.Text, "Hook self-update started for main-updated") {
+		t.Fatalf("start text = %q", start.Text)
+	}
+	run.State, run.DurationMS = HookPassed, 4000
+	result, err := store.PostEvent(rec.ID, run, rec.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Notice.Kind != string(TypeResult) || start.ID == result.ID {
+		t.Fatalf("stored result = %+v (start %s)", result, start.ID)
+	}
+	for _, msg := range []Message{start, result} {
+		if got, ok := msg.Hook(); !ok || got.RunID != "ab12" || got.Hook != "self-update" || got.Repo != "/repo" {
+			t.Fatalf("stored payload of %s = %+v, %v", msg.ID, got, ok)
+		}
+	}
+	if got, _ := result.Hook(); got.State != HookPassed || got.DurationMS != 4000 {
+		t.Fatalf("result payload = %+v", got)
+	}
+	if !strings.Contains(result.Text, "passed for main-updated after 4000 ms") {
+		t.Fatalf("result text = %q", result.Text)
+	}
+	// A retried post of the same result keeps the first stored content.
+	run.DurationMS = 9000
+	if again, err := store.PostEvent(rec.ID, run, rec.Name); err != nil || again.ID != "" {
+		t.Fatalf("repeated result = %+v, %v", again, err)
+	}
+	msgs, err := store.Messages(rec.ID)
+	if err != nil || len(msgs) != 2 {
+		t.Fatalf("stored events = %+v, %v", msgs, err)
 	}
 }
 
@@ -111,15 +158,34 @@ func generateEvents() ([]byte, error) {
 		fmt.Fprintf(&b, "export type %s = %s\n\n", name, stringUnion(enum.Values))
 	}
 
-	var payloads []string
+	// A payload can serve several event types, such as the start and the result
+	// of one run, so each interface and its guard is written once.
+	type payloadEntry struct {
+		typ  reflect.Type
+		keys []string
+	}
+	var order []*payloadEntry
+	byName := map[string]*payloadEntry{}
 	for _, spec := range eventSpecs {
-		fields, err := payloadFields(spec.Payload)
+		name := spec.Payload.Name()
+		entry := byName[name]
+		if entry == nil {
+			entry = &payloadEntry{typ: spec.Payload}
+			byName[name] = entry
+			order = append(order, entry)
+		}
+		entry.keys = append(entry.keys, fmt.Sprintf("%s/%s", spec.Family, spec.Type))
+	}
+
+	var payloads []string
+	for _, entry := range order {
+		fields, err := payloadFields(entry.typ)
 		if err != nil {
 			return nil, err
 		}
-		name := spec.Payload.Name()
+		name := entry.typ.Name()
 		payloads = append(payloads, name)
-		fmt.Fprintf(&b, "// %s is the payload of the %s/%s event.\n", name, spec.Family, spec.Type)
+		fmt.Fprintf(&b, "// %s is the payload of the %s events.\n", name, strings.Join(entry.keys, " and "))
 		fmt.Fprintf(&b, "export interface %s {\n", name)
 		for _, field := range fields {
 			optional := ""
@@ -170,12 +236,12 @@ func generateEvents() ([]byte, error) {
 	}
 	b.WriteString("\n")
 
-	for _, spec := range eventSpecs {
-		fields, err := payloadFields(spec.Payload)
+	for _, entry := range order {
+		fields, err := payloadFields(entry.typ)
 		if err != nil {
 			return nil, err
 		}
-		name := spec.Payload.Name()
+		name := entry.typ.Name()
 		fmt.Fprintf(&b, "export function is%s(v: unknown): v is %s {\n", name, name)
 		conditions := []string{"isRecord(v)"}
 		for _, field := range fields {

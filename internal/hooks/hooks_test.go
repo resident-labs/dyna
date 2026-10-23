@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/shellquote"
 	statewrite "dyna-agent/internal/state"
 )
@@ -40,7 +41,7 @@ func setup(t *testing.T) (Service, string) {
 	if err := statewrite.MigrateMirrors(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	return Service{DataDir: dataDir, Notify: func(Event, string) error { return nil }}, repo
+	return Service{DataDir: dataDir, Post: func(Event, room.HookEvent) error { return nil }}, repo
 }
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -165,15 +166,18 @@ func TestRunnerEventEnvCwdAndStoredResults(t *testing.T) {
 		t.Fatalf("log: %s %v", b, err)
 	}
 }
-func TestFailureNoticeDeduplicatesCauses(t *testing.T) {
+func TestFailureAlertDeduplicatesCauses(t *testing.T) {
 	s, repo := setup(t)
 	ctx := context.Background()
 	cause := "first failure"
-	notices := 0
-	s.Notify = func(_ Event, text string) error {
-		notices++
-		if !strings.Contains(text, "dyna git hooks log fail --repo "+shellquote.Quote(repo)) {
-			t.Errorf("missing log command: %s", text)
+	alerts := 0
+	s.Post = func(_ Event, ev room.HookEvent) error {
+		if ev.State == room.HookRunning || ev.State == room.HookPassed {
+			return nil
+		}
+		alerts++
+		if ev.RunID == "" || ev.Repo != repo || ev.Hook != "fail" || ev.Event != AfterLand || ev.Command != "true" {
+			t.Errorf("alert payload: %+v", ev)
 		}
 		return nil
 	}
@@ -195,20 +199,20 @@ func TestFailureNoticeDeduplicatesCauses(t *testing.T) {
 			t.Fatal("failure lost")
 		}
 	}
-	if notices != 1 {
-		t.Fatalf("notices %d", notices)
+	if alerts != 1 {
+		t.Fatalf("alerts %d", alerts)
 	}
 	cause = "second failure"
 	_, _ = s.Run(ctx, Event{Repo: repo}, "fail")
-	if notices != 2 {
-		t.Fatalf("causes lost: %d", notices)
+	if alerts != 2 {
+		t.Fatalf("causes lost: %d", alerts)
 	}
 	cause = "success"
 	_, _ = s.Run(ctx, Event{Repo: repo}, "fail")
 	cause = "first failure"
 	_, _ = s.Run(ctx, Event{Repo: repo}, "fail")
-	if notices != 3 {
-		t.Fatalf("success did not reset notice: %d", notices)
+	if alerts != 3 {
+		t.Fatalf("success did not reset the alert: %d", alerts)
 	}
 }
 func TestBlockingHooksAndQueuedAlerts(t *testing.T) {
@@ -515,7 +519,13 @@ func TestSpoolWriteFailureNotifies(t *testing.T) {
 		t.Fatal(err)
 	}
 	notices := 0
-	s.Notify = func(Event, string) error { notices++; return nil }
+	s.Post = func(_ Event, ev room.HookEvent) error {
+		notices++
+		if ev.State != room.HookError || ev.RunID == "" || !strings.Contains(ev.Detail, "spool write error") {
+			t.Errorf("spool alert: %+v", ev)
+		}
+		return nil
+	}
 	if err := s.Emit(context.Background(), Event{Repo: repo, Event: AfterLand}); err == nil || notices != 1 {
 		t.Fatalf("spool failure: %v; notices %d", err, notices)
 	}

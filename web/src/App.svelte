@@ -26,6 +26,8 @@
   import { callLink, callTarget } from './lib/voice/callRequests.ts'
   import { GENERAL, VOICE, isChannel, inChannel, homeChannel, channelModel, parentTrail, prepareChannelText } from './lib/rooms/channels.ts'
   import { isShellResult } from './lib/rooms/feedRows.ts'
+  import { HOOK_LOG_EVENT, hookLogFrom } from './lib/settings/hookLog.ts'
+  import type { HookLogTarget } from './lib/settings/hookLog.ts'
   import { mergeSessionPage } from './lib/sessions/sessionPages.ts'
   import { trimFeed } from './lib/rooms/feedWindow.ts'
   import { look, revealed, reveal as revealPost } from './lib/rooms/look.svelte.ts'
@@ -453,7 +455,7 @@
   let showRoomSettings = $state(false)
   let settingsKey = $state(0)
   let palettePath = $state<string | null>(null) // set: the palette opens on New room with this path
-  let settingsAt = $state<{ start: string; pairNow: boolean; profile?: string; accountId?: string; initialSelection?: ModelSelection }>({ start: 'profiles', pairNow: false }) // where Settings opens
+  let settingsAt = $state<{ start: string; pairNow: boolean; profile?: string; accountId?: string; initialSelection?: ModelSelection; hookRun?: HookLogTarget | null }>({ start: 'profiles', pairNow: false }) // where Settings opens
   let showPalette = $state(false) // Ctrl+K, or the search button on a phone
   let update = $state<UpdateNotice | null>(null) // configsvc.UpdateNotice: a newer dyna release
   let updateHidden = $state(false)
@@ -2166,6 +2168,15 @@
     showSettings = true
   }
 
+  // A hook card asks for its run's log. Settings opens on Hooks with the repo
+  // and the run already in front, the same view `dyna git hooks log` reads.
+  function openHookLog(target: HookLogTarget) {
+    navOpen = false
+    settingsAt = { start: 'hooks', pairNow: false, hookRun: target }
+    settingsKey++
+    showSettings = true
+  }
+
   function createProfile(selection: ModelSelection) {
     settingsAt = { start: 'profiles', pairNow: false, initialSelection: selection }
     settingsKey++
@@ -2325,6 +2336,12 @@
     // One viewer at a time: a pop-out takes the stream, so the tab goes back to Messages.
     const popped = () => { if (sessionTab === 'computer') sessionTab = 'chat' }
     window.addEventListener('dyna:computer-popped', popped)
+    // A hook card opens its run's log in Settings.
+    const hookLog = (event: Event) => {
+      const target = hookLogFrom(event)
+      if (target) openHookLog(target)
+    }
+    window.addEventListener(HOOK_LOG_EVENT, hookLog)
     const visibility = () => {
       pageVisible = document.visibilityState === 'visible'
       if (pageVisible && started) refreshVisibleRoom()
@@ -2356,6 +2373,7 @@
       if (gone) return
       gone = true
       window.removeEventListener('dyna:computer-popped', popped)
+      window.removeEventListener(HOOK_LOG_EVENT, hookLog)
       document.removeEventListener('visibilitychange', visibility)
       clearInterval(computerPoll)
       clearInterval(syncPoll)
@@ -2606,7 +2624,7 @@
 {/if}
 {#if showSettings}
   {#key settingsKey}
-    <Settings {update} {dataDir} start={settingsAt.start} pairNow={settingsAt.pairNow} profile={settingsAt.profile ?? ''} accountId={settingsAt.accountId ?? ''} initialSelection={settingsAt.initialSelection} roomId={room?.id ?? ''} oncreateprofile={createProfile} onclose={() => { showSettings = false; loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
+    <Settings {update} {dataDir} start={settingsAt.start} pairNow={settingsAt.pairNow} profile={settingsAt.profile ?? ''} accountId={settingsAt.accountId ?? ''} initialSelection={settingsAt.initialSelection} hookRun={settingsAt.hookRun ?? null} roomId={room?.id ?? ''} oncreateprofile={createProfile} onclose={() => { showSettings = false; loadProfiles(); home?.refresh(); voiceCall.refresh() }} />
   {/key}
 {/if}
 {#if showRoomSettings && room}
