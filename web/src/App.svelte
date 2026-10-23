@@ -1054,7 +1054,8 @@
   function loadSession() { return sessionData.load() }
   $effect(() => {
     const tab = sessionTab
-    untrack(() => { if (drill && sessionVisible(tab)) loadSession() })
+    const visible = sessionVisible(tab)
+    untrack(() => { if (drill && visible) loadSession() })
   })
 
   function loadEarlierSession(near = () => true) {
