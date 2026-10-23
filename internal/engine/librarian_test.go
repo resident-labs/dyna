@@ -164,7 +164,7 @@ func TestLibrarianSmellUsesVerifiedAddress(t *testing.T) {
 	}
 	id := "ses_20261020-000001-aaaaaaaa"
 	recordtest.Write(t, s.rooms.Notify.Sessions.Store.Root, id, subagent.Meta{ID: id, Name: "librarian", RoomID: st.RoomID, Room: enabled.Room, Role: subagent.RoleLibrarian})
-	if _, err := (librarianstate.Store{DataDir: store.DataDir()}).Update(enabled.Repo.ID, false, func(st *librarianstate.State) error { st.Session = id; return nil }); err != nil {
+	if _, err := (librarianstate.Store{DataDir: store.DataDir()}).Update(enabled.Repo.ID, false, func(st *librarianstate.State) error { st.SmellSession = id; return nil }); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("DYNA_ADDRESS", "forged:address")

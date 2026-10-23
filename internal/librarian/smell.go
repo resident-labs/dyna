@@ -17,7 +17,7 @@ import (
 
 // SmellsPerDay caps the smells the librarian files for one repository in a
 // UTC day.
-const SmellsPerDay = 3
+const SmellsPerDay = 10
 
 // Issues is the room issue board that smells use.
 type Issues interface {
@@ -43,7 +43,7 @@ func (s Service) FileSmell(ctx context.Context, actor authority.Actor, repoDir, 
 	if err != nil {
 		return room.Issue{}, err
 	}
-	if err := (librarianstate.Store{DataDir: s.DataDir}).CheckEdit("library smell", r.ID, actor); err != nil {
+	if err := (librarianstate.Store{DataDir: s.DataDir}).CheckSmell("library smell", r.ID, actor); err != nil {
 		return room.Issue{}, err
 	}
 	sm.Title = strings.TrimSpace(sm.Title)

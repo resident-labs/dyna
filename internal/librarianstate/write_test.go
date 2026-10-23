@@ -3,11 +3,27 @@ package librarianstate
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
 )
+
+func TestEqualRunTimestampsRoundTrip(t *testing.T) {
+	s := Store{DataDir: t.TempDir()}
+	run := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	if _, err := s.Update("repo", true, func(st *State) error {
+		st.LastRun, st.SmellLastRun = run, run
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Get("repo")
+	if err != nil || !got.LastRun.Equal(run) || !got.SmellLastRun.Equal(run) {
+		t.Fatalf("round trip = %+v, %v; want both %s", got, err, run)
+	}
+}
 
 func TestUpdateUsesSharedWriter(t *testing.T) {
 	s := Store{DataDir: t.TempDir()}
