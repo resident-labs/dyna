@@ -157,9 +157,16 @@ func (a *Runtime) MigratePiAccounts(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	active, err := a.Accounts.Active("pi")
+	current, err := a.Accounts.Active("pi")
 	if err != nil {
 		return
+	}
+	// Active does not fill in the repo rules; the list does.
+	var active NativeAccount
+	for _, n := range accounts {
+		if n.ID == current.ID {
+			active = n
+		}
 	}
 	for _, n := range accounts {
 		if n.Harness != "pi" || n.Active || AccountInUse(n.ID) {

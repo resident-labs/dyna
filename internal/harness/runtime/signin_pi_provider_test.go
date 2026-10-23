@@ -125,3 +125,32 @@ func TestMigratePiAccountsKeepsRepoLimitedAccounts(t *testing.T) {
 		t.Fatal("the limited login reached the unrestricted runtime home")
 	}
 }
+
+// A restricted active account must not take the login of an unrestricted one.
+func TestMigratePiAccountsKeepsUnrestrictedAccountsFromARestrictedLogin(t *testing.T) {
+	r := providerKeysRuntime(t)
+	install(t, r.Bundles, "pi", "1.3.0")
+	ctx := context.Background()
+	if _, err := r.HarnessProviderKeys(ctx, "pi", "add", "zai", testProviderKey); err != nil {
+		t.Fatal(err)
+	}
+	active, _ := r.Accounts.Active("pi")
+	if err := r.Accounts.SetRepos(active.ID, []string{"github.com/acme/private"}); err != nil {
+		t.Fatal(err)
+	}
+	extra, err := r.Accounts.Create("pi", "open")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(extra.Home, "auth.json"), []byte(`{"kimi-coding":{"type":"oauth","access":"fake"}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.MigratePiAccounts(ctx)
+	if _, err = r.Accounts.Find(extra.ID); err != nil {
+		t.Fatalf("the unrestricted account was removed: %v", err)
+	}
+	home, _ := r.Accounts.HarnessHome("pi")
+	if _, have := piAuthTypes(t, home)["kimi-coding"]; have {
+		t.Fatal("an unrestricted login reached the restricted runtime home")
+	}
+}
