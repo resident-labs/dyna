@@ -17,7 +17,7 @@
   import GoalPost from './GoalPost.svelte'
   import CallRequestRow from '../voice/CallRequestRow.svelte'
   import CompletionBody from '../ui/CompletionBody.svelte'
-  import { feedRows, feedPRRepos, callsInWindow } from './feedRows.js'
+  import { feedRows, feedPRRepos, callsInWindow, rowPost } from './feedRows.ts'
   import PostFiles from '../ui/PostFiles.svelte'
   import { postParts } from '../ui/postParts.ts'
   import { questionID } from './questions.ts'
@@ -119,7 +119,7 @@
   }
 
   // A folded PR row holds several posts; any of them finds the row.
-  const rowOf = (id) => rows.findIndex((r) => r.post?.id === id || r.posts?.some((p) => p.id === id))
+  const rowOf = (id) => rows.findIndex((r) => r.kind === 'post' && (r.post.id === id || r.posts?.some((p) => p.id === id)))
 
   // The row a jump went to, and the post in it. The list can draw a row
   // again while it settles the scroll, so the row takes its flash and focus
@@ -208,7 +208,7 @@
       {@const parts = postParts(p)}
       <!-- Every stored post owns the same actions. Kind selects its body only. -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions, a11y_no_noninteractive_tabindex -->
-      <article class="post {p.completion ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind) || sealedEvent(p)} class:after-sys={p.completion && rows[index - 1]?.post?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, p, room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(p)} {...postHandlers(selection, p.id)}>
+      <article class="post {p.completion ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind) || sealedEvent(p)} class:after-sys={p.completion && rowPost(rows[index - 1])?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, p, room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(p)} {...postHandlers(selection, p.id)}>
         {@render replyCue()}
         {#if (row.posts ?? [p]).some((post) => pinned.has(post.id))}<span class="post-pin" title="Pinned" transition:scale={{ start: 0.6, duration: motion(FAST) }}><PinIcon size={13} filled /></span>{/if}
           {#if p.replyTo}

@@ -13,6 +13,7 @@ import (
 
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/shellquote"
 	statewrite "dyna-agent/internal/state"
 )
@@ -40,7 +41,7 @@ func setup(t *testing.T) (Service, string) {
 	if err := statewrite.MigrateMirrors(dataDir); err != nil {
 		t.Fatal(err)
 	}
-	return Service{DataDir: dataDir, Notify: func(Event, string) error { return nil }}, repo
+	return Service{DataDir: dataDir, Post: func(Event, room.HookEvent) error { return nil }}, repo
 }
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -165,15 +166,22 @@ func TestRunnerEventEnvCwdAndStoredResults(t *testing.T) {
 		t.Fatalf("log: %s %v", b, err)
 	}
 }
-func TestFailureNoticeDeduplicatesCauses(t *testing.T) {
+
+// Every failed run ends its own card, and the claim that may create the repo's
+// room stays one per cause until a passing run clears it. A retried failure
+// must not leave a card running, and a new cause is new news.
+func TestFailureEndsEveryRunAndClaimsEachCauseOnce(t *testing.T) {
 	s, repo := setup(t)
 	ctx := context.Background()
 	cause := "first failure"
-	notices := 0
-	s.Notify = func(_ Event, text string) error {
-		notices++
-		if !strings.Contains(text, "dyna git hooks log fail --repo "+shellquote.Quote(repo)) {
-			t.Errorf("missing log command: %s", text)
+	var results []room.HookEvent
+	s.Post = func(_ Event, ev room.HookEvent) error {
+		if ev.State == room.HookRunning || ev.State == room.HookPassed {
+			return nil
+		}
+		results = append(results, ev)
+		if ev.RunID == "" || ev.Repo != repo || ev.Hook != "fail" || ev.Event != AfterLand || ev.Command != "true" {
+			t.Errorf("result payload: %+v", ev)
 		}
 		return nil
 	}
@@ -195,21 +203,46 @@ func TestFailureNoticeDeduplicatesCauses(t *testing.T) {
 			t.Fatal("failure lost")
 		}
 	}
-	if notices != 1 {
-		t.Fatalf("notices %d", notices)
+	if len(results) != 2 || results[0].RunID == results[1].RunID {
+		t.Fatalf("a retried failure must end its own card: %+v", results)
+	}
+	if claims := claimKeys(t, s, repo); len(claims) != 1 {
+		t.Fatalf("claims after a retried failure = %v, want one", claims)
 	}
 	cause = "second failure"
 	_, _ = s.Run(ctx, Event{Repo: repo}, "fail")
-	if notices != 2 {
-		t.Fatalf("causes lost: %d", notices)
+	if len(results) != 3 || len(claimKeys(t, s, repo)) != 2 {
+		t.Fatalf("a new cause must post and claim: %d results, %v claims", len(results), claimKeys(t, s, repo))
 	}
 	cause = "success"
 	_, _ = s.Run(ctx, Event{Repo: repo}, "fail")
+	if claims := claimKeys(t, s, repo); len(claims) != 0 {
+		t.Fatalf("a passing run did not clear the claims: %v", claims)
+	}
 	cause = "first failure"
 	_, _ = s.Run(ctx, Event{Repo: repo}, "fail")
-	if notices != 3 {
-		t.Fatalf("success did not reset notice: %d", notices)
+	if len(results) != 4 || len(claimKeys(t, s, repo)) != 1 {
+		t.Fatalf("the next failure must be new news: %d results, %v claims", len(results), claimKeys(t, s, repo))
 	}
+}
+
+// claimKeys lists the alert claims the runtime state holds for a repo.
+func claimKeys(t *testing.T, s Service, repo string) []string {
+	t.Helper()
+	r, err := repoid.Resolve(t.Context(), repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []string
+	if err := s.runtime(r.ID, func(st *state) error {
+		for key := range st.Notices {
+			keys = append(keys, key)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return keys
 }
 func TestBlockingHooksAndQueuedAlerts(t *testing.T) {
 	s, repo := setup(t)
@@ -515,7 +548,13 @@ func TestSpoolWriteFailureNotifies(t *testing.T) {
 		t.Fatal(err)
 	}
 	notices := 0
-	s.Notify = func(Event, string) error { notices++; return nil }
+	s.Post = func(_ Event, ev room.HookEvent) error {
+		notices++
+		if ev.State != room.HookError || ev.RunID == "" || !strings.Contains(ev.Detail, "spool write error") {
+			t.Errorf("spool alert: %+v", ev)
+		}
+		return nil
+	}
 	if err := s.Emit(context.Background(), Event{Repo: repo, Event: AfterLand}); err == nil || notices != 1 {
 		t.Fatalf("spool failure: %v; notices %d", err, notices)
 	}

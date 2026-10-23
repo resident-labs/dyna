@@ -12,6 +12,7 @@ import (
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
+	"dyna-agent/internal/room"
 )
 
 func TestInstallReceiptSurvivesRestartAndFinishesHookLog(t *testing.T) {
@@ -68,7 +69,12 @@ func TestInstallReceiptSurvivesRestartAndFinishesHookLog(t *testing.T) {
 		t.Fatalf("pending: %#v %v", ev, err)
 	}
 	notices := 0
-	restarted := Service{DataDir: s.DataDir, Install: &installer, Notify: func(Event, string) error { notices++; return nil }}
+	restarted := Service{DataDir: s.DataDir, Install: &installer, Post: func(_ Event, ev room.HookEvent) error {
+		if ev.State == room.HookError {
+			notices++
+		}
+		return nil
+	}}
 	for n := 0; n < 2; n++ {
 		if err = restarted.ReconcileInstall(ctx); err != nil {
 			t.Fatal(err)
@@ -169,4 +175,56 @@ func withFakeNodeTools(t *testing.T) {
 		}
 	}
 	t.Setenv("PATH", os.Getenv("PATH")+string(os.PathListSeparator)+dir)
+}
+
+// A unit that passes without a warning still ends the run the hook started.
+// The hook hands its result to the unit, so nothing else would close the card.
+func TestPassedInstallUnitEndsTheRunCard(t *testing.T) {
+	withFakeNodeTools(t)
+	s, repo := setup(t)
+	ctx := context.Background()
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module dyna-agent\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "desktop"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "desktop", "build.sh"), []byte("fake"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	h, err := SelfUpdateRecipe(ctx, repo, "/fake/dyna", "install")
+	if err != nil {
+		t.Fatal(err)
+	}
+	add(t, s, repo, h)
+	r, err := repoid.Resolve(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := "44444444444444444444444444444444"
+	logPath := filepath.Join(t.TempDir(), "hook.log")
+	if err = os.WriteFile(logPath, []byte("Install unit: dyna-install-example\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	ev := Run{ID: id, Repo: r.ID, Name: "hook-install", Result: "pending", LogPath: logPath, StartedAt: time.Now().Add(-2 * time.Second)}
+	if _, err = s.saveRun(ctx, ev); err != nil {
+		t.Fatal(err)
+	}
+	installer := s.installer()
+	s.Install = &installer
+	j := hookinstall.Job{ID: id, Unit: "dyna-install-example", Repo: r.ID, Hook: "install", SHA: strings.Repeat("b", 40), HookLog: logPath, Status: "finished", Result: "pass", FinishedAt: time.Now(), Config: hookinstall.Config{Main: repo}}
+	if err = installer.Jobs.Update(id, func(out *hookinstall.Job) error { *out = j; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	var got []room.HookEvent
+	s.Post = func(_ Event, ev room.HookEvent) error { got = append(got, ev); return nil }
+	if err = s.ReconcileInstall(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].State != room.HookPassed || got[0].RunID != id || got[0].Hook != "install" {
+		t.Fatalf("events = %+v", got)
+	}
+	if got[0].DurationMS <= 0 {
+		t.Fatalf("the passing result has no duration: %+v", got[0])
+	}
 }
