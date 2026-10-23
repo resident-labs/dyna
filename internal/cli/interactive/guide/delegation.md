@@ -27,6 +27,9 @@ dyna subagent reopen <address|session-id>
 Run a command with `--help` for flags. Start requires a goal and non-empty brief.
 It prints the address and starts a detached turn. Inside a session, `--dir` defaults to the parent session's directory; elsewhere it defaults to cwd. Without `--dir`, a start outside a git work tree fails when the room has a repository.
 The goal states the outcome and completion test; the brief states how.
+When the work fixes a room issue (D-N) or a GitHub issue (#N), name that issue in
+the brief and tell the builder to pass `--fixes D-5,#207` when it opens or tracks
+the PR. The merge then closes the issue; nobody needs to close it by hand.
 Dyna restores both after compaction. Start prints `assigned item iN on goal gN` for an item, or `holds goal gN` for a standalone goal.
 `start --json` returns the goal ID as `goal` and adds `item` when assigned.
 Writers use `dyna git worktrees new <branch>`; never edit the main checkout.
