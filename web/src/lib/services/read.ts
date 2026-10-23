@@ -2,7 +2,7 @@
 // data and returns a typed value, or null where the call failed or the shape
 // is wrong. Nothing here changes data.
 import { arrayOf, isBoolean, isNumber, isRecord, isString } from '../api/guards.ts'
-import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, ServiceInfo as ServiceRow, TestHealth, UsageRow } from './model.ts'
+import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, ServiceInfo as ServiceRow, SyncInfo, TestHealth, UsageRow } from './model.ts'
 
 const rows = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isRecord) : [])
 const num = (v: unknown): number => (isNumber(v) ? v : 0)
@@ -119,6 +119,24 @@ export function readMergeState(v: unknown): { queue: QueueRow[]; mergePaused: bo
   if (!isRecord(v) || !isBoolean(v.paused)) return null
   const queue = readQueue(v.queue)
   return queue ? { queue, mergePaused: v.paused } : null
+}
+
+// SyncStatus: lanesync.Status by repository path. The page reads each remote's
+// last check and error, and the error of a failed export.
+export function readSync(v: unknown): SyncInfo | null {
+  if (!isRecord(v)) return null
+  const remotes: SyncInfo['remotes'] = []
+  let operationError = ''
+  for (const repo of Object.values(v)) {
+    if (!isRecord(repo)) continue
+    if (isRecord(repo.remotes)) {
+      for (const remote of Object.values(repo.remotes)) {
+        if (isRecord(remote)) remotes.push({ checkedAt: str(remote.checkedAt), lastError: str(remote.lastError) })
+      }
+    }
+    if (!operationError && isRecord(repo.operation)) operationError = str(repo.operation.error)
+  }
+  return { remotes, operationError }
 }
 
 // HookRuns: a list of settings.HookRun, returned newest first.

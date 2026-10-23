@@ -36,7 +36,7 @@ export interface Tab {
 }
 
 const rowIds: Record<Exclude<TabId, 'more'>, string> = { merges: 'merge', reviews: 'reviewer', updates: 'update', librarian: 'librarian', ci: 'ci' }
-const moreIds = ['radar', 'maintenance', 'usage', 'voice']
+const moreIds = ['radar', 'watcher', 'lanesync', 'maintenance', 'usage', 'voice']
 
 const isFailure = (result: string): boolean => result === 'error' || result === 'fail'
 const resultWord = (result: string): string => (result === 'pass' ? 'passed' : isFailure(result) ? 'failed' : result === 'pending' ? 'running' : result || 'unknown')

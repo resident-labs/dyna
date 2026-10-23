@@ -15,6 +15,7 @@ const api: ServiceApi = {
   roomCIBudget: ok({ ciWarnAfter: '2m', ciFailAfter: '3m', ciTestMax: '1s' }),
   accountUsageCached: ok({ accounts: [] }),
   ciHealth: ok({ limitMs: 1000, tests: [] }),
+  syncStatus: ok({}),
 }
 
 test('one failing call leaves its part empty and the others loaded', async () => {
@@ -46,7 +47,7 @@ test('a failed call keeps what was loaded before', async () => {
 })
 
 test('every part is pending until its call answers, and each part arrives on its own', async () => {
-  assert.equal(emptyData.pending.length, 12)
+  assert.equal(emptyData.pending.length, 13)
   let release: () => void = () => {}
   const slow = new Promise<unknown>((resolve) => { release = () => resolve({ queue: [], paused: false }) })
   const seen: string[][] = []

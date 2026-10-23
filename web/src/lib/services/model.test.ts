@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildRows, type Inputs, elapsed, nextAt, queueLine, readableDuration, testLine } from './model.ts'
+import { buildRows, type Inputs, elapsed, hhmm, nextAt, queueLine, readableDuration, testLine } from './model.ts'
 
 test('the queue separates trials, ready changes, failures and drafts', () => {
   assert.equal(queueLine(null), 'The queue could not be read')
@@ -36,7 +36,7 @@ test('durations keep zero retention off and test health hides at zero', () => {
 const inputs = (over: Partial<Inputs> = {}): Inputs => ({
   reviewer: null, queue: null, mergePaused: null, history: [], services: null, notices: null,
   hooks: null, runs: {}, settings: null, budget: null, accounts: null, usage: null, voice: null,
-  changes: [], testHealth: null, repo: '/repo', ...over,
+  changes: [], testHealth: null, laneSync: null, repo: '/repo', ...over,
 })
 const row = (over: Partial<Inputs>, id: string) => {
   const found = buildRows(inputs(over)).find((r) => r.id === id)
@@ -106,4 +106,28 @@ test('a busy reviewer names a provider limit once, and an idle one ignores it', 
   const idle = { enabled: true, profile: 'sonnet', lastError: '', current: null, queued: 0, lastVerdictAt: '' }
   assert.equal(row({ services, notices, reviewer: idle }, 'reviewer').state, 'idle')
   assert.equal(row({ services, notices, reviewer: { ...idle, queued: 2 } }, 'reviewer').state, 'rate-limited')
+})
+
+test('the watcher and lane sync show their last tick, schedule and error', () => {
+  const tick = '2026-10-21T22:52:00Z'
+  const changes = [
+    { state: 'open', kind: 'github', watching: true, checked: '2026-10-21T22:49:00Z' },
+    { state: 'open', kind: 'github', watching: true, checked: tick },
+    { state: 'merged', kind: 'github', watching: false, checked: '2026-10-21T22:20:00Z' },
+  ]
+  const watcher = row({ changes }, 'watcher')
+  assert.equal(watcher.state, 'on')
+  assert.equal(watcher.tone, 'on')
+  assert.equal(watcher.detail, `Watches 2 open changes each minute · last tick ${hhmm(tick)}`)
+  assert.equal(watcher.nextText, 'each minute')
+  // A failed poll is the row's error and keeps the last good tick.
+  const failed = row({ changes: [{ ...changes[1], error: 'GitHub rate limit\nlater' }] }, 'watcher')
+  assert.equal(failed.tone, 'error')
+  assert.equal(failed.detail, `GitHub rate limit · last tick ${hhmm(tick)}`)
+
+  const lane = row({ laneSync: { remotes: [{ checkedAt: '2026-10-21T22:50:00Z', lastError: '' }], operationError: '' } }, 'lanesync')
+  assert.equal(lane.detail, `Fetches 1 lane remote every 5 min · last fetch ${hhmm('2026-10-21T22:50:00Z')}`)
+  assert.equal(row({ laneSync: { remotes: [{ checkedAt: '', lastError: 'git fetch failed' }], operationError: '' } }, 'lanesync').tone, 'error')
+  assert.equal(row({ laneSync: { remotes: [], operationError: 'export failed' } }, 'lanesync').detail, 'export failed')
+  assert.equal(row({}, 'lanesync').detail, 'Lane status could not be read')
 })

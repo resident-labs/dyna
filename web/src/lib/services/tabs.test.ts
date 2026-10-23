@@ -37,7 +37,7 @@ test('each tab gets its own one-line state and results', () => {
     history: [merge({ outcome: 'failed', detail: 'go-test failed' })], services: null, notices: null,
     hooks: [{ hook, lastRun: run(1) }, { hook: { ...hook, name: 'self-update', label: 'Update Dyna', event: 'main-updated' }, lastRun: run(5) }],
     runs: { 'librarian-batch': [run(1), run(11)] }, settings: { 'library.enabled': '["/repo"]' }, budget: null, accounts: null, usage: null, voice: null,
-    changes: [{ number: 3, title: 'Fix it', verdict: 'approve', reviewAt: new Date(now - 60000).toISOString() }], testHealth: { count: 2, limitMs: 2000 }, repo: '/repo',
+    changes: [{ number: 3, title: 'Fix it', verdict: 'approve', reviewAt: new Date(now - 60000).toISOString() }], testHealth: { count: 2, limitMs: 2000 }, laneSync: null, repo: '/repo',
   }
   const tabs = buildTabs(inputs, buildRows(inputs), now)
   const by = (id: string) => tabs.find((t) => t.id === id)

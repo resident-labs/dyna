@@ -83,8 +83,8 @@ export interface AccountsInfo {
   stale: boolean
 }
 
-// ChangeRow is the part of a change the page reads: one line per verdict and
-// the overlap count for the radar.
+// ChangeRow is the part of a change the page reads: one line per verdict, the
+// overlap count for the radar, and the watcher's last poll and error.
 // TestHealth is how many tests went over the room's per-test limit in their
 // latest stored run, and the limit itself.
 export interface TestHealth {
@@ -100,6 +100,26 @@ export interface ChangeRow {
   verdict?: string
   overlaps?: { length: number } | number
   reviewerSession?: string
+  state?: string
+  kind?: string
+  // watching is true while the watcher polls this change; checked is when it
+  // last polled and error is why that poll could not finish.
+  watching?: boolean
+  checked?: string
+  error?: string
+}
+
+// SyncRemote is one local lane remote as lane sync last saw it.
+export interface SyncRemote {
+  checkedAt: string
+  lastError: string
+}
+
+// SyncInfo is what the page reads from the lane sync status: each local lane
+// remote's last check and error, and the error of an export that failed.
+export interface SyncInfo {
+  remotes: SyncRemote[]
+  operationError: string
 }
 
 export interface Inputs {
@@ -120,6 +140,7 @@ export interface Inputs {
   voice: string | null
   changes: ChangeRow[]
   testHealth: TestHealth | null
+  laneSync: SyncInfo | null
   repo: string
 }
 
@@ -162,6 +183,14 @@ export function shortDuration(text: string): string {
   if (!m || text === '') return text
   const [, h, min, sec] = m
   return [Number(h) ? `${Number(h)} h` : '', Number(min) ? `${Number(min)} min` : '', Number(sec) ? `${Number(sec)} s` : ''].filter(Boolean).join(' ') || '0 s'
+}
+
+// hhmm is a stored time as a local clock time, such as "14:05". A watcher
+// polls each minute, so the clock time says when its last tick ran.
+export function hhmm(iso: string): string {
+  const d = new Date(iso)
+  if (!Number.isFinite(d.getTime())) return ''
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
 // msDuration names a millisecond limit in words: 1000 as "1 s", 10000 as "10 s".
@@ -309,6 +338,48 @@ export function buildRows(i: Inputs): Row[] {
     tone: 'on',
     detail: overlaps ? `${overlaps} open ${overlaps === 1 ? 'change overlaps' : 'changes overlap'} another` : 'No overlaps between open changes',
     nextText: 'each push',
+  })
+
+  // PR watcher: the engine polls each open change's pull request, so its last
+  // tick and the error from the newest poll are the row's state. It has no
+  // switch, because the review and merge flow reads what it polls.
+  const watched = i.changes.filter((c) => c.watching === true && c.kind !== 'local')
+  const polled = watched.map((c) => c.checked ?? '').filter(Boolean).sort().at(-1) ?? ''
+  const pollError = watched.find((c) => c.error)?.error?.split('\n')[0] ?? ''
+  rows.push({
+    ...base,
+    id: 'watcher',
+    name: 'PR watcher',
+    state: 'on',
+    tone: pollError ? 'error' : 'on',
+    detail: pollError
+      ? [pollError, polled ? `last tick ${hhmm(polled)}` : ''].filter(Boolean).join(' · ')
+      : `Watches ${watched.length} open ${watched.length === 1 ? 'change' : 'changes'} each minute · ${polled ? `last tick ${hhmm(polled)}` : 'no tick yet'}`,
+    last: polled,
+    nextText: 'each minute',
+  })
+
+  // Lane sync fetches each local lane remote on its own timer, and a remote's
+  // last error is the row's error. It has no switch, because integration and
+  // the PR gates read what it fetches.
+  const lane = i.laneSync
+  const remoteError = lane?.remotes.find((r) => r.lastError)?.lastError.split('\n')[0] ?? lane?.operationError ?? ''
+  const fetched = lane?.remotes.map((r) => r.checkedAt).filter(Boolean).sort().at(-1) ?? ''
+  rows.push({
+    ...base,
+    id: 'lanesync',
+    name: 'Lane sync',
+    state: 'on',
+    tone: lane === null ? 'off' : remoteError ? 'error' : 'on',
+    detail: lane === null
+      ? 'Lane status could not be read'
+      : remoteError
+        ? [remoteError, fetched ? `last fetch ${hhmm(fetched)}` : ''].filter(Boolean).join(' · ')
+        : lane.remotes.length
+          ? `Fetches ${lane.remotes.length} lane ${lane.remotes.length === 1 ? 'remote' : 'remotes'} every 5 min · ${fetched ? `last fetch ${hhmm(fetched)}` : 'no fetch yet'}`
+          : 'No lane remotes set up',
+    last: fetched,
+    nextText: 'every 5 min',
   })
 
   // Librarian activation stays local; the browser shows status and profile.
