@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -84,8 +85,7 @@ VALUES(?, ?, ?, 'wake', '', ?, ?, ?)`,
 
 // touchDelivery writes one delivery row of session id, which moves the members
 // revision the way a claim does.
-func touchDelivery(t *testing.T, s *Store, id string) {
-	t.Helper()
+func touchDelivery(t *testing.T, s *Store, id string) {	t.Helper()
 	dataDir := filepath.Dir(s.root())
 	if err := room.Migrate(dataDir); err != nil {
 		t.Fatal(err)
@@ -100,5 +100,52 @@ VALUES('room', 'msg_a', ?, 'wake', '', 'claimed', 1,
   (SELECT COALESCE(MAX(updated_at), 0) + 1 FROM post_deliveries))
 RETURNING updated_at`, id).Scan(&at); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A post a finished turn received is never claimed again. State alone cannot
+// tell: the one-time post index import marks every retained row delivered
+// (conversation PR 4b part 1), so the row cannot say whether its recipient read
+// it. The turn receipts are the guard, and a later turn orders its input by
+// them: drainRoomMessages skips a post a turn already delivered, and Wake asks
+// deliveredPostTurn before it starts a turn.
+func TestDeliveredPostIsNotClaimedByTheNextTurn(t *testing.T) {
+	e := newTestEnv(t)
+	info, _ := e.start("SLEEP:1 RESPOND: ready")
+	e.wait(info.ID, 1)
+	before, err := e.m.Store.ReadMeta(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A quiet post waits for the next turn instead of waking one, so the test
+	// decides which turn reads it.
+	post, err := e.m.rooms().Post(info.RoomID, room.PostInput{From: info.Room, To: []string{info.Address()}, Text: "received once"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.send(info.ID, "SLEEP:1 RESPOND: second", WakeOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	_, second := e.wait(info.ID, 2)
+	if !second.DeliveredPost(post.ID) {
+		t.Fatalf("turn 2 steering = %#v", second.Steering)
+	}
+	if row, _ := deliveryRowOf(t, e, info.ID, post.ID); row.ClaimedTurn != 2 || row.State != room.DeliveryDelivered {
+		t.Fatalf("row = %+v; want the turn that received it, 2, delivered", row)
+	}
+	// A runner that died before committing its cursor leaves turn 3 reading the
+	// same posts again. It must not claim the one turn 2 received.
+	if _, err := e.m.Store.UpdateMeta(info.ID, func(m *Meta) { m.RoomCursor = before.RoomCursor }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.send(info.ID, "SLEEP:1 RESPOND: third", WakeOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	_, third := e.wait(info.ID, 3)
+	if third.DeliveredPost(post.ID) || strings.Contains(third.Prompt, "received once") {
+		t.Fatalf("turn 3 received the post again: %#v", third.Steering)
+	}
+	if row, _ := deliveryRowOf(t, e, info.ID, post.ID); row.ClaimedTurn != 2 {
+		t.Fatalf("turn 3 claimed a delivered post: row = %+v, want claim turn 2", row)
 	}
 }
