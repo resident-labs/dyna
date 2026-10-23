@@ -9,6 +9,7 @@ import { createRoomData } from '../rooms/roomData.js'
 import { createWorkflowData } from '../workflows/workflowData.ts'
 import { mergeListPage } from './listPages.ts'
 import { reloadsUnread } from './unreadReload.ts'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const update = (id, text, inHead) => ({ op: 'upsert', id, item: { id, text }, ...(inHead === undefined ? {} : { inHead }) })
 
@@ -49,7 +50,7 @@ function app(rows) {
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }))
   c.refreshHeldComments ??= () => {}
   vm.createContext(c)
-  for (const node of functions) vm.runInContext(source.slice(node.start, node.end), c)
+  for (const node of functions) vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
   c.hierarchy = []
   c.memberFetches = 0
   c.loadMembers = () => c.memberFetches++

@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { createReloadGate, reconcileRows } from '../ui/reloadGate.ts'
 import { parse } from 'svelte/compiler'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const source = readFileSync(new URL('./Questions.svelte', import.meta.url), 'utf8')
 const code = parse(source).instance.content.body.filter((n) =>
@@ -15,7 +16,7 @@ test('live question refreshes preserve the chosen filter and Reply focus', () =>
   const calls = []
   const c = { focusId: 'q1', focusRequest: 1, questions: [{ id: 'q1', state: 'open' }], filter: 'open', focus: (id) => calls.push(id) }
   vm.createContext(c)
-  vm.runInContext(code, c)
+  vm.runInContext(stripTypes(code), c)
   c.applyFocusRequest()
   assert.deepEqual(calls, ['q1'])
   c.filter = 'answered'
@@ -41,7 +42,7 @@ test('a delayed question snapshot cannot replace a newer answer', async () => {
   }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: 1 }))
   vm.createContext(c)
-  vm.runInContext(appSource.slice(load.start, load.end), c)
+  vm.runInContext(stripTypes(appSource.slice(load.start, load.end)), c)
   const pending = c.loadQuestions()
   const answered = c.loadQuestions()
   assert.equal(calls, 1)

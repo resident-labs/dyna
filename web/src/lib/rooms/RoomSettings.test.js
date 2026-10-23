@@ -9,6 +9,7 @@ import vm from 'node:vm'
 import { compile, compileModule, parse } from 'svelte/compiler'
 import { build } from 'esbuild'
 import { normalizePolicy, budgetForm, checksText, saveRoomPolicy, DEFAULT_POLICY } from '../prs/pr.ts'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 // Render the real Room settings modal on the server and read the text. The
 // ServiceHeader is a stub that prints its role, so each section shows which
@@ -81,7 +82,7 @@ const handlers = (names) => parse(source).instance.content.body.filter((node) =>
 function page(api, names, extra = {}) {
   const context = { api, $state: (value) => value, roomId: 'r', normalizePolicy, budgetForm, checksText, saveRoomPolicy, policy: null, form: null, busy: false, dirty: true, error: '', saved: false, onreviewer: async () => {}, prSettings: null, reviewPublishing: 'local', publishError: '', ...extra }
   vm.createContext(context)
-  vm.runInContext(handlers([...names, 'formOf', 'policyRequest', 'policyRoom', 'policyLoading', 'saveAfterPolicy', 'reviewerBusy']), context)
+  vm.runInContext(stripTypes(handlers([...names, 'formOf', 'policyRequest', 'policyRoom', 'policyLoading', 'saveAfterPolicy', 'reviewerBusy'])), context)
   return context
 }
 
@@ -155,10 +156,10 @@ test('the room menu opens the modal, for another room after selecting it, and Es
   const selected = []
   const state = vm.createContext({ roomId: 'room-1', room, showRoomSettings: false, selectRoom: async (id) => { selected.push(id); state.roomId = id; return true } })
   const { actions, roomMenu } = await import('../ui/actions.ts')
-  const item = (r) => roomMenu(actions({ room: r, rooms: [r], icons: {}, openRoomSettings: vm.runInContext(opener, state) })).find((a) => a.id === 'roomsettings')
+  const item = (r) => roomMenu(actions({ room: r, rooms: [r], icons: {}, openRoomSettings: vm.runInContext(stripTypes(opener), state) })).find((a) => a.id === 'roomsettings')
 
   await item(room).run()
-  assert.ok(vm.runInContext(mount[1], state))
+  assert.ok(vm.runInContext(stripTypes(mount[1]), state))
   assert.deepEqual(selected, [])
 
   const shell = readFileSync(new URL('../ui/SettingsShell.svelte', import.meta.url), 'utf8')
@@ -168,7 +169,7 @@ test('the room menu opens the modal, for another room after selecting it, and Es
   globalThis.window = { addEventListener: (_, fn) => listeners.add(fn), removeEventListener: (_, fn) => listeners.delete(fn) }
   globalThis.document = { activeElement: null }
   const node = { parentElement: { addEventListener() {}, removeEventListener() {} }, focus() {}, contains: () => false, querySelectorAll: () => [], querySelector: () => null }
-  const action = dialog(node, { close: vm.runInContext(mount[2], state), busy: false })
+  const action = dialog(node, { close: vm.runInContext(stripTypes(mount[2]), state), busy: false })
   for (const fn of listeners) fn({ key: 'Escape', preventDefault() {}, stopImmediatePropagation() {} })
   assert.equal(state.showRoomSettings, false)
   action.destroy()
@@ -187,9 +188,9 @@ test('Esc in a rule edit cancels the edit, and leaving Rules mid-edit frees Esc 
   const onkey = /aria-label="Edit rule \{r\.id\}"[^\n]*?onkeydown=\{(\(e\) => \{ if \(e\.key === 'Enter'.*? edit = null \} \})\}/.exec(rulesSource)[1]
   const effect = /\$effect\((\(\) => \{ editing = !!edit;.*?\})\)\n/.exec(rulesSource)[1]
   const rules = vm.createContext({ edit: null, editing: false, save() {} })
-  const textareaKey = vm.runInContext(onkey, rules)
+  const textareaKey = vm.runInContext(stripTypes(onkey), rules)
   let cleanup = () => {}
-  const rerun = () => { cleanup(); cleanup = vm.runInContext(effect, rules)() }
+  const rerun = () => { cleanup(); cleanup = vm.runInContext(stripTypes(effect), rules)() }
 
   const { dialog } = await import('../ui/dialog.ts')
   const listeners = new Set()
@@ -231,8 +232,8 @@ test('leaving Hooks with a hook editor open frees Esc for the modal', async () =
   const effect = /\$effect\((\(\) => \{ onmodal\?\.\(!!editor\);.*?\})\)\n/.exec(hooksSource)[1]
   const handler = /<HooksPane [^>]*onmodal=\{(\(open\) => \(hooksBusy = open\))\}/.exec(source)[1]
   const state = vm.createContext({ hooksBusy: false })
-  const pane = vm.createContext({ editor: { form: {} }, onmodal: vm.runInContext(handler, state) })
-  const cleanup = vm.runInContext(effect, pane)()
+  const pane = vm.createContext({ editor: { form: {} }, onmodal: vm.runInContext(stripTypes(handler), state) })
+  const cleanup = vm.runInContext(stripTypes(effect), pane)()
   assert.equal(state.hooksBusy, true) // Add hook: the editor is open
 
   const { dialog } = await import('../ui/dialog.ts')

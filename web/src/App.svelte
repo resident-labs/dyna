@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { refreshHeldComments } from './lib/prs/heldComments.ts'
   import { actions, actionItems, roomMenu as roomActionItems } from './lib/ui/actions.ts'
   import { createReloadGate, listVisible, reconcileRows } from './lib/ui/reloadGate.ts'
@@ -16,6 +16,7 @@
   import { reloadsUnread } from './lib/ui/unreadReload.ts'
   import { createWorkflowData } from './lib/workflows/workflowData.ts'
   import { onMount, tick } from 'svelte'
+  import { errorText } from './lib/errorText.ts'
   import { api, onEvent, engineCheck, openExternal, copyText, onUnauthorized, logout } from './api.js'
   import RoomRail from './lib/rooms/RoomRail.svelte'
   import Sidebar from './lib/rooms/Sidebar.svelte'
@@ -109,37 +110,151 @@
   import { paletteTargets } from './lib/ui/paletteTargets.ts'
   import { activeAgents, agentsHeader, roomsWorking } from './lib/rooms/agents.ts'
   import { roomIDPattern as ROOM, postIDPattern as POST } from './lib/ui/posts.ts'
+  import type { Room, Member, Post, Feed as FeedPage, Question, Visual, ProfileChoice, Attachment } from './lib/api/room.ts'
+  import type { Session as SessionData, QueueItem, MemberProfile } from './lib/api/session.ts'
+  import type { Goal } from './lib/api/goal.ts'
+  import type { RunList, RunDetail, RunSummary } from './lib/api/workflow.ts'
+  import type { ShellJob } from './lib/api/terminal.ts'
+  import type { ComputerInfo, ComputerEvent } from './lib/api/computer.ts'
+  import type { AppEvent, ListChange } from './lib/api/event.ts'
+  import type { UpdateNotice } from './lib/api/settings.ts'
+  import type { Target as PaletteTarget } from './lib/ui/paletteTargets.ts'
+  import type { ReviewerStatus } from './lib/api/change.ts'
+  import type { Row as ChangeRow } from './lib/prs/prlist.ts'
+  import type { SyncRepository } from './lib/rooms/sync.ts'
+  import type { CallRequest } from './lib/voice/callRequests.ts'
+  import type { BulkAction, BulkValue } from './lib/sessions/bulkSessions.ts'
+  import type { BootResult, RouteNotice } from './lib/settings/link.ts'
+  import type { Route } from './lib/ui/route.ts'
+  import type { ModelSelection } from './lib/settings/profiles/state.ts'
+  import type { RunAgent } from './lib/api/workflow.ts'
 
-  let rooms = $state([])
+  // A member the open view drills into. The root conversation is one made from the seat.
+  interface Drill extends Member {
+    rootSeat?: boolean
+  }
+  interface PromptSpec {
+    title: string
+    lines?: string[]
+    label?: string
+    value?: string
+    multiline?: boolean
+    placeholder?: string
+    match?: string
+    action?: string
+    danger?: boolean
+    submit: (value: string) => void | Promise<unknown>
+  }
+  interface RoomContext {
+    roomId: string
+    visit: number
+  }
+  interface SelectionContext {
+    roomId: string
+    ids: string[]
+    key: string
+  }
+  interface MenuItem {
+    label: string
+    run: () => unknown
+    hint?: string
+    danger?: boolean
+    gap?: boolean
+    disabled?: boolean
+  }
+  interface RoomIssue {
+    id: string
+    title: string
+    state: string
+  }
+  interface RuleList {
+    hash: string
+  }
+  interface RuleSet {
+    room: RuleList
+    global: RuleList
+    hash: string
+  }
+  interface BulkRecord {
+    key: number
+    roomId: string
+    roomRequest: number
+    selectionRevision: number
+    sessions: Member[]
+    action: BulkAction
+    value?: BulkValue
+  }
+  type Confirming =
+    | { kind: 'promote' | 'stop' | 'close'; m: Member; busy?: boolean; error?: string }
+    | { kind: 'forceclose'; m: Member; items: string[]; busy?: boolean; error?: string }
+    | { kind: 'cancelrun'; run: RunSummary; busy?: boolean; error?: string }
+    | { kind: 'expedite'; goal: Goal; roomId: string; busy?: boolean; error?: string }
+  // A page of one list, with its continuation cursor.
+  interface ListPage<T> {
+    items: T[]
+    older?: boolean
+    cursor?: string
+    loadedOlder?: boolean
+  }
+  interface ListKinds {
+    goals: Goal
+    changes: ChangeRow
+    jobs: ShellJob
+  }
+  type ListKind = keyof ListKinds
+  type ListPages = { [K in ListKind]?: ListPage<ListKinds[K]> }
+  // What api.openRoom returns for the open room.
+  interface Opened {
+    feed: FeedPage
+    members?: Member[]
+    choices?: ProfileChoice[]
+    pins?: Post[]
+    runs?: RunList
+  }
+  interface EarlierLoad {
+    id: string
+    roomLoad: number
+    direction: string
+    promise: Promise<boolean> | null
+  }
+  interface DetailTarget {
+    kind: string
+    id: string
+    roomId?: string
+    turn?: number
+  }
+  // The stream's events, with the two the engine sends for a room pause.
+  type StreamEvent = AppEvent | { kind: 'room.paused' | 'room.resumed'; roomId?: string }
+  let rooms = $state<Room[]>([])
   // started turns on once the first room is chosen. Before that, the
   // empty room is not the owner's choice and must not overwrite the saved one.
   let started = $state(false)
   let roomId = $state('')
-  let voiceWidget = $state()
-  let callPush = $state(null) // the call request a push tap opened
+  let voiceWidget = $state<ReturnType<typeof VoiceWidget>>()
+  let callPush = $state<CallRequest | null>(null) // the call request a push tap opened
   let roomCalls = $derived($callRequests.filter((r) => r.room === roomId))
   // The room's whole history of call requests, for its feed rows.
   $effect(() => {
     if (roomId) callRequests.load(roomId).catch(() => {})
   })
-  const acceptCall = (req) => voiceWidget?.accept(req)
-  const declineCall = (req) => voiceWidget?.decline(req)
+  const acceptCall = (req: CallRequest) => voiceWidget?.accept(req)
+  const declineCall = (req: CallRequest) => voiceWidget?.decline(req)
   let pageVisible = $state(document.visibilityState === 'visible')
   // agentsNav: the rail's agents tile is open, so the sidebar lists the awake
   // agents of every room. Picking one opens its room and keeps the list.
   let agentsNav = $state(false)
-  let agentMembers = $state(null) // room id -> members, for the agents list; null until first loaded
+  let agentMembers = $state<Record<string, Member[]> | null>(null) // room id -> members, for the agents list; null until first loaded
   let agentsRequest = 0
-  let agentGoals = $state({}) // room id -> goals, to badge expedited agents in every listed room
+  let agentGoals = $state<Record<string, Goal[]>>({}) // room id -> goals, to badge expedited agents in every listed room
   function agentsVisible() { return pageVisible && agentsNav && (narrow ? navOpen : showSide) }
   const reloadAgents = createReloadGate(() => ({ room: 'agents', visit: 0 }), agentsVisible)
-  let home = $state() // the home screen, which takes live events
+  let home = $state<ReturnType<typeof Home>>() // the home screen, which takes live events
   let agents = $derived(activeAgents(rooms, agentMembers))
   // The rail count comes from room summaries. Only the active-agents
   // view needs member lists from every room.
   let workingAgents = $derived(roomsWorking(rooms))
   $effect(() => { if (agentsVisible()) loadAgents(rooms) })
-  function loadAgents(list) { return reloadAgents('members', async (current) => {
+  function loadAgents(list: Room[]) { return reloadAgents('members', async (current: () => boolean) => {
     const request = ++agentsRequest
     const open = list.filter((r) => !r.archived && r.members > 0)
     // Goals includes all active goals on the first page, regardless of its closed-item limit.
@@ -151,17 +266,18 @@
     agentGoals = Object.fromEntries(open.map((r, i) => [r.id, goalLists[i] ?? agentGoals[r.id] ?? []]))
     agentMembers = Object.fromEntries(open.map((r, i) => [r.id, reconcileRows(agentMembers?.[r.id] ?? [], lists[i] ?? agentMembers?.[r.id] ?? [])]))
   }) }
-  let feed = $state(null)
+  let feed = $state<FeedPage | null>(null)
+  let room = $derived(feed?.room ?? null)
   let feedAtBottom = $state(true)
-  let members = $state([])
-  let hierarchy = $state([])
-  let choices = $state([])
-  let view = $state(GENERAL)
-  let prLink = $state(null) // a PR link from the address bar, for the Pull requests view
+  let members = $state<Member[]>([])
+  let hierarchy = $state<Member[]>([])
+  let choices = $state<ProfileChoice[]>([])
+  let view = $state<string>(GENERAL)
+  let prLink = $state<ReturnType<typeof parsePRHash>>(null) // a PR link from the address bar, for the Pull requests view
   let unreadFrom = $state('')
-  let drill = $state(null) // the member whose transcript is open
+  let drill = $state<Drill | null>(null) // the member whose transcript is open
   let readOnlyDm = $state(false) // the open transcript came from Services: no header tabs, no composer
-  let session = $state(null)
+  let session = $state<SessionData | null>(null)
   let sessionReadingHistory = $state(false)
   let threadCount = $derived(dmView(session, room || { name: '' }).threads.length)
   let sessionTurn = $state(0) // a completion link opens its exact stored turn
@@ -169,16 +285,16 @@
   let sessionVisit = 0
   let detailRequest = 0
   let roomRequest = 0 // room data can still load after a later view choice
-  let queue = $state([]) // steering that waits for the open session's turn
+  let queue = $state<QueueItem[]>([]) // steering that waits for the open session's turn
   let sessionError = $state('')
   const layout = loadLayout({ side: true, members: true, threads: true })
   let threadsOpen = $state(layout.threads)
   let selectedThread = $state('')
   let contextOpen = $state(false)
-  let listPages = $state({})
+  let listPages = $state<ListPages>({})
   let olderLoading = $state(false)
   let olderFailed = $state(false) // the last older-page load failed
-  let jobs = $state(null) // the room's shell jobs, newest first: one list for every view
+  let jobs = $state<ShellJob[] | null>(null) // the room's shell jobs, newest first: one list for every view
   let jobsError = $state('')
   $effect(() => saveLayout({ threads: threadsOpen }))
   let showSide = $state(layout.side) // the room sidebar next to the rail
@@ -202,59 +318,63 @@
   let routeFix = true
   $effect(() => syncRoute())
   let needPair = $state(new URLSearchParams(location.hash.slice(1)).has('pair')) // a pairing link or a server 401 opens the pairing screen
-  let halt = $state(null) // {key} or {error}: Connect stopped the app before it started
-  let route = $state(null) // the route this page uses, for the sidebar
+  let halt = $state<BootResult | null>(null) // {key} or {error}: Connect stopped the app before it started
+  let route = $state<RouteNotice | null>(null) // the route this page uses, for the sidebar
   let showClosed = $state(false)
   let showPins = $state(false) // the Pinned panel takes the member list's place
   let finding = $state(false) // the find bar under the room header
-  let feedFind = $state()
-  let questions = $state([])
-  let visuals = $state([])
+  let feedFind = $state<ReturnType<typeof FeedFind>>()
+  let questions = $state<Question[]>([])
+  let visuals = $state<Visual[]>([])
   let questionFocus = $state('')
   let questionFocusRequest = $state(0)
   let questionsRequest = 0
-  let pins = $state([]) // the room's pinned posts, newest pin first
-  let syncStatus = $state({}) // saved remote counts by repo path
-  let syncRepo = $derived(syncStatus[room?.repo] ?? null) // {remotes, integration, operation?}
+  let pins = $state<Post[]>([]) // the room's pinned posts, newest pin first
+  let syncStatus = $state<Record<string, SyncRepository>>({}) // saved remote counts by repo path
+  let syncRepo = $derived(room?.repo ? syncStatus[room.repo] ?? null : null) // {remotes, integration, operation?}
   let syncRemotes = $derived(remoteList(syncRepo?.remotes))
   let syncNote = $state('') // the last Refresh or Export answer that was not a start
   let showIssues = $state(false) // the Issues panel, beside Pinned; it needs an open issue
-  let channelMenu = $state(null) // {x, y}: a phone shows the panel toggles in this menu
+  let channelMenu = $state<{ x: number; y: number } | null>(null) // {x, y}: a phone shows the panel toggles in this menu
   let lookOpen = $state(false) // a phone opens the channel look from that menu
-  let issues = $state([]) // open issues, newest first
-  let issueHistory = $state([]) // closed and converted issues, newest first
-  let feedView = $state()
+  let issues = $state<RoomIssue[]>([]) // open issues, newest first
+  let issueHistory = $state<RoomIssue[]>([]) // closed and converted issues, newest first
+  let feedView = $state<ReturnType<typeof Feed>>()
   let pinnedIds = $derived(new Set(pins.map((p) => p.id)))
-  let reply = $state(null)
-  let drafts = $state({})
+  let reply = $state<Post | null>(null)
+  let drafts = $state<Record<string, string>>({})
   let dataDir = $state('')
   let loadError = $state('')
   let health = $state('')
   let engineStatus = $state('') // why the event stream is down, see engineWatch
-  let composer = $state()
-  let card = $state(null) // the member whose profile modal is open
-  let profile = $state(null)
+  let composer = $state<ReturnType<typeof Composer>>()
+  let card = $state<Drill | null>(null) // the member whose profile modal is open
+  let profile = $state<MemberProfile | null>(null)
   let profileError = $state('')
-  let sessionView = $state()
-  let viewing = $state(null) // the attachment open in the viewer; roomId names its room when it is not this one (a call's shared file)
+  let sessionView = $state<ReturnType<typeof Session>>()
+  let viewing = $state<(Attachment & { roomId?: string; postId?: string }) | null>(null) // the attachment open in the viewer; roomId names its room when it is not this one (a call's shared file)
   let dropping = $state(false) // files are being dragged over the window
-  let profiles = $state([]) // what "/" completes in the composer
+  let profiles = $state<ProfileChoice[]>([]) // what "/" completes in the composer
   let fresh = $state('') // a session just started from the composer: its row flashes
-  let menu = $state(null) // {m, x, y, anchor}: the open session menu
-  let roomMenu = $state(null) // {r, x, y, anchor}: the open room menu
-  let goals = $state([])
+  let menu = $state<{ m: Member; x: number; y: number; anchor?: HTMLElement } | null>(null) // {m, x, y, anchor}: the open session menu
+  let roomMenu = $state<{ r: Room; x: number; y: number; anchor?: HTMLElement } | null>(null) // {r, x, y, anchor}: the open room menu
+  let goals = $state<Goal[]>([])
   let goalId = $state('')
   // The room's one expedited goal, kept for the badges. A timer wakes it at the
   // deadline, so the badges leave on time without a server event.
   let expireTick = $state(Date.now())
-  let knownGoals = $derived(fetchedGoal && !goals.some((g) => g.id === fetchedGoal.id) ? [...goals, fetchedGoal] : goals)
+  let fetchedGoal = $state<Goal | null>(null)
+  let knownGoals = $derived.by(() => {
+    const fetched = fetchedGoal
+    return fetched && !goals.some((g) => g.id === fetched.id) ? [...goals, fetched] : goals
+  })
   // Items carry the expedite scope's assignees. They load for each room's
   // expedited goal, room:goal -> {at, items}, and load again when the goal
   // changes, so a new assignee gets the badge without a reload.
   let expediteGoalItems = $state({})
   // withItems attaches the loaded items to the expedited goal, so the scope
   // can cover item assignees.
-  function withItems(room, list) {
+  function withItems(room: string, list: Goal[]) {
     const g = list.find((x) => isExpedited(x))
     const items = g && expediteGoalItems[room + ':' + g.id]?.items
     return g && items ? list.map((x) => (x.id === g.id ? { ...x, items } : x)) : list
@@ -287,62 +407,61 @@
     return () => clearTimeout(timer)
   })
   // A goal opened by a link but held by no loaded page; list refreshes keep it.
-  let fetchedGoal = $state(null)
   // Counts change events applied to fetchedGoal, so a slower reload answer
   // never replaces a newer event.
   let fetchedGoalVersion = 0
   let selectedGoal = $derived(goalById(goalId))
   // rules is the list in the Room settings Rules section; rulesPending waits while an inline edit
   // is open (rulesEditing) and replaces it when the edit closes.
-  let rules = $state(null)
-  let rulesPending = $state(null)
+  let rules = $state<RuleSet | null>(null)
+  let rulesPending = $state<RuleSet | null>(null)
   let rulesEditing = $state(false)
   $effect(() => { if (!rulesEditing && rulesPending) { rules = rulesPending; rulesPending = null } })
-  let reviewer = $state(null) // the room's reviewer (ReviewerStatus)
+  let reviewer = $state<ReviewerStatus | null>(null) // the room's reviewer (ReviewerStatus)
+  let changes = $state<ChangeRow[] | null>(null) // the room's changes, local and PR (Changes); null before they load or on a host without the API
   let mergeVersion = $state(0)
-  let changes = $state(null) // the room's changes, local and PR (Changes); null before they load or on a host without the API
   // The room's pull requests: the Changes rows that are not local changes.
   let prs = $derived((changes ?? []).filter((c) => c.kind !== 'local'))
   let prError = $state('')
   let prMap = $derived(prsBySession(prs))
   // Agent rows show a chip only while a PR is open; the panel lists them all.
   let openPRMap = $derived(prsBySession(prs.filter(isOpen)))
-  let confirm = $state(null)
-  const bulkControllers = new Map()
+  let confirm = $state<Confirming | null>(null)
+  const bulkControllers = new Map<number, ReturnType<typeof createBulkSessionAction>>()
   let bulkSerial = 0
   let activeBulk = $state(0)
-  let bulkBatches = $state([])
+  let bulkBatches = $state<BulkRecord[]>([])
   let selectionRevision = 0
   let currentBulk = $derived(bulkBatches.find((b) => b.key === activeBulk))
-  let roomSessionController = null
-  let roomControls = $state(null)
-  let roomControlsMenu = $state(null)
-  let clearDormantConfirm = $state(null)
+  let roomSessionController: ReturnType<typeof createRoomSessionControls> | null = null
+  let roomControls = $state<{ busy?: boolean; loading?: boolean; state?: { dormant?: number; paused?: boolean } } | null>(null)
+  let roomControlsMenu = $state<(RoomContext & { x: number; y: number; anchor?: HTMLElement }) | null>(null)
+  let clearDormantConfirm = $state<(RoomContext & { count: number }) | null>(null)
   let roomControlsVisit = 0
-  let selectionMenu = $state(null)
+  let selectionMenu = $state<(SelectionContext & { x: number; y: number; anchor?: HTMLElement }) | null>(null)
   let selectingSessions = $state(false)
-  let pickedSessions = $state([])
-  let consolidating = $state(null)
+  let pickedSessions = $state<string[]>([])
+  let consolidating = $state<{ roomId: string; sessions: (Member | { id: string; name: string })[]; key: number } | null>(null)
   let consolidationView = 0
   let consolidationAlive = true
-  let transferring = $state(null) // {kind: 'stop'|'close', m, busy, error}
+  let transferring = $state<Member | null>(null) // {kind: 'stop'|'close', m, busy, error}
   let toast = $state('')
-  let closeResult = $state(null)
-  let runs = $state(null) // roomsvc.RunList for the room
+  let closeResult = $state<{ name: string; items: string[] } | null>(null)
+  let runs = $state<RunList | null>(null) // roomsvc.RunList for the room
   let runsError = $state('')
   let openRun = $state('') // the run whose detail is open, in the runs view
-  let runDetail = $state(null)
+  let runDetail = $state<RunDetail | null>(null)
   let runError = $state('')
   let showSettings = $state(false)
   let showRoomSettings = $state(false)
   let settingsKey = $state(0)
-  let palettePath = $state(null) // set: the palette opens on New room with this path
-  let settingsAt = $state({ start: 'profiles', pairNow: false }) // where Settings opens
+  let palettePath = $state<string | null>(null) // set: the palette opens on New room with this path
+  let settingsAt = $state<{ start: string; pairNow: boolean; profile?: string; accountId?: string; initialSelection?: ModelSelection }>({ start: 'profiles', pairNow: false }) // where Settings opens
   let showPalette = $state(false) // Ctrl+K, or the search button on a phone
-  let update = $state(null) // configsvc.UpdateNotice: a newer dyna release
+  let update = $state<UpdateNotice | null>(null) // configsvc.UpdateNotice: a newer dyna release
   let updateHidden = $state(false)
   let sessionTab = $state('chat') // the open tab of a session view
-  let changesTracker = null // pokes a reload of the open session's changed-file count when it shows activity
+  let changesTracker: ReturnType<typeof trackChanges> | null = null // pokes a reload of the open session's changed-file count when it shows activity
   let sessionChanged = $state(0) // files changed in the open session's worktree; the Changes tab shows above zero
   $effect(() => {
     const session = drill?.id, roomRef = room?.id
@@ -358,14 +477,14 @@
   let prView = $derived((!drill && (view === 'github' || view === 'issues')) || (!!drill && sessionTab === 'prs'))
   // Agent computers of the open room (null when the feature is unavailable),
   // each session's recent actions, and whether the viewer is open.
-  let computers = $state(null)
-  let computerFeed = $state({})
+  let computers = $state<ComputerInfo[] | null>(null)
+  let computerFeed = $state<ReturnType<typeof pushAction>>({})
   let computerError = $state('')
   let winWidth = $state(typeof window === 'undefined' ? 1400 : window.innerWidth)
   const popMatch = /^#pop=(room_[0-9]{8}-[0-9]{6}-[0-9a-f]{8}):([A-Za-z0-9][A-Za-z0-9_.-]{0,95})$/.exec(typeof location === 'undefined' ? '' : location.hash)
   const pop = popMatch ? { room: popMatch[1], session: popMatch[2] } : null
   let computerRequest = 0
-  function loadComputers() { return reload('computers', async (current) => {
+  function loadComputers() { return reload('computers', async (current: () => boolean) => {
     if (!roomId) return
     const id = roomId, request = ++computerRequest
     try {
@@ -378,8 +497,8 @@
       computerError = String(e)
     }
   }) }
-  let computerTimer = 0
-  function handleComputer(ev) {
+  let computerTimer: ReturnType<typeof setTimeout> | undefined
+  function handleComputer(ev: ComputerEvent) {
     if (ev.action) computerFeed = pushAction(computerFeed, ev.session, ev.action)
     if (!computers) return
     // An app that starts reads "Opened Chromium" in the pill.
@@ -398,26 +517,26 @@
   // view is '': a session view is open, so the computers page is not.
   const showPreview = $derived(!!drill && !!drillComputer && previewVisible({ c: drillComputer, tab: sessionTab, view: '', width: winWidth, hidden: null }))
   const drillShells = $derived(drill ? runningShells(jobs, drill) : [])
-  const computerOf = (id) => computers?.find((c) => c.session === id) ?? null
+  function computerOf(id?: string) { return computers?.find((c) => c.session === id) ?? null }
   let reveal = $state('') // a file the Files view opens, from Changes
-  let revealFolder = $state(null) // a folder the Files view shows, from Library; an object so the root and repeats still open
+  let revealFolder = $state<{ path: string } | null>(null) // a folder the Files view shows, from Library; an object so the root and repeats still open
   let starting = $state(false) // the Run workflow dialog is open
-  let ask = $state(null) // {title, lines, label, value, multiline, match, action, danger, submit}: the open Prompt
+  let ask = $state<PromptSpec | null>(null) // {title, lines, label, value, multiline, match, action, danger, submit}: the open Prompt
   // The sidebar row of the open work view, and its tabs when it has several.
   let workRow = $derived(rowOf(view))
   let workTabs = $derived(visibleTabs(workRow))
   // The room feed is on screen: a channel view, not a work view or a session.
   let feedShown = $derived(!!room && !drill && isChannel(view) && !workRow)
 
-  function hasFiles(e) {
+  function hasFiles(e: DragEvent) {
     return Array.from(e.dataTransfer?.types || []).includes('Files')
   }
-  function dragOver(e) {
+  function dragOver(e: DragEvent) {
     if (!hasFiles(e) || !room) return
     e.preventDefault()
     dropping = true
   }
-  function drop(e) {
+  function drop(e: DragEvent) {
     dropping = false
     if (!hasFiles(e)) return
     e.preventDefault()
@@ -426,7 +545,6 @@
     else composer?.addFiles(files)
   }
 
-  let room = $derived(feed?.room ?? null)
   let current = $derived(rooms.find((r) => r.id === roomId))
   let channels = $derived(channelModel(hierarchy))
   let channel = $derived(view.startsWith('channel:') ? channels.byId.get(view.slice(8)) : null)
@@ -437,10 +555,10 @@
   // The root conversation opens like any session. A root with no session of its own (an external
   // seat holder, or an internal root that has not started) is a member made from the seat; its
   // posts load through RootSession.
-  function rootMember() {
+  function rootMember(): Drill {
     const owner = hierarchy.find((m) => m.owner)
     const holder = rootSeat.external ? (rootSeat.harness ? rootSeat.harness + ' (external)' : 'External orchestrator') : 'Internal root'
-    return { id: 'root:' + roomId, rootSeat: true, role: 'root', name: 'root', address: room?.name + ':root', hue: owner?.hue ?? 0, state: 'idle', status: 'seat', profile: holder + ' holds the seat', seat: rootSeat }
+    return { id: 'root:' + roomId, rootSeat: true, role: 'root', name: 'root', address: room?.name + ':root', hue: owner?.hue ?? 0, state: 'idle', status: 'seat', profile: holder + ' holds the seat', seat: rootSeat, resumable: false, depth: 0, children: 0, turns: 0, created: '', lastActivity: '' }
   }
   // The breadcrumbs above a session and a run: root, then the parent sessions.
   let sessionTrail = $derived(drill && !readOnlyDm && !isRootDm ? parentTrail(channels, drill.parent, rootMember()).filter((m) => m.id !== drill.id) : [])
@@ -464,14 +582,14 @@
     get value() { return drafts['session:' + roomId + ':' + drill?.id] ?? '' },
     set value(v) { drafts = { ...drafts, ['session:' + roomId + ':' + drill?.id]: v } },
   }
-  const computerDraft = (v) => {
+  const computerDraft = (v: string) => {
     const key = 'computer:' + roomId + ':' + drill?.id
     if ((drafts[key] ?? '') !== v) drafts = { ...drafts, [key]: v }
   }
 
   let memberChips = $derived(showMembers && !showPins && !drill)
   let sidebarChips = $derived((narrow ? navOpen : showSide) && (agentsNav || live.length > 0))
-  function visibleList(name) {
+  function visibleList(name: string) {
     return consolidationAlive && pageVisible && listVisible(name, {
       view, drill, showRoomSettings, memberChips, sidebarChips,
       sideVisible: narrow ? navOpen : showSide,
@@ -485,7 +603,7 @@
   })
 
   // The unread refresh carries channel counts into the open feed.
-  function applyUnread(value) {
+  function applyUnread(value: { room: Room; channelUnread?: Record<string, number> | null }) {
     if (feed?.room.id !== value.room.id) return
     feed.channelUnread = value.channelUnread ?? {}
   }
@@ -505,20 +623,20 @@
   })
   function loadRooms() { return roomData.loadRooms() }
   function loadMembers() { return roomData.loadMembers() }
-  function memberRoster(list) {
+  function memberRoster(list: Member[]) {
     return JSON.stringify(list.filter((m) => !m.owner).map((m) => [m.id, m.name, !!m.closed]).sort())
   }
   // Channels come from the server with each post, so a parent change (a
   // promote) rereads the routing of every loaded post. reconcileRows updates
   // rows in place, so the last key is kept, not recomputed.
   let routedParents = ''
-  function parentKey(list) {
+  function parentKey(list: Member[]) {
     return JSON.stringify([roomId, list.filter((m) => !m.owner).map((m) => [m.id, m.parent || '']).sort()])
   }
   // noteParents records the member parent tree. When it changed in the same
   // room, loaded posts reread their channels. Live member updates and room
   // opens, including a reconnect, both come through here.
-  function noteParents(rows) {
+  function noteParents(rows: Member[]) {
     const parents = parentKey(rows)
     const moved = routedParents !== parents && JSON.parse(routedParents || '[null]')[0] === roomId
     routedParents = parents
@@ -532,15 +650,15 @@
       if (id === roomId && request === roomRequest && feed) feed.posts = withChannels(feed.posts, pages)
     } catch { /* The next room open or reconnect reroutes the posts. */ }
   }
-  function roomCountKey(list) {
+  function roomCountKey(list: Member[]) {
     return JSON.stringify(list.filter((m) => !m.owner && !m.closed).map((m) => [m.id, m.state === 'live']).sort())
   }
-  function applyMembers(value) {
+  function applyMembers(value: Member[]) {
     const changed = memberRoster(hierarchy) !== memberRoster(value)
     const counts = roomCountKey(hierarchy)
     showMemberRows(reconcileRows(hierarchy, value), changed, counts)
   }
-  function applyMemberItem(change) {
+  function applyMemberItem(change: ListChange) {
     const before = memberRoster(hierarchy)
     const counts = roomCountKey(hierarchy)
     const known = hierarchy.some((m) => (m.id || m.address) === change.id)
@@ -548,7 +666,7 @@
     showMemberRows(rows, before !== memberRoster(rows), known ? counts : null)
     return hierarchy
   }
-  function showMemberRows(rows, rosterChanged, previousCounts) {
+  function showMemberRows(rows: Member[], rosterChanged: boolean, previousCounts: string | null) {
     noteParents(rows)
     hierarchy = rows
     setPicked(pruneSelection(pickedSessions, hierarchy))
@@ -558,7 +676,7 @@
     if (previousCounts !== roomCountKey(rows)) soonRooms()
   }
 
-  function visitRoomControls(id) {
+  function visitRoomControls(id: string) {
     roomSessionController?.destroy()
     roomSessionController = null
     roomControls = null
@@ -573,18 +691,18 @@
       if (finished) { loadMembers(); loadChanges() }
     }, () => visibleList('roomControls'))
   }
-  function roomSessionActions(x, y, anchor) {
+  function roomSessionActions(x: number, y: number, anchor?: HTMLElement) {
     roomControlsMenu = { x, y, anchor, roomId, visit: roomControlsVisit }
   }
   function closeRoomSessionMenu() { const anchor = roomControlsMenu?.anchor; roomControlsMenu = null; anchor?.focus?.() }
-  function currentRoomControls(context) { return consolidationAlive && context?.roomId === roomId && context.visit === roomControlsVisit }
-  function askClearDormant(count) {
+  function currentRoomControls(context: RoomContext | null | undefined) { return consolidationAlive && context?.roomId === roomId && context.visit === roomControlsVisit }
+  function askClearDormant(count?: number) {
     if (!consolidationAlive || !roomId || roomControls?.busy) return
     const n = count || roomControls?.state?.dormant || 0
     if (!n) return
     clearDormantConfirm = { roomId, visit: roomControlsVisit, count: n }
   }
-  function roomSessionItems(context) {
+  function roomSessionItems(context: RoomContext) {
     const busy = !roomControls?.state || roomControls.busy
     const dormant = roomControls?.state?.dormant || 0
     return [
@@ -593,16 +711,16 @@
       { label: 'Clear dormant sessions…', gap: true, disabled: busy || !dormant, run: () => { if (currentRoomControls(context)) askClearDormant(dormant) } },
     ]
   }
-  function clearRoomDormant(context) {
+  function clearRoomDormant(context: RoomContext) {
     if (!currentRoomControls(context) || clearDormantConfirm?.visit !== context.visit) return
     clearDormantConfirm = null
     roomSessionController.run('clearDormant')
   }
 
-  function setPicked(ids) {
+  function setPicked(ids: string[]) {
     if (JSON.stringify(ids) !== JSON.stringify(pickedSessions)) { pickedSessions = ids; selectionRevision++ }
   }
-  function bulkChanged(record, value) {
+  function bulkChanged(record: BulkRecord, value: BulkValue) {
     if (!consolidationAlive) return
     const old = bulkBatches.find((b) => b.key === record.key)?.value
     const next = { ...record, value }
@@ -614,7 +732,7 @@
     }
     if (old?.busy && !value.busy && value.started && record.roomId === roomId && record.roomRequest === roomRequest) { loadMembers(); loadChanges() }
   }
-  function openBulkAction(action, context) {
+  function openBulkAction(action: BulkAction, context: SelectionContext) {
     if (!currentSelection(context)) return
     const sessions = context.ids.map((id) => hierarchy.find((m) => m.id === id)).filter(selectableSession).map((m) => ({ ...m }))
     if (!sessions.length) return
@@ -625,19 +743,19 @@
     activeBulk = record.key
     controller.load()
   }
-  function runBulk(key, force = false) { bulkControllers.get(key)?.run(force) }
-  function selectBulkFailures(batch) {
+  function runBulk(key: number, force = false) { bulkControllers.get(key)?.run(force) }
+  function selectBulkFailures(batch: BulkRecord) {
     if (batch.roomId !== roomId) return
     const failed = batch.value.results.filter((r) => bulkRetryable(r, batch.action)).map((r) => r.session)
     setPicked(pruneSelection(failed, hierarchy)); selectingSessions = true
     activeBulk = 0
   }
-  function selectionActions(x, y, anchor) {
+  function selectionActions(x: number, y: number, anchor?: HTMLElement) {
     selectionMenu = { x, y, anchor, roomId, ids: [...pickedSessions], key: selectionKey(roomId, pickedSessions) }
   }
   function closeSelectionMenu() { const anchor = selectionMenu?.anchor; selectionMenu = null; anchor?.focus?.() }
-  function currentSelection(context) { return context?.roomId === roomId && context.key === selectionKey(roomId, pickedSessions) }
-  function selectionItems(context) {
+  function currentSelection(context: SelectionContext | null | undefined) { return context?.roomId === roomId && context.key === selectionKey(roomId, pickedSessions) }
+  function selectionItems(context: SelectionContext) {
     return [
       { label: 'Select all sessions', run: () => { if (currentSelection(context)) setPicked(people.filter(selectableSession).map((m) => m.id)) } },
       { label: 'Message', run: () => messageSelection(context) },
@@ -650,11 +768,11 @@
     ]
   }
   // moveUnder opens the bulk "Move under…" panel for one session.
-  function moveUnder(m) {
+  function moveUnder(m: Member) {
     setPicked([m.id])
     openBulkAction('adopt', { roomId, ids: [m.id], key: selectionKey(roomId, [m.id]) })
   }
-  function messageSelection(context) {
+  function messageSelection(context: SelectionContext) {
     if (!currentSelection(context)) return
     const selected = context.ids.map((id) => hierarchy.find((m) => m.id === id)).filter(selectableSession)
     clearItemLink()
@@ -671,7 +789,7 @@
     selectingSessions = !selectingSessions
     if (!selectingSessions) { setPicked([]); selectionRevision++ }
   }
-  function pickSession(m, checked, begin = false) { if (begin) selectingSessions = true; setPicked(toggleSelection(pickedSessions, m, checked)) }
+  function pickSession(m: Member, checked: boolean, begin = false) { if (begin) selectingSessions = true; setPicked(toggleSelection(pickedSessions, m, checked)) }
   function openConsolidation() {
     const ids = pruneSelection(pickedSessions, hierarchy)
     if (ids.length < 2 || ids.length > 16) return
@@ -680,7 +798,7 @@
     consolidating = { roomId, sessions, key: ++consolidationView }
     menu = null
   }
-  function consolidationChanged(context, operation) {
+  function consolidationChanged(context: { key: number; roomId: string }, operation: { roomId: string }) {
     if (!consolidationAlive || (!consolidating || context.key !== consolidating.key) || context.roomId !== roomId || operation.roomId !== roomId) return
     selectingSessions = false
     setPicked([])
@@ -711,19 +829,19 @@
   function loadRuns() { return workflowData.loadList() }
   function loadRun() { return workflowData.loadDetail() }
 
-  async function pauseRun(run) {
+  async function pauseRun(run: RunSummary) {
     await api.pauseRun(run.id, !run.paused)
     say(run.paused ? `${run.name} resumed.` : `${run.name} is paused. Running agents finish; no new ones start.`)
     loadRuns()
     await loadRun()
   }
-  async function stopJob(job) {
+  async function stopJob(job: ShellJob) {
     await api.stopShell(roomId, job.id)
     say(`Shell job ${job.id} stopped.`)
     workflowData.loadJobs()
   }
 
-  function showRun(r) {
+  function showRun(r: { id: string }) {
     clearItemLink()
     detailRequest++
     drill = null
@@ -733,7 +851,7 @@
     loadRun()
   }
 
-  function loadQuestions() { return reload('questions', async (current) => {
+  function loadQuestions() { return reload('questions', async (current: () => boolean) => {
     const request = ++questionsRequest
     const id = roomId
     if (!id) return
@@ -742,7 +860,7 @@
       if (current() && id === roomId && request === questionsRequest) { questions = reconcileRows(questions, q?.[id] ?? []) }
     } catch (e) { if (current() && id === roomId && request === questionsRequest) loadError = String(e) }
   }) }
-  function loadVisuals() { return reload('visuals', async (current) => {
+  function loadVisuals() { return reload('visuals', async (current: () => boolean) => {
     try {
       const list = await api.visuals(roomId)
       if (current()) {
@@ -752,24 +870,24 @@
     } catch (e) { if (current()) loadError = String(e) }
   }) }
 
-  async function answerQuestion(id, choice, text) {
+  async function answerQuestion(id: string, choice: string, text: string) {
     await api.answerQuestion(roomId, id, choice, text)
     await loadQuestions()
   }
-  function openQuestion(post) {
+  function openQuestion(post: Post) {
     openView('questions')
     questionFocus = questionID(post)
     questionFocusRequest++
   }
 
-  function loadGoals() { return reload('goals', async (current) => {
+  function loadGoals() { return reload('goals', async (current: () => boolean) => {
     const id = roomId
     if (!id) return
     try { const list = await api.goals(id); if (current() && roomId === id) { goals = applyListPage('goals', list); await refreshFetchedGoal(current) } }
     catch (e) { if (current() && roomId === id) loadError = String(e) }
   }) }
 
-  function loadRules() { return reload('rules', async (current) => {
+  function loadRules() { return reload('rules', async (current: () => boolean) => {
     const id = roomId
     if (!id) return
     try {
@@ -785,7 +903,7 @@
   // A goal link may name a goal that no loaded page holds, such as an old
   // done goal: load it, then select it.
   // It resolves to the goal, or null when it cannot load.
-  async function openGoal(id) {
+  async function openGoal(id: string) {
     openView('goals'); goalId = id; showPins = false
     const have = goalById(id)
     if (!id || have) return have ?? null
@@ -796,15 +914,15 @@
       fetchedGoal = g
       return g
     } catch (e) {
-      if (rid === roomId) say(`Could not open goal ${id}: ${String(e?.message || e)}`)
+      if (rid === roomId) say(`Could not open goal ${id}: ${errorText(e)}`)
       return null
     }
   }
-  function goalById(id) {
+  function goalById(id: string) {
     return goals.find((g) => g.id === id) ?? (fetchedGoal?.id === id ? fetchedGoal : undefined)
   }
   // The fetched goal follows its change events, as listed goals do.
-  function trackFetchedGoal(change) {
+  function trackFetchedGoal(change: ListChange) {
     if (!fetchedGoal || change?.id !== fetchedGoal.id) return
     fetchedGoalVersion++
     fetchedGoal = change.op === 'delete' ? null : change.item ?? fetchedGoal
@@ -823,7 +941,7 @@
   // A failure of this background read shows no banner: a device without
   // the scope, or a busy engine, must not look like a broken room. The
   // sync popover reports errors when the owner acts.
-  function loadSync() { return reload('sync', async (current) => {
+  function loadSync() { return reload('sync', async (current: () => boolean) => {
     try {
       const s = await api.syncStatus()
       if (current()) syncStatus = s ?? {}
@@ -832,17 +950,17 @@
 
   // Refresh and Export start in the background; the saved operation shows
   // the progress. An error, such as one already running, shows in the popover.
-  async function syncAction(call) {
+  async function syncAction(call: (roomId: string, repo: string) => Promise<unknown>) {
     syncNote = ''
     try {
       await call(roomId, room.repo)
     } catch (e) {
-      syncNote = String(e?.message || e)
+      syncNote = errorText(e)
     }
     loadSync()
   }
 
-  function loadPins() { return reload('pins', async (current) => {
+  function loadPins() { return reload('pins', async (current: () => boolean) => {
     if (!roomId) return
     const id = roomId
     try {
@@ -853,7 +971,7 @@
     }
   }) }
 
-  function loadIssues(history = false) { return reload(history ? 'issueHistory' : 'issues', async (current) => {
+  function loadIssues(history = false) { return reload(history ? 'issueHistory' : 'issues', async (current: () => boolean) => {
     if (!roomId) return
     const id = roomId
     try {
@@ -870,19 +988,19 @@
   function openIssues() { showIssues = true; showPins = false; if (narrow) showMembers = false }
 
   // One issue action: run the call, then refresh both lists.
-  async function triageIssue(call) {
+  async function triageIssue(call: () => Promise<unknown>) {
     try {
       await call()
       loadError = ''
       loadIssues()
       if (showIssues) loadIssues(true)
     } catch (e) {
-      say(`Could not update the issue: ${String(e?.message || e)}`)
+      say(`Could not update the issue: ${errorText(e)}`)
     }
   }
 
   // Close needs a reason: the backend rejects an empty one.
-  function askCloseIssue(i) {
+  function askCloseIssue(i: RoomIssue) {
     ask = {
       title: 'Close issue',
       label: 'Reason',
@@ -895,7 +1013,7 @@
     }
   }
 
-  async function togglePin(p) {
+  async function togglePin(p: Post) {
     try {
       if (pinnedIds.has(p.id)) await api.unpin(roomId, p.id)
       else await api.pin(roomId, p.id)
@@ -907,7 +1025,7 @@
   }
 
   // Pins and links open the channel that contains the requested post.
-  async function jumpTo(id) {
+  async function jumpTo(id: string) {
     const request = ++detailRequest
     const rid = roomId
     drill = null
@@ -934,7 +1052,7 @@
     queue: (value) => (queue = value),
     error: (error) => (sessionError = error),
   })
-  function showSession(value, older = false) {
+  function showSession(value: SessionData, older = false) {
     session = mergeSessionPage(session, value, older, sessionReadingHistory)
     sessionError = ''
     // The root seat opened before root had a session of its own. Once RootSession returns the real
@@ -962,26 +1080,26 @@
   }
   function presentSession() { return sessionData.present() }
 
-  async function unqueue(q) {
+  async function unqueue(q: QueueItem) {
     await api.deletePendingSteer(drill.id, q.id)
     queue = queue.filter((x) => x.id !== q.id)
     say('Removed. The turn will not see that message.')
   }
 
-  async function dismissPendingPost(id, messageId) {
+  async function dismissPendingPost(id: string, messageId: string) {
     await api.dismissPendingPost(id, messageId, true)
     if (drill?.id === id) queue = queue.filter((post) => post.id !== messageId)
     say('Message dismissed. History stays available.')
   }
 
-  function markShown(list) { return readMarker.mark(list) }
+  function markShown(list: Post[]) { return readMarker.mark(list) }
 
   // Only messages visible in the selected channel become read.
   $effect(() => {
     if (!drill && isChannel(view)) markShown(posts)
   })
 
-  function loadReviewer() { return reload('reviewer', async (current) => {
+  function loadReviewer() { return reload('reviewer', async (current: () => boolean) => {
     const id = roomId
     if (!id) return
     const status = await api.reviewerStatus(id).catch(() => null)
@@ -989,20 +1107,20 @@
   }) }
 
   // A burst of PR events refreshes the reviewer once.
-  let reviewerTimer
+  let reviewerTimer: ReturnType<typeof setTimeout> | undefined
   function reviewerSoon() {
     clearTimeout(reviewerTimer)
     reviewerTimer = setTimeout(loadReviewer, 250)
   }
 
-  function loadChanges() { return reload('changes', async (current) => {
+  function loadChanges() { return reload('changes', async (current: () => boolean) => {
     const id = roomId
     try {
       const all = await api.changes(id)
       if (!current()) return
       changes = applyListPage('changes', all)
       prError = ''
-    } catch (e) { if (current()) prError = String(e?.message || e) }
+    } catch (e) { if (current()) prError = errorText(e) }
   }) }
 
   // Read navigation here; list state reads inside loaders must not become
@@ -1018,7 +1136,7 @@
     })
   })
 
-  function applyListPage(kind, page, append = false) {
+  function applyListPage<K extends ListKind>(kind: K, page: ListPage<ListKinds[K]>, append = false): ListKinds[K][] {
     const previous = listPages[kind]
     const merged = mergeListPage(previous, page, append)
     if (kind === 'jobs') merged.items.sort((a, b) => (b.started || '').localeCompare(a.started || ''))
@@ -1027,7 +1145,7 @@
     return merged.items
   }
 
-  function applyListItem(kind, change, rows) {
+  function applyListItem<K extends ListKind>(kind: K, change: ListChange, rows: ListKinds[K][] | null): ListKinds[K][] {
     const previous = listPages[kind] ?? { items: rows ?? [] }
     const items = patchListRows(previous.items, change, kind === 'changes' ? 'key' : 'id')
     if (kind === 'jobs') items.sort((a, b) => (b.started || '').localeCompare(a.started || ''))
@@ -1035,7 +1153,7 @@
     return items
   }
 
-  async function loadOlderLists(kinds) {
+  async function loadOlderLists(kinds: ListKind[]) {
     if (olderLoading) return
     const id = roomId, visit = roomRequest
     olderLoading = true
@@ -1049,7 +1167,7 @@
           await workflowData.loadJobs(page.cursor)
           continue
         }
-        await reload.patch(kind, async (current) => {
+        await reload.patch(kind, async (current: () => boolean) => {
           const selected = listPages[kind]
           if (!current() || id !== roomId || visit !== roomRequest || !selected?.older) return
           const next = await methods[kind](id, selected.cursor)
@@ -1079,30 +1197,30 @@
     untrack(() => { if (canLoadMentions) roomData.loadMentions() })
   })
 
-  async function untrackPR(pr) {
+  async function untrackPR(pr: ChangeRow) {
     try {
       await api.untrackPR(roomId, pr.key)
       say(`Dyna stopped watching PR #${pr.number}.`)
     } catch (e) {
-      say(String(e?.message || e))
+      say(errorText(e))
     }
     loadChanges()
   }
 
   // trackPR links a PR to a session from the pull-requests view.
-  async function trackPR(number, m) {
+  async function trackPR(number: number | string, m: Member) {
     try {
       await api.trackPR(roomId, m.id, number)
       say(`Dyna watches PR #${number} for ${m.name}.`)
     } catch (e) {
-      say(String(e?.message || e))
+      say(errorText(e))
     }
     loadChanges()
   }
 
   // askAgent puts a new-session line in the room composer, with the room's
   // default profile, so the owner reads and edits it before sending.
-  async function askAgent(task) {
+  async function askAgent(task: string) {
     if (!profiles.length) profiles = (await api.profiles().catch(() => [])) ?? []
     const p = profiles.find((x) => x.default) ?? profiles[0]
     if (!p) return say('Add a profile in Settings first.')
@@ -1111,18 +1229,18 @@
     setTimeout(() => composer?.focus(), 0)
   }
 
-  async function resumePR(pr) {
+  async function resumePR(pr: ChangeRow) {
     try {
       await api.resumePR(roomId, pr.key)
       say(`Dyna watches PR #${pr.number} again.`)
     } catch (e) {
-      say(String(e?.message || e))
+      say(errorText(e))
     }
     loadChanges()
   }
 
   // applyOpened shows what api.openRoom returned for the open room.
-  function applyOpened(o) {
+  function applyOpened(o: Opened) {
     const f = mergeFeedPage(feed && !feedAtBottom ? { ...feed, historyLoaded: true } : feed, o.feed)
     f.posts = reconcileRows(feed?.room.id === f.room.id ? feed.posts : [], f.posts ?? [])
     feed = f
@@ -1143,7 +1261,7 @@
 
   // Each request adds one bounded older page. Existing posts keep their
   // objects and unread marks until the room is left.
-  let earlierLoad = null
+  let earlierLoad: EarlierLoad | null = null
   const STEP = 50
   async function loadEarlier(direction = 'older', target = '', near = () => true) {
     const id = roomId
@@ -1179,7 +1297,7 @@
 
   // selectRoom loads a room and returns whether its navigation is still current.
   // One call brings the first screen; the room list refreshes beside it.
-  async function selectRoom(id, startView = GENERAL) {
+  async function selectRoom(id: string, startView = GENERAL) {
     clearItemLink(id, startView)
     const request = ++detailRequest
     roomRequest++
@@ -1240,7 +1358,7 @@
   }
 
   // openMember shows a member's profile card. The owner has no card.
-  async function openMember(m) {
+  async function openMember(m: Drill | null | undefined) {
     if (m?.rootSeat) { openSession(m); return }
     detailRequest++
     if (!m || m.owner) return
@@ -1257,7 +1375,7 @@
 
   // openAgent opens a session from the sidebar. An agent from the agents list
   // may live in another room; its room opens first and the list stays.
-  async function openAgent(m) {
+  async function openAgent(m: Member & { roomId?: string }) {
     navOpen = false
     if (m.roomId && m.roomId !== roomId) {
       const selecting = selectRoom(m.roomId)
@@ -1269,8 +1387,8 @@
   }
 
   // openSession drills into a member's full session view.
-  function openSession(m, turn = 0, initial = null, readOnly = false) {
-    if (m?.rootSeat) m = rootMember()
+  function openSession(source: Drill | { rootSeat: true }, turn = 0, initial: SessionData | null = null, readOnly = false) {
+    const m: Drill = source.rootSeat || !('id' in source) ? rootMember() : source
     clearItemLink()
     detailRequest++
     sessionVisit++
@@ -1296,13 +1414,14 @@
   }
 
   // The root seat has no session of its own to send to; @root reaches whoever holds it.
-  async function sendToSession(text, atts = [], forwardOf = '') {
+  async function sendToSession(text: string, atts: unknown[] = [], forwardOf = '') {
+    if (!drill) return
     const res = drill.rootSeat ? await api.send(roomId, '@root ' + text, '', atts, forwardOf) : await api.sendToSession(drill.id, text, atts, forwardOf)
     openSession(drill)
     return res
   }
 
-  function openAddress(addr) {
+  function openAddress(addr: string) {
     if (!room || addr === room.name) {
       drill = null
       return
@@ -1311,7 +1430,7 @@
     if (m) openMember(m)
   }
 
-  function mentionMember(m) {
+  function mentionMember(m: Member) {
     card = null
     drill = null
     const cur = draft.value.trim()
@@ -1324,7 +1443,7 @@
   // written after them. A reply to your own post leaves the draft alone.
   // A reply to a root post targets @root: root is an external orchestrator
   // that watches the room, not you.
-  function startReply(p) {
+  function startReply(p: Post) {
     reply = p
     if (!p.owner) {
       const body = draft.value.replace(/^\s*(?:@\S+(?:\s+|$))*/, '')
@@ -1339,7 +1458,7 @@
 
   // send goes through Go's one router: a "/<profile> <task>" draft starts a
   // session, anything else posts.
-  async function send(text, atts = [], forwardOf = '') {
+  async function send(text: string, atts: unknown[] = [], forwardOf = '') {
     const sent = roomId
     const draftKey = roomId + ':' + view
     const res = await api.send(sent, text, reply?.id ?? '', atts, forwardOf)
@@ -1357,7 +1476,7 @@
   }
 
   let reopening = $state('')
-  async function reopenSession(m) {
+  async function reopenSession(m: Member) {
     if (reopening || dismissing || !m.closed || !m.resumable) return
     const rid = roomId, visit = roomRequest, selection = sessionVisit
     reopening = m.id
@@ -1382,12 +1501,12 @@
     try {
       await api.returnSeat(rid)
     } catch (e) {
-      say(`Could not take back the root seat: ${String(e?.message || e)}`)
+      say(`Could not take back the root seat: ${errorText(e)}`)
       return
     }
     if (rid === roomId) await loadMembers()
   }
-  async function dismissSession(m) {
+  async function dismissSession(m: Member) {
     if (dismissing || reopening || !isFinished(m)) return
     const rid = roomId, visit = roomRequest, selection = sessionVisit
     dismissing = m.id
@@ -1406,7 +1525,7 @@
 
   // Expedite gives the goal's agents and PRs the first review and merge.
   // A goal that would replace another asks first.
-  async function expediteGoal(g) {
+  async function expediteGoal(g: Goal) {
     if (g.room && g.room !== roomId) return
     const action = expediteAction($expedite, g)
     if (action === 'replace') { confirm = { kind: 'expedite', goal: g, roomId }; return }
@@ -1422,24 +1541,24 @@
     if (id === roomId) await loadChanges()
   }
   // Menu items for the goal an agent holds, or its nearest ancestor holds; with several goals, one item for each.
-  function expediteItems(m) {
+  function expediteItems(m: Member) {
     if (m.closed) return []
     const held = heldGoals(m, hierarchy, knownGoals)
     return held.map((g) => ({
       label: expediteAction($expedite, g) === 'stop' ? `Stop expediting${held.length > 1 ? ` ${g.id}` : ' goal'}` : held.length > 1 ? `Expedite goal ${g.id}: ${g.text.slice(0, 40)}` : 'Expedite goal',
-      run: () => expediteGoal(g).catch((e) => say(String(e?.message || e))),
+      run: () => expediteGoal(g).catch((e) => say(errorText(e))),
     }))
   }
 
   // Session menu: safe actions first, then the two that stop work, set
   // apart in coral. Both of those ask first.
-  function menuItems(m) {
+  function menuItems(m: Member) {
     const items = [
       { label: m.closed ? 'Open transcript' : 'Message', run: () => openSession(m) },
       { label: 'Open profile', run: () => openMember(m) },
     ]
-    if (isFinished(m)) items.push({ label: dismissing === m.id ? 'Dismissing…' : 'Dismiss', run: () => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${String(e?.message || e)}`)) })
-    if (m.closed && m.resumable) items.push({ label: reopening === m.id ? 'Reopening…' : 'Reopen', run: () => reopenSession(m).catch((e) => say(`Could not reopen ${m.name}: ${String(e?.message || e)}`)) })
+    if (isFinished(m)) items.push({ label: dismissing === m.id ? 'Dismissing…' : 'Dismiss', run: () => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${errorText(e)}`)) })
+    if (m.closed && m.resumable) items.push({ label: reopening === m.id ? 'Reopening…' : 'Reopen', run: () => reopenSession(m).catch((e) => say(`Could not reopen ${m.name}: ${errorText(e)}`)) })
     // The internal root holds the root seat, so it is never consolidated.
     if (!m.closed && m.role !== 'root') items.push({ label: 'Consolidate sessions…', run: () => { selectingSessions = true; setPicked([m.id]); showMembers = true; showPins = false } })
     if (!m.closed) items.push({ label: 'Mention in composer', run: () => mentionMember(m) })
@@ -1455,7 +1574,7 @@
 
   // Room menu: everyday actions first, then Delete in coral, which asks for
   // the room's name.
-  function roomMenuItems(r) {
+  function roomMenuItems(r: Room) {
     return roomActionItems(actionRegistry(r))
   }
 
@@ -1471,17 +1590,17 @@
     return items
   }
 
-  async function roomAction(fn, done) {
+  async function roomAction(fn: () => Promise<unknown>, done: string) {
     try {
       await fn()
       say(done)
       await loadRooms()
     } catch (e) {
-      say(String(e?.message || e))
+      say(errorText(e))
     }
   }
 
-  function renameRoom(r) {
+  function renameRoom(r: Room) {
     ask = {
       title: 'Rename room',
       label: 'Name',
@@ -1497,7 +1616,7 @@
     }
   }
 
-  function deleteRoom(r) {
+  function deleteRoom(r: Room) {
     ask = {
       title: `Delete ${roomLabel(r)}?`,
       lines: ['This removes the room, its feed and its pins. Records of closed sessions stay.', 'A room with live work cannot be deleted. Stop its sessions and runs first.', `Type ${r.name} to confirm.`],
@@ -1516,7 +1635,7 @@
     }
   }
 
-  function steerAgent(run, a) {
+  function steerAgent(run: RunSummary, a: RunAgent) {
     ask = {
       title: `Steer ${a.label || 'agent ' + a.id}`,
       lines: [`This message goes to this agent of ${run.name} while it works.`],
@@ -1531,7 +1650,7 @@
     }
   }
 
-  async function runStarted(id) {
+  async function runStarted(id?: string) {
     starting = false
     say('Workflow started.')
     await loadRuns()
@@ -1544,15 +1663,15 @@
     anchor?.focus?.()
   }
 
-  let toastTimer
-  function say(text) {
+  let toastTimer: ReturnType<typeof setTimeout> | undefined
+  function say(text: string) {
     toast = text
     clearTimeout(toastTimer)
     toastTimer = setTimeout(() => (toast = ''), 3200)
   }
 
   // guardItems lists what a close-guard error names: "responsibilities: cannot close:\n- ...".
-  function guardItems(msg) {
+  function guardItems(msg: string) {
     const items = msg.split('\n').filter((l) => l.startsWith('- ') && !l.startsWith('- or close anyway')).map((l) => l.slice(2))
     return items.length ? items : [msg]
   }
@@ -1613,7 +1732,7 @@
         confirm = null
         loadGoals()
       } catch (e) {
-        confirm = { ...confirm, busy: false, error: String(e?.message || e) }
+        confirm = { ...confirm, busy: false, error: errorText(e) }
       }
       return
     }
@@ -1625,7 +1744,7 @@
         loadRuns()
         loadRun()
       } catch (e) {
-        confirm = { ...confirm, busy: false, error: String(e?.message || e) }
+        confirm = { ...confirm, busy: false, error: errorText(e) }
       }
       return
     }
@@ -1641,15 +1760,15 @@
       loadMembers()
       loadChanges()
     } catch (e) {
-      const msg = String(e?.message || e)
+      const msg = errorText(e)
       // Force is offered only when the automatic handoff fails.
       if (kind === 'close' && msg.startsWith('responsibilities:')) confirm = { kind: 'forceclose', m, items: guardItems(msg) }
       else confirm = { ...confirm, busy: false, error: msg }
     }
   }
 
-  let roomTimer
-  const roomRefreshes = new Set()
+  let roomTimer: ReturnType<typeof setTimeout> | undefined
+  const roomRefreshes = new Set<string>()
   function soonRooms(kind = 'rooms') {
     roomRefreshes.add(kind)
     clearTimeout(roomTimer)
@@ -1696,7 +1815,7 @@
 
   // A push (or a link to #room=<id>&post=<id>) names a room to open. Only
   // ids in the expected shape get through.
-  async function openTarget(id, post, startView = GENERAL) {
+  async function openTarget(id: string, post: string | null | undefined, startView = GENERAL) {
     if (!ROOM.test(id || '') || !rooms.some((r) => r.id === id)) return false
     const selecting = selectRoom(id, startView)
     const request = detailRequest
@@ -1753,8 +1872,8 @@
     }
   }
 
-  function applyItemEvent(ev) {
-    if (!hasItemChange(ev.change) || !roomId || ev.roomId !== roomId) return false
+  function applyItemEvent(ev: StreamEvent) {
+    if (!('change' in ev) || !hasItemChange(ev.change) || !roomId || ev.roomId !== roomId) return false
     if (ev.kind === 'members') {
       roomData.patchMembers(ev.change)
       return true
@@ -1788,19 +1907,20 @@
     return false
   }
 
-  function handle(ev) {
+  function handle(ev: StreamEvent) {
+    const evRoom = 'roomId' in ev ? ev.roomId : undefined
     if (['prs', 'changes', 'resync'].includes(ev.kind)) refreshHeldComments()
     const item = applyItemEvent(ev)
     home?.event(ev)
     if (ev.kind === 'computer') return handleComputer(ev)
     if (ev.kind === 'resync') return resync()
-    if (ev.kind === 'questions' && ev.roomId === roomId && !item) loadQuestions()
+    if (ev.kind === 'questions' && evRoom === roomId && !item) loadQuestions()
     if (reloadsUnread(ev, roomId, item)) soonRooms('feed')
-    if (ev.kind === 'posts' && ev.roomId === roomId) {
+    if (ev.kind === 'posts' && evRoom === roomId) {
       if (changesVisuals(ev)) loadVisuals()
       if (roomSessionController && (roomControls?.loading || roomControls?.state?.paused !== false)) roomSessionController.load()
     }
-    if (ev.kind === 'posts' && feed && ev.roomId === feed.room.id) {
+    if (ev.kind === 'posts' && feed && evRoom === feed.room.id) {
       const seen = new Set(feed.posts.map((p) => p.id))
       const add = (ev.posts ?? []).filter((p) => !seen.has(p.id))
       if (add.length) {
@@ -1811,28 +1931,28 @@
         }
       }
     }
-    if (ev.kind === 'goals' && ev.roomId === roomId) { if (!item) loadGoals(); loadRules() }
-    if (ev.kind === 'goals' && ev.roomId !== roomId && agentsVisible()) loadAgents(rooms)
-    if (ev.kind === 'pins' && ev.roomId === roomId) loadPins()
-    if (ev.kind === 'issues' && ev.roomId === roomId) { loadIssues(); if (showIssues) loadIssues(true) }
-    if (['room.paused', 'room.resumed'].includes(ev.kind) && (!ev.roomId || ev.roomId === roomId)) roomSessionController?.load()
+    if (ev.kind === 'goals' && evRoom === roomId) { if (!item) loadGoals(); loadRules() }
+    if (ev.kind === 'goals' && evRoom !== roomId && agentsVisible()) loadAgents(rooms)
+    if (ev.kind === 'pins' && evRoom === roomId) loadPins()
+    if (ev.kind === 'issues' && evRoom === roomId) { loadIssues(); if (showIssues) loadIssues(true) }
+    if (['room.paused', 'room.resumed'].includes(ev.kind) && (!evRoom || evRoom === roomId)) roomSessionController?.load()
     // A prs event without a row says the room's PR settings changed.
-    if ((ev.kind === 'prs' || ev.kind === 'changes') && (!ev.roomId || ev.roomId === roomId)) {
+    if ((ev.kind === 'prs' || ev.kind === 'changes') && (!evRoom || evRoom === roomId)) {
       mergeVersion += 1
       reviewerSoon()
       if (ev.kind === 'changes' && !item) loadChanges()
     }
-    if (ev.kind === 'session' && ev.roomId === roomId && ev.change?.id === drill?.id) { loadSession(); changesTracker?.poke() }
-    if (ev.kind === 'members' && ev.roomId === roomId) {
+    if (ev.kind === 'session' && evRoom === roomId && ev.change?.id === drill?.id) { loadSession(); changesTracker?.poke() }
+    if (ev.kind === 'members' && evRoom === roomId) {
       if (!item) loadMembers()
       if (ev.change?.controls) soonRooms('controls')
     }
-    if (ev.kind === 'posts' && drill && ev.roomId === roomId) {
+    if (ev.kind === 'posts' && drill && evRoom === roomId) {
       sessionData.schedule()
     }
-    if (['goals', 'questions', 'prs', 'jobs', 'runs'].includes(ev.kind) && (!ev.roomId || ev.roomId === roomId)) soonRooms('members')
-    if (ev.kind === 'jobs' && ev.roomId === roomId && !item) loadJobs()
-    if (ev.kind === 'runs' && ev.roomId === roomId) {
+    if (['goals', 'questions', 'prs', 'jobs', 'runs'].includes(ev.kind) && (!evRoom || evRoom === roomId)) soonRooms('members')
+    if (ev.kind === 'jobs' && evRoom === roomId && !item) workflowData.loadJobs()
+    if (ev.kind === 'runs' && evRoom === roomId) {
       loadRuns()
       if (openRun) loadRun()
     }
@@ -1842,8 +1962,9 @@
 
   // Ctrl+B toggles the room sidebar, as in most editors. It works from the
   // composer too; a textarea has no use for the key.
-  function shortcut(e) {
-    if (e.key === 'Escape' && (e.defaultPrevented || e.target?.closest?.('[role="menu"], [role="dialog"], [role="alertdialog"]'))) return
+  const inside = (e: Event, selector: string) => e.target instanceof Element && !!e.target.closest(selector)
+  function shortcut(e: KeyboardEvent) {
+    if (e.key === 'Escape' && (e.defaultPrevented || inside(e, '[role="menu"], [role="dialog"], [role="alertdialog"]'))) return
     if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
       e.preventDefault()
       showPalette = !showPalette
@@ -1851,7 +1972,7 @@
     }
     // Ctrl+F finds in the whole room while its feed shows. In the find box, in
     // another view, or under a dialog or menu, the browser's own find takes the key.
-    if (e.key.toLowerCase() === 'f' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && feedShown && !showPalette && !e.target?.closest?.('.find, [role="menu"], [role="dialog"], [role="alertdialog"]')) {
+    if (e.key.toLowerCase() === 'f' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && feedShown && !showPalette && !inside(e, '.find, [role="menu"], [role="dialog"], [role="alertdialog"]')) {
       e.preventDefault()
       openFind()
       return
@@ -1904,7 +2025,7 @@
     find: 'M8.8 14.1a5.3 5.3 0 1 0 0-10.6 5.3 5.3 0 0 0 0 10.6ZM12.8 12.8l3.7 3.7',
   }
 
-  function openPR(n) {
+  function openPR(n: number | string) {
     history.pushState({ pr: true }, '', prHash(roomId, n))
     openView('github')
     prLink = { roomId, pr: String(n), tab: 'conversation' }
@@ -1951,7 +2072,7 @@
 
   // routeHere follows an address in the open room without reloading the room.
   // It returns false when the screen already shows the address.
-  function routeHere(r) {
+  function routeHere(r: Route) {
     // A followed address always ends a detail navigation that is still loading:
     // its older response must not open over the screen the reader asked for.
     detailRequest++
@@ -1960,7 +2081,7 @@
     return { roomId, request: detailRequest }
   }
 
-  function openView(v) {
+  function openView(v: string) {
     clearItemLink(roomId, v)
     detailRequest++
     prLink = null
@@ -1983,7 +2104,7 @@
   }
 
   // Completion links open stored UI details. They never invoke a command.
-  async function openDetail(target) {
+  async function openDetail(target: DetailTarget) {
     let request = ++detailRequest
     const rid = target.roomId || roomId
     card = null
@@ -2010,7 +2131,7 @@
           openSession(data.member, target.turn, data)
         }
       } catch (e) {
-        if (request === detailRequest) say(String(e?.message || e))
+        if (request === detailRequest) say(errorText(e))
       }
     }
   }
@@ -2022,7 +2143,7 @@
     showSettings = true
   }
 
-  function createProfile(selection) {
+  function createProfile(selection: ModelSelection) {
     settingsAt = { start: 'profiles', pairNow: false, initialSelection: selection }
     settingsKey++
     showSettings = true
@@ -2030,7 +2151,7 @@
 
   // Slash argument parsing stays here; menu and palette actions call the
   // same handlers with no argument.
-  let templates = $state(null)
+  let templates = $state<{ name: string; description?: string }[] | null>(null)
   function loadTemplates() {
     if (!templates) api.listTemplates().then((t) => (templates = t ?? []), () => (templates = []))
     return templates ?? []
@@ -2079,14 +2200,14 @@
   // list loads only for the Runs view, so an open palette loads it too.
   let targets = $derived(showPalette && roomId ? paletteTargets(hierarchy, runs?.runs ?? [], changes ?? []) : [])
   $effect(() => { if (showPalette && roomId && runs === null) untrack(loadRuns) })
-  function openPaletteTarget(t) {
+  function openPaletteTarget(t: PaletteTarget) {
     if (t.kind === 'session') openSession(t.session)
     else if (t.kind === 'run') showRun(t.run)
     else openPR(t.pr)
   }
 
   // A room chosen in the palette. A room just made is not in the list yet.
-  async function paletteRoom(id) {
+  async function paletteRoom(id: string) {
     await loadRooms()
     selectRoom(id)
   }
@@ -2142,15 +2263,15 @@
     const engine = engineWatch((s) => (engineStatus = s), browserEngine(engineCheck))
     const off = onEvent((ev) => { handle(ev); voiceWidget?.event(ev) }, (up) => { link.streamState(up); engine.state(up) })
     registerWorker()
-    const fromWorker = (e) => {
+    const fromWorker = (e: MessageEvent) => {
       if (e.data?.type !== 'open') return
       callPush = callLink(e.data.room, e.data.call ?? null) ?? callPush
       openTarget(e.data.room, e.data.post)
     }
     navigator.serviceWorker?.addEventListener('message', fromWorker)
     window.addEventListener('hashchange', hashChanged)
-    const clicks = (e) => {
-      const a = e.target.closest?.('a[href]')
+    const clicks = (e: MouseEvent) => {
+      const a = e.target instanceof Element ? e.target.closest<HTMLAnchorElement>('a[href]') : null
       if (!a) return
       e.preventDefault()
       const target = parseDetailHref(a.getAttribute('href'))
@@ -2418,7 +2539,7 @@
         {:else if view === 'jobs'}
           {#key room.id}<Jobs older={listPages.jobs?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['jobs'])} {jobs} error={jobsError} jobId={openJob} {narrow} onstop={stopJob} />{/key}
         {:else if view === 'goals'}
-          {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id) => (goalId = id)} ongoal={openGoal} onexpedite={(g) => expediteGoal(g).catch((e) => say(String(e?.message || e)))} />{/key}
+          {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id) => (goalId = id)} ongoal={openGoal} onexpedite={(g) => expediteGoal(g).catch((e) => say(errorText(e)))} />{/key}
         {:else if view === 'runs'}
           {#if openRun}
             {#key openRun}<Run detail={runDetail} error={runError} oncancel={(run) => (confirm = { kind: 'cancelrun', run })} onpause={pauseRun} onsteer={steerAgent} />{/key}
@@ -2448,7 +2569,7 @@
         <Issues open={issues} history={issueHistory} onhistory={() => loadIssues(true)} onclose={() => (showIssues = false)}
           ongoal={(i) => triageIssue(() => api.issueGoal(roomId, i.id))} onexport={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} oncloseissue={askCloseIssue} />
       {:else if roomId && room && showMembers && !drill}
-        <Members computers={computers ?? []} onopencomputer={(m) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} controlMembers={hierarchy} onroomactions={roomSessionActions} onresumeroom={() => roomSessionController?.run('resume')} onreloadcontrols={() => roomSessionController?.load()} oncleardormant={askClearDormant} ondismiss={(m) => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${String(e?.message || e)}`))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={drill?.address ?? ''} closed={showClosed} onselect={openMember} onmenu={(m, x, y, anchor) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
+        <Members computers={computers ?? []} onopencomputer={(m) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} controlMembers={hierarchy} onroomactions={roomSessionActions} onresumeroom={() => roomSessionController?.run('resume')} onreloadcontrols={() => roomSessionController?.load()} oncleardormant={askClearDormant} ondismiss={(m) => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${errorText(e)}`))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={drill?.address ?? ''} closed={showClosed} onselect={openMember} onmenu={(m, x, y, anchor) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
       {/if}
       </div>
     </div>
