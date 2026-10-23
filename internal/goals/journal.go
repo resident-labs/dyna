@@ -33,7 +33,8 @@ type JournalLine struct {
 
 // An Event is one journal line about a goal or item: a note, or an item
 // state change. Its ID is "e" and the byte offset of its line. Event lines
-// carry kind "event"; keeper entries carry no kind.
+// carry kind "event"; a legacy keeper entry, converted by convertJournals in
+// sqlite.go, carries no kind.
 type Event struct {
 	ID    string    `json:"id"`
 	Goal  string    `json:"goal"`

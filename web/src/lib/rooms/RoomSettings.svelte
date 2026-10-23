@@ -312,7 +312,6 @@
   <Section title="Services" lede="The agents that work for this room. Pick Auto or one profile.">
     <Group>
       <div class="svc"><ServiceHeader {roomId} role="reviewer" onchange={onreviewer} /></div>
-      <div class="svc"><ServiceHeader {roomId} role="keeper" /></div>
     </Group>
   </Section>
 {:else if section === 'rules'}

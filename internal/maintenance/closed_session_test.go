@@ -47,13 +47,13 @@ func TestClosedSessionsGoAfterThirtyDays(t *testing.T) {
 		t.Fatalf("lock ses_busy: %v, %v", owned, err)
 	}
 	defer unlock()
-	// keep takes other stores' locks, so the sweep must not hold the
+	// retain takes other stores' locks, so the sweep must not hold the
 	// session's own lock while it asks.
-	keep := func(_ context.Context, id string) (bool, error) {
+	retain := func(_ context.Context, id string) (bool, error) {
 		if id != "ses_busy" {
 			release, owned, err := store.TryLock(filepath.Join(sessions, id, "session.lock"))
 			if err != nil || !owned {
-				t.Errorf("keep(%s) ran while the sweep held the session lock: %v", id, err)
+				t.Errorf("retain(%s) ran while the sweep held the session lock: %v", id, err)
 			} else {
 				release()
 			}
@@ -61,7 +61,7 @@ func TestClosedSessionsGoAfterThirtyDays(t *testing.T) {
 		return id == "ses_kept", nil
 	}
 	run := func() maintenance.Result {
-		result, err := maintenance.Run(context.Background(), maintenance.Options{Now: now, Repos: []string{}, ClosedSessionKeeper: func(context.Context) (func(context.Context, string) (bool, error), error) { return keep, nil }})
+		result, err := maintenance.Run(context.Background(), maintenance.Options{Now: now, Repos: []string{}, RetainClosedSession: func(context.Context) (func(context.Context, string) (bool, error), error) { return retain, nil }})
 		if err != nil {
 			t.Fatal(err)
 		}
