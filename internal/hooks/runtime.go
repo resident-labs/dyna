@@ -120,7 +120,7 @@ func (s Service) runtime(id string, fn func(*state) error) error {
 		return err
 	}
 	ctx := context.Background()
-	key := filepath.Base(s.dir(id))
+	key := s.key(id)
 	return statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		var st state
 		var body []byte
@@ -153,4 +153,26 @@ func (s Service) runtime(id string, fn func(*state) error) error {
 ON CONFLICT(repo) DO UPDATE SET body=excluded.body`, key, body)
 		return err
 	})
+}
+
+// runtimeState reads the stored schedule state of one hook scope without the
+// writer lock that a change takes. A scope with no state yet reads as empty.
+func (s Service) runtimeState(ctx context.Context, id string) (state, error) {
+	db, err := s.runtimeDB()
+	if err != nil {
+		return state{}, err
+	}
+	var body []byte
+	err = db.QueryRowContext(ctx, "SELECT body FROM hook_runtime WHERE repo=?", s.key(id)).Scan(&body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return state{}, nil
+	}
+	if err != nil {
+		return state{}, err
+	}
+	var st state
+	if err := json.Unmarshal(body, &st); err != nil {
+		return state{}, err
+	}
+	return st, nil
 }

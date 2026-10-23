@@ -96,6 +96,17 @@ export function ago(iso: string | number | Date = NaN): string {
   return `${Math.floor(s / 86400)}d ago`
 }
 
+// until reads a future time the way ago reads a past one: how long from now.
+export function until(iso: string | number | Date = NaN): string {
+  const t = new Date(iso).getTime()
+  if (!t || t < 0) return ''
+  const s = Math.max(0, (t - Date.now()) / 1000)
+  if (s < 60) return 'in under a minute'
+  if (s < 3600) return `in ${Math.floor(s / 60)}m`
+  if (s < 86400) return `in ${Math.floor(s / 3600)}h`
+  return `in ${Math.floor(s / 86400)}d`
+}
+
 export function duration(a: string | number | Date = NaN, b?: string | number | Date | null): string {
   const start = new Date(a).getTime()
   const end = b && new Date(b).getTime() > 0 ? new Date(b).getTime() : Date.now()

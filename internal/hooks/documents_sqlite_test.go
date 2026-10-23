@@ -74,6 +74,8 @@ func TestHookDocumentImportMakesSQLAuthoritative(t *testing.T) {
 		return path
 	}
 	raw := `{"repo":"/main/imported","future":9007199254740993,"hooks":[{"name":"imported","event":"after-land","command":"true"}]}`
+	// The v4 migration stamps the scope of a hook stored before scope existed.
+	stamped := `{"repo":"/main/imported","future":9007199254740993,"hooks":[{"name":"imported","event":"after-land","command":"true","scope":"repository"}]}`
 	key := filepath.Base(s.dir("repo"))
 	path := write(key, raw)
 	empty := `{"repo":"/main/empty","hooks":[]}`
@@ -96,7 +98,7 @@ func TestHookDocumentImportMakesSQLAuthoritative(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got string
-	if err := db.QueryRow("SELECT body FROM hook_documents WHERE repo=?", key).Scan(&got); err != nil || got != raw {
+	if err := db.QueryRow("SELECT body FROM hook_documents WHERE repo=?", key).Scan(&got); err != nil || got != stamped {
 		t.Fatalf("immediate import = %s, %v", got, err)
 	}
 	if err := db.QueryRow("SELECT body FROM hook_documents WHERE repo='empty'").Scan(&got); err != nil || got != empty {

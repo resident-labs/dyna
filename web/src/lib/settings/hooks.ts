@@ -22,6 +22,38 @@ export function failLabel(onFail: string): string {
   return onFail === 'block' ? 'Block' : 'Alert'
 }
 
+// isBuiltin is true for a hook the engine seeds and runs in its own process.
+// Its command is fixed, it cannot be removed, and the owner changes only its
+// interval, timeout and switch.
+export function isBuiltin(h: Pick<Hook, 'builtin'>): boolean {
+  return !!h.builtin
+}
+
+// runByHand is the command that runs a global hook now, built-in or not.
+export function runByHand(h: Pick<Hook, 'name'>): string {
+  return `dyna git hooks run ${h.name} --global`
+}
+
+// scopeOf reads a stored hook's scope. A hook stored before scope existed
+// belongs to its repository.
+export function scopeOf(h: Pick<Hook, 'scope'>): 'repository' | 'global' {
+  return h.scope === 'global' ? 'global' : 'repository'
+}
+
+// The two screens of the Hooks pane: one repository's hooks, or the machine's.
+export type HookScope = 'repository' | 'global'
+
+// authorLabel names who added a hook. A stored hook may record the owner, the
+// engine, or the session that asked for it, and a card shows a name for each
+// instead of a raw session ID.
+export function authorLabel(addedBy: string | undefined): string {
+  if (!addedBy) return 'someone'
+  if (addedBy === 'owner') return 'you'
+  if (addedBy === 'engine') return 'Dyna'
+  if (addedBy.startsWith('ses_')) return 'a session'
+  return addedBy
+}
+
 // Runs come oldest first. The pane shows newest first.
 export function newestFirst<R extends Pick<HookRun, 'startedAt'>>(runs: R[] | null | undefined): R[] {
   return [...(runs ?? [])].sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))

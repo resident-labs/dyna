@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"path/filepath"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
@@ -22,7 +21,7 @@ func (s Service) documentsDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "hooks.documents", 3, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "hooks.documents", 4, func(conn *sql.Conn, old int) error {
 		if old < 1 {
 			if _, err := conn.ExecContext(context.Background(), documentsSchema); err != nil {
 				return err
@@ -33,7 +32,10 @@ func (s Service) documentsDB() (*sql.DB, error) {
 				return err
 			}
 		}
-		return migrateDocumentFields(conn)
+		if err := migrateDocumentFields(conn); err != nil {
+			return err
+		}
+		return migrateDocumentScope(conn)
 	})
 	return db, err
 }
@@ -72,6 +74,12 @@ func readDocument(ctx context.Context, q documentQuerier, key string) (document,
 	if err := json.Unmarshal(raw, &d); err != nil {
 		return d, err
 	}
+	for i := range d.Hooks {
+		// A hook stored before scope existed belongs to its repository.
+		if d.Hooks[i].Scope == "" {
+			d.Hooks[i].Scope = ScopeRepository
+		}
+	}
 	return d, nil
 }
 
@@ -83,7 +91,7 @@ func (s Service) update(ctx context.Context, id string, fn func(*document) error
 	if err != nil {
 		return err
 	}
-	key := filepath.Base(s.dir(id))
+	key := s.key(id)
 	return statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		d, err := readDocument(ctx, conn, key)
 		if err != nil {
@@ -101,7 +109,7 @@ func (s Service) load(ctx context.Context, id string) ([]Hook, error) {
 	if err != nil {
 		return nil, err
 	}
-	d, err := readDocument(ctx, db, filepath.Base(s.dir(id)))
+	d, err := readDocument(ctx, db, s.key(id))
 	if err != nil {
 		return nil, err
 	}

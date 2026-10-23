@@ -127,6 +127,7 @@ export interface HookEvent {
   label?: string
   command?: string
   state: HookState
+  builtin?: boolean
   durationMs?: number
   detail?: string
 }
@@ -1030,6 +1031,7 @@ export function isHookEvent(v: unknown): v is HookEvent {
     (v.label === undefined || typeof v.label === "string") &&
     (v.command === undefined || typeof v.command === "string") &&
     HOOK_STATE.has(v.state) &&
+    (v.builtin === undefined || typeof v.builtin === "boolean") &&
     (v.durationMs === undefined || Number.isInteger(v.durationMs)) &&
     (v.detail === undefined || typeof v.detail === "string")
 }

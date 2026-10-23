@@ -11,12 +11,12 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/cihealth"
-	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/notices"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/runstore"
@@ -28,6 +28,11 @@ import (
 )
 
 const runTimeout = 2 * time.Minute
+
+// pass holds one maintenance pass at a time. The hourly built-in hook and the
+// loop's disk-pressure pass both call Run, and two passes must not delete the
+// same trees at once. A pass that waits for the lock stops if its context ends.
+var pass = make(chan struct{}, 1)
 
 // Result describes completed removals and the reasons other trees were kept.
 type Result struct {
@@ -66,7 +71,14 @@ func CleanBranch(ctx context.Context, repos []string, branch string) (Result, er
 }
 
 // Run collects worktrees before cleaning scratch files. The total pass is bounded.
+// One pass runs at a time, so the schedule and a by-hand run never overlap.
 func Run(ctx context.Context, options ...Options) (Result, error) {
+	select {
+	case pass <- struct{}{}:
+		defer func() { <-pass }()
+	case <-ctx.Done():
+		return Result{}, ctx.Err()
+	}
 	var opts Options
 	if len(options) > 0 {
 		opts = options[0]
@@ -288,6 +300,11 @@ func (s *scheduler) tick(ctx context.Context, now time.Time, low []lowDisk, run 
 	firstPressure := pressure && !s.pressure
 	s.pressure = pressure
 	s.low = low
+	// The routine hourly pass is the built-in maintenance hook's job, so this
+	// loop runs only while disk pressure holds, and then at most once an hour.
+	if !pressure {
+		return nil
+	}
 	if !firstPressure && !s.lastRun.IsZero() && now.Sub(s.lastRun) < time.Hour {
 		return nil
 	}
@@ -323,20 +340,44 @@ func (s *scheduler) tick(ctx context.Context, now time.Time, low []lowDisk, run 
 // whether a long-closed session must be retained.
 type ClosedSessionRetainer func(context.Context) (retain func(context.Context, string) (bool, error), err error)
 
-// Loop checks pressure each minute and runs cleanup at least once per hour.
-// It executes passes serially and stops when the host context is canceled.
-// retainer is passed to each pass as Options.RetainClosedSession.
-func Loop(ctx context.Context, logf func(string, ...any), retainer ClosedSessionRetainer) {
-	loop(ctx, logf, hooks.New(), retainer)
+// Pass is the scheduled maintenance entry point: one pass of Run with the
+// defaults the engine uses for a timer tick, recorded so
+// `dyna maintenance status` lists it. The built-in maintenance hook calls it.
+// Disk-pressure cleanup stays in the engine's own loop.
+func Pass(ctx context.Context, retain ClosedSessionRetainer, logf func(string, ...any)) (Result, error) {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	start := time.Now()
+	result, err := Run(ctx, Options{Logf: logf, RetainClosedSession: retain})
+	logf("maintenance: %s", result.Summary())
+	if saveErr := SaveReport(store.DataDir(), start, time.Since(start), result, err); saveErr != nil {
+		logf("maintenance report: %v", saveErr)
+	}
+	return result, err
 }
 
-type lifecycleHooks interface {
+// Loop checks disk pressure each minute and runs a cleanup pass while space is
+// low, at most once an hour. The routine hourly pass is the built-in
+// maintenance hook's job.
+// It executes passes serially and stops when the host context is canceled.
+// retainer is passed to each pass as Options.RetainClosedSession. hookService
+// records schedule runs; the engine passes the service that holds the built-in
+// table, so global hooks run too.
+func Loop(ctx context.Context, logf func(string, ...any), hookService LifecycleHooks, retainer ClosedSessionRetainer) {
+	loop(ctx, logf, hookService, retainer)
+}
+
+// LifecycleHooks is the hook schedule the maintenance loop drives: it owns the
+// repositories whose hooks it stores, and it starts each due run.
+type LifecycleHooks interface {
 	ReconcileInstall(context.Context) error
 	Repositories(context.Context) ([]string, error)
 	Tick(context.Context, string, time.Time) error
+	TickGlobal(context.Context, time.Time) error
 }
 
-func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleHooks, retainer ClosedSessionRetainer) {
+func loop(ctx context.Context, logf func(string, ...any), hookService LifecycleHooks, retainer ClosedSessionRetainer) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -351,6 +392,7 @@ func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleH
 	timer := time.NewTicker(time.Minute)
 	defer timer.Stop()
 	var schedule scheduler
+	var globalTick sync.Mutex
 	for {
 		if ctx.Err() != nil {
 			return
@@ -379,6 +421,17 @@ func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleH
 			if hookErr != nil {
 				logf("hooks: %v", hookErr)
 			}
+		}
+		// A built-in pass can take minutes, so the global schedule runs on its
+		// own goroutine instead of holding the once-a-minute loop. The next tick
+		// claims nothing until the interval is due again.
+		if globalTick.TryLock() {
+			go func() {
+				defer globalTick.Unlock()
+				if err := hookService.TickGlobal(ctx, time.Now()); err != nil && ctx.Err() == nil {
+					logf("global hooks: %v", err)
+				}
+			}()
 		}
 		v, err := settings.Load("")
 		var low []lowDisk
