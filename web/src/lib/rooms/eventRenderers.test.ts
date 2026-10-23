@@ -175,6 +175,41 @@ const fixtures: Record<string, EventPayload> = {
     ]),
   ),
   'merge/decision': { note: 'Keep the queue paused until the flake is fixed' },
+  ...Object.fromEntries(
+    (['renamed', 'promoted', 'adopted', 'account', 'instructions', 'seat', 'spawned'] as const).map((type) => [
+      `session/${type}`,
+      {
+        type,
+        session: 'dyna:notice-session',
+        name: type === 'renamed' || type === 'spawned' ? 'notice-session' : undefined,
+        oldName: type === 'renamed' ? 'notice-events' : undefined,
+        from: type === 'account' ? 'claude' : type === 'promoted' ? 'dyna:notice-contract' : type === 'adopted' ? 'dyna:root' : undefined,
+        to: type === 'account' ? 'claude-2' : type === 'promoted' ? 'top level' : type === 'adopted' ? 'dyna:notice-contract' : undefined,
+        reason: type === 'account' ? 'usage-limit' : undefined,
+        profile: type === 'spawned' ? 'deepseek' : undefined,
+        dir: type === 'spawned' ? '/home/a/Work/app' : undefined,
+        seat: type === 'seat' ? 'Internal root took back the seat' : undefined,
+        sections: type === 'instructions' ? [{ name: 'Room rules', action: 'items', added: ['Rule 4'], removed: ['Rule 2'] }] : undefined,
+        detail: `The ${type} note body.`,
+      },
+    ]),
+  ),
+  'alert/doctor': {
+    source: 'doctor', reportId: '7', trigger: 'hook main-updated',
+    summary: 'machine is overloaded', action: 'dyna doctor report 7',
+    detail: 'machine is overloaded\n1. three builds run at once. Next: `dyna doctor report 7`',
+  },
+  'alert/engine': {
+    source: 'engine',
+    summary: 'The engine has been read-only for more than 2 minutes because migration failed.',
+    detail: 'only the engine creates and migrates dyna.db',
+  },
+  'service/failed': {
+    service: 'librarian', session: 'dyna:librarian', turn: 4,
+    error: 'turn failed: harness exited with status 1', profile: 'deepseek', model: 'deepseek-flash',
+  },
+  'engine/root-flush': { minutes: 15 },
+  'question/withdrawn': { questionId: 'q1', post: 'msg_0123456789abcdef', by: 'dyna:notice-session', reason: 'session closed' },
 }
 
 function postFor(family: string, type: string, payload: EventPayload, text = ''): Message {
@@ -230,6 +265,15 @@ function fixtureTip(payload: EventPayload): string {
   if ('children' in payload) return payload.children[0]?.name ?? payload.parent
   if ('ruleId' in payload) return payload.ruleId
   if ('floorBytes' in payload) return payload.name
+  if ('source' in payload) return payload.reportId ?? payload.summary ?? payload.source
+  if ('service' in payload) return payload.error
+  if ('minutes' in payload) return String(payload.minutes)
+  if ('questionId' in payload) return payload.questionId
+  if ('session' in payload) {
+    if (payload.type === 'renamed' || payload.type === 'spawned') return payload.name ?? payload.session
+    if (payload.type === 'seat') return payload.seat ?? payload.session
+    return payload.session
+  }
   return payload.detail || payload.reason
 }
 
