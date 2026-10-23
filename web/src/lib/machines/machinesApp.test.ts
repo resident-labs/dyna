@@ -62,3 +62,18 @@ test('a page answer for a machine that closed is dropped', async () => {
   await settle()
   assert.equal(c.machineDetail, null, 'the closed page does not come back')
 })
+
+// probeText runs the page's own wording of one probe result.
+function probeText(detail: unknown): string {
+  const c: Record<string, unknown> = {}
+  vm.createContext(c)
+  vm.runInContext(stripTypes(functionCode('probeResult')), c)
+  return (vm.runInContext('probeResult', c) as (detail: unknown) => string)(detail)
+}
+
+test('a degraded probe reports the disk hold, not an unreachable machine', () => {
+  assert.equal(probeText({ name: 'hermeslab', status: 'degraded', statusReason: 'low-disk' }), 'hermeslab is low on disk, so it starts no CI work.')
+  assert.equal(probeText({ name: 'hermeslab', status: 'degraded', statusReason: 'other' }), 'hermeslab needs attention.')
+  assert.equal(probeText({ name: 'hermeslab', status: 'offline' }), 'hermeslab did not answer the probe.')
+  assert.equal(probeText({ name: 'hermeslab', status: 'online' }), 'Probed hermeslab.')
+})

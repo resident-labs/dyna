@@ -46,8 +46,11 @@ test('a degraded machine says why in a designed line', () => {
 
 test('the Disk row words the free space and the floor Dyna keeps', () => {
   const GiB = 2 ** 30
+  const TiB = 2 ** 40
   assert.equal(diskText({ freeDisk: 3 * GiB, diskFloor: 20 * GiB }), '3.0 GiB free · needs 20.0 GiB')
   assert.equal(diskText({ freeDisk: 40 * GiB }), '40.0 GiB free', 'no floor shows only what is free')
+  assert.equal(diskText({ freeDisk: 1000 * GiB, diskFloor: 2000 * GiB }), '1000.0 GiB free · needs 2.0 TiB', 'a large floor steps up to the next unit')
+  assert.equal(diskText({ freeDisk: 2 * TiB }), '2.0 TiB free')
   assert.equal(diskText({}), '', 'no reading shows no row')
 })
 
