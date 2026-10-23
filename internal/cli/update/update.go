@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -58,9 +57,9 @@ func NewCommand(currentVersion string) *cobra.Command {
 
 func Config(currentVersion string) selfupdate.Config {
 	return selfupdate.Config{
-		Version:   releaseVersion(currentVersion),
-		Repo:      selfupdate.DefaultRepo,
-		StatePath: filepath.Join(store.DataDir(), "update-check.json"),
+		Version: releaseVersion(currentVersion),
+		Repo:    selfupdate.DefaultRepo,
+		DataDir: store.DataDir(),
 	}
 }
 

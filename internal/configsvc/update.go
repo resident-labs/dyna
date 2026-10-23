@@ -3,7 +3,6 @@ package configsvc
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/store"
@@ -30,9 +29,9 @@ func CheckUpdate(ctx context.Context, version string, disabled bool) (UpdateNoti
 		return UpdateNotice{}, err
 	}
 	res, err := selfupdate.Config{
-		Version:   version,
-		Repo:      selfupdate.DefaultRepo,
-		StatePath: filepath.Join(store.DataDir(), "update-check.json"),
+		Version: version,
+		Repo:    selfupdate.DefaultRepo,
+		DataDir: store.DataDir(),
 	}.Check(ctx, true)
 	if err != nil || !res.Available {
 		return UpdateNotice{}, err
