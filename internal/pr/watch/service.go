@@ -741,7 +741,7 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 			if r.HeldComments == nil {
 				r.HeldComments = map[string]state.HeldComment{}
 			}
-			r.HeldComments[e.ID] = state.HeldComment{ID: e.ID, Commenter: e.Commenter, Body: e.Text, URL: commentLink(snap, e.ID), Version: r.Seen[e.ID]}
+			r.HeldComments[e.ID] = state.HeldComment{ID: e.ID, Commenter: e.Commenter, Body: e.Text, URL: commentURL(snap, e.ID), Version: r.Seen[e.ID]}
 			r.Notices = append(r.Notices, Notice{ID: "msg_" + digest(r.Key + "/held/" + e.ID + "/" + r.Seen[e.ID])[:16], Kind: "held-comment", CommentID: e.ID, Text: fmt.Sprintf("PR #%d: Held: outside commenter. Review this comment in Dyna to admit or dismiss it.", r.Number)})
 			continue
 		}
@@ -773,6 +773,15 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 		text := fmt.Sprintf("New comments on %s while you review head %s. Keep reviewing. Answer each comment in your final review.\n\n%s", changeLabel(*r), r.Head, strings.Join(reviewerTexts, "\n\n"))
 		systemReviewNotice(r, r.Reviewer, text, "review-comments:"+digest(strings.Join(reviewerTexts, ";")))
 	}
+}
+
+func commentURL(snap Snapshot, id string) string {
+	for _, c := range snap.Comments {
+		if commentKey(c) == id {
+			return c.URL
+		}
+	}
+	return ""
 }
 
 // commentLink is a comment's URL, after its file and line for a code comment.
