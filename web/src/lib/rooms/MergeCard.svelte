@@ -92,10 +92,10 @@
       {#if type !== 'decision'}<Chip tone={stepTones[type]}>{stepWords[type]}</Chip>{/if}
       {#if retries > 0}<span class="fact">{retries} {retries === 1 ? 'retry' : 'retries'}</span>{/if}
     </span>
-    {#if decision}<span class="note">{decision.note}</span>{/if}
     <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
   </button>
   <div class="body">
+    {#if decision}<p class="note">{decision.note}</p>{/if}
     {#if payload}
       {#if first?.title}<p class="sub">{first.title}</p>{/if}
       <div class="steps" aria-hidden="true">
@@ -152,7 +152,7 @@
   .title { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .what { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .fact { color: var(--muted); font-size: var(--t-sm); white-space: nowrap; flex: none; }
-  .note { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: var(--t-sm); }
+  .note { margin: 0; color: var(--ink-2); font-size: var(--t-sm); overflow-wrap: anywhere; }
   /* The clock keeps the row short; the full stamp is in the title. */
   time { margin-left: auto; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; flex: none; padding-left: 4px; }
   .body { display: grid; gap: 6px; padding: 0 12px 10px; }
@@ -186,7 +186,6 @@
     .sum { min-height: 40px; padding: 6px var(--s2); cursor: pointer; pointer-events: auto; }
     /* One row on a phone: the title, the step and the clock; the rest expands. */
     .title .fact { display: none; }
-    .note { display: none; }
     .legend { display: none; }
     time { display: none; }
     .card:not(.open) .body { display: none; }
