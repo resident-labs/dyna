@@ -45,7 +45,7 @@ func TestReviewerQueueReusesSessionAndReplacesHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Current == nil || status.Current.PR != 17 || len(status.Queue) != 2 || status.Queue[0].PR != 18 {
+	if len(status.Reviewers) != 1 || status.Reviewers[0].Current == nil || status.Reviewers[0].Current.PR != 17 || len(status.Queue) != 2 || status.Queue[0].PR != 18 {
 		t.Fatalf("queue order: %+v", status)
 	}
 	if err := e.s.Store.update(func(st *State) error { st.Records["github.com/owner/repo#18"].Head = "new-head"; return nil }); err != nil {
@@ -91,7 +91,7 @@ func TestClosedAndMissingReviewerAreRecreated(t *testing.T) {
 				t.Fatalf("recovery: %+v", got)
 			}
 			status, _ := e.s.ReviewerStatus(r.RoomID)
-			if status.Session == nil || status.Session.ID != got.Reviewer {
+			if len(status.Reviewers) != 1 || status.Reviewers[0].Session == nil || status.Reviewers[0].Session.ID != got.Reviewer {
 				t.Fatalf("status: %+v", status)
 			}
 		})

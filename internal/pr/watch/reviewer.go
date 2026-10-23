@@ -65,9 +65,6 @@ type ReviewerStatus struct {
 	Queue         []ReviewQueued       `json:"queue"`
 	LastError     string               `json:"lastError"`
 	Recent        []state.ReviewResult `json:"recent"`
-	// TODO: legacy/shim remove later — projects the first live reviewer for clients that use single-reviewer fields; remove when those clients use reviewers.
-	Session *ReviewerSession `json:"session"`
-	Current *ReviewCurrent   `json:"current"`
 }
 
 func (s *Service) profiles() ([]profile.Profile, error) {
@@ -448,9 +445,6 @@ func (s *Service) ReviewerStatus(roomID string) (ReviewerStatus, error) {
 		current := &ReviewCurrent{ChangeID: changeID(*r), Kind: changeKind(*r), PR: r.Number, Title: r.Title, Head: r.Head, StartedAt: r.RoundStarted}
 		session := &ReviewerSession{ID: live.Info.ID, Address: live.Info.Address(), Status: live.Info.Status}
 		out.Reviewers = append(out.Reviewers, ReviewerSlotStatus{Session: session, Profile: live.Info.Profile, Current: current, Status: "reviewing"})
-		if out.Session == nil {
-			out.Session, out.Current = session, current
-		}
 	}
 	if s.Notify != nil {
 		infos, e := s.Notify.Sessions.Store.ListSnapshot(false)

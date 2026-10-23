@@ -98,12 +98,12 @@ test('review state does not hide CI failures, CI pauses or ended PRs', () => {
   assert.equal(statusMeta({ status: 'paused', pauseReason: 'x' }).label, 'Paused')
 })
 
-test('reviewer slots keep the legacy fallback', () => {
+test('reviewer slots read the pool', () => {
   const first = { session: { id: 's1' }, current: { pr: 12 } }
-  const r = { enabled: true, ...first, reviewers: [first, { session: { id: 's2' }, current: { pr: 13 } }, { session: { id: 's3' } }], queue: [{ pr: 14 }] }
+  const r = { enabled: true, reviewers: [first, { session: { id: 's2' }, current: { pr: 13 } }, { session: { id: 's3' } }], queue: [{ pr: 14 }] }
   assert.equal(reviewerSlots(r).length, 3)
   assert.deepEqual(reviewerSlots({ ...r, reviewers: [] }), [])
-  assert.deepEqual(reviewerSlots(first), [first])
+  assert.deepEqual(reviewerSlots({}), [])
   assert.deepEqual(reviewerSlots(null), [])
 })
 
@@ -121,7 +121,7 @@ test('reviewer sessions and their helpers leave every list but the PR screen', (
   assert.deepEqual(names(withoutReviewers(members)), ['lead', 'reviewer-198', 'author'])
   // The pool status names a reviewer that has no marker yet.
   assert.deepEqual(names(withoutReviewers(members, { reviewers: [{ session: { id: 'r2' } }] })), ['lead', 'author'])
-  assert.deepEqual(names(withoutReviewers(members, { session: { id: 'r2' }, helpers: [{ id: 'a1' }] })), ['lead'])
+  assert.deepEqual(names(withoutReviewers(members, { reviewers: [{ session: { id: 'r2' } }], helpers: [{ id: 'a1' }] })), ['lead'])
   assert.deepEqual(withoutReviewers(null), [])
 })
 
