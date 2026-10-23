@@ -1,4 +1,9 @@
-package watch
+// Package ghquota counts the GitHub API requests the engine makes, by caller.
+//
+// The REST quota is 5,000 an hour and the engine shares it with every agent, so
+// knowing which path spends it matters. A conditional request that GitHub
+// answers with 304 costs no quota, so free replies are counted apart.
+package ghquota
 
 import (
 	"fmt"
@@ -9,14 +14,11 @@ import (
 	"time"
 )
 
-// ghQuotaEvery is how often the engine writes its quota summary to the journal.
-const ghQuotaEvery = 10 * time.Minute
+// window is how often the counted requests are written to the journal.
+const window = 10 * time.Minute
 
-// ghQuotaLog counts the GitHub requests the engine makes, by caller. The REST
-// quota is 5,000 an hour and the engine shares it with every agent, so knowing
-// which path spends it matters. A conditional request that GitHub answers with
-// 304 costs no quota, so free replies are counted apart.
-type ghQuotaLog struct {
+// quotaLog counts completed requests and writes a summary for each window.
+type quotaLog struct {
 	mu      sync.Mutex
 	since   time.Time
 	counted map[string]int
@@ -26,10 +28,21 @@ type ghQuotaLog struct {
 }
 
 // engineGHQuota is shared by every engine request. Tests replace it.
-var engineGHQuota = &ghQuotaLog{}
+var engineGHQuota = &quotaLog{}
 
-// record adds one completed request and writes a summary every ghQuotaEvery.
-func (q *ghQuotaLog) record(path string, notModified bool) {
+// Record counts one completed request, classified by its API path.
+func Record(path string, notModified bool) {
+	engineGHQuota.record(ghQuotaCaller(path), notModified)
+}
+
+// RecordCaller counts one request from a named caller that has no API path,
+// such as a session's GitHub access check.
+func RecordCaller(caller string, notModified bool) {
+	engineGHQuota.record(caller, notModified)
+}
+
+// record adds one completed request and writes a summary every window.
+func (q *quotaLog) record(caller string, notModified bool) {
 	if q == nil {
 		return
 	}
@@ -45,20 +58,19 @@ func (q *ghQuotaLog) record(path string, notModified bool) {
 	if q.counted == nil {
 		q.counted, q.free = map[string]int{}, map[string]int{}
 	}
-	caller := ghQuotaCaller(path)
 	if notModified {
 		q.free[caller]++
 	} else {
 		q.counted[caller]++
 	}
-	if now.Sub(q.since) < ghQuotaEvery {
+	if now.Sub(q.since) < window {
 		return
 	}
 	q.summary(now)
 }
 
-// summary logs one line and starts a new window. Callers hold the lock.
-func (q *ghQuotaLog) summary(now time.Time) {
+// summary writes one line and starts a new window. Callers hold the lock.
+func (q *quotaLog) summary(now time.Time) {
 	counted, free := 0, 0
 	for _, n := range q.counted {
 		counted += n

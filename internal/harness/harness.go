@@ -428,6 +428,27 @@ func Resumable(p profile.Profile) bool {
 // that launch fake CLIs replace it with fakeruntime.Prepare.
 var PrepareRuntime = prepareRuntime
 
+// prepareRoomGitHub gives one turn the room's GitHub account. Tests replace it.
+var prepareRoomGitHub = roomGitHubEnvironment
+
+// roomGitHubEnvironment returns the environment the turn needs, with the one
+// line the agent gets instead when GitHub is limited.
+func roomGitHubEnvironment(ctx context.Context, p profile.Profile) (map[string]string, string, error) {
+	binary, err := fsutil.StableExecutable()
+	if err != nil {
+		return nil, "", err
+	}
+	inherited := append([]string{}, os.Environ()...)
+	for key, value := range p.Env {
+		inherited = append(inherited, key+"="+value)
+	}
+	sessionEnv, err := ghclient.SessionEnvironment(ctx, p.Env[mode.EnvRoomID], p.Env[scratch.Env], binary, inherited)
+	if err != nil {
+		return nil, "", fmt.Errorf("prepare room GitHub access: %w", err)
+	}
+	return sessionEnv.Env, sessionEnv.Notice, nil
+}
+
 func prepareRuntime(ctx context.Context, p profile.Profile, previous *harnessruntime.Pin) (_ profile.Profile, _ harnessruntime.Pin, _ func(), err error) {
 	var closers []io.Closer
 	// A local func, so an error return cannot replace it before the defer runs.
@@ -520,21 +541,17 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 			}
 		}
 	}
-	if ref := p.Env[mode.EnvRoomID]; ref != "" && p.Harness != profile.HarnessMock && exec.ProcessRunner == nil {
-		binary, err := fsutil.StableExecutable()
+	if p.Env[mode.EnvRoomID] != "" && p.Harness != profile.HarnessMock && exec.ProcessRunner == nil {
+		env, notice, err := prepareRoomGitHub(ctx, p)
 		if err != nil {
 			return Result{}, err
 		}
-		inherited := append([]string{}, os.Environ()...)
-		for key, value := range p.Env {
-			inherited = append(inherited, key+"="+value)
-		}
-		sessionEnv, err := ghclient.SessionEnvironment(ctx, ref, p.Env[scratch.Env], binary, inherited)
-		if err != nil {
-			return Result{}, fmt.Errorf("prepare room GitHub access: %w", err)
-		}
-		for key, value := range sessionEnv {
+		for key, value := range env {
 			p.Env[key] = value
+		}
+		// GitHub being limited costs the agent one line, never the turn.
+		if notice != "" {
+			prompt += "\n\n" + notice
 		}
 	}
 	if exec.ConstrainProfile != nil {

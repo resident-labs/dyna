@@ -45,10 +45,11 @@ esac
 `)
 	for i, rec := range records {
 		scratch := t.TempDir()
-		env, err := SessionEnvironment(context.Background(), rec.ID, scratch, "/real/dyna", os.Environ())
+		session, err := SessionEnvironment(context.Background(), rec.ID, scratch, "/real/dyna", os.Environ())
 		if err != nil {
 			t.Fatal(err)
 		}
+		env := session.Env
 		want := []string{"personal-secret", "work-secret"}[i]
 		if env["GH_TOKEN"] != want || env["GH_HOST"] != "github.com" || env["GH_REPO"] != "" {
 			t.Fatal("session has the wrong repository credentials")
@@ -82,7 +83,7 @@ esac
 		if err != nil {
 			t.Fatal(err)
 		}
-		if child["GH_TOKEN"] != want || child["GIT_CONFIG_COUNT"] != env["GIT_CONFIG_COUNT"] {
+		if child.Env["GH_TOKEN"] != want || child.Env["GIT_CONFIG_COUNT"] != env["GIT_CONFIG_COUNT"] {
 			t.Fatal("child changed account or accumulated duplicate Git guards")
 		}
 	}
@@ -102,7 +103,7 @@ func TestSessionPreservesEnterpriseTokenEnvironment(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if env["GH_ENTERPRISE_TOKEN"] != "enterprise-token" || env["GH_HOST"] != "work.example" {
+			if env.Env["GH_ENTERPRISE_TOKEN"] != "enterprise-token" || env.Env["GH_HOST"] != "work.example" {
 				t.Fatal("enterprise owner authentication was lost")
 			}
 		})
