@@ -1,6 +1,6 @@
 // The web client calls the server API with JSON arguments.
 
-import { deviceKey, makeProof } from './lib/settings/connect.ts'
+import { createTransport } from './lib/api/transport.ts'
 import { openStream } from './lib/api/stream.ts'
 
 function readConfig() {
@@ -20,93 +20,8 @@ export const features = { push: !!web?.push }
 // connect is the Resident Labs Connect link of this machine, or null.
 export const connect = web?.connect ?? null
 
-let unauthorized = () => {}
-// onUnauthorized runs when the server says this browser is not paired.
-export function onUnauthorized(fn) {
-  unauthorized = fn
-}
-
-// A Connect session has a short access window. A 401 with code "renew"
-// means the session can renew: renew once (calls share one renewal), then
-// send the call again once.
-let renewing = null
-let renewed = () => {}
-// onRenewed runs with {expires, grantEnd} after each renewal.
-export function onRenewed(fn) {
-  renewed = fn
-}
-
-export function renew() {
-  renewing ??= (async () => {
-    try {
-      const r = await fetch('/api/connect/renew', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-Dyna': '1' },
-        body: JSON.stringify({ proof: await proof('/api/connect/renew') }),
-      })
-      // 401: the session has ended. 403: this browser's key cannot renew
-      // it. Both mean sign-in; anything else (relay down, busy) may pass,
-      // so the session stays and renewal tries again later.
-      if (r.status === 401 || r.status === 403) unauthorized()
-      const data = await r.json().catch(() => null)
-      if (!r.ok) throw data?.error ?? `HTTP ${r.status}`
-      renewed(data)
-      return data
-    } finally {
-      renewing = null
-    }
-  })()
-  return renewing
-}
-
-// Keep the response body available for binary previews and streams. Callers
-// pass replayable bodies (JSON strings) and may cancel either attempt.
-export async function authenticatedFetch(path, options = {}, canRenew = true) {
-  const request = () => fetch(path, { ...options, credentials: 'same-origin' })
-  let response = await request()
-  if (response.status === 401) {
-    const error = await response.clone().json().catch(() => null)
-    if (error?.code === 'renew' && canRenew) {
-      await renew()
-      options.signal?.throwIfAborted()
-      response = await request()
-    }
-    if (response.status === 401) unauthorized()
-  }
-  return response
-}
-
-// A room's feed is asked for again on every event and mostly comes back unchanged.
-// The server tags that reply with an ETag; a POST gets no browser cache, so the
-// last reply for each request is kept here and sent back with If-None-Match.
-const REVALIDATED = new Set(['/api/FeedTail'])
-const REVALIDATED_MAX = 32
-const replies = new Map()
-
-async function post(path, body, canRenew = true) {
-  const payload = JSON.stringify(body)
-  const key = REVALIDATED.has(path) ? path + payload : ''
-  const known = key ? replies.get(key) : undefined
-  const r = await authenticatedFetch(path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Dyna': '1', ...(known && { 'If-None-Match': known.etag }) },
-    body: payload,
-  }, canRenew)
-  if (r.status === 304 && known) return JSON.parse(known.text)
-  // Only a revalidated reply keeps its raw text; every other call reads JSON as before.
-  const text = key ? await r.text().catch(() => '') : ''
-  const data = key ? (() => { try { return JSON.parse(text) } catch { return null } })() : await r.json().catch(() => null)
-  // Errors reject with the server message.
-  if (!r.ok) throw data?.error ?? `HTTP ${r.status}`
-  const etag = key && r.headers.get('ETag')
-  if (etag) {
-    replies.delete(key)
-    replies.set(key, { etag, text })
-    if (replies.size > REVALIDATED_MAX) replies.delete(replies.keys().next().value)
-  }
-  return data
-}
+const { post, renew, authenticatedFetch, onUnauthorized, onRenewed, connectSession, connectHandoff, whoami, connectRoutes, pushStatus, pushSubscribe, pushNames, pushUnsubscribe, pushTest, pair, logout } = createTransport()
+export { renew, authenticatedFetch, onUnauthorized, onRenewed, connectSession, connectHandoff, whoami, connectRoutes, pushStatus, pushSubscribe, pushNames, pushUnsubscribe, pushTest, pair, logout }
 
 // The HTTP side of a call: app.Rooms() posts [] to /api/Rooms.
 const app = new Proxy({}, { get: (_, name) => (...args) => post(`/api/${String(name)}`, args) })
@@ -387,43 +302,6 @@ export const api = {
   browseDirs: (path) => app.BrowseDirs(path),
   inspectPath: (path) => app.InspectPath(path),
   createRoom: (input) => app.CreateRoom(input),
-}
-
-// proof signs a request to path with this browser's device key.
-async function proof(path) {
-  return makeProof(await deviceKey(), 'POST', location.origin + path)
-}
-
-// connectSession trades a relay code or a route handoff for a session.
-// secret is {code} or {handoff}.
-export async function connectSession(secret) {
-  return post('/api/connect/session', { ...secret, proof: await proof('/api/connect/session') })
-}
-
-// connectHandoff asks for a one-time code to open a session on another route.
-export async function connectHandoff(target) {
-  return post('/api/connect/handoff', { target, proof: await proof('/api/connect/handoff') })
-}
-
-export const whoami = () => post('/api/connect/whoami', [])
-export const connectRoutes = () => post('/api/connect/routes', [])
-
-// Web Push: the server holds the keys and sends; the browser subscribes.
-export const pushStatus = () => post('/api/push/status', [])
-export const pushSubscribe = (sub, names = false) => post('/api/push/subscribe', { endpoint: sub.endpoint, keys: sub.keys, names })
-export const pushNames = (names) => post('/api/push/names', { names })
-export const pushUnsubscribe = () => post('/api/push/unsubscribe', {})
-export const pushTest = () => post('/api/push/test', {})
-
-// pair trades a one-time code from `dyna engine run --pair` for this
-// browser's device cookie.
-export function pair(code, name) {
-  return post('/api/pair', { code, name })
-}
-
-// logout forgets this browser's device on the server.
-export function logout() {
-  return post('/api/logout', [])
 }
 
 // onEvent subscribes to the live stream: {kind: "posts"|"rooms"|"members"|

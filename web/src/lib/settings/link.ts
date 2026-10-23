@@ -61,7 +61,7 @@ export async function boot(): Promise<BootResult | null> {
 
   const f = new URLSearchParams(location.hash.slice(1))
   const handoff = f.get('handoff'), code = f.get('code')
-  const secret = handoff ? { handoff } : { code }
+  const secret = handoff ? { handoff } : { code: code ?? '' }
   const saved = sessionStorage.getItem(STATE_KEY)
   const bad = !(handoff || code) || (!handoff && code && (!saved || f.get('state') !== saved))
   if (bad) return { error: 'This sign-in link does not work.' }
@@ -169,7 +169,7 @@ export function watch(onRoute: (notice: RouteNotice) => void): { stop(): void; s
       const who = await whoami()
       isConnect = who.kind === 'connect'
       if (isConnect) {
-        expires = toMs(who.expires)
+        expires = toMs(who.expires ?? 0)
         lastRenew = Date.now()
         arm()
       }
