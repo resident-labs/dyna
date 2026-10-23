@@ -76,3 +76,21 @@ test('an active tool stays running when the API omits its false done flag', asyn
     await rm(dir, { recursive: true, force: true })
   }
 })
+
+test('a running turn measures elapsed time despite the API zero end time', async (t) => {
+  t.mock.method(Date, 'now', () => Date.parse('2026-10-23T07:02:10Z'))
+  const dom = installDom()
+  Reflect.set(globalThis, 'HTMLMediaElement', dom.window.HTMLMediaElement)
+  const { dir, default: C, mount, unmount, flushSync } = await load({ component: '../sessions/ActivityTimeline', format })
+  const row: TimelineRow = { kind: 'timeline', key: 'timeline:1', turn: { n: 1, status: 'running', started: '2026-10-23T07:00:00Z', ended: '0001-01-01T00:00:00Z' }, steps: [] }
+  let app
+  try {
+    flushSync(() => app = mount(C, { target: need(document.getElementById('app')), props: { row } }))
+    assert.match(document.querySelector('.timeline header')?.textContent ?? '', /2m 10s/)
+  } finally {
+    if (app) unmount(app)
+    dom.window.close()
+    for (const key of [...domNames, 'HTMLMediaElement']) Reflect.deleteProperty(globalThis, key)
+    await rm(dir, { recursive: true, force: true })
+  }
+})

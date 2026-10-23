@@ -24,7 +24,7 @@
     const timer = setInterval(() => now = Date.now(), 1000)
     return () => clearInterval(timer)
   })
-  let span = $derived(row.turn ? elapsed(Math.max(0, (row.turn.ended ? Date.parse(row.turn.ended) : running ? now : new Date(row.steps.at(-1)?.ts ?? row.turn.started).getTime()) - Date.parse(row.turn.started))) : '')
+  let span = $derived(row.turn ? elapsed(Math.max(0, (row.turn.status === 'running' ? now : row.turn.ended ? Date.parse(row.turn.ended) : new Date(row.steps.at(-1)?.ts ?? row.turn.started).getTime()) - Date.parse(row.turn.started))) : '')
 </script>
 
 <section class="timeline" aria-label={row.turn ? `Turn ${row.turn.n} activity` : 'Shell activity'}>
