@@ -33,6 +33,23 @@ const sockAt = (sockets: FakeSocket[], i: number): FakeSocket => {
   return ws
 }
 
+// Events the socket hands its handlers. Node has no CloseEvent before v23, so
+// the test builds the one the call's close handler reads: a close code, a
+// reason and whether it was clean.
+class FakeCloseEvent extends Event implements CloseEvent {
+  readonly code: number
+  readonly reason: string
+  readonly wasClean: boolean
+  constructor(code: number, reason: string) {
+    super('close')
+    this.code = code
+    this.reason = reason
+    this.wasClean = code === 1000
+  }
+  // Deprecated in the DOM, and the call never reads it.
+  initCloseEvent(): void {}
+}
+
 function fakeSocket(): FakeSocket {
   const ws: FakeSocket = {
     readyState: 0,
@@ -45,7 +62,7 @@ function fakeSocket(): FakeSocket {
     close(code) { ws.closed = code ?? null },
     open() { ws.readyState = 1; ws.onopen?.(new Event('open')) },
     recv(m) { ws.onmessage?.(new MessageEvent('message', { data: JSON.stringify(m) })) },
-    drop(code, reason = '') { ws.readyState = 3; ws.onclose?.(new CloseEvent('close', { code, reason })) },
+    drop(code, reason = '') { ws.readyState = 3; ws.onclose?.(new FakeCloseEvent(code, reason)) },
   }
   return ws
 }
