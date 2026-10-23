@@ -139,15 +139,15 @@ func TestGuardReapsAdoptedChildrenWhileRunning(t *testing.T) {
 	if len(pids) != 32 {
 		t.Fatalf("child PIDs: %q", b)
 	}
-	// The guard reaps adopted children in its SIGCHLD path and reports each
-	// pass, so waiting for all 32 counts is a real reaping event.
-	reaped := 0
-	for reaped < len(pids) {
+	// The guard reaps adopted children in its SIGCHLD path and reports the
+	// running total, so waiting for it to reach 32 is a real reaping event. The
+	// total is cumulative, so a guard that reaps in many passes cannot outrun
+	// this check.
+	for c.Reaped() < len(pids) {
 		select {
-		case n := <-c.Reaped():
-			reaped += n
+		case <-c.ReapedChanged():
 		case <-time.After(8 * time.Second):
-			t.Fatalf("the guard reaped %d of %d adopted children while the native ran", reaped, len(pids))
+			t.Fatalf("the guard reaped %d of %d adopted children while the native ran", c.Reaped(), len(pids))
 		}
 	}
 	// The pids are gone while the native still runs, so the live reaper did the

@@ -110,7 +110,9 @@ type Controller struct {
 	cancelSignal  syscall.Signal
 	done          chan struct{}
 	waitErr       error
-	reaped        chan int
+	reapedMu      sync.Mutex
+	reapedTotal   int
+	reapedNotify  chan struct{}
 }
 
 // New makes a command controller. Call Cmd to configure its byte streams.
@@ -136,15 +138,22 @@ func Wrap(cmd *exec.Cmd) (*Controller, error) {
 		!reflect.DeepEqual(cmd.SysProcAttr, &syscall.SysProcAttr{Setpgid: true}) {
 		return nil, errors.New("processguard requires exclusive process group attributes")
 	}
-	return &Controller{cmd: cmd, done: make(chan struct{}), reaped: make(chan int, 16)}, nil
+	return &Controller{cmd: cmd, done: make(chan struct{}), reapedNotify: make(chan struct{}, 1)}, nil
 }
 
 func (c *Controller) Reference() Reference { c.mu.Lock(); defer c.mu.Unlock(); return c.ref }
 
-// Reaped reports adopted children that the running guard reaped, one count per
-// reap pass. The guard never waits for a reader, so an unread channel only
-// drops notifications.
-func (c *Controller) Reaped() <-chan int { return c.reaped }
+// Reaped reports how many adopted children the running guard has reaped so far.
+func (c *Controller) Reaped() int {
+	c.reapedMu.Lock()
+	defer c.reapedMu.Unlock()
+	return c.reapedTotal
+}
+
+// ReapedChanged reports that Reaped may have grown. A change leaves one pending
+// token, so reading Reaped and then waiting here cannot miss an update, and a
+// guard that reaps in many passes never blocks on a slow caller.
+func (c *Controller) ReapedChanged() <-chan struct{} { return c.reapedNotify }
 
 // SetCancelSignal selects context cancellation before Start. SIGTERM is the
 // default. SIGKILL is available for callers that require immediate retirement.
@@ -269,8 +278,11 @@ func (c *Controller) Start(bind func(Reference) error) (retErr error) {
 				break
 			}
 			if m.Op == "reaped" {
+				c.reapedMu.Lock()
+				c.reapedTotal += m.Code
+				c.reapedMu.Unlock()
 				select {
-				case c.reaped <- m.Code:
+				case c.reapedNotify <- struct{}{}:
 				default:
 				}
 			}
