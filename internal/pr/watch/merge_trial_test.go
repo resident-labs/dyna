@@ -20,6 +20,11 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
+// trialChecks is the GitHub check-runs response of the trial head.
+type trialChecks struct {
+	Checks []Check `json:"check_runs"`
+}
+
 type trialFixture struct {
 	e                                               *testEnv
 	fs                                              map[int]*fixture
@@ -34,6 +39,11 @@ type trialFixture struct {
 	commitHeads                                     map[string][]string
 	trialCI                                         map[int]string
 	jobs                                            []budgetJob
+	// checks are the hosted checks of the trial head, as a failed job leaves
+	// them while the rest of its run is still going.
+	checks []Check
+	// extraRuns are the trial head's other workflows beside the first one.
+	extraRuns []Run
 }
 
 func mergeTrialEnv(t *testing.T, numbers ...int) *trialFixture {
@@ -151,10 +161,13 @@ func mergeTrialEnv(t *testing.T, numbers ...int) *trialFixture {
 				if f.conclusion != "" {
 					conclusion = f.conclusion
 				}
-				return json.NewEncoder(cmd.Stdout).Encode(map[string]any{"workflow_runs": []Run{{ID: 81, Attempt: 1, Event: event, HeadBranch: branch, HeadSHA: head, Status: status, Conclusion: conclusion}}})
+				// extraRuns are further workflows of the same trial head, such as a
+				// cancelled one beside the failed one.
+				runs := append([]Run{{ID: 81, Attempt: 1, Event: event, HeadBranch: branch, HeadSHA: head, Status: status, Conclusion: conclusion}}, f.extraRuns...)
+				return json.NewEncoder(cmd.Stdout).Encode(trialRuns{Runs: runs})
 			}
 			if strings.Contains(joined, "check-runs?") {
-				return json.NewEncoder(cmd.Stdout).Encode(map[string]any{"check_runs": []Check{}})
+				return json.NewEncoder(cmd.Stdout).Encode(trialChecks{Checks: f.checks})
 			}
 			return json.NewEncoder(cmd.Stdout).Encode([]Status{})
 		}

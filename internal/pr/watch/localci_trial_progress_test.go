@@ -149,3 +149,80 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 		t.Fatalf("read cancelled hosted job counts %d times", jobReads)
 	}
 }
+
+// A hosted check that fails while the rest of its run is still going leaves no
+// run log. The trial read must name the check, so a failed batch always records
+// the reason it failed.
+func TestTrialCINamesAFailedCheckWithoutARunLog(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	if raw, err := exec.Command("git", "init", "--quiet", repoDir).CombinedOutput(); err != nil {
+		t.Fatalf("init repository: %v: %s", err, raw)
+	}
+	registry := localci.Store{DataDir: dataDir}
+	ciMachine := machines.Store{DataDir: dataDir}
+	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", Roles: []machines.Role{machines.RoleCI}, SSH: "ari@worker", CISlots: 1, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
+		t.Fatal(err)
+	}
+	head, prHead := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	branch := "dyna/merge-trial/1"
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
+	s := &Service{Store: &Store{Root: state.Root(dataDir)}, LocalCIRegistry: registry}
+	if err := s.Store.update(func(st *State) error {
+		st.Records[r.Key] = &r
+		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Head: head, Branch: branch, Phase: "running", Changes: []state.MergeTrialChange{{Key: r.Key, Head: prHead}}}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run := Run{ID: 81, Attempt: 1, CheckSuiteID: 9, Path: ".github/workflows/ci.yml", HeadSHA: head, HeadBranch: branch, Event: "push", Status: "in_progress"}
+	check := Check{ID: 7, Name: "frontend-check", Status: "completed", Conclusion: "failure"}
+	check.App.Slug = "github-actions"
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		endpoint := ""
+		for _, arg := range cmd.Args {
+			if strings.HasPrefix(arg, "repos/") {
+				endpoint = arg
+			}
+		}
+		var raw []byte
+		var err error
+		switch {
+		case strings.Contains(endpoint, "/check-runs?"):
+			raw, err = json.Marshal(trialChecks{Checks: []Check{check}})
+		case strings.Contains(endpoint, "/statuses?"):
+			raw, err = json.Marshal([]Status{})
+		case strings.Contains(endpoint, "/actions/runs?"):
+			raw, err = json.Marshal(trialRuns{Runs: []Run{run}})
+		default:
+			return fmt.Errorf("unexpected endpoint %s", endpoint)
+		}
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n%s", raw)
+		return err
+	}
+	got, err := s.mergeTrialCI(ctx, r, branch, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("ci=%s reason=%q", got.Status, got.Reason)
+	}
+	if len(got.Failed) != 1 || got.Failed[0] != "frontend-check" {
+		t.Fatalf("failed checks = %v, want the failed check named", got.Failed)
+	}
+	if !strings.Contains(got.Logs, "frontend-check") || !strings.Contains(got.Reason, "frontend-check") {
+		t.Fatalf("evidence logs=%q reason=%q", got.Logs, got.Reason)
+	}
+}
+
+// trialRuns is the GitHub workflow-runs response of the trial head.
+type trialRuns struct {
+	Runs []Run `json:"workflow_runs"`
+}
