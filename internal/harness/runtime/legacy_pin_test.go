@@ -19,7 +19,7 @@ func TestLegacyDormantSessionKeepsRuntimePins(t *testing.T) {
 	generation := filepath.Join(r.Generations, "gen-v1-fixture")
 	pin := Pin{Bundle: Bundle{Harness: "codex", Version: "1.0.0"}, Generation: generation}
 	root := filepath.Join(store.DataDir(), "sessions")
-	recordtest.Write(t, root, id, map[string]any{"id": id, "closed": time.Now(), "done": true, "runtimePin": pin})
+	recordtest.Write(t, root, id, map[string]any{"id": id, "finished": time.Now(), "status": "dormant", "runtimePin": pin})
 	if err := os.MkdirAll(filepath.Dir(profile.DefaultPath()), 0700); err != nil {
 		t.Fatal(err)
 	}
