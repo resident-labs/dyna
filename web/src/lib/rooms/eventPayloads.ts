@@ -18,6 +18,12 @@ export function registeredEvent(post: EventPost): boolean {
   return eventSpecs.some((spec) => spec.family === post.kind && spec.type === post.notice?.kind)
 }
 
+// systemEvent also accepts a family or type from a newer engine. Its payload
+// stays sealed, so the UI shows a neutral reload row instead of its raw text.
+export function systemEvent(post: EventPost): boolean {
+  return registeredEvent(post) || legacyEvent(post) || !!post.notice?.kind
+}
+
 // worktreeEvent returns the typed payload of a kept-worktree post.
 export function worktreeEvent(post: EventPost): WorktreeEvent | undefined {
   if (post.kind !== 'worktree' || post.notice?.kind !== 'kept') return undefined
