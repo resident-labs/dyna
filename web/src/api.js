@@ -267,7 +267,7 @@ export const api = {
   prNoiseRules: (roomRef) => app.PRNoiseRules(roomRef),
   heldPRComments: (roomRef = '') => app.HeldPRComments(roomRef),
   dismissPRComment: (roomRef, key, id) => app.DismissPRComment(roomRef, key, id),
-  admitPRComment: (roomRef, key, id) => app.AdmitPRComment(roomRef, key, id),
+  admitPRComment: (roomRef, key, id, version) => app.AdmitPRComment(roomRef, key, id, version),
   removePRNoiseRule: (roomRef, id) => app.RemovePRNoiseRule(roomRef, id),
   setPRSettings: (roomRef, settings) => app.SetPRSettings(roomRef, settings),
   untrackPR: (roomRef, key) => app.UntrackPR(roomRef, key),

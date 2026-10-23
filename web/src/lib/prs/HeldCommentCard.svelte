@@ -13,7 +13,7 @@
     error = ''
     try {
       // The server checks owner authority for both actions.
-      if (action === 'admit') await api.admitPRComment(comment.roomId, comment.key, comment.id)
+      if (action === 'admit') await api.admitPRComment(comment.roomId, comment.key, comment.id, comment.version)
       else await api.dismissPRComment(comment.roomId, comment.key, comment.id)
       removeHeldComment(comment)
     } catch (e) {
