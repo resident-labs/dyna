@@ -129,6 +129,10 @@ func bindings(s services) []websvc.Binding {
 		// Changing a machine's roles or route retargets the engine's work, so
 		// the write needs the admin scope, like other settings.
 		{Name: "SaveMachine", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: machine.SaveMachine},
+		// A probe reads the machine now and stores what it found. It writes
+		// only the probe fields, and it spends one SSH connection, so it needs
+		// the admin scope too.
+		{Name: "ProbeMachine", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: machine.ProbeMachine},
 		{Name: "Rooms", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Rooms},
 		{Name: "FeedTail", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.FeedTail},
 		{Name: "FeedAfter", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.FeedAfter},

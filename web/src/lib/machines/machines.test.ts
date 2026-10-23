@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { machinesSub, summaryText, roleLabel, statusText } from './machines.ts'
-import type { MachineRole, MachineSummary } from '../api/machine.ts'
+import { computersText, loadText, machinesSub, memoryPct, roleLabel, runtimeText, statusText, summaryText, systemText, versionText } from './machines.ts'
+import type { MachineCapabilities, MachineRole, MachineSummary } from '../api/machine.ts'
 
 const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
   id: 'm_1', name: 'this-machine', roles: ['engine', 'agents'], local: true, enabled: true, status: 'online', ciSlots: 0, ...over,
@@ -41,4 +41,35 @@ test('status words separate a switched off machine from one that is not probed',
 test('role chips name CI in capitals and other roles as they are', () => {
   const roles: MachineRole[] = ['engine', 'agents', 'ci']
   assert.deepEqual(roles.map(roleLabel), ['engine', 'agents', 'CI'])
+})
+
+test('the page words what the probe read, and leaves out what it could not', () => {
+  const caps: MachineCapabilities = {
+    os: 'Linux', arch: 'x86_64', cpus: 20, memTotal: 32700000000, memAvailable: 26000000000,
+    gpu: true, containers: ['docker'], computers: true, stream: false,
+  }
+  assert.equal(systemText(caps), 'Linux · x86_64 · 20 CPUs · 30.5 GiB')
+  assert.equal(systemText({ ...caps, arch: '', cpus: 0, memTotal: 0 }), 'Linux', 'a probe that read only the OS shows only the OS')
+  assert.equal(runtimeText(caps.containers), 'Docker')
+  assert.equal(runtimeText(['docker', 'podman']), 'Docker and Podman')
+  assert.equal(runtimeText(undefined), 'None')
+})
+
+test('the computer capability does not require the desktop stream', () => {
+  assert.equal(computersText({ computers: true, stream: false }), 'Yes', 'a machine runs computers without wayvnc')
+  assert.equal(computersText({ computers: true, stream: true }), 'Yes, and shows its desktop')
+  assert.equal(computersText({ computers: false, stream: true }), 'No', 'a stream without labwc runs no computer')
+})
+
+test('a remote machine memory bar shows the used share, and nothing without a reading', () => {
+  assert.equal(memoryPct({ memTotal: 100, memAvailable: 25 }), 75)
+  assert.equal(memoryPct({ memTotal: 0, memAvailable: 0 }), null, 'no total means no bar')
+  assert.equal(loadText({ memAvailable: 2 ** 30 }), '1.0 GiB free')
+  assert.equal(loadText({ memAvailable: 0 }), '')
+})
+
+test('the Dyna row keeps a version short and leaves the whole string to its title', () => {
+  assert.equal(versionText('dyna v0.4.3-0.20261004142815-69873b466650'), 'v0.4.3 (dev)')
+  assert.equal(versionText('dyna 0.9.412'), '0.9.412', 'the row already says Dyna')
+  assert.equal(versionText('dev+707043d01018'), 'dev+707043d01018', 'a build version shows as it is')
 })

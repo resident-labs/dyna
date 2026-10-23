@@ -78,6 +78,40 @@ export interface MachineDetail extends MachineSummary {
   // ciRuns lists the CI runs in flight on this machine, so the page shows what
   // it checks now. Their slots add up to ci.used.
   ciRuns?: MachineCIRun[]
+  // probedAt is when the engine last read this machine, and seenAt when a probe
+  // last reached it. Both are absent before the first probe. A failed probe
+  // keeps the capabilities and load of the last good one.
+  probedAt?: string
+  seenAt?: string
+  capabilities?: MachineCapabilities
+  load?: MachineLoad
+}
+
+// MachineCapabilities is what the last probe read about a machine. Memory
+// values are bytes.
+export interface MachineCapabilities {
+  os: string
+  arch: string
+  cpus: number
+  memTotal: number
+  memAvailable: number
+  gpu: boolean
+  // containers names the container runtimes the machine has, in the order
+  // Dyna prefers them. Absent means none.
+  containers?: string[]
+  // computers is whether a computer can run on the machine, which needs labwc
+  // and Xwayland. stream is whether wayvnc can show its desktop in the app.
+  computers: boolean
+  stream: boolean
+}
+
+// MachineLoad is the last load reading of a machine. cpuPercent is absent when
+// the probe could not take two readings.
+export interface MachineLoad {
+  cpuPercent?: number
+  loadAvg: [number, number, number]
+  memTotal: number
+  memAvailable: number
 }
 
 // MachinePatch is a change to one machine. An absent field keeps its value.

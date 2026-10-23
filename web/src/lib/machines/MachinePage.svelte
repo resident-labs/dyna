@@ -1,8 +1,9 @@
 <script lang="ts">
-  // The Machine page: what one machine is, what it uses now and how it is
-  // configured. Only this engine's machine reports live use in this version;
-  // a remote machine shows its stored settings and "not probed" until the
-  // probe reads it.
+  // The Machine page: what one machine is, what it uses now, what its last
+  // probe read and how it is configured. This engine's own machine reports
+  // live use from the load sampler; a remote machine shows the load its last
+  // probe read. A machine that no probe has reached shows "not probed"
+  // instead of empty figures.
   import Card from '../ui/Card.svelte'
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
@@ -11,19 +12,22 @@
   import Skeleton from '../ui/Skeleton.svelte'
   import SystemLoadCard from '../rooms/SystemLoadCard.svelte'
   import { pollLoad } from '../rooms/systemLoad.ts'
+  import { ago } from '../ui/format.ts'
   import { api } from '../../api.ts'
   import type { SystemLoad } from '../api/system.ts'
   import type { MachineAgent, MachineDetail, MachinePatch, MachineRole } from '../api/machine.ts'
   import { ago } from '../ui/format.ts'
-  import { ciRunDetail, ciRunText, count, roleLabel, routeText, statusText } from './machines.ts'
+  import { ciRunDetail, ciRunText, computersText, count, loadText, memoryPct, roleLabel, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
 
-  let { machine, error = '', busy = false, onback, onagent, onsave }: {
+  let { machine, error = '', busy = false, probing = false, onback, onagent, onsave, onprobe = () => {} }: {
     machine: MachineDetail | null
     error?: string
     busy?: boolean
+    probing?: boolean
     onback: () => void
     onagent?: (agent: MachineAgent) => void
     onsave: (patch: MachinePatch) => void
+    onprobe?: () => void
   } = $props()
 
   // Live use reads from the engine's load sampler, the same call Home's card
@@ -34,6 +38,12 @@
     if (!machine?.local) return
     return pollLoad(() => api.systemLoad(), (value) => { load = value })
   })
+
+  // What the last probe read. A machine no probe has reached has no
+  // capabilities, and the page then shows no figure at all.
+  let caps = $derived(machine?.capabilities ?? null)
+  let remote = $derived(machine && !machine.local ? machine.load ?? null : null)
+  let memory = $derived(remote ? memoryPct(remote) : null)
 
   const ROLES: MachineRole[] = ['engine', 'agents', 'ci']
 
@@ -76,9 +86,35 @@
         <Row dense text="Route">
           {#snippet trail()}<span class="value mono">{routeText(machine)}</span>{/snippet}
         </Row>
+        {#if machine.status === 'offline'}
+          <!-- r8: a designed line, never the engine's probe error text. -->
+          <Row dense text="Last probe">
+            {#snippet trail()}<span class="value warn">Did not reach the machine. Check the SSH route, then probe again.</span>{/snippet}
+          </Row>
+        {/if}
+        {#if machine.seenAt}
+          <Row dense text="Last seen">
+            {#snippet trail()}<span class="value">{ago(machine.seenAt)}</span>{/snippet}
+          </Row>
+        {/if}
+        {#if caps}
+          <Row dense text="System">
+            {#snippet trail()}<span class="value">{systemText(caps)}</span>{/snippet}
+          </Row>
+          <Row dense text="GPU">
+            {#snippet trail()}<span class="value">{caps.gpu ? 'Yes' : 'No'}</span>{/snippet}
+          </Row>
+          <Row dense text="Containers">
+            {#snippet trail()}<span class="value">{runtimeText(caps.containers)}</span>{/snippet}
+          </Row>
+          <Row dense text="Computers">
+            {#snippet trail()}<span class="value">{computersText(caps)}</span>{/snippet}
+          </Row>
+        {/if}
         {#if machine.dynaVersion}
+          {@const version = machine.dynaVersion}
           <Row dense text="Dyna">
-            {#snippet trail()}<span class="value mono">{machine.dynaVersion}</span>{/snippet}
+            {#snippet trail()}<span class="value mono" title={version}>{versionText(version)}</span>{/snippet}
           </Row>
         {/if}
         {#if machine.harnesses?.length}
@@ -107,6 +143,34 @@
             {/each}
           </Card>
         </div>
+      {/if}
+
+      {#if remote}
+        <Card title="Usage">
+          <Row dense text="CPU">
+            {#snippet trail()}
+              {#if remote.cpuPercent !== undefined}
+                <span class="mem">
+                  <span class="bar" aria-hidden="true"><span class="fill" style="width: {remote.cpuPercent}%"></span></span>
+                  <span class="value">{remote.cpuPercent}%</span>
+                </span>
+              {:else}<span class="value">No reading</span>{/if}
+            {/snippet}
+          </Row>
+          <Row dense text="Load average">
+            {#snippet trail()}<span class="value mono">{remote.loadAvg.map((v) => v.toFixed(2)).join(' · ')}</span>{/snippet}
+          </Row>
+          <Row dense text="Memory">
+            {#snippet trail()}
+              {#if memory !== null}
+                <span class="mem">
+                  <span class="bar" aria-hidden="true"><span class="fill" style="width: {memory}%"></span></span>
+                  <span class="value">{loadText(remote)}</span>
+                </span>
+              {:else}<span class="value">No reading</span>{/if}
+            {/snippet}
+          </Row>
+        </Card>
       {/if}
 
       {#if machine.ci}
@@ -167,6 +231,12 @@
             {/if}
           {/snippet}
         </Row>
+        <Row dense text="Probe now">
+          {#snippet meta()}<span class="note">Reads what the machine has and how it is loaded.</span>{/snippet}
+          {#snippet trail()}
+            <button class="probe" disabled={busy || probing || !machine.enabled} onclick={onprobe}>{probing ? 'Probing…' : 'Probe'}</button>
+          {/snippet}
+        </Row>
       </Card>
     </div>
   {/if}
@@ -191,8 +261,19 @@
   .note { color: var(--faint); }
   .open { color: var(--iris); text-decoration: none; }
   @media (hover: hover) { .open:hover { text-decoration: underline; } }
+  .warn { color: var(--coral); }
   .mono { font-family: var(--mono); font-size: var(--t-sm); }
-  .role { flex: none; padding: 2px 9px; border-radius: 9px; background: var(--raise); color: var(--muted); font-size: var(--t-cap); font-weight: 600; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }  .role.on { background: var(--iris-wash); color: var(--iris); box-shadow: inset 0 0 0 1px var(--iris-edge); }
+  .mem { display: inline-flex; align-items: center; gap: var(--s2); }
+  .bar { display: block; width: 72px; height: 4px; border-radius: 2px; overflow: hidden; background: var(--raise); }
+  .fill { display: block; height: 100%; background: var(--iris); }
+  .probe { flex: none; padding: 3px 11px; border-radius: 9px; background: var(--raise); color: var(--ink-2); font-size: var(--t-cap); font-weight: 600; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
+  @media (hover: hover) {
+    .probe:hover { background: var(--hover); color: var(--ink); }
+  }
+  .probe:active { background: var(--select); }
+  .probe:disabled { opacity: 0.6; }
+  .role { flex: none; padding: 2px 9px; border-radius: 9px; background: var(--raise); color: var(--muted); font-size: var(--t-cap); font-weight: 600; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
+  .role.on { background: var(--iris-wash); color: var(--iris); box-shadow: inset 0 0 0 1px var(--iris-edge); }
   .role:disabled { opacity: 0.6; }
   .num { width: 72px; background: var(--field); border: 0; border-radius: var(--r-xs); padding: 4px 8px; color: var(--ink); font: inherit; font-size: var(--t-sm); }
   .ssh { width: 200px; max-width: 100%; background: var(--field); border: 0; border-radius: var(--r-xs); padding: 4px 8px; color: var(--ink); font-size: var(--t-sm); }
@@ -202,6 +283,7 @@
     .body { padding: var(--s2) var(--s3) var(--s3); }
     .back { min-height: 44px; }
     .role { min-height: 32px; }
+    .probe { min-height: 32px; }
     .num, .ssh { min-height: 36px; }
   }
 </style>

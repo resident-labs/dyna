@@ -86,9 +86,11 @@ export interface Engine {
   SystemLoad(): Promise<SystemLoad>
   // Machines lists the registry; Machine reads one page; SaveMachine writes
   // the fields of MachinePatch and answers with the machine's next state.
+  // ProbeMachine reads one machine now and answers with its page after it.
   Machines(): Promise<MachineSummary[]>
   Machine(id: string): Promise<MachineDetail>
   SaveMachine(id: string, patch: MachinePatch): Promise<MachineDetail>
+  ProbeMachine(id: string): Promise<MachineDetail>
   SyncStatus(): Promise<SyncStatus>
   SyncRefresh(roomId: string, repo: string): Promise<SyncStarted>
   GitExport(roomId: string, repo: string): Promise<SyncStarted>

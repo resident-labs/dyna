@@ -3,6 +3,7 @@ package websvc
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"time"
@@ -78,7 +79,8 @@ type MachineHarness struct {
 }
 
 // MachineDetail is the Machine page: the summary, how the engine reaches the
-// machine, the versions this machine runs and the sessions that run on it.
+// machine, the versions this machine runs, the sessions that run on it, and
+// what the last probe read.
 type MachineDetail struct {
 	MachineSummary
 	SSH         string `json:"ssh"`
@@ -89,6 +91,41 @@ type MachineDetail struct {
 	// CIRuns lists the CI runs in flight on this machine, so the page shows
 	// what it checks now. The count of them is ci.used.
 	CIRuns []MachineCIRun `json:"ciRuns,omitempty"`
+
+	// ProbedAt is when the engine last read the machine, and SeenAt when a
+	// probe last reached it. Both stay absent before the first probe, and
+	// Capabilities and Load are what that good probe read. A failed probe
+	// keeps them, so the page shows what the machine has while it is offline.
+	ProbedAt     *time.Time           `json:"probedAt,omitempty"`
+	SeenAt       *time.Time           `json:"seenAt,omitempty"`
+	Capabilities *MachineCapabilities `json:"capabilities,omitempty"`
+	Load         *MachineLoad         `json:"load,omitempty"`
+}
+
+// MachineCapabilities is what the last probe read about a machine. Memory
+// values are bytes.
+type MachineCapabilities struct {
+	OS           string   `json:"os"`
+	Arch         string   `json:"arch"`
+	CPUs         int      `json:"cpus"`
+	MemTotal     uint64   `json:"memTotal"`
+	MemAvailable uint64   `json:"memAvailable"`
+	GPU          bool     `json:"gpu"`
+	Containers   []string `json:"containers,omitempty"`
+	// Computers is whether the machine can host an agent computer, which needs
+	// labwc and Xwayland. Stream is whether wayvnc can show its desktop in the
+	// app.
+	Computers bool `json:"computers"`
+	Stream    bool `json:"stream"`
+}
+
+// MachineLoad is the last load reading of a machine. CPUPercent stays absent
+// when the probe could not take two readings.
+type MachineLoad struct {
+	CPUPercent   *int       `json:"cpuPercent,omitempty"`
+	LoadAvg      [3]float64 `json:"loadAvg"`
+	MemTotal     uint64     `json:"memTotal"`
+	MemAvailable uint64     `json:"memAvailable"`
 }
 
 // MachinePatch is one change to a machine. A nil field keeps its value; the
@@ -125,6 +162,9 @@ type MachineAPI struct {
 	// takes from its scheduler. nil means the engine runs no local CI, so a CI
 	// machine keeps showing its slots and no use.
 	CI func() []MachineCIRun
+	// Prober reads a machine when the owner asks for a probe. A nil Prober
+	// reads it through this registry with no load sampler of this engine.
+	Prober *machines.Prober
 }
 
 // Machines lists every machine, the engine host first.
@@ -176,6 +216,24 @@ func (a MachineAPI) SaveMachine(ctx context.Context, id string, patch MachinePat
 	return a.machine(ctx, saved, a.ciRuns()), nil
 }
 
+// ProbeMachine reads one machine now and answers with its page after the
+// probe, so the owner sees the new health without a second read.
+func (a MachineAPI) ProbeMachine(ctx context.Context, id string) (MachineDetail, error) {
+	m, err := a.find(ctx, id)
+	if err != nil {
+		return MachineDetail{}, err
+	}
+	prober := machines.Prober{Store: a.Store}
+	if a.Prober != nil {
+		prober = *a.Prober
+	}
+	stored, err := prober.ProbeAndSave(ctx, m)
+	if err != nil {
+		return MachineDetail{}, err
+	}
+	return a.machine(ctx, stored, a.ciRuns()), nil
+}
+
 // find reads the machine with this ID. The registry is small, so one list
 // answers it.
 func (a MachineAPI) find(ctx context.Context, id string) (machines.Machine, error) {
@@ -196,12 +254,25 @@ func (a MachineAPI) find(ctx context.Context, id string) (machines.Machine, erro
 // machine holds their slots, so a CI machine reports them wherever it runs.
 func (a MachineAPI) machine(ctx context.Context, m machines.Machine, ci map[string][]MachineCIRun) MachineDetail {
 	out := MachineDetail{MachineSummary: machineSummary(m), SSH: m.SSH}
+	// The probe fills these for every machine, this one included.
+	if !m.LastProbe.IsZero() {
+		probed := m.LastProbe
+		out.ProbedAt = &probed
+	}
+	if !m.LastSeen.IsZero() {
+		seen := m.LastSeen
+		out.SeenAt = &seen
+		out.Capabilities = capabilitiesView(m.Capabilities)
+		out.Load = loadView(m.Load)
+	}
 	if m.HasRole(machines.RoleCI) {
 		runs := ci[m.Name]
 		out.CI = &MachineCISlots{Used: ciUsedSlots(runs), Slots: m.CISlots}
 		out.CIRuns = runs
 	}
 	if !m.Local {
+		// The probe reads the version installed on the machine itself.
+		out.DynaVersion = m.Capabilities.DynaVersion
 		return out
 	}
 	out.DynaVersion = a.Version
@@ -251,14 +322,45 @@ func machineSummary(m machines.Machine) MachineSummary {
 	}
 }
 
-// machineStatus words a stored machine: this one runs the engine, a switched
-// off one takes no new work, and a remote one is not probed yet.
+// capabilitiesView words what one probe read for the page.
+func capabilitiesView(c machines.Capabilities) *MachineCapabilities {
+	return &MachineCapabilities{
+		OS:           c.OS,
+		Arch:         c.Arch,
+		CPUs:         c.CPUs,
+		MemTotal:     c.MemTotal,
+		MemAvailable: c.MemAvailable,
+		GPU:          c.GPU,
+		Containers:   c.Containers.Names(),
+		Computers:    c.Computers.Ready(),
+		Stream:       c.Computers.Stream,
+	}
+}
+
+// loadView words one load reading for the page.
+func loadView(l machines.Load) *MachineLoad {
+	out := &MachineLoad{LoadAvg: l.LoadAvg, MemTotal: l.MemTotal, MemAvailable: l.MemAvailable}
+	if l.CPUPercent != nil {
+		cpu := int(math.Round(*l.CPUPercent))
+		out.CPUPercent = &cpu
+	}
+	return out
+}
+
+// machineStatus words a stored machine. This engine's own machine is online
+// because it runs the engine; a remote machine shows what its last probe found.
 func machineStatus(m machines.Machine) MachineStatus {
 	switch {
 	case !m.Enabled:
 		return MachineDisabled
 	case m.Local:
 		return MachineOnline
+	}
+	switch m.Status() {
+	case machines.HealthOnline:
+		return MachineOnline
+	case machines.HealthOffline:
+		return MachineOffline
 	default:
 		return MachineUnknown
 	}
