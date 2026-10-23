@@ -9,7 +9,7 @@
   // Issues come from GitHub through gh on the host, grouped by who is on them
   // (IssueList) and opened as an IssuePage.
   import { onMount, untrack } from 'svelte'
-  import { api } from '../../api.ts'
+  import { api, openExternal } from '../../api.ts'
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
   import { expedite, prExpedited } from '../rooms/expedite.ts'
   import RowItem from '../ui/Row.svelte'
@@ -24,6 +24,8 @@
   import { fixesLabel } from './fixes.ts'
   import type { Row as ChangeRow } from './prlist.ts'
   import MentionInChat from './MentionInChat.svelte'
+  import RowActions from './RowActions.svelte'
+  import type { RowAction } from './props.ts'
   import { roomIssueLabel, unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
   import { location as issueLocation } from '../rooms/issues.ts'
   import IssuePage from './IssuePage.svelte'
@@ -346,6 +348,13 @@
   function mentionRow(row: ChangeRow) {
     onmention?.({ kind: 'pr', number: row.number || 0, title: changeTitle(row), state: String(row.state || 'OPEN'), url: row.url || '' })
   }
+  // The row menu holds what a row can do besides mention it.
+  function rowMenu(row: ChangeRow): RowAction[] {
+    const url = isLocal(row) ? '' : row.url || ''
+    return url ? [{ label: 'Open on GitHub', run: () => openExternal(url) }] : []
+  }
+  // The row's name in a tooltip or a menu title.
+  const rowName = (row: ChangeRow): string => (row.number ? `PR #${row.number}` : 'this PR')
   // Track and review: a PR that Dyna tracked before keeps its author session;
   // any other PR needs a session to wake.
   function trackRow(c: Row, e: MouseEvent) {
@@ -437,7 +446,7 @@
               {@const ci = ciLabel(row)}{@const review = reviewLabel(row)}
               {@const item = merge?.find((entry) => entry.changeId === row.changeId)}
               {@const state = mergeState(row, item)}
-              <div class="item" class:stack={narrow}>
+              <div class="item">
                 <RowItem selected={row.changeId === selId} onclick={() => openRow(row)}>
                   {#snippet lead()}<PRGlyph it={row} />{/snippet}
                   <div class="row-title">{changeTitle(row)} {#if row.isDraft}<Chip>Draft</Chip>{/if} {#if prExpedited($expedite, row)}<ExpediteBadge />{/if}</div>
@@ -445,7 +454,7 @@
                   <div class="row-facts"><Chip tone={ci.tone}>{ci.label}</Chip><Chip tone={review.tone} title={row.reviewBlocked}>{review.label}</Chip>{#if row.fixes?.length}<Chip outline title="Merging this PR closes these issues">Fixes {fixesLabel(row.fixes)}</Chip>{/if}<span>{mergePosition(row.changeId ?? '', merge ?? [])}</span></div>
                   {#if item && !item.trial && item.state !== 'ready'}<div class="row-author">{state.reason || state.label}</div>{/if}
                 </RowItem>
-                {#if onmention}<MentionInChat onmention={() => mentionRow(row)} />{/if}
+                <RowActions name={rowName(row)} onmention={onmention ? () => mentionRow(row) : null} items={rowMenu(row)} />
               </div>
             {/each}
             <LoadOlder auto {older} loading={loadingOlder} failed={failedOlder} onclick={onolder} />
@@ -485,7 +494,7 @@
       <div class="dscroll local-detail">
         <button class="act" onclick={() => { localSelected = null; localSequence++ }}>Issues</button>
         <h2>{roomIssueLabel(selectedLocal)} {selectedLocal.title}</h2>
-        {#if onmention}<button class="act" onclick={() => onmention?.({ kind: 'room_issue', number: roomIssueLabel(selectedLocal), title: selectedLocal.title, state: selectedLocal.state, url: `#room=${encodeURIComponent(roomId)}&view=issues` })}>Mention in chat</button>{/if}
+        {#if onmention}<MentionInChat onmention={() => onmention?.({ kind: 'room_issue', number: roomIssueLabel(selectedLocal), title: selectedLocal.title, state: selectedLocal.state, url: `#room=${encodeURIComponent(roomId)}&view=issues` })} />{/if}
         <p>Dyna · {selectedLocal.filer} · {selectedLocal.state}</p>
         {#if issueLocation(selectedLocal)}<p>{issueLocation(selectedLocal)}</p>{/if}
         {#if localBodyError}<p class="err">{localBodyError}</p>{/if}
@@ -519,10 +528,12 @@
 
 <style>
   .rows { padding: 0 var(--s4) var(--s4); }
-  .item { display: flex; align-items: center; gap: var(--s2); }
+  /* The row actions appear when the row is hovered or focused. A phone has no
+     hover, so it shows them all the time, still compact. */
+  .item { display: flex; align-items: center; gap: var(--s2); --row-actions-visibility: hidden; }
+  .item:hover, .item:focus-within { --row-actions-visibility: visible; }
+  @media (hover: none) { .item { --row-actions-visibility: visible; } }
   .item :global(.row) { flex: 1; min-width: 0; }
-  .item.stack { flex-wrap: wrap; padding-bottom: var(--s2); }
-  .item.stack :global(.row) { flex-basis: 100%; }
   .rows :global(.row) { border-bottom: 1px solid var(--line-soft); border-radius: 0; padding: var(--s4) 0; }
   .row-title { font-size: var(--t-body); font-weight: 600; overflow-wrap: anywhere; }
   .row-author { margin-top: var(--s1); color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
