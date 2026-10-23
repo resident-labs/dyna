@@ -20,6 +20,10 @@ type defaultBranchProbe struct {
 	ChecksPending bool
 	NoPushCI      bool
 	MergeTrialCI  bool
+	// Rollup is GitHub's own status summary. A red rollup that counted a
+	// cancelled run is re-read from the commit, because GitHub keeps counting a
+	// cancellation that a later run of the same workflow superseded.
+	Rollup *commitRollup
 }
 
 type discoveredPull struct {
@@ -194,6 +198,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 			if rollup := defaultBranch.Target.Rollup; rollup != nil {
 				branch.CI, branch.CheckCount = rollup.State, rollup.Contexts.TotalCount
 				branch.ChecksPending = rollup.pending()
+				branch.Rollup = rollup
 			}
 			branch.NoPushCI = branch.NoPushCI && branch.CheckCount == 0
 
@@ -410,6 +415,7 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 	gh := s.GH
 	gh.requests = &requestCache{rates: st.RateLimits, legacyPause: st.LegacyPause, now: s.now}
 	heads, rates, readErr := gh.readHeads(ctx, records)
+	recheckErr := s.recheckCancelledMainCI(ctx, gh, records, localRepos, heads)
 	saveErr := s.Store.update(func(current *State) error {
 		for key, probe := range heads {
 			if r := current.Records[key]; r != nil && probe.Account != "" {
@@ -443,7 +449,116 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 		applyRateLimits(current, rates, s.now())
 		return nil
 	})
-	return heads, errors.Join(readErr, saveErr)
+	return heads, errors.Join(readErr, recheckErr, saveErr)
+}
+
+// recheckCancelledMainCI replaces a red rollup that counted a cancelled run with
+// the commit's own CI. GitHub keeps counting a cancelled run after a later run of
+// the same workflow passed, so the latest completed result of each check decides
+// and a superseded cancellation does not fail main. One read serves every PR of
+// the repository, and every probe of that head gets the same result.
+func (s *Service) recheckCancelledMainCI(ctx context.Context, gh GitHub, records []*Record, localRepos map[string]bool, heads map[string]headProbe) error {
+	results := map[string]mainCIResult{}
+	var failures []error
+	for _, r := range records {
+		probe, ok := heads[r.Key]
+		if !ok || probe.Err != nil || localRepos[defaultRepo(*r)] || !probe.Default.cancelledFailure() {
+			continue
+		}
+		identity := defaultRepo(*r) + "@" + probe.Default.Head
+		result, read := results[identity]
+		if !read {
+			var snap Snapshot
+			if err := gh.readCommitCI(ctx, refRecord(*r), probe.Default.Head, &snap); err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			snap.Pull.Head.SHA, snap.Pull.Head.Repo.FullName = probe.Default.Head, r.Repo
+			result = mainCIResult{state: rollupState(mainCIVerdict(snap)), count: len(snap.currentChecks())}
+			results[identity] = result
+		}
+		probe.Default.CI, probe.Default.CheckCount = result.state, result.count
+		probe.Default.ChecksPending = result.state == "PENDING"
+		heads[r.Key] = probe
+	}
+	return errors.Join(failures...)
+}
+
+// mainCIResult is the rechecked CI of one commit, shared by every probe of it.
+type mainCIResult struct {
+	state string
+	count int
+}
+
+// mainCIVerdict judges every context of a commit the way the default-branch
+// rollup does, so a recheck never ignores a fact the rollup counted: the latest
+// result of each check and status decides, and a cancelled context that a later
+// result replaced does not count. Runs are evidence of their own, because a
+// replacement that has not created job checks yet, or that fails before it
+// creates them, exists only as a run.
+func mainCIVerdict(snap Snapshot) string {
+	failed, pending, passed := false, false, false
+	for _, check := range snap.currentChecks() {
+		switch checkState(check.Status, check.Conclusion) {
+		case "failure", "cancelled":
+			// A cancelled check that no later result replaced never tested
+			// the commit, and CI cannot pass until it runs again.
+			failed = true
+		case "pending":
+			pending = true
+		case "success":
+			passed = true
+		}
+	}
+	// currentRuns already drops a cancellation that a later run of the same
+	// workflow replaced, so a queued replacement reads as unfinished here.
+	for _, run := range currentRuns(snap.Runs) {
+		switch {
+		case run.Status != "completed" || run.Conclusion == "":
+			pending = true
+		case run.Conclusion == "cancelled" || !success(run.Conclusion):
+			failed = true
+		}
+	}
+	latest := map[string]Status{}
+	for _, v := range snap.Statuses {
+		if localCommitStatus(v) {
+			continue
+		}
+		if old, ok := latest[v.Context]; !ok || v.ID > old.ID {
+			latest[v.Context] = v
+		}
+	}
+	for _, v := range latest {
+		switch v.State {
+		case "failure", "error":
+			failed = true
+		case "success":
+			passed = true
+		default:
+			pending = true
+		}
+	}
+	switch {
+	case failed:
+		return "failed"
+	case pending:
+		return "pending"
+	case passed:
+		return "passed"
+	}
+	return "pending"
+}
+
+// rollupState spells a computed CI state the way the default-branch verdict reads it.
+func rollupState(ci string) string {
+	switch ci {
+	case "passed":
+		return "SUCCESS"
+	case "failed":
+		return "FAILURE"
+	}
+	return "PENDING"
 }
 
 // ConfirmHeads refreshes remote facts through their single batched writer.
