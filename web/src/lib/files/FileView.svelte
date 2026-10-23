@@ -5,11 +5,11 @@
   // image, rendered markdown (with a Source switch), or a note for a binary
   // file. The server caps text at 2 MiB and says when it cut a file.
   import { api, copyText } from '../../api.js'
-  import { human } from './attach.js'
+  import { human } from './attach.ts'
   import { markdownDocument } from './preview.ts'
   import Document from './Document.svelte'
   import { highlight, languageOf, escape, splitLines } from '../ui/highlight.ts'
-  import { code, setWrap } from './codeprefs.svelte.js'
+  import { code, setWrap } from './codeprefs.svelte.ts'
   import { crumbs, isMarkdown } from './repo.ts'
   import History from './History.svelte'
   import { ago } from '../ui/format.ts'
