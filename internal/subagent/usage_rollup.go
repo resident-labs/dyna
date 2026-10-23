@@ -12,7 +12,6 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/state"
-	"dyna-agent/internal/workeroutput"
 )
 
 // The usage rollup keeps one row per day, session, profile and model in
@@ -38,7 +37,7 @@ CREATE INDEX IF NOT EXISTS usage_rollup_room_day ON usage_rollup(room_id, day);`
 
 // usageRollupVersion changes whenever the layout or the accounting rules change,
 // so rows folded under older rules are rebuilt from the turn files.
-const usageRollupVersion = 2
+const usageRollupVersion = 3
 
 // RoleSubagent is the rollup role of a session with no stored role.
 const RoleSubagent = "subagent"
@@ -54,6 +53,9 @@ func Migrate(dataDir string) error {
 		return err
 	}
 	if err := s.migrateRetainedTurns(); err != nil {
+		return err
+	}
+	if err := s.migrateRetainedUsage(); err != nil {
 		return err
 	}
 	return migrateQueues(dataDir)
@@ -93,14 +95,10 @@ func newUsageMetric(value int64, state string) usageMetric {
 	return usageMetric{unknown: 1}
 }
 
-// TODO: legacy/shim remove later — counts turns written before usage normalization as unknown, and Claude turns written before per-turn cost as unknown cost; remove when no retained turn lacks usageNormalization or costBasis
 func turnUsageMetrics(t Turn) (input, cached, output, cost usageMetric, costUSD float64, pair usagePair) {
 	n := t.UsageNormalization
-	if n.Version != 1 {
-		n = workeroutput.UsageNormalization{}
-	}
 	costState := n.Cost
-	if t.Usage.CostUSD < 0 || (t.OutputDialect == workeroutput.DialectClaudeStreamJSON && n.CostBasis != workeroutput.CostBasisTurn) {
+	if t.Usage.CostUSD < 0 {
 		costState = ""
 	}
 	cost = newUsageMetric(0, costState)
@@ -121,32 +119,6 @@ func turnUsageMetrics(t Turn) (input, cached, output, cost usageMetric, costUSD 
 
 // usagePair is input and cache summed over a turn that reported both.
 type usagePair struct{ input, cached, turns int64 }
-
-// claudeStepCost gives a Claude turn saved before per-turn cost its own spend.
-// Those turns hold the session's cumulative total, so a turn's cost is its total
-// minus the previous turn's total in the same native session. The first turn's
-// total starts from zero. With no complete earlier turn, a different or unknown
-// native session (a transfer starts a new one), or a total that went down (a
-// reset), the cost stays as saved and reads unknown.
-// TODO: legacy/shim remove later — rebuilds per-turn cost for Claude turns saved before costBasis; remove when no retained turn lacks costBasis
-func claudeStepCost(n int, prev *Turn, t Turn) Turn {
-	legacy := func(x Turn) bool {
-		u := x.UsageNormalization
-		return x.OutputDialect == workeroutput.DialectClaudeStreamJSON && u.Version == 1 && u.Cost == "complete" && u.CostBasis != workeroutput.CostBasisTurn
-	}
-	if !legacy(t) || t.Usage.CostUSD < 0 {
-		return t
-	}
-	switch {
-	case n == 1:
-	case prev != nil && legacy(*prev) && t.HarnessSession != "" && t.HarnessSession == prev.HarnessSession && t.Usage.CostUSD >= prev.Usage.CostUSD:
-		t.Usage.CostUSD -= prev.Usage.CostUSD
-	default:
-		return t
-	}
-	t.UsageNormalization.CostBasis = workeroutput.CostBasisTurn
-	return t
-}
 
 // RecordTurnUsage folds one finished turn into the rollup. It is idempotent:
 // a turn that is already folded changes nothing.
@@ -248,11 +220,7 @@ func (s *Store) ReconcileUsage(ctx context.Context) error {
 				continue
 			}
 			if t, err := s.ReadTurn(meta.ID, n); err == nil {
-				var prev *Turn
-				if before, err := s.ReadTurn(meta.ID, n-1); n > 1 && err == nil {
-					prev = &before
-				}
-				if err := s.RecordTurnUsage(meta, claudeStepCost(n, prev, t)); err != nil {
+				if err := s.RecordTurnUsage(meta, t); err != nil {
 					failures = append(failures, err)
 				}
 			}
