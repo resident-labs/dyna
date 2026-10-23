@@ -3,7 +3,7 @@ import type { Item, SessionReference, Turn, Usage } from '../api/session.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { isSessionReference } from '../api/guards.ts'
 import { isNote, noteData } from '../ui/notices.ts'
-import { legacyEvent, registeredEvent } from '../rooms/eventPayloads.ts'
+import { legacyEvent, registeredEvent, shellEvent } from '../rooms/eventPayloads.ts'
 import { userText } from './userText.ts'
 import { duration, short, tokens } from '../ui/format.ts'
 
@@ -321,6 +321,14 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
         continue
       }
       if (input && it.postId) {
+        // A shell result stays with the step of the job it ended, so it never
+        // becomes a card of its own. The item still says who it woke.
+        if (post && shellEvent(post)) {
+          wakes.set(it.postId, { n: t.n, woke: it.kind === 'prompt' })
+          carried.add(it.postId)
+          delivered.set(it.postId, { delivery: it.delivered ? 'read' : 'delivered', pending: it.delivered ? undefined : receipt })
+          continue
+        }
         if (post && (registeredEvent(post) || legacyEvent(post))) {
           // A notice that opened or steered this turn draws its card, the same
           // one the feed shows, instead of its raw text.
@@ -375,13 +383,16 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
       continue
     }
     // An engine event is not a conversation with a peer: it draws its card, so
-    // it opens no thread and names no member.
+    // it opens no thread and names no member. A shell's result is the exception:
+    // it joins the step of the job it ends, so the timeline keeps one step per
+    // command with its output and who it woke.
     const engine = registeredEvent(p) || legacyEvent(p)
-    const keys = engine ? [] : threadKeys(p, address, room.name)
+    const shell = shellEvent(p)
+    const keys = shell ? [`shell:${shell.shellId}`] : engine ? [] : threadKeys(p, address, room.name)
     for (const key of keys) threadFor(key).posts.push(receiptOf(p))
     // A carried post draws its own message row; the queue's receipt does not
     // replace it, because the row below takes the delivery from the turn item.
-    events.push({ kind: 'post', key: `post:${p.id}`, ts: p.ts, post: p, threads: keys, suppressMessage: matched.has(p.id) || (!carried.has(p.id) && receipts.has(p.id) && receipts.get(p.id)?.state !== 'delivered') })
+    events.push({ kind: 'post', key: `post:${p.id}`, ts: p.ts, post: p, threads: keys, suppressMessage: !!shell || matched.has(p.id) || (!carried.has(p.id) && receipts.has(p.id) && receipts.get(p.id)?.state !== 'delivered') })
   }
   for (const q of receipts.values()) {
     if (matched.has(q.id) || carried.has(q.id) || q.state === 'delivered') continue

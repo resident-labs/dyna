@@ -16,6 +16,7 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/mode"
+	"dyna-agent/internal/parentoutput"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/questions"
 	"dyna-agent/internal/room"
@@ -196,6 +197,12 @@ type fixture struct {
 	*testEnv
 	a, b                              room.Record
 	lead, decoder, parser, crc, other subagent.Info
+}
+
+// turnReport reports whether msg is the typed end-of-turn event of one state.
+func turnReport(msg room.Message, state room.TurnState) bool {
+	ev, ok := msg.TurnResult()
+	return ok && ev.State == state
 }
 
 func newFixture(t *testing.T, options ...func(*testEnv)) *fixture {
@@ -500,8 +507,11 @@ func TestSessionCompletionsGoOnlyToOwner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(top.Message.To, []string{f.a.Name}) || top.Message.From != "shell:42" || top.Message.Kind != "failed" || top.Deliveries[0].Delivery != "room" {
+	if !reflect.DeepEqual(top.Message.To, []string{f.a.Name}) || top.Message.From != room.EngineSender || top.Message.Kind != string(room.FamilyShell) || top.Deliveries[0].Delivery != "room" {
 		t.Fatalf("top-level completion = %#v", top)
+	}
+	if ev, ok := top.Message.Shell(); !ok || ev.State != room.ShellFailed || ev.ExitCode != 7 || ev.ShellID != "42" {
+		t.Fatalf("top-level shell result = %+v, %v", ev, ok)
 	}
 	child, err := f.svc.CompleteSessionTurn(f.ctx, f.decoder.ID, 1)
 	if err != nil {
@@ -590,7 +600,7 @@ func TestTerminalSessionReportsPreserveOutputAndAlertOnlyFailures(t *testing.T) 
 				if err != nil {
 					t.Fatal(err)
 				}
-				if report.Message.Kind != "failed" || !reflect.DeepEqual(report.Message.To, []string{f.lead.Address(), f.a.Name}) || !reflect.DeepEqual(report.Message.Via, []string{"@parent", "@root"}) || len(report.Deliveries) != 2 || report.Deliveries[0].Delivery != "session-queued" {
+				if !turnReport(report.Message, room.TurnFailed) || !reflect.DeepEqual(report.Message.To, []string{f.lead.Address(), f.a.Name}) || !reflect.DeepEqual(report.Message.Via, []string{"@parent", "@root"}) || len(report.Deliveries) != 2 || report.Deliveries[0].Delivery != "session-queued" {
 					t.Fatalf("terminal report = %#v", report)
 				}
 				if !strings.Contains(report.Message.Text, "failure detail") || !strings.Contains(report.Message.Text, "dyna subagent output "+f.decoder.Address()) {
@@ -642,7 +652,7 @@ func TestRepairedTurnReportsFailedOnce(t *testing.T) {
 		t.Fatalf("repaired turn = %+v, %v; want one finalized failure", turn, err)
 	}
 	posts := f.postsSince(f.a, start)
-	if len(posts) != 1 || posts[0].Kind != "failed" || !reflect.DeepEqual(posts[0].To, []string{f.lead.Address(), f.a.Name}) || !strings.Contains(posts[0].Text, "turn runner exited") {
+	if len(posts) != 1 || !turnReport(posts[0], room.TurnFailed) || !reflect.DeepEqual(posts[0].To, []string{f.lead.Address(), f.a.Name}) || !strings.Contains(posts[0].Text, "turn runner exited") {
 		t.Fatalf("repair posts = %#v", posts)
 	}
 	f.wait(f.lead.ID, 2)
@@ -688,8 +698,7 @@ func TestSessionCompletionSpillsFullReport(t *testing.T) {
 	}
 	path := filepath.Join(dir, "parent-output", "turn-1.txt")
 	full, err := os.ReadFile(path)
-	want := CompletionText(f.decoder.Address(), 1, "completed", long, "")
-	if err != nil || string(full) != want || len([]rune(report.Message.Text)) > 1500 || !strings.Contains(report.Message.Text, path) {
+	if err != nil || string(full) != long || len([]rune(report.Message.Text)) > parentoutput.InlineCharLimit+200 || !strings.Contains(report.Message.Text, path) {
 		t.Fatalf("completion = %s, full length = %d, error = %v", report.Message.Text, len(full), err)
 	}
 	turn, err := f.mgr.Store.ReadTurn(f.decoder.ID, 1)
@@ -717,7 +726,7 @@ func TestSessionCompletionSpillFailurePostsFallbackAndRetryIsSafe(t *testing.T) 
 	}
 	result, err := e.svc.CompleteSessionTurn(e.ctx, child.ID, 1)
 	pointer := fmt.Sprintf("dyna subagent output %s --turn 1", child.ID)
-	if err != nil || result.Message.ID == "" || len([]rune(result.Message.Text)) > 1500 ||
+	if err != nil || result.Message.ID == "" || len([]rune(result.Message.Text)) > parentoutput.InlineCharLimit+200 ||
 		!strings.Contains(result.Message.Text, "Could not save full report") || !strings.Contains(result.Message.Text, pointer) {
 		t.Fatalf("fallback = %+v, error = %v", result.Message, err)
 	}
@@ -743,7 +752,7 @@ func TestSessionCompletionSpillFailurePostsFallbackAndRetryIsSafe(t *testing.T) 
 // post stores nothing. The original keeps its kind, so every kind forwards.
 func TestPostForwardsAnyKindAndRejectsUnknownPost(t *testing.T) {
 	f := newFixture(t)
-	for _, kind := range []string{"", "completed", "failed"} {
+	for _, kind := range []string{"", "message", "service-alert"} {
 		orig, err := f.svc.Rooms.Post(f.a.ID, room.PostInput{From: f.a.Name + ":decoder", Kind: kind, To: []string{f.a.Name}, Text: "original " + kind})
 		if err != nil {
 			t.Fatal(err)

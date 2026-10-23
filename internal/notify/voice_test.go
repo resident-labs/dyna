@@ -28,7 +28,7 @@ func TestVoiceRequestStartsRootAndGetsItsReport(t *testing.T) {
 		t.Fatalf("first turn prompt = %q", p)
 	}
 	answer, err := e.svc.CompleteSessionTurn(e.ctx, root.ID, 1)
-	if err != nil || answer.Message.ID == "" || answer.Message.Kind != "completed" || !strings.Contains(answer.Message.Text, "CI is green") {
+	if err != nil || answer.Message.ID == "" || !turnReport(answer.Message, room.TurnCompleted) || !strings.Contains(answer.Message.Text, "CI is green") {
 		t.Fatalf("root owed Voice no report: %+v, %v", answer.Message, err)
 	}
 	// An open, idle root also owes a report for the next request.

@@ -81,7 +81,7 @@ func TestHumanPostStartsRootAndOnlyFailuresWakeIt(t *testing.T) {
 		t.Fatalf("first turn prompt = %q", p)
 	}
 	answer, err := e.svc.CompleteSessionTurn(e.ctx, root.ID, 1)
-	if err != nil || answer.Message.From != rec.Name+":"+room.RootAgent || !strings.Contains(answer.Message.Text, "first answer") || !answer.Message.Addressed(rec.Name) {
+	if ev, ok := answer.Message.TurnResult(); err != nil || !ok || ev.Session != rec.Name+":"+room.RootAgent || !strings.Contains(answer.Message.Text, "first answer") || !answer.Message.Addressed(rec.Name) {
 		t.Fatalf("the internal root's answer did not reach the room: %+v, %v", answer.Message, err)
 	}
 	if got := rootDelivery(answer, rec); got != "" {
@@ -97,7 +97,7 @@ func TestHumanPostStartsRootAndOnlyFailuresWakeIt(t *testing.T) {
 	}
 	e.wait(root.ID, 2)
 	second, err := e.svc.CompleteSessionTurn(e.ctx, root.ID, 2)
-	if err != nil || second.Message.From != rec.Name+":"+room.RootAgent || !strings.Contains(second.Message.Text, "second answer") || rootDelivery(second, rec) != "" {
+	if ev, ok := second.Message.TurnResult(); err != nil || !ok || ev.Session != rec.Name+":"+room.RootAgent || !strings.Contains(second.Message.Text, "second answer") || rootDelivery(second, rec) != "" {
 		t.Fatalf("the second answer did not reach the room: %+v, %v", second, err)
 	}
 	if root = e.rootSession(rec); root.Turns != 2 {

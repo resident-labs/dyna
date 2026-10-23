@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
 	"log"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strconv"
@@ -86,11 +87,20 @@ type Item struct {
 	TS        time.Time `json:"ts"`
 	Text      string    `json:"text,omitempty"`
 	From      string    `json:"from,omitempty"`
-	Tool      string    `json:"tool,omitempty"`
-	Target    string    `json:"target,omitempty"`
-	Aside     string    `json:"aside,omitempty"`
-	Failed    bool      `json:"failed,omitempty"`
-	Done      bool      `json:"done,omitempty"`
+	// Step is what a tool call did, in the session view's own words: read,
+	// edit, search, run and so on. Label is the call's short name, a file name
+	// or a command's first word, and ToolName the harness's own tool ID. The
+	// row shows Step, Label and a state; ToolName, the full target and the exit
+	// code stay in its details.
+	Step       string `json:"step,omitempty"`
+	Label      string `json:"label,omitempty"`
+	ToolName   string `json:"toolName,omitempty"`
+	DurationMS int    `json:"durationMs,omitempty"`
+	Tool       string `json:"tool,omitempty"`
+	Target     string `json:"target,omitempty"`
+	Aside      string `json:"aside,omitempty"`
+	Failed     bool   `json:"failed,omitempty"`
+	Done       bool   `json:"done,omitempty"`
 	// JobID and JobOp link a call of Dyna's shell tools to its job: JobOp is
 	// run, output or stop. Job is the snapshot of the job a run started.
 	// Command, Output and Exit explain a failed call: its input, the tail of
@@ -139,6 +149,8 @@ func sessionItem(it transcript.Item) Item {
 	switch it.Kind {
 	case transcript.ToolUse:
 		item.Tool, item.Target = transcript.Headline(it.Tool), it.Tool.Target
+		item.Step, item.Label, item.ToolName = string(it.Tool.Step), toolLabel(it.Tool), it.Tool.Name
+		item.DurationMS = int(it.Tool.Dur.Milliseconds())
 		item.Aside, item.Failed, item.Done = transcript.ToolAside(it.Tool), it.Tool.Failed, it.Tool.Done
 		item.JobID, item.JobOp = it.Tool.JobID, it.Tool.JobOp
 		if it.Tool.Failed {
@@ -152,6 +164,26 @@ func sessionItem(it transcript.Item) Item {
 		item.TokensBefore, item.TokensAfter = c.Before, c.After
 	}
 	return item
+}
+
+// toolLabel is the short name a step row shows: a file's own name, a
+// command's first word, or the pattern a search used. The full target and the
+// harness's tool ID stay in the row's details.
+func toolLabel(t transcript.Tool) string {
+	target := strings.TrimSpace(t.Target)
+	if target == "" {
+		return ""
+	}
+	switch t.Step {
+	case transcript.StepRun, transcript.StepMonitor, transcript.StepFetch, transcript.StepDelegate:
+		if word, _, ok := strings.Cut(target, " "); ok {
+			return word
+		}
+		return strings.TrimRight(target, "/")
+	case transcript.StepRead, transcript.StepEdit, transcript.StepWrite, transcript.StepList:
+		return filepath.Base(strings.TrimRight(target, "/"))
+	}
+	return target
 }
 
 // Transcript reads a session's six newest turns.
@@ -309,6 +341,16 @@ func (s *Service) sessionView(sess transcript.Session) (Session, error) {
 		return Session{}, err
 	}
 	return out, nil
+}
+
+// authoredBy reports whether a post was written by one session: an agent post
+// names it in the sender, and a typed turn event names it in the payload.
+func authoredBy(msg room.Message, id, addr string) bool {
+	if msg.SentBySession(id, addr) {
+		return true
+	}
+	ev, ok := msg.TurnResult()
+	return ok && ev.SessionID == id
 }
 
 func (s *Service) shellStore() *shells.Store { return terminalsvc.ShellStore(s.sessions().Root) }

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { feedRows, feedPRRepos, isShellResult, rowPost, rowPosts } from './feedRows.ts'
+import { feedRows, feedPRRepos, isShellResult, rowPost, rowPosts, shellJobID } from './feedRows.ts'
 import type { FeedInput, FeedRow } from './feedRows.ts'
 import { hookEvent } from './eventPayloads.ts'
 import { need } from '../../../test/need.ts'
@@ -17,6 +17,37 @@ const conts = (rows: readonly FeedRow[]) => content(rows).map((row) => row.cont)
 
 test('automatic shell exits of every kind are shell results', () => {
   for (const kind of ['completed', 'failed', 'stopped']) assert.equal(isShellResult(result(1, kind)), true)
+})
+
+// isShellResultForFeed is the feed's own filter: App.svelte drops every post it
+// reports, so a result row never reaches the room chat.
+const isShellResultForFeed = (post: FeedInput) => isShellResult(post)
+
+test('a typed shell result is a shell result, and names its job', () => {
+  const jobs = [
+    { state: 'completed', exitCode: 0 },
+    { state: 'failed', exitCode: 2 },
+    { state: 'stopped', exitCode: -1 },
+  ] as const
+  for (const job of jobs) {
+    const post: FeedInput = {
+      id: 'msg_shell', ts: start, from: 'dyna', kind: 'shell', notice: { kind: 'result' }, completion: true, to: ['test-room'],
+      payload: { shellId: 'sh_20261017-120000-00000001', label: 'go test', ...job, output: ['FAIL'] },
+    }
+    assert.equal(isShellResult(post), true)
+    assert.equal(shellJobID(post), 'sh_20261017-120000-00000001')
+    // The room chat leaves it out: the session DM and the shell view carry it.
+    assert.equal(isShellResultForFeed(post), true)
+    // An owner's own shell is not a background result row.
+    assert.equal(isShellResult({ ...post, owner: true }), false)
+  }
+  // A turn end is not a shell result, so it keeps its feed row.
+  const turn: FeedInput = {
+    id: 'msg_turn', ts: start, from: 'dyna', kind: 'turn', notice: { kind: 'completed' }, completion: true, to: ['test-room'],
+    payload: { session: 'test-room:decoder', sessionId: 'ses_1', turn: 1, state: 'completed', summary: 'Done.' },
+  }
+  assert.equal(isShellResult(turn), false)
+  assert.equal(isShellResult(result(1, 'completed', { kind: 'shell', from: 'dyna' })), false)
 })
 
 test('other posts are never shell results', () => {
