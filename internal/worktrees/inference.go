@@ -1,7 +1,6 @@
 package worktrees
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
-	"syscall"
 
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/sessionlife"
@@ -27,8 +25,6 @@ type inferredOwners struct {
 	Sessions []ownerRef
 	Runs     []ownerRef
 }
-
-const inferenceMetadataLimit = 4 << 20
 
 // inferOwners reads historical ownership without changing stores or worktrees.
 // An error means that ownership is incomplete; callers must keep the trees.
@@ -282,40 +278,6 @@ func inferenceStore(ctx context.Context, path string, visit func(*os.Root, strin
 	}
 }
 
-func inferenceOpen(root *os.Root, path string) (*os.File, error) {
-	info, err := root.Lstat(path)
-	if err != nil {
-		return nil, err
-	}
-	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("ownership file is not regular: %s", path)
-	}
-	// Nonblocking open also prevents a concurrent replacement with a FIFO
-	// from trapping inference before the regular-file check.
-	file, err := root.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return nil, err
-	}
-	info, err = file.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		file.Close()
-		return nil, fmt.Errorf("unsafe ownership file: %s", path)
-	}
-	return file, nil
-}
-
-type inferenceReader struct {
-	ctx context.Context
-	r   io.Reader
-}
-
-func (r inferenceReader) Read(p []byte) (int, error) {
-	if err := r.ctx.Err(); err != nil {
-		return 0, err
-	}
-	return r.r.Read(p)
-}
-
 // rowless holds the run folders already reported for having no row.
 var rowless sync.Map
 
@@ -325,36 +287,6 @@ func reportRowless(id string) {
 	if _, seen := rowless.LoadOrStore(id, true); !seen {
 		log.Printf("worktrees: run %s has a folder but no meta in dyna.db; its trees are kept", id)
 	}
-}
-
-func inferenceMetadata(ctx context.Context, root *os.Root, path string, dest any) (bool, error) {
-	file, err := inferenceOpen(root, path)
-	if os.IsNotExist(err) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	defer file.Close()
-	data, err := io.ReadAll(io.LimitReader(inferenceReader{ctx, file}, inferenceMetadataLimit+1))
-	if err != nil {
-		return false, err
-	}
-	if len(data) > inferenceMetadataLimit {
-		return false, fmt.Errorf("ownership metadata exceeds size limit: %s", path)
-	}
-	if err := inferenceDecode(data, dest); err != nil {
-		return false, fmt.Errorf("invalid ownership metadata %s: %w", path, err)
-	}
-	return true, nil
-}
-
-func inferenceDecode(data []byte, dest any) error {
-	data = bytes.TrimSpace(data)
-	if len(data) == 0 || data[0] != '{' {
-		return errors.New("expected a JSON object")
-	}
-	return json.Unmarshal(data, dest)
 }
 
 // sessionWorktreePaths selects possible session trees without reading other
