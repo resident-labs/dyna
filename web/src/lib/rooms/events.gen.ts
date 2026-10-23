@@ -144,6 +144,15 @@ export interface MergeDecisionEvent {
   note: string
 }
 
+// MachineEvent is the payload of the machine/low-disk events.
+export interface MachineEvent {
+  name: string
+  freeBytes: number
+  floorBytes: number
+  summary: string
+  atMs: number
+}
+
 // PREvent is the payload of the pr/opened and pr/ready and pr/approved and pr/changes and pr/ci-failed and pr/ci-paused and pr/ci-passed and pr/returned and pr/merged and pr/closed and pr/comment and pr/held-comment and pr/review-assigned and pr/update events.
 export interface PREvent {
   type: PRType
@@ -169,10 +178,10 @@ export interface PREvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | PREvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | PREvent
 
-export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "pr"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update"
+export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "pr"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "low-disk" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update"
 export type WakeRule = "never" | "target" | "root-if-needed"
 
 export type Audience = "room" | "session"
@@ -410,6 +419,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     once: false,
     audience: "room",
     text: "{note}",
+  },
+  {
+    family: "machine",
+    type: "low-disk",
+    renderer: "MachineDiskCard",
+    quiet: false,
+    wake: "root-if-needed",
+    once: true,
+    audience: "room",
+    text: "Machine {name} is low on disk: {summary}. Dyna starts no CI there until space is freed.",
   },
   {
     family: "pr",
@@ -686,6 +705,15 @@ export function isMergeDecisionEvent(v: unknown): v is MergeDecisionEvent {
     typeof v.note === "string"
 }
 
+export function isMachineEvent(v: unknown): v is MachineEvent {
+  return isRecord(v) &&
+    typeof v.name === "string" &&
+    Number.isInteger(v.freeBytes) &&
+    Number.isInteger(v.floorBytes) &&
+    typeof v.summary === "string" &&
+    Number.isInteger(v.atMs)
+}
+
 export function isPREvent(v: unknown): v is PREvent {
   return isRecord(v) &&
     P_R_TYPE.has(v.type) &&
@@ -733,6 +761,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "merge" && type === "conflict") return isMergeEvent(v)
   if (family === "merge" && type === "rolled-back") return isMergeEvent(v)
   if (family === "merge" && type === "decision") return isMergeDecisionEvent(v)
+  if (family === "machine" && type === "low-disk") return isMachineEvent(v)
   if (family === "pr" && type === "opened") return isPREvent(v)
   if (family === "pr" && type === "ready") return isPREvent(v)
   if (family === "pr" && type === "approved") return isPREvent(v)

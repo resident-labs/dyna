@@ -16,6 +16,7 @@ import (
 
 	"dyna-agent/internal/cli/jsonout"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/settings"
 )
 
 // NewCommand builds the `dyna machine` group.
@@ -38,8 +39,22 @@ func NewCommand() *cobra.Command {
 
 func store() machines.Store { return machines.Store{} }
 
-// prober is the prober the CLI saves through.
-func prober() machines.Prober { return machines.Prober{Store: store()} }
+// prober is the prober the CLI saves through. It reads the same disk floor as
+// the engine, so a probe from the command line marks a CI machine that is low
+// on disk exactly as the engine's own probe does.
+func prober() machines.Prober {
+	return machines.Prober{Store: store(), DiskFloorBytes: diskFloorBytes()}
+}
+
+// diskFloorBytes is the free space a CI machine must keep. A settings file that
+// cannot be read keeps the default floor.
+func diskFloorBytes() uint64 {
+	values, err := settings.Load("")
+	if err != nil {
+		return settings.Defaults().CIDiskFloorBytes()
+	}
+	return values.CIDiskFloorBytes()
+}
 
 func listCommand() *cobra.Command {
 	var asJSON bool
@@ -138,6 +153,14 @@ func writeCapabilities(out io.Writer, m machines.Machine) {
 	fmt.Fprintf(out, "Runtime:  %s\n", joinOr(caps.Containers.Names(), "none"))
 	fmt.Fprintf(out, "Computers: %t, stream: %t\n", caps.Computers.Ready(), caps.Computers.Stream)
 	fmt.Fprintf(out, "Dyna:     %s\n", orNone(caps.DynaVersion))
+	if caps.Disk.Total > 0 {
+		fmt.Fprintf(out, "Disk:     %s free of %s on /var/tmp\n", size(caps.Disk.Free), size(caps.Disk.Total))
+	}
+	// A CI machine below the floor keeps its CI work until space is freed, so
+	// the reason is named, not only the health.
+	if m.HoldsCI() {
+		fmt.Fprintf(out, "CI:       held; free space is below the %s floor of machines.ciDiskFloorGB\n", size(diskFloorBytes()))
+	}
 	if load.CPUPercent != nil {
 		fmt.Fprintf(out, "Load:     %.2f %.2f %.2f, CPU %.0f%%, %s free\n",
 			load.LoadAvg[0], load.LoadAvg[1], load.LoadAvg[2], *load.CPUPercent, size(load.MemAvailable))
