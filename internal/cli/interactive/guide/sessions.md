@@ -32,3 +32,18 @@ The owner can also use Clear dormant or Dismiss for the same checks sooner.
 Closed sessions stay closed until an explicit `dyna subagent reopen <session>`.
 Reopen preserves the conversation and turn history and returns the session to idle.
 It does not start a turn. The next coordination post can start one.
+
+## Services
+
+Dyna runs some sessions for itself: the librarian, the PR reviewers and Voice.
+They are services, not members of the room's hierarchy. A service has no parent,
+holds no goal and owns no place in the tree, so it never appears in
+`dyna room members`, a parent check-in, the Children section of a session's
+threads or an `@children` selector. It appears only with `dyna services`:
+`list`, `show <service>`, `enable|disable <service>`,
+`profile <service> <profile|auto>`, `restart <service>` and `log <service>`.
+
+Change a service's profile with `dyna services profile` only, and never as part
+of a bulk move of sessions: a service keeps the profile chosen for it. A failed
+service turn posts one alert that names the service, its turn and its error.
+Never manage a service with `dyna subagent transfer` or a raw settings key.

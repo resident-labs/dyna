@@ -96,9 +96,10 @@ func TestCommittedMemberViewSharedByFiveSubscribers(t *testing.T) {
 	}
 }
 
-// Service classification uses stored flags when an ancestor changes.
-// Requests and targeted watch scans must agree.
-func TestCommittedMemberViewPreservesStoredService(t *testing.T) {
+// A service session is outside the hierarchy, so a member view never shows one,
+// whatever its ancestor's stored flags say. Requests and targeted watch scans
+// must still agree on the records they read.
+func TestCommittedMemberViewLeavesServicesOut(t *testing.T) {
 	for _, requestFirst := range []bool{false, true} {
 		t.Run(fmt.Sprintf("request-first=%t", requestFirst), func(t *testing.T) {
 			e := newEnv(t)
@@ -119,26 +120,19 @@ func TestCommittedMemberViewPreservesStoredService(t *testing.T) {
 				t.Fatal(err)
 			}
 			e.svc.scanMembers(all, []room.Record{rec}, w, nil, true, func(Event) {})
-			assertMembers := func(wantService bool) {
+			assertMembers := func() {
 				t.Helper()
 				members, err := e.svc.Members(rec.ID, true)
 				if err != nil {
 					t.Fatal(err)
 				}
-				found := 0
 				for _, member := range members {
 					if member.ID == child || member.ID == grandchild {
-						found++
-						if member.Service != wantService {
-							t.Errorf("member %s service=%v; want %v", member.Name, member.Service, wantService)
-						}
+						t.Fatalf("service session is a member: %+v", member)
 					}
 				}
-				if found != 2 {
-					t.Fatalf("lost descendant members: %+v", members)
-				}
 			}
-			assertMembers(true) // Warm the rendered tree before the ancestor write.
+			assertMembers() // Warm the rendered tree before the ancestor write.
 			reads := map[string]int{}
 			read := readSnapshotSession
 			readSnapshotSession = func(fn func(string) (subagent.Info, error), id string) (subagent.Info, error) {
@@ -157,7 +151,7 @@ func TestCommittedMemberViewPreservesStoredService(t *testing.T) {
 					t.Fatal(err)
 				}
 				if requestFirst {
-					assertMembers(true)
+					assertMembers()
 				}
 				ids := map[string]bool{parent: true}
 				fresh, err := w.refresh(e.svc, ids)
@@ -174,7 +168,7 @@ func TestCommittedMemberViewPreservesStoredService(t *testing.T) {
 				if seen[child] || seen[grandchild] {
 					t.Errorf("ancestor change published unchanged descendant members: %v", seen)
 				}
-				assertMembers(true)
+				assertMembers()
 				if reads[parent] != 1 || reads[child] != 1 || reads[grandchild] != 1 || reads[unrelated] != 0 {
 					t.Errorf("ancestor refresh reads=%v; want each affected record once and no unrelated read", reads)
 				}
