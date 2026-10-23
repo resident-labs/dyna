@@ -320,9 +320,9 @@ test('an agent still sees the owner steering it inline, not as a thread', () => 
 test('the posted-to chip is empty for a post written in a DM and names recipients elsewhere', () => {
   const owner = 'room', root = 'room:root'
   assert.equal(postedTo({ to: [owner], conversation: `dm:seat:${room.id}` }, owner), '', 'a DM post is to its reader')
-  assert.equal(postedTo({ to: [owner] }, owner), '#room · @root')
-  assert.equal(postedTo({ to: ['room:lead', owner] }, owner), '#room · @lead, @root')
-  assert.equal(postedTo({ to: [root] }, owner), '#room · @root')
+  assert.equal(postedTo({ to: [owner] }, owner), 'Room chat · @root')
+  assert.equal(postedTo({ to: ['room:lead', owner] }, owner), 'Room chat · @lead, @root')
+  assert.equal(postedTo({ to: [root] }, owner), 'Room chat · @root')
 })
 
 test('a reference row names its home conversation without IDs', () => {
