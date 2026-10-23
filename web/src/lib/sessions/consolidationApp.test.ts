@@ -2,14 +2,14 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createReloadGate, reconcileRows } from '../ui/reloadGate.ts'
-import { createRoomData } from '../rooms/roomData.ts'
 import { bulkRetryable } from './bulkSessions.ts'
 import { pruneSelection, toggleSelection } from './consolidation.ts'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
+import { installRoomLoader } from '../../../test/appRoomLoader.ts'
 import { need } from '../../../test/need.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const names = ['consolidationChanged', 'loadMembers', 'memberRoster', 'roomCountKey', 'showMemberRows', 'parentKey', 'noteParents', 'applyMembers', 'pickSession', 'setPicked', 'bulkChanged', 'toggleSessionSelection', 'closeSelectionMenu']
+const names = ['consolidationChanged', 'loadMembers', 'pickSession', 'setPicked', 'bulkChanged', 'toggleSessionSelection', 'closeSelectionMenu']
 function deferred<T>() { let resolve: (value: T) => void = () => {}; const promise = new Promise<T>((yes) => { resolve = yes }); return { promise, resolve } }
 // The slice of App's state these handlers read and write.
 interface Member { id: string; closed?: boolean }
@@ -31,10 +31,8 @@ function app(api: Record<string, unknown>): App {
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), () => c.consolidationAlive)
   c.routedParents ??= ''; c.feed ??= null
   runFunctions(source, names, c)
-  c.roomData = createRoomData(api, {
-    current: () => ({ room: c.roomId, visit: c.roomRequest }),
-    members: (...args: unknown[]) => call(c, 'applyMembers', ...args), choices() {},
-  })
+  // The member rows live in the room loader now, so it holds the members read.
+  installRoomLoader(c, api)
   return c
 }
 test('a stale member list cannot restore a closed selection or replace a newer hierarchy', async () => {
