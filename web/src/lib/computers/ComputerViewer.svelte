@@ -13,6 +13,7 @@
   import ComputerChat from './ComputerChat.svelte'
   import { badgeText } from './preview.ts'
   import PhoneKeys from '../ui/PhoneKeys.svelte'
+  import type { PhoneKey } from '../ui/PhoneKeys.svelte'
   import { phoneKeyboard, type Modifiers } from './phoneKeyboard.ts'
   import { errorText } from '../errorText.ts'
   import type { ComputerInfo, ComputerStream } from '../api/computer.ts'
@@ -350,7 +351,7 @@
   {#if human}
     <textarea class="keyboard-input" aria-label="Type on computer" bind:this={keyboardInput} use:bindKeyboard onblur={() => (keyboardOpen = false)} autocapitalize="off" autocomplete="off" {...noAutocorrect} spellcheck="false" rows="1"></textarea>
     {#if keyboardOpen}
-      <PhoneKeys {...modifiers} label="Computer keys" onkey={(key: number) => { keyboard?.key(key); keyboardInput?.focus({ preventScroll: true }) }} />
+      <PhoneKeys {...modifiers} label="Computer keys" onkey={(key: PhoneKey) => { keyboard?.key(key); keyboardInput?.focus({ preventScroll: true }) }} />
     {/if}
   {/if}
 

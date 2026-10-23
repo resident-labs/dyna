@@ -1,7 +1,11 @@
-<script>
+<script lang="ts">
   // Skeleton stands in for a list of messages while it loads: an avatar and
   // two lines per row, with a slow shimmer that reduced motion turns off.
-  let { label = 'Loading', rows = 4 } = $props()
+  interface Props {
+    label?: string
+    rows?: number
+  }
+  let { label = 'Loading', rows = 4 }: Props = $props()
   // Fixed widths read as text without looking random on every load.
   const widths = ['72%', '54%', '86%', '63%', '78%', '48%']
 </script>

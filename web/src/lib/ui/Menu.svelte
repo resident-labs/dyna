@@ -1,12 +1,29 @@
-<script>
+<script lang="ts">
   // A small context menu drawn in the DOM, so the web client can reuse it.
   // items: [{ label, hint?, danger?, gap? (separator above), run }].
   import { onMount, tick, untrack } from 'svelte'
 
-  let { x = 0, y = 0, title = '', items = [], onclose } = $props()
+  interface MenuItem {
+    label: string
+    run: () => unknown
+    hint?: string
+    danger?: boolean
+    gap?: boolean
+    disabled?: boolean
+  }
 
-  let box = $state()
-  let list = $state()
+  interface Props {
+    // x and y place the menu, in viewport pixels.
+    x?: number
+    y?: number
+    title?: string
+    items?: MenuItem[]
+    onclose: () => void
+  }
+  let { x = 0, y = 0, title = '', items = [], onclose }: Props = $props()
+
+  let box = $state<HTMLDivElement | undefined>()
+  let list = $state<HTMLDivElement | undefined>()
   let pick = $state(0)
   let pos = $state({ left: x, top: y })
 
@@ -27,7 +44,7 @@
       top: Math.max(top + 8, Math.min(y + r.height > top + height - 8 ? y - r.height : y, top + height - r.height - 8)),
     }
   }
-  function reveal(item) {
+  function reveal(item: HTMLElement | undefined) {
     if (!item || !list) return
     const itemRect = item.getBoundingClientRect()
     const listRect = list.getBoundingClientRect()
@@ -43,7 +60,7 @@
     const viewport = window.visualViewport
     const resize = () => {
       place()
-      reveal(box.querySelectorAll('[role=menuitem]')[pick])
+      reveal(box?.querySelectorAll<HTMLElement>('[role=menuitem]')[pick])
     }
     window.addEventListener('resize', resize)
     viewport?.addEventListener('resize', resize)
@@ -61,20 +78,21 @@
     }
   })
 
-  function focusAt(i, direction = 1) {
+  function focusAt(i: number, direction = 1) {
     let next = (i + items.length) % items.length
     for (let n = 0; n < items.length; n++, next = (next + direction + items.length) % items.length) {
-      if (!items[next].disabled) {
+      const item = items[next]
+      if (item && !item.disabled) {
         pick = next
-        const item = box.querySelectorAll('[role=menuitem]')[pick]
-        item?.focus({ preventScroll: true })
-        reveal(item)
+        const node = box?.querySelectorAll<HTMLElement>('[role=menuitem]')[pick]
+        node?.focus({ preventScroll: true })
+        reveal(node)
         return
       }
     }
   }
 
-  function keydown(e) {
+  function keydown(e: KeyboardEvent) {
     if (e.key === 'ArrowDown') { e.preventDefault(); focusAt(pick + 1) }
     else if (e.key === 'ArrowUp') { e.preventDefault(); focusAt(pick - 1, -1) }
     else if (e.key === 'Home') { e.preventDefault(); focusAt(0) }
@@ -82,7 +100,7 @@
     else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); onclose() }
   }
 
-  function choose(it) {
+  function choose(it: MenuItem) {
     if (it.disabled) return
     onclose()
     it.run()

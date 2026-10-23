@@ -40,8 +40,9 @@ test('source links support in-app navigation and native modified clicks', () => 
   const c: { onopen: ((id: string) => void) | null, postId: string } = { onopen: (id) => calls.push(id), postId: 'msg_123' }
   vm.createContext(c)
   const { start, end } = sourceRange(openNode)
-  vm.runInContext(source.slice(start, end), c)
-  // vm runs untyped JavaScript, so the handler comes back with its call shape.
+  vm.runInContext(stripTypes(source.slice(start, end)), c)
+  // vm runs untyped JavaScript, so a lang="ts" slice is stripped first, and the
+  // handler comes back with its call shape.
   const handlers = vm.runInContext('({ open })', c) as { open: (event: OpenEvent) => void }
   const state = Object.assign(c, handlers)
   const event: OpenEvent = { button: 0, preventDefault() { calls.push('prevent') } }

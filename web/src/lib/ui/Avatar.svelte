@@ -1,7 +1,22 @@
-<script>
+<script lang="ts">
   import { sessionStatus } from '../sessions/status.ts'
   import { initials } from './format.ts'
-  let { name = '', hue = 0, size = 40, state = '', status = '', ring = 'var(--main)', owner = false, emoji = '', image = '' } = $props()
+
+  interface Props {
+    name?: string
+    hue?: number
+    size?: number
+    // state is the member's session state; the dot draws it.
+    state?: string
+    status?: string
+    // ring is the color of the gap between the avatar and its dot.
+    ring?: string
+    owner?: boolean
+    emoji?: string
+    // image is an icon URL, such as a harness logo.
+    image?: string
+  }
+  let { name = '', hue = 0, size = 40, state = '', status = '', ring = 'var(--main)', owner = false, emoji = '', image = '' }: Props = $props()
 </script>
 
 <span class="avatar bg-{hue}" class:owner class:has-image={!!image} style="--s:{size}px; --ring:{ring}">

@@ -35,7 +35,7 @@
     removing?: string
     onunqueue?: ((pending: Receipt) => void) | null
     ondismiss?: ((pending: Receipt) => void) | null
-    onissue?: ((number: number) => void) | null
+    onissue?: ((issue: string) => void) | null
     selection?: PostSelection
   }
   let { dm, jobs = [], onjob = null, rows = null, room, onforward = null, member, members = [], compact = false, isNew = () => false, selectedKey = '', onthread, onopenfile, onpost = null, removing = '', onunqueue = null, ondismiss = null, onissue = null, selection = createSelection() }: Props = $props()
