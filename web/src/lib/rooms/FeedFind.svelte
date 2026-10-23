@@ -47,6 +47,7 @@
     asked = query
     const mine = ++token
     loading = true
+    error = ''
     try {
       const found: unknown = await api.searchFeed(roomId, query)
       if (mine !== token) return
@@ -81,7 +82,11 @@
     return () => clearTimeout(timer)
   })
 
+  const ready = $derived(!loading && !error && !!results && results.query === text.trim())
+  const navigating = $derived(ready && !!results?.posts.length)
+
   function jump(i: number) {
+    if (!navigating) return
     const p = results?.posts[i]
     if (!p) return
     pick = at = i
@@ -94,7 +99,14 @@
     list?.querySelector(`#find-row-${pick}`)?.scrollIntoView({ block: 'nearest' })
   }
 
+  function moveMatch(direction: number) {
+    if (!navigating || !results) return
+    jump((pick + direction + results.posts.length) % results.posts.length)
+    showPick()
+  }
+
   function keydown(e: KeyboardEvent) {
+    if (e.isComposing || e.keyCode === 229) return
     const query = text.trim()
     const n = results?.posts.length ?? 0
     if (e.key === 'Escape') {
@@ -107,37 +119,41 @@
       // Enter does not wait for the typing pause.
       e.preventDefault()
       search(query)
-    } else if (e.key === 'Enter' && n) {
+    } else if (e.key === 'Enter' && navigating && n) {
       e.preventDefault()
       // Enter opens the highlighted match, then each older one; Shift+Enter goes newer.
       jump(pick !== at ? pick : (pick + (e.shiftKey ? n - 1 : 1)) % n)
       showPick()
-    } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && n) {
+    } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && navigating && n) {
       e.preventDefault()
       pick = Math.min(n - 1, Math.max(0, pick + (e.key === 'ArrowDown' ? 1 : -1)))
       showPick()
     }
   }
 
-  const count = $derived(results ? `${results.posts.length}${results.more ? '+' : ''} found` : '')
+  const count = $derived(ready && results ? `${results.posts.length ? (pick + 1) + ' of ' : ''}${results.posts.length}${results.more ? '+' : ''} found` : '')
 </script>
 
 <div class="find" role="search">
   <div class="bar">
     <span class="lens"><SearchIcon size={16} /></span>
-    <input bind:this={input} bind:value={text} onkeydown={keydown} placeholder="Find in this room" aria-label="Find in this room" role="combobox" aria-expanded={!!results?.posts.length} aria-controls="find-results" aria-activedescendant={results && pick >= 0 ? `find-row-${pick}` : undefined} aria-busy={loading} autocomplete="off" spellcheck="false" enterkeyhint="search" />
+    <input bind:this={input} bind:value={text} onkeydown={keydown} placeholder="Find in this room" aria-label="Find in this room" role="combobox" aria-expanded={navigating} aria-controls="find-results" aria-activedescendant={navigating && pick >= 0 ? `find-row-${pick}` : undefined} aria-busy={loading} autocomplete="off" spellcheck="false" enterkeyhint="search" />
     {#if count}<span class="count" aria-live="polite">{count}</span>{/if}
+    <button class="nav" onclick={() => moveMatch(-1)} disabled={!navigating} aria-label="Previous match" title="Previous match (Shift+Enter)">↑</button>
+    <button class="nav" onclick={() => moveMatch(1)} disabled={!navigating} aria-label="Next match" title="Next match (Enter)">↓</button>
     <button class="x" onclick={onclose} title="Close (Esc)" aria-label="Close find">✕</button>
   </div>
   {#if error}
-    <p class="note err" role="alert">{error}</p>
+    <div class="failure"><p class="note err" role="alert">{error}</p><button class="retry" onclick={() => search(text.trim())} disabled={!text.trim() || loading}>Retry</button></div>
+  {:else if loading || (text.trim() && !ready)}
+    <p class="note" role="status">Searching…</p>
   {:else if results && !results.posts.length}
     <p class="note">Nothing in this room matches “{results.query}”.</p>
   {:else if results}
     <ul class="results" id="find-results" role="listbox" aria-label="Matching posts" bind:this={list}>
       {#each results.posts as p, i (p.id)}
         <li role="presentation">
-          <button id="find-row-{i}" class="row" class:on={pick === i} role="option" aria-selected={pick === i} tabindex="-1" onclick={() => jump(i)}>
+          <button id="find-row-{i}" class="row" class:on={pick === i} role="option" aria-selected={pick === i} tabindex="-1" disabled={!navigating} onclick={() => jump(i)}>
             <span class="head"><span class="name hue-{p.fromHue}">{speaker(p, roomName)}</span><time>{stamp(p.ts)}</time></span>
             <span class="text">{#each snippet(p.text, results.query) as part, j (j)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span>
           </button>
@@ -155,7 +171,12 @@
   input { flex: 1; min-width: 0; height: 36px; background: none; border: 0; outline: none; color: var(--ink); font: inherit; font-size: var(--t-body); }
   input::placeholder { color: var(--faint); }
   .count { color: var(--faint); font-size: var(--t-sm); white-space: nowrap; }
-  .x { color: var(--muted); width: 32px; height: 32px; border-radius: 6px; font-size: var(--t-ui); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
+  .failure { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding-right: var(--s3); }
+  .retry { min-height: 44px; padding: 0 var(--s2); color: var(--iris); }
+  .nav { flex: none; width: 32px; height: 32px; border-radius: 6px; color: var(--muted); }
+  .nav:disabled { opacity: 0.4; }
+  .row:disabled { opacity: 0.5; }
+  .x { flex: none; color: var(--muted); width: 32px; height: 32px; border-radius: 6px; font-size: var(--t-ui); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .x:hover { color: var(--ink); background: var(--hover); }
     .row:hover { background: var(--hover); }
@@ -173,7 +194,11 @@
   .note { margin: 0; padding: 6px var(--s3) var(--s2); font-size: var(--t-ui); color: var(--faint); }
   .note.err { color: var(--coral); }
   @media (max-width: 760px) {
-    input, .x { min-height: 44px; }
+    input { min-height: 44px; font-size: var(--t-title); }
+    .nav, .x { width: 44px; min-height: 44px; }
+    .bar { flex-wrap: wrap; gap: 0; }
+    input { flex-basis: calc(100% - 164px); }
+    .count { order: 1; flex-basis: 100%; padding-bottom: 4px; }
     .row { min-height: 44px; }
   }
 </style>
