@@ -22,14 +22,12 @@ test('every control on the page writes through the call that owns it', async () 
   await applyControl(api, host, 'review.enabled', false)
   await applyControl(api, host, 'review.profile', 'sol')
   await applyControl(api, host, 'steward.profile', 'off')
-  await applyControl(api, host, 'keeper.profile', 'luna')
   await applyControl(api, host, 'library.profile', 'sonnet')
   await applyControl(api, host, 'update.run', true)
   assert.deepEqual(calls, [
     'review room_1 false',
     'service-profile room_1 reviewer sol',
     'service-profile room_1 merge-steward off',
-    'service-profile room_1 keeper luna',
     'setting library.profile sonnet',
     'hook-run /repo self-update',
   ])

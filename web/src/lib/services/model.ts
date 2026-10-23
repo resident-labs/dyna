@@ -51,13 +51,6 @@ export interface MergeHistoryRow {
   changes: number
 }
 
-export interface JournalRow {
-  at: string
-  event?: string
-  text?: string
-  goal?: string
-}
-
 export interface UsageRow {
   role: string
   turns: number
@@ -107,7 +100,6 @@ export interface Inputs {
   accounts: AccountsInfo | null
   usage: UsageRow[] | null
   voice: string | null
-  journal: JournalRow[]
   changes: ChangeRow[]
   testHealth: TestHealth | null
   repo: string

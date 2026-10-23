@@ -23,8 +23,6 @@ export async function applyControl(api: ControlApi, host: ControlHost, id: strin
       return api.setServiceProfile(host.room, 'reviewer', name)
     case 'steward.profile':
       return api.setServiceProfile(host.room, 'merge-steward', name)
-    case 'keeper.profile':
-      return api.setServiceProfile(host.room, 'keeper', name)
     case 'library.profile':
       return api.setSetting('library.profile', name)
     case 'update.run':
