@@ -94,7 +94,7 @@ func fallbackNotice(address, id, from, to, cause string, now time.Time) string {
 		reset = fmt.Sprintf(", resets %s", at.Format("15:04"))
 	}
 	handle := address
-	if len(handle) > 120 {
+	if len(handle) > shownAddressLimit {
 		handle = id
 	}
 	return fmt.Sprintf("Moved from %s to %s: usage limit%s. Dyna will not move it back automatically; `dyna subagent transfer %s --profile %s` moves it back.", from, to, reset, handle, from)
