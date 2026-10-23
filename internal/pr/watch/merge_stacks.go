@@ -64,15 +64,15 @@ func (s *Service) advanceMergeStacks(ctx context.Context, repo string, r Record,
 			return err
 		}
 		stack.Reason = ci.Reason
-		if ci.Status == "passed" || ci.Status == "failed" {
+		if ci.Status.Conclusive() {
 			stack.Phase = state.MergeTrialPhaseFailed
-			if ci.Status == "passed" {
+			if ci.Status == VerdictPassed {
 				stack.Phase = state.MergeTrialPhasePassed
 			}
 			stack.Logs = ci.Logs
 			prefix := b
 			prefix.Branch, prefix.Changes = stack.Branch, b.Changes[:stack.Count]
-			s.noteMergeHistory(st, repo, prefix, "trial", ci.Status, stack.Head, ci.Logs)
+			s.noteMergeHistory(st, repo, prefix, "trial", string(ci.Status), stack.Head, ci.Logs)
 		} else {
 			active++
 		}

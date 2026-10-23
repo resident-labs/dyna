@@ -413,7 +413,7 @@ func (s *Service) publishControlledTrial(ctx context.Context, roomID string, st 
 			if err != nil {
 				return err
 			}
-			if ci.Status != "passed" {
+			if ci.Status != VerdictPassed {
 				return fmt.Errorf("trial push CI has not passed")
 			}
 		}

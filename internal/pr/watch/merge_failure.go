@@ -39,7 +39,7 @@ func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b s
 	if b.Phase == state.MergeTrialPhaseAwaitingRoot && b.Notified {
 		return nil
 	}
-	if ci.Status == "failed" {
+	if ci.Status == VerdictFailed {
 		b.FailReason, b.FailChecks = ci.Reason, append([]string(nil), ci.Failed...)
 	}
 	b.Phase, b.Reason = state.MergeTrialPhaseAwaitingRoot, state.MergeBatchFailedReason

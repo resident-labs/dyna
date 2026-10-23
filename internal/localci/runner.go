@@ -59,13 +59,36 @@ type Request struct {
 	// DeferSave lets the scheduler apply room budgets before publishing a result.
 	DeferSave bool
 }
+
+// Outcome is how one local CI check or a whole run ended. A check that could
+// not test the commit reports OutcomeError, which is an infrastructure cause and
+// not a test failure. The values are stored in saved results and sent to other
+// machines, so their spelling must not change.
+type Outcome string
+
+const (
+	OutcomePassed Outcome = "passed"
+	OutcomeFailed Outcome = "failed"
+	OutcomeError  Outcome = "error"
+)
+
+// Conclusive reports an outcome that no later run will change. All three
+// outcomes are final; only a run still in progress has none of them.
+func (o Outcome) Conclusive() bool {
+	return o == OutcomePassed || o == OutcomeFailed || o == OutcomeError
+}
+
+// Decided reports an outcome that says whether the commit passed its checks. An
+// infrastructure error is conclusive but decides nothing, so CI waits.
+func (o Outcome) Decided() bool { return o == OutcomePassed || o == OutcomeFailed }
+
 type SuiteResult struct {
 	Suite     string        `json:"suite"`
 	Node      string        `json:"node,omitempty"`
 	CheckName string        `json:"checkName,omitempty"`
 	Duration  time.Duration `json:"duration"`
 	SlowTests []TestTiming  `json:"slowTests,omitempty"`
-	Status    string        `json:"status"`
+	Status    Outcome       `json:"status"`
 	LogTail   string        `json:"logTail,omitempty"`
 	Failures  []string      `json:"failures,omitempty"`
 	Reports   []string      `json:"reports,omitempty"`
@@ -80,7 +103,7 @@ type Result struct {
 	RoomID   string        `json:"roomID,omitempty"`
 	Node     string        `json:"node,omitempty"`
 	SHA      string        `json:"sha"`
-	Status   string        `json:"status"`
+	Status   Outcome       `json:"status"`
 	Started  time.Time     `json:"started"`
 	Duration time.Duration `json:"duration"`
 	Suites   []SuiteResult `json:"suites"`

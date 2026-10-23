@@ -667,7 +667,7 @@ func ciCheck(c Check, required []string) bool {
 
 func (s Snapshot) CIStatus(required ...string) (state, key string, jobs []string, failedRuns []Run) {
 	if s.localCI != nil {
-		return s.localCI.Status, s.localCI.Key, s.localCI.Jobs, s.localCI.Runs
+		return string(s.localCI.Status), s.localCI.Key, s.localCI.Jobs, s.localCI.Runs
 	}
 	pending, failed, count := false, false, 0
 	passed := false
