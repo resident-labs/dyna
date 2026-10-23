@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 	"time"
@@ -331,28 +332,76 @@ func (s *Service) scanGoalsAt(now time.Time, signatures, work map[string]string,
 	service.Store.Now = func() time.Time { return now }
 	current, err := service.Store.Revision()
 	// Expiry changes the published goal even without a database write.
-	// Keep the next boundary with this watcher's cached goal inputs.
 	const expiryKey = "\x00expediteUntil"
+	const expiryPrefix = expiryKey + "\x00"
+	const revisionPrefix = "\x00roomRevision\x00"
 	expiry, _ := time.Parse(time.RFC3339Nano, work[expiryKey])
 	if err != nil || current == *version && (expiry.IsZero() || now.Before(expiry)) {
 		return
 	}
-	state, err := service.Store.Read()
+	revisions, err := service.Store.RoomRevisions()
 	if err != nil {
 		return
 	}
+	all := first || *version == "" || work[revisionPrefix+goals.Global] != revisions[goals.Global]
+	selected := map[string]bool{}
+	for roomID, revision := range revisions {
+		if roomID != goals.Global && (all || work[revisionPrefix+roomID] != revision) {
+			selected[roomID] = true
+		}
+	}
+	for key, value := range work {
+		if strings.HasPrefix(key, revisionPrefix) {
+			roomID := strings.TrimPrefix(key, revisionPrefix)
+			if roomID != goals.Global {
+				if _, exists := revisions[roomID]; all || !exists {
+					selected[roomID] = true
+				}
+			}
+		}
+		if strings.HasPrefix(key, expiryPrefix) {
+			at, err := time.Parse(time.RFC3339Nano, value)
+			if err == nil && !now.Before(at) {
+				selected[strings.TrimPrefix(key, expiryPrefix)] = true
+			}
+		}
+	}
+	var state goals.State
+	if all {
+		state, err = service.Store.Read()
+	} else {
+		rooms := make([]string, 0, len(selected))
+		for roomID := range selected {
+			rooms = append(rooms, roomID)
+		}
+		state, err = service.Store.ReadRooms(rooms)
+	}
+	if err != nil {
+		return
+	}
+	// Prepare every input before advancing any caller-owned snapshot.
+	nextWork := maps.Clone(work)
+	for roomID := range selected {
+		delete(nextWork, roomID)
+		delete(nextWork, "rules\x00"+roomID)
+		delete(nextWork, expiryPrefix+roomID)
+		delete(nextWork, revisionPrefix+roomID)
+	}
 	rows := []listchange.Item{}
+	present := map[string]bool{}
 	wake, metadata := map[string]bool{}, map[string]bool{}
-	var nextExpiry time.Time
 	for roomID, room := range state.Rooms {
+		selected[roomID] = true
 		items := make([]goals.Goal, 0, len(room.Goals))
 		inputs := map[string]goals.Goal{}
+		var roomExpiry time.Time
 		for id, goal := range room.Goals {
-			if goal.ExpeditedAt(now) && (nextExpiry.IsZero() || goal.ExpediteUntil.Before(nextExpiry)) {
-				nextExpiry = *goal.ExpediteUntil
+			if goal.ExpeditedAt(now) && (roomExpiry.IsZero() || goal.ExpediteUntil.Before(roomExpiry)) {
+				roomExpiry = *goal.ExpediteUntil
 			}
 			items = append(items, *goal)
 			inputs[id] = *goal
+			present[listchange.Key("goals", roomID, id)] = true
 		}
 		page, err := goalPage(items, "", 0)
 		if err != nil {
@@ -360,26 +409,63 @@ func (s *Service) scanGoalsAt(now time.Time, signatures, work map[string]string,
 		}
 		id := func(g goals.Goal) string { return g.ID }
 		rows = append(rows, listchange.Rows("goals", roomID, items, listchange.HeadIDs(page.Items, id), id)...)
-		data, _ := json.Marshal(inputs)
+		data, err := json.Marshal(inputs)
+		if err != nil {
+			return
+		}
 		wake[roomID] = work[roomID] != string(data)
-		work[roomID] = string(data)
-		rules, _ := json.Marshal(struct {
+		nextWork[roomID] = string(data)
+		rules, err := json.Marshal(struct {
 			Global *goals.RuleSet
 			Room   goals.RuleSet
 		}{state.Global, room.RuleSet})
+		if err != nil {
+			return
+		}
 		key := "rules\x00" + roomID
 		metadata[roomID] = work[key] != string(rules)
-		work[key] = string(rules)
+		nextWork[key] = string(rules)
+		if !roomExpiry.IsZero() {
+			nextWork[expiryPrefix+roomID] = roomExpiry.Format(time.RFC3339Nano)
+		}
 	}
-	changes, err := listchange.Sync(signatures, rows, first)
+	var gone []string
+	for key := range signatures {
+		parts := strings.SplitN(key, "\x00", 3)
+		if len(parts) == 3 && selected[parts[1]] && !present[key] {
+			gone = append(gone, key)
+			wake[parts[1]] = true
+		}
+	}
+	var changes []listchange.Event
+	if first {
+		changes, err = listchange.Sync(signatures, rows, true)
+	} else {
+		changes, err = listchange.Patch(signatures, rows, gone)
+	}
 	if err != nil {
 		return
 	}
-	*version = current
-	delete(work, expiryKey)
-	if !nextExpiry.IsZero() {
-		work[expiryKey] = nextExpiry.Format(time.RFC3339Nano)
+	delete(nextWork, revisionPrefix+goals.Global)
+	for roomID, revision := range revisions {
+		nextWork[revisionPrefix+roomID] = revision
 	}
+	delete(nextWork, expiryKey)
+	var nextExpiry time.Time
+	for key, value := range nextWork {
+		if strings.HasPrefix(key, expiryPrefix) {
+			at, _ := time.Parse(time.RFC3339Nano, value)
+			if !at.IsZero() && (nextExpiry.IsZero() || at.Before(nextExpiry)) {
+				nextExpiry = at
+			}
+		}
+	}
+	if !nextExpiry.IsZero() {
+		nextWork[expiryKey] = nextExpiry.Format(time.RFC3339Nano)
+	}
+	clear(work)
+	maps.Copy(work, nextWork)
+	*version = current
 	emitted := map[string]bool{}
 	for _, change := range changes {
 		value := change.Change
