@@ -58,7 +58,7 @@ func importSessionRecords(conn *sql.Conn, sessions string) error {
 		if !entry.IsDir() {
 			continue
 		}
-		raw, _, err := legacyLoadRaw(sessions, id)
+		raw, err := legacyLoadRaw(sessions, id)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}

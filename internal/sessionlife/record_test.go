@@ -78,7 +78,7 @@ func TestLegacyLoadRefusesUnsafeOrInvalidRecords(t *testing.T) {
 	}
 	var s Snapshot
 	load := func() error {
-		raw, _, err := legacyLoadRaw(sessions, id)
+		raw, err := legacyLoadRaw(sessions, id)
 		if err != nil {
 			return err
 		}
@@ -186,7 +186,7 @@ func TestLegacyLoadStaysInsideSessions(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(sessions, id)); err != nil {
 		t.Fatal(err)
 	}
-	raw, _, err := legacyLoadRaw(sessions, id)
+	raw, err := legacyLoadRaw(sessions, id)
 	if err == nil || errors.Is(err, os.ErrNotExist) || !errors.Is(err, ErrRecord) {
 		t.Fatalf("Load through a symlinked session folder = %v, %+v; want ErrRecord", err, raw)
 	}
@@ -195,7 +195,7 @@ func TestLegacyLoadStaysInsideSessions(t *testing.T) {
 	}
 }
 
-func TestIDsListsSessionFoldersAndRefusesSymlinks(t *testing.T) {
+func TestIDsListsCanonicalRowsAndIgnoresFolders(t *testing.T) {
 	sessions := t.TempDir()
 	for _, name := range []string{"ses_b", "ses_a", "notes"} {
 		if err := os.Mkdir(filepath.Join(sessions, name), 0o700); err != nil {
@@ -205,18 +205,26 @@ func TestIDsListsSessionFoldersAndRefusesSymlinks(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessions, "ses_file"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if ids, err := IDs(sessions); err != nil || len(ids) != 0 {
+		t.Fatalf("IDs without canonical rows = %v, %v", ids, err)
+	}
+	for _, id := range []string{"ses_b", "ses_a"} {
+		if err := Save(sessions, id, map[string]any{"id": id}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	ids, err := IDs(sessions)
-	if err != nil || strings.Join(ids, ",") != "notes,ses_a,ses_b" {
+	if err != nil || strings.Join(ids, ",") != "ses_a,ses_b" {
 		t.Fatalf("IDs = %v, %v", ids, err)
 	}
 	if err := os.Symlink(t.TempDir(), filepath.Join(sessions, "ses_link")); err != nil {
 		t.Fatal(err)
 	}
-	if ids, err := IDs(sessions); !errors.Is(err, ErrRecord) || strings.Join(ids, ",") != "notes,ses_a,ses_b" {
-		t.Fatalf("IDs with a symlinked entry = %v, %v; want the safe IDs and ErrRecord", ids, err)
+	if ids, err := IDs(sessions); err != nil || strings.Join(ids, ",") != "ses_a,ses_b" {
+		t.Fatalf("IDs with a symlinked entry = %v, %v; want canonical IDs", ids, err)
 	}
-	if ids, err := SafeIDs(sessions); err != nil || strings.Join(ids, ",") != "notes,ses_a,ses_b" {
-		t.Fatalf("SafeIDs with a symlinked entry = %v, %v; want the safe IDs", ids, err)
+	if ids, err := SafeIDs(sessions); err != nil || strings.Join(ids, ",") != "ses_a,ses_b" {
+		t.Fatalf("SafeIDs with a symlinked entry = %v, %v; want canonical IDs", ids, err)
 	}
 	if ids, err := IDs(filepath.Join(sessions, "missing")); err != nil || ids != nil {
 		t.Fatalf("IDs of a missing folder = %v, %v", ids, err)

@@ -82,10 +82,9 @@ func TestReadsInsideAnotherTransactionNeverWait(t *testing.T) {
 	}
 }
 
-// Each reads the rows with one query and falls back to the legacy file only
-// for folders that have no row. With open, closed rows are left out and
-// their folders are not read as legacy records.
-func TestEachReadsRowsThenLegacyFiles(t *testing.T) {
+// Each reports damaged canonical rows through the callback and ignores
+// retained files. Callbacks can write after the listing cursor closes.
+func TestEachReadsCanonicalRows(t *testing.T) {
 	sessions := filepath.Join(t.TempDir(), "sessions")
 	mkdir := func(id string) {
 		if err := os.MkdirAll(filepath.Join(sessions, id), 0o700); err != nil {
@@ -108,9 +107,7 @@ func TestEachReadsRowsThenLegacyFiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(sessions, "ses_legacy", "session.json"), []byte(`{"id":"ses_legacy"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(sessions, "ses_broken", "session.json"), []byte(`{`), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeRawRecord(t, sessions, "ses_broken", []byte(`{`))
 	scan := func(open bool) (string, error) {
 		var seen []string
 		err := Each(sessions, open, func(id string, raw []byte, err error) error {
@@ -118,24 +115,30 @@ func TestEachReadsRowsThenLegacyFiles(t *testing.T) {
 				err = errors.New("invalid JSON")
 			}
 			if err != nil {
+				if !errors.Is(err, ErrRecord) {
+					t.Errorf("damaged row %s: %v", id, err)
+				}
 				seen = append(seen, id+"!")
 			} else {
 				seen = append(seen, id)
+			}
+			if id == "ses_open" {
+				return Save(sessions, id, map[string]any{"id": id})
 			}
 			return nil
 		})
 		return strings.Join(seen, ","), err
 	}
-	if got, err := scan(true); err != nil || got != "ses_broken!,ses_legacy,ses_open" {
+	if got, err := scan(true); err != nil || got != "ses_broken!,ses_open" {
 		t.Fatalf("open scan = %q, %v", got, err)
 	}
-	if got, err := scan(false); err != nil || got != "ses_broken!,ses_closed,ses_legacy,ses_open" {
+	if got, err := scan(false); err != nil || got != "ses_broken!,ses_closed,ses_open" {
 		t.Fatalf("full scan = %q, %v", got, err)
 	}
 	if err := os.Symlink(t.TempDir(), filepath.Join(sessions, "ses_link")); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := scan(false); !errors.Is(err, ErrRecord) || got != "ses_broken!,ses_closed,ses_legacy,ses_open" {
-		t.Fatalf("scan with a symlinked entry = %q, %v; want the records and ErrRecord", got, err)
+	if got, err := scan(false); err != nil || got != "ses_broken!,ses_closed,ses_open" {
+		t.Fatalf("scan with a symlinked entry = %q, %v; want only canonical records", got, err)
 	}
 }
