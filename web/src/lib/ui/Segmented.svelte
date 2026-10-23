@@ -1,6 +1,7 @@
-<script lang="ts" generics="T extends string">
+<script lang="ts" generics="T extends string | boolean">
   // One choice out of a few, as a row of buttons. options is [[value, label]].
-  // small fits a toolbar.
+  // small fits a toolbar. A choice is usually a word; a setting that is on or
+  // off is a boolean, so the value may be either.
   interface Props {
     options: readonly (readonly [T, string])[]
     value: T
