@@ -172,6 +172,39 @@ func goAggregateCancelled(checks []Check, suite int64) bool {
 	return aggregate && cancelled && len(groups) == len(expected)
 }
 
+// hostedSuiteClass is one hosted suite's read of a cancellation: whether one of
+// its checks really failed, and whether its go-test aggregate only repeats
+// cancelled dependencies. Both cancellation filters read it, so one definition
+// decides what a suite failure and a cancellation-only aggregate are.
+type hostedSuiteClass struct {
+	// realFailure holds a completed check that neither passed nor was cancelled.
+	// A cancelled-only go-test aggregate does not count, since GitHub marks it
+	// failed for the cancellations behind it alone.
+	realFailure bool
+	// cancelledOnlyAggregate holds a go-test aggregate that only repeats
+	// cancelled dependencies. Only the replaceable workflow can report it, so
+	// the caller says whether this suite's run is that workflow.
+	cancelledOnlyAggregate bool
+}
+
+// classifyHostedSuite classifies the checks of one hosted suite. The caller
+// passes trustAggregate = false for a run whose go-test aggregate it must not
+// read, such as a run with no suite id.
+func classifyHostedSuite(checks []Check, suite int64, trustAggregate bool) hostedSuiteClass {
+	aggregate := trustAggregate && goAggregateCancelled(checks, suite)
+	class := hostedSuiteClass{cancelledOnlyAggregate: aggregate}
+	for _, check := range checks {
+		if check.CheckSuite.ID != suite || check.Status != "completed" || success(check.Conclusion) || check.Conclusion == "cancelled" {
+			continue
+		}
+		if aggregate && check.Name == string(localci.GroupGoTest.Name()) {
+			continue
+		}
+		class.realFailure = true
+	}
+	return class
+}
+
 func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns) Snapshot {
 	current := snap.currentSuiteChecks()
 	cancelledSuites, aggregates, ignoredSuites := map[int64]bool{}, map[int64]bool{}, map[int64]bool{}
@@ -190,17 +223,16 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns) Sn
 		}
 		suite := run.CheckSuiteID
 		cancelledSuites[suite] = true
-		aggregate := replaceableHostedWorkflow(run) && goAggregateCancelled(current, suite)
-		aggregates[suite] = aggregate
-		realFailure := false
-		for _, check := range current {
-			if check.CheckSuite.ID == suite && check.Status == "completed" && !success(check.Conclusion) && check.Conclusion != "cancelled" && !(aggregate && check.Name == string(localci.GroupGoTest.Name())) {
-				realFailure = true
-			}
-		}
-		// Cancellation can leave the run active, cancelled, or failed after its
-		// aggregate runs. None is a test failure when only cancelled work caused it.
-		if !realFailure && (run.Conclusion == "cancelled" || aggregate) {
+		class := classifyHostedSuite(current, suite, replaceableHostedWorkflow(run))
+		aggregates[suite] = class.cancelledOnlyAggregate
+		// The saved record proves the cancellation is ours, so here a run that is
+		// still active, or one whose aggregate failed, counts too. This is the one
+		// rule the general filter below does not share: with no saved record it
+		// needs the run's own cancelled conclusion, because only that proves a
+		// cancellation rather than a test ended it. Cancellation can leave the
+		// run active, cancelled, or failed after its aggregate runs; none is a test
+		// failure when only cancelled work caused it.
+		if !class.realFailure && (run.Conclusion == "cancelled" || class.cancelledOnlyAggregate) {
 			ignoredSuites[suite] = true
 			continue
 		}
@@ -315,23 +347,17 @@ func withoutCancelledHostedWorkflows(snap Snapshot) Snapshot {
 	ignored := map[int64]bool{}
 	var runs []Run
 	for _, run := range snap.Runs {
-		suite := run.CheckSuiteID
-		aggregate := run.Conclusion == "cancelled" && suite != 0 && replaceableHostedWorkflow(run) && goAggregateCancelled(current, suite)
-		if run.Conclusion != "cancelled" && !aggregate {
+		// No saved record says who cancelled this run, so only its own cancelled
+		// conclusion proves that a cancellation, not a test, ended it. A run Dyna
+		// cancelled for local CI can still be active or failed at this point, so
+		// this filter leaves that case to the saved-cancellation filter above.
+		if run.Conclusion != "cancelled" {
 			runs = append(runs, run)
 			continue
 		}
-		realFailure := false
-		for _, check := range current {
-			if check.CheckSuite.ID != suite || check.Status != "completed" || success(check.Conclusion) || check.Conclusion == "cancelled" {
-				continue
-			}
-			if aggregate && check.Name == string(localci.GroupGoTest.Name()) {
-				continue
-			}
-			realFailure = true
-		}
-		if realFailure {
+		suite := run.CheckSuiteID
+		class := classifyHostedSuite(current, suite, suite != 0 && replaceableHostedWorkflow(run))
+		if class.realFailure {
 			runs = append(runs, run)
 			continue
 		}
