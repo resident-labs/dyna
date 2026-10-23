@@ -112,7 +112,7 @@ desktop/build/bin/dyna-desktop    # opens the window on the running server
 The room has **Messages**, **PRs** and **Issues** tabs. Messages shows top-level
 agents speaking to each other, their final results, and explicit messages
 to the owner. PRs shows open pull requests and saved merge progress. Issues
-shows the repository's GitHub issues.
+shows local Dyna issues and the repository's GitHub issues.
 
 The member list folds subagents under their parent, like categories in
 Discord. A chevron left of the avatar opens or closes a subtree. By default,
@@ -577,12 +577,12 @@ Open the room's **PRs** tab to browse its open GitHub pull requests and merge
 progress. Open the room's **Issues** tab to browse issues. Search narrows the lists.
 Read descriptions, comments, reviews, checks, and PR diffs.
 This uses the host's `gh` login; install the GitHub CLI and run `gh auth login`
-if needed. Lists show up to 60 results; search narrows larger lists.
+if needed. GitHub lists show up to 60 results; search narrows larger lists.
 
 Tracked PRs reuse the session's status chip and PR card. **Track** links a PR
-to an open session in the room. **Untrack** stops its watcher. **Ask an agent**
-fills the room composer with the default profile, title, and GitHub URL.
-You can edit that draft before sending it. The command palette and `/prs`
+to an open session in the room. **Untrack** stops its watcher. **Mention in chat**
+adds the PR or issue as a reference in the room composer.
+You can write a message before sending it. The command palette and `/prs`
 and `/issues` commands open the same browser.
 
 Agents can link a PR to their session with `dyna git pr track <number|url>`.
