@@ -13,9 +13,10 @@
   import { allParts, emptyData, loadServiceData } from './load.ts'
   import { applyControl } from './control.ts'
 
-  // A change read here is only its verdict, its number and its overlaps, so the
-  // page takes the list rows the room already holds.
-  type ChangeLike = Pick<ChangeRow, 'reviewAt' | 'number' | 'title' | 'verdict' | 'reviewerSession'> & { overlaps?: { length: number } | number }
+  // A change read here is only what the page shows: its verdict, its number,
+  // its overlaps and the watcher's last poll, so the page takes the list rows
+  // the room already holds.
+  type ChangeLike = Pick<ChangeRow, 'reviewAt' | 'number' | 'title' | 'verdict' | 'reviewerSession' | 'kind' | 'watching' | 'checked' | 'error'> & { overlaps?: { length: number } | number }
 
   let { roomId, repo = '', members = [], changes = [], onopen, onopenhealth }: {
     roomId: string
@@ -43,16 +44,17 @@
     return () => clearInterval(t)
   })
 
-  // The page reads five things from a change: its verdict, its overlap count
-  // and the session behind it.
+  // The page keeps the change fields it shows: the verdict, the overlap count,
+  // the session behind it and the watcher's last poll.
   const changeRows: ChangeRow[] = $derived((changes ?? []).map((c) => ({
     reviewAt: c.reviewAt, number: c.number, title: c.title, verdict: c.verdict, reviewerSession: c.reviewerSession, overlaps: c.overlaps,
+    kind: c.kind, watching: c.watching, checked: c.checked, error: c.error,
   })))
 
   const inputs: Inputs = $derived({
     reviewer: data.reviewer, queue: data.queue, mergePaused: data.mergePaused, history: data.history, services: data.services,
     notices: data.notices, hooks: data.hooks, runs: data.runs, settings: data.settings, budget: data.budget, accounts: data.accounts,
-    usage: data.usage, voice: data.voice, changes: changeRows, testHealth: data.testHealth, repo,
+    usage: data.usage, voice: data.voice, changes: changeRows, testHealth: data.testHealth, laneSync: data.laneSync, repo,
   })
   const rows = $derived(buildRows(inputs))
   const tabs = $derived(buildTabs(inputs, rows, now))
