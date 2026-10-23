@@ -98,7 +98,8 @@ func ParseFixLines(body string) []IssueRef {
 		for _, token := range strings.FieldsFunc(rest, func(r rune) bool {
 			return r == ',' || r == ' ' || r == '\t'
 		}) {
-			if ref, ok := parseIssueRef(token); ok {
+			// Sentence punctuation follows a reference in prose: "Fixes D-5."
+			if ref, ok := parseIssueRef(strings.Trim(token, "()[]{}.,;:!?\"'\u201c\u201d\u2018\u2019")); ok {
 				out = append(out, ref)
 			}
 		}
@@ -110,9 +111,10 @@ func ParseFixLines(body string) []IssueRef {
 	return out
 }
 
-// fixLine returns the text after a leading "Fixes"-style keyword.
+// fixLine returns the text after a leading "Fixes"-style keyword, ignoring
+// bullet and quote markers in front of it.
 func fixLine(line string) (string, bool) {
-	line = strings.TrimSpace(line)
+	line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-*>\u2022"))
 	for _, keyword := range []string{"fixes", "fixed", "closes", "closed", "resolves", "resolved"} {
 		if len(line) <= len(keyword) || !strings.EqualFold(line[:len(keyword)], keyword) {
 			continue
