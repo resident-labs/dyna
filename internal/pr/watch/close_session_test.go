@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/subagent"
 )
 
@@ -15,7 +16,7 @@ func TestCloseReleasesReviewerAndPreservesVerdict(t *testing.T) {
 			const reviewer = "reviewer-to-close"
 			if err := e.s.Store.update(func(st *State) error {
 				live := st.Records[r.Key]
-				live.Reviewer, live.ReviewerOverride, live.RoundHead, live.Verdict = reviewer, reviewer, "head", verdict
+				live.Reviewer, live.ReviewerOverride, live.RoundHead, live.Verdict = reviewer, reviewer, "head", state.ReviewVerdict(verdict)
 				if verdict == "" {
 					live.RequiredReviewers = []string{reviewer}
 				}
@@ -31,7 +32,7 @@ func TestCloseReleasesReviewerAndPreservesVerdict(t *testing.T) {
 			if got.Reviewer != "" || got.ReviewerOverride != "" || len(got.RequiredReviewers) != 0 || len(result) != 1 {
 				t.Fatalf("unreleased roles: %+v; %v", got, result)
 			}
-			if got.Verdict != verdict || got.LastReviewer != reviewer || verdict == "" && got.RoundHead != "" || verdict != "" && got.RoundHead != "head" {
+			if got.Verdict != state.ReviewVerdict(verdict) || got.LastReviewer != reviewer || verdict == "" && got.RoundHead != "" || verdict != "" && got.RoundHead != "head" {
 				t.Fatalf("review provenance: %+v", got)
 			}
 		})

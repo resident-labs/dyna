@@ -108,4 +108,3 @@ func TestMergeQueueShowsOwnerCommentReason(t *testing.T) {
 		t.Fatalf("rows: %+v", rows)
 	}
 }
-

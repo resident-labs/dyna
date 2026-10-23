@@ -26,7 +26,7 @@ func TestPRStatus(t *testing.T) {
 		{"pending", "", "closed", "PR is closed", "closed", false, false},
 		{"failed", "", "open", "untracked", "untracked", false, true},
 	} {
-		record := watch.Record{Head: "head", RoundHead: "head", CI: tc.ci, Verdict: tc.verdict, State: tc.state, PauseReason: tc.reason, Watching: tc.watching, CIPaused: tc.paused}
+		record := watch.Record{Head: "head", RoundHead: "head", CI: tc.ci, Verdict: state.ReviewVerdict(tc.verdict), State: tc.state, PauseReason: tc.reason, Watching: tc.watching, CIPaused: tc.paused}
 		reviewState, _, _ := (watch.ReviewFacts{}).ReviewState(record)
 		if got := prStatus(record, reviewState); got != tc.want {
 			t.Errorf("%+v => %s", tc, got)

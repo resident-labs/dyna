@@ -42,8 +42,8 @@ func releaseReviewer(r *Record, id string) {
 	if r.Reviewer == id {
 		rememberReviewAssignment(r)
 		r.Reviewer, r.ReviewerName, r.ReviewerMode = "", "", ""
-		// Keep a completed verdict at its reviewed head.
-		if r.Verdict == "" {
+		// Keep a completed verdict or a stopped review at its reviewed head.
+		if r.Verdict == "" && r.StopReason == "" {
 			r.RoundHead = ""
 			r.RoundStarted = time.Time{}
 		}

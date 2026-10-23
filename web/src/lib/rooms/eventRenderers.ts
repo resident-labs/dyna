@@ -23,6 +23,7 @@ import AlertCard from './AlertCard.svelte'
 import ServiceAlertCard from './ServiceAlertCard.svelte'
 import EngineNoticeCard from './EngineNoticeCard.svelte'
 import QuestionNoteCard from './QuestionNoteCard.svelte'
+import ReviewResultCard from './ReviewResultCard.svelte'
 import { eventSpecs } from './events.gen.ts'
 import type { EventSpecEntry } from './events.gen.ts'
 import type { EventNotice, Room } from '../api/room.ts'
@@ -82,7 +83,7 @@ export type EventRenderer = Component<EventProps>
 
 // Components by the name a spec gives in its renderer field. A name with no
 // component here draws the unknown event row, and the test fails.
-export const eventComponents: Record<string, EventRenderer> = { WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, SessionNoteCard, AlertCard, ServiceAlertCard, EngineNoticeCard, QuestionNoteCard }
+export const eventComponents: Record<string, EventRenderer> = { WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, SessionNoteCard, AlertCard, ServiceAlertCard, EngineNoticeCard, QuestionNoteCard, ReviewResultCard }
 
 // The post key of a registered event: its family and its event type.
 export function eventKey(family?: string, type?: string): string {

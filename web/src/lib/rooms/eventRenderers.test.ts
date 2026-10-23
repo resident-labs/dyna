@@ -32,7 +32,7 @@ const built = await build({
       export { default as MergeCard } from './MergeCard.svelte';
       export { default as PRCard } from '../prs/PRCard.svelte';
       export { eventRenderers, eventComponents, eventKey, rendererFor, sealedEvent } from './eventRenderers.ts';
-      export { hookEvent, mergeDecision, mergeEvent, prEvent, worktreeEvent } from './eventPayloads.ts';
+      export { hookEvent, mergeDecision, mergeEvent, prEvent, reviewEvent, worktreeEvent } from './eventPayloads.ts';
       export { eventSpecs } from './events.gen.ts';
       export { mount, unmount, flushSync } from 'svelte';`,
     resolveDir: rooms,
@@ -134,6 +134,23 @@ const fixtures: Record<string, EventPayload> = {
     actor: 'dyna:owner',
     verb: 'edited',
     text: 'A subagent commits to its parent branch.',
+  },
+  'review/result': {
+    kind: 'changes',
+    changeId: 'github.com/acme/app#542',
+    number: 542,
+    label: 'PR #542',
+    location: 'https://github.com/acme/app/pull/542',
+    head: 'a'.repeat(40),
+    summary: 'Two findings need a fix.',
+    findings: [
+      { id: 'f1', severity: 'blocking', file: 'internal/room/events.go', line: 42, why: 'the field is required but empty', fix: 'make it optional' },
+      { id: 'f2', severity: 'nit', file: 'web/src/lib/rooms/ReviewResultCard.svelte', line: 0, why: 'name is unclear', fix: 'rename the prop' },
+    ],
+    blocking: 1,
+    shouldFix: 0,
+    nits: 1,
+    detail: 'Two findings need a fix.',
   },
   ...Object.fromEntries(
     (['opened', 'ready', 'approved', 'changes', 'ci-failed', 'ci-paused', 'ci-passed', 'returned', 'merged', 'closed', 'comment', 'held-comment', 'review-assigned', 'update'] as const).map((type) => [
@@ -261,7 +278,8 @@ test('every registered event has a renderer and renders on feed and DM', () => {
 // fixtureTip is a value every payload fixture shows, so a card that renders
 // nothing meaningful fails.
 function fixtureTip(payload: EventPayload): string {
-  if ('note' in payload) return payload.note
+  if ('kind' in payload && 'changeId' in payload) return payload.label
+  if ('note' in payload) return payload.note ?? ''
   if ('hook' in payload) return payload.label || payload.hook
   if ('trialId' in payload) return '#242'
   if ('changeId' in payload) return `PR #${payload.number}`
@@ -390,7 +408,7 @@ test('a folded hook card keeps its count and last time outside the name', () => 
 
 test('an alert card lists its typed findings and copies the next command', async () => {
   const payload = fixtures['alert/doctor']
-  assert.ok(payload && 'findings' in payload, 'the doctor alert fixture is missing')
+  assert.ok(payload && 'nextCommand' in payload, 'the doctor alert fixture is missing')
   const post = postFor('alert', 'doctor', payload)
   const target = document.createElement('div')
   document.body.append(target)
@@ -449,4 +467,32 @@ test('an alert stored before the typed events still shows its line', () => {
   assert.match(text, /machine is overloaded/)
   web.unmount(mounted)
   target.remove()
+})
+
+test('a review result card shows all four results on feed and DM', () => {
+  const base = web.reviewEvent({ kind: 'review', payload: fixtures['review/result'] })
+  assert.ok(base, 'the review result fixture is missing')
+  const cases = [
+    { payload: { ...base, kind: 'approve' as const }, wants: [/PR #542 approved/, /approved/] },
+    { payload: { ...base, kind: 'approve-fast' as const, fastLand: true, note: 'fast landing', area: 'docs' }, wants: [/fast landing/, /approved/] },
+    { payload: { ...base, kind: 'approve' as const, note: 'normal path' }, wants: [/normal path/, /approved/] },
+    { payload: base, wants: [/changes requested/, /1 blocking/, /events\.go:42/] },
+    { payload: { ...base, kind: 'stop-early' as const, stopReason: 'superseded' as const, findings: [], blocking: 0, nits: 0 }, wants: [/stopped early/, /newer review replaced this one/] },
+  ]
+  for (const surface of ['feed', 'dm'] as const) {
+    for (const c of cases) {
+      const post = postFor('review', 'result', c.payload, 'PR #542 at head: reviewer result changes.')
+      const target = document.createElement('div')
+      document.body.append(target)
+      const mounted = web.mount(web.eventComponents.ReviewResultCard, { target, props: { post, notice: post.notice, surface } })
+      web.flushSync()
+      const text = (target.textContent ?? '').trim()
+      for (const want of c.wants) assert.match(text, want, `${c.payload.kind} on ${surface}: ${text}`)
+      // The glyph is a drawn icon, never an emoji.
+      assert.ok(target.querySelector('svg'), `${c.payload.kind} lost its icon`)
+      if (surface === 'dm') assert.match(text, /Details/, `${c.payload.kind} DM lost its details toggle`)
+      web.unmount(mounted)
+      target.remove()
+    }
+  }
 })

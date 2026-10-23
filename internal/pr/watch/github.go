@@ -481,6 +481,34 @@ func (g GitHub) Pull(ctx context.Context, r Ref) (Pull, error) {
 	return pull, err
 }
 
+// pullFile is the facts a changed-path read uses. A rename keeps both names:
+// a production file moved into docs/ is still a production change.
+type pullFile struct {
+	Name     string `json:"filename"`
+	Previous string `json:"previous_filename,omitempty"`
+}
+
+// ChangedPaths reads the paths a pull request touches, from GitHub and not from
+// the reviewer. A PR with more files than one page is not low risk, because the
+// fast-landing rule needs every path. Both sides of a rename count.
+func (g GitHub) ChangedPaths(ctx context.Context, r Ref) ([]string, error) {
+	var files []pullFile
+	if err := g.api(ctx, r, r.path("/files")+"?per_page=100", &files); err != nil {
+		return nil, err
+	}
+	paths := make([]string, 0, len(files)*2)
+	for _, f := range files {
+		paths = append(paths, f.Name)
+		if f.Previous != "" && f.Previous != f.Name {
+			paths = append(paths, f.Previous)
+		}
+	}
+	if len(files) == 100 {
+		return nil, fmt.Errorf("the change has more than 100 files")
+	}
+	return paths, nil
+}
+
 func (g GitHub) Snapshot(ctx context.Context, r Ref) (Snapshot, error) {
 	var s Snapshot
 	if err := g.api(ctx, r, r.path(""), &s.Pull); err != nil {

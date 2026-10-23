@@ -48,6 +48,15 @@ export type WorktreeReason = "not-merged" | "dirty" | "manual-handoff" | "keep-f
 // HookState is a named string type of an event payload.
 export type HookState = "running" | "passed" | "failed" | "error"
 
+// ReviewKind is a named string type of an event payload.
+export type ReviewKind = "approve" | "changes" | "approve-fast" | "stop-early"
+
+// ReviewSeverity is a named string type of an event payload.
+export type ReviewSeverity = "blocking" | "should-fix" | "nit"
+
+// ReviewStopReason is a named string type of an event payload.
+export type ReviewStopReason = "superseded" | "duplicate" | "empty" | "too-large"
+
 // MergePR is a struct of an event payload.
 export interface MergePR {
   number: number
@@ -76,6 +85,17 @@ export interface AlertFinding {
   severity: AlertSeverity
   title: string
   cause?: string
+}
+
+// ReviewFinding is a struct of an event payload.
+export interface ReviewFinding {
+  id: string
+  severity: ReviewSeverity
+  file: string
+  line: number
+  why: string
+  fix: string
+  patch?: string
 }
 
 // WorktreeEvent is the payload of the worktree/kept events.
@@ -187,6 +207,26 @@ export interface MachineEvent {
   atMs: number
 }
 
+// ReviewEvent is the payload of the review/result events.
+export interface ReviewEvent {
+  kind: ReviewKind
+  changeId: string
+  number?: number
+  label: string
+  location: string
+  head: string
+  summary?: string
+  findings?: ReviewFinding[]
+  blocking?: number
+  shouldFix?: number
+  nits?: number
+  stopReason?: ReviewStopReason
+  fastLand?: boolean
+  area?: string
+  note?: string
+  detail?: string
+}
+
 // PREvent is the payload of the pr/opened and pr/ready and pr/approved and pr/changes and pr/ci-failed and pr/ci-paused and pr/ci-passed and pr/returned and pr/merged and pr/closed and pr/comment and pr/held-comment and pr/review-assigned and pr/update events.
 export interface PREvent {
   type: PRType
@@ -267,9 +307,9 @@ export interface QuestionEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | PREvent | SessionEvent | AlertEvent | ServiceFailedEvent | EngineEvent | QuestionEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | ReviewEvent | PREvent | SessionEvent | AlertEvent | ServiceFailedEvent | EngineEvent | QuestionEvent
 
-export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "pr" | "session" | "alert" | "service" | "engine" | "question"
+export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question"
 export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "low-disk" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "doctor" | "engine" | "root-flush" | "withdrawn"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
@@ -518,6 +558,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     once: true,
     audience: "room",
     text: "Machine {name} is low on disk: {summary}. Dyna starts no CI there until space is freed.",
+  },
+  {
+    family: "review",
+    type: "result",
+    renderer: "ReviewResultCard",
+    quiet: false,
+    wake: "target",
+    once: false,
+    audience: "room",
+    text: "{location}\nHead: {head}\n\nReviewer result for {label}: {kind}.",
   },
   {
     family: "pr",
@@ -797,6 +847,9 @@ const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "he
 const RULE_VERB: ReadonlySet<unknown> = new Set(["added", "edited", "removed"])
 const WORKTREE_REASON: ReadonlySet<unknown> = new Set(["not-merged", "dirty", "manual-handoff", "keep-failed", "other"])
 const HOOK_STATE: ReadonlySet<unknown> = new Set(["running", "passed", "failed", "error"])
+const REVIEW_KIND: ReadonlySet<unknown> = new Set(["approve", "changes", "approve-fast", "stop-early"])
+const REVIEW_SEVERITY: ReadonlySet<unknown> = new Set(["blocking", "should-fix", "nit"])
+const REVIEW_STOP_REASON: ReadonlySet<unknown> = new Set(["superseded", "duplicate", "empty", "too-large"])
 
 export function isMergePR(v: unknown): v is MergePR {
   return isRecord(v) &&
@@ -842,6 +895,21 @@ export function isAlertFinding(v: unknown): v is AlertFinding {
 
 export function isAlertFindingList(v: unknown): v is AlertFinding[] {
   return Array.isArray(v) && v.every((item: unknown) => isAlertFinding(item))
+}
+
+export function isReviewFinding(v: unknown): v is ReviewFinding {
+  return isRecord(v) &&
+    typeof v.id === "string" &&
+    REVIEW_SEVERITY.has(v.severity) &&
+    typeof v.file === "string" &&
+    Number.isInteger(v.line) &&
+    typeof v.why === "string" &&
+    typeof v.fix === "string" &&
+    (v.patch === undefined || typeof v.patch === "string")
+}
+
+export function isReviewFindingList(v: unknown): v is ReviewFinding[] {
+  return Array.isArray(v) && v.every((item: unknown) => isReviewFinding(item))
 }
 
 export function isWorktreeEvent(v: unknown): v is WorktreeEvent {
@@ -953,6 +1021,26 @@ export function isMachineEvent(v: unknown): v is MachineEvent {
     Number.isInteger(v.atMs)
 }
 
+export function isReviewEvent(v: unknown): v is ReviewEvent {
+  return isRecord(v) &&
+    REVIEW_KIND.has(v.kind) &&
+    typeof v.changeId === "string" &&
+    (v.number === undefined || Number.isInteger(v.number)) &&
+    typeof v.label === "string" &&
+    typeof v.location === "string" &&
+    typeof v.head === "string" &&
+    (v.summary === undefined || typeof v.summary === "string") &&
+    (v.findings === undefined || isReviewFindingList(v.findings)) &&
+    (v.blocking === undefined || Number.isInteger(v.blocking)) &&
+    (v.shouldFix === undefined || Number.isInteger(v.shouldFix)) &&
+    (v.nits === undefined || Number.isInteger(v.nits)) &&
+    (v.stopReason === undefined || REVIEW_STOP_REASON.has(v.stopReason)) &&
+    (v.fastLand === undefined || typeof v.fastLand === "boolean") &&
+    (v.area === undefined || typeof v.area === "string") &&
+    (v.note === undefined || typeof v.note === "string") &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
 export function isPREvent(v: unknown): v is PREvent {
   return isRecord(v) &&
     P_R_TYPE.has(v.type) &&
@@ -1056,6 +1144,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "merge" && type === "rolled-back") return isMergeEvent(v)
   if (family === "merge" && type === "decision") return isMergeDecisionEvent(v)
   if (family === "machine" && type === "low-disk") return isMachineEvent(v)
+  if (family === "review" && type === "result") return isReviewEvent(v)
   if (family === "pr" && type === "opened") return isPREvent(v)
   if (family === "pr" && type === "ready") return isPREvent(v)
   if (family === "pr" && type === "approved") return isPREvent(v)

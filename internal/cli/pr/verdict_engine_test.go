@@ -28,10 +28,10 @@ func TestVerdictCommandsUseEngineAndPreserveNotices(t *testing.T) {
 			}
 			saveState(t, s.Store.Root, raw)
 			called := false
-			calls, err := websvc.Bind([]websvc.Binding{{Name: "RecordPRVerdict", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(ctx context.Context, room, keyArg, head, verdict, summary string, reviewID int64, findings []watch.Finding) (struct{ Notice string }, error) {
+			calls, err := websvc.Bind([]websvc.Binding{{Name: "RecordReviewResult", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(ctx context.Context, room, keyArg string, result watch.ReviewResult) (struct{ Notice string }, error) {
 				called = true
-				if room != "review-room" || keyArg != key || head != "head" || verdict != "approve" || summary != "Review complete." || reviewID != 42 || len(findings) != 0 {
-					t.Errorf("verdict arguments: %q %q %q %q %q %d %+v", room, keyArg, head, verdict, summary, reviewID, findings)
+				if room != "review-room" || keyArg != key || result.Head != "head" || result.Verdict != "approve" || result.Summary != "Review complete." || result.ReviewID != 42 || len(result.Findings) != 0 {
+					t.Errorf("verdict arguments: %q %q %+v", room, keyArg, result)
 				}
 				return struct{ Notice string }{Notice: "verdict saved; applies after GitHub refresh"}, nil
 			}}})

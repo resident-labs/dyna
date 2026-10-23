@@ -14,9 +14,10 @@ type VerdictResult struct {
 	Notice string `json:"notice,omitempty"`
 }
 
-// RecordPRVerdict uses the authenticated session as the reviewer. The watcher
-// checks its assignment or room roster and the exact head inside the state update.
-func (s *Service) RecordPRVerdict(ctx context.Context, roomRef, key, head, verdict, summary string, reviewID int64, findings []watch.Finding) (VerdictResult, error) {
+// RecordReviewResult uses the authenticated session as the reviewer. The
+// watcher checks its assignment or room roster and the exact head inside the
+// state update. The result is a typed review result; anything else is rejected.
+func (s *Service) RecordReviewResult(ctx context.Context, roomRef, key string, result watch.ReviewResult) (VerdictResult, error) {
 	p, err := s.prInRoom(roomRef, key)
 	if err != nil {
 		return VerdictResult{}, err
@@ -37,7 +38,7 @@ func (s *Service) RecordPRVerdict(ctx context.Context, roomRef, key, head, verdi
 	default:
 		return VerdictResult{}, fmt.Errorf("a verdict needs an authenticated reviewer session")
 	}
-	err = p.VerdictWithFindings(ctx, key, actor.Session, head, verdict, summary, reviewID, findings)
+	err = p.RecordReviewResult(ctx, key, actor.Session, result)
 	if notice, ok := watch.VerdictNotice(err); ok {
 		return VerdictResult{Notice: notice}, nil
 	}

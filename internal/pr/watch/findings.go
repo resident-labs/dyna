@@ -22,7 +22,7 @@ func cloneFindings(in []Finding) []Finding {
 	}
 	return out
 }
-func prepareFindings(r Record, verdict string, input []Finding) ([]Finding, error) {
+func prepareFindings(r Record, verdict state.ReviewVerdict, input []Finding) ([]Finding, error) {
 	if len(input) > 100 {
 		return nil, fmt.Errorf("a review can contain at most 100 findings")
 	}
@@ -38,11 +38,11 @@ func prepareFindings(r Record, verdict string, input []Finding) ([]Finding, erro
 	for i := range out {
 		f := &out[i]
 		switch f.Severity {
-		case "blocking", "should-fix", "nit":
+		case state.FindingBlocking, state.FindingShouldFix, state.FindingNit:
 		default:
 			return nil, fmt.Errorf("finding severity must be blocking, should-fix, or nit")
 		}
-		if approved(verdict) && f.Severity != "nit" {
+		if approved(verdict) && f.Severity != state.FindingNit {
 			return nil, fmt.Errorf("approval cannot contain blocking or should-fix findings")
 		}
 		if f.File == "" || f.Line < 0 || strings.TrimSpace(f.Why) == "" || strings.TrimSpace(f.Fix) == "" {
@@ -65,7 +65,7 @@ func prepareFindings(r Record, verdict string, input []Finding) ([]Finding, erro
 			}
 		}
 	}
-	weight := map[string]int{"blocking": 0, "should-fix": 1, "nit": 2}
+	weight := map[state.FindingSeverity]int{state.FindingBlocking: 0, state.FindingShouldFix: 1, state.FindingNit: 2}
 	sort.SliceStable(out, func(i, j int) bool { return weight[out[i].Severity] < weight[out[j].Severity] })
 	return out, nil
 }
