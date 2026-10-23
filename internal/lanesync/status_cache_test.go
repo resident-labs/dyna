@@ -94,3 +94,34 @@ func TestSyncStatusKeepsItsGitViewUntilRefsMove(t *testing.T) {
 		t.Fatalf("moved status: %+v", row)
 	}
 }
+
+func TestSyncStatusRefreshesSymbolicRefTargets(t *testing.T) {
+	for _, integration := range []bool{true, false} {
+		svc, repo, base, head := statusFixture(t)
+		ref, target := "refs/remotes/origin/main", "refs/heads/base-target"
+		initial, moved := base, head
+		if integration {
+			ref, target = "refs/heads/dyna/integration", "refs/heads/integration-target"
+			initial, moved = head, commitOn(t, repo, head, "next")
+		} else if err := svc.Update(func(s *Snapshot) error { s.Exports = nil; return nil }); err != nil {
+			t.Fatal(err)
+		}
+		git(t, repo, "update-ref", target, initial)
+		git(t, repo, "symbolic-ref", ref, target)
+		if _, err := svc.Status(); err != nil {
+			t.Fatal(err)
+		}
+		git(t, repo, "update-ref", target, moved)
+		got, err := svc.Status()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if integration {
+			if got[repo].Integration.Head != moved {
+				t.Fatalf("symbolic integration target stayed stale: %+v", got[repo].Integration)
+			}
+		} else if len(got[repo].Integration.Commits) != 0 {
+			t.Fatalf("symbolic main target left stale commits: %+v", got[repo].Integration)
+		}
+	}
+}
