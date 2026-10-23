@@ -117,3 +117,25 @@ test('a hook run folds its start into its result, and another run is another car
   assert.equal(rowPost(rows[0])?.notice?.kind, 'result')
   assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['h3', 'h4'])
 })
+
+// A merge trial posts its progress and its end. One card shows the trial, so
+// every step of one trial ID folds into the newest post.
+const mergePost = (id: string, type: 'queued' | 'trial' | 'checks' | 'landed' | 'failed', trialId: string): FeedInput => ({
+  id, ts: start, from: 'dyna-merge', kind: 'merge', text: 'merge',
+  notice: { kind: type },
+  payload: { type, trialId, repo: 'acme/app', base: 'main', prs: [{ number: 242, title: 'Tidy the composer', url: 'https://github.com/acme/app/pull/242' }] },
+})
+
+test('a merge trial folds queued, trial and landed into one card', () => {
+  const posts = [
+    mergePost('m1', 'queued', 'dyna/merge-trial/7'),
+    mergePost('m2', 'trial', 'dyna/merge-trial/7'),
+    mergePost('m3', 'checks', 'dyna/merge-trial/7'),
+    mergePost('m4', 'landed', 'dyna/merge-trial/7'),
+    mergePost('m5', 'queued', 'dyna/merge-trial/8'),
+  ]
+  const rows = content(feedRows(posts))
+  assert.deepEqual(rows.map((row) => row.key), ['m1', 'm5'])
+  assert.deepEqual(rowPosts(rows[0]).map((post) => post.id), ['m1', 'm2', 'm3', 'm4'])
+  assert.equal(rowPost(rows[0])?.notice?.kind, 'landed')
+})

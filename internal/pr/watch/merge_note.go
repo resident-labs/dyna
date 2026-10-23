@@ -31,8 +31,11 @@ func (s *Service) mergeNote(ctx context.Context, roomID string, args, without []
 	if err != nil {
 		return err
 	}
-	post, err := s.Notify.Rooms.Post(rm.ID, room.PostInput{
-		From: rm.Name + ":" + room.RootAgent, Kind: "merge-decision", To: []string{rm.Name}, Text: args[0],
+	// A decision is a typed merge event: one line, one card, and no wake. Each
+	// decision is its own post even when its line repeats.
+	post, err := s.Notify.Rooms.PostEventInput(room.PostEventInput{
+		RoomID: rm.ID, Event: room.MergeDecisionEvent{Note: args[0]},
+		FreshID: true, To: []string{rm.Name}, RoomService: true,
 	})
 	if err != nil {
 		return err

@@ -98,7 +98,7 @@ func TestWatchWakeAndOwnerEchoRules(t *testing.T) {
 func TestWatchHoldsQuietContextThroughRootSelfPosts(t *testing.T) {
 	var out bytes.Buffer
 	write := watchWriter(&out, "work", false, false)
-	quiet := room.Message{ID: "quiet", From: "work:lead", Kind: "merge-decision", To: []string{"work"}, Text: "Keep the queue paused"}
+	quiet := room.Message{ID: "quiet", From: "work:lead", Kind: "notice", To: []string{"work"}, Text: "Keep the queue paused"}
 	if err := write(quiet); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestWatchHoldsQuietContextThroughRootSelfPosts(t *testing.T) {
 func TestWatchTimedFlushNoticeDeliversHeldContext(t *testing.T) {
 	var out bytes.Buffer
 	write := watchWriter(&out, "work", false, false)
-	quiet := room.Message{ID: "quiet", From: "work:lead", Kind: "merge-decision", To: []string{"work"}, Text: "Keep the queue paused"}
+	quiet := room.Message{ID: "quiet", From: "work:lead", Kind: "notice", To: []string{"work"}, Text: "Keep the queue paused"}
 	if err := write(quiet); err != nil {
 		t.Fatal(err)
 	}

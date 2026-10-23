@@ -10,6 +10,7 @@
 import type { Component } from 'svelte'
 import WorktreeCard from './WorktreeCard.svelte'
 import HookCard from './HookCard.svelte'
+import MergeCard from './MergeCard.svelte'
 import PRCard from '../prs/PRCard.svelte'
 import { eventSpecs } from './events.gen.ts'
 import type { EventSpecEntry } from './events.gen.ts'
@@ -53,7 +54,7 @@ export type EventRenderer = Component<EventProps>
 
 // Components by the name a spec gives in its renderer field. A name with no
 // component here draws the unknown event row, and the test fails.
-export const eventComponents: Record<string, EventRenderer> = { WorktreeCard, HookCard, PRCard }
+export const eventComponents: Record<string, EventRenderer> = { WorktreeCard, HookCard, PRCard, MergeCard }
 
 // The post key of a registered event: its family and its event type.
 export function eventKey(family?: string, type?: string): string {
