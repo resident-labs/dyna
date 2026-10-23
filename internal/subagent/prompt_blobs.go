@@ -12,8 +12,8 @@ import (
 	"dyna-agent/internal/state"
 )
 
-// Prompt storage is additive until the format 3 cutover. Existing turns
-// continue to store inline text.
+// Turn prompts share blobs by hash. Historical inline fields remain readable
+// until the startup conversion registers their references.
 const promptBlobSchema = `CREATE TABLE prompt_blobs (
  hash TEXT PRIMARY KEY,
  text TEXT NOT NULL

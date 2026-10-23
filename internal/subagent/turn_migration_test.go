@@ -3,8 +3,10 @@ package subagent
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -41,8 +43,19 @@ func TestMigrateImportsRetainedTurnBeforeAnyRead(t *testing.T) {
 				t.Fatal(err)
 			}
 			var got []byte
-			if err := db.QueryRow("SELECT turn FROM session_turns WHERE session=? AND n=1", id).Scan(&got); err != nil || !bytes.Equal(got, raw) {
-				t.Fatalf("startup import = %s, %v; want original bytes before any turn read", got, err)
+			if err := db.QueryRow("SELECT turn FROM session_turns WHERE session=? AND n=1", id).Scan(&got); err != nil {
+				t.Fatal(err)
+			}
+			resolved, err := resolveRowPrompts(t.Context(), db, id, 1, got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var original, imported any
+			if err := json.Unmarshal(raw, &original); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(resolved, &imported); err != nil || !reflect.DeepEqual(original, imported) {
+				t.Fatalf("startup import = %s, %v; want original content before any turn read", resolved, err)
 			}
 			if preserved, err := os.ReadFile(path); err != nil || !bytes.Equal(preserved, raw) {
 				t.Fatalf("source changed: %s, %v", preserved, err)

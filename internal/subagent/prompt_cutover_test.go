@@ -12,8 +12,8 @@ import (
 )
 
 func TestPromptCutoverRequiresQuiescentOldWriters(t *testing.T) {
-	if callerid.StoreFormat != 2 {
-		t.Fatal("this port must not activate format 3")
+	if callerid.StoreFormat != promptStoreFormat {
+		t.Fatal("launch records must advertise the active prompt format")
 	}
 	unavailable := errors.New("source unavailable or malformed")
 	for _, tc := range []struct {

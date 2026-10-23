@@ -38,9 +38,9 @@ const recordsKept = 24 * time.Hour
 type Store struct{ db *sql.DB }
 
 // StoreFormat says how the binary that records a launch stores session state.
-// 2 means it writes turns and queue claims as dyna.db rows (#1470, #1506).
+// 3 means turn prompts use shared blobs in dyna.db.
 // Records made by an earlier release have format 0.
-const StoreFormat = 2
+const StoreFormat = 3
 
 // formatSchema adds the launching binary's StoreFormat. It migrates under its
 // own key, so an earlier release still finds caller_records at the version it
