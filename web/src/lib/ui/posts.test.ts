@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
 import { postHref, postAttachment, speaker } from './posts.ts'
-import { sourceRange } from '../../../test/svelte-source.ts'
+import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 
 const room = 'room_20261017-123456-abcdef12'
 test('post links name stored room and post IDs and reject non-post targets', () => {
@@ -68,7 +68,7 @@ test('Files sends both ordinary previews and card source views through the selec
   const opened: ShownAttachment[] = []
   const c = { postAttachment, postId: 'msg_stored', onopen: (attachment: ShownAttachment) => opened.push(attachment) }
   vm.createContext(c)
-  vm.runInContext(files.slice(sourceRange(declaration).start, sourceRange(declaration).end), c)
+  vm.runInContext(stripTypes(files.slice(sourceRange(declaration).start, sourceRange(declaration).end)), c)
   const shown: ShownAttachment[] = [{ id: 'file' }, { id: 'image', mime: 'image/png' }, { id: 'card', view: 'source' }]
   for (const attachment of shown) {
     Object.assign(c, { attachment })

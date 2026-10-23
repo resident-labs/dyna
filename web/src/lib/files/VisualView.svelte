@@ -1,29 +1,46 @@
-<script>
+<script lang="ts">
   import Avatar from '../ui/Avatar.svelte'
   import CardFrame from './CardFrame.svelte'
   import { fileURL } from '../../api.ts'
   import { ago } from '../ui/format.ts'
   import { visuals } from './visuals.svelte.ts'
   import { visualOf, versionOf, checkStatus, checksSummary } from './visuals.ts'
+  import type { Attachment, Post } from '../api/room.ts'
+
+  interface Props {
+    roomId: string
+    att: Attachment & { postId?: string }
+    ready: boolean
+    onjump?: (() => void) | null
+    ondownload: (attachment: Attachment) => void
+    downloading?: boolean
+    error?: string
+    onclose: () => void
+  }
+  // One version of the visual, with the post that carried it.
+  interface VisualVersion {
+    post?: Post
+    attachment: Attachment
+  }
 
   // The full view of one card: header with versions and checks, then the card.
-  let { roomId, att, ready, onjump = null, ondownload, downloading = false, error = '', onclose } = $props()
+  let { roomId, att, ready, onjump = null, ondownload, downloading = false, error = '', onclose }: Props = $props()
   // svelte-ignore state_referenced_locally
   let shownVersion = $state(att.version || 1)
   let open = $state('') // 'versions' or 'checks'
-  let shot = $state(null)
+  let shot = $state<string | null>(null)
 
-  let row = $derived(visualOf(visuals.byId, att.postId, att))
-  let versions = $derived(row?.versions?.length ? row.versions : [{ post: row?.post, attachment: att }])
-  let current = $derived(versionOf(versions, shownVersion))
+  let row = $derived(visualOf(visuals.byId, att.postId ?? '', att))
+  let versions: VisualVersion[] = $derived(row?.versions?.length ? row.versions : [{ post: row?.post, attachment: att }])
+  let current = $derived(versionOf(versions, shownVersion) ?? { attachment: att })
   let shown = $derived(current.attachment)
   let older = $derived(current !== versions[0])
   let title = $derived(shown.title || shown.name)
   let status = $derived(checkStatus(shown))
-  const when = (post) => (post ? ago(new Date(post.ts).toISOString()) : '')
-  const note = (post) => post?.text?.split('\n').find((l) => l.trim()) ?? ''
-  const toggle = (name) => { open = open === name ? '' : name; shot = null }
-  function pick(n) { shownVersion = n; open = '' }
+  const when = (post?: Post) => (post ? ago(new Date(post.ts).toISOString()) : '')
+  const note = (post?: Post) => post?.text?.split('\n').find((l) => l.trim()) ?? ''
+  const toggle = (name: string) => { open = open === name ? '' : name; shot = null }
+  function pick(n: number) { shownVersion = n; open = '' }
 </script>
 
 <header>
@@ -77,7 +94,7 @@
 </header>
 {#if error}<p class="err" role="alert">{error}</p>{/if}
 {#if older}
-  <div class="strip">Viewing v{shown.version || 1} · <button onclick={() => pick(versions[0].attachment.version || 1)}>Back to latest</button></div>
+  <div class="strip">Viewing v{shown.version || 1} · <button onclick={() => pick(versions[0]?.attachment.version || 1)}>Back to latest</button></div>
 {/if}
 <!-- A new frame per version, even for the same bytes: switching the URL of one frame reads as a navigation to its link guard, and each version has its own network policy. -->
 <div class="body">{#if ready}{#key current.post?.id ?? shown.id}<CardFrame {roomId} att={shown} />{/key}{/if}</div>

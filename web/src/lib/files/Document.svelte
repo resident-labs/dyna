@@ -1,9 +1,13 @@
-<script>
+<script lang="ts">
   import { tick } from 'svelte'
   import { documentCopy } from './documentCopy.ts'
   import { copyText, openExternal } from '../../api.ts'
-  let { html } = $props()
-  let article
+
+  interface Props {
+    html: string
+  }
+  let { html }: Props = $props()
+  let article = $state<HTMLElement>()
   $effect(() => {
     html
     const root = article
@@ -15,16 +19,16 @@
     return () => { active = false; cleanup() }
   })
 
-  function click(e) {
-    const link = e.target.closest?.('a[href]')
+  function click(e: MouseEvent) {
+    const link = e.target instanceof Element ? e.target.closest('a[href]') : null
     if (!link) return
     e.preventDefault()
     e.stopPropagation()
-    const href = link.getAttribute('href')
+    const href = link.getAttribute('href') ?? ''
     if (href.startsWith('#')) {
-      let id
+      let id: string
       try { id = decodeURIComponent(href.slice(1)) } catch { return }
-      const target = e.currentTarget.querySelector(`[id="${CSS.escape(id)}"], [name="${CSS.escape(id)}"]`)
+      const target = e.currentTarget instanceof Element ? e.currentTarget.querySelector(`[id="${CSS.escape(id)}"], [name="${CSS.escape(id)}"]`) : null
       target?.scrollIntoView({ block: 'start', behavior: 'instant' })
     } else if (/^https?:\/\//i.test(href)) openExternal(href)
   }

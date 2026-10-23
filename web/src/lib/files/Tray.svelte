@@ -1,16 +1,23 @@
-<script>
+<script lang="ts">
   import { human, extOf } from './attach.ts'
   import { dialog } from '../ui/dialog.ts'
-  let { items = [], onremove, onretry } = $props()
+  import type { DraftItem } from './attach.ts'
+
+  interface Props {
+    items?: DraftItem[]
+    onremove: (item: DraftItem) => void
+    onretry: (item: DraftItem) => void
+  }
+  let { items = [], onremove, onretry }: Props = $props()
   const titleId = $props.id()
-  let previewKey = $state(null)
+  let previewKey = $state<string | null>(null)
   let preview = $derived(items.find(it => it.key === previewKey))
   // Leave transformed, filtered, or clipped composer ancestors behind.
-  function portal(node) {
+  function portal(node: HTMLElement) {
     document.body.append(node)
     return { destroy: () => node.remove() }
   }
-  const closePreview = () => { previewKey = null }
+  const closePreview = (): void => { previewKey = null }
   $effect(() => {
     if (previewKey !== null && !preview) closePreview()
   })

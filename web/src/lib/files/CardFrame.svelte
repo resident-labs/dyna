@@ -1,15 +1,24 @@
-<script>
+<script lang="ts">
   import { openExternal, cardURL } from '../../api.ts'
   import { sandbox, guard, onLoad, readCardMessage, frameKey, forKey } from '../ui/rich.ts'
+  import type { CardGuard } from '../ui/rich.ts'
+  import type { Attachment } from '../api/room.ts'
+
+  interface Props {
+    roomId: string
+    att: Attachment
+    height?: string
+    onheight?: (height: number) => void
+  }
   // One HTML card frame with its link guard and its message channel. See
-  // rich.js for the rules.
-  let { roomId, att, height = '100%', onheight } = $props()
+  // rich.ts for the rules.
+  let { roomId, att, height = '100%', onheight }: Props = $props()
   let attId = $derived(att.id)
   let title = $derived(att.title || att.name)
-  let g = $state(guard())
+  let g = $state<CardGuard>(guard())
   // The guard of the document now in the frame.
   let current = $derived(forKey(g, frameKey(att)))
-  let frame = $state()
+  let frame = $state<HTMLIFrameElement>()
   let url = $state('')
   let urlError = $state('')
   const NOTE = 'This card tried to open a link by navigating. Cards open links with dyna:open after a click.'
@@ -17,7 +26,7 @@
   // The URL comes from api.cardURL: a fixed path in the desktop, a URL with
   // a ten-minute ticket on the web. A restore or a reload asks again, so a
   // card never reloads a dead ticket.
-  async function fetchURL() {
+  async function fetchURL(): Promise<string> {
     try {
       const u = await cardURL(roomId, attId)
       urlError = ''
@@ -28,7 +37,8 @@
     }
   }
   $effect(() => {
-    roomId, attId
+    roomId
+    attId
     fetchURL().then((u) => (url = u))
   })
 
@@ -59,9 +69,9 @@
   // open per card every two seconds: one click, one link.
   let lastHeight = 0
   let heightAt = 0
-  let heightTimer
+  let heightTimer: ReturnType<typeof setTimeout> | undefined
   let openAt = 0
-  function message(e) {
+  function message(e: MessageEvent) {
     if (!frame || e.source !== frame.contentWindow || e.origin !== 'null') return
     const m = readCardMessage(e.data)
     const now = Date.now()
