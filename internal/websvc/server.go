@@ -356,9 +356,6 @@ func (s *Server) serveApp(w http.ResponseWriter, r *http.Request) {
 	case p == "/api/pair":
 		s.pair(w, r, rt)
 		return
-	case p == "/api/android/app.apk", p == "/api/android/version":
-		s.android(w, r)
-		return
 	case strings.HasPrefix(p, "/api/"), strings.HasPrefix(p, "/attachments/"):
 	default:
 		s.shell(w, r, rt)

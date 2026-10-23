@@ -165,7 +165,7 @@ func TestLocalCancellationReachesFactsAndTrialGate(t *testing.T) {
 		for _, localState := range []string{"passed", "failed", "pending"} {
 			t.Run(mode+"/"+localState, func(t *testing.T) {
 				result := localci.Result{Repo: common, SHA: head, Node: "node", Status: localState}
-				for _, name := range requiredRegisteredChecks([]string{"relay", "go", "cross-build", "computer-smoke", "android"}) {
+				for _, name := range requiredRegisteredChecks([]string{"relay", "go", "cross-build", "computer-smoke"}) {
 					result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: localState})
 				}
 				registry := &cancellationCIRegistry{mode: mode, requiredCIRegistry: requiredCIRegistry{result: result, hostedCIRegistry: hostedCIRegistry{hosted: localci.HostedRuns{IDs: []int64{10}, Attempts: map[int64]int{10: 1}}}}}

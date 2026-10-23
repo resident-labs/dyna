@@ -96,15 +96,6 @@ if [ -f "$script_dir/go.mod" ] && grep -q '^module dyna-agent$' "$script_dir/go.
   build_source "$script_dir"
   activate_binary
   ok "built $BIN"
-  # The Android call app is optional: it is built only where the Android SDK and JDK 17 exist.
-  if [ -n "${ANDROID_HOME:-}" ] && command -v keytool >/dev/null 2>&1; then
-    info "building the Android call app"
-    if "$script_dir/mobile/android/build-apk.sh" >/dev/null; then
-      ok "built the Android call app"
-    else
-      info "the Android call app did not build; skipped"
-    fi
-  fi
 else
   # 2) Try a prebuilt release binary.
   asset="dyna_${os}_${arch}"

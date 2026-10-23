@@ -51,18 +51,10 @@ case "$suite" in
     fi
     ;;
   android)
-    sdk=${ANDROID_HOME:?set ANDROID_HOME}
-    if [[ ! -d "$sdk/platforms/android-35" || ! -d "$sdk/build-tools/35.0.0" ]]; then
-      mkdir -p "$sdk/cmdline-tools" "$RUNNER_TEMP/android-tools"
-      curl -fsSL -o "$RUNNER_TEMP/android-tools/cmdline-tools.zip" https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-      unzip -q -o "$RUNNER_TEMP/android-tools/cmdline-tools.zip" -d "$RUNNER_TEMP/android-tools"
-      rm -rf "$sdk/cmdline-tools/latest"
-      mv "$RUNNER_TEMP/android-tools/cmdline-tools" "$sdk/cmdline-tools/latest"
-      # sdkmanager asks for each license; "yes" in a process substitution avoids SIGPIPE under pipefail.
-      "$sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk" "platforms;android-35" "build-tools;35.0.0" < <(yes) >/dev/null
-    fi
-    cd mobile/android
-    ./gradlew --no-daemon -q testDebugUnitTest assembleDebug
+    # TODO: legacy/shim remove later — engines released before the Android app
+    # removal still ask for this suite by name. Answer the check and do nothing.
+    # Remove once main's local CI no longer lists "android".
+    echo "The Android app suite is retired; nothing to run."
     ;;
   cross-build)
     started=$SECONDS
