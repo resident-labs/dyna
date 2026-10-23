@@ -19,6 +19,7 @@ import { trimFeed } from './feedWindow.js'
 import { mergeFeedPage, rerouteAnchors, withChannels } from './feedPages.js'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from '../ui/route.ts'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 // Run the actual App navigation functions with controlled API responses.
 // The Svelte parser selects complete declarations without copying their logic.
@@ -74,7 +75,7 @@ function navigation() {
   const write = (kind, url) => { c.location.hash = url.includes('#') ? url.slice(url.indexOf('#')) : ''; c.entries.push([kind, c.location.hash]) }
   c.history = { replaceState(_state, _title, url) { write('replace', url) }, pushState(_state, _title, url) { write('push', url) } }
   vm.createContext(c)
-  vm.runInContext(code, c)
+  vm.runInContext(stripTypes(code), c)
   return { c, pending, calls, applied }
 }
 
@@ -227,7 +228,7 @@ test('a pin 10,000 posts back waits for the in-flight page then uses one around 
     return Promise.resolve({ room: { id: B }, posts: [result], earlier: 1, newer: 9999 })
   }
   const declaration = declarations.find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'loadEarlier')
-  vm.runInContext(source.slice(declaration.start, declaration.end), c)
+  vm.runInContext(stripTypes(source.slice(declaration.start, declaration.end)), c)
   const loading = c.loadEarlier()
   const jumping = c.jumpTo(result.id)
   await setImmediate()
@@ -275,7 +276,7 @@ test('reconnect moves a stale lead channel to general after its last child is pr
   c.api.openRoom = async () => ({ ...opened(B), members: [lead, { ...child, parent: '' }] })
   for (const name of ['parentKey', 'noteParents', 'applyOpened', 'resync']) {
     const node = declarations.find((node) => node.type === 'FunctionDeclaration' && node.id.name === name)
-    vm.runInContext(source.slice(node.start, node.end), c)
+    vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
   }
   await c.resync()
   assert.deepEqual(c.channels.leads, [])
@@ -292,7 +293,7 @@ test('a reconnect after a promote rereads the channels of loaded completions in 
   for (const name of ['loadReviewer', 'loadChanges', 'loadGoals', 'loadRules', 'loadVisuals']) c[name] = () => {}
   for (const name of ['parentKey', 'noteParents', 'rerouteLoaded', 'applyOpened', 'resync']) {
     const node = declarations.find((node) => node.type === 'FunctionDeclaration' && node.id.name === name)
-    vm.runInContext(source.slice(node.start, node.end), c)
+    vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
   }
   c.roomId = B
   c.feed = { room: { id: B }, posts: [] }
@@ -390,7 +391,7 @@ test('an older page cannot merge after a same-room refresh changes its boundary'
     api: { feedTail: (id, cursor) => { assert.equal(cursor, 'p151'); return pending.promise } } }
   vm.createContext(c)
   const fn = declarations.find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'loadEarlier')
-  vm.runInContext(source.slice(fn.start, fn.end), c)
+  vm.runInContext(stripTypes(source.slice(fn.start, fn.end)), c)
   const loading = c.loadEarlier()
   c.feed = refreshed
   pending.resolve({ room: { id: B }, posts: [{ id: 'p51' }, { id: 'p150' }], cursor: 'p51', earlier: 50 })
@@ -542,7 +543,7 @@ test('successful read batches refresh channel counts through the existing room d
     loadRooms() { rooms++ }, roomData: { loadUnread() { tails.push('unread') } },
   }
   vm.createContext(c)
-  vm.runInContext(source.slice(refresh.start, refresh.end) + '\nvar afterRead = ' + source.slice(callback.start, callback.end), c)
+  vm.runInContext(stripTypes(source.slice(refresh.start, refresh.end) + '\nvar afterRead = ' + source.slice(callback.start, callback.end)), c)
   c.afterRead()
   c.afterRead()
   assert.equal(rooms, 0)
@@ -568,7 +569,7 @@ test('channel count refresh preserves over 200 displayed posts while scrolled up
   const refresh = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'soonRooms')
   const hook = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'applyUnread')
   const handle = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'handle')
-  vm.runInContext(source.slice(refresh.start, refresh.end) + '\n' + source.slice(handle.start, handle.end) + '\n' + source.slice(hook.start, hook.end), c)
+  vm.runInContext(stripTypes(source.slice(refresh.start, refresh.end) + '\n' + source.slice(handle.start, handle.end) + '\n' + source.slice(hook.start, hook.end)), c)
   const requests = []
   c.roomData = createRoomData({
     feedTail: async (...args) => { requests.push(args); return { room: { id: A }, posts: posts.slice(-1), channelUnread: { 'channel:lead': 3 } } },
@@ -610,7 +611,7 @@ test('an older page cannot trim the post a reader moved to while it was loading'
  Object.assign(c,{feed:original,earlierLoad:null,STEP:50})
  c.api.feedTail=()=>pending.promise
  const declaration=declarations.find(n=>n.type==='FunctionDeclaration'&&n.id.name==='loadEarlier')
- vm.runInContext(source.slice(declaration.start,declaration.end),c)
+ vm.runInContext(stripTypes(source.slice(declaration.start,declaration.end)),c)
  const loading=c.loadEarlier('older','',()=>near)
  near=false
  pending.resolve({room:{id:B},posts:[{id:'older'}],earlier:0})
@@ -630,7 +631,7 @@ test('opening a goal that no loaded page holds loads it, and a done goal opens u
   c.fetchedGoalVersion = 0
   for (const name of ['goalById', 'openGoal', 'trackFetchedGoal', 'refreshFetchedGoal']) {
     const node = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
-    vm.runInContext(source.slice(node.start, node.end), c)
+    vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
   }
   assert.equal(await c.openGoal('g9'), old)
   assert.equal(c.goalId, 'g9')

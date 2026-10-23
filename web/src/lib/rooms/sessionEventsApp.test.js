@@ -9,6 +9,7 @@ import { hasItemChange } from '../ui/listChanges.ts'
 import { createRoomData } from './roomData.js'
 import { createRoomSessionControls } from './roomSessionControls.js'
 import { reloadsUnread } from '../ui/unreadReload.ts'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const functions = parse(source).instance.content.body
@@ -33,7 +34,7 @@ function app(view) {
   vm.createContext(c)
   for (const name of ['applyItemEvent', 'handle', 'loadSession', 'loadMembers']) {
     const node = functions.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
-    vm.runInContext(source.slice(node.start, node.end), c)
+    vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
   }
   return { c, calls, close() { c.roomData.destroy(); c.roomSessionController.destroy() } }
 }
@@ -77,7 +78,7 @@ test('reconnect refreshes visible controls without consolidation history', async
   let reviewerLoads = 0
   c.loadReviewer = () => reviewerLoads++
   const node = functions.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'resync')
-  vm.runInContext(source.slice(node.start, node.end), c)
+  vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
   await c.resync()
   await new Promise(setImmediate)
   assert.deepEqual(calls, ['rooms', 'controls'])
@@ -95,7 +96,7 @@ test('reconnect refreshes the open session and its Changes count', async () => {
   for (const name of ['loadChanges', 'loadGoals', 'loadRules', 'loadVisuals', 'loadReviewer']) c[name] = () => {}
   c.drill = { id: 'one' }
   const node = functions.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'resync')
-  vm.runInContext(source.slice(node.start, node.end), c)
+  vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
   await c.resync()
   await new Promise(setImmediate)
   assert.ok(calls.includes('transcript') && calls.includes('changes'), `calls: ${calls}`)
@@ -110,7 +111,7 @@ test('the remaining timer refreshes bulk transfers only while the page is visibl
   const mounted = functions.find((n) => n.type === 'ExpressionStatement' && n.expression.callee?.name === 'onMount')
   const binding = mounted.expression.arguments[0].body.body.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.name === 'transferPoll'))
   const callback = binding.declarations.find((d) => d.id.name === 'transferPoll').init.arguments[0]
-  const poll = vm.runInContext(source.slice(callback.start, callback.end), c)
+  const poll = vm.runInContext(stripTypes(source.slice(callback.start, callback.end)), c)
   poll()
   assert.deepEqual(calls, ['transfer'])
   calls.length = 0
@@ -180,5 +181,15 @@ test('merge refresh version follows room PR and change events only', () => {
   c.handle({ kind: 'prs', roomId: 'a' })
   c.handle({ kind: 'changes', roomId: 'a' })
   assert.equal(c.mergeVersion, 2)
+  close()
+})
+
+test('a jobs metadata event reloads jobs only for the open room', () => {
+  const { c, calls, close } = app('jobs')
+  c.workflowData = { loadJobs: () => calls.push('jobs') }
+  c.handle({ kind: 'jobs', roomId: 'other' })
+  assert.deepEqual(calls, [])
+  c.handle({ kind: 'jobs', roomId: 'a' })
+  assert.deepEqual(calls, ['members', 'jobs'])
   close()
 })

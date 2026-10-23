@@ -12,6 +12,7 @@ import { applyEvent, openedApps, pushAction } from '../computers/computers.js'
 import { hasItemChange } from '../ui/listChanges.ts'
 import { createReloadGate, listVisible, reconcileRows } from '../ui/reloadGate.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const deferred = () => { let resolve; const promise = new Promise((yes) => { resolve = yes }); return { promise, resolve } }
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
@@ -26,7 +27,7 @@ function appFunctions(c, names) {
   vm.createContext(c)
   for (const name of names) {
     const node = functions.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
-    vm.runInContext(source.slice(node.start, node.end), c)
+    vm.runInContext(stripTypes(source.slice(node.start, node.end)), c)
   }
 }
 test('room summary bursts share one request plus one trailing request', async () => {
@@ -189,7 +190,7 @@ test('visibility restoration refreshes skipped members, choices, questions and p
   const mounted = functions.find((n) => n.type === 'ExpressionStatement' && n.expression.callee?.name === 'onMount')
   const binding = mounted.expression.arguments[0].body.body.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.name === 'visibility'))
   const callback = binding.declarations.find((d) => d.id.name === 'visibility').init
-  c.restoreVisibility = vm.runInContext(source.slice(callback.start, callback.end), c)
+  c.restoreVisibility = vm.runInContext(stripTypes(source.slice(callback.start, callback.end)), c)
   await Promise.all([c.loadMembers(), c.loadQuestions(), c.loadPins(), c.loadSync(), c.loadIssues()])
   assert.deepEqual(calls, [])
   c.document.visibilityState = 'visible'
@@ -307,7 +308,7 @@ test('App polling leaves visible and hidden control panels unchanged', async () 
   const mounted = functions.find((n) => n.type === 'ExpressionStatement' && n.expression.callee?.name === 'onMount')
   const binding = mounted.expression.arguments[0].body.body.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.name === 'transferPoll'))
   const callback = binding.declarations.find((d) => d.id.name === 'transferPoll').init.arguments[0]
-  const poll = vm.runInContext(source.slice(callback.start, callback.end), c)
+  const poll = vm.runInContext(stripTypes(source.slice(callback.start, callback.end)), c)
   poll()
   await new Promise(setImmediate)
   assert.deepEqual(calls, [])
@@ -331,9 +332,9 @@ function sessionApp(tab, api) {
   appFunctions(c, helpers)
   const binding = functions.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.name === 'sessionData'))
   const hooks = binding.declarations.find((d) => d.id.name === 'sessionData').init.arguments[1]
-  c.sessionData = createSessionData(api, vm.runInContext('(' + source.slice(hooks.start, hooks.end) + ')', c))
+  c.sessionData = createSessionData(api, vm.runInContext(stripTypes('(' + source.slice(hooks.start, hooks.end) + ')'), c))
   const entry = functions.find((n) => n.type === 'ExpressionStatement' && n.expression.callee?.name === '$effect' && source.slice(n.start, n.end).includes('const tab = sessionTab'))
-  vm.runInContext(source.slice(entry.start, entry.end), c)
+  vm.runInContext(stripTypes(source.slice(entry.start, entry.end)), c)
   return { c, effect: () => effect() }
 }
 

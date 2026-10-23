@@ -90,3 +90,24 @@ test('a root post that arrived while reading history is revealed by present and 
  assert.deepEqual(applied, [['new', 'present'], ['new', 'present']])
  data.destroy()
 })
+
+test('App history loaders discard a delayed page after the reader leaves the edge', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { call, runFunctions } = await import('../../../test/svelte-source.ts')
+  const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
+  for (const loader of ['loadEarlierSession', 'loadNewerSession']) {
+    let finish: (page: Session) => void = () => {}
+    const pending = new Promise<Session>((resolve) => { finish = resolve })
+    const applied: Session[] = []
+    const data = createSessionData(api({ transcriptPage: () => pending, transcriptAfter: () => pending }), hooks({ transcript: (page) => applied.push(page) }))
+    const context = { sessionData: data, sessionTurn: 0, session: session('session', { cursor: '2', earlier: true, newer: true, turns: [turn(2)] }) }
+    runFunctions(source, [loader], context)
+    let nearEdge = true
+    const loading = call(context, loader, () => nearEdge)
+    nearEdge = false
+    finish(session('session', { posts: [post('late')] }))
+    await loading
+    assert.deepEqual(applied, [], loader + ' must keep the viewport after the reader moves away')
+    data.destroy()
+  }
+})

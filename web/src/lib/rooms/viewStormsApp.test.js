@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
 import { createReloadGate, reconcileRows } from '../ui/reloadGate.ts'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const nodes = parse(source).instance.content.body
@@ -19,9 +20,9 @@ function app(state, members) {
     ...state, api: { members, goals: async () => ({ items: [] }) },
   }
   vm.createContext(c)
-  vm.runInContext(functionCode('agentsVisible'), c)
+  vm.runInContext(stripTypes(functionCode('agentsVisible')), c)
   const binding = nodes.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.name === 'reloadAgents'))
-  vm.runInContext(source.slice(binding.start, binding.end) + '\n' + functionCode('loadAgents'), c)
+  vm.runInContext(stripTypes(source.slice(binding.start, binding.end) + '\n' + functionCode('loadAgents')), c)
   return c
 }
 
