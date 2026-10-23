@@ -32,6 +32,7 @@ func TestServiceUpdateNotice(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
+	// A cache written before dyna.db, which the release check store imports once.
 	state := fmt.Sprintf(`{"lastChecked":%q,"release":{"tag_name":"v9.9.9"}}`, time.Now().UTC().Format(time.RFC3339Nano))
 	if err := os.WriteFile(filepath.Join(dir, "update-check.json"), []byte(state), 0o644); err != nil {
 		t.Fatal(err)
