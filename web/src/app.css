@@ -107,6 +107,12 @@ input:focus-visible,
 
 code, pre, .mono { font-family: var(--mono); font-size: 0.86em; font-variant-ligatures: none; }
 
+/* A sideways strip fades the edge where more waits, so a phone reader sees
+   that the row continues. lib/ui/scrollFade.ts sets the attribute. */
+[data-scroll-fade='start'] { mask-image: linear-gradient(to right, transparent, #000 28px); }
+[data-scroll-fade='end'] { mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+[data-scroll-fade='both'] { mask-image: linear-gradient(to right, transparent, #000 28px, #000 calc(100% - 28px), transparent); }
+
 ::selection { background: rgba(183, 168, 255, 0.28); }
 
 /* Thin scrollbars that stay out of the way. */

@@ -20,7 +20,7 @@
         {#each USES as [u]}
           {@const uses = p.uses ?? []}
           {@const on = uses.includes(u)}
-          <td><input type="checkbox" aria-label="{p.name}: {u}" checked={on} disabled={p.disabled || busy.includes(p.name) || (on && uses.length === 1)} onchange={(e) => { const want = e.currentTarget.checked; e.currentTarget.checked = on; onchange(p, toggleUse(uses, u, want)) }} /></td>
+          <td><label class="hit"><input type="checkbox" aria-label="{p.name}: {u}" checked={on} disabled={p.disabled || busy.includes(p.name) || (on && uses.length === 1)} onchange={(e) => { const want = e.currentTarget.checked; e.currentTarget.checked = on; onchange(p, toggleUse(uses, u, want)) }} /></label></td>
         {/each}
       </tr>
     {/each}
@@ -34,6 +34,13 @@
   tbody th { text-align: left; font-weight: 500; color: var(--ink-2); padding-left: 0; }
   tbody tr + tr { box-shadow: 0 -1px 0 var(--hair); }
   tr.off { opacity: .55; }
-  input { accent-color: var(--iris); }
+  /* A checkbox is a small mark, so the cell around it is the target. A thumb
+     needs 44 px; a mouse pointer only the box itself. */
+  .hit { display: grid; place-items: center; margin: -5px 0; cursor: pointer; }
+  input { width: 16px; height: 16px; margin: 0; accent-color: var(--iris); }
+  @media (pointer: coarse) {
+    .hit { min-width: 44px; min-height: 44px; }
+    input { width: 20px; height: 20px; }
+  }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
