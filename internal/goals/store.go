@@ -2,10 +2,8 @@
 package goals
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -116,35 +114,6 @@ func (s *Store) now() time.Time {
 	return time.Now()
 }
 
-// TODO: legacy/shim remove later — reads goals/state.json only for its one-time import into dyna.db; remove with importLegacy.
-func readLegacy(path string) (State, error) {
-	st := State{Version: 1, Rooms: map[string]*RoomState{}}
-	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		return st, nil
-	}
-	if err != nil {
-		return st, err
-	}
-	if err = json.Unmarshal(b, &st); err != nil {
-		return st, fmt.Errorf("invalid goals state: %w", err)
-	}
-	if st.Version != 1 {
-		return st, fmt.Errorf("unsupported goals state version %d", st.Version)
-	}
-	if st.Rooms == nil {
-		st.Rooms = map[string]*RoomState{}
-	}
-	for _, r := range st.Rooms {
-		for _, g := range r.Goals {
-			// TODO: legacy/shim remove later — goals stored as "resting" read as active; remove once no stored state has it
-			if g.State == "resting" {
-				g.State = "active"
-			}
-		}
-	}
-	return st, nil
-}
 func (st *State) Room(id string) *RoomState {
 	if st.Rooms[id] == nil {
 		st.Rooms[id] = &RoomState{Goals: map[string]*Goal{}}
