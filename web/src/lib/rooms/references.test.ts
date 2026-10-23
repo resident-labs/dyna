@@ -10,7 +10,7 @@ const code = await bundle({
   api: `export const api = {
     preview: () => Promise.resolve({mentions: [], wakes: []}),
     githubList: (_room, kind) => Promise.resolve({items: kind === 'pr' ? [{number: 123, title: 'Fix composer focus', state: 'OPEN', url: 'https://github.com/o/r/pull/123'}] : [{number: 123, title: 'Old composer issue', state: 'CLOSED', url: 'https://github.com/o/r/issues/123'}]}),
-    issues: () => Promise.resolve([]),
+    issues: () => Promise.resolve([{id: 'msg_f05fdb28f01d83', title: 'Keep the fixture running', state: 'open'}]),
   }`,
 })
 const settle = () => new Promise<void>((resolve) => setImmediate(resolve))
@@ -30,12 +30,27 @@ test('the attach picker accepts a typed number and sends a reference-only post',
     await settle()
     const input = element<HTMLTextAreaElement>(target, 'textarea')
     assert.equal(input.value, '#')
+    const rows = [...target.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+    assert.equal(rows.length, 3)
+    for (const [index, title, label, state] of [
+      [0, 'Fix composer focus', 'PR #123', 'open'],
+      [1, 'Keep the fixture running', 'Issue', 'open'],
+      [2, 'Old composer issue', 'Issue #123', 'closed'],
+    ] as const) {
+      const row = need(rows[index])
+      assert.equal(element(row, '.reference-title').textContent, title)
+      const meta = element(row, '.reference-meta')
+      assert.equal(element(meta, '.mono').textContent, label)
+      assert.match(meta.textContent ?? '', new RegExp(state))
+      assert.doesNotMatch(row.textContent ?? '', /msg_/)
+    }
+    assert.equal(element(need(rows[1]), '.room-tag').textContent, 'room')
     input.value = '#123'
     input.setSelectionRange(4, 4)
     input.dispatchEvent(new dom.window.Event('input', { bubbles: true }))
     await settle()
     const option = element<HTMLButtonElement>(target, '[role="option"]')
-    assert.match(option.textContent ?? '', /PR #123.*Fix composer focus/)
+    assert.match(option.textContent ?? '', /Fix composer focus.*PR #123/)
     option.click()
     await settle()
     assert.equal(input.value, '')
