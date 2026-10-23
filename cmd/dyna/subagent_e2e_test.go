@@ -632,52 +632,95 @@ func (e *e2e) show(ref string) showJSON {
 	return s
 }
 
-// waitTurn polls show until turn n reaches a terminal status, then returns
-// its status and result text (string results unquoted, JSON results raw).
+// e2eWait bounds a wait on a committed change. It is a failure bound only: a
+// wait wakes on the next change the engine publishes, so this is not a poll
+// interval.
+const e2eWait = 60 * time.Second
+
+// awaitTurn reads turn n of ref and, while ready rejects it, waits for the
+// engine's next committed change. It takes the wake channel before each read,
+// so a write that lands between the read and the wait cannot be missed. It
+// returns the session ID, the last turn it read, and whether ready accepted
+// that turn.
+func (e *e2e) awaitTurn(ref string, n int, ready func(subagent.Turn) bool) (id string, turn subagent.Turn, ok bool) {
+	e.t.Helper()
+	sessions := &subagent.Store{Root: filepath.Join(e.data, "dyna", "sessions")}
+	info, err := sessions.ResolveSnapshot(ref)
+	if err != nil {
+		e.t.Fatalf("resolve %s: %v", ref, err)
+	}
+	ctx, cancel := context.WithTimeout(e.t.Context(), e2eWait)
+	defer cancel()
+	for {
+		_, _, _, wake := e.events.Since(e.events.Epoch(), e.events.Rev())
+		turns, err := sessions.Turns(info.ID)
+		if err != nil {
+			e.t.Fatalf("read turns of %s: %v", info.ID, err)
+		}
+		turn, ok = findTurn(turns, n)
+		if ok && ready(turn) {
+			return info.ID, turn, true
+		}
+		select {
+		case <-wake:
+		case <-ctx.Done():
+			return info.ID, turn, false
+		}
+	}
+}
+
+// findTurn returns turn n from a session's stored turns. A turn that is missing
+// or unreadable reports not found, as `show --json` lists it.
+func findTurn(turns []subagent.Turn, n int) (subagent.Turn, bool) {
+	for _, turn := range turns {
+		if turn.N == n && turn.Status != subagent.TurnUnreadable {
+			return turn, true
+		}
+	}
+	return subagent.Turn{N: n}, false
+}
+
 // waitReported waits until turn n of ref has made its report decision (a
 // report was sent, or the turn ended silently).
 func (e *e2e) waitReported(ref string, n int) {
 	e.t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, turn := range e.show(ref).Turns {
-			if turn.N == n && turn.Reported {
-				return
-			}
-		}
-		time.Sleep(e2ePoll)
+	id, turn, ok := e.awaitTurn(ref, n, func(turn subagent.Turn) bool { return turn.Reported })
+	if !ok {
+		e.t.Fatalf("%s turn %d never made its report decision; last turn=%+v\n%s", ref, n, turn, e.runnerLog(id))
 	}
-	e.t.Fatalf("%s turn %d never made its report decision", ref, n)
 }
 
-// e2ePoll spaces status polls; each poll is a short CLI process, so a small
-// interval keeps waits close to the event they wait for.
-const e2ePoll = 25 * time.Millisecond
-
+// waitTurn waits until turn n of ref reaches a terminal status, then returns
+// its status and result text (string results unquoted, JSON results raw).
 func (e *e2e) waitTurn(ref string, n int) (status, result string) {
 	e.t.Helper()
-	deadline := time.Now().Add(60 * time.Second)
-	var last showJSON
-	for {
-		last = e.show(ref)
-		if st, res, ok := last.turn(n); ok {
-			switch st {
-			case "error":
-				for _, turn := range last.Turns {
-					if turn.N == n {
-						e.t.Logf("turn %d of %s ended with an error: %s\n%s", n, ref, turn.Error, e.runnerLog(last.Session.ID))
-					}
-				}
-				return st, res
-			case "ok", "stopped":
-				return st, res
-			}
-		}
-		if time.Now().After(deadline) {
-			e.t.Fatalf("turn %d of %s never finished; last show session=%#v turns=%#v\n%s", n, ref, last.Session, last.Turns, e.runnerLog(last.Session.ID))
-		}
-		time.Sleep(e2ePoll)
+	id, turn, ok := e.awaitTurn(ref, n, func(turn subagent.Turn) bool {
+		return turn.Status == subagent.TurnOK || turn.Status == subagent.TurnError || turn.Status == subagent.TurnStopped
+	})
+	if !ok {
+		e.t.Fatalf("turn %d of %s never finished; last turn=%+v\n%s", n, ref, turn, e.runnerLog(id))
 	}
+	if turn.Status == subagent.TurnError {
+		e.t.Logf("turn %d of %s ended with an error: %s\n%s", n, ref, turn.Error, e.runnerLog(id))
+	}
+	return turn.Status, turnText(turn)
+}
+
+// turnText is a turn's result as text: a string result as it is, any other
+// result as JSON.
+func turnText(turn subagent.Turn) string {
+	if turn.Result == nil {
+		return ""
+	}
+	raw, err := json.Marshal(turn.Result)
+	if err != nil {
+		return ""
+	}
+	var text string
+	if err := json.Unmarshal(raw, &text); err == nil {
+		return text
+	}
+	return string(raw)
 }
 
 // runnerLog is the tail of a session's daemon.log, where its turn runners
@@ -691,50 +734,6 @@ func (e *e2e) runnerLog(id string) string {
 		b = b[len(b)-4096:]
 	}
 	return "daemon.log tail:\n" + string(b)
-}
-
-// waitTurnRunning polls show until turn n's record says it is running. A
-// turn that ends first fails with its record, so a turn cut short is not
-// mistaken for one that never started.
-func (e *e2e) waitTurnRunning(ref string, n int) {
-	e.t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		last := e.show(ref)
-		for _, turn := range last.Turns {
-			if turn.N != n {
-				continue
-			}
-			switch turn.Status {
-			case "running":
-				return
-			case "ok", "error", "stopped":
-				e.t.Fatalf("turn %d of %s ended before the test saw it run: %+v\n%s", n, ref, turn, e.runnerLog(last.Session.ID))
-			}
-		}
-		if time.Now().After(deadline) {
-			e.t.Fatalf("turn %d of %s never ran; last show session=%#v turns=%#v\n%s", n, ref, last.Session, last.Turns, e.runnerLog(last.Session.ID))
-		}
-		time.Sleep(e2ePoll)
-	}
-}
-
-// waitRoomText polls `dyna room log <room> --json` until a post to the
-// owner contains substr. Top-level completions land here.
-func (e *e2e) waitRoomText(roomName, substr string) {
-	e.t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	var last string
-	for {
-		last = e.must("room", "log", roomName, "--json")
-		if strings.Contains(last, substr) {
-			return
-		}
-		if time.Now().After(deadline) {
-			e.t.Fatalf("room %s never showed %q; last:\n%s", roomName, substr, last)
-		}
-		time.Sleep(e2ePoll)
-	}
 }
 
 // waitTurnReleased waits for final runner writes after a terminal turn record.
