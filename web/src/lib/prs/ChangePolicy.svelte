@@ -39,7 +39,7 @@
   let busy = $state('')
   let error = $state('')
 
-  const FIELDS: { key: 'review' | 'land'; label: string; opts: { id: string; label: string }[] }[] = [
+  const FIELDS: { key: 'review'; label: string; opts: { id: string; label: string }[] }[] = [
     { key: 'review', label: 'Review', opts: POLICY_REVIEW },
   ]
   // The settings an override changes, in the order the form lists them.
@@ -47,7 +47,7 @@
   const show = (k: OverrideField, p: NormalizedPolicy) => (k === 'requiredChecks' ? checksText(p.requiredChecks) || 'none' : policyLabel[k](p[k]))
 
   function edit() {
-    form = { requiredChecks: checksText(policy.requiredChecks), review: policy.review, land: policy.land }
+    form = { requiredChecks: checksText(policy.requiredChecks), review: policy.review }
     reason = ov?.reason ?? ''
     error = ''
     open = true

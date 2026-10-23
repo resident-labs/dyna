@@ -19,12 +19,11 @@ func TestChangePolicyAPIRoundTripAndRoomBoundary(t *testing.T) {
 		t.Fatalf("defaults %+v %v", p, err)
 	}
 	p.RequiredChecks = []string{"unit"}
-	p.Land = "branch-only"
 	if err = e.svc.PRs.SetRoomChangePolicy(ownerCtx, alpha.ID, p); err != nil {
 		t.Fatal(err)
 	}
 	p2, err := e.svc.PRs.RoomChangePolicy(alpha.ID)
-	if err != nil || len(p2.RequiredChecks) != 1 || p2.Land != "branch-only" {
+	if err != nil || len(p2.RequiredChecks) != 1 {
 		t.Fatalf("round trip %+v %v", p2, err)
 	}
 	st, _ := e.svc.PRs.Watcher().Store.Read()

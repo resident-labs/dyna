@@ -8,15 +8,13 @@ import (
 )
 
 type Policy struct {
-	Reviewers      []string `json:"reviewers,omitempty"`
-	CITimeBudget   string   `json:"ciTimeBudget,omitempty"`
-	CIBudgetExempt []string `json:"ciBudgetExempt,omitempty"`
-	CIWarnAfter    string   `json:"ciWarnAfter,omitempty"`
-	CIFailAfter    string   `json:"ciFailAfter,omitempty"`
-	RequiredChecks []string `json:"requiredChecks"`
-	Review         string   `json:"review"`
-	// TODO: legacy/shim remove later — reads saved landing modes for old policy documents and clients; remove after those policies migrate.
-	Land             string            `json:"land"`
+	Reviewers        []string          `json:"reviewers,omitempty"`
+	CITimeBudget     string            `json:"ciTimeBudget,omitempty"`
+	CIBudgetExempt   []string          `json:"ciBudgetExempt,omitempty"`
+	CIWarnAfter      string            `json:"ciWarnAfter,omitempty"`
+	CIFailAfter      string            `json:"ciFailAfter,omitempty"`
+	RequiredChecks   []string          `json:"requiredChecks"`
+	Review           string            `json:"review"`
 	CINoJUnitWarning *bool             `json:"ciNoJUnitWarning,omitempty"`
 	CITestMax        string            `json:"ciTestMax,omitempty"`
 	CITestAllowNotes map[string]string `json:"ciTestAllowNotes,omitempty"`
@@ -28,16 +26,14 @@ type Policy struct {
 type Override struct {
 	RequiredChecks []string `json:"requiredChecks"`
 	Review         string   `json:"review,omitempty"`
-	// TODO: legacy/shim remove later — reads saved landing overrides for old policy documents and clients; remove after those policies migrate.
-	Land   string `json:"land,omitempty"`
-	Reason string `json:"reason"`
+	Reason         string   `json:"reason"`
 }
 
 func Default() Policy {
-	return Policy{CITimeBudget: "warn", CIWarnAfter: "2m", CIFailAfter: "3m", CITestMax: "10s", RequiredChecks: []string{}, Review: "on", Land: "github-pr"}
+	return Policy{CITimeBudget: "warn", CIWarnAfter: "2m", CIFailAfter: "3m", CITestMax: "10s", RequiredChecks: []string{}, Review: "on"}
 }
 func (o Override) Empty() bool {
-	return o.RequiredChecks == nil && o.Review == "" && o.Land == ""
+	return o.RequiredChecks == nil && o.Review == ""
 }
 func Apply(p Policy, o Override) Policy {
 	if o.RequiredChecks != nil {
@@ -45,9 +41,6 @@ func Apply(p Policy, o Override) Policy {
 	}
 	if o.Review != "" {
 		p.Review = o.Review
-	}
-	if o.Land != "" {
-		p.Land = o.Land
 	}
 	return p
 }
@@ -70,9 +63,6 @@ func Validate(p Policy) error {
 	}
 	if !oneOf(p.Review, "on", "off") {
 		return fmt.Errorf("review must be on or off")
-	}
-	if !oneOf(p.Land, "github-pr", "local-merge", "branch-only") {
-		return fmt.Errorf("land must be github-pr, local-merge, or branch-only")
 	}
 	if len(p.RequiredChecks) > 20 {
 		return fmt.Errorf("at most 20 required checks are allowed")
