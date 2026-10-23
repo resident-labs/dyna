@@ -1,4 +1,5 @@
-<script>
+<script lang="ts">
+  import type { Room } from '../api/room.ts'
   import { flip } from 'svelte/animate'
   import { fade } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
@@ -6,25 +7,31 @@
   import { initials, roomLabel } from '../ui/format.ts'
   // selected is the open room's ID, or '' for the machines list, the rail's
   // own tile.
-  let { rooms = [], selected = '', onselect, onmenu = null } = $props()
+  interface Props {
+    rooms?: Room[]
+    selected?: string
+    onselect: (id: string) => void
+    onmenu?: ((room: Room, x: number, y: number, anchor?: HTMLElement) => void) | null
+  }
+  let { rooms = [], selected = '', onselect, onmenu = null }: Props = $props()
   // Pinned rooms first, in pin order, then the rest as Go sorts them. A
   // pinned room stays on the rail even after it goes quiet.
   let pinned = $derived(rooms.filter((r) => r.pinned).sort((a, b) => (a.pinOrder || 0) - (b.pinOrder || 0)))
   let others = $derived(rooms.filter((r) => !r.pinned && !r.archived))
 
-  function menu(e, r) {
+  function menu(e: (MouseEvent | KeyboardEvent) & { currentTarget: HTMLButtonElement }, r: Room) {
     if (!onmenu) return
     e.preventDefault()
     const box = e.currentTarget.getBoundingClientRect()
-    onmenu(r, e.clientX || box.right, e.clientY || box.top, e.currentTarget)
+    onmenu(r, ('clientX' in e && e.clientX) || box.right, ('clientY' in e && e.clientY) || box.top, e.currentTarget)
   }
   // Shift+F10 or the context menu key open the menu from the keyboard.
-  function key(e, r) {
+  function key(e: KeyboardEvent & { currentTarget: HTMLButtonElement }, r: Room) {
     if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) menu(e, r)
   }
 </script>
 
-{#snippet tile(r)}
+{#snippet tile(r: Room)}
   <div class="slot" class:sel={selected === r.id} class:unread={r.unread > 0}>
     <span class="pill"></span>
     <button class="tile" onclick={() => onselect(r.id)} oncontextmenu={(e) => menu(e, r)} onkeydown={(e) => key(e, r)} aria-label={roomLabel(r)}>
