@@ -21,6 +21,14 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
+// shellStopView is what `dyna shell stop` prints. Exit is null until the shell
+// has ended, as it was when this reply was a map.
+type shellStopView struct {
+	ID     string       `json:"id"`
+	Status string       `json:"status"`
+	Exit   *shells.Exit `json:"exit"`
+}
+
 func NewCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "shell",
@@ -163,7 +171,7 @@ func stopCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return printJSON(c.OutOrStdout(), map[string]any{"id": in.ID, "status": in.Status, "exit": in.Exit})
+			return printJSON(c.OutOrStdout(), shellStopView{ID: in.ID, Status: in.Status, Exit: in.Exit})
 		},
 	}
 }

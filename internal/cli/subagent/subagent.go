@@ -23,6 +23,7 @@ import (
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/subagent"
+	"dyna-agent/internal/workeroutput"
 )
 
 // NewCommand builds `dyna session` over the default store.
@@ -137,11 +138,40 @@ func turnOutcome(info subagent.Info, t subagent.Turn) error {
 	}
 }
 
-func turnEnvelope(info subagent.Info, t subagent.Turn) map[string]any {
-	return map[string]any{
-		"session": info.ID, "name": info.Name, "turn": t.N, "status": t.Status,
-		"result": t.Result, "error": t.Error, "harnessSession": t.HarnessSession, "usage": t.Usage,
+// turnView is the JSON body a turn command prints with --json. Result keeps the
+// open type of subagent.Turn.Result, because the caller's response schema
+// decides its shape; every other field is fixed.
+type turnView struct {
+	Session        string             `json:"session"`
+	Name           string             `json:"name"`
+	Turn           int                `json:"turn"`
+	Status         string             `json:"status"`
+	Result         any                `json:"result"`
+	Error          string             `json:"error"`
+	HarnessSession string             `json:"harnessSession"`
+	Usage          workeroutput.Usage `json:"usage"`
+}
+
+func turnEnvelope(info subagent.Info, t subagent.Turn) turnView {
+	return turnView{
+		Session: info.ID, Name: info.Name, Turn: t.N, Status: t.Status,
+		Result: t.Result, Error: t.Error, HarnessSession: t.HarnessSession, Usage: t.Usage,
 	}
+}
+
+// startView is what `dyna session start --json` prints. Item is the only
+// optional field: a session with no assigned item omits it.
+type startView struct {
+	Session string `json:"session"`
+	Address string `json:"address"`
+	Name    string `json:"name"`
+	Room    string `json:"room"`
+	RoomID  string `json:"roomId"`
+	Goal    string `json:"goal"`
+	Profile string `json:"profile"`
+	Depth   int    `json:"depth"`
+	Turn    int    `json:"turn"`
+	Item    string `json:"item,omitempty"`
 }
 
 // ---- start ----
@@ -185,15 +215,11 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 				return err
 			}
 			if asJSON {
-				out := map[string]any{
-					"session": info.ID, "address": info.Address(), "name": info.Name,
-					"room": info.Room, "roomId": info.RoomID, "goal": info.Goal,
-					"profile": info.Profile, "depth": info.Depth, "turn": info.Turns,
-				}
-				if info.Item != "" {
-					out["item"] = info.Item
-				}
-				return jsonout.Write(c.OutOrStdout(), out)
+				return jsonout.Write(c.OutOrStdout(), startView{
+					Session: info.ID, Address: info.Address(), Name: info.Name, Room: info.Room,
+					RoomID: info.RoomID, Goal: info.Goal, Profile: info.Profile,
+					Depth: info.Depth, Turn: info.Turns, Item: info.Item,
+				})
 			}
 			fmt.Fprintln(c.OutOrStdout(), info.Address())
 			if info.Item != "" {
