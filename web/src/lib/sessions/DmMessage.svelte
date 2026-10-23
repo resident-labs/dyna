@@ -29,10 +29,11 @@
     onpost?: ((postId: string) => void) | null
     inThread?: boolean
     compact?: boolean
+    fullText?: boolean
     enter?: boolean
     selection?: PostSelection
   }
-  let { row, room, onforward = null, member, address, members = [], onunqueue = null, ondismiss = null, removing = '', onopenfile, onpost = null, inThread = false, compact = false, enter = false, selection = createSelection() }: Props = $props()
+  let { row, room, onforward = null, member, address, members = [], onunqueue = null, ondismiss = null, removing = '', onopenfile, onpost = null, inThread = false, compact = false, fullText = false, enter = false, selection = createSelection() }: Props = $props()
   // selection is the list's one selected post (postSelect.ts), shared by all
   // its messages; a message alone keeps its own.
   let post = $derived(row.post)
@@ -54,8 +55,8 @@
     })
   })
   let typed = $derived(postParts({ text: row.text, attachments: row.post?.attachments }))
-  // Long agent messages fold like the room feed does. A person's own words
-  // stay whole.
+  // The room feed folds long agent messages. A DM can request the full text.
+  // A person's own words stay whole in both views.
   let preview = $derived(postPreview(typed.text))
   let expanded = $state(false)
   let expandedFor = $state('')
@@ -77,9 +78,9 @@
     {#if row.folded}<details class="folded"><summary>Turn result (same as the post above)</summary><div class="prose">{@html markdown(typed.text)}</div></details>
     {:else if typed.text && row.human}<div class="prose">{@html markdown(typed.text)}</div>
     {:else if typed.text}
-      {@const shown = expanded ? typed.text : preview.text}
+      {@const shown = fullText || expanded ? typed.text : preview.text}
       <div id={"dm-" + row.key} class="prose">{@html markdown(shown)}</div>
-      {#if preview.truncated}<button class="more" aria-expanded={expanded} aria-controls={"dm-" + row.key} onclick={() => (expanded = !expanded)}>{expanded ? 'Show less' : 'Show more'}</button>{/if}
+      {#if !fullText && preview.truncated}<button class="more" aria-expanded={expanded} aria-controls={"dm-" + row.key} onclick={() => (expanded = !expanded)}>{expanded ? 'Show less' : 'Show more'}</button>{/if}
     {/if}
     {#if row.post?.forward}<ForwardQuote {room} post={row.post.forward} {onpost} {onopenfile} />{/if}
     <PostFiles roomId={room.id} post={{ id: row.post?.id, text: row.text, attachments: row.post?.attachments, references: row.post?.references }} onopen={onopenfile} />
