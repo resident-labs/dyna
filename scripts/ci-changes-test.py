@@ -46,16 +46,16 @@ class ChangesTest(unittest.TestCase):
         self.git("merge", "-q", "--no-ff", "-m", "merge", "pr")
         return base
 
-    def test_mobile_only_change_skips_go_when_main_moved(self):
-        base = self.pull_request("mobile/android/App.kt", main_file="internal/x/x.go")
+    def test_docs_only_change_skips_go_when_main_moved(self):
+        base = self.pull_request("docs/guide.md", main_file="internal/x/x.go")
         self.assertEqual(self.run_filter("pull_request", base), {"relay": "false", "go": "false", "computers": "false"})
 
     def test_go_change_runs_go(self):
-        base = self.pull_request("internal/x/y.go", main_file="mobile/z.kt")
+        base = self.pull_request("internal/x/y.go", main_file="docs/z.md")
         self.assertEqual(self.run_filter("pull_request", base)["go"], "true")
 
     def test_other_events_run_everything(self):
-        base = self.pull_request("mobile/android/App.kt")
+        base = self.pull_request("docs/guide.md")
         self.assertEqual(self.run_filter("push", base), {"relay": "true", "go": "true", "computers": "true"})
 
 
