@@ -164,22 +164,7 @@ func (s *Service) OpenCommand(argv, env []string, cwd string, cols, rows uint16)
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Dir = cwd
-	merged := map[string]string{}
-	for _, item := range append(os.Environ(), env...) {
-		key, value, ok := strings.Cut(item, "=")
-		if ok && !strings.HasPrefix(key, "DYNA_") {
-			merged[key] = value
-		}
-	}
-	merged["TERM"] = "xterm-256color"
-	keys := make([]string, 0, len(merged))
-	for key := range merged {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		cmd.Env = append(cmd.Env, key+"="+merged[key])
-	}
+	cmd.Env = childenv.Merge(os.Environ(), env, "xterm-256color")
 	return s.start(cmd, "", "", cwd, argv[0], cols, rows, false)
 }
 
