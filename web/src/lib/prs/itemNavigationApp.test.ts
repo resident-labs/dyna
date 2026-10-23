@@ -8,7 +8,7 @@ import { parsePRHash, parseIssueHash, parseFileHash, prHash, issueHash } from '.
 import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from '../ui/route.ts'
 import { call, moduleFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
-import { installGoals, installIssues, installMachines, installPins, installPRs, installQuestions, installSync } from '../../../test/appModules.ts'
+import { installGoals, installIssues, installMachines, installPins, installPRs, installQuestions, installSessionView, installSync } from '../../../test/appModules.ts'
 
 const A = 'room_20261017-100000-aaaaaaaa'
 const B = 'room_20261017-100000-bbbbbbbb'
@@ -53,6 +53,7 @@ function app(hash: string): Harness {
   installPins(c)
   installIssues(c)
   installSync(c)
+  installSessionView(c)
   installPRs(c)
   // The screen state lives in the router now, and the router asks the page for
   // the side of a screen change it does not own.
