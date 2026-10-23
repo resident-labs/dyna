@@ -2,12 +2,15 @@ package websvc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
 	"slices"
 	"testing"
+	"time"
 
+	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/machines"
 )
 
@@ -179,5 +182,51 @@ func TestProbeMachineStoresWhatItRead(t *testing.T) {
 	}
 	if list[len(list)-1].Status != MachineOffline {
 		t.Fatalf("list status after a failed probe = %s", list[len(list)-1].Status)
+	}
+}
+
+// The bound probe call must outlast the probe itself. With the 5 s default
+// deadline, a slow SSH connection was cancelled before the probe could store
+// that the machine is offline, so the page kept its old health.
+func TestProbeMachineCallHasRoomForSSH(t *testing.T) {
+	api := machineAPI(t)
+	remote, err := api.Store.Save(t.Context(), machines.Machine{Name: "hermes", Roles: []machines.Role{machines.RoleCI}, SSH: "pip@hermes", CISlots: 4, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left time.Duration
+	api.Prober = &machines.Prober{Store: api.Store, Command: func(ctx context.Context, _ string, _ io.Reader, out, _ io.Writer, _ string, _ ...string) error {
+		if end, ok := ctx.Deadline(); ok {
+			left = time.Until(end)
+		}
+		_, err := io.WriteString(out, probeOutput)
+		return err
+	}}
+	calls, err := Bind([]Binding{{Name: "ProbeMachine", Access: Write, Scope: ScopeAdmin, Method: api.ProbeMachine}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := json.Marshal(remote.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := calls["ProbeMachine"](t.Context(), []json.RawMessage{id}); err != nil {
+		t.Fatal(err)
+	}
+	// The probe takes its 20 s budget from the call's deadline, so a shorter
+	// call deadline clamps it. That is what made a slow SSH connection reach
+	// the request deadline and store nothing.
+	if left < 19*time.Second {
+		t.Fatalf("the probe ran with %v left, so the call deadline clamped its 20 s budget", left)
+	}
+	if d := callspec.Deadline("ProbeMachine"); d < 25*time.Second {
+		t.Fatalf("ProbeMachine has a %v deadline, which cannot cover a 20 s probe and its store", d)
+	}
+	page, err := api.Machine(t.Context(), remote.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Status != MachineOnline || page.SeenAt == nil {
+		t.Fatalf("page after the bound probe = %+v", page)
 	}
 }
