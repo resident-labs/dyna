@@ -64,7 +64,7 @@ type ReviewerStatus struct {
 	ProfileReason string               `json:"profileReason"`
 	Queue         []ReviewQueued       `json:"queue"`
 	LastError     string               `json:"lastError"`
-	Recent        []state.ReviewResult `json:"recent"`
+	Recent        []state.RecentReview `json:"recent"`
 }
 
 func (s *Service) profiles() ([]profile.Profile, error) {
@@ -381,8 +381,13 @@ func (f ReviewFacts) ReviewState(r Record) (string, *int, string) {
 		if approved(r.Verdict) {
 			return "approved", nil, ""
 		}
+		// TODO: legacy/shim remove later — a stored review from before the typed
+		// results may still say question; remove when that history ages out.
 		if r.Verdict == "changes" || r.Verdict == "question" {
 			return "changes", nil, ""
+		}
+		if r.StopReason != "" {
+			return "blocked", nil, "The reviewer stopped early: " + string(r.StopReason) + ". Push a new head or run dyna git pr reviewer --restart."
 		}
 	}
 	if !r.Watching || r.State != "open" || EffectivePolicy(f.State, r).Review == "off" {
@@ -419,7 +424,7 @@ func (s *Service) ReviewerStatus(roomID string) (ReviewerStatus, error) {
 			continue
 		}
 		for _, round := range record.ReviewRounds {
-			out.Recent = append(out.Recent, state.ReviewResult{ChangeID: changeID(*record), PR: record.Number, Verdict: round.Verdict, At: round.At})
+			out.Recent = append(out.Recent, state.RecentReview{ChangeID: changeID(*record), PR: record.Number, Verdict: round.Verdict, At: round.At})
 		}
 	}
 	sort.Slice(out.Recent, func(i, j int) bool { return out.Recent[i].At.After(out.Recent[j].At) })
@@ -428,7 +433,7 @@ func (s *Service) ReviewerStatus(roomID string) (ReviewerStatus, error) {
 	}
 
 	if out.Recent == nil {
-		out.Recent = []state.ReviewResult{}
+		out.Recent = []state.RecentReview{}
 	}
 	if cfg.Profile != "" {
 		out.ProfileSource = "pinned"
@@ -501,6 +506,22 @@ func (s *Service) RestartReviewer(ctx context.Context, roomID string) error {
 	}
 	defer unlockReviewer(lock)
 	st, err := s.Store.Read()
+	if err != nil {
+		return err
+	}
+	// Restart is the recovery action for a stopped review: it ends the stop on
+	// the current head so the pool reviews that head again.
+	if err := s.Store.update(func(st *State) error {
+		for _, r := range st.Records {
+			if r.RoomID == roomID && r.StopReason != "" {
+				r.StopReason, r.RoundHead, r.RoundStarted = "", "", time.Time{}
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	st, err = s.Store.Read()
 	if err != nil {
 		return err
 	}
@@ -681,6 +702,8 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 		r.Verdict = ""
 		r.Summary = ""
 		r.ReviewID = 0
+		r.StopReason = ""
+		r.FastLand = nil
 		r.ReviewPublishing = PublishingLocal
 		r.ReviewerName = reviewerChangeName(&r)
 		task, e := s.prepareReviewTask(ctx, r, "")
@@ -711,6 +734,7 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 			rememberReviewAssignment(live)
 			live.Round, live.RoundHead, live.RoundStarted = r.Round, r.Head, r.RoundStarted
 			live.Verdict, live.Summary, live.ReviewID = "", "", 0
+			live.StopReason, live.FastLand = "", nil
 			live.Reviewer, live.ReviewerName, live.ReviewerMode = id, r.ReviewerName, "session"
 			live.ReviewPublishing = r.ReviewPublishing
 			live.PauseReason = ""

@@ -8,6 +8,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/changepolicy"
+	"dyna-agent/internal/pr/state"
 )
 
 func TestRoomPolicyPreservesLegacySwitchAndEnforcesOwner(t *testing.T) {
@@ -295,7 +296,7 @@ func TestReopeningLocalChangeWithNewBaseRequiresReview(t *testing.T) {
 }
 
 func TestDisabledAssignmentCleanupVisitsRecords(t *testing.T) {
-	for _, verdict := range []string{"", "approve"} {
+	for _, verdict := range []state.ReviewVerdict{"", state.VerdictApprove} {
 		e := newEnv(t)
 		r := e.track()
 		if err := e.s.Store.update(func(st *State) error {
