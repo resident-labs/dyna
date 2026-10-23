@@ -2,8 +2,9 @@
   import Segmented from '../ui/Segmented.svelte'
   import { dialog } from '../ui/dialog.js'
   import { onMount } from 'svelte'
-  import { api, fileURL, authenticatedFetch } from '../../api.js'
+  import { api, copyText, fileURL, authenticatedFetch } from '../../api.js'
   import { human, extOf } from './attach.js'
+  import { code, setWrap } from './codeprefs.svelte.js'
   import { afterOpen } from './afterOpen.ts'
   import VisualView from './VisualView.svelte'
   import Document from './Document.svelte'
@@ -26,6 +27,30 @@
   // svelte-ignore state_referenced_locally
   let view = $state(att.view === 'source' ? 'source' : 'preview')
   let source = $derived(view === 'source')
+  let showTextTools = $derived(!loading && !error && (kind === 'text' || kind === 'json' || (source && hasSource)))
+  let copyStatus = $state('')
+  let copyTimer
+  let copyGeneration = 0
+  $effect(() => {
+    att
+    copyGeneration++
+    copyStatus = ''
+    return () => clearTimeout(copyTimer)
+  })
+  async function copyContents() {
+    const current = ++copyGeneration
+    clearTimeout(copyTimer)
+    copyStatus = ''
+    try {
+      await copyText(text)
+      if (current !== copyGeneration) return
+      copyStatus = 'Copied contents'
+    } catch {
+      if (current !== copyGeneration) return
+      copyStatus = 'Could not copy'
+    }
+    copyTimer = setTimeout(() => { copyStatus = '' }, 2000)
+  }
   let delimiter = $derived(/\.tsv$/i.test(att.name) || att.mime === 'text/tab-separated-values' ? '\t' : ',')
   let formatted = $derived.by(() => {
     if (kind !== 'json' || !text) return { text, error: '' }
@@ -107,9 +132,16 @@
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
       </button>
     </header>
-    {#if hasSource}
+    {#if hasSource || showTextTools}
       <div class="toolbar">
-        <Segmented small label="Document view" options={[['preview', 'Preview'], ['source', 'Source']]} value={source ? 'source' : 'preview'} onchange={(v) => (view = v)} />
+        {#if hasSource}<Segmented small label="Document view" options={[['preview', 'Preview'], ['source', 'Source']]} value={source ? 'source' : 'preview'} onchange={(v) => (view = v)} />{/if}
+        {#if showTextTools}
+          <div class="source-tools">
+            <button class:active={code.wrap} aria-pressed={code.wrap} onclick={() => setWrap(!code.wrap)}>Wrap</button>
+            <button onclick={copyContents} title="Copy the original file text">Copy contents</button>
+          </div>
+          <span class="copy-status" class:error={copyStatus === 'Could not copy'} role="status">{copyStatus}</span>
+        {/if}
       </div>
     {/if}
     {#if downloadError}<p class="err" role="alert">{downloadError}</p>{/if}
@@ -124,14 +156,14 @@
       {:else if error}
         <div class="status"><strong>Preview unavailable</strong><p class="err" role="alert">{error}</p><button onclick={() => download()}>Download file</button></div>
       {:else if source}
-        <pre class="source">{text}</pre>
+        <pre class="source" class:wrap={code.wrap}>{text}</pre>
       {:else if kind === 'markdown' || kind === 'word'}
         {#if html}<div class="document-scroll"><Document {html} /></div>{:else}<div class="status">This document has no text to preview.</div>{/if}
       {:else if kind === 'table'}
         <TablePreview {text} {delimiter} />
       {:else if kind === 'json' || kind === 'text'}
         {#if formatted.error}<p class="note">{formatted.error}</p>{/if}
-        <pre class="source">{formatted.text}</pre>
+        <pre class="source" class:wrap={code.wrap}>{formatted.text}</pre>
       {:else}
         <div class="status">
           <span class="large-mark" aria-hidden="true">{extOf(att.name)}</span>
@@ -163,7 +195,14 @@
   .download:active, .x:active { background: var(--select); }
   .download:disabled { opacity: 0.5; }
   .x { width: 30px; height: 30px; border-radius: 6px; display: grid; place-items: center; color: var(--muted); flex: none; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
-  .toolbar { display: flex; align-items: center; gap: 18px; padding: 10px 20px; border-bottom: 1px solid var(--line-soft); }
+  .toolbar { display: flex; align-items: center; gap: 8px 18px; flex-wrap: wrap; padding: 10px 20px; border-bottom: 1px solid var(--line-soft); }
+  .source-tools { display: flex; gap: 6px; }
+  .source-tools button { min-height: 36px; padding: 6px 10px; border-radius: 6px; background: var(--raise); color: var(--muted); font-size: 12px; }
+  .source-tools button.active { color: var(--iris); background: var(--iris-wash); }
+  .source-tools button:focus-visible { outline: 2px solid var(--iris-edge); outline-offset: 2px; }
+  .copy-status { font-size: 12px; color: var(--sage); }
+  .copy-status.error { color: var(--coral); }
+  .source.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
   .content { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; background: var(--main); }
   .document-scroll { flex: 1; min-height: 0; overflow: auto; }
   .media { display: block; overflow: auto; text-align: center; background: var(--rail); }
@@ -185,6 +224,7 @@
     .download span { display: none; }
     .download { padding: 7px; }
     .toolbar { padding: 8px 12px; }
+    .source-tools button { min-height: 44px; }
     .source { padding: 16px; font-size: 11.5px; }
   }
 </style>
