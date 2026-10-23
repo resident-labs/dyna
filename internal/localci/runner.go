@@ -50,7 +50,7 @@ type Request struct {
 	RepoDir     string
 	RoomID      string
 	SHA         string
-	Suites      []string
+	Suites      []Suite
 	Timeout     time.Duration
 	MaxTest     time.Duration
 	Allowed     map[string]bool
@@ -83,9 +83,9 @@ func (o Outcome) Conclusive() bool {
 func (o Outcome) Decided() bool { return o == OutcomePassed || o == OutcomeFailed }
 
 type SuiteResult struct {
-	Suite     string        `json:"suite"`
+	Suite     Suite         `json:"suite"`
 	Node      string        `json:"node,omitempty"`
-	CheckName string        `json:"checkName,omitempty"`
+	CheckName CheckName     `json:"checkName,omitempty"`
 	Duration  time.Duration `json:"duration"`
 	SlowTests []TestTiming  `json:"slowTests,omitempty"`
 	Status    Outcome       `json:"status"`
@@ -94,6 +94,16 @@ type SuiteResult struct {
 	Reports   []string      `json:"reports,omitempty"`
 	Error     string        `json:"error,omitempty"`
 }
+
+// Name is the name a check reports under: its own name, or its suite for a result
+// saved before checks had names.
+func (s SuiteResult) Name() CheckName {
+	if s.CheckName != "" {
+		return s.CheckName
+	}
+	return CheckName(s.Suite)
+}
+
 type TestTiming struct {
 	Name     string        `json:"name"`
 	Duration time.Duration `json:"duration"`
@@ -164,9 +174,6 @@ func (r Runner) commonDir(ctx context.Context, repo string) (string, error) {
 	return strings.TrimSpace(out.String()), nil
 }
 
-// DefaultSuites returns the complete suite set used for a trial run.
-func DefaultSuites() []string { return []string{"relay", "frontend", "go", "cross-build"} }
-
 // Run returns completed suite failures in Result. Setup failures also return an error.
 // Go requires frontend assets. Cross-build also waits when frontend is selected.
 // Live computer-smoke tests are intentionally excluded.
@@ -177,14 +184,16 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 	if r.Node != nil {
 		return r.runNodeWithDiskRetry(ctx, req)
 	}
-	suites := append([]string(nil), req.Suites...)
+	suites := append([]Suite(nil), req.Suites...)
 	if len(suites) == 0 {
 		suites = DefaultSuites()
 	}
-	seen := map[string]bool{}
+	seen := map[Suite]bool{}
 	for _, s := range suites {
+		// The SSH lane runs the four original suites; the node runner reads the
+		// wider suite description.
 		switch s {
-		case "relay", "frontend", "go", "cross-build":
+		case SuiteRelay, SuiteFrontend, SuiteGo, SuiteCrossBuild:
 		default:
 			return result, fmt.Errorf("unknown CI suite %q", s)
 		}
@@ -193,8 +202,8 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 		}
 		seen[s] = true
 	}
-	if seen["go"] && !seen["frontend"] {
-		suites = append(suites, "frontend")
+	if seen[SuiteGo] && !seen[SuiteFrontend] {
+		suites = append(suites, SuiteFrontend)
 	}
 	if req.Timeout <= 0 {
 		req.Timeout = 15 * time.Minute
@@ -267,7 +276,7 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 	}
 	controlBudget := time.Duration(len(suites))*req.Timeout + 2*time.Minute
 	for _, suite := range suites {
-		if suite == "go" || suite == "cross-build" {
+		if suite == SuiteGo || suite == SuiteCrossBuild {
 			controlBudget += admissionWait + req.Timeout
 		}
 	}
@@ -291,7 +300,7 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 		var output bytes.Buffer
 		var containers []string
 		for _, suite := range suites {
-			containers = append(containers, shellquote.Quote("dyna-ci-"+runID+"-"+suite))
+			containers = append(containers, shellquote.Quote("dyna-ci-"+runID+"-"+string(suite)))
 		}
 		script := "docker rm -f " + strings.Join(containers, " ") + " >/dev/null 2>&1 || true; git --git-dir=" + shellquote.Quote(cache) + " worktree remove --force " + shellquote.Quote(work) + " >/dev/null 2>&1 || true; " + removeRunDir(base, active)
 		if e := r.ssh(cleanupCtx, host, script, &output); e != nil {
@@ -306,19 +315,19 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 	result.Suites = make([]SuiteResult, len(suites))
 	frontendDone := make(chan struct{})
 	var frontendOK bool
-	if !seen["go"] && !seen["frontend"] {
+	if !seen[SuiteGo] && !seen[SuiteFrontend] {
 		close(frontendDone)
 	}
 	var wg sync.WaitGroup
 	for i, suite := range suites {
 		wg.Add(1)
-		go func(i int, suite string) {
+		go func(i int, suite Suite) {
 			defer wg.Done()
 			sr := SuiteResult{Suite: suite, Status: "passed"}
-			if suite == "frontend" {
+			if suite == SuiteFrontend {
 				defer close(frontendDone)
 			}
-			if suite == "go" || (suite == "cross-build" && (seen["go"] || seen["frontend"])) {
+			if suite == SuiteGo || (suite == SuiteCrossBuild && (seen[SuiteGo] || seen[SuiteFrontend])) {
 				select {
 				case <-frontendDone:
 				case <-sshCtx.Done():
@@ -338,13 +347,13 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 			// Admission is outside execution time. The remote supervisor starts
 			// its hard deadline only after the shared host gate grants a slot.
 			controlTimeout := req.Timeout + time.Minute
-			if suite == "go" || suite == "cross-build" {
+			if suite == SuiteGo || suite == SuiteCrossBuild {
 				controlTimeout += admissionWait + req.Timeout
 			}
 			suiteCtx, stop := context.WithTimeout(sshCtx, controlTimeout)
 			defer stop()
 			var output tailBuffer
-			container := "dyna-ci-" + runID + "-" + suite
+			container := "dyna-ci-" + runID + "-" + string(suite)
 			script := containerScript(base, cache, work, reports, container, suite, req.Timeout)
 			e := r.ssh(suiteCtx, host, script, &output)
 			sr.Duration = time.Since(started)
@@ -361,7 +370,7 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 			if sr.Status == "failed" && diskFull(sr.LogTail+"\n"+sr.Error) {
 				sr.Status, sr.Error = "error", "check ran out of disk space on the CI machine"
 			}
-			if suite == "frontend" {
+			if suite == SuiteFrontend {
 				frontendOK = e == nil
 			}
 			result.Suites[i] = sr
@@ -398,7 +407,7 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 			sr.Status = "error"
 			sr.Error = fmt.Sprintf("copy reports: %v: %s", archiveErr, stderr.String())
 		} else {
-			diagnostics := filepath.Join(reportRoot, "reports", sr.Suite, "ci-diagnostics.jsonl")
+			diagnostics := filepath.Join(reportRoot, "reports", string(sr.Suite), "ci-diagnostics.jsonl")
 			if info, e := os.Stat(diagnostics); e == nil && info.Mode().IsRegular() {
 				sr.Reports = append(sr.Reports, diagnostics)
 			}
@@ -416,29 +425,29 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 	return result, nil
 }
 
-func containerScript(base, cache, work, reports, name, suite string, timeout time.Duration) string {
+func containerScript(base, cache, work, reports, name string, suite Suite, timeout time.Duration) string {
 	image := "node:22"
-	inner := "bash scripts/ci.sh " + suite
-	if suite == "go" || suite == "cross-build" {
+	inner := "bash scripts/ci.sh " + string(suite)
+	if suite == SuiteGo || suite == SuiteCrossBuild {
 		image = "golang:1.26.3"
 	}
-	if suite == "go" {
+	if suite == SuiteGo {
 		inner = "apt-get update -qq && apt-get install -y -qq shellcheck >/dev/null && " +
 			"(getent group $CI_GID >/dev/null || groupadd --gid $CI_GID dyna-ci) && " +
 			"(getent passwd $CI_UID >/dev/null || useradd --no-log-init --uid $CI_UID --gid $CI_GID --no-create-home --home-dir /tmp dyna-ci) && " +
 			"exec setpriv --reuid=$CI_UID --regid=$CI_GID --clear-groups bash scripts/ci.sh go"
 	}
-	reportDir := path.Join(reports, suite)
+	reportDir := path.Join(reports, string(suite))
 	operation := "run"
-	if suite == "go" || suite == "cross-build" {
+	if suite == SuiteGo || suite == SuiteCrossBuild {
 		operation = "create"
 	}
 	// Docker init reaps orphaned test children before they exhaust the PID limit.
-	args := "docker " + operation + " --rm --init --cpus=2 --memory=4g --memory-swap=4g --pids-limit=512 --name " + shellquote.Quote(name) + " -v " + shellquote.Quote(work+":"+work) + " -v " + shellquote.Quote(cache+":"+cache) + " -v " + shellquote.Quote(reportDir+":/reports") + " -v " + shellquote.Quote(path.Join(base, "go-build")+":/cache/build") + " -v " + shellquote.Quote(path.Join(base, "go-mod")+":/cache/mod") + " -v " + shellquote.Quote(path.Join(base, "npm")+":/cache/npm") + " -w " + shellquote.Quote(work) + " -e HOME=/tmp -e RUNNER_TEMP=/reports -e GITHUB_STEP_SUMMARY=/reports/step-summary.md -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod -e npm_config_cache=/cache/npm -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=" + shellquote.Quote(work) + " -e CI_UID=$(id -u) -e CI_GID=$(id -g) -e JUNIT_REPORT_PATH=/reports/" + suite + "-test.xml"
-	if suite == "go" || suite == "cross-build" {
+	args := "docker " + operation + " --rm --init --cpus=2 --memory=4g --memory-swap=4g --pids-limit=512 --name " + shellquote.Quote(name) + " -v " + shellquote.Quote(work+":"+work) + " -v " + shellquote.Quote(cache+":"+cache) + " -v " + shellquote.Quote(reportDir+":/reports") + " -v " + shellquote.Quote(path.Join(base, "go-build")+":/cache/build") + " -v " + shellquote.Quote(path.Join(base, "go-mod")+":/cache/mod") + " -v " + shellquote.Quote(path.Join(base, "npm")+":/cache/npm") + " -w " + shellquote.Quote(work) + " -e HOME=/tmp -e RUNNER_TEMP=/reports -e GITHUB_STEP_SUMMARY=/reports/step-summary.md -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod -e npm_config_cache=/cache/npm -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=" + shellquote.Quote(work) + " -e CI_UID=$(id -u) -e CI_GID=$(id -g) -e JUNIT_REPORT_PATH=/reports/" + string(suite) + "-test.xml"
+	if suite == SuiteGo || suite == SuiteCrossBuild {
 		args += " -e GOMAXPROCS=2 -e GOMEMLIMIT=3GiB -e GOFLAGS=-p=2"
 	}
-	if suite != "go" {
+	if suite != SuiteGo {
 		args += " --user $(id -u):$(id -g)"
 	}
 	seconds := fmt.Sprintf("%d", int64((timeout+time.Second-1)/time.Second))
@@ -526,15 +535,15 @@ func readArchive(input io.Reader, dir string) error {
 }
 func checkReports(sr *SuiteResult, dir string, max time.Duration, allowed map[string]bool) error {
 	switch sr.Suite {
-	case "cross-build", "frontend-check", "go-static", "computer-smoke":
+	case SuiteCrossBuild, SuiteFrontendCheck, SuiteGoStatic, SuiteComputerSmoke:
 		return nil
 	}
-	files, err := filepath.Glob(filepath.Join(dir, "reports", sr.Suite, "*.xml"))
+	files, err := filepath.Glob(filepath.Join(dir, "reports", string(sr.Suite), "*.xml"))
 	if err != nil {
 		return err
 	}
 	if len(files) == 0 {
-		if sr.Status != "passed" {
+		if sr.Status != OutcomePassed {
 			return nil
 		}
 		return fmt.Errorf("%s produced no JUnit reports", sr.Suite)
@@ -553,8 +562,8 @@ func checkReports(sr *SuiteResult, dir string, max time.Duration, allowed map[st
 		sr.Reports = append(sr.Reports, file)
 	}
 	// Go's JUnit exporter records timing; its JSON stream retains failure details.
-	if sr.Suite == "go" || strings.HasPrefix(sr.Suite, "go-test-shard-") {
-		streams, e := filepath.Glob(filepath.Join(dir, "reports", sr.Suite, "*.json"))
+	if sr.Suite == SuiteGo || IsShard(sr.Suite) {
+		streams, e := filepath.Glob(filepath.Join(dir, "reports", string(sr.Suite), "*.json"))
 		if e != nil {
 			return e
 		}
@@ -581,7 +590,7 @@ func checkReports(sr *SuiteResult, dir string, max time.Duration, allowed map[st
 	}
 	var output bytes.Buffer
 	if !report.Write(&output, max, allowed) {
-		if sr.Status == "passed" {
+		if sr.Status == OutcomePassed {
 			sr.Status = "failed"
 		}
 		sr.Failures = append(sr.Failures, report.Failures...)

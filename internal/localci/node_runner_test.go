@@ -34,15 +34,15 @@ func fakeNodeReports(out io.Writer, checks []nodeCheck, failFrontend bool) error
 	tw := tar.NewWriter(out)
 	for _, check := range checks {
 		files := map[string]string{"execution.json": `{"durationNanos":1000000000}`}
-		if check.id == "frontend" || strings.HasPrefix(check.id, "go-test-shard-") {
+		if check.id == SuiteFrontend || IsShard(check.id) {
 			xml := `<testsuite><testcase name="fast" time="0.1"/></testsuite>`
-			if check.id == "frontend" && failFrontend {
+			if check.id == SuiteFrontend && failFrontend {
 				xml = `<testsuite><testcase name="broken"><failure message="bad"/></testcase></testsuite>`
 			}
 			files["test.xml"] = xml
 		}
 		for name, body := range files {
-			if err := tw.WriteHeader(&tar.Header{Name: check.id + "/" + name, Mode: 0600, Size: int64(len(body))}); err != nil {
+			if err := tw.WriteHeader(&tar.Header{Name: string(check.id) + "/" + name, Mode: 0600, Size: int64(len(body))}); err != nil {
 				return err
 			}
 			if _, err := io.WriteString(tw, body); err != nil {
@@ -55,7 +55,7 @@ func fakeNodeReports(out io.Writer, checks []nodeCheck, failFrontend bool) error
 
 func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T) {
 	const slots = 4
-	checks, _, err := nodeChecks([]string{"go", "cross-build"})
+	checks, _, err := nodeChecks([]Suite{SuiteGo, SuiteCrossBuild})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		result, err := runner.Run(t.Context(), Request{RepoDir: t.TempDir(), Suites: []string{"go", "cross-build"}, Parallelism: slots, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
+		result, err := runner.Run(t.Context(), Request{RepoDir: t.TempDir(), Suites: []Suite{"go", "cross-build"}, Parallelism: slots, RoomID: "room", DeferSave: true, OnStart: func(context.Context) error { started.Store(true); return nil }})
 		done <- outcome{result, err}
 	}()
 	select {
@@ -145,9 +145,9 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	if got.err != nil || got.result.Status != "failed" || peak.Load() != slots {
 		t.Fatalf("result=%+v err=%v peak=%d", got.result, got.err, peak.Load())
 	}
-	wanted := map[string]bool{"frontend": true, "frontend-check": true, "go-static": true, "go-test": true, "cross-build": true}
-	for i := 0; i < 8; i++ {
-		wanted[fmt.Sprintf("go-test-shard (%d)", i)] = true
+	wanted := map[CheckName]bool{"frontend": true, "frontend-check": true, "go-static": true, "go-test": true, "cross-build": true}
+	for i := 0; i < ShardCount; i++ {
+		wanted[shardName(i)] = true
 	}
 	for _, check := range got.result.Checks {
 		if !wanted[check.CheckName] || check.Node != "local" {
@@ -214,7 +214,7 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 				}
 				return nil
 			}
-			result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []string{"go-static"}, DeferSave: true})
+			result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []Suite{"go-static"}, DeferSave: true})
 			want := OutcomeError
 			if entered {
 				want = OutcomeFailed
@@ -233,7 +233,7 @@ func TestNodeCancellationDoesNotSaveResult(t *testing.T) {
 		fakeNodeGit(dir, out, name, args)
 		return nil
 	}
-	result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []string{"cross-build"}, OnStart: func(context.Context) error { cancel(); return ctx.Err() }})
+	result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []Suite{"cross-build"}, OnStart: func(context.Context) error { cancel(); return ctx.Err() }})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err=%v", err)
 	}
@@ -259,7 +259,7 @@ func TestNodeScriptWritesValidExecutionTiming(t *testing.T) {
 			t.Fatalf("%s syntax: %v: %s", check.name, err, output)
 		}
 	}
-	check := nodeCheck{id: "frontend", name: "frontend", inner: "true", image: "node:22"}
+	check := nodeCheck{id: SuiteFrontend, name: "frontend", inner: "true", image: "node:22"}
 	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "cache.git"), dir, "run", strings.Repeat("a", 40), check, time.Minute, 0)
 	cmd := exec.Command("bash", "-c", script)
 	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"))
@@ -289,7 +289,7 @@ func TestNodeScriptWritesValidExecutionTiming(t *testing.T) {
 // check is an infrastructure failure rather than a test failure, the run cleans
 // Dyna's own caches and retries once, and a second full disk stops there.
 func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
-	checks, _, err := nodeChecks([]string{"go-static"})
+	checks, _, err := nodeChecks([]Suite{SuiteGoStatic})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +324,7 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 				}
 				return nil
 			}
-			result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []string{"go-static"}, DeferSave: true})
+			result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []Suite{"go-static"}, DeferSave: true})
 			if err != nil {
 				t.Fatalf("run failed: %v", err)
 			}

@@ -64,9 +64,6 @@ type registeredCIObservation struct {
 	Checks     []CheckSummary
 }
 
-func registeredResultComplete(result localci.Result) bool {
-	return result.Node != "" && (result.Status == localci.OutcomeError || len(result.Checks) > 0 && result.Status.Decided())
-}
 func localInfrastructureError(result localci.Result) bool {
 	if result.Status == localci.OutcomeError {
 		return true
@@ -84,17 +81,14 @@ func registeredResultStatus(result localci.Result) (CIVerdict, []string, string)
 		if check.Status != localci.OutcomeFailed || !registeredTestFailure(result, check) {
 			continue
 		}
-		name := check.CheckName
-		if name == "" {
-			name = check.Suite
-		}
+		name := string(check.Name())
 		jobs = append(jobs, name)
 		logs = append(logs, name+": "+check.Error+"\n"+check.LogTail+"\n"+strings.Join(check.Failures, "\n"))
 	}
 	if len(jobs) > 0 {
 		return VerdictFailed, jobs, strings.Join(logs, "\n")
 	}
-	if !registeredResultComplete(result) || localInfrastructureError(result) {
+	if !result.Complete() || localInfrastructureError(result) {
 		return VerdictPending, nil, ""
 	}
 	for _, check := range result.Checks {
@@ -121,10 +115,7 @@ func checkSummaryState(outcome localci.Outcome) (state, status, conclusion strin
 func registeredCheckSummaries(result localci.Result) []CheckSummary {
 	var out []CheckSummary
 	for _, check := range result.Checks {
-		name := check.CheckName
-		if name == "" {
-			name = check.Suite
-		}
+		name := string(check.Name())
 		state, status, conclusion := checkSummaryState(check.Status)
 		excerpt := failureExcerpt(check.Error+"\n"+strings.Join(check.Failures, "\n")+"\n"+check.LogTail, true)
 		if state != "failure" {
@@ -139,11 +130,11 @@ func registeredTestFailure(result localci.Result, check localci.SuiteResult) boo
 	if check.Status != localci.OutcomeFailed {
 		return false
 	}
-	if check.CheckName != "go-test" || !localInfrastructureError(result) {
+	if check.CheckName != localci.GroupGoTest.Name() || !localInfrastructureError(result) {
 		return true
 	}
 	for _, other := range result.Checks {
-		if other.CheckName != "go-test" && other.Status == localci.OutcomeFailed {
+		if other.CheckName != localci.GroupGoTest.Name() && other.Status == localci.OutcomeFailed {
 			return true
 		}
 	}
@@ -185,13 +176,13 @@ func applyLocalBudgets(result *localci.Result, policy ChangePolicy) string {
 	}
 	goFailed := false
 	for _, check := range result.Checks {
-		if check.Status == localci.OutcomeFailed && (check.CheckName == "frontend" || check.CheckName == "frontend-check" || check.CheckName == "go-static" || strings.HasPrefix(check.CheckName, "go-test-shard (")) {
+		if check.Status == localci.OutcomeFailed && localci.GroupOf(check.CheckName) == localci.GroupGoTest {
 			goFailed = true
 		}
 	}
 	if goFailed {
 		for i := range result.Checks {
-			if result.Checks[i].CheckName == "go-test" && result.Checks[i].Status == localci.OutcomePassed {
+			if result.Checks[i].CheckName == localci.GroupGoTest.Name() && result.Checks[i].Status == localci.OutcomePassed {
 				result.Checks[i].Status = localci.OutcomeFailed
 				result.Checks[i].Error = "a required local CI check failed"
 			}
@@ -393,41 +384,6 @@ func chooseRegisteredCI(head string, hostedState CIVerdict, hostedKey string, ho
 	return o
 }
 
-func requiredRegisteredChecks(suites []string) []string {
-	var checks []string
-	for _, suite := range suites {
-		if suite != "go" {
-			checks = append(checks, suite)
-			continue
-		}
-		checks = append(checks, "frontend", "frontend-check", "go-static", "go-test")
-		for n := 0; n < 8; n++ {
-			checks = append(checks, fmt.Sprintf("go-test-shard (%d)", n))
-		}
-	}
-	if len(checks) == 0 {
-		checks = []string{"changes"}
-	}
-	return checks
-}
-func coversRegisteredChecks(result localci.Result, required []string) bool {
-	if !registeredResultComplete(result) {
-		return false
-	}
-	if result.Status != localci.OutcomePassed {
-		return true
-	}
-	seen := map[string]bool{}
-	for _, check := range result.Checks {
-		seen[check.CheckName] = check.Status == localci.OutcomePassed
-	}
-	for _, name := range required {
-		if !seen[name] {
-			return false
-		}
-	}
-	return true
-}
 func (s *Service) registeredJobResultComplete(ctx context.Context, job registeredCIJob, result localci.Result) bool {
 	if result.Status == localci.OutcomeError && result.Node != "" {
 		return true
@@ -435,9 +391,9 @@ func (s *Service) registeredJobResultComplete(ctx context.Context, job registere
 	if result.Status == localci.OutcomeFailed && result.Node != "" {
 		return true
 	}
-	var suites []string
+	var suites []localci.Suite
 	if job.trial {
-		suites = []string{"relay", "go", "cross-build", "computer-smoke"}
+		suites = localci.WorkflowSuites()
 	} else {
 		if !headSHAPattern.MatchString(job.record.Base) {
 			return false
@@ -446,9 +402,9 @@ func (s *Service) registeredJobResultComplete(ctx context.Context, job registere
 		if err != nil {
 			return false
 		}
-		suites = registeredSuites(strings.Split(files, "\n"))
+		suites = localci.SuitesForFiles(strings.Split(files, "\n"))
 	}
-	return coversRegisteredChecks(result, requiredRegisteredChecks(suites))
+	return localci.CoversSuites(result, suites)
 }
 
 // A finished failing check is conclusive even while another hosted job runs.
@@ -498,10 +454,7 @@ func missingRequiredCIChecks(required []string, result localci.Result, hosted Sn
 	passed := map[string]bool{}
 	if result.Node != "" {
 		for _, check := range result.Checks {
-			name := check.CheckName
-			if name == "" {
-				name = check.Suite
-			}
+			name := string(check.Name())
 			if check.Status == localci.OutcomePassed {
 				passed[name] = true
 			}

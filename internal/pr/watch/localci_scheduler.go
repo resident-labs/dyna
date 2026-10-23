@@ -54,7 +54,7 @@ type registeredCIRun struct {
 	title   string
 	url     string
 	started time.Time
-	suites  []string
+	suites  []localci.Suite
 }
 type registeredCIJob struct {
 	record       Record
@@ -329,7 +329,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 		}
 	} else if err == nil {
 		result.Status = "passed"
-		result.Checks = []localci.SuiteResult{{Suite: "changes", CheckName: "changes", Node: node.Name, Status: "passed"}}
+		result.Checks = []localci.SuiteResult{{Suite: localci.SuiteChanges, CheckName: localci.CheckName(localci.SuiteChanges), Node: node.Name, Status: localci.OutcomePassed}}
 	}
 	if ctx.Err() != nil {
 		if err := s.recoverInterruptedCI(ctx, job, repo, node, result); err != nil {
@@ -369,7 +369,7 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 	}
 }
 
-func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) ([]string, error) {
+func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) ([]localci.Suite, error) {
 	r := job.record
 	args := []string{"fetch", "--quiet", "--no-tags", "--", "https://" + r.Host + "/" + r.Repo + ".git", job.head}
 	if !job.trial && headSHAPattern.MatchString(r.Base) {
@@ -388,7 +388,7 @@ func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) 
 		return nil, fmt.Errorf("fetch local CI head: %w", err)
 	}
 	if job.trial {
-		return []string{"relay", "go", "cross-build", "computer-smoke"}, nil
+		return localci.WorkflowSuites(), nil
 	}
 	if !headSHAPattern.MatchString(r.Base) {
 		return nil, fmt.Errorf("local CI requires a verified base SHA")
@@ -397,29 +397,7 @@ func (s *Service) prepareRegisteredCI(ctx context.Context, job registeredCIJob) 
 	if err != nil {
 		return nil, err
 	}
-	return registeredSuites(strings.Split(files, "\n")), nil
-}
-
-func registeredSuites(files []string) []string {
-	relay, goSuite, computers := false, false, false
-	for _, f := range files {
-		workflow := strings.HasPrefix(f, ".github/")
-		script := f == "scripts/ci.sh"
-		relay = relay || workflow || script || strings.HasPrefix(f, "relay/")
-		goSuite = goSuite || workflow || script || strings.HasSuffix(f, ".go") || strings.HasPrefix(f, "internal/") || f == "go.mod" || f == "go.sum" || strings.HasPrefix(f, "desktop/") || strings.HasPrefix(f, "web/") || f == "install.sh"
-		computers = computers || workflow || strings.HasPrefix(f, "internal/computers/") || strings.HasPrefix(f, "internal/computerweb/")
-	}
-	var suites []string
-	if relay {
-		suites = append(suites, "relay")
-	}
-	if goSuite {
-		suites = append(suites, "go", "cross-build")
-	}
-	if computers {
-		suites = append(suites, "computer-smoke")
-	}
-	return suites
+	return localci.SuitesForFiles(strings.Split(files, "\n")), nil
 }
 
 // Cancellation of a still-current head restores the hosted work we removed.
