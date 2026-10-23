@@ -235,9 +235,9 @@ unread one, so opening a room still marks everything it shows as read.
 Go keeps caches so a store with thousands of old sessions, runs and shells
 stays cheap:
 
-- `subagent.Store.Info` keeps each session's parsed `session.json` and last
-  turn status, keyed by file inode, size and time. A closed or unusable
-  session is trusted for 30 seconds with no file call.
+- `subagent.Store.Info` keeps parsed session records and last-turn status,
+  keyed by their SQLite row revisions. It checks the record revision on
+  each read, including closed sessions.
 - `room.Store.LiveRoomIDs` does the same for sessions, runs and shells, and
   skips shells it has seen finish.
 - `roomsvc.Rooms` counts unread posts from a per-room cache and reads only
@@ -586,15 +586,15 @@ and `/issues` commands open the same browser.
 
 Agents can link a PR to their session with `dyna git pr track <number|url>`.
 The host watcher batches CI failures and useful comments to the author,
-starts the room's reviewer after green CI, and sends Dyna approvals to the
+starts the room's reviewer alongside CI, and sends Dyna approvals to the
 owner. "Ready to land" and CI escalations walk from the author up its parent
-chain to the first open session. Dyna does not auto-merge or stop active author
-work after CI failures. See [PR tracking and agent review](../pr-tracking.md) for the
+chain to the first open session. The engine merges approved PRs after their
+merge batch passes CI. CI failures do not stop active author work. See [PR tracking and agent review](../pr-tracking.md) for the
 commands, hidden comment markers, pause reasons, and watcher lifecycle.
 PR status, check details, room reviewer settings, untrack, and resume are
 available through the same App APIs on desktop and web. PR changes emit live
-`prs` events. Session close refuses an author or reviewer with an open tracked
-PR; the client can explicitly force close after confirmation.
+`prs` events. Session close transfers PR authorship to the nearest open
+ancestor and returns reviewer roles to the pool.
 Agents can teach repo-scoped bot noise templates with `dyna git pr noise`.
 Every wake reports the drop count and matching rule IDs. Human comments and
 real review content stay protected; `dyna git pr noise rm` removes a wrong rule.
