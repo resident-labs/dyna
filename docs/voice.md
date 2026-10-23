@@ -1,7 +1,7 @@
 # Voice (experimental)
 
 Voice lets the owner talk to a room's root by voice.
-The engine runs the call itself, in Go, against a realtime voice provider. Today that is OpenAI Realtime, through the Codex sign-in.
+The engine runs the call itself, in Go, against a realtime voice provider. By default, it uses OpenAI Realtime through the Codex sign-in.
 
 ## Set up
 
@@ -44,7 +44,7 @@ The call is a floating widget above every view, so it stays while you move betwe
   The page opens `/api/voice/realtime?v=2` on the app origin. The engine checks the device or Connect session and the Origin, then attaches the page to the call. Version 2 sends microphone audio as binary PCM16 mono at 24 kHz; the engine converts it to provider base64. Legacy JSON microphone audio remains supported. An older engine rejects version 2 instead of dropping its audio. Controls and output keep the JSON protocol (`internal/voice/realtime/testdata/page-protocol.json`), including base64 output audio, response IDs and playback receipts. A newer page takes over the call and the older one closes with code 4001.
   A call that no page has used for 60 seconds ends, as Hang up ends it, so a closed tab leaves nothing running. A page that reloads and reconnects in time resumes the same call.
   The desktop app allows microphone requests only from the app origin, and only for audio. WebKitGTK denies a request that the host does not answer.
-- **Each call is fresh.** Every call is a new conversation with the provider.
+- **Each new call is fresh.** A call resumed after an engine restart restores saved conversation context and pending root updates.
 
 ## Limits
 
