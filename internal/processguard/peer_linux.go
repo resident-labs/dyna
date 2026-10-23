@@ -63,9 +63,20 @@ func (p *Peer) Alive() bool {
 	}
 	// Signal 0 also succeeds for an exited, unreaped process. Poll the same
 	// pinned exit event that KillAndWait uses; reaping is not part of liveness.
-	fds := []unix.PollFd{{Fd: int32(p.fd), Events: unix.POLLIN}}
-	n, err := unix.Poll(fds, 0)
-	return err == nil && n == 0
+	return peerAlive(p.fd, unix.Poll)
+}
+
+func peerAlive(fd int, poll func([]unix.PollFd, int) (int, error)) bool {
+	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	for {
+		n, err := poll(fds, 0)
+		// Go runtime preemption can interrupt poll even with a zero timeout.
+		// An interruption says nothing about the pinned process exit event.
+		if errors.Is(err, unix.EINTR) {
+			continue
+		}
+		return err == nil && n == 0
+	}
 }
 
 func (p *Peer) Close() error {
