@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"sync"
@@ -40,6 +41,8 @@ func TestMain(m *testing.M) {
 		fakeFailChild()
 	case "noisy":
 		fakeNoisyChild()
+	case "fence":
+		fakeFenceChild()
 	}
 	os.Exit(m.Run())
 }
@@ -51,6 +54,18 @@ func fakeEchoChild() {
 	for sc.Scan() {
 		fmt.Fprintf(os.Stdout, "got:%s\n", sc.Text())
 	}
+	syscall.Exit(7)
+}
+
+// fakeFenceChild writes one frame, then opens and closes the FIFO named by
+// GO_SESSIONHOST_FENCE so the parent knows the frame is already written, and
+// waits for stdin to close.
+func fakeFenceChild() {
+	fmt.Fprintln(os.Stdout, "last")
+	if f, err := os.OpenFile(os.Getenv("GO_SESSIONHOST_FENCE"), os.O_WRONLY, 0); err == nil {
+		f.Close()
+	}
+	io.Copy(io.Discard, os.Stdin)
 	syscall.Exit(7)
 }
 
