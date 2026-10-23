@@ -9,7 +9,6 @@ import (
 	"context"
 	"hash/fnv"
 	"log"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -514,7 +513,7 @@ func (s *Service) SearchFeed(ref, query string, limit int) (FeedSearch, error) {
 	return FeedSearch{Posts: posts, More: more}, err
 }
 
-type feedPageReader func(string, string, int, func(room.Message) bool) (room.MessagePage, error)
+type feedPageReader func(string, string, int, room.PageFilter) (room.MessagePage, error)
 
 func (s *Service) feedPage(ref, cursor string, keep int, read feedPageReader) (Feed, error) {
 	keep = listpage.Limit(keep)
@@ -538,25 +537,25 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	}
 	views := newFeedViews(members)
 	counts := map[string]int{}
-	page, err := read(rec.ID, cursor, keep, func(m room.Message) bool {
-		home := homeOf(elsewhere, m.ID)
-		if !roomFeedPost(home) {
-			return false
-		}
-		unread := countsUnread(m, rec.Name) && !reads[m.ID]
-		if unread {
-			for _, view := range views.viewsFor(m, home) {
-				counts[view]++
+	// The page selects and counts only the room's own posts, before it pages:
+	// a run of DM posts never leaves a page empty or repeats a cursor.
+	page, err := read(rec.ID, cursor, keep, room.PageFilter{
+		Keep: func(m room.Message) bool {
+			return roomFeedPost(homeOf(elsewhere, m.ID))
+		},
+		Unread: func(m room.Message) bool {
+			unread := countsUnread(m, rec.Name) && !reads[m.ID]
+			if unread {
+				for _, view := range views.viewsFor(m, homeOf(elsewhere, m.ID)) {
+					counts[view]++
+				}
 			}
-		}
-		return unread
+			return unread
+		},
 	})
 	if err != nil {
 		return Feed{}, err
 	}
-	page.Messages = slices.DeleteFunc(page.Messages, func(m room.Message) bool {
-		return !roomFeedPost(homeOf(elsewhere, m.ID))
-	})
 	out, err := s.feedOf(rec, page.Messages, page.Offset, book, reads)
 	for i := range out.Posts {
 		out.Posts[i].setViews(views.viewsFor(out.Posts[i].Message, homeOf(elsewhere, out.Posts[i].ID)))

@@ -19,6 +19,18 @@ type MessagePage struct {
 	FirstUnread string
 }
 
+// PageFilter selects the posts a page lists and marks the unread ones, so one
+// read decides both before it pages: a reader that lists one conversation never
+// pages over posts it leaves out, and the page's counts and cursor name only the
+// posts it lists.
+type PageFilter struct {
+	// Keep lists only the posts it accepts, and nil lists every post.
+	Keep func(Message) bool
+	// Unread marks a post the owner has not read, and nil marks none. It is
+	// asked only about the posts Keep lists.
+	Unread func(Message) bool
+}
+
 type pageDirection uint8
 
 const (
@@ -27,25 +39,25 @@ const (
 	pageAround
 )
 
-// ReadPage selects an older page in append order. isUnread reads indexed values
+// ReadPage selects an older page in append order. filter reads indexed values
 // without changing them. Returned messages belong to the caller.
-func (s *Store) ReadPage(roomID, before string, limit int, isUnread func(Message) bool) (MessagePage, error) {
-	return s.readPage(roomID, before, limit, pageBefore, isUnread)
+func (s *Store) ReadPage(roomID, before string, limit int, filter PageFilter) (MessagePage, error) {
+	return s.readPage(roomID, before, limit, pageBefore, filter)
 }
 
 // ReadAfter selects posts after an exclusive cursor. An empty cursor starts
 // at the beginning of the retained log.
-func (s *Store) ReadAfter(roomID, after string, limit int, isUnread func(Message) bool) (MessagePage, error) {
-	return s.readPage(roomID, after, limit, pageAfter, isUnread)
+func (s *Store) ReadAfter(roomID, after string, limit int, filter PageFilter) (MessagePage, error) {
+	return s.readPage(roomID, after, limit, pageAfter, filter)
 }
 
 // ReadAround selects a bounded page containing the cursor post. Pages balance
 // around it, using the remaining side when the cursor is near an edge.
-func (s *Store) ReadAround(roomID, id string, limit int, isUnread func(Message) bool) (MessagePage, error) {
+func (s *Store) ReadAround(roomID, id string, limit int, filter PageFilter) (MessagePage, error) {
 	if id == "" {
 		return MessagePage{}, fmt.Errorf("feed cursor post is required")
 	}
-	return s.readPage(roomID, id, limit, pageAround, isUnread)
+	return s.readPage(roomID, id, limit, pageAround, filter)
 }
 
 // Search limits keep one query's work small.
@@ -103,7 +115,7 @@ func holdsWords(m Message, words []string) bool {
 	return true
 }
 
-func (s *Store) readPage(roomID, cursor string, limit int, direction pageDirection, isUnread func(Message) bool) (MessagePage, error) {
+func (s *Store) readPage(roomID, cursor string, limit int, direction pageDirection, filter PageFilter) (MessagePage, error) {
 	limit = listpage.Limit(limit)
 	out := MessagePage{}
 	var cursorErr error
@@ -118,13 +130,18 @@ func (s *Store) readPage(roomID, cursor string, limit int, direction pageDirecti
 				return
 			}
 		}
+		// Keep only the posts this reader lists, so paging, the page's counts and
+		// its cursor all measure that set and never the whole log.
 		lines := make([]int, 0, len(log.lines))
 		for i, line := range log.lines {
 			if line.msg.ID == "" {
 				continue
 			}
+			if filter.Keep != nil && !filter.Keep(line.msg) {
+				continue
+			}
 			lines = append(lines, i)
-			if isUnread != nil && isUnread(line.msg) {
+			if filter.Unread != nil && filter.Unread(line.msg) {
 				out.Unread++
 				if out.FirstUnread == "" {
 					out.FirstUnread = line.msg.ID
