@@ -35,7 +35,9 @@ Hook results cannot satisfy landing check requirements.
 A failed alert hook sends one owner notice per cause class until the hook succeeds.
 A later failure after a successful run sends a new notice.
 
-Dyna stores hooks in its data directory at `repos/<safe-id>/hooks.json`.
+Dyna stores hook configuration in the `hook_documents` table in `dyna.db`.
+At startup, a one-time migration imports retained `repos/<safe-id>/hooks.json` files.
+Later changes to retained files do not change hook configuration.
 The safe ID is a SHA-256 digest of the shared remote identity.
 Different remote transports for the same repository share hooks.
 A repository without a remote uses its root commit hash.
