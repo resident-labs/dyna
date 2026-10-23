@@ -117,7 +117,7 @@ func TestLegacyPrivateSnapshotsNeedFreshLogin(t *testing.T) {
 			if err != nil || signed.Identity != "fresh" {
 				t.Fatal(signed, err)
 			}
-			if err = privateAccountProven(n.Home, "fresh"); err != nil {
+			if err = requirePrivateSnapshot(signed); err != nil {
 				t.Fatal(err)
 			}
 			if err = a.Switch(context.Background(), n.ID, "/fake/native"); err != nil {

@@ -2,7 +2,6 @@ package runtime
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -21,44 +20,12 @@ func requirePrivateAccount(h string) bool { return h == "muse" }
 
 var errPrivateSignIn = errors.New("Sign in again in Dyna's private account scope before using this account.")
 
-type privateAccountOrigin struct {
-	Version  int    `json:"version"`
-	Identity string `json:"identity"`
-	Scope    string `json:"scope"`
-}
-
-func privateAccountProven(home, identity string) error {
-	path := filepath.Join(home, ".private-login.json")
-	if err := checkPrivateAccountFile(path, false); err != nil {
-		return err
-	}
-	// Reuse the checked, bounded snapshot reader for the same file safety rules.
-	c, err := readAccountLoginFile(path)
-	if err != nil {
-		return errPrivateSignIn
-	}
-	var origin privateAccountOrigin
-	if c.Credential.Schema != "dyna/private-home@1" || json.Unmarshal(c.Credential.Payload, &origin) != nil || origin.Version != 1 || origin.Identity != identity || c.Identity != identity || origin.Scope != "private-home-v1" || identity == "" {
-		return errPrivateSignIn
-	}
-	return nil
-}
-func writePrivateAccountOrigin(home, identity string) error {
-	path := filepath.Join(home, ".private-login.json")
-	if err := checkPrivateAccountFile(path, false); err != nil {
-		return err
-	}
-	raw, err := json.Marshal(privateAccountOrigin{1, identity, "private-home-v1"})
-	if err != nil {
-		return err
-	}
-	return writePrivateAccountJSON(path, native.Captured{Identity: identity, Credential: store.Credential{Schema: "dyna/private-home@1", Payload: raw}})
+func privateProofHolds(identity string, proof *store.PrivateProof) bool {
+	return identity != "" && proof != nil && proof.Version == 1 && proof.Identity == identity
 }
 func requirePrivateSnapshot(n NativeAccount) error {
-	if requirePrivateAccount(n.Harness) {
-		if err := privateAccountProven(n.Home, n.Identity); err != nil {
-			return errors.Join(errPrivateSignIn, err)
-		}
+	if requirePrivateAccount(n.Harness) && !privateProofHolds(n.Identity, n.proof) {
+		return errPrivateSignIn
 	}
 	return nil
 }
