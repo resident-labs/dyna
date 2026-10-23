@@ -200,13 +200,14 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 	fallbackBytes, fallbackCount := int64(maxTestArtifact), 3
 	junit := false
 	var problems []string
+	uninspected, oversized := 0, 0
 	for _, artifact := range artifacts {
 		if artifact.Expired || artifact.ID <= 0 {
 			continue
 		}
 		if artifact.Size < 0 || artifact.Size > maxTestArtifact {
 			if likelyTestArtifact(artifact.Name) {
-				problems = append(problems, "report unreadable: "+boundedTestName(artifact.Name)+" exceeds artifact size limit")
+				oversized++
 			}
 			continue
 		}
@@ -219,7 +220,7 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 		}
 		if !likelyTestArtifact(artifact.Name) {
 			if fallbackCount == 0 || artifact.Size > fallbackBytes {
-				problems = append(problems, "report unreadable: "+boundedTestName(artifact.Name)+" exceeds fallback inspection limit (3 artifacts, 20 MiB)")
+				uninspected++
 				continue
 			}
 			fallbackCount--
@@ -248,6 +249,14 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 		junit = junit || found
 		report.Tests = append(report.Tests, part.Tests...)
 		report.Failures = append(report.Failures, part.Failures...)
+	}
+	if uninspected > 0 {
+		// One line holds any number of skipped artifacts: a list per artifact
+		// would bury every other report problem in the notice.
+		problems = append(problems, fmt.Sprintf("Test reports: %d %s not inspected (over the 3 artifact, 20 MiB limit).", uninspected, reportNoun(uninspected)))
+	}
+	if oversized > 0 {
+		problems = append(problems, fmt.Sprintf("Test reports: %d %s over the 20 MiB size limit.", oversized, reportNoun(oversized)))
 	}
 	if ctx.Err() != nil {
 		return report, junit, problems, ctx.Err()
@@ -518,6 +527,14 @@ func boundedNames(names []string) []string {
 		return append(names[:10:10], fmt.Sprintf("and %d more", len(names)-10))
 	}
 	return names
+}
+
+// reportNoun keeps a collapsed report line readable at one artifact.
+func reportNoun(n int) string {
+	if n == 1 {
+		return "artifact"
+	}
+	return "artifacts"
 }
 
 func boundedTestName(name string) string {
