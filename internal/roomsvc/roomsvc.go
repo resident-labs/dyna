@@ -9,7 +9,6 @@ import (
 	"context"
 	"hash/fnv"
 	"log"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -300,9 +299,30 @@ func (s *Service) Rooms() ([]Room, error) {
 	return out, nil
 }
 
-// ownerPosts returns the IDs of the posts addressed to the room owner by
-// someone else, oldest first.
+// ownerPosts returns the IDs of the posts unread in the room rail: the room's
+// own posts addressed to the owner. A post written in a DM or in the owner's
+// voice call is not in the room chat, so it is not unread in the room either.
 func (s *Service) ownerPosts(rec room.Record) ([]string, error) {
+	ids, err := s.ownerSelection(rec)
+	if err != nil {
+		return nil, err
+	}
+	elsewhere, err := s.rooms().OtherHomes(rec.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if _, other := elsewhere[id]; !other {
+			out = append(out, id)
+		}
+	}
+	return out, nil
+}
+
+// ownerSelection returns the IDs of the posts addressed to the owner, kept in
+// one selection that grows with the room's log.
+func (s *Service) ownerSelection(rec room.Record) ([]string, error) {
 	s.ownerMu.Lock()
 	defer s.ownerMu.Unlock()
 	if s.ownerIDs == nil {
@@ -470,7 +490,16 @@ func (s *Service) SearchFeed(ref, query string, limit int) (FeedSearch, error) {
 	if err != nil {
 		return FeedSearch{}, err
 	}
-	msgs, more, err := s.rooms().SearchMessages(rec.ID, query, limit, nil)
+	// A post written in a DM or in the owner's voice call is not in the room
+	// chat, so a room search finds no result for it: its own conversation lists
+	// it.
+	elsewhere, err := s.rooms().OtherHomes(rec.ID)
+	if err != nil {
+		return FeedSearch{}, err
+	}
+	msgs, more, err := s.rooms().SearchMessages(rec.ID, query, limit, func(m room.Message) bool {
+		return roomFeedPost(homeOf(elsewhere, m.ID))
+	})
 	if err != nil {
 		return FeedSearch{}, err
 	}
@@ -484,7 +513,7 @@ func (s *Service) SearchFeed(ref, query string, limit int) (FeedSearch, error) {
 	return FeedSearch{Posts: posts, More: more}, err
 }
 
-type feedPageReader func(string, string, int, func(room.Message) bool) (room.MessagePage, error)
+type feedPageReader func(string, string, int, room.PageFilter) (room.MessagePage, error)
 
 func (s *Service) feedPage(ref, cursor string, keep int, read feedPageReader) (Feed, error) {
 	keep = listpage.Limit(keep)
@@ -502,27 +531,34 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	if err != nil {
 		return Feed{}, err
 	}
+	elsewhere, err := store.OtherHomes(rec.ID)
+	if err != nil {
+		return Feed{}, err
+	}
 	views := newFeedViews(members)
 	counts := map[string]int{}
-	page, err := read(rec.ID, cursor, keep, func(m room.Message) bool {
-		if !roomConversationPost(rec, m) {
-			return false
-		}
-		unread := countsUnread(m, rec.Name) && !reads[m.ID]
-		if unread {
-			for _, view := range views.viewsFor(m) {
-				counts[view]++
+	// The page selects and counts only the room's own posts, before it pages:
+	// a run of DM posts never leaves a page empty or repeats a cursor.
+	page, err := read(rec.ID, cursor, keep, room.PageFilter{
+		Keep: func(m room.Message) bool {
+			return roomFeedPost(homeOf(elsewhere, m.ID))
+		},
+		Unread: func(m room.Message) bool {
+			unread := countsUnread(m, rec.Name) && !reads[m.ID]
+			if unread {
+				for _, view := range views.viewsFor(m, homeOf(elsewhere, m.ID)) {
+					counts[view]++
+				}
 			}
-		}
-		return unread
+			return unread
+		},
 	})
 	if err != nil {
 		return Feed{}, err
 	}
-	page.Messages = slices.DeleteFunc(page.Messages, func(m room.Message) bool { return !roomConversationPost(rec, m) })
 	out, err := s.feedOf(rec, page.Messages, page.Offset, book, reads)
 	for i := range out.Posts {
-		out.Posts[i].setViews(views.viewsFor(out.Posts[i].Message))
+		out.Posts[i].setViews(views.viewsFor(out.Posts[i].Message, homeOf(elsewhere, out.Posts[i].ID)))
 	}
 	out.Earlier, out.Newer, out.Cursor = page.Earlier, page.Newer, page.Cursor
 	out.Unread, out.FirstUnread = page.Unread, page.FirstUnread
@@ -531,16 +567,21 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	return out, err
 }
 
-// roomConversationPost reports whether a post belongs in the room's own
-// conversation. A session-audience event belongs to the one session it names
-// and lives in that session's DM; the room lists it only when the owner is a
-// recipient. The decision reads the typed audience, never the addresses it was
-// posted to.
-//
-// TODO: the conversation series replaces this with the stored home
-// (Message.Conversation and post_homes).
-func roomConversationPost(rec room.Record, msg room.Message) bool {
-	return msg.EventAudience() == room.AudienceRoom || msg.Addressed(rec.Name)
+// homeOf is the stored home of one post: the room feed, or the conversation the
+// room's other homes name for it.
+func homeOf(elsewhere map[string]room.Conversation, postID string) room.Conversation {
+	if home, ok := elsewhere[postID]; ok {
+		return home
+	}
+	return room.ConversationRoom
+}
+
+// roomFeedPost reports whether the room feed carries a post whose home is home.
+// It lists the room's own posts and the owner's voice call, whose lines travel
+// with the feed so the call view can replay a call; no feed view lists the call.
+// A post written in a DM is not in the room feed: its own DM lists it.
+func roomFeedPost(home room.Conversation) bool {
+	return home == room.ConversationRoom || home == room.ConversationVoice
 }
 
 // feedOf decorates already selected room or session messages through one path.
@@ -671,10 +712,14 @@ func (s *Service) FeedSince(roomID string, offset int64) ([]Post, int64, error) 
 	all, rev := s.snapshot()
 	book := s.avatarBook(rec.ID, all, rev)
 	views := newFeedViews(s.membersOf(rec, all, rev, true))
+	elsewhere, err := store.OtherHomes(rec.ID)
+	if err != nil {
+		return nil, offset, err
+	}
 	var out []Post
 	for _, m := range msgs {
 		post := s.expand(decorate(m, rec.Name, reads, book), book)
-		post.setViews(views.viewsFor(m))
+		post.setViews(views.viewsFor(m, homeOf(elsewhere, m.ID)))
 		out = append(out, post)
 	}
 	return out, next, nil
