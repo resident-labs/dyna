@@ -69,13 +69,15 @@ func testCalls(t *testing.T, readOnly bool) map[string]websvc.Call {
 
 func TestCallTablePreservesBrowserAPI(t *testing.T) {
 	calls := testCalls(t, false)
-	source, err := os.ReadFile("../../web/src/api.js")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, match := range regexp.MustCompile("app[.]([A-Z][A-Za-z]+)[(]").FindAllStringSubmatch(string(source), -1) {
-		if calls[match[1]] == nil {
-			t.Errorf("browser API %s is not bound", match[1])
+	for _, path := range []string{"../../web/src/api.js", "../../web/src/lib/api/terminalTransport.ts"} {
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, match := range regexp.MustCompile("app[.]([A-Z][A-Za-z]+)[(]").FindAllStringSubmatch(string(source), -1) {
+			if calls[match[1]] == nil {
+				t.Errorf("browser API %s is not bound", match[1])
+			}
 		}
 	}
 	if _, err := calls["Terms"](t.Context(), nil); err != nil {
