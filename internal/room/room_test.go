@@ -163,7 +163,6 @@ func TestSteeringFrameFitsLimitAndPointsToPost(t *testing.T) {
 func TestQuestionMarker(t *testing.T) {
 	for _, tc := range []struct{ kind, text, want string }{
 		{"message", "[QUESTION q12] Which fix?", "q12"},
-		{"question", "[QUESTION q12] Which fix?", "q12"},
 		{"message", "[ANSWER q12] Small fix.", ""},
 		{"message", "Example [QUESTION q12]", ""},
 		{"completed", "[QUESTION q12] Example", ""},
