@@ -33,13 +33,17 @@ async function harness(thread = false) {
   })
   dom.window.ResizeObserver = globalThis.ResizeObserver
   const proto = dom.window.HTMLElement.prototype
-  for (const name of ['offsetHeight', 'clientHeight']) Object.defineProperty(proto, name, { configurable: true, get() { return (this.id === 'app' || this.classList.contains('thread-log') || this.classList.contains('log')) ? 500 : this.classList.contains('vlist') ? parseFloat(this.style.height) || 0 : 40 } })
+  // The mount root and the scroller are separate elements, as in the app: the
+  // list sits in a scroller that a pane holds.
+  const scrollRoot = (el: Element) => el.id === 'app' || el.classList.contains('feed')
+  for (const name of ['offsetHeight', 'clientHeight']) Object.defineProperty(proto, name, { configurable: true, get() { return (scrollRoot(this) || this.classList.contains('thread-log') || this.classList.contains('log')) ? 500 : this.classList.contains('vlist') ? parseFloat(this.style.height) || 0 : 40 } })
   for (const name of ['offsetWidth', 'clientWidth']) Object.defineProperty(proto, name, { configurable: true, get: () => 800 })
   Object.defineProperty(proto, 'offsetTop', { configurable: true, get() { return this.classList.contains('vlist') ? 36 : 0 } })
-  Object.defineProperty(proto, 'scrollHeight', { configurable: true, get() { if (this.classList.contains('log')) return 2000; return (this.id === 'app' || this.classList.contains('thread-log')) ? 36 + (parseFloat(this.querySelector('.vlist')?.style.height) || 0) : this.offsetHeight } })
+  Object.defineProperty(proto, 'scrollHeight', { configurable: true, get() { if (this.classList.contains('log')) return 2000; return (scrollRoot(this) || this.classList.contains('thread-log')) ? 36 + (parseFloat(this.querySelector('.vlist')?.style.height) || 0) : this.offsetHeight } })
   Reflect.set(proto, 'scrollTo', function(this: HTMLElement, options?: ScrollToOptions) { const top = options?.top ?? 0; this.scrollTop = top; queueMicrotask(() => this.dispatchEvent(new Event('scroll'))) })
   proto.getBoundingClientRect = function() {
-    const y = this.classList.contains('vrow') ? 36 + Number(this.style.transform.match(/translateY\(([-.\d]+)px\)/)?.[1] || 0) - (document.getElementById('app')?.scrollTop ?? 0) : 0
+    const scrolled = document.querySelector<HTMLElement>('.feed')?.scrollTop ?? document.getElementById('app')?.scrollTop ?? 0
+    const y = this.classList.contains('vrow') ? 36 + Number(this.style.transform.match(/translateY\(([-.\d]+)px\)/)?.[1] || 0) - scrolled : 0
     return { x: 0, y, top: y, left: 0, width: 800, height: this.offsetHeight, bottom: y + this.offsetHeight, right: 800 } as DOMRect
   }
   const dir = await mkdtemp(join(tmpdir(), 'dyna-history-test-'))
@@ -78,25 +82,30 @@ async function harness(thread = false) {
   const api = await import(pathToFileURL(file).href)
   const target = document.getElementById('app')
   assert.ok(target)
-  let state: { scroller: HTMLElement; items: { id: string }[]; earlier: boolean; room?: string; newer?: boolean; onnewer?: () => void; onpresent?: () => void } = { scroller: target, items: rows(10, 50), earlier: true }
+  // The list is mounted into a scroller that sits in the page, as it does in a
+  // room: the jump pill takes the row under the scroller.
+  const feed = document.createElement('div')
+  feed.className = 'feed'
+  target.append(feed)
+  let state: { scroller: HTMLElement; items: { id: string }[]; earlier: boolean; room?: string; newer?: boolean; onnewer?: () => void; onpresent?: () => void } = { scroller: feed, items: rows(10, 50), earlier: true }
   const model = api.writable(state)
   let component: object | undefined
   const update = (patch: Partial<typeof state>) => { state = { ...state, ...patch }; model.set(state); api.flushSync() }
-  const scroll = (top: number) => { const el = thread ? target.querySelector<HTMLElement>('.thread-log') : target; assert.ok(el); el.scrollTop = top; el.dispatchEvent(new Event('scroll')); api.flushSync() }
-  return { ...api, target, update, scroll, observed,
+  const scroll = (top: number) => { const el = thread ? target.querySelector<HTMLElement>('.thread-log') : feed; assert.ok(el); el.scrollTop = top; el.dispatchEvent(new Event('scroll')); api.flushSync() }
+  return { ...api, target, feed, update, scroll, observed,
     until: (check: () => boolean) => new Promise<void>(resolve => {
       if (check()) return resolve()
       const observer = new MutationObserver(() => { if (check()) { observer.disconnect(); resolve() } })
       observer.observe(target, { childList: true, subtree: true, characterData: true })
     }),
-    mount: (load: () => Promise<boolean>) => { component = api.mount(api.default, { target, props: { model, load } }); api.flushSync(); return component },
+    mount: (load: () => Promise<boolean>) => { component = api.mount(api.default, { target: feed, props: { model, load } }); api.flushSync(); return component },
     close: async () => { if (component) await api.unmount(component); dom.window.close(); for (const n of [...domNames, 'DOMParser', 'NodeFilter', 'HTMLMediaElement', 'matchMedia']) Reflect.deleteProperty(globalThis, n); await rm(dir, { recursive: true, force: true }) },
   }
 }
 
 for (const thread of [false]) test((thread ? 'a thread' : 'a channel') + ' opens at its latest post on first load and after a switch', { timeout: 9000 }, async () => {
   const h = await harness(thread)
-  const el = () => thread ? h.target.querySelector('.thread-log') : h.target
+  const el = () => thread ? h.target.querySelector('.thread-log') : h.feed
   const gap = () => el().scrollHeight - el().clientHeight - el().scrollTop
   try {
     h.mount(async () => false)
@@ -120,7 +129,7 @@ test('a jump right after a channel switch wins over opening at the latest post',
     feed.scrollToIndex(5)
     await h.tick()
     // Row 5 starts 5 rows below the 36px history marker.
-    assert.equal(h.target.scrollTop, 36 + 5 * 40)
+    assert.equal(h.feed.scrollTop, 36 + 5 * 40)
   } finally { await h.close() }
 })
 
@@ -132,7 +141,7 @@ test('a reader above the latest post keeps their place when new posts arrive', {
     h.scroll(600)
     h.update({ items: rows(10, 52) })
     await h.tick()
-    assert.equal(h.target.scrollTop, 600)
+    assert.equal(h.feed.scrollTop, 600)
   } finally { await h.close() }
 })
 
@@ -286,8 +295,8 @@ test('a wheel gesture at the loaded top can fetch the next page without a scroll
  const h=await harness(),page=deferred();let calls=0
  try {
   h.mount(()=>{calls++;return page.promise})
-  h.target.scrollTop=0
-  h.target.dispatchEvent(new h.target.ownerDocument.defaultView.WheelEvent('wheel',{deltaY:-100}))
+  h.feed.scrollTop=0
+  h.feed.dispatchEvent(new h.feed.ownerDocument.defaultView.WheelEvent('wheel',{deltaY:-100}))
   await h.tick()
   assert.equal(calls,1)
   h.update({earlier:false});page.resolve(true);await h.tick()
@@ -298,7 +307,7 @@ test('scroll events queued before unmount cannot load history afterward', {timeo
  const h=await harness();let calls=0
  h.mount(async()=>{calls++;return false})
  h.scroll(700);await h.tick()
- const target=h.target,event=new target.ownerDocument.defaultView.Event('scroll')
+ const target=h.feed,event=new target.ownerDocument.defaultView.Event('scroll')
  await h.close()
  target.scrollTop=0
  target.dispatchEvent(event)
@@ -380,12 +389,12 @@ test('a local jump appears half a viewport from the end and does not reload hist
     h.update({ onpresent: async () => { calls++; return true } })
     h.mount(async () => false)
     await h.tick()
-    h.scroll(h.target.scrollHeight - h.target.clientHeight - 250)
+    h.scroll(h.feed.scrollHeight - h.feed.clientHeight - 250)
     const jump = h.target.querySelector('[aria-label="Jump to present"]')
     assert.ok(jump)
     jump.click()
     await h.tick()
     assert.equal(calls, 0)
-    assert.ok(h.target.scrollHeight - h.target.scrollTop - h.target.clientHeight < 48)
+    assert.ok(h.feed.scrollHeight - h.feed.scrollTop - h.feed.clientHeight < 48)
   } finally { await h.close() }
 })
