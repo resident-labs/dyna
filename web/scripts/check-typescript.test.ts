@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { checkSource, checkSvelte, collectFiles, defaultRoots, main } from "./check-typescript.ts";
+import { checkJavaScriptOnly, checkSource, checkSvelte, collectFiles, defaultRoots, main } from "./check-typescript.ts";
 
 const rulesOf = (code: string): string[] => checkSource(code, "x.ts").map((v) => v.rule);
 
@@ -142,6 +142,35 @@ test("collectFiles walks directories and skips node_modules", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// Web source files must be TypeScript, with no exception today: convert a stray file.
+test("rejects JavaScript files and skips node_modules", () => {
+  const dir = mkdtempSync(join(tmpdir(), "tscheck-"));
+  const originalError = console.error;
+  const diagnostics: string[] = [];
+  try {
+    mkdirSync(join(dir, "node_modules"));
+    for (const name of ["ok.ts", "stray.js", "old.mjs", "node_modules/dep.js"]) writeFileSync(join(dir, name), "");
+    assert.deepEqual(
+      checkJavaScriptOnly([dir]).map((v) => [v.file, v.rule]),
+      [
+        [join(dir, "old.mjs"), "no-javascript-file"],
+        [join(dir, "stray.js"), "no-javascript-file"],
+      ],
+    );
+    console.error = (message: unknown) => { diagnostics.push(String(message)); };
+    assert.equal(main([dir, join(dir, "ok.ts")]), 1);
+    assert.match(diagnostics.join("\n"), /stray\.js:1:1 no-javascript-file/);
+  } finally {
+    console.error = originalError;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the web source directories hold no JavaScript files", () => {
+  const webRoot = fileURLToPath(new URL("..", import.meta.url));
+  assert.deepEqual(checkJavaScriptOnly(defaultRoots(webRoot)).map((v) => v.file), []);
 });
 
 test("main reports violations and returns a nonzero code, or stays silent when clean", () => {
