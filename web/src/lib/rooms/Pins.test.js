@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { bundle, importBundle, installDom, domNames } from '../prs/prDetailHarness.ts'
-const code = await bundle({ component: '../rooms/Pins', format: readFileSync(new URL('../ui/format.js', import.meta.url), 'utf8') })
+const code = await bundle({ component: '../rooms/Pins', format: readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8') })
 test('pin search matches text, speaker and attachment names without changing pin order', async () => {
   const dom = installDom()
   const extra = ['HTMLMediaElement', 'DOMParser', 'NodeFilter']
