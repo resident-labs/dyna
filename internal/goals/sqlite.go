@@ -121,7 +121,13 @@ func (s *Store) migrate(db *sql.DB) error {
 }
 
 // TODO: legacy/shim remove later — copies goals/state.json into dyna.db once and leaves the file in place so an older binary can roll back; remove after every host has run a SQLite build for a while.
-func (s *Store) importLegacy(conn *sql.Conn) error {
+func (s *Store) importLegacy(conn *sql.Conn) (err error) {
+	path := filepath.Join(s.Root, "state.json")
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("goal import %s: %w", path, err)
+		}
+	}()
 	data, err := os.ReadFile(filepath.Join(s.Root, "state.json"))
 	if os.IsNotExist(err) {
 		return nil
