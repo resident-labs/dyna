@@ -11,6 +11,7 @@ import { createRoomSessionControls } from './roomSessionControls.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { installSessionView } from '../../../test/appModules.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const functions = parse(source, { modern: true }).instance?.content.body ?? []
@@ -128,10 +129,13 @@ function app(view: string) {
   Reflect.set(app, 'questionView', { setQuestions: () => {} })
   Reflect.set(app, 'pinView', { setPins: () => {}, clear: () => {} })
   Reflect.set(app, 'issueView', { clear: () => {} })
+  // The transcript lives in lib/app/sessionView.svelte.ts now; its controller
+  // is the test's own, so the counts stay visible.
+  installSessionView(app, state.sessionData)
   // The screen state lives in the router now, so the sliced functions write through it.
   installRouterShim(app)
   vm.createContext(app)
-  for (const name of ['applyItemEvent', 'handle', 'loadSession', 'loadMembers', 'resync']) {
+  for (const name of ['applyItemEvent', 'handle', 'loadMembers', 'resync']) {
     const node = functions.find((n) => n.type === 'FunctionDeclaration' && n.id?.name === name)
     assert.ok(node, name)
     const { start, end } = sourceRange(node)

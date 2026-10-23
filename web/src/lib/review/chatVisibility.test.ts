@@ -6,7 +6,7 @@ import { build } from 'esbuild'
 import { parse } from 'svelte/compiler'
 import { compileSvelteModule } from '../../../test/svelte-esbuild.ts'
 import { importBundle } from '../prs/prDetailHarness.ts'
-import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { moduleFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { need } from '../../../test/need.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
@@ -15,7 +15,11 @@ const codeOf = (node: object | undefined) => {
   const { start, end } = sourceRange(need(node))
   return stripTypes(source.slice(start, end))
 }
-const visible = codeOf(nodes.find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'sessionVisible'))
+// sessionVisible lives in lib/app/sessionView.svelte.ts now; the compiled
+// snippet below gives it the page's own side.
+const sessionViewSource = readFileSync(new URL('../app/sessionView.svelte.ts', import.meta.url), 'utf8')
+const visible = [...moduleFunctions(sessionViewSource, ['sessionVisible']).values()][0]
+if (!visible) throw new Error('sessionView has no sessionVisible')
 const effect = codeOf(nodes.find((node) => node.type === 'ExpressionStatement' && node.expression.type === 'CallExpression' && node.expression.callee.type === 'Identifier' && node.expression.callee.name === '$effect' && codeOf(node).includes('const tab = sessionTab')))
 // Run App's actual visibility effect with Svelte's dependency tracking.
 const compiled = compileSvelteModule(`
@@ -23,7 +27,9 @@ const compiled = compileSvelteModule(`
   export function create() {
     let sessionTab = $state('chat'), pageVisible = $state(true), narrow = $state(true), reviewOpen = $state(true), drill = $state(null);
     const loads = [];
+    const sessionHost = { pageOpen: () => pageVisible && !(narrow && reviewOpen), tab: () => sessionTab, say() {} };
     ${visible}
+    const transcripts = { sessionVisible };
     function loadSession() { if (sessionVisible()) loads.push(drill.id) }
     const cleanup = $effect.root(() => { ${effect} });
     return { loads, cleanup, select() { drill = { id: 'idle-session' }; loadSession() }, close() { reviewOpen = false } };
