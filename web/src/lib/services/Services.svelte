@@ -12,6 +12,7 @@
   import { buildTabs, type TabId } from './tabs.ts'
   import { allParts, emptyData, loadServiceData } from './load.ts'
   import { applyControl } from './control.ts'
+  import { openHookLog } from '../settings/hookLog.ts'
 
   // A change read here is only what the page shows: its verdict, its number,
   // its overlaps and the watcher's last poll, so the page takes the list rows
@@ -30,7 +31,7 @@
   // row empty. The page reads again every minute, so a change made elsewhere
   // shows without a reload.
   let data = $state(emptyData)
-  const reload = () => loadServiceData(api, roomId, new Date(), untrack(() => data), (d) => (data = d), undefined, repo ? () => api.hookSummary(repo) : null, repo ? (name) => api.hookRuns(repo, name) : null)
+  const reload = () => loadServiceData(api, roomId, new Date(), untrack(() => data), (d) => (data = d), undefined, repo ? () => api.hookSummary(repo) : null, repo ? (name) => api.hookRuns(repo, name) : null, repo ? (name, id) => api.hookRunLog(repo, name, id) : null)
   $effect(() => {
     reload()
     const t = setInterval(reload, 60 * 1000)
@@ -52,7 +53,7 @@
 
   const inputs: Inputs = $derived({
     reviewer: data.reviewer, queue: data.queue, mergePaused: data.mergePaused, history: data.history, services: data.services,
-    notices: data.notices, hooks: data.hooks, runs: data.runs, settings: data.settings, budget: data.budget, accounts: data.accounts,
+    notices: data.notices, hooks: data.hooks, runs: data.runs, reasons: data.reasons, settings: data.settings, budget: data.budget, accounts: data.accounts,
     usage: data.usage, voice: data.voice, changes: changeRows, testHealth: data.testHealth, laneSync: data.laneSync, repo,
   })
   const rows = $derived(buildRows(inputs))
@@ -87,6 +88,12 @@
     const member = members.find((m) => m.id === session)
     if (member && onopen) onopen(member)
   }
+
+  // A failed hook run opens its log in Room settings, as the Hooks pane shows
+  // it, so the reader sees the whole tail the row only summarises.
+  const openRun = (run: { hook: string; id: string }): void => {
+    if (repo) openHookLog({ repo, hook: run.hook, runId: run.id })
+  }
 </script>
 
 <section class="services" aria-label="Services">
@@ -107,7 +114,7 @@
         {#if tab.id === 'ci'}
           {#if onopenhealth}<button class="health" onclick={() => onopenhealth?.()}>Open CI health</button>{/if}
         {:else if tab.id !== 'more'}
-          <EntryList entries={shown} empty="Nothing here yet." onOpen={openSession} />
+          <EntryList entries={shown} empty="Nothing here yet." onOpen={openSession} onRun={openRun} />
           {#if left > 0}
             <button class="more" onclick={() => (limit += PAGE)}>Show more · {left} left</button>
           {/if}
