@@ -539,3 +539,29 @@ func TestRegisteredCIPublishesSavedResultWhileNodesAreBusy(t *testing.T) {
 		})
 	}
 }
+
+func TestRegisteredCIPrefersFreeCapacity(t *testing.T) {
+	nodes := []localci.Node{
+		{Name: "local", Slots: 1, Enabled: true},
+		{Name: "hermeslab", Slots: 8, Enabled: true},
+		{Name: "disabled", Slots: 20},
+	}
+	for _, tc := range []struct {
+		active map[string]int
+		want   string
+	}{
+		{map[string]int{}, "hermeslab"},
+		{map[string]int{"local": 1}, "hermeslab"},
+		{map[string]int{"hermeslab": 1}, "local"},
+		{map[string]int{"hermeslab": 1, "local": 1}, ""},
+	} {
+		node := availableCINode(nodes, tc.active)
+		got := ""
+		if node != nil {
+			got = node.Name
+		}
+		if got != tc.want {
+			t.Fatalf("active=%v: chose %q, want %q", tc.active, got, tc.want)
+		}
+	}
+}

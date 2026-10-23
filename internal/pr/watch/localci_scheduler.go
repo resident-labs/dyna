@@ -203,13 +203,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		if runs.runs[key] != nil {
 			continue
 		}
-		var chosen *localci.Node
-		for i := range enabled {
-			node := &enabled[i]
-			if active[node.Name] < node.Slots && (chosen == nil || active[node.Name] < active[chosen.Name]) {
-				chosen = node
-			}
-		}
+		chosen := availableCINode(enabled, active)
 		if chosen == nil {
 			continue
 		}
@@ -227,6 +221,20 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		go s.executeRegisteredCI(runCtx, job, repo, *chosen, key, run)
 	}
 	return nil
+}
+
+// A run can fill every check slot. Reserve those slots until the run stops,
+// and prefer the idle node with the most capacity.
+func availableCINode(nodes []localci.Node, active map[string]int) *localci.Node {
+	var chosen *localci.Node
+	free := 0
+	for i := range nodes {
+		node := &nodes[i]
+		if node.Enabled && active[node.Name] == 0 && node.Slots > free {
+			chosen, free = node, node.Slots
+		}
+	}
+	return chosen
 }
 
 func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, repo string, node localci.Node, key string, run *registeredCIRun) {
