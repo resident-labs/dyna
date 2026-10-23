@@ -1,0 +1,120 @@
+package subagent
+
+import (
+	"bytes"
+	"database/sql"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"dyna-agent/internal/database"
+)
+
+func TestMigrateImportsRetainedTurnBeforeAnyRead(t *testing.T) {
+	for _, version := range []string{"", "1"} {
+		t.Run("prior_version_"+version, func(t *testing.T) {
+			s, id := turnStore(t)
+			db, err := s.turnsDB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if version != "" {
+				if _, err := db.Exec("INSERT INTO meta(key,value) VALUES('subagent.turns.import',?)", version); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// A stale malformed copy must never defeat its canonical row.
+			if _, err := db.Exec(`INSERT INTO session_turns(session,n,revision,turn) VALUES(?,2,1,'{"n":2,"prompt":"canonical"}')`, id); err != nil {
+				t.Fatal(err)
+			}
+			raw := []byte("{\n  \"n\": 1, \"prompt\": \"retained\", \"future\": {\"keep\": true}\n}\n")
+			path := turnFile(t, s, id, 1)
+			if err := os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(turnFile(t, s, id, 2), []byte("{"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			// No session record or turn count exists for this artifact folder.
+			if err := Migrate(filepath.Dir(s.Root)); err != nil {
+				t.Fatal(err)
+			}
+			var got []byte
+			if err := db.QueryRow("SELECT turn FROM session_turns WHERE session=? AND n=1", id).Scan(&got); err != nil || !bytes.Equal(got, raw) {
+				t.Fatalf("startup import = %s, %v; want original bytes before any turn read", got, err)
+			}
+			if preserved, err := os.ReadFile(path); err != nil || !bytes.Equal(preserved, raw) {
+				t.Fatalf("source changed: %s, %v", preserved, err)
+			}
+			backups, _ := filepath.Glob(filepath.Join(filepath.Dir(s.Root), "backups", database.PreMigrationFolder, "dyna-*.db"))
+			if len(backups) != 1 {
+				t.Fatalf("backups = %v; want one before import", backups)
+			}
+			backup, err := sql.Open("sqlite", backups[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer backup.Close()
+			var count int
+			if err := backup.QueryRow("SELECT count(*) FROM session_turns WHERE n=1").Scan(&count); err != nil || count != 0 {
+				t.Fatalf("backup already contains imported turn: %d, %v", count, err)
+			}
+			var prior string
+			err = backup.QueryRow("SELECT value FROM meta WHERE key='subagent.turns.import'").Scan(&prior)
+			if version == "" && err != sql.ErrNoRows || version != "" && (err != nil || prior != version) {
+				t.Fatalf("backup import version = %q, %v; want prior version %q", prior, err, version)
+			}
+			if err := os.WriteFile(path, []byte("{"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := database.Close(filepath.Dir(s.Root)); err != nil {
+				t.Fatal(err)
+			}
+			if err := Migrate(filepath.Dir(s.Root)); err != nil {
+				t.Fatalf("completed import replayed retained files: %v", err)
+			}
+		})
+	}
+	for _, badKind := range []string{"number", "json", "symlink"} {
+		t.Run("rollback_"+badKind, func(t *testing.T) {
+			s, id := turnStore(t)
+			if err := os.WriteFile(turnFile(t, s, id, 1), []byte(`{"n":1}`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			bad := turnFile(t, s, id, 2)
+			switch badKind {
+			case "symlink":
+				outside := filepath.Join(t.TempDir(), "outside.json")
+				if err := os.WriteFile(outside, []byte(`{"n":2}`), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, bad); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				raw := []byte(`{"n":3}`)
+				if badKind == "json" {
+					raw = []byte("{")
+				}
+				if err := os.WriteFile(bad, raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := Migrate(filepath.Dir(s.Root)); err == nil || !strings.Contains(err.Error(), bad) {
+				t.Fatalf("malformed retained turn error = %v; want its source path", err)
+			}
+			db, err := database.Open(filepath.Dir(s.Root))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var count int
+			if err := db.QueryRow("SELECT count(*) FROM session_turns").Scan(&count); err != nil || count != 0 {
+				t.Fatalf("partial import survived rollback: %d, %v", count, err)
+			}
+			if err := db.QueryRow("SELECT count(*) FROM meta WHERE key='subagent.turns.import'").Scan(&count); err != nil || count != 0 {
+				t.Fatalf("failed import stamped completion: %d, %v", count, err)
+			}
+		})
+	}
+}
