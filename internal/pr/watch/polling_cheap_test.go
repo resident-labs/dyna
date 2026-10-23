@@ -205,7 +205,7 @@ func TestTickNewCommentOnSettledPRTriggersFullPoll(t *testing.T) {
 	e.track()
 	e.tick()
 	before := len(e.sent)
-	e.addComment(77, "issue-comments", "Please check this result.", "owner")
+	e.addTrustedComment(77, "issue-comments", "Please check this result.", "owner")
 	e.f.Pull.Updated = e.clock.Add(time.Minute).Format(time.RFC3339)
 	e.tick()
 	if len(e.sent) != before+1 || !strings.Contains(e.sent[before].Text, "Please check this result.") {
@@ -239,7 +239,7 @@ func TestSafetyPollFindsChangesWithoutPullMetadataChange(t *testing.T) {
 			e := newEnv(t)
 			e.setCI("success", 1)
 			e.f.Pull.Updated = "2026-10-17T12:00:00Z"
-			e.addComment(77, "issue-comments", "Original comment.", "owner")
+			e.addTrustedComment(77, "issue-comments", "Original comment.", "owner")
 			e.write()
 			e.track()
 			e.tick()

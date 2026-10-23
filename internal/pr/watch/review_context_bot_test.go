@@ -14,7 +14,7 @@ func TestReviewCommentsUseCompleteSnapshot(t *testing.T) {
 	e := newEnv(t)
 	r := e.track()
 	inline := func(id int64, commit string) Comment {
-		return Comment{ID: id, Kind: "comments", User: User{Login: "new-reviewer[bot]", Type: "Bot"}, Commit: commit, Path: "parser.go", Line: 12, Body: "Check bounds", URL: "https://github.com/owner/repo/pull/17#discussion_r1"}
+		return Comment{Association: "COLLABORATOR", ID: id, Kind: "comments", User: User{Login: "new-reviewer[bot]", Type: "Bot"}, Commit: commit, Path: "parser.go", Line: 12, Body: "Check bounds", URL: "https://github.com/owner/repo/pull/17#discussion_r1"}
 	}
 	keep := inline(1, r.Head)
 	stale := inline(2, "old-head")
@@ -60,7 +60,7 @@ func TestReviewCommentsUseCompleteSnapshot(t *testing.T) {
 func TestReviewCommentsFetchIncompleteSnapshot(t *testing.T) {
 	e := newEnv(t)
 	r := e.track()
-	e.f.Comments = []Comment{{ID: 8, Kind: "comments", User: User{Login: "reviewer[bot]"}, Commit: r.Head, Path: "parser.go", Line: 4, Body: "Bug: check bounds"}, {ID: 9, Kind: "reviews", User: User{Login: "reviewer[bot]"}, Commit: r.Head, Body: "Summary"}}
+	e.f.Comments = []Comment{{Association: "COLLABORATOR", ID: 8, Kind: "comments", User: User{Login: "reviewer[bot]"}, Commit: r.Head, Path: "parser.go", Line: 4, Body: "Bug: check bounds"}, {Association: "COLLABORATOR", ID: 9, Kind: "reviews", User: User{Login: "reviewer[bot]"}, Commit: r.Head, Body: "Summary"}}
 	e.write()
 	st, _ := e.s.Store.Read()
 	firstPath := "github.com/repos/owner/repo/pulls/17/comments?per_page=100"
@@ -102,7 +102,7 @@ func TestLocalReviewTaskDoesNotRequireGitHub(t *testing.T) {
 func TestReviewTaskWritesKeptComments(t *testing.T) {
 	e := newEnv(t)
 	r := e.track()
-	comment := Comment{ID: 11, User: User{Login: "reviewer[bot]"}, Commit: r.Head, Path: "parser.go", Line: 5, Body: "Bug: validate input"}
+	comment := Comment{Association: "COLLABORATOR", ID: 11, User: User{Login: "reviewer[bot]"}, Commit: r.Head, Path: "parser.go", Line: 5, Body: "Bug: validate input"}
 	body, _ := json.Marshal([]Comment{comment})
 	err := e.s.Store.update(func(st *State) error {
 		if st.Responses == nil {

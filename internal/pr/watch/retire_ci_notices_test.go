@@ -91,7 +91,7 @@ func TestPollNoticeKindKeepsBatchedComments(t *testing.T) {
 	if ci.Kind != "ci" {
 		t.Fatalf("CI-only notice kind = %q, want ci: %q", ci.Kind, ci.Text)
 	}
-	e.addComment(201, "issue-comments", "Please keep the old flag.", "owner")
+	e.addTrustedComment(201, "issue-comments", "Please keep the old flag.", "owner")
 	// GitHub bumps the pull's updated_at for a new comment; the cheap
 	// unchanged poll relies on that to fetch it.
 	e.f.Pull.Updated = "2026-10-18T09:00:00Z"

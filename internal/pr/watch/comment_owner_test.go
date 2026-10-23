@@ -33,10 +33,10 @@ func TestCommentOwnerUsesStoredIDs(t *testing.T) {
 func TestStoredCommentSessionRoutesAuthorAndReviewerComments(t *testing.T) {
 	pr := PRContext{URL: "https://github.com/owner/repo/pull/17", OwnerLogin: "owner", AuthorSession: "ses_author"}
 	events := []Event{
-		{ID: "issue-comments:1", Kind: "issue-comments", Commenter: "owner", Text: "my own progress", Session: "ses_author"},
-		{ID: "issue-comments:2", Kind: "issue-comments", Commenter: "owner", Text: "owner feedback"},
-		{ID: "issue-comments:3", Kind: "issue-comments", Commenter: "owner", Text: "reviewer finding", Session: "ses_reviewer"},
-		{ID: "issue-comments:4", Kind: "issue-comments", Commenter: "owner", Text: "older reply " + Marker("ses_author")},
+		{ID: "issue-comments:1", Kind: "issue-comments", Association: "COLLABORATOR", Commenter: "owner", Text: "my own progress", Session: "ses_author"},
+		{ID: "issue-comments:2", Kind: "issue-comments", Association: "COLLABORATOR", Commenter: "owner", Text: "owner feedback"},
+		{ID: "issue-comments:3", Kind: "issue-comments", Association: "COLLABORATOR", Commenter: "owner", Text: "reviewer finding", Session: "ses_reviewer"},
+		{ID: "issue-comments:4", Kind: "issue-comments", Association: "COLLABORATOR", Commenter: "owner", Text: "older reply " + Marker("ses_author")},
 	}
 	decisions := (Rules{}).Triage(pr, events)
 	want := []Decision{
@@ -64,8 +64,8 @@ func TestTickDropsAuthorCommentsByIDWithoutMarkers(t *testing.T) {
 	if strings.Contains(string(body), "dyna:") {
 		t.Fatalf("posted comment carries a marker: %s", body)
 	}
-	e.addComment(123, "issue-comments", "my own progress note", "owner")
-	e.addComment(124, "issue-comments", "real owner feedback", "owner")
+	e.addTrustedComment(123, "issue-comments", "my own progress note", "owner")
+	e.addTrustedComment(124, "issue-comments", "real owner feedback", "owner")
 	e.tick()
 	if len(e.sent) != 1 || strings.Contains(e.sent[0].Text, "my own progress note") || !strings.Contains(e.sent[0].Text, "real owner feedback") {
 		t.Fatalf("author comment routing by stored ID: %+v", e.sent)
@@ -177,7 +177,7 @@ func TestBodyMarkerCannotSuppressForeignFeedback(t *testing.T) {
 	c := Comment{ID: 90, Kind: "issue-comments", Body: Marker("ses_author") + " Please check the result", User: User{Login: "other"}}
 	owned := map[string]string{}
 	pr := PRContext{AuthorSession: "ses_author", OwnerLogin: "owner"}
-	event := Event{Kind: c.Kind, Commenter: c.User.Login, Text: c.Body}
+	event := Event{Kind: c.Kind, Association: "COLLABORATOR", Commenter: c.User.Login, Text: c.Body}
 	if got := commentOwner(owned, c); got != "" {
 		t.Errorf("copied marker claimed ownership: %s", got)
 	}

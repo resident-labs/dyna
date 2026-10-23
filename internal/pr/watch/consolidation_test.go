@@ -40,7 +40,7 @@ func TestConsolidationMovesActiveRolesPreservesReviewHistoryAndAuthorNoise(t *te
 	if after.LookupDir != r.LookupDir || after.Dir != r.Dir || after.Head != r.Head {
 		t.Fatal("worktree/head continuity changed")
 	}
-	events := []Event{{Session: oldAuthor, Text: "previous author progress " + Marker(oldAuthor), Commenter: "owner"}, {Session: oldReviewer, Text: "independent reviewer finding " + Marker(oldReviewer), Commenter: "owner"}, {Session: target, Text: "new author progress " + Marker(target), Commenter: "owner"}, {Text: "Please fix this", Commenter: "owner"}}
+	events := []Event{{Session: oldAuthor, Text: "previous author progress " + Marker(oldAuthor), Association: "COLLABORATOR", Commenter: "owner"}, {Session: oldReviewer, Text: "independent reviewer finding " + Marker(oldReviewer), Association: "COLLABORATOR", Commenter: "owner"}, {Session: target, Text: "new author progress " + Marker(target), Association: "COLLABORATOR", Commenter: "owner"}, {Text: "Please fix this", Association: "COLLABORATOR", Commenter: "owner"}}
 	decisions := (Rules{}).Triage(PRContext{AuthorSession: after.Author, FormerAuthors: after.FormerAuthors, OwnerLogin: "owner"}, events)
 	for i, want := range []string{"drop", "keep", "drop", "keep"} {
 		if decisions[i].Action != want {

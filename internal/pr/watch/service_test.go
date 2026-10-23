@@ -428,6 +428,11 @@ func (e *testEnv) record() Record {
 	}
 	return r
 }
+func (e *testEnv) addTrustedComment(id int64, kind, body, login string) {
+	e.addComment(id, kind, body, login)
+	e.f.Comments[len(e.f.Comments)-1].Association = "COLLABORATOR"
+}
+
 func (e *testEnv) addComment(id int64, kind, body, login string) {
 	e.f.Comments = append(e.f.Comments, Comment{ID: id, Kind: kind, Body: body, User: User{Login: login, Type: "User"}, Commit: e.f.Pull.Head.SHA, State: "COMMENTED", URL: fmt.Sprintf("https://github.com/owner/repo/pull/17#comment-%d", id)})
 }
@@ -494,7 +499,7 @@ func TestCIStreakBatchesLogsAndPausesOnlyCIWakes(t *testing.T) {
 		t.Fatalf("streak: %+v sent=%+v", r, e.sent)
 	}
 	// Stored author comments are noise. Owner comments on the very same login wake it.
-	e.addComment(1, "issue-comments", Marker(e.author.ID)+" agent reply", "owner")
+	e.addTrustedComment(1, "issue-comments", Marker(e.author.ID)+" agent reply", "owner")
 	if err := e.s.Store.update(func(st *State) error {
 		if st.CommentSessions == nil {
 			st.CommentSessions = map[string]string{}
@@ -504,9 +509,9 @@ func TestCIStreakBatchesLogsAndPausesOnlyCIWakes(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	e.addComment(2, "issue-comments", "Rate limit exceeded", "coderabbitai[bot]")
-	e.addComment(3, "issue-comments", "useful bot diagnostic", "other[bot]")
-	e.addComment(4, "issue-comments", "Please inspect this too.", "owner")
+	e.addTrustedComment(2, "issue-comments", "Rate limit exceeded", "coderabbitai[bot]")
+	e.addTrustedComment(3, "issue-comments", "useful bot diagnostic", "other[bot]")
+	e.addTrustedComment(4, "issue-comments", "Please inspect this too.", "owner")
 	e.f.Pull.Updated = e.clock.Add(time.Minute).Format(time.RFC3339)
 	e.tick()
 	e.tick()
@@ -738,8 +743,8 @@ func TestVerdictsPushesAndMerge(t *testing.T) {
 	if len(e.launches) != 1 || !strings.Contains(e.launches[0], "--head "+r.Head) || !strings.Contains(e.launches[0], "Read GitHub without posting") {
 		t.Fatalf("review task: %+v", e.launches)
 	}
-	e.addComment(10, "reviews", Marker(r.Reviewer)+" Fix the parser.", "owner")
-	e.addComment(11, "comments", Marker(r.Reviewer)+" Bounds check at line 7.", "owner")
+	e.addTrustedComment(10, "reviews", Marker(r.Reviewer)+" Fix the parser.", "owner")
+	e.addTrustedComment(11, "comments", Marker(r.Reviewer)+" Bounds check at line 7.", "owner")
 	e.f.Comments[1].ReviewID = 10
 	if err := e.s.Store.update(func(st *State) error {
 		if st.CommentSessions == nil {
@@ -981,8 +986,8 @@ func TestKeptBotCommentsWakeInOneBatch(t *testing.T) {
 	e.f.Checks = nil
 	e.f.Runs = nil
 	e.track()
-	e.addComment(31, "issue-comments", "meaningful automated finding", "coderabbitai[bot]")
-	e.addComment(32, "issue-comments", "another finding", "other[bot]")
+	e.addTrustedComment(31, "issue-comments", "meaningful automated finding", "coderabbitai[bot]")
+	e.addTrustedComment(32, "issue-comments", "another finding", "other[bot]")
 	e.tick()
 	e.tick()
 	if len(e.sent) != 1 || !strings.Contains(e.sent[0].Text, "meaningful automated finding") || !strings.Contains(e.sent[0].Text, "another finding") {
