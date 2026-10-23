@@ -57,10 +57,11 @@ func (s *Service) mergeFailureReport(ctx context.Context, r Record, b state.Merg
 	}
 	out.WriteString("Failed jobs:\n")
 	if len(jobs) == 0 {
-		// A cancelled or unproven run is an infrastructure cause, not a test
-		// failure, and the report says so instead of stopping at "unknown".
-		if ci.Status == "failed" {
-			out.WriteString("- none: CI reported a failure with no failed check and no failed run, so the checks were cancelled or never proved this commit.\n")
+		// Only an observed cancellation is an infrastructure cause. A failure
+		// that named no job keeps an unknown cause, which is not evidence of
+		// anything else.
+		if ci.Cancelled {
+			out.WriteString("- none: CI for this commit was cancelled, so it never tested the change.\n")
 		} else {
 			out.WriteString("- unknown; job evidence unavailable.\n")
 		}

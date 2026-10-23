@@ -1,6 +1,8 @@
 package watch
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -24,26 +26,71 @@ func TestFailedBatchWakesRootOnce(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.s.stopMergeBatch(t.Context(), "repo", r, b, trialCI{}); err != nil {
-		t.Fatal(err)
+	// A delivery error must not lose the failure facts: the retry posts the same
+	// cause and failed checks, even with no CI read of its own.
+	deliver, unavailable := e.s.Deliver, true
+	e.s.Deliver = func(ctx context.Context, rec Record, n Notice) (string, error) {
+		if unavailable {
+			return "", errors.New("room store unavailable")
+		}
+		return deliver(ctx, rec, n)
+	}
+	ci := trialCI{Status: "failed", Reason: "checks failed: TestBroken", Failed: []string{"TestBroken"}}
+	if err := e.s.stopMergeBatch(t.Context(), "repo", r, b, ci); err == nil {
+		t.Fatal("a delivery error was ignored")
+	}
+	if len(e.sent) != 0 {
+		t.Fatalf("posted before delivery failed: %+v", e.sent)
 	}
 	saved, err := e.s.Store.Read()
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := saved.MergeTrials["repo"]
-	if !got.Notified || got.Phase != "awaiting-root" || saved.MergePauses[r.RoomID] != mergeBatchFailedReason {
-		t.Fatalf("trial = %+v, pauses = %v", got, saved.MergePauses)
+	if got.Notified || got.Phase != "awaiting-root" || got.FailReason != ci.Reason || len(got.FailChecks) != 1 || got.FailChecks[0] != "TestBroken" {
+		t.Fatalf("trial after a delivery error = %+v", got)
 	}
-	if len(e.sent) != 1 || !e.sent[0].NeedsRoot || !strings.Contains(e.sent[0].Text, "TestBroken failed") {
-		t.Fatalf("notices = %+v", e.sent)
-	}
+	unavailable = false
 	restarted := *e.s
 	if err := restarted.stopMergeBatch(t.Context(), "repo", r, *got, trialCI{}); err != nil {
 		t.Fatal(err)
 	}
+	posted, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.sent) != 1 || !posted.MergeTrials["repo"].Notified {
+		t.Fatalf("notices = %+v", e.sent)
+	}
+	if notice := e.sent[0]; notice.Merge == nil || notice.Merge.Reason != ci.Reason || notice.Merge.Checks == nil || len(notice.Merge.Checks.Failed) != 1 {
+		t.Fatalf("retry notice lost the saved facts: %+v", notice.Merge)
+	}
+	// A restart resumes from the saved checkpoint, which is already notified.
+	if err := restarted.stopMergeBatch(t.Context(), "repo", r, *posted.MergeTrials["repo"], trialCI{}); err != nil {
+		t.Fatal(err)
+	}
 	if len(e.sent) != 1 {
 		t.Fatal("restart repeated the notice")
+	}
+}
+
+// A failed push run can report failure without naming a check. Its logs are the
+// evidence, so the notice must not call that failure an unknown or a cancel.
+func TestFailedBatchKeepsTheCauseOfAFailedRun(t *testing.T) {
+	f := mergeTrialEnv(t, 1, 2)
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	f.ci, f.conclusion = "completed", "failure"
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ev, report := failedBatchNotice(t, f)
+	if strings.Contains(ev.Reason, "infrastructure") || strings.Contains(report, "cancelled") {
+		t.Fatalf("a failed run was called a cancellation: reason=%q\n%s", ev.Reason, report)
+	}
+	if ev.Reason != "a CI run failed without a named check; read its logs for the failing test" {
+		t.Fatalf("reason=%q", ev.Reason)
 	}
 }
 
@@ -82,7 +129,7 @@ func TestFailedBatchWithoutJobEvidenceReportsTheCause(t *testing.T) {
 		t.Fatal(err)
 	}
 	ev, report := failedBatchNotice(t, f)
-	if !strings.Contains(ev.Reason, "infrastructure") || !strings.Contains(report, "cancelled or never proved") {
+	if !strings.Contains(ev.Reason, "infrastructure") || !strings.Contains(report, "was cancelled") {
 		t.Fatalf("reason=%q report:\n%s", ev.Reason, report)
 	}
 }
