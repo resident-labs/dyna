@@ -11,24 +11,29 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
-func TestEndedPRNoticesFollowLandRecipients(t *testing.T) {
+func TestEndedPRNoticesWakeAuthorOrOpenAncestor(t *testing.T) {
 	for _, merged := range []bool{false, true} {
 		outcome := map[bool]string{false: "closed", true: "merged"}[merged]
-		for _, route := range []string{"child", "top-level", "closed-parent", "closed-chain"} {
+		for _, route := range []string{"child", "top-level", "closed-author", "closed-parent", "closed-chain"} {
 			t.Run(outcome+"/"+route, func(t *testing.T) {
 				e := newEscalationEnv(t)
 				e.testEnv.track()
-				recipient, _ := e.mgr.Store.Info(e.author.ParentSession)
+				recipient, _ := e.mgr.Store.Info(e.author.ID)
 				switch route {
 				case "top-level":
 					e.session(e.author.ID, "", true)
 					recipient, _ = e.mgr.Store.Info(e.author.ID)
+				case "closed-author":
+					e.session(e.author.ID, e.author.ParentSession, false)
+					recipient, _ = e.mgr.Store.Info(e.author.ParentSession)
 				case "closed-parent":
+					e.session(e.author.ID, e.author.ParentSession, false)
 					grandparent := "ses_20261017-000008-dddddddd"
 					e.session(grandparent, "", true)
 					e.session(e.author.ParentSession, grandparent, false)
 					recipient, _ = e.mgr.Store.Info(grandparent)
 				case "closed-chain":
+					e.session(e.author.ID, e.author.ParentSession, false)
 					e.session(e.author.ParentSession, "", false)
 					recipient = subagent.Info{}
 				}
