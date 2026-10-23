@@ -9,6 +9,7 @@ import { patchListRows, hasItemChange } from '../ui/listChanges.ts'
 import { reconcileRows } from '../ui/reloadGate.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { installRouterShim } from '../../../test/appRouterShim.ts'
 import type { Member } from '../api/room.ts'
 import type { ListChange } from '../api/event.ts'
 
@@ -89,6 +90,8 @@ function app() {
     clearTimeout(id: number) { timers.delete(id) },
   }
   c.routedParents ??= ''; c.feed ??= null
+  // The screen state lives in the router now, so the sliced functions write through it.
+  installRouterShim(c)
   vm.createContext(c)
   for (const name of ['roomTimer', 'roomRefreshes']) {
     const n = nodes.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.type === 'Identifier' && d.id.name === name))

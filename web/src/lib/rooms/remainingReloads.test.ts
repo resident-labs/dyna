@@ -14,6 +14,7 @@ import { hasItemChange } from '../ui/listChanges.ts'
 import { createReloadGate, listVisible, reconcileRows } from '../ui/reloadGate.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 import { call, runFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { need } from '../../../test/need.ts'
 import { member } from '../../../test/session-fixtures.ts'
 import type { Member } from '../api/room.ts'
@@ -99,6 +100,8 @@ function appFunctions(c: AppState, names: string[]): void {
   c.changesVisuals = changesVisuals
   for (const [k, v] of Object.entries({ mergeVersion: 0, routedParents: "", feed: null, roomId: "" })) if (!(k in c)) c[k] = v
   c.refreshHeldComments ??= () => {}
+  // The screen state lives in the router now, so the sliced functions write through it.
+  installRouterShim(c)
   runFunctions(source, names, c)
 }
 
