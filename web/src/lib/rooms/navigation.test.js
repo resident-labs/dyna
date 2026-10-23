@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { setImmediate } from 'node:timers/promises'
 import { parse } from 'svelte/compiler'
-import { GENERAL, VOICE, isChannel, inChannel, homeChannel, channelModel } from './channels.js'
+import { GENERAL, VOICE, isChannel, inChannel, homeChannel, channelModel } from './channels.ts'
 import { appLoaderStubs } from './appStubs.js'
 import { reconcileRows } from '../ui/reloadGate.js'
 import { createRoomData } from './roomData.js'
@@ -620,7 +620,7 @@ test('an older page cannot trim the post a reader moved to while it was loading'
 
 test('opening a goal that no loaded page holds loads it, and a done goal opens under Done', async () => {
   const { c } = navigation()
-  const { goalFilter } = await import('./goals.js')
+  const { goalFilter } = await import('./goals.ts')
   const old = { id: 'g9', state: 'done', text: 'Old goal' }
   const calls = []
   c.goals = [{ id: 'g1', state: 'active' }]
