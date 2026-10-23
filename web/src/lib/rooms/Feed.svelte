@@ -34,6 +34,7 @@
   import type { Attachment, Post, Question, Room } from '../api/room.ts'
   import type { Goal } from '../api/goal.ts'
   import type { CallRequest } from '../voice/callRequests.ts'
+  import { postPreview } from '../ui/preview.ts'
 
   interface Props {
     room: Room
@@ -86,22 +87,6 @@
 
   let showRepo = $derived(feedPRRepos(posts).size > 1)
   let expanded = $state(new Set<string>())
-  let foldable = $state(new Set<string>())
-
-  function measureMessage(node: HTMLElement, id: string) {
-    const measure = () => {
-      const line = parseFloat(getComputedStyle(node).lineHeight)
-      const long = node.scrollHeight > line * 3 + 2
-      if (foldable.has(id) === long) return
-      const next = new Set(foldable)
-      if (long) next.add(id)
-      else next.delete(id)
-      foldable = next
-    }
-    const observer = new ResizeObserver(measure)
-    observer.observe(node)
-    return { destroy: () => observer.disconnect() }
-  }
 
   function toggleMessage(id: string) {
     const next = new Set(expanded)
@@ -323,8 +308,9 @@
               {#if p.human}
                 <div class="prose">{@html markdown(parts.text)}</div>
               {:else}
-                <div id={"message-" + p.id} class="prose agent-message" class:folded={!expanded.has(p.id)} use:measureMessage={p.id}>{@html markdown(parts.text)}</div>
-                {#if foldable.has(p.id)}<button class="message-toggle" aria-expanded={expanded.has(p.id)} aria-controls={"message-" + p.id} onclick={() => toggleMessage(p.id)}>{expanded.has(p.id) ? 'Show less' : 'Show more'}</button>{/if}
+                {@const preview = postPreview(parts.text)}
+                <div id={"message-" + p.id} class="prose">{@html markdown(expanded.has(p.id) ? parts.text : preview.text)}</div>
+                {#if preview.truncated}<button class="message-toggle" aria-expanded={expanded.has(p.id)} aria-controls={"message-" + p.id} onclick={() => toggleMessage(p.id)}>{expanded.has(p.id) ? 'Show less' : 'Show more'}</button>{/if}
               {/if}
             {/if}
           </div>
@@ -448,7 +434,6 @@
   }
   .comma { margin-left: -4px; }
   .prose { margin-top: 1px; }
-  .agent-message.folded { max-height: 4.35em; overflow: hidden; }
   .message-toggle { color: var(--iris); font-size: var(--t-sm); margin-top: var(--s1); }
   .message-toggle:hover { text-decoration: underline; }
   .prose.small { font-size: var(--t-body); color: var(--muted); }
