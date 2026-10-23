@@ -1,16 +1,27 @@
-<script>
+<script lang="ts">
   // JsonView typesets a JSON value for people: objects as labelled fields,
   // lists of records as rows that open in place, links as links, long text
   // as paragraphs. A closed record renders nothing inside it, so large
-  // results stay fast. See readable.js.
+  // results stay fast. See readable.ts.
   import JsonView from './JsonView.svelte'
   import Segmented from './Segmented.svelte'
   import { fieldLabel, kindOf, recordTitle, recordLine, linkOf, paragraphs } from './readable.ts'
-  let { value, depth = 0 } = $props()
+  import { isRecord } from '../api/guards.ts'
+
+  interface Props {
+    value: unknown
+    depth?: number
+  }
+  let { value, depth = 0 }: Props = $props()
   const LONG = 4000
-  let mode = $state('readable')
+  type Mode = 'readable' | 'json'
+  let mode = $state<Mode>('readable')
   let inspectable = $derived(depth === 0 && value !== null && typeof value === 'object')
-  let raw = $derived.by(() => {
+  interface Raw {
+    text?: string
+    error?: string
+  }
+  let raw = $derived.by((): Raw | null => {
     if (!inspectable || mode !== 'json') return null
     try {
       const text = JSON.stringify(value, null, 2)
@@ -20,21 +31,38 @@
     }
   })
   let kind = $derived(kindOf(value))
-  let opened = $state({})
+  let opened = $state<Record<number, boolean>>({})
   let more = $state(false)
-  const segments = (s) => s.split('`').map((text, i) => ({ text, code: i % 2 === 1 }))
+
+  // kindOf names how a value renders, but it cannot narrow the value itself,
+  // so each part the template shows is read once, with its own type.
+  let list = $derived(Array.isArray(value) ? value : [])
+  let entries = $derived(isRecord(value) ? Object.entries(value) : [])
+  let content = $derived(typeof value === 'string' ? value : '')
+  let link = $derived(linkOf(value))
+  // caption is the one field of an object that holds a collection, which reads
+  // best without a label column.
+  let caption = $derived.by((): { label: string; value: unknown } | null => {
+    const first = entries[0]
+    if (entries.length !== 1 || !first) return null
+    const field = first[1]
+    if (!['records', 'list', 'object'].includes(kindOf(field))) return null
+    return { label: fieldLabel(first[0]) + (Array.isArray(field) ? ' · ' + field.length : ''), value: field }
+  })
+
+  const segments = (s: string) => s.split('`').map((text, i) => ({ text, code: i % 2 === 1 }))
 </script>
 
-{#snippet text(s)}
+{#snippet text(s: string)}
   {@const shown = more || s.length <= LONG ? s : s.slice(0, LONG)}
   {@const parts = paragraphs(shown)}
-  {#if parts.length === 1}<span class="inline">{#each segments(parts[0]) as seg}{#if seg.code}<code>{seg.text}</code>{:else}{seg.text}{/if}{/each}</span>
+  {#if parts.length === 1}<span class="inline">{#each segments(parts[0] ?? '') as seg}{#if seg.code}<code>{seg.text}</code>{:else}{seg.text}{/if}{/each}</span>
   {:else}{#each parts as p}<p class="para">{#each segments(p) as seg}{#if seg.code}<code>{seg.text}</code>{:else}{seg.text}{/if}{/each}</p>{/each}{/if}
   {#if s.length > LONG && !more}<button type="button" class="more" onclick={() => (more = true)}>Show all {s.length.toLocaleString()} characters</button>{/if}
 {/snippet}
 
 {#if inspectable}
-  <div class="view-mode"><Segmented options={[['readable', 'Readable'], ['json', 'JSON']]} value={mode} label="Result view" small onchange={(value) => mode = value} /></div>
+  <div class="view-mode"><Segmented options={[['readable', 'Readable'], ['json', 'JSON']]} value={mode} label="Result view" small onchange={(next) => mode = next} /></div>
   <div hidden={mode !== 'readable'}>{@render readable()}</div>
   {#if mode === 'json'}
     {#if raw?.error}<p class="raw-error" role="status">{raw.error}</p>{:else}<pre class="raw">{raw?.text}</pre>{/if}
@@ -51,29 +79,26 @@
 {:else if kind === 'scalar'}
   <span>{String(value)}</span>
 {:else if kind === 'text'}
-  {@render text(value)}
-{:else if kind === 'link'}
-  {@const l = linkOf(value)}
-  <a href={l.url} target="_blank" rel="noopener noreferrer">{l.text}</a>{#if l.text !== l.url}<span class="host"> {l.host}</span>{/if}
+  {@render text(content)}
+{:else if link}
+  <a href={link.url} target="_blank" rel="noopener noreferrer">{link.text}</a>{#if link.text !== link.url}<span class="host"> {link.host}</span>{/if}
 {:else if kind === 'list'}
-  <ul class="list">{#each value as item}<li><JsonView value={item} depth={depth + 1} /></li>{/each}</ul>
+  <ul class="list">{#each list as item}<li><JsonView value={item} depth={depth + 1} /></li>{/each}</ul>
 {:else if kind === 'records'}
   <div class="records">
-    {#each value as r, i}
+    {#each list as r, i}
       <details class="rec" ontoggle={(e) => (opened = { ...opened, [i]: e.currentTarget.open })}>
         <summary><b>{recordTitle(r, i)}</b><span class="line">{recordLine(r)}</span><span class="chev" aria-hidden="true">›</span></summary>
         {#if opened[i]}<div class="body"><JsonView value={r} depth={depth + 1} /></div>{/if}
       </details>
     {/each}
   </div>
-{:else if Object.keys(value).length === 1 && ['records', 'list', 'object'].includes(kindOf(Object.values(value)[0]))}
-  <!-- One field holding a collection reads best without a label column. -->
-  {@const [k, v] = Object.entries(value)[0]}
-  <p class="caption">{fieldLabel(k)}{#if Array.isArray(v)}{' · ' + v.length}{/if}</p>
-  <JsonView value={v} depth={depth + 1} />
+{:else if caption}
+  <p class="caption">{caption.label}</p>
+  <JsonView value={caption.value} depth={depth + 1} />
 {:else}
   <dl class="kv">
-    {#each Object.entries(value) as [k, v]}<dt>{fieldLabel(k)}</dt><dd><JsonView value={v} depth={depth + 1} /></dd>{/each}
+    {#each entries as [k, v]}<dt>{fieldLabel(k)}</dt><dd><JsonView value={v} depth={depth + 1} /></dd>{/each}
   </dl>
 {/if}
 

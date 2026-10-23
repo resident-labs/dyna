@@ -1,5 +1,12 @@
-<script>
-  let { on = false, label, disabled = false, onchange } = $props()
+<script lang="ts">
+  interface Props {
+    on?: boolean
+    // label names the switch; a row that already names it may leave it out.
+    label?: string
+    disabled?: boolean
+    onchange: (on: boolean) => void
+  }
+  let { on = false, label, disabled = false, onchange }: Props = $props()
 </script>
 
 <button class="switch" class:on role="switch" aria-checked={on} aria-label={label} {disabled} onclick={() => onchange(!on)}><span></span></button>

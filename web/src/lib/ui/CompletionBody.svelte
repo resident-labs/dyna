@@ -1,21 +1,36 @@
-<script>
+<script lang="ts">
   import { markdown, turnText } from './format.ts'
   import { detailHref, detailLabels } from './details.ts'
+  import type { Post, PostDetail } from '../api/room.ts'
 
-  let { post, trimLead = false, onopen = null } = $props()
+  interface Props {
+    post: Post
+    trimLead?: boolean
+    onopen?: ((detail: PostDetail) => void) | null
+  }
+  let { post, trimLead = false, onopen = null }: Props = $props()
   let href = $derived(detailHref(post.detail, post.roomId))
 
-  function open(e) {
+  // detailLabels keys a detail by its kind, and a stored kind is a plain string,
+  // so each known kind names its own label.
+  function detailLabel(detail: PostDetail): string {
+    if (detail.kind === 'shell') return detailLabels.shell
+    if (detail.kind === 'run') return detailLabels.run
+    if (detail.kind === 'session') return detailLabels.session
+    return ''
+  }
+
+  function open(e: MouseEvent) {
     if (!onopen || e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
     e.preventDefault()
     e.stopPropagation()
-    onopen?.(post.detail)
+    if (post.detail) onopen(post.detail)
   }
 </script>
 
 {#if post.text}<div>{@html markdown(trimLead ? turnText(post.text) : post.text)}</div>{/if}
-{#if href}
-  <a class="detail" {href} onclick={open}>{detailLabels[post.detail.kind]}{post.detail.turn ? ` · turn ${post.detail.turn}` : ''}<span aria-hidden="true"> →</span></a>
+{#if href && post.detail}
+  <a class="detail" {href} onclick={open}>{detailLabel(post.detail)}{post.detail.turn ? ` · turn ${post.detail.turn}` : ''}<span aria-hidden="true"> →</span></a>
 {/if}
 
 <style>

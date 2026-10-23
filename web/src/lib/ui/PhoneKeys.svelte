@@ -1,6 +1,21 @@
-<script>
-  let { ctrl = false, alt = undefined, onkey, label = 'Terminal keys' } = $props()
-  const keys = [
+<script lang="ts">
+  // One key of the on-screen terminal keyboard. k names the key that onkey
+  // gets, such as "esc" or "ctrl".
+  interface PhoneKey {
+    k: string
+    label: string
+    // aria is the spoken name when the label is a symbol or a modifier.
+    aria?: string
+  }
+  interface Props {
+    ctrl?: boolean
+    // alt stays undefined when the keyboard has no Alt key.
+    alt?: boolean
+    onkey: (key: string) => void
+    label?: string
+  }
+  let { ctrl = false, alt = undefined, onkey, label = 'Terminal keys' }: Props = $props()
+  const keys: PhoneKey[] = [
     { k: 'esc', label: 'Esc' }, { k: 'tab', label: 'Tab' },
     { k: 'ctrl', label: 'Ctrl' }, { k: 'alt', label: 'Alt' },
     { k: 'left', label: '←', aria: 'Left' }, { k: 'up', label: '↑', aria: 'Up' },

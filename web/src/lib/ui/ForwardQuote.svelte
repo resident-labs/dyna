@@ -1,14 +1,33 @@
-<script>
+<script lang="ts">
   import { speaker } from './posts.ts'
   import { markdown, stamp } from './format.ts'
   import { postParts } from './postParts.ts'
   import { postPreview } from './preview.ts'
   import PostFiles from './PostFiles.svelte'
   import PostLink from './PostLink.svelte'
+  import type { Attachment, Room } from '../api/room.ts'
+  import type { ThreadPost } from '../sessions/dm.ts'
 
-  let { room, post, author = null, onpost = null, onopenfile, onremove = null, disabled = false } = $props()
+  // A quoted post is the stored snapshot a forward carries, or the post a DM
+  // quotes before it is sent.
+  type Quoted = ThreadPost
+
+  interface Props {
+    room: Pick<Room, 'id' | 'name'>
+    post: Quoted
+    // author is the original post; it adds the sender's color and label.
+    author?: Quoted | null
+    onpost?: ((postId: string) => void) | null
+    onopenfile?: (attachment: Attachment) => void
+    // onremove makes the quote a draft: it drops the label and grows no jump link.
+    onremove?: (() => void) | null
+    disabled?: boolean
+  }
+  let { room, post, author = null, onpost = null, onopenfile, onremove = null, disabled = false }: Props = $props()
   let parts = $derived(postParts(post))
-  let from = $derived(author ?? post)
+  let from = $derived<Quoted>(author ?? post)
+  // The quote's own time; a post that is not stored yet has none.
+  let at = $derived(post.ts === undefined ? '' : new Date(post.ts).toLocaleString())
   let expanded = $state(false)
   let expandedFor = $state('')
   // A draft folds its post text like the feed does; a posted quote shows it all.
@@ -25,7 +44,7 @@
 <div class="fwd" class:draft={!!onremove}>
   <div class="fwdhead">
     <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="m12 5 5 5-5 5M16.5 10H8a5 5 0 0 0-5 5v1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
-    <span>{onremove ? 'Forwarding a post ·' : 'Forwarded from'} <span class="hue-{from.fromHue ?? 0}">{speaker(from, room.name)}</span> · <time title={new Date(post.ts).toLocaleString()}>{stamp(post.ts)}</time></span>
+    <span>{onremove ? 'Forwarding a post ·' : 'Forwarded from'} <span class="hue-{from.fromHue ?? 0}">{speaker(from, room.name)}</span> · <time title={at}>{stamp(post.ts)}</time></span>
     {#if onremove}
       <button class="remove" onclick={onremove} {disabled} aria-label="Remove forwarded post" title="Remove forwarded post">×</button>
     {:else}

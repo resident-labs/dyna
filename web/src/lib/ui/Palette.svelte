@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { dialog as modal } from './dialog.ts'
   // The command palette: one box for rooms, messages and commands, on the desktop and
   // on a phone. "New room" pushes a path view: type a folder path, see the
@@ -12,7 +12,7 @@
   //             "New room" is built in.
   //   targets   paletteTargets.ts rows: the open room's sessions, runs and
   //             PRs, shown once the owner types
-  //   onroom    (roomId) a room row was chosen
+  //   onroom    (roomId, created?) a room row was chosen
   //   ontarget  (target) a session, run or PR row was chosen
   //   onclose   the palette should close
   import { onMount, tick } from 'svelte'
@@ -23,35 +23,87 @@
   import { isFeedSearch } from '../api/guards.ts'
   import { speaker } from './posts.ts'
   import { snippet } from './searchSnippet.ts'
+  import { errorText } from '../errorText.ts'
+  import type { BrowseEntry, PathCheck } from '../api/file.ts'
+  import type { FeedSearch, Post, Room } from '../api/room.ts'
+  import type { Target } from './paletteTargets.ts'
 
-  // path, when set, opens straight in the New room path view with that
-  // text ("" for the home folder).
-  let { rooms = [], commands = [], targets = [], roomId = '', roomName = '', initial = '', path = null, onroom, ontarget, onmessage, onclose } = $props()
+  // One command the app offers here; "New room" is one of them.
+  interface Command {
+    id: string
+    label: string
+    hint?: string
+    terms?: string
+    icon?: string
+    danger?: boolean
+    run: (arg?: string) => unknown
+  }
 
-  let step = $state('root') // root | path | confirm
+  // A row of the root list, or of the path list.
+  type Row =
+    | { kind: 'room'; r: Room }
+    | { kind: 'target'; t: Target }
+    | { kind: 'message'; p: Post }
+    | { kind: 'cmd'; c: Command }
+  type PathRow = { kind: 'up' } | { kind: 'dir'; f: BrowseEntry }
+
+  interface Listing {
+    dir: string
+    entries: BrowseEntry[]
+    error: string
+  }
+  // check says what the typed path is, or why it could not be read.
+  type PathCheckState = { path: string; error?: string } & Partial<PathCheck>
+  interface SearchResults extends FeedSearch {
+    roomId: string
+    query: string
+  }
+  interface Status {
+    tone: 'ok' | 'warn' | 'err'
+    text: string
+  }
+
+  interface Props {
+    rooms?: Room[]
+    commands?: Command[]
+    targets?: Target[]
+    roomId?: string
+    roomName?: string
+    initial?: string
+    // path, when set, opens straight in the New room path view with that
+    // text ("" for the home folder).
+    path?: string | null
+    onroom: (roomId: string, created?: boolean) => unknown
+    ontarget: (target: Target) => unknown
+    onmessage: (postId: string) => unknown
+    onclose: () => void
+  }
+  let { rooms = [], commands = [], targets = [], roomId = '', roomName = '', initial = '', path = null, onroom, ontarget, onmessage, onclose }: Props = $props()
+
+  let step = $state<'root' | 'path' | 'confirm'>('root') // root | path | confirm
   let text = $state(initial)
   let pick = $state(0)
-  let input = $state()
-  let list = $state()
+  let input = $state<HTMLInputElement | undefined>()
+  let list = $state<HTMLDivElement | undefined>()
   let home = $state('')
-  let listing = $state(null) // {dir, entries, error}
-  let check = $state(null) // {path, ...roomsvc.PathCheck} or {path, error}
+  let listing = $state<Listing | null>(null)
+  let check = $state<PathCheckState | null>(null)
   let busy = $state(false)
   let error = $state('')
-  let target = $state(null) // the path being confirmed
+  let target = $state('') // the path being confirmed
   let name = $state('')
-  let results = $state(null)
+  let results = $state<SearchResults | null>(null)
   let searchError = $state('')
   let searching = $state(false)
   let asked = ''
   let searchToken = 0
-  let searchTimer
+  let searchTimer: ReturnType<typeof setTimeout> | undefined
 
-  const newRoom = { id: 'new-room', label: 'New room', hint: 'Type a folder path', terms: 'add create project folder path repo', icon: 'M10 4.5v11M4.5 10h11', run: openPath }
+  const newRoom: Command = { id: 'new-room', label: 'New room', hint: 'Type a folder path', terms: 'add create project folder path repo', icon: 'M10 4.5v11M4.5 10h11', run: openPath }
   // A command without its own icon gets a small chevron.
   const CMD = 'm8 5.5 4.5 4.5L8 14.5'
   // A person for a session, a play mark for a run, a branch for a PR.
-  const TARGET_ICON = {
+  const TARGET_ICON: Record<Target['kind'], string> = {
     session: 'M10 9.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM4.5 16.5c.6-3 2.8-4.7 5.5-4.7s4.9 1.7 5.5 4.7',
     run: 'M6.5 4.5v11l9-5.5Z',
     pr: 'M6 4.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM6 15.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM17 15.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0ZM4.5 6v8M15.5 14V8.5a2.5 2.5 0 0 0-2.5-2.5h-3M11.5 4 9.5 6l2 2',
@@ -64,7 +116,7 @@
   const targetRows = $derived(findTargets(text, targets))
   const messageQuery = $derived(step === 'root' && roomId ? text.trim() : '')
   const messageRows = $derived(results?.roomId === roomId && results?.query === messageQuery ? results.posts : [])
-  const rows = $derived([...roomRows.map((r) => ({ kind: 'room', r })), ...targetRows.map((t) => ({ kind: 'target', t })), ...messageRows.map((p) => ({ kind: 'message', p })), ...cmdRows.map((c) => ({ kind: 'cmd', c }))])
+  const rows = $derived<Row[]>([...roomRows.map((r): Row => ({ kind: 'room', r })), ...targetRows.map((t): Row => ({ kind: 'target', t })), ...messageRows.map((p): Row => ({ kind: 'message', p })), ...cmdRows.map((c): Row => ({ kind: 'cmd', c }))])
 
   // Search the whole room log. Changing the query, room or view invalidates
   // an old request before the next typing pause starts.
@@ -88,13 +140,13 @@
     searching = true
     searchError = ''
     try {
-      const found = await api.searchFeed(id, query)
+      const found: unknown = await api.searchFeed(id, query)
       if (token !== searchToken) return
       if (!isFeedSearch(found)) throw new Error('The server sent search results this page cannot read.')
       results = { roomId: id, query, ...found }
       pick = Math.min(pick, Math.max(0, rows.length - 1))
     } catch (e) {
-      if (token === searchToken) searchError = String(e?.message || e)
+      if (token === searchToken) searchError = errorText(e)
     } finally {
       if (token === searchToken) searching = false
     }
@@ -104,9 +156,9 @@
   const pathMode = $derived(step === 'path' && isPathText(text))
   const parts = $derived(splitPath(text))
   const folders = $derived(pathMode && listing?.dir === parts.dir ? folderRows(listing.entries, parts.filter) : [])
-  const pathRows = $derived([
-    ...(pathMode && parts.filter === '' && !atRoot(parts.dir) ? [{ kind: 'up' }] : []),
-    ...folders.map((f) => ({ kind: 'dir', f })),
+  const pathRows = $derived<PathRow[]>([
+    ...(pathMode && parts.filter === '' && !atRoot(parts.dir) ? [{ kind: 'up' as const }] : []),
+    ...folders.map((f): PathRow => ({ kind: 'dir', f })),
   ])
   // pick -1 means no row is highlighted: Enter submits the typed path.
   const count = $derived(step === 'root' ? rows.length : step === 'path' ? pathRows.length : 0)
@@ -165,8 +217,8 @@
     const token = ++listToken
     api
       .browseDirs(dir)
-      .then((b) => token === listToken && (listing = { dir, entries: b?.entries ?? [], error: '' }))
-      .catch((e) => token === listToken && (listing = { dir, entries: [], error: String(e?.message || e) }))
+      .then((b) => { if (token === listToken) listing = { dir, entries: b.entries ?? [], error: '' } })
+      .catch((e) => { if (token === listToken) listing = { dir, entries: [], error: errorText(e) } })
   })
 
   // Say what the typed path is, after a short pause in typing.
@@ -178,8 +230,8 @@
     const t = setTimeout(() => {
       api
         .inspectPath(path)
-        .then((c) => token === checkToken && (check = { path, ...c }))
-        .catch((e) => token === checkToken && (check = { path, error: String(e?.message || e) }))
+        .then((c) => { if (token === checkToken) check = { path, ...c } })
+        .catch((e) => { if (token === checkToken) check = { path, error: errorText(e) } })
     }, 200)
     return () => clearTimeout(t)
   })
@@ -193,16 +245,17 @@
 
   async function scrollPick() {
     await tick()
-    list?.querySelector('[aria-selected=true]')?.scrollIntoView({ block: 'nearest' })
+    list?.querySelector<HTMLElement>('[aria-selected=true]')?.scrollIntoView({ block: 'nearest' })
   }
 
-  function move(d) {
+  function move(d: number) {
     if (!count) return
     pick = pick < 0 && d < 0 ? count - 1 : Math.min(count - 1, Math.max(0, pick + d))
     scrollPick()
   }
 
-  function runRow(row) {
+  function runRow(row: Row | PathRow | undefined) {
+    if (!row) return
     if (row.kind === 'room') {
       onroom(row.r.id)
       onclose()
@@ -213,7 +266,7 @@
       onclose()
       onmessage(row.p.id)
     } else if (row.kind === 'cmd') {
-      if (row.c.id === 'new-room') return row.c.run()
+      if (row.c.id === 'new-room') return void row.c.run()
       onclose()
       row.c.run()
     } else if (row.kind === 'up') {
@@ -248,13 +301,13 @@
       await tick()
       input?.blur()
     } catch (e) {
-      error = String(e?.message || e)
+      error = errorText(e)
     } finally {
       busy = false
     }
   }
 
-  async function create(gitInit) {
+  async function create(gitInit: boolean) {
     busy = true
     error = ''
     try {
@@ -262,13 +315,13 @@
       onroom(made.id, true)
       onclose()
     } catch (e) {
-      error = String(e?.message || e)
+      error = errorText(e)
     } finally {
       busy = false
     }
   }
 
-  function keydown(e) {
+  function keydown(e: KeyboardEvent) {
     if (e.isComposing || e.keyCode === 229) return
     if (step === 'confirm') return
     if (e.key === 'ArrowDown') {
@@ -284,14 +337,14 @@
       e.preventDefault()
       if (step === 'path') {
         if ((e.ctrlKey || e.metaKey) || pick < 0) submit()
-        else if (pathRows[pick]) runRow(pathRows[pick])
+        else runRow(pathRows[pick])
       } else if (rows[pick]) runRow(rows[pick])
       else if (messageQuery && (asked !== messageQuery || searchError)) searchMessages()
     }
   }
 
   const placeholder = $derived(step === 'root' ? (roomId ? 'Search sessions, messages and commands' : 'Search rooms and commands') : 'Enter a folder path, for example ~/code/my-app')
-  const status = $derived.by(() => {
+  const status = $derived.by((): Status | null => {
     if (!pathMode || !check || check.path !== text) return null
     if (check.error) return { tone: 'err', text: check.error }
     if (check.state === 'repo') return { tone: 'ok', text: `Git repository${check.repo ? ' · ' + showHome(check.repo, home) : ''}` }
