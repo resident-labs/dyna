@@ -157,3 +157,33 @@ func (s Service) importRuns(conn *sql.Conn) error {
 	}
 	return nil
 }
+
+// pendingRuns lists the runs whose result is still pending. A run that an
+// earlier engine left pending cannot finish on its own: the engine that would
+// save its result is gone.
+func (s Service) pendingRuns(ctx context.Context) ([]Run, error) {
+	db, err := s.runsDB()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.QueryContext(ctx, "SELECT body FROM hook_runs")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	pending := []Run{}
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var run Run
+		if err := json.Unmarshal(raw, &run); err != nil {
+			continue // a damaged record is not a run to settle
+		}
+		if run.Result == "pending" {
+			pending = append(pending, run)
+		}
+	}
+	return pending, rows.Err()
+}
