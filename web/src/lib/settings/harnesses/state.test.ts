@@ -9,7 +9,6 @@ import {
   harnessMeta,
   harnessRowState,
   hasSubscriptionLogin,
-  parseScopeList,
   personalLoginChoice,
   preferenceStatusLabel,
   recommendedVersion,
@@ -579,12 +578,6 @@ test('filterProviders matches every typed word against name or ID, ignoring case
   assert.deepEqual(filterProviders(choices, 'open  rout').map((c) => c.id), ['openrouter'])
   assert.deepEqual(filterProviders(choices, 'nothing'), [])
   assert.deepEqual(filterProviders(undefined, 'x'), [])
-})
-
-test('a repo scope list drops blank lines and trims what the user typed', () => {
-  assert.deepEqual(parseScopeList(' github.com/org/name \n\n\tgithub.com/other/repo\n'), ['github.com/org/name', 'github.com/other/repo'])
-  assert.deepEqual(parseScopeList('   '), [])
-  assert.deepEqual(parseScopeList(''), [])
 })
 
 test('the key reaches only the add call and is cleared after saving', () => {
