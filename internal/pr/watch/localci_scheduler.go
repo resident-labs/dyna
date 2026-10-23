@@ -15,6 +15,7 @@ import (
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/gitexec"
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/pr/state"
 )
 
 type localCIRegistry interface {
@@ -100,11 +101,11 @@ func registeredCIJobs(st State) []registeredCIJob {
 		if !valid {
 			continue
 		}
-		if b.Head != "" && (b.Phase == "running" || b.Phase == "building" || b.Phase == "passed") {
+		if b.Head != "" && (b.Phase == state.MergeTrialPhaseRunning || b.Phase == state.MergeTrialPhaseBuilding || b.Phase == state.MergeTrialPhasePassed) {
 			jobs = append(jobs, registeredCIJob{record: *r, head: b.Head, branch: b.Branch, trial: true, created: b.Created})
 		}
 		for _, stack := range b.Stacks {
-			if stack.Head != "" && stack.Phase == "running" {
+			if stack.Head != "" && stack.Phase == state.MergeTrialPhaseRunning {
 				jobs = append(jobs, registeredCIJob{record: *r, head: stack.Head, branch: stack.Branch, trial: true, created: b.Created})
 			}
 		}

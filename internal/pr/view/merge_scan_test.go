@@ -17,7 +17,7 @@ func TestScanPublishesRoomMergeProgress(t *testing.T) {
 	st := watch.State{Version: 1, Records: map[string]*watch.Record{
 		"a": {Key: "a", Kind: "github", Host: "github.com", Repo: "org/a", RoomID: a.ID, State: "open", Watching: true, CI: "pending"},
 		"b": {Key: "b", Kind: "github", Host: "github.com", Repo: "org/b", RoomID: b.ID, State: "open", Watching: true, CI: "pending"},
-	}, MergeTrials: map[string]*state.MergeTrial{"github.com/org/a": {Phase: "testing", Changes: []state.MergeTrialChange{{Key: "a"}}}}, MergePauses: map[string]string{}, RepositoryFacts: map[string]state.RepositoryFacts{}}
+	}, MergeTrials: map[string]*state.MergeTrial{"github.com/org/a": {Phase: "testing", Changes: []state.MergeTrialChange{{Key: "a"}}}}, MergePauses: map[string]state.MergePause{}, RepositoryFacts: map[string]state.RepositoryFacts{}}
 	testfixture.SaveState(t, root, st)
 	signatures, work, version := map[string]string{}, map[string]string{}, ""
 	e.svc.PRs.Scan(signatures, work, &version, true, func(string, string, *listchange.Change, bool) {})
@@ -32,7 +32,9 @@ func TestScanPublishesRoomMergeProgress(t *testing.T) {
 		change func()
 	}{
 		{"trial phase", func() { st.MergeTrials["github.com/org/a"].Phase = "passed" }},
-		{"pause", func() { st.MergePauses[a.ID] = "inspect failure" }},
+		{"pause", func() {
+			st.MergePauses[a.ID] = state.MergePause{Cause: state.MergePauseCauseManual, Reason: "inspect failure"}
+		}},
 		{"main CI", func() {
 			st.RepositoryFacts["github.com/org/a"] = state.RepositoryFacts{Head: "main-head", Verdict: "failed", CheckedAt: time.Date(2026, 10, 22, 0, 0, 0, 0, time.UTC)}
 		}},

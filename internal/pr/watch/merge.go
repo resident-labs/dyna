@@ -40,7 +40,7 @@ type MergeQueueItem struct {
 type MergeTrialStatus struct {
 	Branch      string                  `json:"branch"`
 	Head        string                  `json:"head,omitempty"`
-	Phase       string                  `json:"phase"`
+	Phase       state.MergeTrialPhase   `json:"phase"`
 	Reason      string                  `json:"reason,omitempty"`
 	Batch       []string                `json:"batch"`
 	MaxParallel int                     `json:"maxParallel,omitempty"`
@@ -167,13 +167,13 @@ func mergeQueue(st State) []MergeQueueItem {
 			for _, change := range b.Changes {
 				if change.Key == r.Key && change.Head == r.Head {
 					item.Trial = trialStatus(st, b)
-					item.State, item.Reason = "trial-"+b.Phase, b.Reason
+					item.State, item.Reason = "trial-"+string(b.Phase), b.Reason
 					break
 				}
 			}
 		}
-		if why := st.MergePauses[r.RoomID]; why != "" {
-			item.State, item.Reason = "merge-paused", why
+		if pause := st.MergePauses[r.RoomID]; pause.Reason != "" {
+			item.State, item.Reason = "merge-paused", pause.Reason
 		}
 		queue = append(queue, item)
 	}

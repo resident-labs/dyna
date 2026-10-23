@@ -192,7 +192,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 				return errors.New("merge-trial push CI or default branch could not be confirmed")
 			}
 			st.NextMergeTrial++
-			batch = state.MergeTrial{Branch: "dyna/merge-trial/" + strconv.FormatUint(st.NextMergeTrial, 10), Base: base.Head, DefaultBranch: base.DefaultBranch, Phase: "building", Created: s.now(), MaxParallel: limit}
+			batch = state.MergeTrial{Branch: "dyna/merge-trial/" + strconv.FormatUint(st.NextMergeTrial, 10), Base: base.Head, DefaultBranch: base.DefaultBranch, Phase: state.MergeTrialPhaseBuilding, Created: s.now(), MaxParallel: limit}
 			for _, r := range groups[repo] {
 				batch.Changes = append(batch.Changes, trialChange(r))
 			}
@@ -241,8 +241,8 @@ func (s *Service) trialRoomHold(ctx context.Context, r Record) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if why := st.MergePauses[r.RoomID]; why != "" && ctx.Value(mergeControlRoom{}) != r.RoomID {
-		return why, nil
+	if pause := st.MergePauses[r.RoomID]; pause.Reason != "" && ctx.Value(mergeControlRoom{}) != r.RoomID {
+		return pause.Reason, nil
 	}
 	if paused, err := s.RoomPaused(r.RoomID); err != nil {
 		return "", err
@@ -361,7 +361,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		return errors.New("merge trial lost its tracked repository")
 	}
 	// TODO: legacy/shim remove later — resume batches saved by the advisory-review engine; remove after all pre-upgrade batches are gone.
-	if b.Phase == "reviewing" || b.LegacyReview != nil {
+	if b.Phase == state.MergeTrialPhaseReviewing || b.LegacyReview != nil {
 		if err := s.clearLegacyMergeReview(ctx, &b); err != nil {
 			return err
 		}
@@ -369,7 +369,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 			return err
 		}
 	}
-	if b.Phase == "awaiting-root" || ((b.Phase == "failed" || b.Phase == "stacking") && !b.Bisect) {
+	if mergePhaseHoldsBatchPause(b.Phase) && (b.Phase == state.MergeTrialPhaseAwaitingRoot || !b.Bisect) {
 		return s.stopMergeBatch(ctx, repo, *r, b, trialCI{})
 	}
 	// The access and pause checks also apply to a resumed publishing attempt.
@@ -384,7 +384,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 			return nil
 		}
 	}
-	if b.Phase != "publishing" && b.Phase != "published" {
+	if b.Phase != state.MergeTrialPhasePublishing && b.Phase != state.MergeTrialPhasePublished {
 		if st.RepositoryFacts[repo].Head != b.Base {
 			return s.discardMergeTrial(ctx, repo, *r, b)
 		}
@@ -398,7 +398,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 	client := s.trialClient(*r)
 	batch := trialBatch(*r, b)
 	switch b.Phase {
-	case "building":
+	case state.MergeTrialPhaseBuilding:
 		result, err := client.Build(ctx, batch, func(result trial.Result) error { b.Head = result.Head; return s.saveMergeTrial(repo, b) })
 		if err != nil {
 			b.Reason = err.Error()
@@ -424,19 +424,19 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		if len(included) == 0 {
 			return s.discardMergeTrial(ctx, repo, *r, b)
 		}
-		b.Changes, b.Head, b.Phase, b.Reason = included, result.Head, "running", ""
+		b.Changes, b.Head, b.Phase, b.Reason = included, result.Head, state.MergeTrialPhaseRunning, ""
 		if err := s.saveMergeTrial(repo, b); err != nil {
 			return err
 		}
 		s.noteTrialEvent(ctx, st, b, mergeTrialEvent(st, b, room.MergeTrial))
 		return nil
-	case "running":
+	case state.MergeTrialPhaseRunning:
 		ci, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
 		if err != nil {
 			return err
 		}
 		if ci.Status == "failed" {
-			b.Phase, b.Reason, b.Logs = "failed", "batch trial failed; waiting for root", ci.Logs
+			b.Phase, b.Reason, b.Logs = state.MergeTrialPhaseFailed, "batch trial failed; waiting for root", ci.Logs
 			s.noteMergeHistory(st, repo, b, "trial", "failed", b.Head, ci.Logs)
 			return s.stopMergeBatch(ctx, repo, *r, b, ci)
 		}
@@ -467,12 +467,12 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 				return s.discardMergeTrial(ctx, repo, *r, b)
 			}
 		}
-		b.Phase = "publishing"
+		b.Phase = state.MergeTrialPhasePublishing
 		if err := s.saveMergeTrial(repo, b); err != nil {
 			return err
 		}
 		return s.advanceMergeTrial(ctx, repo, b)
-	case "publishing":
+	case state.MergeTrialPhasePublishing:
 		if st.RepositoryFacts[repo].Head != b.Head {
 			ci, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
 			if err != nil {
@@ -486,14 +486,14 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 				if len(b.StackChanges) > 0 {
 					for i := range b.Stacks {
 						if b.Stacks[i].Branch == b.Branch {
-							b.Stacks[i].Phase, b.Stacks[i].Logs = "failed", logs
+							b.Stacks[i].Phase, b.Stacks[i].Logs = state.MergeTrialPhaseFailed, logs
 						}
 					}
 					b.Changes, b.Branch, b.Head = b.StackChanges, b.RootBranch, b.OriginalHead
-					b.Phase, b.Reason = "stacking", "selected prefix CI changed; choosing a passing prefix"
+					b.Phase, b.Reason = state.MergeTrialPhaseStacking, "selected prefix CI changed; choosing a passing prefix"
 					b.Failure = nil
 				} else {
-					b.Phase, b.Reason, b.Logs = "failed", "batch trial failed; waiting for root", logs
+					b.Phase, b.Reason, b.Logs = state.MergeTrialPhaseFailed, "batch trial failed; waiting for root", logs
 				}
 				if !b.Bisect {
 					return s.stopMergeBatch(ctx, repo, *r, b, ci)
@@ -528,12 +528,12 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		landed := mergeTrialEvent(st, b, room.MergeLanded)
 		landed.Commit = b.Head
 		s.noteTrialEvent(ctx, st, b, landed)
-		b.Phase = "published"
+		b.Phase = state.MergeTrialPhasePublished
 		if err := s.saveMergeTrial(repo, b); err != nil {
 			return err
 		}
 		return s.advanceMergeTrial(ctx, repo, b)
-	case "published":
+	case state.MergeTrialPhasePublished:
 		if err := s.rejectTrialFailure(ctx, b); err != nil {
 			return err
 		}
@@ -571,7 +571,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 			}
 		}
 		return errors.Join(append(followups, s.discardMergeTrial(ctx, repo, *r, b))...)
-	case "failed", "stacking":
+	case state.MergeTrialPhaseFailed, state.MergeTrialPhaseStacking:
 		return s.advanceMergeStacks(ctx, repo, *r, b)
 	default:
 		return fmt.Errorf("unknown merge trial phase %q", b.Phase)
@@ -724,7 +724,7 @@ func withTrialEvidence(r Record, head string, ci trialCI) trialCI {
 // confirmTrialProbes scopes a failed observation to trials that contain it.
 func (s *Service) confirmTrialProbes(st State, probes map[string]headProbe, b state.MergeTrial) error {
 	// Publication owns its scoped revalidation and already-published recovery.
-	if b.Phase == "publishing" || b.Phase == "published" || b.Phase == "awaiting-root" || ((b.Phase == "failed" || b.Phase == "stacking") && !b.Bisect) {
+	if b.Phase == state.MergeTrialPhasePublishing || b.Phase == state.MergeTrialPhasePublished || (mergePhaseHoldsBatchPause(b.Phase) && (b.Phase == state.MergeTrialPhaseAwaitingRoot || !b.Bisect)) {
 		return nil
 	}
 	// Let the existing state transition discard locally invalid membership
