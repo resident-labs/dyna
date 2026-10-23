@@ -80,6 +80,7 @@
   import Palette from './lib/ui/Palette.svelte'
   import ConnectStop from './lib/settings/ConnectStop.svelte'
   import ReviewWorkspace from './lib/review/ReviewWorkspace.svelte'
+  import ReviewIcon from './lib/ui/ReviewIcon.svelte'
   import SessionTabs from './lib/sessions/SessionTabs.svelte'
   import UseIcons from './lib/sessions/UseIcons.svelte'
   import ShellGrid from './lib/sessions/ShellGrid.svelte'
@@ -2648,7 +2649,7 @@
         {/if}
       {/if}
       {#if room?.repo && !readOnlyDm}<button class="icon" class:on={reviewOpen} aria-controls="review-workspace" aria-expanded={reviewOpen} title={reviewOpen ? 'Hide review' : 'Review files, changes, PRs and issues'} aria-label={reviewOpen ? 'Hide review' : 'Show review'} onclick={() => reviewOpen ? closeReview() : openReview()}>
-        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M13 4.5v15" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M15.8 9.5h2.2M15.8 12.5h2.2M15.8 15.5h1.2" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
+        <ReviewIcon size={22} />
       </button>{/if}
       {#if !roomId}<span class="spacer"></span>{/if}
       {#if narrow}
