@@ -79,7 +79,7 @@ func TestPostIndexBackfillsUnboundRecipients(t *testing.T) {
 	if err != nil || rows[msg.ID].Mode != DeliveryWake {
 		t.Fatalf("rows after the backfill = %+v, %v: want the wake row of the named address", rows, err)
 	}
-	if _, _, deliveries := postIndexRows(t, s, rec.ID, msg.ID); len(deliveries) != 1 || deliveries[0].state != string(DeliveryDelivered) {
-		t.Fatalf("deliveries = %+v, want one delivered row: the readers acted on it already", deliveries)
+	if _, _, deliveries := postIndexRows(t, s, rec.ID, msg.ID); len(deliveries) != 1 || deliveries[0].state != string(DeliveryImported) {
+		t.Fatalf("deliveries = %+v, want one imported row: the index cannot tell whether it reached the session", deliveries)
 	}
 }

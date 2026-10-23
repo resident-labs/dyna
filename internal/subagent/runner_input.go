@@ -143,22 +143,16 @@ func (m *Manager) selectPreparedInput(ctx context.Context, id string, input Inpu
 			*frames = inputFrames{meta: meta, posts: map[string]ClaimedPost{}}
 		}
 		reply = ClaimedInput{Cursor: input.Cursor, Depth: meta.Depth, ParentSession: meta.ParentSession, roomID: meta.RoomID}
-		var q queueClaims
-		if readOnly {
-			q, err = readCanonicalQueue(dir)
-		} else {
-			q, err = readQueueForUpdate(dir)
-		}
-		if err != nil {
-			return err
-		}
-		changed := false
+		// covered names the notes a held prompt already carried; claimed names
+		// the posts this read hands to the turn. Both are committed with the
+		// reply, so a retry replays them and a crash repeats nothing.
+		var covered, claimed []string
 		commit := func() error {
 			if readOnly {
 				return nil
 			}
 			// An empty final read closes only after all earlier claims have
-			// resolved. Sealing changes no queue row. If recording its reply
+			// resolved. Sealing changes no delivery row. If recording its reply
 			// fails, a retry reads the same closed gate and cursor.
 			if input.Final && len(reply.Posts) == 0 && !reply.Closed {
 				st := readGateState(dir)
@@ -168,24 +162,17 @@ func (m *Manager) selectPreparedInput(ctx context.Context, id string, input Inpu
 				}
 				reply.Closed = true
 			}
-			if !changed && len(reply.Posts) == 0 && !reply.Closed {
-				// An empty read changed no queue or gate. A retry may check
+			if len(claimed) == 0 && len(covered) == 0 && len(reply.Posts) == 0 && !reply.Closed {
+				// An empty read changed no delivery and no gate. A retry may check
 				// again; there is no accepted input or control effect to replay.
 				reply.readOnly = true
 				return nil
-			}
-			var raw []byte
-			if changed {
-				raw, err = json.Marshal(q)
-				if err != nil {
-					return err
-				}
 			}
 			result, err := json.Marshal(reply)
 			if err != nil {
 				return err
 			}
-			return storeQueueContext(ctx, dir, raw, result)
+			return storeClaimReply(ctx, m.rooms(), meta, claimed, covered, input.Turn, result)
 		}
 
 		var selected []room.Message
@@ -204,11 +191,7 @@ func (m *Manager) selectPreparedInput(ctx context.Context, id string, input Inpu
 			if turn.HeldPrompt != "" || paused {
 				return commit()
 			}
-			for _, note := range input.Covered {
-				if !q.Cancelled[note] {
-					q.Cancelled[note], changed = true, true
-				}
-			}
+			covered = input.Covered
 			selected, reply.Cursor, err = m.drainRoomMessages(meta, turn)
 		} else {
 			st := readGateState(dir)
@@ -254,12 +237,28 @@ func (m *Manager) selectPreparedInput(ctx context.Context, id string, input Inpu
 		if err != nil {
 			return err
 		}
-		var eligible []room.Message
-		for _, msg := range selected {
-			if q.Dismissed[msg.ID] || !input.Startup && q.Claimed[msg.ID] == input.Turn {
+		claims, err := postClaims(m.rooms(), meta, append(postIDs(selected), covered...))
+		if err != nil {
+			return err
+		}
+		// A note the held prompt already carried is cancelled in this read's
+		// commit, so this read must not hand it to the turn again. A note that is
+		// already cancelled needs no write, and the reply then stays read-only.
+		var notes []string
+		for _, note := range covered {
+			if claims.cancelled[note] {
 				continue
 			}
-			if q.Cancelled[msg.ID] && len(meta.InheritedInboxes) == 0 {
+			claims.cancelled[note] = true
+			notes = append(notes, note)
+		}
+		covered = notes
+		var eligible []room.Message
+		for _, msg := range selected {
+			if claims.dismissed[msg.ID] || !input.Startup && claims.claimedTurn[msg.ID] == input.Turn {
+				continue
+			}
+			if claims.cancelled[msg.ID] && len(meta.InheritedInboxes) == 0 {
 				continue
 			}
 			if readOnly {
@@ -275,8 +274,7 @@ func (m *Manager) selectPreparedInput(ctx context.Context, id string, input Inpu
 			return errInputFrames
 		}
 		for _, msg := range eligible {
-			q.claim(msg.ID, input.Turn)
-			changed = true
+			claimed = append(claimed, msg.ID)
 			reply.Posts = append(reply.Posts, frames.posts[msg.ID])
 		}
 		return commit()
