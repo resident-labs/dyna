@@ -392,3 +392,47 @@ func TestNoPushWorkflowPreservesObservedChecks(t *testing.T) {
 		})
 	}
 }
+
+// A cancelled push can leave the aggregate red while its replacement still runs.
+func TestDefaultVerificationWaitsForUnfinishedChecks(t *testing.T) {
+	for _, tc := range []struct {
+		name, counts string
+		want         string
+	}{
+		{"replacement running", `"checkRunCountsByState":[{"state":"CANCELLED","count":9},{"state":"IN_PROGRESS","count":1}]`, "pending"},
+		{"replacement queued", `"checkRunCountsByState":[{"state":"FAILURE","count":1},{"state":"QUEUED","count":1}]`, "pending"},
+		{"replacement waiting", `"checkRunCountsByState":[{"state":"FAILURE","count":1},{"state":"WAITING","count":1}]`, "pending"},
+		{"status pending", `"statusContextCountsByState":[{"state":"FAILURE","count":1},{"state":"PENDING","count":1}]`, "pending"},
+		{"status expected", `"statusContextCountsByState":[{"state":"FAILURE","count":1},{"state":"EXPECTED","count":1}]`, "pending"},
+		{"completed", `"checkRunCountsByState":[{"state":"COMPLETED","count":2}]`, "failed"},
+		{"all final", `"checkRunCountsByState":[{"state":"FAILURE","count":1},{"state":"SUCCESS","count":1}]`, "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t)
+			r := e.track()
+			contexts := map[string]any{"totalCount": 2}
+			if err := json.Unmarshal([]byte("{"+tc.counts+"}"), &contexts); err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(map[string]any{"data": map[string]any{"r0": map[string]any{fmt.Sprint("p", r.Number): map[string]any{"number": r.Number, "state": "OPEN", "headRefOid": r.Head}, "defaultBranchRef": map[string]any{"name": "main", "target": map[string]any{"oid": strings.Repeat("d", 40), "statusCheckRollup": map[string]any{"state": "FAILURE", "contexts": contexts}}}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
+				query := strings.Join(cmd.Args, " ")
+				if !strings.Contains(query, "checkRunCountsByState") || !strings.Contains(query, "statusContextCountsByState") {
+					t.Error("default branch query omitted completion evidence")
+				}
+				fmt.Fprint(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n"+string(body))
+				return nil
+			}
+			probes, _, err := e.s.GH.readHeads(t.Context(), []*Record{&r})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := defaultVerification(probes[r.Key].Default); got != tc.want {
+				t.Fatalf("verification=%s; want %s", got, tc.want)
+			}
+		})
+	}
+}
