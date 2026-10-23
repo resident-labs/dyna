@@ -1,17 +1,15 @@
 package computers
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
-
-	"dyna-agent/internal/store"
 )
 
 // RecordFailure keeps setup and cleanup failures visible without failing an
 // unrelated agent turn or the rest of a durable session-close transaction.
+// The daemon log keeps the detail; the reason itself lives in dyna.db.
 func RecordFailure(id string, err error) {
 	if err == nil {
 		return
@@ -26,18 +24,12 @@ func RecordFailure(id string, err error) {
 	if ValidateID(id) != nil {
 		return
 	}
-	if os.MkdirAll(Dir(id), 0700) != nil {
-		return
-	}
-	_ = store.WriteJSON(filepath.Join(Dir(id), "failure.json"), map[string]string{"reason": err.Error(), "at": time.Now().Format(time.RFC3339)}, 0o600)
+	_ = saveFailure(id, err.Error())
 }
-func failureReason(id string) string {
-	var v struct {
-		Reason string `json:"reason"`
-	}
-	b, err := os.ReadFile(filepath.Join(Dir(id), "failure.json"))
-	if err == nil {
-		_ = json.Unmarshal(b, &v)
-	}
-	return v.Reason
+
+// clearFailedSetup forgets a recorded failure once the computer runs again,
+// and removes the failure.json that an earlier release left in its folder.
+func clearFailedSetup(id string) {
+	_ = clearFailure(id)
+	_ = os.Remove(filepath.Join(Dir(id), "failure.json"))
 }

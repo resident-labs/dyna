@@ -2,88 +2,14 @@ package computers
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 )
-
-// TestConcurrentFailureWritesNeverCorrupt covers the JSON file writer that
-// every computer document shares: concurrent writers to one path must never
-// leave a corrupt or partial file, and the file keeps its mode and format.
-func TestConcurrentFailureWritesNeverCorrupt(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	id := "concurrent-writers"
-	path := filepath.Join(Dir(id), "failure.json")
-	stop := make(chan struct{})
-	observed := make(chan error, 1)
-	go func() {
-		for {
-			select {
-			case <-stop:
-				observed <- nil
-				return
-			default:
-			}
-			b, err := os.ReadFile(path)
-			if err != nil || len(b) == 0 {
-				continue
-			}
-			var v map[string]string
-			if jerr := json.Unmarshal(b, &v); jerr != nil || v["reason"] == "" {
-				observed <- fmt.Errorf("corrupt or partial failure.json (%d bytes): %v\n%s", len(b), jerr, preview(b))
-				return
-			}
-		}
-	}()
-	var wg sync.WaitGroup
-	for w := 0; w < 8; w++ {
-		wg.Add(1)
-		go func(w int) {
-			defer wg.Done()
-			for i := 0; i < 150; i++ {
-				unit := fmt.Sprintf("worker-%d-write-%d ", w, i)
-				RecordFailure(id, errors.New(strings.Repeat(unit, 5+(w*150+i)%250)))
-			}
-		}(w)
-	}
-	wg.Wait()
-	close(stop)
-	if err := <-observed; err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var v map[string]string
-	if err := json.Unmarshal(b, &v); err != nil {
-		t.Fatalf("failure.json is corrupt: %v\n%s", err, preview(b))
-	}
-	if len(v) != 2 || v["reason"] == "" || v["at"] == "" {
-		t.Fatalf("failure.json changed format: %s", preview(b))
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("failure.json mode %v, want 0600", info.Mode().Perm())
-	}
-}
-
-func preview(b []byte) string {
-	if len(b) > 240 {
-		return string(b[:240]) + "..."
-	}
-	return string(b)
-}
 
 func TestEnvironmentPreservesOwnerServices(t *testing.T) {
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())
