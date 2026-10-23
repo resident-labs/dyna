@@ -119,12 +119,19 @@ function hookIdentity(hook: HookEvent): string {
   return `${hook.repo}\u0000${hook.hook}`
 }
 
+// isOpenHook reports whether a hook post may sit inside a fold: a pass, or the
+// start of a run that has not ended yet. A failed or erroring run is its own
+// card and ends the fold, so its next pass starts a new row.
+function isOpenHook(hook: HookEvent): boolean {
+  return hook.state === 'passed' || hook.state === 'running'
+}
+
 // hookRowKey names the row a hook post joins. Every pass of one hook folds
 // into one row, and the start of a run joins that row too, so a running run
 // shows as the running state of its hook. A failed or erroring run is its own
 // card: no failure ever hides inside a fold.
 function hookRowKey(hook: HookEvent): string {
-  return hook.state === 'passed' || hook.state === 'running' ? `hook:${hookIdentity(hook)}` : `hook-run:${hook.runId}`
+  return isOpenHook(hook) ? `hook:${hookIdentity(hook)}` : `hook-run:${hook.runId}`
 }
 
 // rowPosts lists every post a row shows, oldest first.
@@ -204,6 +211,22 @@ function hiddenHookStarts(posts: readonly FeedInput[]): Set<string> {
   return hidden
 }
 
+// openHookRow returns the row a hook post may still update when another hook's
+// card sits between, as it does when two hooks fire in a burst: the walk back
+// covers hook rows only, so a message, a day divider or any other row ends it
+// and gives the next pass a row of its own. The folded row keeps its place in
+// the feed and shows the newest pass's state and time, so the card updates in
+// place instead of repeating down the page.
+function openHookRow<P extends FeedInput>(out: FeedRow<P>[], key: string, ts: number): FeedPostRow<P> | undefined {
+  for (let i = out.length - 1; i >= 0; i--) {
+    const row = out[i]
+    const hook = row?.kind === 'post' ? hookEvent(row.post) : undefined
+    if (row?.kind !== 'post' || !hook || !isOpenHook(hook)) return undefined
+    if (foldKey(row.post) === key) return ts - row.post.ts <= HOOK_PASS_WINDOW ? row : undefined
+  }
+  return undefined
+}
+
 // feedRows adds day and "new" dividers, and marks a post that continues the
 // previous sender's run. Root and the human share the owner address, so the
 // human flag is part of the sender. A call request is a row at the time root
@@ -259,10 +282,15 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
     // far apart stay separate rows.
     const sameRow = !!key && !!openPosts && !!prevPost && plain(post) && plain(prevPost) &&
       foldKey(prevPost) === key && (!hook || post.ts - prevPost.ts <= HOOK_PASS_WINDOW)
+    const skipped = sameRow ? undefined : hook && plain(post) ? openHookRow(out, key, post.ts) : undefined
     if (sameRow && open && openPosts && prevPost) {
       openPosts.push(post)
       open.post = post
       if (hook) open.hook = hookFold(openPosts)
+    } else if (skipped?.posts) {
+      skipped.posts.push(post)
+      skipped.post = post
+      skipped.hook = hookFold(skipped.posts)
     } else {
       out.push({ kind: 'post', key: post.id, post, cont,
         ...(foldable ? { posts: [post] } : {}),
