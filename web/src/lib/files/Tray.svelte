@@ -5,6 +5,11 @@
   const titleId = $props.id()
   let previewKey = $state(null)
   let preview = $derived(items.find(it => it.key === previewKey))
+  // Leave transformed, filtered, or clipped composer ancestors behind.
+  function portal(node) {
+    document.body.append(node)
+    return { destroy: () => node.remove() }
+  }
   const closePreview = () => { previewKey = null }
   $effect(() => {
     if (previewKey !== null && !preview) closePreview()
@@ -38,7 +43,7 @@
 {/if}
 
 {#if preview?.image && preview.url}
-  <div class="preview-backdrop">
+  <div class="preview-backdrop" use:portal>
     <div class="preview" use:dialog={{ close: closePreview }} role="dialog" aria-modal="true" aria-labelledby={titleId} tabindex="-1">
       <header>
         <h2 id={titleId}>{preview.name}</h2>
