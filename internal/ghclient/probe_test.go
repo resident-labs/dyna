@@ -153,8 +153,9 @@ func recv[T any](t *testing.T, ch <-chan T) T {
 }
 
 func (e probeEnv) seed(login string) {
+	config := ghConfigFingerprint(Command(context.Background(), e.exe, ""))
 	accounts.Lock()
-	accounts.choices[e.key] = choice{login, time.Now().Add(-time.Second)}
+	accounts.choices[e.key] = choice{login: login, until: time.Now().Add(-time.Second), config: config}
 	accounts.Unlock()
 }
 

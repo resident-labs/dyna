@@ -77,7 +77,7 @@ func storedChoice(key, config string) (choice, bool) {
 	if err != nil || login == "" || stored != config {
 		return choice{}, false
 	}
-	return choice{login: login, until: time.Unix(expires, 0)}, true
+	return choice{login: login, until: time.Unix(expires, 0), config: stored}, true
 }
 
 // rememberChoice stores a proved account for the next turns and for the next

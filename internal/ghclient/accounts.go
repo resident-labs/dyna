@@ -49,6 +49,9 @@ type accountFlight struct {
 type choice struct {
 	login string
 	until time.Time
+	// config is the GitHub CLI configuration the choice was proved against. A
+	// different one, such as a replaced token or another account, drops it.
+	config string
 }
 
 var accounts = struct {
@@ -288,6 +291,14 @@ func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, st
 	write := Access(ctx, rec) == ReadWrite
 	key := accountKey(cmd, r) + rec.ID + Access(ctx, rec)
 	config := ghConfigFingerprint(cmd)
+	accounts.Lock()
+	inMemory, haveMemory := accounts.choices[key]
+	accounts.Unlock()
+	if haveMemory && inMemory.config != config {
+		// The GitHub CLI configuration changed, so nothing it proved still holds.
+		forgetAccount(key)
+		forgetChoice(key)
+	}
 	// A choice an earlier engine process proved is as good as a cached one, so
 	// a restart or an empty cache does not probe GitHub again for every session.
 	if stored, ok := storedChoice(key, config); ok {
@@ -300,7 +311,7 @@ func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, st
 	for {
 		accounts.Lock()
 		cached := accounts.choices[key]
-		if time.Now().Before(cached.until) {
+		if time.Now().Before(cached.until) && cached.config == config {
 			accounts.Unlock()
 			if token, err := accountToken(ctx, cmd, r.host, cached.login); err == nil && token != "" {
 				return cached.login, token, nil
@@ -317,14 +328,15 @@ func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, st
 			forgetChoice(key)
 			continue
 		}
+		until, limited := accounts.limited[key]
 		accounts.Unlock()
 		// GitHub already refused a request in this window: prove nothing again
 		// until the quota returns, and use the last known account when there is
 		// one. The caller otherwise starts without GitHub access.
-		if until, ok := accounts.limited[key]; ok && time.Now().Before(until) {
+		if limited && time.Now().Before(until) {
 			if cached.login != "" {
 				if token, err := accountToken(ctx, cmd, r.host, cached.login); err == nil && token != "" {
-					cacheAccount(key, cached.login)
+					cacheAccount(key, cached.login, config)
 					return cached.login, token, nil
 				}
 			}
@@ -363,6 +375,7 @@ func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, st
 }
 
 func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string, cached choice, write bool) (login string, err error) {
+	config := ghConfigFingerprint(cmd)
 	// Read the fallback token before the probe can exhaust its deadline.
 	knownToken := ""
 	if cached.login != "" {
@@ -389,7 +402,7 @@ func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string
 			accounts.Unlock()
 		}
 		if cached.login != "" && knownToken != "" {
-			cacheAccount(key, cached.login)
+			cacheAccount(key, cached.login, config)
 			login, err = cached.login, nil
 		}
 	}()
@@ -433,11 +446,14 @@ func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string
 		if denied {
 			if account.Login == cached.login {
 				cached = choice{}
+				// GitHub denied this account, so remember nothing that could
+				// bring it back during a later outage.
 				forgetAccount(key)
+				forgetChoice(key)
 			}
 			continue
 		}
-		proveAccount(key, account.Login, cmd)
+		proveAccount(key, account.Login, config)
 		return account.Login, nil
 	}
 	if ctx.Err() != nil {
@@ -459,7 +475,12 @@ func Account(ctx context.Context, executable, dir string, args ...string) string
 		return ""
 	}
 	key := accountKey(cmd, r) + rec.ID + Access(ctx, rec)
+	config := ghConfigFingerprint(cmd)
 	accounts.Lock()
 	defer accounts.Unlock()
-	return accounts.choices[key].login
+	cached := accounts.choices[key]
+	if cached.config != config {
+		return ""
+	}
+	return cached.login
 }

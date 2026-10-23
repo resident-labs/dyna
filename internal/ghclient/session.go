@@ -45,6 +45,8 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 	}
 	ctx = WithRoom(ctx, rec.ID)
 	notice := ""
+	// unavailable means this turn could not prove which account it may use.
+	unavailable := false
 	_, token, err := selectAccount(ctx, cmd, r)
 	if err != nil {
 		// A turn must run even while GitHub refuses requests, so a limit or an
@@ -53,13 +55,13 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 		if !errors.As(err, &probe) || !probe.transient {
 			return SessionEnv{}, err
 		}
-		notice, token = probeNotice(probe), ""
+		notice, token, unavailable = probeNotice(probe), "", true
 	}
 	tokenKey, fallbackKey := "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"
 	if r.host == "github.com" || strings.HasSuffix(r.host, ".ghe.com") {
 		tokenKey, fallbackKey = "GH_TOKEN", "GITHUB_TOKEN"
 	}
-	if token == "" {
+	if token == "" && !unavailable {
 		// Token-only owner environments remain usable when gh has no saved accounts.
 		source := map[string]string{}
 		for _, entry := range inherited {
@@ -104,6 +106,15 @@ func SessionEnvironment(ctx context.Context, roomRef, scratchDir, dynaBinary str
 	}
 	out[BinaryEnv] = cmd.Path
 	out["PATH"] = bin + string(os.PathListSeparator) + values["PATH"]
+	if unavailable {
+		// The turn could not prove its account, so no other account may stand in:
+		// point the GitHub CLI at an empty configuration and give git no helper.
+		config := filepath.Join(bin, "config")
+		if err := os.MkdirAll(config, 0700); err != nil {
+			return SessionEnv{}, err
+		}
+		out["GH_CONFIG_DIR"] = config
+	}
 	// Read-only rooms get no helper; its keys still clear a parent's helper.
 	credentials := sessionCredentialHelper(r, cmd.Path)
 	if err := sessionGitConfig(ctx, rec, readOnly, credentials, !readOnly && token != "", values, out); err != nil {
