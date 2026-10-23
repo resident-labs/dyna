@@ -7,6 +7,7 @@
 package room
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -101,6 +102,9 @@ type Message struct {
 	From       string            `json:"from"`
 	Kind       string            `json:"kind,omitempty"`
 	Notice     PRNotice          `json:"notice,omitzero"`
+	// Payload is the typed JSON of a sealed system event. Only PostEvent
+	// builds one; read it with the event accessor, such as Worktree().
+	Payload EventPayload `json:"payload,omitzero"`
 	// Human marks an owner post a person typed in the desktop composer.
 	Human bool `json:"human,omitempty"`
 	// Source is SourceVoice on posts of the owner's voice call.
@@ -248,8 +252,14 @@ func (m Message) IsSession(key, id, addr string) bool {
 	return key == addr
 }
 
-// Deliverable distinguishes agent input from informational room notices.
-func (m Message) Deliverable() bool { return m.Kind != "notice" }
+// Deliverable distinguishes agent input from informational room notices. A
+// registered event follows its spec's quiet flag.
+func (m Message) Deliverable() bool {
+	if spec, ok := eventSpecFor(m.Kind, m.Notice.Kind); ok {
+		return !spec.Quiet
+	}
+	return m.Kind != "notice"
+}
 
 // maxToShown bounds the recipients listed in an envelope's To line so the
 // header stays small enough for live steering.
@@ -793,10 +803,13 @@ type PostInput struct {
 	SessionIDs map[string]string
 	// ID is an optional stable msg ID for retrying integrations. Reusing it
 	// requires the same sender, recipients and content. Ordinary posts leave it empty.
-	ID          string
-	From        string
-	Kind        string
-	Notice      PRNotice
+	ID   string
+	From string
+	Kind string
+	// Notice is the watcher payload of a post, unchanged until PR 3.
+	Notice PRNotice
+	// payload is the typed JSON of a sealed event. Only PostEvent sets it.
+	payload     EventPayload
 	Human       bool
 	To          []string
 	Via         []string
@@ -850,8 +863,18 @@ func newMessageID() string {
 	return "msg_" + hex.EncodeToString(b[:])
 }
 
+// ErrPostIDConflict means a post ID is stored with other content. A caller
+// that derives the ID from what it reports reads it as "already posted".
+var ErrPostIDConflict = errors.New("post ID already belongs to different content")
+
 // Post appends a message and updates the room activity time.
 func (s *Store) Post(roomID string, in PostInput) (Message, error) {
+	return s.post(roomID, in, false)
+}
+
+// post appends a message. event lets PostEvent write a sealed family, which
+// no other caller can do.
+func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 	if in.ID != "" && !regexp.MustCompile(`^msg_[a-f0-9]{16}$`).MatchString(in.ID) {
 		return Message{}, fmt.Errorf("invalid post ID")
 	}
@@ -872,6 +895,14 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 	}
 	if in.Kind == "" {
 		in.Kind = "message"
+	}
+	if !event {
+		if sealedFamily(in.Kind) {
+			return Message{}, fmt.Errorf("%q is a sealed event family: post it with PostEvent", in.Kind)
+		}
+		if !agentKind(in.Kind) && !legacyFamily(in.Kind) {
+			return Message{}, fmt.Errorf("post kind %q is not registered in internal/room/events.go", in.Kind)
+		}
 	}
 	if in.Kind == "message" {
 		in.Text = stripSelfLabel(in.From, in.Text)
@@ -923,8 +954,8 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 		if in.ID != "" {
 			for _, m := range msgs {
 				if m.ID == in.ID {
-					if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.Kind != in.Kind || m.Notice != in.Notice || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.References, in.References) || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
-						return fmt.Errorf("post ID already belongs to different content")
+					if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.Kind != in.Kind || m.Notice != in.Notice || !bytes.Equal(m.Payload.raw, in.payload.raw) || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.References, in.References) || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
+						return ErrPostIDConflict
 					}
 					out = m
 					return nil
@@ -934,7 +965,7 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 		now := s.now()
 		out = Message{
 			Wake: in.Wake, ID: newMessageID(), TS: now.UnixMilli(), RoomID: roomID, SessionIDs: in.SessionIDs,
-			From: in.From, Kind: in.Kind, Notice: in.Notice, Human: in.Human, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text,
+			From: in.From, Kind: in.Kind, Notice: in.Notice, Payload: in.payload, Human: in.Human, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text,
 			Attachments: in.Attachments, References: append([]Reference(nil), in.References...),
 		}
 		if in.ID != "" {

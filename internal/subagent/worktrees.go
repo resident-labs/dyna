@@ -64,7 +64,7 @@ func (m *Manager) cleanupWorktrees(ctx context.Context, info Info, keep bool) {
 	if keep {
 		if err := m.keepWorktrees(ctx, info); err != nil {
 			// A tree that cannot be kept must not be removed by this pass.
-			m.reportKeptWorktrees(info, err.Error())
+			m.reportKeptWorktree(info, keptTree{Reason: err.Error()})
 			return
 		}
 	}
@@ -72,52 +72,81 @@ func (m *Manager) cleanupWorktrees(ctx context.Context, info Info, keep bool) {
 		meta, err := m.store().ReadMeta(id)
 		return !meta.Closed.IsZero(), err
 	}})
-	if kept := cleanupNotice(err, result.Trees); len(kept) > 0 {
-		m.reportKeptWorktrees(info, strings.Join(kept, "; "))
+	for _, k := range cleanupNotice(err, result.Trees) {
+		m.reportKeptWorktree(info, k)
 	}
 }
 
-// cleanupNotice describes what session cleanup kept that someone may need to
+// keptTree is one fact cleanup kept that someone may need to act on.
+type keptTree struct {
+	Owner, Path, Branch, Reason string
+	Ahead                       int
+	Dirty                       []string
+}
+
+// cleanupNotice lists what session cleanup kept that someone may need to
 // act on. The main checkout is never removed and a clean tree whose owner is
 // still open is kept as expected. A cleanup that ran out of time, or that
 // engine shutdown canceled, and the trees it deferred, are retried by the
 // scheduled maintenance pass. None of these is news.
-func cleanupNotice(err error, trees []worktrees.Tree) []string {
-	var kept []string
+func cleanupNotice(err error, trees []worktrees.Tree) []keptTree {
+	var kept []keptTree
 	if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
-		kept = append(kept, err.Error())
+		kept = append(kept, keptTree{Reason: err.Error()})
 	}
 	for _, a := range trees {
 		if a.Action == "removed" || a.Main || a.OwnerOpen || a.Deferred {
 			continue
 		}
-		dirty := "none"
-		if len(a.DirtyFiles) > 0 {
-			dirty = strings.Join(a.DirtyFiles, ", ")
+		dirty := a.DirtyFiles
+		ahead := a.Ahead
+		if ahead < 0 {
+			ahead = 0
 		}
-		ahead := fmt.Sprint(a.Ahead)
-		if a.Ahead < 0 {
-			ahead = "unknown"
-		}
-		kept = append(kept, fmt.Sprintf("branch %q, path %q, ahead %s, dirty files: %s (%s)", a.Branch, a.Path, ahead, dirty, a.Reason))
+		kept = append(kept, keptTree{Owner: a.Owner, Path: a.Path, Branch: a.Branch, Ahead: ahead, Dirty: dirty, Reason: a.Reason})
 	}
 	return kept
 }
 
-func (m *Manager) reportKeptWorktrees(info Info, reason string) {
-	to, kind, parentID := info.Room, "notice", ""
-	if info.Depth != 1 && info.ParentSession != "" {
-		if parent, err := m.store().ReadMeta(info.ParentSession); err == nil && parent.Closed.IsZero() && parent.Resumable && parent.HarnessSession != "" && parent.RoomID == info.RoomID {
-			to, kind, parentID = Info{Meta: parent}.Address(), "message", parent.ID
+// reportKeptWorktree tells the session that owns the tree, and only it, that
+// cleanup kept the tree. The post is quiet, comes from the engine and is
+// stored once per tree and reason: PostEvent derives the post ID from them,
+// so a later pass that finds the same tree kept again posts nothing. A tree
+// with no known owner, and a failure to keep, go to the session being closed.
+func (m *Manager) reportKeptWorktree(info Info, k keptTree) {
+	owner := info.Meta
+	if k.Owner != "" && k.Owner != info.ID {
+		if meta, err := m.store().ReadMeta(k.Owner); err == nil && meta.RoomID == info.RoomID {
+			owner = meta
 		}
 	}
-	var sessionIDs map[string]string
-	if parentID != "" {
-		sessionIDs = map[string]string{to: parentID}
-	}
-	_, err := m.rooms().Post(info.RoomID, room.PostInput{Wake: parentID != "", SessionIDs: sessionIDs, From: info.Address(), Kind: kind, To: []string{to}, Text: fmt.Sprintf("Worktree cleanup kept: %s", strings.ReplaceAll(reason, "\n", " "))})
+	_, err := m.rooms().PostEvent(info.RoomID, room.WorktreeEvent{
+		Owner:  owner.ID,
+		Path:   k.Path,
+		Branch: k.Branch,
+		Ahead:  k.Ahead,
+		Dirty:  k.Dirty,
+		Reason: worktreeReason(k),
+		Detail: strings.ReplaceAll(k.Reason, "\n", " "),
+	}, owner.Address())
 	if err != nil {
 		m.store().appendEvent(info.ID, map[string]any{"t": "worktree_cleanup_report_failed", "error": err.Error()})
-		return
+	}
+}
+
+// worktreeReason picks the reason class of a kept tree from the sentence
+// cleanup gave. The class keys the dedupe and the card wording.
+func worktreeReason(k keptTree) room.WorktreeReason {
+	switch {
+	case k.Path == "":
+		return room.WorktreeKeepFailed
+	case strings.Contains(k.Reason, "not merged"):
+		return room.WorktreeNotMerged
+	case strings.Contains(k.Reason, "uncommitted"), strings.Contains(k.Reason, "untracked"):
+		return room.WorktreeDirty
+	case strings.Contains(k.Reason, keptWorktreeReason):
+		return room.WorktreeManualHandoff
+	default:
+		return room.WorktreeOther
 	}
 }
