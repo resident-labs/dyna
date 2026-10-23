@@ -21,7 +21,7 @@ func TestLiveProfileCheckRefusesBeforeConfigRead(t *testing.T) {
 	if err := os.WriteFile(path, invalid, 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, role := range []authority.Role{authority.Session, authority.Worker, authority.Steward, ""} {
+	for _, role := range []authority.Role{authority.Session, authority.Worker, ""} {
 		ctx := authority.WithActor(t.Context(), authority.Actor{Role: role})
 		for _, check := range []func() error{
 			func() error { _, err := CheckProfile(ctx, "missing", true); return err },
@@ -41,7 +41,7 @@ func TestLiveProfileCheckRefusesBeforeConfigRead(t *testing.T) {
 func TestStaticProfileChecksKeepCallerAccess(t *testing.T) {
 	isolate(t)
 	seed(t, mock("observed"))
-	for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker, authority.Steward, ""} {
+	for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker, ""} {
 		ctx := authority.WithActor(t.Context(), authority.Actor{Role: role})
 		got, err := (&Service{}).ConfigCheckProfile(ctx, "observed", false)
 		if err != nil || got.Name != "observed" {

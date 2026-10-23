@@ -14,7 +14,7 @@ func TestAuthorityActorUsesStoredRoleAndRoom(t *testing.T) {
 		role string
 		want authority.Role
 	}{
-		{"", authority.Session}, {RoleRoot, authority.Root}, {RoleSteward, authority.Steward},
+		{"", authority.Session}, {RoleRoot, authority.Root}, {RoleLibrarian, authority.Session},
 	} {
 		t.Run(string(tc.want), func(t *testing.T) {
 			m, _, work, metas := actorFixture(t)
@@ -82,13 +82,13 @@ func TestAuthorityActorSkipsLookupForProcessRoles(t *testing.T) {
 func TestAuthorityActorRejectsClosedSession(t *testing.T) {
 	m, _, _, metas := actorFixture(t)
 	meta := metas["lead"]
-	meta.Role, meta.Closed = RoleSteward, time.Now()
+	meta.Role, meta.Closed = RoleLibrarian, time.Now()
 	if err := m.Store.writeMeta(meta); err != nil {
 		t.Fatal(err)
 	}
 	stampAs(t, meta)
 	if _, err := m.AuthorityActor(context.Background()); err == nil {
-		t.Fatal("accepted closed steward")
+		t.Fatal("accepted closed service session")
 	}
 }
 
@@ -119,23 +119,6 @@ func TestSessionAuthorityAllowsRelatedCallers(t *testing.T) {
 			got, err := m.authorityTarget(context.Background(), tc.action, metas[tc.target].ID)
 			if err != nil || got.ID != metas[tc.target].ID {
 				t.Fatalf("target = %s, %v", got.ID, err)
-			}
-		})
-	}
-}
-
-func TestStewardCannotChangeSessions(t *testing.T) {
-	for _, action := range []string{"subagent promote", "subagent adopt", "subagent rename", "subagent close"} {
-		t.Run(action, func(t *testing.T) {
-			m, _, _, metas := actorFixture(t)
-			meta := metas["lead"]
-			meta.Role = "merge-steward"
-			if err := m.Store.writeMeta(meta); err != nil {
-				t.Fatal(err)
-			}
-			stampAs(t, meta)
-			if _, err := m.authorityTarget(context.Background(), action, metas["child"].ID); err == nil {
-				t.Fatal("steward can change sessions")
 			}
 		})
 	}

@@ -202,8 +202,8 @@ func (s *Service) ReplyToFinding(ctx context.Context, roomRef, changeID, finding
 	} else if p, r, err = s.authorPRInRoom(ctx, "git change reply", roomRef, changeID); err != nil {
 		return err
 	}
-	// Any session's reply is its own, root seat and stewards included; only
-	// the owner replies with no session.
+	// Any session's reply is its own, the root seat included; only the owner
+	// replies with no session.
 	return p.ReplyFinding(ctx, changeID, r.Author, authority.Of(ctx).Session, findingID, disposition, message)
 }
 

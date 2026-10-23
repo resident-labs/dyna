@@ -24,7 +24,6 @@ test('every control on the page writes through the call that owns it', async () 
   await applyControl(api, host, 'review.enabled', false)
   await applyControl(api, host, 'review.profile', 'sol')
   await applyControl(api, host, 'merge.paused', true)
-  await applyControl(api, host, 'steward.profile', 'off')
   await applyControl(api, host, 'library.profile', 'sonnet')
   await applyControl(api, host, 'update.enabled', false)
   await applyControl(api, host, 'update.run', true)
@@ -32,7 +31,6 @@ test('every control on the page writes through the call that owns it', async () 
     'review room_1 false',
     'service-profile room_1 reviewer sol',
     'merge-paused room_1 true',
-    'service-profile room_1 merge-steward off',
     'setting library.profile sonnet',
     'hook-edit /repo self-update {"disabled":true}',
     'hook-run /repo self-update',

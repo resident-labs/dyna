@@ -278,11 +278,7 @@ func (s *Service) authorPRInRoom(ctx context.Context, action, roomRef, key strin
 	actsOnAuthor := func() bool {
 		return actor.Session != "" && r.Author != "" && s.Notify.Sessions.CheckActsOn(actor.Session, subagent.Info{Meta: subagent.Meta{ID: r.Author}}) == nil
 	}
-	// authority.Check reads the Author relation for sessions only; a steward
-	// acts on its own tree exactly as #1605's checkActsOn lets it.
-	if actor.Role == authority.Steward && actsOnAuthor() {
-		return p, r, nil
-	}
+	// authority.Check reads the Author relation for sessions only.
 	// The author holds the PR's one transferable role, so Holder is Author.
 	if err := authority.Check(action, actor, func(rel authority.Relation) bool {
 		return (rel == authority.Author || rel == authority.Holder) && actsOnAuthor()

@@ -99,7 +99,7 @@ func (s *Service) authorizeMergeControl(ctx context.Context, roomID, action stri
 		if err != nil {
 			return room.Record{}, err
 		}
-	} else if actor.Session != "" && (actor.Role == authority.Root || actor.Role == authority.Steward) {
+	} else if actor.Session != "" && actor.Role == authority.Root {
 		// The engine resolved this role before the call. The stored session
 		// can lose its role, move rooms or close while the publisher runs.
 		var err error
@@ -123,7 +123,7 @@ func (s *Service) authorizeMergeControl(ctx context.Context, roomID, action stri
 	if err != nil {
 		return room.Record{}, err
 	}
-	// Root and Steward resolve the target in the relation callback. Owner needs no relation.
+	// Root resolves the target in the relation callback. Owner needs no relation.
 	if rm.ID == "" {
 		rm, err = s.Notify.Rooms.Resolve(roomID)
 		if err != nil {
@@ -138,9 +138,12 @@ func (s *Service) authorizeMergeControl(ctx context.Context, roomID, action stri
 
 // MergeControl changes only the existing worker state. Root and the worker
 // share the publication lock, current PR facts, and tested-commit publisher.
-func (s *Service) MergeControl(ctx context.Context, roomID, action string, args, without []string) error {
+func (s *Service) MergeControl(ctx context.Context, roomID, action string, args, without, flaky []string) error {
 	if action == "note" {
 		return s.mergeNote(ctx, roomID, args, without)
+	}
+	if len(flaky) > 0 && action != "publish" {
+		return fmt.Errorf("--flaky applies only to merge publish")
 	}
 	rm, err := s.authorizeMergeControl(ctx, roomID, action)
 	if err != nil {
@@ -306,12 +309,16 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 			return nil
 		})
 	case "publish":
-		return s.publishControlledTrial(ctx, rm.ID, st, repos, args[0])
+		tests, err := ParseFlakyTests(flaky)
+		if err != nil {
+			return err
+		}
+		return s.publishControlledTrial(ctx, rm.ID, st, repos, args[0], tests)
 	}
 	return nil
 }
 
-func (s *Service) publishControlledTrial(ctx context.Context, roomID string, st State, repos []string, name string) error {
+func (s *Service) publishControlledTrial(ctx context.Context, roomID string, st State, repos []string, name string, flaky []FlakyTest) error {
 	if paused, err := s.RoomPaused(roomID); err != nil {
 		return err
 	} else if paused {
@@ -351,12 +358,22 @@ func (s *Service) publishControlledTrial(ctx context.Context, roomID string, st 
 		if r == nil {
 			return fmt.Errorf("trial lost its repository record")
 		}
-		ci, _, _, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
-		if err != nil {
-			return err
-		}
-		if ci != "passed" {
-			return fmt.Errorf("trial push CI has not passed")
+		if len(flaky) > 0 {
+			// Root names every failing test before a failed trial may merge.
+			if b.Phase != "failed" && b.Phase != "awaiting-root" {
+				return fmt.Errorf("trial %s has not failed; publish it without --flaky", b.Branch)
+			}
+			if err := flakyCoverage(b.Logs, flaky); err != nil {
+				return err
+			}
+		} else {
+			ci, _, _, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
+			if err != nil {
+				return err
+			}
+			if ci != "passed" {
+				return fmt.Errorf("trial push CI has not passed")
+			}
 		}
 		probes, err := s.observeHeadBatch(ctx, st, []*Record{r}, nil)
 		if err != nil {
@@ -378,12 +395,26 @@ func (s *Service) publishControlledTrial(ctx context.Context, roomID string, st 
 		}
 		b.Failure = nil
 		b.Phase, b.Reason = "publishing", "root requested publication of passed trial"
+		if len(flaky) > 0 {
+			b.Reason = "root published a failed trial for known flaky tests"
+		}
 		if err := s.saveMergeTrial(repo, b); err != nil {
 			return err
 		}
-		// Preserve the room pause. This one explicit publication still enforces
-		// room access, session pause, fresh PR gates, ancestry, and the main lease.
-		return s.advanceMergeTrial(context.WithValue(ctx, mergeControlRoom{}, roomID), repo, b)
+		// A normal publication preserves the room pause and still enforces room
+		// access, session pause, fresh PR gates, ancestry and the main lease. A
+		// flaky publication clears the pause only after it merges.
+		publishCtx := context.WithValue(ctx, mergeControlRoom{}, roomID)
+		if len(flaky) > 0 {
+			publishCtx = withFlakyPublish(publishCtx, flaky)
+		}
+		if err := s.advanceMergeTrial(publishCtx, repo, b); err != nil {
+			return err
+		}
+		if len(flaky) > 0 {
+			return s.finishFlakyPublish(ctx, roomID, repo, b, flaky)
+		}
+		return nil
 	}
 	return fmt.Errorf("trial %q is not saved for this room", name)
 }

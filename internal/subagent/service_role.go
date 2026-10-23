@@ -15,12 +15,9 @@ const RoleLibrarian = "librarian"
 // LibrarianName names the librarian session, after `dyna library`.
 const LibrarianName = "library"
 
-// RoleSteward owns recovery decisions for failed merge batches.
-const RoleSteward = "merge-steward"
-
 // serviceNames are the fixed session names of service roles. Only a session
 // of that role may take one, so a user session never blocks a service start.
-var serviceNames = map[string]string{LibrarianName: RoleLibrarian, RoleSteward: RoleSteward}
+var serviceNames = map[string]string{LibrarianName: RoleLibrarian}
 
 func checkServiceName(name, role string) error {
 	if owner, ok := serviceNames[name]; ok && owner != role {
@@ -30,5 +27,5 @@ func checkServiceName(name, role string) error {
 }
 
 func isServiceRole(role string) bool {
-	return role == "reviewer" || role == RoleRoot || role == RoleLibrarian || role == RoleSteward
+	return role == "reviewer" || role == RoleRoot || role == RoleLibrarian
 }

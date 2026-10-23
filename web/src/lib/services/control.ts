@@ -23,8 +23,6 @@ export async function applyControl(api: ControlApi, host: ControlHost, id: strin
       return api.setServiceProfile(host.room, 'reviewer', name)
     case 'merge.paused':
       return api.setMergePaused(host.room, on)
-    case 'steward.profile':
-      return api.setServiceProfile(host.room, 'merge-steward', name)
     case 'library.profile':
       return api.setSetting('library.profile', name)
     // A hook switch keeps the hook's settings and stops its automatic runs.

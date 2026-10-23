@@ -52,7 +52,7 @@ func TestRequireReviewersAuthorLeadRootAndOwnerPermissions(t *testing.T) {
 			t.Fatal("refused caller changed PR state")
 		}
 	}
-	for _, ctx := range []context.Context{as(authority.Session, author, rm.ID), as(authority.Session, parent, rm.ID), as(authority.Steward, parent, rm.ID), as(authority.Root, parent, rm.ID), ownerCtx} {
+	for _, ctx := range []context.Context{as(authority.Session, author, rm.ID), as(authority.Session, parent, rm.ID), as(authority.Root, parent, rm.ID), ownerCtx} {
 		if err := e.svc.PRs.RequirePRReviewers(ctx, rm.ID, "change", []string{"architecture", reviewer}); err != nil {
 			t.Fatal(err)
 		}

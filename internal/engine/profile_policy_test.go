@@ -29,7 +29,7 @@ func TestProfileWritesUseCallerPower(t *testing.T) {
 		{"SetProfileDisabled", "profiles enable", []any{p.Name, false}},
 	} {
 		t.Run(op.action, func(t *testing.T) {
-			for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Steward, authority.Worker, ""} {
+			for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker, ""} {
 				t.Run(string(role), func(t *testing.T) {
 					base := p
 					base.Disabled = op.action == "profiles enable"

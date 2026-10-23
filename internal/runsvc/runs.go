@@ -42,7 +42,7 @@ func callerRoom(ctx context.Context) (string, error) {
 	switch a.Role {
 	case authority.Owner:
 		return "", nil
-	case authority.Root, authority.Session, authority.Steward, authority.Worker:
+	case authority.Root, authority.Session, authority.Worker:
 		if a.Room != "" {
 			return a.Room, nil
 		}

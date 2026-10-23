@@ -24,10 +24,11 @@ type fakeMergeControl struct {
 	args, without []string
 	room          string
 	err           error
+	flaky         []string
 }
 
-func (f *fakeMergeControl) MergeControl(_ context.Context, room, action string, args, without []string) error {
-	f.room, f.action, f.args, f.without = room, action, args, without
+func (f *fakeMergeControl) MergeControl(_ context.Context, room, action string, args, without, flaky []string) error {
+	f.room, f.action, f.args, f.without, f.flaky = room, action, args, without, flaky
 	return f.err
 }
 func (f *fakeMergeControl) MergeControlStatus(room string) (watch.MergeControlStatus, error) {
@@ -40,15 +41,17 @@ func TestMergeCommandsForwardControls(t *testing.T) {
 		argv          []string
 		action        string
 		args, without []string
+		flaky         []string
 	}{
-		{[]string{"pause"}, "pause", nil, nil},
-		{[]string{"note", "Retry #17; TestQueue passes on main."}, "note", []string{"Retry #17; TestQueue passes on main."}, nil},
-		{[]string{"resume"}, "resume", nil, nil},
-		{[]string{"cancel"}, "cancel", nil, nil},
-		{[]string{"return", "17", "fix the conflict"}, "return", []string{"17", "fix the conflict"}, nil},
-		{[]string{"retry", "--without", "17", "--without", "19"}, "retry", nil, []string{"17", "19"}},
-		{[]string{"bisect"}, "bisect", nil, nil},
-		{[]string{"publish", "trial-1"}, "publish", []string{"trial-1"}, nil},
+		{[]string{"pause"}, "pause", nil, nil, nil},
+		{[]string{"note", "Retry #17; TestQueue passes on main."}, "note", []string{"Retry #17; TestQueue passes on main."}, nil, nil},
+		{[]string{"resume"}, "resume", nil, nil, nil},
+		{[]string{"cancel"}, "cancel", nil, nil, nil},
+		{[]string{"return", "17", "fix the conflict"}, "return", []string{"17", "fix the conflict"}, nil, nil},
+		{[]string{"retry", "--without", "17", "--without", "19"}, "retry", nil, []string{"17", "19"}, nil},
+		{[]string{"bisect"}, "bisect", nil, nil, nil},
+		{[]string{"publish", "trial-1"}, "publish", []string{"trial-1"}, nil, nil},
+		{[]string{"publish", "trial-1", "--flaky", "TestQueue: racy temp dir"}, "publish", []string{"trial-1"}, nil, []string{"TestQueue: racy temp dir"}},
 	} {
 		t.Run(tc.action, func(t *testing.T) {
 			f := &fakeMergeControl{}
@@ -57,7 +60,7 @@ func TestMergeCommandsForwardControls(t *testing.T) {
 			if err := cmd.Execute(); err != nil {
 				t.Fatal(err)
 			}
-			if f.room != "room-id" || f.action != tc.action || !reflect.DeepEqual(f.args, tc.args) || !reflect.DeepEqual(f.without, tc.without) {
+			if f.room != "room-id" || f.action != tc.action || !reflect.DeepEqual(f.args, tc.args) || !reflect.DeepEqual(f.without, tc.without) || !reflect.DeepEqual(f.flaky, tc.flaky) {
 				t.Fatalf("forwarded control = %#v", f)
 			}
 		})
@@ -140,9 +143,9 @@ func TestMergeCommandMutationsUseEngine(t *testing.T) {
 	called := false
 	sentinel := errors.New("engine handled merge control")
 	calls, err := websvc.Bind([]websvc.Binding{{Name: "MergeControl", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true,
-		Method: func(_ context.Context, id, action string, args, without []string) error {
+		Method: func(_ context.Context, id, action string, args, without, flaky []string) error {
 			called = true
-			if id != rm.ID || action != "retry" || len(args) != 0 || !reflect.DeepEqual(without, []string{"17", "19"}) {
+			if id != rm.ID || action != "retry" || len(args) != 0 || !reflect.DeepEqual(without, []string{"17", "19"}) || len(flaky) != 0 {
 				t.Errorf("engine arguments = %q %q %v %v", id, action, args, without)
 			}
 			return sentinel

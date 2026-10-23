@@ -154,11 +154,11 @@ func TestStoppedTurnStartKeepsTheDrainedPosts(t *testing.T) {
 	}
 }
 
-// The room's root seat and a steward are sessions too: their own runner
-// marks their turn running. The engine gives them the Root and Steward
-// roles (SessionActor), which the runner calls refused before.
-func TestRootAndStewardRunnersMarkTheirTurnRunning(t *testing.T) {
-	for _, role := range []authority.Role{authority.Root, authority.Steward} {
+// The room's root seat is a session too: its own runner marks its turn
+// running. The engine gives it the Root role (SessionActor), which the
+// runner calls refused before.
+func TestRootRunnerMarksItsTurnRunning(t *testing.T) {
+	for _, role := range []authority.Role{authority.Root} {
 		t.Run(string(role), func(t *testing.T) {
 			e := newTestEnv(t)
 			info, _ := e.start("RESPOND: done")
@@ -170,7 +170,7 @@ func TestRootAndStewardRunnersMarkTheirTurnRunning(t *testing.T) {
 			if turn, err := e.m.Store.ReadTurn(info.ID, 1); err != nil || turn.Status != TurnRunning {
 				t.Fatalf("turn = %q, %v; want running", turn.Status, err)
 			}
-			// A call never names a session: a root or steward runner writes
+			// A call never names a session: a root runner writes
 			// only the session it was launched for, never another one.
 			other, _ := e.start("RESPOND: other")
 			e.wait(other.ID, 1)

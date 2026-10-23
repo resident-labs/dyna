@@ -32,7 +32,7 @@ func TestBrowserResumeMergingPreservesOtherMergeControls(t *testing.T) {
 	owner := authority.WithActor(context.Background(), authority.Actor{Role: authority.Owner})
 	pause := func() {
 		t.Helper()
-		if err := s.rooms.PRs.MergeControl(owner, rm.ID, "pause", nil, nil); err != nil {
+		if err := s.rooms.PRs.MergeControl(owner, rm.ID, "pause", nil, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	}

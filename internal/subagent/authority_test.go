@@ -50,8 +50,6 @@ func TestWorkerAuthorityRefusesBeforeBackend(t *testing.T) {
 			}
 			want := tt.action + " is owner or root or session only; " + instead
 			switch tt.action {
-			case "subagent start":
-				want = "subagent start is owner or root or session or steward only; " + instead
 			case "subagent close":
 				want = "subagent close is owner or root or another session only; a session becomes dormant when its turn ends, so it does not close itself"
 			case "subagent adopt", "subagent promote":

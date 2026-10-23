@@ -28,7 +28,7 @@ func TestBrowserRuntimeSyncRefusesBeforeConfigAccess(t *testing.T) {
 	if err := os.WriteFile(r.Config.Path, invalid, 0600); err != nil {
 		t.Fatal(err)
 	}
-	for _, role := range []authority.Role{authority.Session, authority.Worker, authority.Steward, ""} {
+	for _, role := range []authority.Role{authority.Session, authority.Worker, ""} {
 		_, err := r.SyncPrivateRuntime(authority.WithActor(t.Context(), authority.Actor{Role: role}), "codex")
 		if err == nil || !strings.Contains(err.Error(), "SyncPrivateRuntime is owner or root only") {
 			t.Errorf("browser sync as %q reached config: %v", role, err)

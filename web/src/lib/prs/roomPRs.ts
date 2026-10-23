@@ -49,7 +49,7 @@ export function trialProgress(trial: MergeTrialStatus, status: MergeControlStatu
   const summary = checkSummary(checks)
   const nodes = [...new Set(checks.flatMap((c) => c.node ? [c.node] : []))]
   const completed = checks.filter((c) => c.status === 'completed' || ['success', 'failure', 'skipped', 'cancelled'].includes(c.state)).length
-  const labels: Record<string, string> = { building: 'Building trial', reviewing: 'Reviewing trial', running: 'Testing trial', stacking: 'Testing prefixes', publishing: 'Publishing tested batch', published: 'Published · confirming main CI', failed: 'Trial failed', 'awaiting-root': 'Needs merge steward' }
+  const labels: Record<string, string> = { building: 'Building trial', reviewing: 'Reviewing trial', running: 'Testing trial', stacking: 'Testing prefixes', publishing: 'Publishing tested batch', published: 'Published · confirming main CI', failed: 'Trial failed', 'awaiting-root': 'Needs root' }
   return { label: labels[trial.phase] ?? trial.phase, tone: ['failed', 'awaiting-root'].includes(trial.phase) ? 'coral' : trial.phase === 'published' ? 'sage' : 'gold', nodes: nodes.join(', '), total: summary.total, completed, passed: summary.passed.length, failed: summary.failed.length }
 }
 

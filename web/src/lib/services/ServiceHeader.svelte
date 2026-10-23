@@ -6,7 +6,7 @@
   import type { ServiceView } from '../api/service.ts'
   import { serviceStatus, pinNotEnabled, pickProfile, errorText } from './services.ts'
 
-  // role is "merge-steward" or "reviewer". The header loads its ListServices row,
+  // role is "reviewer". The header loads its ListServices row,
   // which names the profiles the service can run; pages pass only roomId and
   // role. The service prop exists so server-render tests can give data.
   // onchange runs after a saved choice, so the page can reload its status.

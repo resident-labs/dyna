@@ -50,7 +50,7 @@ func TestUserSyncCallsUseEngineAuthority(t *testing.T) {
 			}
 		}
 	}
-	for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker, authority.Steward, ""} {
+	for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker, ""} {
 		t.Run(string(role), func(t *testing.T) {
 			actor := authority.Actor{Role: role, Session: "session", Run: "wf_test"}
 			caller := websvc.Caller{Kind: websvc.Session, Session: actor.Session}

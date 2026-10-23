@@ -787,7 +787,7 @@ func requestFixtureBisect(t *testing.T, f *trialFixture) {
 	}
 	for _, b := range st.MergeTrials {
 		if b.Phase == "awaiting-root" {
-			if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "bisect", nil, nil); err != nil {
+			if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "bisect", nil, nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			return

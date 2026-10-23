@@ -40,7 +40,6 @@ var help = map[string]string{
 	settings.KeyVoiceURL:               "The voice provider's WebSocket address. Required for speech-to-speech, such as ws://host:8000/v1/realtime; for dashscope it overrides the public endpoint, as a Model Studio workspace model needs.",
 	settings.KeyComputersEnabled:       "Give agent sessions a lazy Linux computer when labwc is installed. Applies to the next harness turn.",
 	settings.KeySessionCheckInInterval: "Parent check-in interval (default 15m). Zero disables check-ins.",
-	settings.KeyMergeStewardProfile:    "The merge steward handles failed batches. Auto uses an available service profile. Off sends failed batches straight to root.",
 	settings.KeyLibraryEnabled:         "JSON list of main checkout paths whose librarian runs. Use dyna library enable and disable, which also add and remove the librarian hooks.",
 	settings.KeyLibraryProfile:         "One profile for all librarian work. Auto ranks enabled service profiles.",
 	settings.KeyLibraryReadmeMaxLines:  "Longest README.md the librarian may leave (default 300 lines). Its README change fails dyna library check-readme when it is longer.",
@@ -84,17 +83,12 @@ func Items() ([]Item, error) {
 			}
 		}
 	}
-	// Only the merge steward has an off mode, so its select alone offers it.
-	stewardOptions, stewardLabels := slices.Clone(options), slices.Clone(labels)
-	stewardOptions = slices.Insert(stewardOptions, 1, settings.StewardProfileOff)
-	stewardLabels = slices.Insert(stewardLabels, 1, "Off · failed batches go to root")
 	items := []Item{
 		{Key: settings.KeyPRTrustedBots, Value: v.PRTrustedBots, Source: v.Source(settings.KeyPRTrustedBots), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of trusted GitHub bot logins. Other outside comments are held for the owner."},
 		{Key: settings.KeyVoiceDucking, Value: v.VoiceDucking, Source: v.Source(settings.KeyVoiceDucking), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeyLocalLaneRepos, Value: v.LocalLaneRepos, Source: v.Source(settings.KeyLocalLaneRepos), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of absolute repository paths using the local lane. Fetches every five minutes."},
 		{Key: settings.KeyComputersEnabled, Value: v.ComputersEnabled, Source: v.Source(settings.KeyComputersEnabled), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeySessionCheckInInterval, Value: v.SessionCheckInInterval.String(), Source: v.Source(settings.KeySessionCheckInInterval), LiveVsRestart: settings.LiveNextOperation, Kind: "duration"},
-		{Key: settings.KeyMergeStewardProfile, Value: v.MergeStewardProfile, Source: v.Source(settings.KeyMergeStewardProfile), LiveVsRestart: settings.LiveNextOperation, Kind: "select", Options: stewardOptions, OptionLabels: stewardLabels},
 		{Key: settings.KeyLibraryEnabled, Value: v.LibraryEnabled, Source: v.Source(settings.KeyLibraryEnabled), LiveVsRestart: settings.LiveNextOperation, Kind: "string"},
 		{Key: settings.KeyLibraryProfile, Value: v.LibraryProfile, Source: v.Source(settings.KeyLibraryProfile), LiveVsRestart: settings.LiveNextOperation, Kind: "select", Options: options, OptionLabels: labels},
 		{Key: settings.KeyLibraryReadmeMaxLines, Value: v.LibraryReadmeMaxLines, Source: v.Source(settings.KeyLibraryReadmeMaxLines), LiveVsRestart: settings.LiveNextOperation, Kind: "int"},

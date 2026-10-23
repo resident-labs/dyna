@@ -16,7 +16,7 @@ Attaching twice changes nothing.
 ## Your watcher
 
 The watch uses the root seat's wake rules. It delivers root-addressed alerts, marked action requests, owner requests and root failures.
-All root-addressed quiet posts stay held until that delivery. This includes merge-decision posts, issues, cleanup notices and quiet steward notes.
+All root-addressed quiet posts stay held until that delivery. This includes issues, cleanup notices and every other quiet post for root.
 The owner's posts to agents are quiet context too: the agents answer them, and you read what was said.
 If no wake comes for 15 minutes, the engine posts one timed-flush notice that delivers the held posts as the same kind of delivery.
 A lone quiet post prints nothing. It does not wake the monitor on its own.
@@ -24,7 +24,7 @@ By default the watcher emits one JSON block with a `posts` array: quiet context 
 `--lines` prints the same deliveries as short text lines instead, one per post, each cut to about 200 characters, and ends each delivery with one line: `-- since <post-id>`.
 
 ```text
-· work:merge-steward [merge-decision] msg_1: Keep the queue paused
+· work:author [issue] msg_1: Repair the flaky test
 · work [message] msg_2: @worker fix the flaky test
 ! work:lead [message] msg_3: Choose the recovery
 -- since msg_3

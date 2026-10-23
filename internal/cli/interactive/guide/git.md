@@ -232,14 +232,12 @@ Main push CI checks the merged result.
 Dyna automatically merges approved PRs with passing CI. Successful batches
 remain automatic. Per-PR review and CI feedback still goes to authors.
 
-When a batch fails, Dyna pauses the queue and assigns the merge steward.
-If the steward cannot start, root receives one waking notice instead.
-Set merge.stewardProfile to off to skip the steward; failed batches then reach root directly.
-The steward records decisions quietly for root's next turn and in merge history.
+When a batch fails, Dyna pauses the queue and sends root one waking notice.
+Root chooses the recovery, and every decision enters merge history.
 Authors continue to fix their own PRs.
 Dyna does not automatically recover a passing prefix. Bisect runs on demand.
 
-Root and the merge steward use these commands in their own stamped room:
+Root uses these commands in its own stamped room:
 
 ```text
 dyna git merge status
@@ -251,11 +249,12 @@ dyna git merge retry
 dyna git merge retry --without <pr> --without <pr>
 dyna git merge bisect
 dyna git merge publish <trial>
+dyna git merge publish <trial> --flaky "<test name>: <reason>"
 dyna git merge note "<decision and evidence>"
 ```
 
-`note` records one quiet decision line in merge history and root's next turn.
-Root and the room's steward may record notes. Other workers cannot.
+`note` records one decision line in merge history. Root may record notes in
+its own room. Other workers cannot.
 
 `status` prints JSON with the queue, current failed batch and pause state.
 `pause` stops automatic merging for the room. `resume` clears that merge
@@ -277,6 +276,16 @@ PR. `publish` publishes a saved passed trial by its branch or numeric suffix.
 It checks current push CI, fresh PR gates, ancestry from current main, and the
 main lease. It preserves the room merge pause, so you can inspect the result
 before you resume batching.
+
+Repeat `--flaky "<test name>: <reason>"` to publish a failed trial whose only
+failures are unrelated flakes. It refuses when any other test or job failed.
+It records the decision in merge history, files one room issue for each named
+test, and clears the batch pause.
+
+When a batch fails on a test that is unrelated to the batch's changes and is
+known or likely flaky, rerun that test once locally. If it still looks like a
+flake, publish with `--flaky` and assign the fix. Do not return PRs or block
+the queue for a known flake.
 
 Inspect status before choosing a recovery action. Return a PR when its author
 must fix it. Retry after the cause is fixed, or exclude a PR from the retry.

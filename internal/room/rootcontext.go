@@ -19,8 +19,6 @@ const (
 const (
 	// RootOwnerDM is the owner's post to an agent, not to the root seat.
 	RootOwnerDM = "owner-dm"
-	// RootMergeNote is a merge steward's recorded merge decision.
-	RootMergeNote = "merge-note"
 	// RootQuietPost is any other quiet post addressed to the root seat,
 	// whatever its kind: issues, completions and notices all reach root.
 	RootQuietPost = "quiet-post"
@@ -50,10 +48,6 @@ func RootContext(msg Message, roomName string) (RootDecision, string) {
 			return RootWake, ""
 		}
 		return RootQuiet, ""
-	}
-	switch {
-	case msg.From == roomName+":merge-steward" && msg.Kind == "merge-decision":
-		return RootQuiet, RootMergeNote
 	}
 	return RootQuiet, RootQuietPost
 }

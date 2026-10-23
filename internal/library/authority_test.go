@@ -33,7 +33,6 @@ func TestLibraryMutationsUseExplicitActor(t *testing.T) {
 		{"other-session", authority.Actor{Role: authority.Session, Session: "other"}, false},
 		{"empty-session", authority.Actor{Role: authority.Session}, false},
 		{"worker-with-librarian-id", authority.Actor{Role: authority.Worker, Session: "librarian"}, false},
-		{"steward-with-librarian-id", authority.Actor{Role: authority.Steward, Session: "librarian"}, false},
 		{"unknown-with-librarian-id", authority.Actor{Session: "librarian"}, false},
 		{"no-actor", authority.Actor{}, false},
 	}

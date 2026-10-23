@@ -10,8 +10,6 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/profile"
-	"dyna-agent/internal/settings"
-	"dyna-agent/internal/subagent"
 )
 
 func servicesByRole(t *testing.T, e *env, roomName string) map[string]ServiceView {
@@ -32,10 +30,7 @@ func TestServicesListAutoProfiles(t *testing.T) {
 	rec := e.room("svc")
 	got := servicesByRole(t, e, rec.Name)
 	reviewer := got["reviewer"]
-	if view := got["merge-steward"]; view.Name != "Merge steward" || view.Page != "pull-requests" || view.Scope != "global" {
-		t.Fatalf("steward = %+v", view)
-	}
-	if len(got) != 2 || reviewer.Page != "pull-requests" || reviewer.Scope != "room" {
+	if len(got) != 1 || reviewer.Name != "PR reviewer" || reviewer.Page != "pull-requests" || reviewer.Scope != "room" {
 		t.Fatalf("services = %+v", got)
 	}
 	for _, view := range got {
@@ -67,69 +62,42 @@ func TestServicesListServiceProfiles(t *testing.T) {
 }
 
 func TestServiceProfilePinAndReset(t *testing.T) {
-	for _, role := range []string{"reviewer", "merge-steward"} {
-		t.Run(role, func(t *testing.T) {
-			e := newEnv(t)
-			rec := e.room("svc")
-			readPin := func() string {
-				t.Helper()
-				if role == "merge-steward" {
-					value, err := settings.Load(settings.DefaultPath())
-					if err != nil {
-						t.Fatal(err)
-					}
-					return value.MergeStewardProfile
-				}
-				value, err := e.svc.PRs.PRSettings(rec.Name)
-				if err != nil {
-					t.Fatal(err)
-				}
-				return value.ReviewerProfile
-			}
-			if err := e.svc.SetServiceProfile(ownerCtx, rec.Name, role, "mock"); err != nil {
-				t.Fatal(err)
-			}
-			if pin := readPin(); pin != "mock" {
-				t.Fatalf("stored pin = %q", pin)
-			}
-			view := servicesByRole(t, e, rec.Name)[role]
-			if view.Source != "pinned" || view.Pinned != "mock" || view.Reason != "pinned by the room" {
-				t.Fatalf("pinned service = %+v", view)
-			}
-			if err := e.svc.SetServiceProfile(ownerCtx, rec.Name, role, "missing"); err == nil {
-				t.Fatal("accepted a missing profile")
-			}
-			if pin := readPin(); pin != "mock" {
-				t.Fatalf("missing profile replaced the pin: %q", pin)
-			}
-			if err := e.svc.SetServiceProfile(ownerCtx, rec.Name, role, ""); err != nil {
-				t.Fatal(err)
-			}
-			if pin := readPin(); pin != "" {
-				t.Fatalf("reset kept the pin: %q", pin)
-			}
-			view = servicesByRole(t, e, rec.Name)[role]
-			if view.Source != "auto" || view.Pinned != "" {
-				t.Fatalf("auto again = %+v", view)
-			}
-		})
-	}
-}
-
-// The steward accepts one extra pin, off, which routes failed batches to
-// root.
-func TestServiceProfileOffForStewardOnly(t *testing.T) {
+	role := "reviewer"
 	e := newEnv(t)
 	rec := e.room("svc")
-	if err := e.svc.SetServiceProfile(ownerCtx, rec.Name, subagent.RoleSteward, "off"); err != nil {
+	readPin := func() string {
+		t.Helper()
+		value, err := e.svc.PRs.PRSettings(rec.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return value.ReviewerProfile
+	}
+	if err := e.svc.SetServiceProfile(ownerCtx, rec.Name, role, "mock"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.svc.SetServiceProfile(ownerCtx, rec.Name, "keeper", "off"); err == nil {
-		t.Fatal("keeper accepted off")
+	if pin := readPin(); pin != "mock" {
+		t.Fatalf("stored pin = %q", pin)
 	}
-	view := servicesByRole(t, e, rec.Name)[subagent.RoleSteward]
-	if view.Pinned != "off" || view.Source != "pinned" || view.Profile != "off" || view.Reason != "" {
-		t.Fatalf("off steward = %+v", view)
+	view := servicesByRole(t, e, rec.Name)[role]
+	if view.Source != "pinned" || view.Pinned != "mock" || view.Reason != "pinned by the room" {
+		t.Fatalf("pinned service = %+v", view)
+	}
+	if err := e.svc.SetServiceProfile(ownerCtx, rec.Name, role, "missing"); err == nil {
+		t.Fatal("accepted a missing profile")
+	}
+	if pin := readPin(); pin != "mock" {
+		t.Fatalf("missing profile replaced the pin: %q", pin)
+	}
+	if err := e.svc.SetServiceProfile(ownerCtx, rec.Name, role, ""); err != nil {
+		t.Fatal(err)
+	}
+	if pin := readPin(); pin != "" {
+		t.Fatalf("reset kept the pin: %q", pin)
+	}
+	view = servicesByRole(t, e, rec.Name)[role]
+	if view.Source != "auto" || view.Pinned != "" {
+		t.Fatalf("auto again = %+v", view)
 	}
 }
 
@@ -154,7 +122,7 @@ func TestServicesListKeepsRowsWithBrokenReviewerState(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := servicesByRole(t, e, rec.Name)
-	if len(got) != 2 || got["merge-steward"].Profile != "mock" || got["reviewer"].Profile != "" || got["reviewer"].Reason == "" {
+	if len(got) != 1 || got["reviewer"].Profile != "" || got["reviewer"].Reason == "" {
 		t.Fatalf("broken reviewer = %+v", got)
 	}
 }
@@ -165,7 +133,7 @@ func TestServicesListKeepsRowsWithBrokenReviewerState(t *testing.T) {
 func TestServiceProfileIsTheOwnersOnly(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("svc-owner")
-	for _, role := range []string{subagent.RoleSteward, "reviewer"} {
+	for _, role := range []string{"reviewer"} {
 		for who, actor := range map[string]authority.Actor{
 			"the room's root": {Role: authority.Root, Session: "ses_20261020-000000-0000abcd", Room: rec.ID},
 			"a session":       {Role: authority.Session, Session: "ses_20261020-000000-0000ffff", Room: rec.ID},

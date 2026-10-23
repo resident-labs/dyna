@@ -437,9 +437,9 @@ func (m *Manager) returnDormant(ctx context.Context, id string, turn int) error 
 // own process. A call never names its session (item 3).
 func runnerSession(ctx context.Context) (string, error) {
 	a := authority.Of(ctx)
-	// A session acts as Session, or as Root or Steward when it holds the
-	// room's root seat or a steward role (SessionActor); each is a session.
-	sessionRole := a.Role == authority.Session || a.Role == authority.Root || a.Role == authority.Steward
+	// A session acts as Session, or as Root when it holds the room's root
+	// seat (SessionActor); each is a session.
+	sessionRole := a.Role == authority.Session || a.Role == authority.Root
 	if !sessionRole || a.Session == "" {
 		// Logged, so a runner the engine could not identify shows in its log.
 		log.Printf("runner call refused: the caller acts as %q, not as a session", a.Role)

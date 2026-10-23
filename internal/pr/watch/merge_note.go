@@ -9,7 +9,7 @@ import (
 	"dyna-agent/internal/room"
 )
 
-// mergeNote records a decision without waking root.
+// mergeNote records root's decision without waking root.
 func (s *Service) mergeNote(ctx context.Context, roomID string, args, without []string) error {
 	if len(args) != 1 || len(without) != 0 || strings.TrimSpace(args[0]) == "" || strings.ContainsAny(args[0], "\r\n") {
 		return fmt.Errorf("merge note requires one nonempty line")
@@ -32,7 +32,7 @@ func (s *Service) mergeNote(ctx context.Context, roomID string, args, without []
 		return err
 	}
 	post, err := s.Notify.Rooms.Post(rm.ID, room.PostInput{
-		From: rm.Name + ":merge-steward", Kind: "merge-decision", To: []string{rm.Name}, Text: args[0],
+		From: rm.Name + ":" + room.RootAgent, Kind: "merge-decision", To: []string{rm.Name}, Text: args[0],
 	})
 	if err != nil {
 		return err

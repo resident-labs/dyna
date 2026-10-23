@@ -22,7 +22,7 @@ func TestHookEditsUseCallerPower(t *testing.T) {
 		"EditHook":   {repo, "power", hooks.Patch{}},
 		"RemoveHook": {repo, "power"},
 	}
-	for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Steward, authority.Worker, ""} {
+	for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker, ""} {
 		t.Run(string(role), func(t *testing.T) {
 			a := authority.Actor{Role: role, Session: "session", Run: "wf_test", Room: "room"}
 			caller := websvc.Caller{Kind: websvc.Session, Session: a.Session}

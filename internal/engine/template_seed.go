@@ -12,7 +12,7 @@ import (
 
 func (s services) templateSeed(ctx context.Context, registry string) (workflowtemplate.SeedResult, error) {
 	switch authority.Of(ctx).Role {
-	case authority.Owner, authority.Root, authority.Session, authority.Worker, authority.Steward:
+	case authority.Owner, authority.Root, authority.Session, authority.Worker:
 	default:
 		return workflowtemplate.SeedResult{}, fmt.Errorf("template seed needs a verified caller")
 	}

@@ -39,7 +39,6 @@ const iso = (minutesAgo) => new Date(now - minutesAgo * 60000).toISOString()
 export const api = {
   listServices: () => Promise.resolve([
     { role: 'reviewer', name: 'PR reviewer', profile: 'sol', pinned: 'sol', reason: '', profiles: ['luna', 'sol'] },
-    { role: 'merge-steward', name: 'Merge steward', profile: 'off', pinned: 'off', reason: '', profiles: ['luna', 'sol'] },
   ]),
   reviewerStatus: () => Promise.resolve({ enabled: true, profile: 'sol', lastError: '', queue: [], reviewers: [{ current: { pr: 1943, title: 'bundle only the DM Session' } }], recent: [{ pr: 1918, verdict: 'approve', at: iso(1) }] }),
   mergeControlStatus: () => Promise.resolve({ paused: false, queue: [{ state: 'trial-running', reason: 'running (3 of 4 jobs done)', trial: { branch: 'batch-a', batch: ['a', 'b'] } }, { state: 'held', reason: 'draft' }] }),
@@ -90,7 +89,7 @@ test('every service gets a line with its switch or its reason, and the timed one
   try {
     await settle(page)
     const list = need(page.root.querySelector('.list'), 'services list')
-    for (const name of ['PR reviewers', 'Merge queue', 'Merge steward', 'Conflict radar', 'Librarian', 'Update Dyna', 'Maintenance', 'Account usage', 'CI admission', 'Voice']) {
+    for (const name of ['PR reviewers', 'Merge queue', 'Conflict radar', 'Librarian', 'Update Dyna', 'Maintenance', 'Account usage', 'CI admission', 'Voice']) {
       assert.ok(serviceRow(list, name), `missing ${name}`)
     }
     const reviewer = textOf(need(serviceRow(list, 'PR reviewers'), 'reviewer row'))

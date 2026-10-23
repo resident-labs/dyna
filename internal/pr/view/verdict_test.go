@@ -31,7 +31,6 @@ func TestVerdictUsesAuthenticatedReviewerAndPreservesPendingNotice(t *testing.T)
 	}{
 		{authority.Actor{Role: authority.Session, Session: reviewer, Room: alpha.ID}, true},
 		{authority.Actor{Role: authority.Root, Session: reviewer, Room: alpha.ID}, true},
-		{authority.Actor{Role: authority.Steward, Session: reviewer, Room: alpha.ID}, true},
 		{authority.Actor{Role: authority.Session, Session: "another-session", Room: alpha.ID}, false},
 		{authority.Actor{Role: authority.Root, Session: reviewer, Room: beta.ID}, false},
 		{authority.Actor{Role: authority.Worker, Session: reviewer, Run: "run", Room: alpha.ID}, false},

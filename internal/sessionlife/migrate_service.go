@@ -70,6 +70,7 @@ func migrateService(db *sql.DB) error {
 				}
 				service := ancestor.Service
 				switch ancestor.Role {
+				// TODO: legacy/shim — merge-steward is a role saved before the steward was removed; keep it marked as a service so its stored sessions migrate cleanly.
 				case "root", "reviewer", "keeper", "librarian", "merge-steward":
 					service = true
 				}

@@ -19,7 +19,7 @@ func TestWatchHoldsLoneQuietPostUntilWake(t *testing.T) {
 	if out.Len() != 0 {
 		t.Fatalf("lone quiet post printed before a wake: %s", out.Bytes())
 	}
-	wake := room.Message{Wake: true, ID: "wake", From: "work:merge-steward", Kind: "alert", To: []string{"work"}, Text: "Main is red"}
+	wake := room.Message{Wake: true, ID: "wake", From: "work:lead", Kind: "alert", To: []string{"work"}, Text: "Main is red"}
 	if err := write(wake); err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestWatchWakeAndOwnerEchoRules(t *testing.T) {
 func TestWatchHoldsQuietContextThroughRootSelfPosts(t *testing.T) {
 	var out bytes.Buffer
 	write := watchWriter(&out, "work", false, false)
-	quiet := room.Message{ID: "quiet", From: "work:merge-steward", Kind: "merge-decision", To: []string{"work"}, Text: "Keep the queue paused"}
+	quiet := room.Message{ID: "quiet", From: "work:lead", Kind: "merge-decision", To: []string{"work"}, Text: "Keep the queue paused"}
 	if err := write(quiet); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestWatchHoldsQuietContextThroughRootSelfPosts(t *testing.T) {
 			t.Errorf("root self-post flushed held context: %s", out.Bytes())
 		}
 	}
-	alert := room.Message{Wake: true, ID: "alert", From: "work:merge-steward", Kind: "alert", To: []string{"work"}, Text: "Main is red"}
+	alert := room.Message{Wake: true, ID: "alert", From: "work:lead", Kind: "alert", To: []string{"work"}, Text: "Main is red"}
 	if err := write(alert); err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestWatchHoldsQuietContextThroughRootSelfPosts(t *testing.T) {
 func TestWatchTimedFlushNoticeDeliversHeldContext(t *testing.T) {
 	var out bytes.Buffer
 	write := watchWriter(&out, "work", false, false)
-	quiet := room.Message{ID: "quiet", From: "work:merge-steward", Kind: "merge-decision", To: []string{"work"}, Text: "Keep the queue paused"}
+	quiet := room.Message{ID: "quiet", From: "work:lead", Kind: "merge-decision", To: []string{"work"}, Text: "Keep the queue paused"}
 	if err := write(quiet); err != nil {
 		t.Fatal(err)
 	}

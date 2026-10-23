@@ -13,7 +13,7 @@ import (
 func TestSettingWriteUsesCallerPower(t *testing.T) {
 	storetest.Isolate(t)
 	calls := testCalls(t, false)
-	for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Steward, authority.Worker, ""} {
+	for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker, ""} {
 		t.Run(string(role), func(t *testing.T) {
 			baseline := settings.Defaults()
 			if err := baseline.Save(); err != nil {

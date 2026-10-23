@@ -11,7 +11,7 @@ import (
 
 func TestCatalogChecksAuthorityBeforeValidation(t *testing.T) {
 	manager := &ConfigManager{Path: filepath.Join(t.TempDir(), "absent", "catalog.json")}
-	for _, role := range []authority.Role{authority.Session, authority.Worker, authority.Steward, ""} {
+	for _, role := range []authority.Role{authority.Session, authority.Worker, ""} {
 		ctx := authority.WithActor(t.Context(), authority.Actor{Role: role})
 		for _, err := range []error{
 			manager.AddMCP(ctx, ManagedMCP{}), manager.AddSkill(ctx, ManagedSkill{}),

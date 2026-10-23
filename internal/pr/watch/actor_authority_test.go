@@ -112,7 +112,7 @@ func checkTypedRoomAuthority(t *testing.T, action string, call func(*Service, au
 }
 
 func TestOpenAndTrackRejectUnauthorizedActorsBeforeBackend(t *testing.T) {
-	for _, role := range []authority.Role{authority.Worker, authority.Steward, ""} {
+	for _, role := range []authority.Role{authority.Worker, ""} {
 		t.Run(string(role), func(t *testing.T) {
 			actor := authority.Actor{Role: role, Session: "author"}
 			var s *Service

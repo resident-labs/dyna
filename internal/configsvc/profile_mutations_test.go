@@ -118,7 +118,7 @@ func TestProfileOperationsRefuseBeforeReadingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := &Service{}
-	for _, role := range []authority.Role{authority.Session, authority.Worker, authority.Steward, ""} {
+	for _, role := range []authority.Role{authority.Session, authority.Worker, ""} {
 		ctx := authority.WithActor(t.Context(), authority.Actor{Role: role})
 		_, upErr := svc.SaveProfile(ctx, ProfileEdit{})
 		_, useErr := svc.SetProfileUses(ctx, "missing", nil)

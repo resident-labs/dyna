@@ -709,10 +709,10 @@ func TestWorkflowWorkersCannotStartOrControlSubagents(t *testing.T) {
 	info, _ := e.start("SLEEP:1 RESPOND: ok")
 	e.wait(info.ID, 1)
 	t.Setenv(mode.EnvMode, mode.Workflow)
-	if _, _, err := e.m.Start(context.Background(), StartOptions{Goal: "Finish the test task", Profile: "mock", Dir: t.TempDir(), Task: "x"}); err == nil || err.Error() != "subagent start is owner or root or session or steward only; use subagent mode to start work" {
+	if _, _, err := e.m.Start(context.Background(), StartOptions{Goal: "Finish the test task", Profile: "mock", Dir: t.TempDir(), Task: "x"}); err == nil || err.Error() != "subagent start is owner or root or session only; use subagent mode to start work" {
 		t.Fatalf("Start in workflow mode err = %v", err)
 	}
-	if _, err := e.send(info.ID, "SLEEP:1 x", WakeOptions{}); err == nil || err.Error() != "subagent start is owner or root or session or steward only; use subagent mode to start work" {
+	if _, err := e.send(info.ID, "SLEEP:1 x", WakeOptions{}); err == nil || err.Error() != "subagent start is owner or root or session only; use subagent mode to start work" {
 		t.Fatalf("Send in workflow mode err = %v", err)
 	}
 	if _, err := e.m.Stop(e.ctx, info.ID); err == nil || err.Error() != "subagent stop is owner or root or session only; use subagent mode to control sessions" {

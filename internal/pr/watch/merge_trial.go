@@ -448,7 +448,8 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 			if err != nil {
 				return err
 			}
-			if ci == "failed" {
+			flaky := flakyPublicationAllowed(ctx, logs)
+			if ci == "failed" && !flaky {
 				// Record the prefix before it is reset to the full batch.
 				s.noteMergeHistory(st, repo, b, "trial", "failed", b.Head, logs)
 				if len(b.StackChanges) > 0 {
@@ -468,7 +469,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 				}
 				return s.saveMergeTrial(repo, b)
 			}
-			if ci != "passed" {
+			if ci != "passed" && !flaky {
 				b.Reason = reason
 				return s.saveMergeTrial(repo, b)
 			}

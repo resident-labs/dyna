@@ -477,8 +477,8 @@ func TestLiveMemberShowsItsRunningTool(t *testing.T) {
 	}
 }
 
-// A session or a steward that calls a session control through the engine
-// may change only itself and its descendants, as the CLI's Target checked
+// A session that calls a session control through the engine may change only
+// itself and its descendants, as the CLI's Target checked
 // in its own process before. The root seat and the owner, which the web app
 // and paired devices act as, still may change any session in the room.
 func TestSessionControlsLetASessionActOnlyOnItsDescendants(t *testing.T) {
@@ -499,10 +499,6 @@ func TestSessionControlsLetASessionActOnlyOnItsDescendants(t *testing.T) {
 		if err := act(as(stranger)); err == nil || !strings.Contains(err.Error(), "may act only on itself and its descendants") {
 			t.Errorf("%s by a stranger session = %v; want the descendant refusal", name, err)
 		}
-	}
-	steward := authority.WithActor(e.ctx, authority.Actor{Role: authority.Steward, Session: stranger.ID, Room: alpha.ID})
-	if _, err := e.svc.StopSession(steward, "alpha", child.ID); err == nil || !strings.Contains(err.Error(), "may act only on itself and its descendants") {
-		t.Errorf("a steward stopped a session outside its tree: %v", err)
 	}
 	if _, err := e.svc.PromoteSession(as(lead), "alpha", child.ID); err != nil {
 		t.Fatalf("the parent could not promote its child: %v", err)
@@ -568,7 +564,7 @@ func TestRenameAndAdoptSessionCheckTheCaller(t *testing.T) {
 }
 
 // StartSubagent acts for the caller in the engine. A workflow worker may
-// not start a session. Session, root and steward callers start children
+// not start a session. Session and root callers start children
 // only in their own room, and the owner
 // starts top-level sessions in the caller's directory. The start event
 // records that directory.
@@ -583,7 +579,7 @@ func TestStartSubagentActsForTheCaller(t *testing.T) {
 	if _, err := e.svc.StartSubagent(as(worker), "alpha", in); err == nil || !strings.Contains(err.Error(), "subagent start is") {
 		t.Fatalf("workflow worker started a session: %v", err)
 	}
-	for _, role := range []authority.Role{authority.Session, authority.Root, authority.Steward} {
+	for _, role := range []authority.Role{authority.Session, authority.Root} {
 		actor := authority.Actor{Role: role, Session: lead.ID, Room: alpha.ID}
 		if _, err := e.svc.StartSubagent(as(actor), beta.Name, in); err == nil || !strings.Contains(err.Error(), "another room") {
 			t.Fatalf("%s started a child in another room: %v", role, err)

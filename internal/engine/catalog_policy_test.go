@@ -41,7 +41,7 @@ func TestCatalogWritesUseCallerPower(t *testing.T) {
 		{"SetHarnessConfigEnabled", "skill disable", []any{"skill", "existing", "codex", false}},
 	} {
 		t.Run(op.action, func(t *testing.T) {
-			for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker, authority.Steward, ""} {
+			for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker, ""} {
 				t.Run(string(role), func(t *testing.T) {
 					enabled := []string{"codex"}
 					if strings.HasSuffix(op.action, " enable") {

@@ -32,7 +32,7 @@ func (m *Manager) AuthorityActor(ctx context.Context) (authority.Actor, error) {
 }
 
 // SessionActor is the actor of an open session from its stored role and
-// room: the room's root seat is Root and a steward is Steward.
+// room: the room's root seat is Root.
 func (s *Store) SessionActor(id string) (authority.Actor, error) {
 	actor, _, err := s.sessionActor(id)
 	return actor, err
@@ -50,8 +50,6 @@ func (s *Store) sessionActor(id string) (authority.Actor, Meta, error) {
 	switch meta.Role {
 	case RoleRoot:
 		actor.Role = authority.Root
-	case RoleSteward:
-		actor.Role = authority.Steward
 	}
 	return actor, meta, nil
 }

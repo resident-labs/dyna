@@ -73,7 +73,6 @@ type Values struct {
 	BrowserSaveBack        bool
 	ComputersEnabled       bool
 	SessionCheckInInterval time.Duration
-	MergeStewardProfile    string
 	MaxCardBytes           int64
 	MaxFileBytes           int64
 	AutoCheck              bool
@@ -406,13 +405,6 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.ComputersEnabled = b
 		v.fromFile[key] = true
-	case KeyMergeStewardProfile:
-		value = strings.TrimSpace(value)
-		if strings.EqualFold(value, StewardProfileOff) {
-			value = StewardProfileOff
-		}
-		v.MergeStewardProfile = value
-		v.fromFile[key] = true
 	case KeySessionCheckInInterval:
 		return v.setSession(key, value)
 	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking:
@@ -514,9 +506,6 @@ func (v Values) Save() error {
 	computers["enabled"] = v.ComputersEnabled
 	raw["computers"] = computers
 	v.saveBrowser(raw)
-	merge := nested(raw, "merge")
-	merge["stewardProfile"] = v.MergeStewardProfile
-	raw["merge"] = merge
 	v.saveSessions(raw)
 	v.saveVoice(raw)
 	v.saveLibrary(raw)

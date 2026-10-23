@@ -168,7 +168,7 @@ func finishLocalTrials(t *testing.T, e *testEnv, ci *fakeLocalCI, bisect bool) {
 					t.Fatalf("failed local batch did not stop and notify root: %+v", b)
 				}
 				localTick(t, e)
-				if err := e.s.MergeControl(t.Context(), e.author.RoomID, "bisect", nil, nil); err != nil {
+				if err := e.s.MergeControl(t.Context(), e.author.RoomID, "bisect", nil, nil, nil); err != nil {
 					t.Fatal(err)
 				}
 				bisect = false

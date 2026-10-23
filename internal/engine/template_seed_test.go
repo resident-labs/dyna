@@ -36,7 +36,7 @@ func TestTemplateSeedUsesVerifiedContextOnLocalSocket(t *testing.T) {
 	if call == nil {
 		t.Fatal("TemplateSeed is not registered")
 	}
-	for _, role := range []authority.Role{"", authority.Owner, authority.Root, authority.Session, authority.Worker, authority.Steward} {
+	for _, role := range []authority.Role{"", authority.Owner, authority.Root, authority.Session, authority.Worker} {
 		t.Run(string(role), func(t *testing.T) {
 			registry := filepath.Join(t.TempDir(), "templates")
 			// The fake engine supplies the verified actor, never a request argument.

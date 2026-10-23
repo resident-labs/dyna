@@ -9,7 +9,7 @@ import (
 )
 
 // MergeControl applies the existing merge controls for the authenticated caller.
-func (s *Service) MergeControl(ctx context.Context, roomRef, action string, args, without []string) error {
+func (s *Service) MergeControl(ctx context.Context, roomRef, action string, args, without, flaky []string) error {
 	rm, err := s.Notify.Rooms.Resolve(roomRef)
 	if err != nil {
 		return err
@@ -18,7 +18,7 @@ func (s *Service) MergeControl(ctx context.Context, roomRef, action string, args
 	if err != nil {
 		return err
 	}
-	return s.Watcher().MergeControl(authority.WithActor(ctx, actor), rm.ID, action, args, without)
+	return s.Watcher().MergeControl(authority.WithActor(ctx, actor), rm.ID, action, args, without, flaky)
 }
 
 // SetMergePaused uses the same room and caller checks as the CLI merge controls.
@@ -27,7 +27,7 @@ func (s *Service) SetMergePaused(ctx context.Context, roomRef string, paused boo
 	if paused {
 		action = "pause"
 	}
-	return s.MergeControl(ctx, roomRef, action, nil, nil)
+	return s.MergeControl(ctx, roomRef, action, nil, nil, nil)
 }
 
 // MergeControlStatus includes the same in-memory fairness order as the worker.

@@ -1,56 +1,31 @@
 package settings
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
 
-func TestMergeStewardProfileRoundTrip(t *testing.T) {
+// A settings.json saved with the removed merge steward still loads, and a save
+// leaves the stale key alone.
+// TODO: legacy/shim — remove with the legacy merge reader in merge.go.
+func TestLegacyMergeStewardProfileIsIgnored(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "settings.json")
-	v, err := Load(path)
-	if err != nil {
+	if err := os.WriteFile(path, []byte(`{"version":1,"merge":{"stewardProfile":"sol"}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if v.MergeStewardProfile != "" {
-		t.Fatal("steward should use Auto")
+	v, err := Load(path)
+	if err != nil {
+		t.Fatalf("load: %v", err)
 	}
-	if err := v.Set(KeyMergeStewardProfile, " sol "); err != nil {
+	if err := v.Set(KeySessionCheckInInterval, "5m"); err != nil {
 		t.Fatal(err)
 	}
 	if err := v.Save(); err != nil {
-		t.Fatal(err)
+		t.Fatalf("save: %v", err)
 	}
 	saved, err := Load(path)
-	if err != nil || saved.MergeStewardProfile != "sol" {
+	if err != nil || saved.SessionCheckInInterval.String() != "5m0s" {
 		t.Fatalf("saved = %+v, %v", saved, err)
-	}
-	if err := saved.Set(KeyMergeStewardProfile, ""); err != nil || saved.MergeStewardProfile != "" {
-		t.Fatal("cannot reset Auto", err)
-	}
-}
-
-func TestMergeStewardProfileOff(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "settings.json")
-	v, err := Load(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, input := range []string{"off", "Off", " OFF "} {
-		if err := v.Set(KeyMergeStewardProfile, input); err != nil {
-			t.Fatal(err)
-		}
-		if v.MergeStewardProfile != "off" {
-			t.Fatalf("Set(%q) stored %q, want off", input, v.MergeStewardProfile)
-		}
-	}
-	if err := v.Save(); err != nil {
-		t.Fatal(err)
-	}
-	saved, err := Load(path)
-	if err != nil || saved.MergeStewardProfile != "off" {
-		t.Fatalf("saved = %+v, %v", saved, err)
-	}
-	if err := saved.Set(KeyMergeStewardProfile, ""); err != nil || saved.MergeStewardProfile != "" {
-		t.Fatal("cannot reset Auto", err)
 	}
 }

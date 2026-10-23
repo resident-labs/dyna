@@ -130,7 +130,7 @@ func TestDefaultDisableRemove(t *testing.T) {
 func TestSettingsItemsAndSet(t *testing.T) {
 	isolate(t)
 	items, err := Items()
-	if err != nil || len(items) != 29 {
+	if err != nil || len(items) != 28 {
 		t.Fatalf("Items = %d, %v", len(items), err)
 	}
 	for _, it := range items {
@@ -158,40 +158,6 @@ func TestSettingsItemsAndSet(t *testing.T) {
 	}
 	if _, err := Set(t.Context(), settings.KeySubagentMaxDepth, "0"); err == nil {
 		t.Fatal("depth 0 must fail")
-	}
-}
-
-// The steward profile select offers Off next to Auto; the
-// librarian select does not, because they have no off mode.
-func TestStewardOffSettingOption(t *testing.T) {
-	isolate(t)
-	seed(t, mock("sol"))
-	items, err := Items()
-	if err != nil {
-		t.Fatal(err)
-	}
-	byKey := map[string]Item{}
-	for _, it := range items {
-		byKey[it.Key] = it
-	}
-	steward := byKey[settings.KeyMergeStewardProfile]
-	if want := []string{"", "off", "sol"}; !slices.Equal(steward.Options, want) {
-		t.Fatalf("steward options = %v, want %v", steward.Options, want)
-	}
-	if steward.OptionLabels[1] != "Off · failed batches go to root" {
-		t.Fatalf("off label = %q", steward.OptionLabels[1])
-	}
-	if !strings.Contains(steward.Help, "Off") {
-		t.Fatalf("steward help lacks Off: %q", steward.Help)
-	}
-	for _, key := range []string{settings.KeyLibraryProfile} {
-		if slices.Contains(byKey[key].Options, "off") {
-			t.Fatalf("%s offers off", key)
-		}
-	}
-	it, err := Set(t.Context(), settings.KeyMergeStewardProfile, "off")
-	if err != nil || it.Value != "off" {
-		t.Fatalf("Set off = %+v, %v", it, err)
 	}
 }
 

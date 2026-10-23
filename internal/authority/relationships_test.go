@@ -6,7 +6,7 @@ func TestObjectRelationsRequireSession(t *testing.T) {
 	old := Rules
 	Rules = append(append([]Rule(nil), old...), Rule{Action: "test object", Relations: []Relation{Author, Parent, Self, Librarian}})
 	defer func() { Rules = old }()
-	for _, role := range []Role{Owner, Root, Session, Worker, Role("steward"), ""} {
+	for _, role := range []Role{Owner, Root, Session, Worker, ""} {
 		err := Check("test object", Actor{Role: role, Session: "matching-id"}, func(Relation) bool { return true })
 		if (err == nil) != (role == Session) {
 			t.Errorf("role %q: %v", role, err)
