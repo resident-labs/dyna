@@ -5,7 +5,7 @@ import vm from 'node:vm'
 import { stripTypes, topLevelFunctions } from '../../../test/svelte-source.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { installSessionView } from '../../../test/appModules.ts'
-import { session } from '../../../test/session-fixtures.ts'
+import { member, session } from '../../../test/session-fixtures.ts'
 
 // A completion link for the session that is already open skips openFresh, so
 // the transcript it brings must replace the error of the read that failed.
@@ -30,7 +30,7 @@ function app(failed: boolean) {
 
 test('the transcript a completion link brings clears the error of a read that failed', () => {
   const c = app(true)
-  const brought = session('ses_one', { member: { id: 'ses_one', name: 'one' } as never })
+  const brought = session('ses_one', { member: member('ses_one', { name: 'one' }) })
   ;(c.openSession as (member: { id: string; name: string }, turn: number, initial: unknown) => void)({ id: 'ses_one', name: 'one' }, 3, brought)
   assert.equal(c.session, brought)
   assert.equal(c.sessionError, '')
