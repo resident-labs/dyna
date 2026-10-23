@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strings"
 	"syscall"
+	"time"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/state"
@@ -314,4 +315,27 @@ func directoryFileEvidence(ctx context.Context, root *os.Root, id, name string) 
 		return dirs, found, readErr
 	}
 	return dirs, found, err
+}
+
+// FinishWithDirectoriesTx preserves the first terminal state and commits the
+// directory completeness bit with that transition. The caller owns receipts.
+func FinishWithDirectoriesTx(ctx context.Context, conn *sql.Conn, id, status, errorText string, ended time.Time, complete bool) (Meta, bool, error) {
+	if err := validateRunID(id); err != nil {
+		return Meta{}, false, err
+	}
+	if !IsFinishedStatus(status) || ended.IsZero() {
+		return Meta{}, false, fmt.Errorf("run finish needs a terminal status and end time")
+	}
+	meta, changed, err := endRunTx(ctx, conn, id, status, errorText, ended)
+	if err != nil || !changed {
+		return meta, changed, err
+	}
+	previous, _, err := readDirectories(ctx, conn, id)
+	if err != nil {
+		return Meta{}, false, err
+	}
+	if err := writeDirectories(ctx, conn, id, previous.Directories, complete); err != nil {
+		return Meta{}, false, err
+	}
+	return meta, true, nil
 }
