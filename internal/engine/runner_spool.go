@@ -91,7 +91,7 @@ func newRunnerSpool(dataDir string, sessions func() *subagent.Manager, w *state.
 		},
 	}}
 	bindings = append(bindings, receiptBindings...)
-	bindings = append(bindings, runDirectoriesRecoveryBinding(w))
+	bindings = append(bindings, runDirectoriesRecoveryBinding(w), runFinishRecoveryBinding(w))
 	for i := range bindings {
 		bindings[i].Local = false
 	}
@@ -104,6 +104,7 @@ func newRunnerSpool(dataDir string, sessions func() *subagent.Manager, w *state.
 		receiptCalls[binding.Name] = calls[binding.Name]
 	}
 	receiptCalls["AddRunDirectories"] = calls["AddRunDirectories"]
+	receiptCalls["FinishRun"] = calls["FinishRun"]
 	return &runnerSpool{receiptCalls: receiptCalls, dir: sessionlife.RunnerSpoolDir(dataDir), runs: filepath.Join(dataDir, "runs"), calls: calls, once: &requestRunner{w: w, logf: logf}, w: w, now: time.Now, logf: logf}, nil
 }
 

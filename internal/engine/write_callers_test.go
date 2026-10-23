@@ -20,6 +20,7 @@ var handlerCallerChecks = map[string]string{
 	"ObserveClaudeUsage":          "checkClaudeUsageCaller uses the verified execution caller and request prefix, then the service loads the complete immutable admission reference.",
 	"AdmitNativeAttempt":          "checkAdmissionCaller requires the verified session runner or the run coordinator and its own execution and request prefix.",
 	"AttachSeat":                  "Checks root attach with authority.Of(ctx).",
+	"FinishRun":                   "checkRunCoordinator requires the run's verified coordinator and its own request prefix.",
 	"AddRunDirectories":           "checkRunCoordinator requires the run's verified coordinator and its own request prefix.",
 	"AddHook":                     "actor(ctx) resolves the author; hooks.Add checks git hooks add with authority.Of(ctx).",
 	"AddLibraryEntry":             "libraryStore passes mutationActor to library authority checks.",
