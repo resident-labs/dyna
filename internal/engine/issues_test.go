@@ -23,7 +23,7 @@ func TestIssueBindings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	i, err := s.rooms.Notify.Rooms.FileIssue(r.ID, "Later", "detail", "", 0, r.Name)
+	i, err := s.rooms.Notify.Rooms.FileIssue(r.ID, room.IssueInput{Title: "Later", Note: "detail", File: "", Line: 0, Filer: r.Name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func testIssueCallerPower(t *testing.T, method string) {
 		{name: "paired owner", remote: true, actor: owner, allow: true, by: rec.Name},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			issue, err := s.rooms.Notify.Rooms.FileIssue(rec.ID, "Caller guard", "detail", "", 0, rec.Name)
+			issue, err := s.rooms.Notify.Rooms.FileIssue(rec.ID, room.IssueInput{Title: "Caller guard", Note: "detail", File: "", Line: 0, Filer: rec.Name})
 			if err != nil {
 				t.Fatal(err)
 			}

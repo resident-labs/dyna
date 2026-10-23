@@ -35,7 +35,7 @@ func TestEventsFileMatchesRegistry(t *testing.T) {
 
 func TestPostRejectsSealedFamily(t *testing.T) {
 	store, rec := newEventStore(t)
-	for _, family := range []EventFamily{FamilyWorktree, FamilyHook, FamilyPR, FamilyMerge} {
+	for _, family := range []EventFamily{FamilyWorktree, FamilyHook, FamilyPR, FamilyMerge, FamilyIssue, FamilyGoal, FamilyCheckin, FamilyCIHealth, FamilyRule} {
 		_, err := store.Post(rec.ID, PostInput{From: rec.Name, To: []string{rec.Name}, Kind: string(family), Text: "sealed"})
 		if err == nil || !strings.Contains(err.Error(), "PostEvent") {
 			t.Fatalf("Post accepted the sealed family %q: %v", family, err)
@@ -364,7 +364,8 @@ func generateEvents() ([]byte, error) {
 	fmt.Fprintf(&b, "export type EventType = %s\n", stringUnion(typesList))
 	fmt.Fprintf(&b, "export type WakeRule = %s\n\n", stringUnion([]string{string(WakeNever), string(WakeTarget), string(WakeRootIfNeeded)}))
 
-	b.WriteString("export interface EventSpecEntry {\n  family: EventFamily\n  type: EventType\n  renderer: string\n  quiet: boolean\n  wake: WakeRule\n  once: boolean\n  text: string\n  textNoSubject?: string\n}\n\n")
+	fmt.Fprintf(&b, "export type Audience = %s\n\n", stringUnion([]string{string(AudienceRoom), string(AudienceSession)}))
+	b.WriteString("export interface EventSpecEntry {\n  family: EventFamily\n  type: EventType\n  renderer: string\n  quiet: boolean\n  wake: WakeRule\n  once: boolean\n  audience: Audience\n  text: string\n  textNoSubject?: string\n}\n\n")
 	b.WriteString("export const eventSpecs: readonly EventSpecEntry[] = [\n")
 	for _, spec := range eventSpecs {
 		b.WriteString("  {\n")
@@ -374,6 +375,11 @@ func generateEvents() ([]byte, error) {
 		fmt.Fprintf(&b, "    quiet: %t,\n", spec.Quiet)
 		fmt.Fprintf(&b, "    wake: %s,\n", jsonString(string(spec.Wake)))
 		fmt.Fprintf(&b, "    once: %t,\n", spec.Once)
+		audience := spec.Audience
+		if audience == "" {
+			audience = AudienceRoom
+		}
+		fmt.Fprintf(&b, "    audience: %s,\n", jsonString(string(audience)))
 		fmt.Fprintf(&b, "    text: %s,\n", jsonString(spec.Text))
 		if spec.TextNoSubject != "" {
 			fmt.Fprintf(&b, "    textNoSubject: %s,\n", jsonString(spec.TextNoSubject))
@@ -426,6 +432,7 @@ func generateEvents() ([]byte, error) {
 
 	b.WriteString("function isRecord(v: unknown): v is Record<string, unknown> {\n  return typeof v === \"object\" && v !== null && !Array.isArray(v)\n}\n\n")
 	b.WriteString("function isStringList(v: unknown): v is string[] {\n  return Array.isArray(v) && v.every((item: unknown) => typeof item === \"string\")\n}\n")
+	b.WriteString("function isNumberList(v: unknown): v is number[] {\n  return Array.isArray(v) && v.every((item: unknown) => Number.isInteger(item))\n}\n")
 
 	return []byte(b.String()), nil
 }
@@ -440,7 +447,11 @@ type payloadField struct {
 
 // payloadFields reads the payload struct: a field is optional when its json
 // tag says omitempty, and PostEvent rejects an empty required field.
-func payloadFields(typ reflect.Type) ([]payloadField, error) {
+func payloadFields(typ reflect.Type) ([]payloadField, error) { return fieldsOf(typ, "v") }
+
+// fieldsOf reads the fields of one struct, reading each from the expression
+// base. A nested struct reads its fields from the field's own expression.
+func fieldsOf(typ reflect.Type, base string) ([]payloadField, error) {
 	var out []payloadField
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
@@ -452,18 +463,23 @@ func payloadFields(typ reflect.Type) ([]payloadField, error) {
 			continue
 		}
 		optional := strings.Contains(options, "omitempty")
-		tsType, check, err := tsField(field.Type, "v."+name)
+		// A pointer says the value can be absent, so its tag must say so too.
+		if field.Type.Kind() == reflect.Pointer && !optional {
+			return nil, fmt.Errorf("%s.%s is a pointer without omitempty", typ.Name(), field.Name)
+		}
+		tsType, check, err := tsField(field.Type, base+"."+name)
 		if err != nil {
 			return nil, fmt.Errorf("%s.%s: %w", typ.Name(), field.Name, err)
 		}
 		if optional {
-			check = fmt.Sprintf("(v.%s === undefined || %s)", name, check)
+			check = fmt.Sprintf("(%s === undefined || %s)", base+"."+name, check)
 		}
 		out = append(out, payloadField{name: name, tsType: tsType, optional: optional, check: check})
 	}
 	return out, nil
 }
 
+// tsField maps one Go field type to its TypeScript type and runtime guard.
 // tsField maps one Go field type to its TypeScript type and runtime guard.
 func tsField(typ reflect.Type, expr string) (string, string, error) {
 	switch typ.Kind() {
@@ -476,24 +492,66 @@ func tsField(typ reflect.Type, expr string) (string, string, error) {
 			return name, fmt.Sprintf("%s.has(%s)", enumSetName(name), expr), nil
 		}
 		return "string", fmt.Sprintf("typeof %s === \"string\"", expr), nil
-	case reflect.Int:
+	case reflect.Int, reflect.Int64:
 		return "number", fmt.Sprintf("Number.isInteger(%s)", expr), nil
-	case reflect.Pointer:
-		if typ.Elem().Kind() != reflect.Struct || !hasObject(typ.Elem()) {
-			return "", "", fmt.Errorf("pointer type %s is not an event object", typ)
+	case reflect.Struct:
+		// An event object gets its own interface and guard; any other struct is
+		// written inline, so a payload can carry a small fact such as a close
+		// origin without a registry entry.
+		if hasObject(typ) {
+			return typ.Name(), fmt.Sprintf("is%s(%s)", typ.Name(), expr), nil
 		}
-		return typ.Elem().Name(), fmt.Sprintf("is%s(%s)", typ.Elem().Name(), expr), nil
+		return structField(typ, expr)
+	case reflect.Pointer:
+		elem := typ.Elem()
+		if elem.Kind() != reflect.Struct {
+			return "", "", fmt.Errorf("pointer type %s is not supported", typ)
+		}
+		if hasObject(elem) {
+			return elem.Name(), fmt.Sprintf("is%s(%s)", elem.Name(), expr), nil
+		}
+		return structField(elem, expr)
 	case reflect.Slice:
 		elem := typ.Elem()
 		if elem.Kind() == reflect.Struct && hasObject(elem) {
 			return elem.Name() + "[]", fmt.Sprintf("is%sList(%s)", elem.Name(), expr), nil
 		}
-		if elem.Kind() != reflect.String || elem.PkgPath() != "" {
-			return "", "", fmt.Errorf("slice type %s is not supported", typ)
+		if elem.Kind() == reflect.Struct {
+			tsType, check, err := structField(elem, "item")
+			if err != nil {
+				return "", "", err
+			}
+			return tsType + "[]", fmt.Sprintf("Array.isArray(%s) && %s.every((item: unknown) => %s)", expr, expr, check), nil
 		}
-		return "string[]", fmt.Sprintf("isStringList(%s)", expr), nil
+		if elem.Kind() == reflect.String && elem.PkgPath() == "" {
+			return "string[]", fmt.Sprintf("isStringList(%s)", expr), nil
+		}
+		if elem.Kind() == reflect.Int {
+			return "number[]", fmt.Sprintf("isNumberList(%s)", expr), nil
+		}
+		return "", "", fmt.Errorf("slice type %s is not supported", typ)
 	}
 	return "", "", fmt.Errorf("type %s is not supported", typ)
+}
+
+// structField writes one nested struct as an inline TypeScript object type and
+// a guard that checks each of its fields.
+func structField(typ reflect.Type, expr string) (string, string, error) {
+	fields, err := fieldsOf(typ, expr)
+	if err != nil {
+		return "", "", err
+	}
+	parts := []string{"isRecord(" + expr + ")"}
+	members := make([]string, 0, len(fields))
+	for _, field := range fields {
+		optional := ""
+		if field.optional {
+			optional = "?"
+		}
+		members = append(members, fmt.Sprintf("%s%s: %s", field.name, optional, field.tsType))
+		parts = append(parts, field.check)
+	}
+	return "{ " + strings.Join(members, "; ") + " }", "(" + strings.Join(parts, " && ") + ")", nil
 }
 
 func hasObject(typ reflect.Type) bool {

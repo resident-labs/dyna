@@ -204,14 +204,11 @@ func (s *Store) changeRule(scope, id, by string, fn func(*RuleSet, *Rule) error)
 
 // PostRuleNotice records a rule change without session recipients or delivery.
 func PostRuleNotice(rooms *room.Store, rec room.Record, rule Rule, who, verb string) error {
-	kind := "rule"
+	scope := "room"
 	if strings.HasPrefix(rule.ID, "u") {
-		kind = "global rule"
+		scope = "global"
 	}
-	text := fmt.Sprintf("%s %s %s %s: %s", who, verb, kind, rule.ID, rule.Text)
-	if verb == "removed" {
-		text = fmt.Sprintf("%s removed %s %s.", who, kind, rule.ID)
-	}
-	_, err := rooms.Post(rec.ID, room.PostInput{From: who, Kind: "notice", To: []string{rec.Name}, Text: text})
+	ev := room.RuleEvent{RuleID: rule.ID, Scope: scope, Actor: who, Verb: room.RuleVerb(verb), Text: rule.Text}
+	_, err := rooms.PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: ev, To: []string{rec.Name}})
 	return err
 }

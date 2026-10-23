@@ -66,6 +66,69 @@ const fixtures: Record<string, EventPayload> = {
     detail: 'exit 1',
   },
   ...Object.fromEntries(
+    (['filed', 'updated', 'closed'] as const).map((type) => [
+      `issue/${type}`,
+      {
+        type,
+        issueId: type === 'filed' ? undefined : 'msg_0123456789abcdef',
+        number: 3,
+        title: 'Two retry loops in the agent runner',
+        files: [{ path: 'internal/agents/run.go', line: 42 }],
+        symbols: ['Runner.retry'],
+        cost: 'Two retry paths are easy to drift apart.',
+        direction: 'Keep one retry loop with an injected clock.',
+        state: type === 'closed' ? 'closed' : type === 'updated' ? 'goal' : 'open',
+        filer: 'dyna:librarian',
+        actor: type === 'filed' ? undefined : 'dyna:root',
+        reason: type === 'closed' ? 'Fixed by PR #542' : undefined,
+        closedBy: type === 'closed' ? { pr: 542, commit: '24c91eb' } : undefined,
+        detail: `The note of the ${type} issue.`,
+      },
+    ]),
+  ),
+  ...Object.fromEntries(
+    (['added', 'edited', 'finished', 'dropped'] as const).map((type) => [
+      `goal/${type}`,
+      {
+        type,
+        goalId: 'g318',
+        title: 'Ship typed issue events',
+        actor: 'dyna:notice-issues',
+        state: type === 'finished' ? 'done' : type === 'dropped' ? 'dropped' : 'active',
+        summary: type === 'finished' ? 'Merged as PR #542' : undefined,
+      },
+    ]),
+  ),
+  'checkin/summary': {
+    parent: 'dyna:notice-contract',
+    windowStart: 1792227600000,
+    counts: { running: 1, queued: 0, idle: 2 },
+    children: [
+      { name: 'notice-merge', state: 'idle', age: '42m', goal: 'g317/i12: merge events', pr: 'open PR #269: ready' },
+      { name: 'notice-pr', state: 'running', age: '3m', goal: 'no open goal or item', pr: 'no open PRs' },
+      { name: 'reviewer-pool', state: 'idle', age: '9m', goal: 'g319: review queue', pr: 'no open PRs' },
+    ],
+    detail: 'notice-merge · idle for 42m · g317/i12: merge events · open PR #269: ready',
+  },
+  'ci-health/slow-test': {
+    run: '#1241',
+    count: 1,
+    crossings: [
+      {
+        test: 'dyna-agent/internal/room/TestPostEvent', package: 'internal/room', features: ['rooms'],
+        durationMs: 2470, run: '#1241', otherMs: 1200, otherRun: '#1238', limitMs: 1000,
+      },
+    ],
+    detail: 'dyna-agent/internal/room/TestPostEvent · internal/room · rooms · 2.47 s at #1241, 1.2 s at #1238 · limit 1 s',
+  },
+  'rule/changed': {
+    ruleId: 'r4',
+    scope: 'room',
+    actor: 'dyna:owner',
+    verb: 'edited',
+    text: 'A subagent commits to its parent branch.',
+  },
+  ...Object.fromEntries(
     (['opened', 'ready', 'approved', 'changes', 'ci-failed', 'ci-paused', 'ci-passed', 'returned', 'merged', 'closed', 'comment', 'held-comment', 'review-assigned', 'update'] as const).map((type) => [
       `pr/${type}`,
       {
@@ -153,9 +216,29 @@ function fixtureTip(payload: EventPayload): string {
   if ('note' in payload) return payload.note
   if ('hook' in payload) return payload.label || payload.hook
   if ('trialId' in payload) return '#242'
-  if ('type' in payload) return payload.changeId ? `PR #${payload.number}` : payload.label
+  if ('changeId' in payload) return `PR #${payload.number}`
+  if ('filer' in payload) return `D-${payload.number}`
+  if ('goalId' in payload) return payload.goalId
+  if ('crossings' in payload) return payload.run
+  if ('children' in payload) return payload.children[0]?.name ?? payload.parent
+  if ('ruleId' in payload) return payload.ruleId
   return payload.detail || payload.reason
 }
+
+test('a post stored before the typed events still draws its family card', () => {
+  // Old history names no event type. The family's card reads the stored text,
+  // so a sealed family never falls to the unknown-event row on old posts.
+  for (const [family, renderer] of [
+    ['goal', 'GoalPost'], ['issue', 'IssueCard'], ['checkin', 'CheckinCard'],
+    ['ci-health', 'SlowTestCard'], ['rule', 'RuleCard'], ['pr', 'PRCard'], ['hook', 'HookCard'],
+  ] as const) {
+    const legacy = { id: 'msg_0123456789abcdef', ts: 1, kind: family, text: 'stored text' }
+    assert.ok(web.sealedEvent(legacy), `${family} is not a sealed family`)
+    assert.equal(web.rendererFor(legacy), web.eventComponents[renderer], `${family} lost its legacy card`)
+  }
+  // A type the registry does not know is still a visible gap, not an old post.
+  assert.equal(web.rendererFor({ id: 'msg_0123456789abcdef', ts: 1, kind: 'goal', notice: { kind: 'unregistered' } }), undefined)
+})
 
 test('a hook card shows its state and opens the log of its own run', () => {
   const payload = fixtures['hook/result']

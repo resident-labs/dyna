@@ -892,14 +892,16 @@ func (s *Store) ReportTarget(m Meta) string {
 // handoff, owes a report.
 func (s *Store) Owes(m Meta, msg room.Message) bool {
 	if m.Role == RoleRoot {
-		return room.OwnerRequest(msg, m.Room) || msg.From == m.Room && msg.SessionAddressed(m.ID, m.Address())
+		// The room's own address means the owner, except for a typed system
+		// event: the engine posts those, and an engine note owes no report.
+		return room.OwnerRequest(msg, m.Room) || msg.From == m.Room && !msg.EngineEvent() && msg.SessionAddressed(m.ID, m.Address())
 	}
 	from := msg.From
 	if from == "" || !s.named(m, msg) {
 		return false
 	}
 	if from == m.Room {
-		return true
+		return !msg.EngineEvent()
 	}
 	if m.ParentSession == "" {
 		return false

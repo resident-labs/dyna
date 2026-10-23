@@ -101,7 +101,7 @@ func (s *Store) ReplyAddress(msg room.Message) string {
 		ref = id
 	}
 	switch {
-	case from == room.ParentCheckInSender || strings.HasPrefix(from, "shell:"):
+	case msg.Kind == string(room.FamilyCheckin) || strings.HasPrefix(from, "shell:"):
 		return ""
 	case strings.HasPrefix(from, "run:") && !strings.Contains(from, "/agent:"):
 		meta, err := runstore.ReadMeta(strings.TrimPrefix(from, "run:"))

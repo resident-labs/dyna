@@ -1,37 +1,62 @@
 <script lang="ts">
-  import type { Goal } from '../api/goal.ts'
-  import type { Post } from '../api/room.ts'
+  // The row for a goal milestone: a glyph, the goal's link and one line. It
+  // reads the typed payload of the post, so the goal and the verdict never come
+  // from the text. A post stored before the typed events still has only text;
+  // TODO: legacy/shim remove later — remove the text readers when that history
+  // ages out.
   import GoalGlyph from './GoalGlyph.svelte'
   import ExpediteBadge from './ExpediteBadge.svelte'
+  import EventDetails from './EventDetails.svelte'
   import { expedite, goalExpedited } from './expedite.ts'
   import { stamp } from '../ui/format.ts'
-  interface Props {
-    post: Post
-    goals?: Goal[]
+  import type { EventNotice } from '../api/room.ts'
+  import type { EventPost, EventSurface, GoalRef } from './eventRenderers.ts'
+  import { goalEvent } from './eventPayloads.ts'
+
+  let {
+    post,
+    notice = post.notice,
+    surface = 'feed',
+    goals = [],
+    ongoal = undefined,
+  }: {
+    post: EventPost
+    notice?: EventNotice
+    surface?: EventSurface
+    goals?: readonly GoalRef[]
     ongoal?: (id: string) => void
-  }
-  let { post, goals = [], ongoal = () => {} }: Props = $props()
-  let id = $derived(post.text?.match(/\bgoal (g\d+)\b/i)?.[1] ?? '')
-  let goal = $derived(goals.find((g) => g.id === id))
+  } = $props()
+
+  let payload = $derived(goalEvent(post))
+  let legacyID = $derived(post.text?.match(/\bgoal (g\d+)\b/i)?.[1] ?? '')
   let milestone = $derived(post.text?.match(/^Goal g\d+ (.*?) is (blocked|done):\s*(.*)$/is))
-  // TODO: legacy/shim remove later — renders old goal milestone posts without titles; remove when retained room history uses the current format
   let legacy = $derived(post.text?.match(/^Goal g\d+ (blocked|done):\s*(.*)$/is))
-  let verdict = $derived(milestone?.[2] ?? legacy?.[1] ?? '')
-  let title = $derived(milestone?.[1] ?? goal?.text ?? '')
-  let summary = $derived(milestone?.[3] ?? legacy?.[2] ?? '')
-  let prefix = $derived(post.text?.split(/goal g\d+:?/i)[0] ?? '')
-  let actor = $derived(prefix.match(/^(.+?) (?:added|edited|finished|dropped)/)?.[1] ?? '')
-  const clip = (s: string): string => [...s].length > 60 ? [...s].slice(0, 59).join('') + '…' : s
+  let legacyVerdict = $derived(milestone?.[2] ?? legacy?.[1] ?? '')
+  let legacyPrefix = $derived(post.text?.split(/goal g\d+:?/i)[0] ?? '')
+  let legacyActor = $derived(legacyPrefix.match(/^(.+?) (?:added|edited|finished|dropped)/)?.[1] ?? '')
+
+  let id = $derived(payload?.goalId ?? legacyID)
+  let title = $derived(payload?.title ?? milestone?.[1] ?? goals.find((g) => g.id === id)?.text ?? '')
+  let verdict = $derived(payload ? (payload.type === 'finished' ? 'done' : '') : legacyVerdict)
+  let summary = $derived(payload?.summary ?? milestone?.[3] ?? legacy?.[2] ?? '')
+  let actor = $derived(payload?.actor ?? legacyActor)
+  // The words before the goal link, and the goal's own text after it.
+  let rest = $derived(payload ? ` ${payload.type} goal ` : legacyActor ? legacyPrefix.slice(legacyActor.length) : legacyPrefix)
+  let tail = $derived(payload ? `: ${payload.title}` : (post.text?.split(/goal g\d+:?/i).slice(1).join('') ?? ''))
+  let state = $derived(payload ? payload.state : verdict === 'done' ? 'done' : /\bdropped goal\b/.test(post.text ?? '') ? 'dropped' : 'active')
+  const clip = (s: string): string => ([...s].length > 60 ? [...s].slice(0, 59).join('') + '…' : s)
 </script>
+
 <div class="goalpost" data-id={post.id}>
-  <GoalGlyph goal={{ state: verdict === 'done' ? 'done' : /\bdropped goal\b/.test(post.text) ? 'dropped' : 'active' }} /><div class="body">
+  <GoalGlyph goal={{ state }} /><div class="body">
     {#if verdict}
-      <button class="goal title" onclick={() => ongoal(id)}>{id} {clip(title).replace(/\.$/, '')}</button> is {verdict}: {summary}
+      <button class="goal title" onclick={() => ongoal?.(id)}>{id} {clip(title).replace(/\.$/, '')}</button> is {verdict}: {summary}
     {:else}
-      <span>{#if actor}<strong class="hue-{post.fromHue}">{actor}</strong>{prefix.slice(actor.length)}{:else}{prefix}{/if}<button class="goal" onclick={() => ongoal(id)}>{id}</button>{post.text?.split(/goal g\d+:?/i).slice(1).join('')}</span>
+      <span>{#if actor}<strong class="hue-{post.fromHue}">{actor}</strong>{rest}{:else}{rest}{/if}<button class="goal" onclick={() => ongoal?.(id)}>{id}</button>{tail}</span>
     {/if}
     {#if goalExpedited($expedite, { id })}<ExpediteBadge />{/if}
-  </div><time title={new Date(post.ts).toLocaleString()}>{stamp(post.ts)}</time>
+    {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
+  </div><time title={new Date(post.ts ?? 0).toLocaleString()}>{stamp(post.ts)}</time>
 </div>
 <style>
   .goalpost { display: flex; align-items: start; gap: 10px; margin: var(--s1) 20px; padding: 7px 0; color: var(--muted); font-size: var(--t-sm); }

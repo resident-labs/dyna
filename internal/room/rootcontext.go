@@ -34,7 +34,7 @@ const (
 // (RootInput) and wake intent (Message.Wake) are separate. Passive turn input
 // has no quiet category because the internal root already reads it in full.
 func RootContext(msg Message, roomName string) (RootDecision, string) {
-	if msg.Kind == "voice" || msg.From == roomName+":"+RootAgent || msg.From == roomName && !msg.Human {
+	if msg.Kind == "voice" || msg.From == roomName+":"+RootAgent || msg.From == roomName && !msg.Human && !msg.EngineEvent() {
 		return RootSkip, ""
 	}
 	if !msg.Addressed(roomName) && !msg.Addressed(roomName+":"+RootAgent) {

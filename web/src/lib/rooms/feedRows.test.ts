@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { feedRows, feedPRRepos, isShellResult, rowPost, rowPosts } from './feedRows.ts'
+import { feedRows, feedPRRepos, isShellResult, roomPosts, rowPost, rowPosts } from './feedRows.ts'
 import type { FeedInput, FeedRow } from './feedRows.ts'
 import { need } from '../../../test/need.ts'
 
@@ -102,6 +102,47 @@ const hookPost = (id: string, type: 'started' | 'result', runId: string, state: 
   id, ts: start, from: 'dyna', kind: 'hook', text: 'hook',
   notice: { kind: type },
   payload: { runId, repo: '/repo', hook: 'self-update', event: 'main-updated', state },
+})
+
+// A parent check-in belongs to the parent's DM. It is not part of the room's
+// own conversation, so room chat does not list it, unless the owner received it.
+const checkinPost = (id: string, to: string): FeedInput => ({
+  id, ts: start, from: 'dyna', kind: 'checkin', text: 'check-in',
+  notice: { kind: 'summary', producer: 'parent-checkin' },
+  payload: {
+    parent: 'ses_1', windowStart: 1, counts: { running: 0, queued: 0, idle: 1 },
+    children: [{ name: 'lead', state: 'idle', age: '5m', goal: 'g1: work', pr: 'no open PRs' }],
+  },
+  to: [to],
+})
+
+test('a session-audience event lives in its session DM, not in room chat', () => {
+  const owner: FeedInput = { id: 'msg_owner', ts: start, from: 'room:lead', text: 'Hello', to: ['room'] }
+  const posts = [checkinPost('msg_parent', 'room:lead'), checkinPost('msg_owner', 'room'), owner]
+  assert.deepEqual(roomPosts(posts, 'room').map((post) => post.id), ['msg_owner', 'msg_owner'])
+})
+
+// An issue is filed, then changed, then closed. One card shows the issue, so
+// all three posts fold into the filing's row: a filing has no issue ID yet,
+// and its own post ID is the issue's ID.
+const issuePost = (id: string, type: 'filed' | 'updated' | 'closed', issueId: string | undefined, state: 'open' | 'goal' | 'closed'): FeedInput => ({
+  id, ts: start, from: 'dyna', kind: 'issue', text: 'issue',
+  notice: { kind: type },
+  payload: { type, issueId, number: 3, title: 'Two retry loops', state, filer: 'dyna:librarian' },
+})
+
+test('an issue folds its filing, change and close into one card', () => {
+  const posts = [
+    issuePost('i1', 'filed', undefined, 'open'),
+    issuePost('i2', 'updated', 'i1', 'goal'),
+    issuePost('i3', 'closed', 'i1', 'closed'),
+    issuePost('i4', 'filed', undefined, 'open'),
+  ]
+  const rows = content(feedRows(posts))
+  assert.deepEqual(rows.map((row) => row.key), ['i1', 'i4'])
+  assert.deepEqual(rowPosts(rows[0]).map((post) => post.id), ['i1', 'i2', 'i3'])
+  assert.equal(rowPost(rows[0])?.notice?.kind, 'closed')
+  assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['i4'])
 })
 
 test('a hook run folds its start into its result, and another run is another card', () => {

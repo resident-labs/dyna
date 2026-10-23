@@ -77,7 +77,7 @@ func Command(o Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		i, err := s.Notify.Rooms.FileIssue(r.ID, a[0], note, file, line, by)
+		i, err := s.Notify.Rooms.FileIssue(r.ID, room.IssueInput{Title: a[0], Note: note, File: file, Line: line, Filer: by})
 		if err != nil {
 			return err
 		}

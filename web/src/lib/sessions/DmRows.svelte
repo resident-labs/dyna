@@ -63,7 +63,7 @@
       {@const Card = rendererFor(row.post)}
       <div class="event-row" class:enter={isNew(row.key)}>
         {#if Card}
-          <Card post={row.post} notice={row.post.notice} surface="dm" />
+          <Card post={row.post} notice={row.post.notice} surface="dm" {room} onissue={onissue ?? undefined} />
         {:else}
           <p class="note event-note">Unknown event {row.post.kind}/{row.post.notice?.kind ?? '?'}</p>
         {/if}
@@ -87,7 +87,7 @@
         <ThreadChip glyph="▱" name={short(thread.key, room.name)} emoji={person?.emoji} hue={person?.hue} badge={`${row.posts.length} message${row.posts.length === 1 ? '' : 's'}`} queued={row.queued} snippet={plain(row.posts.at(-1)?.text)} time={ago(row.posts.at(-1)?.ts)} selected={selectedKey === thread.key} enter={isNew(row.key)} onopen={() => onthread(thread.key)} />
       </div>
     {:else if row.kind === 'instructions'}
-      <SystemNote notes={row.notes ?? [{ ...row.note, id: row.note?.id ?? row.key, target: member.name, text: row.text, ts: row.ts }]} roomId={room.id} {onopenfile} {onissue} />
+      <SystemNote notes={row.notes ?? [{ ...row.note, id: row.note?.id ?? row.key, target: member.name, text: row.text, ts: row.ts }]} roomId={room.id} {onopenfile} />
     {:else if row.kind === 'compaction'}
       <CompactionDivider {row} enter={isNew(row.key)} />
     {:else}<p class:error={row.kind === 'error'} class="note event-note">{row.text}</p>{/if}
