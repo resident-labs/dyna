@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -445,5 +446,43 @@ func TestQueuedMainHookUsesLiveMainTree(t *testing.T) {
 	}
 	if !called {
 		t.Fatal("main hook was not called")
+	}
+}
+
+func TestReadSpoolEventRejectsUnsafeEntries(t *testing.T) {
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	for _, name := range []string{"regular", "large", "link", "pipe"} {
+		path := filepath.Join(dir, name)
+		switch name {
+		case "regular":
+			err = os.WriteFile(path, []byte("{}"), 0600)
+		case "large":
+			var f *os.File
+			f, err = os.Create(path)
+			if err == nil {
+				err = f.Truncate(maxSpoolEvent + 1)
+				f.Close()
+			}
+		case "link":
+			err = os.Symlink("regular", path)
+		case "pipe":
+			err = syscall.Mkfifo(path, 0600)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = readSpoolEvent(root, name)
+		if name == "regular" {
+			if err != nil {
+				t.Fatal(err)
+			}
+		} else if !errors.Is(err, errSpoolRefused) {
+			t.Fatalf("%s: %v", name, err)
+		}
 	}
 }
