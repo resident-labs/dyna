@@ -10,6 +10,7 @@ import { compile, compileModule, parse } from 'svelte/compiler'
 import { build } from 'esbuild'
 import { normalizePolicy, budgetForm, checksText, saveRoomPolicy, DEFAULT_POLICY } from '../prs/pr.ts'
 import { stripTypes, topLevelFunctions } from '../../../test/svelte-source.ts'
+import type { Action } from '../ui/actions.ts'
 
 // Render the real Room settings modal on the server and read the text. The
 // ServiceHeader is a stub that prints its role, so each section shows which
@@ -27,12 +28,14 @@ async function load() {
       builder.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: 'export const api = {}; export const openExternal = () => {}; export const features = {}', loader: 'js' }))
     } }],
   })
+  const output = result.outputFiles?.[0]
+  assert.ok(output, 'the room settings modal built')
   const file = join(dir, 'RoomSettings.mjs')
-  await writeFile(file, result.outputFiles[0].contents)
+  await writeFile(file, output.contents)
   const module = await import(pathToFileURL(file).href)
   return { dir, component: module.default, render: module.render, createRawSnippet: module.createRawSnippet }
 }
-const text = (html) => html.replace(/<!--.*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
+const text = (html: string) => html.replace(/<!--.*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
 const room = { id: 'room-1', name: 'dyna-agent', displayName: 'Dyna', repo: '/repo', pinned: true }
 
 test('the modal uses the Settings shell with the room sections in order', async () => {
@@ -50,7 +53,7 @@ test('the modal uses the Settings shell with the room sections in order', async 
 test('each section shows its moved controls in one shared layout', async () => {
   const { dir, component, render } = await load()
   try {
-    const show = (start, props = {}) => render(component, { props: { room, start, onclose() {}, ...props } }).body
+    const show = (start: string, props: Record<string, unknown> = {}) => render(component, { props: { room, start, onclose() {}, ...props } }).body
     const general = show('general', { controls: { state: { paused: true }, busy: false } })
     assert.match(text(general), /General .*Name Agents still address the room as #dyna-agent\. Dyna Rename… Pin to rail .*Pause agents Paused\./)
     assert.match(text(general), /Danger zone Archive .*Archive room Delete .*Delete room…/)
@@ -75,34 +78,80 @@ test('each section shows its moved controls in one shared layout', async () => {
 
 // Run the page's real handlers with a fake api.
 const source = readFileSync(new URL('./RoomSettings.svelte', import.meta.url), 'utf8')
-const handlers = (names) => parse(source).instance.content.body.filter((node) =>
-  (node.type === 'FunctionDeclaration' && names.includes(node.id.name)) ||
-  (node.type === 'VariableDeclaration' && names.includes(node.declarations[0]?.id.name))
-).map((node) => source.slice(node.start, node.end)).join('\n')
-function page(api, names, extra = {}) {
-  const context = { api, $state: (value) => value, roomId: 'r', normalizePolicy, budgetForm, checksText, saveRoomPolicy, policy: null, form: null, busy: false, dirty: true, error: '', saved: false, onreviewer: async () => {}, prSettings: null, reviewPublishing: 'local', publishError: '', ...extra }
+const handlers = (names: readonly string[]) => (parse(source, { modern: true }).instance?.content.body ?? []).filter((node) =>
+  (node.type === 'FunctionDeclaration' && names.includes(node.id?.name ?? '')) ||
+  (node.type === 'VariableDeclaration' && node.declarations[0]?.id.type === 'Identifier' && names.includes(node.declarations[0].id.name))
+).map((node) => {
+  const { start, end } = nodeRange(node)
+  return source.slice(start, end)
+}).join('\n')
+
+type Node = { start: number; end: number }
+const group = (match: RegExpExecArray, index: number): string => {
+  const value = match[index]
+  assert.ok(value, `group ${index}`)
+  return value
+}
+function nodeRange(node: object): Node {
+  if (typeof Reflect.get(node, 'start') !== 'number' || typeof Reflect.get(node, 'end') !== 'number') throw new Error('the node has no source range')
+  return { start: Reflect.get(node, 'start') as number, end: Reflect.get(node, 'end') as number }
+}
+
+interface PageFns {
+  load(): Promise<void>
+  save(): Promise<void>
+  loadPublishing(): Promise<void>
+  savePublishing(): Promise<void>
+  fill(): void
+  formOf(...args: unknown[]): unknown
+  policyRequest(...args: unknown[]): unknown
+  policyRoom(...args: unknown[]): unknown
+  policyLoading(...args: unknown[]): unknown
+  saveAfterPolicy(...args: unknown[]): unknown
+  reviewerBusy(...args: unknown[]): unknown
+}
+
+interface PageState {
+  roomId: string
+  policy: unknown
+  form: Record<string, unknown> | null
+  busy: boolean
+  dirty: boolean
+  error: string
+  saved: boolean
+  reviewPublishing: string
+  githubAccess: string
+  mergeMaxParallel: number
+  publishError: string
+}
+
+function page<K extends keyof PageFns>(api: object, names: readonly K[], extra: Record<string, unknown> = {}): PageState & Pick<PageFns, K> {
+  const state: PageState = { roomId: 'r', policy: null, form: null, busy: false, dirty: true, error: '', saved: false, reviewPublishing: 'local', githubAccess: 'read-only', mergeMaxParallel: 3, publishError: '' }
+  const context = Object.assign({ api, $state: (value: unknown) => value, normalizePolicy, budgetForm, checksText, saveRoomPolicy, onreviewer: async () => {}, prSettings: null, ...extra }, state)
   vm.createContext(context)
   vm.runInContext(stripTypes(handlers([...names, 'formOf', 'policyRequest', 'policyRoom', 'policyLoading', 'saveAfterPolicy', 'reviewerBusy'])), context)
-  return context
+  return Object.assign(context, vm.runInContext(`({ ${names.join(', ')} })`, context) as Pick<PageFns, K>)
 }
 
 test('the policy saves all budget fields, reloads them, and reports rejected writes', async () => {
-  let stored = { ...DEFAULT_POLICY, ciTestAllowNotes: { 'pkg.Test/a,b': 'External service' } }
+  let stored: Record<string, unknown> = { ...DEFAULT_POLICY, ciTestAllowNotes: { 'pkg.Test/a,b': 'External service' } }
   let fail = false
-  const api = { roomChangePolicy: async () => stored, setRoomChangePolicy: async (_, next) => {
+  const api = { roomChangePolicy: async () => stored, setRoomChangePolicy: async (_room: string, next: unknown) => {
     if (fail) throw new Error('CI budget requires 0 < warn < fail')
     stored = JSON.parse(JSON.stringify(next))
   } }
-  const open = () => page(api, ['load', 'save', 'fill'])
+  const open = () => page(api, ['load', 'save', 'fill'] as const)
   const first = open()
   await first.load()
-  assert.equal(first.form.ciNoJUnitWarning, true)
+  assert.equal(first.form?.ciNoJUnitWarning, true)
+  assert.ok(first.form)
   Object.assign(first.form, { ciWarnAfter: '4m', ciFailAfter: '5m', ciTestMax: '20s', ciTestAllow: 'pkg.Test/a,b\nSuite.test[x]', ciTestAllowNotes: { 'pkg.Test/a,b': '12 seconds: external service', 'Suite.test[x]': '15 seconds: setup' }, ciNoJUnitWarning: false, requiredChecks: 'one, two' })
   await first.save()
   assert.equal(first.saved, true)
   assert.equal(first.busy, false)
   const reopened = open()
   await reopened.load()
+  assert.ok(reopened.form && first.form)
   for (const key of ['ciWarnAfter', 'ciFailAfter', 'ciTestMax', 'ciTestAllow', 'ciNoJUnitWarning']) assert.equal(reopened.form[key], first.form[key])
   assert.deepEqual(stored.requiredChecks, ['one', 'two'])
   assert.deepEqual(stored.ciTestAllowNotes, { 'pkg.Test/a,b': '12 seconds: external service', 'Suite.test[x]': '15 seconds: setup' })
@@ -116,27 +165,28 @@ test('the policy saves all budget fields, reloads them, and reports rejected wri
 })
 
 test('where reviews appear: legacy settings read local, a choice persists and keeps old fields', async () => {
-  let stored = { reviewerSession: 'reviewer' }
-  const api = { prSettings: async () => stored, setPRSettings: async (_, next) => { stored = JSON.parse(JSON.stringify(next)) } }
-  const first = page(api, ['loadPublishing', 'savePublishing'])
+  let stored: Record<string, unknown> = { reviewerSession: 'reviewer' }
+  const api = { prSettings: async () => stored, setPRSettings: async (_room: string, next: unknown) => { stored = JSON.parse(JSON.stringify(next)) } }
+
+  const first = page(api, ['loadPublishing', 'savePublishing'] as const)
   await first.loadPublishing()
   assert.equal(first.reviewPublishing, 'local')
   first.reviewPublishing = 'github'
   await first.savePublishing()
   assert.deepEqual(stored, { reviewerProfile: '', reviewerSession: 'reviewer', reviewPublishing: 'github', githubAccess: 'read-only', mergeMaxParallel: 3 })
-  const reopened = page(api, ['loadPublishing', 'savePublishing'])
+  const reopened = page(api, ['loadPublishing', 'savePublishing'] as const)
   await reopened.loadPublishing()
   assert.equal(reopened.reviewPublishing, 'github')
   assert.equal(reopened.githubAccess, 'read-only')
   reopened.githubAccess = 'read-write'
   await reopened.savePublishing()
-  const accessReopened = page(api, ['loadPublishing', 'savePublishing'])
+  const accessReopened = page(api, ['loadPublishing', 'savePublishing'] as const)
   await accessReopened.loadPublishing()
   assert.equal(accessReopened.githubAccess, 'read-write')
 })
 
 test('a failed publishing write shows the error and returns the select to the stored value', async () => {
-  const c = page({ prSettings: async () => ({}), setPRSettings: async () => { throw new Error('write failed') } }, ['loadPublishing', 'savePublishing'])
+  const c = page({ prSettings: async () => ({}), setPRSettings: async () => { throw new Error('write failed') } }, ['loadPublishing', 'savePublishing'] as const)
   await c.loadPublishing()
   c.reviewPublishing = 'github'
   c.githubAccess = 'read-write'
@@ -151,32 +201,49 @@ test('a failed publishing write shows the error and returns the select to the st
 // calls the modal's onclose on Esc.
 test('the room menu opens the modal, for another room after selecting it, and Esc closes it', async () => {
   const app = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-  const opener = /openRoomSettings: (async \(target\) => \{.*\}),\n/.exec(app)[1]
+  const opener = /openRoomSettings: (async \(target\) => \{.*\}),\n/.exec(app)?.[1]
+  assert.ok(opener, 'App has openRoomSettings')
   const mount = /\{#if (showRoomSettings && room)\}\n(?:.*\n)*?\s*<RoomSettings [^\n]*onclose=\{(\(\) => \(showRoomSettings = false\))\} \/>/.exec(app)
-  const selected = []
-  const state = vm.createContext({ roomId: 'room-1', room, showRoomSettings: false, selectRoom: async (id) => { selected.push(id); state.roomId = id; return true } })
+  assert.ok(mount, 'App mounts RoomSettings with its close handler')
+  const selected: string[] = []
+  const state = vm.createContext({ roomId: 'room-1', room, showRoomSettings: false, selectRoom: async (id: string) => { selected.push(id); state.roomId = id; return true } })
   const { actions, roomMenu } = await import('../ui/actions.ts')
-  const item = (r) => roomMenu(actions({ room: r, rooms: [r], icons: {}, openRoomSettings: vm.runInContext(stripTypes(opener), state) })).find((a) => a.id === 'roomsettings')
+  // The menu reads only the room and its settings opener.
+  const openRoomSettings = vm.runInContext(stripTypes(opener), state)
+  const item = (r: typeof room): Action | undefined => {
+    const menuContext: object = { room: r, rooms: [r], icons: {}, openRoomSettings }
+    return roomMenu(actions(menuContext as Parameters<typeof actions>[0])).find((a) => a.id === 'roomsettings')
+  }
 
-  await item(room).run()
-  assert.ok(vm.runInContext(stripTypes(mount[1]), state))
+  await item(room)?.run()
+  assert.ok(vm.runInContext(stripTypes(group(mount, 1)), state))
   assert.deepEqual(selected, [])
 
   const shell = readFileSync(new URL('../ui/SettingsShell.svelte', import.meta.url), 'utf8')
   assert.match(shell, /role="dialog" aria-modal="true"[^>]*use:modal=\{\{ close: onclose, busy \}\}/)
   const { dialog } = await import('../ui/dialog.ts')
-  const listeners = new Set()
-  globalThis.window = { addEventListener: (_, fn) => listeners.add(fn), removeEventListener: (_, fn) => listeners.delete(fn) }
-  globalThis.document = { activeElement: null }
-  const node = { parentElement: { addEventListener() {}, removeEventListener() {} }, focus() {}, contains: () => false, querySelectorAll: () => [], querySelector: () => null }
-  const action = dialog(node, { close: vm.runInContext(stripTypes(mount[2]), state), busy: false })
-  for (const fn of listeners) fn({ key: 'Escape', preventDefault() {}, stopImmediatePropagation() {} })
+  interface EscapeEvent {
+    key: string
+    target?: unknown
+    stopped: boolean
+    preventDefault(): void
+    stopImmediatePropagation(): void
+    stopPropagation(): void
+  }
+  const listeners = new Set<(event: EscapeEvent) => void>()
+  Reflect.set(globalThis, 'window', { addEventListener: (_: string, fn: (event: EscapeEvent) => void) => listeners.add(fn), removeEventListener: (_: string, fn: (event: EscapeEvent) => void) => listeners.delete(fn) })
+  Reflect.set(globalThis, 'document', { activeElement: null })
+  // dialog reads only these members of its card, so the fake names them.
+  const fake: object = { parentElement: { addEventListener() {}, removeEventListener() {} }, focus() {}, contains: () => false, querySelectorAll: () => [], querySelector: () => null }
+  const node = fake as HTMLElement
+  const action = dialog(node, { close: vm.runInContext(stripTypes(group(mount, 2)), state), busy: false })
+  for (const fn of listeners) fn({ key: 'Escape', preventDefault() {}, stopImmediatePropagation() {}, stopPropagation() {}, stopped: false })
   assert.equal(state.showRoomSettings, false)
   action.destroy()
-  delete globalThis.window
-  delete globalThis.document
+  Reflect.deleteProperty(globalThis, 'window')
+  Reflect.deleteProperty(globalThis, 'document')
 
-  await item({ ...room, id: 'room-2' }).run()
+  await item({ ...room, id: 'room-2' })?.run()
   assert.deepEqual(selected, ['room-2'])
   assert.equal(state.showRoomSettings, true)
 })
@@ -185,25 +252,37 @@ test('the room menu opens the modal, for another room after selecting it, and Es
 // real dialog action with App's busy={rulesEditing} wiring.
 test('Esc in a rule edit cancels the edit, and leaving Rules mid-edit frees Esc for the modal', async () => {
   const rulesSource = readFileSync(new URL('./Rules.svelte', import.meta.url), 'utf8')
-  const effect = /\$effect\((\(\) => \{ editing = !!edit;.*?\})\)\n/.exec(rulesSource)[1]
-  const rules = vm.createContext({ edit: null, editGeneration: 0, editing: false, save() {}, tick: async () => {}, document: { getElementById: () => null } })
-  const handlers = topLevelFunctions(rulesSource, ['editKey', 'cancelEdit', 'restoreEditFocus'])
-  vm.runInContext([...handlers.values()].join('\n'), rules)
-  const textareaKey = rules.editKey
-  let cleanup = () => {}
-  const rerun = () => { cleanup(); cleanup = vm.runInContext(stripTypes(effect), rules)() }
+  const effect = /\$effect\((\(\) => \{ editing = !!edit;.*?\})\)\n/.exec(rulesSource)?.[1]
+  assert.ok(effect, 'Rules reacts to an open edit')
+  const rules = vm.createContext({ edit: null as { id: string; text: string } | null, editGeneration: 0, editing: false, save() {}, tick: async () => {}, document: { getElementById: () => null } })
+  const rulesHandlers = topLevelFunctions(rulesSource, ['editKey', 'cancelEdit', 'restoreEditFocus'])
+  vm.runInContext([...rulesHandlers.values()].join('\n'), rules)
+  interface EscapeEvent {
+    key: string
+    target?: unknown
+    stopped: boolean
+    preventDefault(): void
+    stopImmediatePropagation(): void
+    stopPropagation(): void
+  }
+  const textareaKey = vm.runInContext('editKey', rules) as (event: EscapeEvent) => void
+  let cleanup: () => void = () => {}
+  const runEffect = vm.runInContext(stripTypes(effect), rules) as () => () => void
+  const rerun = () => { cleanup(); cleanup = runEffect() }
 
   const { dialog } = await import('../ui/dialog.ts')
-  const listeners = new Set()
-  globalThis.window = { addEventListener: (_, fn) => listeners.add(fn), removeEventListener: (_, fn) => listeners.delete(fn) }
-  globalThis.document = { activeElement: null }
+  const listeners = new Set<(event: EscapeEvent) => void>()
+  Reflect.set(globalThis, 'window', { addEventListener: (_: string, fn: (event: EscapeEvent) => void) => listeners.add(fn), removeEventListener: (_: string, fn: (event: EscapeEvent) => void) => listeners.delete(fn) })
+  Reflect.set(globalThis, 'document', { activeElement: null })
   const textarea = {}
-  const node = { parentElement: { addEventListener() {}, removeEventListener() {} }, focus() {}, contains: (el) => el === textarea || el === node, querySelectorAll: () => [], querySelector: () => null }
+  // dialog reads only these members of its card, so the fake names them.
+  const fake: object = { parentElement: { addEventListener() {}, removeEventListener() {} }, focus() {}, contains: (el: unknown) => el === textarea, querySelectorAll: () => [], querySelector: () => null }
+  const node = fake as HTMLElement
   let closed = 0
   const action = dialog(node, { close: () => closed++, busy: false })
   // window capture first, then the target, as in the browser.
-  function escape(target) {
-    const event = { key: 'Escape', target, stopped: false, preventDefault() {}, stopImmediatePropagation() { this.stopped = true }, stopPropagation() { this.stopped = true } }
+  function escape(target: unknown) {
+    const event: EscapeEvent = { key: 'Escape', target, stopped: false, preventDefault() {}, stopImmediatePropagation() { event.stopped = true }, stopPropagation() { event.stopped = true } }
     for (const fn of listeners) fn(event)
     if (!event.stopped && target === textarea) textareaKey(event)
   }
@@ -223,25 +302,35 @@ test('Esc in a rule edit cancels the edit, and leaving Rules mid-edit frees Esc 
   escape(node)
   assert.equal(closed, 1)
   action.destroy()
-  delete globalThis.window
-  delete globalThis.document
+  Reflect.deleteProperty(globalThis, 'window')
+  Reflect.deleteProperty(globalThis, 'document')
 })
 
 // HooksPane's real onmodal effect with Room settings' real onmodal handler.
 test('leaving Hooks with a hook editor open frees Esc for the modal', async () => {
   const hooksSource = readFileSync(new URL('../settings/HooksPane.svelte', import.meta.url), 'utf8')
-  const effect = /\$effect\((\(\) => \{ onmodal\?\.\(!!editor\);.*?\})\)\n/.exec(hooksSource)[1]
-  const handler = /<HooksPane [^>]*onmodal=\{(\(open\) => \(hooksBusy = open\))\}/.exec(source)[1]
+  const effect = /\$effect\((\(\) => \{ onmodal\?\.\(!!editor\);.*?\})\)\n/.exec(hooksSource)?.[1]
+  assert.ok(effect, 'HooksPane reacts to its editor')
+  const handler = /<HooksPane [^>]*onmodal=\{(\(open\) => \(hooksBusy = open\))\}/.exec(source)?.[1]
+  assert.ok(handler, 'RoomSettings wires the HooksPane modal state')
   const state = vm.createContext({ hooksBusy: false })
   const pane = vm.createContext({ editor: { form: {} }, onmodal: vm.runInContext(stripTypes(handler), state) })
-  const cleanup = vm.runInContext(stripTypes(effect), pane)()
+  const cleanup = (vm.runInContext(stripTypes(effect), pane) as () => () => void)()
   assert.equal(state.hooksBusy, true) // Add hook: the editor is open
 
   const { dialog } = await import('../ui/dialog.ts')
-  const listeners = new Set()
-  globalThis.window = { addEventListener: (_, fn) => listeners.add(fn), removeEventListener: (_, fn) => listeners.delete(fn) }
-  globalThis.document = { activeElement: null }
-  const node = { parentElement: { addEventListener() {}, removeEventListener() {} }, focus() {}, contains: (el) => el === node, querySelectorAll: () => [], querySelector: () => null }
+  interface EscapeEvent {
+    key: string
+    target?: unknown
+    preventDefault(): void
+    stopImmediatePropagation(): void
+  }
+  const listeners = new Set<(event: EscapeEvent) => void>()
+  Reflect.set(globalThis, 'window', { addEventListener: (_: string, fn: (event: EscapeEvent) => void) => listeners.add(fn), removeEventListener: (_: string, fn: (event: EscapeEvent) => void) => listeners.delete(fn) })
+  Reflect.set(globalThis, 'document', { activeElement: null })
+  // dialog reads only these members of its card, so the fake names them.
+  const fake: object = { parentElement: { addEventListener() {}, removeEventListener() {} }, focus() {}, contains: (el: unknown) => el === node, querySelectorAll: () => [], querySelector: () => null }
+  const node = fake as HTMLElement
   let closed = 0
   const action = dialog(node, { close: () => closed++, busy: state.hooksBusy })
   cleanup() // select General: HooksPane unmounts
@@ -249,8 +338,8 @@ test('leaving Hooks with a hook editor open frees Esc for the modal', async () =
   for (const fn of listeners) fn({ key: 'Escape', target: node, preventDefault() {}, stopImmediatePropagation() {} })
   assert.equal(closed, 1)
   action.destroy()
-  delete globalThis.window
-  delete globalThis.document
+  Reflect.deleteProperty(globalThis, 'window')
+  Reflect.deleteProperty(globalThis, 'document')
 })
 
 test('room switches use the shared component and retain checked states', async () => {
@@ -266,17 +355,17 @@ test('room switches use the shared component and retain checked states', async (
 
 
 test('parallel prefix trials load, save, and restore after a failed write', async () => {
- let stored={mergeMaxParallel:2}
- let fail=false
- const c=page({prSettings:async()=>stored,setPRSettings:async(_,next)=>{if(fail)throw new Error('write failed');stored=JSON.parse(JSON.stringify(next))}},['loadPublishing','savePublishing'])
+ let stored: Record<string, unknown> = { mergeMaxParallel: 2 }
+ let fail = false
+ const c = page({ prSettings: async () => stored, setPRSettings: async (_room: string, next: unknown) => { if (fail) throw new Error('write failed'); stored = JSON.parse(JSON.stringify(next)) } }, ['loadPublishing', 'savePublishing'] as const)
  await c.loadPublishing()
- assert.equal(c.mergeMaxParallel,2)
- c.mergeMaxParallel=4
+ assert.equal(c.mergeMaxParallel, 2)
+ c.mergeMaxParallel = 4
  await c.savePublishing()
- assert.equal(stored.mergeMaxParallel,4)
- fail=true
- c.mergeMaxParallel=1
+ assert.equal(stored.mergeMaxParallel, 4)
+ fail = true
+ c.mergeMaxParallel = 1
  await c.savePublishing()
- assert.equal(c.mergeMaxParallel,4)
- assert.match(c.publishError,/write failed/)
+ assert.equal(c.mergeMaxParallel, 4)
+ assert.match(c.publishError, /write failed/)
 })
