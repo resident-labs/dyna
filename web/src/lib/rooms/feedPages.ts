@@ -13,12 +13,12 @@ export function mergeFeedPage<F extends FeedPage>(current: F | null, page: F, di
  const older = direction === true || direction === 'older'
  const currentPosts = current.posts ?? []
  const mine = new Map<string, FeedPost>(currentPosts.map((post): [string, FeedPost] => [post.id, post]))
- // Loaded posts keep their object, but take the server's channels: a promote
- // moves posts to another channel.
+ // Loaded posts keep their object, but take the server's views: a promote
+ // moves posts to another feed view.
  const incoming = (page.posts ?? []).map((post) => {
   const have = mine.get(post.id)
   if (!have) return post
-  return String(have.channels) === String(post.channels) ? have : { ...have, channels: post.channels }
+  return String(have.views) === String(post.views) ? have : { ...have, views: post.views }
  })
  const have = new Set(incoming.map((post) => post.id))
  if (older) return trimFeed(Object.assign({}, current, { earlier: page.earlier ?? 0,
@@ -27,7 +27,7 @@ export function mergeFeedPage<F extends FeedPage>(current: F | null, page: F, di
  if (direction === 'newer') return trimFeed(Object.assign({}, current, { newer: page.newer ?? 0, historyLoaded: true,
   posts: [...currentPosts, ...incoming.filter((post) => !mine.has(post.id))] }))
  if (current.newer) return Object.assign({}, page, current, {
-  channelUnread: page.channelUnread ?? current.channelUnread,
+  viewUnread: page.viewUnread ?? current.viewUnread,
   unread: page.unread ?? current.unread })
  if (!current.historyLoaded) return page
  const first = currentPosts.findIndex((post) => have.has(post.id))
@@ -50,14 +50,14 @@ export function rerouteAnchors(posts: readonly FeedPost[] | null | undefined, pa
  return out
 }
 
-// The part of a page the channel refresh reads: its posts and their channels.
-export interface ChannelPage<P extends FeedPost> {
+// The part of a page the feed view refresh reads: its posts and their views.
+export interface ViewPage<P extends FeedPost> {
  posts?: P[] | null
 }
 
-// withChannels gives loaded posts the channels in fresh pages. A post whose
-// channels did not change keeps its object.
-export function withChannels<P extends FeedPost>(posts: P[], pages: ChannelPage<P>[]): P[] {
- const fresh = new Map<string, string[] | undefined>(pages.flatMap((page) => page.posts ?? []).map((post): [string, string[] | undefined] => [post.id, post.channels]))
- return posts.map((post) => !fresh.has(post.id) || String(fresh.get(post.id)) === String(post.channels) ? post : Object.assign({}, post, { channels: fresh.get(post.id) }))
+// withViews gives loaded posts the views in fresh pages. A post whose views
+// did not change keeps its object.
+export function withViews<P extends FeedPost>(posts: P[], pages: ViewPage<P>[]): P[] {
+ const fresh = new Map<string, string[] | undefined>(pages.flatMap((page) => page.posts ?? []).map((post): [string, string[] | undefined] => [post.id, post.views]))
+ return posts.map((post) => !fresh.has(post.id) || String(fresh.get(post.id)) === String(post.views) ? post : Object.assign({}, post, { views: fresh.get(post.id) }))
 }

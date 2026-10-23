@@ -1,5 +1,6 @@
 <script lang="ts">
   import { speaker } from '../ui/posts.ts'
+  import { ROOM_CHAT } from './feedViews.ts'
   import { tick, onMount } from 'svelte'
   import HeldCommentNotice from '../prs/HeldCommentNotice.svelte'
   import { refreshHeldComments } from '../prs/heldComments.ts'
@@ -67,7 +68,7 @@
     ongoal?: (id: string) => unknown
     stuck?: boolean
   }
-  let { room, label = 'general', intro = true, posts = [], questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set<string>(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onacceptcall = () => {}, ondeclinecall = () => {}, ongoal, stuck = $bindable(true) }: Props = $props()
+  let { room, label = ROOM_CHAT, intro = true, posts = [], questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set<string>(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onacceptcall = () => {}, ondeclinecall = () => {}, ongoal, stuck = $bindable(true) }: Props = $props()
 
   let scroller = $state<HTMLDivElement>()
   // The list's jump and scroll calls, which only it knows how to make.
@@ -222,11 +223,11 @@
 <div class="pane">
 <div class="feed" bind:this={scroller} >
   {#if rows.length === 0}
-    <p class="empty">No messages in this channel yet.</p>
+    <p class="empty">No messages yet.</p>
   {/if}
   <!-- Only rows near the viewport render; jump() finds the others by index. -->
   {#key room.id + ':' + view}
-  <HistoryList bind:this={list} bind:atBottom={stuck} {scroller} items={rows} key={(r: FeedRow<Post>) => r.key} estimate={(r: FeedRow<Post>) => (r.kind === 'post' ? 96 : 32)} earlier={earlier > 0} newer={newer > 0} {onearlier} {onnewer} {onpresent} onhistory={() => (stuck = false)} beginning={intro ? 'Beginning of #' + label : ''}>
+  <HistoryList bind:this={list} bind:atBottom={stuck} {scroller} items={rows} key={(r: FeedRow<Post>) => r.key} estimate={(r: FeedRow<Post>) => (r.kind === 'post' ? 96 : 32)} earlier={earlier > 0} newer={newer > 0} {onearlier} {onnewer} {onpresent} onhistory={() => (stuck = false)} beginning={intro ? 'Beginning of ' + label : ''}>
   {#snippet children(row: FeedRow<Post>, index: number)}
     {#if row.kind === 'day'}
       <div class="divider"><span>{dayLabel(row.ts)}</span></div>

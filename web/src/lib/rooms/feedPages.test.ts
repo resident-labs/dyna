@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mergeFeedPage, rerouteAnchors, withChannels } from './feedPages.ts'
+import { mergeFeedPage, rerouteAnchors, withViews } from './feedPages.ts'
 import type { FeedPage, FeedPost } from './feedWindow.ts'
 import { need } from '../../../test/need.ts'
 
@@ -53,26 +53,26 @@ test('refreshing an old window cannot append a disjoint live tail', () => {
  assert.equal(merged.newer,10)
 })
 
-test('a page takes the server channels of loaded posts, so a promote moves them', () => {
-  const kept: TestPost = { id: 'kept', channels: ['general'] }
-  const moved: TestPost = { id: 'moved', text: 'loaded', channels: ['channel:lead'] }
-  const merged = mergeFeedPage(feed([moved, kept]), feed([{ id: 'moved', text: 'page', channels: ['general'] }, { id: 'kept', channels: ['general'] }], { earlier: 2, cursor: 'c' }), true)
-  assert.deepEqual(merged.posts.map((p) => p.channels), [['general'], ['general']])
-  assert.equal(merged.posts[0]?.text, 'loaded', 'the loaded post object stays apart from its channels')
+test('a page takes the server views of loaded posts, so a promote moves them', () => {
+  const kept: TestPost = { id: 'kept', views: ['general'] }
+  const moved: TestPost = { id: 'moved', text: 'loaded', views: ['channel:lead'] }
+  const merged = mergeFeedPage(feed([moved, kept]), feed([{ id: 'moved', text: 'page', views: ['general'] }, { id: 'kept', views: ['general'] }], { earlier: 2, cursor: 'c' }), true)
+  assert.deepEqual(merged.posts.map((p) => p.views), [['general'], ['general']])
+  assert.equal(merged.posts[0]?.text, 'loaded', 'the loaded post object stays apart from its views')
   assert.equal(merged.posts[1], kept, 'unchanged posts keep their object')
 })
 
-test('reroute pages cover a full loaded window and update only changed channels', () => {
-  const posts = Array.from({ length: 300 }, (_, i) => ({ id: `p${i}`, channels: ['channel:lead'] }))
+test('reroute pages cover a full loaded window and update only changed views', () => {
+  const posts = Array.from({ length: 300 }, (_, i) => ({ id: `p${i}`, views: ['channel:lead'] }))
   const anchors = rerouteAnchors(posts)
   assert.ok(anchors.length <= 2)
   // The server returns up to 200 posts around each anchor.
   const index = new Map(posts.map((p, i): [string, number] => [p.id, i]))
   const pages = anchors.map((id) => {
     const at = need(index.get(id), id)
-    return { posts: posts.slice(Math.max(0, at - 100), at + 100).map((p) => ({ id: p.id, channels: p.id === 'p0' ? ['channel:lead'] : ['general'] })) }
+    return { posts: posts.slice(Math.max(0, at - 100), at + 100).map((p) => ({ id: p.id, views: p.id === 'p0' ? ['channel:lead'] : ['general'] })) }
   })
-  const out = withChannels(posts, pages)
+  const out = withViews(posts, pages)
   assert.equal(out[0], posts[0], 'an unchanged post keeps its object')
-  assert.ok(out.slice(1).every((p) => p.channels?.[0] === 'general'), 'every other loaded post moved')
+  assert.ok(out.slice(1).every((p) => p.views?.[0] === 'general'), 'every other loaded post moved')
 })

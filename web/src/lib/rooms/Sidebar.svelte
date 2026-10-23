@@ -9,7 +9,7 @@
   import { fade } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
   import { motion, BASE, FAST } from '../ui/motion.ts'
-  import { GENERAL } from './channels.ts'
+  import { GENERAL, ROOM_CHAT } from './feedViews.ts'
   import Avatar from '../ui/Avatar.svelte'
   import Notify from './Notify.svelte'
   import { features } from '../../api.ts'
@@ -40,7 +40,7 @@
     route?: RouteNotice | null
     room?: Room | null
     view?: string
-    channelUnread?: Record<string, number>
+    viewUnread?: Record<string, number>
     questions?: number
     live?: Member[]
     runs?: RunList | null
@@ -55,7 +55,7 @@
     onsettings?: (() => void) | null
     onlogout?: (() => void) | null
   }
-  let { machines = null, machinesOpen = false, machineId = '', onmachine = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, channelUnread = {}, questions = 0, live = [], runs = null, dataDir = '', ownerHue = 0, update = false, prs = {}, computers = null, onroommenu = null, onview, onmember, onsettings = null, onlogout = null }: Props = $props()
+  let { machines = null, machinesOpen = false, machineId = '', onmachine = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, viewUnread = {}, questions = 0, live = [], runs = null, dataDir = '', ownerHue = 0, update = false, prs = {}, computers = null, onroommenu = null, onview, onmember, onsettings = null, onlogout = null }: Props = $props()
   // Gold marks only what needs the owner or runs now; no totals.
   let liveComputers = $derived(new Set((computers ?? []).filter(isLive).map((c) => c.session)).size)
   let running = $derived(runningWork(runs))
@@ -111,8 +111,8 @@
       {#if room.repo}<p class="repo mono" title={room.repo}><bdi>{room.repo}</bdi></p>{/if}
     </header>
     <div class="scroll">
-      <button class="chan" class:sel={view === GENERAL || view.startsWith('channel:')} class:unread={(channelUnread[GENERAL] ?? 0) > 0} title="Room messages" onclick={() => onview(GENERAL)}>
-        <svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons.messages} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><span class="label">Messages</span>{#if channelUnread[GENERAL]}<span class="count">{channelUnread[GENERAL]}</span>{/if}
+      <button class="chan" class:sel={view === GENERAL || view.startsWith('channel:')} class:unread={(viewUnread[GENERAL] ?? 0) > 0} title="Room chat" onclick={() => onview(GENERAL)}>
+        <svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons.messages} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><span class="label">{ROOM_CHAT}</span>{#if viewUnread[GENERAL]}<span class="count">{viewUnread[GENERAL]}</span>{/if}
       </button>
       {#each sections as section (section.label)}
         {@const rows = shown(section.rows, { repo: !!room.repo, terminal, computers: !!computers })}

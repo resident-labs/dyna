@@ -51,7 +51,7 @@ interface MembersState {
   reconcileRows: typeof reconcileRows
   pruneSelection: () => string[]
   setPicked: () => void
-  channels: { resolveView: (view: string) => string }
+  feedViews: { resolveView: (view: string) => string }
   loadComputers: () => void
   loadMembers: () => void
   loadConsolidations: () => void
@@ -81,7 +81,7 @@ function app() {
     roomId: 'a', roomRequest: 1, view: 'github', drill: null, feed: null, home: null,
     hierarchy: [row({ owner: true, name: 'owner' }), row({ id: 'one', name: 'one', status: 'running', state: 'live', turns: 1 })],
     members: [], pickedSessions: [], showClosed: false, hasItemChange, reloadsUnread, patchListRows, reconcileRows,
-    pruneSelection: () => [], setPicked() {}, channels: { resolveView: (v: string) => v },
+    pruneSelection: () => [], setPicked() {}, feedViews: { resolveView: (v: string) => v },
     loadComputers() {}, loadMembers() {}, loadConsolidations() {},
     loadRooms: () => calls.push('rooms'),
     roomSessionController: { load: () => calls.push('controls') },

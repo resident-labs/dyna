@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ancestors, finishedTrees, foldMembers, isFinished, openTrail, orderMemberSessions, type MemberView } from './memberOrder.ts'
-import { channelModel } from './channels.ts'
+import { feedModel } from './feedViews.ts'
 
 const now = Date.parse('2026-10-17T17:00:00Z')
 const minute = 60 * 1000
@@ -114,13 +114,13 @@ test('finished sessions sort after open siblings and form finishedTrees when no 
   assert.deepEqual([...finishedTrees(ordered)], ['done-lead', 'done-child'])
 })
 
-test('channels and the member list walk the same ancestors, and a parent loop stops', () => {
+test('feed views and the member list walk the same ancestors, and a parent loop stops', () => {
   const sessions = [member('lead'), member('child', 'lead'), member('grandchild', 'child'), member('a', 'b'), member('b', 'a')]
   const byId = new Map<string | undefined, Fixture>(sessions.map((m): [string, Fixture] => [m.id, m]))
   assert.deepEqual(ancestors(byId, 'grandchild').map((m) => m.id), ['lead', 'child', 'grandchild'])
   assert.deepEqual(ancestors(byId, 'a').map((m) => m.id), ['b', 'a'])
   assert.deepEqual(ancestors(byId, 'missing'), [])
-  assert.deepEqual(channelModel(sessions).trail('grandchild').map((m) => m.id), [...openTrail(sessions, 'grandchild')])
+  assert.deepEqual(feedModel(sessions).trail('grandchild').map((m) => m.id), [...openTrail(sessions, 'grandchild')])
 })
 
 test('dormant status alone groups a finished session', () => {
