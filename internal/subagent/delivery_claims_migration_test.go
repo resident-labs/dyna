@@ -102,6 +102,66 @@ func TestDeliveryClaimsImportMovesQueueStateIntoRows(t *testing.T) {
 	}
 }
 
+// A blob also holds the state of posts its session inherited from another
+// inbox, and the session has no row for those. The import gives them a row: the
+// claim would otherwise be lost, and a dismissed post could reach the session
+// again. The row keeps the post's wake decision.
+func TestDeliveryClaimsImportKeepsInheritedState(t *testing.T) {
+	e := newTestEnv(t)
+	source := completedFixtureSession(t, e)
+	target := completedFixtureSession(t, e)
+	post := func(text string) room.Message {
+		t.Helper()
+		msg, err := e.m.rooms().Post(source.RoomID, room.PostInput{Wake: true, From: source.Room, To: []string{source.Address()}, Text: text})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return msg
+	}
+	claimed, dismissed := post("claimed for the target"), post("dismissed for the target")
+	if _, err := e.m.Store.UpdateMeta(target.ID, func(m *Meta) {
+		m.InheritedInboxes = []InheritedInbox{{Session: source.ID, Address: source.Address()}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := deliveryRowOf(t, e, target.ID, claimed.ID); ok {
+		t.Fatal("the target already had a delivery row for the source's post")
+	}
+	writeQueueBlob(t, e.m.Store, target.ID, legacyQueueClaims{
+		Claimed:   map[string]int{claimed.ID: 2},
+		Cancelled: map[string]bool{},
+		Dismissed: map[string]bool{dismissed.ID: true},
+	})
+	if err := migrateQueues(filepath.Dir(e.m.Store.root())); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]struct {
+		state room.DeliveryState
+		turn  int
+	}{
+		claimed.ID:   {room.DeliveryClaimed, 2},
+		dismissed.ID: {room.DeliveryDismissed, 0},
+	}
+	for postID, want := range want {
+		row, ok := deliveryRowOf(t, e, target.ID, postID)
+		if !ok {
+			t.Fatalf("the import dropped the target's state for %s", postID)
+		}
+		if row.State != want.state || row.ClaimedTurn != want.turn || row.Mode != room.DeliveryWake {
+			t.Fatalf("post %s = %+v; want state %s, turn %d, wake", postID, row, want.state, want.turn)
+		}
+	}
+	pending, err := e.m.pendingRoomMessages(metaOf(t, e, target.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, msg := range pending {
+		if msg.ID == dismissed.ID {
+			t.Fatalf("a dismissed inherited post came back as pending: %+v", pending)
+		}
+	}
+}
+
 // A claim committed after the import moves the rows, keeps its exact receipt
 // across a reopen, and cannot revive the retired blob.
 func TestPostMigrationRunnerClaimKeepsRowsAndReceipt(t *testing.T) {
