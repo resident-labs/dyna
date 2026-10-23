@@ -39,6 +39,30 @@ func (p Patch) Apply(e *Entry) error {
 	return nil
 }
 
+// Links are docs and tests to add to, or remove from, one entry.
+type Links struct {
+	Docs  []string `json:"docs,omitempty"`
+	Tests []string `json:"tests,omitempty"`
+}
+
+// Relink adds add and drops remove, in sorted order without duplicates.
+// A removed path that is not linked is ignored, so a repeat run changes nothing.
+func Relink(list, add, remove []string) []string {
+	drop := map[string]bool{}
+	for _, v := range remove {
+		if v = strings.TrimSpace(v); v != "" {
+			drop[v] = true
+		}
+	}
+	kept := []string{}
+	for _, v := range Union(list, add) {
+		if !drop[v] {
+			kept = append(kept, v)
+		}
+	}
+	return kept
+}
+
 // Union combines trimmed paths or entry IDs without duplicates, in sorted order.
 func Union(a, b []string) []string {
 	seen := map[string]bool{}

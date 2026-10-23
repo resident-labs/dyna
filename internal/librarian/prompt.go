@@ -36,7 +36,7 @@ Do these tasks in order.
    Every run, whatever woke you:
    a. Re-verify every stale entry, not only the ones this change touched. Run dyna library list --stale. For each entry, read git diff <its pin> HEAD for its owned files, fix its summary, differs and owns, then pin it with --verified HEAD.
    b. For each changed file, ask whether it adds a sub-feature: a new folder, command, screen, provider or adapter. If it does, add a child under the right parent, or update the parent when a child would be one file.
-   Commands: dyna library list --tree, show <id>, add <id> --name --summary --owns [--parent] [--kind], update <id> [...] [--verified HEAD], link <id> --docs <path> | --tests <glob>, retire <id> [--successor <id>].
+   Commands: dyna library list --tree, show <id>, add <id> --name --summary --owns [--parent] [--kind], update <id> [...] [--verified HEAD], link <id> --docs <path> | --tests <glob> | --remove-docs <path> | --remove-tests <glob>, retire <id> [--successor <id>].
 2. Lint. Run dyna library lint. Fix what the map can fix: owners, globs, links, summaries, differs, pins and parents. Leave other warnings.
 3. Smells. When you see an architectural problem that a design change would make easier to maintain, such as duplicated logic, two paths for one feature, or a leaky boundary, file it:
    dyna library smell "<title>" --at <file[:line]> [--at ...] --symbols <names> --cost "<maintenance cost>" --direction "<direction, not a patch>"

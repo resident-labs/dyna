@@ -159,24 +159,26 @@ func Command(o Options) *cobra.Command {
 	}}
 	u.bind(update)
 
-	var docs, tests []string
-	link := &cobra.Command{Use: "link <id>", Short: "Link docs or tests to an entry", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
-		if len(docs)+len(tests) == 0 {
-			return fmt.Errorf("supply --docs or --tests")
+	var addLinks, removeLinks library.Links
+	link := &cobra.Command{Use: "link <id>", Short: "Add or remove docs and tests links on an entry", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
+		if len(addLinks.Docs)+len(addLinks.Tests)+len(removeLinks.Docs)+len(removeLinks.Tests) == 0 {
+			return fmt.Errorf("supply --docs, --tests, --remove-docs or --remove-tests")
 		}
 		s, r, err := open(c)
 		if err != nil {
 			return err
 		}
 		var e library.Entry
-		err = engineclient.New("").Call(c.Context(), "LinkLibraryEntry", []any{r.ID, a[0], docs, tests}, &e)
+		err = engineclient.New("").Call(c.Context(), "LinkLibraryEntry", []any{r.ID, a[0], addLinks, removeLinks}, &e)
 		if err != nil {
 			return err
 		}
 		return printEntry(c, s, r, e)
 	}}
-	link.Flags().StringSliceVar(&docs, "docs", nil, "documentation path")
-	link.Flags().StringSliceVar(&tests, "tests", nil, "test file glob")
+	link.Flags().StringSliceVar(&addLinks.Docs, "docs", nil, "documentation path to link")
+	link.Flags().StringSliceVar(&addLinks.Tests, "tests", nil, "test file glob to link")
+	link.Flags().StringSliceVar(&removeLinks.Docs, "remove-docs", nil, "documentation path to unlink")
+	link.Flags().StringSliceVar(&removeLinks.Tests, "remove-tests", nil, "test file glob to unlink")
 
 	var successor string
 	retire := &cobra.Command{Use: "retire <id>", Short: "Retire an entry; children move to the successor or the parent", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {

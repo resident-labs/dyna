@@ -34,13 +34,14 @@ func (s services) updateLibraryEntry(ctx context.Context, repo, id string, patch
 	return st.Update(repo, id, patch.Apply)
 }
 
-func (s services) linkLibraryEntry(ctx context.Context, repo, id string, docs, tests []string) (library.Entry, error) {
+func (s services) linkLibraryEntry(ctx context.Context, repo, id string, add, remove library.Links) (library.Entry, error) {
 	st, err := libraryStore(ctx)
 	if err != nil {
 		return library.Entry{}, err
 	}
 	return st.Update(repo, id, func(e *library.Entry) error {
-		e.Docs, e.Tests = library.Union(e.Docs, docs), library.Union(e.Tests, tests)
+		e.Docs = library.Relink(e.Docs, add.Docs, remove.Docs)
+		e.Tests = library.Relink(e.Tests, add.Tests, remove.Tests)
 		return nil
 	})
 }
