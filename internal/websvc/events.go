@@ -52,15 +52,21 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request, tok string, pr P
 	// hello proves the stream flows. A client that does not get it soon is
 	// behind a proxy that holds the body, and switches to long polls.
 	_, _ = io.WriteString(w, "retry: 2000\n")
+	hello := []byte("{}")
+	if s.o.Version != "" {
+		hello, _ = json.Marshal(struct {
+			Version string `json:"version"`
+		}{Version: s.o.Version})
+	}
 	// A reconnect names the last event it got (item 14). It gets what it
 	// missed from the ring, or one reset with the new position after an
 	// engine restart or when it fell behind the ring; the client then
 	// reloads once. A new stream's hello carries its starting position.
 	last := lastEventID(r)
 	if last == "" {
-		_, _ = fmt.Fprintf(w, "id: %s\nevent: hello\ndata: {}\n\n", hub.Event{Epoch: epoch, Rev: sent}.ID())
+		_, _ = fmt.Fprintf(w, "id: %s\nevent: hello\ndata: %s\n\n", hub.Event{Epoch: epoch, Rev: sent}.ID(), hello)
 	} else {
-		_, _ = io.WriteString(w, "event: hello\ndata: {}\n\n")
+		_, _ = fmt.Fprintf(w, "event: hello\ndata: %s\n\n", hello)
 		from, rev, ok := hub.ParseID(last)
 		missed, newest, reset, _ := s.o.Hub.Since(from, rev)
 		if !ok || reset {
@@ -119,10 +125,11 @@ func lastEventID(r *http.Request) string {
 // must reload what it shows: the engine restarted, or the client fell more
 // than the hub keeps behind.
 type PollReply struct {
-	Epoch  int64             `json:"epoch"`
-	Seq    uint64            `json:"seq"`
-	Events []json.RawMessage `json:"events"`
-	Reset  bool              `json:"reset,omitempty"`
+	Epoch   int64             `json:"epoch"`
+	Seq     uint64            `json:"seq"`
+	Version string            `json:"version,omitempty"`
+	Events  []json.RawMessage `json:"events"`
+	Reset   bool              `json:"reset,omitempty"`
 }
 
 // poll is the event stream for clients whose proxy holds a stream's body:
@@ -141,7 +148,7 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request, pr Principal) {
 	current := s.o.Hub.Epoch()
 	q := r.URL.Query().Get("after")
 	if q == "" {
-		jsonReply(w, http.StatusOK, PollReply{Epoch: current, Seq: s.o.Hub.Rev(), Events: []json.RawMessage{}})
+		jsonReply(w, http.StatusOK, PollReply{Epoch: current, Seq: s.o.Hub.Rev(), Version: s.o.Version, Events: []json.RawMessage{}})
 		return
 	}
 	epoch, after, ok := hub.ParseID(q)
@@ -154,13 +161,13 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request, pr Principal) {
 	for {
 		evs, last, reset, wake := s.o.Hub.Since(epoch, after)
 		if reset || len(evs) > 0 {
-			out := PollReply{Epoch: current, Seq: last, Reset: reset, Events: make([]json.RawMessage, 0, len(evs))}
+			out := PollReply{Epoch: current, Seq: last, Version: s.o.Version, Reset: reset, Events: make([]json.RawMessage, 0, len(evs))}
 			for _, ev := range evs {
 				b, err := s.wires.get(ev)
 				if err != nil {
 					// Reset rather than skip the event: the client reloads.
 					s.o.Logf("web: encode event %s rev %d: %v", ev.Topic, ev.Rev, err)
-					out = PollReply{Epoch: current, Seq: last, Reset: true, Events: []json.RawMessage{}}
+					out = PollReply{Epoch: current, Seq: last, Version: s.o.Version, Reset: true, Events: []json.RawMessage{}}
 					break
 				}
 				out.Events = append(out.Events, b)
@@ -171,7 +178,7 @@ func (s *Server) poll(w http.ResponseWriter, r *http.Request, pr Principal) {
 		select {
 		case <-wake:
 		case <-timer.C:
-			jsonReply(w, http.StatusOK, PollReply{Epoch: current, Seq: last, Events: []json.RawMessage{}})
+			jsonReply(w, http.StatusOK, PollReply{Epoch: current, Seq: last, Version: s.o.Version, Events: []json.RawMessage{}})
 			return
 		case <-r.Context().Done():
 			return

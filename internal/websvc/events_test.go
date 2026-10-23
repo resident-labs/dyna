@@ -2,6 +2,7 @@ package websvc
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -132,6 +133,24 @@ func TestEventsHelloCarriesThePosition(t *testing.T) {
 	sc := openStream(t, e, "")
 	if got := readUntil(t, sc, "event: hello"); strings.Join(got, "\n") != "id: 1:1\nevent: hello" {
 		t.Fatalf("new stream = %q; want hello with id 1:1", got)
+	}
+}
+
+func TestEventsReportTheEngineBuild(t *testing.T) {
+	e := newEnv(t)
+	e.srv.o.Version = "build-b"
+	sc := openStream(t, e, "")
+	readUntil(t, sc, "event: hello")
+	if !sc.Scan() || sc.Text() != `data: {"version":"build-b"}` {
+		t.Fatalf("hello data = %q; want the engine build", sc.Text())
+	}
+	w := e.do(e.app, req{method: http.MethodGet, url: tsApp + "/api/events/poll", cookie: e.paired()})
+	var reply PollReply
+	if err := json.Unmarshal(w.Body.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+	if reply.Version != "build-b" {
+		t.Fatalf("poll version = %q; want build-b", reply.Version)
 	}
 }
 

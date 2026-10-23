@@ -19,8 +19,8 @@ class FakeSource implements StreamSource {
   close() {
     this.readyState = 2
   }
-  emit(type: 'hello' | 'reset' | 'ping', lastEventId = '') {
-    this.listeners.get(type)?.({ data: '{}', lastEventId })
+  emit(type: 'hello' | 'reset' | 'ping', lastEventId = '', data: unknown = {}) {
+    this.listeners.get(type)?.({ data: JSON.stringify(data), lastEventId })
   }
   message(data: unknown, lastEventId: string) {
     this.onmessage?.({ data: JSON.stringify(data), lastEventId })
@@ -130,6 +130,34 @@ test('a reconnect resumes from the last event ID without a resync', (t) => {
   h.last().message({ kind: 'runs', roomId: 'r' }, '5:3')
   assert.deepEqual(h.got, [{ kind: 'pins', roomId: 'r' }, { kind: 'runs', roomId: 'r' }])
   assert.deepEqual(h.states, [false, true])
+  h.stop()
+})
+
+test('a changed engine build on reconnect emits one build event', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const h = harness()
+  h.last().emit('hello', '5:1', { version: 'build-a' })
+  assert.deepEqual(h.got, [], 'the first hello sets the baseline')
+  h.last().fail()
+  t.mock.timers.tick(3000)
+  h.last().emit('hello', '', { version: 'build-b' })
+  h.last().emit('hello', '', { version: 'build-b' })
+  assert.deepEqual(h.got, [{ kind: 'build', version: 'build-b' }])
+  h.stop()
+})
+
+test('a changed engine build in long-poll mode emits one build event', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const replies: ((response: Response) => void)[] = []
+  const h = harness(() => new Promise<Response>((resolve) => replies.push(resolve)))
+  h.last().onopen?.()
+  t.mock.timers.tick(6000)
+  replies[0]?.(Response.json({ epoch: 5, seq: 1, version: 'build-a', events: [] }))
+  await settle(() => replies.length > 1)
+  assert.deepEqual(h.got, [{ kind: 'resync' }], 'the first poll sets the cursor and build baseline')
+  replies[1]?.(Response.json({ epoch: 5, seq: 2, version: 'build-b', events: [] }))
+  await settle(() => h.got.length > 1)
+  assert.deepEqual(h.got, [{ kind: 'resync' }, { kind: 'build', version: 'build-b' }])
   h.stop()
 })
 
