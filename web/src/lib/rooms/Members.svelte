@@ -20,6 +20,15 @@
   import { isLive, hasComputer, appName, ageText } from '../computers/computers.ts'
   import { finishedTrees, foldMembers, isFinished, openTrail, orderMemberSessions } from './memberOrder.ts'
 
+  // sessionRow draws one folded row. The root row has no fold state, so the
+  // fold fields stay optional for it.
+  interface SessionRow {
+    member: Member
+    hasChildren?: boolean
+    folded?: boolean
+    hidden?: number
+  }
+
   interface Props {
     members?: Member[]
     focus?: string
@@ -125,7 +134,7 @@
   }
 </script>
 
-{#snippet sessionRow(row: Partial<ReturnType<typeof foldMembers<Member>>[number]> & { member: Member })}
+{#snippet sessionRow(row: SessionRow)}
   {@const m = row.member}
   {@const pc = computerOf(m.id)}
   {@const offSeat = external && m.id === rootSession?.id}
