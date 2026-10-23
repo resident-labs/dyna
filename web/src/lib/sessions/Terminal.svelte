@@ -9,7 +9,7 @@
   // Shells live on the host, so they survive a reload; the app lists them
   // again and reattaches. On a phone a key row adds Esc, Tab, Ctrl and the
   // arrows, which a soft keyboard lacks.
-  import { onMount, untrack } from 'svelte'
+  import { onMount, untrack, tick } from 'svelte'
   import { api } from '../../api.js'
   import { base } from '../files/repo.ts'
   import TermPane from './TermPane.svelte'
@@ -41,6 +41,26 @@
   let current = $derived(list.find((t) => t.id === active))
 
   $effect(() => { if (active) lastTab.set(ref, active) })
+
+  function revealTab() {
+    const tab = tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]')?.closest<HTMLElement>('.tab')
+    if (!tabsEl || !tab) return
+    const strip = tabsEl.getBoundingClientRect()
+    const item = tab.getBoundingClientRect()
+    if (item.left < strip.left) tabsEl.scrollLeft += item.left - strip.left
+    else if (item.right > strip.right) tabsEl.scrollLeft += item.right - strip.right
+  }
+
+  $effect(() => {
+    active
+    list
+    if (!tabsEl) return
+    let live = true
+    tick().then(() => { if (live) revealTab() })
+    const observer = new ResizeObserver(revealTab)
+    observer.observe(tabsEl)
+    return () => { live = false; observer.disconnect() }
+  })
 
   // load lists the shells. A background refresh (quiet) never shows an
   // error: a lost connection already shows elsewhere and passes.
@@ -120,10 +140,16 @@
 
   function tabKey(e: KeyboardEvent) {
     const i = list.findIndex((t) => t.id === active)
-    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+    const next = e.key === 'Home' ? 0 : e.key === 'End' ? list.length - 1
+      : e.key === 'ArrowRight' ? (i + 1) % list.length
+      : e.key === 'ArrowLeft' ? (i - 1 + list.length) % list.length : -1
+    if (next >= 0 && list[next]) {
       e.preventDefault()
-      active = list[(i + (e.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length]?.id ?? active
-      setTimeout(() => tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus(), 0)
+      active = list[next].id
+      tick().then(() => {
+        tabsEl?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus({ preventScroll: true })
+        revealTab()
+      })
     } else if (e.key === 'Delete' && current) askClose(current)
   }
 
