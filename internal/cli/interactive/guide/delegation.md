@@ -175,9 +175,10 @@ Read `dyna guide steering` for reports and handoffs.
 Close accepted children unless a follow-up is likely.
 When an assigned item is done, run `dyna goal item done <goal> <item>`.
 When a held goal is done, run `dyna goal done <id> "Summary"`.
-End or move PR roles, other goals, questions, children, shells, and runs. Then run `dyna subagent finish`.
-It lists remaining responsibilities and commands to resolve them. The shell job running finish does not block it.
-Finish keeps the session available. Close ends it and automatically hands work up the parent chain.
-Finish makes the session dormant; messages wake it. Dyna closes it after 7 dormant days.
+End or move PR roles, other goals, questions, children, shells, and runs.
+A session with no responsibilities at the end of a turn goes dormant by itself; messages wake it.
+The shell job a turn runs in ends with that turn and never keeps it awake.
+Dormant keeps the session available. Close ends it and automatically hands work up the parent chain.
+Dyna closes a dormant session after 7 dormant days.
 Keep authors open while they handle their changes. If an author must close, the handoff described in `dyna guide git` applies.
 Use `dyna guide recovery` for transfers.

@@ -1,8 +1,8 @@
 package subagent
 
 import (
-	"strings"
 	"testing"
+	"time"
 
 	"dyna-agent/internal/goals"
 )
@@ -43,9 +43,9 @@ func TestChildrenDelegateAsItems(t *testing.T) {
 	}
 }
 
-// Finish refuses while an open item is assigned, and passes once the item is
-// done.
-func TestFinishBlocksOnOpenAssignedItem(t *testing.T) {
+// An open assigned item keeps a session awake; once it is done, the next turn
+// that ends with no work makes it dormant.
+func TestOpenAssignedItemKeepsASessionAwake(t *testing.T) {
 	e := newTestEnv(t)
 	e.joinRunners()
 	lead, _ := e.start("SLEEP:1 RESPOND: lead")
@@ -53,15 +53,23 @@ func TestFinishBlocksOnOpenAssignedItem(t *testing.T) {
 	stampParent(t, lead)
 	child, _ := e.start("RESPOND: child")
 	child, _ = e.wait(child.ID, 1)
-	e.joinRunners()()
-	if _, err := e.m.Finish(e.ctx, child.ID); err == nil || !strings.Contains(err.Error(), "dyna goal item done") {
-		t.Fatalf("finish with open item: %v", err)
+	if got, err := e.m.Store.Info(child.ID); err != nil || got.Status != StatusIdle {
+		t.Fatalf("session with an open item = %+v, %v; want it awake", got, err)
 	}
 	if _, err := e.m.goalStore().SetItemState(child.RoomID, child.Goal, child.Item, child.ID, goals.ItemDone); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.m.Finish(e.ctx, child.ID); err != nil {
-		t.Fatalf("finish after item done: %v", err)
+	// One more turn: its end leaves the session no work.
+	if _, err := e.m.Assign(e.ctx, child.ID, "RESPOND: done", "", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	now, err := e.m.Store.Info(child.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.wait(child.ID, now.Turns)
+	if got := e.waitStatus(child.ID, StatusDormant); got.Status != StatusDormant {
+		t.Fatalf("session after the item is done = %+v; want it dormant", got)
 	}
 }
 

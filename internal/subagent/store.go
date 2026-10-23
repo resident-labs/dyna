@@ -43,7 +43,8 @@ import (
 )
 
 // Session lifecycle: queued/running have an active turn; idle is open without
-// a turn and can own work. Only Finish enters dormant after checking ownership.
+// a turn and can own work. A turn that ends with no responsibilities makes the
+// session dormant; its own turn runner makes that change.
 // Coordination posts can wake dormant sessions; notices cannot. Maintenance
 // closes them after DormantCloseAfter. Closed sessions require explicit Reopen.
 // Metadata stores idle/dormant/closed; Info derives queued/running from turn state.
@@ -126,11 +127,9 @@ type Meta struct {
 	Owner        string    `json:"owner,omitempty"`
 	Created      time.Time `json:"created"`
 	LastActivity time.Time `json:"lastActivity"`
-	// Finished records when Finish entered dormancy, for the maintenance cutoff.
+	// Finished records when dormancy began, for the maintenance cutoff.
 	// Status alone determines dormancy; the next turn clears this timestamp.
 	Finished time.Time `json:"finished,omitzero"`
-	// DormantWake remembers that the current wake chain began in dormancy.
-	DormantWake bool `json:"dormantWake,omitempty"`
 	// Status stores idle, dormant or closed. Use Info.Status for live turn state.
 	Status string `json:"status"`
 	// Closed records the close time.

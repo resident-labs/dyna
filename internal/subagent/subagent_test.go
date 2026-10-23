@@ -176,10 +176,19 @@ func (e *testEnv) doneGoals() {
 	}
 }
 
-// finish finishes ref after its spawn goals are done.
+// finish makes ref dormant the way a turn end does: it finishes the session's
+// goals, then runs one more turn that leaves no work.
 func (e *testEnv) finish(ref string) (Info, error) {
 	e.doneGoals()
-	return e.m.Finish(e.ctx, ref)
+	if _, err := e.m.Assign(e.ctx, ref, "RESPOND: nothing left", "", time.Time{}); err != nil {
+		return Info{}, err
+	}
+	info, err := e.m.Store.Info(ref)
+	if err != nil {
+		return info, err
+	}
+	e.wait(ref, info.Turns)
+	return e.m.Store.Info(ref)
 }
 
 func (e *testEnv) wait(ref string, turn int) (Info, Turn) {
@@ -697,7 +706,7 @@ func TestWorkflowWorkersCannotStartOrControlSubagents(t *testing.T) {
 	if _, err := e.m.Stop(e.ctx, info.ID); err == nil || err.Error() != "subagent stop is owner or root or session only; use subagent mode to control sessions" {
 		t.Fatalf("Stop in workflow mode err = %v", err)
 	}
-	if _, err := e.m.Close(e.ctx, info.ID); err == nil || err.Error() != "subagent close is owner or root or another session only; a session must use dyna subagent finish instead of closing itself" {
+	if _, err := e.m.Close(e.ctx, info.ID); err == nil || err.Error() != "subagent close is owner or root or another session only; a session becomes dormant when its turn ends, so it does not close itself" {
 		t.Fatalf("Close in workflow mode err = %v", err)
 	}
 	// Read-only access still works.

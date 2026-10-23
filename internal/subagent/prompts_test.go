@@ -21,7 +21,7 @@ func TestInstructionsTeachDynaOnlyDelegation(t *testing.T) {
 		"Edit code only in dyna git worktrees new trees, never main.",
 		"Delegate only through Dyna", "never harness subagents, Task/Agent or workflow tools",
 		`"$DYNA_BIN" subagent start --name <unique-name> --profile <profile>`,
-		"or pass --room", "Never wait or poll for children", "dyna ask", "dyna subagent finish", "Never auto-merge",
+		"or pass --room", "Never wait or poll for children", "dyna ask", "goes dormant by itself", "Never auto-merge",
 		"git`: before you create a worktree, open, track, review or comment on a pull request",
 		"dyna git pr comment", clearEnglishPrompt,
 		"Turns started only by child, sibling or group posts end silently.",

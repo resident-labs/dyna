@@ -47,7 +47,7 @@ func TestSessionRelationshipRefusals(t *testing.T) {
 			want := tc.action + " is owner or root or parent only; ask the session parent or root to move it"
 			switch tc.action {
 			case "subagent close":
-				want = "subagent close is owner or root or another session only; a session must use dyna subagent finish instead of closing itself"
+				want = "subagent close is owner or root or another session only; a session becomes dormant when its turn ends, so it does not close itself"
 			case "subagent rename":
 				want = "subagent rename is owner or root or self or parent only; ask the session or its parent to rename it"
 			}
