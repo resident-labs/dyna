@@ -315,6 +315,10 @@ func prepareBrowserProfile(ctx context.Context, id string, v settings.Values) er
 // can tell when a second cleanup path is waiting for it.
 var browserCleanupWait = func(string) {}
 
+// browserCleanupLocked reports that this path now holds the cleanup lock, so a
+// test can act only after the daemon's own save-back started.
+var browserCleanupLocked = func(string) {}
+
 func withBrowserCleanup(ctx context.Context, id string, fn func() error) error {
 	browserCleanupWait(id)
 	f, err := browserFileLock(ctx, filepath.Join(Dir(id), "cleanup.lock"), false)
@@ -322,6 +326,7 @@ func withBrowserCleanup(ctx context.Context, id string, fn func() error) error {
 		return err
 	}
 	defer f.Close()
+	browserCleanupLocked(id)
 	return fn()
 }
 

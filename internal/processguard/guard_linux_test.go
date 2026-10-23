@@ -31,10 +31,16 @@ func TestLiveReaperPreservesExitedAnchor(t *testing.T) {
 		t.Fatal(err)
 	}
 	pid := anchor.Process.Pid
-	await(t, "exited anchor", func() bool {
-		fields, err := procFields(pid)
-		return err == nil && fields[0] == "Z"
-	})
+	// A pidfd becomes readable when the anchor exits, which is the event this
+	// test needs before it can check the zombie it is not allowed to reap.
+	fd, err := unix.PidfdOpen(pid, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(fd)
+	if n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 8000); err != nil || n == 0 {
+		t.Fatalf("exited anchor: %d %v", n, err)
+	}
 	reapOrphans(pid)
 	fields, err := procFields(pid)
 	if err != nil || fields[0] != "Z" {
@@ -75,6 +81,8 @@ func TestAdoptedChildFixture(t *testing.T) {
 			os.Exit(103)
 		}
 		if os.Getenv("PG_ADOPTED_FIXTURE") == "host" {
+			// The parent waits for this line instead of the orphan file.
+			_, _ = os.Stdout.WriteString("ready\n")
 			var b [1]byte
 			_, _ = os.Stdin.Read(b[:])
 		}
@@ -107,15 +115,22 @@ func TestGuardReapsAdoptedChildrenWhileRunning(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestAdoptedChildFixture$")
 	cmd.Env = append(os.Environ(), "PG_ADOPTED_FIXTURE=host", "PG_ROOT="+root)
 	cmd.Stdin = input
+	readyIn, readyOut, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer readyIn.Close()
+	cmd.Stdout = readyOut
 	c := wrapTest(t, cmd)
 	if err := c.Start(nil); err != nil {
 		t.Fatal(err)
 	}
+	readyOut.Close()
 	defer func() {
 		release.Close()
 		_ = waitTest(t, c)
 	}()
-	await(t, "adopted child PIDs", func() bool { return fileExists(filepath.Join(root, "orphans")) })
+	awaitLine(t, readyIn, "adopted child PIDs")
 	b, err := os.ReadFile(filepath.Join(root, "orphans"))
 	if err != nil {
 		t.Fatal(err)
@@ -124,24 +139,24 @@ func TestGuardReapsAdoptedChildrenWhileRunning(t *testing.T) {
 	if len(pids) != 32 {
 		t.Fatalf("child PIDs: %q", b)
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	// Each adopted child reports its own exit, so the guard sees the exits
+	// while the native still runs; the reap that follows is a process fact.
 	for _, value := range pids {
 		pid, err := strconv.Atoi(value)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for {
-			fields, err := procFields(pid)
-			if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ESRCH) {
-				break
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("child %d remains: state=%s parent=%s; guard=%d", pid, fields[0], fields[1], c.Reference().value.Guardian)
-			}
-			time.Sleep(time.Millisecond)
+		fd, err := unix.PidfdOpen(pid, 0)
+		if errors.Is(err, unix.ESRCH) {
+			continue // already reaped
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 8000)
+		unix.Close(fd)
+		if err != nil || n == 0 {
+			t.Fatalf("child %d did not exit: %d %v", pid, n, err)
 		}
 	}
 	if live, err := Probe(c.Reference()); !live || err != nil {
@@ -152,6 +167,14 @@ func TestGuardReapsAdoptedChildrenWhileRunning(t *testing.T) {
 	var exit *exec.ExitError
 	if !errors.As(err, &exit) || exit.ExitCode() != 7 {
 		t.Fatalf("native exit status: %v, want 7", err)
+	}
+	// The guard reaps adopted children in its SIGCHLD path and once more before
+	// it exits, so no adopted child may remain afterwards.
+	for _, value := range pids {
+		pid, _ := strconv.Atoi(value)
+		if fields, err := procFields(pid); err == nil {
+			t.Fatalf("child %d was not reaped: state=%s parent=%s", pid, fields[0], fields[1])
+		}
 	}
 }
 

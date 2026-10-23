@@ -10,8 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"dyna-agent/internal/settings"
 )
 
@@ -34,28 +32,14 @@ func browserCleanupComputer(t *testing.T, ctx context.Context, id string) *super
 	return s
 }
 
-// browserCleanupHeld reports whether another open file description holds path.
-func browserCleanupHeld(path string) bool {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
-	if err != nil {
-		return false
-	}
-	held := unix.Flock(int(f.Fd()), unix.LOCK_EX|unix.LOCK_NB) != nil
-	f.Close()
-	return held
-}
-
-// waitBrowserCleanupHeld waits until the daemon holds the cleanup lock, so the
+// waitBrowserCleanupLocked waits until the daemon holds the cleanup lock, so the
 // test acts only after its save-back started.
-func waitBrowserCleanupHeld(t *testing.T, path string) {
+func waitBrowserCleanupLocked(t *testing.T, locked <-chan struct{}) {
 	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(time.Millisecond) {
-		if browserCleanupHeld(path) {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the daemon never reached its profile release")
-		}
+	select {
+	case <-locked:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the daemon never reached its profile release")
 	}
 }
 
@@ -121,16 +105,24 @@ func TestDestroyFallbackKeepsSavedBrowserState(t *testing.T) {
 	// Each path reports its attempt, so the test knows the fallback is waiting
 	// for the lock the daemon holds instead of guessing from a goroutine start.
 	attempts := make(chan struct{}, 8)
+	locked := make(chan struct{}, 1)
 	realWait := browserCleanupWait
 	browserCleanupWait = func(string) { attempts <- struct{}{} }
-	t.Cleanup(func() { browserCleanupWait = realWait })
+	realLocked := browserCleanupLocked
+	browserCleanupLocked = func(string) {
+		select {
+		case locked <- struct{}{}:
+		default:
+		}
+	}
+	t.Cleanup(func() { browserCleanupWait = realWait; browserCleanupLocked = realLocked })
 	daemonDone := make(chan error, 1)
 	go func() {
 		d := &daemon{ctx: ctx, computers: map[string]*supervisor{id: s}}
 		_, err := d.dispatch(ctx, Request{Op: "destroy", Session: id})
 		daemonDone <- err
 	}()
-	waitBrowserCleanupHeld(t, filepath.Join(Dir(id), "cleanup.lock"))
+	waitBrowserCleanupLocked(t, locked)
 	<-attempts // the daemon's save-back, which now waits for the master lock
 	fallbackDone := make(chan error, 1)
 	go func() {
