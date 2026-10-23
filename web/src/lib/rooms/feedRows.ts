@@ -2,7 +2,7 @@ import { parsePRPost } from '../prs/pr.ts'
 import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
 import type { EventPayload } from './events.gen.ts'
-import { hookEvent, prEvent } from './eventPayloads.ts'
+import { hookEvent, mergeEvent, prEvent } from './eventPayloads.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
 // fixtures of a test both fit it.
@@ -90,11 +90,14 @@ export function rowPosts<P extends FeedInput>(row: FeedRow<P> | undefined): P[] 
   return row?.kind === 'post' ? row.posts ?? [row.post] : []
 }
 
-// foldKey names what a row folds on: one card per PR, and one card per hook
-// run, so a run's start folds into its result. An empty key never folds.
+// foldKey names a row that folds on one subject: one card per PR, one card
+// per hook run, and one card per merge trial, so a trial's progress and its
+// end stay one card. An empty key never folds.
 function foldKey(post: FeedInput): string {
   const hook = hookEvent(post)
   if (hook) return `hook:${hook.runId}`
+  const merge = mergeEvent(post)
+  if (merge) return `merge:${merge.trialId}`
   const pr = prEvent(post)
   if (pr) return pr.type === 'held-comment' ? '' : `pr:${pr.changeId || pr.url || ''}`
   // TODO: legacy/shim remove later — a PR post stored before the typed events
@@ -153,7 +156,8 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
       (prev.to || []).join() === (post.to || []).join()
     const last = out[out.length - 1]
     const key = foldKey(post)
-    // A PR row and a hook row can fold, so both keep their posts from the start.
+    // A PR row, a hook row and a merge trial row can fold, so each keeps its
+    // posts from the start.
     const foldable = !!key || post.kind === 'pr'
     const plain = (p: FeedInput) => !p.replyTo && !p.forward && !p.attachments?.length
     if (key && last?.kind === 'post' && last.posts && plain(post) && plain(last.post) && foldKey(last.post) === key) {

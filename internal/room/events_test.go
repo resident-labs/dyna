@@ -35,7 +35,7 @@ func TestEventsFileMatchesRegistry(t *testing.T) {
 
 func TestPostRejectsSealedFamily(t *testing.T) {
 	store, rec := newEventStore(t)
-	for _, family := range []EventFamily{FamilyWorktree, FamilyHook, FamilyPR} {
+	for _, family := range []EventFamily{FamilyWorktree, FamilyHook, FamilyPR, FamilyMerge} {
 		_, err := store.Post(rec.ID, PostInput{From: rec.Name, To: []string{rec.Name}, Kind: string(family), Text: "sealed"})
 		if err == nil || !strings.Contains(err.Error(), "PostEvent") {
 			t.Fatalf("Post accepted the sealed family %q: %v", family, err)
@@ -185,6 +185,89 @@ func TestPREventRequiresLabelAndChange(t *testing.T) {
 	}
 }
 
+// A merge trial posts its progress and its end as events of one trial: the
+// web folds them into one card by the trial ID, and each event carries the
+// facts the card shows.
+func TestMergeTrialEventsFoldByTrial(t *testing.T) {
+	store, rec := newEventStore(t)
+	prs := []MergePR{{Number: 241, Title: "Port the timeline", URL: "https://github.com/a/b/pull/241"}}
+	queued := MergeEvent{Type: MergeQueued, TrialID: "dyna/merge-trial/7", Repo: "a/b", Base: "main", PRs: prs}
+	first, err := store.PostEvent(rec.ID, queued, rec.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Kind != string(FamilyMerge) || first.Notice.Kind != string(MergeQueued) || first.Wake || first.Deliverable() {
+		t.Fatalf("stored queued event = %+v", first)
+	}
+	if !strings.Contains(first.Text, "Merge trial dyna/merge-trial/7 queued for main in a/b") {
+		t.Fatalf("queued text = %q", first.Text)
+	}
+	landed := MergeEvent{Type: MergeLanded, TrialID: queued.TrialID, Repo: "a/b", Base: "main", PRs: prs, Commit: strings.Repeat("2", 40)}
+	second, err := store.PostEvent(rec.ID, landed, rec.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The landed event is a new post of the same trial, so one card folds it.
+	if second.ID == first.ID || second.Notice.Kind != string(MergeLanded) {
+		t.Fatalf("stored landed event = %+v", second)
+	}
+	for _, msg := range []Message{first, second} {
+		got, ok := msg.Merge()
+		if !ok || got.TrialID != queued.TrialID || len(got.PRs) != 1 || got.PRs[0].Number != 241 || got.Repo != "a/b" || got.Base != "main" {
+			t.Fatalf("stored payload of %s = %+v, %v", msg.ID, got, ok)
+		}
+	}
+	if got, _ := second.Merge(); got.Commit != landed.Commit {
+		t.Fatalf("landed payload = %+v", got)
+	}
+	// The same fact in a later pass keeps its post, so a retried tick posts once.
+	if again, err := store.PostEvent(rec.ID, landed, rec.Name); err != nil || again.ID != second.ID {
+		t.Fatalf("retried landed event = %+v, %v", again, err)
+	}
+}
+
+// A merge event without its trial, base or member PRs posts no blank card.
+func TestMergeEventRequiresTrialBaseAndPRs(t *testing.T) {
+	store, rec := newEventStore(t)
+	prs := []MergePR{{Number: 1, Title: "a", URL: "https://github.com/a/b/pull/1"}}
+	for _, ev := range []MergeEvent{
+		{Type: MergeQueued, Repo: "a/b", Base: "main", PRs: prs},
+		{Type: MergeQueued, TrialID: "t", Repo: "a/b", PRs: prs},
+		{Type: MergeQueued, TrialID: "t", Repo: "a/b", Base: "main"},
+	} {
+		if _, err := store.PostEvent(rec.ID, ev, rec.Name); err == nil {
+			t.Fatalf("PostEvent accepted %+v", ev)
+		}
+	}
+}
+
+// A recorded decision is one line with no trial. Each decision is its own post,
+// even when the line repeats.
+func TestMergeDecisionPostsOncePerDecision(t *testing.T) {
+	store, rec := newEventStore(t)
+	ev := MergeDecisionEvent{Note: "Keep the queue paused until the flake is fixed"}
+	first, err := store.PostEventInput(PostEventInput{RoomID: rec.ID, Event: ev, FreshID: true, To: []string{rec.Name}, RoomService: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.PostEventInput(PostEventInput{RoomID: rec.ID, Event: ev, FreshID: true, To: []string{rec.Name}, RoomService: true})
+	if err != nil || first.ID == second.ID {
+		t.Fatalf("second decision = %+v, %v", second, err)
+	}
+	if first.Kind != string(FamilyMerge) || first.Notice.Kind != string(MergeDecision) || first.From != rec.Name {
+		t.Fatalf("stored decision = %+v", first)
+	}
+	if first.Text != ev.Note || first.Wake {
+		t.Fatalf("decision text = %q, wake %v", first.Text, first.Wake)
+	}
+	if got, ok := first.MergeDecision(); !ok || got.Note != ev.Note {
+		t.Fatalf("stored payload = %+v, %v", got, ok)
+	}
+	if _, ok := first.Merge(); ok {
+		t.Fatal("a decision read as a trial event")
+	}
+}
+
 func newEventStore(t *testing.T) (*Store, Record) {
 	t.Helper()
 	store := &Store{Root: t.TempDir()}
@@ -206,6 +289,25 @@ func generateEvents() ([]byte, error) {
 		name := enum.Type.Name()
 		fmt.Fprintf(&b, "// %s is a named string type of an event payload.\n", name)
 		fmt.Fprintf(&b, "export type %s = %s\n\n", name, stringUnion(enum.Values))
+	}
+
+	// An embedded struct, such as one member PR, is its own interface, so a
+	// card reads a typed object rather than a list of strings.
+	for _, typ := range eventObjects {
+		fields, err := payloadFields(typ)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(&b, "// %s is a struct of an event payload.\n", typ.Name())
+		fmt.Fprintf(&b, "export interface %s {\n", typ.Name())
+		for _, field := range fields {
+			optional := ""
+			if field.optional {
+				optional = "?"
+			}
+			fmt.Fprintf(&b, "  %s%s: %s\n", field.name, optional, field.tsType)
+		}
+		b.WriteString("}\n\n")
 	}
 
 	// A payload can serve several event types, such as the start and the result
@@ -286,6 +388,22 @@ func generateEvents() ([]byte, error) {
 	}
 	b.WriteString("\n")
 
+	for _, typ := range eventObjects {
+		fields, err := payloadFields(typ)
+		if err != nil {
+			return nil, err
+		}
+		name := typ.Name()
+		fmt.Fprintf(&b, "export function is%s(v: unknown): v is %s {\n", name, name)
+		conditions := []string{"isRecord(v)"}
+		for _, field := range fields {
+			conditions = append(conditions, field.check)
+		}
+		fmt.Fprintf(&b, "  return %s\n}\n\n", strings.Join(conditions, " &&\n    "))
+		fmt.Fprintf(&b, "export function is%sList(v: unknown): v is %s[] {\n", name, name)
+		fmt.Fprintf(&b, "  return Array.isArray(v) && v.every((item: unknown) => is%s(item))\n}\n\n", name)
+	}
+
 	for _, entry := range order {
 		fields, err := payloadFields(entry.typ)
 		if err != nil {
@@ -360,13 +478,26 @@ func tsField(typ reflect.Type, expr string) (string, string, error) {
 		return "string", fmt.Sprintf("typeof %s === \"string\"", expr), nil
 	case reflect.Int:
 		return "number", fmt.Sprintf("Number.isInteger(%s)", expr), nil
+	case reflect.Pointer:
+		if typ.Elem().Kind() != reflect.Struct || !hasObject(typ.Elem()) {
+			return "", "", fmt.Errorf("pointer type %s is not an event object", typ)
+		}
+		return typ.Elem().Name(), fmt.Sprintf("is%s(%s)", typ.Elem().Name(), expr), nil
 	case reflect.Slice:
-		if typ.Elem().Kind() != reflect.String || typ.Elem().PkgPath() != "" {
+		elem := typ.Elem()
+		if elem.Kind() == reflect.Struct && hasObject(elem) {
+			return elem.Name() + "[]", fmt.Sprintf("is%sList(%s)", elem.Name(), expr), nil
+		}
+		if elem.Kind() != reflect.String || elem.PkgPath() != "" {
 			return "", "", fmt.Errorf("slice type %s is not supported", typ)
 		}
 		return "string[]", fmt.Sprintf("isStringList(%s)", expr), nil
 	}
 	return "", "", fmt.Errorf("type %s is not supported", typ)
+}
+
+func hasObject(typ reflect.Type) bool {
+	return slices.ContainsFunc(eventObjects, func(object reflect.Type) bool { return object == typ })
 }
 
 func hasEnum(name string) bool {

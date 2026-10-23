@@ -312,6 +312,11 @@ export function parsePRPost(text: string | null | undefined, notice: EventNotice
 
 export const shortSha = (s?: string | null): string => (s || '').slice(0, 7)
 
+// commitUrl is the GitHub page of a commit whose pull request URL is known. A
+// change without a pull request link has no commit link either.
+export const commitUrl = (url?: string | null, sha?: string | null): string =>
+  url && sha ? url.replace(/\/pull\/\d+.*$/, `/commit/${sha}`) : ''
+
 // verdictMeta says how a verdict reads. approve-with-nits is an approval
 // with a note; question asks for an answer, not for code.
 export function verdictMeta(verdict?: string | null): { label: string; tone: string; note: string } | null {

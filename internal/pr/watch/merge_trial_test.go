@@ -654,12 +654,12 @@ func TestBatchTrialProgressUsesJobsWithoutAcceptingQueuedRun(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ci, _, reason, err := f.e.s.mergeTrialCI(t.Context(), r, f.branch, f.head)
+			trial, err := f.e.s.mergeTrialCI(t.Context(), r, f.branch, f.head)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if ci != "pending" || reason != tc.want {
-				t.Fatalf("CI=%q reason=%q, want pending and %q", ci, reason, tc.want)
+			if trial.Status != "pending" || trial.Reason != tc.want {
+				t.Fatalf("CI=%q reason=%q, want pending and %q", trial.Status, trial.Reason, tc.want)
 			}
 		})
 	}
@@ -826,7 +826,7 @@ func TestFailedBatchNoticeRetriesWithoutRestartingTrials(t *testing.T) {
 	if _, err := f.e.s.MergeTick(t.Context()); err == nil {
 		t.Fatal("expected probe error")
 	}
-	if len(f.e.sent) != 1 || f.builds != 1 {
+	if failed := mergeNotices(f.e.sent, room.MergeFailed); len(failed) != 1 || f.builds != 1 {
 		t.Fatalf("notices=%v builds=%d", f.e.sent, f.builds)
 	}
 }

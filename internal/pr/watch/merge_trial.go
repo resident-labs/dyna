@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/locallane"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/pr/trial"
+	"dyna-agent/internal/room"
 )
 
 // MergeTick uses the existing PR facts and publication lock. Every automatic
@@ -191,6 +192,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 			continue
 		}
 		s.expediteGranted("merge:"+repo, expeditedRecord(groups[repo][0], active))
+		s.noteTrialEvent(ctx, st, batch, mergeTrialEvent(st, batch, room.MergeQueued))
 		if err := s.advanceMergeTrial(ctx, repo, batch); err != nil {
 			failures = append(failures, err)
 		}
@@ -354,7 +356,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		}
 	}
 	if b.Phase == "awaiting-root" || ((b.Phase == "failed" || b.Phase == "stacking") && !b.Bisect) {
-		return s.stopMergeBatch(ctx, repo, *r, b)
+		return s.stopMergeBatch(ctx, repo, *r, b, nil)
 	}
 	// The access and pause checks also apply to a resumed publishing attempt.
 	for _, change := range b.Changes {
@@ -397,7 +399,9 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 			if slices.Contains(result.Conflicts, change.Head) {
 				member := *st.Records[change.Key]
 				text := fmt.Sprintf("%s conflicts with another PR in merge trial %s. Inspect the overlapping changes before this PR can join a batch.", changeLocation(member), b.Branch)
-				if err := s.postMergeNotice(ctx, member, "merge-trial-conflict", Notice{Target: member.Author, Text: text}); err != nil {
+				ev := mergeTrialEvent(st, b, room.MergeConflict)
+				ev.Label, ev.Reason = changeLabel(member), "conflicts with another PR in the trial"
+				if err := s.postMergeNotice(ctx, member, "merge-trial-conflict", Notice{Target: member.Author, Merge: &ev, Text: text}); err != nil {
 					return err
 				}
 			}
@@ -406,21 +410,32 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 			return s.discardMergeTrial(ctx, repo, *r, b)
 		}
 		b.Changes, b.Head, b.Phase, b.Reason = included, result.Head, "running", ""
-		return s.saveMergeTrial(repo, b)
+		if err := s.saveMergeTrial(repo, b); err != nil {
+			return err
+		}
+		s.noteTrialEvent(ctx, st, b, mergeTrialEvent(st, b, room.MergeTrial))
+		return nil
 	case "running":
-		ci, logs, reason, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
+		ci, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
 		if err != nil {
 			return err
 		}
-		if ci == "failed" {
-			b.Phase, b.Reason, b.Logs = "failed", "batch trial failed; waiting for root", logs
-			s.noteMergeHistory(st, repo, b, "trial", "failed", b.Head, logs)
-			return s.stopMergeBatch(ctx, repo, *r, b)
+		if ci.Status == "failed" {
+			b.Phase, b.Reason, b.Logs = "failed", "batch trial failed; waiting for root", ci.Logs
+			s.noteMergeHistory(st, repo, b, "trial", "failed", b.Head, ci.Logs)
+			return s.stopMergeBatch(ctx, repo, *r, b, mergeChecksOf(ci))
 		}
-		if ci != "passed" {
-			if b.Reason != reason {
-				b.Reason = reason
-				return s.saveMergeTrial(repo, b)
+		if ci.Status != "passed" {
+			if b.Reason != ci.Reason {
+				b.Reason = ci.Reason
+				if err := s.saveMergeTrial(repo, b); err != nil {
+					return err
+				}
+				// A new count is one progress step of the trial's card. This is a
+				// fact the CI read already gave, so it costs no extra call.
+				if ci.Total > 0 {
+					s.noteTrialEvent(ctx, st, b, mergeChecksEvent(st, b, ci))
+				}
 			}
 			return nil
 		}
@@ -444,12 +459,13 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		return s.advanceMergeTrial(ctx, repo, b)
 	case "publishing":
 		if st.RepositoryFacts[repo].Head != b.Head {
-			ci, logs, reason, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
+			ci, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
 			if err != nil {
 				return err
 			}
+			logs := ci.Logs
 			flaky := flakyPublicationAllowed(ctx, logs)
-			if ci == "failed" && !flaky {
+			if ci.Status == "failed" && !flaky {
 				// Record the prefix before it is reset to the full batch.
 				s.noteMergeHistory(st, repo, b, "trial", "failed", b.Head, logs)
 				if len(b.StackChanges) > 0 {
@@ -465,12 +481,12 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 					b.Phase, b.Reason, b.Logs = "failed", "batch trial failed; waiting for root", logs
 				}
 				if !b.Bisect {
-					return s.stopMergeBatch(ctx, repo, *r, b)
+					return s.stopMergeBatch(ctx, repo, *r, b, mergeChecksOf(ci))
 				}
 				return s.saveMergeTrial(repo, b)
 			}
-			if ci != "passed" && !flaky {
-				b.Reason = reason
+			if ci.Status != "passed" && !flaky {
+				b.Reason = ci.Reason
 				return s.saveMergeTrial(repo, b)
 			}
 
@@ -494,6 +510,9 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 			return errors.Join(err, s.saveMergeTrial(repo, b))
 		}
 		s.noteMergeHistory(st, repo, b, "publish", "published", b.Head, "")
+		landed := mergeTrialEvent(st, b, room.MergeLanded)
+		landed.Commit = b.Head
+		s.noteTrialEvent(ctx, st, b, landed)
 		b.Phase = "published"
 		if err := s.saveMergeTrial(repo, b); err != nil {
 			return err
@@ -507,7 +526,7 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 		for _, change := range b.Changes {
 			member := *st.Records[change.Key]
 			if changeKind(member) == "local" {
-				if err := s.publishLocalChange(ctx, member, change.Head); err != nil {
+				if err := s.publishLocalChange(ctx, member, change.Head, trialIdentity(b)); err != nil {
 					return err
 				}
 				continue
@@ -544,15 +563,29 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 	}
 }
 
+// trialCI is what the steward observed about a merge trial's CI: its status,
+// the logs of a failure, the reason it shows while it waits, and the check
+// counts it already read. It costs no extra GitHub call.
+type trialCI struct {
+	Status string
+	Logs   string
+	Reason string
+	// Done counts the checks that finished, and Total counts them all. Both
+	// are zero while the trial branch has no started run.
+	Done   int
+	Total  int
+	Failed []string
+}
+
 // mergeTrialCI accepts only push evidence for the frozen trial branch and head.
 // Missing or queued runs do not prove that the trial suite ran.
-func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head string) (string, string, string, error) {
+func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head string) (trialCI, error) {
 	if changeKind(r) == "local" {
 		return s.localTrialCI(ctx, r, head)
 	}
 	var snap Snapshot
 	if err := s.github(r.RoomID).readCommitCI(ctx, refRecord(r), head, &snap); err != nil {
-		return "", "", "", err
+		return trialCI{}, err
 	}
 	var pushes []Run
 	started := false
@@ -573,29 +606,29 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 	trialRecord.Branch = branch
 	st, err := s.Store.Read()
 	if err != nil {
-		return "", "", "", err
+		return trialCI{}, err
 	}
 	snap, err = s.withRegisteredCI(ctx, trialRecord, snap, EffectivePolicy(st, r))
 	if err != nil {
-		return "", "", "", err
+		return trialCI{}, err
 	}
 	if snap.localCI != nil {
 		if conclusiveCI(snap.localCI.Status) {
-			return snap.localCI.Status, snap.localCI.Logs, "", nil
+			return trialCI{Status: snap.localCI.Status, Logs: snap.localCI.Logs}, nil
 		}
-		return "pending", "", snap.localCI.Reason, nil
+		return trialCI{Status: "pending", Reason: snap.localCI.Reason}, nil
 	}
-	ci := "pending"
+	out := trialCI{Status: "pending"}
 	var failed []Run
 	if started {
-		ci, _, _, failed = snap.CIStatus()
+		out.Status, _, out.Failed, failed = snap.CIStatus()
 	}
-	if ci == "pending" {
+	if out.Status == "pending" {
 		total, done, active := 0, 0, false
 		for _, run := range currentRuns(pushes) {
 			jobs, err := s.github(r.RoomID).runJobs(ctx, refRecord(r), run)
 			if err != nil {
-				return "", "", "", err
+				return trialCI{}, err
 			}
 			total += len(jobs)
 			for _, job := range jobs {
@@ -607,19 +640,22 @@ func (s *Service) mergeTrialCI(ctx context.Context, r Record, branch, head strin
 				}
 			}
 		}
-		reason := "waiting for push CI to start"
+		out.Done, out.Total = done, total
+		out.Reason = "waiting for push CI to start"
 		if active {
-			reason = fmt.Sprintf("running (%d of %d jobs done)", done, total)
+			out.Reason = fmt.Sprintf("running (%d of %d jobs done)", done, total)
 		}
-		return ci, "", reason, nil
+		return out, nil
 	}
-	logs := ""
-	if ci == "failed" {
+	if out.Status != "failed" {
+		out.Failed = nil
+	}
+	if out.Status == "failed" {
 		for _, run := range failed {
-			logs += s.github(r.RoomID).Logs(ctx, refRecord(r), run) + "\n"
+			out.Logs += s.github(r.RoomID).Logs(ctx, refRecord(r), run) + "\n"
 		}
 	}
-	return ci, logs, "", nil
+	return out, nil
 }
 
 // confirmTrialProbes scopes a failed observation to trials that contain it.

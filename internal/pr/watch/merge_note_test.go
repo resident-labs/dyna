@@ -34,10 +34,13 @@ func TestMergeNoteStoresQuietPostAndDecisionHistory(t *testing.T) {
 	}
 	var decisions []room.Message
 	for _, post := range posts {
-		if post.Kind == "merge-decision" {
+		if post.Kind == string(room.FamilyMerge) && post.Notice.Kind == string(room.MergeDecision) {
 			decisions = append(decisions, post)
 			if post.Wake || room.WakesRoot(post, rm.Name) || !post.Addressed(rm.Name) || post.Text != line {
 				t.Fatalf("decision did not stay quiet: %+v", post)
+			}
+			if got, ok := post.MergeDecision(); !ok || got.Note != line {
+				t.Fatalf("decision payload = %+v, %v", got, ok)
 			}
 		}
 	}

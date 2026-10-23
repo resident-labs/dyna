@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
 )
 
 // mergeBatchFailedReason is the merge pause that a failed batch sets.
@@ -11,7 +12,7 @@ const mergeBatchFailedReason = "batch trial failed; merging paused for recovery"
 
 // A failed batch stays frozen until root chooses recovery. The pause is durable
 // before report preparation, so a reporting error cannot start work.
-func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b state.MergeTrial) error {
+func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b state.MergeTrial, checks *room.MergeCheckSummary) error {
 	if b.Phase == "awaiting-root" && b.Notified {
 		return nil
 	}
@@ -59,7 +60,9 @@ func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b s
 		seen[member.RoomID] = true
 		anchor := *member
 		anchor.Head = b.Head
-		if err := s.postMergeNotice(ctx, anchor, "merge-batch-failed/"+trialIdentity(b), Notice{NeedsRoot: true, Kind: "ci", Text: b.RootReport}); err != nil {
+		ev := mergeTrialEvent(st, b, room.MergeFailed)
+		ev.Repo, ev.Reason, ev.Checks = mergeRepo(anchor), mergeBatchFailedReason, checks
+		if err := s.postMergeNotice(ctx, anchor, "merge-batch-failed/"+trialIdentity(b), Notice{NeedsRoot: true, Kind: "ci", Merge: &ev, Text: b.RootReport}); err != nil {
 			return err
 		}
 	}

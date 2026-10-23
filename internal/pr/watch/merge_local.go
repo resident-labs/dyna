@@ -13,6 +13,7 @@ import (
 	"dyna-agent/internal/locallane"
 	"dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
 )
 
@@ -161,18 +162,22 @@ func localCIStatus(result localci.Result, repo, head string) (string, string, st
 	}
 }
 
-func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (string, string, string, error) {
+func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (trialCI, error) {
 	runner := s.LocalCI
 	if runner == nil {
 		runner = localci.Runner{}
 	}
+	show := func(result localci.Result) (trialCI, error) {
+		status, logs, reason, err := localCIStatus(result, r.RepoPath, head)
+		return trialCI{Status: status, Logs: logs, Reason: reason}, err
+	}
 	result, err := runner.Show(r.RepoPath, head)
 	if err == nil && completeLocalCI(result) {
 		s.localRuns().Delete(r.RepoPath + "\x00" + head)
-		return localCIStatus(result, r.RepoPath, head)
+		return show(result)
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return "", "", "", err
+		return trialCI{}, err
 	}
 	key := r.RepoPath + "\x00" + head
 	run := &localCIRun{done: make(chan struct{})}
@@ -182,11 +187,11 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (stri
 		select {
 		case <-run.done:
 			if run.err != nil {
-				return "failed", run.err.Error(), "local CI failed", nil
+				return trialCI{Status: "failed", Logs: run.err.Error(), Reason: "local CI failed"}, nil
 			}
-			return localCIStatus(run.result, r.RepoPath, head)
+			return show(run.result)
 		default:
-			return "pending", "", "waiting for local CI", nil
+			return trialCI{Status: "pending", Reason: "waiting for local CI"}, nil
 		}
 	}
 	go func() {
@@ -195,10 +200,10 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (stri
 		defer cancel()
 		run.result, run.err = runner.Run(runCtx, localci.Request{Repo: r.RepoPath, SHA: head})
 	}()
-	return "pending", "", "waiting for local CI", nil
+	return trialCI{Status: "pending", Reason: "waiting for local CI"}, nil
 }
 
-func (s *Service) publishLocalChange(ctx context.Context, r Record, expected string) error {
+func (s *Service) publishLocalChange(ctx context.Context, r Record, expected, trialID string) error {
 	if r.Head != expected {
 		return errors.New("local change head changed after publication")
 	}
@@ -214,7 +219,8 @@ func (s *Service) publishLocalChange(ctx context.Context, r Record, expected str
 	}); err != nil {
 		return err
 	}
-	if err := s.postMergeNotice(ctx, r, "local-merged", Notice{Target: r.Author, Text: fmt.Sprintf("%s merged into %s. Watching stopped. Its clean worktree can be removed after this session closes.", changeLabel(r), locallane.Integration)}); err != nil {
+	ev := room.MergeEvent{Type: room.MergeLanded, TrialID: trialID, Repo: mergeRepo(r), Base: locallane.Integration, PRs: []room.MergePR{mergePR(r)}, Commit: expected}
+	if err := s.postMergeNotice(ctx, r, "local-merged", Notice{Target: r.Author, Merge: &ev, Text: fmt.Sprintf("%s merged into %s. Watching stopped. Its clean worktree can be removed after this session closes.", changeLabel(r), locallane.Integration)}); err != nil {
 		return err
 	}
 	return nil

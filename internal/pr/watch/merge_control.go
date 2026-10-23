@@ -9,6 +9,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/locallane"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
 )
@@ -230,12 +231,14 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 			return err
 		}
 		var affected []string
+		var trial *state.MergeTrial
 		logs := ""
 		for _, repo := range repos {
 			b := st.MergeTrials[repo]
 			for _, c := range b.Changes {
 				if c.Key == r.Key {
 					affected = append(affected, repo)
+					trial = b
 					logs = b.RootReport
 					if logs == "" {
 						logs = fmt.Sprintf("Trial CI evidence: https://%s/%s/commit/%s/checks\n%s", r.Host, r.Repo, b.Head, b.Logs)
@@ -255,7 +258,17 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 		}); err != nil {
 			return err
 		}
-		if err := s.postMergeNotice(ctx, r, "merge-root-return/"+digest(reason), Notice{Kind: "ci", Target: r.Author, Text: fmt.Sprintf("%s returned by root at %s. %s\n%s", r.URL, r.Head, reason, logs)}); err != nil {
+		ev := mergeEventOf(r, room.MergeReturned)
+		if ev.Base == "" {
+			// A local change merges into the integration branch.
+			ev.Base = locallane.Integration
+		}
+		ev.Reason = reason
+		if trial != nil {
+			ev = mergeTrialEvent(st, *trial, room.MergeReturned)
+			ev.Label, ev.Reason = changeLabel(r), reason
+		}
+		if err := s.postMergeNotice(ctx, r, "merge-root-return/"+digest(reason), Notice{Kind: "ci", Target: r.Author, Merge: &ev, Text: fmt.Sprintf("%s returned by root at %s. %s\n%s", r.URL, r.Head, reason, logs)}); err != nil {
 			return err
 		}
 		return discard(affected)
@@ -367,11 +380,11 @@ func (s *Service) publishControlledTrial(ctx context.Context, roomID string, st 
 				return err
 			}
 		} else {
-			ci, _, _, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
+			ci, err := s.mergeTrialCI(ctx, *r, b.Branch, b.Head)
 			if err != nil {
 				return err
 			}
-			if ci != "passed" {
+			if ci.Status != "passed" {
 				return fmt.Errorf("trial push CI has not passed")
 			}
 		}

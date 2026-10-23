@@ -205,14 +205,14 @@ func (s *Service) advanceSyncOperation(ctx context.Context, repo string, op lane
 		op.Head, op.State = result.Head, "testing"
 		return saveSyncOperation(repo, op)
 	case "testing":
-		status, logs, _, err := s.localTrialCI(ctx, r, op.Head)
+		ci, err := s.localTrialCI(ctx, r, op.Head)
 		if err != nil {
 			return finish("failed", err.Error())
 		}
-		if status == "failed" {
-			return finish("failed", logs)
+		if ci.Status == "failed" {
+			return finish("failed", ci.Logs)
 		}
-		if status != "passed" {
+		if ci.Status != "passed" {
 			return nil
 		}
 		op.State = "publishing"
@@ -222,14 +222,14 @@ func (s *Service) advanceSyncOperation(ctx context.Context, repo string, op lane
 			return nil
 		}
 		// Recheck the complete saved CI evidence after a restart before publication.
-		status, logs, _, err := s.localTrialCI(ctx, r, op.Head)
+		ci, err := s.localTrialCI(ctx, r, op.Head)
 		if err != nil {
 			return finish("failed", err.Error())
 		}
-		if status == "failed" {
-			return finish("failed", logs)
+		if ci.Status == "failed" {
+			return finish("failed", ci.Logs)
 		}
-		if status != "passed" {
+		if ci.Status != "passed" {
 			return nil
 		}
 		if op.Kind == "refresh" {
