@@ -78,7 +78,8 @@ correction.
 
 ### Goals and the keeper
 
-`dyna goal` records an outcome and its done condition for a session. The goal
+`dyna goal` records an outcome and its done condition for a session. Root holds
+no goals itself, so the agents that do the work hold them. The goal
 keeper checks progress on each goal, asks holders for status when progress
 stops, and records each check-in.
 

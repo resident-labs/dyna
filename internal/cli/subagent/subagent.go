@@ -149,7 +149,7 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "start --goal <outcome; done when> --profile <name> [--name <label>] [--room <room>] [--dir <path>] [--schema <file>] [--under <goal>] <brief text | @file>",
 		Short: "Start a subagent session; prints its address and runs the first turn in the background",
-		Long:  "Start a subagent with a goal and brief. Use --under gN to select its goal. Otherwise, start uses the starter's unique open assigned item goal, then its single open held goal set by someone else. Multiple eligible goals require --under. With no eligible goal, the child holds a new standalone goal.",
+		Long:  "Start a subagent with a goal and brief. Use --under gN to select its goal. Otherwise, start uses the starter's unique open assigned item goal, then its single open held goal set by someone else. Multiple eligible goals require --under. With no eligible goal, the child holds a new standalone goal. Root holds no goals: a start from root's session gives the child a top-level goal of its own, and a goal that root holds is never used.",
 		// Start explains a missing brief better than cobra's argument count.
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {

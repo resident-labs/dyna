@@ -66,6 +66,17 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]string, 
 			if m.checkpoint != nil {
 				m.checkpoint("close-before-goal-handoff")
 			}
+			// Root holds no goals, so a goal that would reach root stays with
+			// the owner, unheld, instead.
+			if heir.Role == RoleRoot {
+				released, err := m.goalStore().ReleaseHolder(info.RoomID, item.ID, info.ID)
+				if err != nil {
+					errs = append(errs, err)
+				} else if released {
+					summary = append(summary, "Goal "+item.ID+" → the owner")
+				}
+				continue
+			}
 			moved, err := m.goalStore().HandoffHolder(info.RoomID, item.ID, info.ID, heir.ID)
 			if err != nil {
 				errs = append(errs, err)

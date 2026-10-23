@@ -92,8 +92,14 @@ It ignores self-set held goals. Multiple assigned item goals or eligible held go
 If no goal is eligible, the child holds a new standalone goal, for any parent role.
 Placement does not change session hierarchy.
 
+Root holds no goals. A start from root's session makes the child the holder of a new
+top-level goal, unless `--under gN` names a goal that another agent holds. A goal that
+root holds is never used. When a closed session would hand a goal to root, the goal
+stays with the owner instead.
+
 For other work across turns, use `dyna goal "<outcome; done when>"`.
 The caller holds it by default. Select holders with `--for @name`, `@children`, `@siblings`, or `@room`.
+Root cannot be a holder: `dyna goal` fails for root, and `--for @root` is refused.
 
 ```bash
 dyna goal                         # your goals and other open room goals
@@ -113,7 +119,8 @@ dyna goal expedite --off
 Each room has at most one expedited goal. Only the owner or root sets it. It ends when
 the goal is done or dropped, with `--off`, or after 24 hours. Replacing it needs
 `--replace`. Expediting the same goal preserves its original expiry. Its holders
-and their descendants share priority; PRs use their saved goal link.
+and their descendants share priority; PRs use their saved goal link. A holder that
+is root or the owner never carries the badge, and neither do its children.
 
 Linked changes get priority for the next available review slot in their room.
 Eligible expedited PRs get an isolated merge trial, with merge priority per repository.

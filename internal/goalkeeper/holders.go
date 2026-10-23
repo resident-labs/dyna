@@ -1,13 +1,16 @@
 package goalkeeper
 
 import (
+	"errors"
 	"fmt"
 
+	"dyna-agent/internal/goals"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/sessionlife"
 )
 
 // ResolveHolders uses Post's mention rules, with @room for a shared goal.
+// Root holds no goals, so @root names no holder.
 func (s *Service) ResolveHolders(roomID, by string, selectors []string) ([]string, bool, error) {
 	if len(selectors) == 0 {
 		if !sessionlife.IsSessionID(by) {
@@ -16,6 +19,9 @@ func (s *Service) ResolveHolders(roomID, by string, selectors []string) ([]strin
 		return []string{by}, false, nil
 	}
 	for _, sel := range selectors {
+		if sel == "@root" {
+			return nil, false, errors.New(goals.RootHoldsNothing)
+		}
 		if sel == "@room" {
 			for _, other := range selectors {
 				if other != "@room" {

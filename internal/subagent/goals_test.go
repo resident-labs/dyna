@@ -98,6 +98,35 @@ func TestRootAndReviewerStartsCreateNoGoal(t *testing.T) {
 	}
 }
 
+// Root holds no goals, so a start from root's session gives the child a goal of
+// its own, even when root still holds a goal that the old lookup would find.
+func TestRootStartNeverJoinsARootGoal(t *testing.T) {
+	m := &Manager{Store: &Store{Root: filepath.Join(t.TempDir(), "sessions")}}
+	rootID := "ses_20261022-000000-rrrrrrrr"
+	if err := m.Store.writeMeta(Meta{ID: rootID, Name: RoleRoot, Role: RoleRoot, Service: true, RoomID: "r", Room: "work", Depth: 1}); err != nil {
+		t.Fatal(err)
+	}
+	store := m.goalStore()
+	rootGoal, err := store.Add("r", rootID, goals.Input{Text: "Room work", Holders: []string{rootID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, under := range []string{"", rootGoal.ID} {
+		meta := Meta{ID: "child-" + under, RoomID: "r", ParentSession: rootID}
+		goalID, itemID, err := m.addSpawnGoal(meta, under, "Child work", "Brief")
+		if err != nil {
+			t.Fatal(err)
+		}
+		g, err := store.Get("r", goalID)
+		if err != nil || itemID != "" || goalID == rootGoal.ID || !g.HeldBy(meta.ID) {
+			t.Fatalf("under=%q start: goal=%q item=%q err=%v", under, goalID, itemID, err)
+		}
+	}
+	if items, err := store.Items("r", rootGoal.ID); err != nil || len(items) != 0 {
+		t.Fatalf("root goal items = %v, %v", items, err)
+	}
+}
+
 func TestStartWithInvalidGoalLeavesNoSession(t *testing.T) {
 	e := newTestEnv(t)
 	e.joinRunners()

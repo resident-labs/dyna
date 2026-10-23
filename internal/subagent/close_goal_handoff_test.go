@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -24,6 +25,33 @@ func TestCloseWithoutHeirKeepsHeldGoalOpen(t *testing.T) {
 	got, err := e.m.goalStore().Get(holder.RoomID, goal.ID)
 	if err != nil || !got.Open() || !got.HeldBy(holder.ID) {
 		t.Fatalf("goal changed: %+v, %v", got, err)
+	}
+}
+
+// Close hands a goal to the nearest open ancestor, never to root: a goal that
+// would reach root stays with the owner instead.
+func TestCloseKeepsGoalsOffRoot(t *testing.T) {
+	e := newTestEnv(t)
+	rootID := NewID()
+	if err := e.m.Store.writeMeta(Meta{ID: rootID, Name: RoleRoot, Role: RoleRoot, Service: true,
+		RoomID: e.room.ID, Room: e.room.Name, Depth: 1}); err != nil {
+		t.Fatal(err)
+	}
+	holder := completedFixtureSession(t, e)
+	goal, err := e.m.goalStore().Add(holder.RoomID, "owner", goals.Input{Text: "Unfinished work", Holders: []string{holder.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed, err := e.m.Close(e.ctx, holder.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.m.goalStore().Get(holder.RoomID, goal.ID)
+	if err != nil || !got.Open() || got.HeldBy(rootID) || len(got.Holders) != 0 || got.Setter != "owner" {
+		t.Fatalf("goal after close = %+v, %v; want it open and unheld for the owner", got, err)
+	}
+	if !slices.Contains(closed.CloseSummary, "Goal "+goal.ID+" → the owner") {
+		t.Fatalf("close summary = %+v; want it to report the owner", closed.CloseSummary)
 	}
 }
 
