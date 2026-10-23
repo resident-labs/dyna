@@ -10,7 +10,7 @@
   import ComputerShot from './ComputerShot.svelte'
   import { clock } from './clock.svelte.js'
   import { ageText, appName } from './computers.js'
-  import { loadPreview, savePreview, snapCorner } from './preview.js'
+  import { loadPreview, savePreview, snapCorner } from './preview.ts'
 
   let { c, session, name = '', onopen } = $props()
   // The preview is keyed by session in the app, so the first value is the right one.
