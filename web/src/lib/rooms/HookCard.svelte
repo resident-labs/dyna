@@ -30,8 +30,13 @@
   let payload = $derived(hookEvent(post))
   let name = $derived(payload?.label || payload?.hook || 'Hook')
   let state = $derived<HookState>(payload?.state ?? 'running')
-  let took = $derived(payload?.durationMs ?? 0)
-  let seconds = $derived(took > 0 ? `${(took / 1000).toFixed(took < 10_000 ? 1 : 0)} s` : '')
+  // A run under a second reads in milliseconds, so a quick hook does not look
+  // like a clock that failed to move.
+  let elapsed = $derived.by(() => {
+    const ms = payload?.durationMs ?? 0
+    if (ms <= 0) return ''
+    return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`
+  })
 
   function viewLog() {
     if (!payload) return
@@ -46,7 +51,7 @@
       <span class="name">{name}</span>
       <span class="state {stateTone[state]}">{stateWords[state]}</span>
     </span>
-    {#if seconds}<span class="fact">{seconds}</span>{/if}
+    {#if elapsed}<span class="fact">{elapsed}</span>{/if}
     <button class="btn" type="button" onclick={viewLog} aria-label="View the log of {name}">View log</button>
     <time title={new Date(post.ts).toLocaleString()}>{clock(post.ts)}</time>
   </div>
