@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"dyna-agent/internal/authority"
-	"dyna-agent/internal/goalkeeper"
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/goalservice"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
@@ -36,7 +36,7 @@ func TestRulesCommands(t *testing.T) {
 	mgr := subagent.NewManager()
 	mgr.Store = &subagent.Store{Root: filepath.Join(root, "sessions")}
 	mgr.Rooms = rooms
-	s := goalkeeper.New()
+	s := goalservice.New()
 	s.Store = &goals.Store{Root: filepath.Join(root, "goals")}
 	s.Notify = notify.New(rooms, mgr)
 	actor := authority.Actor{Role: authority.Owner}
@@ -44,7 +44,7 @@ func TestRulesCommands(t *testing.T) {
 	id := "ses_20261018-000001-aaaaaaaa"
 	recordtest.Write(t, mgr.Store.Root, id, subagent.Meta{ID: id, Name: "helper", RoomID: rec.ID, Room: rec.Name, Depth: 1, Resumable: true})
 	call := func(args ...string) (string, error) {
-		cmd := Command(Options{Service: func() *goalkeeper.Service { return s }})
+		cmd := Command(Options{Service: func() *goalservice.Service { return s }})
 		var out bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetErr(&out)
@@ -158,7 +158,7 @@ func TestRulesCommandsReturnSavedRuleWhenNoticeFails(t *testing.T) {
 	if err := os.Mkdir(feed, 0700); err != nil {
 		t.Fatal(err)
 	}
-	service := &goalkeeper.Service{
+	service := &goalservice.Service{
 		Store:  &goals.Store{Root: filepath.Join(root, "goals")},
 		Notify: notify.New(rooms, &subagent.Manager{Store: &subagent.Store{Root: filepath.Join(root, "sessions")}}),
 	}
@@ -177,7 +177,7 @@ func TestRulesCommandsReturnSavedRuleWhenNoticeFails(t *testing.T) {
 		{[]string{"edit", "r1", "Changed rule"}, "Changed rule", 1},
 		{[]string{"rm", "r1"}, "Changed rule", 0},
 	} {
-		cmd := Command(Options{Service: func() *goalkeeper.Service { return service }})
+		cmd := Command(Options{Service: func() *goalservice.Service { return service }})
 		var out, warning bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetErr(&warning)

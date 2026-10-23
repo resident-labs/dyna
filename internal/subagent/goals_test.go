@@ -2,7 +2,6 @@ package subagent
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -26,29 +25,6 @@ func TestGoalsStayInTheTurnPrompt(t *testing.T) {
 		t.Fatal("follow-up lost goals")
 	}
 }
-func TestKeeperPostsWaitForTurnLock(t *testing.T) {
-	e := newTestEnv(t)
-	id := NewID()
-	dir, _ := e.m.Store.Dir(id)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	// A stored idle session is sufficient; the busy path must not post or wake.
-	if err := e.m.Store.writeMeta(Meta{ID: id, Name: "holder", Room: "work", RoomID: "r", Depth: 1}); err != nil {
-		t.Fatal(err)
-	}
-	lock, err := e.m.Store.tryTurnLock(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer lock.Close()
-	wrote := false
-	done, err := e.m.DeliverGoal(context.Background(), id, func() (string, error) { wrote = true; return "", nil })
-	if err != nil || done || wrote {
-		t.Fatal(done, wrote, err)
-	}
-}
-
 func TestGoalFrameNudgesInRoomWithNoGoals(t *testing.T) {
 	m := &Manager{Store: &Store{Root: filepath.Join(t.TempDir(), "sessions")}}
 	frame := m.goalFrame(Meta{ID: "ses_x", RoomID: "room_empty"}, "")
@@ -80,8 +56,7 @@ func TestStartCreatesSpawnGoalWithBrief(t *testing.T) {
 	e.wait(child.ID, 1)
 }
 
-// Root and service sessions hold no goals: the keeper leaves them alone, and
-// a start must not add a goal that never changes.
+// Root and service starts must not add goals that never change.
 func TestRootAndReviewerStartsCreateNoGoal(t *testing.T) {
 	e := newTestEnv(t)
 	e.joinRunners()

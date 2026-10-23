@@ -20,7 +20,7 @@ func TestStartFollowsProfileUse(t *testing.T) {
 		refuse           string
 	}{
 		{"subagent with services-only", "svc", "", false, "limited to Dyna services"},
-		{"keeper with subagents-only", "sub", "keeper", false, "limited to subagent sessions"},
+		{"librarian with subagents-only", "sub", RoleLibrarian, false, "limited to subagent sessions"},
 		{"service with subagents-only", "sub", "", true, "limited to subagent sessions"},
 		{"service with services-only", "svc", "", true, ""},
 		{"root with subagents-only", "sub", RoleRoot, false, ""},

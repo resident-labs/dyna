@@ -10,8 +10,8 @@ import (
 
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/enginetest"
-	"dyna-agent/internal/goalkeeper"
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/goalservice"
 	"dyna-agent/internal/websvc"
 )
 
@@ -25,7 +25,6 @@ func TestWritesCallEngine(t *testing.T) {
 		{"edit", "EditGoalSelectors", []string{"edit", "g1", "New text", "--for", "@child"}, 4},
 		{"done", "FinishGoal", []string{"done", "g1", "Shipped"}, 4},
 		{"drop", "FinishGoal", []string{"drop", "g1"}, 4},
-		{"wait", "WaitGoal", []string{"wait", "g1", "--until", "30m"}, 3},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			called := false
@@ -36,7 +35,7 @@ func TestWritesCallEngine(t *testing.T) {
 				}
 				return goals.Goal{ID: "g1"}, nil
 			}})
-			cmd := Command(Options{Service: func() *goalkeeper.Service { t.Fatal("write opened a local goal store"); return nil }})
+			cmd := Command(Options{Service: func() *goalservice.Service { t.Fatal("write opened a local goal store"); return nil }})
 			var out bytes.Buffer
 			cmd.SetOut(&out)
 			cmd.SetErr(&out)
@@ -58,9 +57,8 @@ func TestWritesWithoutEngineFailWithCause(t *testing.T) {
 		{"edit", "g1", "New text", "--for", "@child"},
 		{"done", "g1", "Shipped"},
 		{"drop", "g1"},
-		{"wait", "g1", "--until", "30m"},
 	} {
-		cmd := Command(Options{Client: client, Service: func() *goalkeeper.Service { t.Fatal("write opened a local goal store"); return nil }})
+		cmd := Command(Options{Client: client, Service: func() *goalservice.Service { t.Fatal("write opened a local goal store"); return nil }})
 		cmd.SetOut(&bytes.Buffer{})
 		cmd.SetErr(&bytes.Buffer{})
 		cmd.SetArgs(append(args, "--room", "work"))
@@ -84,7 +82,7 @@ func TestMoveItemCallsEngineAndPrintsReferences(t *testing.T) {
 			return moved, nil
 		}})
 		for _, asJSON := range []bool{false, true} {
-			cmd := Command(Options{Service: func() *goalkeeper.Service { t.Fatal("move opened a local goal store"); return nil }})
+			cmd := Command(Options{Service: func() *goalservice.Service { t.Fatal("move opened a local goal store"); return nil }})
 			var out bytes.Buffer
 			cmd.SetOut(&out)
 			cmd.SetErr(&out)

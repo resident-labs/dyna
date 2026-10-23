@@ -28,7 +28,7 @@ func TestServiceSessionsGroupMentions(t *testing.T) {
 			// Service names are reserved for their role, so these sessions
 			// take another name and become services through their metadata.
 			var services []string
-			for _, role := range []string{"reviewer", "keeper"} {
+			for _, role := range []string{"reviewer", subagent.RoleLibrarian} {
 				info := e.start(rec, role+"-service", parent)
 				if _, err := e.mgr.Store.UpdateMeta(info.ID, func(m *subagent.Meta) { m.Role, m.Service = role, true }); err != nil {
 					t.Fatal(err)
@@ -54,7 +54,7 @@ func TestServiceSessionsGroupMentions(t *testing.T) {
 }
 
 func TestServiceSessionDirectMentions(t *testing.T) {
-	for _, role := range []string{"reviewer", "keeper"} {
+	for _, role := range []string{"reviewer", subagent.RoleLibrarian} {
 		t.Run(role, func(t *testing.T) {
 			e := newTestEnv(t, withImmediateTurns)
 			rec := e.room()
@@ -86,16 +86,6 @@ func TestServiceSessionDirectMentions(t *testing.T) {
 			result, err := e.svc.Post(e.ctx, PostInput{Sender: Sender{Kind: SenderSession, Room: rec.Name, Session: worker}, Mentions: []string{"@" + role}, Text: "SLEEP:0\nRESPOND: direct"})
 			if err != nil || len(result.Deliveries) != 1 {
 				t.Fatalf("direct post: %+v %v", result, err)
-			}
-			if role == subagent.RoleKeeper {
-				// The keeper reads posts with its next assignment; they never wake it.
-				if _, err := e.mgr.TickSessions(e.ctx); err != nil {
-					t.Fatal(err)
-				}
-				if meta, _ := e.mgr.Store.ReadMeta(info.ID); meta.Turns != 1 {
-					t.Fatalf("a direct post woke the keeper: %d turns", meta.Turns)
-				}
-				return
 			}
 			e.wait(info.ID, 2)
 		})

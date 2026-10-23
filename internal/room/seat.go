@@ -57,9 +57,6 @@ func (s *Store) SetSeat(ctx context.Context, ref string, holder Seat, atEnd func
 // session: its posts record the call, and it never takes a turn.
 const VoiceAgent = "voice-call"
 
-// GoalKeeperSender sends the goal keeper's posts. It is not a session.
-const GoalKeeperSender = "goal-keeper"
-
 // SourceVoice marks the posts of the owner's voice call.
 const SourceVoice = "voice"
 
