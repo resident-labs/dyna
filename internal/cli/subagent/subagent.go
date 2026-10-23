@@ -392,14 +392,6 @@ func plural(n int) string {
 	return "s"
 }
 
-func oneLine(s string, n int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > n {
-		return s[:n] + "…"
-	}
-	return s
-}
-
 // ---- output ----
 
 func outputCommand(newManager func() *subagent.Manager) *cobra.Command {
