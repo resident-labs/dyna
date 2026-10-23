@@ -356,8 +356,10 @@ func (s *Store) FileIssue(roomID string, in IssueInput) (Issue, error) {
 		return Issue{}, err
 	}
 	// The post comes first, so a crash before the insert leaves a post without
-	// an issue row rather than an issue no one can see. A retry takes the next
-	// number, so the lost filing still posts.
+	// an issue row rather than an issue no one can see. A retry reads the same
+	// number again, because nothing committed it, and its event key (filed and
+	// open for that D-N) matches the stored post: the retry gets the earlier
+	// post back instead of a second one.
 	msg, err := s.PostEventInput(PostEventInput{
 		RoomID: rec.ID,
 		Event: IssueEvent{
@@ -382,7 +384,9 @@ func (s *Store) FileIssue(roomID string, in IssueInput) (Issue, error) {
 }
 
 // CloseIssue closes an open issue with a reason. origin stays zero for a manual
-// close and names the merging PR for an automatic one.
+// close and names the merging PR for an automatic one. The automatic path that
+// fills origin is the tracked-PR close (goal g343, change fix/pr-closes-issues),
+// which calls this from the merge watcher.
 func (s *Store) CloseIssue(roomID, id, by, reason string, origin CloseOrigin) (Issue, error) {
 	return s.ChangeIssueFrom(roomID, id, by, origin, func(i *Issue) error {
 		i.State = "closed"

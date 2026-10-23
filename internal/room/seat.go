@@ -120,5 +120,8 @@ func WakesRoot(msg Message, roomName string) bool {
 // their Wake field stays false. Worker copies require explicit action intent.
 // RootContext builds the root context feed on top of it.
 func RootInput(msg Message, roomName string) bool {
-	return WakesRoot(msg, roomName) || msg.Addressed(roomName+":"+RootAgent) && (msg.From == roomName || msg.From == "dyna")
+	// A check-in is input for the parent it names, whoever posted it: the
+	// engine now, and "system:parent-checkin" for a post stored before the
+	// typed events. The family check covers both.
+	return WakesRoot(msg, roomName) || msg.Addressed(roomName+":"+RootAgent) && (msg.From == roomName || msg.From == "dyna" || msg.Kind == string(FamilyCheckin))
 }
