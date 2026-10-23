@@ -888,6 +888,10 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 			in.References[i].Number = float64(n)
 		}
 	}
+	refs := issueReferences{store: s}
+	if err := refs.canonical(roomID, in.References); err != nil {
+		return Message{}, err
+	}
 	if len(in.Attachments) > 0 {
 		atts, err := s.canonAttachments(roomID, in.Attachments)
 		if err != nil {
