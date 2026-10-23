@@ -37,9 +37,7 @@ func TestMemberChangesUsesCommittedRecordTurnAndQueueRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert(b)
-	if err := writeQueue(filepath.Join(s.Root, a), claims(1)); err != nil {
-		t.Fatal(err)
-	}
+	touchDelivery(t, s, a)
 	if err := s.writeTurn(a, Turn{N: 1, Status: TurnOK}); err != nil {
 		t.Fatal(err)
 	}
@@ -84,9 +82,7 @@ func TestMemberChangesQuerySeeksRevisionIndexes(t *testing.T) {
 	if err := s.writeTurn(id, Turn{N: 1, Status: TurnOK}); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeQueue(filepath.Join(s.Root, id), claims(1)); err != nil {
-		t.Fatal(err)
-	}
+	touchDelivery(t, s, id)
 	db, err := database.Open(filepath.Dir(s.root()))
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +102,7 @@ func TestMemberChangesQuerySeeksRevisionIndexes(t *testing.T) {
 		plan = append(plan, detail)
 	}
 	text := strings.Join(plan, "\n")
-	for _, index := range []string{"session_records_revision", "session_turns_revision", "session_queues_revision"} {
+	for _, index := range []string{"session_records_revision", "session_turns_revision", "post_deliveries_updated"} {
 		if !strings.Contains(text, index) {
 			t.Fatalf("plan does not seek %s:\n%s", index, text)
 		}

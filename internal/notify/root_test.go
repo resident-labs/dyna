@@ -1,7 +1,6 @@
 package notify
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -306,24 +305,19 @@ func TestFirstRootPostIsClaimedAndDelivered(t *testing.T) {
 	if delivered != 1 {
 		t.Fatalf("first post receipts: %+v", turn.Steering)
 	}
-	// The queue's row is the truth; queue.json is only the earlier release's
-	// copy.
+	// The delivery row holds the claim the turn took.
 	db, err := database.Open(filepath.Dir(e.mgr.Store.Root))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var data []byte
-	if err := db.QueryRow("SELECT queue FROM session_queues WHERE session = ?", root.ID).Scan(&data); err != nil {
+	var state string
+	var claimedTurn int
+	if err := db.QueryRow("SELECT state, claimed_turn FROM post_deliveries WHERE post_id = ? AND session_id = ?",
+		out.Message.ID, root.ID).Scan(&state, &claimedTurn); err != nil {
 		t.Fatal(err)
 	}
-	var claims struct {
-		Claimed map[string]int `json:"claimed"`
-	}
-	if err := json.Unmarshal(data, &claims); err != nil {
-		t.Fatal(err)
-	}
-	if claims.Claimed[out.Message.ID] != 1 {
-		t.Fatalf("first post claim: %+v", claims.Claimed)
+	if state != "delivered" || claimedTurn != 1 {
+		t.Fatalf("first post delivery: %s, turn %d", state, claimedTurn)
 	}
 	if count := strings.Count(e.turnInput(root.ID, 1), request); count != 1 {
 		t.Fatalf("first input appears %d times", count)

@@ -436,7 +436,7 @@ func QueueMirrorKey(id string) string { return "queues/" + id }
 // tables; a table that does not exist yet holds no rows.
 func deleteTurnsAndQueue(conn *sql.Conn, id string) error {
 	ctx := context.Background()
-	for _, table := range []string{"session_turns", "session_queues"} {
+	for _, table := range []string{"session_turns", "session_queues", "post_deliveries"} {
 		ok, err := tableExists(conn, table)
 		if err != nil {
 			return err
@@ -444,7 +444,13 @@ func deleteTurnsAndQueue(conn *sql.Conn, id string) error {
 		if !ok {
 			continue
 		}
-		if _, err := conn.ExecContext(ctx, "DELETE FROM "+table+" WHERE session = ?", id); err != nil {
+		key := "session"
+		if table == "post_deliveries" {
+			// A delivery row names its recipient in session_id. Rows keyed by an
+			// address stay: they were never bound to this session.
+			key = "session_id"
+		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM "+table+" WHERE "+key+" = ?", id); err != nil {
 			return err
 		}
 	}

@@ -21,12 +21,21 @@ const (
 	DeliveryQueued DeliveryState = "queued"
 	// DeliveryClaimed is taken by the recipient's turn and not finished.
 	DeliveryClaimed DeliveryState = "claimed"
-	// DeliveryDelivered reached the recipient.
+	// DeliveryDelivered reached the recipient, and a turn receipt says so.
 	DeliveryDelivered DeliveryState = "delivered"
+	// DeliveryImported comes from the one-time index import of posts that were
+	// stored before the index existed. It says the row is not known to have
+	// reached its recipient and not known to have missed it: the turn receipts
+	// decide. An imported row still takes a claim, a cancellation and a
+	// dismissal, so a pending post an owner can see stays theirs to drop.
+	DeliveryImported DeliveryState = "imported"
 	// DeliveryCancelled was dropped before it reached the recipient.
 	DeliveryCancelled DeliveryState = "cancelled"
 	// DeliveryFailed could not reach the recipient.
 	DeliveryFailed DeliveryState = "failed"
+	// DeliveryDismissed was dropped by the owner before it reached the
+	// recipient. The post stays in the room log; the recipient never reads it.
+	DeliveryDismissed DeliveryState = "dismissed"
 )
 
 // Delivery is one recipient of one post, as stored in post_deliveries.
@@ -35,10 +44,12 @@ const (
 // quiet section of a quiet root-seat delivery, such as RootOwnerDM, and empty
 // for every other row.
 type Delivery struct {
-	PostID    string
-	SessionID string
-	Mode      DeliveryMode
-	Category  string
+	PostID      string
+	SessionID   string
+	Mode        DeliveryMode
+	Category    string
+	State       DeliveryState
+	ClaimedTurn int
 }
 
 // RootInput reports whether a root-seat delivery is turn input: a post that

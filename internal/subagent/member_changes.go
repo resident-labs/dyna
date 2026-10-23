@@ -49,10 +49,13 @@ func (s *Store) MemberChanges(since string) (revision string, ids []string, rese
 // Match ListSnapshot(true): canonical records include closed sessions.
 // A reset still uses the existing listing, including its folder checks.
 // UNION would sort the sessions and scan every turn row; UNION ALL lets each
-// branch seek its revision index. The caller drops duplicate IDs.
+// branch seek its revision index. The caller drops duplicate IDs. The delivery
+// branch names a session whose delivery rows moved. A row keyed by an address
+// rather than a session ID names no record here; the session change that write
+// published still starts the scan.
 const memberChangesQuery = `SELECT id FROM session_records WHERE revision > ?
 UNION ALL SELECT t.session FROM session_turns t JOIN session_records r ON r.id = t.session WHERE t.revision > ?
-UNION ALL SELECT q.session FROM session_queues q JOIN session_records r ON r.id = q.session WHERE q.revision > ?`
+UNION ALL SELECT d.session_id FROM post_deliveries d JOIN session_records r ON r.id = d.session_id WHERE d.updated_at > ?`
 
 type membersCursor struct {
 	newest                                 string
