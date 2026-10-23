@@ -2,12 +2,14 @@ package voice
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"dyna-agent/internal/notify"
+	"dyna-agent/internal/parentoutput"
 	"dyna-agent/internal/questions"
 	"dyna-agent/internal/room"
 )
@@ -262,13 +264,43 @@ func TestWatchSkipsTurnResultRootAlreadyRelayed(t *testing.T) {
 	post(room.PostInput{Turn: 3, To: []string{work.Name + ":voice-call"}, Text: "The merge is done."})
 	post(room.PostInput{Kind: "completed", OwnerReport: true, Turn: 3, To: []string{work.Name},
 		Text: "work:root turn 3 completed. Result: The merge is done."})
-	if got := <-call.said; !strings.HasSuffix(got, "The merge is done.") || strings.Contains(got, "turn 3") {
-		t.Fatalf("said %q, want only root's own relay", got)
+	// A later call post is the barrier: Watch says it only after it has read
+	// the completion, so a broken skip would speak between the two.
+	post(room.PostInput{Turn: 4, To: []string{work.Name + ":voice-call"}, Text: "The review passed."})
+	if got := <-call.said; !strings.HasSuffix(got, "The merge is done.") {
+		t.Fatalf("first said %q, want root's own relay", got)
+	}
+	if got := <-call.said; !strings.HasSuffix(got, "The review passed.") {
+		t.Fatalf("second said %q, want the later call post, so the completion came first", got)
 	}
 	select {
 	case got := <-call.said:
-		t.Fatalf("the turn result was said twice: %q", got)
+		t.Fatalf("the turn result was said as well: %q", got)
 	default:
+	}
+}
+
+// The engine posts only the start of a long result and saves the rest, so the
+// call hears the whole result, including its last point.
+func TestWatchSaysTheWholeSavedResult(t *testing.T) {
+	tools, work, _ := toolsFixture(t)
+	link, rooms := tools.link, room.DefaultStore()
+	call := newFakeSpeaker()
+	watchRoom(t, link, time.Time{}, call)
+	path := filepath.Join(t.TempDir(), "parent-output", "turn-5.txt")
+	post, err := parentoutput.Text(path, "work:root turn 5 completed. Result: FIRST POINT "+strings.Repeat("detail ", 400)+"LAST POINT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(post, "LAST POINT") {
+		t.Fatal("the test post was not bounded, so it proves nothing about reading the report")
+	}
+	if _, err := rooms.Post(work.ID, room.PostInput{From: work.Name + ":root", Kind: "completed", OwnerReport: true,
+		Turn: 5, To: []string{work.Name}, Text: post}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-call.said; !strings.Contains(got, "FIRST POINT") || !strings.Contains(got, "LAST POINT") {
+		t.Fatalf("said %q, want the whole saved result", got)
 	}
 }
 
@@ -279,9 +311,14 @@ func TestWatchClipsLongTurnResults(t *testing.T) {
 	link, rooms := tools.link, room.DefaultStore()
 	call := newFakeSpeaker()
 	watchRoom(t, link, time.Time{}, call)
+	path := filepath.Join(t.TempDir(), "parent-output", "turn-4.txt")
 	head, tail := "FIRST POINT "+strings.Repeat("α", 3000), strings.Repeat("漢", 3000)+" LAST POINT"
+	post, err := parentoutput.Text(path, "work:root turn 4 completed. Result: "+head+" "+tail)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := rooms.Post(work.ID, room.PostInput{From: work.Name + ":root", Kind: "completed", OwnerReport: true,
-		Turn: 4, To: []string{work.Name}, Text: "work:root turn 4 completed. Result: " + head + " " + tail}); err != nil {
+		Turn: 4, To: []string{work.Name}, Text: post}); err != nil {
 		t.Fatal(err)
 	}
 	got := <-call.said

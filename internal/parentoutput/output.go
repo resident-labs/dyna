@@ -100,10 +100,28 @@ func Text(path, text string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	trailer := "\n\nFull report: " + ref.File
+	trailer := reportTrailer + ref.File
 	budget := InlineCharLimit - len([]rune(trailer))
 	if budget < 0 {
 		return "", fmt.Errorf("report path exceeds inline character limit")
 	}
 	return string([]rune(text)[:budget]) + trailer, nil
+}
+
+// reportTrailer separates a bounded post from the file Text saved for it.
+const reportTrailer = "\n\nFull report: "
+
+// ReportFile returns the file that a post from Text points at: the complete
+// report. It reports false for text Text returned unchanged, or for a text
+// whose last line names no single path.
+func ReportFile(text string) (string, bool) {
+	i := strings.LastIndex(text, reportTrailer)
+	if i < 0 {
+		return "", false
+	}
+	path := strings.TrimSpace(text[i+len(reportTrailer):])
+	if path == "" || strings.ContainsAny(path, "\r\n") {
+		return "", false
+	}
+	return path, true
 }
