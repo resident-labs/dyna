@@ -9,7 +9,6 @@ import (
 
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/plan"
-	"dyna-agent/internal/planclient"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/websvc"
@@ -28,7 +27,7 @@ func TestNestedWorkflowStopsWhenAncestryWriteFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := plan.Options{SourcePath: filepath.Join(dir, "root.js"), WorkDir: dir, WriteAncestry: planclient.StampAncestry, ResumedFrom: "wf_source"}
+	opts := plan.Options{SourcePath: filepath.Join(dir, "root.js"), WorkDir: dir, WriteAncestry: plan.StampAncestry, ResumedFrom: "wf_source"}
 	if _, err := plan.Ensure(run.Dir, src, opts); err != nil {
 		t.Fatal(err)
 	}

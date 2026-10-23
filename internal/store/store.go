@@ -1,5 +1,9 @@
 // Package store provides file locks and atomic JSON documents.
 //
+// Runtime state that changes and is queried belongs in SQLite (dyna.db), per
+// room rule r1. Keep store for settings and config files that stay JSON, and
+// for the file locks that guard those files and other shared resources.
+//
 // Keep each caller's lock path unchanged. Acquire session metadata/gate locks
 // before room locks. When both room locks are needed, take the root lock before
 // the individual room lock. Never reacquire a held lock or call a room writer

@@ -16,7 +16,6 @@ import (
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/plan"
-	"dyna-agent/internal/planclient"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/state"
@@ -96,7 +95,7 @@ func executeWithOutbox(ctx context.Context, opts Options, store *profile.Store, 
 	}
 	prefix := fmt.Sprintf("%s/%d/%d", run.Meta.ID, os.Getpid(), time.Now().UnixNano())
 	defer installRunWriters(ctx, run, factory(prefix))()
-	if _, planErr := plan.Ensure(run.Dir, opts.ScriptSrc, plan.Options{WriteAncestry: planclient.StampAncestry, SourcePath: opts.ScriptPath, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir, ResumedFrom: opts.ResumeFrom}); planErr != nil {
+	if _, planErr := plan.Ensure(run.Dir, opts.ScriptSrc, plan.Options{WriteAncestry: plan.StampAncestry, SourcePath: opts.ScriptPath, WorkDir: opts.WorkDir, WorkflowDir: opts.WorkflowDir, ResumedFrom: opts.ResumeFrom}); planErr != nil {
 		if errors.Is(planErr, plan.ErrAncestry) {
 			err = planErr
 		} else {
