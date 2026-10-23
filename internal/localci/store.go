@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
@@ -62,6 +63,12 @@ CREATE TABLE local_ci_hosted_runs (
  PRIMARY KEY(repo,sha)
 );`
 
+// cacheCleanSchema records when Dyna last cleaned a CI machine's own caches.
+const cacheCleanSchema = `CREATE TABLE IF NOT EXISTS local_ci_cache_cleans (
+ node TEXT PRIMARY KEY,
+ cleaned_at TEXT NOT NULL
+);`
+
 // Migrate prepares the local CI tables at engine startup.
 func Migrate(dataDir string) error {
 	_, err := (Store{DataDir: dataDir}).open()
@@ -80,18 +87,26 @@ func (s Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "localci.schema", 2, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "localci.schema", 3, func(conn *sql.Conn, old int) error {
 		if old == 1 {
 			// Version 1 had a jump host column; nodes are now reached directly.
 			// The machines migration drops this table, so it may be gone already.
 			present, err := database.HasTable(context.Background(), conn, "local_ci_nodes")
-			if err != nil || !present {
+			if err != nil {
 				return err
 			}
-			_, err = conn.ExecContext(context.Background(), "ALTER TABLE local_ci_nodes DROP COLUMN jump")
-			return err
+			if present {
+				if _, err := conn.ExecContext(context.Background(), "ALTER TABLE local_ci_nodes DROP COLUMN jump"); err != nil {
+					return err
+				}
+			}
 		}
-		_, err := conn.ExecContext(context.Background(), storeSchema)
+		if old == 0 {
+			if _, err := conn.ExecContext(context.Background(), storeSchema); err != nil {
+				return err
+			}
+		}
+		_, err := conn.ExecContext(context.Background(), cacheCleanSchema)
 		return err
 	})
 	return db, err
@@ -259,6 +274,40 @@ func (s Store) LoadResult(ctx context.Context, repo, sha string) (Result, error)
 	}
 	err = s.loadPayload(ctx, "local_ci_results", repo, sha, &result)
 	return result, err
+}
+
+// LastCacheClean reports when Dyna last cleaned this node's caches. A node
+// that was never cleaned has the zero time.
+func (s Store) LastCacheClean(ctx context.Context, node string) (time.Time, error) {
+	db, err := s.open()
+	if err != nil {
+		return time.Time{}, err
+	}
+	var raw string
+	err = db.QueryRowContext(ctx, "SELECT cleaned_at FROM local_ci_cache_cleans WHERE node=?", node).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	if err != nil {
+		return time.Time{}, err
+	}
+	at, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("read cache cleanup time of %s: %w", node, err)
+	}
+	return at, nil
+}
+
+func (s Store) SaveCacheClean(ctx context.Context, node string, at time.Time) error {
+	db, err := s.open()
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "caches:" + node}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_cache_cleans(node,cleaned_at) VALUES(?,?)
+ON CONFLICT(node) DO UPDATE SET cleaned_at=excluded.cleaned_at`, node, at.UTC().Format(time.RFC3339Nano))
+		return err
+	})
 }
 
 func (s Store) SaveHostedRuns(ctx context.Context, repo, sha string, runs HostedRuns) error {
