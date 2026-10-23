@@ -92,7 +92,7 @@ func syncNotice(key, repo, lane, other string, rewritten bool) notices.Notice {
 		Kind:     notices.KindSync,
 		Severity: notices.SeverityWarn,
 		Sync:     &notices.SyncFacts{Repo: repo, Lane: lane, Other: other, Rewritten: rewritten},
-		Command:  "dyna sync status",
+		Command:  "dyna git sync status",
 	}
 }
 
