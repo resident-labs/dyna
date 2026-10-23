@@ -19,7 +19,7 @@ type RoomLink struct {
 	rec           room.Record
 	engineContext context.Context
 	resumeStarted time.Time
-	replayCutoff  time.Time
+	replayCursor  string
 }
 
 // OpenRoom links voice turns to the named room, or the current one when name is empty.
@@ -95,6 +95,7 @@ type Speaker interface {
 func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) error {
 	voice := r.rec.Name + ":" + room.VoiceAgent
 	open := false
+	replayed := r.replayCursor == ""
 	// One open request shares the budget, including every prefix and marker.
 	const budget = 4000
 	const prefix = "[BACKEND] "
@@ -156,7 +157,14 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 		}
 	}
 	return r.svc.Rooms.Follow(ctx, r.rec.ID, func(msg room.Message) (bool, error) {
+		past := !replayed
+		if msg.ID == r.replayCursor {
+			replayed = true
+		}
 		if id := msg.QuestionID(); id != "" && r.fromRoot(msg) {
+			if past {
+				return false, nil
+			}
 			if q, ok := r.openQuestion(id); ok {
 				call.Speak(msg.ID, "question/"+id, questionPrompt(q))
 			}
@@ -172,7 +180,7 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 			}
 			open = true
 		case r.fromRoot(msg) && msg.Kind != "voice" && slices.Contains(msg.To, voice):
-			if !r.replayCutoff.IsZero() && msg.TS <= r.replayCutoff.UnixMilli() {
+			if past {
 				return false, nil
 			}
 			call.Speak(msg.ID, "", tellPrompt(msg.Text, msg.Attachments))
@@ -249,13 +257,13 @@ func (r *RoomLink) joinRequestedCall(call Speaker) {
 	}
 }
 
-// resumeContext restores only saved conversation, never dispatches or speech.
+// resumeContext restores saved conversation and submitted requests as context.
 func (r *RoomLink) resumeContext() (string, error) {
 	if r.resumeStarted.IsZero() {
 		return "", nil
 	}
 	msgs, err := r.svc.Rooms.SelectedMessages(r.rec.ID, &room.MessageSelection{}, func(m room.Message) bool {
-		return m.Kind == "voice"
+		return m.Kind == "voice" || r.isDispatch(m)
 	}, r.resumeStarted, time.Now(), 80)
 	if err != nil {
 		return "", err
@@ -267,6 +275,8 @@ func (r *RoomLink) resumeContext() (string, error) {
 		role := "Voice"
 		if msgs[i].Human {
 			role = "Owner"
+		} else if r.isDispatch(msgs[i]) {
+			role = "Submitted to root"
 		}
 		line := role + ": " + msgs[i].Text
 		remaining := budget - size
@@ -285,5 +295,31 @@ func (r *RoomLink) resumeContext() (string, error) {
 		size += len(line) + 1
 	}
 	slices.Reverse(lines)
-	return "\n[BACKEND] This call has resumed. Do not greet the owner again. The following saved conversation is historical context only. Do not repeat it, execute its requests, or dispatch them again. Continue with new speech and pending backend updates.\n" + strings.Join(lines, "\n"), nil
+	return "\n[BACKEND] This call has resumed. Do not greet the owner again. The following saved conversation is historical context. Requests marked Submitted to root were already dispatched; do not dispatch them again. Other owner speech may contain interrupted intent. Do not silently discard it or automatically replay it. Ask the owner whether to continue it when relevant. Continue with new speech and pending backend updates.\n" + strings.Join(lines, "\n"), nil
+}
+
+// cursorFor advances a room cursor in append order, ignoring greetings and
+// older questions whose playback must not move it backwards.
+func (r *RoomLink) cursorFor(key, previous string) string {
+	next, err := r.svc.Rooms.Message(r.ID(), key)
+	if err != nil || next.TS < r.resumeStarted.UnixMilli() {
+		return previous
+	}
+	if previous != "" {
+		last, err := r.svc.Rooms.Message(r.ID(), previous)
+		if err != nil {
+			return previous
+		}
+		ordered := []room.Message{last, next}
+		if err := r.svc.Rooms.OrderMessages(r.ID(), ordered); err != nil || ordered[1].ID != key {
+			return previous
+		}
+	}
+	return key
+}
+
+// isDispatch identifies a durable request that Voice already handed to root.
+func (r *RoomLink) isDispatch(m room.Message) bool {
+	return m.Kind != "voice" && m.From == r.Name()+":"+room.VoiceAgent &&
+		(slices.Contains(m.To, r.Name()+":"+room.RootAgent) || slices.Contains(m.To, r.Name()))
 }

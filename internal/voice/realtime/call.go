@@ -33,6 +33,7 @@ type PageEvent struct {
 	Text    string `json:"text,omitempty"`
 	Final   bool   `json:"final,omitempty"`
 	Post    string `json:"post,omitempty"`
+	Cursor  string `json:"cursor,omitempty"`
 	Message string `json:"message,omitempty"`
 }
 
@@ -54,6 +55,9 @@ var errHangup = errors.New("the owner hung up")
 type Call struct {
 	// Greeting is queued once, when the first page attaches. Set it before Run.
 	Greeting string
+	// ResumeCursor advances only when the page starts a saved update.
+	ResumeCursor string
+	CursorFor    func(key, previous string) string
 	// ServiceContext is canceled when the hosting service shuts down.
 	// Pages receive a restart close code so they can reconnect.
 	ServiceContext context.Context
@@ -169,6 +173,9 @@ func (c *Call) Attach(p *Page) (leave func()) {
 		}
 		c.page = p
 		p.Send(PageEvent{Type: "state", State: c.state})
+		if c.CursorFor != nil {
+			p.Send(PageEvent{Type: "resume_cursor", Cursor: c.ResumeCursor})
+		}
 		if c.Greeting != "" {
 			if !c.provider.Caps.NoClientResponses {
 				c.queue.add("greeting", "", c.Greeting)
@@ -705,7 +712,14 @@ func (c *Call) fromPage(m PageMessage) {
 				return // audio of a dropped connection
 			}
 			c.playing[m.ID] = c.now()
-			c.queue.started(m.ID, c.keys[c.responses[m.ID]])
+			key := c.keys[c.responses[m.ID]]
+			c.queue.started(m.ID, key)
+			if c.CursorFor != nil {
+				if cursor := c.CursorFor(key, c.ResumeCursor); cursor != c.ResumeCursor {
+					c.ResumeCursor = cursor
+					c.toPage(PageEvent{Type: "resume_cursor", Cursor: cursor})
+				}
+			}
 		case "ended":
 			c.playbackEnded(m.ID, time.Duration(m.PlayedMs)*time.Millisecond)
 		}

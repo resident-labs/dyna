@@ -149,6 +149,8 @@ func runCall(ctx context.Context, link *RoomLink, p realtime.Provider) (*session
 		}
 	})
 	call.ServiceContext = link.engineContext
+	call.ResumeCursor = link.replayCursor
+	call.CursorFor = link.cursorFor
 	if link.resumeStarted.IsZero() {
 		call.Greeting = "[BACKEND] The call has started. Greet the owner briefly once. If a request or question is pending, include its key point."
 	} else {
