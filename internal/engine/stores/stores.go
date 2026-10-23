@@ -15,6 +15,7 @@ import (
 	"dyna-agent/internal/devicegrant"
 	"dyna-agent/internal/doctor"
 	"dyna-agent/internal/escalate"
+	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/goals"
 	harnesshealth "dyna-agent/internal/harness/health"
 	"dyna-agent/internal/harness/preferences"
@@ -72,6 +73,9 @@ var migrations = []func(dataDir string) error{
 	hooks.MigrateDocuments,
 	hookinstall.Migrate,
 	cihealth.Migrate,
+	// ghclient keeps the proved GitHub account of each room, so turn startup
+	// makes no GitHub API call after an engine restart.
+	ghclient.Migrate,
 	lanesync.Migrate,
 	librarianstate.Migrate,
 	library.Migrate,

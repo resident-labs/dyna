@@ -35,6 +35,11 @@ type repository struct{ host, name string }
 
 const accountCacheTTL = 30 * time.Minute
 
+// accountProvedTTL is how long one proven access check is trusted, across turns
+// and across engine restarts, so a normal turn makes no GitHub API call. The
+// stored choice is dropped when the account or the room's access changes.
+const accountProvedTTL = 12 * time.Hour
+
 type accountFlight struct {
 	done  chan struct{}
 	login string
@@ -50,7 +55,10 @@ var accounts = struct {
 	sync.Mutex
 	choices map[string]choice
 	flights map[string]*accountFlight
-}{choices: make(map[string]choice), flights: make(map[string]*accountFlight)}
+	// limited holds the time GitHub said the quota returns, per choice key, so
+	// a turn during an outage makes no request at all.
+	limited map[string]time.Time
+}{choices: make(map[string]choice), flights: make(map[string]*accountFlight), limited: make(map[string]time.Time)}
 
 func repositoryFor(ctx context.Context, cmd *exec.Cmd) repository {
 	if r, ok := ctx.Value(repositoryContextKey{}).(repository); ok && r.name != "" {
@@ -279,6 +287,16 @@ func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, st
 	}
 	write := Access(ctx, rec) == ReadWrite
 	key := accountKey(cmd, r) + rec.ID + Access(ctx, rec)
+	config := ghConfigFingerprint(cmd)
+	// A choice an earlier engine process proved is as good as a cached one, so
+	// a restart or an empty cache does not probe GitHub again for every session.
+	if stored, ok := storedChoice(key, config); ok {
+		accounts.Lock()
+		if current, have := accounts.choices[key]; !have || stored.until.After(current.until) {
+			accounts.choices[key] = stored
+		}
+		accounts.Unlock()
+	}
 	for {
 		accounts.Lock()
 		cached := accounts.choices[key]
@@ -295,8 +313,24 @@ func selectAccount(ctx context.Context, cmd *exec.Cmd, r repository) (string, st
 				delete(accounts.choices, key)
 			}
 			accounts.Unlock()
+			// The account really changed, so its stored choice is stale too.
+			forgetChoice(key)
 			continue
 		}
+		accounts.Unlock()
+		// GitHub already refused a request in this window: prove nothing again
+		// until the quota returns, and use the last known account when there is
+		// one. The caller otherwise starts without GitHub access.
+		if until, ok := accounts.limited[key]; ok && time.Now().Before(until) {
+			if cached.login != "" {
+				if token, err := accountToken(ctx, cmd, r.host, cached.login); err == nil && token != "" {
+					cacheAccount(key, cached.login)
+					return cached.login, token, nil
+				}
+			}
+			return "", "", &accountProbeError{cause: "GitHub API rate limited; retrying", transient: true, until: until}
+		}
+		accounts.Lock()
 		flight := accounts.flights[key]
 		if flight == nil {
 			flight = &accountFlight{done: make(chan struct{})}
@@ -336,10 +370,19 @@ func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string
 	}
 	defer func() {
 		if errors.Is(err, context.DeadlineExceeded) {
-			err = &accountProbeError{"GitHub API account probe timed out; retrying", true}
+			err = &accountProbeError{cause: "GitHub API account probe timed out; retrying", transient: true}
 		}
 		var cause *accountProbeError
-		if errors.As(err, &cause) && cause.transient && cached.login != "" && knownToken != "" {
+		if !errors.As(err, &cause) || !cause.transient {
+			return
+		}
+		// GitHub said when its quota returns: no request before then.
+		if !cause.until.IsZero() {
+			accounts.Lock()
+			accounts.limited[key] = cause.until
+			accounts.Unlock()
+		}
+		if cached.login != "" && knownToken != "" {
 			cacheAccount(key, cached.login)
 			login, err = cached.login, nil
 		}
@@ -388,7 +431,7 @@ func refreshAccount(ctx context.Context, cmd *exec.Cmd, r repository, key string
 			}
 			continue
 		}
-		cacheAccount(key, account.Login)
+		proveAccount(key, account.Login, cmd)
 		return account.Login, nil
 	}
 	if ctx.Err() != nil {
