@@ -161,7 +161,7 @@ test('CI and review run in parallel; ready needs both on the same head', () => {
 test('parsePRPost reads a structured ready notice as one ready row', () => {
   const head = '8ceb989f4dd2aff97e96eb0c1248f2d81887439d'
   const text = `${url}\nHead: ${head}\n\nPR #577 is ready to land at ${head}.\n\nComment filter: dropped 0 comments.`
-  const p = parsePRPost(text, { kind: 'ready', number: 577, head, changeId: 'github.com/resident-labs/dyna#577' })
+  const p = parsePRPost(text, { kind: 'ready' })
   assert.deepEqual(p.events.map((e) => [e.kind, e.label, e.tone]), [['ready', 'Ready to land', 'sage']])
   // The row says it is ready and shows the short head; the body repeats nothing.
   assert.equal(p.body, '')

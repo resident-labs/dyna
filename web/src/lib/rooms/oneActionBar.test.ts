@@ -78,9 +78,9 @@ test('a mouse click does not undo its hover, and controls and nested parts keep 
   v.close()
 })
 
-// PRPost with the real component: one bar per notice, shown only for the selected notice.
+// PRCard with the real component: one bar per notice, shown only for the selected notice.
 const FORMAT = "export const markdown = (t) => t || ''; export const stamp = () => '08:56'; export const clock = () => '08:56'; export const short = (a) => a"
-const built = await bundle({ component: 'PRPost', format: FORMAT, api: 'export const api = {}; export const openExternal = () => {}; export const copyText = () => Promise.resolve()' })
+const built = await bundle({ component: 'PRCard', format: FORMAT, api: 'export const api = {}; export const openExternal = () => {}; export const copyText = () => Promise.resolve()' })
 const notice = (id: string, n: number) => ({ id, kind: 'pr', from: 'pr:watch', to: ['work:voice'], ts: '2026-10-20T08:56:00Z', text: `https://github.com/o/r/pull/${n}\nHead: 0366830\n\nPR merged. Watching stopped.` })
 
 test('Tab selects the nearest selectable part: an earlier grouped notice, not its post', () => {
@@ -101,14 +101,14 @@ test('a PR post has one bar per notice and shows only the selected one', async (
   // The post's markdown and media parts read DOM classes installDom does not set.
   const extra = Object.getOwnPropertyNames(dom.window).filter((name) => /^(HTML|SVG|DOM|Node|Range)/.test(name) && !(name in globalThis))
   for (const name of extra) Reflect.set(globalThis, name, Reflect.get(dom.window, name))
-  const { dir, default: PRPost, mount, flushSync } = await importBundle(built, 'PRPost')
+  const { dir, default: PRCard, mount, flushSync } = await importBundle(built, 'PRCard')
   try {
     const target = dom.window.document.getElementById('app')
     assert.ok(target)
     const posts = [notice('n1', 1258), notice('n2', 1258)]
     const show = (selected: string): string[] => {
       target.replaceChildren()
-      mount(PRPost, { target, props: { post: posts[1], posts, room: { id: 'r', name: 'work' }, selection: { get: () => selected, set: () => {} }, onreply: () => {}, onforward: () => {}, onpin: () => {} } })
+      mount(PRCard, { target, props: { post: posts[1], posts, room: { id: 'r', name: 'work' }, selection: { get: () => selected, set: () => {} }, onreply: () => {}, onforward: () => {}, onpin: () => {} } })
       flushSync()
       assert.equal(target.querySelectorAll('.actions').length, 2, 'one bar per notice, none for the post')
       assert.ok([...target.querySelectorAll('[data-notice-id]')].every((n) => n.getAttribute('tabindex') === '0'), 'every notice is in the Tab order')
@@ -171,7 +171,8 @@ test('tapping DM message A and then B leaves only B with a bar', async () => {
 test('the feed and DMs draw no post bar for a PR post, and the bar has no CSS hover or focus rules', () => {
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
   assert.match(read('./Feed.svelte'), /p\.kind !== 'pr' && !sealedEvent\(p\)\}<PostActions/)
-  assert.match(read('../sessions/DmMessage.svelte'), /row\.post\.kind !== 'pr'\}<PostActions/)
+  // A registered event owns its own card and bar, in the feed and in a DM.
+  assert.match(read('../sessions/DmRows.svelte'), /<Card post=\{row\.post\} notice=\{row\.post\.notice\} surface="dm" \/>/)
   // A session renders one DmRows per row and a thread of DmMessages; each list shares one selection.
   const session = read('../sessions/Session.svelte')
   assert.match(session, /<DmRows [^>]*selection=\{listSelection\}/)
