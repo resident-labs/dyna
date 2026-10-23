@@ -997,7 +997,10 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 		}
 		parent := s.ReplyHome(indexDB, roomID, in.ReplyTo)
 		supplied := in.Conversation
-		in.Conversation = HomeFor(Message{From: in.From, Kind: in.Kind, Human: in.Human, Source: in.Source, To: in.To, SessionIDs: in.SessionIDs, Conversation: in.Conversation}, rec.Name, parent)
+		// The reader of the home needs the notice kind and the room too: a typed
+		// event's audience decides whether its post is a DM, and the seat's DM
+		// names the room.
+		in.Conversation = HomeFor(Message{RoomID: roomID, From: in.From, Kind: in.Kind, Notice: in.Notice, Human: in.Human, Source: in.Source, To: in.To, SessionIDs: in.SessionIDs, Conversation: in.Conversation}, rec.Name, parent)
 		if in.ID != "" {
 			for _, m := range msgs {
 				if m.ID == in.ID {

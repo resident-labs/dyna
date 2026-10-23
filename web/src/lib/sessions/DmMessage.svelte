@@ -41,7 +41,7 @@
   let person = $derived(row.author === address ? member : members.find((m) => m.address === row.author))
   let owner = $derived(row.author === room.name)
   let name = $derived(speaker(row.post ?? { from: row.author, human: row.human }, room.name))
-  let sentTo = $derived(row.post ? postedTo(row.post, address, room.name) : '')
+  let sentTo = $derived(row.post ? postedTo(row.post, room.name) : '')
   let hue = $derived(row.post?.fromHue ?? person?.hue ?? 0)
   const timeDescriptionId = $props.id()
   let exactTime = $derived.by(() => {

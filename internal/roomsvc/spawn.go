@@ -355,11 +355,19 @@ type SendResult struct {
 // and anything else posts as Post does. Files sent with a new task are
 // recorded as an owner post before the session starts.
 func (s *Service) Send(ctx context.Context, roomRef, draft, replyTo, forwardOf string, atts ...room.Attachment) (SendResult, error) {
-	return s.SendWithReferences(ctx, roomRef, draft, replyTo, forwardOf, nil, atts...)
+	return s.SendFromConversation(ctx, roomRef, draft, replyTo, forwardOf, "", nil, atts...)
 }
 
 // SendWithReferences sends composer references with the post.
 func (s *Service) SendWithReferences(ctx context.Context, roomRef, draft, replyTo, forwardOf string, refs []room.Reference, atts ...room.Attachment) (SendResult, error) {
+	return s.SendFromConversation(ctx, roomRef, draft, replyTo, forwardOf, "", refs, atts...)
+}
+
+// SendFromConversation is Send for a client that names the conversation it
+// wrote in: the room feed when conversation is empty, or the root seat's DM
+// (see room.SeatDMConversation). A spawn starts from the feed, so it takes no
+// conversation.
+func (s *Service) SendFromConversation(ctx context.Context, roomRef, draft, replyTo, forwardOf string, conversation room.Conversation, refs []room.Reference, atts ...room.Attachment) (SendResult, error) {
 	if _, _, ok := splitSpawn(draft); ok {
 		if len(refs) > 0 {
 			return SendResult{}, errors.New("remove references before starting a new session")
@@ -370,12 +378,15 @@ func (s *Service) SendWithReferences(ctx context.Context, roomRef, draft, replyT
 		if replyTo != "" {
 			return SendResult{}, errors.New("a new session cannot start as a reply. Cancel the reply first")
 		}
+		if conversation != "" {
+			return SendResult{}, errors.New("a new session starts from the room feed")
+		}
 		res, err := s.StartSession(ctx, roomRef, draft, atts...)
 		if err != nil {
 			return SendResult{}, err
 		}
 		return SendResult{Kind: "spawn", Spawn: &res}, nil
 	}
-	res, err := s.post(ctx, roomRef, draft, replyTo, forwardOf, refs, atts...)
+	res, err := s.postIn(ctx, roomRef, draft, replyTo, forwardOf, conversation, refs, atts...)
 	return SendResult{Kind: "post", Post: &res}, err
 }

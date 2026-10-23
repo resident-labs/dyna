@@ -218,7 +218,7 @@ func (s *Store) homesFor(db *sql.DB, roomName, roomID string, msgs []Message) []
 // same post is kept as it is: a post's rows are written once.
 func putPostRows(ctx context.Context, conn *sql.Conn, roomID, roomName string, msg Message, home Conversation, deliveryState DeliveryState, at int64) error {
 	if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO post_homes(room_id, post_id, ts, conversation, author_session_id) VALUES(?, ?, ?, ?, ?)`,
-		roomID, msg.ID, msg.TS, string(home.Home()), msg.AuthorSessionID()); err != nil {
+		roomID, msg.ID, msg.TS, string(home.Home()), postAuthor(msg, roomName, roomID)); err != nil {
 		return err
 	}
 	for _, delivery := range DeliveriesFor(msg, roomName) {
@@ -228,6 +228,30 @@ func putPostRows(ctx context.Context, conn *sql.Conn, roomID, roomName string, m
 		}
 	}
 	return nil
+}
+
+// postAuthor is who wrote msg, as post_homes records it: the session bound to
+// the sender's address, or the room's root seat for a post of the seat itself.
+// The seat's holder can change, so its posts name the seat (see
+// SeatSessionID), the same identity the seat's delivery rows use, and the
+// seat's DM finds them whoever holds it now.
+//
+// An event is the engine's notice rather than the seat's own words, so it names
+// no author. An owner, worker or engine post names none either.
+func postAuthor(msg Message, roomName, roomID string) string {
+	if msg.From == roomName+":"+RootAgent {
+		return SeatSessionID(roomID)
+	}
+	if id := msg.AuthorSessionID(); id != "" {
+		return id
+	}
+	if msg.From != roomName || msg.Human {
+		return ""
+	}
+	if _, event := eventSpecFor(msg.Kind, msg.Notice.Kind); event {
+		return ""
+	}
+	return SeatSessionID(roomID)
 }
 
 // ReplyHome is the home of the post that postID answers, and empty when the
