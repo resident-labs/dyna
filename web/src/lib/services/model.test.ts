@@ -125,3 +125,11 @@ test('activity keeps one review result, merge details, and accurate hook states'
   assert.equal(lines[3]?.tone, 'live')
   assert.equal(new Set(lines.map((l) => l.key)).size, lines.length)
 })
+
+test('a recorded merge decision is a normal note, not a failed trial', () => {
+  const lines = buildActivity(inputs({
+    history: [{ at: '2026-10-21T22:49:00Z', kind: 'decision', outcome: 'recorded', changes: 0, detail: 'Retry after the cache fix' }],
+  }), Date.parse('2026-10-21T22:50:00Z'))
+  assert.equal(lines[0]?.text, 'decision: Retry after the cache fix')
+  assert.equal(lines[0]?.tone, 'on')
+})
