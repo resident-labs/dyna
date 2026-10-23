@@ -121,14 +121,31 @@ prune_runs() {
   done
 }
 
-# prune_tree BASE: finished runs, the diagnostics of old runs, and the build
-# cache entries that nothing has used for longer than the age limit. Entries
-# younger than the limit stay, so a run keeps its warm cache.
+# base_idle BASE: no run in BASE holds its lock, so no run reads its caches.
+base_idle() {
+  local run
+  for run in "$1"/runs/*; do
+    live_run "$run" && return 1
+  done
+  return 0
+}
+
+# prune_tree BASE: the finished runs and the diagnostics of old runs, and, only
+# while no run uses the base, the cache entries that nothing has used for longer
+# than the age limit. A run mounts these caches (go-build, go-mod, npm) and its
+# reads do not touch the parent directory, so its base is never trimmed under it.
+# Entries younger than the limit always stay, so builds keep their warm cache.
 prune_tree() {
   local path
   [ -d "$1" ] && [ ! -L "$1" ] || return 0
   prune_runs "$1"
-  for path in "$1"/diagnostics/* "$1"/go-build/*; do
+  for path in "$1"/diagnostics/*; do
+    [ -d "$path" ] && [ ! -L "$path" ] || continue
+    older "$path" || continue
+    remove "$path"
+  done
+  base_idle "$1" || return 0
+  for path in "$1"/go-build/* "$1"/go-mod/* "$1"/npm/*; do
     [ -d "$path" ] && [ ! -L "$path" ] || continue
     older "$path" || continue
     remove "$path"
@@ -137,18 +154,19 @@ prune_tree() {
 
 for base in "${bases[@]}"; do
   prune_tree "$base"
-done
-
-# The legacy tree also holds the work trees and copies of the old runner, one
-# entry per run, at its top level. A moved-aside run names itself there.
-if [ -d "$legacy" ] && [ ! -L "$legacy" ]; then
+  # The legacy tree also holds the work trees and copies of the old runner, one
+  # entry per run, at its top level. A moved-aside run names itself there, and
+  # its own lock protects it. Only a cleanup asked to visit this tree does this.
+  [ "$base" = "$legacy" ] || continue
   for path in "$legacy"/*; do
     [ -d "$path" ] && [ ! -L "$path" ] || continue
-    case "$path" in "$legacy/runs" | "$legacy/diagnostics" | "$legacy/go-build") continue ;; esac
+    case "$path" in
+    "$legacy/runs" | "$legacy/diagnostics" | "$legacy/go-build" | "$legacy/go-mod" | "$legacy/npm") continue ;;
+    esac
     live_run "$path" && continue
     older "$path" || continue
     remove "$path"
   done
-fi
+done
 
 printf 'DYNA_CI_CACHE_CLEAN_FREED_KB=%s\n' "$freed_kb"
