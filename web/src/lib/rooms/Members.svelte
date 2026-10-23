@@ -108,7 +108,7 @@
   let liveCount = $derived(sessions.filter((m) => m.state === 'live').length)
 
   // Subagents fold under their parent, like a Discord category. The focused
-  // channel's lead and its ancestors open by default, and so does the path to
+  // feed view's lead and its ancestors open by default, and so does the path to
   // a session just started. A click on a chevron overrides the default for
   // this room and view only.
   let overrides = $state<Record<string, Record<string, boolean>>>({})
@@ -117,7 +117,7 @@
   let rows = $derived(foldMembers(sessions, isOpen))
   let serviceRows = $derived(foldMembers(services, isOpen))
   // Trees with no open session except finished ones fold into a Finished group.
-  // It opens by itself while it holds the focused channel or a selection is in progress.
+  // It opens by itself while it holds the focused feed view or a selection is in progress.
   let doneSet = $derived(finishedTrees(sessions))
   let mainRows = $derived(rows.filter((row) => !doneSet.has(row.member.id)))
   let finishedRows = $derived(rows.filter((row) => doneSet.has(row.member.id)))

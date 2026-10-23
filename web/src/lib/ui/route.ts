@@ -4,7 +4,7 @@
 // format (prlink.js); a completion link (details.js) names a session or run.
 import { roomIDPattern } from './posts.ts'
 import { detailIDs } from './details.ts'
-import { GENERAL } from '../rooms/channels.ts'
+import { GENERAL } from '../rooms/feedViews.ts'
 
 export interface Route {
   room: string

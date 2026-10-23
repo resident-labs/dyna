@@ -30,11 +30,11 @@ function app(hash: string): Harness {
   const c: Harness = {
     callTarget, callPush: null, URLSearchParams, location, history, entries, parsePRHash, parseIssueHash, parseFileHash, prHash, parseDetailHref: () => null,
     ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute, started: true, routing: 0, routeFix: false, pop: null, readOnlyDm: false, openRun: '',
-    roomId: A, reviewOpen: false, reviewTab: 'files', reviewVersion: 0, isChannel: (v: string) => v === 'general', loadChanges() {}, loadReviewer() {}, view: 'general', drill: null, detailRequest: 0, roomRequest: 0, sessionVisit: 0,
+    roomId: A, reviewOpen: false, reviewTab: 'files', reviewVersion: 0, isFeedView: (v: string) => v === 'general', loadChanges() {}, loadReviewer() {}, view: 'general', drill: null, detailRequest: 0, roomRequest: 0, sessionVisit: 0,
     GENERAL: 'general', hasTerminal: true, feed: null, feedAtBottom: false, needPair: false,
     selectionRevision: 0, consolidationRequest: 0, consolidationView: 0, questionsRequest: 0,
     rooms: [{ id: A }, { id: B }], ROOM: /^room_/, POST: /^msg_/,
-    channels: { resolveView: (v: string) => v }, trimFeed: (v: unknown) => v, setPicked() {}, visitRoomControls() {},
+    feedViews: { resolveView: (v: string) => v }, trimFeed: (v: unknown) => v, setPicked() {}, visitRoomControls() {},
     roomData: { open: async () => true }, narrow: false, sessionTurn: 0,
     loadSession() {}, setTimeout() {}, loadRuns() {}, jumpTo() {},
   }

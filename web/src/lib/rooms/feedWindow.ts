@@ -6,7 +6,7 @@ export const FEED_WINDOW = 300
 // text and unread, pass through untouched.
 export interface FeedPost {
   id: string
-  channels?: string[]
+  views?: string[]
 }
 
 // The part of a room feed that the window helpers read. The feed's other
@@ -19,7 +19,7 @@ export interface FeedPage<P extends FeedPost = FeedPost> {
   cursor?: string
   historyLoaded?: boolean
   unread?: number
-  channelUnread?: Record<string, number> | null
+  viewUnread?: Record<string, number> | null
 }
 
 // Loading old pages releases far newer posts; following present releases old
