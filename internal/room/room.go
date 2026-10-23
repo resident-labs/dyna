@@ -935,7 +935,7 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 		if sealedFamily(in.Kind) {
 			return Message{}, fmt.Errorf("%q is a sealed event family: post it with PostEvent", in.Kind)
 		}
-		if !agentKind(in.Kind) && !legacyFamily(in.Kind) {
+		if !agentKind(in.Kind) && !voiceCallPost(in.Kind) {
 			return Message{}, fmt.Errorf("post kind %q is not registered in internal/room/events.go", in.Kind)
 		}
 	}
