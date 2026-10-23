@@ -52,7 +52,11 @@ func (m *Manager) pendingRoomMessages(meta Meta) ([]pendingRoomMessage, error) {
 		msgs = append(msgs, msg)
 	}
 	ordinary := []room.Message{}
-	for _, msg := range forSession(m.rooms(), meta, msgs) {
+	input, err := forSession(m.rooms(), meta, msgs)
+	if err != nil {
+		return nil, err
+	}
+	for _, msg := range input {
 		if !q.Cancelled[msg.ID] && !q.Dismissed[msg.ID] && !delivered[msg.ID] {
 			ordinary = append(ordinary, msg)
 		}
@@ -63,8 +67,14 @@ func (m *Manager) pendingRoomMessages(meta Meta) ([]pendingRoomMessage, error) {
 	}
 	out := []pendingRoomMessage{}
 	seen := map[string]bool{}
+	// The stored delivery of each post says whether it asks for a turn; the
+	// family check keeps the informational notices out, as before.
+	rows, err := inputRows(m.rooms(), meta.RoomID, meta.ID, meta.Address(), postIDs(selected))
+	if err != nil {
+		return nil, err
+	}
 	for _, msg := range selected {
-		if !msg.Wake || !msg.Deliverable() || q.Dismissed[msg.ID] || seen[msg.ID] || delivered[msg.ID] {
+		if !msg.Deliverable() || !wakes(rows, msg) || q.Dismissed[msg.ID] || seen[msg.ID] || delivered[msg.ID] {
 			continue
 		}
 		seen[msg.ID] = true

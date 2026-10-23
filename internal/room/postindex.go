@@ -97,7 +97,83 @@ func (s *Store) migratePostIndex() error {
 	if err := s.backfillPostAuthors(db); err != nil {
 		return err
 	}
+	if err := s.backfillPostRecipients(db); err != nil {
+		return err
+	}
 	return s.catchUpPostIndex(db)
+}
+
+// postIndexRecipientsKey records that the retained posts of every room were
+// given the row of each recipient they named without binding a session to it.
+// It is a separate versioned key because the schema did not change: only the
+// key a row gets when the post bound no session to the address it named.
+const postIndexRecipientsKey = "room.post_index.recipients"
+
+// backfillPostRecipients gives the retained posts of an older index the rows of
+// the agent addresses they named without a binding, once. A session reads its
+// input and its wakes from its rows, and the address text alone no longer
+// decides that, so a post stored before those rows existed would stop reaching
+// the session that holds the address.
+func (s *Store) backfillPostRecipients(db *sql.DB) error {
+	var version string
+	err := db.QueryRow("SELECT value FROM meta WHERE key=?", postIndexRecipientsKey).Scan(&version)
+	switch {
+	case err == nil:
+		return nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return err
+	}
+	records, err := storedRecords(db)
+	if err != nil {
+		return err
+	}
+	for _, rec := range records {
+		if err := s.addNamedRows(db, rec); err != nil {
+			return err
+		}
+	}
+	return markPostIndex(db, postIndexRecipientsKey)
+}
+
+// addNamedRows stores the row of every recipient of one room's retained posts
+// that the post named without binding a session to it, in one write per room. A
+// row already stored for the same post and session is kept as it is, so the
+// bound rows of the import keep their state.
+//
+// TODO: legacy/shim remove later — fills rows for posts stored before a post
+// named an unbound recipient in its rows; remove once retained history ages
+// out.
+func (s *Store) addNamedRows(db *sql.DB, rec Record) error {
+	msgs, err := s.Messages(rec.ID)
+	if err != nil {
+		return err
+	}
+	var rows []Delivery
+	for _, msg := range msgs {
+		mode := deliveryModeFor(msg)
+		for _, to := range msg.To {
+			if msg.SessionIDs[to] != "" {
+				continue
+			}
+			if key := deliveryRowKey(msg, rec.Name, to); key != "" {
+				rows = append(rows, Delivery{PostID: msg.ID, SessionID: key, Mode: mode})
+			}
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	at := s.now().UnixMilli()
+	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		ctx := context.Background()
+		for _, r := range rows {
+			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO post_deliveries(room_id, post_id, session_id, mode, category, state, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+				rec.ID, r.PostID, r.SessionID, string(r.Mode), r.Category, string(DeliveryDelivered), at); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // markPostIndex records that these one-time steps of the post index ran.
