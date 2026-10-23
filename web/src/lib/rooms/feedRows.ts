@@ -1,7 +1,7 @@
 import { parsePRPost } from '../prs/pr.ts'
 import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
-import type { EventPayload } from './events.gen.ts'
+import type { EventPayload, HookEvent, HookState } from './events.gen.ts'
 import { hookEvent, issueEvent, mergeEvent, prEvent } from './eventPayloads.ts'
 import { eventSpecs } from './events.gen.ts'
 
@@ -53,7 +53,21 @@ export interface FeedPostRow<P extends FeedInput = FeedInput> {
   post: P
   cont: boolean | null
   posts?: P[]
+  // hook is the fold of a row of hook passes: how many passes the row holds
+  // and when the last one ended. A row of another kind has none.
+  hook?: HookFold
 }
+
+// HookFold is what a folded row of hook passes shows.
+export interface HookFold {
+  count: number
+  lastTs: number
+}
+
+// HOOK_PASS_WINDOW is how long after one pass of a hook the next pass still
+// joins the same row. A dozen routine passes a minute apart read as one line,
+// while passes an hour apart stay apart.
+export const HOOK_PASS_WINDOW = 60 * 60 * 1000
 
 export type FeedRow<P extends FeedInput = FeedInput> = FeedDayRow | FeedNewRow | FeedCallRow | FeedPostRow<P>
 
@@ -86,11 +100,6 @@ export function rowPost<P extends FeedInput>(row: FeedRow<P> | undefined): P | u
   return row?.kind === 'post' ? row.post : undefined
 }
 
-// rowPosts lists every post a row shows, oldest first.
-export function rowPosts<P extends FeedInput>(row: FeedRow<P> | undefined): P[] {
-  return row?.kind === 'post' ? row.posts ?? [row.post] : []
-}
-
 // roomPosts keeps the posts of the room's own conversation. A session-audience
 // event belongs to the one session it names and lives in that session's DM;
 // the room lists it only when the owner is a recipient. The decision reads the
@@ -105,13 +114,31 @@ export function roomPosts<P extends FeedInput>(posts: readonly P[], owner: strin
   })
 }
 
-// foldKey names a row that folds on one subject: one card per PR, one card
-// per hook run, one card per merge trial, so a trial's progress and its end
+// hookIdentity names one hook of one repo: the subject a pass folds by.
+function hookIdentity(hook: HookEvent): string {
+  return `${hook.repo}\u0000${hook.hook}`
+}
+
+// hookRowKey names the row a hook post joins. Every pass of one hook folds
+// into one row, and the start of a run joins that row too, so a running run
+// shows as the running state of its hook. A failed or erroring run is its own
+// card: no failure ever hides inside a fold.
+function hookRowKey(hook: HookEvent): string {
+  return hook.state === 'passed' || hook.state === 'running' ? `hook:${hookIdentity(hook)}` : `hook-run:${hook.runId}`
+}
+
+// rowPosts lists every post a row shows, oldest first.
+export function rowPosts<P extends FeedInput>(row: FeedRow<P> | undefined): P[] {
+  return row?.kind === 'post' ? row.posts ?? [row.post] : []
+}
+
+// foldKey names a row that folds on one subject: one card per PR, one row of
+// passes per hook, one card per merge trial, so a trial's progress and its end
 // stay one card, and one card per issue, so a filing, a change and a close
 // fold together. An empty key never folds.
 function foldKey(post: FeedInput): string {
   const hook = hookEvent(post)
-  if (hook) return `hook:${hook.runId}`
+  if (hook) return hookRowKey(hook)
   const merge = mergeEvent(post)
   if (merge) return `merge:${merge.trialId}`
   const pr = prEvent(post)
@@ -135,12 +162,55 @@ interface FeedItem<P extends FeedInput> {
   ts: number
 }
 
+// hookFold reads the passes a row of a hook holds: how many, and when the last
+// one ended. The card draws these typed facts, never the post text.
+function hookFold(posts: readonly FeedInput[]): HookFold | undefined {
+  let count = 0
+  let lastTs = 0
+  for (const post of posts) {
+    if (hookEvent(post)?.state !== 'passed') continue
+    count++
+    lastTs = Math.max(lastTs, post.ts)
+  }
+  return count ? { count, lastTs } : undefined
+}
+
+// hiddenHookStarts lists the starts of hook runs that show nowhere. A start
+// shows only while its run is the newest thing of its hook: the engine posts a
+// result for every start, so a start whose run ended in a failure or an error
+// is already told by that failure's own card, and a start with no result while
+// a later run of the same hook posted belongs to a run that ended unrecorded.
+// Either way no stale "running" card is left behind.
+function hiddenHookStarts(posts: readonly FeedInput[]): Set<string> {
+  const resultState = new Map<string, HookState>()
+  const lastOfHook = new Map<string, number>()
+  posts.forEach((post, i) => {
+    const hook = hookEvent(post)
+    if (!hook) return
+    if (hook.state !== 'running') resultState.set(hook.runId, hook.state)
+    lastOfHook.set(hookIdentity(hook), i)
+  })
+  const hidden = new Set<string>()
+  posts.forEach((post, i) => {
+    const hook = hookEvent(post)
+    if (hook?.state !== 'running') return
+    const result = resultState.get(hook.runId)
+    if (result !== undefined) {
+      if (result !== 'passed') hidden.add(post.id)
+      return
+    }
+    if ((lastOfHook.get(hookIdentity(hook)) ?? 0) > i) hidden.add(post.id)
+  })
+  return hidden
+}
+
 // feedRows adds day and "new" dividers, and marks a post that continues the
 // previous sender's run. Root and the human share the owner address, so the
 // human flag is part of the sender. A call request is a row at the time root
 // asked, between the posts.
 export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = '', calls: readonly CallRequest[] = []): FeedRow<P>[] {
   const out: FeedRow<P>[] = []
+  const hidden = hiddenHookStarts(posts)
   let prev: P | null = null
   let prevDay = ''
   const waiting = calls.map((call) => ({ call, ts: Date.parse(call.askedAt) })).sort((a, b) => a.ts - b.ts)
@@ -166,6 +236,7 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
       continue
     }
     if (!post) continue
+    if (hidden.has(post.id)) continue
     if (post.id === unreadFrom) {
       out.push({ kind: 'new', key: 'new' })
       prev = null
@@ -180,11 +251,22 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
     // posts from the start.
     const foldable = !!key || post.kind === 'pr'
     const plain = (p: FeedInput) => !p.replyTo && !p.forward && !p.attachments?.length
-    if (key && last?.kind === 'post' && last.posts && plain(post) && plain(last.post) && foldKey(last.post) === key) {
-      last.posts.push(post)
-      last.post = post
+    const hook = hookEvent(post)
+    const open = last?.kind === 'post' ? last : undefined
+    const openPosts = open?.posts
+    const prevPost = open?.post
+    // A pass of a hook joins its hook's row only within the window, so passes
+    // far apart stay separate rows.
+    const sameRow = !!key && !!openPosts && !!prevPost && plain(post) && plain(prevPost) &&
+      foldKey(prevPost) === key && (!hook || post.ts - prevPost.ts <= HOOK_PASS_WINDOW)
+    if (sameRow && open && openPosts && prevPost) {
+      openPosts.push(post)
+      open.post = post
+      if (hook) open.hook = hookFold(openPosts)
     } else {
-      out.push({ kind: 'post', key: post.id, post, cont, ...(foldable ? { posts: [post] } : {}) })
+      out.push({ kind: 'post', key: post.id, post, cont,
+        ...(foldable ? { posts: [post] } : {}),
+        ...(hook && foldable ? { hook: hookFold([post]) } : {}) })
     }
     prev = post
   }
