@@ -149,14 +149,14 @@ test('an issue folds its filing, change and close into one card', () => {
 // A passing run of a hook, one a minute, as the engine posts them.
 const pass = (n: number, hook = 'librarian') => hookPost(`pass-${hook}-${n}`, 'result', `${hook}-run-${n}`, 'passed', start + n * 60_000, hook)
 
-test('a hook run folds its start into its result', () => {
+test('a hook run shows its start only while the run is open, then its result', () => {
   const posts = [
     hookPost('h1', 'started', 'run-a', 'running'),
     hookPost('h2', 'result', 'run-a', 'passed'),
   ]
   const rows = content(feedRows(posts))
   assert.equal(rows.length, 1)
-  assert.deepEqual(rowPosts(need(rows[0])).map((post) => post.id), ['h1', 'h2'])
+  assert.deepEqual(rowPosts(need(rows[0])).map((post) => post.id), ['h2'])
   assert.equal(rowPost(need(rows[0]))?.notice?.kind, 'result')
   assert.deepEqual(need(rows[0]).hook, { count: 1, lastTs: start })
 })
@@ -224,13 +224,27 @@ test('an overlapping run stays visibly running until its own result arrives', ()
   ]
   const rows = content(feedRows(posts))
   assert.equal(rows.length, 1)
-  assert.deepEqual(rowPosts(need(rows[0])).map((post) => post.id), ['start-a', 'start-b', 'pass-b'])
+  assert.deepEqual(rowPosts(need(rows[0])).map((post) => post.id), ['start-a', 'pass-b'])
   // The row keeps saying that a run of this hook is going, and names the run
   // whose log the card opens.
   assert.deepEqual(need(rows[0]).hook, { count: 1, lastTs: start + 90_000, active: { runId: 'librarian-run-a', ts: start } })
-  // A's own result ends the active run, and the row then shows the pass.
+  // A's own result ends the active run, and the row then shows the passes.
   const ended = content(feedRows([...posts, hookPost('pass-a', 'result', 'librarian-run-a', 'passed', start + 120_000, 'librarian')]))
   assert.deepEqual(need(ended[0]).hook, { count: 2, lastTs: start + 120_000 })
+})
+
+test('a run that ends in another row stops showing as active', () => {
+  const message: FeedInput = { id: 'chat', ts: start + 100_000, from: 'dyna:root', kind: 'message', text: 'Hello' }
+  const posts = [
+    hookPost('start-a', 'started', 'librarian-run-a', 'running', start, 'librarian'),
+    hookPost('start-b', 'started', 'librarian-run-b', 'running', start + 60_000, 'librarian'),
+    hookPost('pass-b', 'result', 'librarian-run-b', 'passed', start + 90_000, 'librarian'),
+    message,
+    hookPost('pass-a', 'result', 'librarian-run-a', 'passed', start + 120_000, 'librarian'),
+  ]
+  const rows = content(feedRows(posts))
+  assert.deepEqual(rows.map((row) => row.post.id), ['pass-b', 'chat', 'pass-a'])
+  for (const row of rows) assert.equal(row.hook?.active, undefined, `${row.post.id} still claims a live run`)
 })
 
 test('the start of a run that ended badly shows nowhere', () => {
