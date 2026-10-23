@@ -67,6 +67,7 @@ var signInSpecs = map[string]signInSpec{
 	"claude-code": {Parse: parseClaudeCodeSignIn, AcceptsPaste: true},
 	"codex":       {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},
 	"grok":        {Argv: grokDeviceArgv, Parse: parseGrokSignIn},
+	"muse":        {Argv: museDeviceArgv, Parse: parseMuseSignIn},
 	"opencode":    {Argv: openCodeDeviceArgv, Parse: parseOpenCodeSignIn},
 }
 
