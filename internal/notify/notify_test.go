@@ -20,6 +20,7 @@ import (
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/settings"
+	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/subagent"
 )
 
@@ -34,16 +35,10 @@ type testEnv struct {
 	waitForTurn func(context.Context, string, int) error
 }
 
-var stampKeys = mode.StampKeys()
-
 func newTestEnv(t *testing.T, options ...func(*testEnv)) *testEnv {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	storetest.Isolate(t)
 	t.Setenv(runstore.AgentJournalRootEnv, "")
-	for _, key := range stampKeys {
-		t.Setenv(key, "")
-	}
 	profiles := &profile.Store{Profiles: []profile.Profile{{Name: "mock", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 5, Default: true}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	spawner := &testTurnSpawner{ctx: ctx}
@@ -131,9 +126,7 @@ func (e *testEnv) room() room.Record {
 // as stamps the process as a session (or clears the stamp for nil) so that
 // Start creates children of parent in its room.
 func (e *testEnv) as(parent *subagent.Info) {
-	for _, key := range stampKeys {
-		e.t.Setenv(key, "")
-	}
+	storetest.ClearStamp(e.t)
 	if parent != nil {
 		e.t.Setenv(mode.EnvMode, mode.Subagent)
 		e.t.Setenv(mode.EnvSession, parent.ID)
@@ -397,8 +390,14 @@ func TestExplicitBadRecipientsRejectGroupMembersSkip(t *testing.T) {
 // A group post is stored once and wakes every open member; each frame marks
 // its reader and names the group.
 func TestGroupPostStoredOnceDeliveredToEach(t *testing.T) {
-	f := newFixture(t)
-	res, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.lead), Mentions: []string{"@children"}, Text: "Interface changed in abc123. Rebase."})
+	// A lead and two children are all this test needs. Neither child is steered,
+	// so the delivered post carries the mock's no-hold directive.
+	e := newTestEnv(t)
+	f := &fixture{testEnv: e, a: e.room()}
+	f.lead = e.start(f.a, "lead", nil)
+	f.decoder = e.start(f.a, "decoder", &f.lead)
+	f.parser = e.start(f.a, "parser", &f.lead)
+	res, err := f.svc.Post(f.ctx, PostInput{Sender: f.session(f.lead), Mentions: []string{"@children"}, Text: "SLEEP:0\nInterface changed in abc123. Rebase."})
 	if err != nil {
 		t.Fatal(err)
 	}

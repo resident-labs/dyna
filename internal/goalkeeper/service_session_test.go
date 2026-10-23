@@ -22,7 +22,7 @@ func TestLiveKeeperCreatesServiceSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	var runners sync.WaitGroup
 	t.Cleanup(func() {
 		cancel()
@@ -40,17 +40,8 @@ func TestLiveKeeperCreatesServiceSession(t *testing.T) {
 	if !info.Service || info.Role != "keeper" {
 		t.Fatalf("keeper metadata: %+v", info.Meta)
 	}
-	// Join the runner instead of polling and repairing its session files.
-	finished := make(chan struct{})
-	go func() {
-		runners.Wait()
-		close(finished)
-	}()
-	select {
-	case <-finished:
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	}
+	// Join the runner without sharing the keeper turn deadline.
+	runners.Wait()
 	turn, err := manager.Store.ReadTurn(info.ID, 1)
 	if err != nil {
 		t.Fatal(err)

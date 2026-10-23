@@ -13,7 +13,11 @@ import (
 
 func TestFailureAlertStaysQueuedDuringParentTransfer(t *testing.T) {
 	// Transfer state holds the alert; the mock turn needs no steering hold.
-	f := newFixture(t, withImmediateTurns)
+	// A lead and one child are all this test needs.
+	e := newTestEnv(t, withImmediateTurns)
+	f := &fixture{testEnv: e, a: e.room()}
+	f.lead = e.start(f.a, "lead", nil)
+	f.decoder = e.start(f.a, "decoder", &f.lead)
 	before, _ := f.mgr.Store.ReadMeta(f.lead.ID)
 	_, err := f.mgr.Store.UpdateMeta(f.lead.ID, func(meta *subagent.Meta) {
 		meta.HarnessSession, meta.Resumable = "", false
