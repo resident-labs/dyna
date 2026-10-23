@@ -42,7 +42,8 @@ func TestOnlyTheRecordCodeTouchesSessionJSON(t *testing.T) {
 	}
 	var found []string
 	for _, rel := range strings.Fields(string(out)) {
-		if strings.HasPrefix(rel, "internal/sessionlife/") {
+		// This one-time migration enumerates artifacts, without reading session records.
+		if strings.HasPrefix(rel, "internal/sessionlife/") || rel == "internal/subagent/turn_migration.go" {
 			continue
 		}
 		b, err := os.ReadFile(filepath.Join(repo, rel))
