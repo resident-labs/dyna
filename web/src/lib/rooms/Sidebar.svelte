@@ -3,7 +3,7 @@
   import { fade } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
   import { motion, BASE, FAST } from '../ui/motion.js'
-  import { GENERAL } from './channels.js'
+  import { GENERAL } from './channels.ts'
   import Avatar from '../ui/Avatar.svelte'
   import Notify from './Notify.svelte'
   import { features } from '../../api.js'

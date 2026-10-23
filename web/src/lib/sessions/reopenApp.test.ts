@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { isFinished } from '../rooms/memberOrder.js'
+import { isFinished } from '../rooms/memberOrder.ts'
 import { selectableSession } from './consolidation.ts'
 import { appLoaderStubs } from '../rooms/appStubs.js'
 import { reconcileRows } from '../ui/reloadGate.js'
