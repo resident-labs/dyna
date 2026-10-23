@@ -4,8 +4,11 @@ import (
 	"context"
 	"dyna-agent/internal/notices"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/sessionlife/recordtest"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/store/storetest"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -109,17 +112,15 @@ func TestScratchOwnerReadsSessionAndRunLifecycle(t *testing.T) {
 		{runstore.RunsDir(), "wf_active", "meta.json", `{"id":"wf_active","status":"running","endedAt":"` + closed.Format(time.RFC3339) + `"}`, true, true, time.Time{}},
 		{runstore.SessionsDir(), "ses_bad", "", `not json`, false, false, time.Time{}},
 	} {
-		dir := filepath.Join(tc.root, tc.id)
 		if tc.name == "" {
 			// An empty name stands for the session record.
 			recordtest.WriteRaw(t, tc.root, tc.id, []byte(tc.body))
 		} else {
-			if err := os.MkdirAll(dir, 0700); err != nil {
+			var m runstore.Meta
+			if err := json.Unmarshal([]byte(tc.body), &m); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.WriteFile(filepath.Join(dir, tc.name), []byte(tc.body), 0600); err != nil {
-				t.Fatal(err)
-			}
+			runstoretest.Write(t, store.DataDir(), m)
 		}
 		got := scratchOwner(tc.id)
 		if got.Known != tc.known || got.Open != tc.open || !got.ClosedAt.Equal(tc.ended) {

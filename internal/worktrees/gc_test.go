@@ -12,8 +12,10 @@ import (
 	"time"
 
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/settings"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/store/storetest"
 )
 
@@ -359,13 +361,7 @@ func TestGCProtectsRunningWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir := filepath.Join(runstore.RunsDir(), "wf_active")
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"id":"wf_active","status":"running"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
+	runstoretest.Write(t, store.DataDir(), runstore.Meta{ID: "wf_active", Status: "running"})
 	old := time.Now().Add(-25 * time.Hour)
 	for _, p := range []string{path, git(t, path, "rev-parse", "--absolute-git-dir")} {
 		if err := filepath.Walk(p, func(p string, i os.FileInfo, e error) error {
@@ -389,9 +385,7 @@ func TestGCProtectsRunningWorkflow(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal("active workflow removed")
 	}
-	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"id":"wf_active","status":"ok","endedAt":"2026-01-01T00:00:00Z"}`), 0600); err != nil {
-		t.Fatal(err)
-	}
+	runstoretest.Write(t, store.DataDir(), runstore.Meta{ID: "wf_active", Status: "ok", EndedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
 	actions, err = GC(context.Background(), repo, GCOptions{})
 	if err != nil {
 		t.Fatal(err)
