@@ -4,15 +4,23 @@ package callrequests
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/listchange"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 )
+
+// Topic identifies committed call request list changes.
+const Topic = "call-requests"
+
+var errUnchanged = errors.New("call request unchanged")
 
 type Request struct {
 	ID             string     `json:"id"`
@@ -91,6 +99,16 @@ func get(conn *sql.Conn, room, id string) (Request, error) {
 	return scan(conn.QueryRowContext(context.Background(), "SELECT "+columns+" FROM call_requests WHERE room=? AND id=?", room, id))
 }
 
+// setChange encodes the committed row in the shared list-event shape.
+func setChange(event *listchange.Event, row Request) error {
+	raw, err := json.Marshal(row)
+	if err != nil {
+		return err
+	}
+	event.Change = listchange.Change{Op: "upsert", ID: row.ID, Item: raw}
+	return nil
+}
+
 // Ask creates a request or updates the reason of the room's ringing request.
 func (s *Store) Ask(room, reason, asker string) (Request, bool, error) {
 	if strings.TrimSpace(room) == "" || strings.TrimSpace(reason) == "" || strings.TrimSpace(asker) == "" {
@@ -102,29 +120,40 @@ func (s *Store) Ask(room, reason, asker string) (Request, bool, error) {
 	}
 	var r Request
 	created := false
-	// TODO: legacy/shim remove later — the room watch publishes call requests until item 16 moves the topic here.
-	err = state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+	event := listchange.Event{Kind: Topic, RoomID: room}
+	err = state.For(db).Write(context.Background(), hub.Event{Topic: Topic, Room: room, Body: &event}, func(conn *sql.Conn) error {
 		ctx := context.Background()
 		var err error
 		r, err = scan(conn.QueryRowContext(ctx, "SELECT "+columns+" FROM call_requests WHERE room=? AND state='ringing'", room))
 		if err == nil {
-			_, err = conn.ExecContext(ctx, "UPDATE call_requests SET reason=? WHERE room=? AND id=?", reason, room, r.ID)
+			if r.Reason == reason {
+				return errUnchanged
+			}
+			if _, err := conn.ExecContext(ctx, "UPDATE call_requests SET reason=? WHERE room=? AND id=?", reason, room, r.ID); err != nil {
+				return err
+			}
 			r.Reason = reason
-			return err
+			return setChange(&event, r)
 		}
 		if err != sql.ErrNoRows {
 			return err
 		}
 		var next int64
-		err = conn.QueryRowContext(ctx, `INSERT INTO call_request_next(room,next) VALUES(?,1) ON CONFLICT(room) DO UPDATE SET next=next+1 RETURNING next`, room).Scan(&next)
+		err = conn.QueryRowContext(ctx, "INSERT INTO call_request_next(room,next) VALUES(?,1) ON CONFLICT(room) DO UPDATE SET next=next+1 RETURNING next", room).Scan(&next)
 		if err != nil {
 			return err
 		}
 		r = Request{ID: fmt.Sprintf("c%d", next), Room: room, Reason: reason, Asker: asker, State: "ringing", AskedAt: time.Now().UTC()}
-		_, err = conn.ExecContext(ctx, `INSERT INTO call_requests(room,id,reason,asker,state,asked_at) VALUES(?,?,?,?,'ringing',?)`, room, r.ID, reason, asker, r.AskedAt.UnixNano())
-		created = err == nil
-		return err
+		_, err = conn.ExecContext(ctx, "INSERT INTO call_requests(room,id,reason,asker,state,asked_at) VALUES(?,?,?,?,'ringing',?)", room, r.ID, reason, asker, r.AskedAt.UnixNano())
+		if err != nil {
+			return err
+		}
+		created = true
+		return setChange(&event, r)
 	})
+	if errors.Is(err, errUnchanged) {
+		err = nil
+	}
 	return r, created && err == nil, err
 }
 
@@ -179,8 +208,8 @@ func (s *Store) update(room, id, assignment, condition string, args ...any) (Req
 	}
 	var r Request
 	changed := false
-	// TODO: legacy/shim remove later — the room watch publishes call requests until item 16 moves the topic here.
-	err = state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+	event := listchange.Event{Kind: Topic, RoomID: room}
+	err = state.For(db).Write(context.Background(), hub.Event{Topic: Topic, Room: room, Key: id, Body: &event}, func(conn *sql.Conn) error {
 		params := append(args, room, id)
 		result, err := conn.ExecContext(context.Background(), "UPDATE call_requests SET "+assignment+" WHERE room=? AND id=? AND "+condition, params...)
 		if err != nil {
@@ -192,8 +221,17 @@ func (s *Store) update(room, id, assignment, condition string, args ...any) (Req
 		}
 		changed = n > 0
 		r, err = get(conn, room, id)
-		return err
+		if err != nil {
+			return err
+		}
+		if !changed {
+			return errUnchanged
+		}
+		return setChange(&event, r)
 	})
+	if errors.Is(err, errUnchanged) {
+		err = nil
+	}
 	return r, changed && err == nil, err
 }
 

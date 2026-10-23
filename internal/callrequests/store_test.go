@@ -272,8 +272,8 @@ func TestWritesUseSharedWriterWithoutDuplicateEvents(t *testing.T) {
 	if _, _, err := s.Close(r.Room, "missing", "withdrawn", "session"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("missing request: %v", err)
 	}
-	if len(events) != 0 {
-		t.Fatalf("published %v; the room watch already publishes call requests", events)
+	if len(events) != 3 {
+		t.Fatalf("published %v; want one event per changed row", events)
 	}
 	if writes := state.For(db).Health().Writes; writes != 4 {
 		t.Fatalf("shared writer recorded %d writes; want four attempts", writes)

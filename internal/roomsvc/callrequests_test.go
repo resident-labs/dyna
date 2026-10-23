@@ -4,6 +4,7 @@ import (
 	"dyna-agent/internal/callrequests"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/listchange"
 	"dyna-agent/internal/state"
 	"encoding/json"
 	"testing"
@@ -18,25 +19,21 @@ func TestCallRequestViewsDeliveryAndEvents(t *testing.T) {
 	}
 	var published []hub.Event
 	state.For(db).SetPublish(func(ev hub.Event) { published = append(published, ev) })
-	sig := map[string]string{}
-	e.svc.scanCallRequests(sig, true, func(Event) { t.Fatal("initial event") })
 	row, _, err := e.svc.Notify.CallRequestStore().Ask(rec.ID, "CI needs a sign-in", "root")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var events []Event
-	e.svc.scanCallRequests(sig, false, func(ev Event) { events = append(events, ev) })
-	if len(events) != 1 || events[0].Kind != "call-requests" || events[0].RoomID != rec.ID || events[0].Change == nil {
-		t.Fatalf("events: %+v", events)
+	if len(published) != 1 {
+		t.Fatalf("published %d events, want one", len(published))
 	}
-	if len(published) != 0 {
-		t.Fatalf("one request produced %d events; want only the room watch event", len(events)+len(published))
+	event := published[0].Body.(*listchange.Event)
+	if event.Kind != "call-requests" || event.RoomID != rec.ID {
+		t.Fatalf("event: %+v", event)
 	}
 	var wire callrequests.Request
-	if err := json.Unmarshal(events[0].Change.Item, &wire); err != nil || wire.ID != row.ID || wire.Reason != row.Reason {
+	if err := json.Unmarshal(event.Change.Item, &wire); err != nil || wire.ID != row.ID || wire.Reason != row.Reason {
 		t.Fatalf("row: %+v %v", wire, err)
 	}
-	e.svc.scanCallRequests(sig, false, func(Event) { t.Fatal("unchanged event") })
 	rows, err := e.svc.CallRequests("")
 	if err != nil || len(rows[rec.ID]) != 1 {
 		t.Fatalf("open view: %+v %v", rows, err)

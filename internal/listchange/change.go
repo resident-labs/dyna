@@ -30,9 +30,9 @@ type Item struct {
 }
 
 type Event struct {
-	Kind   string
-	RoomID string
-	Change Change
+	Kind   string `json:"kind"`
+	RoomID string `json:"roomId,omitempty"`
+	Change Change `json:"change"`
 }
 
 func HeadIDs[T any](rows []T, id func(T) string) map[string]bool {

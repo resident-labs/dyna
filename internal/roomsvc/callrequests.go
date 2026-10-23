@@ -2,7 +2,6 @@ package roomsvc
 
 import (
 	"dyna-agent/internal/callrequests"
-	"dyna-agent/internal/listchange"
 )
 
 // CallRequests returns active rooms, or the complete history of one room.
@@ -53,22 +52,4 @@ func (s *Service) DeclineCallRequest(ref, id string) (callrequests.Request, erro
 	}
 	row, _, err := s.Notify.CallRequestStore().Close(rec.ID, id, "declined", "owner")
 	return row, err
-}
-
-func (s *Service) scanCallRequests(signatures map[string]string, first bool, emit func(Event)) {
-	rows, err := s.Notify.CallRequestStore().List("")
-	if err != nil {
-		return
-	}
-	items := make([]listchange.Item, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, listchange.Item{Kind: "call-requests", RoomID: row.Room, ID: row.ID, Value: row})
-	}
-	changes, err := listchange.Sync(signatures, items, first)
-	if err != nil {
-		return
-	}
-	for _, change := range changes {
-		emit(Event{Kind: change.Kind, RoomID: change.RoomID, Change: &change.Change})
-	}
 }

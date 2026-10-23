@@ -515,7 +515,6 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 	defer jobs.close()
 	pinSig := map[string]string{}
 	questionSig := map[string]string{}
-	callRequestSig := map[string]string{}
 	var questionVersion string
 	prSig, prVersion := map[string]string{}, ""
 	prWork := map[string]string{}
@@ -538,7 +537,6 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 		s.scanHookSpool(&hookVersion, first, emit)
 		s.scan(offsets, &roomSig, memberSig, pinSig, first, liveEmit)
 		s.scanQuestions(questionSig, &questionVersion, first, emit)
-		s.scanCallRequests(callRequestSig, first, emit)
 		s.scanNotices(&noticeVersion, first, emit)
 		// Runs change slowly and a store can hold thousands; scan them on
 		// every fourth tick only.
