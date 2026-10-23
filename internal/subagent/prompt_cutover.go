@@ -15,6 +15,15 @@ import (
 
 const promptStoreFormat = 3
 
+// LivePromptWriterError blocks migration until an old-format writer exits.
+// Process pins the blocker to its process start identity, not just its PID.
+type LivePromptWriterError struct {
+	Process callerid.Process
+	Reason  string
+}
+
+func (e *LivePromptWriterError) Error() string { return e.Reason }
+
 type promptLaunch struct {
 	process  callerid.Process
 	format   int
@@ -76,7 +85,7 @@ func checkPromptCutover(p promptCutoverProbes) error {
 			continue
 		}
 		if row.format < promptStoreFormat {
-			return fmt.Errorf("live %s pid %d uses format %d; need %d", row.launcher, current.PID, row.format, promptStoreFormat)
+			return &LivePromptWriterError{Process: current, Reason: fmt.Sprintf("live %s pid %d uses format %d; need %d", row.launcher, current.PID, row.format, promptStoreFormat)}
 		}
 	}
 	candidates, err := p.candidates()
@@ -114,7 +123,11 @@ func checkPromptCutover(p promptCutoverProbes) error {
 			return fmt.Errorf("read runner launch for pid %d: %w", c.pid, err)
 		}
 		if !found || launch.Kind != callerid.Session || launch.Session != c.id || launch.Format < promptStoreFormat {
-			return fmt.Errorf("runner pid %d of %s lacks a verified format %d launch", c.pid, c.id, promptStoreFormat)
+			reason := fmt.Sprintf("runner pid %d of %s lacks a verified format %d launch", c.pid, c.id, promptStoreFormat)
+			if found && launch.Kind == callerid.Session && launch.Session == c.id && launch.Format < promptStoreFormat {
+				return &LivePromptWriterError{Process: process, Reason: reason}
+			}
+			return errors.New(reason)
 		}
 	}
 	return nil

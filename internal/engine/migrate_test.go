@@ -3,14 +3,19 @@ package engine
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/room"
+	"dyna-agent/internal/subagent"
 )
 
 // Every store that calls database.Migrate must be in the shared store registry, or
@@ -85,7 +90,7 @@ func TestFailedMigrationStartsReadOnlyWithTheCause(t *testing.T) {
 		t.Fatal(err)
 	}
 	keepSchemaOwner(t)
-	readOnly, status := startStores(dir, false)
+	readOnly, status, _ := startStores(dir, false)
 	if !readOnly || status != "read-only: migrate dyna.db: table things: no such column" {
 		t.Fatalf("failed migration gave readOnly=%v status=%q", readOnly, status)
 	}
@@ -102,7 +107,7 @@ func TestFailedMigrationStartsReadOnlyWithTheCause(t *testing.T) {
 	}
 	database.OwnSchema() // as an engine whose migrations succeed
 	migrateStores = func(string) error { return nil }
-	if readOnly, status := startStores(dir, false); readOnly || status != "" {
+	if readOnly, status, _ := startStores(dir, false); readOnly || status != "" {
 		t.Fatalf("good migration gave readOnly=%v status=%q", readOnly, status)
 	}
 }
@@ -118,4 +123,68 @@ func keepSchemaOwner(t *testing.T) {
 			database.DisownSchema()
 		}
 	})
+}
+
+// The fake clock covers a live blocker, one delayed alert, and recovery after
+// PID reuse. Migration must not run while the old writer still owns that PID.
+func TestMigrationRecoversAfterOldWriterExits(t *testing.T) {
+	keepSchemaOwner(t)
+	database.OwnSchema()
+	dir := t.TempDir()
+	t.Cleanup(func() { database.Close(dir) })
+	if err := room.Migrate(dir); err != nil {
+		t.Fatal(err)
+	}
+	rooms := &room.Store{Root: filepath.Join(dir, "rooms")}
+	rec, err := rooms.Create(room.CreateInput{Name: "dyna", CreatedBy: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := migrateStores
+	t.Cleanup(func() { migrateStores = saved })
+	writer := callerid.Process{PID: 7, Start: 1}
+	live := writer
+	blocker := &subagent.LivePromptWriterError{Process: writer, Reason: "live turn pid 7 uses format 2; need 3"}
+	attempts := 0
+	migrateStores = func(string) error {
+		attempts++
+		if live == writer {
+			return blocker
+		}
+		return nil
+	}
+	readOnly, status, _ := startStores(dir, false)
+	if !readOnly {
+		t.Fatal("live old writer did not block migration")
+	}
+	clock := newFakeClock()
+	set := clock.timers(t.Context())
+	defer set.close()
+	alerts := 0
+	recoverStores(set, fmt.Errorf("migrate dyna.db: %w", blocker), func(int) (callerid.Process, error) { return live, nil }, func() {
+		readOnly, status, _ = startStores(dir, false)
+	}, func(cause error) {
+		alerts++
+		migrationAlert(rooms, cause)
+	})
+	clock.advance(3 * time.Minute)
+	if !readOnly || attempts != 1 || alerts != 1 {
+		t.Fatalf("blocked: readOnly=%v attempts=%d alerts=%d; want true, 1, 1", readOnly, attempts, alerts)
+	}
+	posts, err := rooms.Messages(rec.ID)
+	if err != nil || len(posts) != 1 {
+		t.Fatalf("root alerts = %v, %v; want one", posts, err)
+	}
+	if decision, _ := room.RootContext(posts[0], rec.Name); decision != room.RootWake || !strings.Contains(posts[0].Text, blocker.Reason) {
+		t.Fatalf("alert must wake root and include the cause: %+v", posts[0])
+	}
+	live.Start++ // A new process reused the PID after the old writer exited.
+	clock.advance(15 * time.Second)
+	if readOnly || status != "" || attempts != 2 {
+		t.Fatalf("after exit: readOnly=%v status=%q attempts=%d; want false, empty, 2", readOnly, status, attempts)
+	}
+	clock.advance(3 * time.Minute)
+	if alerts != 1 || attempts != 2 {
+		t.Fatalf("recovery repeated: alerts=%d attempts=%d", alerts, attempts)
+	}
 }
