@@ -186,7 +186,7 @@ test('the room menu opens the modal, for another room after selecting it, and Es
 test('Esc in a rule edit cancels the edit, and leaving Rules mid-edit frees Esc for the modal', async () => {
   const rulesSource = readFileSync(new URL('./Rules.svelte', import.meta.url), 'utf8')
   const effect = /\$effect\((\(\) => \{ editing = !!edit;.*?\})\)\n/.exec(rulesSource)[1]
-  const rules = vm.createContext({ edit: null, editing: false, save() {}, tick: async () => {}, document: { getElementById: () => null } })
+  const rules = vm.createContext({ edit: null, editGeneration: 0, editing: false, save() {}, tick: async () => {}, document: { getElementById: () => null } })
   const handlers = topLevelFunctions(rulesSource, ['editKey', 'cancelEdit', 'restoreEditFocus'])
   vm.runInContext([...handlers.values()].join('\n'), rules)
   const textareaKey = rules.editKey

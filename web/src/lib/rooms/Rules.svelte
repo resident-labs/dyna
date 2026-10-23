@@ -18,6 +18,7 @@
   let busy = $state(false)
   let error = $state('')
   let edit = $state(null)
+  let editGeneration = 0
   let removing = $state(null)
   let now = $state(Date.now())
   $effect(() => { const timer = setInterval(() => (now = Date.now()), 60000); return () => clearInterval(timer) })
@@ -37,18 +38,20 @@
     catch (e) { say(e) } finally { busy = false }
   }
   async function startEdit(r) {
+    editGeneration++
     edit = { id: r.id, text: r.text }
     await tick()
     document.getElementById(`rule-edit-${r.id}`)?.focus()
   }
-  async function restoreEditFocus(id) {
+  async function restoreEditFocus(id, generation, allowed = () => true) {
     await tick()
-    document.getElementById(`rule-control-${id}`)?.focus()
+    if (generation === editGeneration && !edit && allowed()) document.getElementById(`rule-control-${id}`)?.focus()
   }
   async function cancelEdit() {
     const id = edit?.id
+    const generation = ++editGeneration
     edit = null
-    if (id) await restoreEditFocus(id)
+    if (id) await restoreEditFocus(id, generation)
   }
   function editKey(e) {
     if (e.isComposing || e.keyCode === 229) return
@@ -58,9 +61,20 @@
   async function save() {
     if (!edit?.text.trim() || busy) return
     const draft = edit
+    const generation = editGeneration
+    let focusMoved = false
+    const moved = () => { focusMoved = true }
+    document.addEventListener('focusin', moved)
     busy = true
-    try { await api.editRule(roomId, globalRule(draft), draft.id, draft.text); edit = null; error = ''; await tick(); await onchanged(); await restoreEditFocus(draft.id) }
-    catch (e) { say(e) } finally { busy = false }
+    try {
+      await api.editRule(roomId, globalRule(draft), draft.id, draft.text)
+      if (generation === editGeneration) edit = null
+      error = ''; await tick(); await onchanged()
+      await restoreEditFocus(draft.id, generation, () => !focusMoved)
+    } catch (e) { say(e) } finally {
+      document.removeEventListener('focusin', moved)
+      busy = false
+    }
   }
   async function remove(r) {
     busy = true
