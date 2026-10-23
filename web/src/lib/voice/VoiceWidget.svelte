@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // The floating Voice call widget. It is one overlay above every view: it
   // collapses to Voice's line and the call controls, and expands into this
   // call's conversation. Drag it by its top line.
@@ -18,35 +18,53 @@
   import IncomingToast from './IncomingToast.svelte'
   import Menu from '../ui/Menu.svelte'
   import { icons } from './icons.ts'
+  import type { AppEvent } from '../api/event.ts'
+  import type { Attachment, Question, Room } from '../api/room.ts'
+  import type { CallPost, CallRow, SharedFile, SharedItem } from './conversation.ts'
+  import type { CallRequest } from './callRequests.ts'
+  import type { TalkKey, TalkTarget } from './callState.ts'
+  import type { Layout, Offset, PhoneUI } from './phone.ts'
+
+  // WidgetEvent is the app's live events, with the two the engine sends for a
+  // room pause: the call reads only the parts it needs.
+  type WidgetEvent = AppEvent | { kind: 'room.paused' | 'room.resumed'; roomId?: string }
 
   const POS_KEY = 'dyna.voice.widget'
 
   // narrow: App's phone breakpoint, where the call is a full screen.
   // onopenfile opens a shared file in the app's viewer. rooms name the room
   // of a call request. link names the request a push tap opened.
-  let { narrow = false, rooms = [], link = $bindable(null), onopenfile } = $props()
+  let { narrow = false, rooms = [], link = $bindable(null), onopenfile }: {
+    narrow?: boolean
+    rooms?: Room[]
+    link?: { room: string; call: string } | null
+    onopenfile: (a: Attachment & { roomId?: string; postId?: string }) => void
+  } = $props()
 
   let s = $derived($voiceCall)
   let active = $derived(['starting', 'connecting', 'live', 'ending'].includes(s.phase))
-  let posts = $state([])
+  let posts = $state<CallPost[]>([])
   let open = $state(false)
   let closed = $state(true)
   let endedAt = $state(0)
   let now = $state(Date.now())
   let visible = $state(document.visibilityState === 'visible')
-  let pos = $state(savedPos())
-  let drag = null
-  let thread = $state()
+  let pos = $state<Offset>(savedPos())
+  let drag: { x: number; y: number; right: number; bottom: number } | null = null
+  let thread = $state<HTMLDivElement>()
   let loadedFor = 0
-  let modeMenu = $state(null) // the microphone mode menu, where it opened
+  let modeMenu = $state<{ x: number; y: number; anchor: HTMLElement } | null>(null) // the microphone mode menu, where it opened
   // Root asked to talk now: the oldest request that still rings. A push tap
   // names one request (link); its toast then covers the screen.
-  let linkedRing = $derived(link ? $callRequests.find((r) => r.state === 'ringing' && r.room === link.room && r.id === link.call) : undefined)
+  let linkedRing = $derived.by(() => {
+    const want = link
+    return want ? $callRequests.find((r) => r.state === 'ringing' && r.room === want.room && r.id === want.call) : undefined
+  })
   let ring = $derived(linkedRing ?? ringing($callRequests))
   let full = $derived(!!linkedRing)
-  let question = $state(null) // root's open question in the call's room
-  let phoneUI = $state(phoneInitial) // the phone screen: minimized, sheet open
-  let layout = $derived(narrow ? phoneLayout(s, phoneUI) : '')
+  let question = $state<Question | null>(null) // root's open question in the call's room
+  let phoneUI = $state<PhoneUI>(phoneInitial) // the phone screen: minimized, sheet open
+  let layout = $derived<Layout>(narrow ? phoneLayout(s, phoneUI) : 'none')
 
   let shown = $derived(active || s.phase === 'error' || s.phase === 'resumable' || (!closed && !!s.startedAt))
 
@@ -57,12 +75,19 @@
   })
   let rows = $derived(callRows(posts, s.tools, s.room, s.unspoken))
   // The files shared in this call that the owner has not opened or hidden.
-  let seen = $state(new Set())
+  let seen = $state(new Set<string>())
   let shared = $derived(unseen(sharedItems(posts, s.room), seen))
-  const see = (share) => (seen = new Set([...seen, share.key]))
-  function openShared(share) {
+  // newest is the shared file the banner shows.
+  let newest = $derived(shared.at(-1))
+  // stored is a shared file as a stored Attachment. A shared file may instead
+  // be one the engine listed in a post's text; it carries the same id, name,
+  // mime and title that SharedBanner and the app's viewer read, and no wider
+  // type fits both of them.
+  const stored = (att: SharedFile): Attachment => att as Attachment
+  const see = (share: SharedItem) => (seen = new Set([...seen, share.key]))
+  function openShared(share: SharedItem) {
     see(share)
-    onopenfile({ ...share.att, postId: share.postId, roomId: s.roomId })
+    onopenfile({ ...stored(share.att), postId: share.postId, roomId: s.roomId })
   }
   let length = $derived(s.startedAt ? clock((endedAt || now) - s.startedAt) : '')
   let line = $derived(s.phase === 'idle' && s.startedAt ? `Call ended · ${length}` : statusLine(s))
@@ -77,7 +102,7 @@
     seen = new Set()
     closed = false
     endedAt = 0
-    api.feedTail(s.roomId, '', 200).then((f) => { if (s.startedAt === at) posts = callPosts([...f.posts, ...posts], at) }).catch(() => {})
+    api.feedTail(s.roomId, '', 200).then((f) => { if (s.startedAt === at) posts = callPosts([...(f.posts ?? []), ...posts], at) }).catch(() => {})
   })
   $effect(() => {
     if (s.phase === 'ending' && !endedAt) endedAt = Date.now()
@@ -96,7 +121,7 @@
   // Root's question shows while the widget does; the engine has Voice read
   // it aloud during a call.
   let questionRoom = $derived(shown ? s.roomId : '')
-  function loadQuestion(id) {
+  function loadQuestion(id: string) {
     api.questions(id).then((m) => { if (questionRoom === id) question = rootQuestion(m[id]) }).catch(() => {})
   }
   $effect(() => {
@@ -120,12 +145,12 @@
 
   // Accept starts the normal call; the engine marks the request joined when
   // that call connects. A browser opens the microphone only after this tap.
-  export function accept(req = ring) {
+  export function accept(req: CallRequest | null = ring) {
     if (!req || req.state !== 'ringing') return
     link = null
     voiceCall.call(req.room, rooms.find((r) => r.id === req.room)?.name ?? req.room)
   }
-  export function decline(req = ring) {
+  export function decline(req: CallRequest | null = ring) {
     if (!req || req.state !== 'ringing') return
     link = null
     callRequests.decline(req).catch(() => {})
@@ -136,7 +161,7 @@
   })
 
   // event takes the app's live events; App passes each one.
-  export function event(ev) {
+  export function event(ev: WidgetEvent) {
     callRequests.apply(ev)
     if (ev.kind === 'resync') callRequests.load().catch(() => {})
     if (ev.kind === 'questions' && ev.roomId === questionRoom) loadQuestion(questionRoom)
@@ -145,13 +170,13 @@
     if (more.length) posts = callPosts([...posts, ...more], s.startedAt)
   }
 
-  function savedPos() {
-    let raw = null
+  function savedPos(): Offset {
+    let raw: string | null = null
     try { raw = localStorage.getItem(POS_KEY) } catch { /* private mode */ }
     return widgetPlace(raw, window.innerWidth, window.innerHeight)
   }
-  let widget = $state() // the widget's element, measured to keep it whole on screen
-  function place(right, bottom) {
+  let widget = $state<HTMLElement>() // the widget's element, measured to keep it whole on screen
+  function place(right: number, bottom: number) {
     const size = widget ? { width: widget.offsetWidth, height: widget.offsetHeight } : undefined
     pos = clampWidget({ right, bottom }, window.innerWidth, window.innerHeight, size)
   }
@@ -166,12 +191,14 @@
   function save() {
     try { localStorage.setItem(POS_KEY, JSON.stringify(pos)) } catch { /* private mode */ }
   }
-  function grab(e) {
-    if (e.button !== 0 || e.target.closest('button')) return
+  function grab(e: PointerEvent) {
+    const target = e.target
+    if (e.button !== 0 || (target instanceof Element && target.closest('button'))) return
     drag = { x: e.clientX, y: e.clientY, right: pos.right, bottom: pos.bottom }
-    e.currentTarget.setPointerCapture(e.pointerId)
+    const source = e.currentTarget
+    if (source instanceof HTMLElement) source.setPointerCapture(e.pointerId)
   }
-  function move(e) {
+  function move(e: PointerEvent) {
     if (drag) place(drag.right - (e.clientX - drag.x), drag.bottom - (e.clientY - drag.y))
   }
   function release() {
@@ -179,9 +206,10 @@
     drag = null
     save()
   }
-  function nudge(e) {
+  function nudge(e: KeyboardEvent) {
     const step = e.shiftKey ? 64 : 16
-    const d = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }[e.key]
+    const moves: Record<string, readonly [number, number]> = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] }
+    const d = moves[e.key]
     if (!d) return
     e.preventDefault()
     place(pos.right + d[0], pos.bottom + d[1])
@@ -191,8 +219,26 @@
   // Hold Space to talk (see spaceTalk); a blur or a hidden page also ends a
   // hold. A handled Space neither scrolls the page nor presses a focused
   // button: both happen as the key's default.
-  function key(e) {
-    const on = spaceTalk(e, s)
+  // talkTarget is what a key, blur or visibility event targets, as push to
+  // talk reads it: the page for a visibility change, else the focused element.
+  function talkTarget(target: EventTarget | null): TalkTarget | null {
+    if (target instanceof HTMLElement) {
+      return { hidden: target.hidden === true, isContentEditable: target.isContentEditable, closest: (selector: string) => target.closest(selector) }
+    }
+    return target !== null && 'hidden' in target && typeof target.hidden === 'boolean' ? { hidden: target.hidden } : null
+  }
+  // talkKey is what push to talk reads from a key, blur or visibility event.
+  function talkKey(e: Event): TalkKey {
+    const pressed = e instanceof KeyboardEvent ? e : null
+    return {
+      type: e.type,
+      code: pressed?.code,
+      repeat: pressed?.repeat,
+      target: talkTarget(e.target),
+    }
+  }
+  function key(e: Event) {
+    const on = spaceTalk(talkKey(e), s)
     if (on === null) return
     e.preventDefault()
     voiceCall.talk(on)
@@ -232,12 +278,13 @@
         {/if}
       </div>
 
-      {#if shared.length}<div class="shared"><SharedBanner roomId={s.roomId} share={shared.at(-1)} onopen={openShared} ondismiss={see} /></div>{/if}
+      {#if newest}<div class="shared"><SharedBanner roomId={s.roomId} share={{ ...newest, att: stored(newest.att) }} onopen={openShared} ondismiss={see} /></div>{/if}
       {#if s.switchTo}
+        {@const moveTo = s.switchTo}
         <div class="ask" role="alertdialog" aria-label="Move the call">
-          <p>End the call in {s.room} and call from {s.switchTo.room}?</p>
+          <p>End the call in {s.room} and call from {moveTo.room}?</p>
           <div class="row">
-            <button class="btn pri" onclick={() => voiceCall.switchHere(s.switchTo.roomId, s.switchTo.room)}>End and call here</button>
+            <button class="btn pri" onclick={() => voiceCall.switchHere(moveTo.roomId, moveTo.room)}>End and call here</button>
             <button class="btn quiet" onclick={voiceCall.cancelSwitch}>Cancel</button>
           </div>
         </div>
@@ -296,7 +343,7 @@
   </section>
 {/if}
 {#if modeMenu}
-  <Menu x={modeMenu.x} y={modeMenu.y} title="Microphone" items={micModes(s).map((m) => ({ label: m.label, hint: m.current ? '✓' : '', run: () => voiceCall.setPushToTalk(m.on) }))} onclose={() => { const a = modeMenu?.anchor; modeMenu = null; a?.focus?.() }} />
+  <Menu x={modeMenu.x} y={modeMenu.y} title="Microphone" items={micModes(s).map((m) => ({ label: m.label, hint: m.current ? '✓' : '', run: () => voiceCall.setPushToTalk(m.on) }))} onclose={() => { const a = modeMenu?.anchor; modeMenu = null; a?.focus() }} />
 {/if}
 {#if ring && !active}<IncomingToast request={ring} {narrow} {full} onaccept={() => accept()} ondecline={() => decline()} />{/if}
 
