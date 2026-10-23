@@ -38,7 +38,7 @@ test('a delete removes the item from any loaded page', () => {
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const functions = parse(source).instance.content.body.filter((node) => node.type === 'FunctionDeclaration' && ['applyListItem', 'applyListPage', 'applyItemEvent', 'handle', 'loadOlderLists', 'trackFetchedGoal', 'refreshFetchedGoal'].includes(node.id.name))
 function app(rows) {
-  const c = { olderLoading: false, roomId: 'room', roomRequest: 1, home: null, fetchedGoal: null, fetchedGoalVersion: 0, goals: rows, listPages: { goals: { items: rows, loadedOlder: true, cursor: 'older', older: true } }, hasItemChange, reloadsUnread, patchListRows, reconcileRows, mergeListPage, goalFetches: 0, questions: [], questionFetches: 0, loadRules() {}, soonRooms() {} }
+  const c = { mergeVersion: 0, olderLoading: false, roomId: 'room', roomRequest: 1, home: null, fetchedGoal: null, fetchedGoalVersion: 0, goals: rows, listPages: { goals: { items: rows, loadedOlder: true, cursor: 'older', older: true } }, hasItemChange, reloadsUnread, patchListRows, reconcileRows, mergeListPage, goalFetches: 0, questions: [], questionFetches: 0, loadRules() {}, soonRooms() {} }
   c.loadGoals = () => c.goalFetches++
   c.loadQuestions = () => c.questionFetches++
   c.changes = []
