@@ -28,7 +28,11 @@ func TestRoomLogFilters(t *testing.T) {
 	}
 	post("shell:42", "completed", "work")
 	post("run:42", "failed", "work")
-	post("work:lead", "pr", "work")
+	pr, err := st.PostEvent(work.ID, room.PREvent{Type: room.PRReady, Label: "PR #1", ChangeID: "github.com/o/r#1", Number: 1}, "work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids = append(ids, pr.ID)
 	post("work:lead", "completed", "work")
 	post("work:lead", "failed", "work")
 	post("work:lead", "stopped", "work")
@@ -39,12 +43,12 @@ func TestRoomLogFilters(t *testing.T) {
 		count, hidden int
 		first         string
 	}{
-		{"default", nil, 30, 8, ids[8]},
+		{"default", nil, 30, 9, ids[9]},
 		{"all", []string{"--all"}, 42, 0, ids[0]},
-		{"tail", []string{"--tail", "2"}, 2, 36, ids[39]},
-		{"unlimited", []string{"--tail", "0"}, 38, 0, ids[0]},
-		{"since", []string{"--since", ids[34]}, 3, 0, ids[38]},
-		{"since filtered post", []string{"--since", ids[36]}, 3, 0, ids[38]},
+		{"tail", []string{"--tail", "2"}, 2, 37, ids[39]},
+		{"unlimited", []string{"--tail", "0"}, 39, 0, ids[0]},
+		{"since", []string{"--since", ids[34]}, 4, 0, ids[37]},
+		{"since filtered post", []string{"--since", ids[36]}, 4, 0, ids[37]},
 		{"since last", []string{"--since", ids[41]}, 0, 0, ""},
 		{"kind", []string{"--kind", "completed"}, 2, 0, ids[35]},
 		{"repeat kind", []string{"--kind", "completed", "--kind", "failed"}, 4, 0, ids[35]},
