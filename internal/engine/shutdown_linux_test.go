@@ -53,7 +53,7 @@ func TestWorkersCancelSlowGitHubWithInheritedOutput(t *testing.T) {
 	}
 	go func() {
 		defer close(done)
-		w.run(ctx, newWorkerSignals(), newFakeClock().timers(ctx), func(string, error) {})
+		w.run(ctx, newWorkerSignals(nil), newFakeClock().timers(ctx), func(string, error) {})
 	}()
 	defer func() {
 		cancel()

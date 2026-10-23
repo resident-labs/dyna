@@ -132,7 +132,7 @@ type Message struct {
 	Turn int `json:"turn,omitempty"`
 	// OwnerReport marks a completion owed to the room owner, such as a
 	// top-level session's report. Other completions reach the owner only
-	// for the desktop. See WakesRoot.
+	// for the desktop. See RootContext.
 	OwnerReport bool `json:"ownerReport,omitempty"`
 	// NeedsRoot marks a post that requires the root seat to act.
 	NeedsRoot bool   `json:"needsRoot,omitempty"`
@@ -1040,14 +1040,23 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 		if err != nil {
 			return err
 		}
-		if err := state.For(db).Append(context.Background(), hub.Event{Topic: "room-post", Room: roomID}, path, b); err != nil {
+		// Every post gets its index rows here, whoever posted it, so no caller
+		// has to remember them. The rows go in first, so a reader that finds
+		// this post in the log also finds the rows that decide who reads it. A
+		// failed row write does not fail the stored post: the log holds it, and
+		// the cursor catch-up fills the rows at the next engine start. A failed
+		// append takes the new rows out again, so no delivery outlives its post.
+		rowsErr := s.indexPostRows(roomID, rec.Name, out)
+		if err = state.For(db).Append(context.Background(), hub.Event{Topic: "room-post", Room: roomID}, path, b); err != nil {
+			if rowsErr == nil {
+				s.dropPostRows(roomID, out.ID)
+			}
 			return err
 		}
-		// Every post gets its index rows here, whoever posted it, so no caller
-		// has to remember them. A failed row write does not fail the stored
-		// post: the log holds it, and the cursor catch-up fills the rows.
-		if err := s.indexPost(roomID, rec.Name, out, logStart); err != nil {
-			log.Printf("room %s: post %s: post index rows not written, the cursor catch-up will fill them: %v", roomID, out.ID, err)
+		if rowsErr != nil {
+			log.Printf("room %s: post %s: post index rows not written, the cursor catch-up will fill them: %v", roomID, out.ID, rowsErr)
+		} else if err = s.advancePostIndex(roomID, logStart); err != nil {
+			log.Printf("room %s: post %s: post index cursor not moved, the cursor catch-up will check it: %v", roomID, out.ID, err)
 		}
 		return s.touchRecord(rec)
 	})

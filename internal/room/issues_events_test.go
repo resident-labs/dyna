@@ -33,7 +33,7 @@ func TestFileIssuePostsOneQuietEvent(t *testing.T) {
 		if msg.Kind != string(FamilyIssue) || msg.Notice.Kind != string(IssueFiled) || msg.Wake || msg.Deliverable() {
 			t.Fatalf("filed event of %s = %+v", filer, msg)
 		}
-		if WakesRoot(msg, rec.Name) {
+		if rootWakes(msg, rec.Name) {
 			t.Fatalf("the issue filed by %s wakes root", filer)
 		}
 		ev, ok := msg.Issue()
@@ -77,7 +77,7 @@ func TestCloseIssuePostsTheIssueEvent(t *testing.T) {
 		t.Fatalf("posts = %+v, %v", msgs, err)
 	}
 	msg := msgs[1]
-	if msg.Kind != string(FamilyIssue) || msg.Notice.Kind != string(IssueClosed) || msg.Wake || msg.Deliverable() || WakesRoot(msg, rec.Name) {
+	if msg.Kind != string(FamilyIssue) || msg.Notice.Kind != string(IssueClosed) || msg.Wake || msg.Deliverable() || rootWakes(msg, rec.Name) {
 		t.Fatalf("close event = %+v", msg)
 	}
 	ev, ok := msg.Issue()
@@ -155,7 +155,7 @@ func TestGoalAndCheckinWakeRules(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
-		if msg.Wake != tc.wake || WakesRoot(msg, rec.Name) {
+		if msg.Wake != tc.wake || rootWakes(msg, rec.Name) {
 			t.Fatalf("%s: wake = %v, want %v (post %+v)", tc.name, msg.Wake, tc.wake, msg)
 		}
 		if tc.name == "checkin" {

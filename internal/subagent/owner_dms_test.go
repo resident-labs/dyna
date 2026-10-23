@@ -73,13 +73,27 @@ func TestOwnerDMDuringActiveRootTurnReachesNextTurnOnce(t *testing.T) {
 	}
 }
 
+// seatRowsFor builds the seat delivery rows of msgs as the writer stores them,
+// so these rendering tests read the same rows the runner reads.
+func seatRowsFor(roomName string, msgs []room.Message) map[string]room.Delivery {
+	out := map[string]room.Delivery{}
+	for _, msg := range msgs {
+		for _, d := range room.DeliveriesFor(msg, roomName) {
+			if d.SessionID == room.SeatSessionID(msg.RoomID) {
+				out[msg.ID] = d
+			}
+		}
+	}
+	return out
+}
+
 func TestQuietRootDigestIsBoundedAndExcludesActionablePosts(t *testing.T) {
 	var posts []room.Message
 	for i := range 35 {
 		posts = append(posts, room.Message{ID: fmt.Sprintf("quiet-%02d", i), From: "work:author", Kind: "message", To: []string{"work"}, Text: strings.Repeat("界", 300)})
 	}
 	posts = append(posts, room.Message{Wake: true, ID: "action", From: "work:author", Kind: "message", To: []string{"work"}, NeedsRoot: true, Text: "Decide now."}, room.Message{Wake: true, ID: "human", From: "work", Human: true, Kind: "message", To: []string{"work"}, Text: "Owner request."}, room.Message{Wake: true, ID: "own", From: "work:root", Kind: "message", To: []string{"work"}, Text: "Root reply."})
-	digest := quietRootPosts("work", posts)
+	digest := quietRootPosts("work", posts, seatRowsFor("work", posts))
 	if !strings.Contains(digest, "5 older quiet posts omitted") || strings.Count(digest, "- work:author:") != 30 || strings.Contains(digest, "quiet-04") || !strings.Contains(digest, "quiet-34") || strings.Contains(digest, "Decide now.") || strings.Contains(digest, "Owner request.") || strings.Contains(digest, "Root reply.") || strings.Contains(digest, strings.Repeat("界", 241)) {
 		t.Fatalf("incorrect quiet digest: %s", digest)
 	}
@@ -94,7 +108,7 @@ func TestQuietSectionsCoverEveryRootAddressedKind(t *testing.T) {
 		{ID: "done", From: "work:author", Kind: "completed", OwnerReport: true, To: []string{"work"}, Text: "Report shipped"},
 		{ID: "action", Wake: true, From: "work:author", Kind: "message", To: []string{"work"}, NeedsRoot: true, Text: "Decide now."},
 	}
-	digest := quietRootPosts("work", posts)
+	digest := quietRootPosts("work", posts, seatRowsFor("work", posts))
 	for _, id := range []string{"issue", "done"} {
 		if !strings.Contains(digest, id) {
 			t.Errorf("quiet digest misses %s:\n%s", id, digest)
@@ -112,12 +126,15 @@ func TestPassiveRootInputHasOneHome(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta := Meta{ID: "ses_root", Name: room.RootAgent, Role: RoleRoot, Room: rec.Name, RoomID: rec.ID}
-	note := room.Message{ID: "passive", From: "dyna", Kind: "instructions", To: []string{"work:root"}, Text: "Updated rules"}
+	note, err := rooms.PostEvent(rec.ID, room.SessionEvent{Type: room.SessionInstructions, Session: "work:lead", Detail: "Updated rules"}, "work:root")
+	if err != nil {
+		t.Fatal(err)
+	}
 	posts := []room.Message{note}
 	if input := forSession(rooms, meta, posts); len(input) != 1 || input[0].ID != note.ID {
 		t.Fatalf("passive engine note must remain turn input: %+v", input)
 	}
-	if digest := quietRootPosts(meta.Room, posts); digest != "" {
+	if digest := quietRootPosts(meta.Room, posts, seatRowsFor(meta.Room, posts)); digest != "" {
 		t.Fatalf("passive input repeated in the quiet digest: %s", digest)
 	}
 }
@@ -129,16 +146,23 @@ func TestRootGateRequiresActionIntentForDirectWorkerCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 	meta := Meta{ID: "ses_root", Name: room.RootAgent, Role: RoleRoot, Room: rec.Name, RoomID: rec.ID}
-	messages := []room.Message{
-		{ID: "quiet-owner", Wake: true, From: "work:author", Kind: "message", To: []string{"work"}},
-		{ID: "quiet-direct", Wake: true, From: "work:author", Kind: "message", To: []string{"work:root"}},
-		{ID: "action", Wake: true, From: "work:author", Kind: "message", To: []string{"work:root"}, NeedsRoot: true},
-		{ID: "notice", Kind: "notice", Wake: true, From: "work:author", To: []string{"work"}, NeedsRoot: true},
-		{ID: "human", Wake: true, From: "work", Human: true, Kind: "message", To: []string{"work"}},
-		{ID: "failure", Wake: true, From: "work:author", Kind: "failed", To: []string{"work"}, OwnerReport: true},
+	var messages []room.Message
+	for _, in := range []room.PostInput{
+		{Wake: true, From: "work:author", Kind: "message", To: []string{"work"}, Text: "quiet owner"},
+		{Wake: true, From: "work:author", Kind: "message", To: []string{"work:root"}, Text: "quiet direct"},
+		{Wake: true, From: "work:author", Kind: "message", To: []string{"work:root"}, NeedsRoot: true, Text: "action"},
+		{Wake: true, From: "work:author", Kind: "message", To: []string{"work"}, NeedsRoot: true, Text: "notice"},
+		{Wake: true, From: "work", Human: true, Kind: "message", To: []string{"work"}, Text: "human"},
+		{Wake: true, From: "work:author", Kind: "failed", OwnerReport: true, To: []string{"work"}, Text: "failure"},
+	} {
+		msg, err := rooms.Post(rec.ID, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, msg)
 	}
 	got := forSession(rooms, meta, messages)
-	if len(got) != 4 || got[0].ID != "action" || got[1].ID != "notice" || got[2].ID != "human" || got[3].ID != "failure" {
+	if len(got) != 4 || got[0].Text != "action" || got[1].Text != "notice" || got[2].Text != "human" || got[3].Text != "failure" {
 		t.Fatalf("root gate input: %+v", got)
 	}
 }

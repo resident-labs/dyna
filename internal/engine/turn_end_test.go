@@ -40,7 +40,7 @@ func TestTurnEndFiresSessionTurnEndedHookEvent(t *testing.T) {
 	const id = "ses_20261023-120000-abcdefgh"
 	recordtest.Write(t, sessions.Root, id, subagent.Meta{ID: id, Name: "worker", RoomID: "room_one", Room: "work", Dir: repo, Profile: "sol"})
 
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	// Two turns of the same session before one hooks pass fire one event.
 	signals.wake(roomsvc.Event{Kind: "posts", Posts: []roomsvc.Post{
 		{Message: room.Message{Kind: "completed", Turn: 1, From: "work:worker", SessionIDs: map[string]string{"work:worker": id}}},

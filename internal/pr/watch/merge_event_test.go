@@ -64,8 +64,8 @@ func TestMergeEventRoutingAndWakePerType(t *testing.T) {
 			if len(msg.To) != len(tc.to) || msg.To[0] != tc.to[0] {
 				t.Fatalf("recipients = %v, want %v", msg.To, tc.to)
 			}
-			if msg.Wake != tc.wake || room.WakesRoot(msg, "merge-work") != tc.wakesRoot {
-				t.Fatalf("wake = %v, wakes root = %v", msg.Wake, room.WakesRoot(msg, "merge-work"))
+			if msg.Wake != tc.wake || wakesRoot(msg, "merge-work") != tc.wakesRoot {
+				t.Fatalf("wake = %v, wakes root = %v", msg.Wake, wakesRoot(msg, "merge-work"))
 			}
 			if got, ok := msg.Merge(); !ok || got.Type != tc.step || got.TrialID != "dyna/merge-trial/1" || len(got.PRs) != 1 {
 				t.Fatalf("payload = %+v, %v", got, ok)

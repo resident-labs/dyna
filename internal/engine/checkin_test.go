@@ -10,7 +10,7 @@ import (
 
 func TestCheckInSettingAndTurnEventsWakeScheduler(t *testing.T) {
 	s := testServices(t, false)
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	s.settingsChanged = func() { wakeWorker(signals.channels["checkins"]) }
 	calls, _, err := callsFor(s, false)
 	if err != nil {
