@@ -1,82 +1,68 @@
 <script lang="ts">
-  // CI health: the room's runs as a graph, then a run, then a test. A column
-  // is one run: its jobs stacked, the wait for a runner at its foot, and the
-  // room's warn and fail lines across. A row is one slow test, and its state
-  // is a rule at the edge, a type weight, its place in the list and a line of
-  // words, never a coloured chip.
+  // CI health, the CI tab of the Services page: one status line, a chart of
+  // each run's time against the budget, the slowest jobs, then the slow tests.
+  // A bar takes its colour from the budget state alone. A test row's state is
+  // a rule at the edge, a type weight and a line of words, never a chip.
   import Segmented from '../ui/Segmented.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
-  import TabHeader from '../rooms/TabHeader.svelte'
   import { api } from '../../api.ts'
   import {
-    bandNames,
-    bandPx,
-    bandShare,
     barPct,
     breachLimit,
-    capRows,
-    budgetWithAllow,
+    budgetState,
     budgetWord,
+    budgetWithAllow,
+    capRows,
     duration,
-    failed,
     filterTests,
     graphRuns,
     graphScale,
-    jobMs,
+    jobRanking,
     readCIHealth,
-    readRunDetail,
     readTestDetail,
     rowLimit,
-    runState,
+    slowestJobs,
     spark,
+    statusLine,
     stateLine,
     type CIHealth,
-    type CIHealthRun,
-    type CIHealthRunDetail,
     type CIHealthTest,
     type TestFilter,
   } from './health.ts'
 
   interface Props {
     roomId: string
-    narrow?: boolean
     changes?: unknown
     onpr?: (pr: number) => void
   }
-  let { roomId, narrow = false, changes = null, onpr = () => {} }: Props = $props()
+  let { roomId, changes = null, onpr = () => {} }: Props = $props()
 
   // The client's call names, typed so the readers get unknown data.
-  type Calls = Pick<typeof api, 'ciHealth' | 'ciHealthRun' | 'ciHealthTest' | 'roomCIBudget' | 'setRoomCIBudget'>
+  type Calls = Pick<typeof api, 'ciHealth' | 'ciHealthTest' | 'roomCIBudget' | 'setRoomCIBudget'>
   const calls: Calls = api
 
   let health = $state<CIHealth | null>(null)
   let error = $state('')
   let note = $state('')
-  let run = $state<CIHealthRunDetail | null>(null)
   let test = $state<CIHealthTest | null>(null)
-  let loading = $state('')
   let filter = $state<TestFilter>('all')
+  let picked = $state('')
+  let hovered = $state('')
   let allowOpen = $state(false)
   let allowReason = $state('')
   let allowError = $state('')
   let allowing = $state(false)
   let seq = 0
 
-  const chart = $derived(narrow ? 120 : 176)
   const runs = $derived(health?.runs ?? [])
   const scale = $derived(graphScale(runs, health?.failMs ?? 0))
-  // Newest first from the store; the graph draws oldest on the left, and a
-  // narrow screen takes the newest few before reversing them.
-  const graph = $derived(graphRuns(runs, narrow ? 8 : 0))
+  // Newest first from the store; the chart draws oldest on the left.
+  const graph = $derived(graphRuns(runs, 0))
+  const active = $derived(runs.find((item) => item.token === (hovered || picked)) ?? graph.newest)
+  const jobs = $derived(jobRanking(runs))
   const tests = $derived(health ? filterTests(health.tests, filter) : [])
   const capped = $derived(capRows(tests, rowLimit))
   const breaches = $derived(test ? capRows(test.runs.filter((row) => row.over), breachLimit) : { shown: [], hidden: 0 })
-  const bands = $derived(bandNames(runs))
-  const over = $derived((health?.tests ?? []).filter((row) => row.breaches > 0).length)
-  const warnPx = $derived(bandPx(health?.warnMs ?? 0, scale, chart))
-  const failPx = $derived(bandPx(health?.failMs ?? 0, scale, chart))
-  const waitScale = $derived(Math.max(1, ...graph.shown.map((item) => item.queueMs)))
-  const newest = $derived(graph.newest)
   const filters: [TestFilter, string][] = [
     ['all', 'All'],
     ['recurring', 'Recurring'],
@@ -112,46 +98,19 @@
     void load()
   })
 
-  async function openRun(token: string): Promise<void> {
-    loading = token
-    note = ''
-    allowOpen = false
-    try {
-      const detail = readRunDetail(await calls.ciHealthRun(roomId, token))
-      if (detail) {
-        run = detail
-        test = null
-      } else {
-        note = 'That run could not be read.'
-      }
-    } catch (e) {
-      note = message(e)
-    } finally {
-      loading = ''
-    }
-  }
-
   async function openTest(name: string): Promise<void> {
-    loading = name
     note = ''
     allowOpen = false
     try {
       const detail = readTestDetail(await calls.ciHealthTest(roomId, name))
-      if (detail) {
-        test = detail.test
-        run = null
-      } else {
-        note = 'That test could not be read.'
-      }
+      if (detail) test = detail.test
+      else note = 'That test could not be read.'
     } catch (e) {
       note = message(e)
-    } finally {
-      loading = ''
     }
   }
 
   function back(): void {
-    run = null
     test = null
     note = ''
     allowOpen = false
@@ -189,14 +148,8 @@
     return id ? `#${id}` : token
   }
 
-  const longestIn = (jobs: CIHealthRunDetail['jobs']): number => {
-    let longest = 0
-    for (const job of jobs) {
-      longest = Math.max(longest, job.busyMs)
-      for (const step of job.steps) longest = Math.max(longest, step.ms)
-    }
-    return longest
-  }
+  const trendText = (rank: { trend: string; changePct: number }): string =>
+    rank.trend === 'steady' ? 'steady' : `${rank.trend} ${rank.changePct > 0 ? '+' : ''}${rank.changePct}%`
 
   const stateOf = (row: CIHealthTest): string => (row.state === 'ignored' ? 'allowed' : row.state)
   // The two charts keep their own scale and size; the helpers keep the markup
@@ -206,59 +159,11 @@
 </script>
 
 <div class="health">
-<TabHeader title="CI health" blurb="The room's CI runs against its budget, and the tests that run near the limit." />
 {#if note}<p class="err" role="alert">{note}</p>{/if}
 
-{#if run}
-  <section class="level" aria-label="Run {runLabel(run.run.token)}">
-    <button class="back" onclick={back}>‹ All runs</button>
-    <div class="lhead">
-      <h2>
-        {#if run.run.pr}#{run.run.pr} · {/if}{run.run.workflow}
-        <span class="stateword">{runState(run.run)}</span>
-      </h2>
-      <p class="kv">
-        <span>{duration(run.run.busyMs)} busy</span>
-        {#if run.run.queueMs}<span>· {duration(run.run.queueMs)} waiting</span>{/if}
-        <span>· warn {duration(run.run.warnMs)}, fail {duration(run.run.failMs)}</span>
-        <span>· {budgetWord(run.run.busyMs, run.run.warnMs, run.run.failMs)}</span>
-        {#if run.run.head}<span>· <span class="mono">{run.run.head.slice(0, 7)}</span></span>{/if}
-      </p>
-    </div>
-    <h3>Jobs and steps</h3>
-    <p class="caption">Every bar shares one scale: the longest job or step in this run.</p>
-    {#each run.jobs as job (job.id)}
-      <div class="bar">
-        <span class="bn">{job.name}</span>
-        <span class="track" aria-hidden="true"><span class="fill" style:width="{barPct(job.busyMs, longestIn(run.jobs))}%"></span></span>
-        <span class="bt">{job.busyMs ? duration(job.busyMs) : job.status || 'no time'}</span>
-      </div>
-      {#if job.steps.length}
-        <div class="steps">
-          {#each job.steps as step (step.name)}
-            <div class="bar step">
-              <span class="bn">{step.name}</span>
-              <span class="track" aria-hidden="true"><span class="fill" style:width="{barPct(step.ms, longestIn(run.jobs))}%"></span></span>
-              <span class="bt">{duration(step.ms)}</span>
-            </div>
-          {/each}
-        </div>
-      {/if}
-    {/each}
-    {#if run.tests.length}
-      <h3>Slowest tests in this run</h3>
-      {#each run.tests as row (row.test)}
-        <button class="runrow" onclick={() => openTest(row.test)}>
-          <span class="rule{row.over ? ' over' : ''}"></span>
-          <span class="id"><span class="name">{row.test}</span><span class="meta">{row.package} · limit {duration(row.durationMs > 0 ? (health?.limitMs ?? 0) : 0)}</span></span>
-          <span class="times"><b>{duration(row.durationMs)}</b>this run</span>
-        </button>
-      {/each}
-    {/if}
-  </section>
-{:else if test}
+{#if test}
   <section class="level" aria-label="Test {test.name}">
-    <button class="back" onclick={back}>‹ All runs</button>
+    <button class="back" onclick={back}>‹ CI health</button>
     <div class="lhead">
       <h2>{test.name} <span class="stateword">{stateOf(test)}</span></h2>
       <p class="kv">
@@ -282,7 +187,7 @@
       {/if}
       <div class="table">
         {#each breaches.shown as row (row.token)}
-          <button class="trow" onclick={() => openRun(row.token)} aria-label="Open run {runLabel(row.token)} for PR {row.pr}">
+          <button class="trow" onclick={() => onpr(row.pr)} aria-label="Open PR #{row.pr}, run {runLabel(row.token)}">
             <span class="mono">#{row.pr}</span>
             <span class="dur">{duration(row.durationMs)}</span>
             <span class="when">{row.at.replace('T', ' ').slice(0, 16)}</span>
@@ -291,12 +196,7 @@
       </div>
     {/if}
     <div class="acts">
-      {#if test.runs[0]}
-        {@const newestRun = test.runs[0]}
-        <button class="link" onclick={() => openRun(newestRun.token)}>Open the newest run</button>
-        {#if newestRun.pr}<span>·</span><button class="link" onclick={() => onpr(newestRun.pr)}>Open PR #{newestRun.pr}</button>{/if}
-      {/if}
-      {#if test.state !== 'ignored'}<span>·</span><button class="link" onclick={() => { allowOpen = !allowOpen; allowError = '' }}>{allowOpen ? 'Cancel' : 'Allow…'}</button>{/if}
+      {#if test.state !== 'ignored'}<button class="link" onclick={() => { allowOpen = !allowOpen; allowError = '' }}>{allowOpen ? 'Cancel' : 'Allow…'}</button>{/if}
     </div>
     {#if allowOpen}
       <div class="allow">
@@ -312,51 +212,49 @@
     <EmptyState title="CI health unavailable">{error}</EmptyState>
   {:else if !health}
     <div class="loading" aria-busy="true"></div>
-  {:else if runs.length === 0}
+  {:else if runs.length === 0 && health.tests.length === 0}
     <EmptyState title="No CI run yet">A run is recorded when the watcher inspects one of this room's pull requests.</EmptyState>
   {:else}
-    <p class="summary">
-      {#if newest}newest run {duration(newest.busyMs)} · {runState(newest)}{/if}
-      <span>· warn {duration(health.warnMs)}, fail {duration(health.failMs)}</span>
-      <span>· {over} over the test limit of {duration(health.limitMs)}</span>
-    </p>
+    {#if active}
+      <p class="status">{statusLine(graph.newest)}</p>
 
-    <div class="chart">
-    <div class="plot" style:height="{chart}px" role="group" aria-label="Busy time per run, with the warn and fail budgets">
-      {#if warnPx > 0}<div class="warn" style:bottom="{warnPx}px">{#if !narrow}<em>warn {duration(health.warnMs)}</em>{/if}</div>{/if}
-      {#if failPx > 0}<div class="fail" style:bottom="{failPx}px">{#if !narrow}<em>fail {duration(health.failMs)}</em>{/if}</div>{/if}
-      {#each graph.shown as item (item.token)}
-        {@const column = bandPx(item.busyMs, scale, chart)}
-        <button
-          class="col"
-          aria-label="Run {runLabel(item.token)}: {duration(item.busyMs)}, {budgetWord(item.busyMs, item.warnMs, item.failMs)}, {runState(item)}"
-          title="{runLabel(item.token)} · {duration(item.busyMs)} busy · {runState(item)}"
-          onclick={() => openRun(item.token)}
-        >
-          {#each bands as name, index (name)}
-            {#if jobMs(item, name) > 0}<span class="band b{index % 6}" style:height="{column * bandShare(item, name)}px" title="{name} {duration(jobMs(item, name))}"></span>{/if}
-          {/each}
-          {#if failed(item)}<span class="dot" aria-hidden="true"></span>{/if}
-        </button>
-      {/each}
-    </div>
-    </div>
-    {#if graph.shown.some((item) => item.queueMs > 0)}
-      <div class="waits" role="group" aria-label="Time each run waited for a runner, which the budget does not count">
+      <div class="plot" role="group" aria-label="Time of each run against the budget, oldest on the left">
+        {#if health.warnMs > 0}<div class="line-warn" style:bottom="{barPct(health.warnMs, scale)}%"></div>{/if}
+        {#if health.failMs > 0}<div class="line-fail" style:bottom="{barPct(health.failMs, scale)}%"></div>{/if}
         {#each graph.shown as item (item.token)}
-          {#if item.queueMs > 0}<span class="queued" style:height="{bandPx(item.queueMs, waitScale, 10)}px" title="{runLabel(item.token)} waited {duration(item.queueMs)}"></span>{:else}<span class="queued none"></span>{/if}
+          {@const state = budgetState(item.busyMs, item.warnMs, item.failMs)}
+          <button
+            class="col {state}"
+            class:on={item.token === active.token}
+            aria-pressed={item.token === active.token}
+            aria-label="Run {runLabel(item.token)}: {duration(item.busyMs)}, {budgetWord(state)}"
+            onclick={() => (picked = item.token)}
+            onmouseenter={() => (hovered = item.token)}
+            onmouseleave={() => (hovered = '')}
+          >
+            <span class="bar" style:height="{Math.max(barPct(item.busyMs, scale), 2)}%"></span>
+          </button>
         {/each}
       </div>
-      <p class="caption">The strip is time each run waited for a runner. The budget does not count it, so it stays out of the column.</p>
+      <p class="pick" aria-live="polite">
+        <b>{runLabel(active.token)}</b>
+        <span>{duration(active.busyMs)} · {budgetWord(budgetState(active.busyMs, active.warnMs, active.failMs))}</span>
+        {#each slowestJobs(active) as job (job.id)}<span class="job">{job.name} {duration(job.busyMs)}</span>{/each}
+        {#if active.pr}<button class="link" onclick={() => onpr(active.pr)}>PR #{active.pr}</button>{/if}
+      </p>
     {/if}
 
-    {#if !narrow}
-      <p class="caption">One column per run, oldest on the left. A column is the run's measured busy time against this room's budget lines, and the jobs divide it.</p>
-      <p class="legend">
-        {#each bands as name, index (name)}<span><i class="b{index % 6}"></i>{name}</span>{/each}
-        <span><i class="queued"></i>waiting for a runner</span>
-        <span><i class="dotmark"></i>failed</span>
-      </p>
+    {#if jobs.length > 0}
+      <h3>Slowest jobs</h3>
+      <ol class="jobs">
+        {#each jobs as rank (rank.name)}
+          <li>
+            <span class="jn">{rank.name}</span>
+            <span class="jt">{duration(rank.typicalMs)}</span>
+            <span class="trend {rank.trend}">{trendText(rank)}</span>
+          </li>
+        {/each}
+      </ol>
     {/if}
 
     <h3 class="tests">Slow tests</h3>
@@ -374,12 +272,10 @@
             <span class="name">{row.name}</span>
             <span class="meta">{row.package}{#if row.features.length} · {row.features.join(', ')}{/if} · {stateLine(row)}</span>
           </span>
-          {#if !narrow}
-            <svg class="spark" viewBox="0 0 118 26" preserveAspectRatio="none" role="img" aria-label="Trend of the last stored runs">
-              <line x1="0" y1={rowLine(row).limitY} x2="118" y2={rowLine(row).limitY} class="limit" />
-              {#if rowLine(row).hasLine}<polyline points={rowLine(row).points} class="line" />{/if}
-            </svg>
-          {/if}
+          <svg class="spark" viewBox="0 0 118 26" preserveAspectRatio="none" role="img" aria-label="Trend of the last stored runs">
+            <line x1="0" y1={rowLine(row).limitY} x2="118" y2={rowLine(row).limitY} class="limit" />
+            {#if rowLine(row).hasLine}<polyline points={rowLine(row).points} class="line" />{/if}
+          </svg>
           <span class="times"><b>{duration(row.typicalMs)}</b>typical · last {duration(row.lastMs)}</span>
         </button>
       {/each}
@@ -389,40 +285,36 @@
 </div>
 
 <style>
-  .health { display: flex; flex-direction: column; min-width: 0; flex: 1; }
-  .summary { margin: 0 0 var(--s3); color: var(--muted); font-size: var(--t-ui); }
-  .summary span { margin-left: var(--s2); }
-  /* The wrapper holds the room for the budget labels; the plot is exactly the
-     drawn height, so a column's pixels and a line's pixels share one zero. */
-  .chart { padding: 18px 2px 0; margin: 0 0 6px; }
-  .plot { position: relative; display: flex; align-items: flex-end; justify-content: center; gap: 4px; }
-  .col { flex: 1 1 0; min-width: 4px; max-width: 40px; display: flex; flex-direction: column-reverse; gap: 0; position: relative; padding: 0; border: 0; background: none; cursor: pointer; height: 100%; }
-  .col:hover .band { filter: brightness(1.25); }
-  .band { display: block; flex: none; width: 100%; border-radius: 3px 3px 0 0; }
-  .queued { display: block; width: 100%; border-radius: 0 0 2px 2px; background: repeating-linear-gradient(45deg, var(--raise), var(--raise) 2px, transparent 2px, transparent 4px); }
-  .waits { display: flex; align-items: flex-end; justify-content: center; gap: 4px; height: 12px; padding: 0 2px; margin: -6px 0 4px; }
-  .waits .queued { max-width: 40px; flex: 1 1 0; }
-  .queued.none { background: none; }
-  .b0 { background: #4c4a52; } .b1 { background: #6c6a74; } .b2 { background: #8a8792; }
-  .b3 { background: #a5a2ab; } .b4 { background: #585560; } .b5 { background: #787480; }
-  .dot { position: absolute; left: 50%; bottom: -8px; width: 5px; height: 5px; margin-left: -2.5px; border-radius: 50%; background: var(--coral); }
-  .warn, .fail { position: absolute; left: 0; right: 0; z-index: 2; pointer-events: none; border-top: 1px dashed var(--faint); }
-  .fail { border-top-style: dotted; border-top-color: var(--muted); }
-  .warn em, .fail em { position: absolute; left: 2px; top: -14px; font-style: normal; font-size: var(--t-xs); color: var(--faint); background: var(--main); padding: 0 4px; }
+  .health { display: flex; flex-direction: column; min-width: 0; flex: 1; container-type: inline-size; }
+  .status { margin: 0 0 var(--s3); color: var(--ink); font-size: var(--t-ui); }
+  /* A bar's height is a share of the plot, and a line's position is the same
+     share, so both use one zero. */
+  .plot { position: relative; display: flex; align-items: stretch; gap: 2px; height: 120px; }
+  .col { flex: 1 1 0; min-width: 3px; max-width: 28px; display: flex; align-items: flex-end; padding: 0; border: 0; background: none; cursor: pointer; }
+  .bar { display: block; width: 100%; border-radius: 2px 2px 0 0; background: var(--sage); opacity: 0.55; }
+  .col.warn .bar { background: var(--gold); }
+  .col.over .bar { background: var(--coral); }
+  .col.on .bar { opacity: 1; }
+  .line-warn, .line-fail { position: absolute; left: 0; right: 0; z-index: 1; pointer-events: none; border-top: 1px dashed var(--faint); }
+  .line-warn { border-top-style: dotted; }
+  .pick { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--s3); margin: var(--s2) 0 0; font-size: var(--t-sm); color: var(--muted); min-height: 2.6em; }
+  .pick b { color: var(--ink); font-family: var(--mono); font-size: var(--t-xs); }
+  .job { color: var(--ink-2); }
+  .jobs { list-style: none; margin: 0; padding: 0; }
+  .jobs li { display: grid; grid-template-columns: 1fr auto 96px; gap: var(--s3); align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line-soft); font-size: var(--t-sm); }
+  .jobs li:last-child { border-bottom: 0; }
+  .jn { font-family: var(--mono); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .jt { color: var(--ink); }
+  .trend { text-align: right; color: var(--faint); font-size: var(--t-xs); }
+  .trend.slower { color: var(--gold); }
   .caption { margin: 4px 0 var(--s3); color: var(--faint); font-size: var(--t-sm); }
-  .legend { display: flex; flex-wrap: wrap; gap: var(--s3); margin: 0 0 var(--s4); font-size: var(--t-sm); color: var(--faint); }
-  .legend span { display: inline-flex; align-items: center; gap: 5px; }
-  .legend i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
-  .legend .dotmark { border-radius: 50%; background: var(--coral); }
-  .tests { margin: var(--s4) 0 var(--s2); font-size: var(--t-ui); color: var(--muted); font-weight: 600; }
-  .row, .runrow { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; width: 100%; max-width: 100%; min-width: 0; text-align: left; padding: 7px 8px 7px 0; border: 0; border-bottom: 1px solid var(--line-soft); background: none; color: inherit; cursor: pointer; transition: background-color var(--motion-fast) var(--ease); }
-  .row > .rule, .runrow > .rule { flex: none; width: 3px; align-self: stretch; }
-  .row > .id, .runrow > .id { flex: 1 1 auto; min-width: 0; }
+  .tests { margin: var(--s4) 0 var(--s2); }
+  .row { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; width: 100%; max-width: 100%; min-width: 0; text-align: left; padding: 7px 8px 7px 0; border: 0; border-bottom: 1px solid var(--line-soft); background: none; color: inherit; cursor: pointer; transition: background-color var(--motion-fast) var(--ease); }
+  .row > .rule { flex: none; width: 3px; align-self: stretch; }
+  .row > .id { flex: 1 1 auto; min-width: 0; }
   .row > .spark { flex: none; width: 118px; }
-  .row > .times, .runrow > .times { flex: none; width: 150px; }
-  .runrow:hover, .row:hover { background: var(--hover); }
-  .runrow .name { color: var(--ink); }
-  .runrow .rule.over { background: var(--gold); }
+  .row > .times { flex: none; width: 150px; }
+  .row:hover { background: var(--hover); }
   .row:last-child { border-bottom: 0; }
 
   .rule { border-radius: 2px; }
@@ -449,14 +341,6 @@
   .kv { margin: 0; font-size: var(--t-sm); color: var(--muted); display: flex; flex-wrap: wrap; gap: 5px; }
   .why { margin: 2px 0 0; font-size: var(--t-sm); color: var(--faint); font-style: italic; }
   h3 { margin: var(--s4) 0 var(--s2); font-size: var(--t-ui); color: var(--muted); font-weight: 600; }
-  .bar { display: flex; align-items: center; gap: var(--s2); margin: 0 0 4px; }
-  .bn { width: 120px; font-family: var(--mono); font-size: var(--t-sm); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .track { flex: 1; height: 8px; background: var(--rail); border-radius: 2px; overflow: hidden; }
-  .fill { display: block; height: 100%; background: #6c6a74; border-radius: 2px; }
-  .bt { width: 58px; text-align: right; font-size: var(--t-sm); color: var(--muted); }
-  .steps { border-left: 1px solid var(--line-soft); margin: 0 0 var(--s2) 6px; padding: 2px 0 2px 8px; }
-  .bar.step .bn { width: 104px; font-family: var(--sans); color: var(--muted); font-size: var(--t-xs); }
-  .bar.step .fill { background: #4c4a52; }
   .wide { width: 100%; height: 96px; margin: var(--s2) 0 0; }
   .table { border-top: 1px solid var(--line-soft); }
   .trow { display: grid; grid-template-columns: 90px 90px 1fr; gap: var(--s2); width: 100%; text-align: left; padding: 5px 0; border: 0; border-bottom: 1px solid var(--line-soft); background: none; color: var(--ink-2); font-size: var(--t-sm); cursor: pointer; transition: background-color var(--motion-fast) var(--ease); }
@@ -471,19 +355,18 @@
   .allow input { width: 100%; margin: 0 0 var(--s2); padding: 7px 9px; background: var(--field); border: 1px solid var(--line); border-radius: 7px; color: var(--ink); font: inherit; font-size: var(--t-sm); }
   .primary { padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--raise); color: var(--ink); font-size: var(--t-sm); font-weight: 600; cursor: pointer; }
   .primary:disabled { opacity: 0.6; cursor: default; }
-  .row:active, .runrow:active, .trow:active { background: var(--select); }
+  .row:active, .trow:active { background: var(--select); }
   .back:active { color: var(--ink-2); }
   .err { margin: 4px 0; color: var(--coral); font-size: var(--t-sm); }
   .loading { min-height: 120px; }
-  @media (max-width: 780px) {
-    .row, .runrow { flex-wrap: wrap; }
-    .row > .id, .runrow > .id { flex: 1 1 calc(100% - 13px); }
-    .row > .times, .runrow > .times { flex: 1 1 100%; width: auto; text-align: left; margin: -2px 0 0 13px; }
+  @container (max-width: 560px) {
+    .row { flex-wrap: wrap; }
+    .row > .id { flex: 1 1 calc(100% - 13px); }
+    .row > .spark { display: none; }
+    .row > .times { flex: 1 1 100%; width: auto; text-align: left; margin: -2px 0 0 13px; }
     .times b { display: inline; margin-right: 6px; }
-    .bn { width: 84px; }
-    .bar.step .bn { width: 72px; }
-    .bt { width: 48px; }
     .trow { grid-template-columns: 80px 80px; }
     .trow .when { grid-column: 1 / -1; }
+    .jobs li { grid-template-columns: 1fr auto 84px; }
   }
 </style>
