@@ -15,7 +15,7 @@ import (
 func TestIssueGoalAndClose(t *testing.T) {
 	e := newEnv(t)
 	r := e.room("work")
-	i, err := e.svc.rooms().FileIssue(r.ID, "Fix parser", "one path", "parser.go", 7, r.Name+":agent")
+	i, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Fix parser", Note: "one path", File: "parser.go", Line: 7, Filer: r.Name+":agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestIssueExportAccountAndReadOnly(t *testing.T) {
 			if err := e.svc.rooms().UpdatePreferences(r.ID, func(r *room.Record) error { r.Repo = repo; r.GitHubAccess = ghclient.ReadOnly; return nil }); err != nil {
 				t.Fatal(err)
 			}
-			i, err := e.svc.rooms().FileIssue(r.ID, tc.title, "Export note", "a.go", 3, r.Name)
+			i, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: tc.title, Note: "Export note", File: "a.go", Line: 3, Filer: r.Name})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -97,6 +97,11 @@ esac
 			if err != nil || !strings.Contains(string(b), tc.title) || !strings.Contains(string(b), "Local issue D-1\n") || strings.Contains(string(b), i.ID) || !strings.Contains(string(b), "a.go:3") || !strings.Contains(string(b), "--repo\ngithub.com/test/issues\n") {
 				t.Fatalf("args: %s %v", b, err)
 			}
+			// The exported body is the filer's note, not the event's one-line
+			// summary: a GitHub issue must carry what was filed.
+			if !strings.Contains(string(b), "Export note") || strings.Contains(string(b), "filed issue D-1") {
+				t.Fatalf("exported body = %s", b)
+			}
 		})
 	}
 }
@@ -107,7 +112,7 @@ func TestIssueEvents(t *testing.T) {
 	offsets, members, signatures := map[string]int64{}, newMemberWatch(), map[string]string{}
 	sig := ""
 	e.svc.scan(offsets, &sig, members, signatures, true, func(Event) {})
-	i, err := e.svc.rooms().FileIssue(r.ID, "Watch me", "", "", 0, r.Name)
+	i, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Watch me", Note: "", File: "", Line: 0, Filer: r.Name})
 	if err != nil {
 		t.Fatal(err)
 	}

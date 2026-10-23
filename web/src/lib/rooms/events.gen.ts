@@ -6,6 +6,24 @@ export type PRType = "opened" | "ready" | "approved" | "changes" | "ci-failed" |
 // MergeStep is a named string type of an event payload.
 export type MergeStep = "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision"
 
+// IssueChange is a named string type of an event payload.
+export type IssueChange = "filed" | "updated" | "closed"
+
+// IssueState is a named string type of an event payload.
+export type IssueState = "open" | "goal" | "exported" | "closed"
+
+// GoalChange is a named string type of an event payload.
+export type GoalChange = "added" | "edited" | "finished" | "dropped"
+
+// GoalState is a named string type of an event payload.
+export type GoalState = "active" | "done" | "dropped"
+
+// CheckinState is a named string type of an event payload.
+export type CheckinState = "running" | "queued" | "idle"
+
+// RuleVerb is a named string type of an event payload.
+export type RuleVerb = "added" | "edited" | "removed"
+
 // WorktreeReason is a named string type of an event payload.
 export type WorktreeReason = "not-merged" | "dirty" | "manual-handoff" | "keep-failed" | "other"
 
@@ -48,6 +66,61 @@ export interface HookEvent {
   state: HookState
   durationMs?: number
   detail?: string
+}
+
+// IssueEvent is the payload of the issue/filed and issue/updated and issue/closed events.
+export interface IssueEvent {
+  type: IssueChange
+  issueId?: string
+  number: number
+  title: string
+  files?: { path: string; line?: number }[]
+  symbols?: string[]
+  cost?: string
+  direction?: string
+  state: IssueState
+  filer: string
+  actor?: string
+  assignee?: string
+  closedBy?: { pr?: number; commit?: string }
+  reason?: string
+  detail?: string
+}
+
+// GoalEvent is the payload of the goal/added and goal/edited and goal/finished and goal/dropped events.
+export interface GoalEvent {
+  type: GoalChange
+  goalId: string
+  title: string
+  actor: string
+  state: GoalState
+  summary?: string
+}
+
+// CheckinEvent is the payload of the checkin/summary events.
+export interface CheckinEvent {
+  parent: string
+  windowStart: number
+  counts: { running: number; queued: number; idle: number }
+  children: { name: string; state: CheckinState; age: string; goal: string; pr: string }[]
+  detail?: string
+}
+
+// SlowTestEvent is the payload of the ci-health/slow-test events.
+export interface SlowTestEvent {
+  run: string
+  count: number
+  crossings: { test: string; package?: string; features?: string[]; durationMs: number; run: string; otherMs: number; otherRun: string; limitMs: number }[]
+  detail?: string
+}
+
+// RuleEvent is the payload of the rule/changed events.
+export interface RuleEvent {
+  ruleId: string
+  scope: string
+  actor: string
+  verb: RuleVerb
+  text?: string
 }
 
 // MergeEvent is the payload of the merge/queued and merge/trial and merge/checks and merge/landed and merge/failed and merge/returned and merge/conflict and merge/rolled-back events.
@@ -96,11 +169,13 @@ export interface PREvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | MergeEvent | MergeDecisionEvent | PREvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | PREvent
 
-export type EventFamily = "worktree" | "hook" | "merge" | "pr"
-export type EventType = "kept" | "started" | "result" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "closed" | "comment" | "held-comment" | "review-assigned" | "update"
+export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "pr"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update"
 export type WakeRule = "never" | "target" | "root-if-needed"
+
+export type Audience = "room" | "session"
 
 export interface EventSpecEntry {
   family: EventFamily
@@ -109,6 +184,7 @@ export interface EventSpecEntry {
   quiet: boolean
   wake: WakeRule
   once: boolean
+  audience: Audience
   text: string
   textNoSubject?: string
 }
@@ -121,6 +197,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "session",
     text: "Worktree kept at {path}: branch {branch}, ahead {ahead}, dirty: {dirty}.",
     textNoSubject: "Worktree cleanup could not keep the session's trees.",
   },
@@ -131,6 +208,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "Hook {hook} started for {event} (run {runId}).",
   },
   {
@@ -140,7 +218,108 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}).",
+  },
+  {
+    family: "issue",
+    type: "filed",
+    renderer: "IssueCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "{filer} filed issue D-{number}: {title}",
+  },
+  {
+    family: "issue",
+    type: "updated",
+    renderer: "IssueCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "{actor} changed issue D-{number} to {state}: {title}",
+  },
+  {
+    family: "issue",
+    type: "closed",
+    renderer: "IssueCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "{actor} closed issue D-{number}: {reason}",
+  },
+  {
+    family: "goal",
+    type: "added",
+    renderer: "GoalPost",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "{actor} added goal {goalId}: {title}",
+  },
+  {
+    family: "goal",
+    type: "edited",
+    renderer: "GoalPost",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "{actor} edited goal {goalId}: {title}",
+  },
+  {
+    family: "goal",
+    type: "finished",
+    renderer: "GoalPost",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "Goal {goalId} {title} is done: {summary}",
+  },
+  {
+    family: "goal",
+    type: "dropped",
+    renderer: "GoalPost",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "{actor} dropped goal {goalId}: {title}",
+  },
+  {
+    family: "checkin",
+    type: "summary",
+    renderer: "CheckinCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "session",
+    text: "Check on your children. For each one below, confirm it is making progress. If one is stuck, idle with unfinished work, or waiting for something that already happened, nudge it, restart it, or take over its work. Close children whose work is done. If everything is on track, end your turn without posting.",
+  },
+  {
+    family: "ci-health",
+    type: "slow-test",
+    renderer: "SlowTestCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "{count} slow tests crossed the CI limit in run {run}.",
+  },
+  {
+    family: "rule",
+    type: "changed",
+    renderer: "RuleCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "{actor} {verb} the {scope} rule {ruleId}",
   },
   {
     family: "merge",
@@ -149,6 +328,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} queued for {base} in {repo}.",
   },
   {
@@ -158,6 +338,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} started for {base} in {repo}.",
   },
   {
@@ -167,6 +348,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} checks: {summary}.",
   },
   {
@@ -176,6 +358,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} landed {commit} on {base}.",
   },
   {
@@ -185,6 +368,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} failed: {reason}.",
   },
   {
@@ -194,6 +378,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} returned by root: {reason}.",
   },
   {
@@ -203,6 +388,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "Merge conflict for {label} on {base}.",
   },
   {
@@ -212,6 +398,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "Merge rollback for {label} on {base}.",
   },
   {
@@ -221,6 +408,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "{note}",
   },
   {
@@ -230,6 +418,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\n{label} opened in {repo}. Review it at {url}",
   },
   {
@@ -239,6 +428,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\n{label} is ready to land at {head}.",
   },
   {
@@ -248,6 +438,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\n{label} at {head} approved by its Dyna reviewer:",
   },
   {
@@ -257,6 +448,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\nReviewer requests changes for {label} at {head}:",
   },
   {
@@ -266,6 +458,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\nCI failed ({ciAttempt}/{ciMax}): {summary}. Fix the failure and push to this PR.",
   },
   {
@@ -275,6 +468,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\n{label} failed CI three times in a row. Later CI failures will not wake the author. Inspect dyna git pr show {url}. Failed jobs: {summary}.",
   },
   {
@@ -284,6 +478,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\nCI passed on {label} at {head}.",
   },
   {
@@ -293,6 +488,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\n{label} at {head} was returned to you.",
   },
   {
@@ -302,6 +498,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
   {
@@ -311,6 +508,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
   {
@@ -320,6 +518,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
   {
@@ -329,6 +528,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
   {
@@ -338,6 +538,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
   {
@@ -347,12 +548,19 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
 ]
 
 const P_R_TYPE: ReadonlySet<unknown> = new Set(["opened", "ready", "approved", "changes", "ci-failed", "ci-paused", "ci-passed", "returned", "merged", "closed", "comment", "held-comment", "review-assigned", "update"])
 const MERGE_STEP: ReadonlySet<unknown> = new Set(["queued", "trial", "checks", "landed", "failed", "returned", "conflict", "rolled-back", "decision"])
+const ISSUE_CHANGE: ReadonlySet<unknown> = new Set(["filed", "updated", "closed"])
+const ISSUE_STATE: ReadonlySet<unknown> = new Set(["open", "goal", "exported", "closed"])
+const GOAL_CHANGE: ReadonlySet<unknown> = new Set(["added", "edited", "finished", "dropped"])
+const GOAL_STATE: ReadonlySet<unknown> = new Set(["active", "done", "dropped"])
+const CHECKIN_STATE: ReadonlySet<unknown> = new Set(["running", "queued", "idle"])
+const RULE_VERB: ReadonlySet<unknown> = new Set(["added", "edited", "removed"])
 const WORKTREE_REASON: ReadonlySet<unknown> = new Set(["not-merged", "dirty", "manual-handoff", "keep-failed", "other"])
 const HOOK_STATE: ReadonlySet<unknown> = new Set(["running", "passed", "failed", "error"])
 
@@ -400,6 +608,61 @@ export function isHookEvent(v: unknown): v is HookEvent {
     HOOK_STATE.has(v.state) &&
     (v.durationMs === undefined || Number.isInteger(v.durationMs)) &&
     (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isIssueEvent(v: unknown): v is IssueEvent {
+  return isRecord(v) &&
+    ISSUE_CHANGE.has(v.type) &&
+    (v.issueId === undefined || typeof v.issueId === "string") &&
+    Number.isInteger(v.number) &&
+    typeof v.title === "string" &&
+    (v.files === undefined || Array.isArray(v.files) && v.files.every((item: unknown) => (isRecord(item) && typeof item.path === "string" && (item.line === undefined || Number.isInteger(item.line))))) &&
+    (v.symbols === undefined || isStringList(v.symbols)) &&
+    (v.cost === undefined || typeof v.cost === "string") &&
+    (v.direction === undefined || typeof v.direction === "string") &&
+    ISSUE_STATE.has(v.state) &&
+    typeof v.filer === "string" &&
+    (v.actor === undefined || typeof v.actor === "string") &&
+    (v.assignee === undefined || typeof v.assignee === "string") &&
+    (v.closedBy === undefined || (isRecord(v.closedBy) && (v.closedBy.pr === undefined || Number.isInteger(v.closedBy.pr)) && (v.closedBy.commit === undefined || typeof v.closedBy.commit === "string"))) &&
+    (v.reason === undefined || typeof v.reason === "string") &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isGoalEvent(v: unknown): v is GoalEvent {
+  return isRecord(v) &&
+    GOAL_CHANGE.has(v.type) &&
+    typeof v.goalId === "string" &&
+    typeof v.title === "string" &&
+    typeof v.actor === "string" &&
+    GOAL_STATE.has(v.state) &&
+    (v.summary === undefined || typeof v.summary === "string")
+}
+
+export function isCheckinEvent(v: unknown): v is CheckinEvent {
+  return isRecord(v) &&
+    typeof v.parent === "string" &&
+    Number.isInteger(v.windowStart) &&
+    (isRecord(v.counts) && Number.isInteger(v.counts.running) && Number.isInteger(v.counts.queued) && Number.isInteger(v.counts.idle)) &&
+    Array.isArray(v.children) && v.children.every((item: unknown) => (isRecord(item) && typeof item.name === "string" && CHECKIN_STATE.has(item.state) && typeof item.age === "string" && typeof item.goal === "string" && typeof item.pr === "string")) &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isSlowTestEvent(v: unknown): v is SlowTestEvent {
+  return isRecord(v) &&
+    typeof v.run === "string" &&
+    Number.isInteger(v.count) &&
+    Array.isArray(v.crossings) && v.crossings.every((item: unknown) => (isRecord(item) && typeof item.test === "string" && (item.package === undefined || typeof item.package === "string") && (item.features === undefined || isStringList(item.features)) && Number.isInteger(item.durationMs) && typeof item.run === "string" && Number.isInteger(item.otherMs) && typeof item.otherRun === "string" && Number.isInteger(item.limitMs))) &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isRuleEvent(v: unknown): v is RuleEvent {
+  return isRecord(v) &&
+    typeof v.ruleId === "string" &&
+    typeof v.scope === "string" &&
+    typeof v.actor === "string" &&
+    RULE_VERB.has(v.verb) &&
+    (v.text === undefined || typeof v.text === "string")
 }
 
 export function isMergeEvent(v: unknown): v is MergeEvent {
@@ -451,6 +714,16 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "worktree" && type === "kept") return isWorktreeEvent(v)
   if (family === "hook" && type === "started") return isHookEvent(v)
   if (family === "hook" && type === "result") return isHookEvent(v)
+  if (family === "issue" && type === "filed") return isIssueEvent(v)
+  if (family === "issue" && type === "updated") return isIssueEvent(v)
+  if (family === "issue" && type === "closed") return isIssueEvent(v)
+  if (family === "goal" && type === "added") return isGoalEvent(v)
+  if (family === "goal" && type === "edited") return isGoalEvent(v)
+  if (family === "goal" && type === "finished") return isGoalEvent(v)
+  if (family === "goal" && type === "dropped") return isGoalEvent(v)
+  if (family === "checkin" && type === "summary") return isCheckinEvent(v)
+  if (family === "ci-health" && type === "slow-test") return isSlowTestEvent(v)
+  if (family === "rule" && type === "changed") return isRuleEvent(v)
   if (family === "merge" && type === "queued") return isMergeEvent(v)
   if (family === "merge" && type === "trial") return isMergeEvent(v)
   if (family === "merge" && type === "checks") return isMergeEvent(v)
@@ -483,4 +756,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 function isStringList(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((item: unknown) => typeof item === "string")
+}
+function isNumberList(v: unknown): v is number[] {
+  return Array.isArray(v) && v.every((item: unknown) => Number.isInteger(item))
 }

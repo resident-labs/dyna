@@ -12,11 +12,11 @@ import (
 
 func TestIssuesRoundTripAndTriage(t *testing.T) {
 	s, rec, _ := pinFixture(t)
-	a, err := s.FileIssue(rec.ID, "First", "detail", "file.go", 12, "alpha:agent")
+	a, err := s.FileIssue(rec.ID, IssueInput{Title: "First", Note: "detail", File: "file.go", Line: 12, Filer: "alpha:agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.FileIssue(rec.ID, "Second", "", "", 0, "alpha:agent")
+	b, err := s.FileIssue(rec.ID, IssueInput{Title: "Second", Note: "", File: "", Line: 0, Filer: "alpha:agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,8 +25,14 @@ func TestIssuesRoundTripAndTriage(t *testing.T) {
 		t.Fatalf("issues: %+v %v", rows, err)
 	}
 	post, err := s.Message(rec.ID, a.ID)
-	if err != nil || post.Kind != "issue" || post.Text != "First\n\ndetail" || WakesRoot(post, rec.Name) {
+	if err != nil || post.Kind != "issue" || post.Notice.Kind != "filed" || WakesRoot(post, rec.Name) {
 		t.Fatalf("post: %+v %v", post, err)
+	}
+	if ev, ok := post.Issue(); !ok || ev.Number != 1 || ev.Title != "First" || ev.Detail != "detail" || ev.State != IssueStateOpen {
+		t.Fatalf("filed event: %+v %v", ev, ok)
+	}
+	if !strings.Contains(post.Text, "alpha:agent filed issue D-1: First") {
+		t.Fatalf("post text: %q", post.Text)
 	}
 	if _, err = s.ChangeIssue(rec.ID, a.ID, "alpha:agent", func(i *Issue) error { i.State = "closed"; i.Reason = "fixed"; return nil }); err == nil {
 		t.Fatal("agent triaged issue")
@@ -50,7 +56,7 @@ func TestIssuesRoundTripAndTriage(t *testing.T) {
 	if err != nil || len(rows) != 2 || rows[1].State != "closed" || rows[1].Number != 1 {
 		t.Fatalf("round trip: %+v %v", rows, err)
 	}
-	c, err := reopened.FileIssue(rec.ID, "Third", "", "", 0, rec.Name)
+	c, err := reopened.FileIssue(rec.ID, IssueInput{Title: "Third", Note: "", File: "", Line: 0, Filer: rec.Name})
 	if err != nil || c.Number != 3 {
 		t.Fatalf("number after close: %+v %v", c, err)
 	}
@@ -58,7 +64,7 @@ func TestIssuesRoundTripAndTriage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := s.FileIssue(other.ID, "Separate room", "", "", 0, other.Name)
+	first, err := s.FileIssue(other.ID, IssueInput{Title: "Separate room", Note: "", File: "", Line: 0, Filer: other.Name})
 	if err != nil || first.Number != 1 {
 		t.Fatalf("other room: %+v %v", first, err)
 	}
@@ -66,7 +72,7 @@ func TestIssuesRoundTripAndTriage(t *testing.T) {
 
 func TestIssueTriageDoesNotBlockRoomPosts(t *testing.T) {
 	s, rec, _ := pinFixture(t)
-	i, err := s.FileIssue(rec.ID, "Export", "", "", 0, rec.Name)
+	i, err := s.FileIssue(rec.ID, IssueInput{Title: "Export", Note: "", File: "", Line: 0, Filer: rec.Name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +116,7 @@ func TestIssueWritesLeaveTheLegacyFileUnchanged(t *testing.T) {
 	if err := os.WriteFile(path, legacy, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	i, err := s.FileIssue(rec.ID, "Kept in the database", "", "", 0, rec.Name)
+	i, err := s.FileIssue(rec.ID, IssueInput{Title: "Kept in the database", Note: "", File: "", Line: 0, Filer: rec.Name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +171,7 @@ func TestIssuesRevisionChangesOnEveryWrite(t *testing.T) {
 		return n
 	}
 	start := rev()
-	i, err := s.FileIssue(rec.ID, "Watch", "", "", 0, rec.Name)
+	i, err := s.FileIssue(rec.ID, IssueInput{Title: "Watch", Note: "", File: "", Line: 0, Filer: rec.Name})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,7 +210,7 @@ func TestDamagedLegacyIssuesFailUntilRepaired(t *testing.T) {
 // Deleting a room removes its issues, which live outside the room folder.
 func TestDeletedRoomKeepsNoIssues(t *testing.T) {
 	s, rec, _ := pinFixture(t)
-	if _, err := s.FileIssue(rec.ID, "Gone with the room", "", "file.go", 3, rec.Name); err != nil {
+	if _, err := s.FileIssue(rec.ID, IssueInput{Title: "Gone with the room", Note: "", File: "file.go", Line: 3, Filer: rec.Name}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Delete(rec.ID, nil); err != nil {

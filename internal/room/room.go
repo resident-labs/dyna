@@ -86,6 +86,10 @@ func (r Record) Archived(now time.Time, hasLiveWork bool) bool {
 // extra facts that now live in the payload; a reader ignores those.
 type EventNotice struct {
 	Kind string `json:"kind"`
+	// Producer names the engine service that observed the event, such as the
+	// parent check-in scheduler. It is data, never a sender: the post's sender
+	// is the engine.
+	Producer EventProducer `json:"producer,omitempty"`
 }
 
 // Message is one durable post. It is append-only: once written it never
