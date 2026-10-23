@@ -14,12 +14,13 @@ import (
 
 func TestCloseKeepsQuotaPausedVerdictForReplay(t *testing.T) {
 	e := newEnv(t)
+	accountGH(t, e)
 	e.setCI("success", 1)
 	e.track()
 	e.tick()
 	before := e.record()
 	if err := e.s.Store.update(func(st *State) error {
-		st.LegacyPause = e.clock.Add(time.Hour)
+		st.RateLimits = map[string]RateLimit{(RateLimitScope{Host: "github.com", Account: "fixture", Resource: "core"}).Key(): {PauseUntil: e.clock.Add(time.Hour)}, (RateLimitScope{Host: "github.com", Account: "fixture", Resource: "graphql"}).Key(): {PauseUntil: e.clock.Add(time.Hour)}}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -57,7 +58,7 @@ func TestCloseKeepsQuotaPausedVerdictForReplay(t *testing.T) {
 		t.Fatalf("close dropped the saved verdicts or the reviewer's authority: %+v", closed)
 	}
 	if err := e.s.Store.update(func(st *State) error {
-		st.LegacyPause = time.Time{}
+		st.RateLimits = map[string]RateLimit{}
 		return nil
 	}); err != nil {
 		t.Fatal(err)

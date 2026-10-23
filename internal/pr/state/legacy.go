@@ -131,10 +131,7 @@ func readLegacy(root string) (st legacyDocuments, found bool, err error) {
 			st.records[key] = raw
 		}
 	}
-	if err := convertLegacyQuota(st.index, disk); err != nil {
-		return st, false, err
-	}
-	for _, field := range []string{"records", "httpResponses", "recordFiles", "closedIndex", "rateLimit"} {
+	for _, field := range []string{"records", "httpResponses", "recordFiles", "closedIndex"} {
 		delete(st.index, field)
 	}
 	st.index["version"] = json.RawMessage("1")
