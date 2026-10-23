@@ -87,6 +87,10 @@ func open(root string) (*sql.DB, error) {
 		_, err := conn.ExecContext(context.Background(), "CREATE INDEX IF NOT EXISTS pr_records_revision ON pr_records(rev, key)")
 		return err
 	})
+	if err != nil {
+		return db, err
+	}
+	err = database.Migrate(db, "pr.closed_at", 1, migrateClosedAt)
 	return db, err
 }
 
@@ -241,7 +245,7 @@ func refresh(q querier, root string) error {
 			return err
 		}
 		if cached := snapshot.state.Records[key]; cached != nil && rev <= snapshot.revision {
-			// Normalization updates derived quota and close fields. Keep the
+			// Normalization updates derived quota fields. Keep the
 			// record in an already retained snapshot unchanged.
 			copy := *cached
 			st.Records[key] = &copy
@@ -289,19 +293,6 @@ func normalizeState(st *State) {
 		}
 	}
 	st.RefreshQuotaDisplay()
-	for _, r := range st.Records {
-		if (r.State != "closed" && r.State != "merged") || !r.ClosedAt.IsZero() {
-			continue
-		}
-		// TODO: legacy/shim remove later — derives stable end times for records written before closedAt; remove when those stores are migrated
-		if r.Landing != nil && r.Landing.State == "landed" && !r.Landing.At.IsZero() {
-			r.ClosedAt = r.Landing.At
-		} else if !r.Checked.IsZero() {
-			r.ClosedAt = r.Checked
-		} else {
-			r.ClosedAt = r.Created
-		}
-	}
 	if st.Records == nil {
 		st.Records = map[string]*Record{}
 	}
