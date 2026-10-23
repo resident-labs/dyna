@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createRoomData } from '../rooms/roomData.js'
+import { createRoomData } from '../rooms/roomData.ts'
 import { createSessionData } from '../sessions/sessionData.ts'
 import { createWorkflowData } from '../workflows/workflowData.ts'
 
