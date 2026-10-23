@@ -302,8 +302,25 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 	}
 }
 
+var errRetryMigration = errors.New("retry engine migration")
+
 // Run owns the engine services until ctx is cancelled.
-func Run(ctx context.Context, f Options) (runErr error) {
+func Run(ctx context.Context, f Options) error {
+	noUpdate := os.Getenv("DYNA_NO_AUTO_UPDATE") == "1"
+	for {
+		err := run(ctx, f, noUpdate)
+		if !errors.Is(err, errRetryMigration) {
+			return err
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+	}
+}
+
+// run owns one complete engine lifetime. Recovery drains its read-only server
+// before Run starts the writable handlers and workers with current stores.
+func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	ctx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 	// The engine's environment is the owner's, never a caller's, so a check
@@ -314,7 +331,7 @@ func Run(ctx context.Context, f Options) (runErr error) {
 	ctx = authority.WithActor(ctx, authority.Actor{Role: authority.Owner})
 	dataDir, ownerData := store.DataDir(), store.OwnerDataDir()
 	group, _ := callerid.Cgroup("/proc", os.Getpid())
-	readOnly, migrateStatus, connectRefused := startMode(dataDir, f.ReadOnly, group, ownerData)
+	readOnly, migrateStatus, connectRefused, migrateCause := startMode(dataDir, f.ReadOnly, group, ownerData)
 	if !readOnly {
 		go dailyBackups(ctx, store.DataDir())
 	}
@@ -425,7 +442,6 @@ func Run(ctx context.Context, f Options) (runErr error) {
 	if err != nil {
 		return err
 	}
-	noUpdate := os.Getenv("DYNA_NO_AUTO_UPDATE") == "1"
 	dropDynaEnv()
 	rooms := roomsvc.New(nil)
 	files := &filesvc.Service{Rooms: rooms.Notify.Rooms, SessionInRoom: rooms.SessionInRoom, AttachmentBytes: rooms.AttachmentBytes}
@@ -443,7 +459,7 @@ func Run(ctx context.Context, f Options) (runErr error) {
 	}
 	cleanup := []func(){terminals.Shutdown, background.Wait}
 	defer func() {
-		if err := stopEngine(cancelRun, workerDone, servers, cleanup...); err != nil && runErr == nil {
+		if err := stopEngine(cancelRun, workerDone, servers, cleanup...); err != nil && (runErr == nil || errors.Is(runErr, errRetryMigration)) {
 			runErr = fmt.Errorf("engine shutdown: %w", err)
 		}
 	}()
@@ -532,6 +548,10 @@ func Run(ctx context.Context, f Options) (runErr error) {
 	notify := push.Notifier(pushMayRead(cstore))
 	// The engine's one timer set: one-shot deadlines in place of clock ticks.
 	engineTimers := newTimers(ctx, time.Now, afterFunc)
+	retryMigration := make(chan struct{})
+	recoverStores(engineTimers, migrateCause, callerid.ProcessOf, func() { close(retryMigration) }, func(cause error) {
+		migrationAlert(rooms.Notify.Rooms, cause)
+	})
 	if writer != nil {
 		pruneRequests(ctx, engineTimers, writer)
 	}
@@ -677,6 +697,8 @@ func Run(ctx context.Context, f Options) (runErr error) {
 
 	select {
 	case <-ctx.Done():
+	case <-retryMigration:
+		return errRetryMigration
 	case err := <-errs:
 		if !errors.Is(err, http.ErrServerClosed) {
 			return err
