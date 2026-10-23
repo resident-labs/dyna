@@ -49,7 +49,7 @@
 </div>
 
 <style>
-  .rows { padding: 0 var(--s5) var(--s4); }
+  .rows { flex: 1; overflow-y: auto; padding: 0 var(--s5) var(--s4); }
   .item { display: flex; align-items: center; gap: var(--s2); border-bottom: 1px solid var(--line-soft); }
   .item :global(.row) { flex: 1; min-width: 0; border-radius: 0; padding: var(--s4) 0; }
   .title { font-size: var(--t-body); font-weight: 600; overflow-wrap: anywhere; }
