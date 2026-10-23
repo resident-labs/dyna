@@ -29,21 +29,20 @@ import (
 )
 
 type services struct {
-	settingsChanged func()
-	devices         *devicesvc.Service
-	files           *filesvc.Service
-	git             *gitsvc.Service
-	rooms           *roomsvc.Service
-	terminals       *terminalsvc.Service
-	runtime         *harnessruntime.Runtime
-	accounts        *service.Service
-	config          *configsvc.Service
-	computers       *computerweb.Host
-	voice           *voice.Calls
-	hooks           hooks.Service
-	sync            *lanesync.Service
-	health          func() Health
-	load            *sysload.Sampler
+	devices   *devicesvc.Service
+	files     *filesvc.Service
+	git       *gitsvc.Service
+	rooms     *roomsvc.Service
+	terminals *terminalsvc.Service
+	runtime   *harnessruntime.Runtime
+	accounts  *service.Service
+	config    *configsvc.Service
+	computers *computerweb.Host
+	voice     *voice.Calls
+	hooks     hooks.Service
+	sync      *lanesync.Service
+	health    func() Health
+	load      *sysload.Sampler
 }
 
 // SeatBindings are the root seat calls of dyna root and the web app. Tests
