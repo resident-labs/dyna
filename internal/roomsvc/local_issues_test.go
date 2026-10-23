@@ -97,6 +97,11 @@ esac
 			if err != nil || !strings.Contains(string(b), tc.title) || !strings.Contains(string(b), "Local issue D-1\n") || strings.Contains(string(b), i.ID) || !strings.Contains(string(b), "a.go:3") || !strings.Contains(string(b), "--repo\ngithub.com/test/issues\n") {
 				t.Fatalf("args: %s %v", b, err)
 			}
+			// The exported body is the filer's note, not the event's one-line
+			// summary: a GitHub issue must carry what was filed.
+			if !strings.Contains(string(b), "Export note") || strings.Contains(string(b), "filed issue D-1") {
+				t.Fatalf("exported body = %s", b)
+			}
 		})
 	}
 }

@@ -57,7 +57,7 @@
   @media (hover: hover) { summary:hover .label { color: var(--ink-2); } }
   .panel { margin: 6px 0 2px 24px; padding: 2px 0 2px 12px; border-left: 2px solid var(--line); }
   .handoff { white-space: pre-wrap; color: var(--ink-2); line-height: 1.5; margin: 0; }
-              .one + .one { margin-top: 10px; }
+  .one + .one { margin-top: 10px; }
   .one b { display: block; color: var(--muted); font-weight: 600; margin-bottom: 2px; }
   .one p { margin: 0; color: var(--ink-2); line-height: 1.5; }
   .full { margin-top: 4px; }
