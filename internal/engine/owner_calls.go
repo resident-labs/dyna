@@ -21,6 +21,7 @@ var ownerCalls = []string{
 	"SetAccountRepos",
 	"UninstallPrivateRuntime",
 	"CancelPrivateRuntimeLogin",
+	"RespondPrivateRuntimeLogin",
 	"CancelPrivateRuntimeAccountSwitch",
 	"ConfirmPrivateRuntimeAccountSwitch",
 	"StartIssueWork",
