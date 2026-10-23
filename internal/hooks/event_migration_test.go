@@ -26,7 +26,7 @@ func TestHookDocumentMigrationConvertsAliasesAndRecipesOnce(t *testing.T) {
 	}
 	repo, exe, name := "/repo dir/dyna's", "/bin dir/dyna's", "self-update"
 	command := shellquote.Quote(exe) + " hooks _install --main " + shellquote.Quote(repo) + " --name " + shellquote.Quote(name) + " --tool-path " + shellquote.Quote("/tools dir:/usr/bin")
-	base := map[string]any{"name": name, "label": "Update Dyna", "event": MainMoved, "command": command, "cwd": "main", "timeout": "25m", "onFail": "alert", "addedBy": "owner", "addedAt": "2026-10-01T01:02:03Z", "editedBy": "owner", "editedAt": "2026-10-02T01:02:03Z", "everyMinutes": 17, "future": json.Number("18446744073709551617")}
+	base := map[string]any{"name": name, "label": "Update Dyna", "event": "main-moved", "command": command, "cwd": "main", "timeout": "25m", "onFail": "alert", "addedBy": "owner", "addedAt": "2026-10-01T01:02:03Z", "editedBy": "owner", "editedAt": "2026-10-02T01:02:03Z", "everyMinutes": 17, "future": json.Number("18446744073709551617")}
 	hooks := []any{base}
 	for field, value := range map[string]any{"label": "Owner script", "cwd": "/owner/worktree", "name": "other", "command": command + "; owner-script"} {
 		custom := map[string]any{}
@@ -104,7 +104,7 @@ func TestHookDocumentMigrationConvertsAliasesAndRecipesOnce(t *testing.T) {
 	}
 	// Later owner commands are outside the one-time migration, even if they
 	// contain the old route or alias spelling.
-	if _, err := db.Exec("UPDATE hook_documents SET body=json_set(CAST(body AS TEXT),'$.hooks[0].command',?,'$.hooks[0].event',?) WHERE repo='saved'", command+"; owner-edit", MainMoved); err != nil {
+	if _, err := db.Exec("UPDATE hook_documents SET body=json_set(CAST(body AS TEXT),'$.hooks[0].command',?,'$.hooks[0].event',?) WHERE repo='saved'", command+"; owner-edit", "main-moved"); err != nil {
 		t.Fatal(err)
 	}
 	edited := read()
