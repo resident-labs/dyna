@@ -12,14 +12,14 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/goals"
-	"dyna-agent/internal/goalservice"
+	"dyna-agent/internal/goalsvc"
 	"dyna-agent/internal/listchange"
 	"dyna-agent/internal/listpage"
 	"dyna-agent/internal/subagent"
 )
 
-func (s *Service) goalService() *goalservice.Service {
-	service := goalservice.New()
+func (s *Service) goalService() *goalsvc.Service {
+	service := goalsvc.New()
 	service.Notify = s.Notify
 	root := s.sessions().Root
 	if root == "" {

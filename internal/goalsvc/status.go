@@ -1,4 +1,4 @@
-package goalservice
+package goalsvc
 
 import (
 	"dyna-agent/internal/goals"

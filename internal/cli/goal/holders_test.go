@@ -1,7 +1,7 @@
 package goal
 
 import (
-	"dyna-agent/internal/goalservice"
+	"dyna-agent/internal/goalsvc"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife/recordtest"
@@ -21,7 +21,7 @@ func TestHolderSiblingsUsePostEligibility(t *testing.T) {
 		t.Fatal(err)
 	}
 	mgr := &subagent.Manager{Store: &subagent.Store{Root: filepath.Join(root, "sessions")}, Rooms: rooms}
-	s := goalservice.New()
+	s := goalsvc.New()
 	s.Notify = notify.New(rooms, mgr)
 	var caller subagent.Info
 	var want string

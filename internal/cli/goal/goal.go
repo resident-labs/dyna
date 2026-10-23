@@ -8,21 +8,21 @@ import (
 
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/goals"
-	"dyna-agent/internal/goalservice"
+	"dyna-agent/internal/goalsvc"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/room"
 	"github.com/spf13/cobra"
 )
 
 type Options struct {
-	Service func() *goalservice.Service
+	Service func() *goalsvc.Service
 	Client  *engineclient.Client
 }
 
 func NewCommand() *cobra.Command { return Command(Options{}) }
 func Command(o Options) *cobra.Command {
 	if o.Service == nil {
-		o.Service = goalservice.New
+		o.Service = goalsvc.New
 	}
 
 	if o.Client == nil {
@@ -362,7 +362,7 @@ func isGoalCommandWord(root *cobra.Command, text string) bool {
 }
 
 // Caller resolves the room and caller shared by goal and rules commands.
-func Caller(s *goalservice.Service, roomRef string) (*goalservice.Service, room.Record, string, error) {
+func Caller(s *goalsvc.Service, roomRef string) (*goalsvc.Service, room.Record, string, error) {
 	ref := roomRef
 	by := "owner"
 	if cur, ok := mode.CurrentSession(); ok {

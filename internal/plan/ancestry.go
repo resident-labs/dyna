@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"dyna-agent/internal/engineclient"
 )
 
 // AncestryWriter persists a parent through the caller's engine boundary.
@@ -21,4 +23,11 @@ func stampAncestry(ctx context.Context, write AncestryWriter, dir, parent string
 		return "", fmt.Errorf("%w: %w", ErrAncestry, err)
 	}
 	return result, nil
+}
+
+// StampAncestry is the shared engine writer for workflow services and runners.
+func StampAncestry(ctx context.Context, dir, parent string) (string, error) {
+	var result string
+	err := engineclient.New("").Call(ctx, "StampPlanAncestry", []any{dir, parent}, &result)
+	return result, err
 }

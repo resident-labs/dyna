@@ -34,7 +34,6 @@ import (
 	"dyna-agent/internal/instructions"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/plan"
-	"dyna-agent/internal/planclient"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/scratch"
@@ -1288,7 +1287,7 @@ func truncate(s string, n int) string {
 }
 
 func prepareScript(o Options, workflowID string) (string, string, error) {
-	opts := plan.Options{WriteAncestry: planclient.StampAncestry,
+	opts := plan.Options{WriteAncestry: plan.StampAncestry,
 		SourcePath: o.ScriptPath, WorkDir: o.WorkDir, WorkflowDir: o.WorkflowDir,
 		ResumedFrom: o.ResumeFrom,
 	}
