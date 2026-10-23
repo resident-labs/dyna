@@ -64,8 +64,9 @@ type signInSpec struct {
 // signInSpecs lists the harnesses that sign in through the runner rather than a
 // terminal. Every other harness keeps its terminal.
 var signInSpecs = map[string]signInSpec{
-	"codex": {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},
-	"grok":  {Argv: grokDeviceArgv, Parse: parseGrokSignIn},
+	"codex":    {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},
+	"grok":     {Argv: grokDeviceArgv, Parse: parseGrokSignIn},
+	"opencode": {Argv: openCodeDeviceArgv, Parse: parseOpenCodeSignIn},
 }
 
 var (
