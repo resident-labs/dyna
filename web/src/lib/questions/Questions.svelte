@@ -4,7 +4,7 @@
   import { errorText } from '../errorText.ts'
   import Avatar from '../ui/Avatar.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
-  import TabHeader from './TabHeader.svelte'
+  import TabHeader from '../rooms/TabHeader.svelte'
   import QuestionFiles from './QuestionFiles.svelte'
   import { markdown, ago } from '../ui/format.ts'
   import { alsoAsked, orderQuestions, answeredLine } from './questions.ts'

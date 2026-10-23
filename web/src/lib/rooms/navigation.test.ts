@@ -14,7 +14,7 @@ import { detailHref, parseDetailHref } from '../ui/details.ts'
 import { callTarget } from '../voice/callRequests.ts'
 import { prHash, parsePRHash, issueHash, parseIssueHash, parseFileHash } from '../prs/prlink.ts'
 import { roomIDPattern as ROOM, postIDPattern as POST, postHref } from '../ui/posts.ts'
-import { questionID } from './questions.ts'
+import { questionID } from '../questions/questions.ts'
 import { isShellResult } from './feedRows.ts'
 import { trimFeed } from './feedWindow.ts'
 import { mergeFeedPage, rerouteAnchors, withViews } from './feedPages.ts'
@@ -921,7 +921,7 @@ test('an older page cannot trim the post a reader moved to while it was loading'
 
 test('opening a goal that no loaded page holds loads it, and a done goal opens under Done', async () => {
   const { c } = navigation()
-  const { goalFilter } = await import('./goals.ts')
+  const { goalFilter } = await import('../goals/goals.ts')
   const old = { id: 'g9', state: 'done', text: 'Old goal' }
   const calls: unknown[][] = []
   c.goals = [{ id: 'g1', state: 'active' }]
