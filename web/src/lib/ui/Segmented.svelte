@@ -29,5 +29,9 @@
   .seg button.on { background: var(--select); color: var(--ink); }
   .seg.small { padding: 2px; }
   .seg.small button { padding: 4px 10px; font-size: var(--t-sm); }
+  /* Each segment owns its touch area; neighboring targets never overlap. */
+  @media (pointer: coarse) {
+    .seg button, .seg.small button { min-block-size: 44px; min-inline-size: 44px; }
+  }
   @media (max-width: 760px) { .seg button, .seg.small button { padding: 8px 12px; } }
 </style>
