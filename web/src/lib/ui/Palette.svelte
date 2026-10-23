@@ -283,6 +283,7 @@
           {/if}
         </div>
       </div>
+      <div class="foot keyboard-help"><span class="keys"><span><kbd>Enter</kbd> Create room</span><span><kbd>Esc</kbd> Close</span></span></div>
     {:else}
       <div class="top">
         {#if step === 'path'}
@@ -379,10 +380,10 @@
       </div>
       <div class="foot">
         {#if step === 'path'}
-          <span class="keys"><kbd>↑↓</kbd> move <kbd>Enter</kbd> open folder <kbd>Ctrl+Enter</kbd> use this path</span>
+          <span class="keys"><span><kbd>↑ ↓</kbd> Move</span><span><kbd>Enter</kbd> {pick < 0 ? 'Use path' : 'Open folder'}</span><span><kbd>Ctrl/⌘ Enter</kbd> Use path</span><span><kbd>Esc</kbd> Close</span>{#if text === ''}<span><kbd>Backspace</kbd> Back</span>{/if}</span>
           <button class="go" disabled={!pathMode || busy} onclick={submit}>Create room</button>
         {:else}
-          <span class="keys"><kbd>↑↓</kbd> move <kbd>Enter</kbd> run <kbd>Esc</kbd> close</span>
+          <span class="keys"><span><kbd>↑ ↓</kbd> Move</span><span><kbd>Enter</kbd> Open</span><span><kbd>Esc</kbd> Close</span></span>
         {/if}
       </div>
     {/if}
@@ -471,7 +472,9 @@
   .empty { color: var(--muted); font-size: var(--t-ui); padding: 10px; margin: 0; }
   .empty.err { color: var(--coral); }
   .foot { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); padding: var(--s2) var(--s3); border-top: 1px solid var(--line-soft); }
-  .keys { color: var(--faint); font-size: var(--t-sm); }
+  .keyboard-help { flex-shrink: 0; }
+  .keys { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--faint); font-size: var(--t-sm); }
+  .keys > span { white-space: nowrap; }
   kbd { font: inherit; font-family: var(--mono); font-size: var(--t-cap); background: var(--raise); border-radius: 4px; padding: 1px 5px; margin: 0 2px 0 6px; color: var(--muted); }
   kbd:first-child { margin-left: 0; }
   .go { background: var(--iris); color: #18161d; border-radius: 6px; padding: var(--s2) 14px; font-size: var(--t-body); font-weight: 500; min-height: 36px; }
@@ -498,7 +501,7 @@
     .card { width: 100%; max-height: 100dvh; height: 100dvh; border-radius: 0; border: 0; }
     .x { display: grid; place-items: center; }
     .row { min-height: 48px; font-size: var(--t-lead); }
-    .keys { display: none; }
+    .keys, .keyboard-help { display: none; }
     .foot { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
     .foot .go, .actions .go { width: 100%; min-height: 44px; }
     .actions { display: block; }
