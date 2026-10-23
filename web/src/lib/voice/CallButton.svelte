@@ -1,12 +1,13 @@
-<script>
+<script lang="ts">
   // The room header's "Call Voice" button. It shows only once voice is set
   // up (VoiceStatus.available). During this room's call it shows the call's
   // length instead; during a call elsewhere it asks to move the call here.
   import { voiceCall, clock } from './voiceCall.ts'
   import { offerCall } from './callState.ts'
   import { icons } from './icons.ts'
+  import type { Room } from '../api/room.ts'
 
-  let { room } = $props()
+  let { room }: { room: Room } = $props()
   let now = $state(Date.now())
   let offer = $derived(offerCall($voiceCall, room.id))
 

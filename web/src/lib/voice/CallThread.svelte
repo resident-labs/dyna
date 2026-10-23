@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // The call's conversation rows (design option A): who spoke, to whom, and
   // how it reached the call, Voice's requests to root and its room checks as
   // quiet activity lines, then the owner's words as they are heard. A shared
@@ -8,25 +8,35 @@
   import VoiceRelay from './VoiceRelay.svelte'
   import { icons } from './icons.ts'
   import { NAMES, shareTitle, shareWhat } from './conversation.ts'
+  import type { CallRow, SharedItem, Speaker } from './conversation.ts'
 
-  let { rows, partial = '', onopen } = $props()
-  const HUES = { you: 4, voice: 3, root: 7 }
-  const time = (ts) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  let { rows, partial = '', onopen }: {
+    rows: CallRow[]
+    partial?: string
+    onopen: (share: SharedItem) => void
+  } = $props()
+  const HUES: Record<Speaker, number> = { you: 4, voice: 3, root: 7 }
+  // nameOf names who spoke; a row that names no speaker shows no name.
+  const nameOf = (who: Speaker | undefined) => (who ? NAMES[who] : '')
+  // hueOf is the speaker's colour; a row that names none takes the default.
+  const hueOf = (who: Speaker | undefined) => (who ? HUES[who] : undefined)
+  const time = (ts: number) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 </script>
 
 {#each rows as r (r.key)}
   {#if r.share}
-    <VoiceRelay icon="shared" label="{NAMES[r.share.who]} shared {shareWhat(r.share.att)}" text={shareTitle(r.share.att)} onopen={() => onopen(r.share)} />
+    {@const share = r.share}
+    <VoiceRelay icon="shared" label="{NAMES[share.who]} shared {shareWhat(share.att)}" text={shareTitle(share.att)} onopen={() => onopen(share)} />
   {:else if r.tool}
     <VoiceRelay icon="search" label={r.tool.label} state={r.tool.state} />
   {:else if r.ask}
-    <VoiceRelay icon="mic" label="Started" text={r.post.text} state={r.state} />
-  {:else}
+    <VoiceRelay icon="mic" label="Started" text={r.post?.text ?? ''} state={r.state} />
+  {:else if r.post}
     <article class="tp">
-      <div class="gutter"><Avatar name={NAMES[r.who]} hue={HUES[r.who]} owner={r.who === 'you'} size={28} /></div>
+      <div class="gutter"><Avatar name={nameOf(r.who)} hue={hueOf(r.who)} owner={r.who === 'you'} size={28} /></div>
       <div>
         <header>
-          <span class="name hue-{HUES[r.who]}">{NAMES[r.who]}</span>
+          <span class="name hue-{hueOf(r.who)}">{nameOf(r.who)}</span>
           <time>{time(r.post.ts)}</time>
           <span class="to">→ {r.to}</span>
           {#if r.via}<span class="to">via Voice</span>{/if}

@@ -1,13 +1,20 @@
-<script>
+<script lang="ts">
   // One quiet activity line in a conversation, outside any message: Voice
   // started work, Voice checked something, or someone shared a file. The
   // call window and the DM transcript show it.
   import { icons } from './icons.ts'
+  import type { IconName } from './icons.ts'
 
   // icon names an icons.ts path; text is the request, quoted when present;
   // state is working, answered, stopped, running, done, failed, queued or
   // delivered. onopen, when given, adds an "open" link.
-  let { icon, label, text = '', state = '', onopen = null } = $props()
+  let { icon, label, text = '', state = '', onopen = null }: {
+    icon: IconName
+    label: string
+    text?: string
+    state?: string
+    onopen?: (() => void) | null
+  } = $props()
 </script>
 
 <div class="line" class:failed={state === 'failed'}>
