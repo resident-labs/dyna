@@ -29,7 +29,11 @@
       spellcheck="true"
       {placeholder}
       oninput={() => { grow(); oninput() }}
-      {onkeydown}
+      onkeydown={(event) => {
+        // IME confirmation belongs to the input, not completion or sending.
+        if (event.isComposing || event.keyCode === 229) return
+        onkeydown?.(event)
+      }}
       {onclick}
       onpaste={attachments.paste}
       onfocus={grow}
