@@ -628,6 +628,7 @@ test('Antigravity sign-in does not promise a personal login copy', () => {
 test('sign-in card words each step', () => {
   assert.equal(harnessState.signInStatus({ phase: 'starting' }), 'Starting sign-in…')
   assert.equal(harnessState.signInStatus({ phase: 'waiting' }), 'Waiting for you to approve the sign-in.')
+  assert.equal(harnessState.signInStatus({ phase: 'waiting', message: 'Paste the final redirect URL.' }), 'Paste the final redirect URL.')
   assert.equal(harnessState.signInStatus({ phase: 'verifying' }), 'Checking the sign-in…')
   assert.equal(harnessState.signInStatus({ phase: 'succeeded' }), 'Signed in.')
   assert.equal(harnessState.signInStatus({ phase: 'cancelled' }), 'Sign-in cancelled.')

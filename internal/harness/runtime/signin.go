@@ -55,8 +55,10 @@ type signInSpec struct {
 	Argv func([]string) []string
 	// Parse updates st from one output line, with ANSI codes already removed.
 	Parse func(st *SignInState, line string)
-	// AcceptsPaste keeps stdin open and shows a paste box.
+	// AcceptsPaste shows a paste box and keeps stdin open unless Respond is set.
 	AcceptsPaste bool
+	// Respond handles a pasted response instead of writing it to stdin.
+	Respond func(context.Context, SignInState, string) error
 	// Timeout bounds the wait for the owner. Zero uses signInTimeout.
 	Timeout time.Duration
 }
@@ -64,6 +66,7 @@ type signInSpec struct {
 // signInSpecs lists the harnesses that sign in through the runner rather than a
 // terminal. Every other harness keeps its terminal.
 var signInSpecs = map[string]signInSpec{
+	"antigravity": {Parse: parseAntigravitySignIn, AcceptsPaste: true, Respond: respondAntigravitySignIn, Timeout: 5 * time.Minute},
 	"claude-code": {Parse: parseClaudeCodeSignIn, AcceptsPaste: true},
 	"codex":       {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},
 	"grok":        {Argv: grokDeviceArgv, Parse: parseGrokSignIn},
@@ -112,6 +115,7 @@ type privateSignIn struct {
 	mu     sync.Mutex
 	state  SignInState
 	stdin  io.WriteCloser
+	paste  func(SignInState, string) error
 	cancel context.CancelFunc
 	done   chan struct{}
 	closed bool
@@ -135,12 +139,29 @@ func (s *privateSignIn) set(fn func(*SignInState)) {
 	fn(&s.state)
 }
 
-// respond sends a pasted code to a login that reads one from stdin.
+// respond sends a pasted response through its handler or the login stdin.
 func (s *privateSignIn) respond(code string) error {
 	s.mu.Lock()
-	stdin, closed, accepts := s.stdin, s.closed, s.state.AcceptsPaste
+	stdin, closed, st, paste := s.stdin, s.closed, s.state, s.paste
+	if closed || !st.AcceptsPaste || st.final() {
+		s.mu.Unlock()
+		return errors.New("This sign-in does not take a pasted response.")
+	}
+	if paste != nil {
+		if st.Phase != signInWaiting {
+			s.mu.Unlock()
+			return errors.New("Wait for the sign-in link before sending a response.")
+		}
+		s.state.Phase = signInVerifying
+		s.mu.Unlock()
+		if err := paste(st, code); err != nil {
+			s.set(func(state *SignInState) { state.Phase = signInWaiting })
+			return err
+		}
+		return nil
+	}
 	s.mu.Unlock()
-	if closed || stdin == nil || !accepts {
+	if stdin == nil {
 		return errors.New("This sign-in does not take a pasted code.")
 	}
 	if _, err := io.WriteString(stdin, code+"\n"); err != nil {
@@ -225,7 +246,7 @@ func (a *Runtime) RespondPrivateRuntimeLogin(id, text string) error {
 	}
 	code := strings.TrimSpace(text)
 	if code == "" || len(code) > 4096 || strings.ContainsAny(code, "\r\n") {
-		return errors.New("Paste the sign-in code on one line.")
+		return errors.New("Paste the sign-in code or redirect URL on one line.")
 	}
 	return login.signIn.respond(code)
 }
@@ -247,6 +268,9 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 	}
 	ctx, cancel := context.WithTimeout(a.lifetimeContext(), timeout)
 	signIn := &privateSignIn{state: SignInState{Phase: signInStarting, AcceptsPaste: spec.AcceptsPaste}, cancel: cancel, done: make(chan struct{})}
+	if spec.Respond != nil {
+		signIn.paste = func(st SignInState, text string) error { return spec.Respond(ctx, st, text) }
+	}
 	out, writer := io.Pipe()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = flow.Cwd
@@ -262,7 +286,7 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.WaitDelay = 5 * time.Second
-	if spec.AcceptsPaste {
+	if spec.AcceptsPaste && spec.Respond == nil {
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
 			cancel()

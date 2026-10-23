@@ -64,8 +64,8 @@
   {#if signIn.acceptsPaste && running}
     <form class="paste" onsubmit={(e) => { e.preventDefault(); send() }}>
       <label>
-        <span class="muted small">Paste the code from your browser</span>
-        <input bind:value={pasted} autocomplete="off" spellcheck="false" disabled={busy} aria-label="Sign-in code" />
+        <span class="muted small">Paste the code or redirect URL from your browser</span>
+        <input bind:value={pasted} autocomplete="off" spellcheck="false" disabled={busy} aria-label="Sign-in response" />
       </label>
       <button type="submit" class="btn" disabled={busy || !pasted.trim()}>Continue</button>
     </form>
