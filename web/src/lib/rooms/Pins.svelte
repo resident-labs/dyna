@@ -1,4 +1,5 @@
-<script>
+<script lang="ts">
+  import type { Attachment, Post, PostDetail, Room } from '../api/room.ts'
   import { speaker } from '../ui/posts.ts'
   import Avatar from '../ui/Avatar.svelte'
   import PostFiles from '../ui/PostFiles.svelte'
@@ -8,10 +9,19 @@
 
   // The Pinned panel. It takes the member list's place, like Discord. Each
   // item reuses Files, so attachments and HTML cards render as in the feed.
-  let { room, pins = [], onjump, onunpin, onopenfile, onclose, ondetail } = $props()
+  interface Props {
+    room: Room
+    pins?: Post[]
+    onjump: (id: string) => void
+    onunpin: (post: Post) => unknown
+    onopenfile?: (attachment: Attachment) => void
+    onclose: () => void
+    ondetail: (detail: PostDetail) => void
+  }
+  let { room, pins = [], onjump, onunpin, onopenfile, onclose, ondetail }: Props = $props()
 
   // The label comes from Go (roomsvc.SpeakerLabel), as in the feed.
-  const who = (p) => speaker(p, room.name)
+  const who = (p: Post): string => speaker(p, room.name)
   let query = $state('')
   let needle = $derived(query.trim().toLocaleLowerCase())
   let filtered = $derived(pins.filter(p => !needle || [postParts(p).text, who(p),
@@ -50,7 +60,7 @@
         {:else if postParts(p).text}<div class="prose">{@html markdown(postParts(p).text)}</div>{/if}
         <PostFiles roomId={room.id} post={p} onopen={onopenfile} />
         <footer>
-          <span class="by" title={p.pinnedBy}>pinned {ago(new Date(p.pinnedAt).toISOString())}</span>
+          <span class="by" title={p.pinnedBy}>pinned {ago(new Date(p.pinnedAt ?? 0).toISOString())}</span>
           <button onclick={() => onjump(p.id)}>Jump</button>
           <button class="danger" onclick={() => onunpin(p)}>Unpin</button>
         </footer>

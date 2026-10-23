@@ -1,6 +1,12 @@
-<script>
+<script lang="ts">
+  import type { Goal } from '../api/goal.ts'
   import { goalTone } from './goals.ts'
-  let { goal = { state: 'active' }, size = 14, neutral = false } = $props()
+  interface Props {
+    goal?: Pick<Goal, 'state'>
+    size?: number
+    neutral?: boolean
+  }
+  let { goal = { state: 'active' }, size = 14, neutral = false }: Props = $props()
 </script>
 <svg width={size} height={size} viewBox="0 0 14 14" class="glyph {neutral ? 'neutral' : goalTone(goal)}" aria-hidden="true">
   <circle cx="7" cy="7" r="5.8" stroke="currentColor" stroke-width="2" fill={goal.state === 'done' ? 'currentColor' : 'none'} />

@@ -1,5 +1,7 @@
-<script>
+<script lang="ts">
+  import type { Attachment, Question } from '../api/room.ts'
   import { tick } from 'svelte'
+  import { errorText } from '../errorText.ts'
   import Avatar from '../ui/Avatar.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import TabHeader from './TabHeader.svelte'
@@ -7,19 +9,27 @@
   import { markdown, ago } from '../ui/format.ts'
   import { alsoAsked, orderQuestions, answeredLine } from './questions.ts'
 
-  let { roomId, questions = [], focusId = '', focusRequest = 0, onanswer, onopenfile } = $props()
+  interface Props {
+    roomId: string
+    questions?: Question[]
+    focusId?: string
+    focusRequest?: number
+    onanswer: (id: string, choice: string, text: string) => unknown
+    onopenfile: (attachment: Attachment) => void
+  }
+  let { roomId, questions = [], focusId = '', focusRequest = 0, onanswer, onopenfile }: Props = $props()
   let filter = $state('open')
   let focused = $state('')
-  let pane = $state()
-  let replies = $state({})
-  let busy = $state(new Set())
+  let pane: HTMLElement | undefined = $state()
+  let replies = $state<Record<string, string>>({})
+  let busy = $state(new Set<string>())
   let error = $state('')
   let shown = $derived(orderQuestions(questions.filter((q) => q.to === 'owner' || q.id === focusId), filter))
 
-  async function focus(id, scroll = true) {
+  async function focus(id: string, scroll = true) {
     focused = id
     await tick()
-    const el = pane?.querySelector(`[data-question="${id}"]`)
+    const el = pane?.querySelector<HTMLElement>(`[data-question="${id}"]`)
     el?.focus({ preventScroll: true })
     if (scroll) el?.scrollIntoView({ block: 'nearest' })
   }
@@ -31,27 +41,30 @@
     if (q) { appliedFocus = request; filter = q.state; focus(q.id) }
   }
   $effect(applyFocusRequest)
-  async function answer(q, choice = '', text = '') {
+  async function answer(q: Question, choice = '', text = '') {
     if (busy.has(q.id) || (!choice && !text.trim())) return
     busy = new Set([...busy, q.id])
     error = ''
     try { await onanswer(q.id, choice, text); replies = { ...replies, [q.id]: '' } }
-    catch (e) { error = String(e?.message || e) }
+    catch (e) { error = errorText(e) }
     finally { busy = new Set([...busy].filter((id) => id !== q.id)) }
   }
-  function keydown(e) {
-    if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest('input, textarea, [contenteditable], [role="dialog"]')) return
+  function keydown(e: KeyboardEvent) {
+    if (e.ctrlKey || e.metaKey || e.altKey || (e.target instanceof Element && e.target.closest('input, textarea, [contenteditable], [role="dialog"]'))) return
     if (filter !== 'open' || !shown.length) return
     const index = shown.findIndex((q) => q.id === focused)
     if (e.key === 'j' || e.key === 'k') {
       e.preventDefault()
-      focus(shown[Math.max(0, Math.min(shown.length - 1, index + (e.key === 'j' ? 1 : -1)))].id)
+      const next = shown[Math.max(0, Math.min(shown.length - 1, index + (e.key === 'j' ? 1 : -1)))]
+      if (next) focus(next.id)
     } else {
       const q = shown[index < 0 ? 0 : index]
-      if (/^[1-6]$/.test(e.key) && q.options?.[Number(e.key) - 1]) {
-        e.preventDefault(); answer(q, q.options[Number(e.key) - 1])
+      if (!q) return
+      const option = /^[1-6]$/.test(e.key) ? q.options?.[Number(e.key) - 1] : undefined
+      if (option) {
+        e.preventDefault(); answer(q, option)
       } else if (e.key === 'r') {
-        e.preventDefault(); pane?.querySelector(`[data-question="${q.id}"] input`)?.focus()
+        e.preventDefault(); pane?.querySelector<HTMLInputElement>(`[data-question="${q.id}"] input`)?.focus()
       }
     }
   }
@@ -59,7 +72,7 @@
 
 <svelte:window onkeydown={keydown} />
 <section class="questions" bind:this={pane} aria-label="Questions">
-  <TabHeader title="Questions" blurb="Agents keep working while they wait. Answer when you can." filters={['open', 'answered', 'withdrawn'].map((f) => ({ id: f, label: f[0].toUpperCase() + f.slice(1) }))} bind:filter />
+  <TabHeader title="Questions" blurb="Agents keep working while they wait. Answer when you can." filters={['open', 'answered', 'withdrawn'].map((f) => ({ id: f, label: f.charAt(0).toUpperCase() + f.slice(1) }))} bind:filter />
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="list">
     {#if !shown.length}
@@ -67,7 +80,7 @@
     {/if}
     {#each shown as q (q.id)}
       <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-      <article class="question" class:focused={focused === q.id} class:compact={q.state !== 'open'} tabindex="-1" data-question={q.id} onfocusin={() => focused = q.id} onclick={(e) => { focused = q.id; if (!e.target.closest('button, input, a')) e.currentTarget.focus() }}>
+      <article class="question" class:focused={focused === q.id} class:compact={q.state !== 'open'} tabindex="-1" data-question={q.id} onfocusin={() => focused = q.id} onclick={(e) => { focused = q.id; const target = e.target instanceof Element ? e.target : null; if (!target?.closest('button, input, a')) e.currentTarget.focus() }}>
         {#if q.state === 'open'}
           <div class="top">
             <Avatar name={q.askerName} hue={q.askerHue} emoji={q.askerEmoji} owner={q.asker === 'owner'} size={24} ring="var(--raise)" />
@@ -83,7 +96,7 @@
             {#each q.options ?? [] as option, i}
               <button class="option" class:gold={i === 0} type="button" disabled={busy.has(q.id)} onclick={() => answer(q, option)}>{option}</button>
             {/each}
-            <div class="reply-field"><input aria-label="Reply to {q.id}" placeholder="Reply…" value={replies[q.id] ?? ''} oninput={(e) => replies = { ...replies, [q.id]: e.target.value }} disabled={busy.has(q.id)} maxlength="2000" enterkeyhint="send" /><button class="send" type="submit" aria-label="Send answer to {q.id}" disabled={busy.has(q.id) || !(replies[q.id] ?? '').trim()}>Send</button></div>
+            <div class="reply-field"><input aria-label="Reply to {q.id}" placeholder="Reply…" value={replies[q.id] ?? ''} oninput={(e) => replies = { ...replies, [q.id]: e.currentTarget.value }} disabled={busy.has(q.id)} maxlength="2000" enterkeyhint="send" /><button class="send" type="submit" aria-label="Send answer to {q.id}" disabled={busy.has(q.id) || !(replies[q.id] ?? '').trim()}>Send</button></div>
           </form>
           {@const others = alsoAsked(questions, q)}
           {#if others.length}
@@ -94,7 +107,7 @@
           <div class="outcome">
             <Avatar name={q.askerName} hue={q.askerHue} emoji={q.askerEmoji} owner={q.asker === 'owner'} size={16} ring="var(--raise)" />
             <span class="asker hue-{q.askerHue}">{q.askerName}</span><span>·</span><span class="mono">{q.id}</span><span>·</span>
-            {#if q.answer}<span class="answered"><span aria-hidden="true">✓</span> {answeredLine(q)} · {ago(q.answer.at)}</span>
+            {#if q.answer}{@const answered = q.answer}<span class="answered"><span aria-hidden="true">✓</span> {answeredLine({ answererName: q.answererName, answer: answered })} · {ago(answered.at)}</span>
             {:else if q.withdrawn}<span class="withdrawn">Withdrawn: {q.withdrawn.reason} · {ago(q.withdrawn.at)}</span>{/if}
           </div>
         {/if}

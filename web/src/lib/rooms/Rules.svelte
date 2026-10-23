@@ -1,6 +1,8 @@
-<script>
+<script lang="ts">
+  import type { Member } from '../api/room.ts'
   import { tick } from 'svelte'
   import { api } from '../../api.ts'
+  import { errorText } from '../errorText.ts'
   import Avatar from '../ui/Avatar.svelte'
   import Confirm from '../ui/Confirm.svelte'
   import TabHeader from './TabHeader.svelte'
@@ -8,18 +10,39 @@
   import Row from '../ui/Row.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import { agentRule, globalRule, ruleFilter, ruleUsage, ruleTime, scopeLabels } from './rules.ts'
+  import type { RoomRule } from './rules.ts'
+
+  // A rule set as the Rules API returns it. Its fields are optional because a
+  // parent may hold only the hash that picks the set.
+  interface RulesPane {
+    hash?: string
+    rules?: RoomRule[] | null
+    used?: number
+    max?: number
+  }
+
   // view is {room, global, hash}: the Rules API response {rules, used, max,
   // hash} for this room and for all rooms. editing is true while an inline
   // edit is open; App holds new lists back until it closes.
-  let { roomId, view = null, members = [], ownerHue = 0, editing = $bindable(false), onchanged } = $props()
+  interface Props {
+    roomId: string
+    view?: { room: RulesPane; global: RulesPane } | null
+    members?: Member[]
+    ownerHue?: number
+    editing?: boolean
+    onchanged?: () => unknown
+  }
+  let { roomId, view = null, members = [], ownerHue = 0, editing = $bindable(false), onchanged = () => {} }: Props = $props()
+  const SCOPES = ['room', 'global'] as const
+  type Scope = (typeof SCOPES)[number]
   let filter = $state('all')
-  let scope = $state('room')
+  let scope = $state<Scope>('room')
   let text = $state('')
   let busy = $state(false)
   let error = $state('')
-  let edit = $state(null)
+  let edit = $state<{ id: string; text: string } | null>(null)
   let editGeneration = 0
-  let removing = $state(null)
+  let removing = $state<RoomRule | null>(null)
   let now = $state(Date.now())
   $effect(() => { const timer = setInterval(() => (now = Date.now()), 60000); return () => clearInterval(timer) })
   // Unmounting with an edit open (another Room settings section) ends the edit.
@@ -30,20 +53,20 @@
   ])
   let agents = $derived(sections.reduce((n, s) => n + s.rules.filter(agentRule).length, 0))
   let usage = $derived(view?.[scope] ? `${ruleUsage(view[scope])} characters` : '')
-  const member = (id) => members.find((m) => m.id === id || m.address === id)
-  const say = (e) => (error = String(e?.message || e))
+  const member = (id: string) => members.find((m) => m.id === id || m.address === id)
+  const say = (e: unknown) => (error = errorText(e))
   async function add() {
     busy = true
     try { await api.addRule(roomId, scope === 'global', text); text = ''; error = ''; await onchanged() }
     catch (e) { say(e) } finally { busy = false }
   }
-  async function startEdit(r) {
+  async function startEdit(r: RoomRule) {
     editGeneration++
-    edit = { id: r.id, text: r.text }
+    edit = { id: r.id, text: r.text ?? '' }
     await tick()
     document.getElementById(`rule-edit-${r.id}`)?.focus()
   }
-  async function restoreEditFocus(id, generation, allowed = () => true) {
+  async function restoreEditFocus(id: string, generation: number, allowed = () => true) {
     await tick()
     if (generation === editGeneration && !edit && allowed()) document.getElementById(`rule-control-${id}`)?.focus()
   }
@@ -53,7 +76,7 @@
     edit = null
     if (id) await restoreEditFocus(id, generation)
   }
-  function editKey(e) {
+  function editKey(e: KeyboardEvent) {
     if (e.isComposing || e.keyCode === 229) return
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save() }
     else if (e.key === 'Escape') { e.stopPropagation(); cancelEdit() }
@@ -76,7 +99,7 @@
       busy = false
     }
   }
-  async function remove(r) {
+  async function remove(r: RoomRule) {
     busy = true
     try { await api.removeRule(roomId, globalRule(r), r.id); removing = null; error = ''; await onchanged() }
     catch (e) { say(e); removing = null } finally { busy = false }
@@ -85,7 +108,7 @@
 <section class="rules" aria-label="Rules">
   <TabHeader title="Rules" blurb="Standing rules for agents. Owner rules win over agent rules." filters={[{ id: 'all', label: 'All' }, { id: 'owner', label: 'Owner' }, { id: 'agents', label: `Agents (${agents})` }]} bind:filter {usage} />
   <div class="add-rule"><ComposerBox label="Rule text" placeholder="Write a standing rule in plain English…" submitLabel="Add rule" maxlength={500} bind:draft={text} {busy} canSend={!!text.trim()} bad={!!error} onsend={add} mode="" expand>
-    {#snippet tools()}<span class="scope" role="radiogroup" aria-label="Rule scope">{#each ['room', 'global'] as id}<button type="button" role="radio" aria-checked={scope === id} class:sel={scope === id} onclick={() => (scope = id)}>{scopeLabels[id]}</button>{/each}</span>{/snippet}
+    {#snippet tools()}<span class="scope" role="radiogroup" aria-label="Rule scope">{#each SCOPES as id}<button type="button" role="radio" aria-checked={scope === id} class:sel={scope === id} onclick={() => (scope = id)}>{scopeLabels[id]}</button>{/each}</span>{/snippet}
   </ComposerBox>{#if error}<p class="error" role="alert">{error}</p>{/if}</div>
   <div class="list">
     {#each sections as sec (sec.id)}
@@ -114,7 +137,7 @@
     {/each}
   </div>
 </section>
-{#if removing}<Confirm title="Remove this rule?" lines={[`${removing.id}: ${removing.text}`, globalRule(removing) ? 'The owner wrote it. Agents in every room stop getting it when their harness next starts.' : 'The owner wrote it. Agents stop getting it on their next turn.']} action="Remove" {busy} onconfirm={() => remove(removing)} oncancel={() => (removing = null)} />{/if}
+{#if removing}{@const target = removing}<Confirm title="Remove this rule?" lines={[`${target.id}: ${target.text ?? ''}`, globalRule(target) ? 'The owner wrote it. Agents in every room stop getting it when their harness next starts.' : 'The owner wrote it. Agents stop getting it on their next turn.']} action="Remove" {busy} onconfirm={() => remove(target)} oncancel={() => (removing = null)} />{/if}
 <style>
   .add-rule { margin: 0 var(--s4) 18px; }
   .error { color: var(--coral); font-size: var(--t-ui); margin: var(--s2) 0; }
