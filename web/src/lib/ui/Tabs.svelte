@@ -1,12 +1,26 @@
-<script>
+<script lang="ts">
   import { tick } from 'svelte'
   // A row of tabs. Arrow keys, Home and End move between them. Each tab is
   // {id, label, live?, count?, aria?}; onselect runs after a pick.
-  let { tabs, tab = $bindable(), label, onselect = null } = $props()
-  let list = $state()
+  interface Tab {
+    id: string
+    label: string
+    live?: boolean
+    count?: number
+    aria?: string
+  }
+  interface Props {
+    tabs: Tab[]
+    tab?: string
+    label: string
+    onselect?: ((id: string) => void) | null
+  }
+  let { tabs, tab = $bindable(''), label, onselect = null }: Props = $props()
+  let list = $state<HTMLDivElement | undefined>()
 
   function reveal() {
-    const selected = list?.querySelector('[aria-selected="true"]')
+    if (!list) return
+    const selected = list.querySelector<HTMLElement>('[aria-selected="true"]')
     if (!selected) return
     const strip = list.getBoundingClientRect()
     const item = selected.getBoundingClientRect()
@@ -25,20 +39,22 @@
     return () => { active = false; observer.disconnect() }
   })
 
-  function pick(id) {
+  function pick(id: string) {
     tab = id
     onselect?.(id)
   }
 
-  function keydown(e) {
+  function keydown(e: KeyboardEvent) {
     if (!tabs.length) return
     const i = tabs.findIndex((t) => t.id === tab)
     const j = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -2
     if (j === -2) return
     e.preventDefault()
-    pick(tabs[(j + tabs.length) % tabs.length].id)
+    const next = tabs[(j + tabs.length) % tabs.length]
+    if (!next) return
+    pick(next.id)
     tick().then(() => {
-      list?.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true })
+      list?.querySelector<HTMLElement>('[aria-selected="true"]')?.focus({ preventScroll: true })
       reveal()
     })
   }
