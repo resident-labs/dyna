@@ -514,6 +514,7 @@ func (g GitHub) snapshotFromPull(ctx context.Context, r Ref, pull Pull, savedCI 
 			return s, workflowErr
 		}
 	}
+	s.OwnerLogin = g.ownerLogin(ctx, r)
 	return s, err
 }
 
