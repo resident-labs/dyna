@@ -34,8 +34,9 @@
     onmessages?: (() => void) | null
     draft?: string
     ondraft?: ((draft: string) => void) | null
+    onpending?: ((pending: boolean) => void) | null
   }
-  let { session = null, room, members = [], name = '', c = null, computerCount = 1, driving = false, onsend, onopenfile, onpost = null, onmessages = null, draft: saved = '', ondraft = null }: Props = $props()
+  let { session = null, room, members = [], name = '', c = null, computerCount = 1, driving = false, onsend, onopenfile, onpost = null, onmessages = null, draft: saved = '', ondraft = null, onpending = null }: Props = $props()
 
   // shape is the chat's current form; the rules that move it are in chatState.ts.
   let shape = $state<ChatShape>(TUCKED)
@@ -47,7 +48,8 @@
   let busy = $state(false)
   let sendError = $state('')
   const attachments = attachmentDraft({ room: () => room?.id, error: (m: string) => (sendError = m), focus: () => field?.focus(), disabled: () => !!m?.closed, noun: 'message' })
-  onDestroy(() => attachments.destroy())
+  $effect(() => { onpending?.(busy || $attachments.items.length > 0) })
+  onDestroy(() => { attachments.destroy(); onpending?.(false) })
 
   const m = $derived(session?.member)
   const dm = $derived(session ? dmView(session, room, { reasoning: $showReasoning, compaction: $showCompaction }, [], members.filter((child) => !!m?.id && child.parent === m?.id)) : null)
