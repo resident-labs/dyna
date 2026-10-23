@@ -47,6 +47,8 @@
 
   let list = $state<Loaded | null>(null)
   let error = $state('')
+  let filterQuery = $state('')
+  let filterInput: HTMLInputElement | undefined = $state()
   let editing = $state<{ original: string; profile: ProfileView } | null>(null)
   let confirm = $state<{ kind: ConfirmKind; p: ProfileView; busy?: boolean; error?: string } | null>(null)
   let menu = $state<{ p: ProfileView; x: number; y: number } | null>(null)
@@ -69,6 +71,10 @@
   })
 
   let enabled = $derived((list?.profiles ?? []).filter((p) => !p.disabled))
+  let filterText = $derived(filterQuery.trim().toLowerCase())
+  let filteredProfiles = $derived((list?.profiles ?? []).filter((p) => !filterText ||
+    [p.name, p.harness, p.model, ...(p.models ?? []), p.description]
+      .some((value) => value?.toLowerCase().includes(filterText))))
 
   $effect(() => { onmodal?.(!!(creating || editing || confirm || menu || asking)); return () => onmodal?.(false) })
 
@@ -179,8 +185,20 @@
     <EmptyState title="No profiles yet">A profile is a harness and a model. Create one to start sessions on it.</EmptyState>
   {/if}
   {#if list}
-    <div class="list">
-      {#each list.profiles as p (p.name)}
+    {#if list.profiles.length}
+      <div class="filter-bar">
+        <label class="profile-filter">Filter profiles
+          <input type="search" bind:this={filterInput} bind:value={filterQuery} placeholder="Name, harness, model, or description" aria-controls="profile-cards" />
+        </label>
+        <button class="btn quiet" aria-label="Clear profile filter" disabled={!filterQuery} onclick={() => { filterQuery = ''; filterInput?.focus() }}>Clear</button>
+        <span class="count" role="status">{filteredProfiles.length} of {list.profiles.length} profiles</span>
+      </div>
+      {#if !filteredProfiles.length}
+        <EmptyState title="No matching profiles">Try another name, harness, model, or description, or clear the filter.</EmptyState>
+      {/if}
+    {/if}
+    <div class="list" id="profile-cards">
+      {#each filteredProfiles as p (p.name)}
         {@const h = healthChip(p)}
         <div class="prof" class:off={p.disabled} transition:slide={{ duration: motion(BASE) }}>
           <span class="glyph bg-{harnessHue[p.harness] ?? 0}" aria-hidden="true">{short[p.harness] ?? '?'}</span>
@@ -208,6 +226,7 @@
     </div>
     <div class="usegrid">
       <h3>Who may use each profile</h3>
+      <p class="use-scope">All profiles, including those hidden by the filter.</p>
       <ProfileUses profiles={list.profiles} busy={saving} onchange={setUses} />
     </div>
   {/if}
@@ -232,6 +251,12 @@
 {/if}
 
 <style>
+  .filter-bar { display: flex; flex-wrap: wrap; align-items: end; gap: var(--s2); margin-bottom: var(--s4); }
+  .profile-filter { display: flex; flex: 1; flex-direction: column; gap: var(--s1); min-width: 180px; font-size: var(--t-sm); color: var(--muted); }
+  .profile-filter input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 36px; padding: 7px 10px; font: inherit; font-size: var(--t-ui); color: var(--ink); background: var(--side); border: 1px solid var(--line); border-radius: var(--r-xs); }
+  .filter-bar .btn { min-height: 36px; }
+  .count { align-self: end; padding-bottom: 9px; color: var(--faint); font-size: var(--t-sm); white-space: nowrap; }
+  .use-scope { margin: 0 0 var(--s3); color: var(--faint); font-size: var(--t-sm); }
   .usegrid { margin-top: var(--s5); }
   .usegrid h3 { margin: 0 0 var(--s2); font-size: var(--t-sm); font-weight: 600; color: var(--muted); }
   .err { color: var(--coral); }
@@ -265,7 +290,8 @@
      name, model and badges get the full width and wrap instead of
      squeezing. The menu button stays at the top right, 44 px. */
   @media (max-width: 760px) {
-    .btn { min-height: 44px; }
+    .btn, .filter-bar .btn, .profile-filter input { min-height: 44px; }
+    .count { padding-bottom: 13px; }
     .prof { display: grid; grid-template-columns: 40px minmax(0, 1fr) 44px; grid-template-areas: 'glyph main more' 'stats stats stats'; column-gap: var(--s3); row-gap: var(--s3); align-items: start; padding: var(--s3) 6px 14px 14px; }
     .glyph { grid-area: glyph; }
     .main { grid-area: main; }
