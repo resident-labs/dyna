@@ -138,8 +138,6 @@
       if (n !== seq) return
       list = res
       error = ''
-      const first = issueGroups(res.items ?? [])[0]?.rows[0]
-      if (!inPRs && !sel && !narrow && first) pick(first.number)
     } catch (e) {
       if (n === seq) error = errorText(e)
     }
@@ -394,7 +392,7 @@
   {#if onask && !isLocal(chg) && chg?.url}<button class="act" onclick={ask} title="Start a session with this PR as its task">Ask an agent</button>{/if}
 {/snippet}
 <svelte:window onkeydown={keys} />
-<section class="gh" class:narrow class:pr-list={inPRs && !chg} bind:clientWidth={width}>
+<section class="gh" class:narrow class:pr-list={inPRs ? !chg : !sel} bind:clientWidth={width}>
   {#if inPRs}
       <div class="list prlist" hidden={narrow && !!chg}>
         <TabHeader title="Pull requests" usage={`${listRows.length} open`} />
@@ -421,6 +419,7 @@
   {:else}
     {#if !narrow || !sel}
       <div class="list" role="presentation">
+        <TabHeader title="Issues" usage={list ? `${rowItems.length} ${listState === 'all' ? 'total' : listState}` : ''} />
         {@render filters()}
         {@render note()}
         {#if error}
