@@ -1,7 +1,7 @@
 <script lang="ts">
-  // The card for a worktree event: one quiet line in the feed and in a DM.
-  // It reads the typed payload of the post, never its text, so the same card
-  // serves both surfaces (system-events.md section 3.4.2).
+  // The card for a worktree event: one quiet line in the feed, and the props a
+  // session DM row will pass in PR 3. It reads the typed payload of the post,
+  // never its text, and keeps no feed-only state.
   import type { Message, PRNotice } from '../api/room.ts'
   import type { EventSurface } from './eventRenderers.ts'
   import { worktreeEvent } from './eventRenderers.ts'

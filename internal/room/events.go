@@ -217,7 +217,8 @@ func agentKind(kind string) bool { return kind == "" || slices.Contains(agentKin
 // whose required fields are empty, fixes the sender to the engine, derives the
 // post ID from the event so the same event is stored once, and applies the
 // spec's quiet and wake rules. A spec with Once drops a later post with the
-// same key: it returns no message and no error.
+// same key and other content: it returns no message and no error. A retry with
+// identical content returns the stored message, as Post does.
 func (s *Store) PostEvent(roomID string, ev Event, to ...string) (Message, error) {
 	spec, ok := eventSpecFor(string(ev.eventFamily()), string(ev.eventType()))
 	if !ok {
@@ -308,6 +309,9 @@ func eventFieldText(value reflect.Value, name string) string {
 		case reflect.Slice:
 			if fieldValue.Len() == 0 {
 				return "none"
+			}
+			if fieldValue.Type().Elem().Kind() != reflect.String {
+				return ""
 			}
 			items := make([]string, fieldValue.Len())
 			for j := range items {

@@ -134,15 +134,15 @@ func (m *Manager) reportKeptWorktree(info Info, k keptTree) {
 	}
 }
 
-// worktreeReason picks the reason class of a kept tree from the sentence
-// cleanup gave. The class keys the dedupe and the card wording.
+// worktreeReason picks the reason class of a kept tree. The class keys the
+// dedupe and the card wording; the detail keeps the full sentence.
 func worktreeReason(k keptTree) room.WorktreeReason {
 	switch {
 	case k.Path == "":
 		return room.WorktreeKeepFailed
-	case strings.Contains(k.Reason, "not merged"):
+	case strings.HasPrefix(k.Reason, worktrees.ReasonNotMerged):
 		return room.WorktreeNotMerged
-	case strings.Contains(k.Reason, "uncommitted"), strings.Contains(k.Reason, "untracked"):
+	case strings.HasPrefix(k.Reason, worktrees.ReasonDirty):
 		return room.WorktreeDirty
 	case strings.Contains(k.Reason, keptWorktreeReason):
 		return room.WorktreeManualHandoff

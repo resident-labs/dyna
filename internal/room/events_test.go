@@ -41,6 +41,18 @@ func TestPostRejectsSealedFamily(t *testing.T) {
 	}
 }
 
+// TestPostAcceptsEveryRegisteredKind proves that every kind the allow-list
+// names can post. A caller with another kind must register it in events.go
+// first, so the set stays closed on purpose.
+func TestPostAcceptsEveryRegisteredKind(t *testing.T) {
+	store, rec := newEventStore(t)
+	for _, kind := range append(slices.Clone(legacyFamilies), agentKinds...) {
+		if _, err := store.Post(rec.ID, PostInput{From: rec.Name, To: []string{rec.Name}, Kind: kind, Text: "kind " + kind}); err != nil {
+			t.Errorf("kind %q: %v", kind, err)
+		}
+	}
+}
+
 func TestPostEventRequiresFieldsAndPostsOnce(t *testing.T) {
 	store, rec := newEventStore(t)
 	if _, err := store.PostEvent(rec.ID, WorktreeEvent{Owner: "s1", Path: "/w/a", Detail: " "}, rec.Name); err == nil {
