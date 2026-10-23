@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -251,4 +252,118 @@ func LibrarianHooks(exe, main string) []Hook {
 		return Hook{Name: name, Label: "Librarian", Event: event, Command: command, Cwd: "main", Timeout: "2m", OnFail: "alert", EveryMinutes: every}
 	}
 	return []Hook{hook("librarian-merged", PRMerged, 0), hook("librarian-main", MainUpdated, 0), hook("librarian-batch", Schedule, 10)}
+}
+
+// SettleInterrupted finishes the hook runs that an earlier engine left running.
+// The self-update hook restarts the engine in the middle of its own run, so the
+// engine that posted the start never posts a result, and the card would stay
+// running forever. Install receipts settle their own runs through
+// ReconcileInstall. A run that started before this engine and has no receipt
+// can never finish, so it ends failed with the reason and keeps its log.
+// started is this engine's start time, so a run this engine began is left alone.
+func (s Service) SettleInterrupted(ctx context.Context, started time.Time) error {
+	errs := []error{s.ReconcileInstall(ctx)}
+	runs, err := s.pendingRuns(ctx)
+	if err != nil {
+		return errors.Join(append(errs, err)...)
+	}
+	mains := s.repoMains(ctx)
+	i := s.installer()
+	for _, run := range runs {
+		// A run that started after this engine did, such as one a drained spool
+		// event began, is still live.
+		if !run.StartedAt.Before(started) {
+			continue
+		}
+		// An install unit owns its run until it records a result, and
+		// ReconcileInstall finishes it.
+		if _, err := i.Jobs.Read(run.ID); err == nil {
+			continue
+		} else if !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+			continue
+		}
+		errs = append(errs, s.settleLeftRun(ctx, run, mains[run.Repo], started))
+	}
+	return errors.Join(errs...)
+}
+
+// settleLeftRun ends one run that can never finish, writes why into its log,
+// and posts the typed result that ends its card.
+func (s Service) settleLeftRun(ctx context.Context, run Run, main string, now time.Time) error {
+	detail := "the engine stopped during this run, so its result was never recorded"
+	if line := lastLogLine(run.LogPath); line != "" {
+		detail += ": " + line
+	}
+	if file, err := os.OpenFile(run.LogPath, os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+		_, _ = fmt.Fprintln(file, detail)
+		_ = file.Close()
+	}
+	run.Result, run.FinishedAt = "error", now
+	if _, err := s.saveRun(ctx, run); err != nil {
+		return err
+	}
+	if main == "" {
+		return nil
+	}
+	// The run names the hook as "hook-<name>", and the hook's settings decide
+	// how the card reads. A hook removed since then still ends its own run.
+	h := Hook{Name: strings.TrimPrefix(run.Name, "hook-")}
+	if hooks, err := s.load(ctx, run.Repo); err == nil {
+		for _, old := range hooks {
+			if "hook-"+old.Name == run.Name {
+				h = old
+				break
+			}
+		}
+	}
+	ev := Event{Event: h.Event, Repo: main, Worktree: main}
+	s.emit(ev, hookEvent(ev, h, run, room.HookError, detail))
+	return nil
+}
+
+// repoMains maps the identity of each repository with stored hooks to its main
+// checkout, which a settled run's event needs to reach the repository's room.
+func (s Service) repoMains(ctx context.Context) map[string]string {
+	paths, err := s.Repositories(ctx)
+	if err != nil {
+		return nil
+	}
+	mains := make(map[string]string, len(paths))
+	for _, path := range paths {
+		if r, err := repoid.Resolve(ctx, path); err == nil {
+			mains[r.ID] = r.Main
+		}
+	}
+	return mains
+}
+
+// lastLogLine reads the end of a run's log for the line its settled card shows.
+// The runner writes its own error line, such as an exit status, last.
+func lastLogLine(path string) string {
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return ""
+	}
+	const tail = 512
+	if info.Size() > tail {
+		if _, err := file.Seek(info.Size()-tail, io.SeekStart); err != nil {
+			return ""
+		}
+	}
+	b, err := io.ReadAll(io.LimitReader(file, tail))
+	if err != nil {
+		return ""
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	last := strings.TrimSpace(lines[len(lines)-1])
+	if runes := []rune(last); len(runes) > 160 {
+		last = string(runes[:160])
+	}
+	return last
 }
