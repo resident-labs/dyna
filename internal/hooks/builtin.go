@@ -22,7 +22,9 @@ type BuiltinSpec struct {
 	Label        string
 	EveryMinutes int
 	Timeout      string
-	Run          func(context.Context, io.Writer) error
+	// Run is the pass. minutes is the hook's interval, which a pass that
+	// spaces its own due times follows.
+	Run func(ctx context.Context, minutes int, log io.Writer) error
 }
 
 // builtinSpec finds the table entry a stored row runs.

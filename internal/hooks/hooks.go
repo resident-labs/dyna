@@ -683,7 +683,7 @@ func (s Service) runBuiltin(ctx context.Context, r repoid.Repo, h Hook, e Event)
 	timeout, _ := time.ParseDuration(h.Timeout)
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	runErr := spec.Run(runCtx, log)
+	runErr := spec.Run(runCtx, h.EveryMinutes, log)
 	if runErr != nil {
 		_, logErr := fmt.Fprintln(log, runErr)
 		runErr = errors.Join(runErr, logErr)

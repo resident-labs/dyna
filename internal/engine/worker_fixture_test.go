@@ -19,7 +19,6 @@ func testWorkers(tick func(string) func(context.Context) error) workers {
 		return noop
 	}
 	instructions := callback("instructions")
-	checkins := callback("checkins")
 	fetch := callback("fetch")
 	questions := callback("questions")
 	hooks := callback("hooks")
@@ -28,7 +27,6 @@ func testWorkers(tick func(string) func(context.Context) error) workers {
 		return func(ctx context.Context) (time.Time, error) { return time.Time{}, run(ctx) }
 	}
 	return workers{callback("sweep"), callback("sessions"),
-		func(ctx context.Context) (time.Time, error) { return time.Time{}, checkins(ctx) },
 		func(ctx context.Context) (time.Time, error) { return time.Time{}, instructions(ctx) },
 		func(ctx context.Context) (time.Time, error) { return time.Time{}, fetch(ctx) },
 		func(ctx context.Context) (time.Time, error) { return time.Time{}, questions(ctx) },
