@@ -4,8 +4,8 @@
 // lost. Nothing here fills in or changes data.
 import type { ComputerApp, ComputerInfo, ComputerStream, ActionIntent } from './computer.ts'
 import type { AppEvent, ListChange, ListEvent } from './event.ts'
-import type { Attachment, Check, Delivery, Doing, Draft, FeedSearch, Forward, Member, Message, Post, PostDetail, PostResult, EventNotice, ProfileChoice, Question, QuestionAnswer, QuestionWithdrawal, Seat, SendResult, Shot, Skip, SpawnPreview, SpawnResult, Visual, VisualVersion } from './room.ts'
-import type { CallStatus, VoicePageEvent } from './voice.ts'
+import type { Attachment, Check, Delivery, Doing, Draft, FeedSearch, Forward, Member, Message, Post, PostDetail, PostResult, EventNotice, Seat, SendResult, Shot, Skip, SpawnPreview, SpawnResult } from './room.ts'
+import type { VoicePageEvent } from './voice.ts'
 import { eventSpecs, isEventPayload } from '../rooms/events.gen.ts'
 
 export type Guard<T> = (v: unknown) => v is T
@@ -353,23 +353,6 @@ export function isSendResult(v: unknown): v is SendResult {
   return false
 }
 
-export function isCallStatus(v: unknown): v is CallStatus {
-  return (
-    isRecord(v) &&
-    isBoolean(v.available) &&
-    isBoolean(v.live) &&
-    optional(v.unavailable, isString) &&
-    optional(v.roomId, isString) &&
-    optional(v.room, isString) &&
-    optional(v.startedAt, isNumber) &&
-    optional(v.error, isString)
-  )
-}
-
-export function isProfileChoice(v: unknown): v is ProfileChoice {
-  return isRecord(v) && isString(v.name) && isString(v.harness) && optional(v.model, isString) && optional(v.models, isStrings) && optional(v.default, isBoolean)
-}
-
 function isSkip(v: unknown): v is Skip {
   return isRecord(v) && isString(v.to) && isString(v.reason)
 }
@@ -399,50 +382,4 @@ export function isDraft(v: unknown): v is Draft {
     optional(v.skipped, arrayOf(isSkip)) &&
     optional(v.spawn, isSpawnPreview)
   )
-}
-
-function isQuestionAnswer(v: unknown): v is QuestionAnswer {
-  return isRecord(v) && isString(v.at) && isString(v.by) && optional(v.human, isBoolean) && optional(v.choice, isString) && optional(v.text, isString)
-}
-
-function isQuestionWithdrawal(v: unknown): v is QuestionWithdrawal {
-  return isRecord(v) && isString(v.at) && isString(v.by) && isString(v.reason) && optional(v.human, isBoolean)
-}
-
-export function isQuestion(v: unknown): v is Question {
-  return (
-    isRecord(v) &&
-    isString(v.id) &&
-    isString(v.room) &&
-    isString(v.asker) &&
-    isString(v.to) &&
-    isString(v.text) &&
-    nullable(v.options, isStrings) &&
-    isString(v.meanwhile) &&
-    isString(v.post) &&
-    isString(v.state) &&
-    isString(v.askedAt) &&
-    isString(v.groupKey) &&
-    isString(v.askerName) &&
-    isNumber(v.askerHue) &&
-    isString(v.askerEmoji) &&
-    isNumber(v.withdrawnHue) &&
-    nullable(v.attachments, isAttachments) &&
-    optional(v.human, isBoolean) &&
-    optional(v.answer, isQuestionAnswer) &&
-    optional(v.withdrawn, isQuestionWithdrawal) &&
-    optional(v.askedTurn, isNumber) &&
-    optional(v.answerDelivered, isBoolean) &&
-    optional(v.toName, isString) &&
-    optional(v.withdrawnBy, isString) &&
-    optional(v.answererName, isString)
-  )
-}
-
-function isVisualVersion(v: unknown): v is VisualVersion {
-  return isRecord(v) && isPost(v.post) && isAttachment(v.attachment)
-}
-
-export function isVisual(v: unknown): v is Visual {
-  return isRecord(v) && isString(v.id) && isPost(v.post) && isAttachment(v.attachment) && arrayOf(isVisualVersion)(v.versions)
 }

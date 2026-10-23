@@ -7,8 +7,8 @@ import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { compile } from 'svelte/compiler'
 import { build } from 'esbuild'
-import type { BotReview, Overlap } from '../api/change.ts'
-import { classify, listView, mergeState, mergeBox, queueLine, checksLine, overlapChip, stateFilter, rowsFromGitHub, listLine, botNote, statusBox, factsLine, isReady, isBotAuthor, asksChanges, botKey, moveKey, navOrder, type MergeItem, type Row } from './prlist.ts'
+import type { BotReview } from '../api/change.ts'
+import { classify, listView, mergeState, mergeBox, rowsFromGitHub, botNote, statusBox, factsLine, isReady, isBotAuthor, asksChanges, botKey, moveKey, type MergeItem, type Row } from './prlist.ts'
 import type { CheckRow } from './pr.ts'
 
 const open = (o: Row = {}): Row => ({ changeId: 'c', kind: 'pr', number: 1, state: 'open', status: 'ci-running', ci: 'pending', ...o })
@@ -20,7 +20,6 @@ function need<T>(value: T | null | undefined): T {
   return value
 }
 const chk = (...states: string[]): CheckRow[] => states.map((state, i) => ({ name: `c${i}`, state }))
-const overlap = (o: Partial<Overlap>): Overlap => ({ changeId: 'x', head: 'h', otherHead: 'o', ...o })
 const bot = (name: string, state: string): BotReview => ({ bot: name, state, findings: 0, url: '' })
 
 test('one chip per row shows the agent state', () => {
@@ -91,24 +90,6 @@ test('the list puts queued PRs on the queue card in merge order, and groups the 
   assert.deepEqual(listView([], []).groups, [])
 })
 
-test('a row counts its checks only when they are not all green', () => {
-  assert.equal(checksLine(open({ checks: chk('success', 'success', 'failure') })), '2/3 checks')
-  assert.equal(checksLine(open({ checks: chk('success', 'pending') })), '1/2 checks')
-  assert.equal(checksLine(open({ checks: chk('success', 'success') })), '')
-  // Skipped and neutral checks do not block, so they count as green.
-  assert.equal(checksLine(open({ checks: chk('success', 'skipped') })), '')
-  assert.equal(checksLine(open({ checks: [] })), '')
-  assert.equal(checksLine(open()), '')
-})
-
-test('Open, Closed and All filters; Closed includes merged', () => {
-  const rows = [open({ changeId: 'a' }), open({ changeId: 'b', state: 'merged' }), open({ changeId: 'c', state: 'closed' }), open({ changeId: 'd', status: 'untracked' })]
-  const ids = (s: string) => stateFilter(rows, s).map((r) => r.changeId)
-  assert.deepEqual(ids('open'), ['a', 'd'])
-  assert.deepEqual(ids('closed'), ['b', 'c'])
-  assert.deepEqual(ids('all'), ['a', 'b', 'c', 'd'])
-})
-
 test('GitHub PRs that no change covers become untracked rows', () => {
   const items = [{ number: 1, title: 'covered' }, { number: 2, title: 'plain', state: 'OPEN', author: { login: 'sam' }, headRefName: 'f', baseRefName: 'main', url: 'u' }, { number: 3, title: 'old', state: 'MERGED' }, { number: 4, state: 'CLOSED', author: { login: 'bot', isBot: true } }]
   const out = rowsFromGitHub(items, [open({ number: 1 })], 'o/r')
@@ -120,14 +101,6 @@ test('GitHub PRs that no change covers become untracked rows', () => {
   // A draft PR that Dyna does not track still shows as a draft.
   assert.equal(need(rowsFromGitHub([{ number: 5, state: 'OPEN', isDraft: true }], [])[0]).isDraft, true)
   assert.equal(need(rowsFromGitHub([{ number: 6, state: 'OPEN' }], [])[0]).isDraft, false)
-})
-
-test('the list line shows the author session, never "undefined"', () => {
-  assert.equal(listLine(open({ number: 131, authorSession: 's' }), { s: 'lets-work' }), '#131 · lets-work')
-  assert.equal(listLine(open({ number: 131 })), '#131')
-  assert.equal(listLine(open({ number: 2, author: 'sam' })), '#2 · sam')
-  assert.equal(listLine({ kind: 'local', branch: 'x', authorSession: 's' }, { s: 'fix' }), 'Local · fix')
-  for (const r of [open({}), { kind: 'local' }, ...rowsFromGitHub([{ number: 1 }], [])] satisfies Row[]) assert.doesNotMatch(listLine(r), /undefined/)
 })
 
 test('a bot that asked for changes gets one note; bots never block', () => {
@@ -303,20 +276,6 @@ test('the list shows CI and review side by side, and ready only on the same head
 })
 
 
-test('keyboard order follows the visible rows, with open folds included', () => {
-  const groups = [
-    { id: 'review', label: 'In review', rows: [{ changeId: 'r' }] },
-    { id: 'done', label: 'Done', collapsed: true, rows: [{ changeId: 'm' }] },
-    { id: 'untracked', label: 'Not tracked', fold: true, rows: [{ changeId: 'u' }] },
-  ]
-  const ids = (o: { doneOpen?: boolean; untrackedOpen?: boolean }) => navOrder(groups, o).map((c) => c.changeId)
-  assert.deepEqual(ids({}), ['r'])
-  assert.deepEqual(ids({ doneOpen: true }), ['r', 'm'])
-  assert.deepEqual(ids({ doneOpen: true, untrackedOpen: true }), ['r', 'm', 'u'])
-  // Under the Closed filter only the folded group has rows.
-  assert.deepEqual(navOrder([need(groups[1])], { doneOpen: true }).map((c) => c.changeId), ['m'])
-})
-
 test('the merge box has a checks, a review and a merge row', () => {
   const rows = (c: Row, o: Parameters<typeof mergeBox>[1]) => mergeBox(c, o).rows.map((r) => [r.id, r.icon, r.title])
   const c = open({ ci: 'pending', verdict: 'approve', reviewState: 'approved', reviewRound: 1, checks: chk('success', 'success', 'pending') })
@@ -343,42 +302,10 @@ test('the merge box has a checks, a review and a merge row', () => {
   assert.deepEqual(rows(open({ checks: [] }), {})[0], ['checks', 'wait', 'No checks yet'])
 })
 
-test('the queue header says how main CI stands in a few words, and nothing when it passed', () => {
-  const q = (main?: MergeItem['main']) => [{ item: { state: 'ready', main } }]
-  assert.equal(queueLine(q({ state: 'passed', head: '47a5ff71c0ffee' })), null)
-  assert.deepEqual(queueLine(q({ state: 'pending', head: 'a', wait: { kind: 'pending', base: 'main' } })), { text: 'waiting for main CI', tone: 'gold' })
-  assert.deepEqual(queueLine(q({ state: 'failed', head: 'a', wait: { kind: 'failed', base: 'main' } })), { text: 'main CI failed', tone: 'coral' })
-  assert.equal(queueLine([]), null)
-  assert.equal(queueLine(q(undefined)), null)
-})
-
 test('the merge box does not call cancelled or unfinished checks passed', () => {
   const box = (states: string[]) => mergeBox(open({ checks: chk(...states) }), {}).rows[0]
   assert.deepEqual(box(['success', 'cancelled']), { id: 'checks', icon: 'run', title: 'Some checks did not finish', note: '1 of 2 checks passed · c1 cancelled', link: 'checks' })
   assert.deepEqual(box(['success', 'skipped']), { id: 'checks', icon: 'ok', title: 'All checks passed', note: '1 of 2 checks passed · 1 skipped', link: 'checks' })
-})
-
-
-
-
-test('the conflict radar chip shows a conflict, shared files, or nothing', async () => {
-  const { dir, component, render } = await load('PRList')
-  try {
-    const show = (overlaps: Overlap[] | undefined) => text(render(component, { props: { groups: [{ id: 'ci', label: 'CI', rows: [open({ overlaps })] }] } }).body)
-    const conflict = show([overlap({ changeId: 'a', number: 7, files: ['x.go'], conflicts: ['y.go'] }), overlap({ changeId: 'b', number: 9, conflicts: ['z.go'] })])
-    assert.match(conflict, /conflicts with #7 \+1/)
-    assert.deepEqual(overlapChip(open({ overlaps: [overlap({ number: 7, conflicts: ['y.go'] })] })), { tone: 'gold', text: 'conflicts with #7' })
-    // A local change has no PR number: name it by its short title, never "#undefined".
-    const local = [overlap({ changeId: 'local-1', title: 'Add the trace panel', conflicts: ['y.go'] })]
-    assert.deepEqual(overlapChip(open({ overlaps: local })), { tone: 'gold', text: 'conflicts with Add the trace panel' })
-    assert.doesNotMatch(show(local), /#undefined/)
-    assert.match(show([...local, overlap({ changeId: 'b', number: 9, conflicts: ['z.go'] })]), /conflicts with Add the trace panel \+1/)
-    assert.match(overlapChip(open({ overlaps: [overlap({ changeId: 'local-2', title: 'A local change whose title runs long enough to clip', conflicts: ['y.go'] })] }))?.text ?? '', /^conflicts with A local change whose title…$/)
-    assert.deepEqual(overlapChip(open({ overlaps: [overlap({ changeId: 'local-3', conflicts: ['y.go'] })] })), { tone: 'gold', text: 'conflicts with a local change' })
-    assert.match(show([overlap({ changeId: 'a', number: 7, files: ['x.go', 'y.go'] }), overlap({ changeId: 'b', number: 8, files: ['y.go', 'z.go'] })]), /3 shared files/)
-    assert.doesNotMatch(show([]), /shared file|conflicts with/)
-    assert.doesNotMatch(show(undefined), /shared file|conflicts with/)
-  } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
 test('the overlap list names conflicting files before shared files', async () => {

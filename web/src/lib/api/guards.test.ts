@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isCallStatus, isComputerInfo, isDraft, isFeedSearch, isMember, isPost, isPostResult, isProfileChoice, isQuestion, isSendResult, isVisual, parseAppEvent, parseVoicePageEvent } from './guards.ts'
+import { isComputerInfo, isDraft, isFeedSearch, isMember, isPost, isPostResult, isSendResult, parseAppEvent, parseVoicePageEvent } from './guards.ts'
 
 const post = { wake: false, id: 'm1', ts: 1, roomId: 'r', from: 'a', to: null, text: 'hi', owner: false, completion: false, fromHue: 3, speaker: 'a' }
 
@@ -113,22 +113,6 @@ test('isSendResult takes only the payload that matches its kind', () => {
   assert.equal(isSendResult(null), false)
 })
 
-test('isCallStatus checks required flags and optional fields', () => {
-  assert.equal(isCallStatus({ available: true, live: false }), true)
-  assert.equal(isCallStatus({ available: true, live: true, roomId: 'r', room: 'n', startedAt: 5, error: 'e', unavailable: 'u' }), true)
-  assert.equal(isCallStatus({ available: true }), false)
-  assert.equal(isCallStatus({ available: true, live: true, startedAt: '5' }), false)
-  assert.equal(isCallStatus(null), false)
-})
-
-test('isProfileChoice checks required and optional fields', () => {
-  assert.equal(isProfileChoice({ name: 'opus', harness: 'claude' }), true)
-  assert.equal(isProfileChoice({ name: 'opus', harness: 'claude', model: 'm', models: ['a', 'b'], default: true }), true)
-  assert.equal(isProfileChoice({ name: 'opus' }), false)
-  assert.equal(isProfileChoice({ name: 'opus', harness: 'claude', models: ['a', 1] }), false)
-  assert.equal(isProfileChoice({ name: 'opus', harness: 'claude', models: null }), false)
-})
-
 test('isDraft accepts null lists and checks the nested spawn and skipped rows', () => {
   const draft = { mentions: null, text: 't', default: true, wakes: null, self: false }
   assert.equal(isDraft(draft), true)
@@ -138,31 +122,6 @@ test('isDraft accepts null lists and checks the nested spawn and skipped rows', 
   assert.equal(isDraft({ ...draft, skipped: null }), false)
   assert.equal(isDraft({ ...draft, spawn: { profile: 'p' } }), false)
   assert.equal(isDraft({ ...draft, self: undefined }), false)
-})
-
-const question = { id: 'q1', room: 'r', asker: 'owner', to: 'owner', text: 't', options: null, meanwhile: '', post: 'm1', state: 'open', askedAt: '2026-10-20T10:00:00Z', groupKey: 'k', askerName: 'you', askerHue: 1, askerEmoji: '', withdrawnHue: 0, attachments: null }
-
-test('isQuestion keeps the embedded fields and checks answer and withdrawn', () => {
-  assert.equal(isQuestion(question), true)
-  const answered = { ...question, options: ['a'], attachments: [], human: true, askedTurn: 2, answerDelivered: true, toName: 'n', answererName: 'a', answer: { at: 't', by: 'owner', choice: 'a' }, withdrawn: { at: 't', by: 'owner', reason: 'r' }, withdrawnBy: 'x' }
-  assert.equal(isQuestion(answered), true)
-  assert.equal(isQuestion({ ...question, options: [1] }), false)
-  assert.equal(isQuestion({ ...question, attachments: [{ id: 'a' }] }), false)
-  assert.equal(isQuestion({ ...question, answer: { at: 't' } }), false)
-  assert.equal(isQuestion({ ...question, withdrawn: { at: 't', by: 'b' } }), false)
-  assert.equal(isQuestion({ ...question, withdrawnHue: undefined }), false)
-  assert.equal(isQuestion({ ...question, askedAt: 5 }), false)
-})
-
-const attachment = { id: 'a', name: 'n.html', mime: 'text/html', size: 1, sha256: 'h', render: 'html' }
-
-test('isVisual checks the post, attachment and every version', () => {
-  const version = { post, attachment }
-  assert.equal(isVisual({ id: 'v', post, attachment, versions: [version] }), true)
-  assert.equal(isVisual({ id: 'v', post, attachment, versions: null }), false)
-  assert.equal(isVisual({ id: 'v', post, attachment, versions: [{ post }] }), false)
-  assert.equal(isVisual({ id: 'v', post: { id: 'x' }, attachment, versions: [] }), false)
-  assert.equal(isVisual({ id: 'v', post, attachment: { id: 'a' }, versions: [] }), false)
 })
 
 test('isFeedSearch needs a post list and the more flag', () => {

@@ -44,11 +44,6 @@ export function normalizeModels(model = '', models: readonly unknown[] = []): st
   if (list.length === 1 && solo.length === 1 && solo[0] !== list[0]) return solo
   return list.length ? list : solo
 }
-export function formatModelChain(profile?: Pick<ProfileView, 'model' | 'models'> | null): string {
-  const models = normalizeModels(profile?.model ?? '', profile?.models ?? [])
-  if (models.length > 1) return `${models[0]} (+${models.length - 1} fallback)`
-  return profile?.model || models[0] || ''
-}
 // Who may use a profile (internal/profile Uses), each one a switch: workflow
 // agent() calls, subagent sessions, and services (Dyna's PR reviewers).
 // The engine sends every allowed use.
