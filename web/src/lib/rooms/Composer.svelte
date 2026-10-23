@@ -150,12 +150,13 @@
       pick = Math.max(0, options.length - 1)
       return
     }
-    const selected = options[pick]
-    if (!selected) return
+    if (!options[pick]) return
     tick().then(() => {
+      const selected = matches[pick]
+      if (!selected) return
       const menu = completionList
       const row = menu?.querySelector('[id="' + optionID(selected) + '"]')
-      if (!menu || !row || !matches[pick] || optionID(matches[pick]) !== optionID(selected)) return
+      if (!menu || !row) return
       const bounds = menu.getBoundingClientRect()
       const item = row.getBoundingClientRect()
       const top = item.top - bounds.top - menu.clientTop
@@ -204,7 +205,7 @@
     if (token?.file) {
       const prefix = token.text.slice(0, token.text.lastIndexOf('/') + 1)
       const text = before.slice(token.start)
-      if (text.startsWith(prefix)) {
+      if (text.startsWith(prefix) && !/\s@|[\r\n]/.test(text.slice(prefix.length))) {
         token = { ...token, end: pos, text }
         pick = 0
         return
