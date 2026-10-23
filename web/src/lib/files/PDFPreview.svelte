@@ -1,20 +1,28 @@
-<script>
+<script lang="ts">
   import { onMount } from 'svelte'
   import { fileURL, authenticatedFetch } from '../../api.ts'
-  let { roomId, att } = $props()
-  let pdf = $state.raw(null)
+  import { errorText } from '../errorText.ts'
+  import type { Attachment } from '../api/room.ts'
+  import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
+
+  interface Props {
+    roomId: string
+    att: Attachment
+  }
+  let { roomId, att }: Props = $props()
+  let pdf = $state.raw<PDFDocumentProxy | null>(null)
   let page = $state(1)
   let pageInput = $state('1')
   let jumpError = $state('')
   const jumpErrorId = $props.id()
   $effect(() => { pageInput = String(page); jumpError = '' })
-  function parsePageInput(value, total) {
+  function parsePageInput(value: string, total: number): number | null {
     const text = value.trim()
     if (!/^\d+$/.test(text)) return null
     const number = Number(text)
     return Number.isSafeInteger(number) && number >= 1 && number <= total ? number : null
   }
-  function jump(event) {
+  function jump(event: SubmitEvent) {
     event.preventDefault()
     if (!pdf) return
     const number = parsePageInput(pageInput, pages)
@@ -26,7 +34,7 @@
     pageInput = String(number)
     jumpError = ''
   }
-  function inputKey(event) {
+  function inputKey(event: KeyboardEvent) {
     if (event.isComposing) return
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -40,15 +48,19 @@
   let error = $state('')
   let pageText = $state('')
   let textView = $state(false)
-  let canvas = $state()
-  let container = $state()
+  let canvas = $state<HTMLCanvasElement>()
+  let container = $state<HTMLDivElement>()
   let width = $state(600)
 
   onMount(() => {
-    let stopped = false, loading
+    let stopped = false
+    let loading: PDFDocumentLoadingTask | undefined
     const controller = new AbortController()
-    const observer = new ResizeObserver(([entry]) => { width = Math.max(200, entry.contentRect.width - 48) })
-    observer.observe(container)
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0]
+      if (entry) width = Math.max(200, entry.contentRect.width - 48)
+    })
+    if (container) observer.observe(container)
     ;(async () => {
       try {
         const [lib, worker, response] = await Promise.all([
@@ -60,18 +72,20 @@
         const data = new Uint8Array(await response.arrayBuffer())
         if (stopped) return
         lib.GlobalWorkerOptions.workerSrc = worker.default
-        loading = lib.getDocument({ data, isEvalSupported: false, useSystemFonts: true, enableXfa: false })
+        // pdfjs 6 dropped isEvalSupported, so the viewer no longer sets it.
+        loading = lib.getDocument({ data, useSystemFonts: true, enableXfa: false })
         loading.onPassword = () => {
           error = 'This PDF needs a password. Download it to open it in your PDF app.'
           busy = false
-          loading.destroy()
+          loading?.destroy()
         }
         const doc = await loading.promise
-        if (stopped) { doc.destroy(); return }
+        // The mount cleanup already destroyed a loading task that a later unmount found.
+        if (stopped) return
         pages = doc.numPages
         pdf = doc
       } catch (e) {
-        if (!stopped) { error ||= `The PDF preview could not open. ${e.message || e}`; busy = false }
+        if (!stopped) { error ||= `The PDF preview could not open. ${errorText(e)}`; busy = false }
       }
     })()
     return () => { stopped = true; controller.abort(); observer.disconnect(); loading?.destroy() }
@@ -80,7 +94,8 @@
   $effect(() => {
     const doc = pdf, num = page, fit = width, target = canvas
     if (!doc || !target) return
-    let stopped = false, task
+    let stopped = false
+    let task: RenderTask | undefined
     busy = true
     error = ''
     ;(async () => {
@@ -95,14 +110,14 @@
         target.height = Math.ceil(viewport.height * ratio)
         target.style.width = `${viewport.width}px`
         target.style.height = `${viewport.height}px`
-        task = current.render({ canvasContext: target.getContext('2d'), viewport, transform: [ratio, 0, 0, ratio, 0, 0] })
+        task = current.render({ canvas: null, canvasContext: target.getContext('2d') ?? undefined, viewport, transform: [ratio, 0, 0, ratio, 0, 0] })
         await task.promise
         const content = await current.getTextContent()
         if (stopped) return
-        pageText = content.items.map((item) => item.str + (item.hasEOL ? '\n' : ' ')).join('')
+        pageText = content.items.map((item) => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join('')
         busy = false
       } catch (e) {
-        if (!stopped) { error = `This page could not be shown. ${e.message || e}`; busy = false }
+        if (!stopped) { error = `This page could not be shown. ${errorText(e)}`; busy = false }
       }
     })()
     return () => { stopped = true; task?.cancel() }

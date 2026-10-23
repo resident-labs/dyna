@@ -1,21 +1,37 @@
-<script>
+<script lang="ts">
   import { copyText } from '../../api.ts'
   import { tableCSV } from './tableCSV.ts'
   import { parseTable, TABLE_ROWS } from './preview.ts'
-  let { text, delimiter = ',' } = $props()
+  import { errorText } from '../errorText.ts'
+
+  interface Props {
+    text: string
+    delimiter?: string
+  }
+  interface ParsedTable {
+    rows: string[][]
+    more: boolean
+    columnsTruncated: boolean
+    error: string
+  }
+  let { text, delimiter = ',' }: Props = $props()
   let header = $state(true)
-  let parsed = $derived.by(() => {
-    try { return { ...parseTable(text, delimiter), error: '' } }
-    catch (e) { return { rows: [], error: e.message } }
+  let parsed = $derived.by((): ParsedTable => {
+    try {
+      const table = parseTable(text, delimiter)
+      return { rows: table.rows, more: table.more, columnsTruncated: table.columnsTruncated, error: '' }
+    } catch (e) {
+      return { rows: [], more: false, columnsTruncated: false, error: errorText(e) }
+    }
   })
   let width = $derived(Math.max(0, ...parsed.rows.map((r) => r.length)))
   let headings = $derived(header ? parsed.rows[0] || [] : Array.from({ length: width }, (_, i) => `Column ${i + 1}`))
   let more = $derived(parsed.more || parsed.rows.length > TABLE_ROWS + (header ? 1 : 0))
   let rows = $derived(parsed.rows.slice(header ? 1 : 0, TABLE_ROWS + (header ? 1 : 0)))
-  let copyRows = $derived(header && parsed.rows.length ? [parsed.rows[0], ...rows] : rows)
+  let copyRows = $derived(header && parsed.rows.length ? [...parsed.rows.slice(0, 1), ...rows] : rows)
   let copyStatus = $state('')
   let copyGeneration = 0
-  let copyTimer
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
   $effect(() => {
     text; delimiter; header
     copyGeneration++
