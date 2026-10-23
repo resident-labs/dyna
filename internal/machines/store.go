@@ -545,19 +545,26 @@ func (s Store) SaveProbe(ctx context.Context, id string, r ProbeResult) (Machine
 		return Machine{}, err
 	}
 	health := r.Health
-	if !stored.Enabled {
-		health = HealthDisabled
-	}
 	if r.At.IsZero() {
 		r.At = time.Now()
 	}
-	// A machine that is off or unreachable has no reason of its own: only a
-	// probe that reached it can degrade it.
+	// A reason belongs to a health that a probe reached: an online or degraded
+	// machine. A probe that failed says nothing about the reason it carried.
 	reason := ReasonNone
 	if health == HealthOnline || health == HealthDegraded {
 		reason = r.Reason
-	} else {
-		health = r.Health
+	}
+	// A machine that could not be reached keeps the reason of its last probe,
+	// so a low-disk hold survives a connection failure. Only a probe that
+	// reached the machine can show that space came back.
+	if health == HealthOffline && stored.HealthReason == ReasonLowDisk {
+		reason = ReasonLowDisk
+	}
+	// A machine the owner turned off holds nothing and shows nothing: it takes
+	// no work either way. Its readings stay as the last good probe left them,
+	// and enabling it again starts unknown, so this comes last.
+	if !stored.Enabled {
+		health, reason = HealthDisabled, ReasonNone
 	}
 	// Only a probe that reached the machine replaces what the last good probe
 	// read, so a machine that is off keeps its capabilities for the owner.
@@ -595,8 +602,8 @@ func (s Store) SaveProbe(ctx context.Context, id string, r ProbeResult) (Machine
 				string(health), probed, id)
 			return err
 		}
-		_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, health_reason='', last_probe_ms=?, probe_error=? WHERE id=?`,
-			string(health), probed, probeErr, id)
+		_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, health_reason=?, last_probe_ms=?, probe_error=? WHERE id=?`,
+			string(health), string(reason), probed, probeErr, id)
 		return err
 	})
 	if err != nil {
@@ -607,7 +614,7 @@ func (s Store) SaveProbe(ctx context.Context, id string, r ProbeResult) (Machine
 
 // holdsCI reports whether a stored health and reason hold CI work.
 func holdsCI(health Health, reason HealthReason) bool {
-	return health == HealthDegraded && reason == ReasonLowDisk
+	return health != HealthDisabled && reason == ReasonLowDisk
 }
 
 // Save inserts a machine, or updates the stored row that has this ID, and

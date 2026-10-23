@@ -7,7 +7,8 @@ import (
 )
 
 // DefaultCIDiskFloorGB is the floor a new settings file starts with. Twenty
-// gigabytes covers a full local CI run with room to spare.
+// gigabytes covers a full local CI run with room to spare. The unit is GiB
+// (2^30 bytes), and the key keeps the shorter GB name that owners read.
 const DefaultCIDiskFloorGB = 20
 
 // parseCIDiskFloorGB reads a whole number of gigabytes. Zero turns the floor
@@ -21,5 +22,5 @@ func parseCIDiskFloorGB(value string) (int, error) {
 }
 
 // CIDiskFloorBytes is the disk floor in bytes, the unit a probe and the
-// scheduler work in.
+// scheduler work in. One step of the setting is one GiB (2^30 bytes).
 func (v Values) CIDiskFloorBytes() uint64 { return uint64(v.CIDiskFloorGB) << 30 }
