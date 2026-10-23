@@ -2,7 +2,7 @@
 # Shared CI commands. Reports live outside the checkout.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-suite=${1:?usage: scripts/ci.sh relay|frontend|go|cross-build [phase]}
+suite=${1:?usage: scripts/ci.sh relay|frontend|go|cross-build|android [phase]}
 phase=${2:-all}
 export RUNNER_TEMP=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
 # web/embed.go embeds all:dist, but only the frontend suite builds it. Every
@@ -49,6 +49,12 @@ case "$suite" in
       git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --short
       test -z "$(git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --porcelain)"
     fi
+    ;;
+  android)
+    # TODO: legacy/shim remove later — engines released before the Android app
+    # removal still ask for this suite by name. Answer the check and do nothing.
+    # Remove once main's local CI no longer lists "android".
+    echo "The Android app suite is retired; nothing to run."
     ;;
   cross-build)
     started=$SECONDS
