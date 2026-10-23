@@ -164,6 +164,6 @@ fi
 
 bold "next steps"
 info "dyna profiles add --name my-builder --harness codex --model <model-id>  # add one profile per model you use"
-info "dyna demo            # mock workers + sample workflow (removes them after the run)"
+info "dyna demo            # sample workflow on mock workers; saves no profiles"
 info "desktop/build.sh     # build the desktop app (from a checkout)"
 info "dyna guide           # scripting guide for agents"

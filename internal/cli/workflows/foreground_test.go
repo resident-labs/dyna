@@ -198,7 +198,7 @@ func TestRunCancellationFinalizesBeforeReturning(t *testing.T) {
 	}
 }
 
-func TestDemoBorrowsMockProfilesAndRemovesThem(t *testing.T) {
+func TestDemoLeavesSavedProfilesUntouched(t *testing.T) {
 	inRepo(t)
 	storetest.Isolate(t)
 	serveWorkflowEngine(t)
@@ -208,19 +208,30 @@ func TestDemoBorrowsMockProfilesAndRemovesThem(t *testing.T) {
 	if err := owner.Save(); err != nil {
 		t.Fatal(err)
 	}
+	before, err := os.ReadFile(profile.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(profile.DefaultPath(), old, old); err != nil {
+		t.Fatal(err)
+	}
 	stdout, stderr, err := runForegroundCLI(t, "demo")
-	if err != nil || !strings.HasPrefix(stdout, "registered demo profiles for this run:") || !strings.Contains(stdout, "running demo workflow...") || !strings.Contains(stdout, "open the desktop app") {
+	if err != nil || !strings.Contains(stdout, "running demo workflow on mock workers...") || !strings.Contains(stdout, "open the desktop app") {
 		t.Fatalf("demo = %q, %q, %v", stdout, stderr, err)
 	}
-	profiles, err := loadStore()
-	if err != nil || len(profiles.Profiles) != 1 || profiles.Profiles[0].Name != "owner-profile" || !profiles.Profiles[0].Default {
-		t.Fatalf("profiles after demo = %+v, %v; want only the owner's profile", profiles, err)
+	after, err := os.ReadFile(profile.DefaultPath())
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("demo changed saved profiles: %v\n%s", err, after)
+	}
+	info, err := os.Stat(profile.DefaultPath())
+	if err != nil || !info.ModTime().Equal(old) {
+		t.Fatalf("demo rewrote the profiles file: %v, %v", info, err)
 	}
 	runs, err := runstore.List()
-	if err != nil || len(runs) != 1 || runs[0].Name != "demo-fanout" {
+	if err != nil || len(runs) != 1 || runs[0].Name != "demo-fanout" || runs[0].Status != "ok" || runs[0].Detached {
 		t.Fatalf("demo runs = %+v, %v", runs, err)
 	}
-	checkForegroundRun(t, runs[0].ID, "ok")
 }
 
 func TestRunResultFormatterKeepsEmptyAndRawResults(t *testing.T) {

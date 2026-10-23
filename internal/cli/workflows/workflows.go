@@ -31,10 +31,6 @@ import (
 	"dyna-agent/internal/worktreesvc"
 )
 
-func loadStore() (*profile.Store, error) {
-	return profile.Load(profile.DefaultPath())
-}
-
 // applyRunRoom resolves this run's room and stamps it into the process
 // environment for runstore.Create, the engine, and detached children.
 func applyRunRoom(ref string) (room.Record, error) {
@@ -515,44 +511,34 @@ func eventViews(events []runstore.Event) []plan.EventView {
 func NewDemoCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "demo",
-		Short: "Run a sample workflow on temporary mock worker profiles",
+		Short: "Run a sample workflow on unsaved mock worker profiles",
 		RunE: func(c *cobra.Command, _ []string) error {
 			if err := authority.Check("demo", authority.Current(), nil); err != nil {
 				return err
 			}
-			s, err := loadStore()
-			if err != nil {
-				return err
-			}
-			added, err := addDemoProfiles(s)
-			if err != nil {
-				return err
-			}
-			// The demo borrows its mock profiles for one run and then removes
-			// only the ones it added, so it leaves the owner's profiles alone.
-			defer func() {
-				if err := removeDemoProfiles(s, added); err != nil {
-					fmt.Fprintln(c.ErrOrStderr(), "remove demo profiles: "+err.Error())
-				}
-			}()
-			fmt.Fprintln(c.OutOrStdout(), "registered demo profiles for this run: mock-workhorse, mock-reviewer, mock-sprinter")
-			fmt.Fprintln(c.OutOrStdout(), "running demo workflow...")
-
 			if _, err := applyRunRoom(""); err != nil {
 				return err
 			}
 			cwd, _ := os.Getwd()
-			if err := runForeground(c, workflowsvc.Options{Name: "demo-fanout", ScriptSrc: demoScript, WorkDir: cwd}, false, "raw"); err != nil {
+			fmt.Fprintln(c.OutOrStdout(), "running demo workflow on mock workers...")
+			// The run takes the demo workers in memory, so the demo never reads
+			// or writes the owner's profile registry.
+			demo := &profile.Store{Profiles: demoProfiles()}
+			ctx, cancel := signal.NotifyContext(c.Context(), syscall.SIGINT, syscall.SIGTERM)
+			defer cancel()
+			result, err := workflowsvc.Execute(ctx, workflowsvc.Options{Name: "demo-fanout", ScriptSrc: demoScript, WorkDir: cwd}, demo, runObserver(c, false, ""))
+			if err != nil {
 				return err
 			}
+			fmt.Fprintln(c.OutOrStdout(), result.Value)
 			fmt.Fprintln(c.OutOrStdout(), stDim.Render("open the desktop app to browse this run"))
 			return nil
 		},
 	}
 }
 
-// demoProfiles are the mock workers the demo run uses. They are never saved
-// as the owner's own profiles.
+// demoProfiles are the mock workers the demo run uses. They are passed to the
+// run in memory and never saved as the owner's own profiles.
 func demoProfiles() []profile.Profile {
 	return []profile.Profile{
 		{Name: "mock-workhorse", Harness: profile.HarnessMock, Taste: 4, Intelligence: 10, Cost: 6,
@@ -562,36 +548,6 @@ func demoProfiles() []profile.Profile {
 		{Name: "mock-sprinter", Harness: profile.HarnessMock, Taste: 8, Intelligence: 6, Cost: 10,
 			Description: "Demo worker. Pretend GLM-class sprinter: fast and very cheap, great taste, slightly below the big models."},
 	}
-}
-
-// addDemoProfiles registers the demo workers that are missing and returns
-// their names, so removeDemoProfiles can drop exactly those.
-func addDemoProfiles(s *profile.Store) ([]string, error) {
-	var added []string
-	for _, d := range demoProfiles() {
-		if _, exists := s.Get(d.Name); exists {
-			continue
-		}
-		if err := s.Upsert(d); err != nil {
-			return nil, err
-		}
-		added = append(added, d.Name)
-	}
-	if err := s.Save(); err != nil {
-		return nil, err
-	}
-	return added, nil
-}
-
-// removeDemoProfiles removes the demo workers this run added.
-func removeDemoProfiles(s *profile.Store, names []string) error {
-	if len(names) == 0 {
-		return nil
-	}
-	for _, name := range names {
-		s.Remove(name)
-	}
-	return s.Save()
 }
 
 const demoScript = `export const meta = { name: 'demo-fanout', description: 'demo', phases: [{title:'Scan'},{title:'Verify'}] }
