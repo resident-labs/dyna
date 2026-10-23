@@ -309,3 +309,37 @@ export interface PRNoiseList {
   rules: NoiseRule[]
   warning?: string
 }
+
+// MergeHistoryEntry is watch.MergeHistoryEntry, one row of the room's merge
+// history. kind is trial, publish or decision.
+export interface MergeHistoryEntry {
+  kind: string
+  outcome: string
+  repo: string
+  branch: string
+  head: string
+  changes: string[] | null
+  at: string
+  detail?: string
+}
+
+// CIBudgetSettings is view.CIBudgetSettings.
+export interface CIBudgetSettings {
+  ciTimeBudget: string
+  ciBudgetExempt: string[] | null
+  ciWarnAfter: string
+  ciFailAfter: string
+  ciTestMax: string
+  ciTestAllowNotes: Record<string, string> | null
+  ciTestAllow: string[] | null
+  ciNoJUnitWarning: boolean | null
+}
+
+// PRConfig is view.PRConfig.
+export interface PRConfig {
+  mergeMaxParallel: number
+  githubAccess: string
+  reviewPublishing: string
+  reviewerProfile: string
+  reviewerSession: string
+}
