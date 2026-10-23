@@ -45,6 +45,7 @@ export interface HookRow {
 }
 
 export interface MergeHistoryRow {
+  detail: string
   kind: string
   outcome: string
   at: string
@@ -80,6 +81,7 @@ export interface TestHealth {
 }
 
 export interface ChangeRow {
+  key?: string
   reviewAt?: string
   number?: number
   title?: string
@@ -432,3 +434,52 @@ export function until(iso: string, now: number): string {
   return minutes <= 0 ? 'due' : minutes < 60 ? `in ${minutes} m` : `in ${Math.round(minutes / 60)} h`
 }
 
+// Activity is one service result or one current operation.
+export interface Activity {
+  key: string
+  at: number
+  service: string
+  text: string
+  tone: Tone
+  session: string
+}
+
+export function buildActivity(i: Inputs, now: number): Activity[] {
+  const out: Activity[] = []
+  if (i.reviewer?.current) {
+    out.push({ key: 'review:now', at: now, service: 'reviewer', text: `reviewing #${i.reviewer.current.pr} · ${i.reviewer.current.title}`, tone: 'live', session: '' })
+  }
+  i.changes.forEach((c, n) => {
+    if (!c.reviewAt) return
+    const verdict = c.verdict ? c.verdict.replaceAll('-', ' ') : 'reviewed'
+    const name = c.number ? `#${c.number}` : c.title || c.key || 'local change'
+    out.push({
+      key: `verdict:${c.key ?? c.number ?? n}:${c.reviewAt}`,
+      at: Date.parse(c.reviewAt), service: 'reviewer',
+      text: `${verdict} ${name}${c.number && c.title ? ` · ${c.title}` : ''}`,
+      tone: c.verdict === 'changes' ? 'error' : 'on', session: c.reviewerSession ?? '',
+    })
+  })
+  i.history.forEach((h, n) => {
+    out.push({
+      key: `merge:${h.at}:${n}`, at: Date.parse(h.at), service: 'merge',
+      text: h.kind === 'publish' ? `published main · ${h.changes} ${h.changes === 1 ? 'change' : 'changes'}` : `trial ${h.outcome}${h.detail ? `: ${h.detail}` : ''}`,
+      tone: h.outcome === 'published' || h.outcome === 'passed' ? 'on' : 'error', session: '',
+    })
+  })
+  for (const row of i.hooks ?? []) {
+    if (!row.lastRun) continue
+    const { hook, lastRun } = row
+    const pending = lastRun.result === 'pending'
+    const failed = lastRun.result === 'error'
+    const took = pending ? '' : elapsed(lastRun.startedAt, lastRun.finishedAt)
+    const result = pending ? 'running' : failed ? 'failed' : lastRun.result === 'pass' ? 'passed' : lastRun.result || 'unknown'
+    out.push({
+      key: `hook:${hook.name}:${lastRun.startedAt}`, at: Date.parse(lastRun.startedAt),
+      service: hook.name === 'self-update' ? 'update' : hook.name.startsWith('librarian-') ? 'librarian' : hook.name,
+      text: `${hook.label || hook.name} · ${result}${took ? ` in ${took}` : ''}`,
+      tone: pending ? 'live' : failed ? 'error' : 'on', session: '',
+    })
+  }
+  return out.filter((a) => Number.isFinite(a.at) && a.at > 0).sort((a, b) => b.at - a.at)
+}
