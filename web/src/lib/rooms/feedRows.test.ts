@@ -110,3 +110,25 @@ test('held comment notices stay separate from grouped PR updates', () => {
   ]
   assert.deepEqual(content(feedRows(posts)).map((row) => row.post.id), ['one', 'held', 'three'])
 })
+
+// A hook run posts its start and then its result. One card shows the run, so
+// the start folds into the result of the same run ID.
+const hookPost = (id: string, type: 'started' | 'result', runId: string, state: 'running' | 'passed' | 'failed'): FeedInput => ({
+  id, ts: start, from: 'dyna', kind: 'hook', text: 'hook',
+  notice: { kind: type, number: 0, head: '', changeId: '' },
+  payload: { runId, repo: '/repo', hook: 'self-update', event: 'main-updated', state },
+})
+
+test('a hook run folds its start into its result, and another run is another card', () => {
+  const posts = [
+    hookPost('h1', 'started', 'run-a', 'running'),
+    hookPost('h2', 'result', 'run-a', 'passed'),
+    hookPost('h3', 'started', 'run-b', 'running'),
+    hookPost('h4', 'result', 'run-b', 'failed'),
+  ]
+  const rows = content(feedRows(posts))
+  assert.deepEqual(rows.map((row) => row.key), ['h1', 'h3'])
+  assert.deepEqual(rowPosts(rows[0]).map((post) => post.id), ['h1', 'h2'])
+  assert.equal(rowPost(rows[0])?.notice?.kind, 'result')
+  assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['h3', 'h4'])
+})

@@ -16,6 +16,7 @@
   import { ago, duration } from '../ui/format.ts'
   import HookForm from './HookForm.svelte'
   import { eventLabel, exitLabel, failLabel, hookForm, hookOf, hookPatch, newHook, newestFirst, runTone, timeoutLabel, type HookFields } from './hooks.ts'
+  import type { HookLogTarget } from './hookLog.ts'
   import type { Hook, HookRun, HookRunLog } from '../api/settings.ts'
 
   // A hook the owner asked about removing, inline.
@@ -33,7 +34,7 @@
     error?: string
   }
 
-  let { onmodal = null, repo: fixed = '' }: { onmodal?: ((open: boolean) => void) | null; repo?: string } = $props()
+  let { onmodal = null, repo: fixed = '', focus = null }: { onmodal?: ((open: boolean) => void) | null; repo?: string; focus?: HookLogTarget | null } = $props()
 
   let repos = $state<string[]>([])
   let repo = $state('')
@@ -169,15 +170,25 @@
   // The folder name, or the full path when two repos share a name.
   const label = (p: string) => (repos.filter((r) => base(r) === base(p)).length > 1 ? p : base(p))
 
+  // A hook card asks for one run. The pane opens its hook and its log, so the
+  // card's "View log" lands on the run that posted it.
+  async function showFocus(target: HookLogTarget) {
+    open = target.hook
+    openRun = target.runId
+    await loadRuns(target.hook)
+    if (!logs[target.runId]) await loadLog(target.hook, target.runId)
+  }
+
   onMount(async () => {
     if (fixed) { repo = fixed; return load() }
     try {
       repos = (await api.hookRepos()) ?? []
-      repo = repos[0] ?? ''
+      repo = focus?.repo || repos[0] || ''
     } catch (e) {
       error = errorText(e)
     }
     await load()
+    if (focus) await showFocus(focus)
   })
 </script>
 

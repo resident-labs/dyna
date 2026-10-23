@@ -2,6 +2,8 @@ import { parsePRPost } from '../prs/pr.ts'
 import type { ParsedPost, PREvent } from '../prs/pr.ts'
 import type { PRNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
+import { isHookEvent } from './events.gen.ts'
+import type { EventPayload, HookEvent } from './events.gen.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
 // fixtures of a test both fit it.
@@ -12,6 +14,8 @@ export interface FeedInput {
   text?: string | null
   kind?: string
   notice?: PRNotice | null
+  // payload is the typed JSON of a sealed system event.
+  payload?: EventPayload
   to?: string[] | null
   human?: boolean
   owner?: boolean
@@ -87,6 +91,24 @@ export function rowPosts<P extends FeedInput>(row: FeedRow<P> | undefined): P[] 
   return row?.kind === 'post' ? row.posts ?? [row.post] : []
 }
 
+// hookEventOf returns the typed payload of a hook run post.
+function hookEventOf(post: FeedInput): HookEvent | undefined {
+  if (post.kind !== 'hook') return undefined
+  return isHookEvent(post.payload) ? post.payload : undefined
+}
+
+// foldKey names what a row folds on: one card per PR, and one card per hook
+// run, so a run's start folds into its result. An empty key never folds.
+function foldKey(post: FeedInput): string {
+  const hook = hookEventOf(post)
+  if (hook) return `hook:${hook.runId}`
+  if (post.kind === 'pr' && post.notice?.kind !== 'held-comment') {
+    const url = parsePRPost(post.text, post.notice).url
+    if (url) return `pr:${url}`
+  }
+  return ''
+}
+
 interface FeedItem<P extends FeedInput> {
   post?: P
   call?: CallRequest
@@ -133,14 +155,15 @@ export function feedRows<P extends FeedInput>(posts: readonly P[], unreadFrom = 
       !post.replyTo && prev.from === post.from && !!prev.human === !!post.human && gap < senderGap &&
       (prev.to || []).join() === (post.to || []).join()
     const last = out[out.length - 1]
-    const pr = post.kind === 'pr' && post.notice?.kind !== 'held-comment' ? parsePRPost(post.text, post.notice) : null
+    const key = foldKey(post)
+    // A PR row and a hook row can fold, so both keep their posts from the start.
+    const foldable = !!key || post.kind === 'pr'
     const plain = (p: FeedInput) => !p.replyTo && !p.forward && !p.attachments?.length
-    if (pr?.url && last?.kind === 'post' && last.posts && plain(post) && plain(last.post) &&
-      parsePRPost(last.post.text, last.post.notice).url === pr.url) {
+    if (key && last?.kind === 'post' && last.posts && plain(post) && plain(last.post) && foldKey(last.post) === key) {
       last.posts.push(post)
       last.post = post
     } else {
-      out.push({ kind: 'post', key: post.id, post, cont, ...(pr?.url ? { posts: [post] } : {}) })
+      out.push({ kind: 'post', key: post.id, post, cont, ...(foldable ? { posts: [post] } : {}) })
     }
     prev = post
   }
