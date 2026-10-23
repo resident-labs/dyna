@@ -93,7 +93,7 @@
           </Row>
         {:else if machine.status === 'degraded'}
           <Row dense text="Needs attention">
-            {#snippet trail()}<span class="value gold">{reasonText(machine.statusReason)}</span>{/snippet}
+            {#snippet meta()}<span class="gold">{reasonText(machine.statusReason)}</span>{/snippet}
           </Row>
         {/if}
         {#if machine.seenAt}
