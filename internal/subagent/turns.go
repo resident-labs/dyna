@@ -92,9 +92,8 @@ WHERE json_extract(CAST(turn AS TEXT), '$.reportPending') = 1`)
 //
 // TODO: legacy/shim remove later — turn records lived in turns/<n>.json
 // before dyna.db. A turn that has only its file, from a binary before
-// dyna.db, is imported on its first read; it has no row to write over.
-// Remove the import here and in readTurnForUpdate and writeTurn with item 31,
-// when no runner from before this release is alive.
+// dyna.db, is imported on its first read; existing canonical rows always win.
+// Remove this missing-row import after eager conversion and watcher retirement.
 func (s *Store) readTurnRow(id string, n int) ([]byte, string, error) {
 	var raw []byte
 	var revision int64
@@ -141,41 +140,42 @@ func (s *Store) queryTurn(id string, n int, query func(*sql.DB) error) error {
 	if err := query(db); !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if _, err := s.importTurnFile(id, n, false); err != nil {
+	if _, err := s.importTurnFile(id, n); err != nil {
 		return err
 	}
 	return query(db)
 }
 
-// ImportLegacyTurn imports turn n's file over its row when a runner of an
-// earlier release wrote it. It takes the session lock, as every import over
-// a row must; the engine's watch calls it for such runners, so their turn
-// changes show while they run.
+// ImportLegacyTurn fills a missing canonical row for the engine's watcher.
+// It stays until the watcher caller is removed; it never replaces a row.
 func (s *Store) ImportLegacyTurn(id string, n int) error {
 	return s.withLock(id, func() error {
-		_, err := s.importTurnFile(id, n, true)
+		_, err := s.importTurnFile(id, n)
 		return err
 	})
 }
 
-// readTurnForUpdate reads turn n for a read-modify-write. The caller holds
-// the session lock, so a file another binary wrote is imported over the row
-// first, and the write that follows keeps that binary's change.
+// readTurnForUpdate reads the canonical turn while the caller holds the
+// session lock. ReadTurn imports a retained file only when its row is missing.
 func (s *Store) readTurnForUpdate(id string, n int) (Turn, error) {
-	if _, err := s.importTurnFile(id, n, true); err != nil {
-		return Turn{}, err
-	}
 	return s.ReadTurn(id, n)
 }
 
 func turnRevision(revision int64) string { return "r" + strconv.FormatInt(revision, 10) }
 
-// importTurnFile imports turn n's file when another binary wrote it, and
-// returns the turns database. Only a caller that holds the session lock may
-// overwrite a row; otherwise the file is imported only where no row exists.
-func (s *Store) importTurnFile(id string, n int, overwrite bool) (*sql.DB, error) {
+// importTurnFile fills a missing canonical row from its retained turn file.
+// Existing rows always win, including intentionally cleared fields.
+func (s *Store) importTurnFile(id string, n int) (*sql.DB, error) {
 	db, err := s.turnsDB()
 	if err != nil {
+		return nil, err
+	}
+	var exists int
+	err = db.QueryRow("SELECT 1 FROM session_turns WHERE session=? AND n=?", id, n).Scan(&exists)
+	if err == nil {
+		return db, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
 		return nil, err
 	}
 	path, err := s.turnPath(id, n)
@@ -183,23 +183,20 @@ func (s *Store) importTurnFile(id string, n int, overwrite bool) (*sql.DB, error
 		return nil, err
 	}
 	_, err = state.For(db).ImportIfForeign(context.Background(), sessionlife.TurnMirrorKey(id, n), path, func(conn *sql.Conn, raw []byte) error {
-		// A damaged file is skipped once; the row stays.
+		// Recheck inside the transaction in case a writer made the row
+		// after the read missed it. Leave its retained file unstamped.
+		var exists int
+		err := conn.QueryRowContext(context.Background(), "SELECT 1 FROM session_turns WHERE session=? AND n=?", id, n).Scan(&exists)
+		if err == nil {
+			return state.ErrRecordExists
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
 		if !json.Valid(raw) {
 			return fmt.Errorf("turn %d of %s is not JSON: %w", n, id, state.ErrSkipForeign)
 		}
-		if !overwrite {
-			var exists int
-			err := conn.QueryRowContext(context.Background(), "SELECT 1 FROM session_turns WHERE session=? AND n=?", id, n).Scan(&exists)
-			if err == nil {
-				// A writer made the row after the read missed it. Leave the
-				// file unstamped for the next locked write.
-				return state.ErrRecordExists
-			}
-			if !errors.Is(err, sql.ErrNoRows) {
-				return err
-			}
-		}
-		_, err := saveTurnConn(context.Background(), conn, id, n, raw)
+		_, err = saveTurnConn(context.Background(), conn, id, n, raw)
 		return err
 	})
 	return db, err
@@ -233,10 +230,10 @@ RETURNING revision`, id, n, raw).Scan(&revision)
 
 // TODO: legacy/shim remove later — the previous release reads turns/<n>.json,
 // so a downgrade keeps every turn (requirement 24). The file is a write-only
-// copy of the row, written by state.Mirror after the row's commit. Remove it
-// with item 31.
+// copy of the row, written by state.MirrorCanonical after the row's commit.
+// Remove with P1828a.
 func mirrorTurn(ctx context.Context, db *sql.DB, id string, n int, path string) error {
-	return state.For(db).Mirror(ctx, sessionlife.TurnMirrorKey(id, n), path, func(out io.Writer) error {
+	return state.For(db).MirrorCanonical(ctx, sessionlife.TurnMirrorKey(id, n), path, func(out io.Writer) error {
 		var raw []byte
 		if err := state.For(db).Read(ctx, func(r state.Reader) error {
 			var err error

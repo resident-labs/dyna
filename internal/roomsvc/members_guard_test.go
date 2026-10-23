@@ -37,6 +37,19 @@ func TestMembersScanRunsOnlyWhenSomethingChanged(t *testing.T) {
 	if _, all := e.svc.takeDirty(); !all {
 		t.Fatal("a SessionsChanged wake did not ask for every session")
 	}
+	// A canonical turn write outside the engine moves the revision once.
+	if _, err := e.mgr.Store.UpdateTurn(info.ID, info.Turns, func(turn *subagent.Turn) { turn.Prompt = "current write" }); err != nil {
+		t.Fatal(err)
+	}
+	if !e.svc.membersChanged(w, records, false) {
+		t.Fatal("a turn write did not wake the scan")
+	}
+	if turn, err := e.mgr.Store.ReadTurn(info.ID, info.Turns); err != nil || turn.Prompt != "current write" {
+		t.Fatalf("the turn reads %q, %v; want the canonical write", turn.Prompt, err)
+	}
+	if e.svc.membersChanged(w, records, false) {
+		t.Fatal("an idle tick scanned members after one turn write")
+	}
 	w.runners = newRunnerWatch(func() {}, nil)
 	w.runners.unwatched[info.ID] = true
 	for range 2 {

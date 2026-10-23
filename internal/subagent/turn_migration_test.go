@@ -13,6 +13,89 @@ import (
 	"dyna-agent/internal/database"
 )
 
+func TestPostMigrationTurnUpdateKeepsClearedCanonicalFields(t *testing.T) {
+	s, id := turnStore(t)
+	if err := s.writeTurn(id, Turn{N: 1, Status: TurnOK}); err != nil {
+		t.Fatal(err)
+	}
+	path := turnFile(t, s, id, 1)
+	stale := []byte(`{"n":1,"status":"running","prompt":"stale prompt","error":"stale error","steering":[{"id":"old-post"}],"deliveries":[{"outcome":"delivered"}]}`)
+	writeStale := func() {
+		t.Helper()
+		if err := os.WriteFile(path+".stale", stale, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(path+".stale", path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeStale()
+	if err := Migrate(filepath.Dir(s.Root)); err != nil {
+		t.Fatal(err)
+	}
+	check := func(turn Turn, profile string) {
+		t.Helper()
+		if turn.Prompt != "" || turn.Status != TurnOK || turn.Error != "" || len(turn.Steering) != 0 || len(turn.Deliveries) != 0 || turn.Profile != profile {
+			t.Errorf("update resurrected cleared canonical fields: %+v", turn)
+		}
+	}
+	checkCopy := func(profile string) {
+		t.Helper()
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var copied Turn
+		if err := json.Unmarshal(raw, &copied); err != nil {
+			t.Fatal(err)
+		}
+		check(copied, profile)
+	}
+	got, err := s.UpdateTurn(id, 1, func(turn *Turn) { turn.Profile = "current-profile" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(got, "current-profile")
+	checkCopy("current-profile")
+	writeStale()
+	before, ok := s.turnVersion(id, 1)
+	if !ok {
+		t.Fatal("canonical turn has no revision")
+	}
+	if err := s.ImportLegacyTurn(id, 1); err != nil {
+		t.Fatal(err)
+	}
+	if after, ok := s.turnVersion(id, 1); !ok || after != before {
+		t.Errorf("watcher changed canonical revision: %s -> %s", before, after)
+	}
+	got, err = s.ReadTurn(id, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(got, "current-profile")
+	got, err = s.UpdateTurn(id, 1, func(turn *Turn) { turn.Profile = "next-profile" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(got, "next-profile")
+	checkCopy("next-profile")
+	got, err = s.ReadTurn(id, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check(got, "next-profile")
+	// A direct canonical write must not read an unusable retained copy.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.writeTurn(id, Turn{N: 1, Status: TurnOK, Profile: "current-profile"}); err != nil {
+		t.Fatalf("canonical write read the retained copy: %v", err)
+	}
+}
+
 func TestMigrateImportsRetainedTurnBeforeAnyRead(t *testing.T) {
 	for _, version := range []string{"", "1"} {
 		t.Run("prior_version_"+version, func(t *testing.T) {
