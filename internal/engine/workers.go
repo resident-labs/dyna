@@ -556,7 +556,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	daily = func() { wakeWorker(sweep); t.at(timerSweep, t.now().Add(sweepEvery), daily) }
 	// Catch writes made while the engine was down.
 	signals.recoverSessions()
-	wake("instructions", "fetch", "questions", "hooks", "prs", "merges", "sync", "probe", "caches")
+	wake("instructions", "fetch", "questions", "hooks", "hook-schedule", "prs", "merges", "sync", "probe", "caches")
 	wakeWorker(sweep)
 	t.at(timerSafetySweep, t.now().Add(safetySweepEvery), safety)
 	t.at(timerSweep, t.now().Add(sweepEvery), daily)
