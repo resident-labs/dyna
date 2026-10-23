@@ -28,7 +28,7 @@ func TestMigrateImportsRetainedTurnBeforeAnyRead(t *testing.T) {
 			if _, err := db.Exec(`INSERT INTO session_turns(session,n,revision,turn) VALUES(?,2,1,'{"n":2,"prompt":"canonical"}')`, id); err != nil {
 				t.Fatal(err)
 			}
-			raw := []byte("{\n  \"n\": 1, \"prompt\": \"retained\", \"future\": {\"keep\": true}\n}\n")
+			raw := []byte("{\n  \"n\": 1, \"prompt\": \"retained\", \"future\": {\"keep\": true}, \"usageNormalization\": {\"version\": 1}\n}\n")
 			path := turnFile(t, s, id, 1)
 			if err := os.WriteFile(path, raw, 0600); err != nil {
 				t.Fatal(err)
