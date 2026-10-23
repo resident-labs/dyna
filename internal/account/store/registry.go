@@ -6,10 +6,10 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 
@@ -50,6 +50,10 @@ func Migrate(dataDir string) error {
 }
 
 func openRegistry(dataDir string) (*sql.DB, error) {
+	return openRegistryAt(dataDir, filepath.Join(dataDir, "accounts"))
+}
+
+func openRegistryAt(dataDir, root string) (*sql.DB, error) {
 	db, err := database.Open(dataDir)
 	if err != nil {
 		return nil, err
@@ -57,7 +61,7 @@ func openRegistry(dataDir string) (*sql.DB, error) {
 	if err := statewrite.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "account.registry", 3, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "account.registry", 4, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, registrySchema); err != nil {
@@ -67,7 +71,10 @@ func openRegistry(dataDir string) (*sql.DB, error) {
 		if _, err := conn.ExecContext(ctx, activeSchema); err != nil {
 			return err
 		}
-		return importActiveSelections(ctx, conn, filepath.Join(dataDir, "accounts"))
+		if err := importActiveSelections(ctx, conn, root); err != nil {
+			return err
+		}
+		return (&Store{Root: root}).importRegistry(ctx, conn)
 	})
 	return db, err
 }
@@ -77,7 +84,7 @@ func openRegistry(dataDir string) (*sql.DB, error) {
 const Topic = "accounts"
 
 // db is the registry's database: dyna.db in the folder above the accounts.
-func (s *Store) db() (*sql.DB, error) { return openRegistry(filepath.Dir(s.Root)) }
+func (s *Store) db() (*sql.DB, error) { return openRegistryAt(filepath.Dir(s.Root), s.Root) }
 
 func (s *Store) registryPath() string { return filepath.Join(s.Root, "accounts.json") }
 
@@ -242,9 +249,6 @@ func (s *Store) syncCredentialDir() error {
 //   - A new account writes its row, then its secret, so a crash between the
 //     two leaves a row that reads as signed out.
 //   - A removed account loses its row, then its secret.
-//
-// The rollback copy is rewritten only when a field the previous release acts
-// on changes.
 func (s *Store) save(ctx context.Context, db *sql.DB, committed, next State) error {
 	old := map[string]Entry{}
 	for _, e := range committed.Entries {
@@ -302,10 +306,7 @@ func (s *Store) save(ctx context.Context, db *sql.DB, committed, next State) err
 			return errors.New("Saved accounts could not be written.")
 		}
 	}
-	if actedOn(committed) == actedOn(next) {
-		return nil
-	}
-	return s.mirror(ctx, db)
+	return nil
 }
 
 // rowsChanged reports whether next differs from the stored account rows.
@@ -334,7 +335,7 @@ func (s *Store) rowsChanged(ctx context.Context, db *sql.DB, next State) (bool, 
 		return true, err
 	}
 	for i, e := range next.Entries {
-		raw, err := json.Marshal(e.Metadata)
+		raw, err := mergeMetadata(e.Metadata, []byte(stored[i].metadata))
 		if err != nil {
 			return false, err
 		}
@@ -346,11 +347,30 @@ func (s *Store) rowsChanged(ctx context.Context, db *sql.DB, next State) (bool, 
 }
 
 func writeRows(ctx context.Context, conn *sql.Conn, st State) error {
+	prior := map[string][]byte{}
+	rows, err := conn.QueryContext(ctx, "SELECT id, metadata FROM accounts")
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var id string
+		var raw []byte
+		if err := rows.Scan(&id, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		prior[id] = raw
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
 	if _, err := conn.ExecContext(ctx, "DELETE FROM accounts"); err != nil {
 		return err
 	}
 	for i, e := range st.Entries {
-		raw, err := json.Marshal(e.Metadata)
+		raw, err := mergeMetadata(e.Metadata, prior[e.ID])
 		if err != nil {
 			return err
 		}
@@ -366,7 +386,7 @@ func writeRows(ctx context.Context, conn *sql.Conn, st State) error {
 	if version == 0 {
 		version = 1
 	}
-	_, err := conn.ExecContext(ctx, `INSERT INTO accounts_registry(id, version, opencode_cleaned) VALUES (1, ?, ?)
+	_, err = conn.ExecContext(ctx, `INSERT INTO accounts_registry(id, version, opencode_cleaned) VALUES (1, ?, ?)
 ON CONFLICT(id) DO UPDATE SET version = excluded.version, opencode_cleaned = excluded.opencode_cleaned`, version, cleaned)
 	return err
 }
@@ -375,94 +395,79 @@ func sameCredential(a, b Credential) bool {
 	return a.Schema == b.Schema && bytes.Equal(a.Payload, b.Payload)
 }
 
-// actedOn is what the previous release acts on in accounts.json: the
-// account set, each credential, NeedsLogin and RefreshPending, and the
-// OpenCode cleanup flag.
-func actedOn(st State) string {
-	type fields struct {
-		ID, Schema             string
-		Payload                json.RawMessage
-		NeedsLogin, Refreshing bool
+// mergeMetadata preserves fields that this release does not understand.
+func mergeMetadata(meta Metadata, prior []byte) ([]byte, error) {
+	fields := map[string]json.RawMessage{}
+	if len(prior) != 0 {
+		if err := json.Unmarshal(prior, &fields); err != nil {
+			return nil, err
+		}
 	}
-	out := struct {
-		Cleaned bool
-		Entries []fields
-	}{Cleaned: st.OpenCodeProvidersCleaned}
-	for _, e := range st.Entries {
-		out.Entries = append(out.Entries, fields{e.ID, e.Credential.Schema, e.Credential.Payload, e.NeedsLogin, e.RefreshPending})
+	typ := reflect.TypeOf(meta)
+	for i := 0; i < typ.NumField(); i++ {
+		name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+		delete(fields, name)
 	}
-	raw, _ := json.Marshal(out)
-	return string(raw)
+	raw, err := json.Marshal(meta)
+	if err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return nil, err
+	}
+	return json.Marshal(fields)
 }
 
-// mirror writes accounts.json, the previous release's registry, from the
-// rows merged with each account's credential file. It is 0600, like each
-// credential file.
-//
-// TODO: legacy/shim remove later — the previous release reads every account
-// and credential from accounts.json, so each secret lives in two files until
-// requirement 31 (item 31) removes this copy and importRegistry. The copy is
-// rewritten only when a field that release acts on changes (actedOn), so
-// usage observations, labels and times in it may be stale.
-func (s *Store) mirror(ctx context.Context, db *sql.DB) error {
-	err := statewrite.For(db).Mirror(ctx, registryKey, s.registryPath(), func(out io.Writer) error {
-		st, err := s.load(ctx, db)
-		if err != nil {
-			return err
-		}
-		raw, err := json.MarshalIndent(st, "", "  ")
-		if err != nil || len(raw) > maxStoreBytes {
-			return errors.New("Saved accounts exceed the supported size or format.")
-		}
-		_, err = out.Write(raw)
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("Saved accounts were written, but the previous release's copy could not be written.")
-	}
-	return nil
-}
-
-// importRegistry imports accounts.json when another binary wrote it. The
-// caller holds accounts.lock, which the previous release also takes, so the
-// file cannot change while it runs. Its secrets are written first, outside
-// dyna.db's writer; then one transaction commits its rows and the stamp. A
-// crash before that commit leaves the file unstamped, so the next read
-// imports it again and rewrites the same secrets. After the commit, the
-// credential file of any account the file no longer has is deleted. A file
-// this release cannot read (wrong version or invalid) stays an error, as
-// before, so a newer release's registry is never replaced.
-//
-// TODO: legacy/shim remove later — remove with mirror, in requirement 31.
-func (s *Store) importRegistry(ctx context.Context, db *sql.DB) error {
-	w := statewrite.For(db)
-	if foreign, err := w.Foreign(ctx, registryKey, s.registryPath()); err != nil || !foreign {
+// TODO: legacy/shim remove later — import accounts.json once, before SQL owns the registry.
+// Credential files are durable before the transaction commits metadata. Retrying
+// an interrupted migration preserves any credential file already written.
+func (s *Store) importRegistry(ctx context.Context, conn *sql.Conn) error {
+	var canonical bool
+	if err := conn.QueryRowContext(ctx, `SELECT
+		EXISTS(SELECT 1 FROM accounts) OR EXISTS(SELECT 1 FROM accounts_registry)
+		OR EXISTS(SELECT 1 FROM state_mirrors WHERE key = ?)`, registryKey).Scan(&canonical); err != nil {
 		return err
 	}
-	raw, err := os.ReadFile(s.registryPath())
-	if err != nil {
-		return errors.New("Saved accounts could not be read.")
+	if canonical {
+		return nil
 	}
-	st, err := parseRegistry(raw)
-	if err != nil {
-		return err
-	}
-	for _, e := range st.Entries {
-		if err := s.writeCredential(e.ID, e.Credential); err != nil {
-			return errors.New("Saved accounts could not be written.")
-		}
-	}
-	imported, err := w.ImportIfForeign(ctx, registryKey, s.registryPath(), func(conn *sql.Conn, raw []byte) error {
+	_, err := statewrite.ImportMigration(ctx, conn, registryKey, s.registryPath(), func(conn *sql.Conn, raw []byte) error {
 		st, err := parseRegistry(raw)
 		if err != nil {
 			return err
 		}
-		return writeRows(ctx, conn, st)
-	})
-	if err != nil || !imported {
+		var source struct{ Entries []map[string]json.RawMessage }
+		if err := json.Unmarshal(raw, &source); err != nil {
+			return err
+		}
+		for i, e := range st.Entries {
+			if e.ID == "" || filepath.Base(e.ID) != e.ID || e.ID == "." || e.ID == ".." {
+				return errors.New("Saved accounts have an unsupported or invalid format.")
+			}
+			if _, err := os.Lstat(s.credentialPath(e.ID)); errors.Is(err, os.ErrNotExist) {
+				if err := s.writeCredential(e.ID, e.Credential); err != nil {
+					return err
+				}
+			} else if err != nil {
+				return err
+			}
+			delete(source.Entries[i], "credential")
+			metadata, err := json.Marshal(source.Entries[i])
+			if err != nil {
+				return err
+			}
+			if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id,ord,metadata,credential_schema) VALUES(?,?,?,?)", e.ID, i, metadata, e.Credential.Schema); err != nil {
+				return err
+			}
+		}
+		cleaned := 0
+		if st.OpenCodeProvidersCleaned {
+			cleaned = 1
+		}
+		_, err = conn.ExecContext(ctx, "INSERT INTO accounts_registry(id,version,opencode_cleaned) VALUES(1,?,?)", st.Version, cleaned)
 		return err
-	}
-	return s.dropOrphanCredentials(ctx, db)
+	})
+	return err
 }
 
 func parseRegistry(raw []byte) (State, error) {

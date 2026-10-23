@@ -83,10 +83,8 @@ func (a *Accounts) transaction(fn func(*store.State) error, write bool) error {
 	if err := safeAccountPath(a.Root); err != nil {
 		return err
 	}
-	for _, name := range []string{"accounts.json", "accounts.lock"} {
-		if err := safeAccountPath(filepath.Join(a.Root, name)); err != nil {
-			return err
-		}
+	if err := safeAccountPath(filepath.Join(a.Root, "accounts.lock")); err != nil {
+		return err
 	}
 	s := &store.Store{Root: a.Root, Quiet: a.Quiet}
 	if !write {
