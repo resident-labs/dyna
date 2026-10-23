@@ -44,7 +44,7 @@
   .document :global(blockquote) { border-color: var(--iris-edge); background: var(--iris-wash); padding: 12px 18px; border-radius: 0 6px 6px 0; margin: 1.2em 0; }
   .document :global(blockquote > :last-child) { margin-bottom: 0; }
   .document :global(.document-code) { position: relative; }
-  .document :global(.document-copy) { position: absolute; right: 8px; top: 6px; min-height: 44px; padding: 0 12px; font-size: 12px; color: var(--muted); border-radius: 6px; background: var(--raise); }
+  .document :global(.document-copy) { position: absolute; right: 8px; top: 6px; min-height: 44px; padding: 0 12px; font-size: 12px; color: var(--muted); border-radius: 6px; background: var(--raise); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   .document :global(.document-copy:hover) { color: var(--ink); background: var(--raise-hover); }
   .document :global(.document-copy:focus-visible) { outline: 2px solid var(--iris-edge); outline-offset: 2px; }
   .document :global(.document-copy-status) { position: absolute; left: 18px; top: 18px; font-size: 12px; color: var(--sage); }
