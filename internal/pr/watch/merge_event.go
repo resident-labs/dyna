@@ -50,12 +50,34 @@ func mergeTrialEvent(st State, b state.MergeTrial, step room.MergeStep) room.Mer
 	return ev
 }
 
+// mergeEventOf is the base of an event about one change, when no trial owns the
+// fact. A caller sets the step and overrides the facts that only it knows.
+func mergeEventOf(r Record, step room.MergeStep) room.MergeEvent {
+	return room.MergeEvent{
+		Type:    step,
+		TrialID: changeID(r),
+		Repo:    mergeRepo(r),
+		Base:    conflictBase(r),
+		PRs:     []room.MergePR{mergePR(r)},
+		Label:   changeLabel(r),
+	}
+}
+
+// mergeChecksOf is the CI summary of one read, or nil when the read gave no
+// count and no failing name.
+func mergeChecksOf(ci trialCI) *room.MergeCheckSummary {
+	if ci.Total == 0 && len(ci.Failed) == 0 {
+		return nil
+	}
+	return &room.MergeCheckSummary{Done: ci.Done, Total: ci.Total, Failed: ci.Failed}
+}
+
 // mergeChecksEvent is the trial's CI progress. The counts are the checks the
 // steward already read, so a progress step costs no GitHub call.
 func mergeChecksEvent(st State, b state.MergeTrial, ci trialCI) room.MergeEvent {
 	ev := mergeTrialEvent(st, b, room.MergeChecks)
 	ev.Summary = fmt.Sprintf("%d of %d checks done", ci.Done, ci.Total)
-	ev.Checks = &room.MergeCheckSummary{Done: ci.Done, Total: ci.Total, Failed: ci.Failed}
+	ev.Checks = mergeChecksOf(ci)
 	// Each count is one progress step: a later step is a new post of the same
 	// trial, and a repeated one keeps its post.
 	ev.Key = fmt.Sprintf("%d/%d", ci.Done, ci.Total)
