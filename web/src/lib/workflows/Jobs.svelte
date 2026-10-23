@@ -96,7 +96,7 @@
       if (id !== sel || request !== logRequest) return
       logError = errorText(e)
     } finally {
-      if (id === sel && request === logRequest) { logLoading = false; loadingJob = '' }
+      if (request === logRequest) { logLoading = false; loadingJob = '' }
     }
   }
 
