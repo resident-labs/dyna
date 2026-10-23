@@ -61,7 +61,9 @@ func TestReportPreparationKeepsExactParentIdentity(t *testing.T) {
 			if reuse {
 				e.start(rec, "lead", nil)
 			}
-			n := len(CompletionText(child.Address(), 1, "completed", payload, ""))
+			// The turn's report is bounded after it is written to its artifact: the
+			// spill holds the result itself, without its surrounding space.
+			n := len(strings.TrimSpace(payload))
 			if _, err := io.CopyN(io.Discard, pipe, int64(n-1)); err != nil {
 				t.Fatal(err)
 			}

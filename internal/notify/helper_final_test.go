@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/parentoutput"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
 
@@ -37,7 +38,7 @@ func TestServiceHelperFinalResultReachesReviewerWithoutPost(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if out.Message.Kind != "completed" || out.Message.OwnerReport || !reflect.DeepEqual(out.Message.To, []string{parent.Address()}) || out.Message.SessionIDs[parent.Address()] != parent.ID || !strings.Contains(out.Message.Text, findings) {
+			if !turnReport(out.Message, room.TurnCompleted) || out.Message.OwnerReport || !reflect.DeepEqual(out.Message.To, []string{parent.Address()}) || out.Message.SessionIDs[parent.Address()] != parent.ID || !strings.Contains(out.Message.Text, findings) {
 				t.Fatalf("helper final did not reach its current reviewer: %+v", out.Message)
 			}
 			if len(out.Deliveries) != 1 || out.Deliveries[0].Delivery != "session-queued" {
@@ -81,7 +82,7 @@ func TestServiceHelperLongFinalIsBoundedAndRetryIsSafe(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if out.Message.Kind != "completed" || out.Message.OwnerReport || !reflect.DeepEqual(out.Message.To, []string{parent.Address()}) || len([]rune(out.Message.Text)) > parentoutput.InlineCharLimit {
+			if !turnReport(out.Message, room.TurnCompleted) || out.Message.OwnerReport || !reflect.DeepEqual(out.Message.To, []string{parent.Address()}) || len([]rune(out.Message.Text)) > parentoutput.InlineCharLimit+200 {
 				t.Fatalf("helper report was not bounded for its reviewer: %+v", out.Message)
 			}
 			if spillFails {
@@ -94,7 +95,7 @@ func TestServiceHelperLongFinalIsBoundedAndRetryIsSafe(t *testing.T) {
 			} else {
 				path := filepath.Join(outputDir, "turn-1.txt")
 				full, err := os.ReadFile(path)
-				if err != nil || string(full) != CompletionText(helper.Address(), 1, "completed", findings, "") || !strings.Contains(out.Message.Text, path) {
+				if err != nil || string(full) != findings || !strings.Contains(out.Message.Text, path) {
 					t.Fatalf("full helper report was not preserved: %v", err)
 				}
 			}

@@ -31,6 +31,9 @@ func TestSeatRowsCarryTheRootDecisions(t *testing.T) {
 		mode     DeliveryMode
 		category string
 		input    bool
+		// ownerReport and producer describe a typed event's post.
+		ownerReport bool
+		producer    EventProducer
 	}{
 		{
 			name: "human request",
@@ -53,19 +56,26 @@ func TestSeatRowsCarryTheRootDecisions(t *testing.T) {
 			row:  true, mode: DeliveryWake, input: true,
 		},
 		{
-			name: "completion owed to the owner",
-			in:   PostInput{From: roomName + ":lead", Kind: "completed", OwnerReport: true, To: []string{roomName}, Text: "Report shipped"},
-			row:  true, mode: DeliveryQuiet, category: RootQuietPost,
+			name:        "completion owed to the owner",
+			event:       TurnEvent{Session: roomName + ":lead", SessionID: "ses_lead", Turn: 1, State: TurnCompleted, Summary: "Report shipped"},
+			to:          []string{roomName},
+			ownerReport: true,
+			row:         true, mode: DeliveryQuiet, category: RootQuietPost,
 		},
 		{
-			name: "failed report",
-			in:   PostInput{Wake: true, From: roomName + ":lead", Kind: "failed", OwnerReport: true, To: []string{roomName}, Text: "The turn failed"},
-			row:  true, mode: DeliveryWake, input: true,
+			name:        "failed report",
+			event:       TurnEvent{Session: roomName + ":lead", SessionID: "ses_lead", Turn: 1, State: TurnFailed, Summary: "The turn failed", Error: "the provider refused the request"},
+			to:          []string{roomName},
+			ownerReport: true,
+			row:         true, mode: DeliveryWake, input: true,
 		},
 		{
-			name: "shell result owed to the owner",
-			in:   PostInput{Wake: true, From: "shell:s1", Kind: "completed", OwnerReport: true, To: []string{roomName}, Text: "Exit 0"},
-			row:  true, mode: DeliveryWake, input: true,
+			name:        "shell result owed to the owner",
+			event:       ShellEvent{ShellID: "sh_20261023-120000-00000001", Label: "make", State: ShellCompleted, ExitCode: 0},
+			to:          []string{roomName},
+			ownerReport: true,
+			producer:    ProducerShell,
+			row:         true, mode: DeliveryWake, input: true,
 		},
 		{
 			name: "owner DM to an agent",
@@ -105,7 +115,7 @@ func TestSeatRowsCarryTheRootDecisions(t *testing.T) {
 			var msg Message
 			var err error
 			if tc.event != nil {
-				msg, err = s.PostEvent(rec.ID, tc.event, tc.to...)
+				msg, err = s.PostEventInput(PostEventInput{RoomID: rec.ID, Event: tc.event, To: tc.to, OwnerReport: tc.ownerReport, Producer: tc.producer})
 			} else {
 				msg, err = s.Post(rec.ID, tc.in)
 			}

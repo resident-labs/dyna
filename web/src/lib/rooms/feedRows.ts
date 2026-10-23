@@ -2,7 +2,8 @@ import { parsePRPost } from '../prs/pr.ts'
 import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
 import type { EventPayload, HookEvent } from './events.gen.ts'
-import { hookEvent, issueEvent, mergeEvent, prEvent, reviewEvent } from './eventPayloads.ts'
+import { hookEvent, issueEvent, mergeEvent, prEvent, reviewEvent, shellEvent } from './eventPayloads.ts'
+import { eventSpecs } from './events.gen.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
 // fixtures of a test both fit it.
@@ -80,10 +81,24 @@ const shellSender = /^shell:sh_\d{8}-\d{6}-[a-f0-9]{8}$/
 const resultKinds: ReadonlySet<string> = new Set(['completed', 'failed', 'stopped'])
 
 // Automatic `dyna shell` exit records stay out of feed views; the
-// shell-jobs view lists those jobs. They still wake the job's parent.
+// shell-jobs view lists those jobs. They still wake the job's parent. A typed
+// shell result is its own event; an older one names its job in the sender.
+//
+// TODO: legacy/shim remove later — the sender and kind form reads a shell
+// result stored before the typed shell events. Remove when that history ages
+// out.
 export function isShellResult(post: FeedInput): boolean {
+  if (shellEvent(post)) return !post.owner && !post.human && !post.replyTo && !post.attachments?.length
   return post.completion === true && resultKinds.has(post.kind ?? '') &&
     shellSender.test(post.from) && !post.owner && !post.human && !post.replyTo && !post.attachments?.length
+}
+
+// shellJobID names the shell job a result row opens. The ID stays opaque: it
+// is the job's own key, never text a reader sees.
+export function shellJobID(post: FeedInput): string {
+  const typed = shellEvent(post)
+  if (typed) return typed.shellId
+  return post.from.slice('shell:'.length)
 }
 
 // callsInWindow keeps the call requests that belong between the loaded

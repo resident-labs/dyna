@@ -10,6 +10,9 @@
 import type { Component } from 'svelte'
 import WorktreeCard from './WorktreeCard.svelte'
 import HookCard from './HookCard.svelte'
+import ShellResultRow from './ShellResultRow.svelte'
+import RunResultCard from './RunResultCard.svelte'
+import TurnCompletionRow from './TurnCompletionRow.svelte'
 import MergeCard from './MergeCard.svelte'
 import MachineDiskCard from './MachineDiskCard.svelte'
 import PRCard from '../prs/PRCard.svelte'
@@ -42,6 +45,13 @@ export interface EventPost {
   kind?: string
   from?: string
   fromHue?: number
+  // speaker, completion, fullResult and turn are what a feed row and a DM row
+  // keep of the shaped post; a card shows them when its event has no better
+  // name for the session.
+  speaker?: string
+  completion?: boolean
+  fullResult?: boolean
+  turn?: number
   notice?: EventNotice
   payload?: EventPayload
   to?: string[] | null
@@ -83,7 +93,11 @@ export type EventRenderer = Component<EventProps>
 
 // Components by the name a spec gives in its renderer field. A name with no
 // component here draws the unknown event row, and the test fails.
-export const eventComponents: Record<string, EventRenderer> = { WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard, SessionNoteCard, AlertCard, ServiceAlertCard, EngineNoticeCard, QuestionNoteCard, ReviewResultCard }
+export const eventComponents: Record<string, EventRenderer> = {
+  WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard,
+  SessionNoteCard, AlertCard, ServiceAlertCard, EngineNoticeCard, QuestionNoteCard, ReviewResultCard,
+  ShellResultRow, RunResultCard, TurnCompletionRow,
+}
 
 // The post key of a registered event: its family and its event type.
 export function eventKey(family?: string, type?: string): string {

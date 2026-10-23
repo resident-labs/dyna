@@ -50,7 +50,8 @@ func TestFeedViewUnreadUsesWholeSharedIndex(t *testing.T) {
 	if err := e.svc.MarkReadMany(rec.ID, []string{first.ID}); err != nil {
 		t.Fatal(err)
 	}
-	completed, err := e.svc.rooms().Post(rec.ID, room.PostInput{From: grandchild.Address(), To: []string{rec.Name}, Kind: "completed", Text: "finished"})
+	completed, err := e.svc.rooms().PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{rec.Name},
+		Event: room.TurnEvent{Session: grandchild.Address(), SessionID: grandchild.ID, Turn: 1, State: room.TurnCompleted, Summary: "finished"}})
 	if err != nil {
 		t.Fatal(err)
 	}

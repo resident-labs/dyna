@@ -7,7 +7,7 @@ import { build } from 'esbuild'
 import { JSDOM } from 'jsdom'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 
-export const domNames = ['window', 'document', 'Element', 'Node', 'HTMLElement', 'Event', 'MouseEvent', 'DocumentFragment', 'ShadowRoot', 'CharacterData', 'Text', 'Comment', 'HTMLInputElement', 'HTMLButtonElement', 'HTMLAnchorElement', 'HTMLDivElement', 'HTMLMediaElement', 'HTMLImageElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLFormElement', 'File', 'FileReader', 'Blob', 'DOMParser', 'Audio', 'NodeList', 'KeyboardEvent', 'CustomEvent', 'IntersectionObserver', 'ResizeObserver', 'HTMLTemplateElement', 'MutationObserver', 'getComputedStyle', 'requestAnimationFrame']
+export const domNames = ['window', 'document', 'Element', 'Node', 'NodeFilter', 'HTMLElement', 'Event', 'MouseEvent', 'DocumentFragment', 'ShadowRoot', 'CharacterData', 'Text', 'Comment', 'HTMLInputElement', 'HTMLButtonElement', 'HTMLAnchorElement', 'HTMLDivElement', 'HTMLMediaElement', 'HTMLImageElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLFormElement', 'File', 'FileReader', 'Blob', 'DOMParser', 'Audio', 'NodeList', 'KeyboardEvent', 'CustomEvent', 'IntersectionObserver', 'ResizeObserver', 'HTMLTemplateElement', 'MutationObserver', 'getComputedStyle', 'requestAnimationFrame']
 
 // A jsdom page whose window fills the globals a compiled Svelte component needs.
 export function installDom(extra: object = {}): JSDOM {

@@ -35,7 +35,7 @@ func TestEventsFileMatchesRegistry(t *testing.T) {
 
 func TestPostRejectsSealedFamily(t *testing.T) {
 	store, rec := newEventStore(t)
-	for _, family := range []EventFamily{FamilyWorktree, FamilyHook, FamilyPR, FamilyMerge, FamilyIssue, FamilyGoal, FamilyCheckin, FamilyCIHealth, FamilyRule} {
+	for _, family := range []EventFamily{FamilyWorktree, FamilyHook, FamilyPR, FamilyMerge, FamilyIssue, FamilyGoal, FamilyCheckin, FamilyCIHealth, FamilyRule, FamilyShell, FamilyRun, FamilyTurn} {
 		_, err := store.Post(rec.ID, PostInput{From: rec.Name, To: []string{rec.Name}, Kind: string(family), Text: "sealed"})
 		if err == nil || !strings.Contains(err.Error(), "PostEvent") {
 			t.Fatalf("Post accepted the sealed family %q: %v", family, err)

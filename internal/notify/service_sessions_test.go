@@ -76,7 +76,7 @@ func TestServiceSessionDirectMentions(t *testing.T) {
 			}
 			reported := false
 			for _, message := range messages {
-				if message.From == info.Address() && message.Kind == "completed" && reflect.DeepEqual(message.To, []string{rec.Name}) {
+				if ev, ok := message.TurnResult(); ok && ev.SessionID == info.ID && reflect.DeepEqual(message.To, []string{rec.Name}) {
 					reported = true
 				}
 			}
