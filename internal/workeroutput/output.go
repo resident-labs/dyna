@@ -352,6 +352,30 @@ func PairTools(events []Event) ([]Event, map[int]int64) {
 	return out, ended
 }
 
+// IsCompactionEvent reports whether e is a compaction status record. Dyna
+// keeps every one of them when it trims a long turn, because the divider is
+// the only sign the context was compacted.
+func IsCompactionEvent(e Event) bool {
+	return e.Kind == "status" && (e.Name == "compaction" || e.Name == "compact_boundary")
+}
+
+// KeepCompactions trims events to their newest max records, keeping every
+// compaction status event where it was. A long turn keeps only its tail, so a
+// compaction early in it would otherwise disappear from every view.
+func KeepCompactions(events []Event, max int) []Event {
+	if max <= 0 || len(events) <= max {
+		return events
+	}
+	first := len(events) - max
+	out := make([]Event, 0, max)
+	for i, e := range events {
+		if i >= first || IsCompactionEvent(e) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // CoalesceNormalizedEvents turns a provider's token-sized reasoning and message
 // deltas into readable blocks without changing the append-only output artifact.
 // Consecutive deltas of one kind that share an ID merge into a single block, so

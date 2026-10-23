@@ -231,23 +231,29 @@ func fromEvents(events []workeroutput.Event) ([]Item, int, []int) {
 	return items, hidden, conts
 }
 
-// appendCompaction adds one compaction item. A started item is completed or
-// failed by the outcome that follows it.
+// appendCompaction adds one compaction item. A start that arrives while a
+// compaction is already running is the same compaction reported again, and the
+// outcome closes the open item wherever other work sits between them.
 func appendCompaction(items []Item, e workeroutput.Event, ts time.Time) []Item {
 	c := CompactionInfo{State: CompactionState(e.State), Trigger: e.Trigger, Before: e.TokensBefore, After: e.TokensAfter}
 	if c.State == CompactionFailed {
 		c.Reason = strings.TrimSpace(e.Text)
 	}
-	if n := len(items); n > 0 && items[n-1].Kind == Compaction && items[n-1].Compaction.State == CompactionStarted {
-		prev := &items[n-1]
-		// A repeated start keeps the first one: the harness said it twice.
-		if c.State == CompactionStarted {
+	open := -1
+	for i := len(items) - 1; i >= 0; i-- {
+		if items[i].Kind == Compaction && items[i].Compaction.State == CompactionStarted {
+			open = i
+			break
+		}
+	}
+	if c.State == CompactionStarted {
+		if open >= 0 {
 			return items
 		}
-		prev.Compaction, prev.TS = c, ts
-		return items
+		return append(items, Item{Kind: Compaction, TS: ts, Compaction: c})
 	}
-	if c.State == CompactionStarted && len(items) > 0 && items[len(items)-1].Kind == Compaction {
+	if open >= 0 {
+		items[open].Compaction, items[open].TS = c, ts
 		return items
 	}
 	return append(items, Item{Kind: Compaction, TS: ts, Compaction: c})
