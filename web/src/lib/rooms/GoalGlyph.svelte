@@ -1,5 +1,5 @@
 <script>
-  import { goalTone } from './goals.js'
+  import { goalTone } from './goals.ts'
   let { goal = { state: 'active' }, size = 14, neutral = false } = $props()
 </script>
 <svg width={size} height={size} viewBox="0 0 14 14" class="glyph {neutral ? 'neutral' : goalTone(goal)}" aria-hidden="true">

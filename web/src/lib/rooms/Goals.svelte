@@ -6,7 +6,7 @@
   import ServiceHeader from '../services/ServiceHeader.svelte'
   import Row from '../ui/Row.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
-  import { goalTree, goalStatus, goalTone, goalFilter, itemCountLabel } from './goals.js'
+  import { goalTree, goalStatus, goalTone, goalFilter, itemCountLabel } from './goals.ts'
   import GoalJournal from './GoalJournal.svelte'
   import { createGoalEvents } from './goalEvents.ts'
   import ExpediteBadge from './ExpediteBadge.svelte'

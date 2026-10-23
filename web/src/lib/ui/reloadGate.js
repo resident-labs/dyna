@@ -1,4 +1,4 @@
-import { isChannel } from '../rooms/channels.js'
+import { isChannel } from '../rooms/channels.ts'
 
 // Each room/list has one request and one pending refresh. Every caller waits
 // for the whole burst, including its trailing refresh.

@@ -2,7 +2,7 @@
 // voice-call channel (roomsvc.VoiceChannel), and root's posts to
 // @voice-call, since this call started. Each
 // call is a fresh conversation, so earlier calls never show here.
-import { VOICE } from '../rooms/channels.js'
+import { VOICE } from '../rooms/channels.ts'
 import { rootToVoice } from './attention.ts'
 import { postParts } from '../ui/postParts.js'
 

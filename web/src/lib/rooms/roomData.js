@@ -1,4 +1,4 @@
-import { memberChoices } from './mentions.js'
+import { memberChoices } from './mentions.ts'
 import { createReloadGate } from '../ui/reloadGate.js'
 
 // Controllers own request identity and cleanup. App owns navigation and
