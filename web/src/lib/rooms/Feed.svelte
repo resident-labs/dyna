@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { speaker } from '../ui/posts.ts'
   import { tick, onMount } from 'svelte'
   import HeldCommentNotice from '../prs/HeldCommentNotice.svelte'
@@ -17,6 +17,7 @@
   import CallRequestRow from '../voice/CallRequestRow.svelte'
   import CompletionBody from '../ui/CompletionBody.svelte'
   import { feedRows, feedPRRepos, callsInWindow, rowPost } from './feedRows.ts'
+  import type { FeedRow } from './feedRows.ts'
   import PostFiles from '../ui/PostFiles.svelte'
   import { postParts } from '../ui/postParts.ts'
   import { questionID } from './questions.ts'
@@ -26,13 +27,51 @@
   import SystemNote from '../ui/SystemNote.svelte'
   import { noteGroups } from '../ui/notices.ts'
   import { sealedEvent, rendererFor } from './eventRenderers.ts'
+  import type { EventPost } from './eventRenderers.ts'
+  import { prEvent } from './eventPayloads.ts'
   import { look } from './look.svelte.ts'
   import { highlighted, oneLine } from './look.ts'
+  import type { Attachment, Post, Question, Room } from '../api/room.ts'
+  import type { Goal } from '../api/goal.ts'
+  import type { CallRequest } from '../voice/callRequests.ts'
 
-  let { room, label = 'general', intro = true, posts = [], questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onacceptcall, ondeclinecall, ongoal, stuck = $bindable(true) } = $props()
+  interface Props {
+    room: Room
+    label?: string
+    intro?: boolean
+    posts?: Post[]
+    questions?: Question[]
+    calls?: CallRequest[]
+    goals?: Goal[]
+    earlier?: number
+    newer?: number
+    onearlier?: (near: () => boolean) => unknown
+    onnewer?: (near: () => boolean) => unknown
+    onpresent?: () => unknown
+    onaround?: (id: string) => unknown
+    unreadFrom?: string
+    view?: string
+    pinned?: Set<string>
+    onaddress?: (address: string) => void
+    onreveal?: (id: string) => void
+    onreply?: (post: Post) => void
+    onforward?: (post: Post) => void
+    onpin?: (post: Post) => unknown
+    onopenfile?: (attachment: Attachment & { roomId?: string; postId?: string }) => void
+    onissue?: (() => void) | null
+    // Where a result opens its detail: the app's DetailTarget.
+    ondetail?: (target: { kind: string; id: string; roomId?: string; turn?: number }) => unknown
+    onquestion?: (post: Post) => void
+    onacceptcall?: (request: CallRequest) => void
+    ondeclinecall?: (request: CallRequest) => void
+    ongoal?: (id: string) => unknown
+    stuck?: boolean
+  }
+  let { room, label = 'general', intro = true, posts = [], questions = [], calls = [], goals = [], earlier = 0, newer = 0, onearlier, onnewer, onpresent, onaround, unreadFrom = '', view = 'general', pinned = new Set<string>(), onaddress, onreveal, onreply, onforward, onpin, onopenfile, onissue = null, ondetail, onquestion, onacceptcall = () => {}, ondeclinecall = () => {}, ongoal, stuck = $bindable(true) }: Props = $props()
 
-  let scroller = $state()
-  let list = $state()
+  let scroller = $state<HTMLDivElement>()
+  // The list's jump and scroll calls, which only it knows how to make.
+  let list = $state<{ scrollToIndex(index: number): void }>()
   // On a touch screen there is no hover: a tap on a post shows its actions.
   // The one post whose action bar shows (postSelect.ts).
   const selection = createSelection()
@@ -40,15 +79,16 @@
   let rows = $derived(feedRows(posts, unreadFrom, callsInWindow(calls, posts, earlier, newer)))
   // Posts that arrive while the feed is open rise in; the feed opens still.
   const arrived = arrivals()
-  let isNew = $derived(arrived(`${room?.id}:${view}`, rows.map((r) => r.key)))
+  // The tester reads no argument; each row passes its key, which it ignores.
+  let isNew = $derived<(key: string) => boolean>(arrived(`${room?.id}:${view}`, rows.map((r) => r.key)))
   // A run of Dyna's notices shares one quiet note.
-  let notes = $derived(noteGroups(rows, room?.name))
+  let notes = $derived(noteGroups(rows.map((r) => ({ post: rowPost(r) })), room?.name))
 
   let showRepo = $derived(feedPRRepos(posts).size > 1)
-  let expanded = $state(new Set())
-  let foldable = $state(new Set())
+  let expanded = $state(new Set<string>())
+  let foldable = $state(new Set<string>())
 
-  function measureMessage(node, id) {
+  function measureMessage(node: HTMLElement, id: string) {
     const measure = () => {
       const line = parseFloat(getComputedStyle(node).lineHeight)
       const long = node.scrollHeight > line * 3 + 2
@@ -63,7 +103,7 @@
     return { destroy: () => observer.disconnect() }
   }
 
-  function toggleMessage(id) {
+  function toggleMessage(id: string) {
     const next = new Set(expanded)
     if (next.has(id)) next.delete(id)
     else next.add(id)
@@ -73,7 +113,7 @@
   let questionsById = $derived(Object.fromEntries(questions.map((q) => [q.id, q])))
   // Only questions to the owner wait for an answer here. Older questions
   // between agents read as plain posts.
-  const ownerQuestion = (p) => {
+  const ownerQuestion = (p: Post) => {
     const id = questionID(p)
     return id && (questionsById[id]?.to ?? 'owner') === 'owner' ? id : ''
   }
@@ -93,7 +133,7 @@
 
   // Also called by the Pinned panel, so a pin and a reply line scroll and
   // flash the same way.
-  export async function jump(id) {
+  export async function jump(id: string) {
     // Leaving the bottom keeps the app from trimming the pages loaded here.
     stuck = false
     let i = rowOf(id)
@@ -111,40 +151,49 @@
     }
     if (i < 0) return
     const n = ++jumps
-    flash = { key: rows[i].key, id, n }
-    list.scrollToIndex(i)
+    flash = { key: rows[i]?.key ?? '', id, n }
+    list?.scrollToIndex(i)
     // Compare the jump number: state wraps the object, so identity differs.
     setTimeout(() => { if (flash?.n === n) flash = null }, 1200)
   }
 
   // A folded PR row holds several posts; any of them finds the row.
-  const rowOf = (id) => rows.findIndex((r) => r.kind === 'post' && (r.post.id === id || r.posts?.some((p) => p.id === id)))
+  const rowOf = (id: string) => rows.findIndex((r) => r.kind === 'post' && (r.post.id === id || r.posts?.some((p) => p.id === id)))
 
   // The row a jump went to, and the post in it. The list can draw a row
   // again while it settles the scroll, so the row takes its flash and focus
   // from this state each time it is drawn. A PR row passes the post to the
   // notice it belongs to.
-  let flash = $state(null)
+  let flash = $state<{ key: string; id: string; n: number } | null>(null)
   let jumps = 0
 
   // The label comes from Go (roomsvc.SpeakerLabel): you, root, or a member.
-  const who = (p) => speaker(p, room.name)
+  const who = (p: Post) => speaker(p, room.name)
 
-  function recipients(p) {
+  function recipients(p: Post) {
     const groups = (p.via || []).filter((v) => /^@(.*:)?(children|siblings|parent)$/.test(v))
     const names = (p.to || []).map((a) => short(a, room.name))
     return { groups, names }
   }
 
-  // The look choices (Settings) pick the highlighted posts and the finished
-  // turns that fold to one line.
-  let opened = $state({}) // one-line results the owner opened
+  // A card hands back the shared fields of its stored post; the feed's own
+  // callbacks take the whole post, which byId holds.
+  const keep = (post: EventPost, run?: (post: Post) => void) => {
+    const full = byId[post.id]
+    if (full) run?.(full)
+  }
 
-  function verb(p) {
+  // The look choices (Settings) pick the marked posts and the finished turns
+  // that fold to one line. look.ts reads the part of a post that decides this,
+  // where no recipient list is undefined.
+  const lookFields = (p: Post) => ({ ...p, to: p.to ?? undefined })
+  let opened = $state<Record<string, boolean>>({}) // one-line results the owner opened
+
+  function verb(p: Post) {
     return p.kind === 'failed' ? 'failed' : p.kind === 'stopped' ? 'stopped' : 'finished'
   }
 
-  function snippet(p) {
+  function snippet(p: Post) {
     const t = postParts(p).text.replace(/\s+/g, ' ').trim()
     return t.length > 90 ? t.slice(0, 90) + '…' : t
   }
@@ -158,11 +207,11 @@
   </span>
 {/snippet}
 
-{#snippet completionPost(p)}
-  {#if oneLine(look, p) && !opened[p.id]}
+{#snippet completionPost(p: Post)}
+  {#if oneLine(look, lookFields(p)) && !opened[p.id]}
     <span class="gutter"><span class="mark" aria-hidden="true">✓</span></span>
     <div class="body line">
-      <button class="name hue-{p.fromHue}" onclick={() => onaddress(p.from)}>{who(p)}</button>
+      <button class="name hue-{p.fromHue}" onclick={() => onaddress?.(p.from)}>{who(p)}</button>
       <span class="what">{verb(p)}{p.turn ? ` turn ${p.turn}` : ''}</span>
       <span class="snip">{resultLine(postParts(p).text)}</span>
       <button class="open" onclick={() => (opened[p.id] = true)}>View</button>
@@ -172,7 +221,7 @@
     <span class="gutter"><span class="mark" aria-hidden="true">{p.kind === 'failed' ? '✕' : p.kind === 'stopped' ? '⊘' : '✓'}</span></span>
     <div class="body">
       <div class="sysline">
-        <button class="name hue-{p.fromHue}" onclick={() => onaddress(p.from)}>{who(p)}</button>
+        <button class="name hue-{p.fromHue}" onclick={() => onaddress?.(p.from)}>{who(p)}</button>
         <span class="what">{verb(p)}{p.turn ? ` turn ${p.turn}` : ''}</span>
         <time title={stamp(p.ts)}>{stamp(p.ts)}</time>
       </div>
@@ -191,8 +240,8 @@
   {/if}
   <!-- Only rows near the viewport render; jump() finds the others by index. -->
   {#key room.id + ':' + view}
-  <HistoryList bind:this={list} bind:atBottom={stuck} {scroller} items={rows} key={(r) => r.key} estimate={(r) => (r.kind === 'post' ? 96 : 32)} {earlier} {newer} {onearlier} {onnewer} {onpresent} onhistory={() => (stuck = false)} beginning={intro ? 'Beginning of #' + label : ''}>
-  {#snippet children(row, index)}
+  <HistoryList bind:this={list} bind:atBottom={stuck} {scroller} items={rows} key={(r: FeedRow<Post>) => r.key} estimate={(r: FeedRow<Post>) => (r.kind === 'post' ? 96 : 32)} earlier={earlier > 0} newer={newer > 0} {onearlier} {onnewer} {onpresent} onhistory={() => (stuck = false)} beginning={intro ? 'Beginning of #' + label : ''}>
+  {#snippet children(row: FeedRow<Post>, index: number)}
     {#if row.kind === 'day'}
       <div class="divider"><span>{dayLabel(row.ts)}</span></div>
     {:else if row.kind === 'new'}
@@ -205,28 +254,31 @@
     {:else}
       {@const p = row.post}
       {@const parts = postParts(p)}
+      {@const replyTo = p.replyTo}
       <!-- Every stored post owns the same actions. Kind selects its body only. -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions, a11y_no_noninteractive_tabindex -->
-      <article class="post {p.completion ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind) || sealedEvent(p)} class:after-sys={p.completion && rowPost(rows[index - 1])?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, p, room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(p)} {...postHandlers(selection, p.id)}>
+      <article class="post {p.completion ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind ?? '') || sealedEvent(p)} class:after-sys={p.completion && rowPost(rows[index - 1])?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, lookFields(p), room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(p)} {...postHandlers(selection, p.id)}>
         {@render replyCue()}
         {#if (row.posts ?? [p]).some((post) => pinned.has(post.id))}<span class="post-pin" title="Pinned" transition:scale={{ start: 0.6, duration: motion(FAST) }}><PinIcon size={13} filled /></span>{/if}
-          {#if p.replyTo}
-            <button class="replyline" onclick={() => jump(p.replyTo)}>
+          {#if replyTo}
+            {@const parent = byId[replyTo]}
+            <button class="replyline" onclick={() => jump(replyTo)}>
               <span class="spine" aria-hidden="true"></span>
-              {#if byId[p.replyTo]}
-                <span class="rname hue-{byId[p.replyTo].fromHue}">{who(byId[p.replyTo])}</span>
-                <span class="rtext">{snippet(byId[p.replyTo])}</span>
+              {#if parent}
+                <span class="rname hue-{parent.fromHue}">{who(parent)}</span>
+                <span class="rtext">{snippet(parent)}</span>
               {:else}
                 <span class="rtext">Reply to an earlier post</span>
               {/if}
             </button>
           {/if}
       {#if notes.has(index)}
-        {#if notes.get(index)}<SystemNote notes={notes.get(index)} roomId={room.id} {onopenfile} {onissue} />{/if}
+        {@const note = notes.get(index)}
+        {#if note}<SystemNote notes={note} roomId={room.id} {onopenfile} {onissue} />{/if}
       {:else if sealedEvent(p)}
         {@const Card = rendererFor(p)}
         {#if Card}
-          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} {showRepo} {room} {pinned} {selection} {onreply} {onforward} {onpin} to={recipients(p).names} {onaddress} focus={flash?.key === row.key ? flash.id : ''} />
+          <Card post={p} notice={p.notice} surface="feed" posts={row.posts} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} focus={flash?.key === row.key ? flash.id : ''} />
         {:else}
           <p class="unknown-event" role="status">Unknown event {p.kind}/{p.notice?.kind ?? '?'}</p>
         {/if}
@@ -234,12 +286,13 @@
         <GoalPost post={p} {goals} {ongoal} />
       {:else if ownerQuestion(p)}
         {@const q = questionsById[ownerQuestion(p)]}
-          <div class="sysline"><span class="question-mark" class:quiet={q && q.state !== 'open'}>?</span><button class="name hue-{p.fromHue}" onclick={() => onaddress(p.from)}>{who(p)}</button><span class="what">asked: {p.text.replace(/^\[QUESTION q\d+\] /, '').split('\n')[0]}</span><span>·</span>
-            {#if !q || q.state === 'open'}<button class="answer-link" onclick={() => onquestion(p)}>Answer</button>
-            {:else}<button class="question-state {q.state}" onclick={() => onquestion(p)}>{q.state}</button>{/if}
+          <div class="sysline"><span class="question-mark" class:quiet={q && q.state !== 'open'}>?</span><button class="name hue-{p.fromHue}" onclick={() => onaddress?.(p.from)}>{who(p)}</button><span class="what">asked: {p.text.replace(/^\[QUESTION q\d+\] /, '').split('\n')[0]}</span><span>·</span>
+            {#if !q || q.state === 'open'}<button class="answer-link" onclick={() => onquestion?.(p)}>Answer</button>
+            {:else}<button class="question-state {q.state}" onclick={() => onquestion?.(p)}>{q.state}</button>{/if}
           </div>
       {:else if p.notice?.kind === 'held-comment'}
-          <HeldCommentNotice roomId={room.id} prKey={p.notice.changeId} commentId={p.notice.commentId ?? ''} />
+          {@const held = prEvent(p)}
+          <HeldCommentNotice roomId={room.id} prKey={held?.changeId ?? ''} commentId={held?.commentId ?? ''} />
       {:else if p.completion}
         {@render completionPost(p)}
       {:else}
@@ -247,7 +300,7 @@
             {#if row.cont}
               <time class="side-time">{clock(p.ts)}</time>
             {:else}
-              <button class="av" onclick={() => onaddress(p.from)} aria-label={who(p)}>
+              <button class="av" onclick={() => onaddress?.(p.from)} aria-label={who(p)}>
                 <Avatar name={who(p)} hue={p.fromHue} owner={p.owner} emoji={p.fromEmoji} size={40} />
               </button>
             {/if}
@@ -256,13 +309,13 @@
             {#if !row.cont}
               {@const r = recipients(p)}
               <header>
-                <button class="name hue-{p.fromHue}" onclick={() => onaddress(p.from)}>{who(p)}</button>
+                <button class="name hue-{p.fromHue}" onclick={() => onaddress?.(p.from)}>{who(p)}</button>
                 {#if p.owner && p.human}<span class="tag">human</span>{/if}
                 <time title={new Date(p.ts).toLocaleString()}>{stamp(p.ts)}</time>
                 <span class="to">
                   <span class="arrow" aria-hidden="true">→</span>
                   {#each r.groups as g}<span class="group">{g}</span>{/each}
-                  {#each r.names as n, i}<button class="rcpt" onclick={() => onaddress(p.to[i])}>{n}</button>{#if i < r.names.length - 1}<span class="comma">,</span>{/if}{/each}
+                  {#each r.names as n, i}<button class="rcpt" onclick={() => onaddress?.(p.to?.[i] ?? '')}>{n}</button>{#if i < r.names.length - 1}<span class="comma">,</span>{/if}{/each}
                 </span>
               </header>
             {/if}

@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // The feed choices for every channel. Settings is the one place that sets
   // them, so each row writes the same shared value.
   import Switch from '../ui/Switch.svelte'
@@ -15,9 +15,9 @@
         <span class="hint">{c.hint}</span>
       </div>
       {#if c.options}
-        <Segmented options={c.options} value={setting(look, c.id)} label={c.label} onchange={(v) => choose(c.id, v)} />
+        <Segmented options={c.options} value={setting(look, c.id)} label={c.label} onchange={(v: string | boolean) => choose(c.id, v)} />
       {:else}
-        <Switch on={setting(look, c.id)} label={c.label} onchange={(v) => choose(c.id, v)} />
+        <Switch on={setting(look, c.id) === true} label={c.label} onchange={(v: boolean) => choose(c.id, v)} />
       {/if}
     </div>
   {/each}
