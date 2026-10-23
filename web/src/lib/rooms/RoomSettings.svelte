@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // Room settings: the shared settings modal with one pane per section,
   // opened from the room menu or the palette. Each control calls the same
   // API as the CLI. The room policy (review and CI time) saves when a field
@@ -6,7 +6,9 @@
   // review field are one setting: the host keeps both in step, so the policy
   // reloads when the switch flips.
   import { tick, untrack } from 'svelte'
+  import type { Snippet } from 'svelte'
   import { api } from '../../api.ts'
+  import { errorText } from '../errorText.ts'
   import { roomLabel } from '../ui/format.ts'
   import Switch from '../ui/Switch.svelte'
   import SettingsShell from '../ui/SettingsShell.svelte'
@@ -15,18 +17,45 @@
   import CIBudgetFields from '../prs/CIBudgetFields.svelte'
   import PRNoiseRules from '../prs/PRNoiseRules.svelte'
   import { normalizePolicy, parseChecks, checksText, saveRoomPolicy, budgetForm, parseTestAllow } from '../prs/pr.ts'
+  import type { BudgetForm, PolicyForm, NormalizedPolicy } from '../prs/pr.ts'
+  import type { Room } from '../api/room.ts'
+  import type { ChangePolicy, PRConfig, ReviewerStatus } from '../api/change.ts'
+  import type { HookLogTarget } from '../settings/hookLog.ts'
+  import type { RoomControlValue } from './roomSessionControls.ts'
   import Section from './RoomSettingsSection.svelte'
   import Group from './RoomSettingsGroup.svelte'
   import Row from './RoomSettingsRow.svelte'
 
-  // start: the first section. reviewer: the ReviewerStatus answer;
-  // onreviewer reloads it. controls: the room session controls (pause
-  // state); onsessions runs 'pause' or 'resume'. onaction runs a room action
-  // by id: rename, room-pin, room-archive or delete. rules draws the Rules
-  // section; busy is true while a rule edit is open, so Esc cancels the edit.
-  // hookRun is the hook run a feed card asked to open, or null.
-  let { room, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onclose } = $props()
-  const nav = [
+  // controls is the room session controls (RoomControlValue). The app keeps a
+  // narrower copy, so every field is optional here.
+  type Controls = Partial<Pick<RoomControlValue, 'busy' | 'loading' | 'error' | 'statusError'>> & {
+    state?: { paused?: boolean; dormant?: number } | null
+  }
+
+  // The policy form this pane edits: every budget field, plus the checks text.
+  type PolicyDraft = BudgetForm & Pick<PolicyForm, 'requiredChecks' | 'review'>
+
+  interface Props {
+    // start: the first section. reviewer: the ReviewerStatus answer;
+    // onreviewer reloads it. controls: the room session controls (pause
+    // state); onsessions runs 'pause' or 'resume'. onaction runs a room action
+    // by id: rename, room-pin, room-archive or delete. rules draws the Rules
+    // section; busy is true while a rule edit is open, so Esc cancels the edit.
+    // hookRun is the hook run a feed card asked to open, or null.
+    room: Room
+    start?: string
+    hookRun?: HookLogTarget | null
+    reviewer?: ReviewerStatus | null
+    onreviewer?: () => unknown
+    controls?: Controls | null
+    onsessions?: (action: string) => void
+    onaction?: (id: string) => void
+    rules: Snippet
+    busy?: boolean
+    onclose: () => void
+  }
+  let { room, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onclose }: Props = $props()
+  const nav: { id: string; label: string }[] = [
     { id: 'general', label: 'General' },
     { id: 'review', label: 'Review & landing' },
     { id: 'ci', label: 'CI time' },
@@ -40,8 +69,8 @@
   let roomId = $derived(room.id)
   let reviewEnabled = $derived(reviewer?.enabled ?? null)
 
-  let policy = $state(null)
-  let form = $state(null)
+  let policy = $state<NormalizedPolicy | null>(null)
+  let form = $state<PolicyDraft | null>(null)
   let busy = $state(false)
   let error = $state('')
   let saved = $state(false)
@@ -51,8 +80,13 @@
   let policyRoom = ''
   let policyLoading = $state(false)
   let saveAfterPolicy = false
-  const formOf = (p) => ({ ...budgetForm(p), requiredChecks: checksText(p.requiredChecks) })
-  const fill = (p) => {
+  const formOf = (p: Partial<ChangePolicy>): PolicyDraft => ({ ...budgetForm(p), requiredChecks: checksText(p.requiredChecks) })
+  // differing lists the form fields a fresh policy would not set on its own.
+  function differing(base: PolicyDraft, edited: PolicyDraft) {
+    const baseValues = new Map<string, unknown>(Object.entries(base))
+    return Object.fromEntries(Object.entries(edited).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(baseValues.get(key))))
+  }
+  const fill = (p: Partial<ChangePolicy>) => {
     policy = normalizePolicy(p)
     form = formOf(policy)
     policyRoom = roomId
@@ -72,18 +106,12 @@
     try {
       const next = await api.roomChangePolicy(targetRoom)
       if (request !== policyRequest || targetRoom !== roomId) return
-      const edits = {}
-      if (policy && form) {
-        const base = formOf(policy)
-        for (const key of Object.keys(form)) {
-          if (JSON.stringify(form[key]) !== JSON.stringify(base[key])) edits[key] = form[key]
-        }
-      }
+      const edits = form && policy ? differing(formOf(policy), form) : {}
       fill(next)
-      Object.assign(form, edits)
+      if (form) Object.assign(form, edits)
       error = ''
     } catch (e) {
-      if (request === policyRequest && targetRoom === roomId) error = String(e?.message || e)
+      if (request === policyRequest && targetRoom === roomId) error = errorText(e)
     } finally {
       if (request === policyRequest && targetRoom === roomId) {
         policyLoading = false
@@ -100,17 +128,19 @@
   })
 
   let dirty = $derived.by(() => {
-    if (!form || !policy) return false
-    const base = budgetForm(policy)
-    const fields = ['review', 'ciTimeBudget', 'ciWarnAfter', 'ciFailAfter', 'ciTestMax', 'ciNoJUnitWarning']
-    return fields.some((k) => form[k] !== base[k]) ||
-      parseChecks(form.requiredChecks).join('\n') !== policy.requiredChecks.join('\n') ||
-      parseTestAllow(form.ciBudgetExempt).join('\n') !== (policy.ciBudgetExempt ?? []).join('\n') ||
-      parseTestAllow(form.ciTestAllow).join('\n') !== (policy.ciTestAllow ?? []).join('\n') ||
-      parseTestAllow(form.ciTestAllow).some((id) => (form.ciTestAllowNotes[id] ?? '') !== (base.ciTestAllowNotes[id] ?? ''))
+    const editing = form
+    const current = policy
+    if (!editing || !current) return false
+    const base = budgetForm(current)
+    const fields: (keyof PolicyDraft)[] = ['review', 'ciTimeBudget', 'ciWarnAfter', 'ciFailAfter', 'ciTestMax', 'ciNoJUnitWarning']
+    return fields.some((k) => editing[k] !== base[k]) ||
+      parseChecks(editing.requiredChecks).join('\n') !== current.requiredChecks.join('\n') ||
+      parseTestAllow(editing.ciBudgetExempt).join('\n') !== (current.ciBudgetExempt ?? []).join('\n') ||
+      parseTestAllow(editing.ciTestAllow).join('\n') !== (current.ciTestAllow ?? []).join('\n') ||
+      parseTestAllow(editing.ciTestAllow).some((id) => (editing.ciTestAllowNotes[id] ?? '') !== (base.ciTestAllowNotes[id] ?? ''))
   })
   async function save() {
-    if (busy || !dirty) return
+    if (!form || !policy || busy || !dirty) return
     if (policyLoading || reviewerBusy) {
       saveAfterPolicy = true
       return
@@ -133,20 +163,20 @@
       saved = true
       await onreviewer()
     } catch (e) {
-      if (targetRoom === roomId) error = String(e?.message || e)
+      if (targetRoom === roomId) error = errorText(e)
     } finally {
       busy = false
     }
   }
 
-  async function reviewerAct(name, fn) {
+  async function reviewerAct(name: string, fn: () => Promise<unknown>) {
     reviewerBusy = name
     error = ''
     try {
       await fn()
       await onreviewer()
     } catch (e) {
-      error = String(e?.message || e)
+      error = errorText(e)
     } finally {
       reviewerBusy = ''
       if (saveAfterPolicy) {
@@ -158,12 +188,12 @@
       }
     }
   }
-  const flip = () => reviewerAct('enabled', () => api.setReviewEnabled(roomId, !reviewer.enabled))
+  const flip = () => reviewerAct('enabled', () => api.setReviewEnabled(roomId, !reviewer?.enabled))
   const restart = () => reviewerAct('restart', () => api.restartReviewer(roomId))
 
   // Where reviews appear: the room's PR settings. The old reviewer fields
   // pass through untouched; the backend owns them.
-  let prSettings = $state(null)
+  let prSettings = $state<Partial<PRConfig> | null>(null)
   let reviewPublishing = $state('local')
   let githubAccess = $state('read-only')
   let mergeMaxParallel = $state(3)
@@ -176,17 +206,17 @@
       mergeMaxParallel = prSettings.mergeMaxParallel || 3
       publishError = ''
     } catch (e) {
-      publishError = String(e?.message || e)
+      publishError = errorText(e)
     }
   }
   async function savePublishing() {
-    const next = { reviewerProfile: prSettings?.reviewerProfile || '', reviewerSession: prSettings?.reviewerSession || '', reviewPublishing, githubAccess, mergeMaxParallel }
+    const next: PRConfig = { reviewerProfile: prSettings?.reviewerProfile || '', reviewerSession: prSettings?.reviewerSession || '', reviewPublishing, githubAccess, mergeMaxParallel }
     try {
       await api.setPRSettings(roomId, next)
       prSettings = next
       publishError = ''
     } catch (e) {
-      publishError = String(e?.message || e)
+      publishError = errorText(e)
       reviewPublishing = prSettings?.reviewPublishing === 'github' ? 'github' : 'local'
       githubAccess = prSettings?.githubAccess === 'read-write' ? 'read-write' : 'read-only'
       mergeMaxParallel = prSettings?.mergeMaxParallel || 3
@@ -247,7 +277,7 @@
       <div onchange={save}>
         <Group title="Review">
           <Row title="Required checks" help="GitHub check names, separated by commas.">
-            {#snippet control()}<input class="field" aria-label="Required checks" type="text" bind:value={form.requiredChecks} disabled={busy} onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} />{/snippet}
+            {#snippet control()}{#if form}<input class="field" aria-label="Required checks" type="text" bind:value={form.requiredChecks} disabled={busy} onkeydown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} />{/if}{/snippet}
           </Row>
           <Row title="GitHub access" help="Read-only lets Dyna read PRs, CI and issues. Read and write also lets Dyna comment, change PRs and merge. New agent turns use this access." error={publishError}>
             {#snippet control()}<select class="field" aria-label="GitHub access" bind:value={githubAccess} onchange={savePublishing} disabled={!prSettings}><option value="read-only">Read-only</option><option value="read-write">Read and write</option></select>{/snippet}
