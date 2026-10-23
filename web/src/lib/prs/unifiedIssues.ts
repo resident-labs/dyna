@@ -12,6 +12,8 @@ export interface RoomIssue {
   reason?: string
   goalId?: string
   githubUrl?: string
+  // fixPr is the open PR that closes this issue on merge.
+  fixPr?: number
   changedAt?: number
 }
 export interface IssueReference { kind: 'pr' | 'issue' | 'room_issue'; number: number | string; title: string; state: string; url: string }
@@ -32,7 +34,7 @@ export function unifiedIssues(github: readonly GitHubItem[], local: readonly Roo
   // Unresolved exports appear only in All, until a GitHub response supplies their state.
   for (const i of locals) {
     if (i.githubUrl && seen.has(urlKey(i.githubUrl))) continue
-    rows.push({ number: 0, title: i.title, state: i.githubUrl ? 'UNKNOWN' : i.state === 'open' ? 'OPEN' : 'CLOSED', group: i.state === 'open' ? 'needs-owner' : '', author: { login: i.filer || '' }, labels: [], workingSessionLive: false, createdAt: new Date(i.filedAt).toISOString(), updatedAt: new Date(i.changedAt || i.filedAt).toISOString(), url: i.githubUrl || '', source: 'Dyna', local: i })
+    rows.push({ number: 0, title: i.title, state: i.githubUrl ? 'UNKNOWN' : i.state === 'open' ? 'OPEN' : 'CLOSED', group: i.state === 'open' ? 'needs-owner' : '', author: { login: i.filer || '' }, labels: [], workingSessionLive: false, createdAt: new Date(i.filedAt).toISOString(), updatedAt: new Date(i.changedAt || i.filedAt).toISOString(), url: i.githubUrl || '', source: 'Dyna', local: i, fixPR: i.fixPr || undefined })
   }
   const q = query.trim().toLowerCase()
   // People type D-12, d12 or 12, so both spellings are searchable. A number

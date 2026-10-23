@@ -20,7 +20,21 @@ func (s *Service) Issues(roomRef string, all bool) ([]room.Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.rooms().Issues(r.ID, all)
+	issues, err := s.rooms().Issues(r.ID, all)
+	if err != nil {
+		return nil, err
+	}
+	// The issue card shows "Fix in #N" while a linked PR is open.
+	if s.PRs != nil {
+		fixes, err := s.PRs.IssueFixes(r.ID)
+		if err != nil {
+			return nil, err
+		}
+		for i := range issues {
+			issues[i].FixPR = fixes[issues[i].Number]
+		}
+	}
+	return issues, nil
 }
 
 // Issue mutations use the same triage policy as the CLI, with the actor

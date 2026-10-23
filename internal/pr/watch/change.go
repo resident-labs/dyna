@@ -36,6 +36,9 @@ type OpenChangeOptions struct {
 	// Goal links the change to this goal of its room, replacing any link.
 	// Empty keeps the link, or captures one when the change is new.
 	Goal string
+	// Fixes lists the issues a merge closes, replacing the existing list.
+	// Nil keeps the links that the body and earlier calls set.
+	Fixes []state.IssueRef
 }
 
 // gitRead performs bounded, read-only repository inspection without shell expansion.
@@ -447,6 +450,23 @@ func (s *Service) SetGoal(key, author, goalID string) error {
 		r.GoalID = goalID
 		return nil
 	})
+}
+
+func (s *Service) SetFixes(key, author string, fixes []state.IssueRef) (Record, error) {
+	var out Record
+	err := s.Store.update(func(st *State) error {
+		r := recordByID(st, key)
+		if r == nil {
+			return fmt.Errorf("change is not tracked")
+		}
+		if err := sameAuthor(r, author); err != nil {
+			return err
+		}
+		r.Fixes = state.NormalizeFixes(fixes)
+		out = *r
+		return nil
+	})
+	return out, err
 }
 
 // endRecord sets the terminal state and its stable pagination time together.

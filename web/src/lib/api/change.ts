@@ -100,6 +100,14 @@ export interface ChangeView {
   heldCommentCount?: number
   filteredComments?: number
   overlaps?: Overlap[]
+  fixes?: IssueFix[] // issues this change closes when it merges
+  mergeCommit?: string // the merge commit of a merged change
+}
+
+// IssueFix is state.IssueRef: a room issue (dyna, D-5) or a GitHub issue (github, #207).
+export interface IssueFix {
+  kind: 'dyna' | 'github'
+  number: number
 }
 
 // AuthorNotes is state.AuthorNotes.

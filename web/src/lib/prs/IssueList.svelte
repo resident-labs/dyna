@@ -47,7 +47,7 @@
             {#if it.local && location(it.local)}<span>{location(it.local)}</span>{/if}
             {#if chip}<Chip tone={chip.tone} outline={!chip.tone}>{chip.label}</Chip>{/if}
             {#each (it.labels ?? []).slice(0, 3) as l}<span class="label" style={labelStyle(l.color)}>{l.name}</span>{/each}
-            {#if open && g.id !== 'has-pr'}<span class="pr">PR #{open.number}{open.isDraft ? ' draft' : ''}</span>{/if}
+            {#if open && g.id !== 'has-pr'}<span class="pr">PR #{open.number}{open.isDraft ? ' draft' : ''}</span>{:else if it.fixPR}<span class="pr">Fix in #{it.fixPR}</span>{/if}
           </div>
         </Row>
         {#if it.local?.githubUrl}<a class="start" href={it.local.githubUrl} target="_blank" rel="noreferrer">GitHub ↗</a>{/if}
