@@ -2,7 +2,7 @@
 // data and returns a typed value, or null where the call failed or the shape
 // is wrong. Nothing here changes data.
 import { arrayOf, isBoolean, isNumber, isRecord, isString } from '../api/guards.ts'
-import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, ServiceInfo as ServiceRow, TestHealth, UsageRow } from './model.ts'
+import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, RunReason, ServiceInfo as ServiceRow, SyncInfoByRepo, SyncRemote, TestHealth, UsageRow } from './model.ts'
 
 const rows = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? v.filter(isRecord) : [])
 const num = (v: unknown): number => (isNumber(v) ? v : 0)
@@ -67,7 +67,7 @@ export function readHookSummary(v: unknown): HookRow[] | null {
     const run = isRecord(r.lastRun) ? r.lastRun : null
     return {
       hook: { name: str(h.name), label: str(h.label), event: str(h.event), everyMinutes: num(h.everyMinutes), disabled: h.disabled === true },
-      lastRun: run ? { result: str(run.result), startedAt: str(run.startedAt), finishedAt: str(run.finishedAt) } : null,
+      lastRun: run ? { id: str(run.id), result: str(run.result), startedAt: str(run.startedAt), finishedAt: str(run.finishedAt) } : null,
     }
   })
 }
@@ -121,7 +121,36 @@ export function readMergeState(v: unknown): { queue: QueueRow[]; mergePaused: bo
   return queue ? { queue, mergePaused: v.paused } : null
 }
 
+// SyncStatus: lanesync.Status by repository path. The page reads each repository
+// by its own key, so one room never shows another repository's remotes; within
+// a repository it reads each remote's last check and error, and the error of a
+// failed export.
+export function readSync(v: unknown): SyncInfoByRepo | null {
+  if (!isRecord(v)) return null
+  const out: SyncInfoByRepo = {}
+  for (const [path, repo] of Object.entries(v)) {
+    if (!isRecord(repo)) continue
+    const remotes: SyncRemote[] = []
+    if (isRecord(repo.remotes)) {
+      for (const remote of Object.values(repo.remotes)) {
+        if (isRecord(remote)) remotes.push({ checkedAt: str(remote.checkedAt), lastError: str(remote.lastError) })
+      }
+    }
+    out[path] = { remotes, operationError: isRecord(repo.operation) ? str(repo.operation.error) : '' }
+  }
+  return out
+}
+
 // HookRuns: a list of settings.HookRun, returned newest first.
 export const readHookRuns = (v: unknown): HookRunRow[] =>
-  rows(v).map((r) => ({ result: str(r.result), startedAt: str(r.startedAt), finishedAt: str(r.finishedAt) }))
+  rows(v).map((r) => ({ id: str(r.id), result: str(r.result), startedAt: str(r.startedAt), finishedAt: str(r.finishedAt) }))
     .sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))
+
+// HookRunLog: one run's exit code, or -1 when the log records none. A log that
+// records no exit code still names the cause on its last line, so the page
+// reads that line as the reason.
+export function readHookLog(v: unknown): RunReason | null {
+  if (!isRecord(v) || !isNumber(v.exitCode)) return null
+  const lines = str(v.tail).split('\n').map((l) => l.trim()).filter(Boolean)
+  return { exitCode: v.exitCode, detail: v.exitCode >= 0 ? '' : lines.at(-1) ?? '' }
+}
