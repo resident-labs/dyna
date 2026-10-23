@@ -23,6 +23,7 @@ import (
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/state"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/store/storetest"
 )
 
@@ -261,17 +262,60 @@ func (e *testEnv) waitTurn(ctx context.Context, ref string, turn int) (Info, Tur
 
 func (e *testEnv) waitStatus(ref, want string) Info {
 	e.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	db, err := database.Open(filepath.Dir(e.m.Store.root()))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	// Every session record write publishes its committed change, so the
+	// waiter wakes on the store's own signal instead of a clock sample.
+	changed := make(chan struct{}, 1)
+	state.For(db).SetPublish(func(ev hub.Event) {
+		if ev.Topic == sessionlife.Topic {
+			select {
+			case changed <- struct{}{}:
+			default:
+			}
+		}
+	})
+	e.t.Cleanup(func() { state.For(db).SetPublish(nil) })
+	deadline := time.After(10 * time.Second)
 	for {
 		info, err := e.m.Store.Resolve(ref)
-		if err == nil && info.Status == want {
+		if err != nil {
+			e.t.Fatalf("session %s: %v", ref, err)
+		}
+		if info.Status == want {
 			return info
 		}
-		if time.Now().After(deadline) {
+		if info.Meta.Status == want {
+			// The record already has the wanted status, but a finishing turn
+			// still holds the turn lock and Info then reports running. Waiting
+			// for that lock is the signal; its release publishes no change.
+			e.awaitTurnLock(info.ID)
+			continue
+		}
+		select {
+		case <-changed:
+		case <-deadline:
 			e.t.Fatalf("session %s never became %s (now %s, err %v)", ref, want, info.Status, err)
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// awaitTurnLock returns once no turn holds the session's turn lock.
+func (e *testEnv) awaitTurnLock(id string) {
+	e.t.Helper()
+	path, err := e.m.Store.path(id, "turn.lock")
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	unlock, err := store.LockContext(ctx, path)
+	if err != nil {
+		e.t.Fatalf("session %s turn lock: %v", id, err)
+	}
+	unlock()
 }
 
 // send stores an owner post, then uses the shared wake path the engine calls.
@@ -818,12 +862,8 @@ func TestConcurrentSendsNeverStartTwoTurns(t *testing.T) {
 	if started.Load() < 1 {
 		t.Fatal("no send started a turn")
 	}
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		if got, _ := e.m.Store.Info(info.ID); got.Status == StatusIdle {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
+	if got := e.waitStatus(info.ID, StatusIdle); got.Status != StatusIdle {
+		t.Fatalf("session status = %s, want idle", got.Status)
 	}
 	turns, _ := e.m.Store.Turns(info.ID)
 	for _, tr := range turns {

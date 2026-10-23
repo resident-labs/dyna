@@ -42,8 +42,12 @@ func TestFirstUseInstallsMissingCLIOnce(t *testing.T) {
 func TestFirstUseConcurrentRequestsShareOneInstall(t *testing.T) {
 	f, installs := firstUse(t, "1.2.3")
 	release := make(chan struct{})
+	// Run starts once the installer holds the per-harness lock, so the
+	// channel reports an install that Installing must see as running.
+	downloading := make(chan struct{}, 1)
 	run := f.Bundles.Run
 	f.Bundles.Run = func(ctx context.Context, args, env []string) error {
+		downloading <- struct{}{}
 		<-release
 		return run(ctx, args, env)
 	}
@@ -69,9 +73,11 @@ func TestFirstUseConcurrentRequestsShareOneInstall(t *testing.T) {
 			}
 		}()
 	}
-	deadline := time.Now().Add(time.Second)
-	for !f.Installing("codex") && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
+	deadline := time.After(time.Second)
+	select {
+	case <-downloading:
+	case <-deadline:
+		t.Fatal("no install reached the download")
 	}
 	if !f.Installing("codex") || f.Installing("claude-code") {
 		t.Fatal("Installing does not report the running codex install")

@@ -5,7 +5,6 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/store/storetest"
 	"errors"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -179,66 +178,11 @@ func TestCloseStopsBackgroundJob(t *testing.T) {
 	if term.cmd.ProcessState == nil || !term.cmd.ProcessState.Sys().(syscall.WaitStatus).Signaled() {
 		t.Fatal("close did not reap the killed shell")
 	}
-	// Close reaps its shell. A background child can remain in kernel I/O
-	// with SIGKILL pending until that I/O completes.
-	var status []byte
-	for deadline := time.Now().Add(3 * time.Second); ; {
-		b, err := os.ReadFile("/proc/" + string(pid) + "/status")
-		if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
-			return
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		status = b
-		if backgroundJobTerminating(b) {
-			return
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
+	// Close reaps its shell and kills the rest of the group. The background
+	// job's own exit is the signal: a survivor never exits and fails here.
+	backgroundPID, err := strconv.Atoi(string(pid))
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Fatalf("background job has no termination request after close: %s", status)
-}
-
-func backgroundJobTerminating(status []byte) bool {
-	for _, line := range strings.Split(string(status), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		if fields[0] == "State:" && (fields[1] == "Z" || fields[1] == "X") {
-			return true
-		}
-		if fields[0] == "SigPnd:" || fields[0] == "ShdPnd:" {
-			pending, err := strconv.ParseUint(fields[1], 16, 64)
-			if err == nil && pending&(1<<(syscall.SIGKILL-1)) != 0 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func TestBackgroundJobTerminationStatus(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		status string
-		want   bool
-	}{
-		{"zombie", "State:\tZ (zombie)\n", true},
-		{"dead", "State:\tX (dead)\n", true},
-		{"disk_wait_with_thread_kill", "State:\tD (disk sleep)\nSigPnd:\t0000000000000100\nShdPnd:\t0000000000000000\n", true},
-		{"disk_wait_with_shared_kill", "State:\tD (disk sleep)\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000100\n", true},
-		{"disk_wait_without_kill", "State:\tD (disk sleep)\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\n", false},
-		{"other_signal", "State:\tD (disk sleep)\nShdPnd:\t0000000000004000\n", false},
-		{"running", "State:\tR (running)\n", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := backgroundJobTerminating([]byte(tc.status)); got != tc.want {
-				t.Fatalf("termination requested = %v, want %v; status: %s", got, tc.want, tc.status)
-			}
-		})
-	}
+	waitProcessExit(t, backgroundPID, 3000)
 }
