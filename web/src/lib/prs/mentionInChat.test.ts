@@ -18,6 +18,7 @@ const API = `export const api = {
 const code = await bundle({ component: 'GitHub', api: API })
 const change: Row = { changeId: 'c', key: 'k', number: 7, kind: 'github', title: 'Speed up the parser', state: 'open', checks: [], branch: 'speed-up', base: 'main', url: 'https://github.com/o/r/pull/7', author: 'sam' }
 const mentionButtons = (root: ParentNode) => elements(root, 'button').filter((b) => b.textContent?.trim() === 'Mention in chat')
+const mentionIcons = (root: ParentNode) => elements(root, 'button').filter((b) => b.getAttribute('aria-label')?.startsWith('Mention ') === true)
 
 test('a PR row and its detail page both mention the PR in chat', async () => {
   const mentions: unknown[] = []
@@ -30,9 +31,10 @@ test('a PR row and its detail page both mention the PR in chat', async () => {
   try {
     await settle()
     await settle()
-    // The list row has the same small button as an issue row.
+    // The list row has one compact icon button, so the row keeps one line.
     const row = need(elements(target, '.item').find((item) => item.textContent?.includes('Speed up the parser')))
-    need(mentionButtons(row)[0]).click()
+    assert.equal(mentionButtons(row).length, 0, 'the row has no wide Mention in chat button')
+    need(mentionIcons(row)[0]).click()
     assert.deepEqual(mentions[0], { kind: 'pr', number: 7, title: 'Speed up the parser', state: 'open', url: 'https://github.com/o/r/pull/7' })
     // Opening the row keeps one in the detail header.
     element(target, '.row').click()
