@@ -104,14 +104,14 @@
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m6 4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
     </button>
   {/if}
-  <button class="row" class:sel={selecting ? pickedSet.has(m.id) : selected === m.address} class:closed={m.closed} class:finished={finished(m)} class:off={offSeat} class:fresh={fresh === m.id} class:pc={hasComputer(pc)} onclick={(e) => rowClick(e, m)} aria-pressed={selecting ? pickedSet.has(m.id) : undefined} aria-disabled={selecting && !selectableSession(m) ? true : undefined} title="{m.address} · active {ago(m.lastActivity)}" oncontextmenu={(e) => { e.preventDefault(); onmenu(m, e.clientX, e.clientY, e.currentTarget) }} onkeydown={(e) => menuKey(e, m)}>
+  <button class="row" class:sel={selecting ? pickedSet.has(m.id) : selected === m.address} class:closed={m.closed} class:finished={finished(m)} class:off={offSeat} class:fresh={fresh === m.id} class:pc={hasComputer(pc)} onclick={(e) => rowClick(e, m)} aria-pressed={selecting ? pickedSet.has(m.id) : undefined} aria-disabled={selecting && !selectableSession(m) ? true : undefined} title="{m.address} · {m.profile} · {sessionStatus(m, true)} · active {ago(m.lastActivity)}" oncontextmenu={(e) => { e.preventDefault(); onmenu(m, e.clientX, e.clientY, e.currentTarget) }} onkeydown={(e) => menuKey(e, m)}>
     {#if m.depth > 0}
       <span class="guide" aria-hidden="true"></span>
     {/if}
     <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={32} state={finished(m) ? 'finished' : m.state} status={m.status} ring="var(--side)" />
     <span class="text">
       <span class="name hue-{m.hue}">{offSeat ? 'root (internal)' : m.name}{#if row.folded}<span class="kids" title="{row.hidden} folded subagent{row.hidden === 1 ? '' : 's'}">{row.hidden}</span>{/if}{#if agentExpedited($expedite, m)} <ExpediteBadge short />{/if}</span>
-      <span class="sub {finished(m) ? 'finished' : m.state}">{m.profile} · {#if offSeat}off seat{:else if finished(m)}dormant · {ago(m.lastActivity)}{:else if m.state === 'live' && m.doing?.text}<DoingLine doing={m.doing} {now} />{:else}{sessionStatus(m, true)}{/if}</span>
+      <span class="sub {finished(m) ? 'finished' : m.state}">{#if offSeat}off seat{:else if finished(m)}dormant · {ago(m.lastActivity)}{:else}<span class="now" class:working={sessionStatus(m) === 'working'}>{sessionStatus(m)}</span> · {#if m.state === 'live' && m.doing?.text}<DoingLine doing={m.doing} {now} />{:else}{m.profile}{/if}{/if}</span>
       <ResponsibilityCount counts={m.responsibilities} />
     </span>
   </button>
@@ -360,7 +360,8 @@
     line-height: 15px;
   }
   .sub { font-size: var(--t-sm); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .sub.live { color: var(--gold); }
+  /* The status reads as the DM header does: gold only while working. */
+  .sub .now.working { color: var(--gold); }
   .sub.error, .sub.finished { color: var(--coral); }
   .sub.done { color: var(--muted); }
   footer { flex: none; padding: var(--s2) var(--s4) var(--s3); border-top: 1px solid var(--line-soft); }
