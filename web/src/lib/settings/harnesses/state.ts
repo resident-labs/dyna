@@ -95,6 +95,7 @@ const SIGN_IN_STATUS: Record<string, string> = {
   cancelled: 'Sign-in cancelled.',
 }
 export function signInStatus(state?: { phase?: string; message?: string } | null): string {
+  if (state?.phase === 'waiting' && state.message) return state.message
   if (state?.phase === 'failed') return state.message || 'Sign-in did not finish. Try again.'
   return SIGN_IN_STATUS[state?.phase ?? ''] ?? 'Starting sign-in…'
 }
