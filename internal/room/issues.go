@@ -71,7 +71,9 @@ type CloseOrigin struct {
 }
 
 // CloseIssue closes an open issue with a reason. origin stays zero for a
-// manual close and names the merging PR for an automatic one.
+// manual close and names the merging PR for an automatic one. The automatic
+// path that fills origin is the tracked-PR close (goal g343, change
+// fix/pr-closes-issues), which calls this from the merge watcher.
 func (s *Store) CloseIssue(roomID, id, by, reason string, origin CloseOrigin) (Issue, error) {
 	return s.ChangeIssueFrom(roomID, id, by, origin, func(i *Issue) error {
 		i.State = "closed"
@@ -381,18 +383,6 @@ func (s *Store) FileIssue(roomID string, in IssueInput) (Issue, error) {
 		return insertIssue(context.Background(), conn, rec.ID, &out)
 	})
 	return out, err
-}
-
-// CloseIssue closes an open issue with a reason. origin stays zero for a manual
-// close and names the merging PR for an automatic one. The automatic path that
-// fills origin is the tracked-PR close (goal g343, change fix/pr-closes-issues),
-// which calls this from the merge watcher.
-func (s *Store) CloseIssue(roomID, id, by, reason string, origin CloseOrigin) (Issue, error) {
-	return s.ChangeIssueFrom(roomID, id, by, origin, func(i *Issue) error {
-		i.State = "closed"
-		i.Reason = reason
-		return nil
-	})
 }
 
 // lockIssueNumbers serializes number allocation for one room. It is separate
