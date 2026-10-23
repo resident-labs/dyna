@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"dyna-agent/internal/fsutil"
@@ -131,6 +133,54 @@ func quarantineSpoolFile(dir, name string, cause error) error {
 	return nil
 }
 
+// maxSpoolEvent bounds one queued event file. A real event is a few hundred
+// bytes, so a larger file is not an event.
+const maxSpoolEvent = 1 << 20
+
+// errSpoolRefused marks a spool entry that is not a plain, bounded event file.
+var errSpoolRefused = errors.New("not a plain event file")
+
+// readSpoolEvent reads one queued event through the pinned spool directory. It
+// accepts only a physical regular file within maxSpoolEvent bytes: a link, a
+// pipe or a device is refused without being followed or opened for reading, so
+// a planted entry can neither read another file as an event nor block the
+// drain. A refusal wraps errSpoolRefused; any other error may pass on a retry.
+func readSpoolEvent(root *os.Root, name string) ([]byte, error) {
+	physical, err := root.Lstat(name)
+	if err != nil {
+		return nil, err
+	}
+	if !physical.Mode().IsRegular() {
+		return nil, fmt.Errorf("%w: %s", errSpoolRefused, physical.Mode().Type())
+	}
+	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if errors.Is(err, syscall.ELOOP) {
+		return nil, fmt.Errorf("%w: replaced by a link", errSpoolRefused)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !opened.Mode().IsRegular() || !os.SameFile(physical, opened) {
+		return nil, fmt.Errorf("%w: changed while opening", errSpoolRefused)
+	}
+	if opened.Size() > maxSpoolEvent {
+		return nil, fmt.Errorf("%w: %d bytes exceeds %d", errSpoolRefused, opened.Size(), maxSpoolEvent)
+	}
+	data, err := io.ReadAll(io.LimitReader(f, maxSpoolEvent+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxSpoolEvent {
+		return nil, fmt.Errorf("%w: exceeds %d bytes", errSpoolRefused, maxSpoolEvent)
+	}
+	return data, nil
+}
+
 // drainRetry is how soon a drain that could not finish runs again.
 const drainRetry = time.Minute
 
@@ -160,13 +210,24 @@ func (s Service) Drain(ctx context.Context, now time.Time) (ran []string, retry 
 	if err != nil {
 		return nil, retry, err
 	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, retry, err
+	}
+	defer root.Close()
 	var errs []error
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return ran, time.Time{}, errors.Join(append(errs, err)...)
 		}
 		path := filepath.Join(dir, entry.name)
-		data, err := os.ReadFile(path)
+		data, err := readSpoolEvent(root, entry.name)
+		if errors.Is(err, errSpoolRefused) {
+			if err := quarantineSpoolFile(dir, entry.name, err); err != nil {
+				return ran, retry, errors.Join(append(errs, err)...)
+			}
+			continue
+		}
 		if err != nil {
 			return ran, retry, errors.Join(append(errs, err)...)
 		}
