@@ -13,7 +13,7 @@ const code = await bundle({ component: '../rooms/Composer',
 })
 const settle = () => new Promise<void>(resolve => setImmediate(resolve))
 
-test('file choices browse folders, keep paths out of recipients, and preserve text when choosing a profile', async () => {
+test('file choices browse folders and keep paths out of recipients', async () => {
   const dom = installDom()
   Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
   const ui = await importBundle(code, 'Composer')
@@ -39,16 +39,6 @@ test('file choices browse folders, keep paths out of recipients, and preserve te
     input.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key: 'Enter', bubbles: true}))
     await settle()
     assert.equal(input.value, 'Review `web/main.ts` ')
-    const profile = element<HTMLSelectElement>(target, '[aria-label="Session profile"]')
-    profile.value = 'sol'
-    profile.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
-    await settle()
-    assert.equal(input.value, '/sol Review `web/main.ts` ')
-    assert.match(target.textContent ?? '', /Start session/)
-    profile.value = ''
-    profile.dispatchEvent(new dom.window.Event('change', { bubbles: true }))
-    await settle()
-    assert.equal(input.value, 'Review `web/main.ts` ')
     input.dispatchEvent(new dom.window.KeyboardEvent('keydown', {key: 'Enter', isComposing: true, bubbles: true}))
     await settle()
     assert.equal(sent.length, 0)
@@ -69,7 +59,7 @@ async function withFileComposer(run: (target: Element, input: HTMLTextAreaElemen
   Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement })
   const ui = await importBundle(code, 'Composer')
   const target = need(document.getElementById('app'))
-  const component = ui.mount(ui.default, { target, props: { room: { id: 'r', name: 'room' }, choices: ['@lead'], onsend: async () => ({}) } })
+  const component = ui.mount(ui.default, { target, props: { room: { id: 'r', name: 'room' }, choices: ['@lead'], profiles: [{ name: 'sol', model: 'gpt-6.1-sol' }], onsend: async () => ({}) } })
   try {
     await settle()
     const input = element<HTMLTextAreaElement>(target, 'textarea')
@@ -133,5 +123,20 @@ test('a new session mention or line break ends folder completion', async () => {
       await settle()
       assert.equal(input.value, 'Review @web docs/' + separator + '@lead ')
     }
+  })
+})
+
+
+test('profiles start sessions through slash completion without a toolbar picker', async () => {
+  await withFileComposer(async (target, input, type) => {
+    assert.equal(target.querySelector('[aria-label="Session profile"]'), null)
+    await type('/so')
+    assert.match(target.textContent ?? '', /Start a session with/)
+    element<HTMLButtonElement>(target, '[role="option"]').click()
+    await settle()
+    assert.equal(input.value, '/sol ')
+    await type('/sol Review the composer')
+    assert.equal(element(target, '.mode').textContent, 'Start session')
+    assert.equal(element(target, '.model').textContent, 'gpt-6.1-sol')
   })
 })

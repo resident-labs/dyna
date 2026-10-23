@@ -100,20 +100,21 @@ test('the Sessions settings include the default root profile picker', () => {
 
 test('the Feed section previews the real feed with sample posts under the current choices', async () => {
   assert.match(source, /<Feed room=\{sampleRoom\} posts=\{previewPosts\} intro=\{false\}/)
-  assert.match(source, /previewPosts = \$derived\(samplePosts\.filter\(visibleTo\(look, scopeOf\(sampleRoom\.id, 'general'\)\)\)\)/)
+  assert.match(source, /previewPosts = \$derived\(samplePosts\.filter\(visibleTo\(look\)\)\)/)
+  assert.doesNotMatch(source, /scopeOf/, 'no part of Settings scopes the look to one channel')
   const { samplePosts } = await import('../rooms/feedSample.ts')
   const { visibleTo, oneLine, highlighted } = await import('../rooms/look.ts')
-  const look = { all: {}, channels: {} }
-  assert.ok(samplePosts.every(visibleTo(look, 'preview:general')))
-  assert.ok(samplePosts.some((p) => oneLine(look, 'preview:general', p)), 'a worker result folds to one line')
-  assert.equal(samplePosts.filter((p) => highlighted(look, 'preview:general', p, 'dyna-agent')).length, 1, 'only root is highlighted')
+  const look = { all: {} }
+  assert.ok(samplePosts.every(visibleTo(look)))
+  assert.ok(samplePosts.some((p) => oneLine(look, p)), 'a worker result folds to one line')
+  assert.equal(samplePosts.filter((p) => highlighted(look, p, 'dyna-agent')).length, 1, 'only root is highlighted')
 })
 
 test('with Finished turns Hidden, the preview drops worker results and keeps root results and failures', async () => {
-  const { samplePosts, sampleRoom } = await import('../rooms/feedSample.ts')
-  const { visibleTo, scopeOf, withChoice } = await import('../rooms/look.ts')
-  const look = withChoice({ all: {}, channels: {} }, null, 'finished', 'hidden')
-  const shown: Partial<Post>[] = samplePosts.filter(visibleTo(look, scopeOf(sampleRoom.id, 'general')))
+  const { samplePosts } = await import('../rooms/feedSample.ts')
+  const { visibleTo, withChoice } = await import('../rooms/look.ts')
+  const look = withChoice({ all: {} }, 'finished', 'hidden')
+  const shown: Partial<Post>[] = samplePosts.filter(visibleTo(look))
   assert.ok(!shown.some((p) => p.completion && p.kind === 'completed' && p.speaker !== 'root'), 'worker results hide')
   assert.ok(shown.some((p) => p.completion && p.speaker === 'root'), 'root result stays')
   assert.ok(shown.some((p) => p.kind === 'failed'), 'failure stays')

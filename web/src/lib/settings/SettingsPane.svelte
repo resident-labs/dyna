@@ -12,7 +12,7 @@
   import Feed from '../rooms/Feed.svelte'
   import { sampleRoom, samplePosts } from '../rooms/feedSample.ts'
   import { look } from '../rooms/look.svelte.js'
-  import { visibleTo, scopeOf } from '../rooms/look.ts'
+  import { visibleTo } from '../rooms/look.ts'
   import { showReasoning, saveShowReasoning, showCompaction, saveShowCompaction, channelList, saveChannelList, CHANNEL_LISTS } from '../ui/prefs.ts'
   import { FAST, motion } from '../ui/motion.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
@@ -50,8 +50,8 @@
     { title: 'Workflows', keys: ['worktrees.retention'] },
     { title: 'App', keys: ['updater.autoCheck'] },
   ]
-  // The preview filters like a channel does (App.svelte), so Hidden hides.
-  let previewPosts = $derived(samplePosts.filter(visibleTo(look, scopeOf(sampleRoom.id, 'general'))))
+  // The preview filters like a feed does (App.svelte), so Hidden hides.
+  let previewPosts = $derived(samplePosts.filter(visibleTo(look)))
   let byKey = $derived(Object.fromEntries(items.map((it) => [it.key, it])))
 
   function visible(key: string) {
@@ -136,7 +136,7 @@
     </div>
   </div>
   <h3 class="section-label">Feed</h3>
-  <p class="help browser-note">The default for every channel. A channel’s top-bar menu can change it for that channel.</p>
+  <p class="help browser-note">How every channel's feed looks. Saves in this browser.</p>
   <div class="group"><LookRows /></div>
   <div class="preview" aria-label="Feed preview" inert>
     <Feed room={sampleRoom} posts={previewPosts} intro={false} onearlier={undefined} onnewer={undefined} onpresent={undefined} onaround={undefined} onacceptcall={undefined} ondeclinecall={undefined} onaddress={() => {}} onreveal={() => {}} onreply={() => {}} onforward={() => {}} onpin={() => {}} onopenfile={() => {}} ondetail={() => {}} onquestion={() => {}} ongoal={() => {}} />
