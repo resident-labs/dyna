@@ -22,7 +22,7 @@ import { reloadsUnread } from '../ui/unreadReload.ts'
 import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from '../ui/route.ts'
 import { sourceRange, stripTypes, moduleFunctions } from '../../../test/svelte-source.ts'
 import { installRoomLoader } from '../../../test/appRoomLoader.ts'
-import { goalsCode, installGoals, installIssues, installMachines, installPins, installPRs, installQuestions, installSessionView, installSync, machinesCode } from '../../../test/appModules.ts'
+import { goalsCode, installGoals, installIssues, installMachines, installPins, installPRs, installQuestions, installSelection, installSessionView, installSync, machinesCode } from '../../../test/appModules.ts'
 
 // Run the actual App navigation functions with controlled API responses.
 // The Svelte parser selects complete declarations without copying their logic.
@@ -34,7 +34,9 @@ const routerSource = readFileSync(new URL('../app/router.svelte.ts', import.meta
 const loaderSource = readFileSync(new URL('../app/roomLoader.svelte.ts', import.meta.url), 'utf8')
 const loaderCode = moduleFunctions(loaderSource)
 const declarations = parse(source, { modern: true }).instance?.content.body ?? []
-const names = ['openReview', 'clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'hashChanged', 'setPicked', 'selectRoom', 'openTarget', 'hashTarget', 'openDetail', 'openView', 'jumpTo', 'showRun', 'openPR']
+// The member selection moved to lib/app/selection.svelte.ts with the reset that
+// selectRoom runs, so installSelection brings it into the state.
+const names = ['openReview', 'clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'hashChanged', 'selectRoom', 'openTarget', 'hashTarget', 'openDetail', 'openView', 'jumpTo', 'showRun', 'openPR']
 const routerCode = moduleFunctions(routerSource, names)
 const appCode = (name: string): string | undefined => {
   const node = declarations.find((entry) => entry.type === 'FunctionDeclaration' && entry.id?.name === name)
@@ -247,7 +249,6 @@ interface NavFns {
   syncRoute: () => void
   routeHere: () => boolean
   hashChanged: () => void
-  setPicked: (...args: unknown[]) => unknown
   selectRoom: (room: string, workspace?: string) => Promise<boolean>
   openTarget: (...args: unknown[]) => Promise<boolean>
   hashTarget: () => boolean
@@ -333,6 +334,7 @@ function navigation() {
   installSync(state)
   installSessionView(state)
   installPRs(state)
+  installSelection(state)
   // The router asks the page for the side of a screen change it does not own.
   Reflect.set(state, 'host', {
     started: () => state.started,
