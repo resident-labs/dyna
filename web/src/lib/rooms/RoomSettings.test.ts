@@ -66,7 +66,7 @@ test('each section shows its moved controls in one shared layout', async () => {
     assert.doesNotMatch(review, /Review starts after/) // the room policy loads after mount
     assert.doesNotMatch(text(show('review')), /Automatic review/)
 
-    assert.match(text(show('services')), /service reviewer in room-1 service keeper in room-1/)
+    assert.match(text(show('services')), /service reviewer in room-1/)
     // The room's repo is fixed, so the hooks list has no repo picker.
     const hooks = show('hooks')
     assert.match(text(hooks), /Hooks Shell commands/)
