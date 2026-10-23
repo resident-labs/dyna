@@ -89,10 +89,8 @@ func TestOwnTurnCopyIsNotImported(t *testing.T) {
 	}
 }
 
-// A runner or command from the previous release still writes the turn file.
-// A read takes the row as it is and never writes; the next write under the
-// session lock imports that file first, and the row follows it.
-func TestTurnFileFromAnOlderBinaryIsImportedByTheNextWrite(t *testing.T) {
+// A retained file cannot replace a canonical row on a read or an update.
+func TestTurnFileFromAnOlderBinaryCannotReplaceTheRow(t *testing.T) {
 	s, id := turnStore(t)
 	if err := s.writeTurn(id, Turn{N: 1, Prompt: "first"}); err != nil {
 		t.Fatal(err)
@@ -107,15 +105,15 @@ func TestTurnFileFromAnOlderBinaryIsImportedByTheNextWrite(t *testing.T) {
 	if _, err := s.UpdateTurn(id, 1, func(*Turn) {}); err != nil {
 		t.Fatal(err)
 	}
-	if got := prompt(t, s, id, 1); got != "old binary" {
-		t.Fatalf("after the next write, the turn reads %q; want the old binary's write", got)
+	if got := prompt(t, s, id, 1); got != "first" {
+		t.Fatalf("after the next write, the turn reads %q; want the canonical row", got)
 	}
 	after, _ := s.turnVersion(id, 1)
 	if after == before {
-		t.Fatal("the old binary's write did not move the turn's version")
+		t.Fatal("the canonical update did not move the turn's version")
 	}
 	if again, _ := s.turnVersion(id, 1); again != after {
-		t.Fatalf("an imported file was imported again: %s then %s", after, again)
+		t.Fatalf("a read changed the canonical revision: %s then %s", after, again)
 	}
 }
 
@@ -233,15 +231,14 @@ func TestTurnStampsMoveFromTheMirrorColumn(t *testing.T) {
 	}
 }
 
-// An update imports an old binary's write first, so the update keeps its
-// own value and is built on the old binary's turn (the import-first order).
-func TestTurnUpdateImportsAnOldBinaryWriteFirst(t *testing.T) {
+// An update changes only the canonical row, even beside a foreign turn file.
+func TestTurnUpdateKeepsTheCanonicalStatus(t *testing.T) {
 	s, id := turnStore(t)
-	if err := s.writeTurn(id, Turn{N: 1, Prompt: "first"}); err != nil {
+	if err := s.writeTurn(id, Turn{N: 1, Prompt: "first", Status: TurnOK}); err != nil {
 		t.Fatal(err)
 	}
 	path := turnFile(t, s, id, 1)
-	if err := store.WriteJSON(path, Turn{N: 1, Prompt: "old binary", Status: TurnOK}, 0o600); err != nil {
+	if err := store.WriteJSON(path, Turn{N: 1, Prompt: "old binary", Status: TurnRunning}, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.UpdateTurn(id, 1, func(turn *Turn) { turn.Prompt = "update" }); err != nil {
@@ -249,12 +246,11 @@ func TestTurnUpdateImportsAnOldBinaryWriteFirst(t *testing.T) {
 	}
 	turn, err := s.ReadTurn(id, 1)
 	if err != nil || turn.Prompt != "update" || turn.Status != TurnOK {
-		t.Fatalf("turn after the update = %+v, %v; want the update on the old binary's turn", turn, err)
+		t.Fatalf("turn after the update = %+v, %v; want the update on the canonical turn", turn, err)
 	}
 }
 
-// A damaged turn file from another binary is skipped once
-// (state.ErrSkipForeign): the turn keeps its row.
+// A damaged retained turn file cannot affect a canonical row.
 func TestDamagedTurnFileKeepsTheRow(t *testing.T) {
 	s, id := turnStore(t)
 	if err := s.writeTurn(id, Turn{N: 1, Prompt: "row"}); err != nil {
