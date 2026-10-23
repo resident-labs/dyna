@@ -84,6 +84,10 @@ func Command(o Options) *cobra.Command {
 			if g.Shared {
 				holders = []string{"room"}
 			}
+			// An old build left this goal with the owner, and only root can move it.
+			if g.NeedsRoot() {
+				holders = []string{"nobody; root asks the owner, then drops or finishes the goal"}
+			}
 			items := ""
 			if n := counts[g.ID]; n[1] > 0 {
 				items = fmt.Sprintf(" · %d/%d items", n[0], n[1])

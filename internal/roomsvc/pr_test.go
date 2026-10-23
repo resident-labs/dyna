@@ -80,6 +80,7 @@ func TestPRSettingsRowsActionsAndCloseGuard(t *testing.T) {
 	if rows, _ = e.svc.PRs.Changes(alpha.ID, "", 0); rows.Items[0].CIPaused || rows.Items[0].ConsecutiveFailures != 0 || !rows.Items[0].Watching {
 		t.Fatalf("resume state: %+v", rows)
 	}
+	e.doneGoal(author)
 	if closed, err := e.svc.ForceCloseSession(e.ctx, alpha.ID, author.ID); err != nil || !closed.Closed {
 		t.Fatalf("app force close: %+v %v", closed, err)
 	}

@@ -43,9 +43,18 @@ type Goal struct {
 	// ExpediteUntil marks the room's one expedited goal until that time.
 	// Readers drop an expired value; see Store.Expedite.
 	ExpediteUntil *time.Time `json:"expediteUntil,omitempty"`
+	// LegacyOwnerHeld marks a goal that an old build left with the owner. Root
+	// must ask the owner about it, then drop or finish the goal, or hand it to
+	// an open session. Nothing writes it now.
+	// TODO: legacy/shim remove later — only goals saved by an old build carry it; remove once every room's owner-held goals are resolved.
+	LegacyOwnerHeld bool `json:"legacyOwnerHeld,omitempty"`
 }
 
 func (g Goal) Open() bool { return g.State == "active" }
+
+// NeedsRoot reports a goal that only root can move: root asks the owner about
+// it, then drops or finishes it, or hands it to an open session.
+func (g Goal) NeedsRoot() bool { return g.LegacyOwnerHeld && g.Open() }
 
 // RootHoldsNothing is the refusal for any goal holder that is root. Root leads
 // the room, so the agents that do the work hold the goals.
@@ -197,6 +206,8 @@ func (s *Store) Edit(room, id, by, text string, holders *[]string, shared bool) 
 		}
 		if holders != nil {
 			g.Holders, g.Shared = unique(*holders), shared
+			// New holders or the whole room settle an old owner-held mark.
+			g.LegacyOwnerHeld = false
 		}
 		g.State, g.Done = "active", nil
 		return nil
@@ -247,29 +258,42 @@ func unique(in []string) []string {
 	return out
 }
 
-// CloseSession drops the closing session's own work. Delegated work returns
-// to its live setter, or remains unheld. Historical goals retain
-// the existing heir mapping without waking that heir.
+// CloseSession drops the closing session's own work. Open work moves to a
+// live session: its setter first, then the heir. A goal with no live session
+// left to hold it is dropped with a note, because root and the owner hold no
+// goals. Historical goals keep the heir mapping without waking that heir.
 func (s *Store) CloseSession(room, id, heir string, open map[string]bool) error {
 	return s.updateTx(func(w *wake, st *State) error {
 		r := st.Rooms[room]
 		if r == nil {
 			return nil
 		}
+		drop := func(g *Goal, now time.Time, note string) {
+			g.Holders, g.Shared, g.State, g.ExpediteUntil, g.UpdatedAt = []string{}, false, "dropped", nil, now
+			g.Done = &Outcome{At: now, By: id, Summary: note}
+		}
 		for _, g := range r.Goals {
 			if g.Open() && g.HeldBy(id) && len(g.Holders) == 1 {
 				now := s.now()
 				g.Holders, g.Shared, g.UpdatedAt = []string{}, false, now
 				if g.Setter == id {
-					g.State, g.ExpediteUntil = "dropped", nil
-					g.Done = &Outcome{At: now, By: id, Summary: "The sole holder " + id + " closed its own goal."}
+					drop(g, now, "The sole holder "+id+" closed its own goal.")
 					continue
 				}
+				// The setter keeps the work it delegated, and the heir takes work
+				// no live setter is left to own.
 				target := ""
-				if g.Setter != "" && g.Setter != "owner" && open[g.Setter] && w.activate(g.Setter) == nil {
-					target = g.Setter
-					g.Holders = []string{target}
+				for _, candidate := range []string{g.Setter, heir} {
+					if candidate != "" && candidate != id && open[candidate] && w.activate(candidate) == nil {
+						target = candidate
+						break
+					}
 				}
+				if target == "" {
+					drop(g, now, "No open session was left to hold this goal after "+id+" closed.")
+					continue
+				}
+				g.Holders = []string{target}
 				continue
 			}
 			// Historical handovers validate recipients without assigning live work.
@@ -281,11 +305,8 @@ func (s *Store) CloseSession(room, id, heir string, open map[string]bool) error 
 				return sid != "" && open[sid] && check(sid) == nil
 			}
 			changed := false
-			if g.Setter == id {
-				g.Setter = "owner"
-				if live(heir) {
-					g.Setter = heir
-				}
+			if g.Setter == id && live(heir) {
+				g.Setter = heir
 				changed = true
 			}
 			if g.HeldBy(id) {
@@ -299,11 +320,13 @@ func (s *Store) CloseSession(room, id, heir string, open map[string]bool) error 
 				if len(h) == 0 {
 					switch {
 					case live(heir):
-						g.Holders, g.Shared = []string{heir}, false
+						g.Holders = []string{heir}
+					case !g.Open():
+						// A finished goal keeps its record; no session works it.
 					case live(g.Setter):
 						g.Holders, g.Shared = []string{g.Setter}, false
 					default:
-						g.Shared = true
+						drop(g, s.now(), "No open session was left to hold this goal after "+id+" closed.")
 					}
 				}
 				changed = true

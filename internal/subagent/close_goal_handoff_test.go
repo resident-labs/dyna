@@ -1,16 +1,15 @@
 package subagent
 
 import (
-	"slices"
 	"strings"
 	"testing"
 
 	"dyna-agent/internal/goals"
 )
 
-// A close whose heir is root, or the owner, keeps the goals where they are and
-// names the commands that resolve them. --force closes and moves them to the
-// owner.
+// A close whose heir is root, or the owner when nothing else is open, refuses
+// until each held goal is resolved. A forced close refuses for the same reason
+// and never hands the goal to the owner.
 func TestCloseRefusesGoalsThatWouldReachRoot(t *testing.T) {
 	e := newTestEnv(t)
 	holder := completedFixtureSession(t, e)
@@ -33,7 +32,9 @@ func TestCloseRefusesGoalsThatWouldReachRoot(t *testing.T) {
 		"dyna goal done " + goal.ID,
 		"dyna goal drop " + goal.ID,
 		"dyna goal edit " + goal.ID + " --for @",
-		"close with --force to move them to the owner",
+		"a forced close keeps the work here",
+		"ask the owner first with dyna ask",
+		"hand it to an open session",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("refusal %q misses %q", err, want)
@@ -46,16 +47,15 @@ func TestCloseRefusesGoalsThatWouldReachRoot(t *testing.T) {
 	if got, err := e.m.goalStore().Get(holder.RoomID, goal.ID); err != nil || !got.HeldBy(holder.ID) {
 		t.Fatalf("refused close moved the goal: %+v, %v", got, err)
 	}
-	closed, err := e.m.CloseWithOptions(e.ctx, holder.ID, CloseOptions{Force: true})
-	if err != nil {
-		t.Fatalf("forced close: %v", err)
+	if _, err := e.m.CloseWithOptions(e.ctx, holder.ID, CloseOptions{Force: true}); err == nil || !strings.Contains(err.Error(), "dyna goal done "+goal.ID) {
+		t.Fatalf("forced close = %v; want the goal refusal", err)
 	}
 	got, err := e.m.goalStore().Get(holder.RoomID, goal.ID)
-	if err != nil || !got.Open() || got.HeldBy(holder.ID) || got.HeldBy(rootID) || got.Setter != "owner" {
-		t.Fatalf("forced close left goal = %+v, %v; want it unheld for the owner", got, err)
+	if err != nil || !got.Open() || !got.HeldBy(holder.ID) || got.Setter == "owner" || got.NeedsRoot() {
+		t.Fatalf("forced close left goal = %+v, %v; want it held by the open session", got, err)
 	}
-	if !slices.Contains(closed.CloseSummary, "Goal "+goal.ID+" → the owner") {
-		t.Fatalf("forced close summary = %+v; want it to report the owner", closed.CloseSummary)
+	if info, err := e.m.Store.Info(holder.ID); err != nil || !info.Closed.IsZero() {
+		t.Fatalf("forced close closed the session: %+v, %v", info, err)
 	}
 }
 

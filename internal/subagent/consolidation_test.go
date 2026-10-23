@@ -402,12 +402,13 @@ func TestConsolidationReturnsGoalsAndMovesQuestions(t *testing.T) {
 	for _, r := range items {
 		got[r.Kind+" "+r.ID] = true
 	}
-	// Goals do not transfer: the delegated work returns to its setter, b's
-	// own goal drops with it, and only the question moves to the kept session.
-	if got["goal "+delegated.ID] || got["goal "+own.ID] || !got["question "+q.ID] {
-		t.Fatalf("kept session responsibilities = %+v, want only question %s", items, q.ID)
+	// Goals do not transfer as a rule. The delegated goal has no live setter,
+	// so the kept session, the close heir, holds it. b's own goal drops with
+	// it, and only the question moves to the kept session.
+	if got["goal "+own.ID] || !got["goal "+delegated.ID] || !got["question "+q.ID] {
+		t.Fatalf("kept session responsibilities = %+v, want the delegated goal and question %s", items, q.ID)
 	}
-	if g, err := e.m.goalStore().Get(b.RoomID, delegated.ID); err != nil || !g.Open() || len(g.Holders) != 0 {
+	if g, err := e.m.goalStore().Get(b.RoomID, delegated.ID); err != nil || !g.Open() || !g.HeldBy(a.ID) {
 		t.Fatalf("delegated goal = %+v err=%v", g, err)
 	}
 	if g, err := e.m.goalStore().Get(b.RoomID, own.ID); err != nil || g.State != "dropped" {
