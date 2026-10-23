@@ -97,21 +97,21 @@ func rateLimitReset(headers http.Header, now time.Time) time.Time {
 	return time.Time{}
 }
 
-func cacheAccount(key, login string) {
+func cacheAccount(key, login, config string) {
 	accounts.Lock()
-	accounts.choices[key] = choice{login: login, until: time.Now().Add(accountCacheTTL)}
+	accounts.choices[key] = choice{login: login, until: time.Now().Add(accountCacheTTL), config: config}
 	accounts.Unlock()
 }
 
 // proveAccount records a choice a real access check confirmed. It lasts much
 // longer than a cached one and survives the engine process, so the next turn,
 // and the next engine start, make no GitHub API call.
-func proveAccount(key, login string, cmd *exec.Cmd) {
+func proveAccount(key, login, config string) {
 	until := time.Now().Add(accountProvedTTL)
 	accounts.Lock()
-	accounts.choices[key] = choice{login: login, until: until}
+	accounts.choices[key] = choice{login: login, until: until, config: config}
 	accounts.Unlock()
-	rememberChoice(key, login, ghConfigFingerprint(cmd), until)
+	rememberChoice(key, login, config, until)
 }
 
 // forgetAccount drops an account choice GitHub no longer accepts, and the rate
