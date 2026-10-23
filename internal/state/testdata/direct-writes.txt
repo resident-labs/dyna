@@ -156,6 +156,7 @@ not-state internal/hookinstall/unit.go Service.Worker 1 # self-update install jo
 not-state internal/harness/runtime/signin_pi.go runPiOAuth 2 # temporary OAuth extension source and its cleanup; no queried runtime state
 not-state internal/hooks/events.go cleanupSnapshot 1 # removes a private Git execution worktree directory
 not-state internal/hooks/events.go snapshot 1 # removes a failed private Git execution worktree directory
+not-state internal/hooks/install.go Service.settleLeftRun 1 # appends why a run ended to the run's own log file, which holds its raw output
 not-state internal/hooks/runs.go Service.newRun 1 # raw command output stays in log files
 not-state internal/hooks/spool.go Service.Drain 1 # allowed inbox, requirement 2: the git hook spool the engine drains
 not-state internal/hooks/spool.go Service.Enqueue 1 # allowed inbox, requirement 2: the git hook spool the engine drains

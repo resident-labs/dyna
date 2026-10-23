@@ -186,7 +186,10 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 		tick := func(name string) func(context.Context) error {
 			return func(context.Context) error { calls <- owner + "-" + name; return nil }
 		}
-		return testWorkers(tick)
+		w := testWorkers(tick)
+		// Only the engine that owns the store settles the previous engine's runs.
+		w.settle = func(context.Context) error { calls <- owner + "-settle"; return nil }
+		return w
 	}
 	report := func(string, error) { t.Error("unexpected worker error") }
 	run := func(ctx context.Context, owner string) <-chan bool {
@@ -213,7 +216,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	first := run(ctx, "first")
-	awaitWorker(t, calls, "first-prs", "first-checkins", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch", "first-probe", "first-caches")
+	awaitWorker(t, calls, "first-settle", "first-prs", "first-checkins", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch", "first-probe", "first-caches")
 	// A second engine on the same store runs no workers at all.
 	secondCtx, cancelSecond := context.WithCancel(context.Background())
 	secondDone := make(chan bool, 1)
@@ -246,7 +249,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	// takes over the store workers.
 	ctx, cancel = context.WithCancel(context.Background())
 	third := run(ctx, "third")
-	awaitWorker(t, calls, "third-prs", "third-checkins", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch", "third-probe", "third-caches")
+	awaitWorker(t, calls, "third-settle", "third-prs", "third-checkins", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch", "third-probe", "third-caches")
 	cancel()
 	stop(third, "third")
 	select {
@@ -281,7 +284,7 @@ func TestEngineHookWorkerDrainsStartupSpoolOnce(t *testing.T) {
 	t.Cleanup(authority.InEngine())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil)
+	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil, time.Now())
 	drain := w.hooks
 	ticks := make(chan struct{}, 4)
 	w.hooks = func(ctx context.Context) (time.Time, error) {
@@ -621,5 +624,26 @@ func TestSweepMarkCountsOnlyAPassWithNoEvent(t *testing.T) {
 	signals.found("question delivery", nil)
 	if got := signals.findings(); got != 1 {
 		t.Fatalf("findings = %d, want 1", got)
+	}
+}
+
+// Settlement measures a run against the engine's own start, not the moment the
+// workers reach it. Startup recovery can take time, and a hook run that the
+// owner starts in between must stay live.
+func TestWorkersSettleFromTheEngineStart(t *testing.T) {
+	services := testServices(t, false)
+	started := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	var cutoff time.Time
+	settleHookRuns = func(_ context.Context, at time.Time) error {
+		cutoff = at
+		return nil
+	}
+	t.Cleanup(func() { settleHookRuns = settleFromStart })
+	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil, started)
+	if err := w.settle(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !cutoff.Equal(started) {
+		t.Fatalf("settle cutoff = %s, want the engine start %s", cutoff, started)
 	}
 }
