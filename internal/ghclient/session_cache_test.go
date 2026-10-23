@@ -51,7 +51,7 @@ esac
 		t.Fatal(err)
 	}
 	if session.Env["GH_TOKEN"] != "worker-secret" || session.Notice != "" {
-		t.Fatalf("first turn session = %#v", session)
+		t.Fatalf("first turn host=%q notice=%q, want the stored account", session.Env["GH_HOST"], session.Notice)
 	}
 	if got := probeCount(t, probes); got != 1 {
 		t.Fatalf("first turn probed %d times, want 1", got)
@@ -66,7 +66,7 @@ esac
 		t.Fatalf("the turn after an engine restart probed GitHub %d times, want none", got-1)
 	}
 	if again.Env["GH_TOKEN"] != "worker-secret" || again.Notice != "" {
-		t.Fatalf("turn after restart session = %#v", again)
+		t.Fatalf("turn after restart host=%q notice=%q, want the stored account", again.Env["GH_HOST"], again.Notice)
 	}
 }
 
@@ -89,7 +89,7 @@ esac
 		t.Fatalf("a rate limit failed the turn: %v", err)
 	}
 	if session.Env["GH_TOKEN"] != "" || session.Env["GH_HOST"] != "github.com" {
-		t.Fatalf("rate-limited session = %#v", session.Env)
+		t.Fatalf("rate-limited session host=%q token set=%v, want no token", session.Env["GH_HOST"], session.Env["GH_TOKEN"] != "")
 	}
 	want := "GitHub is rate limited until " + reset.UTC().Format(time.RFC3339) + ", so GitHub commands may fail this turn"
 	if !strings.Contains(session.Notice, want) {
