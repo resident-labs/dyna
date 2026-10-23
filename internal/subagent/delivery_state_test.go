@@ -219,3 +219,44 @@ func TestOwnerDropsPendingImportedDelivery(t *testing.T) {
 		})
 	}
 }
+
+// A note the held prompt covered is cancelled, so a second startup from an old
+// cursor cannot deliver it. An imported note is covered the same way: the index
+// import wrote its row before any turn claimed it, so a filter that only takes
+// queued or claimed rows would leave it pending.
+func TestCoveredImportedNoteIsNotDeliveredByTheNextStartup(t *testing.T) {
+	e := newTestEnv(t)
+	info := completedFixtureSession(t, e)
+	note, err := e.m.rooms().PostEvent(info.RoomID, room.SessionEvent{
+		Type: room.SessionInstructions, Session: info.Address(), Detail: "covered imported note",
+	}, info.Address())
+	if err != nil {
+		t.Fatal(err)
+	}
+	setDeliveryRow(t, e, info.ID, note.ID, room.DeliveryImported, 0)
+	// The runner exits before it commits the cursor, so the next startup reads
+	// the note from the same place.
+	if _, err := e.m.Store.UpdateMeta(info.ID, func(m *Meta) { m.RoomCursor = 0 }); err != nil {
+		t.Fatal(err)
+	}
+	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: info.ID})
+	first, err := e.m.RunnerClaimInput(ctx, InputClaim{Turn: 1, Startup: true, Depth: info.Depth, Covered: []string{note.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Posts) != 0 {
+		t.Fatalf("a covered note was claimed: %+v", first.Posts)
+	}
+	if row, _ := deliveryRowOf(t, e, info.ID, note.ID); row.State != room.DeliveryCancelled {
+		t.Fatalf("covered row = %+v; want it cancelled", row)
+	}
+	second, err := e.m.RunnerClaimInput(ctx, InputClaim{Turn: 1, Startup: true, Depth: info.Depth})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, post := range second.Posts {
+		if post.Steer.ID == note.ID {
+			t.Fatalf("a second startup delivered the covered note again: %+v", second.Posts)
+		}
+	}
+}
