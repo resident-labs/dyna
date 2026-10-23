@@ -57,6 +57,12 @@ func TestRunChecksReportsAndSavesResult(t *testing.T) {
 					io.WriteString(tw, diagnostics)
 					return tw.Close()
 				}
+				// Every remote script must parse: a setup that does not stops each run.
+				if name == "ssh" {
+					if output, err := exec.Command("bash", "-n", "-c", args[len(args)-1]).CombinedOutput(); err != nil {
+						return fmt.Errorf("invalid script: %w: %s", err, output)
+					}
+				}
 				return nil
 			}}
 			result, err := runner.Run(context.Background(), Request{Repo: t.TempDir(), SHA: "HEAD", Suites: []string{"go"}, MaxTest: 10 * time.Second})
