@@ -121,3 +121,17 @@ test('browsing a folder with a space keeps file completion active while typing',
     assert.equal(input.value, 'Review ``web docs/odd`file.txt`` @lead ')
   })
 })
+
+test('a new session mention or line break ends folder completion', async () => {
+  await withFileComposer(async (target, input, type) => {
+    for (const separator of [' ', '\n']) {
+      await type('Review @web')
+      need([...target.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(option => option.textContent?.includes('web docs/'))).click()
+      await settle()
+      await type('Review @web docs/' + separator + '@lead')
+      element<HTMLButtonElement>(target, '[role="option"][title="member"]').click()
+      await settle()
+      assert.equal(input.value, 'Review @web docs/' + separator + '@lead ')
+    }
+  })
+})
