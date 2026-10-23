@@ -11,18 +11,71 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
-func TestEndedPRNoticesAreInformational(t *testing.T) {
+func TestEndedPRNoticesFollowLandRecipients(t *testing.T) {
 	for _, merged := range []bool{false, true} {
-		t.Run(map[bool]string{false: "closed", true: "merged"}[merged], func(t *testing.T) {
-			e := newEnv(t)
-			e.track()
-			e.f.Pull.State, e.f.Pull.Merged = "closed", merged
-			e.tick()
-			n := lastNotice(t, e.record())
-			if n.Kind != "informational" {
-				t.Fatalf("ended PR notice kind = %q, want informational", n.Kind)
-			}
-		})
+		outcome := map[bool]string{false: "closed", true: "merged"}[merged]
+		for _, route := range []string{"child", "top-level", "closed-parent", "closed-chain"} {
+			t.Run(outcome+"/"+route, func(t *testing.T) {
+				e := newEscalationEnv(t)
+				e.testEnv.track()
+				recipient, _ := e.mgr.Store.Info(e.author.ParentSession)
+				switch route {
+				case "top-level":
+					e.session(e.author.ID, "", true)
+					recipient, _ = e.mgr.Store.Info(e.author.ID)
+				case "closed-parent":
+					grandparent := "ses_20261017-000008-dddddddd"
+					e.session(grandparent, "", true)
+					e.session(e.author.ParentSession, grandparent, false)
+					recipient, _ = e.mgr.Store.Info(grandparent)
+				case "closed-chain":
+					e.session(e.author.ParentSession, "", false)
+					recipient = subagent.Info{}
+				}
+				e.f.Pull.State, e.f.Pull.Merged = "closed", merged
+				e.f.Pull.Head.Ref = "feature"
+				e.f.Pull.Base.Repo.DefaultBranch = "main"
+				e.s.CleanupMerged = func(context.Context, Record, string) error { return nil }
+				e.tick()
+				r := e.record()
+				var completion Notice
+				for _, n := range r.Notices {
+					if n.Kind == outcome {
+						completion = n
+					}
+				}
+				if completion.ID == "" {
+					t.Fatalf("no %s notice: %+v", outcome, r.Notices)
+				}
+				r.Head += "-new"
+				r.Watching = true
+				endRecord(&r, merged, e.clock)
+				count := 0
+				for _, n := range r.Notices {
+					if n.Kind == outcome {
+						count++
+					}
+				}
+				if count != 1 {
+					t.Fatalf("got %d completion notices", count)
+				}
+				id, err := e.s.deliver(t.Context(), r, completion)
+				if err != nil {
+					t.Fatal(err)
+				}
+				msg, err := e.rooms.Message(e.rec.ID, id)
+				want, wake := recipient.Address(), true
+				if route == "closed-chain" {
+					want, wake = e.rec.Name, false
+				}
+				if err != nil || msg.Wake != wake || len(msg.To) != 1 || msg.To[0] != want {
+					t.Fatalf("completion recipient: %+v %v, want %s wake=%v", msg, err, want, wake)
+				}
+				if len(e.starts) != 0 {
+					t.Fatalf("ended change started an agent: %+v", e.starts)
+				}
+			})
+		}
 	}
 }
 
