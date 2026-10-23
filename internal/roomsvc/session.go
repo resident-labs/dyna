@@ -532,6 +532,7 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 		emit(ev)
 	}
 	scanStores := func() {
+		s.scanChangedPosts(offsets, emit)
 		for topic := range s.takeStoreTopics() {
 			switch topic {
 			case "goals":
@@ -626,26 +627,7 @@ func (s *Service) scan(offsets map[string]int64, roomSig *string, memberSig *mem
 				emit(Event{Kind: "pins", RoomID: rec.ID})
 			}
 		}
-		size, err := store.FileSize(rec.ID)
-		if err != nil {
-			continue
-		}
-		if first {
-			offsets[rec.ID] = size
-			continue
-		}
-		prev := offsets[rec.ID] // a room created after the first scan starts at 0
-		if size == prev {
-			continue
-		}
-		posts, next, err := s.FeedSince(rec.ID, prev)
-		if err != nil {
-			continue
-		}
-		offsets[rec.ID] = next
-		if len(posts) > 0 {
-			emit(Event{Kind: "posts", RoomID: rec.ID, Posts: posts, Offset: next})
-		}
+		s.scanPosts(rec.ID, offsets, first, emit)
 	}
 	if s.membersChanged(memberSig, records, first) {
 		if sessions, err := memberSig.list(s); err == nil {
@@ -657,6 +639,31 @@ func (s *Service) scan(offsets map[string]int64, roomSig *string, memberSig *mem
 		emit(Event{Kind: "rooms"})
 	}
 	*roomSig = sig
+}
+
+// scanPosts shares the byte cursor between committed wakes and fallback scans.
+func (s *Service) scanPosts(roomID string, offsets map[string]int64, first bool, emit func(Event)) {
+	store := s.rooms()
+	size, err := store.FileSize(roomID)
+	if err != nil {
+		return
+	}
+	if first {
+		offsets[roomID] = size
+		return
+	}
+	prev := offsets[roomID] // a room created after the first scan starts at 0
+	if size == prev {
+		return
+	}
+	posts, next, err := s.FeedSince(roomID, prev)
+	if err != nil {
+		return
+	}
+	offsets[roomID] = next
+	if len(posts) > 0 {
+		emit(Event{Kind: "posts", RoomID: roomID, Posts: posts, Offset: next})
+	}
 }
 
 // RunScanEvery is how many Watch ticks pass between run scans.

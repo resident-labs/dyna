@@ -937,8 +937,7 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 			return err
 		}
 		// The append has no deadline today; the room lock above orders posts.
-		// TODO: legacy/shim remove later — posts publish from the room watch (with their body), not from this append, so a client gets each post once; remove when item 16 moves the posts topic to this write.
-		if err := state.For(db).Append(context.Background(), hub.Event{}, path, b); err != nil {
+		if err := state.For(db).Append(context.Background(), hub.Event{Topic: "room-post", Room: roomID}, path, b); err != nil {
 			return err
 		}
 		return s.touchRecord(rec)
