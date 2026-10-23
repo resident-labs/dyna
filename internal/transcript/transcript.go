@@ -75,6 +75,7 @@ type Tool struct {
 
 // Item is one entry of the conversation.
 type Item struct {
+	source    int64
 	Kind      Kind
 	PostID    string    // original room post
 	TS        time.Time // zero when the source carried no time
@@ -161,7 +162,7 @@ func fromEvents(events []workeroutput.Event) ([]Item, int, []int) {
 					items[n-1].Text += text
 					continue
 				}
-				items = append(items, Item{Kind: Reply, TS: ts, Text: text})
+				items = append(items, Item{Kind: Reply, TS: ts, Text: text, source: e.SourceOffset})
 				deltaReply, deltaID = len(items)-1, e.ID
 				continue
 			}
@@ -179,7 +180,7 @@ func fromEvents(events []workeroutput.Event) ([]Item, int, []int) {
 				items[n-1].Text += "\n\n" + text
 				continue
 			}
-			items = append(items, Item{Kind: Reply, TS: ts, Text: text})
+			items = append(items, Item{Kind: Reply, TS: ts, Text: text, source: e.SourceOffset})
 		case "reasoning":
 			if line := firstLine(stripEmphasis(e.Text)); line != "" {
 				// A run of thoughts reads as one line: the latest, with a count.
@@ -188,7 +189,7 @@ func fromEvents(events []workeroutput.Event) ([]Item, int, []int) {
 					items[n-1].Tool.Count = max(items[n-1].Tool.Count, 1) + 1
 					continue
 				}
-				items = append(items, Item{Kind: Thought, TS: ts, Text: line})
+				items = append(items, Item{Kind: Thought, TS: ts, Text: line, source: e.SourceOffset})
 			}
 		case "tool":
 			if e.Name == "tool_result" && e.ID != "" {
@@ -198,7 +199,7 @@ func fromEvents(events []workeroutput.Event) ([]Item, int, []int) {
 			if end, ok := ended[i]; ok && end > 0 && e.TS > 0 {
 				t.Dur = time.Duration(end-e.TS) * time.Millisecond
 			}
-			items = appendTool(items, Item{Kind: ToolUse, TS: ts, Tool: t})
+			items = appendTool(items, Item{Kind: ToolUse, TS: ts, Tool: t, source: e.SourceOffset})
 		case "status":
 			if e.Name == "response" || e.Name == "result" || e.State == "started" {
 				deltaReply = -1
@@ -222,7 +223,7 @@ func fromEvents(events []workeroutput.Event) ([]Item, int, []int) {
 					hidden++
 					continue
 				}
-				items = append(items, Item{Kind: Error, TS: ts, Text: text})
+				items = append(items, Item{Kind: Error, TS: ts, Text: text, source: e.SourceOffset})
 			}
 		case "raw":
 			hidden++
@@ -250,13 +251,13 @@ func appendCompaction(items []Item, e workeroutput.Event, ts time.Time) []Item {
 		if open >= 0 {
 			return items
 		}
-		return append(items, Item{Kind: Compaction, TS: ts, Compaction: c})
+		return append(items, Item{Kind: Compaction, TS: ts, Compaction: c, source: e.SourceOffset})
 	}
 	if open >= 0 {
 		items[open].Compaction, items[open].TS = c, ts
 		return items
 	}
-	return append(items, Item{Kind: Compaction, TS: ts, Compaction: c})
+	return append(items, Item{Kind: Compaction, TS: ts, Compaction: c, source: e.SourceOffset})
 }
 
 // repeated reports whether text is a full reply already given in items.

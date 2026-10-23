@@ -34,6 +34,9 @@ type Declaration struct {
 // contract independently of the source dialect.
 // docs/reasoning-and-compaction.md defines the reasoning and compaction events.
 type Event struct {
+	// SourceOffset is the original output line boundary, assigned by readers.
+	SourceOffset int64 `json:"-"`
+
 	V      int    `json:"v"`
 	Kind   string `json:"kind"` // message|reasoning|tool|status|raw
 	Role   string `json:"role,omitempty"`
