@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { Meter, statsLine, ENCODING } from './rfbStats.js'
+import { Meter, statsLine, ENCODING } from './rfbStats.ts'
 
 function clock() {
   let t = 0
-  return { now: () => t, tick: (ms) => (t += ms) }
+  return { now: () => t, tick: (ms: number) => (t += ms) }
 }
 
 test('fps and bitrate use the last two seconds', () => {
