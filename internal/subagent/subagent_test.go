@@ -341,22 +341,31 @@ func TestSendWhileIdleResumesTheSameHarnessSession(t *testing.T) {
 
 func TestSendWhileRunningIsDeliveredAsSteering(t *testing.T) {
 	e := newTestEnv(t)
-	info, _ := e.start("long job SLEEP:20000")
-	e.waitStatus(info.ID, StatusRunning)
-	var res WakeResult
-	var err error
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		res, err = e.send(info.ID, "SLEEP:1 prioritize the parser", WakeOptions{})
-		if err == nil {
-			break
+	ready, release := make(chan struct{}), make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(release) })
+	defer unblock()
+	e.m.checkpoint = func(stage string) {
+		if stage == "turn-started" {
+			close(ready)
+			select {
+			case <-release:
+			case <-e.ctx.Done():
+			}
 		}
-		time.Sleep(20 * time.Millisecond)
 	}
+	joined := e.joinRunners()
+	info, _ := e.start("long job SLEEP:0")
+	<-ready
+	res, err := e.send(info.ID, "prioritize the parser", WakeOptions{})
 	if err != nil || !res.Steered || res.Turn != 1 {
 		t.Fatalf("Send = %#v, %v; want steering of turn 1", res, err)
 	}
-	_, done := e.wait(info.ID, 1)
+	unblock()
+	joined()
+	done, err := e.m.Store.ReadTurn(info.ID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if r := resultString(done); !strings.Contains(r, "prioritize the parser") {
 		t.Fatalf("turn result = %#v", done.Result)
 	}
