@@ -750,8 +750,9 @@ the newest 200 posts by day. Click an item to open its file or card viewer.
 Room Files, Changes, and Terminal remain in the sidebar.
 
 Messages share an avatar and header when the same author writes within
-seven minutes. Turn dividers mark progress. Click a work summary to see tools and thoughts. Posts to root show
-inline, with their HTML cards and files.
+seven minutes. Turn dividers mark progress. Each turn groups tools, shell commands
+and child activity into expandable steps. Posts to root show inline, with their
+HTML cards and files.
 
 Posts between agents form one thread per counterpart. Click a thread chip or
 **Threads** to open the panel. The app remembers whether the panel is open.
