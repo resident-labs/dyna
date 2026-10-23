@@ -159,35 +159,38 @@ Exempt workflows still gate CI. In enforce mode, runs that finish over budget st
 Use `dyna git sync status --json` to inspect saved ahead and behind counts.
 `dyna git sync fetch` refreshes the configured local lane remotes.
 
-Registered nodes run CI for tracked PR heads and merge trials. Nodes are not
-GitHub self-hosted runners. Add this machine or SSH machines:
+Registered machines run CI for tracked PR heads and merge trials. They are not
+GitHub self-hosted runners. Every machine lives in one registry, and this
+machine is the local row that runs the engine:
 
 ```sh
-dyna git ci node add local --slots 1
-dyna git ci node add omarchy --ssh ari@omarchy --slots 2
-dyna git ci node add hermeslab --ssh pip@hermeslab --jump ari@omarchy --slots 2
-dyna git ci node list
+dyna machine list
+dyna machine add omarchy --ssh ari@omarchy --ci-slots 2
+dyna machine add hermeslab --ssh pip@hermeslab --ci-slots 2
+dyna machine edit this-machine --ci-slots 1
 dyna git ci mode local
 ```
 
 The mode applies to the current room. `github` is the default. `local` and
 `both` accept the first conclusive local or GitHub result; any observed failure
 blocks merging. Every configured required check must pass. With no enabled
-nodes, GitHub remains the CI source.
-Use `node disable <name>` or `node rm <name>` to stop assigning a node work.
+machines, GitHub remains the CI source.
+Use `dyna machine edit <name> --disable` or `dyna machine rm <name>` to stop
+assigning a machine CI work.
 Merge trials run first. Superseded heads are cancelled. Forks stay on GitHub.
 Local checks use bounded systemd scopes and containers, with warm caches.
 When local work starts, Dyna removes only queued or waiting runs of
 `.github/workflows/ci.yml` for that exact head. Running jobs and other workflows
 finish. An infrastructure error reruns the removed runs. Main pushes are never cancelled.
-The PR Checks tab and `dyna git merge status` show the node for each check.
+The PR Checks tab and `dyna git merge status` show the machine for each check.
+`dyna git ci node` still works and forwards to `dyna machine`.
 
 Manual CI can also run one commit over the configured SSH destination:
 
 ```sh
 dyna git ci run <sha>
 dyna git ci run <sha> --suite go
-dyna git ci run <sha> --node local --suite relay
+dyna git ci run <sha> --node omarchy --suite relay
 dyna git ci show <sha> --json
 ```
 

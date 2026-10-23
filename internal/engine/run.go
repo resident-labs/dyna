@@ -39,6 +39,7 @@ import (
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/lanesync"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/maintenance"
 	"dyna-agent/internal/mode"
 	prstate "dyna-agent/internal/pr/state"
@@ -290,6 +291,10 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 		case "goals", "questions", "notices", "sync":
 			rooms.StoreChanged(ev.Topic)
 			return
+		case machines.Topic:
+			// A machine change can add, move or stop CI work.
+			wakeWorker(signals.channels["prs"])
+			wakeWorker(signals.channels["merges"])
 		case prstate.Topic:
 			rooms.PRsChanged()
 			return

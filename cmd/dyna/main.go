@@ -28,6 +28,7 @@ import (
 	"dyna-agent/internal/cli/interactive"
 	"dyna-agent/internal/cli/journal"
 	clilibrary "dyna-agent/internal/cli/library"
+	"dyna-agent/internal/cli/machine"
 	climaintenance "dyna-agent/internal/cli/maintenance"
 	"dyna-agent/internal/cli/managed"
 	"dyna-agent/internal/cli/profiles"
@@ -169,6 +170,7 @@ func newRootCommand() *cobra.Command {
 		clisubagent.NewCommand(),
 		shell.NewCommand(),
 		computer.NewCommand(),
+		machine.NewCommand(),
 		computer.NewBrowserCommand(),
 		computer.NewDaemonCommand(),
 		hook.NewCommand(),

@@ -25,6 +25,7 @@ import (
 	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/library"
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/maintenance"
 	"dyna-agent/internal/notices"
 	"dyna-agent/internal/parentcheckin"
@@ -74,6 +75,8 @@ var migrations = []func(dataDir string) error{
 	librarianstate.Migrate,
 	library.Migrate,
 	localci.Migrate,
+	// machines reads the old local_ci_nodes table, so it runs after localci.
+	machines.Migrate,
 	maintenance.Migrate,
 	notices.Migrate,
 	parentcheckin.Migrate,
