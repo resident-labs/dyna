@@ -3,7 +3,7 @@
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
   import Avatar from '../ui/Avatar.svelte'
-  import { loadView } from './systemLoad.js'
+  import { loadView } from './systemLoad.ts'
   // load: one SystemLoad answer. onagent opens a top row's session.
   let { load, onagent } = $props()
   let v = $derived(loadView(load))

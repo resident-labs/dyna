@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createReloadGate, reconcileRows } from '../ui/reloadGate.ts'
-import { createRoomData } from '../rooms/roomData.js'
+import { createRoomData } from '../rooms/roomData.ts'
 import { bulkRetryable } from './bulkSessions.ts'
 import { pruneSelection, toggleSelection } from './consolidation.ts'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
@@ -21,6 +21,7 @@ interface App {
   selectionMenu: { anchor: { focus(): void } } | null
   consolidating: Batch | null
   roomRequest: number
+  roomId: string
   selectionRevision: number
   consolidationAlive: boolean
   [name: string]: unknown

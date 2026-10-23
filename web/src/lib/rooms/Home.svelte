@@ -12,8 +12,8 @@
   import Chip from '../ui/Chip.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import SystemLoadCard from './SystemLoadCard.svelte'
-  import { pollLoad } from './systemLoad.js'
-  import { accountRows, allClear, updateRows, rootQuestions } from './home.js'
+  import { pollLoad } from './systemLoad.ts'
+  import { accountRows, allClear, updateRows, rootQuestions } from './home.ts'
   // update: the dyna update notice ({current, latest}) or null.
   let { rooms = [], update = null, onroom, onaccount, onagent } = $props()
 

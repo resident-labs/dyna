@@ -4,8 +4,13 @@
 // Object.assign(c, appLoaderStubs(), { loadX: realOrSpy }).
 import { readFileSync } from 'node:fs'
 
-export function appLoaderStubs() {
+// The stubbed loaders, keyed by the name App.svelte declares them with.
+export type AppLoaderStubs = Record<string, () => void>
+
+const LOADER = /^ {2}(?:async )?function (load[A-Z]\w*)\(/gm
+
+export function appLoaderStubs(): AppLoaderStubs {
   const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-  const names = [...source.matchAll(/^ {2}(?:async )?function (load[A-Z]\w*)\(/gm)].map((m) => m[1])
+  const names = [...source.matchAll(LOADER)].map((m) => m[1] ?? '')
   return Object.fromEntries(names.map((n) => [n, () => {}]))
 }

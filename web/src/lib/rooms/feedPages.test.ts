@@ -1,13 +1,18 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mergeFeedPage, rerouteAnchors, withChannels } from './feedPages.js'
+import { mergeFeedPage, rerouteAnchors, withChannels } from './feedPages.ts'
+import type { FeedPage, FeedPost } from './feedWindow.ts'
+import { need } from '../../../test/need.ts'
 
-const feed = (posts, extra = {}) => ({ room: { id: 'room' }, posts, ...extra })
+type TestPost = FeedPost & { text?: string; unread?: boolean }
+type TestFeed = FeedPage<TestPost> & { posts: TestPost[]; offset?: number }
+
+const feed = (posts: TestPost[], extra: Partial<TestFeed> = {}): TestFeed => ({ room: { id: 'room' }, posts, ...extra })
 
 test('an older page preserves post objects, append order, and the live offset', () => {
-  const current = { id: 'current', unread: true }
-  const newest = { id: 'newest' }
-  const old = { id: 'old' }
+  const current: TestPost = { id: 'current', unread: true }
+  const newest: TestPost = { id: 'newest' }
+  const old: TestPost = { id: 'old' }
   const merged = mergeFeedPage(feed([current, newest], { offset: 30 }), feed([old, { id: 'current', unread: false }], { offset: 20, earlier: 4, cursor: 'next' }), true)
   assert.deepEqual(merged.posts, [old, current, newest])
   assert.equal(merged.posts[1], current)
@@ -17,7 +22,7 @@ test('an older page preserves post objects, append order, and the live offset', 
 })
 
 test('a refreshed overlapping tail keeps loaded history and later live posts', () => {
-  const old = { id: 'old' }, overlap = { id: 'overlap' }, live = { id: 'live' }
+  const old: TestPost = { id: 'old' }, overlap: TestPost = { id: 'overlap' }, live: TestPost = { id: 'live' }
   const merged = mergeFeedPage(feed([old, overlap, live], { historyLoaded: true, earlier: 2, cursor: 'history' }), feed([{ id: 'overlap' }], { earlier: 30, cursor: 'head' }))
   assert.deepEqual(merged.posts, [old, overlap, live])
   assert.equal(merged.posts[1], overlap)
@@ -49,11 +54,11 @@ test('refreshing an old window cannot append a disjoint live tail', () => {
 })
 
 test('a page takes the server channels of loaded posts, so a promote moves them', () => {
-  const kept = { id: 'kept', channels: ['general'] }
-  const moved = { id: 'moved', text: 'loaded', channels: ['channel:lead'] }
+  const kept: TestPost = { id: 'kept', channels: ['general'] }
+  const moved: TestPost = { id: 'moved', text: 'loaded', channels: ['channel:lead'] }
   const merged = mergeFeedPage(feed([moved, kept]), feed([{ id: 'moved', text: 'page', channels: ['general'] }, { id: 'kept', channels: ['general'] }], { earlier: 2, cursor: 'c' }), true)
   assert.deepEqual(merged.posts.map((p) => p.channels), [['general'], ['general']])
-  assert.equal(merged.posts[0].text, 'loaded', 'the loaded post object stays apart from its channels')
+  assert.equal(merged.posts[0]?.text, 'loaded', 'the loaded post object stays apart from its channels')
   assert.equal(merged.posts[1], kept, 'unchanged posts keep their object')
 })
 
@@ -62,9 +67,12 @@ test('reroute pages cover a full loaded window and update only changed channels'
   const anchors = rerouteAnchors(posts)
   assert.ok(anchors.length <= 2)
   // The server returns up to 200 posts around each anchor.
-  const index = new Map(posts.map((p, i) => [p.id, i]))
-  const pages = anchors.map((id) => ({ posts: posts.slice(Math.max(0, index.get(id) - 100), index.get(id) + 100).map((p) => ({ id: p.id, channels: p.id === 'p0' ? ['channel:lead'] : ['general'] })) }))
+  const index = new Map(posts.map((p, i): [string, number] => [p.id, i]))
+  const pages = anchors.map((id) => {
+    const at = need(index.get(id), id)
+    return { posts: posts.slice(Math.max(0, at - 100), at + 100).map((p) => ({ id: p.id, channels: p.id === 'p0' ? ['channel:lead'] : ['general'] })) }
+  })
   const out = withChannels(posts, pages)
   assert.equal(out[0], posts[0], 'an unchanged post keeps its object')
-  assert.ok(out.slice(1).every((p) => p.channels[0] === 'general'), 'every other loaded post moved')
+  assert.ok(out.slice(1).every((p) => p.channels?.[0] === 'general'), 'every other loaded post moved')
 })

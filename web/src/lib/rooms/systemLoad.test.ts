@@ -3,20 +3,27 @@ import assert from 'node:assert/strict'
 import { setImmediate } from 'node:timers/promises'
 import { readFileSync } from 'node:fs'
 import { createTestServer } from '../../../test/ssr-server.ts'
-import { pollLoad, loadView } from './systemLoad.js'
+import { need } from '../../../test/need.ts'
+import { pollLoad, loadView } from './systemLoad.ts'
+import type { SystemLoad } from '../api/system.ts'
 
-const sample = (over = {}) => ({
+const sample = (over: Partial<SystemLoad> = {}): SystemLoad => ({
   at: '2026-10-19T12:00:00Z', cpus: 8, load: [59.3, 45.1, 32.1], cpuPercent: 87.4,
   split: { engine: 5, agents: 40, computers: 30, other: 12.4 },
   memory: { total: 16 * 2 ** 30, used: 10 * 2 ** 30, dyna: 4 * 2 ** 30 },
   top: [
     { id: 'ses_a', name: 'lead', address: 'dyna-agent:lead', room: 'dyna-agent', roomId: 'room_1', hue: 3, cores: 2.14 },
-    { id: 'wf_x', name: 'wf_x', cores: 0.5 },
+    { id: 'wf_x', name: 'wf_x', hue: 0, cores: 0.5 },
   ],
   dynaKnown: true, ...over,
 })
 
-async function render(t, props) {
+// What one test server renders the card with.
+interface CardProps {
+  load: SystemLoad
+}
+
+async function render(t: Parameters<typeof createTestServer>[0], props: CardProps) {
   const vite = await createTestServer(t)
   const { render } = await vite.ssrLoadModule('svelte/server')
   const { default: Card } = await vite.ssrLoadModule('/src/lib/rooms/SystemLoadCard.svelte')
@@ -40,7 +47,7 @@ test('polling reads every 5 s and stops on unmount', async () => {
   mock.timers.enable({ apis: ['setInterval'] })
   try {
     let reads = 0
-    const seen = []
+    const seen: number[] = []
     const stop = pollLoad(() => { reads++; return Promise.resolve(reads) }, (v) => seen.push(v))
     assert.equal(reads, 1)
     mock.timers.tick(5000)
@@ -58,13 +65,13 @@ test('polling reads every 5 s and stops on unmount', async () => {
 test('a slow answer that arrives after a newer one is dropped', async () => {
   mock.timers.enable({ apis: ['setInterval'] })
   try {
-    const answers = []
-    const seen = []
+    const answers: ((value: string) => void)[] = []
+    const seen: unknown[] = []
     const stop = pollLoad(() => new Promise((r) => answers.push(r)), (v) => seen.push(v))
     mock.timers.tick(5000)
-    answers[1]('new')
+    need(answers[1])('new')
     await setImmediate()
-    answers[0]('old')
+    need(answers[0])('old')
     await setImmediate()
     stop()
     assert.deepEqual(seen, ['new'])
@@ -76,8 +83,8 @@ test('a slow answer that arrives after a newer one is dropped', async () => {
 test('an answer after unmount is ignored', async () => {
   mock.timers.enable({ apis: ['setInterval'] })
   try {
-    let answer
-    const seen = []
+    let answer: (value: string) => void = () => {}
+    const seen: unknown[] = []
     const stop = pollLoad(() => new Promise((r) => { answer = r }), (v) => seen.push(v))
     stop()
     answer('late')

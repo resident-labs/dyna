@@ -4,7 +4,7 @@
   import Switch from '../ui/Switch.svelte'
   import Segmented from '../ui/Segmented.svelte'
   import { CHOICES, setting } from './look.ts'
-  import { look, choose } from './look.svelte.js'
+  import { look, choose } from './look.svelte.ts'
 </script>
 
 <div class="rows">
