@@ -1,4 +1,6 @@
 <script>
+  import { copyText } from '../../api.js'
+  import { tableCSV } from './tableCSV.ts'
   import { parseTable, TABLE_ROWS } from './preview.ts'
   let { text, delimiter = ',' } = $props()
   let header = $state(true)
@@ -10,6 +12,30 @@
   let headings = $derived(header ? parsed.rows[0] || [] : Array.from({ length: width }, (_, i) => `Column ${i + 1}`))
   let more = $derived(parsed.more || parsed.rows.length > TABLE_ROWS + (header ? 1 : 0))
   let rows = $derived(parsed.rows.slice(header ? 1 : 0, TABLE_ROWS + (header ? 1 : 0)))
+  let copyRows = $derived(header && parsed.rows.length ? [parsed.rows[0], ...rows] : rows)
+  let copyStatus = $state('')
+  let copyGeneration = 0
+  let copyTimer
+  $effect(() => {
+    text; delimiter; header
+    copyGeneration++
+    copyStatus = ''
+    return () => clearTimeout(copyTimer)
+  })
+  async function copyVisible() {
+    const current = ++copyGeneration
+    clearTimeout(copyTimer)
+    copyStatus = ''
+    try {
+      await copyText(tableCSV(copyRows, width))
+      if (current !== copyGeneration) return
+      copyStatus = 'Copied visible rows'
+    } catch {
+      if (current !== copyGeneration) return
+      copyStatus = 'Could not copy'
+    }
+    copyTimer = setTimeout(() => { copyStatus = '' }, 2000)
+  }
 </script>
 
 {#if parsed.error}
@@ -18,6 +44,8 @@
   <div class="table-info">
     <span>{rows.length.toLocaleString()}{more ? '+' : ''} rows <span class="dot">·</span> {width} columns</span>
     <label><input type="checkbox" bind:checked={header} /> First row is header</label>
+    <button class="copy" disabled={!copyRows.length} onclick={copyVisible} title="Copy only the displayed rows and columns">Copy visible rows as CSV</button>
+    <span class="copy-status" class:error={copyStatus === 'Could not copy'} role="status">{copyStatus}</span>
   </div>
   {#if more || parsed.columnsTruncated}<p class="limit">Showing up to {TABLE_ROWS} rows and 100 columns. Download the file for all data.</p>{/if}
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
@@ -36,6 +64,10 @@
 
 <style>
   .table-info { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 16px 20px; font-size: 12px; color: var(--muted); border-bottom: 1px solid var(--line-soft); }
+  .copy { min-height: 44px; padding: 8px 12px; border-radius: var(--r-xs); background: var(--raise); color: var(--ink); }
+  .copy:disabled { opacity: 0.5; }
+  .copy-status { color: var(--sage); align-self: center; }
+  .copy-status.error { color: var(--coral); }
   .dot { padding: 0 5px; color: var(--faint); }
   label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   input { accent-color: var(--iris); margin: 0; }
