@@ -22,3 +22,21 @@ test('a failed call panel shows its command, error text and exit code, never an 
   assert.match(bare, /<small[^>]*>failed<\/small>/)
   assert.doesNotMatch(bare, /class="cmd/)
 })
+
+test('copy details preserves captured text and reports clipboard failures', async () => {
+  const { readFileSync } = await import('node:fs')
+  const { call, runFunctions } = await import('../../../test/svelte-source.ts')
+  const source = readFileSync(new URL('./FailedCall.svelte', import.meta.url), 'utf8')
+  let copied = ''
+  const context: Record<string, unknown> = {
+    command: 'run first\n  then second', output: 'line one\n\tline two', exit: 7,
+    generation: 0, feedback: '', copyText: async (text: string) => { copied = text },
+  }
+  runFunctions(source, ['details', 'copy'], context)
+  await call(context, 'copy')
+  assert.equal(copied, 'Command:\nrun first\n  then second\n\nCaptured output:\nline one\n\tline two\n\nExit status: 7')
+  assert.equal(context.feedback, 'Copied')
+  context.copyText = async () => { throw new Error('denied') }
+  await call(context, 'copy')
+  assert.equal(context.feedback, 'Could not copy')
+})
