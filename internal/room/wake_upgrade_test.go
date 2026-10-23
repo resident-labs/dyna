@@ -11,7 +11,7 @@ func TestMessageWakeUpgrade(t *testing.T) {
 		name, input string
 		wake        bool
 	}{
-		{"legacy ordinary", `{"kind":"message"}`, true},
+		{"missing intent", `{"kind":"message"}`, false},
 		{"legacy instructions", `{"kind":"instructions"}`, false},
 		{"explicit quiet", `{"kind":"message","wake":false}`, false},
 		{"explicit wake", `{"kind":"message","wake":true}`, true},
