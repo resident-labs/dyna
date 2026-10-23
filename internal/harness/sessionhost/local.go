@@ -524,3 +524,23 @@ func (s *localSession) supervise(c *child) {
 	close(c.exited)
 	s.wake()
 }
+
+func (h *localHost) RetainedReference(_ context.Context, launch Launch) (processguard.Reference, bool, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	s := h.sessions[launch.id()]
+	if s == nil {
+		return processguard.Reference{}, false, nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.turn || s.child == nil {
+		return processguard.Reference{}, false, nil
+	}
+	select {
+	case <-s.child.exited:
+		return processguard.Reference{}, false, nil
+	default:
+	}
+	return s.child.guardRef, true, nil
+}

@@ -183,6 +183,19 @@ func (c *hostConn) loop() {
 			c.start(m)
 			continue
 		}
+		if m.Op == opRetained {
+			if m.Launch == nil {
+				c.reply(errors.New("launch missing"), message{})
+				continue
+			}
+			ref, ok, err := c.sv.host.RetainedReference(context.Background(), m.Launch.launch())
+			reply := message{}
+			if ok {
+				reply.Ref = &ref
+			}
+			c.reply(err, reply)
+			continue
+		}
 		if m.Op == opShutdown {
 			c.sv.shutdown()
 			c.reply(nil, message{})
