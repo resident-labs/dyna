@@ -17,7 +17,7 @@
   import { createWorkflowData } from './lib/workflows/workflowData.ts'
   import { onMount, tick } from 'svelte'
   import { errorText } from './lib/errorText.ts'
-  import { api, onEvent, engineCheck, openExternal, copyText, onUnauthorized, logout } from './api.js'
+  import { api, onEvent, engineCheck, openExternal, copyText, onUnauthorized, logout } from './api.ts'
   import RoomRail from './lib/rooms/RoomRail.svelte'
   import Sidebar from './lib/rooms/Sidebar.svelte'
   import CallButton from './lib/voice/CallButton.svelte'
@@ -108,6 +108,7 @@
   import { activeAgents, agentsHeader, roomsWorking } from './lib/rooms/agents.ts'
   import { roomIDPattern as ROOM, postIDPattern as POST } from './lib/ui/posts.ts'
   import type { Room, Member, Post, Feed as FeedPage, Question, Visual, ProfileChoice, Attachment } from './lib/api/room.ts'
+  import type { AttachmentRef } from './lib/api/engine.ts'
   import type { Session as SessionData, QueueItem, MemberProfile } from './lib/api/session.ts'
   import type { Goal } from './lib/api/goal.ts'
   import type { RunList, RunDetail, RunSummary } from './lib/api/workflow.ts'
@@ -123,7 +124,7 @@
   import type { Target as PaletteTarget } from './lib/ui/paletteTargets.ts'
   import type { ReviewerStatus } from './lib/api/change.ts'
   import type { Row as ChangeRow } from './lib/prs/prlist.ts'
-  import type { SyncRepository } from './lib/rooms/sync.ts'
+  import type { SyncStatus } from './lib/api/lanesync.ts'
   import type { CallRequest } from './lib/voice/callRequests.ts'
   import type { BulkAction, BulkValue } from './lib/sessions/bulkSessions.ts'
   import type { BootResult, RouteNotice } from './lib/settings/link.ts'
@@ -265,7 +266,9 @@
     agentGoals = Object.fromEntries(open.map((r, i) => [r.id, goalLists[i] ?? agentGoals[r.id] ?? []]))
     agentMembers = Object.fromEntries(open.map((r, i) => [r.id, reconcileRows(agentMembers?.[r.id] ?? [], lists[i] ?? agentMembers?.[r.id] ?? [])]))
   }) }
-  let feed = $state<FeedPage | null>(null)
+  // SavedFeed is the feed the page keeps: the server's page plus the client's history flag.
+  type SavedFeed = FeedPage & { historyLoaded?: boolean }
+  let feed = $state<SavedFeed | null>(null)
   let room = $derived(feed?.room ?? null)
   let feedAtBottom = $state(true)
   let members = $state<Member[]>([])
@@ -326,7 +329,7 @@
   let questionFocusRequest = $state(0)
   let questionsRequest = 0
   let pins = $state<Post[]>([]) // the room's pinned posts, newest pin first
-  let syncStatus = $state<Record<string, SyncRepository>>({}) // saved remote counts by repo path
+  let syncStatus = $state<SyncStatus>({}) // saved remote counts by repo path
   let syncRepo = $derived(room?.repo ? syncStatus[room.repo] ?? null : null) // {remotes, integration, operation?}
   let syncRemotes = $derived(remoteList(syncRepo?.remotes))
   let syncNote = $state('') // the last Refresh or Export answer that was not a start
@@ -1159,10 +1162,15 @@
         await reload.patch(kind, async (current: () => boolean) => {
           const selected = listPages[kind]
           if (!current() || id !== roomId || visit !== roomRequest || !selected?.older) return
-          const next = await methods[kind](id, selected.cursor)
-          if (!current() || id !== roomId || visit !== roomRequest) return
-          if (kind === 'goals') goals = applyListPage('goals', next, true)
-          if (kind === 'changes') changes = applyListPage('changes', next, true)
+          if (kind === 'goals') {
+            const next = await api.goals(id, selected.cursor)
+            if (!current() || id !== roomId || visit !== roomRequest) return
+            goals = applyListPage('goals', next, true)
+          } else if (kind === 'changes') {
+            const next = await api.changes(id, selected.cursor)
+            if (!current() || id !== roomId || visit !== roomRequest) return
+            changes = applyListPage('changes', next, true)
+          }
         })
       }
     } catch (e) { if (id === roomId && visit === roomRequest) { loadError = String(e); olderFailed = true } }
@@ -1186,6 +1194,7 @@
   })
 
   async function untrackPR(pr: ChangeRow) {
+    if (!pr.key) return
     try {
       await api.untrackPR(roomId, pr.key)
       say(`Dyna stopped watching PR #${pr.number}.`)
@@ -1197,8 +1206,9 @@
 
   // trackPR links a PR to a session from the pull-requests view.
   async function trackPR(number: number | string | undefined, m: Member) {
+    if (number === undefined || !m.id) return
     try {
-      await api.trackPR(roomId, m.id, number)
+      await api.trackPR(roomId, m.id, Number(number))
       say(`Dyna watches PR #${number} for ${m.name}.`)
     } catch (e) {
       say(errorText(e))
@@ -1215,6 +1225,7 @@
   }
 
   async function resumePR(pr: ChangeRow) {
+    if (!pr.key) return
     try {
       await api.resumePR(roomId, pr.key)
       say(`Dyna watches PR #${pr.number} again.`)
@@ -1258,7 +1269,7 @@
     }
     if (!feed || (direction === 'older' && !feed.earlier) || (direction === 'newer' && !feed.newer)) return false
     feedAtBottom = false
-    const cursor = direction === 'older' ? feed.cursor : direction === 'newer' ? feed.posts?.at(-1)?.id : target
+    const cursor = direction === 'older' ? feed.cursor ?? '' : direction === 'newer' ? feed.posts?.at(-1)?.id ?? '' : target ?? ''
     const request: EarlierLoad = { id, roomLoad, direction, promise: null }
     earlierLoad = request
     request.promise = (async () => {
@@ -1347,7 +1358,7 @@
   async function openMember(m: Member | null | undefined) {
     if (m && 'rootSeat' in m && m.rootSeat) { openSession(m); return }
     detailRequest++
-    if (!m || m.owner) return
+    if (!m || m.owner || !m.id) return
     card = m as Drill
     profile = null
     profileError = ''
@@ -1400,7 +1411,7 @@
   }
 
   // The root seat has no session of its own to send to; @root reaches whoever holds it.
-  async function sendToSession(text: string, atts: unknown[] = [], forwardOf = '') {
+  async function sendToSession(text: string, atts: AttachmentRef[] = [], forwardOf = '') {
     if (!drill) return
     const res = drill.rootSeat ? await api.send(roomId, '@root ' + text, '', atts, forwardOf) : await api.sendToSession(drill.id, text, atts, forwardOf)
     openSession(drill)
@@ -1445,14 +1456,14 @@
 
   // send goes through Go's one router: a "/<profile> <task>" draft starts a
   // session, anything else posts.
-  async function send(text: string, atts: Attachment[] = [], forwardOf = '', references: Reference[] = []) {
+  async function send(text: string, atts: AttachmentRef[] = [], forwardOf = '', references: Reference[] = []) {
     const sent = roomId
     const draftKey = roomId + ':' + view
     const res = await api.send(sent, text, reply?.id ?? '', atts, forwardOf, references)
     if (res?.kind === 'spawn') {
       drafts = { ...drafts, [draftKey]: '' }
-      fresh = res.spawn.member.id
-      setTimeout(() => { if (fresh === res.spawn.member.id) fresh = '' }, 4000)
+      fresh = res.spawn.member.id ?? ''
+      setTimeout(() => { if (fresh === (res.spawn.member.id ?? '')) fresh = '' }, 4000)
       loadMembers()
     } else if (res?.post?.message?.id) {
       reply = null
@@ -1468,10 +1479,11 @@
     const rid = roomId, visit = roomRequest, selection = sessionVisit
     reopening = m.id ?? ''
     try {
+      if (!m.id) return
       const member = await api.reopenSession(rid, m.id)
       if (rid !== roomId || visit !== roomRequest) return
       if (drill?.id === m.id && selection === sessionVisit) {
-        drill = member
+        drill = member as Drill
         if (session && session.member?.id === m.id) session = { ...session, member }
         await loadSession()
       }
@@ -1498,10 +1510,11 @@
     const rid = roomId, visit = roomRequest, selection = sessionVisit
     dismissing = m.id ?? ''
     try {
+      if (!m.id) return
       const member = await api.dismissSession(rid, m.id)
       if (rid !== roomId || visit !== roomRequest) return
       if (drill?.id === m.id && selection === sessionVisit) {
-        drill = member
+        drill = member as Drill
         if (session && session.member?.id === m.id) session = { ...session, member }
         await loadSession()
       }
@@ -1523,7 +1536,9 @@
   async function linkPRGoal(change: ChangeRow, goalId: string) {
     const id = roomId
     // A GitHub-only row has no record to hold its goal yet. Track it for the owner first.
+    if (change.number === undefined) return
     const row = change.key ? change : await api.trackPR(id, '', change.number)
+    if (!row.key) return
     await api.setPRGoal(id, row.key, goalId)
     if (id === roomId) await loadChanges()
   }
@@ -1738,6 +1753,7 @@
       return
     }
     const m = request.m
+    if (!m.id) return
     try {
       if (kind === 'stop') await api.stopSession(roomId, m.id)
       else if (kind === 'promote') await api.promoteSession(roomId, m.id)

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { fileURL } from '../../api.js'
+  import { fileURL } from '../../api.ts'
   import { dayLabel, short } from '../ui/format.ts'
   import EmptyState from '../ui/EmptyState.svelte'
   import Files from '../files/Files.svelte'

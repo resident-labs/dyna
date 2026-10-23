@@ -1,14 +1,14 @@
 // The app's one Voice call. It lives outside every view, so the call goes on
 // while the owner moves between rooms and views.
-import { api } from '../../api.js'
+import { api } from '../../api.ts'
 import { openAudio } from './audio.js'
 import { createCall } from './call.js'
 import { createCallRequests } from './callRequests.ts'
 import type { SettingItem } from '../api/settings.ts'
 
 async function configuredAudio(...[onFrame, receipts]: Parameters<typeof openAudio>) {
-  const items: SettingItem[] = await api.settings().catch(() => [])
-  const ducking = items?.some((item) => item.key === 'voice.ducking' && item.value === true) ?? false
+  const items: SettingItem[] = (await api.settings().catch(() => [])) ?? []
+  const ducking = items.some((item) => item.key === 'voice.ducking' && item.value === true)
   return openAudio(onFrame, receipts, ducking)
 }
 

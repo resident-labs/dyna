@@ -69,7 +69,7 @@ func testCalls(t *testing.T, readOnly bool) map[string]websvc.Call {
 
 func TestCallTablePreservesBrowserAPI(t *testing.T) {
 	calls := testCalls(t, false)
-	for _, path := range []string{"../../web/src/api.js", "../../web/src/lib/api/terminalTransport.ts"} {
+	for _, path := range []string{"../../web/src/api.ts", "../../web/src/lib/api/terminalTransport.ts"} {
 		source, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)

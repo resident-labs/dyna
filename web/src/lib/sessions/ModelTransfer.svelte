@@ -1,7 +1,7 @@
 <script lang="ts">
   import { dialog as modal } from '../ui/dialog.ts'
   import { onMount } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import type { Member, ProfileChoice } from '../api/room.ts'
   import type { TransferState } from '../api/session.ts'
 
@@ -26,13 +26,20 @@
       (!active && isCurrent(p) && (transfer?.phase === 'completed' || member.state !== 'error') && !['failed', 'cancelled'].includes(transfer?.phase ?? ''))
   }
 
+  // sessionId is the member's session id; every call below needs it.
+  function sessionId(): string | null {
+    return member.id ?? null
+  }
+
   async function refresh(force = false) {
     if (busy && !force) return
+    const id = sessionId()
+    if (!id) return
     const revision = transferRevision
     const serial = ++pollSerial
     const current = () => revision === transferRevision && serial === pollSerial && (force || !busy)
     try {
-      const next = await api.sessionTransfer(roomId, member.id)
+      const next = await api.sessionTransfer(roomId, id)
       if (current()) {
         transfer = next
         if (error === 'Couldn’t check transfer progress. Try again.') error = ''
@@ -55,11 +62,13 @@
   async function start(p: ProfileChoice) {
     if (unavailable(p)) return
     if (active) { await resume(); return }
+    const id = sessionId()
+    if (!id) return
     const revision = ++transferRevision
     pollSerial++
     busy = true; error = ''
     try {
-      const next = await api.transferSession(roomId, member.id, { profile: p.name, waitSeconds: 30, retry: ['failed', 'cancelled'].includes(transfer?.phase ?? '') })
+      const next = await api.transferSession(roomId, id, { profile: p.name, waitSeconds: 30, retry: ['failed', 'cancelled'].includes(transfer?.phase ?? '') })
       if (revision === transferRevision) transfer = next
     } catch (e) {
       if (revision === transferRevision) {
@@ -70,22 +79,26 @@
   }
   async function resume() {
     if (!transfer || busy) return
+    const id = sessionId()
+    if (!id) return
     const revision = ++transferRevision
     pollSerial++
     busy = true; error = ''
     try {
-      const next = await api.transferSession(roomId, member.id, { profile: transfer.profile, model: transfer.model || '', waitSeconds: 30 })
+      const next = await api.transferSession(roomId, id, { profile: transfer.profile, model: transfer.model || '', waitSeconds: 30 })
       if (revision === transferRevision) transfer = next
     } catch (e) { if (revision === transferRevision) error = 'Transfer paused. Select the same model to try again.' }
     finally { if (revision === transferRevision) busy = false }
   }
   async function cancel() {
     if (busy) return
+    const id = sessionId()
+    if (!id) return
     const revision = ++transferRevision
     pollSerial++
     busy = true; error = ''
     try {
-      const next = await api.cancelSessionTransfer(roomId, member.id)
+      const next = await api.cancelSessionTransfer(roomId, id)
       if (revision === transferRevision) transfer = next
     } catch (e) { if (revision === transferRevision) error = 'Couldn’t cancel. The transfer may have started.' }
     finally { if (revision === transferRevision) busy = false }

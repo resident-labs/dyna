@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { copyText } from '../../api.js'
+  import { copyText } from '../../api.ts'
   // What a failed call printed: its command, the tail of its output and its
   // exit code. A failed call never shows as an empty box.
   interface Props {

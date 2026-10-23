@@ -5,7 +5,7 @@
   // overlay is the "Starting stream…" / "Stream ended" note, which shows
   // when there is no stream to cover, and control cannot be on then.
   import { onMount } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { openStream, savedStreamMode } from './computerStream.js'
   import { stateWord, hintText, escTwice, viewKey, popOut } from './computers.js'
   import { statsLine } from './rfbStats.ts'

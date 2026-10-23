@@ -1,5 +1,5 @@
 import { writable } from 'svelte/store'
-import { api } from '../../api.js'
+import { api } from '../../api.ts'
 import type { HeldComment } from '../api/change.ts'
 import { errorText } from '../errorText.ts'
 

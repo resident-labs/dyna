@@ -5,7 +5,7 @@
   import { dialog as modal } from '../ui/dialog.ts'
   import ChangeDetail from './ChangeDetail.svelte'
   import ChangePolicy from './ChangePolicy.svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { normalizePolicy, type NormalizedPolicy } from './pr.ts'
   import type { ChangePolicy as RoomPolicy } from '../api/change.ts'
   import type { Row } from './prlist.ts'

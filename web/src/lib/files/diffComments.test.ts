@@ -41,7 +41,7 @@ test('PRFiles has the send bar with Send and Discard, and the API names the call
   const src = readFileSync(new URL('../prs/PRFiles.svelte', import.meta.url), 'utf8')
   assert.match(src, /<SendBar/)
   assert.match(readFileSync(new URL('../files/SendBar.svelte', import.meta.url), 'utf8'), /sendLabel\(pending\.length[\s\S]*Discard/)
-  assert.match(readFileSync(new URL('../../api.js', import.meta.url), 'utf8'), /sendDiffComments:.*app\.SendDiffComments/)
+  assert.match(readFileSync(new URL('../../api.ts', import.meta.url), 'utf8'), /sendDiffComments:.*app\.SendDiffComments/)
 })
 
 test('owner findings form the first group, "Your comments"', async () => {

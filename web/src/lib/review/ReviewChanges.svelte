@@ -5,7 +5,7 @@
   // Staged, unstaged and untracked files are separate groups, as in git; a
   // file with both kinds of change shows in both.
   import { onMount, untrack } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { ago } from '../ui/format.ts'
   import DiffView from '../files/DiffView.svelte'
   import SendBar from '../files/SendBar.svelte'

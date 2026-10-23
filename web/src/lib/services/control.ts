@@ -6,7 +6,7 @@ export interface ControlHost {
   repo: string
 }
 
-import type { api } from '../../api.js'
+import type { api } from '../../api.ts'
 
 // Select the real browser API methods so unsupported adapters fail the type check.
 export type ControlApi = Pick<typeof api, 'setReviewEnabled' | 'setServiceProfile' | 'setSetting' | 'runHook'>

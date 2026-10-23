@@ -3,7 +3,7 @@
   import { dialog as modal } from '../ui/dialog.ts'
   import Loading from './Loading.svelte'
   import { onMount, tick, untrack } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import ProfileEditor from './ProfileEditor.svelte'
   import HarnessIcon from './harnesses/HarnessIcon.svelte'
   import UsageMeter from './usage/UsageMeter.svelte'

@@ -1,6 +1,6 @@
 <script>
   import { untrack } from 'svelte'
-  import { fileURL } from '../../api.js'
+  import { fileURL } from '../../api.ts'
   import { human, extOf } from './attach.ts'
   import { previewKind, previewLabel } from './preview.ts'
   import VisualBanner from './VisualBanner.svelte'

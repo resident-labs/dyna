@@ -50,8 +50,8 @@ export async function bundle({ component = 'PRDetail', api = DETAIL_API, format 
       builder.onLoad({ filter: /[/\\]format\.ts$/ }, () => ({ contents: format, loader: 'ts' }))
       // Keep new production exports available when a fixture replaces only a few.
       builder.onResolve({ filter: /^actual-api:/ }, ({ path }) => ({ path: path.slice('actual-api:'.length), namespace: 'actual-api' }))
-      builder.onLoad({ filter: /.*/, namespace: 'actual-api' }, ({ path }) => ({ contents: readFileSync(path, 'utf8'), loader: 'js', resolveDir: resolve(path, '..') }))
-      builder.onLoad({ filter: /[/\\]api\.js$/, namespace: 'file' }, ({ path }) => ({ contents: `export * from ${JSON.stringify('actual-api:' + path)};\n${api}`, loader: 'js', resolveDir: resolve(path, '..') }))
+      builder.onLoad({ filter: /.*/, namespace: 'actual-api' }, ({ path }) => ({ contents: readFileSync(path, 'utf8'), loader: path.endsWith('.ts') ? 'ts' : 'js', resolveDir: resolve(path, '..') }))
+      builder.onLoad({ filter: /[/\\]api\.ts$/, namespace: 'file' }, ({ path }) => ({ contents: `export * from ${JSON.stringify('actual-api:' + path)};\n${api}`, loader: 'ts', resolveDir: resolve(path, '..') }))
     } }],
   })
   const output = result.outputFiles?.[0]

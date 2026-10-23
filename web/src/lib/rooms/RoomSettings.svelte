@@ -6,7 +6,7 @@
   // review field are one setting: the host keeps both in step, so the policy
   // reloads when the switch flips.
   import { tick, untrack } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { roomLabel } from '../ui/format.ts'
   import Switch from '../ui/Switch.svelte'
   import SettingsShell from '../ui/SettingsShell.svelte'
