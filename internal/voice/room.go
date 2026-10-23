@@ -99,7 +99,8 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 	open := false
 	replayed := r.replayCursor == ""
 	// relayed holds the turns in which root posted to @voice-call, so the
-	// turn's own result is not said again.
+	// turn's own result is not said again. A relay post carries its sender's
+	// turn, so it matches the turn's completion record.
 	relayed := map[int]bool{}
 	// One open request shares the budget, including every prefix and marker.
 	const budget = 4000
