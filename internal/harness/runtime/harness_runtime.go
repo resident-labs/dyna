@@ -144,7 +144,7 @@ func (a *Runtime) startPrivateLogin(id, exe string) (PrivateLogin, error) {
 	}
 	// Harnesses with a sign-in spec run without a terminal, so the owner can
 	// finish on any device.
-	if spec, ok := signInSpecs[n.Harness]; ok {
+	if spec, ok := signInSpecs[n.Harness]; ok && !openCodeKeySignIn(n) {
 		return a.startPrivateSignIn(id, n.Harness, spec, flow)
 	}
 	argv, err := a.privateSignInCommand(id, exe, flow)
