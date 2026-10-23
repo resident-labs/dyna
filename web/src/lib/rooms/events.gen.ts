@@ -39,6 +39,15 @@ export type AlertSeverity = "warning" | "critical"
 // ServiceRole is a named string type of an event payload.
 export type ServiceRole = "librarian" | "reviewer" | "helper"
 
+// ShellState is a named string type of an event payload.
+export type ShellState = "completed" | "failed" | "stopped"
+
+// RunState is a named string type of an event payload.
+export type RunState = "completed" | "failed" | "stopped"
+
+// TurnState is a named string type of an event payload.
+export type TurnState = "completed" | "failed" | "stopped"
+
 // RuleVerb is a named string type of an event payload.
 export type RuleVerb = "added" | "edited" | "removed"
 
@@ -306,11 +315,47 @@ export interface QuestionEvent {
   detail?: string
 }
 
-// EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | ReviewEvent | PREvent | SessionEvent | AlertEvent | ServiceFailedEvent | EngineEvent | QuestionEvent
+// ShellEvent is the payload of the shell/result events.
+export interface ShellEvent {
+  shellId: string
+  label: string
+  state: ShellState
+  exitCode?: number
+  durationMs?: number
+  output?: string[]
+  parent?: string
+  detail?: string
+}
 
-export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "low-disk" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "doctor" | "engine" | "root-flush" | "withdrawn"
+// RunEvent is the payload of the run/result events.
+export interface RunEvent {
+  runId: string
+  name: string
+  state: RunState
+  summary?: string
+  steps?: number
+  agents?: number
+  durationMs?: number
+  parent?: string
+  detail?: string
+}
+
+// TurnEvent is the payload of the turn/completed and turn/failed and turn/stopped events.
+export interface TurnEvent {
+  session: string
+  sessionId: string
+  turn: number
+  state: TurnState
+  summary?: string
+  error?: string
+  detail?: string
+}
+
+// EventPayload is the payload of any registered system event.
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | ReviewEvent | PREvent | SessionEvent | AlertEvent | ServiceFailedEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
+
+export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "low-disk" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "doctor" | "engine" | "root-flush" | "withdrawn" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -829,6 +874,56 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     audience: "room",
     text: "Question {questionId} was withdrawn: {reason}",
   },
+  {
+    family: "shell",
+    type: "result",
+    renderer: "ShellResultRow",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "session",
+    text: "Shell job {label} {state} with exit code {exitCode}.",
+  },
+  {
+    family: "run",
+    type: "result",
+    renderer: "RunResultCard",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "room",
+    text: "Workflow run {name} {state}.",
+  },
+  {
+    family: "turn",
+    type: "completed",
+    renderer: "TurnCompletionRow",
+    quiet: false,
+    wake: "target",
+    once: false,
+    audience: "room",
+    text: "{session} turn {turn} completed.",
+  },
+  {
+    family: "turn",
+    type: "failed",
+    renderer: "TurnCompletionRow",
+    quiet: false,
+    wake: "target",
+    once: false,
+    audience: "room",
+    text: "{session} turn {turn} failed.",
+  },
+  {
+    family: "turn",
+    type: "stopped",
+    renderer: "TurnCompletionRow",
+    quiet: false,
+    wake: "target",
+    once: false,
+    audience: "room",
+    text: "{session} turn {turn} stopped.",
+  },
 ]
 
 const P_R_TYPE: ReadonlySet<unknown> = new Set(["opened", "ready", "approved", "changes", "ci-failed", "ci-paused", "ci-passed", "returned", "merged", "closed", "comment", "held-comment", "review-assigned", "update"])
@@ -844,6 +939,9 @@ const INSTRUCTION_ACTION: ReadonlySet<unknown> = new Set(["items", "body", "remo
 const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine"])
 const ALERT_SEVERITY: ReadonlySet<unknown> = new Set(["warning", "critical"])
 const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "helper"])
+const SHELL_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
+const RUN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
+const TURN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
 const RULE_VERB: ReadonlySet<unknown> = new Set(["added", "edited", "removed"])
 const WORKTREE_REASON: ReadonlySet<unknown> = new Set(["not-merged", "dirty", "manual-handoff", "keep-failed", "other"])
 const HOOK_STATE: ReadonlySet<unknown> = new Set(["running", "passed", "failed", "error"])
@@ -1120,6 +1218,42 @@ export function isQuestionEvent(v: unknown): v is QuestionEvent {
     (v.detail === undefined || typeof v.detail === "string")
 }
 
+export function isShellEvent(v: unknown): v is ShellEvent {
+  return isRecord(v) &&
+    typeof v.shellId === "string" &&
+    typeof v.label === "string" &&
+    SHELL_STATE.has(v.state) &&
+    (v.exitCode === undefined || Number.isInteger(v.exitCode)) &&
+    (v.durationMs === undefined || Number.isInteger(v.durationMs)) &&
+    (v.output === undefined || isStringList(v.output)) &&
+    (v.parent === undefined || typeof v.parent === "string") &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isRunEvent(v: unknown): v is RunEvent {
+  return isRecord(v) &&
+    typeof v.runId === "string" &&
+    typeof v.name === "string" &&
+    RUN_STATE.has(v.state) &&
+    (v.summary === undefined || typeof v.summary === "string") &&
+    (v.steps === undefined || Number.isInteger(v.steps)) &&
+    (v.agents === undefined || Number.isInteger(v.agents)) &&
+    (v.durationMs === undefined || Number.isInteger(v.durationMs)) &&
+    (v.parent === undefined || typeof v.parent === "string") &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isTurnEvent(v: unknown): v is TurnEvent {
+  return isRecord(v) &&
+    typeof v.session === "string" &&
+    typeof v.sessionId === "string" &&
+    Number.isInteger(v.turn) &&
+    TURN_STATE.has(v.state) &&
+    (v.summary === undefined || typeof v.summary === "string") &&
+    (v.error === undefined || typeof v.error === "string") &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
 export function isEventPayload(family: string | undefined, type: string | undefined, v: unknown): v is EventPayload {
   if (family === "worktree" && type === "kept") return isWorktreeEvent(v)
   if (family === "hook" && type === "started") return isHookEvent(v)
@@ -1171,6 +1305,11 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "service" && type === "failed") return isServiceFailedEvent(v)
   if (family === "engine" && type === "root-flush") return isEngineEvent(v)
   if (family === "question" && type === "withdrawn") return isQuestionEvent(v)
+  if (family === "shell" && type === "result") return isShellEvent(v)
+  if (family === "run" && type === "result") return isRunEvent(v)
+  if (family === "turn" && type === "completed") return isTurnEvent(v)
+  if (family === "turn" && type === "failed") return isTurnEvent(v)
+  if (family === "turn" && type === "stopped") return isTurnEvent(v)
   return false
 }
 

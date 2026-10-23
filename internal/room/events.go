@@ -47,6 +47,10 @@ const (
 	ProducerReviewer EventProducer = "reviewer"
 	// ProducerHelper is a helper service.
 	ProducerHelper EventProducer = "helper"
+	// ProducerShell is the supervisor that watches a detached shell job.
+	ProducerShell EventProducer = "shell"
+	// ProducerWorkflow is the workflow runtime that ran a detached run.
+	ProducerWorkflow EventProducer = "workflow"
 )
 
 // Audience is who an event's post belongs to. A room event is part of the
@@ -80,6 +84,20 @@ const (
 const (
 	FamilyWorktree EventFamily = "worktree"
 	TypeKept       EventType   = "kept"
+
+	// The shell family reports how a detached shell job ended.
+	FamilyShell EventFamily = "shell"
+	// The run family reports how a detached workflow run ended.
+	FamilyRun EventFamily = "run"
+	// The turn family reports how a session turn ended.
+	FamilyTurn EventFamily = "turn"
+
+	// TypeTurnCompleted, TypeTurnFailed and TypeTurnStopped are the states of a
+	// finished turn. A shell and a run post their one type, TypeResult, with
+	// the state in their own payload.
+	TypeTurnCompleted EventType = "completed"
+	TypeTurnFailed    EventType = "failed"
+	TypeTurnStopped   EventType = "stopped"
 
 	FamilyHook  EventFamily = "hook"
 	TypeStarted EventType   = "started"
@@ -1115,6 +1133,144 @@ func (e ReviewEvent) eventSubject() string { return e.ChangeID + "\x00" + e.Head
 // post, and a different result on the same head posts again.
 func (e ReviewEvent) eventDedupe() string { return string(e.Kind) }
 
+// ShellState is how a detached shell job ended: with its command's exit
+// status, or stopped before it finished.
+type ShellState string
+
+// Shell states.
+const (
+	ShellCompleted ShellState = "completed"
+	ShellFailed    ShellState = "failed"
+	ShellStopped   ShellState = "stopped"
+)
+
+// shellStates lists every shell state the web needs as a union type.
+var shellStates = []ShellState{ShellCompleted, ShellFailed, ShellStopped}
+
+// ShellEvent is the result of a detached `dyna shell` job: the facts its row
+// shows, so the row never reads the post text. The job ID stays opaque: it is
+// the row's own key and the way to the stored output, never a label.
+type ShellEvent struct {
+	// ShellID is the shell store's job ID.
+	ShellID string `json:"shellId"`
+	// Label is the human label of the command: its first word, and the short
+	// description its caller gave.
+	Label string     `json:"label"`
+	State ShellState `json:"state"`
+	// ExitCode is the command's exit status, -1 when a stop ended the job
+	// before it finished.
+	ExitCode   int `json:"exitCode,omitempty"`
+	DurationMS int `json:"durationMs,omitempty"`
+	// Output is the last lines of the job's output. The row shows them behind
+	// its own toggle only, never in the room feed it is hidden from.
+	Output []string `json:"output,omitempty"`
+	// Parent is the session that started the job, empty when the owner did.
+	Parent string `json:"parent,omitempty"`
+	// Detail is the rest of the line an agent reads, when the state and the
+	// exit code do not say it: where the full output lives.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (ShellEvent) eventFamily() EventFamily { return FamilyShell }
+func (ShellEvent) eventType() EventType     { return TypeResult }
+func (s ShellEvent) eventSubject() string   { return s.ShellID }
+
+// eventDedupe keys one result per job, so a second notice of the same job
+// posts nothing.
+func (s ShellEvent) eventDedupe() string { return s.ShellID }
+
+// RunState is how a detached workflow run ended.
+type RunState string
+
+// Run states.
+const (
+	RunCompleted RunState = "completed"
+	RunFailed    RunState = "failed"
+	RunStopped   RunState = "stopped"
+)
+
+// runStates lists every run state the web needs as a union type.
+var runStates = []RunState{RunCompleted, RunFailed, RunStopped}
+
+// RunEvent is the result of a detached workflow run: the facts its card
+// shows, so the card never reads the post text.
+type RunEvent struct {
+	// RunID is the workflow's run ID: the card's key and the way to its view.
+	RunID string `json:"runId"`
+	// Name is the workflow's name, as its script wrote it.
+	Name  string   `json:"name"`
+	State RunState `json:"state"`
+	// Summary is the run's result as one short line, or the failure cause.
+	Summary string `json:"summary,omitempty"`
+	// Steps is how many agent calls the run recorded, and Agents how many
+	// worker sessions served them.
+	Steps      int `json:"steps,omitempty"`
+	Agents     int `json:"agents,omitempty"`
+	DurationMS int `json:"durationMs,omitempty"`
+	// Parent is the session that started the run, empty when an external
+	// orchestrator or the owner did.
+	Parent string `json:"parent,omitempty"`
+	// Detail is the rest of the line an agent reads: where the full output
+	// lives, or the error the summary cuts short.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (RunEvent) eventFamily() EventFamily { return FamilyRun }
+func (RunEvent) eventType() EventType     { return TypeResult }
+func (r RunEvent) eventSubject() string   { return r.RunID }
+func (r RunEvent) eventDedupe() string    { return r.RunID }
+
+// TurnState is how a session turn ended.
+type TurnState string
+
+// Turn states.
+const (
+	TurnCompleted TurnState = "completed"
+	TurnFailed    TurnState = "failed"
+	TurnStopped   TurnState = "stopped"
+)
+
+// turnStates lists every turn state the web needs as a union type.
+var turnStates = []TurnState{TurnCompleted, TurnFailed, TurnStopped}
+
+// TurnEvent is the end of one session turn. Its summary is the report the
+// session gave, which the completion row shows as its body.
+type TurnEvent struct {
+	// Session is the address of the session that ended the turn, as the post
+	// reports it, and SessionID its exact session.
+	Session   string    `json:"session"`
+	SessionID string    `json:"sessionId"`
+	Turn      int       `json:"turn"`
+	State     TurnState `json:"state"`
+	// Summary is the report the session gave, as markdown. A failed turn has
+	// the error instead.
+	Summary string `json:"summary,omitempty"`
+	// Error is why the turn failed, when it did.
+	Error string `json:"error,omitempty"`
+	// Detail is the rest of the line an agent reads: how to inspect the turn
+	// or recover from it.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (TurnEvent) eventFamily() EventFamily { return FamilyTurn }
+func (t TurnEvent) eventSubject() string   { return t.Session }
+
+// eventType reads the state: each end of a turn has its own type, so a card
+// and a feed view pick their tone from the registry.
+func (t TurnEvent) eventType() EventType {
+	switch t.State {
+	case TurnFailed:
+		return TypeTurnFailed
+	case TurnStopped:
+		return TypeTurnStopped
+	}
+	return TypeTurnCompleted
+}
+
+// eventDedupe keys one post per session and turn, so a retried report keeps
+// its post.
+func (t TurnEvent) eventDedupe() string { return strconv.Itoa(t.Turn) + "\x00" + string(t.State) }
+
 // EventSpec is one entry of the system event registry. The web app draws the
 // event with Renderer and reads its typed payload; Text is the one-line
 // summary that agents and `dyna room log` read.
@@ -1126,10 +1282,20 @@ type EventSpec struct {
 	// write the TypeScript types, so the two sides cannot drift.
 	Payload reflect.Type
 	Quiet   bool
+	// NoWatch keeps the event out of `dyna room watch` and its text log, even
+	// though agents receive it: a shell or run result lives in its own view.
+	NoWatch bool
 	Wake    WakeRule
+	// RootOnOwnerReport starts the root seat when the post is owed to the
+	// owner (Message.OwnerReport). A shell or run the root started wakes it on
+	// its result; a completed turn does not, and only a failure or a stop does.
+	RootOnOwnerReport bool
 	// Once drops a later post with the same key instead of appending it.
 	Once bool
 	Text string
+	// Blocks are the payload fields that the agent text appends after the
+	// template, in order. Empty means the default blocks: detail and logTail.
+	Blocks []string
 	// TextNoSubject is the summary for an event that names no subject, such
 	// as a cleanup failure that has no single tree.
 	TextNoSubject string
@@ -1637,6 +1803,70 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "Question {questionId} was withdrawn: {reason}",
 	},
+	// A shell result is the parent's own command, so it wakes the parent and
+	// reaches the owner feed as a row. It stays out of the room watch and out
+	// of the room chat: the session DM and the shell view carry it.
+	{
+		Family:            FamilyShell,
+		Type:              TypeResult,
+		Renderer:          "ShellResultRow",
+		Payload:           reflect.TypeOf(ShellEvent{}),
+		NoWatch:           true,
+		Wake:              WakeTarget,
+		Once:              true,
+		RootOnOwnerReport: true,
+		Audience:          AudienceSession,
+		Blocks:            []string{"output", "detail"},
+		Text:              "Shell job {label} {state} with exit code {exitCode}.",
+		Producers:         []EventProducer{ProducerShell},
+	},
+	// A workflow run result is the parent's work too, and stays out of the
+	// room watch for the same reason as a shell result.
+	{
+		Family:            FamilyRun,
+		Type:              TypeResult,
+		Renderer:          "RunResultCard",
+		Payload:           reflect.TypeOf(RunEvent{}),
+		NoWatch:           true,
+		Wake:              WakeTarget,
+		Once:              true,
+		RootOnOwnerReport: true,
+		Blocks:            []string{"summary", "detail"},
+		Text:              "Workflow run {name} {state}.",
+		Producers:         []EventProducer{ProducerWorkflow},
+	},
+	// The end of a turn is a row in the feed and a card in a session DM. A
+	// completed turn is quiet for root unless root asked for it; a failure and
+	// a stop wake root when they are owed to it (RootOnOwnerReport).
+	{
+		Family:   FamilyTurn,
+		Type:     TypeTurnCompleted,
+		Renderer: "TurnCompletionRow",
+		Payload:  reflect.TypeOf(TurnEvent{}),
+		Wake:     WakeTarget,
+		Blocks:   []string{"summary", "detail"},
+		Text:     "{session} turn {turn} completed.",
+	},
+	{
+		Family:            FamilyTurn,
+		Type:              TypeTurnFailed,
+		Renderer:          "TurnCompletionRow",
+		Payload:           reflect.TypeOf(TurnEvent{}),
+		Wake:              WakeTarget,
+		RootOnOwnerReport: true,
+		Blocks:            []string{"error", "summary", "detail"},
+		Text:              "{session} turn {turn} failed.",
+	},
+	{
+		Family:            FamilyTurn,
+		Type:              TypeTurnStopped,
+		Renderer:          "TurnCompletionRow",
+		Payload:           reflect.TypeOf(TurnEvent{}),
+		Wake:              WakeTarget,
+		RootOnOwnerReport: true,
+		Blocks:            []string{"summary", "detail"},
+		Text:              "{session} turn {turn} stopped.",
+	},
 }
 
 // eventEnum is a named string type whose values the web needs as a union.
@@ -1663,6 +1893,9 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(AlertSource("")), Values: enumValues(alertSources)},
 	{Type: reflect.TypeOf(AlertSeverity("")), Values: enumValues(alertSeverities)},
 	{Type: reflect.TypeOf(ServiceRole("")), Values: enumValues(serviceRoles)},
+	{Type: reflect.TypeOf(ShellState("")), Values: enumValues(shellStates)},
+	{Type: reflect.TypeOf(RunState("")), Values: enumValues(runStates)},
+	{Type: reflect.TypeOf(TurnState("")), Values: enumValues(turnStates)},
 	{Type: reflect.TypeOf(RuleVerb("")), Values: enumValues([]RuleVerb{RuleAdded, RuleEdited, RuleRemoved})},
 	{Type: reflect.TypeOf(WorktreeReason("")), Values: []string{
 		string(WorktreeNotMerged), string(WorktreeDirty), string(WorktreeManualHandoff), string(WorktreeKeepFailed), string(WorktreeOther),
@@ -1698,10 +1931,11 @@ var legacyFamilies = []string{
 	"voice",
 }
 
-// agentKinds are the posts a person or a session writes, and the session turn
-// results the engine records for them. A service's own alert is a session
-// post too: the service session writes it to its owner or parent.
-var agentKinds = []string{"message", "completed", "failed", "stopped", "service-alert"}
+// agentKinds are the posts a person or a session writes. A service's own alert
+// is a session post too: the service session writes it to its owner or parent.
+// Every other system post goes through PostEvent, so the turn, shell and run
+// results this PR types are no kinds here any more.
+var agentKinds = []string{"message", "service-alert"}
 
 // EventPost is the registry's description of the post one event makes. notify
 // reads it so a poster never chooses the post kind, text, quiet flag or wake.
@@ -1719,11 +1953,10 @@ func DescribeEvent(ev Event) (EventPost, bool) {
 	if !ok {
 		return EventPost{}, false
 	}
-	text := spec.Text
 	if ev.eventSubject() == "" && spec.TextNoSubject != "" {
-		text = spec.TextNoSubject
+		spec.Text = spec.TextNoSubject
 	}
-	return EventPost{Kind: string(spec.Family), Type: spec.Type, Text: eventText(text, ev), Quiet: spec.Quiet, Wake: spec.Wake}, true
+	return EventPost{Kind: string(spec.Family), Type: spec.Type, Text: eventText(spec, ev), Quiet: spec.Quiet, Wake: spec.Wake}, true
 }
 
 // eventSpecFor returns the registered spec of a family and type.
@@ -1777,10 +2010,18 @@ type PostEventInput struct {
 	Producer EventProducer
 	// SessionId binds participant addresses to exact sessions.
 	SessionIDs map[string]string
-	ReplyTo    string
+	// Conversation names the conversation the post belongs to, when the poster
+	// writes in a DM rather than in the room.
+	Conversation string
+	ReplyTo      string
 	// Attachments are the files the poster stored for this post, such as the
 	// full text of a truncated root handoff.
 	Attachments []Attachment
+	// OwnerReport marks the post as a report owed to the room owner, which
+	// root reads in its own feed.
+	OwnerReport bool
+	// Turn is the turn number of a turn-end event, when the poster knows it.
+	Turn int
 	// NoWake stores an informational post for the recipient's next turn.
 	NoWake bool
 }
@@ -1847,7 +2088,7 @@ func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
 	if ev.eventSubject() == "" && spec.TextNoSubject != "" {
 		template = spec.TextNoSubject
 	}
-	text := eventText(template, ev)
+	text := eventText(EventSpec{Text: template, Blocks: spec.Blocks}, ev)
 	if spec.Wake == WakeRootIfNeeded && !in.NeedsRoot {
 		spec.Wake = WakeNever
 	}
@@ -1856,19 +2097,22 @@ func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
 		id = eventID(ev)
 	}
 	msg, err := s.post(in.RoomID, PostInput{
-		ID:          id,
-		From:        from,
-		Kind:        string(spec.Family),
-		Notice:      EventNotice{Kind: string(spec.Type), Producer: in.Producer},
-		payload:     EventPayload{raw: payload},
-		To:          in.To,
-		Via:         in.Via,
-		NeedsRoot:   in.NeedsRoot,
-		SessionIDs:  in.SessionIDs,
-		ReplyTo:     in.ReplyTo,
-		Text:        text,
-		Attachments: in.Attachments,
-		Wake:        spec.Wake != WakeNever && !in.NoWake,
+		ID:           id,
+		From:         from,
+		Kind:         string(spec.Family),
+		Notice:       EventNotice{Kind: string(spec.Type), Producer: in.Producer},
+		payload:      EventPayload{raw: payload},
+		To:           in.To,
+		Via:          in.Via,
+		NeedsRoot:    in.NeedsRoot,
+		SessionIDs:   in.SessionIDs,
+		Conversation: Conversation(in.Conversation),
+		ReplyTo:      in.ReplyTo,
+		Text:         text,
+		Attachments:  in.Attachments,
+		Turn:         in.Turn,
+		OwnerReport:  in.OwnerReport,
+		Wake:         spec.Wake != WakeNever && !in.NoWake,
 	}, true)
 	if errors.Is(err, ErrPostIDConflict) && spec.Once {
 		return Message{}, nil
@@ -1896,23 +2140,53 @@ func mergeStepValues() []string {
 }
 
 // eventBlocks are the payload fields that the agent text appends as their own
-// paragraph after the spec's one-line template, in this order. A block that the
-// event leaves empty adds nothing, so the text has no empty section.
+// paragraph after the spec's one-line template, in this order. A spec with no
+// blocks of its own appends detail and logTail. A block that the event leaves
+// empty adds nothing, so the text has no empty section.
 var eventBlocks = []string{"detail", "logTail"}
 
 // eventText renders the spec's one-line template and appends the event's text
-// blocks. A block that only repeats the template adds nothing.
-func eventText(template string, ev Event) string {
-	text := renderEventText(template, ev)
+// blocks. A block that only repeats the template adds nothing. A block that is
+// a list of strings, such as the tail lines of a shell, keeps one line per
+// item.
+func eventText(spec EventSpec, ev Event) string {
+	text := renderEventText(spec.Text, ev)
+	blocks := spec.Blocks
+	if len(blocks) == 0 {
+		blocks = eventBlocks
+	}
 	value := reflect.ValueOf(ev)
-	for _, name := range eventBlocks {
-		block := eventFieldText(value, name)
-		if block == "" || strings.TrimSpace(block) == strings.TrimSpace(text) {
+	for _, name := range blocks {
+		block := strings.TrimSpace(eventBlockText(value, name))
+		if block == "" || block == strings.TrimSpace(text) {
 			continue
 		}
 		text += "\n\n" + block
 	}
 	return text
+}
+
+// eventBlockText formats one block field of an event. A list field, such as the
+// tail lines of a shell, is one line per item.
+func eventBlockText(value reflect.Value, name string) string {
+	typ := value.Type()
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		jsonName, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		if jsonName != name || value.Field(i).Kind() != reflect.Slice {
+			continue
+		}
+		items := value.Field(i)
+		if items.Len() == 0 {
+			return ""
+		}
+		lines := make([]string, items.Len())
+		for j := range lines {
+			lines[j] = fmt.Sprint(items.Index(j).Interface())
+		}
+		return strings.Join(lines, "\n")
+	}
+	return eventFieldText(value, name)
 }
 
 // checkRequired rejects an event with an empty field that its json tag does
@@ -1934,6 +2208,26 @@ func checkRequired(ev Event) error {
 		}
 	}
 	return nil
+}
+
+// EventFromPayload rebuilds a stored event from its family, type and payload
+// bytes, so a saved report plan replays exactly the event it prepared.
+func EventFromPayload(family, typ string, payload []byte) (Event, error) {
+	spec, ok := eventSpecFor(family, typ)
+	if !ok {
+		return nil, fmt.Errorf("event %s/%s is not registered in internal/room/events.go", family, typ)
+	}
+	ptr := reflect.New(spec.Payload)
+	if err := decodeEventPayload(payload, ptr.Interface()); err != nil {
+		return nil, err
+	}
+	// Elem gives the event value itself: an event is a value, and a pointer to
+	// one would break the reflection that reads its fields.
+	ev, ok := ptr.Elem().Interface().(Event)
+	if !ok {
+		return nil, fmt.Errorf("event %s/%s has no payload type", family, typ)
+	}
+	return ev, nil
 }
 
 // eventID is the post ID of an event: family, type, subject and the event's
@@ -1987,6 +2281,56 @@ func eventFieldText(value reflect.Value, name string) string {
 		}
 	}
 	return ""
+}
+
+// Shell returns the payload of a shell result: the facts its row shows.
+func (m Message) Shell() (ShellEvent, bool) {
+	if m.Kind != string(FamilyShell) || m.Notice.Kind != string(TypeResult) || len(m.Payload.raw) == 0 {
+		return ShellEvent{}, false
+	}
+	var ev ShellEvent
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.ShellID == "" {
+		return ShellEvent{}, false
+	}
+	return ev, true
+}
+
+// RunResult returns the payload of a workflow run result.
+func (m Message) RunResult() (RunEvent, bool) {
+	if m.Kind != string(FamilyRun) || m.Notice.Kind != string(TypeResult) || len(m.Payload.raw) == 0 {
+		return RunEvent{}, false
+	}
+	var ev RunEvent
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.RunID == "" {
+		return RunEvent{}, false
+	}
+	return ev, true
+}
+
+// TurnResult returns the payload of the end of a session turn, of any of its
+// three states.
+func (m Message) TurnResult() (TurnEvent, bool) {
+	if m.Kind != string(FamilyTurn) || len(m.Payload.raw) == 0 {
+		return TurnEvent{}, false
+	}
+	switch m.Notice.Kind {
+	case string(TypeTurnCompleted), string(TypeTurnFailed), string(TypeTurnStopped):
+	default:
+		return TurnEvent{}, false
+	}
+	var ev TurnEvent
+	if err := decodeEventPayload(m.Payload.raw, &ev); err != nil || ev.Session == "" || ev.Turn < 1 {
+		return TurnEvent{}, false
+	}
+	return ev, true
+}
+
+// decodeEventPayload decodes a stored event payload strictly, so an unknown
+// field is a failed read rather than a silent mismatch.
+func decodeEventPayload(raw []byte, out any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	return decoder.Decode(out)
 }
 
 // PR returns the payload of a PR event. It decodes the stored bytes strictly,

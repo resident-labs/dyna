@@ -26,7 +26,7 @@
   import { callLink, callTarget } from './lib/voice/callRequests.ts'
   import { GENERAL, VOICE, isFeedView, inView, homeView, inRoomFeed, feedModel, parentTrail, prepareFeedText } from './lib/rooms/feedViews.ts'
   import { seatDMConversation } from './lib/rooms/conversations.ts'
-  import { isShellResult } from './lib/rooms/feedRows.ts'
+  import { isShellResult, shellJobID } from './lib/rooms/feedRows.ts'
   import { HOOK_LOG_EVENT, hookLogFrom } from './lib/settings/hookLog.ts'
   import type { HookLogTarget } from './lib/settings/hookLog.ts'
   import { mergeSessionPage } from './lib/sessions/sessionPages.ts'
@@ -1160,7 +1160,7 @@
     clearItemLink()
     const post = (feed?.posts ?? []).find((p) => p.id === id)
     if (post && questionID(post)) { openQuestion(post); return }
-    if (post && isShellResult(post)) { router.openJob = post.from.slice('shell:'.length); router.view = 'jobs'; return }
+    if (post && isShellResult(post)) { router.openJob = shellJobID(post); router.view = 'jobs'; return }
     // A voice call line has no feed view; Voice's call widget shows it.
     if (post && inView(post, VOICE)) return
     router.view = post ? homeView(post) : GENERAL

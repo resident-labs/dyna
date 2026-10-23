@@ -88,11 +88,7 @@ func (s *Service) helperCompletion(meta subagent.Meta, turn subagent.Turn) (*sub
 			"Service helper finished, but its parent is unavailable. Full output: dyna subagent output "+meta.Address(), turn.N, true)
 	}
 	if resultPreview(turn.Result, 1) != "" {
-		text, err := s.boundSessionReport(meta.ID, turn.N, CompletionText(meta.Address(), turn.N, "completed", turn.Result, ""))
-		if err != nil {
-			return nil, err
-		}
-		return s.prepareCompletion(meta.RoomID, meta.Address(), []string{parent.ID}, "completed", text, turn.N, false)
+		return s.prepareTurnReport(meta, turn, []string{parent.ID}, false)
 	}
 	return s.prepareCompletion(meta.RoomID, meta.Address(), []string{parent.ID}, serviceAlertKind,
 		"Service turn produced no artifact: helper finished without posting findings to its parent.", turn.N, false)

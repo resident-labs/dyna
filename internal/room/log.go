@@ -74,13 +74,16 @@ func DefaultView(msg Message, roomName string) bool {
 }
 
 // agentPost keeps ordinary messages, including workflow worker messages.
-// System completions share result kinds, so those also require a session sender.
+// A shell or run result is not a watch line: its own view carries it.
 func agentPost(msg Message, roomName string) bool {
 	// A registered system event follows its spec: a quiet event is not agent
-	// input, and a non-quiet one is.
+	// input, and a non-quiet one is, unless its family keeps its own view.
 	if spec, ok := eventSpecFor(msg.Kind, msg.Notice.Kind); ok {
-		return !spec.Quiet
+		return !spec.Quiet && !spec.NoWatch
 	}
+	// TODO: legacy/shim remove later — a completion stored before the typed
+	// turn, shell and run events names its kind and its sender. Remove when
+	// retained room history ages out.
 	switch msg.Kind {
 	case "", "message":
 		return true

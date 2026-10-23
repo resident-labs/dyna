@@ -8,7 +8,7 @@ import { build } from 'esbuild'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { installDom, domNames } from '../prs/prDetailHarness.ts'
 import { need } from '../../../test/need.ts'
-import type { EventPayload } from './events.gen.ts'
+import type { EventPayload, HookEvent } from './events.gen.ts'
 import type { Message } from '../api/room.ts'
 
 // The registry test for the web side: every event in the generated registry
@@ -233,6 +233,58 @@ const fixtures: Record<string, EventPayload> = {
   },
   'engine/root-flush': { minutes: 15 },
   'question/withdrawn': { questionId: 'q1', post: 'msg_0123456789abcdef', by: 'dyna:notice-session', reason: 'session closed' },
+  'shell/result': {
+    shellId: 'sh_20261023-120000-0000000a',
+    label: 'go test · the room package',
+    state: 'failed',
+    exitCode: 1,
+    durationMs: 41_200,
+    output: ['--- FAIL: TestRoomPost (0.02s)', 'FAIL dyna-agent/internal/room 0.03s'],
+    parent: 'dyna:notice-contract',
+    detail: 'Full output: dyna shell tail sh_20261023-120000-0000000a',
+  },
+  'run/result': {
+    runId: 'wf_20261023-000001-aaaaaaaa',
+    name: 'review-prs',
+    state: 'completed',
+    summary: 'Reviewed 3 pull requests, filed 2 findings.',
+    steps: 3,
+    agents: 3,
+    durationMs: 184_000,
+    parent: 'dyna:notice-contract',
+    detail: 'Full output: dyna runs show wf_20261023-000001-aaaaaaaa',
+  },
+  'turn/completed': {
+    session: 'dyna:notice-merge',
+    sessionId: 'ses_20261023-120000-00000000',
+    turn: 4,
+    state: 'completed',
+    summary: 'PR 3b is open and ready for review. CI is green.',
+    detail: 'Full output: dyna subagent output dyna:notice-merge',
+  },
+  'turn/failed': {
+    session: 'dyna:notice-merge',
+    sessionId: 'ses_20261023-120000-00000000',
+    turn: 5,
+    state: 'failed',
+    error: 'the provider refused the request',
+    detail: 'Inspect: dyna subagent output ses_20261023-120000-00000000 --turn 5 --transcript',
+  },
+  'turn/stopped': {
+    session: 'dyna:notice-merge',
+    sessionId: 'ses_20261023-120000-00000000',
+    turn: 6,
+    state: 'stopped',
+    summary: 'Stopped after the owner asked for a wrap-up.',
+  },
+}
+
+// hookFixture reads a hook payload by name, so a test reads the fields of its
+// own event rather than the union of every payload.
+function hookFixture(type: 'started' | 'result'): HookEvent {
+  const payload = fixtures[`hook/${type}`]
+  assert.ok(payload && 'hook' in payload, `the hook/${type} fixture is missing`)
+  return payload
 }
 
 function postFor(family: string, type: string, payload: EventPayload, text = ''): Message {
@@ -293,7 +345,11 @@ function fixtureTip(payload: EventPayload): string {
   if ('service' in payload) return payload.error
   if ('minutes' in payload) return String(payload.minutes)
   if ('questionId' in payload) return payload.questionId
+  if ('shellId' in payload) return payload.label
+  if ('runId' in payload) return payload.name
   if ('session' in payload) {
+    // A turn end names its session and carries no session change of its own.
+    if (!('type' in payload)) return payload.session
     if (payload.type === 'account') return payload.to ?? payload.session
     if (payload.type === 'renamed' || payload.type === 'spawned') return payload.name ?? payload.session
     if (payload.type === 'seat') return payload.seat ?? payload.session
@@ -318,7 +374,7 @@ test('a post stored before the typed events still draws its family card', () => 
 })
 
 test('a hook card shows its state and opens the log of its own run', () => {
-  const payload = fixtures['hook/result']
+  const payload = hookFixture('result')
   assert.ok(payload && 'runId' in payload, 'the hook result fixture is missing')
   const post = postFor('hook', 'result', payload)
   const target = document.createElement('div')
@@ -343,7 +399,7 @@ test('a hook card shows its state and opens the log of its own run', () => {
   target.remove()
   // A start shows as running and offers no duration, so the card never claims
   // a time it does not know.
-  const running = postFor('hook', 'started', fixtures['hook/started'] ?? payload)
+  const running = postFor('hook', 'started', hookFixture('started'))
   const second = document.createElement('div')
   document.body.append(second)
   const mountedStart = web.mount(web.eventComponents.HookCard, { target: second, props: { post: running, notice: running.notice, surface: 'dm' } })
@@ -356,7 +412,7 @@ test('a hook card shows its state and opens the log of its own run', () => {
 })
 
 test('a folded hook card shows a run that is still going and opens its log', () => {
-  const payload = fixtures['hook/result']
+  const payload = hookFixture('result')
   assert.ok(payload && 'runId' in payload, 'the hook result fixture is missing')
   const post = postFor('hook', 'result', payload)
   const target = document.createElement('div')
@@ -380,7 +436,7 @@ test('a folded hook card shows a run that is still going and opens its log', () 
 })
 
 test('a folded hook card keeps its count and last time outside the name', () => {
-  const payload = fixtures['hook/result']
+  const payload = hookFixture('result')
   assert.ok(payload && 'runId' in payload, 'the hook result fixture is missing')
   const post = postFor('hook', 'result', payload)
   const target = document.createElement('div')

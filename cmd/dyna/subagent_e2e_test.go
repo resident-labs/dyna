@@ -1195,16 +1195,20 @@ esac
 				if !ok {
 					t.Fatal("room watch ended early")
 				}
-				if msg.Kind == "completed" && (msg.From == parent.Address || msg.From == childAddr) {
+				report, typed := msg.TurnResult()
+				if !typed || report.State != room.TurnCompleted || (report.Session != parent.Address && report.Session != childAddr) {
+					continue
+				}
+				{
 					to, via := roomName, "@root"
-					if msg.From == childAddr {
+					if report.Session == childAddr {
 						to, via = parent.Address, "@parent"
 					}
 					if msg.Turn != 1 || len(msg.To) != 1 || msg.To[0] != to || len(msg.Via) != 1 || msg.Via[0] != via {
 						t.Fatalf("automatic completion has the wrong report recipient: %+v", msg)
 					}
-					seen[msg.From] = true
-					if msg.From == parent.Address {
+					seen[report.Session] = true
+					if report.Session == parent.Address {
 						// The parent's completion does not imply its child has started.
 						// Wait for startup acceptance before posting: a post drained
 						// into the startup prompt cannot interrupt the mock's hold.

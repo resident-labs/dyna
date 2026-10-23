@@ -182,7 +182,7 @@ func engineRecoveryCompletions(t *testing.T, service *notify.Service, roomID str
 	}
 	var completions []room.Message
 	for _, post := range posts {
-		if post.From == session.Address() && post.Turn == 1 && post.Kind == "completed" {
+		if ev, ok := post.TurnResult(); ok && ev.SessionID == session.ID && ev.Turn == 1 && ev.State == room.TurnCompleted {
 			completions = append(completions, post)
 		}
 	}

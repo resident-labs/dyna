@@ -57,7 +57,8 @@ func TestDelegatePostsOnceAndNeverRelaysRootsReport(t *testing.T) {
 	if err != nil || got != workStarted {
 		t.Fatalf("dispatch: %q, %v", got, err)
 	}
-	if _, err := rooms.Post(work.ID, room.PostInput{From: "work:root", To: []string{"work"}, Kind: "completed", Text: "work:root turn 1 completed. Result: CI is green."}); err != nil {
+	if _, err := rooms.PostEventInput(room.PostEventInput{RoomID: work.ID, OwnerReport: true, To: []string{"work"},
+		Event: room.TurnEvent{Session: "work:root", SessionID: "ses_root", Turn: 1, State: room.TurnCompleted, Summary: "CI is green."}}); err != nil {
 		t.Fatal(err)
 	}
 	msgs, err := rooms.Messages(work.ID)
