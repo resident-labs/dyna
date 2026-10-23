@@ -1,4 +1,4 @@
-import type { MachineRole, MachineStatus, MachineSummary } from '../api/machine.ts'
+import type { MachineCIRun, MachineRole, MachineStatus, MachineSummary } from '../api/machine.ts'
 
 // roleLabel is the short name a role chip shows.
 export function roleLabel(role: MachineRole): string {
@@ -31,7 +31,12 @@ export function count(n: number, noun: string): string {
 export function summaryParts(machine: MachineSummary): string[] {
   const parts: string[] = []
   if (machine.agents !== undefined) parts.push(count(machine.agents, 'agent'))
-  if (machine.roles.includes('ci')) parts.push(machine.ci ? `CI ${machine.ci.used}/${machine.ci.slots} slots` : `CI ${machine.ciSlots} slots`)
+  // A disabled machine takes no CI work, so it reports no slots at all. The
+  // noun follows the total: "CI 1 slot", "CI 6/16 slots".
+  if (machine.roles.includes('ci')) {
+    const slots = machine.ci ? `CI ${machine.ci.used}/${count(machine.ci.slots, 'slot')}` : `CI ${count(machine.ciSlots, 'slot')}`
+    parts.push(machine.enabled ? slots : 'CI off')
+  }
   if (machine.computers !== undefined) parts.push(count(machine.computers, 'computer'))
   return parts
 }
@@ -39,6 +44,18 @@ export function summaryParts(machine: MachineSummary): string[] {
 // summaryText is the row's one line of counts.
 export function summaryText(machine: MachineSummary): string {
   return summaryParts(machine).join(' · ')
+}
+
+// ciRunText names one CI run the way its row shows it: the PR's number and
+// title, so a reader never looks a number up.
+export function ciRunText(run: Pick<MachineCIRun, 'number' | 'title'>): string {
+  return run.title ? `#${run.number} ${run.title}` : `#${run.number}`
+}
+
+// ciRunDetail is the run's second line: the suites it checks, when it started
+// them, and whether it is a merge trial.
+export function ciRunDetail(run: Pick<MachineCIRun, 'suites'>): string {
+  return run.suites?.length ? run.suites.join(' · ') : ''
 }
 
 // statusCounts counts machines by status, in the order the subline shows them.
