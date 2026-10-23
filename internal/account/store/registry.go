@@ -403,17 +403,44 @@ func mergeMetadata(meta Metadata, prior []byte) ([]byte, error) {
 			return nil, err
 		}
 	}
-	typ := reflect.TypeOf(meta)
-	for i := 0; i < typ.NumField(); i++ {
-		name, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
-		delete(fields, name)
-	}
 	raw, err := json.Marshal(meta)
 	if err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(raw, &fields); err != nil {
+	var next map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &next); err != nil {
 		return nil, err
+	}
+	typ := reflect.TypeOf(meta)
+	for i := 0; i < typ.NumField(); i++ {
+		field := typ.Field(i)
+		name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
+		replacement, present := next[name]
+		for key, retained := range fields {
+			if !strings.EqualFold(key, name) {
+				continue
+			}
+			delete(fields, key)
+			if !present {
+				continue
+			}
+			// Keep the raw value of an unchanged field. Re-encoding an
+			// observation would discard nested members this release cannot read.
+			value := reflect.New(field.Type)
+			if err := json.Unmarshal(retained, value.Interface()); err != nil {
+				return nil, err
+			}
+			known, err := json.Marshal(value.Interface())
+			if err != nil {
+				return nil, err
+			}
+			if bytes.Equal(known, next[name]) {
+				replacement = retained
+			}
+		}
+		if present {
+			fields[name] = replacement
+		}
 	}
 	return json.Marshal(fields)
 }
