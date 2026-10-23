@@ -98,8 +98,8 @@ func TestRootAndReviewerStartsCreateNoGoal(t *testing.T) {
 	}
 }
 
-// Root holds no goals, so a start from root's session gives the child a goal of
-// its own, even when root still holds a goal that the old lookup would find.
+// Root holds no goals, so an implicit lookup gives the child a goal of its own.
+// An explicit --under still selects its goal, and a bad ID is still an error.
 func TestRootStartNeverJoinsARootGoal(t *testing.T) {
 	m := &Manager{Store: &Store{Root: filepath.Join(t.TempDir(), "sessions")}}
 	rootID := "ses_20261022-000000-rrrrrrrr"
@@ -111,15 +111,28 @@ func TestRootStartNeverJoinsARootGoal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, under := range []string{"", rootGoal.ID} {
-		meta := Meta{ID: "child-" + under, RoomID: "r", ParentSession: rootID}
-		goalID, itemID, err := m.addSpawnGoal(meta, under, "Child work", "Brief")
-		if err != nil {
-			t.Fatal(err)
-		}
-		g, err := store.Get("r", goalID)
-		if err != nil || itemID != "" || goalID == rootGoal.ID || !g.HeldBy(meta.ID) {
-			t.Fatalf("under=%q start: goal=%q item=%q err=%v", under, goalID, itemID, err)
+	// An implicit lookup finds no root goal.
+	meta := Meta{ID: "child", RoomID: "r", ParentSession: rootID}
+	goalID, itemID, err := m.addSpawnGoal(meta, "", "Child work", "Brief")
+	if err != nil || itemID != "" || goalID == rootGoal.ID {
+		t.Fatalf("implicit start: goal=%q item=%q err=%v", goalID, itemID, err)
+	}
+	if g, err := store.Get("r", goalID); err != nil || !g.HeldBy(meta.ID) {
+		t.Fatalf("implicit goal = %+v, err=%v", g, err)
+	}
+	// An explicit --under names a goal an agent holds, so the child joins it.
+	leadGoal, err := store.Add("r", "owner", goals.Input{Text: "Lead work", Holders: []string{"lead"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalID, itemID, err = m.addSpawnGoal(Meta{ID: "child-2", RoomID: "r", ParentSession: rootID}, leadGoal.ID, "Child work", "Brief")
+	if err != nil || itemID == "" || goalID != leadGoal.ID {
+		t.Fatalf("explicit agent goal: goal=%q item=%q err=%v", goalID, itemID, err)
+	}
+	// A goal root holds, and a bad ID, are both refused.
+	for _, under := range []string{rootGoal.ID, "g99"} {
+		if _, _, err := m.addSpawnGoal(Meta{ID: "child-3", RoomID: "r", ParentSession: rootID}, under, "Child work", "Brief"); err == nil {
+			t.Fatalf("under=%q accepted", under)
 		}
 	}
 	if items, err := store.Items("r", rootGoal.ID); err != nil || len(items) != 0 {

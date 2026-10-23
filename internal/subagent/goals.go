@@ -18,8 +18,9 @@ func (m *Manager) goalStore() *goals.Store {
 
 // addSpawnGoal creates the work a new session holds: a delegation item on
 // an effective goal for a child, or a goal of its own when none is eligible.
-// Service sessions hold no goals, and root holds no goals either, so a start
-// from root never joins a root goal.
+// Service sessions hold no goals, and root holds no goals either, so an
+// implicit lookup never picks a root goal. An explicit --under still selects
+// its goal, so a bad ID stays an error.
 func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string) (goalID, itemID string, err error) {
 	if meta.Service {
 		return "", "", nil
@@ -29,12 +30,16 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string) (goalID, it
 		setter = "owner"
 	}
 	store := m.goalStore()
-	if (meta.ParentSession != "" || under != "") && !m.isRootSession(meta.ParentSession) {
+	implicit := meta.ParentSession != "" && !m.isRootSession(meta.ParentSession)
+	if implicit || under != "" {
 		goal, err := store.EffectiveGoal(meta.RoomID, meta.ParentSession, under)
 		if err != nil {
 			return "", "", err
 		}
-		if goal != "" && !m.rootHeld(meta.RoomID, goal) {
+		if goal != "" {
+			if m.rootHeld(meta.RoomID, goal) {
+				return "", "", fmt.Errorf("goal %s is held by root, which holds no goals; start without --under, or use a goal an agent holds", goal)
+			}
 			itemText := text
 			if brief != "" {
 				itemText += "\n\nBrief:\n" + brief
