@@ -1,11 +1,13 @@
 package testsafe
 
 import (
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A test binary that starts with real data, config, cache and runtime
@@ -68,5 +70,63 @@ func TestUnmarkedRootIsIgnored(t *testing.T) {
 	cmd.Env = append(os.Environ(), "TESTSAFE_CHILD=3", rootEnv+"=/")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("child test binary: %v\n%s", err, out)
+	}
+}
+
+// A later test binary removes the folders of test binaries that have ended,
+// and keeps the folder of one that still runs, a folder that is too young to
+// judge, and a folder of an older Dyna build.
+func TestPruneStaleRemovesEndedBinaryFolders(t *testing.T) {
+	root := t.TempDir()
+	made := func(name string, age time.Duration, mode fs.FileMode) string {
+		dir := filepath.Join(root, name)
+		frozen := filepath.Join(dir, "dyna", "harnesses", "1.0.0", "bin")
+		if err := os.MkdirAll(frozen, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(frozen, "grok-native"), []byte("payload"), 0o400); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(filepath.Dir(frozen), mode); err != nil {
+			t.Fatal(err)
+		}
+		old := time.Now().Add(-age)
+		if err := os.Chtimes(dir, old, old); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	ended := made(tempPrefix+"424242-1234", 2*staleAfter, 0o500)
+	running := made(tempPrefix+"434343-1234", 2*staleAfter, 0o700)
+	young := made(tempPrefix+"444444-1234", 0, 0o700)
+	legacy := made(tempPrefix+"123456789", 2*staleAfter, 0o700)
+	pruneStale(root, time.Now(), func(pid int) bool { return pid == 434343 })
+	for _, dir := range []string{ended} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("a folder of an ended test binary stayed: %v", err)
+		}
+	}
+	for _, dir := range []string{running, young, legacy} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Fatalf("a folder that must stay was removed: %v", err)
+		}
+	}
+}
+
+func TestFolderPID(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		pid  int
+		ok   bool
+	}{
+		{tempPrefix + "4242-1234", 4242, true},
+		{tempPrefix + "123456789", 0, false},
+		{tempPrefix + "nan-1234", 0, false},
+		{"other-4242-1234", 0, false},
+	} {
+		pid, ok := folderPID(tt.name)
+		if pid != tt.pid || ok != tt.ok {
+			t.Fatalf("folderPID(%q) = %d, %v", tt.name, pid, ok)
+		}
 	}
 }

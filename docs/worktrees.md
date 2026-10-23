@@ -57,6 +57,9 @@ its clean, merged worktrees.
 The `dyna-engine` host runs maintenance when it starts and once per hour.
 It checks free space each minute on the worktree root and `/tmp`.
 When free space falls below `worktrees.minFreeBytes`, maintenance runs immediately.
+A file system that lives in memory, such as a RAM-backed `/tmp`, is judged
+against its own size instead: it is low under 15 percent free.
+The alert names the path that is low.
 One owner alert reports space freed and the reasons other directories were kept.
 The default threshold is 10 GiB. Change it with:
 

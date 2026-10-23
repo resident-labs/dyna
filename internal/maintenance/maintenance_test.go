@@ -29,22 +29,25 @@ func TestSchedulerHourlyAndPressureEpisodes(t *testing.T) {
 		if !strings.Contains(text, "42 bytes") || !strings.Contains(text, "dirty: 2") {
 			t.Fatal(text)
 		}
+		if !strings.Contains(text, "Disk space is low in /tmp") {
+			t.Fatalf("the alert must name the low path: %s", text)
+		}
 		return nil
 	}
 	for _, tick := range []struct {
 		after        time.Duration
-		pressure     bool
+		low          []string
 		runs, alerts int
 	}{
-		{0, false, 1, 0},
-		{time.Minute, false, 1, 0},
-		{2 * time.Minute, true, 2, 1},
-		{3 * time.Minute, true, 2, 1},
-		{62 * time.Minute, true, 3, 1},
-		{63 * time.Minute, false, 3, 1},
-		{64 * time.Minute, true, 4, 2},
+		{0, nil, 1, 0},
+		{time.Minute, nil, 1, 0},
+		{2 * time.Minute, []string{"/tmp"}, 2, 1},
+		{3 * time.Minute, []string{"/tmp"}, 2, 1},
+		{62 * time.Minute, []string{"/tmp"}, 3, 1},
+		{63 * time.Minute, nil, 3, 1},
+		{64 * time.Minute, []string{"/tmp"}, 4, 2},
 	} {
-		if err := s.tick(context.Background(), now.Add(tick.after), tick.pressure, run, alert); err != nil {
+		if err := s.tick(context.Background(), now.Add(tick.after), tick.low, run, alert); err != nil {
 			t.Fatal(err)
 		}
 		if runs != tick.runs || alerts != tick.alerts {
@@ -66,10 +69,10 @@ func TestSchedulerReportsPartialFailureOnce(t *testing.T) {
 		return nil
 	}
 	now := time.Now()
-	if err := s.tick(context.Background(), now, true, run, alert); !errors.Is(err, failure) {
+	if err := s.tick(context.Background(), now, []string{"/tmp"}, run, alert); !errors.Is(err, failure) {
 		t.Fatal(err)
 	}
-	if err := s.tick(context.Background(), now.Add(time.Minute), true, run, alert); err != nil {
+	if err := s.tick(context.Background(), now.Add(time.Minute), []string{"/tmp"}, run, alert); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 {
@@ -77,15 +80,33 @@ func TestSchedulerReportsPartialFailureOnce(t *testing.T) {
 	}
 }
 
-func TestFreeBytesForMissingManagedRoot(t *testing.T) {
+func TestFreeSpaceForMissingManagedRoot(t *testing.T) {
 	root := t.TempDir()
-	if _, err := freeBytes(root); err != nil {
+	if _, err := freeSpace(root); err != nil {
 		t.Fatal(err)
 	}
 	// A missing root must resolve to its nearest existing parent without error.
 	// The value is not asserted: a full disk legitimately reports zero free bytes.
-	if _, err := freeBytes(root + "/not-created/yet"); err != nil {
+	if _, err := freeSpace(root + "/not-created/yet"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A small in-memory file system is judged against its own size: the owner's
+// absolute minimum free space would keep /tmp under pressure forever.
+func TestLowSpaceJudgesInMemoryFileSystemsByShare(t *testing.T) {
+	const minFree = 10 << 30
+	tmpfs := space{Free: 8 << 30, Total: 16 << 30, InMemory: true}
+	if lowSpace(tmpfs, minFree) {
+		t.Fatalf("%d free of %d is not under pressure", tmpfs.Free, tmpfs.Total)
+	}
+	for _, low := range []space{
+		{Free: 2 << 30, Total: 16 << 30, InMemory: true},
+		{Free: 8 << 30, Total: 900 << 30, InMemory: false},
+	} {
+		if !lowSpace(low, minFree) {
+			t.Fatalf("%+v must be under pressure", low)
+		}
 	}
 }
 

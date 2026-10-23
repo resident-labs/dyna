@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io/fs"
 	"os"
+	"os/exec"
 	"testing"
 )
 
@@ -23,5 +24,24 @@ func TestReadUsesTheGivenTree(t *testing.T) {
 	}
 	if _, err := Read(root, 8); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("Read of a missing process = %v; want a missing file", err)
+	}
+}
+
+// A running process is alive, and a PID whose process has ended is not, so a
+// folder named after a test binary outlives that binary.
+func TestAliveOfThisProcessAndAFinishedOne(t *testing.T) {
+	if !Alive(os.Getpid()) {
+		t.Fatal("this process must be alive")
+	}
+	cmd := exec.Command("true")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if Alive(pid) {
+		t.Fatalf("pid %d ended, but it is reported alive", pid)
 	}
 }
