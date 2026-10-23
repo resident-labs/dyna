@@ -68,7 +68,13 @@
         <Chip tone={p.state === 'MERGED' ? 'iris' : p.state === 'OPEN' ? 'sage' : ''} outline={p.state === 'CLOSED'}>{p.isDraft ? 'Draft' : p.state[0] + p.state.slice(1).toLowerCase()}</Chip>
       </div>
     {/each}
-    {#if !it.workingSession && !prs.length}<p class="quiet">No agent is working on this yet.</p>{/if}
+    {#if it.fixPR}
+      <div class="link">
+        <button class="name" onclick={() => onpr(it.fixPR ?? 0)}>Fix in #{it.fixPR}</button>
+        <Chip tone="sage">Open</Chip>
+      </div>
+    {/if}
+    {#if !it.workingSession && !prs.length && !it.fixPR}<p class="quiet">No agent is working on this yet.</p>{/if}
     <div class="acts">
       {#if onmention}<MentionInChat onmention={() => onmention?.({ kind: 'issue', number: it.number, title: it.title, state: it.state, url: it.url })} />{/if}
       <button class="act" onclick={() => openExternal(it.url)}>Open on GitHub</button>

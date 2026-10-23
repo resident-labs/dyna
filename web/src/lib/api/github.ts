@@ -26,6 +26,8 @@ export interface GitHubItem {
   workingSessionName?: string
   workingSessionLive: boolean
   linkedPRs?: GitHubLinkedPR[]
+  // fixPR is the open PR that closes this room issue on merge; absent for GitHub rows.
+  fixPR?: number
   group?: string
   number: number
   title: string
