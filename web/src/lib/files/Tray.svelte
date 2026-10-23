@@ -73,9 +73,9 @@
     position: relative;
     display: flex;
     align-items: center;
-    gap: 10px;
-    width: 220px;
-    padding: 8px 48px 8px 8px;
+    gap: 6px;
+    max-width: min(260px, 100%);
+    padding: 5px 44px 5px 6px;
     background: var(--side);
     border: 1px solid var(--line-soft);
     border-radius: 8px;
@@ -83,16 +83,16 @@
   .chip.failed { border-color: color-mix(in srgb, var(--coral) 45%, transparent); }
   .chip.loading { opacity: 0.7; }
   .thumbnail img {
-    width: 44px;
-    height: 44px;
+    width: 28px;
+    height: 28px;
     object-fit: cover;
     border-radius: 5px;
     flex: none;
     background: #18171a;
   }
   .ext {
-    width: 44px;
-    height: 44px;
+    width: 28px;
+    height: 28px;
     flex: none;
     border-radius: 5px;
     background: var(--raise);
@@ -110,11 +110,11 @@
   .act { font-size: 12px; font-weight: 600; color: var(--hue-1); flex: none; }
   .x {
     position: absolute;
+    width: 36px;
+    height: 36px;
     top: 50%;
     right: 2px;
     transform: translateY(-50%);
-    width: 44px;
-    height: 44px;
     border-radius: 50%;
     display: grid;
     place-items: center;
@@ -127,4 +127,5 @@
   .x:active {
     background: var(--select);
 }
+  @media (max-width: 760px) { .chip { min-height: 44px; } .x { width: 44px; height: 44px; } }
 </style>
