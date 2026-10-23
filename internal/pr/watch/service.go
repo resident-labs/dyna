@@ -877,9 +877,6 @@ func assignment(r Record) ReviewAssignment {
 	return ReviewAssignment{ChangeID: changeID(r), Kind: changeKind(r), Repo: r.Repo, Branch: r.Branch, Base: r.Base, Head: r.Head, URL: r.URL, Notes: r.Notes}
 }
 func reviewTask(r Record) string {
-	if changeKind(r) == "local" {
-		r.ReviewPublishing = PublishingLocal
-	}
 	base := fmt.Sprintf("Review %s at head %s. Do not merge or push changes.\n", changeLocation(r), r.Head)
 	command := "dyna git change verdict " + shellquote.Quote(changeID(r))
 	if changeKind(r) == "github" {
@@ -892,12 +889,8 @@ func reviewTask(r Record) string {
 	input, _ := json.Marshal(assignment(r))
 	base += "Assignment input: " + string(input) + "\n"
 	base += "You may start at most 3 live helper sessions, one level deep, using your own profile or a cheaper profile (higher cost-efficiency). Helpers report findings to you. Only you may record this assignment's verdict. Keep this reviewer session open between reviews.\n"
-	if PublishingMode(r.ReviewPublishing) == PublishingLocal {
-		return base + fmt.Sprintf(`This assignment is Dyna-only. Read GitHub without posting: do not publish GitHub reviews or comments for this assignment.
+	return base + fmt.Sprintf(`This assignment is Dyna-only. Read GitHub without posting: do not publish GitHub reviews or comments for this assignment.
 Record the full Markdown review and verdict in Dyna: %s approve|approve-with-nits|changes|question --body-file <file> --findings-file <json-file> --head %s. Reviews over 12000 bytes are rejected, never silently clipped. Include findings, file paths, line numbers and suggested fixes in the Markdown. No GitHub review ID is needed. Use changes when fixes are needed. The stored review is visible in Dyna and changes are delivered to the author.`, command, r.Head)
-	}
-	return base + fmt.Sprintf(`This assignment explicitly enables GitHub publishing. Publish one GitHub comment review with dyna git pr review %s --body-file <file> --comments-file <json-file> --head %s. It posts through gh and records the review ID for routing. Post any other GitHub comment with dyna git pr comment so Dyna can route replies by comment ID, and never add HTML markers or agent attribution to comments. All agents use the owner's GitHub account, so do not use gh approve or request-changes.
-Then record your verdict: %s approve|approve-with-nits|changes|question "Markdown review" --findings-file <json-file> --head %s --review-id <GitHub-review-id>. Use changes when fixes are needed. The Dyna verdict, not GitHub approval state, controls the next wake. Include findings and file/line references in the stored Markdown too.`, r.URL, r.Head, command, r.Head)
 }
 func (s *Service) launch(ctx context.Context, r Record, profile, task string) (string, error) {
 	if s.LaunchReviewer != nil {
@@ -1043,11 +1036,8 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 	}
 	pull := snap.Pull
 
-	if PublishingMode(r.ReviewPublishing) == PublishingLocal && head == "" {
+	if head == "" {
 		return fmt.Errorf("a local review must supply --head from its assignment")
-	}
-	if PublishingMode(r.ReviewPublishing) == PublishingGitHub && reviewID <= 0 {
-		return fmt.Errorf("GitHub publishing requires --review-id for your published review")
 	}
 	var registered *Comment
 	if reviewID > 0 {
@@ -1100,8 +1090,8 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 		if err := validateVerdictReviewer(*r, actor, head, reviewID, named); err != nil {
 			return err
 		}
-		if PublishingMode(r.ReviewPublishing) == PublishingGitHub && registered == nil {
-			return fmt.Errorf("GitHub publishing requires --review-id for your published review")
+		if reviewID == 0 {
+			r.ReviewPublishing = PublishingLocal
 		}
 		if head == "" {
 			head = r.RoundHead

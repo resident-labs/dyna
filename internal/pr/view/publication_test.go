@@ -9,6 +9,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/ghclient"
+	prview "dyna-agent/internal/pr/view"
 	prfixture "dyna-agent/internal/pr/view/testfixture"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/room"
@@ -44,14 +45,33 @@ esac
 }
 
 func TestPublicationUsesAuthenticatedSession(t *testing.T) {
-	for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker} {
+	for _, role := range []authority.Role{authority.Owner, authority.Root, authority.Session, authority.Worker, authority.Steward, ""} {
 		t.Run(string(role), func(t *testing.T) {
-			e, rec, ref, _ := publicationEnv(t)
-			// Even a stale or forged Session field must not give owners or workers
-			// session attribution. Root and session callers keep their real session.
+			e, rec, ref, writes := publicationEnv(t)
+			// Agents cannot publish, regardless of an authenticated session or explicit flag.
 			actor := authority.Actor{Role: role, Room: rec.ID, Session: "ses_authenticated", Run: "run_worker"}
 			ctx := authority.WithActor(t.Context(), actor)
 			body := "<!-- dyna:ses_forged -->" + " feedback"
+			if role != authority.Owner {
+				for _, publish := range []bool{false, true} {
+					if err := e.svc.PRs.CommentPR(ctx, rec.ID, ref, body, publish); err == nil || !strings.Contains(err.Error(), "agents cannot publish") {
+						t.Fatalf("agent comment = %v", err)
+					}
+					if _, err := e.svc.PRs.PostPRReview(ctx, rec.ID, ref, body, "head", nil, publish); err == nil || !strings.Contains(err.Error(), "agents cannot publish") {
+						t.Fatalf("agent review = %v", err)
+					}
+				}
+				if err := e.svc.PRs.SetReviewPublishing(ctx, rec.ID, watch.PublishingGitHub); err == nil {
+					t.Fatal("agent enabled GitHub publishing")
+				}
+				if _, err := e.svc.PRs.SetPRSettings(ctx, rec.ID, prview.PRConfig{ReviewPublishing: watch.PublishingGitHub}); err == nil {
+					t.Fatal("agent enabled GitHub publishing through settings")
+				}
+				if _, err := os.Stat(writes); !os.IsNotExist(err) {
+					t.Fatalf("agent wrote to GitHub: %v", err)
+				}
+				return
+			}
 			if err := e.svc.PRs.CommentPR(ctx, rec.ID, ref, body, true); err != nil {
 				t.Fatal(err)
 			}
@@ -119,7 +139,7 @@ func TestPublicationPreservesPolicyAndUntrackedOptIn(t *testing.T) {
 	e, rec, ref, _ := publicationEnv(t)
 	// A second room for the same repository makes an absent room context ambiguous.
 	roomfixture.Repository(t, e.svc.Notify.Rooms, e.room("same-repository").ID, "github.com", "owner/repo", "read-only")
-	ctx := authority.WithActor(context.Background(), authority.Actor{Role: authority.Session, Session: "reviewer", Room: rec.ID})
+	ctx := authority.WithActor(context.Background(), authority.Actor{Role: authority.Owner, Room: rec.ID})
 	for _, tracked := range []bool{true, false} {
 		if !tracked {
 			ref.Number++

@@ -101,10 +101,8 @@ queue review again. Reviewers check the delta and earlier findings and replies.
 
 ## Publishing and comments
 
-Agent reviews stay in Dyna by default. Read the assignment's publishing mode; it remains fixed for that assignment.
-`dyna git pr publishing [local|github]` sets the mode for future assignments.
-Publish only when the assignment enables it or the owner explicitly asks.
-For local review, read GitHub without posting and save the complete review:
+Agent reviews stay in Dyna. Agents, including root and workflow workers,
+cannot publish GitHub PR comments or reviews. Record the complete review locally:
 
 ```sh
 dyna git pr verdict <pr> changes --body-file review.md --head <assigned-sha>
@@ -112,19 +110,10 @@ dyna git pr verdict <pr> changes --body-file review.md --head <assigned-sha>
 
 Include findings, paths, lines, and fixes. `--body-file -` reads stdin.
 Reviews must be at most 12000 bytes. Local verdicts require no GitHub review ID.
-For GitHub mode, use a comment review because agents share the owner's account:
-
-```sh
-dyna git pr review <pr> --body-file review.md --comments-file inline.json --head <assigned-sha>
-dyna git pr verdict <pr> approve --head <assigned-sha> --review-id <github-review-id>
-```
-
-The review ID must match that reviewer and head.
-Post other GitHub comments with `dyna git pr comment <pr> --body "..."` so replies route correctly.
-`--publish` explicitly publishes one comment when the room uses local mode.
-Root can publish `dyna git pr comment` and `dyna git pr review --publish`.
-These posts stay unattributed; posts and replies route as owner feedback.
+The owner can publish with `dyna git pr comment` or `dyna git pr review`.
+Only the owner can select `publishing github`; agent assignments still stay local.
 Never add HTML markers or agent attribution to comments.
+The owner can admit held feedback with `dyna git pr admit <pr> <kind:id>`.
 Mark bot spam with `dyna git pr noise <pr> <comment-id> --reason "why"`.
 Use `dyna git pr noise list` to inspect rules and `dyna git pr noise rm <id>` to undo one.
 

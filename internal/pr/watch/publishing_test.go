@@ -9,7 +9,7 @@ import (
 )
 
 func TestLocalReviewDefaultPreservesMarkdownWithoutGitHubWrites(t *testing.T) {
-	for _, legacy := range []string{"", "local", "retired-value"} {
+	for _, legacy := range []string{"", "local", "github", "retired-value"} {
 		t.Run("setting="+legacy, func(t *testing.T) {
 			e := newEnv(t)
 			e.setCI("success", 1)
@@ -25,6 +25,15 @@ func TestLocalReviewDefaultPreservesMarkdownWithoutGitHubWrites(t *testing.T) {
 			task := e.launches[0]
 			if r.ReviewPublishing != PublishingLocal || !strings.Contains(task, "Read GitHub without posting") || !strings.Contains(task, "--head "+r.Head) || strings.Contains(task, "gh pr review --comment") {
 				t.Fatalf("local assignment: %+v, %s", r, task)
+			}
+			// A running legacy assignment must also accept a local verdict.
+			if legacy == PublishingGitHub {
+				if err := e.s.Store.update(func(st *State) error {
+					st.Records[r.Key].ReviewPublishing = PublishingGitHub
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			feedback := "## Findings\n\n- `internal/parser.go:42`: check the bound.\n\n" + strings.Repeat("Keep this detail.\n", 200) + "\n`tail.go:99`: final finding."
 			for _, bad := range []struct{ actor, head string }{{r.Reviewer, ""}, {e.author.ID, r.Head}, {r.Reviewer, "old-head"}} {
@@ -59,67 +68,10 @@ func TestLocalReviewDefaultPreservesMarkdownWithoutGitHubWrites(t *testing.T) {
 	}
 }
 
-func TestGitHubAssignmentClaimsPublishedReviewAndKeepsItsMode(t *testing.T) {
-	e := newEnv(t)
-	e.setCI("success", 1)
-	r := e.track()
-	if err := e.s.ConfigurePublishing(r.RoomID, PublishingGitHub); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.s.Configure(r.RoomID, Reviewer{Profile: "judge"}); err != nil {
-		t.Fatal(err)
-	}
-	e.tick()
-	r = e.record()
-	if r.ReviewPublishing != PublishingGitHub || !strings.Contains(e.launches[0], "dyna git pr review") || !strings.Contains(e.launches[0], "--comments-file") || !strings.Contains(e.launches[0], "--review-id") {
-		t.Fatalf("GitHub assignment: %+v / %+v", r, e.launches)
-	}
-	if strings.Contains(e.launches[0], "dyna:") {
-		t.Fatalf("assignment still asks for a comment marker: %s", e.launches[0])
-	}
-	if err := e.s.ConfigurePublishing(r.RoomID, PublishingLocal); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.s.Verdict(context.Background(), r.Key, r.Reviewer, r.Head, "approve", "review", 0); err == nil {
-		t.Fatal("accepted GitHub assignment without published review")
-	}
-	e.addTrustedComment(88, "reviews", "Review at parser.go:42.", "owner")
-	for _, invalid := range []struct{ body, commit, state string }{
-		{Marker(r.Reviewer) + " wrong head", "old-head", "COMMENTED"},
-		{"Unmarked draft", r.Head, "PENDING"},
-	} {
-		e.f.Comments[0].Body, e.f.Comments[0].Commit, e.f.Comments[0].State = invalid.body, invalid.commit, invalid.state
-		e.write()
-		if err := e.s.Verdict(context.Background(), r.Key, r.Reviewer, r.Head, "approve", "review", 88); err == nil {
-			t.Fatalf("accepted invalid published review: %+v", invalid)
-		}
-	}
-	e.f.Comments[0].Body, e.f.Comments[0].Commit, e.f.Comments[0].State = "Review at parser.go:42.", r.Head, "COMMENTED"
-	e.write()
-	if err := e.s.Verdict(context.Background(), r.Key, r.Reviewer, r.Head, "approve", "review", 88); err != nil {
-		t.Fatal(err)
-	}
-	if st, err := e.s.Store.Read(); err != nil || st.CommentSessions["reviews:88"] != r.Reviewer {
-		t.Fatalf("published review ID was not claimed by its reviewer: %+v, %v", st.CommentSessions, err)
-	}
-	if e.record().ReviewPublishing != PublishingGitHub {
-		t.Fatal("room setting rewrote an active assignment")
-	}
-	e.f.Pull.Head.SHA = strings.Repeat("b", 40)
-	e.setCI("success", 2)
-	e.tick()
-	r = e.record()
-	if r.ReviewPublishing != PublishingLocal || !strings.Contains(e.launches[len(e.launches)-1], "Dyna-only") {
-		t.Fatalf("new assignment ignored current room setting: %+v", r)
-	}
-	if err := e.s.ConfigurePublishing(r.RoomID, PublishingGitHub); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.s.Verdict(context.Background(), r.Key, r.Reviewer, r.Head, "changes", "Local review at file.go:42", 0); err != nil {
-		t.Fatalf("local assignment changed mode mid-round: %v", err)
-	}
-	if e.record().ReviewPublishing != PublishingLocal {
-		t.Fatal("local assignment lost its bound mode")
+func TestLegacyGitHubAssignmentUsesLocalPrompt(t *testing.T) {
+	task := reviewTask(Record{Kind: "github", ReviewPublishing: PublishingGitHub, Head: "head", URL: "https://github.com/owner/repo/pull/17"})
+	if !strings.Contains(task, "Dyna-only") || strings.Contains(task, "explicitly enables GitHub") || strings.Contains(task, "--review-id") {
+		t.Fatalf("legacy assignment can publish: %s", task)
 	}
 }
 
