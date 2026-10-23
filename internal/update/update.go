@@ -67,13 +67,6 @@ type Result struct {
 	Target    string
 }
 
-type state struct {
-	LastChecked time.Time `json:"lastChecked"`
-	ETag        string    `json:"etag,omitempty"`
-	Release     Release   `json:"release,omitempty"`
-	LastError   string    `json:"lastError,omitempty"`
-}
-
 // Config makes release lookups and filesystem effects explicit and testable.
 type Config struct {
 	Version    string
@@ -82,10 +75,11 @@ type Config struct {
 	OS         string
 	Arch       string
 	Executable string
-	StatePath  string
-	Interval   time.Duration
-	Client     *http.Client
-	Now        func() time.Time
+	// DataDir holds dyna.db, where the check record lives, and the lock file.
+	DataDir  string
+	Interval time.Duration
+	Client   *http.Client
+	Now      func() time.Time
 }
 
 func (c Config) normalized() (Config, error) {
@@ -115,12 +109,12 @@ func (c Config) normalized() (Config, error) {
 	if resolved, err := filepath.EvalSymlinks(c.Executable); err == nil {
 		c.Executable = resolved
 	}
-	if c.StatePath == "" {
+	if c.DataDir == "" {
 		cacheDir, err := os.UserCacheDir()
 		if err != nil {
 			return c, fmt.Errorf("locate update cache: %w", err)
 		}
-		c.StatePath = filepath.Join(cacheDir, "dyna", "update-check.json")
+		c.DataDir = filepath.Join(cacheDir, "dyna")
 	}
 	if c.Interval <= 0 {
 		c.Interval = DefaultInterval
@@ -219,7 +213,7 @@ func compare(current, latest string) Result {
 	return r
 }
 
-func (c Config) latest(ctx context.Context, cached bool) (Release, state, error) {
+func (c Config) latest(ctx context.Context, cached bool) (Release, checkState, error) {
 	st, _ := c.loadState()
 	cacheFor := c.Interval
 	if st.LastError != "" && cacheFor > time.Hour {
@@ -293,7 +287,7 @@ func (c Config) latest(ctx context.Context, cached bool) (Release, state, error)
 	return release, st, nil
 }
 
-func (c Config) cacheFailure(st state, err error) (Release, state, error) {
+func (c Config) cacheFailure(st checkState, err error) (Release, checkState, error) {
 	st.LastChecked = c.Now().UTC()
 	st.LastError = err.Error()
 	_ = c.saveState(st)
@@ -494,54 +488,11 @@ func displayVersion(v string) string {
 	return v
 }
 
-func (c Config) loadState() (state, error) {
-	b, err := os.ReadFile(c.StatePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return state{}, nil
-		}
-		return state{}, err
-	}
-	var st state
-	if err := json.Unmarshal(b, &st); err != nil {
-		return state{}, err
-	}
-	return st, nil
-}
-
-func (c Config) saveState(st state) error {
-	if err := os.MkdirAll(filepath.Dir(c.StatePath), 0o755); err != nil {
-		return fmt.Errorf("create update cache: %w", err)
-	}
-	b, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(c.StatePath), ".update-check-*")
-	if err != nil {
-		return err
-	}
-	name := tmp.Name()
-	defer os.Remove(name)
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(append(b, '\n')); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(name, c.StatePath)
-}
-
 func (c Config) acquireLock() (func(), error) {
-	if err := os.MkdirAll(filepath.Dir(c.StatePath), 0o755); err != nil {
+	if err := os.MkdirAll(c.DataDir, 0o755); err != nil {
 		return nil, err
 	}
-	path := c.StatePath + ".lock"
+	path := filepath.Join(c.DataDir, "update.lock")
 	create := func() (*os.File, error) {
 		return os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	}
