@@ -36,7 +36,8 @@
   <ol>
     {#each row.steps as step (step.key)}
       {@const job = step.kind === 'shell' ? (step.job ? mergeJob(step.job, jobs.find((j) => j.id === step.jobId)) : jobs.find((j) => j.id === step.jobId)) : undefined}
-      {@const state = job ? blockState(job) : step.kind === 'child' ? (step.member.state === 'live' ? 'running' : step.member.status === 'error' ? 'failed' : 'done') : step.failed ? 'failed' : step.done === false ? 'running' : 'done'}
+      {@const activeTool = step.kind === 'tool' && !step.done && row.turn?.status === 'running'}
+      {@const state = job ? blockState(job) : step.kind === 'child' ? (step.member.state === 'live' ? 'running' : step.member.status === 'error' ? 'failed' : 'done') : step.failed ? 'failed' : activeTool ? 'running' : 'done'}
       {@const expanded = opened[step.key] ?? state === 'failed'}
       <li class={state} id={step.kind === 'shell' ? `shell-${step.jobId}` : undefined}>
         <details open={expanded} ontoggle={(event) => opened[step.key] = event.currentTarget.open}>
@@ -46,7 +47,7 @@
             <span class="target" title={job ? titleOf(job) : step.kind === 'child' ? step.member.name : step.target}>{job ? titleOf(job) : step.kind === 'child' ? step.member.name : step.target || (step.kind === 'shell' ? step.jobId : '')}</span>
             {#if job}<span class="meta">{metaOf(job, now)}</span>
             {:else if step.kind === 'child'}<span class="meta">{step.member.state === 'live' ? 'running' : step.member.status}</span>
-            {:else if step.aside || step.failed || step.done === false}<span class="meta">{step.aside || (step.failed ? 'failed' : 'running')}</span>{/if}
+            {:else if step.aside || step.failed || activeTool}<span class="meta">{step.aside}{#if activeTool}{step.aside ? ' · ' : ''}running{:else if step.failed && !step.aside}failed{/if}</span>{/if}
             <span class="chevron" aria-hidden="true">›</span>
           </summary>
           {#if expanded}
