@@ -139,6 +139,27 @@ func (s *Service) authorizeMergeControl(ctx context.Context, roomID, action stri
 
 // MergeControl changes only the existing worker state. Root and the worker
 // share the publication lock, current PR facts, and tested-commit publisher.
+// clearSettledPause resumes a room whose batch-failure pause has no frozen batch
+// left to recover from, such as when root returned the only PR of a failed
+// batch. Any other pause reason, and any batch still awaiting root, stays.
+func (s *Service) clearSettledPause(roomID string) error {
+	return s.Store.update(func(st *State) error {
+		if st.MergePauses[roomID] != mergeBatchFailedReason {
+			return nil
+		}
+		for _, b := range st.MergeTrials {
+			if b == nil || !trialHasRoom(*st, *b, roomID) {
+				continue
+			}
+			if b.Phase == "awaiting-root" || b.Phase == "failed" || b.Phase == "stacking" {
+				return nil
+			}
+		}
+		delete(st.MergePauses, roomID)
+		return nil
+	})
+}
+
 func (s *Service) MergeControl(ctx context.Context, roomID, action string, args, without, flaky []string) error {
 	if action == "note" {
 		return s.mergeNote(ctx, roomID, args, without)
@@ -271,7 +292,12 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 		if err := s.postMergeNotice(ctx, r, "merge-root-return/"+digest(reason), Notice{Kind: "ci", Target: r.Author, Merge: &ev, Text: fmt.Sprintf("%s returned by root at %s. %s\n%s", r.URL, r.Head, reason, logs)}); err != nil {
 			return err
 		}
-		return discard(affected)
+		if err := discard(affected); err != nil {
+			return err
+		}
+		// A return can leave the room with no failed batch to recover from, and
+		// then its batch-failure pause has nothing left to hold.
+		return s.clearSettledPause(rm.ID)
 	case "retry":
 		excluded := map[string]bool{}
 		for _, ref := range without {
