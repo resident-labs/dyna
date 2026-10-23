@@ -41,7 +41,7 @@ export interface NoticeRow {
 // HookRow is one HookSummary row: the hook and its newest run.
 export interface HookRow {
   hook: { name: string; label: string; event: string; everyMinutes: number; disabled: boolean }
-  lastRun: { result: string; startedAt: string; finishedAt: string } | null
+  lastRun: { id: string; result: string; startedAt: string; finishedAt: string } | null
 }
 
 export interface MergeHistoryRow {
@@ -57,11 +57,21 @@ export interface MergeHistoryRow {
   labels: string[]
 }
 
-// HookRunRow is one run of a hook, as the hook run list gives it.
+// HookRunRow is one run of a hook, as the hook run list gives it. id names the
+// run, so its log can open.
 export interface HookRunRow {
+  id: string
   result: string
   startedAt: string
   finishedAt: string
+}
+
+// RunReason is why one hook run failed, read from its log: the exit code a
+// command returned, or the log's last line when it records no exit code, such
+// as a timeout or a runner fault.
+export interface RunReason {
+  exitCode: number
+  detail: string
 }
 
 export interface UsageRow {
@@ -134,8 +144,10 @@ export interface Inputs {
   notices: NoticeRow[] | null
   hooks: HookRow[] | null
   // runs holds each hook's recent runs by hook name; a hook with none listed
-  // falls back to its newest run.
+  // falls back to its newest run. reasons gives a failed run's log reason by
+  // run id.
   runs: Record<string, HookRunRow[]>
+  reasons: Record<string, RunReason>
   settings: Record<string, string> | null
   budget: BudgetInfo | null
   accounts: AccountsInfo | null

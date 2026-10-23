@@ -50,7 +50,10 @@ export const api = {
     { hook: { name: 'self-update', label: 'Update Dyna', event: 'schedule', everyMinutes: 60, disabled: false }, lastRun: { result: 'pass', startedAt: iso(6), finishedAt: iso(5.4) } },
     { hook: { name: 'librarian-batch', label: 'Librarian', event: 'schedule', everyMinutes: 10, disabled: false }, lastRun: { result: 'pass', startedAt: iso(4), finishedAt: iso(3.9) } },
   ]),
-  hookRuns: (repo, name) => Promise.resolve(name === 'librarian-batch' ? [4, 14, 24].map((m) => ({ result: 'pass', startedAt: iso(m), finishedAt: iso(m - 0.02) })) : []),
+  hookRuns: (repo, name) => Promise.resolve(name === 'librarian-batch'
+    ? [4, 14, 24].map((m) => ({ id: 'librarian-' + m, result: 'pass', startedAt: iso(m), finishedAt: iso(m - 0.02) }))
+    : [{ id: 'run3', result: 'pass', startedAt: iso(6), finishedAt: iso(5.4) }, { id: 'run1', result: 'fail', startedAt: iso(7), finishedAt: iso(7) }, { id: 'run2', result: 'error', startedAt: iso(9), finishedAt: iso(8.5) }]),
+  hookRunLog: (repo, name, id) => Promise.resolve(id === 'run1' ? { exitCode: 1, tail: 'exit status 1' } : { exitCode: -1, tail: 'context deadline exceeded' }),
   notices: () => Promise.resolve([{ key: 'provider:sol', severity: 'warn', text: 'sol: provider limit reached, resets in 60m' }]),
   roomCIBudget: () => Promise.resolve({ ciWarnAfter: '3m0s', ciFailAfter: '4m0s', ciTestMax: '1s' }),
   accountUsageCached: () => Promise.resolve({ accounts: [{ observedAt: iso(12), stale: true }] }),
@@ -149,4 +152,25 @@ test('the CI health tab shows the slow-test state and opens the CI view', async 
     need([...panel.querySelectorAll<HTMLElement>('button.health')][0], 'open link').click()
     assert.equal(opened, 1)
   } finally { await page.done() }
+})
+
+test('a failed hook run names its reason and opens its log', async () => {
+  const page = await mountPage()
+  const opened: Record<string, string>[] = []
+  const listen = (event: Event): void => { opened.push((event as CustomEvent<Record<string, string>>).detail) }
+  window.addEventListener('dyna:hook-log', listen)
+  try {
+    await settle(page)
+    const panel = open(page, 'Updates')
+    const text = textOf(panel)
+    assert.match(text, /Update Dyna · failed: exit 1/)
+    assert.match(text, /Update Dyna · failed: context deadline exceeded/)
+    assert.doesNotMatch(text, /failed in 0 s/)
+    const row = need([...panel.querySelectorAll<HTMLElement>('button.open')].find((b) => textOf(b).includes('exit 1')), 'failed run row')
+    row.click()
+    assert.deepEqual(opened, [{ repo: '/repo', hook: 'self-update', runId: 'run1' }])
+  } finally {
+    window.removeEventListener('dyna:hook-log', listen)
+    await page.done()
+  }
 })
