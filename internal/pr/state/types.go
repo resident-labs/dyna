@@ -286,7 +286,6 @@ type MergeTrial struct {
 
 	RootReport    string             `json:"rootReport,omitempty"`
 	Notified      bool               `json:"notified,omitempty"`
-	Notifier      string             `json:"notifier,omitempty"`
 	Bisect        bool               `json:"bisect,omitempty"`
 	StackChanges  []MergeTrialChange `json:"stackChanges,omitempty"`
 	RootBranch    string             `json:"rootBranch,omitempty"`

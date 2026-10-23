@@ -25,7 +25,6 @@ import (
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shellquote"
-	"dyna-agent/internal/steward"
 	"dyna-agent/internal/subagent"
 	"path/filepath"
 )
@@ -34,7 +33,6 @@ type Service struct {
 	// beforeCloseTransfer lets a test act after the notice scan, before the transfer commits.
 	beforeCloseTransfer func(key string)
 	tickReads           *tickReadView
-	StewardSessions     steward.Sessions
 	LocalCI             localCIRunner
 	LocalCIRegistry     localCIRegistry
 	RunNodeCI           func(context.Context, localci.Node, localci.Request) (localci.Result, error)

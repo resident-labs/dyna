@@ -59,12 +59,12 @@ func (e *flushEnv) post(t *testing.T, in room.PostInput) room.Message {
 
 func (e *flushEnv) quiet(t *testing.T, text string) room.Message {
 	t.Helper()
-	return e.post(t, room.PostInput{Wake: true, From: "work:merge-steward", Kind: "merge-decision", To: []string{"work"}, Text: text})
+	return e.post(t, room.PostInput{Wake: true, From: "work:lead", Kind: "merge-decision", To: []string{"work"}, Text: text})
 }
 
 func (e *flushEnv) wake(t *testing.T, text string) room.Message {
 	t.Helper()
-	return e.post(t, room.PostInput{Wake: true, From: "work:merge-steward", Kind: "alert", To: []string{"work"}, Text: text})
+	return e.post(t, room.PostInput{Wake: true, From: "work:lead", Kind: "alert", To: []string{"work"}, Text: text})
 }
 
 // timedFlush returns the room's timed-flush notice, if the engine posted one.
@@ -160,7 +160,7 @@ func TestRootFlushRecoversHeldInputAfterARestart(t *testing.T) {
 	}
 	// The new quiet post goes straight to the store: the old flusher gets no
 	// event, so only the restarted flusher's recovery can arm the flush.
-	if _, err := e.rooms.Post(e.rec.ID, room.PostInput{Wake: true, From: "work:merge-steward", Kind: "merge-decision", To: []string{"work"}, Text: "Held after the restart"}); err != nil {
+	if _, err := e.rooms.Post(e.rec.ID, room.PostInput{Wake: true, From: "work:lead", Kind: "merge-decision", To: []string{"work"}, Text: "Held after the restart"}); err != nil {
 		t.Fatal(err)
 	}
 	ctx2, cancel2 := context.WithCancel(t.Context())
@@ -213,7 +213,7 @@ func TestRootFlushRecoversQuietInputFromBeforeTheFirstScan(t *testing.T) {
 	t.Cleanup(cancel)
 	_, recovered := startRootFlush(svc, e.clock.timers(ctx))
 	// The quiet post lands before the first scan takes the room's baseline.
-	if _, err := e.rooms.Post(e.rec.ID, room.PostInput{Wake: true, From: "work:merge-steward", Kind: "merge-decision", To: []string{"work"}, Text: "Quiet before the first scan"}); err != nil {
+	if _, err := e.rooms.Post(e.rec.ID, room.PostInput{Wake: true, From: "work:lead", Kind: "merge-decision", To: []string{"work"}, Text: "Quiet before the first scan"}); err != nil {
 		t.Fatal(err)
 	}
 	svc.AfterFirstScan()

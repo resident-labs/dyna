@@ -12,8 +12,8 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
-func TestStoredStewardResumesOnlyItsRoom(t *testing.T) {
-	const stewardID = "ses_20261020-120000-aaaaaaaa"
+func TestStoredRootResumesOnlyItsRoom(t *testing.T) {
+	const rootID = "ses_20261020-120000-aaaaaaaa"
 	const ordinaryID = "ses_20261020-120000-bbbbbbbb"
 	root := t.TempDir()
 	rooms := &room.Store{Root: filepath.Join(root, "rooms")}
@@ -32,7 +32,7 @@ func TestStoredStewardResumesOnlyItsRoom(t *testing.T) {
 	}
 	manager := &subagent.Manager{Store: &subagent.Store{Root: filepath.Join(root, "sessions")}, Rooms: rooms}
 	for _, meta := range []subagent.Meta{
-		{ID: stewardID, Name: "steward", Role: "merge-steward", RoomID: own.ID, Room: own.Name},
+		{ID: rootID, Name: "root", Role: subagent.RoleRoot, RoomID: own.ID, Room: own.Name},
 		{ID: ordinaryID, Name: "ordinary", RoomID: own.ID, Room: own.Name},
 	} {
 		recordtest.Write(t, manager.Store.Root, meta.ID, meta)
@@ -45,17 +45,17 @@ func TestStoredStewardResumesOnlyItsRoom(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("DYNA_MODE", "subagent")
-	t.Setenv("DYNA_SESSION", stewardID)
+	t.Setenv("DYNA_SESSION", rootID)
 	t.Setenv("DYNA_ROOM_ID", own.ID)
 	t.Setenv("DYNA_ROOM", own.Name)
-	if err := service.MergeControl(t.Context(), own.ID, "resume", nil, nil); err != nil {
+	if err := service.MergeControl(t.Context(), own.ID, "resume", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.MergeControl(t.Context(), other.ID, "resume", nil, nil); err == nil || !strings.HasPrefix(err.Error(), "git merge resume is ") {
+	if err := service.MergeControl(t.Context(), other.ID, "resume", nil, nil, nil); err == nil || !strings.HasPrefix(err.Error(), "git merge resume is ") {
 		t.Fatalf("other room: %v", err)
 	}
 	t.Setenv("DYNA_SESSION", ordinaryID)
-	if err := service.MergeControl(t.Context(), own.ID, "resume", nil, nil); err == nil || !strings.HasPrefix(err.Error(), "git merge resume is ") {
+	if err := service.MergeControl(t.Context(), own.ID, "resume", nil, nil, nil); err == nil || !strings.HasPrefix(err.Error(), "git merge resume is ") {
 		t.Fatalf("ordinary session: %v", err)
 	}
 	state, err := service.Store.Read()

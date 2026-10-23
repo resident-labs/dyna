@@ -27,7 +27,7 @@ func (s *Service) goalCaller(ctx context.Context, ref string) (room.Record, goal
 	callerRoom := ""
 	switch actor.Role {
 	case authority.Owner, authority.Worker:
-	case authority.Root, authority.Session, authority.Steward:
+	case authority.Root, authority.Session:
 		if actor.Session == "" {
 			return room.Record{}, goalAuthor{}, fmt.Errorf("goal and rule changes need an authenticated session")
 		}

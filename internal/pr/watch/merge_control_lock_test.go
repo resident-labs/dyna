@@ -30,7 +30,7 @@ func holdTestPublisher(t *testing.T, s *Service) func() {
 func TestMergeControlWaitsForPublisherAndKeepsAutomaticTickNonblocking(t *testing.T) {
 	e, _, _ := mergeEnv(t, 1)
 	id := e.author.RoomID
-	if err := e.s.MergeControl(t.Context(), id, "pause", nil, nil); err != nil {
+	if err := e.s.MergeControl(t.Context(), id, "pause", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	release := holdTestPublisher(t, e.s)
@@ -44,7 +44,7 @@ func TestMergeControlWaitsForPublisherAndKeepsAutomaticTickNonblocking(t *testin
 		contended = true
 		release()
 	})
-	if err := e.s.MergeControl(ctx, id, "resume", nil, nil); err != nil {
+	if err := e.s.MergeControl(ctx, id, "resume", nil, nil, nil); err != nil {
 		t.Fatalf("resume did not wait for the short publisher: %v", err)
 	}
 	if !contended {
@@ -64,7 +64,7 @@ func TestMergeControlWaitsForPublisherAndKeepsAutomaticTickNonblocking(t *testin
 func TestMergeControlCancellationKeepsTheCurrentPublisher(t *testing.T) {
 	e, _, _ := mergeEnv(t, 1)
 	id := e.author.RoomID
-	if err := e.s.MergeControl(t.Context(), id, "pause", nil, nil); err != nil {
+	if err := e.s.MergeControl(t.Context(), id, "pause", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	release := holdTestPublisher(t, e.s)
@@ -73,7 +73,7 @@ func TestMergeControlCancellationKeepsTheCurrentPublisher(t *testing.T) {
 	cancellable, cancel := context.WithCancel(guard)
 	defer cancel()
 	ctx := store.WithFlockContentionHook(cancellable, func(string) { cancel() })
-	if err := e.s.MergeControl(ctx, id, "resume", nil, nil); !errors.Is(err, context.Canceled) {
+	if err := e.s.MergeControl(ctx, id, "resume", nil, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled lock wait returned %v; want context cancellation", err)
 	}
 	if unlock, err := e.s.mergeLock(); err == nil {
@@ -87,7 +87,7 @@ func TestMergeControlCancellationKeepsTheCurrentPublisher(t *testing.T) {
 	release()
 	retry, stopRetry := context.WithTimeout(t.Context(), 30*time.Second)
 	defer stopRetry()
-	if err := e.s.MergeControl(retry, id, "resume", nil, nil); err != nil {
+	if err := e.s.MergeControl(retry, id, "resume", nil, nil, nil); err != nil {
 		t.Fatalf("fresh control could not acquire the released lock: %v", err)
 	}
 }
@@ -95,7 +95,7 @@ func TestMergeControlCancellationKeepsTheCurrentPublisher(t *testing.T) {
 func TestMergeControlRechecksRoomAccessAfterWaiting(t *testing.T) {
 	e, _, _ := mergeEnv(t, 1)
 	id := e.author.RoomID
-	if err := e.s.MergeControl(t.Context(), id, "pause", nil, nil); err != nil {
+	if err := e.s.MergeControl(t.Context(), id, "pause", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	release := holdTestPublisher(t, e.s)
@@ -107,7 +107,7 @@ func TestMergeControlRechecksRoomAccessAfterWaiting(t *testing.T) {
 		}
 		release()
 	})
-	if err := e.s.MergeControl(ctx, id, "resume", nil, nil); err == nil || !strings.Contains(err.Error(), "room is read-only") {
+	if err := e.s.MergeControl(ctx, id, "resume", nil, nil, nil); err == nil || !strings.Contains(err.Error(), "room is read-only") {
 		t.Fatalf("changed room access was not checked after waiting: %v", err)
 	}
 	st, err := e.s.Store.Read()
@@ -120,17 +120,13 @@ func TestMergeControlRefreshesCachedRootAfterWaiting(t *testing.T) {
 	testMergeControlSessionChanges(t, authority.Root, subagent.RoleRoot)
 }
 
-func TestMergeControlRefreshesCachedStewardAfterWaiting(t *testing.T) {
-	testMergeControlSessionChanges(t, authority.Steward, subagent.RoleSteward)
-}
-
 func testMergeControlSessionChanges(t *testing.T, role authority.Role, storedRole string) {
 	t.Helper()
 	for _, change := range []string{"role", "room", "closed"} {
 		t.Run(change, func(t *testing.T) {
 			e, _, _ := mergeEnv(t, 1)
 			id := e.author.RoomID
-			if err := e.s.MergeControl(t.Context(), id, "pause", nil, nil); err != nil {
+			if err := e.s.MergeControl(t.Context(), id, "pause", nil, nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			before, err := e.s.Store.Read()
@@ -166,7 +162,7 @@ func testMergeControlSessionChanges(t *testing.T, role authority.Role, storedRol
 				recordtest.Write(t, e.s.sessionStore().Root, session, meta)
 				release()
 			})
-			if err := e.s.MergeControl(ctx, id, "resume", nil, nil); err == nil || !changed {
+			if err := e.s.MergeControl(ctx, id, "resume", nil, nil, nil); err == nil || !changed {
 				t.Errorf("cached %s accepted after stored %s changed: changed=%v error=%v", role, change, changed, err)
 			}
 			after, err := e.s.Store.Read()

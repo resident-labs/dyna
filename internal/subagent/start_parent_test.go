@@ -19,7 +19,6 @@ func TestStartParentsSessionActorsAndInheritsService(t *testing.T) {
 	}{
 		{name: "session", actorRole: authority.Session},
 		{name: "root", role: RoleRoot, actorRole: authority.Root, service: true},
-		{name: "steward", role: RoleSteward, actorRole: authority.Steward, service: true, wantSvc: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newTestEnv(t)
@@ -53,7 +52,6 @@ func TestStartSessionActorsCannotStartInAnotherRoom(t *testing.T) {
 	}{
 		{name: "session", actorRole: authority.Session},
 		{name: "root", role: RoleRoot, actorRole: authority.Root},
-		{name: "steward", role: RoleSteward, actorRole: authority.Steward},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := newTestEnv(t)
@@ -80,7 +78,7 @@ func TestStartSessionActorsCannotStartInAnotherRoom(t *testing.T) {
 	}
 }
 
-func TestStartOwnerRemainsTopLevelAndStewardCannotCreateServiceRole(t *testing.T) {
+func TestStartOwnerRemainsTopLevelAndOnlyOwnerOrRootStartsAService(t *testing.T) {
 	e := newTestEnv(t)
 	ctx := authority.WithActor(e.ctx, authority.Actor{Role: authority.Owner, Room: e.room.ID})
 	info, _, err := e.m.Start(ctx, StartOptions{Goal: "g", Task: "RESPOND: done", Profile: "mock", Dir: t.TempDir(), Room: e.room.ID, Owner: "codex:test"})
@@ -102,9 +100,4 @@ func TestStartOwnerRemainsTopLevelAndStewardCannotCreateServiceRole(t *testing.T
 	}
 	e.wait(info.ID, 1)
 
-	steward := authority.WithActor(e.ctx, authority.Actor{Role: authority.Steward, Session: NewID(), Room: e.room.ID})
-	_, _, err = e.m.Start(steward, StartOptions{Goal: "g", Task: "RESPOND: done", Profile: "mock", Dir: t.TempDir(), Room: e.room.ID, Role: RoleSteward, Name: RoleSteward, Service: true})
-	if err == nil || !strings.Contains(err.Error(), "only the owner or root may start a service role") {
-		t.Fatalf("steward service-role Start = %v", err)
-	}
 }

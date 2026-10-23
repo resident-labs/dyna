@@ -285,19 +285,6 @@ export function buildRows(i: Inputs): Row[] {
     nextText: counts.ready ? `${counts.ready} ready` : '',
   })
 
-  // Merge steward: its profile is its switch, because off is the off state.
-  const steward = svc('merge-steward')
-  const stewardOff = steward?.pinned === 'off' || steward?.profile === 'off'
-  rows.push({
-    ...base,
-    id: 'steward',
-    name: 'Merge steward',
-    state: !steward ? 'unreadable' : stewardOff ? 'off' : !steward.profile ? 'unavailable' : 'on',
-    tone: !steward || stewardOff || !steward.profile ? 'off' : 'on',
-    detail: !steward ? 'Steward state could not be read' : stewardOff ? 'Off: a failed batch goes straight to root' : !steward.profile ? steward.reason || 'No enabled profile' : 'Handles a failed merge batch',
-    profile: steward ? { id: 'steward.profile', value: steward.pinned, options: ['', 'off', ...steward.profiles] } : null,
-  })
-
   // Conflict radar runs with the watcher on every push, so it has no switch.
   const overlaps = i.changes.filter((c) => (typeof c.overlaps === 'number' ? c.overlaps : c.overlaps?.length ?? 0) > 0).length
   rows.push({

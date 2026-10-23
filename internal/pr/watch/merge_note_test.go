@@ -24,7 +24,7 @@ func TestMergeNoteStoresQuietPostAndDecisionHistory(t *testing.T) {
 	t.Setenv("DYNA_ROOM", rm.Name)
 	line := "Return #17; TestQueue failed in run 81."
 	for range 2 {
-		if err := s.MergeControl(t.Context(), rm.ID, "note", []string{line}, nil); err != nil {
+		if err := s.MergeControl(t.Context(), rm.ID, "note", []string{line}, nil, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -57,7 +57,7 @@ func TestMergeNoteStoresQuietPostAndDecisionHistory(t *testing.T) {
 	}
 }
 
-func TestMergeNoteRequiresStoredStewardAndOwnStampedRoom(t *testing.T) {
+func TestMergeNoteRequiresStoredRootAndOwnStampedRoom(t *testing.T) {
 	rooms := &room.Store{Root: t.TempDir()}
 	rm, err := rooms.Create(room.CreateInput{Name: "notes"})
 	if err != nil {
@@ -76,13 +76,13 @@ func TestMergeNoteRequiresStoredStewardAndOwnStampedRoom(t *testing.T) {
 	}{
 		{"ordinary session", "", rm.ID, rm.ID, false, false},
 		{"name alone", "reviewer", rm.ID, rm.ID, false, false},
-		{"stored steward", "merge-steward", rm.ID, rm.ID, false, true},
-		{"wrong stored room", "merge-steward", "other", rm.ID, false, false},
-		{"wrong stamp", "merge-steward", rm.ID, "other", false, false},
-		{"closed steward", "merge-steward", rm.ID, rm.ID, true, false},
+		{"stored root", subagent.RoleRoot, rm.ID, rm.ID, false, true},
+		{"wrong stored room", subagent.RoleRoot, "other", rm.ID, false, false},
+		{"wrong stamp", subagent.RoleRoot, rm.ID, "other", false, false},
+		{"closed root", subagent.RoleRoot, rm.ID, rm.ID, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			meta := subagent.Meta{ID: id, Name: "merge-steward", Role: tc.role, RoomID: tc.storedRoom, Room: rm.Name}
+			meta := subagent.Meta{ID: id, Name: "root", Role: tc.role, RoomID: tc.storedRoom, Room: rm.Name}
 			if tc.closed {
 				meta.Closed = time.Now()
 			}

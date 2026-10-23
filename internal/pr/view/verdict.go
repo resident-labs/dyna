@@ -30,7 +30,7 @@ func (s *Service) RecordPRVerdict(ctx context.Context, roomRef, key, head, verdi
 		return VerdictResult{}, err
 	}
 	switch actor.Role {
-	case authority.Session, authority.Root, authority.Steward:
+	case authority.Session, authority.Root:
 		if actor.Session == "" {
 			return VerdictResult{}, fmt.Errorf("a verdict needs an authenticated reviewer session")
 		}

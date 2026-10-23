@@ -27,7 +27,7 @@ func TestOwnerTracksAndOpensPRWithoutSession(t *testing.T) {
 				out, err := e.svc.PRs.OpenChange(ctx, rec.ID, "", "7", "", watch.OpenChangeOptions{Notes: watch.ChangeNotes{Intent: "Owner work"}})
 				return out.Change, err
 			}
-			for _, role := range []authority.Role{authority.Session, authority.Root, authority.Worker, authority.Steward, ""} {
+			for _, role := range []authority.Role{authority.Session, authority.Root, authority.Worker, ""} {
 				ctx := authority.WithActor(t.Context(), authority.Actor{Role: role, Room: rec.ID, Session: "ses_20261021-000000-0000abcd"})
 				if _, err := call(ctx); err == nil {
 					t.Fatalf("%s gained an owner author through an empty session reference", role)

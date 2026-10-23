@@ -38,12 +38,12 @@ func (s *Service) actOnSession(ctx context.Context, roomRef, ref string) (subage
 
 // checkActsOn applies the rule the CLI's Target applied in its own process
 // before these controls were engine calls: a caller in subagent mode, that
-// is a session or a steward, may change only itself and its descendants.
+// is a session, may change only itself and its descendants.
 // The root seat, which runs in root mode, and the owner may change any
 // session in the room.
 func (s *Service) checkActsOn(ctx context.Context, info subagent.Info) error {
 	actor := authority.Of(ctx)
-	if actor.Role != authority.Session && actor.Role != authority.Steward {
+	if actor.Role != authority.Session {
 		return nil
 	}
 	return s.Notify.Sessions.CheckActsOn(actor.Session, info)

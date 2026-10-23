@@ -20,7 +20,6 @@ const (
 	Root    Role = "root"
 	Session Role = "session"
 	Worker  Role = "worker"
-	Steward Role = "steward"
 )
 
 type Relation string
@@ -30,7 +29,7 @@ const (
 	Parent    Relation = "parent"
 	Self      Relation = "self"
 	Librarian Relation = "librarian"
-	RootRoom  Relation = "root or steward in its own room"
+	RootRoom  Relation = "root in its own room"
 	NotSelf   Relation = "another session"
 	Holder    Relation = "current role holder"
 )
@@ -165,7 +164,7 @@ var Rules = []Rule{
 	{Action: "git hooks add", Allowed: []Role{Owner, Root}, Instead: "ask root to change stored hook commands"},
 	{Action: "git hooks edit", Allowed: []Role{Owner, Root}, Instead: "ask root to change stored hook commands"},
 	{Action: "git hooks rm", Allowed: []Role{Owner, Root}, Instead: "ask root to change stored hook commands"},
-	{Action: "git sync fetch", Allowed: []Role{Owner, Root, Session, Worker, Steward}, Instead: "call through the engine as a registered caller"},
+	{Action: "git sync fetch", Allowed: []Role{Owner, Root, Session, Worker}, Instead: "call through the engine as a registered caller"},
 	{Action: "call", Allowed: []Role{Root}, Instead: "use dyna post @parent to ask root to call the owner"},
 	{Action: "call list", Allowed: []Role{Root}},
 	{Action: "call withdraw", Allowed: []Role{Root}},
@@ -178,7 +177,7 @@ var Rules = []Rule{
 	{Action: "room watch", Allowed: []Role{Owner}, Instead: "posts arrive as turn input; use dyna post @<mention> for coordination"},
 	{Action: "root attach", Allowed: []Role{Owner}, Instead: "run dyna root attach from an external shell"},
 	{Action: "root detach", Allowed: []Role{Owner}, Instead: "run dyna root detach from an external shell"},
-	{Action: "subagent start", Allowed: []Role{Owner, Root, Session, Steward}, Instead: "use subagent mode to start work"},
+	{Action: "subagent start", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to start work"},
 	{Action: "subagent stop", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control sessions"},
 	{Action: "subagent close", Allowed: []Role{Owner, Root}, Relations: []Relation{NotSelf}, Instead: "a session becomes dormant when its turn ends, so it does not close itself"},
 	{Action: "subagent reopen", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to start work"},
@@ -196,14 +195,14 @@ var Rules = []Rule{
 	{Action: "subagent transfer handoff", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control work"},
 	{Action: "subagent consolidate resume", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control work"},
 	{Action: "subagent consolidate cancel", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control work"},
-	{Action: "git merge note", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root and steward may record notes only in their own room"},
-	{Action: "git merge pause", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root and steward may control only their own room; use dyna post @parent for merge changes"},
-	{Action: "git merge resume", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root and steward may control only their own room; use dyna post @parent for merge changes"},
-	{Action: "git merge cancel", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root and steward may control only their own room; use dyna post @parent for merge changes"},
-	{Action: "git merge retry", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root and steward may control only their own room; use dyna post @parent for merge changes"},
-	{Action: "git merge bisect", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root and steward may control only their own room; use dyna post @parent for merge changes"},
-	{Action: "git merge return", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root and steward may control only their own room; use dyna post @parent for merge changes"},
-	{Action: "git merge publish", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root and steward may control only their own room; use dyna post @parent for merge changes"},
+	{Action: "git merge note", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root may record notes only in its own room"},
+	{Action: "git merge pause", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root may control only its own room; use dyna post @parent for merge changes"},
+	{Action: "git merge resume", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root may control only its own room; use dyna post @parent for merge changes"},
+	{Action: "git merge cancel", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root may control only its own room; use dyna post @parent for merge changes"},
+	{Action: "git merge retry", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root may control only its own room; use dyna post @parent for merge changes"},
+	{Action: "git merge bisect", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root may control only its own room; use dyna post @parent for merge changes"},
+	{Action: "git merge return", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root may control only its own room; use dyna post @parent for merge changes"},
+	{Action: "git merge publish", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root may control only its own room; use dyna post @parent for merge changes"},
 	{Action: "git pr merge-fix", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "SetRoomChangePolicy", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "SetRoomCIBudget", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
@@ -295,7 +294,7 @@ func Check(action string, actor Actor, has func(Relation) bool) error {
 	if has != nil {
 		for _, relation := range rule.Relations {
 			if relation == RootRoom {
-				if actor.Role != Root && actor.Role != Steward {
+				if actor.Role != Root {
 					continue
 				}
 			} else if actor.Role != Session {

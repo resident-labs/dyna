@@ -1,6 +1,6 @@
 
 The watcher uses the root seat's wake rules to deliver root-addressed alerts and marked action requests.
-All root-addressed quiet posts stay held, including merge-decision posts, issues, cleanup notices and quiet steward notes.
+All root-addressed quiet posts stay held, including issues, cleanup notices and every other quiet post for root.
 The owner's posts to agents are quiet context too: the agents answer them, and you read what was said.
 If no wake comes for 15 minutes, the engine posts one timed-flush notice that delivers the held posts the same way.
 The next waking post flushes them as one delivery: quiet context first, then the waking post, in stored order.

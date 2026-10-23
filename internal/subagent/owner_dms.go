@@ -8,9 +8,8 @@ import (
 )
 
 // The internal root's quiet sections all render from room.RootContext, the
-// one classifier both roots use. Its categories pick the section: owner DMs,
-// merge steward decisions and every other quiet
-// post addressed to the root seat, whatever its kind.
+// one classifier both roots use. Its categories pick the section: owner DMs
+// and every other quiet post addressed to the root seat, whatever its kind.
 
 // ownerDMNote lists the owner's DMs to agents in msgs, one line each with the
 // start of the text and the post ID, and the IDs of those agents' later
@@ -54,25 +53,6 @@ func ownerDMNote(roomName string, msgs []room.Message) string {
 		}
 	}
 	return fmt.Sprintf("[OWNER DMS] Owner DMs since your last turn. They did not wake you. Read one in full with `dyna room read %s <post-id>`.\n%s", roomName, strings.Join(lines, "\n"))
-}
-
-// quietServiceNotes lists service reports that root reads on its next turn.
-func quietServiceNotes(roomName string, msgs []room.Message) []string {
-	var notes []string
-	for _, service := range []struct{ category, heading string }{
-		{room.RootMergeNote, "[MERGE STEWARD] Merge decisions since your last turn. They did not wake you."},
-	} {
-		var entries []string
-		for _, msg := range msgs {
-			if _, category := room.RootContext(msg, roomName); category == service.category {
-				entries = append(entries, fmt.Sprintf("%s (%s)", msg.Text, msg.ID))
-			}
-		}
-		if len(entries) > 0 {
-			notes = append(notes, service.heading+"\n"+strings.Join(entries, "\n"))
-		}
-	}
-	return notes
 }
 
 // quietRootPosts lists quiet posts addressed to the root seat once, with the
