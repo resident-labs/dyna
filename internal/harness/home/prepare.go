@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/shellquote"
 )
 
@@ -27,6 +28,7 @@ func Prepare(nativeScope, realDyna string, inherited []string) (map[string]strin
 	if !filepath.IsAbs(nativeScope) {
 		return nil, fmt.Errorf("native scope must be absolute")
 	}
+	realDyna = stableDynaPath(realDyna)
 	owner := envMap(inherited)
 	home, err := ownerHome(owner)
 	if err != nil {
@@ -241,6 +243,22 @@ func resolve(name, path string) (string, error) {
 	}
 	return "", fmt.Errorf("executable not found in inherited PATH")
 }
+
+// stableDynaPath replaces a running-image path with a copy of the same build
+// that outlives its process. A bridge, an MCP server command and $DYNA_BIN are
+// read again on later turns; /proc/<pid>/exe stops existing when that process
+// exits, which left harness sessions with no Dyna tools.
+func stableDynaPath(realDyna string) string {
+	if !strings.HasPrefix(realDyna, "/proc/") {
+		return realDyna
+	}
+	stable, err := fsutil.StableImage(realDyna)
+	if err != nil || !filepath.IsAbs(stable) {
+		return realDyna
+	}
+	return stable
+}
+
 func bridge(owner map[string]string, target string, isDyna bool) string {
 	var script strings.Builder
 	script.WriteString("#!/bin/sh\n")
