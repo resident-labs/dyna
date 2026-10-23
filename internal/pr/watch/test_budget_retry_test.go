@@ -31,7 +31,7 @@ func enforceArtifactRetry(t *testing.T, e *testEnv, ctx context.Context, snap Sn
 
 func TestArtifactRetryCancellation(t *testing.T) {
 	for _, stage := range []string{"listing", "download"} {
-		for _, kind := range []string{"cancel", "deadline", "expired parent", "expired deadline", "HTTP timeout"} {
+		for _, kind := range []string{"cancel", "expired parent"} {
 			t.Run(stage+"/"+kind, func(t *testing.T) {
 				e, snap, policy := artifactRetryFixture(t)
 				base := e.s.GH.run
@@ -41,26 +41,11 @@ func TestArtifactRetryCancellation(t *testing.T) {
 				}
 				for attempt := 0; attempt < 4; attempt++ {
 					ctx, cancel := context.WithCancel(context.Background())
-					if kind == "expired deadline" {
-						cancel()
-						ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond)
-					}
 					e.s.GH.run = func(commandCtx context.Context, cmd *exec.Cmd) error {
 						if strings.Contains(strings.Join(cmd.Args, " "), target) {
-							if kind == "expired deadline" {
-								<-commandCtx.Done()
-								return errors.New("signal: killed")
-							}
-							if kind == "HTTP timeout" {
-								fmt.Fprint(cmd.Stdout, "HTTP/2.0 408 Request Timeout\r\n\r\n{}")
-								return errors.New("exit status 1")
-							}
 							if kind == "expired parent" {
 								cancel()
 								return errors.New("signal: killed")
-							}
-							if kind == "deadline" {
-								return fmt.Errorf("wrapped timeout: %w", context.DeadlineExceeded)
 							}
 							return fmt.Errorf("wrapped cancellation: %w", context.Canceled)
 						}
@@ -192,7 +177,6 @@ func TestArtifactRetryCancellationKeepsCount(t *testing.T) {
 	}{
 		{failure, 1},
 		{context.Canceled, 1},
-		{context.DeadlineExceeded, 1},
 		{failure, 2},
 	} {
 		failure = step.err
@@ -333,3 +317,37 @@ func testArtifactRetryRequestFailures(t *testing.T, stage string) {
 
 func TestArtifactRetryListingFailures(t *testing.T)  { testArtifactRetryRequestFailures(t, "listing") }
 func TestArtifactRetryDownloadFailures(t *testing.T) { testArtifactRetryRequestFailures(t, "download") }
+
+func TestArtifactDeadlineRetriesStop(t *testing.T) {
+	for _, httpTimeout := range []bool{false, true} {
+		t.Run(fmt.Sprint(httpTimeout), func(t *testing.T) {
+			e, snap, _ := artifactRetryFixture(t)
+			base := e.s.GH.run
+			calls := 0
+			e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
+				if strings.Contains(strings.Join(cmd.Args, " "), "/artifacts/91/zip") {
+					calls++
+					if deadline, ok := ctx.Deadline(); !ok || time.Until(deadline) < 89*time.Second {
+						t.Fatalf("artifact deadline too short: %v", deadline)
+					}
+					if httpTimeout {
+						fmt.Fprint(cmd.Stdout, "HTTP/2.0 408 Request Timeout\r\n\r\n{}")
+						return errors.New("exit status 1")
+					}
+					return context.DeadlineExceeded
+				}
+				return base(ctx, cmd)
+			}
+			for attempt := 0; attempt < 4; attempt++ {
+				if err := e.s.runBudgets(context.Background(), pollResult{key: e.record().Key, gh: e.s.GH, snap: snap}, map[string]bool{}); err != nil {
+					t.Fatal(err)
+				}
+				e.clock = e.clock.Add(time.Minute)
+			}
+			r := e.record()
+			if calls != 3 || pendingTestReports(r) || !strings.Contains(r.CITestReportNote, "stopped after 3 failed inspection attempts") {
+				t.Fatalf("downloads=%d retries=%v note=%q", calls, r.CITestRetries, r.CITestReportNote)
+			}
+		})
+	}
+}

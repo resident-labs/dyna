@@ -96,6 +96,7 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 	if budget <= 0 {
 		budget = 50 * time.Second
 	}
+	budgetParent := ctx
 	ctx, cancel := context.WithTimeout(ctx, budget)
 	defer cancel()
 	ctx = context.WithValue(ctx, tickReadKey{}, tickReadScope{s, s.tickView()})
@@ -247,7 +248,7 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 			return retry(errors.Join(first, ctx.Err()))
 		}
 		started := time.Now()
-		remember(s.runBudgets(ctx, result, pauses))
+		remember(s.runBudgets(budgetParent, result, pauses))
 		slog.Debug("PR watcher phase", "key", result.key, "phase", "budgets", "duration", time.Since(started))
 	}
 	// The radar runs local git only, after GitHub work, so its notices go out
@@ -314,7 +315,9 @@ var readBudgetSnapshot = state.ReadSnapshot
 // runBudgets enforces the CI time and test budgets for a refreshed head with
 // its own time limit, then keeps the cached responses of those requests.
 func (s *Service) runBudgets(ctx context.Context, result pollResult, pauses map[string]bool) (err error) {
-	ctx, cancel := context.WithTimeout(ctx, s.recordBudget())
+	// Allow the artifact reader its full 90-second limit, plus other budget reads.
+	// The caller retains shutdown cancellation, without the short polling deadline.
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	var r Record
 	var policy ChangePolicy
