@@ -1,6 +1,7 @@
 package voice
 
 import (
+	"regexp"
 	"slices"
 	"strings"
 	"unicode"
@@ -39,4 +40,20 @@ func hallucinated(text string) bool {
 // words splits text into lowercase words, dropping punctuation.
 func words(text string) []string {
 	return strings.FieldsFunc(strings.ToLower(text), func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+}
+
+var (
+	markdownLink   = regexp.MustCompile(`!?\[([^\]]*)\]\([^)]*\)`)
+	markdownLine   = regexp.MustCompile(`(?m)^[ \t]*(?:#{1,6}[ \t]+|>[ \t]?|[-*+][ \t]+|\d+[.)][ \t]+|` + "```" + `.*$)`)
+	markdownEmph   = regexp.MustCompile(`\*\*|__|~~|[*` + "`" + `]`)
+	markdownBreaks = regexp.MustCompile(`[ \t]*\n+[ \t]*`)
+)
+
+// plainSpeech removes markdown from root's text before Voice sees it, so
+// labels and markers such as "**Key point:**" or "- " are never read aloud.
+func plainSpeech(text string) string {
+	text = markdownLink.ReplaceAllString(text, "$1")
+	text = markdownLine.ReplaceAllString(text, "")
+	text = markdownEmph.ReplaceAllString(text, "")
+	return strings.TrimSpace(markdownBreaks.ReplaceAllString(text, " "))
 }
