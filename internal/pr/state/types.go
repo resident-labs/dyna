@@ -24,8 +24,9 @@ type Reviewer struct {
 	Profile          string               `json:"profile,omitempty"`
 }
 type Notice struct {
-	NeedsRoot bool `json:"needsRoot,omitempty"`
-	System    bool `json:"system,omitempty"`
+	CommentID string `json:"commentId,omitempty"`
+	NeedsRoot bool   `json:"needsRoot,omitempty"`
+	System    bool   `json:"system,omitempty"`
 	// Kind is "ci" for CI results and budgets; empty for everything else.
 	Kind         string `json:"kind,omitempty"`
 	SupersededBy string `json:"supersededBy,omitempty"`
@@ -193,6 +194,9 @@ type Record struct {
 	Verdict          string                       `json:"verdict,omitempty"`
 	Summary          string                       `json:"summary,omitempty"`
 	ReviewID         int64                        `json:"reviewId,omitempty"`
+	OwnerLogin       string                       `json:"ownerLogin,omitempty"`
+	HeldComments     map[string]HeldComment       `json:"heldComments,omitempty"`
+	AdmittedComments map[string]string            `json:"admittedComments,omitempty"`
 	CommentDecisions map[string]Decision          `json:"commentDecisions,omitempty"`
 	Seen             map[string]string            `json:"seen,omitempty"`
 	Notices          []Notice                     `json:"notifications,omitempty"`
@@ -372,6 +376,15 @@ type NoiseRule struct {
 	Created       time.Time `json:"created"`
 	Hits          int       `json:"hits"`
 	LastMatched   time.Time `json:"lastMatched,omitempty"`
+}
+
+// HeldComment is stored in the PR record in SQLite until the owner admits it.
+type HeldComment struct {
+	ID        string `json:"id"`
+	Commenter string `json:"commenter"`
+	Body      string `json:"body"`
+	URL       string `json:"url"`
+	Version   string `json:"version"`
 }
 
 type Decision struct {

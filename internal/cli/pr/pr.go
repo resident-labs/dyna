@@ -575,6 +575,29 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		}
 		return engineclient.New("").Call(c.Context(), "RemovePRNoiseRule", []any{roomID, a[0]}, nil)
 	}})
+	admit := &cobra.Command{Use: "admit <number|url> <comment-id>", Short: "Owner: admit a held outside comment", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, args []string) error {
+		s, ref, err := resolve(c, args[0])
+		if err != nil {
+			return err
+		}
+		rec, err := s.Store.Get(ref.Key())
+		if err != nil {
+			return err
+		}
+		return engineclient.New("").Call(c.Context(), "AdmitPRComment", []any{rec.RoomID, ref.Key(), args[1]}, nil)
+	}}
+	dismiss := &cobra.Command{Use: "dismiss <number|url> <comment-id>", Short: "Owner: dismiss a held outside comment", Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, args []string) error {
+		s, ref, err := resolve(c, args[0])
+		if err != nil {
+			return err
+		}
+		rec, err := s.Store.Get(ref.Key())
+		if err != nil {
+			return err
+		}
+		return engineclient.New("").Call(c.Context(), "DismissPRComment", []any{rec.RoomID, ref.Key(), args[1]}, nil)
+	}}
+	root.AddCommand(admit, dismiss)
 	root.AddCommand(budget, healthCommand(o, roomFor), track, show, list, untrack, transfer, resume, hold, release, require, reviewer, review, verdict, comment, publishing, noise)
 	return root
 }

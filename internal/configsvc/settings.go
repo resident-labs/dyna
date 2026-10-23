@@ -90,6 +90,7 @@ func Items() ([]Item, error) {
 	stewardOptions = slices.Insert(stewardOptions, 1, settings.StewardProfileOff)
 	stewardLabels = slices.Insert(stewardLabels, 1, "Off · failed batches go to root")
 	items := []Item{
+		{Key: settings.KeyPRTrustedBots, Value: v.PRTrustedBots, Source: v.Source(settings.KeyPRTrustedBots), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of trusted GitHub bot logins. Other outside comments are held for the owner."},
 		{Key: settings.KeyVoiceDucking, Value: v.VoiceDucking, Source: v.Source(settings.KeyVoiceDucking), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},
 		{Key: settings.KeyLocalLaneRepos, Value: v.LocalLaneRepos, Source: v.Source(settings.KeyLocalLaneRepos), LiveVsRestart: settings.LiveNextOperation, Kind: "string", Help: "JSON list of absolute repository paths using the local lane. Fetches every five minutes."},
 		{Key: settings.KeyComputersEnabled, Value: v.ComputersEnabled, Source: v.Source(settings.KeyComputersEnabled), LiveVsRestart: settings.LiveNextOperation, Kind: "bool"},

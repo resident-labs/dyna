@@ -31,7 +31,10 @@ func (s *Service) Show(key string) (PRDetails, error) {
 	if r == nil {
 		return PRDetails{}, fmt.Errorf("PR is not tracked")
 	}
-	return PRDetails{Record: *r, NoiseRules: repoNoise(st, refRecord(*r))}, nil
+	record := *r
+	// Held bodies are owner-only. Generic PR inspection is also used by agents.
+	record.HeldComments = nil
+	return PRDetails{Record: record, NoiseRules: repoNoise(st, refRecord(*r))}, nil
 }
 
 func repoNoise(st State, ref Ref) []NoiseRule {

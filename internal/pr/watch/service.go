@@ -688,10 +688,11 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 		r.Seen[k] = v
 		n.changes = append(n.changes, k+":"+v)
 		c.Body = Sanitize(c.Body)
-		events = append(events, Event{ID: k, Kind: c.Kind, Commenter: c.User.Login, IsBot: isBot(c.User), Text: c.Body, ReviewState: c.State, Session: commentOwner(st.CommentSessions, c)})
+		events = append(events, Event{ID: k, Kind: c.Kind, Commenter: c.User.Login, IsBot: isBot(c.User), Text: c.Body, ReviewState: c.State, Association: c.Association, Session: commentOwner(st.CommentSessions, c)})
 	}
-	pr := PRContext{URL: r.URL, AuthorSession: r.Author, FormerAuthors: r.FormerAuthors, OwnerLogin: snap.Pull.User.Login}
-	rules := (Rules{Learned: repoNoise(*st, refRecord(*r))}).Triage(pr, events)
+	pr := PRContext{URL: r.URL, AuthorSession: r.Author, FormerAuthors: r.FormerAuthors, OwnerLogin: snap.OwnerLogin}
+	r.OwnerLogin = snap.OwnerLogin
+	rules := commentRules(*st, refRecord(*r)).Triage(pr, events)
 	decisions := rules
 	if s.Triage != nil && len(events) > 0 {
 		decisions = s.Triage.Triage(pr, events)
@@ -705,10 +706,13 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 	var reviewerTexts []string
 	for i, e := range events {
 		decision := decisions[i]
-		if rules[i].Reason == "owner" || rules[i].Action == "drop" {
+		if rules[i].Reason == "owner" || rules[i].Action == "drop" || rules[i].Action == "hold" {
 			decision = rules[i]
 		}
-		if decision.Action != "drop" {
+		if decision.Action == "hold" && r.AdmittedComments[e.ID] == r.Seen[e.ID] {
+			decision = Decision{Action: "keep", Reason: "owner_admitted"}
+		}
+		if decision.Action != "drop" && decision.Action != "hold" {
 			decision.Action = "keep"
 		}
 		if r.CommentDecisions == nil {
@@ -716,6 +720,15 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 		}
 		decision.Reason = Sanitize(clip(decision.Reason, 300))
 		r.CommentDecisions[e.ID] = decision
+		if decision.Action == "hold" {
+			if r.HeldComments == nil {
+				r.HeldComments = map[string]state.HeldComment{}
+			}
+			r.HeldComments[e.ID] = state.HeldComment{ID: e.ID, Commenter: e.Commenter, Body: e.Text, URL: commentLink(snap, e.ID), Version: r.Seen[e.ID]}
+			r.Notices = append(r.Notices, Notice{ID: "msg_" + digest(r.Key + "/held/" + e.ID + "/" + r.Seen[e.ID])[:16], Kind: "held-comment", CommentID: e.ID, Text: fmt.Sprintf("PR #%d: Held: outside commenter. Review this comment in Dyna to admit or dismiss it.", r.Number)})
+			continue
+		}
+		delete(r.HeldComments, e.ID)
 		if decision.Action == "drop" {
 			n.drops[decision.Reason]++
 			if id, ok := strings.CutPrefix(decision.Reason, "learned_noise:"); ok {
@@ -730,7 +743,7 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 		if decision.Action == "drop" && !toReviewer {
 			continue
 		}
-		text := fmt.Sprintf("GitHub %s from %s (comment %s):\n%s\n%s", e.Kind, e.Commenter, e.ID, clip(strings.TrimSpace(e.Text), 4000), commentLink(snap, e.ID))
+		text := commentNotice(e, decision, commentLink(snap, e.ID))
 		if decision.Action != "drop" {
 			n.add(r.Author, text)
 		}
@@ -1266,6 +1279,14 @@ func (s *Service) flush(ctx context.Context, key string) error {
 	return first
 }
 func (s *Service) deliver(ctx context.Context, r Record, n Notice) (string, error) {
+	if n.Kind == "held-comment" {
+		rec, err := s.roomsStore().Resolve(r.RoomID)
+		if err != nil {
+			return "", err
+		}
+		post, err := s.roomsStore().Post(rec.ID, room.PostInput{ID: n.ID, From: rec.Name + ":pr", Kind: "pr", To: []string{rec.Name}, Text: n.Text, Notice: room.PRNotice{Kind: "held-comment", Number: r.Number, ChangeID: r.Key, CommentID: n.CommentID}})
+		return post.ID, err
+	}
 	rec, err := s.Notify.Rooms.Resolve(r.RoomID)
 	if err != nil {
 		return "", err

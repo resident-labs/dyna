@@ -81,10 +81,11 @@ func (r Record) Archived(now time.Time, hasLiveWork bool) bool {
 
 // PRNotice identifies a watcher event without parsing its agent-facing text.
 type PRNotice struct {
-	Kind     string `json:"kind"`
-	Number   int    `json:"number"`
-	Head     string `json:"head"`
-	ChangeID string `json:"changeId"`
+	CommentID string `json:"commentId,omitempty"`
+	Kind      string `json:"kind"`
+	Number    int    `json:"number"`
+	Head      string `json:"head"`
+	ChangeID  string `json:"changeId"`
 }
 
 // Message is one durable post. It is append-only: once written it never
