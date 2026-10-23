@@ -15,7 +15,7 @@ func historicalWakeFixture(t *testing.T) (*Store, string, string, []byte) {
 	s := &Store{Root: filepath.Join(t.TempDir(), "rooms")}
 	roomID := "room_20261021-060000-01234567"
 	path := filepath.Join(s.Root, roomID, "messages.jsonl")
-	raw := []byte("{\"id\":\"legacy\",\"kind\":\"message\"}\n")
+	raw := []byte("{\"id\":\"bad\",\"kind\":1}\n{\"id\":\"legacy\",\"kind\":\"message\"}\n")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -39,8 +39,8 @@ func TestRoomWakeMigrationPreservesSourceOffsets(t *testing.T) {
 	if err := db.QueryRow("SELECT source_start, source_end, body, digest FROM room_post_normalizations WHERE room_id = ?", roomID).Scan(&start, &end, &body, &digest); err != nil {
 		t.Fatal(err)
 	}
-	wantDigest := sha256.Sum256(raw)
-	if start != 0 || end != int64(len(raw)) || !bytes.Equal(digest, wantDigest[:]) {
+	wantDigest := sha256.Sum256(raw[bytes.IndexByte(raw, '\n')+1:])
+	if start != int64(bytes.IndexByte(raw, '\n')+1) || end != int64(len(raw)) || !bytes.Equal(digest, wantDigest[:]) {
 		t.Fatalf("projection range = %d..%d, digest %x", start, end, digest)
 	}
 	var current map[string]json.RawMessage
@@ -70,7 +70,7 @@ func TestRoomWakeMigrationPreservesSourceOffsets(t *testing.T) {
 		t.Fatalf("end cursor = %+v, %d, %v", messages, next, err)
 	}
 	messages, next, err = s.ReadFrom(roomID, 1)
-	if err != nil || len(messages) != 0 || next != int64(len(raw)) {
+	if err != nil || len(messages) != 1 || !messages[0].Wake || next != int64(len(raw)) {
 		t.Fatalf("arbitrary cursor = %+v, %d, %v", messages, next, err)
 	}
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
