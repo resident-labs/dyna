@@ -75,8 +75,8 @@ func TestMembersRevisionMovesOnEveryMembersWrite(t *testing.T) {
 	moved("deleting the newest session row, then writing another")
 }
 
-// Deleting a session also deletes its turn and queue rows and their copies'
-// stamps, in the same transaction, and leaves other sessions' rows alone.
+// Deleting a session deletes its turn and queue rows in one transaction
+// and leaves other sessions' rows alone.
 func TestDeleteRemovesTheSessionsTurnsAndQueue(t *testing.T) {
 	s := revisionStore(t)
 	gone, kept := newSession(t, s, "gone"), newSession(t, s, "kept")
@@ -106,7 +106,6 @@ func TestDeleteRemovesTheSessionsTurnsAndQueue(t *testing.T) {
 	for _, c := range []struct{ what, query string }{
 		{"turn rows", "SELECT COUNT(*) FROM session_turns WHERE session = ?"},
 		{"queue rows", "SELECT COUNT(*) FROM session_queues WHERE session = ?"},
-		{"copy stamps", "SELECT COUNT(*) FROM state_mirrors WHERE key IN ('queues/' || ?1, 'turns/' || ?1 || '/1')"},
 	} {
 		if n := count(c.query, gone); n != 0 {
 			t.Errorf("the deleted session kept %d %s", n, c.what)
@@ -126,11 +125,6 @@ func TestTurnStatusReadsTheRow(t *testing.T) {
 		t.Fatalf("TurnStatus before any turn = %v, %v; want no row", ok, err)
 	}
 	if err := s.writeTurn(id, Turn{N: 1, Status: TurnOK}); err != nil {
-		t.Fatal(err)
-	}
-	// The rollback copy says otherwise; the row is the turn.
-	path := filepath.Join(s.Root, id, "turns", "1.json")
-	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
 	if status, ok, err := sessionlife.TurnStatus(s.Root, id, 1); err != nil || !ok || status != TurnOK {

@@ -81,15 +81,6 @@ func TestStoredPromptRewritePreservesTextAndRollsBack(t *testing.T) {
 		t.Fatalf("steering snapshots = %v, %v", snapshots, err)
 	}
 	checkText(snapshots[0].Turn, nil)
-	mirror, err := os.ReadFile(turnFile(t, s, id, 1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var copied Turn
-	if err := json.Unmarshal(mirror, &copied); err != nil {
-		t.Fatal(err)
-	}
-	checkText(copied, nil)
 
 	before, revision, err := storedTurn(ctx, db, id, 1)
 	if err != nil {
@@ -164,27 +155,25 @@ func TestStoredPromptRewritePreservesTextAndRollsBack(t *testing.T) {
 	if turn, err := s.ReadTurn(id, 3); err != nil || turn.Prompt != literal {
 		t.Fatalf("unconverted inline prompt = %q, %v", turn.Prompt, err)
 	}
-	// Both missing-row and eager retained-file imports treat hashes as text.
-	for n := 4; n <= 5; n++ {
-		raw, _ := json.Marshal(Turn{N: n, Prompt: literal})
-		if err := os.WriteFile(turnFile(t, s, id, n), raw, 0600); err != nil {
-			t.Fatal(err)
-		}
-		if n == 5 {
-			if err := s.migrateRetainedTurns(); err != nil {
-				t.Fatal(err)
-			}
-		}
-		turn, err := s.ReadTurn(id, n)
-		if err != nil || turn.Prompt != literal {
-			t.Fatalf("imported prompt = %q, %v", turn.Prompt, err)
-		}
-		stored, _, err := storedTurn(ctx, db, id, n)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := json.Unmarshal(stored, &turn); err != nil || turn.Prompt != hash(literal) {
-			t.Fatalf("imported reference = %q, %v", turn.Prompt, err)
-		}
+	// The one-time retained-file import also treats hashes as literal text.
+	legacy, legacyID := turnStore(t)
+	raw, _ := json.Marshal(Turn{N: 1, Prompt: literal})
+	if err := os.WriteFile(turnFile(t, legacy, legacyID, 1), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := legacy.ReadTurn(legacyID, 1)
+	if err != nil || turn.Prompt != literal {
+		t.Fatalf("imported prompt = %q, %v", turn.Prompt, err)
+	}
+	legacyDB, err := legacy.turnsDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, _, err := storedTurn(ctx, legacyDB, legacyID, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(stored, &turn); err != nil || turn.Prompt != hash(literal) {
+		t.Fatalf("imported reference = %q, %v", turn.Prompt, err)
 	}
 }
