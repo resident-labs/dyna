@@ -135,9 +135,11 @@ dependency, draft, mergeability, and CI gates still apply. Running reviews, merg
 trials, and CI continue. Expedite does not change session, workflow, or CI scheduling.
 
 Goal changes print one short status line. Add `--json` for the full record.
-Edits wake nobody. Every 15 minutes, Dyna asks parents, including root, to check
-their children and report their own status. Parents remain responsible for
-their children and their work. Set `sessions.checkInInterval` to change the
+Edits wake nobody. Every 15 minutes, Dyna asks parents with running, queued,
+or idle direct children to check those children and report their own status.
+The same rule applies to root. Dormant and closed children do not count.
+Parents remain responsible for their children and their work.
+Set `sessions.checkInInterval` to change the
 interval; `0s` disables check-ins.
 Goal status uses running turns, turn failures, tracked PRs, item counts, and recent journal events.
 Use `dyna goal note <id> "<progress>"` to record progress.
