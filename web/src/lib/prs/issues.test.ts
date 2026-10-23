@@ -171,6 +171,7 @@ test('unified issues deduplicate exports by repository URL and preserve local ro
 test('local issue search includes its room number', () => {
   const local = [localIssue, { ...localIssue, id: 'other', number: 13 }]
   assert.deepEqual(unifiedIssues([], local, 'dyna', 'all', 'd-12').map(i => i.local?.id), ['msg_local'])
+  assert.deepEqual(unifiedIssues([], local, 'dyna', 'all', 'd12').map(i => i.local?.id), ['msg_local'])
   assert.deepEqual(unifiedIssues([], local, 'dyna', 'all', '12').map(i => i.local?.id), ['msg_local'])
   assert.deepEqual(unifiedIssues([], local, 'dyna', 'all', 'D-14'), [])
 })
