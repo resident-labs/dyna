@@ -122,7 +122,8 @@
   /* The tabs scroll sideways on a phone, so none wraps or shrinks. */
   .strip { display: flex; gap: var(--s1); overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line-soft); margin-bottom: var(--s3); }
   .strip::-webkit-scrollbar { display: none; }
-  .tab { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: var(--s2) var(--s3); font-size: var(--t-ui); color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; transition: color var(--motion-fast) var(--ease); }
+  .tab { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: var(--s2) var(--s3); font-size: var(--t-ui); color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+  .tab:not(.sel) { transition: color var(--motion-fast) var(--ease); }
   .tab.sel { color: var(--ink); border-bottom-color: var(--iris); }
   @media (hover: hover) {
     .tab:not(.sel):hover { color: var(--ink-2); }
