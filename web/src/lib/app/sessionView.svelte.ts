@@ -92,6 +92,13 @@ async function unqueue(q: Receipt) {
   sessionHost.say({ tone: 'success', subject: 'Removed the queued message', text: 'The turn will not see it.' })
 }
 
+// setSession takes a transcript that arrived with the session, so it also
+// clears the error of a read that failed before it.
+function setSession(value: Session | null) {
+  session = value
+  sessionError = ''
+}
+
 async function dismissPendingPost(id: string, messageId: string) {
   await api.dismissPendingPost(id, messageId, true)
   if (router.drill?.id === id) queue = queue.filter((post) => post.id !== messageId)
@@ -118,7 +125,7 @@ export const sessionView = {
   /** A room pick drops the old room's transcript. */
   clear() { session = null },
   /** A transcript that arrived with the session needs no read. */
-  setSession(value: Session | null) { session = value },
+  setSession,
   /** A member that changed, as a reopen or a dismiss does, keeps its transcript. */
   patchMember(member: Session['member']) {
     if (session && session.member?.id === member?.id) session = { ...session, member }
