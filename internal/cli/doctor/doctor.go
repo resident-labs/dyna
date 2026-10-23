@@ -125,6 +125,6 @@ func post(r doctor.Report) error {
 
 func reportPost(roomName string, r doctor.Report) room.PostInput {
 	text := fmt.Sprintf("Doctor report %d (%s):\n%s", r.ID, r.Trigger, r.Text())
-	sum := sha256.Sum256([]byte(fmt.Sprintf("doctor:%s:%d:%s", r.Machine, r.ID, r.At.UTC().Format(time.RFC3339Nano))))
+	sum := sha256.Sum256([]byte(fmt.Sprintf("doctor:%s:%d:%d", r.Machine, r.ID, r.At.Unix())))
 	return room.PostInput{ID: fmt.Sprintf("msg_%x", sum[:8]), From: roomName + ":doctor", To: []string{roomName + ":root"}, Kind: "alert", Wake: true, Text: text}
 }
