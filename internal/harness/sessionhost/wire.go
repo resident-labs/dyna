@@ -19,6 +19,7 @@ const privateArg = "--dyna-private-sessionhost-v1"
 // host pushes opFrame and opExit between replies. During attach and replace
 // the host first sends opBind and waits for the client's opBound.
 const (
+	opRetained = "retained"
 	opAttach   = "attach"
 	opReplace  = "replace"
 	opBound    = "bound"
