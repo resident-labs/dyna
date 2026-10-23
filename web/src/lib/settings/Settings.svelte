@@ -11,6 +11,7 @@
   import SettingsPane from './SettingsPane.svelte'
   import DevicesPane from './DevicesPane.svelte'
   import HooksPane from './HooksPane.svelte'
+  import type { HookLogTarget } from './hookLog.ts'
   import type { ModelSelection } from './profiles/state.ts'
   import type { UpdateNotice } from '../api/settings.ts'
 
@@ -23,10 +24,12 @@
     accountId?: string
     profile?: string
     initialSelection?: ModelSelection | null
+    // hookRun is the run a card asked for, which the Hooks pane opens.
+    hookRun?: HookLogTarget | null
     oncreateprofile?: (selection: ModelSelection) => void
     onclose: () => void
   }
-  let { update = null, dataDir = '', start = 'profiles', pairNow = false, roomId = '', accountId = '', profile = '', initialSelection = null, oncreateprofile = () => {}, onclose }: Props = $props()
+  let { update = null, dataDir = '', start = 'profiles', pairNow = false, roomId = '', accountId = '', profile = '', initialSelection = null, hookRun = null, oncreateprofile = () => {}, onclose }: Props = $props()
 
   let pane = $state(untrack(() => start)) // the pane to open first
   let usageAccountId = $state(untrack(() => accountId))
@@ -64,7 +67,7 @@
   {:else if pane === 'settings'}
     <SettingsPane />
   {:else if pane === 'hooks'}
-    <HooksPane onmodal={(open) => (busy = open)} />
+    <HooksPane onmodal={(open) => (busy = open)} focus={hookRun} />
   {:else if pane === 'devices'}
     <DevicesPane {pairNow} onmodal={(open) => (busy = open)} />
   {:else}

@@ -12,6 +12,7 @@ import (
 	"dyna-agent/internal/hookinstall"
 	"dyna-agent/internal/processguard"
 	"dyna-agent/internal/repoid"
+	"dyna-agent/internal/room"
 )
 
 func TestInstallReceiptSurvivesRestartAndFinishesHookLog(t *testing.T) {
@@ -68,7 +69,12 @@ func TestInstallReceiptSurvivesRestartAndFinishesHookLog(t *testing.T) {
 		t.Fatalf("pending: %#v %v", ev, err)
 	}
 	notices := 0
-	restarted := Service{DataDir: s.DataDir, Install: &installer, Notify: func(Event, string) error { notices++; return nil }}
+	restarted := Service{DataDir: s.DataDir, Install: &installer, Post: func(_ Event, ev room.HookEvent) error {
+		if ev.State == room.HookError {
+			notices++
+		}
+		return nil
+	}}
 	for n := 0; n < 2; n++ {
 		if err = restarted.ReconcileInstall(ctx); err != nil {
 			t.Fatal(err)

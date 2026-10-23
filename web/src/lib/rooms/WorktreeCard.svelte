@@ -4,7 +4,7 @@
   // never its text, and keeps no feed-only state.
   import type { Message, PRNotice } from '../api/room.ts'
   import type { EventSurface } from './eventRenderers.ts'
-  import { worktreeEvent } from './eventRenderers.ts'
+  import { worktreeEvent } from './eventPayloads.ts'
   import type { WorktreeReason } from './events.gen.ts'
   import { clock } from '../ui/format.ts'
 
