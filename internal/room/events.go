@@ -26,9 +26,15 @@ type EventType string
 // WakeRule says whether an event starts or steers a session.
 type WakeRule string
 
-// WakeNever posts an event without starting or steering any session. Later
-// PRs add the rules for events that do wake someone.
-const WakeNever WakeRule = "never"
+const (
+	// WakeNever posts an event without starting or steering any session.
+	WakeNever WakeRule = "never"
+	// WakeTarget starts or steers the session the event is addressed to, such
+	// as the PR author a CI failure belongs to.
+	WakeTarget WakeRule = "target"
+	// WakeRootIfNeeded starts the root seat only when the post needs root.
+	WakeRootIfNeeded WakeRule = "root-if-needed"
+)
 
 // Event families and types.
 const (
@@ -39,6 +45,41 @@ const (
 	TypeStarted EventType   = "started"
 	TypeResult  EventType   = "result"
 )
+
+// The PR family posts one event per fact the watcher observed about a change.
+// Its events wake the change's author, so unlike the quiet families their texts
+// are input an agent acts on.
+const FamilyPR EventFamily = "pr"
+
+// PRType is the fact a PR event reports. The web card picks its chip from it.
+type PRType string
+
+// PR event types. The CI attempt and the reviewer verdict carry their own
+// fields, so a card never reads the text to tell them apart.
+const (
+	PROpened         PRType = "opened"
+	PRReady          PRType = "ready"
+	PRApproved       PRType = "approved"
+	PRChanges        PRType = "changes"
+	PRCIFailed       PRType = "ci-failed"
+	PRCIPaused       PRType = "ci-paused"
+	PRCIPassed       PRType = "ci-passed"
+	PRReturned       PRType = "returned"
+	PRMerged         PRType = "merged"
+	PRClosed         PRType = "closed"
+	PRComment        PRType = "comment"
+	PRHeldComment    PRType = "held-comment"
+	PRReviewAssigned PRType = "review-assigned"
+	// PRUpdate is a change fact that none of the other types names, such as a
+	// CI budget note or a merge report that PR 3b will type.
+	PRUpdate PRType = "update"
+)
+
+// prTypes lists every PR type the web needs as a union type.
+var prTypes = []PRType{
+	PROpened, PRReady, PRApproved, PRChanges, PRCIFailed, PRCIPaused, PRCIPassed,
+	PRReturned, PRMerged, PRClosed, PRComment, PRHeldComment, PRReviewAssigned, PRUpdate,
+}
 
 // WorktreeReason is the class of a kept worktree. It keys the dedupe of the
 // notice and picks the wording of the card.
@@ -72,6 +113,57 @@ const (
 
 // hookStates lists every state the web needs as a union type.
 var hookStates = []HookState{HookRunning, HookPassed, HookFailed, HookError}
+
+// PREvent tells one fact about a tracked change: a CI result, a reviewer
+// verdict, a comment, or the end of the change. The watcher posts it to the
+// change's author. Every field is typed, so the web card draws the same facts
+// the agent text carries and never reads the text.
+type PREvent struct {
+	Type PRType `json:"type"`
+	// Label names the change in the agent text, as "PR #12" or "Change <key>".
+	Label string `json:"label"`
+	// Number is the GitHub PR number. A change on a local branch has none.
+	Number int `json:"number,omitempty"`
+	// ChangeID is the watcher's key of the change, such as the PR URL.
+	ChangeID string `json:"changeId"`
+	// Key is the watcher's own identity of this notice, such as its write
+	// token. Two comments on one head need it to post as two events.
+	Key      string `json:"key,omitempty"`
+	Repo     string `json:"repo,omitempty"`
+	Title    string `json:"title,omitempty"`
+	Head     string `json:"head,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Branch   string `json:"branch,omitempty"`
+	CIAttempt int   `json:"ciAttempt,omitempty"`
+	CIMax     int   `json:"ciMax,omitempty"`
+	// Summary is the short facts line: the failed check names, the reviewer's
+	// verdict summary. It never holds raw log lines.
+	Summary   string `json:"summary,omitempty"`
+	Commenter string `json:"commenter,omitempty"`
+	CommentID string `json:"commentId,omitempty"`
+	// Verdict is a reviewer verdict: approve, approve-with-nits, changes or question.
+	Verdict string `json:"verdict,omitempty"`
+	// Detail is the body the agent reads: review markdown, comment text or the
+	// remaining notice sentences.
+	Detail string `json:"detail,omitempty"`
+	// LogTail is the labelled CI log tail block, when the watcher had one.
+	LogTail string `json:"logTail,omitempty"`
+	// Dropped counts the comments the watcher left out as noise.
+	Dropped int `json:"dropped,omitempty"`
+}
+
+func (p PREvent) eventFamily() EventFamily { return FamilyPR }
+func (p PREvent) eventType() EventType     { return EventType(p.Type) }
+
+// eventSubject is the change, so every event of one change folds into one card.
+func (p PREvent) eventSubject() string { return p.ChangeID }
+
+// eventDedupe keys one post per type and head. A comment adds its own key and
+// comment ID, because one head can get many comments. The key is the watcher's
+// notice token, so a retried notice keeps its post ID.
+func (p PREvent) eventDedupe() string {
+	return strings.Join([]string{string(p.Type), p.Head, p.CommentID, p.Key}, "\x00")
+}
 
 // EventPayload is the stored payload of a sealed system event. PostEvent
 // writes it and the per-event accessors on Message read it, so no code
@@ -220,9 +312,9 @@ var eventSpecs = []EventSpec{
 		Quiet:    true,
 		Wake:     WakeNever,
 		Once:     true,
-		Text:     "Worktree kept at {path}: branch {branch}, ahead {ahead}, dirty: {dirty}. {detail}",
+		Text:     "Worktree kept at {path}: branch {branch}, ahead {ahead}, dirty: {dirty}.",
 		// The keep failure names no tree.
-		TextNoSubject: "Worktree cleanup could not keep the session's trees: {detail}",
+		TextNoSubject: "Worktree cleanup could not keep the session's trees.",
 	},
 	{
 		Family:   FamilyHook,
@@ -242,7 +334,122 @@ var eventSpecs = []EventSpec{
 		Quiet:    true,
 		Wake:     WakeNever,
 		Once:     true,
-		Text:     "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}). {detail}",
+		Text:     "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}).",
+	},
+	// PR events reach the change's author, so their texts are input an agent
+	// acts on. Only a CI failure, a requested change and a return wake the
+	// author; the other facts wait for its next turn.
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PROpened),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "{label} opened in {repo}. Review it at {url}",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRReady),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "{label} is ready to land at {head}.",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRApproved),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "{label} at {head} approved by its Dyna reviewer.",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRChanges),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "Reviewer requests changes for {label} at {head}. Fix the findings and push to this PR.",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRCIFailed),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "CI failed ({ciAttempt}/{ciMax}) on {label} at {head}: {summary}. Fix the failure and push to this PR.",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRCIPaused),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "{label} failed CI three times in a row. Later CI failures will not wake the author. Failed jobs: {summary}.",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRCIPassed),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "CI passed on {label} at {head}.",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRReturned),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "{label} at {head} was returned to you. {summary}",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRMerged),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "{label} merged.",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRClosed),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "{label} closed.",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRComment),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "{label} at {head}: {summary}",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRHeldComment),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "{label}: Held: comment from {commenter}, who is outside the trusted set. Review this comment in Dyna to admit or dismiss it.",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRReviewAssigned),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeTarget,
+		Text:     "Review {label} at {head}.",
+	},
+	{
+		Family:   FamilyPR,
+		Type:     EventType(PRUpdate),
+		Renderer: "PRCard",
+		Payload:  reflect.TypeOf(PREvent{}),
+		Wake:     WakeRootIfNeeded,
+		Text:     "{label} at {head}.",
 	},
 }
 
@@ -253,6 +460,7 @@ type eventEnum struct {
 }
 
 var eventEnums = []eventEnum{
+	{Type: reflect.TypeOf(PRType("")), Values: prTypeValues()},
 	{Type: reflect.TypeOf(WorktreeReason("")), Values: []string{
 		string(WorktreeNotMerged), string(WorktreeDirty), string(WorktreeManualHandoff), string(WorktreeKeepFailed), string(WorktreeOther),
 	}},
@@ -274,7 +482,6 @@ var legacyFamilies = []string{
 	"issue",
 	"merge-decision",
 	"notice",
-	"pr",
 	"seat",
 	"spawn",
 	"test-health",
@@ -284,6 +491,29 @@ var legacyFamilies = []string{
 // agentKinds are the posts a person or an agent writes, and the session turn
 // results the engine records for them.
 var agentKinds = []string{"message", "completed", "failed", "stopped"}
+
+// EventPost is the registry's description of the post one event makes. notify
+// reads it so a poster never chooses the post kind, text, quiet flag or wake.
+type EventPost struct {
+	Kind  string
+	Type  EventType
+	Text  string
+	Quiet bool
+	Wake  WakeRule
+}
+
+// DescribeEvent returns the post of an event from the registry.
+func DescribeEvent(ev Event) (EventPost, bool) {
+	spec, ok := eventSpecFor(string(ev.eventFamily()), string(ev.eventType()))
+	if !ok {
+		return EventPost{}, false
+	}
+	text := spec.Text
+	if ev.eventSubject() == "" && spec.TextNoSubject != "" {
+		text = spec.TextNoSubject
+	}
+	return EventPost{Kind: string(spec.Family), Type: spec.Type, Text: eventText(text, ev), Quiet: spec.Quiet, Wake: spec.Wake}, true
+}
 
 // eventSpecFor returns the registered spec of a family and type.
 func eventSpecFor(family, typ string) (EventSpec, bool) {
@@ -306,13 +536,52 @@ func legacyFamily(kind string) bool { return slices.Contains(legacyFamilies, kin
 // agentKind reports a kind that a person or a session writes.
 func agentKind(kind string) bool { return kind == "" || slices.Contains(agentKinds, kind) }
 
-// PostEvent stores one system event. It looks up the spec, rejects an event
-// whose required fields are empty, fixes the sender to the engine, derives the
-// post ID from the event so the same event is stored once, and applies the
-// spec's quiet and wake rules. A spec with Once drops a later post with the
-// same key and other content: it returns no message and no error. A retry with
-// identical content returns the stored message, as Post does.
+// PostEventInput is one system event to store, with the delivery facts the
+// poster knows and the registry does not: who receives it, whether root must
+// act, and the session bindings of the recipient addresses.
+//
+// The registry decides everything else: the post kind, its text, its quiet
+// flag and its wake rule. A poster cannot choose them.
+type PostEventInput struct {
+	RoomID string
+	Event  Event
+	// ID is the poster's own stable post ID, when it keeps one for retries.
+	// A poster without one lets the registry derive it from the event, unless
+	// FreshID asks for a new post as Store.Post does.
+	ID string
+	// FreshID stores a new post for every call, for a poster whose notice has
+	// no stable identity of its own.
+	FreshID bool
+	// To holds the resolved recipient addresses and Via the mention tokens as
+	// the poster wrote them.
+	To  []string
+	Via []string
+	// NeedsRoot asks the root seat to act on this post.
+	NeedsRoot bool
+	// RoomService sends the post as the room's own service, such as the PR
+	// watcher. The default sender is the engine.
+	RoomService bool
+	// SessionIDs binds participant addresses to exact sessions.
+	SessionIDs map[string]string
+	ReplyTo    string
+	// NoWake stores an informational post for the recipient's next turn.
+	NoWake bool
+}
+
+// PostEvent stores one system event with no recipients but the given ones. It
+// is the short form for a quiet event that wakes nobody.
 func (s *Store) PostEvent(roomID string, ev Event, to ...string) (Message, error) {
+	return s.PostEventInput(PostEventInput{RoomID: roomID, Event: ev, To: to})
+}
+
+// PostEventInput stores one system event. It looks up the spec, rejects an
+// event whose required fields are empty, fixes the sender to an engine sender,
+// derives the post ID from the event so the same event is stored once, and
+// applies the spec's quiet and wake rules. A spec with Once drops a later post
+// with the same key and other content: it returns no message and no error. A
+// retry with identical content returns the stored message, as Post does.
+func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
+	ev := in.Event
 	spec, ok := eventSpecFor(string(ev.eventFamily()), string(ev.eventType()))
 	if !ok {
 		return Message{}, fmt.Errorf("event %s/%s is not registered in internal/room/events.go", ev.eventFamily(), ev.eventType())
@@ -324,24 +593,75 @@ func (s *Store) PostEvent(roomID string, ev Event, to ...string) (Message, error
 	if err != nil {
 		return Message{}, err
 	}
-	text := spec.Text
-	if ev.eventSubject() == "" {
-		text = spec.TextNoSubject
+	// A caller cannot choose the sender of an event post: it is the engine or
+	// the room's own service, never a session.
+	from := EngineSender
+	if in.RoomService {
+		rec, err := s.readRecord(in.RoomID)
+		if err != nil {
+			return Message{}, err
+		}
+		from = rec.Name
 	}
-	msg, err := s.post(roomID, PostInput{
-		ID:      eventID(ev),
-		From:    EngineSender,
-		Kind:    string(spec.Family),
-		Notice:  PRNotice{Kind: string(spec.Type)},
-		payload: EventPayload{raw: payload},
-		To:      to,
-		Text:    renderEventText(text, ev),
-		Wake:    spec.Wake != WakeNever,
+	template := spec.Text
+	if ev.eventSubject() == "" && spec.TextNoSubject != "" {
+		template = spec.TextNoSubject
+	}
+	text := eventText(template, ev)
+	if spec.Wake == WakeRootIfNeeded && !in.NeedsRoot {
+		spec.Wake = WakeNever
+	}
+	id := in.ID
+	if id == "" && !in.FreshID {
+		id = eventID(ev)
+	}
+	msg, err := s.post(in.RoomID, PostInput{
+		ID:         id,
+		From:       from,
+		Kind:       string(spec.Family),
+		Notice:     EventNotice{Kind: string(spec.Type)},
+		payload:    EventPayload{raw: payload},
+		To:         in.To,
+		Via:        in.Via,
+		NeedsRoot:  in.NeedsRoot,
+		SessionIDs: in.SessionIDs,
+		ReplyTo:    in.ReplyTo,
+		Text:       text,
+		Wake:       spec.Wake != WakeNever && !in.NoWake,
 	}, true)
 	if errors.Is(err, ErrPostIDConflict) && spec.Once {
 		return Message{}, nil
 	}
 	return msg, err
+}
+
+// prTypeValues lists the PR types for the generated web union.
+func prTypeValues() []string {
+	values := make([]string, len(prTypes))
+	for i, typ := range prTypes {
+		values[i] = string(typ)
+	}
+	return values
+}
+
+// eventBlocks are the payload fields that the agent text appends as their own
+// paragraph after the spec's one-line template, in this order. A block that the
+// event leaves empty adds nothing, so the text has no empty section.
+var eventBlocks = []string{"detail", "logTail"}
+
+// eventText renders the spec's one-line template and appends the event's text
+// blocks. A block that only repeats the template adds nothing.
+func eventText(template string, ev Event) string {
+	text := renderEventText(template, ev)
+	value := reflect.ValueOf(ev)
+	for _, name := range eventBlocks {
+		block := eventFieldText(value, name)
+		if block == "" || strings.TrimSpace(block) == strings.TrimSpace(text) {
+			continue
+		}
+		text += "\n\n" + block
+	}
+	return text
 }
 
 // checkRequired rejects an event with an empty field that its json tag does
@@ -416,6 +736,21 @@ func eventFieldText(value reflect.Value, name string) string {
 		}
 	}
 	return ""
+}
+
+// PR returns the payload of a PR event. It decodes the stored bytes strictly,
+// so an unknown field is a failed read rather than a silent mismatch.
+func (m Message) PR() (PREvent, bool) {
+	if m.Kind != string(FamilyPR) || len(m.Payload.raw) == 0 {
+		return PREvent{}, false
+	}
+	var ev PREvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
+		return PREvent{}, false
+	}
+	return ev, true
 }
 
 // Hook returns the payload of a hook run event, of either type. It decodes the
