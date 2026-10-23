@@ -408,6 +408,18 @@ func TestClearDormantReportsGainedWorkAsANeutralKeptSession(t *testing.T) {
 	}
 }
 
+func TestDormantKeptRowSeparatesNewWorkFromAFailure(t *testing.T) {
+	meta := Meta{ID: "ses_a", Room: "dyna", Name: "ts-guard"}
+	work := keptRow(meta, keptForWork("the session started a turn"))
+	if !work.OK || work.Reason != RoomSessionKeptStartedWork || work.Name != "dyna:ts-guard" || work.Status != "kept" {
+		t.Fatalf("gained work row = %+v; want a neutral kept row with its name", work)
+	}
+	failure := keptRow(meta, errors.New("the session store could not be read"))
+	if failure.OK || failure.Reason != RoomSessionKeptFailed || failure.Error == "" {
+		t.Fatalf("failure row = %+v; want a real failure", failure)
+	}
+}
+
 // testIdleAfter is the dormant age these tests treat as long dormant.
 const testIdleAfter = 30 * time.Minute
 

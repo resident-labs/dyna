@@ -1696,8 +1696,15 @@
     toastTimer = setTimeout(hideToast, TOAST_DETAIL_MS)
   }
   function toggleToastDetail() {
-    toastDetailOpen = !toastDetailOpen
+    if (toastDetailOpen) { closeToastDetail(); return }
+    toastDetailOpen = true
     clearTimeout(toastTimer)
+  }
+  // closeToastDetail leaves the one line on screen for its normal time again.
+  function closeToastDetail() {
+    toastDetailOpen = false
+    clearTimeout(toastTimer)
+    toastTimer = setTimeout(hideToast, TOAST_MS)
   }
 
   // guardItems lists what a close-guard error names: "responsibilities: cannot close:\n- ...".
@@ -2707,9 +2714,9 @@
 {:else if toast}
   <div class="toast" role="status">{toast}{#if toastDetail}<button type="button" class="toast-action" aria-expanded={toastDetailOpen} onclick={toggleToastDetail}>Details</button>{/if}</div>
 {/if}
-{#if toast && toastDetail && toastDetailOpen}
-  <div class="toast-details" role="dialog" aria-label={toastDetail.title}>
-    <header><strong>{toastDetail.title}</strong><button type="button" onclick={() => (toastDetailOpen = false)}>Dismiss</button></header>
+{#if !closeResult && toast && toastDetail && toastDetailOpen}
+  <div class="toast-details" role="region" aria-label={toastDetail.title}>
+    <header><strong>{toastDetail.title}</strong><button type="button" onclick={closeToastDetail}>Dismiss</button></header>
     <ul>{#each toastDetail.items as item, i (i)}<li class:error={item.error}><strong>{item.name}</strong><span>{item.text}</span></li>{/each}</ul>
   </div>
 {/if}
