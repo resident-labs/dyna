@@ -192,15 +192,22 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 	for _, page := range pages {
 		artifacts = append(artifacts, page.Artifacts...)
 	}
+	// Prefer report names, but retain bounded discovery for custom artifact names.
+	sort.SliceStable(artifacts, func(i, j int) bool {
+		return likelyTestArtifact(artifacts[i].Name) && !likelyTestArtifact(artifacts[j].Name)
+	})
 	remaining := int64(maxTestArtifact)
+	fallbackBytes, fallbackCount := int64(maxTestArtifact), 3
 	junit := false
 	var problems []string
 	for _, artifact := range artifacts {
-		if artifact.Expired || artifact.ID <= 0 || !likelyTestArtifact(artifact.Name) {
+		if artifact.Expired || artifact.ID <= 0 {
 			continue
 		}
 		if artifact.Size < 0 || artifact.Size > maxTestArtifact {
-			problems = append(problems, "report unreadable: "+boundedTestName(artifact.Name)+" exceeds artifact size limit")
+			if likelyTestArtifact(artifact.Name) {
+				problems = append(problems, "report unreadable: "+boundedTestName(artifact.Name)+" exceeds artifact size limit")
+			}
 			continue
 		}
 		if run.Attempt > 1 {
@@ -209,6 +216,14 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 			if startErr != nil || createErr != nil || created.Before(started) {
 				continue
 			}
+		}
+		if !likelyTestArtifact(artifact.Name) {
+			if fallbackCount == 0 || artifact.Size > fallbackBytes {
+				problems = append(problems, "report unreadable: "+boundedTestName(artifact.Name)+" exceeds fallback inspection limit (3 artifacts, 20 MiB)")
+				continue
+			}
+			fallbackCount--
+			fallbackBytes -= artifact.Size
 		}
 		download := gh
 		if download.Timeout < 90*time.Second {
@@ -222,6 +237,9 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 				return report, junit, problems, err
 			}
 			continue
+		}
+		if !likelyTestArtifact(artifact.Name) {
+			fallbackBytes -= max(int64(len(raw))-artifact.Size, 0)
 		}
 		part, found, err := readTestArtifact(raw, &remaining)
 		if err != nil {
