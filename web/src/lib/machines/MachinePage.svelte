@@ -17,7 +17,7 @@
   import type { SystemLoad } from '../api/system.ts'
   import type { MachineAgent, MachineDetail, MachinePatch, MachineRole } from '../api/machine.ts'
   import { ago } from '../ui/format.ts'
-  import { ciRunDetail, ciRunText, computersText, count, loadText, memoryPct, reasonText, roleLabel, routeText, runtimeText, sizeText, statusText, systemText, versionText } from './machines.ts'
+  import { ciRunDetail, ciRunText, computersText, count, diskText, loadText, memoryPct, reasonText, roleLabel, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
 
   let { machine, error = '', busy = false, probing = false, onback, onagent, onsave, onprobe = () => {} }: {
     machine: MachineDetail | null
@@ -115,9 +115,8 @@
             {#snippet trail()}<span class="value">{computersText(caps)}</span>{/snippet}
           </Row>
           {#if caps.freeDisk !== undefined}
-            {@const free = caps.freeDisk}
             <Row dense text="Disk">
-              {#snippet trail()}<span class="value">{sizeText(free)} free</span>{/snippet}
+              {#snippet trail()}<span class="value">{diskText(caps)}</span>{/snippet}
             </Row>
           {/if}
         {/if}

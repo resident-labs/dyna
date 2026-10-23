@@ -111,8 +111,10 @@ export interface MachineCapabilities {
   computers: boolean
   stream: boolean
   // freeDisk is the free space on the machine's disk in bytes. It is absent
-  // when the probe could not read it.
+  // when the probe could not read it. diskFloor is the free space Dyna keeps
+  // for CI work on the machine; below it, no CI starts there.
   freeDisk?: number
+  diskFloor?: number
 }
 
 // MachineLoad is the last load reading of a machine. cpuPercent is absent when
