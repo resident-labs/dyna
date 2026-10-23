@@ -189,7 +189,7 @@ test('two hooks never fold together', () => {
 })
 
 test('passes more than the fold window apart start a new row', () => {
-  const late = hookPost('pass-late', 'result', 'librarian-run-late', 'passed', start + 61 * 60_000, 'librarian')
+  const late = hookPost('pass-late', 'result', 'librarian-run-late', 'passed', start + 90 * 60_000, 'librarian')
   const rows = content(feedRows([pass(1), late]))
   assert.deepEqual(rows.map((row) => row.post.id), ['pass-librarian-1', 'pass-late'])
 })
