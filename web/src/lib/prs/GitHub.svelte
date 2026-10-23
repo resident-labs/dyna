@@ -16,6 +16,8 @@
   import TabHeader from '../rooms/TabHeader.svelte'
   import PRDetail from './PRDetail.svelte'
   import IssueList from './IssueList.svelte'
+  import { unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
+  import { location as issueLocation } from '../rooms/issues.ts'
   import IssuePage from './IssuePage.svelte'
   import Menu from '../ui/Menu.svelte'
   import { changeTitle, isLocal, withoutReviewers } from './pr.ts'
@@ -23,7 +25,7 @@
   import { neighbor } from './prboard.ts'
   import { prHash, parsePRHash, prRef, findPR, lookupNumber, issueHash, parseIssueHash, type Link } from './prlink.ts'
   import { roomHash } from '../ui/route.ts'
-  import { trackedFor, issueGroups, loadFilters, saveFilters } from './github.ts'
+  import { trackedFor, loadFilters, saveFilters } from './github.ts'
   import type { MergeQueueItem, MergeControlStatus, ReviewerStatus } from '../api/change.ts'
   import type { Goal } from '../api/goal.ts'
   import type { GitHubDetail, GitHubItem, GitHubListResult } from '../api/github.ts'
@@ -45,6 +47,11 @@
     items: TrackItem[]
   }
   interface Props {
+    onmention?: (reference: IssueReference) => void
+    localIssues?: RoomIssue[]
+    oncloseissue?: (issue: RoomIssue) => void
+    onexportissue?: (issue: RoomIssue) => void
+    ondismississue?: (issue: RoomIssue) => void
     mergeVersion?: number
     older?: boolean
     loadingOlder?: boolean
@@ -75,10 +82,16 @@
   // kind is 'pr' or 'issue': the Pull requests tab and the Issues tab each mount this view.
   // onpr opens a PR by number in the Pull requests tab, from an issue's linked PRs.
   // link is a PR link ({pr, tab}) or issue link ({issue}) to open, from the address bar.
-  let { mergeVersion = 0, older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, kind = 'pr', integration = null, changes = null, members = [], link = null, onask, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
+  let { onmention, localIssues = [], oncloseissue, onexportissue, ondismississue, mergeVersion = 0, older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, kind = 'pr', integration = null, changes = null, members = [], link = null, onask, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
 
   const saved = loadFilters()
-  let listState = $state(saved.state)
+  let listState = $state(kind === 'issue' ? 'open' : saved.state)
+  let source = $state('all')
+  let localSelected = $state<RoomIssue | null>(null)
+  let selectedLocal = $derived(localIssues.find((i) => i.id === localSelected?.id) || localSelected)
+  let localBody = $state('')
+  let localBodyError = $state('')
+  let localSequence = 0
   let selId = $state(findPR(changes, link?.pr ?? '')?.changeId ?? '') // the open row's changeId
   let tab = $state(link?.tab ?? 'conversation')
   let search = $state('')
@@ -125,6 +138,20 @@
   let chgAuthor = $derived(chg?.authorSession ? byId[chg.authorSession] : null)
   let chgReviewer = $derived(chg?.reviewerSession ? byId[chg.reviewerSession] : null)
   let rowItems = $derived(list?.items ?? [])
+  let issueRows = $derived(unifiedIssues(rowItems, localIssues, source, listState, query))
+  async function pickIssue(it: IssueRow) {
+    localSelected = it.number ? null : it.local || null
+    localBody = ''; localBodyError = ''
+    const n = ++localSequence
+    if (!localSelected) { openIssue(it.number); return }
+    pick(0)
+    history.replaceState(null, '', listAddress())
+    const issue = localSelected
+    try {
+      const feed = await api.feedAround(roomId, issue.id, 1)
+      if (n === localSequence) localBody = feed.posts?.find((p: { id: string }) => p.id === issue.id)?.text || ''
+    } catch (e) { if (n === localSequence) localBodyError = errorText(e) }
+  }
   let item = $derived(detail ?? rowItems.find((it) => it.number === sel) ?? null)
   let workSession = $derived(item?.workingSession ? byId[item.workingSession] : null)
   // Keyboard and swipe navigation follow exactly the visible open list.
@@ -142,6 +169,14 @@
       if (n === seq) error = errorText(e)
     }
   }
+
+  // Export changes the local row before GitHub's list contains the new issue.
+  let localVersion: string | null = null
+  $effect(() => {
+    const version = localIssues.map((i) => i.id + ':' + i.state + ':' + (i.githubUrl || '')).join('|')
+    if (localVersion !== null && localVersion !== version && !inPRs) load()
+    localVersion = version
+  })
 
   // The merge service's state and order for each open PR. It reads saved
   // facts only, so it reloads whenever a change moves.
@@ -218,6 +253,8 @@
   // The address bar leads: Back, Forward and a new link open what they name.
   function followLink(l: Link | null) {
     if (!inPRs) {
+      localSelected = null
+      localSequence++
       const n = l && (!l.roomId || l.roomId === roomId) ? l.issue ?? 0 : 0
       if (n !== sel) pick(n)
       return
@@ -293,11 +330,13 @@
     }, 450)
   }
   function ask() {
+    if (chg && onmention) { onmention({ kind: 'pr', number: chg.number || 0, title: changeTitle(chg), state: String(chg.state || 'OPEN'), url: chg.url || '' }); return }
     if (chg) onask?.(`Review pull request #${chg.number}: ${chg.title}\n${chg.url}`)
   }
   // Start and "Ask an agent" on an issue are one path: the engine starts the
   // work, or returns the session already on it. Its warning is shown first.
   async function startWork(it: GitHubItem) {
+    if (onmention) { onmention({ kind: 'issue', number: it.number, title: it.title, state: it.state, url: it.url }); return }
     starting = it.number
     startNote = ''
     started = null
@@ -380,6 +419,7 @@
 {#snippet filters()}
   <header class="lhead">
     {#if !inPRs}<div class="filters">
+      <Segmented small label="Source" options={[['all', 'All'], ['dyna', 'Dyna'], ['github', 'GitHub']]} value={source} onchange={(value: string) => source = value} />
       <Segmented small label="State" options={STATES.map((s) => [s, s.charAt(0).toUpperCase() + s.slice(1)])} value={listState} onchange={setState} />
     </div>{/if}
     <input class="search" type="search" bind:value={search} oninput={typed} onkeydown={(e) => e.key === 'Enter' && (clearTimeout(timer), (query = search.trim()), load())} placeholder="Search, for example author:@me label:bug" aria-label="Search {inPRs ? 'pull requests' : 'issues'}" />
@@ -389,10 +429,10 @@
   {#if startNote}<p class="more err">{startNote}{#if started} <button class="act" onclick={() => started && onsession?.(started)}>Open session</button>{/if}</p>{/if}
 {/snippet}
 {#snippet askAgent()}
-  {#if onask && !isLocal(chg) && chg?.url}<button class="act" onclick={ask} title="Start a session with this PR as its task">Ask an agent</button>{/if}
+  {#if (onask || onmention) && !isLocal(chg) && chg?.url}<button class="act" onclick={ask} title="Start a session with this PR as its task">{onmention ? 'Mention in chat' : 'Ask an agent'}</button>{/if}
 {/snippet}
 <svelte:window onkeydown={keys} />
-<section class="gh" class:narrow class:pr-list={inPRs ? !chg : !sel} bind:clientWidth={width}>
+<section class="gh" class:narrow class:pr-list={inPRs ? !chg : !sel && !localSelected} bind:clientWidth={width}>
   {#if inPRs}
       <div class="list prlist" hidden={narrow && !!chg}>
         <TabHeader title="Pull requests" usage={`${listRows.length} open`} />
@@ -417,30 +457,35 @@
       </div>
     {/if}
   {:else}
-    {#if !narrow || !sel}
+    {#if !narrow || (!sel && !localSelected)}
       <div class="list" role="presentation">
-        <TabHeader title="Issues" usage={list ? `${rowItems.length} ${listState === 'all' ? 'total' : listState}` : ''} />
+        <TabHeader title="Issues" usage={`${issueRows.length} ${listState === 'all' ? 'total' : listState}`} />
         {@render filters()}
         {@render note()}
-        {#if error}
-          <div class="empty err-box">
-            <strong>GitHub did not answer</strong>
-            <p>{error}</p>
-          </div>
-        {:else if !list}
-          <p class="quiet">Asking GitHub…</p>
-        {:else if !rowItems.length}
-          <div class="empty">
-            <strong>No issues</strong>
-            <p>{query ? 'Nothing matches this search.' : `No ${listState === 'all' ? '' : listState + ' '}issues in ${list.repo || 'this repo'}.`}</p>
-          </div>
-        {:else}
-          <IssueList groups={issueGroups(rowItems)} {sel} {starting} onpick={(it) => openIssue(it.number)} onstart={startWork} />
-          {#if list.more}<p class="more">Showing the first {list.items?.length ?? 0}. Search to narrow the list.</p>{/if}
+        {#if error && source !== 'dyna'}<p class="quiet err">GitHub did not answer: {error}</p>{/if}
+        {#if !list && !error && source !== 'dyna'}<p class="quiet">Asking GitHub…</p>{/if}
+        {#if issueRows.length}
+          <IssueList groups={['open', 'closed'].map((id) => ({ id, label: id, rows: issueRows.filter((i) => (i.state === 'OPEN') === (id === 'open')) }))} {sel} {starting} {onmention} onpick={pickIssue} onstart={startWork}
+            oncloseissue={oncloseissue ? (it) => it.local && oncloseissue(it.local) : undefined} onexport={onexportissue ? (it) => it.local && onexportissue(it.local) : undefined} ondismiss={ondismississue ? (it) => it.local && ondismississue(it.local) : undefined} />
+          {#if list?.more && source !== 'dyna'}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
+        {:else if list || error || source === 'dyna'}
+          <div class="empty"><strong>No issues</strong><p>{query ? 'Nothing matches this search.' : 'No issues match these filters.'}</p></div>
         {/if}
       </div>
     {/if}
-    {#if sel}
+    {#if selectedLocal}
+      <div class="dscroll local-detail">
+        <button class="act" onclick={() => { localSelected = null; localSequence++ }}>Issues</button>
+        <h2>{selectedLocal.title}</h2>
+        <p>Dyna · {selectedLocal.filer} · {selectedLocal.state}</p>
+        {#if issueLocation(selectedLocal)}<p>{issueLocation(selectedLocal)}</p>{/if}
+        {#if localBodyError}<p class="err">{localBodyError}</p>{/if}
+        <div class="local-body">{localBody}</div>
+        {#if selectedLocal.reason}<p>{selectedLocal.reason}</p>{/if}
+        {#if selectedLocal.goalId}<p>Goal {selectedLocal.goalId}</p>{/if}
+        {#if selectedLocal.githubUrl}<a href={selectedLocal.githubUrl} target="_blank" rel="noreferrer">Open on GitHub ↗</a>{/if}
+      </div>
+    {:else if sel}
       <div class="dscroll">
         {#if item}
         {#key sel}
@@ -464,6 +509,8 @@
 {/if}
 
 <style>
+  .local-detail { padding: var(--s5); overflow-wrap: anywhere; }
+  .local-body { white-space: pre-wrap; margin: var(--s4) 0; }
   .gh { flex: 1; display: flex; min-height: 0; min-width: 0; }
   .list { width: 420px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line-soft); min-height: 0; }
   .prlist { overflow-y:auto; }
@@ -482,7 +529,6 @@
   .dscroll { flex: 1; min-width: 0; overflow-y: auto; }
   .empty { margin: 28px 14px; text-align: center; background: var(--side); border: 1px solid var(--line-soft); border-radius: 12px; padding: 20px; }
   .empty p { color: var(--muted); font-size: 13.5px; margin: 6px 0 0; overflow-wrap: anywhere; }
-  .err-box strong { color: var(--coral); }
   .quiet { color: var(--faint); font-size: 13.5px; padding: 12px 16px; }
   .err { color: var(--coral); padding: 12px 2px; overflow-wrap: anywhere; }
   @media (max-width: 760px) {
