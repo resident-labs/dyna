@@ -2,7 +2,7 @@
   // The floating chat on the Computer tab. It reads the same session data and
   // sends through the same path as the Messages tab, so a message shows in
   // both places. Tucked: one pill. Composer: the pill widens into an input.
-  // Chat: the recent thread grows upward. The rules live in chatState.js.
+  // Chat: the recent thread grows upward. The rules live in chatState.ts.
   import { tick, untrack, onMount, onDestroy } from 'svelte'
   import DmRows from '../sessions/DmRows.svelte'
   import ComposerBox from '../ui/ComposerBox.svelte'
@@ -10,9 +10,9 @@
   import { showReasoning, showCompaction } from '../ui/prefs.ts'
   import { ago } from '../ui/format.ts'
   import { computerLine } from './summary.ts'
-  import { clock } from './clock.svelte.js'
+  import { clock } from './clock.svelte.ts'
   import { attachmentDraft } from '../files/attachmentDraft.ts'
-  import { TUCKED, COMPOSER, CHAT, RECENT, chatClick, chatKey, chatDriving, lastLine } from './chatState.js'
+  import { TUCKED, COMPOSER, CHAT, RECENT, chatClick, chatKey, chatDriving, lastLine } from './chatState.ts'
 
   // session: the transcript the app already holds. onsend sends to the
   // session, as the Messages tab does. driving: the owner has control.

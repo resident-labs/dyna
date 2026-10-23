@@ -12,7 +12,7 @@
   import ExpediteBadge from './ExpediteBadge.svelte'
   import { expedite, agentExpedited } from './expedite.ts'
   import GoalGlyph from './GoalGlyph.svelte'
-  import { isLive } from '../computers/computers.js'
+  import { isLive } from '../computers/computers.ts'
   import { available as terminal } from '../sessions/TermPane.svelte'
   import { sections, rowOf, shown, runningWork } from './workViews.ts'
   import { sessionStatus } from '../sessions/status.ts'

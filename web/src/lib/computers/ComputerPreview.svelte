@@ -8,8 +8,8 @@
   // A click opens the Computer tab. A drag moves it to the nearest corner of
   // the message area, and the corner is remembered per session.
   import ComputerShot from './ComputerShot.svelte'
-  import { clock } from './clock.svelte.js'
-  import { ageText, appName } from './computers.js'
+  import { clock } from './clock.svelte.ts'
+  import { ageText, appName } from './computers.ts'
   import { loadPreview, savePreview, snapCorner } from './preview.ts'
 
   let { c, session, name = '', onopen } = $props()

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { autoQuality, savedStreamMode, setEncodingMode, requestedEncodings } from './computerStream.js'
+import { autoQuality, savedStreamMode, setEncodingMode, requestedEncodings } from './computerStream.ts'
 
 test('Auto is the default; explicit Sharp and Smooth stay selected', () => {
   assert.equal(savedStreamMode(null), 'auto')
@@ -10,7 +10,7 @@ test('Auto is the default; explicit Sharp and Smooth stay selected', () => {
 })
 
 test('Auto starts Smooth, sharpens after 1.5 seconds, and needs sustained motion to return', () => {
-  const changes = []
+  const changes: boolean[] = []
   const q = autoQuality(on => changes.push(on), 0)
   q.sample(0, 1499)
   assert.deepEqual(changes, [])
@@ -31,7 +31,7 @@ test('Auto starts Smooth, sharpens after 1.5 seconds, and needs sustained motion
 })
 
 test('cursor-sized changes and motion below the threshold do not flap', () => {
-  const changes = []
+  const changes: boolean[] = []
   const q = autoQuality(on => changes.push(on), 0)
   for (let t = 100; t <= 3000; t += 100) q.sample(0.003, t)
   assert.deepEqual(changes, [false])
@@ -40,12 +40,19 @@ test('cursor-sized changes and motion below the threshold do not flap', () => {
 })
 
 test('live encoding choice belongs to each socket and refreshes Sharp without reconnecting', () => {
-  const refresh = []
+  const refresh: unknown[][] = []
   class FakeRFB {
-    static messages = { fbUpdateRequest: (...args) => refresh.push(args) }
-    constructor() { this._rfbConnectionState = 'connected'; this._sock = {}; this._fbWidth = 1280; this._fbHeight = 800; this.sent = [] }
-    _sendEncodings() { this.sent.push(requestedEncodings(this._sock, [1, 50, 7])) }
-    disconnect() { assert.fail('must keep the connection') }
+    static messages = { fbUpdateRequest: (...args: unknown[]) => { refresh.push(args) } }
+    _rfbConnectionState: string
+    _sock: object
+    _fbWidth: number
+    _fbHeight: number
+    qualityLevel = 0
+    compressionLevel = 0
+    sent: number[][] = []
+    constructor() { this._rfbConnectionState = 'connected'; this._sock = {}; this._fbWidth = 1280; this._fbHeight = 800 }
+    _sendEncodings(): void { this.sent.push(requestedEncodings(this._sock, [1, 50, 7])) }
+    disconnect(): void { assert.fail('must keep the connection') }
   }
   const a = new FakeRFB(), b = new FakeRFB()
   setEncodingMode(a, true)
@@ -60,7 +67,7 @@ test('live encoding choice belongs to each socket and refreshes Sharp without re
 })
 
 test('Sharp redraws cannot immediately trigger a switch back to Smooth', () => {
-  const changes = []
+  const changes: boolean[] = []
   const q = autoQuality(on => changes.push(on), 0)
   q.sample(0, 1400)
   q.sample(0, 1500)
@@ -72,30 +79,72 @@ test('Sharp redraws cannot immediately trigger a switch back to Smooth', () => {
   assert.deepEqual(changes, [false, true], 'sustained motion after the refresh still switches')
 })
 
-async function withStream(run) {
+// TestRfb is the fake noVNC client the bundle builds; the test drives it by hand.
+interface TestRfb {
+  qualityLevel: number
+  compressionLevel: number
+  _sock: object
+  _display: { pending(): boolean; flip(...args: unknown[]): unknown }
+  viewOnly: boolean
+  disconnectCalls?: number
+  emit(name: string, detail?: object): void
+}
+
+// SocketFake is the fake WebSocket the bundle connects through.
+interface SocketFake {
+  emitClose(code: number): void
+}
+
+// TestHandle is the handle openStream returns in the bundle.
+interface TestHandle {
+  rfb: TestRfb
+  meter: { frames: unknown[] }
+  setMode(mode: string): void
+  setControl(on: boolean): void
+  close(): void
+  reconnect(): void
+}
+
+// StreamModule is the built module; esbuild strips the source types.
+interface StreamModule {
+  openStream(options: { target: object; url: () => Promise<string>; mode?: string; on?: (state: string, detail?: unknown) => void }): TestHandle
+  requestedEncodings(sock: object, encs: number[]): number[]
+}
+
+interface StreamFixture {
+  mod: StreamModule
+  instances: TestRfb[]
+  sockets: SocketFake[]
+  firstReady: Promise<TestRfb>
+  open(options?: { url?: () => Promise<string>; mode?: string; on?: (state: string, detail?: unknown) => void }): TestHandle
+}
+
+async function withStream(run: (f: StreamFixture) => Promise<void>): Promise<void> {
   const { build } = await import('esbuild')
   const { mkdtemp, writeFile, rm } = await import('node:fs/promises')
   const { tmpdir } = await import('node:os')
   const { join } = await import('node:path')
   const dir = await mkdtemp(join(tmpdir(), 'dyna-stream-test-'))
   const names = ['window', 'document', 'WebSocket', 'startupReady']
-  const previous = names.map(n => [n, Object.getOwnPropertyDescriptor(globalThis, n)])
-  const instances = [], sockets = []
-  let ready, stream
-  const firstReady = new Promise(resolve => { ready = resolve })
-  globalThis.startupReady = instance => { instances.push(instance); ready(instance) }
-  globalThis.window = { addEventListener() {}, removeEventListener() {} }
-  globalThis.document = { createElement: () => ({ getContext: () => null }) }
-  globalThis.WebSocket = class {
-    constructor() { this.listeners = {}; sockets.push(this) }
-    addEventListener(name, fn) { this.listeners[name] = fn }
-    emitClose(code) { this.listeners.close?.({ code }) }
-    send() {}
-    close() {}
-  }
+  const previous = names.map(n => [n, Object.getOwnPropertyDescriptor(globalThis, n)] as const)
+  const instances: TestRfb[] = [], sockets: SocketFake[] = []
+  let ready: (instance: TestRfb) => void = () => {}
+  let stream: TestHandle | undefined
+  const firstReady = new Promise<TestRfb>(resolve => { ready = resolve })
+  Reflect.set(globalThis, 'startupReady', (instance: TestRfb) => { instances.push(instance); ready(instance) })
+  Reflect.set(globalThis, 'window', { addEventListener() {}, removeEventListener() {} })
+  Reflect.set(globalThis, 'document', { createElement: () => ({ getContext: () => null }) })
+  Reflect.set(globalThis, 'WebSocket', class {
+    listeners: Record<string, (event?: { code?: number }) => void> = {}
+    constructor() { sockets.push(this) }
+    addEventListener(name: string, fn: (event?: { code?: number }) => void): void { this.listeners[name] = fn }
+    emitClose(code: number): void { this.listeners.close?.({ code }) }
+    send(): void {}
+    close(): void {}
+  })
   try {
     const result = await build({
-      entryPoints: [new URL('./computerStream.js', import.meta.url).pathname],
+      entryPoints: [new URL('./computerStream.ts', import.meta.url).pathname],
       bundle: true, write: false, format: 'esm', platform: 'node', logLevel: 'silent',
       plugins: [{ name: 'fake-rfb', setup(builder) {
         builder.onResolve({ filter: /^@novnc\/novnc$/ }, () => ({ path: 'rfb', namespace: 'fake' }))
@@ -124,9 +173,11 @@ async function withStream(run) {
         }))
       } }],
     })
+    const output = result.outputFiles?.[0]
+    assert.ok(output)
     const file = join(dir, 'stream.mjs')
-    await writeFile(file, result.outputFiles[0].contents)
-    const mod = await import(file)
+    await writeFile(file, output.contents)
+    const mod: StreamModule = await import(file)
     const target = { replaceChildren() {}, addEventListener() {}, removeEventListener() {} }
     await run({ mod, instances, sockets, firstReady, open(options = {}) {
       return stream = mod.openStream({ target, mode: 'sharp', url: async () => 'ws://example.test', on() {}, ...options })
@@ -135,7 +186,7 @@ async function withStream(run) {
     stream?.close()
     for (const [name, descriptor] of previous) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor)
-      else delete globalThis[name]
+      else Reflect.deleteProperty(globalThis, name)
     }
     await rm(dir, { recursive: true, force: true })
   }
@@ -143,9 +194,10 @@ async function withStream(run) {
 
 test('a mode chosen while the URL is pending applies to the new connection', async () => {
   await withStream(async f => {
-    let enterURL, resolveURL
-    const entered = new Promise(resolve => { enterURL = resolve })
-    const url = new Promise(resolve => { resolveURL = resolve })
+    let enterURL: () => void = () => {}
+    let resolveURL: (url: string) => void = () => {}
+    const entered = new Promise<void>(resolve => { enterURL = resolve })
+    const url = new Promise<string>(resolve => { resolveURL = resolve })
     const stream = f.open({ mode: 'auto', url: () => { enterURL(); return url } })
     await entered
     stream.setMode('sharp')
@@ -169,24 +221,24 @@ test('a mode chosen while the URL is pending applies to the new connection', asy
 test('an abnormal socket close retries even when noVNC calls it clean', async t => {
   await withStream(async f => {
     t.mock.timers.enable({ apis: ['setTimeout'] })
-    const states = []
+    const states: { state: string; detail?: unknown }[] = []
     const stream = f.open({ on: (state, detail) => states.push({ state, detail }) })
     const first = await f.firstReady
     first.emit('connect')
     stream.setControl(true)
-    f.sockets[0].emitClose(1006)
+    f.sockets[0]?.emitClose(1006)
     first.emit('disconnect', { clean: true })
     t.mock.timers.tick(1000)
-    await new Promise(setImmediate)
+    await new Promise<void>(resolve => setImmediate(resolve))
     assert.equal(f.instances.length, 2)
     assert.equal(first.disconnectCalls || 0, 0, 'an ended RFB is not disconnected twice')
-    assert.equal(f.instances[1].viewOnly, true, 'a new lease starts with agent control')
-    assert.equal(states.at(-1).state, 'connecting')
-    f.instances[1].emit('connect')
-    assert.equal(states.at(-1).state, 'connected')
+    assert.equal(f.instances[1]?.viewOnly, true, 'a new lease starts with agent control')
+    assert.equal(states.at(-1)?.state, 'connecting')
+    f.instances[1]?.emit('connect')
+    assert.equal(states.at(-1)?.state, 'connected')
     stream.close()
     t.mock.timers.tick(20000)
-    await new Promise(setImmediate)
+    await new Promise<void>(resolve => setImmediate(resolve))
     assert.equal(f.instances.length, 2, 'closing the viewer cancels retries')
   })
 })
@@ -195,15 +247,15 @@ test('normal closes and refused credentials do not retry', async t => {
   for (const refused of [false, true]) {
     await withStream(async f => {
       t.mock.timers.enable({ apis: ['setTimeout'] })
-      const states = []
+      const states: string[] = []
       f.open({ on: state => states.push(state) })
       const first = await f.firstReady
       first.emit('connect')
       if (refused) first.emit('securityfailure', { reason: 'access denied' })
-      f.sockets[0].emitClose(refused ? 1006 : 1000)
+      f.sockets[0]?.emitClose(refused ? 1006 : 1000)
       first.emit('disconnect', { clean: true })
       t.mock.timers.tick(20000)
-      await new Promise(setImmediate)
+      await new Promise<void>(resolve => setImmediate(resolve))
       assert.equal(f.instances.length, 1)
       assert.equal(states.at(-1), refused ? 'failed' : 'disconnected')
       t.mock.timers.reset()
@@ -213,38 +265,39 @@ test('normal closes and refused credentials do not retry', async t => {
 
 test('closing during URL lookup prevents a later connection', async () => {
   await withStream(async f => {
-    let enterURL, resolveURL
-    const entered = new Promise(resolve => { enterURL = resolve })
-    const url = new Promise(resolve => { resolveURL = resolve })
+    let enterURL: () => void = () => {}
+    let resolveURL: (url: string) => void = () => {}
+    const entered = new Promise<void>(resolve => { enterURL = resolve })
+    const url = new Promise<string>(resolve => { resolveURL = resolve })
     const stream = f.open({ url: () => { enterURL(); return url } })
     await entered
     stream.close()
     resolveURL('ws://example.test')
-    await new Promise(setImmediate)
+    await new Promise<void>(resolve => setImmediate(resolve))
     assert.equal(f.instances.length, 0)
   })
 })
 
 test('events from a replaced RFB cannot change the current phase', async () => {
   await withStream(async f => {
-    const states = []
+    const states: string[] = []
     const stream = f.open({ on: state => states.push(state) })
     const first = await f.firstReady
     first.emit('connect')
     stream.setControl(true)
     stream.reconnect()
-    await new Promise(setImmediate)
+    await new Promise<void>(resolve => setImmediate(resolve))
     assert.equal(f.instances.length, 2)
-    assert.equal(f.instances[1].viewOnly, true, 'manual reconnect also starts a new lease')
+    assert.equal(f.instances[1]?.viewOnly, true, 'manual reconnect also starts a new lease')
     first.emit('connect')
     assert.equal(states.at(-1), 'connecting')
-    f.instances[1].emit('connect')
+    f.instances[1]?.emit('connect')
     assert.equal(states.at(-1), 'connected')
   })
 })
 
 test('scroll input keeps Auto Smooth even when near-identical lines change few pixels', () => {
-  const changes = []
+  const changes: boolean[] = []
   const q = autoQuality(on => changes.push(on), 0)
   q.sample(0, 1400)
   q.sample(0, 1500)
@@ -258,7 +311,7 @@ test('scroll input keeps Auto Smooth even when near-identical lines change few p
 })
 
 test('large scroll-shaped damage detects motion when sampled pixels look alike', () => {
-  const changes = []
+  const changes: boolean[] = []
   const q = autoQuality(on => changes.push(on), 0)
   q.sample(0, 1400)
   q.sample(0, 1500)
@@ -279,7 +332,7 @@ test('large scroll-shaped damage detects motion when sampled pixels look alike',
 })
 
 test('full-frame H.264 regions from a blinking caret still let Auto sharpen', () => {
-  const changes = []
+  const changes: boolean[] = []
   const q = autoQuality(on => changes.push(on), 0)
   for (let time = 100; time <= 3000; time += 100) {
     if (time % 500 === 0) q.region(0, 0, 1280, 800, 1280, 800)
@@ -289,7 +342,7 @@ test('full-frame H.264 regions from a blinking caret still let Auto sharpen', ()
 })
 
 test('a tall strip of changed row numbers detects near-identical terminal scrolling', () => {
-  const changes = []
+  const changes: boolean[] = []
   const q = autoQuality(on => changes.push(on), 0)
   q.sample(0, 1400)
   q.sample(0, 1500)
@@ -301,7 +354,7 @@ test('a tall strip of changed row numbers detects near-identical terminal scroll
 })
 
 test('a delayed Sharp refresh is ignored until its frame has finished painting', () => {
-  const changes = []
+  const changes: boolean[] = []
   const q = autoQuality(on => changes.push(on), 0)
   q.sample(0, 1400)
   q.sample(0, 1500)
@@ -319,7 +372,7 @@ test('a delayed Sharp refresh is ignored until its frame has finished painting',
 })
 
 test('a blocked renderer gets a fresh quiet sample before requesting Sharp', () => {
-  const changes = []
+  const changes: boolean[] = []
   const q = autoQuality(on => changes.push(on), 0)
   q.sample(0, 100)
   q.sample(0, 4000)
@@ -333,7 +386,7 @@ test('a blocked renderer gets a fresh quiet sample before requesting Sharp', () 
 })
 
 test('Auto keeps Smooth after a slow frame, until the mode or connection is reset', () => {
-  const changes = []
+  const changes: boolean[] = []
   const q = autoQuality(on => changes.push(on), 0)
   q.sample(0, 1400)
   q.sample(0, 1500)
@@ -349,10 +402,12 @@ test('Auto keeps Smooth after a slow frame, until the mode or connection is rese
 
 test('a replaced URL lookup cannot report a late failure over a live stream', async () => {
   await withStream(async f => {
-    let enterURL, rejectURL, calls = 0
-    const entered = new Promise(resolve => { enterURL = resolve })
-    const oldURL = new Promise((resolve, reject) => { rejectURL = reject })
-    const states = []
+    let enterURL: () => void = () => {}
+    let rejectURL: (reason: Error) => void = () => {}
+    let calls = 0
+    const entered = new Promise<void>(resolve => { enterURL = resolve })
+    const oldURL = new Promise<string>((resolve, reject) => { rejectURL = reject })
+    const states: string[] = []
     const stream = f.open({
       url: () => { if (calls++ === 0) { enterURL(); return oldURL } return Promise.resolve('ws://example.test') },
       on: state => states.push(state),
@@ -362,7 +417,7 @@ test('a replaced URL lookup cannot report a late failure over a live stream', as
     await f.firstReady
     stream.rfb.emit('connect')
     rejectURL(new Error('old request failed'))
-    await new Promise(setImmediate)
+    await new Promise<void>(resolve => setImmediate(resolve))
     assert.equal(states.at(-1), 'connected')
   })
 })
