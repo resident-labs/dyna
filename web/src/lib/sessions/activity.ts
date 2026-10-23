@@ -1,7 +1,9 @@
 // activityLabel is what a live session is doing, in one line a person reads.
 // It keeps the step and drops the MCP server prefix from a tool ID, so
-// "mcp__dyna__shell: Read guide command" reads "Read guide command". The
-// session view and the members list share it.
+// "mcp__dyna__shell: Read guide command" reads "Read guide command".
+// DoingLine uses it for the session view and for the members list. The Go
+// side (workeroutput.LastActivity) names the step; the tables below only
+// normalize text that still carries a tool ID, such as older activity lines.
 const shellTools = new Set(['shell', 'shell_output', 'shell_stop', 'shell_jobs', 'bash', 'command', 'command_execution', 'run_command', 'run_terminal_cmd'])
 
 // A file tool whose arguments are unreadable still names what it does.

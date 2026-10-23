@@ -98,6 +98,7 @@
   {@const m = row.member}
   {@const pc = computerOf(m.id)}
   {@const offSeat = external && m.id === rootSession?.id}
+  {@const status = sessionStatus(m)}
   <div class="item" style="--depth:{m.depth}">
   {#if row.hasChildren && !selecting}
     <button class="fold" aria-expanded={!row.folded} aria-label="{row.folded ? 'Show' : 'Hide'} subagents of {m.name}" title={row.folded ? 'Show subagents' : 'Hide subagents'} onclick={() => toggleFold(m.id)}>
@@ -111,7 +112,7 @@
     <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={32} state={finished(m) ? 'finished' : m.state} status={m.status} ring="var(--side)" />
     <span class="text">
       <span class="name hue-{m.hue}">{offSeat ? 'root (internal)' : m.name}{#if row.folded}<span class="kids" title="{row.hidden} folded subagent{row.hidden === 1 ? '' : 's'}">{row.hidden}</span>{/if}{#if agentExpedited($expedite, m)} <ExpediteBadge short />{/if}</span>
-      <span class="sub {finished(m) ? 'finished' : m.state}">{#if offSeat}off seat{:else if finished(m)}dormant · {ago(m.lastActivity)}{:else}<span class="now" class:working={sessionStatus(m) === 'working'}>{sessionStatus(m)}</span> · {#if m.state === 'live' && m.doing?.text}<DoingLine doing={m.doing} {now} />{:else}{m.profile}{/if}{/if}</span>
+      <span class="sub {finished(m) ? 'finished' : m.state}">{#if offSeat}off seat{:else if finished(m)}dormant · {ago(m.lastActivity)}{:else}{#if status}<span class="now" class:working={status === 'working'}>{status}</span> · {/if}{#if m.state === 'live' && m.doing?.text}<DoingLine doing={m.doing} {now} />{:else}{m.profile}{/if}{/if}</span>
       <ResponsibilityCount counts={m.responsibilities} />
     </span>
   </button>
