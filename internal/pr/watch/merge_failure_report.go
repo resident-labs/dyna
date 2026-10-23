@@ -22,8 +22,9 @@ var mergeFailedPackage = regexp.MustCompile(`(?:^|\s)FAIL[ \t]+([^\s]+)[ \t]+(?:
 var mergeFailedTest = regexp.MustCompile(`--- FAIL:[ \t]+([^\s]+)`)
 
 // mergeFailureReport uses frozen inputs and reads source as data. Missing
-// evidence must not prevent the owner from receiving the failure report.
-func (s *Service) mergeFailureReport(ctx context.Context, r Record, b state.MergeTrial) (string, error) {
+// evidence must not prevent the owner from receiving the failure report. The ci
+// read names the failed checks when the saved logs carry no job of their own.
+func (s *Service) mergeFailureReport(ctx context.Context, r Record, b state.MergeTrial, ci trialCI) (string, error) {
 	st, err := s.Store.Read()
 	if err != nil {
 		return "", err
@@ -47,12 +48,23 @@ func (s *Service) mergeFailureReport(ctx context.Context, r Record, b state.Merg
 	}
 	packages, tests, frontend, logJobs := mergeFailureLines(b.Logs)
 	jobs, links := s.mergeFailureJobs(ctx, r, b)
+	if len(jobs) == 0 && len(ci.Failed) > 0 {
+		jobs = append(jobs, ci.Failed...)
+		links = append(links, fmt.Sprintf("https://%s/%s/commit/%s/checks", r.Host, r.Repo, b.Head))
+	}
 	if len(jobs) == 0 {
 		jobs = logJobs
 	}
 	out.WriteString("Failed jobs:\n")
 	if len(jobs) == 0 {
-		out.WriteString("- unknown; job evidence unavailable.\n")
+		// Only a read that observed nothing but a cancellation says the CI never
+		// tested the change. A failed run or a failed check next to a cancelled
+		// one keeps the known failure and an unknown job name.
+		if ci.Cancelled && ci.Runs == 0 && len(ci.Failed) == 0 {
+			out.WriteString("- none: CI for this commit was cancelled, so it never tested the change.\n")
+		} else {
+			out.WriteString("- unknown; job evidence unavailable.\n")
+		}
 	}
 	for _, job := range jobs {
 		fmt.Fprintf(&out, "- %s\n", job)
