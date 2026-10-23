@@ -337,7 +337,6 @@ func (s *Service) mediaWhere(rec room.Record, msgs []room.Message, book avatarBo
 func (s *Service) sessionPosts(rec room.Record, msgs []room.Message, id, address string, since, before time.Time, book avatarBook) ([]Post, error) {
 	selected := make([]room.Message, 0)
 	for _, m := range msgs {
-		m = s.legacyQuestionPost(rec, m)
 		if (!since.IsZero() && time.UnixMilli(m.TS).Before(since)) || (!before.IsZero() && time.UnixMilli(m.TS).After(before)) {
 			continue
 		}
@@ -391,7 +390,7 @@ func (s *Service) transcriptMessages(rec room.Record, info subagent.Info, since,
 		s.conversations[info.ID] = selected
 	}
 	posts, err := s.rooms().SelectedMessages(rec.ID, &selected.posts, func(m room.Message) bool {
-		return sessionPost(rec, s.legacyQuestionPost(rec, m), info.ID, address)
+		return sessionPost(rec, m, info.ID, address)
 	}, since, before, maxSessionPosts)
 	if err != nil {
 		return nil, nil, err
