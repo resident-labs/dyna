@@ -253,10 +253,10 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 	if uninspected > 0 {
 		// One line holds any number of skipped artifacts: a list per artifact
 		// would bury every other report problem in the notice.
-		problems = append(problems, fmt.Sprintf("Test reports: %d artifacts not inspected (over the 3 artifact, 20 MiB limit).", uninspected))
+		problems = append(problems, fmt.Sprintf("Test reports: %d %s not inspected (over the 3 artifact, 20 MiB limit).", uninspected, reportNoun(uninspected)))
 	}
 	if oversized > 0 {
-		problems = append(problems, fmt.Sprintf("Test reports: %d artifacts over the 20 MiB size limit.", oversized))
+		problems = append(problems, fmt.Sprintf("Test reports: %d %s over the 20 MiB size limit.", oversized, reportNoun(oversized)))
 	}
 	if ctx.Err() != nil {
 		return report, junit, problems, ctx.Err()
@@ -527,6 +527,14 @@ func boundedNames(names []string) []string {
 		return append(names[:10:10], fmt.Sprintf("and %d more", len(names)-10))
 	}
 	return names
+}
+
+// reportNoun keeps a collapsed report line readable at one artifact.
+func reportNoun(n int) string {
+	if n == 1 {
+		return "artifact"
+	}
+	return "artifacts"
 }
 
 func boundedTestName(name string) string {
