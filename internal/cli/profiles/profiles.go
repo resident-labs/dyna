@@ -270,7 +270,7 @@ func NewCommand() *cobra.Command {
 }
 
 // useHelp explains the --use values.
-const useHelp = "who may use it, any of: workflows (workflow agent() calls), agents (dyna subagent sessions) and services (Dyna's PR reviewers and goal keeper); comma-separated, default all three"
+const useHelp = "who may use it, any of: workflows (workflow agent() calls), agents (dyna subagent sessions) and services (Dyna's PR reviewers and librarian); comma-separated, default all three"
 
 func orDash(s string) string {
 	if s == "" {

@@ -13,7 +13,7 @@ const (
 	// KeyLibraryEnabled lists the repositories whose librarian runs.
 	KeyLibraryEnabled = "library.enabled"
 	// KeyLibraryProfile is the one profile for all librarian work; empty ranks
-	// service profiles like the keeper.
+	// enabled service profiles.
 	KeyLibraryProfile = "library.profile"
 	// KeyLibraryReadmeMaxLines is the longest README the librarian may leave.
 	KeyLibraryReadmeMaxLines = "library.readmeMaxLines"
