@@ -18,7 +18,7 @@
   }
 </script>
 <form class="add" onsubmit={(e) => { e.preventDefault(); add() }}>
-  <textarea aria-label={label} {placeholder} {maxlength} rows="1" bind:this={field} bind:value oninput={(e) => fit(e.currentTarget)} onfocus={(e) => { focused = true; fit(e.currentTarget, 3) }} onblur={(e) => { focused = false; fit(e.currentTarget, 1) }} onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); add() } }}></textarea>
+  <textarea aria-label={label} {placeholder} {maxlength} rows="1" bind:this={field} bind:value oninput={(e) => fit(e.currentTarget)} onfocus={(e) => { focused = true; fit(e.currentTarget, 3) }} onblur={(e) => { focused = false; fit(e.currentTarget, 1) }} onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); add() } }}></textarea>
   <div class="addtools">{@render tools?.()}<button class="submit" disabled={busy || !value.trim()}>{submit}</button></div>
 </form>
 {#if error}<p class="error" role="alert">{error}</p>{/if}
