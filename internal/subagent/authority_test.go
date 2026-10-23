@@ -34,11 +34,9 @@ func TestWorkerAuthorityRefusesBeforeBackend(t *testing.T) {
 		}},
 		{"subagent transfer handoff", func() error { return m.SubmitHandoff(context.Background(), "missing", "", "", "", "") }},
 		{"subagent transfer cancel", func() error { _, err := m.CancelTransfer(context.Background(), "missing"); return err }},
-		{"subagent _transfer", func() error { return m.ProcessTransfer(ctx, "missing", "") }},
 		{"subagent consolidate", func() error { _, err := m.Consolidate(context.Background(), ConsolidationOptions{}); return err }},
 		{"subagent consolidate resume", func() error { _, err := m.ResumeConsolidation(context.Background(), "missing", ""); return err }},
 		{"subagent consolidate cancel", func() error { _, err := m.CancelConsolidation(context.Background(), "missing", ""); return err }},
-		{"subagent _consolidate", func() error { return m.ProcessConsolidation(ctx, "missing", "") }},
 		{"room pause", func() error { _, err := m.PauseRoomSessions(ctx, "missing"); return err }},
 		{"room resume", func() error { _, err := m.ResumeRoomSessions(ctx, "missing"); return err }},
 	}
@@ -48,7 +46,7 @@ func TestWorkerAuthorityRefusesBeforeBackend(t *testing.T) {
 			if tt.action == "subagent start" || tt.action == "subagent reopen" {
 				instead = "use subagent mode to start work"
 			}
-			if tt.action == "room pause" || tt.action == "room resume" || tt.action == "subagent transfer handoff" || tt.action == "subagent transfer cancel" || tt.action == "subagent _transfer" || tt.action == "subagent consolidate resume" || tt.action == "subagent consolidate cancel" || tt.action == "subagent _consolidate" {
+			if tt.action == "room pause" || tt.action == "room resume" || tt.action == "subagent transfer handoff" || tt.action == "subagent transfer cancel" || tt.action == "subagent consolidate resume" || tt.action == "subagent consolidate cancel" {
 				instead = "use subagent mode to control work"
 			}
 			want := tt.action + " is owner or root or session only; " + instead

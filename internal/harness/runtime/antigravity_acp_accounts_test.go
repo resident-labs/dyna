@@ -102,9 +102,7 @@ func TestAntigravityUpgradeRecordsTheActiveAccount(t *testing.T) {
 	if err = os.Remove(record); err != nil {
 		t.Fatal(err)
 	}
-	if err = a.MigrateLegacyGrants(); err != nil {
-		t.Fatal(err)
-	}
+	a.RepairAntigravityACPAccount()
 	if err = a.Switch(context.Background(), n.ID, "/fake/agy"); err != nil {
 		t.Fatalf("the active account was lost in the upgrade: %v", err)
 	}

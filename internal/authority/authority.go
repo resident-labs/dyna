@@ -195,8 +195,6 @@ var Rules = []Rule{
 	{Action: "subagent transfer handoff", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control work"},
 	{Action: "subagent consolidate resume", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control work"},
 	{Action: "subagent consolidate cancel", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control work"},
-	{Action: "subagent _transfer", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control work"},
-	{Action: "subagent _consolidate", Allowed: []Role{Owner, Root, Session}, Instead: "use subagent mode to control work"},
 	{Action: "git merge note", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root and steward may record notes only in their own room"},
 	{Action: "git merge pause", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root and steward may control only their own room; use dyna post @parent for merge changes"},
 	{Action: "git merge resume", Allowed: []Role{Owner}, Relations: []Relation{RootRoom}, Instead: "root and steward may control only their own room; use dyna post @parent for merge changes"},

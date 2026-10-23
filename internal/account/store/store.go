@@ -60,7 +60,6 @@ type Metadata struct {
 	UpdatedAt      time.Time    `json:"updatedAt"`
 }
 
-// TODO: legacy/shim remove later — keeps grant payloads saved before native homes so runtime.Accounts.MigrateLegacyGrants can move them; remove with that migration.
 // Credential is adapter-owned JSON. Schema identifies its native format.
 // It must never be returned by an API binding or included in an error.
 type Credential struct {

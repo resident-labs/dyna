@@ -425,14 +425,6 @@ func (m *Manager) consolidationWorkerLock(target string) (func(), error) {
 	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }, nil
 }
 
-// TODO: legacy/shim remove later — dyna subagent _consolidate, which an earlier engine starts as a detached worker; remove one release after every host runs consolidation coordinators in the engine.
-func (m *Manager) ProcessConsolidation(ctx context.Context, target, id string) error {
-	if err := authority.Check("subagent _consolidate", authority.Current(), nil); err != nil {
-		return err
-	}
-	return m.runConsolidation(ctx, target, id)
-}
-
 // Failed operations and cancelled cleanup keep their explicit resume paths.
 var consolidationWorkerPhases = []string{"waiting", "stopping", "starting", "committing"}
 
