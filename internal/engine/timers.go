@@ -23,6 +23,7 @@ const (
 	timerRootFlush           = "root-flush"
 	timerPRs                 = "prs"
 	timerMerges              = "merges"
+	timerCaches              = "ci-caches"
 	timerSync                = "sync"
 	timerProbe               = "machine-probe"
 	timerRequests            = "requests"

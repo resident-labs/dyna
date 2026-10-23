@@ -67,7 +67,7 @@ func TestWorkersStartupStoreEventsSafetyAndDailySweep(t *testing.T) {
 		w.run(ctx, signals, set, func(string, error) { t.Error("unexpected worker error") })
 	}()
 	defer func() { cancel(); <-done }()
-	awaitWorker(t, calls, "prs", "checkins", "questions", "sweep", "hooks", "sessions", "merges", "instructions", "sync", "fetch", "probe")
+	awaitWorker(t, calls, "prs", "checkins", "questions", "sweep", "hooks", "sessions", "merges", "instructions", "sync", "fetch", "probe", "caches")
 	// The daily sweep's deadline counts from when it is set, so the clock
 	// moves only after both sweep timers exist.
 	awaitTimer(t, set, timerSafetySweep)
@@ -211,7 +211,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	first := run(ctx, "first")
-	awaitWorker(t, calls, "first-prs", "first-checkins", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch", "first-probe")
+	awaitWorker(t, calls, "first-prs", "first-checkins", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch", "first-probe", "first-caches")
 	// A second engine on the same store runs no workers at all.
 	secondCtx, cancelSecond := context.WithCancel(context.Background())
 	secondDone := make(chan bool, 1)
@@ -244,7 +244,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	// takes over the store workers.
 	ctx, cancel = context.WithCancel(context.Background())
 	third := run(ctx, "third")
-	awaitWorker(t, calls, "third-prs", "third-checkins", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch", "third-probe")
+	awaitWorker(t, calls, "third-prs", "third-checkins", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch", "third-probe", "third-caches")
 	cancel()
 	stop(third, "third")
 	select {

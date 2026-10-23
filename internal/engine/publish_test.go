@@ -84,8 +84,9 @@ func TestPublishLocalCIRefreshesOnlyRoomsUsingHead(t *testing.T) {
 	}
 }
 
-// A machine edit wakes the CI workers and the probe; a probe result must not.
-// Otherwise every five-minute probe would wake the CI workers.
+// A machine edit wakes the CI workers, the probe and the cache cleanup, since a
+// new or enabled CI machine needs its own daily cleanup; a probe result wakes
+// none of them, or every five-minute probe would wake all three.
 func TestPublishMachineChangesWakeOnlyTheRegistryWorkers(t *testing.T) {
 	storetest.Isolate(t)
 	events := hub.New(1)
@@ -101,7 +102,7 @@ func TestPublishMachineChangesWakeOnlyTheRegistryWorkers(t *testing.T) {
 	}
 
 	publish(hub.Event{Topic: machines.Topic, Key: "machine:hermeslab"})
-	for _, worker := range []string{"prs", "merges", "probe"} {
+	for _, worker := range []string{"prs", "merges", "probe", "caches"} {
 		if !drain(worker) {
 			t.Fatalf("a machine change did not wake %s", worker)
 		}
@@ -109,7 +110,7 @@ func TestPublishMachineChangesWakeOnlyTheRegistryWorkers(t *testing.T) {
 
 	rev := events.Rev()
 	publish(hub.Event{Topic: machines.Topic, Key: "health:hermeslab"})
-	for _, worker := range []string{"prs", "merges", "probe"} {
+	for _, worker := range []string{"prs", "merges", "probe", "caches"} {
 		if drain(worker) {
 			t.Fatalf("a probe result woke %s", worker)
 		}

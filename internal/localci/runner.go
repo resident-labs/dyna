@@ -152,7 +152,7 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 		req.Repo = req.RepoDir
 	}
 	if r.Node != nil {
-		return r.runNode(ctx, req)
+		return r.runNodeWithDiskRetry(ctx, req)
 	}
 	suites := append([]string(nil), req.Suites...)
 	if len(suites) == 0 {
@@ -255,6 +255,10 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 		return result, fmt.Errorf("initialize cache: %w: %s", err, &log)
 	}
 	log.Reset()
+	// The run holds a lock on its own directory and its base's cache lock while
+	// it runs, so a cleanup tells a live run from one that died and never trims
+	// the caches a run mounts. Its teardown stops the keeper and removes it.
+	active := path.Join(runDir, ".active")
 	if err = r.run(sshCtx, repo, &log, "git", "push", host+":"+cache, result.SHA+":refs/dyna/ci/"+result.SHA); err != nil {
 		return result, fmt.Errorf("push commit: %w: %s", err, &log)
 	}
@@ -266,13 +270,13 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 		for _, suite := range suites {
 			containers = append(containers, shellquote.Quote("dyna-ci-"+runID+"-"+suite))
 		}
-		script := "docker rm -f " + strings.Join(containers, " ") + " >/dev/null 2>&1 || true; git --git-dir=" + shellquote.Quote(cache) + " worktree remove --force " + shellquote.Quote(work) + " && rm -rf " + shellquote.Quote(runDir)
+		script := "docker rm -f " + strings.Join(containers, " ") + " >/dev/null 2>&1 || true; git --git-dir=" + shellquote.Quote(cache) + " worktree remove --force " + shellquote.Quote(work) + " >/dev/null 2>&1 || true; " + removeRunDir(base, active)
 		if e := r.ssh(cleanupCtx, host, script, &output); e != nil {
 			err = errors.Join(err, fmt.Errorf("cleanup: %w: %s", e, &output))
 		}
 	}()
 	log.Reset()
-	setup := "mkdir -p " + shellquote.Quote(reports) + " " + shellquote.Quote(path.Join(base, "go-build")) + " " + shellquote.Quote(path.Join(base, "go-mod")) + " " + shellquote.Quote(path.Join(base, "npm")) + " && git --git-dir=" + shellquote.Quote(cache) + " worktree add --detach " + shellquote.Quote(work) + " " + shellquote.Quote(result.SHA)
+	setup := "set -e; mkdir -p " + shellquote.Quote(reports) + " " + shellquote.Quote(path.Join(base, "go-build")) + " " + shellquote.Quote(path.Join(base, "go-mod")) + " " + shellquote.Quote(path.Join(base, "npm")) + " " + shellquote.Quote(path.Dir(active)) + " && git --git-dir=" + shellquote.Quote(cache) + " worktree add --detach " + shellquote.Quote(work) + " " + shellquote.Quote(result.SHA) + "; " + runLocks(base, active)
 	if err = r.ssh(sshCtx, host, setup, &log); err != nil {
 		return result, fmt.Errorf("create worktree: %w: %s", err, &log)
 	}
@@ -329,6 +333,10 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 				if errors.As(e, &exit) && exit.ExitCode() != 255 && exit.ExitCode() != 75 && exit.ExitCode() != 124 && exit.ExitCode() != 137 && suiteCtx.Err() == nil {
 					sr.Status = "failed"
 				}
+			}
+			// A full disk on the machine is not a failing test.
+			if sr.Status == "failed" && diskFull(sr.LogTail+"\n"+sr.Error) {
+				sr.Status, sr.Error = "error", "check ran out of disk space on the CI machine"
 			}
 			if suite == "frontend" {
 				frontendOK = e == nil
