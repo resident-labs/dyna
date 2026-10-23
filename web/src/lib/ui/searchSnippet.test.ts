@@ -12,6 +12,8 @@ test('an excerpt reads as plain words, without markup or goal IDs', () => {
 
 test('code keeps its characters: a glob search still finds its text', () => {
   assert.equal(show('Use `src/**/*.ts` for the check', 'src'), 'Use src/**/*.ts for the check')
+  // A link whose label is code keeps its words and loses its target.
+  assert.equal(show('Read [`go test`](https://example.com/docs).', 'test'), 'Read go test.')
   // The searched glob is still there to highlight.
   assert.ok(snippet('Use `src/**/*.ts` for the check', 'src/**/*.ts').some((part) => part.hit && part.text === 'src/**/*.ts'))
   // Only a fence line goes, never the line of code below it.
