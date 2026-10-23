@@ -15,7 +15,7 @@ import (
 	"dyna-agent/internal/sysload"
 )
 
-func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Service, load *sysload.Sampler, readOnly bool, signals *workerSignals, t *timers, events *hub.Hub, emit func(roomsvc.Event)) <-chan struct{} {
+func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Service, load *sysload.Sampler, readOnly bool, signals *workerSignals, t *timers, events *hub.Hub, started time.Time, emit func(roomsvc.Event)) <-chan struct{} {
 	watch := ctx
 	done := make(chan struct{})
 	go func() {
@@ -64,7 +64,7 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 		}
 		workersDone := make(chan struct{})
 		if !readOnly {
-			go func() { defer close(workersDone); runWorkers(watch, rooms, signals, t, load, events) }()
+			go func() { defer close(workersDone); runWorkers(watch, rooms, signals, t, load, events, started) }()
 		} else {
 			close(workersDone)
 		}

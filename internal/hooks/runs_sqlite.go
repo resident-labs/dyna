@@ -166,7 +166,7 @@ func (s Service) pendingRuns(ctx context.Context) ([]Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, "SELECT body FROM hook_runs")
+	rows, err := db.QueryContext(ctx, "SELECT body FROM hook_runs WHERE json_extract(CAST(body AS TEXT),'$.result')='pending'")
 	if err != nil {
 		return nil, err
 	}
@@ -181,9 +181,7 @@ func (s Service) pendingRuns(ctx context.Context) ([]Run, error) {
 		if err := json.Unmarshal(raw, &run); err != nil {
 			continue // a damaged record is not a run to settle
 		}
-		if run.Result == "pending" {
-			pending = append(pending, run)
-		}
+		pending = append(pending, run)
 	}
 	return pending, rows.Err()
 }

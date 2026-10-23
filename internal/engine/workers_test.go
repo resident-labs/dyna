@@ -284,7 +284,7 @@ func TestEngineHookWorkerDrainsStartupSpoolOnce(t *testing.T) {
 	t.Cleanup(authority.InEngine())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil)
+	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil, time.Now())
 	drain := w.hooks
 	ticks := make(chan struct{}, 4)
 	w.hooks = func(ctx context.Context) (time.Time, error) {
@@ -624,5 +624,26 @@ func TestSweepMarkCountsOnlyAPassWithNoEvent(t *testing.T) {
 	signals.found("question delivery", nil)
 	if got := signals.findings(); got != 1 {
 		t.Fatalf("findings = %d, want 1", got)
+	}
+}
+
+// Settlement measures a run against the engine's own start, not the moment the
+// workers reach it. Startup recovery can take time, and a hook run that the
+// owner starts in between must stay live.
+func TestWorkersSettleFromTheEngineStart(t *testing.T) {
+	services := testServices(t, false)
+	started := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	var cutoff time.Time
+	settleHookRuns = func(_ context.Context, at time.Time) error {
+		cutoff = at
+		return nil
+	}
+	t.Cleanup(func() { settleHookRuns = settleFromStart })
+	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil, started)
+	if err := w.settle(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !cutoff.Equal(started) {
+		t.Fatalf("settle cutoff = %s, want the engine start %s", cutoff, started)
 	}
 }
