@@ -39,3 +39,34 @@ func TestHistoricalCardAndShellShapesAreCanonical(t *testing.T) {
 		t.Fatalf("unknown field lost: %s", body)
 	}
 }
+
+func TestQuestionProjectionPreservesCursorAndOmitsDuplicateAnswer(t *testing.T) {
+	s, id, path, _ := historicalWakeFixture(t)
+	first := "{\"id\":\"q\",\"kind\":\"question\",\"text\":\"[QUESTION q1] Which fix?\"}\n"
+	raw := []byte(first + "{\"id\":\"a\",\"kind\":\"message\",\"text\":\"[ANSWER q1] Small.\"}\n{\"id\":\"dup\",\"kind\":\"question-answered\",\"text\":\"q1 answered\"}\n")
+	if err := os.WriteFile(path, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Migrate(filepath.Dir(s.Root)); err != nil {
+		t.Fatal(err)
+	}
+	for _, offset := range []int64{0, int64(len(first))} {
+		posts, next, err := s.ReadFrom(id, offset)
+		want := 2 - int(offset/int64(len(first)))
+		if err != nil || len(posts) != want || next != int64(len(raw)) {
+			t.Fatalf("offset %d: posts = %+v, cursor %d, %v", offset, posts, next, err)
+		}
+		for _, p := range posts {
+			if p.Kind != "message" {
+				t.Fatalf("kind = %q", p.Kind)
+			}
+		}
+	}
+	if posts, _, _ := s.ReadFrom(id, 0); posts[0].QuestionID() != "q1" {
+		t.Fatalf("question marker lost: %+v", posts[0])
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(raw, after) {
+		t.Fatalf("source changed: %v", err)
+	}
+}

@@ -139,9 +139,8 @@ func OwnerLabel(human bool) string {
 }
 
 // QuestionID reads the marker on an ordinary question post.
-// TODO(legacy): Accept the old question kind while retained logs still use it.
 func (m Message) QuestionID() string {
-	if m.Kind != "message" && m.Kind != "question" {
+	if m.Kind != "message" {
 		return ""
 	}
 	match := questionMarker.FindStringSubmatch(m.Text)
