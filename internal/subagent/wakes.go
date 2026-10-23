@@ -144,11 +144,7 @@ func (m *Manager) pendingWakePosts(meta Meta, previous ...Turn) ([]room.Message,
 				fresh[post.ID] = true
 			}
 		} else {
-			// TODO: legacy/shim remove later — turns without an input cutoff use their end time; remove after retained turns have cutoffs.
-			fresh = map[string]bool{}
-			for _, post := range posts {
-				fresh[post.ID] = post.TS > last.Ended.UnixMilli()
-			}
+			return nil, fmt.Errorf("terminal turn %s/%d has no input cutoff", meta.ID, last.N)
 		}
 	}
 	selected := posts[:0]
