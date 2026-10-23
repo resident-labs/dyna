@@ -20,7 +20,7 @@ func TestRegistryImportPreservesRawMetadataAndCanonicalEmpty(t *testing.T) {
 			if err := os.MkdirAll(s.Root, 0700); err != nil {
 				t.Fatal(err)
 			}
-			raw := []byte(`{"version":1,"entries":[{"id":"legacy","harness":"fixture","identity":"account","label":"Old","unknown":{"large":9007199254740993},"credential":{"schema":"fixture-v1","payload":{"token":"legacy-canary"}}}]}`)
+			raw := []byte(`{"version":1,"entries":[{"id":"legacy","harness":"fixture","identity":"account","label":"Old","needslogin":true,"observation":{"windows":[],"unknown":{"large":9007199254740993}},"unknown":{"large":9007199254740993},"credential":{"schema":"fixture-v1","payload":{"token":"legacy-canary"}}}]}`)
 			if mode == "credential casing" {
 				raw = bytes.Replace(raw, []byte(`"credential"`), []byte(`"Credential"`), 1)
 			}
@@ -101,6 +101,20 @@ func TestRegistryImportPreservesRawMetadataAndCanonicalEmpty(t *testing.T) {
 				var fields map[string]json.RawMessage
 				if json.Unmarshal(metadata, &fields) != nil || string(fields["unknown"]) != `{"large":9007199254740993}` {
 					t.Fatal("update lost unknown metadata")
+				}
+				var observationFields map[string]json.RawMessage
+				if json.Unmarshal(fields["observation"], &observationFields) != nil || string(observationFields["unknown"]) != `{"large":9007199254740993}` {
+					t.Error("label update lost unknown nested metadata")
+				}
+				if err := s.Update(func(st *State) error {
+					st.Find("legacy").NeedsLogin = false
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				reloaded, err := s.Read()
+				if err != nil || reloaded.Find("legacy") == nil || reloaded.Find("legacy").NeedsLogin {
+					t.Error("retained field alias restored the cleared login flag")
 				}
 				if err := s.Update(func(st *State) error { st.Entries = nil; return nil }); err != nil {
 					t.Fatal(err)
