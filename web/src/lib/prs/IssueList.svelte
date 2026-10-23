@@ -17,7 +17,7 @@
   import { issueReference, roomIssueLabel, type IssueReference, type IssueRow as GitHubItem } from './unifiedIssues.ts'
   import RowActions from './RowActions.svelte'
   import type { RowAction } from './props.ts'
-  import { location } from '../rooms/issues.ts'
+  import { location } from '../issues/localIssues.ts'
 
   interface Props {
     groups?: { id: string; label: string; rows: GitHubItem[] }[]

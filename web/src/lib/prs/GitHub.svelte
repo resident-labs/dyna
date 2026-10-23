@@ -27,7 +27,7 @@
   import RowActions from './RowActions.svelte'
   import type { RowAction } from './props.ts'
   import { roomIssueLabel, unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
-  import { location as issueLocation } from '../rooms/issues.ts'
+  import { location as issueLocation } from '../issues/localIssues.ts'
   import IssuePage from './IssuePage.svelte'
   import Menu from '../ui/Menu.svelte'
   import { changeTitle, isLocal, withoutReviewers } from './pr.ts'
