@@ -223,7 +223,7 @@ func TestMigrateAddsProbeColumns(t *testing.T) {
 	if !m.LastProbe.IsZero() || !m.LastSeen.IsZero() || m.Capabilities.CPUs != 0 {
 		t.Fatalf("migrated machine has a probe: %#v", m)
 	}
-	if err := s.SaveProbe(ctx, m.ID, ProbeResult{Health: HealthOnline, Capabilities: Capabilities{OS: "Linux", CPUs: 4}, Load: Load{CPUs: 4}}); err != nil {
+	if _, err := s.SaveProbe(ctx, m.ID, ProbeResult{Health: HealthOnline, Capabilities: Capabilities{OS: "Linux", CPUs: 4}, Load: Load{CPUs: 4}}); err != nil {
 		t.Fatal(err)
 	}
 	stored, err := s.Get(ctx, "hermes")
