@@ -1,4 +1,24 @@
-import type { Bundle, Capability, Doctor, HarnessAccount, HarnessSnapshot, RecommendedVersion } from '../../api/harness.ts'
+import type { Bundle, Capability, Doctor, HarnessAccount, HarnessSnapshot, PrivateLogin, RecommendedVersion } from '../../api/harness.ts'
+import { errorText } from '../../errorText.ts'
+
+// LoginFlow is a sign-in card that a harness account waits on. The pane keeps
+// it while Settings closes or changes panes.
+export type LoginFlow = PrivateLogin & { harness: string }
+
+// Confirmation is a question the pane asks before a sign-in or switch goes ahead.
+export interface Confirmation {
+  kind: string
+  title: string
+  lines: string[]
+  action: string
+  danger: boolean
+  alternative?: string
+  run: () => void
+  runAlternative?: () => void
+}
+
+// failText is the thrown value's message, or the fallback when it has none.
+export const failText = (e: unknown, fallback: string): string => (e ? errorText(e) : fallback)
 
 export interface HarnessMeta {
   id: string
@@ -104,6 +124,17 @@ export function accountNeedsSignIn(account?: { needsLogin?: boolean; status?: st
   return !!account && (!!account.needsLogin || ['not signed in', 'needs_auth', 'needs-sign-in'].includes(account.status ?? ''))
 }
 
+// accountScopeLabel says how far an account's repo limit reaches.
+export function accountScopeLabel(account: HarnessAccount): string {
+  const n = account.repos?.length ?? 0
+  return n ? `${n} ${n === 1 ? 'repo' : 'repos'} only` : 'All repos'
+}
+
+// parseScopeList turns the one-repo-per-line field into the list the engine takes.
+export function parseScopeList(text: string): string[] {
+  return text.split('\n').map((line) => line.trim()).filter(Boolean)
+}
+
 // personalLoginChoice words the dialog that offers the user's own login. A login
 // that Dyna already saved can only lead to another account.
 export function personalLoginChoice(name: string, found: { saved?: boolean; label: string }): { title: string; lines: string[]; action: string; alternative: string } {
@@ -203,6 +234,17 @@ export function rowLine(row: Pick<HarnessRow, 'id' | 'installing' | 'needsInstal
 
 export function toolEnabledForHarness(entry: { enabledHarnesses?: string[] } | null | undefined, harnessId: string): boolean {
   return (entry?.enabledHarnesses ?? []).includes(harnessId)
+}
+
+// HarnessTab is one of the two views of the harness settings pane.
+export type HarnessTab = 'harnesses' | 'tools'
+
+// nextTab is the view that a tablist key moves to, or null for any other key.
+export function nextTab(current: string, key: string): HarnessTab | null {
+  if (key === 'Home') return 'harnesses'
+  if (key === 'End') return 'tools'
+  if (key !== 'ArrowLeft' && key !== 'ArrowRight') return null
+  return current === 'harnesses' ? 'tools' : 'harnesses'
 }
 
 export function toolSummary(kind: string, entry: { url?: string; command?: string; args?: string[]; source?: string } | null | undefined): string {
