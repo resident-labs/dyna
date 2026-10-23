@@ -50,7 +50,7 @@
   import { changesVisuals } from './lib/files/visuals.js'
   import Goals from './lib/rooms/Goals.svelte'
   import GoalDetail from './lib/rooms/GoalDetail.svelte'
-  import { expedite, expediteScope, expediteAction, heldGoals } from './lib/rooms/expedite.ts'
+  import { expedite, expediteScope, expediteAction, heldGoals, isExpedited } from './lib/rooms/expedite.ts'
   import Rules from './lib/rooms/Rules.svelte'
   import { nextRules } from './lib/rooms/rules.js'
   import PinIcon from './lib/ui/PinIcon.svelte'
@@ -248,11 +248,37 @@
   // deadline, so the badges leave on time without a server event.
   let expireTick = $state(Date.now())
   let knownGoals = $derived(fetchedGoal && !goals.some((g) => g.id === fetchedGoal.id) ? [...goals, fetchedGoal] : goals)
+  // Items carry the expedite scope's assignees. They load for each room's
+  // expedited goal, room:goal -> {at, items}, and load again when the goal
+  // changes, so a new assignee gets the badge without a reload.
+  let expediteGoalItems = $state({})
+  // withItems attaches the loaded items to the expedited goal, so the scope
+  // can cover item assignees.
+  function withItems(room, list) {
+    const g = list.find((x) => isExpedited(x))
+    const items = g && expediteGoalItems[room + ':' + g.id]?.items
+    return g && items ? list.map((x) => (x.id === g.id ? { ...x, items } : x)) : list
+  }
+  $effect(() => {
+    const wanted = []
+    const here = knownGoals.find((x) => isExpedited(x))
+    if (here) wanted.push({ room: roomId, goal: here })
+    for (const [id, list] of Object.entries(agentGoals)) {
+      const g = id === roomId ? undefined : (list ?? []).find((x) => isExpedited(x))
+      if (g) wanted.push({ room: id, goal: g })
+    }
+    for (const { room, goal } of wanted) {
+      const key = room + ':' + goal.id
+      const cached = untrack(() => expediteGoalItems[key])
+      if (cached && cached.at === goal.updatedAt) continue
+      api.goalItems(room, goal.id).then((items) => { expediteGoalItems = { ...expediteGoalItems, [key]: { at: goal.updatedAt, items: items ?? [] } } }, () => {})
+    }
+  })
   $effect(() => {
     const now = Math.max(expireTick, Date.now())
-    const scope = expediteScope(knownGoals, hierarchy, now)
+    const scope = expediteScope(withItems(roomId, knownGoals), hierarchy, now)
     // The agents list shows other rooms too: their expedited agents carry the badge as well.
-    const others = Object.entries(agentGoals).filter(([id]) => id !== roomId).map(([id, list]) => expediteScope(list, agentMembers?.[id] ?? [], now))
+    const others = Object.entries(agentGoals).filter(([id]) => id !== roomId).map(([id, list]) => expediteScope(withItems(id, list), agentMembers?.[id] ?? [], now))
     const agents = new Set([scope, ...others].flatMap((x) => [...x.agents]))
     expedite.set({ ...scope, agents })
     const until = Math.min(...[scope, ...others].filter((x) => x.goalId).map((x) => x.until))
@@ -419,7 +445,7 @@
   // The breadcrumbs above a session and a run: root, then the parent sessions.
   let sessionTrail = $derived(drill && !readOnlyDm && !isRootDm ? parentTrail(channels, drill.parent, rootMember()).filter((m) => m.id !== drill.id) : [])
   let runTrail = $derived(view === 'runs' && openRun && runDetail?.run?.parentId ? parentTrail(channels, runDetail.run.parentId, rootMember()) : [])
-  let channelLabel = $derived(channel?.name ?? 'general')
+  let channelLabel = $derived(channel?.name ?? roomLabel(current ?? room))
   // Shell exit records live in shell-jobs, not in channel feeds.
   let posts = $derived((feed?.posts ?? []).filter((p) => !isShellResult(p) && (!isChannel(view) || inChannel(p, view))))
   // What the owner chose to show in this channel; hidden posts still count as read.
