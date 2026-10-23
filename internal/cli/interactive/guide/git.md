@@ -1,6 +1,7 @@
 # Git
 
-Use `dyna git` for version-control work: `pr`, `change`, `ci`, `worktrees`, `hooks`, `sync`, and `issue`.
+Use `dyna git` for version-control work: `pr`, `change`, `ci`, `worktrees`, `hooks`, and `sync`.
+Room issues use the separate `dyna issue` group.
 Use `dyna git worktrees new <branch>` for a managed checkout.
 Run `eval "$(dyna git worktrees env)"` to set `DYNA_PORT`, `DYNA_PORTS` and `PORT` for that worktree's dev servers; open them with `dyna browser open http://127.0.0.1:$DYNA_PORT`.
 
@@ -158,6 +159,7 @@ Exempt workflows still gate CI. In enforce mode, runs that finish over budget st
 
 Use `dyna git sync status --json` to inspect saved ahead and behind counts.
 `dyna git sync fetch` refreshes the configured local lane remotes.
+Use `dyna git pr export` to test integration against origin/main and open or update its export PR.
 
 Registered machines run CI for tracked PR heads and merge trials. They are not
 GitHub self-hosted runners. Every machine lives in one registry, and this
@@ -331,11 +333,11 @@ fix the cause, then test before retrying. Tell the owner about hook changes.
 
 ## Issues for later
 
-When you find an architectural smell outside your current task, file it with `dyna git issue`. Filing wakes nobody.
+When you find an architectural smell outside your current task, file it with `dyna issue`. Filing wakes nobody.
 
 ```bash
-dyna git issue "Unify the parser paths" --at internal/parser.go:12 --note "Two callers use different rules."
-dyna git issue list --json
+dyna issue "Unify the parser paths" --at internal/parser.go:12 --note "Two callers use different rules."
+dyna issue list --json
 ```
 
-Root or the owner can triage an issue with `dyna git issue close <id> --reason "..."`, `dyna git issue goal <id> [--for @name]`, or `dyna git issue export <id>`. Export uses the room GitHub account and requires read-write access.
+Root or the owner can triage an issue with `dyna issue close <id> --reason "..."`, `dyna issue goal <id> [--for @name]`, or `dyna issue export <id>`. Export uses the room GitHub account and requires read-write access.

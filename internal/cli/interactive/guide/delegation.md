@@ -7,6 +7,7 @@ Keep small or tightly coupled changes yourself. Run read-only scouts in parallel
 
 ## Commands
 
+Manage sessions with `dyna session`; `dyna subagent` is an alias for every command below.
 Choose a profile with `dyna profiles list`; `--all` includes disabled profiles.
 A profile's uses switch on workflows, agents (subagent sessions) and services separately; `dyna profiles set <name> --use agents,services` picks any subset, and `dyna profiles list` shows the limits.
 Address sessions by full address (`<room>:<name>`), ID (`ses_...`), or open name.
