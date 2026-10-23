@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -225,9 +226,24 @@ func TestReplacementStartupTimeoutReportsFailureToOwner(t *testing.T) {
 	if err = e.mgr.SubmitHandoff(context.Background(), child.ID, state.ID, "SLEEP:60000 RESPOND: replacement", "", ""); err != nil {
 		t.Fatal(err)
 	}
-	if err = e.mgr.ProcessTransfer(e.ctx, child.ID, state.ID); err == nil || !strings.Contains(err.Error(), "no model output") {
-		t.Fatalf("startup timeout = %v", err)
+
+	stopped := make(chan string, 1)
+	e.mgr.Workers = subagent.NewWorkers(e.ctx, func(format string, args ...any) {
+		stopped <- fmt.Sprintf(format, args...)
+	})
+	e.mgr.TransferLaunch = nil
+	if err := e.mgr.ResumeWorkersForEngine(); err != nil {
+		t.Fatal(err)
 	}
+	select {
+	case failure := <-stopped:
+		if !strings.Contains(failure, "no model output") {
+			t.Fatalf("startup timeout = %s", failure)
+		}
+	case <-e.ctx.Done():
+		t.Fatal("replacement coordinator did not finish")
+	}
+
 	select {
 	case res := <-reports:
 		if res.Message.Kind != "failed" || !reflect.DeepEqual(res.Message.To, []string{rec.Name}) || !strings.Contains(res.Message.Text, "replacement startup produced no model output") {

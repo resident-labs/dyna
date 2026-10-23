@@ -8,7 +8,5 @@ internal/cli/room/room.go 1
 internal/cli/workflows/workflows.go 2
 internal/engine/callers.go 0
 internal/ghclient/policy.go 1
-internal/subagent/consolidation.go 1
 internal/subagent/manager.go 1
-internal/subagent/transfer.go 1
 internal/workflowsvc/run.go 1

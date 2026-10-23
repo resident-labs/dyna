@@ -109,9 +109,7 @@ func NewCommand() *cobra.Command {
 	accounts := &cobra.Command{Use: "accounts", Short: "Manage private native login homes"}
 	accounts.AddCommand(&cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		accounts := harnessruntime.NewAccounts()
-		if err := accounts.MigrateLegacyGrants(); err != nil {
-			return err
-		}
+		accounts.RepairAntigravityACPAccount()
 		a, err := accounts.List()
 		if err != nil {
 			return err

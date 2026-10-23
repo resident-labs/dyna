@@ -51,8 +51,8 @@ Run ` + "`dyna guide`" + ` for when to use a subagent instead of a workflow.`,
 	cmd.AddCommand(
 		startCommand(newManager), listCommand(newManager),
 		showCommand(newManager), outputCommand(newManager),
-		stopCommand(newManager), closeCommand(newManager), finishCommand(newManager), reopenCommand(newManager), promoteCommand(newManager), adoptCommand(newManager), renameCommand(newManager), consolidationCommand(newManager), consolidationRunnerCommand(newManager), transferCommand(newManager), transferRunnerCommand(newManager), historyCommand(newManager), turnCommand(newManager),
-		dismissPendingCommand(newManager), roomResumeCommand(newManager))
+		stopCommand(newManager), closeCommand(newManager), finishCommand(newManager), reopenCommand(newManager), promoteCommand(newManager), adoptCommand(newManager), renameCommand(newManager), consolidationCommand(newManager), transferCommand(newManager), historyCommand(newManager), turnCommand(newManager),
+		dismissPendingCommand(newManager))
 	return cmd
 }
 

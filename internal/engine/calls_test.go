@@ -205,7 +205,7 @@ func TestHookActionsUseRequestPrincipal(t *testing.T) {
 
 }
 
-func TestStartupMigratesOldAccountsAndUsageDoesNotWrite(t *testing.T) {
+func TestRuntimeConstructionAndUsageDoNotWriteAccounts(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	store := accountstore.DefaultStore()
 	// Write the historical fixture directly. Store.Update would add an
@@ -251,20 +251,7 @@ func TestStartupMigratesOldAccountsAndUsageDoesNotWrite(t *testing.T) {
 	}
 	accounts := service.New(service.Options{Store: store})
 	checkReadOnly("old usage", func() { accounts.AccountUsage(t.Context(), false) })
-	checkReadOnly("read-only startup", func() {
-		if _, err := newRuntime(t.Context(), true); err != nil {
-			t.Fatal(err)
-		}
-	})
-	// Keep the real migration and its durable checkpoint under test.
-	if _, err := newRuntime(t.Context(), false); err != nil {
-		t.Fatal(err)
-	}
-	state, err := store.Read()
-	if err != nil || len(state.Entries) != 0 {
-		t.Fatalf("startup did not drop old grant-only ref: %+v %v", state, err)
-	}
-	checkReadOnly("migrated usage", func() { accounts.AccountUsage(t.Context(), false) })
+	checkReadOnly("runtime construction", func() { newRuntime(t.Context()) })
 }
 
 func TestNotBuiltPageIsUsableShell(t *testing.T) {

@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -108,39 +107,14 @@ func (a *Accounts) transaction(fn func(*store.State) error, write bool) error {
 	})
 }
 
-// TODO: legacy/shim remove later — moves grant-only entries saved before
-// private native homes. Remove it once no saved index holds such an entry.
-// OpenCode v2 refs point into the owner's database, so they cannot move.
-func legacyGrant(e store.Entry) bool {
-	h, err := canonicalAccountHarness(e.Harness)
-	return err == nil && h == e.Harness && e.NativeHome == "" && e.Identity != "" &&
-		e.Credential.Schema != "" && e.Credential.Schema != "opencode/v2-ref@1" && json.Valid(e.Credential.Payload)
-}
-
-// MigrateLegacyGrants copies each legacy grant once into its own native home
-// and keeps its ID. A grant whose login already has a native entry merges into
-// that entry, which keeps its own login and gains a missing usage observation.
-// Then it drops every grant-only entry that is left.
-func (a *Accounts) MigrateLegacyGrants() error {
-	a.recordAntigravityACPAccount()
-	found := false
-	if err := a.transaction(func(s *store.State) error {
-		found = slices.ContainsFunc(s.Entries, func(e store.Entry) bool { return e.NativeHome == "" })
-		return nil
-	}, false); err != nil || !found {
-		return err
-	}
-	return a.transaction(a.migrateLegacyGrants, true)
-}
-
-// recordAntigravityACPAccount gives a HOME signed in before ACP-only accounts
+// RepairAntigravityACPAccount gives a HOME signed in before ACP-only accounts
 // the identity of its grant. Activation only ever wrote the active account's
 // grant there, so the active account names it. It is best effort and never
 // stops startup: a HOME it cannot repair stays signed out until its account
 // signs in again.
 //
 // TODO: legacy/shim remove later — once every such HOME has its record.
-func (a *Accounts) recordAntigravityACPAccount() {
+func (a *Accounts) RepairAntigravityACPAccount() {
 	id, err := a.activeID("antigravity")
 	if err != nil || id == "" {
 		return
@@ -151,52 +125,6 @@ func (a *Accounts) recordAntigravityACPAccount() {
 		return
 	}
 	_ = native.RecordAntigravityACPAccount(harnesshome.Home(scope), n.Identity, n.Label)
-}
-
-func (a *Accounts) migrateLegacyGrants(state *store.State) error {
-	merged := []string{}
-	for i := range state.Entries {
-		e := &state.Entries[i]
-		if !legacyGrant(*e) {
-			continue
-		}
-		if n := nativeEntryFor(state, e.Harness, e.Integration, e.Identity); n != nil {
-			if n.Observation == nil {
-				n.Observation = e.Observation
-			}
-			// An older import could mark the legacy ID active; move it to the kept entry.
-			if active, err := a.activeID(e.Harness); err != nil {
-				return err
-			} else if active == e.ID {
-				if err = a.setActive(e.Harness, n.ID); err != nil {
-					return err
-				}
-			}
-			merged = append(merged, e.ID)
-			continue
-		}
-		dir, err := a.harnessDirectory(e.Harness)
-		if err != nil {
-			return err
-		}
-		e.NativeHome = filepath.Join(dir, e.ID)
-		if err = os.Mkdir(e.NativeHome, 0700); err != nil && !os.IsExist(err) {
-			return err
-		}
-		c := native.Captured{Integration: e.Integration, Identity: e.Identity, Label: e.Label, Credential: e.Credential}
-		if err = a.saveOutgoing(state, e.Harness, c, e.ID); err != nil {
-			return err
-		}
-		e.Credential = store.Credential{}
-	}
-	for _, id := range merged {
-		state.Remove(id)
-	}
-	// TODO: legacy/shim remove later — drops grant-only entries that could not
-	// move, such as OpenCode v2 refs. Nothing reads them since the personal
-	// account path went; remove with legacyGrant.
-	state.Entries = slices.DeleteFunc(state.Entries, func(e store.Entry) bool { return e.NativeHome == "" })
-	return nil
 }
 
 func nativeEntryFor(state *store.State, h, integration, identity string) *store.Entry {

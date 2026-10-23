@@ -395,14 +395,6 @@ func goTransfer(m *Manager, id, token string) error {
 	return nil
 }
 
-// TODO: legacy/shim remove later — dyna subagent _transfer, which an engine of the earlier release starts as a detached worker; remove one release after every host runs the release where transfers run in the engine.
-func (m *Manager) ProcessTransfer(ctx context.Context, id, token string) error {
-	if err := authority.Check("subagent _transfer", authority.Current(), nil); err != nil {
-		return err
-	}
-	return m.runTransfer(ctx, id, token)
-}
-
 // runTransfer resumes durable work under a per-session worker lock. It never
 // changes process-wide environment or starts two replacement turns. It is
 // the engine's own work, so it checks no caller.

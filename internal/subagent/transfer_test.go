@@ -334,7 +334,7 @@ func TestTransferCancelledWorkerCannotCreateReplacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.m.TransferSleep = func(context.Context, time.Duration) error { return errors.New("unexpected wait") }
-	if err := e.m.ProcessTransfer(e.ctx, info.ID, state.ID); err != nil {
+	if err := e.m.runTransfer(e.ctx, info.ID, state.ID); err != nil {
 		t.Fatal(err)
 	}
 	meta, _ := e.m.Store.ReadMeta(info.ID)
@@ -390,14 +390,14 @@ func TestTransferFinalHandoffHintsAndDurableCoordinatorRecovery(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(e.ctx, 5*time.Second)
 	defer cancel()
-	if err := recovered.ProcessTransfer(ctx, info.ID, state.ID); err != nil {
+	if err := recovered.runTransfer(ctx, info.ID, state.ID); err != nil {
 		t.Fatal(err)
 	}
 	meta, _ = e.m.Store.ReadMeta(info.ID)
 	if meta.Transfer.Phase != "completed" || meta.Turns != 2 || meta.Dir != actual || !strings.Contains(meta.Transfer.WrittenHandoff, "decoder-transfer") {
 		t.Fatalf("recovered checkpoint: %+v", meta.Transfer)
 	}
-	if err := recovered.ProcessTransfer(ctx, info.ID, state.ID); err != nil {
+	if err := recovered.runTransfer(ctx, info.ID, state.ID); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := e.m.Store.ReadMeta(info.ID)
@@ -574,7 +574,7 @@ func TestTransferPollingBackoffAndImmediateProgress(t *testing.T) {
 				}
 				return nil
 			}
-			if err := e.m.ProcessTransfer(e.ctx, info.ID, state.ID); err == nil || !strings.Contains(err.Error(), "injected runner start failure") {
+			if err := e.m.runTransfer(e.ctx, info.ID, state.ID); err == nil || !strings.Contains(err.Error(), "injected runner start failure") {
 				t.Fatalf("expected target startup failure: %v", err)
 			}
 			got, _ := e.m.TransferStatus(info.ID)

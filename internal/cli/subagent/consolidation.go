@@ -1,7 +1,6 @@
 package subagent
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -88,9 +87,4 @@ Cancel works before startup or after a startup failure.`, Args: cobra.MinimumNAr
 		cmd.AddCommand(sub)
 	}
 	return cmd
-}
-func consolidationRunnerCommand(newManager func() *subagent.Manager) *cobra.Command {
-	return &cobra.Command{Use: "_consolidate <target> <operation-id>", Hidden: true, Args: cobra.ExactArgs(2), RunE: func(c *cobra.Command, args []string) error {
-		return newManager().ProcessConsolidation(context.Background(), args[0], args[1])
-	}}
 }

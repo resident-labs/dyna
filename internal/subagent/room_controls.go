@@ -148,11 +148,6 @@ func (m *Manager) launchRoomResume(id string, revision uint64) error {
 	return nil
 }
 
-// TODO: legacy/shim remove later — dyna subagent _resume-room, which an earlier engine starts as a detached worker; remove one release after every host runs room-resume coordinators in the engine.
-func (m *Manager) ProcessRoomResume(ctx context.Context, id string, revision uint64) error {
-	return m.runRoomResume(ctx, id, revision)
-}
-
 // runRoomResume is replayable. The revision prevents an old worker from
 // admitting work after another pause. Cursors/claims coalesce repeated wakes.
 func (m *Manager) runRoomResume(ctx context.Context, id string, revision uint64) error {
