@@ -67,7 +67,7 @@ func (s *Store) open() (*sql.DB, error) {
 }
 
 // migrate creates the goal tables, imports state.json once and folds legacy
-// child goals into items, recorded as goals.schema=2 in meta.
+// child goals into items, and adds room revisions (goals.schema=3).
 func (s *Store) migrate(db *sql.DB) error {
 	if err := os.MkdirAll(s.Root, 0700); err != nil {
 		return err
@@ -86,20 +86,31 @@ func (s *Store) migrate(db *sql.DB) error {
 	}); err != nil {
 		return err
 	}
-	if err := database.Migrate(db, "goals.schema", 2, func(conn *sql.Conn, from int) error {
+	if err := database.Migrate(db, "goals.schema", 3, func(conn *sql.Conn, from int) error {
 		ctx := context.Background()
 		if from < 1 {
 			if _, err := conn.ExecContext(ctx, goalsSchema); err != nil {
 				return err
 			}
+		}
+		if _, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO meta(key,value) VALUES ('goals.revision','0')"); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "ALTER TABLE goal_rooms ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "UPDATE goal_rooms SET revision=(SELECT CAST(value AS INTEGER) FROM meta WHERE key='goals.revision')"); err != nil {
+			return err
+		}
+		if from < 1 {
 			if err := s.importLegacy(conn); err != nil {
 				return err
 			}
-			if _, err := conn.ExecContext(ctx, "INSERT INTO meta(key,value) VALUES ('goals.revision','0')"); err != nil {
-				return err
-			}
 		}
-		return s.foldLegacyChildren(conn)
+		if from < 2 {
+			return s.foldLegacyChildren(conn)
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -138,9 +149,25 @@ const (
 // readState reads every room row and the goals matching where. A state read
 // with fewer goals saves only the goals it holds.
 func readState(query reader, where string, args ...any) (State, rows, error) {
+	return readStateRooms(query, where, nil, args...)
+}
+
+// A nil room list reads all rooms. A scoped read also includes Global rules.
+func readStateRooms(query reader, where string, rooms []string, args ...any) (State, rows, error) {
+	roomQuery := "SELECT room,body FROM goal_rooms"
+	var roomArgs []any
+	if rooms != nil {
+		for _, id := range append(append([]string{}, rooms...), Global) {
+			roomArgs = append(roomArgs, id)
+		}
+		filter := "room IN (" + strings.TrimSuffix(strings.Repeat("?,", len(roomArgs)), ",") + ")"
+		roomQuery += " WHERE " + filter
+		where = "(" + where + ") AND " + filter
+		args = append(append([]any{}, args...), roomArgs...)
+	}
 	st := State{Version: 1, Rooms: map[string]*RoomState{}}
 	stored := rows{goals: map[[2]string][]byte{}, rooms: map[string][]byte{}}
-	err := scan(query, "SELECT room,body FROM goal_rooms", func(room string, body []byte) error {
+	err := scan(query, roomQuery, func(room string, body []byte) error {
 		stored.rooms[room] = body
 		if room == Global {
 			st.Global = &RuleSet{}
@@ -153,7 +180,7 @@ func readState(query reader, where string, args ...any) (State, rows, error) {
 		r.Goals = map[string]*Goal{}
 		st.Rooms[room] = r
 		return nil
-	})
+	}, roomArgs...)
 	if err != nil {
 		return st, stored, err
 	}
@@ -192,7 +219,12 @@ func scan(query reader, sqlText string, each func(room string, body []byte) erro
 // rows st no longer has. Callers hold BEGIN IMMEDIATE.
 func saveState(conn *sql.Conn, stored rows, st State) (bool, error) {
 	ctx := context.Background()
+	var revision int64
+	if err := conn.QueryRowContext(ctx, "SELECT CAST(value AS INTEGER)+1 FROM meta WHERE key='goals.revision'").Scan(&revision); err != nil {
+		return false, err
+	}
 	changed := false
+	changedRooms := map[string]bool{}
 	exec := func(query string, args ...any) error {
 		changed = true
 		_, err := conn.ExecContext(ctx, query, args...)
@@ -213,7 +245,7 @@ func saveState(conn *sql.Conn, stored rows, st State) (bool, error) {
 		if old, ok := stored.rooms[id]; ok && bytes.Equal(old, body) {
 			continue
 		}
-		if err := exec("INSERT INTO goal_rooms(room,body) VALUES (?,?) ON CONFLICT(room) DO UPDATE SET body=excluded.body", id, string(body)); err != nil {
+		if err := exec("INSERT INTO goal_rooms(room,body,revision) VALUES (?,?,?) ON CONFLICT(room) DO UPDATE SET body=excluded.body,revision=excluded.revision", id, string(body), revision); err != nil {
 			return false, err
 		}
 	}
@@ -233,6 +265,7 @@ func saveState(conn *sql.Conn, stored rows, st State) (bool, error) {
 			if old, ok := stored.goals[[2]string{room, id}]; ok && bytes.Equal(old, body) {
 				continue
 			}
+			changedRooms[room] = true
 			if err := exec("INSERT INTO goals(room,id,state,body) VALUES (?,?,?,?) ON CONFLICT(room,id) DO UPDATE SET state=excluded.state,body=excluded.body", room, id, g.State, string(body)); err != nil {
 				return false, err
 			}
@@ -240,9 +273,20 @@ func saveState(conn *sql.Conn, stored rows, st State) (bool, error) {
 	}
 	for key := range stored.goals {
 		if r := st.Rooms[key[0]]; r == nil || r.Goals[key[1]] == nil {
+			changedRooms[key[0]] = true
 			if err := exec("DELETE FROM goals WHERE room=? AND id=?", key[0], key[1]); err != nil {
 				return false, err
 			}
+		}
+	}
+	for room := range changedRooms {
+		if _, err := conn.ExecContext(ctx, "UPDATE goal_rooms SET revision=? WHERE room=?", revision, room); err != nil {
+			return false, err
+		}
+	}
+	if changed {
+		if _, err := conn.ExecContext(ctx, "UPDATE meta SET value=? WHERE key='goals.revision'", revision); err != nil {
+			return false, err
 		}
 	}
 	return changed, nil
@@ -370,11 +414,7 @@ func (s *Store) updateTx(fn func(*wake, *State) error, where string, args ...any
 				if err := recordReleases(&st, stored, s.now()); err != nil {
 					return err
 				}
-				changed, err := saveState(conn, stored, st)
-				if err != nil || !changed {
-					return err
-				}
-				_, err = conn.ExecContext(context.Background(), "UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='goals.revision'")
+				_, err = saveState(conn, stored, st)
 				return err
 			})
 		})
@@ -436,6 +476,44 @@ func (s *Store) Revision() (string, error) {
 	var revision string
 	err = db.QueryRow("SELECT value FROM meta WHERE key='goals.revision'").Scan(&revision)
 	return revision, err
+}
+
+// RoomRevisions identifies rooms changed by committed writes without decoding goals.
+func (s *Store) RoomRevisions() (map[string]string, error) {
+	db, err := s.open()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query("SELECT room,revision FROM goal_rooms")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	revisions := map[string]string{}
+	for rows.Next() {
+		var room, revision string
+		if err := rows.Scan(&room, &revision); err != nil {
+			return nil, err
+		}
+		revisions[room] = revision
+	}
+	return revisions, rows.Err()
+}
+
+// ReadRooms reads the named rooms and Global rules from one database snapshot.
+func (s *Store) ReadRooms(rooms []string) (State, error) {
+	db, err := s.open()
+	if err != nil {
+		return State{}, err
+	}
+	var st State
+	err = state.For(db).Read(context.Background(), func(query state.Reader) error {
+		var err error
+		st, _, err = readStateRooms(query, allGoals, append([]string{}, rooms...))
+		return err
+	})
+	s.dropExpired(&st)
+	return st, err
 }
 
 // recordReleases runs in the shared writer so closing, reassigning and removing

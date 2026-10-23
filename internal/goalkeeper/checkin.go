@@ -208,9 +208,12 @@ func (s *Service) deliverNotice(ctx context.Context, rec room.Record, r *goals.R
 			}
 		}
 		return true, s.postToRoot(rec, true, room.PostInput{ID: stableID(rec.ID + "/" + n.ID), Kind: "goal", Text: text})
+	case "journal", "close", "goalless":
+		// TODO: legacy/shim remove later — known check-in notice kinds retire without delivery; remove when stored states hold none.
+		return true, nil
+	default:
+		return false, fmt.Errorf("unsupported goal notice kind %q", kind)
 	}
-	// TODO: legacy/shim remove later — journal, close and goalless notices queued by the check-in keeper are dropped unsent; remove when stored states hold none.
-	return true, nil
 }
 
 // postToRoot sends a keeper post to root's session and wakes it when wake is
