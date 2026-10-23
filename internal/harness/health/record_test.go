@@ -3,15 +3,12 @@ package health
 import (
 	"context"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"dyna-agent/internal/profile"
-	"dyna-agent/internal/store"
 )
 
-// Persistence assertions use the same observation and commit/copy code as
+// Persistence assertions use the same observation and commit code as
 // RecordTurn, with the test context instead of optional production deadlines.
 func recordForTest(t *testing.T, s *Service, p profile.Profile, version string, o Observation, probe, passed bool) View {
 	t.Helper()
@@ -24,24 +21,12 @@ func recordForTest(t *testing.T, s *Service, p profile.Profile, version string, 
 
 // Worker goroutines return errors so the test goroutine can report failures.
 func persistForTest(ctx context.Context, s *Service, p profile.Profile, version string, o Observation, probe, passed bool) (View, error) {
-	path, err := s.path(p.Name)
-	if err != nil {
-		return View{}, err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-		return View{}, err
-	}
 	db, err := s.db()
 	if err != nil {
 		return View{}, err
 	}
-	unlock, err := store.LockContext(ctx, path+".lock")
-	if err != nil {
-		return View{}, err
-	}
-	defer unlock()
 	v := recordObservation(p, version, o, probe, passed, func(name string, r *record, apply func()) error {
-		return s.saveRecord(ctx, db, name, path, r, apply)
+		return s.saveRecord(ctx, db, name, r, apply)
 	})
 	if v.StorageError != "" {
 		return v, errors.New(v.StorageError)
