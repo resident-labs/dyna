@@ -27,7 +27,6 @@ func serveProfileEngine(t *testing.T, actor authority.Actor) (string, *atomic.In
 	calls, err := websvc.Bind([]websvc.Binding{
 		{Name: "UpsertProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: svc.UpsertProfile},
 		{Name: "SetProfileUses", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: svc.SetProfileUses},
-		{Name: "SeedProfiles", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: svc.SeedProfiles},
 		{Name: "RemoveProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: svc.RemoveProfile},
 		{Name: "SetDefaultProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: svc.SetDefaultProfile},
 		{Name: "SetProfileDisabled", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: svc.SetProfileDisabled},
@@ -58,7 +57,6 @@ func profileMutationArgs() [][]string {
 		{"set", "subject", "--use", "agents"},
 		{"remove", "subject"}, {"set-default", "subject"},
 		{"enable", "subject"}, {"disable", "subject"},
-		{"init-codex"}, {"init-claude"}, {"init-antigravity"}, {"init-muse"},
 	}
 }
 
@@ -162,20 +160,6 @@ func TestProfileCommandsRenderEngineResults(t *testing.T) {
 				}
 				return []string{profile.UseServices}, nil
 			}},
-		{Name: "SeedProfiles", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true,
-			Method: func(harness string, defaults []profile.Profile) ([]configsvc.SeededProfile, error) {
-				called.Add(1)
-				var bundle struct {
-					Profiles []profile.Profile `json:"profiles"`
-				}
-				if err := json.Unmarshal(defaultProfilesJSON, &bundle); err != nil || !reflect.DeepEqual(defaults, bundle.Profiles) {
-					t.Errorf("seed request lost bundle fields: %v", err)
-				}
-				return []configsvc.SeededProfile{
-					{Name: "kept", Kept: true},
-					{Name: "remote", Harness: harness, Model: "engine-model"},
-				}, nil
-			}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -184,19 +168,8 @@ func TestProfileCommandsRenderEngineResults(t *testing.T) {
 	if out := runProfilesCommand(t, "set", "subject", "--use", "agents"); out != "profile \"subject\" uses: services\n" {
 		t.Errorf("uses output = %q", out)
 	}
-	for command, harness := range map[string]string{
-		"init-codex": profile.HarnessCodex, "init-claude": profile.HarnessClaudeCode,
-		"init-antigravity": profile.HarnessAntigravity, "init-muse": profile.HarnessMuse,
-	} {
-		out := runProfilesCommand(t, command)
-		want := "  - kept     exists, kept\n  ✓ remote   " + harness + " · engine-model\n" +
-			"browse and edit them in the desktop app (Settings, Profiles); agents see them via `dyna profiles list --json`\n"
-		if out != want {
-			t.Errorf("%s output = %q, want %q", command, out, want)
-		}
-	}
-	if called.Load() != 5 {
-		t.Errorf("engine calls = %d, want 5", called.Load())
+	if called.Load() != 1 {
+		t.Errorf("engine calls = %d, want 1", called.Load())
 	}
 	after, err := os.ReadFile(profile.DefaultPath())
 	if err != nil || !bytes.Equal(before, after) {

@@ -344,7 +344,6 @@ func bindings(s services) []websvc.Binding {
 		{Name: "ConfigProfiles", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: configsvc.Profiles},
 		{Name: "UpsertProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.config.UpsertProfile},
 		{Name: "SetProfileUses", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.config.SetProfileUses},
-		{Name: "SeedProfiles", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.config.SeedProfiles},
 		{Name: "SaveProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.config.SaveProfile},
 		{Name: "RemoveProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.config.RemoveProfile},
 		{Name: "SetDefaultProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.config.SetDefaultProfile},
