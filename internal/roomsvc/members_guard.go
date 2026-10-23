@@ -16,15 +16,10 @@ import (
 // fact comes from a row whose write moves MembersRevision, or from a room
 // record's name and seat, compared here.
 //
-// TODO: legacy/shim remove later — the revision guard catches session writes
-// from CLI processes, detached coordinators and runners of earlier releases.
-// Remove it when no earlier-release writer can change these stores outside
-// the engine. A runner of a replaced binary has its session's turn and
-// queue read on every tick (runnerWatch.probe); a runner that cannot be
-// watched makes every tick scan all sessions; and a revision that cannot be
-// read scans too.
+// The guard also catches current session writes made outside the engine,
+// which do not wake Watch. A runner that cannot be watched makes every
+// tick scan all sessions; a revision that cannot be read scans too.
 func (s *Service) membersChanged(w *memberWatch, records []room.Record, first bool) bool {
-	w.runners.probe(s.sessions())
 	guard, err := s.membersGuard(records)
 	full := w.ticks%MemberFullScanEvery == 0
 	w.ticks++

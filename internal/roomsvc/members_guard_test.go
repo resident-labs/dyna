@@ -1,11 +1,8 @@
 package roomsvc
 
 import (
-	"encoding/json"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
@@ -15,7 +12,7 @@ import (
 )
 
 // An idle tick skips the members scan. A session write that no wake covered
-// and a session whose runner is an older binary each make the next tick scan
+// and a session whose runner cannot be watched each make the next tick scan
 // (requirement 16). A SessionsChanged wake scans every session at once,
 // without a tick.
 func TestMembersScanRunsOnlyWhenSomethingChanged(t *testing.T) {
@@ -51,29 +48,6 @@ func TestMembersScanRunsOnlyWhenSomethingChanged(t *testing.T) {
 	e.svc.membersChanged(w, records, false)
 	if e.svc.membersChanged(w, records, false) {
 		t.Fatal("an idle tick scanned members after the unwatched runner went")
-	}
-	// A runner of a replaced binary may write its turn file, not the row:
-	// the probe imports it, which moves the revision.
-	w.runners.legacy[info.ID] = info.Turns
-	path := filepath.Join(e.mgr.Store.Root, info.ID, "turns", strconv.Itoa(info.Turns)+".json")
-	raw, err := json.Marshal(subagent.Turn{N: info.Turns, Status: subagent.TurnOK, Prompt: "old binary"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path+".old", raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(path+".old", path); err != nil {
-		t.Fatal(err)
-	}
-	if !e.svc.membersChanged(w, records, false) {
-		t.Fatal("an older runner's turn file write did not wake the scan")
-	}
-	if turn, err := e.mgr.Store.ReadTurn(info.ID, info.Turns); err != nil || turn.Prompt != "old binary" {
-		t.Fatalf("after one probe the turn reads %q, %v; want the older runner's write", turn.Prompt, err)
-	}
-	if e.svc.membersChanged(w, records, false) {
-		t.Fatal("an idle tick scanned members with only an older runner probed")
 	}
 }
 
@@ -123,7 +97,7 @@ func TestRunnerWatchWakesOnExitAndFallsBack(t *testing.T) {
 		w := newRunnerWatch(func() { woke <- struct{}{} }, recordedAs("ses_a"))
 		defer w.close()
 		w.follow([]subagent.Info{runningInfo("ses_a", cmd.Process.Pid)})
-		if w.needsFullScans() || len(w.legacy) != 0 {
+		if w.needsFullScans() {
 			t.Fatal("a recorded runner of this binary fell back")
 		}
 		_ = cmd.Process.Kill()
@@ -158,13 +132,13 @@ func TestRunnerWatchWakesOnExitAndFallsBack(t *testing.T) {
 			t.Fatalf("full scans %v, wakes %d; want a fallback with one wake", w.needsFullScans(), len(woke))
 		}
 	})
-	t.Run("an earlier release's launch record is an older runner", func(t *testing.T) {
+	t.Run("an earlier release's launch record is still watched", func(t *testing.T) {
 		cmd := startRunner(t)
 		w := newRunnerWatch(func() {}, launchedAs("ses_a", 0))
 		defer w.close()
 		w.follow([]subagent.Info{runningInfo("ses_a", cmd.Process.Pid)})
-		if _, probed := w.legacy["ses_a"]; !probed || w.needsFullScans() {
-			t.Fatalf("legacy %v, full scans %v; want its session probed, without full scans", w.legacy, w.needsFullScans())
+		if w.watched["ses_a"] != cmd.Process.Pid || w.needsFullScans() {
+			t.Fatalf("watched %v, full scans %v; want its runner watched without full scans", w.watched, w.needsFullScans())
 		}
 	})
 
