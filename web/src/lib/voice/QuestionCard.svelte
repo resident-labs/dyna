@@ -1,17 +1,23 @@
-<script>
+<script lang="ts">
   // Root's open question, as a card under the call widget. Voice reads it
   // aloud during a call, so the owner may answer by voice, or here.
   import { api } from '../../api.ts'
   import { answers } from './attention.ts'
   import { icons } from './icons.ts'
+  import type { Question } from '../api/room.ts'
 
   // phone: touch sizes for the full-screen call.
-  let { question, roomId, live = false, phone = false } = $props()
+  let { question, roomId, live = false, phone = false }: {
+    question: Question
+    roomId: string
+    live?: boolean
+    phone?: boolean
+  } = $props()
   let text = $state('')
   let busy = $state(false)
   let error = $state('')
 
-  async function answer(choice, typed = '') {
+  async function answer(choice: string, typed = '') {
     if (busy) return
     busy = true
     error = ''
@@ -19,12 +25,12 @@
       await api.answerQuestion(roomId, question.id, choice, typed)
       text = ''
     } catch (err) {
-      error = String(err?.message ?? err)
+      error = err instanceof Error ? err.message : String(err)
     } finally {
       busy = false
     }
   }
-  const time = (at) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  const time = (at: string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 </script>
 
 <div class="qcard" class:phone role="group" aria-label="Root asks you">
@@ -34,7 +40,7 @@
     <p class="qnote"><svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path d={icons.mic} fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" /></svg>Voice reads this aloud. Speak to answer, or use these.</p>
   {/if}
   <div class="answers">
-    {#each answers(question) as a, i (a.label)}
+    {#each answers({ options: question.options ?? undefined }) as a, i (a.label)}
       <button class="option" class:gold={i === 0} disabled={busy} onclick={() => answer(a.choice, a.text)}>{a.label}</button>
     {/each}
     <form class="reply" onsubmit={(e) => { e.preventDefault(); if (text.trim()) answer('', text.trim()) }}>

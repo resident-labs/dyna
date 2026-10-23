@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // The minimized call on a phone: a small circle with the mic, its live
   // state as a ring. Double-tap it to open the call, hold it to talk, and
   // drag it anywhere: it snaps to the nearest side and keeps its place. A badge counts the files
@@ -8,20 +8,30 @@
   import { icons } from './icons.ts'
   import { shareLine } from './conversation.ts'
   import { bubbleGestures, bubbleOrb, bubblePlace, bubbleTop, snapBubble, BUBBLE, SHARE_PEEK } from './phone.ts'
+  import type { SharedItem } from './conversation.ts'
+  import type { CallState } from './callState.ts'
+  import type { BubblePlace, Point, PointerMove } from './phone.ts'
+  import type { Question } from '../api/room.ts'
 
   // shared: the unseen shared items, oldest first.
   // ontalk(on) starts and ends a hold: it talks, and opens a muted mic
   // only while held.
-  let { s, question = null, shared = [], onexpand, ontalk } = $props()
+  let { s, question = null, shared = [], onexpand, ontalk }: {
+    s: CallState
+    question?: Question | null
+    shared?: SharedItem[]
+    onexpand: () => void
+    ontalk: (on: boolean) => void
+  } = $props()
 
   const KEY = 'dyna.voice.bubble'
   let held = $state(false)
   let o = $derived(bubbleOrb(s, held))
-  let place = $state(saved())
-  function saved() {
+  let place = $state<BubblePlace>(saved())
+  function saved(): BubblePlace {
     try { return bubblePlace(localStorage.getItem(KEY)) } catch { return bubblePlace(null) }
   }
-  let drag = $state(null) // {x, y} of the finger while dragging
+  let drag = $state<Point | null>(null) // {x, y} of the finger while dragging
 
   // Only an item shared while the bubble shows gets a peek.
   let newest = $derived(shared.at(-1)?.key)
@@ -33,7 +43,8 @@
       return
     }
     peeked = newest
-    peek = untrack(() => shareLine(shared.at(-1)))
+    const item = untrack(() => shared.at(-1))
+    peek = item ? shareLine(item) : ''
     const t = setTimeout(() => (peek = ''), SHARE_PEEK)
     return () => clearTimeout(t)
   })
@@ -55,12 +66,13 @@
   // A hold must end even when its pointerup never comes: the browser took
   // the pointer, the page lost focus or hid, or the bubble went away (a
   // rotation past the phone breakpoint) while the call goes on.
-  function cancel(e) {
+  function cancel(e?: PointerMove) {
     if (g.cancel(e)) drag = null
   }
   $effect(() => () => cancel())
-  function down(e) {
-    if (g.down(e)) e.currentTarget.setPointerCapture(e.pointerId)
+  function down(e: PointerEvent) {
+    const source = e.currentTarget
+    if (g.down(e) && source instanceof HTMLElement) source.setPointerCapture(e.pointerId)
   }
   let style = $derived(drag
     ? `left:${drag.x - BUBBLE / 2}px;top:${drag.y - BUBBLE / 2}px`
