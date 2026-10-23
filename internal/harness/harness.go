@@ -516,7 +516,7 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 		}
 	}
 	if ref := p.Env[mode.EnvRoomID]; ref != "" && p.Harness != profile.HarnessMock && exec.ProcessRunner == nil {
-		binary, err := fsutil.RunningExecutable()
+		binary, err := fsutil.StableExecutable()
 		if err != nil {
 			return Result{}, err
 		}

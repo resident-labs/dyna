@@ -79,6 +79,8 @@ not-state internal/engine/runner_spool.go runnerSpool.reject 2 # renames a taken
 not-state internal/engine/runner_spool.go runnerSpool.take 2 # renames a runner spool file under the runner's spool lock before reading it, and removes its own empty reservation when that rename fails; the spool is a transport log, not state
 violation internal/engine/socket.go listenSocket 1
 not-state internal/fsutil/atomic.go WriteFile 2 # the atomic file write primitive itself
+not-state internal/fsutil/stable_executable.go copyExecutable 2 # a private cache copy of the running dyna image; a build artifact, not shared Dyna state
+not-state internal/fsutil/stable_executable.go pruneStableExecutables 1 # removes superseded cache copies of the running dyna image
 not-state internal/ghclient/session.go SessionEnvironment 2 # private session gh launcher symlink; no queried runtime state
 not-state internal/harness/cliversion/cliversion.go outputFile 1 # an unlinked temporary output file, not state
 not-state internal/harness/config/config.go ConfigManager.update 1 # a harness CLI's own config files
