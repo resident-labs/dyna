@@ -16,7 +16,7 @@ function row(target: HTMLElement, name: string): HTMLElement {
   return need(elements(target, '.item').find((el) => textOf(el.querySelector('.name')).includes(name)), `row ${name}`)
 }
 function box(item: HTMLElement, name: string): HTMLInputElement {
-  return need(elements<HTMLInputElement>(item, '.scopes input').find((el) => textOf(el.parentElement).trim() === name), `box ${name}`)
+  return need(elements<HTMLInputElement>(item, '.scopes input').find((el) => textOf(el.parentElement).trim().toLowerCase() === name), `box ${name}`)
 }
 function saveButton(item: HTMLElement): HTMLButtonElement {
   return need(elements<HTMLButtonElement>(item, 'button').find((el) => textOf(el).trim() === 'Save'), 'Save')
