@@ -8,7 +8,7 @@
   import { onMount } from 'svelte'
   import TabHeader from '../rooms/TabHeader.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import Skeleton from '../ui/Skeleton.svelte'
   import InlineConfirm from '../ui/InlineConfirm.svelte'
   import { slide } from 'svelte/transition'

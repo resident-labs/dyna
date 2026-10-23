@@ -1,7 +1,7 @@
 <script lang="ts">
   // The files a pull request changes, each with its diff under a row that
   // opens and closes. It loads the diff once per PR page.
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import DiffView from '../files/DiffView.svelte'
   import { parseDiff, diffTotals, split } from '../files/repo.ts'
   import { code, setWrap } from '../files/codeprefs.svelte.ts'

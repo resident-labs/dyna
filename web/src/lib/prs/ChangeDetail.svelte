@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Snippet } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import type { ChangeDetail as Detail } from '../api/change.ts'
   import { errorText } from '../errorText.ts'
   import type { Row } from './prlist.ts'

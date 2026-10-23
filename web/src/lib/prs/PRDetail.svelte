@@ -30,7 +30,7 @@
   import { authorName, factsLine, isBotAuthor, botKey, mergeBox, mergeState, type MergeItem, type MergeState, type Names, type Row } from './prlist.ts'
   import { changeName, changeTitle, isLocal, type CheckRow } from './pr.ts'
   import { sortThread, timeline, itemState, labelStyle } from './github.ts'
-  import { openExternal } from '../../api.js'
+  import { openExternal } from '../../api.ts'
   import type { Snippet } from 'svelte'
   import type { BotReview, ChangeDetail as Detail } from '../api/change.ts'
   import type { GitHubDetail } from '../api/github.ts'
@@ -130,7 +130,7 @@
   <header class="head">
     <div class="title">
       <h1>{changeTitle(change)} <span class="num">{changeName(change)}</span></h1>
-      {#if !isLocal(change) && change.url}<button class="ghb" onclick={() => openExternal(change.url)} title="Open on GitHub">GitHub ↗</button>{/if}
+      {#if !isLocal(change) && change.url}<button class="ghb" onclick={() => change.url && openExternal(change.url)} title="Open on GitHub">GitHub ↗</button>{/if}
     </div>
     <p class="meta">
       {#if !isLocal(change)}<span class="badge {gh.tone}"><PRGlyph it={change} size={14} />{gh.label}</span>{/if}

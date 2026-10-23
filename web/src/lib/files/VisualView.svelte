@@ -1,7 +1,7 @@
 <script>
   import Avatar from '../ui/Avatar.svelte'
   import CardFrame from './CardFrame.svelte'
-  import { fileURL } from '../../api.js'
+  import { fileURL } from '../../api.ts'
   import { ago } from '../ui/format.ts'
   import { visuals } from './visuals.svelte.ts'
   import { visualOf, versionOf, checkStatus, checksSummary } from './visuals.ts'

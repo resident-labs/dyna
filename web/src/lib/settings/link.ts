@@ -1,8 +1,8 @@
 // The Resident Labs Connect flows in the browser: sign-in through the relay,
 // the landing page, session renewal, route choice and Web Push. The helpers
-// are in connect.ts; the calls are in api.js. All of this runs only in the
+// are in connect.ts; the calls are in api.ts. All of this runs only in the
 // web app, and only when the machine is linked.
-import { connect, features, connectSession, connectHandoff, connectRoutes, whoami, renew, onRenewed, pushStatus, pushSubscribe, pushNames, pushUnsubscribe, pushTest } from '../../api.js'
+import { connect, features, connectSession, connectHandoff, connectRoutes, whoami, renew, onRenewed, pushStatus, pushSubscribe, pushNames, pushUnsubscribe, pushTest } from '../../api.ts'
 import { b64uDecode, randomB64u, deviceKey, publicJwk, thumbprint, getPin, putPin, rank, ROUTE_LABEL, allowedRoute, verifyHello } from './connect.ts'
 
 const STATE_KEY = 'dyna-connect-state'
@@ -14,7 +14,7 @@ interface ConnectConfig {
   relay: string
   key: string
 }
-// api.js reads the config from the page, so its type is loose; this is the shape the page writes.
+// api.ts reads the config from the page, so its type is loose; this is the shape the page writes.
 const link: ConnectConfig | null = connect
 // A route to this machine: its address and how it is reached.
 interface Route {

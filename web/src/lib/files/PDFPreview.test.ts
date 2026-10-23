@@ -41,7 +41,7 @@ test('Escape resets the page field before the outer dialog can close', async () 
         builder.onResolve({ filter: /^pdfjs-dist\// }, ({ path }) => ({ path, namespace: 'pdf-fixture' }))
         builder.onLoad({ filter: /worker/, namespace: 'pdf-fixture' }, () => ({ contents: "export default 'worker'" }))
         builder.onLoad({ filter: /pdf\.mjs$/, namespace: 'pdf-fixture' }, () => ({ contents: "export const GlobalWorkerOptions = {}; export const getDocument = () => ({ promise: Promise.resolve({ numPages: 80, getPage: async () => ({ getViewport: () => ({ width: 600, height: 800 }), render: () => ({ promise: Promise.resolve(), cancel() {} }), getTextContent: async () => ({ items: [] }) }) }), destroy() {} })" }))
-        builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: "export const fileURL = () => '/fixture'; export const authenticatedFetch = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) })" }))
+        builder.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: "export const fileURL = () => '/fixture'; export const authenticatedFetch = async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(0) })" }))
       } }],
     })
     const output = result.outputFiles?.[0]

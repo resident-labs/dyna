@@ -10,7 +10,7 @@
   // again and reattaches. On a phone a key row adds Esc, Tab, Ctrl and the
   // arrows, which a soft keyboard lacks.
   import { onMount, untrack, tick } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { base } from '../files/repo.ts'
   import TermPane from './TermPane.svelte'
   import Confirm from '../ui/Confirm.svelte'
@@ -86,7 +86,7 @@
     opening = true
     try {
       const t = await api.termOpen(ref, narrow ? 48 : 120, narrow ? 24 : 32)
-      all = [...(all ?? []), { roomId, ref, alive: true, ...t }]
+      all = [...(all ?? []), t]
       active = t.id
       load()
     } catch (e) {

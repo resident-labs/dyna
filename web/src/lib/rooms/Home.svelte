@@ -4,7 +4,7 @@
   import { onMount } from 'svelte'
   import { createReloadGate } from '../ui/reloadGate.ts'
   import { hasItemChange, patchListRows } from '../ui/listChanges.ts'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { ago, roomLabel } from '../ui/format.ts'
   import SubscriptionCard from '../settings/usage/SubscriptionCard.svelte'
   import Card from '../ui/Card.svelte'

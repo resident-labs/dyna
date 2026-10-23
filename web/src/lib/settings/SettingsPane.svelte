@@ -3,7 +3,7 @@
   // saves on change (toggles, choices) or on Enter and blur (text).
   import { errorText } from '../errorText.ts'
   import { onMount } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { settingDisplay } from './display.ts'
   import { fade } from 'svelte/transition'
   import Switch from '../ui/Switch.svelte'

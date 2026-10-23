@@ -33,6 +33,10 @@ import type { RunDetail, RunList, RunResultView, RunSource, StartedRun, Template
 // ProfileSave is ProfileEdit with the env changes left out when there are none.
 export type ProfileSave = Omit<ProfileEdit, 'envSet' | 'envRemove'> & Partial<Pick<ProfileEdit, 'envSet' | 'envRemove'>>
 
+// AttachmentRef names a saved attachment on a send: its id and the name the
+// composer shows. The engine reads the rest from the bytes it already holds.
+export type AttachmentRef = Pick<Attachment, 'id' | 'name'>
+
 export interface Engine {
   // Usage and models.
   AccountUsageCached(): Promise<UsageSnapshot>
@@ -98,8 +102,8 @@ export interface Engine {
   Preview(roomId: string, draft: string): Promise<Draft>
   MarkRead(roomId: string, messageId: string): Promise<null>
   MarkReadMany(roomId: string, ids: string[]): Promise<null>
-  Send(roomId: string, draft: string, replyTo: string, atts: Attachment[], forwardOf: string): Promise<SendResult>
-  SendWithReferences(roomId: string, draft: string, replyTo: string, atts: Attachment[], forwardOf: string, references: Reference[]): Promise<SendResult>
+  Send(roomId: string, draft: string, replyTo: string, atts: AttachmentRef[], forwardOf: string): Promise<SendResult>
+  SendWithReferences(roomId: string, draft: string, replyTo: string, atts: AttachmentRef[], forwardOf: string, references: Reference[]): Promise<SendResult>
   Attach(roomId: string, name: string, base64: string): Promise<Attachment>
   AttachmentText(roomId: string, id: string): Promise<string>
   ArchiveRoom(ref: string): Promise<null>
@@ -123,7 +127,7 @@ export interface Engine {
   TranscriptAfter(ref: string, after: string, limit: number): Promise<Session>
   TranscriptTurn(ref: string, turn: number): Promise<Session>
   Profile(ref: string): Promise<MemberProfile>
-  SendToSession(ref: string, text: string, atts: Attachment[], forwardOf: string): Promise<PostResult>
+  SendToSession(ref: string, text: string, atts: AttachmentRef[], forwardOf: string): Promise<PostResult>
   Profiles(): Promise<ProfileChoice[]>
   StopSession(roomId: string, sessionId: string): Promise<Member>
   CloseSession(roomId: string, sessionId: string): Promise<Member>

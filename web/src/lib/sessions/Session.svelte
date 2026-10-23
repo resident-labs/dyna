@@ -13,7 +13,7 @@
   import { createSelection } from '../ui/selection.svelte.ts'
   import DmRows from './DmRows.svelte'
   import { dmView, groupMessages, threadList } from './dm.ts'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { short, ago } from '../ui/format.ts'
   import ComposerBox from '../ui/ComposerBox.svelte'
   import { unreadableOutput, unreadableNotice } from '../settings/support.ts'
@@ -23,7 +23,7 @@
   import { cubicOut } from 'svelte/easing'
   import { arrivals, motion, BASE } from '../ui/motion.ts'
   import { errorText } from '../errorText.ts'
-  import type { Attachment, Member, PostResult, Room } from '../api/room.ts'
+  import type { Attachment, Member, PostResult, Room, SendResult } from '../api/room.ts'
   import type { QueueItem, Session as SessionData } from '../api/session.ts'
   import type { ShellJob } from '../api/terminal.ts'
   import type { ProfileView } from '../settings/support.ts'
@@ -39,7 +39,7 @@
     error?: string
     room: Room
     onharness?: ((name?: string) => void) | null
-    onsend: (text: string, attachments: { id: string; name: string }[], forwardId: string) => Promise<PostResult | undefined>
+    onsend: (text: string, attachments: { id: string; name: string }[], forwardId: string) => Promise<PostResult | SendResult | undefined>
     queue?: QueueItem[]
     onunqueue?: ((pending: Receipt) => Promise<void>) | null
     ondismiss?: ((sessionId: string, postId: string) => Promise<void>) | null
@@ -208,8 +208,10 @@
     sendError = ''
     try {
       const res = await onsend(draft, $attachments.atts, forwarding?.id ?? '')
-      if (res?.failed?.length) sendError = res.failed.map((f) => f.error || 'delivery failed').join(' · ')
-      if (res?.message?.id) {
+      // A send either posted or started a session; only a post has a message.
+      const posted = res && 'message' in res ? res : null
+      if (posted?.failed?.length) sendError = posted.failed.map((f) => f.error || 'delivery failed').join(' · ')
+      if (posted?.message?.id) {
         attachments.clear()
         forwarding = null
         draft = ''

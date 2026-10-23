@@ -19,7 +19,7 @@ async function load() {
     format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
     plugins: [{ name: 'svelte-test', setup(builder) {
       builder.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({ contents: compile(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
-      builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: 'export const copyText = async () => {}; export const openExternal = () => { throw new Error("unexpected browser request") }', loader: 'js' }))
+      builder.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: 'export const copyText = async () => {}; export const openExternal = () => { throw new Error("unexpected browser request") }', loader: 'js' }))
     } }],
   })
   const file = join(dir, 'PRChecks.mjs')

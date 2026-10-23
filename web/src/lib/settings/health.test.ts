@@ -8,7 +8,7 @@ const items = (usage = 'yes'): SupportItem[] => [item('transcript', 'Transcript'
 const profile = (support: SupportView, more: { disabled?: boolean } = {}): ProfileView => ({ name: 'opus', harness: 'claude-code', support: { installed: true, binary: '/usr/bin/claude', version: '2.1.5', partial: false, status: 'healthy', items: items(), ...support }, ...more })
 const ZERO = '0001-01-01T00:00:00Z'
 
-const apiModule = '../../api.js?health-flow'
+const apiModule = '../../api.ts?health-flow'
 type ApiModule = { api: { configCheckProfile: (name: string, live: boolean) => Promise<unknown> } }
 const hasConfigCheckProfile = (m: unknown): m is ApiModule => typeof m === 'object' && m !== null && 'api' in m && typeof m.api === 'object' && m.api !== null && 'configCheckProfile' in m.api && typeof m.api.configCheckProfile === 'function'
 // The bridge result is checked field by field, so the probe flow never claims a shape it did not verify.
