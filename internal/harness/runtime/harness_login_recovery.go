@@ -14,7 +14,12 @@ func (a *Runtime) PrivateRuntimeLogins() []PrivateLogin {
 	defer a.privateLoginMu.Unlock()
 	out := []PrivateLogin{}
 	for id, login := range a.privateLogins {
-		out = append(out, PrivateLogin{AccountID: id, TerminalID: login.terminalID, Warning: login.flow.Warning})
+		row := PrivateLogin{AccountID: id, TerminalID: login.terminalID, Warning: login.flow.Warning}
+		if login.signIn != nil {
+			state := login.signIn.snapshot()
+			row.SignIn = &state
+		}
+		out = append(out, row)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].AccountID < out[j].AccountID })
 	return out
@@ -36,6 +41,19 @@ func (a *Runtime) cancelPrivateLogin(id string) error {
 	login.control.Lock()
 	defer login.control.Unlock()
 	flow, terminalID := login.flow, login.terminalID
+	if login.signIn != nil {
+		// A runner flow stops its own child: mark the card, then release the gate.
+		login.signIn.set(func(st *SignInState) { st.Phase = signInCancelled })
+		login.finished = true
+		login.signIn.stop()
+		err := flow.Cancel()
+		a.privateLoginMu.Lock()
+		if a.privateLogins[id] == login {
+			delete(a.privateLogins, id)
+		}
+		a.privateLoginMu.Unlock()
+		return err
+	}
 	if a.terminals != nil {
 		for _, terminal := range a.terminals.List("") {
 			if terminal.ID == terminalID {
