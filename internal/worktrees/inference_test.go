@@ -174,7 +174,7 @@ func TestInferOwnersRejectsIncompleteEvidence(t *testing.T) {
 	}
 }
 
-func TestInferOwnersRejectsUnsafeStorePaths(t *testing.T) {
+func TestInferOwnersIgnoresRetainedSessionSymlinks(t *testing.T) {
 	for _, directory := range []bool{false, true} {
 		t.Run(map[bool]string{false: "file", true: "directory"}[directory], func(t *testing.T) {
 			tree := inferenceTestStore(t)
@@ -190,8 +190,9 @@ func TestInferOwnersRejectsUnsafeStorePaths(t *testing.T) {
 			if err := os.Symlink(target, link); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := inferOwners(context.Background(), []string{tree}, nil); err == nil {
-				t.Fatal("expected unsafe store symlink to fail closed")
+			got, err := inferOwners(context.Background(), []string{tree}, nil)
+			if err != nil || len(got[tree].Sessions) != 0 {
+				t.Fatalf("retained symlink created owner evidence: %#v, %v", got, err)
 			}
 		})
 	}
