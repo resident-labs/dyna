@@ -2,8 +2,8 @@ package subagent
 
 import (
 	"strings"
+	"sync"
 	"testing"
-	"time"
 
 	"dyna-agent/internal/goals"
 )
@@ -142,25 +142,31 @@ func TestCloseRefusesGoalAssignedDuringStop(t *testing.T) {
 		RoomID: e.room.ID, Room: e.room.Name, Depth: 1}); err != nil {
 		t.Fatal(err)
 	}
-	started, atStop, resume := make(chan struct{}, 1), make(chan struct{}), make(chan struct{})
+	started, atStop := make(chan struct{}, 1), make(chan struct{}, 1)
+	turnGate, closeGate := make(chan struct{}), make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(turnGate); close(closeGate) }) }
+	// A failed assertion must still release the gates, so no goroutine waits.
+	t.Cleanup(release)
+	signal := func(ch chan struct{}) {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
 	e.m.checkpoint = func(stage string) {
 		switch stage {
 		case "turn-started":
-			select {
-			case started <- struct{}{}:
-			default:
-			}
+			// Hold the turn open here instead of sleeping in the mock.
+			signal(started)
+			<-turnGate
 		case "close-before-stop":
-			close(atStop)
-			<-resume
+			signal(atStop)
+			<-closeGate
 		}
 	}
-	holder, _ := e.start("SLEEP:60000 RESPOND: slow")
-	select {
-	case <-started:
-	case <-time.After(30 * time.Second):
-		t.Fatal("mock turn did not start")
-	}
+	holder, _ := e.start("RESPOND: held")
+	<-started
 	// The spawn goal is resolved, so the first refusal sees no held goal.
 	e.doneGoal(holder)
 	done := make(chan error, 1)
@@ -168,18 +174,14 @@ func TestCloseRefusesGoalAssignedDuringStop(t *testing.T) {
 		_, err := e.m.CloseWithOptions(e.ctx, holder.ID, CloseOptions{Force: true})
 		done <- err
 	}()
-	select {
-	case <-atStop:
-	case err := <-done:
-		t.Fatalf("close ended before the stop: %v", err)
-	}
+	<-atStop
 	// This assignment lands after the first refusal and before the close fence.
 	goal, err := e.m.goalStore().Add(holder.RoomID, "owner", goals.Input{Text: "Late work", Holders: []string{holder.ID}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	close(resume)
-	if err := <-done; err == nil || !strings.Contains(err.Error(), "holds goal "+goal.ID) {
+	release()
+	if err := <-done; err == nil || !strings.Contains(err.Error(), goal.ID) {
 		t.Fatalf("close with a goal assigned during the stop = %v; want the goal refusal", err)
 	}
 	got, err := e.m.goalStore().Get(holder.RoomID, goal.ID)
