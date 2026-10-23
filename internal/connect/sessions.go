@@ -85,7 +85,7 @@ func (s *Service) exchange(w http.ResponseWriter, r *http.Request, rt websvc.Rou
 		websvc.JSONError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	if !s.limit.allow("session", 20, time.Minute) {
+	if !s.limit.Allow("session", 20, time.Minute) {
 		websvc.JSONError(w, http.StatusTooManyRequests, "too many sign-ins")
 		return
 	}

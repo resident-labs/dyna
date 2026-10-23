@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/devicegrant"
+	"dyna-agent/internal/ratelimit"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/scope"
 	"dyna-agent/internal/webpush"
@@ -27,8 +28,7 @@ type Push struct {
 	now    func() time.Time
 	audit  func(string, string)
 	logf   func(string, ...any)
-	mu     sync.Mutex
-	limits map[string][2]int64
+	limits *ratelimit.Limiter
 }
 
 // OpenPush loads the VAPID key and subscriptions. The host supplies audit logging.
@@ -51,27 +51,14 @@ func OpenPush(dataDir string, audit func(string, string), logf func(string, ...a
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	return &Push{Store: st, VAPID: vapid, Sender: webpush.NewSender(st, vapid), now: time.Now, audit: audit, logf: logf, limits: map[string][2]int64{}}, nil
+	p := &Push{Store: st, VAPID: vapid, Sender: webpush.NewSender(st, vapid), now: time.Now, audit: audit, logf: logf}
+	// The limiter reads the same clock, so a test can move the window too.
+	p.limits = ratelimit.New(func() time.Time { return p.now() })
+	return p, nil
 }
 
 func (s *Push) allow(key string, max int) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	start := s.now().Truncate(time.Minute).Unix()
-	v := s.limits[key]
-	if v[0] != start {
-		v = [2]int64{start, 0}
-	}
-	v[1]++
-	s.limits[key] = v
-	if len(s.limits) > 4096 {
-		for k, x := range s.limits {
-			if x[0] != start {
-				delete(s.limits, k)
-			}
-		}
-	}
-	return v[1] <= int64(max)
+	return s.limits.Allow(key, max, time.Minute)
 }
 
 func (s *Push) serve(w http.ResponseWriter, r *http.Request, rt Route, p Principal) {

@@ -9,12 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/terminalsvc"
 )
 
@@ -209,25 +209,8 @@ func (s *privateSignIn) closeStdin() {
 // signInEnv merges the login environment over the engine's own and drops
 // DYNA_* so the child never inherits session state.
 func signInEnv(overrides []string) []string {
-	merged := map[string]string{}
-	for _, item := range append(os.Environ(), overrides...) {
-		key, value, ok := strings.Cut(item, "=")
-		if ok && !strings.HasPrefix(key, "DYNA_") {
-			merged[key] = value
-		}
-	}
 	// The login prints plain text for the card, not a full-screen UI.
-	merged["TERM"] = "dumb"
-	keys := make([]string, 0, len(merged))
-	for key := range merged {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, key+"="+merged[key])
-	}
-	return out
+	return childenv.Merge(os.Environ(), overrides, "dumb")
 }
 
 // findPrivateLogin returns the running flow for an account, or nil.

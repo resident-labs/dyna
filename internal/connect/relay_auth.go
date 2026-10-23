@@ -160,7 +160,7 @@ func (s *Service) mint(w http.ResponseWriter, r *http.Request, rt websvc.Route) 
 		websvc.JSONError(w, http.StatusNotFound, "not found")
 		return
 	}
-	if !s.limit.allow("mint", 30, time.Minute) {
+	if !s.limit.Allow("mint", 30, time.Minute) {
 		websvc.JSONError(w, http.StatusTooManyRequests, "too many sign-ins")
 		return
 	}
