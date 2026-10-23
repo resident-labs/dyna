@@ -493,29 +493,6 @@ func (s *Store) readMetaRecord(id string) (Meta, []byte, error) {
 	}
 	m := cloneMeta(entry.meta)
 	b := entry.raw
-	// TODO: legacy/shim remove later — older managed sessions and their helpers lack the service flag.
-	ancestor := m
-	seen := map[string]bool{m.ID: true}
-	for !m.Service {
-		// The internal root is a service, but its helpers are not.
-		if ancestor.Role == RoleRoot && ancestor.ID != m.ID {
-			break
-		}
-		if ancestor.Service || isServiceRole(ancestor.Role) {
-			m.Service = true
-			break
-		}
-		if ancestor.ParentSession == "" || seen[ancestor.ParentSession] {
-			break
-		}
-		seen[ancestor.ParentSession] = true
-		entry, err := s.metaSnapshot(ancestor.ParentSession)
-		if err != nil || entry.meta.RoomID != m.RoomID {
-			break
-		}
-		parent := entry.meta
-		ancestor = parent
-	}
 	return m, b, nil
 }
 

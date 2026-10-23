@@ -30,7 +30,7 @@ func TestServiceSessionsGroupMentions(t *testing.T) {
 			var services []string
 			for _, role := range []string{"reviewer", "keeper"} {
 				info := e.start(rec, role+"-service", parent)
-				if _, err := e.mgr.Store.UpdateMeta(info.ID, func(m *subagent.Meta) { m.Role = role }); err != nil {
+				if _, err := e.mgr.Store.UpdateMeta(info.ID, func(m *subagent.Meta) { m.Role, m.Service = role, true }); err != nil {
 					t.Fatal(err)
 				}
 				services = append(services, info.Address())
