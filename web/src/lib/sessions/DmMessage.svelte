@@ -26,7 +26,7 @@
     ondismiss?: ((pending: Receipt) => void) | null
     removing?: string
     onopenfile: (attachment: Attachment) => void
-    onpost?: ((post: ThreadPost) => void) | null
+    onpost?: ((postId: string) => void) | null
     inThread?: boolean
     compact?: boolean
     enter?: boolean

@@ -33,7 +33,7 @@
     selectedKey?: string
     onthread: (key: string) => void
     onopenfile: (attachment: Attachment) => void
-    onpost?: ((post: ThreadPost) => void) | null
+    onpost?: ((postId: string) => void) | null
     removing?: string
     onunqueue?: ((pending: Receipt) => void) | null
     ondismiss?: ((pending: Receipt) => void) | null
