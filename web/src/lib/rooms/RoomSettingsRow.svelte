@@ -1,7 +1,18 @@
-<script>
+<script lang="ts">
   // One setting: its title and help on the left, its control on the right.
   // A wide row puts the control under the text. saved shows a short "Saved".
-  let { title, help = '', error = '', saved = false, wide = false, control = null, children = null } = $props()
+  import type { Snippet } from 'svelte'
+
+  interface Props {
+    title: string
+    help?: string
+    error?: string
+    saved?: boolean
+    wide?: boolean
+    control?: Snippet | null
+    children?: Snippet | null
+  }
+  let { title, help = '', error = '', saved = false, wide = false, control = null, children = null }: Props = $props()
 </script>
 
 <div class="row" class:wide>
