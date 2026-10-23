@@ -216,7 +216,13 @@
   @media (max-width: 760px) {
     .card { margin: var(--s1) var(--s2); }
     .sum { min-height: 40px; padding: 6px var(--s2); cursor: pointer; pointer-events: auto; }
-    /* One row on a phone: the title, the step and the clock; the rest expands. */
+    /* One row on a phone when it fits: the title, the step and the clock. A
+       title that needs the whole width wraps its step word under itself, so
+       the row never runs past the card.
+     */
+    .sum { align-items: flex-start; }
+    .title { flex: 1 1 auto; flex-wrap: wrap; row-gap: 2px; }
+    .what { white-space: normal; overflow: visible; }
     .title .fact { display: none; }
     .legend { display: none; }
     time { display: none; }
