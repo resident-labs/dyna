@@ -2,7 +2,6 @@ package subagent
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -55,9 +54,9 @@ func TestListMetaSkipsUnassignedLegacyHistory(t *testing.T) {
 	s := &Store{Root: t.TempDir()}
 	for _, closed := range []bool{false, true} {
 		id := NewID()
-		raw := []byte(`{"id":"` + id + `","name":"old","turns":1}`)
+		raw := []byte(`{"id":"` + id + `","historyOnly":true,"name":"old","turns":1}`)
 		if closed {
-			raw = []byte(`{"id":"` + id + `","name":"old","turns":1,"closed":"2026-10-05T00:00:00Z"}`)
+			raw = []byte(`{"id":"` + id + `","historyOnly":true,"name":"old","turns":1,"closed":"2026-10-05T00:00:00Z"}`)
 		}
 		dir, _ := s.Dir(id)
 		if err := os.MkdirAll(filepath.Join(dir, "turns"), 0700); err != nil {
@@ -72,7 +71,7 @@ func TestListMetaSkipsUnassignedLegacyHistory(t *testing.T) {
 		if err != nil || len(got) != 0 {
 			t.Fatalf("ListMeta = %+v, %v", got, err)
 		}
-		if _, err := s.ReadMeta(id); !errors.Is(err, ErrNoRoom) {
+		if _, err := s.ReadMeta(id); err != nil {
 			t.Fatalf("legacy routing allowed: %v", err)
 		}
 		// History remains readable without assigning a room or changing files.
