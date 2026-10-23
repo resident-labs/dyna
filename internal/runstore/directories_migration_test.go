@@ -17,7 +17,7 @@ func TestMigrateKeepsIncompleteDirectoryEvidence(t *testing.T) {
 	t.Setenv(ArchiveDirEnv, "")
 	t.Cleanup(func() { database.Close(dataDir) })
 	raw := []byte("{\"dir\":\"/retained/worktree\"}\n")
-	for _, id := range []string{"wf_evidence", "wf_unknown"} {
+	for _, id := range []string{"wf_evidence", "wf_unknown", "wf_index", "wf_malformed", "wf_oversized"} {
 		dir := filepath.Join(dataDir, "runs", id)
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
@@ -33,6 +33,21 @@ func TestMigrateKeepsIncompleteDirectoryEvidence(t *testing.T) {
 	path := filepath.Join(dataDir, "runs", "wf_evidence", "journal.jsonl")
 	if err := os.WriteFile(path, raw, 0600); err != nil {
 		t.Fatal(err)
+	}
+	for _, id := range []string{"wf_index", "wf_malformed", "wf_oversized"} {
+		dir := filepath.Join(dataDir, "runs", id)
+		journal := append(append([]byte{}, raw...), []byte("invalid\n")...)
+		if id == "wf_oversized" {
+			journal = append(append([]byte{}, raw...), bytes.Repeat([]byte("x"), 16<<20)...)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "journal.jsonl"), journal, 0600); err != nil {
+			t.Fatal(err)
+		}
+		if id == "wf_index" {
+			if err := os.WriteFile(filepath.Join(dir, DirsFile), []byte("\"/indexed/worktree\"\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+		}
 	}
 	if err := Migrate(dataDir); err != nil {
 		t.Fatal(err)
@@ -54,6 +69,9 @@ func TestMigrateKeepsIncompleteDirectoryEvidence(t *testing.T) {
 	}
 	check("wf_evidence", `["/retained/worktree"]`, true)
 	check("wf_unknown", `[]`, false)
+	check("wf_index", `["/indexed/worktree"]`, true)
+	check("wf_malformed", `["/retained/worktree"]`, false)
+	check("wf_oversized", `["/retained/worktree"]`, false)
 	after, err := os.ReadFile(path)
 	if err != nil || !bytes.Equal(raw, after) {
 		t.Fatalf("source changed: %v", err)
