@@ -70,6 +70,32 @@ func (s *Store) AuthoredPosts(roomID, author string, conversation Conversation, 
 		[]any{roomID, author, conversation.Home().String()}, since, before, limit)
 }
 
+// OtherHomes returns the home of every post of the room that was not written in
+// the room feed: the owner's DMs and the owner's voice call, by post ID. A post
+// the map does not name was written in the room feed. A reader that lists the
+// room feed asks this once, then reads each post's home from the map.
+func (s *Store) OtherHomes(roomID string) (map[string]Conversation, error) {
+	db, err := s.postIndexDB()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT post_id, conversation FROM post_homes WHERE room_id=? AND conversation<>?`,
+		roomID, ConversationRoom.String())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]Conversation{}
+	for rows.Next() {
+		var id, home string
+		if err := rows.Scan(&id, &home); err != nil {
+			return nil, err
+		}
+		out[id] = Conversation(home)
+	}
+	return out, rows.Err()
+}
+
 // HomeOf is the stored home of one post: its index row, or the conversation the
 // post carries when the index has no row for it yet. A post that names neither
 // is the room feed.

@@ -16,7 +16,7 @@
   import { focusWhen } from '../ui/focusWhen.ts'
   import CallRequestRow from '../voice/CallRequestRow.svelte'
   import CompletionBody from '../ui/CompletionBody.svelte'
-  import { feedRows, feedPRRepos, callsInWindow, roomPosts, rowPost } from './feedRows.ts'
+  import { feedRows, feedPRRepos, callsInWindow, rowPost } from './feedRows.ts'
   import type { FeedRow } from './feedRows.ts'
   import PostFiles from '../ui/PostFiles.svelte'
   import { postParts } from '../ui/postParts.ts'
@@ -77,9 +77,10 @@
   // The one post whose action bar shows (postSelect.ts).
   const selection = createSelection()
 
-  // A session-audience event lives in its session's DM, not in room chat.
-  let own = $derived(roomPosts(posts, room.name))
-  let rows = $derived(feedRows(own, unreadFrom, callsInWindow(calls, own, earlier, newer)))
+  // The room chat lists the room's own posts: the engine leaves out a post
+  // written in a DM, and no feed view lists the voice call's lines
+  // (internal/roomsvc/roomFeedPost).
+  let rows = $derived(feedRows(posts, unreadFrom, callsInWindow(calls, posts, earlier, newer)))
   // Posts that arrive while the feed is open rise in; the feed opens still.
   const arrived = arrivals()
   // The tester reads no argument; each row passes its key, which it ignores.
