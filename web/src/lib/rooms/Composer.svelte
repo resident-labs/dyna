@@ -1,38 +1,90 @@
-<script>
+<script lang="ts">
   import { speaker } from '../ui/posts.ts'
   import { tick, onDestroy } from 'svelte'
   import { short, roomLabel } from '../ui/format.ts'
+  import { errorText } from '../errorText.ts'
   import { api } from '../../api.ts'
   import ComposerBox from '../ui/ComposerBox.svelte'
   import { attachmentDraft } from '../files/attachmentDraft.ts'
   import { mentionOptions, matchMentions, fileMentionDirectory, fileMentionOptions, fileMentionText } from './mentions.ts'
   import { loadReferences, matchReferences, referenceKey, referenceLabel } from './references.ts'
   import ReferenceChips from './ReferenceChips.svelte'
+  import type { Reference } from './references.ts'
+  import type { Action } from '../ui/actions.ts'
+  import type { ProfileChoice, Room, Post, Draft, SendResult, Attachment } from '../api/room.ts'
+  import type { DirectoryEntries } from '../api/file.ts'
+  import type { RepoEntry } from '../files/repo.ts'
 
-  // commands are app actions typed as "/name [arg]": [{name, hint, arg?,
-  // options?() -> [{value, hint}], pickRuns?, run(arg) -> error text or
-  // nothing}]. A profile with the same name wins, so "/<profile> <task>"
-  // always starts a session.
-  let { room, label = '', prepareText = (text) => text, choices = [], profiles = [], commands = [], reply = null, onopenfile, draft = $bindable(''), onsend, onslash, oncancelreply } = $props()
+  // A slash command the composer completes and runs: an action's slash
+  // metadata plus the handler that runs it (ui/actions.ts).
+  type SlashCommand = { id: string; run: (arg?: string) => unknown } & NonNullable<Action['slash']>
+
+  // One row of the completion menu: a mention, a file, a reference or a
+  // command, whichever the token at the caret asks for.
+  interface MenuOption {
+    value: string
+    hint: string
+    label?: string
+    group?: string
+    arg?: SlashCommand
+    file?: RepoEntry
+    reference?: Reference
+  }
+
+  // The @token at the caret: where it starts and ends, and what it asks for.
+  interface Token {
+    start: number
+    end: number
+    text: string
+    slash?: boolean
+    arg?: SlashCommand
+    reference?: boolean
+    file?: boolean
+  }
+
+  interface Props {
+    room: Room
+    label?: string
+    prepareText?: (text: string) => string | Promise<string>
+    choices?: string[]
+    profiles?: ProfileChoice[]
+    // commands are app actions typed as "/name [arg]": [{name, hint, arg?,
+    // options?() -> [{value, hint}], pickRuns?, run(arg) -> error text or
+    // nothing}]. A profile with the same name wins, so "/<profile> <task>"
+    // always starts a session.
+    commands?: SlashCommand[]
+    reply?: Post | null
+    onopenfile?: (attachment: Attachment & { roomId?: string; postId?: string }) => void
+    draft?: string
+    onsend: (text: string, atts: { id: string; name: string }[], forwardOf: string, references: Reference[]) => Promise<SendResult | undefined> | SendResult | undefined
+    onslash?: () => void
+    oncancelreply?: () => void
+  }
+  let { room, label = '', prepareText = (text) => text, choices = [], profiles = [], commands = [], reply = null, onopenfile, draft = $bindable(''), onsend, onslash, oncancelreply = () => {} }: Props = $props()
 
   // An asynchronous recipient lookup must not outlive its channel composer.
   let active = true
   onDestroy(() => { active = false })
 
-  let forwarding = $state(null)
-  export function forward(post) { if (busy) return; forwarding = post; field?.focus() }
+  let forwarding = $state<Post | null>(null)
+  export function forward(post: Post) { if (busy) return; forwarding = post; field?.focus() }
 
-  let references = $state([])
-  let referenceOptions = $state([])
+  let references = $state<Reference[]>([])
+  let token = $state<Token | null>(null) // {start, end, text} of the @token at the caret
+  let referenceOptions = $state<Reference[]>([])
   let referenceLoading = $state(false)
-  let fileEntries = $state([])
+  let fileEntries = $state<RepoEntry[]>([])
   let fileLoading = $state(false)
   let fileError = $state('')
-  const fileListings = new Map()
+  const fileListings = new Map<string, Promise<DirectoryEntries>>()
+  // The workspace answers with a kind string; the file completions use the
+  // repo's three kinds.
+  const repoEntries = (entries: DirectoryEntries['entries']): RepoEntry[] =>
+    (entries ?? []).map((e) => ({ path: e.path, name: e.name, kind: e.kind === 'dir' ? 'dir' : e.kind === 'symlink' ? 'symlink' : 'file' }))
   const fileDirectory = $derived(token && !token.slash && !token.arg && !token.reference ? fileMentionDirectory(token.text) : null)
   $effect(() => {
     const directory = fileDirectory
-    const id = room?.id
+    const id = room.id
     if (directory === null || !id) return
     let cancelled = false
     fileLoading = true
@@ -40,10 +92,10 @@
     fileEntries = []
     const key = id + ':' + directory
     if (!fileListings.has(key)) fileListings.set(key, api.listEntries(id, '', directory).catch((error) => { fileListings.delete(key); throw error }))
-    fileListings.get(key).then((listing) => {
-      if (!cancelled) fileEntries = listing.entries ?? []
+    fileListings.get(key)?.then((listing) => {
+      if (!cancelled) fileEntries = repoEntries(listing.entries)
     }).catch((error) => {
-      if (!cancelled) fileError = String(error?.message || error)
+      if (!cancelled) fileError = errorText(error)
     }).finally(() => { if (!cancelled) fileLoading = false })
     return () => { cancelled = true }
   })
@@ -51,11 +103,11 @@
   async function fetchReferences() {
     if (referenceLoading || referenceLoaded) return
     referenceLoading = true
-    const id = room?.id
+    const id = room.id
     try {
       const result = await loadReferences(id)
-      if (active && room?.id === id) { referenceOptions = result; referenceLoaded = true }
-    } catch (e) { if (active) error = String(e?.message || e) }
+      if (active && room.id === id) { referenceOptions = result; referenceLoaded = true }
+    } catch (e) { if (active) error = errorText(e) }
     finally { if (active) referenceLoading = false }
   }
   $effect(() => {
@@ -64,22 +116,21 @@
     let cancelled = false
     const timer = setTimeout(async () => {
       try {
-        const found = await loadReferences(room?.id, query)
+        const found = await loadReferences(room.id, query)
         if (!active || cancelled) return
         const merged = new Map(referenceOptions.map((reference) => [referenceKey(reference), reference]))
         found.forEach((reference) => merged.set(referenceKey(reference), reference))
         referenceOptions = [...merged.values()]
-      } catch (e) { if (active && !cancelled) error = String(e?.message || e) }
+      } catch (e) { if (active && !cancelled) error = errorText(e) }
     }, 200)
     return () => { cancelled = true; clearTimeout(timer) }
   })
 
-  export function addReference(reference) {
+  export function addReference(reference: Reference) {
     if (!references.some((item) => referenceKey(item) === referenceKey(reference))) references = [...references, reference]
     field?.focus()
   }
   const selectedProfile = $derived(profiles.find((profile) => draft.startsWith('/' + profile.name + ' ') || draft === '/' + profile.name))
-  const composerMode = $derived(command ? 'Command' : selectedProfile ? 'Start session' : 'Message')
   async function openCommands() {
     if (!draft.startsWith('/')) draft = '/' + draft
     await tick()
@@ -89,7 +140,7 @@
   }
   async function openReferences() {
     const pos = field?.selectionStart ?? draft.length
-    const prefix = pos && !/\s/.test(draft[pos - 1]) ? ' #' : '#'
+    const prefix = pos && !/\s/.test(draft[pos - 1] ?? '') ? ' #' : '#'
     draft = draft.slice(0, pos) + prefix + draft.slice(pos)
     await tick()
     field?.focus()
@@ -97,20 +148,19 @@
     findToken()
   }
 
-  let field = $state()
+  let field = $state<HTMLTextAreaElement>()
   let busy = $state(false)
   let error = $state('')
   let note = $state('')
   let pick = $state(0)
-  let completionList = $state()
+  let completionList = $state<HTMLElement>()
   const completionID = $props.id()
-  const optionID = (option) => completionID + '-option-' + (option.file ? 'file-' : option.reference ? 'reference-' : 'text-') + encodeURIComponent(option.value)
-  let preview = $state(null) // roomsvc.Draft for the current text: who it wakes
-  let token = $state(null) // {start, end, text} of the @token at the caret
-  const attachments = attachmentDraft({ room: () => room?.id, error: (message) => (error = message), focus: () => field?.focus(), noun: 'post' })
+  const optionID = (option: MenuOption) => completionID + '-option-' + (option.file ? 'file-' : option.reference ? 'reference-' : 'text-') + encodeURIComponent(option.value)
+  let preview = $state<Draft | null>(null) // roomsvc.Draft for the current text: who it wakes
+  const attachments = attachmentDraft({ room: () => room.id, error: (message) => (error = message), focus: () => field?.focus(), noun: 'post' })
   let failed = $derived($attachments.failed)
   let canSend = $derived(!busy && !$attachments.uploading && !failed && (draft.trim() !== '' || $attachments.ready.length > 0 || !!forwarding || references.length > 0))
-  export function addFiles(files) { attachments.addFiles(files) }
+  export function addFiles(files: ArrayLike<File> | null | undefined) { attachments.addFiles(files) }
   onDestroy(() => attachments.destroy())
 
   // App commands a profile does not shadow, and the one the draft names.
@@ -122,19 +172,33 @@
   })
 
   let commandLine = $derived(command ? `/${command.c.name}${command.c.arg && !command.arg ? ` ‹${command.c.arg}›` : ''} · ${command.c.hint}` : '')
+  const composerMode = $derived(command ? 'Command' : selectedProfile ? 'Start session' : 'Message')
 
   // A token is "@name" anywhere, "/profile" or "/command" at the very start
   // of the draft (only a draft's first word can start a session), or the
   // argument of a command that offers choices.
-  let options = $derived(
+  let options = $derived<MenuOption[]>(
     token?.reference ? matchReferences(referenceOptions, token.text).map((reference) => ({ value: referenceKey(reference), hint: reference.title + ' · ' + reference.state, label: referenceLabel(reference), reference })) :
-    token?.arg ? token.arg.options() :
+    token?.arg ? token.arg.options?.() ?? [] :
     token?.slash ? [
       ...profiles.map((p) => ({ value: '/' + p.name, group: 'Start a session with', hint: [p.harness, p.model].filter(Boolean).join(' · ') + (p.default ? ' · default' : '') })),
       ...appCommands.map((c) => ({ value: '/' + c.name, group: 'Commands', arg: c.arg, hint: c.hint })),
     ] :
-    [...mentionOptions(choices).map((option) => ({ ...option, group: 'Sessions' })), ...fileMentionOptions(fileEntries, token?.text || '@')])
-  let matches = $derived(token ? (token.reference ? options : token.arg ? options.filter((o) => `${o.value} ${o.hint}`.toLowerCase().includes(token.text.toLowerCase())).slice(0, 8) : token.slash ? matchMentions(options, token.text, 20) : [...matchMentions(options.filter((option) => !option.file), token.text, 6), ...options.filter((option) => option.file)]) : [])
+    [...mentionOptions(choices).map((option) => ({ ...option, group: 'Sessions' })), ...fileMentionOptions(fileEntries, token?.text || '@')]
+  )
+  let matches = $derived.by((): MenuOption[] => {
+    const t = token
+    if (!t) return []
+    if (t.reference) return options
+    if (t.arg) return options.filter((o) => `${o.value} ${o.hint}`.toLowerCase().includes(t.text.toLowerCase())).slice(0, 8)
+    if (t.slash) return matchMentions(options, t.text, 20)
+    return [...matchMentions(options.filter((option) => !option.file), t.text, 6), ...options.filter((option) => option.file)]
+  })
+  // The option the menu marks as active, for aria-activedescendant.
+  let activeOption = $derived.by(() => {
+    const option = matches[pick]
+    return option ? optionID(option) : undefined
+  })
   // Keep the selected option inside this menu without scrolling the feed.
   $effect(() => {
     const options = matches
@@ -164,7 +228,7 @@
   $effect(() => {
     const text = draft
     const prepare = prepareText
-    const id = room?.id
+    const id = room.id
     const files = $attachments.items.length
     const refs = references.length
     if (!id || (!text.trim() && !files && !refs)) { preview = null; return }
@@ -184,13 +248,13 @@
     !preview ? '' :
     spawn ? (spawn.error || `New session @${spawn.name || 'agent-…'} · ${spawn.profile}${spawn.model ? ' (' + spawn.model + ')' : ''} · in ${spawn.dir}`) :
     preview.self ? 'To root only · external orchestrators watching this room' :
-    !preview.wakes?.length ? `To ${preview.mentions.join(' ')} · wakes nobody` :
+    !preview.wakes?.length ? `To ${(preview.mentions ?? []).join(' ')} · wakes nobody` :
     `To ${preview.wakes.join(', ')} · ${preview.wakes.length} wake`
   )
 
 
   function findToken() {
-    const pos = field.selectionStart
+    const pos = field?.selectionStart ?? 0
     const before = draft.slice(0, pos)
     // Folder completion already knows the start, including any spaces in
     // its path. Keep that boundary while the user filters this folder.
@@ -206,19 +270,20 @@
     const start = Math.max(before.lastIndexOf(' '), before.lastIndexOf('\n'), before.lastIndexOf('\t')) + 1
     const text = before.slice(start)
     const lead = draft.match(/^\/([\w-]+)\s+/)
-    const withArg = lead && appCommands.find((c) => c.name === lead[1] && c.options)
+    const withArg = lead ? appCommands.find((c) => c.name === lead[1] && c.options) : undefined
+    const argStart = lead ? lead[0].length : 0
     if (start === 0 && text.startsWith('/') && !text.startsWith('//')) {
       if (!token?.slash) onslash?.() // the list may have changed since launch
       token = { start, end: pos, text, slash: true }
     }
-    else if (withArg && pos >= lead[0].length && !draft.slice(lead[0].length, pos).includes(' ')) token = { start: lead[0].length, end: pos, text: draft.slice(lead[0].length, pos), arg: withArg }
+    else if (withArg && pos >= argStart && !draft.slice(argStart, pos).includes(' ')) token = { start: argStart, end: pos, text: draft.slice(argStart, pos), arg: withArg }
     else if (text.startsWith('#')) { token = { start, end: pos, text, reference: true }; fetchReferences() }
     else token = text.startsWith('@') ? { start, end: pos, text } : null
     pick = 0
   }
 
-  async function complete(option) {
-    if (!token) return
+  async function complete(option?: MenuOption) {
+    if (!token || !option) return
     const choice = option.value
     const file = option.file
     if (file) {
@@ -233,7 +298,7 @@
       field?.setSelectionRange(caret, caret)
       return
     }
-    if (token?.reference) {
+    if (token.reference) {
       const reference = option.reference
       if (!reference) return
       addReference(reference)
@@ -257,19 +322,19 @@
     draft = next
     token = null
     await tick()
-    field.focus()
-    field.setSelectionRange(caret, caret)
+    field?.focus()
+    field?.setSelectionRange(caret, caret)
   }
 
-  async function runCommand(c, arg) {
+  async function runCommand(c: SlashCommand, arg: string) {
     error = ''
     busy = true
     try {
       const err = await c.run(arg)
-      if (err) error = err
+      if (err) error = String(err)
       else draft = ''
     } catch (e) {
-      error = String(e?.message || e)
+      error = errorText(e)
     } finally {
       busy = false
       await tick()
@@ -312,7 +377,7 @@
         references = []
       }
     } catch (e) {
-      const msg = String(e?.message || e)
+      const msg = errorText(e)
       error = msg
     } finally {
       busy = false
@@ -321,14 +386,15 @@
     }
   }
 
-  function keydown(e) {
+  function keydown(e: KeyboardEvent) {
     if (e.key === 'Escape' && token) { e.preventDefault(); token = null; return }
+    const selected = matches[pick]
     if (matches.length) {
       if (e.key === 'ArrowDown') { e.preventDefault(); pick = (pick + 1) % matches.length; return }
       if (e.key === 'ArrowUp') { e.preventDefault(); pick = (pick - 1 + matches.length) % matches.length; return }
       // Enter on a typed command that needs nothing more runs it.
-      if (e.key === 'Enter' && !e.shiftKey && command && !command.c.arg && matches[pick].value === '/' + command.c.name) { e.preventDefault(); token = null; send(); return }
-      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); complete(matches[pick]); return }
+      if (e.key === 'Enter' && !e.shiftKey && command && !command.c.arg && selected?.value === '/' + command.c.name) { e.preventDefault(); token = null; send(); return }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) { e.preventDefault(); complete(selected); return }
       if (e.key === 'Escape') { e.preventDefault(); token = null; return }
     }
     if (e.key === 'Escape' && reply) { e.preventDefault(); oncancelreply(); return }
@@ -349,7 +415,7 @@
   {/if}
   {#if matches.length}
     <div class="pop" id={completionID} role="listbox" aria-label="Composer suggestions" bind:this={completionList}>
-      {#if !matches[0].group}<div class="pophead">{token?.reference ? 'Attach a PR or issue' : token?.arg ? token.arg.listTitle || token.arg.arg : 'Mention'}</div>{/if}
+      {#if !matches[0]?.group}<div class="pophead">{token?.reference ? 'Attach a PR or issue' : token?.arg ? token.arg.listTitle || token.arg.arg : 'Mention'}</div>{/if}
       {#each matches as m, i}
         {#if m.group && m.group !== matches[i - 1]?.group}<div class="pophead">{m.group}</div>{/if}
         <button id={optionID(m)} class="opt" class:reference-opt={!!m.reference} title={m.hint} class:on={i === pick} role="option" aria-selected={i === pick} onmousedown={(e) => e.preventDefault()} onclick={() => complete(m)}>
@@ -379,7 +445,7 @@
   {#if fileDirectory !== null && (fileLoading || fileError || !matches.length)}
     <div class="file-status" role="status">{fileLoading ? 'Loading files…' : fileError ? 'Files unavailable: ' + fileError : 'No matching files or sessions.'}</div>
   {/if}
-  <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message #${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} activeOption={matches[pick] ? optionID(matches[pick]) : undefined}>
+  <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message #${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} {activeOption}>
     {#snippet context()}<ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />{/snippet}
     {#snippet tools()}
       <button class="command-chip" type="button" aria-label="Browse commands" title="Browse sessions and commands" disabled={busy} onclick={openCommands}>/</button>
