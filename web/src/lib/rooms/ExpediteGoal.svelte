@@ -1,7 +1,7 @@
 <script lang="ts">
   import { dialog as modal } from '../ui/dialog.ts'
   import { api } from '../../api.ts'
-  import { itemCountLabel } from './goals.ts'
+  import { itemCountLabel } from '../goals/goals.ts'
   import type { Goal } from '../api/goal.ts'
 
   interface Props {

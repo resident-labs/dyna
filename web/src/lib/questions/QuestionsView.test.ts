@@ -87,12 +87,12 @@ test('a delayed question snapshot cannot replace a newer answer', async () => {
 
 const { bundle, importBundle, installDom, domNames } = await import('../prs/prDetailHarness.ts')
 const { rm } = await import('node:fs/promises')
-const renderedCode = await bundle({ component: '../rooms/Questions' })
+const renderedCode = await bundle({ component: '../questions/Questions' })
 
 test('free-text Send requires content, submits once, and keeps a failed draft for retry', async () => {
   const dom = installDom()
   globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
-  const ui = await importBundle(renderedCode, '../rooms/Questions')
+  const ui = await importBundle(renderedCode, '../questions/Questions')
   let finish: () => void = () => { throw new Error('no pending answer') }
   let fail: (reason: unknown) => void = () => { throw new Error('no pending answer') }
   const sent: unknown[][] = []

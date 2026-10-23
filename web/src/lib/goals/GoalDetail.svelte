@@ -6,8 +6,8 @@
   import Avatar from '../ui/Avatar.svelte'
   import GoalGlyph from './GoalGlyph.svelte'
   import GoalHolders from './GoalHolders.svelte'
-  import ExpediteBadge from './ExpediteBadge.svelte'
-  import { expedite, goalExpedited } from './expedite.ts'
+  import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
+  import { expedite, goalExpedited } from '../rooms/expedite.ts'
   import { goalAgo } from './goals.ts'
   interface Props {
     roomId: string

@@ -10,10 +10,10 @@
   import Card from '../ui/Card.svelte'
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
-  import GoalGlyph from '../rooms/GoalGlyph.svelte'
+  import GoalGlyph from '../goals/GoalGlyph.svelte'
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
   import { expedite, agentExpedited, goalExpedited } from '../rooms/expedite.ts'
-  import { goalAgo, goalParts, goalTone } from '../rooms/goals.ts'
+  import { goalAgo, goalParts, goalTone } from '../goals/goals.ts'
   import { markdown, stamp, tokens, roomLabel } from '../ui/format.ts'
 
   import type { Attachment, Member, PostDetail, Room } from '../api/room.ts'

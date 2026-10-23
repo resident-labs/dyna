@@ -26,7 +26,7 @@ interface CardProps {
 async function render(t: Parameters<typeof createTestServer>[0], props: CardProps) {
   const vite = await createTestServer(t)
   const { render } = await vite.ssrLoadModule('svelte/server')
-  const { default: Card } = await vite.ssrLoadModule('/src/lib/rooms/SystemLoadCard.svelte')
+  const { default: Card } = await vite.ssrLoadModule('/src/lib/system/SystemLoadCard.svelte')
   return render(Card, { props }).body
 }
 

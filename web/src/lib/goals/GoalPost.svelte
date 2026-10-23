@@ -5,13 +5,13 @@
   // TODO: legacy/shim remove later — remove the text readers when that history
   // ages out.
   import GoalGlyph from './GoalGlyph.svelte'
-  import ExpediteBadge from './ExpediteBadge.svelte'
-  import EventDetails from './EventDetails.svelte'
-  import { expedite, goalExpedited } from './expedite.ts'
+  import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
+  import EventDetails from '../rooms/EventDetails.svelte'
+  import { expedite, goalExpedited } from '../rooms/expedite.ts'
   import { stamp } from '../ui/format.ts'
   import type { EventNotice } from '../api/room.ts'
-  import type { EventPost, EventSurface, GoalRef } from './eventRenderers.ts'
-  import { goalEvent } from './eventPayloads.ts'
+  import type { EventPost, EventSurface, GoalRef } from '../rooms/eventRenderers.ts'
+  import { goalEvent } from '../rooms/eventPayloads.ts'
 
   let {
     post,

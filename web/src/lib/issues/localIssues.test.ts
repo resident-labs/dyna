@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { areas, location, type IssueView } from './issues.ts'
+import { areas, location, type IssueView } from './localIssues.ts'
 
 const list: IssueView[] = [
   { id: 'i1', file: 'internal/pr/trial/build.go', line: 212 },
