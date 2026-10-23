@@ -49,7 +49,7 @@ INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES
 		if local.SSH != "" || local.CISlots != 3 || !local.Enabled {
 			t.Fatalf("local machine did not take the old local node: %#v", local)
 		}
-		want := Machine{Name: "hermes", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true}
+		want := Machine{Name: "hermes", Roles: []Role{RoleCI}, SSH: "pip@hermeslab", CISlots: 2, Enabled: true, Health: HealthUnknown}
 		if got := list[1]; !sameMachine(got, want) {
 			t.Fatalf("imported machine = %#v, want %#v", got, want)
 		}
@@ -179,5 +179,58 @@ func TestStoreRenamesAndRemovesMachines(t *testing.T) {
 	local.Roles = []Role{RoleAgents}
 	if _, err := s.Save(ctx, local); !errors.Is(err, ErrLocal) {
 		t.Fatalf("dropped the engine role from this machine: %v", err)
+	}
+}
+
+// machinesVersionOneSchema is the registry before the probes, so a data folder
+// from that version still migrates.
+const machinesVersionOneSchema = `CREATE TABLE machines (
+	id         TEXT    PRIMARY KEY,
+	name       TEXT    NOT NULL UNIQUE,
+	roles      TEXT    NOT NULL CHECK(json_valid(roles)),
+	ssh        TEXT    NOT NULL,
+	ci_slots   INTEGER NOT NULL CHECK(ci_slots >= 0),
+	enabled    INTEGER NOT NULL CHECK(enabled IN (0,1)),
+	local      INTEGER NOT NULL CHECK(local IN (0,1)),
+	created_ms INTEGER NOT NULL,
+	updated_ms INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;
+INSERT INTO machines(id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms) VALUES
+ ('m_old','hermes','["ci"]','pip@hermeslab',2,1,0,1000,1000);
+INSERT INTO meta(key,value) VALUES('machines.version','1');`
+
+func TestMigrateAddsProbeColumns(t *testing.T) {
+	ctx := context.Background()
+	dir := storetest.DataDir(t)
+	db, err := database.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	if _, err := db.Exec(machinesVersionOneSchema); err != nil {
+		t.Fatal(err)
+	}
+
+	s := Store{DataDir: dir}
+	m, err := s.Get(ctx, "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Health != HealthUnknown || m.SSH != "pip@hermeslab" || m.CISlots != 2 || !m.Enabled {
+		t.Fatalf("migrated machine = %#v", m)
+	}
+	if !m.LastProbe.IsZero() || !m.LastSeen.IsZero() || m.Capabilities.CPUs != 0 {
+		t.Fatalf("migrated machine has a probe: %#v", m)
+	}
+	if err := s.SaveProbe(ctx, m.ID, ProbeResult{Health: HealthOnline, Capabilities: Capabilities{OS: "Linux", CPUs: 4}, Load: Load{CPUs: 4}}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err := s.Get(ctx, "hermes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status() != HealthOnline || stored.Capabilities.CPUs != 4 || stored.LastSeen.IsZero() {
+		t.Fatalf("stored probe = %#v", stored)
 	}
 }

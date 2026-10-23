@@ -8,7 +8,9 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -24,14 +26,20 @@ func NewCommand() *cobra.Command {
 		Long: "The registry holds this machine, marked local, and each machine that Dyna\n" +
 			"can use. A machine has one or more roles: engine (this machine only),\n" +
 			"agents, and ci. A ci machine needs an SSH destination and at least one CI\n" +
-			"slot. `dyna git ci node` still works and forwards to these commands.",
+			"slot. `dyna git ci node` still works and forwards to these commands.\n\n" +
+			"`dyna machine probe` reads a machine's capabilities and load over SSH. The\n" +
+			"engine also probes every enabled machine when it starts, when a machine\n" +
+			"changes, and every five minutes.",
 		Args: cobra.NoArgs,
 	}
-	root.AddCommand(listCommand(), showCommand(), addCommand(), editCommand(), removeCommand())
+	root.AddCommand(listCommand(), showCommand(), addCommand(), editCommand(), probeCommand(), removeCommand())
 	return root
 }
 
 func store() machines.Store { return machines.Store{} }
+
+// prober is the prober the CLI saves through.
+func prober() machines.Prober { return machines.Prober{Store: store()} }
 
 func listCommand() *cobra.Command {
 	var asJSON bool
@@ -58,7 +66,7 @@ func listCommand() *cobra.Command {
 // that runs this engine.
 func writeTable(w io.Writer, list []machines.Machine) error {
 	out := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	fmt.Fprintln(out, "NAME\tROLES\tSSH\tSLOTS\tENABLED\tLOCAL")
+	fmt.Fprintln(out, "NAME\tROLES\tSTATUS\tSSH\tSLOTS\tENABLED\tLOCAL")
 	for _, m := range list {
 		ssh, local := m.SSH, ""
 		if ssh == "" {
@@ -67,7 +75,7 @@ func writeTable(w io.Writer, list []machines.Machine) error {
 		if m.Local {
 			local = "*"
 		}
-		fmt.Fprintf(out, "%s\t%s\t%s\t%d\t%t\t%s\n", m.Name, m.RoleNames(), ssh, m.CISlots, m.Enabled, local)
+		fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%d\t%t\t%s\n", m.Name, m.RoleNames(), m.Status(), ssh, m.CISlots, m.Enabled, local)
 	}
 	return out.Flush()
 }
@@ -98,11 +106,125 @@ func showCommand() *cobra.Command {
 			fmt.Fprintf(out, "CI slots: %d\n", m.CISlots)
 			fmt.Fprintf(out, "Enabled:  %t\n", m.Enabled)
 			fmt.Fprintf(out, "Local:    %t\n", m.Local)
+			fmt.Fprintf(out, "Status:   %s\n", m.Status())
+			fmt.Fprintf(out, "Probed:   %s\n", stamp(m.LastProbe))
+			fmt.Fprintf(out, "Seen:     %s\n", stamp(m.LastSeen))
+			if m.ProbeError != "" {
+				fmt.Fprintf(out, "Error:    %s\n", m.ProbeError)
+			}
+			writeCapabilities(out, m)
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the machine as JSON")
 	return cmd
+}
+
+// writeCapabilities prints what the last probe read, or says that no probe
+// has reached the machine.
+func writeCapabilities(out io.Writer, m machines.Machine) {
+	caps, load := m.Capabilities, m.Load
+	if m.LastSeen.IsZero() {
+		fmt.Fprintln(out, "System:   not probed yet")
+		return
+	}
+	system := caps.OS
+	if caps.Arch != "" {
+		system += "/" + caps.Arch
+	}
+	fmt.Fprintf(out, "System:   %s, %d CPUs, %s memory, %s available\n",
+		system, caps.CPUs, size(caps.MemTotal), size(caps.MemAvailable))
+	fmt.Fprintf(out, "GPU:      %t\n", caps.GPU)
+	fmt.Fprintf(out, "Runtime:  %s\n", joinOr(caps.Containers.Names(), "none"))
+	fmt.Fprintf(out, "Computers: %t\n", caps.Computers.Ready())
+	fmt.Fprintf(out, "Dyna:     %s\n", orNone(caps.DynaVersion))
+	if load.CPUPercent != nil {
+		fmt.Fprintf(out, "Load:     %.2f %.2f %.2f, CPU %.0f%%, %s free\n",
+			load.LoadAvg[0], load.LoadAvg[1], load.LoadAvg[2], *load.CPUPercent, size(load.MemAvailable))
+		return
+	}
+	fmt.Fprintf(out, "Load:     %.2f %.2f %.2f, %s free\n",
+		load.LoadAvg[0], load.LoadAvg[1], load.LoadAvg[2], size(load.MemAvailable))
+}
+
+func probeCommand() *cobra.Command {
+	var asJSON, all bool
+	cmd := &cobra.Command{
+		Use:   "probe [<name>|--all]",
+		Short: "Read a machine's capabilities and load, and store them",
+		Long: "Probe one machine, or every enabled machine with --all, and store what\n" +
+			"the probe read. A remote machine is read over SSH with no credential. A\n" +
+			"failed probe keeps the last capabilities it read, and marks the machine\n" +
+			"offline. A disabled machine is not probed.",
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(c *cobra.Command, args []string) error {
+			if all && len(args) > 0 {
+				return errors.New("probe: give a machine name or --all, not both")
+			}
+			if !all && len(args) == 0 {
+				return errors.New("probe: give a machine name or --all")
+			}
+			targets := args
+			if all {
+				list, err := store().List(c.Context())
+				if err != nil {
+					return err
+				}
+				targets = nil
+				for _, m := range list {
+					if m.Enabled {
+						targets = append(targets, m.Name)
+					}
+				}
+			}
+			p, out := prober(), c.OutOrStdout()
+			var failures []error
+			for _, name := range targets {
+				m, err := store().Get(c.Context(), name)
+				if err != nil {
+					failures = append(failures, err)
+					continue
+				}
+				started := time.Now()
+				stored, err := p.ProbeAndSave(c.Context(), m)
+				if errors.Is(err, machines.ErrDisabled) {
+					failures = append(failures, fmt.Errorf("%s is disabled; enable it with dyna machine edit %s --enable", name, name))
+					continue
+				}
+				if err != nil {
+					failures = append(failures, err)
+					continue
+				}
+				if !asJSON {
+					writeProbe(out, stored, time.Since(started))
+				}
+			}
+			if asJSON {
+				list, err := store().List(c.Context())
+				if err != nil {
+					return err
+				}
+				if err := jsonout.Write(out, list); err != nil {
+					return err
+				}
+			}
+			return errors.Join(failures...)
+		},
+	}
+	cmd.Flags().BoolVar(&all, "all", false, "probe every enabled machine")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the probed machines as JSON")
+	return cmd
+}
+
+// writeProbe prints one probe result. A machine that could not be reached
+// prints as a result with its error, not as a command failure.
+func writeProbe(out io.Writer, m machines.Machine, took time.Duration) {
+	fmt.Fprintf(out, "%s: %s in %s\n", m.Name, m.Status(), took.Round(time.Millisecond))
+	if m.ProbeError != "" {
+		fmt.Fprintf(out, "  Error: %s\n", m.ProbeError)
+		return
+	}
+	writeCapabilities(out, m)
 }
 
 func addCommand() *cobra.Command {
@@ -244,4 +366,42 @@ func parseRoles(names []string) ([]machines.Role, error) {
 		roles = append(roles, role)
 	}
 	return roles, nil
+}
+
+// stamp prints a probe time, or a dash before the first probe.
+func stamp(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.Format(time.DateTime)
+}
+
+// size prints a byte count in the largest unit that keeps it readable.
+func size(bytes uint64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	value, exp := float64(bytes), 0
+	for value >= unit && exp < 4 {
+		value /= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", value, "KMGTP"[exp-1])
+}
+
+// joinOr joins names for one line, or prints the fallback when there is none.
+func joinOr(names []string, fallback string) string {
+	if len(names) == 0 {
+		return fallback
+	}
+	return strings.Join(names, ",")
+}
+
+// orNone prints a value, or a dash when the probe read none.
+func orNone(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
 }
