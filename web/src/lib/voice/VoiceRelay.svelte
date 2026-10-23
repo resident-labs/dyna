@@ -4,7 +4,7 @@
   // call window and the DM transcript show it.
   import { icons } from './icons.ts'
 
-  // icon names an icons.js path; text is the request, quoted when present;
+  // icon names an icons.ts path; text is the request, quoted when present;
   // state is working, answered, stopped, running, done, failed, queued or
   // delivered. onopen, when given, adds an "open" link.
   let { icon, label, text = '', state = '', onopen = null } = $props()
