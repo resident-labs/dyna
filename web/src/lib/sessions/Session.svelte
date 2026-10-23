@@ -1,7 +1,9 @@
 <script lang="ts">
   import { isFinished } from '../rooms/memberOrder.ts'
   import { sessionStatus } from './status.ts'
-  import { tick, onDestroy } from 'svelte'
+  import { tick, onDestroy, onMount } from 'svelte'
+  import { dialog } from '../ui/dialog.js'
+  import { threadHeaderSwipe } from './threadHeaderSwipe.ts'
   import Avatar from '../ui/Avatar.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import Skeleton from '../ui/Skeleton.svelte'
@@ -91,6 +93,31 @@
     if (threadStuck && !session?.newer) tick().then(() => { if (threadScroller) threadScroller.scrollTop = threadScroller.scrollHeight })
   })
   function openThread(key: string) { selectedThread = key; threadsOpen = true }
+  let threadOverlay = $state(false)
+  onMount(() => {
+    const query = matchMedia('(max-width: 1099px)')
+    const update = () => { threadOverlay = query.matches }
+    update()
+    query.addEventListener('change', update)
+    return () => query.removeEventListener('change', update)
+  })
+  function threadModal(node: HTMLElement, enabled: boolean) {
+    let active: ReturnType<typeof dialog> | undefined
+    const update = (modal: boolean) => {
+      if (modal && !active) active = dialog(node, {
+        close: () => { threadsOpen = false },
+        initial: () => node.querySelector<HTMLButtonElement>('.panel-head button:last-child'),
+      })
+      else if (!modal && active) { active.destroy(); active = undefined }
+    }
+    update(enabled)
+    return { update, destroy: () => active?.destroy() }
+  }
+  function backFromThread() {
+    if (selectedThread) selectedThread = ''
+    else threadsOpen = false
+  }
+
   // The profile's running output health: a live turn whose stdout Dyna
   // cannot read. Poll the one profile while the turn runs. Errors stay quiet.
   let check = $state<ProfileView | null>(null)
@@ -276,11 +303,12 @@
     {/if}
     </div>
     {#if threadsOpen}
+      <div class="thread-wrap" class:overlay={threadOverlay}>
       <button class="thread-scrim" aria-label="Close threads" onclick={() => (threadsOpen = false)} transition:fade={{ duration: motion(BASE) }}></button>
-      <aside class="thread-panel" aria-label="Session threads" transition:fly={{ x: 24, duration: motion(BASE), easing: cubicOut }}>
+      <aside class="thread-panel" role={threadOverlay ? 'dialog' : undefined} aria-modal={threadOverlay ? true : undefined} tabindex="-1" use:threadModal={threadOverlay} aria-label="Session threads" transition:fly={{ x: 24, duration: motion(BASE), easing: cubicOut }}>
         {#if selected}
           {@const count = selected.posts.length}
-          <header class="panel-head"><button class="back" onclick={() => (selectedThread = '')} aria-label="Back to threads">‹</button><strong>{short(selected.key, room.name)}<small>with {m.name} · {count} message{count === 1 ? '' : 's'}</small></strong><button onclick={() => (threadsOpen = false)} aria-label="Close threads">✕</button></header>
+          <header class="panel-head" use:threadHeaderSwipe={{ enabled: threadOverlay, back: backFromThread }}><button class="back" onclick={() => (selectedThread = '')} aria-label="Back to threads">‹</button><strong>{short(selected.key, room.name)}<small>with {m.name} · {count} message{count === 1 ? '' : 's'}</small></strong><button onclick={() => (threadsOpen = false)} aria-label="Close threads">✕</button></header>
           <div class="thread-log" bind:this={threadScroller}>
             {#key m.id + ':' + selected.key + ':' + focusedTurn}
             <HistoryList bind:atBottom={threadStuck} fill={false} scroller={threadScroller} items={threadRows} key={(r: DmRow) => r.key} estimate={() => 96} newer={!focusedTurn && session.newer} onnewer={focusedTurn ? null : onnewer} onpresent={focusedTurn || !onpresent ? null : present} earlier={!focusedTurn && session.earlier} onearlier={focusedTurn ? null : onearlier} onhistory={() => (threadStuck = false)} beginning={focusedTurn ? '' : 'Beginning of thread with ' + short(selected.key, room.name)}>
@@ -289,7 +317,7 @@
             {/key}
           </div>
         {:else}
-          <header class="panel-head"><strong>Threads<small>{m.name} · {dm.threads.length} thread{dm.threads.length === 1 ? '' : 's'}</small></strong><button onclick={() => (threadsOpen = false)} aria-label="Close threads">✕</button></header>
+          <header class="panel-head" use:threadHeaderSwipe={{ enabled: threadOverlay, back: backFromThread }}><strong>Threads<small>{m.name} · {dm.threads.length} thread{dm.threads.length === 1 ? '' : 's'}</small></strong><button onclick={() => (threadsOpen = false)} aria-label="Close threads">✕</button></header>
           <div class="thread-list">
             {#each allRecent ? list.recent : list.recent.slice(0, 3) as thread (thread.key)}{@render threadRow(thread)}{/each}
             {#if list.recent.length > 3}<button class="context-row more" onclick={() => (allRecent = !allRecent)}>{allRecent ? 'Show fewer' : `Show ${list.recent.length - 3} more`}</button>{/if}
@@ -310,6 +338,7 @@
           </div>
         {/if}
       </aside>
+      </div>
     {/if}
     {#if contextOpen}
       <button class="context-scrim" aria-label="Close context" onclick={() => (contextOpen = false)}></button>
@@ -378,6 +407,9 @@
   }
   .thread-count:active { background: var(--select); }
   .symbol { width: 24px; flex: none; text-align: center; }
+  .thread-wrap { display: contents; }
+  .thread-wrap.overlay { display: block; position: absolute; inset: 0; z-index: 31; }
+  .thread-wrap.overlay .panel-head { touch-action: pan-y; }
   .thread-scrim { display: none; }
   .context-scrim { position: absolute; inset: 0; z-index: 33; background: transparent; }
   .context-pop { position: absolute; top: 8px; right: 12px; z-index: 34; width: min(320px, 90%); max-height: 70%; overflow-y: auto; padding: 6px; background: var(--side); border: 1px solid var(--line-soft); border-radius: 8px; box-shadow: 0 8px 24px #0008; }
