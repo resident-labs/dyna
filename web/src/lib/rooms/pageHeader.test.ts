@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { visibleTabs } from './workViews.ts'
-import { computerLabel } from '../computers/computers.js'
+import { computerLabel } from '../computers/computers.ts'
 
 const read = (p: string): string => readFileSync(new URL(p, import.meta.url), 'utf8')
 

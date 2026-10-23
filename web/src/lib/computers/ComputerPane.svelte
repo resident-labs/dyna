@@ -8,7 +8,7 @@
   import ComputerViewer from './ComputerViewer.svelte'
   import ComputerShot from './ComputerShot.svelte'
   import { streamWanted, loadPreview, savePreview } from './preview.ts'
-  import { stateText } from './computers.js'
+  import { stateText } from './computers.ts'
 
   let { c, room, feed = [], chat = null } = $props()
   let pageVisible = $state(typeof document === 'undefined' || document.visibilityState !== 'hidden')
