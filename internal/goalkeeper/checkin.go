@@ -10,6 +10,7 @@ import (
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/rolesession"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/settings"
 	"dyna-agent/internal/subagent"
 )
 
@@ -20,6 +21,15 @@ const maxKeeperPasses = 20
 // notice delivery. The check-in wake rounds are gone. Session snapshots
 // exclude closed history.
 func (s *Service) Tick(ctx context.Context) (time.Time, error) {
+	v, err := settings.Load(settings.DefaultPath())
+	if err != nil {
+		return time.Time{}, err
+	}
+	if !v.GoalKeeperEnabled {
+		// The keeper is off: no nudges and no notice delivery. It looks again
+		// soon, so turning it back on needs no restart or other wake.
+		return s.now().Add(keeperOffRetry), nil
+	}
 	st, err := s.Store.Read()
 	if err != nil {
 		return time.Time{}, err
@@ -95,6 +105,10 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 // checkInRetry is how soon the keeper looks again at a room with a round or
 // queued notices.
 const checkInRetry = time.Minute
+
+// keeperOffRetry is how soon a keeper that is switched off looks at the
+// setting again, so the switch takes effect without an engine restart.
+const keeperOffRetry = 5 * time.Minute
 
 // roomWork reports whether a room has queued notices to deliver. The
 // check-in wake rounds are gone; stale nudges schedule their own ticks.

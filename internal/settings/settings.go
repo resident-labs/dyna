@@ -73,6 +73,7 @@ type Values struct {
 	BrowserSaveBack       bool
 	ComputersEnabled      bool
 	GoalKeeperTimeout     time.Duration
+	GoalKeeperEnabled     bool
 	MergeStewardProfile   string
 	GoalKeeperProfile     string
 	MaxCardBytes          int64
@@ -115,6 +116,7 @@ func Defaults() Values {
 		BrowserSaveBack:       true,
 		ComputersEnabled:      true,
 		GoalKeeperTimeout:     5 * time.Minute,
+		GoalKeeperEnabled:     true,
 		LibraryReadmeMaxLines: DefaultLibraryReadmeMaxLines,
 		MaxCardBytes:          DefaultContentBytes,
 		MaxFileBytes:          DefaultContentBytes,
@@ -414,7 +416,7 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.MergeStewardProfile = value
 		v.fromFile[key] = true
-	case KeyGoalKeeperTimeout, KeyGoalKeeperProfile:
+	case KeyGoalKeeperTimeout, KeyGoalKeeperProfile, KeyGoalEnabled:
 		return v.setGoal(key, value)
 	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking:
 		return v.setVoice(key, value)

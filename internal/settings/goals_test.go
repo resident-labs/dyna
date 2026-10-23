@@ -58,3 +58,29 @@ func TestGoalKeeperTimeoutRejectsUnboundedValues(t *testing.T) {
 		}
 	}
 }
+
+// The keeper's switch defaults to on, survives a save, and rejects a value that
+// is not a boolean.
+func TestGoalKeeperSwitch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	v, err := Load(path)
+	if err != nil || !v.GoalKeeperEnabled {
+		t.Fatalf("keeper switch defaults to off: %v %v", v.GoalKeeperEnabled, err)
+	}
+	if err = v.Set(KeyGoalEnabled, "off"); err != nil {
+		t.Fatal(err)
+	}
+	if err = v.Save(); err != nil {
+		t.Fatal(err)
+	}
+	v, err = Load(path)
+	if err != nil || v.GoalKeeperEnabled {
+		t.Fatalf("keeper switch did not persist: on=%v err=%v", v.GoalKeeperEnabled, err)
+	}
+	if err = v.Set(KeyGoalEnabled, "maybe"); err == nil {
+		t.Fatal("accepted a value that is not a boolean")
+	}
+	if err = v.Set(KeyGoalEnabled, "on"); err != nil || !v.GoalKeeperEnabled {
+		t.Fatalf("could not switch the keeper back on: on=%v err=%v", v.GoalKeeperEnabled, err)
+	}
+}
