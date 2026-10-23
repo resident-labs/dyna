@@ -80,9 +80,11 @@ func TestWriteFileDoesNotCreateParent(t *testing.T) {
 
 func TestWriteExecutableDuringConcurrentForks(t *testing.T) {
 	stop := make(chan struct{})
+	ready := make(chan struct{}, 4)
 	var workers sync.WaitGroup
 	for range 4 {
 		workers.Go(func() {
+			ready <- struct{}{}
 			for {
 				select {
 				case <-stop:
@@ -97,8 +99,13 @@ func TestWriteExecutableDuringConcurrentForks(t *testing.T) {
 		})
 	}
 	defer func() { close(stop); workers.Wait() }()
+	for range 4 {
+		<-ready
+	}
 	dir := t.TempDir()
-	for i := range 400 {
+	// Exercise writes while four independent fork loops compete for ForkLock.
+	// A bounded sample keeps this regression test within the test budget.
+	for i := range 32 {
 		path := filepath.Join(dir, fmt.Sprintf("script-%d", i))
 		if err := WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)

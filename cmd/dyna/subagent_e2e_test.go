@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -22,6 +23,7 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/engine"
 	"dyna-agent/internal/enginetest"
+	"dyna-agent/internal/goals"
 	"dyna-agent/internal/harness/fakeruntime"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hub"
@@ -29,6 +31,7 @@ import (
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/roomsvc"
+	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
@@ -1335,8 +1338,74 @@ with socket.create_connection((host, int(port))) as gate:
 print("held turn completed")
 PYTHON
 `)
-	lead := e.startSession("--name", "lead", "RESPOND: lead SLEEP:0")
-	e.waitTurn(lead.Address, 1)
+	// Observe committed turn changes without spawning polling CLI processes.
+	sessions := &subagent.Store{Root: filepath.Join(e.data, "dyna", "sessions")}
+	db, err := database.Open(filepath.Join(e.data, "dyna"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := make(chan struct{}, 1)
+	state.For(db).SetPublish(func(ev hub.Event) {
+		e.events.Publish(ev)
+		select {
+		case changed <- struct{}{}:
+		default:
+		}
+	})
+	t.Cleanup(func() { state.For(db).SetPublish(e.events.Publish) })
+	wait := func(id string) subagent.Turn {
+		for {
+			turn, err := sessions.ReadTurn(id, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if turn.Done() && turn.Reported {
+				return turn
+			}
+			select {
+			case <-changed:
+			case <-t.Context().Done():
+				t.Fatal(t.Context().Err())
+			}
+		}
+	}
+	show := func(id string) subagent.Info {
+		info, err := sessions.Resolve(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info
+	}
+	ownerCommand := func(args ...string) {
+		cmd := newRootCommand()
+		cmd.SetOut(io.Discard)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs(args)
+		if err := cmd.ExecuteContext(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(e.dir)
+	// The idle parent only supplies stored ancestry; it needs no harness.
+	lead := startResult{Session: subagent.NewID(), RoomID: e.room.ID, Room: e.room.Name}
+	if err := os.MkdirAll(filepath.Join(sessions.Root, lead.Session), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionlife.Save(sessions.Root, lead.Session, subagent.Meta{
+		ID: lead.Session, Name: "lead", RoomID: lead.RoomID, Room: lead.Room,
+		Profile: "mock", Dir: e.dir, Depth: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	goal, err := (&goals.Store{Root: filepath.Join(e.data, "dyna", "goals")}).Add(
+		lead.RoomID, "owner", goals.Input{Text: "Finish the test task", Holders: []string{lead.Session}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions.UpdateMeta(lead.Session, func(meta *subagent.Meta) { meta.Goal = goal.ID }); err != nil {
+		t.Fatal(err)
+	}
 	stamp := func(parent startResult, depth string) []string {
 		return []string{"DYNA_MODE=subagent", "DYNA_SESSION=" + parent.Session, "DYNA_DEPTH=" + depth, "DYNA_ROOM_ID=" + parent.RoomID, "DYNA_ROOM=" + parent.Room}
 	}
@@ -1344,15 +1413,10 @@ PYTHON
 	child := e.startSession("--profile", "held", "--name", "child", "job")
 	e.extra = nil
 	t.Cleanup(func() { e.run("subagent", "close", child.Session) })
-	worker := acceptChildHarness(t, e, gate, child.Session)
+	worker := acceptChildHarness(t, gate, changed, sessions, child.Session)
 	defer worker.Close()
-	sessions := &subagent.Store{Root: filepath.Join(e.data, "dyna", "sessions")}
-	meta, err := sessions.ReadMeta(child.Session)
-	if err != nil {
-		t.Fatal(err)
-	}
-	e.must("subagent", "promote", child.Session)
-	current := e.show(child.Session).Session
+	ownerCommand("subagent", "promote", child.Session)
+	current := show(child.Session)
 	if current.ParentSession != "" || current.Depth != 1 || current.Turns != 1 || current.Status != "running" {
 		t.Fatalf("promoted running session = %+v", current)
 	}
@@ -1363,62 +1427,48 @@ PYTHON
 	e.extra = stamp(child, "3")
 	grandchild := e.startSession("--name", "grandchild", "RESPOND: grandchild SLEEP:0")
 	e.extra = nil
-	e.waitTurn(grandchild.Session, 1)
-	if got := e.show(grandchild.Session).Session; got.Depth != 2 || got.ParentSession != child.Session {
+	wait(grandchild.Session)
+	if got := show(grandchild.Session); got.Depth != 2 || got.ParentSession != child.Session {
 		t.Fatalf("child creation from stale stamp = %+v", got)
 	}
 	if _, err := worker.Write([]byte("x")); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
-	defer cancel()
-	if err := waitE2ERunner(ctx, meta.Pid, "subagent _turn "+child.Session+" 1"); err != nil {
-		t.Fatalf("child runner did not finish: %v", err)
+	if turn := wait(child.Session); turn.Status != "ok" || turn.Result != "held turn completed" {
+		t.Fatalf("promotion interrupted work: %+v", turn)
 	}
-	if status, result, _ := e.show(child.Session).turn(1); status != "ok" || result != "held turn completed" {
-		t.Fatalf("promotion interrupted work: %s %q", status, result)
-	}
-	e.must("subagent", "close", child.Session)
-	if got := e.show(grandchild.Session).Session; got.Depth != 1 || got.ParentSession != "" || got.Status == "closed" {
+	ownerCommand("subagent", "close", child.Session)
+	if got := show(grandchild.Session); got.Depth != 1 || got.ParentSession != "" || got.Status == "closed" {
 		t.Fatalf("close hand-over = %+v", got)
 	}
 }
 
-// acceptGuard bounds a hung harness start. It is a failure bound, not a wait.
-const acceptGuard = time.Minute
-
-// acceptChildHarness waits for the child's harness to connect, or for its
-// first turn to end without connecting. It waits on those events, not on a
-// fixed deadline: a loaded machine can take seconds to start the detached
-// runner and its harness. A start that hangs fails after acceptGuard, far
-// above any load-induced delay, rather than at go test's 10-minute timeout.
-func acceptChildHarness(t *testing.T, e *e2e, gate *net.TCPListener, session string) *net.TCPConn {
+// acceptChildHarness waits for the held harness startup event.
+func acceptChildHarness(t *testing.T, gate *net.TCPListener, changed <-chan struct{}, sessions *subagent.Store, id string) *net.TCPConn {
 	t.Helper()
 	type accepted struct {
 		conn *net.TCPConn
 		err  error
 	}
 	got := make(chan accepted, 1)
-	go func() {
-		conn, err := gate.AcceptTCP()
-		got <- accepted{conn, err}
-	}()
-	tick := time.NewTicker(e2ePoll)
-	defer tick.Stop()
-	guard := time.After(acceptGuard)
+	go func() { conn, err := gate.AcceptTCP(); got <- accepted{conn, err} }()
 	for {
 		select {
-		case <-guard:
-			t.Fatalf("child harness did not connect within %v while turn 1 kept running", acceptGuard)
 		case a := <-got:
 			if a.err != nil {
-				t.Fatalf("child harness did not start: %v", a.err)
+				t.Fatal(a.err)
 			}
 			return a.conn
-		case <-tick.C:
-			if status, result, ok := e.show(session).turn(1); ok && status != "queued" && status != "running" {
-				t.Fatalf("child turn 1 ended before its harness connected: %s %q", status, result)
+		case <-changed:
+			turn, err := sessions.ReadTurn(id, 1)
+			if err != nil {
+				t.Fatal(err)
 			}
+			if turn.Done() {
+				t.Fatalf("child ended before connecting: %+v", turn)
+			}
+		case <-t.Context().Done():
+			t.Fatal(t.Context().Err())
 		}
 	}
 }
