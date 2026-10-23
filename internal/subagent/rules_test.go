@@ -185,3 +185,67 @@ func TestInstructionNotesRepeatAfterARevertedChange(t *testing.T) {
 		t.Fatalf("a retry of one change posted %s after %s", again.ID, before)
 	}
 }
+
+// A snapshot refresh covers the notes it includes and clears their list, but it
+// must not reset the occurrence: a change that repeats an earlier one after the
+// refresh is a new note, or the session would miss it.
+func TestInstructionNoteRepeatsAfterASnapshotRefresh(t *testing.T) {
+	e := newTestEnv(t)
+	info, _ := e.start("SLEEP:1 RESPOND: ready")
+	info, _ = e.wait(info.ID, 1)
+	flush := func() room.Message {
+		t.Helper()
+		if _, err := e.m.FlushInstructionNotes(e.ctx, time.Now().Add(instructionQuietPeriod)); err != nil {
+			t.Fatal(err)
+		}
+		meta, err := e.m.Store.ReadMeta(info.ID)
+		if err != nil || len(meta.InstructionsNotes) == 0 {
+			t.Fatalf("no instruction note: %v", err)
+		}
+		note, err := e.m.rooms().Message(info.RoomID, meta.InstructionsNotes[len(meta.InstructionsNotes)-1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return note
+	}
+	change := func(add bool) {
+		t.Helper()
+		if add {
+			if _, err := e.m.goalStore().AddRule(e.room.ID, "owner", "", "Check the running note."); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			rules, err := e.m.goalStore().Rules(e.room.ID)
+			if err != nil || len(rules) == 0 {
+				t.Fatalf("rules = %+v, %v", rules, err)
+			}
+			if _, err := e.m.goalStore().RemoveRule(e.room.ID, rules[len(rules)-1].ID, "owner"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		e.m.NoteRoomInstructions(e.ctx, e.room.ID)
+	}
+	change(true)
+	first := flush()
+	change(false)
+	flush()
+	// A refresh folds the notes into a new frozen snapshot, as a compaction or
+	// a transfer does: the covered notes leave the list.
+	if _, err := e.m.Store.UpdateMeta(info.ID, func(meta *Meta) {
+		meta.Instructions = meta.InstructionsKnown
+		meta.InstructionsStale = false
+		meta.InstructionsKnown = nil
+		meta.InstructionsNotes = nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	change(true)
+	third := flush()
+	if third.ID == first.ID {
+		t.Fatalf("the change after a refresh reused post %s", first.ID)
+	}
+	payload, ok := third.Session()
+	if !ok || payload.Occurrence == 0 {
+		t.Fatalf("third note = %+v, %v", payload, ok)
+	}
+}
