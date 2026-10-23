@@ -5,7 +5,7 @@
   import { api } from '../../api.js'
   import MessageInput from '../ui/MessageInput.svelte'
   import { attachmentDraft } from '../files/attachmentDraft.ts'
-  import { mentionOptions, matchMentions } from './mentions.js'
+  import { mentionOptions, matchMentions } from './mentions.ts'
 
   // commands are app actions typed as "/name [arg]": [{name, hint, arg?,
   // options?() -> [{value, hint}], pickRuns?, run(arg) -> error text or

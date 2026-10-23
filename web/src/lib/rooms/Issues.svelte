@@ -1,6 +1,6 @@
 <script>
   import { ago } from '../ui/format.js'
-  import { areas, byArea, location, historyLabel } from './issues.js'
+  import { areas, byArea, location, historyLabel } from './issues.ts'
 
   // The Issues panel. It sits beside Pinned and uses the same card shape.
   // open and history are Issue lists from roomsvc; the buttons call back with

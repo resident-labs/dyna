@@ -13,7 +13,7 @@
   import GoalGlyph from '../rooms/GoalGlyph.svelte'
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
   import { expedite, agentExpedited, goalExpedited } from '../rooms/expedite.ts'
-  import { goalAgo, goalParts, goalTone } from '../rooms/goals.js'
+  import { goalAgo, goalParts, goalTone } from '../rooms/goals.ts'
   import { markdown, stamp, tokens, roomLabel } from '../ui/format.js'
 
   import type { Attachment, Member, PostDetail, Room } from '../api/room.ts'

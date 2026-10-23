@@ -1,11 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { activeAgents, agentsHeader, roomsWorking } from './agents.js'
+import { activeAgents, agentsHeader, roomsWorking, type AgentMember } from './agents.ts'
 
 const now = Date.parse('2026-10-18T12:00:00Z')
 const recent = new Date(now - 60 * 1000).toISOString()
 const old = new Date(now - 60 * 60 * 1000).toISOString()
-const agent = (name, extra = {}) => ({ id: name, name, address: `r:${name}`, state: 'idle', lastActivity: recent, ...extra })
+type Fixture = AgentMember & { address: string; lastActivity: string }
+const agent = (name: string, extra: Partial<Fixture> = {}): Fixture => ({ id: name, name, address: `r:${name}`, state: 'idle', lastActivity: recent, ...extra })
 
 test('lists awake agents by room and counts dormant and paused ones as hidden', () => {
   // A session goes dormant when a turn ends with no work; long idle time never does.
@@ -18,14 +19,14 @@ test('lists awake agents by room and counts dormant and paused ones as hidden', 
   }
   const { groups, hidden } = activeAgents(rooms, members)
   assert.deepEqual(groups.map((g) => [g.room.id, g.members.map((m) => m.name)]), [['a', ['lead', 'sleepy']], ['d', ['solo']]])
-  assert.equal(groups[0].members[0].roomId, 'a')
+  assert.equal(groups[0]?.members[0]?.roomId, 'a')
   assert.equal(hidden, 2)
   assert.equal(activeAgents(rooms, members).working, 1)
 })
 
 test('a live agent is never hidden', () => {
   const { groups } = activeAgents([{ id: 'a' }], { a: [agent('busy', { state: 'live', lastActivity: old })] })
-  assert.equal(groups[0].members[0].name, 'busy')
+  assert.equal(groups[0]?.members[0]?.name, 'busy')
 })
 
 test('before member lists load, the agents view is loading and keeps the rooms summary count', () => {
