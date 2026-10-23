@@ -8,8 +8,7 @@
   import { FAST, motion } from './lib/ui/motion.ts'
   import { viewIdentity } from './lib/ui/viewIdentity.ts'
   import { createReadMarker } from './lib/rooms/readMarker.ts'
-  import { mergeFeedPage, rerouteAnchors, withViews } from './lib/rooms/feedPages.ts'
-  import { createRoomData } from './lib/rooms/roomData.ts'
+  import { bindRoomLoader, roomData } from './lib/app/roomLoader.svelte.ts'
   import { createSessionData } from './lib/sessions/sessionData.ts'
   import { mergeListPage } from './lib/ui/listPages.ts'
   import { patchListRows } from './lib/ui/listChanges.ts'
@@ -24,13 +23,12 @@
   import VoiceWidget from './lib/voice/VoiceWidget.svelte'
   import { voiceCall, callRequests } from './lib/voice/voiceCall.ts'
   import { callLink, callTarget } from './lib/voice/callRequests.ts'
-  import { GENERAL, VOICE, isFeedView, inView, homeView, inRoomFeed, feedModel, parentTrail, prepareFeedText } from './lib/rooms/feedViews.ts'
+  import { GENERAL, VOICE, isFeedView, inView, homeView, feedModel, parentTrail, prepareFeedText } from './lib/rooms/feedViews.ts'
   import { seatDMConversation } from './lib/rooms/conversations.ts'
   import { isShellResult } from './lib/rooms/feedRows.ts'
   import { HOOK_LOG_EVENT, hookLogFrom } from './lib/settings/hookLog.ts'
   import type { HookLogTarget } from './lib/settings/hookLog.ts'
   import { mergeSessionPage } from './lib/sessions/sessionPages.ts'
-  import { trimFeed } from './lib/rooms/feedWindow.ts'
   import { look, revealed, reveal as revealPost } from './lib/rooms/look.svelte.ts'
   import { visibleTo } from './lib/rooms/look.ts'
   import Feed from './lib/rooms/Feed.svelte'
@@ -121,7 +119,7 @@
   import { LOAD_POLL_MS } from './lib/system/systemLoad.ts'
   import { roomIDPattern as ROOM, postIDPattern as POST } from './lib/ui/posts.ts'
   import type { MachineDetail, MachinePatch, MachineSummary } from './lib/api/machine.ts'
-  import type { Room, Member, Post, Feed as FeedPage, Question, Visual, ProfileChoice, Attachment } from './lib/api/room.ts'
+  import type { Room, Member, Post, Opened, Question, Visual, ProfileChoice, Attachment } from './lib/api/room.ts'
   import type { AttachmentRef } from './lib/api/engine.ts'
   import type { Session as SessionData, QueueItem, MemberProfile } from './lib/api/session.ts'
   import type { Goal } from './lib/api/goal.ts'
@@ -222,21 +220,6 @@
   }
   type ListKind = keyof ListKinds
   type ListPages = { [K in ListKind]?: ListPage<ListKinds[K]> }
-  // What api.openRoom returns for the open room. The host sends null for an
-  // empty list, and the composer's choices are member names.
-  interface Opened {
-    feed: FeedPage
-    members?: Member[] | null
-    choices?: string[] | null
-    pins?: Post[] | null
-    runs?: RunList
-  }
-  interface EarlierLoad {
-    id: string
-    roomLoad: number
-    direction: string
-    promise: Promise<boolean> | null
-  }
   interface DetailTarget {
     kind: string
     id: string
@@ -391,20 +374,23 @@
       machineProbing = false
     }
   }
-  // SavedFeed is the feed the page keeps: the server's page plus the client's history flag.
-  type SavedFeed = FeedPage & { historyLoaded?: boolean }
-  let feed = $state<SavedFeed | null>(null)
+  // The open room's data lives in lib/app/roomLoader.svelte.ts. The page reads
+  // it through these aliases and writes it through the loader, so the template
+  // and the code below name the room data as they always have.
+  const feed = $derived(roomData.feed)
   let room = $derived(feed?.room ?? null)
+  // The reader is at the bottom of the feed; the Feed component binds this.
   let feedAtBottom = $state(true)
-  let members = $state<Member[]>([])
-  let hierarchy = $state<Member[]>([])
-  let choices = $state<string[]>([])
-  let unreadFrom = $state('')
+  const members = $derived(roomData.members)
+  const hierarchy = $derived(roomData.hierarchy)
+  const choices = $derived(roomData.choices)
+  const unreadFrom = $derived(roomData.unreadFrom)
+  const loadEarlier = roomData.loadEarlier // one bounded page per request
   let session = $state<SessionData | null>(null)
   let sessionReadingHistory = $state(false)
   let threadCount = $derived(dmView(session, room || { name: '' }).threads.length)
   let sessionVisit = 0
-  let roomRequest = 0 // room data can still load after a later view choice
+  const roomRequest = $derived(roomData.roomRequest) // room data can still load after a later view choice
   let queue = $state<QueueItem[]>([]) // steering that waits for the open session's turn
   let sessionError = $state('')
   const layout = loadLayout({ side: true, members: true, threads: true })
@@ -441,7 +427,7 @@
     closePanels: () => { threadsOpen = false; showMembers = false; showPins = false; navOpen = false },
     closeDrawer: () => (navOpen = false),
     resolveView: (v) => feedViews.resolveView(v),
-    trimFeedAtView: (next, previous) => { if (next !== previous || feedAtBottom) feed = trimFeed(feed) },
+    trimFeedAtView: (next, previous) => roomData.trimAtView(next, previous),
     leaveScreen: (v, previous) => { reveal = ''; revealFolder = null; if (previous !== v) reply = null; if (v !== 'goals') goalId = '' },
     clearRunDetail: () => (runDetail = null),
     loadChanges,
@@ -716,80 +702,34 @@
     read: () => { soonRooms(); soonRooms('feed') },
   })
 
-  // The unread refresh carries view counts into the open feed.
-  function applyUnread(value: { room: Room; viewUnread?: Record<string, number> | null }) {
-    if (feed?.room.id !== value.room.id) return
-    feed.viewUnread = value.viewUnread ?? {}
-  }
-  const roomData = createRoomData(api, {
-    current: () => ({ room: roomId, visit: roomRequest }),
+  // The page's side of the room data, which the loader asks for. The loader
+  // holds the feed and the member tree; the page owns the other lists.
+  bindRoomLoader({
     visible: visibleList,
-    choices: (value: string[]) => { choices = value },
-    rooms: (value: Room[]) => { rooms = value; loadError = '' },
-    unread: applyUnread,
-    members: applyMembers,
-    patchMembers: applyMemberItem,
-    opened: (value: Opened, initial: boolean) => {
-      if (initial) unreadFrom = value.feed.firstUnread ?? (value.feed.posts ?? []).find((p) => p.unread)?.id ?? ''
-      applyOpened(value)
-    },
-    error: (error: string) => (loadError = error),
+    resolveView: (v) => feedViews.resolveView(v),
+    closedShown: () => showClosed,
+    atBottom: () => feedAtBottom,
+    leaveBottom: () => (feedAtBottom = false),
+    error: (message) => (loadError = message),
+    rooms: (value) => { rooms = value; loadError = '' },
+    opened: applyRoomOpened,
+    picked: (rows) => setPicked(pruneSelection(pickedSessions, rows)),
+    loadComputers,
+    refreshCounts: () => soonRooms(),
   })
   function loadRooms() { return roomData.loadRooms() }
   function loadMembers() { return roomData.loadMembers() }
-  function memberRoster(list: Member[]) {
-    return JSON.stringify(list.filter((m) => !m.owner).map((m) => [m.id, m.name, !!m.closed]).sort())
+  // applyRoomOpened shows the opened room's other lists, which the page owns.
+  function applyRoomOpened(value: Opened) {
+    pins = value.pins ?? []
+    loadSync()
+    loadIssues()
+    loadIssues(true)
+    runs = value.runs ?? null
+    runsError = ''
+    workflowData.loadJobs()
+    loadQuestions()
   }
-  // Feed views come from the server with each post, so a parent change (a
-  // promote) rereads the routing of every loaded post. reconcileRows updates
-  // rows in place, so the last key is kept, not recomputed.
-  let routedParents = ''
-  function parentKey(list: Member[]) {
-    return JSON.stringify([roomId, list.filter((m) => !m.owner).map((m) => [m.id, m.parent || '']).sort()])
-  }
-  // noteParents records the member parent tree. When it changed in the same
-  // room, loaded posts reread their views. Live member updates and room
-  // opens, including a reconnect, both come through here.
-  function noteParents(rows: Member[]) {
-    const parents = parentKey(rows)
-    const moved = routedParents !== parents && JSON.parse(routedParents || '[null]')[0] === roomId
-    routedParents = parents
-    if (moved) rerouteLoaded()
-  }
-  async function rerouteLoaded() {
-    const id = roomId, request = roomRequest
-    if (!feed?.posts?.length) return
-    try {
-      const pages = await Promise.all(rerouteAnchors(feed.posts).map((post) => api.feedAround(id, post, 200)))
-      if (id === roomId && request === roomRequest && feed) feed.posts = withViews(feed.posts ?? [], pages)
-    } catch { /* The next room open or reconnect reroutes the posts. */ }
-  }
-  function roomCountKey(list: Member[]) {
-    return JSON.stringify(list.filter((m) => !m.owner && !m.closed).map((m) => [m.id, m.state === 'live']).sort())
-  }
-  function applyMembers(value: Member[]) {
-    const changed = memberRoster(hierarchy) !== memberRoster(value)
-    const counts = roomCountKey(hierarchy)
-    showMemberRows(reconcileRows(hierarchy, value), changed, counts)
-  }
-  function applyMemberItem(change: ListChange) {
-    const before = memberRoster(hierarchy)
-    const counts = roomCountKey(hierarchy)
-    const known = hierarchy.some((m) => (m.id || m.address) === change.id)
-    const rows = patchListRows(hierarchy, change as RowChange<Member>, (member) => member.id || member.address)
-    showMemberRows(rows, before !== memberRoster(rows), known ? counts : null)
-    return hierarchy
-  }
-  function showMemberRows(rows: Member[], rosterChanged: boolean, previousCounts: string | null) {
-    noteParents(rows)
-    hierarchy = rows
-    setPicked(pruneSelection(pickedSessions, hierarchy))
-    members = hierarchy.filter((m) => showClosed || !m.closed)
-    router.view = feedViews.resolveView(view)
-    if (rosterChanged) loadComputers()
-    if (previousCounts !== roomCountKey(rows)) soonRooms()
-  }
-
   function visitRoomControls(id: string) {
     roomSessionController?.destroy()
     roomSessionController = null
@@ -1154,7 +1094,7 @@
     card = null
     viewing = null
     // Leave the bottom first, so a live post does not trim what this loads.
-    feedAtBottom = false
+    roomData.leaveBottom()
     if (!(feed?.posts ?? []).some(post => post.id === id)) await loadEarlier('around', id)
     if (request !== detailRequest || rid !== roomId) return
     clearItemLink()
@@ -1367,69 +1307,12 @@
     loadChanges()
   }
 
-  // applyOpened shows what api.openRoom returned for the open room.
-  function applyOpened(o: Opened) {
-    const f = mergeFeedPage(feed && !feedAtBottom ? { ...feed, historyLoaded: true } : feed, o.feed)
-    f.posts = reconcileRows(feed && feed.room.id === f.room.id ? feed.posts ?? [] : [], f.posts ?? [])
-    feed = f
-    hierarchy = o.members ?? []
-    noteParents(hierarchy)
-    setPicked(pruneSelection(pickedSessions, hierarchy))
-    router.view = feedViews.resolveView(view)
-    members = hierarchy.filter((m) => showClosed || !m.closed)
-    choices = o.choices ?? []
-    pins = o.pins ?? []
-    loadSync()
-    loadIssues()
-    loadIssues(true)
-    runs = o.runs ?? null
-    runsError = ''
-    workflowData.loadJobs()
-    loadQuestions()
-  }
-
-  // Each request adds one bounded older page. Existing posts keep their
-  // objects and unread marks until the room is left.
-  let earlierLoad: EarlierLoad | null = null
-  const STEP = 50
-  async function loadEarlier(direction = 'older', target = '', near = () => true): Promise<boolean> {
-    const id = roomId
-    const roomLoad = roomRequest
-    if (earlierLoad?.id === id && earlierLoad.roomLoad === roomLoad) {
-      if (earlierLoad.direction === direction) return earlierLoad.promise ?? false
-      return earlierLoad.promise?.then(() => id === roomId && roomLoad === roomRequest && loadEarlier(direction, target, near)) ?? false
-    }
-    if (!feed || (direction === 'older' && !feed.earlier) || (direction === 'newer' && !feed.newer)) return false
-    feedAtBottom = false
-    const cursor = direction === 'older' ? feed.cursor ?? '' : direction === 'newer' ? feed.posts?.at(-1)?.id ?? '' : target ?? ''
-    const request: EarlierLoad = { id, roomLoad, direction, promise: null }
-    earlierLoad = request
-    request.promise = (async () => {
-      try {
-        const page = direction === 'newer' ? await api.feedAfter(id, cursor, STEP)
-          : direction === 'around' ? await api.feedAround(id, cursor, STEP)
-          : await api.feedTail(id, direction === 'present' ? '' : cursor, STEP)
-        if (id !== roomId || roomLoad !== roomRequest || !feed) return false
-        if (!near()) return true
-        if (direction === 'older' && feed.cursor !== cursor) return false
-        feed = direction === 'around' ? { ...page, historyLoaded: true } : Reflect.apply(mergeFeedPage, undefined, [feed, page, direction]) as FeedPage
-        return true
-      } catch (e) {
-        if (id === roomId && roomLoad === roomRequest) loadError = String(e)
-        return false
-      } finally {
-        if (earlierLoad === request) earlierLoad = null
-      }
-    })()
-    return request.promise
-  }
-
   // selectRoom loads a room and returns whether its navigation is still current.
   // One call brings the first screen; the room list refreshes beside it.
   async function selectRoom(id: string, startView = GENERAL) {
     clearItemLink(id, startView)
     const request = ++router.detailRequest
-    roomRequest++
+    roomData.newVisit()
     navOpen = false
     machineId = ''
     machineDetail = null
@@ -1459,8 +1342,7 @@
     router.reviewOpen = startView === 'files' || startView === 'github' || startView === 'issues'
     router.reviewTab = startView === 'github' ? 'prs' : startView === 'issues' ? 'issues' : 'files'
     router.view = ['all', 'owner', 'turns', 'files', 'github'].includes(startView) || (startView === 'terminal' && !hasTerminal) ? GENERAL : startView
-    members = []
-    hierarchy = []
+    roomData.clearMembers()
     runs = null
     listPages = {}
     jobs = null
@@ -1482,7 +1364,7 @@
     rules = null
     rulesPending = null
     if (!id) {
-      feed = null
+      roomData.clearFeed()
       return true
     }
     if (!await roomData.open(0, true)) return false
@@ -2110,19 +1992,7 @@
       if (changesVisuals(ev)) loadVisuals()
       if (roomSessionController && (roomControls?.loading || roomControls?.state?.paused !== false)) roomSessionController.load()
     }
-    if (ev.kind === 'posts' && feed && evRoom === feed.room.id) {
-      const seen = new Set((feed.posts ?? []).map((p) => p.id))
-      // A live post written in a DM belongs to that DM, so it never joins the
-      // room feed; the event still reloads the open DM.
-      const add = (ev.posts ?? []).filter((p) => !seen.has(p.id) && inRoomFeed(p))
-      if (add.length) {
-        if (feed.newer || !feedAtBottom) feed = { ...feed, newer: (feed.newer ?? 0) + add.length }
-        else {
-          feed.posts = [...(feed.posts ?? []), ...add]
-          if (feedAtBottom) feed = trimFeed(feed)
-        }
-      }
-    }
+    if (ev.kind === 'posts' && feed && evRoom === feed.room.id) roomData.applyPosts(ev)
     if (ev.kind === 'goals' && evRoom === roomId) { if (!item) loadGoals(); loadRules() }
     if (ev.kind === 'machines') { if (machinesVisible()) loadMachines(); if (machineId) loadMachine(machineId) }
     if (ev.kind === 'pins' && evRoom === roomId) loadPins()

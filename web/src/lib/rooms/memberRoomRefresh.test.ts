@@ -4,12 +4,12 @@ import vm from 'node:vm'
 import { readFileSync } from 'node:fs'
 import { parse } from 'svelte/compiler'
 import { setImmediate } from 'node:timers/promises'
-import { createRoomData } from './roomData.ts'
 import { patchListRows, hasItemChange } from '../ui/listChanges.ts'
 import { reconcileRows } from '../ui/reloadGate.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
+import { installRoomLoader } from '../../../test/appRoomLoader.ts'
 import type { Member } from '../api/room.ts'
 import type { ListChange } from '../api/event.ts'
 
@@ -61,7 +61,7 @@ interface MembersState {
   setTimeout: (fn: () => void, delay: number) => number
   clearTimeout: (id: number) => void
   routedParents?: string
-  roomData?: ReturnType<typeof createRoomData>
+  roomData?: { loadMembers(): Promise<unknown> }
 }
 
 interface MembersFns {
@@ -100,7 +100,10 @@ function app() {
       vm.runInContext(stripTypes(source.slice(start, end)), c)
     }
   }
-  for (const name of ['memberRoster', 'roomCountKey', 'applyMembers', 'applyMemberItem', 'showMemberRows', 'parentKey', 'noteParents', 'applyItemEvent', 'handle', 'soonRooms']) {
+  const api = { members: async () => [] as Member[], mentions: async () => [] as unknown[], feedTail: async () => { calls.push('feed'); return {} } }
+  // The member rows and the room data they feed live in the room loader.
+  installRoomLoader(c, api)
+  for (const name of ['applyItemEvent', 'handle', 'soonRooms']) {
     const n = nodes.find((n) => n.type === 'FunctionDeclaration' && n.id?.name === name)
     if (n) {
       const { start, end } = sourceRange(n)
@@ -108,14 +111,8 @@ function app() {
     }
   }
   const fns = vm.runInContext('({ handle, applyMembers, applyMemberItem })', c) as MembersFns
-  const api = { members: async () => [] as Member[], mentions: async () => [] as unknown[], feedTail: async () => { calls.push('feed'); return {} } }
   // The App functions read the room data, so the shared state is the app.
   const state: MembersApp = Object.assign(c, fns, { api })
-  c.roomData = createRoomData(api, {
-    current: () => ({ room: 'a', visit: 1 }),
-    members: (rows) => state.applyMembers(rows),
-    patchMembers: (change) => { state.applyMemberItem(change); return state.members }, choices() {}, unread() {}, error(error: unknown): never { throw error },
-  })
   return {
     c: state, calls, api,
     member(patch: Partial<Member> = {}, flags: { controls?: boolean } = {}) {

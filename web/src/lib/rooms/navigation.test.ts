@@ -21,7 +21,7 @@ import { mergeFeedPage, rerouteAnchors, withViews } from './feedPages.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 import { ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute } from '../ui/route.ts'
 import { sourceRange, stripTypes, moduleFunctions } from '../../../test/svelte-source.ts'
-import { installRouterShim } from '../../../test/appRouterShim.ts'
+import { installRoomLoader } from '../../../test/appRoomLoader.ts'
 
 // Run the actual App navigation functions with controlled API responses.
 // The Svelte parser selects complete declarations without copying their logic.
@@ -29,6 +29,9 @@ const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8'
 // The screen's own navigation moved to lib/app/router.svelte.ts; the room,
 // detail and selection functions still live in App.
 const routerSource = readFileSync(new URL('../app/router.svelte.ts', import.meta.url), 'utf8')
+// The open room's data moved to lib/app/roomLoader.svelte.ts.
+const loaderSource = readFileSync(new URL('../app/roomLoader.svelte.ts', import.meta.url), 'utf8')
+const loaderCode = moduleFunctions(loaderSource)
 const declarations = parse(source, { modern: true }).instance?.content.body ?? []
 const names = ['openReview', 'clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'hashChanged', 'setPicked', 'selectRoom', 'openTarget', 'hashTarget', 'openDetail', 'openView', 'jumpTo', 'showRun', 'openPR']
 const routerCode = moduleFunctions(routerSource, names)
@@ -43,7 +46,7 @@ assert.equal(picked.length + routerCode.size, names.length)
 const code = [...picked, ...routerCode.values()].join('\n')
 // The tests add the functions they call by slicing the same declarations.
 function runDeclaration(target: object, name: string): void {
-  const text = appCode(name) ?? routerCode.get(name)
+  const text = appCode(name) ?? routerCode.get(name) ?? loaderCode.get(name)
   assert.ok(text, name)
   vm.runInContext(stripTypes(text), target)
 }
@@ -120,7 +123,7 @@ interface NavApi {
 
 interface NavState {
   api: NavApi
-  roomData?: ReturnType<typeof createRoomData>
+  roomData?: { trimAtView(next: string, previous: string): void }
   roomRefreshes: Set<unknown>
   roomTimer: (() => void) | null
   roomId: string
@@ -196,6 +199,7 @@ interface NavState {
   markShown: (posts: NavPost[]) => void
   say: () => void
   openSession: (member: NavMember) => void
+  applyRoomOpened: (value: unknown) => void
   applyOpened: (value: unknown) => void
   reconcileRows: typeof reconcileRows
   mergeFeedPage: typeof mergeFeedPage
@@ -288,8 +292,8 @@ function navigation() {
     loadGoals() {}, loadRules() {}, loadVisuals() {}, loadQuestions() {}, loadMembers() {},
     feedView: { jump() { calls.push('post') } },
     openSession() { calls.push('session') },
-    applyOpened(o: unknown) { const value = o as { feed: NavFeed }; state.feed = value.feed; applied.push(value.feed.room.id) },
-    applyItemEvent: () => false, applyUnread: () => {}, afterRead: () => {}, handle: () => {},
+    applyRoomOpened(o: unknown) { applied.push((o as { feed: NavFeed }).feed.room.id) },
+    applyItemEvent: () => false, applyUnread: () => {}, applyOpened: () => {}, afterRead: () => {}, handle: () => {},
     reconcileRows, rerouteAnchors, withViews, reloadsUnread,
     api: {
       openRoom(id: string) { return id === A ? pending.promise : Promise.resolve(opened(id)) },
@@ -303,19 +307,8 @@ function navigation() {
       goal: async () => ({ id: '' }),
     },
   }
-  // The controller calls only the api and hook members this fixture provides.
-  const roomApi: object = state.api
-  const roomHooks: object = {
-    current: () => ({ room: state.roomId, visit: state.roomRequest }),
-    opened: (value: { feed: NavFeed }, initial: boolean) => {
-      if (initial) state.unreadFrom = (value.feed.posts ?? []).find((p) => p.unread)?.id ?? ''
-      state.applyOpened(value)
-    },
-    error: (error: string) => (state.loadError = error),
-  }
-  state.roomData = createRoomData(roomApi as Parameters<typeof createRoomData>[0], roomHooks as Parameters<typeof createRoomData>[1])
-  // The screen state the sliced functions write lives in the router now.
-  installRouterShim(state)
+  // The room data the sliced functions write lives in the loader now.
+  installRoomLoader(state, state.api)
   // The router asks the page for the side of a screen change it does not own.
   Reflect.set(state, 'host', {
     started: () => state.started,
@@ -326,8 +319,7 @@ function navigation() {
     closeDrawer: () => {},
     resolveView: (v: string) => (state.feedViews as { resolveView: (view: string) => string }).resolveView(v),
     trimFeedAtView: (next: string, previous: string) => {
-      if (next === previous && !state.feedAtBottom) return
-      state.feed = Reflect.apply(state.trimFeed, undefined, [state.feed]) as NavFeed | null
+      (state.roomData as { trimAtView(n: string, p: string): void }).trimAtView(next, previous)
     },
     leaveScreen: () => {},
     clearRunDetail: () => { Reflect.set(state, 'runDetail', null) },
@@ -667,8 +659,7 @@ test('an older page cannot merge after a same-room refresh changes its boundary'
     loadEarlier: (...args: unknown[]) => unknown
   }
   const state: EarlierState = { roomId: B, roomRequest: 1, earlierLoad: null, feed: before, feedAtBottom: true, STEP: 50, mergeFeedPage, api: { feedTail: (id, cursor) => { assert.equal(cursor, 'p151'); return pending.promise } }, loadEarlier() {} }
-  vm.createContext(state)
-  runDeclaration(state, 'loadEarlier')
+  installRoomLoader(state, state.api)
   const c = state as EarlierState
   const loading = c.loadEarlier()
   c.feed = refreshed
