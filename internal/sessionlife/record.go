@@ -41,6 +41,7 @@ const recordSchema = `CREATE TABLE IF NOT EXISTS session_records (
   parent TEXT NOT NULL,
   created_ns INTEGER NOT NULL,
   activity_ms INTEGER NOT NULL,
+  history_only INTEGER NOT NULL DEFAULT 0,
   meta TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS session_records_room ON session_records(room_id, closed);
@@ -72,6 +73,9 @@ func Migrate(dataDir string) error {
 	if err := migrateSessionImport(db, sessions); err != nil {
 		return err
 	}
+	if err := migrateHistory(db); err != nil {
+		return err
+	}
 	_, err = steeringDB(sessions)
 	return err
 }
@@ -90,6 +94,9 @@ func records(sessions string) (*sql.DB, error) {
 		return err
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := prepareHistory(db); err != nil {
 		return nil, err
 	}
 	tables.Store(db, true)
@@ -296,7 +303,7 @@ func SaveTx(conn *sql.Conn, id string, v any) error {
 	if !isObject(raw) || len(raw) > recordLimit {
 		return fmt.Errorf("%w: session %s record is not a JSON object under %d bytes", ErrRecord, id, recordLimit)
 	}
-	return writeRow(conn, id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, room_id=excluded.room_id, room=excluded.room, name=excluded.name, status=excluded.status, closed=excluded.closed, parent=excluded.parent, created_ns=excluded.created_ns, activity_ms=excluded.activity_ms, meta=excluded.meta")
+	return writeRow(conn, id, raw, "ON CONFLICT(id) DO UPDATE SET revision=excluded.revision, room_id=excluded.room_id, room=excluded.room, name=excluded.name, status=excluded.status, closed=excluded.closed, parent=excluded.parent, created_ns=excluded.created_ns, activity_ms=excluded.activity_ms, history_only=excluded.history_only, meta=excluded.meta")
 }
 
 // recordColumns are the record fields copied into columns.
@@ -324,9 +331,9 @@ func writeRow(conn *sql.Conn, id string, raw []byte, conflict string) error {
 	if !c.Created.IsZero() {
 		created = c.Created.UnixNano()
 	}
-	_, err := conn.ExecContext(context.Background(), `INSERT INTO session_records(id, revision, room_id, room, name, status, closed, parent, created_ns, activity_ms, meta)
-VALUES (?, (SELECT COALESCE(MAX(revision), 0) + 1 FROM session_records), ?, ?, ?, ?, ?, ?, ?, ?, ?) `+conflict,
-		id, c.RoomID, c.Room, c.Name, c.Status, closed, c.ParentSession, created, c.LastActivity.UnixMilli(), string(raw))
+	_, err := conn.ExecContext(context.Background(), `INSERT INTO session_records(id, revision, room_id, room, name, status, closed, parent, created_ns, activity_ms, history_only, meta)
+VALUES (?, (SELECT COALESCE(MAX(revision), 0) + 1 FROM session_records), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) `+conflict,
+		id, c.RoomID, c.Room, c.Name, c.Status, closed, c.ParentSession, created, c.LastActivity.UnixMilli(), c.HistoryOnly, string(raw))
 	return err
 }
 

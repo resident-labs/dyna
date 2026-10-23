@@ -31,7 +31,7 @@ func TestRoomControlsIgnoreLegacyUnassignedHistory(t *testing.T) {
 	}
 	writeRoomScanFixture(t, e, valid.ID, data)
 	legacy := NewID()
-	raw := []byte(`{"id":"` + legacy + `","profile":"old","harnessSession":"preserved-native","turns":3}`)
+	raw := []byte(`{"id":"` + legacy + `","historyOnly":true,"profile":"old","harnessSession":"preserved-native","turns":3}`)
 	path := writeRoomScanFixture(t, e, legacy, raw)
 	history := filepath.Join(filepath.Dir(path), "old-history.txt")
 	if err = os.WriteFile(history, []byte("preserved old transcript"), 0600); err != nil {
@@ -71,7 +71,7 @@ func TestRoomControlsIgnoreLegacyUnassignedHistory(t *testing.T) {
 	if current, err := os.ReadFile(history); err != nil || string(current) != "preserved old transcript" {
 		t.Fatal("legacy history was changed", err)
 	}
-	if _, err = e.m.Store.ReadMeta(legacy); !errors.Is(err, ErrNoRoom) {
+	if _, err = e.m.Store.ReadMeta(legacy); err != nil {
 		t.Fatalf("strict ReadMeta changed legacy semantics: %v", err)
 	}
 	foreignMeta, err := e.m.Store.ReadMeta(foreign)
