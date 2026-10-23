@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -106,6 +107,11 @@ type Message struct {
 	Payload EventPayload `json:"payload,omitzero"`
 	// Human marks an owner post a person typed in the desktop composer.
 	Human bool `json:"human,omitempty"`
+	// Conversation is where the post was written: the room feed, one
+	// session's DM or the owner's voice call. The store decides it once, when
+	// the post is appended (see HomeFor), and never changes it. The empty
+	// value reads as the room feed.
+	Conversation Conversation `json:"conversation,omitempty"`
 	// Source is SourceVoice on posts of the owner's voice call.
 	Source string `json:"source,omitempty"`
 	// Spoken marks a transcript line of the voice call.
@@ -235,6 +241,11 @@ func (m Message) SessionAddressed(id, addr string) bool {
 	}
 	return false
 }
+
+// AuthorSessionID is the sender's session ID when SessionIDs binds the
+// sender's address, and empty for an owner, engine or worker post. The
+// binding survives a rename, so the DM of a renamed session keeps its rows.
+func (m Message) AuthorSessionID() string { return m.SessionIDs[m.From] }
 
 // SentBySession reports whether post m was written by session id, currently
 // named addr. It follows the same binding rule as SessionAddressed.
@@ -808,19 +819,22 @@ type PostInput struct {
 	// Notice names the registered type of a system event post.
 	Notice EventNotice
 	// payload is the typed JSON of a sealed event. Only PostEvent sets it.
-	payload     EventPayload
-	Human       bool
-	To          []string
-	Via         []string
-	ReplyTo     string
-	Forward     *Forward
-	Turn        int
-	OwnerReport bool
-	NeedsRoot   bool
-	Text        string
-	Source      string
-	Spoken      bool
-	RelayOf     string
+	payload EventPayload
+	Human   bool
+	To      []string
+	Via     []string
+	ReplyTo string
+	// Conversation is the conversation the writer says it wrote in. Empty
+	// lets the store decide where the post belongs (see HomeFor).
+	Conversation Conversation
+	Forward      *Forward
+	Turn         int
+	OwnerReport  bool
+	NeedsRoot    bool
+	Text         string
+	Source       string
+	Spoken       bool
+	RelayOf      string
 	// Attachments must already be saved in this room (PutAttachment).
 	Attachments []Attachment
 	References  []Reference
@@ -906,6 +920,9 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 	if in.Kind == "message" {
 		in.Text = stripSelfLabel(in.From, in.Text)
 	}
+	if err := in.Conversation.Validate(); err != nil {
+		return Message{}, err
+	}
 
 	if err := ValidateReferences(in.References); err != nil {
 		return Message{}, err
@@ -954,10 +971,21 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 		if err := stampVersions(msgs, in.Attachments); err != nil {
 			return err
 		}
+		// Resolve the home before the retry check, so a retry compares the
+		// conversation the post is stored in, not the one the caller named. A
+		// process that may not migrate dyna.db (such as dyna doctor) stores the
+		// post without rows, and the next engine start fills them.
+		indexDB, indexErr := s.postIndexDB()
+		if indexErr != nil {
+			log.Printf("room %s: post index is not ready, the next engine start fills this post's rows: %v", roomID, indexErr)
+			indexDB = nil
+		}
+		parent := s.ReplyHome(indexDB, roomID, in.ReplyTo)
+		in.Conversation = HomeFor(Message{From: in.From, Kind: in.Kind, Human: in.Human, Source: in.Source, To: in.To, SessionIDs: in.SessionIDs, Conversation: in.Conversation}, rec.Name, parent)
 		if in.ID != "" {
 			for _, m := range msgs {
 				if m.ID == in.ID {
-					if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.Kind != in.Kind || m.Notice != in.Notice || !bytes.Equal(m.Payload.raw, in.payload.raw) || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.References, in.References) || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
+					if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.Kind != in.Kind || m.Notice != in.Notice || !bytes.Equal(m.Payload.raw, in.payload.raw) || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Conversation.Home() != in.Conversation.Home() || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.References, in.References) || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
 						return ErrPostIDConflict
 					}
 					out = m
@@ -968,7 +996,7 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 		now := s.now()
 		out = Message{
 			Wake: in.Wake, ID: newMessageID(), TS: now.UnixMilli(), RoomID: roomID, SessionIDs: in.SessionIDs,
-			From: in.From, Kind: in.Kind, Notice: in.Notice, Payload: in.payload, Human: in.Human, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text,
+			From: in.From, Kind: in.Kind, Notice: in.Notice, Payload: in.payload, Human: in.Human, Conversation: in.Conversation, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text,
 			Attachments: in.Attachments, References: append([]Reference(nil), in.References...),
 		}
 		if in.ID != "" {
@@ -987,8 +1015,18 @@ func (s *Store) post(roomID string, in PostInput, event bool) (Message, error) {
 			return err
 		}
 		// The append has no deadline today; the room lock above orders posts.
+		logStart, err := s.FileSize(roomID)
+		if err != nil {
+			return err
+		}
 		if err := state.For(db).Append(context.Background(), hub.Event{Topic: "room-post", Room: roomID}, path, b); err != nil {
 			return err
+		}
+		// Every post gets its index rows here, whoever posted it, so no caller
+		// has to remember them. A failed row write does not fail the stored
+		// post: the log holds it, and the cursor catch-up fills the rows.
+		if err := s.indexPost(roomID, rec.Name, out, logStart); err != nil {
+			log.Printf("room %s: post %s: post index rows not written, the cursor catch-up will fill them: %v", roomID, out.ID, err)
 		}
 		return s.touchRecord(rec)
 	})
