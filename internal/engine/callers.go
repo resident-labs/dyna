@@ -5,19 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
-	"slices"
-	"strconv"
-	"strings"
 	"sync/atomic"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/runstore"
-	"dyna-agent/internal/sessionlife"
-	"dyna-agent/internal/shells"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/websvc"
 )
@@ -120,75 +114,19 @@ func (s *socketCallers) Refused() int64 {
 	return s.refused.Load()
 }
 
-// identifyCallers builds the one Resolver for the private socket
-// (requirements item 3). It first records the live work that started before
-// launches were recorded: a writable engine in its store, a read-only one in
-// memory for this start. A read-only engine may have no records table; it
-// then knows only the work it found.
+// identifyCallers builds the socket resolver from committed launch records.
+// A read-only engine without the launch store has no recorded callers.
 func identifyCallers(ctx context.Context, dataDir string, readOnly bool, sessions *subagent.Store) (*socketCallers, error) {
-	memory := &callerid.Memory{}
-	records := callerid.Layered{memory}
-	store, openErr := callerid.OpenStore(dataDir)
-	switch {
-	case openErr == nil:
-		records = callerid.Layered{store, memory}
-	case !readOnly:
-		return nil, openErr
+	var records callerid.Records = callerid.Empty{}
+	store, err := callerid.OpenStore(dataDir)
+	if err == nil {
+		records = store
+	} else if !readOnly {
+		return nil, err
 	}
-	backfillCallers(sessions, func(pid int, actor callerid.Identity, launcher string) error {
-		if openErr == nil && !readOnly {
-			return store.Backfill(ctx, pid, actor, launcher)
-		}
-		return memory.Backfill(pid, actor, launcher)
-	})
 	r, err := callerid.New("/proc", os.Getpid(), records)
 	if err != nil {
 		return nil, err
 	}
 	return &socketCallers{resolver: r, resolve: r.ResolveConn, sessions: sessions}, nil
-}
-
-// TODO: legacy/shim remove later — records the runners, shell supervisors and workflow workers that were already running when launch records began (#1418), so their agents are not refused after the install; remove with item 31's legacy scan, when no such process is alive.
-// backfillCallers records live work from the engine's own rows only: a
-// session's runner PID, a shell job's supervisor and a run's worker, each
-// checked against its command line. It never records the owner.
-func backfillCallers(sessions *subagent.Store, backfill func(pid int, actor callerid.Identity, launcher string) error) {
-	record := func(pid int, actor callerid.Identity, launcher string, args ...string) {
-		if pid <= 0 || !runs(pid, args...) {
-			return
-		}
-		if err := backfill(pid, actor, launcher); err != nil {
-			log.Printf("callers: backfill %s %d: %v", launcher, pid, err)
-		}
-	}
-	if infos, err := sessions.List(false); err == nil {
-		for _, info := range infos {
-			record(info.Pid, callerid.Identity{Kind: callerid.Session, Session: info.ID}, "turn", "subagent", "_turn", info.ID)
-		}
-	}
-	if jobs, err := shells.DefaultStore().List(false); err == nil {
-		for _, job := range jobs {
-			if sessionlife.IsSessionID(job.Owner) {
-				record(job.Supervisor, callerid.Identity{Kind: callerid.Session, Session: job.Owner}, "shell", "shell", "_run", job.ID)
-			}
-		}
-	}
-	if metas, err := runstore.List(); err == nil {
-		for _, meta := range metas {
-			if meta.Status == "running" {
-				record(meta.Pid, callerid.Identity{Kind: callerid.Worker, Run: meta.ID}, "workflow", "run-worker")
-			}
-		}
-	}
-}
-
-// runs reports whether pid's command line holds args in order, right after
-// the program name, so a reused PID of another program never matches.
-func runs(pid int, args ...string) bool {
-	data, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/cmdline")
-	if err != nil {
-		return false
-	}
-	argv := strings.Split(strings.TrimRight(string(data), "\x00"), "\x00")
-	return len(argv) > len(args) && slices.Equal(argv[1:1+len(args)], args)
 }

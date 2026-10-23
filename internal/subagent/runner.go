@@ -141,7 +141,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		if cutoffErr != nil {
 			log.Printf("session %s turn %d: %v; the terminal write uses the read position", id, n, cutoffErr)
 		}
-		end := TurnEnd{Turn: n, CompletionPending: true, Status: status, Error: msg, Ended: ended, Model: model, Usage: turnUsage,
+		end := TurnEnd{Turn: n, Status: status, Error: msg, Ended: ended, Model: model, Usage: turnUsage,
 			UsageNormalization: turnNormalization, HarnessSession: sid, RawEnd: fileSize(rawPath), NormEnd: fileSize(normPath),
 			InputCutoff: cutoff, CutoffPending: cutoff == nil, FallbackCutoff: &fallback}
 		if result != nil {

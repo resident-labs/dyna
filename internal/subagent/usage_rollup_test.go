@@ -192,13 +192,13 @@ func claudeTurn(basis string, cost float64) Turn {
 	return t
 }
 
-// Claude turns saved before the per-turn cost step hold the session's whole
-// cumulative total, so their cost must read unknown.
-func TestLegacyClaudeCostIsUnknownAndStepCostIsKept(t *testing.T) {
+// Unknown cost coverage persisted by migration stays unknown during accounting.
+func TestUnknownClaudeCostIsUnknownAndStepCostIsKept(t *testing.T) {
 	s := rollupStore(t)
 	meta := Meta{ID: "ses_20261019-120000-aaaaaaaa", RoomID: "r1"}
 	old, step := claudeTurn("", 159.85), claudeTurn(workeroutput.CostBasisTurn, 0.25)
 	old.N, step.N = 1, 2
+	old.UsageNormalization.Cost = "unknown"
 	for _, turn := range []Turn{old, step} {
 		if err := s.RecordTurnUsage(meta, turn); err != nil {
 			t.Fatal(err)
@@ -290,6 +290,9 @@ func TestRefoldTurnsOldClaudeCumulativeCostIntoSteps(t *testing.T) {
 	}
 	turns[2].UsageNormalization.Cost = "unknown" // a turn with no cost report breaks the chain
 	seedRollupSession(t, s, "ses_20261019-120000-aaaaaaaa", "r1", "", turns...)
+	if err := Migrate(filepath.Dir(s.root())); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.ReconcileUsage(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -314,6 +317,9 @@ func TestRefoldNeverSubtractsAcrossNativeSessions(t *testing.T) {
 			a, b := claudeTurn("", 3.0), claudeTurn("", tc.second)
 			a.HarnessSession, b.HarnessSession = "native-old", "native-new"
 			seedRollupSession(t, s, "ses_20261019-120000-aaaaaaaa", "r1", "", a, b)
+			if err := Migrate(filepath.Dir(s.root())); err != nil {
+				t.Fatal(err)
+			}
 			if err := s.ReconcileUsage(context.Background()); err != nil {
 				t.Fatal(err)
 			}
@@ -328,6 +334,9 @@ func TestRefoldNeverSubtractsAcrossNativeSessions(t *testing.T) {
 	a, b := claudeTurn("", 3.0), claudeTurn("", 5.0)
 	a.HarnessSession = "native-old"
 	seedRollupSession(t, s, "ses_20261019-120000-bbbbbbbb", "r1", "", a, b)
+	if err := Migrate(filepath.Dir(s.root())); err != nil {
+		t.Fatal(err)
+	}
 	if err := s.ReconcileUsage(context.Background()); err != nil {
 		t.Fatal(err)
 	}
