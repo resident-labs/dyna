@@ -507,10 +507,10 @@
 <style>
   .filter { display: flex; align-items: center; gap: 8px; margin: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); }
   .filter:focus-within { border-color: var(--iris-edge); }
-  .filter input { flex: 1; min-width: 0; width: 100%; padding: 10px; color: var(--ink); font: inherit; font-size: 14px; border: 0; outline: 0; background: transparent; }
+  .filter input { flex: 1; min-width: 0; width: 100%; padding: 10px; color: var(--ink); font: inherit; font-size: var(--t-body); border: 0; outline: 0; background: transparent; }
   .filter button { min-height: 44px; padding: 0 10px; color: var(--muted); font-size: var(--t-sm); }
   .filter-help { margin: 0 14px 8px; color: var(--muted); font-size: var(--t-sm); }
-  .phone .filter input { font-size: 16px; }
+  .phone .filter input { font-size: var(--t-title); }
 
   .home .treepane { flex: 1; width: auto; min-width: 0; border-right: 0; background: transparent; }
   .repository { padding: 14px 20px; border-bottom: 1px solid var(--line-soft); }
