@@ -316,7 +316,7 @@ func Command(o Options) *cobra.Command {
 		if asJSON {
 			return json.NewEncoder(c.OutOrStdout()).Encode(i)
 		}
-		fmt.Fprintf(c.OutOrStdout(), "filed %s : %s\n", i.ID, i.Title)
+		fmt.Fprintf(c.OutOrStdout(), "filed %s : %s\n", i.Label(), i.Title)
 		return nil
 	}}
 	smell.Flags().StringSliceVar(&sm.At, "at", nil, "file or file:line; repeat for each file")
