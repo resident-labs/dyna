@@ -239,11 +239,10 @@ test('every peer message folds into that agent\'s thread; the newest gets a chip
   assert.deepEqual(peer.posts.map((p) => p.text), ['older steer', 'newest steer'])
   assert.equal(peer.posts.at(-1)?.text, 'newest steer')
 })
-test('the thread list puts agents newest first and folds shell jobs into a group', () => {
+test('the thread list puts agents newest first', () => {
   const thread = (key: string, s: number): Thread => ({ key, posts: [post(key, key, [address], s)] })
-  const { recent, shells } = threadList([thread('room:old', 1), thread('shell:sh_a', 2), thread('room:new', 5), thread('shell:sh_b', 4)])
+  const { recent } = threadList([thread('room:old', 1), thread('room:new', 5)])
   assert.deepEqual(recent.map((t) => t.key), ['room:new', 'room:old'])
-  assert.deepEqual(shells.map((t) => t.key), ['shell:sh_b', 'shell:sh_a'])
 })
 test('the thread list gives every child a row and keeps child threads out of recent', () => {
   const thread = (key: string, s: number): Thread => ({ key, posts: [post(key, key, [address], s)] })
@@ -435,5 +434,6 @@ test('each turn has one timeline with tools, shell output and child sessions', (
   assert.equal(shell.waits, 1)
   assert.deepEqual(shell.posts.map((p) => p.id), ['finished'])
   assert.equal(dm.rows.some((r) => ['activity', 'shell', 'shellGroup', 'shellNote'].includes(r.kind)), false)
+  assert.equal(dm.threads.some((t) => t.key.startsWith('shell:')), false)
   assert.equal(dm.rows.filter(isKind('message')).length, 2, 'messages remain outside the steps')
 })

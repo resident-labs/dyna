@@ -461,20 +461,18 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   // show. The delivery itself stays on every row.
   const reads = rows.filter((r) => r.delivery === 'read')
   for (const r of reads.slice(0, -1)) if (r.kind === 'message') r.quietReceipt = true
-  return { address, threads: [...threads.values()], rows: groupMessages(rows) }
+  // Shell job completions are timeline steps, not threads.
+  return { address, threads: [...threads.values()].filter((t) => !t.key.startsWith('shell:')), rows: groupMessages(rows) }
 }
 
-// threadList orders the thread panel list newest first. Shell job
-// completions fold into their own group. Every child gets a row, with its
-// thread when one exists; children with recent posts come first.
-export function threadList<M extends Pick<Member, 'name' | 'address'>>(threads: Thread[], children: M[] = []): { recent: Thread[]; shells: Thread[]; children: { member: M; thread: Thread | undefined }[] } {
+// threadList orders the thread panel list newest first. Every child gets a
+// row, with its thread when one exists; children with recent posts come first.
+export function threadList<M extends Pick<Member, 'name' | 'address'>>(threads: Thread[], children: M[] = []): { recent: Thread[]; children: { member: M; thread: Thread | undefined }[] } {
   const last = (t?: Thread) => time(t?.posts.at(-1)?.ts)
   const sorted = [...threads].sort((a, b) => last(b) - last(a))
-  const shell = (t: Thread) => t.key.startsWith('shell:')
   const childKeys = new Set(children.map((c) => c.address))
   return {
-    recent: sorted.filter((t) => !shell(t) && !childKeys.has(t.key)),
-    shells: sorted.filter(shell),
+    recent: sorted.filter((t) => !childKeys.has(t.key)),
     children: children.map((member) => ({ member, thread: threads.find((t) => t.key === member.address) }))
       .sort((a, b) => last(b.thread) - last(a.thread) || a.member.name.localeCompare(b.member.name)),
   }
