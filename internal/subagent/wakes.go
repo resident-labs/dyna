@@ -110,10 +110,9 @@ func (m *Manager) deliverSessionPosts(ctx context.Context, meta Meta) (bool, err
 // pendingWakePosts is shared by engine delivery and room-resume recovery.
 // A resume stays pending only for input the engine can still admit.
 func (m *Manager) pendingWakePosts(meta Meta, previous ...Turn) ([]room.Message, error) {
-	// The keeper reads replies with its next assignment; a reply never wakes it.
 	// A session with no harness session still takes input: its next turn opens
 	// a fresh conversation.
-	if !meta.Resumable || meta.Role == RoleKeeper {
+	if !meta.Resumable {
 		return nil, nil
 	}
 	posts, _, err := m.drainRoomMessages(meta, Turn{N: meta.Turns + 1})

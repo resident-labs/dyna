@@ -73,12 +73,6 @@ func TestOwnerDMDuringActiveRootTurnReachesNextTurnOnce(t *testing.T) {
 	}
 }
 
-// A quiet goals journal post to the owner never wakes root. Root reads it in
-// a [GOALS JOURNAL] block with its next turn that has posts, once.
-func TestQuietGoalsJournalReachesRootNextTurnOnce(t *testing.T) {
-	testQuietServiceNextTurn(t, room.GoalKeeperSender, "goal", "[GOALS JOURNAL]")
-}
-
 func TestQuietMergeStewardReachesRootNextTurnOnce(t *testing.T) {
 	testQuietServiceNextTurn(t, "", "merge-decision", "[MERGE STEWARD]")
 }
@@ -164,13 +158,9 @@ func TestQuietRootDigestIsBoundedAndExcludesActionablePosts(t *testing.T) {
 }
 
 // Every quiet kind addressed to root reaches the internal root: issues and
-// completions land in the quiet digest, while keeper goal posts and merge
-// decisions keep their own sections, including a keeper post that asks root
-// to act. A marked action request stays turn input, not context.
+// completions land in the quiet digest, while merge decisions keep their own section. A marked action request stays turn input, not context.
 func TestQuietSectionsCoverEveryRootAddressedKind(t *testing.T) {
 	posts := []room.Message{
-		{ID: "journal", From: room.GoalKeeperSender, Kind: "goal", To: []string{"work"}, Text: "Journal j0"},
-		{ID: "act", From: room.GoalKeeperSender, Kind: "goal", Wake: true, To: []string{"work:root"}, Text: "Needs action"},
 		{ID: "merge", From: "work:merge-steward", Kind: "merge-decision", To: []string{"work"}, Text: "Return #17"},
 		{ID: "issue", From: "work:author", Kind: "issue", To: []string{"work"}, Text: "Repair the test"},
 		{ID: "done", From: "work:author", Kind: "completed", OwnerReport: true, To: []string{"work"}, Text: "Report shipped"},
@@ -182,13 +172,13 @@ func TestQuietSectionsCoverEveryRootAddressedKind(t *testing.T) {
 			t.Errorf("quiet digest misses %s:\n%s", id, digest)
 		}
 	}
-	for _, id := range []string{"journal", "act", "merge", "action"} {
+	for _, id := range []string{"merge", "action"} {
 		if strings.Contains(digest, id) {
 			t.Errorf("quiet digest lists %s, which has another home:\n%s", id, digest)
 		}
 	}
 	notes := strings.Join(quietServiceNotes("work", posts), "\n")
-	for _, id := range []string{"journal", "act", "merge"} {
+	for _, id := range []string{"merge"} {
 		if !strings.Contains(notes, id) {
 			t.Errorf("service notes miss %s:\n%s", id, notes)
 		}

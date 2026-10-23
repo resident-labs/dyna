@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
@@ -381,7 +380,7 @@ func saveState(conn *sql.Conn, stored rows, st State) (bool, error) {
 	}
 	roomBodies := map[string]any{}
 	for id, r := range st.Rooms {
-		roomBodies[id] = roomRow{RuleSet: r.RuleSet, Keeper: r.Keeper, NextID: r.NextID, Notices: r.Notices, ReleasedAt: r.ReleasedAt}
+		roomBodies[id] = roomRow{RuleSet: r.RuleSet, NextID: r.NextID}
 	}
 	if st.Global != nil {
 		roomBodies[Global] = st.Global
@@ -444,10 +443,7 @@ func saveState(conn *sql.Conn, stored rows, st State) (bool, error) {
 // roomRow is a room's stored state without its goals.
 type roomRow struct {
 	RuleSet
-	ReleasedAt map[string]time.Time `json:"releasedAt,omitempty"`
-	Keeper     KeeperRoomState      `json:"keeper,omitempty"`
-	NextID     int                  `json:"nextId"`
-	Notices    []Notice             `json:"notices"`
+	NextID int `json:"nextId"`
 }
 
 // Read returns a WAL snapshot of the whole store without waiting for writers.
@@ -559,9 +555,6 @@ func (s *Store) updateTx(fn func(*wake, *State) error, where string, args ...any
 				if err != nil {
 					return err
 				}
-				if err := recordReleases(&st, stored, s.now()); err != nil {
-					return err
-				}
 				_, err = saveState(conn, stored, st)
 				return err
 			})
@@ -662,35 +655,6 @@ func (s *Store) ReadRooms(rooms []string) (State, error) {
 	})
 	s.dropExpired(&st)
 	return st, err
-}
-
-// recordReleases runs in the shared writer so closing, reassigning and removing
-// holders record the same boundary, including scoped writes and handovers.
-func recordReleases(st *State, stored rows, now time.Time) error {
-	for key, body := range stored.goals {
-		r := st.Rooms[key[0]]
-		if r == nil {
-			continue
-		}
-		var old Goal
-		if err := json.Unmarshal(body, &old); err != nil {
-			return err
-		}
-		if !old.Open() {
-			continue
-		}
-		fresh := r.Goals[key[1]]
-		for _, holder := range old.Holders {
-			if fresh != nil && fresh.Open() && fresh.HeldBy(holder) {
-				continue
-			}
-			if r.ReleasedAt == nil {
-				r.ReleasedAt = map[string]time.Time{}
-			}
-			r.ReleasedAt[holder] = now
-		}
-	}
-	return nil
 }
 
 // legacyBody reads a stored goal body, including the parent field version 2

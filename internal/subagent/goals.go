@@ -1,9 +1,6 @@
 package subagent
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -165,59 +162,5 @@ func (m *Manager) closeGoals(info Info, heir string) {
 			}
 		}
 	}
-	completedResult := m.completedResult(info)
-	_ = m.goalStore().CloseSession(info.RoomID, info.ID, heir, open, completedResult)
-}
-
-// completedResult is the finished turn's result as a holder-closed notice
-// offers it: a bounded preview and the command that prints the full result.
-func (m *Manager) completedResult(info Info) string {
-	turn, err := m.store().ReadTurn(info.ID, info.Turns)
-	if err != nil || turn.Status != TurnOK || turn.Result == nil {
-		return ""
-	}
-	text, ok := turn.Result.(string)
-	if !ok {
-		encoded, err := json.Marshal(turn.Result)
-		if err != nil {
-			return ""
-		}
-		text = string(encoded)
-	}
-	preview := goals.Clip(text, 600)
-	if preview == "" {
-		return ""
-	}
-	return fmt.Sprintf("Last completed result: %s\nFull result: dyna subagent output %s --turn %d", preview, info.ID, turn.N)
-}
-
-// DeliverGoal stores a keeper post only between turns. The turn lock makes
-// this atomic with a new turn, so a keeper nudge never becomes live steering.
-func (m *Manager) DeliverGoal(ctx context.Context, id string, write func() (string, error)) (bool, error) {
-	busy := false
-	err := m.store().withLock(id, func() error {
-		meta, err := m.store().ReadMeta(id)
-		if err != nil {
-			return err
-		}
-		if m.RoomPaused(meta.RoomID) {
-			busy = true
-			return nil
-		}
-		lock, err := m.store().tryTurnLock(id)
-		if errors.Is(err, ErrBusy) {
-			busy = true
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		defer lock.Close()
-		_, err = write()
-		return err
-	})
-	if err != nil || busy {
-		return false, err
-	}
-	return true, nil
+	_ = m.goalStore().CloseSession(info.RoomID, info.ID, heir, open)
 }

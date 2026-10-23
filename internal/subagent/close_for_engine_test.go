@@ -59,7 +59,7 @@ func TestStartRefusesAServiceRoleFromASession(t *testing.T) {
 	lead, _ := e.start("RESPOND: ready")
 	t.Cleanup(authority.InEngine())
 	ctx := authority.WithActor(context.Background(), authority.Actor{Role: authority.Session, Session: lead.ID, Room: lead.RoomID})
-	for _, role := range []string{RoleKeeper, RoleLibrarian, RoleSteward, RoleRoot, "reviewer"} {
+	for _, role := range []string{RoleLibrarian, RoleSteward, RoleRoot, "reviewer"} {
 		opts := StartOptions{Role: role, Goal: "Finish the test task", Task: "RESPOND: ok", Profile: "mock", Dir: t.TempDir()}
 		if _, _, err := e.m.Start(ctx, opts); err == nil || !strings.Contains(err.Error(), "only the owner or root may start a service role") {
 			t.Errorf("a session started role %q: %v", role, err)

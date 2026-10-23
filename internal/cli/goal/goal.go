@@ -7,22 +7,22 @@ import (
 	"strings"
 
 	"dyna-agent/internal/engineclient"
-	"dyna-agent/internal/goalkeeper"
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/goalservice"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/room"
 	"github.com/spf13/cobra"
 )
 
 type Options struct {
-	Service func() *goalkeeper.Service
+	Service func() *goalservice.Service
 	Client  *engineclient.Client
 }
 
 func NewCommand() *cobra.Command { return Command(Options{}) }
 func Command(o Options) *cobra.Command {
 	if o.Service == nil {
-		o.Service = goalkeeper.New
+		o.Service = goalservice.New
 	}
 
 	if o.Client == nil {
@@ -125,7 +125,7 @@ func Command(o Options) *cobra.Command {
 	list := &cobra.Command{Use: "list", Short: "List room goals", Args: cobra.NoArgs, RunE: listGoals}
 	list.Flags().BoolVar(&all, "all", false, "include every goal in the room, including done goals")
 
-	show := &cobra.Command{Use: "show <id>", Short: "Show goal status; use --json for full keeper history", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
+	show := &cobra.Command{Use: "show <id>", Short: "Show goal status; use --json for full goal history", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
 		s, r, _, err := Caller(o.Service(), roomRef)
 		if err != nil {
 			return err
@@ -306,7 +306,7 @@ func Command(o Options) *cobra.Command {
 	itemMove.Flags().StringVar(&itemMoveTo, "to", "", "destination goal ID, or new to promote the item (required)")
 	_ = itemMove.MarkFlagRequired("to")
 	item.AddCommand(itemAdd, itemState("done <goal> <item>", "Mark an item done", goals.ItemDone), itemState("drop <goal> <item>", "Drop an item", goals.ItemDropped), itemState("reopen <goal> <item>", "Reopen an item", goals.ItemOpen), itemEdit, itemMove)
-	root.AddCommand(list, show, edit, waitCommand(o, &roomRef), journalCommand(o, &roomRef), finish(false), finish(true), expedite, note, item)
+	root.AddCommand(list, show, edit, journalCommand(o, &roomRef), finish(false), finish(true), expedite, note, item)
 	return root
 }
 
@@ -362,7 +362,7 @@ func isGoalCommandWord(root *cobra.Command, text string) bool {
 }
 
 // Caller resolves the room and caller shared by goal and rules commands.
-func Caller(s *goalkeeper.Service, roomRef string) (*goalkeeper.Service, room.Record, string, error) {
+func Caller(s *goalservice.Service, roomRef string) (*goalservice.Service, room.Record, string, error) {
 	ref := roomRef
 	by := "owner"
 	if cur, ok := mode.CurrentSession(); ok {

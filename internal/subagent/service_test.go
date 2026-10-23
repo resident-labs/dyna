@@ -7,7 +7,7 @@ import (
 
 func TestStoredServiceSessionAndHelperFlags(t *testing.T) {
 	store := &Store{Root: t.TempDir()}
-	for _, role := range []string{"reviewer", "keeper"} {
+	for _, role := range []string{"reviewer", RoleLibrarian} {
 		parent := Meta{ID: NewID(), RoomID: "room", Room: "room", Role: role, Service: true}
 		child := Meta{ID: NewID(), RoomID: "room", Room: "room", ParentSession: parent.ID, Service: true}
 		for _, meta := range []Meta{parent, child} {

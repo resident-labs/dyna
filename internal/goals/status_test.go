@@ -32,13 +32,7 @@ func TestComputeStatusPrecedence(t *testing.T) {
 		{"unheld goal", Goal{ID: "g2", State: "active"}, nil, Facts{}, StatusUnowned, "no holder"},
 		{"held goal with unassigned item is not unowned", open, []Item{item(ItemOpen, "")}, Facts{Busy: true}, StatusOnTrack, "1 unassigned"},
 		{"pending pr", open, []Item{item(ItemOpen, "a")}, Facts{OpenPR: true}, StatusWaiting, "PR pending"},
-		{"stale idle holder", Goal{ID: "g3", State: "active", Holders: []string{"a"}, CreatedAt: statusNow.Add(-8 * time.Hour)}, []Item{item(ItemOpen, "a")}, Facts{LastEventAt: statusNow.Add(-7 * time.Hour)}, StatusStuck, "stale"},
-		{"fresh idle holder", open, []Item{item(ItemOpen, "a")}, Facts{LastEventAt: statusNow.Add(-time.Hour)}, StatusOnTrack, ""},
 		{"fresh creation", open, []Item{item(ItemOpen, "a")}, Facts{}, StatusOnTrack, ""},
-		{"wait deadline keeps it fresh", Goal{ID: "g4", State: "active", Holders: []string{"a"}, CreatedAt: statusNow.Add(-8 * time.Hour), WaitUntil: statusNow.Add(time.Hour)}, []Item{item(ItemOpen, "a")}, Facts{}, StatusOnTrack, ""},
-		{"past wait deadline can go stale", Goal{ID: "g5", State: "active", Holders: []string{"a"}, CreatedAt: statusNow.Add(-8 * time.Hour), WaitUntil: statusNow.Add(-7 * time.Hour)}, []Item{item(ItemOpen, "a")}, Facts{}, StatusStuck, "stale"},
-		{"shortly after a wait ends stays fresh", Goal{ID: "g10", State: "active", Holders: []string{"a"}, CreatedAt: statusNow.Add(-8 * time.Hour), WaitUntil: statusNow.Add(-time.Hour)}, []Item{item(ItemOpen, "a")}, Facts{}, StatusOnTrack, ""},
-		{"stale itemless goal", Goal{ID: "g6", State: "active", Holders: []string{"a"}, CreatedAt: statusNow.Add(-8 * time.Hour)}, nil, Facts{}, StatusStuck, "stale"},
 		{"done goal", Goal{ID: "g7", State: "done"}, nil, Facts{LastFailed: true}, "done", "goal done"},
 		{"done goal keeps counts", Goal{ID: "g9", State: "done"}, []Item{item(ItemDone, "a"), item(ItemOpen, "")}, Facts{}, "done", "goal done"},
 		{"dropped goal", Goal{ID: "g8", State: "dropped"}, nil, Facts{}, "dropped", "goal dropped"},
@@ -82,7 +76,6 @@ func TestComputeItemStatus(t *testing.T) {
 		{"busy assignee", item(ItemOpen, "a"), Facts{Busy: true}, StatusOnTrack, "may be another item"},
 		{"failed assignee", item(ItemOpen, "a"), Facts{LastFailed: true}, StatusErrored, "last turn failed"},
 		{"waiting assignee", item(ItemOpen, "a"), Facts{OpenPR: true}, StatusWaiting, "PR pending"},
-		{"stale assignee", item(ItemOpen, "a"), Facts{LastEventAt: statusNow.Add(-7 * time.Hour)}, StatusStuck, "stale"},
 		{"done item", item(ItemDone, "a"), Facts{}, ItemDone, "done"},
 		{"dropped item", item(ItemDropped, "a"), Facts{}, ItemDropped, "dropped"},
 	} {
@@ -95,22 +88,5 @@ func TestComputeItemStatus(t *testing.T) {
 				t.Fatalf("reason = %q, want it to mention %q", got.Reason, tc.reason)
 			}
 		})
-	}
-}
-
-func TestStaleNudgeWindow(t *testing.T) {
-	g := Goal{ID: "g1", State: "active", Holders: []string{"a"}}
-	items := []Item{item(ItemOpen, "a")}
-	stale := Facts{LastEventAt: statusNow.Add(-7 * time.Hour)}
-	fresh := Facts{LastEventAt: statusNow.Add(-time.Hour)}
-	if !Stale(ComputeStatus(g, items, stale, statusNow), stale, statusNow) {
-		t.Fatal("idle holder past the window is not stale")
-	}
-	if Stale(ComputeStatus(g, items, fresh, statusNow), fresh, statusNow) {
-		t.Fatal("fresh holder counts as stale")
-	}
-	busy := Facts{Busy: true, LastEventAt: statusNow.Add(-7 * time.Hour)}
-	if Stale(ComputeStatus(g, items, busy, statusNow), busy, statusNow) {
-		t.Fatal("busy holder counts as stale")
 	}
 }

@@ -6,7 +6,7 @@ import (
 )
 
 // HandoffHolder replaces one holder only while the goal is still open and
-// held by from. The ownership change and the heir's notice commit together.
+// held by from. The ownership change commits atomically.
 func (s *Store) HandoffHolder(room, id, from, to string) (moved bool, err error) {
 	where, args := named(room, id)
 	err = s.updateTx(func(w *wake, st *State) error {
@@ -33,11 +33,6 @@ func (s *Store) HandoffHolder(room, id, from, to string) (moved bool, err error)
 		g.Holders = unique(g.Holders)
 		now := s.now()
 		g.UpdatedAt = now
-		r.Notices = append(r.Notices, Notice{
-			Kind: "holder_closed", ID: fmt.Sprintf("goal_%s_handoff_%d", id, now.UnixNano()),
-			Room: room, Goal: id, To: to,
-			Text: fmt.Sprintf("%s moved to you because session %s is closing. Continue or reassign this work. Inspect: dyna goal show %s. Source context: dyna subagent output %s.", Clip(g.Text, 200), from, id, from),
-		})
 		moved = true
 		return nil
 	}, where, args...)
@@ -46,9 +41,9 @@ func (s *Store) HandoffHolder(room, id, from, to string) (moved bool, err error)
 
 // ReleaseHolder hands a goal to no session: it stays open and unheld, and the
 // owner takes it, reassigns it, or closes it. Root never holds goals, so a
-// close that would hand work to root releases the goal instead. result is the
-// finished turn's result, offered to the owner when there is one.
-func (s *Store) ReleaseHolder(room, id, from, result string) (released bool, err error) {
+// close that would hand work to root releases the goal instead.
+// The goal remains visible to the owner.
+func (s *Store) ReleaseHolder(room, id, from string) (released bool, err error) {
 	where, args := named(room, id)
 	err = s.updateTx(func(_ *wake, st *State) error {
 		released = false
@@ -66,14 +61,6 @@ func (s *Store) ReleaseHolder(room, id, from, result string) (released bool, err
 		}
 		now := s.now()
 		g.UpdatedAt = now
-		text := fmt.Sprintf("Session %s closed, so goal %s lost its holder. Take it, reassign it, or close it. Inspect: dyna goal show %s. Source context: dyna subagent output %s.", from, id, id, from)
-		if result != "" {
-			text = fmt.Sprintf("Goal %s holder %s closed after a successful turn.\n%s\nReview the result before reassigning or closing the goal. Source context: dyna subagent output %s.", id, from, result, from)
-		}
-		r.Notices = append(r.Notices, Notice{
-			Kind: "holder_closed", ID: fmt.Sprintf("goal_%s_released_%d", id, now.UnixNano()),
-			Room: room, Goal: id, Text: text,
-		})
 		released = true
 		return nil
 	}, where, args...)

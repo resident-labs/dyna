@@ -17,13 +17,13 @@ import (
 	"dyna-agent/internal/state"
 )
 
-// JournalLine is the keeper's status for one agent in one pass.
+// JournalLine is a saved status for one agent in a journal entry.
 type JournalLine struct {
 	Agent   string   `json:"agent"`
 	Status  string   `json:"status"`
 	Summary string   `json:"summary"`
 	Goals   []string `json:"goals"`
-	// Done lists goals of this agent that the keeper judges finished but
+	// Done lists goals of this agent recorded as finished but
 	// still open. Their holder is reminded once to close them.
 	Done []string `json:"done,omitempty"`
 	// Needs is a short, stable key for the action root or the owner must
@@ -80,7 +80,7 @@ func (s *Store) Events(room, goal string, limit int) ([]Event, error) {
 	return out, err
 }
 
-// JournalEntry is the result of one keeper pass. Its ID is "j" and the byte
+// JournalEntry is a saved report. Its ID is "j" and the byte
 // offset of its line in the room's journal file, so a cursor finds its place
 // without reading the whole file.
 type JournalEntry struct {
@@ -169,7 +169,7 @@ func (s *Store) AddJournal(room string, e JournalEntry) (JournalEntry, error) {
 	return e, nil
 }
 
-// roundEntry finds an entry of e's round. The keeper appends rounds in time
+// roundEntry finds an entry of e's round. Reports append rounds in time
 // order, so a copy can only follow the entries older than e.At; the search
 // stops at the first of those.
 func roundEntry(r io.ReaderAt, size int64, e JournalEntry) (JournalEntry, bool, error) {
