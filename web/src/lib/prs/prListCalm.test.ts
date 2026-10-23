@@ -2,18 +2,18 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 import { JSDOM } from 'jsdom'
+import { compileModule } from 'svelte/compiler'
 import { domNames, bundle, importBundle } from './prDetailHarness.ts'
 import type { Row } from './prlist.ts'
 import { element, elements, need } from '../../../test/need.ts'
 
 // The PR screen with an api that answers each call from globalThis.answers.
-const API = "export const api = new Proxy({}, { get: (_, name) => () => Promise.resolve(globalThis.answers[name] ?? []) }); export const openExternal = () => {}"
+const reactive = compileModule('export const versionState = $state({ mergeVersion: 0 }); globalThis.versionState = versionState;', { filename: 'version.svelte.js', dev: false }).js.code
+const API = reactive + "\nexport const api = new Proxy({}, { get: (_, name) => () => Promise.resolve(globalThis.answers[name] ?? []) }); export const openExternal = () => {}"
 // One build for the file; each test imports its own copy.
 const built = await bundle({ component: 'GitHub', api: API })
-const settle = () => new Promise<void>((r) => setTimeout(r, 0))
+const settle = async () => { for (let i = 0; i < 8; i++) await Promise.resolve() }
 const row = (n: number): Row => ({ changeId: `c${n}`, key: `c${n}`, kind: 'github', number: n, title: `PR ${n}`, state: 'open', status: 'approved', ci: 'passed', verdict: 'approve', reviewState: 'approved', checks: [] })
-const batch = (ids: number[]) => ids.map((n) => ({ changeId: `c${n}`, state: 'trial-running', trial: { branch: 'b', phase: 'running', batch: ids.map((i) => `c${i}`) } }))
-const blocked = (ids: number[]) => ids.map((n) => ({ changeId: `c${n}`, state: 'conflict' }))
 
 // A stand-in for IntersectionObserver that a test fires by hand.
 class FakeObserver {
@@ -55,12 +55,12 @@ async function screen(run: (screen: Screen) => Promise<void>, { merge, props = {
   } })
   if (storage) for (const [k, v] of Object.entries(storage)) w.localStorage.setItem(k, v)
   const names = [...domNames, 'location', 'history', 'localStorage']
-  Object.assign(globalThis, Object.fromEntries(names.map((n) => [n, n === 'window' ? w : Reflect.get(w, n)])), { answers: { roomMergeStatus: merge ?? [], githubList: { items: [], more: false }, ...answers } })
+  Object.assign(globalThis, Object.fromEntries(names.map((n) => [n, n === 'window' ? w : Reflect.get(w, n)])), { answers: { mergeControlStatus: { roomId, paused: false, queue: merge ?? [], trials: [], localCIChecks: {} }, githubList: { items: [], more: false }, ...answers } })
   const { dir, default: GitHub, mount, flushSync } = await importBundle(built, 'GitHub')
   const open = async (id = roomId, extra: object = {}) => {
     const app = need(document.getElementById('app'), '#app')
     app.replaceChildren()
-    mount(GitHub, { target: app, props: { roomId: id, changes: [1, 2, 3].map(row), ...props, ...extra } })
+    mount(GitHub, { target: app, props: { get mergeVersion() { return Reflect.get(globalThis, 'versionState').mergeVersion }, roomId: id, changes: [1, 2, 3].map(row), ...props, ...extra } })
     await settle()
     flushSync()
     return app
@@ -71,29 +71,62 @@ async function screen(run: (screen: Screen) => Promise<void>, { merge, props = {
     dom.window.close()
     for (const n of names) Reflect.deleteProperty(globalThis, n)
     Reflect.deleteProperty(globalThis, 'answers')
+    Reflect.deleteProperty(globalThis, 'versionState')
     await rm(dir, { recursive: true, force: true })
   }
 }
-const toggle = (t: ParentNode, label: string) => elements(t, 'button.fold').find((b) => b.textContent?.includes(label))
-
-test('queue and blocked rows are one line: title, number, author and one status dot', async () => {
-  const red = { ...row(4), checks: [{ name: 'web', state: 'failure' }, { name: 'go', state: 'success' }] }
-  const green = { ...row(1), checks: [{ name: 'web', state: 'success' }, { name: 'lint', state: 'skipped' }] }
+test('the room list shows only open PRs with CI, review and merge order', async () => {
   await screen(async ({ open, text }) => {
     const t = await open()
-    const all = text(t)
-    for (const noise of [/Trial batch/i, /Waiting \d/i, /Testing batch/, /Advisory/, /CI remains required/, /Conflict/]) assert.doesNotMatch(all, noise)
-    assert.equal(t.querySelector('.pos'), null, 'no position numbers')
     const rows = elements(t, '.rows .row')
-    assert.equal(rows.length, 4)
-    for (const r of rows) assert.equal(r.querySelectorAll('.sdot').length, 1)
-    const [first, , , last] = rows.map((r) => need(r))
-    assert.equal(element(need(first), '.sdot').getAttribute('title'), 'Testing batch')
-    assert.match(text(need(first)), /PR 1 ?#1/)
-    assert.doesNotMatch(text(need(first)), /checks/, 'all green: no count')
-    assert.equal(element(need(last), '.sdot').getAttribute('title'), 'Conflict')
-    assert.match(text(need(last)), /1\/2 checks/, 'a red check shows the count')
-  }, { merge: [...batch([1, 2, 3]), ...blocked([4])], props: { changes: [green, row(2), row(3), red] } })
+    assert.equal(rows.length, 2)
+    assert.match(text(need(rows[0])), /PR 1.*#1.*CI · passed.*Approved.*Next · 1/)
+    assert.match(text(need(rows[1])), /PR 2/)
+    assert.doesNotMatch(text(t), /PR 3|PR 5|Local change/)
+    assert.equal(t.querySelector('.dscroll'), null, 'opening the list does not select a PR')
+    assert.equal(t.querySelector('[aria-label="State"]'), null)
+  }, { merge: [{ changeId: 'c1', state: 'ready' }], props: { changes: [
+    { ...row(1), head: 'abc', reviewHead: 'abc' }, row(2),
+    { ...row(3), state: 'merged' }, { ...row(4), kind: 'local', title: 'Local change' }, { ...row(5), state: 'closed' },
+  ] } })
+})
+
+test('a row opens the existing detail and Back returns to the list', async () => {
+  await screen(async ({ open, flushSync }) => {
+    const t = await open()
+    element(t, '.rows .row').click()
+    flushSync()
+    assert.ok(t.querySelector('.dscroll'))
+    const back = t.querySelector<HTMLButtonElement>('button.back')
+    let wentBack = false
+    history.back = () => {
+      wentBack = true
+      history.replaceState(null, '', '/')
+      window.dispatchEvent(new window.PopStateEvent('popstate'))
+    }
+    need(back, 'Back button').click()
+    flushSync()
+    assert.equal(wentBack, true)
+    assert.equal(t.querySelector('.dscroll'), null)
+    assert.equal(elements(t, '.rows .row').length, 3)
+  })
+})
+
+test('mergeVersion refreshes main CI without a changed PR row', async () => {
+  await screen(async ({ open, text, flushSync, settle }) => {
+    const t = await open()
+    assert.match(text(t), /Main CI is running/)
+    Reflect.get(globalThis, 'answers').mergeControlStatus = {
+      roomId: 'r', paused: false, queue: [{ changeId: 'c1', state: 'ready', main: { state: 'passed' } }], trials: [], localCIChecks: {},
+    }
+    Reflect.get(globalThis, 'versionState').mergeVersion++
+    flushSync()
+    await settle()
+    flushSync()
+    assert.doesNotMatch(text(t), /Main CI is running|Merge status unavailable|Loading merge status/)
+    assert.match(text(t), /No merge running/)
+    assert.equal(elements(t, '.rows .row').length, 3)
+  }, { merge: [{ changeId: 'c1', state: 'ready', main: { state: 'pending', reason: 'Main CI is running' } }] })
 })
 
 test('the PR list has no reviewer bar, account name or reload button', async () => {
@@ -103,29 +136,6 @@ test('the PR list has no reviewer bar, account name or reload button', async () 
     assert.equal(t.querySelector('[aria-label="Reload"]'), null)
     assert.equal(t.querySelector('select'), null)
   }, { answers: { listServices: [{ role: 'reviewer', name: 'PR reviewer', pinned: 'sol' }], githubList: { items: [], more: false, account: 'octocat' } } })
-})
-
-test('Blocked is open by default and folds to a count', async () => {
-  await screen(async ({ open, text, flushSync }) => {
-    const t = await open()
-    assert.match(text(t), /PR 1/)
-    need(toggle(t, 'Blocked')).click()
-    flushSync()
-    assert.match(text(need(toggle(t, 'Blocked'))), /Blocked · 3/)
-    assert.doesNotMatch(text(t), /PR 1/)
-  }, { merge: blocked([1, 2, 3]) })
-})
-
-test('the choice is remembered for its room and wins over the batch default', async () => {
-  await screen(async ({ open, text, flushSync }) => {
-    let t = await open('room-a')
-    need(toggle(t, 'Merge queue')).click()
-    flushSync()
-    t = await open('room-a')
-    assert.doesNotMatch(text(t), /PR 1/, 'room-a keeps the queue folded')
-    t = await open('room-b')
-    assert.match(text(t), /PR 1/, 'room-b keeps the default')
-  }, { merge: batch([1, 2, 3]) })
 })
 
 test('older pull requests load when the end of the list comes into view', async () => {
