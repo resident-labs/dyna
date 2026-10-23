@@ -215,8 +215,8 @@ function Install-Dyna {
     Write-Host "Open http://localhost:$Port in your browser."
     Write-Host 'Get a pairing code:'
     Write-Host "  wsl -d $Name -- dyna engine run --pair"
-    Write-Host 'Create agent profiles after you log in to an agent tool:'
-    Write-Host "  wsl -d $Name -- dyna profiles init-codex"
+    Write-Host 'Add agent profiles after you log in to an agent tool:'
+    Write-Host "  wsl -d $Name -- dyna profiles add --name my-builder --harness codex --model <model-id> --taste 7 --intelligence 9 --cost 6"
 }
 
 function Uninstall-Dyna {

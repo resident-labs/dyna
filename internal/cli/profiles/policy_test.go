@@ -63,7 +63,7 @@ func testProfileCommandsUseEngineCallerPower(t *testing.T, role authority.Role) 
 			}
 		})
 	}
-	if called.Load() != 10 {
-		t.Fatalf("engine calls = %d, want 10", called.Load())
+	if called.Load() != 6 {
+		t.Fatalf("engine calls = %d, want 6", called.Load())
 	}
 }
