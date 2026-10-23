@@ -29,11 +29,15 @@ func TestMigrationPersistsReasonWithoutChangingWait(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	resolved, err := resolveRowPrompts(t.Context(), db, id, 1, converted)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var want, got map[string]any
 	if err := json.Unmarshal(raw, &want); err != nil {
 		t.Fatal(err)
 	}
-	if err := json.Unmarshal(converted, &got); err != nil {
+	if err := json.Unmarshal(resolved, &got); err != nil {
 		t.Fatal(err)
 	}
 	entries := want["deliveries"].([]any)

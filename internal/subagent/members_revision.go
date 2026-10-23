@@ -15,11 +15,11 @@ import (
 // read. Turn and queue rows are never deleted, so their highest revision
 // cannot be reused.
 func (s *Store) MembersRevision() (string, error) {
-	records, err := sessionlife.Revision(s.root())
-	if err != nil {
+	if _, err := s.turnsDB(); err != nil {
 		return "", err
 	}
-	if _, err := s.turnsDB(); err != nil {
+	records, err := sessionlife.Revision(s.root())
+	if err != nil {
 		return "", err
 	}
 	if _, err := queuesDB(s.root()); err != nil {

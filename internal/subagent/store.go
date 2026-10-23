@@ -11,6 +11,7 @@ package subagent
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"dyna-agent/internal/harness"
 	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/instructions"
@@ -576,7 +577,7 @@ func (s *Store) updateMetaContext(ctx context.Context, id string, fn func(*Meta)
 	return out, err
 }
 
-// ReadTurn loads one turn record from dyna.db.
+// ReadTurn loads one turn and its prompt text from the same dyna.db snapshot.
 func (s *Store) ReadTurn(id string, n int) (Turn, error) {
 	b, _, err := s.readTurnRow(id, n)
 	if err != nil {
@@ -688,22 +689,65 @@ func (s *Store) updateTurnContext(ctx context.Context, id string, n int, fn func
 	return out, err
 }
 
-// Turns lists every turn record in order. A turn that cannot be read is
-// listed as TurnUnreadable with its read error.
+// Turns lists every turn record in order from one database snapshot. A turn
+// that cannot be read is listed as TurnUnreadable with its read error.
 func (s *Store) Turns(id string) ([]Turn, error) {
 	m, err := s.ReadMeta(id)
 	if err != nil {
 		return nil, err
 	}
-	turns := make([]Turn, 0, m.Turns)
-	for n := 1; n <= m.Turns; n++ {
-		t, err := s.ReadTurn(id, n)
-		if err != nil {
-			t = Turn{N: n, Status: TurnUnreadable, Error: err.Error()}
-		}
-		turns = append(turns, t)
+	db, err := s.turnsDB()
+	if err != nil {
+		return nil, err
 	}
-	return turns, nil
+	ctx := context.Background()
+	// TODO: legacy/shim remove later — import missing retained turns before
+	// opening the listing snapshot, so every row and blob shares that snapshot.
+	rows, err := db.QueryContext(ctx, "SELECT n FROM session_turns WHERE session=? AND n BETWEEN 1 AND ?", id, m.Turns)
+	if err != nil {
+		return nil, err
+	}
+	present := map[int]bool{}
+	for rows.Next() {
+		var n int
+		if err := rows.Scan(&n); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		present[n] = true
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	unreadable := map[int]error{}
+	for n := 1; n <= m.Turns; n++ {
+		if !present[n] {
+			_, unreadable[n] = s.importTurnFile(id, n, false)
+		}
+	}
+	turns := make([]Turn, 0, m.Turns)
+	err = state.For(db).Read(ctx, func(r state.Reader) error {
+		for n := 1; n <= m.Turns; n++ {
+			var turn Turn
+			err := unreadable[n]
+			if err == nil {
+				var raw []byte
+				raw, _, err = resolvedTurn(ctx, r, id, n)
+				if errors.Is(err, sql.ErrNoRows) {
+					err = fmt.Errorf("session %s has no turn %d", id, n)
+				}
+				if err == nil {
+					turn, err = s.decodeTurnRecord(id, n, raw)
+				}
+			}
+			if err != nil {
+				turn = Turn{N: n, Status: TurnUnreadable, Error: err.Error()}
+			}
+			turns = append(turns, turn)
+		}
+		return nil
+	})
+	return turns, err
 }
 
 // lockHeld reports whether a turn runner holds the lock, where its identity is known.
