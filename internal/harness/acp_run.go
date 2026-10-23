@@ -365,19 +365,25 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 		s.settled = true
 		return nil
 	}
+	var startBoundary *int64
+	sendInitial := func() error {
+		startBoundary = normalizedBoundary(normalizer)
+		send(spec.acpPrompt)
+		return nil
+	}
 	if steering != nil && steering.opts.StartGate != nil {
-		if err := steering.opts.StartGate(ctx, spec.acpPrompt, func() error { send(spec.acpPrompt); return nil }); err != nil {
+		if err := steering.opts.StartGate(ctx, spec.acpPrompt, sendInitial); err != nil {
 			return finishAttempt(spec, rawLines.String(), stderr.String(), err, true, ctx.Err() != nil, false, false, nil, nil)
 		}
 	} else {
-		send(spec.acpPrompt)
+		_ = sendInitial()
 	}
 	if steering != nil && steering.opts.OnStart != nil {
 		steering.opts.OnStart()
 	}
 	if steering != nil && steering.opts.OnMessage != nil {
 		for _, message := range spec.steering {
-			steering.opts.OnMessage(message)
+			steering.opts.OnMessage(message, startBoundary)
 		}
 	}
 	if spec.journalReminderReason != "" && journal != nil {
@@ -457,12 +463,13 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 		if journal != nil {
 			journal.noteExternalResume()
 		}
+		sourceOffset := normalizedBoundary(normalizer)
 		send(steeringPrompt(messages))
 		gate.report(DeliverySteering, DeliveryBoundary, 0, tools.InFlight())
 		streamSteered = true
 		if steering.opts.OnMessage != nil {
 			for _, message := range messages {
-				steering.opts.OnMessage(message)
+				steering.opts.OnMessage(message, sourceOffset)
 			}
 		}
 		return nil
