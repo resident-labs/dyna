@@ -216,10 +216,7 @@ func resolveRefs(roomFlag, repoFlag string) refs {
 // facts is everything the reads said. A read that failed keeps its message so
 // the row can say why instead of showing a wrong value.
 type facts struct {
-	refs refs
-	// repo is the repository the librarian and its hooks belong to: an
-	// explicit --repo, else the room's own repository, else the current one.
-	repo     string
+	refs     refs
 	services []serviceRow
 	reviewer reviewerStatus
 	settings []settingRow
@@ -238,17 +235,8 @@ func (f facts) err(method string) string {
 // readFacts asks the engine for the values a row shows. It returns no error:
 // a service the engine could not describe keeps its row, with the reason.
 func readFacts(ctx context.Context, call engineCaller, r refs) facts {
-	out := facts{refs: r, repo: r.Repo, errs: map[string]string{}}
-	// The engine names the room, so a flag or stamp that carries an ID still
-	// gives the name a session address needs.
-	if rec, ok := resolveRoom(ctx, call, r); ok {
-		out.refs.Room = rec.Name
-		// The librarian belongs to the room's repository, not to the worktree
-		// a caller stands in, so the room names it unless --repo does.
-		if !r.RepoExplicit && rec.Repo != "" {
-			out.repo = rec.Repo
-		}
-	}
+	r = resolve(ctx, call, r)
+	out := facts{refs: r, errs: map[string]string{}}
 	if out.refs.Room != "" {
 		// A service list that cannot be read leaves the profile columns empty;
 		// the call that owns each profile reports its own error.
@@ -262,8 +250,8 @@ func readFacts(ctx context.Context, call engineCaller, r refs) facts {
 	if err := call.Call(ctx, "Settings", nil, &out.settings); err != nil {
 		out.errs["Settings"] = err.Error()
 	}
-	if out.repo != "" {
-		if err := call.Call(ctx, "HookSummary", []any{out.repo}, &out.hooks); err != nil {
+	if out.refs.Repo != "" {
+		if err := call.Call(ctx, "HookSummary", []any{out.refs.Repo}, &out.hooks); err != nil {
 			out.errs["HookSummary"] = err.Error()
 		}
 	}
@@ -273,8 +261,25 @@ func readFacts(ctx context.Context, call engineCaller, r refs) facts {
 	return out
 }
 
-// resolveRoom finds the room the reads use: the named one, or else the room of
-// this repository. It reads the room list and never creates a room.
+// resolve names the room and the repository a command works in. The engine
+// names the room, so a flag or stamp that carries an ID still gives the name a
+// session address needs, and the room's own repository applies unless --repo
+// chose one. Every read and every write goes through it, so a list and a switch
+// always describe the same service.
+func resolve(ctx context.Context, call engineCaller, r refs) refs {
+	rec, ok := resolveRoom(ctx, call, r)
+	if !ok {
+		return r
+	}
+	r.Room = rec.Name
+	if !r.RepoExplicit && rec.Repo != "" {
+		r.Repo = rec.Repo
+	}
+	return r
+}
+
+// resolveRoom finds the room a command works in: the named one, or else the
+// room of this repository. It reads the room list and never creates a room.
 func resolveRoom(ctx context.Context, call engineCaller, r refs) (roomRow, bool) {
 	var rooms []roomRow
 	if err := call.Call(ctx, "Rooms", nil, &rooms); err != nil {
@@ -363,13 +368,13 @@ func libraryRow(f facts) Row {
 		row.State = "unknown"
 		return row
 	}
-	if f.repo == "" {
+	if f.refs.Repo == "" {
 		row.Error = "no repository; run this inside one or pass --repo <path>"
 		row.State = "unknown"
 		return row
 	}
 	for _, path := range repos {
-		if filepath.Clean(path) == filepath.Clean(f.repo) {
+		if filepath.Clean(path) == filepath.Clean(f.refs.Repo) {
 			row.Enabled = true
 		}
 	}
@@ -379,7 +384,7 @@ func libraryRow(f facts) Row {
 	batch := f.hookNamed("librarian-batch")
 	switch {
 	case !row.Enabled:
-		row.State, row.Detail = "off", "Off for "+f.repo
+		row.State, row.Detail = "off", "Off for "+f.refs.Repo
 	case batch.LastRun != nil && batch.LastRun.Result == "pending":
 		row.State, row.Detail = "running", "Keeps the feature map current"
 	default:
@@ -600,6 +605,7 @@ func switchCmd(on bool) *cobra.Command {
 }
 
 func setEnabled(ctx context.Context, call engineCaller, r refs, id ServiceID, on bool, out io.Writer) error {
+	r = resolve(ctx, call, r)
 	switch id {
 	case Reviewer:
 		if r.Room == "" {
@@ -674,6 +680,7 @@ func profileCmd() *cobra.Command {
 
 // setProfile writes the profile of one service through the call that owns it.
 func setProfile(ctx context.Context, call engineCaller, r refs, id ServiceID, profile string, out io.Writer) error {
+	r = resolve(ctx, call, r)
 	if profile != "" {
 		known, err := serviceProfiles(ctx, call, r)
 		if err != nil {
@@ -715,6 +722,7 @@ func setProfile(ctx context.Context, call engineCaller, r refs, id ServiceID, pr
 // serviceProfiles lists the enabled profiles a service may run, as the
 // Services page offers them.
 func serviceProfiles(ctx context.Context, call engineCaller, r refs) ([]string, error) {
+	r = resolve(ctx, call, r)
 	if r.Room == "" {
 		return nil, fmt.Errorf("no room; pass --room <room>")
 	}
@@ -752,6 +760,7 @@ func restartCmd() *cobra.Command {
 }
 
 func restart(ctx context.Context, call engineCaller, r refs, id ServiceID, out io.Writer) error {
+	r = resolve(ctx, call, r)
 	switch id {
 	case Reviewer:
 		if r.Room == "" {

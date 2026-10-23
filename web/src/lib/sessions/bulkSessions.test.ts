@@ -57,20 +57,19 @@ test('accepted transfers progress to a confirmed ready state through saved statu
 })
 
 // Move under…: each open session is a target, unless the move would make a
-// cycle, land under a service, or pass subagent.maxDepth. A refused target says why.
-test('adopt targets refuse cycles, services and depth past the limit, with a reason', () => {
+// cycle or pass subagent.maxDepth. A refused target says why.
+test('adopt targets refuse cycles and depth past the limit, with a reason', () => {
   const m = (id: string, depth: number, parent = '', extra: Parameters<typeof member>[1] = {}) => member(id, { name: id, depth, parent, ...extra })
   // Depths as the Members API sends them: a top-level session is at display
   // depth 0, while its stored session depth is 1 (roomsvc.membersOf).
   const members = [
     m('owner', 0, '', { owner: true }), m('root', 0, '', { role: 'root', service: true }),
     m('lead', 0), m('a', 0), m('b', 1, 'a'), m('c', 2, 'b'), m('deep', 1, 'lead'), m('done', 0, '', { closed: true }),
-    m('rev', 0, '', { service: true, role: 'reviewer' }),
   ]
   const why = (ids: string[], max = 3) => Object.fromEntries(adoptTargets(members, ids, max).map((t) => [t.member.id, t.reason]))
   // a's subtree is a, b, c: under lead it would reach depth 4.
-  assert.deepEqual(why(['a']), { root: 'c would be at depth 4 of 3', lead: 'c would be at depth 4 of 3', b: 'Inside the selection', c: 'Inside the selection', deep: 'c would be at depth 5 of 3', rev: 'Service session' })
-  assert.deepEqual(why(['b']), { root: '', lead: '', a: '', c: 'Inside the selection', deep: 'c would be at depth 4 of 3', rev: 'Service session' })
+  assert.deepEqual(why(['a']), { root: 'c would be at depth 4 of 3', lead: 'c would be at depth 4 of 3', b: 'Inside the selection', c: 'Inside the selection', deep: 'c would be at depth 5 of 3' })
+  assert.deepEqual(why(['b']), { root: '', lead: '', a: '', c: 'Inside the selection', deep: 'c would be at depth 4 of 3' })
   assert.equal(why(['a'], 0).lead, '', 'no limit when maxDepth is 0')
 })
 

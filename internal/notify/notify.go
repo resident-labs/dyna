@@ -909,11 +909,23 @@ func serviceRoleName(meta subagent.Meta) string {
 	return "helper"
 }
 
+// serviceAlertRole names the service an alert is about and says whether
+// `dyna services` can act on it. A helper reports its service's role, because
+// that is the service the reader can start or read.
+func (s *Service) serviceAlertRole(meta subagent.Meta) (string, bool) {
+	if meta.Role != "" {
+		return meta.Role, true
+	}
+	if parent, err := s.sessionStore().ReadMeta(meta.ParentSession); err == nil && parent.ManagedService() && parent.Role != "" {
+		return parent.Role, true
+	}
+	return serviceRoleName(meta), false
+}
+
 // serviceFailureText is the alert a failed service turn posts: what failed,
-// then the session it ran as, then how to inspect it. It names no parent and
-// offers no child-failure recovery, because `dyna services` changes a service.
-func serviceFailureText(meta subagent.Meta, turn subagent.Turn) string {
-	role := serviceRoleName(meta)
+// then the session it ran as, then how to inspect it. A service changes with
+// `dyna services`, so the alert offers no child-failure recovery.
+func serviceFailureText(meta subagent.Meta, turn subagent.Turn, role string, manage bool) string {
 	lines := []string{
 		fmt.Sprintf("Service %s failed turn %d: %s", role, turn.N, strings.TrimSpace(turn.Error)),
 		"Session: " + meta.Address(),
@@ -929,7 +941,9 @@ func serviceFailureText(meta subagent.Meta, turn subagent.Turn) string {
 		}
 		lines = append(lines, line)
 	}
-	lines = append(lines, "Inspect: dyna services log "+role+" · restart: dyna services restart "+role)
+	if manage {
+		lines = append(lines, "Inspect: dyna services log "+role+" · restart: dyna services restart "+role)
+	}
 	return strings.Join(lines, "\n")
 }
 
@@ -1030,7 +1044,8 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 	// A service is outside the hierarchy, so its failure is one alert from the
 	// service to the room owner, never a child failure report.
 	if kind == "failed" && meta.ManagedService() {
-		return s.prepareCompletion(meta.RoomID, meta.Address(), []string{meta.Room}, serviceAlertKind, serviceFailureText(meta, turn), turn.N, true)
+		role, manage := s.serviceAlertRole(meta)
+		return s.prepareCompletion(meta.RoomID, meta.Address(), []string{meta.Room}, serviceAlertKind, serviceFailureText(meta, turn, role, manage), turn.N, true)
 	}
 	if len(turn.ReportTo) == 0 && kind == "completed" {
 		return nil, nil
