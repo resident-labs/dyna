@@ -19,6 +19,53 @@ func (r *callPushRecorder) Notify(_ context.Context, event websvc.Event) {
 	r.events = append(r.events, event)
 }
 
+// A call answer wakes the root seat, as the voice post it replaced did: root
+// asked for the call, so an idle root resumes when the owner joins, declines,
+// or lets the request be withdrawn. The answer is a typed call event addressed
+// to the root seat and to nobody else.
+func TestCallAnswersWakeRoot(t *testing.T) {
+	for _, tc := range []struct {
+		closed string
+		want   room.CallState
+	}{{"joined", room.CallJoined}, {"declined", room.CallDeclined}, {"withdrawn", room.CallWithdrawn}} {
+		t.Run(tc.closed, func(t *testing.T) {
+			s := testServices(t, false)
+			rec, err := s.rooms.Notify.Rooms.Create(room.CreateInput{Name: "call-" + tc.closed})
+			if err != nil {
+				t.Fatal(err)
+			}
+			st := s.rooms.Notify.CallRequestStore()
+			row, _, err := st.Ask(rec.ID, "Approve the deploy", "root")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.Shown(rec.ID, row.ID); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := st.Close(rec.ID, row.ID, tc.closed, "owner"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := deliverCallRequests(t.Context(), s.rooms, &callPushRecorder{}, row.AskedAt); err != nil {
+				t.Fatal(err)
+			}
+			posts, err := s.rooms.Notify.Rooms.Messages(rec.ID)
+			if err != nil || len(posts) != 1 {
+				t.Fatalf("close posts = %+v, %v", posts, err)
+			}
+			ev, ok := posts[0].Call()
+			if !ok || ev.Type != tc.want {
+				t.Fatalf("answer = %+v, %v", ev, ok)
+			}
+			if !posts[0].Addressed(rec.Name) || !posts[0].NeedsRoot {
+				t.Fatalf("answer does not reach the root seat: to=%v needsRoot=%v", posts[0].To, posts[0].NeedsRoot)
+			}
+			if decision, why := room.RootContext(posts[0], rec.Name); decision != room.RootWake {
+				t.Fatalf("call answer does not wake root: %v (%s)", decision, why)
+			}
+		})
+	}
+}
+
 func TestCallRequestPushFallbackAndCloseDelivery(t *testing.T) {
 	s := testServices(t, false)
 	rec, err := s.rooms.Notify.Rooms.Create(room.CreateInput{Name: "calls"})

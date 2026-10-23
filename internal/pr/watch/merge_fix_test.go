@@ -120,6 +120,49 @@ func TestMergeFixKeepsFreshPRGates(t *testing.T) {
 	}
 }
 
+func TestMergeFixRecordsEveryRequest(t *testing.T) {
+	// Every request is its own audit line. Two refused requests on one PR, from
+	// two callers, are two lines: the old typed post derived its ID from the
+	// change alone, so the second request vanished without a record.
+	storetest.ClearStamp(t)
+	e, fs, merged := mergeEnv(t, 1)
+	rewriteMergeDefault(e, func(target map[string]any) {
+		target["statusCheckRollup"].(map[string]any)["state"] = "FAILURE"
+	})
+	// A head the record does not have refuses the request before any merge.
+	fs[1].Pull.Head.SHA = strings.Repeat("f", 40)
+	if err := e.s.MergeFix(t.Context(), "github.com/owner/repo#1"); err == nil || !strings.Contains(err.Error(), "not eligible") {
+		t.Fatalf("owner repair request = %v", err)
+	}
+	t.Setenv("DYNA_MODE", "root")
+	t.Setenv("DYNA_SESSION", "ses_20261019-000001-bbbbbbbb")
+	if err := e.s.MergeFix(t.Context(), "github.com/owner/repo#1"); err == nil || !strings.Contains(err.Error(), "not eligible") {
+		t.Fatalf("root repair request = %v", err)
+	}
+	if len(*merged) != 0 {
+		t.Fatalf("repair published %v", *merged)
+	}
+	messages, err := e.s.Notify.Rooms.Messages(e.author.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actors []string
+	for _, message := range messages {
+		if message.Notice.Kind != string(room.MergeFixRequested) {
+			continue
+		}
+		ev, ok := message.Merge()
+		if !ok {
+			t.Fatalf("audit post carries no typed merge event: %+v", message)
+		}
+		actors = append(actors, ev.Actor)
+	}
+	root := "root session ses_20261019-000001-bbbbbbbb"
+	if len(actors) != 2 || actors[0] == actors[1] || actors[1] != root {
+		t.Fatalf("repair audit actors = %v, want the owner then %s", actors, root)
+	}
+}
+
 func TestMergeFixRechecksAfterChildPreparation(t *testing.T) {
 	e, fs, merged := mergeEnv(t, 1, 2)
 	fs[2].Pull.Base.Ref = fs[1].Pull.Head.Ref

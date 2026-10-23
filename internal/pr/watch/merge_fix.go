@@ -52,7 +52,10 @@ func (s *Service) MergeFix(ctx context.Context, key string) error {
 	// The owner's request needs the root seat, which reads why main CI was
 	// bypassed. Root's own request needs nobody, as it always did.
 	needsRoot := caller.Role != authority.Root
-	if _, err := s.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: rm.ID, Event: ev, To: []string{rm.Name}, RoomService: true, NeedsRoot: needsRoot}); err != nil {
+	// Every request is its own audit line: a refused attempt keeps its record,
+	// and a later attempt with another head or another caller is a second one.
+	// A request has no stable identity of its own to dedupe on.
+	if _, err := s.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: rm.ID, FreshID: true, Event: ev, To: []string{rm.Name}, RoomService: true, NeedsRoot: needsRoot}); err != nil {
 		return fmt.Errorf("record repair merge requester: %w", err)
 	}
 	current, children, ready, err := s.prepareMerge(ctx, r)
