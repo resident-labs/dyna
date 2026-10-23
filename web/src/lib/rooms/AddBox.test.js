@@ -29,3 +29,31 @@ test('AddBox keeps composition and Shift+Enter separate from submission', async 
     await rm(ui.dir, { recursive: true, force: true })
   }
 })
+
+test('AddBox keeps Submit still when focus moves inside the form and collapses on exit', async () => {
+  const dom = installDom()
+  globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
+  const ui = await importBundle(code, '../rooms/AddBox')
+  let sent = 0
+  const component = ui.mount(ui.default, { target: document.getElementById('app'), props: {
+    value: 'New rule', label: 'Rule', submit: 'Add rule', onsubmit() { sent++ },
+  } })
+  try {
+    ui.flushSync()
+    const field = document.querySelector('textarea')
+    const button = document.querySelector('button')
+    field.focus(); ui.flushSync()
+    const expanded = field.style.height
+    assert.equal(expanded, '87px')
+    button.focus(); ui.flushSync()
+    assert.equal(field.style.height, expanded)
+    button.click(); assert.equal(sent, 1)
+    const outside = document.createElement('button')
+    document.body.append(outside); outside.focus(); ui.flushSync()
+    assert.equal(field.style.height, '45px')
+  } finally {
+    await ui.unmount(component); dom.window.close()
+    for (const name of [...domNames, 'HTMLMediaElement']) Reflect.deleteProperty(globalThis, name)
+    await rm(ui.dir, { recursive: true, force: true })
+  }
+})
