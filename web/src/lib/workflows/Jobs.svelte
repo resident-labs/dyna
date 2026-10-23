@@ -6,7 +6,7 @@
   // selected one's log. A running job's log follows itself every two
   // seconds while it stays open. jobs is App's one room list, newest first.
   // onstop(job) stops a running job and resolves when it has ended.
-  import { onMount, untrack } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
   import { api } from '../../api.js'
   import { ago, duration } from '../ui/format.js'
   import { runningJob } from '../rooms/workViews.ts'
@@ -29,7 +29,9 @@
   let log = $state<ShellLog | null>(null)
   let logError = $state('')
   let logEl = $state<HTMLPreElement>()
-  let follow = true
+  let follow = $state(true)
+  let logLoading = $state(false)
+  let logRequest = 0
   const historyPageSize = 20
   let historyOpen = $state(false)
   let historyLimit = $state(historyPageSize)
@@ -79,17 +81,29 @@
   async function loadLog() {
     if (!sel) return
     const id = sel
+    const request = ++logRequest
+    logLoading = true
     try {
       const l = await api.shellLog(id, 400)
-      if (id !== sel) return
-      follow = !logEl || logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40
+      if (id !== sel || request !== logRequest) return
       log = l
       logError = ''
-      if (follow) setTimeout(() => logEl && (logEl.scrollTop = logEl.scrollHeight), 0)
+      await tick()
+      if (id === sel && request === logRequest && follow) resumeFollowing()
     } catch (e) {
-      if (id !== sel) return
+      if (id !== sel || request !== logRequest) return
       logError = errorText(e)
+    } finally {
+      if (id === sel && request === logRequest) logLoading = false
     }
+  }
+
+  function trackFollow() {
+    if (logEl) follow = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 40
+  }
+  function resumeFollowing() {
+    follow = true
+    if (logEl) logEl.scrollTop = logEl.scrollHeight
   }
 
   async function stop(j: ShellJob) {
@@ -210,12 +224,14 @@
       </header>
       {#if stopError}<p class="err" role="alert">Could not stop the job: {stopError}</p>{/if}
       {#if logError}
-        <p class="err">{logError}</p>
-      {:else if !log}
-        <p class="quiet">Loading log…</p>
-      {:else}
+        <div class="log-tools"><p class="err">{logError}</p><button class="log-action" disabled={logLoading} aria-label="Retry log" onclick={loadLog}>Retry</button></div>
+      {/if}
+      {#if log && !follow}<div class="log-tools"><button class="log-action" onclick={resumeFollowing}>Resume following</button></div>{/if}
+      {#if !log && !logError}<p class="quiet" role="status">Loading log…</p>{/if}
+      {#if log}
         {#if log.truncated}<p class="cut">Showing the last 400 lines.</p>{/if}
-        <pre bind:this={logEl}>{log.text || '(no output yet)'}</pre>
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex (The log scrolls with the keyboard.) -->
+        <pre bind:this={logEl} tabindex="0" role="region" aria-label="Log for {job.id}" onscroll={trackFollow}>{log.text || '(no output yet)'}</pre>
       {/if}
     </div>
   {:else if !narrow && jobs?.length}
@@ -224,6 +240,10 @@
 </section>
 
 <style>
+  .log-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); padding: 8px 12px; }
+  .log-tools .err { margin: 0; padding: 0; overflow-wrap: anywhere; }
+  .log-action { min-height: 44px; padding: 8px 12px; background: var(--raise); color: var(--ink); border-radius: var(--r-xs); }
+  .log-action:disabled { opacity: 0.5; }
   .jobs { flex: 1; display: flex; min-height: 0; min-width: 0; }
   .list { width: 400px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--line-soft); min-height: 0; }
   .narrow .list { width: 100%; border: 0; }
