@@ -1196,8 +1196,36 @@ esac
 					}
 					seen[msg.From] = true
 					if msg.From == parent.Address {
-						// Release the child only after the parent's result is sealed.
-						// Otherwise its completion can steer the parent's first call.
+						// The parent's completion does not imply its child has started.
+						// Wait for startup acceptance before posting: a post drained
+						// into the startup prompt cannot interrupt the mock's hold.
+						sessions := &subagent.Store{Root: filepath.Join(e.data, "dyna", "sessions")}
+						child, err := sessions.Resolve(childAddr)
+						if err != nil {
+							t.Fatal(err)
+						}
+						for {
+							// Capture the next commit notification before reading so
+							// startup cannot finish between the read and the wait.
+							_, _, _, changed := e.events.Since(e.events.Epoch(), e.events.Rev())
+							turn, err := sessions.ReadTurn(child.ID, 1)
+							if err != nil {
+								t.Fatal(err)
+							}
+							if turn.Status == subagent.TurnRunning && turn.HeldAccepted {
+								break
+							}
+							if turn.Done() {
+								t.Fatalf("child ended before startup acceptance: %+v", turn)
+							}
+							select {
+							case <-changed:
+							case <-fail.Done():
+								t.Fatalf("child never accepted startup: %+v", turn)
+							}
+						}
+						// Both startup and the parent's sealed result now precede
+						// the post, which reaches the child as live steering.
 						out, stderr, err := e.runEnv([]string{
 							"DYNA_MODE=subagent", "DYNA_SESSION=" + parent.Session, "DYNA_DEPTH=1",
 							"DYNA_ROOM=" + roomName, "DYNA_ROOM_ID=" + parent.RoomID,
