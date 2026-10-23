@@ -104,55 +104,39 @@ desktop/build/bin/dyna-desktop    # opens the window on the running server
 | Column | What it shows |
 |---|---|
 | Room rail | Rooms as tiles, unread badge, gold dot for live work; the top tile opens the room list |
-| Room sidebar | Room name (click for the room menu) and repo, channels (`#general` and nested agent channels), Workspace views (`#files`, `#changes`, `#terminal`, `#shell-jobs`), `#workflows` with running runs, sessions working now, the Settings gear |
+| Room sidebar | Room name (click for the room menu) and repo, Messages and PRs, Work and Machine views, sessions working now, the Settings gear |
 | Feed | Day dividers, a New line, sender groups, replies, full completion results, a `Message #room` composer with `@` and `/` completion |
 | Members | The owner, with the room's root seat under it: the internal root session (labeled `root`; open it to see its turns and tool calls) and a line naming the seat holder, "internal root" or "external orchestrator since <time>" with a Take back seat button. Then sessions as a tree with gold/green/red status, each with a context menu. Finished (dormant) sessions sort after their other siblings, with each subtree kept together, and fold into a Finished group with coral status dots, a Dismiss action, and a confirmed Clear finished action. A post still wakes a finished session with its full conversation. Dismissal preserves transcripts and reports retained dirty or unmerged worktrees in the room. Subagents fold under their parent; see below |
 | Drill-down | A member's profile card and session view in the center column, with Messages, Media, and Pull requests tabs |
 
-The Channels section follows the agent tree. `#general` shows top-level
+The room has **Messages** and **PRs** tabs. Messages shows top-level
 agents speaking to each other, their final results, and explicit messages
-to the owner. Only agents with children have their own channel. Agents without
-children stay visible in the member list and their parent channel. Each lead
-channel shows its direct children: their discussion, their final results, and the lead's messages to those children. Child results
-stay in the parent channel even though their automatic delivery still goes
-only to the owner. A child's message to its own parent stays in that parent's
-channel; it does not also appear in general or the parent's peer channel.
-Explicit additional recipients keep their own visibility. These channels change
-the view; they do not create separate backend rooms or change agent wake rules.
+to the owner. PRs shows open pull requests and saved merge progress.
 
 The member list folds subagents under their parent, like categories in
 Discord. A chevron left of the avatar opens or closes a subtree. By default,
-the channel you are in opens its lead and that lead's ancestors, so you see
-that team; every other subtree stays folded. In `#general` and workspace views
-only top-level sessions show. A folded row shows how many subagents it hides,
+the focused session and its ancestors open, so you see that team; every
+other subtree stays folded. In Messages and workspace views only top-level
+sessions show. A folded row shows how many subagents it hides,
 and a gold "N live" chip when some of them are working. A chevron click lasts
 for that room and view. Top-level trees with only finished or closed sessions
 move into a folded **Finished** group at the end of the list. The group opens by
-itself when it holds the current channel. **Select** mode opens every subtree
+itself when it holds the focused session. **Select** mode opens every subtree
 and the Finished group, so every session can be picked.
 
-A saved view for an agent without children opens its parent channel, or
-`#general` for a top-level agent. Channels with closed children remain available
-so their conversation history stays accessible.
+Saved links to old agent channels open Messages. Pins open the Messages
+tab at the pinned post, including posts in older history. Opening a workspace
+view does not mark hidden messages as read.
 
-Select an indented channel to drill down. The header breadcrumbs let you
-return to each parent channel or to `#general`. Pins open the channel that
-contains the pinned post, including posts in older history. Drafts and the
-saved view belong to the selected channel. Opening a workspace view does not
-mark hidden channel messages as read.
-
-A plain message in an agent channel goes to that agent's open direct children.
-If there are no open children, it goes to that agent. Explicit recipients
+Plain messages in Messages go to the top-level team. Explicit recipients
 and session commands keep their normal behavior. The recipient preview uses
 the same Go parser as send, so unknown inline tokens, escaped mentions, and
-mentions inside code do not override channel defaults. Plain messages in
-`#general` still go to the top-level team.
+mentions inside code do not override the default recipients.
 
 The header's left button, or `Ctrl+B`, hides the room sidebar and gives the
 feed its width; the rail stays. The app keeps that choice and the member list
 choice in the webview's local storage (`dyna.layout`). The same key holds
-the last open room and its view (general, an agent channel, files, changes,
-terminal, shell jobs). After a
+the last open room and its view (Messages, PRs, files, terminal, shell jobs). After a
 restart the app opens that room again, in the desktop and in the web app (each
 browser keeps its own). If the room no longer exists, the app opens the first
 active room. A link that names a room (`#room=…`) wins.
@@ -588,9 +572,9 @@ item also has `job`, the job's row with its tail.
 
 ## PR tracking
 
-Open **pull-requests** under Workspace to browse the room repository's
-GitHub pull requests and issues. Filter by state, tracked PRs, or GitHub
-search text. Read descriptions, comments, reviews, checks, and PR diffs.
+Open the room's **PRs** tab to browse its open GitHub pull requests and merge
+progress. Open **Issues** under Code to browse issues. Search narrows the lists.
+Read descriptions, comments, reviews, checks, and PR diffs.
 This uses the host's `gh` login; install the GitHub CLI and run `gh auth login`
 if needed. Lists show up to 60 results; search narrows larger lists.
 
@@ -649,13 +633,12 @@ CLI recovery commands remain available in `dyna guide recovery`.
 
 ## Review publishing
 
-Pull requests settings defaults to **Dyna only**. The room can explicitly choose
-**Publish on GitHub** for future review assignments. Active assignments keep
-their publishing mode. Local Markdown feedback, including file:line references,
+Agent reviews stay in Dyna, even when the room retains a GitHub publishing
+setting. Only the owner can publish GitHub comments or reviews and change
+the publishing setting. Local Markdown feedback, including file:line references,
 appears in the shared PR card in session and repository views. Old reviews
-with GitHub review IDs remain labeled **Published on GitHub**. Missing legacy
-settings are local. Desktop, paired web and Connect share PRSettings and
-SetPRSettings with the reviewPublishing field (local or github).
+with GitHub review IDs remain labeled **Published on GitHub**. Desktop, paired
+web and Connect share PRSettings and SetPRSettings.
 
 ## Harness installations
 

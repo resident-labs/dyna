@@ -339,10 +339,11 @@ old history and tracked PR ownership. See [README.md](README.md#transfer-to-a-ne
 
 ## PR review publishing
 
-The Pull requests dialog uses the same room reviewPublishing setting as the
-desktop: local by default, or an explicit github choice for future assignments.
-Local Markdown reviews appear in both tracked PR views. Existing public
-reviews stay public. See [Review publishing](README.md#review-publishing).
+Agent reviews stay in Dyna, even when the room retains a GitHub publishing
+setting. Only the owner can publish GitHub comments or reviews and change
+the publishing setting. Local Markdown reviews appear in both tracked PR
+views. Existing public reviews stay public.
+See [Review publishing](README.md#review-publishing).
 
 
 ## Child failure alerts
