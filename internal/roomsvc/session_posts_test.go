@@ -79,7 +79,7 @@ func TestTranscriptPostsMatchFeed(t *testing.T) {
 	byID := map[string]Post{}
 	for _, post := range feed.Posts {
 		// Feed views route the room feed only; transcripts have none.
-		post.Views = nil
+		post.setViews(nil)
 		byID[post.ID] = post
 	}
 	for i, id := range ids {
@@ -218,7 +218,7 @@ func TestTranscriptMediaIncludesWholeConversation(t *testing.T) {
 	}
 	byID := map[string]Post{}
 	for _, p := range feed.Posts {
-		p.Views = nil
+		p.setViews(nil)
 		byID[p.ID] = p
 	}
 	for _, exact := range []bool{false, true} {

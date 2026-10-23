@@ -101,6 +101,45 @@ func TestFeedPostsCarryViews(t *testing.T) {
 	}
 }
 
+// A browser tab open across an engine update keeps the bundle it was built
+// with, and a reset resyncs data without reloading the page. A new engine must
+// still answer the field names that bundle reads, or team posts and voice
+// lines appear in the room chat and the sidebar loses its counts.
+func TestFeedAnswersTheFieldsOfAnOldBundle(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	e.start(rec, "child", &lead)
+	e.say(rec, "child", "to the owner")
+	page, err := e.svc.FeedTail(rec.ID, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old struct {
+		Posts []struct {
+			Channels []string `json:"channels"`
+		} `json:"posts"`
+		ChannelUnread map[string]int `json:"channelUnread"`
+	}
+	if err := json.Unmarshal(raw, &old); err != nil {
+		t.Fatal(err)
+	}
+	last := page.Posts[len(page.Posts)-1]
+	if last.Views[0] != "channel:"+lead.ID {
+		t.Fatalf("the newest post shows in %v, want the lead view first", last.Views)
+	}
+	if got := old.Posts[len(old.Posts)-1].Channels; !reflect.DeepEqual(got, last.Views) {
+		t.Fatalf("old bundle channels = %v, want %v", got, last.Views)
+	}
+	if !reflect.DeepEqual(old.ChannelUnread, page.ViewUnread) || old.ChannelUnread["channel:"+lead.ID] == 0 {
+		t.Fatalf("old bundle counts = %v, want %v", old.ChannelUnread, page.ViewUnread)
+	}
+}
+
 // Voice's lines to the owner are heard live in the call and never shown in a
 // feed view, so they never count as unread: not in the room, not in the feed.
 func TestVoiceCallLinesAreNeverUnread(t *testing.T) {
