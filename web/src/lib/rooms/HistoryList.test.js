@@ -362,3 +362,20 @@ test('a page request that outlives its view asks for nothing more', { timeout: 9
     assert.equal(calls, 2, 'the destroyed list asks for nothing more')
   } finally { await h.close() }
 })
+
+test('a local jump appears half a viewport from the end and does not reload history', async () => {
+  const h = await harness()
+  let calls = 0
+  try {
+    h.update({ onpresent: async () => { calls++; return true } })
+    h.mount(async () => false)
+    await h.tick()
+    h.scroll(h.target.scrollHeight - h.target.clientHeight - 250)
+    const jump = h.target.querySelector('[aria-label="Jump to present"]')
+    assert.ok(jump)
+    jump.click()
+    await h.tick()
+    assert.equal(calls, 0)
+    assert.ok(h.target.scrollHeight - h.target.scrollTop - h.target.clientHeight < 48)
+  } finally { await h.close() }
+})
