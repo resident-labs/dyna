@@ -1,6 +1,7 @@
 <script lang="ts">
   // The Expedited badge. Callers show it only for an expedited goal, the
-  // agents that hold it and their children, or a PR linked to it.
+  // agents that do its items (or hold it when it has none) with their
+  // children, or a PR linked to it.
   import Chip from '../ui/Chip.svelte'
   let { short = false }: { short?: boolean } = $props()
 </script>

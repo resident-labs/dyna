@@ -22,6 +22,36 @@ test('the scope covers the holder, its descendants and linked PRs, and ends at t
   assert.equal(isExpedited({ ...goal('g1', ['r:a'], { expediteUntil: '2026-10-23T12:00:00Z' }), state: 'done' }, now), false)
 })
 
+test('items narrow the scope to their assignees, and root never hands the badge to every child', () => {
+  const root = { id: 'root', address: 'r:root', role: 'root' }
+  const lead = { id: 'lead', address: 'r:lead', parent: 'root' }
+  const worker = { id: 'worker', address: 'r:worker', parent: 'lead' }
+  const other = { id: 'other', address: 'r:other', parent: 'root' }
+  const tree = [root, lead, worker, other]
+  const until = { expediteUntil: '2026-10-23T12:00:00Z' }
+  // Root holds the goal and every session is its child. A goal with items goes
+  // to the item assignees, their children and the linked PRs, not to root's
+  // other children.
+  const held = {
+    ...goal('g1', ['r:root'], until),
+    items: [{ id: 'i1', state: 'open', assignee: 'lead' }, { id: 'i2', state: 'done', assignee: 'other' }],
+  }
+  const scope = expediteScope([held], tree, now)
+  assert.deepEqual([...scope.agents].sort(), ['lead', 'root', 'worker'])
+  assert.equal(prExpedited(scope, { goalId: 'g1' }), true)
+  // A goal without items covers the holder and its children...
+  assert.deepEqual([...expediteScope([goal('g2', ['r:lead'], until)], tree, now).agents].sort(), ['lead', 'worker'])
+  // ...but a root or owner holder never covers all of its children.
+  assert.deepEqual([...expediteScope([goal('g3', ['r:root'], until)], tree, now).agents], ['root'])
+  assert.deepEqual([...expediteScope([goal('g4', ['r:owner'], until)], [{ id: 'owner', address: 'r:owner', owner: true }, ...tree], now).agents], ['owner'])
+  // A Room goal has no holder: a shared goal with an item covers the assignee.
+  const shared = { ...goal('g5', [], until), shared: true, items: [{ id: 'i1', state: 'open', assignee: 'r:other' }] }
+  assert.deepEqual([...expediteScope([shared], tree, now).agents], ['other'])
+  // An item assigned to root itself does not spread to root's children.
+  const byRoot = { ...goal('g6', [], until), shared: true, items: [{ id: 'i1', state: 'open', assignee: 'r:root' }] }
+  assert.deepEqual([...expediteScope([byRoot], tree, now).agents], ['root'])
+})
+
 test('an agent without a goal uses its nearest ancestor with one; several goals stay separate', () => {
   const goals = [goal('g1', ['r:a']), goal('g2', ['a']), goal('g3', ['d'])]
   assert.deepEqual(heldGoals(c, members, goals).map((g) => g.id), ['g1', 'g2'])
