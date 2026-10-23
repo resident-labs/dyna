@@ -185,3 +185,15 @@ test('local issues remain readable and actionable when GitHub fails', async () =
     assert.match(element(r.target, '.local-detail').textContent || '', /web\/Example.svelte:12/)
   } finally { await r.done() }
 })
+
+
+test('an unresolved export is history, not a closed GitHub issue', () => {
+  const remote = issue(20, 'needs-owner')
+  const exported = { ...localIssue, state: 'exported', githubUrl: remote.url }
+  assert.deepEqual(unifiedIssues([], [exported], 'all', 'closed', ''), [])
+  assert.deepEqual(unifiedIssues([], [exported], 'all', 'open', ''), [])
+  const history = unifiedIssues([], [exported], 'all', 'all', '')
+  assert.equal(history[0]?.state, 'UNKNOWN')
+  assert.equal(history[0]?.url, remote.url)
+  assert.equal(unifiedIssues([remote], [exported], 'all', 'open', '')[0]?.state, 'OPEN')
+})
