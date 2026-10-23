@@ -17,7 +17,7 @@ import (
 
 // SmellsPerDay caps the smells the librarian files for one repository in a
 // UTC day.
-const SmellsPerDay = 3
+const SmellsPerDay = 10
 
 // Issues is the room issue board that smells use.
 type Issues interface {

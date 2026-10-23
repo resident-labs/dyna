@@ -49,14 +49,19 @@ func (s Service) Enable(ctx context.Context, actor authority.Actor, repoDir, roo
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return r, err
 	}
-	if err == nil && old.RoomID != roomID && old.Session != "" {
-		if err := s.Sessions.Close(ctx, old.Session); err != nil {
-			return r, err
+	if err == nil && old.RoomID != roomID {
+		for _, id := range []string{old.Session, old.SmellSession} {
+			if id != "" {
+				if err := s.Sessions.Close(ctx, id); err != nil {
+					return r, err
+				}
+			}
 		}
 	}
 	if _, err := (librarianstate.Store{DataDir: s.DataDir}).Update(r.ID, true, func(st *librarianstate.State) error {
 		if st.RoomID != roomID {
 			st.Session, st.Pending, st.PendingTurn = "", "", 0
+			st.SmellSession, st.SmellPending, st.SmellPendingTurn = "", "", 0
 		}
 		st.Main, st.RoomID = r.Main, roomID
 		return nil
@@ -121,13 +126,14 @@ func (s Service) Disable(ctx context.Context, actor authority.Actor, repoDir str
 	if err != nil {
 		return r, err
 	}
-	if st.Session == "" {
-		return r, nil
+	for _, id := range []string{st.Session, st.SmellSession} {
+		if id != "" {
+			if err := s.Sessions.Close(ctx, id); err != nil {
+				return r, err
+			}
+		}
 	}
-	if err := s.Sessions.Close(ctx, st.Session); err != nil {
-		return r, err
-	}
-	_, err = librarianstate.Store{DataDir: s.DataDir}.Update(r.ID, false, func(st *librarianstate.State) error { st.Session = ""; return nil })
+	_, err = librarianstate.Store{DataDir: s.DataDir}.Update(r.ID, false, func(st *librarianstate.State) error { st.Session, st.SmellSession = "", ""; return nil })
 	return r, err
 }
 
