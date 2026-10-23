@@ -93,6 +93,9 @@ func (s *Store) Issues(roomID string, all bool) ([]Issue, error) {
 // Only the engine calls it, at start (requirement 41).
 func Migrate(dataDir string) error {
 	s := &Store{Root: filepath.Join(dataDir, "rooms")}
+	if err := s.migrateRecords(); err != nil {
+		return err
+	}
 	if _, err := s.issuesDB(); err != nil {
 		return err
 	}
