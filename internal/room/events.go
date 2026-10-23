@@ -23,6 +23,32 @@ type EventFamily string
 // EventType is the Notice.Kind of a system event post.
 type EventType string
 
+// EventProducer names the engine service or worker that observed an event. The
+// producer is data on the post, so a card can name where a fact came from
+// without inventing a sender.
+//
+// TODO: add the remaining producers when their families are typed: the
+// doctor, the engine, CI health, the merge steward and the PR watcher.
+type EventProducer string
+
+// Producers.
+const (
+	// ProducerParentCheckin is the scheduler that reminds a parent to look at
+	// its children.
+	ProducerParentCheckin EventProducer = "parent-checkin"
+)
+
+// Audience is who an event's post belongs to. A room event is part of the
+// room's own conversation. A session event belongs to the one session it is
+// addressed to, and lives in that session's DM.
+type Audience string
+
+// Audiences.
+const (
+	AudienceRoom    Audience = "room"
+	AudienceSession Audience = "session"
+)
+
 // WakeRule says whether an event starts or steers a session.
 type WakeRule string
 
@@ -659,10 +685,12 @@ type EventSpec struct {
 	// TextNoSubject is the summary for an event that names no subject, such
 	// as a cleanup failure that has no single tree.
 	TextNoSubject string
-	// Sender is the post's sender when the event is not the room's own
-	// service. The check-in keeps its system sender, because a parent reads
-	// it as the scheduler's own input. Empty means the engine sends it.
-	Sender string
+	// Audience is who the post belongs to. Empty means the room's own
+	// conversation.
+	Audience Audience
+	// Producers lists the services that may post this event, and the producer
+	// it names. Empty means the engine itself posts it.
+	Producers []EventProducer
 }
 
 // eventSpecs is the registry of every system event that PostEvent may store.
@@ -678,6 +706,7 @@ var eventSpecs = []EventSpec{
 		Quiet:    true,
 		Wake:     WakeNever,
 		Once:     true,
+		Audience: AudienceSession,
 		Text:     "Worktree kept at {path}: branch {branch}, ahead {ahead}, dirty: {dirty}.",
 		// The keep failure names no tree.
 		TextNoSubject: "Worktree cleanup could not keep the session's trees.",
@@ -778,14 +807,15 @@ var eventSpecs = []EventSpec{
 	// A check-in starts the parent, as the free-text check-in always did, and
 	// reaches no other session.
 	{
-		Family:   FamilyCheckin,
-		Type:     TypeSummary,
-		Renderer: "CheckinCard",
-		Payload:  reflect.TypeOf(CheckinEvent{}),
-		Wake:     WakeTarget,
-		Once:     true,
-		Text:     checkinText,
-		Sender:   ParentCheckInSender,
+		Family:    FamilyCheckin,
+		Type:      TypeSummary,
+		Renderer:  "CheckinCard",
+		Payload:   reflect.TypeOf(CheckinEvent{}),
+		Wake:      WakeTarget,
+		Once:      true,
+		Text:      checkinText,
+		Audience:  AudienceSession,
+		Producers: []EventProducer{ProducerParentCheckin},
 	},
 	// A slow test is a quiet CI health line in the owner feed.
 	{
@@ -1132,6 +1162,9 @@ type PostEventInput struct {
 	// RoomService sends the post as the room's own service, such as the PR
 	// watcher. The default sender is the engine.
 	RoomService bool
+	// Producer names the service that observed the event. A spec that lists
+	// producers accepts only one of them, and requires one.
+	Producer EventProducer
 	// SessionIDs binds participant addresses to exact sessions.
 	SessionIDs map[string]string
 	ReplyTo    string
@@ -1164,13 +1197,14 @@ func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
-	// A caller cannot choose the sender of an event post: it is the engine, a
-	// sender the registry fixes for the event, or the room's own service.
+	// A caller cannot choose the sender of an event post: it is the engine, or
+	// the room's own service. A service that observes an event is the event's
+	// producer, which is data on the post, never a sender.
+	if len(spec.Producers) > 0 && !slices.Contains(spec.Producers, in.Producer) {
+		return Message{}, fmt.Errorf("a %s/%s event is posted by %v, not %q", spec.Family, spec.Type, spec.Producers, in.Producer)
+	}
 	from := EngineSender
-	switch {
-	case spec.Sender != "":
-		from = spec.Sender
-	case in.RoomService:
+	if in.RoomService {
 		rec, err := s.readRecord(in.RoomID)
 		if err != nil {
 			return Message{}, err
@@ -1193,7 +1227,7 @@ func (s *Store) PostEventInput(in PostEventInput) (Message, error) {
 		ID:         id,
 		From:       from,
 		Kind:       string(spec.Family),
-		Notice:     EventNotice{Kind: string(spec.Type)},
+		Notice:     EventNotice{Kind: string(spec.Type), Producer: in.Producer},
 		payload:    EventPayload{raw: payload},
 		To:         in.To,
 		Via:        in.Via,
@@ -1424,6 +1458,22 @@ func (m Message) Rule() (RuleEvent, bool) {
 		return RuleEvent{}, false
 	}
 	return ev, true
+}
+
+// EventAudience returns the audience of a stored event. A post that is not a
+// registered event, and every agent message, belongs to the room.
+func (m Message) EventAudience() Audience {
+	if spec, ok := eventSpecFor(m.Kind, m.Notice.Kind); ok {
+		return spec.Audience
+	}
+	return AudienceRoom
+}
+
+// EngineEvent reports a registered system event. Its sender is the engine, so
+// a post that carries the room's own address is still not the root's writing.
+func (m Message) EngineEvent() bool {
+	_, ok := eventSpecFor(m.Kind, m.Notice.Kind)
+	return ok
 }
 
 // Worktree returns the payload of a kept-worktree event. It decodes the stored

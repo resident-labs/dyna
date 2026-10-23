@@ -3,6 +3,7 @@ import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
 import type { EventPayload } from './events.gen.ts'
 import { hookEvent, issueEvent, mergeEvent, prEvent } from './eventPayloads.ts'
+import { eventSpecs } from './events.gen.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
 // fixtures of a test both fit it.
@@ -88,6 +89,20 @@ export function rowPost<P extends FeedInput>(row: FeedRow<P> | undefined): P | u
 // rowPosts lists every post a row shows, oldest first.
 export function rowPosts<P extends FeedInput>(row: FeedRow<P> | undefined): P[] {
   return row?.kind === 'post' ? row.posts ?? [row.post] : []
+}
+
+// roomPosts keeps the posts of the room's own conversation. A session-audience
+// event belongs to the one session it names and lives in that session's DM;
+// the room lists it only when the owner is a recipient. The decision reads the
+// typed audience, never the addresses it was posted to.
+//
+// TODO: the conversation series replaces this with the stored home
+// (Message.Conversation and post_homes).
+export function roomPosts<P extends FeedInput>(posts: readonly P[], owner: string): P[] {
+  return posts.filter((post) => {
+    const spec = eventSpecs.find((entry) => entry.family === post.kind && entry.type === post.notice?.kind)
+    return spec?.audience !== 'session' || (post.to ?? []).includes(owner)
+  })
 }
 
 // foldKey names a row that folds on one subject: one card per PR, one card

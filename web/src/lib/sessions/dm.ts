@@ -2,7 +2,7 @@ import type { Member, Post } from '../api/room.ts'
 import type { Item, Turn, Usage } from '../api/session.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { isNote, noteData } from '../ui/notices.ts'
-import { registeredEvent } from '../rooms/eventPayloads.ts'
+import { legacyEvent, registeredEvent } from '../rooms/eventPayloads.ts'
 import { userText } from './userText.ts'
 import { duration, short, tokens } from '../ui/format.ts'
 
@@ -280,7 +280,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
         continue
       }
       if (input && it.postId) {
-        if (post && registeredEvent(post)) {
+        if (post && (registeredEvent(post) || legacyEvent(post))) {
           // A notice that opened or steered this turn draws its card, the same
           // one the feed shows, instead of its raw text.
           matched.add(it.postId)
@@ -331,7 +331,10 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
       if (!matched.has(p.id)) events.push({ kind: 'voice', key: `post:${p.id}`, ts: p.ts, text: p.text, post: p, delivery: receipts.get(p.id)?.state === 'waiting' ? 'queued' : undefined })
       continue
     }
-    const keys = threadKeys(p, address, room.name)
+    // An engine event is not a conversation with a peer: it draws its card, so
+    // it opens no thread and names no member.
+    const engine = registeredEvent(p) || legacyEvent(p)
+    const keys = engine ? [] : threadKeys(p, address, room.name)
     for (const key of keys) threadFor(key).posts.push(receiptOf(p))
     // A carried post draws its own message row; the queue's receipt does not
     // replace it, because the row below takes the delivery from the turn item.
@@ -340,6 +343,12 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   for (const q of receipts.values()) {
     if (matched.has(q.id) || carried.has(q.id) || q.state === 'delivered') continue
     const post = posts.get(q.id)
+    if (post && (registeredEvent(post) || legacyEvent(post))) {
+      // A queued engine event draws its card, not a bubble with the raw text
+      // and not a thread with the engine as a peer.
+      events.push({ kind: 'system-event', key: `post:${q.id}`, ts: post.ts ?? q.ts, post, author: post.from, text: post.text, delivery: q.state === 'waiting' ? 'queued' : 'delivered' })
+      continue
+    }
     if (q.from === voice) {
       if (!post) events.push({ kind: 'voice', key: `post:${q.id}`, ts: q.ts, text: q.text, delivery: q.state === 'waiting' ? 'queued' : 'delivered' })
       continue
@@ -402,7 +411,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
     if (event.kind === 'post') {
       const p = event.post
       if (!event.suppressMessage && (!event.threads.length || (p.from === address && (p.to || []).includes(room.name)))) {
-        if (registeredEvent(p)) {
+        if (registeredEvent(p) || legacyEvent(p)) {
           // A registered event is a card, not a message. The agent text stays
           // on the card, behind its Details toggle.
           rows.push({ kind: 'system-event', key: `post:${p.id}`, ts: p.ts, post: p, author: p.from, text: p.text })

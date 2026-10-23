@@ -347,6 +347,21 @@ test('a compaction divider is one row that the compaction setting hides', () => 
   assert.deepEqual(rows({ compaction: false }).map((r) => r.kind), ['turn', 'message', 'message'])
   assert.equal(need(rows({}).find((r) => r.kind === 'compaction')).key, 'item:1:1')
 })
+test('a queued check-in draws its card, not a bubble with its raw text', () => {
+	const checkin = {
+		...post('c1', 'dyna', [address], 5, { kind: 'checkin', notice: { kind: 'summary', producer: 'parent-checkin' }, text: 'Check on your children.' }),
+		payload: {
+			parent: 'ses_1', windowStart: 1, counts: { running: 0, queued: 0, idle: 1 },
+			children: [{ name: 'lead', state: 'idle' as const, age: '5m', goal: 'g1: work', pr: 'no open PRs' }],
+		},
+	}
+	const receipt: Receipt = { id: 'c1', from: 'dyna', text: 'Check on your children.', ts: ts(5), state: 'waiting' }
+	const rows = dmView({ address, turns: [], posts: [checkin] }, room, undefined, [receipt]).rows
+	const row = need(rows.find((r) => r.key === 'post:c1'))
+	assert.equal(row.kind, 'system-event')
+	if (row.kind === 'system-event') assert.equal(row.post.kind, 'checkin')
+})
+
 // Voice's request is the owner's words: it shows inline as one voice row in
 // every delivery state, never as a Voice thread. The call's own lines are
 // not requests.

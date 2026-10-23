@@ -29,12 +29,15 @@
     const total = children.length
     return total === 1 ? '1 child' : `${total} children`
   })
+  // The card names the service that looked, never a sender.
+  const producers: Record<string, string> = { 'parent-checkin': 'Parent check-in' }
+  let producer = $derived(notice?.producer ? producers[notice.producer] ?? '' : '')
 </script>
 
 <div class="card {surface}" data-id={post.id}>
   <div class="sum">
     <span class="glyph" aria-hidden="true">⌥</span>
-    <span class="title">Check-in · {title}</span>
+    <span class="title">{producer || 'Check-in'} · {title}</span>
     {#each counts as entry (entry.state)}
       <span class="fact {stateTone[entry.state]}"><b>{entry.count}</b> {stateWords[entry.state]}</span>
     {/each}

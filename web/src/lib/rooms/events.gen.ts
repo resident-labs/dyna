@@ -175,6 +175,8 @@ export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "
 export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update"
 export type WakeRule = "never" | "target" | "root-if-needed"
 
+export type Audience = "room" | "session"
+
 export interface EventSpecEntry {
   family: EventFamily
   type: EventType
@@ -182,6 +184,7 @@ export interface EventSpecEntry {
   quiet: boolean
   wake: WakeRule
   once: boolean
+  audience: Audience
   text: string
   textNoSubject?: string
 }
@@ -194,6 +197,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "session",
     text: "Worktree kept at {path}: branch {branch}, ahead {ahead}, dirty: {dirty}.",
     textNoSubject: "Worktree cleanup could not keep the session's trees.",
   },
@@ -204,6 +208,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "Hook {hook} started for {event} (run {runId}).",
   },
   {
@@ -213,6 +218,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}).",
   },
   {
@@ -222,6 +228,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "{filer} filed issue D-{number}: {title}",
   },
   {
@@ -231,6 +238,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "{actor} changed issue D-{number} to {state}: {title}",
   },
   {
@@ -240,6 +248,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "{actor} closed issue D-{number}: {reason}",
   },
   {
@@ -249,6 +258,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "{actor} added goal {goalId}: {title}",
   },
   {
@@ -258,6 +268,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "{actor} edited goal {goalId}: {title}",
   },
   {
@@ -267,6 +278,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "Goal {goalId} {title} is done: {summary}",
   },
   {
@@ -276,6 +288,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "{actor} dropped goal {goalId}: {title}",
   },
   {
@@ -285,6 +298,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: true,
+    audience: "session",
     text: "Check on your children. For each one below, confirm it is making progress. If one is stuck, idle with unfinished work, or waiting for something that already happened, nudge it, restart it, or take over its work. Close children whose work is done. If everything is on track, end your turn without posting.",
   },
   {
@@ -294,6 +308,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "{count} slow tests crossed the CI limit in run {run}.",
   },
   {
@@ -303,6 +318,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: true,
+    audience: "room",
     text: "{actor} {verb} the {scope} rule {ruleId}",
   },
   {
@@ -312,6 +328,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} queued for {base} in {repo}.",
   },
   {
@@ -321,6 +338,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} started for {base} in {repo}.",
   },
   {
@@ -330,6 +348,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} checks: {summary}.",
   },
   {
@@ -339,6 +358,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} landed {commit} on {base}.",
   },
   {
@@ -348,6 +368,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} failed: {reason}.",
   },
   {
@@ -357,6 +378,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "Merge trial {trialId} returned by root: {reason}.",
   },
   {
@@ -366,6 +388,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "Merge conflict for {label} on {base}.",
   },
   {
@@ -375,6 +398,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "Merge rollback for {label} on {base}.",
   },
   {
@@ -384,6 +408,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: true,
     wake: "never",
     once: false,
+    audience: "room",
     text: "{note}",
   },
   {
@@ -393,6 +418,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\n{label} opened in {repo}. Review it at {url}",
   },
   {
@@ -402,6 +428,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\n{label} is ready to land at {head}.",
   },
   {
@@ -411,6 +438,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\n{label} at {head} approved by its Dyna reviewer:",
   },
   {
@@ -420,6 +448,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\nReviewer requests changes for {label} at {head}:",
   },
   {
@@ -429,6 +458,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\nCI failed ({ciAttempt}/{ciMax}): {summary}. Fix the failure and push to this PR.",
   },
   {
@@ -438,6 +468,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\n{label} failed CI three times in a row. Later CI failures will not wake the author. Inspect dyna git pr show {url}. Failed jobs: {summary}.",
   },
   {
@@ -447,6 +478,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\nCI passed on {label} at {head}.",
   },
   {
@@ -456,6 +488,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}\n\n{label} at {head} was returned to you.",
   },
   {
@@ -465,6 +498,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
   {
@@ -474,6 +508,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
   {
@@ -483,6 +518,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
   {
@@ -492,6 +528,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
   {
@@ -501,6 +538,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
   {
@@ -510,6 +548,7 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     quiet: false,
     wake: "target",
     once: false,
+    audience: "room",
     text: "{location}\nHead: {head}",
   },
 ]

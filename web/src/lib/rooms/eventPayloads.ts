@@ -8,6 +8,7 @@ import type { CheckinEvent, EventPayload, GoalEvent, HookEvent, IssueEvent, Merg
 // stored message and a test fixture all fit it.
 export interface EventPost {
   kind?: string
+  from?: string
   notice?: { kind: string } | null
   payload?: EventPayload
 }
@@ -49,6 +50,15 @@ export function mergeEvent(post: EventPost): MergeEvent | undefined {
 export function mergeDecision(post: EventPost): MergeDecisionEvent | undefined {
   if (post.kind !== 'merge' || post.notice?.kind !== 'decision') return undefined
   return isMergeDecisionEvent(post.payload) ? post.payload : undefined
+}
+
+// legacyEvent reports a post that names no event type but is still an engine
+// event, so it draws its family's card instead of a message bubble.
+// TODO: legacy/shim remove later — the scheduler posted check-ins from
+// "system:parent-checkin" before the typed events; remove when that history
+// ages out.
+export function legacyEvent(post: EventPost): boolean {
+  return post.kind === 'checkin' && post.from === 'system:parent-checkin'
 }
 
 // issueEvent returns the typed payload of an issue post. A post stored before
