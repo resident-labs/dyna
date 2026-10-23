@@ -100,12 +100,10 @@ type engineCaller interface {
 // a change on the engine side cannot silently reshape a row.
 type serviceRow struct {
 	Role     string   `json:"role"`
-	Name     string   `json:"name"`
 	Profile  string   `json:"profile"`
 	Pinned   string   `json:"pinned"`
 	Source   string   `json:"source"`
 	Reason   string   `json:"reason"`
-	Sessions int      `json:"sessions"`
 	Profiles []string `json:"profiles"`
 }
 
@@ -114,17 +112,16 @@ type reviewerSlot struct {
 		Address string `json:"address"`
 		Status  string `json:"status"`
 	} `json:"session"`
-	Profile string `json:"profile"`
 	Current *struct {
 		PR    int    `json:"pr"`
 		Title string `json:"title"`
 	} `json:"current"`
-	Status    string `json:"status"`
-	LastError string `json:"lastError"`
 }
 
 type reviewerStatus struct {
-	Enabled   bool           `json:"enabled"`
+	Enabled bool `json:"enabled"`
+	// Profile is the one the next review uses; it backs the profile column
+	// when the service list cannot be read.
 	Profile   string         `json:"profile"`
 	LastError string         `json:"lastError"`
 	Reviewers []reviewerSlot `json:"reviewers"`
@@ -253,9 +250,9 @@ func readFacts(ctx context.Context, call engineCaller, r refs) facts {
 		}
 	}
 	if out.refs.Room != "" {
-		if err := call.Call(ctx, "ListServices", []any{out.refs.Room}, &out.services); err != nil {
-			out.errs["ListServices"] = err.Error()
-		}
+		// A service list that cannot be read leaves the profile columns empty;
+		// the call that owns each profile reports its own error.
+		_ = call.Call(ctx, "ListServices", []any{out.refs.Room}, &out.services)
 		if err := call.Call(ctx, "ReviewerStatus", []any{out.refs.Room}, &out.reviewer); err != nil {
 			out.errs["ReviewerStatus"] = err.Error()
 		}
@@ -403,6 +400,9 @@ func reviewerRow(f facts) Row {
 		row.Profile, row.Pinned, row.Source, row.Profiles, row.Error = listed.Profile, listed.Pinned, listed.Source, listed.Profiles, listed.Reason
 	}
 	st := f.reviewer
+	if row.Profile == "" && st.Profile != "" {
+		row.Profile, row.Source = st.Profile, "pinned"
+	}
 	switch {
 	case f.errs["room"] != "":
 		row.State, row.Error = "unknown", f.errs["room"]
