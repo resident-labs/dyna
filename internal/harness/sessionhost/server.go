@@ -183,6 +183,10 @@ func (c *hostConn) loop() {
 			c.start(m)
 			continue
 		}
+		if m.Op == opCloseKey {
+			c.reply(c.sv.host.closeKey(m.Key), message{})
+			continue
+		}
 		if m.Op == opShutdown {
 			c.sv.shutdown()
 			c.reply(nil, message{})
@@ -257,7 +261,7 @@ func (c *hostConn) start(m message) {
 		}
 		c.sess = s.(*localSession)
 	}
-	c.reply(nil, message{Started: started, Pid: pid, Fresh: m.Op == opReplace})
+	c.reply(nil, message{Connection: c.sess.Connection(), Started: started, Pid: pid, Fresh: m.Op == opReplace})
 	c.startPump()
 }
 

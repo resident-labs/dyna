@@ -205,6 +205,10 @@ type commandSpec struct {
 	codexKey    string
 	codexThread string
 	codexPolicy codexTurnPolicy
+	// openCode runs the pinned v2 HTTP protocol on a retained server.
+	openCode                     bool
+	openCodeKey, openCodeSession string
+	openCodeOperation            string
 	// muse runs MSP on the shared session host.
 	muse                         bool
 	museKey, museSession         string

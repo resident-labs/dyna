@@ -40,6 +40,9 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 	if spec.streamInput {
 		return runClaudeTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
 	}
+	if spec.openCode {
+		return runOpenCodeTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
+	}
 	if spec.muse {
 		return runMuseTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
 	}
@@ -516,6 +519,9 @@ func runCompaction(ctx context.Context, p profile.Profile, cwd string, spec comm
 }
 
 func runCompactCommand(ctx context.Context, p profile.Profile, cwd string, spec commandSpec, steering *steeringSupervisor, execution ExecutionOptions, admit func(context.Context) error) error {
+	if spec.openCode {
+		return runOpenCodeCompact(ctx, p, cwd, spec, execution, admit)
+	}
 	if spec.rpc {
 		return runPiCompact(ctx, p, cwd, spec, steering, execution, admit)
 	}

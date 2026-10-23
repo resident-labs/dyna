@@ -111,9 +111,13 @@ func TestSocketHostReusesChildAcrossProcesses(t *testing.T) {
 	h := realHost(t)
 	pids, refs := &pidRecorder{}, &refRecorder{}
 	launch := childLaunch("echo", "fake:cross", "f1", pids, refs)
+	launch.Connection = []byte("private-endpoint")
 	s1, err := h.Session(context.Background(), launch)
 	if err != nil {
 		t.Fatalf("first session: %v", err)
+	}
+	if string(s1.(ConnectionSession).Connection()) != "private-endpoint" {
+		t.Fatal("lost private connection data")
 	}
 	clientRun := func(fingerprints string) []string {
 		cmd := exec.Command(os.Args[0])
@@ -372,4 +376,36 @@ func TestDefaultDirStaysShortUnderLongTempDir(t *testing.T) {
 	if socket, _ := hostPaths(dir, "key"); len(socket) > 104 {
 		t.Fatalf("socket path is %d bytes: %s", len(socket), socket)
 	}
+}
+
+func TestSocketCloseKeyStopsEveryAccountHome(t *testing.T) {
+	h := realHost(t)
+	pids, refs := &pidRecorder{}, &refRecorder{}
+	start := func(key string) Session {
+		t.Helper()
+		s, err := h.Session(t.Context(), childLaunch("echo", key, "f1", pids, refs))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := roundTrip(t, s, "ready"); got != "got:ready" {
+			t.Fatal(got)
+		}
+		return s
+	}
+	a := start("session/closed\x00/account-a")
+	b := start("session/closed\x00/account-b")
+	other := start("session/other\x00/account-a")
+	if err := h.closeKey(t.Context(), "session/closed"); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range []Session{a, b} {
+		if err := s.Write([]byte("after close")); err == nil {
+			t.Fatal("closed session retained a live child")
+		}
+		s.Detach(DetachIdle)
+	}
+	if got := roundTrip(t, other, "still alive"); got != "got:still alive" {
+		t.Fatal("closed another session")
+	}
+	other.Detach(DetachIdle)
 }

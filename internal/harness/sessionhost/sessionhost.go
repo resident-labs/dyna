@@ -44,6 +44,10 @@ const (
 // fingerprint differs is replaced, and the harness session file carries the
 // conversation. Env travels only over the 0600 socket, never argv.
 type Launch struct {
+	// Connection is opaque, private connection data retained with the child.
+	// It travels only over the protected host socket, never in argv or files.
+	Connection []byte
+
 	Harness     string
 	Key         string
 	Fingerprint string
@@ -114,3 +118,6 @@ func Default() Host { return defaultHost }
 // ResetForTest stops the child and host of every session this process
 // attached through Default; tests use it to leave nothing behind.
 func ResetForTest() { defaultHost.shutdownUsed() }
+
+// ConnectionSession exposes the connection data of the retained child.
+type ConnectionSession interface{ Connection() []byte }

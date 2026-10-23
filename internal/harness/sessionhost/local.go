@@ -123,6 +123,8 @@ func (h *localHost) closeAll() {
 // the child inside the same session entry. processguard is its only
 // supervisor: spawn, wait, signal and liveness reference.
 type child struct {
+	connection []byte
+
 	stdin      io.WriteCloser
 	controller *processguard.Controller
 	guardRef   processguard.Reference
@@ -473,7 +475,7 @@ func (s *localSession) startChild(launch Launch) error {
 	if err != nil {
 		return err
 	}
-	c := &child{stdin: stdin, exited: make(chan struct{})}
+	c := &child{stdin: stdin, exited: make(chan struct{}), connection: append([]byte(nil), launch.Connection...)}
 	cmd.Stdout = &lineWriter{s: s}
 	c.stderrPipe, err = newStderrPipe(&c.stderr)
 	if err != nil {
@@ -542,4 +544,36 @@ func (s *localSession) supervise(c *child) {
 	}
 	close(c.exited)
 	s.wake()
+}
+
+func (s *localSession) Connection() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.child == nil {
+		return nil
+	}
+	return append([]byte(nil), s.child.connection...)
+}
+
+// closeKey stops every account-home variant of a caller key.
+func (h *localHost) closeKey(key string) error {
+	if key == "" {
+		return errors.New("session key is empty")
+	}
+	h.mu.Lock()
+	var sessions []*localSession
+	for _, s := range h.sessions {
+		_, caller, _ := strings.Cut(s.key, "\x00")
+		if caller == key || strings.HasPrefix(caller, key+"\x00") {
+			sessions = append(sessions, s)
+		}
+	}
+	h.mu.Unlock()
+	var failures []error
+	for _, s := range sessions {
+		if err := s.Close(); err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
