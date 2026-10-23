@@ -230,14 +230,6 @@ func removeClosedSessionLogs(ctx context.Context, id string, now time.Time, dry 
 	}
 	defer r.Close()
 	var meta sessionlife.Snapshot
-	read := func(path string, value any) error {
-		f, err := r.Open(path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		return json.NewDecoder(f).Decode(value)
-	}
 	eligible := func() (bool, error) {
 		var err error
 		if meta, err = sessionlife.Read(runstore.SessionsDir(), id); err != nil {
@@ -273,17 +265,7 @@ func removeClosedSessionLogs(ctx context.Context, id string, now time.Time, dry 
 		if err != nil {
 			return 0, err
 		}
-		// TODO: legacy/shim remove later — a turn that only an earlier release wrote has no row until a read imports it; its file is the record. Remove with item 31. A row that is not finished keeps the logs, the safe side, even when a newer file says the turn ended.
-		if !ok {
-			var turn struct {
-				Status string `json:"status"`
-			}
-			if err := read(fmt.Sprintf("turns/%d.json", meta.Turns), &turn); err != nil {
-				return 0, err
-			}
-			status = turn.Status
-		}
-		if !sessionlife.TerminalTurn(status) {
+		if !ok || !sessionlife.TerminalTurn(status) {
 			return 0, nil
 		}
 	}
