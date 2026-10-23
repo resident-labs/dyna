@@ -1,5 +1,5 @@
 // Plain computer activity text shared by the pill and compact DM rows.
-import { appName } from './computers.js'
+import { appName } from './computers.ts'
 import type { ComputerInfo } from '../api/computer.ts'
 
 export const PILL_MAX = 48

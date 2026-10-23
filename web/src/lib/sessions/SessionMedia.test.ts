@@ -3,15 +3,20 @@ import assert from 'node:assert/strict'
 import { build } from 'esbuild'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 
+// MediaAttachment is the part of an attachment the media grid reads.
+type MediaAttachment = { id: string; name: string; mime: string }
+
 const compiled = await build({
   bundle: true, write: false, platform: 'node', format: 'esm', logLevel: 'silent',
   stdin: { contents: "export { default as Media } from './SessionMedia.svelte'; export { render } from 'svelte/server'", resolveDir: new URL('.', import.meta.url).pathname },
   plugins: [svelteEsbuildPlugin('server')],
 })
-const { Media, render } = await import('data:text/javascript;base64,' + Buffer.from(compiled.outputFiles[0].contents).toString('base64'))
-const post = (id, day, attachments) => ({ id, ts: Date.UTC(2026, 9, day, 12), from: 'room:agent', to: ['room'], text: 'Text', attachments })
+const output = compiled.outputFiles?.[0]
+assert.ok(output)
+const { Media, render } = await import('data:text/javascript;base64,' + Buffer.from(output.contents).toString('base64'))
+const post = (id: string, day: number, attachments?: MediaAttachment[]) => ({ id, ts: Date.UTC(2026, 9, day, 12), from: 'room:agent', to: ['room'], text: 'Text', attachments })
 const room = { id: 'room', name: 'room' }
-const html = posts => render(Media, { props: { room, posts, onopenfile() {} } }).body
+const html = (posts: ReturnType<typeof post>[]): string => render(Media, { props: { room, posts, onopenfile() {} } }).body
 
 test('media groups only attachment days and text-only input shows the empty state', () => {
   const empty = html([post('p1', 1), post('p2', 2, [])])

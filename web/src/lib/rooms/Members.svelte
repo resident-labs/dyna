@@ -14,7 +14,7 @@
   import ExpediteBadge from './ExpediteBadge.svelte'
   import { expedite, agentExpedited } from './expedite.ts'
   import MonitorGlyph from '../computers/MonitorGlyph.svelte'
-  import { isLive, hasComputer, appName, ageText } from '../computers/computers.js'
+  import { isLive, hasComputer, appName, ageText } from '../computers/computers.ts'
   import { finishedTrees, foldMembers, isFinished, openTrail, orderMemberSessions } from './memberOrder.ts'
 
   let { members = [], focus = '', scope = '', selected = '', fresh = '', closed = false, computers = [], onopencomputer = () => {}, onselect, onclosed, onmenu, selecting = false, picked = [], onselection = () => {}, onpick = () => {}, onactions = () => {}, roomControls = null, controlMembers = members, onroomactions = () => {}, onresumeroom = () => {}, onreloadcontrols = () => {}, oncleardormant = null, ondismiss = null, dismissing = '', ontakeseat = null } = $props()

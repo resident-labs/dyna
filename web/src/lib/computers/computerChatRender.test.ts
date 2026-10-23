@@ -5,6 +5,7 @@ import { build } from 'esbuild'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { installDom, importBundle, domNames } from '../prs/prDetailHarness.ts'
 import { rm } from 'node:fs/promises'
+import { element } from '../../../test/need.ts'
 
 test('ComputerChat uses DmRows and the shared composer, with no renderer of its own', () => {
   const src = readFileSync(new URL('./ComputerChat.svelte', import.meta.url), 'utf8')
@@ -18,7 +19,7 @@ test('computer chat leaves modal Escape to the active dialog', async () => {
   globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
   globalThis.addEventListener = dom.window.addEventListener.bind(dom.window)
   globalThis.removeEventListener = dom.window.removeEventListener.bind(dom.window)
-  let api, component
+  let api: Awaited<ReturnType<typeof importBundle>> | undefined, component: ReturnType<NonNullable<typeof api>['mount']> | undefined
   try {
     const result = await build({
       bundle: true, write: false, format: 'esm', platform: 'node',
@@ -38,29 +39,31 @@ test('computer chat leaves modal Escape to the active dialog', async () => {
         },
       }, svelteEsbuildPlugin()],
     })
-    api = await importBundle(result.outputFiles[0].contents, 'ComputerChat')
+    const output = result.outputFiles?.[0]
+    assert.ok(output)
+    api = await importBundle(output.contents, 'ComputerChat')
     component = api.mount(api.default, { target: document.getElementById('app'), props: { room: { id: 'global', name: 'team' } } })
     api.flushSync()
-    const press = (target, key) => {
+    const press = (target: Element, key: string): void => {
       target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))
-      api.flushSync()
+      api?.flushSync()
     }
     press(document.body, '/')
-    assert.equal(document.querySelector('[data-chat]').dataset.state, 'composer')
+    assert.equal(element(document, '[data-chat]').dataset.state, 'composer')
     const modal = document.createElement('div')
     modal.setAttribute('aria-modal', 'true')
     modal.tabIndex = -1
     document.body.append(modal)
     modal.focus()
     press(modal, 'Escape')
-    assert.equal(document.querySelector('[data-chat]').dataset.state, 'composer')
+    assert.equal(element(document, '[data-chat]').dataset.state, 'composer')
     modal.remove()
     press(document.body, 'Escape')
-    assert.equal(document.querySelector('[data-chat]').dataset.state, 'tucked')
+    assert.equal(element(document, '[data-chat]').dataset.state, 'tucked')
   } finally {
-    if (component) await api.unmount(component)
+    if (component) await api?.unmount(component)
     if (api) await rm(api.dir, { recursive: true, force: true })
     dom.window.close()
-    for (const name of [...domNames, 'addEventListener', 'removeEventListener', 'HTMLMediaElement']) delete globalThis[name]
+    for (const name of [...domNames, 'addEventListener', 'removeEventListener', 'HTMLMediaElement']) Reflect.deleteProperty(globalThis, name)
   }
 })

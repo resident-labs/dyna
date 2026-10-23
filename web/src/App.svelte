@@ -84,7 +84,7 @@
   import ComputerPopout from './lib/computers/ComputerPopout.svelte'
   import ComputerPreview from './lib/computers/ComputerPreview.svelte'
   import { previewVisible, inUse } from './lib/computers/preview.ts'
-  import { applyEvent, pushAction, openedApps, popOut } from './lib/computers/computers.js'
+  import { applyEvent, pushAction, openedApps, popOut } from './lib/computers/computers.ts'
   import Terminal from './lib/sessions/Terminal.svelte'
   import { available as hasTerminal } from './lib/sessions/TermPane.svelte'
   import Jobs from './lib/workflows/Jobs.svelte'
