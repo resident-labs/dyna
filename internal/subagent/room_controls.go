@@ -22,16 +22,34 @@ type RoomSessionState struct {
 	Held      int       `json:"held"`
 	Dormant   int       `json:"dormant"`
 }
+// RoomSessionKeptReason says why a room action left a session as it was. The
+// web maps these named reasons to text, so it never matches an error message.
+// Only RoomSessionKeptFailed is a real failure.
+type RoomSessionKeptReason string
+
+const (
+	// RoomSessionKeptStartedWork means the session gained work after the list
+	// was drawn. Keeping it open is the correct, neutral outcome.
+	RoomSessionKeptStartedWork RoomSessionKeptReason = "started-work"
+	// RoomSessionKeptResponsibilities means the session still answers for work.
+	RoomSessionKeptResponsibilities RoomSessionKeptReason = "responsibilities"
+	// RoomSessionKeptFailed means the action could not run.
+	RoomSessionKeptFailed RoomSessionKeptReason = "failed"
+)
+
 type RoomSessionResult struct {
-	Session string `json:"session"`
-	OK      bool   `json:"ok"`
-	Status  string `json:"status"`
-	Error   string `json:"error,omitempty"`
+	Session string                `json:"session"`
+	Name    string                `json:"name,omitempty"`
+	OK      bool                  `json:"ok"`
+	Status  string                `json:"status"`
+	Reason  RoomSessionKeptReason `json:"reason,omitempty"`
+	Error   string                `json:"error,omitempty"`
 }
 type RoomSessionMutation struct {
 	State     RoomSessionState    `json:"state"`
 	Results   []RoomSessionResult `json:"results"`
 	Succeeded int                 `json:"succeeded"`
+	Kept      int                 `json:"kept"`
 	Failed    int                 `json:"failed"`
 }
 
@@ -132,7 +150,7 @@ func (m *Manager) setRoomSessions(ctx context.Context, ref string, paused bool) 
 				status = "held"
 			}
 		}
-		out.Results = append(out.Results, RoomSessionResult{Session: meta.ID, OK: true, Status: status})
+		out.Results = append(out.Results, RoomSessionResult{Session: meta.ID, Name: meta.Address(), OK: true, Status: status})
 		out.Succeeded++
 	}
 	out.State, err = m.RoomSessionControls(p.RoomID)
