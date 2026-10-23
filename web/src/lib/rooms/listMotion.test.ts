@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { createTestServer } from '../../../test/ssr-server.ts'
-import { compile } from 'svelte/compiler'
+import { compileSvelte } from '../../../test/svelte-esbuild.ts'
 
 const files = ['Sidebar', 'RoomRail', 'Members']
 
@@ -14,7 +14,7 @@ for (const file of files) {
     assert.match(source, /in:fade=\{\{ duration: motion\(FAST\) \}\}/)
     assert.doesNotMatch(source, /(?:in|out):fade\|global/)
     assert.equal([...source.matchAll(/animate:flip=/g)].length, { Sidebar: 2, RoomRail: 2, Members: 3 }[file])
-    assert.doesNotThrow(() => compile(source, { filename: `${file}.svelte`, generate: 'client' }))
+    assert.doesNotThrow(() => compileSvelte(source, `${file}.svelte`))
     if (file !== 'Sidebar') assert.doesNotMatch(source, /out:fade/, 'filter and fold changes remove rows immediately')
     else {
       assert.equal([...source.matchAll(/out:fade=/g)].length, 2, 'only active lists fade removals')

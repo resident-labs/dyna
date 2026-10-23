@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { compile } from 'svelte/compiler'
+import { compileSvelte } from '../../../test/svelte-esbuild.ts'
 import { viewIdentity } from './viewIdentity.ts'
 
 test('data refreshes preserve the view identity', () => {
@@ -28,5 +28,5 @@ test('the main view uses only an incoming fade and skips PR views', () => {
   assert.match(source, /let prView = \$derived\(view === 'issues'\)/)
   assert.match(source, /in:fade=\{\{ duration: prView \? 0 : motion\(FAST\) \}\}/)
   assert.doesNotMatch(source, /(?:out|transition):fade/)
-  assert.doesNotThrow(() => compile(source, { filename: 'App.svelte', generate: 'client' }))
+  assert.doesNotThrow(() => compileSvelte(source, 'App.svelte'))
 })
