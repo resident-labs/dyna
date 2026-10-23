@@ -80,6 +80,22 @@ ON CONFLICT(run_id) DO UPDATE SET body=excluded.body, complete=excluded.complete
 	return err
 }
 
+// AddDirectoriesTx adds ownership evidence to a run's current set inside the
+// caller's state transaction. A complete set is sealed and refuses additions.
+func AddDirectoriesTx(ctx context.Context, conn *sql.Conn, id string, dirs []string) error {
+	if err := validateRunID(id); err != nil {
+		return err
+	}
+	set, _, err := readDirectories(ctx, conn, id)
+	if err != nil {
+		return err
+	}
+	if set.Complete {
+		return fmt.Errorf("run %s directory set is complete", id)
+	}
+	return writeDirectories(ctx, conn, id, append(set.Directories, dirs...), false)
+}
+
 // ReadDirectories returns a current set. Missing and incomplete sets cannot
 // authorize cleanup. The engine has already migrated the store.
 func ReadDirectories(ctx context.Context, id string) (DirectorySet, bool, error) {

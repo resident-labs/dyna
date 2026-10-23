@@ -57,6 +57,16 @@ func cachedReplyChecks() map[string]func(context.Context, []json.RawMessage) err
 		"RunnerWaitInput": func(context.Context, []json.RawMessage) error {
 			return errors.New("read-only input waits do not carry request IDs")
 		},
+		"AddRunDirectories": func(ctx context.Context, args []json.RawMessage) error {
+			var in callspec.RunDirectories
+			if len(args) != 1 {
+				return errors.New("directory recording needs one argument")
+			}
+			if err := json.Unmarshal(args[0], &in); err != nil {
+				return err
+			}
+			return checkRunCoordinator(ctx, in.Run)
+		},
 		"AdmitNativeAttempt": func(ctx context.Context, args []json.RawMessage) error {
 			var in callspec.AccountAdmission
 			if len(args) != 1 {
