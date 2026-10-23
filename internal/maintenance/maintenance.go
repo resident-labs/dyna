@@ -16,7 +16,6 @@ import (
 
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/cihealth"
-	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/notices"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/runstore"
@@ -342,18 +341,23 @@ func Pass(ctx context.Context, retain ClosedSessionRetainer, logf func(string, .
 
 // Loop checks pressure each minute and runs cleanup at least once per hour.
 // It executes passes serially and stops when the host context is canceled.
-// retainer is passed to each pass as Options.RetainClosedSession.
-func Loop(ctx context.Context, logf func(string, ...any), retainer ClosedSessionRetainer) {
-	loop(ctx, logf, hooks.New(), retainer)
+// retainer is passed to each pass as Options.RetainClosedSession. hookService
+// records schedule runs; the engine passes the service that holds the built-in
+// table, so global hooks run too.
+func Loop(ctx context.Context, logf func(string, ...any), hookService LifecycleHooks, retainer ClosedSessionRetainer) {
+	loop(ctx, logf, hookService, retainer)
 }
 
-type lifecycleHooks interface {
+// LifecycleHooks is the hook schedule the maintenance loop drives: it owns the
+// repositories whose hooks it stores, and it starts each due run.
+type LifecycleHooks interface {
 	ReconcileInstall(context.Context) error
 	Repositories(context.Context) ([]string, error)
 	Tick(context.Context, string, time.Time) error
+	TickGlobal(context.Context, time.Time) error
 }
 
-func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleHooks, retainer ClosedSessionRetainer) {
+func loop(ctx context.Context, logf func(string, ...any), hookService LifecycleHooks, retainer ClosedSessionRetainer) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -396,6 +400,13 @@ func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleH
 			if hookErr != nil {
 				logf("hooks: %v", hookErr)
 			}
+		}
+		// Global hooks belong to no repository, so they tick once per pass.
+		if hookErr := hookService.TickGlobal(ctx, time.Now()); hookErr != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			logf("global hooks: %v", hookErr)
 		}
 		v, err := settings.Load("")
 		var low []lowDisk

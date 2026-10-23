@@ -41,7 +41,8 @@
     // state); onsessions runs 'pause' or 'resume'. onaction runs a room action
     // by id: rename, room-pin, room-archive or delete. rules draws the Rules
     // section; busy is true while a rule edit is open, so Esc cancels the edit.
-    // hookRun is the hook run a feed card asked to open, or null.
+    // hookRun is the hook run a feed card asked to open, or null. onopenglobal
+    // opens Settings > Hooks, which holds the built-in and machine-wide hooks.
     room: Room
     start?: string
     hookRun?: HookLogTarget | null
@@ -52,9 +53,10 @@
     onaction?: (id: string) => void
     rules: Snippet
     busy?: boolean
+    onopenglobal?: () => unknown
     onclose: () => void
   }
-  let { room, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onclose }: Props = $props()
+  let { room, start = 'general', hookRun = null, reviewer = null, onreviewer = () => {}, controls = null, onsessions = () => {}, onaction = () => {}, rules, busy: rulesBusy = false, onopenglobal = () => {}, onclose }: Props = $props()
   const nav: { id: string; label: string }[] = [
     { id: 'general', label: 'General' },
     { id: 'review', label: 'Review & landing' },
@@ -318,7 +320,7 @@
   {@render rules()}
 {:else if section === 'hooks'}
   <Section title="Hooks" lede="Shell commands that Dyna runs on repository events, such as after a pull request merges.">
-    {#if room.repo}<p class="quiet">Shared by every room on this repository.</p><HooksPane repo={room.repo} focus={hookRun} onmodal={(open) => (hooksBusy = open)} />{:else}<p class="quiet">This room has no repository.</p>{/if}
+    {#if room.repo}<p class="quiet">Shared by every room on this repository.</p><HooksPane repo={room.repo} scope="repository" focus={hookRun} onmodal={(open) => (hooksBusy = open)} /><button class="btn quiet link" onclick={onopenglobal}>Built-in and machine-wide hooks are in Settings › Hooks</button>{:else}<p class="quiet">This room has no repository.</p>{/if}
   </Section>
 {:else if section === 'noise'}
   <Section title="Bot noise rules">

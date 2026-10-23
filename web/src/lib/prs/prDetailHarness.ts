@@ -18,7 +18,7 @@ export function installDom(extra: object = {}): JSDOM {
 
 const DETAIL_API = 'export const api = { githubDiff: (...a) => { globalThis.diffCalls.push(a); return Promise.resolve({ text: globalThis.diffText }) }, changeDetail: () => new Promise(() => {}), roomChangePolicy: () => new Promise(() => {}) }; export const openExternal = () => {}'
 
-export const FORMAT = "export const markdown = (t) => t || ''; export const ago = () => 'now'; export const initials = (n) => n.slice(0, 2); export const short = (n) => n;"
+export const FORMAT = "export const markdown = (t) => t || ''; export const ago = () => 'now'; export const until = () => 'soon'; export const initials = (n) => n.slice(0, 2); export const short = (n) => n;"
 
 // A browser component with API overrides and all other real API exports.
 export async function load(opts: BundleOptions = {}) {

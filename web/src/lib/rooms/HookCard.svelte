@@ -68,6 +68,7 @@
     <span class="glyph {stateTone[state]}"><HookIcon size={15} /></span>
     <span class="title">
       <span class="name">{name}</span>
+      {#if payload?.builtin}<span class="auto">Automatic</span>{/if}
       <span class="state {stateTone[state]}">{stateWords[state]}</span>
     </span>
     {#if count > 1 && hookFold}
@@ -108,6 +109,7 @@
   .title { display: flex; align-items: center; gap: 6px; min-width: 0; }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
   .state { font-size: var(--t-cap); font-weight: 600; text-transform: none; flex: none; }
+  .auto { font-size: var(--t-cap); font-weight: 600; color: var(--iris); flex: none; }
   .state.gold { color: var(--gold); }
   .state.sage { color: var(--sage); }
   .state.coral { color: var(--coral); }

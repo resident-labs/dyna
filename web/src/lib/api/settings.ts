@@ -32,6 +32,12 @@ export interface Hook {
   cwd: string
   timeout: string
   onFail: string
+  // scope says where the hook belongs: one repository, or the whole machine.
+  // A hook stored before scope existed belongs to its repository.
+  scope?: 'repository' | 'global'
+  // builtin names the automatic pass that a hook the engine seeds runs. It is
+  // absent on a hook the owner added.
+  builtin?: string
   addedBy: string
   addedAt: string
   editedBy?: string
@@ -46,6 +52,9 @@ export interface Hook {
 export interface HookSummary {
   hook: Hook
   lastRun?: HookRun
+  // nextRun is when the schedule next runs the hook. It is absent on a hook
+  // that does not run on a schedule.
+  nextRun?: string
 }
 
 // HookRun is hooks.Run, one execution of a hook. finishedAt is the zero time

@@ -9,6 +9,7 @@
   import HarnessesPane from './harnesses/HarnessesPane.svelte'
   import UsagePane from './usage/UsagePane.svelte'
   import SettingsPane from './SettingsPane.svelte'
+  import HooksPane from './HooksPane.svelte'
   import DevicesPane from './DevicesPane.svelte'
   import type { ModelSelection } from './profiles/state.ts'
   import type { UpdateNotice } from '../api/settings.ts'
@@ -37,6 +38,7 @@
     { id: 'profiles', label: 'Profiles', hint: 'Who does the work' },
     { id: 'harnesses', label: 'Harnesses', hint: 'Install and maintain coding agents' },
     { id: 'usage', label: 'Usage', hint: 'Accounts and activity' },
+    { id: 'hooks', label: 'Hooks', hint: 'Automatic passes and shell hooks' },
     { id: 'settings', label: 'Settings', hint: 'How Dyna behaves' },
     { id: 'devices', label: 'Devices', hint: 'Phones and browsers' },
     { id: 'about', label: 'Updates', hint: 'Version and data' },
@@ -61,6 +63,8 @@
     <UsagePane accountId={usageAccountId} {roomId} {oncreateprofile} onprofile={viewProfile} onharnesses={() => selectPane('harnesses')} onmodal={(open) => (busy = open)} />
   {:else if pane === 'settings'}
     <SettingsPane />
+  {:else if pane === 'hooks'}
+    <HooksPane scope="global" onmodal={(open) => (busy = open)} />
   {:else if pane === 'devices'}
     <DevicesPane {pairNow} onmodal={(open) => (busy = open)} />
   {:else}
