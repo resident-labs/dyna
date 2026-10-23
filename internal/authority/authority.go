@@ -231,10 +231,6 @@ var Rules = []Rule{
 	{Action: "profiles set-default", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
 	{Action: "profiles enable", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
 	{Action: "profiles disable", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
-	{Action: "profiles init-codex", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
-	{Action: "profiles init-claude", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
-	{Action: "profiles init-antigravity", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
-	{Action: "profiles init-muse", Allowed: []Role{Owner, Root}, Instead: "ask root to change global profiles"},
 	// Service profiles are global settings, so only the owner pins them.
 	{Action: "SetServiceProfile", Allowed: []Role{Owner}, Instead: "ask the owner to pin a service profile"},
 	// The owner's review comments speak for the human owner, so no agent sends them.

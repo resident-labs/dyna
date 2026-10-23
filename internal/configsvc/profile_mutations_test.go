@@ -67,47 +67,6 @@ func TestFullProfileOperationsPreserveFields(t *testing.T) {
 	}
 }
 
-func TestSeedProfilesKeepsExistingAndDefault(t *testing.T) {
-	isolate(t)
-	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
-	old := mock("existing")
-	old.DeclareOutput()
-	old.Default, old.Env = true, map[string]string{"SECRET": "private"}
-	seed(t, old)
-	candidate := mock(old.Name)
-	candidate.Harness = profile.HarnessCodex
-	added := candidate
-	added.Name, added.Default = "added", true
-	unrelated := mock("unrelated")
-	svc := &Service{}
-	for attempt := 0; attempt < 2; attempt++ {
-		rows, err := svc.SeedProfiles(ctx, profile.HarnessCodex, []profile.Profile{candidate, added, unrelated})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(rows) != 2 || !rows[0].Kept || rows[1].Kept != (attempt == 1) {
-			t.Fatalf("seed results: %+v", rows)
-		}
-		reg, err := loadProfiles()
-		if err != nil {
-			t.Fatal(err)
-		}
-		got, ok := reg.Get(old.Name)
-		if !ok || !reflect.DeepEqual(*got, old) {
-			t.Fatalf("seed changed an existing profile: %#v", got)
-		}
-		if d, ok := reg.DefaultProfile(); !ok || d.Name != old.Name {
-			t.Fatalf("seed changed default: %#v", d)
-		}
-		if p, ok := reg.Get(added.Name); !ok || p.Default {
-			t.Fatalf("added profile: %#v", p)
-		}
-		if _, ok := reg.Get(unrelated.Name); ok {
-			t.Fatal("seed added another harness")
-		}
-	}
-}
-
 func TestProfileOperationsRefuseBeforeReadingConfig(t *testing.T) {
 	isolate(t)
 	if err := os.MkdirAll(filepath.Dir(profile.DefaultPath()), 0700); err != nil {
@@ -122,8 +81,7 @@ func TestProfileOperationsRefuseBeforeReadingConfig(t *testing.T) {
 		ctx := authority.WithActor(t.Context(), authority.Actor{Role: role})
 		_, upErr := svc.SaveProfile(ctx, ProfileEdit{})
 		_, useErr := svc.SetProfileUses(ctx, "missing", nil)
-		_, seedErr := svc.SeedProfiles(ctx, profile.HarnessCodex, nil)
-		for _, err := range []error{upErr, useErr, seedErr, svc.UpsertProfile(ctx, mock("new")), svc.RemoveProfile(ctx, "missing"), svc.SetDefaultProfile(ctx, "missing"), svc.SetProfileDisabled(ctx, "missing", true)} {
+		for _, err := range []error{upErr, useErr, svc.UpsertProfile(ctx, mock("new")), svc.RemoveProfile(ctx, "missing"), svc.SetDefaultProfile(ctx, "missing"), svc.SetProfileDisabled(ctx, "missing", true)} {
 			if err == nil || !strings.Contains(err.Error(), "is owner or root only") {
 				t.Fatalf("role %q reached config: %v", role, err)
 			}

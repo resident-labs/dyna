@@ -515,7 +515,7 @@ func eventViews(events []runstore.Event) []plan.EventView {
 func NewDemoCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "demo",
-		Short: "Register mock worker profiles and run a sample workflow",
+		Short: "Run a sample workflow on temporary mock worker profiles",
 		RunE: func(c *cobra.Command, _ []string) error {
 			if err := authority.Check("demo", authority.Current(), nil); err != nil {
 				return err
@@ -524,25 +524,18 @@ func NewDemoCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			demos := []profile.Profile{
-				{Name: "mock-workhorse", Harness: profile.HarnessMock, Taste: 4, Intelligence: 10, Cost: 6, Default: true,
-					Description: "Demo worker. Pretend GPT-class workhorse: grinds long tasks alone, correct but unpolished code, weak frontend taste."},
-				{Name: "mock-reviewer", Harness: profile.HarnessMock, Taste: 10, Intelligence: 8, Cost: 4,
-					Description: "Demo worker. Pretend Opus-class reviewer: excellent taste, finds subtle issues, great frontend instincts, pricey."},
-				{Name: "mock-sprinter", Harness: profile.HarnessMock, Taste: 8, Intelligence: 6, Cost: 10,
-					Description: "Demo worker. Pretend GLM-class sprinter: fast and very cheap, great taste, slightly below the big models."},
-			}
-			for _, d := range demos {
-				if _, exists := s.Get(d.Name); !exists {
-					if err := s.Upsert(d); err != nil {
-						return err
-					}
-				}
-			}
-			if err := s.Save(); err != nil {
+			added, err := addDemoProfiles(s)
+			if err != nil {
 				return err
 			}
-			fmt.Fprintln(c.OutOrStdout(), "registered demo profiles: mock-workhorse, mock-reviewer, mock-sprinter")
+			// The demo borrows its mock profiles for one run and then removes
+			// only the ones it added, so it leaves the owner's profiles alone.
+			defer func() {
+				if err := removeDemoProfiles(s, added); err != nil {
+					fmt.Fprintln(c.ErrOrStderr(), "remove demo profiles: "+err.Error())
+				}
+			}()
+			fmt.Fprintln(c.OutOrStdout(), "registered demo profiles for this run: mock-workhorse, mock-reviewer, mock-sprinter")
 			fmt.Fprintln(c.OutOrStdout(), "running demo workflow...")
 
 			if _, err := applyRunRoom(""); err != nil {
@@ -556,6 +549,49 @@ func NewDemoCommand() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// demoProfiles are the mock workers the demo run uses. They are never saved
+// as the owner's own profiles.
+func demoProfiles() []profile.Profile {
+	return []profile.Profile{
+		{Name: "mock-workhorse", Harness: profile.HarnessMock, Taste: 4, Intelligence: 10, Cost: 6,
+			Description: "Demo worker. Pretend GPT-class workhorse: grinds long tasks alone, correct but unpolished code, weak frontend taste."},
+		{Name: "mock-reviewer", Harness: profile.HarnessMock, Taste: 10, Intelligence: 8, Cost: 4,
+			Description: "Demo worker. Pretend Opus-class reviewer: excellent taste, finds subtle issues, great frontend instincts, pricey."},
+		{Name: "mock-sprinter", Harness: profile.HarnessMock, Taste: 8, Intelligence: 6, Cost: 10,
+			Description: "Demo worker. Pretend GLM-class sprinter: fast and very cheap, great taste, slightly below the big models."},
+	}
+}
+
+// addDemoProfiles registers the demo workers that are missing and returns
+// their names, so removeDemoProfiles can drop exactly those.
+func addDemoProfiles(s *profile.Store) ([]string, error) {
+	var added []string
+	for _, d := range demoProfiles() {
+		if _, exists := s.Get(d.Name); exists {
+			continue
+		}
+		if err := s.Upsert(d); err != nil {
+			return nil, err
+		}
+		added = append(added, d.Name)
+	}
+	if err := s.Save(); err != nil {
+		return nil, err
+	}
+	return added, nil
+}
+
+// removeDemoProfiles removes the demo workers this run added.
+func removeDemoProfiles(s *profile.Store, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	for _, name := range names {
+		s.Remove(name)
+	}
+	return s.Save()
 }
 
 const demoScript = `export const meta = { name: 'demo-fanout', description: 'demo', phases: [{title:'Scan'},{title:'Verify'}] }

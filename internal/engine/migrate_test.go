@@ -14,6 +14,7 @@ import (
 
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
@@ -54,6 +55,24 @@ func TestEngineMigratesEveryStore(t *testing.T) {
 	}
 	if found < 15 {
 		t.Fatalf("found %d database.Migrate calls under internal/, want at least 15; did the call pattern change?", found)
+	}
+}
+
+// An engine start creates no profile: every profile is one the owner added.
+func TestEngineStartCreatesNoProfiles(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	keepSchemaOwner(t)
+	if readOnly, status, _ := startStores(dir, false); readOnly {
+		t.Fatalf("start = read-only: %s", status)
+	}
+	t.Cleanup(func() { database.Close(dir) })
+	if _, err := os.Stat(profile.DefaultPath()); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("engine start wrote %s: %v", profile.DefaultPath(), err)
+	}
+	store, err := profile.Load(profile.DefaultPath())
+	if err != nil || len(store.Profiles) != 0 {
+		t.Fatalf("profiles after engine start = %+v, %v", store, err)
 	}
 }
 
