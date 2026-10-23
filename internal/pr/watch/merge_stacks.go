@@ -6,6 +6,7 @@ import (
 	"dyna-agent/internal/pr/trial"
 	"dyna-agent/internal/room"
 	"fmt"
+	"slices"
 )
 
 func trialIdentity(b state.MergeTrial) string {
@@ -166,10 +167,20 @@ func (s *Service) rejectTrialFailure(ctx context.Context, b state.MergeTrial) er
 	if member.Key == "" {
 		return nil
 	}
-	text := fmt.Sprintf("%s failed merge trial CI after the preceding tested prefix. %s\n%s", changeLocation(member), b.Failure.Reason, b.Failure.Logs)
-	if len(prs) == 0 {
-		prs = []room.MergePR{mergePR(member)}
+	// A published passing prefix no longer holds the member that failed, so the
+	// trial's own list leaves it out. The event still names it: the card draws
+	// the cause against that PR, and must not fall back to a member that merged.
+	// A local change has no URL, so its title identifies it.
+	listed := func(p room.MergePR) bool {
+		if member.URL != "" {
+			return p.URL == member.URL
+		}
+		return p.Title == member.Title
 	}
+	if !slices.ContainsFunc(prs, listed) {
+		prs = append(prs, mergePR(member))
+	}
+	text := fmt.Sprintf("%s failed merge trial CI after the preceding tested prefix. %s\n%s", changeLocation(member), b.Failure.Reason, b.Failure.Logs)
 	ev := room.MergeEvent{Type: room.MergeFailed, TrialID: trialIdentity(b), Repo: mergeRepo(member), Base: b.DefaultBranch, PRs: prs, Label: changeLabel(member), Member: member.Number, Reason: "failed trial CI after the tested prefix", ReasonKind: room.MergeReasonOther}
 	return s.postMergeNotice(ctx, member, "merge-trial-failed", Notice{Target: member.Author, Merge: &ev, Text: text})
 }

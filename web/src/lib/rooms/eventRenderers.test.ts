@@ -557,6 +557,11 @@ test('a member-scoped merge card names that PR, not the whole batch', () => {
     assert.match(text, /Second member/, `${c.type} named the other member's title: ${text}`)
     assert.doesNotMatch(text, /First member/, `${c.type} kept the other member's title: ${text}`)
   }
+  // A published prefix leaves the failed member out of the trial's own list.
+  // The card names it by its typed number and points at no other PR.
+  const missing = renderMergeCard({ ...base, type: 'failed', prs: [members[0]], member: 2, reason: 'failed after the prefix', reasonKind: 'other' })
+  assert.match(missing, /Merge failed: #2 into main/, `an unlisted member lost its number: ${missing}`)
+  assert.doesNotMatch(missing, /#1|First member|Open PR/, `an unlisted member fell back to another PR: ${missing}`)
 })
 
 test('a single-PR merge card keeps the singular title', () => {

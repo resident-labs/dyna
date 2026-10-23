@@ -77,17 +77,18 @@
   // failure) is about that PR alone; a trial-wide fact names every member.
   let affected = $derived(payload?.member ? prs.find((pr) => pr.number === payload?.member) : undefined)
   let what = $derived(
-    affected
-      ? affected.number
+    payload?.member
+      ? affected?.number
         ? `#${affected.number}`
-        : affected.title || 'the change'
+        : affected?.title || `#${payload.member}`
       : prs.length > 1
         ? `${prs.length} PRs: ${prs.map((pr) => (pr.number ? `#${pr.number}` : pr.title || 'the change')).join(', ')}`
         : name,
   )
   // The card opens the PR it names: the affected member when the fact is about
-  // one, else the first member of the batch.
-  let subject = $derived(affected ?? first)
+  // one, else the first member of the batch. An affected member the payload no
+  // longer lists names its number alone, so the card never points at another PR.
+  let subject = $derived(payload?.member ? affected : first)
   let title = $derived(type === 'decision' ? verbs.decision : `${verbs[type]} ${what} into ${payload?.base ?? ''}`)
   let failedChecks = $derived(payload?.checks?.failed ?? [])
   // The card says a cause once. The Go side words a cause the steward
