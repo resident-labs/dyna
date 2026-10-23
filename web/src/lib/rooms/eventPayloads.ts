@@ -1,8 +1,8 @@
 // Typed readers for the payload of a sealed system event. They read the
 // stored payload only, never the post text, so a card and its event cannot
 // disagree. The types come from events.gen.ts, which the Go registry writes.
-import { eventSpecs, isCheckinEvent, isGoalEvent, isHookEvent, isIssueEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isRuleEvent, isSlowTestEvent, isWorktreeEvent } from './events.gen.ts'
-import type { CheckinEvent, EventPayload, GoalEvent, HookEvent, IssueEvent, MergeDecisionEvent, MergeEvent, PREvent, RuleEvent, SlowTestEvent, WorktreeEvent } from './events.gen.ts'
+import { eventSpecs, isCheckinEvent, isGoalEvent, isHookEvent, isIssueEvent, isMergeDecisionEvent, isMergeEvent, isMachineEvent, isPREvent, isRuleEvent, isSlowTestEvent, isWorktreeEvent } from './events.gen.ts'
+import type { CheckinEvent, EventPayload, GoalEvent, HookEvent, IssueEvent, MachineEvent, MergeDecisionEvent, MergeEvent, PREvent, RuleEvent, SlowTestEvent, WorktreeEvent } from './events.gen.ts'
 
 // A post of one event family, with the fields its reader needs. A feed row, a
 // stored message and a test fixture all fit it.
@@ -93,4 +93,11 @@ export function slowTestEvent(post: EventPost): SlowTestEvent | undefined {
 export function ruleEvent(post: EventPost): RuleEvent | undefined {
   if (post.kind !== 'rule') return undefined
   return isRuleEvent(post.payload) ? post.payload : undefined
+}
+
+// machineEvent returns the typed payload of a machine event: the sizes its probe
+// read and the floor it missed.
+export function machineEvent(post: EventPost): MachineEvent | undefined {
+  if (post.kind !== 'machine' || post.notice?.kind !== 'low-disk') return undefined
+  return isMachineEvent(post.payload) ? post.payload : undefined
 }
