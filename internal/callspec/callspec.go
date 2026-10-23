@@ -73,7 +73,7 @@ var LongCalls = map[string]time.Duration{
 	"ExportIssue": 30 * time.Second, "GitHubList": 2 * time.Minute, "GitHubView": 2 * time.Minute, "GitHubDiff": 2 * time.Minute,
 	"CommentPR": 2 * time.Minute, "PostPRReview": 2 * time.Minute, "LearnPRNoise": 2 * time.Minute, "TrackPR": 2 * time.Minute, "TrackPRRef": 2 * time.Minute, "SetPRDraft": 2 * time.Minute, "OpenChange": 2 * time.Minute, "MergeFixPR": 2 * time.Minute,
 	// Verdicts refresh GitHub or git and deliver notices before returning.
-	"RecordReviewResult": 2 * time.Minute, "StartIssueWork": 2 * time.Minute, "GitStatus": 2 * time.Minute, "GitLastCommits": 2 * time.Minute,
+	"RecordReviewResult": 2 * time.Minute, "RecordPRVerdict": 2 * time.Minute, "StartIssueWork": 2 * time.Minute, "GitStatus": 2 * time.Minute, "GitLastCommits": 2 * time.Minute,
 	"GitReadFile": 2 * time.Minute, "GitHistory": 2 * time.Minute, "GitBlame": 2 * time.Minute, "GitDiff": 2 * time.Minute,
 	"GitExport": 2 * time.Minute, "SyncRefresh": 2 * time.Minute,
 	// Git fetch of every remote can take up to 2 minutes each.
