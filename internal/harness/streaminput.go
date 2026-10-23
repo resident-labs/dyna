@@ -37,11 +37,12 @@ func nextClaudeControlID() string {
 }
 
 type streamItem struct {
-	kind     string
-	text     string // exact written content, used to correlate replay acknowledgments
-	messages []runstore.SteeringMessage
-	written  time.Time
-	inFlight int // tool calls in flight when it was written
+	sourceOffset *int64 // complete-line boundary captured at acknowledgement
+	kind         string
+	text         string // exact written content, used to correlate replay acknowledgments
+	messages     []runstore.SteeringMessage
+	written      time.Time
+	inFlight     int // tool calls in flight when it was written
 }
 
 type streamNotice struct {
@@ -61,6 +62,7 @@ type streamTerminal struct {
 }
 
 type streamInput struct {
+	captureBoundary  func() *int64
 	w                io.WriteCloser
 	mu               sync.Mutex
 	closed           bool
@@ -162,6 +164,9 @@ func (s *streamInput) observe(line string, stdoutEnd int, usage workeroutput.Usa
 			n++
 		}
 		for _, item := range s.queue[:n] {
+			if s.captureBoundary != nil {
+				item.sourceOffset = s.captureBoundary()
+			}
 			s.notes = append(s.notes, streamNotice{consumed: item})
 			for _, m := range item.messages {
 				if m.ID != "" {

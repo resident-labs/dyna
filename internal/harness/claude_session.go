@@ -132,6 +132,7 @@ func runClaudeTurn(ctx context.Context, p profile.Profile, cwd string, spec comm
 		defer normalizedOutput.Close()
 	}
 	normalizer := workeroutput.NewNormalizer(output, normalizedOutput)
+	stream.captureBoundary = func() *int64 { return normalizedBoundary(normalizer) }
 	tools := workeroutput.NewToolTracker(output)
 	emptyLimit := emptyStepLimit
 	if execution.emptyStepLimit > 0 {
@@ -204,7 +205,7 @@ func runClaudeTurn(ctx context.Context, p profile.Profile, cwd string, spec comm
 				return errors.New("worker input closed before set_model")
 			}
 		}
-		if !stream.write(streamItemPrompt, spec.prompt, nil, 0) {
+		if !stream.write(streamItemPrompt, spec.prompt, spec.steering, 0) {
 			return errors.New("worker input closed before prompt delivery")
 		}
 		return nil
@@ -221,11 +222,6 @@ func runClaudeTurn(ctx context.Context, p profile.Profile, cwd string, spec comm
 	if steering != nil {
 		if steering.opts.OnStart != nil {
 			steering.opts.OnStart()
-		}
-		if steering.opts.OnMessage != nil {
-			for _, message := range spec.steering {
-				steering.opts.OnMessage(message)
-			}
 		}
 	}
 	if spec.journalReminderReason != "" && journal != nil {
