@@ -44,8 +44,6 @@ export const sections: Section[] = [
   },
 ]
 
-export const roomTabs: Tab[] = [{ id: 'general', label: 'Messages' }, { id: 'issues', label: 'Issues' }]
-
 // rowOf is the sidebar row that holds a view, or undefined for the feed.
 export function rowOf(view: string): Row | undefined {
   for (const s of sections) for (const r of s.rows) if (r.tabs.some((t) => t.id === view)) return r

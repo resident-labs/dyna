@@ -5,7 +5,7 @@
   import ReviewFiles from './ReviewFiles.svelte'
   import ReviewChanges from './ReviewChanges.svelte'
 
-  let { roomId, session = '', sessionName = '', members = [], tab = $bindable('files'), reveal = '', folder = null, version = 0, onpr, onselect, onclose, prs }: {
+  let { roomId, session = '', sessionName = '', members = [], tab = $bindable('files'), reveal = '', folder = null, version = 0, onpr, onselect, onclose, prs, issuesTab }: {
     roomId: string
     session?: string
     sessionName?: string
@@ -18,12 +18,13 @@
     onselect: (id: string) => void
     onclose: () => void
     prs: Snippet
+    issuesTab: Snippet
   } = $props()
   let width = $state(400)
   // Keep the mounted tabs so switching tabs preserves file position and draft comments.
   let visited = $state(new Set<string>())
   $effect(() => { const selected = tab; untrack(() => { if (!visited.has(selected)) visited = new Set([...visited, selected]) }) })
-  const tabs = [{ id: 'files', label: 'Files' }, { id: 'changes', label: 'Changes' }, { id: 'prs', label: 'PRs' }]
+  const tabs = [{ id: 'files', label: 'Files' }, { id: 'changes', label: 'Changes' }, { id: 'prs', label: 'PRs' }, { id: 'issues', label: 'Issues' }]
 </script>
 
 <aside id="review-workspace" bind:clientWidth={width} class="review-workspace" aria-label="Review workspace">
@@ -32,7 +33,7 @@
     <button class="close" onclick={onclose} aria-label="Close review workspace">Back to chat <span aria-hidden="true">×</span></button>
   </header>
   <Tabs {tabs} bind:tab label="Review views" />
-  {#if tab !== 'prs'}
+  {#if tab !== 'prs' && tab !== 'issues'}
     <label class="workspace-source">Workspace
       <select value={session} onchange={(event) => onselect(event.currentTarget.value)}>
         <option value="">Repository</option>
@@ -58,6 +59,9 @@
   {/if}
   {#if visited.has('prs')}
     <div class="tab-content" hidden={tab !== 'prs'}>{@render prs()}</div>
+  {/if}
+  {#if visited.has('issues')}
+    <div class="tab-content" hidden={tab !== 'issues'}>{@render issuesTab()}</div>
   {/if}
 </aside>
 

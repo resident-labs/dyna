@@ -57,10 +57,23 @@ function rendered(view: string): string[] {
 
 test('every sidebar tab renders its own page, not the feed', () => {
   assert.ok(chain, 'App view chain not found')
-  const expected = { issues: 'GitHub', library: 'Library', services: 'Services' }
+  const expected = { library: 'Library', services: 'Services' }
   for (const [view, name] of Object.entries(expected)) assert.ok(rendered(view).includes(name), `${view} renders ${rendered(view)}`)
   for (const tab of sections.flatMap((s) => s.rows).flatMap((r) => r.tabs)) assert.ok(!rendered(tab.id).includes('Feed'), `${tab.id} falls through to the feed`)
   assert.ok(rendered('general').includes('Feed'))
   // Rules and Room settings live in the Room settings modal, not in a view.
   for (const view of ['settings', 'rules', 'room-general', 'room-hooks']) assert.deepEqual(rendered(view).filter((name) => name === 'Rules' || name === 'RoomSettings'), [], view)
+})
+
+// Issues used to be a room tab of its own. It is the review workspace's
+// fourth tab now, so there is one Issues page and no separate view chain.
+test('Issues is the review workspace tab, not a room view', () => {
+  const workspace = readFileSync(new URL('../review/ReviewWorkspace.svelte', import.meta.url), 'utf8')
+  assert.match(workspace, /\{ id: 'files', label: 'Files' \}, \{ id: 'changes', label: 'Changes' \}, \{ id: 'prs', label: 'PRs' \}, \{ id: 'issues', label: 'Issues' \}/)
+  assert.match(workspace, /\{@render issuesTab\(\)\}/)
+  assert.match(source, /\{#snippet issuesTab\(\)\}/)
+  assert.doesNotMatch(source, /\{:else if view === 'issues'\}/)
+  // The Issues view still opens the workspace on that tab, so old links work.
+  assert.match(source, /if \(next === 'issues'\) openReview\('issues'\)/)
+  assert.doesNotMatch(source, /roomTabs/)
 })

@@ -58,10 +58,10 @@ test('a phone title keeps a readable width and its buttons never shrink', () => 
   assert.match(rule(callButton, '.call-label, .live-label'), /display: none/, 'only the call icon remains')
 })
 
-test('the room header shows its name and moves room tabs below the bar on phones', () => {
+test('the room header shows its name and holds no room tabs', () => {
   assert.match(header, /<span class="name">\{roomLabel\(current \?\? room\)\}<\/span>/)
-  assert.match(header, /\{#if !narrow\}<div class="dm-tabs"><Tabs tabs=\{roomTabs\}/)
-  assert.match(app, /\{#if !workRow && narrow\}<Tabs tabs=\{roomTabs\}/)
+  // Issues left the header for the review workspace, so Messages is the room.
+  assert.doesNotMatch(app, /roomTabs/)
   assert.doesNotMatch(header, /channelTrail|>general<|>Channels</)
 })
 
