@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/plan"
 	"dyna-agent/internal/runstore"
 )
@@ -76,7 +75,7 @@ func TestRunPlanUnavailableOnInvalidScript(t *testing.T) {
 
 func TestRunsShowJSONKeepsEventsResultAndAddsPlan(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	enginetest.ServePlanAncestry(t)
+	serveWorkflowEngine(t)
 	t.Setenv("DYNA_RUN_ID", "wf_show-plan")
 	run, err := runstore.Create("show-plan", "await agent('x', {label:'x'}); return 1", nil)
 	if err != nil {
@@ -115,7 +114,7 @@ func TestRunsShowJSONKeepsEventsResultAndAddsPlan(t *testing.T) {
 
 func TestRunsGraphPrintsMermaid(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	enginetest.ServePlanAncestry(t)
+	serveWorkflowEngine(t)
 	t.Setenv("DYNA_RUN_ID", "wf_graph")
 	run, err := runstore.Create("graph", "await agent('x', {label:'x'}); return 1", nil)
 	if err != nil {
@@ -141,7 +140,7 @@ func TestRunsGraphPrintsMermaid(t *testing.T) {
 func TestAttachedCreateWritesPlanBeforeRunStart(t *testing.T) {
 	inRepo(t)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	enginetest.ServePlanAncestry(t)
+	serveWorkflowEngine(t)
 	t.Setenv(runstore.AgentJournalRootEnv, "")
 	mockProfile(t)
 	dir := t.TempDir()
