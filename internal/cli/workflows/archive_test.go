@@ -13,6 +13,8 @@ import (
 
 	"dyna-agent/internal/harness"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
+	"dyna-agent/internal/store"
 )
 
 func execRuns(t *testing.T, args ...string) (string, string, error) {
@@ -27,9 +29,7 @@ func execRuns(t *testing.T, args ...string) (string, string, error) {
 	return stdout.String(), stderr.String(), err
 }
 
-// agedRun is a finished run whose meta claims it ended `age` ago. Its runner
-// finishes it the way an earlier release does, by writing only meta.json, so
-// the store imports the end it claims.
+// agedRun stores a finished run that ended age ago.
 func agedRun(t *testing.T, id, status string, age time.Duration) *runstore.Run {
 	t.Helper()
 	t.Setenv("DYNA_RUN_ID", id)
@@ -40,10 +40,7 @@ func agedRun(t *testing.T, id, status string, age time.Duration) *runstore.Run {
 	run.Meta.Status = status
 	run.Meta.EndedAt = time.Now().Add(-age)
 	run.Meta.StartedAt = run.Meta.EndedAt.Add(-time.Minute)
-	b, _ := json.Marshal(run.Meta)
-	if err := os.WriteFile(filepath.Join(run.Dir, "meta.json"), b, 0o644); err != nil {
-		t.Fatal(err)
-	}
+	runstoretest.Write(t, store.DataDir(), run.Meta)
 	return run
 }
 

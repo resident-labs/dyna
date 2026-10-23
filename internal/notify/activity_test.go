@@ -10,6 +10,7 @@ import (
 
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/store/storetest"
@@ -19,19 +20,6 @@ import (
 func TestActiveRoomIDsUsesOwningStores(t *testing.T) {
 	root := storetest.DataDir(t)
 	svc := New(&room.Store{Root: filepath.Join(root, "rooms")}, &subagent.Manager{Store: &subagent.Store{Root: filepath.Join(root, "sessions")}})
-	write := func(path string, v any) {
-		t.Helper()
-		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
-			t.Fatal(err)
-		}
-		b, err := json.Marshal(v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, b, 0600); err != nil {
-			t.Fatal(err)
-		}
-	}
 	const id = "ses_20261017-120000-00000001"
 	recordtest.Write(t, filepath.Join(root, "sessions"), id, subagent.Meta{ID: id, RoomID: "session", Room: "session"})
 	lock, err := os.OpenFile(filepath.Join(root, "sessions", id, "turn.lock"), os.O_CREATE|os.O_RDWR, 0600)
@@ -49,9 +37,9 @@ func TestActiveRoomIDsUsesOwningStores(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	// Runs an earlier release wrote: only their meta.json files.
-	write(filepath.Join(root, "runs", "wf_live", "meta.json"), runstore.Meta{ID: "wf_live", RoomID: "run", Status: "running", Pid: os.Getpid()})
-	write(filepath.Join(root, "runs", "wf_stale", "meta.json"), runstore.Meta{ID: "wf_stale", RoomID: "stale-run", Status: "running", Pid: 999999999})
+	// Seed canonical workflow rows.
+	runstoretest.Write(t, root, runstore.Meta{ID: "wf_live", RoomID: "run", Status: "running", Pid: os.Getpid()})
+	runstoretest.Write(t, root, runstore.Meta{ID: "wf_stale", RoomID: "stale-run", Status: "running", Pid: 999999999})
 	const shell = "sh_20261017-120000-00000001"
 	shellStore := &shells.Store{Root: filepath.Join(root, "shells")}
 	job := shells.Meta{ID: shell, RoomID: "shell", Supervisor: os.Getpid(), Cmd: []string{"true"}, Started: time.Now()}
