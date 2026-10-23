@@ -101,7 +101,7 @@ func (s services) fileLibrarySmell(ctx context.Context, repo string, sm libraria
 		return room.Issue{}, err
 	}
 	states := librarianstate.Store{DataDir: store.DataDir()}
-	if err := states.CheckEdit("library smell", r.ID, as); err != nil {
+	if err := states.CheckSmell("library smell", r.ID, as); err != nil {
 		return room.Issue{}, err
 	}
 	st, err := states.Get(r.ID)
