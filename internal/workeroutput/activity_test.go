@@ -24,10 +24,12 @@ func TestLastActivity(t *testing.T) {
 		lines []string
 		want  string
 	}{
-		{"tool", []string{`{"v":1,"kind":"message","role":"assistant","text":"hi"}`, `{"v":1,"kind":"tool","name":"webfetch","input":"{\"url\":\"https://github.com/stablyai/orca\"}\nmore"}`, `{"v":1,"kind":"status","text":"step started"}`}, `webfetch: {"url":"https://github.com/stablyai/orca"}`},
+		{"tool", []string{`{"v":1,"kind":"message","role":"assistant","text":"hi"}`, `{"v":1,"kind":"tool","name":"webfetch","input":"{\"url\":\"https://github.com/stablyai/orca\"}\nmore"}`, `{"v":1,"kind":"status","text":"step started"}`}, `webfetch: https://github.com/stablyai/orca`},
+		{"mcp shell", []string{`{"v":1,"kind":"tool","name":"mcp__dyna__shell","input":"{\"command\":\"cat guide.md\",\"description\":\"Read guide command\"}"}`}, `Read guide command`},
+		{"mcp read", []string{`{"v":1,"kind":"tool","name":"mcp__pi__read","input":"{\"file_path\":\"/repo/web/src/lib/notify.go\"}"}`}, `reading notify.go`},
 		{"thinking", []string{filler, `{"v":1,"kind":"reasoning","text":"Let me check"}`}, "Thinking"},
 		{"writing", []string{`{"v":1,"kind":"message","role":"assistant","text":"Done"}`}, "Writing"},
-		{"torn last line", []string{`{"v":1,"kind":"tool","name":"bash","input":"go test ./..."}`, `{"v":1,"kind":"reason`}, "bash: go test ./..."},
+		{"torn last line", []string{`{"v":1,"kind":"tool","name":"bash","input":"go test ./..."}`, `{"v":1,"kind":"reason`}, "go test ./..."},
 	} {
 		if got := LastActivity(write(tc.lines...)).Text; got != tc.want {
 			t.Errorf("%s: LastActivity = %q, want %q", tc.name, got, tc.want)
@@ -52,7 +54,7 @@ func TestLastActivityRunningToolAndCompaction(t *testing.T) {
 	}
 	start := `{"v":1,"kind":"tool","name":"Bash","state":"started","id":"t1","ts":1000,"input":"{\"command\":\"dd if=/dev/zero of=big bs=1M count=10000\",\"description\":\"Write a 10 GB test file\"}"}`
 	running := LastActivity(write(start))
-	if running.Text != "Bash: Write a 10 GB test file" || running.Since != 1000 {
+	if running.Text != "Write a 10 GB test file" || running.Since != 1000 {
 		t.Fatalf("running tool = %+v", running)
 	}
 	done := LastActivity(write(start, `{"v":1,"kind":"tool","name":"tool_result","state":"completed","id":"t1","ts":2000,"output":"ok"}`))
@@ -80,7 +82,7 @@ func TestLastActivityKeepsStartTimeThroughUpdates(t *testing.T) {
 	start := `{"v":1,"kind":"tool","name":"command_execution","state":"started","id":"c1","ts":1000,"input":"cargo build"}`
 	update := `{"v":1,"kind":"tool","name":"command_execution","state":"updated","id":"c1","ts":5000,"input":"cargo build"}`
 	thinking := `{"v":1,"kind":"reasoning","ts":900}`
-	if a := LastActivity(write(thinking, start, update)); a.Text != "command_execution: cargo build" || a.Since != 1000 {
+	if a := LastActivity(write(thinking, start, update)); a.Text != "cargo build" || a.Since != 1000 {
 		t.Fatalf("updated tool = %+v, want the start time 1000", a)
 	}
 	done := `{"v":1,"kind":"tool","name":"command_execution","state":"completed","id":"c1","ts":9000,"input":"cargo build"}`
