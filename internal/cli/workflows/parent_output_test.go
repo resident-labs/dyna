@@ -17,6 +17,7 @@ func TestRunPrintsReferencesButKeepsFullHistory(t *testing.T) {
 	inRepo(t)
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	serveWorkflowEngine(t)
 	store, err := profile.Load(profile.DefaultPath())
 	if err != nil {
 		t.Fatal(err)
