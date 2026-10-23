@@ -21,6 +21,21 @@ export type GoalState = "active" | "done" | "dropped"
 // CheckinState is a named string type of an event payload.
 export type CheckinState = "running" | "queued" | "idle"
 
+// SessionChange is a named string type of an event payload.
+export type SessionChange = "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned"
+
+// AccountReason is a named string type of an event payload.
+export type AccountReason = "usage-limit" | "fallback"
+
+// InstructionAction is a named string type of an event payload.
+export type InstructionAction = "items" | "body" | "removed"
+
+// AlertSource is a named string type of an event payload.
+export type AlertSource = "doctor" | "engine"
+
+// ServiceRole is a named string type of an event payload.
+export type ServiceRole = "librarian" | "reviewer" | "helper"
+
 // RuleVerb is a named string type of an event payload.
 export type RuleVerb = "added" | "edited" | "removed"
 
@@ -42,6 +57,15 @@ export interface MergeCheckSummary {
   done: number
   total?: number
   failed?: string[]
+}
+
+// InstructionChange is a struct of an event payload.
+export interface InstructionChange {
+  name: string
+  action: InstructionAction
+  added?: string[]
+  removed?: string[]
+  body?: string
 }
 
 // WorktreeEvent is the payload of the worktree/kept events.
@@ -177,12 +201,63 @@ export interface PREvent {
   dropped?: number
 }
 
-// EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | PREvent
+// SessionEvent is the payload of the session/renamed and session/promoted and session/adopted and session/account and session/instructions and session/seat and session/spawned events.
+export interface SessionEvent {
+  type: SessionChange
+  session: string
+  name?: string
+  oldName?: string
+  from?: string
+  to?: string
+  reason?: AccountReason
+  profile?: string
+  dir?: string
+  seat?: string
+  sections?: InstructionChange[]
+  detail?: string
+}
 
-export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "pr"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "low-disk" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update"
-export type WakeRule = "never" | "target" | "root-if-needed"
+// AlertEvent is the payload of the alert/doctor and alert/engine events.
+export interface AlertEvent {
+  source: AlertSource
+  reportId?: string
+  trigger?: string
+  summary?: string
+  action?: string
+  detail?: string
+}
+
+// ServiceFailedEvent is the payload of the service/failed events.
+export interface ServiceFailedEvent {
+  service: ServiceRole
+  session: string
+  turn?: number
+  error: string
+  profile?: string
+  model?: string
+}
+
+// EngineEvent is the payload of the engine/root-flush events.
+export interface EngineEvent {
+  minutes: number
+  detail?: string
+}
+
+// QuestionEvent is the payload of the question/withdrawn events.
+export interface QuestionEvent {
+  questionId: string
+  post: string
+  by?: string
+  reason?: string
+  detail?: string
+}
+
+// EventPayload is the payload of any registered system event.
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | PREvent | SessionEvent | AlertEvent | ServiceFailedEvent | EngineEvent | QuestionEvent
+
+export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "pr" | "session" | "alert" | "service" | "engine" | "question"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "low-disk" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "doctor" | "engine" | "root-flush" | "withdrawn"
+export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
 
@@ -570,6 +645,126 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     audience: "room",
     text: "{location}\nHead: {head}",
   },
+  {
+    family: "session",
+    type: "renamed",
+    renderer: "SessionNoteCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "session",
+    text: "Session {oldName} is now {name}.",
+  },
+  {
+    family: "session",
+    type: "promoted",
+    renderer: "SessionNoteCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "session",
+    text: "{session} moved from {from} to {to}.",
+  },
+  {
+    family: "session",
+    type: "adopted",
+    renderer: "SessionNoteCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "session",
+    text: "{session} moved from {from} to {to}.",
+  },
+  {
+    family: "session",
+    type: "account",
+    renderer: "SessionNoteCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "{session}: {from} moved to {to} ({reason}).",
+  },
+  {
+    family: "session",
+    type: "instructions",
+    renderer: "SessionNoteCard",
+    quiet: false,
+    wake: "never",
+    once: true,
+    audience: "session",
+    text: "[DYNA INSTRUCTIONS CHANGED] Since this conversation started, your standing instructions changed. These changes apply now:",
+  },
+  {
+    family: "session",
+    type: "seat",
+    renderer: "SessionNoteCard",
+    quiet: false,
+    wake: "root-if-needed",
+    once: false,
+    audience: "room",
+    text: "{seat}",
+  },
+  {
+    family: "session",
+    type: "spawned",
+    renderer: "SessionNoteCard",
+    quiet: true,
+    wake: "never",
+    once: false,
+    audience: "room",
+    text: "Started @{name} ({profile}) in {dir}:",
+  },
+  {
+    family: "alert",
+    type: "doctor",
+    renderer: "AlertCard",
+    quiet: false,
+    wake: "root",
+    once: true,
+    audience: "room",
+    text: "Doctor report {reportId} ({trigger}):",
+  },
+  {
+    family: "alert",
+    type: "engine",
+    renderer: "AlertCard",
+    quiet: false,
+    wake: "root",
+    once: true,
+    audience: "room",
+    text: "The engine has been read-only for more than 2 minutes because migration failed:",
+  },
+  {
+    family: "service",
+    type: "failed",
+    renderer: "ServiceAlertCard",
+    quiet: false,
+    wake: "root",
+    once: true,
+    audience: "room",
+    text: "The {service} service failed on turn {turn} ({session}): {error}",
+  },
+  {
+    family: "engine",
+    type: "root-flush",
+    renderer: "EngineNoticeCard",
+    quiet: false,
+    wake: "root",
+    once: false,
+    audience: "room",
+    text: "[TIMED FLUSH] No post woke the root seat for {minutes} minutes, so this notice delivers the held quiet posts as one batch. They did not ask for action; act only where one of them needs a root decision. The full posts stay in the room log.",
+  },
+  {
+    family: "question",
+    type: "withdrawn",
+    renderer: "QuestionNoteCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "Question {questionId} was withdrawn: {reason}",
+  },
 ]
 
 const P_R_TYPE: ReadonlySet<unknown> = new Set(["opened", "ready", "approved", "changes", "ci-failed", "ci-paused", "ci-passed", "returned", "merged", "closed", "comment", "held-comment", "review-assigned", "update"])
@@ -579,6 +774,11 @@ const ISSUE_STATE: ReadonlySet<unknown> = new Set(["open", "goal", "exported", "
 const GOAL_CHANGE: ReadonlySet<unknown> = new Set(["added", "edited", "finished", "dropped"])
 const GOAL_STATE: ReadonlySet<unknown> = new Set(["active", "done", "dropped"])
 const CHECKIN_STATE: ReadonlySet<unknown> = new Set(["running", "queued", "idle"])
+const SESSION_CHANGE: ReadonlySet<unknown> = new Set(["renamed", "promoted", "adopted", "account", "instructions", "seat", "spawned"])
+const ACCOUNT_REASON: ReadonlySet<unknown> = new Set(["usage-limit", "fallback"])
+const INSTRUCTION_ACTION: ReadonlySet<unknown> = new Set(["items", "body", "removed"])
+const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine"])
+const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "helper"])
 const RULE_VERB: ReadonlySet<unknown> = new Set(["added", "edited", "removed"])
 const WORKTREE_REASON: ReadonlySet<unknown> = new Set(["not-merged", "dirty", "manual-handoff", "keep-failed", "other"])
 const HOOK_STATE: ReadonlySet<unknown> = new Set(["running", "passed", "failed", "error"])
@@ -603,6 +803,19 @@ export function isMergeCheckSummary(v: unknown): v is MergeCheckSummary {
 
 export function isMergeCheckSummaryList(v: unknown): v is MergeCheckSummary[] {
   return Array.isArray(v) && v.every((item: unknown) => isMergeCheckSummary(item))
+}
+
+export function isInstructionChange(v: unknown): v is InstructionChange {
+  return isRecord(v) &&
+    typeof v.name === "string" &&
+    INSTRUCTION_ACTION.has(v.action) &&
+    (v.added === undefined || isStringList(v.added)) &&
+    (v.removed === undefined || isStringList(v.removed)) &&
+    (v.body === undefined || typeof v.body === "string")
+}
+
+export function isInstructionChangeList(v: unknown): v is InstructionChange[] {
+  return Array.isArray(v) && v.every((item: unknown) => isInstructionChange(item))
 }
 
 export function isWorktreeEvent(v: unknown): v is WorktreeEvent {
@@ -738,6 +951,57 @@ export function isPREvent(v: unknown): v is PREvent {
     (v.dropped === undefined || Number.isInteger(v.dropped))
 }
 
+export function isSessionEvent(v: unknown): v is SessionEvent {
+  return isRecord(v) &&
+    SESSION_CHANGE.has(v.type) &&
+    typeof v.session === "string" &&
+    (v.name === undefined || typeof v.name === "string") &&
+    (v.oldName === undefined || typeof v.oldName === "string") &&
+    (v.from === undefined || typeof v.from === "string") &&
+    (v.to === undefined || typeof v.to === "string") &&
+    (v.reason === undefined || ACCOUNT_REASON.has(v.reason)) &&
+    (v.profile === undefined || typeof v.profile === "string") &&
+    (v.dir === undefined || typeof v.dir === "string") &&
+    (v.seat === undefined || typeof v.seat === "string") &&
+    (v.sections === undefined || isInstructionChangeList(v.sections)) &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isAlertEvent(v: unknown): v is AlertEvent {
+  return isRecord(v) &&
+    ALERT_SOURCE.has(v.source) &&
+    (v.reportId === undefined || typeof v.reportId === "string") &&
+    (v.trigger === undefined || typeof v.trigger === "string") &&
+    (v.summary === undefined || typeof v.summary === "string") &&
+    (v.action === undefined || typeof v.action === "string") &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isServiceFailedEvent(v: unknown): v is ServiceFailedEvent {
+  return isRecord(v) &&
+    SERVICE_ROLE.has(v.service) &&
+    typeof v.session === "string" &&
+    (v.turn === undefined || Number.isInteger(v.turn)) &&
+    typeof v.error === "string" &&
+    (v.profile === undefined || typeof v.profile === "string") &&
+    (v.model === undefined || typeof v.model === "string")
+}
+
+export function isEngineEvent(v: unknown): v is EngineEvent {
+  return isRecord(v) &&
+    Number.isInteger(v.minutes) &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isQuestionEvent(v: unknown): v is QuestionEvent {
+  return isRecord(v) &&
+    typeof v.questionId === "string" &&
+    typeof v.post === "string" &&
+    (v.by === undefined || typeof v.by === "string") &&
+    (v.reason === undefined || typeof v.reason === "string") &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
 export function isEventPayload(family: string | undefined, type: string | undefined, v: unknown): v is EventPayload {
   if (family === "worktree" && type === "kept") return isWorktreeEvent(v)
   if (family === "hook" && type === "started") return isHookEvent(v)
@@ -776,6 +1040,18 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "pr" && type === "held-comment") return isPREvent(v)
   if (family === "pr" && type === "review-assigned") return isPREvent(v)
   if (family === "pr" && type === "update") return isPREvent(v)
+  if (family === "session" && type === "renamed") return isSessionEvent(v)
+  if (family === "session" && type === "promoted") return isSessionEvent(v)
+  if (family === "session" && type === "adopted") return isSessionEvent(v)
+  if (family === "session" && type === "account") return isSessionEvent(v)
+  if (family === "session" && type === "instructions") return isSessionEvent(v)
+  if (family === "session" && type === "seat") return isSessionEvent(v)
+  if (family === "session" && type === "spawned") return isSessionEvent(v)
+  if (family === "alert" && type === "doctor") return isAlertEvent(v)
+  if (family === "alert" && type === "engine") return isAlertEvent(v)
+  if (family === "service" && type === "failed") return isServiceFailedEvent(v)
+  if (family === "engine" && type === "root-flush") return isEngineEvent(v)
+  if (family === "question" && type === "withdrawn") return isQuestionEvent(v)
   return false
 }
 
