@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -312,13 +311,22 @@ func (s *Store) gateOpen(id string) (int, bool, error) {
 // holds the root seat, and nothing while an external orchestrator holds it.
 // Every other session keeps the posts its stored delivery rows name it in that
 // it did not write.
-func forSession(rooms *room.Store, meta Meta, msgs []room.Message) []room.Message {
-	received := sessionInput(rooms, meta, msgs)
+//
+// A read that fails returns an error and no posts: a caller must then keep its
+// room cursor and its cached pending posts where they are, so the same posts
+// are read again instead of being skipped for good.
+func forSession(rooms *room.Store, meta Meta, msgs []room.Message) ([]room.Message, error) {
+	received, err := sessionInput(rooms, meta, msgs)
+	if err != nil {
+		return nil, err
+	}
 	keep := func(msg room.Message) bool {
 		return msg.Deliverable() && received(msg) && !msg.SentBySession(meta.ID, meta.Address())
 	}
 	if meta.Role == RoleRoot {
-		keep = seatInput(rooms, meta, msgs)
+		if keep, err = seatInput(rooms, meta, msgs); err != nil {
+			return nil, err
+		}
 	}
 	var out []room.Message
 	for _, msg := range msgs {
@@ -332,34 +340,30 @@ func forSession(rooms *room.Store, meta Meta, msgs []room.Message) []room.Messag
 			out = append(out, msg)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // seatInput is the root seat's turn input, read from the seat's stored delivery
 // rows: a post that asks the seat to act, or a passive one that only adds
 // context to its next turn. Quiet posts with their own section in the root's
 // context are not turn input, and the seat's own posts never come back to it.
-func seatInput(rooms *room.Store, meta Meta, msgs []room.Message) func(room.Message) bool {
+// A failed row read is an error, so the seat's cursor stays where it is.
+func seatInput(rooms *room.Store, meta Meta, msgs []room.Message) (func(room.Message) bool, error) {
 	if rooms == nil {
-		return func(room.Message) bool { return false }
+		return func(room.Message) bool { return false }, nil
 	}
 	rec, err := rooms.Resolve(meta.RoomID)
 	if err != nil || rec.Seat.External {
-		return func(room.Message) bool { return false }
+		return func(room.Message) bool { return false }, nil
 	}
-	ids := make([]string, len(msgs))
-	for i, msg := range msgs {
-		ids[i] = msg.ID
-	}
-	seats, err := rooms.SeatDeliveries(meta.RoomID, ids)
+	seats, err := rooms.SeatDeliveries(meta.RoomID, postIDs(msgs))
 	if err != nil {
-		log.Printf("session %s: read the root seat's deliveries: %v", meta.ID, err)
-		return func(room.Message) bool { return false }
+		return nil, err
 	}
 	return func(msg room.Message) bool {
 		seat, ok := seats[msg.ID]
 		return ok && seat.RootInput() && !msg.SentBySession(meta.ID, meta.Address())
-	}
+	}, nil
 }
 
 // sessionInput reports which of msgs this session received, from its stored
@@ -368,12 +372,15 @@ func seatInput(rooms *room.Store, meta Meta, msgs []room.Message) func(room.Mess
 // rename keeps the post. Its mode is not the input test: a quiet post is still
 // read on the session's next turn, so the caller keeps the post's own family
 // check (Message.Deliverable).
-func sessionInput(rooms *room.Store, meta Meta, msgs []room.Message) func(room.Message) bool {
-	rows := inputRows(rooms, meta.RoomID, meta.ID, meta.Address(), postIDs(msgs))
+func sessionInput(rooms *room.Store, meta Meta, msgs []room.Message) (func(room.Message) bool, error) {
+	rows, err := inputRows(rooms, meta.RoomID, meta.ID, meta.Address(), postIDs(msgs))
+	if err != nil {
+		return nil, err
+	}
 	return func(msg room.Message) bool {
 		_, ok := rows[msg.ID]
 		return ok
-	}
+	}, nil
 }
 
 func (s *Store) frameOptions(meta Meta, msg room.Message) room.FrameOptions {
