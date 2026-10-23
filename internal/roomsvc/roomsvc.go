@@ -62,6 +62,7 @@ type Service struct {
 	storeWake   chan struct{}
 	storeMu     sync.Mutex
 	storeTopics map[string]bool
+	postRooms   map[string]bool
 	// callRequestWake asks Watch to read committed local call-request changes.
 	callRequestWake chan struct{}
 	// RunnerExited, when set, runs after a watched turn runner exits, with
@@ -117,6 +118,30 @@ func (s *Service) StoreChanged(topic string) {
 	select {
 	case s.storeWake <- struct{}{}:
 	default:
+	}
+}
+
+// PostsChanged queues each room independently of other store topics.
+func (s *Service) PostsChanged(roomID string) {
+	s.storeMu.Lock()
+	if s.postRooms == nil {
+		s.postRooms = map[string]bool{}
+	}
+	s.postRooms[roomID] = true
+	s.storeMu.Unlock()
+	select {
+	case s.storeWake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *Service) scanChangedPosts(offsets map[string]int64, emit func(Event)) {
+	s.storeMu.Lock()
+	rooms := s.postRooms
+	s.postRooms = nil
+	s.storeMu.Unlock()
+	for id := range rooms {
+		s.scanPosts(id, offsets, false, emit)
 	}
 }
 
