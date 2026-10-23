@@ -3,6 +3,7 @@ package roomsvc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"path/filepath"
@@ -118,6 +119,18 @@ func (s *Service) validGoalHolders(roomID string, in goals.Input) error {
 	}
 	return nil
 }
+
+// refuseRootHolders keeps the room's root seat out of goal holders. Root leads
+// the room and gives the work goals to the agents that do the work.
+func (s *Service) refuseRootHolders(holders []string) error {
+	for _, id := range holders {
+		if info, err := s.sessions().Info(id); err == nil && info.Role == subagent.RoleRoot {
+			return errors.New(goals.RootHoldsNothing)
+		}
+	}
+	return nil
+}
+
 func (s *Service) AddGoal(ctx context.Context, roomRef, text string, selectors []string) (goals.Goal, error) {
 	r, author, err := s.goalCaller(ctx, roomRef)
 	if err != nil {
@@ -126,6 +139,9 @@ func (s *Service) AddGoal(ctx context.Context, roomRef, text string, selectors [
 	service := s.goalService()
 	holders, shared, err := service.ResolveHolders(r.ID, author.ResolveAs, selectors)
 	if err != nil {
+		return goals.Goal{}, err
+	}
+	if err = s.refuseRootHolders(holders); err != nil {
 		return goals.Goal{}, err
 	}
 	g, err := service.Store.Add(r.ID, author.ID, goals.Input{Text: text, Holders: holders, Shared: shared})
@@ -165,6 +181,9 @@ func (s *Service) editGoal(ctx context.Context, roomRef, id, text string, holder
 	}
 	if holders != nil {
 		if err = s.validGoalHolders(r.ID, goals.Input{Holders: *holders, Shared: shared}); err != nil {
+			return goals.Goal{}, err
+		}
+		if err = s.refuseRootHolders(*holders); err != nil {
 			return goals.Goal{}, err
 		}
 	}
@@ -298,7 +317,32 @@ func (s *Service) MoveGoalItem(ctx context.Context, roomRef, goal, item, to stri
 	if err != nil {
 		return goals.ItemMove{}, err
 	}
+	// Promotion gives the item's assignee, or the caller, a goal of its own.
+	if to == "new" {
+		if err = s.refusePromotedRootHolder(r.ID, goal, item, author.ID); err != nil {
+			return goals.ItemMove{}, err
+		}
+	}
 	return s.goalService().Store.MoveItem(r.ID, goal, item, author.ID, to)
+}
+
+// refusePromotedRootHolder checks the session that would hold a promoted item.
+func (s *Service) refusePromotedRootHolder(roomID, goal, item, by string) error {
+	items, err := s.goalService().Store.Items(roomID, goal)
+	if err != nil {
+		return nil // MoveItem reports a missing goal or item
+	}
+	for _, it := range items {
+		if it.ID != item {
+			continue
+		}
+		holder := it.Assignee
+		if holder == "" {
+			holder = by
+		}
+		return s.refuseRootHolders([]string{holder})
+	}
+	return nil
 }
 
 func (s *Service) SetGoalItemState(ctx context.Context, roomRef, goal, item, state string) (goals.Item, error) {

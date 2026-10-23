@@ -69,13 +69,15 @@ export function expediteScope(goals: GoalLike[], members: MemberLike[], now = Da
   const assigned = (m: MemberLike): boolean =>
     items.some((i) => i.state === 'open' && !!i.assignee && (i.assignee === m.id || i.assignee === m.address))
   for (const m of members) {
-    // Root or the owner leads the whole room, so even as an item assignee it
-    // keeps the badge to itself.
+    // Root or the owner leads the whole room, so it is no holder of one goal's
+    // work: it carries no badge for holding it, and neither do its children.
+    // As an item assignee it does that work, so it keeps the badge to itself.
     if (assigned(m)) {
       if (top(m)) addSelf(m)
       else add(m)
     } else if (holders.includes(m.id ?? '') || holders.includes(m.address ?? '')) {
-      if (items.length || top(m)) addSelf(m)
+      if (top(m)) continue
+      if (items.length) addSelf(m)
       else add(m)
     }
   }

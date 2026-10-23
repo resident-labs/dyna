@@ -55,6 +55,10 @@ type Goal struct {
 
 func (g Goal) Open() bool { return g.State == "active" }
 
+// RootHoldsNothing is the refusal for any goal holder that is root. Root leads
+// the room, so the agents that do the work hold the goals.
+const RootHoldsNothing = "root cannot hold goals; start an agent with dyna subagent start --goal, or pass --for @agent"
+
 // Concerns reports whether session id sees the goal: shared, held or set by it.
 func (g Goal) Concerns(id string) bool { return g.Shared || g.HeldBy(id) || g.Setter == id }
 func (g Goal) HeldBy(id string) bool {

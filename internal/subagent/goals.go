@@ -18,7 +18,8 @@ func (m *Manager) goalStore() *goals.Store {
 
 // addSpawnGoal creates the work a new session holds: a delegation item on
 // an effective goal for a child, or a goal of its own when none is eligible.
-// Service sessions hold no goals.
+// Service sessions hold no goals, and root holds no goals either, so a start
+// from root never joins a root goal.
 func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string) (goalID, itemID string, err error) {
 	if meta.Service {
 		return "", "", nil
@@ -28,12 +29,12 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string) (goalID, it
 		setter = "owner"
 	}
 	store := m.goalStore()
-	if meta.ParentSession != "" || under != "" {
+	if (meta.ParentSession != "" || under != "") && !m.isRootSession(meta.ParentSession) {
 		goal, err := store.EffectiveGoal(meta.RoomID, meta.ParentSession, under)
 		if err != nil {
 			return "", "", err
 		}
-		if goal != "" {
+		if goal != "" && !m.rootHeld(meta.RoomID, goal) {
 			itemText := text
 			if brief != "" {
 				itemText += "\n\nBrief:\n" + brief
@@ -50,6 +51,29 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string) (goalID, it
 		return "", "", fmt.Errorf("cannot create the session's goal: %w", err)
 	}
 	return g.ID, "", nil
+}
+
+// isRootSession reports whether id is a room's internal root session.
+func (m *Manager) isRootSession(id string) bool {
+	if id == "" {
+		return false
+	}
+	meta, err := m.store().ReadMeta(id)
+	return err == nil && meta.Role == RoleRoot
+}
+
+// rootHeld reports whether root holds the goal, so no child joins it.
+func (m *Manager) rootHeld(roomID, goalID string) bool {
+	g, err := m.goalStore().Get(roomID, goalID)
+	if err != nil {
+		return false
+	}
+	for _, id := range g.Holders {
+		if m.isRootSession(id) {
+			return true
+		}
+	}
+	return false
 }
 
 // spawnGoalBlock is the session's open spawn goal and its brief under one
@@ -130,7 +154,8 @@ func (m *Manager) closeGoals(info Info, heir string) {
 	open := map[string]bool{}
 	if sessions, err := m.store().List(false); err == nil {
 		for _, s := range sessions {
-			if s.RoomID == info.RoomID {
+			// Root receives no hand-off, so the goal stays with the owner.
+			if s.RoomID == info.RoomID && s.Role != RoleRoot {
 				open[s.ID] = true
 			}
 		}
