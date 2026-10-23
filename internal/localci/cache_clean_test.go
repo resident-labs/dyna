@@ -24,7 +24,7 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 	command := cacheCleanCommand("hermeslab", true, ciCacheCleanAge)
 	for _, keep := range []string{
 		"-xdev", `-maxdepth 0 -mmin +"$age_min" ! -type l`, "rm -rf --one-file-system",
-		"DYNA_CI_CLEAN_AGE_MIN=2880", "flock -n \"$1/.active\" true",
+		"DYNA_CI_CLEAN_AGE_MIN=2880", "flock -n \"$1/.active\" true", `base_idle "$1" || return 0`,
 	} {
 		if !strings.Contains(command, keep) {
 			t.Fatalf("cleanup command lacks %q", keep)
@@ -76,10 +76,11 @@ func runCacheClean(t *testing.T, roots string, dryRun bool) ([]byte, error) {
 	return exec.Command("bash", "-c", command).CombinedOutput()
 }
 
-// TestCacheCleanRemovesOnlyADeadRunsDirectory checks the liveness rule on a real
-// tree of Dyna's own: an old run goes, an old run that still holds its lock
-// stays, and an old run that left its lock file behind goes.
-func TestCacheCleanRemovesOnlyADeadRunsDirectory(t *testing.T) {
+// TestCacheCleanRemovesOnlyWhatNoRunUses checks the liveness rule on a real tree
+// of Dyna's own: a dead run's directory goes, a held run's stays, and a base
+// with a live run keeps all of its caches. It also checks that a cleanup asked
+// for one tree never visits the shared legacy tree.
+func TestCacheCleanRemovesOnlyWhatNoRunUses(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("the cleanup refuses to run as root")
 	}
@@ -89,24 +90,37 @@ func TestCacheCleanRemovesOnlyADeadRunsDirectory(t *testing.T) {
 	}
 	t.Cleanup(func() { os.RemoveAll(base) })
 	old := time.Now().Add(-72 * time.Hour)
-	runs := map[string]bool{"finished": false, "crashed": true, "live": true}
-	for name, marker := range runs {
-		dir := filepath.Join(base, "runs", name)
-		if err := os.MkdirAll(filepath.Join(dir, "work"), 0700); err != nil {
+	dirs := []string{
+		filepath.Join(base, "runs", "finished"),
+		filepath.Join(base, "runs", "crashed"),
+		filepath.Join(base, "runs", "held"),
+		filepath.Join(base, "go-mod", "module"),
+		filepath.Join(base, "npm", "package"),
+		filepath.Join(base, "diagnostics", "run"),
+	}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
-		if marker {
-			if err := os.WriteFile(filepath.Join(dir, ".active"), nil, 0600); err != nil {
-				t.Fatal(err)
-			}
+	}
+	// A crashed run leaves its lock file behind; a dead holder leaves nothing.
+	// The lock files come first: a new entry would date its directory today.
+	for _, name := range []string{"crashed", "held"} {
+		if err := os.WriteFile(filepath.Join(base, "runs", name, ".active"), nil, 0600); err != nil {
+			t.Fatal(err)
 		}
+	}
+	for _, dir := range dirs {
 		if err := os.Chtimes(dir, old, old); err != nil {
 			t.Fatal(err)
 		}
 	}
-	// A live run holds its lock; a crashed run's lock died with it. The holder
-	// prints once it has the lock, so the cleanup never races it.
-	holder := exec.Command("flock", "-n", filepath.Join(base, "runs", "live", ".active"), "bash", "-c", "echo held; sleep 30")
+	// The live run holds its lock until this test closes the pipe.
+	holder := exec.Command("flock", "-n", filepath.Join(base, "runs", "held", ".active"), "bash", "-c", "echo held; read -r line")
+	stdin, err := holder.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	stdout, err := holder.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -114,25 +128,54 @@ func TestCacheCleanRemovesOnlyADeadRunsDirectory(t *testing.T) {
 	if err := holder.Start(); err != nil {
 		t.Skipf("no flock to hold the test's lock: %v", err)
 	}
-	t.Cleanup(func() { holder.Process.Kill(); holder.Wait() })
+	stopped := false
+	stopHolder := func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		stdin.Close()
+		holder.Wait()
+	}
+	t.Cleanup(stopHolder)
 	if held, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || !strings.Contains(held, "held") {
 		t.Fatalf("lock holder did not start: %q %v", held, err)
 	}
 
-	command := "DYNA_CI_CLEAN_DRY=0 DYNA_CI_CLEAN_ROOTS=" + shellquote.Quote(base) +
-		" bash -o pipefail -c " + shellquote.Quote(ciCacheCleanBody)
-	out, err := exec.Command("bash", "-c", command).CombinedOutput()
+	out, err := runCacheClean(t, base, false)
 	if err != nil {
 		t.Fatalf("cleanup failed: %v: %s", err, out)
 	}
-	for name, wantGone := range map[string]bool{"finished": true, "crashed": true, "live": false} {
-		_, statErr := os.Stat(filepath.Join(base, "runs", name))
-		if gone := os.IsNotExist(statErr); gone != wantGone {
-			t.Fatalf("run %q removed = %v, want %v: %s", name, gone, wantGone, out)
+	for _, gone := range []string{"runs/finished", "runs/crashed", "diagnostics/run"} {
+		if _, err := os.Stat(filepath.Join(base, gone)); !os.IsNotExist(err) {
+			t.Fatalf("%s stayed: %s", gone, out)
+		}
+	}
+	for _, kept := range []string{"runs/held", "go-mod/module", "npm/package"} {
+		if _, err := os.Stat(filepath.Join(base, kept)); err != nil {
+			t.Fatalf("%s went while a run held it: %v: %s", kept, err, out)
 		}
 	}
 	if !strings.Contains(string(out), "DYNA_CI_CACHE_CLEAN_FREED_KB=") {
 		t.Fatalf("cleanup reported no total: %s", out)
+	}
+	// A cleanup for one tree never reaches into the shared legacy tree.
+	for _, line := range strings.Split(string(out), "\n") {
+		if fields := strings.Fields(line); len(fields) == 3 && strings.HasPrefix(fields[2], legacyCacheDir+"/") {
+			t.Fatalf("cleanup visited the legacy tree it was not asked for: %s", line)
+		}
+	}
+
+	// The same tree, now with no live run: its caches are old enough to go.
+	stopHolder()
+	out, err = runCacheClean(t, base, false)
+	if err != nil {
+		t.Fatalf("cleanup failed: %v: %s", err, out)
+	}
+	for _, gone := range []string{"runs/held", "go-mod/module", "npm/package"} {
+		if _, err := os.Stat(filepath.Join(base, gone)); !os.IsNotExist(err) {
+			t.Fatalf("%s stayed with no live run: %s", gone, out)
+		}
 	}
 }
 
