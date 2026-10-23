@@ -34,8 +34,8 @@ func TestUpdateConfigUsesDynaDataDir(t *testing.T) {
 	data := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", data)
 	cfg := Config("dev")
-	if got := cfg.StatePath; got != data+"/dyna/update-check.json" {
-		t.Fatalf("state path = %q", got)
+	if got := cfg.DataDir; got != data+"/dyna" {
+		t.Fatalf("data dir = %q", got)
 	}
 	if cfg.Version != "dev" {
 		t.Fatalf("source build update version = %q, want dev", cfg.Version)
