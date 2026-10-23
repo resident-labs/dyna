@@ -14,7 +14,11 @@ import (
 // machineAPI answers the machine calls. The registry gives every row; the live
 // figures come from this engine's own machine.
 func (s services) machineAPI() websvc.MachineAPI {
-	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI}
+	var alerter machines.Alerter
+	if s.rooms != nil && s.rooms.Notify != nil {
+		alerter = machineDiskAlerter{notify: s.rooms.Notify}
+	}
+	return websvc.MachineAPI{Store: machines.Store{}, Version: callspec.Build, Live: s.machineLive, Running: s.machineRunning, CI: s.machineCI, DiskFloor: ciDiskFloor, Alerter: alerter}
 }
 
 // machineCI lists the local CI runs in flight on every machine. The runs live
