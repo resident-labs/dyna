@@ -227,7 +227,10 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			script += "timeout 10s systemctl --user stop " + shellquote.Quote(name+".scope") + " >/dev/null 2>&1 || true; "
 			script += "git --git-dir=" + shellquote.Quote(cache) + " worktree remove --force " + shellquote.Quote(path.Join(runDir, check.id, "work")) + " >/dev/null 2>&1 || true; "
 		}
-		script += "rm -rf " + shellquote.Quote(runDir) + "; git --git-dir=" + shellquote.Quote(cache) + " worktree prune"
+		// The run directory itself is left to the removal defer, which stops the
+		// run's keeper first: deleting the directory here would take the keeper's
+		// process ID away before anything could stop it.
+		script += "git --git-dir=" + shellquote.Quote(cache) + " worktree prune"
 		if e := r.nodeCommand(cleanup, &log, &log, "", script); e != nil {
 			err = errors.Join(err, fmt.Errorf("cleanup node: %w: %s", e, log.String()))
 		}
