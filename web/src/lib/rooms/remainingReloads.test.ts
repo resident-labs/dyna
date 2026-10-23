@@ -16,6 +16,7 @@ import { reloadsUnread } from '../ui/unreadReload.ts'
 import { inRoomFeed } from './feedViews.ts'
 import { call, runFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
+import { installRoomLoader } from '../../../test/appRoomLoader.ts'
 import { need } from '../../../test/need.ts'
 import { member } from '../../../test/session-fixtures.ts'
 import type { Member } from '../api/room.ts'
@@ -352,7 +353,9 @@ test('a channel roster change refreshes computers once and its later computer ev
     api: { computers: async () => { calls++; return computerRows } },
   }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), (name: string) => listVisible(name, c))
-  appFunctions(c, ['memberRoster', 'roomCountKey', 'showMemberRows', 'parentKey', 'noteParents', 'rerouteLoaded', 'applyMembers', 'loadComputers', 'handleComputer'])
+  // The member rows live in the room loader now; the computers stay in App.
+  installRoomLoader(c, c.api)
+  appFunctions(c, ['loadComputers', 'handleComputer'])
   computerRows = [...computerRows, { session: 'two', name: 'two', state: 'none' }]
   call(c, 'applyMembers', [one, two])
   await new Promise(setImmediate)
@@ -588,6 +591,8 @@ test('live posts mark a missing newer page while the reader is in history', () =
     home: null, drill: null, roomId: 'room', roomSessionController: null, feedAtBottom: false,
     feed: { room: { id: 'room' }, posts: [{ id: 'old' }] }, soonRooms() {}, loadVisuals() {},
   }
+  // A live page joins the feed through the room loader.
+  installRoomLoader(c, {})
   appFunctions(c, ['handle'])
   for (let i = 0; i < 1000; i++) call(c, 'handle', { kind: 'posts', roomId: 'room', posts: [{ id: 'new' + i }] })
   assert.deepEqual(c.feed.posts.map((p) => p.id), ['old'])
