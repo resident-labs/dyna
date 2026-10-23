@@ -135,6 +135,7 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 	}
 	main, _ := repoid.Git(ctx, r.Root, "rev-parse", "--verify", "refs/remotes/origin/main^{commit}")
 	var events []Event
+	var due []string
 	err = s.runtime(r.ID, func(st *state) error {
 		if main != "" {
 			if st.Main != "" && st.Main != main {
@@ -142,42 +143,75 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 			}
 			st.Main = main
 		}
-		for _, h := range hooks {
-			if h.Event != Schedule || h.Disabled || Validate(h) != nil {
-				continue
-			}
-			key := scheduleKey(h)
-			due := st.Due[key]
-			last, known := st.Every[key]
-			switch {
-			case !due.IsZero() && known && last != h.EveryMinutes:
-				// An edited interval moves the run that the old interval made
-				// due: the last run plus the new interval.
-				due = due.Add(time.Duration(h.EveryMinutes-last) * time.Minute)
-			case !due.IsZero() && !known && due.Before(now.Add(time.Duration(h.EveryMinutes)*time.Minute)):
-				// An older release wrote this run time without the interval that
-				// set it, so it may predate an interval edit. Wait one full
-				// interval from here rather than fire at the old deadline.
-				due = now.Add(time.Duration(h.EveryMinutes) * time.Minute)
-			}
-			st.Due[key] = due
-			st.Every[key] = h.EveryMinutes
-			if now.Before(due) {
-				continue
-			}
-			st.Due[key] = now.Add(time.Duration(h.EveryMinutes) * time.Minute)
-			events = append(events, Event{Event: Schedule, Repo: r.Root, Worktree: r.Main, Name: h.Name})
-		}
+		due = claimSchedule(st, hooks, now)
 		return nil
 	})
 	if err != nil {
 		return err
+	}
+	for _, name := range due {
+		events = append(events, Event{Event: Schedule, Repo: r.Root, Worktree: r.Main, Name: name})
 	}
 	errs := []error{fetchErr}
 	for _, e := range events {
 		errs = append(errs, s.Emit(ctx, e))
 	}
 	return errors.Join(errs...)
+}
+
+// TickGlobal claims the due runs of the global hooks. They belong to no
+// repository, so the engine ticks them once, apart from each repository.
+func (s Service) TickGlobal(ctx context.Context, now time.Time) error {
+	hooks, err := s.ListGlobal(ctx)
+	if err != nil || len(hooks) == 0 {
+		return err
+	}
+	var due []string
+	if err := s.runtime(globalKey, func(st *state) error {
+		due = claimSchedule(st, hooks, now)
+		return nil
+	}); err != nil {
+		return err
+	}
+	var errs []error
+	for _, name := range due {
+		_, err := s.run(ctx, Event{Event: Schedule, Name: name}, name, nil, false)
+		errs = append(errs, err)
+	}
+	return errors.Join(errs...)
+}
+
+// claimSchedule marks the schedule hooks that are due, and the next run of
+// each, in the runtime state. It returns the names that are due now.
+func claimSchedule(st *state, hooks []Hook, now time.Time) []string {
+	var due []string
+	for _, h := range hooks {
+		if h.Event != Schedule || h.Disabled || Validate(h) != nil {
+			continue
+		}
+		key := scheduleKey(h)
+		at := st.Due[key]
+		last, known := st.Every[key]
+		switch {
+		case !at.IsZero() && known && last != h.EveryMinutes:
+			// An edited interval moves the run that the old interval made
+			// due: the last run plus the new interval.
+			at = at.Add(time.Duration(h.EveryMinutes-last) * time.Minute)
+		case !at.IsZero() && !known && at.Before(now.Add(time.Duration(h.EveryMinutes)*time.Minute)):
+			// An older release wrote this run time without the interval that
+			// set it, so it may predate an interval edit. Wait one full
+			// interval from here rather than fire at the old deadline.
+			at = now.Add(time.Duration(h.EveryMinutes) * time.Minute)
+		}
+		st.Due[key] = at
+		st.Every[key] = h.EveryMinutes
+		if now.Before(at) {
+			continue
+		}
+		st.Due[key] = now.Add(time.Duration(h.EveryMinutes) * time.Minute)
+		due = append(due, h.Name)
+	}
+	return due
 }
 
 func validCommitSHA(sha string) bool {

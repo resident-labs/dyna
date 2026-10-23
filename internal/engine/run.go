@@ -26,6 +26,7 @@ import (
 
 	"dyna-agent/internal/account/service"
 	accountstore "dyna-agent/internal/account/store"
+	"dyna-agent/internal/automations"
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/computerrestart"
@@ -532,7 +533,14 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	if !readOnly {
 		load.Record = doctor.Samples{DataDir: filepath.Dir(cstore.Dir())}.Recorder(log.Printf)
 	}
-	calls, callScopes, err := callsFor(services{settingsChanged: func() { wakeWorker(signals.channels["checkins"]) }, git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, hooks: hooks.New(), sync: lanesync.New(), health: health, load: load}, readOnly)
+	// The built-in hooks are seeded before any schedule or caller can run one.
+	hookService := hooks.New(automations.Hooks()...)
+	if !readOnly {
+		if err := hookService.Seed(ctx); err != nil {
+			log.Printf("seed built-in hooks: %v", err)
+		}
+	}
+	calls, callScopes, err := callsFor(services{settingsChanged: func() { wakeWorker(signals.channels["checkins"]) }, git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, hooks: hookService, sync: lanesync.New(), health: health, load: load}, readOnly)
 	if err != nil {
 		return err
 	}
@@ -653,7 +661,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	go func() { errs <- servers[1].Serve(cardLn) }()
 	go func() { errs <- servers[2].Serve(socketLn) }()
 	if !readOnly {
-		startService(func() { maintenance.Loop(ctx, log.Printf, rooms.Notify.Sessions.RetainClosedSession) })
+		startService(func() { maintenance.Loop(ctx, log.Printf, hookService, rooms.Notify.Sessions.RetainClosedSession) })
 	}
 
 	fmt.Printf("Dyna web app on http://%s (cards on http://%s)\n", f.Addr, f.CardAddr)

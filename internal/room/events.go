@@ -648,9 +648,13 @@ type HookEvent struct {
 	// Label is the hook's own label, when it has one.
 	Label string `json:"label,omitempty"`
 	// Command is the first word of the command only: the full command can
-	// hold a secret, so it never leaves the hooks store.
+	// hold a secret, so it never leaves the hooks store. A built-in run has
+	// no command, because the engine runs its own pass.
 	Command string    `json:"command,omitempty"`
 	State   HookState `json:"state"`
+	// Builtin marks a run of an automatic hook, so the card names the pass
+	// instead of a command.
+	Builtin bool `json:"builtin,omitempty"`
 	// DurationMS is how long the run took. A start has none.
 	DurationMS int `json:"durationMs,omitempty"`
 	// Detail is the cause the state cannot carry alone, such as the exit code,

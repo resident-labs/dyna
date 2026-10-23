@@ -35,6 +35,7 @@ func TestHookDocumentMigrationConvertsAliasesAndRecipesOnce(t *testing.T) {
 		}
 		custom[field] = value
 		custom["event"] = Schedule
+		custom["scope"] = ScopeRepository
 		hooks = append(hooks, custom)
 	}
 	original := map[string]any{"repo": repo, "hooks": hooks, "future": map[string]any{"large": json.Number("9007199254740993")}}
@@ -83,6 +84,7 @@ func TestHookDocumentMigrationConvertsAliasesAndRecipesOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	base["event"] = MainUpdated
+	base["scope"] = ScopeRepository
 	base["command"] = shellquote.Quote(exe) + " git hooks _install --main " + shellquote.Quote(repo) + " --name " + shellquote.Quote(name) + " --tool-path " + shellquote.Quote("/tools dir:/usr/bin")
 	expected, err := json.Marshal(original)
 	if err != nil {
@@ -92,7 +94,7 @@ func TestHookDocumentMigrationConvertsAliasesAndRecipesOnce(t *testing.T) {
 		t.Fatalf("migrated document = %s; want %s", got, expected)
 	}
 	var version int
-	if err := db.QueryRow("SELECT value FROM meta WHERE key='hooks.documents'").Scan(&version); err != nil || version != 3 {
+	if err := db.QueryRow("SELECT value FROM meta WHERE key='hooks.documents'").Scan(&version); err != nil || version != 4 {
 		t.Fatalf("version = %d, %v", version, err)
 	}
 	var stamp, pending string
