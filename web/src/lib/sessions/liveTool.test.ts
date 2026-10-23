@@ -10,6 +10,7 @@ const format = readFileSync(new URL('../ui/format.ts', import.meta.url), 'utf8')
 // Mounts a component with the real format helpers and returns its text.
 async function render(component: string, props: object) {
   const dom = installDom()
+  Reflect.set(globalThis, 'HTMLMediaElement', dom.window.HTMLMediaElement)
   const { dir, default: C, mount, unmount, flushSync } = await load({ component, format })
   let app
   try {
@@ -18,6 +19,7 @@ async function render(component: string, props: object) {
   } finally {
     if (app) unmount(app)
     dom.window.close()
+    Reflect.deleteProperty(globalThis, 'HTMLMediaElement')
     for (const n of domNames) Reflect.deleteProperty(globalThis, n)
     await rm(dir, { recursive: true, force: true })
   }
@@ -31,12 +33,12 @@ test('the session view shows the current call from the live activity, not the fi
   // transcript grouping keeps the first read's target and time but marks the group running.
   const dm = { address: 'repo:root', threads: [], rows: [
     { kind: 'turn', key: 'turn:1', ts: started, turn: { n: 1, status: 'running', started } },
-    { kind: 'activity', key: 'activity:1', ts: started, items: [{ kind: 'tool', tool: 'read', target: 'old.go', ts: started, done: false }] },
+    { kind: 'timeline', key: 'timeline:1', ts: started, turn: { n: 1, started, status: 'running' }, steps: [{ kind: 'tool', key: 'tool:1', tool: 'read', target: 'old.go', ts: started }] },
   ] }
   const member = { name: 'root', hue: 1, state: 'live', address: 'repo:root', doing: { text: 'Read: new.go', since: now - 45000 } }
   const html = await render('../sessions/DmRows', { dm, member, room: { name: 'repo' }, members: [] })
-  assert.match(html, /class="live[^"]*long[^"]*"[^>]*>Read: new\.go · 45s</)
-  assert.doesNotMatch(html, /10m/)
+  assert.match(html, /class="doing[^"]*long[^"]*"[^>]*>Read: new\.go · 45s</)
+  assert.doesNotMatch(html, /old\.go · 10m/)
 })
 
 test('a live member row says what it is doing and for how long', async (t) => {

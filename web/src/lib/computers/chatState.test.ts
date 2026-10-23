@@ -99,6 +99,9 @@ test('last line is the newest agent action or reply', () => {
   const dm2 = dmView(more, room)
   assert.deepEqual(lastLine(dm2.rows, dm2.address), { key: 'item:1:3', who: 'say', text: 'Got it, switching to SAVE10.' })
   assert.notEqual(need(lastLine(dm2.rows, dm2.address), 'last line').key, need(l, 'last line').key, 'a new line changes the key, which sets the unread dot')
+  need(more.turns[0], 'first turn').items.push({ kind: 'tool', tool: 'click', target: 'Apply', ts: '2026-10-17T18:00:05Z' })
+  const dm3 = dmView(more, room)
+  assert.equal(need(lastLine(dm3.rows, dm3.address), 'new action').who, 'act', 'a later step in the earlier timeline row still marks new activity')
   assert.equal(lastLine([], 'x'), null)
 })
 

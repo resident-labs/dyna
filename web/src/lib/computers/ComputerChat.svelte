@@ -30,7 +30,7 @@
   onDestroy(() => attachments.destroy())
 
   const m = $derived(session?.member)
-  const dm = $derived(session ? dmView(session, room, { reasoning: $showReasoning, compaction: $showCompaction }) : null)
+  const dm = $derived(session ? dmView(session, room, { reasoning: $showReasoning, compaction: $showCompaction }, [], members.filter((child) => !!m?.id && child.parent === m.id)) : null)
   const last = $derived(lastLine(dm?.rows, dm?.address))
   // The overlay shows the newest rows; the Messages tab has the rest.
   const shown = $derived(dm ? { ...dm, rows: dm.rows.slice(-RECENT) } : null)
