@@ -16,14 +16,15 @@ import (
 	"dyna-agent/internal/store"
 )
 
-// A computer's registration and its last status live in dyna.db (rule
-// r10), one row per session. The computer service writes them from its own
-// processes, outside the engine, until item 2 moves those writes into
-// engine calls.
+// A computer's registration, its last status and its last failure reason
+// live in dyna.db (rule r10), one row per session. The computer service writes
+// them from its own processes, outside the engine, until item 2 moves those
+// writes into engine calls.
 const recordSchema = `CREATE TABLE computers (
  session TEXT PRIMARY KEY,
  meta BLOB CHECK(meta IS NULL OR json_valid(meta)),
- status BLOB CHECK(status IS NULL OR json_valid(status))
+ status BLOB CHECK(status IS NULL OR json_valid(status)),
+ failure TEXT
 );`
 
 // Migrate creates the computers table. Only the engine runs it, at start.
@@ -37,10 +38,14 @@ func openRecords(dataDir string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "computers.records", 2, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "computers.records", 3, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, recordSchema); err != nil {
+				return err
+			}
+		} else if old < 3 {
+			if _, err := conn.ExecContext(ctx, `ALTER TABLE computers ADD COLUMN failure TEXT`); err != nil {
 				return err
 			}
 		}
@@ -51,20 +56,21 @@ func openRecords(dataDir string) (*sql.DB, error) {
 
 func recordsDB() (*sql.DB, error) { return openRecords(filepath.Dir(Root())) }
 
-// A record is one of a computer's two columns and its previous release's
-// file in the computer's folder.
+// A record is one of a computer's columns and its previous release's file in
+// the computer's folder.
 type record struct{ column, file string }
 
 var (
-	metaRecord   = record{"meta", "meta.json"}
-	statusRecord = record{"status", "state.json"}
+	metaRecord    = record{"meta", "meta.json"}
+	statusRecord  = record{"status", "state.json"}
+	failureRecord = record{"failure", "failure.json"}
 )
 
 func (r record) path(id string) string { return filepath.Join(Dir(id), r.file) }
 func (r record) key(id string) string  { return "computers/" + id + "/" + r.column }
 
 // TODO: legacy/shim remove later — imports retained computer files only during
-// schema upgrade; remove once supported stores have passed computers.records 2.
+// schema upgrade; remove once supported stores have passed computers.records 3.
 func importComputerFiles(ctx context.Context, conn *sql.Conn, root string) error {
 	entries, err := os.ReadDir(root)
 	if os.IsNotExist(err) {
@@ -111,8 +117,32 @@ func importComputerFiles(ctx context.Context, conn *sql.Conn, root string) error
 				return err
 			}
 		}
+		if err := importFailureFile(ctx, conn, root, id); err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+// importFailureFile copies a computer's failure reason from the file that
+// earlier releases wrote.
+// TODO: legacy/shim remove later — imports failure.json only during schema
+// upgrade; remove once supported stores have passed computers.records 3.
+func importFailureFile(ctx context.Context, conn *sql.Conn, root, id string) error {
+	path := filepath.Join(root, id, failureRecord.file)
+	_, err := state.ImportMigration(ctx, conn, failureRecord.key(id), path, func(conn *sql.Conn, raw []byte) error {
+		var v struct {
+			Reason string `json:"reason"`
+		}
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return fmt.Errorf("import computer %s: %w", path, err)
+		}
+		if v.Reason == "" {
+			return nil
+		}
+		return setFailure(ctx, conn, id, v.Reason)
+	})
+	return err
 }
 
 func setColumn(ctx context.Context, conn *sql.Conn, id string, r record, raw []byte) error {
@@ -192,6 +222,63 @@ func lockRecord(id string) (func(), error) {
 	ctx, cancel := context.WithTimeout(context.Background(), lockWait)
 	defer cancel()
 	return store.LockContext(ctx, filepath.Join(Dir(id), "record.lock"))
+}
+
+// setFailure writes a computer's failure reason on conn.
+func setFailure(ctx context.Context, conn *sql.Conn, id, reason string) error {
+	_, err := conn.ExecContext(ctx, `INSERT INTO computers(session, failure) VALUES (?, ?)
+ON CONFLICT(session) DO UPDATE SET failure = excluded.failure`, id, reason)
+	return err
+}
+
+// saveFailure stores a computer's last setup or cleanup failure reason, which
+// status reads report as the reason.
+func saveFailure(id, reason string) error {
+	return changeFailure(id, func(conn *sql.Conn) error {
+		return setFailure(context.Background(), conn, id, reason)
+	})
+}
+
+// clearFailure forgets a computer's recorded failure reason.
+func clearFailure(id string) error {
+	return changeFailure(id, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(context.Background(), `UPDATE computers SET failure = NULL WHERE session = ?`, id)
+		return err
+	})
+}
+
+// changeFailure runs one failure-column change under the computer's lock, so
+// it never loses to a concurrent status write.
+func changeFailure(id string, change func(*sql.Conn) error) error {
+	unlock, err := lockRecord(id)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	db, err := recordsDB()
+	if err != nil {
+		return err
+	}
+	return state.For(db).Write(context.Background(), hub.Event{}, change)
+}
+
+// storedFailure returns a computer's recorded failure reason, "" when it has
+// none.
+func storedFailure(id string) (string, error) {
+	db, err := recordsDB()
+	if err != nil {
+		return "", err
+	}
+	ctx := context.Background()
+	var reason string
+	err = state.For(db).Read(ctx, func(q state.Reader) error {
+		err := q.QueryRowContext(ctx, `SELECT coalesce(failure, '') FROM computers WHERE session = ?`, id).Scan(&reason)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	})
+	return reason, err
 }
 
 // saveMeta stores a computer's registration.
