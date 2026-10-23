@@ -10,7 +10,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/goals"
-	"dyna-agent/internal/goalservice"
+	"dyna-agent/internal/goalsvc"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/store/storetest"
@@ -24,7 +24,7 @@ func TestGoalCommandsUseShortOutputAndExplicitJSON(t *testing.T) {
 	mgr := subagent.NewManager()
 	mgr.Store = &subagent.Store{Root: filepath.Join(root, "sessions")}
 	mgr.Rooms = rooms
-	s := goalservice.New()
+	s := goalsvc.New()
 	s.Store = &goals.Store{Root: filepath.Join(root, "goals")}
 	s.Notify = notify.New(rooms, mgr)
 	actor := authority.Actor{Role: authority.Owner}
@@ -56,7 +56,7 @@ func TestGoalCommandsUseShortOutputAndExplicitJSON(t *testing.T) {
 				if _, err := s.Store.Add(rec.ID, "owner", goals.Input{Text: "Ship the task", Shared: true}); err != nil {
 					t.Fatal(err)
 				}
-				cmd := Command(Options{Service: func() *goalservice.Service { return s }})
+				cmd := Command(Options{Service: func() *goalsvc.Service { return s }})
 				var out bytes.Buffer
 				cmd.SetOut(&out)
 				cmd.SetErr(&out)
