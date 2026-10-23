@@ -77,4 +77,6 @@ the pull request.
 
 - `library.enabled`: JSON list of main checkout paths. Use `enable` and `disable`.
 - `library.profile`: one profile for all librarian work. Empty ranks service profiles.
+  Change it with `dyna services profile library <profile|auto>`, never as part of a bulk
+  move of sessions: the librarian is a service, not a worker.
 - `library.readmeMaxLines`: the longest README the librarian may leave (default 300).

@@ -38,3 +38,28 @@ func TestRoomMembershipCutsCycles(t *testing.T) {
 		t.Fatalf("cycle tree = %+v", got.Roots)
 	}
 }
+
+func TestRoomMembershipLeavesServicesOut(t *testing.T) {
+	all := []Info{
+		{Meta: Meta{ID: "root", RoomID: "room", Role: RoleRoot, Service: true}},
+		{Meta: Meta{ID: "worker", RoomID: "room"}},
+		{Meta: Meta{ID: "librarian", RoomID: "room", Role: RoleLibrarian, Service: true}},
+		{Meta: Meta{ID: "reviewer", RoomID: "room", Role: "reviewer", Service: true}},
+		{Meta: Meta{ID: "helper", RoomID: "room", ParentSession: "librarian", Service: true}},
+	}
+	got := RoomMembership(all, "room", false)
+	ids := []string{}
+	for _, info := range got.Sessions {
+		ids = append(ids, info.ID)
+	}
+	// The internal root holds the room's seat, so it stays; a service and its
+	// helper are outside the hierarchy and are no member at all.
+	if !reflect.DeepEqual(ids, []string{"root", "worker"}) {
+		t.Fatalf("sessions = %v", ids)
+	}
+	for _, node := range got.Roots {
+		if node.Info.ManagedService() {
+			t.Fatalf("service is a member tree root: %+v", node.Info)
+		}
+	}
+}
