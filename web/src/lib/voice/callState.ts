@@ -94,7 +94,8 @@ export const initial: CallState = Object.freeze({
   switchTo: null,
 })
 
-const inCall = (s: CallState): boolean => ['starting', 'connecting', 'live'].includes(s.phase)
+// inCall says whether a call runs: it starts, connects or is live.
+export const inCall = (s: CallState): boolean => ['starting', 'connecting', 'live'].includes(s.phase)
 
 export function reduce(s: CallState, e: CallEvent): CallState {
   switch (e.type) {
