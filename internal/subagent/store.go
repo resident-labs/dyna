@@ -151,6 +151,10 @@ type Meta struct {
 	// notes' post IDs; a refresh cancels the ones it covers.
 	InstructionsKnown *instructions.Snapshot `json:"instructionsKnown,omitempty"`
 	InstructionsNotes []string               `json:"instructionsNotes,omitempty"`
+	// InstructionsSeq counts the instruction notes this session has posted. It
+	// is the note's occurrence identity, and unlike InstructionsNotes it never
+	// resets when a snapshot refresh covers the notes.
+	InstructionsSeq int `json:"instructionsSeq,omitempty"`
 	// InstructionsChangedAt is the last queued change, persisted for the engine's quiet period.
 	InstructionsChangedAt time.Time `json:"instructionsChangedAt,omitzero"`
 	// Resumable records whether the profile's harness can resume (follow-ups

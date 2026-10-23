@@ -245,20 +245,24 @@ func (m *Manager) noteInstructionsLocked(meta *Meta, now time.Time) error {
 		meta.InstructionsChangedAt = time.Time{}
 		return nil
 	}
-	// The note count is the change's occurrence: a change that reverts to an
-	// earlier state is a new note, and a retry of this one keeps its post.
+	// The session's own counter is the change's occurrence: a change that
+	// reverts to an earlier state is a new note, a retry of one change keeps
+	// its post, and a snapshot refresh does not reset it.
 	event := room.SessionEvent{
 		Type:       room.SessionInstructions,
 		Session:    meta.Address(),
 		Sections:   instructionChanges(changes),
 		Detail:     instructions.Lines(changes),
-		Occurrence: len(meta.InstructionsNotes),
+		Occurrence: meta.InstructionsSeq,
 	}
 	msg, err := m.rooms().PostEvent(meta.RoomID, event, meta.Address())
 	if err != nil {
 		return err
 	}
 	meta.InstructionsKnown = &desired
+	// The counter moves only with a stored note, so a retry of one change
+	// posts the same ID and the store keeps its first post.
+	meta.InstructionsSeq++
 	if msg.ID != "" {
 		meta.InstructionsNotes = append(meta.InstructionsNotes, msg.ID)
 	}
