@@ -38,10 +38,8 @@ func TestRunMetaLivesInDynaDB(t *testing.T) {
 	}
 }
 
-// A runner from the previous release writes only meta.json. Its write is
-// imported, even after this release's first import, so a run it finishes
-// shows as finished (item 31).
-func TestOldBinaryMetaWriteIsImported(t *testing.T) {
+// A stale rollback copy cannot overwrite canonical metadata.
+func TestOldBinaryMetaWriteCannotOverwriteRow(t *testing.T) {
 	run := newTestRun(t, "wf_meta-old")
 	old := run.Meta
 	old.Status, old.EndedAt = "ok", time.Now()
@@ -50,11 +48,11 @@ func TestOldBinaryMetaWriteIsImported(t *testing.T) {
 		t.Fatal(err)
 	}
 	m, err := ReadMeta(run.Meta.ID)
-	if err != nil || m.Status != "ok" {
-		t.Fatalf("ReadMeta after an old-binary write = %+v, %v; want ok", m, err)
+	if err != nil || m.Status != "running" {
+		t.Fatalf("ReadMeta after an old-binary write = %+v, %v; want running", m, err)
 	}
-	if list, err := List(); err != nil || len(list) != 1 || list[0].Status != "ok" {
-		t.Fatalf("List after an old-binary write = %+v, %v; want ok", list, err)
+	if list, err := List(); err != nil || len(list) != 1 || list[0].Status != "running" {
+		t.Fatalf("List after an old-binary write = %+v, %v; want running", list, err)
 	}
 }
 
@@ -83,8 +81,8 @@ func TestCancelRacingFinishKeepsTheFirst(t *testing.T) {
 	}
 }
 
-// A run that an earlier release wrote is imported when it is first read.
-func TestEarlierReleaseMetaIsImportedOnRead(t *testing.T) {
+// Startup imports a run that an earlier release wrote.
+func TestEarlierReleaseMetaIsImportedAtStartup(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	dir := filepath.Join(RunsDir(), "wf_earlier")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -106,9 +104,7 @@ func TestEarlierReleaseMetaIsImportedOnRead(t *testing.T) {
 	}
 }
 
-// With an old binary's meta.json in place, our write imports it first, so
-// the row keeps our change instead of the next read importing the older
-// file over it (the rollback helper's rule).
+// A canonical update ignores changes made only to a stale rollback copy.
 func TestWriteAfterOldBinaryFileKeepsOurValue(t *testing.T) {
 	run := newTestRun(t, "wf_meta-order")
 	old := run.Meta
@@ -125,8 +121,8 @@ func TestWriteAfterOldBinaryFileKeepsOurValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	m, err := ReadMeta(run.Meta.ID)
-	if err != nil || m.Status != "canceled" || m.Name != "renamed by the old binary" {
-		t.Fatalf("after an old file and our cancel: %+v, %v; want the old file's name and our canceled", m, err)
+	if err != nil || m.Status != "canceled" || m.Name != "meta" {
+		t.Fatalf("after an old file and our cancel: %+v, %v; want the canonical name and canceled status", m, err)
 	}
 }
 
