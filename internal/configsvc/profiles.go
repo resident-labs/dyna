@@ -23,7 +23,6 @@ import (
 // exceptions. roomsvc.ProfileChoice is the only profile shape that is safe
 // to serve without one.
 type ProfileView struct {
-	RuntimeAccount string   `json:"runtimeAccount"`
 	RuntimeVersion string   `json:"runtimeVersion"`
 	Name           string   `json:"name"`
 	Description    string   `json:"description"`
@@ -79,8 +78,8 @@ func loadProfiles() (*profile.Store, error) { return profile.Load(profile.Defaul
 
 func view(p profile.Profile) ProfileView {
 	v := ProfileView{
-		RuntimeAccount: p.RuntimeAccount, RuntimeVersion: p.RuntimeVersion,
-		Name: p.Name, Description: p.Description, Harness: p.Harness, Model: p.Model, Models: p.EffectiveModels(),
+		RuntimeVersion: p.RuntimeVersion,
+		Name:           p.Name, Description: p.Description, Harness: p.Harness, Model: p.Model, Models: p.EffectiveModels(),
 		Fallback: p.Fallback,
 		Taste:    p.Taste, Intelligence: p.Intelligence, Cost: p.Cost,
 		TimeoutSec: p.TimeoutSec, MaxConcurrent: p.MaxConcurrent, MaxCallsPerRun: p.MaxCallsPerRun,
@@ -173,7 +172,7 @@ func (s *Service) SaveProfile(ctx context.Context, e ProfileEdit) (ProfileView, 
 	if p.Harness != in.Harness {
 		p.Output = nil
 	}
-	p.RuntimeAccount, p.RuntimeVersion = in.RuntimeAccount, in.RuntimeVersion
+	p.RuntimeVersion = in.RuntimeVersion
 	p.Name, p.Description, p.Harness, p.Model = in.Name, strings.TrimSpace(in.Description), in.Harness, strings.TrimSpace(in.Model)
 	p.Model, p.Models = profile.NormalizeModels(in.Model, in.Models)
 	if len(p.Models) <= 1 {

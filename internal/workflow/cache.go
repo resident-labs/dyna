@@ -71,12 +71,13 @@ func (c *Cache) Stats() CacheStats {
 // not installed runtime bundles, active provider accounts or external state.
 func executionConfigDigest(p profile.Profile, timeout time.Duration) string {
 	config := struct {
-		Harness           string
-		Models            []string
-		Args              []string          `json:",omitempty"`
-		Command           []string          `json:",omitempty"`
-		Env               map[string]string `json:",omitempty"`
-		RuntimeAccount    string
+		Harness string
+		Models  []string
+		Args    []string          `json:",omitempty"`
+		Command []string          `json:",omitempty"`
+		Env     map[string]string `json:",omitempty"`
+		// Keep the empty retired member in place to preserve existing replay keys.
+		RetiredAccount    string `json:"RuntimeAccount"`
 		RuntimeVersion    string
 		RuntimeExecutable string
 		RuntimeSkillPaths []string `json:",omitempty"`
@@ -89,7 +90,6 @@ func executionConfigDigest(p profile.Profile, timeout time.Duration) string {
 		Args:              p.ExtraArgs,
 		Command:           p.Command,
 		Env:               p.Env,
-		RuntimeAccount:    p.RuntimeAccount,
 		RuntimeVersion:    p.RuntimeVersion,
 		RuntimeExecutable: p.RuntimeExecutable,
 		RuntimeSkillPaths: p.RuntimeSkillPaths,

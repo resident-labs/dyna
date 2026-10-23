@@ -105,31 +105,13 @@ func (st *State) dropOpenCodeProviders() {
 	st.Entries = entries
 }
 
-// Read returns the saved accounts. It creates no files in the account
-// folder, so discovery works in read-only mode, except when it imports a
-// registry that another binary wrote: then it takes accounts.lock and writes
-// that registry's rows and credential files.
+// Read returns SQL metadata and protected credentials after the one-time migration.
 func (s *Store) Read() (State, error) {
 	db, err := s.db()
 	if err != nil {
 		return State{}, errors.New("Saved accounts could not be read.")
 	}
 	ctx := context.Background()
-	foreign, err := statewrite.For(db).Foreign(ctx, registryKey, s.registryPath())
-	if err != nil {
-		return State{}, errors.New("Saved accounts could not be read.")
-	}
-	if foreign {
-		unlock, err := s.lock()
-		if err != nil {
-			return State{}, err
-		}
-		err = s.importRegistry(ctx, db)
-		unlock()
-		if err != nil {
-			return State{}, err
-		}
-	}
 	st, err := s.load(ctx, db)
 	if err == nil {
 		st.dropOpenCodeProviders()
@@ -146,7 +128,7 @@ func (s *Store) Update(fn func(*State) error) error {
 
 // UpdateContext saves the callback's changes and request receipt in one SQL
 // commit. Import and legacy cleanup remain independent maintenance writes.
-// Credential files and the legacy mirror retain their existing write order.
+// Credential files retain their existing write order.
 // With a request-bearing ctx, fn must change metadata only: changed credential
 // files are written before SQL checks replay or argument conflicts. A request
 // that changes credentials needs a receipt check before any secret write.
@@ -189,9 +171,6 @@ func (s *Store) transaction(ctx context.Context, fn func(*State, func() error) e
 	}
 	// Maintenance must not record the user operation before its callback saves.
 	maintenanceCtx := statewrite.ForRequest(ctx, "")
-	if err := s.importRegistry(maintenanceCtx, db); err != nil {
-		return err
-	}
 	// A crash during a removal, after its row and before its secret, leaves
 	// that secret; drop it before anything else reads the folder.
 	if err := s.dropOrphanCredentials(maintenanceCtx, db); err != nil {

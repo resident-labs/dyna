@@ -147,9 +147,9 @@ func TestCredentialRefreshInactiveCoalesces(t *testing.T) {
 		}
 		checkMode(t, filepath.Join(n.Home, path), 0600)
 	}
-	index, err := os.ReadFile(filepath.Join(a.Root, "accounts.json"))
-	if err != nil || bytes.Contains(index, []byte("fake-rotated-grant")) {
-		t.Fatal("index contains a credential or could not be read", err)
+	index := accountMetadataBytes(t, a)
+	if bytes.Contains(index, []byte("fake-rotated-grant")) {
+		t.Fatal("index contains a credential")
 	}
 }
 

@@ -335,7 +335,7 @@ esac
 		t.Fatal(err)
 	}
 	r := &Runtime{Bundles: bundles, Accounts: a, Config: harnessmgr.NewConfigManager(), Generations: filepath.Join(agentstore.DataDir(), "harnesses", "generations")}
-	selected, _, lease, err := r.PrepareLeased(context.Background(), profile.Profile{Name: "fixture", Harness: "opencode", RuntimeVersion: "2.0.32", RuntimeAccount: account.ID}, nil)
+	selected, _, lease, err := r.PrepareLeased(context.Background(), profile.Profile{Name: "fixture", Harness: "opencode", RuntimeVersion: "2.0.32"}, nil)
 	if err != nil {
 		t.Fatal("cold service was probed before selecting its generation:", err)
 	}

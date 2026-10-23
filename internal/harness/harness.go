@@ -488,7 +488,6 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 		}
 	}
 	if session.RuntimePin != nil {
-		p.RuntimeAccount = ""
 		p.RuntimeVersion = session.RuntimePin.Bundle.Version
 	}
 	accountID := ""

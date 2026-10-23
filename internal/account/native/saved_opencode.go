@@ -8,8 +8,6 @@ import (
 	"math"
 	"math/big"
 	"net/http"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 )
@@ -154,50 +152,12 @@ func (m *openCodeManager) readOpenCodeKeyUsage(ctx context.Context, token string
 
 func (m *openCodeManager) usageCredentials(ctx context.Context, s openCodeScope, integration string) ([]openCodePrivateCredential, error) {
 	raw, err := m.run(ctx, s, "auth", "export", integration, "--standalone")
-	if err == nil {
-		var credentials []openCodePrivateCredential
-		if json.Unmarshal(raw, &credentials) == nil {
-			return credentials, nil
-		}
-	}
-	// TODO: legacy/shim remove later — reads credentials for early OpenCode v2 without auth export; remove when the minimum supported version exports credentials.
-	sqlite, err := exec.LookPath("sqlite3")
-	if err != nil {
-		return nil, errors.New("OpenCode usage requires auth export or sqlite3 for this harness version.")
-	}
-	info, err := os.Stat(s.Database)
-	if err != nil || !info.Mode().IsRegular() {
-		return nil, errors.New("The private OpenCode credential database is not available.")
-	}
-	// Integration is one of the two constants checked by ProbeSaved.
-	query := "SELECT id, integration_id AS integrationID, value FROM credential WHERE integration_id = '" + integration + "' LIMIT 256;"
-	commandScope := s
-	commandScope.Executable = sqlite
-	raw, err = m.run(ctx, commandScope, "-readonly", "-json", s.Database, query)
 	if err != nil {
 		return nil, err
 	}
-	if len(strings.TrimSpace(string(raw))) == 0 {
-		return nil, ErrNotSignedIn
-	}
-	var rows []struct {
-		ID          string `json:"id"`
-		Integration string `json:"integrationID"`
-		Value       string `json:"value"`
-	}
-	if json.Unmarshal(raw, &rows) != nil {
+	var credentials []openCodePrivateCredential
+	if json.Unmarshal(raw, &credentials) != nil {
 		return nil, ErrSchema
-	}
-	credentials := []openCodePrivateCredential{}
-	for _, row := range rows {
-		if row.Integration != integration || row.ID == "" {
-			return nil, ErrSchema
-		}
-		c := openCodePrivateCredential{ID: row.ID, IntegrationID: row.Integration}
-		if json.Unmarshal([]byte(row.Value), &c.Value) != nil {
-			return nil, ErrSchema
-		}
-		credentials = append(credentials, c)
 	}
 	return credentials, nil
 }

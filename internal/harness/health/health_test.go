@@ -1,19 +1,15 @@
 package health
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
 	"dyna-agent/internal/profile"
-	"dyna-agent/internal/state"
 	"dyna-agent/internal/workeroutput"
 )
 
@@ -136,29 +132,19 @@ func TestReloadAndPrivateStorage(t *testing.T) {
 		t.Fatalf("unsafe path: %s, %v", path, err)
 	}
 	// Check durable storage without RecordTurn's optional work deadline.
-	if err := s.saveRecord(t.Context(), db, p.Name, path, &r, func() {}); err != nil {
+	if err := s.saveRecord(t.Context(), db, p.Name, &r, func() {}); err != nil {
 		t.Fatal("persist private health record:", err)
 	}
 	v := New(dir).View(p, "v1")
 	if v.Status != Healthy || v.StorageError != "" || v.Observed == nil || !v.Observed.PositiveUsageSeen || !v.Observed.ToolSeen {
 		t.Fatalf("reload: %+v", v)
 	}
-	b, err := os.ReadFile(path)
-	if err != nil {
+	var b []byte
+	if err := db.QueryRow("SELECT record FROM harness_health WHERE profile = ?", key(p.Name)).Scan(&b); err != nil {
 		t.Fatal(err)
 	}
 	if !json.Valid(b) || strings.Contains(string(b), "do-not-store") {
-		t.Fatalf("unsafe cache: %s", b)
-	}
-	info, err := os.Stat(path)
-	if err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("cache permissions: %v, %v", info, err)
-	}
-	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	if v := New(dir).View(p, "v1"); v.StorageError != "" || v.Status != Healthy || v.Observed == nil || !v.Observed.PositiveUsageSeen || !v.Observed.ToolSeen {
-		t.Fatalf("SQLite-only reload: %+v", v)
+		t.Fatalf("unsafe health record: %s", b)
 	}
 	before := Fingerprint(p)
 	p.Env["SECRET"] = "another-secret"
@@ -233,31 +219,7 @@ func TestParallelWritersPreserveLatestAndHealthyEvidence(t *testing.T) {
 	}
 }
 
-func TestBusyLockDoesNotBreakTurn(t *testing.T) {
-	s, p := New(t.TempDir()), testProfile()
-	recordTurn(t, s, p, "v1", observation(1))
-	path, _ := s.path(p.Name)
-	f, err := os.OpenFile(path+".lock", os.O_RDWR, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatal(err)
-	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
-	v := s.RecordTurn(p, "v2", observation(2))
-	if v.Status != Healthy || v.StorageError == "" {
-		t.Fatalf("busy cache changed turn health: %+v", v)
-	}
-	v = s.View(p, "v1")
-	if v.Status != Healthy || v.LastCheckedAt != observation(1).At {
-		t.Fatalf("busy cache was modified: %+v", v)
-	}
-}
-
-// A damaged copy from another binary is skipped once (state.ErrSkipForeign):
-// the view shows no evidence and no error, and the next record repairs it.
+// Malformed retained evidence is skipped. A later observation creates a SQL row.
 func TestCorruptCacheIsRepaired(t *testing.T) {
 	for _, data := range []string{"{", `{"observed":{"recognizedRecords":"wrong-type"}}`} {
 		s, p := New(t.TempDir()), testProfile()
@@ -290,50 +252,5 @@ func TestProgressCannotBlessVersionOrCompleteTurn(t *testing.T) {
 	v = recordTurn(t, s, p, "v2", observation(3))
 	if v.Status != Healthy || v.Observed.Running || v.LastHealthyVersion != "v2" {
 		t.Fatalf("completion did not replace progress: %#v", v)
-	}
-}
-
-// Cancel only after another SQLite read can see the committed record. The
-// shared writer's completion clock gives this event without a timed wait.
-func TestCanceledCopyKeepsCommittedHealth(t *testing.T) {
-	s, p := New(t.TempDir()), testProfile()
-	db, err := s.db()
-	if err != nil {
-		t.Fatal(err)
-	}
-	path, err := s.path(p.Name)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	committed := make(chan struct{})
-	var once sync.Once
-	w := state.For(db)
-	w.Now = func() time.Time {
-		if _, ok, err := readRow(t.Context(), db, p.Name); err == nil && ok {
-			once.Do(func() { close(committed); cancel() })
-		}
-		return time.Now()
-	}
-	t.Cleanup(func() { w.Now = nil })
-	o := observation(1)
-	r := record{Fingerprint: Fingerprint(p), Version: "v1", LastHealthyVersion: "v1", LastHealthyAt: o.At,
-		Observed: Observed{Observation: o, LastTurnAt: o.At, RecognizedOutput: true}}
-	err = s.saveRecord(ctx, db, p.Name, path, &r, func() {})
-	select {
-	case <-committed:
-	default:
-		t.Fatal("cancellation happened before the row committed")
-	}
-	if !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "copy profile health") {
-		t.Fatalf("copy error = %v; want a reported canceled copy", err)
-	}
-	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("copy after cancellation: %v; want no file", err)
-	}
-	v := New(s.dir).View(p, "v1")
-	if v.Status != Healthy || v.StorageError != "" || v.LastHealthyVersion != "v1" {
-		t.Fatalf("committed health after copy failure: %+v", v)
 	}
 }

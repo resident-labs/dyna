@@ -2,11 +2,9 @@ package store
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"dyna-agent/internal/database"
@@ -64,20 +62,6 @@ func TestDatabaseAndBackupHoldNoCredentialPayload(t *testing.T) {
 	raw, err := os.ReadFile(s.credentialPath(meta.ID))
 	if err != nil || !bytes.Contains(raw, []byte("secret-canary-token")) {
 		t.Fatalf("the credential file lacks the payload: %v", err)
-	}
-}
-
-// The previous release reads credentials from accounts.json, so its copy
-// holds each account's credential.
-func TestRollbackCopyHoldsTheCredentials(t *testing.T) {
-	s := registryStore(t)
-	saveAccount(t, s, "copy-canary-token")
-	raw, err := os.ReadFile(s.registryPath())
-	if err != nil || !bytes.Contains(raw, []byte("copy-canary-token")) {
-		t.Fatalf("the rollback copy lacks the credential: %v", err)
-	}
-	if info, err := os.Stat(s.registryPath()); err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("rollback copy mode = %v, %v", info.Mode().Perm(), err)
 	}
 }
 
@@ -148,38 +132,6 @@ func TestRowWithoutItsSecretReadsAsSignedOut(t *testing.T) {
 	}
 }
 
-// A usage observation does not rewrite the rollback copy, which holds every
-// secret; a change the previous release acts on does.
-func TestCopyIsRewrittenOnlyWhenTheEarlierReleaseActsOnTheChange(t *testing.T) {
-	s := registryStore(t)
-	meta := saveAccount(t, s, "token")
-	first, err := os.ReadFile(s.registryPath())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Update(func(st *State) error {
-		st.Find(meta.ID).Observation = &Observation{UsageError: "observed", Windows: []Window{}}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if same, _ := os.ReadFile(s.registryPath()); !bytes.Equal(same, first) {
-		t.Fatal("an observation rewrote the copy")
-	}
-	if st, _ := s.Read(); st.Find(meta.ID).Observation == nil {
-		t.Fatal("the observation was not saved in the row")
-	}
-	if err := s.Update(func(st *State) error {
-		st.Find(meta.ID).NeedsLogin = true
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if after, _ := os.ReadFile(s.registryPath()); !strings.Contains(string(after), `"needsLogin": true`) {
-		t.Fatal("a NeedsLogin change did not rewrite the copy")
-	}
-}
-
 // Removing an account deletes its row, then its credential file.
 func TestRemoveDeletesTheSecret(t *testing.T) {
 	s := registryStore(t)
@@ -195,51 +147,6 @@ func TestRemoveDeletesTheSecret(t *testing.T) {
 	}
 	if st, _ := s.Read(); st.Find(meta.ID) != nil {
 		t.Fatal("the row stayed after removal")
-	}
-}
-
-// An old binary's registry without account B leaves no B credential file
-// after the import.
-func TestImportDropsTheSecretOfAnAccountTheOldFileRemoved(t *testing.T) {
-	s := registryStore(t)
-	a := saveAccount(t, s, "a-token")
-	var b Metadata
-	if err := s.Update(func(st *State) error {
-		var err error
-		b, err = st.Save("fixture", "", "other", "Other", grant("b-token"))
-		return err
-	}); err != nil {
-		t.Fatal(err)
-	}
-	st, err := s.Read()
-	if err != nil {
-		t.Fatal(err)
-	}
-	st.Remove(b.ID)
-	raw, err := json.MarshalIndent(st, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The previous release rewrites accounts.json without account B.
-	tmp := s.registryPath() + ".old"
-	if err := os.WriteFile(tmp, raw, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(tmp, s.registryPath()); err != nil {
-		t.Fatal(err)
-	}
-	after, err := s.Read()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if after.Find(b.ID) != nil || after.Find(a.ID) == nil {
-		t.Fatalf("after the import, accounts = %+v", after.Entries)
-	}
-	if _, err := os.Stat(s.credentialPath(b.ID)); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the removed account's credential file stayed: %v", err)
-	}
-	if _, err := os.Stat(s.credentialPath(a.ID)); err != nil {
-		t.Fatalf("the kept account's credential file is gone: %v", err)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 
 	"dyna-agent/internal/account/native"
 	"dyna-agent/internal/account/store"
+	"dyna-agent/internal/database"
 	harnesshome "dyna-agent/internal/harness/home"
 )
 
@@ -115,14 +116,11 @@ func TestAccountsPrivateLifecycle(t *testing.T) {
 			for _, f := range files {
 				checkMode(t, filepath.Join(n.Home, f.Name()), 0600)
 			}
-			raw, err := os.ReadFile(filepath.Join(a.Root, "accounts.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
+			raw := accountMetadataBytes(t, a)
 			if strings.Contains(string(raw), "native-access-canary") || strings.Contains(string(raw), "native-refresh-canary") {
 				t.Fatal("native grant entered metadata")
 			}
-			checkMode(t, filepath.Join(a.Root, "accounts.json"), 0600)
+			checkMode(t, filepath.Join(filepath.Dir(a.Root), "dyna.db"), 0600)
 			if os.Getenv("HOME") != beforeHome || os.Getenv("XDG_CONFIG_HOME") != beforeXDG {
 				t.Fatal("environment changed")
 			}
@@ -310,4 +308,30 @@ func TestClaudeAccountLabelsUseEmail(t *testing.T) {
 	if work.Label != "Work" {
 		t.Fatalf("explicit label = %q; want Work", work.Label)
 	}
+}
+
+// accountMetadataBytes reads the canonical metadata without credential files.
+func accountMetadataBytes(t *testing.T, a *Accounts) []byte {
+	t.Helper()
+	db, err := database.Open(filepath.Dir(a.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := db.Query("SELECT metadata FROM accounts ORDER BY ord")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []byte
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, raw...)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
