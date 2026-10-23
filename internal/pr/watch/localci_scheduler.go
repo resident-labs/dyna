@@ -37,10 +37,21 @@ type registeredCIRuns struct {
 	sync.Mutex
 	runs map[string]*registeredCIRun
 }
+
+// registeredCIRun is one local CI run in flight. node, slots and cancel belong
+// to the scheduler; the other fields describe the run to a reader of
+// RunningCI.
 type registeredCIRun struct {
 	node   string
 	slots  int
 	cancel context.CancelFunc
+
+	repo    string
+	number  int
+	trial   bool
+	head    string
+	started time.Time
+	suites  []string
 }
 type registeredCIJob struct {
 	record       Record
@@ -49,11 +60,18 @@ type registeredCIJob struct {
 	created      time.Time
 }
 
+// nodeRuns returns the run set for this service. Every service over the same
+// PR store shares the set of the process, so a read-only service reports the
+// runs the engine's workers scheduled.
 func (s *Service) nodeRuns() *registeredCIRuns {
 	localCIInit.Lock()
 	defer localCIInit.Unlock()
 	if s.registeredRuns == nil {
-		s.registeredRuns = &registeredCIRuns{runs: map[string]*registeredCIRun{}}
+		root := ""
+		if s.Store != nil {
+			root = s.Store.Root
+		}
+		s.registeredRuns = runningCISet(root)
 	}
 	return s.registeredRuns
 }
@@ -122,7 +140,13 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	}
 	runs := s.nodeRuns()
 	runs.Lock()
-	defer runs.Unlock()
+	started := false
+	defer func() {
+		runs.Unlock()
+		if started {
+			s.runningCIChanged()
+		}
+	}()
 	desired := map[string]registeredCIJob{}
 	var jobs []registeredCIJob
 	modes := map[string]string{}
@@ -217,8 +241,13 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		}
 		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		slots := min(registeredCIRunSlots, chosen.Slots-active[chosen.Name])
-		run := &registeredCIRun{node: chosen.Name, slots: slots, cancel: cancel}
+		run := &registeredCIRun{
+			node: chosen.Name, slots: slots, cancel: cancel,
+			repo: job.record.Repo, number: job.record.Number, trial: job.trial,
+			head: job.head, started: s.now(),
+		}
 		runs.runs[key] = run
+		started = true
 		active[chosen.Name] += slots
 		go s.executeRegisteredCI(runCtx, job, repo, *chosen, key, run)
 	}
@@ -248,10 +277,14 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 		run.cancel()
 		runs := s.nodeRuns()
 		runs.Lock()
-		if runs.runs[key] == run {
+		ended := runs.runs[key] == run
+		if ended {
 			delete(runs.runs, key)
 		}
 		runs.Unlock()
+		if ended {
+			s.runningCIChanged()
+		}
 	}()
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Minute)
 	defer cancel()
@@ -270,6 +303,9 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 		maxTest = time.Duration(1<<63 - 1)
 	}
 	suites, err := s.prepareRegisteredCI(ctx, job)
+	if len(suites) > 0 {
+		s.setRunningCISuites(key, run, suites)
+	}
 	result := localci.Result{Repo: repo, SHA: job.head, RoomID: job.record.RoomID, Node: node.Name, Started: s.now(), Status: "error"}
 	if err == nil && len(suites) > 0 {
 		req := localci.Request{Repo: job.record.RepoPath, SHA: job.head, RoomID: job.record.RoomID, Suites: suites, MaxTest: maxTest, Allowed: allowed, DeferSave: true, Parallelism: run.slots}

@@ -279,7 +279,7 @@ func TestEngineHookWorkerDrainsStartupSpoolOnce(t *testing.T) {
 	t.Cleanup(authority.InEngine())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	w := engineWorkers(services.rooms, newWorkerSignals())
+	w := engineWorkers(services.rooms, newWorkerSignals(), nil)
 	drain := w.hooks
 	ticks := make(chan struct{}, 4)
 	w.hooks = func(ctx context.Context) (time.Time, error) {
