@@ -167,21 +167,9 @@ type Meta struct {
 	Pid int `json:"pid,omitempty"`
 }
 
-// EffectiveName is the persisted name, or the deterministic generated name
-// for a stored session that predates always-named sessions.
-// TODO: legacy/shim remove later — names sessions created before names were required; remove after all retained sessions have names
-func (m Meta) EffectiveName() string {
-	if m.Name != "" {
-		return m.Name
-	}
-	if len(m.ID) > 8 {
-		return "agent-" + m.ID[len(m.ID)-8:]
-	}
-	if m.ID != "" {
-		return "agent-" + m.ID
-	}
-	return ""
-}
+// EffectiveName is the persisted name. Retained sessions without one get
+// their generated name from sessionlife.Migrate.
+func (m Meta) EffectiveName() string { return m.Name }
 
 // Address returns this session's readable room address.
 func (m Meta) Address() string {
