@@ -243,6 +243,17 @@ export interface Engine {
   AddHook(repo: string, hook: HookInput): Promise<null>
   EditHook(repo: string, name: string, patch: Partial<HookInput>): Promise<null>
   RemoveHook(repo: string, name: string): Promise<null>
+  // Global hooks belong to no repository: the built-ins the engine seeds and
+  // the hooks the owner added for the whole machine.
+  ListGlobalHooks(): Promise<Hook[] | null>
+  GlobalHookSummary(): Promise<HookSummary[] | null>
+  GlobalHookRuns(name: string): Promise<HookRun[] | null>
+  GlobalHookRunLog(name: string, id: string): Promise<HookRunLog>
+  RunGlobalHook(name: string): Promise<HookRun>
+  AddGlobalHook(hook: HookInput): Promise<null>
+  EditGlobalHook(name: string, patch: Partial<HookInput>): Promise<null>
+  RemoveGlobalHook(name: string): Promise<null>
+  ResetHook(name: string): Promise<null>
 
   // Profiles, settings and private runtimes.
   ConfigProfiles(): Promise<ProfileList>

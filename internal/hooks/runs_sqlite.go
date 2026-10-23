@@ -70,7 +70,7 @@ func (s Service) saveRun(ctx context.Context, run Run) (Run, error) {
 	if err != nil {
 		return run, err
 	}
-	key := filepath.Base(s.dir(run.Repo))
+	key := s.key(run.Repo)
 	if err := statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 		return writeRun(ctx, conn, key, run)
 	}); err != nil {
@@ -84,7 +84,7 @@ func (s Service) runs(ctx context.Context, repo, name string) ([]Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	key := filepath.Base(s.dir(repo))
+	key := s.key(repo)
 	query := "SELECT body FROM hook_runs WHERE repo=?"
 	args := []any{key}
 	if name != "" {
@@ -144,7 +144,7 @@ func (s Service) importRuns(conn *sql.Conn) error {
 				log.Printf("skip hook receipt %s: %v", path, err)
 				return nil
 			}
-			if !validRunID(id) || run.ID != id || filepath.Base(s.dir(run.Repo)) != key {
+			if !validRunID(id) || run.ID != id || s.key(run.Repo) != key {
 				log.Printf("skip hook receipt %s: invalid run or repository identity", path)
 				return nil
 			}
