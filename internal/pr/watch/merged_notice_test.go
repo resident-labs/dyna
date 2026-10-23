@@ -17,9 +17,14 @@ func TestEngineMergeWakesAuthorOnceAndKeepsCleanupQuiet(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.s.Notify.Sessions.Store = &subagent.Store{Root: t.TempDir()}
+	recordtest.Write(t, e.s.Notify.Sessions.Store.Root, e.author.ParentSession, subagent.Meta{
+		ID: e.author.ParentSession, Name: "lead", Room: "merge-work", RoomID: r.RoomID,
+		Resumable: true, HarnessSession: "lead",
+	})
 	recordtest.Write(t, e.s.Notify.Sessions.Store.Root, r.Author, subagent.Meta{
 		ID: r.Author, Name: "builder", Room: "merge-work", RoomID: r.RoomID,
-		Resumable: true, HarnessSession: "builder",
+		ParentSession: e.author.ParentSession,
+		Resumable:     true, HarnessSession: "builder",
 	})
 	e.s.Deliver = nil
 	merged, err := e.s.publishMerge(t.Context(), r, nil)
@@ -55,7 +60,7 @@ func TestEngineMergeWakesAuthorOnceAndKeepsCleanupQuiet(t *testing.T) {
 				t.Fatalf("completion did not wake author: %+v", post)
 			}
 		}
-		if strings.Contains(post.Text, "worktree") {
+		if strings.Contains(post.Text, "Your PR branch worktree") {
 			cleanupCount++
 			if post.Wake {
 				t.Fatalf("cleanup woke author: %+v", post)
