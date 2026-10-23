@@ -33,10 +33,10 @@ func TestServicesListAutoProfiles(t *testing.T) {
 	if len(got) != 1 || reviewer.Name != "PR reviewer" || reviewer.Page != "pull-requests" || reviewer.Scope != "room" {
 		t.Fatalf("services = %+v", got)
 	}
-	for _, view := range got {
-		if view.Source != "auto" || view.Pinned != "" || view.Profile != "mock" || view.Reason != "auto: best taste + cost" || view.Sessions != 0 {
-			t.Fatalf("auto service = %+v", view)
-		}
+	// The reviewer is the only service here, and it ranks by diagnostics.
+	view := got["reviewer"]
+	if view.Source != "auto" || view.Pinned != "" || view.Profile != "mock" || view.Reason != "auto: best diagnostics + cost" || view.Sessions != 0 {
+		t.Fatalf("auto service = %+v", view)
 	}
 }
 
