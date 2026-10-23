@@ -19,7 +19,7 @@ export interface ServiceApi {
 }
 
 export type Part = 'services' | 'reviewer' | 'queue' | 'history' | 'settings' | 'usage' | 'voice' | 'hooks' | 'notices' | 'budget' | 'accounts' | 'tests'
-const allParts: Part[] = ['services', 'reviewer', 'queue', 'history', 'settings', 'usage', 'voice', 'hooks', 'notices', 'budget', 'accounts', 'tests']
+export const allParts: Part[] = ['services', 'reviewer', 'queue', 'history', 'settings', 'usage', 'voice', 'hooks', 'notices', 'budget', 'accounts', 'tests']
 
 export interface ServiceData {
   pending: Part[] // parts whose call has not answered yet; each card shows loading until its part arrives
