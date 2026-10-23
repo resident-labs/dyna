@@ -17,9 +17,14 @@ import (
 	"dyna-agent/internal/worktrees"
 )
 
-func autoTrackEnv(t *testing.T) (*testEnv, string) {
+// autoTrackSource is the git repository and its tracked worktree. One source
+// serves every case of a test because the cases never change its files.
+type autoTrackSource struct {
+	repo, tree string
+}
+
+func newAutoTrackSource(t *testing.T) autoTrackSource {
 	t.Helper()
-	e := newEnv(t)
 	repo := checkoutRepo(t, "https://github.com/owner/repo.git")
 	tree, err := os.MkdirTemp("", "dyna-wt-auto-track-")
 	if err != nil {
@@ -27,6 +32,18 @@ func autoTrackEnv(t *testing.T) (*testEnv, string) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(tree) })
 	checkoutGit(t, repo, "worktree", "add", "-b", "feature/auto", tree)
+	return autoTrackSource{repo: repo, tree: tree}
+}
+
+func autoTrackEnv(t *testing.T) (*testEnv, string) {
+	t.Helper()
+	return autoTrackEnvIn(t, newAutoTrackSource(t))
+}
+
+func autoTrackEnvIn(t *testing.T, source autoTrackSource) (*testEnv, string) {
+	t.Helper()
+	e := newEnv(t)
+	repo, tree := source.repo, source.tree
 	if err := worktrees.Track(worktrees.Record{Repo: repo, Path: tree, Branch: "feature/auto", Session: e.author.ID}); err != nil {
 		t.Fatal(err)
 	}
@@ -53,9 +70,11 @@ func autoTrackEnv(t *testing.T) (*testEnv, string) {
 }
 
 func TestRepoPollAutoTracksOwnedWorktreePR(t *testing.T) {
+	// Share the unchanged repository; each case keeps its own sessions and PR store.
+	source := newAutoTrackSource(t)
 	for _, mode := range []string{"owned", "already-tracked", "closed-record", "fork", "unowned", "closed-owner", "dormant-owner", "wrong-room", "paused-room"} {
 		t.Run(mode, func(t *testing.T) {
-			e, _ := autoTrackEnv(t)
+			e, _ := autoTrackEnvIn(t, source)
 			const key = "github.com/owner/repo#18"
 			switch mode {
 			case "already-tracked", "closed-record":

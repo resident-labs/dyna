@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -153,6 +154,20 @@ func workflowResponse(body string) string {
 }
 
 func TestNoPRWorkflowsAndGraceWindow(t *testing.T) {
+	// Share the session fixture. Reset the PR store, clock, and workflow
+	// answer for each case.
+	e := newEnv(t)
+	reset := func(t *testing.T) {
+		t.Helper()
+		e.f = defaultFixture()
+		e.clock = time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
+		e.s.Store = &Store{Root: filepath.Join(t.TempDir(), "prs")}
+		// The workflow capability is cached per executable and repository, so a
+		// case with another answer must not read the previous case's result.
+		workflowCapabilities.Lock()
+		delete(workflowCapabilities.repos, e.s.GH.Executable+":github.com/owner/repo")
+		workflowCapabilities.Unlock()
+	}
 	for _, tc := range []struct {
 		name, workflows, body string
 		immediate             bool
@@ -165,12 +180,11 @@ func TestNoPRWorkflowsAndGraceWindow(t *testing.T) {
 	} {
 		for _, bots := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/bots=%v", tc.name, bots), func(t *testing.T) {
-				e := newEnv(t)
+				reset(t)
 				e.f.Checks, e.f.Runs, e.f.Statuses = nil, nil, nil
 				if bots {
 					e.f.Statuses = []Status{{Context: "CodeRabbit", State: "success"}}
 				}
-				e.f.Raw = map[string]string{}
 				if tc.workflows != "" {
 					e.f.Raw["repos/owner/repo/actions/workflows?per_page=100"] = workflowResponse(tc.workflows)
 				} else {
