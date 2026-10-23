@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/shellquote"
 )
 
 func TestSharedGoTestStepRunsWithoutRaceAndPreservesPipelineFailure(t *testing.T) {
@@ -221,6 +223,41 @@ func TestSlotReleaseIsIdempotentUnderRunnerErrexit(t *testing.T) {
 			}
 			if data, err := os.ReadFile(reservation); err != nil || string(data) != "reserved-container" {
 				t.Fatalf("release removed or changed reservation: %q: %v", data, err)
+			}
+		})
+	}
+}
+
+// TestCacheCleanRefusesOtherPathsAndFindsItsTargets checks the one command a run
+// sends to a CI machine: it must refuse every path outside Dyna's own
+// directories, and it must select by age with one xdev find per tree.
+func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
+	command := cacheCleanCommand(true, ciCacheCleanAge)
+	for _, keep := range []string{"-xdev", `-maxdepth 0 -mmin +"$age_min" ! -type l`, "rm -rf --one-file-system", "DYNA_CI_CLEAN_AGE_MIN=2880", "-e \"$run/.active\""} {
+		if !strings.Contains(command, keep) {
+			t.Fatalf("cleanup command lacks %q", keep)
+		}
+	}
+	for _, outside := range []string{"/home/pip/media", "/var/tmp", "/var/tmp/dyna-local-ci/..", "/srv/homelab"} {
+		t.Run(outside, func(t *testing.T) {
+			cmd := exec.Command("bash", "-c", "DYNA_CI_CLEAN_ROOTS="+shellquote.Quote(outside)+" "+command)
+			out, err := cmd.CombinedOutput()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 2 {
+				t.Fatalf("cleanup accepted %s: %v: %s", outside, err, out)
+			}
+			if !strings.Contains(string(out), "refusing") {
+				t.Fatalf("cleanup refused %s without a reason: %s", outside, out)
+			}
+		})
+	}
+	// Dyna's own trees stay allowed, including one entry inside them.
+	for _, inside := range []string{"/var/tmp/dyna-local-ci/go-build", "/var/tmp/dyna-local-ci-1000/hermeslab/runs", "/var/tmp/dyna-ci/slots"} {
+		t.Run(inside, func(t *testing.T) {
+			cmd := exec.Command("bash", "-c", "DYNA_CI_CLEAN_ROOTS="+shellquote.Quote(inside)+" "+command)
+			out, err := cmd.CombinedOutput()
+			if err != nil || strings.Contains(string(out), "refusing") {
+				t.Fatalf("cleanup refused Dyna's own path %s: %v: %s", inside, err, out)
 			}
 		})
 	}

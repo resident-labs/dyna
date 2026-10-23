@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -169,8 +170,27 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	}
 	control, cancel := context.WithTimeout(ctx, time.Duration(len(checks))*(req.Timeout+admissionWait)+2*time.Minute)
 	defer cancel()
+	// A run removes its own directory on the node, whatever ended it: a finished
+	// run left about half a gigabyte behind, and the machine filled its disk.
+	// It is a separate call because the cleanup below stops at its first failed
+	// container check (exit 69) and would then keep the directory. It runs on its
+	// own context, so a cancelled run still removes it, and it runs last, after
+	// the reports were copied back.
+	defer func() {
+		remove, stop := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		defer stop()
+		var log tailBuffer
+		if e := r.nodeCommand(remove, &log, &log, "", "rm -rf --one-file-system "+shellquote.Quote(runDir)+" || true"); e != nil {
+			err = errors.Join(err, fmt.Errorf("remove run directory: %w: %s", e, log.String()))
+		}
+	}()
 	output.Reset()
-	setup := "set -e; umask 077; mkdir -p " + shellquote.Quote(base) + " " + shellquote.Quote(reports) + "; flock " + shellquote.Quote(path.Join(base, "init.lock")) + " bash -c " + shellquote.Quote("if [ ! -d "+shellquote.Quote(cache)+" ]; then git init --bare "+shellquote.Quote(cache)+"; fi")
+	// A machine that is close to a full disk cleans Dyna's own caches first, so
+	// the checks do not die on a full disk halfway through.
+	if e := r.cleanBeforeRun(control, node); e != nil {
+		log.Printf("local CI %s: free space check: %v", node.Name, e)
+	}
+	setup := "set -e; umask 077; mkdir -p " + shellquote.Quote(base) + " " + shellquote.Quote(reports) + "; : > " + shellquote.Quote(path.Join(runDir, ".active")) + "; flock " + shellquote.Quote(path.Join(base, "init.lock")) + " bash -c " + shellquote.Quote("if [ ! -d "+shellquote.Quote(cache)+" ]; then git init --bare "+shellquote.Quote(cache)+"; fi")
 	if err := r.nodeCommand(control, &output, &output, "", setup); err != nil {
 		return result, fmt.Errorf("initialize node: %w: %s", err, &output)
 	}
@@ -270,6 +290,12 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 							sr.Status = "failed"
 						}
 					}
+				}
+				// A full disk on the machine is not a failing test: report it as an
+				// infrastructure error, so the run cleans up and retries, and hosted
+				// CI resumes when it stays broken.
+				if sr.Status == "failed" && diskFull(sr.LogTail+"\n"+sr.Error) {
+					sr.Status, sr.Error = "error", "check ran out of disk space on the CI machine"
 				}
 				stop()
 				result.Suites[i] = sr
