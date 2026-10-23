@@ -11,7 +11,7 @@ import { createRoomSessionControls } from './roomSessionControls.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
-import { installSessionView } from '../../../test/appModules.ts'
+import { installSelection, installSessionView } from '../../../test/appModules.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const functions = parse(source, { modern: true }).instance?.content.body ?? []
@@ -219,6 +219,9 @@ test('reconnect refreshes the open session and its review workspace', async () =
 test('the remaining timer refreshes bulk transfers only while the page is visible', () => {
   const calls: string[] = []
   const c = { needPair: false, pageVisible: true, bulkControllers: new Map([['one', { refreshTransfers: () => calls.push('transfer') }]]), changesVisuals }
+  // The transfer poll asks the selection module, which owns the batch
+  // controllers; the state above holds them here.
+  installSelection(c)
   installRouterShim(c)
   vm.createContext(c)
   const mounted = functions.find((n): n is Extract<typeof n, { type: 'ExpressionStatement' }> => n.type === 'ExpressionStatement' && n.expression.type === 'CallExpression' && n.expression.callee.type === 'Identifier' && n.expression.callee.name === 'onMount')
