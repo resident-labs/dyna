@@ -1,10 +1,11 @@
-<script module>
+<script module lang="ts">
   // Where each room or session was last: open folders, the open file, the
   // phone's current folder. It survives a switch to another view.
-  const memory = new Map()
+  interface SavedView { open: string[]; file: string; dir: string; hidden: boolean }
+  const memory = new Map<string, SavedView>()
 </script>
 
-<script>
+<script lang="ts">
   // The workspace Files tab: a folder tree next to the file viewer on a wide screen;
   // on a phone, one folder list at a time with a path bar, and the file
   // full width. Folders load one level at a time, when opened.
@@ -12,7 +13,7 @@
   import { untrack, onDestroy } from 'svelte'
   import { api } from '../../api.ts'
   import FileView from '../files/FileView.svelte'
-  import { base, crumbs, isDir, parent, STATUS, statusLetter, treeRows } from '../files/repo.ts'
+  import { base, crumbs, isDir, parent, STATUS, statusLetter, treeRows, type Listing, type RepoEntry, type StatusCode, type TreeEntry, type TreeRow } from '../files/repo.ts'
   import { fileHash, parseFileHash } from '../prs/prlink.ts'
   import { routeHash } from '../ui/route.ts'
   import { ago } from '../ui/format.ts'
@@ -20,11 +21,22 @@
   import Document from '../files/Document.svelte'
   import History from '../files/History.svelte'
   import { markdownDocument } from '../files/preview.ts'
+  import { errorText } from '../errorText.ts'
+  import type { DirectoryEntry, GitCommit, GitFileStatus, GitStatusResult, WorkspaceFile } from '../api/file.ts'
 
-  let { roomId, session = '', narrow = false, active = true, reveal = '', folder = null, onpr } = $props()
+  interface Props {
+    roomId: string
+    session?: string
+    narrow?: boolean
+    active?: boolean
+    reveal?: string
+    folder?: { path: string } | null
+    onpr?: (number: number) => void
+  }
+  let { roomId, session = '', narrow = false, active = true, reveal = '', folder = null, onpr }: Props = $props()
 
   const key = untrack(() => `${roomId}|${session}`) // the view is keyed by room and session
-  const saved = memory.get(key) ?? { open: [''], file: '', dir: '', hidden: false }
+  const saved: SavedView = memory.get(key) ?? { open: [''], file: '', dir: '', hidden: false }
   // A file link in the address opens that file, with its folders, in place of the saved view.
   const linked = untrack(() => {
     const l = parseFileHash(window.location.hash)
@@ -38,40 +50,41 @@
   let was = $derived(at ? shown.was : '')
   let hidden = $state(saved.hidden)
   let repoHistory = $state(false) // the whole-repository History panel on the home
-  let lists = $state({}) // folder -> {entries} | {error} | {loading}
+  let lists = $state<Record<string, Listing>>({}) // folder -> {entries} | {error} | {loading}
   let root = $state('')
   let focusPath = $state('')
   let filter = $state('')
-  let filterInput = $state()
+  let filterInput = $state<HTMLInputElement | undefined>()
   const term = $derived(filter.trim().toLocaleLowerCase())
-  let treeEl = $state()
+  let treeEl = $state<HTMLElement | undefined>()
 
-  let status = $state(null)
+  let status = $state<GitStatusResult | null>(null)
   let statusError = $state('')
-  let commits = $state({})
+  let commits = $state<Record<string, GitCommit>>({})
   let commitError = $state('')
-  let readme = $state(null)
+  let readme = $state<WorkspaceFile | null>(null)
   let readmeError = $state('')
   let revision = 0
   let batchActive = false
   let batchQueued = false
   let destroyed = false
-  const visible = new Set()
-  const requested = new Set()
-  let observer
+  const visible = new Set<string>()
+  const requested = new Set<string>()
+  let observer: IntersectionObserver | undefined
 
   // Both layouts report visible paths to one bounded, serial batch loader.
-  function observeCommit(node) {
+  function observeCommit(node: HTMLElement) {
     observer ??= new IntersectionObserver(entries => {
       for (const entry of entries) {
-        const path = entry.target.dataset.path
+        const path = entry.target instanceof HTMLElement ? entry.target.dataset.path : undefined
+        if (!path) continue
         if (entry.isIntersecting) visible.add(path)
         else visible.delete(path)
       }
       queueBatch()
     })
     observer.observe(node)
-    return { destroy() { observer.unobserve(node); visible.delete(node.dataset.path) } }
+    return { destroy() { observer?.unobserve(node); if (node.dataset.path) visible.delete(node.dataset.path) } }
   }
 
   function queueBatch() {
@@ -89,9 +102,9 @@
     batchActive = true
     try {
       const result = await api.gitLastCommits(roomId, session, paths)
-      if (!destroyed && version === revision) commits = { ...commits, ...result.commits }
+      if (!destroyed && version === revision) commits = { ...commits, ...(result.commits ?? {}) }
     } catch (e) {
-      if (!destroyed && version === revision) commitError = String(e?.message || e)
+      if (!destroyed && version === revision) commitError = errorText(e)
     } finally {
       batchActive = false
       queueBatch()
@@ -104,13 +117,13 @@
       const result = await api.gitStatus(roomId, session)
       if (!destroyed && version === revision) { status = result; statusError = '' }
     } catch (e) {
-      if (!destroyed && version === revision) statusError = String(e?.message || e)
+      if (!destroyed && version === revision) statusError = errorText(e)
     }
   }
   $effect(() => { untrack(loadStatus) })
   onDestroy(() => { destroyed = true; observer?.disconnect() })
 
-  let changes = $derived(new Map((status?.files ?? []).map(change => [change.path, change])))
+  let changes = $derived(new Map<string, GitFileStatus>((status?.files ?? []).map((change): [string, GitFileStatus] => [change.path, change])))
   let latest = $derived(status?.commits?.[0])
   let rootList = $derived(lists[''])
   let readmePath = $derived(rootList?.entries?.find(entry => !isDir(entry) && /^readme\.md$/i.test(entry.name))?.path)
@@ -123,7 +136,7 @@
     readmeError = ''
     api.readFile(roomId, session, path).then(result => {
       if (current) readme = result
-    }, e => { if (current) readmeError = String(e?.message || e) })
+    }, e => { if (current) readmeError = errorText(e) })
     return () => { current = false }
   })
 
@@ -160,19 +173,23 @@
 
   $effect(() => { memory.set(key, { open: [...open], file, dir, hidden }) })
 
-  async function load(path, force = false) {
-    if (!force && lists[path] && !lists[path].error) return
-    lists = { ...lists, [path]: { loading: true, entries: lists[path]?.entries } }
+  async function load(path: string, force = false) {
+    const known = lists[path]
+    if (!force && known && !known.error) return
+    lists = { ...lists, [path]: { loading: true, entries: known?.entries } }
     try {
       const res = await api.listEntries(roomId, session, path, hidden)
       root = res.root || root
       lists = { ...lists, [path]: { entries: sortEntries(res.entries ?? []) } }
     } catch (e) {
-      lists = { ...lists, [path]: { error: String(e?.message || e) } }
+      lists = { ...lists, [path]: { error: errorText(e) } }
     }
   }
 
-  const sortEntries = (list) => [...list].sort((a, b) => (isDir(b) - isDir(a)) || a.name.localeCompare(b.name))
+  // The API reports a free-form kind; the tree knows three.
+  const repoKind = (kind: string): RepoEntry['kind'] => (kind === 'dir' || kind === 'symlink' ? kind : 'file')
+  const sortEntries = (list: readonly DirectoryEntry[]): RepoEntry[] =>
+    list.map((e) => ({ ...e, kind: repoKind(e.kind) })).sort((a, b) => ((isDir(b) ? 1 : 0) - (isDir(a) ? 1 : 0)) || a.name.localeCompare(b.name))
 
   // Load what the saved state shows, and again when "show hidden" flips.
   $effect(() => {
@@ -199,13 +216,13 @@
   }
 
   // The tree's visible rows; rows that did not change keep their objects.
-  let rowCache = new Map()
-  let rows = $derived.by(() => {
+  let rowCache = new Map<string, TreeRow>()
+  let rows = $derived.by((): TreeRow[] => {
     const out = treeRows(lists, open, rowCache)
     rowCache = new Map(out.map((r) => [r.path, r]))
     return term ? filterLoaded(lists, term) : out
   })
-  let items = $derived(rows.filter((r) => r.kind !== 'note'))
+  let items = $derived(rows.filter((r): r is TreeEntry => r.kind !== 'note'))
 
   $effect(() => {
     if (term && !items.some((row) => row.path === focusPath)) focusPath = items[0]?.path ?? ''
@@ -216,7 +233,7 @@
     filterInput?.focus()
   }
 
-  function toggle(e) {
+  function toggle(e: { path: string }) {
     const next = new Set(open)
     if (next.has(e.path)) next.delete(e.path)
     else {
@@ -226,7 +243,8 @@
     open = next
   }
 
-  function pick(e) {
+  // pick opens a row: a folder opens or closes, a file shows.
+  function pick(e: RepoEntry & { isDir?: boolean }) {
     focusPath = e.path
     if (e.isDir ?? isDir(e)) {
       if (narrow) dir = e.path
@@ -237,7 +255,7 @@
 
   // Show a folder: on a phone, list it; on a wide screen, open it and its
   // parents in the tree and put focus on it.
-  function showFolder(path) {
+  function showFolder(path: string) {
     if (!path) file = ''
     if (narrow) {
       file = ''
@@ -251,18 +269,18 @@
     }
     open = next
     focusPath = path
-    setTimeout(() => treeEl?.querySelector(`[data-path="${CSS.escape(path)}"]`)?.focus(), 30)
+    setTimeout(() => treeEl?.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`)?.focus(), 30)
   }
 
   // Arrow keys move through the tree; Right opens a folder or steps in,
   // Left closes it or steps to its parent; Enter and Space open.
-  function keydown(ev) {
+  function keydown(ev: KeyboardEvent) {
     const i = items.findIndex((r) => r.path === focusPath)
-    const at = (j) => {
+    const at = (j: number) => {
       const r = items[Math.max(0, Math.min(items.length - 1, j))]
       if (!r) return
       focusPath = r.path
-      treeEl.querySelector(`[data-path="${CSS.escape(r.path)}"]`)?.focus()
+      treeEl?.querySelector<HTMLElement>(`[data-path="${CSS.escape(r.path)}"]`)?.focus()
     }
     const r = items[i]
     if (ev.key === 'ArrowDown') at(i + 1)
@@ -279,8 +297,8 @@
   }
 
   // A small mark per file type, so a long list scans faster.
-  function mark(name) {
-    const ext = name.includes('.') ? name.split('.').pop().toLowerCase() : ''
+  function mark(name: string): { t: string; hue: number } {
+    const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() ?? '' : ''
     if (/^(png|jpe?g|gif|webp|svg|ico|avif)$/.test(ext)) return { t: 'img', hue: 2 }
     if (/^(md|markdown|txt|rst)$/.test(ext)) return { t: 'doc', hue: 7 }
     if (/^(json|ya?ml|toml|ini|conf|lock|mod|sum|env)$/.test(ext)) return { t: 'cfg', hue: 6 }
@@ -312,7 +330,7 @@
   $effect(() => { dir; untrack(() => { filter = '' }) })
 </script>
 
-{#snippet icon(e)}
+{#snippet icon(e: RepoEntry & { isDir?: boolean })}
   {#if e.isDir ?? isDir(e)}
     <svg class="glyph dir" viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M2.5 5.5a1.5 1.5 0 0 1 1.5-1.5h3.6l1.6 1.8H16a1.5 1.5 0 0 1 1.5 1.5v7.2A1.5 1.5 0 0 1 16 16H4a1.5 1.5 0 0 1-1.5-1.5Z" fill="currentColor" /></svg>
   {:else}
@@ -333,10 +351,11 @@
         <button class="count" aria-pressed={repoHistory} onclick={() => (repoHistory = !repoHistory)} title="Show the commits of the whole repository">{status.commitCount} commits</button>
       </div>
       {#if latest}
+        {@const prNumber = latest.prNumber}
         <div class="latest">
           <strong>{latest.author}</strong>
           <span class="subject" title={latest.subject}>{latest.subject}</span>
-          {#if latest.prNumber && onpr}<button class="pr" onclick={() => onpr(latest.prNumber)}>#{latest.prNumber}</button>{/if}
+          {#if prNumber && onpr}<button class="pr" onclick={() => onpr(prNumber)}>#{prNumber}</button>{/if}
           <span class="hash mono">{latest.shortHash}</span>
           <span class="age" title={latest.time}>{ago(latest.time)}</span>
         </div>
@@ -348,7 +367,7 @@
   </header>
 {/snippet}
 
-{#snippet rowCommit(path)}
+{#snippet rowCommit(path: string)}
   {@const change = changes.get(path)}
   {#if change?.untracked}
     <em class="row-subject untracked">untracked</em>
@@ -398,7 +417,7 @@
   <section class="phone">
     {#if file}
       {#key file}
-        <FileView {roomId} {session} path={file} rootLabel={label} {narrow} {at} {was} onat={(hash, old) => (shown = { path: file, at: hash, was: old })} onfolder={showFolder} onback={() => (file = '')} />
+        <FileView {roomId} {session} path={file} rootLabel={label} {narrow} {at} {was} onat={(hash: string, old: string) => (shown = { path: file, at: hash, was: old })} onfolder={showFolder} onback={() => (file = '')} />
       {/key}
     {:else}
       <div class="pbar">
@@ -500,7 +519,7 @@
     {#if repoHistory && !file}<History {roomId} {session} onclose={() => (repoHistory = false)} />{/if}
     {#if file}<div class="viewer">
         {#key file}
-          <FileView {roomId} {session} path={file} rootLabel={label} {narrow} {at} {was} onat={(hash, old) => (shown = { path: file, at: hash, was: old })} onfolder={showFolder} />
+          <FileView {roomId} {session} path={file} rootLabel={label} {narrow} {at} {was} onat={(hash: string, old: string) => (shown = { path: file, at: hash, was: old })} onfolder={showFolder} />
         {/key}
     </div>{/if}
   </section>
