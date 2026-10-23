@@ -5,10 +5,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { compile } from 'svelte/compiler'
 import { build } from 'esbuild'
+import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { callsInWindow, feedRows } from '../rooms/feedRows.ts'
 
 const dir = new URL('.', import.meta.url).pathname
@@ -18,9 +18,7 @@ async function load(name: string) {
   const result = await build({
     bundle: true, write: false, format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
     stdin: { contents: `export { default } from './${name}.svelte'; export { render } from 'svelte/server'`, resolveDir: dir, loader: 'js' },
-    plugins: [{ name: 'svelte-test', setup(b) {
-      b.onLoad({ filter: /\.svelte$/ }, ({ path }) => ({ contents: compile(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
-    } }],
+    plugins: [svelteEsbuildPlugin('server')],
   })
   const file = join(tmp, `${name}.mjs`)
   await writeFile(file, result.outputFiles[0]?.contents ?? '')
