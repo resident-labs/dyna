@@ -28,13 +28,14 @@ Keep `dyna run` in the foreground when its result is the work. Without `schema`,
 
 Run `dyna profiles list --json` before choosing profiles. Stats range from 1–10; higher is better:
 
-- `cost`: cost efficiency; choose cheap capable profiles for discovery.
-- `intelligence`: capability for complex implementation.
-- `taste`: judgment for review, verification, and quality-critical fixes.
+- `taste`: choosing the solution.
+- `diagnostics`: finding what is wrong with a solution (reviews, debugging), with few false positives.
+- `intelligence`: executing a given solution on hard multi-step work.
+- `cost`: higher is cheaper.
 
 Use descriptions to confirm the choice. Omitting `profile` selects the default workflow profile, or the first eligible profile if none is marked default.
 
-`profiles` contains enabled workflow profiles: `name`, `description`, `harness`, `model`, `taste`, `intelligence`, `cost`, `default`, `use`, `maxConcurrent`, `maxCallsPerRun`, and live read-only `remaining` (`null` means unlimited).
+`profiles` contains enabled workflow profiles: `name`, `description`, `harness`, `model`, `taste`, `diagnostics`, `intelligence`, `cost`, `default`, `use`, `maxConcurrent`, `maxCallsPerRun`, and live read-only `remaining` (`null` means unlimited).
 Only enabled profiles whose uses include `workflows` appear; naming another rejects the call.
 
 `maxConcurrent` queues excess calls. `maxCallsPerRun` is a lifetime logical-call cap; exceeding it rejects immediately and fails the run. Accepted calls still finish and journal for `--resume`.

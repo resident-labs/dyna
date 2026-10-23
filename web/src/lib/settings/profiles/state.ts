@@ -60,7 +60,7 @@ export type ProfileDraft = Omit<ProfileView, 'runtimeVersion' | 'fallback' | 'su
 }
 export function blankProfile(harness = 'opencode', model = '', models: readonly unknown[] | undefined = undefined): ProfileDraft {
   const chain = normalizeModels(model, models)
-  return { name: '', description: '', harness, model: chain[0] ?? '', models: chain, taste: 5, intelligence: 5, cost: 5, timeoutSec: 0, maxConcurrent: 0, maxCallsPerRun: 0, default: false, disabled: false, uses: USES.map(([u]) => u), safeMode: false, extraArgs: [], compact: null, command: [], envKeys: [] }
+  return { name: '', description: '', harness, model: chain[0] ?? '', models: chain, taste: 5, diagnostics: 5, intelligence: 5, cost: 5, timeoutSec: 0, maxConcurrent: 0, maxCallsPerRun: 0, default: false, disabled: false, uses: USES.map(([u]) => u), safeMode: false, extraArgs: [], compact: null, command: [], envKeys: [] }
 }
 // A catalog effort carries the exact extraArgs that select it on its harness.
 const indexOfArgs = (args: readonly string[], part: readonly string[]): number => part.length ? args.findIndex((_, i) => part.every((x, j) => args[i + j] === x)) : -1

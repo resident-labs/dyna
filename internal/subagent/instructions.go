@@ -125,7 +125,11 @@ func (m *Manager) profileInstructions(meta Meta) instructions.Section {
 		section.Text = "[DYNA PROFILES]\nProfiles could not be read. Run dyna profiles list before delegation."
 		return section
 	}
-	section.Text = "[DYNA PROFILES]\nEnabled subagent profiles. Ratings are out of 10; higher cost-efficiency means cheaper. Max-concurrent 0 means unlimited."
+	section.Text = "[DYNA PROFILES]\nEnabled subagent profiles. Ratings are out of 10; higher is better. Max-concurrent 0 means unlimited.\n" +
+		"taste = choosing the solution.\n" +
+		"diagnostics = finding what is wrong with a solution (reviews, debugging), with few false positives.\n" +
+		"intelligence = executing a given solution on hard multi-step work.\n" +
+		"cost = higher is cheaper."
 	usable := (*profile.Profile).ForSubagents
 	if meta.Service && meta.Role != RoleRoot {
 		usable = (*profile.Profile).ForServices
@@ -138,7 +142,7 @@ func (m *Manager) profileInstructions(meta Meta) instructions.Section {
 		if model == "" {
 			model = "-"
 		}
-		section.Items = append(section.Items, fmt.Sprintf("- %s | model: %s | taste: %d/10 | intelligence: %d/10 | cost-efficiency: %d/10 | max-concurrent: %d | %s", p.Name, model, p.Taste, p.Intelligence, p.Cost, p.MaxConcurrent, strings.Join(strings.Fields(p.Description), " ")))
+		section.Items = append(section.Items, fmt.Sprintf("- %s | model: %s | taste: %d/10 | diagnostics: %d/10 | intelligence: %d/10 | cost-efficiency: %d/10 | max-concurrent: %d | %s", p.Name, model, p.Taste, p.EffectiveDiagnostics(), p.Intelligence, p.Cost, p.MaxConcurrent, strings.Join(strings.Fields(p.Description), " ")))
 	}
 	if len(section.Items) == 0 {
 		section.Items = []string{"No enabled subagent profiles."}

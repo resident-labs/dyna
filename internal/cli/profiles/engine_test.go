@@ -109,7 +109,7 @@ func TestProfileAddSendsFullFieldsToEngine(t *testing.T) {
 	want := profile.Profile{
 		Name: "complete", Harness: profile.HarnessCustom, RuntimeVersion: "2.3.4",
 		Description: "keep spacing ", Model: "first", Models: []string{"first", "second"},
-		Taste: 8, Intelligence: 7, Cost: 6, ExtraArgs: []string{"--flag", " spaced "},
+		Taste: 8, Diagnostics: 9, Intelligence: 7, Cost: 6, ExtraArgs: []string{"--flag", " spaced "},
 		Command:    []string{"fixture", "{{prompt}}"},
 		Output:     &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL},
 		TimeoutSec: 2100, Default: true, SafeMode: true,
@@ -132,7 +132,7 @@ func TestProfileAddSendsFullFieldsToEngine(t *testing.T) {
 	out := runProfilesCommand(t, "add", "--name", want.Name, "--harness", want.Harness,
 		"--runtime-version", want.RuntimeVersion, "--desc", want.Description,
 		"--model", "ignored", "--models", " first ,second,first",
-		"--taste", "8", "--intelligence", "7", "--cost", "6",
+		"--taste", "8", "--intelligence", "7", "--cost", "6", "--diagnostics", "9",
 		"--extra-arg=--flag", "--extra-arg", " spaced ",
 		"--command", "fixture", "--command", "{{prompt}}",
 		"--output-dialect", workeroutput.DialectCodexJSONL, "--timeout", "2100",

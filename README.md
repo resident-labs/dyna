@@ -120,13 +120,14 @@ A harness is an adapter for one agent CLI: `claude-code`, `codex`,
 `antigravity`, `opencode`, `muse`, `grok`, `pi`, `custom` and `mock`. Each
 runs as a headless child process, with its own private runtime and accounts.
 
-A profile binds a harness and a model to three ratings from 1 to 10: taste,
-intelligence and cost (10 is cheapest). Agents choose a profile by the work.
+A profile binds a harness and a model to four ratings from 1 to 10: taste,
+diagnostics, intelligence and cost (10 is cheapest). Agents choose a profile
+by the work: reviewers rank by diagnostics, other roles by taste.
 `dyna profiles list` shows them; add your own in Settings or with:
 
 ```bash
 dyna profiles add --name my-builder --harness codex --model <model-id> \
-  --taste 7 --intelligence 9 --cost 6 --desc "Your routing notes."
+  --taste 7 --diagnostics 6 --intelligence 9 --cost 6 --desc "Your routing notes."
 ```
 
 By default workers run headless with the CLI's permission prompts bypassed.

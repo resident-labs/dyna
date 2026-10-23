@@ -213,8 +213,8 @@
             <div class="sub" title={(p.models?.length ?? 0) > 1 ? (p.models ?? []).join(' → ') : undefined}>{p.harness}{p.model ? ' · ' + p.model : ''}{#if (p.models?.length ?? 0) > 1}&nbsp;→ +{(p.models?.length ?? 0) - 1} fallback{/if}{#if p.envKeys?.length}&nbsp;· {p.envKeys.length} env {p.envKeys.length === 1 ? 'value' : 'values'}{/if}</div>
             {#if p.description}<div class="desc">{p.description}</div>{/if}
           </div>
-          <div class="stats" aria-label="taste {p.taste}, intelligence {p.intelligence}, cost-efficiency {p.cost} out of 10">
-            {#each ([['taste', p.taste], ['smarts', p.intelligence], ['thrift', p.cost]] as const) as [label, v]}
+          <div class="stats" aria-label="taste {p.taste}, diagnostics {p.diagnostics}, intelligence {p.intelligence}, cost-efficiency {p.cost} out of 10">
+            {#each ([['taste', p.taste], ['diagnostics', p.diagnostics], ['smarts', p.intelligence], ['thrift', p.cost]] as const) as [label, v]}
               <div class="stat"><span>{label}</span><span class="bar"><span style="width:{v * 10}%"></span></span></div>
             {/each}
           </div>
@@ -277,7 +277,7 @@
   .sub { font-size: var(--t-ui); color: var(--muted); margin-top: 2px; }
   .desc { font-size: var(--t-ui); color: var(--faint); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .stats { display: flex; flex-direction: column; gap: var(--s1); width: 150px; flex: none; }
-  .stat { display: grid; grid-template-columns: 44px 1fr; align-items: center; gap: var(--s2); font-size: var(--t-cap); color: var(--faint); }
+  .stat { display: grid; grid-template-columns: 72px 1fr; align-items: center; gap: var(--s2); font-size: var(--t-cap); color: var(--faint); }
   .bar { height: 5px; background: var(--rail); border-radius: 3px; overflow: hidden; }
   .bar span { display: block; height: 100%; background: var(--iris); border-radius: 3px; opacity: 0.85; }
   .more { width: 32px; height: 32px; border-radius: 6px; color: var(--muted); display: grid; place-items: center; flex: none; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }

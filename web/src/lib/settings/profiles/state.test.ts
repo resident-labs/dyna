@@ -34,6 +34,10 @@ test('new profiles use OpenCode defaults and preserve the selected exact model',
   assert.equal(blankProfile().name, '')
   assert.deepEqual(blankProfile().envKeys, [])
 })
+test('new profiles start every rating at neutral 5, including diagnostics', () => {
+  const { taste, diagnostics, intelligence, cost } = blankProfile()
+  assert.deepEqual({ taste, diagnostics, intelligence, cost }, { taste: 5, diagnostics: 5, intelligence: 5, cost: 5 })
+})
 
 test('single-route harnesses join by harness while OpenCode follows credential integration', () => {
   const codex = usageAccount({ id: 'codex-account', harness: 'codex', providerId: 'codex', active: true })

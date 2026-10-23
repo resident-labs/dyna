@@ -36,6 +36,7 @@ type ProfileView struct {
 	Taste          int      `json:"taste"`
 	Intelligence   int      `json:"intelligence"`
 	Cost           int      `json:"cost"`
+	Diagnostics    int      `json:"diagnostics"`
 	TimeoutSec     int      `json:"timeoutSec"`
 	MaxConcurrent  int      `json:"maxConcurrent"`
 	MaxCallsPerRun int      `json:"maxCallsPerRun"`
@@ -81,7 +82,7 @@ func view(p profile.Profile) ProfileView {
 		RuntimeVersion: p.RuntimeVersion,
 		Name:           p.Name, Description: p.Description, Harness: p.Harness, Model: p.Model, Models: p.EffectiveModels(),
 		Fallback: p.Fallback,
-		Taste:    p.Taste, Intelligence: p.Intelligence, Cost: p.Cost,
+		Taste:    p.Taste, Diagnostics: p.EffectiveDiagnostics(), Intelligence: p.Intelligence, Cost: p.Cost,
 		TimeoutSec: p.TimeoutSec, MaxConcurrent: p.MaxConcurrent, MaxCallsPerRun: p.MaxCallsPerRun,
 		Default: p.Default, Disabled: p.Disabled, Uses: p.EffectiveUses(), SafeMode: p.SafeMode,
 		ExtraArgs: append([]string{}, p.ExtraArgs...), Compact: p.Compact, Command: append([]string{}, p.Command...), EnvKeys: []string{},
@@ -180,6 +181,7 @@ func (s *Service) SaveProfile(ctx context.Context, e ProfileEdit) (ProfileView, 
 	}
 	p.Fallback = strings.TrimSpace(in.Fallback)
 	p.Taste, p.Intelligence, p.Cost = in.Taste, in.Intelligence, in.Cost
+	p.Diagnostics = in.Diagnostics
 	p.TimeoutSec, p.MaxConcurrent, p.MaxCallsPerRun = in.TimeoutSec, in.MaxConcurrent, in.MaxCallsPerRun
 	p.Default, p.Disabled, p.Uses, p.SafeMode = in.Default, in.Disabled, in.Uses, in.SafeMode
 	p.ExtraArgs, p.Command, p.Compact = clean(in.ExtraArgs), clean(in.Command), in.Compact

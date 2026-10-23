@@ -39,7 +39,7 @@ func TestProfileSelection(t *testing.T) {
 			}
 		})
 	}
-	got := RankProfiles(profiles, failures, now.Add(time.Minute))
+	got := RankProfiles(profiles, failures, now.Add(time.Minute), "")
 	if got[0].Name != "failed" {
 		t.Fatal("unavailable time did not expire")
 	}
@@ -48,6 +48,27 @@ func TestProfileSelection(t *testing.T) {
 	}
 	if _, _, err := ChooseProfile(nil, "", nil, now, "keeper"); err == nil || !strings.Contains(err.Error(), "no enabled keeper profile") {
 		t.Fatalf("unavailable: %v", err)
+	}
+}
+
+func TestReviewerRanksByDiagnostics(t *testing.T) {
+	now := time.Date(2026, 10, 21, 12, 0, 0, 0, time.UTC)
+	profiles := []profile.Profile{
+		{Name: "stylish", Taste: 10, Cost: 4, Diagnostics: 3, Intelligence: 5},
+		{Name: "sharp", Taste: 4, Cost: 4, Diagnostics: 10, Intelligence: 5},
+	}
+	if got, reason, err := ChooseProfile(profiles, "", nil, now, subagent.RoleReviewer); err != nil || got != "sharp" || reason != "auto: best diagnostics + cost" {
+		t.Fatalf("reviewer chose %q %q, %v; want the high-diagnostics profile", got, reason, err)
+	}
+	// Other roles still choose a solution by taste.
+	if got, reason, err := ChooseProfile(profiles, "", nil, now, subagent.RoleLibrarian); err != nil || got != "stylish" || reason != "auto: best taste + cost" {
+		t.Fatalf("librarian chose %q %q, %v; want the high-taste profile", got, reason, err)
+	}
+	// A profile saved before the rating existed ranks as 5, the neutral value,
+	// so it beats an explicit 4 even though its stored value is 0.
+	old := []profile.Profile{{Name: "old", Cost: 4}, {Name: "low", Cost: 4, Diagnostics: 4}}
+	if got := RankProfiles(old, nil, now, subagent.RoleReviewer); got[0].Name != "old" {
+		t.Fatalf("unset diagnostics ranked %q first, want old as neutral 5", got[0].Name)
 	}
 }
 
@@ -142,18 +163,18 @@ func TestMultiModelProfileUsesModelCooldowns(t *testing.T) {
 	failures := map[string]time.Time{p.Name: now}
 	// Older failed turns cannot hide a profile with another healthy model.
 	harness.RecordModelFailure(p.Name, "a", now)
-	if got := RankProfiles([]profile.Profile{p}, failures, now); len(got) != 1 {
+	if got := RankProfiles([]profile.Profile{p}, failures, now, ""); len(got) != 1 {
 		t.Fatal("healthy fallback was excluded")
 	}
 	harness.RecordModelFailure(p.Name, "b", now)
-	if got := RankProfiles([]profile.Profile{p}, failures, now); len(got) != 0 {
+	if got := RankProfiles([]profile.Profile{p}, failures, now, ""); len(got) != 0 {
 		t.Fatal("exhausted profile remained available")
 	}
-	if got := RankProfiles([]profile.Profile{p}, failures, now.Add(time.Hour)); len(got) != 1 {
+	if got := RankProfiles([]profile.Profile{p}, failures, now.Add(time.Hour), ""); len(got) != 1 {
 		t.Fatal("cooldown did not expire")
 	}
 	harness.ClearModelFailure(p.Name, "b")
-	if got := RankProfiles([]profile.Profile{p}, failures, now); len(got) != 1 {
+	if got := RankProfiles([]profile.Profile{p}, failures, now, ""); len(got) != 1 {
 		t.Fatal("healthy model did not restore profile")
 	}
 }
@@ -184,10 +205,10 @@ func TestNotReadyExcludesMultiModelProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := RankProfiles(profiles, cached, now); len(got) != 1 || got[0].Name != "spare" {
+	if got := RankProfiles(profiles, cached, now, ""); len(got) != 1 || got[0].Name != "spare" {
 		t.Fatalf("cached not-ready failure ignored: %+v", got)
 	}
-	if got := RankProfiles(profiles, failures, now.Add(time.Hour)); len(got) != 2 {
+	if got := RankProfiles(profiles, failures, now.Add(time.Hour), ""); len(got) != 2 {
 		t.Fatal("not-ready failure did not expire")
 	}
 }
@@ -204,10 +225,10 @@ func TestQuotaResetKeepsProfileOut(t *testing.T) {
 		t.Fatalf("until = %v, want %v", failures["argon"], want)
 	}
 	profiles := []profile.Profile{{Name: "argon"}}
-	if got := RankProfiles(profiles, failures, now.Add(2*time.Hour)); len(got) != 0 {
+	if got := RankProfiles(profiles, failures, now.Add(2*time.Hour), ""); len(got) != 0 {
 		t.Fatal("exhausted profile returned before its reset")
 	}
-	if got := RankProfiles(profiles, failures, now.Add(153*time.Hour)); len(got) != 1 {
+	if got := RankProfiles(profiles, failures, now.Add(153*time.Hour), ""); len(got) != 1 {
 		t.Fatal("profile stayed out after its reset")
 	}
 

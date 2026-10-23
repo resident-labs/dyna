@@ -392,6 +392,21 @@ func TestSaveProfileKeepsCompact(t *testing.T) {
 }
 
 // The Settings editor saves any set of uses, and the list reads it back.
+func TestSaveProfileDiagnosticsRoundTrip(t *testing.T) {
+	isolate(t)
+	seed(t, mock("sol"))
+	edit := ProfileEdit{Original: "sol", Profile: view(mock("sol"))}
+	edit.Profile.Diagnostics = 9
+	v, err := (&Service{}).SaveProfile(t.Context(), edit)
+	if err != nil || v.Diagnostics != 9 {
+		t.Fatalf("save = %+v, %v", v, err)
+	}
+	list, err := Profiles()
+	if err != nil || list.Profiles[0].Diagnostics != 9 {
+		t.Fatalf("list after save = %+v, %v", list.Profiles, err)
+	}
+}
+
 func TestSaveProfileUsesRoundTrip(t *testing.T) {
 	isolate(t)
 	seed(t, mock("sol"))

@@ -179,6 +179,44 @@ func TestLoadRejectsInvalidProfile(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsDefaultsToNeutral(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "profiles.json")
+	contents := `{"version":2,"profiles":[{"name":"old","harness":"mock","taste":5,"intelligence":5,"cost":5}]}`
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() of a profile without the new field: %v", err)
+	}
+	p, _ := store.Get("old")
+	if p.Diagnostics != 0 || p.EffectiveDiagnostics() != 5 {
+		t.Fatalf("unset diagnostics = %d effective %d, want 0 effective 5", p.Diagnostics, p.EffectiveDiagnostics())
+	}
+	// Zero stays legal so old profiles load, but a rating outside 1..10 is refused.
+	for _, bad := range []Profile{
+		{Name: "x", Harness: HarnessMock, Taste: 5, Intelligence: 5, Cost: 5, Diagnostics: 11},
+		{Name: "x", Harness: HarnessMock, Taste: 5, Intelligence: 5, Cost: 5, Diagnostics: -1},
+	} {
+		if err := bad.Validate(); err == nil {
+			t.Fatalf("Validate(%+v) accepted an out-of-range diagnostics rating", bad)
+		}
+	}
+	if err := store.Upsert(Profile{Name: "rated", Harness: HarnessMock, Taste: 5, Intelligence: 5, Cost: 5, Diagnostics: 9}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rated, _ := reloaded.Get("rated"); rated.Diagnostics != 9 {
+		t.Fatalf("round trip diagnostics = %d, want 9", rated.Diagnostics)
+	}
+}
+
 func TestLoadIgnoresLegacyAdmissionCost(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "profiles.json")
 	legacy := `{"version":2,"profiles":[{"name":"legacy","harness":"mock","taste":5,"intelligence":5,"cost":5,"admissionCost":"heavy"}]}`
