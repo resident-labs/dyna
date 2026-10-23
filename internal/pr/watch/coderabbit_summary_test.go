@@ -52,12 +52,12 @@ func TestCodeRabbitSummaryFakeGH(t *testing.T) {
 	e.authorFeedOnly()
 	e.f.Checks, e.f.Runs = nil, nil
 	e.track()
-	e.addComment(201, "issue-comments", string(body), "coderabbitai[bot]")
+	e.addTrustedComment(201, "issue-comments", string(body), "coderabbitai[bot]")
 	e.tick()
 	if len(e.sent) != 0 || e.record().PendingDrops["known_bot_summary"] != 1 {
 		t.Fatalf("summary woke the author: %+v %+v", e.sent, e.record().PendingDrops)
 	}
-	e.addComment(202, "comments", "Bug at parser.go:12: ensure bounds.", "coderabbitai[bot]")
+	e.addTrustedComment(202, "comments", "Bug at parser.go:12: ensure bounds.", "coderabbitai[bot]")
 	e.tick()
 	if len(e.sent) != 1 || !strings.Contains(e.sent[0].Text, "parser.go:12") {
 		t.Fatalf("finding lost: %+v", e.sent)
