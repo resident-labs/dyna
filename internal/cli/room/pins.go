@@ -3,12 +3,12 @@ package room
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/textutil"
 )
 
 func pinCmd() *cobra.Command {
@@ -103,22 +103,13 @@ func pinsCmd() *cobra.Command {
 				return printJSON(cmd.OutOrStdout(), rows)
 			}
 			for _, r := range rows {
-				fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %s  %s%s\n", r.ID, time.UnixMilli(r.Post.TS).Format("2006-01-02 15:04:05"), r.Post.From, firstLine(r.Post.Text), attachNote(r.Post))
+				fmt.Fprintf(cmd.OutOrStdout(), "%s  %s  %s  %s%s\n", r.ID, time.UnixMilli(r.Post.TS).Format("2006-01-02 15:04:05"), r.Post.From, textutil.FirstLine(r.Post.Text), attachNote(r.Post))
 			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print each pin with its post as JSON")
 	return cmd
-}
-
-func firstLine(text string) string {
-	for _, line := range strings.Split(text, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			return line
-		}
-	}
-	return ""
 }
 
 // attachNote is "  [card]" for an HTML card, "  [N files]" for other files.

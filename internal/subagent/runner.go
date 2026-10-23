@@ -25,6 +25,7 @@ import (
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/scratch"
 	"dyna-agent/internal/structuredoutput"
+	"dyna-agent/internal/textutil"
 	"dyna-agent/internal/workeroutput"
 	"dyna-agent/internal/workerprompt"
 	"dyna-agent/internal/worktrees"
@@ -161,10 +162,10 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			ev["writeError"] = werr.Error()
 		}
 		if s, ok := result.(string); ok && s != "" {
-			ev["preview"] = truncateText(s, 240)
+			ev["preview"] = textutil.Prefix(s, 240)
 		} else if result != nil {
 			if b, err := json.Marshal(result); err == nil {
-				ev["preview"] = truncateText(string(b), 240)
+				ev["preview"] = textutil.Prefix(string(b), 240)
 			}
 		}
 		if m.checkpoint != nil {
@@ -683,13 +684,6 @@ func cloneEnv(src map[string]string) map[string]string {
 		dst[k] = v
 	}
 	return dst
-}
-
-func truncateText(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
 }
 
 // endedAs is what a turn whose end was written ended as: its record's status

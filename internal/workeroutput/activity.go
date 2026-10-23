@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"dyna-agent/internal/textutil"
 )
 
 // activityTail bounds how much of a worker's output LastActivity reads.
@@ -157,12 +159,12 @@ func toolLine(e Event) string {
 	// also arrive as plain text.
 	if strings.HasPrefix(raw, "{") {
 		if json.Unmarshal([]byte(raw), &input) != nil {
-			_ = json.Unmarshal([]byte(firstLine(raw)), &input)
+			_ = json.Unmarshal([]byte(textutil.FirstLine(raw)), &input)
 		}
 	}
 	plain := ""
 	if !strings.HasPrefix(raw, "{") {
-		plain = firstLine(raw)
+		plain = textutil.FirstLine(raw)
 	}
 	path := firstText(input.FilePath, input.Path, input.Target)
 	if verb, ok := fileSteps[lower]; ok {
@@ -172,7 +174,7 @@ func toolLine(e Event) string {
 		return verb + " a file"
 	}
 	if shellTools[lower] {
-		if step := firstText(input.Description, firstLine(input.Command), plain); step != "" {
+		if step := firstText(input.Description, textutil.FirstLine(input.Command), plain); step != "" {
 			return clip(step)
 		}
 		if step, ok := shellJobSteps[lower]; ok {
@@ -180,7 +182,7 @@ func toolLine(e Event) string {
 		}
 		return "running a command"
 	}
-	step := firstText(input.Description, firstLine(input.Command), input.URL, input.Query, input.Pattern)
+	step := firstText(input.Description, textutil.FirstLine(input.Command), input.URL, input.Query, input.Pattern)
 	if step == "" && path != "" {
 		step = filepath.Base(path)
 	}
@@ -204,16 +206,10 @@ func firstText(values ...string) string {
 	return ""
 }
 
-// firstLine returns a value's first line, without surrounding space.
-func firstLine(s string) string {
-	line, _, _ := strings.Cut(s, "\n")
-	return strings.TrimSpace(line)
-}
+// labelRunes bounds one activity label.
+const labelRunes = 100
 
-// clip bounds a label to 100 runes.
+// clip bounds a label to labelRunes runes.
 func clip(s string) string {
-	if r := []rune(s); len(r) > 100 {
-		return string(r[:100]) + "…"
-	}
-	return s
+	return textutil.Clip(s, labelRunes)
 }

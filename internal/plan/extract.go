@@ -2,6 +2,7 @@ package plan
 
 import (
 	"dyna-agent/internal/workflowresolve"
+	"dyna-agent/internal/textutil"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -808,7 +809,7 @@ func (ex *extractor) hookAgent(call *ast.CallExpression, ctx walkCtx, sc *scope)
 		phase = phaseOf(ctx)
 	}
 	if label == "" && promptOK {
-		label = truncatePreview(prompt)
+		label = textutil.ClipOneLine(prompt, PreviewLimit)
 	}
 	if label == "" {
 		label = "agent"
@@ -820,7 +821,7 @@ func (ex *extractor) hookAgent(call *ast.CallExpression, ctx walkCtx, sc *scope)
 	}
 	preview := ""
 	if promptOK {
-		preview = truncatePreview(prompt)
+		preview = textutil.ClipOneLine(prompt, PreviewLimit)
 	} else if len(call.ArgumentList) > 0 {
 		preview = "${…}"
 	}
@@ -883,7 +884,7 @@ func (ex *extractor) hookLog(call *ast.CallExpression, ctx walkCtx, sc *scope) {
 	if !ok {
 		preview = "${…}"
 	} else {
-		preview = truncatePreview(preview)
+		preview = textutil.ClipOneLine(preview, PreviewLimit)
 	}
 	ex.visitCallArguments(call, ctx, sc)
 	node := Node{

@@ -10,6 +10,7 @@ import (
 	"github.com/dop251/goja"
 
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/textutil"
 )
 
 func (e *engine) bind(vm *goja.Runtime) error {
@@ -25,7 +26,7 @@ func (e *engine) bind(vm *goja.Runtime) error {
 	})
 	vm.Set("__log", func(msg string, planNodeID string) {
 		e.emit(runstore.Event{
-			T: "log", Msg: truncate(msg, 4000), PlanNodeID: planNodeID,
+			T: "log", Msg: textutil.ClipOneLine(msg, 4000), PlanNodeID: planNodeID,
 			Provenance: runstore.CanonicalLogProvenance(runstore.LogProvenanceWorkflow),
 		})
 	})
