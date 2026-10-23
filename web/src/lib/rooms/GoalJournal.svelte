@@ -19,7 +19,7 @@
   const member = (id: string) => members.find((m) => m.id === id || m.address === id)
   const name = (id: string): string => member(id)?.name ?? String(id).split(':').pop() ?? String(id)
   const when = (at: string) => new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-  const VERBS: Record<string, string> = { note: 'noted', added: 'added an item', done: 'finished an item', dropped: 'dropped an item', reopened: 'reopened an item', assigned: 'assigned an item', edited: 'edited an item', returned: 'an item returned', 'keeper-status': 'keeper check-in' }
+  const VERBS: Record<string, string> = { note: 'noted', added: 'added an item', done: 'finished an item', dropped: 'dropped an item', reopened: 'reopened an item', assigned: 'assigned an item', edited: 'edited an item', returned: 'an item returned', 'keeper-status': 'status check-in' }
 </script>
 
 {#if error}<p class="err">Could not load the journal: {error}</p>{/if}

@@ -10,12 +10,12 @@ import (
 	"dyna-agent/internal/worktrees"
 )
 
-// ClosedSessionKeeper is maintenance's per-pass check for long-closed
+// RetainClosedSession is maintenance's per-pass check for long-closed
 // sessions. It reads every record once to find the sessions others still
 // read: a consolidation target reads its sources through InheritedInboxes,
 // and delivery follows a source's ConsumedBy to its target. A source stays
 // while a remaining record names it, so chains of consolidations stay whole.
-func (m *Manager) ClosedSessionKeeper(ctx context.Context) (func(context.Context, string) (bool, error), error) {
+func (m *Manager) RetainClosedSession(ctx context.Context) (func(context.Context, string) (bool, error), error) {
 	referenced := map[string]bool{}
 	exists := map[string]bool{}
 	consumedBy := map[string]string{}
@@ -23,7 +23,7 @@ func (m *Manager) ClosedSessionKeeper(ctx context.Context) (func(context.Context
 		exists[id] = true
 		var meta Meta
 		if err != nil || json.Unmarshal(raw, &meta) != nil {
-			return nil // unreadable records are not removed (keep reads them again)
+			return nil // unreadable records are not removed (the retain check reads them again)
 		}
 		for _, in := range meta.InheritedInboxes {
 			referenced[in.Session] = true

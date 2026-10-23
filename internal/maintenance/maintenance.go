@@ -46,11 +46,11 @@ type Options struct {
 	Repos       []string
 	OwnerClosed func(string) (bool, error)
 	Pressure    bool
-	// ClosedSessionKeeper returns, once per pass, a check that reports
+	// RetainClosedSession returns, once per pass, a check that reports
 	// whether a long-closed session still matters (open children, goals, PR
 	// roles, kept worktrees, sessions that still read it). The session
 	// manager sets it; without it closed sessions are not removed.
-	ClosedSessionKeeper Keeper
+	RetainClosedSession ClosedSessionRetainer
 }
 
 // RunSession runs the same maintenance pass for a single session.
@@ -110,9 +110,9 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		errs = append(errs, sweepWithDryPass(ctx, &result, "closed session stdout", sessionLogRetention, func(dry bool) (Pruned, error) {
 			return sweepClosedSessionLogs(ctx, now, dry, opts.Logf)
 		}))
-		if opts.ClosedSessionKeeper != nil {
+		if opts.RetainClosedSession != nil {
 			errs = append(errs, sweepWithDryPass(ctx, &result, "closed sessions", closedSessionRetention, func(dry bool) (Pruned, error) {
-				return sweepClosedSessions(ctx, now, dry, opts.ClosedSessionKeeper, opts.Logf)
+				return sweepClosedSessions(ctx, now, dry, opts.RetainClosedSession, opts.Logf)
 			}))
 		}
 		errs = append(errs, sweepWithDryPass(ctx, &result, "rejected runner spool lines", rejectedSpoolRetention, func(dry bool) (Pruned, error) {
@@ -312,15 +312,15 @@ func (s *scheduler) tick(ctx context.Context, now time.Time, low []string, run f
 	return err
 }
 
+// ClosedSessionRetainer builds, once per pass, the check that reports
+// whether a long-closed session must be retained.
+type ClosedSessionRetainer func(context.Context) (retain func(context.Context, string) (bool, error), err error)
+
 // Loop checks pressure each minute and runs cleanup at least once per hour.
 // It executes passes serially and stops when the host context is canceled.
-// Keeper builds, once per pass, the check that keeps a long-closed session.
-type Keeper func(context.Context) (keep func(context.Context, string) (bool, error), err error)
-
-// Loop runs scheduled maintenance until ctx ends. keep is passed to each pass
-// as Options.ClosedSessionKeeper.
-func Loop(ctx context.Context, logf func(string, ...any), keep Keeper) {
-	loop(ctx, logf, hooks.New(), keep)
+// retainer is passed to each pass as Options.RetainClosedSession.
+func Loop(ctx context.Context, logf func(string, ...any), retainer ClosedSessionRetainer) {
+	loop(ctx, logf, hooks.New(), retainer)
 }
 
 type lifecycleHooks interface {
@@ -329,7 +329,7 @@ type lifecycleHooks interface {
 	Tick(context.Context, string, time.Time) error
 }
 
-func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleHooks, keep Keeper) {
+func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleHooks, retainer ClosedSessionRetainer) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
@@ -404,7 +404,7 @@ func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleH
 		}
 		maintenanceErr := schedule.tick(ctx, time.Now(), low, func(ctx context.Context) (Result, error) {
 			start := time.Now()
-			result, err := Run(ctx, Options{Pressure: len(low) > 0, Logf: logf, ClosedSessionKeeper: keep})
+			result, err := Run(ctx, Options{Pressure: len(low) > 0, Logf: logf, RetainClosedSession: retainer})
 			logf("maintenance: %s", result.Summary())
 			if saveErr := SaveReport(store.DataDir(), start, time.Since(start), result, err); saveErr != nil {
 				logf("maintenance report: %v", saveErr)

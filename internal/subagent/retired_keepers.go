@@ -7,6 +7,10 @@ import (
 )
 
 // RetireGoalKeepers closes obsolete keeper services before workers resume.
+//
+// TODO: legacy/shim — the goal keeper service was removed, but stored sessions
+// may still carry the role. Remove this retirement pass, and the role check in
+// retireGoalKeepers, when no stored session has role keeper.
 func (m *Manager) RetireGoalKeepers(ctx context.Context) error {
 	sessions, err := m.Store.ListSnapshot(false)
 	if err != nil {
