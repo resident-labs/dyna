@@ -18,6 +18,9 @@ const (
 	// MachineOnline is this engine's own machine, or a machine the probe
 	// reached: the engine knows it is up.
 	MachineOnline MachineStatus = "online"
+	// MachineDegraded is a machine that answered a probe but needs attention,
+	// such as low free disk space. The probe names the reason.
+	MachineDegraded MachineStatus = "degraded"
 	// MachineDisabled is a machine switched off in the registry. It takes no
 	// new work, but it is not known to be down.
 	MachineDisabled MachineStatus = "disabled"
@@ -25,6 +28,15 @@ const (
 	MachineOffline MachineStatus = "offline"
 	// MachineUnknown is a machine the engine does not probe yet.
 	MachineUnknown MachineStatus = "unknown"
+)
+
+// MachineStatusReason names why a machine is degraded. The page words it, so
+// no probe message reaches the screen.
+type MachineStatusReason string
+
+const (
+	// MachineLowDisk means the machine is short of free disk space.
+	MachineLowDisk MachineStatusReason = "low-disk"
 )
 
 // MachineCISlots is the CI work a machine runs now, out of its slots.
@@ -100,6 +112,9 @@ type MachineDetail struct {
 	SeenAt       *time.Time           `json:"seenAt,omitempty"`
 	Capabilities *MachineCapabilities `json:"capabilities,omitempty"`
 	Load         *MachineLoad         `json:"load,omitempty"`
+	// StatusReason names why a degraded machine needs attention. It stays
+	// empty for every other status.
+	StatusReason MachineStatusReason `json:"statusReason,omitempty"`
 }
 
 // MachineCapabilities is what the last probe read about a machine. Memory
@@ -356,6 +371,8 @@ func loadView(l machines.Load) *MachineLoad {
 
 // machineStatus words a stored machine. This engine's own machine is online
 // because it runs the engine; a remote machine shows what its last probe found.
+// A probe that answers but needs attention reports a degraded health, which
+// maps to MachineDegraded with the reason the probe names.
 func machineStatus(m machines.Machine) MachineStatus {
 	switch {
 	case !m.Enabled:

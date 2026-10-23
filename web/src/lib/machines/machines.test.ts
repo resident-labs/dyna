@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { computersText, loadText, machinesSub, memoryPct, roleLabel, runtimeText, statusText, summaryText, systemText, versionText } from './machines.ts'
+import { computersText, loadText, machinesSub, memoryPct, reasonText, roleLabel, runtimeText, statusText, summaryText, systemText, versionText } from './machines.ts'
 import type { MachineCapabilities, MachineRole, MachineSummary } from '../api/machine.ts'
 
 const machine = (over: Partial<MachineSummary> = {}): MachineSummary => ({
@@ -24,18 +24,24 @@ test('a CI machine shows its slots, and its use once the CI work reports it', ()
 test('the header counts machines by status and leaves out what is zero', () => {
   const list = [
     machine(),
+    machine({ id: 'm_5', status: 'degraded' }),
     machine({ id: 'm_2', status: 'disabled' }),
     machine({ id: 'm_3', local: false, status: 'offline' }),
     machine({ id: 'm_4', local: false, status: 'unknown' }),
   ]
-  assert.equal(machinesSub(list), '1 online · 1 disabled · 1 offline · 1 not probed')
+  assert.equal(machinesSub(list), '1 online · 1 degraded · 1 disabled · 1 offline · 1 not probed')
   assert.equal(machinesSub([machine(), machine({ id: 'm_2' })]), '2 online')
   assert.equal(machinesSub([]), 'No machines yet')
   assert.equal(machinesSub(null), '', 'a list that has not loaded yet has no subline')
 })
 
 test('status words separate a switched off machine from one that is not probed', () => {
-  assert.deepEqual(['online', 'disabled', 'offline', 'unknown'].map((s) => statusText(s as MachineSummary['status'])), ['Online', 'Disabled', 'Offline', 'Not probed'])
+  assert.deepEqual(['online', 'degraded', 'disabled', 'offline', 'unknown'].map((s) => statusText(s as MachineSummary['status'])), ['Online', 'Degraded', 'Disabled', 'Offline', 'Not probed'])
+})
+
+test('a degraded machine says why in a designed line', () => {
+  assert.equal(reasonText('low-disk'), 'Low disk space. The machine still works, but it needs free space soon.')
+  assert.equal(reasonText(undefined), 'The machine still works, but it needs attention.', 'an unknown reason still reads as a sentence')
 })
 
 test('role chips name CI in capitals and other roles as they are', () => {
