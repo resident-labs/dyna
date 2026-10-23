@@ -73,7 +73,11 @@ func normalizeRetainedUsage(conn *sql.Conn, _ int) error {
 			return fmt.Errorf("normalize usage %s/%d: %w", row.id, row.n, err)
 		}
 		if !bytes.Equal(raw, row.raw) {
-			if _, err := saveTurnConn(ctx, conn, row.id, row.n, raw); err != nil {
+			resolved, err := resolveRowPrompts(ctx, conn, row.id, row.n, raw)
+			if err != nil {
+				return err
+			}
+			if _, err := saveTurnConn(ctx, conn, row.id, row.n, resolved); err != nil {
 				return err
 			}
 		}

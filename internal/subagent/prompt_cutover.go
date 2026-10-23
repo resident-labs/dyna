@@ -34,8 +34,8 @@ type promptCutoverProbes struct {
 
 // preflightPromptCutover checks whether known writers can use format 3.
 // It assumes old external CLI writers are quiescent. Inspection cannot stop
-// another old-format process from starting afterward. P2022c must call this
-// before activating format 3; this port does not activate the guard.
+// another old-format process from starting afterward. turnsDB calls this
+// before changing the turn store to format 3.
 func preflightPromptCutover(db *sql.DB, sessions string) error {
 	launches, err := callerid.OpenStore(filepath.Dir(sessions))
 	if err != nil {

@@ -77,8 +77,14 @@ func (s *Store) migrateTurnCutoffs() error {
 	}
 	return database.Migrate(db, "subagent.turns.cutoff", 1, func(conn *sql.Conn, _ int) error {
 		for _, c := range pending {
+			// Re-read inside the writer so prompt references and text belong
+			// to the row being patched, including any concurrent update.
+			raw, _, err := resolvedTurn(ctx, conn, c.id, c.n)
+			if err != nil {
+				return err
+			}
 			var normalized []byte
-			if err := conn.QueryRowContext(ctx, "SELECT json_set(CAST(? AS TEXT),'$.inputCutoff',?)", c.raw, c.cutoff).Scan(&normalized); err != nil {
+			if err := conn.QueryRowContext(ctx, "SELECT json_set(CAST(? AS TEXT),'$.inputCutoff',?)", raw, c.cutoff).Scan(&normalized); err != nil {
 				return err
 			}
 			if _, err := saveTurnConn(ctx, conn, c.id, c.n, normalized); err != nil {
