@@ -10,6 +10,7 @@
   import { postedTo } from './dm.ts'
   import { speaker } from '../ui/posts.ts'
   import { postParts } from '../ui/postParts.ts'
+  import { postPreview } from '../ui/preview.ts'
   import type { Attachment, Member, Room } from '../api/room.ts'
   import type { PostSelection } from '../ui/postSelect.ts'
   import type { MessageRow, Receipt, ThreadPost } from './dm.ts'
@@ -53,6 +54,17 @@
     })
   })
   let typed = $derived(postParts({ text: row.text, attachments: row.post?.attachments }))
+  // Long agent messages fold like the room feed does. A person's own words
+  // stay whole.
+  let preview = $derived(postPreview(typed.text))
+  let expanded = $state(false)
+  let expandedFor = $state('')
+  // A row that takes over this instance starts folded again.
+  $effect(() => {
+    if (expandedFor === row.key) return
+    expandedFor = row.key
+    expanded = false
+  })
 </script>
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_tabindex -->
 <article class="message" class:post={actionable} class:cont={row.cont} class:selected={!!post && selection.get() === post.id} class:enter tabindex={actionable ? 0 : undefined} data-select-id={post?.id} {...(post && actionable ? postHandlers(selection, post.id) : {})}>
@@ -63,7 +75,12 @@
   <div class="body">
     {#if !row.cont}<div class="head"><span class="from hue-{hue}" class:owner>{name}</span>{@render when(stamp(row.ts))}{#if row.post && !delivery && !inThread && !row.ownerAttachments && sentTo}<span class="tag posted">posted to {sentTo}</span>{/if}</div>{/if}
     {#if row.folded}<details class="folded"><summary>Turn result (same as the post above)</summary><div class="prose">{@html markdown(typed.text)}</div></details>
-    {:else if typed.text}<div class="prose">{@html markdown(typed.text)}</div>{/if}
+    {:else if typed.text && row.human}<div class="prose">{@html markdown(typed.text)}</div>
+    {:else if typed.text}
+      {@const shown = expanded ? typed.text : preview.text}
+      <div id={"dm-" + row.key} class="prose">{@html markdown(shown)}</div>
+      {#if preview.truncated}<button class="more" aria-expanded={expanded} aria-controls={"dm-" + row.key} onclick={() => (expanded = !expanded)}>{expanded ? 'Show less' : 'Show more'}</button>{/if}
+    {/if}
     {#if row.post?.forward}<ForwardQuote {room} post={row.post.forward} {onpost} {onopenfile} />{/if}
     <PostFiles roomId={room.id} post={{ id: row.post?.id, text: row.text, attachments: row.post?.attachments, references: row.post?.references }} onopen={onopenfile} />
     {@render receipt()}
@@ -119,4 +136,6 @@
     .folded summary:hover { color: var(--ink); }
   }
   .folded[open] summary { margin-bottom: var(--s1); }
+  .more { color: var(--iris); font-size: var(--t-sm); margin-top: var(--s1); }
+  .more:hover { text-decoration: underline; }
 </style>
