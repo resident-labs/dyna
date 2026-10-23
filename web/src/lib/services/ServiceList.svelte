@@ -92,10 +92,15 @@
 <style>
   .list { list-style: none; margin: 0; padding: 0; }
   .row { padding: var(--s2) var(--s2) 9px; border-radius: var(--r-xs); }
+  /* The rows that take pointer hover also carry its shared fast transition. */
+  .row:not(.on) { transition: background-color var(--motion-fast) var(--ease); }
   .row.on { background: var(--select); }
   @media (hover: hover) {
     .row:not(.on):hover { background: var(--hover); }
   }
+  /* The pressed surface is declared after the hover one, so a press wins on a
+     device that also reports hover. */
+  .row:not(.on):active { background: var(--select); }
   .name { display: flex; align-items: baseline; gap: var(--s2); width: 100%; text-align: left; font-size: var(--t-ui); }
   .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
   .dot.live { background: var(--gold); }
