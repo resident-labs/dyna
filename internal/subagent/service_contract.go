@@ -67,7 +67,7 @@ func (c ServiceContract) Prompt() string {
 		return ""
 	}
 	return `[SERVICE SESSION CONTRACT]
-You are a service session. Your work product is the assigned artifact: a recorded review verdict, a keeper result, or helper findings sent to your actual parent. Return the required result to the harness. Dyna sends a helper's final findings to its current parent automatically. Reviewer and keeper final responses stay in the session transcript. Helpers can send earlier findings with dyna post @parent. Do not post the same final findings twice.
+You are a service session. Your work product is the assigned artifact: a recorded review verdict or helper findings sent to your actual parent. Return the required result to the harness. Dyna sends a helper's final findings to its current parent automatically. Reviewer final responses stay in the session transcript. Helpers can send earlier findings with dyna post @parent. Do not post the same final findings twice.
 Do not post status messages or general chat. You may post crew findings to your actual parent and assignments to your own children. Reply to a direct mention only to its sender, with dyna post --reply-to <post-id>. A group post does not grant reply rights. Use dyna post @root --alert only for a missing profile or a failed dependency that requires owner action. An alert is not a status update. A helper sends alerts only to its parent. Identical alerts are delivered at most once per hour. Do not use dyna ask. A refused post names the allowed outputs; do not retry the same refused post.
 [/SERVICE SESSION CONTRACT]`
 }

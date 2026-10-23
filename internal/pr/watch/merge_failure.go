@@ -86,7 +86,7 @@ func (s *Service) mergeSteward() steward.Service {
 	return steward.Service{Sessions: sessions, Root: s.Store.Root, Now: s.Now}
 }
 
-// StewardProfile uses the same picker as the keeper and steward assignment.
+// StewardProfile uses the picker for steward assignments.
 // Off is not a profile: it reports the steward as off without a session manager.
 func (s *Service) StewardProfile(pinned string) (string, string, error) {
 	if pinned == settings.StewardProfileOff {

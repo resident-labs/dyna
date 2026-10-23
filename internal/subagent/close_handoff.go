@@ -92,7 +92,7 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]string, 
 			// Root and the owner take no goals, so a goal that would reach them is
 			// released to the owner instead.
 			if heir.ID == "" || heir.Role == RoleRoot {
-				released, err := m.goalStore().ReleaseHolder(info.RoomID, item.ID, info.ID, m.completedResult(info))
+				released, err := m.goalStore().ReleaseHolder(info.RoomID, item.ID, info.ID)
 				if err != nil {
 					errs = append(errs, err)
 				} else if released {

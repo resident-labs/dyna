@@ -33,41 +33,22 @@ const (
 	StatusUnowned      = "unowned"
 )
 
-// StaleAfter is how long a holder may sit idle with open work and no journal
-// event before the goal reads stuck and earns one nudge (owner-set window).
-const StaleAfter = 6 * time.Hour
-
 // Facts carries what a status needs about the sessions working a goal: one
-// session's busy state, turn health, PRs, and the goal's newest event.
+// session's busy state, turn health, and PRs.
 type Facts struct {
-	Busy        bool
-	LastFailed  bool
-	OpenPR      bool
-	MergedPR    bool
-	LastEventAt time.Time
-}
-
-// freshness is the newest moment the goal's work showed life: its newest
-// journal event, its declared wait deadline, or its creation when none
-// exists yet.
-func freshness(g Goal, f Facts) time.Time {
-	at := g.CreatedAt
-	if f.LastEventAt.After(at) {
-		at = f.LastEventAt
-	}
-	if g.WaitUntil.After(at) {
-		at = g.WaitUntil
-	}
-	return at
+	Busy       bool
+	LastFailed bool
+	OpenPR     bool
+	MergedPR   bool
 }
 
 // ComputeStatus labels a goal from facts, checked in this order: a running
 // turn is on_track (working beats a pending PR, and errored needs nothing
 // running), a failed last turn is errored, a closed checklist or a merged PR
 // with no open items is ready_to_close, an open goal with no holders is
-// unowned, a pending PR is waiting, and an idle holder with open work and no
-// event inside the stale window is stuck. Unassigned open items surface in
-// the reason and counts without making a held goal unowned.
+// unowned, a pending PR is waiting, and other held goals are on_track.
+// Unassigned open items surface in the reason and counts without making a
+// held goal unowned.
 func ComputeStatus(g Goal, items []Item, f Facts, now time.Time) Status {
 	var s Status
 	for _, it := range items {
@@ -107,9 +88,6 @@ func ComputeStatus(g Goal, items []Item, f Facts, now time.Time) Status {
 		s.Label, s.Reason = StatusUnowned, "open goal with no holder"
 	case f.OpenPR:
 		s.Label, s.Reason = StatusWaiting, "PR pending"
-	case now.Sub(freshness(g, f)) > StaleAfter:
-		s.Label = StatusStuck
-		s.Reason = fmt.Sprintf("stale: holder idle with no journal event for %s", now.Sub(freshness(g, f)).Round(time.Minute))
 	case f.MergedPR:
 		s.Reason = fmt.Sprintf("merged PR with %d items still open", s.Open)
 	}
@@ -141,14 +119,6 @@ func ComputeItemStatus(item Item, f Facts, now time.Time) ItemStatus {
 		return ItemStatus{Label: StatusErrored, Reason: "assignee's last turn failed"}
 	case f.OpenPR:
 		return ItemStatus{Label: StatusWaiting, Reason: "assignee has a PR pending"}
-	case now.Sub(f.LastEventAt) > StaleAfter:
-		return ItemStatus{Label: StatusStuck, Reason: fmt.Sprintf("stale: assignee idle with no event for %s", now.Sub(f.LastEventAt).Round(time.Minute))}
 	}
 	return ItemStatus{Label: StatusOnTrack, Reason: ""}
-}
-
-// Stale reports whether a goal's holder is idle with open work and no event
-// inside the stale window: the nudge condition.
-func Stale(s Status, f Facts, now time.Time) bool {
-	return s.Label == StatusStuck
 }

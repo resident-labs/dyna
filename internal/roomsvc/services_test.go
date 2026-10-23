@@ -31,11 +31,11 @@ func TestServicesListAutoProfiles(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("svc")
 	got := servicesByRole(t, e, rec.Name)
-	keeper, reviewer := got["keeper"], got["reviewer"]
+	reviewer := got["reviewer"]
 	if view := got["merge-steward"]; view.Name != "Merge steward" || view.Page != "pull-requests" || view.Scope != "global" {
 		t.Fatalf("steward = %+v", view)
 	}
-	if len(got) != 3 || keeper.Page != "goals" || keeper.Scope != "global" || reviewer.Page != "pull-requests" || reviewer.Scope != "room" {
+	if len(got) != 2 || reviewer.Page != "pull-requests" || reviewer.Scope != "room" {
 		t.Fatalf("services = %+v", got)
 	}
 	for _, view := range got {
@@ -67,21 +67,18 @@ func TestServicesListServiceProfiles(t *testing.T) {
 }
 
 func TestServiceProfilePinAndReset(t *testing.T) {
-	for _, role := range []string{"keeper", "reviewer", "merge-steward"} {
+	for _, role := range []string{"reviewer", "merge-steward"} {
 		t.Run(role, func(t *testing.T) {
 			e := newEnv(t)
 			rec := e.room("svc")
 			readPin := func() string {
 				t.Helper()
-				if role == "keeper" || role == "merge-steward" {
+				if role == "merge-steward" {
 					value, err := settings.Load(settings.DefaultPath())
 					if err != nil {
 						t.Fatal(err)
 					}
-					if role == "merge-steward" {
-						return value.MergeStewardProfile
-					}
-					return value.GoalKeeperProfile
+					return value.MergeStewardProfile
 				}
 				value, err := e.svc.PRs.PRSettings(rec.Name)
 				if err != nil {
@@ -120,7 +117,7 @@ func TestServiceProfilePinAndReset(t *testing.T) {
 }
 
 // The steward accepts one extra pin, off, which routes failed batches to
-// root. The keeper does not: it has no off mode.
+// root.
 func TestServiceProfileOffForStewardOnly(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("svc")
@@ -157,7 +154,7 @@ func TestServicesListKeepsRowsWithBrokenReviewerState(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := servicesByRole(t, e, rec.Name)
-	if len(got) != 3 || got["keeper"].Profile != "mock" || got["reviewer"].Profile != "" || got["reviewer"].Reason == "" {
+	if len(got) != 2 || got["merge-steward"].Profile != "mock" || got["reviewer"].Profile != "" || got["reviewer"].Reason == "" {
 		t.Fatalf("broken reviewer = %+v", got)
 	}
 }
@@ -168,7 +165,7 @@ func TestServicesListKeepsRowsWithBrokenReviewerState(t *testing.T) {
 func TestServiceProfileIsTheOwnersOnly(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("svc-owner")
-	for _, role := range []string{"keeper", subagent.RoleSteward, "reviewer"} {
+	for _, role := range []string{subagent.RoleSteward, "reviewer"} {
 		for who, actor := range map[string]authority.Actor{
 			"the room's root": {Role: authority.Root, Session: "ses_20261020-000000-0000abcd", Room: rec.ID},
 			"a session":       {Role: authority.Session, Session: "ses_20261020-000000-0000ffff", Room: rec.ID},

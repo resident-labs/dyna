@@ -29,20 +29,21 @@ import (
 )
 
 type services struct {
-	devices   *devicesvc.Service
-	files     *filesvc.Service
-	git       *gitsvc.Service
-	rooms     *roomsvc.Service
-	terminals *terminalsvc.Service
-	runtime   *harnessruntime.Runtime
-	accounts  *service.Service
-	config    *configsvc.Service
-	computers *computerweb.Host
-	voice     *voice.Calls
-	hooks     hooks.Service
-	sync      *lanesync.Service
-	health    func() Health
-	load      *sysload.Sampler
+	settingsChanged func()
+	devices         *devicesvc.Service
+	files           *filesvc.Service
+	git             *gitsvc.Service
+	rooms           *roomsvc.Service
+	terminals       *terminalsvc.Service
+	runtime         *harnessruntime.Runtime
+	accounts        *service.Service
+	config          *configsvc.Service
+	computers       *computerweb.Host
+	voice           *voice.Calls
+	hooks           hooks.Service
+	sync            *lanesync.Service
+	health          func() Health
+	load            *sysload.Sampler
 }
 
 // SeatBindings are the root seat calls of dyna root and the web app. Tests
@@ -283,14 +284,12 @@ func bindings(s services) []websvc.Binding {
 		{Name: "MoveGoalItem", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.MoveGoalItem, Local: true},
 		{Name: "EditGoalSelectors", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.EditGoalSelectors, Local: true},
 		{Name: "EditGoalItem", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.EditGoalItem, Local: true},
-		{Name: "WaitGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.WaitGoal, Local: true},
 		{Name: "EditGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.EditGoal},
 		{Name: "FinishGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.FinishGoal},
 		{Name: "ExpediteGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.ExpediteGoal},
 		{Name: "SetPRGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.SetPRGoal},
 		{Name: "SetGoalItemState", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.SetGoalItemState},
 		{Name: "NoteGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.NoteGoal},
-		{Name: "CheckGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.CheckGoal},
 		{Name: "ListEntries", Access: websvc.Read, Scope: websvc.ScopeFiles, Method: s.files.ListEntries},
 		{Name: "ReadFile", Access: websvc.Read, Scope: websvc.ScopeFiles, Method: s.files.ReadFile},
 		{Name: "SyncStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.sync.Status},
@@ -345,7 +344,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "SetDefaultProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.config.SetDefaultProfile},
 		{Name: "SetProfileDisabled", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.config.SetProfileDisabled},
 		{Name: "Settings", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: configsvc.Items},
-		{Name: "SetSetting", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: configsvc.Set},
+		{Name: "SetSetting", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.setSetting},
 		{Name: "UpdateNotice", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.config.UpdateNotice},
 		{Name: "Notices", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Notices},
 		{Name: "DismissNotice", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.DismissNotice},

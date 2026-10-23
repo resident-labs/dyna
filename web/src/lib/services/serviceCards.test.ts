@@ -46,11 +46,11 @@ async function mountPage() {
 test('every service has a row with its profile and cost, and no developer call list', async () => {
   const page = await mountPage()
   try {
-    assert.equal(page.root.querySelectorAll('.svc').length, 7, 'every card shows at once')
+    assert.equal(page.root.querySelectorAll('.svc').length, 6, 'every card shows at once')
     assert.match(page.root.querySelector('.svc')?.textContent ?? '', /loading/i, 'and says loading, not unreadable, before its data arrives')
     await page.settle()
     const names = [...page.root.querySelectorAll('.svc .nm')].map((n) => n.firstChild?.textContent)
-    assert.deepEqual(names, ['PR reviewers', 'Merge queue and trials', 'Conflict radar', 'Goal keeper', 'Librarian', 'Maintenance and retention', 'Voice service'])
+    assert.deepEqual(names, ['PR reviewers', 'Merge queue and trials', 'Conflict radar', 'Librarian', 'Maintenance and retention', 'Voice service'])
     const reviewer = page.root.querySelector('.svc')
     assert.match(reviewer?.textContent ?? '', /opus/)
     assert.match(reviewer?.textContent ?? '', /\$1\.84/)
@@ -83,7 +83,7 @@ test('the service filter hides events of other services', async () => {
     assert.ok(texts().some((t) => t.includes('gave a verdict')))
     const select = page.root.querySelector<HTMLSelectElement>('.filters select')
     assert.ok(select)
-    select.value = 'keeper'
+    select.value = 'agents'
     select.dispatchEvent(new window.Event('change', { bubbles: true }))
     await page.settle()
     assert.ok(!texts().some((t) => t.includes('gave a verdict')))

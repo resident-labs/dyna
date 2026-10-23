@@ -17,7 +17,7 @@ func TestRenameKeepsIdentityAndChecksReservedNames(t *testing.T) {
 	if err != nil || renamed.ID != a.ID || renamed.EffectiveName() != "gamma" || renamed.Turns != a.Turns {
 		t.Fatalf("Rename = %+v, %v", renamed, err)
 	}
-	for _, bad := range []string{"keeper", "library", "bad name", "root"} {
+	for _, bad := range []string{"library", "bad name", "root"} {
 		if _, err := e.m.Rename(context.Background(), a.ID, bad); err == nil {
 			t.Fatalf("name %q was accepted", bad)
 		}

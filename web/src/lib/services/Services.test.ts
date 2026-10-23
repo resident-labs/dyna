@@ -61,7 +61,6 @@ test('the page lists events and current sessions with the live tool line; earlie
     const text = textOf(page.root)
     assert.match(text, /lead\s*started/)
     assert.match(page.root.innerHTML, /class="doing[^"]*long[^"]*"[^>]*>Bash: go test · 45s</)
-    assert.match(text, /keeper|checked in: 1 agent/)
     assert.doesNotMatch(textOf(one(page.root, '.sessions')), /old/)
     one<HTMLButtonElement>(page.root, 'button.earlier').click()
     page.flushSync()

@@ -105,7 +105,7 @@ export function modelRows(byRoleModel: RoleModelRow[]) {
 const ROLES: { label: string; note: string; roles: string[] }[] = [
   { label: 'Subagents', note: 'workers started by agents', roles: ['subagent'] },
   { label: 'Reviewers', note: 'PR review', roles: ['reviewer'] },
-  { label: 'Services', note: 'goal keeper and other services', roles: [] },
+  { label: 'Services', note: 'background services', roles: [] },
   { label: 'Root', note: 'room root sessions', roles: ['root'] },
 ]
 export function roleRows(byRoleModel: RoleModelRow[]) {

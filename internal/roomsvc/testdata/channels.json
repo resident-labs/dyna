@@ -334,58 +334,6 @@
       "views": [
         "voice-call"
       ]
-    },
-    {
-      "name": "keeper nudge to a holder",
-      "post": {
-        "from": "goal-keeper",
-        "to": [
-          "repo:lead"
-        ],
-        "kind": "goal"
-      },
-      "views": [
-        "dm"
-      ]
-    },
-    {
-      "name": "keeper escalation to root",
-      "post": {
-        "from": "goal-keeper",
-        "to": [
-          "repo:root"
-        ],
-        "kind": "goal"
-      },
-      "views": [
-        "dm"
-      ]
-    },
-    {
-      "name": "keeper failed-pass alert to root",
-      "post": {
-        "from": "goal-keeper",
-        "to": [
-          "repo:root"
-        ],
-        "kind": "goal"
-      },
-      "views": [
-        "dm"
-      ]
-    },
-    {
-      "name": "quiet keeper journal entry to the owner",
-      "post": {
-        "from": "goal-keeper",
-        "to": [
-          "repo"
-        ],
-        "kind": "goal"
-      },
-      "views": [
-        "dm"
-      ]
     }
   ]
 }

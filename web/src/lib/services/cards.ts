@@ -9,7 +9,6 @@ export interface ReviewerInfo { enabled: boolean; profile: string; lastError: st
 export interface QueueRow { state: string }
 export interface HistoryRow { kind: string; outcome: string; at: string; changes: number; detail: string }
 export interface ChangeRow { reviewAt?: string; overlaps?: number }
-export interface JournalRow { at: string }
 export interface UsageRow { role: string; usd: number | null; incomplete: boolean } // incomplete: some turns have no price, so usd is a lower bound
 export interface MemberRow { role?: string; state?: string; closed?: boolean }
 
@@ -22,8 +21,6 @@ export interface ServiceInputs {
   history: HistoryRow[] | null
   changes: ChangeRow[]
   journal: { at: string }[]
-  // checkins is the entry journal: the keeper's own passes, newest first.
-  checkins: JournalRow[]
   settings: Record<string, string> | null // null when the caller may not read settings
   usage: UsageRow[] | null
   voice: string | null // 'idle', 'live' or 'unavailable: why'; null when it cannot be read
@@ -114,20 +111,6 @@ export function buildCards(i: ServiceInputs): Card[] {
     id: 'radar', name: 'Conflict radar', tone: 'on', status: 'on',
     line: clashes ? `${clashes} open ${clashes === 1 ? 'change overlaps' : 'changes overlap'} another` : 'No clashes',
     profile: '', last: '', next: { text: 'on each push' }, cost: unknown, controls: [],
-  })
-
-  const keeper = svc('keeper')
-  const keeperLive = i.members.some((m) => m.role === 'keeper' && !m.closed && m.state === 'live')
-  // Only the keeper's own passes move this clock; holder notes and item events must not.
-  const check = i.checkins[0]?.at ?? ''
-  push('services', {
-    id: 'keeper', name: 'Goal keeper', tone: keeperLive ? 'running' : 'on', status: keeperLive ? 'running' : 'on',
-    line: keeperLive ? 'Writing the digest' : 'Idle between digests',
-    profile: keeper?.profile ?? '', last: check,
-    // The engine schedules from when a round starts, and the journal is written when replies arrive, so the next run cannot be derived from the journal.
-    next: {},
-    cost: costOf(i.usage, 'keeper'),
-    controls: profileSelect('profile.keeper', keeper),
   })
 
   const libEnabled = !!i.settings && (i.settings['library.enabled'] ?? '[]') !== '[]' && (i.settings['library.enabled'] ?? '') !== ''

@@ -264,7 +264,7 @@ func TestCloseSessionChecksReplacementCandidates(t *testing.T) {
 				} else {
 					writeHolder(t, s, tc.metadata)
 				}
-				if err := s.CloseSession("r", other, parent, map[string]bool{lifecycleHolder: true}, ""); err != nil {
+				if err := s.CloseSession("r", other, parent, map[string]bool{lifecycleHolder: true}); err != nil {
 					t.Fatal(err)
 				}
 				got, err := s.Get("r", g.ID)
@@ -353,7 +353,7 @@ func TestHistoricalGoalHandoverPreservesDormancy(t *testing.T) {
 			}
 			body := `{"id":"` + lifecycleHolder + `","status":"dormant","finished":"2026-10-17T12:00:00Z"}`
 			writeHolder(t, s, body)
-			if err = s.CloseSession("r", "child", lifecycleHolder, map[string]bool{lifecycleHolder: true}, ""); err != nil {
+			if err = s.CloseSession("r", "child", lifecycleHolder, map[string]bool{lifecycleHolder: true}); err != nil {
 				t.Fatal(err)
 			}
 			got, err := s.Get("r", g.ID)

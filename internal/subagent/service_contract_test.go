@@ -9,7 +9,7 @@ import (
 )
 
 func TestServiceContractUsesOneClassification(t *testing.T) {
-	for _, role := range []string{"reviewer", "keeper", ""} {
+	for _, role := range []string{"reviewer", RoleLibrarian, ""} {
 		meta := Meta{Service: true, Role: role, ID: "service", RoomID: "room", ParentSession: "parent"}
 		contract := meta.ServiceContract()
 		if !contract.Active() || !strings.Contains(contract.Prompt(), "Do not post status messages") {
@@ -22,7 +22,7 @@ func TestServiceContractUsesOneClassification(t *testing.T) {
 			t.Fatal("unrelated recipient allowed")
 		}
 	}
-	prompt := (Meta{Service: true, Role: "keeper"}).ServiceContract().Prompt()
+	prompt := (Meta{Service: true, Role: RoleLibrarian}).ServiceContract().Prompt()
 	if strings.Contains(prompt, "blocked goal") || !strings.Contains(prompt, "only for a missing profile or a failed dependency that requires owner action") {
 		t.Fatalf("unexpected root alert policy: %s", prompt)
 	}

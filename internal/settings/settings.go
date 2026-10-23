@@ -58,30 +58,29 @@ const (
 
 // Values are the effective V1 settings. Unknown file keys are kept in Extra.
 type Values struct {
-	PRTrustedBots         []string
-	LocalLaneRepos        []string
-	LibraryEnabled        []string
-	LibraryProfile        string
-	LibraryReadmeMaxLines int
-	LocalCIRemote         string
-	RootProfile           string
-	BrowserPath           string
-	BrowserExtraFlags     string
-	BrowserUseFlagsFile   bool
-	BrowserProfileMode    string
-	BrowserOwnerProfile   string
-	BrowserSaveBack       bool
-	ComputersEnabled      bool
-	GoalKeeperTimeout     time.Duration
-	MergeStewardProfile   string
-	GoalKeeperProfile     string
-	MaxCardBytes          int64
-	MaxFileBytes          int64
-	AutoCheck             bool
-	RunsRetention         time.Duration
-	WorktreesRetention    string
-	WorktreesRoot         string
-	WorktreesMinFreeBytes int64
+	PRTrustedBots          []string
+	LocalLaneRepos         []string
+	LibraryEnabled         []string
+	LibraryProfile         string
+	LibraryReadmeMaxLines  int
+	LocalCIRemote          string
+	RootProfile            string
+	BrowserPath            string
+	BrowserExtraFlags      string
+	BrowserUseFlagsFile    bool
+	BrowserProfileMode     string
+	BrowserOwnerProfile    string
+	BrowserSaveBack        bool
+	ComputersEnabled       bool
+	SessionCheckInInterval time.Duration
+	MergeStewardProfile    string
+	MaxCardBytes           int64
+	MaxFileBytes           int64
+	AutoCheck              bool
+	RunsRetention          time.Duration
+	WorktreesRetention     string
+	WorktreesRoot          string
+	WorktreesMinFreeBytes  int64
 	// SubagentMaxDepth caps subagent-session nesting (top-level sessions are
 	// depth 1).
 	SubagentMaxDepth int
@@ -106,28 +105,28 @@ func DefaultPath() string {
 
 func Defaults() Values {
 	return Values{
-		PRTrustedBots:         []string{"coderabbitai", "copilot-pull-request-reviewer"},
-		LocalCIRemote:         DefaultLocalCIRemote,
-		RootProfile:           "opus",
-		BrowserUseFlagsFile:   true,
-		BrowserProfileMode:    "shared",
-		BrowserOwnerProfile:   "Default",
-		BrowserSaveBack:       true,
-		ComputersEnabled:      true,
-		GoalKeeperTimeout:     5 * time.Minute,
-		LibraryReadmeMaxLines: DefaultLibraryReadmeMaxLines,
-		MaxCardBytes:          DefaultContentBytes,
-		MaxFileBytes:          DefaultContentBytes,
-		AutoCheck:             true,
-		RunsRetention:         14 * 24 * time.Hour,
-		WorktreesRetention:    WorktreesRetentionChanged,
-		WorktreesRoot:         "~/.dyna-worktrees",
-		WorktreesMinFreeBytes: DefaultWorktreesMinFreeBytes,
-		SubagentMaxDepth:      DefaultSubagentMaxDepth,
-		SteeringMaxToolWait:   DefaultSteeringToolWait,
-		VoiceProvider:         "openai",
-		Extra:                 map[string]any{},
-		fromFile:              map[string]bool{},
+		PRTrustedBots:          []string{"coderabbitai", "copilot-pull-request-reviewer"},
+		LocalCIRemote:          DefaultLocalCIRemote,
+		RootProfile:            "opus",
+		BrowserUseFlagsFile:    true,
+		BrowserProfileMode:     "shared",
+		BrowserOwnerProfile:    "Default",
+		BrowserSaveBack:        true,
+		ComputersEnabled:       true,
+		SessionCheckInInterval: 15 * time.Minute,
+		LibraryReadmeMaxLines:  DefaultLibraryReadmeMaxLines,
+		MaxCardBytes:           DefaultContentBytes,
+		MaxFileBytes:           DefaultContentBytes,
+		AutoCheck:              true,
+		RunsRetention:          14 * 24 * time.Hour,
+		WorktreesRetention:     WorktreesRetentionChanged,
+		WorktreesRoot:          "~/.dyna-worktrees",
+		WorktreesMinFreeBytes:  DefaultWorktreesMinFreeBytes,
+		SubagentMaxDepth:       DefaultSubagentMaxDepth,
+		SteeringMaxToolWait:    DefaultSteeringToolWait,
+		VoiceProvider:          "openai",
+		Extra:                  map[string]any{},
+		fromFile:               map[string]bool{},
 	}
 }
 
@@ -226,7 +225,7 @@ func Load(path string) (Values, error) {
 	if err := v.loadMerge(raw); err != nil {
 		return Values{}, err
 	}
-	if err := v.loadGoals(raw); err != nil {
+	if err := v.loadSessions(raw); err != nil {
 		return Values{}, err
 	}
 	if err := v.loadVoice(raw); err != nil {
@@ -414,8 +413,8 @@ func (v *Values) Set(key, value string) error {
 		}
 		v.MergeStewardProfile = value
 		v.fromFile[key] = true
-	case KeyGoalKeeperTimeout, KeyGoalKeeperProfile:
-		return v.setGoal(key, value)
+	case KeySessionCheckInInterval:
+		return v.setSession(key, value)
 	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking:
 		return v.setVoice(key, value)
 	case KeyLibraryEnabled, KeyLibraryProfile, KeyLibraryReadmeMaxLines:
@@ -518,7 +517,7 @@ func (v Values) Save() error {
 	merge := nested(raw, "merge")
 	merge["stewardProfile"] = v.MergeStewardProfile
 	raw["merge"] = merge
-	v.saveGoals(raw)
+	v.saveSessions(raw)
 	v.saveVoice(raw)
 	v.saveLibrary(raw)
 	content := nested(raw, "content")

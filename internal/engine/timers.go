@@ -16,7 +16,7 @@ const (
 	timerCallRing            = "call-ring"
 	timerCallRetry           = "call-retry"
 	timerAccounts            = "accounts"
-	timerGoals               = "goals"
+	timerParentCheckins      = "parent-checkins"
 	timerLaneFetch           = "lane-fetch"
 	timerQuestions           = "questions"
 	timerHooks               = "hooks"

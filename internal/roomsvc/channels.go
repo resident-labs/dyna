@@ -15,8 +15,8 @@ type channelIndex struct {
 	owners    map[string]bool
 }
 
-// DMChannel holds posts that belong only in DM threads, such as the goal
-// keeper's; no channel view shows it.
+// DMChannel holds posts that belong only in direct-message threads;
+// no channel view shows them.
 const DMChannel = "dm"
 
 // VoiceChannel is the channel of the owner's voice call.
@@ -47,10 +47,6 @@ func (c channelIndex) views(post room.Message) []string {
 	// still reads it: the call through its owner DM block, relays as input.
 	if post.Source == room.SourceVoice {
 		return []string{VoiceChannel}
-	}
-	// The goal keeper talks to a goal's holder, or to root, in their DM only.
-	if post.From == room.GoalKeeperSender && post.Kind == "goal" {
-		return []string{DMChannel}
 	}
 	sender, known := c.byAddress[post.From]
 	// Automatic results stay with the sender's peers, despite delivery to root.

@@ -1,4 +1,4 @@
-package goalkeeper
+package goalservice
 
 import (
 	"errors"
