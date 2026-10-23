@@ -1,5 +1,10 @@
 import type { Post } from '../api/room.ts'
 // Dyna notices render as quiet system notes in feeds and DMs.
+//
+// TODO: legacy/shim remove later — the readers below read the free-text
+// instruction and seat notes that posts stored before their families were
+// typed. A typed session note now renders through SessionNoteCard, so nothing
+// new reaches these parsers. Remove them when retained room history ages out.
 import { short } from './format.ts'
 
 // Feed rows and DM notices can carry only part of a stored post.
@@ -35,6 +40,8 @@ export function changeLines(text?: string | null) {
 // fullText is the notice without its standard first line.
 export const fullText = (text?: string | null) => (text || '').replace(HEAD, '').trim()
 
+// isNote reports a stored free-text instruction or seat note.
+// TODO: legacy/shim remove later — see the note at the top of this file.
 export const isNote = (post: NoticePost | null | undefined): post is NoticePost & { kind: 'instructions' | 'seat' } => ['instructions', 'seat'].includes(post?.kind ?? '')
 
 // Notes of one family fold into one row when they follow each other.
@@ -42,6 +49,9 @@ const family = (post: NoticePost | null | undefined) => (post?.kind === 'instruc
 
 // Seat text starts with its display label. Detach retains root input context
 // behind that line; only the written handoff belongs in the expanded panel.
+// noteData reads the label and body of a stored seat note.
+// TODO: legacy/shim remove later — a typed session/seat post carries its label
+// in the payload; see the note at the top of this file.
 export function noteData(post: NoticePost, target?: string): NoteData {
   const note: NoteData = { id: post.id, target, text: post.text, ts: post.ts, attachments: post.attachments }
   if (post.kind === 'seat') {
