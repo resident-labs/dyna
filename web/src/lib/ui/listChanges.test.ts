@@ -12,6 +12,7 @@ import type { WorkflowApi, WorkflowHooks } from '../workflows/workflowData.ts'
 import { mergeListPage } from './listPages.ts'
 import { reloadsUnread } from './unreadReload.ts'
 import { topLevelFunctions } from '../../../test/svelte-source.ts'
+import { installGoals } from '../../../test/appModules.ts'
 import { member } from '../../../test/session-fixtures.ts'
 import type { Member } from '../api/room.ts'
 
@@ -147,7 +148,7 @@ type AppSandbox = AppState & AppFunctions & {
 }
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const functions = topLevelFunctions(source, ['applyListItem', 'applyListPage', 'applyItemEvent', 'handle', 'loadOlderLists', 'trackFetchedGoal', 'refreshFetchedGoal'])
+const functions = topLevelFunctions(source, ['applyListItem', 'applyListPage', 'applyItemEvent', 'handle', 'loadOlderLists'])
 function app(rows: AppRow[]): AppSandbox {
   const c: AppState = {
     mergeVersion: 0, olderLoading: false, roomId: 'room', roomRequest: 1, home: null, fetchedGoal: null, fetchedGoalVersion: 0,
@@ -168,6 +169,11 @@ function app(rows: AppRow[]): AppSandbox {
   }
   vm.createContext(c)
   for (const code of functions.values()) vm.runInContext(code, c)
+  // The room's goals live in lib/app/goals.svelte.ts now; their functions run
+  // here over the same state. The tests count the loads themselves.
+  installGoals(c)
+  c.loadGoals = () => { c.goalFetches++ }
+  c.loadRules = () => {}
   const installed = appFunctions(c)
   const roomData = createRoomData({ members: async () => { c.memberFetches++; return [] }, mentions: async () => [] }, {
     current: () => ({ room: c.roomId, visit: c.roomRequest }),
