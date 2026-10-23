@@ -30,8 +30,8 @@ func TestUpdateUsesStateWriter(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 0 {
-		t.Fatalf("published %v; room watch owns sync events", events)
+	if len(events) != 1 || events[0].Topic != "sync" {
+		t.Fatalf("published %v; want one sync event", events)
 	}
 	// The update uses the shared state writer.
 	if got := state.For(db).Health().Writes; got != 1 {
@@ -42,7 +42,7 @@ func TestUpdateUsesStateWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, err := s.Read()
-	if err != nil || st.Operations["repo"].State != "building" || len(events) != 0 {
+	if err != nil || st.Operations["repo"].State != "building" || len(events) != 1 {
 		t.Fatalf("failed update changed state or published: %+v, %v, %v", st, err, events)
 	}
 	var count int

@@ -26,13 +26,15 @@ func TestPublishStateRoutesPRChanges(t *testing.T) {
 	if events.Rev() != 0 {
 		t.Fatalf("a session write reached the hub (rev %d)", events.Rev())
 	}
-	publish(hub.Event{Topic: "goals", Room: "room_1"})
-	if events.Rev() != 1 {
-		t.Fatalf("hub rev %d after a goals change; want 1", events.Rev())
+	for _, topic := range []string{"goals", "questions", "notices", "sync"} {
+		publish(hub.Event{Topic: topic, Room: "room_1"})
+		if events.Rev() != 0 {
+			t.Fatalf("%s commit bypassed the room watch publisher", topic)
+		}
 	}
 	signals.channels["call-requests"] = make(chan struct{}, 1)
 	publish(hub.Event{Topic: "call-requests", Room: "room_1"})
-	if events.Rev() != 1 {
+	if events.Rev() != 0 {
 		t.Fatal("call-request commit bypassed the room watch publisher")
 	}
 	select {
