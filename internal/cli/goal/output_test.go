@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"dyna-agent/internal/authority"
-	"dyna-agent/internal/goalkeeper"
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/goalservice"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/store/storetest"
@@ -24,7 +24,7 @@ func TestGoalCommandsUseShortOutputAndExplicitJSON(t *testing.T) {
 	mgr := subagent.NewManager()
 	mgr.Store = &subagent.Store{Root: filepath.Join(root, "sessions")}
 	mgr.Rooms = rooms
-	s := goalkeeper.New()
+	s := goalservice.New()
 	s.Store = &goals.Store{Root: filepath.Join(root, "goals")}
 	s.Notify = notify.New(rooms, mgr)
 	actor := authority.Actor{Role: authority.Owner}
@@ -38,7 +38,6 @@ func TestGoalCommandsUseShortOutputAndExplicitJSON(t *testing.T) {
 		{"create", []string{"Ship another task"}, "g2", "active"},
 		{"show", []string{"show", "g1"}, "g1", "active"},
 		{"edit", []string{"edit", "g1", "Ship the revised task"}, "g1", "active"},
-		{"wait", []string{"wait", "g1", "--until", "30m"}, "g1", "active"},
 		{"done", []string{"done", "g1", "Shipped"}, "g1", "done"},
 		{"drop", []string{"drop", "g1", "No longer needed"}, "g1", "dropped"},
 	} {
@@ -57,7 +56,7 @@ func TestGoalCommandsUseShortOutputAndExplicitJSON(t *testing.T) {
 				if _, err := s.Store.Add(rec.ID, "owner", goals.Input{Text: "Ship the task", Shared: true}); err != nil {
 					t.Fatal(err)
 				}
-				cmd := Command(Options{Service: func() *goalkeeper.Service { return s }})
+				cmd := Command(Options{Service: func() *goalservice.Service { return s }})
 				var out bytes.Buffer
 				cmd.SetOut(&out)
 				cmd.SetErr(&out)

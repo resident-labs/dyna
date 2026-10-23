@@ -27,7 +27,7 @@ type ItemMove struct {
 }
 
 // MoveItem moves one open item, or promotes it to a standalone goal when to
-// is "new". Item rows, spawn metadata and the delivery notice commit together.
+// is "new". Item rows and spawn metadata commit together.
 func (s *Store) MoveItem(room, goal, item, by, to string) (ItemMove, error) {
 	var out ItemMove
 	if to == "" {
@@ -100,13 +100,6 @@ func (s *Store) MoveItem(room, goal, item, by, to string) (ItemMove, error) {
 		events = []Event{
 			{Goal: goal, Item: item, By: by, Event: "moved-out", Text: text, At: now},
 			{Goal: out.To.Goal, Item: out.To.Item, By: by, Event: "moved-in", Text: text, At: now},
-		}
-		if it.Assignee != "" {
-			command := fmt.Sprintf("dyna goal item done %s %s", out.To.Goal, out.To.Item)
-			if out.To.Item == "" {
-				command = fmt.Sprintf("dyna goal done %s \"<summary>\"", out.To.Goal)
-			}
-			r.Notices = append(r.Notices, Notice{Kind: "item_moved", ID: fmt.Sprintf("goal_move_%s_%s_%s_%s", goal, item, out.To.Goal, out.To.Item), Room: room, Goal: out.To.Goal, To: it.Assignee, Text: text + " When the work is done, run `" + command + "`."})
 		}
 		return nil
 	}, "room=?", room)

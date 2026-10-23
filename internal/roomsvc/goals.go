@@ -11,15 +11,15 @@ import (
 	"time"
 
 	"dyna-agent/internal/authority"
-	"dyna-agent/internal/goalkeeper"
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/goalservice"
 	"dyna-agent/internal/listchange"
 	"dyna-agent/internal/listpage"
 	"dyna-agent/internal/subagent"
 )
 
-func (s *Service) goalService() *goalkeeper.Service {
-	service := goalkeeper.New()
+func (s *Service) goalService() *goalservice.Service {
+	service := goalservice.New()
 	service.Notify = s.Notify
 	root := s.sessions().Root
 	if root == "" {
@@ -61,7 +61,7 @@ func (s *Service) Goal(roomRef, id string) (goals.Goal, error) {
 	return s.goalService().Store.Get(r.ID, id)
 }
 
-// GoalJournal returns keeper journal entries, newest first. The cursor is
+// GoalJournal returns saved journal entries, newest first. The cursor is
 // the ID of the last returned entry; pass it as before for older entries.
 func (s *Service) GoalJournal(roomRef, before string, limit int) (listpage.Page[goals.JournalEntry], error) {
 	r, err := s.rooms().Resolve(roomRef)
@@ -247,20 +247,6 @@ func (s *Service) ExpediteGoal(ctx context.Context, roomRef, id string, replace 
 		return store.StopExpedite(r.ID)
 	}
 	return store.Expedite(r.ID, id, replace)
-}
-func (s *Service) CheckGoal(ctx context.Context, roomRef, id string) (goals.Goal, error) {
-	r, _, err := s.goalCaller(ctx, roomRef)
-	if err != nil {
-		return goals.Goal{}, err
-	}
-	return s.goalService().Store.Check(r.ID, id)
-}
-func (s *Service) WaitGoal(ctx context.Context, roomRef, id string, until time.Time) (goals.Goal, error) {
-	r, author, err := s.goalCaller(ctx, roomRef)
-	if err != nil {
-		return goals.Goal{}, err
-	}
-	return s.goalService().Store.Wait(r.ID, id, author.ID, until)
 }
 
 // resolveAssignee turns one selector into one session id. An empty selector

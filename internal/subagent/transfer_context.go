@@ -115,7 +115,7 @@ func (m *Manager) packetHeader(meta Meta, t TransferState) string {
 }
 
 // writeOpenWork lists the session's live responsibilities: goals with the
-// keeper's latest journal line and open items, the PRs it authors or reviews,
+// latest saved journal line and open items, the PRs it authors or reviews,
 // open children and open questions. Each section and line is bounded.
 func (m *Manager) writeOpenWork(b *strings.Builder, meta Meta, tracked []links.Link) {
 	if held, err := m.goalStore().OpenHeldBy(meta.RoomID, meta.ID); err == nil && len(held) > 0 {
@@ -194,7 +194,7 @@ func orNone(s string) string {
 	return s
 }
 
-// journalProgress maps each goal to the keeper's newest journal line about
+// journalProgress maps each goal to the newest saved journal line about
 // this session, read from the room's last 20 check-ins.
 func (m *Manager) journalProgress(meta Meta) map[string]string {
 	out := map[string]string{}

@@ -113,15 +113,6 @@ func TestMoveItemTransaction(t *testing.T) {
 			if raw, _ := recordtest.ReadRaw(t, sessions, other); string(raw) != string(otherBefore) {
 				t.Fatal("unrelated assignment changed")
 			}
-			st, _ := s.Read()
-			notices := st.Room("r").Notices
-			if assignee == "" {
-				if len(notices) != 0 {
-					t.Fatalf("unassigned item sent a notice: %+v", notices)
-				}
-			} else if len(notices) != 1 || notices[0].To != assignee || !strings.Contains(notices[0].Text, moved.To.Goal) || !strings.Contains(notices[0].Text, "dyna goal ") || strings.Contains(notices[0].Text, "dropped") {
-				t.Fatalf("placement notice = %+v", notices)
-			}
 			events, err := s.Events("r", "", 0)
 			if err != nil || len(events) != 3 || events[0].Goal != moved.To.Goal || events[1].Goal != "g1" || events[2].Event != "added" {
 				t.Fatalf("history = %+v, %v", events, err)

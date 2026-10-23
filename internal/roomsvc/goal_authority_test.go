@@ -3,7 +3,6 @@ package roomsvc
 import (
 	"context"
 	"testing"
-	"time"
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/sessionlife/recordtest"
@@ -25,10 +24,6 @@ func TestGoalMutationsUseAuthenticatedCaller(t *testing.T) {
 	if err != nil || g.Edits[len(g.Edits)-1].By != id {
 		t.Fatalf("edit = %+v, %v", g, err)
 	}
-	g, err = e.svc.WaitGoal(ctx, r.ID, g.ID, time.Now().Add(time.Hour))
-	if err != nil || g.Edits[len(g.Edits)-1].By != id {
-		t.Fatalf("wait = %+v, %v", g, err)
-	}
 	g, err = e.svc.FinishGoal(ctx, r.ID, g.ID, "Shipped", false)
 	if err != nil || g.Done == nil || g.Done.By != id {
 		t.Fatalf("finish = %+v, %v", g, err)
@@ -36,9 +31,6 @@ func TestGoalMutationsUseAuthenticatedCaller(t *testing.T) {
 	g, err = e.svc.EditGoal(ctx, r.ID, g.ID, "Reopen the goal", []string{id}, false)
 	if err != nil || g.Edits[len(g.Edits)-1].By != id {
 		t.Fatalf("web edit = %+v, %v", g, err)
-	}
-	if _, err := e.svc.CheckGoal(ctx, r.ID, g.ID); err != nil {
-		t.Fatal(err)
 	}
 	it, err := e.svc.AddGoalItem(ctx, r.ID, g.ID, "Promote this work", "")
 	if err != nil {
@@ -66,14 +58,9 @@ func TestGoalMutationsUseAuthenticatedCaller(t *testing.T) {
 			return err
 		},
 		func(ctx context.Context, room string) error {
-			_, err := e.svc.WaitGoal(ctx, room, g.ID, time.Now().Add(time.Hour))
-			return err
-		},
-		func(ctx context.Context, room string) error {
 			_, err := e.svc.FinishGoal(ctx, room, g.ID, "Wrong caller", true)
 			return err
 		},
-		func(ctx context.Context, room string) error { _, err := e.svc.CheckGoal(ctx, room, g.ID); return err },
 		func(ctx context.Context, room string) error {
 			_, err := e.svc.MoveGoalItem(ctx, room, g.ID, it.ID, "new")
 			return err

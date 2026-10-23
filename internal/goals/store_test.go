@@ -54,9 +54,6 @@ func TestStoreLifecycle(t *testing.T) {
 	if _, err := s.Get("other", g.ID); err == nil {
 		t.Fatal("room isolation")
 	}
-	if _, err = s.Check("r", g.ID); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestRestingGoalLoadsAsActive(t *testing.T) {
@@ -121,14 +118,14 @@ func TestConcurrentIDs(t *testing.T) {
 func TestCloseSession(t *testing.T) {
 	s := testStore(t)
 	g, _ := s.Add("r", "setter", Input{Text: "goal", Holders: []string{"holder"}})
-	if err := s.CloseSession("r", "holder", "", map[string]bool{"setter": true}, ""); err != nil {
+	if err := s.CloseSession("r", "holder", "", map[string]bool{"setter": true}); err != nil {
 		t.Fatal(err)
 	}
 	g, _ = s.Get("r", g.ID)
 	if !g.HeldBy("setter") {
 		t.Fatal(g)
 	}
-	if err := s.CloseSession("r", "setter", "parent", map[string]bool{"parent": true}, ""); err != nil {
+	if err := s.CloseSession("r", "setter", "parent", map[string]bool{"parent": true}); err != nil {
 		t.Fatal(err)
 	}
 	g, _ = s.Get("r", g.ID)
@@ -139,7 +136,7 @@ func TestCloseSession(t *testing.T) {
 func TestCloseSessionReturnsAssignedGoalToSetterBeforeHeir(t *testing.T) {
 	s := testStore(t)
 	g, _ := s.Add("r", "setter", Input{Text: "goal", Holders: []string{"absorbed"}})
-	if err := s.CloseSession("r", "absorbed", "kept", map[string]bool{"setter": true, "kept": true}, ""); err != nil {
+	if err := s.CloseSession("r", "absorbed", "kept", map[string]bool{"setter": true, "kept": true}); err != nil {
 		t.Fatal(err)
 	}
 	if g, _ = s.Get("r", g.ID); g.HeldBy("kept") || !g.HeldBy("setter") || g.Setter != "setter" {

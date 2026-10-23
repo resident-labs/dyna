@@ -19,8 +19,6 @@ const (
 const (
 	// RootOwnerDM is the owner's post to an agent, not to the root seat.
 	RootOwnerDM = "owner-dm"
-	// RootGoalJournal is the goal keeper's goal post.
-	RootGoalJournal = "goal-journal"
 	// RootMergeNote is a merge steward's recorded merge decision.
 	RootMergeNote = "merge-note"
 	// RootQuietPost is any other quiet post addressed to the root seat,
@@ -54,8 +52,6 @@ func RootContext(msg Message, roomName string) (RootDecision, string) {
 		return RootQuiet, ""
 	}
 	switch {
-	case msg.From == GoalKeeperSender && msg.Kind == "goal":
-		return RootQuiet, RootGoalJournal
 	case msg.From == roomName+":merge-steward" && msg.Kind == "merge-decision":
 		return RootQuiet, RootMergeNote
 	}
