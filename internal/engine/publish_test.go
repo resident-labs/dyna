@@ -16,7 +16,7 @@ import (
 func TestPublishStateRoutesPRChanges(t *testing.T) {
 	storetest.Isolate(t)
 	events := hub.New(1)
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	publish := publishState(events, roomsvc.New(nil), signals)
 	publish(hub.Event{Topic: prstate.Topic})
 	if events.Rev() != 0 {
@@ -67,7 +67,7 @@ func TestPublishLocalCIRefreshesOnlyRoomsUsingHead(t *testing.T) {
 		events := hub.New(1)
 		stream, _, closeStream := events.Subscribe()
 		defer closeStream()
-		publishState(events, rooms, newWorkerSignals())(hub.Event{Topic: "localci", Key: "result:" + head})
+		publishState(events, rooms, newWorkerSignals(nil))(hub.Event{Topic: "localci", Key: "result:" + head})
 		want := uint64(1)
 		if head == "unrelated" {
 			want = 0
@@ -90,7 +90,7 @@ func TestPublishLocalCIRefreshesOnlyRoomsUsingHead(t *testing.T) {
 func TestPublishMachineChangesWakeOnlyTheRegistryWorkers(t *testing.T) {
 	storetest.Isolate(t)
 	events := hub.New(1)
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	publish := publishState(events, roomsvc.New(nil), signals)
 	drain := func(worker string) bool {
 		select {

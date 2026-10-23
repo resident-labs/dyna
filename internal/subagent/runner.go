@@ -456,11 +456,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		}
 		if len(frames) > 0 {
 			if msgs, end, err := m.rooms().ReadAll(meta.RoomID, from); err == nil {
-				for _, note := range []string{ownerDMNote(meta.Room, msgs), quietRootPosts(meta.Room, msgs)} {
-					if note != "" {
-						frames = append(frames, note)
-					}
-				}
+				frames = append(frames, seatNotes(m.rooms(), meta, msgs)...)
 				from = end
 			}
 		}

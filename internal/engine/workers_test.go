@@ -8,6 +8,7 @@ import (
 	"dyna-agent/internal/subagent"
 	"errors"
 	"os"
+	"path/filepath"
 	"runtime"
 	"sync"
 	"testing"
@@ -15,6 +16,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/configsvc"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/listchange"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
@@ -59,7 +61,7 @@ func TestWorkersStartupStoreEventsSafetyAndDailySweep(t *testing.T) {
 		due = time.Time{}
 		return next, nil
 	}
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	set := clock.timers(ctx)
 	done := make(chan struct{})
 	go func() {
@@ -174,7 +176,7 @@ func TestWorkersCancelledBeforeStartup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	fail := func(context.Context) error { t.Error("cancelled loop ran worker"); return nil }
-	testWorkers(func(string) func(context.Context) error { return fail }).run(ctx, newWorkerSignals(), newFakeClock().timers(ctx), func(string, error) {})
+	testWorkers(func(string) func(context.Context) error { return fail }).run(ctx, newWorkerSignals(nil), newFakeClock().timers(ctx), func(string, error) {})
 }
 
 func TestOneWorkerOwnerPerStore(t *testing.T) {
@@ -190,7 +192,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	run := func(ctx context.Context, owner string) <-chan bool {
 		done := make(chan bool, 1)
 		go func() {
-			owned, err := runOwned(ctx, root, w(owner), newWorkerSignals(), newFakeClock().timers(ctx), report)
+			owned, err := runOwned(ctx, root, w(owner), newWorkerSignals(nil), newFakeClock().timers(ctx), report)
 			if err != nil {
 				t.Error(err)
 			}
@@ -216,7 +218,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	secondCtx, cancelSecond := context.WithCancel(context.Background())
 	secondDone := make(chan bool, 1)
 	go func() {
-		owned, err := runOwned(secondCtx, root, w("second"), newWorkerSignals(), newFakeClock().timers(secondCtx), report)
+		owned, err := runOwned(secondCtx, root, w("second"), newWorkerSignals(nil), newFakeClock().timers(secondCtx), report)
 		if err != nil {
 			t.Error(err)
 		}
@@ -279,7 +281,7 @@ func TestEngineHookWorkerDrainsStartupSpoolOnce(t *testing.T) {
 	t.Cleanup(authority.InEngine())
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	w := engineWorkers(services.rooms, newWorkerSignals(), nil, nil)
+	w := engineWorkers(services.rooms, newWorkerSignals(nil), nil, nil)
 	drain := w.hooks
 	ticks := make(chan struct{}, 4)
 	w.hooks = func(ctx context.Context) (time.Time, error) {
@@ -291,7 +293,7 @@ func TestEngineHookWorkerDrainsStartupSpoolOnce(t *testing.T) {
 	w.sweep, w.sessions = idle, idle
 	idleTimed := func(context.Context) (time.Time, error) { return time.Time{}, nil }
 	w.checkins, w.questions, w.prs = idleTimed, idleTimed, idleTimed
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -329,7 +331,7 @@ func TestEngineHookWorkerDrainsStartupSpoolOnce(t *testing.T) {
 }
 
 func TestSessionSignalsRetainTargetsAcrossPasses(t *testing.T) {
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	post := func(address string) {
 		signals.wake(roomsvc.Event{Kind: "posts", Posts: []roomsvc.Post{{Message: room.Message{Wake: true, To: []string{address}}}}})
 	}
@@ -361,22 +363,42 @@ func TestSessionSignalsRetainTargetsAcrossPasses(t *testing.T) {
 }
 
 func TestSessionSignalsSelectBoundIDsRootAndChangedMember(t *testing.T) {
-	signals := newWorkerSignals()
-	signals.wake(roomsvc.Event{Kind: "posts", RoomID: "work-room", Posts: []roomsvc.Post{
-		{Message: room.Message{Wake: true, To: []string{"work:alias"}, SessionIDs: map[string]string{"work:alias": "exact-session"}}},
-		{Message: room.Message{Wake: true, Human: true, From: "work", To: []string{"work"}}},
-		{Message: room.Message{Wake: false, To: []string{"work:quiet"}}},
-	}})
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	rooms := room.DefaultStore()
+	t.Cleanup(func() {
+		if err := database.Close(filepath.Dir(rooms.Root)); err != nil {
+			t.Error(err)
+		}
+	})
+	rec, err := rooms.Create(room.CreateInput{Name: "work", CreatedBy: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var posts []roomsvc.Post
+	for _, in := range []room.PostInput{
+		{Wake: true, From: "work:lead", To: []string{"work:alias"}, SessionIDs: map[string]string{"work:alias": "exact-session"}, Text: "for the alias"},
+		{Wake: true, Human: true, From: "work", To: []string{"work"}, Text: "owner request"},
+		{Wake: false, From: "work:lead", To: []string{"work:quiet"}, Text: "quiet"},
+	} {
+		msg, err := rooms.Post(rec.ID, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		posts = append(posts, roomsvc.Post{Message: msg})
+	}
+	signals := newWorkerSignals(rooms)
+	signals.wake(roomsvc.Event{Kind: "posts", RoomID: rec.ID, Posts: posts})
 	signals.wake(roomsvc.Event{Kind: "members", Change: &listchange.Change{Op: "upsert", ID: "ses_20261018-120000-abcdef12"}})
 	signals.wake(roomsvc.Event{Kind: "members", Change: &listchange.Change{Op: "delete", ID: "removed-session"}})
 	batch := signals.takeSessions()
-	if len(batch.targets) != 2 || len(batch.roots) != 1 || !batch.roots["work-room"] || !batch.targets["exact-session"] || !batch.targets["ses_20261018-120000-abcdef12"] {
+	if len(batch.targets) != 2 || len(batch.roots) != 1 || !batch.roots[rec.ID] || !batch.targets["exact-session"] || !batch.targets["ses_20261018-120000-abcdef12"] {
 		t.Fatalf("wrong event recipients: %+v", batch)
 	}
 }
 
 func TestSessionSignalsIgnoreCanonicalOwnerRow(t *testing.T) {
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	signals.wake(roomsvc.Event{Kind: "members", Change: &listchange.Change{Op: "upsert", ID: "work"}})
 	select {
 	case <-signals.channels["sessions"]:
@@ -390,7 +412,7 @@ func TestSessionSignalsIgnoreCanonicalOwnerRow(t *testing.T) {
 }
 
 func TestChangesItemEventsUseTheExistingPRWorkerSignal(t *testing.T) {
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	signals.wake(roomsvc.Event{Kind: "changes"})
 	select {
 	case <-signals.channels["prs"]:
@@ -429,7 +451,7 @@ func TestNewInstructionNoteReArmsTheTimer(t *testing.T) {
 		dues = dues[1:]
 		return next, nil
 	}
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	set := clock.timers(ctx)
 	done := make(chan struct{})
 	go func() {
@@ -499,7 +521,7 @@ func TestEngineProfileChangeArmsItsNote(t *testing.T) {
 		due = time.Time{}
 		return next, nil
 	}
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	sessions := subagent.NewManager()
 	wakeInstructionNotes(sessions, signals)
 	config := &configsvc.Service{Sessions: sessions}
@@ -539,7 +561,7 @@ func TestLaneFetchWakesAtItsDueTime(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		w.run(ctx, newWorkerSignals(), set, func(string, error) { t.Error("unexpected worker error") })
+		w.run(ctx, newWorkerSignals(nil), set, func(string, error) { t.Error("unexpected worker error") })
 	}()
 	defer func() { cancel(); <-done }()
 	awaitWorker(t, calls, "fetch")
@@ -568,7 +590,7 @@ func TestQuestionDeliveryRetriesAtItsDueTime(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		w.run(ctx, newWorkerSignals(), set, func(string, error) { t.Error("unexpected worker error") })
+		w.run(ctx, newWorkerSignals(nil), set, func(string, error) { t.Error("unexpected worker error") })
 	}()
 	defer func() { cancel(); <-done }()
 	awaitWorker(t, calls, "questions")
@@ -585,7 +607,7 @@ func TestQuestionDeliveryRetriesAtItsDueTime(t *testing.T) {
 // A safety sweep pass counts what it delivers; an event for the worker
 // before the pass clears the mark, so that pass counts nothing.
 func TestSweepMarkCountsOnlyAPassWithNoEvent(t *testing.T) {
-	signals := newWorkerSignals()
+	signals := newWorkerSignals(nil)
 	signals.sweep("questions")
 	if !signals.takeSweep("questions") || signals.takeSweep("questions") {
 		t.Fatal("a sweep mark must last for one pass")

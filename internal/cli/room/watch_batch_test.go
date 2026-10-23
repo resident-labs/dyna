@@ -7,19 +7,51 @@ import (
 	"testing"
 
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/store/storetest"
 )
 
+// watchFixture is a room with the watch's own seat lookup, so the tests post
+// real posts and the stored delivery rows decide what the monitor holds and
+// delivers.
+func watchFixture(t *testing.T) (watchSeat, func(room.PostInput) room.Message, func(room.Event, ...string) room.Message) {
+	t.Helper()
+	storetest.Isolate(t)
+	st := room.DefaultStore()
+	rec := workRoom(t)
+	seat := func(msg room.Message) (room.DeliveryMode, bool, error) {
+		d, ok, err := st.SeatDelivery(rec.ID, msg.ID)
+		return d.Mode, ok, err
+	}
+	event := func(ev room.Event, to ...string) room.Message {
+		t.Helper()
+		msg, err := st.PostEvent(rec.ID, ev, to...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return msg
+	}
+	return seat, func(in room.PostInput) room.Message {
+		t.Helper()
+		msg, err := st.Post(rec.ID, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return msg
+	}, event
+}
+
 func TestWatchHoldsLoneQuietPostUntilWake(t *testing.T) {
+	seat, post, _ := watchFixture(t)
 	var out bytes.Buffer
-	write := watchWriter(&out, "work", false, false)
-	quiet := room.Message{ID: "quiet", From: "dyna", Kind: "notice", To: []string{"work"}, Text: "Cleanup complete"}
+	write := watchWriter(&out, seat, false, false)
+	quiet := post(room.PostInput{From: "work:lead", Kind: "message", To: []string{"work"}, Text: "Cleanup complete"})
 	if err := write(quiet); err != nil {
 		t.Fatal(err)
 	}
 	if out.Len() != 0 {
 		t.Fatalf("lone quiet post printed before a wake: %s", out.Bytes())
 	}
-	wake := room.Message{Wake: true, ID: "wake", From: "work:lead", Kind: "alert", To: []string{"work"}, Text: "Main is red"}
+	wake := post(room.PostInput{Wake: true, From: "work:lead", Kind: "service-alert", To: []string{"work"}, Text: "Main is red"})
 	if err := write(wake); err != nil {
 		t.Fatal(err)
 	}
@@ -40,12 +72,14 @@ func TestWatchHoldsLoneQuietPostUntilWake(t *testing.T) {
 }
 
 func TestWatchAllKeepsRawQuietPosts(t *testing.T) {
-	for _, msg := range []room.Message{
-		{ID: "quiet", From: "dyna", Kind: "notice", To: []string{"work"}},
-		{ID: "self", From: "work:root", Kind: "completed", To: []string{"work"}},
+	seat, post, _ := watchFixture(t)
+	for _, in := range []room.PostInput{
+		{From: "work:lead", Kind: "message", To: []string{"work"}, Text: "Cleanup complete"},
+		{From: "work:root", Kind: "completed", To: []string{"work"}, Text: "Root history"},
 	} {
+		msg := post(in)
 		var out bytes.Buffer
-		if err := watchWriter(&out, "work", true, false)(msg); err != nil {
+		if err := watchWriter(&out, seat, true, false)(msg); err != nil {
 			t.Fatal(err)
 		}
 		var got room.Message
@@ -58,27 +92,31 @@ func TestWatchAllKeepsRawQuietPosts(t *testing.T) {
 func TestWatchWakeAndOwnerEchoRules(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		msg  room.Message
+		in   room.PostInput
 		want bool
 	}{
-		{"owner request", room.Message{Wake: true, From: "work", Human: true, Kind: "message", To: []string{"work"}}, true},
+		{"owner request", room.PostInput{Wake: true, From: "work", Human: true, Kind: "message", To: []string{"work"}, Text: "Fix it"}, true},
 		// The owner's DM to an agent is quiet context for both roots: the
 		// agent answers it, and root reads what was said with the next wake.
-		{"owner DM to an agent", room.Message{Wake: true, From: "work", Human: true, Kind: "message", Via: []string{"@worker"}, To: []string{"work:worker"}}, false},
-		{"owner failure", room.Message{Wake: true, From: "work:worker", Kind: "failed", OwnerReport: true, To: []string{"work"}}, true},
-		{"own owner action", room.Message{Wake: true, From: "work", Kind: "message", NeedsRoot: true, To: []string{"work"}}, false},
-		{"own owner alert", room.Message{Wake: true, From: "work", Kind: "alert", To: []string{"work"}}, false},
-		{"another recipient", room.Message{Wake: true, From: "work:worker", Kind: "alert", To: []string{"work:other"}}, false},
+		{"owner DM to an agent", room.PostInput{Wake: true, From: "work", Human: true, Kind: "message", Via: []string{"@worker"}, To: []string{"work:worker"}, Text: "Fix it"}, false},
+		{"owner failure", room.PostInput{Wake: true, From: "work:worker", Kind: "failed", OwnerReport: true, To: []string{"work"}, Text: "It failed"}, true},
+		// The owner's own shell and API posts name the room as the sender. Only
+		// the NeedsRoot mark says that one asks the seat to act.
+		{"own owner post that needs root", room.PostInput{Wake: true, From: "work", Kind: "message", NeedsRoot: true, To: []string{"work"}, Text: "Choose the merge order"}, true},
+		{"own owner post without a mark", room.PostInput{Wake: true, From: "work", Kind: "message", To: []string{"work"}, Text: "Paused the queue"}, false},
+		{"own owner alert", room.PostInput{Wake: true, From: "work", Kind: "service-alert", To: []string{"work"}, Text: "Main is red"}, false},
+		{"another recipient", room.PostInput{Wake: true, From: "work:worker", Kind: "service-alert", To: []string{"work:other"}, Text: "Main is red"}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			seat, post, _ := watchFixture(t)
 			var out bytes.Buffer
-			write := watchWriter(&out, "work", false, false)
-			quiet := room.Message{ID: "quiet", From: "dyna", Kind: "notice", To: []string{"work"}}
+			write := watchWriter(&out, seat, false, false)
+			quiet := post(room.PostInput{From: "work:lead", Kind: "message", To: []string{"work"}, Text: "Cleanup complete"})
 			if err := write(quiet); err != nil {
 				t.Fatal(err)
 			}
-			tc.msg.ID = "next"
-			if err := write(tc.msg); err != nil {
+			msg := post(tc.in)
+			if err := write(msg); err != nil {
 				t.Fatal(err)
 			}
 			if !tc.want {
@@ -88,7 +126,7 @@ func TestWatchWakeAndOwnerEchoRules(t *testing.T) {
 				return
 			}
 			var got watchDelivery
-			if err := json.Unmarshal(out.Bytes(), &got); err != nil || !reflect.DeepEqual(got.Posts, []room.Message{quiet, tc.msg}) {
+			if err := json.Unmarshal(out.Bytes(), &got); err != nil || !reflect.DeepEqual(got.Posts, []room.Message{quiet, msg}) {
 				t.Fatalf("root wake delivery = %s, %v", out.Bytes(), err)
 			}
 		})
@@ -96,14 +134,15 @@ func TestWatchWakeAndOwnerEchoRules(t *testing.T) {
 }
 
 func TestWatchHoldsQuietContextThroughRootSelfPosts(t *testing.T) {
+	seat, post, _ := watchFixture(t)
 	var out bytes.Buffer
-	write := watchWriter(&out, "work", false, false)
-	quiet := room.Message{ID: "quiet", From: "work:lead", Kind: "notice", To: []string{"work"}, Text: "Keep the queue paused"}
+	write := watchWriter(&out, seat, false, false)
+	quiet := post(room.PostInput{From: "work:lead", Kind: "message", To: []string{"work"}, Text: "Keep the queue paused"})
 	if err := write(quiet); err != nil {
 		t.Fatal(err)
 	}
 	for _, kind := range []string{"message", "completed", "failed"} {
-		self := room.Message{ID: "self-" + kind, From: "work:root", Kind: kind, To: []string{"work"}, Text: "Root history"}
+		self := post(room.PostInput{From: "work:root", Kind: kind, To: []string{"work"}, Text: "Root history"})
 		if err := write(self); err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +150,7 @@ func TestWatchHoldsQuietContextThroughRootSelfPosts(t *testing.T) {
 			t.Errorf("root self-post flushed held context: %s", out.Bytes())
 		}
 	}
-	alert := room.Message{Wake: true, ID: "alert", From: "work:lead", Kind: "alert", To: []string{"work"}, Text: "Main is red"}
+	alert := post(room.PostInput{Wake: true, From: "work:lead", Kind: "service-alert", To: []string{"work"}, Text: "Main is red"})
 	if err := write(alert); err != nil {
 		t.Fatal(err)
 	}
@@ -125,13 +164,14 @@ func TestWatchHoldsQuietContextThroughRootSelfPosts(t *testing.T) {
 // the held context as one block. Its shape must stay in sync with the notice
 // rootFlush.fire posts (internal/engine/rootflush.go).
 func TestWatchTimedFlushNoticeDeliversHeldContext(t *testing.T) {
+	seat, post, event := watchFixture(t)
 	var out bytes.Buffer
-	write := watchWriter(&out, "work", false, false)
-	quiet := room.Message{ID: "quiet", From: "work:lead", Kind: "notice", To: []string{"work"}, Text: "Keep the queue paused"}
+	write := watchWriter(&out, seat, false, false)
+	quiet := post(room.PostInput{From: "work:lead", Kind: "message", To: []string{"work"}, Text: "Keep the queue paused"})
 	if err := write(quiet); err != nil {
 		t.Fatal(err)
 	}
-	flush := room.Message{ID: "flush", Wake: true, NeedsRoot: true, From: "dyna", Kind: "notice", To: []string{"work"}, Text: "[TIMED FLUSH] No post woke the root seat for 15 minutes."}
+	flush := event(room.EngineEvent{Minutes: 15}, "work")
 	if err := write(flush); err != nil {
 		t.Fatal(err)
 	}
@@ -142,10 +182,11 @@ func TestWatchTimedFlushNoticeDeliversHeldContext(t *testing.T) {
 }
 
 func TestWatchHoldsPassiveInputUntilWake(t *testing.T) {
+	seat, post, event := watchFixture(t)
 	var out bytes.Buffer
-	write := watchWriter(&out, "work", false, false)
-	quiet := room.Message{ID: "quiet", From: "work:worker", Kind: "issue", To: []string{"work"}, Text: "Repair the test"}
-	passive := room.Message{ID: "passive", From: "dyna", Kind: "instructions", To: []string{"work:root"}, Text: "Updated room rules"}
+	write := watchWriter(&out, seat, false, false)
+	quiet := post(room.PostInput{From: "work:worker", Kind: "message", To: []string{"work"}, Text: "Repair the test"})
+	passive := event(room.SessionEvent{Type: room.SessionInstructions, Session: "work:lead", Detail: "Updated room rules"}, "work:root")
 	for _, msg := range []room.Message{quiet, passive} {
 		if err := write(msg); err != nil {
 			t.Fatal(err)
@@ -154,7 +195,7 @@ func TestWatchHoldsPassiveInputUntilWake(t *testing.T) {
 	if out.Len() != 0 {
 		t.Fatalf("passive input released held context: %s", out.Bytes())
 	}
-	wake := room.Message{ID: "wake", Wake: true, From: "work:worker", Kind: "alert", To: []string{"work"}, Text: "Main is red"}
+	wake := post(room.PostInput{Wake: true, From: "work:worker", Kind: "service-alert", To: []string{"work"}, Text: "Main is red"})
 	if err := write(wake); err != nil {
 		t.Fatal(err)
 	}
