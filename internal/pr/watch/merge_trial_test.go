@@ -844,7 +844,7 @@ func TestFailedBatchNoticeRetriesWithoutRestartingTrials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.MergePauses[f.e.author.RoomID] == "" || st.MergeTrials["github.com/owner/repo"].Phase != "awaiting-root" {
+	if st.MergePauses[f.e.author.RoomID].Reason == "" || st.MergeTrials["github.com/owner/repo"].Phase != "awaiting-root" {
 		t.Fatal("delivery failure lost the pause")
 	}
 	f.e.s.Deliver = deliver

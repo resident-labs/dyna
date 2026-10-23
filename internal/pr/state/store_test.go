@@ -63,7 +63,7 @@ func TestWriteStoresOnlyChangedRows(t *testing.T) {
 		t.Fatalf("one record change stored %d rows", n)
 	}
 	// An index-level change stores no record rows.
-	st.MergePauses = map[string]string{"room": "paused"}
+	st.MergePauses = map[string]MergePause{"room": {Cause: MergePauseCauseManual, Reason: "paused"}}
 	if err := Write(root, st); err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestWriteStoresOnlyChangedRows(t *testing.T) {
 		t.Fatalf("index change stored %d rows", n)
 	}
 	got, err := Read(root)
-	if err != nil || got.Records["github.com/acme/widgets#7"].Title != "changed" || got.MergePauses["room"] != "paused" {
+	if err != nil || got.Records["github.com/acme/widgets#7"].Title != "changed" || got.MergePauses["room"].Reason != "paused" {
 		t.Fatalf("read back: %v", err)
 	}
 }
@@ -358,7 +358,7 @@ func TestPRImportPreservesRawDocumentsAndCanonicalOwnership(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if st.Records["p"] == nil || st.Records["p"].Number != 7 || st.MergePauses["room"] != "saved" {
+			if st.Records["p"] == nil || st.Records["p"].Number != 7 || st.MergePauses["room"].Reason != "saved" {
 				t.Fatalf("known state: %+v", st)
 			}
 			response := st.Responses["p"]["pull"]

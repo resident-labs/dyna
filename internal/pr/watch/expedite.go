@@ -189,7 +189,7 @@ func (s *Service) prioritizedMergeQueue(ctx context.Context, st State) ([]MergeQ
 		} else if why, err := s.trialRoomHold(ctx, *r); err != nil {
 			return nil, err
 		} else if why != "" {
-			if st.MergePauses[r.RoomID] != "" {
+			if st.MergePauses[r.RoomID].Reason != "" {
 				rows[i].State, rows[i].Reason = "merge-paused", why
 			} else {
 				rows[i].State, rows[i].Reason = "read-only", why
