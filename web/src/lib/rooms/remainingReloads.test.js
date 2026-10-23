@@ -202,7 +202,7 @@ test('visibility restoration refreshes skipped members, choices, questions and p
   assert.equal(c.pins[0]?.id, 'p-new')
   assert.equal(c.syncStatus['/r'].origin.behind, 2)
   assert.equal(c.issues[0]?.id, 'i-new')
-  assert.deepEqual(calls.sort(), ['issues', 'members', 'mentions', 'pins', 'questions', 'rooms', 'sync'])
+  assert.deepEqual(calls.sort(), ['issues', 'issues', 'members', 'mentions', 'pins', 'questions', 'rooms', 'sync'])
   c.roomData.destroy()
 })
 

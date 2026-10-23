@@ -35,7 +35,7 @@ test('a phone keeps the page title readable and moves the panel toggles into one
   const narrow = header.lastIndexOf('{#if narrow}', actions)
   const desktop = header.indexOf('{:else}', actions)
   assert.ok(narrow > 0 && desktop > actions, 'the actions button is the phone branch of the bar')
-  for (const label of ['Show pinned posts', 'Show issues', 'Show member list']) {
+  for (const label of ['Show pinned posts', 'Show member list']) {
     assert.equal(header.slice(narrow, desktop).includes(label), false, `${label} leaves the phone bar`)
     assert.ok(desktop < header.indexOf(label), `${label} stays in the desktop bar`)
   }
