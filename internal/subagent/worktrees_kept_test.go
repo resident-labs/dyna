@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
+	"slices"
 	"testing"
 
 	"dyna-agent/internal/worktrees"
@@ -19,8 +19,8 @@ func TestCleanupNoticeSkipsCleanTreesWithOpenOwner(t *testing.T) {
 		{Path: "/w/gone", Branch: "gone", Action: "removed"},
 		{Path: "/w/dirty", Branch: "dirty", Action: "kept", Dirty: true, DirtyFiles: []string{"a.go"}, Reason: "uncommitted changes or untracked files"},
 	})
-	if len(got) != 1 || !strings.Contains(got[0], "/w/dirty") || !strings.Contains(got[0], "a.go") {
-		t.Fatalf("kept trees = %q", got)
+	if len(got) != 1 || got[0].Path != "/w/dirty" || !slices.Equal(got[0].Dirty, []string{"a.go"}) {
+		t.Fatalf("kept trees = %+v", got)
 	}
 }
 
@@ -33,15 +33,15 @@ func TestCleanupNoticeSkipsTimeoutAndDeferredTrees(t *testing.T) {
 	deferred := []worktrees.Tree{{Path: "/w/late", Action: "kept", Deferred: true, Reason: "cleanup ran out of time; the scheduled cleanup retries it"}}
 	dirty := []worktrees.Tree{{Path: "/w/dirty", Branch: "dirty", Action: "kept", Dirty: true, DirtyFiles: []string{"a.go"}, Reason: "uncommitted changes or untracked files"}}
 	if got := cleanupNotice(timeout, deferred); len(got) != 0 {
-		t.Fatalf("timed-out cleanup notice = %q", got)
+		t.Fatalf("timed-out cleanup notice = %+v", got)
 	}
 	if got := cleanupNotice(canceled, deferred); len(got) != 0 {
-		t.Fatalf("canceled cleanup notice = %q", got)
+		t.Fatalf("canceled cleanup notice = %+v", got)
 	}
-	if got := cleanupNotice(canceled, dirty); len(got) != 1 || !strings.Contains(got[0], "/w/dirty") || !strings.Contains(got[0], "a.go") {
-		t.Fatalf("cancel hid a dirty tree: %q", got)
+	if got := cleanupNotice(canceled, dirty); len(got) != 1 || got[0].Path != "/w/dirty" || !slices.Equal(got[0].Dirty, []string{"a.go"}) {
+		t.Fatalf("cancel hid a dirty tree: %+v", got)
 	}
-	if got := cleanupNotice(errors.New("cannot trust worktree ownership"), nil); len(got) != 1 {
-		t.Fatalf("other cleanup errors must still notify: %q", got)
+	if got := cleanupNotice(errors.New("cannot trust worktree ownership"), nil); len(got) != 1 || got[0].Reason == "" {
+		t.Fatalf("other cleanup errors must still notify: %+v", got)
 	}
 }

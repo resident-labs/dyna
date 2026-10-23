@@ -118,9 +118,12 @@ func TestDeleteRoomRemovesPins(t *testing.T) {
 	}
 }
 
+// Every kind the store accepts can be pinned and replied to. A kind outside
+// the registry is rejected at Post, which TestPostRejectsSealedFamily and the
+// registry tests cover.
 func TestEveryPostKindCanBePinnedAndRepliedTo(t *testing.T) {
 	s, rec, _ := pinFixture(t)
-	for _, kind := range []string{"message", "completed", "failed", "stopped", "pr", "question", "goal", "future-kind"} {
+	for _, kind := range []string{"message", "completed", "failed", "stopped", "pr", "goal", "checkin", "seat"} {
 		t.Run(kind, func(t *testing.T) {
 			post, err := s.Post(rec.ID, PostInput{From: "alpha:lead", To: []string{"alpha"}, Kind: kind, Text: "Stored report"})
 			if err != nil {

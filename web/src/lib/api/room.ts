@@ -1,3 +1,5 @@
+import type { EventPayload } from '../rooms/events.gen.ts'
+
 import type { RunList } from './workflow.ts'
 import type { Reference } from '../rooms/references.ts'
 
@@ -85,6 +87,9 @@ export interface Message {
   sessionIds?: Record<string, string>
   kind?: string
   notice?: PRNotice
+  // payload is the typed JSON of a sealed system event, generated from the Go
+  // registry in events.gen.ts. Read it with an event helper, not by hand.
+  payload?: EventPayload
   human?: boolean
   source?: string
   spoken?: boolean

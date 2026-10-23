@@ -1,0 +1,101 @@
+import test, { after } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { build } from 'esbuild'
+import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
+import { installDom, domNames } from '../prs/prDetailHarness.ts'
+import { need } from '../../../test/need.ts'
+import type { EventPayload } from './events.gen.ts'
+import type { Message } from '../api/room.ts'
+
+// The registry test for the web side: every event in the generated registry
+// has a renderer, every renderer has an event, and each one renders a real
+// card from its typed payload on the feed surface and on the DM surface.
+const rooms = fileURLToPath(new URL('.', import.meta.url))
+const dom = installDom()
+const dir = await mkdtemp(join(process.env.DYNA_SCRATCH ?? tmpdir(), 'dyna-event-renderers-'))
+after(async () => {
+  dom.window.close()
+  await rm(dir, { recursive: true, force: true })
+  for (const name of domNames) Reflect.deleteProperty(globalThis, name)
+})
+
+const built = await build({
+  bundle: true, write: false, format: 'esm', platform: 'node', conditions: ['browser', 'production'], logLevel: 'silent',
+  loader: { '.svg': 'dataurl' },
+  stdin: {
+    contents: `export { default as WorktreeCard } from './WorktreeCard.svelte';
+      export { eventRenderers, eventComponents, eventKey, rendererFor, sealedEvent, worktreeEvent } from './eventRenderers.ts';
+      export { eventSpecs } from './events.gen.ts';
+      export { mount, unmount, flushSync } from 'svelte';`,
+    resolveDir: rooms,
+    loader: 'js',
+  },
+  plugins: [svelteEsbuildPlugin()],
+})
+const app = join(dir, 'events.mjs')
+await writeFile(app, need(built.outputFiles?.[0]).contents)
+const web = await import(pathToFileURL(app).href)
+
+// One typed fixture per registered event. A new event fails the test until it
+// gets a fixture and a card.
+const fixtures: Record<string, EventPayload> = {
+  'worktree/kept': {
+    owner: 'session-1',
+    path: '/home/a/.dyna-worktrees/dyna-4708ae0b/composer-tidy',
+    branch: 'composer-tidy',
+    ahead: 1,
+    dirty: ['notes.md'],
+    reason: 'not-merged',
+    detail: 'HEAD is not merged into origin/main; cleanup kept it',
+  },
+}
+
+function postFor(family: string, type: string, payload: EventPayload): Message {
+  return {
+    id: 'msg_0123456789abcdef', ts: 1, roomId: 'room_1', from: 'dyna', to: ['room_1:owner'], wake: false,
+    kind: family, notice: { kind: type, number: 0, head: '', changeId: '' }, payload, text: '',
+  }
+}
+
+test('every registered event has a renderer and renders on feed and DM', () => {
+  const specs = web.eventSpecs as readonly { family: string; type: string; renderer: string }[]
+  assert.ok(specs.length > 0, 'the event registry is empty')
+  for (const name of Object.keys(web.eventComponents)) {
+    assert.ok(specs.some((spec) => spec.renderer === name), `renderer ${name} has no registered event`)
+  }
+  for (const spec of specs) {
+    const key = web.eventKey(spec.family, spec.type)
+    const Card = web.eventRenderers[key]
+    assert.ok(Card, `${key} has no renderer`)
+    const payload = fixtures[key]
+    assert.ok(payload, `${key} has no test fixture`)
+    const post = postFor(spec.family, spec.type, payload)
+    assert.equal(web.rendererFor(post), Card, `${key} resolves to another renderer`)
+    assert.ok(web.sealedEvent(post), `${key} is not a sealed family in the web registry`)
+    for (const surface of ['feed', 'dm']) {
+      const target = document.createElement('div')
+      document.body.append(target)
+      const mounted = web.mount(Card, { target, props: { post, notice: post.notice, surface } })
+      web.flushSync()
+      const text = (target.textContent ?? '').trim()
+      assert.ok(text.length > 0, `${key} on ${surface} rendered nothing`)
+      assert.doesNotMatch(text, /Unknown event/i, `${key} on ${surface} rendered the unknown row`)
+      assert.ok(text.includes(fixtureTip(payload)), `${key} on ${surface} hid its payload: ${text}`)
+      web.unmount(mounted)
+      target.remove()
+    }
+    // A type with no renderer resolves to nothing, so the feed shows the
+    // unknown event row instead of an empty gap.
+    assert.equal(web.rendererFor({ ...post, notice: { ...post.notice, kind: 'unregistered' } }), undefined)
+  }
+})
+
+// fixtureTip is a value every payload fixture shows, so a card that renders
+// nothing meaningful fails.
+function fixtureTip(payload: EventPayload): string {
+  return payload.detail || payload.reason
+}
