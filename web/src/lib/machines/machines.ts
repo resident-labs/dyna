@@ -111,9 +111,25 @@ export function routeText(machine: Pick<MachineSummary, 'local'> & { ssh: string
 
 const GIB = 2 ** 30
 
-// sizeText words a byte count the way the load card does: "30.5 GiB".
+// SIZES are the units sizeText steps up to once a value reaches them.
+const SIZES = [
+  { unit: 2 ** 40, name: 'TiB' },
+  { unit: 2 ** 50, name: 'PiB' },
+]
+
+// sizeText words a byte count the way the load card does: "30.5 GiB", and the
+// next unit once the value reaches it, as "2.0 TiB". A count below one GiB
+// stays in GiB, because every figure the page shows is at least that large.
 export function sizeText(bytes: number): string {
-  return `${(bytes / GIB).toFixed(1)} GiB`
+  let unit = GIB
+  let name = 'GiB'
+  for (const size of SIZES) {
+    if (bytes >= size.unit) {
+      unit = size.unit
+      name = size.name
+    }
+  }
+  return `${(bytes / unit).toFixed(1)} ${name}`
 }
 
 // versionText words a Dyna version for a dense row. The row already says Dyna,

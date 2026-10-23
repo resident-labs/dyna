@@ -130,7 +130,7 @@ func TestDefaultDisableRemove(t *testing.T) {
 func TestSettingsItemsAndSet(t *testing.T) {
 	isolate(t)
 	items, err := Items()
-	if err != nil || len(items) != 28 {
+	if err != nil || len(items) != 29 {
 		t.Fatalf("Items = %d, %v", len(items), err)
 	}
 	for _, it := range items {
@@ -158,6 +158,18 @@ func TestSettingsItemsAndSet(t *testing.T) {
 	}
 	if _, err := Set(t.Context(), settings.KeySubagentMaxDepth, "0"); err == nil {
 		t.Fatal("depth 0 must fail")
+	}
+	// The CI disk floor is a byte count the page shows, so its item carries the
+	// saved value, the file source and help that names the unit.
+	floor, err := Set(t.Context(), settings.KeyCIDiskFloorGB, "40")
+	if err != nil || floor.Value != 40 || floor.Source != settings.SourceFile || floor.Kind != "int" {
+		t.Fatalf("Set disk floor = %+v, %v", floor, err)
+	}
+	if !strings.Contains(floor.Help, "GiB") {
+		t.Fatalf("disk floor help = %q", floor.Help)
+	}
+	if _, err := Set(t.Context(), settings.KeyCIDiskFloorGB, "-1"); err == nil {
+		t.Fatal("a negative disk floor must fail")
 	}
 }
 

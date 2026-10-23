@@ -48,20 +48,21 @@ const (
 	ReasonLowDisk HealthReason = "low-disk"
 )
 
-// reason explains a degraded health. A reason of a health that is not degraded
-// reads as ReasonNone, so a stored row cannot claim a reason that it has no
-// degraded health for.
+// reason explains a health that can carry a reason: a degraded machine, and an
+// offline machine that was degraded before a probe lost it. Every other health
+// keeps none, so a stored row cannot hold CI with no evidence.
 func (m Machine) reason() HealthReason {
-	if m.Health != HealthDegraded {
+	if m.Health != HealthDegraded && m.Health != HealthOffline {
 		return ReasonNone
 	}
 	return m.HealthReason
 }
 
 // HoldsCI reports whether Dyna starts no CI work on this machine. A machine
-// with too little disk for Dyna's CI work holds it until space is freed.
+// with too little disk for Dyna's CI work holds it until a probe that reaches
+// the machine reads that space came back.
 func (m Machine) HoldsCI() bool {
-	return m.Status() == HealthDegraded && m.reason() == ReasonLowDisk
+	return m.Status() != HealthDisabled && m.reason() == ReasonLowDisk
 }
 
 // Status is the health that the CLI and the clients show. A disabled machine

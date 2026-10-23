@@ -322,6 +322,20 @@
     machineError = ''
     if (narrow) navOpen = true
   }
+  // probeResult words what one probe found as a typed toast. A degraded machine
+  // answered, so it never reads as unreachable: it holds its CI work instead.
+  function probeResult(detail: MachineDetail): ToastInput {
+    if (detail.status === 'degraded') {
+      if (detail.statusReason === 'low-disk') {
+        return { tone: 'error', subject: `${detail.name} is low on disk`, text: 'Dyna starts no CI work here until space is freed.' }
+      }
+      return { tone: 'error', subject: `${detail.name} needs attention`, text: 'Open the machine page to see why.' }
+    }
+    if (detail.status === 'offline' || detail.status === 'unknown') {
+      return { tone: 'error', subject: `${detail.name} did not answer the probe`, text: 'Check the SSH route, then probe again.' }
+    }
+    return { tone: 'success', subject: `Probed ${detail.name}` }
+  }
   // saveMachine writes one setting and shows the machine's next state. A
   // refused change keeps the old values and shows the engine's reason.
   async function saveMachine(patch: MachinePatch) {
