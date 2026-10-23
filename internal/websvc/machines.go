@@ -309,9 +309,11 @@ func ciUsedSlots(runs []MachineCIRun) int {
 	return used
 }
 
-// machineSummary is the row a machine's stored state alone gives.
+// machineSummary is the row a machine's stored state alone gives. A remote
+// machine gets its CPU figure from its last probe, so its list row shows the
+// same one bar as this engine's own row.
 func machineSummary(m machines.Machine) MachineSummary {
-	return MachineSummary{
+	out := MachineSummary{
 		ID:      m.ID,
 		Name:    m.Name,
 		Roles:   m.Roles,
@@ -320,6 +322,11 @@ func machineSummary(m machines.Machine) MachineSummary {
 		Status:  machineStatus(m),
 		CISlots: m.CISlots,
 	}
+	if !m.Local && m.Load.CPUPercent != nil {
+		cpu := int(math.Round(*m.Load.CPUPercent))
+		out.CPU = &cpu
+	}
+	return out
 }
 
 // capabilitiesView words what one probe read for the page.
