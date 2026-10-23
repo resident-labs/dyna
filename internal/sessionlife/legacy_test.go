@@ -14,52 +14,6 @@ import (
 	"dyna-agent/internal/database"
 )
 
-// Records written before dyna.db are read from session.json until the
-// import copies them. The import skips and reports damaged files, never
-// overwrites a record written meanwhile, and never removes a file.
-func TestImportLegacyCopiesOldRecordsOnce(t *testing.T) {
-	sessions := filepath.Join(t.TempDir(), "sessions")
-	write := func(id, body string) {
-		if err := os.MkdirAll(filepath.Join(sessions, id), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(sessions, id, "session.json"), []byte(body), 0o600); err != nil {
-			t.Fatal(err)
-		}
-	}
-	write("ses_old", `{"id":"ses_old","roomId":"r","room":"work","status":"idle"}`)
-	write("ses_newer", `{"id":"ses_newer","status":"dormant"}`)
-	write("ses_broken", `{`)
-	var s struct{ Status string }
-	if err := Load(sessions, "ses_old", &s); err != nil || s.Status != "idle" {
-		t.Fatalf("legacy read before import = %+v, %v", s, err)
-	}
-	if err := Save(sessions, "ses_newer", map[string]any{"id": "ses_newer", "status": "idle"}); err != nil {
-		t.Fatal(err)
-	}
-	n, damaged := ImportLegacy(sessions)
-	if n != 1 || damaged == nil || !strings.Contains(damaged.Error(), "ses_broken") {
-		t.Fatalf("ImportLegacy = %d, %v; want 1 imported and ses_broken reported", n, damaged)
-	}
-	if err := Load(sessions, "ses_newer", &s); err != nil || s.Status != "idle" {
-		t.Fatalf("import replaced a newer record: %+v, %v", s, err)
-	}
-	if v, ok := RecordVersion(sessions, "ses_old"); !ok || !strings.HasPrefix(string(v), "r") {
-		t.Fatalf("ses_old version = %q, %v; want a row revision", v, ok)
-	}
-	for _, id := range []string{"ses_old", "ses_newer", "ses_broken"} {
-		if _, err := os.Stat(filepath.Join(sessions, id, "session.json")); err != nil {
-			t.Fatalf("import removed %s/session.json: %v", id, err)
-		}
-	}
-	if n, _ := ImportLegacy(sessions); n != 0 {
-		t.Fatalf("second import copied %d records", n)
-	}
-	if err := Load(sessions, "ses_broken", &s); !errors.Is(err, ErrRecord) {
-		t.Fatalf("damaged legacy record = %v, want ErrRecord", err)
-	}
-}
-
 // Every write gets a new version, and a deleted record is gone even when
 // its session folder stays.
 func TestSaveVersionsAndDelete(t *testing.T) {

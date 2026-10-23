@@ -384,10 +384,6 @@ func NewID() string {
 }
 
 // Dir returns the session directory, validating the id shape.
-// ImportLegacyRecords copies session.json files written before the record
-// moved into dyna.db. The engine runs it at start; reads of a session that
-// has no record yet fall back to its file until then.
-func (s *Store) ImportLegacyRecords() (int, error) { return sessionlife.ImportLegacy(s.root()) }
 
 // listing is a copy of the store that reads every record version in one
 // query, with the session IDs it found, so a listing checks its cached
