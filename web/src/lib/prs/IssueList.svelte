@@ -12,7 +12,7 @@
   import PRGlyph from './PRGlyph.svelte'
   import { ago } from '../ui/format.ts'
   import { labelStyle, issueChip } from './github.ts'
-  import { issueReference, type IssueReference, type IssueRow as GitHubItem } from './unifiedIssues.ts'
+  import { issueReference, roomIssueLabel, type IssueReference, type IssueRow as GitHubItem } from './unifiedIssues.ts'
   import { location } from '../rooms/issues.ts'
 
   interface Props {
@@ -37,7 +37,7 @@
         <Row selected={!!it.number && it.number === sel} context={g.id === 'closed'} onclick={() => onpick(it)}>
           {#snippet lead()}{#if unresolvedExport}<span role="img" aria-label="Promoted">↗</span>{:else}<PRGlyph kind="issue" {it} />{/if}{/snippet}
           <div class="title">{it.title}</div>
-          <div class="identity">{#if it.number}#{it.number}{:else}{it.local?.id}{/if}{#if it.author?.login} <span>by {it.author.login}</span>{/if}<span>{ago(it.updatedAt)}</span>{#if it.commentCount}<span>{it.commentCount} {it.commentCount === 1 ? 'comment' : 'comments'}</span>{/if}</div>
+          <div class="identity">{#if it.number}#{it.number}{:else if it.local}{roomIssueLabel(it.local)}{/if}{#if it.author?.login} <span>by {it.author.login}</span>{/if}<span>{ago(it.updatedAt)}</span>{#if it.commentCount}<span>{it.commentCount} {it.commentCount === 1 ? 'comment' : 'comments'}</span>{/if}</div>
           <div class="facts">
             <Chip outline>{it.source || 'GitHub'}</Chip>
             {#if it.local && location(it.local)}<span>{location(it.local)}</span>{/if}

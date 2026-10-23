@@ -27,7 +27,7 @@ func TestIssueGoalAndClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	g, err := e.svc.goalService().Store.Get(r.ID, got.GoalID)
-	if err != nil || g.Text != i.Title || !strings.Contains(g.Detail, i.ID) || !strings.Contains(g.Detail, "parser.go:7") || !strings.Contains(g.Detail, "one path") {
+	if err != nil || g.Text != i.Title || !strings.Contains(g.Detail, "Local issue D-1\n") || strings.Contains(g.Detail, i.ID) || !strings.Contains(g.Detail, "parser.go:7") || !strings.Contains(g.Detail, "one path") {
 		t.Fatalf("goal: %+v %v", g, err)
 	}
 	if _, err = e.svc.CloseIssue(t.Context(), r.ID, i.ID, "done"); err == nil {
@@ -94,7 +94,7 @@ esac
 				t.Fatalf("export: %+v %v", got, err)
 			}
 			b, err := os.ReadFile(argsFile)
-			if err != nil || !strings.Contains(string(b), tc.title) || !strings.Contains(string(b), "a.go:3") || !strings.Contains(string(b), "--repo\ngithub.com/test/issues\n") {
+			if err != nil || !strings.Contains(string(b), tc.title) || !strings.Contains(string(b), "Local issue D-1\n") || strings.Contains(string(b), i.ID) || !strings.Contains(string(b), "a.go:3") || !strings.Contains(string(b), "--repo\ngithub.com/test/issues\n") {
 				t.Fatalf("args: %s %v", b, err)
 			}
 		})

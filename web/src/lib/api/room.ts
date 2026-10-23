@@ -322,6 +322,8 @@ export interface Visual {
 // unix milliseconds.
 export interface Issue {
   id: string
+  // number is the room's short issue number, shown as D-12.
+  number: number
   title: string
   file: string
   line: number
