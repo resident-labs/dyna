@@ -1,5 +1,5 @@
-// Package subagent is `dyna subagent`: long-lived, steerable, resumable
-// worker sessions (subagent mode).
+// Package subagent is `dyna session`: long-lived, steerable, resumable worker
+// sessions. `dyna subagent` remains an alias.
 package subagent
 
 import (
@@ -25,18 +25,21 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
-// NewCommand builds `dyna subagent` over the default store.
+// NewCommand builds `dyna session` over the default store.
 func NewCommand() *cobra.Command {
 	return newCommand(func() *subagent.Manager { return notify.Default().Sessions })
 }
 
 func newCommand(newManager func() *subagent.Manager) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "subagent",
-		Short: "Long-lived, steerable worker sessions (subagent mode)",
-		Args:  cobra.NoArgs,
-		RunE:  func(c *cobra.Command, _ []string) error { return c.Help() },
-		Long: `Subagent mode: start a worker session that behaves like a teammate.
+		Use:     "session",
+		Aliases: []string{"subagent"},
+		Short:   "Long-lived, steerable worker sessions (subagent mode)",
+		Args:    cobra.NoArgs,
+		RunE:    func(c *cobra.Command, _ []string) error { return c.Help() },
+		Long: `Manage sessions with ` + "`dyna session`" + `. ` + "`dyna subagent`" + ` is an alias for the same commands.
+
+Session mode: start a worker session that behaves like a teammate.
 
 A session is one harness session that survives across turns. It has no time
 limit, never expires while idle (it stays open until closed), and has no turn

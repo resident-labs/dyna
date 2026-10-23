@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"dyna-agent/internal/authority"
+	cliexport "dyna-agent/internal/cli/export"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/notify"
@@ -636,6 +637,7 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 	}}
 	root.AddCommand(admit, dismiss, held)
 	root.AddCommand(budget, healthCommand(o, roomFor), track, show, list, untrack, transfer, resume, hold, release, require, reviewer, review, verdict, comment, publishing, noise)
+	root.AddCommand(cliexport.NewCommand())
 	return root
 }
 
