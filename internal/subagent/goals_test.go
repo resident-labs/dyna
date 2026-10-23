@@ -119,7 +119,7 @@ func TestStartWithInvalidGoalLeavesNoSession(t *testing.T) {
 
 func (e *testEnv) openGoals(roomID string) []goals.Goal {
 	all, _ := e.m.goalStore().List(roomID)
-	return slices.DeleteFunc(all, func(g goals.Goal) bool { return !g.Open() || g.Service })
+	return slices.DeleteFunc(all, func(g goals.Goal) bool { return !g.Open() })
 }
 
 func TestSpawnGoalUsesEffectiveGoal(t *testing.T) {

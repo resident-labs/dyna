@@ -87,7 +87,7 @@ func (s *Service) nudgeStaleHolders(ctx context.Context, st goals.State, session
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			if !g.Open() || g.Service || len(g.Holders) == 0 || g.WaitUntil.After(now) {
+			if !g.Open() || len(g.Holders) == 0 || g.WaitUntil.After(now) {
 				continue
 			}
 			if !g.NudgedAt.IsZero() && now.Sub(g.NudgedAt) <= goals.StaleAfter {
