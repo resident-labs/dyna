@@ -2,7 +2,6 @@ package subagent
 
 import (
 	"context"
-	"fmt"
 
 	"dyna-agent/internal/room"
 )
@@ -47,7 +46,7 @@ func (m *Manager) Rename(ctx context.Context, ref, name string) (Info, error) {
 	return store.Info(info.ID)
 }
 
-// noteRename tells the parent in one quiet notice. The parent is not woken.
+// noteRename tells the parent in one quiet note. The parent is not woken.
 func (m *Manager) noteRename(meta Meta, newName string) {
 	if meta.ParentSession == "" {
 		return
@@ -56,5 +55,11 @@ func (m *Manager) noteRename(meta Meta, newName string) {
 	if err != nil || !parent.Closed.IsZero() {
 		return
 	}
-	m.rooms().Post(meta.RoomID, room.PostInput{Wake: false, From: "dyna", Kind: "hierarchy", To: []string{parent.Address()}, Text: fmt.Sprintf("renamed %s → %s", meta.EffectiveName(), newName)})
+	// A session can take an old name again, so each rename is its own note.
+	_, _ = m.rooms().PostEventInput(room.PostEventInput{
+		RoomID:  meta.RoomID,
+		Event:   room.SessionEvent{Type: room.SessionRenamed, Session: meta.Address(), OldName: meta.EffectiveName(), Name: newName},
+		FreshID: true,
+		To:      []string{parent.Address()},
+	})
 }

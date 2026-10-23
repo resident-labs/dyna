@@ -253,7 +253,12 @@ func (s *Service) WithdrawQuestion(snd Sender, roomRef, id, reason string) error
 		return err
 	}
 	from := questionSenderAddress(snd, rec.Name)
-	_, err = s.Rooms.Post(rec.ID, room.PostInput{ID: questions.PostID(q.Room, q.ID, "withdrawn"), From: from, Human: snd.Human, Kind: "message", To: questionParticipants(post, from), ReplyTo: q.Post, Text: "[WITHDRAWN " + q.ID + "] " + reason})
+	by := from
+	if snd.Human {
+		by = rec.Name
+	}
+	event := room.QuestionEvent{QuestionID: q.ID, Post: q.Post, By: by, Reason: reason}
+	_, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: event, ID: questions.PostID(q.Room, q.ID, "withdrawn"), To: questionParticipants(post, from), ReplyTo: q.Post})
 	return err
 }
 

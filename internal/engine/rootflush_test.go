@@ -57,14 +57,33 @@ func (e *flushEnv) post(t *testing.T, in room.PostInput) room.Message {
 	return msg
 }
 
+// quiet posts passive engine input: a typed note the root seat reads on its
+// next turn without a wake.
 func (e *flushEnv) quiet(t *testing.T, text string) room.Message {
 	t.Helper()
-	return e.post(t, room.PostInput{Wake: true, From: "work:lead", Kind: "notice", To: []string{"work"}, Text: text})
+	return e.event(t, room.SessionEvent{Type: room.SessionInstructions, Session: "work:lead", Detail: text}, "work")
 }
 
+// wake posts an alert: a typed event that wakes the root seat now.
 func (e *flushEnv) wake(t *testing.T, text string) room.Message {
 	t.Helper()
-	return e.post(t, room.PostInput{Wake: true, From: "work:lead", Kind: "alert", To: []string{"work"}, Text: text})
+	return e.event(t, room.AlertEvent{Source: room.AlertEngine, Summary: text}, "work")
+}
+
+// event stores one typed event with a fresh post ID and reports it to the
+// flusher as a new post, as the room watch does.
+func (e *flushEnv) event(t *testing.T, ev room.Event, to ...string) room.Message {
+	t.Helper()
+	producer := room.EventProducer("")
+	if alert, ok := ev.(room.AlertEvent); ok && alert.Source == room.AlertEngine {
+		producer = room.ProducerEngine
+	}
+	msg, err := e.rooms.PostEventInput(room.PostEventInput{RoomID: e.rec.ID, Event: ev, FreshID: true, Producer: producer, To: to})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.f.events(roomsvc.Event{Kind: "posts", RoomID: e.rec.ID, Posts: []roomsvc.Post{{Message: msg}}})
+	return msg
 }
 
 // timedFlush returns the room's timed-flush notice, if the engine posted one.
@@ -98,7 +117,7 @@ func TestRootFlushDeliversHeldPostsAfterTheQuietPeriod(t *testing.T) {
 	if !ok {
 		t.Fatal("no timed flush after the quiet period")
 	}
-	if !msg.NeedsRoot || !msg.Wake || msg.Kind != "notice" {
+	if !msg.NeedsRoot || !msg.Wake || msg.Kind != "engine" || msg.Notice.Kind != "root-flush" {
 		t.Fatalf("timed flush is not a waking notice: %+v", msg)
 	}
 	if decision, _ := room.RootContext(msg, e.rec.Name); decision != room.RootWake {
@@ -160,7 +179,7 @@ func TestRootFlushRecoversHeldInputAfterARestart(t *testing.T) {
 	}
 	// The new quiet post goes straight to the store: the old flusher gets no
 	// event, so only the restarted flusher's recovery can arm the flush.
-	if _, err := e.rooms.Post(e.rec.ID, room.PostInput{Wake: true, From: "work:lead", Kind: "notice", To: []string{"work"}, Text: "Held after the restart"}); err != nil {
+	if _, err := e.rooms.PostEventInput(room.PostEventInput{RoomID: e.rec.ID, Event: room.SessionEvent{Type: room.SessionInstructions, Session: "work:lead", Detail: "Held after the restart"}, FreshID: true, To: []string{"work"}}); err != nil {
 		t.Fatal(err)
 	}
 	ctx2, cancel2 := context.WithCancel(t.Context())
@@ -213,7 +232,7 @@ func TestRootFlushRecoversQuietInputFromBeforeTheFirstScan(t *testing.T) {
 	t.Cleanup(cancel)
 	_, recovered := startRootFlush(svc, e.clock.timers(ctx))
 	// The quiet post lands before the first scan takes the room's baseline.
-	if _, err := e.rooms.Post(e.rec.ID, room.PostInput{Wake: true, From: "work:lead", Kind: "notice", To: []string{"work"}, Text: "Quiet before the first scan"}); err != nil {
+	if _, err := e.rooms.PostEventInput(room.PostEventInput{RoomID: e.rec.ID, Event: room.SessionEvent{Type: room.SessionInstructions, Session: "work:lead", Detail: "Quiet before the first scan"}, FreshID: true, To: []string{"work"}}); err != nil {
 		t.Fatal(err)
 	}
 	svc.AfterFirstScan()
@@ -232,7 +251,7 @@ func TestRootFlushRecoversQuietInputFromBeforeTheFirstScan(t *testing.T) {
 // Passive engine input is read on the next real turn. It must neither cancel
 // the first quiet post's deadline nor hide that post from recovery.
 func TestRootFlushPreservesDeadlineThroughPassiveInput(t *testing.T) {
-	for _, kind := range []string{"notice", "owner-dm"} {
+	for _, kind := range []string{"engine-note", "owner-dm"} {
 		for _, recover := range []bool{false, true} {
 			name := kind + "/live"
 			if recover {
@@ -240,13 +259,13 @@ func TestRootFlushPreservesDeadlineThroughPassiveInput(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				e := newFlushEnv(t)
-				quiet := room.PostInput{From: "work:agent", Kind: "notice", To: []string{"work"}, Text: "Repair the test"}
 				if kind == "owner-dm" {
-					quiet = room.PostInput{Wake: true, From: "work", Human: true, Kind: "message", To: []string{"work:agent"}, Text: "Repair the test"}
+					e.post(t, room.PostInput{Wake: true, From: "work", Human: true, Kind: "message", To: []string{"work:agent"}, Text: "Repair the test"})
+				} else {
+					e.quiet(t, "Repair the test")
 				}
-				e.post(t, quiet)
 				e.clock.advance(rootFlushQuiet / 2)
-				e.post(t, room.PostInput{From: "dyna", Kind: "instructions", To: []string{"work:root"}, Text: "Updated room rules"})
+				e.quiet(t, "Updated room rules")
 				remaining := rootFlushQuiet / 2
 				if recover {
 					e.f.t.stop(rootFlushKey(e.rec.ID))

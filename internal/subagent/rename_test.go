@@ -65,7 +65,8 @@ func TestRenameAllowsSelfAndParentOnly(t *testing.T) {
 		t.Fatal("no rename notice")
 	}
 	last := notes[len(notes)-1]
-	if last.Text != "renamed kid-self → kid-parent" || len(last.To) != 1 || last.To[0] != lead.Address() || last.Wake {
+	payload, ok := last.Session()
+	if !ok || payload.Type != room.SessionRenamed || payload.OldName != "kid-self" || payload.Name != "kid-parent" || len(last.To) != 1 || last.To[0] != lead.Address() || last.Wake {
 		t.Fatalf("rename notice = %+v", last)
 	}
 	if after, _ := e.m.Store.Info(lead.ID); after.Turns != turnsBefore || after.Status != lead.Status {

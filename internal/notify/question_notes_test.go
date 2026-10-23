@@ -33,7 +33,7 @@ func TestQuestionChangesReachRootAsInstructionNotes(t *testing.T) {
 			t.Fatal("a question change rebuilt root's prompt")
 		}
 		note, err := e.mgr.RoomStore().Message(rec.ID, meta.InstructionsNotes[len(meta.InstructionsNotes)-1])
-		if err != nil || note.Kind != "instructions" || note.Wake || !strings.Contains(note.Text, want) {
+		if err != nil || note.Kind != "session" || note.Notice.Kind != "instructions" || note.Wake || !strings.Contains(note.Text, want) {
 			t.Fatalf("note %+v %v, want %q", note, err, want)
 		}
 	}

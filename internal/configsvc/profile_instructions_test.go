@@ -60,7 +60,7 @@ func TestProfileEditUsesInstructionChangeNotice(t *testing.T) {
 	}
 	notes := []room.Message{}
 	for _, msg := range messages {
-		if msg.Kind == "instructions" {
+		if msg.Kind == "session" && msg.Notice.Kind == "instructions" {
 			notes = append(notes, msg)
 		}
 	}

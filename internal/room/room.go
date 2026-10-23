@@ -272,6 +272,8 @@ func (m Message) Deliverable() bool {
 	if spec, ok := eventSpecFor(m.Kind, m.Notice.Kind); ok {
 		return !spec.Quiet
 	}
+	// TODO: legacy/shim remove later — a post stored before its family was
+	// typed is a notice by its old kind. Remove when retained history ages out.
 	return m.Kind != "notice"
 }
 

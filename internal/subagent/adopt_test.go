@@ -32,6 +32,8 @@ func (e *testEnv) owner() {
 	e.t.Setenv(mode.EnvRoom, e.room.Name)
 }
 
+// hierarchyNotices are the session notes about moves and renames: the typed
+// events that replaced the free-text "hierarchy" kind.
 func hierarchyNotices(t *testing.T, e *testEnv) []room.Message {
 	t.Helper()
 	msgs, err := e.m.rooms().Messages(e.room.ID)
@@ -40,7 +42,7 @@ func hierarchyNotices(t *testing.T, e *testEnv) []room.Message {
 	}
 	var out []room.Message
 	for _, m := range msgs {
-		if m.Kind == "hierarchy" {
+		if m.Kind == "session" && m.Notice.Kind != "instructions" && m.Notice.Kind != "seat" && m.Notice.Kind != "spawned" && m.Notice.Kind != "account" {
 			out = append(out, m)
 		}
 	}

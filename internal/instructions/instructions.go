@@ -60,12 +60,78 @@ func Refresh(frozen Snapshot, newConversation, compacted, transferred bool) bool
 	return frozen.Hash == "" || newConversation || compacted || transferred
 }
 
+// ChangeAction is what happened to one section of the standing instructions.
+type ChangeAction string
+
+// Change actions.
+const (
+	// ChangeItems is a section whose tracked lines changed.
+	ChangeItems ChangeAction = "items"
+	// ChangeBody is a section whose text changed.
+	ChangeBody ChangeAction = "body"
+	// ChangeRemoved is a section that is gone.
+	ChangeRemoved ChangeAction = "removed"
+)
+
+// Change is one section that a note names. It carries the facts, so the note
+// text, an event payload and a web row all read the same change.
+type Change struct {
+	Name   string
+	Action ChangeAction
+	// Added and Removed are the tracked lines the section gained and lost.
+	Added   []string
+	Removed []string
+	// Body is the section's new text, for a whole-text change.
+	Body string
+}
+
 // Note tells the worker how desired differs from the frozen snapshot, one
 // line per changed section, or "" when they match. It goes at the end of the
 // turn prompt and never into the frozen prefix.
 func Note(frozen, desired Snapshot) string {
-	if frozen.Hash == desired.Hash {
+	changes := Changes(frozen, desired)
+	if len(changes) == 0 {
 		return ""
+	}
+	return NoteHeader + "\n" + Lines(changes)
+}
+
+// NoteHeader is the first line of the note. A typed event states it as its
+// one-line summary, so the agent text and the note stay one text.
+const NoteHeader = "[DYNA INSTRUCTIONS CHANGED] Since this conversation started, your standing instructions changed. These changes apply now:"
+
+// Lines renders the changed sections, one line each, without the header.
+func Lines(changes []Change) string {
+	lines := make([]string, 0, len(changes))
+	for _, change := range changes {
+		var parts []string
+		if len(change.Added) > 0 {
+			parts = append(parts, "added "+quoted(change.Added))
+		}
+		if len(change.Removed) > 0 {
+			parts = append(parts, "removed "+quoted(change.Removed))
+		}
+		switch {
+		case change.Action == ChangeRemoved && len(parts) == 0:
+			lines = append(lines, "- "+change.Name+": removed.")
+		case change.Action == ChangeRemoved:
+			lines = append(lines, "- "+change.Name+": "+strings.Join(parts, "; ")+".")
+		case len(parts) == 0:
+			lines = append(lines, "- "+change.Name+": now:\n"+change.Body)
+		case change.Action == ChangeBody:
+			lines = append(lines, "- "+change.Name+": "+strings.Join(parts, "; ")+".\nNew text:\n"+change.Body)
+		default:
+			lines = append(lines, "- "+change.Name+": "+strings.Join(parts, "; ")+".")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// Changes lists the sections that differ between the frozen instructions and
+// the desired ones, in the order the note names them.
+func Changes(frozen, desired Snapshot) []Change {
+	if frozen.Hash == desired.Hash {
+		return nil
 	}
 	find := func(s Snapshot, name string) (Section, bool) {
 		i := slices.IndexFunc(s.Sections, func(sec Section) bool { return sec.Name == name })
@@ -74,7 +140,7 @@ func Note(frozen, desired Snapshot) string {
 		}
 		return s.Sections[i], true
 	}
-	var lines []string
+	var out []Change
 	seen := map[string]bool{}
 	for _, sec := range append(slices.Clone(desired.Sections), frozen.Sections...) {
 		if seen[sec.Name] {
@@ -84,38 +150,56 @@ func Note(frozen, desired Snapshot) string {
 		was, hadIt := find(frozen, sec.Name)
 		now, hasIt := find(desired, sec.Name)
 		switch {
-		case !hasIt && len(was.Items) > 0:
-			lines = append(lines, "- "+sec.Name+": removed "+quoted(was.Items)+".")
 		case !hasIt:
-			lines = append(lines, "- "+sec.Name+": removed.")
+			out = append(out, Change{Name: sec.Name, Action: ChangeRemoved, Removed: was.Items})
 		case hadIt && was.body() == now.body():
 		case len(now.Items) > 0 || len(was.Items) > 0:
 			// A new section's heading is not news; its items are.
 			if hadIt && was.Text != now.Text {
-				lines = append(lines, "- "+sec.Name+": now:\n"+now.body())
+				out = append(out, Change{Name: sec.Name, Action: ChangeBody, Body: now.body()})
 				continue
 			}
-			var parts []string
-			if added := missing(now.Items, was.Items); len(added) > 0 {
-				parts = append(parts, "added "+quoted(added))
-			}
-			if removed := missing(was.Items, now.Items); len(removed) > 0 {
-				parts = append(parts, "removed "+quoted(removed))
-			}
-			lines = append(lines, "- "+sec.Name+": "+strings.Join(parts, "; ")+".")
+			out = append(out, Change{
+				Name:    sec.Name,
+				Action:  ChangeItems,
+				Added:   missing(now.Items, was.Items),
+				Removed: missing(was.Items, now.Items),
+			})
 		case hadIt && paragraphChange(was.Text, now.Text) != "":
-			lines = append(lines, "- "+sec.Name+": "+paragraphChange(was.Text, now.Text))
+			added, removed, body := paragraphChangeParts(was.Text, now.Text)
+			out = append(out, Change{Name: sec.Name, Action: ChangeBody, Added: added, Removed: removed, Body: body})
 		default:
-			lines = append(lines, "- "+sec.Name+": now:\n"+now.body())
+			out = append(out, Change{Name: sec.Name, Action: ChangeBody, Body: now.body()})
 		}
 	}
-	return "[DYNA INSTRUCTIONS CHANGED] Since this conversation started, your standing instructions changed. These changes apply now:\n" + strings.Join(lines, "\n")
+	return out
 }
 
 // paragraphChange names the paragraphs added to and removed from a text
 // section by their first lines, then gives the added paragraphs in full. It
 // returns "" when the paragraphs only moved.
 func paragraphChange(was, now string) string {
+	added, removed, body := paragraphChangeParts(was, now)
+	if len(added) == 0 && len(removed) == 0 {
+		return ""
+	}
+	var parts []string
+	if len(added) > 0 {
+		parts = append(parts, "added "+quoted(added))
+	}
+	if len(removed) > 0 {
+		parts = append(parts, "removed "+quoted(removed))
+	}
+	out := strings.Join(parts, "; ") + "."
+	if len(added) > 0 {
+		out += "\nNew text:\n" + body
+	}
+	return out
+}
+
+// paragraphChangeParts names the paragraphs added and removed by their first
+// lines, and returns the added paragraphs as the new text.
+func paragraphChangeParts(was, now string) (added, removed []string, body string) {
 	paragraphs := func(text string) []string {
 		var out []string
 		for _, p := range strings.Split(text, "\n\n") {
@@ -125,35 +209,28 @@ func paragraphChange(was, now string) string {
 		}
 		return out
 	}
-	added := missing(paragraphs(now), paragraphs(was))
-	removed := missing(paragraphs(was), paragraphs(now))
-	if len(added) == 0 && len(removed) == 0 {
-		return ""
+	newParagraphs, oldParagraphs := paragraphs(now), paragraphs(was)
+	addedText := missing(newParagraphs, oldParagraphs)
+	removedText := missing(oldParagraphs, newParagraphs)
+	if len(addedText) == 0 && len(removedText) == 0 {
+		return nil, nil, ""
 	}
-	firstLines := func(ps []string) []string {
-		out := make([]string, len(ps))
-		for i, p := range ps {
-			line, _, more := strings.Cut(p, "\n")
-			if r := []rune(line); len(r) > 100 {
-				line, more = string(r[:100]), true
-			}
-			if more {
-				line += "…"
-			}
-			out[i] = line
+	return firstLines(addedText), firstLines(removedText), strings.Join(addedText, "\n\n")
+}
+
+// firstLines names each paragraph by its first line, clipped so a long one
+// stays short in the note.
+func firstLines(paragraphs []string) []string {
+	out := make([]string, len(paragraphs))
+	for i, p := range paragraphs {
+		line, _, more := strings.Cut(p, "\n")
+		if r := []rune(line); len(r) > 100 {
+			line, more = string(r[:100]), true
 		}
-		return out
-	}
-	var parts []string
-	if len(added) > 0 {
-		parts = append(parts, "added "+quoted(firstLines(added)))
-	}
-	if len(removed) > 0 {
-		parts = append(parts, "removed "+quoted(firstLines(removed)))
-	}
-	out := strings.Join(parts, "; ") + "."
-	if len(added) > 0 {
-		out += "\nNew text:\n" + strings.Join(added, "\n\n")
+		if more {
+			line += "…"
+		}
+		out[i] = line
 	}
 	return out
 }
