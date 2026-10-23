@@ -2,9 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
+import { stripTypeScriptTypes } from 'node:module'
 import { formatBytes } from '../settings/display.ts'
 
-const source = readFileSync(new URL('./attach.js', import.meta.url), 'utf8').replace(/^import .*\n/gm, '').replaceAll('export ', '')
+const source = stripTypeScriptTypes(readFileSync(new URL('./attach.ts', import.meta.url), 'utf8')).replace(/^import .*\n/gm, '').replaceAll('export ', '')
 test('uploads use current host limits before reading base64, and retain server errors', async () => {
   let limit = 4
   let reads = 0

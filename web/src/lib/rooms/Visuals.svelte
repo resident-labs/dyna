@@ -5,8 +5,8 @@
   import VisualPlaceholder from '../files/VisualPlaceholder.svelte'
   import { fileURL } from '../../api.js'
   import { ago } from '../ui/format.ts'
-  import { checkStatus, filterVisuals } from '../files/visuals.js'
-  import { visuals as store } from '../files/visuals.svelte.js'
+  import { checkStatus, filterVisuals } from '../files/visuals.ts'
+  import { visuals as store } from '../files/visuals.svelte.ts'
   let { roomId, visuals = [], onopen } = $props()
   let filter = $state('all')
   let shown = $derived(filterVisuals(visuals, filter))
