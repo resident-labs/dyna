@@ -51,3 +51,53 @@ export interface GoalJournalEntry {
   entries: GoalJournalLine[] | null
   needsAction: boolean
 }
+
+// GoalItem is goals.Item in internal/goals/items.go.
+export interface GoalItem {
+  id: string
+  text: string
+  state: string
+  updatedAt: string
+  assignee?: string
+}
+
+// GoalStatus is goals.Status in internal/goals/status.go.
+export interface GoalStatus {
+  label: string
+  reason: string
+  done: number
+  open: number
+  dropped: number
+}
+
+// GoalEvent is goals.Event in internal/goals/journal.go. kind is always "event".
+export interface GoalEvent {
+  id: string
+  goal: string
+  by: string
+  kind: string
+  event: string
+  at: string
+  item?: string
+  text?: string
+}
+
+// GoalRule is goals.Rule in internal/goals/rules.go. Its edits reuse GoalEdit,
+// which has the same fields as goals.Edit.
+export interface GoalRule {
+  id: string
+  text: string
+  setter: string
+  setterName: string
+  createdAt: string
+  updatedAt: string
+  edits?: GoalEdit[]
+}
+
+// RulesView is goals.View in internal/goals/rules.go, the result of Rules.
+export interface RulesView {
+  rules: GoalRule[] | null
+  used: number
+  max: number
+  hash: string
+}

@@ -144,3 +144,16 @@ export interface HarnessConfig {
   mcp: ManagedMCP[]
   skills: ManagedSkill[]
 }
+
+// PrivateRuntimeSwitchControl is runtime.PrivateRuntimeSwitchControl: an
+// account switch waiting on running turns.
+export interface PrivateRuntimeSwitchControl {
+  harness: string
+  requestId: string
+  targetAccountId: string
+  phase: string
+  pending: boolean
+  runningTurns: number
+  canCancel: boolean
+  canStop: boolean
+}
