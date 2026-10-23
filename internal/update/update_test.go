@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/database"
 )
 
 type releaseFixture struct {
@@ -90,11 +92,13 @@ func (f *releaseFixture) config(t *testing.T, version string, now func() time.Ti
 	if err := os.WriteFile(target, []byte("#!/bin/sh\necho 'dyna "+version+"'\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	dataDir := t.TempDir()
+	t.Cleanup(func() { database.Close(dataDir) })
 	return Config{
 		Version: version, Repo: DefaultRepo, APIBase: f.server.URL,
 		OS: runtime.GOOS, Arch: runtime.GOARCH, Executable: target,
-		StatePath: filepath.Join(t.TempDir(), "update-check.json"),
-		Client:    f.server.Client(), Now: now,
+		DataDir: dataDir,
+		Client:  f.server.Client(), Now: now,
 	}
 }
 
