@@ -33,14 +33,11 @@ func antigravityACPPromptError(session, stderr string) error {
 	return nil
 }
 
-// finishStderr closes Antigravity before reading diagnostics. Close must join
-// the host's stderr copy, and StderrTail must retain it until Detach.
+// finishStderr reads this attachment's diagnostics without stopping its child.
 func (s *acpSession) finishStderr() string {
-	if !s.exclusive || s.host == nil {
+	if !s.antigravity || s.host == nil {
 		return ""
 	}
-	s.conn.Close()
-	_ = s.host.Close()
 	if local, ok := s.host.(sessionhost.LocalExtension); ok {
 		return local.StderrTail()
 	}

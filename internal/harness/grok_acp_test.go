@@ -829,7 +829,7 @@ func TestGrokAcpConcurrentSessionsUseSeparateStdioChildren(t *testing.T) {
 	}
 }
 
-func TestAntigravityACPUsesSameStdioHostAndClosesOnIdle(t *testing.T) {
+func TestAntigravityACPReusesStdioHostAcrossTurns(t *testing.T) {
 	dir := acpScript(t, map[string]string{"task": "{\"stopReason\":\"end_turn\"}"})
 	p, mark := antigravityACPTestProfile(t, dir)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
@@ -847,13 +847,12 @@ func TestAntigravityACPUsesSameStdioHostAndClosesOnIdle(t *testing.T) {
 		}
 		s.settled = true
 		s.close()
-		assertACPAgentStopped(t, mark)
 	}
 	body, err := os.ReadFile(mark)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for text, want := range map[string]int{"boot ": 2, "initialize 2": 2, "auth oauth-personal": 2, "session/resume fake-session-1": 1, "disabled start_subagent,schedule,run_command": 1, "mode yolo": 2} {
+	for text, want := range map[string]int{"boot ": 1, "initialize 2": 1, "auth oauth-personal": 1, "session/resume fake-session-1": 1, "disabled start_subagent,schedule,run_command": 1, "mode yolo": 2} {
 		if got := strings.Count(string(body), text); got != want {
 			t.Fatalf("%q count=%d, want %d:\n%s", text, got, want, body)
 		}
@@ -903,7 +902,7 @@ func antigravityACPTestProfile(t *testing.T, scriptDir string) (profile.Profile,
 	return p, mark
 }
 
-func TestAntigravityACPDrainsBackendErrorMarkersBeforeSuccess(t *testing.T) {
+func TestAntigravityACPReadsBackendErrorMarkersBeforeSuccess(t *testing.T) {
 	for _, tc := range []struct {
 		name, stderr string
 		wantError    bool
@@ -919,7 +918,7 @@ func TestAntigravityACPDrainsBackendErrorMarkersBeforeSuccess(t *testing.T) {
 			}
 			script := string(first) + "|" + `{"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"answer"}}}|{"stopReason":"end_turn"}`
 			dir := acpScript(t, map[string]string{"task": script})
-			p, mark := antigravityACPTestProfile(t, dir)
+			p, _ := antigravityACPTestProfile(t, dir)
 			declaration := &workeroutput.Declaration{Dialect: workeroutput.DialectAcpJSON}
 			ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 			defer cancel()
@@ -930,7 +929,6 @@ func TestAntigravityACPDrainsBackendErrorMarkersBeforeSuccess(t *testing.T) {
 			if tc.wantError && !IsUsageLimit(result.runErr.Error()) {
 				t.Fatalf("quota classification lost: %v", result.runErr)
 			}
-			assertACPAgentStopped(t, mark)
 		})
 	}
 }
