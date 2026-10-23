@@ -186,7 +186,10 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 		tick := func(name string) func(context.Context) error {
 			return func(context.Context) error { calls <- owner + "-" + name; return nil }
 		}
-		return testWorkers(tick)
+		w := testWorkers(tick)
+		// Only the engine that owns the store settles the previous engine's runs.
+		w.settle = func(context.Context) error { calls <- owner + "-settle"; return nil }
+		return w
 	}
 	report := func(string, error) { t.Error("unexpected worker error") }
 	run := func(ctx context.Context, owner string) <-chan bool {
@@ -213,7 +216,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	first := run(ctx, "first")
-	awaitWorker(t, calls, "first-prs", "first-checkins", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch", "first-probe", "first-caches")
+	awaitWorker(t, calls, "first-settle", "first-prs", "first-checkins", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch", "first-probe", "first-caches")
 	// A second engine on the same store runs no workers at all.
 	secondCtx, cancelSecond := context.WithCancel(context.Background())
 	secondDone := make(chan bool, 1)
@@ -246,7 +249,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	// takes over the store workers.
 	ctx, cancel = context.WithCancel(context.Background())
 	third := run(ctx, "third")
-	awaitWorker(t, calls, "third-prs", "third-checkins", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch", "third-probe", "third-caches")
+	awaitWorker(t, calls, "third-settle", "third-prs", "third-checkins", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch", "third-probe", "third-caches")
 	cancel()
 	stop(third, "third")
 	select {
