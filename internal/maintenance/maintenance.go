@@ -323,6 +323,23 @@ func (s *scheduler) tick(ctx context.Context, now time.Time, low []lowDisk, run 
 // whether a long-closed session must be retained.
 type ClosedSessionRetainer func(context.Context) (retain func(context.Context, string) (bool, error), err error)
 
+// Pass is the scheduled maintenance entry point: one pass of Run with the
+// defaults the engine uses for a timer tick, recorded so
+// `dyna maintenance status` lists it. The built-in maintenance hook calls it.
+// Disk-pressure cleanup stays in the engine's own loop.
+func Pass(ctx context.Context, retain ClosedSessionRetainer, logf func(string, ...any)) (Result, error) {
+	if logf == nil {
+		logf = func(string, ...any) {}
+	}
+	start := time.Now()
+	result, err := Run(ctx, Options{Logf: logf, RetainClosedSession: retain})
+	logf("maintenance: %s", result.Summary())
+	if saveErr := SaveReport(store.DataDir(), start, time.Since(start), result, err); saveErr != nil {
+		logf("maintenance report: %v", saveErr)
+	}
+	return result, err
+}
+
 // Loop checks pressure each minute and runs cleanup at least once per hour.
 // It executes passes serially and stops when the host context is canceled.
 // retainer is passed to each pass as Options.RetainClosedSession.
