@@ -417,7 +417,7 @@ func TestEveryCallHasOneScope(t *testing.T) {
 		{websvc.ScopeFiles, `ListEntries ReadFile SyncFetch SyncRefresh GitExport GitStatus GitLastCommits GitReadFile GitHistory GitBlame GitDiff BrowseInfo BrowseDirs InspectPath`},
 		{websvc.ScopeTerminal, `TermOpen Terms TermAttach TermWrite TermResize TermClose ShellJobs ShellLog ShellLogRange StopShell`},
 		{websvc.ScopeComputers, `Computers Computer ComputerControl`},
-		{websvc.ScopeAdmin, `EnableLibrarian DisableLibrarian TemplateSeed StartRun SetRoomCIBudget SetMergeSettings SetReviewPublishing SetGitHubAccess MergeFixPR MergeControl ResumeMerging SetRoomChangePolicy SetChangePolicyOverride SetReviewerProfile SetReviewEnabled SetServiceProfile ListHooks HookSummary HookRuns HookRepos RunHook TestHook ReconcileHookInstall AddHook EditHook RemoveHook HookRunLog RemovePRNoiseRule SetPRSettings ExportIssue AddRule EditRule RemoveRule Devices RevokeDevice SetDeviceScopes CreatePairing ArchiveRoom UnarchiveRoom RenameRoom DeleteRoom PinRoom UnpinRoom ConfigCheckProfile ConfigProfiles UpsertProfile SetProfileUses SeedProfiles SaveProfile RemoveProfile SetDefaultProfile SetProfileDisabled Settings SetSetting UpdateNotice UpdateDyna DataDir CreateRoom CreateRoomRecord RestartPrivateRuntimeLogin SwitchPrivateRuntimeAccount PrivateRuntimeSwitchState CancelPrivateRuntimeAccountSwitch ConfirmPrivateRuntimeAccountSwitch PreviewPrivateConfig ImportPrivateConfig PrivateRuntimes RefreshPrivateRuntimes RemovePrivateRuntime UninstallPrivateRuntime InstallPrivateRuntime BeginPrivateRuntimeLogin FindPersonalLogin UsePersonalLogin PrivateRuntimeLogins PrivateRuntimeLoginState RespondPrivateRuntimeLogin CancelPrivateRuntimeLogin FinishPrivateRuntimeLogin SetAccountRepos RemovePrivateRuntimeAccount HarnessProviderKeys SetHarnessConfigEnabled SyncCatalogAccount SyncPrivateRuntime ActivatePrivateRuntimeAccount GCPrivateRuntime AddCatalogMCP AddCatalogSkill RemoveCatalogEntry SetCatalogEntryEnabled AddHarnessMCP AddHarnessSkill RemoveHarnessConfig HarnessConfig AccountUsage ProfileModels`},
+		{websvc.ScopeAdmin, `EnableLibrarian DisableLibrarian TemplateSeed StartRun SetRoomCIBudget SetMergeSettings SetReviewPublishing SetGitHubAccess MergeFixPR MergeControl SetMergePaused ResumeMerging SetRoomChangePolicy SetChangePolicyOverride SetReviewerProfile SetReviewEnabled SetServiceProfile ListHooks HookSummary HookRuns HookRepos RunHook TestHook ReconcileHookInstall AddHook EditHook RemoveHook HookRunLog RemovePRNoiseRule SetPRSettings ExportIssue AddRule EditRule RemoveRule Devices RevokeDevice SetDeviceScopes CreatePairing ArchiveRoom UnarchiveRoom RenameRoom DeleteRoom PinRoom UnpinRoom ConfigCheckProfile ConfigProfiles UpsertProfile SetProfileUses SeedProfiles SaveProfile RemoveProfile SetDefaultProfile SetProfileDisabled Settings SetSetting UpdateNotice UpdateDyna DataDir CreateRoom CreateRoomRecord RestartPrivateRuntimeLogin SwitchPrivateRuntimeAccount PrivateRuntimeSwitchState CancelPrivateRuntimeAccountSwitch ConfirmPrivateRuntimeAccountSwitch PreviewPrivateConfig ImportPrivateConfig PrivateRuntimes RefreshPrivateRuntimes RemovePrivateRuntime UninstallPrivateRuntime InstallPrivateRuntime BeginPrivateRuntimeLogin FindPersonalLogin UsePersonalLogin PrivateRuntimeLogins PrivateRuntimeLoginState RespondPrivateRuntimeLogin CancelPrivateRuntimeLogin FinishPrivateRuntimeLogin SetAccountRepos RemovePrivateRuntimeAccount HarnessProviderKeys SetHarnessConfigEnabled SyncCatalogAccount SyncPrivateRuntime ActivatePrivateRuntimeAccount GCPrivateRuntime AddCatalogMCP AddCatalogSkill RemoveCatalogEntry SetCatalogEntryEnabled AddHarnessMCP AddHarnessSkill RemoveHarnessConfig HarnessConfig AccountUsage ProfileModels`},
 	}
 	want := map[string]websvc.Scope{}
 	for _, group := range scopes {
@@ -658,23 +658,27 @@ func TestRequirePRReviewersUsesPRCallerGuard(t *testing.T) {
 }
 
 func TestMergeControlUsesPRCallerGuard(t *testing.T) {
-	var got authority.Actor
-	calls := map[string]websvc.Call{
-		"MergeControl": func(ctx context.Context, _ []json.RawMessage) (any, error) {
-			got = authority.Of(ctx)
-			return nil, nil
-		},
-	}
-	protectPRCalls(calls)
-	// The shared policy refuses unverified callers before merge controls run.
-	ctx := localCallerContext(t, websvc.Caller{Kind: websvc.Unverified}, authority.Actor{Role: authority.Owner})
-	claim := callspec.Claim{Session: "ordinary-session", Room: "work"}
-	ctx = callspec.WithClaim(ctx, claim)
-	if _, err := calls["MergeControl"](ctx, nil); err == nil || !strings.Contains(err.Error(), "could not verify") {
-		t.Fatalf("unverified merge control: %v", err)
-	}
-	want := authority.Actor{}
-	if got != want {
-		t.Fatalf("merge caller = %+v, want %+v", got, want)
+	for _, name := range []string{"MergeControl", "SetMergePaused"} {
+		t.Run(name, func(t *testing.T) {
+			var got authority.Actor
+			calls := map[string]websvc.Call{
+				name: func(ctx context.Context, _ []json.RawMessage) (any, error) {
+					got = authority.Of(ctx)
+					return nil, nil
+				},
+			}
+			protectPRCalls(calls)
+			// The shared policy refuses unverified callers before merge controls run.
+			ctx := localCallerContext(t, websvc.Caller{Kind: websvc.Unverified}, authority.Actor{Role: authority.Owner})
+			claim := callspec.Claim{Session: "ordinary-session", Room: "work"}
+			ctx = callspec.WithClaim(ctx, claim)
+			if _, err := calls[name](ctx, nil); err == nil || !strings.Contains(err.Error(), "could not verify") {
+				t.Fatalf("unverified merge control: %v", err)
+			}
+			want := authority.Actor{}
+			if got != want {
+				t.Fatalf("merge caller = %+v, want %+v", got, want)
+			}
+		})
 	}
 }
