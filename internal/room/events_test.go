@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -33,12 +34,225 @@ func TestEventsFileMatchesRegistry(t *testing.T) {
 	}
 }
 
+// renderersFile is the web's hand-written card table. It names one component
+// per renderer of the generated registry.
+const renderersFile = "../../web/src/lib/rooms/eventRenderers.ts"
+
+// familyFacts is what the room promises about one event family: the cards that
+// draw it, the services that may post it, who it wakes and where its posts
+// belong. The registry states these facts per event type, so a new type can
+// quietly widen its family; this table is the second copy that fails instead.
+//
+// A new family needs an entry here, which forces the author to say who posts
+// it, who it wakes, where it belongs and which card draws it.
+type familyFacts struct {
+	Family    EventFamily
+	Renderers []string
+	Producers []EventProducer
+	Wakes     []WakeRule
+	Audiences []Audience
+}
+
+// eventFamilyFacts is the table of every family in eventSpecs.
+var eventFamilyFacts = []familyFacts{
+	{Family: FamilyWorktree, Renderers: []string{"WorktreeCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceSession}},
+	{Family: FamilyHook, Renderers: []string{"HookCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyIssue, Renderers: []string{"IssueCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyGoal, Renderers: []string{"GoalPost"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyCheckin, Renderers: []string{"CheckinCard"}, Producers: []EventProducer{ProducerParentCheckin}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceSession}},
+	{Family: FamilyCIHealth, Renderers: []string{"SlowTestCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyRule, Renderers: []string{"RuleCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyMerge, Renderers: []string{"MergeCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever, WakeTarget, WakeRootIfNeeded}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyMachine, Renderers: []string{"MachineDiskCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeRootIfNeeded}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyCall, Renderers: []string{"CallCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyReview, Renderers: []string{"ReviewResultCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyPR, Renderers: []string{"PRCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilySession, Renderers: []string{"SessionNoteCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever, WakeRootIfNeeded, WakeTarget}, Audiences: []Audience{AudienceSession, AudienceRoom}},
+	{Family: FamilyAlert, Renderers: []string{"AlertCard"}, Producers: []EventProducer{ProducerDoctor, ProducerEngine}, Wakes: []WakeRule{WakeRoot}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyService, Renderers: []string{"ServiceAlertCard"}, Producers: []EventProducer{ProducerLibrarian, ProducerReviewer, ProducerHelper}, Wakes: []WakeRule{WakeRoot}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyEngine, Renderers: []string{"EngineNoticeCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeRoot}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyQuestion, Renderers: []string{"QuestionNoteCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyShell, Renderers: []string{"ShellResultRow"}, Producers: []EventProducer{ProducerShell}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceSession}},
+	{Family: FamilyRun, Renderers: []string{"RunResultCard"}, Producers: []EventProducer{ProducerWorkflow}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyTurn, Renderers: []string{"TurnCompletionRow"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
+}
+
+// TestEveryEventFamilyHasItsFacts fails when a family in the registry is
+// missing from the table, or when a type widened a family's poster, wake rule,
+// audience or card without the table saying so.
+func TestEveryEventFamilyHasItsFacts(t *testing.T) {
+	listed := map[EventFamily]familyFacts{}
+	for _, facts := range eventFamilyFacts {
+		if _, ok := listed[facts.Family]; ok {
+			t.Fatalf("family %q is listed twice in eventFamilyFacts", facts.Family)
+		}
+		listed[facts.Family] = facts
+	}
+	seen := map[EventFamily]*familyFacts{}
+	for _, spec := range eventSpecs {
+		facts := seen[spec.Family]
+		if facts == nil {
+			facts = &familyFacts{Family: spec.Family}
+			seen[spec.Family] = facts
+		}
+		facts.Renderers = appendUnique(facts.Renderers, spec.Renderer)
+		producers := spec.Producers
+		if len(producers) == 0 {
+			// An event with no listed producer is the engine's own.
+			producers = []EventProducer{ProducerEngine}
+		}
+		facts.Producers = appendUnique(facts.Producers, producers...)
+		facts.Wakes = appendUnique(facts.Wakes, spec.Wake)
+		audience := spec.Audience
+		if audience == "" {
+			audience = AudienceRoom
+		}
+		facts.Audiences = appendUnique(facts.Audiences, audience)
+	}
+	for family, facts := range seen {
+		want, ok := listed[family]
+		if !ok {
+			t.Errorf("family %q is in the registry but not in eventFamilyFacts", family)
+			continue
+		}
+		for _, field := range []struct {
+			label string
+			want  []string
+			got   []string
+		}{
+			{"renderers", want.Renderers, facts.Renderers},
+			{"producers", stringsOf(want.Producers), stringsOf(facts.Producers)},
+			{"wake rules", stringsOf(want.Wakes), stringsOf(facts.Wakes)},
+			{"audiences", stringsOf(want.Audiences), stringsOf(facts.Audiences)},
+		} {
+			if !slices.Equal(field.want, field.got) {
+				t.Errorf("family %q %s = %v, the table says %v", family, field.label, field.got, field.want)
+			}
+		}
+	}
+	for family := range listed {
+		if seen[family] == nil {
+			t.Errorf("eventFamilyFacts lists %q, which no event uses", family)
+		}
+	}
+}
+
+// TestWebRegistryMatchesGo fails when the web card table and the generated
+// registry disagree with Go: a post of a family Go does not know would draw a
+// bare row, and an event whose card Go names but the web lacks would draw the
+// unknown event row.
+func TestWebRegistryMatchesGo(t *testing.T) {
+	specs := map[string]bool{}
+	for _, spec := range eventSpecs {
+		specs[eventKey(string(spec.Family), string(spec.Type))] = true
+	}
+	known := map[string]bool{}
+	for _, facts := range eventFamilyFacts {
+		known[string(facts.Family)] = true
+	}
+	components := webEventComponents(t)
+	entries := webEventSpecs(t)
+	if len(entries) != len(eventSpecs) {
+		t.Fatalf("the web registry has %d events and Go has %d", len(entries), len(eventSpecs))
+	}
+	for _, entry := range entries {
+		if !known[entry.family] {
+			t.Errorf("the web registry names the family %q, which Go does not know", entry.family)
+		}
+		if !specs[eventKey(entry.family, entry.typ)] {
+			t.Errorf("the web registry names %s/%s, which is not registered in Go", entry.family, entry.typ)
+		}
+		if entry.renderer == "" {
+			t.Errorf("the web registry names no card for %s/%s", entry.family, entry.typ)
+			continue
+		}
+		if !components[entry.renderer] {
+			t.Errorf("the web registry names the card %q for %s/%s, but eventRenderers.ts has no such component", entry.renderer, entry.family, entry.typ)
+		}
+	}
+}
+
+// webSpec is one entry of the generated web registry.
+type webSpec struct{ family, typ, renderer string }
+
+// webEventSpecs reads the generated registry's family, type and renderer of
+// every event.
+func webEventSpecs(t *testing.T) []webSpec {
+	t.Helper()
+	b, err := os.ReadFile(eventsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const start = "export const eventSpecs: readonly EventSpecEntry[] = ["
+	i := bytes.Index(b, []byte(start))
+	if i < 0 {
+		t.Fatalf("%s has no eventSpecs table", eventsFile)
+	}
+	block := b[i:]
+	if end := bytes.Index(block, []byte("\n]\n")); end >= 0 {
+		block = block[:end]
+	}
+	re := regexp.MustCompile(`family: "([^"]*)",\s*\n\s*type: "([^"]*)",\s*\n\s*renderer: "([^"]*)",`)
+	var out []webSpec
+	for _, m := range re.FindAllStringSubmatch(string(block), -1) {
+		out = append(out, webSpec{family: m[1], typ: m[2], renderer: m[3]})
+	}
+	return out
+}
+
+// webEventComponents reads the component names of the web card table.
+func webEventComponents(t *testing.T) map[string]bool {
+	t.Helper()
+	b, err := os.ReadFile(renderersFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const start = "export const eventComponents: Record<string, EventRenderer> = {"
+	i := bytes.Index(b, []byte(start))
+	if i < 0 {
+		t.Fatalf("%s has no eventComponents table", renderersFile)
+	}
+	block := b[i+len(start):]
+	if end := bytes.Index(block, []byte("\n}")); end >= 0 {
+		block = block[:end]
+	}
+	out := map[string]bool{}
+	for _, name := range strings.Split(string(block), ",") {
+		if name = strings.TrimSpace(name); name != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
+// eventKey names one event as family/type, as the web registry does.
+func eventKey(family, typ string) string { return family + "/" + typ }
+
+// appendUnique appends the values that the list does not hold yet.
+func appendUnique[T comparable](list []T, values ...T) []T {
+	for _, value := range values {
+		if !slices.Contains(list, value) {
+			list = append(list, value)
+		}
+	}
+	return list
+}
+
+// stringsOf renders a list of named strings for a comparison.
+func stringsOf[T ~string](values []T) []string {
+	out := make([]string, len(values))
+	for i, value := range values {
+		out[i] = string(value)
+	}
+	return out
+}
+
 func TestPostRejectsSealedFamily(t *testing.T) {
 	store, rec := newEventStore(t)
-	for _, family := range []EventFamily{FamilyWorktree, FamilyHook, FamilyPR, FamilyMerge, FamilyIssue, FamilyGoal, FamilyCheckin, FamilyCIHealth, FamilyRule, FamilyShell, FamilyRun, FamilyTurn} {
-		_, err := store.Post(rec.ID, PostInput{From: rec.Name, To: []string{rec.Name}, Kind: string(family), Text: "sealed"})
+	for _, spec := range eventSpecs {
+		_, err := store.Post(rec.ID, PostInput{From: rec.Name, To: []string{rec.Name}, Kind: string(spec.Family), Text: "sealed"})
 		if err == nil || !strings.Contains(err.Error(), "PostEvent") {
-			t.Fatalf("Post accepted the sealed family %q: %v", family, err)
+			t.Fatalf("Post accepted the sealed family %q: %v", spec.Family, err)
 		}
 	}
 }
@@ -93,7 +307,7 @@ func TestHookRunPostsStartAndResult(t *testing.T) {
 // first, so the set stays closed on purpose.
 func TestPostAcceptsEveryRegisteredKind(t *testing.T) {
 	store, rec := newEventStore(t)
-	for _, kind := range append(slices.Clone(legacyFamilies), agentKinds...) {
+	for _, kind := range append(slices.Clone(voiceCallKinds), agentKinds...) {
 		if _, err := store.Post(rec.ID, PostInput{From: rec.Name, To: []string{rec.Name}, Kind: kind, Text: "kind " + kind}); err != nil {
 			t.Errorf("kind %q: %v", kind, err)
 		}

@@ -1,8 +1,8 @@
 <script lang="ts">
-  // The card for a merge trial and for root's recorded decision. One card folds
-  // every event of a trial: what is merging, the trial's progress, its checks
-  // and the commit it landed. It reads the typed payload, never the text, and
-  // keeps no feed-only state.
+  // The card for a merge trial, for root's recorded decision and for the
+  // owner's merge-fix request. One card folds every event of a trial: what is
+  // merging, the trial's progress, its checks and the commit it landed. It
+  // reads the typed payload, never the text, and keeps no feed-only state.
   import { openExternal } from '../../api.ts'
   import { clock } from '../ui/format.ts'
   import Chip from '../ui/Chip.svelte'
@@ -27,6 +27,7 @@
     conflict: 'conflict',
     'rolled-back': 'rolled back',
     decision: 'decision',
+    'fix-requested': 'fix requested',
   }
   // A landed trial is sage, a running one gold, and an ending that needs a
   // person coral.
@@ -40,6 +41,7 @@
     conflict: 'coral',
     'rolled-back': 'coral',
     decision: '',
+    'fix-requested': 'gold',
   }
   const verbs: Record<MergeStep, string> = {
     queued: 'Merging',
@@ -51,6 +53,7 @@
     conflict: 'Merge conflict:',
     'rolled-back': 'Rolled back:',
     decision: 'Merge decision',
+    'fix-requested': 'Merge fix requested for',
   }
   // The progress bar says how far the trial got. A failure or a return stops
   // at the step the steward had reached, and marks that segment coral.
@@ -64,6 +67,8 @@
     conflict: ['done', 'bad', 'pending', 'pending'],
     'rolled-back': ['done', 'done', 'done', 'bad'],
     decision: [],
+    // A request has no trial to show progress for.
+    'fix-requested': [],
   }
 
   let payload = $derived(mergeEvent(post))
@@ -123,10 +128,11 @@
     {#if decision}<p class="note">{decision.note}</p>{/if}
     {#if payload}
       {#if subject?.title}<p class="sub">{subject.title}</p>{/if}
-      <div class="steps" aria-hidden="true">
-        {#each progress[type] as segment}<i class={segment}></i>{/each}
-      </div>
-      {#if type !== 'decision'}
+      {#if type === 'fix-requested' && payload.actor}<p class="note">Requested by {payload.actor}.</p>{/if}
+      {#if progress[type].length}
+        <div class="steps" aria-hidden="true">
+          {#each progress[type] as segment}<i class={segment}></i>{/each}
+        </div>
         <div class="legend" aria-hidden="true">
           {#each steps as name, i}<span class={progress[type][i]}>{name}</span>{/each}
         </div>
@@ -134,6 +140,7 @@
       <div class="facts">
         {#if affected && prs.length > 1}<span>batch of {prs.length}</span>{/if}
         {#if payload.checks && (payload.checks.total ?? 0) > 0}<span>checks <b>{payload.checks.done}/{payload.checks.total}</b></span>{/if}
+        {#if payload.head}<span>head <b class="mono">{shortSha(payload.head)}</b></span>{/if}
         {#if payload.commit}<span>commit <b class="mono">{shortSha(payload.commit)}</b></span>{/if}
       </div>
       {#if reason && stepTones[type] === 'coral'}<p class="reason">{reason}</p>{/if}
