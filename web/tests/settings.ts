@@ -20,7 +20,7 @@ import type { ProfileList, ProfileView } from '../src/lib/api/profile.ts'
 import type { ProfileSave } from '../src/lib/api/engine.ts'
 import type { UsageAccount } from '../src/lib/api/account.ts'
 import type { ActivityRollup } from '../src/lib/settings/usage/activity.ts'
-import type { Device, Hook, HookRun, HookRunLog, SettingItem } from '../src/lib/api/settings.ts'
+import type { Device, SettingItem } from '../src/lib/api/settings.ts'
 
 const query = new URLSearchParams(location.search)
 const pane = query.get('pane') || 'harnesses'
@@ -156,21 +156,5 @@ const deviceList: Device[] = [
 api.devices = () => later(empty ? [] : deviceList)
 api.revokeDevice = (kind: string, id: string) => { const keep = deviceList.filter((d) => d.kind !== kind || (id !== 'all' && d.id !== id)); deviceList.splice(0, deviceList.length, ...keep); return later(1) }
 api.setDeviceScopes = (id: string, scopes: string[]) => { const row = need(deviceList.find((d) => d.id === id)); row.scopes = scopes; row.legacy = false; row.scopeLabel = scopes.join(', '); return later(row) }
-
-const hookList: Hook[] = [
-  { name: 'lint-web', label: 'Lint web', event: 'before-land', command: 'cd web && npm run lint', cwd: 'worktree', timeout: '5m0s', onFail: 'block', addedBy: 'sam', addedAt: minutes(60 * 24 * 6) },
-  { name: 'refresh-main', label: 'Refresh main', event: 'main-updated', command: 'git fetch origin main', cwd: 'repo', timeout: '1m0s', onFail: 'alert', addedBy: 'settings-polish', addedAt: minutes(60 * 5) },
-  { name: 'nightly-gc', label: 'Nightly cleanup', event: 'schedule', everyMinutes: 1440, command: 'dyna git worktrees gc', cwd: 'repo', timeout: '10m0s', onFail: 'alert', addedBy: 'sam', addedAt: minutes(60 * 24 * 30) },
-]
-const hookRun = (id: string, name: string, result: string, started: number, finished: number): HookRun => ({ id, repo: '', name, command: '', logPath: '', result, startedAt: minutes(started), finishedAt: minutes(finished) })
-const hookRuns: Record<string, HookRun[]> = { 'lint-web': [hookRun('r1', 'lint-web', 'pass', 25, 24), hookRun('r2', 'lint-web', 'fail', 200, 199)], 'refresh-main': [hookRun('r3', 'refresh-main', 'pass', 12, 12)], 'nightly-gc': [] }
-api.hookRepos = () => later(['/home/user/dyna-agent', '/home/user/resident-site'])
-api.listHooks = () => later(empty ? [] : hookList)
-api.hookRuns = (_repo: string, name: string) => later(hookRuns[name] ?? [])
-api.hookRunLog = (_repo: string, _name: string, id: string): Promise<HookRunLog> => later({ tail: id === 'r2' ? 'web/src/App.svelte\n  12:5  error  Unused variable "x"\n' : 'ok\n', exitCode: id === 'r2' ? 1 : 0 })
-api.runHook = () => later(hookRun('r9', 'lint-web', 'pass', 0, 0))
-api.addHook = (_repo: string, hook: Omit<Hook, 'addedBy' | 'addedAt'>) => { hookList.unshift({ ...hook, addedBy: 'sam', addedAt: new Date().toISOString() }); return later(null) }
-api.editHook = (_repo: string, name: string, patch: Partial<Hook>) => { Object.assign(need(hookList.find((h) => h.name === name)), patch); return later(null) }
-api.removeHook = (_repo: string, name: string) => { hookList.splice(hookList.findIndex((h) => h.name === name), 1); return later(null) }
 
 mount(Settings, { target: need(document.getElementById('app'), 'app'), props: { start: pane, dataDir: '/home/user/.local/share/dyna', onclose: () => { document.body.dataset.closed = 'yes' } } })
