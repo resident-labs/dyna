@@ -275,7 +275,7 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 	// The run holds a lock on its own directory while it runs, so a cleanup can
 	// tell a live run from one that died and never trims the caches it mounts.
 	active := path.Join(runDir, ".active")
-	setup := "set -e; mkdir -p " + shellquote.Quote(reports) + " " + shellquote.Quote(path.Join(base, "go-build")) + " " + shellquote.Quote(path.Join(base, "go-mod")) + " " + shellquote.Quote(path.Join(base, "npm")) + " " + shellquote.Quote(path.Dir(active)) + " && git --git-dir=" + shellquote.Quote(cache) + " worktree add --detach " + shellquote.Quote(work) + " " + shellquote.Quote(result.SHA) + "; : > " + shellquote.Quote(active) + "; " + runKeeper(active) + " &"
+	setup := "set -e; mkdir -p " + shellquote.Quote(reports) + " " + shellquote.Quote(path.Join(base, "go-build")) + " " + shellquote.Quote(path.Join(base, "go-mod")) + " " + shellquote.Quote(path.Join(base, "npm")) + " " + shellquote.Quote(path.Dir(active)) + " && git --git-dir=" + shellquote.Quote(cache) + " worktree add --detach " + shellquote.Quote(work) + " " + shellquote.Quote(result.SHA) + "; " + runLocks(base, active)
 	if err = r.ssh(sshCtx, host, setup, &log); err != nil {
 		return result, fmt.Errorf("create worktree: %w: %s", err, &log)
 	}

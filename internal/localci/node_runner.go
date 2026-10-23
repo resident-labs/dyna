@@ -193,7 +193,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	if e := r.cleanBeforeRun(control, node); e != nil {
 		log.Printf("local CI %s: free space check: %v", node.Name, e)
 	}
-	setup := "set -e; umask 077; mkdir -p " + shellquote.Quote(base) + " " + shellquote.Quote(reports) + "; : > " + shellquote.Quote(active) + "; " + runKeeper(active) + " & flock " + shellquote.Quote(path.Join(base, "init.lock")) + " bash -c " + shellquote.Quote("if [ ! -d "+shellquote.Quote(cache)+" ]; then git init --bare "+shellquote.Quote(cache)+"; fi")
+	setup := "set -e; umask 077; mkdir -p " + shellquote.Quote(base) + " " + shellquote.Quote(reports) + "; " + runLocks(base, active) + "; flock " + shellquote.Quote(path.Join(base, "init.lock")) + " bash -c " + shellquote.Quote("if [ ! -d "+shellquote.Quote(cache)+" ]; then git init --bare "+shellquote.Quote(cache)+"; fi")
 	if err := r.nodeCommand(control, &output, &output, "", setup); err != nil {
 		return result, fmt.Errorf("initialize node: %w: %s", err, &output)
 	}
