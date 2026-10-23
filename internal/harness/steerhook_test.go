@@ -72,6 +72,7 @@ func TestMain(m *testing.M) {
 func TestRunSteerHook(t *testing.T) {
 	dir := t.TempDir()
 	h := &steerHook{harness: profile.HarnessCodex, dir: dir}
+	defer h.cleanup()
 	run := func(session string) string {
 		var out bytes.Buffer
 		in := strings.NewReader(`{"session_id":"` + session + `","hook_event_name":"PostToolUse"}`)
@@ -118,8 +119,8 @@ func TestRunSteerHook(t *testing.T) {
 	if got := run("s1"); got != "" {
 		t.Fatalf("withdrawn message delivered: %q", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, steerHookPending)); !os.IsNotExist(err) {
-		t.Fatalf("handoff dir not empty: %v", err)
+	if _, _, err := h.retire(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 
