@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
+import { installRouterShim } from '../../../test/appRouterShim.ts'
+import { installSessionView } from '../../../test/appModules.ts'
 
 // The real function from a component, run against a plain context.
 function run(path: string, name: string, context: Record<string, unknown>): void {
@@ -29,9 +31,11 @@ test('rejected active delivery keeps the confirmation and displays its error', a
 
 test('app sends explicit confirmation and preserves the new session queue', async () => {
   const calls: unknown[][] = []
+  // The pending post lives in lib/app/sessionView.svelte.ts now.
   const c: Record<string, unknown> = { api: { dismissPendingPost: async (...args: unknown[]) => calls.push(args) }, drill: { id: 'new' }, queue: [{ id: 'msg_new' }], say() {} }
-  run('../../App.svelte', 'dismissPendingPost', c)
-  await call(c, 'dismissPendingPost', 'old', 'msg_old')
+  installRouterShim(c)
+  installSessionView(c)
+  await (c.dismissPendingPost as (id: string, messageId: string) => Promise<void>)('old', 'msg_old')
   assert.deepEqual(calls, [['old', 'msg_old', true]])
   assert.deepEqual(c.queue, [{ id: 'msg_new' }])
 })

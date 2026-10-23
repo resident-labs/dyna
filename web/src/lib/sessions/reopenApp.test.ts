@@ -34,7 +34,8 @@ interface App {
   roomRequest: number
   sessionVisit: number
   drill: Member
-  session: { member: Member; turns: number[] }
+  session: { member: Member; turns: number[] } | null
+  transcripts?: Record<string, unknown>
   members: Member[]
   feed: { posts: Member[]; newer?: number } | null
   [name: string]: unknown
@@ -43,6 +44,13 @@ const closed: Member = { id: 'one', name: 'worker', closed: true, resumable: tru
 function app(reopen: (room: string, id: string) => unknown) {
   const calls: string[] = []
   const c: App = { loadComputers() {}, soonRooms() {}, expediteItems: () => [], hierarchy: [], reconcileRows, isFinished, api: { reopenSession: reopen }, reopening: '', dismissing: '', roomId: 'a', roomRequest: 1, sessionVisit: 1, drill: closed, session: { member: closed, turns: [1] }, members: [], feed: null, loadSession: async () => calls.push('transcript'), loadMembers: async () => calls.push('members'), say: (text: string) => calls.push(text) }
+  // The open transcript lives in lib/app/sessionView.svelte.ts now.
+  Reflect.set(c, 'transcripts', {
+    get visit() { return Number(c.sessionVisit) },
+    nextVisit() { c.sessionVisit = Number(c.sessionVisit) + 1 },
+    patchMember(member: Member) { if (c.session && c.session.member?.id === member.id) c.session = { ...c.session, member } },
+    openFresh() { c.session = null }, clear() { c.session = null }, setSession(value: unknown) { c.session = value as App['session'] },
+  })
   c.routedParents ??= ''; c.selectableSession = selectableSession
   // The screen state lives in the router now, so the sliced functions write through it.
   installRouterShim(c)
@@ -63,7 +71,7 @@ test('reopen updates the transcript and refreshes members without starting a tur
   const member = { ...closed, closed: false, state: 'idle' }
   const { c, calls } = app(async (room, id) => { assert.equal(room, 'a'); assert.equal(id, 'one'); return member })
   await call(c, 'reopenSession', closed)
-  assert.equal(c.session.member, member)
+  assert.equal(c.session?.member, member)
   assert.equal(c.drill, member)
   assert.deepEqual([...c.session.turns], [1])
   assert.deepEqual(calls.slice(0, 2), ['transcript', 'members'])
@@ -79,7 +87,7 @@ test('duplicate clicks share one pending action and refusal remains retryable', 
   pending.reject(new Error('The name is already in use.'))
   await assert.rejects(first as Promise<unknown>, /name is already in use/)
   assert.equal(c.reopening, '')
-  assert.equal(c.session.member.closed, true)
+  assert.equal(c.session?.member.closed, true)
   assert.equal(calls.length, 0)
 })
 
@@ -91,7 +99,7 @@ test('late reopen cannot change a different room visit or transcript selection',
     c[changed] += 2
     pending.resolve({ ...closed, closed: false })
     await first
-    assert.equal(c.session.member.closed, true)
+    assert.equal(c.session?.member.closed, true)
     assert.equal(calls.includes('transcript'), false)
     assert.equal(calls.includes('members'), changed === 'sessionVisit')
   }
@@ -113,10 +121,10 @@ test('finished sessions stay visible as open members and offer Dismiss', async (
   assert.equal(menu(c, finished).includes('Dismiss'), true)
   assert.equal(menu(c, finished).includes('Reopen'), false)
   assert.equal(menu(c, closed).includes('Dismiss'), false)
-  c.session.member = finished
+  if (c.session) c.session.member = finished
   c.api.dismissSession = async (room: string, id: string) => { assert.equal(room, 'a'); assert.equal(id, 'one'); return closed }
   await call(c, 'dismissSession', finished)
-  assert.equal(c.session.member.finished, undefined)
+  assert.equal(c.session?.member.finished, undefined)
   assert.deepEqual(calls.slice(0, 2), ['transcript', 'members'])
   assert.equal(c.dismissing, '')
 })

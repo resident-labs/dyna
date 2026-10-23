@@ -5,6 +5,7 @@ import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { installRouterShim } from '../../../test/appRouterShim.ts'
+import { installSessionView } from '../../../test/appModules.ts'
 import { seatDMConversation } from './conversations.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
@@ -69,7 +70,7 @@ interface SeatApp extends SeatState {
 }
 
 function app(rootSeat: RootSeat) {
-  const names = ['openMember', 'openSession', 'rootMember', 'sendToSession', 'showSession']
+  const names = ['openMember', 'openSession', 'rootMember', 'sendToSession']
   const code = declarations.filter((n) => n.type === 'FunctionDeclaration' && names.includes(n.id?.name ?? '')).map((n) => {
     const { start, end } = sourceRange(n)
     return source.slice(start, end)
@@ -86,6 +87,10 @@ function app(rootSeat: RootSeat) {
   // The screen state lives in the router now, so the sliced functions write through it.
   installRouterShim(context)
   vm.runInContext(stripTypes(code), context)
+  // The transcript lives in lib/app/sessionView.svelte.ts now; its showSession
+  // runs here too, and the test counts the reads it asks for.
+  installSessionView(context)
+  context.loadSession = () => calls.push('load')
   const fns = vm.runInContext('({ openMember, openSession, sendToSession, showSession })', context) as Pick<SeatApp, 'openMember' | 'openSession' | 'sendToSession' | 'showSession'>
   return { context: Object.assign(context, fns), calls }
 }

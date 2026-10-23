@@ -11,13 +11,13 @@
   import { bindRoomLoader, roomData } from './lib/app/roomLoader.svelte.ts'
   import { bindMachines, machineView, watchMachines } from './lib/app/machines.svelte.ts'
   import { bindGoals, goalView } from './lib/app/goals.svelte.ts'
+  import { bindSessionView, sessionView as transcripts } from './lib/app/sessionView.svelte.ts'
   import { bindIssues, issueView } from './lib/app/issues.svelte.ts'
   import { bindPins, pinView } from './lib/app/pins.svelte.ts'
   import { bindPRs, changeView } from './lib/app/prs.svelte.ts'
   import { bindQuestions, questionView } from './lib/app/questions.svelte.ts'
   import { bindSync, syncView } from './lib/app/sync.svelte.ts'
   import { closeToastDetail, hideToast, runToastAction, say, sayDetails, sayLine, toasts, toggleToastDetail } from './lib/app/toasts.svelte.ts'
-  import { createSessionData } from './lib/sessions/sessionData.ts'
   import { mergeListPage } from './lib/ui/listPages.ts'
   import { patchListRows } from './lib/ui/listChanges.ts'
   import { reloadsUnread } from './lib/ui/unreadReload.ts'
@@ -277,13 +277,14 @@
   const choices = $derived(roomData.choices)
   const unreadFrom = $derived(roomData.unreadFrom)
   const loadEarlier = roomData.loadEarlier // one bounded page per request
-  let session = $state<SessionData | null>(null)
-  let sessionReadingHistory = $state(false)
-  let threadCount = $derived(dmView(session, room || { name: '' }).threads.length)
-  let sessionVisit = 0
   const roomRequest = $derived(roomData.roomRequest) // room data can still load after a later view choice
-  let queue = $state<QueueItem[]>([]) // steering that waits for the open session's turn
-  let sessionError = $state('')
+  // The open session's transcript lives in lib/app/sessionView.svelte.ts. The
+  // page reads it through these aliases, so the template keeps its names.
+  const session = $derived(transcripts.session)
+  const queue = $derived(transcripts.queue)
+  const sessionError = $derived(transcripts.error)
+  const threadCount = $derived(transcripts.threadCount)
+  const { loadSession, loadEarlierSession, loadNewerSession, presentSession, showSession, unqueue, dismissPendingPost } = transcripts
   const layout = loadLayout({ side: true, members: true, threads: true })
   let threadsOpen = $state(layout.threads)
   let selectedThread = $state('')
@@ -654,6 +655,11 @@
     say,
   })
   bindSync({ reload })
+  bindSessionView({
+    pageOpen: () => pageVisible && !(narrow && reviewOpen),
+    tab: () => sessionTab,
+    say,
+  })
   bindPRs({
     reload,
     applyPage: (value) => applyListPage('changes', value),
@@ -877,54 +883,12 @@
     if (request === detailRequest && rid === roomId) feedView?.jump(id)
   }
 
-  const sessionData = createSessionData(api, {
-    current: () => ({ room: roomId, visit: roomRequest, id: drill?.id ?? '', root: !!drill?.rootSeat, selection: String(sessionVisit), turn: sessionTurn, visible: sessionVisible(), live: session?.member?.state === 'live' }),
-    transcript: showSession,
-    queue: (value) => (queue = value),
-    error: (error) => (sessionError = error),
-  })
-  function showSession(value: SessionData, older: boolean | string = false) {
-    session = mergeSessionPage(session, value, older, sessionReadingHistory)
-    sessionError = ''
-    // The root seat opened before root had a session of its own. Once RootSession returns the real
-    // session (root started, or the seat was released), continue as that member: its queue, paging and events.
-    if (drill?.rootSeat && value.member?.id) {
-      router.drill = { ...value.member, id: value.member.id }
-      loadSession()
-    }
-  }
-  function sessionVisible(tab = sessionTab) { return pageVisible && !(narrow && reviewOpen) && ['chat', 'computer', 'media'].includes(tab) }
-  function loadSession() { return sessionData.load() }
+  // A visible transcript tab keeps the open session read; a hidden one waits.
   $effect(() => {
     const tab = sessionTab
-    const visible = sessionVisible(tab)
+    const visible = transcripts.sessionVisible(tab)
     untrack(() => { if (drill && visible) loadSession() })
   })
-
-  function loadEarlierSession(near = () => true) {
-    if (!session?.earlier || sessionTurn) return Promise.resolve(false)
-    return sessionData.earlier(session.cursor ?? '', near)
-  }
-
-  function loadNewerSession(near = () => true) {
-    if (!session?.newer || sessionTurn) return Promise.resolve(false)
-    return sessionData.newer(String(session.turns?.at(-1)?.n ?? ''), near)
-  }
-  function presentSession() { return sessionData.present() }
-
-  async function unqueue(q: Receipt) {
-    if (!drill) return
-    await api.deletePendingSteer(drill.id, q.id)
-    queue = queue.filter((x) => x.id !== q.id)
-    say({ tone: 'success', subject: 'Removed the queued message', text: 'The turn will not see it.' })
-  }
-
-  async function dismissPendingPost(id: string, messageId: string) {
-    await api.dismissPendingPost(id, messageId, true)
-    if (drill?.id === id) queue = queue.filter((post) => post.id !== messageId)
-    say({ tone: 'success', subject: 'Message dismissed', text: 'Its history stays available.' })
-  }
-
   function markShown(list: Post[]) { return readMarker.mark(list) }
 
   // Only messages visible in the selected feed view become read.
@@ -1044,7 +1008,7 @@
     visitRoomControls(id)
     router.drill = null
     card = null
-    session = null
+    transcripts.clear()
     router.sessionTurn = 0
     router.openJob = ''
     reply = null
@@ -1105,24 +1069,20 @@
     const m = ('rootSeat' in source && source.rootSeat ? rootMember() : source) as Drill
     clearItemLink()
     router.detailRequest++
-    sessionVisit++
+    transcripts.nextVisit()
     card = null
     showPins = false
     if (narrow) showMembers = false
     if (drill?.id !== m.id || sessionTurn !== turn) {
-      session = null
-      sessionError = ''
+      transcripts.openFresh()
       sessionTab = 'chat'
       selectedThread = ''
-      queue = []
     }
     router.drill = m
     router.readOnlyDm = readOnly
     router.sessionTurn = turn
-    if (initial) {
-      session = initial
-      sessionError = ''
-    } else loadSession()
+    if (initial) transcripts.setSession(initial)
+    else loadSession()
     setTimeout(() => sessionView?.focus(), 0)
   }
 
@@ -1193,15 +1153,15 @@
   let reopening = $state('')
   async function reopenSession(m: Member) {
     if (reopening || dismissing || !m.closed || !m.resumable) return
-    const rid = roomId, visit = roomRequest, selection = sessionVisit
+    const rid = roomId, visit = roomRequest, selection = transcripts.visit
     reopening = m.id ?? ''
     try {
       if (!m.id) return
       const member = await api.reopenSession(rid, m.id)
       if (rid !== roomId || visit !== roomRequest) return
-      if (drill?.id === m.id && selection === sessionVisit) {
+      if (drill?.id === m.id && selection === transcripts.visit) {
         router.drill = member as Drill
-        if (session && session.member?.id === m.id) session = { ...session, member }
+        transcripts.patchMember(member)
         await loadSession()
       }
       await loadMembers()
@@ -1224,15 +1184,15 @@
   }
   async function dismissSession(m: Member) {
     if (dismissing || reopening || !isFinished(m)) return
-    const rid = roomId, visit = roomRequest, selection = sessionVisit
+    const rid = roomId, visit = roomRequest, selection = transcripts.visit
     dismissing = m.id ?? ''
     try {
       if (!m.id) return
       const member = await api.dismissSession(rid, m.id)
       if (rid !== roomId || visit !== roomRequest) return
-      if (drill?.id === m.id && selection === sessionVisit) {
+      if (drill?.id === m.id && selection === transcripts.visit) {
         router.drill = member as Drill
-        if (session && session.member?.id === m.id) session = { ...session, member }
+        transcripts.patchMember(member)
         await loadSession()
       }
       await loadMembers()
@@ -1485,7 +1445,7 @@
     loadSync()
     loadIssues()
     loadIssues(true)
-    if (drill && sessionVisible()) loadSession()
+    if (drill && transcripts.sessionVisible()) loadSession()
   }
 
   // resync reloads what the app shows after the web event stream was lost:
@@ -1639,7 +1599,7 @@
       if (ev.change?.controls) soonRooms('controls')
     }
     if (ev.kind === 'posts' && drill && evRoom === roomId) {
-      sessionData.schedule()
+      transcripts.schedule()
     }
     if (['goals', 'questions', 'prs', 'jobs', 'runs'].includes(ev.kind) && (!evRoom || evRoom === roomId)) soonRooms('members')
     if (ev.kind === 'jobs' && evRoom === roomId && !item) workflowData.loadJobs()
@@ -1901,7 +1861,7 @@
     }
     document.addEventListener('click', clicks)
     const ticker = setInterval(() => (rooms = [...rooms]), 30000) // keep "ago" labels fresh
-    sessionData.start()
+    transcripts.start()
     workflowData.start()
     return () => {
       mq.removeEventListener('change', resize)
@@ -1966,7 +1926,7 @@
       consolidationAlive = false
       clearInterval(transferPoll)
       roomData.destroy()
-      sessionData.destroy()
+      transcripts.destroy()
       workflowData.destroy()
       stopApp()
     }
@@ -2065,7 +2025,7 @@
               <SessionMedia onpost={jumpTo} {room} posts={session?.media ?? []} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
             {:else}
               <div class="sess-wrap" style:--shift={threadsOpen && !narrow ? '360px' : '0px'}>
-              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} onchild={openSession} onjob={(job) => { router.openJob = job.id; router.drill = null; router.view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} onpending={(pending) => noteComposerWork('session:' + drill.id, pending)} />
+              <Session readOnly={readOnlyDm} bind:readingHistory={transcripts.readingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} onchild={openSession} onjob={(job) => { router.openJob = job.id; router.drill = null; router.view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} onpending={(pending) => noteComposerWork('session:' + drill.id, pending)} />
               {#if showPreview}<ComputerPreview c={drillComputer} session={drill.id} name={drill.name} onopen={() => (sessionTab = 'computer')} />{/if}
               </div>
             {/if}

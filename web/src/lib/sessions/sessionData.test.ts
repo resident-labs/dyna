@@ -92,18 +92,21 @@ test('a root post that arrived while reading history is revealed by present and 
 })
 
 test('App history loaders discard a delayed page after the reader leaves the edge', async () => {
-  const { readFileSync } = await import('node:fs')
-  const { call, runFunctions } = await import('../../../test/svelte-source.ts')
-  const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
+  const { installRouterShim } = await import('../../../test/appRouterShim.ts')
+  const { installSessionView } = await import('../../../test/appModules.ts')
   for (const loader of ['loadEarlierSession', 'loadNewerSession']) {
     let finish: (page: Session) => void = () => {}
     const pending = new Promise<Session>((resolve) => { finish = resolve })
     const applied: Session[] = []
     const data = createSessionData(api({ transcriptPage: () => pending, transcriptAfter: () => pending }), hooks({ transcript: (page) => applied.push(page) }))
-    const context = { sessionData: data, sessionTurn: 0, session: session('session', { cursor: '2', earlier: true, newer: true, turns: [turn(2)] }) }
-    runFunctions(source, [loader], context)
+    // The transcript's paging lives in lib/app/sessionView.svelte.ts now, so the
+    // test runs that module's loader over the controller it already built.
+    const context: Record<string, unknown> = { data, sessionTurn: 0, session: session('session', { cursor: '2', earlier: true, newer: true, turns: [turn(2)] }) }
+    installRouterShim(context)
+    installSessionView(context, data)
+    const run = context[loader] as (near: () => boolean) => Promise<boolean>
     let nearEdge = true
-    const loading = call(context, loader, () => nearEdge)
+    const loading = run(() => nearEdge)
     nearEdge = false
     finish(session('session', { posts: [post('late')] }))
     await loading
