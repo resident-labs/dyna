@@ -279,7 +279,6 @@ export const api = {
   // is 'pr' or 'issue'; state is open, closed, merged or all.
   githubList: (roomRef, kind, state = 'open', search = '') => app.GitHubList(roomRef, kind, state, search),
   githubView: (roomRef, kind, number) => app.GitHubView(roomRef, kind, number),
-  startIssueWork: (roomRef, number) => app.StartIssueWork(roomRef, number),
   githubDiff: (roomRef, number) => app.GitHubDiff(roomRef, number),
   listTemplates: () => app.ListTemplates(),
   startRun: (ref, source, input) => app.StartRun(ref, source, input),
