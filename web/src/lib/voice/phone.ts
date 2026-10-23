@@ -1,14 +1,30 @@
 // The phone layout of the Voice call. Below App's narrow breakpoint the
 // floating widget becomes a full-screen call, which minimizes to a bubble.
-// The call itself stays in callState.js; this is only the screen's own
+// The call itself stays in callState.ts; this is only the screen's own
 // state: minimized, the conversation sheet open, and a call to rejoin hidden.
-import { capturing, statusLine } from './callState.js'
+import { capturing, statusLine, type CallState } from './callState.ts'
+import { isRecord } from '../api/guards.ts'
+
+// PhoneUI is the phone screen's own state.
+export interface PhoneUI {
+  minimized: boolean
+  sheet: boolean
+  resumeHidden: boolean
+}
+
+// PhoneEvent is one change to the phone screen.
+export type PhoneEvent =
+  | { type: 'minimize' }
+  | { type: 'restore' }
+  | { type: 'hideResume' }
+  | { type: 'toggleSheet' }
+  | { type: 'newCall' }
 
 // A call starts as the bubble, so it covers little of the screen; tapping
 // it opens the full call.
-export const phoneInitial = Object.freeze({ minimized: true, sheet: false, resumeHidden: false })
+export const phoneInitial: PhoneUI = Object.freeze({ minimized: true, sheet: false, resumeHidden: false })
 
-export function phoneReduce(ui, e) {
+export function phoneReduce(ui: PhoneUI, e: PhoneEvent): PhoneUI {
   switch (e.type) {
     case 'minimize':
       return { ...ui, minimized: true, sheet: false }
@@ -33,10 +49,26 @@ export const TAP_SLOP = 6
 // SHARE_PEEK is how long the bubble says what was just shared, in ms.
 export const SHARE_PEEK = 4000
 
+// Point is a place on the screen, in px from its top left corner.
+export interface Point {
+  x: number
+  y: number
+}
+
+// Side is the edge the bubble rests against.
+export type Side = 'left' | 'right'
+
+// BubblePlace is where the bubble rests: its side, and its height as a share
+// of the screen.
+export interface BubblePlace {
+  side: Side
+  top: number
+}
+
 // snapBubble is where a dropped bubble rests: the nearest side, at the
 // height it was dropped, as a share of the screen, kept clear of the top
 // and bottom edges.
-export function snapBubble({ x, y, width, height }) {
+export function snapBubble({ x, y, width, height }: Point & { width: number; height: number }): BubblePlace {
   const margin = BUBBLE / 2 + 8
   const top = Math.min(height - margin, Math.max(margin, y)) / height
   return { side: x < width / 2 ? 'left' : 'right', top: Math.round(top * 1000) / 1000 }
@@ -44,12 +76,60 @@ export function snapBubble({ x, y, width, height }) {
 
 // dragged says whether a finger that went down at start and is now at
 // (x, y) drags the bubble rather than taps it.
-export const dragged = (start, x, y) => Math.hypot(x - start.x, y - start.y) > TAP_SLOP
+export const dragged = (start: Point, x: number, y: number): boolean => Math.hypot(x - start.x, y - start.y) > TAP_SLOP
 
 // HOLD_MS is how long a still press waits before it talks, and
 // DOUBLE_TAP_MS how close two taps must come to open the call.
 export const HOLD_MS = 250
 export const DOUBLE_TAP_MS = 300
+
+// PointerDown is a pointer press, and PointerMove the same pointer later:
+// the parts of a pointer event the bubble's gestures read.
+export interface PointerDown {
+  button: number
+  pointerId: number
+  clientX: number
+  clientY: number
+}
+
+export interface PointerMove {
+  pointerId: number
+  clientX: number
+  clientY: number
+}
+
+// GestureHandlers get what the bubble's gestures see, and what they do.
+export interface GestureHandlers {
+  onmove(p: Point): void
+  ondrop(p: Point): void
+  onexpand(): void
+  ontalk(on: boolean): void
+}
+
+// GestureClock is the gestures' clock. A timer id is only ever handed back
+// to clear it, so its type stays unknown: a browser returns a number, Node
+// an object.
+export interface GestureClock {
+  set(fn: () => void, ms: number): unknown
+  clear(id: unknown): void
+  now(): number
+}
+
+// browserClock is the real clock, each function called on its own.
+const browserClock: GestureClock = {
+  set: (fn, ms) => setTimeout(fn, ms),
+  clear: (id) => clearTimeout(id as ReturnType<typeof setTimeout>), // the id came from set
+  now: () => Date.now(),
+}
+
+// Gestures tell the bubble's gestures apart.
+export interface Gestures {
+  down(e: PointerDown): boolean
+  move(e: PointerMove): void
+  up(e: PointerMove): void
+  cancel(e?: PointerMove): boolean
+  click(e: { detail: number }): void
+}
 
 // bubbleGestures tells the bubble's gestures apart. A press that moves past
 // TAP_SLOP drags it, at any time: a drag ends any talk the press started. A still press talks once held HOLD_MS,
@@ -62,11 +142,11 @@ export const DOUBLE_TAP_MS = 300
 // it drags, ondrop where it was let go, ontalk true and false as a hold
 // starts and ends. clock is setTimeout, clearTimeout and Date.now, each
 // called on its own: a browser refuses setTimeout called on another object.
-export function bubbleGestures({ onmove, ondrop, onexpand, ontalk }, clock = { set: (fn, ms) => setTimeout(fn, ms), clear: (id) => clearTimeout(id), now: () => Date.now() }) {
-  let start = null // where the owning pointer went down, and its ID
+export function bubbleGestures({ onmove, ondrop, onexpand, ontalk }: GestureHandlers, clock: GestureClock = browserClock): Gestures {
+  let start: (Point & { id: number }) | null = null // where the owning pointer went down, and its ID
   let dragging = false
   let talking = false
-  let hold = null
+  let hold: unknown = null
   let tapped = -Infinity // when the last tap lifted
   function end() {
     clock.clear(hold)
@@ -126,51 +206,72 @@ export function bubbleGestures({ onmove, ondrop, onexpand, ontalk }, clock = { s
 // bubbleTop is the bubble's CSS top for place: its saved share of the
 // screen's height, kept 8 px inside the top and bottom edges whatever the
 // screen's height is now.
-export const bubbleTop = (place) => `clamp(8px, calc(${place.top * 100}% - ${BUBBLE / 2}px), calc(100% - ${BUBBLE + 8}px))`
+export const bubbleTop = (place: BubblePlace): string => `clamp(8px, calc(${place.top * 100}% - ${BUBBLE / 2}px), calc(100% - ${BUBBLE + 8}px))`
 
 // bubblePlace reads a saved bubble place, or the default: the right side,
 // a little below the middle.
-export function bubblePlace(raw) {
+export function bubblePlace(raw: string | null): BubblePlace {
   try {
-    const p = JSON.parse(raw)
-    if ((p?.side === 'left' || p?.side === 'right') && Number.isFinite(p.top) && p.top > 0 && p.top < 1) return p
+    const p: unknown = JSON.parse(raw ?? '')
+    if (isBubblePlace(p)) return p
   } catch { /* nothing saved */ }
   return { side: 'right', top: 0.6 }
+}
+
+const isBubblePlace = (v: unknown): v is BubblePlace =>
+  isRecord(v) && (v.side === 'left' || v.side === 'right') && typeof v.top === 'number' && Number.isFinite(v.top) && v.top > 0 && v.top < 1
+
+// Size is a box's width and height in px.
+export interface Size {
+  width: number
+  height: number
+}
+
+// Offset is a place in px from the window's right and bottom edges.
+export interface Offset {
+  right: number
+  bottom: number
 }
 
 // widgetPlace is where the desktop widget rests: its saved place, {right,
 // bottom} in px from the window's edges, or the default, clamped into a
 // window of width by height. A place saved in a bigger window or on another
 // screen would otherwise leave the widget out of sight.
-export function widgetPlace(raw, width, height, size = WIDGET) {
-  let p = { right: 16, bottom: 96 }
+export function widgetPlace(raw: string | null, width: number, height: number, size: Size = WIDGET): Offset {
+  let p: Offset = { right: 16, bottom: 96 }
   try {
-    const q = JSON.parse(raw)
-    if (Number.isFinite(q?.right) && Number.isFinite(q?.bottom)) p = q
+    const q: unknown = JSON.parse(raw ?? '')
+    if (isOffset(q)) p = q
   } catch { /* nothing saved */ }
   return clampWidget(p, width, height, size)
 }
 
+const isOffset = (v: unknown): v is Offset =>
+  isRecord(v) && typeof v.right === 'number' && Number.isFinite(v.right) && typeof v.bottom === 'number' && Number.isFinite(v.bottom)
+
 // WIDGET is the collapsed widget's size, used until it is measured.
-export const WIDGET = { width: 300, height: 96 }
+export const WIDGET: Size = { width: 300, height: 96 }
 
 // clampWidget keeps the whole widget of size in the window, 8 px inside
 // each edge. A widget wider or taller than the window keeps its top left
 // corner 8 px in, so its header, drag handle and controls stay reachable.
-export const clampWidget = ({ right, bottom }, width, height, size = WIDGET) => ({
+export const clampWidget = ({ right, bottom }: Offset, width: number, height: number, size: Size = WIDGET): Offset => ({
   right: within(right, width - size.width - 8),
   bottom: within(bottom, height - size.height - 8),
 })
 // within keeps an offset from the right or bottom edge between 8 px and max;
 // a max below 8 is the widget's size overflowing, and wins.
-const within = (v, max) => (max < 8 ? max : Math.max(8, Math.min(max, v)))
+const within = (v: number, max: number): number => (max < 8 ? max : Math.max(8, Math.min(max, v)))
+
+// Layout is which of the call's phone screens shows.
+export type Layout = 'full' | 'bubble' | 'none'
 
 // phoneLayout is 'full', 'bubble' or 'none'. A call opens as the bubble; a
 // dropped call, a call found on page load, or Call Voice from another room
 // while minimized, brings it back full screen; an ended call closes to the app.
 // A call found on page load can be hidden to the bubble, which brings Rejoin
 // back on a double tap.
-export function phoneLayout(s, ui) {
+export function phoneLayout(s: CallState, ui: PhoneUI): Layout {
   if (s.phase === 'resumable' && !s.switchTo) return ui.resumeHidden ? 'bubble' : 'full'
   // A dropped call, a call to resume, or a room switch to confirm needs the
   // screen.
@@ -179,8 +280,17 @@ export function phoneLayout(s, ui) {
   return 'none'
 }
 
+// Tone is the big circle's color and motion.
+export type Tone = 'idle' | 'listening' | 'speaking' | 'thinking' | 'muted' | 'error'
+
+// Orb is the big circle's tone and the state's label.
+export interface Orb {
+  tone: Tone
+  label: string
+}
+
 // orb is the big circle: its tone (color and motion) and the state's label.
-export function orb(s) {
+export function orb(s: CallState): Orb {
   if (s.phase === 'error') return { tone: 'error', label: 'Call dropped' }
   if (s.phase !== 'live') return { tone: 'idle', label: statusLine(s) }
   if (s.activity === 'speaking') return { tone: 'speaking', label: 'Speaking' }
@@ -190,18 +300,32 @@ export function orb(s) {
 
 // bubbleOrb is the bubble's ring: while it is held and the microphone is
 // open, Voice listens, even over its own speech.
-export const bubbleOrb = (s, held) => (held && capturing(s) ? { tone: 'listening', label: 'Listening' } : orb(s))
+export const bubbleOrb = (s: CallState, held: boolean): Orb => (held && capturing(s) ? { tone: 'listening', label: 'Listening' } : orb(s))
+
+// MicControl is the one mic button.
+export interface MicControl {
+  hold: boolean
+  pressed: boolean
+  label: string
+}
 
 // micControl is the one mic button: tap to mute in open mic, hold to talk
 // in push to talk.
-export function micControl(s) {
+export function micControl(s: CallState): MicControl {
   if (s.pushToTalk) return { hold: true, pressed: s.talking, label: s.talking ? 'Talking' : 'Hold to talk' }
   return { hold: false, pressed: s.muted, label: s.muted ? 'Unmute' : 'Mute' }
 }
 
+// MicMode is one microphone mode: on is the pushToTalk value it sets.
+export interface MicMode {
+  label: string
+  on: boolean
+  current: boolean
+}
+
 // micModes are the microphone mode menu's items: on is the pushToTalk value
 // each one sets, current marks the mode in use.
-export const micModes = (s) => [
+export const micModes = (s: CallState): MicMode[] => [
   { label: 'Open mic', on: false, current: !s.pushToTalk },
   { label: 'Push to talk', on: true, current: s.pushToTalk },
 ]

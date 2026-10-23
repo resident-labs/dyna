@@ -1,25 +1,86 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createPlayer } from './audio.js'
+import { createPlayer, openAudio, type PlaybackContext, type PlaybackSource } from './audio.ts'
+import { createCall, type CallSocket } from './call.ts'
 import { encodeFrame } from './pcm.ts'
 
-// fakeContext plays nothing; the test ends sources by hand.
-function fakeContext() {
-  const ctx = { currentTime: 0, sources: [] }
-  ctx.createBuffer = (_, n, rate) => ({ duration: n / rate, getChannelData: () => new Float32Array(n) })
-  ctx.createBufferSource = () => {
-    const src = { connect() {}, start(at) { src.at = at }, stop() { src.stopped = true } }
-    ctx.sources.push(src)
+// FakeSource is an audio source node the test starts and ends by hand.
+interface FakeSource extends Omit<PlaybackSource, 'onended'> {
+  at?: number
+  stopped?: boolean
+  onended: (() => void) | null
+}
+
+// FakeGain is a gain node's AudioParam, as the ducker drives it.
+interface FakeGain {
+  value: number
+  cancelScheduledValues(): void
+  setTargetAtTime(value: number): void
+  setValueAtTime(value: number): void
+  linearRampToValueAtTime(value: number): void
+}
+
+// The contexts the call opened, newest last.
+const contexts: FakeAudioContext[] = []
+// lastContext is the context the call just opened.
+function lastContext(): FakeAudioContext {
+  const ctx = contexts.at(-1)
+  if (!ctx) throw new Error('the call opened no AudioContext')
+  return ctx
+}
+
+// FakeAudioContext plays nothing; the test ends sources by hand.
+class FakeAudioContext implements PlaybackContext {
+  currentTime = 0
+  sources: FakeSource[] = []
+  sampleRate = 48000
+  destination = {}
+  gains: FakeGain[] = []
+  audioWorklet = { addModule: async (_url: string) => {} }
+  constructor() { contexts.push(this) }
+  resume() {}
+  close() {}
+  createMediaStreamSource(_stream: MediaStream) { return { connect(_node: unknown) {} } }
+  createBuffer(_channels: number, length: number, rate: number) {
+    return { duration: length / rate, getChannelData: (_channel: number) => new Float32Array(length) }
+  }
+  createBufferSource(): FakeSource {
+    const src: FakeSource = { buffer: null, onended: null, connect(_node: unknown) {}, start(at = 0) { src.at = at }, stop() { src.stopped = true } }
+    this.sources.push(src)
     return src
   }
-  return ctx
+  createGain() {
+    const gain: FakeGain = {
+      value: 1,
+      cancelScheduledValues() {},
+      setTargetAtTime(value) { gain.value = value },
+      setValueAtTime(value) { gain.value = value },
+      linearRampToValueAtTime(value) { gain.value = value },
+    }
+    this.gains.push(gain)
+    return { gain, connect(_node: unknown) {} }
+  }
+}
+
+// The worklet nodes the call made, newest last; their ports carry the
+// microphone's frames. audio.ts replaces onmessage when capture starts.
+const mics: FakeWorkletNode[] = []
+class FakeWorkletNode {
+  port: { onmessage: (e: { data: Float32Array }) => void } = { onmessage: () => {} }
+  constructor() { mics.push(this) }
+}
+// mic is the worklet node the call just made.
+function mic(): FakeWorkletNode {
+  const m = mics.at(-1)
+  if (!m) throw new Error('the call opened no microphone')
+  return m
 }
 
 const chunk = encodeFrame(new Float32Array(240).fill(0.1), 24000, 24000) // 10 ms
 
 function setup() {
-  const ctx = fakeContext()
-  const got = []
+  const ctx = new FakeAudioContext()
+  const got: (string | number)[][] = []
   const player = createPlayer(ctx, {}, {
     started: (id) => got.push(['started', id]),
     ended: (id, ms) => got.push(['ended', id, Math.round(ms)]),
@@ -34,10 +95,10 @@ test('chunks play back to back; started once per response, ended after done and 
   player.play(chunk, 24000, 'r1')
   assert.deepEqual(ctx.sources.map((s) => s.at), [0, 0.01])
   assert.deepEqual(got, [['started', 'r1']])
-  ctx.sources[0].onended()
+  ctx.sources[0]?.onended?.()
   player.done('r1')
   assert.deepEqual(got, [['started', 'r1']], 'ended before the last chunk drained')
-  ctx.sources[1].onended()
+  ctx.sources[1]?.onended?.()
   // Two 10 ms chunks played in full.
   assert.deepEqual(got, [['started', 'r1'], ['ended', 'r1', 20]])
 })
@@ -54,7 +115,7 @@ test('stop drops queued audio at once and cancels each response with the reason'
   // The next response starts now, not after the dropped queue.
   ctx.currentTime = 0.006
   player.play(chunk, 24000, 'r3')
-  assert.equal(ctx.sources.at(-1).at, 0.006)
+  assert.equal(ctx.sources.at(-1)?.at, 0.006)
 })
 
 test('done for a response with no audio sends nothing', () => {
@@ -77,7 +138,7 @@ test("a response queued behind another reports started only when its audio start
   assert.deepEqual(got, [['started', 'r1'], ['started', 'r2']])
   // r2 cannot end before it started, even if done and drained early.
   player.done('r2')
-  ctx.sources[2].onended()
+  ctx.sources[2]?.onended?.()
   assert.deepEqual(got.at(-1), ['ended', 'r2', 10])
 })
 
@@ -95,59 +156,32 @@ test('barge-in drops a pending started receipt', (t) => {
 // Exercise the real call, microphone and player wiring. Noise must not
 // lower playback by default, and server interruption must still stop it.
 test('ducking is opt-in and ignores background noise and short bursts', async (t) => {
-  const contexts = []
-  let mic
-  const install = (name, value) => {
+  const install = (name: string, value: unknown) => {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name)
     Object.defineProperty(globalThis, name, { configurable: true, value })
-    t.after(() => { if (previous) Object.defineProperty(globalThis, name, previous); else delete globalThis[name] })
+    t.after(() => { if (previous) Object.defineProperty(globalThis, name, previous); else Reflect.deleteProperty(globalThis, name) })
   }
   install('navigator', { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } })
-  install('AudioWorkletNode', class { constructor() { this.port = {}; mic = this } })
-  install('AudioContext', class {
-    constructor() {
-      Object.assign(this, fakeContext())
-      this.sampleRate = 48000
-      this.destination = {}
-      this.audioWorklet = { addModule: async () => {} }
-      this.gains = []
-      contexts.push(this)
-    }
-    resume() {}
-    close() {}
-    createMediaStreamSource() { return { connect() {} } }
-    createGain() {
-      const gain = {
-        value: 1,
-        cancelScheduledValues() {},
-        setTargetAtTime(value) { this.value = value },
-        setValueAtTime(value) { this.value = value },
-        linearRampToValueAtTime(value) { this.value = value },
-      }
-      this.gains.push(gain)
-      return { gain, connect() {} }
-    }
-  })
-  const { openAudio } = await import('./audio.js')
-  const { createCall } = await import('./call.js')
-  const start = async (ducking) => {
-    const ws = { readyState: 0, send() {}, close() {} }
+  install('AudioWorkletNode', FakeWorkletNode)
+  install('AudioContext', FakeAudioContext)
+  const start = async (ducking: boolean | undefined) => {
+    const ws: CallSocket = { readyState: 0, onopen: null, onmessage: null, onclose: null, send() {}, close() {} }
     const call = createCall({
-      api: { voiceStart: async () => ({}), voiceStop: async () => {} },
+      api: { voiceStart: async () => ({}), voiceStatus: async () => null, voiceStop: async () => {}, voiceResume: async () => ({}) },
       socket: () => ws,
       openAudio: (frame, receipts) => openAudio(frame, receipts, ducking),
     })
     await call.start('room_1', 'voice-test')
     ws.readyState = 1
-    ws.onopen()
-    const receive = (event) => ws.onmessage({ data: JSON.stringify(event) })
+    ws.onopen?.(new Event('open'))
+    const receive = (event: unknown) => ws.onmessage?.(new MessageEvent('message', { data: JSON.stringify(event) }))
     receive({ type: 'state', state: 'speaking' })
     receive({ type: 'audio', id: 'r1', audio: chunk })
-    return { call, receive, ctx: contexts.at(-1) }
+    return { call, receive, ctx: lastContext() }
   }
-  const frame = (ctx, level, ms) => {
+  const frame = (ctx: FakeAudioContext, level: number, ms: number) => {
     ctx.currentTime += ms / 1000
-    mic.port.onmessage({ data: new Float32Array(ms * ctx.sampleRate / 1000).fill(level) })
+    mic().port.onmessage({ data: new Float32Array(ms * ctx.sampleRate / 1000).fill(level) })
   }
   const off = await start(undefined)
   frame(off.ctx, 0.25, 200)

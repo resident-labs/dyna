@@ -11,3 +11,6 @@ export const icons = {
   close: 'M6 6l12 12M18 6L6 18',
   more: 'M6 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM12 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM18 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z',
 }
+
+// IconName names one of the call's icons. Views pass an icon by name.
+export type IconName = keyof typeof icons
