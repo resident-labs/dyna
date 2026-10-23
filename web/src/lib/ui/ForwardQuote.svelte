@@ -51,7 +51,7 @@
     <div class="prose fwdtext" class:expanded bind:this={textEl} tabindex={expanded ? 0 : undefined} role={expanded ? 'region' : undefined} aria-label={expanded ? 'Full forwarded post' : undefined}>{@html markdown(parts.text)}</div>
     {#if onremove && overflowing}<button class="disclosure" aria-expanded={expanded} onclick={() => expanded = !expanded}>{expanded ? 'Show less' : 'Show full post'}</button>{/if}
   {/if}
-  {#if parts.attachments.length}<div class="fwdfiles"><PostFiles roomId={post.roomId || room.id} {post} {parts} onopen={onopenfile} /></div>{/if}
+  {#if parts.attachments.length || post.references?.length}<div class="fwdfiles"><PostFiles roomId={post.roomId || room.id} {post} {parts} onopen={onopenfile} /></div>{/if}
 </div>
 
 <style>
