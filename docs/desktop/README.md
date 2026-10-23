@@ -590,7 +590,8 @@ The host watcher batches CI failures and useful comments to the author,
 starts the room's reviewer alongside CI, and sends Dyna approvals to the
 owner. "Ready to land" and CI escalations walk from the author up its parent
 chain to the first open session. The engine merges approved PRs after their
-merge batch passes CI. CI failures do not stop active author work. See [PR tracking and agent review](../pr-tracking.md) for the
+merge batch passes CI, or root explicitly accepts every failing test as flaky.
+CI failures do not stop active author work. See [PR tracking and agent review](../pr-tracking.md) for the
 commands, hidden comment markers, pause reasons, and watcher lifecycle.
 PR status, check details, room reviewer settings, untrack, and resume are
 available through the same App APIs on desktop and web. PR changes emit live
