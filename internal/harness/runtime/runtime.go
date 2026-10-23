@@ -20,7 +20,6 @@ import (
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/store"
-	"dyna-agent/internal/terminalsvc"
 )
 
 type Pin struct {
@@ -46,7 +45,6 @@ type Runtime struct {
 	privateSwitch          privateRuntimeControls
 	privateLoginMu         sync.Mutex
 	privateLogins          map[string]*privateRuntimeLogin
-	terminals              *terminalsvc.Service
 	lifetime               context.Context
 	Bundles                *BundleManager
 	Accounts               *Accounts
@@ -519,9 +517,6 @@ func Capabilities() []Capability {
 	}
 	return out
 }
-
-// SetTerminals connects native sign-in to the process terminal service.
-func (r *Runtime) SetTerminals(terminals *terminalsvc.Service) { r.terminals = terminals }
 
 // SetLifetime sets the process context before the runtime starts serving calls.
 // Native sign-in and account switches continue when an API request ends.

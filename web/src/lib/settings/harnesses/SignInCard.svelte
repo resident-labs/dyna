@@ -87,8 +87,8 @@
         </label>
       {:else}
         <label>
-          <span class="muted small">Paste the code or redirect URL from your browser</span>
-          <input bind:value={pasted} autocomplete="off" spellcheck="false" disabled={busy} aria-label="Sign-in response" />
+          <span class="muted small">{signIn.secretInput ? 'OpenCode Go API key' : 'Paste the code or redirect URL from your browser'}</span>
+          <input type={signIn.secretInput ? 'password' : 'text'} bind:value={pasted} autocomplete="off" spellcheck="false" disabled={busy} aria-label="Sign-in response" />
         </label>
       {/if}
       <button type="submit" class="btn" disabled={busy || choicePending || (choices.length ? !selectedChoice : !pasted.trim())}>Continue</button>

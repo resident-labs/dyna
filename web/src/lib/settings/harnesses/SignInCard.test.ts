@@ -9,7 +9,7 @@ import { compileSvelteModule, svelteEsbuildPlugin } from '../../../../test/svelt
 import { installDom, domNames } from '../../prs/prDetailHarness.ts'
 import { element } from '../../../../test/need.ts'
 
-test('a submitted choice stays locked across busy changes and polls, with retry after a failed send', async (t) => {
+test('the card locks submitted choices, retries failed sends, and masks provider keys', async (t) => {
   const calls: string[] = []
   let finish: (sent: boolean) => void = () => {}
   const dom = installDom({
@@ -81,6 +81,20 @@ test('a submitted choice stays locked across busy changes and polls, with retry 
     assert.equal(button().disabled, true)
     submit()
     assert.deepEqual(calls, ['anthropic', 'manual', 'manual'])
+
+    m.props.signIn = {phase: 'waiting', acceptsPaste: true, secretInput: true, message: 'Paste your OpenCode Go API key.'}
+    m.flushSync()
+    const input = element<HTMLInputElement>(target, 'input')
+    assert.equal(input.type, 'password', 'provider keys stay masked')
+    input.value = 'fixture-api-key'
+    input.dispatchEvent(new Event('input', {bubbles: true}))
+    m.flushSync()
+    submit()
+    finish(true)
+    await settle()
+    assert.equal(calls.at(-1), 'fixture-api-key')
+    assert.equal(input.value, '', 'sending clears the key from the card')
+    assert.doesNotMatch(target.textContent ?? '', /fixture-api-key/)
   } finally {
     await m.unmount(app)
   }

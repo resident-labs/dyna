@@ -1,23 +1,18 @@
 package runtime
 
-import (
-	"errors"
-	"sort"
+import "sort"
 
-	"dyna-agent/internal/terminalsvc"
-)
-
-// PrivateRuntimeLogins lets a remounted client recover each native terminal.
+// PrivateRuntimeLogins lets a remounted client recover each sign-in card.
 // Only public identifiers and warnings leave the desktop process.
 func (a *Runtime) PrivateRuntimeLogins() []PrivateLogin {
 	a.privateLoginMu.Lock()
 	defer a.privateLoginMu.Unlock()
 	out := []PrivateLogin{}
 	for id, login := range a.privateLogins {
-		row := PrivateLogin{AccountID: id, TerminalID: login.terminalID, Warning: login.flow.Warning}
-		if login.signIn != nil {
-			state := login.signIn.snapshot()
-			row.SignIn = &state
+		state := login.signIn.snapshot()
+		row := PrivateLogin{AccountID: id, SignIn: &state}
+		if login.flow != nil {
+			row.Warning = login.flow.Warning
 		}
 		out = append(out, row)
 	}
@@ -40,33 +35,14 @@ func (a *Runtime) cancelPrivateLogin(id string) error {
 	}
 	login.control.Lock()
 	defer login.control.Unlock()
-	flow, terminalID := login.flow, login.terminalID
-	if login.signIn != nil {
-		// Stop and join native work before restoring credentials or releasing the gate.
-		login.signIn.set(func(st *SignInState) { st.Phase = signInCancelled })
-		login.finished = true
-		login.signIn.stop()
-		<-login.signIn.done
-		err := flow.Cancel()
-		a.privateLoginMu.Lock()
-		if a.privateLogins[id] == login {
-			delete(a.privateLogins, id)
-		}
-		a.privateLoginMu.Unlock()
-		return err
+	// Stop and join native work before restoring credentials or releasing the gate.
+	login.signIn.set(func(st *SignInState) { st.Phase = signInCancelled })
+	login.signIn.stop()
+	<-login.signIn.done
+	var err error
+	if login.flow != nil {
+		err = login.flow.Cancel()
 	}
-	if a.terminals != nil {
-		for _, terminal := range a.terminals.List("") {
-			if terminal.ID == terminalID {
-				if err := a.terminals.Close(terminalID); err != nil && !errors.Is(err, terminalsvc.ErrNotFound) {
-					return err
-				}
-				break
-			}
-		}
-	}
-	err := flow.Cancel()
-	login.finished = true
 	a.privateLoginMu.Lock()
 	if a.privateLogins[id] == login {
 		delete(a.privateLogins, id)
