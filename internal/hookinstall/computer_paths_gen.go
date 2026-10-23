@@ -39,4 +39,5 @@ var computerCodePaths = []string{
 	"internal/userservices",
 	"internal/websvc/devicestore",
 	"internal/workeroutput",
+	"internal/workeroutput/projection",
 }

@@ -31,6 +31,7 @@ import (
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/workeroutput"
+	"dyna-agent/internal/workeroutput/projection"
 )
 
 // Event is one line in events.jsonl.
@@ -268,6 +269,29 @@ func ReadNormalizedOutputPath(path string, offset, limit int64) ([]workeroutput.
 // newest records. The returned offset includes all complete records scanned.
 func ReadNormalizedOutputTailPath(path string, offset, limit int64, maxEvents int) ([]workeroutput.Event, int64, error) {
 	return readJSONLines[workeroutput.Event](path, offset, limit, normalizedOutputMaxRecordBytes, jsonLinesPolicy{keepLast: maxEvents})
+}
+
+// ReadProjectedNormalizedOutputPath resolves conversions by stable artifact key.
+func ReadProjectedNormalizedOutputPath(dataDir, key, path string, offset, limit int64) ([]workeroutput.Event, int64, error) {
+	return ReadProjectedNormalizedOutputTailPath(dataDir, key, path, offset, limit, 0)
+}
+
+// ReadProjectedNormalizedOutputTailPath bounds retained events while preserving
+// the original source cursor, including malformed complete source lines.
+func ReadProjectedNormalizedOutputTailPath(dataDir, key, path string, offset, limit int64, maxEvents int) ([]workeroutput.Event, int64, error) {
+	reader, err := projection.Open(dataDir, key, path)
+	if err != nil {
+		return nil, offset, err
+	}
+	defer reader.Close()
+	return readJSONLinesDecoded(path, offset, limit, normalizedOutputMaxRecordBytes, jsonLinesPolicy{keepLast: maxEvents}, func(start, end int64, raw []byte) (event workeroutput.Event, ok bool, err error) {
+		event, ok, err = reader.Event(start, end, raw)
+		if err != nil || ok {
+			return event, ok, err
+		}
+		err = json.Unmarshal(raw, &event)
+		return event, err == nil, nil
+	})
 }
 
 // OutputProfilesPath is the run-start snapshot of output-relevant profile
@@ -847,15 +871,53 @@ type jsonLinesPolicy struct {
 }
 
 func readJSONLines[T any](path string, offset int64, limit int64, maxRecordBytes int, policy jsonLinesPolicy) ([]T, int64, error) {
+	return readJSONLinesDecoded(path, offset, limit, maxRecordBytes, policy, func(_, _ int64, line []byte) (record T, ok bool, err error) {
+		return record, json.Unmarshal(line, &record) == nil, nil
+	})
+}
+
+func readJSONLinesDecoded[T any](path string, offset, limit int64, maxRecordBytes int, policy jsonLinesPolicy, decode func(int64, int64, []byte) (T, bool, error)) ([]T, int64, error) {
+	var out []T
+	oldest := 0
+	next, err := visitJSONLines(path, offset, limit, maxRecordBytes, policy, func(start, end int64, line []byte) error {
+		record, ok, err := decode(start, end, line)
+		if err != nil {
+			return err
+		}
+		if ok {
+			if policy.keepLast > 0 && len(out) == policy.keepLast {
+				out[oldest] = record
+				oldest = (oldest + 1) % len(out)
+			} else {
+				out = append(out, record)
+			}
+		}
+		return nil
+	})
+	if oldest > 0 {
+		out = append(out[oldest:len(out):len(out)], out[:oldest]...)
+	}
+	return out, next, err
+}
+
+// VisitNormalizedOutputLines visits complete source lines with original offsets.
+// Oversized lines have nil bytes. Partial trailing lines remain uncommitted.
+func VisitNormalizedOutputLines(path string, offset, limit int64, visit func(projection.Line) error) (int64, error) {
+	return visitJSONLines(path, offset, limit, normalizedOutputMaxRecordBytes, jsonLinesPolicy{}, func(start, end int64, raw []byte) error {
+		return visit(projection.Line{Start: start, End: end, Raw: raw})
+	})
+}
+
+func visitJSONLines(path string, offset, limit int64, maxRecordBytes int, policy jsonLinesPolicy, visit func(int64, int64, []byte) error) (int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, offset, err
+		return offset, err
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		return nil, offset, err
+		return offset, err
 	}
 	// Run files are append-only. If a retained offset lies past EOF (for
 	// example after an unexpected truncation), restart from the beginning.
@@ -865,12 +927,10 @@ func readJSONLines[T any](path string, offset int64, limit int64, maxRecordBytes
 		offset = 0
 	}
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
-		return nil, offset, err
+		return offset, err
 	}
 
 	next := offset
-	var out []T
-	oldest := 0
 	var src io.Reader = f
 	if limit > 0 {
 		src = io.LimitReader(f, limit)
@@ -885,7 +945,7 @@ func readJSONLines[T any](path string, offset int64, limit int64, maxRecordBytes
 		if !oversized {
 			if lineBytes > maxRecordBytes {
 				if policy.errorOversized {
-					return nil, next, bufio.ErrTooLong
+					return next, bufio.ErrTooLong
 				}
 				// Bound memory for corrupt or unexpectedly huge records. A
 				// newline-terminated oversized record is committed and skipped,
@@ -902,21 +962,17 @@ func readJSONLines[T any](path string, offset int64, limit int64, maxRecordBytes
 		// Scanner-based legacy reads need room beyond a full buffer to
 		// observe EOF for an unterminated record.
 		if policy.errorOversized && readErr == io.EOF && lineBytes >= maxRecordBytes {
-			return nil, next, bufio.ErrTooLong
+			return next, bufio.ErrTooLong
 		}
 		if (len(fragment) > 0 && fragment[len(fragment)-1] == '\n') || (policy.acceptFinal && readErr == io.EOF && lineBytes > 0) {
 			// A malformed complete record is committed too: advancing past it
 			// avoids attempting to decode it on every subsequent poll.
+			var raw []byte
 			if !oversized {
-				var record T
-				if json.Unmarshal(line, &record) == nil {
-					if policy.keepLast > 0 && len(out) == policy.keepLast {
-						out[oldest] = record
-						oldest = (oldest + 1) % len(out)
-					} else {
-						out = append(out, record)
-					}
-				}
+				raw = line
+			}
+			if err := visit(next, next+int64(lineBytes), raw); err != nil {
+				return next, err
 			}
 			next += int64(lineBytes)
 			line = line[:0]
@@ -925,12 +981,9 @@ func readJSONLines[T any](path string, offset int64, limit int64, maxRecordBytes
 		}
 		if readErr != nil {
 			if readErr == io.EOF {
-				if oldest > 0 {
-					out = append(out[oldest:len(out):len(out)], out[:oldest]...)
-				}
-				return out, next, nil
+				return next, nil
 			}
-			return out, next, readErr
+			return next, readErr
 		}
 	}
 }
