@@ -125,7 +125,7 @@ var tables sync.Map // *sql.DB -> true
 
 // readable opens dyna.db for reads. It never creates the table, so a read
 // inside another store's transaction never waits for the writer; until the
-// first write there are no rows, and readers use the legacy files.
+// first write there are no rows.
 func readable(sessions string) (*sql.DB, bool, error) {
 	db, err := database.Open(filepath.Dir(sessions))
 	if err != nil {
@@ -509,12 +509,7 @@ ON CONFLICT(key) DO UPDATE SET value = CAST(value AS INTEGER) + 1`, DeletesKey)
 	return err
 }
 
-// IDs lists the sessions in name order: every record, and every session
-// folder under sessions, whatever its name, so careful readers see damaged
-// or stray folders too. A folder entry that is a symlink could lead out of
-// sessions: it is left out, and IDs still returns the others with an
-// ErrRecord error. Careful readers stop on that error; others may use the
-// safe IDs (see SafeIDs).
+// IDs lists canonical session records in name order, including history.
 func IDs(sessions string) ([]string, error) {
 	versions, err := Versions(sessions)
 	if versions == nil {
@@ -532,15 +527,13 @@ func IDs(sessions string) ([]string, error) {
 }
 
 // Versions is IDs with each record's version, read in one query, so a
-// listing can check its cached copies without a query per session. A folder
-// without a record or legacy file has an empty version.
+// listing can check its cached copies without a query per session.
 func Versions(sessions string) (map[string]Version, error) {
 	return versions(sessions, versionsQuery)
 }
 
-// OpenVersions is Versions for open sessions only: the rows whose record is
-// not closed, read through session_records_closed without touching closed
-// rows, and the session folders that have no row yet.
+// OpenVersions is Versions for open sessions only, including history. It
+// reads session_records_closed without touching closed rows or session folders.
 func OpenVersions(sessions string) (map[string]Version, error) {
 	return versions(sessions, openQuery)
 }
@@ -550,22 +543,13 @@ func versions(sessions, query string) (map[string]Version, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Folders first: a session started meanwhile has its folder before its
-	// row, so one of the two reads finds it.
-	legacy, err := legacyFolders(db, ok, sessions)
-	if err != nil {
-		return nil, err
-	}
-	out := make(map[string]Version, len(legacy.ids))
-	for _, id := range legacy.ids {
-		out[id], _ = legacyVersion(sessions, id)
-	}
+	out := make(map[string]Version)
 	if ok {
 		if err := scanVersions(db, query, out); err != nil {
 			return nil, err
 		}
 	}
-	return out, legacy.unsafe
+	return out, nil
 }
 
 // The listing queries read only session_records_closed (see recordSchema).
@@ -573,10 +557,6 @@ const (
 	versionsQuery = "SELECT id, revision FROM session_records"
 	openQuery     = "SELECT id, revision FROM session_records WHERE closed = 0"
 )
-
-func readVersions(db *sql.DB, out map[string]Version) error {
-	return scanVersions(db, versionsQuery, out)
-}
 
 func scanVersions(db *sql.DB, query string, out map[string]Version) error {
 	rows, err := db.Query(query)
@@ -595,91 +575,54 @@ func scanVersions(db *sql.DB, query string, out map[string]Version) error {
 	return errors.Join(rows.Err(), rows.Close())
 }
 
-// Each calls fn with every session record in name order: one query for the
-// rows, then the legacy files of session folders that have no row yet. With
-// open, closed records are left out by the query. A record that cannot be
-// read reaches fn with its error; fn decides whether that stops the scan.
-// Folder entries that are symlinks are left out and returned as an ErrRecord
-// error at the end, as IDs does.
+// Each calls fn with every canonical session record in name order,
+// including history. With open, the query leaves out closed records. A
+// damaged record reaches fn with ErrRecord; fn decides whether to stop.
+// The cursor closes before callbacks run, so callbacks can write records.
 func Each(sessions string, open bool, fn func(id string, raw []byte, err error) error) error {
 	db, ok, err := readable(sessions)
+	if err != nil || !ok {
+		return err
+	}
+	query := "SELECT id, meta FROM session_records"
+	if open {
+		query += " WHERE closed = 0"
+	}
+	res, err := db.Query(query + " ORDER BY id")
 	if err != nil {
 		return err
 	}
-	// One query: a session that reopens between two queries would be in
-	// neither, and fall back to an old file.
-	rows := map[string][]byte{}
-	listed := map[string]bool{} // closed rows left out by open
-	if ok {
-		res, err := db.Query("SELECT id, closed != 0, CASE WHEN closed != 0 AND ? THEN '' ELSE meta END FROM session_records", open)
-		if err != nil {
-			return err
-		}
-		for res.Next() {
-			var id, meta string
-			var closed bool
-			if err := res.Scan(&id, &closed, &meta); err != nil {
-				res.Close()
-				return err
-			}
-			if closed && open {
-				listed[id] = true
-			} else {
-				rows[id] = []byte(meta)
-			}
-		}
-		if err := errors.Join(res.Err(), res.Close()); err != nil {
-			return err
-		}
+	type record struct {
+		id  string
+		raw []byte
 	}
-	entries, err := os.ReadDir(sessions)
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	var records []record
+	for res.Next() {
+		var r record
+		if err := res.Scan(&r.id, &r.raw); err != nil {
+			res.Close()
+			return err
+		}
+		records = append(records, r)
+	}
+	if err := errors.Join(res.Err(), res.Close()); err != nil {
 		return err
 	}
-	var unsafe error
-	legacy := map[string]bool{}
-	for _, e := range entries {
-		id := e.Name()
-		switch {
-		case e.Type()&os.ModeSymlink != 0:
-			unsafe = errors.Join(unsafe, fmt.Errorf("%w: session entry %q is a symlink", ErrRecord, id))
-		case e.IsDir() && rows[id] == nil && !listed[id]:
-			legacy[id] = true
+	for _, r := range records {
+		var err error
+		if !isObject(r.raw) {
+			err = fmt.Errorf("%w: session %s record is not a bounded JSON object", ErrRecord, r.id)
 		}
-	}
-	ids := make([]string, 0, len(rows)+len(legacy))
-	for id := range rows {
-		ids = append(ids, id)
-	}
-	for id := range legacy {
-		ids = append(ids, id)
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		raw, err := rows[id], error(nil)
-		if raw == nil {
-			if raw, _, err = legacyLoadRaw(sessions, id); errors.Is(err, os.ErrNotExist) {
-				continue
-			}
-		}
-		if err == nil && !isObject(raw) {
-			err = fmt.Errorf("%w: session %s record is not a bounded JSON object", ErrRecord, id)
-		}
-		if err := fn(id, raw, err); err != nil {
+		if err := fn(r.id, r.raw, err); err != nil {
 			return err
 		}
 	}
-	return unsafe
+	return nil
 }
 
-// SafeIDs is IDs for readers that skip unsafe entries rather than stop: only
-// a failure to list the sessions is an error.
+// SafeIDs lists canonical session records in name order, as IDs does.
 func SafeIDs(sessions string) ([]string, error) {
-	ids, err := IDs(sessions)
-	if errors.Is(err, ErrRecord) {
-		err = nil
-	}
-	return ids, err
+	return IDs(sessions)
 }
 
 // Revision changes whenever any stored session record is written or removed:
