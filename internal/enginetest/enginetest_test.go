@@ -125,9 +125,21 @@ func TestFakeEngineIsolatesTemplateRegistry(t *testing.T) {
 	config := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", config)
 	registry := workflowtemplate.DefaultRegistryDir()
-	enginetest.Serve(t, t.TempDir(), map[string]websvc.Call{})
-	if got := workflowtemplate.DefaultRegistryDir(); got == registry {
-		t.Fatalf("fake engine kept caller template registry %s", got)
+	dataDir := t.TempDir()
+	enginetest.Serve(t, dataDir, map[string]websvc.Call{})
+	if got := workflowtemplate.DefaultRegistryDir(); got != registry {
+		t.Fatalf("fake engine hid caller config: registry = %s; want %s", got, registry)
+	}
+	db, err := database.Open(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var migratedRegistry string
+	if err := db.QueryRow("SELECT registry FROM workflow_template_seeds").Scan(&migratedRegistry); err != nil {
+		t.Fatal(err)
+	}
+	if migratedRegistry == registry {
+		t.Fatalf("fake engine migrated caller template registry %s", registry)
 	}
 	if _, err := os.Stat(registry); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("fake engine touched caller template registry: %v", err)
