@@ -542,11 +542,11 @@ func NewDemoCommand() *cobra.Command {
 // from Options.Demo in memory, so they never reach the owner's profile store.
 func demoProfiles() []profile.Profile {
 	return []profile.Profile{
-		{Name: "mock-workhorse", Harness: profile.HarnessMock, Taste: 4, Intelligence: 10, Cost: 6,
+		{Name: "mock-workhorse", Harness: profile.HarnessMock, Taste: 4, Diagnostics: 3, Intelligence: 10, Cost: 6,
 			Description: "Demo worker. Pretend GPT-class workhorse: grinds long tasks alone, correct but unpolished code, weak frontend taste."},
-		{Name: "mock-reviewer", Harness: profile.HarnessMock, Taste: 10, Intelligence: 8, Cost: 4,
+		{Name: "mock-reviewer", Harness: profile.HarnessMock, Taste: 10, Diagnostics: 9, Intelligence: 8, Cost: 4,
 			Description: "Demo worker. Pretend Opus-class reviewer: excellent taste, finds subtle issues, great frontend instincts, pricey."},
-		{Name: "mock-sprinter", Harness: profile.HarnessMock, Taste: 8, Intelligence: 6, Cost: 10,
+		{Name: "mock-sprinter", Harness: profile.HarnessMock, Taste: 8, Diagnostics: 5, Intelligence: 6, Cost: 10,
 			Description: "Demo worker. Pretend GLM-class sprinter: fast and very cheap, great taste, slightly below the big models."},
 	}
 }

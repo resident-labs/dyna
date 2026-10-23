@@ -12,6 +12,7 @@ export interface ProfileView {
   models?: string[]
   fallback: string
   taste: number
+  diagnostics: number
   intelligence: number
   cost: number
   timeoutSec: number
