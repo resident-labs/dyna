@@ -147,8 +147,8 @@ func TestChangesSinceWalksOnlyWhenTheFoldersChange(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "meta.json"), []byte(`{"id":"wf_walk-old","status":"running"}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if c, err := ChangesSince(0); err != nil || len(c.Live) != 2 || c.Changed["wf_walk-old"].Status != "running" {
-		t.Fatalf("after a new folder = %+v, %v; want both runs, the new one imported", c, err)
+	if c, err := ChangesSince(0); err != nil || len(c.Live) != 2 || len(c.Changed) != 1 || c.Changed["wf_walk-a"].Status != "running" {
+		t.Fatalf("after a new folder = %+v, %v; want both folders and only the canonical row", c, err)
 	}
 	if walks != 2 {
 		t.Fatalf("walks = %d; want one more for the new folder", walks)

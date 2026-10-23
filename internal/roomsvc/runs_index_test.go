@@ -32,9 +32,8 @@ func TestRunIndexReadsDynaDB(t *testing.T) {
 	}
 }
 
-// A runner from the earlier release finishes its run by writing only
-// meta.json, in place. The index shows the finished run.
-func TestRunIndexSeesOldBinaryMetaWrite(t *testing.T) {
+// A stale metadata file cannot change the canonical index.
+func TestRunIndexIgnoresStaleMetaWrite(t *testing.T) {
 	e := newEnv(t)
 	alpha := e.room("alpha")
 	m := runstore.Meta{ID: "wf_20261020-000002-bbbbbbbb", Name: "w", Status: "running", RoomID: alpha.ID, StartedAt: time.Now()}
@@ -48,8 +47,8 @@ func TestRunIndexSeesOldBinaryMetaWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 	list, err := e.svc.Runs("alpha")
-	if err != nil || list.Running != 0 || len(list.Runs) != 1 || list.Runs[0].Status != "ok" {
-		t.Fatalf("runs after the old binary's finish = %+v, %v; want ok", list, err)
+	if err != nil || list.Running != 1 || len(list.Runs) != 1 || list.Runs[0].Status != "running" {
+		t.Fatalf("runs after the old binary's finish = %+v, %v; want running", list, err)
 	}
 }
 

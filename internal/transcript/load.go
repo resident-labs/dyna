@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"time"
@@ -41,9 +42,10 @@ type runningTurn struct {
 }
 
 type sessionCache struct {
-	mu      sync.Mutex
-	done    map[int]cachedTurn
-	running map[int]runningTurn
+	mu           sync.Mutex
+	done         map[int]cachedTurn
+	running      map[int]runningTurn
+	dataDir, key string
 }
 
 // Loader reads sessions incrementally and permits concurrent loads across sessions.
@@ -65,7 +67,7 @@ func (l *Loader) cache(id string) *sessionCache {
 	defer l.mu.Unlock()
 	c := l.caches[id]
 	if c == nil {
-		c = &sessionCache{done: map[int]cachedTurn{}, running: map[int]runningTurn{}}
+		c = &sessionCache{done: map[int]cachedTurn{}, running: map[int]runningTurn{}, dataDir: filepath.Dir(l.Store.Root), key: "sessions/" + id + "/agents/1"}
 		l.caches[id] = c
 	}
 	return c
@@ -93,7 +95,7 @@ func (c *sessionCache) read(path string, t subagent.Turn, following *subagent.Tu
 			return r.events, r.omitted
 		}
 	}
-	events, next, err := runstore.ReadNormalizedOutputTailPath(path, r.offset, limit, MaxTurnEvents+1)
+	events, next, err := runstore.ReadProjectedNormalizedOutputTailPath(c.dataDir, c.key, path, r.offset, limit, MaxTurnEvents+1)
 	if err != nil {
 		return nil, false
 	}

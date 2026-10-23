@@ -13,7 +13,9 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/settings"
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/subagent"
 )
 
@@ -51,6 +53,7 @@ func writeRun(t *testing.T, m runstore.Meta, events []runstore.Event, result str
 	if err := os.WriteFile(filepath.Join(dir, "meta.json"), b, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	runstoretest.Write(t, store.DataDir(), m)
 	var lines []byte
 	for _, ev := range events {
 		l, _ := json.Marshal(ev)
@@ -141,8 +144,8 @@ func TestRunsShowWhenARunningRunIsPaused(t *testing.T) {
 	}
 }
 
-// TODO: legacy/shim remove later — show file-only pauses from earlier-release runners; remove with the paused file (item 31).
-func TestRunsShowLegacyFileOnlyPause(t *testing.T) {
+// Stale pause files do not override canonical state.
+func TestRunsIgnoreStaleFileOnlyPause(t *testing.T) {
 	e := newEnv(t)
 	alpha := e.room("alpha")
 	running := runstore.Meta{ID: "wf_20261016-000006-ffffffff", Name: "old runner", Status: "running", RoomID: alpha.ID, StartedAt: time.Now()}
@@ -154,13 +157,13 @@ func TestRunsShowLegacyFileOnlyPause(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(runstore.RunsDir(), running.ID, "paused"), []byte("paused\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if !runstore.IsPaused(running.ID) {
-		t.Fatal("IsPaused missed the earlier release's pause file")
+	if runstore.IsPaused(running.ID) {
+		t.Fatal("IsPaused used a stale pause file")
 	}
-	if list, err := e.svc.Runs("alpha"); err != nil || len(list.Runs) != 1 || !list.Runs[0].Paused {
+	if list, err := e.svc.Runs("alpha"); err != nil || len(list.Runs) != 1 || list.Runs[0].Paused {
 		t.Fatalf("runs after file-only pause = %+v %v", list, err)
 	}
-	if d, err := e.svc.RunDetail(running.ID); err != nil || !d.Run.Paused {
+	if d, err := e.svc.RunDetail(running.ID); err != nil || d.Run.Paused {
 		t.Fatalf("detail after file-only pause = %+v %v", d.Run, err)
 	}
 	if err := runstore.SetPaused(running.ID, false); err != nil {
@@ -201,8 +204,7 @@ func TestRunCountsRecountWhenARunEnds(t *testing.T) {
 		t.Fatalf("live run = %+v", l.Runs[0])
 	}
 	m.Status = "error"
-	b, _ := json.Marshal(m)
-	if err := os.WriteFile(filepath.Join(runstore.RunsDir(), m.ID, "meta.json"), b, 0o644); err != nil {
+	if err := runstore.ForceStatus(m.ID, m.Status, m.Error); err != nil {
 		t.Fatal(err)
 	}
 	if l, _ := e.svc.Runs("alpha"); l.Runs[0].Working != 0 {

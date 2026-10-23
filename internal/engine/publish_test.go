@@ -28,6 +28,16 @@ func TestPublishStateRoutesPRChanges(t *testing.T) {
 	if events.Rev() != 1 {
 		t.Fatalf("hub rev %d after a goals change; want 1", events.Rev())
 	}
+	signals.channels["call-requests"] = make(chan struct{}, 1)
+	publish(hub.Event{Topic: "call-requests", Room: "room_1"})
+	if events.Rev() != 1 {
+		t.Fatal("call-request commit bypassed the room watch publisher")
+	}
+	select {
+	case <-signals.channels["call-requests"]:
+	default:
+		t.Fatal("call-request commit did not wake the notifier")
+	}
 	publish(hub.Event{Topic: "localci", Key: "result:head"})
 	for _, worker := range []string{"prs", "merges"} {
 		select {

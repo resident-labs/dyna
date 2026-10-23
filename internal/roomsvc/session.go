@@ -516,6 +516,7 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 	pinSig := map[string]string{}
 	questionSig := map[string]string{}
 	callRequestSig := map[string]string{}
+	var callRequestVersion int64
 	var questionVersion string
 	prSig, prVersion := map[string]string{}, ""
 	prWork := map[string]string{}
@@ -538,7 +539,7 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 		s.scanHookSpool(&hookVersion, first, emit)
 		s.scan(offsets, &roomSig, memberSig, pinSig, first, liveEmit)
 		s.scanQuestions(questionSig, &questionVersion, first, emit)
-		s.scanCallRequests(callRequestSig, first, emit)
+		s.scanCallRequests(callRequestSig, &callRequestVersion, first, emit)
 		s.scanNotices(&noticeVersion, first, emit)
 		// Runs change slowly and a store can hold thousands; scan them on
 		// every fourth tick only.
@@ -553,16 +554,16 @@ func (s *Service) Watch(ctx context.Context, interval time.Duration, emit func(E
 		if s.AfterFirstScan != nil {
 			s.AfterFirstScan()
 		}
-		if !s.waitTick(ctx, tick.C, func() { s.scanPRs(prSig, prWork, &prVersion, false, emit) }, func() { s.scanDirtyMembers(memberSig, liveEmit) }, func() { scanCoordinators(s.takeCoordinatorHints()) }) {
+		if !s.waitTick(ctx, tick.C, func() { s.scanPRs(prSig, prWork, &prVersion, false, emit) }, func() { s.scanDirtyMembers(memberSig, liveEmit) }, func() { scanCoordinators(s.takeCoordinatorHints()) }, func() { s.scanCallRequests(callRequestSig, &callRequestVersion, false, emit) }) {
 			return
 		}
 	}
 }
 
-// waitTick waits for the next tick. A PR wake or a session wake in between
-// scans PRs or the named sessions at once, without the other scans. It
+// waitTick waits for the next tick. Local state wakes scan only the affected
+// store between ticks. It
 // returns false when ctx ends.
-func (s *Service) waitTick(ctx context.Context, tick <-chan time.Time, scanPRs, scanSessions, scanCoordinators func()) bool {
+func (s *Service) waitTick(ctx context.Context, tick <-chan time.Time, scanPRs, scanSessions, scanCoordinators, scanCallRequests func()) bool {
 	for {
 		select {
 		case <-ctx.Done():
@@ -571,6 +572,8 @@ func (s *Service) waitTick(ctx context.Context, tick <-chan time.Time, scanPRs, 
 			return true
 		case <-s.coordinatorWake:
 			scanCoordinators()
+		case <-s.callRequestWake:
+			scanCallRequests()
 		case <-s.prWake:
 			scanPRs()
 		case <-s.sessionWake:
