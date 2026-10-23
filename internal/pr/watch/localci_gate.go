@@ -193,6 +193,20 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 	// so no later step spends an artifact read or a log excerpt on it.
 	snap = withoutLocalHostedCancellations(snap, saved)
 	if !enabled {
+		// In local mode a conclusive local result already tested this head, so
+		// it decides on its own. A host that is briefly unavailable must not
+		// restart the hosted run that local CI replaced: that wait costs a full
+		// hosted run and holds merge work the local pass already released.
+		// GitHub mode keeps the hosted fallback untouched.
+		if mode == localci.ModeLocal || mode == localci.ModeBoth {
+			if saved, ok := savedLocalResult(ctx, registry, repo, r.Head); ok {
+				budgetNote := applyLocalBudgets(&saved, policy)
+				if state, jobs, logs := registeredResultStatus(saved); conclusiveCI(state) {
+					snap.localCI = &registeredCIObservation{Status: state, Key: "local-result:" + r.Head, Jobs: jobs, Logs: logs, BudgetNote: budgetNote, Checks: registeredCheckSummaries(saved)}
+					return snap, nil
+				}
+			}
+		}
 		if len(saved.IDs) == 0 {
 			return snap, nil
 		}
@@ -450,4 +464,15 @@ func hostedFallbackReason(snap Snapshot) string {
 		}
 	}
 	return "waiting for hosted CI fallback"
+}
+
+// savedLocalResult reads the local CI result of one head for the hosted-fallback
+// decision. A missing or unreadable result is no result, so a fallback still
+// decides instead of a read error breaking the observation.
+func savedLocalResult(ctx context.Context, registry localCIRegistry, repo, head string) (localci.Result, bool) {
+	result, err := registry.LoadResult(ctx, repo, head)
+	if err != nil || result.Repo != repo || result.SHA != head {
+		return localci.Result{}, false
+	}
+	return result, true
 }
