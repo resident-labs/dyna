@@ -19,6 +19,7 @@
   import Thread from './Thread.svelte'
   import { itemState, sortThread, timeline } from './github.ts'
   import { openExternal } from '../../api.js'
+  import type { Reference } from '../rooms/references.ts'
   import type { Snippet } from 'svelte'
   import type { GitHubDetail, GitHubItem } from '../api/github.ts'
 
@@ -27,13 +28,14 @@
     detail?: GitHubDetail | null
     detailError?: string
     starting?: boolean
-    onstart: () => void
+    onstart?: () => void
+    onmention?: (reference: Reference) => void
     note?: Snippet | null
     onsession?: (() => void) | null
     onpr: (number: number) => void
     onback?: (() => void) | null
   }
-  let { it, detail = null, detailError = '', starting = false, onstart, note = null, onsession = null, onpr, onback = null }: Props = $props()
+  let { it, detail = null, detailError = '', starting = false, onstart, onmention, note = null, onsession = null, onpr, onback = null }: Props = $props()
   let st = $derived(itemState('issue', it))
   let prs = $derived(it.linkedPRs ?? [])
   let thread = $derived(detail ? sortThread(detail) : [])
@@ -72,7 +74,8 @@
     {/each}
     {#if !it.workingSession && !prs.length}<p class="quiet">No agent is working on this yet.</p>{/if}
     <div class="acts">
-      {#if st.id === 'open'}<button class="act primary" disabled={starting} onclick={onstart}>Ask an agent</button>{/if}
+      {#if onmention}<button class="act primary" onclick={() => onmention?.({ kind: 'issue', number: it.number, title: it.title, state: it.state, url: it.url })}>Mention in chat</button>
+      {:else if st.id === 'open'}<button class="act primary" disabled={starting} onclick={onstart}>Ask an agent</button>{/if}
       <button class="act" onclick={() => openExternal(it.url)}>Open on GitHub</button>
     </div>
   </Card>

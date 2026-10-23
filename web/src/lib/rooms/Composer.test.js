@@ -19,7 +19,7 @@ function composer() {
   const cleanup = []
   const calls = []
   const c = {
-    command: null, forwarding: null, canSend: true, busy: false, error: '', note: '',
+    references: [], command: null, forwarding: null, canSend: true, busy: false, error: '', note: '',
     $attachments: { atts: [] }, attachments: { destroy() {} }, draft: 'old channel draft', currentRoom: 'old-room',
     prepareText: () => pending,
     onDestroy: (fn) => cleanup.push(fn),

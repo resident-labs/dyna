@@ -96,6 +96,7 @@
   import RunWorkflow from './lib/workflows/RunWorkflow.svelte'
   import PRPanel from './lib/prs/PRPanel.svelte'
   import GitHub from './lib/prs/GitHub.svelte'
+  import type { Reference } from './lib/rooms/references.ts'
   import type { RoomIssue } from './lib/prs/unifiedIssues.ts'
   import RoomSettings from './lib/rooms/RoomSettings.svelte'
   import { prsBySession, isOpen, withoutReviewers } from './lib/prs/pr.ts'
@@ -1221,15 +1222,11 @@
     loadChanges()
   }
 
-  // askAgent puts a new-session line in the room composer, with the room's
-  // default profile, so the owner reads and edits it before sending.
-  async function askAgent(task: string) {
-    if (!profiles.length) profiles = (await api.profiles().catch(() => [])) ?? []
-    const p = profiles.find((x) => x.default) ?? profiles[0]
-    if (!p) return say('Add a profile in Settings first.')
+  async function mentionReference(reference: Reference) {
     openView('all')
-    draft.value = `/${p.name} ${task}`
-    setTimeout(() => composer?.focus(), 0)
+    await tick()
+    composer?.addReference(reference)
+    composer?.focus()
   }
 
   async function resumePR(pr: ChangeRow) {
@@ -1463,10 +1460,10 @@
 
   // send goes through Go's one router: a "/<profile> <task>" draft starts a
   // session, anything else posts.
-  async function send(text: string, atts: unknown[] = [], forwardOf = '') {
+  async function send(text: string, atts: Attachment[] = [], forwardOf = '', references: Reference[] = []) {
     const sent = roomId
     const draftKey = roomId + ':' + view
-    const res = await api.send(sent, text, reply?.id ?? '', atts, forwardOf)
+    const res = await api.send(sent, text, reply?.id ?? '', atts, forwardOf, references)
     if (res?.kind === 'spawn') {
       drafts = { ...drafts, [draftKey]: '' }
       fresh = res.spawn.member.id
@@ -2530,7 +2527,7 @@
         {:else if view === 'library'}
           {#key room.id}<Library roomId={room.id} {narrow} onopen={({ path, dir }) => { openView('files'); if (dir) revealFolder = { path }; else reveal = path }} />{/key}
         {:else if view === 'github' || view === 'issues'}
-          {#key `${room.id}:${view}`}<GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind={view === 'issues' ? 'issue' : 'pr'} localIssues={[...issues, ...issueHistory]} oncloseissue={askCloseIssue} onexportissue={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} ondismississue={(i) => triageIssue(() => api.closeIssue(roomId, i.id, 'Dismissed'))} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onask={askAgent} onsession={(m, tab) => { openSession(m); if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
+          {#key `${room.id}:${view}`}<GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind={view === 'issues' ? 'issue' : 'pr'} localIssues={[...issues, ...issueHistory]} oncloseissue={askCloseIssue} onexportissue={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} ondismississue={(i) => triageIssue(() => api.closeIssue(roomId, i.id, 'Dismissed'))} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m, tab) => { openSession(m); if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
         {:else if view === 'terminal' && hasTerminal}
           {#key room.id}<Terminal roomId={room.id} ref={room.id} noRepo={!room.repo} {narrow} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
         {:else if view === 'questions'}

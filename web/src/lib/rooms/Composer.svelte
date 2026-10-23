@@ -6,6 +6,8 @@
   import MessageInput from '../ui/MessageInput.svelte'
   import { attachmentDraft } from '../files/attachmentDraft.ts'
   import { mentionOptions, matchMentions } from './mentions.ts'
+  import { loadReferences, matchReferences, referenceKey, referenceLabel } from './references.ts'
+  import ReferenceChips from './ReferenceChips.svelte'
 
   // commands are app actions typed as "/name [arg]": [{name, hint, arg?,
   // options?() -> [{value, hint}], pickRuns?, run(arg) -> error text or
@@ -20,6 +22,50 @@
   let forwarding = $state(null)
   export function forward(post) { if (busy) return; forwarding = post; field?.focus() }
 
+  let references = $state([])
+  let referenceOptions = $state([])
+  let referenceLoading = $state(false)
+  let referenceLoaded = false
+  async function fetchReferences() {
+    if (referenceLoading || referenceLoaded) return
+    referenceLoading = true
+    const id = room?.id
+    try {
+      const result = await loadReferences(id)
+      if (active && room?.id === id) { referenceOptions = result; referenceLoaded = true }
+    } catch (e) { if (active) error = String(e?.message || e) }
+    finally { if (active) referenceLoading = false }
+  }
+  $effect(() => {
+    const query = token?.reference ? token.text.replace(/^#/, '').trim() : ''
+    if (!query) return
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      try {
+        const found = await loadReferences(room?.id, query)
+        if (!active || cancelled) return
+        const merged = new Map(referenceOptions.map((reference) => [referenceKey(reference), reference]))
+        found.forEach((reference) => merged.set(referenceKey(reference), reference))
+        referenceOptions = [...merged.values()]
+      } catch (e) { if (active && !cancelled) error = String(e?.message || e) }
+    }, 200)
+    return () => { cancelled = true; clearTimeout(timer) }
+  })
+
+  export function addReference(reference) {
+    if (!references.some((item) => referenceKey(item) === referenceKey(reference))) references = [...references, reference]
+    field?.focus()
+  }
+  async function openReferences() {
+    const pos = field?.selectionStart ?? draft.length
+    const prefix = pos && !/\s/.test(draft[pos - 1]) ? ' #' : '#'
+    draft = draft.slice(0, pos) + prefix + draft.slice(pos)
+    await tick()
+    field?.focus()
+    field?.setSelectionRange(pos + prefix.length, pos + prefix.length)
+    findToken()
+  }
+
   let field = $state()
   let busy = $state(false)
   let error = $state('')
@@ -32,7 +78,7 @@
   let token = $state(null) // {start, end, text} of the @token at the caret
   const attachments = attachmentDraft({ room: () => room?.id, error: (message) => (error = message), focus: () => field?.focus(), noun: 'post' })
   let failed = $derived($attachments.failed)
-  let canSend = $derived(!busy && !$attachments.uploading && !failed && (draft.trim() !== '' || $attachments.ready.length > 0 || !!forwarding))
+  let canSend = $derived(!busy && !$attachments.uploading && !failed && (draft.trim() !== '' || $attachments.ready.length > 0 || !!forwarding || references.length > 0))
   export function addFiles(files) { attachments.addFiles(files) }
   onDestroy(() => attachments.destroy())
 
@@ -50,13 +96,14 @@
   // of the draft (only a draft's first word can start a session), or the
   // argument of a command that offers choices.
   let options = $derived(
+    token?.reference ? matchReferences(referenceOptions, token.text).map((reference) => ({ value: referenceKey(reference), hint: reference.title + ' · ' + reference.state, label: referenceLabel(reference), reference })) :
     token?.arg ? token.arg.options() :
     token?.slash ? [
       ...profiles.map((p) => ({ value: '/' + p.name, group: 'Start a session with', hint: [p.harness, p.model].filter(Boolean).join(' · ') + (p.default ? ' · default' : '') })),
       ...appCommands.map((c) => ({ value: '/' + c.name, group: 'Commands', arg: c.arg, hint: c.hint })),
     ] :
     mentionOptions(choices))
-  let matches = $derived(token ? (token.arg ? options.filter((o) => `${o.value} ${o.hint}`.toLowerCase().includes(token.text.toLowerCase())).slice(0, 8) : matchMentions(options, token.text, token.slash ? 20 : 8)) : [])
+  let matches = $derived(token ? (token.reference ? options : token.arg ? options.filter((o) => `${o.value} ${o.hint}`.toLowerCase().includes(token.text.toLowerCase())).slice(0, 8) : matchMentions(options, token.text, token.slash ? 20 : 8)) : [])
   // Keep the selected option inside this menu without scrolling the feed.
   $effect(() => {
     const options = matches
@@ -87,7 +134,8 @@
     const prepare = prepareText
     const id = room?.id
     const files = $attachments.items.length
-    if (!id || (!text.trim() && !files)) { preview = null; return }
+    const refs = references.length
+    if (!id || (!text.trim() && !files && !refs)) { preview = null; return }
     let cancelled = false
     const timer = setTimeout(async () => {
       try {
@@ -121,11 +169,24 @@
       token = { start, end: pos, text, slash: true }
     }
     else if (withArg && pos >= lead[0].length && !draft.slice(lead[0].length, pos).includes(' ')) token = { start: lead[0].length, end: pos, text: draft.slice(lead[0].length, pos), arg: withArg }
+    else if (text.startsWith('#')) { token = { start, end: pos, text, reference: true }; fetchReferences() }
     else token = text.startsWith('@') ? { start, end: pos, text } : null
     pick = 0
   }
 
   async function complete(choice) {
+    if (token?.reference) {
+      const reference = options.find((option) => option.value === choice)?.reference
+      if (!reference) return
+      addReference(reference)
+      const caret = token.start
+      draft = draft.slice(0, token.start) + draft.slice(token.end)
+      token = null
+      await tick()
+      field?.focus()
+      field?.setSelectionRange(caret, caret)
+      return
+    }
     // Picking a room in "/room" runs it at once.
     if (token.arg?.pickRuns) {
       const c = token.arg
@@ -159,7 +220,10 @@
   }
 
   async function send() {
-    if (command && !forwarding) return runCommand(command.c, command.arg)
+    if (command && !forwarding) {
+      if (references.length) { error = 'Remove references before running a command.'; return }
+      return runCommand(command.c, command.arg)
+    }
     if (!canSend) return
     error = ''
     busy = true
@@ -167,7 +231,7 @@
       const atts = $attachments.atts
       const text = await prepareText(draft)
       if (!active) return
-      const sent = await onsend(text, atts, forwarding?.id ?? '')
+      const sent = await onsend(text, atts, forwarding?.id ?? '', references)
       if (sent?.kind === 'spawn') {
         const m = sent.spawn.member
         note = sent.spawn.warning ? `Started @${m.name}, but ${sent.spawn.warning.replace(/^the session started, but /, '')}` : `Started @${m.name} · ${m.profile}`
@@ -187,6 +251,7 @@
         // next post; see App.send.
         attachments.clear()
         forwarding = null
+        references = []
       }
     } catch (e) {
       const msg = String(e?.message || e)
@@ -199,6 +264,7 @@
   }
 
   function keydown(e) {
+    if (e.key === 'Escape' && token?.reference) { e.preventDefault(); token = null; return }
     if (matches.length) {
       if (e.key === 'ArrowDown') { e.preventDefault(); pick = (pick + 1) % matches.length; return }
       if (e.key === 'ArrowUp') { e.preventDefault(); pick = (pick - 1 + matches.length) % matches.length; return }
@@ -220,13 +286,16 @@
 </script>
 
 <div class="composer">
+  {#if token?.reference && !matches.length}
+    <div class="pop" role="status">{referenceLoading ? 'Loading PRs and issues…' : 'No matching PRs or issues.'}</div>
+  {/if}
   {#if matches.length}
     <div class="pop" role="listbox" bind:this={completionList}>
-      {#if !matches[0].group}<div class="pophead">{token?.arg ? token.arg.listTitle || token.arg.arg : 'Mention'}</div>{/if}
+      {#if !matches[0].group}<div class="pophead">{token?.reference ? 'Attach a PR or issue' : token?.arg ? token.arg.listTitle || token.arg.arg : 'Mention'}</div>{/if}
       {#each matches as m, i}
         {#if m.group && m.group !== matches[i - 1]?.group}<div class="pophead">{m.group}</div>{/if}
-        <button id={optionID(m)} class="opt" class:on={i === pick} role="option" aria-selected={i === pick} onmousedown={(e) => { e.preventDefault(); complete(m.value) }}>
-          <span class="mono">{m.value}{#if m.arg}<span class="argph"> ‹{m.arg}›</span>{/if}</span>
+        <button id={optionID(m)} class="opt" title={m.hint} class:on={i === pick} role="option" aria-selected={i === pick} onmousedown={(e) => { e.preventDefault(); complete(m.value) }}>
+          <span class="mono">{m.label || m.value}{#if m.arg}<span class="argph"> ‹{m.arg}›</span>{/if}</span>
           <span class="kind">{m.hint}</span>
         </button>
       {/each}
@@ -240,7 +309,8 @@
       </button>
     </div>
   {/if}
-  <MessageInput {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message #${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} />
+  <ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />
+  <MessageInput onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message #${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} />
   <div class="foot">
     {#if error}
       <span class="err">{error}</span>
@@ -257,7 +327,7 @@
     {:else if note}
       <span class="ok">{note}</span>
     {:else}
-      <span><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line · <span class="mono">@</span> to mention · <span class="mono">/</span> for sessions and commands</span>
+      <span><kbd>Enter</kbd> to send · <kbd>Shift</kbd>+<kbd>Enter</kbd> new line · <span class="mono">@</span> to mention · <span class="mono">#</span> for PRs and issues · <span class="mono">/</span> for sessions and commands</span>
     {/if}
   </div>
 </div>
@@ -318,11 +388,13 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: var(--s2);
+    text-align: left;
     padding: 6px var(--s2);
     border-radius: 5px;
     color: var(--ink-2);
   }
   .opt.on { background: var(--select); color: var(--ink); }
-  .opt .mono { font-size: var(--t-ui); }
-  .kind { font-size: var(--t-sm); color: var(--faint); }
+  .opt .mono { font-size: var(--t-ui); flex: none; }
+  .kind { font-size: var(--t-sm); color: var(--faint); text-align: right; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 </style>

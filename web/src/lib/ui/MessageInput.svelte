@@ -4,7 +4,7 @@
   import Tray from '../files/Tray.svelte'
   // skin: 'docked' is the look in Messages and rooms. 'glass' is for a floating
   // surface over a picture: a dark field with an iris edge.
-  let { room, forwarding = null, onremoveforward, onopenfile, skin = 'docked', attachments, draft = $bindable(''), field = $bindable(), placeholder, busy = false, closed = false, canSend, joined = false, bad = false, spawn = false, oninput = () => {}, onkeydown, onclick = undefined, onsend } = $props()
+  let { room, forwarding = null, onremoveforward, onopenfile, skin = 'docked', attachments, draft = $bindable(''), field = $bindable(), placeholder, busy = false, closed = false, canSend, joined = false, bad = false, spawn = false, oninput = () => {}, onreference = undefined, onkeydown, onclick = undefined, onsend } = $props()
   let picker = $state()
   function grow() {
     if (!field) return
@@ -21,6 +21,7 @@
     <button class="plus" onclick={() => picker.click()} disabled={closed} aria-label="Attach files" title="Attach files">
       <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="currentColor" /><path d="M10 6v8M6 10h8" stroke="var(--field)" stroke-width="2" stroke-linecap="round" /></svg>
     </button>
+    {#if onreference}<button class="reference" onclick={onreference} disabled={busy || closed} aria-label="Attach a PR or issue" title="Attach a PR or issue">#</button>{/if}
     <input bind:this={picker} type="file" multiple hidden onchange={(e) => { attachments.addFiles(e.currentTarget.files); e.currentTarget.value = '' }} />
     <textarea
       bind:this={field}
@@ -54,6 +55,7 @@
     border: 1px solid transparent;
   }
   .row { display: flex; align-items: flex-end; }
+  .reference { flex: none; width: 36px; height: 44px; color: var(--muted); font-size: var(--t-head); }
   .plus { flex: none; height: 44px; padding: 0 var(--s1) 0 14px; color: var(--muted); }
   .plus:not(:disabled) { transition: color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
@@ -90,6 +92,7 @@
   }
   @media (max-width: 760px) {
     textarea { font-size: var(--t-title); max-height: 160px; }
+    .reference { width: 44px; }
     .plus { padding: 0 var(--s2) 0 var(--s3); }
     .send { padding: 0 var(--s4); }
   }
