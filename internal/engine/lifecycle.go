@@ -64,7 +64,7 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 		}
 		workersDone := make(chan struct{})
 		if !readOnly {
-			go func() { defer close(workersDone); runWorkers(watch, rooms, signals, t, events) }()
+			go func() { defer close(workersDone); runWorkers(watch, rooms, signals, t, load, events) }()
 		} else {
 			close(workersDone)
 		}
