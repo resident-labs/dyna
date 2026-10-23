@@ -363,7 +363,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('questionId' in payload) return payload.questionId
   if ('shellId' in payload) return payload.label
   if ('runId' in payload) return payload.name
-  if ('call' in payload) return payload.call
+  if ('call' in payload) return payload.type === 'withdrawn' ? 'Call request' : 'the call'
   if ('session' in payload) {
     // A turn end names its session and carries no session change of its own.
     if (!('type' in payload)) return payload.session
@@ -376,7 +376,7 @@ function fixtureTip(payload: EventPayload): string {
   return payload.detail || payload.reason
 }
 
-test('a call row says how the owner answered, with the call it answers', () => {
+test('a call row says how the owner answered, without its request ID', () => {
   for (const [type, words] of [['joined', /Owner joined the call/], ['declined', /Owner declined the call/], ['withdrawn', /Call request withdrawn/]] as const) {
     const payload = fixtures[`call/${type}`]
     assert.ok(payload, `the call/${type} fixture is missing`)
@@ -388,9 +388,11 @@ test('a call row says how the owner answered, with the call it answers', () => {
       web.flushSync()
       const text = (target.textContent ?? '').trim()
       assert.match(text, words, `call/${type} on ${surface}: ${text}`)
-      // The request's own ID is a fact of the row, never a label inside the
-      // agent text.
-      assert.equal(need(target.querySelector('.id'), 'the call ID').textContent, 'c1')
+      // The owner reads what happened, not the request's ID. The ID stays in
+      // the row's tooltip, and in the agent text the DM keeps behind Details.
+      const row = need(target.querySelector('.call'), 'the call row')
+      assert.doesNotMatch(row.textContent ?? '', /\bc1\b/, `call/${type} on ${surface} shows the request ID`)
+      assert.equal(row.getAttribute('title'), 'Call request c1')
       web.unmount(mounted)
       target.remove()
     }
