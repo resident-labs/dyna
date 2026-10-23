@@ -166,7 +166,7 @@
               {:else if it.kind === 'select'}
                 <select class="field profile" aria-label={titles[key]} value={it.value} onchange={(e) => set(key, e.currentTarget.value)}>{#if !it.options?.some((o) => o === it.value)}<option value={it.value} disabled>{missingLabel(it)}</option>{/if}{#each it.options ?? [] as value, i}<option {value}>{it.optionLabels?.[i] ?? value}</option>{/each}</select>
               {:else if it.kind === 'enum'}
-                <Segmented options={(it.options ?? []).map((o) => [o, o])} value={it.value} label={titles[key]} onchange={(o: string) => set(key, o)} />
+                <Segmented options={(it.options ?? []).map((o) => [o, o])} value={String(it.value)} label={titles[key]} onchange={(o: string) => set(key, o)} />
               {:else}
                 <input
                   class="field mono"

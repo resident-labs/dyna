@@ -1,15 +1,59 @@
-<script>
+<script lang="ts">
+  import type { Snippet } from 'svelte'
   import { tick } from 'svelte'
   import ForwardQuote from './ForwardQuote.svelte'
   import Tray from '../files/Tray.svelte'
+  import type { AttachmentDraft } from '../files/attachmentDraft.ts'
+  import type { Attachment, Room } from '../api/room.ts'
+  import type { ThreadPost } from '../sessions/dm.ts'
 
+  interface Props {
+    // room names the feed a forwarded post comes from.
+    room?: Pick<Room, 'id' | 'name'>
+    forwarding?: ThreadPost | null
+    onremoveforward?: (() => void) | undefined
+    onopenfile?: (attachment: Attachment) => void
+    // skin draws a floating box over a computer view.
+    skin?: 'docked' | 'glass'
+    // attachments is the draft's file list, when this box takes files.
+    attachments?: AttachmentDraft
+    draft?: string
+    // field is the box's element, so a view can focus it and the box can grow it.
+    field?: HTMLElement
+    placeholder?: string
+    label?: string
+    maxlength?: number
+    busy?: boolean
+    closed?: boolean
+    canSend: boolean
+    joined?: boolean
+    // bad marks a failed send; spawn marks a queued session start.
+    bad?: boolean
+    spawn?: boolean
+    oninput?: () => void
+    onreference?: (() => void) | undefined
+    onkeydown?: ((event: KeyboardEvent) => unknown) | undefined
+    onclick?: ((event: MouseEvent) => void) | undefined
+    onsend: () => void
+    tools?: Snippet | null
+    // context draws between the file tray and the textarea.
+    context?: Snippet | null
+    model?: string
+    mode?: string
+    submitLabel?: string
+    expand?: boolean
+    // completionID and activeOption describe an open completion list.
+    completionID?: string
+    activeOption?: string
+    expanded?: boolean
+  }
   let { room = undefined, forwarding = null, onremoveforward = undefined, onopenfile = undefined, skin = 'docked', attachments = undefined,
     draft = $bindable(''), field = $bindable(), placeholder, label = placeholder, maxlength = undefined,
     busy = false, closed = false, canSend, joined = false, bad = false, spawn = false,
     oninput = () => {}, onreference = undefined, onkeydown = undefined, onclick = undefined, onsend, tools = undefined, context = undefined,
     model = '', mode = 'Message', submitLabel = '', expand = false,
-    completionID = undefined, activeOption = undefined, expanded = false } = $props()
-  let picker = $state()
+    completionID = undefined, activeOption = undefined, expanded = false }: Props = $props()
+  let picker = $state<HTMLInputElement | undefined>()
   let focused = $state(false)
   function grow() {
     if (!field) return
@@ -18,7 +62,7 @@
     field.style.height = Math.min(Math.max(lines * 22 + 24, field.scrollHeight), 240) + 'px'
   }
   $effect(() => { draft; tick().then(grow) })
-  function keydown(event) {
+  function keydown(event: KeyboardEvent) {
     if (event.isComposing || event.keyCode === 229) return
     if (onkeydown) onkeydown(event)
     else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); if (canSend && !busy && !closed) onsend() }
@@ -26,9 +70,12 @@
 </script>
 
 <div class="box" class:glass={skin === 'glass'} class:joined class:bad class:spawn
-  onfocusout={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) { focused = false; grow() } }}>
-  {#if forwarding}<ForwardQuote {room} post={forwarding} onremove={onremoveforward} disabled={busy || closed} {onopenfile} />{/if}
-  {#if attachments}<Tray items={$attachments.items} onremove={attachments.remove} onretry={attachments.retry} />{/if}
+  onfocusout={(event) => { const next = event.relatedTarget; if (!(next instanceof Node && event.currentTarget.contains(next))) { focused = false; grow() } }}>
+  {#if forwarding && room}<ForwardQuote {room} post={forwarding} onremove={onremoveforward} disabled={busy || closed} {onopenfile} />{/if}
+  {#if attachments}
+    {@const tray = $attachments?.items ?? []}
+    <Tray items={tray} onremove={attachments.remove} onretry={attachments.retry} />
+  {/if}
   {@render context?.()}
   <textarea bind:this={field} bind:value={draft} rows="1" spellcheck="true" {placeholder} {maxlength}
     aria-label={label} role={completionID ? 'combobox' : undefined} aria-autocomplete={completionID ? 'list' : undefined}
@@ -41,7 +88,7 @@
       {#if model}<span class="chip model" title={model}>{model}</span>{/if}
       {#if mode && mode !== 'Message'}<span class="chip mode">{mode}</span>{/if}
       {#if attachments}
-        <button class="tool" type="button" onclick={() => picker.click()} disabled={busy || closed} aria-label="Attach files" title="Attach files">
+        <button class="tool" type="button" onclick={() => picker?.click()} disabled={busy || closed} aria-label="Attach files" title="Attach files">
           <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d="m7 11 5-5a2.1 2.1 0 0 1 3 3l-6 6a3.5 3.5 0 0 1-5-5l6-6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" /></svg>
         </button>
         <input bind:this={picker} type="file" multiple hidden onchange={(event) => { attachments.addFiles(event.currentTarget.files); event.currentTarget.value = '' }} />

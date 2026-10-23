@@ -1,16 +1,28 @@
-<script>
+<script lang="ts" generics="T extends string | boolean">
   // One choice out of a few, as a row of buttons. options is [[value, label]].
-  // small fits a toolbar.
-  let { options, value, label, small = false, onchange } = $props()
+  // small fits a toolbar. A choice is usually a word; a setting that is on or
+  // off is a boolean, so the value may be either.
+  interface Props {
+    options: readonly (readonly [T, string])[]
+    value: T
+    // label names the group; a view without a title for it keeps it unannounced.
+    label?: string
+    small?: boolean
+    onchange: (value: T) => void
+  }
+  let { options, value, label, small = false, onchange }: Props = $props()
 
-  function key(e) {
+  // The arrow keys that move the choice, and by how many places. Kept in the
+  // handler so the component's whole behavior sits in one function.
+  function key(e: KeyboardEvent & { currentTarget: HTMLElement }) {
     const i = options.findIndex(([v]) => v === value)
-    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key]
+    const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
     if (!step) return
     e.preventDefault()
     const next = options[(i + step + options.length) % options.length]
+    if (!next) return
     onchange(next[0])
-    e.currentTarget.querySelectorAll('button')[options.indexOf(next)]?.focus()
+    e.currentTarget.querySelectorAll<HTMLElement>('button')[options.indexOf(next)]?.focus()
   }
 </script>
 

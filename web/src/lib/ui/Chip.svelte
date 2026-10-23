@@ -1,8 +1,19 @@
-<script>
+<script lang="ts">
+  import type { Snippet } from 'svelte'
   // One status chip. tone is a state color: gold (live), sage (done),
   // coral (error), iris (focus), or none. outline drops the fill for a
   // settled state. dot marks something running.
-  let { tone = '', outline = false, dot = false, title = undefined, children } = $props()
+  //
+  // tone stays a plain string: each view names its own state colors, and the
+  // class applies whatever word it gets.
+  interface Props {
+    tone?: string
+    outline?: boolean
+    dot?: boolean
+    title?: string
+    children: Snippet
+  }
+  let { tone = '', outline = false, dot = false, title = undefined, children }: Props = $props()
 </script>
 <span class="chip {tone}" class:outline {title}>{#if dot}<span class="dot" aria-hidden="true"></span>{/if}{@render children()}</span>
 <style>
