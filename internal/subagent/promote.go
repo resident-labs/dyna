@@ -87,6 +87,10 @@ func (m *Manager) Adopt(ctx context.Context, ref, parentRef string) (Info, error
 	case p.Service && p.Role != RoleRoot:
 		// A service's helpers are services too, so the move would change the session's kind.
 		return Info{}, fmt.Errorf("cannot move %s under %s: it is a service session", info.Address(), p.Address())
+	case info.ManagedService():
+		// A service is outside the hierarchy. A move would give it a parent,
+		// and it would show up as a child of an ordinary session again.
+		return Info{}, fmt.Errorf("cannot move %s: a service changes with dyna services, not with a session move", info.Address())
 	}
 	return m.moveLockedContext(ctx, info.ID, p.ID, p.Depth+1)
 }
