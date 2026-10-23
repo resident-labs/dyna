@@ -27,7 +27,7 @@ func TestTurnNotesRecordEachFact(t *testing.T) {
 	notes := []TurnNote{
 		{Profile: &TurnProfile{Profile: "p", Model: "m", Harness: "h", Dialect: "d"}},
 		{Dispatched: &DrainedPost{Steer: Steer{ID: "msg_live", TS: 7, Message: "live"}, Owed: "work:lead"}},
-		{Delivered: &Steer{TS: 7, Message: "live"}},
+		{Delivered: &Steer{ID: "msg_live", TS: 7, Message: "live"}},
 		{Delivery: &Delivery{TS: 1, Kind: "steer", Outcome: "deferred", WaitedMs: 5}},
 		{Fallback: &harness.ModelFallback{From: "a", To: "b", Reason: "limit"}},
 		{HarnessSession: "h-2"},
