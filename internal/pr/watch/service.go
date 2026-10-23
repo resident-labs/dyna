@@ -38,6 +38,9 @@ type Service struct {
 	RunNodeCI           func(context.Context, localci.Node, localci.Request) (localci.Result, error)
 	registeredRuns      *registeredCIRuns
 	localCIRuns         *sync.Map
+	// RunningCIChanged tells clients that the local CI runs in flight changed,
+	// so they read the machine view again. nil when no client hears of them.
+	RunningCIChanged func()
 
 	autoTrackFailures *sync.Map // PR key and remote head; only failed attempts remain.
 	ReviewerProfiles  func() ([]profile.Profile, error)

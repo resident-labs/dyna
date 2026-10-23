@@ -10,6 +10,10 @@ import (
 	"dyna-agent/internal/pr/watch"
 )
 
+// RunningCI lists the local CI runs in flight on each machine. The runs live in
+// the engine's worker process, so this reads the set that scheduler owns.
+func (s *Service) RunningCI() []watch.RunningCI { return s.Watcher().RunningCI() }
+
 // localCIChecks projects stored local results into the existing check list.
 func localCIChecks(facts watch.ReviewFacts, record watch.Record) watch.Record {
 	if record.Kind != "local" || record.RepoPath == "" || record.Head == "" {
