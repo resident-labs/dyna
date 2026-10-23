@@ -59,7 +59,7 @@
     {:else if row.kind === 'turnEnd'}
       <p class="turn-end" class:enter={isNew(row.key)}><b class={row.turn.status}>{turnText[row.turn.status ?? ''] || row.turn.status}</b>{turnTail(row.turn) ? ` · ${turnTail(row.turn)}` : ''}</p>
     {:else if row.kind === 'message'}
-      <DmMessage {row} {room} {onforward} {member} address={dm.address} {members} {compact} {onopenfile} {onpost} {removing} {onunqueue} {ondismiss} {selection} enter={isNew(row.key)} />
+      <DmMessage {row} {room} {onforward} {member} address={dm.address} {members} {compact} fullText {onopenfile} {onpost} {removing} {onunqueue} {ondismiss} {selection} enter={isNew(row.key)} />
     {:else if row.kind === 'reference'}
       <ReferenceRow {row} {room} {members} {onpost} enter={isNew(row.key)} />
     {:else if row.kind === 'system-event'}
