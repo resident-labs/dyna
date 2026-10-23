@@ -211,10 +211,12 @@ func (s *Service) parse(rec room.Record, draft string) (Draft, error) {
 // Attachments must be saved in the room first (Attach); mentions come from
 // the draft text only, never from the files.
 func (s *Service) Post(ctx context.Context, roomRef, draft, replyTo string, atts ...room.Attachment) (PostResult, error) {
-	return s.post(ctx, roomRef, draft, replyTo, "", nil, atts...)
+	return s.postIn(ctx, roomRef, draft, replyTo, "", "", nil, atts...)
 }
 
-func (s *Service) post(ctx context.Context, roomRef, draft, replyTo, forwardOf string, refs []room.Reference, atts ...room.Attachment) (PostResult, error) {
+// postIn posts one composer draft in the conversation its writer named: the
+// room feed when conversation is empty.
+func (s *Service) postIn(ctx context.Context, roomRef, draft, replyTo, forwardOf string, conversation room.Conversation, refs []room.Reference, atts ...room.Attachment) (PostResult, error) {
 	// A spawn-shaped draft is a command, never text: posting "/opus fix it"
 	// to @root would be a silent misfire. Send routes it; "//" escapes it.
 	if _, _, ok := splitSpawn(draft); ok {
@@ -234,7 +236,7 @@ func (s *Service) post(ctx context.Context, roomRef, draft, replyTo, forwardOf s
 	}
 	res, err := s.Notify.Post(ctx, notify.PostInput{
 		Sender:   notify.Sender{Kind: notify.SenderOwner, Room: rec.Name, Human: true},
-		Mentions: d.Mentions, Text: strings.TrimSpace(d.Text), ReplyTo: replyTo, ForwardOf: forwardOf, Attachments: atts, References: refs,
+		Mentions: d.Mentions, Text: strings.TrimSpace(d.Text), ReplyTo: replyTo, ForwardOf: forwardOf, Attachments: atts, References: refs, Conversation: conversation,
 	})
 	out := PostResult{Message: res.Message, Deliveries: res.Deliveries, Failed: res.Failed(), Sticky: d.Sticky()}
 	if res.Message.ID != "" {

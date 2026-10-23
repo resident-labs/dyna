@@ -183,7 +183,9 @@ func TestPostIndexImportAndCursorCatchUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	bound := map[string]string{"alpha:lead": ownerSession}
-	dm, err := s.Post(rec.ID, PostInput{From: "alpha", Human: true, To: []string{"alpha:lead"}, SessionIDs: bound, Text: "hello"})
+	// The owner's DM composer says where it writes; the store never guesses a DM
+	// from the mentions.
+	dm, err := s.Post(rec.ID, PostInput{From: "alpha", Human: true, Conversation: DMConversation(ownerSession), To: []string{"alpha:lead"}, SessionIDs: bound, Text: "hello"})
 	if err != nil {
 		t.Fatal(err)
 	}

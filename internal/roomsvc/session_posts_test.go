@@ -4,95 +4,316 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
-	"dyna-agent/internal/subagent"
-
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/subagent"
 )
 
-func TestTranscriptPostsMatchFeed(t *testing.T) {
+// The DM, the seat's DM and the media list read the stored home and delivery
+// rows (internal/room/postindex.go), never the address strings of a post. One
+// test per rule.
+
+// A post written in the DM is the DM's own post. A post the session writes
+// elsewhere, and a completion, are not.
+func TestSessionDMReadsThePostsWrittenInIt(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
 	lead := e.start(rec, "lead", nil)
 	peer := e.start(rec, "peer", nil)
 	store := e.svc.Notify.Rooms
-	turn, err := e.mgr.Store.ReadTurn(lead.ID, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	store.Now = func() time.Time { return turn.Started.Add(-time.Second) }
-	before, err := store.Post(rec.ID, room.PostInput{From: lead.Address(), To: []string{rec.Name}, Text: "Before the returned turn"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	store.Now = nil
-	card, err := store.PutAttachment(rec.ID, "card.html", []byte("<!doctype html><html><head><title>Build status</title></head><body>Ready</body></html>"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	card.Render = room.RenderHTML
-	inputs := []room.PostInput{
-		{From: lead.Address(), To: []string{rec.Name}, Text: "My card", Attachments: []room.Attachment{card}},
-		{From: lead.Address(), To: []string{peer.Address()}, Text: "To peer"},
-		{From: peer.Address(), To: []string{lead.Address()}, Text: "From peer"},
-		{From: peer.Address(), Kind: "completed", To: []string{lead.Address()}, Text: "Peer finished"},
-		{From: rec.Name, Human: true, To: []string{lead.Address()}, Text: "Owner prompt"},
-		{From: rec.Name, To: []string{lead.Address()}, Text: "Owner steering"},
-		{From: peer.Address(), To: []string{rec.Name}, Text: "Unrelated"},
-		{From: lead.Address(), Kind: "completed", To: []string{rec.Name}, Text: "Finished"},
-		{From: lead.Address(), Kind: "failed", To: []string{rec.Name}, Text: "Failed"},
-		{From: lead.Address(), Kind: "stopped", To: []string{rec.Name}, Text: "Stopped"},
-	}
-	ids := []string{before.ID}
-	for i, input := range inputs {
-		if input.Text == "" {
-			input.Text = "Media report is ready."
-		}
-		msg, err := store.Post(rec.ID, input)
+	dm := room.DMConversation(lead.ID)
+	bound := map[string]string{lead.Address(): lead.ID}
+	var want []string
+	for _, in := range []room.PostInput{
+		// The owner's DM composer says where it writes.
+		{From: rec.Name, Human: true, Conversation: dm, To: []string{lead.Address()}, SessionIDs: bound, Text: "In the DM"},
+		// The session's answer to that post stays in the DM.
+		{From: lead.Address(), Conversation: dm, To: []string{rec.Name}, SessionIDs: bound, Text: "Answer in the DM"},
+		// A post the session writes to another agent is not the DM's.
+		{From: lead.Address(), To: []string{peer.Address()}, SessionIDs: map[string]string{peer.Address(): peer.ID}, Text: "To peer"},
+		// A completion folds into its turn, so the DM does not draw it again.
+		{From: lead.Address(), Kind: "completed", Conversation: dm, To: []string{rec.Name}, SessionIDs: bound, Text: "Finished"},
+	} {
+		msg, err := store.Post(rec.ID, in)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if i < 6 {
-			ids = append(ids, msg.ID)
+		if in.Conversation == dm && in.Kind == "" {
+			want = append(want, msg.ID)
 		}
 	}
-	// A PR event is an engine post; it reaches the feed like any other post.
-	// A typed PR event reaches the feed like any other post.
-	if _, err := store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{rec.Name}, RoomService: true,
-		Event: room.PREvent{Type: room.PRApproved, Label: "PR #1", Location: "github.com/o/r#1", ChangeID: "github.com/o/r#1", Number: 1, Head: strings.Repeat("a", 40)}}); err != nil {
+	sess, err := e.svc.transcript(lead.ID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, post := range sess.Posts {
+		got = append(got, post.ID)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("DM posts = %v, want %v", got, want)
+	}
+	// The session's own completion of a turn in the room is the transcript's,
+	// not a reference row.
+	done, err := store.Post(rec.ID, room.PostInput{From: lead.Address(), Kind: "completed", To: []string{rec.Name}, SessionIDs: bound, Text: "Turn done"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err = e.svc.transcript(lead.ID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range sess.References {
+		if row.PostID == done.ID {
+			t.Fatalf("a completion reached the DM as a reference row: %+v", row)
+		}
+	}
+}
+
+// A post of another conversation that reached this session is one compact
+// reference row, not a second copy.
+func TestSessionDMShowsReceivedPostsAsReferences(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	peer := e.start(rec, "peer", nil)
+	store := e.svc.Notify.Rooms
+	attrs, err := store.PutAttachment(rec.ID, "log.txt", []byte("log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	peerPost, err := store.Post(rec.ID, room.PostInput{From: peer.Address(), To: []string{lead.Address()},
+		SessionIDs: map[string]string{peer.Address(): peer.ID, lead.Address(): lead.ID}, Text: "Please review the parser",
+		Attachments: []room.Attachment{attrs}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A post delivered to another session is not this session's row.
+	if _, err := store.Post(rec.ID, room.PostInput{From: peer.Address(), To: []string{rec.Name + ":other"},
+		SessionIDs: map[string]string{peer.Address(): peer.ID}, Text: "Not for lead"}); err != nil {
 		t.Fatal(err)
 	}
 	sess, err := e.svc.transcript(lead.ID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess.Address != lead.Address() || len(sess.Posts) != len(ids) {
-		t.Fatalf("address = %q, posts = %+v", sess.Address, sess.Posts)
+	if len(sess.Posts) != 0 {
+		t.Fatalf("a post of the room feed reached the DM posts: %+v", sess.Posts)
 	}
-	feed, err := e.svc.FeedTail(rec.ID, "", 0)
+	if len(sess.References) != 1 {
+		t.Fatalf("references = %+v", sess.References)
+	}
+	row := sess.References[0]
+	if row.PostID != peerPost.ID || row.From != peer.Address() || row.Speaker != "peer" || row.Conversation != room.ConversationRoom.String() {
+		t.Fatalf("reference row = %+v", row)
+	}
+	if row.Preview != "Please review the parser" || row.Attachments != 1 || row.TS != peerPost.TS || row.FromHue != NameHue(peer.Address()) {
+		t.Fatalf("reference row = %+v", row)
+	}
+}
+
+// A post the session wrote in another conversation is a reference row too, so
+// the DM keeps what the session said where the owner could see it.
+func TestSessionDMShowsItsOwnPostsElsewhereAsReferences(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	peer := e.start(rec, "peer", nil)
+	store := e.svc.Notify.Rooms
+	report, err := store.Post(rec.ID, room.PostInput{From: lead.Address(), To: []string{peer.Address()},
+		SessionIDs: map[string]string{lead.Address(): lead.ID, peer.Address(): peer.ID}, Text: "Parser is fixed"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	byID := map[string]Post{}
-	for _, post := range feed.Posts {
-		// Feed views route the room feed only; transcripts have none.
-		post.setViews(nil)
-		byID[post.ID] = post
+	sess, err := e.svc.transcript(lead.ID, 0, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	for i, id := range ids {
-		if !reflect.DeepEqual(sess.Posts[i], byID[id]) {
-			t.Errorf("post %d = %+v, want feed post %+v", i, sess.Posts[i], byID[id])
+	rows := rowsByPost(sess.References)
+	row, ok := rows[report.ID]
+	if !ok || len(sess.References) == 0 {
+		t.Fatalf("references = %+v", sess.References)
+	}
+	if row.Speaker != "lead" || row.Conversation != room.ConversationRoom.String() {
+		t.Fatalf("reference row = %+v", row)
+	}
+}
+
+// The root seat's DM names the seat: the owner's DM post is the seat's own
+// post, and a post that reached the seat from the room feed is a reference.
+// The seat holder can change without moving either.
+func TestSeatDMReadsTheSeatRows(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	store := e.svc.Notify.Rooms
+	seat := room.SeatDMConversation(rec.ID)
+	ask, err := store.Post(rec.ID, room.PostInput{From: rec.Name, Human: true, Conversation: seat, To: []string{rec.Name}, Via: []string{"@root"}, Text: "In the root DM"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shot, err := store.PutAttachment(rec.ID, "screenshot.png", []byte("\x89PNG\r\n\x1a\n screenshot"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := store.Post(rec.ID, room.PostInput{From: lead.Address(), To: []string{rec.Name}, Via: []string{"@root"},
+		SessionIDs: map[string]string{lead.Address(): lead.ID}, Text: "The parser is fixed", Attachments: []room.Attachment{shot}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An external root posts as the room, not as a person, and no delivery row
+	// names the seat for its own post: the rows name the seat as its author, so
+	// the seat's DM keeps its answers whoever holds the seat.
+	answer, err := store.Post(rec.ID, room.PostInput{From: rec.Name, To: []string{rec.Name}, Text: "Fixed on the new branch"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := e.svc.RootSession(rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(session.Posts) != 1 || session.Posts[0].ID != ask.ID {
+		t.Fatalf("seat posts = %+v", session.Posts)
+	}
+	// The agent's report reached the seat from the room feed, so it is one row
+	// that jumps to the post there.
+	row, ok := rowsByPost(session.References)[report.ID]
+	if !ok || row.Conversation != room.ConversationRoom.String() || row.Preview != "The parser is fixed" {
+		t.Fatalf("seat references = %+v", session.References)
+	}
+	// The seat's own post is a reference row too, with the seat's label.
+	own, ok := rowsByPost(session.References)[answer.ID]
+	if !ok || own.Speaker != room.OwnerLabel(false) || own.Preview != "Fixed on the new branch" {
+		t.Fatalf("the seat's own post is not a reference row: %+v", session.References)
+	}
+	if len(session.Media) != 1 || session.Media[0].ID != report.ID {
+		t.Fatalf("seat media = %+v", session.Media)
+	}
+}
+
+// rowsByPost keys reference rows by the post they name.
+func rowsByPost(rows []ReferenceRow) map[string]ReferenceRow {
+	out := make(map[string]ReferenceRow, len(rows))
+	for _, row := range rows {
+		out[row.PostID] = row
+	}
+	return out
+}
+
+// The DM composers say where they wrote: the session's DM composer names that
+// session's DM, and the seat's names the seat's, so both posts read back in the
+// conversation they were typed in.
+func TestDMComposersNameTheirConversation(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	sent, err := e.svc.SendToSession(e.ctx, lead.ID, "Hello lead", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := sent.Message.Conversation, room.DMConversation(lead.ID); got != want {
+		t.Fatalf("session DM post stored in %q, want %q", got, want)
+	}
+	seat, err := e.svc.SendFromConversation(e.ctx, rec.ID, "@root hello seat", "", "", room.SeatDMConversation(rec.ID), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := seat.Post.Message.Conversation, room.SeatDMConversation(rec.ID); got != want {
+		t.Fatalf("seat DM post stored in %q, want %q", got, want)
+	}
+	// The room composer names nobody, so its post stays in the feed.
+	feed, err := e.svc.Send(e.ctx, rec.ID, "@lead hello feed", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := feed.Post.Message.Conversation; got != room.ConversationRoom {
+		t.Fatalf("room composer post stored in %q, want the room feed", got)
+	}
+}
+
+// The media list is the files of the DM, of the posts delivered to the session
+// and of the posts it wrote elsewhere, and of nothing else.
+func TestSessionMediaFollowsTheDMRows(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	peer := e.start(rec, "peer", nil)
+	store := e.svc.Notify.Rooms
+	book := e.svc.avatars(rec.ID)
+	att, err := store.PutAttachment(rec.ID, "notes.txt", []byte("notes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dm := room.DMConversation(lead.ID)
+	posts := map[string]room.PostInput{
+		"own":       {From: lead.Address(), Conversation: dm, To: []string{rec.Name}, SessionIDs: map[string]string{lead.Address(): lead.ID}, Attachments: []room.Attachment{att}},
+		"delivered": {From: peer.Address(), To: []string{lead.Address()}, SessionIDs: map[string]string{peer.Address(): peer.ID, lead.Address(): lead.ID}, Attachments: []room.Attachment{att}},
+		"authored":  {From: lead.Address(), To: []string{peer.Address()}, SessionIDs: map[string]string{lead.Address(): lead.ID, peer.Address(): peer.ID}, Attachments: []room.Attachment{att}},
+		"other":     {From: peer.Address(), To: []string{rec.Name + ":other"}, SessionIDs: map[string]string{peer.Address(): peer.ID}, Attachments: []room.Attachment{att}},
+	}
+	want := map[string]bool{}
+	for name, in := range posts {
+		msg, err := store.Post(rec.ID, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want[msg.ID] = name != "other"
+	}
+	media, err := e.svc.sessionMedia(rec, dm, book)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(media) != 3 {
+		t.Fatalf("media = %+v", media)
+	}
+	for _, post := range media {
+		if !want[post.ID] {
+			t.Errorf("media holds %s, which is in none of the DM's rows", post.ID)
 		}
 	}
-	first := sess.Posts[1]
-	if first.Owner || first.Speaker != "lead" || first.FromEmoji == "" || first.FromHue != NameHue(lead.Address()) {
-		t.Fatalf("sender shaping = %+v", first)
+}
+
+func TestSessionMediaNewest200AndEmpty(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	store := e.svc.Notify.Rooms
+	book := e.svc.avatars(rec.ID)
+	dm := room.DMConversation("ses_20261023-120000-aaaaaaaa")
+	empty, err := e.svc.sessionMedia(rec, dm, book)
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Fatalf("empty media = %+v, %v", empty, err)
 	}
-	if len(first.Attachments) != 1 || !first.Attachments[0].Rich() || first.Attachments[0].Title != "Build status" {
-		t.Fatalf("card = %+v", first.Attachments)
+	att, err := store.PutAttachment(rec.ID, "notes.txt", []byte("notes"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for i := 0; i < 203; i++ {
+		// Append out of time order to test chronological sorting before the cap.
+		store.Now = func() time.Time { return time.Unix(2000-int64(i), 0) }
+		msg, err := store.Post(rec.ID, room.PostInput{From: "alpha:lead", Conversation: dm, To: []string{rec.Name}, Attachments: []room.Attachment{att}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, msg.ID)
+	}
+	store.Now = nil
+	if _, err := store.Post(rec.ID, room.PostInput{From: "alpha:peer", To: []string{rec.Name}, Attachments: []room.Attachment{att}}); err != nil {
+		t.Fatal(err)
+	}
+	media, err := e.svc.sessionMedia(rec, dm, book)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(media) != 200 {
+		t.Fatalf("media count = %d", len(media))
+	}
+	for i, p := range media {
+		if p.ID != ids[i] {
+			t.Errorf("media %d = %s, want %s", i, p.ID, ids[i])
+		}
 	}
 }
 
@@ -100,16 +321,18 @@ func TestSessionPostsTimeWindow(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
 	store := e.svc.Notify.Rooms
+	dm := room.DMConversation("ses_20261023-120000-aaaaaaaa")
 	started := time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC)
 	var ids []string
 	for _, delta := range []time.Duration{-time.Second, 885 * time.Millisecond, time.Second} {
 		store.Now = func() time.Time { return started.Add(delta) }
-		msg, err := store.Post(rec.ID, room.PostInput{From: "alpha:lead", To: []string{rec.Name}, Text: fmt.Sprint(delta)})
+		msg, err := store.Post(rec.ID, room.PostInput{From: "alpha:lead", Conversation: dm, To: []string{rec.Name}, Text: fmt.Sprint(delta)})
 		if err != nil {
 			t.Fatal(err)
 		}
 		ids = append(ids, msg.ID)
 	}
+	store.Now = nil
 	for _, tc := range []struct {
 		name  string
 		start time.Time
@@ -120,15 +343,15 @@ func TestSessionPostsTimeWindow(t *testing.T) {
 		{"no matching posts", started.Add(time.Hour), nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			msgs, err := store.Messages(rec.ID)
+			msgs, err := store.ConversationMessages(rec.ID, dm, tc.start, time.Time{}, maxSessionPosts)
 			if err != nil {
 				t.Fatal(err)
 			}
-			posts, err := e.svc.sessionPosts(rec, msgs, "", "alpha:lead", tc.start, time.Time{}, e.svc.avatars(rec.ID))
+			posts, err := e.svc.shapeSessionPosts(rec, msgs, e.svc.avatars(rec.ID))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if posts == nil || len(posts) != len(tc.want) {
+			if len(posts) != len(tc.want) {
 				t.Fatalf("posts = %+v, want IDs %v", posts, tc.want)
 			}
 			for i, id := range tc.want {
@@ -143,23 +366,25 @@ func TestSessionPostsTimeWindow(t *testing.T) {
 func TestSessionPostsKeepNewest300(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
+	store := e.svc.Notify.Rooms
+	dm := room.DMConversation("ses_20261023-120000-aaaaaaaa")
 	var ids []string
 	for i := 0; i < 303; i++ {
-		msg, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: "alpha:lead", To: []string{rec.Name}, Text: fmt.Sprintf("Post %d", i)})
+		msg, err := store.Post(rec.ID, room.PostInput{From: "alpha:lead", Conversation: dm, To: []string{rec.Name}, Text: fmt.Sprintf("Post %d", i)})
 		if err != nil {
 			t.Fatal(err)
 		}
 		ids = append(ids, msg.ID)
 	}
 	// Unrelated posts must not consume the conversation's limit.
-	if _, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: "alpha:peer", To: []string{rec.Name}, Text: "Unrelated"}); err != nil {
+	if _, err := store.Post(rec.ID, room.PostInput{From: "alpha:peer", To: []string{rec.Name}, Text: "Unrelated"}); err != nil {
 		t.Fatal(err)
 	}
-	msgs, err := e.svc.Notify.Rooms.Messages(rec.ID)
+	msgs, err := store.ConversationMessages(rec.ID, dm, time.Time{}, time.Time{}, maxSessionPosts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	posts, err := e.svc.sessionPosts(rec, msgs, "", "alpha:lead", time.Time{}, time.Time{}, e.svc.avatars(rec.ID))
+	posts, err := e.svc.shapeSessionPosts(rec, msgs, e.svc.avatars(rec.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,209 +398,8 @@ func TestSessionPostsKeepNewest300(t *testing.T) {
 	}
 }
 
-func TestTranscriptMediaIncludesWholeConversation(t *testing.T) {
-	e := newEnv(t)
-	rec := e.room("alpha")
-	lead := e.start(rec, "lead", nil)
-	peer := e.start(rec, "peer", nil)
-	store := e.svc.Notify.Rooms
-	card, err := store.PutAttachment(rec.ID, "card.html", []byte("<!doctype html><title>Media report</title><p>Ready</p>"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	card.Render = room.RenderHTML
-	turn, err := e.mgr.Store.ReadTurn(lead.ID, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	store.Now = func() time.Time { return turn.Started.Add(-time.Hour) }
-	inputs := []room.PostInput{
-		{From: lead.Address(), To: []string{rec.Name}, Attachments: []room.Attachment{card}},
-		{From: rec.Name, Human: true, To: []string{lead.Address()}, Attachments: []room.Attachment{card}},
-		{From: peer.Address(), To: []string{lead.Address()}, Attachments: []room.Attachment{card}},
-		{From: lead.Address(), Kind: "completed", To: []string{rec.Name}, Attachments: []room.Attachment{card}},
-		{From: peer.Address(), To: []string{rec.Name}, Attachments: []room.Attachment{card}},
-		{From: rec.Name, To: []string{peer.Address()}, Attachments: []room.Attachment{card}},
-		{From: lead.Address(), To: []string{rec.Name}, Text: "No attachments"},
-	}
-	var ids []string
-	for i, input := range inputs {
-		if input.Text == "" {
-			input.Text = "Media report is ready."
-		}
-		msg, err := store.Post(rec.ID, input)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if i < 4 {
-			ids = append(ids, msg.ID)
-		}
-	}
-	store.Now = nil
-	feed, err := e.svc.FeedTail(rec.ID, "", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	byID := map[string]Post{}
-	for _, p := range feed.Posts {
-		p.setViews(nil)
-		byID[p.ID] = p
-	}
-	for _, exact := range []bool{false, true} {
-		var sess Session
-		if exact {
-			sess, err = e.svc.TranscriptTurn(lead.ID, 1)
-		} else {
-			sess, err = e.svc.transcript(lead.ID, 1, 0)
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(sess.Media) != 4 || len(sess.Posts) != 4 {
-			t.Fatalf("media = %+v, posts = %+v", sess.Media, sess.Posts)
-		}
-		for i, p := range sess.Media {
-			if !reflect.DeepEqual(p, byID[ids[len(ids)-1-i]]) {
-				t.Errorf("media %d differs from feed: %+v", i, p)
-			}
-		}
-		if sess.Media[2].Speaker != "you" || !sess.Media[2].Owner {
-			t.Errorf("owner media = %+v", sess.Media[2])
-		}
-		if sess.Media[0].Attachments[0].Title != "Media report" {
-			t.Errorf("card = %+v", sess.Media[0].Attachments)
-		}
-	}
-}
-
-func TestSessionMediaNewest200AndEmpty(t *testing.T) {
-	e := newEnv(t)
-	rec := e.room("alpha")
-	store := e.svc.Notify.Rooms
-	book := e.svc.avatars(rec.ID)
-	empty, err := e.svc.sessionMedia(rec, nil, "", "alpha:lead", book)
-	if err != nil || empty == nil || len(empty) != 0 {
-		t.Fatalf("empty media = %+v, %v", empty, err)
-	}
-	att, err := store.PutAttachment(rec.ID, "notes.txt", []byte("notes"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var ids []string
-	for i := 0; i < 203; i++ {
-		// Append out of time order to test chronological sorting before the cap.
-		store.Now = func() time.Time { return time.Unix(2000-int64(i), 0) }
-		msg, err := store.Post(rec.ID, room.PostInput{From: "alpha:lead", To: []string{rec.Name}, Attachments: []room.Attachment{att}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		ids = append(ids, msg.ID)
-	}
-	store.Now = nil
-	if _, err := store.Post(rec.ID, room.PostInput{From: "alpha:peer", To: []string{rec.Name}, Attachments: []room.Attachment{att}}); err != nil {
-		t.Fatal(err)
-	}
-	msgs, err := store.Messages(rec.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	posts, err := e.svc.sessionMedia(rec, msgs, "", "alpha:lead", book)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(posts) != 200 {
-		t.Fatalf("media count = %d", len(posts))
-	}
-	for i, p := range posts {
-		if p.ID != ids[i] {
-			t.Errorf("media %d = %s, want %s", i, p.ID, ids[i])
-		}
-	}
-}
-
-func TestSessionPostsHoldEveryOwnerPostToTheSession(t *testing.T) {
-	e := newEnv(t)
-	rec := e.room("alpha")
-	store := e.svc.Notify.Rooms
-	att, err := store.PutAttachment(rec.ID, "notes.txt", []byte("notes"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, input := range []room.PostInput{
-		{From: rec.Name, Human: true, To: []string{"alpha:lead"}, Text: "with files", Attachments: []room.Attachment{att}},
-		{From: rec.Name, Human: true, To: []string{"alpha:lead"}, Text: "text only"},
-		{From: rec.Name, Human: true, To: []string{"alpha:peer"}, Text: "other session", Attachments: []room.Attachment{att}},
-	} {
-		if _, err := store.Post(rec.ID, input); err != nil {
-			t.Fatal(err)
-		}
-	}
-	msgs, err := store.Messages(rec.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	posts, err := e.svc.sessionPosts(rec, msgs, "", "alpha:lead", time.Time{}, time.Time{}, e.svc.avatars(rec.ID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Both owner posts are the stored posts the DM shows: text, files and all.
-	if len(posts) != 2 || !posts[0].Owner || posts[0].Text != "with files" || len(posts[0].Attachments) != 1 || posts[1].Text != "text only" {
-		t.Fatalf("owner posts: %+v", posts)
-	}
-}
-
-// The owner's post to @root is addressed to the room, and it belongs to the
-// root seat's conversation: root's DM draws the stored post, so an attached
-// screenshot shows there.
-func TestSessionPostsHoldThePostTheOwnerSentToTheSeat(t *testing.T) {
-	e := newEnv(t)
-	rec := e.room("alpha")
-	store := e.svc.Notify.Rooms
-	shot, err := store.PutAttachment(rec.ID, "screenshot.png", []byte("\x89PNG\r\n\x1a\n screenshot"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	inputs := []room.PostInput{
-		{From: rec.Name, Human: true, To: []string{rec.Name}, Via: []string{"@root"}, Text: "What happened here?", Attachments: []room.Attachment{shot}},
-		{From: rec.Name, Human: true, To: []string{rec.Name}, Via: []string{"@" + rec.Name + ":root"}, Text: "And now?"},
-		{From: "alpha:peer", To: []string{rec.Name}, Text: "A report to the owner"},
-	}
-	for _, input := range inputs {
-		if _, err := store.Post(rec.ID, input); err != nil {
-			t.Fatal(err)
-		}
-	}
-	msgs, err := store.Messages(rec.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	book := e.svc.avatars(rec.ID)
-	posts, err := e.svc.sessionPosts(rec, msgs, "", "alpha:root", time.Time{}, time.Time{}, book)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(posts) != 2 || posts[0].Text != "What happened here?" || len(posts[0].Attachments) != 1 || posts[0].Attachments[0].ID != shot.ID || posts[1].Text != "And now?" {
-		t.Fatalf("seat posts: %+v", posts)
-	}
-	media, err := e.svc.sessionMedia(rec, msgs, "", "alpha:root", book)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(media) != 1 || media[0].Attachments[0].ID != shot.ID {
-		t.Fatalf("seat media: %+v", media)
-	}
-	// A worker session keeps the posts addressed to it, not the seat's.
-	posts, err = e.svc.sessionPosts(rec, msgs, "", "alpha:lead", time.Time{}, time.Time{}, book)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(posts) != 0 {
-		t.Fatalf("worker posts: %+v", posts)
-	}
-}
-
-// A turn item names the post that carried it. A post the page window left out
-// still belongs to the message, so its attachments reach the DM.
+// A turn item names the post that carried it. A post of the DM that the page
+// window left out still belongs to the message, so its files reach the DM.
 func TestSessionPostsHoldThePostOfATurnItemOutsideThePage(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
@@ -384,19 +408,25 @@ func TestSessionPostsHoldThePostOfATurnItemOutsideThePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ask, err := store.Post(rec.ID, room.PostInput{From: rec.Name, Human: true, To: []string{"alpha:lead"}, Text: "Look", Attachments: []room.Attachment{shot}})
+	dm := room.DMConversation("ses_20261023-120000-aaaaaaaa")
+	ask, err := store.Post(rec.ID, room.PostInput{From: rec.Name, Human: true, Conversation: dm, To: []string{"alpha:lead"}, Text: "Look", Attachments: []room.Attachment{shot}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	book := e.svc.avatars(rec.ID)
 	// The DM page starts after the post, and only its turn item still names it.
 	items := []Item{{Kind: "prompt", PostID: ask.ID, Text: "Look", From: rec.Name + " (human)"}}
-	posts, err := e.svc.withItemPosts(rec, nil, "lead", "alpha:lead", []Turn{{N: 1, Items: items}}, book)
+	posts, err := e.svc.withItemPosts(rec, nil, dm, "", "alpha:lead", []Turn{{N: 1, Items: items}}, book)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(posts) != 1 || posts[0].ID != ask.ID || len(posts[0].Attachments) != 1 {
 		t.Fatalf("item posts: %+v", posts)
+	}
+	// A post of another conversation stays a reference row, not a post.
+	posts, err = e.svc.withItemPosts(rec, nil, room.DMConversation("ses_20261023-120001-bbbbbbbb"), "", "alpha:lead", []Turn{{N: 1, Items: items}}, book)
+	if err != nil || len(posts) != 0 {
+		t.Fatalf("item posts of another DM: %+v, %v", posts, err)
 	}
 }
 
@@ -419,10 +449,11 @@ func TestTranscriptPostsUseOmittedTurnEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	store := e.svc.Notify.Rooms
+	dm := room.DMConversation(lead.ID)
 	var ids []string
 	for _, delta := range []time.Duration{30 * time.Second, 2*time.Minute - 43*time.Millisecond, 4 * time.Minute} {
 		store.Now = func() time.Time { return base.Add(delta) }
-		msg, err := store.Post(rec.ID, room.PostInput{From: lead.Address(), To: []string{rec.Name}, Text: "report"})
+		msg, err := store.Post(rec.ID, room.PostInput{From: lead.Address(), Conversation: dm, To: []string{rec.Name}, Text: "report"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -464,35 +495,58 @@ func TestTranscriptPostsUseOmittedTurnEnd(t *testing.T) {
 	}
 }
 
-// A typed PR event is a delivered notice the DM draws as a card, so the
-// session's conversation includes it. A PR post stored before the typed events
-// keeps its raw text and stays out, as it always did.
-func TestSessionConversationIncludesTypedPREvents(t *testing.T) {
+// The DM's posts are stored posts shaped like the feed's, so the two views draw
+// the same row.
+func TestTranscriptPostsMatchFeed(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
 	lead := e.start(rec, "lead", nil)
 	store := e.svc.Notify.Rooms
-	event, err := store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{lead.Address()}, RoomService: true,
-		Event: room.PREvent{Type: room.PRCIFailed, Label: "PR #7", Location: "github.com/o/r#7", ChangeID: "github.com/o/r#7", Number: 7,
-			Head: strings.Repeat("a", 40), CIAttempt: 1, CIMax: 3, Summary: "unit"}})
+	dm := room.DMConversation(lead.ID)
+	card, err := store.PutAttachment(rec.ID, "card.html", []byte("<!doctype html><html><head><title>Build status</title></head><body>Ready</body></html>"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Old history keeps PR posts with only text and a notice kind.
-	legacy := room.Message{Kind: "pr", From: rec.Name, To: []string{lead.Address()}, Notice: room.EventNotice{Kind: "ready"}, Text: "PR #7 is ready to land.",
-		SessionIDs: map[string]string{lead.Address(): lead.ID}}
-	if sessionPost(rec, legacy, lead.ID, lead.Address()) {
-		t.Fatal("a stored PR post without a typed payload reached the session conversation")
+	card.Render = room.RenderHTML
+	var ids []string
+	for _, in := range []room.PostInput{
+		{From: rec.Name, Human: true, Conversation: dm, To: []string{lead.Address()}, Text: "Owner prompt"},
+		{From: lead.Address(), Conversation: dm, To: []string{rec.Name}, Text: "My card", Attachments: []room.Attachment{card}},
+		{From: lead.Address(), Conversation: dm, To: []string{rec.Name}, Text: "No files"},
+	} {
+		msg, err := store.Post(rec.ID, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, msg.ID)
 	}
 	sess, err := e.svc.transcript(lead.ID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids := map[string]bool{}
-	for _, p := range sess.Posts {
-		ids[p.ID] = true
+	if sess.Address != lead.Address() || len(sess.Posts) != len(ids) {
+		t.Fatalf("address = %q, posts = %+v", sess.Address, sess.Posts)
 	}
-	if !ids[event.ID] {
-		t.Fatalf("typed PR event is missing from the session conversation: %+v", sess.Posts)
+	feed, err := e.svc.FeedTail(rec.ID, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]Post{}
+	for _, post := range feed.Posts {
+		// Feed views route the room feed only; transcripts have none.
+		post.setViews(nil)
+		byID[post.ID] = post
+	}
+	for i, id := range ids {
+		if !reflect.DeepEqual(sess.Posts[i], byID[id]) {
+			t.Errorf("post %d = %+v, want feed post %+v", i, sess.Posts[i], byID[id])
+		}
+	}
+	first := sess.Posts[1]
+	if first.Owner || first.Speaker != "lead" || first.FromEmoji == "" || first.FromHue != NameHue(lead.Address()) {
+		t.Fatalf("sender shaping = %+v", first)
+	}
+	if len(first.Attachments) != 1 || !first.Attachments[0].Rich() || first.Attachments[0].Title != "Build status" {
+		t.Fatalf("card = %+v", first.Attachments)
 	}
 }

@@ -1,5 +1,7 @@
 package room
 
+import "regexp"
+
 // DeliveryMode says whether a post asks its recipient to act now or only adds
 // context for its next turn.
 type DeliveryMode string
@@ -39,7 +41,14 @@ type Delivery struct {
 // SeatSessionID is the delivery identity of the room's root seat. The seat is
 // not a session, and its holder can change, so its rows name the seat rather
 // than the session that holds it today.
-func SeatSessionID(roomID string) string { return "seat:" + roomID }
+func SeatSessionID(roomID string) string { return seatPrefix + roomID }
+
+// seatPrefix starts the seat's delivery identity and its DM conversation.
+const seatPrefix = "seat:"
+
+// seatSessionRe is the shape of a root seat's delivery identity: the seat of
+// one well-formed room.
+var seatSessionRe = regexp.MustCompile(`^seat:room_[0-9]{8}-[0-9]{6}-[0-9a-f]{8}$`)
 
 // deliveryModeFor is the mode of every delivery of msg: a post that does not
 // ask for a wake, and an event of a quiet family, only add context.

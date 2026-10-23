@@ -6,6 +6,7 @@ import type { ComputerApp, ComputerInfo, ComputerStream, ActionIntent } from './
 import type { AppEvent, ListChange, ListEvent } from './event.ts'
 import type { Attachment, Check, Delivery, Doing, Draft, FeedSearch, Forward, Member, Message, Post, PostDetail, PostResult, EventNotice, Seat, SendResult, Shot, Skip, SpawnPreview, SpawnResult } from './room.ts'
 import type { VoicePageEvent } from './voice.ts'
+import type { SessionReference } from './session.ts'
 import { eventSpecs, isEventPayload } from '../rooms/events.gen.ts'
 
 export type Guard<T> = (v: unknown) => v is T
@@ -116,6 +117,7 @@ function messageFields(v: Record<string, unknown>): boolean {
     optional(v.notice, isEventNotice) &&
     isEventPayloadField(v) &&
     optional(v.human, isBoolean) &&
+    optional(v.conversation, isString) &&
     optional(v.source, isString) &&
     optional(v.spoken, isBoolean) &&
     optional(v.relayOf, isString) &&
@@ -158,6 +160,21 @@ export function isPost(v: unknown): v is Post {
 
 export function isFeedSearch(v: unknown): v is FeedSearch {
   return isRecord(v) && isPosts(v.posts) && isBoolean(v.more)
+}
+
+// isSessionReference accepts one reference row of a DM (roomsvc.ReferenceRow).
+export function isSessionReference(v: unknown): v is SessionReference {
+  return (
+    isRecord(v) &&
+    isString(v.postId) &&
+    isString(v.from) &&
+    isString(v.speaker) &&
+    isNumber(v.fromHue) &&
+    isString(v.conversation) &&
+    isNumber(v.ts) &&
+    isString(v.preview) &&
+    isNumber(v.attachments)
+  )
 }
 
 function isActionIntent(v: unknown): v is ActionIntent {

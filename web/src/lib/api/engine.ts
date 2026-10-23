@@ -110,8 +110,8 @@ export interface Engine {
   Preview(roomId: string, draft: string): Promise<Draft>
   MarkRead(roomId: string, messageId: string): Promise<null>
   MarkReadMany(roomId: string, ids: string[]): Promise<null>
-  Send(roomId: string, draft: string, replyTo: string, atts: AttachmentRef[], forwardOf: string): Promise<SendResult>
-  SendWithReferences(roomId: string, draft: string, replyTo: string, atts: AttachmentRef[], forwardOf: string, references: Reference[]): Promise<SendResult>
+  Send(roomId: string, draft: string, replyTo: string, atts: AttachmentRef[], forwardOf: string, conversation: string): Promise<SendResult>
+  SendWithReferences(roomId: string, draft: string, replyTo: string, atts: AttachmentRef[], forwardOf: string, references: Reference[], conversation: string): Promise<SendResult>
   Attach(roomId: string, name: string, base64: string): Promise<Attachment>
   AttachmentText(roomId: string, id: string): Promise<string>
   ArchiveRoom(ref: string): Promise<null>

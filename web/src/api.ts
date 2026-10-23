@@ -156,8 +156,9 @@ export const api = {
   transcriptTurn: (ref: string, turn: number) => app.TranscriptTurn(ref, turn),
   profile: (ref: string) => app.Profile(ref),
   sendToSession: (ref: string, text: string, atts: AttachmentRef[] = [], forwardOf = '') => app.SendToSession(ref, text, atts, forwardOf),
-  // send is the composer's one send path: Go decides post or spawn.
-  send: (roomId: string, draft: string, replyTo = '', atts: AttachmentRef[] = [], forwardOf = '', references: Reference[] = []) => references.length ? app.SendWithReferences(roomId, draft, replyTo, atts, forwardOf, references) : app.Send(roomId, draft, replyTo, atts, forwardOf),
+  // send is the composer's one send path: Go decides post or spawn. conversation
+  // names the DM the client wrote in, and is empty for the room feed.
+  send: (roomId: string, draft: string, replyTo = '', atts: AttachmentRef[] = [], forwardOf = '', references: Reference[] = [], conversation = '') => references.length ? app.SendWithReferences(roomId, draft, replyTo, atts, forwardOf, references, conversation) : app.Send(roomId, draft, replyTo, atts, forwardOf, conversation),
   profiles: () => app.Profiles(),
   stopSession: (roomId: string, sessionId: string) => app.StopSession(roomId, sessionId),
   consolidateSessions: (roomId: string, options: ConsolidationOptions) => app.ConsolidateSessions(roomId, options),

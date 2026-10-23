@@ -12,10 +12,15 @@ export interface PagePost {
   id: string
   ts?: number
 }
+export interface PageReference {
+  postId: string
+  ts?: number
+}
 export interface SessionPage {
   member?: { id?: string }
   turns?: PageTurn[] | null
   posts?: PagePost[] | null
+  references?: PageReference[] | null
   earlier?: boolean
   newer?: boolean
   cursor?: string
@@ -43,8 +48,16 @@ export function mergeSessionPage<S extends SessionPage>(current: S | null | unde
  const since = before ? time(all[before-1]?.ended) : 0
  const until = after ? time(turns.at(-1)?.ended) : 0
  if (since || until) posts = posts.filter(p => (!since || (p.ts ?? 0) > since) && (!until || (p.ts ?? 0) <= until))
+ // A reference row follows the same window as the posts it stands next to.
+ const currentRefs = current.references ?? []
+ const incomingRefs = frozen
+  ? (page.references ?? []).filter(r => currentRefs.some(old => old.postId === r.postId)) : page.references ?? []
+ let references = older
+  ? merge(incomingRefs,currentRefs,r=>r.postId)
+  : merge(currentRefs,incomingRefs,r=>r.postId)
+ if (since || until) references = references.filter(r => (!since || (r.ts ?? 0) > since) && (!until || (r.ts ?? 0) <= until))
  const first = turns[0]
- return { ...current, ...page, turns, posts,
+ return { ...current, ...page, turns, posts, references,
   earlier: before > 0 || (older ? page.earlier : current.earlier),
   newer: after > 0 || (frozen && ((page.turns ?? []).some(t => !currentTurns.some(old => old.n === t.n)) || (page.posts ?? []).some(p => !currentPosts.some(old => old.id === p.id)))) || (older || refresh ? current.newer : page.newer),
   cursor: first ? String(first.n) : current.cursor,

@@ -94,6 +94,9 @@ export interface Message {
   // registry in events.gen.ts. Read it with an event helper, not by hand.
   payload?: EventPayload
   human?: boolean
+  // conversation is where the post was written: the room feed (or absent), one
+  // session's DM (dm:<session id>), or the owner's voice call (voice).
+  conversation?: string
   source?: string
   spoken?: boolean
   relayOf?: string
