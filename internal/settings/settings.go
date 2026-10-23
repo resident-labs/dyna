@@ -63,6 +63,7 @@ type Values struct {
 	LocalLaneRepos         []string
 	LibraryEnabled         []string
 	LibraryProfile         string
+	LibrarySmellProfile    string
 	LibraryReadmeMaxLines  int
 	LocalCIRemote          string
 	RootProfile            string
@@ -429,7 +430,7 @@ func (v *Values) Set(key, value string) error {
 		return v.setSession(key, value)
 	case KeyVoiceProvider, KeyVoiceModel, KeyVoiceURL, KeyVoiceDucking:
 		return v.setVoice(key, value)
-	case KeyLibraryEnabled, KeyLibraryProfile, KeyLibraryReadmeMaxLines:
+	case KeyLibraryEnabled, KeyLibraryProfile, KeyLibrarySmellProfile, KeyLibraryReadmeMaxLines:
 		return v.setLibrary(key, value)
 	case KeyMaxCardBytes, KeyMaxFileBytes:
 		n, err := parseContentBytes(key, value)

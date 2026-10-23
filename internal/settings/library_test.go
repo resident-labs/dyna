@@ -29,10 +29,13 @@ func TestLibrarySettings(t *testing.T) {
 	if err := v.Set(KeyLibraryProfile, " cheap "); err != nil {
 		t.Fatal(err)
 	}
+	if err := v.Set(KeyLibrarySmellProfile, " diagnostic "); err != nil {
+		t.Fatal(err)
+	}
 	if err := v.Save(); err != nil {
 		t.Fatal(err)
 	}
-	if v, err = Load(path); err != nil || !v.LibraryOn("/src/app/") || v.LibraryOn("/src/other") || v.LibraryProfile != "cheap" || v.LibraryReadmeMaxLines != 120 {
+	if v, err = Load(path); err != nil || !v.LibraryOn("/src/app/") || v.LibraryOn("/src/other") || v.LibraryProfile != "cheap" || v.LibrarySmellProfile != "diagnostic" || v.LibraryReadmeMaxLines != 120 {
 		t.Fatal(v, err)
 	}
 }
