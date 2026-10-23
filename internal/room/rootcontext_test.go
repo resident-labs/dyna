@@ -50,9 +50,9 @@ func TestRootContext(t *testing.T) {
 			decision: RootWake,
 		},
 		{
-			name:     "a merge steward decision is merge context",
-			msg:      Message{ID: "merge", From: roomName + ":merge-steward", Kind: "merge-decision", To: []string{roomName}},
-			decision: RootQuiet, category: RootMergeNote,
+			name:     "root's own merge decision is skipped",
+			msg:      Message{ID: "merge", From: roomName + ":" + RootAgent, Kind: "merge-decision", To: []string{roomName}},
+			decision: RootSkip,
 		},
 		{
 			name:     "an alert to root wakes",

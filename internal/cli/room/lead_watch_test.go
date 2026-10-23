@@ -29,7 +29,7 @@ func (out watchBlocks) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-func TestRootWatchReceivesStewardPosts(t *testing.T) {
+func TestRootWatchReceivesLeadPosts(t *testing.T) {
 	for _, external := range []bool{false, true} {
 		name := "internal"
 		if external {
@@ -42,7 +42,7 @@ func TestRootWatchReceivesStewardPosts(t *testing.T) {
 			if _, _, err := st.SetSeat(t.Context(), rec.ID, room.Seat{External: external}, nil); err != nil {
 				t.Fatal(err)
 			}
-			steward, root := rec.Name+":merge-steward", rec.Name+":"+room.RootAgent
+			lead, root := rec.Name+":lead", rec.Name+":"+room.RootAgent
 			post := func(in room.PostInput) room.Message {
 				t.Helper()
 				msg, err := st.Post(rec.ID, in)
@@ -51,13 +51,13 @@ func TestRootWatchReceivesStewardPosts(t *testing.T) {
 				}
 				return msg
 			}
-			post(room.PostInput{Wake: true, From: steward, Kind: "alert", To: []string{rec.Name}, Text: "Before cursor"})
+			post(room.PostInput{Wake: true, From: lead, Kind: "alert", To: []string{rec.Name}, Text: "Before cursor"})
 			cursor := post(room.PostInput{From: "dyna", Kind: "instructions", To: []string{rec.Name}, Text: "Hidden cursor"})
 			var quiet []room.Message
 			for _, in := range []room.PostInput{
-				{From: steward, Kind: "notice", To: []string{root}, Text: "Quiet steward note"},
-				{From: steward, Kind: "merge-decision", To: []string{rec.Name}, Text: "Keep the failed trial"},
-				{From: steward, Kind: "issue", To: []string{rec.Name}, Text: "Repair the test"},
+				{From: lead, Kind: "notice", To: []string{root}, Text: "Quiet lead note"},
+				{From: lead, Kind: "merge-decision", To: []string{rec.Name}, Text: "Keep the failed trial"},
+				{From: lead, Kind: "issue", To: []string{rec.Name}, Text: "Repair the test"},
 			} {
 				msg := post(in)
 				quiet = append(quiet, msg)
@@ -66,13 +66,13 @@ func TestRootWatchReceivesStewardPosts(t *testing.T) {
 				}
 			}
 			for _, in := range []room.PostInput{
-				{From: steward, Kind: "alert", To: []string{rec.Name + ":worker"}, Text: "Another recipient"},
-				{From: steward, Kind: "merge-decision", To: []string{"another-room"}, Text: "Another room"},
+				{From: lead, Kind: "alert", To: []string{rec.Name + ":worker"}, Text: "Another recipient"},
+				{From: lead, Kind: "merge-decision", To: []string{"another-room"}, Text: "Another room"},
 				{From: rec.Name, To: []string{rec.Name}, Text: "Own owner post"},
 			} {
 				post(in)
 			}
-			alert := post(room.PostInput{Wake: true, From: steward, Kind: "alert", To: []string{root}, Text: "Main is red"})
+			alert := post(room.PostInput{Wake: true, From: lead, Kind: "alert", To: []string{root}, Text: "Main is red"})
 			watch := func(since string) (watchBlocks, context.CancelFunc) {
 				t.Helper()
 				ctx, cancel := context.WithCancel(t.Context())
@@ -120,7 +120,7 @@ func TestRootWatchReceivesStewardPosts(t *testing.T) {
 			// The first waking post proves the real watcher is running. A
 			// later quiet cleanup notice waits for the next action request.
 			cleanup := post(room.PostInput{From: "dyna", Kind: "notice", To: []string{rec.Name}, Text: "Quiet cleanup note"})
-			wake := post(room.PostInput{From: steward, Kind: "message", To: []string{rec.Name}, Wake: true, NeedsRoot: true, Text: "Choose the recovery"})
+			wake := post(room.PostInput{From: lead, Kind: "message", To: []string{rec.Name}, Wake: true, NeedsRoot: true, Text: "Choose the recovery"})
 			want = []watchBlock{{ID: wake.ID, Posts: []room.Message{cleanup, wake}}}
 			if got := readThrough(out, wake.ID); !reflect.DeepEqual(got, want) {
 				t.Errorf("live deliveries = %+v; want %+v", got, want)

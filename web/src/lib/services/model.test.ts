@@ -63,10 +63,9 @@ test('librarian status belongs to this repository and keeps activation local', (
 })
 
 test('profiles preserve Auto and partial cost falls back to turns', () => {
-  const services = [{ role: 'merge-steward', name: '', profile: 'sol', pinned: '', reason: '', profiles: ['sol'] }]
-  const steward = row({ services }, 'steward')
-  assert.equal(steward.profile?.value, '')
-  assert.deepEqual(steward.profile?.options, ['', 'off', 'sol'])
+  const services = [{ role: 'reviewer', name: '', profile: 'sol', pinned: '', reason: '', profiles: ['sol'] }]
+  assert.equal(row({ services }, 'reviewer').profile?.value, '')
+  assert.deepEqual(row({ services }, 'reviewer').profile?.options, ['', 'sol'])
   const priced = { role: 'reviewer', turns: 4, usd: 1.2, incomplete: false }
   const usage = [{ ...priced, incomplete: true }]
   assert.equal(row({ usage }, 'reviewer').value, '4 turns')

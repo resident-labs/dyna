@@ -11,7 +11,7 @@ import (
 
 func TestRulesRoles(t *testing.T) {
 	for _, rule := range Rules {
-		for _, role := range []Role{Owner, Root, Session, Worker, Steward} {
+		for _, role := range []Role{Owner, Root, Session, Worker} {
 			allowed := false
 			for _, want := range rule.Allowed {
 				allowed = allowed || want == role
@@ -103,11 +103,11 @@ func TestRoleLimits(t *testing.T) {
 		{"room watch", []Role{Owner}},
 		{"root attach", []Role{Owner}},
 		{"root detach", []Role{Owner}},
-		{"subagent start", []Role{Owner, Root, Session, Steward}},
+		{"subagent start", []Role{Owner, Root, Session}},
 		{"doctor examine", []Role{Owner, Root, Session}},
 		{"doctor report", []Role{Owner, Root, Session}},
 	} {
-		for _, role := range []Role{Owner, Root, Session, Worker, Steward} {
+		for _, role := range []Role{Owner, Root, Session, Worker} {
 			want := false
 			for _, allowed := range tc.allowed {
 				want = want || allowed == role

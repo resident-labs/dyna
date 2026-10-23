@@ -18,7 +18,7 @@ import (
 func TestMergeControlPauseResumeAndStatus(t *testing.T) {
 	f := mergeTrialEnv(t, 1)
 	id := f.e.author.RoomID
-	if err := f.e.s.MergeControl(t.Context(), id, "pause", nil, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), id, "pause", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
@@ -28,7 +28,7 @@ func TestMergeControlPauseResumeAndStatus(t *testing.T) {
 	if err != nil || !status.Paused || status.Reason != "merging paused by owner" || len(status.Queue) != 1 || f.builds != 0 {
 		t.Fatalf("status=%+v error=%v builds=%d", status, err, f.builds)
 	}
-	if err := f.e.s.MergeControl(t.Context(), id, "resume", nil, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), id, "resume", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
@@ -44,7 +44,7 @@ func TestMergeControlCancelReturnsBatchToQueue(t *testing.T) {
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "cancel", nil, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "cancel", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	st, err := f.e.s.Store.Read()
@@ -66,7 +66,7 @@ func TestMergeControlReturnHoldsOnlyExactHead(t *testing.T) {
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "return", []string{"2", "Fix TestBroken; https://github.com/owner/repo/actions/runs/81"}, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "return", []string{"2", "Fix TestBroken; https://github.com/owner/repo/actions/runs/81"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	st, err := f.e.s.Store.Read()
@@ -96,10 +96,10 @@ func TestMergeControlRetryWithoutStartsOneSharedBatch(t *testing.T) {
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "pause", nil, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "pause", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "retry", nil, []string{"2"}); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "retry", nil, []string{"2"}, nil); err != nil {
 		t.Fatal(err)
 	}
 	st, _ := f.e.s.Store.Read()
@@ -120,7 +120,7 @@ func TestMergeControlRetryCancellationKeepsReplacementResumable(t *testing.T) {
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.e.s.MergeControl(t.Context(), id, "pause", nil, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), id, "pause", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	before, err := f.e.s.Store.Read()
@@ -135,7 +135,7 @@ func TestMergeControlRetryCancellationKeepsReplacementResumable(t *testing.T) {
 		}
 		return run(ctx, cmd)
 	}
-	if err := f.e.s.MergeControl(t.Context(), id, "retry", nil, nil); !errors.Is(err, context.Canceled) {
+	if err := f.e.s.MergeControl(t.Context(), id, "retry", nil, nil, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("retry error = %v, want cancellation", err)
 	}
 	// Read durable state as the restarted engine would.
@@ -172,7 +172,7 @@ func TestMergeControlBisectIsExplicitAndBounded(t *testing.T) {
 	if f.builds != 1 {
 		t.Fatal("automatic prefix trial")
 	}
-	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "bisect", nil, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "bisect", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
@@ -194,7 +194,7 @@ func TestMergeControlPublishRequiresPassedTrial(t *testing.T) {
 				f.ci = "completed"
 				f.conclusion = ci
 			}
-			err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{"1"}, nil)
+			err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{"1"}, nil, nil)
 			if ci == "success" {
 				if err != nil || len(*f.merged) != 2 {
 					t.Fatalf("publish=%v merged=%v", err, *f.merged)
@@ -210,7 +210,7 @@ func TestMergeControlRefusesWorkerAndReadOnlyRoom(t *testing.T) {
 	f := mergeTrialEnv(t, 1)
 	t.Setenv("DYNA_MODE", "subagent")
 	t.Setenv("DYNA_SESSION", "ses_test")
-	if err := f.e.s.MergeControl(context.Background(), f.e.author.RoomID, "pause", nil, nil); err == nil {
+	if err := f.e.s.MergeControl(context.Background(), f.e.author.RoomID, "pause", nil, nil, nil); err == nil {
 		t.Fatal("worker can control merging")
 	}
 }
@@ -225,14 +225,14 @@ func TestMergeControlFailureCancelResumeBuildsNewTrial(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := f.e.author.RoomID
-	if err := f.e.s.MergeControl(t.Context(), id, "cancel", nil, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), id, "cancel", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.e.s.MergeControl(t.Context(), id, "resume", nil, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), id, "resume", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	// Root may request a fresh batch without waiting for the next watch tick.
-	if err := f.e.s.MergeControl(t.Context(), id, "retry", nil, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), id, "retry", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
@@ -250,7 +250,7 @@ func TestMergeControlPublishPreservesPauseAndRejectsNonAncestor(t *testing.T) {
 			if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "pause", nil, nil); err != nil {
+			if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "pause", nil, nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			f.ci = "completed"
@@ -261,7 +261,7 @@ func TestMergeControlPublishPreservesPauseAndRejectsNonAncestor(t *testing.T) {
 				}
 				return run(ctx, cmd)
 			}
-			err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{"1"}, nil)
+			err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{"1"}, nil, nil)
 			if ancestor {
 				if err != nil || len(*f.merged) != 2 {
 					t.Fatalf("publish=%v merged=%v", err, *f.merged)
@@ -284,7 +284,7 @@ func TestMergeControlRejectsReadOnlyAndOtherRootRoom(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, action := range []string{"pause", "resume", "cancel", "retry", "bisect"} {
-		if err := f.e.s.MergeControl(t.Context(), id, action, nil, nil); err == nil {
+		if err := f.e.s.MergeControl(t.Context(), id, action, nil, nil, nil); err == nil {
 			t.Fatalf("read-only action %s accepted", action)
 		}
 	}
@@ -293,7 +293,7 @@ func TestMergeControlRejectsReadOnlyAndOtherRootRoom(t *testing.T) {
 	}
 	t.Setenv("DYNA_MODE", "root")
 	t.Setenv("DYNA_ROOM_ID", "different-room")
-	if err := f.e.s.MergeControl(t.Context(), id, "pause", nil, nil); err == nil {
+	if err := f.e.s.MergeControl(t.Context(), id, "pause", nil, nil, nil); err == nil {
 		t.Fatal("root changed another room")
 	}
 }
@@ -303,11 +303,11 @@ func TestMergeControlRetryWithoutAllPRsPreservesPause(t *testing.T) {
 		t.Run(strconv.FormatBool(paused), func(t *testing.T) {
 			f := mergeTrialEnv(t, 1)
 			if paused {
-				if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "pause", nil, nil); err != nil {
+				if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "pause", nil, nil, nil); err != nil {
 					t.Fatal(err)
 				}
 			}
-			err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "retry", nil, []string{"1"})
+			err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "retry", nil, []string{"1"}, nil)
 			if err == nil || f.builds != 0 {
 				t.Fatal("empty retry was accepted")
 			}
@@ -328,7 +328,7 @@ func TestMergeControlPublishRefusesPausedSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.ci = "completed"
-	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{"1"}, nil); err == nil {
+	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{"1"}, nil, nil); err == nil {
 		t.Fatal("publish reported success while sessions were paused")
 	}
 }
@@ -342,13 +342,13 @@ func TestMergeControlPublishesChosenPrefixWithoutReturningAnotherPR(t *testing.T
 			t.Fatal(err)
 		}
 	}
-	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "bisect", nil, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "bisect", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "pause", nil, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "pause", nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.e.s.Store.update(func(st *State) error {
@@ -358,7 +358,7 @@ func TestMergeControlPublishesChosenPrefixWithoutReturningAnotherPR(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{"3"}, nil); err != nil {
+	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{"3"}, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(*f.merged, []int{1, 2}) {
@@ -398,7 +398,7 @@ func TestMergeControlRepeatedPublishReportsAlreadyPublished(t *testing.T) {
 				return run(ctx, cmd)
 			}
 			f.ci = "completed"
-			if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{name}, nil); err != nil {
+			if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{name}, nil, nil); err != nil {
 				t.Fatal(err)
 			}
 			st, err := f.e.s.Store.Read()
@@ -412,7 +412,7 @@ func TestMergeControlRepeatedPublishReportsAlreadyPublished(t *testing.T) {
 			f.ci = "in_progress"
 			calls := 0
 			f.e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error { calls++; return run(ctx, cmd) }
-			err = f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{name}, nil)
+			err = f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "publish", []string{name}, nil, nil)
 			if err == nil || !strings.Contains(err.Error(), "already published") {
 				t.Fatalf("repeat publish result: %v", err)
 			}

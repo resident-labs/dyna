@@ -22,7 +22,7 @@ func TestMergeControlAuthorityBeforeBackend(t *testing.T) {
 	recordtest.Write(t, manager.Store.Root, childID, subagent.Meta{ID: childID, RoomID: "work", Room: "work"})
 	service := &Service{Notify: notify.New(&room.Store{Root: filepath.Join(root, "rooms")}, manager)}
 	for _, action := range []string{"pause", "resume", "cancel", "retry", "bisect", "return", "publish"} {
-		err := service.MergeControl(t.Context(), "missing", action, nil, nil)
+		err := service.MergeControl(t.Context(), "missing", action, nil, nil, nil)
 		if err == nil || !strings.HasPrefix(err.Error(), "git merge "+action+" is ") {
 			t.Fatalf("%s: %v", action, err)
 		}
@@ -45,24 +45,20 @@ func TestMergeControlUsesAuthenticatedActor(t *testing.T) {
 	t.Setenv("DYNA_SESSION", "forged-root")
 	t.Setenv("DYNA_ROOM_ID", "unrelated-room")
 	t.Setenv("DYNA_ROOM", "unrelated-room")
-	for _, role := range []authority.Role{authority.Root, authority.Steward, authority.Owner} {
+	for _, role := range []authority.Role{authority.Root, authority.Owner} {
 		actor := authority.Actor{Role: role, Room: rm.ID}
 		if role != authority.Owner {
 			actor.Session = "ses_20261021-000011-bcdebcde"
-			storedRole := subagent.RoleRoot
-			if role == authority.Steward {
-				storedRole = subagent.RoleSteward
-			}
-			recordtest.Write(t, s.sessionStore().Root, actor.Session, subagent.Meta{ID: actor.Session, Role: storedRole, RoomID: rm.ID, Room: rm.Name})
+			recordtest.Write(t, s.sessionStore().Root, actor.Session, subagent.Meta{ID: actor.Session, Role: subagent.RoleRoot, RoomID: rm.ID, Room: rm.Name})
 		}
 		ctx := authority.WithActor(t.Context(), actor)
-		if err := s.MergeControl(ctx, rm.ID, "pause", nil, nil); err != nil {
+		if err := s.MergeControl(ctx, rm.ID, "pause", nil, nil, nil); err != nil {
 			t.Fatalf("%s pause: %v", role, err)
 		}
-		if err := s.MergeControl(ctx, rm.ID, "note", []string{"Inspect the failed batch."}, nil); err != nil {
+		if err := s.MergeControl(ctx, rm.ID, "note", []string{"Inspect the failed batch."}, nil, nil); err != nil {
 			t.Fatalf("%s note: %v", role, err)
 		}
-		if err := s.MergeControl(ctx, rm.ID, "resume", nil, nil); err != nil {
+		if err := s.MergeControl(ctx, rm.ID, "resume", nil, nil, nil); err != nil {
 			t.Fatalf("%s resume: %v", role, err)
 		}
 	}
@@ -73,7 +69,7 @@ func TestMergeControlUsesAuthenticatedActor(t *testing.T) {
 		if action == "note" {
 			args = []string{"Denied decision."}
 		}
-		err := s.MergeControl(authority.WithActor(t.Context(), authority.Actor{}), rm.ID, action, args, nil)
+		err := s.MergeControl(authority.WithActor(t.Context(), authority.Actor{}), rm.ID, action, args, nil, nil)
 		if err == nil || !strings.HasPrefix(err.Error(), "git merge "+action+" is ") {
 			t.Fatalf("%s: %v", action, err)
 		}

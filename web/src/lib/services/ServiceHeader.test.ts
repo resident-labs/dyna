@@ -31,14 +31,14 @@ async function load() {
 }
 
 // profiles is what the engine says the service can run, services-only profiles included.
-const steward: ServiceView = { role: 'steward', name: 'Merge steward', page: 'goals', profile: 'sol', pinned: '', source: 'auto', reason: 'auto: best taste + cost', scope: 'global', sessions: 1, profiles: ['sol', 'luna'] }
-const reviewer: ServiceView = { ...steward, role: 'reviewer', name: 'PR reviewer', page: 'pull-requests', profile: 'luna', pinned: 'luna', source: 'pinned', reason: 'pinned by the room', scope: 'room', sessions: 2 }
+const librarian: ServiceView = { role: 'librarian', name: 'Librarian', page: 'goals', profile: 'sol', pinned: '', source: 'auto', reason: 'auto: best taste + cost', scope: 'global', sessions: 1, profiles: ['sol', 'luna'] }
+const reviewer: ServiceView = { ...librarian, role: 'reviewer', name: 'PR reviewer', page: 'pull-requests', profile: 'luna', pinned: 'luna', source: 'pinned', reason: 'pinned by the room', scope: 'room', sessions: 2 }
 const text = (html: string) => html.replace(/<!--.*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
 
 test('the status line names the profile, the reason and the open sessions', () => {
-  assert.equal(serviceStatus(steward).text, 'sol · auto: best taste + cost · 1 session')
+  assert.equal(serviceStatus(librarian).text, 'sol · auto: best taste + cost · 1 session')
   assert.equal(serviceStatus(reviewer).text, 'luna · pinned by the room · 2 sessions')
-  assert.deepEqual(serviceStatus({ ...steward, profile: '', reason: 'no enabled steward profile is available' }), { text: 'no enabled steward profile is available', tone: 'coral' })
+  assert.deepEqual(serviceStatus({ ...librarian, profile: '', reason: 'no enabled librarian profile is available' }), { text: 'no enabled librarian profile is available', tone: 'coral' })
   assert.deepEqual(serviceStatus(null), { text: '', tone: '' })
 })
 
@@ -46,9 +46,9 @@ test('the header is one line: no scope chip, a plain note only for a service of 
   const { dir, component, render } = await load()
   try {
     const show = (service: ServiceView) => render(component, { props: { roomId: 'r', role: service.role, service } }).body
-    const auto = show(steward)
-    assert.match(text(auto), /Merge steward sol · auto: best taste \+ cost · 1 session Applies to all rooms Auto sol luna/)
-    assert.match(auto, /aria-label="Merge steward profile"/)
+    const auto = show(librarian)
+    assert.match(text(auto), /Librarian sol · auto: best taste \+ cost · 1 session Applies to all rooms Auto sol luna/)
+    assert.match(auto, /aria-label="Librarian profile"/)
     assert.match(auto, /<option value="" selected/)
     const pinned = show(reviewer)
     assert.match(text(pinned), /PR reviewer luna · pinned by the room · 2 sessions Auto sol luna/)
@@ -59,7 +59,7 @@ test('the header is one line: no scope chip, a plain note only for a service of 
     const sol = show({ ...reviewer, pinned: 'sol', profiles: ['sol'] })
     assert.doesNotMatch(sol, /not enabled/)
     assert.match(sol, /<option value="sol" selected/)
-    assert.equal(text(render(component, { props: { roomId: 'r', role: 'steward' } }).body).trim(), '')
+    assert.equal(text(render(component, { props: { roomId: 'r', role: 'librarian' } }).body).trim(), '')
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

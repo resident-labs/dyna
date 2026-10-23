@@ -2,18 +2,20 @@ package watch
 
 import (
 	"context"
+
 	"dyna-agent/internal/pr/state"
-	"dyna-agent/internal/settings"
-	"dyna-agent/internal/steward"
 )
 
-// A failed batch stays frozen until its steward or root chooses recovery. The pause
-// is durable before report preparation, so a reporting error cannot start work.
+// mergeBatchFailedReason is the merge pause that a failed batch sets.
+const mergeBatchFailedReason = "batch trial failed; merging paused for recovery"
+
+// A failed batch stays frozen until root chooses recovery. The pause is durable
+// before report preparation, so a reporting error cannot start work.
 func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b state.MergeTrial) error {
 	if b.Phase == "awaiting-root" && b.Notified {
 		return nil
 	}
-	b.Phase, b.Reason = "awaiting-root", "batch trial failed; merging paused for recovery"
+	b.Phase, b.Reason = "awaiting-root", mergeBatchFailedReason
 	if err := s.Store.update(func(st *State) error {
 		if current := st.MergeTrials[repo]; current == nil || trialIdentity(*current) != trialIdentity(b) {
 			return nil
@@ -55,19 +57,6 @@ func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b s
 			continue
 		}
 		seen[member.RoomID] = true
-		assigned := false
-		cfg, cfgErr := settings.Load(settings.DefaultPath())
-		if cfgErr == nil && cfg.MergeStewardProfile != settings.StewardProfileOff {
-			svc := s.mergeSteward()
-			assigned = svc.Assign(ctx, member.RoomID, member.Dir, cfg.MergeStewardProfile, trialIdentity(b), b.RootReport) == nil
-		}
-		if assigned {
-			if b.Notifier == "" {
-				b.Notifier = "steward"
-			}
-			continue
-		}
-		b.Notifier = "root"
 		anchor := *member
 		anchor.Head = b.Head
 		if err := s.postMergeNotice(ctx, anchor, "merge-batch-failed/"+trialIdentity(b), Notice{NeedsRoot: true, Kind: "ci", Text: b.RootReport}); err != nil {
@@ -76,21 +65,4 @@ func (s *Service) stopMergeBatch(ctx context.Context, repo string, r Record, b s
 	}
 	b.Notified = true
 	return s.saveMergeTrial(repo, b)
-}
-
-func (s *Service) mergeSteward() steward.Service {
-	sessions := s.StewardSessions
-	if sessions == nil && s.Notify != nil && s.Notify.Sessions != nil {
-		sessions = steward.Live{Manager: s.Notify.Sessions, Rooms: s.Notify.Rooms}
-	}
-	return steward.Service{Sessions: sessions, Root: s.Store.Root, Now: s.Now}
-}
-
-// StewardProfile uses the picker for steward assignments.
-// Off is not a profile: it reports the steward as off without a session manager.
-func (s *Service) StewardProfile(pinned string) (string, string, error) {
-	if pinned == settings.StewardProfileOff {
-		return settings.StewardProfileOff, "", nil
-	}
-	return s.mergeSteward().Profile(pinned)
 }

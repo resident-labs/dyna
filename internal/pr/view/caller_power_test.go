@@ -89,7 +89,7 @@ func TestPRCallsActForTheirCaller(t *testing.T) {
 
 // A lead untracks or resumes its child's PR, by the same rule as the session
 // controls: the author or an ancestor of the author's session may, and a
-// steward its own tree; an unrelated session and a worker may not.
+// its own tree; an unrelated session and a worker may not.
 func TestUntrackAndResumeAllowTheAuthorsAncestor(t *testing.T) {
 	e := newEnv(t)
 	alpha := e.room("ancestor-alpha")
@@ -109,7 +109,7 @@ func TestUntrackAndResumeAllowTheAuthorsAncestor(t *testing.T) {
 		"UntrackPR": func(ctx context.Context) error { return e.svc.PRs.UntrackPR(ctx, alpha.ID, "change") },
 		"ResumePR":  func(ctx context.Context) error { return e.svc.PRs.ResumePR(ctx, alpha.ID, "change") },
 	} {
-		for who, ctx := range map[string]context.Context{"the author": as(authority.Session, author), "the author's parent": as(authority.Session, parent), "a steward over the author": as(authority.Steward, parent)} {
+		for who, ctx := range map[string]context.Context{"the author": as(authority.Session, author), "the author's parent": as(authority.Session, parent)} {
 			if err := call(ctx); err != nil && strings.Contains(err.Error(), " only;") {
 				t.Errorf("%s as %s = %v; want it allowed", name, who, err)
 			}
@@ -179,7 +179,7 @@ func TestRestartReviewerOutlivesTheRequest(t *testing.T) {
 
 // Transfer, hold, release, close, reply and the policy override act for their
 // caller, by the same author rule as untrack and resume: the author, an ancestor of the author's session, a
-// steward over it, the owner and the room's root may; an unrelated session,
+// the owner and the room's root may; an unrelated session,
 // a workflow worker and root of another room may not. A refused transfer
 // leaves the PR as it was.
 func TestTransferAndDraftActForTheirCaller(t *testing.T) {
@@ -251,11 +251,10 @@ func TestTransferAndDraftActForTheirCaller(t *testing.T) {
 			}
 		}
 		for who, ctx := range map[string]context.Context{
-			"the author":                as(authority.Session, author, alpha.ID),
-			"the author's parent":       as(authority.Session, parent, alpha.ID),
-			"a steward over the author": as(authority.Steward, parent, alpha.ID),
-			"the owner":                 ownerCtx,
-			"the room's root":           as(authority.Root, "ses_20261020-000000-0000abcd", alpha.ID),
+			"the author":          as(authority.Session, author, alpha.ID),
+			"the author's parent": as(authority.Session, parent, alpha.ID),
+			"the owner":           ownerCtx,
+			"the room's root":     as(authority.Root, "ses_20261020-000000-0000abcd", alpha.ID),
 		} {
 			reset()
 			// A hold or release then fails only at the fake GitHub.

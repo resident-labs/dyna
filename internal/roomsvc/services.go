@@ -5,9 +5,6 @@ import (
 	"fmt"
 
 	"dyna-agent/internal/authority"
-	"dyna-agent/internal/configsvc"
-	"dyna-agent/internal/profile"
-	"dyna-agent/internal/settings"
 	"dyna-agent/internal/subagent"
 )
 
@@ -28,23 +25,13 @@ type ServiceView struct {
 	Profiles []string `json:"profiles"`
 }
 
-// ListServices reads each service's profile from the setting that owns it:
-// settings for the steward, and the room's reviewer state for the
-// reviewer. A service whose state cannot be read keeps its row, with the
-// error as its Reason, so the other services still show.
+// ListServices reads each service's profile from the state that owns it: the
+// room's reviewer state for the reviewer. A service whose state cannot be read
+// keeps its row, with the error as its Reason, so the other services still show.
 func (s *Service) ListServices(roomRef string) ([]ServiceView, error) {
 	rec, err := s.rooms().Resolve(roomRef)
 	if err != nil {
 		return nil, err
-	}
-	v, err := settings.Load(settings.DefaultPath())
-	if err != nil {
-		return nil, err
-	}
-	steward := ServiceView{Role: subagent.RoleSteward, Name: "Merge steward", Page: "pull-requests", Pinned: v.MergeStewardProfile, Scope: "global"}
-	steward.Profile, steward.Reason, err = s.PRs.Watcher().StewardProfile(v.MergeStewardProfile)
-	if err != nil {
-		steward.Reason = err.Error()
 	}
 	reviewer := ServiceView{Role: "reviewer", Name: "PR reviewer", Page: "pull-requests", Scope: "room"}
 	p := s.PRs.Watcher()
@@ -72,7 +59,7 @@ func (s *Service) ListServices(roomRef string) ([]ServiceView, error) {
 			choices = append(choices, p.Name)
 		}
 	}
-	out := []ServiceView{reviewer, steward}
+	out := []ServiceView{reviewer}
 	for i := range out {
 		out[i].Profiles = choices
 		out[i].Source = "auto"
@@ -94,35 +81,8 @@ func (s *Service) SetServiceProfile(ctx context.Context, roomRef, role, profile 
 		return err
 	}
 	switch role {
-	case subagent.RoleSteward:
-		if _, err := s.rooms().Resolve(roomRef); err != nil {
-			return err
-		}
-		if profile != settings.StewardProfileOff {
-			if err := s.enabledProfile(profile); err != nil {
-				return err
-			}
-		}
-		key := settings.KeyMergeStewardProfile
-		_, err := configsvc.Set(ctx, key, profile)
-		return err
 	case "reviewer":
 		return s.PRs.SetReviewerProfile(ctx, roomRef, profile)
 	}
 	return fmt.Errorf("unknown service %q", role)
-}
-
-// enabledProfile accepts "" (Auto) or the name of an enabled profile.
-func (s *Service) enabledProfile(name string) error {
-	if name == "" {
-		return nil
-	}
-	profiles, err := s.Notify.Sessions.ProfileStore()
-	if err != nil {
-		return err
-	}
-	if profile.IsEnabled(profiles.Profiles, name) {
-		return nil
-	}
-	return fmt.Errorf("no enabled profile named %q", name)
 }

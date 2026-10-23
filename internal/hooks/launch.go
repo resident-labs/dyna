@@ -37,7 +37,7 @@ func (s Service) bindHook(name string, requested bool) func(context.Context, pro
 			}
 			switch a.Role {
 			case authority.Owner:
-			case authority.Root, authority.Session, authority.Steward:
+			case authority.Root, authority.Session:
 				actor = callerid.Identity{Kind: callerid.Session, Session: a.Session}
 			case authority.Worker:
 				actor = callerid.Identity{Kind: callerid.Worker, Run: a.Run, Agent: a.Agent}

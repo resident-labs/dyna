@@ -42,7 +42,7 @@ func caller(ctx context.Context) (authority.Actor, error) {
 	switch a.Role {
 	case authority.Owner:
 		valid = true
-	case authority.Root, authority.Session, authority.Steward:
+	case authority.Root, authority.Session:
 		valid = a.Session != ""
 	case authority.Worker:
 		valid = a.Run != ""
