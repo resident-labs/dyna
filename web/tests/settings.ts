@@ -83,7 +83,7 @@ const minutes = (n: number) => new Date(Date.now() - n * 60000).toISOString()
 const inHours = (n: number) => new Date(Date.now() + n * 3600000).toISOString()
 const supportItem = (label: string, state: string, chip: string, reason: string) => ({ key: label, label, state, chip, reason })
 const support = (fields: Partial<HarnessSupport> = {}): HarnessSupport => ({ installed: true, installable: true, binary: '', version: '', versionError: '', lastHealthyVersion: '', dialect: '', partial: false, status: 'healthy', reason: '', items: [], ...fields })
-const profile = (name: string, harness: string, model: string, extra: Partial<ProfileView> = {}): ProfileView => ({ name, harness, model, models: [model], envKeys: [], uses: ['workflows', 'agents', 'services'], taste: 7, intelligence: 7, cost: 7, description: '', support: support(), runtimeAccount: '', runtimeVersion: '', fallback: '', timeoutSec: 0, maxConcurrent: 0, maxCallsPerRun: 0, default: false, disabled: false, safeMode: false, extraArgs: [], compact: null, command: [], ...extra })
+const profile = (name: string, harness: string, model: string, extra: Partial<ProfileView> = {}): ProfileView => ({ name, harness, model, models: [model], envKeys: [], uses: ['workflows', 'agents', 'services'], taste: 7, intelligence: 7, cost: 7, description: '', support: support(), runtimeVersion: '', fallback: '', timeoutSec: 0, maxConcurrent: 0, maxCallsPerRun: 0, default: false, disabled: false, safeMode: false, extraArgs: [], compact: null, command: [], ...extra })
 // The profile list the fixture changes in place: its profiles are never null.
 interface Listed extends ProfileList {
   profiles: ProfileView[]
