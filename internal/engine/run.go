@@ -288,7 +288,6 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 
 // Run owns the engine services until ctx is cancelled.
 func Run(ctx context.Context, f Options) (runErr error) {
-	restartStarted := time.Now()
 	ctx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 	// The engine's environment is the owner's, never a caller's, so a check
@@ -583,11 +582,6 @@ func Run(ctx context.Context, f Options) (runErr error) {
 		return err
 	}
 	defer socketLn.Close()
-	if !readOnly {
-		if err := userservices.EngineRestarted(ctx, restartStarted); err != nil {
-			return fmt.Errorf("acknowledge engine restart: %w", err)
-		}
-	}
 	appLn, err := net.Listen("tcp", f.Addr)
 	if err != nil {
 		return err
