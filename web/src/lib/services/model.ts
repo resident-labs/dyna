@@ -307,7 +307,6 @@ export function buildRows(i: Inputs): Row[] {
     state: 'always on',
     tone: 'on',
     detail: overlaps ? `${overlaps} open ${overlaps === 1 ? 'change overlaps' : 'changes overlap'} another` : 'No overlaps between open changes',
-    value: overlaps ? String(overlaps) : '',
     nextText: 'each push',
   })
 

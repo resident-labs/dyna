@@ -76,7 +76,8 @@ test('profiles preserve Auto and partial cost falls back to turns', () => {
 test('the schedule sorts timers before triggers and counts each overlapping change once', () => {
   const hooks = [{ hook: { name: 'self-update', label: '', event: 'schedule', everyMinutes: 60, disabled: false }, lastRun: { result: 'pass', startedAt: '2026-10-21T22:49:00Z', finishedAt: '2026-10-21T22:49:36Z' } }]
   const rows = buildRows(inputs({ hooks, changes: [{ overlaps: 2 }, { overlaps: 1 }] }))
-  assert.equal(rows.find((r) => r.id === 'radar')?.value, '2')
+  // The count is already in the line, so the row carries no second number.
+  assert.equal(rows.find((r) => r.id === 'radar')?.detail, '2 open changes overlap another')
   const schedule = buildSchedule(rows, Date.parse('2026-10-21T22:55:00Z'))
   assert.equal(schedule[0]?.name, 'Update Dyna')
   assert.equal(schedule[0]?.when, 'in 54 m')
