@@ -451,12 +451,22 @@ func (s *Store) importRegistry(ctx context.Context, conn *sql.Conn) error {
 			} else if err != nil {
 				return err
 			}
-			delete(source.Entries[i], "credential")
+			// JSON field matching is case-insensitive; no credential spelling may
+			// enter the metadata row.
+			for name := range source.Entries[i] {
+				if strings.EqualFold(name, "credential") {
+					delete(source.Entries[i], name)
+				}
+			}
+			schema := e.Credential.Schema
+			if c, ok := s.readCredential(e.ID); ok {
+				schema = c.Schema
+			}
 			metadata, err := json.Marshal(source.Entries[i])
 			if err != nil {
 				return err
 			}
-			if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id,ord,metadata,credential_schema) VALUES(?,?,?,?)", e.ID, i, metadata, e.Credential.Schema); err != nil {
+			if _, err := conn.ExecContext(ctx, "INSERT INTO accounts(id,ord,metadata,credential_schema) VALUES(?,?,?,?)", e.ID, i, metadata, schema); err != nil {
 				return err
 			}
 		}

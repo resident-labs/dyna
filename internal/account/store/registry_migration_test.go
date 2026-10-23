@@ -14,13 +14,16 @@ import (
 )
 
 func TestRegistryImportPreservesRawMetadataAndCanonicalEmpty(t *testing.T) {
-	for _, mode := range []string{"fresh", "canonical empty", "prior mirror", "canonical secret"} {
+	for _, mode := range []string{"fresh", "canonical empty", "prior mirror", "canonical secret", "credential casing"} {
 		t.Run(mode, func(t *testing.T) {
 			s := registryStore(t)
 			if err := os.MkdirAll(s.Root, 0700); err != nil {
 				t.Fatal(err)
 			}
 			raw := []byte(`{"version":1,"entries":[{"id":"legacy","harness":"fixture","identity":"account","label":"Old","unknown":{"large":9007199254740993},"credential":{"schema":"fixture-v1","payload":{"token":"legacy-canary"}}}]}`)
+			if mode == "credential casing" {
+				raw = bytes.Replace(raw, []byte(`"credential"`), []byte(`"Credential"`), 1)
+			}
 			if err := os.WriteFile(s.registryPath(), raw, 0600); err != nil {
 				t.Fatal(err)
 			}
@@ -48,7 +51,9 @@ func TestRegistryImportPreservesRawMetadataAndCanonicalEmpty(t *testing.T) {
 				}
 			}
 			if mode == "canonical secret" {
-				if err := s.writeCredential("legacy", grant("canonical-canary")); err != nil {
+				canonical := grant("canonical-canary")
+				canonical.Schema = "fixture-v2"
+				if err := s.writeCredential("legacy", canonical); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -78,6 +83,10 @@ func TestRegistryImportPreservesRawMetadataAndCanonicalEmpty(t *testing.T) {
 				}
 				if !ok || !bytes.Contains(c.Payload, []byte(want)) {
 					t.Fatal("credential was lost or replaced")
+				}
+				loaded, err := s.Read()
+				if err != nil || loaded.Find("legacy") == nil || loaded.Find("legacy").Credential.Schema != c.Schema {
+					t.Fatal("canonical credential is not readable through the registry")
 				}
 				info, err := os.Stat(s.credentialPath("legacy"))
 				if err != nil || info.Mode().Perm() != 0600 {

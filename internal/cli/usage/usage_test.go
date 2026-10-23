@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +11,7 @@ import (
 
 	"dyna-agent/internal/account/service"
 	accountstore "dyna-agent/internal/account/store"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/engineclient"
 )
 
@@ -66,10 +66,11 @@ func TestUsageReportsStoreReadFailure(t *testing.T) {
 	if err := run(); err != nil {
 		t.Fatalf("empty store: %v", err)
 	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
+	db, err := database.Open(filepath.Dir(root))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "accounts.json"), []byte("{not json"), 0o600); err != nil {
+	if _, err := db.Exec(`INSERT INTO accounts(id,ord,metadata,credential_schema) VALUES('invalid',0,'{"id":3}','')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := run(); err == nil {

@@ -410,8 +410,8 @@ func TestSharedServiceNativeLoginCompleteAndCancel(t *testing.T) {
 			if err != nil || captured[0].Identity != "fixture:first" {
 				t.Fatal("scope-bound saved ref was not activated", err)
 			}
-			raw, err := os.ReadFile(filepath.Join(a.Root, "accounts.json"))
-			if err != nil || strings.Contains(string(raw), "fake-shared-canary") {
+			raw := accountMetadataBytes(t, a)
+			if strings.Contains(string(raw), "fake-shared-canary") {
 				t.Fatal("login entered metadata", err)
 			}
 		})
@@ -889,10 +889,7 @@ func TestMusePrivateLoginUsesNativeAdapter(t *testing.T) {
 			if err != nil || string(untouched) != string(launcherBytes) {
 				t.Fatal("unrelated launcher-only file changed", err)
 			}
-			raw, err = os.ReadFile(filepath.Join(a.Root, "accounts.json"))
-			if err != nil {
-				t.Fatal(err)
-			}
+			raw = accountMetadataBytes(t, a)
 			for _, canary := range []string{"muse-original-canary", "muse-target-canary", "muse-cancelled-canary"} {
 				if strings.Contains(string(raw), canary) {
 					t.Fatal("Muse grant leaked into metadata")
