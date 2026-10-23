@@ -155,8 +155,13 @@ func (s *Store) readPage(roomID, cursor string, limit int, direction pageDirecti
 			end = rank
 			start = max(0, end-limit)
 		case pageAfter:
+			// Start at the first listed post after the cursor. The filter can leave
+			// the cursor itself out, and then rank already names that post.
 			if cursor != "" {
-				start = rank + 1
+				start = rank
+				if start < len(lines) && lines[start] == cursorLine {
+					start++
+				}
 			}
 			end = min(len(lines), start+limit)
 		case pageAround:
