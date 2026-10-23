@@ -140,8 +140,10 @@ Open a shell in the distro and sign in to each agent tool through Dyna:
 ```powershell
 wsl -d dyna
 dyna harness login codex
-dyna profiles init-codex
+dyna profiles add --name my-builder --harness codex --model <model-id> --taste 7 --intelligence 9 --cost 6
 ```
+
+You can also add profiles in the app under Settings > Profiles.
 
 The first sign-in installs Dyna's private copy of the CLI. It needs internet
 access and can take a minute. Accounts stay under Dyna's data folder.

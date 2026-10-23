@@ -151,12 +151,16 @@ install what they need, and installed software stays across restarts.
 
 ## Agent profiles
 
-The image has no Dyna profiles. After the first login, create them inside
-the container:
+The image has no Dyna profiles. After the first login, add the profiles you
+use inside the container:
 
 ```sh
-sudo machinectl shell dyna@dyna /usr/local/bin/dyna profiles init-codex
+sudo machinectl shell dyna@dyna /usr/local/bin/dyna profiles add \
+  --name my-builder --harness codex --model <model-id> --taste 7 --intelligence 9 --cost 6
 ```
+
+You can also add profiles in the app under Settings > Profiles. Dyna creates
+no profiles for you.
 
 The profiles use Dyna's private copy of the CLI and Dyna's saved accounts.
 

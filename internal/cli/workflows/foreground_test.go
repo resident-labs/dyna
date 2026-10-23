@@ -198,17 +198,23 @@ func TestRunCancellationFinalizesBeforeReturning(t *testing.T) {
 	}
 }
 
-func TestDemoLoadsProfilesSavedBeforeLaunch(t *testing.T) {
+func TestDemoBorrowsMockProfilesAndRemovesThem(t *testing.T) {
 	inRepo(t)
 	storetest.Isolate(t)
 	serveWorkflowEngine(t)
+	owner := profile.Store{Path: profile.DefaultPath(), Profiles: []profile.Profile{{
+		Name: "owner-profile", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 5, Default: true,
+	}}}
+	if err := owner.Save(); err != nil {
+		t.Fatal(err)
+	}
 	stdout, stderr, err := runForegroundCLI(t, "demo")
-	if err != nil || !strings.HasPrefix(stdout, "registered demo profiles:") || !strings.Contains(stdout, "running demo workflow...") || !strings.Contains(stdout, "open the desktop app") {
+	if err != nil || !strings.HasPrefix(stdout, "registered demo profiles for this run:") || !strings.Contains(stdout, "running demo workflow...") || !strings.Contains(stdout, "open the desktop app") {
 		t.Fatalf("demo = %q, %q, %v", stdout, stderr, err)
 	}
 	profiles, err := loadStore()
-	if err != nil || len(profiles.Profiles) != 3 {
-		t.Fatalf("saved profiles = %+v, %v", profiles, err)
+	if err != nil || len(profiles.Profiles) != 1 || profiles.Profiles[0].Name != "owner-profile" || !profiles.Profiles[0].Default {
+		t.Fatalf("profiles after demo = %+v, %v; want only the owner's profile", profiles, err)
 	}
 	runs, err := runstore.List()
 	if err != nil || len(runs) != 1 || runs[0].Name != "demo-fanout" {

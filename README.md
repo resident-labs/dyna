@@ -14,17 +14,18 @@ the `dyna` CLI.
 curl -fsSL https://raw.githubusercontent.com/resident-labs/dyna/main/install.sh | bash
 ```
 
-From a checkout, `./install.sh` builds into `~/.local/bin`. Then register the
-agent CLIs you use and start the engine:
+From a checkout, `./install.sh` builds into `~/.local/bin`. Then add one
+profile for each agent CLI and model you use, and start the engine:
 
 ```bash
-dyna profiles init-claude       # opus, fable, sonnet, haiku
-dyna profiles init-codex        # astra, luna, sol, sol-max, terra
-dyna profiles init-antigravity  # agy
-dyna profiles init-muse         # wonder, wonder-full
+dyna profiles add --name my-builder --harness codex --model <model-id> \
+  --taste 7 --intelligence 9 --cost 6 --desc "Your routing notes."
 dyna engine install-services    # engine and computer user services
-dyna demo                       # mock workers and a sample workflow
+dyna demo                       # mock workers for one run + a sample workflow
 ```
+
+Dyna ships no profiles. You add every profile, in Settings > Profiles or with
+`dyna profiles add`.
 
 ## How it fits together
 
