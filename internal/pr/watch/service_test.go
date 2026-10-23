@@ -814,7 +814,7 @@ func TestVerdictsPushesAndMerge(t *testing.T) {
 	e.f.Pull.Merged = true
 	e.tick()
 	r = e.record()
-	if r.Watching || r.State != "merged" || len(e.sent) != 5 || e.sent[4].Target != e.author.ID {
+	if r.Watching || r.State != "merged" || len(e.sent) != 6 || e.sent[4].Target != e.author.ID || e.sent[4].Kind != "merged" || e.sent[5].Kind != "informational" {
 		t.Fatalf("merge: %+v sent=%+v", r, e.sent)
 	}
 	calls, _ := os.ReadFile(e.calls)

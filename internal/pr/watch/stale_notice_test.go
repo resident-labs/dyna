@@ -211,7 +211,7 @@ func TestFlushKeepsCloseNotice(t *testing.T) {
 	e.track()
 	e.f.Pull.State = "closed"
 	e.tick()
-	if len(e.sent) != 1 || !strings.Contains(e.sent[0].Text, "PR closed. Watching stopped.") {
+	if len(e.sent) != 1 || e.sent[0].Kind != "closed" || !strings.Contains(e.sent[0].Text, "PR #17 closed.") {
 		t.Fatalf("close notice was lost: %+v", e.sent)
 	}
 }
