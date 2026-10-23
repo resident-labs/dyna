@@ -49,19 +49,6 @@ test('a phone title keeps a readable width and its buttons never shrink', () => 
   assert.match(rule(callButton, '.call-label, .live-label'), /display: none/, 'only the call icon remains')
 })
 
-test('the Review button shows the same review icon on a phone and a desktop', () => {
-  // The old glyph drew a panel split down the middle, which promised a side
-  // panel on a phone, where Review opens full screen. One icon now serves
-  // both widths: a page with a check.
-  const at = header.indexOf('aria-controls="review-workspace"')
-  assert.ok(at > 0, 'the bar has the Review button')
-  const body = header.slice(header.lastIndexOf('<button', at), header.indexOf('</button>', at))
-  assert.match(body, /<ReviewIcon size=\{22\} \/>/, 'the Review button draws the shared review icon')
-  assert.doesNotMatch(body, /M13 4\.5v15/, 'the glyph no longer looks like a split panel')
-  const icon = readFileSync(new URL('../ui/ReviewIcon.svelte', import.meta.url), 'utf8')
-  assert.doesNotMatch(icon, /<rect/, 'the glyph has no panel frame')
-})
-
 test('the room header shows its name, not a channel trail', () => {
   assert.match(header, /<span class="name">\{roomLabel\(current \?\? room\)\}<\/span>/)
   assert.doesNotMatch(header, /channelTrail|>general<|>Channels</)

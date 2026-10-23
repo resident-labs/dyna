@@ -8,6 +8,9 @@ import type { GitHubItem } from '../api/github.ts'
 import { element, elements, need } from '../../../test/need.ts'
 
 const settle = () => new Promise((r) => setTimeout(r, 0))
+// A new test settles Svelte updates and API promises without a timer, as r2
+// asks. The older tests in this file keep their timer helper.
+const microtasks = async () => { for (let turn = 0; turn < 8; turn++) await Promise.resolve() }
 const issue = (number: number, group: string, extra: Partial<GitHubItem> = {}): GitHubItem => ({ number, title: `Issue ${number}`, state: group === 'closed-today' || group === '' ? 'CLOSED' : 'OPEN', group, workingSessionLive: false, author: { login: 'sam' }, labels: [], createdAt: '2026-10-19T00:00:00Z', updatedAt: '2026-10-19T00:00:00Z', url: `https://github.com/o/r/issues/${number}`, ...extra })
 
 test('issueGroups orders the groups and puts older closed issues in Closed', () => {
@@ -29,15 +32,15 @@ const API = `export const api = {
 const listCode = await bundle({ component: 'GitHub', api: API })
 const pageCode = await bundle({ component: 'IssuePage', api: API })
 
-async function render(items: GitHubItem[], props: object = {}) {
+async function render(items: GitHubItem[], props: object = {}, wait = settle) {
   const dom = installDom({ ResizeObserver: class { observe() {} unobserve() {} disconnect() {} }, issueItems: items, issueMergeCalls: 0 })
   dom.reconfigure({ url: 'http://localhost/' })
   Object.assign(globalThis, { history: dom.window.history, location: dom.window.location })
   const { dir, default: GitHub, mount } = await importBundle(listCode, 'GitHub')
   const target = need(document.getElementById('app'), '#app')
   mount(GitHub, { target, props: { roomId: 'r', kind: 'issue', ...props } })
-  await settle()
-  await settle()
+  await wait()
+  await wait()
   return { target, done: () => { dom.window.close(); for (const n of [...domNames, 'history', 'location', 'issueMergeCalls', 'issueItems', 'issueViewFails', 'issueListFails']) Reflect.deleteProperty(globalThis, n); return rm(dir, { recursive: true, force: true }) } }
 }
 
@@ -222,7 +225,7 @@ test('an issue row keeps one compact action group and puts the rest in its menu'
     onexportissue: () => calls.push('promote'),
     oncloseissue: () => calls.push('close'),
     ondismississue: () => calls.push('dismiss'),
-  })
+  }, microtasks)
   try {
     const row = element(r.target, '.item')
     assert.equal(elements(row, 'button').filter((b) => b.textContent?.trim() === 'Mention in chat').length, 0, 'no wide button')
@@ -230,11 +233,11 @@ test('an issue row keeps one compact action group and puts the rest in its menu'
     assert.equal(mention.getAttribute('title'), 'Mention D-12 in chat', 'the icon has a tooltip')
     assert.equal(row.textContent?.includes('Promote'), false, 'the row does not show Promote')
     need(elements(row, 'button').find((b) => b.getAttribute('aria-label') === 'More actions for D-12')).click()
-    await settle()
+    await microtasks()
     assert.deepEqual(elements(r.target, '[role=menu] button').map((b) => b.textContent?.trim()), ['Promote', 'Close', 'Dismiss'])
     need(elements(r.target, '[role=menu] button').find((b) => b.textContent?.trim() === 'Promote')).click()
     assert.deepEqual(calls, ['promote'])
-    await settle()
+    await microtasks()
   } finally { await r.done() }
 })
 
