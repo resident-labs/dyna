@@ -246,3 +246,4 @@ not-state internal/worktrees/worktrees.go Remove 1 # Removes an orphaned git wor
 not-state internal/goals/sqlite.go Store.convertJournals 2 # one-time schema-2 migration rewrites the room's append-only journal JSONL in place; the file is a log, not shared SQLite state (r10)
 not-state internal/harness/claude_session.go runClaudeTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/fsutil/tree.go RemoveTree 1 # removes a read-only folder tree the caller names, such as a test folder or a frozen harness bundle
+not-state internal/userservices/engine_restart_legacy.go retireEngineRestart 1 # removes the retired dyna-engine-restart.service unit file; its SQLite row is deleted through internal/state
