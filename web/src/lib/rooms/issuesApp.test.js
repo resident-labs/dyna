@@ -4,13 +4,14 @@ import { readFileSync } from 'node:fs'
 import { parse } from 'svelte/compiler'
 import vm from 'node:vm'
 import { createReloadGate, reconcileRows } from '../ui/reloadGate.ts'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const body = parse(source).instance.content.body
 const fn = (name) => body.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
 function app(names, c) {
   vm.createContext(c)
-  for (const n of names) vm.runInContext(source.slice(fn(n).start, fn(n).end), c)
+  for (const n of names) vm.runInContext(stripTypes(source.slice(fn(n).start, fn(n).end)), c)
   return c
 }
 

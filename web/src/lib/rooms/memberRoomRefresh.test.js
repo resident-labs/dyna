@@ -8,6 +8,7 @@ import { createRoomData } from './roomData.js'
 import { patchListRows, hasItemChange } from '../ui/listChanges.ts'
 import { reconcileRows } from '../ui/reloadGate.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const nodes = parse(source).instance.content.body
@@ -29,11 +30,11 @@ function app() {
   vm.createContext(c)
   for (const name of ['roomTimer', 'roomRefreshes']) {
     const n = nodes.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.name === name))
-    if (n) vm.runInContext(source.slice(n.start, n.end), c)
+    if (n) vm.runInContext(stripTypes(source.slice(n.start, n.end)), c)
   }
   for (const name of ['memberRoster', 'roomCountKey', 'applyMembers', 'applyMemberItem', 'showMemberRows', 'parentKey', 'noteParents', 'applyItemEvent', 'handle', 'soonRooms']) {
     const n = nodes.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
-    if (n) vm.runInContext(source.slice(n.start, n.end), c)
+    if (n) vm.runInContext(stripTypes(source.slice(n.start, n.end)), c)
   }
   const api = { members: async () => [], mentions: async () => [], feedTail: async () => { calls.push('feed'); return {} } }
   c.roomData = createRoomData(api, {

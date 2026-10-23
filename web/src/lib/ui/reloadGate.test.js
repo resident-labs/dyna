@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { mergeListPage } from './listPages.ts'
 import { createReloadGate, listVisible, reconcileRows } from './reloadGate.ts'
 import { reloadsUnread } from './unreadReload.ts'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const deferred = () => { let resolve; const promise = new Promise((r) => { resolve = r }); return { promise, resolve } }
 
@@ -116,7 +117,7 @@ test('App PR events use the real gated loaders and skip the closed PR view', asy
   const declarations = parse(app).instance.content.body
   for (const name of ['applyListItem', 'applyListPage', 'loadReviewer', 'loadChanges', 'applyItemEvent', 'handle']) {
     const node = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
-    vm.runInContext(app.slice(node.start, node.end), c)
+    vm.runInContext(stripTypes(app.slice(node.start, node.end)), c)
   }
   c.handle({ kind: 'prs', roomId: 'a' })
   c.handle({ kind: 'changes', roomId: 'a' })
@@ -169,7 +170,7 @@ test('PR events never load TrackedPRs, and a burst loads the reviewer once', asy
   for (const name of ['applyListItem', 'applyListPage', 'loadReviewer', 'loadChanges', 'reviewerSoon', 'applyItemEvent', 'handle']) {
     const node = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
     assert.ok(node, name)
-    vm.runInContext(app.slice(node.start, node.end), c)
+    vm.runInContext(stripTypes(app.slice(node.start, node.end)), c)
   }
   // Metadata events (reviewer settings, policy) carry no row.
   for (let i = 0; i < 5; i++) c.handle({ kind: 'prs', roomId: 'a' })
@@ -198,7 +199,7 @@ test('a Changes load that succeeds after a failure clears the PR error', async (
   const declarations = parse(app).instance.content.body
   for (const name of ['applyListPage', 'loadChanges']) {
     const node = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
-    vm.runInContext(app.slice(node.start, node.end), c)
+    vm.runInContext(stripTypes(app.slice(node.start, node.end)), c)
   }
   await c.loadChanges()
   assert.equal(c.prError, 'engine away')
@@ -263,11 +264,11 @@ test('room entry and channel events refresh visible PR and goal chips', async ()
   vm.createContext(c)
   for (const name of ['applyListItem', 'applyListPage', 'loadReviewer', 'loadChanges', 'loadGoals', 'trackFetchedGoal', 'refreshFetchedGoal', 'applyItemEvent', 'handle']) {
     const node = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
-    vm.runInContext(app.slice(node.start, node.end), c)
+    vm.runInContext(stripTypes(app.slice(node.start, node.end)), c)
   }
   const entry = declarations.find((n) => n.type === 'ExpressionStatement' &&
     n.expression.callee?.name === '$effect' && app.slice(n.start, n.end).includes('loadChanges()'))
-  vm.runInContext(app.slice(entry.start, entry.end), c)
+  vm.runInContext(stripTypes(app.slice(entry.start, entry.end)), c)
   await new Promise(setImmediate)
   assert.deepEqual(calls, ['changes', 'goals'])
   assert.equal(c.prError, '')
@@ -306,7 +307,7 @@ test('the App visual loader reuses each card by the shared visual identity', asy
   c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   const node = parse(app).instance.content.body.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'loadVisuals')
-  vm.runInContext(app.slice(node.start, node.end), c)
+  vm.runInContext(stripTypes(app.slice(node.start, node.end)), c)
   await c.loadVisuals()
   const first = c.visuals[0], second = c.visuals[1]
   response = [
@@ -365,7 +366,7 @@ test('a visual update reaches chat cards while chat stays open', async () => {
   c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   const node = parse(app).instance.content.body.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'loadVisuals')
-  vm.runInContext(app.slice(node.start, node.end), c)
+  vm.runInContext(stripTypes(app.slice(node.start, node.end)), c)
   await c.loadVisuals()
   assert.equal(newestVersion(shown, 'p1', v1), v1)
   response = [{ id: 'p1', post: { id: 'p2' }, attachment: v2, versions: [{ attachment: v2 }, { attachment: v1 }] }]
