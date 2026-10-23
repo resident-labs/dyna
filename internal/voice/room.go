@@ -87,15 +87,21 @@ type Speaker interface {
 }
 
 // Watch hands the call what root says to the owner: each post to
-// @voice-call from since on, and each of root's questions to the owner
-// while it is open, the oldest first. A question's topic is its ID, so a
-// newer post of the same question replaces one not yet said. While root
-// works on a dispatched request, its agent traffic is silent context. Only
-// explicit call posts and owner questions request speech. It runs until ctx ends.
+// @voice-call from since on, each of root's questions to the owner while it
+// is open, and the final result of each root turn that reports to the owner,
+// the oldest first. A question's topic is its ID, so a newer post of the same
+// question replaces one not yet said. A result whose turn root already
+// relayed to @voice-call is not said twice. While root works on a dispatched
+// request, its agent traffic is silent context. It runs until ctx ends, so
+// the call hears results only while it is live.
 func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) error {
 	voice := r.rec.Name + ":" + room.VoiceAgent
 	open := false
 	replayed := r.replayCursor == ""
+	// relayed holds the turns in which root posted to @voice-call, so the
+	// turn's own result is not said again. A relay post carries its sender's
+	// turn, so it matches the turn's completion record.
+	relayed := map[int]bool{}
 	// One open request shares the budget, including every prefix and marker.
 	const budget = 4000
 	const prefix = "[BACKEND] "
@@ -105,26 +111,10 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 	sent := 0
 	buffered, tail := "", ""
 	truncated := false
-	first := func(text string, limit int) string {
-		if len(text) <= limit {
-			return text
-		}
-		for limit > 0 && !utf8.RuneStart(text[limit]) {
-			limit--
-		}
-		return text[:limit]
-	}
-	last := func(text string, limit int) string {
-		start := max(0, len(text)-limit)
-		for start < len(text) && !utf8.RuneStart(text[start]) {
-			start++
-		}
-		return text[start:]
-	}
 	contextNote := func(msg room.Message) {
 		note := prefix + msg.From + ": " + msg.Text + "\n"
 		if truncated {
-			tail = last(tail+note, tailLimit)
+			tail = tailBytes(tail+note, tailLimit)
 			return
 		}
 		buffered += note
@@ -133,11 +123,11 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 			available = 0
 		}
 		if len(buffered) > budget-sent-len(prefix) {
-			tail = last(buffered, tailLimit)
-			buffered = first(buffered, available)
+			tail = tailBytes(buffered, tailLimit)
+			buffered = headBytes(buffered, available)
 			truncated = true
 		}
-		chunk := first(buffered, available)
+		chunk := headBytes(buffered, available)
 		if chunk != "" {
 			call.Context(chunk)
 			sent += len(chunk)
@@ -173,6 +163,7 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 		if time.UnixMilli(msg.TS).Before(since) {
 			return false, nil
 		}
+		var result string // root's turn result to hand the call after the context
 		switch {
 		case msg.From == voice && msg.Kind != "voice":
 			if !open {
@@ -180,10 +171,15 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 			}
 			open = true
 		case r.fromRoot(msg) && msg.Kind != "voice" && slices.Contains(msg.To, voice):
+			if msg.Turn > 0 {
+				relayed[msg.Turn] = true
+			}
 			if past {
 				return false, nil
 			}
 			call.Speak(msg.ID, "", tellPrompt(msg.Text, msg.Attachments))
+		case !past && r.turnResult(msg) && !relayed[msg.Turn]:
+			result = resultPrompt(msg.Text)
 		case open && r.rootAgentPost(msg):
 			contextNote(msg)
 		}
@@ -191,8 +187,21 @@ func (r *RoomLink) Watch(ctx context.Context, since time.Time, call Speaker) err
 			finish()
 			open = false
 		}
+		if result != "" {
+			call.Speak(msg.ID, "", result)
+		}
 		return false, nil
 	})
+}
+
+// turnResult reports whether msg is the final result of a root turn that
+// reports to the owner. Progress, agent reports, and a turn the owner
+// stopped say nothing new, so only a finished or failed root turn qualifies.
+func (r *RoomLink) turnResult(msg room.Message) bool {
+	if !msg.OwnerReport || msg.Turn == 0 || !r.fromRoot(msg) {
+		return false
+	}
+	return msg.Kind == "completed" || msg.Kind == "failed"
 }
 
 // rootAgentPost selects execution messages, excluding service notices and
@@ -316,6 +325,31 @@ func (r *RoomLink) cursorFor(key, previous string) string {
 		}
 	}
 	return key
+}
+
+// headBytes returns at most limit bytes of text from its start, cut back to a
+// rune boundary.
+func headBytes(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	for limit > 0 && !utf8.RuneStart(text[limit]) {
+		limit--
+	}
+	return text[:limit]
+}
+
+// tailBytes returns at most limit bytes of text from its end, cut forward to a
+// rune boundary.
+func tailBytes(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	start := max(0, len(text)-limit)
+	for start < len(text) && !utf8.RuneStart(text[start]) {
+		start++
+	}
+	return text[start:]
 }
 
 // isDispatch identifies a durable request that Voice already handed to root.
