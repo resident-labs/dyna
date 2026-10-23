@@ -25,9 +25,8 @@ export function channelModel(members = []) {
 
   function resolveView(view) {
     if (!view.startsWith('channel:')) return view
-    const agent = byId.get(view.slice(8))
-    if (!agent) return GENERAL
-    return parentIds.has(agent.id) ? view : home(agent)
+    // Old channel links now open the room's Messages tab.
+    return GENERAL
   }
 
   const trail = (id) => ancestors(byId, id)

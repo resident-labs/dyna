@@ -57,18 +57,18 @@ test('only agents with direct children get channels at each depth', () => {
   assert.deepEqual(model.leads.map((m) => m.id), [lead.id, child.id])
   assert.equal(model.leads.some((m) => [peer.id, sibling.id, grandchild.id].includes(m.id)), false)
 })
-test('saved leaf channels resolve to their parent channel or general', () => {
-  assert.equal(model.resolveView(channelView(grandchild.id)), channelView(child.id))
-  assert.equal(model.resolveView(channelView(sibling.id)), channelView(lead.id))
+test('saved channel links resolve to room Messages', () => {
+  assert.equal(model.resolveView(channelView(grandchild.id)), GENERAL)
+  assert.equal(model.resolveView(channelView(sibling.id)), GENERAL)
   assert.equal(model.resolveView(channelView(peer.id)), GENERAL)
-  assert.equal(model.resolveView(channelView(lead.id)), channelView(lead.id))
+  assert.equal(model.resolveView(channelView(lead.id)), GENERAL)
   assert.equal(model.resolveView(channelView('missing')), GENERAL)
   assert.equal(model.resolveView('files'), 'files')
 })
 test('closed child history keeps its parent channel available', () => {
   const archived = channelModel([owner, lead, { ...child, closed: true }])
   assert.deepEqual(archived.leads.map((m) => m.id), [lead.id])
-  assert.equal(archived.resolveView(channelView(lead.id)), channelView(lead.id))
+  assert.equal(archived.resolveView(channelView(lead.id)), GENERAL)
 })
 
 test('agent questions and answers use the same DM thread as posts', async () => {
