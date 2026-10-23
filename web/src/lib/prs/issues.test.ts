@@ -23,7 +23,6 @@ const API = `export const api = {
   githubList: () => globalThis.issueListFails ? Promise.reject(new Error('No repository')) : Promise.resolve({ repo: 'o/r', items: globalThis.issueItems }),
   githubView: (_r, _k, n) => globalThis.issueViewFails ? Promise.reject(new Error('Issue not found')) : Promise.resolve({ number: n, title: 'Issue ' + n, ...globalThis.issueItems.find((i) => i.number === n), body: 'Body text', comments: [] }),
   mergeControlStatus: () => { globalThis.issueMergeCalls++; return Promise.resolve({ roomId: 'r', paused: false, queue: [], trials: [], localCIChecks: {} }) },
-  startIssueWork: (...a) => { globalThis.startCalls.push(a); return globalThis.startFails ? Promise.reject(new Error('no default profile')) : Promise.resolve(globalThis.startResult) },
 }; export const openExternal = () => {}`
 
 // Bundle outside the test clock: only the mounted view is measured.
@@ -31,7 +30,7 @@ const listCode = await bundle({ component: 'GitHub', api: API })
 const pageCode = await bundle({ component: 'IssuePage', api: API })
 
 async function render(items: GitHubItem[], props: object = {}) {
-  const dom = installDom({ ResizeObserver: class { observe() {} unobserve() {} disconnect() {} }, issueItems: items, issueMergeCalls: 0, startCalls: [], startResult: { member: { id: 's9', name: 'issue-839' } } })
+  const dom = installDom({ ResizeObserver: class { observe() {} unobserve() {} disconnect() {} }, issueItems: items, issueMergeCalls: 0 })
   dom.reconfigure({ url: 'http://localhost/' })
   Object.assign(globalThis, { history: dom.window.history, location: dom.window.location })
   const { dir, default: GitHub, mount } = await importBundle(listCode, 'GitHub')
@@ -39,19 +38,18 @@ async function render(items: GitHubItem[], props: object = {}) {
   mount(GitHub, { target, props: { roomId: 'r', kind: 'issue', ...props } })
   await settle()
   await settle()
-  return { target, done: () => { dom.window.close(); for (const n of [...domNames, 'history', 'location', 'issueMergeCalls', 'issueItems', 'startCalls', 'startResult', 'startFails', 'issueViewFails', 'issueListFails']) Reflect.deleteProperty(globalThis, n); return rm(dir, { recursive: true, force: true }) } }
+  return { target, done: () => { dom.window.close(); for (const n of [...domNames, 'history', 'location', 'issueMergeCalls', 'issueItems', 'issueViewFails', 'issueListFails']) Reflect.deleteProperty(globalThis, n); return rm(dir, { recursive: true, force: true }) } }
 }
 
-test('a failed Ask an agent shows its error on the issue page, where the list is hidden', async () => {
-  const r = await render([issue(839, 'needs-owner')])
+test('the issue page hands its reference to the room composer', async () => {
+  const references: unknown[] = []
+  const r = await render([issue(839, 'needs-owner')], { onmention: (reference: unknown) => references.push(reference) })
   try {
-    Object.assign(globalThis, { startFails: true })
     element(r.target, '.row').click()
     await settle()
     assert.equal(r.target.querySelector('.list'), null)
-    need(elements(r.target, 'button').find((b) => b.textContent === 'Ask an agent')).click()
-    await settle()
-    assert.match(element(r.target, '.detail').textContent, /no default profile/)
+    need(elements(r.target, 'button').find((b) => b.textContent === 'Mention in chat')).click()
+    assert.deepEqual(references, [{ kind: 'issue', number: 839, title: 'Issue 839', state: 'OPEN', url: 'https://github.com/o/r/issues/839' }])
   } finally {
     await r.done()
   }
@@ -68,7 +66,7 @@ test('the issue page has the shared facts line and a Work on this issue card tha
   const calls: string[] = []
   const it = issue(842, 'working', { workingSession: 's1', workingSessionName: 'ui-feed-jump', workingSessionLive: true, linkedPRs: [{ number: 852, state: 'OPEN', isDraft: true, url: 'u852' }], labels: [{ name: 'bug', color: 'd73a4a' }] })
   const target = need(document.getElementById('app'), '#app')
-  mount(IssuePage, { target, props: { it, detail: { ...it, body: 'Body', comments: [] }, onstart: () => calls.push('start'), onsession: () => calls.push('session'), onpr: (n: number) => calls.push(`pr${n}`) } })
+  mount(IssuePage, { target, props: { it, detail: { ...it, body: 'Body', comments: [] }, onsession: () => calls.push('session'), onpr: (n: number) => calls.push(`pr${n}`) } })
   await settle()
   try {
     const facts = element(target, '.factsline')
@@ -76,9 +74,9 @@ test('the issue page has the shared facts line and a Work on this issue card tha
     assert.match(facts.textContent, /bug/)
     assert.match(element(target, 'h4').textContent, /Work on this issue\s*2/)
     for (const b of elements(target, 'button')) {
-      if (/^Session ui-feed-jump/.test(b.textContent) || b.textContent === 'PR #852' || b.textContent === 'Ask an agent') b.click()
+      if (/^Session ui-feed-jump/.test(b.textContent) || b.textContent === 'PR #852') b.click()
     }
-    assert.deepEqual(calls, ['session', 'pr852', 'start'])
+    assert.deepEqual(calls, ['session', 'pr852'])
     assert.equal(element(target, '.name + span').textContent, 'Working')
   } finally {
     dom.window.close()

@@ -63,7 +63,6 @@
     changes?: Row[] | null
     members?: Member[]
     link?: Link | null
-    onask?: (text: string) => void
     onsession?: (member: Member, tab?: string) => void
     onpr: (number: number) => void
     ontrack?: (number: number | undefined, member: Member) => void
@@ -78,11 +77,11 @@
 
   // changes: the room's Changes rows, local changes and PRs.
   // members: the room's sessions, to name and open author and reviewer
-  // sessions. onask fills the composer with a task.
+  // sessions. onmention adds a PR or issue to the composer.
   // kind is 'pr' or 'issue': the Pull requests tab and the Issues tab each mount this view.
   // onpr opens a PR by number in the Pull requests tab, from an issue's linked PRs.
   // link is a PR link ({pr, tab}) or issue link ({issue}) to open, from the address bar.
-  let { onmention, localIssues = [], oncloseissue, onexportissue, ondismississue, mergeVersion = 0, older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, kind = 'pr', integration = null, changes = null, members = [], link = null, onask, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
+  let { onmention, localIssues = [], oncloseissue, onexportissue, ondismississue, mergeVersion = 0, older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, kind = 'pr', integration = null, changes = null, members = [], link = null, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
 
   const saved = loadFilters()
   let listState = $state(kind === 'issue' ? 'open' : saved.state)
@@ -110,8 +109,6 @@
   let resuming = $state(false)
   let resumeError = $state('')
   let merge = $state<MergeQueueItem[] | null>(null) // the room's RoomMergeStatus answer
-  let starting = $state(0) // the issue number Start is working on
-  let startNote = $state('') // a Start warning or error, shown in the list and on the issue page
   let started = $state<Member | null>(null) // the session a warned Start made, for its Open session button
 
   let identified = $derived(members.filter((m): m is Member & { id: string } => !!m.id))
@@ -329,30 +326,8 @@
       load()
     }, 450)
   }
-  function ask() {
-    if (chg && onmention) { onmention({ kind: 'pr', number: chg.number || 0, title: changeTitle(chg), state: String(chg.state || 'OPEN'), url: chg.url || '' }); return }
-    if (chg) onask?.(`Review pull request #${chg.number}: ${chg.title}\n${chg.url}`)
-  }
-  // Start and "Ask an agent" on an issue are one path: the engine starts the
-  // work, or returns the session already on it. Its warning is shown first.
-  async function startWork(it: GitHubItem) {
-    if (onmention) { onmention({ kind: 'issue', number: it.number, title: it.title, state: it.state, url: it.url }); return }
-    starting = it.number
-    startNote = ''
-    started = null
-    try {
-      const res = await api.startIssueWork(roomId, it.number)
-      load()
-      // A warning stays on screen, so the session opens from its button; opening it now would unmount this view.
-      if (res.warning) {
-        startNote = res.warning
-        started = res.member
-      } else onsession?.(res.member)
-    } catch (e) {
-      startNote = errorText(e)
-    } finally {
-      starting = 0
-    }
+  function mentionPR() {
+    if (chg) onmention?.({ kind: 'pr', number: chg.number || 0, title: changeTitle(chg), state: String(chg.state || 'OPEN'), url: chg.url || '' })
   }
   // Track and review: a PR that Dyna tracked before keeps its author session;
   // any other PR needs a session to wake.
@@ -425,11 +400,8 @@
     <input class="search" type="search" bind:value={search} oninput={typed} onkeydown={(e) => e.key === 'Enter' && (clearTimeout(timer), (query = search.trim()), load())} placeholder="Search, for example author:@me label:bug" aria-label="Search {inPRs ? 'pull requests' : 'issues'}" />
   </header>
 {/snippet}
-{#snippet note()}
-  {#if startNote}<p class="more err">{startNote}{#if started} <button class="act" onclick={() => started && onsession?.(started)}>Open session</button>{/if}</p>{/if}
-{/snippet}
-{#snippet askAgent()}
-  {#if (onask || onmention) && !isLocal(chg) && chg?.url}<button class="act" onclick={ask} title="Start a session with this PR as its task">{onmention ? 'Mention in chat' : 'Ask an agent'}</button>{/if}
+{#snippet mentionAction()}
+  {#if onmention && !isLocal(chg) && chg?.url}<button class="act" onclick={mentionPR} title="Add this PR to a chat message">Mention in chat</button>{/if}
 {/snippet}
 <svelte:window onkeydown={keys} />
 <section class="gh" class:narrow class:pr-list={inPRs ? !chg : !sel && !localSelected} bind:clientWidth={width}>
@@ -452,7 +424,7 @@
     {#if chg}
       <div class="dscroll" role="presentation" ontouchstart={narrow ? swipeStart : null} ontouchend={narrow ? swipeEnd : null}>
         {#key chg.changeId}
-          <PRDetail change={chg} {detail} {detailError} {roomId} {names} review={reviewer?.enabled ?? true} merge={merge?.find((m) => m.changeId === chg.changeId) ?? null} standing={view.states[chg.changeId ?? '']} bind:tab ontab={showTab} onback={back} {onuntrack} {onresume} ontrack={trackRow} onchange={onreviewer} onauthor={chgAuthor ? () => onsession?.(chgAuthor, 'prs') : null} onreviewer={chgReviewer ? () => onsession?.(chgReviewer) : null} actions={askAgent} {goals} {onexpedite} {onlinkgoal} />
+          <PRDetail change={chg} {detail} {detailError} {roomId} {names} review={reviewer?.enabled ?? true} merge={merge?.find((m) => m.changeId === chg.changeId) ?? null} standing={view.states[chg.changeId ?? '']} bind:tab ontab={showTab} onback={back} {onuntrack} {onresume} ontrack={trackRow} onchange={onreviewer} onauthor={chgAuthor ? () => onsession?.(chgAuthor, 'prs') : null} onreviewer={chgReviewer ? () => onsession?.(chgReviewer) : null} actions={mentionAction} {goals} {onexpedite} {onlinkgoal} />
         {/key}
       </div>
     {/if}
@@ -461,11 +433,10 @@
       <div class="list" role="presentation">
         <TabHeader title="Issues" usage={`${issueRows.length} ${listState === 'all' ? 'total' : listState}`} />
         {@render filters()}
-        {@render note()}
         {#if error && source !== 'dyna'}<p class="quiet err">GitHub did not answer: {error}</p>{/if}
         {#if !list && !error && source !== 'dyna'}<p class="quiet">Asking GitHub…</p>{/if}
         {#if issueRows.length}
-          <IssueList groups={['open', 'closed'].map((id) => ({ id, label: id, rows: issueRows.filter((i) => (i.state === 'OPEN') === (id === 'open')) }))} {sel} {starting} {onmention} onpick={pickIssue} onstart={startWork}
+          <IssueList groups={['open', 'closed'].map((id) => ({ id, label: id, rows: issueRows.filter((i) => (i.state === 'OPEN') === (id === 'open')) }))} {sel} {onmention} onpick={pickIssue}
             oncloseissue={oncloseissue ? (it) => it.local && oncloseissue(it.local) : undefined} onexport={onexportissue ? (it) => it.local && onexportissue(it.local) : undefined} ondismiss={ondismississue ? (it) => it.local && ondismississue(it.local) : undefined} />
           {#if list?.more && source !== 'dyna'}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
         {:else if list || error || source === 'dyna'}
@@ -477,6 +448,7 @@
       <div class="dscroll local-detail">
         <button class="act" onclick={() => { localSelected = null; localSequence++ }}>Issues</button>
         <h2>{selectedLocal.title}</h2>
+        {#if onmention}<button class="act" onclick={() => onmention?.({ kind: 'room_issue', number: selectedLocal.id, title: selectedLocal.title, state: selectedLocal.state, url: `#room=${encodeURIComponent(roomId)}&view=issues` })}>Mention in chat</button>{/if}
         <p>Dyna · {selectedLocal.filer} · {selectedLocal.state}</p>
         {#if issueLocation(selectedLocal)}<p>{issueLocation(selectedLocal)}</p>{/if}
         {#if localBodyError}<p class="err">{localBodyError}</p>{/if}
@@ -489,7 +461,7 @@
       <div class="dscroll">
         {#if item}
         {#key sel}
-          <IssuePage it={item} {detail} {detailError} {note} starting={starting === sel} onstart={() => startWork(item)} onsession={workSession ? () => onsession?.(workSession) : null} {onpr} onback={narrow ? backIssue : null} />
+          <IssuePage it={item} {detail} {detailError} {onmention} onsession={workSession ? () => onsession?.(workSession) : null} {onpr} onback={narrow ? backIssue : null} />
         {/key}
         {:else}
           <div class="detail">
