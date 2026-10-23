@@ -15,6 +15,10 @@ const RoleLibrarian = "librarian"
 // LibrarianName names the librarian session, after `dyna library`.
 const LibrarianName = "library"
 
+// RoleReviewer reviews pull requests. Profile choice ranks reviewers by
+// diagnostics.
+const RoleReviewer = "reviewer"
+
 // serviceNames are the fixed session names of service roles. Only a session
 // of that role may take one, so a user session never blocks a service start.
 var serviceNames = map[string]string{LibrarianName: RoleLibrarian}
@@ -27,7 +31,7 @@ func checkServiceName(name, role string) error {
 }
 
 func isServiceRole(role string) bool {
-	return role == "reviewer" || role == RoleRoot || role == RoleLibrarian
+	return role == RoleReviewer || role == RoleRoot || role == RoleLibrarian
 }
 
 // ManagedService reports a session that belongs to a service rather than to the

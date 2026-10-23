@@ -98,7 +98,7 @@ func (e *engine) bind(vm *goja.Runtime) error {
 		fields := map[string]any{
 			"name": p.Name, "description": p.Description, "harness": p.Harness,
 			"model": p.Model, "models": p.EffectiveModels(), "taste": p.Taste, "intelligence": p.Intelligence,
-			"cost": p.Cost, "default": p.Default,
+			"cost": p.Cost, "diagnostics": p.EffectiveDiagnostics(), "default": p.Default,
 			"uses":          p.EffectiveUses(),
 			"maxConcurrent": p.MaxConcurrent, "maxCallsPerRun": p.MaxCallsPerRun,
 		}

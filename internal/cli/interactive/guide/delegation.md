@@ -5,6 +5,10 @@ Use a subagent for work that needs memory across turns. Delegate only through Dy
 Workflow workers are leaves: they cannot delegate, start runs, control subagents, or read guides. Read-only inspection commands remain available.
 Keep small or tightly coupled changes yourself. Run read-only scouts in parallel. Give each set of files one writer.
 
+## Choosing a profile
+
+Ratings are out of 10, and higher is better: `taste` is choosing the solution, `diagnostics` is finding what is wrong with a solution (reviews, debugging), with few false positives, `intelligence` is executing a given solution on hard multi-step work, and `cost` means higher is cheaper. Reviews go by diagnostics, design by taste, and bulk work by cost.
+
 ## Commands
 
 Manage sessions with `dyna session`; `dyna subagent` is an alias for every command below.

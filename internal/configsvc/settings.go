@@ -65,7 +65,7 @@ func Items() ([]Item, error) {
 	profiles, _ := profile.Load(profile.DefaultPath())
 	options, labels := []string{""}, []string{"Auto · best taste + cost (none)"}
 	if profiles != nil {
-		enabled := rolesession.RankProfiles(slices.DeleteFunc(slices.Clone(profiles.Profiles), func(p profile.Profile) bool { return !p.ForServices() }), nil, time.Now())
+		enabled := rolesession.RankProfiles(slices.DeleteFunc(slices.Clone(profiles.Profiles), func(p profile.Profile) bool { return !p.ForServices() }), nil, time.Now(), "")
 		if len(enabled) > 0 {
 			labels[0] = "Auto · best taste + cost (" + enabled[0].Name + ")"
 		}

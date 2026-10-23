@@ -162,7 +162,7 @@ func usable(m *subagent.Manager, profile string) string {
 	if err != nil {
 		return ""
 	}
-	for _, p := range rolesession.RankProfiles(ps.Profiles, failures, time.Now()) {
+	for _, p := range rolesession.RankProfiles(ps.Profiles, failures, time.Now(), "") {
 		if p.Name == profile && p.ForSubagents() {
 			return profile
 		}

@@ -285,7 +285,7 @@
             {#if p.harness === 'custom'}<label>Command<textarea bind:value={command} rows="3" class="mono" spellcheck="false" placeholder="One argument per line"></textarea><span class="field-hint">Use {'{{prompt}}'} and {'{{model}}'}.</span></label>{/if}
           </div>
           <div class="score-section"><h3>Workflow scores</h3><p class="explain">Your ratings help workflows choose a profile. Higher is better.</p>
-          <div class="scores">{#each ([['taste', 'Taste'], ['intelligence', 'Intelligence'], ['cost', 'Cost efficiency']] as const) as [k, label]}<label class="score"><span>{label}</span><input type="range" min="1" max="10" bind:value={p[k]} /><span class="v">{p[k]}</span></label>{/each}</div></div>
+          <div class="scores">{#each ([['taste', 'Taste'], ['diagnostics', 'Diagnostics'], ['intelligence', 'Intelligence'], ['cost', 'Cost efficiency']] as const) as [k, label]}<label class="score"><span>{label}</span><input type="range" min="1" max="10" bind:value={p[k]} /><span class="v">{p[k]}</span></label>{/each}</div></div>
           <details class="advanced" bind:open={advancedOpen}><summary>Advanced settings</summary>
             <div class="grid"><label>Harness<select bind:value={p.harness}>{#each harnesses as h}<option value={h}>{h}</option>{/each}</select></label><label>Model<input bind:value={p.model} class="mono" placeholder="the harness default" spellcheck="false" /></label></div>
             {@render fallbackEditor()}
@@ -314,7 +314,7 @@
 
       <h3>Scores <span>1 to 10, higher is better; workflows read them</span></h3>
       <div class="scores">
-        {#each ([['taste', 'Taste'], ['intelligence', 'Intelligence'], ['cost', 'Cost efficiency']] as const) as [k, label]}
+        {#each ([['taste', 'Taste'], ['diagnostics', 'Diagnostics'], ['intelligence', 'Intelligence'], ['cost', 'Cost efficiency']] as const) as [k, label]}
           <label class="score">
             <span>{label}</span>
             <input type="range" min="1" max="10" bind:value={p[k]} />

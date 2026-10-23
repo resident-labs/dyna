@@ -67,8 +67,9 @@ export function supportChip(p: ProfileView | null | undefined): string {
 
 export const supportTitle = (p: ProfileView | null | undefined): string => gaps(p).map((it) => `${it.label}: ${it.reason}`).join('\n')
 
-// bestProfile picks the profile for a support session by the reviewer's rule:
-// enabled profiles, best taste + cost, then intelligence, then name.
+// bestProfile picks the profile for a support session: enabled profiles, best
+// taste + cost, then intelligence, then name. This is the ranking roles use
+// when they choose a solution; reviewers rank by diagnostics instead.
 export function bestProfile(profiles: RankedProfile[] | undefined): string {
   const ok = (profiles ?? []).filter((p) => !p.disabled)
   ok.sort((a, b) => (b.taste + b.cost) - (a.taste + a.cost) || b.intelligence - a.intelligence || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))

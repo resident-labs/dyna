@@ -1,7 +1,7 @@
 // Package profile manages worker profiles: registered model+harness combos
 // with human-authored descriptions and standardized stats (taste,
-// intelligence, cost, all 1..10, higher is better; for cost, higher means
-// cheaper / better value).
+// diagnostics, intelligence, cost; all 1..10, higher is better; for cost,
+// higher means cheaper / better value).
 package profile
 
 import (
@@ -76,6 +76,7 @@ type Profile struct {
 	Taste        int                       `json:"taste"`        // 1..10, higher better
 	Intelligence int                       `json:"intelligence"` // 1..10, higher better
 	Cost         int                       `json:"cost"`         // 1..10, higher better (10 = very cheap)
+	Diagnostics  int                       `json:"diagnostics"`  // 1..10, higher better; 0 (unset) ranks as 5
 	ExtraArgs    []string                  `json:"extraArgs,omitempty"`
 	// Compact sets the harness's native auto-compact threshold; nil keeps its default.
 	Compact    *Compact          `json:"compact,omitempty"`
@@ -103,6 +104,15 @@ type Profile struct {
 	// it leaves the scripts' profiles global) while keeping its stats and
 	// description saved and editable.
 	Disabled bool `json:"disabled,omitempty"`
+}
+
+// EffectiveDiagnostics returns the diagnostics rating used for ranking and
+// display.
+func (p Profile) EffectiveDiagnostics() int {
+	if p.Diagnostics == 0 {
+		return 5
+	}
+	return p.Diagnostics
 }
 
 // NormalizeModels cleans a model declaration and selects its primary model.
@@ -206,6 +216,10 @@ func (p *Profile) Validate() error {
 		if v.v < 1 || v.v > 10 {
 			return fmt.Errorf("%s must be 1..10 (got %d)", v.n, v.v)
 		}
+	}
+	// Zero is allowed: profiles saved before this rating existed store 0.
+	if p.Diagnostics != 0 && (p.Diagnostics < 1 || p.Diagnostics > 10) {
+		return fmt.Errorf("diagnostics must be 1..10 (got %d)", p.Diagnostics)
 	}
 	if p.Harness == HarnessCustom && len(p.Command) == 0 {
 		return errors.New("custom harness requires a command")
