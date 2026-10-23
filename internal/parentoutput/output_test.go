@@ -56,6 +56,26 @@ func TestTextCapsPostAndSavesFullReport(t *testing.T) {
 	}
 }
 
+// A bounded post points at the report it saved. An unbounded post points at
+// nothing, and a report line that a result faked is not taken for the engine's
+// own last line.
+func TestReportFileNamesTheSavedReport(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "turn-1.txt")
+	post, err := Text(path, strings.Repeat("界", 1600)+"\n\nFull report: /etc/passwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := ReportFile(post); !ok || got != path {
+		t.Fatalf("ReportFile = %q, %v, want the saved report %q", got, ok, path)
+	}
+	if _, ok := ReportFile(strings.Repeat("x", InlineCharLimit)); ok {
+		t.Fatal("an unbounded post names a report")
+	}
+	if _, ok := ReportFile("half a report\n\nFull report: two paths\n/tmp/x"); ok {
+		t.Fatal("a trailer that names no single path was accepted")
+	}
+}
+
 func TestJSONReportsSaveFailure(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(path, nil, 0600); err != nil {
