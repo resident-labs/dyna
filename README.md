@@ -32,7 +32,7 @@ dyna demo                       # mock workers and a sample workflow
 
 `dyna engine run` is the long-lived server. It serves the web app and the API
 the CLI uses, and it runs the background workers: PR watcher, merge service,
-goal keeper, question delivery, session delivery, hook spool, dormant session
+parent check-ins, question delivery, session delivery, hook spool, dormant session
 sweep, instruction notes and lane sync. `dyna engine install-services` runs it
 as the `dyna-engine` user service.
 
@@ -76,12 +76,13 @@ Workflow workers are leaves: they cannot delegate. `parallel` and `pipeline`
 fan work out. A JSON Schema retry resumes the same worker session with only a
 correction.
 
-### Goals and the keeper
+### Goals and parent check-ins
 
 `dyna goal` records an outcome and its done condition for a session. Root holds
-no goals itself, so the agents that do the work hold them. The goal
-keeper checks progress on each goal, asks holders for status when progress
-stops, and records each check-in.
+no goals itself, so the agents that do the work hold them. Every 15 minutes,
+Dyna asks each parent, including root, to check its children and report its own
+status. Each parent remains responsible for its children and their work.
+Set `sessions.checkInInterval` to change the interval; `0s` disables check-ins.
 
 ### Questions
 
@@ -170,7 +171,7 @@ off. Updates never touch your profiles.
 - `internal/room`, `internal/roomsvc` — rooms, posts and the room API
 - `internal/subagent` — long-lived sessions
 - `internal/workflow` — the workflow JavaScript runtime
-- `internal/goals`, `internal/goalkeeper` — goals and the keeper
+- `internal/goals`, `internal/goalservice` — goal records and operations
 - `internal/pr` — pull request tracking, review and merging
 - `internal/computers` — agent desktops
 - `internal/harness`, `internal/profile`, `internal/workeroutput` — harness

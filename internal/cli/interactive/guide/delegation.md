@@ -134,8 +134,11 @@ Review fairness is per room; merge fairness is per repository. Existing review,
 dependency, draft, mergeability, and CI gates still apply. Running reviews, merge
 trials, and CI continue. Expedite does not change session, workflow, or CI scheduling.
 
-Goal changes print one short status line. Add `--json` for the full record and keeper history.
-Edits wake nobody. The goal keeper schedules stale holder nudges and delivers queued notices.
+Goal changes print one short status line. Add `--json` for the full record.
+Edits wake nobody. Every 15 minutes, Dyna asks parents, including root, to check
+their children and report their own status. Parents remain responsible for
+their children and their work. Set `sessions.checkInInterval` to change the
+interval; `0s` disables check-ins.
 Goal status uses running turns, turn failures, tracked PRs, item counts, and recent journal events.
 Use `dyna goal note <id> "<progress>"` to record progress.
 While you wait on something, run `dyna goal wait <id> --until <duration>`.
