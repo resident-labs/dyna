@@ -487,7 +487,10 @@ func (g GitHub) Snapshot(ctx context.Context, r Ref) (Snapshot, error) {
 
 // snapshotFromPull reuses metadata fetched by the cheap poll probe.
 func (g GitHub) snapshotFromPull(ctx context.Context, r Ref, pull Pull, savedCI *Snapshot) (Snapshot, error) {
-	s := Snapshot{Pull: pull, OwnerLogin: g.ownerLogin(ctx, r)}
+	if g.requests == nil {
+		g.requests = &requestCache{now: g.now}
+	}
+	s := Snapshot{Pull: pull, OwnerLogin: g.ownerLogin()}
 	if s.Pull.State == "closed" {
 		return s, nil
 	}
@@ -514,7 +517,7 @@ func (g GitHub) snapshotFromPull(ctx context.Context, r Ref, pull Pull, savedCI 
 			return s, workflowErr
 		}
 	}
-	s.OwnerLogin = g.ownerLogin(ctx, r)
+	s.OwnerLogin = g.ownerLogin()
 	return s, err
 }
 
@@ -1104,12 +1107,11 @@ func (g GitHub) openPulls(ctx context.Context, ref Ref) ([]Pull, error) {
 	return pulls, nil
 }
 
-func (g GitHub) ownerLogin(ctx context.Context, r Ref) string {
-	if g.Rooms != nil {
-		ctx = ghclient.WithRooms(ctx, g.Rooms)
+// ownerLogin uses the account that authenticated the snapshot requests. It
+// must not repeat repository discovery while processing a completed snapshot.
+func (g GitHub) ownerLogin() string {
+	if g.requests == nil {
+		return ""
 	}
-	if g.RoomID != "" {
-		ctx = ghclient.WithRoom(ctx, g.RoomID)
-	}
-	return ghclient.Account(ctx, g.Executable, "", "api", "--hostname", r.Host, r.path(""))
+	return g.requests.account
 }
