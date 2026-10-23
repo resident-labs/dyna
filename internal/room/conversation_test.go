@@ -33,24 +33,71 @@ func TestHomeForVoiceCall(t *testing.T) {
 	}
 }
 
-// TODO: legacy/shim remove when the DM composer sends its conversation — an
-// owner post the human typed to exactly one session is that session's DM,
-// and an owner post to anything else stays in the room feed.
-func TestHomeForOwnerPostToExactlyOneSession(t *testing.T) {
+// The mentions never decide a home: an owner post to exactly one session stays
+// in the room feed, bound or not, and that session's DM shows a reference row
+// for it. Only the writer's client names a DM.
+func TestHomeForOwnerPostToASessionStaysInTheFeed(t *testing.T) {
 	bound := map[string]string{"alpha:lead": ownerSession}
-	msg := Message{From: "alpha", Human: true, To: []string{"alpha:lead"}, SessionIDs: bound}
-	if got := HomeFor(msg, "alpha", ""); got != DMConversation(ownerSession) {
-		t.Fatalf("home = %q, want dm:%s", got, ownerSession)
-	}
-	for name, other := range map[string]Message{
+	for name, msg := range map[string]Message{
+		"one session":    {From: "alpha", Human: true, To: []string{"alpha:lead"}, SessionIDs: bound},
+		"unbound":        {From: "alpha", Human: true, To: []string{"alpha:lead"}},
 		"two recipients": {From: "alpha", Human: true, To: []string{"alpha:lead", "alpha:root"}, SessionIDs: bound},
-		"no session":     {From: "alpha", Human: true, To: []string{"alpha:lead"}},
 		"root post":      {From: "alpha", Human: false, To: []string{"alpha:lead"}, SessionIDs: bound},
 		"session author": {From: "alpha:lead", To: []string{"alpha:root"}, SessionIDs: bound},
 	} {
-		if got := HomeFor(other, "alpha", ""); got != ConversationRoom {
+		if got := HomeFor(msg, "alpha", ""); got != ConversationRoom {
 			t.Fatalf("%s: home = %q, want the room feed", name, got)
 		}
+	}
+}
+
+// A typed event whose audience is one session belongs to that session's DM, so
+// a parent's check-in does not land in the room feed. An event that also
+// reaches anything else, such as the room, stays in the feed.
+func TestHomeForOneSessionEvent(t *testing.T) {
+	checkin := Message{From: EngineSender, Kind: string(FamilyCheckin), Notice: EventNotice{Kind: string(TypeSummary)},
+		To: []string{"alpha:lead"}, SessionIDs: map[string]string{"alpha:lead": ownerSession}}
+	if got := HomeFor(checkin, "alpha", ""); got != DMConversation(ownerSession) {
+		t.Fatalf("check-in home = %q, want dm:%s", got, ownerSession)
+	}
+	checkin.To = []string{"alpha:lead", "alpha"}
+	if got := HomeFor(checkin, "alpha", ""); got != ConversationRoom {
+		t.Fatalf("a check-in to the room too has home %q, want the room feed", got)
+	}
+	// An event of the room's own audience keeps the feed even when one session
+	// receives it.
+	roomEvent := Message{From: EngineSender, Kind: string(FamilyPR), Notice: EventNotice{Kind: string(PRReady)},
+		To: []string{"alpha:lead"}, SessionIDs: map[string]string{"alpha:lead": ownerSession}}
+	if got := HomeFor(roomEvent, "alpha", ""); got != ConversationRoom {
+		t.Fatalf("room event home = %q, want the room feed", got)
+	}
+	// A check-in for the root seat is the seat's DM, not the DM of the session
+	// that holds the seat: every root view reads the seat's conversation.
+	const roomID = "room_20261023-120000-abcdef12"
+	rootCheckin := Message{From: EngineSender, Kind: string(FamilyCheckin), Notice: EventNotice{Kind: string(TypeSummary)}, RoomID: roomID,
+		To: []string{"alpha:root"}, SessionIDs: map[string]string{"alpha:root": ownerSession}}
+	if got := HomeFor(rootCheckin, "alpha", ""); got != SeatDMConversation(roomID) {
+		t.Fatalf("root check-in home = %q, want %q", got, SeatDMConversation(roomID))
+	}
+}
+
+// The owner's DM with the root seat names the seat, so it keeps one
+// conversation when the holder changes.
+func TestSeatDMConversation(t *testing.T) {
+	const roomID = "room_20261023-120000-abcdef12"
+	seat := SeatDMConversation(roomID)
+	if got, want := string(seat), "dm:seat:"+roomID; got != want {
+		t.Fatalf("seat DM = %q, want %q", got, want)
+	}
+	if err := seat.Validate(); err != nil {
+		t.Fatalf("%q: %v", string(seat), err)
+	}
+	// The seat is the delivery identity of the same DM.
+	if got, want := seat.SessionID(), SeatSessionID(roomID); got != want {
+		t.Fatalf("delivery target = %q, want %q", got, want)
+	}
+	if HomeFor(Message{From: "alpha", Human: true, Conversation: seat}, "alpha", "") != seat {
+		t.Fatal("a post the writer placed in the seat's DM was not stored there")
 	}
 }
 
@@ -83,12 +130,12 @@ func TestHomeForDefaultsToTheRoom(t *testing.T) {
 }
 
 func TestConversationValidate(t *testing.T) {
-	for _, ok := range []Conversation{"", ConversationRoom, ConversationVoice, DMConversation(ownerSession)} {
+	for _, ok := range []Conversation{"", ConversationRoom, ConversationVoice, DMConversation(ownerSession), SeatDMConversation("room_20261023-120000-abcdef12")} {
 		if err := ok.Validate(); err != nil {
 			t.Fatalf("%q: %v", string(ok), err)
 		}
 	}
-	for _, bad := range []Conversation{"dm:", "dm:alpha:lead", "feed", "dm:ses_a dm:ses_b"} {
+	for _, bad := range []Conversation{"dm:", "dm:alpha:lead", "feed", "dm:ses_a dm:ses_b", "dm:seat:", "dm:seat:alpha", "dm:seat:room_1"} {
 		if err := bad.Validate(); err == nil {
 			t.Fatalf("%q was accepted", string(bad))
 		}

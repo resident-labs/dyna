@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { seatDMConversation } from './conversations.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const declarations = parse(source, { modern: true }).instance?.content.body ?? []
@@ -39,6 +40,7 @@ interface SeatState {
   sessionError: string
   roomId: string
   room: { name: string }
+  seatDMConversation: (roomId: string) => string
   hierarchy: { owner: boolean; hue: number }[]
   drill: Drill | null
   session: null
@@ -72,6 +74,7 @@ function app(rootSeat: RootSeat) {
   const calls: Call[] = []
   const context: SeatState = {
     rootSeat, mergeSessionPage: (_s: unknown, v: unknown) => v, sessionReadingHistory: false, sessionError: 'x', roomId: 'room_a', room: { name: 'alpha' }, hierarchy: [{ owner: true, hue: 3 }], drill: null, session: null, sessionTab: 'chat', queue: [] as unknown[],
+    seatDMConversation,
     detailRequest: 0, sessionVisit: 0, sessionTurn: 0, narrow: false, sessionView: null, loadSession: () => calls.push('load'), clearItemLink() {}, setTimeout() {},
     openView: (view: string) => calls.push('view:' + view),
     api: { send: async (...a: unknown[]) => { calls.push(['send', ...a]); return {} }, sendToSession: async (...a: unknown[]) => { calls.push(['sendToSession', ...a]); return {} }, profile: async () => ({}) },
@@ -90,7 +93,7 @@ test('an external seat holder still opens a working root DM, as a session loaded
   assert.equal(context.drill?.profile, 'claude (external) holds the seat')
   assert.equal(JSON.stringify(calls), JSON.stringify(['load']))
   await context.sendToSession('hello')
-  assert.equal(JSON.stringify(calls.slice(1, 2)), JSON.stringify([['send', 'room_a', '@root hello', '', [], '']]), 'a root DM message goes to @root')
+  assert.equal(JSON.stringify(calls.slice(1, 2)), JSON.stringify([['send', 'room_a', '@root hello', '', [], '', [], 'dm:seat:room_a']]), 'a root DM message is written in the seat DM')
 })
 
 test('the root seat and the internal root both open as sessions, never as a separate view', async () => {

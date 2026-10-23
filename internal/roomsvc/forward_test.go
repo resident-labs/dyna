@@ -113,7 +113,7 @@ func TestTranscriptForwardPageIncludesLiveArrivals(t *testing.T) {
 			t.Fatal(err)
 		}
 		e.svc.Notify.Rooms.Now = func() time.Time { return base.Add(time.Duration(n)*time.Minute + 10*time.Second) }
-		if _, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: lead.Address(), To: []string{rec.Name}, Text: fmt.Sprint(n)}); err != nil {
+		if _, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: lead.Address(), Conversation: room.DMConversation(lead.ID), To: []string{rec.Name}, Text: fmt.Sprint(n)}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isComputerInfo, isDraft, isFeedSearch, isMember, isPost, isPostResult, isSendResult, parseAppEvent, parseVoicePageEvent } from './guards.ts'
+import { isComputerInfo, isDraft, isFeedSearch, isMember, isPost, isPostResult, isSendResult, isSessionReference, parseAppEvent, parseVoicePageEvent } from './guards.ts'
 
 const post = { wake: false, id: 'm1', ts: 1, roomId: 'r', from: 'a', to: null, text: 'hi', owner: false, completion: false, fromHue: 3, speaker: 'a' }
+
+test('isSessionReference accepts one DM reference row and rejects a missing field', () => {
+  const row = { postId: 'msg_1', from: 'r:lead', speaker: 'lead', fromHue: 2, conversation: 'room', ts: 1, preview: 'hi', attachments: 1 }
+  assert.equal(isSessionReference(row), true)
+  assert.equal(isSessionReference({ ...row, postId: undefined }), false)
+  assert.equal(isSessionReference({ ...row, attachments: '1' }), false)
+})
 
 test('isPost accepts a null recipient list and rejects a missing field', () => {
   assert.equal(isPost(post), true)

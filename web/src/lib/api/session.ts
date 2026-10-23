@@ -55,6 +55,22 @@ export interface Turn {
   omitted?: boolean
 }
 
+// SessionReference is roomsvc.ReferenceRow: one post of another conversation,
+// as a session's DM shows it. The row names the post and its home, so the
+// reader jumps to the post where it lives instead of drawing a copy. ts is
+// unix milliseconds.
+export interface SessionReference {
+  postId: string
+  from: string
+  speaker: string
+  fromHue: number
+  // conversation is the home of the post, such as "room", "voice" or a DM.
+  conversation: string
+  ts: number
+  preview: string
+  attachments: number
+}
+
 // Session is roomsvc.Session: a member's drill-down.
 export interface Session {
   cursor?: string
@@ -63,6 +79,9 @@ export interface Session {
   member: Member
   address: string
   posts: Post[] | null
+  // references are the posts of other conversations that this one received
+  // or wrote, in the same time window as posts.
+  references?: SessionReference[] | null
   media: Post[] | null
   dir: string
   usage: Usage

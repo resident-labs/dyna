@@ -73,3 +73,46 @@ func TestCheckinStaysInTheParentDMNotTheRoomFeed(t *testing.T) {
 		t.Fatalf("check-in payload = %+v, %v", ev, ok)
 	}
 }
+
+// A check-in for the internal root goes to the seat's DM, not to the DM of the
+// session that holds the seat: every root view reads dm:seat:<room id>, so the
+// seat's own conversation must hold the check-in and its card.
+func TestRootSeatCheckinLandsInTheSeatDM(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	const rootID = "ses_20261023-120000-rrrrrrrr"
+	recordtest.Write(t, e.mgr.Store.Root, rootID, subagent.Meta{
+		ID: rootID, Name: subagent.RoleRoot, Role: subagent.RoleRoot, Service: true,
+		RoomID: r.ID, Room: r.Name, Depth: 1, Resumable: true, HarnessSession: "mock-fixture",
+		Status: subagent.StatusIdle, Created: time.Now(),
+	})
+	address := r.Name + ":root"
+	msg, err := e.svc.rooms().PostEventInput(room.PostEventInput{
+		RoomID: r.ID, Producer: room.ProducerParentCheckin, To: []string{address},
+		SessionIDs: map[string]string{address: rootID},
+		Event: room.CheckinEvent{
+			Parent: rootID, WindowStart: 1, Counts: room.CheckinCounts{Idle: 1},
+			Children: []room.CheckinChild{{Name: "kid", State: room.CheckinIdle, Age: "5m", Goal: "g1: work", PR: "no open PRs"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := room.SeatDMConversation(r.ID); msg.Conversation != want {
+		t.Fatalf("check-in home = %q, want the seat DM %q", msg.Conversation, want)
+	}
+	sess, err := e.svc.RootSession(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range sess.Posts {
+		if p.ID != msg.ID {
+			continue
+		}
+		if ev, ok := p.Checkin(); !ok || ev.Parent != rootID {
+			t.Fatalf("check-in payload = %+v, %v", ev, ok)
+		}
+		return
+	}
+	t.Fatalf("the root view does not list its check-in: %+v", sess.Posts)
+}

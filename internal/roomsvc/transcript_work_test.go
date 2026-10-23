@@ -48,13 +48,18 @@ func TestTranscriptPageDoesNotCopyRetainedRoomHistory(t *testing.T) {
 	}
 	selected := room.Message{
 		ID: "msg_ffffffffffffffff", TS: base.Add(3*time.Minute + time.Second).UnixMilli(),
-		From: meta.Address(), To: []string{rec.Name}, Text: "in the selected turn",
+		From: meta.Address(), Conversation: room.DMConversation(id), To: []string{rec.Name}, Text: "in the selected turn",
 	}
 	if err := enc.Encode(selected); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(e.svc.rooms().Root, rec.ID, "messages.jsonl")
 	if err := os.WriteFile(path, log.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A log written behind the store's back gets its rows the way an engine
+	// start does: one import of every retained post.
+	if err := room.Migrate(filepath.Dir(e.svc.rooms().Root)); err != nil {
 		t.Fatal(err)
 	}
 	read := func() Session {
@@ -78,18 +83,16 @@ func TestTranscriptPageDoesNotCopyRetainedRoomHistory(t *testing.T) {
 	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > retained*uint64(unsafe.Sizeof(room.Message{}))/2 {
 		t.Fatalf("one transcript page allocated %d bytes for %d retained room posts", allocated, retained)
 	}
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0600)
+	// A post the store appends while the DM is open takes its place at once, and
+	// the page still reads only the window, not the retained log.
+	e.svc.Notify.Rooms.Now = func() time.Time { return base.Add(3*time.Minute + 2*time.Second) }
+	appended, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: meta.Address(), Conversation: room.DMConversation(id), To: []string{rec.Name}, Text: "appended in the selected turn"})
+	e.svc.Notify.Rooms.Now = nil
 	if err != nil {
 		t.Fatal(err)
 	}
-	selected.ID, selected.Text = "msg_eeeeeeeeeeeeeeee", "appended in the selected turn"
-	err = json.NewEncoder(f).Encode(selected)
-	closeErr := f.Close()
-	if err != nil || closeErr != nil {
-		t.Fatalf("append: %v, close: %v", err, closeErr)
-	}
 	got, err := e.svc.TranscriptPage(id, "", 1)
-	if err != nil || len(got.Posts) != 2 || got.Posts[1].ID != selected.ID {
+	if err != nil || len(got.Posts) != 2 || got.Posts[1].ID != appended.ID {
 		t.Fatalf("appended page: %+v, %v", got, err)
 	}
 }
