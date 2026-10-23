@@ -534,13 +534,13 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 		load.Record = doctor.Samples{DataDir: filepath.Dir(cstore.Dir())}.Recorder(log.Printf)
 	}
 	// The built-in hooks are seeded before any schedule or caller can run one.
-	hookService := hooks.New(automations.Hooks()...)
+	hookService := hooks.New(automations.Hooks(rooms.Notify)...)
 	if !readOnly {
 		if err := hookService.Seed(ctx); err != nil {
 			log.Printf("seed built-in hooks: %v", err)
 		}
 	}
-	calls, callScopes, err := callsFor(services{settingsChanged: func() { wakeWorker(signals.channels["checkins"]) }, git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, hooks: hookService, sync: lanesync.New(), health: health, load: load}, readOnly)
+	calls, callScopes, err := callsFor(services{git: &gitsvc.Service{WorkspaceRoot: files.WorkspaceRoot, MaxBytes: filesvc.MaxWorkspaceBytes}, files: files, devices: devicesvc.New(rooms.Notify.Sessions.Store.Root), rooms: rooms, terminals: terminals, runtime: runtime, accounts: accounts, config: config, computers: computers, voice: voiceCalls, hooks: hookService, sync: lanesync.New(), health: health, load: load}, readOnly)
 	if err != nil {
 		return err
 	}

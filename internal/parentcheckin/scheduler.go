@@ -13,6 +13,10 @@ import (
 	"dyna-agent/internal/state"
 )
 
+// DefaultInterval is the spacing a new parent check-in starts with. The hook
+// that runs the pass owns the real interval and sets Interval.
+const DefaultInterval = 15 * time.Minute
+
 // Target identifies an open parent with active direct children.
 type Target struct{ ID, Room string }
 
