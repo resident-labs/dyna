@@ -5,6 +5,7 @@ import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
 import { mergeListPage } from './listPages.ts'
 import { reconcileRows } from './reloadGate.ts'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const node = parse(source).instance.content.body.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'applyListPage')
@@ -14,7 +15,7 @@ for (const [kind, key] of [['jobs', 'id'], ['changes', 'key']]) {
   test(`${kind} refresh keeps loaded history, its cursor, and keyed row objects`, () => {
     const c = { listPages: {}, mergeListPage, reconcileRows }
     vm.createContext(c)
-    vm.runInContext(code, c)
+    vm.runInContext(stripTypes(code), c)
     c.applyListPage(kind, { items: [{ [key]: 'active', state: 'running' }], older: true, cursor: 'first' })
     const expanded = c.applyListPage(kind, { items: [{ [key]: 'old', state: 'exited' }], older: true, cursor: 'second' }, true)
     const active = expanded[0], old = expanded[1]

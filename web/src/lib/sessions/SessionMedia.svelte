@@ -11,7 +11,7 @@
     room: Room
     posts?: Post[]
     onopenfile: (attachment: Attachment) => void
-    onpost?: ((post: Post) => void) | null
+    onpost?: ((postId: string) => void) | null
   }
   let { room, posts = [], onopenfile, onpost = null }: Props = $props()
   const image = (a: Attachment) => /^image\//.test(a.mime || '')

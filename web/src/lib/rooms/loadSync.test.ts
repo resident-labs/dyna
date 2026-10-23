@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { parse } from 'svelte/compiler'
 import vm from 'node:vm'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const ast = parse(source, { modern: true })
@@ -20,8 +21,8 @@ function loader(syncStatus: () => Promise<Counts>) {
     reload: (_name: string, run: (current: () => boolean) => Promise<void>) => run(() => true),
   }
   const context = vm.createContext(state)
-  vm.runInContext(loadSource, context)
-  return { state, load: (): Promise<void> => vm.runInContext('loadSync()', context) }
+  vm.runInContext(stripTypes(loadSource), context)
+  return { state, load: (): Promise<void> => vm.runInContext(stripTypes('loadSync()'), context) }
 }
 
 test('a failed background sync status read shows no error banner', async () => {

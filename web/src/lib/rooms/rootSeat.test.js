@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const declarations = parse(source).instance.content.body
@@ -17,7 +18,7 @@ function app(rootSeat) {
     openView: (view) => calls.push('view:' + view),
     api: { send: async (...a) => { calls.push(['send', ...a]); return {} }, sendToSession: async (...a) => { calls.push(['sendToSession', ...a]); return {} }, profile: async () => ({}) },
   })
-  vm.runInContext(code, context)
+  vm.runInContext(stripTypes(code), context)
   return { context, calls }
 }
 

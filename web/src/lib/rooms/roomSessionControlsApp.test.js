@@ -3,12 +3,13 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { parse } from 'svelte/compiler'
 import vm from 'node:vm'
+import { stripTypes } from '../../../test/svelte-source.ts'
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const code = parse(source).instance.content.body.filter((n) => n.type === 'FunctionDeclaration' && ['visitRoomControls', 'roomSessionActions', 'currentRoomControls', 'closeRoomSessionMenu', 'askClearDormant', 'roomSessionItems', 'clearRoomDormant'].includes(n.id.name)).map((n) => source.slice(n.start, n.end)).join('\n')
 function app() {
   const visits = [], calls = []
   const c = { api: {}, roomId: 'a', roomRequest: 1, roomControlsVisit: 0, consolidationAlive: true, roomSessionController: null, loadMembers() {}, loadChanges() {}, createRoomSessionControls(api, room, changed) { const controller = { load() {}, destroy() { this.destroyed = true }, run(action) { calls.push([room, action]) } }; visits.push({ room, changed, controller }); return controller } }
-  vm.createContext(c); vm.runInContext(code, c); return { c, visits, calls }
+  vm.createContext(c); vm.runInContext(stripTypes(code), c); return { c, visits, calls }
 }
 test('A → B → A rejects old status and action callbacks, including teardown', () => {
   const { c, visits, calls } = app(); c.visitRoomControls('a'); const context = { roomId: 'a', visit: c.roomControlsVisit }

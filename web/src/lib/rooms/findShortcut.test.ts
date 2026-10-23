@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
+import { stripTypes } from '../../../test/svelte-source.ts'
 
 // Run the App's own shortcut and openFind with a controlled state.
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
@@ -26,7 +27,7 @@ function app(state: Record<string, unknown> = {}) {
   const views: unknown[] = []
   const c: Record<string, unknown> = { feedShown: true, showPalette: false, drill: null, finding: false, findText: '', GENERAL: 'general', feedFind: { focus: (q: unknown) => focused.push(q) }, openView: (v: unknown) => views.push(v), showSide: true, ...state }
   vm.createContext(c)
-  vm.runInContext(code.join('\n'), c)
+  vm.runInContext(stripTypes(code.join('\n')), c)
   return { c, focused, views }
 }
 // press sends Ctrl+F and says whether the app took the key.
