@@ -240,7 +240,7 @@ func writeFakeJSON[T any](stdout io.Writer, value T) error {
 
 // savedLocalEnv builds a local-mode service for a saved-result case: no CI node
 // is registered, so only a saved result can decide the head.
-func savedLocalEnv(t *testing.T, hosted localci.HostedRuns, result *localci.Result, runs []Run, checks []Check, required []string) (*Service, Record, string, string, *int) {
+func savedLocalEnv(t *testing.T, hosted localci.HostedRuns, result *localci.Result, runs []Run, checks []Check, required []string, withNode bool) (*Service, Record, string, string, *int) {
 	t.Helper()
 	ctx := context.Background()
 	dataDir := t.TempDir()
@@ -255,6 +255,12 @@ func savedLocalEnv(t *testing.T, hosted localci.HostedRuns, result *localci.Resu
 	registry := localci.Store{DataDir: dataDir}
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
 		t.Fatal(err)
+	}
+	if withNode {
+		ciMachine := machines.Store{DataDir: dataDir}
+		if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", Roles: []machines.Role{machines.RoleCI}, SSH: "ari@worker", CISlots: 1, Enabled: true}); err != nil {
+			t.Fatal(err)
+		}
 	}
 	head, prHead := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	branch := "dyna/merge-trial/1"
@@ -340,7 +346,7 @@ func runningTrialRun() Run {
 // costs a full hosted run and holds work the local pass already released.
 func TestSavedLocalPassNeedsNoHostedFallback(t *testing.T) {
 	result := fullLocalPass(t)
-	s, r, repo, branch, reruns := savedLocalEnv(t, localci.HostedRuns{IDs: []int64{81}, Attempts: map[int64]int{81: 1}}, &result, []Run{cancelledTrialRun()}, nil, nil)
+	s, r, repo, branch, reruns := savedLocalEnv(t, localci.HostedRuns{IDs: []int64{81}, Attempts: map[int64]int{81: 1}}, &result, []Run{cancelledTrialRun()}, nil, nil, false)
 	_ = repo
 	got, err := s.mergeTrialCI(t.Context(), r, branch, result.SHA)
 	if err != nil {
@@ -393,7 +399,7 @@ func TestSavedLocalPassKeepsTheCIGates(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := tc.result(t)
-			s, r, _, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, &result, tc.runs, tc.checks, tc.required)
+			s, r, _, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, &result, tc.runs, tc.checks, tc.required, false)
 			got, err := s.mergeTrialCI(t.Context(), r, branch, result.SHA)
 			if err != nil {
 				t.Fatal(err)
@@ -523,7 +529,7 @@ func independentCheck() Check {
 func TestCancelledHostedWorkflowCannotPassAHead(t *testing.T) {
 	checks := append(cancelledTrialChecks(), independentCheck())
 	runs := []Run{cancelledTrialRun(), independentWorkflow(strings.Repeat("a", 40), "dyna/merge-trial/1")}
-	s, r, _, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, nil, runs, checks, nil)
+	s, r, _, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, nil, runs, checks, nil, false)
 	got, err := s.mergeTrialCI(t.Context(), r, branch, strings.Repeat("a", 40))
 	if err != nil {
 		t.Fatal(err)
@@ -538,7 +544,7 @@ func TestCompleteLocalPassIgnoresACancelledWorkflow(t *testing.T) {
 	result := fullLocalPass(t)
 	checks := append(cancelledTrialChecks(), independentCheck())
 	runs := []Run{cancelledTrialRun(), independentWorkflow(strings.Repeat("a", 40), "dyna/merge-trial/1")}
-	s, r, _, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, &result, runs, checks, nil)
+	s, r, _, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, &result, runs, checks, nil, false)
 	got, err := s.mergeTrialCI(t.Context(), r, branch, strings.Repeat("a", 40))
 	if err != nil {
 		t.Fatal(err)
@@ -553,7 +559,7 @@ func TestCompleteLocalPassIgnoresACancelledWorkflow(t *testing.T) {
 // leave the trial waiting for CI that never comes.
 func TestSchedulerRunsLocalCIAfterHostedCancellation(t *testing.T) {
 	head := strings.Repeat("a", 40)
-	s, r, repo, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, nil, []Run{cancelledTrialRun()}, cancelledTrialChecks(), nil)
+	s, r, repo, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, nil, []Run{cancelledTrialRun()}, cancelledTrialChecks(), nil, false)
 	job := registeredCIJob{record: r, head: head, branch: branch, trial: true}
 	conclusive, err := s.scheduledCIConclusive(t.Context(), job, repo)
 	if err != nil {
@@ -561,5 +567,33 @@ func TestSchedulerRunsLocalCIAfterHostedCancellation(t *testing.T) {
 	}
 	if conclusive {
 		t.Fatal("a cancellation-only hosted read settled the head, so local CI was skipped")
+	}
+}
+
+// With an enabled node and no complete local result, a cancellation-only hosted
+// failure must keep the trial pending: failing here freezes the batch before the
+// local CI that is still queued gets to decide. A complete local pass then
+// decides the head.
+func TestEnabledNodeWaitsForLocalCIAfterHostedCancellation(t *testing.T) {
+	s, r, repo, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, nil, []Run{cancelledTrialRun()}, cancelledTrialChecks(), nil, true)
+	head := strings.Repeat("a", 40)
+	got, err := s.mergeTrialCI(t.Context(), r, branch, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "pending" {
+		t.Fatalf("ci=%s reason=%q; a cancellation froze the batch before local CI could run", got.Status, got.Reason)
+	}
+	result := fullLocalPass(t)
+	result.Repo, result.SHA, result.RoomID = repo, head, r.RoomID
+	if err := s.ciRegistry().SaveResult(t.Context(), result); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.mergeTrialCI(t.Context(), r, branch, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "passed" {
+		t.Fatalf("ci=%s reason=%q; the complete local pass did not decide the head", got.Status, got.Reason)
 	}
 }
