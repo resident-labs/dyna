@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/engineclient"
+	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/ghclient"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/scratch"
@@ -514,7 +515,7 @@ func runJournaledOnce(ctx context.Context, p profile.Profile, prompt, cwd string
 		}
 	}
 	if ref := p.Env[mode.EnvRoomID]; ref != "" && p.Harness != profile.HarnessMock && exec.ProcessRunner == nil {
-		binary, err := os.Executable()
+		binary, err := fsutil.RunningExecutable()
 		if err != nil {
 			return Result{}, err
 		}

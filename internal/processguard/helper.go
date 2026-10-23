@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/childenv"
+	"dyna-agent/internal/fsutil"
 )
 
 // This entrypoint requires an exact private argument vector, a socket on fd 3,
@@ -89,7 +90,7 @@ func runGuard(parent *wire, config message) {
 		_ = parent.send(message{Error: err.Error()})
 		return
 	}
-	exe, err := os.Executable()
+	exe, err := fsutil.RunningExecutable()
 	if err != nil {
 		file.Close()
 		anchor.Close()

@@ -27,6 +27,7 @@ import (
 
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/childenv"
+	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/harness"
 	harnessruntime "dyna-agent/internal/harness/runtime"
@@ -691,7 +692,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 			if runRoot, rootErr := filepath.Abs(e.opts.Run.Dir); rootErr == nil {
 				prof.Env[runstore.AgentJournalRootEnv] = runRoot
 			}
-			if exe, exeErr := os.Executable(); exeErr == nil {
+			if exe, exeErr := fsutil.RunningExecutable(); exeErr == nil {
 				prof.Env["DYNA_BIN"] = exe
 			}
 		}
