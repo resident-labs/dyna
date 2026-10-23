@@ -392,6 +392,10 @@ func TestCancelDuringBindKeepsNativeGateClosed(t *testing.T) {
 	go func() { done <- c.Start(func(r Reference) error { bound <- r; <-release; return nil }) }()
 	ref := <-bound
 	cancel()
+	// Wait for the group leader's exit before releasing the bind: that exit is
+	// the cancellation event, so bind stays blocked while cancellation drains
+	// the group. os/exec calls Cmd.Cancel asynchronously.
+	awaitLeaderExit(t, ref)
 	close(release)
 	select {
 	case err := <-done:

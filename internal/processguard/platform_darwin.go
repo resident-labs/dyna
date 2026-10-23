@@ -32,7 +32,7 @@ func defaultSignal(sig syscall.Signal) error {
 // Darwin has no subreaper or Linux parent-death signal. The control socket EOF
 // provides crash notification; kernel process inspection provides drain proof.
 func becomeSubreaper() error { return nil }
-func reapOrphans(int)        {}
+func reapOrphans(int) int    { return 0 }
 func reapGroup(int)          {} // Adopted grandchildren belong to the system reaper.
 func processBirth(pid int) (string, error) {
 	p, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
