@@ -63,6 +63,14 @@
   })
   let issueID = $derived(payload?.issueId ?? (payload ? post.id : ''))
   let actionable = $derived(!!payload && payload.state === 'open' && issueID !== '')
+  // What closed the issue, named once. An automatic close carries the merging
+  // PR and its commit, so the reason line stays out: it says the same fact.
+  let closedLine = $derived.by(() => {
+    const origin = payload?.closedBy
+    if (!origin?.pr && !origin?.commit) return ''
+    const what = origin?.pr ? `PR #${origin.pr}` : 'commit'
+    return origin?.commit ? `Closed by ${what} at ${origin.commit.slice(0, 8)}` : `Closed by ${what}`
+  })
 
   function openPanel() {
     if (issueID) onissue?.(issueID)
@@ -122,9 +130,10 @@
       <p class="meta">{payload.cost}{#if payload.cost && payload.direction}{' · '}{/if}{payload.direction}</p>
     {/if}
     {#if payload?.assignee}<p class="meta">Assigned to {short(payload.assignee, room?.name)}</p>{/if}
-    {#if payload?.reason}<p class="reason">{payload.reason}</p>{/if}
-    {#if payload?.closedBy?.pr || payload?.closedBy?.commit}
-      <p class="meta">Closed by {#if payload.closedBy.pr}PR #{payload.closedBy.pr}{:else}commit{/if}{#if payload.closedBy.commit}{' at '}{payload.closedBy.commit.slice(0, 8)}{/if}</p>
+    {#if closedLine}
+      <p class="meta">{closedLine}</p>
+    {:else if payload?.reason}
+      <p class="reason">{payload.reason}</p>
     {/if}
     {#if actionable}
       <div class="acts">
