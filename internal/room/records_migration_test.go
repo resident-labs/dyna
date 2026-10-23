@@ -176,6 +176,13 @@ func TestOwnerReadsMigrateOnceAndCurrentWritesLeaveSource(t *testing.T) {
 			if err := os.WriteFile(path, raw, 0600); err != nil {
 				t.Fatal(err)
 			}
+			badDir := filepath.Join(s.Root, "room_20261022-120001-1234abcd")
+			if err := os.MkdirAll(badDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(badDir, ownerReadsFile), []byte("{stale"), 0600); err != nil {
+				t.Fatal(err)
+			}
 			if err := Migrate(filepath.Dir(s.Root)); err != nil {
 				t.Fatal(err)
 			}

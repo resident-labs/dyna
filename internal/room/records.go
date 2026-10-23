@@ -548,7 +548,8 @@ func (s *Store) importRetainedOwnerReads(conn *sql.Conn) error {
 		}
 		var ids []string
 		if err := json.Unmarshal(raw, &ids); err != nil {
-			return fmt.Errorf("%s: %w", path, err)
+			log.Printf("room %s: skip malformed %s: %v", entry.Name(), path, err)
+			continue
 		}
 		if _, err := putOwnerReads(ctx, conn, entry.Name(), ids); err != nil {
 			return err
