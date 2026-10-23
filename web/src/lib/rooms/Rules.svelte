@@ -7,7 +7,7 @@
   import ComposerBox from '../ui/ComposerBox.svelte'
   import Row from '../ui/Row.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
-  import { agentRule, globalRule, ruleFilter, ruleUsage, ruleTime, scopeLabels } from './rules.js'
+  import { agentRule, globalRule, ruleFilter, ruleUsage, ruleTime, scopeLabels } from './rules.ts'
   // view is {room, global, hash}: the Rules API response {rules, used, max,
   // hash} for this room and for all rooms. editing is true while an inline
   // edit is open; App holds new lists back until it closes.

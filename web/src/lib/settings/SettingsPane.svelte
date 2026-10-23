@@ -11,7 +11,7 @@
   import LookRows from '../rooms/LookRows.svelte'
   import Feed from '../rooms/Feed.svelte'
   import { sampleRoom, samplePosts } from '../rooms/feedSample.ts'
-  import { look } from '../rooms/look.svelte.js'
+  import { look } from '../rooms/look.svelte.ts'
   import { visibleTo } from '../rooms/look.ts'
   import { showReasoning, saveShowReasoning, showCompaction, saveShowCompaction, channelList, saveChannelList, CHANNEL_LISTS } from '../ui/prefs.ts'
   import { FAST, motion } from '../ui/motion.ts'

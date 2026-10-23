@@ -1,5 +1,5 @@
 <script>
-  import { roomControlLabels, roomControlResult } from './roomSessionControls.js'
+  import { roomControlLabels, roomControlResult } from './roomSessionControls.ts'
   let { value, members = [], onresume, onreload } = $props()
   let state = $derived(value?.state)
   let accepted = $derived(value?.results.filter((r) => r.ok).length ?? 0)

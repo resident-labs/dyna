@@ -1,8 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { trimFeed } from './feedWindow.js'
+import { trimFeed } from './feedWindow.ts'
+import type { FeedPage, FeedPost } from './feedWindow.ts'
 
-const feed = (n, earlier = 0) => ({ room: { id: 'r' }, earlier, posts: Array.from({ length: n }, (_, i) => ({ id: `p${i}` })) })
+type TestPost = FeedPost & { text?: string }
+type TestFeed = FeedPage<TestPost> & { posts: TestPost[]; offset?: number }
+
+const feed = (n: number, earlier = 0): TestFeed => ({ room: { id: 'r' }, earlier, posts: Array.from({ length: n }, (_, i) => ({ id: `p${i}` })) })
 
 test('trimFeed keeps the newest posts and counts the rest as earlier', () => {
   const trimmed = trimFeed(feed(7, 5), 3)

@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { agentRule, globalRule, ruleFilter, ruleUsage, ruleTime, nextRules } from './rules.js'
+import { agentRule, globalRule, ruleFilter, ruleUsage, ruleTime, nextRules } from './rules.ts'
+import type { RuleList } from './rules.ts'
 
 const owner = { id: 'r1', setter: 'owner', text: 'a' }
 const agent = { id: 'r2', setter: 'ses_1', setterName: 'x', text: 'b' }
@@ -23,7 +24,7 @@ test('time says when a rule was added or last edited', () => {
   assert.equal(ruleTime({ createdAt: '2026-10-18T12:00:00Z', updatedAt: '2026-10-18T12:00:00Z' }, now), 'just now')
 })
 test('a new list replaces the shown one only on a hash change and never during an edit', () => {
-  const a = { hash: 'a', rules: [] }, b = { hash: 'b', rules: [] }
+  const a: RuleList = { hash: 'a', rules: [] }, b: RuleList = { hash: 'b', rules: [] }
   assert.deepEqual(nextRules(a, { hash: 'a' }, false), { shown: a, pending: null })
   assert.deepEqual(nextRules(a, b, false), { shown: b, pending: null })
   assert.deepEqual(nextRules(a, b, true), { shown: a, pending: b })
