@@ -80,6 +80,9 @@ func (h *fakeMuseHost) Write(frame []byte) error {
 	case "initialize":
 		reply(map[string]any{"schema": map[string]any{"fingerprint": "fake", "version": 1}})
 	case "initialized":
+		if r.Params == nil {
+			return fmt.Errorf("initialized needs an empty object, not null")
+		}
 	case "session/start", "session/resume":
 		if r.Params["permissionProfile"] != ":unrestricted" || r.Params["approvalMode"] != "allowAll" {
 			return fmt.Errorf("lost explicit session permission policy")

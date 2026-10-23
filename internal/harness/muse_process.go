@@ -81,7 +81,7 @@ func museSessionProcessFor(ctx context.Context, p profile.Profile, cwd string, s
 		if initialized.Schema.Version != 1 {
 			return nil, fmt.Errorf("Muse initialize returned an unsupported schema version")
 		}
-		if err = s.conn.Notify("initialized", nil); err != nil {
+		if err = s.conn.Notify("initialized", map[string]any{}); err != nil {
 			return nil, err
 		}
 	}
