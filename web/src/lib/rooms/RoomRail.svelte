@@ -4,8 +4,9 @@
   import { cubicOut } from 'svelte/easing'
   import { motion, BASE, FAST } from '../ui/motion.ts'
   import { initials, roomLabel } from '../ui/format.ts'
-  // working: awake agents mid-turn, the count on the agents tile.
-  let { rooms = [], working = 0, selected = '', onselect, onmenu = null } = $props()
+  // selected is the open room's ID, or '' for the machines list, the rail's
+  // own tile.
+  let { rooms = [], selected = '', onselect, onmenu = null } = $props()
   // Pinned rooms first, in pin order, then the rest as Go sorts them. A
   // pinned room stays on the rail even after it goes quiet.
   let pinned = $derived(rooms.filter((r) => r.pinned).sort((a, b) => (a.pinOrder || 0) - (b.pinOrder || 0)))
@@ -38,14 +39,12 @@
 <nav class="rail" aria-label="Rooms">
   <div class="slot" class:sel={selected === ''}>
     <span class="pill"></span>
-    <button class="tile home" aria-label="Active agents" title="Active agents" onclick={() => onselect('')}>
-      <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
-        <circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.9" />
-        <path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" />
-        <circle cx="16.5" cy="9" r="2.4" fill="none" stroke="currentColor" stroke-width="1.7" />
-        <path d="M16 13.6c2.4 0 4 1.5 4.5 4.4" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+    <button class="tile home" aria-label="Machines" title="Machines" onclick={() => onselect('')}>
+      <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">
+        <rect x="4" y="4.5" width="16" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.8" />
+        <rect x="4" y="13.5" width="16" height="6" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.8" />
+        <path d="M7.5 7.5h.01M7.5 16.5h.01" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
       </svg>
-      {#if working}<span class="badge live-n" title="{working} working">{working > 99 ? '99+' : working}</span>{/if}
     </button>
   </div>
   <div class="sep"></div>
@@ -137,7 +136,6 @@
     box-sizing: content-box;
     line-height: 1;
   }
-  .badge.live-n { background: var(--gold); }
   .live {
     position: absolute;
     right: -1px;

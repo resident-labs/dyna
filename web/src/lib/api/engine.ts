@@ -18,6 +18,7 @@ import type { GitHubDetail, GitHubListResult } from './github.ts'
 import type { Goal, GoalEvent, GoalItem, GoalJournalEntry, GoalRule, GoalStatus, RulesView } from './goal.ts'
 import type { HarnessConfig, HarnessSnapshot, ManagedMCP, ManagedSkill, PersonalLogin, PreferencePreview, PrivateLogin, PrivateRuntimeSwitchControl, ProviderKeysResult, SignInState } from './harness.ts'
 import type { SyncStarted, SyncStatus } from './lanesync.ts'
+import type { MachineDetail, MachinePatch, MachineSummary } from './machine.ts'
 import type { LibraryView } from './library.ts'
 import type { ProfileCheck, ProfileEdit, ProfileList, ProfileView } from './profile.ts'
 import type { Attachment, Draft, Feed, FeedSearch, Issue, Member, Opened, Post, PostResult, ProfileChoice, Question, Room, SeatReturn, SendResult, SpawnResult, Visual } from './room.ts'
@@ -83,6 +84,11 @@ export interface Engine {
   DataDir(): Promise<string>
   Health(): Promise<Health>
   SystemLoad(): Promise<SystemLoad>
+  // Machines lists the registry; Machine reads one page; SaveMachine writes
+  // the fields of MachinePatch and answers with the machine's next state.
+  Machines(): Promise<MachineSummary[]>
+  Machine(id: string): Promise<MachineDetail>
+  SaveMachine(id: string, patch: MachinePatch): Promise<MachineDetail>
   SyncStatus(): Promise<SyncStatus>
   SyncRefresh(roomId: string, repo: string): Promise<SyncStarted>
   GitExport(roomId: string, repo: string): Promise<SyncStarted>

@@ -13,11 +13,11 @@ for (const file of files) {
     assert.match(source, /animate:flip=\{\{ duration: motion\(BASE\), easing: cubicOut \}\}/)
     assert.match(source, /in:fade=\{\{ duration: motion\(FAST\) \}\}/)
     assert.doesNotMatch(source, /(?:in|out):fade\|global/)
-    assert.equal([...source.matchAll(/animate:flip=/g)].length, { Sidebar: 3, RoomRail: 2, Members: 3 }[file])
+    assert.equal([...source.matchAll(/animate:flip=/g)].length, { Sidebar: 2, RoomRail: 2, Members: 3 }[file])
     assert.doesNotThrow(() => compile(source, { filename: `${file}.svelte`, generate: 'client' }))
     if (file !== 'Sidebar') assert.doesNotMatch(source, /out:fade/, 'filter and fold changes remove rows immediately')
     else {
-      assert.equal([...source.matchAll(/out:fade=/g)].length, 3, 'only active lists fade removals')
+      assert.equal([...source.matchAll(/out:fade=/g)].length, 2, 'only active lists fade removals')
       assert.match(source, /\{#each live as m \(m.id\)\}<div animate:flip=/, 'Working now keeps keyed movement')
     }
   })

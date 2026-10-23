@@ -16,12 +16,15 @@
   import { available as terminal } from '../sessions/TermPane.svelte'
   import { sections, rowOf, shown, runningWork } from './workViews.ts'
   import { sessionStatus } from '../sessions/status.ts'
+  import MachineRow from '../machines/MachineRow.svelte'
+  import { machinesSub } from '../machines/machines.ts'
   // questions: open questions to the owner, the one "needs you" count.
   // computers: the room's computers, or null when the feature is off.
   // runs: the room's workflow runs.
-  // agents: {groups, hidden} from activeAgents; set, the sidebar lists the
-  // awake agents of every room instead of one room's views.
-  let { agents = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, channelUnread = {}, questions = 0, live = [], runs = null, dataDir = '', ownerHue = 0, update = false, prs = {}, computers = null, onroommenu = null, onview, onmember, onsettings = null, onlogout = null } = $props()
+  // machines: the registered machines, or null until they first load.
+  // machinesOpen: the rail's machines tile is open, so the sidebar lists the
+  // machines of this engine instead of one room's views.
+  let { machines = null, machinesOpen = false, machineId = '', onmachine = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, channelUnread = {}, questions = 0, live = [], runs = null, dataDir = '', ownerHue = 0, update = false, prs = {}, computers = null, onroommenu = null, onview, onmember, onsettings = null, onlogout = null } = $props()
   // Gold marks only what needs the owner or runs now; no totals.
   let liveComputers = $derived(new Set((computers ?? []).filter(isLive).map((c) => c.session)).size)
   let running = $derived(runningWork(runs))
@@ -40,7 +43,7 @@
 </script>
 
 {#snippet person(m, sel, onclick)}
-  <button class="chan person" class:sel style="--depth: {agents ? m.depth : 0}" {onclick}>
+  <button class="chan person" class:sel style="--depth: 0" {onclick}>
     <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={22} state={m.state} ring="var(--side)" />
     <span class="label hue-{m.hue}">{m.name}</span>
     {#if agentExpedited($expedite, m)}<ExpediteBadge short />{/if}
@@ -49,20 +52,18 @@
 {/snippet}
 
 <aside class="side">
-  {#if agents}
+  {#if machinesOpen}
     <header class="head">
-      <h1>Active agents</h1>
-      <p class="sub" title={agents.hidden ? `${agents.hidden} dormant or paused agents are not listed` : ''}>{agents.working} working{agents.hidden ? ` · ${agents.hidden} hidden` : ''}</p>
+      <h1>Machines</h1>
+      <p class="sub">{machinesSub(machines)}</p>
     </header>
     <div class="scroll">
-      {#each agents.groups as g (g.room.id)}
-        {@const busy = g.members.filter((m) => m.state === 'live').length}
+      {#each machines ?? [] as m (m.id)}
         <div animate:flip={{ duration: motion(BASE), easing: cubicOut }} in:fade={{ duration: motion(FAST) }} out:fade={{ duration: motion(FAST) }}>
-        <h2 class="group"><button class="roomlink" title="Open #{roomLabel(g.room)}" onclick={() => onroom(g.room.id)}>{roomLabel(g.room)}</button>{#if busy}<span class="lv">{busy} working</span>{/if}</h2>
-        {#each g.members as m (m.id)}<div animate:flip={{ duration: motion(BASE), easing: cubicOut }} in:fade={{ duration: motion(FAST) }} out:fade={{ duration: motion(FAST) }}>{@render person(m, selected === m.address, () => onmember(m))}</div>{/each}
+          <MachineRow machine={m} selected={machineId === m.id} onopen={() => onmachine?.(m.id)} />
         </div>
       {:else}
-        <p class="empty">{agents.loading ? 'Loading agents…' : 'No agents are awake.'}</p>
+        <p class="empty">{machines ? 'No machines yet.' : 'Loading machines…'}</p>
       {/each}
     </div>
   {:else if room}
@@ -179,8 +180,6 @@
     color: var(--muted);
   }
   h2:first-child { margin-top: 6px; }
-  .scroll > div > h2.group { margin-top: 14px; }
-  .scroll > div:first-child > h2.group { margin-top: 6px; }
   .chan {
     width: 100%;
     display: flex;
@@ -220,11 +219,6 @@
   .lv { font-size: var(--t-sm); color: var(--gold); white-space: nowrap; }
   .person { padding: 4px 8px 4px calc(8px + var(--depth) * 14px); }
   .person .label { font-weight: 600; }
-  .group { display: flex; align-items: center; gap: var(--s2); }
-  .roomlink { flex: 1; min-width: 0; text-align: left; color: inherit; font: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color var(--motion-fast) var(--ease); }
-  @media (hover: hover) {
-    .roomlink:hover { color: var(--ink); text-decoration: underline; }
-  }
   .sub { margin: 3px 0 0; font-size: var(--t-cap); color: var(--faint); }
   .empty { margin: var(--s2); font-size: var(--t-ui); color: var(--faint); }
   .turn { font-size: var(--t-sm); color: var(--faint); }

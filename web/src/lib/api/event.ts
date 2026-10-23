@@ -38,9 +38,15 @@ export interface ListEvent {
   change?: ListChange
 }
 
+// MachinesEvent says the machines registry changed: a row's settings or the
+// live figures it reports.
+export interface MachinesEvent {
+  kind: 'machines'
+}
+
 // ResyncEvent is made by the client, not the engine, after a lost stream.
 export interface ResyncEvent {
   kind: 'resync'
 }
 
-export type AppEvent = PostsEvent | RoomsEvent | NoticesEvent | ListEvent | ComputerEvent | ResyncEvent
+export type AppEvent = PostsEvent | RoomsEvent | NoticesEvent | ListEvent | ComputerEvent | MachinesEvent | ResyncEvent
