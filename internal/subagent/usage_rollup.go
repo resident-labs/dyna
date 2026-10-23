@@ -61,6 +61,9 @@ func Migrate(dataDir string) error {
 	if err := s.migrateRetainedUsage(); err != nil {
 		return err
 	}
+	if err := s.migrateOutputProjection(); err != nil {
+		return err
+	}
 	return migrateQueues(dataDir)
 }
 
