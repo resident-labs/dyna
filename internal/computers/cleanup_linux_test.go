@@ -7,9 +7,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 
-	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/store"
 	"golang.org/x/sys/unix"
 )
@@ -25,11 +26,12 @@ func TestForkSetsidCleanupHelper(t *testing.T) {
 	if err := os.MkdirAll(Dir(id), 0700); err != nil {
 		t.Fatal(err)
 	}
-	env := mergeEnvironment(os.Environ(), map[string]string{"DYNA_COMPUTER_PROCESS": id})
-	// The shell writes the FIFO only after it starts the setsid descendant and
-	// the extra sleep, so reading it proves the process tree exists.
 	ready := readyFIFO(t)
-	script := "setsid /bin/sh -c 'sleep 600 & wait' & sleep 600 & printf ready > " + shellquote.Quote(ready) + "; wait"
+	env := mergeEnvironment(os.Environ(), map[string]string{"DYNA_COMPUTER_PROCESS": id, "CLEANUP_READY": ready})
+	// The detached shell signals from inside its own session, after it starts
+	// its sleep helper, so the FIFO write proves the setsid descendant and its
+	// helper exist rather than only the fork that created them.
+	script := `setsid /bin/sh -c 'sleep 600 & printf ready > "$CLEANUP_READY"; wait' & wait`
 	p, err := startProcess(env, filepath.Join(Dir(id), "child.log"), "/bin/sh", "-c", script)
 	if err != nil {
 		t.Fatal(err)
@@ -40,6 +42,9 @@ func TestForkSetsidCleanupHelper(t *testing.T) {
 	owned := s.owned()
 	if len(owned) < 3 {
 		t.Fatalf("fork/setsid descendants not created: %+v", owned)
+	}
+	if !ownsDetachedSession(owned) {
+		t.Fatalf("no detached descendant session to clean up: %+v", owned)
 	}
 	s.stop()
 	for pid := range owned {
@@ -53,6 +58,29 @@ func TestForkSetsidCleanupHelper(t *testing.T) {
 		}
 	}
 }
+
+// ownsDetachedSession reports whether an owned process leads its own session,
+// so the cleanup set contains a setsid descendant and not only its parent.
+func ownsDetachedSession(owned map[int]string) bool {
+	for pid := range owned {
+		b, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+		if err != nil {
+			continue
+		}
+		line := string(b)
+		end := strings.LastIndexByte(line, ')')
+		if end < 0 {
+			continue
+		}
+		// After the command name: state, ppid, pgrp, session.
+		fields := strings.Fields(line[end+1:])
+		if len(fields) >= 4 && fields[3] == strconv.Itoa(pid) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestDestroyOfflineKeepsHistory(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_RUNTIME_DIR", t.TempDir())

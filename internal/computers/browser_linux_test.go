@@ -145,10 +145,8 @@ func (l *agentBrowserLaunch) profile(t *testing.T) string {
 	// The open command can return before Chromium's main process shows its
 	// profile in /proc. Chromium writes its profile while it starts, so each
 	// write on the profile directory is a real wakeup; the deadline only
-	// bounds a hang.
-	if got := found(); got != "" {
-		return got
-	}
+	// bounds a hang. Register the watch before the first check, so a write
+	// between the check and the registration cannot be missed.
 	watch, err := unix.InotifyInit1(unix.IN_CLOEXEC)
 	if err != nil {
 		t.Fatal(err)
@@ -159,20 +157,23 @@ func (l *agentBrowserLaunch) profile(t *testing.T) string {
 	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
+		if got := found(); got != "" {
+			return got
+		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			break
 		}
-		n, err := unix.Poll([]unix.PollFd{{Fd: int32(watch), Events: unix.POLLIN}}, int(remaining.Milliseconds())+1)
-		if err != nil || n == 0 {
+		if n, err := unix.Poll([]unix.PollFd{{Fd: int32(watch), Events: unix.POLLIN}}, int(remaining.Milliseconds())+1); err != nil || n == 0 {
 			break
 		}
 		if _, err := unix.Read(watch, make([]byte, 4096)); err != nil {
 			break
 		}
-		if got := found(); got != "" {
-			return got
-		}
+	}
+	// Chromium can reach the wanted state after the last wakeup.
+	if got := found(); got != "" {
+		return got
 	}
 	t.Fatal("no browser with the computer's private profile")
 	return ""

@@ -139,24 +139,26 @@ func TestGuardReapsAdoptedChildrenWhileRunning(t *testing.T) {
 	if len(pids) != 32 {
 		t.Fatalf("child PIDs: %q", b)
 	}
-	// Each adopted child reports its own exit, so the guard sees the exits
-	// while the native still runs; the reap that follows is a process fact.
+	// The guard reaps adopted children in its SIGCHLD path and reports each
+	// pass, so waiting for all 32 counts is a real reaping event.
+	reaped := 0
+	for reaped < len(pids) {
+		select {
+		case n := <-c.Reaped():
+			reaped += n
+		case <-time.After(8 * time.Second):
+			t.Fatalf("the guard reaped %d of %d adopted children while the native ran", reaped, len(pids))
+		}
+	}
+	// The pids are gone while the native still runs, so the live reaper did the
+	// work and not the final reap during shutdown.
 	for _, value := range pids {
 		pid, err := strconv.Atoi(value)
 		if err != nil {
 			t.Fatal(err)
 		}
-		fd, err := unix.PidfdOpen(pid, 0)
-		if errors.Is(err, unix.ESRCH) {
-			continue // already reaped
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 8000)
-		unix.Close(fd)
-		if err != nil || n == 0 {
-			t.Fatalf("child %d did not exit: %d %v", pid, n, err)
+		if fields, err := procFields(pid); err == nil {
+			t.Fatalf("child %d was not reaped while the native ran: state=%s parent=%s", pid, fields[0], fields[1])
 		}
 	}
 	if live, err := Probe(c.Reference()); !live || err != nil {
@@ -175,6 +177,24 @@ func TestGuardReapsAdoptedChildrenWhileRunning(t *testing.T) {
 		if fields, err := procFields(pid); err == nil {
 			t.Fatalf("child %d was not reaped: state=%s parent=%s", pid, fields[0], fields[1])
 		}
+	}
+}
+
+// awaitLeaderExit waits for the group leader's own exit event. A pidfd becomes
+// readable on exit, which is the cancellation signal this test needs.
+func awaitLeaderExit(t *testing.T, ref Reference) {
+	t.Helper()
+	leader, _ := ref.Leader()
+	fd, err := unix.PidfdOpen(leader, 0)
+	if errors.Is(err, unix.ESRCH) {
+		return // already gone
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(fd)
+	if n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 8000); err != nil || n == 0 {
+		t.Fatalf("group leader %d did not exit: %d %v", leader, n, err)
 	}
 }
 
