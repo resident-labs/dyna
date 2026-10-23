@@ -36,7 +36,6 @@ export const sections: Section[] = [
   {
     label: 'Machine',
     rows: [
-      { id: 'code', label: 'code', hint: 'CI health', repo: true, tabs: [{ id: 'cihealth', label: 'CI health' }] },
       { id: 'library', label: 'library', hint: 'The feature map of this repository', repo: true, tabs: [{ id: 'library', label: 'Library' }] },
       { id: 'terminal', label: 'terminal', hint: 'A shell on the host', terminal: true, tabs: [{ id: 'terminal', label: 'Terminal' }] },
       { id: 'computers', label: 'computers', hint: 'Every agent computer in this room', computers: true, tabs: [{ id: 'computers', label: 'Computers' }] },

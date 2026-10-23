@@ -2,24 +2,23 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   barPct,
-  bandNames,
-  bandPx,
-  bandShare,
+  budgetState,
   budgetWithAllow,
   capRows,
-  budgetWord,
   duration,
   failed,
   filterTests,
   graphRuns,
   graphScale,
-  jobMs,
+  jobRanking,
   readCIHealth,
-  readRunDetail,
   readTestDetail,
   runState,
+  slowestJobs,
   spark,
+  statusLine,
   stateLine,
+  type CIHealthRun,
   type CIHealthTest,
   type CIHealthTestRun,
 } from './health.ts'
@@ -39,6 +38,11 @@ const slow: CIHealthTest = {
   ignored: '',
   runs: [run(true, '2026-10-21T06:12:00Z', 34200), run(true, '2026-10-20T18:40:00Z', 31000), run(false, '2026-10-19T09:55:00Z', 900)],
 }
+
+const ciRun = (token: string, over: Partial<CIHealthRun> = {}): CIHealthRun => ({
+  token, pr: 1, head: '', workflow: 'CI', started: '', status: 'completed', conclusion: 'success',
+  queueMs: 0, busyMs: 1000, warnMs: 120000, failMs: 240000, jobs: [], ...over,
+})
 
 test('the reader turns the engine answer into rows and refuses junk', () => {
   const health = readCIHealth({
@@ -60,17 +64,6 @@ test('the reader turns the engine answer into rows and refuses junk', () => {
   // A missing job list is an empty list, not a broken row.
   const bare = readCIHealth({ runs: [{ token: '1/1' }] })
   assert.deepEqual(bare?.runs[0]?.jobs, [])
-})
-
-test('a run detail keeps its jobs, steps and test names', () => {
-  const detail = readRunDetail({
-    run: { token: '1241/1', pr: 1902, conclusion: 'failure', queueMs: 16000, busyMs: 166000 },
-    jobs: [{ id: 7, name: 'go-test', busyMs: 114000, steps: [{ name: 'Run tests', ms: 60000 }] }],
-    tests: [{ test: 'pkg/TestX', package: 'pkg', token: '1241/1', durationMs: 34200, over: true }],
-  })
-  assert.equal(detail?.jobs[0]?.steps[0]?.ms, 60000)
-  assert.equal(detail?.tests[0]?.test, 'pkg/TestX')
-  assert.equal(readRunDetail({}), null)
   assert.equal(readTestDetail({ test: slow })?.test.state, 'recurring')
   assert.equal(readTestDetail(null), null)
 })
@@ -102,73 +95,19 @@ test('the filter reads state and keeps the work first', () => {
   assert.deepEqual(filterTests([quiet, fresh, slow], 'quiet').map((t) => t.name), ['TestQuiet'])
 })
 
-test('the graph shares one scale for bands and both budget lines', () => {
-  const runs = [
-    { token: 'a', pr: 1, head: '', workflow: 'CI', started: '', status: '', conclusion: '', queueMs: 12000, busyMs: 96000, warnMs: 180000, failMs: 240000, jobs: [] },
-    { token: 'b', pr: 2, head: '', workflow: 'CI', started: '', status: '', conclusion: '', queueMs: 0, busyMs: 260000, warnMs: 180000, failMs: 240000, jobs: [] },
-  ]
-  // The longest run is taller than the fail line, so the line sits inside.
+test('the chart scale holds the fail budget and the longest run; a wait never raises it', () => {
+  const runs = [ciRun('a', { busyMs: 96000 }), ciRun('b', { busyMs: 260000 })]
   assert.equal(graphScale(runs, 240000), 260000)
-  const one = runs[0]
-  assert.ok(one)
-  assert.equal(graphScale([one], 240000), 240000)
-  assert.equal(bandPx(130000, 260000, 176), 88)
-  assert.equal(bandPx(-5, 260000, 176), 0)
-  assert.equal(barPct(114000, 114000), 100)
-  assert.equal(barPct(57, 114), 50)
+  assert.equal(graphScale([ciRun('c', { busyMs: 90000, queueMs: 600000 })], 240000), 240000)
+  assert.equal(barPct(120000, 240000), 50)
   assert.equal(barPct(10, 0), 0)
 })
 
-test('the graph names its bands once, in the order they first appear', () => {
-  const runs = [
-    { token: 'a', pr: 1, head: '', workflow: 'CI', started: '', status: '', conclusion: '', queueMs: 0, busyMs: 90000, warnMs: 0, failMs: 0, jobs: [{ id: 7, name: 'go-test', busyMs: 70000 }, { id: 8, name: 'frontend', busyMs: 20000 }] },
-    { token: 'b', pr: 2, head: '', workflow: 'CI', started: '', status: '', conclusion: '', queueMs: 0, busyMs: 80000, warnMs: 0, failMs: 0, jobs: [{ id: 9, name: 'go-test', busyMs: 60000 }, { id: 10, name: 'cross-build', busyMs: 20000 }] },
-  ]
-  assert.deepEqual(bandNames(runs), ['go-test', 'frontend', 'cross-build'])
-  const first = runs[0]
-  assert.ok(first)
-  assert.equal(jobMs(first, 'go-test'), 70000)
-  assert.equal(jobMs(first, 'cross-build'), 0)
-})
-
-test('a column is the measured busy time, not the sum of its jobs', () => {
-  // Two jobs of 90 s that ran in parallel: the run used 90 s of budget.
-  const parallel = { token: 'p', pr: 1, head: '', workflow: 'CI', started: '', status: '', conclusion: '', queueMs: 0, busyMs: 90000, warnMs: 180000, failMs: 240000,
-    jobs: [{ id: 1, name: 'go-test', busyMs: 90000 }, { id: 2, name: 'frontend', busyMs: 90000 }] }
-  // A long wait does not belong to the budget either.
-  const waited = { ...parallel, token: 'w', queueMs: 600000, busyMs: 60000 }
-  assert.equal(graphScale([parallel], 240000), 240000, 'parallel jobs must not raise the scale past the budget')
-  assert.equal(graphScale([waited], 240000), 240000, 'a wait must not raise the scale')
-  assert.equal(bandShare(parallel, 'go-test'), 0.5)
-  assert.equal(bandShare(parallel, 'frontend'), 0.5)
-  // The two halves fill the column, so the bands never add up past it.
-  assert.equal(bandShare(parallel, 'go-test') + bandShare(parallel, 'frontend'), 1)
-})
-
-test('a run at the fail limit draws to its line at both sizes', () => {
-  // The plot height is the drawn height at each size; a column measured against
-  // the same scale must reach the fail line exactly, and stop at half for half.
-  for (const plot of [176, 120]) {
-    const fail = 240000
-    const atLimit = { token: 'a', pr: 1, head: '', workflow: 'CI', started: '', status: '', conclusion: '', queueMs: 0, busyMs: fail, warnMs: 180000, failMs: fail, jobs: [] }
-    const scale = graphScale([atLimit], fail)
-    assert.equal(bandPx(fail, scale, plot), plot, `fail limit at ${plot}px`)
-    assert.equal(bandPx(fail / 2, scale, plot), plot / 2, `half at ${plot}px`)
-    assert.equal(bandPx(180000, scale, plot), (180000 / fail) * plot, `warn line at ${plot}px`)
-  }
-})
-
-test('the graph draws oldest on the left and keeps the newest run', () => {
-  const runs = ['n4', 'n3', 'n2', 'n1'].map((token, index) => ({
-    token, pr: index, head: '', workflow: 'CI', started: '', status: '', conclusion: '',
-    queueMs: 0, busyMs: 1000, warnMs: 0, failMs: 0, jobs: [],
-  }))
-  const wide = graphRuns(runs, 0)
-  assert.deepEqual(wide.shown.map((run) => run.token), ['n1', 'n2', 'n3', 'n4'])
-  assert.equal(wide.newest?.token, 'n4')
-  const narrow = graphRuns(runs, 2)
-  assert.deepEqual(narrow.shown.map((run) => run.token), ['n3', 'n4'], 'the newest two, oldest first')
-  assert.equal(narrow.newest?.token, 'n4')
+test('the chart draws oldest on the left and keeps the newest run', () => {
+  const runs = ['n4', 'n3', 'n2', 'n1'].map((token) => ciRun(token))
+  const all = graphRuns(runs, 0)
+  assert.deepEqual(all.shown.map((r) => r.token), ['n1', 'n2', 'n3', 'n4'])
+  assert.equal(all.newest?.token, 'n4')
 })
 
 test('the sparkline draws oldest first and leaves the limit visible', () => {
@@ -176,14 +115,10 @@ test('the sparkline draws oldest first and leaves the limit visible', () => {
   assert.equal(line.hasLine, true)
   const points = line.points.split(' ').map((p) => p.split(',').map(Number))
   assert.equal(points.length, 3)
-  // Points run oldest to newest, and a taller time sits nearer the top, so
-  // the oldest value (900 ms) is lower on the chart than the newest (34.2 s).
-  const first = points[0]
-  const last = points[2]
-  assert.ok(first && last)
-  const [firstX, firstY] = first
-  const [, lastY] = last
-  assert.ok(lastY !== undefined && firstY !== undefined && firstX !== undefined)
+  // A taller time sits nearer the top: the oldest value (900 ms) is lower than the newest (34.2 s).
+  const [, firstY] = points[0] ?? []
+  const [, lastY] = points[2] ?? []
+  assert.ok(lastY !== undefined && firstY !== undefined)
   assert.ok(firstY > lastY)
   assert.ok(line.limitY > 0 && line.limitY < 26)
   assert.equal(spark([], 118, 26, 1000).hasLine, false)
@@ -196,16 +131,48 @@ test('a long list keeps its first rows and counts the rest', () => {
   assert.deepEqual(capRows([], 2), { shown: [], hidden: 0 })
 })
 
-test('a run says how it ended and where it sat', () => {
-  const base = { token: 'a', pr: 1, head: '', workflow: 'CI', started: '', status: 'completed', conclusion: 'success', queueMs: 0, busyMs: 1000, warnMs: 180000, failMs: 240000, jobs: [] }
+test('a run says how it ended and where it sat against its budget', () => {
+  const base = ciRun('a', { warnMs: 180000, failMs: 240000 })
   assert.equal(runState(base), 'success')
   assert.equal(runState({ ...base, conclusion: '' }), 'completed')
   assert.equal(runState({ ...base, conclusion: '', status: '' }), 'unknown')
   assert.equal(failed({ ...base, conclusion: 'failure' }), true)
   assert.equal(failed(base), false)
-  assert.equal(budgetWord(96000, 180000, 240000), 'within')
-  assert.equal(budgetWord(180000, 180000, 240000), 'over warn')
-  assert.equal(budgetWord(250000, 180000, 240000), 'over fail')
+  assert.equal(budgetState(96000, 180000, 240000), 'within')
+  assert.equal(budgetState(180000, 180000, 240000), 'warn')
+  assert.equal(budgetState(250000, 180000, 240000), 'over')
+  assert.equal(budgetState(250000, 0, 0), 'within', 'no budget set means nothing is over')
+})
+
+test('the status line leads with the newest run, its budget state and its wait', () => {
+  assert.equal(statusLine(null), '')
+  assert.equal(statusLine(ciRun('a', { busyMs: 190000, failMs: 120000, warnMs: 60000, queueMs: 40000 })), 'Last run: 3m 10s, over the 2m limit, queued 40 s')
+  assert.equal(statusLine(ciRun('a', { busyMs: 70000, warnMs: 60000, failMs: 120000 })), 'Last run: 1m 10s, over the 1m warning')
+  assert.equal(statusLine(ciRun('a', { busyMs: 30000, warnMs: 60000, failMs: 120000 })), 'Last run: 30 s, within the 2m limit')
+  assert.equal(statusLine(ciRun('a', { busyMs: 30000, conclusion: 'failure', warnMs: 60000, failMs: 120000 })), 'Last run: 30 s, failed, within the 2m limit')
+})
+
+test('a run lists its slowest three jobs, longest first', () => {
+  const jobs = [['a', 10], ['b', 50], ['c', 30], ['d', 40], ['e', 0]].map(([name, ms], id) => ({ id, name: String(name), busyMs: Number(ms) * 1000 }))
+  assert.deepEqual(slowestJobs(ciRun('x', { jobs })).map((j) => j.name), ['b', 'd', 'c'])
+})
+
+test('the job ranking sorts by typical time and reads the trend from the newer half', () => {
+  // Newest first: go-test got slower (60, 60 against 30, 30); lint is steady.
+  const runs = [60, 60, 30, 30].map((ms, i) => ciRun(`r${i}`, { jobs: [{ id: 1, name: 'go-test', busyMs: ms * 1000 }, { id: 2, name: 'lint', busyMs: 5000 }] }))
+  const ranks = jobRanking(runs)
+  assert.deepEqual(ranks.map((r) => r.name), ['go-test', 'lint'])
+  assert.equal(ranks[0]?.typicalMs, 45000)
+  assert.equal(ranks[0]?.trend, 'slower')
+  assert.equal(ranks[0]?.changePct, 100)
+  assert.equal(ranks[1]?.trend, 'steady')
+  // Fewer than four runs is too little to call a trend.
+  assert.equal(jobRanking(runs.slice(0, 3))[0]?.trend, 'steady')
+  // Two running runs with partial 5 s times must not read as a speed-up.
+  const running = [5, 5].map((ms, i) => ciRun(`p${i}`, { status: 'in_progress', conclusion: '', jobs: [{ id: 1, name: 'go-test', busyMs: ms * 1000 }] }))
+  const mixed = jobRanking([...running, ...runs])[0]
+  assert.equal(mixed?.typicalMs, 45000)
+  assert.equal(mixed?.trend, 'slower')
 })
 
 test('allowing a test keeps every other budget field and adds the reason', () => {

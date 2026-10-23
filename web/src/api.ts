@@ -138,9 +138,8 @@ export const api = {
   syncStatus: () => app.SyncStatus(),
   issues: (roomId: string, all = false) => app.Issues(roomId, all),
   library: (roomId: string) => app.Library(roomId),
-  // ciHealth is the room CI graph and its slow tests; the other two open a run and a test.
+  // ciHealth is the room CI graph and its slow tests; ciHealthTest opens one test.
   ciHealth: (roomId: string, runs = 30) => app.CIHealth(roomId, runs),
-  ciHealthRun: (roomId: string, token: string) => app.CIHealthRun(roomId, token),
   ciHealthTest: (roomId: string, test: string) => app.CIHealthTest(roomId, test),
   closeIssue: (roomId: string, id: string, reason = '') => app.CloseIssue(roomId, id, reason),
   issueGoal: (roomId: string, id: string, holder = '') => app.IssueGoal(roomId, id, holder),
