@@ -1,8 +1,14 @@
-<script>
+<script lang="ts">
+  import type { Attachment } from '../api/room.ts'
   import CardFrame from '../files/CardFrame.svelte'
   import Files from '../files/Files.svelte'
   import { cardHeight } from '../ui/rich.ts'
-  let { roomId, items = [], onopen } = $props()
+  interface Props {
+    roomId: string
+    items?: Attachment[]
+    onopen: (attachment: Attachment) => void
+  }
+  let { roomId, items = [], onopen }: Props = $props()
   let expanded = $state(false)
   let fullHeight = $state(360)
   let cards = $derived(items.filter((a) => a.render === 'html'))
@@ -10,7 +16,7 @@
 
 {#each cards as a (a.id)}
   <div class="card">
-    <CardFrame {roomId} att={a} height="{expanded ? cardHeight(fullHeight) : 320}px" onheight={(h) => fullHeight = h} />
+    <CardFrame {roomId} att={a} height="{expanded ? cardHeight(fullHeight) : 320}px" onheight={(h: number) => fullHeight = h} />
     <div class="tools">
       <button onclick={() => expanded = !expanded}>{expanded ? 'Collapse' : 'Expand'}</button>
       <button onclick={() => onopen(a)}>Open</button>
