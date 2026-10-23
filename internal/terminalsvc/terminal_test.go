@@ -5,8 +5,10 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/store/storetest"
 	"errors"
-	"regexp"
-	"strconv"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -164,10 +166,33 @@ func TestOpenLimits(t *testing.T) {
 
 func TestCloseStopsBackgroundJob(t *testing.T) {
 	s, in := terminalTest(t, Options{})
-	write(t, s, in.ID, "sleep 30 & printf '__bg_pid_%d__\\n' $!; wait\n")
-	pattern := regexp.MustCompile(`__bg_pid_([0-9]+)__`)
-	ev := until(t, s, in.ID, 0, func(ev Event) bool { return pattern.Match(ev.Data) })
-	pid := pattern.FindSubmatch(ev.Data)[1]
+	pipe := filepath.Join(t.TempDir(), "background-exit")
+	if err := syscall.Mkfifo(pipe, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The background child holds this pipe for its whole life. It opens the
+	// pipe only after it starts, so a reader proves the child runs before
+	// Close, and the pipe's EOF proves the group kill reached it.
+	holders := make(chan *os.File, 1)
+	go func() {
+		f, err := os.OpenFile(pipe, os.O_RDONLY, 0)
+		if err != nil {
+			holders <- nil
+			return
+		}
+		holders <- f
+	}()
+	write(t, s, in.ID, fmt.Sprintf("( exec 3>%q; sleep 30 ) & wait\n", pipe))
+	var reader *os.File
+	select {
+	case reader = <-holders:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the background job never started")
+	}
+	if reader == nil {
+		t.Fatal("the background job never started")
+	}
+	defer reader.Close()
 	term, err := s.get(in.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -178,11 +203,16 @@ func TestCloseStopsBackgroundJob(t *testing.T) {
 	if term.cmd.ProcessState == nil || !term.cmd.ProcessState.Sys().(syscall.WaitStatus).Signaled() {
 		t.Fatal("close did not reap the killed shell")
 	}
-	// Close reaps its shell and kills the rest of the group. The background
-	// job's own exit is the signal: a survivor never exits and fails here.
-	backgroundPID, err := strconv.Atoi(string(pid))
-	if err != nil {
-		t.Fatal(err)
+	// Close reaps its shell and kills the rest of the group. The child's own
+	// pipe reaches EOF when it exits, so a survivor fails here.
+	closed := make(chan error, 1)
+	go func() { _, err := io.Copy(io.Discard, reader); closed <- err }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("reading the background job's exit pipe: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("close did not stop the background job")
 	}
-	waitProcessExit(t, backgroundPID, 3000)
 }
