@@ -15,7 +15,7 @@ const functions = parse(source).instance.content.body
 function app(view) {
   const calls = []
   const c = {
-    hasItemChange, reloadsUnread, view, roomId: 'a', roomRequest: 1, drill: null, home: null, feed: null,
+    hasItemChange, reloadsUnread, view, mergeVersion: 0, roomId: 'a', roomRequest: 1, drill: null, home: null, feed: null,
     memberChips: true, consolidationAlive: true,
     roomControls: null, loadQuestions() {}, loadVisuals() {}, soonRooms: (kind = 'rooms') => kind === 'controls' ? c.roomSessionController.load() : calls.push(kind),
     sessionData: { load: async () => calls.push('transcript') },
@@ -83,6 +83,7 @@ test('reconnect refreshes visible controls without consolidation history', async
   assert.deepEqual(calls, ['rooms', 'controls'])
   // Reviewer settings that changed while the stream was down show again.
   assert.equal(reviewerLoads, 1)
+  assert.equal(c.mergeVersion, 1)
   close()
 })
 
@@ -166,5 +167,17 @@ for (const cached of [false, true]) test(`a post during ${cached ? 'an unpaused-
   await pending
   assert.equal(calls, 2)
   assert.equal(c.roomControls.state.held, 1)
+  close()
+})
+
+test('merge refresh version follows room PR and change events only', () => {
+  const { c, close } = app('github')
+  c.reviewerSoon = () => {}
+  c.loadChanges = () => {}
+  c.handle({ kind: 'prs', roomId: 'b' })
+  assert.equal(c.mergeVersion, 0)
+  c.handle({ kind: 'prs', roomId: 'a' })
+  c.handle({ kind: 'changes', roomId: 'a' })
+  assert.equal(c.mergeVersion, 2)
   close()
 })
