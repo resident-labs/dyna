@@ -16,7 +16,7 @@ func TestPRWakeScansWithoutATick(t *testing.T) {
 	s.PRsChanged() // one pending wake is enough
 	ctx, cancel := context.WithCancel(context.Background())
 	scans := 0
-	ticked := s.waitTick(ctx, nil, func() { scans++; cancel() }, func() { t.Fatal("a PR wake scanned sessions") }, func() { t.Fatal("a PR wake scanned coordinators") })
+	ticked := s.waitTick(ctx, nil, func() { scans++; cancel() }, func() { t.Fatal("a PR wake scanned sessions") }, func() { t.Fatal("a PR wake scanned coordinators") }, func() { t.Fatal("a PR wake scanned call requests") })
 	if ticked || scans != 1 {
 		t.Fatalf("waitTick returned %v after %d scans; want one scan, then false when ctx ends", ticked, scans)
 	}
@@ -40,7 +40,7 @@ func TestSessionWakesCoalesce(t *testing.T) {
 			taken = -1
 		}
 		cancel()
-	}, func() { t.Fatal("a session wake scanned coordinators") })
+	}, func() { t.Fatal("a session wake scanned coordinators") }, func() { t.Fatal("a session wake scanned call requests") })
 	if ticked || scans != 1 || taken != 3 {
 		t.Fatalf("waitTick returned %v after %d scans of %d sessions; want one scan of 3", ticked, scans, taken)
 	}

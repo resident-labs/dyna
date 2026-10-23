@@ -12,8 +12,10 @@ import (
 
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/shells"
+	datastore "dyna-agent/internal/store"
 )
 
 func writeJSONFile(t *testing.T, path string, v any) {
@@ -104,13 +106,13 @@ func TestRoomDeleteRefusesOpenSessionAndLiveWork(t *testing.T) {
 	}
 	// Close it; a running run now blocks.
 	writeSession(t, old, "idle", true)
-	writeJSONFile(t, filepath.Join(runstore.RunsDir(), "wf_busy", "meta.json"), map[string]any{"id": "wf_busy", "status": "running", "pid": os.Getpid(), "roomId": old.ID, "startedAt": time.Now()})
+	runstoretest.Write(t, datastore.DataDir(), runstore.Meta{ID: "wf_busy", Status: "running", Pid: os.Getpid(), RoomID: old.ID, StartedAt: time.Now()})
 	_, err = execCmd(t, RoomCmd(), "delete", "old-work")
 	if err == nil || !strings.Contains(err.Error(), "run wf_busy (running)") {
 		t.Fatalf("run err = %v", err)
 	}
 	// A finished run does not block, but a live shell does.
-	writeJSONFile(t, filepath.Join(runstore.RunsDir(), "wf_busy", "meta.json"), map[string]any{"id": "wf_busy", "status": "ok", "pid": os.Getpid(), "roomId": old.ID, "startedAt": time.Now()})
+	runstoretest.Write(t, datastore.DataDir(), runstore.Meta{ID: "wf_busy", Status: "ok", Pid: os.Getpid(), RoomID: old.ID, StartedAt: time.Now()})
 	sh, err := shells.DefaultStore().Create(shells.StartOptions{Cmd: []string{"sleep", "1"}, RoomID: old.ID, Room: old.Name, Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
