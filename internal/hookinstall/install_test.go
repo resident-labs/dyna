@@ -69,7 +69,7 @@ func fixture(t *testing.T) (Service, Job) {
 	if err := os.WriteFile(j.HookLog, []byte("initial hook log\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	s := Service{Jobs: Store{Root: filepath.Join(root, "jobs")}, Now: func() time.Time { return time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC) }}
+	s := Service{Jobs: Store{Root: filepath.Join(root, "hooks", "install")}, Now: func() time.Time { return time.Date(2026, 10, 17, 12, 0, 0, 0, time.UTC) }}
 	if err := s.Jobs.Update(j.ID, func(out *Job) error { *out = j; return nil }); err != nil {
 		t.Fatal(err)
 	}
