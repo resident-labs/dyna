@@ -155,6 +155,9 @@ export interface MachinesSlice {
  */
 export function installMachines(state: object): MachinesSlice {
   const fields = prepare(state, { errorText }, machinesSource, MACHINES_FUNCTIONS)
+  // Two modules declare clear(), and this flat state holds one name for each, so
+  // the view keeps the function this module installed rather than a later one.
+  const clearOwn = read_(fields, 'clear') as () => void
   write(fields, 'machineHost', {
     listShown: () => !!call(fields, 'machinesVisible'),
     screenShown: () => read_(fields, 'pageVisible') !== false,
@@ -171,7 +174,7 @@ export function installMachines(state: object): MachinesSlice {
     get machineProbing() { return read_(fields, 'machineProbing') },
     visible: () => call(fields, 'machineVisible'),
     changed: () => call(fields, 'changed'),
-    clear: () => call(fields, 'clear'),
+    clear: () => clearOwn(),
     loadMachines: () => call(fields, 'loadMachines'),
     loadMachine: (id: string) => call(fields, 'loadMachine', id),
     openMachine: (id: string) => call(fields, 'openMachine', id),
@@ -490,6 +493,9 @@ export function installSelection(state: object): SelectionSlice {
     activeBulk: 0, bulkBatches: [] as { key: number }[], bulkSerial: 0, bulkControllers: new Map(),
     consolidating: null, consolidationView: 0,
   }, selectionSource, SELECTION_FUNCTIONS)
+  // The selection module and the machine module both declare clear(), and this
+  // flat state holds one name for each, so the view keeps this module's.
+  const clearOwn = read_(fields, 'clear') as () => void
   const drafts = (): Record<string, string> => (read_(fields, 'drafts') as Record<string, string> | undefined) ?? {}
   write(fields, 'selectionHost', {
     visit: () => Number(read_(fields, 'roomRequest') ?? 0),
@@ -526,7 +532,7 @@ export function installSelection(state: object): SelectionSlice {
     get consolidating(): unknown { return read_(fields, 'consolidating') },
     setPicked: (ids: string[]) => call(fields, 'setPicked', ids),
     applyRows: (rows: unknown[]) => call(fields, 'applyRows', rows),
-    clear: () => call(fields, 'clear'),
+    clear: () => clearOwn(),
     destroy: () => call(fields, 'destroy'),
     closeBulk: () => call(fields, 'closeBulk'),
     configureBulk: (key: number, patch: unknown) => call(fields, 'configureBulk', key, patch),
