@@ -486,6 +486,11 @@ func tsField(typ reflect.Type, expr string) (string, string, error) {
 	case reflect.String:
 		if typ.PkgPath() != "" {
 			name := typ.Name()
+			// An open named type holds values the web cannot list, such as a
+			// session address, so it reads as a plain string.
+			if hasOpenString(name) {
+				return "string", fmt.Sprintf("typeof %s === \"string\"", expr), nil
+			}
 			if !hasEnum(name) {
 				return "", "", fmt.Errorf("named string type %s has no eventEnums entry", name)
 			}
@@ -579,6 +584,10 @@ func enumSetName(name string) string {
 		out.WriteRune(unicode.ToUpper(r))
 	}
 	return out.String()
+}
+
+func hasOpenString(name string) bool {
+	return slices.ContainsFunc(eventOpenStrings, func(open reflect.Type) bool { return open.Name() == name })
 }
 
 func stringUnion(values []string) string {
