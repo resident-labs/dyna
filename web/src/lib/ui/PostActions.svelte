@@ -19,33 +19,53 @@
   }
   let { room, p, pinned = false, show = false, onreply, onforward, onpin }: Props = $props()
 
-  // Which copy button shows its "Copied" state, for 1.2 seconds.
+  // Keep feedback local to the selected post.
   let copied = $state('')
+  let copyError = $state(false)
+  let generation = 0
+  $effect(() => {
+    p
+    generation++
+    copied = ''
+    copyError = false
+    return () => clearTimeout(timer)
+  })
   let timer: ReturnType<typeof setTimeout> | undefined
-  function done(which: string) {
-    copied = which
+  async function copy(which: 'text' | 'link') {
+    const current = ++generation
     clearTimeout(timer)
-    timer = setTimeout(() => { copied = '' }, 1200)
+    copied = ''
+    copyError = false
+    try {
+      await copyText(which === 'text' ? p.text || '' : new URL(postHref(room.id, p.id), location.href).href)
+      if (current !== generation) return
+      copied = which
+    } catch {
+      if (current !== generation) return
+      copyError = true
+    }
+    timer = setTimeout(() => { copied = ''; copyError = false }, 2000)
   }
 </script>
 
 <div class="actions" class:show>
+  <span class="copy-status" class:error={copyError} role="status">{copyError ? 'Could not copy' : copied ? 'Copied' : ''}</span>
   {#if onreply}<button onclick={() => onreply(p)} title="Reply" aria-label="Reply">
     <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M8 5 3 10l5 5M3.5 10H12a5 5 0 0 1 5 5v1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
   </button>{/if}
   {#if onforward}<button onclick={() => onforward(p)} title="Forward" aria-label="Forward">
     <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="m12 5 5 5-5 5M16.5 10H8a5 5 0 0 0-5 5v1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
   </button>{/if}
-  <button class:ok={copied === 'text'} onclick={async () => { await copyText(p.text || ''); done('text') }} title="Copy text" aria-label="Copy text">
+  <button class:ok={copied === 'text'} onclick={() => copy('text')} title="Copy text" aria-label="Copy text">
     {#if copied === 'text'}
-      <svg class="swap" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="m4 10.5 4 4 8-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg><span class="done" role="status">Copied</span>
+      <svg class="swap" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="m4 10.5 4 4 8-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg><span class="done" aria-hidden="true">Copied</span>
     {:else}
       <svg class="swap" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><rect x="7" y="7" width="9" height="9" rx="2" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M13 7V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
     {/if}
   </button>
-  <button class:ok={copied === 'link'} onclick={async () => { await copyText(new URL(postHref(room.id, p.id), location.href).href); done('link') }} title="Copy link" aria-label="Copy link">
+  <button class:ok={copied === 'link'} onclick={() => copy('link')} title="Copy link" aria-label="Copy link">
     {#if copied === 'link'}
-      <svg class="swap" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="m4 10.5 4 4 8-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg><span class="done" role="status">Copied</span>
+      <svg class="swap" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="m4 10.5 4 4 8-9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg><span class="done" aria-hidden="true">Copied</span>
     {:else}
       <svg class="swap" viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M8.5 11.5a3 3 0 0 0 4.2 0l2.6-2.6a3 3 0 0 0-4.2-4.2l-.8.8M11.5 8.5a3 3 0 0 0-4.2 0l-2.6 2.6a3 3 0 0 0 4.2 4.2l.8-.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
     {/if}
@@ -56,6 +76,9 @@
 </div>
 
 <style>
+  .copy-status { position: absolute; right: 0; top: calc(100% + 4px); white-space: nowrap; font-size: var(--t-ui); color: var(--sage); background: var(--side); border-radius: 4px; }
+  .copy-status:not(:empty) { padding: 4px 8px; }
+  .copy-status.error { color: var(--coral); }
   .actions {
     position: absolute;
     right: 16px;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
+import ts from 'typescript'
 import { copyText } from '../../api.js'
 import { postHref } from '../ui/posts.js'
 
@@ -37,22 +38,45 @@ function globals(t, clipboard) {
     }
   })
 }
-async function copyActions() {
+const script = parse(source, { modern: true }).instance
+const copyNode = script.content.body.find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'copy')
+const copySource = ts.transpile(source.slice(copyNode.start, copyNode.end), { target: ts.ScriptTarget.ES2022 })
+
+test('post copy actions report success, catch failure, and ignore stale results', async (t) => {
+  const written = []
+  let reject = false
+  let release
+  globals(t, { async writeText(text) {
+    if (reject) throw new Error('browser clipboard unavailable')
+    written.push(text)
+    if (release !== undefined) await new Promise((resolve) => { release = resolve })
+  } })
   const room = { id: 'room_20261017-123456-abcdef12' }
   const p = { id: 'msg_report', text: 'Full report text' }
-  const c = vm.createContext({ done() {}, copyText, postHref, URL, navigator, room, p, location: { href: 'http://wails.localhost/' } })
-  for (const code of handlers.values()) await vm.runInContext(`(${code})()`, c)
-  return [p.text, 'http://wails.localhost/' + postHref(room.id, p.id)]
-}
-
-test('post text and link actions use the browser clipboard when it succeeds', async (t) => {
-  const copied = []
-  globals(t, { async writeText(text) { copied.push(text) } })
-  const expected = await copyActions()
-  assert.deepEqual(copied, expected)
-})
-
-test('clipboard failures reach the caller', async (t) => {
-  globals(t, { async writeText() { throw new Error('browser clipboard unavailable') } })
-  await assert.rejects(copyActions(), /browser clipboard unavailable/)
+  const c = vm.createContext({
+    copyText, postHref, URL, room, p, location: { href: 'http://wails.localhost/' },
+    generation: 0, copied: '', copyError: false, timer: undefined,
+    clearTimeout() {}, setTimeout() { return 1 },
+  })
+  vm.runInContext(copySource, c)
+  for (const [title, code] of handlers) {
+    await vm.runInContext(`(${code})()`, c)
+    assert.equal(c.copied, title === 'Copy text' ? 'text' : 'link')
+    assert.equal(c.copyError, false)
+  }
+  assert.deepEqual(written, [p.text, 'http://wails.localhost/' + postHref(room.id, p.id)])
+  reject = true
+  for (const code of handlers.values()) {
+    await vm.runInContext(`(${code})()`, c)
+    assert.equal(c.copied, '')
+    assert.equal(c.copyError, true)
+  }
+  reject = false
+  release = null
+  const pending = vm.runInContext('copy("text")', c)
+  c.generation++
+  release()
+  await pending
+  assert.equal(c.copied, '')
+  assert.equal(c.copyError, false)
 })
