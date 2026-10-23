@@ -21,7 +21,9 @@ dyna git pr show 265
 
 A `Fixes D-5` or `Fixes #207` line in the PR body links the same issues. The
 engine reads the body at track time and on later polls, and adds what it finds.
-Re-running track with `--fixes` replaces the list.
+It never removes a link because a body line went away: run track with
+`--fixes` to replace the list. A PR that is already merged when it is first
+tracked closes nothing, because no watch saw the merge.
 
 When the PR merges, Dyna closes each linked room issue with the reason
 `Fixed by #N (<merge commit>)` and closes each linked GitHub issue with a
