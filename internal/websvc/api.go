@@ -175,7 +175,7 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request, rt Route, p Princi
 	res, err := c(ctx, args)
 	if err != nil {
 		status := methodStatus(err)
-		if status == http.StatusServiceUnavailable {
+		if status == http.StatusServiceUnavailable && !errors.Is(r.Context().Err(), context.Canceled) {
 			logTransient(name, err)
 		}
 		jsonError(w, status, err.Error())
