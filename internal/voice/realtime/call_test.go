@@ -256,25 +256,6 @@ func isBackoff(d time.Duration) bool {
 	return d <= 12*time.Second && d != CancelGrace
 }
 
-// lastTimer returns the wait started last, after the call handled every
-// server event sent so far. Earlier waits are dropped unfired.
-func (cf *callFixture) lastTimer(t *testing.T) func() {
-	t.Helper()
-	cf.sync(t)
-	var last func()
-	for {
-		select {
-		case w := <-cf.timers:
-			last = w.fn
-		default:
-			if last == nil {
-				t.Fatal("no wait started")
-			}
-			return last
-		}
-	}
-}
-
 // voiceSays has the server send a reply's words and audio for item, and the
 // page start playing it.
 func (cf *callFixture) voiceSays(t *testing.T, response, item, words string) {

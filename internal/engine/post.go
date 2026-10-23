@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 
 	"dyna-agent/internal/authority"
@@ -56,12 +55,3 @@ func verified(caller websvc.Caller, local bool, actor authority.Actor) (notify.C
 }
 
 // claimed names who c says posts, without its room.
-func claimed(c notify.Claim) string {
-	switch {
-	case c.Run != "":
-		return fmt.Sprintf("worker %d of run %s", c.Agent, c.Run)
-	case c.Session != "":
-		return "session " + c.Session
-	}
-	return "the owner"
-}

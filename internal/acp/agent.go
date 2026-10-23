@@ -233,11 +233,6 @@ func (a *Agent) SetModel(ctx context.Context, sessionID, modelID string) error {
 	return a.c.Request(ctx, "session/set_model", map[string]any{"sessionId": sessionID, "modelId": modelID}, nil)
 }
 
-// CloseSession asks the agent to end a session.
-func (a *Agent) CloseSession(ctx context.Context, sessionID string) error {
-	return a.c.Request(ctx, "session/close", map[string]any{"sessionId": sessionID}, nil)
-}
-
 // SetMode selects the advertised native permission mode.
 func (a *Agent) SetMode(ctx context.Context, sessionID, modeID string) error {
 	return a.c.Request(ctx, "session/set_mode", map[string]any{"sessionId": sessionID, "modeId": modeID}, nil)

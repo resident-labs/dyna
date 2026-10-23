@@ -169,16 +169,6 @@ func (t *ToolTracker) InFlight() int {
 	return len(t.inFlight)
 }
 
-// Reset forgets in-flight calls; used when a new process attempt starts.
-func (t *ToolTracker) Reset() {
-	if t == nil {
-		return
-	}
-	t.mu.Lock()
-	t.inFlight = map[string]struct{}{}
-	t.mu.Unlock()
-}
-
 // Usage is token accounting reported by a harness for one turn.
 type Usage struct {
 	InputTokens  int64   `json:"inputTokens,omitempty"`

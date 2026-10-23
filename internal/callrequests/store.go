@@ -14,7 +14,6 @@ import (
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/listchange"
 	"dyna-agent/internal/state"
-	"dyna-agent/internal/store"
 )
 
 // Topic identifies committed call request list changes.
@@ -37,8 +36,6 @@ type Request struct {
 }
 
 type Store struct{ Root string }
-
-func DefaultStore() *Store { return &Store{Root: store.DataDir()} }
 
 const schema = `CREATE TABLE call_requests (
  room TEXT NOT NULL, id TEXT NOT NULL, reason TEXT NOT NULL, asker TEXT NOT NULL,

@@ -693,50 +693,6 @@ func (e *e2e) runnerLog(id string) string {
 	return "daemon.log tail:\n" + string(b)
 }
 
-// waitTurnRunning polls show until turn n's record says it is running. A
-// turn that ends first fails with its record, so a turn cut short is not
-// mistaken for one that never started.
-func (e *e2e) waitTurnRunning(ref string, n int) {
-	e.t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		last := e.show(ref)
-		for _, turn := range last.Turns {
-			if turn.N != n {
-				continue
-			}
-			switch turn.Status {
-			case "running":
-				return
-			case "ok", "error", "stopped":
-				e.t.Fatalf("turn %d of %s ended before the test saw it run: %+v\n%s", n, ref, turn, e.runnerLog(last.Session.ID))
-			}
-		}
-		if time.Now().After(deadline) {
-			e.t.Fatalf("turn %d of %s never ran; last show session=%#v turns=%#v\n%s", n, ref, last.Session, last.Turns, e.runnerLog(last.Session.ID))
-		}
-		time.Sleep(e2ePoll)
-	}
-}
-
-// waitRoomText polls `dyna room log <room> --json` until a post to the
-// owner contains substr. Top-level completions land here.
-func (e *e2e) waitRoomText(roomName, substr string) {
-	e.t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	var last string
-	for {
-		last = e.must("room", "log", roomName, "--json")
-		if strings.Contains(last, substr) {
-			return
-		}
-		if time.Now().After(deadline) {
-			e.t.Fatalf("room %s never showed %q; last:\n%s", roomName, substr, last)
-		}
-		time.Sleep(e2ePoll)
-	}
-}
-
 // waitTurnReleased waits for final runner writes after a terminal turn record.
 func (e *e2e) waitTurnReleased(id string) {
 	e.t.Helper()

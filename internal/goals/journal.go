@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -102,24 +101,6 @@ func NeedsAction(lines []JournalLine) bool {
 		}
 	}
 	return false
-}
-
-// ActionSet lists the lines that need action as sorted "agent status goals
-// needs" keys. Two entries with the same set report the same problems. The
-// summary is left out on purpose: the model rewords it every pass, so
-// comparing it would wake root for every unchanged blocker again. Needs is
-// the stable action identity instead.
-func ActionSet(lines []JournalLine) []string {
-	var out []string
-	for _, l := range lines {
-		if NeedsAction([]JournalLine{l}) {
-			goals := slices.Clone(l.Goals)
-			slices.Sort(goals)
-			out = append(out, l.Agent+" "+l.Status+" "+strings.Join(slices.Compact(goals), ",")+" "+l.Needs)
-		}
-	}
-	slices.Sort(out)
-	return out
 }
 
 // journalPath is the room's append-only journal, one entry per line.

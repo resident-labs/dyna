@@ -13,7 +13,6 @@ import (
 	"unicode/utf8"
 
 	"dyna-agent/internal/sessionlife"
-	"dyna-agent/internal/store"
 )
 
 type Answer struct {
@@ -61,7 +60,6 @@ type Store struct {
 	db   *sql.DB
 }
 
-func DefaultStore() *Store       { return &Store{Root: filepath.Join(store.DataDir(), "questions")} }
 func key(room, id string) string { return room + "/" + id }
 func Validate(q Question) error {
 	if q.Room == "" || q.Asker == "" {
