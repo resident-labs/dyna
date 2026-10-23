@@ -601,9 +601,9 @@ func TestConsolidationSkipsUnassignedLegacyHistory(t *testing.T) {
 	paths := map[string][]byte{}
 	for _, closed := range []bool{false, true} {
 		id := NewID()
-		raw := []byte(`{"id":"` + id + `","name":"old"}`)
+		raw := []byte(`{"id":"` + id + `","historyOnly":true,"name":"old"}`)
 		if closed {
-			raw = []byte(`{"id":"` + id + `","name":"old","closed":"2026-10-05T00:00:00Z"}`)
+			raw = []byte(`{"id":"` + id + `","historyOnly":true,"name":"old","closed":"2026-10-05T00:00:00Z"}`)
 		}
 		paths[writeRoomScanFixture(t, e, id, raw)] = raw
 	}
