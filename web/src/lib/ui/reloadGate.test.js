@@ -293,7 +293,7 @@ test('room entry and channel events refresh visible PR and goal chips', async ()
 test('the App visual loader reuses each card by the shared visual identity', async () => {
   const { readFile } = await import('node:fs/promises')
   const { parse } = await import('svelte/compiler')
-  const { visualKey } = await import('../rooms/questions.js')
+  const { visualKey } = await import('../rooms/questions.ts')
   const vm = await import('node:vm')
   const app = await readFile(new URL('../../App.svelte', import.meta.url), 'utf8')
   let response = [
@@ -350,7 +350,7 @@ test('a room change drops pending item patches', async () => {
 test('a visual update reaches chat cards while chat stays open', async () => {
   const { readFile } = await import('node:fs/promises')
   const { parse } = await import('svelte/compiler')
-  const { visualKey } = await import('../rooms/questions.js')
+  const { visualKey } = await import('../rooms/questions.ts')
   const { byVisual, newestVersion } = await import('../files/visuals.ts')
   const vm = await import('node:vm')
   const app = await readFile(new URL('../../App.svelte', import.meta.url), 'utf8')

@@ -7,9 +7,9 @@
   import { fade } from 'svelte/transition'
   import { FAST, motion } from './lib/ui/motion.ts'
   import { viewIdentity } from './lib/ui/viewIdentity.ts'
-  import { createReadMarker } from './lib/rooms/readMarker.js'
-  import { mergeFeedPage, rerouteAnchors, withChannels } from './lib/rooms/feedPages.js'
-  import { createRoomData } from './lib/rooms/roomData.js'
+  import { createReadMarker } from './lib/rooms/readMarker.ts'
+  import { mergeFeedPage, rerouteAnchors, withChannels } from './lib/rooms/feedPages.ts'
+  import { createRoomData } from './lib/rooms/roomData.ts'
   import { createSessionData } from './lib/sessions/sessionData.ts'
   import { mergeListPage } from './lib/ui/listPages.ts'
   import { patchListRows } from './lib/ui/listChanges.ts'
@@ -27,13 +27,13 @@
   import { GENERAL, VOICE, isChannel, inChannel, homeChannel, channelModel, parentTrail, prepareChannelText } from './lib/rooms/channels.ts'
   import { isShellResult } from './lib/rooms/feedRows.js'
   import { mergeSessionPage } from './lib/sessions/sessionPages.ts'
-  import { trimFeed } from './lib/rooms/feedWindow.js'
-  import { look, revealed, reveal as revealPost } from './lib/rooms/look.svelte.js'
+  import { trimFeed } from './lib/rooms/feedWindow.ts'
+  import { look, revealed, reveal as revealPost } from './lib/rooms/look.svelte.ts'
   import { visibleTo } from './lib/rooms/look.ts'
   import Feed from './lib/rooms/Feed.svelte'
   import Composer from './lib/rooms/Composer.svelte'
   import Members from './lib/rooms/Members.svelte'
-  import { createRoomSessionControls } from './lib/rooms/roomSessionControls.js'
+  import { createRoomSessionControls } from './lib/rooms/roomSessionControls.ts'
   import Pins from './lib/rooms/Pins.svelte'
   import SearchIcon from './lib/ui/SearchIcon.svelte'
   import SyncBadge from './lib/rooms/SyncBadge.svelte'
@@ -43,14 +43,14 @@
   import Questions from './lib/rooms/Questions.svelte'
   import Visuals from './lib/rooms/Visuals.svelte'
   import Services from './lib/services/Services.svelte'
-  import { questionID, visualKey } from './lib/rooms/questions.js'
+  import { questionID, visualKey } from './lib/rooms/questions.ts'
   import { setVisuals } from './lib/files/visuals.svelte.ts'
   import { changesVisuals } from './lib/files/visuals.ts'
   import Goals from './lib/rooms/Goals.svelte'
   import GoalDetail from './lib/rooms/GoalDetail.svelte'
   import { expedite, expediteScope, expediteAction, heldGoals, isExpedited } from './lib/rooms/expedite.ts'
   import Rules from './lib/rooms/Rules.svelte'
-  import { nextRules } from './lib/rooms/rules.js'
+  import { nextRules } from './lib/rooms/rules.ts'
   import PinIcon from './lib/ui/PinIcon.svelte'
   import { isFinished } from './lib/rooms/memberOrder.ts'
   import Session from './lib/sessions/Session.svelte'
@@ -202,12 +202,13 @@
   }
   type ListKind = keyof ListKinds
   type ListPages = { [K in ListKind]?: ListPage<ListKinds[K]> }
-  // What api.openRoom returns for the open room.
+  // What api.openRoom returns for the open room. The host sends null for an
+  // empty list, and the composer's choices are member names.
   interface Opened {
     feed: FeedPage
-    members?: Member[]
-    choices?: ProfileChoice[]
-    pins?: Post[]
+    members?: Member[] | null
+    choices?: string[] | null
+    pins?: Post[] | null
     runs?: RunList
   }
   interface EarlierLoad {
@@ -272,7 +273,7 @@
   let feedAtBottom = $state(true)
   let members = $state<Member[]>([])
   let hierarchy = $state<Member[]>([])
-  let choices = $state<ProfileChoice[]>([])
+  let choices = $state<string[]>([])
   let view = $state<string>(GENERAL)
   let prLink = $state<ReturnType<typeof parsePRHash> | ReturnType<typeof parseIssueHash>>(null) // a PR link from the address bar, for the Pull requests view
   let unreadFrom = $state('')
@@ -430,7 +431,7 @@
   let selectionRevision = 0
   let currentBulk = $derived(bulkBatches.find((b) => b.key === activeBulk))
   let roomSessionController: ReturnType<typeof createRoomSessionControls> | null = null
-  let roomControls = $state<{ busy?: boolean; loading?: boolean; state?: { dormant?: number; paused?: boolean } } | null>(null)
+  let roomControls = $state<{ busy?: boolean; loading?: boolean; state?: { dormant?: number; paused?: boolean } | null } | null>(null)
   let roomControlsMenu = $state<(RoomContext & { x: number; y: number; anchor?: HTMLElement }) | null>(null)
   let clearDormantConfirm = $state<(RoomContext & { count: number }) | null>(null)
   let roomControlsVisit = 0
@@ -596,7 +597,7 @@
   const roomData = createRoomData(api, {
     current: () => ({ room: roomId, visit: roomRequest }),
     visible: visibleList,
-    choices: (value: ProfileChoice[]) => { choices = value },
+    choices: (value: string[]) => { choices = value },
     rooms: (value: Room[]) => { rooms = value; loadError = '' },
     unread: applyUnread,
     members: applyMembers,
