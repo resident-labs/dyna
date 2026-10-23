@@ -15,7 +15,6 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/lanesync"
-	"dyna-agent/internal/localci"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/pr/trial"
 	"dyna-agent/internal/room"
@@ -472,34 +471,39 @@ func exportPublicationErrorSurvivesWorkerRestart(t *testing.T, created bool) {
 }
 
 func TestExportLostPushAcknowledgementIsIdempotent(t *testing.T) {
-	e, repo, remote, ci := syncEnv(t)
+	e := newEnv(t)
+	repo, head := changeRepo(t)
+	remote := t.TempDir()
+	changeGit(t, repo, "clone", "--bare", repo, remote)
+	changeGit(t, repo, "remote", "add", "origin", remote)
+	if err := os.MkdirAll(filepath.Join(e.s.Store.Root, "trials"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	fake := fakeExportGitHub(t, e, repo, remote)
 	fake.failPushAckOnce = true
-	if _, err := e.s.GitExport(t.Context(), e.author.RoomID, repo); err != nil {
-		t.Fatal(err)
+	// Start with the immutable publication inputs produced after CI. Other
+	// export tests cover preparation and the transition from testing.
+	op := lanesync.Operation{OldIntegration: head, ExportBranch: "dyna/export/test"}
+	op.Head = head
+	record := Record{RepoPath: repo, RoomID: e.author.RoomID}
+	for i := 0; i < 2; i++ {
+		url, err := e.s.publishLaneExport(t.Context(), record, op)
+		if err != nil || url != "https://github.com/owner/repo/pull/42" {
+			t.Fatalf("publication %d: url=%q err=%v", i, url, err)
+		}
 	}
-	stepSync(t, e)
-	op := savedOperation(t, repo)
-	if op.State != "testing" {
-		t.Fatalf("export did not reach testing: %+v", op)
-	}
-	// This test covers publication after CI. Save the fake runner result
-	// directly so Git and SQLite setup cannot exhaust a CI wait deadline.
-	common := changeGit(t, repo, "rev-parse", "--absolute-git-dir")
-	if _, err := ci.Run(t.Context(), localci.Request{Repo: common, SHA: op.Head}); err != nil {
-		t.Fatal(err)
-	}
-	stepSync(t, e)
-	if op = savedOperation(t, repo); op.State != "publishing" {
-		t.Fatalf("export did not reach publication: %+v", op)
-	}
-	stepSync(t, e)
-	op = savedOperation(t, repo)
-	if op.State != "done" || fake.failPushAckOnce || fake.pushes != 1 || fake.creates != 1 {
-		t.Fatalf("lost acknowledgement=%+v pushes=%d creates=%d", op, fake.pushes, fake.creates)
+	if fake.failPushAckOnce || fake.pushes != 1 || fake.creates != 1 || fake.edits != 1 {
+		t.Fatalf("lost acknowledgement: pushes=%d creates=%d edits=%d", fake.pushes, fake.creates, fake.edits)
 	}
 	if got := changeGit(t, remote, "rev-parse", op.ExportBranch); got != op.Head {
 		t.Fatalf("published head=%s, want tested head %s", got, op.Head)
+	}
+	saved, err := lanesync.New().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if export := saved.Exports[repo]; export.Commit != head || export.Branch != op.ExportBranch || export.PRURL != "https://github.com/owner/repo/pull/42" {
+		t.Fatalf("export record=%+v", export)
 	}
 }
 
