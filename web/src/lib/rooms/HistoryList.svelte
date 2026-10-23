@@ -1,23 +1,66 @@
-<script>
+<script lang="ts" generics="T">
+  import type { Snippet } from 'svelte'
   import { onDestroy, tick } from 'svelte'
   import VirtualList from '../ui/VirtualList.svelte'
+  import { errorText } from '../errorText.ts'
 
-  let { scroller, items, key, estimate, earlier = false, newer = false, onearlier, onnewer, onpresent, beginning, onhistory, fill = true, atBottom = $bindable(true), children: renderRow } = $props()
-  let list = $state()
+  // A row key, as the pager and the virtual list compare them.
+  type RowKey = string | number
+  // The place a paging request starts from: the first row's key, the scroll
+  // position and the virtualizer's own anchor.
+  interface Anchor {
+    first: RowKey | null
+    position: number | undefined
+    row: unknown
+  }
+  // The parts of VirtualList this list drives.
+  interface VirtualListApi {
+    captureAnchor: () => unknown
+    restoreAnchor: (row: unknown) => void
+    scrollToIndex: (index: number, align?: string) => void
+    scrollToEnd: () => void
+  }
+
+  interface Props<T> {
+    scroller?: HTMLElement | null
+    items: T[]
+    key: (item: T) => RowKey
+    estimate: (item: T, index: number) => number
+    earlier?: boolean
+    newer?: boolean
+    onearlier?: ((near: () => boolean) => unknown) | null
+    onnewer?: ((near: () => boolean) => unknown) | null
+    onpresent?: (() => unknown) | null
+    beginning?: string
+    onhistory?: (() => void) | null
+    fill?: boolean
+    atBottom?: boolean
+    children: Snippet<[T, number]>
+  }
+
+  let { scroller = null, items, key, estimate, earlier = false, newer = false, onearlier = null, onnewer = null, onpresent = null, beginning = '', onhistory = null, fill = true, atBottom = $bindable(true), children: renderRow }: Props<T> = $props()
+  let list: VirtualListApi | undefined = $state()
   let busy = $state(false)
   let error = $state('')
-  let loading = $state('older')
-  let request = null
-  let pendingAnchor = null
+  let loading = $state<'older' | 'newer' | 'present'>('older')
+  let request: Promise<boolean> | null = null
+  let pendingAnchor: Anchor | null = null
   // A request outlives the view it started in: a reader who opens another page
   // mid-load would otherwise have the paging loop read a list it no longer owns.
   let destroyed = false
   onDestroy(() => (destroyed = true))
 
+  // edgeKey is a page edge's key; an empty list has none.
+  const edgeKey = (item: T | undefined): RowKey | null => (item === undefined ? null : key(item))
+
+  // atEdge is true when the scroller sits within one screen of the loaded end.
+  const atEdge = (el: HTMLElement, older: boolean): boolean =>
+    (older ? el.scrollTop : el.scrollHeight - el.scrollTop - el.clientHeight) <= el.clientHeight
+
   // Both directions, filtered pages and jumps share one request.
   export function loadEarlier() { return loadPage('older') }
 
-  function loadPage(direction) {
+  function loadPage(direction: 'older' | 'newer'): Promise<boolean> {
     if (request) return request
     const older = direction === 'older'
     const load = older ? onearlier : onnewer
@@ -29,10 +72,10 @@
     request = Promise.resolve().then(async () => {
       try {
         do {
-          const anchor = { first: items.length ? key(items[0]) : null, position: scroller?.scrollTop, row: list?.captureAnchor() }
+          const anchor: Anchor = { first: edgeKey(items[0]), position: scroller?.scrollTop, row: list?.captureAnchor() }
           pendingAnchor = anchor
-          const edge = items.length ? key(older ? items[0] : items.at(-1)) : null
-          const nearEdge = () => !!scroller && (older ? scroller.scrollTop : scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight) <= scroller.clientHeight
+          const edge = edgeKey(older ? items[0] : items.at(-1))
+          const nearEdge = () => scroller !== null && atEdge(scroller, older)
           if (await load(nearEdge) === false) {
             error = 'Could not load messages.'
             return false
@@ -46,13 +89,13 @@
           pendingAnchor = null
           await tick()
           if (destroyed) return false
-          const currentEdge = items.length ? key(older ? items[0] : items.at(-1)) : null
-          const near = scroller && (older ? scroller.scrollTop : scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight) <= scroller.clientHeight
+          const currentEdge = edgeKey(older ? items[0] : items.at(-1))
+          const near = scroller !== null && atEdge(scroller, older)
           if (!(older ? earlier : newer) || !near || currentEdge !== edge) break
         } while (true)
         return true
       } catch (e) {
-        error = String(e?.message || e)
+        error = errorText(e)
         return false
       } finally {
         busy = false
@@ -63,7 +106,7 @@
     return request
   }
 
-  async function present() {
+  async function present(): Promise<boolean> {
     if (request) { await request; return present() }
     if (!newer) {
       list?.scrollToEnd()
@@ -75,19 +118,19 @@
     error = ''
     request = Promise.resolve().then(async () => {
       try {
-        if (await onpresent() === false) { error = 'Could not load messages.'; return false }
+        if (await onpresent?.() === false) { error = 'Could not load messages.'; return false }
         await tick()
         if (destroyed) return false
         list?.scrollToEnd()
         atBottom = true
         return true
-      } catch (e) { error = String(e?.message || e); return false }
+      } catch (e) { error = errorText(e); return false }
       finally { busy = false; request = null }
     })
     return request
   }
 
-  function updatePosition(el) {
+  function updatePosition(el: HTMLElement | null | undefined) {
     if (!el) return
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight
     atBottom = !newer && gap < 48
@@ -97,22 +140,24 @@
     const el = scroller
     if (!el) return
     let last = el.scrollTop
-    let touchY = null
-    const prefetch = delta => {
+    let touchY: number | null = null
+    const prefetch = (delta: number) => {
       if (delta < 0 && el.scrollTop <= el.clientHeight) loadEarlier()
       else if (delta > 0 && el.scrollHeight - el.scrollTop - el.clientHeight <= el.clientHeight) loadPage('newer')
     }
-    const wheel = event => prefetch(event.deltaY)
-    const touchstart = event => { touchY = event.touches.length === 1 ? event.touches[0].clientY : null }
-    const touchmove = event => {
+    const wheel = (event: WheelEvent) => prefetch(event.deltaY)
+    const touchstart = (event: TouchEvent) => { touchY = event.touches.length === 1 ? event.touches[0]?.clientY ?? null : null }
+    const touchmove = (event: TouchEvent) => {
       if (event.touches.length !== 1) { touchY = null; return }
-      const y = event.touches[0].clientY
+      const touch = event.touches[0]
+      if (touch === undefined) { touchY = null; return }
+      const y = touch.clientY
       if (touchY !== null) prefetch(touchY - y)
       touchY = y
     }
     const scroll = () => {
       const top = el.scrollTop
-      if (pendingAnchor && items.length && key(items[0]) === pendingAnchor.first) {
+      if (pendingAnchor && items.length && edgeKey(items[0]) === pendingAnchor.first) {
         pendingAnchor.row = list?.captureAnchor()
         pendingAnchor.position = top
       }
@@ -148,7 +193,7 @@
     }
   })
 
-  export function scrollToIndex(i, align = 'center') { list?.scrollToIndex(i, align) }
+  export function scrollToIndex(i: number, align = 'center') { list?.scrollToIndex(i, align) }
   export function scrollToEnd() { list?.scrollToEnd() }
 </script>
 
@@ -159,7 +204,7 @@
   {:else if !earlier && beginning}<span>{beginning}</span>{/if}
 </div>
 <VirtualList bind:this={list} {scroller} {items} {key} {estimate} chat follow={!newer && !busy}>
-  {#snippet children(item, index)}{@render renderRow(item, index)}{/snippet}
+  {#snippet children(item: T, index: number)}{@render renderRow(item, index)}{/snippet}
 </VirtualList>
 {#if onpresent && !atBottom}
   <div class="jump-slot"><button class="btn jump-present" aria-label="Jump to present" disabled={busy} onclick={present}>Jump to present <span aria-hidden="true">↓</span></button></div>

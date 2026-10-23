@@ -1,9 +1,16 @@
-<script>
+<script lang="ts">
+  import type { Goal } from '../api/goal.ts'
+  import type { Post } from '../api/room.ts'
   import GoalGlyph from './GoalGlyph.svelte'
   import ExpediteBadge from './ExpediteBadge.svelte'
   import { expedite, goalExpedited } from './expedite.ts'
   import { stamp } from '../ui/format.ts'
-  let { post, goals = [], ongoal } = $props()
+  interface Props {
+    post: Post
+    goals?: Goal[]
+    ongoal?: (id: string) => void
+  }
+  let { post, goals = [], ongoal = () => {} }: Props = $props()
   let id = $derived(post.text?.match(/\bgoal (g\d+)\b/i)?.[1] ?? '')
   let goal = $derived(goals.find((g) => g.id === id))
   let milestone = $derived(post.text?.match(/^Goal g\d+ (.*?) is (blocked|done):\s*(.*)$/is))
@@ -14,7 +21,7 @@
   let summary = $derived(milestone?.[3] ?? legacy?.[2] ?? '')
   let prefix = $derived(post.text?.split(/goal g\d+:?/i)[0] ?? '')
   let actor = $derived(prefix.match(/^(.+?) (?:added|edited|finished|dropped)/)?.[1] ?? '')
-  const clip = (s) => [...s].length > 60 ? [...s].slice(0, 59).join('') + '…' : s
+  const clip = (s: string): string => [...s].length > 60 ? [...s].slice(0, 59).join('') + '…' : s
 </script>
 <div class="goalpost" data-id={post.id}>
   <GoalGlyph goal={{ state: verdict === 'done' ? 'done' : /\bdropped goal\b/.test(post.text) ? 'dropped' : 'active' }} /><div class="body">

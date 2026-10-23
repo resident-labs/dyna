@@ -1,4 +1,5 @@
-<script>
+<script lang="ts">
+  import type { Visual } from '../api/room.ts'
   import Avatar from '../ui/Avatar.svelte'
   import TabHeader from './TabHeader.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
@@ -7,14 +8,23 @@
   import { ago } from '../ui/format.ts'
   import { checkStatus, filterVisuals } from '../files/visuals.ts'
   import { visuals as store } from '../files/visuals.svelte.ts'
-  let { roomId, visuals = [], onopen } = $props()
+  interface Props {
+    roomId: string
+    visuals?: Visual[]
+    onopen: (visual: Visual) => void
+  }
+  let { roomId, visuals = [], onopen }: Props = $props()
   let filter = $state('all')
   let shown = $derived(filterVisuals(visuals, filter))
   // The store learns the room when its first list arrives.
   let loading = $derived(store.room !== roomId)
-  let loaded = $state({})
-  const title = (v) => v.attachment.title || v.attachment.name
-  const FILTERS = [['all', 'All'], ['mine', 'Mine'], ['attention', 'Needs attention']].map(([id, label]) => ({ id, label }))
+  let loaded = $state<Record<string, boolean>>({})
+  const title = (v: Visual): string => v.attachment.title || v.attachment.name
+  const FILTERS: { id: string; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'mine', label: 'Mine' },
+    { id: 'attention', label: 'Needs attention' },
+  ]
   const blurb = 'Charts and reports that agents post as HTML cards.'
 </script>
 
