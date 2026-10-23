@@ -44,6 +44,10 @@ func localCommands() []*cobra.Command {
 		if len(args) > 0 {
 			sha = args[0]
 		}
+		requested, err := localci.ParseSuites(suites)
+		if err != nil {
+			return err
+		}
 		runner := localci.Runner{}
 		if nodeName != "" {
 			nodes, err := (localci.Store{}).Nodes(c.Context())
@@ -56,7 +60,7 @@ func localCommands() []*cobra.Command {
 			}
 			runner.Node = &node
 		}
-		result, runErr := runner.Run(c.Context(), localci.Request{Repo: checkout.Root, SHA: sha, Suites: suites, Timeout: timeout, MaxTest: max, Allowed: allowed})
+		result, runErr := runner.Run(c.Context(), localci.Request{Repo: checkout.Root, SHA: sha, Suites: requested, Timeout: timeout, MaxTest: max, Allowed: allowed})
 		if result.SHA != "" {
 			if err := printResult(c, result, asJSON); err != nil {
 				return err
@@ -122,10 +126,7 @@ func printResult(c *cobra.Command, result localci.Result, asJSON bool) error {
 		checks = result.Checks
 	}
 	for _, suite := range checks {
-		name := suite.CheckName
-		if name == "" {
-			name = suite.Suite
-		}
+		name := string(suite.Name())
 		if suite.Node != "" {
 			name += " on " + suite.Node
 		}

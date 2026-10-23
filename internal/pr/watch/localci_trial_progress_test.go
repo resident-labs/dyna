@@ -94,7 +94,7 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 		t.Fatalf("local queue: ci=%s reason=%q err=%v", got.Status, got.Reason, err)
 	}
 	result := localci.Result{Repo: repo, SHA: head, RoomID: r.RoomID, Node: "worker", Status: "passed"}
-	for _, name := range requiredRegisteredChecks(localci.WorkflowSuites()) {
+	for _, name := range localci.RequiredChecks(localci.WorkflowSuites()) {
 		result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: "passed"})
 	}
 	if err := registry.SaveResult(ctx, result); err != nil {
@@ -292,7 +292,7 @@ func savedLocalEnv(t *testing.T, hosted localci.HostedRuns, result *localci.Resu
 func fullLocalPass(t *testing.T) localci.Result {
 	t.Helper()
 	result := localci.Result{Node: "worker", Status: "passed"}
-	for _, name := range requiredRegisteredChecks([]string{"relay", "go", "cross-build", "computer-smoke"}) {
+	for _, name := range localci.RequiredChecks([]localci.Suite{localci.SuiteRelay, localci.SuiteGo, localci.SuiteCrossBuild, localci.SuiteComputerSmoke}) {
 		result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: "passed"})
 	}
 	return result
@@ -417,7 +417,7 @@ func TestCancelledHostedWorkflowDoesNotFailATrial(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := localci.Result{Repo: repo, SHA: head, RoomID: r.RoomID, Node: "worker", Status: "passed"}
-	for _, name := range requiredRegisteredChecks([]string{"relay", "go", "cross-build", "computer-smoke"}) {
+	for _, name := range localci.RequiredChecks([]localci.Suite{localci.SuiteRelay, localci.SuiteGo, localci.SuiteCrossBuild, localci.SuiteComputerSmoke}) {
 		result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: "passed"})
 	}
 	if err := registry.SaveResult(ctx, result); err != nil {
