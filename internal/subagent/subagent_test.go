@@ -462,6 +462,9 @@ func TestOldUnnamedSessionHasAddressableFallbackName(t *testing.T) {
 	if _, err := e.m.Store.UpdateMeta(info.ID, func(m *Meta) { m.Name = "" }); err != nil {
 		t.Fatal(err)
 	}
+	if err := sessionlife.Migrate(filepath.Dir(e.m.Store.root())); err != nil {
+		t.Fatal(err)
+	}
 	meta, err := e.m.Store.ReadMeta(info.ID)
 	if err != nil {
 		t.Fatal(err)

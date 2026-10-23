@@ -76,6 +76,9 @@ func Migrate(dataDir string) error {
 	if err := migrateHistory(db); err != nil {
 		return err
 	}
+	if err := migrateNames(db); err != nil {
+		return err
+	}
 	_, err = steeringDB(sessions)
 	return err
 }
