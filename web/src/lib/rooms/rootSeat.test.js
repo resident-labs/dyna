@@ -69,8 +69,8 @@ test('a root DM continues as the real session once root has one', () => {
   assert.equal(JSON.stringify(calls), JSON.stringify(['load']))
 })
 
-test('the root DM header has the voice call button, before Context; an ordinary agent DM does not', () => {
-  const header = source.slice(source.indexOf('<UseIcons'), source.indexOf('>Context</button>'))
+test('the root DM header has the voice call button, before the threads button', () => {
+  const header = source.slice(source.indexOf('<UseIcons'), source.indexOf('class="dm-threads threads"'))
   assert.match(header, /\{#if isRootDm\}<CallButton \{room\} \/>\{\/if\}/)
   assert.match(source, /let isRootDm = \$derived\(!!drill && \(drill\.rootSeat \|\| drill\.role === 'root'\)\)/)
   assert.equal((source.match(/<CallButton /g) || []).length, 2, 'one in the room header, one in the root DM header')
