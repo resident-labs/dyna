@@ -229,32 +229,3 @@ func (s *Store) turnVersion(id string, n int) (string, bool) {
 	}
 	return turnRevision(revision), true
 }
-
-// backUpBeforeTurnImports takes the shared backup of dyna.db once per data
-// folder, before turn files are first imported (requirement 23). The files
-// themselves are imported when each turn is read: every reader names a turn
-// by its session and number, from the session's turn count, and reads it
-// through importTurnFile.
-func backUpBeforeTurnImports(sessions string) error {
-	db, err := database.Open(filepath.Dir(sessions))
-	if err != nil {
-		return err
-	}
-	var done int
-	if db.QueryRow("SELECT 1 FROM meta WHERE key = 'subagent.turns.import'").Scan(&done) == nil {
-		return nil
-	}
-	ids, err := sessionlife.SafeIDs(sessions)
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		if files, _ := filepath.Glob(filepath.Join(sessions, id, "turns", "*.json")); len(files) > 0 {
-			if err := database.BackUpOnce(db); err != nil {
-				return fmt.Errorf("back up dyna.db before importing turns: %w", err)
-			}
-			break
-		}
-	}
-	return database.Migrate(db, "subagent.turns.import", 1, func(*sql.Conn, int) error { return nil })
-}
