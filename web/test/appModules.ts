@@ -20,6 +20,8 @@ import { questionID, visualKey } from '../src/lib/questions/questions.ts'
 // plain Node cannot load; a test that needs it passes its own setter.
 const setVisuals = (): void => {}
 import { remoteList } from '../src/lib/lanesync/sync.ts'
+import { mergeSessionPage } from '../src/lib/sessions/sessionPages.ts'
+import { dmView } from '../src/lib/sessions/dm.ts'
 import { prsBySession, isOpen } from '../src/lib/prs/pr.ts'
 
 const read = (name: string) => readFileSync(new URL('../src/lib/app/' + name, import.meta.url), 'utf8')
@@ -363,4 +365,86 @@ function gate(fields: State, name: string, load: (current: () => boolean) => unk
   const reload = read_(fields, 'reload')
   if (typeof reload === 'function') return (reload as (n: string, l: unknown) => Promise<void>)(name, load)
   return Promise.resolve(load(() => true)) as Promise<void>
+}
+
+// ---- Part 3: the open session's transcript ----
+
+const sessionViewSource = read('sessionView.svelte.ts')
+
+/** The session view's own functions, which a vm can run in a flat state. */
+export const SESSION_VIEW_FUNCTIONS = [
+  'sessionVisible', 'showSession', 'loadSession', 'loadEarlierSession', 'loadNewerSession',
+  'presentSession', 'unqueue', 'dismissPendingPost',
+] as const
+
+export const sessionViewCode = moduleCode(sessionViewSource, SESSION_VIEW_FUNCTIONS)
+
+/** The session view's rows, as App reads them through transcripts. */
+export interface SessionViewSlice {
+  session: unknown
+  queue: unknown[]
+  error: string
+  threadCount: number
+  readingHistory: boolean
+  visit: number
+  nextVisit(): void
+  openFresh(): void
+  clear(): void
+  setSession(value: unknown): void
+  patchMember(member: unknown): void
+  sessionVisible(tab?: string): boolean
+  loadSession(): Promise<void>
+  showSession(value: unknown, older?: boolean | string): void
+  schedule(): void
+  startApp(): void
+  destroy(): void
+}
+
+/**
+ * installSessionView runs the session view module in the state and gives it the
+ * transcripts object App reads. The page's side answers from the state, and the
+ * state's own `sessionData` controller answers the transcript requests.
+ */
+export function installSessionView(state: object, data?: unknown): SessionViewSlice {
+  const fields = prepare(state, { mergeSessionPage, dmView, setTimeout, clearTimeout }, sessionViewSource, SESSION_VIEW_FUNCTIONS)
+  write(fields, 'sessionHost', {
+    pageOpen: () => read_(fields, 'pageVisible') !== false && !(read_(fields, 'narrow') && read_(fields, 'reviewOpen')),
+    tab: () => String(read_(fields, 'sessionTab') ?? 'chat'),
+    say: (input: unknown) => call(fields, 'say', input),
+  })
+  // The controller is created at module scope, so the flat state supplies one.
+  const controller = data ?? read_(fields, 'sessionData') ?? {
+    load: () => Promise.resolve(), earlier: () => Promise.resolve(false), newer: () => Promise.resolve(false),
+    present: () => Promise.resolve(false), schedule: () => {}, start: () => {}, destroy: () => {},
+  }
+  write(fields, 'data', controller)
+  const view: SessionViewSlice = {
+    get session(): unknown { return read_(fields, 'session') ?? null },
+    get queue(): unknown[] { return (read_(fields, 'queue') as unknown[] | undefined) ?? [] },
+    get error(): string { return String(read_(fields, 'sessionError') ?? '') },
+    get threadCount(): number { return Number(read_(fields, 'threadCount') ?? 0) },
+    get readingHistory(): boolean { return !!read_(fields, 'sessionReadingHistory') },
+    set readingHistory(value: boolean) { write(fields, 'sessionReadingHistory', value) },
+    get visit(): number { return Number(read_(fields, 'sessionVisit') ?? 0) },
+    nextVisit() { write(fields, 'sessionVisit', Number(read_(fields, 'sessionVisit') ?? 0) + 1) },
+    openFresh() {
+      write(fields, 'session', null)
+      write(fields, 'sessionError', '')
+      write(fields, 'queue', [])
+    },
+    clear() { write(fields, 'session', null) },
+    setSession(value: unknown) { write(fields, 'session', value) },
+    patchMember(member: unknown) {
+      const current = read_(fields, 'session') as { member?: { id?: string } } | null | undefined
+      if (current && current.member?.id === (member as { id?: string } | null)?.id) write(fields, 'session', { ...current, member })
+    },
+    sessionVisible: (tab?: string) => !!call(fields, 'sessionVisible', tab),
+    loadSession: () => call(fields, 'loadSession') as Promise<void>,
+    showSession: (value: unknown, older?: boolean | string) => call(fields, 'showSession', value, older),
+    schedule() { (controller as { schedule?(): void }).schedule?.() },
+    startApp() { (controller as { start?(): void }).start?.() },
+    destroy() { (controller as { destroy?(): void }).destroy?.() },
+  }
+  write(fields, 'transcripts', view)
+  return view
 }

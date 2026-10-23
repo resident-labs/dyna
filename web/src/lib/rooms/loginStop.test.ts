@@ -48,7 +48,9 @@ function mounted() {
     onUnauthorized: (fn: () => void) => { unauthorized = fn },
     bulkControllers: new Map(), roomSessionController: controller('controls'),
     roomControlsVisit: 0, consolidationAlive: true,
-    roomData: controller('rooms'), sessionData: controller('session'), workflowData: controller('workflow'),
+    roomData: controller('rooms'), workflowData: controller('workflow'),
+    // The open transcript's controller lives in lib/app/sessionView.svelte.ts now.
+    transcripts: { start() {}, schedule() {}, destroy: () => destroyed.push('session') },
   }
   const unmount: () => void = vm.runInNewContext(stripTypes(`(${mountSource})()`), state)
   return {
