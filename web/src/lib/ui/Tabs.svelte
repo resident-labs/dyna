@@ -1,8 +1,29 @@
 <script>
+  import { tick } from 'svelte'
   // A row of tabs. Arrow keys, Home and End move between them. Each tab is
   // {id, label, live?, count?, aria?}; onselect runs after a pick.
   let { tabs, tab = $bindable(), label, onselect = null } = $props()
   let list = $state()
+
+  function reveal() {
+    const selected = list?.querySelector('[aria-selected="true"]')
+    if (!selected) return
+    const strip = list.getBoundingClientRect()
+    const item = selected.getBoundingClientRect()
+    if (item.left < strip.left) list.scrollLeft += item.left - strip.left
+    else if (item.right > strip.right) list.scrollLeft += item.right - strip.right
+  }
+
+  $effect(() => {
+    tab
+    tabs.map(t => [t.id, t.label, t.count, t.live])
+    if (!list) return
+    let active = true
+    tick().then(() => { if (active) reveal() })
+    const observer = new ResizeObserver(reveal)
+    observer.observe(list)
+    return () => { active = false; observer.disconnect() }
+  })
 
   function pick(id) {
     tab = id
@@ -10,12 +31,16 @@
   }
 
   function keydown(e) {
+    if (!tabs.length) return
     const i = tabs.findIndex((t) => t.id === tab)
     const j = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : e.key === 'Home' ? 0 : e.key === 'End' ? tabs.length - 1 : -2
     if (j === -2) return
     e.preventDefault()
     pick(tabs[(j + tabs.length) % tabs.length].id)
-    setTimeout(() => list?.querySelector('[aria-selected="true"]')?.focus(), 0)
+    tick().then(() => {
+      list?.querySelector('[aria-selected="true"]')?.focus({ preventScroll: true })
+      reveal()
+    })
   }
 </script>
 
