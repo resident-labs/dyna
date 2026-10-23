@@ -408,3 +408,116 @@ test('a call found on page load that ends elsewhere leaves the resume state', as
   assert.equal(call.state.phase, 'idle')
   assert.equal(timers[0].on, false, 'it stops asking once the call is gone')
 })
+
+function reconnectSetup() {
+  const t = setup()
+  const timers = []
+  const sockets = []
+  const resumes = []
+  let time = 1000
+  let resume = async () => ({ startedAt: 42 })
+  const call = createCall({
+    ...t.deps,
+    now: () => time,
+    after: (ms, fn) => {
+      const timer = { at: time + ms, fn, active: true }
+      timers.push(timer)
+      return () => { timer.active = false }
+    },
+    socket: () => { const ws = fakeSocket(); sockets.push(ws); return ws },
+    api: { ...t.deps.api, voiceResume: (...args) => { resumes.push(args); return resume() } },
+  })
+  return {
+    ...t, call, sockets, resumes,
+    failResume: () => { resume = async () => { throw new Error('engine unavailable') } },
+    stallResume: () => {
+      let finish
+      resume = () => new Promise((resolve) => { finish = resolve })
+      return () => finish({ startedAt: 42 })
+    },
+    async advance(ms) {
+      const target = time + ms
+      for (;;) {
+        const timer = timers.filter((t) => t.active && t.at <= target).sort((a, b) => a.at - b.at)[0]
+        if (!timer) break
+        time = timer.at
+        timer.active = false
+        // A timer does not wait for the request it starts.
+        timer.fn()
+        await Promise.resolve()
+        await Promise.resolve()
+      }
+      time = target
+    },
+  }
+}
+
+async function reconnectLive() {
+  const t = reconnectSetup()
+  await t.call.start('room_1', 'voice-test')
+  t.sockets[0].open()
+  t.sockets[0].recv({ type: 'state', state: 'listening' })
+  return t
+}
+
+test('an engine restart resumes the same call with its microphone, controls and buffered speech', async () => {
+  const t = await reconnectLive()
+  const old = t.sockets[0]
+  t.call.toggleDeafen()
+  old.drop(1006)
+  assert.equal(t.call.state.phase, 'connecting')
+  assert.equal(t.audio.closed, 0)
+  assert.equal(t.call.state.startedAt, 42)
+  assert.equal(t.call.state.deafened, true)
+  t.call.toggleDeafen()
+  t.mic()
+  await t.advance(500)
+  assert.deepEqual(t.resumes, [['room_1', 42, 1000]])
+  const next = t.sockets[1]
+  old.recv({ type: 'state', state: 'listening' })
+  assert.equal(t.call.state.phase, 'connecting', 'stale socket cannot complete reconnect')
+  next.open()
+  assert.equal(spoken(next).length, 1)
+  next.recv({ type: 'state', state: 'listening' })
+  assert.equal(t.call.state.phase, 'live')
+  await t.advance(30000)
+  assert.equal(t.audio.closed, 0, 'successful recovery cancels its deadline')
+  await t.call.hangup()
+})
+
+test('reconnect backs off and releases the microphone after 30 seconds, even if a request hangs', async () => {
+  const t = await reconnectLive()
+  t.failResume()
+  t.sockets[0].drop(1012)
+  await t.advance(1500)
+  assert.equal(t.resumes.length, 2)
+  assert.deepEqual(t.resumes[1], ['room_1', 42, 1000])
+  t.stallResume()
+  await t.advance(2000)
+  assert.equal(t.resumes.length, 3)
+  await t.advance(26500)
+  assert.equal(t.call.state.phase, 'error')
+  assert.match(t.call.state.error, /could not reconnect/)
+  assert.equal(t.audio.closed, 1)
+  await t.advance(10000)
+  assert.equal(t.resumes.length, 3)
+})
+
+test('hangup cancels reconnect and prevents a pending resume from opening another socket', async () => {
+  const t = await reconnectLive()
+  t.sockets[0].drop(1006)
+  await t.call.hangup()
+  await t.advance(30000)
+  assert.equal(t.resumes.length, 0)
+  assert.equal(t.call.state.phase, 'idle')
+  assert.equal(t.audio.closed, 1)
+  const pending = await reconnectLive()
+  const finish = pending.stallResume()
+  pending.sockets[0].drop(1006)
+  await pending.advance(500)
+  await pending.call.hangup()
+  finish()
+  await pending.advance(30000)
+  assert.equal(pending.sockets.length, 1)
+  assert.equal(pending.call.state.phase, 'idle')
+})
