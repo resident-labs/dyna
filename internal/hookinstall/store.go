@@ -4,6 +4,9 @@ package hookinstall
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +14,9 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/processguard"
+	statewrite "dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/userservices"
 )
@@ -60,6 +65,7 @@ type Job struct {
 var idPattern = regexp.MustCompile(`^[a-f0-9]{32}$`)
 var shaPattern = regexp.MustCompile(`^(?:[a-f0-9]{40}|[a-f0-9]{64})$`)
 
+// Store.Root is <data dir>/hooks/install. Locks and output logs stay there.
 type Store struct{ Root string }
 
 func DefaultStore() Store { return Store{Root: filepath.Join(store.DataDir(), "hooks", "install")} }
@@ -70,30 +76,30 @@ func (s Store) path(id string) (string, error) {
 	return filepath.Join(s.Root, id+".json"), nil
 }
 func (s Store) Read(id string) (Job, error) {
-	var j Job
-	p, err := s.path(id)
+	if _, err := s.path(id); err != nil {
+		return Job{}, err
+	}
+	db, err := s.db()
 	if err != nil {
-		return j, err
+		return Job{}, err
 	}
-	// A concurrent archive can move p between Stat and ReadJSON. In that case
-	// its missing-file zero value falls through to the archived document.
-	if _, err = os.Stat(p); err == nil {
-		if err = store.ReadJSON(p, &j); err != nil {
-			return j, err
-		}
-		if j.ID != "" {
-			return j, nil
-		}
-	} else if !os.IsNotExist(err) {
-		return j, err
+	var body []byte
+	err = db.QueryRow("SELECT body FROM hook_install_jobs WHERE id=?", id).Scan(&body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Job{}, os.ErrNotExist
 	}
-	archived := filepath.Join(s.Root, "done", filepath.Base(p))
-	if _, err = os.Stat(archived); err != nil {
-		return j, err
+	if err != nil {
+		return Job{}, err
 	}
-	err = store.ReadJSON(archived, &j)
+	return decodeJob(body)
+}
+
+func decodeJob(body []byte) (Job, error) {
+	var j Job
+	err := json.Unmarshal(body, &j)
 	return j, err
 }
+
 func (s Store) Update(id string, fn func(*Job) error) error {
 	p, err := s.path(id)
 	if err != nil {
@@ -107,21 +113,26 @@ func (s Store) Update(id string, fn func(*Job) error) error {
 		return err
 	}
 	defer unlock()
-	target := p
-	if _, err = os.Stat(p); os.IsNotExist(err) {
-		archived := filepath.Join(s.Root, "done", filepath.Base(p))
-		if _, err = os.Stat(archived); err == nil {
-			target = archived
-		}
-	}
-	var j Job
-	if err = store.ReadJSON(target, &j); err != nil {
+	j, err := s.Read(id)
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err = fn(&j); err != nil {
+	if err := fn(&j); err != nil {
 		return err
 	}
-	return store.WriteJSON(target, j, 0600)
+	body, err := json.Marshal(j)
+	if err != nil {
+		return err
+	}
+	db, err := s.db()
+	if err != nil {
+		return err
+	}
+	return statewrite.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(context.Background(), `INSERT INTO hook_install_jobs(id,body) VALUES(?,?)
+ON CONFLICT(id) DO UPDATE SET body=excluded.body`, id, body)
+		return err
+	})
 }
 
 // Archive keeps finished receipts addressable by run ID, without re-reading
@@ -131,50 +142,58 @@ func (s Store) Archive(id string) error {
 	if err != nil {
 		return err
 	}
+	if err := os.MkdirAll(s.Root, 0700); err != nil {
+		return err
+	}
 	unlock, err := store.Lock(p + ".lock")
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	if _, err = os.Stat(p); os.IsNotExist(err) {
+	j, err := s.Read(id)
+	if os.IsNotExist(err) {
 		return nil
-	} else if err != nil {
-		return err
 	}
-	var j Job
-	if err = store.ReadJSON(p, &j); err != nil {
+	if err != nil {
 		return err
 	}
 	if !j.Recorded {
 		return fmt.Errorf("cannot archive an unrecorded install")
 	}
-	dir := filepath.Join(s.Root, "done")
-	if err = os.MkdirAll(dir, 0700); err != nil {
+	db, err := s.db()
+	if err != nil {
 		return err
 	}
-	return os.Rename(p, filepath.Join(dir, filepath.Base(p)))
+	return statewrite.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(context.Background(), "UPDATE hook_install_jobs SET archived=1 WHERE id=?", id)
+		return err
+	})
 }
+
+// List returns active jobs in ID order.
 func (s Store) List() ([]Job, error) {
-	entries, err := os.ReadDir(s.Root)
-	if os.IsNotExist(err) {
-		return nil, nil
-	}
+	db, err := s.db()
 	if err != nil {
 		return nil, err
 	}
+	rows, err := db.Query("SELECT body FROM hook_install_jobs WHERE archived=0 ORDER BY id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	out := []Job{}
-	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".json" {
-			continue
+	for rows.Next() {
+		var body []byte
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
 		}
-		id := e.Name()[:len(e.Name())-5]
-		j, err := s.Read(id)
+		j, err := decodeJob(body)
 		if err != nil {
 			return nil, err
 		}
 		out = append(out, j)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 type Service struct {
