@@ -10,6 +10,8 @@ import (
 	"io"
 	"time"
 
+	accountservice "dyna-agent/internal/account/service"
+	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/maintenance"
 	"dyna-agent/internal/notify"
@@ -23,16 +25,25 @@ const (
 	BuiltinMaintenance hooks.Builtin = "maintenance"
 	// BuiltinParentCheckIns posts the periodic report of each parent's children.
 	BuiltinParentCheckIns hooks.Builtin = "parent-checkins"
+	// BuiltinHarnessVersions keeps the recommended harness versions fresh.
+	BuiltinHarnessVersions hooks.Builtin = "harness-versions"
+	// BuiltinAccountUsage refreshes the saved usage readings of the accounts.
+	BuiltinAccountUsage hooks.Builtin = "account-usage"
 )
 
 // defaultCheckInMinutes is a parent's first check-in spacing until the owner
 // sets the hook's own interval.
 const defaultCheckInMinutes = 15
 
+// usageCheckMinutes is the shortest usage cadence the account timer used: an
+// active harness with running turns re-reads its reading every five minutes.
+// The pass still probes each account only when its own deadline is due.
+const usageCheckMinutes = 5
+
 // Hooks returns the automatic hooks of this release. n is the engine's notify
 // service, so a pass posts through the engine's rooms and reads the engine's
-// sessions instead of building its own.
-func Hooks(n *notify.Service) []hooks.BuiltinSpec {
+// sessions instead of building its own. accounts runs the usage probes.
+func Hooks(n *notify.Service, accounts *accountservice.Service) []hooks.BuiltinSpec {
 	return []hooks.BuiltinSpec{
 		{
 			Builtin:      BuiltinMaintenance,
@@ -47,6 +58,20 @@ func Hooks(n *notify.Service) []hooks.BuiltinSpec {
 			EveryMinutes: checkInMinutes(),
 			Timeout:      "5m",
 			Run:          checkInPass(n),
+		},
+		{
+			Builtin:      BuiltinHarnessVersions,
+			Label:        "Harness version checks",
+			EveryMinutes: int(harnessruntime.VersionCheckInterval / time.Minute),
+			Timeout:      "2m",
+			Run:          harnessVersionsPass,
+		},
+		{
+			Builtin:      BuiltinAccountUsage,
+			Label:        "Account usage",
+			EveryMinutes: usageCheckMinutes,
+			Timeout:      "2m",
+			Run:          accountUsagePass(accounts),
 		},
 	}
 }
@@ -85,6 +110,28 @@ func checkInMinutes() int {
 		return defaultCheckInMinutes
 	}
 	return int(cfg.SessionCheckInInterval / time.Minute)
+}
+
+// harnessVersionsPass reads every harness's recommended version into the
+// engine's cache, which the install and update views read.
+func harnessVersionsPass(ctx context.Context, _ int, log io.Writer) error {
+	versions := harnessruntime.CheckVersions(ctx)
+	if _, err := fmt.Fprintf(log, "checked %d harness versions\n", len(versions)); err != nil {
+		return err
+	}
+	return nil
+}
+
+// accountUsagePass probes the saved usage readings: inactive grants once their
+// deadline passes, and the active account of a harness with running turns. It
+// never renews a credential: renewal must run at the exact expiry deadline,
+// because a delayed renewal logs the person out, so the engine keeps it.
+func accountUsagePass(accounts *accountservice.Service) func(context.Context, int, io.Writer) error {
+	return func(ctx context.Context, _ int, log io.Writer) error {
+		next := accounts.RefreshInactiveUsage(ctx, time.Now())
+		_, err := fmt.Fprintf(log, "refreshed account usage; next probe at %s\n", next.UTC().Format(time.RFC3339))
+		return err
+	}
 }
 
 // logger writes a pass's log lines to the hook run log, one line each.

@@ -407,33 +407,3 @@ func TestRecommendedVendorRejectsUninstallableRelease(t *testing.T) {
 		})
 	}
 }
-
-func TestScheduledVersionChecksAndShutdown(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ticks := make(chan time.Time)
-	checked := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		runVersionChecks(ctx, ticks, func(context.Context) []RecommendedVersion { checked <- struct{}{}; return nil })
-	}()
-	for range 2 {
-		select {
-		case ticks <- time.Now():
-		case <-time.After(time.Second):
-			t.Fatal("version checker did not accept a scheduled tick")
-		}
-		select {
-		case <-checked:
-		case <-time.After(time.Second):
-			t.Fatal("scheduled version check did not run")
-		}
-	}
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("version checks did not stop")
-	}
-}
