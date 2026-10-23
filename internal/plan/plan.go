@@ -421,14 +421,6 @@ func preserveAncestryError(err error, parent string) error {
 	return err
 }
 
-func truncatePreview(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) <= PreviewLimit {
-		return s
-	}
-	return s[:PreviewLimit] + "…"
-}
-
 func intPtr(n int) *int { return &n }
 
 // LookupNestedWorkflow finds the extracted child workflow id for a resolved

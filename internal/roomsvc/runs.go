@@ -12,6 +12,7 @@ import (
 
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/settings"
+	"dyna-agent/internal/textutil"
 	"dyna-agent/internal/workeroutput"
 )
 
@@ -358,10 +359,10 @@ func foldAll(events []runstore.Event, live bool) (agents []RunAgent, total int, 
 				a.Status = "ok"
 			}
 			a.DurMs, a.Cached = e.DurMs, e.Cached
-			a.Preview, a.Error = clipRunes(e.Preview, MaxRunPreview), clipRunes(e.Error, MaxRunPreview)
+			a.Preview, a.Error = textutil.Clip(e.Preview, MaxRunPreview), textutil.Clip(e.Error, MaxRunPreview)
 		case "log":
 			if e.Provenance != "system" && e.Msg != "" {
-				logs = append(logs, RunLog{TS: e.TS, Msg: clipRunes(e.Msg, MaxRunPreview)})
+				logs = append(logs, RunLog{TS: e.TS, Msg: textutil.Clip(e.Msg, MaxRunPreview)})
 			}
 		}
 	}
@@ -378,13 +379,6 @@ func foldAll(events []runstore.Event, live bool) (agents []RunAgent, total int, 
 		logs = []RunLog{}
 	}
 	return agents, total, phases, logs
-}
-
-func clipRunes(s string, n int) string {
-	if r := []rune(s); len(r) > n {
-		return string(r[:n]) + "…"
-	}
-	return s
 }
 
 // runSigs returns one signature per room over its runs' ids, statuses and

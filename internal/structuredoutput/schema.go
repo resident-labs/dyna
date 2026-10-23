@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v5"
+
+	"dyna-agent/internal/textutil"
 )
 
 // SchemaSuffix is the JSON-only response contract appended to a prompt whose
@@ -47,9 +49,9 @@ func (s *Schema) Validate(raw string) (any, error) {
 // SchemaCorrection is the follow-up text asking a worker to fix an invalid
 // response; includePrevious repeats a truncated copy of it for fresh sessions.
 func SchemaCorrection(cause error, raw string, includePrevious bool) string {
-	text := "Your previous response was invalid: " + truncate(cause.Error(), 800)
+	text := "Your previous response was invalid: " + textutil.ClipOneLine(cause.Error(), 800)
 	if includePrevious {
-		text += "\nPrevious response (truncated): " + truncate(raw, 1500)
+		text += "\nPrevious response (truncated): " + textutil.ClipOneLine(raw, 1500)
 	}
 	return text + "\nRespond again with ONLY the corrected JSON."
 }
@@ -101,11 +103,3 @@ func decodeJSONFrom(s string) (any, error) {
 }
 
 var fenceRe = regexp.MustCompile("(?s)```(?:json)?\\s*(.*?)```")
-
-func truncate(s string, n int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "…"
-}
