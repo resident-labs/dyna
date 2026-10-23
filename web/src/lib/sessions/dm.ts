@@ -282,6 +282,12 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
       }
       if (input && it.postId) {
         matched.add(it.postId)
+        if (post && registeredEvent(post)) {
+          // A notice that opened or steered this turn draws its card, the same
+          // one the feed shows, instead of its raw text.
+          events.push({ kind: 'system-event', key: `post:${it.postId}`, ts: post.ts ?? at, post, author, text: post.text })
+          continue
+        }
         events.push({ ...it, kind: 'message', itemKind: it.kind, author, human: post?.human ?? receipt?.human ?? /\(human\)$/.test(it.from || ''), ts: post?.ts ?? receipt?.ts ?? at, text: post?.text ?? receipt?.text ?? it.text, key: `post:${it.postId}`, post, pending: it.delivered ? undefined : receipt, delivery: it.delivered ? 'read' : 'delivered' })
         continue
       }
