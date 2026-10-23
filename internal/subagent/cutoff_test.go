@@ -146,18 +146,11 @@ func TestFailedTurnBoundaryKeepsOnlyNewerInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dir, err := e.m.Store.Dir(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := writeQueue(dir, queueClaims{Claimed: map[string]int{old.ID: 1},
-		Cancelled: map[string]bool{}, Dismissed: map[string]bool{}}); err != nil {
-		t.Fatal(err)
-	}
 	if err := e.m.startTurn(e.ctx, id, TurnStart{Turn: 1, Running: true,
 		Drained: []DrainedPost{{Steer: Steer{ID: old.ID, Message: old.Text}}}}); err != nil {
 		t.Fatal(err)
 	}
+	claimPostsFor(t, e, id, 1, old.ID)
 	// The runner dies before the harness takes the prompt: the claim is
 	// delivered by nobody, and the repair fixes the boundary at the old post.
 	if _, err := e.m.Store.RepairTurn(id, 1, "runner exited without recording a result"); err != nil {

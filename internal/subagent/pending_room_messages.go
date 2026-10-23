@@ -19,11 +19,7 @@ type pendingRoomMessage struct {
 // close already holds that gate. A claim alone is not proof of delivery.
 // Quiet informational posts stay readable but do not require another turn.
 func (m *Manager) pendingRoomMessages(meta Meta) ([]pendingRoomMessage, error) {
-	dir, err := m.store().Dir(meta.ID)
-	if err != nil {
-		return nil, err
-	}
-	q, err := readQueue(dir)
+	claims, err := sessionClaims(m.rooms(), meta)
 	if err != nil {
 		return nil, err
 	}
@@ -38,8 +34,8 @@ func (m *Manager) pendingRoomMessages(meta Meta) ([]pendingRoomMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	for id, n := range q.Claimed {
-		if n <= 0 || q.Cancelled[id] || q.Dismissed[id] || delivered[id] {
+	for id, n := range claims.claimedTurn {
+		if n <= 0 || claims.cancelled[id] || claims.dismissed[id] || delivered[id] {
 			continue
 		}
 		msg, err := m.rooms().Message(meta.RoomID, id)
@@ -57,7 +53,7 @@ func (m *Manager) pendingRoomMessages(meta Meta) ([]pendingRoomMessage, error) {
 		return nil, err
 	}
 	for _, msg := range input {
-		if !q.Cancelled[msg.ID] && !q.Dismissed[msg.ID] && !delivered[msg.ID] {
+		if !claims.cancelled[msg.ID] && !claims.dismissed[msg.ID] && !delivered[msg.ID] {
 			ordinary = append(ordinary, msg)
 		}
 	}
@@ -74,11 +70,11 @@ func (m *Manager) pendingRoomMessages(meta Meta) ([]pendingRoomMessage, error) {
 		return nil, err
 	}
 	for _, msg := range selected {
-		if !msg.Deliverable() || !wakes(rows, msg) || q.Dismissed[msg.ID] || seen[msg.ID] || delivered[msg.ID] {
+		if !msg.Deliverable() || !wakes(rows, msg) || claims.dismissed[msg.ID] || seen[msg.ID] || delivered[msg.ID] {
 			continue
 		}
 		seen[msg.ID] = true
-		out = append(out, pendingRoomMessage{Message: msg, Turn: q.Claimed[msg.ID]})
+		out = append(out, pendingRoomMessage{Message: msg, Turn: claims.claimedTurn[msg.ID]})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].TS == out[j].TS {
