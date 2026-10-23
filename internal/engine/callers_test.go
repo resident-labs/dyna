@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -38,30 +39,38 @@ func startRunner(t *testing.T, args ...string) int {
 	return cmd.Process.Pid
 }
 
-// Sessions running when part 3 deploys started before launches were
-// recorded. The engine records their live runners at start, so their agents
-// are not refused; a row whose PID now names another program is skipped,
-// and an idle session gets nothing.
-func TestEngineStartRecordsLiveUnrecordedRunners(t *testing.T) {
-	data := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	store := &subagent.Store{Root: filepath.Join(data, "sessions")}
-	live, reused, idle := "ses_20261020-000000-0000live", "ses_20261020-000000-00reused", "ses_20261020-000000-0000idle"
-	runner := startRunner(t, "subagent", "_turn", live)
-	other := startRunner(t, "shell", "_run", "job")
-	for id, pid := range map[string]int{live: runner, reused: other, idle: 0} {
-		recordtest.Write(t, store.Root, id, subagent.Meta{ID: id, Name: id[len(id)-6:], RoomID: "room", Room: "room", Profile: "mock", Turns: 1, Pid: pid})
-	}
-	callers, err := identifyCallers(context.Background(), data, false, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r := callers.resolver
-	if got := r.Resolve(runner); got.Kind != callerid.Session || got.Session != live {
-		t.Fatalf("a live runner from before the records = %+v, want %s", got, live)
-	}
-	if got := r.Resolve(other); got.Kind == callerid.Session {
-		t.Fatalf("a PID that names another program became session %s", got.Session)
+// Startup trusts only launch records, even when a saved PID matches a runner.
+func TestEngineStartupUsesOnlyCommittedLaunchRecords(t *testing.T) {
+	for _, readOnly := range []bool{false, true} {
+		t.Run(fmt.Sprint(readOnly), func(t *testing.T) {
+			data := t.TempDir()
+			t.Setenv("XDG_DATA_HOME", t.TempDir())
+			store := &subagent.Store{Root: filepath.Join(data, "sessions")}
+			id := "ses_20261020-000000-0000live"
+			runner := startRunner(t, "subagent", "_turn", id)
+			recordtest.Write(t, store.Root, id, subagent.Meta{ID: id, Name: "live", RoomID: "room", Room: "room", Profile: "mock", Turns: 1, Pid: runner})
+			callers, err := identifyCallers(context.Background(), data, readOnly, store)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := callers.resolver.Resolve(runner); got.Kind == callerid.Session {
+				t.Errorf("unrecorded runner acquired identity: %+v", got)
+			}
+			cmd := exec.Command(os.Args[0])
+			cmd.Args = []string{os.Args[0], "subagent", "_turn", id, "2"}
+			cmd.Env = append(os.Environ(), runnerEnv+"=1")
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := callerid.Start(context.Background(), cmd, callerid.Launch{DataDir: data, Name: id, Actor: callerid.Identity{Kind: callerid.Session, Session: id}, Launcher: "turn"}); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { stdin.Close(); _ = cmd.Wait() })
+			if got := callers.resolver.Resolve(cmd.Process.Pid); got.Kind != callerid.Session || got.Session != id {
+				t.Errorf("committed launch lost identity: %+v", got)
+			}
+		})
 	}
 }
 
@@ -91,24 +100,6 @@ func TestIdleSessionNextTurnIsRecordedAfterStart(t *testing.T) {
 	t.Cleanup(func() { stdin.Close(); _ = cmd.Wait() })
 	if got := callers.resolver.Resolve(cmd.Process.Pid); got.Kind != callerid.Session || got.Session != idle {
 		t.Fatalf("the idle session's next turn = %+v, want %s", got, idle)
-	}
-}
-
-// A read-only engine cannot write records, so it keeps its backfill in
-// memory for this start.
-func TestReadOnlyEngineBackfillsInMemory(t *testing.T) {
-	data := t.TempDir()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	store := &subagent.Store{Root: filepath.Join(data, "sessions")}
-	live := "ses_20261020-000000-0000live"
-	runner := startRunner(t, "subagent", "_turn", live)
-	recordtest.Write(t, store.Root, live, subagent.Meta{ID: live, Name: "live", RoomID: "room", Room: "room", Profile: "mock", Turns: 1, Pid: runner})
-	callers, err := identifyCallers(context.Background(), data, true, store)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := callers.resolver.Resolve(runner); got.Kind != callerid.Session || got.Session != live {
-		t.Fatalf("a live runner seen by a read-only engine = %+v, want %s", got, live)
 	}
 }
 
