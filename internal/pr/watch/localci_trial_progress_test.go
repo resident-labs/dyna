@@ -238,10 +238,10 @@ func writeFakeJSON[T any](stdout io.Writer, value T) error {
 	return err
 }
 
-// A saved local pass decides a head on its own. A host that is briefly
-// unavailable must not restart the hosted run that local CI replaced: that wait
-// costs a full hosted run and holds work the local pass already released.
-func TestSavedLocalPassNeedsNoHostedFallback(t *testing.T) {
+// savedLocalEnv builds a local-mode service for a saved-result case: no CI node
+// is registered, so only a saved result can decide the head.
+func savedLocalEnv(t *testing.T, hosted localci.HostedRuns, result *localci.Result, runs []Run, checks []Check, required []string) (*Service, Record, string, string, *int) {
+	t.Helper()
 	ctx := context.Background()
 	dataDir := t.TempDir()
 	repoDir := filepath.Join(t.TempDir(), "repo")
@@ -256,10 +256,10 @@ func TestSavedLocalPassNeedsNoHostedFallback(t *testing.T) {
 	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
 		t.Fatal(err)
 	}
-	// No CI machine is registered, so the host is unavailable for this read.
 	head, prHead := strings.Repeat("a", 40), strings.Repeat("b", 40)
 	branch := "dyna/merge-trial/1"
 	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
+	r.PolicyOverride.RequiredChecks = required
 	s := &Service{Store: &Store{Root: state.Root(dataDir)}, LocalCIRegistry: registry}
 	if err := s.Store.update(func(st *State) error {
 		st.Records[r.Key] = &r
@@ -268,17 +268,21 @@ func TestSavedLocalPassNeedsNoHostedFallback(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.SaveHostedRuns(ctx, repo, head, localci.HostedRuns{IDs: []int64{81}, Attempts: map[int64]int{81: 1}}); err != nil {
+	if err := registry.SaveHostedRuns(ctx, repo, head, hosted); err != nil {
 		t.Fatal(err)
 	}
-	result := localci.Result{Repo: repo, SHA: head, RoomID: r.RoomID, Node: "worker", Status: "passed"}
-	for _, name := range requiredRegisteredChecks(localci.WorkflowSuites()) {
-		result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: "passed"})
+	if result != nil {
+		result.Repo, result.SHA, result.RoomID = repo, head, r.RoomID
+		if err := registry.SaveResult(ctx, *result); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := registry.SaveResult(ctx, result); err != nil {
-		t.Fatal(err)
+	for i := range runs {
+		runs[i].HeadSHA, runs[i].HeadBranch = head, branch
+		if runs[i].Attempt == 0 {
+			runs[i].Attempt = 1
+		}
 	}
-	run := Run{ID: 81, Attempt: 1, CheckSuiteID: 9, Path: ".github/workflows/ci.yml", HeadSHA: head, HeadBranch: branch, Event: "push", Status: "completed", Conclusion: "cancelled"}
 	reruns := 0
 	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
 		endpoint := ""
@@ -292,25 +296,113 @@ func TestSavedLocalPassNeedsNoHostedFallback(t *testing.T) {
 			reruns++
 			return writeFakeJSON(cmd.Stdout, struct{}{})
 		case strings.HasSuffix(endpoint, "/actions/runs/81"):
-			return writeFakeJSON(cmd.Stdout, run)
+			return writeFakeJSON(cmd.Stdout, runs[0])
+		case strings.Contains(endpoint, "/jobs?"):
+			return writeFakeJSON(cmd.Stdout, struct {
+				Jobs []budgetJob `json:"jobs"`
+			}{})
 		case strings.Contains(endpoint, "/check-runs?"):
-			return writeFakeJSON(cmd.Stdout, trialChecks{})
+			return writeFakeJSON(cmd.Stdout, trialChecks{Checks: checks})
 		case strings.Contains(endpoint, "/statuses?"):
 			return writeFakeJSON(cmd.Stdout, []Status{})
 		case strings.Contains(endpoint, "/actions/runs?"):
-			return writeFakeJSON(cmd.Stdout, trialRuns{Runs: []Run{run}})
+			return writeFakeJSON(cmd.Stdout, trialRuns{Runs: runs})
 		default:
 			return fmt.Errorf("unexpected endpoint %s", endpoint)
 		}
 	}
-	got, err := s.mergeTrialCI(ctx, r, branch, head)
+	return s, r, repo, branch, &reruns
+}
+
+// fullLocalPass is a saved local result that covers every trial suite.
+func fullLocalPass(t *testing.T) localci.Result {
+	t.Helper()
+	result := localci.Result{Node: "worker", Status: "passed"}
+	for _, name := range requiredRegisteredChecks([]string{"relay", "go", "cross-build", "computer-smoke"}) {
+		result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: "passed"})
+	}
+	return result
+}
+
+// cancelledTrialRun is the hosted run Dyna cancelled for its own local CI.
+func cancelledTrialRun() Run {
+	return Run{ID: 81, CheckSuiteID: 9, Path: ".github/workflows/ci.yml", Event: "push", Status: "completed", Conclusion: "cancelled"}
+}
+
+// runningTrialRun is a hosted replacement that is still going.
+func runningTrialRun() Run {
+	return Run{ID: 81, CheckSuiteID: 9, Path: ".github/workflows/ci.yml", Event: "push", Status: "in_progress"}
+}
+
+// A saved local pass decides a head on its own. A host that is briefly
+// unavailable must not restart the hosted run that local CI replaced: that wait
+// costs a full hosted run and holds work the local pass already released.
+func TestSavedLocalPassNeedsNoHostedFallback(t *testing.T) {
+	result := fullLocalPass(t)
+	s, r, repo, branch, reruns := savedLocalEnv(t, localci.HostedRuns{IDs: []int64{81}, Attempts: map[int64]int{81: 1}}, &result, []Run{cancelledTrialRun()}, nil, nil)
+	_ = repo
+	got, err := s.mergeTrialCI(t.Context(), r, branch, result.SHA)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Status != "passed" {
 		t.Fatalf("ci=%s reason=%q; a saved local pass waited for hosted CI", got.Status, got.Reason)
 	}
-	if reruns != 0 {
-		t.Fatalf("reran hosted CI %d times for a head that local CI already passed", reruns)
+	if *reruns != 0 {
+		t.Fatalf("reran hosted CI %d times for a head that local CI already passed", *reruns)
+	}
+}
+
+// A saved local pass is judged by the same gates as a fresh one: a hosted
+// failure still vetoes it, a partial suite cannot release a merge, and a
+// required check without evidence holds it pending.
+func TestSavedLocalPassKeepsTheCIGates(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		result     func(t *testing.T) localci.Result
+		runs       []Run
+		checks     []Check
+		required   []string
+		want       string
+		wantReason string
+	}{
+		{
+			name:   "hosted failure vetoes a saved pass",
+			result: fullLocalPass,
+			runs:   []Run{cancelledTrialRun()},
+			checks: []Check{actionsCheck(Check{ID: 700, Name: "security", Status: "completed", Conclusion: "failure"})},
+			want:   "failed",
+		},
+		{
+			name: "partial suite does not pass",
+			result: func(*testing.T) localci.Result {
+				return localci.Result{Node: "worker", Status: "passed", Checks: []localci.SuiteResult{{CheckName: "go-test-shard (0)", Status: "passed"}}}
+			},
+			runs: []Run{runningTrialRun()},
+			want: "pending",
+		},
+		{
+			name:       "required check without evidence",
+			result:     fullLocalPass,
+			runs:       []Run{runningTrialRun()},
+			required:   []string{"security"},
+			want:       "pending",
+			wantReason: "required CI checks: security",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.result(t)
+			s, r, _, branch, _ := savedLocalEnv(t, localci.HostedRuns{}, &result, tc.runs, tc.checks, tc.required)
+			got, err := s.mergeTrialCI(t.Context(), r, branch, result.SHA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != tc.want {
+				t.Fatalf("ci=%s reason=%q, want %s", got.Status, got.Reason, tc.want)
+			}
+			if tc.wantReason != "" && !strings.Contains(got.Reason, tc.wantReason) {
+				t.Fatalf("reason=%q, want %q", got.Reason, tc.wantReason)
+			}
+		})
 	}
 }
