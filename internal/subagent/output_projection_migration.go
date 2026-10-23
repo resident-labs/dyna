@@ -162,22 +162,38 @@ func (s *Store) prepareSessionOutput(id, key string, turns []capturedTurn) (proj
 		return projection.Prepared{}, false, err
 	}
 	defer f.Close()
-	// The pack takes units in start order; overlapping turn ranges are
-	// checked by the pack against the lines it already converted.
-	units := slices.SortedStableFunc(slices.Values(turns), func(a, b capturedTurn) int {
+	// Overlapping ranges share conversion context. Converting them separately
+	// can give one source line different meanings at a turn boundary.
+	sorted := slices.SortedStableFunc(slices.Values(turns), func(a, b capturedTurn) int {
 		return cmp.Compare(a.turn.NormStart, b.turn.NormStart)
 	})
-	for _, unit := range units {
-		start, end := unit.turn.NormStart, unit.turn.NormEnd
+	type conversionUnit struct {
+		start, end int64
+		dialect    string
+		ambiguous  bool
+	}
+	var units []conversionUnit
+	for _, turn := range sorted {
+		start, end := turn.turn.NormStart, turn.turn.NormEnd
 		if end == 0 {
 			end = limit
 		}
 		if start < 0 || end < start || end > limit {
-			return projection.Prepared{}, false, fmt.Errorf("turn %d output range is outside the captured artifact", unit.n)
+			return projection.Prepared{}, false, fmt.Errorf("turn %d output range is outside the captured artifact", turn.n)
 		}
 		if start == end {
 			continue
 		}
+		if len(units) > 0 && start < units[len(units)-1].end {
+			unit := &units[len(units)-1]
+			unit.end = max(unit.end, end)
+			unit.ambiguous = unit.ambiguous || unit.dialect != turn.turn.OutputDialect
+			continue
+		}
+		units = append(units, conversionUnit{start: start, end: end, dialect: turn.turn.OutputDialect})
+	}
+	for _, unit := range units {
+		start, end := unit.start, unit.end
 		var lines []projection.Line
 		_, err := runstore.VisitNormalizedOutputLines(path, start, end-start, func(line projection.Line) error {
 			if line.Raw == nil {
@@ -194,11 +210,16 @@ func (s *Store) prepareSessionOutput(id, key string, turns []capturedTurn) (proj
 		if err != nil {
 			return projection.Prepared{}, false, err
 		}
-		dialect := unit.turn.OutputDialect
+		dialect := unit.dialect
 		if err := pack.Add(lines, func(events []workeroutput.Event) []int {
+			// Conflicting dialects cannot safely share a conversion context.
+			// Preserve their source events rather than reject startup.
+			if unit.ambiguous {
+				return nil
+			}
 			return workeroutput.ConvertSessionTurn(dialect, events)
 		}); err != nil {
-			return projection.Prepared{}, false, fmt.Errorf("artifact %s turn %d range [%d,%d): %w", key, unit.n, start, end, err)
+			return projection.Prepared{}, false, fmt.Errorf("artifact %s range [%d,%d): %w", key, start, end, err)
 		}
 	}
 	prepared, err := pack.Finish(limit, prefixEnd)
