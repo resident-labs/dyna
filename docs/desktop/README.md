@@ -299,10 +299,10 @@ the picker lists any folder the app's user can read.
 Hover a post and press Pin to keep it. The pin icon in the room header
 (with a count) opens a Pinned panel in place of the member list; Esc closes
 it. Each item has Jump (scroll the feed to the post) and Unpin. Pins live in
-`pins.json` in the room directory, at most 50 per room. Agents and scripts
+`dyna.db`, at most 50 per room. Agents and scripts
 use `dyna room pin|unpin|pins <room> [<post-id>]`. A pin from the CLI shows
-in the app at once: `roomsvc.Watch` emits a `pins` event when the file
-changes.
+in the app at once: `roomsvc.Watch` emits a `pins` event when the stored
+revision changes.
 
 ## Go surface
 
