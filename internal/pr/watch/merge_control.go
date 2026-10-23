@@ -9,6 +9,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/locallane"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
 )
@@ -257,7 +258,12 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 		}); err != nil {
 			return err
 		}
-		ev := room.MergeEvent{Type: room.MergeReturned, TrialID: changeID(r), Repo: mergeRepo(r), Base: conflictBase(r), PRs: []room.MergePR{mergePR(r)}, Label: changeLabel(r), Reason: reason}
+		base := conflictBase(r)
+		if base == "" {
+			// A local change merges into the integration branch.
+			base = locallane.Integration
+		}
+		ev := room.MergeEvent{Type: room.MergeReturned, TrialID: changeID(r), Repo: mergeRepo(r), Base: base, PRs: []room.MergePR{mergePR(r)}, Label: changeLabel(r), Reason: reason}
 		if trial != nil {
 			ev = mergeTrialEvent(st, *trial, room.MergeReturned)
 			ev.Label, ev.Reason = changeLabel(r), reason
