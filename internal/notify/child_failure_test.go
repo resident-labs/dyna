@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
 
@@ -70,7 +71,7 @@ func TestActualManualStopReportsOnlyToOwner(t *testing.T) {
 		t.Fatalf("manual stop: %+v %v", turn, err)
 	}
 	res, err := e.svc.CompleteSessionTurn(e.ctx, child.ID, 1)
-	if err != nil || res.Message.Kind != "stopped" || !reflect.DeepEqual(res.Message.To, []string{rec.Name}) {
+	if err != nil || !turnReport(res.Message, room.TurnStopped) || !reflect.DeepEqual(res.Message.To, []string{rec.Name}) {
 		t.Fatalf("manual stop report: %+v %v", res, err)
 	}
 	f := &fixture{testEnv: e}
@@ -250,7 +251,7 @@ func TestReplacementStartupTimeoutReportsFailureToOwner(t *testing.T) {
 
 	select {
 	case res := <-reports:
-		if res.Message.Kind != "failed" || !reflect.DeepEqual(res.Message.To, []string{rec.Name}) || !strings.Contains(res.Message.Text, "replacement startup produced no model output") {
+		if !turnReport(res.Message, room.TurnFailed) || !reflect.DeepEqual(res.Message.To, []string{rec.Name}) || !strings.Contains(res.Message.Text, "replacement startup produced no model output") {
 			t.Fatalf("startup failure report = %+v", res.Message)
 		}
 	case <-e.ctx.Done():

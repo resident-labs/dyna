@@ -4,6 +4,7 @@ import (
 	"context"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/parentoutput"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/subagent"
@@ -46,7 +47,7 @@ func TestFeedShowsFullCompletionAddressedToParent(t *testing.T) {
 	if err != nil || !strings.Contains(string(saved), long) {
 		t.Fatalf("saved completion: %v", err)
 	}
-	if strings.Contains(res.Message.Text, "THE-END") || !strings.Contains(res.Message.Text, "Full report: "+path) || len([]rune(res.Message.Text)) > parentoutput.InlineCharLimit {
+	if strings.Contains(res.Message.Text, "THE-END") || !strings.Contains(res.Message.Text, "Full report: "+path) || len([]rune(res.Message.Text)) > parentoutput.InlineCharLimit+200 {
 		t.Fatal("the stored completion must keep its short preview and pointer")
 	}
 	if state, err := e.mgr.Store.Info(lead.ID); err != nil || state.Turns != 1 || state.Status != subagent.StatusIdle {
@@ -104,7 +105,7 @@ func TestRunCompletionShowsNameAndResult(t *testing.T) {
 	}
 	feed, _ := e.svc.FeedTail("alpha", "", 0)
 	p := feed.Posts[len(feed.Posts)-1]
-	if p.Speaker != "workflow review" || !p.FullResult || !strings.Contains(p.Text, "\"confirmed\": 3") || p.Detail == nil || p.Detail.Kind != "run" || p.Detail.ID != "wf_20261016-000009-eeeeeeee" {
+	if p.Speaker != "workflow review" || !p.FullResult || !strings.Contains(p.Text, "\"confirmed\":3") || p.Detail == nil || p.Detail.Kind != "run" || p.Detail.ID != "wf_20261016-000009-eeeeeeee" {
 		t.Fatalf("run completion = speaker %q, text %q", p.Speaker, p.Text)
 	}
 	// A script that returns nothing has no result block, not "null".
@@ -129,7 +130,7 @@ func TestShellCompletionLinksToLogAcrossFeedAndPins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.Message.Text, "Output: dyna shell tail "+job.ID) {
+	if !strings.Contains(res.Message.Text, "dyna shell tail "+job.ID) {
 		t.Fatal("agent-facing notification lost its command pointer")
 	}
 	if err := e.svc.Pin(rec.ID, res.Message.ID, ""); err != nil {
@@ -178,10 +179,10 @@ func TestRunCancellationFeedKeepsRealErrors(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.status == "canceled" {
-				if result.Message.Kind != "stopped" || strings.Contains(result.Message.Text, "Error:") || !strings.Contains(result.Message.Text, "Canceled") {
+				if ev, ok := result.Message.RunResult(); !ok || ev.State != room.RunStopped || strings.Contains(result.Message.Text, "Error:") || !strings.Contains(result.Message.Text, "Canceled") {
 					t.Fatalf("stored cancel post: %+v", result.Message)
 				}
-			} else if result.Message.Kind != "failed" || !strings.Contains(result.Message.Text, tc.want) {
+			} else if ev, ok := result.Message.RunResult(); !ok || ev.State != room.RunFailed || !strings.Contains(ev.Summary, strings.TrimPrefix(tc.want, "Error: ")) {
 				t.Fatalf("stored failure post: %+v", result.Message)
 			}
 			feed, err := e.svc.FeedTail(rec.ID, "", 0)

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/listpage"
+	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
 )
 
@@ -168,7 +169,7 @@ func TestSessionInfoFollowsChangesThroughTheCache(t *testing.T) {
 func TestShellResultsNeverCountAsUnread(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
-	if _, err := e.svc.rooms().Post(rec.ID, room.PostInput{From: "shell:sh_20261017-120000-0000000a", To: []string{rec.Name}, Kind: "failed", Text: "shell:sh_20261017-120000-0000000a failed with exit code 1."}); err != nil {
+	if _, err := e.svc.rooms().PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: room.ShellEvent{ShellID: "sh_20261017-120000-0000000a", Label: "go test", State: room.ShellFailed, ExitCode: 1}, Producer: room.ProducerShell, To: []string{rec.Name}}); err != nil {
 		t.Fatal(err)
 	}
 	e.say(rec, "lead", "a real post")
@@ -278,5 +279,42 @@ func TestFeedDefaultsMaximumAndCursor(t *testing.T) {
 		if _, err := e.svc.FeedTail(rec.ID, cursor, 50); err == nil {
 			t.Fatalf("accepted invalid cursor %q", cursor)
 		}
+	}
+}
+
+// A shell result belongs to the session that ran the command: it is delivered
+// to that session and to the owner feed, and it never counts as unread. The
+// shell view shows the job, so the feed hides the result row itself.
+func TestShellResultReachesTheSessionAndNeverUnreads(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	lead := e.start(rec, "lead", nil)
+	child := e.start(rec, "child", &lead)
+	res, err := e.svc.Notify.CompleteShell(e.ctx, notify.ShellExit{ID: "sh_20261023-120000-0000000c", RoomID: rec.ID, Parent: child.ID, Command: "go", Code: 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(res.Message.To, []string{child.Address(), rec.Name}) || res.Message.SessionIDs[child.Address()] != child.ID {
+		t.Fatalf("shell recipients = %v, bindings = %v", res.Message.To, res.Message.SessionIDs)
+	}
+	feed, err := e.svc.FeedTail(rec.ID, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	for _, p := range feed.Posts {
+		if p.ID != res.Message.ID {
+			continue
+		}
+		seen = true
+		if p.Unread || !p.Completion || p.Detail == nil || p.Detail.Kind != "shell" {
+			t.Fatalf("shell result row = %+v", p)
+		}
+		if _, ok := p.Shell(); !ok {
+			t.Fatalf("the row lost the typed shell payload: %+v", p)
+		}
+	}
+	if !seen {
+		t.Fatal("the owner feed lost the shell result")
 	}
 }

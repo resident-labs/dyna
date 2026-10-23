@@ -48,7 +48,7 @@ func (s *Service) Profile(ref string, posts int) (Profile, error) {
 	}
 	addr := info.Address()
 	for i := len(msgs) - 1; i >= 0 && len(out.Posts) < posts; i-- {
-		if msgs[i].From == addr {
+		if authoredBy(msgs[i], info.ID, addr) {
 			out.Posts = append(out.Posts, s.expand(decorate(msgs[i], rec.Name, reads, book), book))
 		}
 	}

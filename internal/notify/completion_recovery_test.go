@@ -171,7 +171,7 @@ func completionRecoveryPosts(t *testing.T, svc *Service, roomID string, child su
 	}
 	var completions []room.Message
 	for _, post := range posts {
-		if post.From == child.Address() && post.Turn == 1 && post.Kind == "completed" {
+		if ev, ok := post.TurnResult(); ok && ev.SessionID == child.ID && ev.Turn == 1 && ev.State == room.TurnCompleted {
 			completions = append(completions, post)
 		}
 	}

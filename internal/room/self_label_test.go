@@ -37,11 +37,11 @@ func TestPostStripsSelfLabelOnMessagesOnly(t *testing.T) {
 	if msg.Text != "ready" {
 		t.Fatalf("message text = %q, want %q", msg.Text, "ready")
 	}
-	done, err := s.Post(rec.ID, PostInput{From: "alpha:lead", Kind: "completed", To: []string{"alpha"}, Turn: 1, Text: "lead: kept in a completion"})
+	done, err := s.PostEvent(rec.ID, TurnEvent{Session: "alpha:lead", SessionID: "ses_lead", Turn: 1, State: TurnCompleted, Summary: "lead: kept in a completion"}, "alpha")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if done.Text != "lead: kept in a completion" {
+	if done.Text != "alpha:lead turn 1 completed.\n\nlead: kept in a completion" {
 		t.Fatalf("completion text = %q, want it unchanged", done.Text)
 	}
 }

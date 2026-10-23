@@ -364,16 +364,35 @@ func countsUnread(m room.Message, roomName string) bool {
 
 // SpeakerLabel names a post's sender in a feed: "you" for a post the human
 // owner typed, "root" for other owner posts (the external orchestrator), and
-// the member's name inside its own room otherwise.
+// the member's name inside its own room otherwise. A typed turn event names
+// the session whose turn ended, which the engine posted on its behalf.
 func SpeakerLabel(m room.Message, roomName string) string {
+	if ev, ok := m.TurnResult(); ok {
+		return strings.TrimPrefix(ev.Session, roomName+":")
+	}
 	if m.From == roomName {
 		return room.OwnerLabel(m.Human)
 	}
 	return strings.TrimPrefix(m.From, roomName+":")
 }
 
-// IsCompletion reports an automatic session completion record.
+// IsCompletion reports an automatic result record: the typed end of a turn,
+// the typed result of a detached shell job or workflow run, or a completion
+// stored before those events. The owner feed folds a result like a completion
+// and needs no separate flag.
 func IsCompletion(m room.Message) bool {
+	if _, ok := m.TurnResult(); ok {
+		return true
+	}
+	if _, ok := m.Shell(); ok {
+		return true
+	}
+	if _, ok := m.RunResult(); ok {
+		return true
+	}
+	// TODO: legacy/shim remove later — a completion stored before the typed
+	// turn events carries its state as the post kind. Remove when retained room
+	// history ages out.
 	return m.Kind == "completed" || m.Kind == "failed" || m.Kind == "stopped"
 }
 
@@ -381,6 +400,12 @@ func IsCompletion(m room.Message) bool {
 // The record still wakes the job's parent. Front ends show it in shell-jobs,
 // so it never counts as unread for the owner.
 func IsShellResult(m room.Message) bool {
+	if _, ok := m.Shell(); ok {
+		return true
+	}
+	// TODO: legacy/shim remove later — a shell result stored before the typed
+	// shell events names its job in the sender. Remove when retained room
+	// history ages out.
 	return IsCompletion(m) && strings.HasPrefix(m.From, "shell:")
 }
 
@@ -626,9 +651,15 @@ func (s *Service) postsOf(rec room.Record, msgs []room.Message, book avatarBook,
 }
 
 func decorate(m room.Message, roomName string, reads map[string]bool, book avatarBook) Post {
-	p := Post{Message: m, Owner: m.From == roomName, Completion: IsCompletion(m), FromHue: NameHue(m.From), Speaker: SpeakerLabel(m, roomName)}
+	name := m.From
+	if ev, ok := m.TurnResult(); ok {
+		// The engine posts a turn end on the session's behalf: its name colors
+		// the row and finds the sender's avatar.
+		name = ev.Session
+	}
+	p := Post{Message: m, Owner: m.From == roomName, Completion: IsCompletion(m), FromHue: NameHue(name), Speaker: SpeakerLabel(m, roomName)}
 	if !p.Owner {
-		p.FromEmoji = book.forPost(m.From, m.TS)
+		p.FromEmoji = book.forPost(name, m.TS)
 	}
 	p.Unread = countsUnread(m, roomName) && !reads[m.ID]
 	if !p.Owner {
