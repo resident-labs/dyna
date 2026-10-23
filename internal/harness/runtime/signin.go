@@ -49,6 +49,7 @@ type SignInState struct {
 	Code         string         `json:"code,omitempty"`
 	Message      string         `json:"message,omitempty"`
 	AcceptsPaste bool           `json:"acceptsPaste,omitempty"`
+	SecretInput  bool           `json:"secretInput,omitempty"`
 }
 
 // final reports a phase the runner and the owner can no longer change.
@@ -66,6 +67,8 @@ type signInSpec struct {
 	Parse func(st *SignInState, line string)
 	// AcceptsPaste shows a paste box and keeps stdin open unless Respond is set.
 	AcceptsPaste bool
+	// SecretInput masks the paste field from the first published state.
+	SecretInput bool
 	// Respond handles a pasted response instead of writing it to stdin.
 	Respond func(context.Context, SignInState, string) error
 	// GracefulStop lets a helper stop and join children in separate groups.
@@ -74,8 +77,7 @@ type signInSpec struct {
 	Timeout time.Duration
 }
 
-// signInSpecs lists the harnesses that sign in through the runner rather than a
-// terminal. Every other harness keeps its terminal.
+// signInSpecs lists the harnesses with an in-app sign-in adapter.
 var signInSpecs = map[string]signInSpec{
 	"pi":          {Argv: piOAuthArgv, Parse: parsePiSignIn, AcceptsPaste: true, GracefulStop: true},
 	"antigravity": {Parse: parseAntigravitySignIn, AcceptsPaste: true, Respond: respondAntigravitySignIn, GracefulStop: true, Timeout: 5 * time.Minute},
@@ -204,8 +206,8 @@ func (s *privateSignIn) closeStdin() {
 	}
 }
 
-// signInEnv merges the login environment over the engine's own, as the terminal
-// path does, and drops DYNA_* so the child never inherits session state.
+// signInEnv merges the login environment over the engine's own and drops
+// DYNA_* so the child never inherits session state.
 func signInEnv(overrides []string) []string {
 	merged := map[string]string{}
 	for _, item := range append(os.Environ(), overrides...) {
@@ -242,7 +244,7 @@ func (a *Runtime) PrivateRuntimeLoginState(id string) (SignInState, error) {
 		return SignInState{}, errors.New("private sign-in is not running")
 	}
 	if login.signIn == nil {
-		return SignInState{}, errors.New("this sign-in runs in a terminal")
+		return SignInState{}, errors.New("private sign-in state is unavailable")
 	}
 	return login.signIn.snapshot(), nil
 }
@@ -258,10 +260,30 @@ func (a *Runtime) RespondPrivateRuntimeLogin(id, text string) error {
 		return errors.New("This sign-in does not take a pasted code.")
 	}
 	code := strings.TrimSpace(text)
-	if code == "" || len(code) > 4096 || strings.ContainsAny(code, "\r\n") {
-		return errors.New("Paste the sign-in code or redirect URL on one line.")
+	limit := 4096
+	message := "Paste the sign-in code or redirect URL on one line."
+	if login.signIn.snapshot().SecretInput {
+		limit = maxProviderKey
+		message = "Enter the API key on one line."
+	}
+	if code == "" || len(code) > limit || strings.ContainsAny(code, "\r\n\x00") {
+		return errors.New(message)
 	}
 	return login.signIn.respond(code)
+}
+
+// unavailableSignIn leaves a recoverable failed card without preparing credentials.
+func (a *Runtime) unavailableSignIn(id, harness string) PrivateLogin {
+	state := SignInState{Phase: signInFailed, Message: fmt.Sprintf("Sign-in is not available for %s.", harness)}
+	done := make(chan struct{})
+	close(done)
+	a.privateLoginMu.Lock()
+	defer a.privateLoginMu.Unlock()
+	if a.privateLogins == nil {
+		a.privateLogins = map[string]*privateRuntimeLogin{}
+	}
+	a.privateLogins[id] = &privateRuntimeLogin{signIn: &privateSignIn{state: state, done: done, closed: true}}
+	return PrivateLogin{AccountID: id, SignIn: &state}
 }
 
 // startPrivateSignIn runs a login command with pipes instead of a terminal, so
@@ -280,7 +302,7 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 		timeout = signInTimeout
 	}
 	ctx, cancel := context.WithTimeout(a.lifetimeContext(), timeout)
-	signIn := &privateSignIn{state: SignInState{Phase: signInStarting, AcceptsPaste: spec.AcceptsPaste}, cancel: cancel, done: make(chan struct{})}
+	signIn := &privateSignIn{state: SignInState{Phase: signInStarting, AcceptsPaste: spec.AcceptsPaste, SecretInput: spec.SecretInput}, cancel: cancel, done: make(chan struct{})}
 	if spec.Respond != nil {
 		signIn.paste = func(st SignInState, text string) error { return spec.Respond(ctx, st, text) }
 	}

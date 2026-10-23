@@ -133,8 +133,8 @@ test('shared personal login harnesses require confirmation before sign-in, resta
     setInterval: () => 1,
     clearInterval: () => {},
     api: {
-      beginPrivateRuntimeLogin: async (...args: unknown[]) => { calls.push(['begin', ...args]); return { accountId: 'a1', terminalId: 't1' } },
-      restartPrivateRuntimeLogin: async (...args: unknown[]) => { calls.push(['restart', ...args]); return { accountId: 'a1', terminalId: 't2' } },
+      beginPrivateRuntimeLogin: async (...args: unknown[]) => { calls.push(['begin', ...args]); return { accountId: 'a1', signIn: { phase: 'waiting' } } },
+      restartPrivateRuntimeLogin: async (...args: unknown[]) => { calls.push(['restart', ...args]); return { accountId: 'a1', signIn: { phase: 'waiting' } } },
       switchPrivateRuntimeAccount: async (...args: unknown[]) => { calls.push(['switch', ...args]); return { accounts: [] } },
     },
   }
@@ -253,7 +253,7 @@ test('only verified recommendation statuses permit automatic installation', () =
 
 // The pane's sign-in functions with an api the test controls.
 interface SignInContext {
-  login: { terminalId: string } | null
+  login: { signIn: { phase: string } } | null
   confirm: Confirmation | null
   showSignInForm: boolean
   snapshot: { accounts: { id: string }[] } | null
@@ -270,8 +270,8 @@ function signInContext(found: PersonalLogin | null) {
       privateRuntimes: async () => ({}),
       findPersonalLogin: async (...args: unknown[]) => { calls.push(['find', ...args]); return found },
       usePersonalLogin: async (...args: unknown[]) => { calls.push(['use', ...args]); return { accounts: [{ id: 'p', harness: 'codex', active: true }] } },
-      beginPrivateRuntimeLogin: async (...args: unknown[]) => { calls.push(['begin', ...args]); return { accountId: 'a1', terminalId: 't1' } },
-      restartPrivateRuntimeLogin: async (...args: unknown[]) => { calls.push(['restart', ...args]); return { accountId: 'a1', terminalId: 't2' } },
+      beginPrivateRuntimeLogin: async (...args: unknown[]) => { calls.push(['begin', ...args]); return { accountId: 'a1', signIn: { phase: 'waiting' } } },
+      restartPrivateRuntimeLogin: async (...args: unknown[]) => { calls.push(['restart', ...args]); return { accountId: 'a1', signIn: { phase: 'waiting' } } },
     },
   }
   runFunctions(paneSource, ['signIn', 'signInVersion', 'findPersonalLogin', 'usePersonalLogin', 'requestBeginLogin', 'performBeginLogin', 'requestRestartLogin', 'performRestartLogin'], context)
@@ -288,7 +288,7 @@ test('Sign in uses the recommended version when Dyna knows no installed one, the
   await call(context, 'signIn', row)
   // Nothing found: the normal sign-in starts without a dialog.
   assert.deepEqual(calls, [['find', 'codex', '3.0.0'], ['begin', 'codex', '3.0.0', '', false]])
-  assert.equal(need(context.login).terminalId, 't1')
+  assert.equal(need(context.login).signIn.phase, 'waiting')
 })
 
 test('Sign in offers the personal login, and either choice works', async () => {
@@ -332,12 +332,12 @@ test('Sign in on a saved account signs in again without a scan', async () => {
   assert.equal(need(calls[0])[0], 'find')
 })
 
-test('private login recovery uses saved account metadata and keeps multiple terminals', () => {
-  const logins: PrivateLogin[] = [{ accountId: 'a', terminalId: 't1' }, { accountId: 'b', terminalId: 't2', warning: 'Shared login' }]
+test('private login recovery uses saved account metadata and keeps multiple cards', () => {
+  const logins: PrivateLogin[] = [{ accountId: 'a', signIn: { phase: 'waiting' } }, { accountId: 'b', signIn: { phase: 'waiting' }, warning: 'Shared login' }]
   const flows = recoveredLogins(logins, [account('a', 'claude-code'), account('b', 'codex')])
   assert.deepEqual(flows.map((flow) => flow.harness), ['claude-code', 'codex'])
   assert.equal(need(flows[1]).warning, 'Shared login')
-  assert.deepEqual(recoveredLogins([{ accountId: 'missing', terminalId: 't3' }], []), [])
+  assert.deepEqual(recoveredLogins([{ accountId: 'missing', signIn: { phase: 'waiting' } }], []), [])
 })
 
 test('successful login cancellation accepts null, clears the flow, and reloads saved accounts', async () => {
@@ -396,20 +396,20 @@ test('Refresh checks current metadata while normal page loads use cached metadat
   assert.match(paneSource, /onclick=\{\(\) => load\(true\)\}/)
 })
 
-test('a full page reload recovers the private login terminal from the backend', async () => {
-  const context: { login: { terminalId: string; harness: string } | null; pendingLogin: { accountId: string } | null; error: string; [name: string]: unknown } = {
+test('a full page reload recovers the private login card from the backend', async () => {
+  const context: { login: { signIn: { phase: string }; harness: string } | null; pendingLogin: { accountId: string } | null; error: string; [name: string]: unknown } = {
     ...helpers,
     stopped: false, loading: false, error: '', snapshot: null, catalog: null, loginFlows: [], login: null, pendingLogin: null, recoveredLogins,
     api: {
       privateRuntimes: async () => ({ selectedVersions: {}, accounts: [{ id: 'a', harness: 'codex' }] }),
       harnessConfig: async () => ({ mcp: [], skills: [] }),
-      privateRuntimeLogins: async () => [{ accountId: 'a', terminalId: 'terminal-live' }],
+      privateRuntimeLogins: async () => [{ accountId: 'a', signIn: { phase: 'waiting' } }],
     },
   }
   runFunctions(paneSource, ['load'], context)
   await call(context, 'load')
   assert.equal(context.error, '')
-  assert.equal(need(context.login).terminalId, 'terminal-live')
+  assert.equal(need(context.login).signIn.phase, 'waiting')
   assert.equal(need(context.login).harness, 'codex')
   assert.equal(need(context.pendingLogin).accountId, 'a')
 })
@@ -583,7 +583,7 @@ test('the key reaches only the add call and is cleared after saving', () => {
   assert.match(dialog, /type="password"/)
   assert.ok(dialog.indexOf("key = ''") > dialog.indexOf("'add', picked.id, key"))
   assert.doesNotMatch(dialog, /console\.|localStorage|sessionStorage/)
-  // A pending sign-in of any harness, Pi included, keeps its terminal and Finish controls.
+  // A pending sign-in of any harness, Pi included, keeps its card reachable.
   assert.match(paneSource, /\{#if hasSubscriptionLogin\(r\.id\) \|\| \(login && login\.harness === r\.id\)\}/)
   assert.match(paneSource, /onsaved=\{[^}]*load\(\)/)
   assert.match(paneSource, /api\.harnessProviderKeys\(id, 'remove', provider\)/)
@@ -608,7 +608,7 @@ test('finish sign-in shows the engine message', async () => {
   const message = 'Google did not confirm the account of this Antigravity sign-in, so nothing was saved.'
   const context: { [name: string]: unknown } = {
     ...helpers, busy: false, stopped: false, error: '', notice: '', labelInput: '', pendingLogin: null,
-    login: { accountId: 'a1', terminalId: 't1', harness: 'antigravity' }, loginFlows: [],
+    login: { accountId: 'a1', signIn: { phase: 'waiting' }, harness: 'antigravity' }, loginFlows: [],
     api: { finishPrivateRuntimeLogin: async () => { throw new Error(message) } },
   }
   runFunctions(paneSource, ['finishLogin'], context)
@@ -616,7 +616,7 @@ test('finish sign-in shows the engine message', async () => {
   assert.equal(context.error, message)
   context.api = { finishPrivateRuntimeLogin: async () => { throw null } }
   await call(context, 'finishLogin')
-  assert.equal(context.error, 'Sign-in is not complete yet. Finish signing in inside the terminal first.')
+  assert.equal(context.error, 'Sign-in is not complete yet.')
 })
 
 test('Antigravity sign-in does not promise a personal login copy', () => {

@@ -82,22 +82,17 @@ func (a *Runtime) InstallPrivateRuntime(ctx context.Context, harness, version st
 	return a.PrivateRuntimes(ctx)
 }
 
-// privateRuntimeLogin serializes terminal shutdown with native login completion.
+// privateRuntimeLogin serializes cancellation with native login completion.
 type privateRuntimeLogin struct {
-	control    sync.Mutex
-	finished   bool
-	flow       *NativeLogin
-	terminalID string
-	// signIn is set when the flow runs without a terminal.
-	signIn *privateSignIn
+	control sync.Mutex
+	flow    *NativeLogin
+	signIn  *privateSignIn
 }
 
 type PrivateLogin struct {
-	AccountID  string `json:"accountId"`
-	TerminalID string `json:"terminalId"`
-	Warning    string `json:"warning,omitempty"`
-	// SignIn carries the in-app state of a runner flow. TerminalID stays empty.
-	SignIn *SignInState `json:"signIn,omitempty"`
+	AccountID string       `json:"accountId"`
+	Warning   string       `json:"warning,omitempty"`
+	SignIn    *SignInState `json:"signIn,omitempty"`
 }
 
 func (a *Runtime) BeginPrivateRuntimeLogin(ctx context.Context, harness, version, label string, _ bool) (PrivateLogin, error) {
@@ -133,43 +128,31 @@ func (a *Runtime) UsePersonalLoginSnapshot(ctx context.Context, harness string) 
 	return a.PrivateRuntimes(ctx)
 }
 func (a *Runtime) startPrivateLogin(id, exe string) (PrivateLogin, error) {
+	n, err := a.Accounts.Find(id)
+	if err != nil {
+		return PrivateLogin{}, err
+	}
+	spec, ok := signInSpecs[n.Harness]
+	if !ok {
+		return a.unavailableSignIn(id, n.Harness), nil
+	}
+	if openCodeKeySignIn(n) {
+		spec = openCodeGoSignInSpec
+	}
 	flow, err := a.Accounts.BeginLogin(a.lifetimeContext(), id, exe)
 	if err != nil {
 		return PrivateLogin{}, err
 	}
-	n, err := a.Accounts.Find(id)
+	// Antigravity still needs the scoped ACP helper before its card starts.
+	flow.Argv, err = a.privateSignInCommand(id, exe, flow)
 	if err != nil {
 		_ = flow.Cancel()
 		return PrivateLogin{}, err
 	}
-	argv, err := a.privateSignInCommand(id, exe, flow)
-	if err != nil {
-		_ = flow.Cancel()
-		return PrivateLogin{}, err
-	}
-	// Prepare the native helper before choosing the card or terminal, so
-	// Antigravity's card uses the same scoped ACP login as its terminal.
-	if spec, ok := signInSpecs[n.Harness]; ok && !openCodeKeySignIn(n) {
-		flow.Argv = argv
-		return a.startPrivateSignIn(id, n.Harness, spec, flow)
-	}
-	term, err := a.terminals.OpenCommand(argv, flow.Env, flow.Cwd, 90, 24)
-	if err != nil {
-		_ = flow.Cancel()
-		return PrivateLogin{}, err
-	}
-	a.privateLoginMu.Lock()
-	defer a.privateLoginMu.Unlock()
-	if a.privateLogins == nil {
-		a.privateLogins = map[string]*privateRuntimeLogin{}
-	}
-	login := &privateRuntimeLogin{flow: flow, terminalID: term.ID}
-	a.privateLogins[id] = login
-	go a.watchPrivateLogin(a.lifetimeContext(), login)
-	return PrivateLogin{AccountID: id, TerminalID: term.ID, Warning: flow.Warning}, nil
+	return a.startPrivateSignIn(id, n.Harness, spec, flow)
 }
 
-// privateSignInCommand returns the terminal command for one private sign-in.
+// privateSignInCommand returns the helper command for one private sign-in.
 func (a *Runtime) privateSignInCommand(id, exe string, flow *NativeLogin) ([]string, error) {
 	n, err := a.Accounts.Find(id)
 	if err != nil {
@@ -225,18 +208,8 @@ func (a *Runtime) FinishPrivateRuntimeLogin(ctx context.Context, id string) (Pri
 	}
 	login.control.Lock()
 	defer login.control.Unlock()
-	if login.signIn == nil {
-		exited := false
-		for _, term := range a.terminals.List("") {
-			if term.ID == login.terminalID {
-				exited = term.Exited
-			}
-		}
-		if !exited {
-			if err := a.terminals.Close(login.terminalID); err != nil {
-				return PrivateRuntimeSnapshot{}, err
-			}
-		}
+	if login.flow == nil {
+		return PrivateRuntimeSnapshot{}, errors.New(login.signIn.snapshot().Message)
 	}
 	result, err := login.flow.Complete(a.lifetimeContext())
 	if err != nil {
@@ -245,7 +218,6 @@ func (a *Runtime) FinishPrivateRuntimeLogin(ctx context.Context, id string) (Pri
 	if err := loginReady(result); err != nil {
 		return PrivateRuntimeSnapshot{}, err
 	}
-	login.finished = true
 	a.privateLoginMu.Lock()
 	if a.privateLogins[id] == login {
 		delete(a.privateLogins, id)
@@ -254,7 +226,7 @@ func (a *Runtime) FinishPrivateRuntimeLogin(ctx context.Context, id string) (Pri
 	return a.PrivateRuntimes(ctx)
 }
 
-// CancelPrivateLogins stops all native terminals before releasing their login gates.
+// CancelPrivateLogins stops all native sign-ins before releasing their login gates.
 func (a *Runtime) CancelPrivateLogins() {
 	for _, login := range a.PrivateRuntimeLogins() {
 		_ = a.cancelPrivateLogin(login.AccountID)
@@ -360,39 +332,6 @@ func (a *Runtime) SyncPrivateRuntime(ctx context.Context, harness string) (Priva
 		return PrivateRuntimeSnapshot{}, err
 	}
 	return a.PrivateRuntimes(ctx)
-}
-
-func (a *Runtime) watchPrivateLogin(ctx context.Context, login *privateRuntimeLogin) {
-	var offset uint64
-	for {
-		event, wake, err := a.terminals.Read(login.terminalID, offset)
-		if err != nil || event.Exited {
-			// An explicit finish or cancel must stop the terminal before the watcher
-			// can release the gate. Complete and Cancel are idempotent.
-			login.control.Lock()
-			defer login.control.Unlock()
-			if login.finished {
-				return
-			}
-			login.finished = true
-			if err != nil {
-				_ = login.flow.Cancel()
-				return
-			}
-			if event.ExitCode == 0 {
-				_, _ = login.flow.Complete(ctx)
-			} else {
-				_ = login.flow.Cancel()
-			}
-			return
-		}
-		offset = event.Offset
-		select {
-		case <-ctx.Done():
-			return
-		case <-wake:
-		}
-	}
 }
 
 // UninstallPrivateRuntime removes every Dyna copy of a harness.

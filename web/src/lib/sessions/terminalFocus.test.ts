@@ -35,16 +35,12 @@ test('a pane takes focus on open unless it is a phone pane or refuses it', () =>
   assert.equal(terminalFocusOnOpen(null, false), true)
   // A phone pane keeps the soft keyboard down.
   assert.equal(terminalFocusOnOpen(null, true), false)
-  // The sign-in terminal is narrow and must still take typing at once.
+  // An explicit override can focus a narrow pane.
   assert.equal(terminalFocusOnOpen(true, true), true)
   assert.equal(terminalFocusOnOpen(false, false), false)
 })
 
-test('the sign-in terminal asks for focus and the pane shows the hint', () => {
-  const signin = readFileSync(new URL('../settings/harnesses/HarnessesPane.svelte', import.meta.url), 'utf8')
-  const usage = /<TermPane[^>]*id=\{login\.terminalId\}[^>]*\/>/.exec(signin)?.[0] ?? ''
-  assert.match(usage, /id=\{login\.terminalId\}/, 'the sign-in terminal is still rendered')
-  assert.match(usage, /\bautofocus\b/, 'the sign-in terminal takes keyboard focus when it opens')
+test('the terminal pane shows a focus hint', () => {
   const pane = readFileSync(new URL('./TermPane.svelte', import.meta.url), 'utf8')
   assert.match(pane, /terminalFocusHint\(/, 'the pane shows the hint while it lacks focus')
   assert.match(pane, /terminalReady\(/, 'the pane shows the hint only for a terminal that attached')
