@@ -40,21 +40,32 @@ func (m *Manager) closeHeir(info Info) (Info, error) {
 	return Info{}, nil
 }
 
+// errGoalNeedsRoot marks a held goal that no open agent can take. Root and the
+// owner hold no goals, so a close refuses this goal with or without --force.
+var errGoalNeedsRoot = errors.New("goal has no open agent to hold it")
+
 // refuseGoalsForTopHeir refuses a close whose heir is root, or the owner when
-// no ancestor is open. Root and the owner hold no goals, so such a goal would
-// have nobody to keep working it. The message names each open goal with the
-// commands that resolve it, and tells root to ask the owner when only the
-// owner can unblock the work. A forced close refuses for the same reason.
+// no ancestor is open. It reads the heir itself; use refuseGoalsForHeir when
+// the caller already holds one.
 func (m *Manager) refuseGoalsForTopHeir(info Info) error {
-	held, err := m.goalOwned(map[string]Info{info.ID: info})
-	if err != nil || len(held) == 0 {
-		return nil
-	}
 	heir, err := m.closeHeir(info)
 	if err != nil {
 		return err
 	}
+	return m.refuseGoalsForHeir(info, heir)
+}
+
+// refuseGoalsForHeir refuses held goals that heir cannot keep working. Root
+// and the owner hold no goals, so such a goal would have nobody to work it.
+// The message names each open goal with the commands that resolve it, and
+// tells root to ask the owner when only the owner can unblock the work. A
+// forced close refuses for the same reason.
+func (m *Manager) refuseGoalsForHeir(info, heir Info) error {
 	if heir.ID != "" && heir.Role != RoleRoot {
+		return nil
+	}
+	held, err := m.goalOwned(map[string]Info{info.ID: info})
+	if err != nil || len(held) == 0 {
 		return nil
 	}
 	goals := make([]Responsibility, len(held))
@@ -90,8 +101,12 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]string, 
 			if m.checkpoint != nil {
 				m.checkpoint("close-before-goal-handoff")
 			}
-			// A goal moves only to a live agent. refuseGoalsForTopHeir already
-			// refused a close that would leave the goal with root or the owner.
+			// A goal moves only to a live agent. Root and the owner hold no
+			// goals, so a goal that would reach them is refused, never assigned.
+			if heir.ID == "" || heir.Role == RoleRoot {
+				errs = append(errs, fmt.Errorf("%w: %s; ask the owner with dyna ask, then drop or finish it, or hand it to an open agent", errGoalNeedsRoot, item.ID))
+				continue
+			}
 			moved, err := m.goalStore().HandoffHolder(info.RoomID, item.ID, info.ID, heir.ID)
 			if err != nil {
 				errs = append(errs, err)
