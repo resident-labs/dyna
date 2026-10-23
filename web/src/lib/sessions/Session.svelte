@@ -4,7 +4,6 @@
   import { tick, onDestroy, onMount } from 'svelte'
   import { dialog } from '../ui/dialog.js'
   import { threadHeaderSwipe } from './threadHeaderSwipe.ts'
-  import Avatar from '../ui/Avatar.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import Skeleton from '../ui/Skeleton.svelte'
   import Confirm from '../ui/Confirm.svelte'
@@ -12,7 +11,8 @@
   import DmMessage from './DmMessage.svelte'
   import { createSelection } from '../ui/selection.svelte.ts'
   import DmRows from './DmRows.svelte'
-  import { dmView, groupMessages, threadList } from './dm.ts'
+  import ThreadChip from './ThreadChip.svelte'
+  import { dmView, groupMessages, plain, threadPanel } from './dm.ts'
   import { api } from '../../api.ts'
   import { short, ago } from '../ui/format.ts'
   import ComposerBox from '../ui/ComposerBox.svelte'
@@ -27,7 +27,7 @@
   import type { QueueItem, Session as SessionData } from '../api/session.ts'
   import type { ShellJob } from '../api/terminal.ts'
   import type { ProfileView } from '../settings/support.ts'
-  import type { DmRow, MessageRow, Receipt, Thread, ThreadPost } from './dm.ts'
+  import type { DmRow, MessageRow, PanelRow, Receipt, ThreadPost } from './dm.ts'
 
   interface Props {
     readOnly?: boolean
@@ -54,13 +54,16 @@
     onpost?: ((postId: string) => void) | null
     onissue?: ((number: number) => void) | null
     onchild: (member: Member) => void
+    // A member row of the thread panel opens that session; the parent row and
+    // the sibling rows use the same way in as a child row.
+    onsession?: ((member: Member) => void) | null
     onjob: (job: ShellJob) => void
     threadsOpen?: boolean
     selectedThread?: string
     draft?: string
     readingHistory?: boolean
   }
-  let { readOnly = false, onreopen = null, reopening = '', ondismisssession = null, dismissing = '', session = null, error = '', room, onharness = null, onsend, queue = [], onunqueue = null, ondismiss = null, focusedTurn = 0, onrecent = null, onearlier = null, onnewer = null, onpresent = null, members = [], jobs = [], onopenfile, onpost = null, onissue = null, onchild, onjob, threadsOpen = $bindable(false), selectedThread = $bindable(''), draft = $bindable(''), readingHistory = $bindable(false) }: Props = $props()
+  let { readOnly = false, onreopen = null, reopening = '', ondismisssession = null, dismissing = '', session = null, error = '', room, onharness = null, onsend, queue = [], onunqueue = null, ondismiss = null, focusedTurn = 0, onrecent = null, onearlier = null, onnewer = null, onpresent = null, members = [], jobs = [], onopenfile, onpost = null, onissue = null, onchild, onsession = onchild, onjob, threadsOpen = $bindable(false), selectedThread = $bindable(''), draft = $bindable(''), readingHistory = $bindable(false) }: Props = $props()
   // One selected post for the message list and one for the open thread (postSelect.ts).
   const listSelection = createSelection()
   const threadSelection = createSelection()
@@ -73,8 +76,10 @@
   const arrived = arrivals(), threadArrived = arrivals()
   let isNew = $derived(arrived(m?.id, dm.rows.map((r) => r.key)))
   let selected = $derived(dm.threads.find((t) => t.key === selectedThread) ?? (selectedThread ? { key: selectedThread, posts: [] } : null))
-  let list = $derived(threadList(dm.threads, children))
-  let allRecent = $state(false)
+  // The panel keeps the threads it groups, and the threads it leaves to the
+  // Children, Parent and Siblings sections are gone from Other threads.
+  let panel = $derived(threadPanel(dm.threads, members, m ?? {}))
+  let folded = $state({ siblings: true, others: true })
   let threadRows = $derived(groupMessages((selected?.posts || []).map((p): MessageRow => ({ kind: 'message', key: p.id, author: p.from, ts: p.ts, text: p.text, post: p, delivery: p.delivery, pending: p.pending }))))
   let isNewInThread = $derived(threadArrived(selected?.key, threadRows.map((r) => r.key)))
   let threadScroller = $state<HTMLElement>()
@@ -313,18 +318,30 @@
         {:else}
           <header class="panel-head" use:threadHeaderSwipe={{ enabled: threadOverlay, back: backFromThread }}><strong>Threads<small>{m.name} · {dm.threads.length} thread{dm.threads.length === 1 ? '' : 's'}</small></strong><button onclick={() => (threadsOpen = false)} aria-label="Close threads">✕</button></header>
           <div class="thread-list">
-            {#each allRecent ? list.recent : list.recent.slice(0, 3) as thread (thread.key)}{@render threadRow(thread)}{/each}
-            {#if list.recent.length > 3}<button class="context-row more" onclick={() => (allRecent = !allRecent)}>{allRecent ? 'Show fewer' : `Show ${list.recent.length - 3} more`}</button>{/if}
-            {#if !dm.threads.length && !children.length}<EmptyState title="No threads yet">Posts between agents appear here.</EmptyState>{/if}
-            {#if children.length}
+            {#if panel.children.length}
               <h3>Children</h3>
-              {#each list.children as { member: child, thread } (child.id)}
-                <div class="child-row">
-                  <button class="context-row" title={`Open ${child.name}'s messages`} onclick={() => onchild?.(child)}><Avatar name={child.name} emoji={child.emoji} hue={child.hue} size={24} state={child.state} status={child.status} ring="var(--side)" /><span>{child.name}</span><small>{sessionStatus(child)}</small></button>
-                  {#if thread}<button class="thread-count" title={`Posts between ${m.name} and ${child.name}`} onclick={() => openThread(thread.key)}>{thread.posts.length} · {ago(thread.posts.at(-1)?.ts)} ›</button>{/if}
-                </div>
-              {/each}
+              {#each panel.children as row (row.member.id ?? row.member.address)}{@render memberRow(row)}{/each}
             {/if}
+            {#if panel.parent}
+              <h3>Parent</h3>
+              {@render memberRow(panel.parent)}
+            {/if}
+            {#if panel.siblings.length}
+              <h3><button class="section" aria-expanded={!folded.siblings} onclick={() => (folded = { ...folded, siblings: !folded.siblings })}><span class="chev" aria-hidden="true">{folded.siblings ? '▸' : '▾'}</span>Siblings<small>{panel.siblings.length}</small></button></h3>
+              {#if !folded.siblings}
+                {#each panel.siblings as row (row.member.id ?? row.member.address)}{@render memberRow(row)}{/each}
+              {/if}
+            {/if}
+            {#if panel.others.length}
+              <h3><button class="section" aria-expanded={!folded.others} onclick={() => (folded = { ...folded, others: !folded.others })}><span class="chev" aria-hidden="true">{folded.others ? '▸' : '▾'}</span>Other threads<small>{panel.others.length}</small></button></h3>
+              {#if !folded.others}
+                {#each panel.others as thread (thread.key)}
+                  {@const person = members.find((p) => p.address === thread.key)}
+                  <div class="panel-row"><ThreadChip glyph="▱" name={short(thread.key, room.name)} emoji={person?.emoji} hue={person?.hue} badge={`${thread.posts.length} message${thread.posts.length === 1 ? '' : 's'}`} snippet={plain(thread.posts.at(-1)?.text)} time={ago(thread.posts.at(-1)?.ts)} selected={selectedThread === thread.key} onopen={() => openThread(thread.key)} /></div>
+                {/each}
+              {/if}
+            {/if}
+            {#if !panel.children.length && !panel.parent && !panel.siblings.length && !panel.others.length}<EmptyState title="No threads yet">Posts between agents appear here.</EmptyState>{/if}
           </div>
         {/if}
       </aside>
@@ -333,9 +350,14 @@
   {/if}
 </section>
 
-{#snippet threadRow(thread: Thread)}
-  {@const person = members.find((p) => p.address === thread.key)}
-  <button class="context-row" onclick={() => openThread(thread.key)}><Avatar name={short(thread.key, room.name)} emoji={person?.emoji} hue={person?.hue} size={24} /><span>{short(thread.key, room.name)}</span><small>{thread.posts.length} · {ago(thread.posts.at(-1)?.ts)}</small></button>
+{#snippet memberRow(row: PanelRow<Member>)}
+  <div class="panel-row">
+    <ThreadChip name={row.member.name} emoji={row.member.emoji} hue={row.member.hue} state={row.member.state} status={row.member.status} note={sessionStatus(row.member)} title={`Open ${row.member.name}'s messages`} onopen={() => onsession?.(row.member)} />
+    {#if row.thread && row.thread.posts.length}
+      {@const thread = row.thread}
+      <button class="thread-count" title={`Posts between ${session?.member.name ?? ''} and ${row.member.name}`} onclick={() => openThread(thread.key)}>{thread.posts.length}<span class="when"> · {ago(thread.posts.at(-1)?.ts)}</span> ›</button>
+    {/if}
+  </div>
 {/snippet}
 
 {#if dismissConfirm}
@@ -370,22 +392,20 @@
   .thread-log { position: relative; overflow-anchor: none; flex: 1; min-height: 80px; overflow-y: auto; padding-bottom: var(--s3); }
   .thread-list { flex: 1; overflow-y: auto; padding: var(--s2); }
   h3 { margin: 6px; font-size: var(--t-cap); text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
-  .context-row { display: flex; align-items: center; gap: var(--s2); padding: 5px 6px; width: 100%; border-radius: 6px; text-align: left; color: var(--muted); font-size: var(--t-ui); transition: background-color var(--motion-fast) var(--ease); }
+  .section { display: flex; align-items: center; gap: var(--s1); font-size: var(--t-cap); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); padding: 2px 0; transition: color var(--motion-fast) var(--ease); }
+  .section small { font-weight: 400; color: var(--faint); transition: color var(--motion-fast) var(--ease); }
+  .section .chev { font-size: var(--t-sm); }
   @media (hover: hover) {
-    .context-row:hover { background: var(--hover); }
+    .section:hover, .section:hover small { color: var(--ink); }
   }
-  .context-row:active { background: var(--select); }
-  .context-row > span:not(.symbol) { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .context-row small { color: var(--faint); font-size: var(--t-cap); }
-  .context-row.more { color: var(--faint); font-size: var(--t-sm); padding-left: 38px; }
   h3:not(:first-child) { margin-top: 14px; }
-  .child-row { display: flex; align-items: center; gap: var(--s1); }
+  .panel-row { display: flex; align-items: center; gap: var(--s1); }
+  .panel-row :global(.thread-chip) { flex: 1; }
   .thread-count { flex: none; padding: var(--s1) var(--s2); border-radius: 6px; font-size: var(--t-cap); color: var(--faint); white-space: nowrap; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .thread-count:hover { background: var(--hover); color: var(--ink); }
   }
   .thread-count:active { background: var(--select); }
-  .symbol { width: 24px; flex: none; text-align: center; }
   .thread-wrap { display: contents; }
   .thread-wrap.overlay { display: block; position: absolute; inset: 0; z-index: 31; }
   .thread-wrap.overlay .panel-head { touch-action: pan-y; }
@@ -395,6 +415,7 @@
     .thread-scrim { display: block; position: absolute; inset: 0; background: #0006; z-index: 31; }
   }
   @media (max-width: 760px) {
-    .context-row { min-height: 44px; }
+    .panel-row :global(.thread-chip) { min-height: 44px; }
+    .thread-count .when { display: none; }
   }
 </style>

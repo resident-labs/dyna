@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { speaker } from '../ui/posts.ts'
-import { postedTo, turnHead, turnTail, dmView, groupMessages, sameText, sessionAddress, threadKeys, threadList, plain, voiceRequest, type DmItem, type DmRow, type DmSession, type Receipt, type Thread, type ThreadPost } from './dm.ts'
+import { postedTo, turnHead, turnTail, dmView, groupMessages, sameText, sessionAddress, threadKeys, threadPanel, plain, voiceRequest, type DmItem, type DmRow, type DmSession, type Receipt, type Thread, type ThreadPost } from './dm.ts'
 import type { Attachment } from '../api/room.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { need } from '../../../test/need.ts'
@@ -239,17 +239,23 @@ test('every peer message folds into that agent\'s thread; the newest gets a chip
   assert.deepEqual(peer.posts.map((p) => p.text), ['older steer', 'newest steer'])
   assert.equal(peer.posts.at(-1)?.text, 'newest steer')
 })
-test('the thread list puts agents newest first', () => {
+test('the thread panel keeps open direct children, then the parent and siblings, and lists every other thread last', () => {
   const thread = (key: string, s: number): Thread => ({ key, posts: [post(key, key, [address], s)] })
-  const { recent } = threadList([thread('room:old', 1), thread('room:new', 5)])
-  assert.deepEqual(recent.map((t) => t.key), ['room:new', 'room:old'])
-})
-test('the thread list gives every child a row and keeps child threads out of recent', () => {
-  const thread = (key: string, s: number): Thread => ({ key, posts: [post(key, key, [address], s)] })
-  const kids = [{ name: 'quiet', address: 'room:quiet' }, { name: 'busy', address: 'room:busy' }, { name: 'asleep', address: 'room:asleep' }]
-  const { recent, children } = threadList([thread('room:peer', 9), thread('room:busy', 3)], kids)
-  assert.deepEqual(recent.map((t) => t.key), ['room:peer'])
-  assert.deepEqual(children.map((c) => [c.member.name, c.thread?.key]), [['busy', 'room:busy'], ['asleep', undefined], ['quiet', undefined]])
+  const member = (id: string, parent?: string, closed?: boolean) => ({ id, name: id, address: `room:${id}`, parent, closed })
+  const members = [
+    member('lead'), member('kid', 'lead'), member('busy', 'lead'), member('gone', 'lead', true),
+    member('baby', 'kid'), member('boss'), member('peer', 'boss'), member('else'),
+  ]
+  const threads = [thread('room:boss', 1), thread('room:busy', 9), thread('room:gone', 3), thread('room:baby', 5), thread('room:peer', 7), thread('room:else', 6), thread('system:parent-checkin', 11)]
+  const panel = threadPanel(threads, members, { id: 'lead', parent: 'boss' })
+  assert.deepEqual(panel.children.map((row) => [row.member.name, row.thread?.key]), [['busy', 'room:busy'], ['kid', undefined]])
+  assert.equal(panel.parent?.member.name, 'boss')
+  assert.deepEqual(panel.siblings.map((row) => [row.member.name, row.thread?.key]), [['peer', 'room:peer']])
+  assert.deepEqual(panel.others.map((t) => t.key), ['system:parent-checkin', 'room:else', 'room:baby'])
+  // A root has no parent and no siblings, so those sections stay empty.
+  const root = threadPanel(threads, members, { id: 'boss' })
+  assert.equal(root.parent, null)
+  assert.deepEqual(root.siblings, [])
 })
 test('a finished turn ends with a footer row at its end time; a running turn has none', () => {
   const session = { address, turns: [
