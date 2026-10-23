@@ -3,8 +3,9 @@
 // -run Events`, so the payload types of an event and its card cannot drift.
 //
 // A renderer takes { post, notice, surface } and reads the typed payload only:
-// no text parsing and no feed-only state, so the same card serves the room feed
-// and a session DM (system-events.md section 3.4.2).
+// no text parsing and no feed-only state. The feed draws it now. The session DM
+// row is wired in PR 3 (system-events.md section 3.4.2); the surface prop and
+// the DM-surface render in the test keep the card ready for it.
 import type { Component } from 'svelte'
 import WorktreeCard from './WorktreeCard.svelte'
 import { eventSpecs, isWorktreeEvent } from './events.gen.ts'
