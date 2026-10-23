@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 )
 
 // codexDeviceSample is what `codex login --device-auth` prints when its output
@@ -38,22 +37,47 @@ func TestCodexSignInParserReadsLinkAndCode(t *testing.T) {
 	}
 }
 
+// printSampleArgv prints the codex sample and exits, so the runner sees a
+// login that finishes on its own.
+func printSampleArgv([]string) []string {
+	return []string{"/bin/sh", "-c", "printf '" + codexDeviceSample + "'"}
+}
+
+// holdSampleArgv prints the sample, then reads stdin, which the runner keeps
+// open. The process stays alive with no sleep, and each printed line reaches
+// the parser before the test continues.
+func holdSampleArgv([]string) []string {
+	return []string{"/bin/sh", "-c", "printf '" + codexDeviceSample + "'; read held"}
+}
+
+// waitingSignal closes a channel the first time the parser reaches the waiting
+// state, so a test never reads the state before the code was parsed.
+func waitingSignal(once *sync.Once, reached chan struct{}, parse func(*SignInState, string)) func(*SignInState, string) {
+	return func(st *SignInState, line string) {
+		parse(st, line)
+		if st.Phase == signInWaiting {
+			once.Do(func() { close(reached) })
+		}
+	}
+}
+
 func TestPrivateSignInSettlesWithoutTerminal(t *testing.T) {
 	a := testPrivateRuntime(t)
-	completed, released := 0, 0
+	runs := map[string]int{}
 	flow := &NativeLogin{
 		Cwd: t.TempDir(),
 		Complete: func(context.Context) (NativeAccount, error) {
-			completed++
+			runs["complete"]++
 			return NativeAccount{Status: "ready"}, nil
 		},
-		Cancel: func() error { released++; return nil },
+		Cancel: func() error { runs["cancel"]++; return nil },
 	}
-	spec := signInSpec{Argv: func([]string) []string { return []string{"/bin/sh", "-c", "printf '" + codexDeviceSample + "'"} }, Parse: parseCodexSignIn}
+	spec := signInSpec{Argv: printSampleArgv, Parse: parseCodexSignIn}
 	login, err := a.startPrivateSignIn("acct", "codex", spec, flow)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("acct") })
 	if login.TerminalID != "" {
 		t.Fatalf("runner opened a terminal %q", login.TerminalID)
 	}
@@ -64,11 +88,7 @@ func TestPrivateSignInSettlesWithoutTerminal(t *testing.T) {
 	if running == nil || running.signIn == nil {
 		t.Fatal("runner flow is not registered")
 	}
-	select {
-	case <-running.signIn.done:
-	case <-time.After(time.Second):
-		t.Fatal("runner did not settle")
-	}
+	<-running.signIn.done
 	st, err := a.PrivateRuntimeLoginState("acct")
 	if err != nil {
 		t.Fatal(err)
@@ -76,8 +96,8 @@ func TestPrivateSignInSettlesWithoutTerminal(t *testing.T) {
 	if st.Phase != signInSucceeded || st.URL == "" || st.Code != "C7ST-5VI73" {
 		t.Fatalf("state = %+v, want a succeeded sign-in with its link and code", st)
 	}
-	if completed != 1 || released != 0 {
-		t.Fatalf("complete=%d cancel=%d, want the account saved once", completed, released)
+	if runs["complete"] != 1 || runs["cancel"] != 0 {
+		t.Fatalf("complete=%d cancel=%d, want the account saved once", runs["complete"], runs["cancel"])
 	}
 	// The card refreshes the pane through the existing finish call.
 	if rows := a.PrivateRuntimeLogins(); len(rows) != 1 || rows[0].SignIn == nil || rows[0].SignIn.Phase != signInSucceeded {
@@ -85,46 +105,118 @@ func TestPrivateSignInSettlesWithoutTerminal(t *testing.T) {
 	}
 }
 
-func TestPrivateSignInCancelStopsItsProcess(t *testing.T) {
+// A capture that returns no error and still no usable account must fail the
+// card, or Finish would reject the account the card calls signed in.
+func TestPrivateSignInRejectsNonReadyAccount(t *testing.T) {
 	a := testPrivateRuntime(t)
-	released := 0
-	printed := make(chan struct{})
-	var once sync.Once
+	runs := map[string]int{}
 	flow := &NativeLogin{
-		Cwd:      t.TempDir(),
-		Cancel:   func() error { released++; return nil },
-		Complete: func(context.Context) (NativeAccount, error) { return NativeAccount{}, errors.New("must not complete") },
+		Cwd: t.TempDir(),
+		Complete: func(context.Context) (NativeAccount, error) {
+			runs["complete"]++
+			return NativeAccount{Status: "not signed in"}, nil
+		},
+		Cancel: func() error { runs["cancel"]++; return nil },
 	}
-	spec := signInSpec{Argv: func([]string) []string {
-		return []string{"/bin/sh", "-c", "printf '" + codexDeviceSample + "'; sleep 300"}
-	}, Parse: func(st *SignInState, line string) {
-		parseCodexSignIn(st, line)
-		once.Do(func() { close(printed) })
-	}}
+	spec := signInSpec{Argv: printSampleArgv, Parse: parseCodexSignIn}
 	if _, err := a.startPrivateSignIn("acct", "codex", spec, flow); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("acct") })
 	running := a.findPrivateLogin("acct")
-	select {
-	case <-printed:
-	case <-time.After(time.Second):
-		t.Fatal("runner never read the login output")
+	<-running.signIn.done
+	st, err := a.PrivateRuntimeLoginState("acct")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if state, _ := a.PrivateRuntimeLoginState("acct"); state.Phase != signInWaiting {
-		t.Fatalf("phase = %q, want %q before a cancel", state.Phase, signInWaiting)
+	if st.Phase != signInFailed || st.Message != "private sign-in is not complete" {
+		t.Fatalf("state = %+v, want a failed sign-in that explains the missing account", st)
+	}
+	if runs["complete"] != 1 || runs["cancel"] != 1 {
+		t.Fatalf("complete=%d cancel=%d, want the gate released once", runs["complete"], runs["cancel"])
+	}
+}
+
+func TestPrivateSignInCancelStopsItsProcess(t *testing.T) {
+	a := testPrivateRuntime(t)
+	runs := map[string]int{}
+	reached := make(chan struct{})
+	var once sync.Once
+	flow := &NativeLogin{
+		Cwd:      t.TempDir(),
+		Cancel:   func() error { runs["cancel"]++; return nil },
+		Complete: func(context.Context) (NativeAccount, error) { return NativeAccount{}, errors.New("must not complete") },
+	}
+	spec := signInSpec{
+		Argv:         holdSampleArgv,
+		Parse:        waitingSignal(&once, reached, parseCodexSignIn),
+		AcceptsPaste: true,
+	}
+	if _, err := a.startPrivateSignIn("acct", "codex", spec, flow); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("acct") })
+	running := a.findPrivateLogin("acct")
+	<-reached
+	if state, err := a.PrivateRuntimeLoginState("acct"); err != nil || state.Phase != signInWaiting {
+		t.Fatalf("state = %+v (%v), want %q before a cancel", state, err, signInWaiting)
 	}
 	if err := a.CancelPrivateRuntimeLogin("acct"); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case <-running.signIn.done:
-	case <-time.After(time.Second):
-		t.Fatal("cancelled runner left its child running")
-	}
-	if released != 1 || len(a.PrivateRuntimeLogins()) != 0 {
-		t.Fatalf("cancel=%d flows=%d, want the gate released and the flow dropped", released, len(a.PrivateRuntimeLogins()))
+	<-running.signIn.done
+	if runs["cancel"] != 1 || len(a.PrivateRuntimeLogins()) != 0 {
+		t.Fatalf("cancel=%d flows=%d, want the gate released and the flow dropped", runs["cancel"], len(a.PrivateRuntimeLogins()))
 	}
 	if _, err := a.PrivateRuntimeLoginState("acct"); err == nil {
 		t.Fatal("cancelled flow kept its state")
+	}
+}
+
+// A paste box sends its code to the login's stdin, and refuses to send one
+// when the flow takes no paste.
+func TestPrivateSignInPasteReachesStdin(t *testing.T) {
+	a := testPrivateRuntime(t)
+	echoed := make(chan string, 1)
+	flow := &NativeLogin{
+		Cwd:      t.TempDir(),
+		Cancel:   func() error { return nil },
+		Complete: func(context.Context) (NativeAccount, error) { return NativeAccount{Status: "ready"}, nil },
+	}
+	// Without a paste box the flow refuses the code.
+	plain := signInSpec{Argv: func([]string) []string { return []string{"/bin/sh", "-c", "printf 'ready'"} }}
+	if _, err := a.startPrivateSignIn("plain", "codex", plain, flow); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("plain") })
+	if err := a.RespondPrivateRuntimeLogin("plain", "C7ST-5VI73"); err == nil {
+		t.Fatal("a flow without a paste box took a code")
+	}
+	// With a paste box the login reads the code and finishes.
+	paste := signInSpec{
+		Argv: func([]string) []string {
+			return []string{"/bin/sh", "-c", "printf 'ready\\n'; read code; printf 'PASTED:%s\\n' \"$code\""}
+		},
+		Parse: func(_ *SignInState, line string) {
+			if code, ok := strings.CutPrefix(line, "PASTED:"); ok {
+				echoed <- code
+			}
+		},
+		AcceptsPaste: true,
+	}
+	if _, err := a.startPrivateSignIn("paste", "codex", paste, flow); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("paste") })
+	running := a.findPrivateLogin("paste")
+	if err := a.RespondPrivateRuntimeLogin("paste", " C7ST-5VI73 "); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-echoed; got != "C7ST-5VI73" {
+		t.Fatalf("login read %q, want the pasted code", got)
+	}
+	<-running.signIn.done
+	if state, err := a.PrivateRuntimeLoginState("paste"); err != nil || state.Phase != signInSucceeded {
+		t.Fatalf("state = %+v (%v), want %q after the code", state, err, signInSucceeded)
 	}
 }

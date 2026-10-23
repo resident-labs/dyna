@@ -328,7 +328,13 @@ func (a *Runtime) watchPrivateSignIn(ctx context.Context, login *privateRuntimeL
 	// Exit 0 means the owner approved. The account is saved now, so a closed
 	// app still keeps the sign-in.
 	signIn.set(func(st *SignInState) { st.Phase = signInVerifying })
-	if _, completeErr := login.flow.Complete(a.lifetimeContext()); completeErr != nil {
+	result, completeErr := login.flow.Complete(a.lifetimeContext())
+	if completeErr == nil {
+		// Capture can return no error and still leave no usable account, so
+		// apply the same readiness rules as the Finish sign-in call.
+		completeErr = loginReady(result)
+	}
+	if completeErr != nil {
 		signIn.set(func(st *SignInState) { st.Message = signInFailure(completeErr) })
 		signIn.set(func(st *SignInState) { st.Phase = signInFailed })
 		_ = login.flow.Cancel()
