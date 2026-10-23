@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // The Changes view of a session: git status for its working directory,
   // with each file's diff under a row that opens and closes. The owner can
   // comment on diff lines and send them to that session.
@@ -9,23 +9,39 @@
   import { ago } from '../ui/format.ts'
   import DiffView from '../files/DiffView.svelte'
   import SendBar from '../files/SendBar.svelte'
-  import { addComment, formatComments } from '../files/diffComments.ts'
+  import { addComment, formatComments, type DiffComment } from '../files/diffComments.ts'
   import { code, setWrap } from '../files/codeprefs.svelte.ts'
-  import { parseDiff, statusLetter, STATUS, split, base } from '../files/repo.ts'
+  import { parseDiff, statusLetter, STATUS, split, base, type DiffFile, type StatusSide } from '../files/repo.ts'
+  import { errorText } from '../errorText.ts'
+  import type { GitDiffResult, GitFileStatus, GitStatusResult } from '../api/file.ts'
 
-  // sessionName is the session's display name; the send bar names it as the receiver.
-  let { roomId, session, sessionName = '', version = 0, active = true } = $props()
+  // ShownDiff is a parsed diff of one file; empty marks an untracked file with
+  // no lines. A file git could not show carries the reason instead.
+  type ShownDiff = DiffFile & { empty?: boolean }
+  type ShownFile = ShownDiff | { error: string }
+  // Group is one heading of the view; its id also names the bulk diff it reads.
+  interface Group { id: StatusSide; title: string; hint: string; files: GitFileStatus[] }
 
-  let status = $state(null)
+  interface Props {
+    // sessionName is the session's display name; the send bar names it as the receiver.
+    roomId: string
+    session: string
+    sessionName?: string
+    version?: number
+    active?: boolean
+  }
+  let { roomId, session, sessionName = '', version = 0, active = true }: Props = $props()
+
+  let status = $state<GitStatusResult | null>(null)
   let error = $state('')
   let loading = $state(false)
-  let diffs = $state({ staged: new Map(), unstaged: new Map() })
-  let extra = $state({}) // untracked path -> parsed file | {error}
-  let open = $state(new Set())
+  let diffs = $state<{ staged: Map<string, ShownDiff>; unstaged: Map<string, ShownDiff> }>({ staged: new Map(), unstaged: new Map() })
+  let extra = $state<Record<string, ShownFile>>({}) // untracked path -> parsed file | {error}
+  let open = $state<Set<string>>(new Set())
   let cut = $state(false)
-  let pending = $state([])
+  let pending = $state<DiffComment[]>([])
   // Send the comment as a message to the session shown beside the workspace.
-  const deliver = (comments) => api.sendToSession(session, formatComments(comments))
+  const deliver = (comments: DiffComment[]) => api.sendToSession(session, formatComments(comments))
   let loaded = false
   $effect(() => {
     version
@@ -47,7 +63,7 @@
       ])
       if (version !== loadVersion) return
       extra = {}
-      const byPath = (d) => new Map(parseDiff(d?.text).map((f) => [f.path, f]))
+      const byPath = (d: GitDiffResult | null) => new Map<string, ShownDiff>(parseDiff(d?.text).map((f) => [f.path, f]))
       diffs = { unstaged: byPath(un), staged: byPath(sd) }
       cut = !!(un?.truncated || sd?.truncated || st?.truncated)
       const first = status === null
@@ -61,7 +77,7 @@
         for (const f of g.files) if (open.has(`${g.id}:${f.path}`)) fetchUntracked(f)
       }
     } catch (e) {
-      if (version === loadVersion) error = String(e?.message || e)
+      if (version === loadVersion) error = errorText(e)
     } finally {
       if (version === loadVersion) loading = false
     }
@@ -73,37 +89,42 @@
     return () => window.removeEventListener('focus', again)
   })
 
-  let groups = $derived.by(() => {
+  let groups = $derived.by((): Group[] => {
     const files = status?.files ?? []
-    return [
+    const all: Group[] = [
       { id: 'staged', title: 'Staged', hint: 'Ready to commit', files: files.filter((f) => f.staged && !f.untracked) },
       { id: 'unstaged', title: 'Changes', hint: 'Not staged', files: files.filter((f) => (f.unstaged || (!f.staged && !f.untracked)) && !f.untracked) },
       { id: 'untracked', title: 'Untracked', hint: 'New to git', files: files.filter((f) => f.untracked) },
-    ].filter((g) => g.files.length)
+    ]
+    return all.filter((g) => g.files.length)
   })
   let total = $derived((status?.files ?? []).length)
 
-  function diffOf(g, f) {
-    if (g.id === 'untracked') return extra[f.path]
+  function diffOf(g: Group, f: GitFileStatus): ShownFile | null {
+    if (g.id === 'untracked') return extra[f.path] ?? null
     return diffs[g.id].get(f.path) ?? null
   }
 
+  // An untracked file with no lines has a diff with nothing in it.
+  const emptyDiff = (path: string): ShownDiff => ({ path, from: '', kind: 'added', hunks: [], adds: 0, dels: 0, empty: true })
+
   // An untracked file has no bulk diff; fetch its preview once per refresh.
-  function fetchUntracked(f) {
+  function fetchUntracked(f: GitFileStatus) {
     if (extra[f.path]) return
     const version = loadVersion
     api.gitDiff(roomId, session, f.path, false).then(
       (d) => {
         if (version !== loadVersion) return
         const file = parseDiff(d?.text)[0]
-        const empty = !file || (file.kind !== 'binary' && file.hunks.length === 0)
-        extra = { ...extra, [f.path]: empty ? { path: f.path, kind: 'added', hunks: [], adds: 0, dels: 0, empty: true } : file }
+        // A binary file or one with lines shows its own diff; an empty file has none.
+        if (file && (file.kind === 'binary' || file.hunks.length > 0)) extra = { ...extra, [f.path]: file }
+        else extra = { ...extra, [f.path]: emptyDiff(f.path) }
       },
-      (e) => { if (version === loadVersion) extra = { ...extra, [f.path]: { error: String(e?.message || e) } } },
+      (e) => { if (version === loadVersion) extra = { ...extra, [f.path]: { error: errorText(e) } } },
     )
   }
 
-  async function toggle(g, f) {
+  async function toggle(g: Group, f: GitFileStatus) {
     const k = `${g.id}:${f.path}`
     const next = new Set(open)
     if (next.has(k)) next.delete(k)
@@ -115,8 +136,8 @@
   }
 
   let allOpen = $derived(groups.length > 0 && groups.every((g) => g.files.every((f) => open.has(`${g.id}:${f.path}`))))
-  function setAll(on) {
-    if (!on) return (open = new Set())
+  function setAll(on: boolean) {
+    if (!on) return (open = new Set<string>())
     for (const g of groups) for (const f of g.files) if (!open.has(`${g.id}:${f.path}`)) toggle(g, f)
   }
 </script>
@@ -172,14 +193,14 @@
                   <svg class="chev" viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="m4 2.5 3.5 3.5L4 9.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
                   <span class="letter {STATUS[l].tone}" aria-label={STATUS[l].word}>{l}</span>
                   <span class="path"><bdi><span class="dir">{dir}</span><span class="fname">{name}</span>{#if f.originalPath}<span class="from"> from {f.originalPath}</span>{/if}</bdi></span>
-                  {#if d && !d.error && (d.adds || d.dels)}
+                  {#if d && !('error' in d) && (d.adds || d.dels)}
                     <span class="counts">{#if d.adds}<span class="plus">+{d.adds}</span>{/if}{#if d.dels}<span class="minus">−{d.dels}</span>{/if}</span>
                   {/if}
                 </button>
               </div>
               {#if open.has(k)}
                 <div class="body">
-                  {#if d?.error}
+                  {#if d && 'error' in d}
                     <p class="note err">{d.error}</p>
                   {:else if !d && g.id === 'untracked'}
                     <p class="note">Loading…</p>
@@ -188,7 +209,7 @@
                   {:else if d.empty}
                     <p class="note">Empty file.</p>
                   {:else}
-                    <DiffView file={d} oncomment={(c) => (pending = addComment(pending, c))} />
+                    <DiffView file={d} oncomment={(c: DiffComment) => (pending = addComment(pending, c))} />
                   {/if}
                 </div>
               {/if}
