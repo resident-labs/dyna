@@ -52,9 +52,7 @@ func TestWatchSaysRootsQuestionsAndCallPosts(t *testing.T) {
 	}
 	call := newFakeSpeaker()
 	said := call.said
-	ctx, stop := context.WithCancel(t.Context())
-	defer stop()
-	go link.Watch(ctx, since, call)
+	watchRoom(t, link, since, call)
 	if got := <-said; !strings.Contains(got, "Merge PR 7 now?") || !strings.Contains(got, "yes, no") {
 		t.Fatalf("first said %q, want root's open question with its options", got)
 	}
@@ -78,7 +76,7 @@ func TestWatchNamesWhatRootShares(t *testing.T) {
 	call := newFakeSpeaker()
 	// Posts carry millisecond timestamps: a start with finer precision would
 	// make a post in the same millisecond look older and be skipped.
-	go link.Watch(t.Context(), time.UnixMilli(time.Now().UnixMilli()), call)
+	watchRoom(t, link, time.UnixMilli(time.Now().UnixMilli()), call)
 	card := notify.File{Name: "compare.html", Render: room.RenderHTML, Data: []byte("<!doctype html><title>Provider comparison</title><p>five providers</p>")}
 	if _, err := svc.Post(t.Context(), notify.PostInput{Sender: root, Mentions: []string{"@voice-call"}, Text: "I compared the providers.", Files: []notify.File{card, {Name: "ci.png", Data: []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0x0d, 'I', 'H', 'D', 'R'}}}}); err != nil {
 		t.Fatal(err)
@@ -105,6 +103,20 @@ func newFakeSpeaker() *fakeSpeaker {
 func (f *fakeSpeaker) Speak(_, _, text string) { f.said <- text }
 func (f *fakeSpeaker) Context(text string)     { f.context <- text }
 
+// watchRoom joins the watch before the fixture's data directory is removed.
+func watchRoom(t *testing.T, link *RoomLink, since time.Time, call Speaker) func() {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = link.Watch(ctx, since, call)
+	}()
+	stop := func() { cancel(); <-done }
+	t.Cleanup(stop)
+	return stop
+}
+
 // Root traffic for running work is context and never requests speech. Multiple explicit
 // call posts still reach Voice, including corrections and distinct results.
 func TestWatchKeepsExecutionTrafficAsSilentContext(t *testing.T) {
@@ -112,9 +124,6 @@ func TestWatchKeepsExecutionTrafficAsSilentContext(t *testing.T) {
 	externalRoot(t, work)
 	link, rooms := tools.link, room.DefaultStore()
 	call := newFakeSpeaker()
-	ctx, stop := context.WithCancel(t.Context())
-	defer stop()
-	ended := make(chan error, 1)
 	if _, err := link.Ask(t.Context(), "Fix CI on PR 7."); err != nil {
 		t.Fatal(err)
 	}
@@ -154,14 +163,13 @@ func TestWatchKeepsExecutionTrafficAsSilentContext(t *testing.T) {
 
 	// Follow reads the complete existing log. Spoken posts are ordering
 	// barriers; all earlier context is recorded before Watch stops.
-	go func() { ended <- link.Watch(ctx, time.Time{}, call) }()
+	stop := watchRoom(t, link, time.Time{}, call)
 	for _, text := range append([]string{"Mixed call update."}, append(texts, "Second request ended.")...) {
 		if got := <-call.said; !strings.HasSuffix(got, text) {
 			t.Fatalf("said %q, want call post %q", got, text)
 		}
 	}
 	stop()
-	<-ended
 	var chunks []string
 	for {
 		select {
