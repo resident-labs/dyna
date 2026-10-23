@@ -894,6 +894,45 @@ func silentSessionCompletion(turn subagent.Turn) bool {
 	return turn.WrapUp || turn.StopReason == "transfer" || turn.StopReason == "consolidation" || turn.StopReason == "close"
 }
 
+// serviceAlertKind is the post kind of a service failure alert. The sealed
+// system event registry replaces it with family "service", type "failed"
+// (dyna:notice-contract, PR 5), so the kind and the text live in these two
+// places only: one constant and one function.
+const serviceAlertKind = "alert"
+
+// serviceRoleName names the service an alert is about. A helper has no role of
+// its own, so it reports as a helper of its service.
+func serviceRoleName(meta subagent.Meta) string {
+	if meta.Role != "" {
+		return meta.Role
+	}
+	return "helper"
+}
+
+// serviceFailureText is the alert a failed service turn posts: what failed,
+// then the session it ran as, then how to inspect it. It names no parent and
+// offers no child-failure recovery, because `dyna services` changes a service.
+func serviceFailureText(meta subagent.Meta, turn subagent.Turn) string {
+	role := serviceRoleName(meta)
+	lines := []string{
+		fmt.Sprintf("Service %s failed turn %d: %s", role, turn.N, strings.TrimSpace(turn.Error)),
+		"Session: " + meta.Address(),
+	}
+	profile, model := turn.Profile, turn.Model
+	if profile == "" {
+		profile, model = meta.Profile, meta.Model
+	}
+	if profile != "" {
+		line := "Profile: " + profile
+		if model != "" {
+			line += " / " + model
+		}
+		lines = append(lines, line)
+	}
+	lines = append(lines, "Inspect: dyna services log "+role+" · restart: dyna services restart "+role)
+	return strings.Join(lines, "\n")
+}
+
 // CompleteSessionTurn stores one recoverable report for each terminal turn.
 // Successful owed turns report to their current parent, or the owner when no
 // parent is available.
@@ -987,6 +1026,11 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 			return s.helperCompletion(meta, turn)
 		}
 		return nil, nil
+	}
+	// A service is outside the hierarchy, so its failure is one alert from the
+	// service to the room owner, never a child failure report.
+	if kind == "failed" && meta.ManagedService() {
+		return s.prepareCompletion(meta.RoomID, meta.Address(), []string{meta.Room}, serviceAlertKind, serviceFailureText(meta, turn), turn.N, true)
 	}
 	if len(turn.ReportTo) == 0 && kind == "completed" {
 		return nil, nil

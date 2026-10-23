@@ -29,3 +29,10 @@ func checkServiceName(name, role string) error {
 func isServiceRole(role string) bool {
 	return role == "reviewer" || role == RoleRoot || role == RoleLibrarian
 }
+
+// ManagedService reports a session that belongs to a service rather than to the
+// room's hierarchy: the librarian, a PR reviewer, the voice session and their
+// helpers. Such a session has no parent, no goal and no place in the member
+// tree, and `dyna services` is the way to read or change it. The room's
+// internal root session is not one, because it holds the room's seat.
+func (m Meta) ManagedService() bool { return m.Service && m.Role != RoleRoot }
