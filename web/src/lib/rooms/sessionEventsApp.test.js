@@ -172,6 +172,7 @@ for (const cached of [false, true]) test(`a post during ${cached ? 'an unpaused-
 
 test('merge refresh version follows room PR and change events only', () => {
   const { c, close } = app('github')
+  c.refreshHeldComments = () => {}
   c.reviewerSoon = () => {}
   c.loadChanges = () => {}
   c.handle({ kind: 'prs', roomId: 'b' })
