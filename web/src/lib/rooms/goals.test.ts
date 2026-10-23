@@ -3,8 +3,7 @@ import assert from 'node:assert/strict'
 import type { Goal } from '../api/goal.ts'
 import { goalTree, goalStatus, goalTone, goalParts } from './goals.ts'
 
-const ZERO = '0001-01-01T00:00:00Z'
-const goal = (id: string, parent = '', state = 'active'): Goal => ({ id, room: 'r', text: id, setter: 'a', holders: ['a'], shared: false, parent, state, createdAt: '2026-10-17T11:00:00Z', updatedAt: '2026-10-17T11:00:00Z', waitAt: ZERO, waitUntil: ZERO, edits: null })
+const goal = (id: string, parent = '', state = 'active'): Goal => ({ id, room: 'r', text: id, setter: 'a', holders: ['a'], shared: false, parent, state, createdAt: '2026-10-17T11:00:00Z', updatedAt: '2026-10-17T11:00:00Z', edits: null })
 test('tree preserves ancestors, indents children, and accepts orphan or cyclic history', () => {
   const all = [goal('g1'), goal('g2', 'g1', 'done'), goal('g3', 'g2'), goal('g4', 'missing'), goal('g5', 'g6'), goal('g6', 'g5')]
   assert.deepEqual(goalTree(all).slice(0, 4).map((r) => [r.goal.id, r.depth, r.context]), [['g1', 0, false], ['g2', 1, true], ['g3', 2, false], ['g4', 0, false]])

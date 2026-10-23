@@ -4,7 +4,6 @@ export interface GoalEdit {
   at: string
   by: string
   oldText: string
-  waitUntil: string // zero time "0001-01-01T00:00:00Z" when unset
 }
 
 export interface GoalOutcome {
@@ -26,8 +25,6 @@ export interface Goal {
   state: string // "active" while open
   createdAt: string
   updatedAt: string
-  waitAt: string // zero time "0001-01-01T00:00:00Z" when unset
-  waitUntil: string // zero time when unset
   edits: GoalEdit[] | null
   detail?: string
   service?: boolean
