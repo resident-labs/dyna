@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 import { bundle, domNames, importBundle, installDom } from './prDetailHarness.ts'
+import { unifiedIssues, type RoomIssue } from './unifiedIssues.ts'
 import { issueGroups, issueChip } from './github.ts'
 import type { GitHubItem } from '../api/github.ts'
 import { element, elements, need } from '../../../test/need.ts'
@@ -18,7 +19,8 @@ test('issueGroups orders the groups and puts older closed issues in Closed', () 
 })
 
 const API = `export const api = {
-  githubList: () => Promise.resolve({ repo: 'o/r', items: globalThis.issueItems }),
+  feedAround: () => Promise.resolve({ posts: [{ id: 'msg_local', text: 'Local body text' }] }),
+  githubList: () => globalThis.issueListFails ? Promise.reject(new Error('No repository')) : Promise.resolve({ repo: 'o/r', items: globalThis.issueItems }),
   githubView: (_r, _k, n) => globalThis.issueViewFails ? Promise.reject(new Error('Issue not found')) : Promise.resolve({ number: n, title: 'Issue ' + n, ...globalThis.issueItems.find((i) => i.number === n), body: 'Body text', comments: [] }),
   mergeControlStatus: () => { globalThis.issueMergeCalls++; return Promise.resolve({ roomId: 'r', paused: false, queue: [], trials: [], localCIChecks: {} }) },
   startIssueWork: (...a) => { globalThis.startCalls.push(a); return globalThis.startFails ? Promise.reject(new Error('no default profile')) : Promise.resolve(globalThis.startResult) },
@@ -37,7 +39,7 @@ async function render(items: GitHubItem[], props: object = {}) {
   mount(GitHub, { target, props: { roomId: 'r', kind: 'issue', ...props } })
   await settle()
   await settle()
-  return { target, done: () => { dom.window.close(); for (const n of [...domNames, 'history', 'location', 'issueMergeCalls', 'issueItems', 'startCalls', 'startResult', 'startFails', 'issueViewFails']) Reflect.deleteProperty(globalThis, n); return rm(dir, { recursive: true, force: true }) } }
+  return { target, done: () => { dom.window.close(); for (const n of [...domNames, 'history', 'location', 'issueMergeCalls', 'issueItems', 'startCalls', 'startResult', 'startFails', 'issueViewFails', 'issueListFails']) Reflect.deleteProperty(globalThis, n); return rm(dir, { recursive: true, force: true }) } }
 }
 
 test('a failed Ask an agent shows its error on the issue page, where the list is hidden', async () => {
@@ -153,4 +155,45 @@ test('Issues never loads PR merge status, on mount or focus', async () => {
     await settle()
     assert.equal(Reflect.get(globalThis, 'issueMergeCalls'), 0)
   } finally { await r.done() }
+})
+
+const localIssue: RoomIssue = { id: 'msg_local', title: 'Local issue', state: 'open', file: 'web/Example.svelte', line: 12, filer: 'builder', filedAt: 100 }
+
+test('unified issues deduplicate exports by repository URL and preserve local rows without GitHub', () => {
+  const remote = issue(20, 'needs-owner')
+  const exported = { ...localIssue, id: 'export', state: 'exported', githubUrl: remote.url + '/' }
+  const rows = unifiedIssues([remote, issue(2, '')], [localIssue, exported], 'all', 'all', '')
+  assert.deepEqual(rows.map(i => i.number || i.local?.id), [20, 'msg_local', 2])
+  assert.equal(rows[0]?.local?.id, 'export')
+  assert.equal(unifiedIssues([], [localIssue, { ...localIssue, state: 'closed' }], 'all', 'all', '').length, 1)
+  assert.equal(unifiedIssues([], [localIssue, exported], 'dyna', 'all', '').length, 2)
+  assert.deepEqual(unifiedIssues([], [localIssue], 'dyna', 'open', 'example.svelte').map(i => i.local?.id), ['msg_local'])
+})
+
+test('local issues remain readable and actionable when GitHub fails', async () => {
+  Object.assign(globalThis, { issueListFails: true })
+  const dismissed: RoomIssue[] = []
+  const r = await render([], { localIssues: [localIssue], ondismississue: (i: RoomIssue) => dismissed.push(i) })
+  try {
+    assert.match(r.target.textContent || '', /Local issue/)
+    assert.match(r.target.textContent || '', /No repository/)
+    need(elements(r.target, 'button').find(b => b.textContent === 'Dismiss')).click()
+    assert.equal(dismissed[0]?.id, localIssue.id)
+    element(r.target, '.row').click()
+    await settle()
+    assert.match(element(r.target, '.local-detail').textContent || '', /Local body text/)
+    assert.match(element(r.target, '.local-detail').textContent || '', /web\/Example.svelte:12/)
+  } finally { await r.done() }
+})
+
+
+test('an unresolved export is history, not a closed GitHub issue', () => {
+  const remote = issue(20, 'needs-owner')
+  const exported = { ...localIssue, state: 'exported', githubUrl: remote.url }
+  assert.deepEqual(unifiedIssues([], [exported], 'all', 'closed', ''), [])
+  assert.deepEqual(unifiedIssues([], [exported], 'all', 'open', ''), [])
+  const history = unifiedIssues([], [exported], 'all', 'all', '')
+  assert.equal(history[0]?.state, 'UNKNOWN')
+  assert.equal(history[0]?.url, remote.url)
+  assert.equal(unifiedIssues([remote], [exported], 'all', 'open', '')[0]?.state, 'OPEN')
 })
