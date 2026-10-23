@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"dyna-agent/internal/machines"
@@ -49,6 +50,9 @@ func TestMachineCommandsChangeTheRegistry(t *testing.T) {
 	localName := localMachineName(t)
 	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab", "--ci-slots", "2"); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := run(t, "add", "hermes", "--ssh", "pip@hermeslab", "--ci-slots", "3"); err == nil || !strings.Contains(err.Error(), "machine hermes exists; use dyna machine edit") {
+		t.Fatalf("second add = %v", err)
 	}
 	if _, err := run(t, "add", "bad", "--ssh", "user@host; id"); err == nil {
 		t.Fatal("accepted SSH shell syntax")

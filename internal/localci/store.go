@@ -83,7 +83,12 @@ func (s Store) open() (*sql.DB, error) {
 	err = database.Migrate(db, "localci.schema", 2, func(conn *sql.Conn, old int) error {
 		if old == 1 {
 			// Version 1 had a jump host column; nodes are now reached directly.
-			_, err := conn.ExecContext(context.Background(), "ALTER TABLE local_ci_nodes DROP COLUMN jump")
+			// The machines migration drops this table, so it may be gone already.
+			present, err := database.HasTable(context.Background(), conn, "local_ci_nodes")
+			if err != nil || !present {
+				return err
+			}
+			_, err = conn.ExecContext(context.Background(), "ALTER TABLE local_ci_nodes DROP COLUMN jump")
 			return err
 		}
 		_, err := conn.ExecContext(context.Background(), storeSchema)

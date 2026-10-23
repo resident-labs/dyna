@@ -27,6 +27,9 @@ func TestNodeCommandValidatesAndSavesNode(t *testing.T) {
 	if _, err := run("add", "hermes", "--ssh", "pip@hermeslab", "--slots", "2"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := run("add", "hermes", "--slots", "3"); err != nil {
+		t.Fatalf("the alias no longer updates a stored machine: %v", err)
+	}
 	if _, err := run("add", "hermes", "--slots", "0"); err == nil {
 		t.Fatal("accepted zero slots")
 	}
@@ -38,7 +41,7 @@ func TestNodeCommandValidatesAndSavesNode(t *testing.T) {
 	if err != nil || json.Unmarshal([]byte(output), &nodes) != nil || len(nodes) != 1 {
 		t.Fatalf("listed nodes = %q, %v", output, err)
 	}
-	if nodes[0].Slots != 2 || nodes[0].SSH != "pip@hermeslab" || !nodes[0].Enabled {
+	if nodes[0].Slots != 3 || nodes[0].SSH != "pip@hermeslab" || !nodes[0].Enabled {
 		t.Fatalf("saved flags = %#v", nodes)
 	}
 	if _, err := run("disable", "hermes"); err != nil {
