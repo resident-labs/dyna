@@ -176,6 +176,20 @@ func (e *testEnv) doneGoals() {
 	}
 }
 
+// doneGoal finishes the goal info holds, as a worker does before it finishes.
+func (e *testEnv) doneGoal(info Info) {
+	e.t.Helper()
+	held, err := e.m.goalStore().OpenHeldBy(info.RoomID, info.ID)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for _, g := range held {
+		if _, err := e.m.goalStore().Finish(info.RoomID, g.ID, "owner", "done", false); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+}
+
 // finish makes ref dormant the way a turn end does: it finishes the session's
 // goals, then runs one more turn that leaves no work.
 func (e *testEnv) finish(ref string) (Info, error) {

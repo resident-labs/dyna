@@ -386,6 +386,7 @@ func (e *e2e) serveEngine() {
 			return result, err
 		}},
 		{Name: "CreateRoomRecord", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: roomsvc.New(nil).CreateRoomRecord},
+		{Name: "FinishGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: roomsvc.New(nil).FinishGoal},
 	})
 	if err != nil {
 		e.t.Fatal(err)
@@ -1031,8 +1032,14 @@ func TestSubagentCLILifecycleEndToEnd(t *testing.T) {
 		}
 
 		e.waitTurnReleased(id)
-		// This fixture has unfinished work and no root to inherit it.
-		must("subagent", "close", addr, "--force")
+		// This fixture has unfinished work and no root to inherit it, so even a
+		// forced close refuses. Root would ask the owner first; here the owner
+		// finishes the goal, then the close goes through.
+		if _, stderr, err := run("subagent", "close", addr, "--force"); err == nil || !strings.Contains(stderr, "dyna goal done") {
+			t.Fatalf("forced close with unfinished work = %v %s", err, stderr)
+		}
+		must("goal", "done", "g1", "Fixture completed", "--room", "work")
+		must("subagent", "close", addr)
 		if out := must("subagent", "list"); strings.Contains(out, id) {
 			t.Fatalf("closed session in default list: %q", out)
 		}

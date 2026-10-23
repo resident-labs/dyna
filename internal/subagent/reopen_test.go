@@ -19,6 +19,7 @@ func TestReopenPreservesConversationAndCanResume(t *testing.T) {
 	info, _ := e.start("RESPOND: first SLEEP:1", func(o *StartOptions) { o.Name = "reopen-me" })
 	info, _ = e.wait(info.ID, 1)
 	before, _ := e.m.Store.ReadTurn(info.ID, 1)
+	e.doneGoal(info)
 	closed, err := e.m.CloseWithOptions(e.ctx, info.ID, CloseOptions{Force: true})
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +53,7 @@ func TestReopenRefusesNameConflictAndMissingHistory(t *testing.T) {
 	e.joinRunners()
 	info, _ := e.start("RESPOND: old SLEEP:1", func(o *StartOptions) { o.Name = "same-name" })
 	info, _ = e.wait(info.ID, 1)
+	e.doneGoal(info)
 	if _, err := e.m.CloseWithOptions(e.ctx, info.ID, CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -62,6 +64,7 @@ func TestReopenRefusesNameConflictAndMissingHistory(t *testing.T) {
 			t.Fatalf("conflict %s: %v", ref, err)
 		}
 	}
+	e.doneGoal(replacement)
 	if _, err := e.m.CloseWithOptions(e.ctx, replacement.ID, CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -97,12 +100,14 @@ func TestReopenNameHeldOnlyByOpenOrFinishedSessions(t *testing.T) {
 			e.joinRunners()
 			original, _ := e.start("SLEEP:1 RESPOND: original", func(o *StartOptions) { o.Name = "reused" })
 			original, _ = e.wait(original.ID, 1)
+			e.doneGoal(original)
 			if _, err := e.m.CloseWithOptions(e.ctx, original.ID, CloseOptions{Force: true}); err != nil {
 				t.Fatal(err)
 			}
 			replacement, _ := e.start("SLEEP:1 RESPOND: replacement", func(o *StartOptions) { o.Name = original.Name })
 			replacement, _ = e.wait(replacement.ID, 1)
 			if state == "consumed" {
+				e.doneGoal(replacement)
 				if _, err := e.m.CloseWithOptions(e.ctx, replacement.ID, CloseOptions{Force: true}); err != nil {
 					t.Fatal(err)
 				}

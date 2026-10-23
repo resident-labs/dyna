@@ -30,6 +30,7 @@ func TestComputeStatusPrecedence(t *testing.T) {
 		{"merged pr with closed checklist", open, []Item{item(ItemDone, "a")}, Facts{MergedPR: true}, StatusReadyToClose, "merged PR"},
 		{"goal without items merged pr", open, nil, Facts{MergedPR: true}, StatusReadyToClose, "merged PR"},
 		{"unheld goal", Goal{ID: "g2", State: "active"}, nil, Facts{}, StatusUnowned, "no holder"},
+		{"goal left with the owner", Goal{ID: "g10", State: "active", LegacyOwnerHeld: true}, nil, Facts{}, StatusNeedsRoot, "root asks the owner"},
 		{"held goal with unassigned item is not unowned", open, []Item{item(ItemOpen, "")}, Facts{Busy: true}, StatusOnTrack, "1 unassigned"},
 		{"pending pr", open, []Item{item(ItemOpen, "a")}, Facts{OpenPR: true}, StatusWaiting, "PR pending"},
 		{"fresh creation", open, []Item{item(ItemOpen, "a")}, Facts{}, StatusOnTrack, ""},
