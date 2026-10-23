@@ -1130,3 +1130,32 @@ func TestServiceShutdownAllowsPageReconnect(t *testing.T) {
 		})
 	}
 }
+
+// A queued update is not a resume boundary until the page starts its audio.
+func TestResumeCursorAdvancesOnPlayback(t *testing.T) {
+	cf := startCall(t)
+	cf.call.do(func() {
+		cf.call.ResumeCursor = "previous"
+		cf.call.CursorFor = func(key, previous string) string {
+			if key == "update" {
+				return key
+			}
+			return previous
+		}
+		cf.call.responses["audio"] = "response"
+		cf.call.keys["response"] = "update"
+	})
+	attached := make(chan PageEvent, 8)
+	closed := make(chan closed, 1)
+	cf.attach(attached, closed)
+	if event := <-attached; event.Type != "state" {
+		t.Fatalf("first attach event: %+v", event)
+	}
+	if event := <-attached; event.Type != "resume_cursor" || event.Cursor != "previous" {
+		t.Fatalf("initial cursor: %+v", event)
+	}
+	cf.call.FromPage(PageMessage{Type: "playback", ID: "audio", State: "started"})
+	if event := <-attached; event.Type != "resume_cursor" || event.Cursor != "update" {
+		t.Fatalf("playback cursor: %+v", event)
+	}
+}
