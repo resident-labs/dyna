@@ -458,4 +458,7 @@ func endRecord(r *Record, merged bool, at time.Time) {
 	if merged {
 		r.State = "merged"
 	}
+	if r.Watching {
+		outcomeNotice(r)
+	}
 }
