@@ -41,7 +41,24 @@ func (s *Store) turnsDB() (*sql.DB, error) {
 	if err := state.MigrateMirrors(dataDir); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "subagent.turns", 2, func(conn *sql.Conn, old int) error {
+	// Check live writers before changing the reader boundary. Once format 3
+	// is stored, ordinary reads never inspect processes again.
+	var version int
+	err = db.QueryRow("SELECT value FROM meta WHERE key='subagent.turns'").Scan(&version)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
+	}
+	if version < promptStoreFormat {
+		if err := sessionlife.Prepare(s.root()); err != nil {
+			return nil, err
+		}
+		if err := preflightPromptCutover(db, s.root()); err != nil {
+			return nil, err
+		}
+	}
+	// Version 3 stores prompt references. Unconverted inline rows remain
+	// readable until the bounded startup conversion reaches them.
+	err = database.Migrate(db, "subagent.turns", promptStoreFormat, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, turnSchema); err != nil {
@@ -59,7 +76,7 @@ SELECT 'turns/' || session || '/' || n, mirror FROM session_turns WHERE mirror !
 	if err := migratePromptBlobs(db); err != nil {
 		return nil, err
 	}
-	// TODO: legacy/shim remove later — earlier runners require subagent.turns version 2; keep the additive report index on its own key until those runners exit.
+	// Keep the existing report index migration on its original key.
 	err = database.Migrate(db, "subagent.reports", 1, func(conn *sql.Conn, _ int) error {
 		_, err := conn.ExecContext(context.Background(), `CREATE INDEX session_turns_pending_reports ON session_turns(session, n)
 WHERE json_extract(CAST(turn AS TEXT), '$.reportPending') = 1`)
@@ -82,9 +99,12 @@ func (s *Store) readTurnRow(id string, n int) ([]byte, string, error) {
 	var raw []byte
 	var revision int64
 	err := s.queryTurn(id, n, func(db *sql.DB) error {
-		var err error
-		raw, revision, err = storedTurn(context.Background(), db, id, n)
-		return err
+		ctx := context.Background()
+		return state.For(db).Read(ctx, func(r state.Reader) error {
+			var err error
+			raw, revision, err = resolvedTurn(ctx, r, id, n)
+			return err
+		})
 	})
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, "", fmt.Errorf("session %s has no turn %d", id, n)
@@ -99,6 +119,15 @@ func storedTurn(ctx context.Context, q state.Reader, id string, n int) ([]byte, 
 	var raw []byte
 	var revision int64
 	err := q.QueryRowContext(ctx, "SELECT turn, revision FROM session_turns WHERE session = ? AND n = ?", id, n).Scan(&raw, &revision)
+	return raw, revision, err
+}
+
+// resolvedTurn reads the row and its prompt text through the same snapshot.
+func resolvedTurn(ctx context.Context, r state.Reader, id string, n int) ([]byte, int64, error) {
+	raw, revision, err := storedTurn(ctx, r, id, n)
+	if err == nil {
+		raw, err = resolveRowPrompts(ctx, r, id, n, raw)
+	}
 	return raw, revision, err
 }
 
@@ -159,18 +188,16 @@ func (s *Store) importTurnFile(id string, n int, overwrite bool) (*sql.DB, error
 			return fmt.Errorf("turn %d of %s is not JSON: %w", n, id, state.ErrSkipForeign)
 		}
 		if !overwrite {
-			res, err := conn.ExecContext(context.Background(), `INSERT INTO session_turns(session, n, revision, turn)
-VALUES (?, ?, (SELECT COALESCE(MAX(revision), 0) + 1 FROM session_turns), ?)
-ON CONFLICT(session, n) DO NOTHING`, id, n, raw)
-			if err != nil {
+			var exists int
+			err := conn.QueryRowContext(context.Background(), "SELECT 1 FROM session_turns WHERE session=? AND n=?", id, n).Scan(&exists)
+			if err == nil {
+				// A writer made the row after the read missed it. Leave the
+				// file unstamped for the next locked write.
+				return state.ErrRecordExists
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
 				return err
 			}
-			// A writer made the row after the read missed it. Leave the file
-			// unstamped, so the next locked write imports it.
-			if added, err := res.RowsAffected(); err != nil || added > 0 {
-				return err
-			}
-			return state.ErrRecordExists
 		}
 		_, err := saveTurnConn(context.Background(), conn, id, n, raw)
 		return err
@@ -189,9 +216,15 @@ func saveTurnRow(ctx context.Context, db *sql.DB, id string, n int, raw []byte) 
 	return revision, err
 }
 
+// saveTurnConn accepts full text, never an encoded stored row. Rewrites
+// must resolve the stored row before passing it here.
 func saveTurnConn(ctx context.Context, conn *sql.Conn, id string, n int, raw []byte) (int64, error) {
+	raw, err := storeTurnPrompts(ctx, conn, id, n, raw)
+	if err != nil {
+		return 0, err
+	}
 	var revision int64
-	err := conn.QueryRowContext(ctx, `INSERT INTO session_turns(session, n, revision, turn)
+	err = conn.QueryRowContext(ctx, `INSERT INTO session_turns(session, n, revision, turn)
 VALUES (?, ?, (SELECT COALESCE(MAX(revision), 0) + 1 FROM session_turns), ?)
 ON CONFLICT(session, n) DO UPDATE SET revision = excluded.revision, turn = excluded.turn
 RETURNING revision`, id, n, raw).Scan(&revision)
@@ -205,7 +238,11 @@ RETURNING revision`, id, n, raw).Scan(&revision)
 func mirrorTurn(ctx context.Context, db *sql.DB, id string, n int, path string) error {
 	return state.For(db).Mirror(ctx, sessionlife.TurnMirrorKey(id, n), path, func(out io.Writer) error {
 		var raw []byte
-		if err := db.QueryRowContext(ctx, "SELECT turn FROM session_turns WHERE session = ? AND n = ?", id, n).Scan(&raw); err != nil {
+		if err := state.For(db).Read(ctx, func(r state.Reader) error {
+			var err error
+			raw, _, err = resolvedTurn(ctx, r, id, n)
+			return err
+		}); err != nil {
 			return err
 		}
 		// The previous release's format: store.WriteJSON's indented JSON.
