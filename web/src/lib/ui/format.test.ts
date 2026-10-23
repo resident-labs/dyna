@@ -2,19 +2,30 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import DOMPurify from 'dompurify'
 
+// Node has no browser DOM. These fakes give format.ts the two DOM calls it
+// makes while it renders text: a parser and a sanitizer.
+class FakeDOMParser {
+  parseFromString(html: string): unknown {
+    return { body: { firstChild: { innerHTML: html.replace(/^<div>|<\/div>$/g, '') } }, createTreeWalker: () => ({ nextNode: () => false }) }
+  }
+}
+
 test('markdown renders each text once and reuses the result', async (t) => {
   // Node has no browser DOM: count the mention pass instead of running it.
   let parses = 0
-  const saved = [globalThis.DOMParser, globalThis.NodeFilter, DOMPurify.sanitize]
-  globalThis.NodeFilter = { SHOW_TEXT: 4 }
-  globalThis.DOMParser = class {
-    parseFromString(html) {
+  const saved = { DOMParser: globalThis.DOMParser, NodeFilter: globalThis.NodeFilter, sanitize: DOMPurify.sanitize }
+  t.after(() => {
+    Object.assign(globalThis, { DOMParser: saved.DOMParser, NodeFilter: saved.NodeFilter })
+    Object.assign(DOMPurify, { sanitize: saved.sanitize })
+  })
+  class CountingParser extends FakeDOMParser {
+    override parseFromString(html: string): unknown {
       parses++
-      return { body: { firstChild: { innerHTML: html.replace(/^<div>|<\/div>$/g, '') } }, createTreeWalker: () => ({ nextNode: () => false }) }
+      return super.parseFromString(html)
     }
   }
-  DOMPurify.sanitize = (html) => html
-  t.after(() => { [globalThis.DOMParser, globalThis.NodeFilter, DOMPurify.sanitize] = saved })
+  Object.assign(globalThis, { NodeFilter: { SHOW_TEXT: 4 }, DOMParser: CountingParser })
+  Object.assign(DOMPurify, { sanitize: (html: string) => html })
   const { markdown } = await import('./format.ts')
 
   const first = markdown('**cached** post')

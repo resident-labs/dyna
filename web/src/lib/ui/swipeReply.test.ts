@@ -2,29 +2,46 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { swipeReply } from './swipeReply.ts'
 
-function fixture({ coarse = true, interactive = false, selected = false } = {}) {
-  globalThis.window = { matchMedia: () => ({ matches: coarse }), getSelection: () => selected ? 'selected text' : '' }
-  class Post extends EventTarget {
-    classes = new Set()
-    properties = new Map()
-    classList = { add: (...keys) => keys.forEach((k) => this.classes.add(k)), remove: (...keys) => keys.forEach((k) => this.classes.delete(k)), toggle: (k, on) => on ? this.classes.add(k) : this.classes.delete(k) }
-    style = { setProperty: (k, v) => this.properties.set(k, v), removeProperty: (k) => this.properties.delete(k) }
+interface TouchPoint {
+  clientX: number
+  clientY: number
+  identifier: number
+}
+
+// The fake row stands in for the element the action is typed against: the
+// action reads only these members of it.
+interface RowElement {
+  classList: { add: (...keys: string[]) => void; remove: (...keys: string[]) => void; toggle: (key: string, on: boolean) => void }
+  style: { setProperty: (key: string, value: string) => void; removeProperty: (key: string) => void }
+  closest: (selector: string) => unknown
+  getBoundingClientRect: () => { top: number }
+}
+
+const asRow = (node: RowElement): HTMLElement => node as HTMLElement
+
+function fixture({ coarse = true, interactive = false, selected = false }: { coarse?: boolean; interactive?: boolean; selected?: boolean } = {}) {
+  Object.assign(globalThis, { window: { matchMedia: () => ({ matches: coarse }), getSelection: () => selected ? 'selected text' : '' } })
+  class Post extends EventTarget implements RowElement {
+    classes = new Set<string>()
+    properties = new Map<string, string>()
+    classList = { add: (...keys: string[]) => keys.forEach((k) => this.classes.add(k)), remove: (...keys: string[]) => keys.forEach((k) => this.classes.delete(k)), toggle: (k: string, on: boolean) => on ? this.classes.add(k) : this.classes.delete(k) }
+    style = { setProperty: (k: string, v: string) => this.properties.set(k, v), removeProperty: (k: string) => this.properties.delete(k) }
     closest() { return interactive }
     getBoundingClientRect() { return { top: 50 } }
   }
   const node = new Post()
   let replies = 0
-  const action = swipeReply(node, () => replies++)
-  const touch = (x, y = 100, identifier = 1) => ({ clientX: x, clientY: y, identifier })
-  function event(type, touches, changedTouches = touches, cancelable = true) {
+  const action = swipeReply(asRow(node), () => replies++)
+  const touch = (x: number, y = 100, identifier = 1) => ({ clientX: x, clientY: y, identifier })
+  function event(type: string, touches: TouchPoint[], changedTouches = touches, cancelable = true) {
     const e = new Event(type, { cancelable })
     Object.assign(e, { touches, changedTouches })
     node.dispatchEvent(e)
     return e
   }
   const start = (x = 260, y = 100) => event('touchstart', [touch(x, y)])
-  const move = (x, y = 100) => event('touchmove', [touch(x, y)])
-  const end = (x, y = 100) => event('touchend', [], [touch(x, y)])
+  const move = (x: number, y = 100) => event('touchmove', [touch(x, y)])
+  const end = (x: number, y = 100) => event('touchend', [], [touch(x, y)])
   return { node, action, touch, event, start, move, end, replies: () => replies }
 }
 
@@ -46,7 +63,7 @@ test('a deliberate left swipe shows the cue and replies once on release', () => 
 })
 
 test('right swipes, vertical scrolls, short drags, and reversed drags do not reply', () => {
-  for (const [x, y] of [[330, 100], [250, 180], [220, 100]]) {
+  for (const [x, y] of [[330, 100], [250, 180], [220, 100]] as const) {
     const f = fixture(); f.start(); const move = f.move(x, y); f.end(x, y)
     assert.equal(f.replies(), 0)
     if (x > 260 || y > 100) assert.equal(move.defaultPrevented, false)

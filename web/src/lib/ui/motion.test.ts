@@ -5,15 +5,24 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { arrivals, motion, FAST, BASE, SLOW } from './motion.ts'
 
+// Node has no browser media queries, so the test stands in a minimal list.
+function mediaQueryList(matches: boolean): MediaQueryList {
+  return {
+    matches, media: '', onchange: null,
+    addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {},
+    dispatchEvent: () => false,
+  }
+}
+
 test('motion durations follow the shared tokens and drop to zero for reduced motion', (t) => {
   const saved = globalThis.matchMedia
   t.after(() => { globalThis.matchMedia = saved })
-  globalThis.matchMedia = () => ({ matches: false })
+  globalThis.matchMedia = () => mediaQueryList(false)
   assert.deepEqual([FAST, BASE, SLOW].map(motion), [150, 200, 250])
-  globalThis.matchMedia = (q) => ({ matches: q === '(prefers-reduced-motion: reduce)' })
+  globalThis.matchMedia = (q: string) => mediaQueryList(q === '(prefers-reduced-motion: reduce)')
   assert.deepEqual([FAST, BASE, SLOW].map(motion), [0, 0, 0])
   const css = readFileSync(new URL('../../app.css', import.meta.url), 'utf8')
-  for (const [name, ms] of [['--motion-fast', FAST], ['--motion', BASE], ['--motion-slow', SLOW]]) assert.match(css, new RegExp(`${name}: ${ms}ms;`))
+  for (const [name, ms] of [['--motion-fast', FAST], ['--motion', BASE], ['--motion-slow', SLOW]] as const) assert.match(css, new RegExp(`${name}: ${ms}ms;`))
 })
 
 test('arrivals marks only rows added after a list first showed rows', () => {
@@ -33,13 +42,13 @@ test('arrivals marks only rows added after a list first showed rows', () => {
 
 test('web motion uses shared timing tokens outside the PR view', () => {
   const root = fileURLToPath(new URL('../../', import.meta.url))
-  const violations = []
-  for (const file of readdirSync(root, { recursive: true })) {
+  const violations: string[] = []
+  for (const file of readdirSync(root, { recursive: true, encoding: 'utf8' })) {
     if (file.startsWith('lib/prs/') || !/\.(svelte|css)$/.test(file)) continue
     const source = readFileSync(join(root, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
-    const styles = file.endsWith('.css') ? [source] : [...source.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((match) => match[1])
+    const styles = file.endsWith('.css') ? [source] : [...source.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)].map((match) => match[1] ?? '')
     for (const css of styles) {
-      for (const [, property, value] of css.matchAll(/\b(transition(?:-duration|-delay)?|animation(?:-duration|-delay)?)\s*:\s*([^;}]+)/g)) {
+      for (const [, property = '', value = ''] of css.matchAll(/\b(transition(?:-duration|-delay)?|animation(?:-duration|-delay)?)\s*:\s*([^;}]+)/g)) {
         // Split animation lists without splitting cubic-bezier() or var().
         for (const item of value.split(/,(?![^()]*\))/)) {
           if (property === 'animation' && /\binfinite\b/.test(item)) continue
@@ -49,7 +58,7 @@ test('web motion uses shared timing tokens outside the PR view', () => {
       }
     }
     if (!file.endsWith('.svelte')) continue
-    for (const [directive, options = ''] of source.matchAll(/\b(?:in|out|transition):[\w$]+(?:\|\w+)*(?:=\{([\s\S]*?)\}(?=[\s/>]))?/g)) {
+    for (const [directive = '', options = ''] of source.matchAll(/\b(?:in|out|transition):[\w$]+(?:\|\w+)*(?:=\{([\s\S]*?)\}(?=[\s/>]))?/g)) {
       // A token duration, or an explicit opt-out: `<condition> ? 0 : motion(TOKEN)`.
       if (!/\bduration\s*:\s*(?:[\w.]+\s*\?\s*0\s*:\s*)?motion\(\s*(?:FAST|BASE|SLOW)\s*\)(?=\s*[,}])/.test(options)) violations.push(file + ': ' + directive)
     }
