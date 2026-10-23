@@ -4,7 +4,7 @@
   import Chip from '../ui/Chip.svelte'
   import { statusMeta, changeName, type Facts, type Meta } from './pr.ts'
   import { fade } from 'svelte/transition'
-  import { motion, FAST } from '../ui/motion.js'
+  import { motion, FAST } from '../ui/motion.ts'
   import { expedite, prExpedited } from '../rooms/expedite.ts'
   // badge marks a PR linked to the expedited goal with a bolt.
   let { pr, more = 0, short = false, number = true, meta: shown = null, badge = true }: { pr: Facts; more?: number; short?: boolean; number?: boolean; meta?: Meta | null; badge?: boolean } = $props()

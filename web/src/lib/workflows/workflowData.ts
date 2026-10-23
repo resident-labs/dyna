@@ -3,7 +3,7 @@ import type { Page } from '../api/wire.ts'
 import type { RunDetail, RunList } from '../api/workflow.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { errorText } from '../errorText.ts'
-import { createReloadGate } from '../ui/reloadGate.js'
+import { createReloadGate } from '../ui/reloadGate.ts'
 
 // The app's current selection. A load answers only while the room and visit
 // it started in are still current.

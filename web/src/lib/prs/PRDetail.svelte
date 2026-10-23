@@ -13,7 +13,7 @@
   //   onauthor, onreviewer: open those sessions from the merge box, or null
   //   actions    extra footer buttons
   import { tick } from 'svelte'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import MergeBox from './MergeBox.svelte'
   import PRChip from './PRChip.svelte'
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'

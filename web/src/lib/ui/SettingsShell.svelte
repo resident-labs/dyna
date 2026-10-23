@@ -6,8 +6,8 @@
   // pane owns Esc.
   import type { Snippet } from 'svelte'
   import { fly } from 'svelte/transition'
-  import { dialog as modal } from './dialog.js'
-  import { BASE, motion } from './motion.js'
+  import { dialog as modal } from './dialog.ts'
+  import { BASE, motion } from './motion.ts'
 
   interface NavItem {
     id: string

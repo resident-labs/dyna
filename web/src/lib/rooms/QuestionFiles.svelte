@@ -1,7 +1,7 @@
 <script>
   import CardFrame from '../files/CardFrame.svelte'
   import Files from '../files/Files.svelte'
-  import { cardHeight } from '../ui/rich.js'
+  import { cardHeight } from '../ui/rich.ts'
   let { roomId, items = [], onopen } = $props()
   let expanded = $state(false)
   let fullHeight = $state(360)

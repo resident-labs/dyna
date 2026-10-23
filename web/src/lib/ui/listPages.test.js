@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mergeListPage } from './listPages.js'
+import { mergeListPage } from './listPages.ts'
 
 test('a current-page refresh preserves loaded history and its continuation', () => {
   const first = mergeListPage(null, { items: [{ id: 'active', state: 'running' }], older: true, cursor: 'first' })

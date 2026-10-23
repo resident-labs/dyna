@@ -12,7 +12,7 @@
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
   import PRGlyph from './PRGlyph.svelte'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import { labelStyle, issueChip } from './github.ts'
   import type { GitHubItem } from '../api/github.ts'
 

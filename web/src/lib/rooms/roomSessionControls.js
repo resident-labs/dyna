@@ -1,4 +1,4 @@
-import { createReloadGate } from '../ui/reloadGate.js'
+import { createReloadGate } from '../ui/reloadGate.ts'
 
 export const roomControlLabels = { pause: 'Pause all', resume: 'Resume all', clearDormant: 'Clear dormant sessions' }
 const statusLabels = { paused: 'Paused', running: 'Running turn continues', held: 'Held for resume', idle: 'Idle', resumed: 'Resumed', closed: 'Closed', kept: 'Kept open', error: 'The action failed.' }

@@ -1,10 +1,10 @@
 <script>
-  import { speaker } from '../ui/posts.js'
+  import { speaker } from '../ui/posts.ts'
   import Avatar from '../ui/Avatar.svelte'
   import PostFiles from '../ui/PostFiles.svelte'
-  import { postParts } from '../ui/postParts.js'
+  import { postParts } from '../ui/postParts.ts'
   import CompletionBody from '../ui/CompletionBody.svelte'
-  import { markdown, stamp, ago } from '../ui/format.js'
+  import { markdown, stamp, ago } from '../ui/format.ts'
 
   // The Pinned panel. It takes the member list's place, like Discord. Each
   // item reuses Files, so attachments and HTML cards render as in the feed.

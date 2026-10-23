@@ -1,6 +1,6 @@
 <script>
   import { human, extOf } from './attach.js'
-  import { dialog } from '../ui/dialog.js'
+  import { dialog } from '../ui/dialog.ts'
   let { items = [], onremove, onretry } = $props()
   const titleId = $props.id()
   let previewKey = $state(null)
