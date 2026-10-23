@@ -113,7 +113,7 @@ export function installGoals(state: object): void {
     trackFetchedGoal: (change: unknown) => call(fields, 'trackFetchedGoal', change),
     refreshFetchedGoal: (current?: () => boolean) => call(fields, 'refreshFetchedGoal', current),
     expediteGoal: (goal: unknown) => call(fields, 'expediteGoal', goal),
-    expediteItems: (member: unknown) => call(fields, 'expediteItems', member),
+    expediteItems: (member: unknown, expeditedId: string) => call(fields, 'expediteItems', member, expeditedId),
     stopExpediting: (list: unknown[]) => call(fields, 'stopExpediting', list),
     setGoals: (rows: unknown[]) => write(fields, 'goals', rows),
     clear() {
