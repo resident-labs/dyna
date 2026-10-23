@@ -86,6 +86,19 @@ export function recoveredLogins<F extends { accountId: string }>(flows: F[] | nu
   })
 }
 
+// signInStatus words the step of an in-app sign-in for the shared card. A
+// failure repeats the engine's message, which names the missing step.
+const SIGN_IN_STATUS: Record<string, string> = {
+  waiting: 'Waiting for you to approve the sign-in.',
+  verifying: 'Checking the sign-in…',
+  succeeded: 'Signed in.',
+  cancelled: 'Sign-in cancelled.',
+}
+export function signInStatus(state?: { phase?: string; message?: string } | null): string {
+  if (state?.phase === 'failed') return state.message || 'Sign-in did not finish. Try again.'
+  return SIGN_IN_STATUS[state?.phase ?? ''] ?? 'Starting sign-in…'
+}
+
 export function accountNeedsSignIn(account?: { needsLogin?: boolean; status?: string } | null): boolean {
   return !!account && (!!account.needsLogin || ['not signed in', 'needs_auth', 'needs-sign-in'].includes(account.status ?? ''))
 }

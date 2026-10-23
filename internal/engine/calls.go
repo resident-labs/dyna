@@ -362,6 +362,8 @@ func bindings(s services) []websvc.Binding {
 		{Name: "FindPersonalLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.PreparePersonalLogin},
 		{Name: "UsePersonalLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.UsePersonalLoginSnapshot},
 		{Name: "PrivateRuntimeLogins", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.runtime.PrivateRuntimeLogins},
+		{Name: "PrivateRuntimeLoginState", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.runtime.PrivateRuntimeLoginState},
+		{Name: "RespondPrivateRuntimeLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.RespondPrivateRuntimeLogin},
 		{Name: "CancelPrivateRuntimeLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.CancelPrivateRuntimeLogin},
 		{Name: "FinishPrivateRuntimeLogin", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.FinishPrivateRuntimeLogin},
 		{Name: "HarnessProviderKeys", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.runtime.HarnessProviderKeys},
