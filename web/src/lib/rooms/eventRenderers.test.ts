@@ -427,3 +427,18 @@ test('an engine alert names its remedy as a command chip', () => {
   web.unmount(mounted)
   target.remove()
 })
+
+test('an alert stored before the typed events still shows its line', () => {
+  // The sealed alert family routes an old post to this card, and it has no
+  // payload: without the legacy reader the feed would show only "Alert".
+  const legacy = { id: 'msg_0123456789abcdef', ts: 1, kind: 'alert', text: 'Doctor report 7 (hook main-updated):\nmachine is overloaded' }
+  assert.equal(web.rendererFor(legacy), web.eventComponents.AlertCard, 'the alert family lost its card')
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.AlertCard, { target, props: { post: legacy, surface: 'feed' } })
+  web.flushSync()
+  const text = (target.textContent ?? '').trim()
+  assert.match(text, /machine is overloaded/)
+  web.unmount(mounted)
+  target.remove()
+})
