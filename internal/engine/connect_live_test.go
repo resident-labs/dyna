@@ -52,12 +52,12 @@ func TestFailedMigrationKeepsConnect(t *testing.T) {
 	t.Cleanup(func() { migrateStores = saved })
 	keepSchemaOwner(t)
 	migrateStores = func(string) error { return errors.New("boom") }
-	readOnly, status, refused := startMode(dir, false, unit, dir)
+	readOnly, status, refused, _ := startMode(dir, false, unit, dir)
 	if !readOnly || status == "" || refused != "" {
 		t.Fatalf("failed migration: readOnly=%v status=%q connect refused %q; want read-only with a status, still on Connect", readOnly, status, refused)
 	}
 	migrateStores = func(string) error { return nil }
-	if readOnly, _, refused := startMode(dir, true, unit, dir); !readOnly || !strings.Contains(refused, "read-only") {
+	if readOnly, _, refused, _ := startMode(dir, true, unit, dir); !readOnly || !strings.Contains(refused, "read-only") {
 		t.Fatalf("--read-only engine: readOnly=%v connect refused %q; want read-only and off Connect", readOnly, refused)
 	}
 }

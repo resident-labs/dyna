@@ -113,8 +113,14 @@ func TestPromptCutoverRequiresQuiescentOldWriters(t *testing.T) {
 				},
 			}
 			tc.edit(&p)
-			if err := checkPromptCutover(p); (err != nil) != tc.reject {
+			err := checkPromptCutover(p)
+			if (err != nil) != tc.reject {
 				t.Fatalf("preflight error = %v; reject = %v", err, tc.reject)
+			}
+			var writer *LivePromptWriterError
+			wantRetry := tc.name == "old turn" || tc.name == "old consolidate" || tc.name == "old transfer" || tc.name == "old resume room" || tc.name == "old runner"
+			if errors.As(err, &writer) != wantRetry {
+				t.Fatalf("retryable writer error = %v; want %v", err, wantRetry)
 			}
 		})
 	}
