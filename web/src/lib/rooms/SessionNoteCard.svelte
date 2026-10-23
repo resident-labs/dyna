@@ -39,7 +39,8 @@
       case 'adopted':
         return `${p.session} moved from ${p.from ?? 'top level'} to ${p.to ?? 'top level'}`
       case 'account':
-        return `${p.session}: ${p.from} moved to ${p.to}, ${reasonWord(p.reason)}`
+        // The DM already names the session, so it keeps the change only.
+        return `${surface === 'dm' ? '' : `${p.session}: `}${p.from} moved to ${p.to}, ${reasonWord(p.reason)}`
       case 'instructions':
         return `Standing instructions changed for ${p.session}`
       case 'seat':
@@ -60,7 +61,7 @@
   let sections = $derived(payload?.sections ?? [])
 </script>
 
-<div class="note" data-id={post.id}>
+<div class="note {surface}" data-id={post.id}>
   <div class="sum">
     <span class="glyph {changeTone[kind]}" aria-hidden="true">✦</span>
     <span class="title">{headline}</span>
@@ -96,6 +97,11 @@
     color: var(--muted);
   }
   .sum { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+  /* A DM column is narrow, so its headline wraps inside its own column and
+     the time keeps its place on the first line. */
+  .note.dm .sum { flex-wrap: nowrap; align-items: baseline; }
+  .note.dm .title { flex: 1 1 auto; white-space: normal; }
+  .note.dm time { margin-left: auto; }
   .glyph { flex: none; width: 16px; text-align: center; font-size: var(--t-cap); }
   .glyph.iris { color: var(--iris); }
   .glyph.sage { color: var(--sage); }
@@ -117,6 +123,7 @@
   .detail.task { margin-left: 24px; }
   @media (max-width: 760px) {
     .note { margin: 4px var(--s2); }
+    .title { white-space: normal; }
     .sections { margin-left: 20px; }
   }
 </style>
