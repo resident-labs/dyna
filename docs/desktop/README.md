@@ -56,9 +56,9 @@ link`) adds a managed tunnel, passkey sign-in and push notifications; see
   **Run workflow** starts a template or a host script with an input.
   **Cancel run** stops a live run, after a confirm. **Steer** on a working
   agent sends it a message.
-- **Read the repo:** `#files`, `#changes`, `#terminal` and `#shell-jobs` in
-  the sidebar's Workspace section. Session tabs focus on the agent. See
-  [Workspace views](#workspace-views).
+- **Read the repo:** click **Review** to open Files, Changes and PRs beside
+  chat. Choose a session to review its worktree. Terminal remains in the
+  sidebar. See [Workspace views](#workspace-views).
 - **Tidy rooms:** click the room name at the top of the sidebar, right-click
   a rail tile, or use a room's `⋯` on the home screen. Rename, pin to the
   rail, archive or unarchive, or delete. Delete asks you to type the room
@@ -104,15 +104,15 @@ desktop/build/bin/dyna-desktop    # opens the window on the running server
 | Column | What it shows |
 |---|---|
 | Room rail | Rooms as tiles, unread badge, gold dot for live work; the top tile opens the room list |
-| Room sidebar | Room name (click for the room menu) and repo, Messages, PRs and Issues, Work and Machine views, sessions working now, the Settings gear |
+| Room sidebar | Room name (click for the room menu) and repo, Messages and Issues, Work and Machine views, sessions working now, the Settings gear |
 | Feed | Day dividers, a New line, sender groups, replies, full completion results, a `Message #room` composer with `@` and `/` completion |
 | Members | The owner, with the room's root seat under it: the internal root session (labeled `root`; open it to see its turns and tool calls) and a line naming the seat holder, "internal root" or "external orchestrator since <time>" with a Take back seat button. Then sessions as a tree with gold/green/red status, each with a context menu. Finished (dormant) sessions sort after their other siblings, with each subtree kept together, and fold into a Finished group with coral status dots, a Dismiss action, and a confirmed Clear finished action. A post still wakes a finished session with its full conversation. Dismissal preserves transcripts and reports retained dirty or unmerged worktrees in the room. Subagents fold under their parent; see below |
-| Drill-down | A member's profile card and session view in the center column, with Messages, Media, and Pull requests tabs |
+| Drill-down | A member's profile card and session view in the center column, with Messages, Media, Computer and Shell tabs when available |
 
-The room has **Messages**, **PRs** and **Issues** tabs. Messages shows top-level
+The room has **Messages** and **Issues** tabs. Messages shows top-level
 agents speaking to each other, their final results, and explicit messages
-to the owner. PRs shows open pull requests and saved merge progress. Issues
-shows local Dyna issues and the repository's GitHub issues.
+to the owner. The review workspace's PRs tab shows open pull requests and
+saved merge progress. Issues shows local Dyna issues and the repository's GitHub issues.
 
 The member list folds subagents under their parent, like categories in
 Discord. A chevron left of the avatar opens or closes a subtree. By default,
@@ -137,7 +137,7 @@ mentions inside code do not override the default recipients.
 The header's left button, or `Ctrl+B`, hides the room sidebar and gives the
 feed its width; the rail stays. The app keeps that choice and the member list
 choice in the webview's local storage (`dyna.layout`). The same key holds
-the last open room and its view (Messages, PRs, Issues, files, terminal, shell jobs). After a
+the last open room and its view. Review links also preserve the selected tab. After a
 restart the app opens that room again, in the desktop and in the web app (each
 browser keeps its own). If the room no longer exists, the app opens the first
 active room. A link that names a room (`#room=…`) wins.
@@ -169,10 +169,10 @@ review. The PR page is the fallback when neither link is available.
 
 ## Workspace views
 
-The sidebar's Workspace section and the session tabs show the files, git
-changes, shells and background jobs of a room's repo, or of the folder a
-session works in (its worktree). Everything here works the same in the
-desktop app and on a phone.
+The **Review** button opens Files, Changes and PRs beside chat. Its workspace
+selector chooses the repository or a session's worktree; Changes requires a
+session. Terminal remains in the sidebar, and a session's Shell tab shows
+its shells. On a phone, Review fills the screen; **Back to chat** closes it.
 
 - **Files:** a folder tree beside the file view. Folders load one level at
   a time. Arrow keys move through the tree: Right opens a folder, Left closes
@@ -185,7 +185,7 @@ desktop app and on a phone.
   groups, as git shows them. Each file row opens to its diff, with old and
   new line numbers and added or removed lines on a green or red wash.
   Expand all and Collapse all work on every row. A short list starts open.
-  The arrow on a row opens that file in Files. Recent commits come last.
+  Recent commits come last.
   The view reloads when the window gets focus, or with the reload button.
 - **Wrap:** long lines wrap by default in files and diffs, with the line
   number kept beside the first part. The Wrap button turns it off, and the
@@ -572,8 +572,9 @@ item also has `job`, the job's row with its tail.
 
 ## PR tracking
 
-Open the room's **PRs** tab to browse its open GitHub pull requests and merge
-progress. Open the room's **Issues** tab to browse issues. Search narrows the lists.
+Open **Review → PRs** to browse the room's open GitHub pull requests and merge
+progress. A focused session filters its PR list. Open the room's **Issues**
+tab to browse issues. Search narrows the lists.
 Read descriptions, comments, reviews, checks, and PR diffs.
 This uses the host's `gh` login; install the GitHub CLI and run `gh auth login`
 if needed. GitHub lists show up to 60 results; search narrows larger lists.
@@ -743,11 +744,12 @@ The equivalent CLI commands are `dyna room pause <room>`,
 ## Session messages
 
 Open a member's session to focus on that agent. The tabs are **Messages**,
-**Media** (when the agent has attachments), and **Pull requests** (when it has
-tracked PRs). Media shows images, HTML cards, and files sent by or addressed
-to this agent, including owner uploads and posts from earlier turns. It groups
+**Media** (when the agent has attachments), **Computer** (when available),
+and **Shell** (when it has shells). Media shows images, HTML cards, and files
+sent by or addressed to this agent, including owner uploads and posts from earlier turns. It groups
 the newest 200 posts by day. Click an item to open its file or card viewer.
-Room Files, Changes, and Terminal remain in the sidebar.
+Files, Changes and PRs open in the review workspace beside chat. Terminal
+remains in the sidebar.
 
 Messages share an avatar and header when the same author writes within
 seven minutes. Turn dividers mark progress. Each turn groups tools, shell commands
