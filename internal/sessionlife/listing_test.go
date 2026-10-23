@@ -45,9 +45,8 @@ func TestListingQueriesReadOnlyTheCoveringIndex(t *testing.T) {
 	}
 }
 
-// OpenVersions lists open rows and session folders with no row, and sees a
-// new folder or a new row at once.
-func TestOpenVersionsListsOpenRowsAndFoldersWithoutRows(t *testing.T) {
+// OpenVersions lists only open rows and sees each new row at once.
+func TestOpenVersionsListsOnlyOpenRows(t *testing.T) {
 	sessions := t.TempDir()
 	save := func(id string, closed bool) {
 		t.Helper()
@@ -82,12 +81,12 @@ func TestOpenVersionsListsOpenRowsAndFoldersWithoutRows(t *testing.T) {
 	folder("ses_open")
 	folder("ses_closed")
 	folder("ses_legacy")
-	if got := open(); len(got) != 2 || !got["ses_open"] || !got["ses_legacy"] {
-		t.Fatalf("OpenVersions = %v, want ses_open and ses_legacy", got)
+	if got := open(); len(got) != 1 || !got["ses_open"] {
+		t.Fatalf("OpenVersions = %v, want ses_open", got)
 	}
-	folder("ses_new")
+	save("ses_new", false)
 	if got := open(); !got["ses_new"] {
-		t.Fatalf("a new folder is missing: %v", got)
+		t.Fatalf("a new row is missing: %v", got)
 	}
 	save("ses_legacy", true)
 	if got := open(); got["ses_legacy"] {
