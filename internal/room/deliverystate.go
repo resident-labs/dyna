@@ -162,7 +162,8 @@ ORDER BY mode='wake' DESC LIMIT 1`, roomID, postID).Scan(&mode)
 // already covered, and returns the posts it cancelled. The startup input read
 // uses it for the notes the held prompt carried: a turn claimed them once, and
 // the next read must not deliver them again. It cancels a claimed delivery,
-// which ClaimDeliveries and CancelDelivery both refuse.
+// which ClaimDeliveries and CancelDelivery both refuse, and an imported one,
+// which a previous release's index import wrote before a turn could claim it.
 func (s *Store) CoverDeliveries(ctx context.Context, ev hub.Event, set DeliverySet, postIDs []string) ([]string, error) {
 	db, err := s.postIndexDB()
 	if err != nil {
@@ -188,7 +189,7 @@ func CoverDeliveriesIn(ctx context.Context, conn *sql.Conn, set DeliverySet, pos
 		return nil, err
 	}
 	query := "UPDATE post_deliveries SET state='cancelled', updated_at=? WHERE room_id=? AND post_id=?" +
-		" AND session_id IN (" + inClause(set.Keys) + ") AND state IN ('queued','claimed','failed')"
+		" AND session_id IN (" + inClause(set.Keys) + ") AND state IN ('queued','claimed','failed','imported')"
 	covered := make([]string, 0, len(postIDs))
 	for _, postID := range postIDs {
 		args := []any{at, set.RoomID, postID}
