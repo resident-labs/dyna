@@ -5,7 +5,9 @@ import (
 	"dyna-agent/internal/devicegrant"
 	"dyna-agent/internal/scope"
 	"dyna-agent/internal/websvc"
+	"dyna-agent/internal/websvc/devicestore"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -70,12 +72,23 @@ func TestDeviceViewsPairAndRevoke(t *testing.T) {
 }
 
 func TestExistingDeviceIsLegacyAndANewCodeIsNot(t *testing.T) {
-	svc := New(filepath.Join(t.TempDir(), "sessions"))
-	w, _, err := svc.deviceStores()
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	if err := os.MkdirAll(web, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// Legacy grants come from retained files present before startup imports.
+	now := time.Now()
+	raw, err := json.Marshal([]devicestore.Device{{ID: "old-phone", Name: "old", Created: now, LastSeen: now, Expires: now.Add(time.Hour)}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = w.IssueDevice("old-phone", "old", time.Hour); err != nil {
+	if err := os.WriteFile(filepath.Join(web, "devices.json"), raw, 0600); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(filepath.Join(root, "sessions"))
+	w, _, err := svc.deviceStores()
+	if err != nil {
 		t.Fatal(err)
 	}
 	list, err := svc.Devices()

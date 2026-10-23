@@ -3,10 +3,12 @@
 package devicestore
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/base32"
 	"encoding/base64"
 	"encoding/hex"
@@ -15,14 +17,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 	"unicode"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/hub"
+	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 )
 
@@ -63,7 +66,7 @@ type Device struct {
 	LastSeen time.Time `json:"lastSeen"`
 	Expires  time.Time `json:"expires"`
 	// Scopes is the grant stored with the pairing code that created this
-	// device. It is returned to the caller and is not written to devices.json.
+	// device. It is returned to the caller and is not stored with the device.
 	Scopes []string `json:"-"`
 }
 
@@ -75,25 +78,20 @@ type pairing struct {
 	Scopes  []string  `json:"scopes,omitempty"`
 }
 
-// Store keeps the web server's state in <datadir>/web, mode 0700:
+// Store keeps paired devices and the live pairing code in dyna.db, in the
+// parent of its state directory <datadir>/web (mode 0700). The directory
+// holds one file:
 //
-//	key           32 random bytes that sign card tickets
-//	pair.json     the live pairing code's HMAC (keyed by key), expiry and
-//	              wrong tries, so a reader of the file has nothing to guess
-//	devices.json  paired devices, token hashes only
+//	key  32 random bytes that sign card tickets and key the pairing code's
+//	     HMAC, so a reader of the database has nothing to guess
 //
 // The server and the --pair, --devices and --revoke commands are separate
-// processes. Every change takes an exclusive flock on web/.lock and replaces
-// the file by rename, so no reader sees a partial write. The server reads
-// devices.json again whenever its size or time changes, so a revoke takes
-// effect on the next request.
+// processes. Every change is one SQLite writer transaction and every read
+// sees the latest commit, so a revoke takes effect on the next request.
 type Store struct {
 	dir string
 	now func() time.Time
-
-	mu      sync.Mutex
-	stamp   string
-	devices []Device
+	w   *state.Writer
 }
 
 // DefaultStore opens the web state directory in the Dyna data directory.
@@ -101,7 +99,78 @@ func DefaultStore() (*Store, error) {
 	return OpenStore(filepath.Join(store.DataDir(), "web"))
 }
 
-// OpenStore opens (and makes) the state directory.
+// Migrate brings the device tables in dataDir's dyna.db to this version and
+// imports devices.json and pair.json from <dataDir>/web once. Only the engine
+// calls it, at start (requirement 41).
+func Migrate(dataDir string) error {
+	db, err := database.Open(dataDir)
+	if err != nil {
+		return err
+	}
+	return migrate(db, filepath.Join(dataDir, "web"))
+}
+
+func migrate(db *sql.DB, dir string) error {
+	return database.Migrate(db, "web_devices.version", 1, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old != 0 {
+			return nil
+		}
+		for _, stmt := range []string{
+			`CREATE TABLE web_devices (
+ id TEXT PRIMARY KEY,
+ name TEXT NOT NULL,
+ hash TEXT NOT NULL,
+ created TEXT NOT NULL,
+ last_seen TEXT NOT NULL,
+ expires TEXT NOT NULL
+)`,
+			`CREATE INDEX web_devices_hash ON web_devices(hash)`,
+			`CREATE TABLE web_pairing (
+ slot INTEGER PRIMARY KEY CHECK (slot = 1),
+ device_id TEXT NOT NULL,
+ hash TEXT NOT NULL,
+ expires TEXT NOT NULL,
+ tries INTEGER NOT NULL,
+ scopes TEXT NOT NULL
+)`,
+		} {
+			if _, err := conn.ExecContext(ctx, stmt); err != nil {
+				return err
+			}
+		}
+		// TODO: legacy/shim remove later — imports the pre-SQLite devices.json once so paired devices keep working; remove after one release when no install can still hold the file.
+		_, err := state.ImportMigration(ctx, conn, "web/devices", filepath.Join(dir, "devices.json"), func(conn *sql.Conn, raw []byte) error {
+			var list []Device
+			if err := json.Unmarshal(raw, &list); err != nil {
+				return fmt.Errorf("read devices.json: %w", err)
+			}
+			for _, d := range list {
+				if err := putDevice(ctx, conn, d); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		// TODO: legacy/shim remove later — imports the pre-SQLite pair.json once so a pending pairing code keeps working; remove after one release when no install can still hold the file.
+		_, err = state.ImportMigration(ctx, conn, "web/pair", filepath.Join(dir, "pair.json"), func(conn *sql.Conn, raw []byte) error {
+			var p pairing
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return fmt.Errorf("read pair.json: %w", err)
+			}
+			return putPairing(ctx, conn, p)
+		})
+		return err
+	})
+}
+
+// OpenStore opens (and makes) the state directory. dyna.db is in its parent.
+// Only the engine creates the tables and runs the import. In another process
+// the migration check succeeds once the engine has migrated, and fails with a
+// not-migrated error before that.
 func OpenStore(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
@@ -109,7 +178,14 @@ func OpenStore(dir string) (*Store, error) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return nil, err
 	}
-	return &Store{dir: dir, now: time.Now}, nil
+	db, err := database.Open(filepath.Dir(dir))
+	if err != nil {
+		return nil, err
+	}
+	if err := migrate(db, dir); err != nil {
+		return nil, err
+	}
+	return &Store{dir: dir, now: time.Now, w: state.For(db)}, nil
 }
 
 // Dir is the store's state directory.
@@ -123,61 +199,36 @@ func (s *Store) SetClock(now func() time.Time) { s.now = now }
 
 func (s *Store) path(name string) string { return filepath.Join(s.dir, name) }
 
-func (s *Store) locked(fn func() error) error {
+// update runs fn in one writer transaction.
+func (s *Store) update(fn func(ctx context.Context, conn *sql.Conn) error) error {
+	ctx := context.Background()
+	return s.w.Write(ctx, hub.Event{}, func(conn *sql.Conn) error { return fn(ctx, conn) })
+}
+
+// Key returns the card ticket key, made on first use. Processes make it
+// under an exclusive flock on web/.lock, so they all get one key.
+func (s *Store) Key() ([]byte, error) {
 	f, err := os.OpenFile(s.path(".lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer f.Close()
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
-		return err
+		return nil, err
 	}
 	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
-	return fn()
-}
-
-func (s *Store) write(name string, b []byte) error {
-	return fsutil.WriteFile(s.path(name), b, 0o600, false)
-}
-
-func (s *Store) writeJSON(name string, v any) error {
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
+	b, err := os.ReadFile(s.path("key"))
+	if err == nil && len(b) == 32 {
+		return b, nil
 	}
-	return s.write(name, append(b, '\n'))
-}
-
-func (s *Store) readJSON(name string, v any) (bool, error) {
-	b, err := os.ReadFile(s.path(name))
-	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
 	}
-	if err != nil {
-		return false, err
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		return nil, err
 	}
-	return true, json.Unmarshal(b, v)
-}
-
-// Key returns the card ticket key, made on first use.
-func (s *Store) Key() ([]byte, error) {
-	var key []byte
-	err := s.locked(func() error {
-		b, err := os.ReadFile(s.path("key"))
-		if err == nil && len(b) == 32 {
-			key = b
-			return nil
-		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
-		key = make([]byte, 32)
-		if _, err := rand.Read(key); err != nil {
-			return err
-		}
-		return s.write("key", key)
-	})
-	return key, err
+	return key, fsutil.WriteFile(s.path("key"), key, 0o600, false)
 }
 
 // codeMAC hides a pairing code behind the web key.
@@ -227,8 +278,8 @@ func (s *Store) NewScopedCode(deviceID string, scopes []string) (string, error) 
 		return "", err
 	}
 	kept := append([]string(nil), scopes...)
-	err = s.locked(func() error {
-		return s.writeJSON("pair.json", pairing{ID: deviceID, Hash: mac, Expires: s.now().Add(CodeLife), Scopes: kept})
+	err = s.update(func(ctx context.Context, conn *sql.Conn) error {
+		return putPairing(ctx, conn, pairing{ID: deviceID, Hash: mac, Expires: s.now().Add(CodeLife), Scopes: kept})
 	})
 	if err != nil {
 		return "", err
@@ -244,38 +295,39 @@ func (s *Store) Pair(code, name string) (token string, dev Device, err error) {
 	if err != nil {
 		return "", Device{}, err
 	}
-	err = s.locked(func() error {
-		var p pairing
-		ok, err := s.readJSON("pair.json", &p)
+	failed := false
+	err = s.update(func(ctx context.Context, conn *sql.Conn) error {
+		p, ok, err := readPairing(ctx, conn)
 		if err != nil {
 			return err
 		}
-		now := s.now()
-		if !ok || p.Hash == "" || !now.Before(p.Expires) || p.Tries >= CodeTries {
-			if ok {
-				_ = os.Remove(s.path("pair.json"))
-			}
-			return ErrPair
+		// A failed try still commits: it kills the code or counts the try.
+		if !ok || p.Hash == "" || !s.now().Before(p.Expires) || p.Tries >= CodeTries {
+			failed = true
+			return deletePairing(ctx, conn)
 		}
 		if subtle.ConstantTimeCompare([]byte(mac), []byte(p.Hash)) != 1 {
+			failed = true
 			p.Tries++
 			if p.Tries >= CodeTries {
-				_ = os.Remove(s.path("pair.json"))
-			} else if err := s.writeJSON("pair.json", p); err != nil {
-				return err
+				return deletePairing(ctx, conn)
 			}
-			return ErrPair
-		}
-		if err := os.Remove(s.path("pair.json")); err != nil {
+			_, err := conn.ExecContext(ctx, "UPDATE web_pairing SET tries = ? WHERE slot = 1", p.Tries)
 			return err
 		}
-		token, dev, err = s.addDevice(p.ID, name, DeviceLife)
+		if err := deletePairing(ctx, conn); err != nil {
+			return err
+		}
+		token, dev, err = addDevice(ctx, conn, s.now(), p.ID, name, DeviceLife)
 		if err != nil {
 			return err
 		}
 		dev.Scopes = append([]string(nil), p.Scopes...)
 		return nil
 	})
+	if err == nil && failed {
+		err = ErrPair
+	}
 	if err != nil {
 		return "", Device{}, err
 	}
@@ -286,16 +338,17 @@ func (s *Store) Pair(code, name string) (token string, dev Device, err error) {
 // replaces the device with that ID. It never touches a pending pairing code, so it cannot cancel
 // a code the owner minted.
 func (s *Store) IssueDevice(id, name string, life time.Duration) (token string, dev Device, err error) {
-	err = s.locked(func() error {
+	err = s.update(func(ctx context.Context, conn *sql.Conn) error {
 		var err error
-		token, dev, err = s.addDevice(id, name, life)
+		token, dev, err = addDevice(ctx, conn, s.now(), id, name, life)
 		return err
 	})
 	return token, dev, err
 }
 
-// addDevice makes the device and token, and replaces the device with the same ID. The caller holds the store lock.
-func (s *Store) addDevice(id, name string, life time.Duration) (token string, dev Device, err error) {
+// addDevice makes the device and token, replaces the device with the same ID
+// and drops expired devices.
+func addDevice(ctx context.Context, conn *sql.Conn, now time.Time, id, name string, life time.Duration) (token string, dev Device, err error) {
 	tok := make([]byte, 32)
 	rid := make([]byte, 4)
 	if _, err := rand.Read(tok); err != nil {
@@ -304,22 +357,23 @@ func (s *Store) addDevice(id, name string, life time.Duration) (token string, de
 	if _, err := rand.Read(rid); err != nil {
 		return "", Device{}, err
 	}
-	now := s.now()
 	token = base64.RawURLEncoding.EncodeToString(tok)
 	dev = Device{ID: hex.EncodeToString(rid), Name: CleanName(name), Hash: sum(token), Created: now, LastSeen: now, Expires: now.Add(life)}
 	if id != "" {
 		dev.ID = id
 	}
-	list, err := s.readDevices()
+	list, err := queryDevices(ctx, conn, "")
 	if err != nil {
 		return "", Device{}, err
 	}
-	list = slices.DeleteFunc(live(list, now), func(d Device) bool { return d.ID == dev.ID })
-	if err := s.writeJSON("devices.json", append(list, dev)); err != nil {
-		return "", Device{}, err
+	for _, d := range list {
+		if !now.Before(d.Expires) {
+			if _, err := conn.ExecContext(ctx, "DELETE FROM web_devices WHERE id = ?", d.ID); err != nil {
+				return "", Device{}, err
+			}
+		}
 	}
-	s.forgetCache()
-	return token, dev, nil
+	return token, dev, putDevice(ctx, conn, dev)
 }
 
 // CleanName keeps a device name safe to print in a terminal: no control
@@ -342,62 +396,51 @@ func CleanName(name string) string {
 	return name
 }
 
-func live(list []Device, now time.Time) []Device {
-	out := list[:0:0]
-	for _, d := range list {
-		if now.Before(d.Expires) {
-			out = append(out, d)
-		}
-	}
-	return out
-}
-
-func (s *Store) readDevices() ([]Device, error) {
-	var list []Device
-	if _, err := s.readJSON("devices.json", &list); err != nil {
-		return nil, err
-	}
-	return list, nil
-}
-
 // Devices lists live paired devices.
 func (s *Store) Devices() ([]Device, error) {
 	var list []Device
-	err := s.locked(func() error {
+	err := s.w.Read(context.Background(), func(q state.Reader) error {
 		var err error
-		list, err = s.readDevices()
+		list, err = queryDevices(context.Background(), q, "")
 		return err
 	})
-	return live(list, s.now()), err
+	now := s.now()
+	live := list[:0:0]
+	for _, d := range list {
+		if now.Before(d.Expires) {
+			live = append(live, d)
+		}
+	}
+	return live, err
 }
 
 // Revoke removes one device by ID, or every device for "all". It returns
 // how many it removed.
 func (s *Store) Revoke(id string) (int, error) {
 	n := 0
-	err := s.locked(func() error {
-		list, err := s.readDevices()
+	err := s.update(func(ctx context.Context, conn *sql.Conn) error {
+		query, args := "DELETE FROM web_devices WHERE id = ?", []any{id}
+		if id == "all" {
+			query, args = "DELETE FROM web_devices", nil
+		}
+		res, err := conn.ExecContext(ctx, query, args...)
 		if err != nil {
 			return err
 		}
-		keep := list[:0:0]
-		for _, d := range list {
-			if id == "all" || d.ID == id {
-				n++
-				continue
-			}
-			keep = append(keep, d)
-		}
-		if n == 0 {
-			return fmt.Errorf("no paired device has the ID %q", id)
-		}
-		if err := s.writeJSON("devices.json", keep); err != nil {
+		changed, err := res.RowsAffected()
+		if err != nil {
 			return err
 		}
-		s.forgetCache()
+		if changed == 0 {
+			return fmt.Errorf("no paired device has the ID %q", id)
+		}
+		n = int(changed)
 		return nil
 	})
-	return n, err
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 // RenewDue reports whether this full-life device's expiry should slide
@@ -408,11 +451,10 @@ func (d Device) RenewDue(now time.Time) bool {
 	return !d.Expires.Before(d.Created.Add(DeviceLife)) && d.Expires.Sub(now) < DeviceLife-RenewEvery
 }
 
-// Check finds the live device that holds token. It reads devices.json again
-// when the file changed, and writes LastSeen at most once a minute. A
-// full-life device in use also has its expiry slid forward to a fresh
-// DeviceLife (see RenewDue), so the owner's paired browser stays paired as
-// long as it is used.
+// Check finds the live device that holds token. It writes LastSeen at most
+// once a minute. A full-life device in use also has its expiry slid forward
+// to a fresh DeviceLife (see RenewDue), so the owner's paired browser stays
+// paired as long as it is used.
 func (s *Store) Check(token string) (Device, bool) {
 	return s.check(token, true)
 }
@@ -428,69 +470,37 @@ func (s *Store) check(token string, refresh bool) (Device, bool) {
 	if token == "" {
 		return Device{}, false
 	}
-	list := s.cached()
-	h := sum(token)
+	var list []Device
+	err := s.w.Read(context.Background(), func(q state.Reader) error {
+		var err error
+		list, err = queryDevices(context.Background(), q, "WHERE hash = ?", sum(token))
+		return err
+	})
 	now := s.now()
-	for _, d := range list {
-		if subtle.ConstantTimeCompare([]byte(d.Hash), []byte(h)) == 1 && now.Before(d.Expires) {
-			renew := refresh && d.RenewDue(now)
-			if now.Sub(d.LastSeen) >= seenEvery || renew {
-				s.touch(d.ID, now, renew)
-			}
-			return d, true
-		}
+	// A broken database trusts nobody.
+	if err != nil || len(list) == 0 || !now.Before(list[0].Expires) {
+		return Device{}, false
 	}
-	return Device{}, false
+	d := list[0]
+	renew := refresh && d.RenewDue(now)
+	if now.Sub(d.LastSeen) >= seenEvery || renew {
+		s.touch(d, now, renew)
+	}
+	return d, true
 }
 
-func (s *Store) cached() []Device {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	stamp := ""
-	if fi, err := os.Stat(s.path("devices.json")); err == nil {
-		stamp = fmt.Sprint(fi.Size(), fi.ModTime().UnixNano())
+// touch records a use of d. A device revoked or replaced meanwhile stays gone.
+// Only a renewal writes the expiry, so a stale snapshot never undoes another
+// handle's newer renewal.
+func (s *Store) touch(d Device, now time.Time, renew bool) {
+	query, args := "UPDATE web_devices SET last_seen = ? WHERE id = ? AND hash = ?", []any{formatTime(now), d.ID, d.Hash}
+	if renew {
+		query = "UPDATE web_devices SET last_seen = ?, expires = ? WHERE id = ? AND hash = ?"
+		args = []any{formatTime(now), formatTime(now.Add(DeviceLife)), d.ID, d.Hash}
 	}
-	if stamp != s.stamp || stamp == "" {
-		list, err := s.readDevices()
-		if err != nil {
-			// A broken file trusts nobody.
-			list = nil
-		}
-		s.devices, s.stamp = list, stamp
-	}
-	return s.devices
-}
-
-// forgetCache drops the cached device list so the next read reloads the
-// file. Two same-size writes can share one (size, mtime) stamp when the
-// filesystem's timestamps do not move between them, so the stamp must not
-// stand after this store writes.
-func (s *Store) forgetCache() {
-	s.mu.Lock()
-	s.stamp = ""
-	s.mu.Unlock()
-}
-
-func (s *Store) touch(id string, now time.Time, renew bool) {
-	_ = s.locked(func() error {
-		list, err := s.readDevices()
-		if err != nil {
-			return err
-		}
-		for i := range list {
-			if list[i].ID == id {
-				list[i].LastSeen = now
-				if renew {
-					list[i].Expires = now.Add(DeviceLife)
-				}
-				if err := s.writeJSON("devices.json", list); err != nil {
-					return err
-				}
-				s.forgetCache()
-				return nil
-			}
-		}
-		return nil
+	_ = s.update(func(ctx context.Context, conn *sql.Conn) error {
+		_, err := conn.ExecContext(ctx, query, args...)
+		return err
 	})
 }
 
@@ -500,4 +510,77 @@ func (s *Store) Forget(token string) {
 	if ok {
 		_, _ = s.Revoke(d.ID)
 	}
+}
+
+// querier runs a query on a read snapshot or a writer connection.
+type querier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}
+
+func formatTime(t time.Time) string { return t.Format(time.RFC3339Nano) }
+
+// queryDevices lists devices; where is an optional clause that follows FROM.
+func queryDevices(ctx context.Context, q querier, where string, args ...any) ([]Device, error) {
+	rows, err := q.QueryContext(ctx, "SELECT id, name, hash, created, last_seen, expires FROM web_devices "+where, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var list []Device
+	for rows.Next() {
+		var d Device
+		var created, seen, expires string
+		if err := rows.Scan(&d.ID, &d.Name, &d.Hash, &created, &seen, &expires); err != nil {
+			return nil, err
+		}
+		for dst, src := range map[*time.Time]string{&d.Created: created, &d.LastSeen: seen, &d.Expires: expires} {
+			if *dst, err = time.Parse(time.RFC3339Nano, src); err != nil {
+				return nil, err
+			}
+		}
+		list = append(list, d)
+	}
+	return list, rows.Err()
+}
+
+func putDevice(ctx context.Context, conn *sql.Conn, d Device) error {
+	_, err := conn.ExecContext(ctx, `INSERT INTO web_devices (id, name, hash, created, last_seen, expires) VALUES (?, ?, ?, ?, ?, ?)
+ ON CONFLICT(id) DO UPDATE SET name = excluded.name, hash = excluded.hash, created = excluded.created,
+ last_seen = excluded.last_seen, expires = excluded.expires`,
+		d.ID, d.Name, d.Hash, formatTime(d.Created), formatTime(d.LastSeen), formatTime(d.Expires))
+	return err
+}
+
+func putPairing(ctx context.Context, conn *sql.Conn, p pairing) error {
+	scopes, err := json.Marshal(p.Scopes)
+	if err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, `INSERT INTO web_pairing (slot, device_id, hash, expires, tries, scopes) VALUES (1, ?, ?, ?, ?, ?)
+ ON CONFLICT(slot) DO UPDATE SET device_id = excluded.device_id, hash = excluded.hash, expires = excluded.expires,
+ tries = excluded.tries, scopes = excluded.scopes`,
+		p.ID, p.Hash, formatTime(p.Expires), p.Tries, string(scopes))
+	return err
+}
+
+func readPairing(ctx context.Context, conn *sql.Conn) (pairing, bool, error) {
+	var p pairing
+	var expires, scopes string
+	err := conn.QueryRowContext(ctx, "SELECT device_id, hash, expires, tries, scopes FROM web_pairing WHERE slot = 1").
+		Scan(&p.ID, &p.Hash, &expires, &p.Tries, &scopes)
+	if errors.Is(err, sql.ErrNoRows) {
+		return pairing{}, false, nil
+	}
+	if err != nil {
+		return pairing{}, false, err
+	}
+	if p.Expires, err = time.Parse(time.RFC3339Nano, expires); err != nil {
+		return pairing{}, false, err
+	}
+	return p, true, json.Unmarshal([]byte(scopes), &p.Scopes)
+}
+
+func deletePairing(ctx context.Context, conn *sql.Conn) error {
+	_, err := conn.ExecContext(ctx, "DELETE FROM web_pairing")
+	return err
 }

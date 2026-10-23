@@ -1,7 +1,6 @@
 package devicestore
 
 import (
-	"os"
 	"strconv"
 	"sync"
 	"testing"
@@ -100,9 +99,8 @@ func TestADeviceInUseRenewsItsExpiry(t *testing.T) {
 	}
 }
 
-// The store must read back its own writes even when the filesystem keeps
-// the file's (size, mtime) stamp unchanged across them: pin the stamp a
-// read recorded, renew, and require the next read to see the renewal.
+// The store must read back its own writes: a renewal must be visible to the
+// next read, so a device in use never expires from a stale snapshot.
 func TestTheStoreReadsBackItsOwnWrites(t *testing.T) {
 	s, err := OpenStore(t.TempDir())
 	if err != nil {
@@ -121,20 +119,10 @@ func TestTheStoreReadsBackItsOwnWrites(t *testing.T) {
 	if _, ok := s.Check(token); !ok {
 		t.Fatal("a live device was rejected")
 	}
-	fi, err := os.Stat(s.path("devices.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	stamp := fi.ModTime()
-	// Twenty-nine days of use renews the device and rewrites the file.
+	// Twenty-nine days of use renews the device.
 	now = now.Add(29 * 24 * time.Hour)
 	if _, ok := s.Check(token); !ok {
 		t.Fatal("a live device was rejected")
-	}
-	// The rewrite kept every timestamp the same length, so only mtime
-	// could tell the two files apart: force it not to.
-	if err := os.Chtimes(s.path("devices.json"), stamp, stamp); err != nil {
-		t.Fatal(err)
 	}
 	now = now.Add(2 * 24 * time.Hour)
 	if _, ok := s.Check(token); !ok {

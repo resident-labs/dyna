@@ -38,6 +38,7 @@ import (
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/webpush"
+	"dyna-agent/internal/websvc/devicestore"
 	"dyna-agent/internal/workflowtemplate"
 	"dyna-agent/internal/worktrees"
 )
@@ -53,6 +54,7 @@ var migrations = []func(dataDir string) error{
 	accountstore.Migrate,
 	harnessruntime.MigratePrivateHomes,
 	devicegrant.Migrate,
+	devicestore.Migrate,
 	callerid.Migrate,
 	callrequests.Migrate,
 	computers.Migrate,
