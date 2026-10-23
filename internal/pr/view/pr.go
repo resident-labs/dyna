@@ -357,6 +357,9 @@ func (s *Service) Scan(signatures, work map[string]string, version *string, firs
 		rooms[record.RoomID] = true
 		byRoom[record.RoomID] = append(byRoom[record.RoomID], record)
 	}
+	for roomID := range st.MergePauses {
+		rooms[roomID] = true
+	}
 	for roomID := range st.Policies {
 		rooms[roomID] = true
 	}
@@ -375,7 +378,8 @@ func (s *Service) Scan(signatures, work map[string]string, version *string, firs
 		data, _ := json.Marshal(struct {
 			Settings watch.Reviewer
 			Policy   watch.ChangePolicy
-		}{st.Reviewers[roomID], watch.RoomPolicy(st, roomID)})
+			Merge    mergeScanStatus
+		}{st.Reviewers[roomID], watch.RoomPolicy(st, roomID), roomMergeScanStatus(st, roomID, byRoom[roomID])})
 		key := "\x00metadata\x00" + roomID
 		metadata[roomID] = work[key] != string(data)
 		work[key] = string(data)
@@ -442,6 +446,53 @@ func (s *Service) Scan(signatures, work map[string]string, version *string, firs
 			}
 		}
 	}
+}
+
+// mergeScanStatus includes saved merge progress that does not change a PR row.
+// Scan publishes its changes through the existing room-scoped prs event.
+type mergeScanStatus struct {
+	Pause  string
+	Trials map[string]watch.MergeTrialStatus
+	Main   map[string]state.RepositoryFacts
+}
+
+func roomMergeScanStatus(st watch.State, roomID string, records []*watch.Record) mergeScanStatus {
+	out := mergeScanStatus{Pause: st.MergePauses[roomID], Trials: map[string]watch.MergeTrialStatus{}, Main: map[string]state.RepositoryFacts{}}
+	for _, record := range records {
+		repo := record.Host + "/" + record.Repo
+		if record.Kind == "local" {
+			repo = record.RepoPath
+		}
+		facts := st.RepositoryFacts[repo]
+		// Preserve whether an observation exists, but not its changing poll time.
+		if !facts.CheckedAt.IsZero() {
+			facts.CheckedAt = time.Unix(1, 0).UTC()
+		}
+		out.Main[repo] = facts
+	}
+	for repo, trial := range st.MergeTrials {
+		if trial == nil {
+			continue
+		}
+		for _, change := range trial.Changes {
+			if record := st.Records[change.Key]; record != nil && record.RoomID == roomID {
+				summary := watch.MergeTrialStatus{Branch: trial.Branch, Head: trial.Head, Phase: trial.Phase, Reason: trial.Reason, MaxParallel: trial.MaxParallel}
+				for _, member := range trial.Changes {
+					id := member.Key
+					if record := st.Records[member.Key]; record != nil && record.ChangeID != "" {
+						id = record.ChangeID
+					}
+					summary.Batch = append(summary.Batch, id)
+				}
+				for _, stack := range trial.Stacks {
+					summary.Stacks = append(summary.Stacks, state.MergeTrialStack{Branch: stack.Branch, Head: stack.Head, Phase: stack.Phase, Count: stack.Count, Reason: stack.Reason})
+				}
+				out.Trials[repo] = summary
+				break
+			}
+		}
+	}
+	return out
 }
 
 // buildRow makes one record's row. Tests count calls through it.

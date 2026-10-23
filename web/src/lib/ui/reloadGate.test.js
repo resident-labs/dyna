@@ -102,7 +102,7 @@ test('App PR events use the real gated loaders and skip the closed PR view', asy
   const app = await readFile(new URL('../../App.svelte', import.meta.url), 'utf8')
   const calls = []
   const c = {
-    roomId: 'a', roomRequest: 1, pageVisible: true, view: 'channel:general', drill: null,
+    mergeVersion: 0, roomId: 'a', roomRequest: 1, pageVisible: true, view: 'channel:general', drill: null,
     consolidationAlive: true, changes: null, prError: '', reviewer: null,
     home: null, feed: null, hasItemChange, reloadsUnread, reconcileRows, mergeListPage, listPages: {}, soonRooms() {}, reviewerSoon() {},
     api: {
@@ -152,7 +152,7 @@ test('PR events never load TrackedPRs, and a burst loads the reviewer once', asy
   const timers = new Map()
   let next = 0
   const c = {
-    roomId: 'a', roomRequest: 1, pageVisible: true, view: 'github', drill: null,
+    mergeVersion: 0, roomId: 'a', roomRequest: 1, pageVisible: true, view: 'github', drill: null,
     consolidationAlive: true, changes: null, prError: '', reviewer: null,
     home: null, feed: null, hasItemChange, reloadsUnread, reconcileRows, mergeListPage, listPages: {}, soonRooms() {},
     reviewerTimer: 0, setTimeout: (fn) => { timers.set(++next, fn); return next }, clearTimeout: (id) => timers.delete(id),
@@ -188,7 +188,7 @@ test('a Changes load that succeeds after a failure clears the PR error', async (
   const app = await readFile(new URL('../../App.svelte', import.meta.url), 'utf8')
   let fail = true
   const c = {
-    roomId: 'a', roomRequest: 1, pageVisible: true, view: 'github', drill: null,
+    mergeVersion: 0, roomId: 'a', roomRequest: 1, pageVisible: true, view: 'github', drill: null,
     consolidationAlive: true, changes: null, prError: '', listPages: {}, reconcileRows, mergeListPage,
     api: { changes: async () => { if (fail) throw new Error('engine away'); return { items: [], older: false, cursor: '' } } },
   }
@@ -245,7 +245,7 @@ test('room entry and channel events refresh visible PR and goal chips', async ()
   const declarations = parse(app).instance.content.body
   const calls = []
   const c = {
-    roomId: 'a', roomRequest: 1, pageVisible: true, view: 'channel:general', drill: null,
+    mergeVersion: 0, roomId: 'a', roomRequest: 1, pageVisible: true, view: 'channel:general', drill: null,
     memberChips: true, sidebarChips: false, showRoomSettings: false,
     consolidationAlive: true, goals: [], changes: null,
     prError: '', loadError: '', reviewer: null, home: null, feed: null,
