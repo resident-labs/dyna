@@ -19,7 +19,7 @@ func TestChangesAndPRsCutoffAndCursor(t *testing.T) {
 		id, state string
 		at        time.Time
 	}{{"open", "open", old}, {"recent", "closed", now}, {"old", "merged", old}} {
-		st.Records[item.id] = &watch.Record{Key: item.id, RoomID: r.ID, Created: item.at, Checked: item.at, State: item.state, Watching: item.state == "open"}
+		st.Records[item.id] = &watch.Record{Key: item.id, RoomID: r.ID, Created: item.at, Checked: item.at, ClosedAt: item.at, State: item.state, Watching: item.state == "open"}
 	}
 	prfixture.SaveState(t, e.svc.PRs.Watcher().Store.Root, st)
 	t.Run("Changes", func(t *testing.T) {
@@ -41,7 +41,7 @@ func TestHistoryCursorSurvivesClosedRefresh(t *testing.T) {
 	st := watch.State{Version: 1, Records: map[string]*watch.Record{}, Reviewers: map[string]watch.Reviewer{}}
 	for i, id := range []string{"recent", "older", "oldest"} {
 		at := now.Add(-time.Duration(i) * 48 * time.Hour)
-		st.Records[id] = &watch.Record{Key: id, RoomID: r.ID, State: "closed", Created: at, Checked: at}
+		st.Records[id] = &watch.Record{Key: id, RoomID: r.ID, State: "closed", Created: at, Checked: at, ClosedAt: at}
 	}
 	root := e.svc.PRs.Watcher().Store.Root
 	prfixture.SaveState(t, root, st)
@@ -49,8 +49,7 @@ func TestHistoryCursorSurvivesClosedRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// These old records have no closedAt. Reading freezes their best known end time.
-	// A normal writer reads that snapshot before a metadata refresh.
+	// Stored closure times keep history stable across later metadata refreshes.
 	refreshed, err := e.svc.PRs.Watcher().Store.Read()
 	if err != nil {
 		t.Fatal(err)

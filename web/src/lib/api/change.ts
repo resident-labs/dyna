@@ -202,8 +202,7 @@ export interface ReviewerSlot {
   lastError: string
 }
 
-// ReviewerStatus is watch.ReviewerStatus. session and current are the old
-// single-reviewer fields.
+// ReviewerStatus is watch.ReviewerStatus.
 export interface ReviewerStatus {
   reviewers: ReviewerSlot[] | null
   helpers: ReviewerHelper[] | null
@@ -214,8 +213,6 @@ export interface ReviewerStatus {
   queue: ReviewQueued[] | null
   lastError: string
   recent: { changeId?: string; pr: number; verdict: string; at: string }[] | null
-  session: ReviewerSession | null
-  current: ReviewCurrent | null
 }
 
 // MainCI is watch.MainCI: the state of main's CI between batches.
