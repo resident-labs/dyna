@@ -2,12 +2,14 @@ package voice
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
 	"dyna-agent/internal/notify"
+	"dyna-agent/internal/parentoutput"
 	"dyna-agent/internal/questions"
 	"dyna-agent/internal/room"
 )
@@ -215,6 +217,116 @@ collected:
 	}
 	if !strings.Contains(requests[1], "SECOND HEAD") || !strings.Contains(requests[1], "SECOND TAIL") || strings.Contains(requests[1], "FIRST HEAD") {
 		t.Fatal("second request did not get a fresh head/tail budget")
+	}
+}
+
+// A live call hears the final result of a root turn that reports to the
+// owner. A call that has ended hears nothing, so the feed never speaks work
+// the owner did not ask Voice about.
+func TestWatchSaysRootTurnResultsOnlyWhileLive(t *testing.T) {
+	tools, work, _ := toolsFixture(t)
+	link, rooms := tools.link, room.DefaultStore()
+	result := func(turn int, text string) {
+		t.Helper()
+		if _, err := rooms.Post(work.ID, room.PostInput{From: work.Name + ":root", Kind: "completed",
+			OwnerReport: true, Turn: turn, To: []string{work.Name}, Text: text}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	call := newFakeSpeaker()
+	stop := watchRoom(t, link, time.Time{}, call)
+	result(1, "work:root turn 1 completed. Result: CI is green.")
+	if got := <-call.said; !strings.HasPrefix(got, "[BACKEND] ") || !strings.Contains(got, "Result: CI is green.") {
+		t.Fatalf("said %q, want root's turn result", got)
+	}
+	stop()
+	result(2, "work:root turn 2 completed. Result: The review passed.")
+	select {
+	case got := <-call.said:
+		t.Fatalf("a call that ended said %q", got)
+	default:
+	}
+}
+
+// A turn whose result root already relayed to @voice-call is not said twice.
+func TestWatchSkipsTurnResultRootAlreadyRelayed(t *testing.T) {
+	tools, work, _ := toolsFixture(t)
+	link, rooms := tools.link, room.DefaultStore()
+	call := newFakeSpeaker()
+	watchRoom(t, link, time.Time{}, call)
+	post := func(in room.PostInput) {
+		t.Helper()
+		in.From = work.Name + ":root"
+		if _, err := rooms.Post(work.ID, in); err != nil {
+			t.Fatal(err)
+		}
+	}
+	post(room.PostInput{Turn: 3, To: []string{work.Name + ":voice-call"}, Text: "The merge is done."})
+	post(room.PostInput{Kind: "completed", OwnerReport: true, Turn: 3, To: []string{work.Name},
+		Text: "work:root turn 3 completed. Result: The merge is done."})
+	// A later call post is the barrier: Watch says it only after it has read
+	// the completion, so a broken skip would speak between the two.
+	post(room.PostInput{Turn: 4, To: []string{work.Name + ":voice-call"}, Text: "The review passed."})
+	if got := <-call.said; !strings.HasSuffix(got, "The merge is done.") {
+		t.Fatalf("first said %q, want root's own relay", got)
+	}
+	if got := <-call.said; !strings.HasSuffix(got, "The review passed.") {
+		t.Fatalf("second said %q, want the later call post, so the completion came first", got)
+	}
+	select {
+	case got := <-call.said:
+		t.Fatalf("the turn result was said as well: %q", got)
+	default:
+	}
+}
+
+// The engine posts only the start of a long result and saves the rest, so the
+// call hears the whole result, including its last point.
+func TestWatchSaysTheWholeSavedResult(t *testing.T) {
+	tools, work, _ := toolsFixture(t)
+	link, rooms := tools.link, room.DefaultStore()
+	call := newFakeSpeaker()
+	watchRoom(t, link, time.Time{}, call)
+	path := filepath.Join(t.TempDir(), "parent-output", "turn-5.txt")
+	post, err := parentoutput.Text(path, "work:root turn 5 completed. Result: FIRST POINT "+strings.Repeat("detail ", 400)+"LAST POINT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(post, "LAST POINT") {
+		t.Fatal("the test post was not bounded, so it proves nothing about reading the report")
+	}
+	if _, err := rooms.Post(work.ID, room.PostInput{From: work.Name + ":root", Kind: "completed", OwnerReport: true,
+		Turn: 5, To: []string{work.Name}, Text: post}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-call.said; !strings.Contains(got, "FIRST POINT") || !strings.Contains(got, "LAST POINT") {
+		t.Fatalf("said %q, want the whole saved result", got)
+	}
+}
+
+// A long result reaches the call clipped like Codex output: its start and end
+// survive, with one truncation marker, and it stays inside the budget.
+func TestWatchClipsLongTurnResults(t *testing.T) {
+	tools, work, _ := toolsFixture(t)
+	link, rooms := tools.link, room.DefaultStore()
+	call := newFakeSpeaker()
+	watchRoom(t, link, time.Time{}, call)
+	path := filepath.Join(t.TempDir(), "parent-output", "turn-4.txt")
+	head, tail := "FIRST POINT "+strings.Repeat("α", 3000), strings.Repeat("漢", 3000)+" LAST POINT"
+	post, err := parentoutput.Text(path, "work:root turn 4 completed. Result: "+head+" "+tail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rooms.Post(work.ID, room.PostInput{From: work.Name + ":root", Kind: "completed", OwnerReport: true,
+		Turn: 4, To: []string{work.Name}, Text: post}); err != nil {
+		t.Fatal(err)
+	}
+	got := <-call.said
+	if len(got) > resultBudget+64 || !utf8.ValidString(got) {
+		t.Fatalf("clipped result is %d bytes and valid UTF-8 is %v", len(got), utf8.ValidString(got))
+	}
+	if !strings.Contains(got, "FIRST POINT") || !strings.Contains(got, "LAST POINT") || strings.Count(got, "…output truncated…") != 1 {
+		t.Fatalf("clipped result %q lost its start, its end or its one marker", got)
 	}
 }
 

@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"dyna-agent/internal/parentoutput"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/voice/realtime"
@@ -192,6 +194,47 @@ func tellPrompt(text string, shared []room.Attachment) string {
 		parts = append(parts, "Shared in the call, where the owner can open it: "+strings.Join(names, "; ")+`. Mention newly shared items briefly. You cannot see inside them, so never describe what they hold.`)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// A spoken turn result is clipped like Codex output: resultBudget is bytes,
+// about 1,000 English tokens, split between a head and a tail.
+const (
+	resultBudget = 4000
+	resultMarker = "\n…output truncated…\n"
+)
+
+// resultPrompt hands Voice the final result of a root turn that reports to
+// the owner. It is plain speech, so nothing is read aloud as markdown.
+func resultPrompt(text string) string {
+	return "[BACKEND] Root finished a turn for the owner: " + clipResult(plainSpeech(fullResult(text)))
+}
+
+// fullResult returns the complete result of a root turn. The engine posts only
+// the start of a long result and saves the rest beside the session's turns, so
+// Voice reads the saved report instead of losing the end of the work. Only a
+// report in a parent-output directory is read, so a post can never point Voice
+// at another file.
+func fullResult(text string) string {
+	path, ok := parentoutput.ReportFile(text)
+	if !ok || !filepath.IsAbs(path) || filepath.Base(filepath.Dir(path)) != "parent-output" {
+		return text
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		return text
+	}
+	return string(saved)
+}
+
+// clipResult bounds text to the result budget, keeping both its start and its
+// end.
+func clipResult(text string) string {
+	if len(text) <= resultBudget {
+		return text
+	}
+	room := resultBudget - len(resultMarker)
+	head := headBytes(text, room/2)
+	return head + resultMarker + tailBytes(text, room-len(head))
 }
 
 // sharedName names a shared file by what it is and its title.
