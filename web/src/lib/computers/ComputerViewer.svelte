@@ -1,37 +1,57 @@
-<script>
+<script lang="ts">
   // The live viewer. Toolbar on top, stream below, stats and action feed
   // under it. Control state lives in the toolbar and the frame only: when
   // the owner has control, NOTHING is drawn over the stream. The only
   // overlay is the "Starting stream…" / "Stream ended" note, which shows
   // when there is no stream to cover, and control cannot be on then.
-  import { onMount } from 'svelte'
+  import { onMount, type ComponentProps } from 'svelte'
   import { api } from '../../api.ts'
-  import { openStream, savedStreamMode } from './computerStream.ts'
-  import { stateWord, hintText, escTwice, viewKey, popOut } from './computers.ts'
-  import { statsLine } from './rfbStats.ts'
+  import { openStream, savedStreamMode, type StreamHandle, type StreamMode } from './computerStream.ts'
+  import { stateWord, hintText, escTwice, viewKey, popOut, type FeedItem } from './computers.ts'
+  import { statsLine, type MeterSnapshot } from './rfbStats.ts'
   import ComputerShot from './ComputerShot.svelte'
   import ComputerChat from './ComputerChat.svelte'
   import { badgeText } from './preview.ts'
   import PhoneKeys from '../ui/PhoneKeys.svelte'
-  import { phoneKeyboard } from './phoneKeyboard.ts'
+  import { phoneKeyboard, type Modifiers } from './phoneKeyboard.ts'
+  import { errorText } from '../errorText.ts'
+  import type { ComputerInfo, ComputerStream } from '../api/computer.ts'
 
-  // c: the computer's status. feed: its recent actions [{line, at}].
-  // room: the room ID, for Post shot. popout: this is its own window.
-  // chat: what the floating chat needs {session, room, members, onsend,
-  // onopenfile, onpost}. Without it (the pop-out) no chat shows.
-  let { c, room, feed = [], popout = false, chat = null } = $props()
-  let chatEl = $state()
+  // ShownComputer is the part of a computer row the viewer reads. stream is
+  // partial because the app passes an empty stream until the room list has
+  // the session's row.
+  type ShownComputer = Omit<ComputerInfo, 'stream'> & { stream?: Partial<ComputerStream> | null }
+  // The viewer's own phase; a failed or ended stream can be retried.
+  type ViewerPhase = 'connecting' | 'connected' | 'ended' | 'failed'
+  // Zoom and pan of the picture inside the frame, and a point on the screen.
+  interface Zoom { s: number; x: number; y: number }
+  interface Point { x: number; y: number }
+  type Gesture = { kind: 'pinch'; d: number; m: Point; z: Zoom; r: DOMRect } | { kind: 'pan'; m: Point; z: Zoom; r: DOMRect }
 
-  let keyboardInput = $state()
+  interface Props {
+    // c: the computer's status. feed: its recent actions [{line, at}].
+    // room: the room ID, for Post shot. popout: this is its own window.
+    // chat: what the floating chat needs {session, room, members, onsend,
+    // onopenfile, onpost}. Without it (the pop-out) no chat shows.
+    c: ShownComputer
+    room: string
+    feed?: FeedItem[]
+    popout?: boolean
+    chat?: ComponentProps<typeof ComputerChat> | null
+  }
+  let { c, room, feed = [], popout = false, chat = null }: Props = $props()
+  let chatEl = $state<{ streamClick: () => void } | null>(null)
+
+  let keyboardInput = $state<HTMLTextAreaElement | undefined>()
   let keyboardOpen = $state(false)
-  let modifiers = $state({ ctrl: false, alt: false })
-  let keyboard = null
-  function bindKeyboard(node) {
+  let modifiers = $state<Modifiers>({ ctrl: false, alt: false })
+  let keyboard: ReturnType<typeof phoneKeyboard> | null = null
+  function bindKeyboard(node: HTMLTextAreaElement) {
     keyboard = phoneKeyboard(node, {
-      sendKey: (...args) => { if (human && phase === 'connected') stream?.rfb?.sendKey(...args) },
+      sendKey: (symbol, code, down) => { if (human && phase === 'connected') stream?.rfb?.sendKey(symbol, code ?? null, down) },
       changed: (value) => (modifiers = value),
     })
-    return { destroy() { keyboard.destroy(); keyboard = null } }
+    return { destroy() { keyboard?.destroy(); keyboard = null } }
   }
   function toggleKeyboard() {
     keyboardOpen = !keyboardOpen
@@ -41,17 +61,17 @@
   $effect(() => { if (!human) { keyboardOpen = false; keyboardInput?.blur() } })
 
   const key = viewKey()
-  let target = $state()
-  let phase = $state('connecting') // connecting | connected | ended | failed
+  let target = $state<HTMLDivElement | undefined>()
+  let phase = $state<ViewerPhase>('connecting') // connecting | connected | ended | failed
   let note = $state('')
   let human = $state(false)
   let busy = $state(false)
   let error = $state('')
   let posted = $state('')
-  let stats = $state({ fps: 0, mbit: 0, codec: '', latency: null })
-  let stream = null
-  let screenEl = $state()
-  let present = $state()
+  let stats = $state<MeterSnapshot>({ fps: 0, mbit: 0, codec: '', latency: null })
+  let stream: StreamHandle | null = null
+  let screenEl = $state<HTMLDivElement | undefined>()
+  let present = $state<HTMLCanvasElement | undefined>()
   // presenting: the page paints the picture itself. WebKitGTK scales a canvas
   // with CSS by dropping pixel rows, which wrecks small text. An image or a
   // canvas drawn with smoothing is sharp, so when the picture shrinks, paint a
@@ -59,7 +79,7 @@
   let presenting = $state(false)
   let dirty = true
   let mode = $state(savedStreamMode(typeof localStorage !== 'undefined' ? localStorage.getItem('dyna.computer.mode') : null))
-  function setMode(next) {
+  function setMode(next: StreamMode) {
     if (mode === next) return
     mode = next
     try { localStorage.setItem('dyna.computer.mode', next) } catch {}
@@ -69,11 +89,12 @@
   const word = $derived(stateWord(phase, human))
   // "Live" shows on the badge for a moment after the first frame.
   let liveShown = $state(false)
-  let liveTimer = 0
+  let liveTimer: ReturnType<typeof setTimeout> | undefined
   function retry() { error = ''; stream?.reconnect() }
 
   onMount(() => {
-    stream = openStream({
+    if (!target) return
+    const s = openStream({
       target,
       mode,
       url: () => api.computerViewURL(c.session, key),
@@ -86,7 +107,7 @@
           liveTimer = setTimeout(() => (liveShown = false), 1600)
         }
         else if (state === 'connecting') { phase = 'connecting'; human = false }
-        else if (state === 'fallback') note = detail.reason
+        else if (state === 'fallback') note = detail.reason ?? ''
         else {
           // The lease ends with the stream, so control is back with the agent.
           human = false
@@ -95,10 +116,11 @@
         }
       },
     })
-    const t = setInterval(() => (stats = stream.meter.snapshot()), 1000)
-    stream.onFrame = () => (dirty = true)
+    stream = s
+    const t = setInterval(() => (stats = s.meter.snapshot()), 1000)
+    s.onFrame = () => (dirty = true)
     const ro = new ResizeObserver(() => (dirty = true))
-    ro.observe(screenEl)
+    if (screenEl) ro.observe(screenEl)
     let raf = 0
     const loop = () => {
       raf = requestAnimationFrame(loop)
@@ -110,12 +132,12 @@
       ro.disconnect()
       clearInterval(t)
       clearTimeout(liveTimer)
-      stream?.close()
+      s.close()
     }
   })
 
   function paint() {
-    const src = target?.querySelector('canvas')
+    const src = target?.querySelector<HTMLCanvasElement>('canvas')
     if (!src || !present || !screenEl || !src.width) return
     dirty = false
     const dpr = window.devicePixelRatio || 1
@@ -126,6 +148,7 @@
     if (!shrink) return
     if (present.width !== w || present.height !== h) { present.width = w; present.height = h }
     const x = present.getContext('2d')
+    if (!x) return
     x.imageSmoothingEnabled = true
     x.imageSmoothingQuality = 'high'
     const k = src.width / cw
@@ -137,7 +160,7 @@
   // The daemon may take control back (for example, the lease ended).
   // Only a status that arrives after the owner took control counts: the one
   // the page held at that moment still says "agent".
-  let takenWith = null
+  let takenWith: ShownComputer | null = null
   $effect(() => {
     if (human && c !== takenWith && c.control === 'agent') {
       human = false
@@ -147,11 +170,11 @@
 
   // The ⋯ menu. It closes on an outside click or Esc.
   let menuOpen = $state(false)
-  let menuEl = $state()
+  let menuEl = $state<HTMLSpanElement | undefined>()
   $effect(() => {
     if (!menuOpen) return
-    const away = (e) => { if (!menuEl?.contains(e.target)) menuOpen = false }
-    const esc = (e) => { if (e.key === 'Escape') menuOpen = false }
+    const away = (e: PointerEvent) => { if (!(e.target instanceof Node && menuEl?.contains(e.target))) menuOpen = false }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') menuOpen = false }
     addEventListener('pointerdown', away, true)
     addEventListener('keydown', esc)
     return () => { removeEventListener('pointerdown', away, true); removeEventListener('keydown', esc) }
@@ -161,7 +184,7 @@
   $effect(() => {
     if (!human) return
     // Esc typed in the floating chat is not for the computer.
-    const k = (e) => { if (e.key === 'Escape' && !e.target?.closest?.('[data-chat]') && twice(performance.now())) giveBack() }
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && !(e.target instanceof Element && e.target.closest('[data-chat]')) && twice(performance.now())) giveBack() }
     addEventListener('keydown', k, true)
     return () => removeEventListener('keydown', k, true)
   })
@@ -173,9 +196,9 @@
       await api.computerControl(c.session, key, 'human')
       takenWith = c
       human = true
-      stream.setControl(true)
+      stream?.setControl(true)
     } catch (e) {
-      error = `Could not take control: ${e}`
+      error = `Could not take control: ${errorText(e)}`
     } finally {
       busy = false
     }
@@ -184,12 +207,12 @@
   async function giveBack() {
     busy = true
     error = ''
-    stream.setControl(false)
+    stream?.setControl(false)
     human = false
     try {
       await api.computerControl(c.session, key, 'agent')
     } catch (e) {
-      error = `Could not give control back: ${e}`
+      error = `Could not give control back: ${errorText(e)}`
     } finally {
       busy = false
     }
@@ -208,7 +231,7 @@
       await api.send(room, c.name ? `@${c.name} a screenshot of your computer` : 'A screenshot of the computer', '', [att])
       posted = 'Screenshot posted to the room'
     } catch (e) {
-      error = `Could not post the screenshot: ${e?.message ?? e}`
+      error = `Could not post the screenshot: ${errorText(e)}`
     }
   }
 
@@ -218,49 +241,62 @@
   // browser's own pinch cannot work there. This zooms the picture inside
   // the frame. In control mode, noVNC owns touch: two fingers scroll the
   // computer, and the zoom resets so taps land where the finger is.
-  let zoom = $state({ s: 1, x: 0, y: 0 })
+  let zoom = $state<Zoom>({ s: 1, x: 0, y: 0 })
   const zoomed = $derived(zoom.s > 1.001)
   $effect(() => { if (human) zoom = { s: 1, x: 0, y: 0 } })
-  const clampZoom = (z, w, h) => ({ s: z.s, x: Math.min(0, Math.max(w * (1 - z.s), z.x)), y: Math.min(0, Math.max(h * (1 - z.s), z.y)) })
-  function touchZoom(node) {
-    let g = null
-    const pts = (e) => [...e.touches].map((t) => ({ x: t.clientX, y: t.clientY }))
-    const mid = (p) => ({ x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 })
-    const dist = (p) => Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y)
-    function start(e) {
+  const clampZoom = (z: Zoom, w: number, h: number): Zoom => ({ s: z.s, x: Math.min(0, Math.max(w * (1 - z.s), z.x)), y: Math.min(0, Math.max(h * (1 - z.s), z.y)) })
+  function touchZoom(node: HTMLElement) {
+    let g: Gesture | null = null
+    const pts = (e: TouchEvent): Point[] => [...e.touches].map((t) => ({ x: t.clientX, y: t.clientY }))
+    const mid = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
+    const dist = (a: Point, b: Point): number => Math.hypot(a.x - b.x, a.y - b.y)
+    function start(e: TouchEvent) {
       if (human) return
       const p = pts(e)
       const r = node.getBoundingClientRect()
-      if (p.length === 2) g = { kind: 'pinch', d: dist(p), m: mid(p), z: { ...zoom }, r }
-      else if (p.length === 1 && zoom.s > 1.001) g = { kind: 'pan', m: p[0], z: { ...zoom }, r }
+      const [a, b] = p
+      if (p.length === 2 && a && b) g = { kind: 'pinch', d: dist(a, b), m: mid(a, b), z: { ...zoom }, r }
+      else if (p.length === 1 && a && zoom.s > 1.001) g = { kind: 'pan', m: a, z: { ...zoom }, r }
       else g = null
     }
-    function move(e) {
+    function move(e: TouchEvent) {
       if (!g || human) return
       const p = pts(e)
-      if (g.kind === 'pinch' && p.length === 2) {
+      const [a, b] = p
+      if (g.kind === 'pinch' && a && b) {
         e.preventDefault()
-        const s = Math.min(5, Math.max(1, g.z.s * dist(p) / g.d))
-        const m = mid(p)
+        const s = Math.min(5, Math.max(1, g.z.s * dist(a, b) / g.d))
+        const m = mid(a, b)
         // The content point under the start midpoint follows the fingers.
         const cx = (g.m.x - g.r.left - g.z.x) / g.z.s
         const cy = (g.m.y - g.r.top - g.z.y) / g.z.s
         zoom = clampZoom({ s, x: m.x - g.r.left - cx * s, y: m.y - g.r.top - cy * s }, g.r.width, g.r.height)
-      } else if (g.kind === 'pan' && p.length === 1) {
+      } else if (g.kind === 'pan' && p.length === 1 && a) {
         e.preventDefault()
-        zoom = clampZoom({ s: g.z.s, x: g.z.x + p[0].x - g.m.x, y: g.z.y + p[0].y - g.m.y }, g.r.width, g.r.height)
+        zoom = clampZoom({ s: g.z.s, x: g.z.x + a.x - g.m.x, y: g.z.y + a.y - g.m.y }, g.r.width, g.r.height)
       }
     }
-    const end = (e) => { if (e.touches.length === 0) g = null; else start(e) }
+    const end = (e: TouchEvent) => { if (e.touches.length === 0) g = null; else start(e) }
     // Capture phase: noVNC stops the events at its canvas, below this node.
-    const on = [['touchstart', start, { capture: true, passive: true }], ['touchmove', move, { capture: true, passive: false }], ['touchend', end, { capture: true }], ['touchcancel', end, { capture: true }]]
-    for (const [n, f, o] of on) node.addEventListener(n, f, o)
-    return { destroy() { for (const [n, f, o] of on) node.removeEventListener(n, f, o) } }
+    node.addEventListener('touchstart', start, { capture: true, passive: true })
+    node.addEventListener('touchmove', move, { capture: true, passive: false })
+    node.addEventListener('touchend', end, { capture: true })
+    node.addEventListener('touchcancel', end, { capture: true })
+    return { destroy() {
+      node.removeEventListener('touchstart', start, { capture: true })
+      node.removeEventListener('touchmove', move, { capture: true })
+      node.removeEventListener('touchend', end, { capture: true })
+      node.removeEventListener('touchcancel', end, { capture: true })
+    } }
   }
 
   const ratio = $derived(c.width && c.height ? c.width / c.height : 1.6)
-  const lines = $derived(statsLine(stats, c))
+  const lines = $derived(statsLine(stats, { stream: c.stream ?? undefined }))
   const lastActs = $derived(feed.slice(-3).map((a) => a.line))
+  // The picture choices of the ⋯ menu.
+  const MODES: StreamMode[] = ['auto', 'sharp', 'smooth']
+  // autocorrect is a real browser attribute, but the Svelte types do not name it.
+  const noAutocorrect = { autocorrect: 'off' }
 </script>
 
 <div class="viewer">
@@ -277,8 +313,8 @@
       <button class="round" onclick={() => (menuOpen = !menuOpen)} aria-haspopup="menu" aria-expanded={menuOpen} aria-label="More" title="More">⋯</button>
       {#if menuOpen}
         <div class="menu" role="menu">
-          {#each ['auto', 'sharp', 'smooth'] as choice}
-            <button role="menuitemradio" aria-checked={mode === choice} onclick={() => { setMode(choice); menuOpen = false }}>{choice[0].toUpperCase() + choice.slice(1)}<span>{mode === choice ? '✓' : ''}</span></button>
+          {#each MODES as choice}
+            <button role="menuitemradio" aria-checked={mode === choice} onclick={() => { setMode(choice); menuOpen = false }}>{choice.charAt(0).toUpperCase() + choice.slice(1)}<span>{mode === choice ? '✓' : ''}</span></button>
           {/each}
           {#if zoomed}<button role="menuitem" onclick={() => { zoom = { s: 1, x: 0, y: 0 }; menuOpen = false }}>Fit to window</button>{/if}
           <hr />
@@ -312,9 +348,9 @@
   </div>
 
   {#if human}
-    <textarea class="keyboard-input" aria-label="Type on computer" bind:this={keyboardInput} use:bindKeyboard onblur={() => (keyboardOpen = false)} autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" rows="1"></textarea>
+    <textarea class="keyboard-input" aria-label="Type on computer" bind:this={keyboardInput} use:bindKeyboard onblur={() => (keyboardOpen = false)} autocapitalize="off" autocomplete="off" {...noAutocorrect} spellcheck="false" rows="1"></textarea>
     {#if keyboardOpen}
-      <PhoneKeys {...modifiers} label="Computer keys" onkey={(key) => { keyboard?.key(key); keyboardInput?.focus({ preventScroll: true }) }} />
+      <PhoneKeys {...modifiers} label="Computer keys" onkey={(key: number) => { keyboard?.key(key); keyboardInput?.focus({ preventScroll: true }) }} />
     {/if}
   {/if}
 

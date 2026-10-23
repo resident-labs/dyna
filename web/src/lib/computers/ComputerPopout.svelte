@@ -1,13 +1,21 @@
-<script>
+<script lang="ts">
   // The viewer alone, in its own browser window (web only). It opens from
   // the viewer's Pop out button at #pop=<room>:<session>.
   import { onMount } from 'svelte'
   import { api, onEvent } from '../../api.ts'
   import ComputerViewer from './ComputerViewer.svelte'
-  import { applyEvent, pushAction } from './computers.ts'
-  let { room, session } = $props()
-  let c = $state(null)
-  let feed = $state({})
+  import { pushAction, type ActionFeed } from './computers.ts'
+  import { parseAppEvent } from '../api/guards.ts'
+  import { errorText } from '../errorText.ts'
+  import type { ComputerInfo } from '../api/computer.ts'
+  interface Props {
+    // The pop-out hash always names both; a missing one just fails to load.
+    room?: string
+    session?: string
+  }
+  let { room = '', session = '' }: Props = $props()
+  let c = $state<ComputerInfo | null>(null)
+  let feed = $state<ActionFeed>({})
   let error = $state('')
 
   async function load() {
@@ -15,13 +23,14 @@
       const [st, members] = await Promise.all([api.computer(session), api.members(room, false).catch(() => [])])
       c = { ...st, session, name: members?.find((m) => m.id === session)?.name ?? '' }
     } catch (e) {
-      error = String(e)
+      error = errorText(e)
     }
   }
   onMount(() => {
     load()
-    return onEvent((ev) => {
-      if (ev.kind !== 'computer' || ev.session !== session) return
+    return onEvent((raw) => {
+      const ev = parseAppEvent(raw)
+      if (ev?.kind !== 'computer' || ev.session !== session) return
       if (ev.action) feed = pushAction(feed, session, ev.action)
       if (c && ev.computer) c = { ...ev.computer, session, name: c.name }
     })
