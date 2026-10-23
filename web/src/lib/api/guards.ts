@@ -6,6 +6,7 @@ import type { ComputerApp, ComputerInfo, ComputerStream, ActionIntent } from './
 import type { AppEvent, ListChange, ListEvent } from './event.ts'
 import type { Attachment, Check, Delivery, Doing, Draft, FeedSearch, Forward, Member, Message, Post, PostDetail, PostResult, PRNotice, ProfileChoice, Question, QuestionAnswer, QuestionWithdrawal, Seat, SendResult, Shot, Skip, SpawnPreview, SpawnResult, Visual, VisualVersion } from './room.ts'
 import type { CallStatus, VoicePageEvent } from './voice.ts'
+import { eventSpecs, isEventPayload } from '../rooms/events.gen.ts'
 
 export type Guard<T> = (v: unknown) => v is T
 
@@ -43,6 +44,19 @@ function isCheck(v: unknown): v is Check {
 
 function isPRNotice(v: unknown): v is PRNotice {
   return isRecord(v) && isString(v.kind) && isNumber(v.number) && isString(v.head) && isString(v.changeId) && optional(v.commentId, isString)
+}
+
+// isEventPayloadField accepts the typed payload of a sealed event. The payload
+// must match the generated type of its family and type. A family or type this
+// build does not know keeps its payload as a record, so the feed can show the
+// unknown event row instead of dropping the post.
+function isEventPayloadField(v: Record<string, unknown>): boolean {
+  if (v.payload === undefined) return true
+  if (!isString(v.kind) || !isRecord(v.notice) || !isString(v.notice.kind)) return false
+  const family = v.kind
+  const type = v.notice.kind
+  if (!eventSpecs.some((spec) => spec.family === family && spec.type === type)) return isRecord(v.payload)
+  return isEventPayload(family, type, v.payload)
 }
 
 function isAttachment(v: unknown): v is Attachment {
@@ -100,6 +114,7 @@ function messageFields(v: Record<string, unknown>): boolean {
     optional(v.sessionIds, isStringMap) &&
     optional(v.kind, isString) &&
     optional(v.notice, isPRNotice) &&
+    isEventPayloadField(v) &&
     optional(v.human, isBoolean) &&
     optional(v.source, isString) &&
     optional(v.spoken, isBoolean) &&

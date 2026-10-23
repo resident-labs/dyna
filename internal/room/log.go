@@ -76,6 +76,11 @@ func DefaultView(msg Message, roomName string) bool {
 // agentPost keeps ordinary messages, including workflow worker messages.
 // System completions share result kinds, so those also require a session sender.
 func agentPost(msg Message, roomName string) bool {
+	// A registered system event follows its spec: a quiet event is not agent
+	// input, and a non-quiet one is.
+	if spec, ok := eventSpecFor(msg.Kind, msg.Notice.Kind); ok {
+		return !spec.Quiet
+	}
 	switch msg.Kind {
 	case "", "message", "notice", "seat":
 		return true
