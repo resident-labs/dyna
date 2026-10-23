@@ -314,7 +314,7 @@
           <div class="thread-log" bind:this={threadScroller}>
             {#key m.id + ':' + selected.key + ':' + focusedTurn}
             <HistoryList bind:atBottom={threadStuck} fill={false} scroller={threadScroller} items={threadRows} key={(r: DmRow) => r.key} estimate={() => 96} newer={!focusedTurn && session.newer} onnewer={focusedTurn ? null : onnewer} onpresent={focusedTurn || !onpresent ? null : present} earlier={!focusedTurn && session.earlier} onearlier={focusedTurn ? null : onearlier} onhistory={() => (threadStuck = false)} beginning={focusedTurn ? '' : 'Beginning of thread with ' + short(selected.key, room.name)}>
-            {#snippet children(row: MessageRow)}<DmMessage {row} {room} onforward={readOnly ? null : forward} member={m} address={dm.address} {members} {onopenfile} {onpost} {removing} ondismiss={readOnly ? null : askDismiss} inThread selection={threadSelection} enter={isNewInThread(row.key)} />{/snippet}
+            {#snippet children(row: MessageRow)}<DmMessage {row} {room} onforward={readOnly ? null : forward} member={m} address={dm.address} {members} fullText {onopenfile} {onpost} {removing} ondismiss={readOnly ? null : askDismiss} inThread selection={threadSelection} enter={isNewInThread(row.key)} />{/snippet}
             </HistoryList>
             {/key}
           </div>
