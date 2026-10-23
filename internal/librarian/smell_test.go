@@ -32,7 +32,7 @@ func (f *fakeIssues) FileIssue(roomID, title, note, file string, line int, by st
 
 func TestFileSmellChecks(t *testing.T) {
 	h := setup(t)
-	issues := &fakeIssues{open: []room.Issue{{ID: "old", Title: "Two retry loops in the agent runner", File: "agents/run.go", State: "open"}}}
+	issues := &fakeIssues{open: []room.Issue{{ID: "old", Number: 7, Title: "Two retry loops in the agent runner", File: "agents/run.go", State: "open"}}}
 	h.svc.Issues = issues
 	ctx := context.Background()
 	good := func(title string) Smell {
@@ -67,15 +67,15 @@ func TestFileSmellChecks(t *testing.T) {
 	refuse(escape, "inside the repository")
 	aliased := good("Agent runner has two retry loops")
 	aliased.At = []string{"alias/run.go"}
-	refuse(aliased, "open issue old")
+	refuse(aliased, "open issue D-7")
 	dotted := good("Agent runner has two retry loops")
 	dotted.At = []string{"./agents//run.go:3"}
-	refuse(dotted, "open issue old")
+	refuse(dotted, "open issue D-7")
 	noCost := good("Global state in run")
 	noCost.Cost = ""
 	refuse(noCost, "--cost")
-	refuse(good("two retry loops in the agent runner"), "open issue old")
-	refuse(good("Agent runner has two retry loops"), "open issue old")
+	refuse(good("two retry loops in the agent runner"), "open issue D-7")
+	refuse(good("Agent runner has two retry loops"), "open issue D-7")
 
 	for _, title := range []string{"Global state in run", "Run hides its clock", "Run reads env directly"} {
 		i, err := h.svc.FileSmell(ctx, authority.Current(), h.repo, "room:librarian", good(title))

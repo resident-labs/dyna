@@ -21,7 +21,7 @@
   import TabHeader from '../rooms/TabHeader.svelte'
   import PRDetail from './PRDetail.svelte'
   import IssueList from './IssueList.svelte'
-  import { unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
+  import { roomIssueLabel, unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
   import { location as issueLocation } from '../rooms/issues.ts'
   import IssuePage from './IssuePage.svelte'
   import Menu from '../ui/Menu.svelte'
@@ -474,8 +474,8 @@
     {#if selectedLocal}
       <div class="dscroll local-detail">
         <button class="act" onclick={() => { localSelected = null; localSequence++ }}>Issues</button>
-        <h2>{selectedLocal.title}</h2>
-        {#if onmention}<button class="act" onclick={() => onmention?.({ kind: 'room_issue', number: selectedLocal.id, title: selectedLocal.title, state: selectedLocal.state, url: `#room=${encodeURIComponent(roomId)}&view=issues` })}>Mention in chat</button>{/if}
+        <h2>{roomIssueLabel(selectedLocal)} {selectedLocal.title}</h2>
+        {#if onmention}<button class="act" onclick={() => onmention?.({ kind: 'room_issue', number: roomIssueLabel(selectedLocal), title: selectedLocal.title, state: selectedLocal.state, url: `#room=${encodeURIComponent(roomId)}&view=issues` })}>Mention in chat</button>{/if}
         <p>Dyna · {selectedLocal.filer} · {selectedLocal.state}</p>
         {#if issueLocation(selectedLocal)}<p>{issueLocation(selectedLocal)}</p>{/if}
         {#if localBodyError}<p class="err">{localBodyError}</p>{/if}

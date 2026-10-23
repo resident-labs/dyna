@@ -164,7 +164,7 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 }
 
 func issueDetail(i room.Issue, text string) string {
-	detail := fmt.Sprintf("Local issue %s\n\n%s", i.ID, text)
+	detail := fmt.Sprintf("Local issue %s\n\n%s", i.Label(), text)
 	if i.File != "" {
 		detail += "\n\nLocation: " + i.File
 		if i.Line > 0 {
