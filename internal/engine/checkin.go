@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"dyna-agent/internal/automations"
@@ -9,9 +10,15 @@ import (
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/parentcheckin"
 	"dyna-agent/internal/roomsvc"
+	"dyna-agent/internal/settings"
 )
 
 func (s services) setSetting(ctx context.Context, key, value string) (configsvc.Item, error) {
+	if key == settings.KeySessionCheckInInterval {
+		// The hook owns check-ins now, and this value was imported once. A silent
+		// write here would look like it changed the cadence, so name the hook.
+		return configsvc.Item{}, fmt.Errorf("%s is read once, when the parent check-ins hook is first seeded; change the interval on Settings > Hooks, or with dyna git hooks edit parent-checkins --global --every-minutes <n>", key)
+	}
 	return configsvc.Set(ctx, key, value)
 }
 
