@@ -250,7 +250,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		CompletionTimeout: -1, // subagent turns have no time limits of any kind
 		MaxToolWait:       settingsValues.SteeringMaxToolWait,
 		OnDelivery: func(note harness.DeliveryNote) {
-			d := Delivery{TS: time.Now().UnixMilli(), Kind: note.Kind, Outcome: note.Outcome, WaitedMs: note.Waited.Milliseconds()}
+			d := Delivery{TS: time.Now().UnixMilli(), Kind: note.Kind, Outcome: note.Outcome, Reason: note.Reason, WaitedMs: note.Waited.Milliseconds()}
 			writes.note(TurnNote{Delivery: &d})
 		},
 	}

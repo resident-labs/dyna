@@ -445,7 +445,7 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 			deferredSince[kind] = since
 		}
 		if wait := gate.maxWait; !supported && wait > 0 && time.Since(since) >= wait {
-			gate.report(kind, DeliveryUnsupported, time.Since(since), 0)
+			gate.report(kind, DeliveryInterrupted, time.Since(since), 0)
 			delete(deferredSince, kind)
 			return true
 		}
