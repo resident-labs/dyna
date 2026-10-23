@@ -40,3 +40,44 @@ test('one field holding a collection shows as a caption, not a label column', as
   assert.match(body, /<p class="caption[^"]*">Results · 2<\/p>/)
   assert.doesNotMatch(body, /<dl/)
 })
+
+test('raw JSON preserves exact keys and nulls without losing readable expansion', async () => {
+  const { load, installDom, domNames } = await import('../prs/prDetailHarness.ts')
+  const { rm } = await import('node:fs/promises')
+  const dom = installDom()
+  globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
+  let api: Awaited<ReturnType<typeof load>> | undefined
+  let component: ReturnType<NonNullable<typeof api>['mount']> | undefined
+  try {
+    api = await load({ component: '../ui/JsonView' })
+    const target = document.getElementById('app')
+    assert.ok(target)
+    const value = [{ field_name: 'First', missing_value: null, enabled: false }, { field_name: 'Second', values: [0, null, true] }]
+    component = api.mount(api.default, { target, props: { value } })
+    api.flushSync()
+    const record = target.querySelector('details')
+    assert.ok(record)
+    record.open = true
+    record.dispatchEvent(new Event('toggle'))
+    api.flushSync()
+    const json = Array.from(target.querySelectorAll('button')).find(button => button.textContent === 'JSON')
+    assert.ok(json)
+    json.click()
+    api.flushSync()
+    const raw = target.querySelector('pre')
+    assert.ok(raw)
+    assert.deepEqual(JSON.parse(raw.textContent || ''), value)
+    assert.equal(target.querySelectorAll('[role="radiogroup"]').length, 1)
+    const readable = Array.from(target.querySelectorAll('button')).find(button => button.textContent === 'Readable')
+    assert.ok(readable)
+    readable.click()
+    api.flushSync()
+    assert.equal(record.open, true)
+    assert.ok(record.textContent?.includes('Missing value'))
+  } finally {
+    if (component && api) await api.unmount(component)
+    if (api) await rm(api.dir, { recursive: true, force: true })
+    dom.window.close()
+    for (const name of [...domNames, 'HTMLMediaElement']) delete (globalThis as Record<string, unknown>)[name]
+  }
+})
