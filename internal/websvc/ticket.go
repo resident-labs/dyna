@@ -24,10 +24,6 @@ type Tickets struct {
 	now func() time.Time
 }
 
-// NewTickets signs with key and the real clock. Server makes its own from
-// the store key; the desktop view listener uses a key made at start.
-func NewTickets(key []byte) Tickets { return Tickets{key: key, now: time.Now} }
-
 func (t Tickets) mac(roomID, id string, exp int64) string {
 	m := hmac.New(sha256.New, t.key)
 	// Room and attachment IDs pass room.ValidID and room.ValidAttachmentID,

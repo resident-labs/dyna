@@ -22,13 +22,11 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unicode/utf8"
 
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/procident"
 	"dyna-agent/internal/sessionlife"
-	"dyna-agent/internal/settings"
 	"dyna-agent/internal/state"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/workeroutput"
@@ -130,7 +128,6 @@ const (
 	agentJournalMaxMessageBytes    = 4096
 	agentJournalMaxKindBytes       = 32
 	normalizedOutputMaxRecordBytes = 4 * 1024 * 1024
-	maxSessionIDBytes              = 128
 	// MaxSteeringMessageBytes keeps interactive steering deliberately short and
 	// bounds the prompt injected into an already-running worker session.
 	MaxSteeringMessageBytes = 2000
@@ -841,60 +838,6 @@ func (r *Run) Finish(status string, resultJSON string, runErr error) error {
 // ListArchived.
 func List() ([]Meta, error) { return listIn(RunsDir(), "1") }
 
-// ValidateSessionID applies the persisted-session contract used by scoped
-// clients before a session value reaches a run catalog or action boundary.
-func ValidateSessionID(session string) error {
-	if session == "" {
-		return fmt.Errorf("session id must not be empty")
-	}
-	if !utf8.ValidString(session) {
-		return fmt.Errorf("session id must be valid UTF-8")
-	}
-	if strings.ContainsRune(session, '\x00') {
-		return fmt.Errorf("session id must not contain NUL")
-	}
-	if len(session) > maxSessionIDBytes {
-		return fmt.Errorf("session id is too long (maximum %s)", settings.FormatBytes(int64(maxSessionIDBytes)))
-	}
-	return nil
-}
-
-// ListSession returns only runs owned by session, newest first.
-func ListSession(session string) ([]Meta, error) {
-	if err := ValidateSessionID(session); err != nil {
-		return nil, err
-	}
-	runs, err := List()
-	if err != nil {
-		return nil, err
-	}
-	owned := runs[:0]
-	for _, run := range runs {
-		if run.Session == session {
-			owned = append(owned, run)
-		}
-	}
-	return owned, nil
-}
-
-// RequireSession authorizes one run for a session-scoped read or action.
-func RequireSession(id, session string) (Meta, error) {
-	if err := validateRunID(id); err != nil {
-		return Meta{}, err
-	}
-	if err := ValidateSessionID(session); err != nil {
-		return Meta{}, err
-	}
-	meta, err := ReadMeta(id)
-	if err != nil {
-		return Meta{}, err
-	}
-	if meta.Session != session {
-		return Meta{}, fmt.Errorf("run %s does not belong to this session", id)
-	}
-	return meta, nil
-}
-
 // ReadEvents parses events.jsonl for a run.
 func ReadEvents(id string) ([]Event, error) {
 	records, _, err := readJSONLines[Event](filepath.Join(RunDir(id), "events.jsonl"), 0, 0, 4*1024*1024, jsonLinesPolicy{acceptFinal: true, errorOversized: true})
@@ -1147,13 +1090,6 @@ func RemoveWith(id string, beforeRemove func(Meta) error) error {
 
 func runIsAlive(m Meta) bool {
 	return m.Status == "running" && Alive(m)
-}
-
-// ClearCompletedWith removes every non-running run after an optional hook.
-// Per-run hook and removal failures are returned for reporting but do not stop
-// unrelated completed runs from being cleared.
-func ClearCompletedWith(beforeRemove func(Meta) error) (int, []error, error) {
-	return ClearCompletedInRoom("", beforeRemove)
 }
 
 // ClearCompletedInRoom limits completed-run clearing to roomID. An empty

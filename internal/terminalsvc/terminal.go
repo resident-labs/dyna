@@ -90,7 +90,6 @@ type Service struct {
 	mu       sync.Mutex
 	options  Options
 	terms    map[string]*terminal
-	emit     func(Event)
 	closed   bool
 	stop     chan struct{}
 	reapDone chan struct{}
@@ -109,17 +108,6 @@ func New(o Options) *Service {
 	}
 	go s.reaper()
 	return s
-}
-
-// SetEmitter supplies desktop events. Web streams read the same byte buffer.
-func (s *Service) SetEmitter(emit func(Event)) { s.mu.Lock(); s.emit = emit; s.mu.Unlock() }
-func (s *Service) publish(ev Event) {
-	s.mu.Lock()
-	emit := s.emit
-	s.mu.Unlock()
-	if emit != nil {
-		emit(ev)
-	}
 }
 
 func dimensions(cols, rows uint16) error {
@@ -257,7 +245,6 @@ func (s *Service) read(t *terminal) {
 		n, err := t.file.Read(buf)
 		if n > 0 {
 			t.mu.Lock()
-			start := t.offset
 			t.offset += uint64(n)
 			t.info.LastActivity = time.Now()
 			t.buffer = append(t.buffer, buf[:n]...)
@@ -265,10 +252,8 @@ func (s *Service) read(t *terminal) {
 				copy(t.buffer, t.buffer[len(t.buffer)-ScrollbackBytes:])
 				t.buffer = t.buffer[:ScrollbackBytes]
 			}
-			ev := Event{ID: t.info.ID, Data: append([]byte(nil), buf[:n]...), Start: start, Offset: t.offset}
 			t.signal()
 			t.mu.Unlock()
-			s.publish(ev)
 		}
 		if err != nil {
 			break
@@ -285,10 +270,8 @@ func (s *Service) read(t *terminal) {
 	t.info.Alive = false
 	t.info.ExitCode = code
 	t.info.LastActivity = time.Now()
-	ev := Event{ID: t.info.ID, Data: []byte{}, Start: t.offset, Offset: t.offset, Exited: true, ExitCode: code}
 	t.signal()
 	t.mu.Unlock()
-	s.publish(ev)
 }
 
 func (s *Service) Write(id string, data []byte) error {

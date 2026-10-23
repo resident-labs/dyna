@@ -360,12 +360,6 @@ func RunWithJournal(ctx context.Context, p profile.Profile, prompt, cwd string, 
 	return runJournaled(ctx, p, prompt, cwd, allowRecovery, sessionNudgeDelay, journal, SteeringOptions{}, SessionOptions{}, ExecutionOptions{})
 }
 
-// RunWithJournalAndSteering adds a run-owned steering queue to the normal
-// journaled invocation. Unsupported/non-resumable harnesses never activate it.
-func RunWithJournalAndSteering(ctx context.Context, p profile.Profile, prompt, cwd string, allowRecovery bool, journal JournalOptions, steering SteeringOptions) (Result, error) {
-	return runJournaled(ctx, p, prompt, cwd, allowRecovery, sessionNudgeDelay, journal, steering, SessionOptions{}, ExecutionOptions{})
-}
-
 // RunWithOptions is the full invocation form: journal, steering, session, and
 // execution options in one call. Workflow workers pass
 // ExecutionOptions{DisableNativeSubagents: true} here.

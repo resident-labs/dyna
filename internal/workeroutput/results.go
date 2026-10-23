@@ -12,33 +12,6 @@ func CodexSessionID(stdout string) string {
 	return ""
 }
 
-func AntigravitySessionID(stdout string) string {
-	for _, line := range strings.Split(stdout, "\n") {
-		ev, ok := parseRecord[antigravityRecord]([]byte(line))
-		if !ok {
-			continue
-		}
-		if ev.Event == "init" && ev.ConversationID != "" {
-			return ev.ConversationID
-		}
-		if ev.Event == "result" && ev.Result.ConversationID != "" {
-			return ev.Result.ConversationID
-		}
-	}
-	return ""
-}
-
-func AntigravityOutput(stdout string) string {
-	var response string
-	for _, line := range strings.Split(stdout, "\n") {
-		ev, ok := parseRecord[antigravityRecord]([]byte(line))
-		if ok && ev.Event == "result" && strings.TrimSpace(ev.Result.Response) != "" {
-			response = strings.TrimSpace(ev.Result.Response)
-		}
-	}
-	return response
-}
-
 func OpenCodeSessionID(stdout string) string {
 	for _, line := range strings.Split(stdout, "\n") {
 		ev, ok := parseRecord[openCodeRecord]([]byte(line))
