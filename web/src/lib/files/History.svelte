@@ -2,6 +2,7 @@
   // The commits of one file, or of the whole repository when `path` is empty.
   // A side panel on a wide screen, a bottom sheet on a phone. A file's rows
   // can be selected to show that version; repository rows are only a list.
+  import { dialog } from '../ui/dialog.js'
   import { api } from '../../api.js'
   import { ago } from '../ui/format.js'
   import Row from '../ui/Row.svelte'
@@ -9,6 +10,19 @@
   import LoadOlder from '../ui/LoadOlder.svelte'
 
   let { roomId, session = '', path = '', narrow = false, selected = null, onselect = null, onclose } = $props()
+
+  function modal(node, narrow) {
+    let active
+    function update(enabled) {
+      active?.destroy()
+      active = enabled ? dialog(node, {
+        close: () => onclose(),
+        initial: () => node.querySelector('.x'),
+      }) : null
+    }
+    update(narrow)
+    return { update, destroy() { active?.destroy() } }
+  }
 
   let commits = $state([])
   let cursor = $state('')
@@ -40,8 +54,8 @@
   })
 </script>
 
-{#if narrow}<button class="scrim" aria-label="Close History" onclick={onclose}></button>{/if}
-<aside class="history" class:sheet={narrow} aria-label="History">
+<div class="history-wrap" class:backdrop={narrow}>
+<aside class="history" class:sheet={narrow} role={narrow ? 'dialog' : undefined} aria-modal={narrow ? 'true' : undefined} tabindex="-1" use:modal={narrow} aria-label="History">
   <header>
     <strong>History</strong>
     <span class="scope" title={path}>{path || 'whole repository'}</span>
@@ -67,6 +81,7 @@
     {#if commits.length}<LoadOlder older={earlier} {loading} onclick={() => load(cursor)} />{/if}
   </div>
 </aside>
+</div>
 
 <style>
   .history { width: 340px; flex: none; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid var(--line-soft); background: var(--side); }
@@ -85,7 +100,8 @@
   .del { color: var(--coral); }
   .quiet { color: var(--faint); font-size: 13px; padding: 12px; }
   .err { color: var(--coral); font-size: 13px; padding: 12px; }
-  .scrim { position: fixed; inset: 0; z-index: 54; background: rgba(8, 8, 10, 0.5); }
-  .sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 55; width: auto; max-height: 70dvh; border-left: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; box-shadow: 0 -12px 40px #0006; }
+  .history-wrap { display: contents; }
+  .history-wrap.backdrop { position: fixed; inset: 0; z-index: 55; background: rgba(8, 8, 10, 0.5); display: flex; align-items: flex-end; }
+  .sheet { width: 100%; max-height: 70dvh; border-left: 0; border-top: 1px solid var(--line); border-radius: 14px 14px 0 0; box-shadow: 0 -12px 40px #0006; }
   .sheet .x { width: 44px; height: 44px; }
 </style>
