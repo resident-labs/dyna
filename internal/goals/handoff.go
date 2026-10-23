@@ -46,8 +46,9 @@ func (s *Store) HandoffHolder(room, id, from, to string) (moved bool, err error)
 
 // ReleaseHolder hands a goal to no session: it stays open and unheld, and the
 // owner takes it, reassigns it, or closes it. Root never holds goals, so a
-// close that would hand work to root releases the goal instead.
-func (s *Store) ReleaseHolder(room, id, from string) (released bool, err error) {
+// close that would hand work to root releases the goal instead. result is the
+// finished turn's result, offered to the owner when there is one.
+func (s *Store) ReleaseHolder(room, id, from, result string) (released bool, err error) {
 	where, args := named(room, id)
 	err = s.updateTx(func(_ *wake, st *State) error {
 		released = false
@@ -65,10 +66,13 @@ func (s *Store) ReleaseHolder(room, id, from string) (released bool, err error) 
 		}
 		now := s.now()
 		g.UpdatedAt = now
+		text := fmt.Sprintf("Session %s closed, so goal %s lost its holder. Take it, reassign it, or close it. Inspect: dyna goal show %s. Source context: dyna subagent output %s.", from, id, id, from)
+		if result != "" {
+			text = fmt.Sprintf("Goal %s holder %s closed after a successful turn.\n%s\nReview the result before reassigning or closing the goal. Source context: dyna subagent output %s.", id, from, result, from)
+		}
 		r.Notices = append(r.Notices, Notice{
 			Kind: "holder_closed", ID: fmt.Sprintf("goal_%s_released_%d", id, now.UnixNano()),
-			Room: room, Goal: id,
-			Text: fmt.Sprintf("Session %s closed, so goal %s lost its holder. Take it, reassign it, or close it. Inspect: dyna goal show %s. Source context: dyna subagent output %s.", from, id, id, from),
+			Room: room, Goal: id, Text: text,
 		})
 		released = true
 		return nil

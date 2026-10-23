@@ -1569,7 +1569,7 @@
     if (confirm.kind === 'forceclose') {
       return {
         title: `Could not hand over all work from ${confirm.m.name}`,
-        lines: [...confirm.items, 'Some work could not move. Retry after fixing the error, or force close and leave that work unresolved.'],
+        lines: [...confirm.items, 'Retry after fixing the error, or force close. Goals move to the owner; other work stays unresolved.'],
         action: 'Close anyway',
       }
     }
@@ -1595,7 +1595,8 @@
         action: 'Stop turn',
       }
     }
-    const lines = ['The session closes, and its name becomes free.', 'PR authorship and held goals move to its nearest open ancestor, or root. Reviewer roles return to the pool. Live workflows are canceled.']
+    const lines = ['The session closes, and its name becomes free.', 'PR authorship moves to its nearest open ancestor, or root. Reviewer roles return to the pool. Live workflows are canceled.']
+    lines.push('Held goals must be done, dropped or transferred first when only root or the owner is left above it; finish it, use --force to move them to the owner.')
     if (m.state === 'live') lines.push('Its running turn stops first.')
     const hasChildren = members.some((child) => !child.closed && child.parent === m.id)
     if (hasChildren) lines.push('Its open children that own no work close too. Children that still own work move to its nearest open ancestor and keep running.')
