@@ -2,6 +2,7 @@
 package doctor
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -118,7 +119,12 @@ func post(r doctor.Report) error {
 	if err != nil {
 		return err
 	}
-	text := fmt.Sprintf("Doctor report %d (%s):\n%s", r.ID, r.Trigger, r.Text())
-	_, err = rooms.Post(rec.ID, room.PostInput{From: rec.Name + ":doctor", To: []string{rec.Name + ":root"}, Kind: "doctor", Wake: true, Text: text})
+	_, err = rooms.Post(rec.ID, reportPost(rec.Name, r))
 	return err
+}
+
+func reportPost(roomName string, r doctor.Report) room.PostInput {
+	text := fmt.Sprintf("Doctor report %d (%s):\n%s", r.ID, r.Trigger, r.Text())
+	sum := sha256.Sum256([]byte(fmt.Sprintf("doctor:%s:%d:%s", r.Machine, r.ID, r.At.UTC().Format(time.RFC3339Nano))))
+	return room.PostInput{ID: fmt.Sprintf("msg_%x", sum[:8]), From: roomName + ":doctor", To: []string{roomName + ":root"}, Kind: "alert", Wake: true, Text: text}
 }

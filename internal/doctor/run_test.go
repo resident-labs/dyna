@@ -1,6 +1,7 @@
 package doctor
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -63,5 +64,30 @@ func TestCooldownIsPerMachine(t *testing.T) {
 	res, err := (Run{DataDir: dir, Machine: "laptop", Target: "machine", Now: t0, Cooldown: time.Hour}).Do()
 	if err != nil || res.Repeat || res.Report.Machine != "laptop" {
 		t.Fatalf("result=%+v, err=%v", res, err)
+	}
+}
+
+func TestRunRetriesFailedDelivery(t *testing.T) {
+	dir := t.TempDir()
+	busyMachine(t, Samples{DataDir: dir}, t0)
+	var attempts []int64
+	run := Run{DataDir: dir, Machine: "laptop", Target: "machine", Now: t0, Cooldown: time.Hour,
+		Post: func(r Report) error {
+			attempts = append(attempts, r.ID)
+			if len(attempts) == 1 {
+				return fmt.Errorf("temporary failure")
+			}
+			return nil
+		}}
+	first, err := run.Do()
+	if err == nil {
+		t.Fatal("first post should fail")
+	}
+	second, err := run.Do()
+	if err != nil || second.Report.ID != first.Report.ID || len(attempts) != 2 {
+		t.Fatalf("retry=%+v attempts=%v err=%v", second, attempts, err)
+	}
+	if _, err = run.Do(); err != nil || len(attempts) != 2 {
+		t.Fatalf("delivered report posted again: %v, %v", attempts, err)
 	}
 }

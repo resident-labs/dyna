@@ -58,17 +58,28 @@ func (r Run) Do() (Result, error) {
 	if !rep.Healthy && r.Cooldown > 0 {
 		prev, found, err := reports.Recent(rep.Machine, rep.Target, rep.Fingerprint, r.Now.Add(-r.Cooldown))
 		if err != nil || found {
-			return Result{Report: prev, Ran: true, Repeat: found}, err
+			if err != nil {
+				return Result{}, err
+			}
+			return r.deliver(reports, Result{Report: prev, Ran: true, Repeat: true})
 		}
 	}
 	if rep.ID, err = reports.Save(rep); err != nil {
 		return Result{}, err
 	}
-	res := Result{Report: rep, Ran: true}
-	if !rep.Healthy && r.Post != nil {
+	return r.deliver(reports, Result{Report: rep, Ran: true})
+}
+
+func (r Run) deliver(reports Reports, res Result) (Result, error) {
+	rep := res.Report
+	if !rep.Healthy && !rep.Delivered && r.Post != nil {
 		if err := r.Post(rep); err != nil {
 			return res, errors.Join(fmt.Errorf("report %d is saved but was not posted", rep.ID), err)
 		}
+		if err := reports.MarkDelivered(rep.ID); err != nil {
+			return res, err
+		}
+		res.Report.Delivered = true
 	}
 	return res, nil
 }
