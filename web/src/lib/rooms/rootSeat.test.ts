@@ -8,6 +8,8 @@ import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { seatDMConversation } from './conversations.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
+// The top bar's own markup lives in lib/app/shell/PageHeader.svelte.
+const bar = readFileSync(new URL('../app/shell/PageHeader.svelte', import.meta.url), 'utf8')
 const declarations = parse(source, { modern: true }).instance?.content.body ?? []
 
 interface RootSeat {
@@ -136,8 +138,8 @@ test('a root DM continues as the real session once root has one', () => {
 })
 
 test('the root DM header has the voice call button, before the threads button', () => {
-  const header = source.slice(source.indexOf('<UseIcons'), source.indexOf('class="dm-threads threads"'))
+  const header = bar.slice(bar.indexOf('<UseIcons'), bar.indexOf('class="dm-threads threads"'))
   assert.match(header, /\{#if isRootDm\}<CallButton \{room\} \/>\{\/if\}/)
   assert.match(source, /let isRootDm = \$derived\(!!drill && \(drill\.rootSeat \|\| drill\.role === 'root'\)\)/)
-  assert.equal((source.match(/<CallButton /g) || []).length, 2, 'one in the room header, one in the root DM header')
+  assert.equal((bar.match(/<CallButton /g) || []).length, 2, 'one in the room header, one in the root DM header')
 })
