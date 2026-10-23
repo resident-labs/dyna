@@ -182,6 +182,21 @@ func (e *env) wait(id string, turn int) subagent.Info {
 	return info
 }
 
+// doneGoal finishes the goal info holds, as a worker does before it finishes.
+func (e *env) doneGoal(info subagent.Info) {
+	e.t.Helper()
+	store := e.svc.goalService().Store
+	held, err := store.OpenHeldBy(info.RoomID, info.ID)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	for _, g := range held {
+		if _, err := store.Finish(info.RoomID, g.ID, "owner", "Fixture completed", false); err != nil {
+			e.t.Fatal(err)
+		}
+	}
+}
+
 func TestMembersTreeAndStates(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
@@ -220,6 +235,7 @@ func TestOwnerCountSkipsClosedSessions(t *testing.T) {
 	rec := e.room("alpha")
 	e.start(rec, "open", nil)
 	gone := e.start(rec, "gone", nil)
+	e.doneGoal(gone)
 	if _, err := e.svc.ForceCloseSession(e.ctx, "alpha", gone.ID); err != nil {
 		t.Fatal(err)
 	}

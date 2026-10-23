@@ -44,14 +44,15 @@ List shows open sessions; `--all` includes closed ones.
 Stop cancels only the current turn. Cancel children and runs separately.
 Close stops the session and hands PR authorship and held goals to its nearest open ancestor.
 A top-level session hands PR authorship to the room's root. Reviewer roles return to the pool.
-Root and the owner take no goals: when only they are left above a session, close is refused
-until each held goal is marked done, dropped, or transferred with `dyna goal edit <id> --for @agent`.
-The refusal names each goal and its commands, and the app offers the same choices.
+Root and the owner hold no goals: when only they are left above a session, close is refused
+until each held goal is done, dropped, or transferred with `dyna goal edit <id> --for @agent`
+to an open agent. The refusal names each goal and its commands, and the app offers the same choices.
+A forced close does not move goals to the owner. If only the owner can unblock the work,
+root asks the owner first with `dyna ask`, then resolves the goal.
 Live workflow runs are canceled because their running coordinator cannot change owners.
 Questions withdraw; non-kept shells stop. Empty children close; other children move to the heir.
 The command and app show what moved or stopped. A failed handoff keeps the session open;
-retry after fixing the error, or use `--force` to close with unresolved work. A forced close
-moves goals to the owner.
+retry after fixing the error, or use `--force` to close with other unresolved work.
 Reopen restores history without starting a turn. An address selects its latest closed history; an ID selects exact history.
 An occupied name blocks reopen.
 
@@ -84,6 +85,10 @@ Stored hierarchy controls parent selectors and depth, even when `DYNA_DEPTH` pre
 ## Questions
 
 Only root uses `dyna ask` to ask the human owner. Other sessions use `dyna post @parent` for questions.
+A worker blocked on something only the owner can do, such as a sign-in, a live check on a
+device, a secret, or an outside decision, posts to root with `--needs-root`. The post states
+what is needed and why the work stops without it. Root turns that post into one `dyna ask`
+question. Workers never ask the owner directly.
 Root can use these question commands:
 
 ```bash
@@ -108,7 +113,8 @@ Root holds no goals. A start from root's session makes the child the holder of a
 top-level goal, unless `--under gN` names a goal that another agent holds. Implicit
 lookup never uses a goal root holds, and an explicit `--under` on one is refused.
 When a closed session would hand a goal to root, close is refused until the goal is
-resolved.
+resolved. Root asks the owner about the blocker when only the owner can clear it, then
+drops or finishes the goal, or hands it to an open agent.
 
 For other work across turns, use `dyna goal "<outcome; done when>"`.
 The caller holds it by default. Select holders with `--for @name`, `@children`, `@siblings`, or `@room`.

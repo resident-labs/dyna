@@ -1,7 +1,6 @@
 package goals
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -43,16 +42,26 @@ func TestClosingOneOfSeveralHoldersKeepsOtherHolder(t *testing.T) {
 	}
 }
 
-func TestClosingAssignedHolderReturnsToSetterOrRootOnce(t *testing.T) {
-	for _, setterLive := range []bool{true, false} {
-		t.Run(fmt.Sprint(setterLive), func(t *testing.T) {
+func TestClosingAssignedHolderReturnsToSetterOrHeir(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		setterLive  bool
+		heir        string
+		wantHolder  string
+		wantDropped bool
+	}{
+		{"live setter", true, "another-heir", "setter", false},
+		{"live heir only", false, "another-heir", "another-heir", false},
+		{"nobody left", false, "", "", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			s := lifecycleStore(t)
 			g, err := s.Add("r", "setter", Input{Text: "Delegated task", Holders: []string{"child"}})
 			if err != nil {
 				t.Fatal(err)
 			}
 			for range 2 {
-				if err := s.CloseSession("r", "child", "another-heir", map[string]bool{"setter": setterLive, "another-heir": true}); err != nil {
+				if err := s.CloseSession("r", "child", tc.heir, map[string]bool{"setter": tc.setterLive, "another-heir": true}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -60,7 +69,15 @@ func TestClosingAssignedHolderReturnsToSetterOrRootOnce(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !got.Open() || got.Shared || (setterLive && !got.HeldBy("setter")) || (!setterLive && len(got.Holders) != 0) {
+			// A goal never waits for the owner: it moves to a live session or
+			// closes with a note.
+			if tc.wantDropped {
+				if got.State != "dropped" || got.Done == nil || len(got.Holders) != 0 || got.Shared {
+					t.Fatalf("goal left unheld for the owner: %+v", got)
+				}
+				return
+			}
+			if !got.Open() || got.Shared || !got.HeldBy(tc.wantHolder) {
 				t.Fatalf("incorrect handback: %+v", got)
 			}
 		})

@@ -975,12 +975,11 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 			return info, fmt.Errorf("%w\n- PR handoff service is unavailable; use dyna subagent close %s --force to close anyway", responsibilityError("close", items), info.ID)
 		}
 	}
-	// Root and the owner take no goals, so a close that would leave them as the
-	// heir must resolve each goal first. --force moves the goals to the owner.
-	if !opts.Force {
-		if err := m.refuseGoalsForTopHeir(info); err != nil {
-			return info, err
-		}
+	// Root and the owner hold no goals, so a close that would leave one of them
+	// as the heir must resolve each goal first. A forced close does not move the
+	// goals to the owner either: root asks the owner, then resolves them.
+	if err := m.refuseGoalsForTopHeir(info); err != nil {
+		return info, err
 	}
 	if !opts.DormantBefore.IsZero() && (info.Status == StatusRunning || info.Status == StatusQueued) {
 		return info, keptForWork("the session has an active or held turn")
@@ -1008,8 +1007,22 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	if err != nil {
 		return info, err
 	}
+	// The first check ran before the turn stopped, so a goal can be assigned in
+	// between. Check the fenced session again before it hands any work over.
+	if opts.DormantBefore.IsZero() {
+		fenced, err := store.ResolveSnapshot(info.ID)
+		if err != nil {
+			return info, err
+		}
+		if err := m.refuseGoalsForHeir(fenced, heir); err != nil {
+			return info, err
+		}
+	}
 	summary, err := m.handoffClose(ctx, info, heir)
 	if err != nil {
+		if errors.Is(err, errGoalNeedsRoot) {
+			return info, err
+		}
 		if !opts.Force {
 			return info, fmt.Errorf("responsibilities: cannot close: %w; retry or use --force to close anyway", err)
 		}
