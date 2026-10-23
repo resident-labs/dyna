@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/runstore/runstoretest"
 	"dyna-agent/internal/sessionlife/recordtest"
@@ -378,7 +379,7 @@ func TestGCProtectsRunningWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, a := range actions {
-		if a.Path == path && (a.Action != "kept" || a.Reason != "owning workflow is running") {
+		if a.Path == path && (a.Action != "kept" || !a.OwnerOpen) {
 			t.Fatalf("active workflow: %#v", a)
 		}
 	}
@@ -386,6 +387,14 @@ func TestGCProtectsRunningWorkflow(t *testing.T) {
 		t.Fatal("active workflow removed")
 	}
 	runstoretest.Write(t, store.DataDir(), runstore.Meta{ID: "wf_active", Status: "ok", EndedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)})
+	db, err := database.Open(store.DataDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO run_directories(run_id,body,complete) VALUES('wf_active','[]',1)"); err != nil {
+		t.Fatal(err)
+	}
+
 	actions, err = GC(context.Background(), repo, GCOptions{})
 	if err != nil {
 		t.Fatal(err)
