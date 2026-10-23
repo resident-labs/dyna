@@ -99,16 +99,18 @@ const instructionWindowMS int64 = 60_000
 // instructionLines folds the standing-instruction notes in msgs into one line
 // per change, such as "Instructions changed for 35 sessions: Subagent
 // profiles". One edit reaches every session, so a burst is one fact, not one
-// fact per session. A change is its sections within a minute of its first note;
-// a later edit of the same section is its own change and gets its own line.
+// fact per session. A change is one note per session of the same sections
+// within a minute of its first note: a session that gets a second note of the
+// same sections got a later edit, which is its own change. Every line counts
+// the distinct sessions it names.
 func instructionLines(msgs []room.Message) []string {
 	type change struct {
 		sections []string
-		sessions int
 		firstMS  int64
+		sessions map[string]bool
 	}
 	var order []*change
-	byKey := map[string]*change{}
+	current := map[string]*change{}
 	for _, msg := range msgs {
 		ev, ok := msg.InstructionNote()
 		if !ok {
@@ -121,18 +123,18 @@ func instructionLines(msgs []room.Message) []string {
 			}
 		}
 		fingerprint := strings.Join(names, "\x00")
-		found := byKey[fingerprint]
-		if found == nil || msg.TS-found.firstMS >= instructionWindowMS || msg.TS < found.firstMS {
-			found = &change{sections: names, firstMS: msg.TS}
-			byKey[fingerprint] = found
+		found := current[fingerprint]
+		if found == nil || found.sessions[ev.Session] || msg.TS-found.firstMS >= instructionWindowMS || msg.TS < found.firstMS {
+			found = &change{sections: names, firstMS: msg.TS, sessions: map[string]bool{}}
+			current[fingerprint] = found
 			order = append(order, found)
 		}
-		found.sessions++
+		found.sessions[ev.Session] = true
 	}
 	lines := make([]string, len(order))
 	for i, one := range order {
-		sections, sessions := "their standing instructions", fmt.Sprintf("%d sessions", one.sessions)
-		if one.sessions == 1 {
+		sections, sessions := "their standing instructions", fmt.Sprintf("%d sessions", len(one.sessions))
+		if len(one.sessions) == 1 {
 			sessions = "1 session"
 		}
 		if len(one.sections) > 0 {

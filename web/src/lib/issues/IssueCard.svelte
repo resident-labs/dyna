@@ -121,7 +121,8 @@
     {#if files.length}
       <ul class="files">
         {#each files as file, i (i)}
-          <li>{file.path}{file.line ? `:${file.line}` : ''}</li>
+          {@const parts = file.path.split('/')}
+          <li>{#each parts as part, j (j)}{part}{#if j < parts.length - 1}/<wbr />{/if}{/each}{#if file.line}<span class="line">:{file.line}</span>{/if}</li>
         {/each}
       </ul>
     {/if}
@@ -194,6 +195,9 @@
   time { flex: none; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
   .body { padding: 0 12px 10px; }
   .files { margin: 0 0 6px; padding: 0; list-style: none; font: var(--t-sm)/1.6 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+  /* A path breaks at its slashes, so the line number stays with the file name
+     and a phone never splits ":41" into ":4" and "1". */
+  .files .line { white-space: nowrap; }
   .meta { margin: 0 0 4px; color: var(--muted); font-size: var(--t-sm); }
   .reason { margin: 0 0 6px; color: var(--ink-2); font-size: var(--t-sm); overflow-wrap: anywhere; }
   .acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }

@@ -35,15 +35,17 @@ func newInstructionRoom(t *testing.T) *instructionRoom {
 	return r
 }
 
-// change stores one note per session, all of one change of one section.
+// change stores one note per session, all of one change of one section. The
+// occurrence rises with every change, as the real producer's does, so two edits
+// of one section are two notes for the same session.
 func (r *instructionRoom) change(t *testing.T, section string, sessions int) {
 	t.Helper()
 	for i := range sessions {
 		ev := room.SessionEvent{
 			Type:       room.SessionInstructions,
-			Session:    fmt.Sprintf("%s:w%d-%02d", r.rec.Name, r.changes, i),
+			Session:    fmt.Sprintf("%s:w%02d", r.rec.Name, i),
 			Sections:   []room.InstructionChange{{Name: section, Action: room.InstructionItems, Added: []string{"changed"}}},
-			Occurrence: 1,
+			Occurrence: r.changes + 1,
 		}
 		msg, err := r.store.PostEvent(r.rec.ID, ev, ev.Session)
 		if err != nil {
@@ -95,18 +97,20 @@ func TestOwnerDMBlockLeavesOutStoredInstructionRows(t *testing.T) {
 	}
 }
 
-// Two edits are two changes: another section is its own line, and the same
-// section edited later is a new change, not the first burst.
+// Two edits are two changes. A second edit of one section ten seconds later
+// reaches the same sessions again, so it is its own line and never counts those
+// sessions twice; another section is its own line too.
 func TestInstructionFoldingKeepsASecondChangeApart(t *testing.T) {
 	r := newInstructionRoom(t)
 	r.change(t, "Subagent profiles", 35)
+	r.now = r.now.Add(10 * time.Second)
+	r.change(t, "Subagent profiles", 35)
+	r.now = r.now.Add(3 * time.Minute)
 	r.change(t, "Session rules", 1)
-	r.now = r.now.Add(2 * time.Minute)
-	r.change(t, "Subagent profiles", 2)
 	want := []string{
 		"- Instructions changed for 35 sessions: Subagent profiles.",
+		"- Instructions changed for 35 sessions: Subagent profiles.",
 		"- Instructions changed for 1 session: Session rules.",
-		"- Instructions changed for 2 sessions: Subagent profiles.",
 	}
 	if lines := instructionLines(r.msgs); fmt.Sprint(lines) != fmt.Sprint(want) {
 		t.Fatalf("folded lines = %q, want %q", lines, want)
