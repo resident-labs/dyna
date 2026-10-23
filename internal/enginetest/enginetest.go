@@ -62,11 +62,14 @@ func serve(t testing.TB, dataDir, build string, callers func(net.Conn) (websvc.C
 	if err := testsafe.Check(dataDir); err != nil {
 		t.Fatalf("fake engine: %v", err)
 	}
-	// Store migrations also read the config template registry. Keep it private.
+	// Migrations read the template registry, which must not be shared across
+	// test packages. Restore fixture config before serving prepared profiles.
+	configHome := os.Getenv("XDG_CONFIG_HOME")
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	if err := stores.Migrate(dataDir); err != nil {
 		t.Fatalf("start fake engine: %v", err)
 	}
+	t.Setenv("XDG_CONFIG_HOME", configHome)
 	t.Cleanup(func() {
 		if err := database.Close(dataDir); err != nil {
 			t.Errorf("close fake engine stores: %v", err)
