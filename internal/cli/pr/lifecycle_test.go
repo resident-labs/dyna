@@ -41,7 +41,7 @@ func TestVerdictLifecycleCLI(t *testing.T) {
 	s := watch.New()
 	view := &prview.Service{Notify: s.Notify}
 	s.Store = view.Watcher().Store
-	calls, err := websvc.Bind([]websvc.Binding{{Name: "RecordPRVerdict", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.RecordPRVerdict}})
+	calls, err := websvc.Bind([]websvc.Binding{{Name: "RecordReviewResult", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.RecordReviewResult}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestNamedReviewerVerdictCommandNeedsNoPoolAssignment(t *testing.T) {
 	if err = svc.SetRoomChangePolicy(owner, rec.ID, policy); err != nil {
 		t.Fatal(err)
 	}
-	bindings, err := websvc.Bind([]websvc.Binding{{Name: "RecordPRVerdict", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: svc.RecordPRVerdict}})
+	bindings, err := websvc.Bind([]websvc.Binding{{Name: "RecordReviewResult", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: svc.RecordReviewResult}})
 	if err != nil {
 		t.Fatal(err)
 	}

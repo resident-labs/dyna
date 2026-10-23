@@ -150,8 +150,12 @@ func mergeQueue(st State) []MergeQueueItem {
 			item.State, item.Reason = "waiting", "waiting for a verified head"
 		case r.CI == "failed":
 			item.State, item.Reason = "ci-failed", ciFailedReason(*r)
-		case r.RoundHead == r.Head && (r.Verdict == "changes" || r.Verdict == "question"):
-			item.State, item.Reason = "changes", map[string]string{"changes": "changes requested", "question": "question for the author"}[r.Verdict]
+		// TODO: legacy/shim remove later — a stored review from before the typed
+		// results may still say question; remove when that history ages out.
+		case r.RoundHead == r.Head && (r.Verdict == state.VerdictChanges || r.Verdict == "question"):
+			item.State, item.Reason = "changes", map[state.ReviewVerdict]string{state.VerdictChanges: "changes requested", "question": "question for the author"}[r.Verdict]
+		case r.RoundHead == r.Head && r.StopReason != "":
+			item.State, item.Reason = "stopped", "the reviewer stopped early: "+string(r.StopReason)
 		case !facts.ApprovedAtHead(*r):
 			item.State, item.Reason = "review", "needs review"
 		case r.CI != "passed":
@@ -262,6 +266,26 @@ func (s *Service) MergeStatus(ctx context.Context) ([]MergeQueueItem, error) {
 			Main: &MainCI{State: status, Head: p.Head, Wait: defaultWait(p, status)}})
 	}
 	return rows, nil
+}
+
+// fastLandable reports an approval that Dyna's changed-path rules rated low
+// risk. The reviewer's word alone never lands a change fast.
+func fastLandable(r Record) bool {
+	return r.Verdict == state.VerdictApproveFast && r.FastLand != nil && r.FastLand.LowRisk && r.RoundHead == r.Head
+}
+
+// fastLand publishes one low-risk approve-fast change without the batch trial.
+// Every existing merge gate stays: a fresh head, the approval at that head,
+// green CI, required reviews, mergeability and the room pause. The change's
+// own CI already ran the checks for its area: docs-only changes run none, and
+// test-only changes run their suites. Only the batch wait is skipped.
+func (s *Service) fastLand(ctx context.Context, candidate Record) error {
+	current, children, ready, err := s.prepareMerge(ctx, candidate)
+	if err != nil || !ready {
+		return err
+	}
+	_, err = s.publishMerge(ctx, current, children)
+	return err
 }
 
 // prepareMerge keeps the owner repair preflight, child preparation and final fresh gate together.

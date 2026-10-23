@@ -2,7 +2,7 @@ import { parsePRPost } from '../prs/pr.ts'
 import type { EventNotice } from '../api/room.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
 import type { EventPayload, HookEvent } from './events.gen.ts'
-import { hookEvent, issueEvent, mergeEvent, prEvent } from './eventPayloads.ts'
+import { hookEvent, issueEvent, mergeEvent, prEvent, reviewEvent } from './eventPayloads.ts'
 
 // The part of a stored post that feed rows read. A page of posts and the
 // fixtures of a test both fit it.
@@ -138,6 +138,9 @@ function foldKey(post: FeedInput): string {
   if (hook) return hookRowKey(hook)
   const merge = mergeEvent(post)
   if (merge) return `merge:${merge.trialId}`
+  // One result card per PR head: a new head starts a new card.
+  const review = reviewEvent(post)
+  if (review) return `review:${review.changeId}:${review.head}`
   const pr = prEvent(post)
   if (pr) return pr.type === 'held-comment' ? '' : `pr:${pr.changeId || pr.url || ''}`
   // One card per issue: filed, changed and closed fold together. A filing has

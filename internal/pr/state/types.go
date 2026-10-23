@@ -8,11 +8,12 @@ import (
 	"time"
 )
 
-type ReviewResult struct {
-	ChangeID string    `json:"changeId,omitempty"`
-	PR       int       `json:"pr"`
-	Verdict  string    `json:"verdict"`
-	At       time.Time `json:"at"`
+// RecentReview is one row of a room's recent reviewer results, for status.
+type RecentReview struct {
+	ChangeID string        `json:"changeId,omitempty"`
+	PR       int           `json:"pr"`
+	Verdict  ReviewVerdict `json:"verdict"`
+	At       time.Time     `json:"at"`
 }
 
 // Reviewer stores room settings and provider failure observations, never pool occupancy.
@@ -35,6 +36,9 @@ type Notice struct {
 	// Merge is the typed merge event this notice posts. A merge notice carries
 	// it; every other notice leaves it nil.
 	Merge *room.MergeEvent `json:"merge,omitempty"`
+	// Review is the typed review result this notice posts. A verdict notice
+	// carries it; every other notice leaves it nil.
+	Review *room.ReviewEvent `json:"review,omitempty"`
 	// Summary is the short facts line of the event: the failed check names or
 	// the commenter's action. It never holds raw log lines.
 	Summary string `json:"summary,omitempty"`
@@ -68,25 +72,101 @@ type FindingReply struct {
 	Author      string    `json:"author"`
 	At          time.Time `json:"at"`
 }
+
+// FindingSeverity says how strongly a finding asks for a change.
+type FindingSeverity string
+
+// Finding severities.
+const (
+	FindingBlocking  FindingSeverity = "blocking"
+	FindingShouldFix FindingSeverity = "should-fix"
+	FindingNit       FindingSeverity = "nit"
+)
+
 type Finding struct {
-	ID       string         `json:"id"`
-	Severity string         `json:"severity"`
-	File     string         `json:"file"`
-	Line     int            `json:"line"`
-	Why      string         `json:"why"`
-	Fix      string         `json:"fix"`
-	Patch    string         `json:"patch,omitempty"`
-	Replies  []FindingReply `json:"replies"`
+	ID       string          `json:"id"`
+	Severity FindingSeverity `json:"severity"`
+	File     string          `json:"file"`
+	Line     int             `json:"line"`
+	Why      string          `json:"why"`
+	Fix      string          `json:"fix"`
+	Patch    string          `json:"patch,omitempty"`
+	Replies  []FindingReply  `json:"replies"`
 }
+
+// ReviewVerdict is the typed result of one reviewer turn. A reviewer turn ends
+// with exactly one of these; the engine rejects any other value.
+type ReviewVerdict string
+
+// Review verdicts.
+const (
+	// VerdictApprove approves the reviewed head.
+	VerdictApprove ReviewVerdict = "approve"
+	// VerdictChanges asks the author for changes, with typed findings.
+	VerdictChanges ReviewVerdict = "changes"
+	// VerdictApproveFast approves a low-risk change for a fast landing. Dyna's
+	// changed-path rules still decide whether the landing is fast.
+	VerdictApproveFast ReviewVerdict = "approve-fast"
+	// VerdictStopEarly ends the review without a verdict on the change.
+	VerdictStopEarly ReviewVerdict = "stop-early"
+)
+
+// StopReason is why a reviewer stopped before it judged the change.
+type StopReason string
+
+// Stop reasons, in the order a reviewer usually meets them.
+const (
+	StopSuperseded StopReason = "superseded"
+	StopDuplicate  StopReason = "duplicate"
+	StopEmpty      StopReason = "empty"
+	StopTooLarge   StopReason = "too-large"
+)
+
+// FastLandArea names the low-risk area that Dyna's changed-path rules found.
+// The empty area means the change is not low risk.
+type FastLandArea string
+
+// Fast landing areas.
+const (
+	FastLandDocs  FastLandArea = "docs"
+	FastLandGuide FastLandArea = "guide"
+	FastLandTests FastLandArea = "tests"
+)
+
+// FastLand is the engine's assessment of an approve-fast result against the
+// changed paths. The path rule decides, never the reviewer's word alone.
+type FastLand struct {
+	LowRisk bool         `json:"lowRisk"`
+	Area    FastLandArea `json:"area,omitempty"`
+	// Note is the one line the review card shows: a fast landing, or the normal
+	// path and why the path rule did not rate the change low risk.
+	Note string `json:"note,omitempty"`
+}
+
+// ReviewResult is one reviewer turn's typed result, as recorded through the
+// engine. Head and ReviewID say which submission it is; the rest is what the
+// review decided.
+type ReviewResult struct {
+	Verdict    ReviewVerdict `json:"verdict"`
+	Findings   []Finding     `json:"findings,omitempty"`
+	StopReason StopReason    `json:"stopReason,omitempty"`
+	FastLand   *FastLand     `json:"fastLand,omitempty"`
+	Summary    string        `json:"summary,omitempty"`
+	Head       string        `json:"head,omitempty"`
+	ReviewID   int64         `json:"reviewId,omitempty"`
+}
+
 type ReviewRound struct {
-	Reviewer string    `json:"reviewer,omitempty"`
-	ReviewID int64     `json:"reviewId,omitempty"`
-	Round    int       `json:"round"`
-	Head     string    `json:"head"`
-	Verdict  string    `json:"verdict"`
-	Summary  string    `json:"summary"`
-	Findings []Finding `json:"findings"`
-	At       time.Time `json:"at"`
+	Reviewer   string        `json:"reviewer,omitempty"`
+	ReviewID   int64         `json:"reviewId,omitempty"`
+	Round      int           `json:"round"`
+	Head       string        `json:"head"`
+	Verdict    ReviewVerdict `json:"verdict"`
+	Summary    string        `json:"summary"`
+	Findings   []Finding     `json:"findings"`
+	StopReason StopReason    `json:"stopReason,omitempty"`
+	FastLand   *FastLand     `json:"fastLand,omitempty"`
+	At         time.Time     `json:"at"`
 }
 
 // TODO: legacy/shim remove later — reads saved landing history; remove after old records no longer need it.
@@ -106,13 +186,15 @@ type Landing struct {
 
 // PendingVerdict is one saved review in the PR's ordered pending list.
 type PendingVerdict struct {
-	Next     *PendingVerdict `json:"next,omitempty"`
-	Actor    string          `json:"actor"`
-	Head     string          `json:"head"`
-	Verdict  string          `json:"verdict"`
-	Summary  string          `json:"summary"`
-	ReviewID int64           `json:"reviewId,omitempty"`
-	Findings []Finding       `json:"findings"`
+	Next       *PendingVerdict `json:"next,omitempty"`
+	Actor      string          `json:"actor"`
+	Head       string          `json:"head"`
+	Verdict    ReviewVerdict   `json:"verdict"`
+	Summary    string          `json:"summary"`
+	ReviewID   int64           `json:"reviewId,omitempty"`
+	Findings   []Finding       `json:"findings"`
+	StopReason StopReason      `json:"stopReason,omitempty"`
+	FastLand   *FastLand       `json:"fastLand,omitempty"`
 }
 
 type Record struct {
@@ -210,9 +292,11 @@ type Record struct {
 	ReviewerOverride string                       `json:"reviewerOverride,omitempty"`
 	Reviewer         string                       `json:"reviewerSession,omitempty"`
 	ReviewerName     string                       `json:"reviewerName,omitempty"`
-	Verdict          string                       `json:"verdict,omitempty"`
+	Verdict          ReviewVerdict                `json:"verdict,omitempty"`
 	Summary          string                       `json:"summary,omitempty"`
 	ReviewID         int64                        `json:"reviewId,omitempty"`
+	StopReason       StopReason                   `json:"stopReason,omitempty"`
+	FastLand         *FastLand                    `json:"fastLand,omitempty"`
 	CommentTrust     string                       `json:"commentTrust,omitempty"`
 	OwnerLogin       string                       `json:"ownerLogin,omitempty"`
 	HeldComments     map[string]HeldComment       `json:"heldComments,omitempty"`

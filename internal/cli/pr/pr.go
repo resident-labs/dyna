@@ -496,11 +496,12 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		return output(c, map[string]string{"roomId": rec.ID, "reviewPublishing": value})
 	}
 
-	verdict := &cobra.Command{Use: "verdict <number|url> approve|approve-with-nits|changes|question [Markdown review]", Short: "Record a Dyna review and verdict for an exact PR head", Long: "The assigned reviewer or a session ID in the room policy reviewers list may record a verdict. Named reviewers require --head and no pool assignment. Local assignments keep the full Markdown review in Dyna and require --head; no GitHub review ID is needed. Include findings and file:line references. Use --body-file for multiline Markdown (or - for stdin), up to 12000 bytes. GitHub assignments require your published comment review and --review-id. A changes verdict sends the review to the author; approval tells the owner that the PR is ready to merge, and a separate land notice goes up the author chain. No merge is performed.", Args: cobra.RangeArgs(2, 3)}
+	verdict := &cobra.Command{Use: "verdict <number|url> approve|changes|approve-fast|stop-early [Markdown review]", Short: "Record a Dyna review result for an exact PR head", Long: "The assigned reviewer or a session ID in the room policy reviewers list may record one typed result per turn: approve, changes, approve-fast, or stop-early. Named reviewers require --head and no pool assignment. Local assignments keep the full Markdown review in Dyna and require --head; no GitHub review ID is needed. Include findings and file:line references, or pass --findings-file with a JSON array. Use --body-file for multiline Markdown (or - for stdin), up to 12000 bytes. GitHub assignments require your published comment review and --review-id. A changes result sends the review to the author and wakes it. An approve-fast result lands fast only when Dyna's changed-path rules also rate the change low risk; otherwise it records as approve on the normal path. A stop-early result needs --reason: superseded, duplicate, empty, or too-large. No merge is performed by this command.", Args: cobra.RangeArgs(2, 3)}
 	findingsFile := verdict.Flags().String("findings-file", "", "read structured findings from a JSON array file")
 	bodyFile := verdict.Flags().String("body-file", "", "read Markdown review from a file (- for stdin), instead of a positional review")
 	head := verdict.Flags().String("head", "", "exact PR head SHA (required for local and named reviews)")
 	reviewID := verdict.Flags().Int64("review-id", 0, "GitHub ID of your published comment review")
+	reason := verdict.Flags().String("reason", "", "stop reason for stop-early: superseded, duplicate, empty, or too-large")
 	verdict.RunE = func(c *cobra.Command, a []string) error {
 		s, r, err := resolve(c, a[0])
 		if err != nil {
@@ -550,12 +551,13 @@ a Dyna approval and passing CI. Read dyna git pr merge-status for the queue.`, R
 		if err != nil {
 			return err
 		}
-		var result prview.VerdictResult
-		if err := engineclient.New("").Call(c.Context(), "RecordPRVerdict", []any{rec.RoomID, rec.Key, *head, a[1], summary, *reviewID, findings}, &result); err != nil {
+		result := watch.ReviewResult{Verdict: prstate.ReviewVerdict(a[1]), Findings: findings, Summary: summary, Head: *head, ReviewID: *reviewID, StopReason: prstate.StopReason(*reason)}
+		var saved prview.VerdictResult
+		if err := engineclient.New("").Call(c.Context(), "RecordReviewResult", []any{rec.RoomID, rec.Key, result}, &saved); err != nil {
 			return err
 		}
-		if result.Notice != "" {
-			fmt.Fprintln(c.OutOrStdout(), result.Notice)
+		if saved.Notice != "" {
+			fmt.Fprintln(c.OutOrStdout(), saved.Notice)
 		}
 		return nil
 	}
