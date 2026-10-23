@@ -3,11 +3,8 @@ package room
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
 	"dyna-agent/internal/database"
@@ -31,22 +28,11 @@ func ownerReadFixture(t *testing.T) (*Store, Record, *sql.DB, string) {
 	if err := s.MarkOwnerRead(rec.ID, "msg_a"); err != nil {
 		t.Fatal(err)
 	}
-	return s, rec, db, filepath.Join(s.Root, rec.ID, ownerReadsFile)
-}
-
-func ownerReadFile(t *testing.T, path string, want ...string) {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
+	path := filepath.Join(s.Root, rec.ID, ownerReadsFile)
+	if err := os.WriteFile(path, []byte("[]"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	if err := json.Unmarshal(raw, &got); err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("owner-read copy = %v, want %v", got, want)
-	}
+	return s, rec, db, path
 }
 
 func TestOwnerReadUnchangedAcknowledgementsDoNoFullWork(t *testing.T) {
@@ -65,7 +51,7 @@ INSERT INTO room_owner_reads(room_id,msg_id) SELECT ?,printf('msg_%04d',n) FROM 
 			}); err != nil {
 				t.Fatal(err)
 			}
-			// A real new mark establishes the copy after the retained history.
+			// A new mark must not materialize the retained history.
 			if err := s.MarkOwnerRead(rec.ID, "msg_b"); err != nil {
 				t.Fatal(err)
 			}
@@ -86,7 +72,7 @@ INSERT INTO room_owner_reads(room_id,msg_id) SELECT ?,printf('msg_%04d',n) FROM 
 			if empty {
 				ids = nil
 			}
-			// A new Store must reuse persisted completion, not a process cache.
+			// A new Store must not materialize the retained set.
 			reopened := &Store{Root: s.Root}
 			if err := reopened.MarkOwnerReadMany(rec.ID, ids); err != nil {
 				t.Fatal(err)
@@ -101,84 +87,12 @@ INSERT INTO room_owner_reads(room_id,msg_id) SELECT ?,printf('msg_%04d',n) FROM 
 			if err := reopened.MarkOwnerRead(rec.ID, "msg_new"); err != nil {
 				t.Fatal(err)
 			}
-			if loads != 1 || rows != 515 {
-				t.Fatalf("new mark loaded %d snapshots/%d rows, want 1/515", loads, rows)
+			if loads != 0 || rows != 0 {
+				t.Fatalf("new mark loaded %d snapshots/%d rows, want 0/0", loads, rows)
 			}
 			got, err := read(db, rec.ID)
 			if err != nil || !got["msg_new"] || len(got) != 515 {
 				t.Fatalf("new canonical mark = %v, %v", got, err)
-			}
-		})
-	}
-}
-
-func TestOwnerReadAcknowledgementMirrorsCanonicalForeignUnion(t *testing.T) {
-	for _, ids := range [][]string{nil, {"msg_b"}} {
-		t.Run(fmt.Sprint(ids), func(t *testing.T) {
-			s, rec, _, path := ownerReadFixture(t)
-			if err := s.MarkOwnerRead(rec.ID, "msg_b"); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.WriteFile(path+".foreign", []byte(`["msg_b","msg_c"]`), 0600); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Rename(path+".foreign", path); err != nil {
-				t.Fatal(err)
-			}
-			// A read may import and stamp the foreign subset before the ack.
-			if got, err := s.OwnerReadIDs(rec.ID); err != nil || len(got) != 3 {
-				t.Fatalf("foreign union = %v, %v", got, err)
-			}
-			if err := (&Store{Root: s.Root}).MarkOwnerReadMany(rec.ID, ids); err != nil {
-				t.Fatal(err)
-			}
-			ownerReadFile(t, path, "msg_a", "msg_b", "msg_c")
-		})
-	}
-}
-
-func TestOwnerReadAcknowledgementRepairsInterruptedMirror(t *testing.T) {
-	for _, stage := range []string{"before-pending", "after-rename"} {
-		t.Run(stage, func(t *testing.T) {
-			s, rec, db, path := ownerReadFixture(t)
-			null := "NOT NULL"
-			if stage == "after-rename" {
-				null = "NULL"
-			}
-			trigger := fmt.Sprintf(`CREATE TRIGGER fail_owner_read_mirror BEFORE UPDATE OF pending ON state_mirrors
-WHEN NEW.key='%s' AND NEW.pending IS %s
-BEGIN SELECT RAISE(ABORT,'fixture mirror failure'); END`, ownerReadsKey(rec.ID), null)
-			if _, err := db.Exec(trigger); err != nil {
-				t.Fatal(err)
-			}
-			if err := s.MarkOwnerRead(rec.ID, "msg_new"); err != nil {
-				t.Fatal(err)
-			}
-			var pending sql.NullString
-			if err := db.QueryRow("SELECT pending FROM state_mirrors WHERE key=?", ownerReadsKey(rec.ID)).Scan(&pending); err != nil {
-				t.Fatal(err)
-			}
-			if (pending.Valid && pending.String != "") != (stage == "after-rename") {
-				t.Fatalf("failure at %s left pending=%+v", stage, pending)
-			}
-			if stage == "before-pending" {
-				ownerReadFile(t, path, "msg_a")
-			} else {
-				ownerReadFile(t, path, "msg_a", "msg_new")
-			}
-			if _, err := db.Exec("DROP TRIGGER fail_owner_read_mirror"); err != nil {
-				t.Fatal(err)
-			}
-			ids := []string{"msg_new"}
-			if stage == "after-rename" {
-				ids = nil
-			}
-			if err := (&Store{Root: s.Root}).MarkOwnerReadMany(rec.ID, ids); err != nil {
-				t.Fatal(err)
-			}
-			ownerReadFile(t, path, "msg_a", "msg_new")
-			if err := db.QueryRow("SELECT pending FROM state_mirrors WHERE key=?", ownerReadsKey(rec.ID)).Scan(&pending); err != nil || pending.Valid {
-				t.Fatalf("recovery left pending=%+v, error=%v", pending, err)
 			}
 		})
 	}

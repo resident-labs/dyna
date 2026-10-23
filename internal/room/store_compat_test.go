@@ -30,10 +30,6 @@ func TestStorageGoldenBytes(t *testing.T) {
 	if err := s.MarkOwnerReadMany(rec.ID, []string{"z", "a"}); err != nil {
 		t.Fatal(err)
 	}
-	got, err = os.ReadFile(filepath.Join(s.Root, rec.ID, "owner-read.json"))
-	if err != nil || string(got) != "[\n  \"a\",\n  \"z\"\n]\n" {
-		t.Fatalf("owner-read bytes = %q; error %v", got, err)
-	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
