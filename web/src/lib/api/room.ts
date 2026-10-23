@@ -1,3 +1,4 @@
+import type { RunList } from './workflow.ts'
 import type { Reference } from '../rooms/references.ts'
 
 // Rooms, posts and sessions. Sources: internal/roomsvc/roomsvc.go,
@@ -310,4 +311,37 @@ export interface Visual {
   post: Post
   attachment: Attachment
   versions: VisualVersion[]
+}
+
+// Issue is room.Issue in internal/room/issues.go. filedAt and changedAt are
+// unix milliseconds.
+export interface Issue {
+  id: string
+  title: string
+  file: string
+  line: number
+  filer: string
+  filedAt: number
+  state: string
+  reason: string
+  goalId: string
+  githubUrl: string
+  changedBy: string
+  changedAt: number
+}
+
+// SeatReturn is roomsvc.SeatReturn, the answer of ReturnSeat.
+export interface SeatReturn {
+  seat: Seat
+  changed: boolean
+  deliveries?: Delivery[]
+}
+
+// Opened is roomsvc.Opened: a room's first screen in one call.
+export interface Opened {
+  feed: Feed
+  members: Member[] | null
+  choices: string[] | null
+  pins: Post[] | null
+  runs: RunList
 }

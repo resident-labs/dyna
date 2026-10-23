@@ -85,3 +85,14 @@ export interface TemplateInfo {
   source: string
   path: string
 }
+
+// StartedRun is roomsvc.StartedRun.
+export interface StartedRun {
+  id: string
+}
+
+// RunSource is roomsvc.RunSource: a template by name, or a script.
+export interface RunSource {
+  template?: string
+  script?: string
+}
