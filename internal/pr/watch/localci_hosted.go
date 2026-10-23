@@ -219,6 +219,33 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns) Sn
 	return snap
 }
 
+// hostedWithoutLocalCancellations gives the budget reads the same snapshot that
+// the CI gate uses, so a hosted run Dyna cancelled for local CI supplies no
+// failure log excerpt and no artifact inspection.
+func (s *Service) hostedWithoutLocalCancellations(ctx context.Context, r Record, snap Snapshot) (Snapshot, error) {
+	if r.RepoPath == "" {
+		return snap, nil
+	}
+	repo, err := localci.CanonicalRepo(ctx, r.RepoPath)
+	if err != nil {
+		// No repository means no saved cancellation to find. The CI gate
+		// reports the same condition on its own path.
+		return snap, nil
+	}
+	head := snap.Pull.Head.SHA
+	if head == "" {
+		head = r.Head
+	}
+	saved, err := s.ciRegistry().LoadHostedRuns(ctx, repo, head)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return snap, nil
+		}
+		return snap, err
+	}
+	return withoutLocalHostedCancellations(snap, saved), nil
+}
+
 func (s *Service) publishLocalStatuses(ctx context.Context, job registeredCIJob, result localci.Result) error {
 	registry := s.ciRegistry()
 	saved, err := registry.LoadHostedRuns(ctx, result.Repo, job.head)

@@ -353,6 +353,10 @@ func (s *Service) runBudgets(ctx context.Context, result pollResult, pauses map[
 		return err
 	}
 	policy = EffectivePolicy(observed.Metadata(), r)
+	result.snap, err = s.hostedWithoutLocalCancellations(ctx, r, result.snap)
+	if err != nil {
+		return err
+	}
 	err = s.enforceCIBudget(ctx, result.gh, r, result.snap, policy)
 	if err == nil {
 		beforeReports, readErr := readBudgetSnapshot(s.Store.Root)
@@ -512,14 +516,14 @@ func (s *Service) processSnapshot(ctx context.Context, result pollResult, budget
 	state, ciKey, jobs, runs := s.ciStatus(result.snap, *r, EffectivePolicy(st, *r))
 	var logs []string
 	if result.snap.localCI != nil && result.snap.localCI.Logs != "" {
-		logs = append(logs, result.snap.localCI.Logs)
+		logs = append(logs, logExcerpt(result.snap.localCI.Logs))
 	}
 	if state == "failed" && ciKey != r.CIKey && !r.CIPaused {
 		for i, run := range runs {
 			if i == 3 {
 				break
 			}
-			logs = append(logs, fmt.Sprintf("%s (run %d, attempt %d):\n%s", run.Name, run.ID, run.Attempt, result.gh.Logs(ctx, refRecord(*r), run)))
+			logs = append(logs, fmt.Sprintf("%s (run %d, attempt %d):\n%s", run.Name, run.ID, run.Attempt, failureExcerpt(result.gh.Logs(ctx, refRecord(*r), run), true)))
 		}
 	}
 	return s.process(ctx, result.key, result.snap, state, ciKey, jobs, logs, budgetsDue, result.polledAt)
