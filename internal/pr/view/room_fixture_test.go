@@ -9,12 +9,11 @@ import (
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/settings"
+	"dyna-agent/internal/store/storetest"
 	"dyna-agent/internal/subagent"
 	"testing"
 	"time"
 )
-
-var stampKeys = mode.StampKeys()
 
 type env struct {
 	t   *testing.T
@@ -25,12 +24,8 @@ type env struct {
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	storetest.Isolate(t)
 	t.Setenv(runstore.AgentJournalRootEnv, "")
-	for _, key := range stampKeys {
-		t.Setenv(key, "")
-	}
 	profiles := &profile.Store{Profiles: []profile.Profile{{Name: "mock", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 5, Default: true}}}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -53,9 +48,7 @@ func (e *env) room(name string) room.Record {
 }
 
 func (e *env) as(parent *subagent.Info) {
-	for _, key := range stampKeys {
-		e.t.Setenv(key, "")
-	}
+	storetest.ClearStamp(e.t)
 	if parent != nil {
 		e.t.Setenv(mode.EnvMode, mode.Subagent)
 		e.t.Setenv(mode.EnvSession, parent.ID)
