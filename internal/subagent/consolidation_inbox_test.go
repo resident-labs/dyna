@@ -32,15 +32,7 @@ func TestConsolidationInboxGateIncrementalDelivery(t *testing.T) {
 	}
 	pending := post(b.Address())
 	// The source advanced beyond an unacknowledged claim before consolidation.
-	sourceDir, _ := store.Dir(b.ID)
-	q, err := readQueue(sourceDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	q.Claimed[pending.ID] = 2
-	if err := writeQueue(sourceDir, q); err != nil {
-		t.Fatal(err)
-	}
+	claimPostsFor(t, e, b.ID, 2, pending.ID)
 	_, cursor, err := rooms.ReadAll(a.RoomID, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -49,10 +41,8 @@ func TestConsolidationInboxGateIncrementalDelivery(t *testing.T) {
 	cancelled := post(b.Address())
 	sourceDone := post(b.Address())
 	targetDone := post(b.Address())
-	q.Cancelled[shared.ID], q.Cancelled[cancelled.ID] = true, true
-	if err := writeQueue(sourceDir, q); err != nil {
-		t.Fatal(err)
-	}
+	cancelPostFor(t, e, b.ID, shared.ID)
+	cancelPostFor(t, e, b.ID, cancelled.ID)
 	if _, err := store.UpdateTurn(b.ID, 1, func(turn *Turn) {
 		turn.Steering = append(turn.Steering, Steer{ID: sourceDone.ID, Delivered: true})
 	}); err != nil {

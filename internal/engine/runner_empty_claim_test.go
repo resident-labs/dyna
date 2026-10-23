@@ -63,9 +63,6 @@ func newEmptyClaimFixture(t *testing.T) *emptyClaimFixture {
 	if _, err := db.Exec("INSERT INTO session_turns(session,n,revision,turn) VALUES(?,?,?,?)", meta.ID, 1, 1, turn); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("INSERT INTO session_queues(session,revision,queue) VALUES(?,?,?)", meta.ID, 1, `{"claimed":{},"cancelled":{},"dismissed":{}}`); err != nil {
-		t.Fatal(err)
-	}
 	sessionDir := filepath.Join(sessions, meta.ID)
 	gate := fmt.Sprintf(`{"active":true,"pid":%d,"turn":1}`, os.Getpid())
 	if err := os.WriteFile(filepath.Join(sessionDir, turnlock.GateFile), []byte(gate), 0600); err != nil {
@@ -109,11 +106,6 @@ func TestEmptyRunnerClaimsWriteNothing(t *testing.T) {
 		t.Run(fmt.Sprintf("startup=%v", startup), func(t *testing.T) {
 			f := newEmptyClaimFixture(t)
 			before := f.w.Health().Writes
-			var queueBefore []byte
-			var version int64
-			if err := f.db.QueryRow("SELECT queue,revision FROM session_queues WHERE session=?", f.meta.ID).Scan(&queueBefore, &version); err != nil {
-				t.Fatal(err)
-			}
 			receipts := 0
 			for range 30 {
 				got, key := f.claim(t, subagent.InputClaim{Turn: 1, Startup: startup, Depth: f.meta.Depth})
@@ -131,14 +123,6 @@ func TestEmptyRunnerClaimsWriteNothing(t *testing.T) {
 			}
 			if writes := f.w.Health().Writes - before; writes != 0 {
 				t.Errorf("30 idle claims made %d SQL writes; want zero", writes)
-			}
-			var queueAfter []byte
-			var afterVersion int64
-			if err := f.db.QueryRow("SELECT queue,revision FROM session_queues WHERE session=?", f.meta.ID).Scan(&queueAfter, &afterVersion); err != nil {
-				t.Fatal(err)
-			}
-			if version != afterVersion || !bytes.Equal(queueBefore, queueAfter) {
-				t.Fatal("idle claims changed the canonical queue")
 			}
 		})
 	}
@@ -178,13 +162,10 @@ func TestEmptyRunnerClaimControlsKeepExactReceipts(t *testing.T) {
 					t.Fatalf("final control failed to seal the gate: %s, %+v, %v", raw, got, err)
 				}
 			} else if kind == "covered note cancellation" {
-				var raw []byte
-				if err := f.db.QueryRow("SELECT queue FROM session_queues WHERE session=?", f.meta.ID).Scan(&raw); err != nil {
-					t.Fatal(err)
-				}
-				var queue struct{ Cancelled map[string]bool }
-				if err := json.Unmarshal(raw, &queue); err != nil || !queue.Cancelled[messageID] || len(got.Posts) != 0 {
-					t.Fatalf("covered note was not cancelled: %s, %+v, %v", raw, got, err)
+				var state string
+				if err := f.db.QueryRow("SELECT state FROM post_deliveries WHERE post_id=? AND session_id IN (?, ?)",
+					messageID, f.meta.ID, f.meta.Address()).Scan(&state); err != nil || state != string(room.DeliveryCancelled) || len(got.Posts) != 0 {
+					t.Fatalf("covered note was not cancelled: %s, %+v, %v", state, got, err)
 				}
 			} else if len(got.Posts) != 1 {
 				t.Fatalf("hierarchy change did not return control input: %+v", got)

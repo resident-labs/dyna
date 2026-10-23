@@ -518,14 +518,12 @@ func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, m
 		// Cancellation and turn allocation share the gate. A post cancelled
 		// after the worker scan must not allocate an empty follow-up.
 		return store.withGateLock(id, func(dir string) error {
-			var queue queueClaims
 			if messageID != "" {
-				var err error
-				queue, err = readQueueForUpdate(dir)
+				claims, err := postClaims(m.rooms(), meta, []string{messageID})
 				if err != nil {
 					return err
 				}
-				if queue.Cancelled[messageID] || queue.Dismissed[messageID] {
+				if claims.cancelled[messageID] || claims.dismissed[messageID] {
 					turn, err = store.ReadTurn(id, meta.Turns)
 					alreadyDelivered = true
 					return err
@@ -560,8 +558,7 @@ func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, m
 				return err
 			}
 			if messageID != "" {
-				queue.claim(messageID, turn.N)
-				if err := writeQueue(dir, queue); err != nil {
+				if _, err := store.claimPosts(context.Background(), m.rooms(), meta, []string{messageID}, turn.N); err != nil {
 					return err
 				}
 			}

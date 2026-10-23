@@ -103,6 +103,13 @@ type claimFixture struct {
 	events  *eventLog
 }
 
+// claimedTurn is the turn the fixture session's row for postID names, or 0
+// when no turn holds it.
+func (f *claimFixture) claimedTurn(t *testing.T, postID string) int {
+	t.Helper()
+	return claimsOf(t, f.e, f.info.ID).claimedTurn[postID]
+}
+
 func newClaimFixture(t *testing.T, text string) *claimFixture {
 	t.Helper()
 	e := newTestEnv(t)
@@ -117,7 +124,7 @@ func newClaimFixture(t *testing.T, text string) *claimFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := readQueue(dir); err != nil {
+	if _, err := e.m.rooms().SessionDeliveryRows(info.RoomID, room.DeliveryKeys(info.ID, info.Address())); err != nil {
 		t.Fatal(err)
 	}
 	events := &eventLog{}
@@ -540,10 +547,10 @@ func TestLiveReadFailsOpenWhileOneClaimIsUnresolved(t *testing.T) {
 	if third.err != nil || countSteer(third.msgs, fix.msg.ID) != 0 {
 		t.Fatalf("later read = %+v, %v; want the accepted post to stay consumed", third.msgs, third.err)
 	}
-	q, err := readQueue(fix.dir)
+	turn := fix.claimedTurn(t, fix.msg.ID)
 	calls, _, _, _, _, _, _ = eng.snapshot()
-	if err != nil || q.Claimed[fix.msg.ID] != 1 || len(calls) != 1 || gate.waiting == nil {
-		t.Fatalf("claim %d, requests %v, %v; want one claim and a retained read-only wait", q.Claimed[fix.msg.ID], calls, err)
+	if turn != 1 || len(calls) != 1 || gate.waiting == nil {
+		t.Fatalf("claim turn %d, requests %v; want one claim and a retained read-only wait", turn, calls)
 	}
 }
 
@@ -587,10 +594,8 @@ func TestClaimRetryAfterRestartReturnsTheCachedBatchOnce(t *testing.T) {
 	if err != nil || !done || !bytes.Equal(saved, cached) {
 		t.Fatalf("reopened receipt = %q done %v, %v; want %s", saved, done, err, cached)
 	}
-	q, err := readQueue(fix.dir)
-	_, version, verErr := readQueueRow(fix.dir)
-	if err != nil || verErr != nil || q.Claimed[fix.msg.ID] != 1 || fix.events.members(fix.info.ID)-before != 0 {
-		t.Fatalf("claim %d, version %s, events %d, %v; want one claim and no interim members event", q.Claimed[fix.msg.ID], version, fix.events.members(fix.info.ID)-before, err)
+	if turn := fix.claimedTurn(t, fix.msg.ID); turn != 1 || fix.events.members(fix.info.ID)-before != 0 {
+		t.Fatalf("claim turn %d, events %d; want one claim and no interim members event", turn, fix.events.members(fix.info.ID)-before)
 	}
 }
 
@@ -733,9 +738,8 @@ func TestLateClaimReplyDoesNotAdvanceOldGateOrLoseInput(t *testing.T) {
 	if n != 1 || len(reply.Posts) != 1 {
 		t.Fatalf("startup recovery = %+v; want %s once", reply.Posts, fix.msg.ID)
 	}
-	q, err := readQueue(fix.dir)
-	if err != nil || q.Claimed[fix.msg.ID] != 2 || gate.cursor != cursor || readGateState(fix.dir) != closed {
-		t.Fatalf("claim turn %d, old cursor %d, gate %+v, %v; want turn 2 and the old gate unchanged", q.Claimed[fix.msg.ID], gate.cursor, readGateState(fix.dir), err)
+	if turn := fix.claimedTurn(t, fix.msg.ID); turn != 2 || gate.cursor != cursor || readGateState(fix.dir) != closed {
+		t.Fatalf("claim turn %d, old cursor %d, gate %+v; want turn 2 and the old gate unchanged", turn, gate.cursor, readGateState(fix.dir))
 	}
 }
 
@@ -790,15 +794,8 @@ func TestClaimRollbackDropsReceiptThenRetryCommitsOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`CREATE TRIGGER reject_session_queue
-BEFORE INSERT ON session_queues
-BEGIN
-    SELECT RAISE(ABORT, 'reject queue write');
-END`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`CREATE TRIGGER reject_session_queue_update
-BEFORE UPDATE ON session_queues
+	if _, err := db.Exec(`CREATE TRIGGER reject_delivery_state
+BEFORE UPDATE ON post_deliveries
 BEGIN
     SELECT RAISE(ABORT, 'reject queue write');
 END`); err != nil {
@@ -817,33 +814,30 @@ END`); err != nil {
 	if !bytes.Contains([]byte(err.Error()), []byte("reject queue write")) {
 		t.Fatalf("rejected claim = %v; want the queue trigger", err)
 	}
-	q, qErr := readQueue(fix.dir)
+	turn := fix.claimedTurn(t, fix.msg.ID)
 	saved, done, doneErr := state.For(db).RequestDone(context.Background(), "runner/"+rid)
 	var receipts int
 	countErr := db.QueryRow(`SELECT COUNT(*) FROM request_ids WHERE id = ?`, "runner/"+rid).Scan(&receipts)
-	if qErr != nil || doneErr != nil || countErr != nil || q.Claimed[fix.msg.ID] != 0 || done || saved != nil || receipts != 0 || fix.events.members(fix.info.ID) != before {
-		t.Fatalf("after rollback claim %d, receipt %q done %v rows %d events %d, %v %v %v", q.Claimed[fix.msg.ID], saved, done, receipts, fix.events.members(fix.info.ID)-before, qErr, doneErr, countErr)
+	if doneErr != nil || countErr != nil || turn != 0 || done || saved != nil || receipts != 0 || fix.events.members(fix.info.ID) != before {
+		t.Fatalf("after rollback claim turn %d, receipt %q done %v rows %d events %d, %v %v", turn, saved, done, receipts, fix.events.members(fix.info.ID)-before, doneErr, countErr)
 	}
 	if got := fix.events.count("sessions", fix.info.ID) - changesBefore; got != 0 {
 		t.Fatalf("rollback published %d session changes; want none", got)
 	}
 
-	if _, err := db.Exec(`DROP TRIGGER reject_session_queue`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`DROP TRIGGER reject_session_queue_update`); err != nil {
+	if _, err := db.Exec(`DROP TRIGGER reject_delivery_state`); err != nil {
 		t.Fatal(err)
 	}
 	reply, err = fix.e.m.RunnerClaimInput(ctx, input)
 	if err != nil || len(reply.Posts) != 1 || reply.Posts[0].Steer.ID != fix.msg.ID {
 		t.Fatalf("retry = %+v, %v; want %s", reply, err, fix.msg.ID)
 	}
-	q, qErr = readQueue(fix.dir)
+	turn = fix.claimedTurn(t, fix.msg.ID)
 	saved, done, doneErr = state.For(db).RequestDone(context.Background(), "runner/"+rid)
 	var stored ClaimedInput
 	unmarshalErr := json.Unmarshal(saved, &stored)
-	if qErr != nil || doneErr != nil || unmarshalErr != nil || q.Claimed[fix.msg.ID] != 1 || !done || len(saved) == 0 || bytes.Equal(saved, []byte("null")) || !sameClaim(reply, stored) || fix.events.members(fix.info.ID)-before != 0 {
-		t.Fatalf("retry claim %d, receipt %q events %d, %v %v %v", q.Claimed[fix.msg.ID], saved, fix.events.members(fix.info.ID)-before, qErr, doneErr, unmarshalErr)
+	if doneErr != nil || unmarshalErr != nil || turn != 1 || !done || len(saved) == 0 || bytes.Equal(saved, []byte("null")) || !sameClaim(reply, stored) || fix.events.members(fix.info.ID)-before != 0 {
+		t.Fatalf("retry claim turn %d, receipt %q events %d, %v %v", turn, saved, fix.events.members(fix.info.ID)-before, doneErr, unmarshalErr)
 	}
 	if got := fix.events.count("sessions", fix.info.ID) - changesBefore; got != 1 {
 		t.Fatalf("committed retry published %d session changes; want one", got)

@@ -46,11 +46,11 @@ func (m *Manager) DismissPendingPost(ctx context.Context, ref, messageID string,
 					return errors.New("cannot dismiss a post while an unfinished or held turn may own its input")
 				}
 			}
-			q, err := readQueueForUpdate(dir)
+			claims, err := sessionClaims(m.rooms(), meta)
 			if err != nil {
 				return err
 			}
-			if q.Dismissed[messageID] {
+			if claims.dismissed[messageID] {
 				return nil
 			}
 			pending, err := m.pendingRoomMessages(meta)
@@ -59,8 +59,14 @@ func (m *Manager) DismissPendingPost(ctx context.Context, ref, messageID string,
 			}
 			for _, msg := range pending {
 				if msg.ID == messageID {
-					q.Dismissed[messageID] = true
-					return writeQueue(dir, q)
+					dismissed, err := store.dismissPost(ctx, m.rooms(), meta, messageID)
+					if err != nil {
+						return err
+					}
+					if !dismissed {
+						return fmt.Errorf("message %s went out before it could be dismissed", messageID)
+					}
+					return nil
 				}
 			}
 			return fmt.Errorf("message %s is not pending for session %s", messageID, meta.ID)

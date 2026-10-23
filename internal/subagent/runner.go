@@ -558,8 +558,7 @@ func (m *Manager) drainRoomMessages(meta Meta, current Turn) ([]room.Message, in
 	if err != nil {
 		return nil, meta.RoomCursor, err
 	}
-	dir, _ := m.store().Dir(meta.ID)
-	q, err := readQueue(dir)
+	claims, err := sessionClaims(m.rooms(), meta)
 	if err != nil {
 		return nil, meta.RoomCursor, err
 	}
@@ -568,12 +567,12 @@ func (m *Manager) drainRoomMessages(meta Meta, current Turn) ([]room.Message, in
 	if err != nil {
 		return nil, meta.RoomCursor, err
 	}
-	if len(input) == 0 && len(q.Claimed) == 0 && len(meta.InheritedInboxes) == 0 {
+	if len(input) == 0 && len(claims.claimedTurn) == 0 && len(meta.InheritedInboxes) == 0 {
 		return nil, next, nil
 	}
 	// One read covers the previous turn and every claimed turn.
 	turns := current.N - 1
-	for _, n := range q.Claimed {
+	for _, n := range claims.claimedTurn {
 		turns = max(turns, n)
 	}
 	steers, err := m.store().steering(meta.ID, turns)
@@ -597,8 +596,8 @@ func (m *Manager) drainRoomMessages(meta Meta, current Turn) ([]room.Message, in
 		received[turnPost{st.Turn, st.ID}] = true
 	}
 	var out []room.Message
-	for messageID, n := range q.Claimed {
-		if received[turnPost{n, messageID}] || q.Cancelled[messageID] || q.Dismissed[messageID] {
+	for messageID, n := range claims.claimedTurn {
+		if received[turnPost{n, messageID}] || claims.cancelled[messageID] || claims.dismissed[messageID] {
 			continue
 		}
 		// An accepted turn carried the claimed post in its prompt even when no
@@ -621,7 +620,7 @@ func (m *Manager) drainRoomMessages(meta Meta, current Turn) ([]room.Message, in
 	}
 	// Claims recovered from an older cursor precede later posts. Preserve log
 	// order even when message timestamps tie and the claim map iterates randomly.
-	if len(q.Claimed) > 0 {
+	if len(claims.claimedTurn) > 0 {
 		if err := m.rooms().OrderMessages(meta.RoomID, msgs); err != nil {
 			return nil, meta.RoomCursor, err
 		}
@@ -636,10 +635,10 @@ func (m *Manager) drainRoomMessages(meta Meta, current Turn) ([]room.Message, in
 		return nil, meta.RoomCursor, err
 	}
 	for _, msg := range selected {
-		if q.Cancelled[msg.ID] && len(meta.InheritedInboxes) == 0 {
+		if claims.cancelled[msg.ID] && len(meta.InheritedInboxes) == 0 {
 			continue
 		}
-		if delivered[msg.ID] || q.Dismissed[msg.ID] {
+		if delivered[msg.ID] || claims.dismissed[msg.ID] {
 			continue
 		}
 		delivered[msg.ID] = true

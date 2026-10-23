@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/room"
 )
 
@@ -29,24 +30,28 @@ func TestDormantMessageDeliveryState(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			dir, _ := e.m.Store.Dir(info.ID)
-			q, err := readQueue(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
 			switch state {
-			case "claimed", "delivered", "claimed-cancelled", "unaddressed", "notice":
-				q.Claimed[msg.ID] = 1
+			case "claimed", "delivered", "notice":
+				claimPostsFor(t, e, info.ID, 1, msg.ID)
 			}
 			if state == "missing" {
-				q.Claimed["msg_0000000000000000"] = 1
-				q.Cancelled[msg.ID] = true
+				// A claim for a post the room log does not hold: the row is there,
+				// the post is gone.
+				insertDeliveryRow(t, e, info.ID, "msg_0000000000000000", room.DeliveryClaimed, 1)
+				cancelPostFor(t, e, info.ID, msg.ID)
 			}
-			if state == "cancelled" || state == "claimed-cancelled" {
-				q.Cancelled[msg.ID] = true
+			if state == "cancelled" {
+				cancelPostFor(t, e, info.ID, msg.ID)
 			}
-			if err := writeQueue(dir, q); err != nil {
-				t.Fatal(err)
+			if state == "claimed-cancelled" {
+				// A covered note: the held prompt carried it, and the read cancels
+				// the claim so the next turn does not deliver it again.
+				claimPostsFor(t, e, info.ID, 1, msg.ID)
+				if _, err := e.m.rooms().CoverDeliveries(t.Context(), hub.Event{},
+					room.DeliverySet{RoomID: info.RoomID, Keys: room.DeliveryKeys(info.ID, info.Address())},
+					[]string{msg.ID}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if state == "delivered" {
 				if _, err := e.m.Store.UpdateTurn(info.ID, 1, func(turn *Turn) { turn.Steering = append(turn.Steering, Steer{ID: msg.ID, Delivered: true}) }); err != nil {
@@ -118,17 +123,13 @@ func TestDormantInheritedMessageDeliveryState(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			dir, _ := e.m.Store.Dir(source.ID)
-			q, err := readQueue(dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			q.Claimed[msg.ID] = 1
+			claimPostsFor(t, e, source.ID, 1, msg.ID)
 			if state == "cancelled" {
-				q.Cancelled[msg.ID] = true
-			}
-			if err := writeQueue(dir, q); err != nil {
-				t.Fatal(err)
+				if _, err := e.m.rooms().CoverDeliveries(t.Context(), hub.Event{},
+					room.DeliverySet{RoomID: source.RoomID, Keys: room.DeliveryKeys(source.ID, source.Address())},
+					[]string{msg.ID}); err != nil {
+					t.Fatal(err)
+				}
 			}
 			if state == "delivered" {
 				if _, err := e.m.Store.UpdateTurn(source.ID, 1, func(turn *Turn) { turn.Steering = append(turn.Steering, Steer{ID: msg.ID, Delivered: true}) }); err != nil {
@@ -175,15 +176,7 @@ func TestDormantInformationalPRNoticeDoesNotBlockClose(t *testing.T) {
 				t.Fatal(err)
 			}
 			if claimed {
-				dir, _ := e.m.Store.Dir(info.ID)
-				q, err := readQueue(dir)
-				if err != nil {
-					t.Fatal(err)
-				}
-				q.Claimed[msg.ID] = 1
-				if err := writeQueue(dir, q); err != nil {
-					t.Fatal(err)
-				}
+				claimPostsFor(t, e, info.ID, 1, msg.ID)
 			}
 			if _, err := e.m.Store.UpdateMeta(info.ID, func(meta *Meta) {
 				meta.LastActivity, meta.Finished = time.Now().Add(-time.Hour), time.Now().Add(-time.Hour)

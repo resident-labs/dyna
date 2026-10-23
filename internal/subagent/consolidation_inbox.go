@@ -231,13 +231,12 @@ func (s *Store) cachedInboxMessages(rooms *room.Store, meta Meta, ordinary []roo
 	// Eligibility is per origin. An uncancelled origin can release a shared post
 	// even when another origin cancelled it.
 	eligible := map[string]bool{}
-	targetDir, _ := s.Dir(meta.ID)
-	targetQueue, err := readCanonicalQueue(targetDir)
+	targetClaims, err := sessionClaims(rooms, meta)
 	if err != nil {
 		return nil, err
 	}
 	for _, msg := range ordinary {
-		eligible[msg.ID] = !targetQueue.Cancelled[msg.ID]
+		eligible[msg.ID] = !targetClaims.cancelled[msg.ID]
 	}
 	targetDelivered, err := cache.delivered(reader, meta)
 	if err != nil {
@@ -268,8 +267,7 @@ func (s *Store) cachedInboxMessages(rooms *room.Store, meta Meta, ordinary []roo
 		if err != nil {
 			return nil, err
 		}
-		dir, _ := s.Dir(in.Session)
-		q, err := readCanonicalQueue(dir)
+		originClaims, err := claimsRows(rooms, meta.RoomID, in.Session, in.Address)
 		if err != nil {
 			return nil, err
 		}
@@ -280,10 +278,10 @@ func (s *Store) cachedInboxMessages(rooms *room.Store, meta Meta, ordinary []roo
 		msgs := inboxMsgs[in.Session]
 		pending := cache.origins[in.Session].pending[:0]
 		for _, msg := range msgs {
-			if targetDelivered[msg.ID] || targetQueue.Dismissed[msg.ID] || meta.InheritedReceipts[msg.ID] || (cache.turn > 0 && targetQueue.Claimed[msg.ID] == cache.turn) {
+			if targetDelivered[msg.ID] || targetClaims.dismissed[msg.ID] || meta.InheritedReceipts[msg.ID] || (cache.turn > 0 && targetClaims.claimedTurn[msg.ID] == cache.turn) {
 				continue
 			}
-			suppressed := q.Cancelled[msg.ID] || q.Dismissed[msg.ID] || delivered[msg.ID]
+			suppressed := originClaims.cancelled[msg.ID] || originClaims.dismissed[msg.ID] || delivered[msg.ID]
 			if suppressed {
 				// A shared post retains its position even if this origin cannot release
 				// it. Another inherited origin may become eligible on a later poll.
@@ -320,7 +318,7 @@ func (s *Store) cachedInboxMessages(rooms *room.Store, meta Meta, ordinary []roo
 	out := []room.Message{}
 	seen := map[string]bool{}
 	for _, msg := range all {
-		if !msg.Deliverable() || targetQueue.Dismissed[msg.ID] || seen[msg.ID] || targetDelivered[msg.ID] || meta.InheritedReceipts[msg.ID] || !eligible[msg.ID] {
+		if !msg.Deliverable() || targetClaims.dismissed[msg.ID] || seen[msg.ID] || targetDelivered[msg.ID] || meta.InheritedReceipts[msg.ID] || !eligible[msg.ID] {
 			continue
 		}
 		seen[msg.ID] = true

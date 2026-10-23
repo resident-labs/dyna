@@ -12,6 +12,7 @@ import (
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/state"
 )
@@ -35,7 +36,12 @@ func TestClaimReplyWakeFollowsQueueChange(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			before, beforeVersion, err := readQueueRow(dir)
+			meta, err := e.m.Store.ReadMeta(info.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			keys := room.DeliveryKeys(meta.ID, meta.Address())
+			before, err := e.m.rooms().DeliverySignature(meta.RoomID, keys)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -55,16 +61,17 @@ func TestClaimReplyWakeFollowsQueueChange(t *testing.T) {
 				if !tc.change || ev.Topic != sessionlife.Topic || ev.Key != info.ID {
 					return
 				}
-				// A separate reader must see both the queue and exact reply
-				// when the committed queue change reaches its listeners.
-				raw, _, queueErr := queryQueueRow(db, info.ID)
-				var queue queueClaims
-				decodeErr := json.Unmarshal(raw, &queue)
+				// A separate reader must see both the claimed delivery row and
+				// the exact reply when the committed change reaches its listeners.
+				var rowState string
+				var claimedTurn int
+				rowErr := db.QueryRow("SELECT state, claimed_turn FROM post_deliveries WHERE post_id=? AND session_id IN (?, ?)",
+					messageID, info.ID, info.Address()).Scan(&rowState, &claimedTurn)
 				saved, done, receiptErr := state.For(db).RequestDone(t.Context(), key)
 				var reply ClaimedInput
 				replyErr := json.Unmarshal(saved, &reply)
-				if queueErr != nil || decodeErr != nil || receiptErr != nil || replyErr != nil || !done || queue.Claimed[messageID] != 1 || len(reply.Posts) != 1 || reply.Posts[0].Steer.ID != messageID {
-					t.Errorf("event preceded queue/reply commit: queue %s, reply %s, done %v; errors %v %v %v %v", raw, saved, done, queueErr, decodeErr, receiptErr, replyErr)
+				if rowErr != nil || receiptErr != nil || replyErr != nil || !done || rowState != string(room.DeliveryClaimed) || claimedTurn != 1 || len(reply.Posts) != 1 || reply.Posts[0].Steer.ID != messageID {
+					t.Errorf("event preceded claim/reply commit: state %q turn %d, reply %s, done %v; errors %v %v %v", rowState, claimedTurn, saved, done, rowErr, receiptErr, replyErr)
 				}
 			}
 			fix := &claimFixture{e: e, info: info, dir: dir, dataDir: dataDir, events: events}
@@ -106,9 +113,9 @@ func TestClaimReplyWakeFollowsQueueChange(t *testing.T) {
 				if writes := state.For(db).Health().Writes - beforeWrites; writes != 0 {
 					t.Fatalf("empty claim made %d SQL writes; want none", writes)
 				}
-				after, version, err := readQueueRow(dir)
-				if err != nil || !bytes.Equal(after, before) || version != beforeVersion {
-					t.Fatalf("reply-only claim changed the queue: %s, version %q; before %s, %q; error %v", after, version, before, beforeVersion, err)
+				after, err := e.m.rooms().DeliverySignature(meta.RoomID, keys)
+				if err != nil || after != before {
+					t.Fatalf("reply-only claim changed the deliveries: %d; before %d; error %v", after, before, err)
 				}
 			}
 			if err := engine.reopen(); err != nil {

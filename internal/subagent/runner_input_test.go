@@ -11,6 +11,7 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/state"
 	filestore "dyna-agent/internal/store"
@@ -37,10 +38,9 @@ func TestHeldPromptLeavesNewInputAndCoveredNotesUnclaimed(t *testing.T) {
 	if err != nil || len(got.Posts) != 0 || got.Cursor != info.RoomCursor {
 		t.Fatalf("held prompt claim = %+v, %v", got, err)
 	}
-	dir, _ := e.m.Store.Dir(info.ID)
-	q, err := readQueue(dir)
-	if err != nil || q.Claimed[msg.ID] != 0 || q.Cancelled[msg.ID] {
-		t.Fatalf("held prompt changed the new input: %+v, %v", q, err)
+	claims := claimsOf(t, e, info.ID)
+	if claims.claimedTurn[msg.ID] != 0 || claims.cancelled[msg.ID] {
+		t.Fatalf("held prompt changed the new input: %+v", claims)
 	}
 }
 
@@ -50,12 +50,7 @@ func TestStartupAndLiveInputUseTheSameClaimBoundary(t *testing.T) {
 	cancelled := postClaimInput(t, e, info, "covered note")
 	dismissed := postClaimInput(t, e, info, "dismissed")
 	accepted := postClaimInput(t, e, info, "startup input")
-	dir, _ := e.m.Store.Dir(info.ID)
-	q, _ := readQueue(dir)
-	q.Dismissed[dismissed.ID] = true
-	if err := writeQueue(dir, q); err != nil {
-		t.Fatal(err)
-	}
+	dismissPostFor(t, e, info.ID, dismissed.ID)
 	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: info.ID})
 	calls := e.m
 	first, err := calls.RunnerClaimInput(ctx, InputClaim{Turn: 1, Startup: true, Covered: []string{cancelled.ID}})
@@ -71,9 +66,9 @@ func TestStartupAndLiveInputUseTheSameClaimBoundary(t *testing.T) {
 	if err != nil || len(last.Posts) != 1 || last.Posts[0].Steer.ID != live.ID {
 		t.Fatalf("live claim = %+v, %v; want only %s", last, err, live.ID)
 	}
-	q, err = readQueue(dir)
-	if err != nil || q.Claimed[accepted.ID] != 1 || q.Claimed[live.ID] != 1 || !q.Cancelled[cancelled.ID] || q.Claimed[cancelled.ID] != 0 || q.Claimed[dismissed.ID] != 0 {
-		t.Fatalf("stored claims = %+v, %v", q, err)
+	claims := claimsOf(t, e, info.ID)
+	if claims.claimedTurn[accepted.ID] != 1 || claims.claimedTurn[live.ID] != 1 || !claims.cancelled[cancelled.ID] || claims.claimedTurn[cancelled.ID] != 0 || claims.claimedTurn[dismissed.ID] != 0 {
+		t.Fatalf("stored claims = %+v", claims)
 	}
 }
 
@@ -129,9 +124,8 @@ func TestClaimRefusesAnotherTurnOrAnUnidentifiedCaller(t *testing.T) {
 	if _, err := calls.RunnerClaimInput(t.Context(), InputClaim{Turn: 1, Startup: true}); err == nil {
 		t.Fatal("an unidentified caller claimed input")
 	}
-	dir, _ := e.m.Store.Dir(info.ID)
-	if q, err := readQueue(dir); err != nil || q.Claimed[msg.ID] != 0 {
-		t.Fatalf("refused input was claimed: %+v, %v", q, err)
+	if turn := claimsOf(t, e, info.ID).claimedTurn[msg.ID]; turn != 0 {
+		t.Fatalf("refused input was claimed for turn %d", turn)
 	}
 }
 
@@ -200,13 +194,12 @@ func TestInputClaimResolvesDeliveryOutsideGate(t *testing.T) {
 						t.Errorf("delivery resolution holds the gate: owned %v, %v", owned, err)
 					} else {
 						defer unlock()
-						q, err := readQueue(dir)
-						if err != nil {
-							t.Fatal(err)
-						}
-						q.Dismissed[msg.ID] = true
-						if err := writeQueue(dir, q); err != nil {
-							t.Fatal(err)
+						// The room API, not a store read: this callback runs
+						// while the store reads a record.
+						dismissed, err := e.m.rooms().DismissDelivery(context.Background(), hub.Event{},
+							room.DeliverySet{RoomID: info.RoomID, Keys: room.DeliveryKeys(info.ID, info.Address())}, msg.ID)
+						if err != nil || !dismissed {
+							t.Errorf("dismissing post %s: %v, %v", msg.ID, dismissed, err)
 						}
 					}
 				}
@@ -217,8 +210,8 @@ func TestInputClaimResolvesDeliveryOutsideGate(t *testing.T) {
 			if err != nil || len(got.Posts) != 0 || !resolved {
 				t.Fatalf("claim after dismissal = %+v, %v; resolved %v", got, err, resolved)
 			}
-			if q, err := readQueue(dir); err != nil || q.Claimed[msg.ID] != 0 || !q.Dismissed[msg.ID] {
-				t.Fatalf("claim did not recheck dismissal: %+v, %v", q, err)
+			if claims := claimsOf(t, e, info.ID); claims.claimedTurn[msg.ID] != 0 || !claims.dismissed[msg.ID] {
+				t.Fatalf("claim did not recheck dismissal: %+v", claims)
 			}
 		})
 	}

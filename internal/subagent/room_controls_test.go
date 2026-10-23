@@ -178,14 +178,11 @@ func TestRoomClearRechecksPendingProtectionAndPreservesFiles(t *testing.T) {
 			case "post-before-wake":
 				e.m.rooms().Post(a.RoomID, room.PostInput{Wake: true, From: a.Room, To: []string{a.Address()}, Text: "unread"})
 			case "claim":
-				dir, _ := e.m.Store.Dir(a.ID)
-				q, _ := readQueue(dir)
 				msg, err := e.m.rooms().Post(a.RoomID, room.PostInput{Wake: true, From: a.Room, To: []string{a.Address()}, Text: "unacknowledged claim"})
 				if err != nil {
 					t.Fatal(err)
 				}
-				q.Claimed[msg.ID] = 1
-				writeQueue(dir, q)
+				claimPostsFor(t, e, a.ID, 1, msg.ID)
 			case "child":
 				// A child delegates from the parent's goal, so the parent holds one.
 				if _, err := e.m.goalStore().Add(a.RoomID, "owner", goals.Input{Text: "protecting", Holders: []string{a.ID}}); err != nil {
