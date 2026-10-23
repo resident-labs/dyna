@@ -192,10 +192,12 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 	for _, page := range pages {
 		artifacts = append(artifacts, page.Artifacts...)
 	}
+	// Prefer report names, but retain bounded discovery for custom artifact names.
 	sort.SliceStable(artifacts, func(i, j int) bool {
 		return likelyTestArtifact(artifacts[i].Name) && !likelyTestArtifact(artifacts[j].Name)
 	})
 	remaining := int64(maxTestArtifact)
+	fallbackBytes, fallbackCount := int64(maxTestArtifact), 3
 	junit := false
 	var problems []string
 	for _, artifact := range artifacts {
@@ -215,6 +217,14 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 				continue
 			}
 		}
+		if !likelyTestArtifact(artifact.Name) {
+			if fallbackCount == 0 || artifact.Size > fallbackBytes {
+				problems = append(problems, "report unreadable: "+boundedTestName(artifact.Name)+" exceeds fallback inspection limit (3 artifacts, 20 MiB)")
+				continue
+			}
+			fallbackCount--
+			fallbackBytes -= artifact.Size
+		}
 		download := gh
 		if download.Timeout < 90*time.Second {
 			download.Timeout = 90 * time.Second
@@ -227,6 +237,9 @@ func inspectTestRun(ctx context.Context, gh GitHub, r Record, run Run) (cibudget
 				return report, junit, problems, err
 			}
 			continue
+		}
+		if !likelyTestArtifact(artifact.Name) {
+			fallbackBytes -= max(int64(len(raw))-artifact.Size, 0)
 		}
 		part, found, err := readTestArtifact(raw, &remaining)
 		if err != nil {
@@ -306,7 +319,8 @@ func (s *Service) enforceTestBudget(ctx context.Context, gh GitHub, r Record, sn
 		}
 		report, junit, problems, inspectErr := inspectTestRun(ctx, gh, r, run)
 		if inspectErr != nil {
-			canceled := testInspectionCanceled(ctx, inspectErr)
+			// Shutdown cancellation leaves work pending; timeouts consume a retry.
+			canceled := errors.Is(ctx.Err(), context.Canceled) || errors.Is(inspectErr, context.Canceled)
 			retry := true
 			if err := s.Store.update(func(st *State) error {
 				live := st.Records[r.Key]
@@ -333,6 +347,7 @@ func (s *Service) enforceTestBudget(ctx context.Context, gh GitHub, r Record, sn
 			if retry {
 				continue
 			}
+			problems = append(problems, "report unreadable: stopped after 3 failed inspection attempts")
 		}
 		report.Tests = report.BudgetTests()
 		var allowWarnings []string
