@@ -42,7 +42,7 @@ func (s Service) Emit(ctx context.Context, e Event) error {
 	}
 	async := false
 	for _, h := range hooks {
-		if h.Event != e.Event || (e.Name != "" && h.Name != e.Name) {
+		if h.Event != e.Event || h.Disabled || (e.Name != "" && h.Name != e.Name) {
 			continue
 		}
 		if err := Validate(h); err != nil {
@@ -64,7 +64,7 @@ func (s Service) Emit(ctx context.Context, e Event) error {
 	}
 	if err := s.Enqueue(e); err != nil {
 		for _, h := range hooks {
-			if h.Event == e.Event && h.OnFail == "alert" {
+			if h.Event == e.Event && h.OnFail == "alert" && !h.Disabled {
 				s.notice(r, e, h, "spool write error")
 			}
 		}
@@ -86,7 +86,7 @@ func (s Service) dispatch(ctx context.Context, e Event, preparationErr error) er
 	}
 	var errs []error
 	for _, h := range hooks {
-		if h.Event == e.Event && h.OnFail != "block" && (e.Name == "" || e.Name == h.Name) {
+		if h.Event == e.Event && !h.Disabled && h.OnFail != "block" && (e.Name == "" || e.Name == h.Name) {
 			_, err := s.run(ctx, e, h.Name, preparationErr, false)
 			errs = append(errs, err)
 		}
@@ -109,7 +109,7 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 	}
 	fetchDue := false
 	for _, h := range hooks {
-		if h.Event == MainUpdated {
+		if h.Event == MainUpdated && !h.Disabled {
 			if err := s.runtime(r.ID, func(st *state) error {
 				if st.FetchedAt.IsZero() || !now.Before(st.FetchedAt.Add(5*time.Minute)) {
 					st.FetchedAt = now
@@ -143,7 +143,7 @@ func (s Service) Tick(ctx context.Context, repo string, now time.Time) error {
 			st.Main = main
 		}
 		for _, h := range hooks {
-			if h.Event != Schedule || Validate(h) != nil {
+			if h.Event != Schedule || h.Disabled || Validate(h) != nil {
 				continue
 			}
 			key := scheduleKey(h)

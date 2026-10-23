@@ -44,6 +44,9 @@ type Hook struct {
 	EditedBy     string     `json:"editedBy,omitempty"`
 	EditedAt     *time.Time `json:"editedAt,omitempty"`
 	EveryMinutes int        `json:"everyMinutes,omitempty"`
+	// Disabled keeps the hook's settings and stops automatic runs. It is
+	// absent in older hook documents, where the hook runs.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 type Event struct {
@@ -160,6 +163,7 @@ func (s Service) Add(ctx context.Context, repo string, h Hook) error {
 type Patch struct {
 	Command, Event, Cwd, Timeout, OnFail *string
 	EveryMinutes                         *int
+	Disabled                             *bool
 }
 
 func (s Service) Edit(ctx context.Context, repo, name, editor string, patch Patch) error {
@@ -218,6 +222,9 @@ func (s Service) Edit(ctx context.Context, repo, name, editor string, patch Patc
 			}
 			if patch.EveryMinutes != nil {
 				h.EveryMinutes = *patch.EveryMinutes
+			}
+			if patch.Disabled != nil {
+				h.Disabled = *patch.Disabled
 			}
 			if err := Validate(h); err != nil {
 				return err
@@ -321,6 +328,10 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 	for _, h := range hooks {
 		if h.Name != name {
 			continue
+		}
+		// Reloaded settings can change while an earlier hook is running.
+		if h.Disabled && !requested {
+			return Run{}, nil
 		}
 		if err := Validate(h); err != nil {
 			return Run{}, err
