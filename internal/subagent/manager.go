@@ -192,9 +192,15 @@ func (m *Manager) settings() settings.Values {
 	return v
 }
 
+// executable names the dyna binary a worker and its harness MCP servers run.
+// It must outlive this process: a pinned /proc/<pid>/exe path fails once its
+// process exits, which left later turns without the Dyna tools.
 func (m *Manager) executable() string {
 	if m.Executable != "" {
 		return m.Executable
+	}
+	if exe, err := fsutil.StableExecutable(); err == nil {
+		return exe
 	}
 	exe, _ := fsutil.RunningExecutable()
 	return exe

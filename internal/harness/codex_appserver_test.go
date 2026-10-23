@@ -355,3 +355,19 @@ func TestCodexAppServerLaunchChangeResumesThread(t *testing.T) {
 		})
 	}
 }
+
+// A thread whose Dyna shell MCP server failed to start has no Dyna tools. The
+// turn must end with that reason instead of running blind.
+func TestCodexDynaShellMCPFailureStopsTheTurn(t *testing.T) {
+	p, logPath := installFakeCodex(t, "normal")
+	p.ExtraArgs = []string{"-c", `mcp_servers={dyna={command="dyna",args=["mcp","shell"]}}`}
+	p.Env[envFakeCodexMCPShellFail] = "1"
+
+	_, err := runTest(context.Background(), p, "task", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "Dyna shell MCP server dyna did not start") {
+		t.Fatalf("Run() error = %v, want the Dyna shell MCP failure", err)
+	}
+	if got := fakeCodexRequests(readTestFile(t, logPath), "turn/start"); got != 0 {
+		t.Fatalf("turn ran without Dyna tools: %d turn/start requests", got)
+	}
+}

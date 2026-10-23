@@ -22,15 +22,17 @@ const codexCommandTimeout = 30 * time.Second
 // This is one attached protocol client, not a process registry. The shared
 // Host owns the process, its leases, replacement and idle close.
 type codexSessionProcess struct {
-	host      sessionhost.Session
-	conn      *jsonrpc.Conn
-	transport *nativeSessionTransport
-	thread    string
-	exited    chan struct{}
-	activity  chan struct{}
-	idle      bool
-	mu        sync.Mutex
-	events    []jsonrpc.Notification
+	host         sessionhost.Session
+	conn         *jsonrpc.Conn
+	transport    *nativeSessionTransport
+	thread       string
+	shellServers map[string]bool
+	exited       chan struct{}
+	activity     chan struct{}
+	idle         bool
+	mu           sync.Mutex
+	events       []jsonrpc.Notification
+	mcpErr       error
 }
 
 func codexSessionProcessFor(ctx context.Context, p profile.Profile, cwd string, spec commandSpec, execution ExecutionOptions) (*codexSessionProcess, error) {
@@ -52,7 +54,7 @@ func codexSessionProcessFor(ctx context.Context, p profile.Profile, cwd string, 
 	if err != nil {
 		return nil, err
 	}
-	s := &codexSessionProcess{host: hosted, exited: make(chan struct{}), activity: make(chan struct{}, 1)}
+	s := &codexSessionProcess{host: hosted, exited: make(chan struct{}), activity: make(chan struct{}, 1), shellServers: codexShellMCPServers(spec.argv)}
 	s.transport = newNativeSessionTransport(hosted)
 	s.conn = jsonrpc.NewConn(s.transport, jsonrpc.Handlers{Notification: s.route, Request: codexServerRequest}, func() { close(s.exited) })
 	failed := true
@@ -105,6 +107,9 @@ func codexSessionProcessFor(ctx context.Context, p profile.Profile, cwd string, 
 		return nil, errors.New("Codex did not return the requested thread")
 	}
 	s.thread = result.Thread.ID
+	if err = s.mcpFailure(); err != nil {
+		return nil, err
+	}
 	failed = false
 	return s, nil
 }
@@ -158,6 +163,9 @@ func (s *codexSessionProcess) request(ctx context.Context, method string, params
 func (s *codexSessionProcess) route(u jsonrpc.Notification) {
 	s.mu.Lock()
 	s.events = append(s.events, u)
+	if s.mcpErr == nil {
+		s.mcpErr = codexMCPStartupFailure(u, s.shellServers)
+	}
 	s.mu.Unlock()
 	select {
 	case s.activity <- struct{}{}:
@@ -181,3 +189,11 @@ func (s *codexSessionProcess) detach() {
 }
 func (s *codexSessionProcess) exitError() error { return s.transport.exitError() }
 func (s *codexSessionProcess) kill()            { _ = s.host.Close(); <-s.exited }
+
+// mcpFailure reports a Dyna shell MCP server that failed to start. A turn
+// without those tools cannot do Dyna work, so it stops at once.
+func (s *codexSessionProcess) mcpFailure() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.mcpErr
+}

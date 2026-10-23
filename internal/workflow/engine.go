@@ -692,7 +692,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 			if runRoot, rootErr := filepath.Abs(e.opts.Run.Dir); rootErr == nil {
 				prof.Env[runstore.AgentJournalRootEnv] = runRoot
 			}
-			if exe, exeErr := fsutil.RunningExecutable(); exeErr == nil {
+			if exe, exeErr := fsutil.StableExecutable(); exeErr == nil {
 				prof.Env["DYNA_BIN"] = exe
 			}
 		}

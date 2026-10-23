@@ -232,7 +232,7 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	}
 	cli := p.Env["DYNA_BIN"]
 	if cli == "" {
-		cli, _ = fsutil.RunningExecutable()
+		cli, _ = fsutil.StableExecutable()
 	}
 	toolSource := make([]string, 0, len(os.Environ())+len(p.Env))
 	toolSource = append(toolSource, os.Environ()...)

@@ -62,6 +62,12 @@ func runCodexTurn(ctx context.Context, p profile.Profile, cwd string, spec comma
 				_, _ = io.WriteString(stdout, line+"\n")
 			}
 		}
+		// A Dyna shell server that failed to start leaves this turn without
+		// Dyna tools, so the turn ends with the reason instead of running blind.
+		if err := sess.mcpFailure(); err != nil && !notifications.done {
+			notifications.err = err
+			notifications.done = true
+		}
 		sess.idle = notifications.done
 	}
 	streamNudges := 0

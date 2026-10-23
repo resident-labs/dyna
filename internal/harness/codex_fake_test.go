@@ -33,6 +33,7 @@ const (
 	envFakeCodexSignal        = "DYNA_TEST_FAKE_CODEX_SIGNAL"
 	envFakeCodexInterruptGate = "DYNA_TEST_FAKE_CODEX_INTERRUPT_GATE"
 	envFakeCodexSteerGate     = "DYNA_TEST_FAKE_CODEX_STEER_GATE"
+	envFakeCodexMCPShellFail  = "DYNA_TEST_FAKE_CODEX_MCP_SHELL_FAIL"
 )
 
 // Modes select the base behavior; any other mode answers like "normal". Tests
@@ -178,6 +179,12 @@ func fakeCodexMain() {
 				threads++
 				// The PID keeps ids unique across fake processes in one test binary.
 				thread = fmt.Sprintf("fake-thread-%d-%d", os.Getpid(), threads)
+			}
+			if os.Getenv(envFakeCodexMCPShellFail) != "" {
+				// A shell server that could not start leaves the thread with no
+				// Dyna tools; a real app-server reports it before the first turn.
+				notify("mcpServer/startupStatus/updated", map[string]any{"threadId": thread, "name": "dyna", "status": "failed",
+					"error": "MCP startup failed: handshaking with MCP server failed"})
 			}
 			reply(req.ID, map[string]any{"thread": map[string]any{"id": thread}})
 		case "turn/start":
