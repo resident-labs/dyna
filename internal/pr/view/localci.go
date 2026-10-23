@@ -33,15 +33,12 @@ func localCIChecks(facts watch.ReviewFacts, record watch.Record) watch.Record {
 		}
 		check := watch.CheckSummary{Name: name, Node: suite.Node, Status: "completed", DurationMs: suite.Duration.Milliseconds()}
 		switch suite.Status {
-		case "passed":
+		case localci.OutcomePassed:
 			check.State = "success"
 			check.Conclusion = "success"
-		case "failed", "error":
+		case localci.OutcomeFailed, localci.OutcomeError:
 			check.State = "failure"
 			check.Conclusion = "failure"
-		case "skipped":
-			check.State = "skipped"
-			check.Conclusion = "skipped"
 		default:
 			check.State = "pending"
 			check.Status = "in_progress"
