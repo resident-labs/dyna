@@ -14,10 +14,6 @@ test('ComputerChat uses DmRows and the shared composer, with no renderer of its 
 })
 
 test('computer chat leaves modal Escape to the active dialog', async () => {
-  const { build } = await import('esbuild')
-  const { svelteEsbuildPlugin } = await import('../../../test/svelte-esbuild.ts')
-  const { installDom, importBundle, domNames } = await import('../prs/prDetailHarness.ts')
-  const { rm } = await import('node:fs/promises')
   const dom = installDom()
   globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
   globalThis.addEventListener = dom.window.addEventListener.bind(dom.window)
