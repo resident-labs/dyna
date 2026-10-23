@@ -63,17 +63,31 @@ test('a page answer for a machine that closed is dropped', async () => {
   assert.equal(c.machineDetail, null, 'the closed page does not come back')
 })
 
-// probeText runs the page's own wording of one probe result.
-function probeText(detail: unknown): string {
+// probeResultOf runs the page's own wording of one probe result.
+function probeResultOf(detail: unknown): unknown {
   const c: Record<string, unknown> = {}
   vm.createContext(c)
   vm.runInContext(stripTypes(functionCode('probeResult')), c)
-  return (vm.runInContext('probeResult', c) as (detail: unknown) => string)(detail)
+  const out = (vm.runInContext('probeResult', c) as (detail: unknown) => unknown)(detail)
+  // The value is made in another VM context, so compare its data, not its prototype.
+  return JSON.parse(JSON.stringify(out))
 }
 
 test('a degraded probe reports the disk hold, not an unreachable machine', () => {
-  assert.equal(probeText({ name: 'hermeslab', status: 'degraded', statusReason: 'low-disk' }), 'hermeslab is low on disk, so it starts no CI work.')
-  assert.equal(probeText({ name: 'hermeslab', status: 'degraded', statusReason: 'other' }), 'hermeslab needs attention.')
-  assert.equal(probeText({ name: 'hermeslab', status: 'offline' }), 'hermeslab did not answer the probe.')
-  assert.equal(probeText({ name: 'hermeslab', status: 'online' }), 'Probed hermeslab.')
+  assert.deepEqual(probeResultOf({ name: 'hermeslab', status: 'degraded', statusReason: 'low-disk' }), {
+    tone: 'error',
+    subject: 'hermeslab is low on disk',
+    text: 'Dyna starts no CI work here until space is freed.',
+  })
+  assert.deepEqual(probeResultOf({ name: 'hermeslab', status: 'degraded', statusReason: 'other' }), {
+    tone: 'error',
+    subject: 'hermeslab needs attention',
+    text: 'Open the machine page to see why.',
+  })
+  assert.deepEqual(probeResultOf({ name: 'hermeslab', status: 'offline' }), {
+    tone: 'error',
+    subject: 'hermeslab did not answer the probe',
+    text: 'Check the SSH route, then probe again.',
+  })
+  assert.deepEqual(probeResultOf({ name: 'hermeslab', status: 'online' }), { tone: 'success', subject: 'Probed hermeslab' })
 })
