@@ -184,7 +184,13 @@ func NewRunWorkerCommand() *cobra.Command {
 		}
 		ctx, cancel := signal.NotifyContext(c.Context(), syscall.SIGINT, syscall.SIGTERM)
 		defer cancel()
-		result, err := workflowsvc.Execute(ctx, opts, nil, runObserver(c, quiet, opts.ResumeFrom))
+		// A demo run gets its mock workers here, in memory, so it never reads or
+		// writes the owner's profile registry.
+		var demo *profile.Store
+		if opts.Demo {
+			demo = &profile.Store{Profiles: demoProfiles()}
+		}
+		result, err := workflowsvc.Execute(ctx, opts, demo, runObserver(c, quiet, opts.ResumeFrom))
 		if err != nil {
 			return err
 		}
@@ -521,24 +527,19 @@ func NewDemoCommand() *cobra.Command {
 			}
 			cwd, _ := os.Getwd()
 			fmt.Fprintln(c.OutOrStdout(), "running demo workflow on mock workers...")
-			// The run takes the demo workers in memory, so the demo never reads
-			// or writes the owner's profile registry.
-			demo := &profile.Store{Profiles: demoProfiles()}
-			ctx, cancel := signal.NotifyContext(c.Context(), syscall.SIGINT, syscall.SIGTERM)
-			defer cancel()
-			result, err := workflowsvc.Execute(ctx, workflowsvc.Options{Name: "demo-fanout", ScriptSrc: demoScript, WorkDir: cwd}, demo, runObserver(c, false, ""))
-			if err != nil {
+			// The worker gets the demo profiles from Options.Demo, so the demo
+			// never reads or writes the owner's profile registry.
+			if err := runForeground(c, workflowsvc.Options{Name: "demo-fanout", ScriptSrc: demoScript, WorkDir: cwd, Demo: true}, false, "raw"); err != nil {
 				return err
 			}
-			fmt.Fprintln(c.OutOrStdout(), result.Value)
 			fmt.Fprintln(c.OutOrStdout(), stDim.Render("open the desktop app to browse this run"))
 			return nil
 		},
 	}
 }
 
-// demoProfiles are the mock workers the demo run uses. They are passed to the
-// run in memory and never saved as the owner's own profiles.
+// demoProfiles are the mock workers the demo run uses. The worker takes them
+// from Options.Demo in memory, so they never reach the owner's profile store.
 func demoProfiles() []profile.Profile {
 	return []profile.Profile{
 		{Name: "mock-workhorse", Harness: profile.HarnessMock, Taste: 4, Intelligence: 10, Cost: 6,
