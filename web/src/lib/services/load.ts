@@ -1,7 +1,7 @@
 // Loads what the service cards need, each call on its own: one that fails
 // (a caller without admin scope cannot read settings) leaves its part null
 // and the others still show.
-import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, ServiceInfo as ServiceRow, SyncInfo, TestHealth, UsageRow } from './model.ts'
+import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, ServiceInfo as ServiceRow, SyncInfoByRepo, TestHealth, UsageRow } from './model.ts'
 import { readAccounts, readBudget, readHookRuns, readHookSummary, readMergeState, readNotices, readSync, readTestHealth, readHistory, readReviewer, readServices, readSettings, readUsage, readVoice } from './read.ts'
 
 export interface ServiceApi {
@@ -38,7 +38,7 @@ export interface ServiceData {
   budget: BudgetInfo | null
   accounts: AccountsInfo | null
   testHealth: TestHealth | null
-  laneSync: SyncInfo | null
+  laneSync: SyncInfoByRepo | null
 }
 
 export const emptyData: ServiceData = { pending: allParts, services: [], reviewer: null, queue: null, mergePaused: null, history: [], settings: null, usage: null, voice: null, hooks: null, runs: {}, notices: null, budget: null, accounts: null, testHealth: null, laneSync: null }
