@@ -16,7 +16,11 @@ func TestQuestionChangesUseSharedWriter(t *testing.T) {
 	}
 	writer := state.For(db)
 	before := writer.Health().Writes
-	writer.SetPublish(func(event hub.Event) { t.Errorf("unexpected bare event: %+v", event) })
+	writer.SetPublish(func(event hub.Event) {
+		if event.Topic != "questions" {
+			t.Errorf("unexpected event: %+v", event)
+		}
+	})
 	if err := s.update(func(st *State) error { st.Next["room"]++; return nil }); err != nil {
 		t.Fatal(err)
 	}

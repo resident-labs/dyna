@@ -153,9 +153,7 @@ ON CONFLICT(id) DO UPDATE SET position=excluded.position,key=excluded.key,kind=e
 }
 
 func (s Store) write(db *sql.DB, fn func(*[]Notice)) error {
-	// TODO: legacy/shim remove later — the room watcher still owns notices events;
-	// publish the row once when item 16 moves this topic onto the bus.
-	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+	return state.For(db).Write(context.Background(), hub.Event{Topic: "notices"}, func(conn *sql.Conn) error {
 		list, err := readNotices(conn)
 		if err != nil {
 			return err
