@@ -313,11 +313,22 @@ func writeHookReceipt(conn io.ReadWriter, session string, out io.Writer, event s
 	return nil
 }
 
+// hookSpecificOutput is the Claude-style hook decision body Dyna writes back.
+type hookSpecificOutput struct {
+	HookEventName     string `json:"hookEventName"`
+	AdditionalContext string `json:"additionalContext"`
+}
+
+// hookContextDoc is the JSON line the hook command prints for the harness.
+type hookContextDoc struct {
+	HookSpecificOutput hookSpecificOutput `json:"hookSpecificOutput"`
+}
+
 func hookContext(text, event string) ([]byte, error) {
 	if event == "" {
 		event = "PostToolUse"
 	}
-	encoded, err := json.Marshal(map[string]any{"hookSpecificOutput": map[string]any{"hookEventName": event, "additionalContext": text}})
+	encoded, err := json.Marshal(hookContextDoc{HookSpecificOutput: hookSpecificOutput{HookEventName: event, AdditionalContext: text}})
 	if err != nil {
 		return nil, err
 	}
