@@ -49,7 +49,7 @@ func Command(o Options) *cobra.Command {
 		}
 		return output(c, r)
 	}
-	root := &cobra.Command{Use: "change", Short: "Open and review changes", Long: "Track committed changes from a worktree and record reviews and finding replies. Results use JSON. Tracked pull requests merge automatically after exact-head approval and green CI.", RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
+	root := &cobra.Command{Use: "change", Short: "Review a committed change: base, head and findings", Long: "Track committed changes from a worktree and record reviews and finding replies. A change is a branch with a base and an exact head; it needs no pull request. Results use JSON. Tracked pull requests merge automatically after exact-head approval and green CI.", RunE: func(c *cobra.Command, _ []string) error { return c.Help() }}
 
 	open := &cobra.Command{Use: "open", Short: "Open a change from the current worktree or link a PR with author notes", Long: "The author is the stamped Dyna session. With no Dyna stamp, root (the room owner) is the author.", Args: cobra.NoArgs}
 	openRoom := open.Flags().String("room", "", "room name or ID; a stamped session may name only its own room")
