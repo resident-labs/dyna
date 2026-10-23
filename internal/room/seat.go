@@ -88,7 +88,7 @@ func WakesRoot(msg Message, roomName string) bool {
 		return msg.NeedsRoot || msg.Human || OwnerRequest(msg, roomName) || msg.Source == SourceVoice
 	case "alert":
 		return true
-	case "seat", "pr":
+	case "seat", "pr", "merge":
 		return msg.NeedsRoot
 	case "completed":
 		return msg.OwnerReport && (strings.HasPrefix(msg.From, "shell:") || strings.HasPrefix(msg.From, "run:"))
