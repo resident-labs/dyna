@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"dyna-agent/internal/workeroutput"
 	"dyna-agent/internal/workeroutput/projection"
 )
 
@@ -63,5 +64,79 @@ func TestSessionProjectionPreservesOverlappingTurnOffsets(t *testing.T) {
 	}
 	if count != 1 || start != int64(len(lines[0])) || end != first {
 		t.Fatalf("mapping = %d rows from %d to %d; want one row for the overlapped line", count, start, end)
+	}
+}
+
+func TestSessionProjectionUsesSharedOverlapContext(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		lines     []string
+		wantState string
+		wantID    string
+	}{
+		{"progress", []string{
+			"{\"kind\":\"tool\",\"state\":\"started\",\"id\":\"a\",\"name\":\"shell\"}\n",
+			"{\"kind\":\"tool\",\"state\":\"started\",\"id\":\"a\"}\n",
+		}, "updated", "a"},
+		{"result", []string{
+			"{\"kind\":\"status\",\"name\":\"result\"}\n",
+			"{\"kind\":\"message\",\"role\":\"assistant\",\"text\":\"done\"}\n",
+		}, "", ""},
+		{"pair", []string{
+			"{\"kind\":\"tool\",\"state\":\"started\",\"id\":\"a\",\"name\":\"shell\"}\n",
+			"{\"kind\":\"tool\",\"state\":\"completed\",\"id\":\"b\",\"name\":\"shell\"}\n",
+		}, "completed", "a"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, id := turnStore(t)
+			db, err := s.turnsDB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := []byte(tc.lines[0] + tc.lines[1])
+			path, err := s.NormalizedPath(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, source, 0600); err != nil {
+				t.Fatal(err)
+			}
+			offset := int64(len(tc.lines[0]))
+			for n, start := range []int64{0, offset} {
+				raw, err := json.Marshal(Turn{N: n + 1, Status: "ok", NormStart: start, NormEnd: int64(len(source)), OutputDialect: workeroutput.DialectGrokJSON})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := saveTurnRow(t.Context(), db, id, n+1, raw); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := s.migrateOutputProjection(); err != nil {
+				t.Fatal(err)
+			}
+			reader, err := projection.Open(filepath.Dir(s.root()), "sessions/"+id+"/agents/1", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reader.Close()
+			event, mapped, err := reader.Event(offset, int64(len(source)), []byte(tc.lines[1]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !mapped {
+				if err := json.Unmarshal([]byte(tc.lines[1]), &event); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if event.State != tc.wantState || event.ID != tc.wantID {
+				t.Fatalf("shared event state=%q id=%q; want state=%q id=%q", event.State, event.ID, tc.wantState, tc.wantID)
+			}
+			if got, err := os.ReadFile(path); err != nil || !bytes.Equal(got, source) {
+				t.Fatalf("source changed: %v", err)
+			}
+		})
 	}
 }
