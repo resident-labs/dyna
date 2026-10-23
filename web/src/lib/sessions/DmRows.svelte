@@ -43,6 +43,7 @@
   let { dm, jobs = [], onjob = null, rows = null, offset = 0, room, onforward = null, member, members = [], compact = false, isNew = () => false, selectedKey = '', onthread, onopenfile, onpost = null, removing = '', onunqueue = null, ondismiss = null, onissue = null, selection = createSelection() }: Props = $props()
   // selection is shared by every message in the list (postSelect.ts); a
   // caller that renders one row at a time passes one shared selection.
+  let targets = $state<Record<string, boolean>>({})
   let rendered = $derived(rows ?? dm.rows)
   // While the agent works, the newest activity row shows the member's live
   // activity (the same one the members list shows) next to the collapsed
@@ -96,8 +97,10 @@
         <details class="activity">
         <summary class:failed={row.items.some((it) => it.failed)}>{activitySummary(row.items, dm.rows[offset + i + 1]?.ts)}{#if row.key === liveKey}{@const live = liveLine()}<span class="live" class:long={isLongCall(live.ms)} role="status">{live.text}{#if live.ms}{' · ' + elapsed(live.ms)}{/if}</span>{/if}</summary>
         <div class="activity-list">
-          {#each row.items as it}
-              <div class="tool act-line" class:failed={it.failed}><span class="verb">{it.tool}</span>{#if it.target}<code title={it.target}>{it.target}</code>{/if}{#if it.aside}<span class="aside">{it.aside}</span>{/if}</div>
+          {#each row.items as it, index (it.key || index)}
+              {@const targetKey = JSON.stringify([row.key, it.key || index])}
+              <div class="tool act-line" class:failed={it.failed}><span class="verb">{it.tool}</span>{#if it.target}<button class="target-toggle" aria-expanded={!!targets[targetKey]} aria-label={`${targets[targetKey] ? 'Hide' : 'Show'} full ${it.tool || 'tool'} target`} onclick={() => targets[targetKey] = !targets[targetKey]}><code title={it.target}>{it.target}</code><span class="target-chevron" aria-hidden="true">›</span></button>{/if}{#if it.aside}<span class="aside">{it.aside}</span>{/if}</div>
+              {#if it.target && targets[targetKey]}<pre class="target-detail">{it.target}</pre>{/if}
               {#if it.failed}<FailedCall command={it.command} output={it.output} exit={it.exit} />{/if}
           {/each}
         </div>
@@ -155,6 +158,11 @@
   .tool { display: flex; align-items: baseline; gap: var(--s2); padding: 2px 0; min-width: 0; max-width: 920px; }
   .tool .verb { flex: none; }
   .tool code { color: var(--ink-2); background: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font: inherit; }
+  .target-toggle { display: flex; align-items: baseline; gap: var(--s1); min-width: 0; padding: 0; text-align: left; color: inherit; }
+  .target-chevron { flex: none; color: var(--faint); }
+  .target-toggle[aria-expanded="true"] .target-chevron { transform: rotate(90deg); }
+  .target-toggle:focus-visible { outline-offset: 2px; }
+  .target-detail { max-width: 920px; margin: var(--s1) 0 var(--s2); padding: var(--s2); border-radius: var(--r-xs); background: var(--rail); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--t-sm)/1.6 var(--mono); color: var(--ink-2); user-select: text; }
   .tool .aside { flex: none; color: var(--faint); }
   .tool.failed .verb, .tool.failed .aside { color: var(--coral); }
   .ptr { display: flex; gap: var(--s2); align-items: baseline; margin: 2px 0; font-size: var(--t-sm); color: var(--faint); }
