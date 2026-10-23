@@ -63,7 +63,7 @@ func TestAskWhileARecordWriteHoldsTheSessionLock(t *testing.T) {
 }
 
 // On the first run after the upgrade, the record table does not exist yet.
-// Ask must create it before its own transaction, not inside it.
+// Startup imports the record before Ask takes its own transaction.
 func TestAskOnAFreshDataFolderFinishes(t *testing.T) {
 	data := t.TempDir()
 	sessions := filepath.Join(data, "sessions")
@@ -73,6 +73,9 @@ func TestAskOnAFreshDataFolderFinishes(t *testing.T) {
 	}
 	legacy := `{"id":"` + id + `","roomId":"room_1","room":"work","status":"dormant"}`
 	if err := os.WriteFile(filepath.Join(sessions, id, "session.json"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := sessionlife.Migrate(data); err != nil {
 		t.Fatal(err)
 	}
 	store := &questions.Store{Root: filepath.Join(data, "questions")}
