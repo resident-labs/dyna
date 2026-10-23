@@ -3,7 +3,7 @@ import Skeleton from '../src/lib/ui/Skeleton.svelte'
 import Session from '../src/lib/sessions/Session.svelte'
 import Feed from '../src/lib/rooms/Feed.svelte'
 import DmMessage from '../src/lib/sessions/DmMessage.svelte'
-import { setVisuals } from '../src/lib/files/visuals.svelte.js'
+import { setVisuals } from '../src/lib/files/visuals.svelte.ts'
 import type { CallRequest } from '../src/lib/voice/callRequests.ts'
 import type { Attachment, Post, Room } from '../src/lib/api/room.ts'
 
@@ -61,7 +61,7 @@ export function currentVisualTitle(): string {
     id: '0123456789abcdef01234567', name: 'ci3.html', mime: 'text/html', size: 900, sha256: '',
     render: 'html', title: 'CI time per PR', visual: 'msg_0000000000000001', version: 3,
   }
-  setVisuals(room.id, [{ id: 'msg_0000000000000001', post: { id: 'msg_0000000000000003', ts: 1 }, attachment: newest, versions: [] }])
+  setVisuals(room.id, [{ id: 'msg_0000000000000001', post: post({ id: 'msg_0000000000000003', ts: 1 }), attachment: newest, versions: [] }])
   return feed(post({
     id: 'msg_0000000000000002', text: 'v2',
     attachments: [{ ...newest, id: '0123456789abcdef01234568', name: 'ci2.html', title: 'ci2', version: 2 }],

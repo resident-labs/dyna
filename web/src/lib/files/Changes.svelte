@@ -10,7 +10,7 @@
   import DiffView from './DiffView.svelte'
   import SendBar from './SendBar.svelte'
   import { addComment } from './diffComments.ts'
-  import { code, setWrap } from './codeprefs.svelte.js'
+  import { code, setWrap } from './codeprefs.svelte.ts'
   import { parseDiff, statusLetter, STATUS, split, base } from './repo.ts'
 
   // sessionName is the session's display name; the send bar names it as the receiver.

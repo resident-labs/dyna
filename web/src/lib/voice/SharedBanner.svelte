@@ -4,7 +4,7 @@
   // full view; × hides it. The call's thread keeps every shared file.
   import { fileURL } from '../../api.js'
   import type { Attachment, Post } from '../api/room.ts'
-  import { extOf } from '../files/attach.js'
+  import { extOf } from '../files/attach.ts'
   import VisualPlaceholder from '../files/VisualPlaceholder.svelte'
   import { NAMES, shareKind, shareTitle, shareWhat } from './conversation.js'
   import { icons } from './icons.js'

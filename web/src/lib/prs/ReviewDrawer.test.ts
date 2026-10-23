@@ -1,3 +1,4 @@
+import { stripTypes } from '../../../test/svelte-source.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -20,7 +21,7 @@ async function load(name: string, width = 1200) {
     format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
     plugins: [{ name: 'svelte-test', setup(builder) {
       builder.onLoad({ filter: /[/\\]ServiceHeader\.svelte$/ }, ({ path }) => ({ contents: compile('<script>let { roomId, role, onchange } = $props()</script><b class="service-header">{role} in {roomId} {typeof onchange}</b>', { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
-      builder.onLoad({ filter: /\.svelte\.js$/ }, ({ path }) => ({ contents: compileModule(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
+      builder.onLoad({ filter: /\.svelte\.[jt]s$/ }, ({ path }) => ({ contents: compileModule(stripTypes(readFileSync(path, 'utf8')), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
       builder.onLoad({ filter: /\.svelte$/ }, async ({ path }) => {
         let source = readFileSync(path, 'utf8')
         // SSR has no ResizeObserver. Supply the browser's measured PR width.
