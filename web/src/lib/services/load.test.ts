@@ -4,13 +4,17 @@ import { emptyData, loadServiceData, type ServiceApi } from './load.ts'
 
 const ok = (v: unknown) => () => Promise.resolve(v)
 const api: ServiceApi = {
-  listServices: ok([{ role: 'keeper', profile: 'sonnet', pinned: '', reason: '', profiles: [] }]),
+  listServices: ok([{ role: 'reviewer', profile: 'sonnet', pinned: '', reason: '', profiles: [] }]),
   reviewerStatus: ok({ enabled: true, profile: 'opus', lastError: '', queue: [], reviewers: [] }),
-  roomMergeStatus: ok([]),
+  mergeControlStatus: ok({ queue: [], paused: false }),
   roomMergeHistory: ok([]),
   settings: () => Promise.reject(new Error('needs admin')),
   usageRollup: ok({ byRoleModel: [] }),
   voiceStatus: ok({ available: true, live: false }),
+  notices: ok([]),
+  roomCIBudget: ok({ ciWarnAfter: '2m', ciFailAfter: '3m', ciTestMax: '1s' }),
+  accountUsageCached: ok({ accounts: [] }),
+  ciHealth: ok({ limitMs: 1000, tests: [] }),
 }
 
 test('one failing call leaves its part empty and the others loaded', async () => {
@@ -42,20 +46,43 @@ test('a failed call keeps what was loaded before', async () => {
 })
 
 test('every part is pending until its call answers, and each part arrives on its own', async () => {
-  assert.equal(emptyData.pending.length, 7)
+  assert.equal(emptyData.pending.length, 12)
   let release: () => void = () => {}
-  const slow = new Promise<unknown>((resolve) => { release = () => resolve([]) })
+  const slow = new Promise<unknown>((resolve) => { release = () => resolve({ queue: [], paused: false }) })
   const seen: string[][] = []
-  const done = loadServiceData({ ...api, roomMergeStatus: () => slow }, 'room', new Date('2026-10-20T12:00:00Z'), emptyData, (d) => seen.push([...d.pending]))
-  await new Promise((r) => setTimeout(r, 0))
+  let arrived: () => void = () => {}
+  const first = new Promise<void>((resolve) => { arrived = resolve })
+  const done = loadServiceData({ ...api, mergeControlStatus: () => slow }, 'room', new Date('2026-10-20T12:00:00Z'), emptyData, (d) => { seen.push([...d.pending]); arrived() })
+  await first
   assert.ok(seen.length > 0 && seen.every((p) => p.includes('queue')), 'the slow queue holds back only its own card')
   release()
   assert.deepEqual((await done).pending, [])
 })
 
-test('a call that never answers times out and leaves its part empty', async () => {
-  const data = await loadServiceData({ ...api, voiceStatus: () => new Promise(() => {}) }, 'room', new Date('2026-10-20T12:00:00Z'), emptyData, () => {}, 20)
+test('a call that never answers times out and leaves its part empty', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let ready: () => void = () => {}
+  const settled = new Promise<void>((resolve) => { ready = resolve })
+  const pending = loadServiceData({ ...api, voiceStatus: () => new Promise(() => {}) }, 'room', new Date('2026-10-20T12:00:00Z'), emptyData, (d) => {
+    if (d.pending.length === 1 && d.pending[0] === 'voice') ready()
+  }, 20)
+  await settled
+  t.mock.timers.tick(20)
+  const data = await pending
   assert.deepEqual(data.pending, [])
   assert.equal(data.voice, null)
   assert.equal(data.reviewer?.enabled, true)
+})
+
+test('hook reads settle independently and a failed refresh keeps their last result', async () => {
+  const now = new Date('2026-10-20T12:00:00Z')
+  const first = await loadServiceData(api, 'room', now, emptyData, () => {}, 20000,
+    () => Promise.resolve([{ hook: { name: 'self-update', event: 'main-updated', disabled: true } }]))
+  const next = await loadServiceData({ ...api, notices: () => Promise.reject(new Error('unavailable')) }, 'room', now, first, () => {}, 20000,
+    () => Promise.reject(new Error('unavailable')))
+  assert.equal(next.hooks?.[0]?.hook.disabled, true)
+  assert.deepEqual(next.notices, [])
+  assert.equal(next.budget?.testMax, '1s')
+  assert.deepEqual(next.pending, [])
+  assert.equal(next.mergePaused, false)
 })
