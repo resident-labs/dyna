@@ -45,15 +45,17 @@
     gap: 8px;
     width: 100%;
     padding: 8px 12px;
-    font-size: 13px;
+    color: var(--ink-2);
+    font-size: var(--t-ui);
   }
   .body { padding: 0 12px 10px; }
-  .glyph { color: var(--gold, #b8860b); }
+  .glyph { flex: none; color: var(--gold); }
   .title { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
   .what { color: var(--muted); }
   .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .fact { color: var(--muted); font-size: 12px; }
-  .fact b { color: var(--text); font-weight: 600; }
-  time { margin-left: auto; color: var(--muted); font-size: 12px; }
-  .reason { margin: 0; color: var(--text); font-size: 13px; }
+  .fact { color: var(--muted); font-size: var(--t-sm); white-space: nowrap; flex: none; }
+  .fact b { color: var(--ink-2); font-weight: 600; }
+  /* The clock keeps the row short; the full stamp is in the title. */
+  time { margin-left: auto; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; flex: none; }
+  .reason { margin: 0; color: var(--ink-2); font-size: var(--t-sm); }
 </style>
