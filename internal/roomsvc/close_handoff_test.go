@@ -72,7 +72,16 @@ func TestCloseHandsAuthorshipAndGoalsToAncestor(t *testing.T) {
 				t.Fatal(err)
 			}
 			closed, err := e.svc.CloseSession(e.ctx, rec.ID, author.ID)
-			if err != nil || !closed.Closed {
+			if ancestry == "root" || ancestry == "pruned parent" {
+				// A close only reaches root or the owner: the goal must be resolved
+				// first, and --force releases it to the owner.
+				if err == nil || !strings.Contains(err.Error(), "dyna goal done "+g.ID) {
+					t.Fatalf("close with root above = %+v, %v; want the goal refusal", closed, err)
+				}
+				if closed, err = e.svc.ForceCloseSession(e.ctx, rec.ID, author.ID); err != nil || !closed.Closed {
+					t.Fatalf("forced close = %+v, %v", closed, err)
+				}
+			} else if err != nil || !closed.Closed {
 				t.Fatalf("close = %+v, %v", closed, err)
 			}
 			r, err := e.svc.PRs.Watcher().Store.Get(key)
