@@ -602,7 +602,7 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 			return resumeTurnReports(ctx, rooms.Notify, "")
 		})
 	}
-	workerDone = begin(watch, rooms, accounts, load, readOnly, signals, engineTimers, events, func(ev roomsvc.Event) {
+	workerDone = begin(watch, rooms, accounts, load, readOnly, signals, engineTimers, events, started, func(ev roomsvc.Event) {
 		if ev.Kind == "call-requests" {
 			wakeWorker(callRing)
 		}
