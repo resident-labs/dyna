@@ -14,11 +14,12 @@ import (
 )
 
 type defaultBranchProbe struct {
-	Name, Head   string
-	CI           string
-	CheckCount   int
-	NoPushCI     bool
-	MergeTrialCI bool
+	Name, Head    string
+	CI            string
+	CheckCount    int
+	ChecksPending bool
+	NoPushCI      bool
+	MergeTrialCI  bool
 }
 
 type discoveredPull struct {
@@ -130,7 +131,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 				return nil, rates, fmt.Errorf("invalid repository %q", repo)
 			}
 
-			fmt.Fprintf(&query, "r%d:repository(owner:%s,name:%s){defaultBranchRef{name target{... on Commit{oid statusCheckRollup{state contexts{totalCount}} workflows:file(path:\".github/workflows\"){object{... on Tree{entries{name type object{... on Blob{text isTruncated}}}}}}}}}", i, strconv.Quote(owner), strconv.Quote(name))
+			fmt.Fprintf(&query, "r%d:repository(owner:%s,name:%s){defaultBranchRef{name target{... on Commit{oid statusCheckRollup{state contexts{totalCount checkRunCountsByState{state count} statusContextCountsByState{state count}}} workflows:file(path:\".github/workflows\"){object{... on Tree{entries{name type object{... on Blob{text isTruncated}}}}}}}}}", i, strconv.Quote(owner), strconv.Quote(name))
 			sort.Slice(grouped[repo], func(a, b int) bool {
 				x, y := grouped[repo][a], grouped[repo][b]
 				if x.Number != y.Number {
@@ -192,6 +193,7 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 			}
 			if rollup := defaultBranch.Target.Rollup; rollup != nil {
 				branch.CI, branch.CheckCount = rollup.State, rollup.Contexts.TotalCount
+				branch.ChecksPending = rollup.pending()
 			}
 			branch.NoPushCI = branch.NoPushCI && branch.CheckCount == 0
 

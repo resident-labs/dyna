@@ -9,8 +9,41 @@ import (
 type commitRollup struct {
 	State    string `json:"state"`
 	Contexts struct {
-		TotalCount int `json:"totalCount"`
+		TotalCount int                `json:"totalCount"`
+		CheckRuns  []rollupStateCount `json:"checkRunCountsByState"`
+		Statuses   []rollupStateCount `json:"statusContextCountsByState"`
 	} `json:"contexts"`
+}
+
+type rollupStateCount struct {
+	State string `json:"state"`
+	Count int    `json:"count"`
+}
+
+// GitHub can report FAILURE while a replacement for a cancelled run is active.
+// State counts cover every context without the pagination limit of nodes.
+func (r *commitRollup) pending() bool {
+	for _, run := range r.Contexts.CheckRuns {
+		if run.Count == 0 {
+			continue
+		}
+		switch run.State {
+		case "ACTION_REQUIRED", "CANCELLED", "FAILURE", "NEUTRAL", "SKIPPED", "STALE", "STARTUP_FAILURE", "SUCCESS", "TIMED_OUT":
+		default:
+			return true
+		}
+	}
+	for _, status := range r.Contexts.Statuses {
+		if status.Count == 0 {
+			continue
+		}
+		switch status.State {
+		case "ERROR", "FAILURE", "SUCCESS":
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 type defaultCommit struct {
@@ -23,7 +56,7 @@ func defaultHeadConfirmed(p defaultBranchProbe) bool {
 }
 
 func defaultVerification(p defaultBranchProbe) string {
-	if !defaultHeadConfirmed(p) {
+	if !defaultHeadConfirmed(p) || p.ChecksPending {
 		return "pending"
 	}
 	if p.NoPushCI && p.CheckCount == 0 {
