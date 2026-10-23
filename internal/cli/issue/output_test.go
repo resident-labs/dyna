@@ -90,8 +90,8 @@ func TestIssueCommandsUseReadableOutputAndExplicitJSON(t *testing.T) {
 				f := newIssueFixture(t)
 				args := []string{"Fix parser", "--at", "parser.go:12", "--note", "details"}
 				if action != "file" {
-					i := f.file(t)
-					args = []string{action, i.ID}
+					f.file(t)
+					args = []string{action, "D-1"}
 					switch action {
 					case "list":
 						args = []string{"list"}
@@ -134,15 +134,15 @@ func TestIssueCommandsUseReadableOutputAndExplicitJSON(t *testing.T) {
 				want := ""
 				switch action {
 				case "file":
-					want = "filed " + i.ID + " : " + i.Title + "\n"
+					want = "filed D-1 : " + i.Title + "\n"
 				case "list":
-					want = i.ID + "  open  " + i.Title + "  parser.go:12\n"
+					want = "D-1  open  " + i.Title + "  parser.go:12\n"
 				case "close":
-					want = "closed " + i.ID + " : " + i.Title + "\n"
+					want = "closed D-1 : " + i.Title + "\n"
 				case "goal":
-					want = "goal " + i.ID + " : " + i.Title + " -> " + i.GoalID + "\n"
+					want = "goal D-1 : " + i.Title + " -> " + i.GoalID + "\n"
 				case "export":
-					want = "exported " + i.ID + " : " + i.Title + " -> " + i.GitHubURL + "\n"
+					want = "exported D-1 : " + i.Title + " -> " + i.GitHubURL + "\n"
 				}
 				if out != want {
 					t.Fatalf("human output = %q, want %q", out, want)

@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 import { bundle, domNames, importBundle, installDom } from './prDetailHarness.ts'
-import { unifiedIssues, type RoomIssue } from './unifiedIssues.ts'
+import { issueReference, unifiedIssues, type RoomIssue } from './unifiedIssues.ts'
 import { issueGroups, issueChip } from './github.ts'
 import type { GitHubItem } from '../api/github.ts'
 import { element, elements, need } from '../../../test/need.ts'
@@ -155,7 +155,7 @@ test('Issues never loads PR merge status, on mount or focus', async () => {
   } finally { await r.done() }
 })
 
-const localIssue: RoomIssue = { id: 'msg_local', title: 'Local issue', state: 'open', file: 'web/Example.svelte', line: 12, filer: 'builder', filedAt: 100 }
+const localIssue: RoomIssue = { id: 'msg_local', number: 12, title: 'Local issue', state: 'open', file: 'web/Example.svelte', line: 12, filer: 'builder', filedAt: 100 }
 
 test('unified issues deduplicate exports by repository URL and preserve local rows without GitHub', () => {
   const remote = issue(20, 'needs-owner')
@@ -168,17 +168,37 @@ test('unified issues deduplicate exports by repository URL and preserve local ro
   assert.deepEqual(unifiedIssues([], [localIssue], 'dyna', 'open', 'example.svelte').map(i => i.local?.id), ['msg_local'])
 })
 
+test('local issue search includes its room number', () => {
+  const local = [localIssue, { ...localIssue, id: 'other', number: 13 }]
+  assert.deepEqual(unifiedIssues([], local, 'dyna', 'all', 'd-12').map(i => i.local?.id), ['msg_local'])
+  assert.deepEqual(unifiedIssues([], local, 'dyna', 'all', '12').map(i => i.local?.id), ['msg_local'])
+  assert.deepEqual(unifiedIssues([], local, 'dyna', 'all', 'D-14'), [])
+})
+
+test('issue references use room labels and keep GitHub numbers', () => {
+  const rows = unifiedIssues([issue(839, 'needs-owner')], [localIssue], 'all', 'all', '')
+  assert.deepEqual(issueReference(need(rows.find(i => i.local))), { kind: 'room_issue', number: 'D-12', title: localIssue.title, state: 'OPEN', url: '' })
+  assert.deepEqual(issueReference(need(rows.find(i => i.number))), { kind: 'issue', number: 839, title: 'Issue 839', state: 'OPEN', url: 'https://github.com/o/r/issues/839' })
+})
+
 test('local issues remain readable and actionable when GitHub fails', async () => {
   Object.assign(globalThis, { issueListFails: true })
   const dismissed: RoomIssue[] = []
-  const r = await render([], { localIssues: [localIssue], ondismississue: (i: RoomIssue) => dismissed.push(i) })
+  const references: unknown[] = []
+  const r = await render([], { localIssues: [localIssue], ondismississue: (i: RoomIssue) => dismissed.push(i), onmention: (reference: unknown) => references.push(reference) })
   try {
     assert.match(r.target.textContent || '', /Local issue/)
+    assert.match(element(r.target, '.identity').textContent || '', /D-12/)
+    assert.doesNotMatch(r.target.textContent || '', /msg_local/)
+    need(elements(r.target, 'button').find(b => b.textContent === 'Mention in chat')).click()
     assert.match(r.target.textContent || '', /No repository/)
     need(elements(r.target, 'button').find(b => b.textContent === 'Dismiss')).click()
     assert.equal(dismissed[0]?.id, localIssue.id)
     element(r.target, '.row').click()
     await settle()
+    assert.equal(element(r.target, '.local-detail h2').textContent, 'D-12 Local issue')
+    need(elements(r.target, '.local-detail button').find(b => b.textContent === 'Mention in chat')).click()
+    assert.deepEqual(references.map(reference => (reference as { number: unknown }).number), ['D-12', 'D-12'])
     assert.match(element(r.target, '.local-detail').textContent || '', /Local body text/)
     assert.match(element(r.target, '.local-detail').textContent || '', /web\/Example.svelte:12/)
   } finally { await r.done() }

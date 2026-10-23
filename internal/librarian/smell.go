@@ -93,7 +93,7 @@ func (s Service) FileSmell(ctx context.Context, actor authority.Actor, repoDir, 
 	}
 	for _, i := range open {
 		if sameSmell(i, sm.Title, file) {
-			return room.Issue{}, fmt.Errorf("open issue %s already covers this smell: %s", i.ID, i.Title)
+			return room.Issue{}, fmt.Errorf("open issue %s already covers this smell: %s", i.Label(), i.Title)
 		}
 	}
 	note := "Files: " + strings.Join(sm.At, ", ") + "\nSymbols: " + strings.Join(sm.Symbols, ", ") +
