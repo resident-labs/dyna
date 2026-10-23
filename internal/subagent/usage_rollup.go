@@ -55,6 +55,9 @@ func Migrate(dataDir string) error {
 	if err := s.migrateRetainedTurns(); err != nil {
 		return err
 	}
+	if err := s.migrateTurnCutoffs(); err != nil {
+		return err
+	}
 	if err := s.migrateRetainedUsage(); err != nil {
 		return err
 	}
