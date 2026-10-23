@@ -1,7 +1,6 @@
 package hooks
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -13,12 +12,15 @@ import (
 
 // The self-update hook restarts the engine in the middle of its own run, so no
 // result is ever saved and the card stays running. The startup pass ends that
-// run, and leaves a run this engine began alone.
+// run, keeps the room its event belongs to, still posts after every hook is
+// removed, and leaves a run this engine began alone.
 func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 	s, repo := setup(t)
-	var posted []room.HookEvent
-	s.Post = func(_ Event, ev room.HookEvent) error {
-		posted = append(posted, ev)
+	posted := map[string]room.HookEvent{} // run ID -> posted result
+	rooms := map[string]string{}          // run ID -> room the result went to
+	s.Post = func(e Event, ev room.HookEvent) error {
+		posted[ev.RunID] = ev
+		rooms[ev.RunID] = e.Room
 		return nil
 	}
 	ctx := t.Context()
@@ -26,48 +28,52 @@ func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	add(t, s, repo, func() Hook {
-		updater := hook("update", MainUpdated)
-		updater.Label = "Update Dyna"
-		return updater
-	}())
+	updater := hook("update", MainUpdated)
+	updater.Label = "Update Dyna"
+	add(t, s, repo, updater)
+	add(t, s, repo, hook("finish", SessionFinish))
 	now := time.Date(2026, 10, 23, 12, 0, 0, 0, time.UTC)
+	start := func(h Hook, e Event, at time.Time, main string) Run {
+		t.Helper()
+		run, log, err := s.newRun(ctx, r, e, h)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := log.Close(); err != nil {
+			t.Fatal(err)
+		}
+		run.StartedAt, run.Main = at, main
+		if _, err := s.saveRun(ctx, run); err != nil {
+			t.Fatal(err)
+		}
+		return run
+	}
 
 	// The run the previous engine started and never finished.
-	left, leftLog, err := s.newRun(ctx, r.ID, Hook{Name: "update", Label: "Update Dyna", Event: MainUpdated, Command: "make update", Timeout: "30s"}, "")
-	if err != nil {
+	left := start(Hook{Name: "update", Label: "Update Dyna", Event: MainUpdated, Command: "make update", Timeout: "30s"}, Event{Event: MainUpdated}, now.Add(-time.Hour), r.Main)
+	if err := os.WriteFile(left.LogPath, []byte("installing dyna 7e6caa5c4\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fmt.Fprintln(leftLog, "installing dyna 7e6caa5c4"); err != nil {
-		t.Fatal(err)
-	}
-	if err := leftLog.Close(); err != nil {
-		t.Fatal(err)
-	}
-	left.StartedAt = now.Add(-time.Hour)
-	if _, err := s.saveRun(ctx, left); err != nil {
-		t.Fatal(err)
-	}
-
+	// A session-finish run posts in its session's room, not the repository's.
+	session := start(Hook{Name: "finish", Event: SessionFinish, Command: "true", Timeout: "30s"}, Event{Event: SessionFinish, Room: "room_session"}, now.Add(-30*time.Minute), r.Main)
+	// A run stored before it carried its own checkout.
+	legacy := start(Hook{Name: "update", Event: MainUpdated, Command: "true", Timeout: "30s"}, Event{Event: MainUpdated}, now.Add(-2*time.Hour), "")
 	// A run this engine began, which is still live.
-	live, liveLog, err := s.newRun(ctx, r.ID, Hook{Name: "update", Label: "Update Dyna", Event: MainUpdated, Command: "make update", Timeout: "30s"}, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := liveLog.Close(); err != nil {
-		t.Fatal(err)
-	}
-	live.StartedAt = now
-	if _, err := s.saveRun(ctx, live); err != nil {
-		t.Fatal(err)
+	live := start(Hook{Name: "update", Event: MainUpdated, Command: "make update", Timeout: "30s"}, Event{Event: MainUpdated}, now, r.Main)
+
+	// Every hook is gone before the engine settles these runs.
+	for _, name := range []string{"update", "finish"} {
+		if err := s.Remove(ctx, repo, name); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := s.SettleInterrupted(ctx, now); err != nil {
 		t.Fatal(err)
 	}
 
-	runs, err := s.runs(ctx, r.ID, "update")
-	if err != nil || len(runs) != 2 {
+	runs, err := s.runs(ctx, r.ID, "")
+	if err != nil || len(runs) != 4 {
 		t.Fatalf("runs = %+v, %v", runs, err)
 	}
 	byID := map[string]Run{}
@@ -85,13 +91,16 @@ func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 	if err != nil || !strings.Contains(string(log), "the engine stopped during this run") {
 		t.Fatalf("log = %q, %v", log, err)
 	}
-	// The card ends with one typed result: the state, the detail and how long
+	// Each card ends with one typed result: the state, the detail and how long
 	// the run lasted.
-	if len(posted) != 1 {
+	if len(posted) != 3 {
 		t.Fatalf("posted = %+v", posted)
 	}
-	ev := posted[0]
-	if ev.State != room.HookError || ev.Hook != "update" || ev.Label != "Update Dyna" || ev.RunID != left.ID {
+	ev, ok := posted[left.ID]
+	if !ok {
+		t.Fatalf("no result for the update run: %+v", posted)
+	}
+	if ev.State != room.HookError || ev.Event != MainUpdated || ev.Hook != "update" || ev.Label != "Update Dyna" || ev.RunID != left.ID {
 		t.Fatalf("result event = %+v", ev)
 	}
 	if !strings.Contains(ev.Detail, "the engine stopped during this run") || !strings.Contains(ev.Detail, "installing dyna") {
@@ -99,5 +108,19 @@ func TestSettleInterruptedEndsTheRunAnEarlierEngineLeftRunning(t *testing.T) {
 	}
 	if ev.DurationMS != int(time.Hour.Milliseconds()) {
 		t.Fatalf("duration = %d", ev.DurationMS)
+	}
+	// A session hook's card ends in its own room, and a removed hook still
+	// posts the event the run recorded.
+	got, ok := posted[session.ID]
+	if !ok || rooms[session.ID] != "room_session" {
+		t.Fatalf("session result = %+v in room %q", got, rooms[session.ID])
+	}
+	if got.Event != SessionFinish || got.Hook != "finish" || got.State != room.HookError {
+		t.Fatalf("session result event = %+v", got)
+	}
+	// A run stored without its checkout still reaches the repository's room,
+	// because the hook document keeps the main checkout after its last hook.
+	if _, ok := posted[legacy.ID]; !ok {
+		t.Fatalf("no result for the run without a checkout: %+v", posted)
 	}
 }

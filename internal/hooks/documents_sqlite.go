@@ -144,3 +144,18 @@ func (s Service) Repositories(ctx context.Context) ([]string, error) {
 	}
 	return repos, rows.Err()
 }
+
+// documentRepo returns the main checkout that one hook document records. The
+// document remains after its last hook is removed, and a settled run needs the
+// checkout to reach the room its card is in.
+func (s Service) documentRepo(ctx context.Context, id string) (string, error) {
+	db, err := s.documentsDB()
+	if err != nil {
+		return "", err
+	}
+	d, err := readDocument(ctx, db, filepath.Base(s.dir(id)))
+	if err != nil {
+		return "", err
+	}
+	return d.Repo, nil
+}

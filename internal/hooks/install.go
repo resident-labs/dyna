@@ -267,7 +267,6 @@ func (s Service) SettleInterrupted(ctx context.Context, started time.Time) error
 	if err != nil {
 		return errors.Join(append(errs, err)...)
 	}
-	mains := s.repoMains(ctx)
 	i := s.installer()
 	for _, run := range runs {
 		// A run that started after this engine did, such as one a drained spool
@@ -283,14 +282,15 @@ func (s Service) SettleInterrupted(ctx context.Context, started time.Time) error
 			errs = append(errs, err)
 			continue
 		}
-		errs = append(errs, s.settleLeftRun(ctx, run, mains[run.Repo], started))
+		errs = append(errs, s.settleLeftRun(ctx, run, started))
 	}
 	return errors.Join(errs...)
 }
 
 // settleLeftRun ends one run that can never finish, writes why into its log,
-// and posts the typed result that ends its card.
-func (s Service) settleLeftRun(ctx context.Context, run Run, main string, now time.Time) error {
+// and posts the typed result that ends its card. The run itself keeps the
+// event, the checkout and the room, because the hook may be gone by now.
+func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) error {
 	detail := "the engine stopped during this run, so its result was never recorded"
 	if line := lastLogLine(run.LogPath); line != "" {
 		detail += ": " + line
@@ -303,12 +303,19 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, main string, now ti
 	if _, err := s.saveRun(ctx, run); err != nil {
 		return err
 	}
+	main := run.Main
+	if main == "" {
+		// A run stored before it carried its checkout: the document keeps the
+		// repository's main checkout even after its last hook is removed.
+		main, _ = s.documentRepo(ctx, run.Repo)
+	}
 	if main == "" {
 		return nil
 	}
-	// The run names the hook as "hook-<name>", and the hook's settings decide
-	// how the card reads. A hook removed since then still ends its own run.
-	h := Hook{Name: strings.TrimPrefix(run.Name, "hook-")}
+	// The run names the hook as "hook-<name>", and a hook still in place
+	// decides how the card reads. A removed hook still ends its own run from
+	// what the run recorded.
+	h := Hook{Name: strings.TrimPrefix(run.Name, "hook-"), Event: run.Event, Label: run.Label, Command: run.Command}
 	if hooks, err := s.load(ctx, run.Repo); err == nil {
 		for _, old := range hooks {
 			if "hook-"+old.Name == run.Name {
@@ -317,25 +324,9 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, main string, now ti
 			}
 		}
 	}
-	ev := Event{Event: h.Event, Repo: main, Worktree: main}
+	ev := Event{Event: run.Event, Repo: main, Worktree: main, Room: run.Room}
 	s.emit(ev, hookEvent(ev, h, run, room.HookError, detail))
 	return nil
-}
-
-// repoMains maps the identity of each repository with stored hooks to its main
-// checkout, which a settled run's event needs to reach the repository's room.
-func (s Service) repoMains(ctx context.Context) map[string]string {
-	paths, err := s.Repositories(ctx)
-	if err != nil {
-		return nil
-	}
-	mains := make(map[string]string, len(paths))
-	for _, path := range paths {
-		if r, err := repoid.Resolve(ctx, path); err == nil {
-			mains[r.ID] = r.Main
-		}
-	}
-	return mains
 }
 
 // lastLogLine reads the end of a run's log for the line its settled card shows.
