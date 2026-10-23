@@ -132,11 +132,8 @@ const settingItems: SettingItem[] = [
   item({ key: 'content.maxFileBytes', kind: 'bytes', value: 26214400, source: 'file', help: 'The largest file attachment a session can post.' }),
   item({ key: 'root.profile', kind: 'select', value: 'opus', options: ['opus', 'sol', 'mimo'], source: 'file', help: 'The profile a new root session uses.' }),
   item({ key: 'subagent.maxDepth', kind: 'int', value: 3, source: 'default', help: 'How deep sessions can start child sessions.' }),
+  item({ key: 'sessions.checkInInterval', kind: 'duration', value: '15m', source: 'default', help: 'How often parents review their children.' }),
   item({ key: 'steering.maxToolWait', kind: 'duration', value: '30s', source: 'default', help: 'How long a busy tool can run before a message interrupts it.' }),
-  item({ key: 'goals.keeperProfile', kind: 'select', value: 'sol', options: ['opus', 'sol', 'mimo'], source: 'default', help: 'The model that checks whether goals are done.' }),
-  item({ key: 'goals.checkInInterval', kind: 'duration', value: '30m', source: 'default', help: 'How often Dyna asks goal holders how close they are.' }),
-  item({ key: 'goals.checkInReplyWait', kind: 'duration', value: '15m', source: 'default', help: 'How long a check-in waits for replies.' }),
-  item({ key: 'goals.keeperTimeout', kind: 'duration', value: '5m', source: 'default', help: 'The deadline for one keeper pass.' }),
   item({ key: 'worktrees.retention', kind: 'duration', value: '72h', source: 'default', help: 'How long Dyna keeps finished workflow worktrees.' }),
   item({ key: 'updater.autoCheck', kind: 'bool', value: true, source: 'default', help: 'Check for a new Dyna version in the background.' }),
 ]

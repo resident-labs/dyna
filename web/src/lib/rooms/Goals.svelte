@@ -3,7 +3,6 @@
   import Avatar from '../ui/Avatar.svelte'
   import GoalGlyph from './GoalGlyph.svelte'
   import TabHeader from './TabHeader.svelte'
-  import ServiceHeader from '../services/ServiceHeader.svelte'
   import Row from '../ui/Row.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import { goalTree, goalStatus, goalTone, goalFilter, itemCountLabel } from './goals.ts'
@@ -30,7 +29,6 @@
 </script>
 <section class="goals" aria-label="Goals">
   <TabHeader title="Goals" blurb="Plain-English goals with a mechanical status from facts. Holders write the Journal; items delegate the work." filters={['active', 'done', 'journal'].map((f) => ({ id: f, label: f[0].toUpperCase() + f.slice(1) }))} bind:filter />
-  <ServiceHeader {roomId} role="keeper" />
   <div class="list">
     {#if filter === 'journal'}
       <GoalJournal {...journal} {members} onolder={() => journalLoader.older()} ongoal={async (id) => { const g = await ongoal(id); if (g) filter = goalFilter(g) }} />

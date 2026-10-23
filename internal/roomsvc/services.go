@@ -29,7 +29,7 @@ type ServiceView struct {
 }
 
 // ListServices reads each service's profile from the setting that owns it:
-// settings for the keeper and steward, and the room's reviewer state for the
+// settings for the steward, and the room's reviewer state for the
 // reviewer. A service whose state cannot be read keeps its row, with the
 // error as its Reason, so the other services still show.
 func (s *Service) ListServices(roomRef string) ([]ServiceView, error) {
@@ -40,11 +40,6 @@ func (s *Service) ListServices(roomRef string) ([]ServiceView, error) {
 	v, err := settings.Load(settings.DefaultPath())
 	if err != nil {
 		return nil, err
-	}
-	keeper := ServiceView{Role: "keeper", Name: "Goal keeper", Page: "goals", Pinned: v.GoalKeeperProfile, Scope: "global"}
-	keeper.Profile, keeper.Reason, err = s.goalService().KeeperProfile(rec.ID, v.GoalKeeperProfile)
-	if err != nil {
-		keeper.Reason = err.Error()
 	}
 	steward := ServiceView{Role: subagent.RoleSteward, Name: "Merge steward", Page: "pull-requests", Pinned: v.MergeStewardProfile, Scope: "global"}
 	steward.Profile, steward.Reason, err = s.PRs.Watcher().StewardProfile(v.MergeStewardProfile)
@@ -77,7 +72,7 @@ func (s *Service) ListServices(roomRef string) ([]ServiceView, error) {
 			choices = append(choices, p.Name)
 		}
 	}
-	out := []ServiceView{keeper, reviewer, steward}
+	out := []ServiceView{reviewer, steward}
 	for i := range out {
 		out[i].Profiles = choices
 		out[i].Source = "auto"
@@ -99,20 +94,16 @@ func (s *Service) SetServiceProfile(ctx context.Context, roomRef, role, profile 
 		return err
 	}
 	switch role {
-	case "keeper", subagent.RoleSteward:
+	case subagent.RoleSteward:
 		if _, err := s.rooms().Resolve(roomRef); err != nil {
 			return err
 		}
-		// Only the steward has an off mode; the keeper must name a profile or Auto.
-		if role != subagent.RoleSteward || profile != settings.StewardProfileOff {
+		if profile != settings.StewardProfileOff {
 			if err := s.enabledProfile(profile); err != nil {
 				return err
 			}
 		}
-		key := settings.KeyGoalKeeperProfile
-		if role == subagent.RoleSteward {
-			key = settings.KeyMergeStewardProfile
-		}
+		key := settings.KeyMergeStewardProfile
 		_, err := configsvc.Set(ctx, key, profile)
 		return err
 	case "reviewer":

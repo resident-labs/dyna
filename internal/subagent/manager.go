@@ -260,7 +260,7 @@ func (m *Manager) Start(ctx context.Context, opts StartOptions) (Info, Turn, err
 }
 
 // StartForEngine starts a session for the engine's own work, for no caller:
-// a room's root, keeper, librarian, steward or reviewer, or the agent that a
+// a room's root, librarian, steward or reviewer, or the agent that a
 // PR notice escalates to. It checks no caller and sets no parent. It must never be an engine call
 // (TestEngineMaintenanceIsNeverACall).
 func (m *Manager) StartForEngine(opts StartOptions) (Info, Turn, error) {
@@ -366,13 +366,6 @@ func (m *Manager) start(opts StartOptions, parent, owner string) (Info, Turn, er
 	}
 	if err := checkProfileUse(*prof, service); err != nil {
 		return Info{}, Turn{}, err
-	}
-	if opts.Role == RoleKeeper {
-		safe, err := KeeperProfile(*prof)
-		if err != nil {
-			return Info{}, Turn{}, err
-		}
-		prof = &safe
 	}
 	if err := review.CheckReviewerHelper(reviewerHierarchy{m.store()}, parent, *prof, profs); err != nil {
 		return Info{}, Turn{}, err
@@ -547,7 +540,6 @@ func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, m
 			if pauseErr != nil {
 				return pauseErr
 			}
-			deadline = m.turnDeadline(meta.Role, deadline)
 			turn = Turn{
 				Deadline: deadline,
 				RoomHeld: roomPause.Paused || roomPause.ResumePending,

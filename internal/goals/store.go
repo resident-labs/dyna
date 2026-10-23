@@ -1,4 +1,4 @@
-// Package goals stores long-lasting room tasks and the keeper's journal.
+// Package goals stores long-lasting room tasks and their journals.
 package goals
 
 import (
@@ -14,10 +14,9 @@ import (
 )
 
 type Edit struct {
-	WaitUntil time.Time `json:"waitUntil,omitempty"`
-	At        time.Time `json:"at"`
-	By        string    `json:"by"`
-	OldText   string    `json:"oldText"`
+	At      time.Time `json:"at"`
+	By      string    `json:"by"`
+	OldText string    `json:"oldText"`
 }
 type Outcome struct {
 	At      time.Time `json:"at"`
@@ -35,14 +34,9 @@ type Goal struct {
 	Holders []string `json:"holders"`
 	Shared  bool     `json:"shared"`
 	// NextItem allocates the goal's item IDs: i1, i2, ...
-	NextItem int `json:"nextItem,omitempty"`
-	// NudgedAt records the last stale nudge, so a holder hears at most one
-	// per stale window.
-	NudgedAt  time.Time `json:"nudgedAt,omitempty"`
+	NextItem  int       `json:"nextItem,omitempty"`
 	State     string    `json:"state"`
 	CreatedAt time.Time `json:"createdAt"`
-	WaitAt    time.Time `json:"waitAt,omitempty"`
-	WaitUntil time.Time `json:"waitUntil,omitempty"`
 	UpdatedAt time.Time `json:"updatedAt"`
 	Edits     []Edit    `json:"edits"`
 	Done      *Outcome  `json:"done,omitempty"`
@@ -68,21 +62,6 @@ func (g Goal) HeldBy(id string) bool {
 	return false
 }
 
-// Notice is a queued keeper post. New notices use holder_closed or item_moved.
-// A notice stays queued until its post is stored.
-type Notice struct {
-	Kind string `json:"kind,omitempty"`
-	// Entry is the journal entry a journal notice appends and posts.
-	Entry *JournalEntry `json:"entry,omitempty"`
-	// TODO: legacy/shim remove later — Intent tells holder-closed notices queued before notice kinds existed; remove when stored states hold none.
-	Intent string `json:"intent,omitempty"`
-	ID     string `json:"id"`
-	Room   string `json:"room"`
-	Goal   string `json:"goal"`
-	To     string `json:"to,omitempty"`
-	Text   string `json:"text"`
-}
-
 // RuleSet holds the standing rules of one scope: a room, or Global.
 type RuleSet struct {
 	Rules      map[string]*Rule `json:"rules,omitempty"`
@@ -90,13 +69,8 @@ type RuleSet struct {
 }
 type RoomState struct {
 	RuleSet
-	// ReleasedAt records when each session last stopped holding an open
-	// goal, whether it closed or moved to another holder.
-	ReleasedAt map[string]time.Time `json:"releasedAt,omitempty"`
-	Keeper     KeeperRoomState      `json:"keeper,omitempty"`
-	NextID     int                  `json:"nextId"`
-	Goals      map[string]*Goal     `json:"goals"`
-	Notices    []Notice             `json:"notices"`
+	NextID int              `json:"nextId"`
+	Goals  map[string]*Goal `json:"goals"`
 }
 type State struct {
 	Version int                   `json:"version"`
@@ -239,31 +213,6 @@ func (s *Store) Finish(room, id, by, summary string, drop bool) (Goal, error) {
 	})
 }
 
-// MarkNudged records a stale nudge time on an open goal.
-func (s *Store) MarkNudged(room, id string, at time.Time) error {
-	return s.update(func(st *State) error {
-		g := st.Room(room).Goals[id]
-		if g == nil || !g.Open() {
-			return fmt.Errorf("goal %s is not open in this room", id)
-		}
-		g.NudgedAt, g.UpdatedAt = at, s.now()
-		return nil
-	}, openGoals)
-}
-
-// Check reads a goal for a keeper sweep. Checking is not progress and does
-// not move a strike deadline.
-func (s *Store) Check(room, id string) (Goal, error) {
-	g, err := s.Get(room, id)
-	if err != nil {
-		return Goal{}, err
-	}
-	if !g.Open() {
-		return Goal{}, fmt.Errorf("edit this goal to reopen it before checking")
-	}
-	return g, nil
-}
-
 func (s *Store) change(room, id string, fn func(*wake, *RoomState, *Goal) error) (Goal, error) {
 	var out Goal
 	where, args := named(room, id)
@@ -299,9 +248,9 @@ func unique(in []string) []string {
 }
 
 // CloseSession drops the closing session's own work. Delegated work returns
-// to its live setter, or gets one owner escalation. Historical goals retain
+// to its live setter, or remains unheld. Historical goals retain
 // the existing heir mapping without waking that heir.
-func (s *Store) CloseSession(room, id, heir string, open map[string]bool, completedResult string) error {
+func (s *Store) CloseSession(room, id, heir string, open map[string]bool) error {
 	return s.updateTx(func(w *wake, st *State) error {
 		r := st.Rooms[room]
 		if r == nil {
@@ -321,11 +270,6 @@ func (s *Store) CloseSession(room, id, heir string, open map[string]bool, comple
 					target = g.Setter
 					g.Holders = []string{target}
 				}
-				text := "Goal " + g.ID + " lost its holder " + id + ". Take it, reassign it, or close it."
-				if completedResult != "" {
-					text = "Goal " + g.ID + " holder " + id + " closed after a successful turn.\n" + completedResult + "\nReview the result before reassigning or closing the goal."
-				}
-				r.Notices = append(r.Notices, Notice{Kind: "holder_closed", ID: fmt.Sprintf("goal_%s_holder_closed_%d", g.ID, now.UnixNano()), Room: room, Goal: g.ID, To: target, Text: text})
 				continue
 			}
 			// Historical handovers validate recipients without assigning live work.

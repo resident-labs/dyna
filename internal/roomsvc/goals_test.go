@@ -38,9 +38,6 @@ func TestGoalsUseRoomAuthorityAndQuietMilestones(t *testing.T) {
 	if err != nil || g.State != "active" {
 		t.Fatal(g, err)
 	}
-	if _, err := e.svc.CheckGoal(t.Context(), other.ID, g.ID); err == nil {
-		t.Fatal("checked another room's goal")
-	}
 	all, err := e.svc.Goals(r.ID, "", 0)
 	if err != nil || len(all.Items) != 2 || all.Items[0].ID != lead.Goal { // the lead's spawn goal, then g
 		t.Fatal(all, err)
@@ -196,21 +193,16 @@ func TestGoalStatusReadsLiveFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// A fresh goal with an idle holder and no work reads on track.
-	st, err := e.svc.GoalStatus(r.ID, g.ID)
-	if err != nil || st.Label != goals.StatusOnTrack {
-		t.Fatalf("status = %+v err=%v", st, err)
-	}
-	// Backdate the goal past the stale window and the label turns stuck.
+	// Elapsed time alone must not mark an idle holder stuck.
 	if err := e.svc.goalService().Store.Update(func(state *goals.State) error {
 		state.Room(r.ID).Goals[g.ID].CreatedAt = time.Now().Add(-7 * time.Hour)
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	st, err = e.svc.GoalStatus(r.ID, g.ID)
-	if err != nil || st.Label != goals.StatusStuck {
-		t.Fatalf("stale status = %+v err=%v", st, err)
+	st, err := e.svc.GoalStatus(r.ID, g.ID)
+	if err != nil || st.Label != goals.StatusOnTrack {
+		t.Fatalf("status = %+v err=%v", st, err)
 	}
 }
 

@@ -13,7 +13,7 @@ func journalCommand(o Options, roomRef *string) *cobra.Command {
 	var tail int
 	cmd := &cobra.Command{
 		Use:   "journal",
-		Short: "Show the keeper's check-in journal, oldest of the last entries first",
+		Short: "Show saved journal entries, oldest of the last entries first",
 		Args:  cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error {
 			s, r, _, err := Caller(o.Service(), *roomRef)

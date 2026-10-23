@@ -467,7 +467,7 @@ func (s *Store) Remove(name string) bool {
 // Profile uses. Each one is a switch: UseWorkflows lets workflow agent()
 // calls run the profile, UseAgents lets dyna subagent sessions (and the
 // internal root) run it, and UseServices lets Dyna's own automatic workers
-// run it: PR reviewers, the goal keeper and their helpers.
+// run it: PR reviewers, the merge steward and their helpers.
 const (
 	UseWorkflows = "workflows"
 	UseAgents    = "agents"

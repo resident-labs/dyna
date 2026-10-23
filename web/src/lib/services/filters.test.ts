@@ -5,7 +5,7 @@ import { defaultFilters, filterEvents, filterSessions } from './filters.ts'
 const now = Date.parse('2026-10-20T12:00:00Z')
 const events = [
   { ts: now - 60000, service: 'reviewer', id: 'a' },
-  { ts: now - 2 * 3600000, service: 'keeper', id: 'b' },
+  { ts: now - 2 * 3600000, service: 'agents', id: 'b' },
   { ts: now - 3 * 86400000, service: 'merge', id: 'c' },
 ]
 
@@ -19,7 +19,7 @@ test('events filter by service and by time range', () => {
 test('sessions filter by service and by state', () => {
   const sessions = [
     { id: 1, role: 'reviewer', state: 'live' },
-    { id: 2, role: 'keeper', state: 'idle' },
+    { id: 2, role: '', state: 'idle' },
     { id: 3, state: 'idle', closed: true },
     { id: 4, state: 'live' },
   ]
@@ -27,6 +27,6 @@ test('sessions filter by service and by state', () => {
   assert.deepEqual(ids({}), [1, 2, 3, 4])
   assert.deepEqual(ids({ state: 'running' }), [1, 4])
   assert.deepEqual(ids({ state: 'closed' }), [3])
-  assert.deepEqual(ids({ service: 'agents' }), [3, 4])
+  assert.deepEqual(ids({ service: 'agents' }), [2, 3, 4])
   assert.deepEqual(ids({ service: 'reviewer', state: 'idle' }), [])
 })

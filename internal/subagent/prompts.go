@@ -31,6 +31,8 @@ func firstTurnPrompt(roomContext, task string) string {
 // postOnChangePrompt keeps posts to real changes. Root and workers share it.
 const postOnChangePrompt = `Post only to the session that must act next, and only for a blocker, a decision, or ready work that session owns. Never copy @root for information. At depth 1 @parent is @root, so the same rule applies. Your final result is your report; do not post it too.`
 
+const parentCheckInPrompt = `All parents, including root, remain responsible for their direct children. Check-ins cover running, queued, or idle children, listed stalest first with state, duration, goal/item, and PR state. Dormant and closed children do not count. Act on stuck work. If everything is on track, end your turn without posting.`
+
 // sessionRules is the core contract and topic triggers, without task or worker
 // metadata. Service sessions hold no goals, so they get no goal rule.
 func sessionRules(holdsGoals bool) string {
@@ -55,6 +57,8 @@ Delegate only through Dyna, never harness subagents, Task/Agent or workflow tool
 
 Never wait or poll for children. Success goes to the current parent; failures alert parent and owner.
 
+` + parentCheckInPrompt + `
+
 Post using ` + "`" + `dyna post @<mention>... "..."` + "`" + `. Mentions: @<name>, @parent, @siblings, @children, @root (owner) and @<room>:<name>. Use --needs-root only when root must act. A recorded verdict, a tracked PR, and a finished goal need no extra post. Never post secrets. Only root uses dyna ask; ask @parent otherwise. Turns started only by child, sibling or group posts end silently.
 ` + postOnChangePrompt + `
 
@@ -72,7 +76,7 @@ no responsibilities goes dormant by itself, and messages wake it.`
 // rootRules is the internal root's contract: the root block that `dyna guide`
 // shows the seat holder, followed by the topic triggers.
 func rootRules() string {
-	return "[DYNA ROOT]\n" + clearEnglishPrompt + "\n\n" + postOnChangePrompt + "\n\n" + guidance.RootBlock(true) + guideTriggers()
+	return "[DYNA ROOT]\n" + clearEnglishPrompt + "\n\n" + postOnChangePrompt + "\n\n" + parentCheckInPrompt + "\n\n" + guidance.RootBlock(true) + guideTriggers()
 }
 
 // rulesFor is the contract a session's prompts carry.

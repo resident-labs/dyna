@@ -5,7 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 // legacyStore returns a store whose goals/state.json holds data.
@@ -51,7 +50,7 @@ func TestImportCopiesSampleState(t *testing.T) {
 	// g2's parent g1 is closed, so the fold migration keeps it standalone;
 	// fold_test asserts no body keeps a parent field.
 	if g.Text != "Fix the lexer." || g.Detail != "Own internal/lex." || g.Setter != "ses_lead" || len(g.Holders) != 1 || g.Holders[0] != "ses_worker" ||
-		!g.WaitUntil.Equal(time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)) || len(g.Edits) != 1 || g.Edits[0].By != "ses_worker" {
+		len(g.Edits) != 1 || g.Edits[0].By != "ses_worker" {
 		t.Fatalf("g2 = %+v", g)
 	}
 	if done := a.Goals["g1"].Done; done == nil || done.Summary != "Merged." {
@@ -59,12 +58,6 @@ func TestImportCopiesSampleState(t *testing.T) {
 	}
 	if a.NextID != 4 || a.NextRuleID != 1 || a.Rules["r1"].Text != "Keep tests fast." || len(a.Rules["r1"].Edits) != 1 {
 		t.Fatalf("room = %+v", a.RuleSet)
-	}
-	if a.Keeper.Session != "ses_keeper" || a.Keeper.Assignments != 2 || len(a.Keeper.FailedProfiles) != 1 {
-		t.Fatalf("keeper = %+v", a.Keeper)
-	}
-	if len(a.Notices) != 1 || a.Notices[0].Kind != "holder_closed" || a.Notices[0].To != "ses_lead" {
-		t.Fatalf("notices = %+v", a.Notices)
 	}
 	if st.Global == nil || st.Global.Rules["u1"].Text != "One implementation per job." {
 		t.Fatalf("global = %+v", st.Global)
@@ -180,54 +173,5 @@ func TestScopedWritesKeepClosedGoals(t *testing.T) {
 	}
 	if st, _ := s.Read(); st.Rooms["r"].NextID != 3 {
 		t.Fatalf("next ID = %d", st.Rooms["r"].NextID)
-	}
-}
-
-func TestReleasedAtTracksAllHolderRemovalPaths(t *testing.T) {
-	for _, change := range []string{"close", "transfer", "session-close"} {
-		t.Run(change, func(t *testing.T) {
-			s := testStore(t)
-			now := s.now()
-			s.Now = func() time.Time { return now }
-			g, err := s.Add("r", "owner", Input{Text: "Ship", Holders: []string{"worker"}})
-			if err != nil {
-				t.Fatal(err)
-			}
-			now = now.Add(time.Minute)
-			switch change {
-			case "close":
-				_, err = s.Finish("r", g.ID, "owner", "Done", false)
-			case "transfer":
-				holders := []string{"other"}
-				_, err = s.Edit("r", g.ID, "owner", "", &holders, false)
-			case "session-close":
-				err = s.CloseSession("r", "worker", "other", map[string]bool{"other": true}, "")
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			st, err := (&Store{Root: s.Root}).ReadOpen()
-			if err != nil {
-				t.Fatal(err)
-			}
-			released := st.Room("r").ReleasedAt
-			if !released["worker"].Equal(now) || !released["other"].IsZero() {
-				t.Fatalf("release times after %s: %+v", change, released)
-			}
-			// Text edits must not move a finished release.
-			now = now.Add(time.Minute)
-			if change != "close" {
-				if _, err := s.Edit("r", g.ID, "owner", "New text", nil, false); err != nil {
-					t.Fatal(err)
-				}
-			}
-			st, err = s.ReadOpen()
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got := st.Room("r").ReleasedAt["worker"]; !got.Equal(now.Add(-time.Minute)) {
-				t.Fatalf("unrelated update moved release: %v", got)
-			}
-		})
 	}
 }

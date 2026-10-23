@@ -57,9 +57,6 @@ func (s *Store) SetSeat(ctx context.Context, ref string, holder Seat, atEnd func
 // session: its posts record the call, and it never takes a turn.
 const VoiceAgent = "voice-call"
 
-// GoalKeeperSender sends the goal keeper's posts. It is not a session.
-const GoalKeeperSender = "goal-keeper"
-
 // SourceVoice marks the posts of the owner's voice call.
 const SourceVoice = "voice"
 
@@ -96,10 +93,13 @@ func WakesRoot(msg Message, roomName string) bool {
 	return false
 }
 
+// ParentCheckInSender identifies scheduler posts without using a room owner name.
+const ParentCheckInSender = "system:parent-checkin"
+
 // RootInput includes direct engine notes and owner replies as well as root
 // action requests. Passive engine notes are drained with the next real input;
 // their Wake field stays false. Worker copies require explicit action intent.
 // RootContext builds the root context feed on top of it.
 func RootInput(msg Message, roomName string) bool {
-	return WakesRoot(msg, roomName) || msg.Addressed(roomName+":"+RootAgent) && (msg.From == roomName || msg.From == "dyna")
+	return WakesRoot(msg, roomName) || msg.Addressed(roomName+":"+RootAgent) && (msg.From == roomName || msg.From == "dyna" || msg.From == ParentCheckInSender && msg.Kind == "checkin")
 }

@@ -27,6 +27,7 @@ import (
 	"dyna-agent/internal/localci"
 	"dyna-agent/internal/maintenance"
 	"dyna-agent/internal/notices"
+	"dyna-agent/internal/parentcheckin"
 	"dyna-agent/internal/plan/ancestry"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/pr/watch"
@@ -75,6 +76,7 @@ var migrations = []func(dataDir string) error{
 	localci.Migrate,
 	maintenance.Migrate,
 	notices.Migrate,
+	parentcheckin.Migrate,
 	ancestry.Migrate,
 	prstate.Migrate,
 	watch.Migrate,

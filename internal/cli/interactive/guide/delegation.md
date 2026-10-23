@@ -113,7 +113,6 @@ dyna goal show g1 --json
 dyna goal edit g1 "New outcome"
 dyna goal done g1 "Summary"
 dyna goal drop g1
-dyna goal wait g1 --until 2h       # waiting on something; not progress
 dyna goal item done g1 i2
 dyna goal item move g1 i2 --to g3
 dyna goal item move g1 i2 --to new
@@ -134,15 +133,21 @@ Review fairness is per room; merge fairness is per repository. Existing review,
 dependency, draft, mergeability, and CI gates still apply. Running reviews, merge
 trials, and CI continue. Expedite does not change session, workflow, or CI scheduling.
 
-Goal changes print one short status line. Add `--json` for the full record and keeper history.
-Edits wake nobody. The goal keeper schedules stale holder nudges and delivers queued notices.
-Goal status uses running turns, turn failures, tracked PRs, item counts, and recent journal events.
+Goal changes print one short status line. Add `--json` for the full record.
+Edits wake nobody. Every 15 minutes, Dyna asks parents with running, queued,
+or idle direct children to check those children.
+The same rule applies to root. Dormant and closed children do not count.
+Parents remain responsible for their children and their work.
+The check-in lists children stalest first with state, duration, goal/item, and PR
+state. Act on stuck work. If everything is on track, end your turn without posting.
+Set `sessions.checkInInterval` to change the
+interval; `0s` disables check-ins.
+Goal status uses running turns, turn failures, tracked PRs, and item counts.
 Use `dyna goal note <id> "<progress>"` to record progress.
-While you wait on something, run `dyna goal wait <id> --until <duration>`.
 
 Move repairs one open item between open goals in the same room. It preserves the full text, brief, and assignee under a fresh destination item ID.
 `--to new` promotes the item to a standalone goal held by its assignee, or by the caller when unassigned.
-Matching spawn instructions follow the work. The assignee receives a queued notice with the new completion command.
+Matching spawn instructions follow the work. Tell the assignee its new item reference.
 History stays at the source, and both locations get cross-linked move events.
 The command returns both references in plain output and JSON. It does not move sessions or other items.
 

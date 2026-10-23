@@ -10,7 +10,7 @@ import (
 // start in the room, so only the service's own role may take the name.
 func TestServiceNamesAreReservedForTheirRole(t *testing.T) {
 	e := newTestEnv(t)
-	for _, name := range []string{RoleKeeper, LibrarianName, RoleSteward} {
+	for _, name := range []string{LibrarianName, RoleSteward} {
 		_, _, err := e.m.Start(context.Background(), StartOptions{Goal: "Finish the test task", Profile: "mock", Name: name, Dir: t.TempDir(), Task: "x"})
 		if err == nil || !strings.Contains(err.Error(), "reserved for the") {
 			t.Errorf("user session named %q: err = %v", name, err)

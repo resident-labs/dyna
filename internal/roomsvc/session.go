@@ -417,7 +417,7 @@ func (s *Service) shapeSessionPosts(rec room.Record, selected []room.Message, bo
 }
 
 // rootConversation selects the posts of the root seat. "@root" resolves to the room's own
-// address, so agent and keeper posts to root are addressed to it, and an external root posts as
+// address, so agent posts to root are addressed to it, and an external root posts as
 // the room (without Human). The internal root's own address is included for its earlier posts.
 // Posts the human owner sent to other agents are not part of it.
 func rootConversation(roomName string) func(room.Message) bool {
@@ -434,7 +434,7 @@ func rootConversation(roomName string) func(room.Message) bool {
 // the internal root running it is that session's transcript. Otherwise
 // (an external orchestrator holds the seat, or the internal root has not
 // started) it has the seat holder and the conversation's posts but no turns:
-// owner and keeper posts to root, root's posts, and what agents say to root.
+// owner posts to root, root's posts, and what agents say to root.
 func (s *Service) RootSession(roomRef string) (Session, error) {
 	rec, err := s.rooms().Resolve(roomRef)
 	if err != nil {

@@ -8,21 +8,21 @@ import (
 
 	"dyna-agent/internal/cli/goal"
 	"dyna-agent/internal/engineclient"
-	"dyna-agent/internal/goalkeeper"
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/goalservice"
 	"dyna-agent/internal/room"
 	"github.com/spf13/cobra"
 )
 
 type Options struct {
-	Service func() *goalkeeper.Service
+	Service func() *goalservice.Service
 	Client  *engineclient.Client
 }
 
 func NewCommand() *cobra.Command { return Command(Options{}) }
 func Command(o Options) *cobra.Command {
 	if o.Service == nil {
-		o.Service = goalkeeper.New
+		o.Service = goalservice.New
 	}
 	if o.Client == nil {
 		o.Client = engineclient.New("")

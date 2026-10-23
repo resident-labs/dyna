@@ -7,7 +7,7 @@ const time = (iso) => new Date(iso).getTime()
 const sessions = (members) => members.filter((m) => !m.owner && m.id)
 
 // serviceOf names the service a session belongs to, for the page's filter.
-export const serviceOf = (m) => (m.role === 'reviewer' ? 'reviewer' : m.role === 'keeper' ? 'keeper' : m.role === 'merge-review' ? 'merge' : 'agents')
+export const serviceOf = (m) => (m.role === 'reviewer' ? 'reviewer' : m.role === 'merge-review' ? 'merge' : 'agents')
 
 // serviceEvents is every start, finish, verdict, merge trial and goal event, newest first.
 export function serviceEvents({ members, changes, journal, history = [] }) {
@@ -24,7 +24,7 @@ export function serviceEvents({ members, changes, journal, history = [] }) {
   }
   for (const j of journal) {
     const who = all.find((m) => m.id === j.by || m.address === j.by)
-    events.push({ key: `journal:${j.id}`, ts: time(j.at), who: who?.name ?? j.by, text: `${j.event}${j.goal ? ` ${j.goal}` : ''}${j.text ? `: ${j.text}` : ''}`, session: who?.id, service: who ? serviceOf(who) : 'keeper' })
+    events.push({ key: `journal:${j.id}`, ts: time(j.at), who: who?.name ?? j.by, text: `${j.event}${j.goal ? ` ${j.goal}` : ''}${j.text ? `: ${j.text}` : ''}`, session: who?.id, service: who ? serviceOf(who) : 'agents' })
   }
   history.forEach((h, i) => {
     const n = h.changes ?? 0

@@ -9,7 +9,7 @@ import (
 
 // The internal root's quiet sections all render from room.RootContext, the
 // one classifier both roots use. Its categories pick the section: owner DMs,
-// the goal keeper's journal, merge steward decisions, and every other quiet
+// merge steward decisions and every other quiet
 // post addressed to the root seat, whatever its kind.
 
 // ownerDMNote lists the owner's DMs to agents in msgs, one line each with the
@@ -60,7 +60,6 @@ func ownerDMNote(roomName string, msgs []room.Message) string {
 func quietServiceNotes(roomName string, msgs []room.Message) []string {
 	var notes []string
 	for _, service := range []struct{ category, heading string }{
-		{room.RootGoalJournal, "[GOALS JOURNAL] Keeper journal entries since your last turn. They did not start this turn."},
 		{room.RootMergeNote, "[MERGE STEWARD] Merge decisions since your last turn. They did not wake you."},
 	} {
 		var entries []string

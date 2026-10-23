@@ -191,32 +191,6 @@ func TestSessionWorkerCancellationAfterScanDoesNotStartTurn(t *testing.T) {
 	}
 }
 
-func TestGoalDeliveryStoresInputUntilEngineRuns(t *testing.T) {
-	e := newTestEnv(t)
-	info, _ := e.start("SLEEP:0\nRESPOND: ready")
-	e.wait(info.ID, 1)
-	var post room.Message
-	stored, err := e.m.DeliverGoal(e.ctx, info.ID, func() (string, error) {
-		var err error
-		post, err = e.m.rooms().Post(info.RoomID, room.PostInput{Wake: true, Kind: "goal", From: "goal-keeper", To: []string{info.Address()}, Text: "SLEEP:0\nRESPOND: goal update"})
-		return post.ID, err
-	})
-	if err != nil || !stored {
-		t.Fatalf("goal delivery: %v %v", stored, err)
-	}
-	meta, _ := e.m.Store.ReadMeta(info.ID)
-	if meta.Turns != 1 {
-		t.Fatal("goal poster started a turn")
-	}
-	if _, err := e.m.TickSessions(e.ctx); err != nil {
-		t.Fatal(err)
-	}
-	_, turn := e.wait(info.ID, 2)
-	if len(turn.Steering) != 1 || turn.Steering[0].ID != post.ID || !turn.Steering[0].Delivered {
-		t.Fatalf("goal input was lost: %+v", turn)
-	}
-}
-
 func TestSessionWorkerNoWakeDoesNotRecheckOldWrapUp(t *testing.T) {
 	e := newTestEnv(t)
 	info, _ := e.start("SLEEP:0\nRESPOND: ready")
@@ -628,27 +602,5 @@ func TestPendingPostUsesTurnEndEventAfterLockRelease(t *testing.T) {
 	}
 	if len(followup.Steering) != 1 || followup.Steering[0].ID != late.ID || !followup.Steering[0].Delivered {
 		t.Fatalf("late input was not delivered once: %+v", followup.Steering)
-	}
-}
-
-func TestSessionWorkerNeverWakesTheKeeper(t *testing.T) {
-	e := newTestEnv(t)
-	info, _ := e.start("SLEEP:0\nRESPOND: ready", func(o *StartOptions) { o.Service, o.Role, o.Name = true, RoleKeeper, "keeper" })
-	e.wait(info.ID, 1)
-	if _, err := e.m.rooms().Post(info.RoomID, room.PostInput{Wake: true, From: info.Room + ":worker", To: []string{info.Address()}, Text: "g1: waiting for CI"}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := e.m.TickSessions(e.ctx); err != nil {
-		t.Fatal(err)
-	}
-	if meta, _ := e.m.Store.ReadMeta(info.ID); meta.Turns != 1 {
-		t.Fatal("a reply woke the keeper")
-	}
-	turn, err := e.m.Assign(e.ctx, info.ID, "assignment", "", time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, turn = e.wait(info.ID, turn.N); len(turn.Steering) != 1 {
-		t.Fatalf("the next assignment did not read the stored reply: %+v", turn.Steering)
 	}
 }

@@ -9,8 +9,8 @@ import (
 	"testing"
 
 	"dyna-agent/internal/authority"
-	"dyna-agent/internal/goalkeeper"
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/goalservice"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife/recordtest"
@@ -29,7 +29,7 @@ func TestCommandsAndSelectors(t *testing.T) {
 	mgr := subagent.NewManager()
 	mgr.Store = &subagent.Store{Root: filepath.Join(root, "sessions")}
 	mgr.Rooms = rooms
-	s := goalkeeper.New()
+	s := goalservice.New()
 	s.Store = &goals.Store{Root: filepath.Join(root, "goals")}
 	s.Notify = notify.New(rooms, mgr)
 	actor := authority.Actor{Role: authority.Owner}
@@ -65,7 +65,7 @@ func TestCommandsAndSelectors(t *testing.T) {
 	}
 	call := func(args ...string) (string, error) {
 		calls := 0
-		cmd := Command(Options{Service: func() *goalkeeper.Service { calls++; return s }})
+		cmd := Command(Options{Service: func() *goalservice.Service { calls++; return s }})
 		var out bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetErr(&out)
@@ -134,14 +134,14 @@ func TestListAndCommandWords(t *testing.T) {
 	mgr := subagent.NewManager()
 	mgr.Store = &subagent.Store{Root: filepath.Join(root, "sessions")}
 	mgr.Rooms = rooms
-	s := goalkeeper.New()
+	s := goalservice.New()
 	s.Store = &goals.Store{Root: filepath.Join(root, "goals")}
 	s.Notify = notify.New(rooms, mgr)
 	actor := authority.Actor{Role: authority.Owner}
 	serveMutations(t, s, &actor)
 	call := func(args ...string) (string, error) {
 		calls := 0
-		cmd := Command(Options{Service: func() *goalkeeper.Service { calls++; return s }})
+		cmd := Command(Options{Service: func() *goalservice.Service { calls++; return s }})
 		var out bytes.Buffer
 		cmd.SetOut(&out)
 		cmd.SetErr(&out)

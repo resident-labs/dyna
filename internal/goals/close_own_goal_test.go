@@ -14,7 +14,7 @@ func TestClosingSoleHolderDropsItsGoalWithANote(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if err := s.CloseSession("r", "child", heir, map[string]bool{"parent": true}, ""); err != nil {
+			if err := s.CloseSession("r", "child", heir, map[string]bool{"parent": true}); err != nil {
 				t.Fatal(err)
 			}
 			got, err := s.Get("r", g.ID)
@@ -34,7 +34,7 @@ func TestClosingOneOfSeveralHoldersKeepsOtherHolder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CloseSession("r", "child", "", nil, ""); err != nil {
+	if err := s.CloseSession("r", "child", "", nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.Get("r", g.ID)
@@ -52,7 +52,7 @@ func TestClosingAssignedHolderReturnsToSetterOrRootOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 			for range 2 {
-				if err := s.CloseSession("r", "child", "another-heir", map[string]bool{"setter": setterLive, "another-heir": true}, ""); err != nil {
+				if err := s.CloseSession("r", "child", "another-heir", map[string]bool{"setter": setterLive, "another-heir": true}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -62,14 +62,6 @@ func TestClosingAssignedHolderReturnsToSetterOrRootOnce(t *testing.T) {
 			}
 			if !got.Open() || got.Shared || (setterLive && !got.HeldBy("setter")) || (!setterLive && len(got.Holders) != 0) {
 				t.Fatalf("incorrect handback: %+v", got)
-			}
-			st, err := s.Read()
-			if err != nil {
-				t.Fatal(err)
-			}
-			ns := st.Room("r").Notices
-			if len(ns) != 1 || (setterLive && ns[0].To != "setter") || (!setterLive && ns[0].To != "") {
-				t.Fatalf("handback must produce one setter/root notice: %+v", ns)
 			}
 		})
 	}

@@ -34,7 +34,7 @@ func protectCalls(calls map[string]websvc.Call, names []string, doing string, wi
 	}
 }
 
-var goalCalls = []string{"AddGoal", "AddGoalItem", "MoveGoalItem", "EditGoalSelectors", "EditGoalItem", "WaitGoal", "EditGoal", "FinishGoal", "ExpediteGoal", "SetGoalItemState", "NoteGoal", "CheckGoal", "AddRule", "EditRule", "RemoveRule"}
+var goalCalls = []string{"AddGoal", "AddGoalItem", "MoveGoalItem", "EditGoalSelectors", "EditGoalItem", "EditGoal", "FinishGoal", "ExpediteGoal", "SetGoalItemState", "NoteGoal", "AddRule", "EditRule", "RemoveRule"}
 
 // protectGoalCalls applies the same caller policy to CLI and web mutations.
 func protectGoalCalls(calls map[string]websvc.Call) {

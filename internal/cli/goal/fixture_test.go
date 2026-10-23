@@ -7,21 +7,20 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/enginetest"
-	"dyna-agent/internal/goalkeeper"
+	"dyna-agent/internal/goalservice"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/store"
 	"dyna-agent/internal/websvc"
 )
 
 // serveMutations runs the real shared service with a test-controlled caller.
-func serveMutations(t *testing.T, service *goalkeeper.Service, actor *authority.Actor) {
+func serveMutations(t *testing.T, service *goalservice.Service, actor *authority.Actor) {
 	t.Helper()
 	rooms := roomsvc.New(service.Notify)
 	calls, err := websvc.Bind([]websvc.Binding{
 		{Name: "AddGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: rooms.AddGoal},
 		{Name: "EditGoalSelectors", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: rooms.EditGoalSelectors},
 		{Name: "FinishGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: rooms.FinishGoal},
-		{Name: "WaitGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: rooms.WaitGoal},
 	})
 	if err != nil {
 		t.Fatal(err)

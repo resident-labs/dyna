@@ -5,8 +5,7 @@ import (
 	"strings"
 )
 
-// Goal is the librarian session's standing goal. It is a service goal, so
-// the goal keeper does not check in on it.
+// Goal is the librarian session's standing service goal.
 func Goal(main string) string {
 	return "Keep the feature map and docs of " + main + " accurate; done when Dyna closes this librarian session."
 }
