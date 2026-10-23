@@ -339,7 +339,9 @@ func TestSendBindingUsesComposerArguments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal([]any{rec.ID, "@root hello", "", []room.Attachment{}, ""})
+	// The composer names the conversation it writes in: the seat's DM.
+	seat := room.SeatDMConversation(rec.ID)
+	raw, err := json.Marshal([]any{rec.ID, "@root hello", "", []room.Attachment{}, "", string(seat)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -354,6 +356,9 @@ func TestSendBindingUsesComposerArguments(t *testing.T) {
 	sent, ok := result.(roomsvc.SendResult)
 	if !ok || sent.Kind != "post" || sent.Post == nil || sent.Post.Message.Text != "hello" {
 		t.Fatalf("send result=%+v", result)
+	}
+	if got := sent.Post.Message.Conversation; got != seat {
+		t.Fatalf("post stored in %q, want the seat DM %q", got, seat)
 	}
 }
 
@@ -374,7 +379,7 @@ func TestSendBindingCarriesForwardSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, _ := json.Marshal([]any{rec.ID, "@root please check", "", []room.Attachment{}, original.ID})
+	raw, _ := json.Marshal([]any{rec.ID, "@root please check", "", []room.Attachment{}, original.ID, ""})
 	var args []json.RawMessage
 	if err := json.Unmarshal(raw, &args); err != nil {
 		t.Fatal(err)

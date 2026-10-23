@@ -64,7 +64,9 @@ func (s *Service) SendToSession(ctx context.Context, ref, text, forwardOf string
 	return s.SendToSessionWithReferences(ctx, ref, text, forwardOf, nil, atts...)
 }
 
-// SendToSessionWithReferences sends composer references to one session.
+// SendToSessionWithReferences sends composer references to one session. The
+// writer's client is that session's DM, so the post is stored in it: the
+// session's DM shows it, not a reference row.
 func (s *Service) SendToSessionWithReferences(ctx context.Context, ref, text, forwardOf string, refs []room.Reference, atts ...room.Attachment) (PostResult, error) {
 	text = strings.TrimSpace(text)
 	if text == "" && len(atts) == 0 && len(refs) == 0 && forwardOf == "" {
@@ -77,6 +79,7 @@ func (s *Service) SendToSessionWithReferences(ctx context.Context, ref, text, fo
 	res, err := s.Notify.Post(ctx, notify.PostInput{
 		Sender:   notify.Sender{Kind: notify.SenderOwner, Room: info.Room, Human: true},
 		Mentions: []string{"@" + info.Address()}, Text: text, Attachments: atts, ForwardOf: forwardOf, References: refs,
+		Conversation: dmConversation(info),
 	})
 	if res.Message.ID != "" {
 		_ = s.rooms().MarkOwnerRead(res.Message.RoomID, res.Message.ID)

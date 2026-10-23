@@ -25,6 +25,7 @@
   import { voiceCall, callRequests } from './lib/voice/voiceCall.ts'
   import { callLink, callTarget } from './lib/voice/callRequests.ts'
   import { GENERAL, VOICE, isFeedView, inView, homeView, feedModel, parentTrail, prepareFeedText } from './lib/rooms/feedViews.ts'
+  import { seatDMConversation } from './lib/rooms/conversations.ts'
   import { isShellResult } from './lib/rooms/feedRows.ts'
   import { HOOK_LOG_EVENT, hookLogFrom } from './lib/settings/hookLog.ts'
   import type { HookLogTarget } from './lib/settings/hookLog.ts'
@@ -1537,9 +1538,10 @@
   }
 
   // The root seat has no session of its own to send to; @root reaches whoever holds it.
+  // The post is written in the seat's DM, so the seat reads it there.
   async function sendToSession(text: string, atts: AttachmentRef[] = [], forwardOf = '') {
     if (!drill) return
-    const res = drill.rootSeat ? await api.send(roomId, '@root ' + text, '', atts, forwardOf) : await api.sendToSession(drill.id, text, atts, forwardOf)
+    const res = drill.rootSeat ? await api.send(roomId, '@root ' + text, '', atts, forwardOf, [], seatDMConversation(roomId)) : await api.sendToSession(drill.id, text, atts, forwardOf)
     openSession(drill)
     return res
   }

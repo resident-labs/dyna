@@ -1,6 +1,7 @@
 import type { Member, Post } from '../api/room.ts'
-import type { Item, Turn, Usage } from '../api/session.ts'
+import type { Item, SessionReference, Turn, Usage } from '../api/session.ts'
 import type { ShellJob } from '../api/terminal.ts'
+import { isSessionReference } from '../api/guards.ts'
 import { isNote, noteData } from '../ui/notices.ts'
 import { legacyEvent, registeredEvent } from '../rooms/eventPayloads.ts'
 import { userText } from './userText.ts'
@@ -138,8 +139,14 @@ export interface InstructionsRow extends RowFields {
 export interface ItemRow extends RowFields {
   kind: 'thought' | 'error' | 'note' | 'compaction'
 }
+// A reference row is one post of another conversation: who wrote it, where it
+// lives and its first line, with one action that opens it there.
+export interface ReferenceRow extends RowFields {
+  kind: 'reference'
+  reference: SessionReference
+}
 // One row of the DM.
-export type DmRow = TurnRow | TurnEndRow | MessageRow | VoiceRow | SystemEventRow | ThreadRow | TimelineRow | InstructionsRow | ItemRow
+export type DmRow = TurnRow | TurnEndRow | MessageRow | VoiceRow | SystemEventRow | ThreadRow | TimelineRow | InstructionsRow | ItemRow | ReferenceRow
 // A post waiting to become a row or a chip.
 interface PostEvent extends RowFields {
   kind: 'post'
@@ -159,20 +166,27 @@ export interface DmView {
 export const done = ['ok', 'error', 'stopped']
 const time = (ts?: Time | null): number => Math.max(0, (typeof ts === 'number' ? ts : Date.parse(ts ?? '')) || 0)
 export const sessionAddress = (session: { address?: string; member?: Partial<Pick<Member, 'address' | 'name'>> } | null | undefined, room: { name: string }): string => session?.address || session?.member?.address || `${room.name}:${session?.member?.name || ''}`
-// postedTo is the "posted to" chip of a DM row. Every row of the root conversation is to root (or the
-// owner), so there it says nothing and is empty.
-export function postedTo(post: Pick<ThreadPost, 'to'>, address: string, roomName: string): string {
-  const to = post.to || []
-  if (address === roomName + ':root' && to.every((a) => a === roomName || a === address)) return ''
-  return `#${roomName} · ${to.map((a) => '@' + short(a, roomName)).join(', ')}`
+// postedTo is the "posted to" chip of a DM row. A post written in a DM is to
+// that conversation's reader, so the chip says nothing there; any other post
+// names the room's chat and the recipients it was addressed to. Rooms carry no
+// '#' prefix, as the reference rows' "from Room chat" does.
+export function postedTo(post: Pick<ThreadPost, 'to' | 'conversation'>, roomName: string): string {
+  if ((post.conversation || '').startsWith('dm:')) return ''
+  return `Room chat · ${(post.to || []).map((a) => '@' + short(a, roomName)).join(', ')}`
 }
-// threadKeys are the agents a post belongs to as threads. In the root conversation the room's own
-// non-human posts (an external root posts as the room) are root steering agents, so they are threads too.
+// referenceHome names the conversation a reference row comes from, for a reader
+// without IDs: the room's chat, the voice call, or the DM the post was written
+// in. members resolve that DM's session when the room knows it.
+export function referenceHome(conversation: string, members: Pick<Member, 'id' | 'name' | 'address'>[]): string {
+  if (conversation === 'voice') return 'Voice'
+  if (!conversation.startsWith('dm:')) return 'Room chat'
+  const id = conversation.slice('dm:'.length)
+  const member = members.find((m) => m.id === id || m.address === id)
+  return member ? `the DM with @${member.name}` : 'a direct message'
+}
+// threadKeys are the agents a post of the DM belongs to as threads. A post the
+// owner wrote is the owner's own words, so it opens no thread.
 export function threadKeys(post: Pick<ThreadPost, 'from' | 'to' | 'owner' | 'human'>, address: string, owner: string): string[] {
-  if (address === owner + ':root' && post.from === owner && !post.human) {
-    const to = (post.to || []).filter((a) => a !== owner && a !== address)
-    if (to.length) return [...new Set(to)]
-  }
   if (post.owner || post.from === owner) return []
   return [...new Set(post.from === address ? (post.to || []).filter((a) => a !== owner && a !== address) : [post.from])].flatMap((key) => (key ? [key] : []))
 }
@@ -218,6 +232,7 @@ export interface DmSession {
   address?: string
   member?: Partial<Pick<Member, 'address' | 'name'>>
   posts?: ThreadPost[] | null
+  references?: SessionReference[] | null
   turns?: DmTurn[] | null
 }
 // A message that only the transcript or the queue knows: another agent's input.
@@ -239,8 +254,12 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   const address = sessionAddress(session, room)
   const events: DmEvent[] = [], threads = new Map<string, Thread>(), peerItems = new Map<string, PeerItem>(), wakes = new Map<string, Wake>()
   const posts = new Map<string, ThreadPost>((session?.posts || []).map((p): [string, ThreadPost] => [p.id, p]))
+  // A post of another conversation that this one received or wrote. It is one
+  // row that opens the post where it lives.
+  const references = new Map<string, SessionReference>((session?.references || []).filter(isSessionReference).map((r): [string, SessionReference] => [r.postId, r]))
   const receipts = new Map<string, Receipt>(queue.filter((q) => ['waiting', 'delivering', 'delivered'].includes(q.state)).map((q): [string, Receipt] => [q.id, q]))
   const matched = new Set<string>(), carried = new Set<string>(), delivered = new Map<string, { delivery: string; pending?: Receipt }>()
+  const shownReferences = new Set<string>()
   const threadFor = (key: string): Thread => {
     let thread = threads.get(key)
     if (!thread) { thread = { key, posts: [] }; threads.set(key, thread) }
@@ -250,6 +269,21 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   // Voice's requests are the owner's words, so they stay inline as voice rows.
   const voice = `${room.name}:voice-call`
   const peer = (from: string, human?: boolean) => !human && from !== room.name && from !== address && from !== voice
+  // A reference row of another agent also joins that agent's thread, so the
+  // thread panel keeps what the agent said to this session.
+  const threadReference = (ref: SessionReference) => {
+    if (!peer(ref.from)) return
+    threadFor(ref.from).posts.push({ id: ref.postId, from: ref.from, to: [address], ts: ref.ts, text: ref.preview })
+  }
+  // pushReference draws one post of another conversation as its reference row,
+  // once, whether a pin, a turn item or the row list names it first.
+  const pushReference = (ref: SessionReference) => {
+    if (shownReferences.has(ref.postId) || posts.has(ref.postId)) return
+    shownReferences.add(ref.postId)
+    matched.add(ref.postId)
+    threadReference(ref)
+    events.push({ kind: 'reference', key: `reference:${ref.postId}`, ts: ref.ts, author: ref.from, reference: ref })
+  }
   for (const t of session?.turns || []) {
     events.push({ kind: 'turn', key: `turn:${t.n}`, ts: t.started, turn: t })
     if (done.includes(t.status ?? '') && t.ended) events.push({ kind: 'turnEnd', key: `turn-end:${t.n}`, ts: t.ended, turn: t })
@@ -264,6 +298,13 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
       // Match the stored post ID; transcript text can be framed or clipped.
       const receipt = it.postId ? receipts.get(it.postId) : undefined
       const post = it.postId ? posts.get(it.postId) : undefined
+      // The post lives in another conversation, so the DM reads it as the
+      // reference row: the item only says how and when it arrived.
+      const reference = it.postId ? references.get(it.postId) : undefined
+      if (input && reference) {
+        pushReference(reference)
+        continue
+      }
       // Another agent's input is that agent's thread, in every delivery state.
       // A stored post already joins its thread below.
       if (input && peer(author, /\(human\)$/.test(it.from || ''))) {
@@ -359,6 +400,9 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
     }
     events.push({ kind: 'message', key: `post:${q.id}`, ts: q.ts, author: q.from, human: !!(post?.human ?? q.human), text: q.text, post, pending: q, delivery: q.state === 'waiting' ? 'queued' : 'delivered' })
   }
+  // A post of another conversation is one compact row, in the order it was
+  // written, that jumps to the post there.
+  for (const reference of references.values()) pushReference(reference)
   // A peer message that is also a post stays one message: the post wins.
   // Text decides only for transcript inputs without a post ID.
   const same = (a: string, b: string) => { a = a.trim(); b = b.trim(); return !!a && !!b && (a === b || a.includes(b) || b.includes(a)) }
