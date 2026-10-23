@@ -21,6 +21,15 @@ func (s *Service) MergeControl(ctx context.Context, roomRef, action string, args
 	return s.Watcher().MergeControl(authority.WithActor(ctx, actor), rm.ID, action, args, without)
 }
 
+// SetMergePaused uses the same room and caller checks as the CLI merge controls.
+func (s *Service) SetMergePaused(ctx context.Context, roomRef string, paused bool) error {
+	action := "resume"
+	if paused {
+		action = "pause"
+	}
+	return s.MergeControl(ctx, roomRef, action, nil, nil)
+}
+
 // MergeControlStatus includes the same in-memory fairness order as the worker.
 func (s *Service) MergeControlStatus(roomRef string) (watch.MergeControlStatus, error) {
 	rm, err := s.Notify.Rooms.Resolve(roomRef)

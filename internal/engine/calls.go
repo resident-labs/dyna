@@ -170,6 +170,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "ChangeDetail", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.ChangeDetail},
 		{Name: "MergeStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.MergeStatus},
 		{Name: "MergeControlStatus", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.MergeControlStatus},
+		{Name: "SetMergePaused", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.PRs.SetMergePaused},
 		{Name: "ResumeMerging", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, roomRef string) error {
 			return s.rooms.PRs.MergeControl(ctx, roomRef, "resume", nil, nil)
 		}},
