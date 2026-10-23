@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -103,23 +104,116 @@ func LastActivity(path string) Activity {
 	return Activity{}
 }
 
-// toolLine is a tool call in one line: its name and its input's description
-// (as Claude's Bash gives one), else the first line of its input.
+// bareTool strips an MCP server prefix from a tool name, so
+// "mcp__dyna__shell" reads "shell". Other spellings pass through.
+func bareTool(name string) string {
+	name = strings.TrimSpace(name)
+	if len(name) < 5 || !strings.EqualFold(name[:5], "mcp__") {
+		return name
+	}
+	rest := name[5:]
+	if i := strings.Index(rest, "__"); i >= 0 {
+		return rest[i+2:]
+	}
+	return rest
+}
+
+// shellTools run a command or read a job's output; the harness's description,
+// when it gives one, is already the readable step.
+var shellTools = map[string]bool{
+	"shell": true, "bash": true, "command": true, "command_execution": true, "run_command": true, "run_terminal_cmd": true,
+	"shell_output": true, "shell_jobs": true, "shell_stop": true,
+}
+
+// shellJobSteps name the job tools that carry no command of their own.
+var shellJobSteps = map[string]string{"shell_output": "reading shell output", "shell_jobs": "reading shell jobs", "shell_stop": "stopping a shell job"}
+
+// fileSteps name what a running file tool does to the file it touches.
+var fileSteps = map[string]string{
+	"read": "reading", "read_file": "reading", "view_file": "reading",
+	"edit": "editing", "multiedit": "editing", "edit_file": "editing", "apply_patch": "editing", "file_change": "editing",
+	"write": "writing", "write_file": "writing",
+}
+
+// toolLine is a tool call in one line a person can read: the shell's
+// description or command, the file a file tool touches, or a name and the one
+// argument that says what it works on. A raw tool ID or JSON input never
+// becomes the label.
 func toolLine(e Event) string {
-	summary := ""
+	name := bareTool(e.Name)
+	lower := strings.ToLower(name)
 	var input struct {
 		Description string `json:"description"`
+		Command     string `json:"command"`
+		Path        string `json:"path"`
+		FilePath    string `json:"file_path"`
+		Target      string `json:"target_file"`
+		URL         string `json:"url"`
+		Query       string `json:"query"`
+		Pattern     string `json:"pattern"`
 	}
-	if json.Unmarshal([]byte(e.Input), &input) == nil && strings.TrimSpace(input.Description) != "" {
-		summary = strings.TrimSpace(input.Description)
-	} else {
-		summary, _, _ = strings.Cut(strings.TrimSpace(e.Input), "\n")
+	raw := strings.TrimSpace(e.Input)
+	// Tool arguments are a JSON object, usually on one line; a command may
+	// also arrive as plain text.
+	if strings.HasPrefix(raw, "{") {
+		if json.Unmarshal([]byte(raw), &input) != nil {
+			_ = json.Unmarshal([]byte(firstLine(raw)), &input)
+		}
 	}
-	if r := []rune(summary); len(r) > 100 {
-		summary = string(r[:100]) + "…"
+	plain := ""
+	if !strings.HasPrefix(raw, "{") {
+		plain = firstLine(raw)
 	}
-	if summary == "" {
-		return e.Name
+	path := firstText(input.FilePath, input.Path, input.Target)
+	if verb, ok := fileSteps[lower]; ok {
+		if path != "" {
+			return clip(verb + " " + filepath.Base(path))
+		}
+		return verb + " a file"
 	}
-	return e.Name + ": " + summary
+	if shellTools[lower] {
+		if step := firstText(input.Description, firstLine(input.Command), plain); step != "" {
+			return clip(step)
+		}
+		if step, ok := shellJobSteps[lower]; ok {
+			return step
+		}
+		return "running a command"
+	}
+	step := firstText(input.Description, firstLine(input.Command), input.URL, input.Query, input.Pattern)
+	if step == "" && path != "" {
+		step = filepath.Base(path)
+	}
+	if step == "" {
+		step = plain
+	}
+	if step == "" {
+		return name
+	}
+	return clip(name + ": " + step)
+}
+
+// firstText returns the first value that is not blank, without surrounding
+// space.
+func firstText(values ...string) string {
+	for _, v := range values {
+		if v = strings.TrimSpace(v); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// firstLine returns a value's first line, without surrounding space.
+func firstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return strings.TrimSpace(line)
+}
+
+// clip bounds a label to 100 runes.
+func clip(s string) string {
+	if r := []rune(s); len(r) > 100 {
+		return string(r[:100]) + "…"
+	}
+	return s
 }

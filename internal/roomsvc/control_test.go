@@ -471,7 +471,7 @@ func TestLiveMemberShowsItsRunningTool(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, m := range members {
-		if m.ID == lead.ID && (m.Doing.Text != "Bash: Write a 10 GB test file" || m.Doing.Since != 1000) {
+		if m.ID == lead.ID && (m.Doing.Text != "Write a 10 GB test file" || m.Doing.Since != 1000) {
 			t.Fatalf("live member doing = %+v", m.Doing)
 		}
 	}
