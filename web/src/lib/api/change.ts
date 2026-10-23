@@ -152,7 +152,6 @@ export interface ChangePolicy {
   ciFailAfter?: string
   requiredChecks: string[] | null
   review: string
-  land: string
   ciNoJUnitWarning?: boolean
   ciTestMax?: string
   ciTestAllowNotes?: Record<string, string>
@@ -164,7 +163,6 @@ export interface ChangePolicy {
 export interface PolicyOverride {
   requiredChecks: string[] | null
   review?: string
-  land?: string
   reason: string
 }
 

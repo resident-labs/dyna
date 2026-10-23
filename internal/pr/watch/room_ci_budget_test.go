@@ -14,7 +14,7 @@ func TestSetRoomCIBudgetUpdatesLivePolicyAndNotes(t *testing.T) {
 	e := newEnv(t)
 	id := e.author.RoomID
 	p := changepolicy.Default()
-	p.Review, p.Land = "off", "branch-only"
+	p.Review = "off"
 	p.CITestAllow = []string{"legacy", "removed"}
 	p.CITestAllowNotes = map[string]string{"removed": "old debt"}
 	if err := e.s.SetRoomChangePolicy(id, authority.Actor{Role: authority.Owner}, p); err != nil {
@@ -48,7 +48,7 @@ func TestSetRoomCIBudgetUpdatesLivePolicyAndNotes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Review != p.Review || got.Land != p.Land || !reflect.DeepEqual(got.RequiredChecks, []string{"new-check"}) {
+	if got.Review != p.Review || !reflect.DeepEqual(got.RequiredChecks, []string{"new-check"}) {
 		t.Fatalf("lost policy edit: %+v", got)
 	}
 	if !reflect.DeepEqual(got.CITestAllowNotes, map[string]string{"pkg/new": "12 seconds: service setup"}) {
@@ -93,7 +93,7 @@ func TestRoomBudgetReplacementClearsExemptions(t *testing.T) {
 	original := changepolicy.Default()
 	original.CITimeBudget = "enforce"
 	original.CIBudgetExempt = []string{"Weekly audit"}
-	original.Review, original.Land = "off", "branch-only"
+	original.Review = "off"
 	original.RequiredChecks = []string{"special"}
 	if err := s.Store.update(func(st *State) error {
 		st.Policies = map[string]ChangePolicy{id: original}
@@ -110,7 +110,7 @@ func TestRoomBudgetReplacementClearsExemptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(got.CIBudgetExempt) != 0 || got.CITimeBudget != "warn" ||
-		got.Review != original.Review || got.Land != original.Land ||
+		got.Review != original.Review ||
 		!reflect.DeepEqual(got.RequiredChecks, original.RequiredChecks) {
 		t.Errorf("budget replacement lost or retained fields: %+v", got)
 	}
