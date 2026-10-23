@@ -11,6 +11,4 @@ import { channelList } from '../src/lib/ui/prefs.ts'
 import { need } from '../test/need.ts'
 
 channelList.set(new URLSearchParams(location.search).get('list') ?? 'all')
-const leads = ['ui-guy-right', 'engine-lead', 'settings-polish'].map((name, i) => ({ id: name, name, children: [33, 36, 2][i] ?? 0 }))
-const channels = { leads, trail: () => [1] }
-mount(Sidebar, { target: need(document.getElementById('app'), 'app'), props: { room: { id: 'room-a', name: 'dyna-agent', repo: '/home/user/dyna-agent' }, channels, channelUnread: { general: 4, 'channel:ui-guy-right': 7, 'channel:engine-lead': 12 }, onview: () => {}, onmember: undefined } })
+mount(Sidebar, { target: need(document.getElementById('app'), 'app'), props: { room: { id: 'room-a', name: 'dyna-agent', repo: '/home/user/dyna-agent', lastActivity: '', unread: 0, running: 0, members: 0, pinned: false, pinOrder: 0, archived: false }, channelUnread: { general: 4, 'channel:ui-guy-right': 7, 'channel:engine-lead': 12 }, onview: () => {}, onmember: () => {} } })

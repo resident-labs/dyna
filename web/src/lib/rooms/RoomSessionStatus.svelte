@@ -1,11 +1,12 @@
-<script>
+<script lang="ts">
   import { roomControlLabels } from './roomSessionControls.ts'
-  let { value, onresume, onreload } = $props()
+  import type { RoomControlValue } from './roomSessionControls.ts'
+  let { value, onresume, onreload }: { value: RoomControlValue | null; onresume: () => void; onreload: () => void } = $props()
   let state = $derived(value?.state)
 </script>
 
 {#if state?.paused}
-  <div class="pause-status" role="status"><strong>Sessions paused</strong><button disabled={value.busy} onclick={onresume}>Resume all</button><p>New turns and post delivery wait. Running turns finish naturally.</p><p>{state.running} running · {state.held} held</p><p>Workflows and shell jobs continue.</p></div>
+  <div class="pause-status" role="status"><strong>Sessions paused</strong><button disabled={value?.busy} onclick={onresume}>Resume all</button><p>New turns and post delivery wait. Running turns finish naturally.</p><p>{state.running} running · {state.held} held</p><p>Workflows and shell jobs continue.</p></div>
 {/if}
 {#if value?.busy}<p class="status" role="status">{roomControlLabels[value.action]} · Working…</p>{/if}
 {#if value?.error || value?.statusError}<p class="error" role="alert">{value.error || value.statusError} <button disabled={value.busy || value.loading} onclick={onreload}>Refresh status</button></p>{/if}

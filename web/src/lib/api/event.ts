@@ -49,4 +49,7 @@ export interface ResyncEvent {
   kind: 'resync'
 }
 
+// The stream also carries the two room pause events.
+export type StreamEvent = AppEvent | { kind: 'room.paused' | 'room.resumed'; roomId?: string }
+
 export type AppEvent = PostsEvent | RoomsEvent | NoticesEvent | ListEvent | ComputerEvent | MachinesEvent | ResyncEvent
