@@ -121,6 +121,7 @@ export const api = {
   machines: () => app.Machines(),
   machine: (id: string) => app.Machine(id),
   saveMachine: (id: string, patch: MachinePatch) => app.SaveMachine(id, patch),
+  probeMachine: (id: string) => app.ProbeMachine(id),
   rooms: () => app.Rooms(),
   feedTail: (roomId: string, before = '', keep = 0) => app.FeedTail(roomId, before, keep),
   feedAfter: (roomId: string, after = '', keep = 50) => app.FeedAfter(roomId, after, keep),
