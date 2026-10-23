@@ -7,8 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,9 +29,8 @@ const schema = `CREATE TABLE harness_health (
 // conceal another process's update. The zero value uses the default paths.
 type Service struct{ dir string }
 
-// New uses dir for the records' copies and for dyna.db. An empty dir selects
-// os.UserCacheDir()/dyna/profile-health for the copies and the data folder's
-// dyna.db. Construction has no side effects.
+// New uses dir for dyna.db and retained records to import. An empty dir uses
+// the data folder for dyna.db and the default cache for import sources.
 func New(dir string) *Service { return &Service{dir: dir} }
 
 // Migrate creates the health table. Only the engine runs it, at start.
@@ -83,9 +80,6 @@ func key(name string) string {
 	hash := sha256.Sum256([]byte(name))
 	return hex.EncodeToString(hash[:])
 }
-
-// mirrorKey names a profile's copy in state_mirrors.
-func mirrorKey(name string) string { return "health/" + key(name) }
 
 // path is the previous release's file for a profile's record.
 func (s *Service) sourceDir() (string, error) {
@@ -210,13 +204,8 @@ func (s *Service) RecordProbe(p profile.Profile, version string, o Observation, 
 	return recordObservation(p, version, o, true, passed, s.save)
 }
 
-// An optional health write must not hold a real turn behind another writer
-// indefinitely: lockWait bounds the wait for another writer of the same
-// profile, and saveWait the row write and copy together.
-const (
-	lockWait = 100 * time.Millisecond
-	saveWait = time.Second
-)
+// Bound optional health writes so storage cannot hold up a turn indefinitely.
+const saveWait = time.Second
 
 func recordObservation(p profile.Profile, version string, o Observation, probe, passed bool, save func(string, *record, func()) error) View {
 	if o.At.IsZero() {
@@ -253,39 +242,19 @@ func recordObservation(p profile.Profile, version string, o Observation, probe, 
 	return v
 }
 
-// save applies apply to the profile's stored record in the order
-// state.Mirror needs: write the row, then copy it. Runners and the engine
-// both record health, so the per-profile flock covers both steps with a bounded wait.
+// save merges the observation and commits it through the shared SQLite writer.
 func (s *Service) save(name string, r *record, apply func()) error {
-	ctx, cancel := context.WithTimeout(context.Background(), lockWait)
-	defer cancel()
-	path, err := s.path(name)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	unlock, err := store.LockContext(ctx, path+".lock")
-	if err != nil {
-		return err
-	}
-	defer unlock()
 	db, err := s.db()
 	if err != nil {
 		return err
 	}
 	work, stop := context.WithTimeout(context.Background(), saveWait)
 	defer stop()
-	return s.saveRecord(work, db, name, path, r, apply)
+	return s.saveRecord(work, db, name, r, apply)
 }
 
-// saveRecord commits the health row and its previous-release copy under the
-// caller's record lock. save supplies the optional write's work deadline.
-func (s *Service) saveRecord(work context.Context, db *sql.DB, name, path string, r *record, apply func()) error {
-	var before record
-	fresh := true
-	err := state.For(db).Write(work, hub.Event{}, func(conn *sql.Conn) error {
+func (s *Service) saveRecord(work context.Context, db *sql.DB, name string, r *record, apply func()) error {
+	return state.For(db).Write(work, hub.Event{}, func(conn *sql.Conn) error {
 		existing, ok, err := readRow(work, conn, name)
 		if err != nil {
 			var syntax *json.SyntaxError
@@ -296,7 +265,7 @@ func (s *Service) saveRecord(work context.Context, db *sql.DB, name, path string
 			ok = false
 		}
 		if ok && existing.Fingerprint == r.Fingerprint {
-			*r, before, fresh = existing, existing, false
+			*r = existing
 		}
 		apply()
 		raw, err := json.Marshal(*r)
@@ -305,47 +274,4 @@ func (s *Service) saveRecord(work context.Context, db *sql.DB, name, path string
 		}
 		return saveRow(work, conn, name, raw)
 	})
-	if err != nil {
-		return err
-	}
-	// TODO: legacy/shim remove later — profile-health/<hash>.json is the
-	// previous release's copy. It is rewritten only when a field that release
-	// decides a status from changes (actedOn), not for times or counts alone,
-	// so a downgraded release may show stale times (the last check, the last
-	// turn and the last healthy time) and stale output counts. Remove with
-	// requirement 31.
-	if !fresh && actedOn(before) == actedOn(*r) {
-		return nil
-	}
-	// Claim only the retained copy's stamp. Its bytes must never replace the SQL row.
-	// TODO: legacy/shim remove later — remove this claim with the health mirror.
-	if _, err := state.For(db).ImportIfForeign(work, mirrorKey(name), path, func(*sql.Conn, []byte) error { return nil }); err != nil {
-		return err
-	}
-	err = state.For(db).Mirror(work, mirrorKey(name), path, func(out io.Writer) error {
-		var raw []byte
-		if err := db.QueryRowContext(work, "SELECT record FROM harness_health WHERE profile = ?", key(name)).Scan(&raw); err != nil {
-			return err
-		}
-		_, err := out.Write(raw)
-		return err
-	})
-	if err != nil {
-		return fmt.Errorf("copy profile health: %w", err)
-	}
-	return nil
-}
-
-// actedOn holds the fields that makeView, in this release and the previous
-// one, decides a profile's status from. Times, counts and the other seen
-// flags are only shown.
-type actedOnFields struct {
-	Fingerprint, Version, LastHealthyVersion                            string
-	Healthy, StdoutSeen, Recognized, Running, Successful, Probe, Passed bool
-}
-
-func actedOn(r record) actedOnFields {
-	o := r.Observed
-	return actedOnFields{r.Fingerprint, r.Version, r.LastHealthyVersion, !r.LastHealthyAt.IsZero(),
-		o.StdoutSeen, o.RecognizedOutput, o.Running, o.Successful, o.Probe, o.ProbePassed}
 }
