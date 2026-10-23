@@ -14,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"dyna-agent/internal/terminalsvc"
 )
 
 // sign-in phases, as the shared in-app card shows them.
@@ -55,8 +57,12 @@ type signInSpec struct {
 	Argv func([]string) []string
 	// Parse updates st from one output line, with ANSI codes already removed.
 	Parse func(st *SignInState, line string)
-	// AcceptsPaste keeps stdin open and shows a paste box.
+	// AcceptsPaste shows a paste box and keeps stdin open unless Respond is set.
 	AcceptsPaste bool
+	// Respond handles a pasted response instead of writing it to stdin.
+	Respond func(context.Context, SignInState, string) error
+	// GracefulStop lets a helper stop and join children in separate groups.
+	GracefulStop bool
 	// Timeout bounds the wait for the owner. Zero uses signInTimeout.
 	Timeout time.Duration
 }
@@ -64,6 +70,7 @@ type signInSpec struct {
 // signInSpecs lists the harnesses that sign in through the runner rather than a
 // terminal. Every other harness keeps its terminal.
 var signInSpecs = map[string]signInSpec{
+	"antigravity": {Parse: parseAntigravitySignIn, AcceptsPaste: true, Respond: respondAntigravitySignIn, GracefulStop: true, Timeout: 5 * time.Minute},
 	"claude-code": {Parse: parseClaudeCodeSignIn, AcceptsPaste: true},
 	"codex":       {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},
 	"grok":        {Argv: grokDeviceArgv, Parse: parseGrokSignIn},
@@ -113,6 +120,7 @@ type privateSignIn struct {
 	mu     sync.Mutex
 	state  SignInState
 	stdin  io.WriteCloser
+	paste  func(SignInState, string) error
 	cancel context.CancelFunc
 	done   chan struct{}
 	closed bool
@@ -136,12 +144,29 @@ func (s *privateSignIn) set(fn func(*SignInState)) {
 	fn(&s.state)
 }
 
-// respond sends a pasted code to a login that reads one from stdin.
+// respond sends a pasted response through its handler or the login stdin.
 func (s *privateSignIn) respond(code string) error {
 	s.mu.Lock()
-	stdin, closed, accepts := s.stdin, s.closed, s.state.AcceptsPaste
+	stdin, closed, st, paste := s.stdin, s.closed, s.state, s.paste
+	if closed || !st.AcceptsPaste || st.final() {
+		s.mu.Unlock()
+		return errors.New("This sign-in does not take a pasted response.")
+	}
+	if paste != nil {
+		if st.Phase != signInWaiting {
+			s.mu.Unlock()
+			return errors.New("Wait for the sign-in link before sending a response.")
+		}
+		s.state.Phase = signInVerifying
+		s.mu.Unlock()
+		if err := paste(st, code); err != nil {
+			s.set(func(state *SignInState) { state.Phase = signInWaiting })
+			return err
+		}
+		return nil
+	}
 	s.mu.Unlock()
-	if closed || stdin == nil || !accepts {
+	if stdin == nil {
 		return errors.New("This sign-in does not take a pasted code.")
 	}
 	if _, err := io.WriteString(stdin, code+"\n"); err != nil {
@@ -214,8 +239,8 @@ func (a *Runtime) PrivateRuntimeLoginState(id string) (SignInState, error) {
 	return login.signIn.snapshot(), nil
 }
 
-// RespondPrivateRuntimeLogin sends the code the owner pasted to a login that
-// reads one from stdin. The pane calls it only when AcceptsPaste is set.
+// RespondPrivateRuntimeLogin sends the owner's response through the paste
+// handler or stdin. The pane calls it only when AcceptsPaste is set.
 func (a *Runtime) RespondPrivateRuntimeLogin(id, text string) error {
 	login := a.findPrivateLogin(id)
 	if login == nil {
@@ -226,7 +251,7 @@ func (a *Runtime) RespondPrivateRuntimeLogin(id, text string) error {
 	}
 	code := strings.TrimSpace(text)
 	if code == "" || len(code) > 4096 || strings.ContainsAny(code, "\r\n") {
-		return errors.New("Paste the sign-in code on one line.")
+		return errors.New("Paste the sign-in code or redirect URL on one line.")
 	}
 	return login.signIn.respond(code)
 }
@@ -248,6 +273,9 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 	}
 	ctx, cancel := context.WithTimeout(a.lifetimeContext(), timeout)
 	signIn := &privateSignIn{state: SignInState{Phase: signInStarting, AcceptsPaste: spec.AcceptsPaste}, cancel: cancel, done: make(chan struct{})}
+	if spec.Respond != nil {
+		signIn.paste = func(st SignInState, text string) error { return spec.Respond(ctx, st, text) }
+	}
 	out, writer := io.Pipe()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = flow.Cwd
@@ -256,14 +284,24 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 	// The child has no terminal, so it starts its own process group and a
 	// cancel kills the whole group.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if spec.GracefulStop {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	}
+	var stopTimer *time.Timer
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
 		}
+		if spec.GracefulStop {
+			// SIGTERM reaches the helper's context so it can join ACP before
+			// exiting. A stuck helper loses all groups in its private session.
+			stopTimer = time.AfterFunc(time.Second, func() { terminalsvc.KillSessionGroups(cmd.Process.Pid) })
+			return cmd.Process.Signal(syscall.SIGTERM)
+		}
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
 	cmd.WaitDelay = 5 * time.Second
-	if spec.AcceptsPaste {
+	if spec.AcceptsPaste && spec.Respond == nil {
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
 			cancel()
@@ -288,14 +326,23 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 	login := &privateRuntimeLogin{flow: flow, signIn: signIn}
 	a.privateLogins[id] = login
 	a.privateLoginMu.Unlock()
-	go a.watchPrivateSignIn(ctx, login, spec, cmd, out, writer, cancel)
+	go func() {
+		a.watchPrivateSignIn(ctx, login, spec, cmd, out, writer, cancel, func() {
+			if stopTimer != nil {
+				stopTimer.Stop()
+			}
+			if spec.GracefulStop {
+				terminalsvc.KillSessionGroups(cmd.Process.Pid)
+			}
+		})
+	}()
 	state := signIn.snapshot()
 	return PrivateLogin{AccountID: id, Warning: flow.Warning, SignIn: &state}, nil
 }
 
 // watchPrivateSignIn parses the login output and settles the flow when the
 // child exits. It never returns output beyond a short failure message.
-func (a *Runtime) watchPrivateSignIn(ctx context.Context, login *privateRuntimeLogin, spec signInSpec, cmd *exec.Cmd, out *io.PipeReader, writer *io.PipeWriter, cancel context.CancelFunc) {
+func (a *Runtime) watchPrivateSignIn(ctx context.Context, login *privateRuntimeLogin, spec signInSpec, cmd *exec.Cmd, out *io.PipeReader, writer *io.PipeWriter, cancel context.CancelFunc, stopped func()) {
 	signIn := login.signIn
 	defer cancel()
 	defer close(signIn.done)
@@ -313,6 +360,7 @@ func (a *Runtime) watchPrivateSignIn(ctx context.Context, login *privateRuntimeL
 		}
 	}()
 	err := cmd.Wait()
+	stopped()
 	// Wait copies all output first, so closing the writer ends the scan.
 	_ = writer.Close()
 	<-read
