@@ -286,3 +286,48 @@ func (s *Service) publishLocalStatuses(ctx context.Context, job registeredCIJob,
 	saved.PublishedKey = publicationKey
 	return registry.SaveHostedRuns(ctx, result.Repo, job.head, saved)
 }
+
+// withoutCancelledHostedWorkflows drops hosted runs that a cancellation ended
+// without a real test failure, and the checks of their suites. Such a workflow
+// never tested the head: GitHub ends a run when a newer one replaces it, and
+// Dyna's CI time budget ends it too. The cancelled jobs and the aggregate job
+// that only reports their cancellations are not evidence, so a conclusive local
+// result decides instead. A run with any real failure stays.
+func withoutCancelledHostedWorkflows(snap Snapshot) Snapshot {
+	current := snap.currentSuiteChecks()
+	ignored := map[int64]bool{}
+	var runs []Run
+	for _, run := range snap.Runs {
+		suite := run.CheckSuiteID
+		aggregate := run.Conclusion == "cancelled" && suite != 0 && replaceableHostedWorkflow(run) && goAggregateCancelled(current, suite)
+		if run.Conclusion != "cancelled" && !aggregate {
+			runs = append(runs, run)
+			continue
+		}
+		realFailure := false
+		for _, check := range current {
+			if check.CheckSuite.ID != suite || check.Status != "completed" || success(check.Conclusion) || check.Conclusion == "cancelled" {
+				continue
+			}
+			if aggregate && check.Name == "go-test" {
+				continue
+			}
+			realFailure = true
+		}
+		if realFailure {
+			runs = append(runs, run)
+			continue
+		}
+		ignored[suite] = true
+	}
+	snap.Runs = runs
+	var checks []Check
+	for _, check := range snap.Checks {
+		if check.App.Slug == "github-actions" && ignored[check.CheckSuite.ID] {
+			continue
+		}
+		checks = append(checks, check)
+	}
+	snap.Checks = checks
+	return snap
+}

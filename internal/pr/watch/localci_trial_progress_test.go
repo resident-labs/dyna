@@ -406,3 +406,83 @@ func TestSavedLocalPassKeepsTheCIGates(t *testing.T) {
 		})
 	}
 }
+
+// A hosted workflow that only failed through its own cancellations never tested
+// the head, so it must not veto a passing local result. Trial 159 failed this
+// way: Dyna's CI time budget ended the hosted run, every job was cancelled, and
+// only the go-test aggregate reported failure while local CI had passed.
+func TestCancelledHostedWorkflowDoesNotFailATrial(t *testing.T) {
+	ctx := context.Background()
+	dataDir := t.TempDir()
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	if raw, err := exec.Command("git", "init", "--quiet", repoDir).CombinedOutput(); err != nil {
+		t.Fatalf("init repository: %v: %s", err, raw)
+	}
+	repo, err := localci.CanonicalRepo(ctx, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := localci.Store{DataDir: dataDir}
+	ciMachine := machines.Store{DataDir: dataDir}
+	if _, err := ciMachine.Save(ctx, machines.Machine{Name: "worker", Roles: []machines.Role{machines.RoleCI}, SSH: "ari@worker", CISlots: 1, Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.SetMode(ctx, "room-test", localci.ModeLocal); err != nil {
+		t.Fatal(err)
+	}
+	head, prHead := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	branch := "dyna/merge-trial/159"
+	r := Record{Kind: "github", Key: "pr", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Head: prHead, Branch: "feature", RepoPath: repoDir, RoomID: "room-test", State: "open", Watching: true, CI: "passed", Polling: Polling{PullHead: prHead}}
+	s := &Service{Store: &Store{Root: state.Root(dataDir)}, LocalCIRegistry: registry}
+	if err := s.Store.update(func(st *State) error {
+		st.Records[r.Key] = &r
+		st.MergeTrials = map[string]*state.MergeTrial{defaultRepo(r): {Head: head, Branch: branch, Phase: "running", Changes: []state.MergeTrialChange{{Key: r.Key, Head: prHead}}}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	result := localci.Result{Repo: repo, SHA: head, RoomID: r.RoomID, Node: "worker", Status: "passed"}
+	for _, name := range requiredRegisteredChecks([]string{"relay", "go", "cross-build", "computer-smoke"}) {
+		result.Checks = append(result.Checks, localci.SuiteResult{CheckName: name, Status: "passed"})
+	}
+	if err := registry.SaveResult(ctx, result); err != nil {
+		t.Fatal(err)
+	}
+	run := Run{ID: 81, Attempt: 1, CheckSuiteID: 7, Path: ".github/workflows/ci.yml", HeadSHA: head, HeadBranch: branch, Event: "push", Status: "completed", Conclusion: "cancelled"}
+	var checks []Check
+	for i, job := range []struct{ name, conclusion string }{
+		{"changes", "success"}, {"cache-warm", "skipped"}, {"computer-smoke", "success"}, {"relay", "success"},
+		{"frontend", "cancelled"}, {"frontend-check", "success"}, {"go-static", "cancelled"},
+		{"go-test-shard (0)", "cancelled"}, {"go-test-shard (1)", "cancelled"},
+		{"go-test", "failure"},
+	} {
+		check := actionsCheck(Check{ID: int64(i + 1), Name: job.name, Status: "completed", Conclusion: job.conclusion})
+		check.CheckSuite.ID = 7
+		checks = append(checks, check)
+	}
+	s.GH.run = func(_ context.Context, cmd *exec.Cmd) error {
+		endpoint := ""
+		for _, arg := range cmd.Args {
+			if strings.HasPrefix(arg, "repos/") {
+				endpoint = arg
+			}
+		}
+		switch {
+		case strings.Contains(endpoint, "/check-runs?"):
+			return writeFakeJSON(cmd.Stdout, trialChecks{Checks: checks})
+		case strings.Contains(endpoint, "/statuses?"):
+			return writeFakeJSON(cmd.Stdout, []Status{})
+		case strings.Contains(endpoint, "/actions/runs?"):
+			return writeFakeJSON(cmd.Stdout, trialRuns{Runs: []Run{run}})
+		default:
+			return fmt.Errorf("unexpected endpoint %s", endpoint)
+		}
+	}
+	got, err := s.mergeTrialCI(ctx, r, branch, head)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "passed" {
+		t.Fatalf("ci=%s reason=%q; a cancelled hosted workflow vetoed a passing local result", got.Status, got.Reason)
+	}
+}
