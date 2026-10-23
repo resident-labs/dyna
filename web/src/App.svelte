@@ -36,7 +36,6 @@
   import Members from './lib/rooms/Members.svelte'
   import { createRoomSessionControls } from './lib/rooms/roomSessionControls.js'
   import Pins from './lib/rooms/Pins.svelte'
-  import FeedFind from './lib/rooms/FeedFind.svelte'
   import SearchIcon from './lib/ui/SearchIcon.svelte'
   import SyncBadge from './lib/rooms/SyncBadge.svelte'
   import { remoteList, syncDelay } from './lib/rooms/sync.ts'
@@ -325,8 +324,6 @@
   let route = $state<RouteNotice | null>(null) // the route this page uses, for the sidebar
   let showClosed = $state(false)
   let showPins = $state(false) // the Pinned panel takes the member list's place
-  let finding = $state(false) // the find bar under the room header
-  let feedFind = $state<ReturnType<typeof FeedFind>>()
   let questions = $state<Question[]>([])
   let visuals = $state<Visual[]>([])
   let questionFocus = $state('')
@@ -1307,7 +1304,6 @@
     agentsNav = !id
     if (id !== roomId) {
       showRoomSettings = false
-      finding = false
       selectionMenu = null
       selectingSessions = false
       setPicked([])
@@ -1976,14 +1972,8 @@
     if (e.key === 'Escape' && (e.defaultPrevented || inside('[role="menu"], [role="dialog"], [role="alertdialog"]'))) return
     if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
       e.preventDefault()
-      showPalette = !showPalette
-      return
-    }
-    // Ctrl+F finds in the whole room while its feed shows. In the find box, in
-    // another view, or under a dialog or menu, the browser's own find takes the key.
-    if (e.key.toLowerCase() === 'f' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && feedShown && !showPalette && !inside('.find, [role="menu"], [role="dialog"], [role="alertdialog"]')) {
-      e.preventDefault()
-      openFind()
+      if (showPalette) closeSearch()
+      else openSearch()
       return
     }
     if (e.key.toLowerCase() === 'b' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
@@ -2002,15 +1992,15 @@
     }
   }
 
-  // The find bar focuses its box when it opens; an open bar takes focus
-  // again. A query, as from /find, replaces the text.
-  let findText = $state('')
-  function openFind(query = '') {
-    // The palette and /find can ask from another view; find searches the feed.
-    if (!feedShown) openView(GENERAL)
-    findText = query
-    if (finding) feedFind?.focus(query)
-    finding = true
+  let searchText = $state('')
+  function openSearch(query = '') {
+    searchText = query
+    showPalette = true
+  }
+  function closeSearch() {
+    showPalette = false
+    palettePath = null
+    searchText = ''
   }
 
   // The palette's own commands. "New room" is built into the palette.
@@ -2030,7 +2020,6 @@
     device: 'M7 3h6a1.5 1.5 0 0 1 1.5 1.5v11A1.5 1.5 0 0 1 13 17H7a1.5 1.5 0 0 1-1.5-1.5v-11A1.5 1.5 0 0 1 7 3ZM9 14.5h2',
     gear: 'M10 12.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4',
     side: 'M3.5 4.5h13v11h-13ZM8 4.5v11',
-    find: 'M8.8 14.1a5.3 5.3 0 1 0 0-10.6 5.3 5.3 0 0 0 0 10.6ZM12.8 12.8l3.7 3.7',
   }
 
   function openPR(n: number | string) {
@@ -2170,7 +2159,7 @@
       openView, openSettings, renameRoom, deleteRoom, roomAction, say, loadRooms,
       openFiles: (path) => { openView('files'); if (path) reveal = path.replace(/^\.?\//, '') },
       openPins: () => { showPins = true; if (narrow) showMembers = false },
-      openFind: (arg) => openFind(arg || ''),
+      openSearch: (arg) => openSearch(arg || ''),
       openRoomSettings: async (target) => { if (target.id === roomId || await selectRoom(target.id)) showRoomSettings = true },
       openSessionPRs: () => (sessionTab = 'prs'),
       cancelRun: (run) => (confirm = { kind: 'cancelrun', run }),
@@ -2442,8 +2431,8 @@
         {#if isChannel(view) && !workRow && !narrow}<LookMenu scope={scopeOf(roomId, view)} />{/if}
         <span class="meta">{Math.max(0, people.length - 1)} session{people.length === 2 ? '' : 's'}{#if live.length}&nbsp;·&nbsp;<em>{live.length} working</em>{/if}</span>
         {#if syncRemotes.length}<SyncBadge remotes={syncRemotes} status={syncRepo} note={syncNote} onrefresh={() => syncAction(api.syncRefresh)} onexport={() => syncAction(api.gitExport)} />{/if}
-        {#if feedShown}
-          <button class="icon find-btn" class:on={finding} onclick={() => (finding ? (finding = false) : openFind())} title={finding ? 'Close find' : 'Find in this room (Ctrl+F)'} aria-label={finding ? 'Close find' : 'Find in this room'} aria-expanded={finding}><SearchIcon /></button>
+        {#if !narrow}
+          <button class="icon" onclick={() => openSearch()} title="Search (Ctrl+K)" aria-label="Search sessions and messages"><SearchIcon /></button>
         {/if}
         {#if narrow}
         <!-- A phone keeps the bar for the page title, so the panel toggles and
@@ -2464,12 +2453,9 @@
       {/if}
       {#if !roomId}<span class="spacer"></span>{/if}
       {#if narrow}
-        <button class="icon" onclick={() => (showPalette = true)} title="Search rooms and commands" aria-label="Search rooms and commands"><SearchIcon size={22} /></button>
+        <button class="icon" onclick={() => openSearch()} title="Search (Ctrl+K)" aria-label="Search sessions and messages"><SearchIcon size={22} /></button>
       {/if}
     </header>
-    {#if finding && feedShown && room}
-      <FeedFind bind:this={feedFind} roomId={room.id} roomName={room.name} initial={findText} onjump={jumpTo} onclose={() => (finding = false)} />
-    {/if}
     <div class="content">
       {#key viewIdentity({ roomId, view, drill })}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -2578,7 +2564,7 @@
 </div>
 {/if}
 {#if showPalette}
-  <Palette {rooms} commands={paletteCommands} {targets} path={palettePath} onroom={paletteRoom} ontarget={openPaletteTarget} onclose={() => { showPalette = false; palettePath = null }} />
+  <Palette {rooms} commands={paletteCommands} {targets} {roomId} roomName={room?.name ?? ''} initial={searchText} onmessage={jumpTo} path={palettePath} onroom={paletteRoom} ontarget={openPaletteTarget} onclose={closeSearch} />
 {/if}
 {#if viewing && room}
   {@const attachment = viewing}
@@ -2813,8 +2799,6 @@
     .scrim { display: block; position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.5); }
     .bar { height: 52px; padding: 0 6px 0 4px; gap: 4px; }
     .meta, .slash, .chip { display: none; }
-    /* A phone finds through the palette or /find; the bar has no room for a second search icon. */
-    .find-btn { display: none; }
     .dm-bar .back-name, .dm-bar .back-arrow, .dm-bar .dm-sep { display: none; }
     .dm-bar > .spacer { display: none; }
     .dm-bar .dm-back { width: 36px; max-width: none; font-size: 0; padding: 6px; }
