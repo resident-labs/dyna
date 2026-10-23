@@ -142,34 +142,34 @@ func (s *Service) resumeHostedCI(ctx context.Context, job registeredCIJob, repo 
 // Every observed dependency must have passed or been cancelled; an independent
 // failure, missing dependency group, or unknown failing job keeps hosted CI red.
 func goAggregateCancelled(checks []Check, suite int64) bool {
-	groups := map[string]bool{}
+	groups := map[localci.CheckName]bool{}
 	cancelled, aggregate := false, false
+	expected := map[localci.CheckName]bool{}
+	for _, group := range localci.ProviderGroups(localci.GroupGoTest) {
+		expected[group] = true
+	}
 	for _, check := range checks {
 		if check.CheckSuite.ID != suite || check.App.Slug != "github-actions" {
 			continue
 		}
-		if check.Name == "go-test" {
+		if check.Name == string(localci.GroupGoTest.Name()) {
 			aggregate = check.Status == "completed" && check.Conclusion == "failure"
 			continue
 		}
-		group := check.Name
-		if strings.HasPrefix(group, "go-test-shard (") {
-			group = "go-test-shard"
-		}
-		switch group {
-		case "go-test-shard", "go-static", "frontend", "frontend-check":
+		group := localci.ProviderGroup(localci.CheckName(check.Name))
+		if expected[group] {
 			if check.Status != "completed" || (check.Conclusion != "success" && check.Conclusion != "cancelled") {
 				return false
 			}
 			groups[group] = true
 			cancelled = cancelled || check.Conclusion == "cancelled"
-		default:
-			if check.Status == "completed" && !success(check.Conclusion) && check.Conclusion != "cancelled" {
-				return false
-			}
+			continue
+		}
+		if check.Status == "completed" && !success(check.Conclusion) && check.Conclusion != "cancelled" {
+			return false
 		}
 	}
-	return aggregate && cancelled && len(groups) == 4
+	return aggregate && cancelled && len(groups) == len(expected)
 }
 
 func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns) Snapshot {
@@ -194,7 +194,7 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns) Sn
 		aggregates[suite] = aggregate
 		realFailure := false
 		for _, check := range current {
-			if check.CheckSuite.ID == suite && check.Status == "completed" && !success(check.Conclusion) && check.Conclusion != "cancelled" && !(aggregate && check.Name == "go-test") {
+			if check.CheckSuite.ID == suite && check.Status == "completed" && !success(check.Conclusion) && check.Conclusion != "cancelled" && !(aggregate && check.Name == string(localci.GroupGoTest.Name())) {
 				realFailure = true
 			}
 		}
@@ -210,7 +210,7 @@ func withoutLocalHostedCancellations(snap Snapshot, saved localci.HostedRuns) Sn
 	var checks []Check
 	for _, check := range snap.Checks {
 		suite := check.CheckSuite.ID
-		if check.App.Slug == "github-actions" && (ignoredSuites[suite] || cancelledSuites[suite] && (check.Conclusion == "cancelled" || (aggregates[suite] && check.Name == "go-test"))) {
+		if check.App.Slug == "github-actions" && (ignoredSuites[suite] || cancelledSuites[suite] && (check.Conclusion == "cancelled" || (aggregates[suite] && check.Name == string(localci.GroupGoTest.Name())))) {
 			continue
 		}
 		checks = append(checks, check)
@@ -278,10 +278,7 @@ func (s *Service) publishLocalStatuses(ctx context.Context, job registeredCIJob,
 		if localInfrastructureError(result) && !registeredTestFailure(result, check) {
 			continue
 		}
-		name := check.CheckName
-		if name == "" {
-			name = check.Suite
-		}
+		name := string(check.Name())
 		state, publish := commitStatusState(check.Status)
 		if !publish {
 			continue
@@ -329,7 +326,7 @@ func withoutCancelledHostedWorkflows(snap Snapshot) Snapshot {
 			if check.CheckSuite.ID != suite || check.Status != "completed" || success(check.Conclusion) || check.Conclusion == "cancelled" {
 				continue
 			}
-			if aggregate && check.Name == "go-test" {
+			if aggregate && check.Name == string(localci.GroupGoTest.Name()) {
 				continue
 			}
 			realFailure = true
