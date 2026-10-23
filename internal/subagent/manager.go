@@ -152,9 +152,8 @@ func (m *Manager) startDir(opts StartOptions, rec room.Record, parent string) (s
 	if dir == "" {
 		dir = opts.Cwd
 	}
-	// TODO: legacy/shim remove later — a caller in this process that sends no Cwd uses this process's own directory; remove once every Start caller sets Dir or Cwd.
 	if dir == "" {
-		dir, _ = os.Getwd()
+		return "", errors.New("starting a session requires a working directory; supply Dir or Cwd")
 	}
 	dir, err := filepath.Abs(dir)
 	if err != nil {

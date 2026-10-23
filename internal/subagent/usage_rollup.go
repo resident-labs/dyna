@@ -53,7 +53,7 @@ func Migrate(dataDir string) error {
 	if _, err := s.turnsDB(); err != nil {
 		return err
 	}
-	if err := backUpBeforeTurnImports(s.root()); err != nil {
+	if err := s.migrateRetainedTurns(); err != nil {
 		return err
 	}
 	return migrateQueues(dataDir)

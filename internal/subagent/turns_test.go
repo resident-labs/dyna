@@ -140,9 +140,8 @@ func TestCrashBeforeTheTurnCopyKeepsTheRow(t *testing.T) {
 }
 
 // At the first engine start the engine backs up dyna.db once (requirements
-// 21 and 23). Turn files are then imported when they are read: Turns finds
-// them by the session's turn count, not by a table listing.
-func TestTurnFilesAreImportedOnReadAfterOneBackup(t *testing.T) {
+// 21 and 23). Retained turn files are imported before startup readers run.
+func TestTurnFilesAreImportedAtStartupAfterOneBackup(t *testing.T) {
 	s, id := turnStore(t)
 	recordtest.Write(t, s.Root, id, Meta{ID: id, Name: "old", RoomID: "room", Room: "room", Turns: 2})
 	for n := 1; n <= 2; n++ {

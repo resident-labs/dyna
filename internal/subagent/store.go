@@ -195,6 +195,9 @@ type Steer struct {
 	TS        int64  `json:"ts"`
 	Message   string `json:"message"`
 	Delivered bool   `json:"delivered,omitempty"`
+	// SourceOffset is a complete-line boundary in output.jsonl.
+	// Nil means unknown; zero is a known boundary before any output.
+	SourceOffset *int64 `json:"sourceOffset,omitempty"`
 }
 
 // Delivery records a deferred steering/journal delivery (tool boundaries).

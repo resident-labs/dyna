@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -202,8 +203,7 @@ func TestReleaseOpensTheGateOnlyAfterARecord(t *testing.T) {
 	}
 }
 
-// A record holds exactly one actor. Owner records are kept to the detached
-// launches that run a command for whoever ran it.
+// A generic launch record holds exactly one session or workflow actor.
 func TestLaunchChecksTheActor(t *testing.T) {
 	for _, tc := range []struct {
 		launcher string
@@ -213,9 +213,9 @@ func TestLaunchChecksTheActor(t *testing.T) {
 		{"turn", Identity{Kind: Session, Session: "ses_a"}, true},
 		{"workflow", Identity{Kind: Worker, Run: "run_a"}, true},
 		{"workflow", Identity{Kind: Worker, Run: "run_a", Agent: 2}, true},
-		{"consolidate", Identity{Kind: Owner}, true},
-		{"transfer", Identity{Kind: Owner}, true},
-		{"resume-room", Identity{Kind: Owner}, true},
+		{"consolidate", Identity{Kind: Owner}, false},
+		{"transfer", Identity{Kind: Owner}, false},
+		{"resume-room", Identity{Kind: Owner}, false},
 		{"turn", Identity{Kind: Session}, false},
 		{"workflow", Identity{Kind: Session, Session: "run_a"}.with(Worker), false},
 		{"workflow", Identity{Kind: Worker}, false},
@@ -239,8 +239,7 @@ func TestLaunchChecksTheActor(t *testing.T) {
 // with sets a kind on a copy, so the table can show a wrong pairing.
 func (id Identity) with(k Kind) Identity { id.Kind = k; return id }
 
-// A workflow worker resolves to its run, never to a session or the owner;
-// a detached launch the owner ran resolves to the owner.
+// Recorded workflow workers and sessions resolve to their stored identities.
 func TestRecordedActorsResolve(t *testing.T) {
 	dir := t.TempDir()
 	for _, tc := range []struct {
@@ -248,7 +247,7 @@ func TestRecordedActorsResolve(t *testing.T) {
 		actor    Identity
 	}{
 		{"workflow", Identity{Kind: Worker, Run: "run_20261020-000000-abcd"}},
-		{"transfer", Identity{Kind: Owner}},
+		{"turn", Identity{Kind: Session, Session: "ses_a"}},
 	} {
 		cmd, err := startChild(t, Launch{DataDir: dir, Name: tc.launcher, Actor: tc.actor, Launcher: tc.launcher})
 		if err != nil {
@@ -430,5 +429,25 @@ func TestOwnerTerminalDescendantKeepsOwnerIdentity(t *testing.T) {
 	proc.add(current.PID, engine, current.Start+1, engineCG)
 	if got := resolver.Resolve(600); got.Kind != Refused {
 		t.Fatalf("reused terminal PID = %+v", got)
+	}
+}
+
+func TestGenericManagedLaunchRejectsOwner(t *testing.T) {
+	for _, launcher := range []string{"consolidate", "transfer", "resume-room", "turn", "workflow", "shell", "hook", "hook identity", "terminal"} {
+		t.Run(launcher, func(t *testing.T) {
+			dir := t.TempDir()
+			data := filepath.Join(dir, "data")
+			cmd := exec.Command(filepath.Join(dir, "nonexistent-executable"))
+			err := Start(t.Context(), cmd, Launch{DataDir: data, Actor: Identity{Kind: Owner}, Launcher: launcher})
+			if err == nil || !strings.Contains(err.Error(), "cannot be recorded") {
+				t.Fatalf("owner %s launch = %v; want identity rejection before executable startup", launcher, err)
+			}
+			if cmd.Process != nil {
+				t.Fatal("rejected owner launch created a process")
+			}
+			if _, err := os.Stat(data); !os.IsNotExist(err) {
+				t.Fatalf("rejected owner launch touched its data directory: %v", err)
+			}
+		})
 	}
 }
