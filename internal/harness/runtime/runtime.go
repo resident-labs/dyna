@@ -14,6 +14,7 @@ import (
 	"sync"
 
 	"dyna-agent/internal/account/native"
+	"dyna-agent/internal/fsutil"
 	harnessmgr "dyna-agent/internal/harness/config"
 	harnesshome "dyna-agent/internal/harness/home"
 	"dyna-agent/internal/profile"
@@ -231,7 +232,7 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	}
 	cli := p.Env["DYNA_BIN"]
 	if cli == "" {
-		cli, _ = os.Executable()
+		cli, _ = fsutil.RunningExecutable()
 	}
 	toolSource := make([]string, 0, len(os.Environ())+len(p.Env))
 	toolSource = append(toolSource, os.Environ()...)

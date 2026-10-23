@@ -2,7 +2,6 @@ package subagent
 
 import (
 	"context"
-	"dyna-agent/internal/lockrank"
 	"errors"
 	"fmt"
 	"os"
@@ -19,10 +18,12 @@ import (
 	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/engineclient"
+	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/harness"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/lockrank"
 	"dyna-agent/internal/mode"
 	"dyna-agent/internal/pr/links"
 	"dyna-agent/internal/pr/review"
@@ -195,7 +196,7 @@ func (m *Manager) executable() string {
 	if m.Executable != "" {
 		return m.Executable
 	}
-	exe, _ := os.Executable()
+	exe, _ := fsutil.RunningExecutable()
 	return exe
 }
 
