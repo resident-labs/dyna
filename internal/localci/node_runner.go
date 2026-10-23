@@ -155,10 +155,13 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			err = errors.Join(err, (Store{DataDir: r.root()}).SaveResult(context.Background(), result))
 		}
 	}()
-	base := fmt.Sprintf("/var/tmp/dyna-local-ci-%d/%s", os.Getuid(), node.Name)
+	base := cacheBase(node.Name)
 	cache := path.Join(base, repoKey(common)+".git")
 	runID := fmt.Sprintf("%s-%d", sha[:12], time.Now().UnixNano())
 	runDir := path.Join(base, "runs", runID)
+	// A run holds a lock on this file while it runs. A cleanup takes the lock to
+	// learn that the run died, so a crashed run's directory never stays forever.
+	active := path.Join(runDir, ".active")
 	reports := path.Join(runDir, "reports")
 	dir := r.resultDir(common, sha)
 	if err := os.MkdirAll(dir, 0700); err != nil { // not-state: report blobs live outside SQLite.
@@ -190,7 +193,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	if e := r.cleanBeforeRun(control, node); e != nil {
 		log.Printf("local CI %s: free space check: %v", node.Name, e)
 	}
-	setup := "set -e; umask 077; mkdir -p " + shellquote.Quote(base) + " " + shellquote.Quote(reports) + "; : > " + shellquote.Quote(path.Join(runDir, ".active")) + "; flock " + shellquote.Quote(path.Join(base, "init.lock")) + " bash -c " + shellquote.Quote("if [ ! -d "+shellquote.Quote(cache)+" ]; then git init --bare "+shellquote.Quote(cache)+"; fi")
+	setup := "set -e; umask 077; mkdir -p " + shellquote.Quote(base) + " " + shellquote.Quote(reports) + "; : > " + shellquote.Quote(active) + "; " + runKeeper(active) + " flock " + shellquote.Quote(path.Join(base, "init.lock")) + " bash -c " + shellquote.Quote("if [ ! -d "+shellquote.Quote(cache)+" ]; then git init --bare "+shellquote.Quote(cache)+"; fi")
 	if err := r.nodeCommand(control, &output, &output, "", setup); err != nil {
 		return result, fmt.Errorf("initialize node: %w: %s", err, &output)
 	}

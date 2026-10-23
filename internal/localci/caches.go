@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -29,6 +30,17 @@ const ciCacheCleanAge = 48 * time.Hour
 // drop this constant then.
 const ciDiskFloorGB = 20
 
+// legacyCacheDir is where the old single-node runner kept its caches. Runs that
+// name no node still use it, so its entries stay until their age passes.
+const legacyCacheDir = "/var/tmp/dyna-local-ci"
+
+// cacheBase names the one directory a node keeps on its machine. Setup and
+// cleanup both use it, so a cleanup always visits the tree a run writes to.
+// The user ID is the controller's, not the SSH account's.
+func cacheBase(node string) string {
+	return fmt.Sprintf("/var/tmp/dyna-local-ci-%d/%s", os.Getuid(), node)
+}
+
 //go:embed cache_clean.sh
 var ciCacheCleanBody string
 
@@ -42,13 +54,14 @@ type CacheCleanResult struct {
 
 // cacheCleanCommand is the one shell command a run sends to a CI machine. The
 // script checks the allow-list itself, so a bad root stops it there.
-func cacheCleanCommand(dryRun bool, age time.Duration) string {
+func cacheCleanCommand(node string, dryRun bool, age time.Duration) string {
 	dry := "0"
 	if dryRun {
 		dry = "1"
 	}
 	return "DYNA_CI_CLEAN_DRY=" + dry +
 		" DYNA_CI_CLEAN_AGE_MIN=" + strconv.FormatInt(int64(age/time.Minute), 10) +
+		" DYNA_CI_CLEAN_ROOTS=" + shellquote.Quote(cacheBase(node)+" "+legacyCacheDir) +
 		" bash -o pipefail -c " + shellquote.Quote(ciCacheCleanBody)
 }
 
@@ -66,7 +79,7 @@ func (r Runner) CleanCaches(ctx context.Context, node Node, dryRun bool) (CacheC
 	var out, stderr tailBuffer
 	nodeRunner := r
 	nodeRunner.Node = &node
-	if err := nodeRunner.nodeCommand(ctx, &out, &stderr, "", cacheCleanCommand(dryRun, ciCacheCleanAge)); err != nil {
+	if err := nodeRunner.nodeCommand(ctx, &out, &stderr, "", cacheCleanCommand(node.Name, dryRun, ciCacheCleanAge)); err != nil {
 		return result, fmt.Errorf("clean %s caches: %w: %s", node.Name, err, stderr.String())
 	}
 	result.Paths, result.FreedBytes = parseCacheClean(out.String())
@@ -94,6 +107,15 @@ func parseCacheClean(output string) ([]string, int64) {
 		}
 	}
 	return paths, freed
+}
+
+// runKeeper is the shell text that keeps a run's lock held on the node for as
+// long as the run lasts, and no longer: the keeper goes away with its lock when
+// the run directory is removed, and it gives up after the longest run anyway.
+// A crashed run therefore leaves only the lock file, never a held lock.
+func runKeeper(active string) string {
+	wait := "end=$((SECONDS+10800)); while [ -e " + shellquote.Quote(active) + " ] && [ $SECONDS -lt $end ]; do sleep 5; done"
+	return "setsid flock -n " + shellquote.Quote(active) + " bash -c " + shellquote.Quote(wait) + " >/dev/null 2>&1 </dev/null & "
 }
 
 // diskFullNote is the text the kernel and the tools print when a check runs

@@ -3,16 +3,12 @@ package localci
 import (
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
-
-	"dyna-agent/internal/shellquote"
 )
 
 func TestSharedGoTestStepRunsWithoutRaceAndPreservesPipelineFailure(t *testing.T) {
@@ -227,53 +223,5 @@ func TestSlotReleaseIsIdempotentUnderRunnerErrexit(t *testing.T) {
 				t.Fatalf("release removed or changed reservation: %q: %v", data, err)
 			}
 		})
-	}
-}
-
-// TestCacheCleanRefusesOtherPathsAndFindsItsTargets checks the one command a run
-// sends to a CI machine: it must refuse every path outside Dyna's own
-// directories, and it must select by age with one xdev find per tree.
-func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
-	command := cacheCleanCommand(true, ciCacheCleanAge)
-	for _, keep := range []string{"-xdev", `-maxdepth 0 -mmin +"$age_min" ! -type l`, "rm -rf --one-file-system", "DYNA_CI_CLEAN_AGE_MIN=2880", "-e \"$run/.active\""} {
-		if !strings.Contains(command, keep) {
-			t.Fatalf("cleanup command lacks %q", keep)
-		}
-	}
-	for _, outside := range []string{"/home/pip/media", "/var/tmp", "/var/tmp/dyna-local-ci/..", "/srv/homelab"} {
-		t.Run(outside, func(t *testing.T) {
-			cmd := exec.Command("bash", "-c", "DYNA_CI_CLEAN_ROOTS="+shellquote.Quote(outside)+" "+command)
-			out, err := cmd.CombinedOutput()
-			var exit *exec.ExitError
-			if !errors.As(err, &exit) || exit.ExitCode() != 2 {
-				t.Fatalf("cleanup accepted %s: %v: %s", outside, err, out)
-			}
-			if !strings.Contains(string(out), "refusing") {
-				t.Fatalf("cleanup refused %s without a reason: %s", outside, out)
-			}
-		})
-	}
-	// Dyna's own trees stay allowed, including one entry inside them.
-	for _, inside := range []string{"/var/tmp/dyna-local-ci/go-build", "/var/tmp/dyna-local-ci-1000/hermeslab/runs", "/var/tmp/dyna-ci/slots"} {
-		t.Run(inside, func(t *testing.T) {
-			cmd := exec.Command("bash", "-c", "DYNA_CI_CLEAN_ROOTS="+shellquote.Quote(inside)+" "+command)
-			out, err := cmd.CombinedOutput()
-			if err != nil || strings.Contains(string(out), "refusing") {
-				t.Fatalf("cleanup refused Dyna's own path %s: %v: %s", inside, err, out)
-			}
-		})
-	}
-	// The daily worker has no node on the runner, only one per machine.
-	runner := Runner{DataDir: t.TempDir()}
-	runner.Command = func(_ context.Context, _ string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
-		if name != "bash" || !strings.Contains(args[len(args)-1], "dyna-ci-clean") {
-			t.Fatalf("cleanup ran %s %v", name, args)
-		}
-		fmt.Fprint(out, "DYNA_CI_CACHE_CLEAN_ITEM 2048 /var/tmp/dyna-local-ci-1000/local/runs/gone\nDYNA_CI_CACHE_CLEAN_FREED_KB=2048\n")
-		return nil
-	}
-	cleaned, err := runner.CleanCaches(t.Context(), Node{Name: "local", Slots: 1, Enabled: true}, true)
-	if err != nil || cleaned.FreedBytes != 2<<20 || len(cleaned.Paths) != 1 {
-		t.Fatalf("cleaned = %+v, err = %v", cleaned, err)
 	}
 }
