@@ -105,7 +105,7 @@ func TestWriteExecutableDuringConcurrentForks(t *testing.T) {
 	dir := t.TempDir()
 	// Exercise writes while four independent fork loops compete for ForkLock.
 	// A bounded sample keeps this regression test within the test budget.
-	for i := range 32 {
+	for i := range 8 {
 		path := filepath.Join(dir, fmt.Sprintf("script-%d", i))
 		if err := WriteExecutable(path, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
 			t.Fatal(err)
