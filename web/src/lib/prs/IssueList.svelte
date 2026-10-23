@@ -82,5 +82,5 @@
   .start { flex: none; font-size: 12.5px; font-weight: 600; color: var(--ink-2); background: var(--raise); border-radius: 6px; padding: 5px 12px; }
   .start:hover:not(:disabled) { color: var(--ink); background: var(--raise-hover); }
   .start:disabled { opacity: 0.5; }
-  @media (max-width: 760px) { .item { flex-wrap: wrap; padding-bottom: var(--s2); } .item :global(.row) { flex-basis: 100%; } .actions { max-width: none; } .rows { padding-left: var(--s4); padding-right: var(--s4); } .start { min-height: 44px; padding: 0 14px; } .pr { margin-left: 0; } }
+  @media (max-width: 760px) { .rows { padding-left: var(--s4); padding-right: var(--s4); } .start { min-height: 44px; padding: 0 14px; } .pr { margin-left: 0; } }
 </style>
