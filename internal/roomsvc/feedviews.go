@@ -15,11 +15,9 @@ type feedViews struct {
 	owners    map[string]bool
 }
 
-// DMChannel holds posts that belong only in direct-message threads;
-// no feed view shows them.
-const DMChannel = "dm"
-
-// VoiceChannel is the channel of the owner's voice call.
+// VoiceChannel is the feed view of the owner's voice call. It is a view token,
+// not a conversation: the call's posts have the voice conversation as their
+// home, and the call view lists them there.
 const VoiceChannel = room.VoiceAgent
 
 func newFeedViews(members []Member) feedViews {
@@ -47,12 +45,18 @@ func (c feedViews) home(m Member) string {
 	return "general"
 }
 
-// viewsFor lists the feed views a post shows in, the sender's home first.
-func (c feedViews) viewsFor(post room.Message) []string {
+// viewsFor lists the feed views a post shows in, the sender's home first. home
+// is the conversation the post was written in: a post of the owner's voice call
+// shows in the call view only, and a post written in a DM shows in no feed view,
+// because its DM lists it.
+func (c feedViews) viewsFor(post room.Message, home room.Conversation) []string {
 	// The owner's voice call is its own conversation, never the room chat. Root
 	// still reads it: the call through its owner DM block, relays as input.
-	if post.Source == room.SourceVoice {
+	if home == room.ConversationVoice {
 		return []string{VoiceChannel}
+	}
+	if home.IsDM() {
+		return nil
 	}
 	sender, known := c.byAddress[post.From]
 	// Automatic results stay with the sender's peers, despite delivery to root.

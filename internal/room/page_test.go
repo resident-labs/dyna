@@ -23,7 +23,7 @@ func TestSelectedWindowUsesTheSharedIndex(t *testing.T) {
 	}
 	decoded := 0
 	s.decodeMessage = func(data []byte, msg *Message) error { decoded++; return json.Unmarshal(data, msg) }
-	unread := func(msg Message) bool { return msg.ID != ids[0] }
+	unread := PageFilter{Unread: func(msg Message) bool { return msg.ID != ids[0] }}
 	page, err := s.ReadPage(rec.ID, "", 3, unread)
 	if err != nil {
 		t.Fatal(err)
@@ -80,7 +80,7 @@ func TestForwardPageKeepsLiveArrivalsContiguous(t *testing.T) {
 		}
 		ids = append(ids, msg.ID)
 	}
-	older, err := s.ReadPage(rec.ID, ids[5], 3, nil)
+	older, err := s.ReadPage(rec.ID, ids[5], 3, PageFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,15 +88,15 @@ func TestForwardPageKeepsLiveArrivalsContiguous(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	forward, err := s.ReadAfter(rec.ID, older.Messages[2].ID, 3, nil)
+	forward, err := s.ReadAfter(rec.ID, older.Messages[2].ID, 3, PageFilter{})
 	if err != nil || len(forward.Messages) != 3 || forward.Messages[0].ID != ids[5] || forward.Messages[2].ID != ids[7] || forward.Earlier != 5 || forward.Newer != 1 {
 		t.Fatalf("forward skipped the dropped page: %+v, %v", forward, err)
 	}
-	tail, err := s.ReadAfter(rec.ID, forward.Messages[2].ID, 3, nil)
+	tail, err := s.ReadAfter(rec.ID, forward.Messages[2].ID, 3, PageFilter{})
 	if err != nil || len(tail.Messages) != 1 || tail.Messages[0].ID != live.ID || tail.Newer != 0 {
 		t.Fatalf("live tail: %+v %v", tail, err)
 	}
-	if _, err := s.ReadAfter(rec.ID, "missing", 3, nil); err == nil {
+	if _, err := s.ReadAfter(rec.ID, "missing", 3, PageFilter{}); err == nil {
 		t.Fatal("accepted unknown forward cursor")
 	}
 }
