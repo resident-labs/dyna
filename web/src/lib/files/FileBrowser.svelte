@@ -8,6 +8,7 @@
   // The Files view: a folder tree next to the file viewer on a wide screen;
   // on a phone, one folder list at a time with a path bar, and the file
   // full width. Folders load one level at a time, when opened.
+  import { filterLoaded } from './filterLoaded.ts'
   import { untrack, onDestroy } from 'svelte'
   import { api } from '../../api.js'
   import FileView from './FileView.svelte'
@@ -40,6 +41,9 @@
   let lists = $state({}) // folder -> {entries} | {error} | {loading}
   let root = $state('')
   let focusPath = $state('')
+  let filter = $state('')
+  let filterInput = $state()
+  const term = $derived(filter.trim().toLocaleLowerCase())
   let treeEl = $state()
 
   let status = $state(null)
@@ -197,9 +201,18 @@
   let rows = $derived.by(() => {
     const out = treeRows(lists, open, rowCache)
     rowCache = new Map(out.map((r) => [r.path, r]))
-    return out
+    return term ? filterLoaded(lists, term) : out
   })
   let items = $derived(rows.filter((r) => r.kind !== 'note'))
+
+  $effect(() => {
+    if (term && !items.some((row) => row.path === focusPath)) focusPath = items[0]?.path ?? ''
+  })
+
+  function clearFilter() {
+    filter = ''
+    filterInput?.focus()
+  }
 
   function toggle(e) {
     const next = new Set(open)
@@ -215,6 +228,7 @@
     focusPath = e.path
     if (e.isDir ?? isDir(e)) {
       if (narrow) dir = e.path
+      else if (term) { filter = ''; showFolder(e.path) }
       else toggle(e)
     } else file = e.path
   }
@@ -253,9 +267,9 @@
     else if (ev.key === 'ArrowUp') at(i - 1)
     else if (ev.key === 'Home') at(0)
     else if (ev.key === 'End') at(items.length - 1)
-    else if (ev.key === 'ArrowRight' && r?.isDir) { if (!r.expanded) toggle(r); else at(i + 1) }
+    else if (ev.key === 'ArrowRight' && r?.isDir) { if (r.expanded) at(i + 1); else if (term) pick(r); else toggle(r) }
     else if (ev.key === 'ArrowLeft' && r) {
-      if (r.isDir && r.expanded) toggle(r)
+      if (r.isDir && r.expanded && !term) toggle(r)
       else { const p = parent(r.path); if (p) at(items.findIndex((x) => x.path === p)) }
     } else if ((ev.key === 'Enter' || ev.key === ' ') && r) pick(r)
     else return
@@ -292,6 +306,8 @@
 
   let label = $derived(base(root) || 'repo')
   let phoneList = $derived(lists[dir])
+  let phoneEntries = $derived((phoneList?.entries ?? []).filter((entry) => !term || entry.name.toLocaleLowerCase().includes(term)))
+  $effect(() => { dir; untrack(() => { filter = '' }) })
 </script>
 
 {#snippet icon(e)}
@@ -359,6 +375,14 @@
   {/if}
 {/snippet}
 
+{#snippet filterField()}
+  <div class="filter">
+    <input bind:this={filterInput} bind:value={filter} type="search" aria-label={narrow ? 'Filter this folder' : 'Filter loaded files'} placeholder={narrow ? 'Filter this folder' : 'Filter loaded files'} />
+    {#if filter}<button onclick={clearFilter} aria-label="Clear file filter">Clear</button>{/if}
+  </div>
+  {#if term && !narrow}<p class="filter-help">Only loaded files and folders are included.</p>{/if}
+{/snippet}
+
 {#snippet buttons()}
   <button class="ibtn" class:on={hidden} onclick={() => (hidden = !hidden)} title={hidden ? 'Hide dot files' : 'Show dot files'} aria-pressed={hidden} aria-label="Show dot files">
     <svg viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d="M1.8 10S5 4.5 10 4.5 18.2 10 18.2 10 15 15.5 10 15.5 1.8 10 1.8 10Z" fill="none" stroke="currentColor" stroke-width="1.5" /><circle cx="10" cy="10" r="2.5" fill="none" stroke="currentColor" stroke-width="1.5" />{#if !hidden}<path d="M3 17 17 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />{/if}</svg>
@@ -387,6 +411,7 @@
         {@render buttons()}
       </div>
       {@render repository()}
+      {@render filterField()}
       <div class="list">
         {#if dir}
           <button class="row" onclick={() => (dir = parent(dir))}>
@@ -400,8 +425,10 @@
           <p class="quiet">Loading…</p>
         {:else if !phoneList.entries.length}
           <p class="quiet">This folder is empty.</p>
+        {:else if !phoneEntries.length}
+          <p class="quiet" role="status">No matches in this folder.</p>
         {:else}
-          {#each phoneList.entries as e (e.path)}
+          {#each phoneEntries as e (e.path)}
             <button class="row" data-path={e.path} use:observeCommit onclick={() => pick(e)}>
               {@render icon(e)}
               <span class="name" class:folder={isDir(e)}>{e.name}</span>
@@ -413,7 +440,7 @@
             </button>
           {/each}
         {/if}
-        {#if !dir}{@render readmeView()}{/if}
+        {#if !dir && !term}{@render readmeView()}{/if}
       </div>
       {#if repoHistory}<History {roomId} {session} narrow onclose={() => (repoHistory = false)} />{/if}
     {/if}
@@ -431,7 +458,9 @@
         {@render buttons()}
       </div>
       {#if !file}{@render repository()}{/if}
+      {@render filterField()}
       <div class="tree-scroll">
+      {#if term && !items.length}<p class="quiet" role="status">No matches among loaded files.</p>{/if}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <div class="tree" role="tree" aria-label="Files in {label}" bind:this={treeEl} onkeydown={keydown} tabindex="-1">
         {#each rows as r (r.path)}
@@ -447,7 +476,7 @@
               aria-expanded={r.isDir ? r.expanded : undefined}
               data-path={r.path}
               use:observeCommit
-              tabindex={r.path === (focusPath || items[0]?.path) ? 0 : -1}
+              tabindex={r.path === (items.some((item) => item.path === focusPath) ? focusPath : items[0]?.path) ? 0 : -1}
               style="padding-left:{8 + r.depth * 14}px"
               title={r.path}
               onclick={(e) => { e.currentTarget.focus(); pick(r) }}
@@ -463,7 +492,7 @@
           {/if}
         {/each}
       </div>
-      {#if !file}{@render readmeView()}{/if}
+      {#if !file && !term}{@render readmeView()}{/if}
       </div>
     </aside>
     {#if repoHistory && !file}<History {roomId} {session} onclose={() => (repoHistory = false)} />{/if}
@@ -476,6 +505,13 @@
 {/if}
 
 <style>
+  .filter { display: flex; align-items: center; gap: 8px; margin: 8px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); }
+  .filter:focus-within { border-color: var(--iris-edge); }
+  .filter input { flex: 1; min-width: 0; width: 100%; padding: 10px; color: var(--ink); font: inherit; font-size: var(--t-body); border: 0; outline: 0; background: transparent; }
+  .filter button { min-height: 44px; padding: 0 10px; color: var(--muted); font-size: var(--t-sm); }
+  .filter-help { margin: 0 14px 8px; color: var(--muted); font-size: var(--t-sm); }
+  .phone .filter input { font-size: var(--t-title); }
+
   .home .treepane { flex: 1; width: auto; min-width: 0; border-right: 0; background: transparent; }
   .repository { padding: 14px 20px; border-bottom: 1px solid var(--line-soft); }
   .summary, .latest { display: flex; align-items: center; gap: 12px; min-width: 0; }
