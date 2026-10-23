@@ -60,11 +60,16 @@ func deliverCallRequests(ctx context.Context, rooms *roomsvc.Service, push pushN
 		// The answer is a typed call event, so the card names the call and the
 		// agent text carries no raw ID in the middle of a sentence. A stable ID
 		// makes a crash between posting and recording delivery safe.
+		//
+		// Root asked for the call and stops waiting on the answer, so the post
+		// needs root: a registered event wakes the root seat only when it does
+		// (room.rootWakes), and the voice post this replaced always did.
 		_, err = rooms.Notify.Post(ctx, notify.PostInput{
-			ID:       questions.PostID(row.Room, row.ID, "call-closed"),
-			Event:    room.CallEvent{Type: state, Call: row.ID},
-			Sender:   notify.Sender{Kind: notify.SenderOwner, Room: rec.Name},
-			Mentions: []string{"@root"},
+			ID:        questions.PostID(row.Room, row.ID, "call-closed"),
+			NeedsRoot: true,
+			Event:     room.CallEvent{Type: state, Call: row.ID},
+			Sender:    notify.Sender{Kind: notify.SenderOwner, Room: rec.Name},
+			Mentions:  []string{"@root"},
 		})
 		if err != nil {
 			return next, err
