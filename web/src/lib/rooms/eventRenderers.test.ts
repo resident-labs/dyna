@@ -535,6 +535,30 @@ test('a failed merge card says its failing checks once and names every member PR
   assert.match(returned, /root sent it back to fix the flake/, `a free reason vanished: ${returned}`)
 })
 
+// A fact about one member of a batch, such as root returning that PR or its
+// conflict with another member, names that PR. It must not claim the whole
+// batch, which carries every member in its payload.
+test('a member-scoped merge card names that PR, not the whole batch', () => {
+  const base = web.mergeEvent({ kind: 'merge', notice: { kind: 'returned' }, payload: fixtures['merge/returned'] })
+  assert.ok(base, 'the returned merge fixture is missing')
+  const members = [
+    { number: 1, title: 'First member', url: 'https://github.com/acme/app/pull/1' },
+    { number: 2, title: 'Second member', url: 'https://github.com/acme/app/pull/2' },
+  ]
+  const cases = [
+    { type: 'returned' as const, reasonKind: 'root-return' as const, wants: /Returned by root: #2 into main/ },
+    { type: 'conflict' as const, reasonKind: 'conflict' as const, wants: /Merge conflict: #2 into main/ },
+  ]
+  for (const c of cases) {
+    const text = renderMergeCard({ ...base, ...c, prs: members, member: 2, label: 'PR #2', reason: 'named member' })
+    assert.match(text, c.wants, `${c.type} named the wrong subject: ${text}`)
+    assert.doesNotMatch(text, /#1/, `${c.type} claimed the other member: ${text}`)
+    assert.match(text, /batch of 2/, `${c.type} hid the batch: ${text}`)
+    assert.match(text, /Second member/, `${c.type} named the other member's title: ${text}`)
+    assert.doesNotMatch(text, /First member/, `${c.type} kept the other member's title: ${text}`)
+  }
+})
+
 test('a single-PR merge card keeps the singular title', () => {
   const base = web.mergeEvent({ kind: 'merge', notice: { kind: 'landed' }, payload: fixtures['merge/landed'] })
   assert.ok(base, 'the landed merge fixture is missing')

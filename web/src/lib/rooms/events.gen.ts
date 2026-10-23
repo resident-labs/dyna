@@ -193,6 +193,7 @@ export interface MergeEvent {
   reasonKind?: MergeReasonKind
   summary?: string
   label?: string
+  member?: number
   key?: string
   detail?: string
 }
@@ -1009,6 +1010,7 @@ export function isMergeEvent(v: unknown): v is MergeEvent {
     (v.reasonKind === undefined || MERGE_REASON_KIND.has(v.reasonKind)) &&
     (v.summary === undefined || typeof v.summary === "string") &&
     (v.label === undefined || typeof v.label === "string") &&
+    (v.member === undefined || Number.isInteger(v.member)) &&
     (v.key === undefined || typeof v.key === "string") &&
     (v.detail === undefined || typeof v.detail === "string")
 }

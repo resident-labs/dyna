@@ -691,6 +691,11 @@ type MergeEvent struct {
 	// Label names the change a fact is about, as "PR #12". A trial's own
 	// events name every member in PRs instead.
 	Label string `json:"label,omitempty"`
+	// Member is the PR number a fact is about, when the fact names one member
+	// of a batch rather than the whole trial: a return, a conflict or a failure
+	// that holds back that member alone. A trial-wide fact leaves it zero, and
+	// the card then names the whole batch.
+	Member int `json:"member,omitempty"`
 	// Key is the steward's own identity of this event within a type, such as
 	// one checks progress step. One fact per trial needs no key.
 	Key string `json:"key,omitempty"`

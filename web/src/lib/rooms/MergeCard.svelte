@@ -73,8 +73,21 @@
   let first = $derived(prs[0])
   // A local change has no PR number, so the card names it by its title.
   let name = $derived(first ? (first.number ? `#${first.number}` : first.title || 'the change') : '')
-  // A batch names every member, not only the PR the trial was anchored on.
-  let what = $derived(prs.length > 1 ? `${prs.length} PRs: ${prs.map((p) => (p.number ? `#${p.number}` : p.title || 'the change')).join(', ')}` : name)
+  // A fact that names one member (a return, a conflict, a member's own
+  // failure) is about that PR alone; a trial-wide fact names every member.
+  let affected = $derived(payload?.member ? prs.find((pr) => pr.number === payload?.member) : undefined)
+  let what = $derived(
+    affected
+      ? affected.number
+        ? `#${affected.number}`
+        : affected.title || 'the change'
+      : prs.length > 1
+        ? `${prs.length} PRs: ${prs.map((pr) => (pr.number ? `#${pr.number}` : pr.title || 'the change')).join(', ')}`
+        : name,
+  )
+  // The card opens the PR it names: the affected member when the fact is about
+  // one, else the first member of the batch.
+  let subject = $derived(affected ?? first)
   let title = $derived(type === 'decision' ? verbs.decision : `${verbs[type]} ${what} into ${payload?.base ?? ''}`)
   let failedChecks = $derived(payload?.checks?.failed ?? [])
   // The card says a cause once. The Go side words a cause the steward
@@ -108,7 +121,7 @@
   <div class="body">
     {#if decision}<p class="note">{decision.note}</p>{/if}
     {#if payload}
-      {#if first?.title}<p class="sub">{first.title}</p>{/if}
+      {#if subject?.title}<p class="sub">{subject.title}</p>{/if}
       <div class="steps" aria-hidden="true">
         {#each progress[type] as segment}<i class={segment}></i>{/each}
       </div>
@@ -118,13 +131,14 @@
         </div>
       {/if}
       <div class="facts">
+        {#if affected && prs.length > 1}<span>batch of {prs.length}</span>{/if}
         {#if payload.checks && (payload.checks.total ?? 0) > 0}<span>checks <b>{payload.checks.done}/{payload.checks.total}</b></span>{/if}
         {#if payload.commit}<span>commit <b class="mono">{shortSha(payload.commit)}</b></span>{/if}
       </div>
       {#if reason && stepTones[type] === 'coral'}<p class="reason">{reason}</p>{/if}
       {#if failedChecks.length}<p class="reason">Failed checks: {failedChecks.join(', ')}</p>{/if}
       <div class="acts">
-        {#if first?.url}<button class="btn" type="button" onclick={() => openLink(first?.url)}>Open PR</button>{/if}
+        {#if subject?.url}<button class="btn" type="button" onclick={() => openLink(subject?.url)}>Open PR</button>{/if}
         {#if openCommit}<button class="btn" type="button" onclick={() => openLink(openCommit)}>Open commit</button>{/if}
       </div>
     {/if}

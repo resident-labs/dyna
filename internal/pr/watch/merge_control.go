@@ -264,9 +264,11 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 			ev.Base = locallane.Integration
 		}
 		ev.Reason, ev.ReasonKind = reason, room.MergeRootReturn
+		ev.Member = r.Number
 		if trial != nil {
 			ev = mergeTrialEvent(st, *trial, room.MergeReturned)
 			ev.Label, ev.Reason, ev.ReasonKind = changeLabel(r), reason, room.MergeRootReturn
+			ev.Member = r.Number
 		}
 		if err := s.postMergeNotice(ctx, r, "merge-root-return/"+digest(reason), Notice{Kind: "ci", Target: r.Author, Merge: &ev, Text: fmt.Sprintf("%s returned by root at %s. %s\n%s", r.URL, r.Head, reason, logs)}); err != nil {
 			return err
