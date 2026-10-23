@@ -100,8 +100,9 @@ func (c *sessionCache) read(path string, t subagent.Turn, following *subagent.Tu
 		return nil, false
 	}
 	events = append(r.events, events...)
+	// The reader keeps compaction records, so this only trims the others.
 	if len(events) > MaxTurnEvents {
-		events = append([]workeroutput.Event(nil), events[len(events)-MaxTurnEvents:]...)
+		events = workeroutput.KeepCompactions(append([]workeroutput.Event(nil), events...), MaxTurnEvents)
 		r.omitted = true
 	}
 	r.events, r.offset = events, next

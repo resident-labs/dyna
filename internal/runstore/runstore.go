@@ -267,7 +267,7 @@ func ReadNormalizedOutputPath(path string, offset, limit int64) ([]workeroutput.
 // ReadNormalizedOutputTailPath reads a range while retaining at most maxEvents
 // newest records. The returned offset includes all complete records scanned.
 func ReadNormalizedOutputTailPath(path string, offset, limit int64, maxEvents int) ([]workeroutput.Event, int64, error) {
-	return readJSONLines[workeroutput.Event](path, offset, limit, normalizedOutputMaxRecordBytes, jsonLinesPolicy{keepLast: maxEvents})
+	return readJSONLines[workeroutput.Event](path, offset, limit, normalizedOutputMaxRecordBytes, jsonLinesPolicy{keepLast: maxEvents}, workeroutput.IsCompactionEvent)
 }
 
 // ReadProjectedNormalizedOutputPath resolves conversions by stable artifact key.
@@ -290,7 +290,7 @@ func ReadProjectedNormalizedOutputTailPath(dataDir, key, path string, offset, li
 		}
 		err = json.Unmarshal(raw, &event)
 		return event, err == nil, nil
-	})
+	}, workeroutput.IsCompactionEvent)
 }
 
 // OutputProfilesPath is the run-start snapshot of output-relevant profile
@@ -868,14 +868,14 @@ type jsonLinesPolicy struct {
 	errorOversized bool
 }
 
-func readJSONLines[T any](path string, offset int64, limit int64, maxRecordBytes int, policy jsonLinesPolicy) ([]T, int64, error) {
+func readJSONLines[T any](path string, offset int64, limit int64, maxRecordBytes int, policy jsonLinesPolicy, keep ...func(T) bool) ([]T, int64, error) {
 	return readJSONLinesDecoded(path, offset, limit, maxRecordBytes, policy, func(_, _ int64, line []byte) (record T, ok bool, err error) {
 		return record, json.Unmarshal(line, &record) == nil, nil
-	})
+	}, keep...)
 }
 
-func readJSONLinesDecoded[T any](path string, offset, limit int64, maxRecordBytes int, policy jsonLinesPolicy, decode func(int64, int64, []byte) (T, bool, error)) ([]T, int64, error) {
-	var out []T
+func readJSONLinesDecoded[T any](path string, offset, limit int64, maxRecordBytes int, policy jsonLinesPolicy, decode func(int64, int64, []byte) (T, bool, error), keep ...func(T) bool) ([]T, int64, error) {
+	var out, kept []T
 	oldest := 0
 	next, err := visitJSONLines(path, offset, limit, maxRecordBytes, policy, func(start, end int64, line []byte) error {
 		record, ok, err := decode(start, end, line)
@@ -884,6 +884,9 @@ func readJSONLinesDecoded[T any](path string, offset, limit int64, maxRecordByte
 		}
 		if ok {
 			if policy.keepLast > 0 && len(out) == policy.keepLast {
+				if len(keep) > 0 && keep[0](out[oldest]) {
+					kept = append(kept, out[oldest])
+				}
 				out[oldest] = record
 				oldest = (oldest + 1) % len(out)
 			} else {
@@ -895,7 +898,7 @@ func readJSONLinesDecoded[T any](path string, offset, limit int64, maxRecordByte
 	if oldest > 0 {
 		out = append(out[oldest:len(out):len(out)], out[:oldest]...)
 	}
-	return out, next, err
+	return append(kept, out...), next, err
 }
 
 // VisitNormalizedOutputLines visits complete source lines with original offsets.

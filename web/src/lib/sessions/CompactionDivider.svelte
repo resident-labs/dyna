@@ -13,11 +13,12 @@
   let { row, enter = false }: Props = $props()
   let failed = $derived(row.state === 'failed')
   let running = $derived(row.state === 'started')
+  let done = $derived(!failed && !running)
 </script>
 
-<div class="compaction" class:enter class:failed class:running role="separator" aria-label={compactionText(row)}>
+<div class="compaction" class:enter class:failed class:running class:done role="separator" aria-label={compactionText(row)}>
   <span>
-    {#if running}<i class="spin" aria-hidden="true"></i>{/if}{compactionText(row)}{#if !running && row.ts}<time> · {clock(row.ts)}</time>{/if}
+    {#if running}<i class="spin" aria-hidden="true"></i>{:else}<i class="mark" aria-hidden="true">{failed ? '!' : '⇣'}</i>{/if}{compactionText(row)}{#if !running && row.ts}<time> · {clock(row.ts)}</time>{/if}
   </span>
 </div>
 
@@ -45,6 +46,12 @@
     white-space: nowrap;
   }
   .compaction time { font-variant-numeric: tabular-nums; }
+  /* A finished compaction is its own event, not the green "finished" turn line, so
+     it reads in the ink colour with its own mark. */
+  .compaction.done span { color: var(--ink-2); }
+  .compaction.done .mark { color: var(--iris); }
+  .mark { font-style: normal; font-size: var(--t-cap); }
+  .compaction.failed .mark { color: var(--coral); }
   .compaction.failed { border-top-color: var(--coral); }
   .compaction.failed span { color: var(--coral); }
   /* A failure carries its reason, which can be long: it wraps on its own line
