@@ -622,3 +622,16 @@ test('finish sign-in shows the engine message', async () => {
 test('Antigravity sign-in does not promise a personal login copy', () => {
   assert.match(paneSource, /\{#if r\.id !== 'antigravity'\}\s*<p class="muted small">If you already use \{r\.meta\.name\}, Dyna can copy that login once\.<\/p>/)
 })
+
+// The shared card words each step of an in-app sign-in, and repeats the
+// engine's reason when the sign-in failed.
+test('sign-in card words each step', () => {
+  assert.equal(harnessState.signInStatus({ phase: 'starting' }), 'Starting sign-in…')
+  assert.equal(harnessState.signInStatus({ phase: 'waiting' }), 'Waiting for you to approve the sign-in.')
+  assert.equal(harnessState.signInStatus({ phase: 'verifying' }), 'Checking the sign-in…')
+  assert.equal(harnessState.signInStatus({ phase: 'succeeded' }), 'Signed in.')
+  assert.equal(harnessState.signInStatus({ phase: 'cancelled' }), 'Sign-in cancelled.')
+  assert.equal(harnessState.signInStatus({ phase: 'failed', message: 'Sign-in timed out. Try again.' }), 'Sign-in timed out. Try again.')
+  assert.equal(harnessState.signInStatus({ phase: 'failed' }), 'Sign-in did not finish. Try again.')
+  assert.equal(harnessState.signInStatus(null), 'Starting sign-in…')
+})
