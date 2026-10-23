@@ -1223,6 +1223,7 @@
   }
 
   async function mentionReference(reference: Reference) {
+    if (reference.kind === 'room_issue' && !reference.url) reference = { ...reference, url: `#room=${encodeURIComponent(roomId)}&view=issues` }
     openView('all')
     await tick()
     composer?.addReference(reference)
