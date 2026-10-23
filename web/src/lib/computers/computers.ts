@@ -158,7 +158,10 @@ export function applyEvent<C extends Computer>(list: C[], ev: ComputerChange): {
   if (current === undefined) return { list, needsReload: false }
   if (!ev.computer) return { list, needsReload: ev.type !== 'act' && ev.type !== 'shot' }
   const next = list.slice()
-  next[i] = Object.assign({ ...current }, ev.computer, { name: current.name || ev.computer.name })
+  // The event replaces the row, as it did in JavaScript: a field the event
+  // leaves out is dropped. The cast restores the caller's row type, because a
+  // row of C may carry fields that a Computer event does not name.
+  next[i] = { ...ev.computer, name: current.name || ev.computer.name } as C
   return { list: next, needsReload: false }
 }
 

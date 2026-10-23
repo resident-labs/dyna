@@ -103,6 +103,8 @@ test('events patch the list', () => {
   assert.equal(r.list, list)
   assert.equal(applyEvent(list, { session: 'a', type: 'stopped' }).needsReload, true)
   assert.equal(applyEvent(list, { session: 'a', type: 'act', action: 'click' }).needsReload, false)
+  const was = [{ session: 'a', name: 'alpha', state: 'running', streamRssKiB: 2048 }]
+  assert.equal(applyEvent(was, { session: 'a', type: 'stopped', computer: { session: 'a', state: 'stopped' } }).list[0]?.streamRssKiB, undefined, 'a replacing event drops the fields it leaves out')
 })
 
 test('sort', () => {
