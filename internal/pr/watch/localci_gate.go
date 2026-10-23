@@ -193,24 +193,23 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 	// so no later step spends an artifact read or a log excerpt on it.
 	snap = withoutLocalHostedCancellations(snap, saved)
 	if !enabled {
-		// In local mode a conclusive local result already tested this head, so
-		// it decides on its own. A host that is briefly unavailable must not
-		// restart the hosted run that local CI replaced: that wait costs a full
-		// hosted run and holds merge work the local pass already released.
-		// GitHub mode keeps the hosted fallback untouched.
+		job := registeredCIJob{record: r, head: r.Head, branch: r.Branch, trial: strings.HasPrefix(r.Branch, "dyna/merge-trial/")}
+		// In local mode a saved local result can decide the head without a ready
+		// node. A host that is briefly unavailable must not restart the hosted
+		// run that local CI replaced: that wait costs a full hosted run and holds
+		// merge work the local pass already released. The result is judged by the
+		// same gates as a fresh one, so a hosted failure still vetoes it and a
+		// partial or unproven suite cannot release a merge. GitHub mode keeps the
+		// hosted fallback untouched.
 		if mode == localci.ModeLocal || mode == localci.ModeBoth {
-			if saved, ok := savedLocalResult(ctx, registry, repo, r.Head); ok {
-				budgetNote := applyLocalBudgets(&saved, policy)
-				if state, jobs, logs := registeredResultStatus(saved); conclusiveCI(state) {
-					snap.localCI = &registeredCIObservation{Status: state, Key: "local-result:" + r.Head, Jobs: jobs, Logs: logs, BudgetNote: budgetNote, Checks: registeredCheckSummaries(saved)}
-					return snap, nil
-				}
+			if local, ok := savedLocalResult(ctx, registry, repo, r.Head); ok && s.savedLocalSettles(ctx, job, local, policy) {
+				snap.localCI = s.registeredLocalObservation(ctx, r, snap, policy, job, local)
+				return snap, nil
 			}
 		}
 		if len(saved.IDs) == 0 {
 			return snap, nil
 		}
-		job := registeredCIJob{record: r, head: r.Head, branch: r.Branch, trial: strings.HasPrefix(r.Branch, "dyna/merge-trial/")}
 		if err := s.resumeHostedCI(ctx, job, repo); err != nil {
 			return snap, err
 		}
@@ -218,7 +217,6 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 		snap.localCI = &registeredCIObservation{Status: ci, Key: key, Jobs: jobs, Runs: runs, Reason: hostedFallbackReason(snap)}
 		return snap, nil
 	}
-	hostedState, hostedKey, hostedJobs, hostedRuns := s.registeredHostedStatus(snap, r, policy)
 	result, err := registry.LoadResult(ctx, repo, r.Head)
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return snap, err
@@ -226,9 +224,20 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 	if result.Repo != repo || result.SHA != r.Head {
 		result = localci.Result{}
 	}
+	job := registeredCIJob{record: r, head: r.Head, branch: r.Branch, trial: strings.HasPrefix(r.Branch, "dyna/merge-trial/")}
+	snap.localCI = s.registeredLocalObservation(ctx, r, snap, policy, job, result)
+	return snap, nil
+}
+
+// registeredLocalObservation judges a saved local result together with the
+// hosted read. Either provider's failure vetoes a pass, a local pass needs its
+// whole suite and the required checks, and a pending provider does not block a
+// conclusive pass.
+func (s *Service) registeredLocalObservation(ctx context.Context, r Record, snap Snapshot, policy ChangePolicy, job registeredCIJob, result localci.Result) *registeredCIObservation {
+	hostedState, hostedKey, hostedJobs, hostedRuns := s.registeredHostedStatus(snap, r, policy)
 	budgetNote := applyLocalBudgets(&result, policy)
 	localState, localJobs, logs := registeredResultStatus(result)
-	if result.Status == "passed" && !s.registeredJobResultComplete(ctx, registeredCIJob{record: r, head: r.Head, branch: r.Branch, trial: strings.HasPrefix(r.Branch, "dyna/merge-trial/")}, result) {
+	if result.Status == "passed" && !s.registeredJobResultComplete(ctx, job, result) {
 		localState = "pending"
 	}
 	observation := chooseRegisteredCI(r.Head, hostedState, hostedKey, hostedJobs, hostedRuns, localState, localJobs, logs)
@@ -256,8 +265,20 @@ func (s *Service) withRegisteredCI(ctx context.Context, r Record, snap Snapshot,
 	}
 	observation.Checks = registeredCheckSummaries(result)
 	observation.BudgetNote = budgetNote
-	snap.localCI = observation
-	return snap, nil
+	return observation
+}
+
+// savedLocalSettles reports whether a saved local result can decide a head with
+// no ready node. A conclusive failure always can; a pass must cover the whole
+// suite this job runs, so a manual subset run cannot release a merge.
+func (s *Service) savedLocalSettles(ctx context.Context, job registeredCIJob, result localci.Result, policy ChangePolicy) bool {
+	budgeted := result
+	applyLocalBudgets(&budgeted, policy)
+	state, _, _ := registeredResultStatus(budgeted)
+	if !conclusiveCI(state) {
+		return false
+	}
+	return state != "passed" || s.registeredJobResultComplete(ctx, job, budgeted)
 }
 
 func (s *Service) mergeLocalCIChecks(ctx context.Context, st State, roomID string, out *MergeControlStatus) error {
