@@ -75,7 +75,6 @@
   let name = $derived(first ? (first.number ? `#${first.number}` : first.title || 'the change') : '')
   let title = $derived(type === 'decision' ? verbs.decision : `${verbs[type]} ${name} into ${payload?.base ?? ''}`)
   let failedChecks = $derived(payload?.checks?.failed ?? [])
-  let retries = $derived(payload?.retries ?? 0)
   let openCommit = $derived(commitUrl(first?.url, payload?.commit))
   let open = $state(false)
 
@@ -90,7 +89,6 @@
     <span class="title">
       <span class="what">{title}</span>
       {#if type !== 'decision'}<Chip tone={stepTones[type]}>{stepWords[type]}</Chip>{/if}
-      {#if retries > 0}<span class="fact">{retries} {retries === 1 ? 'retry' : 'retries'}</span>{/if}
     </span>
     <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
   </button>
@@ -108,7 +106,7 @@
       {/if}
       <div class="facts">
         {#if prs.length > 1}<span>{prs.length} PRs</span>{/if}
-        {#if payload.checks}<span>checks <b>{payload.checks.done}/{payload.checks.total ?? payload.checks.done}</b></span>{/if}
+        {#if payload.checks && (payload.checks.total ?? 0) > 0}<span>checks <b>{payload.checks.done}/{payload.checks.total}</b></span>{/if}
         {#if payload.commit}<span>commit <b class="mono">{shortSha(payload.commit)}</b></span>{/if}
       </div>
       {#if payload.reason && stepTones[type] === 'coral'}<p class="reason">{payload.reason}</p>{/if}

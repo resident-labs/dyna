@@ -258,12 +258,12 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 		}); err != nil {
 			return err
 		}
-		base := conflictBase(r)
-		if base == "" {
+		ev := mergeEventOf(r, room.MergeReturned)
+		if ev.Base == "" {
 			// A local change merges into the integration branch.
-			base = locallane.Integration
+			ev.Base = locallane.Integration
 		}
-		ev := room.MergeEvent{Type: room.MergeReturned, TrialID: changeID(r), Repo: mergeRepo(r), Base: base, PRs: []room.MergePR{mergePR(r)}, Label: changeLabel(r), Reason: reason}
+		ev.Reason = reason
 		if trial != nil {
 			ev = mergeTrialEvent(st, *trial, room.MergeReturned)
 			ev.Label, ev.Reason = changeLabel(r), reason

@@ -280,7 +280,8 @@ func (s *Service) publishMerge(ctx context.Context, current Record, children []R
 			urls = append(urls, child.URL())
 		}
 		text := fmt.Sprintf("The merge outcome of %s at %s is unknown. Child PRs remain on %s: %s. If the parent stays open and is no longer ready, restore these child bases to %s by hand.", current.URL, current.Head, current.DefaultBranch, strings.Join(urls, ", "), current.Branch)
-		ev := room.MergeEvent{Type: room.MergeFailed, TrialID: changeID(current), Repo: mergeRepo(current), Base: current.DefaultBranch, PRs: []room.MergePR{mergePR(current)}, Label: changeLabel(current), Reason: "the merge outcome is unknown"}
+		ev := mergeEventOf(current, room.MergeFailed)
+		ev.Base, ev.Reason = current.DefaultBranch, "the merge outcome is unknown"
 		noticeErr := s.postMergeNotice(ctx, current, "merge-unknown", Notice{Merge: &ev, Text: text})
 		unknownErr := fmt.Errorf("GitHub has not confirmed the merge of %s", current.URL)
 		return false, errors.Join(unknownErr, mergeErr, readErr, noticeErr)
@@ -451,7 +452,8 @@ func (s *Service) postMergeConflict(ctx context.Context, r Record, branch string
 	if branch == "" || r.IsDraft {
 		return nil
 	}
-	ev := room.MergeEvent{Type: room.MergeConflict, TrialID: changeID(r), Repo: mergeRepo(r), Base: branch, PRs: []room.MergePR{mergePR(r)}, Label: changeLabel(r), Reason: "conflicts with " + branch}
+	ev := mergeEventOf(r, room.MergeConflict)
+	ev.Base, ev.Reason = branch, "conflicts with "+branch
 	return s.postMergeNotice(ctx, r, "merge-conflict", Notice{Target: r.Author, Merge: &ev, Text: fmt.Sprintf("%s conflicts with %s at %s; rebase onto %s.", changeLabel(r), branch, r.Head, branch)})
 }
 
@@ -501,7 +503,8 @@ func (s *Service) rollbackMergeChildren(ctx context.Context, r Record, children 
 	// The room owner receives one aggregate post for this parent head. The
 	// room log also makes the failed child URLs visible to their authors.
 	text := fmt.Sprintf("Dyna could not restore child PR bases after a failed merge of %s at %s. Restore these PRs to %s before merging them: %s", changeLabel(r), r.Head, r.Branch, strings.Join(failed, ", "))
-	ev := room.MergeEvent{Type: room.MergeRolledBack, TrialID: changeID(r), Repo: mergeRepo(r), Base: r.Branch, PRs: []room.MergePR{mergePR(r)}, Label: changeLabel(r), Reason: "child PR bases could not be restored"}
+	ev := mergeEventOf(r, room.MergeRolledBack)
+	ev.Base, ev.Reason = r.Branch, "child PR bases could not be restored"
 	failures = append(failures, s.postMergeNotice(ctx, r, "merge-rollback", Notice{Merge: &ev, Text: text}))
 	return errors.Join(failures...)
 }
