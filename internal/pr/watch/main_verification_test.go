@@ -437,3 +437,75 @@ func TestDefaultVerificationWaitsForUnfinishedChecks(t *testing.T) {
 		})
 	}
 }
+
+// Main CI comes from GitHub's rollup, which keeps counting a cancelled run after
+// a later run of the same workflow passed. The latest completed result of each
+// check must decide, so a superseded cancellation cannot fail main.
+func TestMainCIUsesTheLatestCompletedRunForEachCheck(t *testing.T) {
+	e, _, _ := mergeEnv(t, 1)
+	head := ""
+	rewriteMergeDefault(e, func(target map[string]any) {
+		head, _ = target["oid"].(string)
+		target["statusCheckRollup"] = map[string]any{
+			"state": "FAILURE",
+			"contexts": map[string]any{
+				"totalCount": 16,
+				"checkRunCountsByState": []any{
+					map[string]any{"state": "CANCELLED", "count": 8},
+					map[string]any{"state": "SUCCESS", "count": 8},
+				},
+			},
+		}
+	})
+	// The older run was cancelled and superseded at the same head by run 2.
+	var checks []Check
+	for i := range 8 {
+		name := fmt.Sprintf("job-%d", i)
+		cancelled := actionsCheck(Check{ID: int64(i + 1), Name: name, Status: "completed", Conclusion: "cancelled"})
+		cancelled.CheckSuite.ID = 1
+		passed := actionsCheck(Check{ID: int64(i + 101), Name: name, Status: "completed", Conclusion: "success"})
+		passed.CheckSuite.ID = 2
+		checks = append(checks, cancelled, passed)
+	}
+	base := e.s.GH.run
+	e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
+		joined := strings.Join(cmd.Args, " ")
+		var body any
+		switch {
+		case strings.Contains(joined, "/check-runs?"):
+			body = mainCheckRuns{Checks: checks}
+		case strings.Contains(joined, "/statuses?"):
+			body = []Status{}
+		case strings.Contains(joined, "/actions/runs?head_sha="):
+			body = mainWorkflowRuns{Runs: []Run{
+				{ID: 1, Attempt: 1, WorkflowID: 7, CheckSuiteID: 1, Event: "push", HeadSHA: head, HeadBranch: "main", Status: "completed", Conclusion: "cancelled"},
+				{ID: 2, Attempt: 1, WorkflowID: 7, CheckSuiteID: 2, Event: "push", HeadSHA: head, HeadBranch: "main", Status: "completed", Conclusion: "success"},
+			}}
+		default:
+			return base(ctx, cmd)
+		}
+		fmt.Fprint(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n")
+		return json.NewEncoder(cmd.Stdout).Encode(body)
+	}
+	if err := e.s.ConfirmHeads(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, status := storedDefault(st, *st.Records["github.com/owner/repo#1"])
+	if status != "passed" {
+		t.Fatalf("main CI = %s (%s); a superseded cancellation failed main", status, defaultReason(p, status))
+	}
+}
+
+// mainCheckRuns is the GitHub check-runs response of one commit.
+type mainCheckRuns struct {
+	Checks []Check `json:"check_runs"`
+}
+
+// mainWorkflowRuns is the GitHub workflow-runs response of one commit.
+type mainWorkflowRuns struct {
+	Runs []Run `json:"workflow_runs"`
+}
