@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 
 	"dyna-agent/internal/authority"
@@ -19,6 +20,7 @@ import (
 // engine and isolated workflow fixtures. Each write requires its own run.
 func RunLifecycleBindings() []websvc.Binding {
 	return []websvc.Binding{
+		{Name: "FinishRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: finishRun},
 		{Name: "AddRunDirectories", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: addRunDirectories},
 	}
 }
@@ -94,5 +96,86 @@ func writeRunDirectories(ctx context.Context, w *state.Writer, in callspec.RunDi
 func runDirectoriesRecoveryBinding(w *state.Writer) websvc.Binding {
 	return websvc.Binding{Name: "AddRunDirectories", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(ctx context.Context, in callspec.RunDirectories) error {
 		return writeRunDirectories(ctx, w, in)
+	}}
+}
+
+func finishRun(ctx context.Context, in callspec.RunFinish) (runstore.Meta, error) {
+	if err := checkRunCoordinator(ctx, in.Run); err != nil {
+		return runstore.Meta{}, err
+	}
+	db, err := database.Open(store.DataDir())
+	if err != nil {
+		return runstore.Meta{}, err
+	}
+	return writeRunFinish(ctx, state.For(db), in)
+}
+
+// runLifecycleEvent admits only the authenticated actor. Recovery supplies
+// Worker(run,0) without inventing a verified socket peer.
+func runLifecycleEvent(ctx context.Context, w *state.Writer, run string) (hub.Event, error) {
+	if err := runstore.ValidateRunID(run); err != nil {
+		return hub.Event{}, err
+	}
+	actor, ok := authority.ContextActor(ctx)
+	if !ok || actor.Role != authority.Worker || actor.Run != run || actor.Agent != 0 || actor.Session != "" {
+		return hub.Event{}, errors.New("run lifecycle needs its coordinator actor")
+	}
+	if callspec.RequestOf(ctx) == "" {
+		return hub.Event{}, errors.New("run lifecycle needs a request ID")
+	}
+	if err := callspec.CheckRunnerRequestID(run, callspec.RequestOf(ctx)); err != nil {
+		return hub.Event{}, err
+	}
+	var meta runstore.Meta
+	err := w.Read(ctx, func(q state.Reader) error {
+		var err error
+		meta, err = runstore.LoadStored(ctx, q, run)
+		if err == nil && meta.ID != run {
+			err = errors.New("stored run identity differs from the coordinator")
+		}
+		return err
+	})
+	return hub.Event{Topic: "runs", Room: meta.RoomID, Key: run}, err
+}
+
+// Recheck the event's canonical identity under the writer transaction.
+func checkRunEvent(ctx context.Context, conn *sql.Conn, event hub.Event) error {
+	meta, err := runstore.LoadStored(ctx, conn, event.Key)
+	if err != nil {
+		return err
+	}
+	if meta.ID != event.Key || meta.RoomID != event.Room {
+		return errors.New("run identity changed before its lifecycle write")
+	}
+	return nil
+}
+
+func writeRunFinish(ctx context.Context, w *state.Writer, in callspec.RunFinish) (runstore.Meta, error) {
+	event, err := runLifecycleEvent(ctx, w, in.Run)
+	if err != nil {
+		return runstore.Meta{}, err
+	}
+	var meta runstore.Meta
+	err = w.Write(ctx, event, func(conn *sql.Conn) error {
+		if err := checkRunEvent(ctx, conn, event); err != nil {
+			return err
+		}
+		var err error
+		meta, _, err = runstore.FinishWithDirectoriesTx(ctx, conn, in.Run, in.Status, in.Error, in.EndedAt, in.DirectoriesComplete)
+		if err != nil {
+			return err
+		}
+		raw, err := json.Marshal(meta)
+		if err != nil {
+			return err
+		}
+		return w.FinishRequestIn(ctx, conn, "FinishRun", raw)
+	})
+	return meta, err
+}
+
+func runFinishRecoveryBinding(w *state.Writer) websvc.Binding {
+	return websvc.Binding{Name: "FinishRun", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(ctx context.Context, in callspec.RunFinish) (runstore.Meta, error) {
+		return writeRunFinish(ctx, w, in)
 	}}
 }
