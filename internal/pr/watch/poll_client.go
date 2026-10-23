@@ -30,7 +30,9 @@ func (s *Service) mergePollClient(st State, r Record) (GitHub, error) {
 
 // savePollResponses keeps the validated copies and the quota those replies
 // prove. Entries merge, so a poll worker's newer copy is never dropped and no
-// saved path disappears before finishUpdate retires it.
+// saved path disappears before finishUpdate retires it. Rate evidence is saved
+// on its own: a reply that failed the request, such as a 403 rate limit on the
+// first read, saves no copy but still proves the pause.
 func (s *Service) savePollResponses(key string, gh GitHub) error {
 	if gh.requests == nil {
 		return nil
@@ -39,12 +41,20 @@ func (s *Service) savePollResponses(key string, gh GitHub) error {
 	used := maps.Clone(gh.requests.used)
 	rates := cloneRates(gh.requests.rates)
 	unlock()
-	if len(used) == 0 {
-		return nil
-	}
+	now := s.now()
 	return s.Store.updateRecordOrAll(key, func(current *State) bool {
-		return ratesNeedAllRecords(current, rates, s.now())
+		return ratesNeedAllRecords(current, rates, now)
 	}, func(current *State) error {
+		ratesChanged := budgetRatesChanged(*current, rates, now)
+		if len(used) == 0 && !ratesChanged {
+			return errNoStoreChange
+		}
+		if ratesChanged {
+			applyRateLimits(current, rates, now)
+		}
+		if len(used) == 0 {
+			return nil
+		}
 		if current.Responses == nil {
 			current.Responses = map[string]map[string]cachedResponse{}
 		}
@@ -56,7 +66,6 @@ func (s *Service) savePollResponses(key string, gh GitHub) error {
 			entries[path] = response
 		}
 		current.Responses[key] = entries
-		applyRateLimits(current, rates, s.now())
 		return nil
 	})
 }
