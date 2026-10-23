@@ -66,7 +66,7 @@ func TestTranscriptPostsMatchFeed(t *testing.T) {
 	}{{rec.Name, room.PRApproved}, {lead.Address(), room.PRReady}}
 	for _, pr := range prs {
 		if _, err := store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{pr.to}, RoomService: true,
-			Event: room.PREvent{Type: pr.kind, Label: "PR #1", ChangeID: "github.com/o/r#1", Number: 1, Head: strings.Repeat("a", 40)}}); err != nil {
+			Event: room.PREvent{Type: pr.kind, Label: "PR #1", Location: "github.com/o/r#1", ChangeID: "github.com/o/r#1", Number: 1, Head: strings.Repeat("a", 40)}}); err != nil {
 			t.Fatal(err)
 		}
 	}

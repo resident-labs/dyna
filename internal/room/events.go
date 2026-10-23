@@ -122,20 +122,23 @@ type PREvent struct {
 	Type PRType `json:"type"`
 	// Label names the change in the agent text, as "PR #12" or "Change <key>".
 	Label string `json:"label"`
+	// Location is where the change lives: its URL, or the watcher's key of a
+	// local change. It heads the agent text, as the watcher used to write it.
+	Location string `json:"location"`
 	// Number is the GitHub PR number. A change on a local branch has none.
 	Number int `json:"number,omitempty"`
 	// ChangeID is the watcher's key of the change, such as the PR URL.
 	ChangeID string `json:"changeId"`
 	// Key is the watcher's own identity of this notice, such as its write
 	// token. Two comments on one head need it to post as two events.
-	Key      string `json:"key,omitempty"`
-	Repo     string `json:"repo,omitempty"`
-	Title    string `json:"title,omitempty"`
-	Head     string `json:"head,omitempty"`
-	URL      string `json:"url,omitempty"`
-	Branch   string `json:"branch,omitempty"`
-	CIAttempt int   `json:"ciAttempt,omitempty"`
-	CIMax     int   `json:"ciMax,omitempty"`
+	Key       string `json:"key,omitempty"`
+	Repo      string `json:"repo,omitempty"`
+	Title     string `json:"title,omitempty"`
+	Head      string `json:"head,omitempty"`
+	URL       string `json:"url,omitempty"`
+	Branch    string `json:"branch,omitempty"`
+	CIAttempt int    `json:"ciAttempt,omitempty"`
+	CIMax     int    `json:"ciMax,omitempty"`
 	// Summary is the short facts line: the failed check names, the reviewer's
 	// verdict summary. It never holds raw log lines.
 	Summary   string `json:"summary,omitempty"`
@@ -336,16 +339,17 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "Hook {hook} {state} for {event} after {durationMs} ms (run {runId}).",
 	},
-	// PR events reach the change's author, so their texts are input an agent
-	// acts on. Only a CI failure, a requested change and a return wake the
-	// author; the other facts wait for its next turn.
+	// PR events reach the change's author, but they do not all wake it: the
+	// watcher marks an informational notice NoWake, and a notice that falls
+	// back to the owner is quiet unless root must act. Every other PR post
+	// wakes the session it is addressed to.
 	{
 		Family:   FamilyPR,
 		Type:     EventType(PROpened),
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "{label} opened in {repo}. Review it at {url}",
+		Text:     "{location}\nHead: {head}\n\n{label} opened in {repo}. Review it at {url}",
 	},
 	{
 		Family:   FamilyPR,
@@ -353,7 +357,7 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "{label} is ready to land at {head}.",
+		Text:     "{location}\nHead: {head}\n\n{label} is ready to land at {head}.",
 	},
 	{
 		Family:   FamilyPR,
@@ -361,7 +365,7 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "{label} at {head} approved by its Dyna reviewer.",
+		Text:     "{location}\nHead: {head}\n\n{label} at {head} approved by its Dyna reviewer:",
 	},
 	{
 		Family:   FamilyPR,
@@ -369,7 +373,7 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "Reviewer requests changes for {label} at {head}. Fix the findings and push to this PR.",
+		Text:     "{location}\nHead: {head}\n\nReviewer requests changes for {label} at {head}:",
 	},
 	{
 		Family:   FamilyPR,
@@ -377,7 +381,7 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "CI failed ({ciAttempt}/{ciMax}) on {label} at {head}: {summary}. Fix the failure and push to this PR.",
+		Text:     "{location}\nHead: {head}\n\nCI failed ({ciAttempt}/{ciMax}): {summary}. Fix the failure and push to this PR.",
 	},
 	{
 		Family:   FamilyPR,
@@ -385,7 +389,7 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "{label} failed CI three times in a row. Later CI failures will not wake the author. Failed jobs: {summary}.",
+		Text:     "{location}\nHead: {head}\n\n{label} failed CI three times in a row. Later CI failures will not wake the author. Inspect dyna git pr show {url}. Failed jobs: {summary}.",
 	},
 	{
 		Family:   FamilyPR,
@@ -393,7 +397,7 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "CI passed on {label} at {head}.",
+		Text:     "{location}\nHead: {head}\n\nCI passed on {label} at {head}.",
 	},
 	{
 		Family:   FamilyPR,
@@ -401,7 +405,7 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "{label} at {head} was returned to you. {summary}",
+		Text:     "{location}\nHead: {head}\n\n{label} at {head} was returned to you.",
 	},
 	{
 		Family:   FamilyPR,
@@ -409,7 +413,7 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "{label} merged.",
+		Text:     "{location}\nHead: {head}",
 	},
 	{
 		Family:   FamilyPR,
@@ -417,7 +421,7 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "{label} closed.",
+		Text:     "{location}\nHead: {head}",
 	},
 	{
 		Family:   FamilyPR,
@@ -425,7 +429,7 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "{label} at {head}: {summary}",
+		Text:     "{location}\nHead: {head}",
 	},
 	{
 		Family:   FamilyPR,
@@ -433,7 +437,7 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "{label}: Held: comment from {commenter}, who is outside the trusted set. Review this comment in Dyna to admit or dismiss it.",
+		Text:     "{location}\nHead: {head}",
 	},
 	{
 		Family:   FamilyPR,
@@ -441,15 +445,15 @@ var eventSpecs = []EventSpec{
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
 		Wake:     WakeTarget,
-		Text:     "Review {label} at {head}.",
+		Text:     "{location}\nHead: {head}",
 	},
 	{
 		Family:   FamilyPR,
 		Type:     EventType(PRUpdate),
 		Renderer: "PRCard",
 		Payload:  reflect.TypeOf(PREvent{}),
-		Wake:     WakeRootIfNeeded,
-		Text:     "{label} at {head}.",
+		Wake:     WakeTarget,
+		Text:     "{location}\nHead: {head}",
 	},
 }
 

@@ -9,7 +9,7 @@ const CHANGE = 'github.com/acme/app#542'
 
 // post is a typed PR post of one event.
 function post(ev: Partial<PREvent>, id = 'msg_0123456789abcdef', ts = 1): PRPostInput {
-  const payload: PREvent = { type: 'update', label: 'PR #542', changeId: CHANGE, number: 542, repo: 'acme/app', head: HEAD, url: 'https://github.com/acme/app/pull/542', ...ev }
+  const payload: PREvent = { type: 'update', label: 'PR #542', location: 'https://github.com/acme/app/pull/542', changeId: CHANGE, number: 542, repo: 'acme/app', head: HEAD, url: 'https://github.com/acme/app/pull/542', ...ev }
   return { id, ts, kind: 'pr', notice: { kind: payload.type }, payload, text: 'agent text' }
 }
 
@@ -35,11 +35,11 @@ test('a plain update keeps the review chip of the same head', () => {
 test('every PR type has a chip', () => {
   const types: PREvent['type'][] = ['opened', 'ready', 'approved', 'changes', 'ci-failed', 'ci-paused', 'ci-passed', 'returned', 'merged', 'closed', 'comment', 'held-comment', 'review-assigned', 'update']
   for (const type of types) {
-    const chip = chipOf({ type, label: 'PR #1', changeId: CHANGE })
+    const chip = chipOf({ type, label: 'PR #1', location: CHANGE, changeId: CHANGE })
     assert.ok(chip.label.length > 0, `${type} has no label`)
     assert.ok(chip.tone.length > 0, `${type} has no tone`)
   }
-  assert.deepEqual(chipOf({ type: 'changes', label: 'PR #1', changeId: CHANGE, verdict: 'question' }), { label: 'Question for the author', tone: 'gold' })
+  assert.deepEqual(chipOf({ type: 'changes', label: 'PR #1', location: CHANGE, changeId: CHANGE, verdict: 'question' }), { label: 'Question for the author', tone: 'gold' })
 })
 
 test('a stored post without a payload still folds and reads its text', () => {
