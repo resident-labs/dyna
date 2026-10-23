@@ -6,7 +6,6 @@
   let list = $state()
   let busy = $state(false)
   let error = $state('')
-  let far = $state(false)
   let loading = $state('older')
   let request = null
   let pendingAnchor = null
@@ -66,6 +65,11 @@
 
   async function present() {
     if (request) { await request; return present() }
+    if (!newer) {
+      list?.scrollToEnd()
+      atBottom = true
+      return true
+    }
     busy = true
     loading = 'present'
     error = ''
@@ -75,7 +79,6 @@
         await tick()
         if (destroyed) return false
         list?.scrollToEnd()
-        far = false
         atBottom = true
         return true
       } catch (e) { error = String(e?.message || e); return false }
@@ -87,7 +90,6 @@
   function updatePosition(el) {
     if (!el) return
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight
-    far = gap > el.clientHeight
     atBottom = !newer && gap < 48
   }
 
@@ -159,7 +161,7 @@
 <VirtualList bind:this={list} {scroller} {items} {key} {estimate} chat follow={!newer && !busy}>
   {#snippet children(item, index)}{@render renderRow(item, index)}{/snippet}
 </VirtualList>
-{#if onpresent && (newer || far)}
+{#if onpresent && !atBottom}
   <div class="jump-slot"><button class="btn jump-present" aria-label="Jump to present" disabled={busy} onclick={present}>Jump to present <span aria-hidden="true">↓</span></button></div>
 {/if}
 
