@@ -481,7 +481,7 @@ func copyRange(w io.Writer, path string, start, end int64) error {
 func stopCommand(newManager func() *subagent.Manager) *cobra.Command {
 	return &cobra.Command{
 		Use:   "stop <session>",
-		Short: "Cancel the running turn (the session stays open and resumable)",
+		Short: "Stop the running turn (the session stays open and resumable)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
 			ctx, stop := waitContext(c)
