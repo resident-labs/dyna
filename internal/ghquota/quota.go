@@ -14,8 +14,8 @@ import (
 	"time"
 )
 
-// Window is how often the counted requests are written to the journal.
-const Window = 10 * time.Minute
+// window is how often the counted requests are written to the journal.
+const window = 10 * time.Minute
 
 // quotaLog counts completed requests and writes a summary for each window.
 type quotaLog struct {
@@ -41,7 +41,7 @@ func RecordCaller(caller string, notModified bool) {
 	engineGHQuota.record(caller, notModified)
 }
 
-// record adds one completed request and writes a summary every Window.
+// record adds one completed request and writes a summary every window.
 func (q *quotaLog) record(caller string, notModified bool) {
 	if q == nil {
 		return
@@ -63,7 +63,7 @@ func (q *quotaLog) record(caller string, notModified bool) {
 	} else {
 		q.counted[caller]++
 	}
-	if now.Sub(q.since) < Window {
+	if now.Sub(q.since) < window {
 		return
 	}
 	q.summary(now)
