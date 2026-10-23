@@ -52,7 +52,7 @@ func (s *Store) Paused(ref string) (bool, error) {
 // acquire session metadata/gate locks first; fn must not call a room writer.
 func (s *Store) WithRoomSnapshot(ctx context.Context, id string, fn func(Record) error) error {
 	return s.lockRoom(ctx, id, func() error {
-		rec, err := s.readRecordHeld(id)
+		rec, err := s.readRecord(id)
 		if err != nil {
 			return err
 		}
@@ -165,7 +165,7 @@ func (s *Store) SetSessionsPaused(ctx context.Context, ref string, paused bool) 
 			state.ResumePending = true
 		}
 		rec.SessionPause = state
-		if e := s.writeRecord(rec, true); e != nil {
+		if e := s.writeRecord(rec); e != nil {
 			return e
 		}
 		out = state
@@ -179,7 +179,7 @@ func (s *Store) CompleteSessionResume(ctx context.Context, id string, revision u
 			return errors.New("room pause generation changed")
 		}
 		rec.SessionPause.ResumePending = false
-		return s.writeRecord(rec, true)
+		return s.writeRecord(rec)
 	})
 }
 func (s *Store) PauseSpans(ref string, since time.Time) ([]PauseSpan, error) {
