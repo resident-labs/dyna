@@ -34,6 +34,17 @@
   }
   const micUp = () => mic.hold && voiceCall.talk(false)
   const micClick = () => !mic.hold && voiceCall.toggleMute()
+
+  // The open sheet follows the newest row, unless the owner scrolled up to
+  // read earlier ones.
+  let body = $state(null)
+  let pinned = true
+  const onscroll = () => { pinned = body.scrollHeight - body.scrollTop - body.clientHeight < 48 }
+  $effect(() => {
+    rows.length
+    s.partial
+    if (body && pinned) body.scrollTop = body.scrollHeight
+  })
 </script>
 
 {#snippet micIcon(size)}
@@ -139,7 +150,7 @@
           <span class="bar" aria-hidden="true"></span>
           {#if !ui.sheet}<span class="peek">{peek}</span>{/if}
         </button>
-        {#if ui.sheet}<div class="body"><CallThread {rows} partial={s.partial} onopen={onopenshared} /></div>{/if}
+        {#if ui.sheet}<div class="body" bind:this={body} {onscroll}><CallThread {rows} partial={s.partial} onopen={onopenshared} /></div>{/if}
       </div>
     {/if}
     {#if modeMenu}
@@ -245,10 +256,13 @@
     flex-direction: column;
     max-height: 60vh;
   }
+  /* An open sheet keeps one height; new rows scroll inside it instead of
+     growing the sheet and pushing the call controls up. */
+  .sheet.open { height: 45vh; height: 45dvh; }
   .handle { display: flex; flex-direction: column; align-items: stretch; gap: var(--s2); min-height: 44px; padding: var(--s2) var(--s4) var(--s3); text-align: left; }
   .bar { align-self: center; width: 40px; height: 4px; border-radius: 2px; background: var(--faint); }
   .peek { font-size: var(--t-body); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .body { overflow: auto; padding-bottom: var(--s3); }
+  .body { flex: 1; min-height: 0; overflow: auto; padding-bottom: var(--s3); }
 
 
   @media (prefers-reduced-motion: reduce) {
