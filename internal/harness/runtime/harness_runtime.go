@@ -88,12 +88,16 @@ type privateRuntimeLogin struct {
 	finished   bool
 	flow       *NativeLogin
 	terminalID string
+	// signIn is set when the flow runs without a terminal.
+	signIn *privateSignIn
 }
 
 type PrivateLogin struct {
 	AccountID  string `json:"accountId"`
 	TerminalID string `json:"terminalId"`
 	Warning    string `json:"warning,omitempty"`
+	// SignIn carries the in-app state of a runner flow. TerminalID stays empty.
+	SignIn *SignInState `json:"signIn,omitempty"`
 }
 
 func (a *Runtime) BeginPrivateRuntimeLogin(ctx context.Context, harness, version, label string, _ bool) (PrivateLogin, error) {
@@ -132,6 +136,16 @@ func (a *Runtime) startPrivateLogin(id, exe string) (PrivateLogin, error) {
 	flow, err := a.Accounts.BeginLogin(a.lifetimeContext(), id, exe)
 	if err != nil {
 		return PrivateLogin{}, err
+	}
+	n, err := a.Accounts.Find(id)
+	if err != nil {
+		_ = flow.Cancel()
+		return PrivateLogin{}, err
+	}
+	// Harnesses with a sign-in spec run without a terminal, so the owner can
+	// finish on any device.
+	if spec, ok := signInSpecs[n.Harness]; ok {
+		return a.startPrivateSignIn(id, n.Harness, spec, flow)
 	}
 	argv, err := a.privateSignInCommand(id, exe, flow)
 	if err != nil {
@@ -190,27 +204,26 @@ func (a *Runtime) RestartPrivateRuntimeLogin(ctx context.Context, id string, _ b
 	return a.startPrivateLogin(id, b.Executable)
 }
 func (a *Runtime) FinishPrivateRuntimeLogin(ctx context.Context, id string) (PrivateRuntimeSnapshot, error) {
-	a.privateLoginMu.Lock()
-	login := a.privateLogins[id]
-	a.privateLoginMu.Unlock()
+	login := a.findPrivateLogin(id)
 	if login == nil {
 		return PrivateRuntimeSnapshot{}, errors.New("private sign-in is not running")
 	}
 	login.control.Lock()
 	defer login.control.Unlock()
-	flow, termID := login.flow, login.terminalID
-	exited := false
-	for _, term := range a.terminals.List("") {
-		if term.ID == termID {
-			exited = term.Exited
+	if login.signIn == nil {
+		exited := false
+		for _, term := range a.terminals.List("") {
+			if term.ID == login.terminalID {
+				exited = term.Exited
+			}
+		}
+		if !exited {
+			if err := a.terminals.Close(login.terminalID); err != nil {
+				return PrivateRuntimeSnapshot{}, err
+			}
 		}
 	}
-	if !exited {
-		if err := a.terminals.Close(termID); err != nil {
-			return PrivateRuntimeSnapshot{}, err
-		}
-	}
-	result, err := flow.Complete(a.lifetimeContext())
+	result, err := login.flow.Complete(a.lifetimeContext())
 	if err != nil {
 		return PrivateRuntimeSnapshot{}, err
 	}
