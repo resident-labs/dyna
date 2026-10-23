@@ -71,8 +71,14 @@ func (s *Store) open() (*sql.DB, error) {
 }
 
 // TODO: legacy/shim remove later — reads retained question files only for the schema migration; remove after all retained stores are migrated.
-func (s *Store) readImportSource() (legacyQuestionState, error) {
-	raw, err := os.ReadFile(filepath.Join(s.Root, "state.json"))
+func (s *Store) readImportSource() (result legacyQuestionState, err error) {
+	path := filepath.Join(s.Root, "state.json")
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("question import %s: %w", path, err)
+		}
+	}()
+	raw, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return legacyQuestionState{}, err
 	}
@@ -85,7 +91,8 @@ func (s *Store) readImportSource() (legacyQuestionState, error) {
 		}
 	}
 	if os.IsNotExist(err) || header.Version == 2 {
-		raw, err = os.ReadFile(filepath.Join(s.Root, "state.v1.backup.json"))
+		path = filepath.Join(s.Root, "state.v1.backup.json")
+		raw, err = os.ReadFile(path)
 		if os.IsNotExist(err) && header.Version != 2 {
 			return legacyQuestionState{}, nil
 		}
