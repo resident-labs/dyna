@@ -16,8 +16,9 @@ const GOAL_ITEM = /\b(item\s+)i\d+\b/gi
 // shorter run inside a longer one stays part of the code.
 const CODE_SPAN = /(`+)([\s\S]*?)\1/g
 
-// prose drops the markup of text outside inline code: link targets, emphasis,
-// and goal IDs. A code span keeps every character it has.
+// prose drops the markup of a post body: link targets, emphasis, and goal
+// IDs. It runs on text whose code spans are already hidden, so a link label
+// that holds code ("[`go test`](url)") still loses its target.
 function prose(part: string): string {
   return part
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1') // a link keeps its words
@@ -27,6 +28,12 @@ function prose(part: string): string {
     .replace(GOAL_ITEM, '$1')
 }
 
+// A hidden code span in the prose: OPEN, its index in code, CLOSE. Private-use
+// characters cannot come from a markdown author by accident.
+const OPEN = '\uE000'
+const CLOSE = '\uE001'
+const HIDDEN = /\uE000(\d+)\uE001/g
+
 // plainText drops the markup a post body may hold: fence lines, headings,
 // quotes, list bullets, emphasis, link targets and goal IDs. Code keeps its
 // text, so "use `src/**/*.ts`" never reads "use src//.ts".
@@ -35,18 +42,18 @@ function plainText(text: string): string {
     .replace(/^[ \t]*`{3,}.*$/gm, '') // fence lines, not their text
     .replace(/^[ \t]*(?:#{1,6}\s+|>+\s*)/gm, '') // headings and quotes
     .replace(/^[ \t]*(?:[-*+]|\d{1,2}[.)])\s+/gm, '') // list bullets and numbers
-  const parts: string[] = []
-  let last = 0
-  for (const match of lines.matchAll(CODE_SPAN)) {
-    const start = match.index ?? 0
-    parts.push(prose(lines.slice(last, start)))
-    parts.push(match[2] ?? '') // the code itself, without its backticks
-    last = start + match[0].length
-  }
-  parts.push(prose(lines.slice(last)))
-  return parts.join('')
+  // The prose is cleaned as one string, so a link whose label is code keeps
+  // its words. Each code span waits behind a placeholder until the end.
+  const code: string[] = []
+  const hidden = lines.replace(CODE_SPAN, (_match, _ticks: string, content: string) => {
+    code.push(content)
+    return OPEN + (code.length - 1) + CLOSE
+  })
+  const cleaned = prose(hidden)
     .replace(/\s+([,.;:])/g, '$1') // punctuation left apart by a goal ID
     .replace(/(?:\s*·\s*){2,}/g, ' · ') // separators left around a goal ID
+  return cleaned
+    .replace(HIDDEN, (_match, index: string) => code[Number(index)] ?? '')
     .replace(/\s+/g, ' ')
     .trim()
 }
