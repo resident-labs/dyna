@@ -47,8 +47,17 @@ func TestServiceContractQuietSuccessAndFailedAlert(t *testing.T) {
 				t.Fatal(err)
 			}
 			res, err = e.svc.CompleteSessionTurn(e.ctx, info.ID, 1)
-			if err != nil || res.Message.Kind != "failed" || !reflect.DeepEqual(res.Message.To, []string{rec.Name}) {
+			if err != nil || res.Message.Kind != serviceAlertKind || !reflect.DeepEqual(res.Message.To, []string{rec.Name}) {
 				t.Fatalf("failure alert: %+v %v", res, err)
+			}
+			// One alert from the service, never a child-failure report with a
+			// transfer hint: a service changes through `dyna services`.
+			text := res.Message.Text
+			if !strings.HasPrefix(text, "Service "+role+" failed turn 1: provider failed") || !strings.Contains(text, "Session: "+info.Address()) {
+				t.Fatalf("alert text = %q", text)
+			}
+			if strings.Contains(text, "dyna subagent transfer") || strings.Contains(text, "dyna subagent output") {
+				t.Fatalf("alert keeps child-failure advice: %q", text)
 			}
 		})
 	}

@@ -103,6 +103,24 @@ func TestAdoptRefusesCyclesAndDepthPastTheLimit(t *testing.T) {
 	}
 }
 
+func TestAdoptRefusesAServiceSession(t *testing.T) {
+	e := newTestEnv(t)
+	lead := e.tree(nil)
+	service := e.tree(nil)
+	if _, err := e.m.Store.UpdateMeta(service.ID, func(meta *Meta) {
+		meta.Role, meta.Service = RoleLibrarian, true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.m.Adopt(context.Background(), service.ID, lead.ID); err == nil || !strings.Contains(err.Error(), "dyna services") {
+		t.Fatalf("service adopt err = %v", err)
+	}
+	got, err := e.m.Store.Info(service.ID)
+	if err != nil || got.ParentSession != "" {
+		t.Fatalf("refused adopt changed the service: %+v, %v", got, err)
+	}
+}
+
 func TestAdoptAllowsOnlyOwnerRootOrCurrentParent(t *testing.T) {
 	e := newTestEnv(t)
 	lead := e.tree(nil)

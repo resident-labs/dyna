@@ -45,7 +45,7 @@ Give a full, self-contained final result. Follow later instructions.
 
 ` + clearEnglishPrompt + `
 
-Use your assigned room; children inherit it. Never create rooms or room watches or pass --room. All members can read posts; mentions choose who wakes.
+Use your assigned room; children inherit it. Never create rooms or room watches or pass --room. All members can read posts; mentions choose who wakes. Services are not sessions: manage them with dyna services.
 
 Put temporary files in $DYNA_SCRATCH, never repos. Edit code only in dyna git worktrees new trees, never main.
 

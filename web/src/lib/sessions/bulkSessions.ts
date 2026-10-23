@@ -28,11 +28,12 @@ export function bulkResultText(r: ResultLike, action: string): string {
 
 // adoptTargets lists the open sessions the selection can move under, as
 // { member, reason }. reason is '' for a valid parent, or why the engine
-// would refuse it: a cycle, a service parent, or a depth past maxDepth (0
-// means no limit). The engine checks again; this only explains the choice.
-// members come from the Members API, whose display depth starts at 0 for a
-// top-level session; stored session depth, which maxDepth limits, starts at 1.
-type AdoptMember = Pick<Member, 'name' | 'depth'> & Partial<Pick<Member, 'id' | 'owner' | 'closed' | 'parent' | 'service' | 'role'>>
+// would refuse it: a cycle, or a depth past maxDepth (0 means no limit). The
+// engine checks again; this only explains the choice. A service is no member,
+// so it is never a target. members come from the Members API, whose display
+// depth starts at 0 for a top-level session; stored session depth, which
+// maxDepth limits, starts at 1.
+type AdoptMember = Pick<Member, 'name' | 'depth'> & Partial<Pick<Member, 'id' | 'owner' | 'closed' | 'parent'>>
 export function adoptTargets<T extends AdoptMember>(members: T[], ids: string[], maxDepth: number): { member: T; reason: string }[] {
   const open = members.filter((m) => m.id && !m.owner && !m.closed)
   const kids = new Map<string | undefined, T[]>()
@@ -44,7 +45,6 @@ export function adoptTargets<T extends AdoptMember>(members: T[], ids: string[],
   const deepest = moved.map((m) => ({ who: below(m).reduce((d, k) => (k.depth > d.depth ? k : d), m), from: m })).map(({ who, from }) => ({ who, extra: who.depth - from.depth }))
   return open.filter((t) => t.id === undefined || !ids.includes(t.id)).map((t) => {
     if (inside.has(t.id)) return { member: t, reason: 'Inside the selection' }
-    if (t.service && t.role !== 'root') return { member: t, reason: 'Service session' }
     const over = deepest.map(({ who, extra }) => ({ who, at: t.depth + 2 + extra })).find(({ at }) => maxDepth > 0 && at > maxDepth)
     return { member: t, reason: over ? `${over.who.name} would be at depth ${over.at} of ${maxDepth}` : '' }
   })

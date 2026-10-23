@@ -35,6 +35,7 @@ import (
 	cliroot "dyna-agent/internal/cli/root"
 	"dyna-agent/internal/cli/rules"
 	cliruntime "dyna-agent/internal/cli/runtime"
+	cliservices "dyna-agent/internal/cli/services"
 	clisettings "dyna-agent/internal/cli/settings"
 	"dyna-agent/internal/cli/shell"
 	clisubagent "dyna-agent/internal/cli/subagent"
@@ -157,6 +158,7 @@ func newRootCommand() *cobra.Command {
 		cliroom.VisualCmd(),
 		cliroom.AttachmentCmd(),
 		clisettings.NewCommand(),
+		cliservices.NewCommand(),
 		profiles.NewCommand(),
 		workflows.NewRunCommand(),
 		workflows.NewRunWorkerCommand(),

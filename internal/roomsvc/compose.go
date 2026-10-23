@@ -8,6 +8,7 @@ import (
 
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/subagent"
 )
 
 // Mentions the composer offers besides members. TeamMention reaches the
@@ -247,8 +248,14 @@ func (s *Service) post(ctx context.Context, roomRef, draft, replyTo, forwardOf s
 	return out, err
 }
 
-// MentionChoices lists the mentions the composer can complete in a room.
+// MentionChoices lists the mentions the composer can complete in a room. A
+// service session is no member, but a post may still address it by name, so
+// its open top-level sessions are added here.
 func (s *Service) MentionChoices(ref string) ([]string, error) {
+	rec, err := s.rooms().Resolve(ref)
+	if err != nil {
+		return nil, err
+	}
 	members, err := s.Members(ref, false)
 	if err != nil {
 		return nil, err
@@ -259,6 +266,15 @@ func (s *Service) MentionChoices(ref string) ([]string, error) {
 			continue
 		}
 		names = append(names, m.Name)
+	}
+	live, err := s.sessions().ListSnapshot(false)
+	if err != nil {
+		return nil, err
+	}
+	for _, info := range live {
+		if info.ManagedService() && info.ParentSession == "" && info.RoomID == rec.ID && info.Status != subagent.StatusClosed {
+			names = append(names, info.EffectiveName())
+		}
 	}
 	return Choices(names), nil
 }

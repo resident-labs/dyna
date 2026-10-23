@@ -16,11 +16,13 @@ type Membership struct {
 
 // RoomMembership filters sessions and orders siblings by creation time and ID.
 // Missing parents become roots. Cycles appear once, with the repeated edge cut.
+// A managed service session is not a member: it is outside the hierarchy and
+// appears only through `dyna services`, so it is neither a root nor a child.
 func RoomMembership(all []Info, roomID string, withClosed bool) Membership {
 	var out Membership
 	byID := map[string]bool{}
 	for _, info := range all {
-		if info.RoomID == roomID && (withClosed || info.Status != StatusClosed) {
+		if info.RoomID == roomID && !info.ManagedService() && (withClosed || info.Status != StatusClosed) {
 			out.Sessions = append(out.Sessions, info)
 			byID[info.ID] = true
 		}

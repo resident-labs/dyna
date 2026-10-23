@@ -6,7 +6,7 @@ import (
 )
 
 func TestRootGuidanceKeepsCallAndMergeInstructions(t *testing.T) {
-	const merge = "When a merge batch fails, Dyna pauses the queue and sends root one waking notice. Take control with `dyna git merge status`. Read `dyna guide git`, then return a PR, retry the batch, run bisect on demand, or publish a successful trial. Resume when the queue can continue. Successful batches remain automatic. Per-PR review and CI feedback still goes to authors."
+	const merge = "When a merge batch fails, Dyna pauses the queue and wakes root once. Take control with `dyna git merge status` (`dyna guide git`): return a PR, retry, bisect, or publish a successful trial, then resume. Successful batches stay automatic; review and CI feedback still goes to authors."
 	for _, internal := range []bool{false, true} {
 		text := RootBlock(internal)
 		if !strings.Contains(text, "To talk with the owner, run `dyna call --reason") {
