@@ -177,7 +177,7 @@ func TestDormantRunPublicationLockPreventsPartialScan(t *testing.T) {
 	select {
 	case got := <-done:
 		joined = true
-		if got.Succeeded != 0 || got.Failed != 1 {
+		if got.Succeeded != 0 || got.Kept != 1 || got.Failed != 0 || got.Results[0].Reason != RoomSessionKeptResponsibilities || got.Results[0].OK != true {
 			t.Fatalf("live job owner closed: %+v", got)
 		}
 	case <-time.After(5 * time.Second):
