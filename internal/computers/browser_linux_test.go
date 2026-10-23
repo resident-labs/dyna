@@ -5,6 +5,7 @@ package computers
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"os"
 	"os/exec"
@@ -15,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/store"
+	"golang.org/x/sys/unix"
 )
 
 // The live agent-browser checks are two tests, so a loaded host stays under
@@ -124,19 +127,51 @@ func (l *agentBrowserLaunch) started(t *testing.T) int {
 func (l *agentBrowserLaunch) profile(t *testing.T) string {
 	t.Helper()
 	pids := browserDaemonPIDs(l.meta.SessionID)
-	// The open command can return before Chromium's main process shows its
-	// profile in /proc, so wait for it instead of reading one snapshot.
+	profile := computerBrowserProfile(l.meta.SessionID)
+	// Chromium can rewrite its process title as one space-separated argument.
 	profileArg := regexp.MustCompile(`--user-data-dir=([^ \x00]+)`)
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+	found := func() string {
 		for pid := range descendants(processes(), pids) {
 			argv, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "cmdline"))
-			// Chromium can rewrite its process title as one space-separated argument.
 			if strings.Contains(string(argv), "--type=") {
 				continue
 			}
-			if match := profileArg.FindStringSubmatch(string(argv)); len(match) == 2 && match[1] == computerBrowserProfile(l.meta.SessionID) {
+			if match := profileArg.FindStringSubmatch(string(argv)); len(match) == 2 && match[1] == profile {
 				return match[1]
 			}
+		}
+		return ""
+	}
+	// The open command can return before Chromium's main process shows its
+	// profile in /proc. Chromium writes its profile while it starts, so each
+	// write on the profile directory is a real wakeup; the deadline only
+	// bounds a hang.
+	if got := found(); got != "" {
+		return got
+	}
+	watch, err := unix.InotifyInit1(unix.IN_CLOEXEC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(watch)
+	if _, err := unix.InotifyAddWatch(watch, profile, unix.IN_CREATE|unix.IN_MODIFY|unix.IN_MOVED_TO|unix.IN_CLOSE_WRITE); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break
+		}
+		n, err := unix.Poll([]unix.PollFd{{Fd: int32(watch), Events: unix.POLLIN}}, int(remaining.Milliseconds())+1)
+		if err != nil || n == 0 {
+			break
+		}
+		if _, err := unix.Read(watch, make([]byte, 4096)); err != nil {
+			break
+		}
+		if got := found(); got != "" {
+			return got
 		}
 	}
 	t.Fatal("no browser with the computer's private profile")
@@ -214,14 +249,21 @@ func TestAgentBrowserSessionNameStaysPrivate(t *testing.T) {
 	}
 }
 
+// waitProcessGone waits for the process's own exit event. A pidfd becomes
+// readable on exit, including for a zombie the test cannot reap itself.
 func waitProcessGone(t *testing.T, pid int, message string) {
 	t.Helper()
-	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
-		if p, ok := processInfo(pid); !ok || p.state == "Z" {
-			return
-		}
+	fd, err := unix.PidfdOpen(pid, 0)
+	if errors.Is(err, unix.ESRCH) {
+		return // already reaped
 	}
-	t.Fatal(message)
+	if err != nil {
+		t.Fatalf("%s: pidfd %d: %v", message, pid, err)
+	}
+	defer unix.Close(fd)
+	if n, err := unix.Poll([]unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}, 3000); err != nil || n == 0 {
+		t.Fatalf("%s: %d %v", message, n, err)
+	}
 }
 
 // Set DYNA_COMPUTERS_PLAYWRIGHT_MODULE to an installed Playwright module to
@@ -331,21 +373,16 @@ func TestOfflineDestroyStopsOnlyPrivateBrowserDaemon(t *testing.T) {
 			key = "AGENT_BROWSER_SOCKET_DIR"
 			name = "private"
 		}
+		ready := readyFIFO(t)
 		env := mergeEnvironment(os.Environ(), map[string]string{key: root, "AGENT_BROWSER_DAEMON": "1"})
-		child, err := startProcess(env, filepath.Join(Dir(id), name+".log"), "/bin/sleep", "600")
+		// The shell signals on the FIFO after its own exec, so /proc/<pid>/environ
+		// is readable before the pid file exists and cleanup can scan it.
+		child, err := startProcess(env, filepath.Join(Dir(id), name+".log"), "/bin/sh", "-c", "printf ready > "+shellquote.Quote(ready)+"; exec sleep 600")
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer child.stop()
-		// Right after Start, /proc/<pid>/environ can still read as empty, and
-		// cleanup would then not recognize the daemon. Wait until it is set.
-		for deadline := time.Now().Add(8 * time.Second); ; time.Sleep(time.Millisecond) {
-			if env, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(child.cmd.Process.Pid), "environ")); len(env) > 0 {
-				break
-			} else if time.Now().After(deadline) {
-				t.Fatal("daemon environment never became readable")
-			}
-		}
+		awaitReady(t, ready)
 		if err := os.WriteFile(filepath.Join(root, name+".pid"), []byte(strconv.Itoa(child.cmd.Process.Pid)), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -391,40 +428,35 @@ func TestStopBrowserDaemonsSignalsBeforeKill(t *testing.T) {
 	// the shell together; if the helper dies first, wait returns, so the shell
 	// keeps looping until its own SIGTERM arrives instead of exiting early.
 	marker := filepath.Join(t.TempDir(), "term")
-	ready := filepath.Join(t.TempDir(), "ready")
+	daemonReady := readyFIFO(t)
+	browserReady := readyFIFO(t)
 	browser := filepath.Join(t.TempDir(), "fake-chromium")
-	script := "#!/bin/sh\ntrap 'echo stopped > " + marker + "; exit 0' TERM\necho ready > " + ready + "\nsleep 600 & wait\nwhile :; do sleep 0.05; done\n"
+	// The browser signals after it starts its sleep helper, so the stop below
+	// sees the whole tree instead of a partly started one.
+	script := "#!/bin/sh\ntrap 'echo stopped > " + marker + "; exit 0' TERM\nsleep 600 &\nprintf ready > " + shellquote.Quote(browserReady) + "\nwait\nwhile :; do sleep 0.05; done\n"
 	if err := os.WriteFile(browser, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
 	env := mergeEnvironment(os.Environ(), map[string]string{"AGENT_BROWSER_SOCKET_DIR": root, "AGENT_BROWSER_DAEMON": "1"})
-	daemon, err := startProcess(env, filepath.Join(Dir(id), "daemon.log"), "/bin/sh", "-c", "env -u AGENT_BROWSER_DAEMON "+browser+" & wait")
+	// The daemon signals after its own exec, so the scan in findBrowserDaemons
+	// can already read its environment.
+	daemon, err := startProcess(env, filepath.Join(Dir(id), "daemon.log"), "/bin/sh", "-c", "printf ready > "+shellquote.Quote(daemonReady)+"; env -u AGENT_BROWSER_DAEMON "+browser+" & wait")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer daemon.stop()
-	// Right after Start, /proc/<pid>/environ can still read as empty, and the
-	// scan would then not recognize the daemon. Wait until it is set.
-	for deadline := time.Now().Add(8 * time.Second); ; time.Sleep(time.Millisecond) {
-		if env, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(daemon.cmd.Process.Pid), "environ")); len(env) > 0 {
-			break
-		} else if time.Now().After(deadline) {
-			t.Fatal("daemon environment never became readable")
-		}
-	}
+	awaitReady(t, daemonReady)
 	if err := os.WriteFile(filepath.Join(root, "daemon.pid"), []byte(strconv.Itoa(daemon.cmd.Process.Pid)), 0600); err != nil {
 		t.Fatal(err)
 	}
-	// Wait for the daemon, its browser (trap set) and the browser's sleep
-	// helper before the stop collects the process set.
-	for deadline := time.Now().Add(8 * time.Second); ; time.Sleep(5 * time.Millisecond) {
-		_, notReady := os.Stat(ready)
-		if roots := findBrowserDaemons(id); notReady == nil && len(roots) == 1 && len(descendants(processes(), roots)) >= 3 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("fake browser never started")
-		}
+	awaitReady(t, browserReady)
+	// The daemon, its browser and the browser's sleep helper exist now.
+	roots := findBrowserDaemons(id)
+	if len(roots) != 1 {
+		t.Fatalf("fake browser roots: %v", roots)
+	}
+	if tree := descendants(processes(), roots); len(tree) < 2 {
+		t.Fatalf("fake browser tree: %v", tree)
 	}
 	stopBrowserDaemons(id)
 	b, err := os.ReadFile(marker)
