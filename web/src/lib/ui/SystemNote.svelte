@@ -12,14 +12,20 @@
   import type { NoteData, SlowTest } from './notices.ts'
   import type { Attachment } from '../api/room.ts'
 
+  // notes are one run of notice posts. target names the session a note is
+  // about; a row that folds only its own note may not know it.
+  type Note = Omit<NoteData, 'target'> & { target?: string }
+
   interface Props {
-    notes?: NoteData[]
+    notes?: Note[]
     roomId: string
     onopenfile?: (attachment: Attachment) => void
     onissue?: ((issue: string) => void) | null
   }
   let { notes = [], roomId, onopenfile, onissue = null }: Props = $props()
   let first = $derived(notes[0])
+  // sameChanges groups the notes by the changes they name; only those fields matter.
+  let changed = $derived(sameChanges(notes.map((n) => ({ id: n.id, target: n.target, text: n.text }))))
   let slow = $derived(notes[0]?.slow ? notes.map((n) => n.slow).filter((t): t is SlowTest => !!t) : null)
   let limit = $derived(slow?.find((t) => t.limit)?.limit ?? '')
   const prs = (t: SlowTest) => t.prs.map((n) => `#${n}`).join(', ')
@@ -54,7 +60,7 @@
       {#if first.body}<p class="text handoff">{first.body}</p>{/if}
       {#if first.attachments?.length}<PostFiles {roomId} post={first} onopen={onopenfile} />{/if}
     {:else}
-    {#each sameChanges(notes) as g (g.key)}
+    {#each changed as g (g.key)}
       <div class="one">
         {#if notes.length > 1}<b>{g.targets.join(', ')}</b>{/if}
         {#each g.lines as line}<p>{line}</p>{:else}<p>Standing instructions changed</p>{/each}

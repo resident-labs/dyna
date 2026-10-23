@@ -2,6 +2,7 @@ import type { Member, Post } from '../api/room.ts'
 import type { Item, Turn, Usage } from '../api/session.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { isNote, noteData } from '../ui/notices.ts'
+import type { SlowTest } from '../ui/notices.ts'
 import { registeredEvent } from '../rooms/eventPayloads.ts'
 import { userText } from './userText.ts'
 import { duration, short, tokens } from '../ui/format.ts'
@@ -51,7 +52,7 @@ export interface DmNote {
   text?: string
   ts?: Time
   attachments?: Post['attachments']
-  slow?: { name: string }
+  slow?: SlowTest
   label?: string
   body?: string
 }
