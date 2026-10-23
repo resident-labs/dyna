@@ -72,10 +72,11 @@ func deliveryModeFor(msg Message) DeliveryMode {
 }
 
 // DeliveriesFor lists the recipients of one stored post, each with its mode.
-// A recipient is an address bound to a session in SessionIDs; an address
-// without a binding (the owner's own address, mostly) gets no row. The room's
-// root seat gets one row when RootContext gives it a wake or a quiet post,
-// under SeatSessionID.
+// A recipient is an address bound to a session in SessionIDs, keyed by that
+// session ID, or an agent address without a binding, keyed by the address text
+// (see deliveryRowKey). A room address names the owner, who is no session, and
+// gets no row. The room's root seat gets one row when RootContext gives it a
+// wake or a quiet post, under SeatSessionID.
 //
 // The rows are what the post meant for each recipient when it was stored.
 // They do not say how far each delivery got: that is DeliveryState.
@@ -84,7 +85,7 @@ func DeliveriesFor(msg Message, roomName string) []Delivery {
 	mode := deliveryModeFor(msg)
 	seen := make(map[string]bool, len(msg.To)+1)
 	for _, to := range msg.To {
-		id := msg.SessionIDs[to]
+		id := deliveryRowKey(msg, roomName, to)
 		if id == "" || seen[id] {
 			continue
 		}
@@ -95,6 +96,23 @@ func DeliveriesFor(msg Message, roomName string) []Delivery {
 		out = append(out, Delivery{SessionID: SeatSessionID(msg.RoomID), Mode: seatDeliveryMode(decision), Category: category})
 	}
 	return out
+}
+
+// deliveryRowKey is the session_id the row for recipient to carries: the
+// session bound to the address, or the address itself when the post bound no
+// session to it. A post that names an address without a binding still reaches
+// the session that answers to that address, so the row keeps the text that
+// matched. It names no session, so a rename ends the match, as the address text
+// did before the rows existed. The room's own address names the owner, who is
+// no session: the room's root seat reads its own row instead.
+func deliveryRowKey(msg Message, roomName, to string) string {
+	if id := msg.SessionIDs[to]; id != "" {
+		return id
+	}
+	if to == roomName {
+		return ""
+	}
+	return to
 }
 
 // seatDeliveryMode maps the root seat's decision to the mode of its row.

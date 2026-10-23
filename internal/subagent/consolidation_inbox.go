@@ -243,6 +243,19 @@ func (s *Store) cachedInboxMessages(rooms *room.Store, meta Meta, ordinary []roo
 	if err != nil {
 		return nil, err
 	}
+	// Each origin's own deliveries decide which posts the target inherits: a row
+	// names the source's session, so a post that named the source's address
+	// without binding it reaches the source and no other holder of the name.
+	inherited := make(map[string]map[string]room.Delivery, len(meta.InheritedInboxes))
+	inboxMsgs := make(map[string][]room.Message, len(meta.InheritedInboxes))
+	for _, in := range meta.InheritedInboxes {
+		msgs, err := cache.messages(rooms, meta.RoomID, in)
+		if err != nil {
+			return nil, err
+		}
+		inboxMsgs[in.Session] = msgs
+		inherited[in.Session] = inputRows(rooms, meta.RoomID, in.Session, in.Address, postIDs(msgs))
+	}
 	for _, in := range meta.InheritedInboxes {
 		source, err := reader.ReadMeta(in.Session)
 		if err != nil {
@@ -257,10 +270,7 @@ func (s *Store) cachedInboxMessages(rooms *room.Store, meta Meta, ordinary []roo
 		if err != nil {
 			return nil, err
 		}
-		msgs, err := cache.messages(rooms, meta.RoomID, in)
-		if err != nil {
-			return nil, err
-		}
+		msgs := inboxMsgs[in.Session]
 		pending := cache.origins[in.Session].pending[:0]
 		for _, msg := range msgs {
 			if targetDelivered[msg.ID] || targetQueue.Dismissed[msg.ID] || meta.InheritedReceipts[msg.ID] || (cache.turn > 0 && targetQueue.Claimed[msg.ID] == cache.turn) {
@@ -272,9 +282,11 @@ func (s *Store) cachedInboxMessages(rooms *room.Store, meta Meta, ordinary []roo
 				// it. Another inherited origin may become eligible on a later poll.
 				shared := false
 				for _, other := range meta.InheritedInboxes {
-					if other.Session != in.Session && msg.Addressed(other.Address) {
-						shared = true
-						break
+					if other.Session != in.Session {
+						if _, theirs := inherited[other.Session][msg.ID]; theirs {
+							shared = true
+							break
+						}
 					}
 				}
 				if !shared {
@@ -284,7 +296,10 @@ func (s *Store) cachedInboxMessages(rooms *room.Store, meta Meta, ordinary []roo
 			if source.Transfer != nil && msg.ID == source.Transfer.PostID {
 				continue
 			}
-			if msg.Deliverable() && (msg.SessionIDs[in.Address] == "" || msg.SessionIDs[in.Address] == source.ID) && !source.ClosedPosts[msg.ID] && msg.Addressed(in.Address) && msg.From != in.Address {
+			if _, theirs := inherited[in.Session][msg.ID]; !theirs {
+				continue
+			}
+			if msg.Deliverable() && !source.ClosedPosts[msg.ID] && msg.From != in.Address {
 				pending = append(pending, msg)
 				all = append(all, msg)
 				if !suppressed {

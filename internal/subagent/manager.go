@@ -678,14 +678,15 @@ func (m *Manager) Wake(ctx context.Context, ref string, opts WakeOptions) (WakeR
 		}
 	}
 	if opts.MessageID != "" && len(info.InheritedInboxes) > 0 {
-		msg, e := m.rooms().Message(info.RoomID, opts.MessageID)
-		if e != nil {
+		// The post must still be in the room log, and its stored deliveries say
+		// which sessions it reached: this one, or one whose inbox it inherited.
+		if _, e := m.rooms().Message(info.RoomID, opts.MessageID); e != nil {
 			return WakeResult{}, e
 		}
-		if !msg.SessionAddressed(info.ID, info.Address()) {
+		if _, mine := inputRow(m.rooms(), info.RoomID, info.ID, info.Address(), opts.MessageID); !mine {
 			matched := false
 			for _, in := range info.InheritedInboxes {
-				if msg.SessionAddressed(in.Session, in.Address) {
+				if _, theirs := inputRow(m.rooms(), info.RoomID, in.Session, in.Address, opts.MessageID); theirs {
 					matched = true
 				}
 			}
