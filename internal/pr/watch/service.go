@@ -679,10 +679,24 @@ func (s *Service) applyCI(st *State, r *Record, snap Snapshot, ci, ciKey string,
 // routeComments triages new comments and routes each kept one to the author
 // and, while a review runs, to the live reviewer.
 func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNotices) {
+	policy := commentRules(*st, refRecord(*r))
+	trust := digest("comment-trust-v1\n" + snap.OwnerLogin + "\n" + strings.Join(policy.TrustedBots, "\n"))
+	trustChanged := r.CommentTrust != trust
+	if trustChanged {
+		// Retire pending batches made under the previous trust policy. The
+		// current snapshot below replaces them after applying the new gate.
+		for i := range r.Notices {
+			old := &r.Notices[i]
+			if !old.Done && old.Kind != "held-comment" && strings.Contains(old.Text, "GitHub ") {
+				old.SupersededBy = "comment-trust-policy"
+			}
+		}
+	}
+	r.CommentTrust = trust
 	var events []Event
 	for _, c := range snap.Comments {
 		k, v := commentKey(c), commentVersion(c)
-		if r.Seen[k] == v {
+		if r.Seen[k] == v && (!trustChanged || r.CommentDecisions[k].Reason == "owner_dismissed") {
 			continue
 		}
 		r.Seen[k] = v
@@ -692,7 +706,7 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 	}
 	pr := PRContext{URL: r.URL, AuthorSession: r.Author, FormerAuthors: r.FormerAuthors, OwnerLogin: snap.OwnerLogin}
 	r.OwnerLogin = snap.OwnerLogin
-	rules := commentRules(*st, refRecord(*r)).Triage(pr, events)
+	rules := policy.Triage(pr, events)
 	decisions := rules
 	if s.Triage != nil && len(events) > 0 {
 		decisions = s.Triage.Triage(pr, events)

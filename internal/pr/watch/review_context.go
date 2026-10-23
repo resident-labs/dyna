@@ -214,13 +214,14 @@ func (s *Service) reviewComments(ctx context.Context, st State, r Record) ([]Com
 		}
 	}
 	pr := PRContext{URL: r.URL, AuthorSession: r.Author, FormerAuthors: r.FormerAuthors, OwnerLogin: r.OwnerLogin}
+	rules := commentRules(st, ref)
 	for _, c := range comments {
 		owner := commentOwner(st.CommentSessions, c)
 		if strings.TrimSpace(c.Body) == "" || (owner != "" && (owner == r.Reviewer || owner == r.LastReviewer)) {
 			continue
 		}
 		event := Event{ID: commentKey(c), Kind: c.Kind, Commenter: c.User.Login, IsBot: isBot(c.User), Text: Sanitize(c.Body), ReviewState: c.State, Session: owner, Association: c.Association}
-		decision := commentRules(st, ref).Triage(pr, []Event{event})[0]
+		decision := rules.Triage(pr, []Event{event})[0]
 		if decision.Action == "hold" && r.AdmittedComments[commentKey(c)] == commentVersion(c) {
 			decision = Decision{Action: "keep", Reason: "owner_admitted"}
 		}

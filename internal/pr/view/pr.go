@@ -210,7 +210,9 @@ func (s *Service) TransferPR(ctx context.Context, roomRef, key, role, toRef, dir
 	if err := p.Transfer(ctx, key, role, to, dir); err != nil {
 		return watch.Record{}, err
 	}
-	return p.Store.Get(key)
+	r, err = p.Store.Get(key)
+	r.HeldComments = nil
+	return r, err
 }
 
 // SetPRDraft holds a PR as a GitHub draft with a reason, or releases it.

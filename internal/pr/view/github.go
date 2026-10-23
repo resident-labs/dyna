@@ -456,6 +456,7 @@ type TrackedPR struct {
 // ID links the PR to that goal, replacing any link.
 func (s *Service) TrackPRRef(ctx context.Context, roomRef, sessionRef, ref, dir, goal string) (TrackedPR, error) {
 	r, created, err := s.track(ctx, roomRef, sessionRef, ref, dir, goal)
+	r.HeldComments = nil
 	return TrackedPR{r, created}, err
 }
 

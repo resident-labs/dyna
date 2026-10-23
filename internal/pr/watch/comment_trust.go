@@ -1,6 +1,7 @@
 package watch
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -12,7 +13,7 @@ import (
 func commentRules(st State, ref Ref) Rules {
 	bots := []string{}
 	if cfg, err := settings.Load(""); err == nil {
-		bots = cfg.PRTrustedBots
+		bots = append([]string{}, cfg.PRTrustedBots...)
 	}
 	return Rules{Learned: repoNoise(st, ref), TrustedBots: bots}
 }
@@ -31,7 +32,7 @@ func commentNotice(e Event, d Decision, link string) string {
 
 // AdmitComment admits only the held version. An edit requires a new decision.
 func (s *Service) AdmitComment(key, id string) error {
-	return s.Store.updateRecords([]string{key}, func(st *State) error {
+	err := s.Store.updateRecords([]string{key}, func(st *State) error {
 		r := st.Records[key]
 		if r == nil {
 			return fmt.Errorf("PR is not tracked")
@@ -56,6 +57,10 @@ func (s *Service) AdmitComment(key, id string) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	return s.flush(context.Background(), key)
 }
 
 func (s *Service) DismissComment(key, id string) error {

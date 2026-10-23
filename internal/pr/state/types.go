@@ -194,6 +194,7 @@ type Record struct {
 	Verdict          string                       `json:"verdict,omitempty"`
 	Summary          string                       `json:"summary,omitempty"`
 	ReviewID         int64                        `json:"reviewId,omitempty"`
+	CommentTrust     string                       `json:"commentTrust,omitempty"`
 	OwnerLogin       string                       `json:"ownerLogin,omitempty"`
 	HeldComments     map[string]HeldComment       `json:"heldComments,omitempty"`
 	AdmittedComments map[string]string            `json:"admittedComments,omitempty"`
