@@ -304,7 +304,7 @@
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <div class="backdrop">
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="card" role="dialog" aria-modal="true" aria-label="Command palette" tabindex="-1" onclick={(e) => e.stopPropagation()} use:modal={{ close: onclose, initial: () => input }} onkeydown={keydown}>
+  <div class="card" role="dialog" aria-modal="true" aria-label="Command palette" tabindex="-1" onclick={(e) => e.stopPropagation()} use:modal={{ close: onclose, initial: () => input }}>
     {#if step === 'confirm'}
       <div class="confirm">
         <button class="back" onclick={back}><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M12.5 4.5 7 10l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>Back</button>
@@ -346,6 +346,7 @@
           class="q"
           bind:value={text}
           oninput={typed}
+          onkeydown={keydown}
           {placeholder}
           aria-label={placeholder}
           role="combobox"
