@@ -241,7 +241,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   const events: DmEvent[] = [], threads = new Map<string, Thread>(), peerItems = new Map<string, PeerItem>(), wakes = new Map<string, Wake>()
   const posts = new Map<string, ThreadPost>((session?.posts || []).map((p): [string, ThreadPost] => [p.id, p]))
   const receipts = new Map<string, Receipt>(queue.filter((q) => ['waiting', 'delivering', 'delivered'].includes(q.state)).map((q): [string, Receipt] => [q.id, q]))
-  const matched = new Set<string>(), delivered = new Map<string, { delivery: string; pending?: Receipt }>()
+  const matched = new Set<string>(), carried = new Set<string>(), delivered = new Map<string, { delivery: string; pending?: Receipt }>()
   const threadFor = (key: string): Thread => {
     let thread = threads.get(key)
     if (!thread) { thread = { key, posts: [] }; threads.set(key, thread) }
@@ -281,14 +281,25 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
         continue
       }
       if (input && it.postId) {
-        matched.add(it.postId)
         if (post && registeredEvent(post)) {
           // A notice that opened or steered this turn draws its card, the same
           // one the feed shows, instead of its raw text.
+          matched.add(it.postId)
           events.push({ kind: 'system-event', key: `post:${it.postId}`, ts: post.ts ?? at, post, author, text: post.text })
           continue
         }
-        events.push({ ...it, kind: 'message', itemKind: it.kind, author, human: post?.human ?? receipt?.human ?? /\(human\)$/.test(it.from || ''), ts: post?.ts ?? receipt?.ts ?? at, text: post?.text ?? receipt?.text ?? it.text, key: `post:${it.postId}`, post, pending: it.delivered ? undefined : receipt, delivery: it.delivered ? 'read' : 'delivered' })
+        // A stored post draws its own row below, from the post alone: its text,
+        // its attachments, its forward and its references. The turn item says
+        // only when and how the post reached this session.
+        if (post) {
+          carried.add(it.postId)
+          delivered.set(it.postId, { delivery: it.delivered ? 'read' : 'delivered', pending: it.delivered ? undefined : receipt })
+          continue
+        }
+        // The room no longer holds the post, or the queue has not posted it
+        // yet. No post row exists, so the item stands in for it.
+        matched.add(it.postId)
+        events.push({ ...it, kind: 'message', itemKind: it.kind, author, human: receipt?.human ?? /\(human\)$/.test(it.from || ''), ts: receipt?.ts ?? at, text: receipt?.text ?? it.text, key: `post:${it.postId}`, post, pending: it.delivered ? undefined : receipt, delivery: it.delivered ? 'read' : 'delivered' })
         continue
       }
       const row = { ...it, itemKind: it.kind, author, human: /\(human\)$/.test(it.from || ''), ts: at, key: `item:${t.n}:${i}`, delivery: it.kind === 'steering' ? (it.delivered ? 'read' : 'delivered') : undefined, n: t.n }
@@ -323,10 +334,12 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
     }
     const keys = threadKeys(p, address, room.name)
     for (const key of keys) threadFor(key).posts.push(receiptOf(p))
-    events.push({ kind: 'post', key: `post:${p.id}`, ts: p.ts, post: p, threads: keys, suppressMessage: matched.has(p.id) || (receipts.has(p.id) && receipts.get(p.id)?.state !== 'delivered') })
+    // A carried post draws its own message row; the queue's receipt does not
+    // replace it, because the row below takes the delivery from the turn item.
+    events.push({ kind: 'post', key: `post:${p.id}`, ts: p.ts, post: p, threads: keys, suppressMessage: matched.has(p.id) || (!carried.has(p.id) && receipts.has(p.id) && receipts.get(p.id)?.state !== 'delivered') })
   }
   for (const q of receipts.values()) {
-    if (matched.has(q.id) || q.state === 'delivered') continue
+    if (matched.has(q.id) || carried.has(q.id) || q.state === 'delivered') continue
     const post = posts.get(q.id)
     if (q.from === voice) {
       if (!post) events.push({ kind: 'voice', key: `post:${q.id}`, ts: q.ts, text: q.text, delivery: q.state === 'waiting' ? 'queued' : 'delivered' })
@@ -396,7 +409,8 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
           rows.push({ kind: 'system-event', key: `post:${p.id}`, ts: p.ts, post: p, author: p.from, text: p.text })
         } else {
           const ownerAttachments = (p.owner || p.from === room.name) && !!p.attachments?.length
-          rows.push({ ...event, kind: 'message', author: p.from, text: p.text, human: !!p.human, ownerAttachments, attachmentOnly: false, post: p })
+          const receipt = carried.has(p.id) ? delivered.get(p.id) : undefined
+          rows.push({ ...event, kind: 'message', author: p.from, text: p.text, human: !!p.human, ownerAttachments, attachmentOnly: false, post: p, delivery: receipt?.delivery, pending: receipt?.pending })
         }
       }
       for (const key of event.threads) {

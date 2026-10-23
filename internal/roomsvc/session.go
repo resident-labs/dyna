@@ -269,6 +269,10 @@ func (s *Service) sessionView(sess transcript.Session) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
+	out.Posts, err = s.withItemPosts(rec, out.Posts, sess.Info.ID, out.Address, out.Turns, book)
+	if err != nil {
+		return Session{}, err
+	}
 	out.Media, err = s.sessionMedia(rec, media, sess.Info.ID, out.Address, book)
 	if err != nil {
 		return Session{}, err
@@ -299,12 +303,12 @@ func (s *Service) sessionJobs(sess transcript.Session) []shells.Info {
 // sessionMedia includes attachments from the entire conversation, including owner posts.
 func (s *Service) sessionMedia(rec room.Record, msgs []room.Message, id, address string, book avatarBook) ([]Post, error) {
 	return s.mediaWhere(rec, msgs, book, func(m room.Message) bool {
-		return sessionParticipant(m, id, address)
+		return sessionParticipant(rec, m, id, address)
 	})
 }
 
-func sessionParticipant(m room.Message, id, address string) bool {
-	return m.SentBySession(id, address) || m.SessionAddressed(id, address)
+func sessionParticipant(rec room.Record, m room.Message, id, address string) bool {
+	return m.SentBySession(id, address) || m.SessionAddressed(id, address) || (rootSeat(rec, address) && m.RootSeatTarget(rec.Name))
 }
 
 // mediaWhere is the attachments of the messages `in` selects, newest first.
@@ -347,20 +351,65 @@ func (s *Service) sessionPosts(rec room.Record, msgs []room.Message, id, address
 	return s.shapeSessionPosts(rec, selected, book)
 }
 
+// rootSeat reports whether address is the room's root seat. Only the seat
+// session holds that address, because "root" is a reserved agent name.
+func rootSeat(rec room.Record, address string) bool {
+	return address == rec.Name+":"+room.RootAgent
+}
+
 // sessionPost is the shared conversation filter for indexed and supplied posts.
 func sessionPost(rec room.Record, m room.Message, id, address string) bool {
 	own := m.SentBySession(id, address)
 	if own && IsCompletion(m) {
 		return false
 	}
+	// The root seat's conversation also holds the posts addressed to the seat:
+	// "@root" on a post to the room reaches the seat, not a worker session.
+	seat := rootSeat(rec, address) && m.RootSeatTarget(rec.Name)
 	// A typed PR event is part of the conversation: the DM draws its card,
 	// whether the engine posted it or the session's own turn did. A PR post
 	// stored before the typed events stays out, as it always did.
 	if m.Kind == "pr" {
 		_, typed := m.PR()
-		return typed && (own || m.SessionAddressed(id, address))
+		return typed && (own || seat || m.SessionAddressed(id, address))
 	}
-	return own || m.SessionAddressed(id, address) && (m.From != rec.Name || len(m.Attachments) > 0)
+	return own || seat || m.SessionAddressed(id, address)
+}
+
+// withItemPosts adds the stored post of every turn item the selection left
+// out, such as a post from before the page window. A turn item names the post
+// that carried it, and that post is the message's one source: its text, its
+// attachments, its forward and its references. A post that the room no longer
+// holds stays out, because the room feed does not show it either.
+func (s *Service) withItemPosts(rec room.Record, posts []Post, id, address string, turns []Turn, book avatarBook) ([]Post, error) {
+	have := make(map[string]bool, len(posts))
+	for _, p := range posts {
+		have[p.ID] = true
+	}
+	var missing []room.Message
+	for _, t := range turns {
+		for _, it := range t.Items {
+			if it.PostID == "" || have[it.PostID] {
+				continue
+			}
+			have[it.PostID] = true
+			m, err := s.rooms().Message(rec.ID, it.PostID)
+			if err != nil || !sessionPost(rec, m, id, address) {
+				continue
+			}
+			missing = append(missing, m)
+		}
+	}
+	if len(missing) == 0 {
+		return posts, nil
+	}
+	extra, err := s.feedOf(rec, missing, 0, book, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := append(posts, extra.Posts...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].TS < out[j].TS })
+	return out, nil
 }
 
 const (
@@ -403,7 +452,7 @@ func (s *Service) transcriptMessages(rec room.Record, info subagent.Info, since,
 		return nil, nil, err
 	}
 	media, err := s.rooms().LatestSelectedMessages(rec.ID, &selected.media, func(m room.Message) bool {
-		return len(m.Attachments) > 0 && sessionParticipant(m, info.ID, address)
+		return len(m.Attachments) > 0 && sessionParticipant(rec, m, info.ID, address)
 	}, maxSessionMedia)
 	return posts, media, err
 }

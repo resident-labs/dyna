@@ -55,7 +55,7 @@ func TestTranscriptPostsMatchFeed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if i < 4 {
+		if i < 6 {
 			ids = append(ids, msg.ID)
 		}
 	}
@@ -293,7 +293,7 @@ func TestSessionMediaNewest200AndEmpty(t *testing.T) {
 	}
 }
 
-func TestSessionPostsOwnerAttachments(t *testing.T) {
+func TestSessionPostsHoldEveryOwnerPostToTheSession(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
 	store := e.svc.Notify.Rooms
@@ -318,8 +318,85 @@ func TestSessionPostsOwnerAttachments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(posts) != 1 || !posts[0].Owner || len(posts[0].Attachments) != 1 {
+	// Both owner posts are the stored posts the DM shows: text, files and all.
+	if len(posts) != 2 || !posts[0].Owner || posts[0].Text != "with files" || len(posts[0].Attachments) != 1 || posts[1].Text != "text only" {
 		t.Fatalf("owner posts: %+v", posts)
+	}
+}
+
+// The owner's post to @root is addressed to the room, and it belongs to the
+// root seat's conversation: root's DM draws the stored post, so an attached
+// screenshot shows there.
+func TestSessionPostsHoldThePostTheOwnerSentToTheSeat(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	store := e.svc.Notify.Rooms
+	shot, err := store.PutAttachment(rec.ID, "screenshot.png", []byte("\x89PNG\r\n\x1a\n screenshot"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inputs := []room.PostInput{
+		{From: rec.Name, Human: true, To: []string{rec.Name}, Via: []string{"@root"}, Text: "What happened here?", Attachments: []room.Attachment{shot}},
+		{From: rec.Name, Human: true, To: []string{rec.Name}, Via: []string{"@" + rec.Name + ":root"}, Text: "And now?"},
+		{From: "alpha:peer", To: []string{rec.Name}, Text: "A report to the owner"},
+	}
+	for _, input := range inputs {
+		if _, err := store.Post(rec.ID, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	msgs, err := store.Messages(rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	book := e.svc.avatars(rec.ID)
+	posts, err := e.svc.sessionPosts(rec, msgs, "", "alpha:root", time.Time{}, time.Time{}, book)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posts) != 2 || posts[0].Text != "What happened here?" || len(posts[0].Attachments) != 1 || posts[0].Attachments[0].ID != shot.ID || posts[1].Text != "And now?" {
+		t.Fatalf("seat posts: %+v", posts)
+	}
+	media, err := e.svc.sessionMedia(rec, msgs, "", "alpha:root", book)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(media) != 1 || media[0].Attachments[0].ID != shot.ID {
+		t.Fatalf("seat media: %+v", media)
+	}
+	// A worker session keeps the posts addressed to it, not the seat's.
+	posts, err = e.svc.sessionPosts(rec, msgs, "", "alpha:lead", time.Time{}, time.Time{}, book)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posts) != 0 {
+		t.Fatalf("worker posts: %+v", posts)
+	}
+}
+
+// A turn item names the post that carried it. A post the page window left out
+// still belongs to the message, so its attachments reach the DM.
+func TestSessionPostsHoldThePostOfATurnItemOutsideThePage(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("alpha")
+	store := e.svc.Notify.Rooms
+	shot, err := store.PutAttachment(rec.ID, "screenshot.png", []byte("\x89PNG\r\n\x1a\n screenshot"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ask, err := store.Post(rec.ID, room.PostInput{From: rec.Name, Human: true, To: []string{"alpha:lead"}, Text: "Look", Attachments: []room.Attachment{shot}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	book := e.svc.avatars(rec.ID)
+	// The DM page starts after the post, and only its turn item still names it.
+	items := []Item{{Kind: "prompt", PostID: ask.ID, Text: "Look", From: rec.Name + " (human)"}}
+	posts, err := e.svc.withItemPosts(rec, nil, "lead", "alpha:lead", []Turn{{N: 1, Items: items}}, book)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posts) != 1 || posts[0].ID != ask.ID || len(posts[0].Attachments) != 1 {
+		t.Fatalf("item posts: %+v", posts)
 	}
 }
 
