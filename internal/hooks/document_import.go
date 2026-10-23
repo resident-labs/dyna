@@ -3,6 +3,7 @@ package hooks
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -40,4 +41,13 @@ func (s Service) importDocuments(conn *sql.Conn) error {
 		}
 	}
 	return nil
+}
+
+// TODO: legacy/shim remove later — decodes retained hook sources only during migration.
+func decodeLegacyDocument(path string, raw []byte) (document, error) {
+	var d document
+	if err := json.Unmarshal(raw, &d); err != nil {
+		return d, fmt.Errorf("invalid hook configuration in %s: %w", path, err)
+	}
+	return d, nil
 }
