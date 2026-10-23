@@ -1,6 +1,7 @@
 // The web client calls the server API with JSON arguments.
 
 import { createTransport } from './lib/api/transport.ts'
+import { createTerminalTransport } from './lib/api/terminalTransport.ts'
 import { openStream } from './lib/api/stream.ts'
 
 function readConfig() {
@@ -26,36 +27,8 @@ export { renew, authenticatedFetch, onUnauthorized, onRenewed, connectSession, c
 // The HTTP side of a call: app.Rooms() posts [] to /api/Rooms.
 const app = new Proxy({}, { get: (_, name) => (...args) => post(`/api/${String(name)}`, args) })
 
-// termWrite sends terminal input in order: one write per terminal at a
-// time, and keys typed while a write is in flight join the next write. On
-// the web each write is its own request, and two in flight can arrive at
-// the host swapped. It resolves when the bytes reached the host.
-const termQueues = new Map()
-function termWrite(id, base64) {
-  let q = termQueues.get(id)
-  if (!q) {
-    q = { pending: [], busy: false }
-    termQueues.set(id, q)
-  }
-  const done = new Promise((resolve, reject) => q.pending.push({ base64, resolve, reject }))
-  if (!q.busy) drainTerm(id, q)
-  return done
-}
-
-async function drainTerm(id, q) {
-  q.busy = true
-  while (q.pending.length) {
-    const batch = q.pending.splice(0)
-    try {
-      await app.TermWrite(id, btoa(batch.map((b) => atob(b.base64)).join('')))
-      for (const b of batch) b.resolve()
-    } catch (e) {
-      for (const b of batch) b.reject(e)
-    }
-  }
-  q.busy = false
-  termQueues.delete(id)
-}
+const { termWrite, termAttach } = createTerminalTransport(app, authenticatedFetch)
+export { termAttach }
 
 export const api = {
 
@@ -372,98 +345,4 @@ export function cardURL(roomId, id) {
     cards.set(key, { url: ref.url, expires: Date.parse(ref.expires) })
     return ref.url
   })
-}
-
-// termAttach sends {id,data,start,offset,reset?,exited,exitCode} to output.
-// data is base64 raw PTY bytes. Return the detach function on view unmount;
-// detaching never closes the shell. Byte offsets prevent duplicate output.
-export async function termAttach(id, output, after = 0) {
-  let stopped = false
-  let cursor = after
-  let controller = null
-  let retryTimer = null
-  let wakeRetry = () => {}
-  const sleep = (ms) => new Promise((resolve) => { wakeRetry = resolve; retryTimer = setTimeout(resolve, ms) })
-  const accept = (ev) => {
-    if (stopped || ev.id !== id) return
-    // An out-of-order event may overlap the initial scrollback.
-    if (!ev.reset && ev.offset < cursor) return
-    if (!ev.reset && ev.start < cursor) {
-      const raw = atob(ev.data || '')
-      ev = { ...ev, data: btoa(raw.slice(cursor - ev.start)), start: cursor }
-    }
-    if (ev.data || ev.exited || ev.reset) output(ev)
-    cursor = ev.offset
-    if (ev.exited) stopped = true
-  }
-  const detach = () => {
-    stopped = true
-    controller?.abort()
-    clearTimeout(retryTimer)
-    wakeRetry()
-  }
-
-  // A stream held by a proxy falls back to bounded snapshot calls. The
-  // terminal keeps running while either transport reconnects.
-  let polling = false
-  const run = async () => {
-    let wait = 500
-    while (!stopped) {
-      let helloTimer = null
-      try {
-        if (polling) {
-          accept(await app.TermAttach(id, cursor))
-          if (!stopped) await sleep(250)
-          continue
-        }
-        controller = new AbortController()
-        helloTimer = setTimeout(() => { polling = true; controller.abort() }, 6000)
-        const response = await authenticatedFetch('/api/terminal/attach', {
-          method: 'POST', credentials: 'same-origin', signal: controller.signal,
-          headers: { 'Content-Type': 'application/json', 'X-Dyna': '1' },
-          body: JSON.stringify({ id, after: cursor }),
-        })
-        if (!response.ok) {
-          const error = await response.json().catch(() => null)
-          // Missing terminals and auth refusal are final, rather than a
-          // network interruption that should retry forever.
-          if (response.status >= 400 && response.status < 500) {
-            output({ id, data: '', start: cursor, offset: cursor, exited: true, exitCode: -1, error: error?.error })
-            stopped = true
-            return
-          }
-          throw new Error(error?.error || `HTTP ${response.status}`)
-        }
-        const reader = response.body.getReader()
-        const decoder = new TextDecoder()
-        let buffer = ''
-        try {
-          while (!stopped) {
-            const { value, done } = await reader.read()
-            if (done) break
-            buffer += decoder.decode(value, { stream: true })
-            let end
-            while ((end = buffer.indexOf('\n\n')) !== -1) {
-              const frame = buffer.slice(0, end)
-              buffer = buffer.slice(end + 2)
-              if (frame.includes('event: hello')) { clearTimeout(helloTimer); wait = 500 }
-              else if (!frame.includes('event: ping')) {
-                const line = frame.split('\n').find((s) => s.startsWith('data: '))
-                if (line) accept(JSON.parse(line.slice(6)))
-              }
-            }
-          }
-        } finally { await reader.cancel().catch(() => {}) }
-      } catch (error) {
-        // Snapshot calls also need backoff when a polling connection fails.
-        if (String(error).includes('no such terminal')) {
-          output({ id, data: '', start: cursor, offset: cursor, exited: true, exitCode: -1, error: String(error) })
-          stopped = true
-        } else if (!stopped && polling) await sleep(1000)
-      } finally { clearTimeout(helloTimer) }
-      if (!stopped && !polling) { await sleep(wait); wait = Math.min(wait * 2, 5000) }
-    }
-  }
-  run()
-  return detach
 }
