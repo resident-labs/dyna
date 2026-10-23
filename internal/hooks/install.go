@@ -302,13 +302,24 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) erro
 	if line := lastLogLine(run.LogPath); line != "" {
 		detail += ": " + line
 	}
-	if file, err := os.OpenFile(run.LogPath, os.O_APPEND|os.O_WRONLY, 0600); err == nil {
-		_, _ = fmt.Fprintln(file, detail)
-		_ = file.Close()
+	writeDetail := func() {
+		if file, err := os.OpenFile(run.LogPath, os.O_APPEND|os.O_WRONLY, 0600); err == nil {
+			_, _ = fmt.Fprintln(file, detail)
+			_ = file.Close()
+		}
 	}
-	if main == "" {
+	if run.Repo == globalKey {
 		// A global built-in hook belongs to no repository and no room, so its
 		// run ends in the hook store that the Hooks screen reads.
+		writeDetail()
+		run.Result, run.FinishedAt = "error", now
+		_, err := s.saveRun(ctx, run)
+		return err
+	}
+	if main == "" {
+		// A repository run whose checkout is gone has no room to post in, so it
+		// ends in the hook store too.
+		writeDetail()
 		run.Result, run.FinishedAt = "error", now
 		_, err := s.saveRun(ctx, run)
 		return err
@@ -346,6 +357,9 @@ func (s Service) settleLeftRun(ctx context.Context, run Run, now time.Time) erro
 	if err := s.postEvent(ev, hookEvent(ev, h, run, room.HookError, detail), false); err != nil {
 		return err
 	}
+	// The reason joins the log only once the card is posted, so a failed post
+	// leaves the log as the run left it.
+	writeDetail()
 	_, err := s.saveRun(ctx, run)
 	return err
 }
