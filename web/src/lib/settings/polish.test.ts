@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const read = (p: string): string => readFileSync(new URL(p, import.meta.url), 'utf8')
+// The Harnesses pane and the section components that now hold its markup.
+const harnessSections = (): string => ['HarnessesPane', 'HarnessTabs', 'HarnessList', 'InstallControls', 'AccountsSection', 'ProvidersSection', 'SettingsImportSection', 'HarnessToolsSection', 'ToolsTab'].map((f) => read(`./harnesses/${f}.svelte`)).join('\n')
 
 test('every settings loading line with an unknown layout is the shared muted Loading element', () => {
   const files = ['ProfileModal', 'ProfileWizard', 'harnesses/HarnessesPane', 'usage/UsagePane', 'usage/LocalActivity']
@@ -18,11 +20,14 @@ test('every settings loading line with an unknown layout is the shared muted Loa
 })
 
 test('empty lists in the settings panes use EmptyState', () => {
-  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane', 'harnesses/HarnessesPane', 'usage/UsagePane', 'usage/ActivityReport']) {
+  for (const f of ['ProfilesPane', 'DevicesPane', 'HooksPane', 'usage/UsagePane', 'usage/ActivityReport']) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /<EmptyState\b/, f)
     assert.doesNotMatch(text, /class="empty"/, f)
   }
+  const harnesses = harnessSections()
+  assert.match(harnesses, /<EmptyState\b/)
+  assert.doesNotMatch(harnesses, /class="empty"/)
 })
 
 test('Usage tabs use the shared filter-chip look', () => {
@@ -68,11 +73,14 @@ test('switching a settings pane fades and lifts the new pane in, with no exit wa
 
 test('section labels share one global class', () => {
   assert.match(read('../ui/tokens.css'), /\.section-label \{[^}]*text-transform: uppercase/)
-  for (const f of ['SettingsPane', 'DevicesPane', 'Settings', 'harnesses/HarnessesPane']) {
+  for (const f of ['SettingsPane', 'DevicesPane', 'Settings']) {
     const text = read(`./${f}.svelte`)
     assert.match(text, /<h3 class="section-label"/, f)
     assert.doesNotMatch(text, /\n\s*(\.sec )?h3 \{/, f)
   }
+  const harnesses = harnessSections()
+  assert.match(harnesses, /<h3 class="section-label"/)
+  assert.doesNotMatch(harnesses, /\n\s*(\.sec )?h3 \{/)
 })
 
 test('settings buttons use the one global .btn', () => {
@@ -93,7 +101,7 @@ test('settings buttons use the one global .btn', () => {
 })
 
 test('Harnesses uses the shared Switch, which keeps its size on phones', () => {
-  const pane = read('./harnesses/HarnessesPane.svelte')
+  const pane = harnessSections()
   assert.match(pane, /import Switch from '..\/..\/ui\/Switch\.svelte'/)
   assert.doesNotMatch(pane, /class="sw"|\.sw\b/)
   const sw = read('../ui/Switch.svelte')
@@ -124,11 +132,12 @@ test('removing one row asks inline, not in a dialog', () => {
   const inline = read('../ui/InlineConfirm.svelte')
   assert.match(inline, /btn danger/)
   assert.match(inline, /btn quiet/)
-  for (const f of ['DevicesPane', 'HooksPane', 'harnesses/HarnessesPane']) assert.match(read(`./${f}.svelte`), /<InlineConfirm\b/, f)
+  for (const f of ['DevicesPane', 'HooksPane']) assert.match(read(`./${f}.svelte`), /<InlineConfirm\b/, f)
+  assert.match(harnessSections(), /<InlineConfirm\b/)
   assert.doesNotMatch(read('./HooksPane.svelte'), /<Confirm\b/)
-  assert.doesNotMatch(read('./harnesses/HarnessesPane.svelte'), /requestRemoveTool/)
+  assert.doesNotMatch(harnessSections(), /requestRemoveTool/)
   // Harnesses has no local copy of the inline confirm: no coral button or Cancel of its own.
-  const harnesses = read('./harnesses/HarnessesPane.svelte')
+  const harnesses = harnessSections()
   assert.doesNotMatch(harnesses, /<button class="btn danger"/)
   assert.doesNotMatch(harnesses, /\(removing = ''\)\}>Cancel</)
   assert.match(harnesses, /ask="Uninstall Dyna’s copy\?"/)
