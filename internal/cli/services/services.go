@@ -507,8 +507,8 @@ func NewCommand() *cobra.Command {
 		Short: "List and manage Dyna's services: the librarian, the PR reviewers and Voice",
 		Long: "A service is not a session in the room's hierarchy: the librarian, the PR reviewers\n" +
 			"and Voice never appear in `dyna room members`, `@children` or a parent check-in.\n" +
-			"This command is the only place to read or change one.\n\n" +
-			"Change a service's profile here, never as part of a bulk move of sessions.",
+			"Read or change one here or on the app's Services page.\n\n" +
+			"Change a service's profile here or there, never as part of a bulk move of sessions.",
 		Args: cobra.NoArgs,
 		RunE: func(c *cobra.Command, _ []string) error { return c.Help() },
 	}

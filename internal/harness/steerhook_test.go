@@ -21,7 +21,7 @@ import (
 
 const envTestSteerHookDir = "DYNA_TEST_STEER_HOOK_DIR"
 
-// TestMain lets the test binary act as `dyna hook steer` for fake harness
+// TestMain lets the test binary act as `dyna harness-hook steer` for fake harness
 // CLIs, and keeps every other test on the interrupt path (their fake CLIs
 // know nothing about hooks).
 func TestMain(m *testing.M) {
@@ -134,13 +134,13 @@ func mustHookArgv(t *testing.T, hook *steerHook, args []string) []string {
 }
 
 func TestSteerHookArgv(t *testing.T) {
-	codex := &steerHook{harness: profile.HarnessCodex, command: `'/bin/dyna' hook steer --dir '/tmp/x'`}
+	codex := &steerHook{harness: profile.HarnessCodex, command: `'/bin/dyna' harness-hook steer --dir '/tmp/x'`}
 	got := strings.Join(mustHookArgv(t, codex, []string{"codex", "-c", "features.memories=false", "app-server"}), " ")
-	want := `codex -c hooks.PostToolUse=[{matcher="*",hooks=[{type="command",command="'/bin/dyna' hook steer --dir '/tmp/x'",timeout=10}]}] --dangerously-bypass-hook-trust -c features.memories=false app-server`
+	want := `codex -c hooks.PostToolUse=[{matcher="*",hooks=[{type="command",command="'/bin/dyna' harness-hook steer --dir '/tmp/x'",timeout=10}]}] --dangerously-bypass-hook-trust -c features.memories=false app-server`
 	if got != want {
 		t.Fatalf("codex argv:\n got %s\nwant %s", got, want)
 	}
-	muse := &steerHook{harness: profile.HarnessMuse, dir: t.TempDir(), command: "dyna hook steer"}
+	muse := &steerHook{harness: profile.HarnessMuse, dir: t.TempDir(), command: "dyna harness-hook steer"}
 	got = strings.Join(mustHookArgv(t, muse, []string{"muse", "exec", "--json", "--session-id", "s", "do it"}), " ")
 	path, _ := json.Marshal(filepath.Join(muse.dir, "hooks.json"))
 	want = "muse exec -c hooks={} -c managed_hooks_path=" + string(path) + " -c managed_hooks_env_vars=[] --json --session-id s do it"
@@ -164,7 +164,7 @@ func TestSteerHookArgv(t *testing.T) {
 // that uses it, and the deny command prints the decision Muse documents.
 func TestMuseManagedHooksDenyNativeMemory(t *testing.T) {
 	dir := t.TempDir()
-	mustHookArgv(t, &steerHook{harness: profile.HarnessMuse, dir: dir, command: "dyna hook steer", steer: true}, []string{"muse", "exec", "hi"})
+	mustHookArgv(t, &steerHook{harness: profile.HarnessMuse, dir: dir, command: "dyna harness-hook steer", steer: true}, []string{"muse", "exec", "hi"})
 	raw, err := os.ReadFile(filepath.Join(dir, "hooks.json"))
 	if err != nil {
 		t.Fatal(err)

@@ -24,7 +24,7 @@ import (
 	clidoctor "dyna-agent/internal/cli/doctor"
 	cligit "dyna-agent/internal/cli/git"
 	"dyna-agent/internal/cli/goal"
-	"dyna-agent/internal/cli/hook"
+	"dyna-agent/internal/cli/harnesshook"
 	"dyna-agent/internal/cli/interactive"
 	"dyna-agent/internal/cli/journal"
 	clilibrary "dyna-agent/internal/cli/library"
@@ -128,6 +128,11 @@ func dropInheritedJournalPin(args []string) {
 	_ = os.Unsetenv(runstore.AgentJournalRootEnv)
 }
 
+// newRootCommand builds the command tree. The verbs follow one convention, so a
+// reader can tell what ends and what erases: stop ends running work (a turn)
+// and leaves the session open; close ends a session; cancel abandons queued or
+// in-flight work; delete and remove erase data; drop sets a goal or item state
+// and erases nothing.
 func newRootCommand() *cobra.Command {
 	resolvedVersion := versioncmd.Resolve(version)
 	// The engine and the CLI send their build on every call.
@@ -173,7 +178,7 @@ func newRootCommand() *cobra.Command {
 		machine.NewCommand(),
 		computer.NewBrowserCommand(),
 		computer.NewDaemonCommand(),
-		hook.NewCommand(),
+		harnesshook.NewCommand(),
 		clilibrary.NewCommand(),
 		interactive.NewGuideCommand(),
 		workflows.NewDemoCommand(),
