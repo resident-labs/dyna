@@ -1,7 +1,6 @@
 package subagent
 
 import (
-	"fmt"
 	"log"
 	"path/filepath"
 	"time"
