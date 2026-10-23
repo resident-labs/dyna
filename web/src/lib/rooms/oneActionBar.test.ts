@@ -170,7 +170,7 @@ test('tapping DM message A and then B leaves only B with a bar', async () => {
 
 test('the feed and DMs draw no post bar for a PR post, and the bar has no CSS hover or focus rules', () => {
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
-  assert.match(read('./Feed.svelte'), /p\.kind !== 'pr'\}<PostActions/)
+  assert.match(read('./Feed.svelte'), /p\.kind !== 'pr' && !sealedEvent\(p\)\}<PostActions/)
   assert.match(read('../sessions/DmMessage.svelte'), /row\.post\.kind !== 'pr'\}<PostActions/)
   // A session renders one DmRows per row and a thread of DmMessages; each list shares one selection.
   const session = read('../sessions/Session.svelte')

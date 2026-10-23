@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/worktrees"
 )
@@ -58,13 +59,11 @@ func TestLifecycleCleansOnlySafeOwnedWorktrees(t *testing.T) {
 			e.joinRunners()
 			info, _ := e.start("RESPOND: ready SLEEP:1")
 			info = waitFixtureTurn(t, e, info)
-			recipient, kind, parentID := info.Room, "notice", ""
+			parent := info
 			if child {
-				parent := info
 				stampParent(t, parent)
 				info, _ = e.start("RESPOND: child SLEEP:1")
 				info = waitFixtureTurn(t, e, info)
-				recipient, kind, parentID = parent.Address(), "message", parent.ID
 			}
 			root := t.TempDir()
 			v := settings.Defaults()
@@ -105,87 +104,67 @@ func TestLifecycleCleansOnlySafeOwnedWorktrees(t *testing.T) {
 			}
 			found := 0
 			for _, p := range posts {
-				if strings.Contains(p.Text, "Worktree cleanup kept:") {
+				if p.Kind == string(room.FamilyWorktree) {
 					found++
-					if p.Kind != kind || len(p.To) != 1 || p.To[0] != recipient {
-						t.Fatalf("wrong cleanup delivery: %+v", p)
+					if p.From != room.EngineSender || p.Wake || len(p.To) != 1 || p.To[0] != info.Address() || p.Deliverable() {
+						t.Fatalf("worktree notice must be quiet, from the engine, to the owner session only: %+v", p)
 					}
-					if !strings.Contains(p.Text, dirty.Path) || !strings.Contains(p.Text, ahead.Path) || !strings.Contains(p.Text, "ahead 1") || !strings.Contains(p.Text, "untracked") {
-						t.Fatalf("missing kept path: %s", p.Text)
+					kept, ok := p.Worktree()
+					if !ok || kept.Path != dirty.Path && kept.Path != ahead.Path {
+						t.Fatalf("notice payload names no kept tree: %+v", p.Payload)
 					}
+					if kept.Reason != room.WorktreeDirty && kept.Reason != room.WorktreeNotMerged {
+						t.Fatalf("notice reason = %q", kept.Reason)
+					}
+				}
+				if strings.Contains(p.Text, "Worktree cleanup kept:") {
+					t.Fatalf("untyped cleanup text: %+v", p)
 				}
 			}
-			if found != 1 {
-				t.Fatalf("cleanup reports=%d", found)
+			if found != 2 {
+				t.Fatalf("cleanup notices=%d, want one per kept tree", found)
 			}
-			if parentID != "" {
-				parent, done := e.wait(parentID, 2)
-				if done.Status != TurnOK {
-					t.Fatalf("parent report turn: %+v", done)
-				}
-				if pending, err := e.m.pendingRoomWork(parent.Meta); err != nil || pending {
-					t.Fatalf("report not acknowledged: pending=%v, err=%v", pending, err)
-				}
-				if _, err := e.m.Store.UpdateMeta(parentID, func(meta *Meta) {
-					meta.LastActivity, meta.Finished = time.Now().Add(-time.Hour), time.Now().Add(-time.Hour)
-					meta.Status = StatusDormant
-				}); err != nil {
-					t.Fatal(err)
-				}
-				e.doneGoals()
-				clearStamp(t) // The engine runs the dormant sweep as the owner.
-				result, err := closeIdle(e.m, e.ctx, info.RoomID)
-				if err != nil || result.Succeeded != 1 {
-					t.Fatalf("parent dormant clear: %+v, %v", result, err)
-				}
-				meta, err := e.m.Store.ReadMeta(parentID)
-				if err != nil || meta.Closed.IsZero() {
-					t.Fatalf("parent remains open: %+v, %v", meta, err)
+			if child {
+				if meta, err := e.m.Store.ReadMeta(parent.ID); err != nil || meta.Turns != 1 {
+					t.Fatalf("cleanup notice woke the parent: %+v, %v", meta, err)
 				}
 			}
 		})
 	}
 }
 
-func TestWorktreeReportsUseOwnerForDepthOneOrClosedParent(t *testing.T) {
-	for _, staleDepth := range []bool{false, true} {
-		t.Run(map[bool]string{false: "closed-parent", true: "depth-one"}[staleDepth], func(t *testing.T) {
-			e := newTestEnv(t)
-			e.joinRunners()
-			parent, _ := e.start("SLEEP:1 RESPOND: parent")
-			parent, _ = e.wait(parent.ID, 1)
-			stampParent(t, parent)
-			child, _ := e.start("SLEEP:1 RESPOND: child")
-			child, _ = e.wait(child.ID, 1)
-			if staleDepth {
-				child.Depth = 1
-			} else {
-				if _, err := e.m.Store.UpdateMeta(parent.ID, func(meta *Meta) { meta.Closed = time.Now() }); err != nil {
-					t.Fatal(err)
-				}
-			}
-			e.m.reportKeptWorktrees(child, "branch feature, ahead 1")
-			posts, err := e.m.rooms().Messages(child.RoomID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			found := false
-			for _, post := range posts {
-				if strings.HasPrefix(post.Text, "Worktree cleanup kept:") {
-					found = true
-					if post.Kind != "notice" || len(post.To) != 1 || post.To[0] != child.Room {
-						t.Fatalf("owner report: %+v", post)
-					}
-				}
-			}
-			if !found {
-				t.Fatal("missing owner notice")
-			}
-			meta, err := e.m.Store.ReadMeta(parent.ID)
-			if err != nil || meta.Turns != 1 {
-				t.Fatalf("owner notice woke parent: %+v, %v", meta, err)
-			}
-		})
+// A kept tree is reported once per tree and reason, to its owner session,
+// even when a later pass finds it again. The reviewer that closes is not the
+// sender, and the post never wakes anyone.
+func TestKeptWorktreeNoticeIsPostedOnce(t *testing.T) {
+	e := newTestEnv(t)
+	e.joinRunners()
+	owner, _ := e.start("SLEEP:1 RESPOND: owner")
+	owner, _ = e.wait(owner.ID, 1)
+	closing, _ := e.start("SLEEP:1 RESPOND: closing")
+	closing, _ = e.wait(closing.ID, 1)
+	k := keptTree{Owner: owner.ID, Path: "/w/feature", Branch: "feature", Ahead: 1, Reason: "HEAD is not merged into origin/main; cleanup kept it"}
+	for range 3 {
+		e.m.reportKeptWorktree(closing, k)
+	}
+	k.Ahead = 2 // the same tree and reason, new facts
+	e.m.reportKeptWorktree(closing, k)
+	posts, err := e.m.rooms().Messages(closing.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []room.Message
+	for _, p := range posts {
+		if p.Kind == string(room.FamilyWorktree) {
+			got = append(got, p)
+		}
+	}
+	if len(got) != 1 || got[0].From != room.EngineSender || len(got[0].To) != 1 || got[0].To[0] != owner.Address() || got[0].Wake {
+		t.Fatalf("kept notices = %+v", got)
+	}
+	kept, ok := got[0].Worktree()
+	if !ok || kept.Owner != owner.ID || kept.Path != "/w/feature" || kept.Reason != room.WorktreeNotMerged || kept.Ahead != 1 {
+		t.Fatalf("kept payload = %+v, %v", kept, ok)
 	}
 }
 
@@ -238,82 +217,6 @@ func TestFinishedKeepsCleanWorktreeUntilClose(t *testing.T) {
 	lifecycleGit(t, repo, "show-ref", "--verify", "refs/heads/done-tree")
 }
 
-func TestWorktreeReportWaitsForEngine(t *testing.T) {
-	e := newTestEnv(t)
-	e.joinRunners()
-	parent, _ := e.start("SLEEP:1 RESPOND: parent")
-	parent, _ = e.wait(parent.ID, 1)
-	stampParent(t, parent)
-	child, _ := e.start("SLEEP:1 RESPOND: child")
-	child, _ = e.wait(child.ID, 1)
-	runner := e.m.Spawner
-	e.m.Spawner = failedTransferSpawner{}
-	e.m.reportKeptWorktrees(child, "branch feature, path /work, ahead 1, dirty files: changed.go")
-	posts, err := e.m.rooms().Messages(child.RoomID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	found := false
-	for _, post := range posts {
-		if post.Wake && post.Addressed(parent.Address()) && strings.Contains(post.Text, "Worktree cleanup kept:") {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("queued parent report is missing: %+v", posts)
-	}
-	meta, _ := e.m.Store.ReadMeta(parent.ID)
-	if meta.Turns != 1 {
-		t.Fatal("reporting process started a turn")
-	}
-	e.m.Spawner = runner
-	if _, err := e.m.TickSessions(e.ctx); err != nil {
-		t.Fatal(err)
-	}
-	_, turn := e.wait(parent.ID, 2)
-	if len(turn.Steering) != 1 || !turn.Steering[0].Delivered {
-		t.Fatalf("engine did not deliver the report: %+v", turn)
-	}
-}
-
-func TestQueuedWorktreeReportProtectsDormantParent(t *testing.T) {
-	e := roomControlEnv(t)
-	parent, _ := e.start("SLEEP:1 RESPOND: parent")
-	parent, _ = e.wait(parent.ID, 1)
-	stampParent(t, parent)
-	child, _ := e.start("SLEEP:1 RESPOND: child")
-	child, _ = e.wait(child.ID, 1)
-	if _, err := e.m.Close(e.ctx, child.ID); err != nil {
-		t.Fatal(err)
-	}
-	awaitWorktreeCleanup(t, e.m)
-	e.m.Spawner = failedTransferSpawner{}
-	e.m.reportKeptWorktrees(child, "branch feature, ahead 1")
-	parent, err := e.m.Store.Info(parent.ID)
-	if err != nil || parent.Status != StatusIdle {
-		t.Fatalf("parent did not stay idle: %+v, %v", parent, err)
-	}
-	pending, err := e.m.pendingRoomMessages(parent.Meta)
-	if err != nil || len(pending) != 1 {
-		t.Fatalf("queued report was lost: %+v, %v", pending, err)
-	}
-	if _, err := e.m.Store.UpdateMeta(parent.ID, func(meta *Meta) {
-		meta.LastActivity, meta.Finished = time.Now().Add(-time.Hour), time.Now().Add(-time.Hour)
-		meta.Status = StatusDormant
-	}); err != nil {
-		t.Fatal(err)
-	}
-	e.doneGoals()
-	if _, err := closeIdle(e.m, e.ctx, parent.RoomID); err != nil {
-		t.Fatal(err)
-	}
-	meta, err := e.m.Store.ReadMeta(parent.ID)
-	if err != nil || !meta.Closed.IsZero() {
-		t.Fatalf("dormant clear discarded a queued report: %+v, %v", meta, err)
-	}
-}
-
-// awaitWorktreeCleanup waits until the close cleanup worker leaves.
 func awaitWorktreeCleanup(t *testing.T, m *Manager) {
 	t.Helper()
 	if left := m.workers().Wait(5 * time.Second); len(left) > 0 {

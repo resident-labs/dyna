@@ -78,6 +78,11 @@ func WakesRoot(msg Message, roomName string) bool {
 	if !msg.Addressed(roomName) && !msg.Addressed(roomName+":"+RootAgent) || msg.From == roomName+":"+RootAgent {
 		return false
 	}
+	// A registered event follows its spec. Only WakeNever is registered today:
+	// a family that does wake someone arrives with its rule in a later PR.
+	if spec, ok := eventSpecFor(msg.Kind, msg.Notice.Kind); ok && spec.Wake == WakeNever {
+		return false
+	}
 	switch msg.Kind {
 	case "", "message", "notice":
 		return msg.NeedsRoot || msg.Human || OwnerRequest(msg, roomName) || msg.Source == SourceVoice

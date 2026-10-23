@@ -726,7 +726,7 @@ func TestSessionCompletionSpillFailurePostsFallbackAndRetryIsSafe(t *testing.T) 
 // post stores nothing. The original keeps its kind, so every kind forwards.
 func TestPostForwardsAnyKindAndRejectsUnknownPost(t *testing.T) {
 	f := newFixture(t)
-	for _, kind := range []string{"", "completed", "pr", "question"} {
+	for _, kind := range []string{"", "completed", "pr", "goal"} {
 		orig, err := f.svc.Rooms.Post(f.a.ID, room.PostInput{From: f.a.Name + ":decoder", Kind: kind, To: []string{f.a.Name}, Text: "original " + kind})
 		if err != nil {
 			t.Fatal(err)
