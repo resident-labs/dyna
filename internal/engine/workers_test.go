@@ -67,7 +67,7 @@ func TestWorkersStartupStoreEventsSafetyAndDailySweep(t *testing.T) {
 		w.run(ctx, signals, set, func(string, error) { t.Error("unexpected worker error") })
 	}()
 	defer func() { cancel(); <-done }()
-	awaitWorker(t, calls, "prs", "goals", "questions", "sweep", "hooks", "sessions", "merges", "instructions", "sync", "fetch")
+	awaitWorker(t, calls, "prs", "checkins", "questions", "sweep", "hooks", "sessions", "merges", "instructions", "sync", "fetch")
 	// The daily sweep's deadline counts from when it is set, so the clock
 	// moves only after both sweep timers exist.
 	awaitTimer(t, set, timerSafetySweep)
@@ -82,7 +82,7 @@ func TestWorkersStartupStoreEventsSafetyAndDailySweep(t *testing.T) {
 		if kind == "prs" {
 			awaitWorker(t, calls, "prs", "merges")
 		} else if kind == "goals" {
-			awaitWorker(t, calls, "goals", "prs", "merges")
+			awaitWorker(t, calls, "prs", "merges")
 		} else {
 			awaitWorker(t, calls, kind)
 		}
@@ -100,7 +100,7 @@ func TestWorkersStartupStoreEventsSafetyAndDailySweep(t *testing.T) {
 	clock.advance(safetySweepEvery - 3*time.Second - instructionRecheck - time.Second)
 	expectNoWorker(t, calls)
 	clock.advance(time.Second)
-	awaitWorker(t, calls, "goals", "sessions", "instructions", "questions", "hooks", "prs", "merges", "sync")
+	awaitWorker(t, calls, "checkins", "sessions", "instructions", "questions", "hooks", "prs", "merges", "sync")
 	for _, worker := range []string{"sessions", "questions", "hooks"} {
 		if !signals.takeSweep(worker) {
 			t.Fatalf("the safety sweep did not mark the %s pass", worker)
@@ -139,82 +139,6 @@ func awaitTimer(t *testing.T, set *timers, key string) {
 
 func expectNoWorker(t *testing.T, calls <-chan string) {
 	t.Helper()
-	select {
-	case name := <-calls:
-		t.Fatalf("extra %s tick", name)
-	default:
-	}
-}
-
-func TestBlockedKeeperDoesNotDelayPRQuestionsOrSweep(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	signals := newWorkerSignals()
-	started := make(chan struct{})
-	release := make(chan struct{})
-	calls := make(chan string, 16)
-	keeperCalls := 0
-	w := testWorkers(func(name string) func(context.Context) error {
-		return func(context.Context) error { calls <- name; return nil }
-	})
-	w.goals = func(ctx context.Context) (time.Time, error) {
-		keeperCalls++
-		if keeperCalls == 1 {
-			close(started)
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return time.Time{}, ctx.Err()
-			}
-		}
-		calls <- "goals"
-		return time.Time{}, nil
-	}
-	clock := newFakeClock()
-	set := clock.timers(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		w.run(ctx, signals, set, func(string, error) { t.Error("unexpected error") })
-	}()
-	defer func() { cancel(); <-done }()
-	select {
-	case <-started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("keeper did not start")
-	}
-	awaitWorker(t, calls, "prs", "questions", "sweep", "hooks", "sessions", "merges", "instructions", "sync", "fetch")
-	// Store events run promptly while the keeper remains blocked.
-	signals.wake(roomsvc.Event{Kind: "prs", WorkerWake: true})
-	signals.wake(roomsvc.Event{Kind: "questions", WorkerWake: true})
-	awaitWorker(t, calls, "prs", "questions", "merges")
-	// The question event checks instruction notes a few seconds later.
-	awaitTimer(t, set, timerInstructionsRecheck)
-	clock.advance(instructionRecheck)
-	awaitWorker(t, calls, "instructions")
-	// Timed work also runs without waiting for the keeper.
-	awaitTimer(t, set, timerSafetySweep)
-	clock.advance(safetySweepEvery - instructionRecheck)
-	awaitWorker(t, calls, "sessions", "instructions", "questions", "hooks", "prs", "merges", "sync")
-	set.stop(timerSafetySweep)
-	clock.advance(sweepEvery - safetySweepEvery)
-	awaitWorker(t, calls, "sweep")
-	// Repeated keeper wakes coalesce into the one pending pass. Goal event
-	// routing to the PR and merge workers is covered separately.
-	for i := 0; i < 100; i++ {
-		wakeWorker(signals.channels["goals"])
-	}
-	close(release)
-	awaitWorker(t, calls, "goals")
-	awaitWorker(t, calls, "goals")
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("worker shutdown blocked")
-	}
-	if keeperCalls != 2 {
-		t.Fatalf("keeper ran %d times, want 2", keeperCalls)
-	}
 	select {
 	case name := <-calls:
 		t.Fatalf("extra %s tick", name)
@@ -287,7 +211,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	first := run(ctx, "first")
-	awaitWorker(t, calls, "first-prs", "first-goals", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch")
+	awaitWorker(t, calls, "first-prs", "first-checkins", "first-questions", "first-sweep", "first-hooks", "first-sessions", "first-merges", "first-instructions", "first-sync", "first-fetch")
 	// A second engine on the same store runs no workers at all.
 	secondCtx, cancelSecond := context.WithCancel(context.Background())
 	secondDone := make(chan bool, 1)
@@ -320,7 +244,7 @@ func TestOneWorkerOwnerPerStore(t *testing.T) {
 	// takes over the store workers.
 	ctx, cancel = context.WithCancel(context.Background())
 	third := run(ctx, "third")
-	awaitWorker(t, calls, "third-prs", "third-goals", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch")
+	awaitWorker(t, calls, "third-prs", "third-checkins", "third-questions", "third-sweep", "third-hooks", "third-sessions", "third-merges", "third-instructions", "third-sync", "third-fetch")
 	cancel()
 	stop(third, "third")
 	select {
@@ -366,7 +290,7 @@ func TestEngineHookWorkerDrainsStartupSpoolOnce(t *testing.T) {
 	idle := func(context.Context) error { return nil }
 	w.sweep, w.sessions = idle, idle
 	idleTimed := func(context.Context) (time.Time, error) { return time.Time{}, nil }
-	w.goals, w.questions, w.prs = idleTimed, idleTimed, idleTimed
+	w.checkins, w.questions, w.prs = idleTimed, idleTimed, idleTimed
 	signals := newWorkerSignals()
 	done := make(chan struct{})
 	go func() {
@@ -599,34 +523,6 @@ func TestEngineProfileChangeArmsItsNote(t *testing.T) {
 	clock.advance(3 * time.Second)
 	awaitWorker(t, calls, "instructions")
 	expectNoWorker(t, calls)
-}
-
-// The goal keeper is woken when its next check-in is due.
-func TestGoalKeeperWakesAtItsNextCheckIn(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	calls := make(chan string, 32)
-	w := testWorkers(nil)
-	clock := newFakeClock()
-	due := clock.Now().Add(30 * time.Second)
-	w.goals = func(context.Context) (time.Time, error) {
-		calls <- "goals"
-		next := due
-		due = time.Time{}
-		return next, nil
-	}
-	set := clock.timers(ctx)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		w.run(ctx, newWorkerSignals(), set, func(string, error) { t.Error("unexpected worker error") })
-	}()
-	defer func() { cancel(); <-done }()
-	awaitWorker(t, calls, "goals")
-	awaitTimerAt(t, set, clock, timerGoals, clock.Now().Add(30*time.Second))
-	clock.advance(29 * time.Second)
-	expectNoWorker(t, calls)
-	clock.advance(time.Second)
-	awaitWorker(t, calls, "goals")
 }
 
 // The lane fetch runs at its own due time, not on the minute wake.
