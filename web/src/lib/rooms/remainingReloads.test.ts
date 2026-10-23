@@ -13,6 +13,7 @@ import { applyEvent, openedApps, pushAction, type Computer } from '../computers/
 import { hasItemChange } from '../ui/listChanges.ts'
 import { createReloadGate, listVisible, reconcileRows } from '../ui/reloadGate.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
+import { inRoomFeed } from './feedViews.ts'
 import { call, runFunctions, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 import { need } from '../../../test/need.ts'
 import { member } from '../../../test/session-fixtures.ts'
@@ -95,6 +96,7 @@ function sessionDataFor(api: unknown, hooks: unknown) {
 function appFunctions(c: AppState, names: string[]): void {
   c.hasItemChange = hasItemChange
   c.reloadsUnread = reloadsUnread
+  c.inRoomFeed = inRoomFeed
   if (names.includes('handle') && !names.includes('applyItemEvent')) names = ['applyItemEvent', ...names]
   c.changesVisuals = changesVisuals
   for (const [k, v] of Object.entries({ mergeVersion: 0, routedParents: "", feed: null, roomId: "" })) if (!(k in c)) c[k] = v
