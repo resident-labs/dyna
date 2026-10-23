@@ -27,28 +27,30 @@ func TestSchedulerHourlyAndPressureEpisodes(t *testing.T) {
 		runs++
 		return Result{BytesFreed: 42, Kept: map[string]int{"dirty": 2}}, nil
 	}
-	alert := func(text string) error {
+	alert := func(n notices.Notice) error {
 		alerts++
-		if !strings.Contains(text, "42 bytes") || !strings.Contains(text, "dirty: 2") {
-			t.Fatal(text)
+		// The notice carries the low path with its free space and what the
+		// pass kept, as typed facts the card reads.
+		if n.Kind != notices.KindDisk || n.Disk == nil || len(n.Disk.Paths) != 1 || n.Disk.Paths[0].Path != "/tmp" {
+			t.Fatalf("disk notice = %+v", n)
 		}
-		if !strings.Contains(text, "Disk space is low in /tmp") {
-			t.Fatalf("the alert must name the low path: %s", text)
+		if n.Disk.FreedBytes != 42 || len(n.Disk.Kept) != 1 || n.Disk.Kept[0] != "dirty: 2" {
+			t.Fatalf("disk facts = %+v", n.Disk)
 		}
 		return nil
 	}
 	for _, tick := range []struct {
 		after        time.Duration
-		low          []string
+		low          []lowDisk
 		runs, alerts int
 	}{
 		{0, nil, 1, 0},
 		{time.Minute, nil, 1, 0},
-		{2 * time.Minute, []string{"/tmp"}, 2, 1},
-		{3 * time.Minute, []string{"/tmp"}, 2, 1},
-		{62 * time.Minute, []string{"/tmp"}, 3, 1},
+		{2 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 2, 1},
+		{3 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 2, 1},
+		{62 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 3, 1},
 		{63 * time.Minute, nil, 3, 1},
-		{64 * time.Minute, []string{"/tmp"}, 4, 2},
+		{64 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 4, 2},
 	} {
 		if err := s.tick(context.Background(), now.Add(tick.after), tick.low, run, alert); err != nil {
 			t.Fatal(err)
@@ -64,18 +66,18 @@ func TestSchedulerReportsPartialFailureOnce(t *testing.T) {
 	calls := 0
 	failure := errors.New("partial cleanup")
 	run := func(context.Context) (Result, error) { return Result{BytesFreed: 7}, failure }
-	alert := func(text string) error {
+	alert := func(n notices.Notice) error {
 		calls++
-		if !strings.Contains(text, "Some maintenance failed") {
-			t.Fatal(text)
+		if n.Disk == nil || !n.Disk.MaintenanceFailed {
+			t.Fatalf("failed pass is not a failed disk fact: %+v", n)
 		}
 		return nil
 	}
 	now := time.Now()
-	if err := s.tick(context.Background(), now, []string{"/tmp"}, run, alert); !errors.Is(err, failure) {
+	if err := s.tick(context.Background(), now, []lowDisk{{Path: "/tmp"}}, run, alert); !errors.Is(err, failure) {
 		t.Fatal(err)
 	}
-	if err := s.tick(context.Background(), now.Add(time.Minute), []string{"/tmp"}, run, alert); err != nil {
+	if err := s.tick(context.Background(), now.Add(time.Minute), []lowDisk{{Path: "/tmp"}}, run, alert); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 {
@@ -193,14 +195,22 @@ func TestDiscoverDeduplicatesLinkedTreesAndScopesSession(t *testing.T) {
 
 func TestOwnerAlertPostsDiskNotice(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	for _, text := range []string{"Disk space is low.", "Disk space is low again."} {
-		if err := ownerAlert(text); err != nil {
+	for _, free := range []int64{2048, 1024} {
+		n := notices.Notice{
+			Key: "disk", Kind: notices.KindDisk, Severity: notices.SeverityError,
+			Disk: &notices.DiskFacts{Paths: []notices.DiskPath{{Path: "/tmp", FreeBytes: free}}},
+		}
+		if err := ownerAlert(n); err != nil {
 			t.Fatal(err)
 		}
 	}
 	list, err := notices.DefaultStore().List()
-	if err != nil || len(list) != 1 || list[0].Kind != "disk" || list[0].Severity != "error" || list[0].Text != "Disk space is low again." {
+	if err != nil || len(list) != 1 || list[0].Kind != notices.KindDisk || list[0].Severity != notices.SeverityError {
 		t.Fatalf("notices = %+v, %v", list, err)
+	}
+	// One notice per key, with the newest facts, and its line built from them.
+	if list[0].Disk == nil || list[0].Disk.Paths[0].FreeBytes != 1024 || list[0].Line() == "" {
+		t.Fatalf("notice = %+v", list[0])
 	}
 }
 

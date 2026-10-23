@@ -268,15 +268,22 @@ func lowSpace(s space, minFree uint64) bool {
 	return s.Free < minFree
 }
 
+// lowDisk is one location measured below the free-space floor, with the free
+// space it has left.
+type lowDisk struct {
+	Path      string
+	FreeBytes int64
+}
+
 type scheduler struct {
 	lastRun  time.Time
 	pressure bool
-	// low holds the paths of the last check that ran, which a later check
+	// low holds the locations of the last check that ran, which a later check
 	// that cannot run keeps.
-	low []string
+	low []lowDisk
 }
 
-func (s *scheduler) tick(ctx context.Context, now time.Time, low []string, run func(context.Context) (Result, error), alert func(string) error) error {
+func (s *scheduler) tick(ctx context.Context, now time.Time, low []lowDisk, run func(context.Context) (Result, error), alert func(notices.Notice) error) error {
 	pressure := len(low) > 0
 	firstPressure := pressure && !s.pressure
 	s.pressure = pressure
@@ -287,19 +294,27 @@ func (s *scheduler) tick(ctx context.Context, now time.Time, low []string, run f
 	s.lastRun = now
 	result, err := run(ctx)
 	if firstPressure {
-		text := fmt.Sprintf("Disk space is low in %s. Maintenance freed %d bytes.", strings.Join(low, ", "), result.BytesFreed)
+		paths := make([]notices.DiskPath, len(low))
+		for i, l := range low {
+			paths[i] = notices.DiskPath{Path: l.Path, FreeBytes: l.FreeBytes}
+		}
 		reasons := make([]string, 0, len(result.Kept))
 		for reason, count := range result.Kept {
 			reasons = append(reasons, fmt.Sprintf("%s: %d", reason, count))
 		}
 		sort.Strings(reasons)
-		if len(reasons) > 0 {
-			text += " Items kept: " + strings.Join(reasons, "; ") + "."
-		}
-		if err != nil {
-			text += " Some maintenance failed; see the host log."
-		}
-		err = errors.Join(err, alert(text))
+		err = errors.Join(err, alert(notices.Notice{
+			Key:      "disk",
+			Kind:     notices.KindDisk,
+			Severity: notices.SeverityError,
+			Disk: &notices.DiskFacts{
+				Paths:             paths,
+				FreedBytes:        result.BytesFreed,
+				Kept:              reasons,
+				MaintenanceFailed: err != nil,
+			},
+			Command: "dyna maintenance run",
+		}))
 	}
 	return err
 }
@@ -366,7 +381,7 @@ func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleH
 			}
 		}
 		v, err := settings.Load("")
-		var low []string
+		var low []lowDisk
 		if err == nil && v.WorktreesMinFreeBytes > 0 {
 			root, rootErr := worktrees.ManagedRoot()
 			err = rootErr
@@ -381,7 +396,7 @@ func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleH
 					continue
 				}
 				if lowSpace(measured, uint64(v.WorktreesMinFreeBytes)) {
-					low = append(low, path)
+					low = append(low, lowDisk{Path: path, FreeBytes: int64(measured.Free)})
 				}
 			}
 		}
@@ -417,8 +432,8 @@ func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleH
 	}
 }
 
-func ownerAlert(text string) error {
-	_, err := notices.DefaultStore().Post(notices.Notice{Key: "disk", Kind: "disk", Severity: "error", Text: text})
+func ownerAlert(n notices.Notice) error {
+	_, err := notices.DefaultStore().Post(n)
 	return err
 }
 
