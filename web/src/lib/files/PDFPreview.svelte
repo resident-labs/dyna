@@ -4,6 +4,37 @@
   let { roomId, att } = $props()
   let pdf = $state.raw(null)
   let page = $state(1)
+  let pageInput = $state('1')
+  let jumpError = $state('')
+  const jumpErrorId = $props.id()
+  $effect(() => { pageInput = String(page); jumpError = '' })
+  function parsePageInput(value, total) {
+    const text = value.trim()
+    if (!/^\d+$/.test(text)) return null
+    const number = Number(text)
+    return Number.isSafeInteger(number) && number >= 1 && number <= total ? number : null
+  }
+  function jump(event) {
+    event.preventDefault()
+    if (!pdf) return
+    const number = parsePageInput(pageInput, pages)
+    if (number === null) {
+      jumpError = `Enter a whole page number from 1 to ${pages}.`
+      return
+    }
+    page = number
+    pageInput = String(number)
+    jumpError = ''
+  }
+  function inputKey(event) {
+    if (event.isComposing) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      pageInput = String(page)
+      jumpError = ''
+    }
+  }
   let pages = $state(0)
   let busy = $state(true)
   let error = $state('')
@@ -82,11 +113,16 @@
   <div class="tools">
     <div class="paging">
       <button onclick={() => page--} disabled={!pdf || page <= 1} aria-label="Previous page">←</button>
-      <span>Page {page} of {pages || '…'}</span>
+      <form class="page-jump" onsubmit={jump}>
+        <label>Page <input data-esc aria-label="Page number" aria-invalid={!!jumpError} aria-describedby={jumpError ? jumpErrorId : undefined} type="text" inputmode="numeric" enterkeyhint="go" bind:value={pageInput} onkeydown={inputKey} oninput={() => jumpError = ''} disabled={!pdf} /></label>
+        <span>of {pages || '…'}</span>
+        <button disabled={!pdf}>Go</button>
+      </form>
       <button onclick={() => page++} disabled={!pdf || page >= pages} aria-label="Next page">→</button>
     </div>
     <button class:active={textView} onclick={() => textView = !textView} disabled={!pdf} aria-pressed={textView}>Text view</button>
   </div>
+  {#if jumpError}<p class="error jump-error" id={jumpErrorId} role="alert">{jumpError}</p>{/if}
   {#if error}<p class="error" role="alert">{error}</p>{/if}
   <div class="pages" aria-busy={busy}>
     {#if busy}<p class="status" role="status">Loading page…</p>{/if}
@@ -97,8 +133,13 @@
 
 <style>
   .pdf { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-  .tools { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font-size: 12px; }
-  .paging { display: flex; align-items: center; gap: 14px; font-variant-numeric: tabular-nums; }
+  .tools { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line-soft); color: var(--muted); font-size: 12px; }
+  .paging { display: flex; align-items: center; gap: var(--s1); font-variant-numeric: tabular-nums; }
+  .page-jump, .page-jump label { display: flex; align-items: center; gap: var(--s1); }
+  .page-jump input { width: 5ch; min-width: 44px; padding: 5px; border: 1px solid var(--line); border-radius: var(--r-xs); background: var(--side); color: var(--ink); text-align: center; font: inherit; }
+  .page-jump input:focus { outline-color: var(--iris); }
+  .jump-error { margin: var(--s2) var(--s4); }
+  @media (max-width: 760px) { .tools { padding: var(--s2); gap: var(--s1); } .tools button, .page-jump input { min-height: 44px; } .page-jump input { font-size: 16px; } }
   button { padding: 5px 10px; border-radius: 5px; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     button:hover { background: var(--hover); color: var(--ink); }
