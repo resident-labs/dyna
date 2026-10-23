@@ -152,7 +152,7 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 		req.Repo = req.RepoDir
 	}
 	if r.Node != nil {
-		return r.runNode(ctx, req)
+		return r.runNodeWithDiskRetry(ctx, req)
 	}
 	suites := append([]string(nil), req.Suites...)
 	if len(suites) == 0 {
@@ -329,6 +329,10 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 				if errors.As(e, &exit) && exit.ExitCode() != 255 && exit.ExitCode() != 75 && exit.ExitCode() != 124 && exit.ExitCode() != 137 && suiteCtx.Err() == nil {
 					sr.Status = "failed"
 				}
+			}
+			// A full disk on the machine is not a failing test.
+			if sr.Status == "failed" && diskFull(sr.LogTail+"\n"+sr.Error) {
+				sr.Status, sr.Error = "error", "check ran out of disk space on the CI machine"
 			}
 			if suite == "frontend" {
 				frontendOK = e == nil

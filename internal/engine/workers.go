@@ -15,6 +15,7 @@ import (
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/lanesync"
+	"dyna-agent/internal/localci"
 	"dyna-agent/internal/machines"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/room"
@@ -58,6 +59,7 @@ func newWorkerSignals() *workerSignals {
 		"sessions": make(chan struct{}, 1), "merges": make(chan struct{}, 1),
 		"sync": make(chan struct{}, 1), "instructions": make(chan struct{}, 1),
 		"fetch": make(chan struct{}, 1), "probe": make(chan struct{}, 1),
+		"caches": make(chan struct{}, 1),
 	}, sweeps: map[string]bool{}}
 }
 
@@ -254,6 +256,8 @@ type workers struct {
 	checkins, instructions, fetch, questions, hooks, prs, merges, sync func(context.Context) (time.Time, error)
 	// probe reads every enabled machine, and returns when to read them again.
 	probe func(context.Context) (time.Time, error)
+	// caches cleans the own CI caches of a CI machine once a day.
+	caches func(context.Context) (time.Time, error)
 }
 
 func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub) workers {
@@ -307,7 +311,10 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 		merges:   prs.MergeTick,
 		sync:     prs.SyncTick,
 		probe:    func(ctx context.Context) (time.Time, error) { return probeMachines(ctx, load) },
-		fetch:    func(ctx context.Context) (time.Time, error) { return syncer.Tick(ctx, time.Now()) },
+		caches: func(ctx context.Context) (time.Time, error) {
+			return localci.CleanCachesTick(ctx, store.DataDir())
+		},
+		fetch: func(ctx context.Context) (time.Time, error) { return syncer.Tick(ctx, time.Now()) },
 		instructions: func(ctx context.Context) (time.Time, error) {
 			return rooms.Notify.Sessions.FlushInstructionNotes(ctx, time.Now())
 		},
@@ -425,6 +432,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	sweep := make(chan struct{}, 1)
 	timed("PR watcher", signals.channels["prs"], timerPRs, w.prs)
 	timed("Merge service", signals.channels["merges"], timerMerges, w.merges)
+	timed("CI cache cleanup", signals.channels["caches"], timerCaches, w.caches)
 	timed("Parent check-ins", signals.channels["checkins"], timerParentCheckins, w.checkins)
 	timed("Question delivery", signals.channels["questions"], timerQuestions, w.questions)
 	timed("Machine probe", signals.channels["probe"], timerProbe, w.probe)
@@ -454,7 +462,7 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	daily = func() { wakeWorker(sweep); t.at(timerSweep, t.now().Add(sweepEvery), daily) }
 	// Catch writes made while the engine was down.
 	signals.recoverSessions()
-	wake("checkins", "instructions", "fetch", "questions", "hooks", "prs", "merges", "sync", "probe")
+	wake("checkins", "instructions", "fetch", "questions", "hooks", "prs", "merges", "sync", "probe", "caches")
 	wakeWorker(sweep)
 	t.at(timerSafetySweep, t.now().Add(safetySweepEvery), safety)
 	t.at(timerSweep, t.now().Add(sweepEvery), daily)
