@@ -13,8 +13,12 @@ Each session has one status. Use the status from the session record or member li
 A normal turn moves from idle to queued, then running, then idle. A failed or stopped
 turn also returns the open session to idle.
 
-Closing transfers PR authorship and held goals to the nearest open ancestor, or root.
+Closing transfers PR authorship and held goals to the nearest open ancestor.
 It releases reviewer roles, cancels live workflows, and reports the handoff.
+Root and the owner hold no goals, so close is refused when only they are left above
+the session, and a forced close does not move the goals to the owner. Root asks the
+owner about the blocker with `dyna ask` when only the owner can clear it, then the
+goal is finished, dropped, or handed to an open agent.
 A failed handoff keeps the session open unless force close is chosen.
 
 A turn that ends with no responsibilities makes the session dormant. Its goals, PRs,

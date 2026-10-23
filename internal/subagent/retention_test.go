@@ -68,6 +68,7 @@ func TestRetainClosedSessionKeepsConsolidationSources(t *testing.T) {
 	if err != nil || source.Closed.IsZero() || source.ConsumedBy != a.ID {
 		t.Fatalf("source after consolidation = %+v, %v; want closed and consumed by %s", source, err, a.ID)
 	}
+	e.doneGoal(plain)
 	if _, err := e.m.CloseWithOptions(e.ctx, plain.ID, CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}

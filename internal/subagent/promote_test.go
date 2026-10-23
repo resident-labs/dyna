@@ -111,6 +111,7 @@ func TestPromoteRunningSessionAndLiveHierarchy(t *testing.T) {
 	if !frame.Delivered || !strings.Contains(frame.Message, "DYNA HIERARCHY CHANGED") || !strings.Contains(frame.Message, "depth 1") || !strings.Contains(frame.Message, "@parent = @root") {
 		t.Fatalf("live hierarchy = %+v", frame)
 	}
+	e.doneGoal(child)
 	if _, err := e.m.Close(e.ctx, child.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -125,6 +126,7 @@ func TestPromoteInvalidAndClosed(t *testing.T) {
 	}
 	info, _ := e.start("SLEEP:1 RESPOND: done")
 	e.wait(info.ID, 1)
+	e.doneGoal(info)
 	if _, err := e.m.CloseWithOptions(e.ctx, info.ID, CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +152,7 @@ func TestCloseHandsChildrenUpAndKeepsPRGuard(t *testing.T) {
 	if unchanged, _ := e.m.Store.ReadMeta(child.ID); unchanged.Depth != 2 || unchanged.ParentSession != lead.ID {
 		t.Fatal("guard mutated child")
 	}
+	e.doneGoal(lead)
 	if _, err := e.m.CloseWithOptions(e.ctx, lead.ID, CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}
@@ -208,6 +211,7 @@ func TestChildCreationRejectsMissingOrClosedParent(t *testing.T) {
 	e := newTestEnv(t)
 	parent, _ := e.start("SLEEP:1 RESPOND: done")
 	e.wait(parent.ID, 1)
+	e.doneGoal(parent)
 	if _, err := e.m.CloseWithOptions(e.ctx, parent.ID, CloseOptions{Force: true}); err != nil {
 		t.Fatal(err)
 	}

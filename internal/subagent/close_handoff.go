@@ -40,27 +40,39 @@ func (m *Manager) closeHeir(info Info) (Info, error) {
 	return Info{}, nil
 }
 
+// errGoalNeedsRoot marks a held goal that no open agent can take. Root and the
+// owner hold no goals, so a close refuses this goal with or without --force.
+var errGoalNeedsRoot = errors.New("goal has no open agent to hold it")
+
 // refuseGoalsForTopHeir refuses a close whose heir is root, or the owner when
-// no ancestor is open. The message names each open goal with the commands that
-// resolve it, so the caller finishes, drops or transfers the work first. PR
-// roles and other responsibilities still move up as before.
+// no ancestor is open. It reads the heir itself; use refuseGoalsForHeir when
+// the caller already holds one.
 func (m *Manager) refuseGoalsForTopHeir(info Info) error {
-	held, err := m.goalOwned(map[string]Info{info.ID: info})
-	if err != nil || len(held) == 0 {
-		return nil
-	}
 	heir, err := m.closeHeir(info)
 	if err != nil {
 		return err
 	}
+	return m.refuseGoalsForHeir(info, heir)
+}
+
+// refuseGoalsForHeir refuses held goals that heir cannot keep working. Root
+// and the owner hold no goals, so such a goal would have nobody to work it.
+// The message names each open goal with the commands that resolve it, and
+// tells root to ask the owner when only the owner can unblock the work. A
+// forced close refuses for the same reason.
+func (m *Manager) refuseGoalsForHeir(info, heir Info) error {
 	if heir.ID != "" && heir.Role != RoleRoot {
+		return nil
+	}
+	held, err := m.goalOwned(map[string]Info{info.ID: info})
+	if err != nil || len(held) == 0 {
 		return nil
 	}
 	goals := make([]Responsibility, len(held))
 	for i, o := range held {
 		goals[i] = o.r
 	}
-	return fmt.Errorf("%w\nRoot and the owner take no goals: run one command above for each goal, or close with --force to move them to the owner.", responsibilityError("close", goals))
+	return fmt.Errorf("%w\nRoot and the owner hold no goals, so a forced close keeps the work here instead of handing it to them. If only the owner can unblock a goal, ask the owner first with dyna ask. Then run one command above for each goal, or hand it to an open session.", responsibilityError("close", goals))
 }
 
 // handoffClose runs after the turn stops and new assignments are fenced off.
@@ -89,15 +101,10 @@ func (m *Manager) handoffClose(ctx context.Context, info, heir Info) ([]string, 
 			if m.checkpoint != nil {
 				m.checkpoint("close-before-goal-handoff")
 			}
-			// Root and the owner take no goals, so a goal that would reach them is
-			// released to the owner instead.
+			// A goal moves only to a live agent. Root and the owner hold no
+			// goals, so a goal that would reach them is refused, never assigned.
 			if heir.ID == "" || heir.Role == RoleRoot {
-				released, err := m.goalStore().ReleaseHolder(info.RoomID, item.ID, info.ID)
-				if err != nil {
-					errs = append(errs, err)
-				} else if released {
-					summary = append(summary, "Goal "+item.ID+" → the owner")
-				}
+				errs = append(errs, fmt.Errorf("%w: %s; ask the owner with dyna ask, then drop or finish it, or hand it to an open agent", errGoalNeedsRoot, item.ID))
 				continue
 			}
 			moved, err := m.goalStore().HandoffHolder(info.RoomID, item.ID, info.ID, heir.ID)

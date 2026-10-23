@@ -156,7 +156,8 @@ func (m *Manager) closeGoals(info Info, heir string) {
 	open := map[string]bool{}
 	if sessions, err := m.store().List(false); err == nil {
 		for _, s := range sessions {
-			// Root receives no hand-off, so the goal stays with the owner.
+			// Root holds no goals, so a goal with no other live session left
+			// is dropped with a note instead of waiting for an owner.
 			if s.RoomID == info.RoomID && s.Role != RoleRoot {
 				open[s.ID] = true
 			}
