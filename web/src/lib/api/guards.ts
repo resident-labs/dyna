@@ -232,6 +232,8 @@ export function parseAppEvent(raw: unknown): AppEvent | null {
       return { kind: 'rooms' }
     case 'notices':
       return { kind: 'notices' }
+    case 'machines':
+      return { kind: 'machines' }
     case 'resync':
       return { kind: 'resync' }
     case 'posts': {
