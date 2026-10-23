@@ -270,6 +270,7 @@
   let machineDetail = $state<MachineDetail | null>(null)
   let machineError = $state('')
   let machineBusy = $state(false)
+  let machineProbing = $state(false)
   let machineRequest = 0
   function machinesVisible() { return pageVisible && machinesNav && (narrow ? navOpen : showSide) }
   function machineVisible() { return pageVisible && machineId !== '' }
@@ -282,7 +283,7 @@
     if (!list && !page) return
     const tick = () => {
       if (list) loadMachines()
-      if (page && !machineBusy) loadMachine(machineId)
+      if (page && !machineBusy && !machineProbing) loadMachine(machineId)
     }
     tick()
     const timer = setInterval(tick, LOAD_POLL_MS)
@@ -338,6 +339,32 @@
       if (machineId === id) machineError = errorText(e)
     } finally {
       machineBusy = false
+    }
+  }
+  // probeMachine reads the open machine now and shows its next health. A probe
+  // that could not reach the machine says so in the page's status; the toast
+  // words the result in one line and never repeats the engine's error text.
+  async function probeMachine() {
+    const id = machineId
+    if (!id || machineBusy || machineProbing) return
+    machineProbing = true
+    machineError = ''
+    // A read that started before this probe may not land after it.
+    machineRequest++
+    const name = machineDetail?.name ?? 'The machine'
+    try {
+      const detail = await api.probeMachine(id)
+      if (machineId === id) machineDetail = detail
+      loadMachines()
+      if (detail.status === 'online') {
+        say({ tone: 'success', subject: `Probed ${detail.name}` })
+      } else {
+        say({ tone: 'error', subject: `${name} did not answer the probe`, text: 'Check the SSH route, then probe again.' })
+      }
+    } catch {
+      if (machineId === id) say({ tone: 'error', subject: `Could not probe ${name}` })
+    } finally {
+      machineProbing = false
     }
   }
   // SavedFeed is the feed the page keeps: the server's page plus the client's history flag.
@@ -2662,7 +2689,7 @@
           <p class="load-err">{loadError}</p>
         {/if}
         {#if !roomId && machineId}
-          <MachinePage machine={machineDetail} error={machineError} busy={machineBusy} onback={closeMachine} onagent={openAgent} onsave={saveMachine} />
+          <MachinePage machine={machineDetail} error={machineError} busy={machineBusy} probing={machineProbing} onback={closeMachine} onagent={openAgent} onsave={saveMachine} onprobe={probeMachine} />
         {:else if !roomId}
           <Home bind:this={home} {rooms} {update} onroom={selectRoom} onaccount={(id: string) => openSettings('usage', false, '', id)} />
         {:else if !room}

@@ -1,21 +1,36 @@
-import type { MachineCIRun, MachineRole, MachineStatus, MachineSummary } from '../api/machine.ts'
+import type { MachineCIRun, MachineCapabilities, MachineDetail, MachineLoad, MachineRole, MachineStatus, MachineStatusReason, MachineSummary } from '../api/machine.ts'
 
 // roleLabel is the short name a role chip shows.
 export function roleLabel(role: MachineRole): string {
   return role === 'ci' ? 'CI' : role
 }
 
-// statusText words a machine's status for a title or a row.
+// statusText words a machine's status for a title or a row. A degraded machine
+// works, but it needs attention.
 export function statusText(status: MachineStatus): string {
   switch (status) {
     case 'online':
       return 'Online'
+    case 'degraded':
+      return 'Degraded'
     case 'disabled':
       return 'Disabled'
     case 'offline':
       return 'Offline'
     default:
       return 'Not probed'
+  }
+}
+
+// reasonText words why a machine is degraded. It is a designed line, never the
+// probe's own message. Below the disk floor the scheduler starts no CI on the
+// machine, so the line says what stops.
+export function reasonText(reason: MachineStatusReason | undefined): string {
+  switch (reason) {
+    case 'low-disk':
+      return 'Low disk space. Dyna starts no new CI here until space is freed.'
+    default:
+      return 'The machine still works, but it needs attention.'
   }
 }
 
@@ -63,6 +78,7 @@ export function statusCounts(machines: readonly MachineSummary[]): { status: Mac
   const of = (status: MachineStatus) => machines.filter((m) => m.status === status).length
   return [
     { status: 'online', n: of('online') },
+    { status: 'degraded', n: of('degraded') },
     { status: 'disabled', n: of('disabled') },
     { status: 'offline', n: of('offline') },
     { status: 'unknown', n: of('unknown') },
@@ -74,7 +90,7 @@ export function statusCounts(machines: readonly MachineSummary[]): { status: Mac
 export function machinesSub(machines: readonly MachineSummary[] | null): string {
   if (!machines) return ''
   if (!machines.length) return 'No machines yet'
-  const words: Record<MachineStatus, string> = { online: 'online', disabled: 'disabled', offline: 'offline', unknown: 'not probed' }
+  const words: Record<MachineStatus, string> = { online: 'online', degraded: 'degraded', disabled: 'disabled', offline: 'offline', unknown: 'not probed' }
   return statusCounts(machines)
     .filter((c) => c.n > 0)
     .map((c) => `${c.n} ${words[c.status]}`)
@@ -91,4 +107,67 @@ export function loadPct(machine: MachineSummary): number | null {
 export function routeText(machine: Pick<MachineSummary, 'local'> & { ssh: string }): string {
   if (machine.local) return 'This machine'
   return machine.ssh || 'No route yet'
+}
+
+const GIB = 2 ** 30
+
+// sizeText words a byte count the way the load card does: "30.5 GiB".
+export function sizeText(bytes: number): string {
+  return `${(bytes / GIB).toFixed(1)} GiB`
+}
+
+// versionText words a Dyna version for a dense row. The row already says Dyna,
+// so the "dyna " prefix goes, and a Go pseudo-version shows the tag it builds
+// on: "v0.4.3 (dev)". The caller keeps the whole string in the row's title.
+export function versionText(version: string): string {
+  const bare = version.replace(/^dyna\s+/i, '')
+  const pseudo = bare.match(/^(v?\d+\.\d+\.\d+)?-0\.\d{14}-[0-9a-f]+$/)
+  if (pseudo) return pseudo[1] ? `${pseudo[1]} (dev)` : 'dev'
+  return bare
+}
+
+// systemText is the machine's own system in one line: "Linux · 16 CPUs · 30.5
+// GiB". It leaves out what the probe could not read.
+export function systemText(caps: MachineCapabilities): string {
+  const parts: string[] = []
+  const system = [caps.os, caps.arch].filter(Boolean).join(' · ')
+  if (system) parts.push(system)
+  if (caps.cpus > 0) parts.push(count(caps.cpus, 'CPU'))
+  if (caps.memTotal > 0) parts.push(sizeText(caps.memTotal))
+  return parts.join(' · ')
+}
+
+// runtimeText names the container runtimes a machine has.
+export function runtimeText(containers: readonly string[] | undefined): string {
+  if (!containers?.length) return 'None'
+  return containers.map((c) => (c === 'docker' ? 'Docker' : c === 'podman' ? 'Podman' : c)).join(' and ')
+}
+
+// computersText words the computer capability. wayvnc only shows a desktop in
+// the app, so a machine without it still runs computers.
+export function computersText(caps: Pick<MachineCapabilities, 'computers' | 'stream'>): string {
+  if (!caps.computers) return 'No'
+  return caps.stream ? 'Yes, and shows its desktop' : 'Yes'
+}
+
+// memoryPct is a machine's used memory for its bar, or null when the probe
+// read no total.
+export function memoryPct(load: Pick<MachineLoad, 'memTotal' | 'memAvailable'>): number | null {
+  if (!load.memTotal) return null
+  const used = load.memTotal - load.memAvailable
+  return Math.max(0, Math.min(100, (used / load.memTotal) * 100))
+}
+
+// loadText is a machine's free memory, next to its bar.
+export function loadText(load: Pick<MachineLoad, 'memAvailable'>): string {
+  if (!load.memAvailable) return ''
+  return `${sizeText(load.memAvailable)} free`
+}
+
+// diskText words a machine's free disk space, and the floor Dyna keeps for CI
+// work on it. It is empty when the probe read no free space.
+export function diskText(caps: Pick<MachineCapabilities, 'freeDisk' | 'diskFloor'>): string {
+  if (caps.freeDisk === undefined) return ''
+  const free = `${sizeText(caps.freeDisk)} free`
+  return caps.diskFloor ? `${free} · needs ${sizeText(caps.diskFloor)}` : free
 }

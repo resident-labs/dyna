@@ -60,6 +60,11 @@ var LongCalls = map[string]time.Duration{
 	"NewWorktree": 10 * time.Minute,
 	"GCWorktrees": 2 * time.Minute, "RemoveWorktrees": 2 * time.Minute,
 	"PruneWorktrees": 2 * time.Minute, "ApplyRunWorktreeDisposition": 2 * time.Minute,
+	// A machine probe waits for one SSH connection: the prober allows 20 s in
+	// all, with a 10 s connect limit, and then stores what it read. With the
+	// 5 s default the request deadline cancels a slow probe before it can
+	// record that the machine is offline.
+	"ProbeMachine": 30 * time.Second,
 	// Merge recovery can delete trial branches, build a retry, or publish a
 	// passed trial through git and GitHub. Keep the existing synchronous CLI
 	// behavior until item 8 moves slow work into jobs.

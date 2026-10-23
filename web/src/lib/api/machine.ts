@@ -9,8 +9,13 @@ export type MachineRole = 'engine' | 'agents' | 'ci'
 
 // MachineStatus is what the engine knows about a machine right now.
 // "disabled" means switched off in the registry, "offline" means the probe
-// could not reach it, and "unknown" means the engine has not probed it yet.
-export type MachineStatus = 'online' | 'disabled' | 'offline' | 'unknown'
+// could not reach it, "degraded" means it answered but needs attention, such
+// as low free disk space, and "unknown" means no probe has run yet.
+export type MachineStatus = 'online' | 'degraded' | 'disabled' | 'offline' | 'unknown'
+
+// MachineStatusReason names why a machine is degraded. The page words it, so a
+// probe message never reaches the screen.
+export type MachineStatusReason = 'low-disk'
 
 // MachineCISlots is the CI work this machine runs now, out of its slots.
 export interface MachineCISlots {
@@ -44,8 +49,8 @@ export interface MachineSummary {
   // ciSlots is the machine's setting; ci is its use now, which the CI work
   // reports in a later version.
   ciSlots: number
-  // cpu is the machine's share of its cores in percent, known for this
-  // engine's machine only.
+  // cpu is the machine's share of its cores in percent: live for this engine's
+  // machine, and the last probe reading for a remote one.
   cpu?: number
   agents?: number
   computers?: number
@@ -78,6 +83,47 @@ export interface MachineDetail extends MachineSummary {
   // ciRuns lists the CI runs in flight on this machine, so the page shows what
   // it checks now. Their slots add up to ci.used.
   ciRuns?: MachineCIRun[]
+  // probedAt is when the engine last read this machine, and seenAt when a probe
+  // last reached it. Both are absent before the first probe. A failed probe
+  // keeps the capabilities and load of the last good one.
+  probedAt?: string
+  seenAt?: string
+  capabilities?: MachineCapabilities
+  load?: MachineLoad
+  // statusReason names why a degraded machine needs attention.
+  statusReason?: MachineStatusReason
+}
+
+// MachineCapabilities is what the last probe read about a machine. Memory
+// values are bytes.
+export interface MachineCapabilities {
+  os: string
+  arch: string
+  cpus: number
+  memTotal: number
+  memAvailable: number
+  gpu: boolean
+  // containers names the container runtimes the machine has, in the order
+  // Dyna prefers them. Absent means none.
+  containers?: string[]
+  // computers is whether a computer can run on the machine, which needs labwc
+  // and Xwayland. stream is whether wayvnc can show its desktop in the app.
+  computers: boolean
+  stream: boolean
+  // freeDisk is the free space on the machine's disk in bytes. It is absent
+  // when the probe could not read it. diskFloor is the free space Dyna keeps
+  // for CI work on the machine; below it, no CI starts there.
+  freeDisk?: number
+  diskFloor?: number
+}
+
+// MachineLoad is the last load reading of a machine. cpuPercent is absent when
+// the probe could not take two readings.
+export interface MachineLoad {
+  cpuPercent?: number
+  loadAvg: [number, number, number]
+  memTotal: number
+  memAvailable: number
 }
 
 // MachinePatch is a change to one machine. An absent field keeps its value.
