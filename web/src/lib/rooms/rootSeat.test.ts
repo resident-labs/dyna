@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
 import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { installRouterShim } from '../../../test/appRouterShim.ts'
 import { seatDMConversation } from './conversations.ts'
 
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
@@ -80,6 +81,8 @@ function app(rootSeat: RootSeat) {
     api: { send: async (...a: unknown[]) => { calls.push(['send', ...a]); return {} }, sendToSession: async (...a: unknown[]) => { calls.push(['sendToSession', ...a]); return {} }, profile: async () => ({}) },
   }
   vm.createContext(context)
+  // The screen state lives in the router now, so the sliced functions write through it.
+  installRouterShim(context)
   vm.runInContext(stripTypes(code), context)
   const fns = vm.runInContext('({ openMember, openSession, sendToSession, showSession })', context) as Pick<SeatApp, 'openMember' | 'openSession' | 'sendToSession' | 'showSession'>
   return { context: Object.assign(context, fns), calls }

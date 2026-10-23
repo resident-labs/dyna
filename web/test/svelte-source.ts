@@ -1,6 +1,7 @@
 import vm from 'node:vm'
 import { transformSync } from 'esbuild'
 import { parse } from 'svelte/compiler'
+import ts from 'typescript'
 
 // Tests run slices of component source in a vm context, and vm runs JavaScript only.
 // esbuild strips the types of a lang="ts" slice; plain JavaScript passes through unchanged.
@@ -27,6 +28,21 @@ export function topLevelFunctions(source: string, names?: readonly string[]): Ma
     if (wanted !== undefined && !wanted.has(node.id.name)) continue
     const { start, end } = sourceRange(node)
     found.set(node.id.name, stripTypes(source.slice(start, end)))
+  }
+  return found
+}
+
+// A plain TypeScript module's top-level functions by name, as JavaScript that
+// vm can run. The screen's navigation moved out of App.svelte into such a
+// module, so the same slicing works there, through the TypeScript parser.
+export function moduleFunctions(source: string, names?: readonly string[]): Map<string, string> {
+  const found = new Map<string, string>()
+  const wanted = names === undefined ? undefined : new Set(names)
+  const file = ts.createSourceFile('module.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  for (const node of file.statements) {
+    if (!ts.isFunctionDeclaration(node) || !node.name) continue
+    if (wanted !== undefined && !wanted.has(node.name.text)) continue
+    found.set(node.name.text, stripTypes(source.slice(node.getStart(file), node.getEnd())))
   }
   return found
 }
