@@ -22,6 +22,7 @@ type nativeGeneration struct {
 	Version        int               `json:"version"`
 	Harness        string            `json:"harness"`
 	Home           string            `json:"home"`
+	CLI            string            `json:"cli,omitempty"`
 	Args           []string          `json:"args"`
 	Env            map[string]string `json:"env"` // native paths/reference syntax only; no values
 	EnvKeys        []string          `json:"envKeys"`
@@ -266,7 +267,7 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 			safeEnv[k] = v
 		}
 	}
-	meta := nativeGeneration{Version: 2, Harness: h, Home: home, Args: g.Args, Env: safeEnv, EnvKeys: g.EnvKeys, PartialReasons: g.PartialReasons, SkillPaths: paths, EnvReferences: envReferences}
+	meta := nativeGeneration{Version: 2, Harness: h, Home: home, CLI: generationCLI(servers), Args: g.Args, Env: safeEnv, EnvKeys: g.EnvKeys, PartialReasons: g.PartialReasons, SkillPaths: paths, EnvReferences: envReferences}
 	if err := writeNativeGeneration(filepath.Join(dir, "native-generation.json"), meta); err != nil {
 		return g, err
 	}
@@ -279,6 +280,19 @@ func writeNativeGeneration(path string, value any) error {
 	}
 	return os.WriteFile(path, append(b, '\n'), 0600)
 }
+
+// generationCLI names the Dyna executable this generation's MCP servers run.
+// A pin whose command no longer launches must be rebuilt, or its next turn has
+// no Dyna tools.
+func generationCLI(servers map[string]any) string {
+	row, ok := servers[dynaMCPName].(map[string]any)
+	if !ok {
+		return ""
+	}
+	command, _ := row["command"].(string)
+	return command
+}
+
 func loadNativeGeneration(h, dir string, lookup func(string) (string, bool)) (harnessmgr.ConfigGeneration, error) {
 	g, err := readNativeGeneration(h, dir, lookup)
 	if err != nil {
@@ -318,7 +332,7 @@ func readNativeGeneration(h, dir string, lookup func(string) (string, bool)) (ha
 	if json.Unmarshal(raw, &m) != nil || m.Version != 2 {
 		return harnessmgr.ConfigGeneration{}, errors.New("invalid native generation manifest")
 	}
-	out := harnessmgr.ConfigGeneration{ID: filepath.Base(dir), Directory: dir, Args: m.Args, Env: m.Env, EnvKeys: m.EnvKeys, PartialReasons: m.PartialReasons}
+	out := harnessmgr.ConfigGeneration{ID: filepath.Base(dir), Directory: dir, CLI: m.CLI, Args: m.Args, Env: m.Env, EnvKeys: m.EnvKeys, PartialReasons: m.PartialReasons}
 	if out.Env == nil {
 		out.Env = map[string]string{}
 	}
