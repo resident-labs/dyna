@@ -7,7 +7,7 @@ function context(room = { id: 'room_test', name: 'test', repo: '/tmp/repo' }) {
   const context = { room, rooms: [room], icons: { pin: 'pin-icon', archive: 'archive-icon' }, hasTerminal: true,
     roomAction: async (run, note) => { calls.push(note); await run() },
   }
-  for (const name of ['switchRoom', 'newRoom', 'openFiles', 'openView', 'openSettings', 'startWorkflow', 'openPins', 'openFind', 'openRoomSettings', 'openSessionPRs', 'cancelRun', 'renameRoom', 'deleteRoom', 'say', 'loadRooms', 'toggleSidebar']) context[name] = (...args) => calls.push({ name, args })
+  for (const name of ['switchRoom', 'newRoom', 'openFiles', 'openView', 'openSettings', 'startWorkflow', 'openPins', 'openSearch', 'openRoomSettings', 'openSessionPRs', 'cancelRun', 'renameRoom', 'deleteRoom', 'say', 'loadRooms', 'toggleSidebar']) context[name] = (...args) => calls.push({ name, args })
   return { context, calls }
 }
 
@@ -37,12 +37,12 @@ test('the room menu opens Room settings; delete stays in the palette only', () =
   assert.equal(actionItems(registry, 'palette').some((a) => a.id === 'delete'), true)
 })
 
-test('Find in this room is one action in the palette and as /find with its text', () => {
+test('/find opens unified search with its text; the palette has no separate find action', () => {
   const { context: c, calls } = context()
   const registry = actions(c)
-  actionItems(registry, 'palette').find((a) => a.id === 'find').run()
+  assert.equal(actionItems(registry, 'palette').some((a) => a.id === 'find'), false)
   actionItems(registry, 'slash').find((a) => a.name === 'find').run('deploy failed')
-  assert.deepEqual(calls, [{ name: 'openFind', args: [] }, { name: 'openFind', args: ['deploy failed'] }])
+  assert.deepEqual(calls, [{ name: 'openSearch', args: ['deploy failed'] }])
 })
 
 test('there is no room Changes command', () => {
