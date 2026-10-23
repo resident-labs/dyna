@@ -172,7 +172,7 @@ test('the feed and DMs draw no post bar for a PR post, and the bar has no CSS ho
   const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
   assert.match(read('./Feed.svelte'), /p\.kind !== 'pr' && !sealedEvent\(p\)\}<PostActions/)
   // A registered event owns its own card and bar, in the feed and in a DM.
-  assert.match(read('../sessions/DmRows.svelte'), /<Card post=\{row\.post\} notice=\{row\.post\.notice\} surface="dm" \/>/)
+  assert.match(read('../sessions/DmRows.svelte'), /<Card post=\{row\.post\} notice=\{row\.post\.notice\} surface="dm" \{room\} onissue=/);
   // A session renders one DmRows per row and a thread of DmMessages; each list shares one selection.
   const session = read('../sessions/Session.svelte')
   assert.match(session, /<DmRows [^>]*selection=\{listSelection\}/)

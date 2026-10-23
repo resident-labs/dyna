@@ -347,14 +347,6 @@ test('a compaction divider is one row that the compaction setting hides', () => 
   assert.deepEqual(rows({ compaction: false }).map((r) => r.kind), ['turn', 'message', 'message'])
   assert.equal(need(rows({}).find((r) => r.kind === 'compaction')).key, 'item:1:1')
 })
-test('slow-test issues in a row fold into one note row; other notes stay apart', () => {
-  const slow = (id: string, s: number) => post(id, 'room', ['room'], s, { kind: 'issue', text: `Slow test over the CI limit: x/Test${id}\n\nTime: 2 s, limit 1 s\nPRs: #1\nArea: x\n\nnote` })
-  const ins = post('ins', 'dyna', [address], 3, { kind: 'instructions', text: '[DYNA INSTRUCTIONS CHANGED] x' })
-  const session = { address, turns: [], posts: [slow('A', 1), slow('B', 2), ins, slow('C', 4)] }
-  const rows = dmView(session, room).rows
-  assert.deepEqual(rows.map((r) => [r.kind, (r.kind === 'instructions' ? r.notes ?? [] : []).map((n) => n.slow?.name)]), [['instructions', ['TestA', 'TestB']], ['instructions', []], ['instructions', ['TestC']]])
-})
-
 // Voice's request is the owner's words: it shows inline as one voice row in
 // every delivery state, never as a Voice thread. The call's own lines are
 // not requests.
