@@ -125,8 +125,14 @@ func (s *Service) RefreshCredentials(ctx context.Context, now time.Time) time.Ti
 	if s.o.Store == nil || ctx.Err() != nil {
 		return next
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// Account locks serialize renewal; provider I/O must not hold the service
+	// lock used by model and usage reads.
+	renewed := false
+	defer func() {
+		if renewed {
+			s.clearUsageCache()
+		}
+	}()
 	accounts := &runtime.Accounts{Root: s.o.Store.Root, Quiet: true}
 	rows, err := accounts.List()
 	if err != nil {
@@ -144,6 +150,7 @@ func (s *Service) RefreshCredentials(ctx context.Context, now time.Time) time.Ti
 		refreshCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		res, err := accounts.RefreshCredentials(refreshCtx, n.ID, b.Executable)
 		cancel()
+		renewed = renewed || res.Refreshed
 		if at := credentialCheckAt(now, res, err); !at.IsZero() && at.Before(next) {
 			next = at
 		}

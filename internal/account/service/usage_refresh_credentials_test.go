@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"dyna-agent/internal/account/service/adapters"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -81,5 +82,56 @@ func TestExplicitUsageRefreshRenewsCredentialsBeforeProbe(t *testing.T) {
 				t.Fatal("renewed usage unavailable", rows[0].UsageError)
 			}
 		})
+	}
+}
+
+func TestCredentialRenewalAllowsModelReads(t *testing.T) {
+	accounts, bundle, account, st := privateCodexAccount(t)
+	home, err := accounts.HarnessHome("codex")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	jwt := func(expiry time.Time) string {
+		raw, _ := json.Marshal(map[string]int64{"exp": expiry.Unix()})
+		return "header." + base64.RawURLEncoding.EncodeToString(raw) + ".signature"
+	}
+	path := filepath.Join(home, "auth.json")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body = []byte(strings.Replace(string(body), "fixture-access", jwt(now.Add(-time.Hour)), 1))
+	if err := os.WriteFile(path, body, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := accounts.Capture(t.Context(), account.ID, bundle.Executable); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{Store: st, Models: func(context.Context, string, string, []string) ([]adapters.Model, error) {
+		return []adapters.Model{{ID: "fixture-model"}}, nil
+	}})
+	s.last = Snapshot{CheckedAt: now}
+	reached, readable := false, false
+	old := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = old })
+	http.DefaultTransport = usageRefreshTransport(func(r *http.Request) (*http.Response, error) {
+		reached = true
+		// Fail immediately on a held lock instead of deadlocking the model read.
+		if !s.mu.TryLock() {
+			return nil, errors.New("credential renewal holds the model lock")
+		}
+		s.mu.Unlock()
+		catalog, err := s.ProfileModels(r.Context(), "codex", true)
+		readable = err == nil && len(catalog.Models) == 1 && catalog.Models[0].ID == "fixture-model"
+		raw, _ := json.Marshal(map[string]string{"access_token": jwt(now.Add(time.Hour)), "refresh_token": "renewed-grant"})
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw))), Header: make(http.Header)}, nil
+	})
+	s.RefreshCredentials(t.Context(), now)
+	if !reached || !readable {
+		t.Fatalf("provider reached: %v, model read succeeded: %v", reached, readable)
+	}
+	if !s.last.CheckedAt.IsZero() {
+		t.Fatal("renewed credentials left the previous usage snapshot cached")
 	}
 }
