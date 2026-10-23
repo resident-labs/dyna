@@ -331,7 +331,6 @@ func TestExecutionConfigDigestUsesEffectiveSettings(t *testing.T) {
 		name   string
 		change func(*profile.Profile)
 	}{
-		{"runtime account", func(p *profile.Profile) { p.RuntimeAccount = "other" }},
 		{"runtime version", func(p *profile.Profile) { p.RuntimeVersion = "2" }},
 		{"runtime executable", func(p *profile.Profile) { p.RuntimeExecutable = "/other/executable" }},
 		{"runtime skills", func(p *profile.Profile) { p.RuntimeSkillPaths = []string{"/other/skill"} }},
@@ -373,5 +372,26 @@ func TestExecutionConfigDigestUsesEffectiveSettings(t *testing.T) {
 	q.Command = []string{}
 	if executionConfigDigest(p, time.Minute) != executionConfigDigest(q, time.Minute) {
 		t.Fatal("equivalent empty settings have different digests")
+	}
+}
+
+func TestRetiredProfileAccountPreservesReplayIdentity(t *testing.T) {
+	var p profile.Profile
+	if err := json.Unmarshal([]byte(`{"name":"retained-worker","harness":"custom","model":"fixture-model","command":["/bin/sh","-c","exit 97"],"timeoutSec":60,"runtimeAccount":"retired-account"}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(p)
+	if err != nil || strings.Contains(string(raw), "runtimeAccount") {
+		t.Errorf("retired account survived profile encoding: %v", err)
+	}
+	// Freeze the key from the old empty-account profile. Keep exec-v1 and v3 stable.
+	const retainedKey = "v3:a6e7ffaef437075ff8c164349c7279bc05b72164c74975fb453ddaa6a34762c6"
+	key := callKey(p, "Return the retained result.", "", "/retained/workdir", "completed-job", time.Minute)
+	if key != retainedKey {
+		t.Errorf("replay key = %s, want %s", key, retainedKey)
+	}
+	cache := NewCache([]runstore.JournalEntry{{Key: retainedKey, Result: "retained result"}})
+	if got, ok := cache.pop(key); !ok || got != "retained result" {
+		t.Errorf("retained journal result = %v, %v", got, ok)
 	}
 }

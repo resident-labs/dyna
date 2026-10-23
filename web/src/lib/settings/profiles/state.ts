@@ -56,7 +56,7 @@ export const USES: [string, string][] = [['workflows', 'Workflows'], ['agents', 
 // toggleUse turns one use on or off and keeps the display order.
 export const toggleUse = (uses: readonly string[] | null | undefined, use: string, on: boolean): string[] => USES.map(([u]) => u).filter((u) => (u === use ? on : (uses ?? []).includes(u)))
 // A profile as the editor holds it: every list is an array and every field is set.
-export type ProfileDraft = Omit<ProfileView, 'runtimeAccount' | 'runtimeVersion' | 'fallback' | 'support' | 'models' | 'uses' | 'extraArgs' | 'command' | 'envKeys'> & {
+export type ProfileDraft = Omit<ProfileView, 'runtimeVersion' | 'fallback' | 'support' | 'models' | 'uses' | 'extraArgs' | 'command' | 'envKeys'> & {
   models: string[]
   uses: string[]
   extraArgs: string[]
@@ -151,7 +151,7 @@ export interface ModelSelection {
   connectionId?: string
 }
 // A profile as the editor takes it: a saved one, or a draft that has no runtime or support yet.
-export type EditableProfile = Omit<ProfileView, 'runtimeAccount' | 'runtimeVersion' | 'fallback' | 'support'> & Partial<Pick<ProfileView, 'runtimeAccount' | 'runtimeVersion' | 'fallback' | 'support'>>
+export type EditableProfile = Omit<ProfileView, 'runtimeVersion' | 'fallback' | 'support'> & Partial<Pick<ProfileView, 'runtimeVersion' | 'fallback' | 'support'>>
 // What the editor keeps in memory while the wizard changes steps: the profile and the raw text and write-only values.
 export interface EditorDraft {
   profile: EditableProfile

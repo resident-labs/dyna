@@ -4,7 +4,6 @@ import type { Compact } from './account.ts'
 
 // ProfileView is configsvc.ProfileView.
 export interface ProfileView {
-  runtimeAccount: string
   runtimeVersion: string
   name: string
   description: string
