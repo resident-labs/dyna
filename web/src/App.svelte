@@ -17,8 +17,9 @@
   import { onMount, tick } from 'svelte'
   import { errorText } from './lib/errorText.ts'
   import { api, onEvent, engineCheck, openExternal, copyText, onUnauthorized, logout } from './api.ts'
-  import RoomRail from './lib/rooms/RoomRail.svelte'
-  import Sidebar from './lib/rooms/Sidebar.svelte'
+  import NavPane from './lib/app/shell/NavPane.svelte'
+  import PageHeader from './lib/app/shell/PageHeader.svelte'
+  import PageNotices from './lib/app/shell/PageNotices.svelte'
   import CallButton from './lib/voice/CallButton.svelte'
   import VoiceWidget from './lib/voice/VoiceWidget.svelte'
   import { voiceCall, callRequests } from './lib/voice/voiceCall.ts'
@@ -104,7 +105,7 @@
   import RoomSettings from './lib/rooms/RoomSettings.svelte'
   import { prsBySession, isOpen, withoutReviewers } from './lib/prs/pr.ts'
   import { boot, watch, registerWorker } from './lib/settings/link.ts'
-  import { engineWatch, browserEngine } from './lib/engineStatus.ts'
+  import { engineWatch, browserEngine, type EngineStatus } from './lib/engineStatus.ts'
   import { loadLayout, saveLayout, lastRoom, saveLastRoom } from './lib/ui/prefs.ts'
   import { dmView } from './lib/sessions/dm.ts'
   import { roomLabel } from './lib/ui/format.ts'
@@ -461,7 +462,7 @@
   let dataDir = $state('')
   let loadError = $state('')
   let health = $state('')
-  let engineStatus = $state('') // why the event stream is down, see engineWatch
+  let engineStatus = $state<EngineStatus>('') // why the event stream is down, see engineWatch
   let composer = $state<ReturnType<typeof Composer>>()
   let card = $state<Drill | null>(null) // the member whose profile modal is open
   let profile = $state<MemberProfile | null>(null)
@@ -617,6 +618,9 @@
   // view is '': a session view is open, so the computers page is not.
   const showPreview = $derived(!!drill && !!drillComputer && previewVisible({ c: drillComputer, tab: sessionTab, view: '', width: winWidth, hidden: null }))
   const drillShells = $derived(drill ? runningShells(jobs, drill) : [])
+  // The computer the session tab row offers: none until the room's computers
+  // load, and none for the root seat, which has no computer of its own.
+  const sessionComputer = $derived(computers && drill && !drill.rootSeat ? computerOf(drill.id) ?? { state: 'none' } : null)
   function computerOf(id?: string) { return computers?.find((c) => c.session === id) ?? null }
   let reveal = $state('') // a file the Files view opens, from Changes
   let revealFolder = $state<{ path: string } | null>(null) // a folder the Files view shows, from Library; an object so the root and repeats still open
@@ -646,6 +650,8 @@
   }
 
   let current = $derived(rooms.find((r) => r.id === roomId))
+  // Where a file dropped on the window goes, as the drop line words it.
+  const dropTarget = $derived(drill ? '@' + drill.name : roomLabel(current ?? room))
   let feedViews = $derived(feedModel(hierarchy))
   let viewLead = $derived(view.startsWith('channel:') ? feedViews.byId.get(view.slice('channel:'.length)) : null)
   // A phone hides the older crumbs, so the current one carries the whole trail.
@@ -2356,124 +2362,68 @@
 <ComputerPopout room={pop.room} session={pop.session} />
 {:else}
 <div class="app" class:narrow>
-  <!-- On a wide screen this wrapper adds no box; on a narrow one it is the drawer. -->
-  <div class="nav" class:open={navOpen}>
-    <RoomRail {rooms} selected={machinesNav ? '' : roomId} onselect={selectRoom} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} />
-    {#if showSide || narrow}
-      <Sidebar machines={machines} machinesOpen={machinesNav} machineId={machineId} onmachine={openMachine} selected={drill?.address ?? ''} onroom={(id: string) => selectRoom(id)} {computers} viewUnread={feed?.viewUnread ?? {}} room={current ?? room} prs={openPRMap} onroommenu={(x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }} view={view as typeof GENERAL} questions={questions.filter((q) => q.state === 'open' && q.to === 'owner').length} {live} {runs} {dataDir} {ownerHue} {route} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onview={openView} onmember={openAgent} />
-    {/if}
-  </div>
+  <NavPane open={navOpen} {narrow} {showSide} {rooms} selected={machinesNav ? '' : roomId} onselect={selectRoom} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} sidebar={{ machines, machinesOpen: machinesNav, machineId, onmachine: openMachine, selected: drill?.address ?? '', onroom: (id: string) => selectRoom(id), computers, viewUnread: feed?.viewUnread ?? {}, room: current ?? room, prs: openPRMap, onroommenu: (x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }, view: view as typeof GENERAL, questions: questions.filter((q) => q.state === 'open' && q.to === 'owner').length, live, runs, dataDir, ownerHue, route, update: !!update, onsettings: () => openSettings(), onlogout: signOut, onview: openView, onmember: openAgent }} />
   {#if narrow && navOpen}
     <button class="scrim" aria-label="Close the room list" onclick={() => (navOpen = false)}></button>
   {/if}
   <main class="main">
-    <header class="bar" class:dm-bar={!!drill} inert={narrow && reviewOpen}>
-      {#if narrow}
-        <button class="icon" onclick={() => (navOpen = true)} title="Rooms and views" aria-label="Open the room list" aria-expanded={navOpen}>
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" /></svg>
-        </button>
-      {:else}
-      <button class="icon" onclick={() => (showSide = !showSide)} title={showSide ? 'Hide sidebar (Ctrl+B)' : 'Show sidebar (Ctrl+B)'} aria-label={showSide ? 'Hide sidebar' : 'Show sidebar'} aria-expanded={showSide}>
-        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M9.5 4.5v15" stroke="currentColor" stroke-width="1.8" />{#if showSide}<path d="M5.8 8.5h1.6M5.8 11.5h1.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" />{/if}</svg>
-      </button>
-      {/if}
-      {#if !roomId}
-        <span class="title">{machineDetail ? machineDetail.name : 'Machines'}</span>
-        {#if !machineId}<span class="meta">{machinesSub(machines)}</span>{/if}
-      {:else if room}
-        {#if drill}
-          {#if readOnlyDm}
-            <button class="dm-back" aria-label="Back to Services" title="Back to Services" onclick={() => (router.drill = null)}><span class="back-arrow" aria-hidden="true">‹</span><span class="back-name">Services</span></button>
-            <span class="dm-sep" aria-hidden="true">/</span>
-            <span class="title">{drill.name}</span>
-          {:else}
-          <button class="dm-back" aria-label={`Back to ${roomLabel(current ?? room)}`} title={`Back to ${roomLabel(current ?? room)}`} onclick={() => (router.drill = null)}><span class="back-arrow" aria-hidden="true">‹</span><span class="back-name">{roomLabel(current ?? room)}</span></button>
-          {#if sessionTrail.length}
-            <nav class="trail" aria-label="Parent sessions">
-              {#each sessionTrail as m (m.id)}
-                <span class="dm-sep" aria-hidden="true">/</span>
-                <button class="dm-back dm-crumb" title={`Open ${m.name}`} onclick={() => openSession(m)}><span class="back-name">{m.name}</span></button>
-              {/each}
-            </nav>
-          {/if}
-          <span class="dm-sep" aria-hidden="true">/</span>
-          <DmIdentity member={session?.member || drill} usage={session?.usage} onopen={openMember} />
-          {#if !narrow}<div class="dm-tabs"><SessionTabs bind:tab={sessionTab} media={session?.media ?? []} computer={computers && !drill.rootSeat ? computerOf(drill.id) ?? { state: 'none' } : null} shells={drillShells.length} /></div>{/if}
-          <span class="spacer"></span>
-          <UseIcons shells={drillShells.length} computer={inUse(drillComputer)} tab={sessionTab} onselect={(tab) => (sessionTab = tab)} />
-          {#if isRootDm}<CallButton {room} />{/if}
-          <button class="dm-threads threads" class:on={threadsOpen} aria-expanded={threadsOpen} aria-label="Threads" title="Threads" onclick={() => { threadsOpen = !threadsOpen; selectedThread = ''; if (threadsOpen) sessionTab = 'chat' }}><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v6a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><b>{threadCount}</b></button>
-          {/if}
-        {:else if view === 'runs' && openRun}
-          <button class="crumb" onclick={() => (router.openRun = '')}><span class="hash">#</span>runs</button>
-          <span class="trail">
-            {#each runTrail as m (m.id)}
-              <span class="slash" aria-hidden="true">/</span>
-              <button class="crumb" title={`Open ${m.name}`} onclick={() => openSession(m)}>{m.name}</button>
-            {/each}
-          </span>
-          <span class="slash" aria-hidden="true">/</span>
-          <span class="title">{runDetail?.run?.name ?? openRun}</span>
-        {:else if workRow}
-          <span class="title" title={room.repo}><span class="hash">#</span><span class="name">{workRow.label}</span></span>
-          {#if workTabs && !narrow}<div class="dm-tabs"><Tabs tabs={workTabs} tab={view} label={workRow?.label ?? ''} onselect={openView} /></div>{/if}
-        {:else}
-          <span class="title" title={room.repo}><span class="name">{roomLabel(current ?? room)}</span></span>
-        {/if}
-        {#if !drill}
-        <span class="spacer"></span>
-        <CallButton {room} />
-        <span class="meta">{Math.max(0, people.length - 1)} session{people.length === 2 ? '' : 's'}{#if live.length}&nbsp;·&nbsp;<em>{live.length} working</em>{/if}</span>
-        {#if syncRemotes.length}<SyncBadge remotes={syncRemotes} status={syncRepo} note={syncNote} onrefresh={() => syncAction(api.syncRefresh)} onexport={() => syncAction(api.gitExport)} />{/if}
-        {#if !narrow}
-          <button class="icon" onclick={() => openSearch()} title="Search (Ctrl+K)" aria-label="Search sessions and messages"><SearchIcon /></button>
-        {/if}
-        <button class="icon pin" class:on={showPins} onclick={() => { showPins = !showPins; if (showPins) showMembers = false }} title={showPins ? 'Hide pinned posts' : 'Show pinned posts'} aria-label={showPins ? 'Hide pinned posts' : 'Show pinned posts'} aria-expanded={showPins}>
-          <PinIcon size={21} />
-          {#if pins.length}<span class="badge">{pins.length}</span>{/if}
-        </button>
-        {/if}
-      {/if}
-      {#if room?.repo && !readOnlyDm}<button class="icon" class:on={reviewOpen} aria-controls="review-workspace" aria-expanded={reviewOpen} title={reviewOpen ? 'Hide review' : 'Review files, changes, PRs and issues'} aria-label={reviewOpen ? 'Hide review' : 'Show review'} onclick={() => reviewOpen ? closeReview() : openReview()}>
-        <ReviewIcon size={22} />
-      </button>{/if}
-      {#if !roomId}<span class="spacer"></span>{/if}
-      {#if narrow}
-        <button class="icon" onclick={() => openSearch()} title="Search (Ctrl+K)" aria-label="Search sessions and messages"><SearchIcon size={22} /></button>
-      {/if}
-      <!-- Members closes the pinned panel, so the two panels never share the
-           side area. The button is the bar's last one, on a phone and a desktop. -->
-      {#if room && !drill}
-        <button class="icon" class:on={showMembers} onclick={() => { showMembers = !showMembers; if (showMembers) showPins = false }} title={showMembers ? 'Hide member list' : 'Show member list'} aria-label={showMembers ? 'Hide member list' : 'Show member list'} aria-expanded={showMembers}>
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><circle cx="16.5" cy="9" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6" /><path d="M16 13.6c2.4 0 4 1.5 4.5 4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
-        </button>
-      {/if}
-    </header>
+    <PageHeader
+      {narrow}
+      {navOpen}
+      {showSide}
+      {roomId}
+      {room}
+      {current}
+      {drill}
+      {session}
+      {machines}
+      {machineId}
+      {machineDetail}
+      {readOnlyDm}
+      {reviewOpen}
+      {people}
+      {live}
+      {pins}
+      bind:sessionTab
+      {sessionComputer}
+      {drillComputer}
+      shells={drillShells.length}
+      {isRootDm}
+      {threadsOpen}
+      {threadCount}
+      {sessionTrail}
+      {view}
+      {openRun}
+      {runTrail}
+      {runDetail}
+      {workRow}
+      {workTabs}
+      {syncRemotes}
+      {syncRepo}
+      {syncNote}
+      {showPins}
+      {showMembers}
+      onnavopen={() => (navOpen = true)}
+      ontoggleside={() => (showSide = !showSide)}
+      onback={() => (router.drill = null)}
+      onsession={openSession}
+      onmember={openMember}
+      onthreads={() => { threadsOpen = !threadsOpen; selectedThread = ''; if (threadsOpen) sessionTab = 'chat' }}
+      oncloserun={() => (router.openRun = '')}
+      onview={openView}
+      onsyncrefresh={() => syncAction(api.syncRefresh)}
+      onsyncexport={() => syncAction(api.gitExport)}
+      onsearch={() => openSearch()}
+      ontogglepins={() => { showPins = !showPins; if (showPins) showMembers = false }}
+      onreview={() => (reviewOpen ? closeReview() : openReview())}
+      ontogglemembers={() => { showMembers = !showMembers; if (showMembers) showPins = false }}
+    />
     <div class="content">
       <div class="conversation-workspace">
       {#key viewIdentity({ roomId, view, drill })}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div class="center" inert={narrow && reviewOpen} in:fade={{ duration: prView ? 0 : motion(FAST) }} ondragover={dragOver} ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget instanceof Node ? e.relatedTarget : null)) dropping = false }} ondrop={drop}>
-        {#if dropping}
-          <div class="dropzone"><div><strong>Drop to attach</strong><span>to your next post in {drill ? '@' + drill.name : roomLabel(current ?? room)}</span></div></div>
-        {/if}
-        {#if engineStatus}
-          <p class="engine-down" class:waiting={engineStatus === 'reconnecting'} role={engineStatus === 'reconnecting' ? 'status' : 'alert'}><strong>Reconnecting…</strong>
-            {#if engineStatus === 'reconnecting'}Contact with the engine broke. Dyna tries again now, and posts wait until it answers.
-            {:else if engineStatus === 'offline'}This device is offline. Dyna reconnects when its network is back.
-            {:else if engineStatus === 'unreachable'}Dyna cannot reach the engine. Check this device's network connection.
-            {:else if engineStatus === 'engine'}The engine did not answer. Agents, posts and merges wait until it is back. On the engine's computer, run <code>systemctl --user start dyna-engine</code>.
-            {/if}</p>
-        {/if}
-        {#if health}
-          <p class="notice">Posting is off: {health}</p>
-        {/if}
-        {#if update && !updateHidden && roomId}
-          <p class="update">{update.text} <button onclick={() => (updateHidden = true)}>Dismiss</button></p>
-        {/if}
-        {#if loadError}
-          <p class="load-err">{loadError}</p>
-        {/if}
+        <PageNotices {dropping} {dropTarget} {engineStatus} {health} {update} {updateHidden} {roomId} {loadError} onupdatehidden={() => (updateHidden = true)} />
         {#if !roomId && machineId}
           <MachinePage machine={machineDetail} error={machineError} busy={machineBusy} probing={machineProbing} onback={closeMachine} onagent={openAgent} onsave={saveMachine} onprobe={probeMachine} />
         {:else if !roomId}
@@ -2482,7 +2432,7 @@
           <Skeleton label="Loading room" />
         {:else if drill}
           <!-- Keyed: staged files and the typed draft belong to one session. -->
-          {#if narrow && !readOnlyDm}<SessionTabs bind:tab={sessionTab} media={session?.media ?? []} computer={computers && !drill.rootSeat ? computerOf(drill.id) ?? { state: 'none' } : null} shells={drillShells.length} />{/if}
+          {#if narrow && !readOnlyDm}<SessionTabs bind:tab={sessionTab} media={session?.media ?? []} computer={sessionComputer} shells={drillShells.length} />{/if}
           {#key drill.id}
             {#if sessionTab === 'computer' && computers}
               <ComputerPane c={computerOf(drill.id) ?? { session: drill.id, name: drill.name, state: 'none', apps: [], stream: {}, viewers: 0, rssKiB: 0, streamRssKiB: 0 }} room={room.id} feed={computerFeed[drill.id] ?? []} chat={{ computerCount: 1, draft: drafts['computer:' + roomId + ':' + drill.id] ?? '', ondraft: computerDraft, session, room, members: hierarchy, onsend: sendToSession, onopenfile: (a: Attachment) => (viewing = a), onpost: jumpTo, onmessages: () => (sessionTab = 'chat') }} />
@@ -2645,107 +2595,11 @@
   .conversation-workspace { flex: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
   .sess-wrap { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
   .app { display: flex; height: 100vh; height: 100dvh; min-height: 0; }
-  .nav, .panel { display: contents; }
+  .panel { display: contents; }
   .scrim { display: none; }
   .main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--main); }
-  .bar {
-    height: 64px;
-    flex: none;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 16px 0 10px;
-    border-bottom: 1px solid #1a191c;
-    box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
-    min-width: 0;
-  }
-  .dm-bar { height: 56px; gap: 8px; }
-  /* A work view gives its whole width to the tab labels: the room's repo path
-     is in the title's tooltip, because a clipped tab is worse than a clipped
-     path. Under 760 px the tabs scroll instead. */
-  .dm-tabs { min-width: 0; }
-  .dm-tabs :global(.tabs) { border: 0; padding: 0; }
-  .dm-tabs :global(button) { padding: 5px 10px; font-size: 12.5px; white-space: nowrap; border-radius: 6px; }
-  .dm-tabs :global(button.on) { background: var(--raise); }
-  .dm-tabs :global(button.on::after) { display: none; }
-  .dm-threads, .dm-back { flex: none; color: var(--muted); font-size: 12.5px; padding: 6px 8px; border-radius: 6px; transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
-  .dm-back { display: inline-flex; align-items: center; gap: 5px; max-width: 160px; }
-  .back-arrow { font-size: 17px; line-height: 1; }
-  .back-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .dm-sep { color: var(--line); margin: 0 -2px; }
-  .dm-threads { display: inline-flex; align-items: center; gap: 6px; }
-  .dm-threads.on { color: var(--ink); background: var(--raise); }
-  .dm-threads b { border-radius: 8px; color: var(--side); background: var(--iris); font-size: 11px; padding: 0 5px; }
-  @media (hover: hover) {
-    .dm-back:hover { color: var(--ink); background: var(--hover); }
-  }
-  .dm-back:active { background: var(--select); }
-  .title { font-weight: 600; font-size: 16px; display: inline-flex; align-items: center; white-space: nowrap; min-width: 0; }
-  .title .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-  .hash { color: var(--faint); font-size: 22px; font-weight: 400; margin-right: 6px; line-height: 1; }
-  .crumb { display: inline-flex; align-items: center; font-weight: 600; color: var(--muted); font-size: 16px; transition: color var(--motion-fast) var(--ease); }
-  /* The view trail is one flex item, so a long trail shrinks as a unit. */
-  .trail { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  @media (hover: hover) {
-    .crumb:hover { color: var(--ink); }
-  }
-  .slash { color: var(--faint); }
-  .trail { display: contents; }
-  .dm-crumb { max-width: 140px; }
-  .who { display: inline-flex; align-items: center; gap: 8px; }
-  .chip { font-size: 12px; color: var(--muted); background: var(--raise); border-radius: 4px; padding: 1px 7px; }
-  .spacer { flex: 1; }
-  .meta { color: var(--faint); font-size: 13px; white-space: nowrap; }
-  .meta em { font-style: normal; color: var(--gold); }
-  .icon { color: var(--muted); display: grid; place-items: center; width: 32px; height: 32px; border-radius: 6px; transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
-  @media (hover: hover) {
-    .icon:hover { color: var(--ink); background: var(--hover); }
-  }
-  .icon:active { background: var(--select); }
-  .icon.on { color: var(--ink); }
-  .icon.pin { position: relative; }
-  .badge {
-    position: absolute;
-    top: 0;
-    right: -2px;
-    min-width: 15px;
-    height: 15px;
-    padding: 0 4px;
-    border-radius: 8px;
-    background: var(--select);
-    color: var(--ink);
-    font-size: 10.5px;
-    font-weight: 600;
-    line-height: 15px;
-    text-align: center;
-    border: 1px solid var(--line);
-  }
   .content { flex: 1; display: flex; min-height: 0; }
   .center { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
-  .dropzone {
-    position: absolute;
-    inset: 12px;
-    z-index: 20;
-    border: 2px dashed var(--iris-edge);
-    border-radius: 12px;
-    background: rgba(28, 27, 30, 0.88);
-    display: grid;
-    place-items: center;
-    pointer-events: none;
-  }
-  .dropzone div { display: flex; flex-direction: column; align-items: center; gap: 4px; }
-  .dropzone strong { font-size: 18px; font-weight: 600; }
-  .dropzone span { color: var(--muted); font-size: 14px; }
-  .notice { color: var(--gold); padding: 8px 16px; margin: 0; font-size: 13px; border-bottom: 1px solid var(--line-soft); }
-  .load-err { color: var(--coral); padding: 8px 16px; margin: 0; font-size: 13px; }
-  .engine-down { color: var(--coral); padding: 8px 16px; margin: 0; font-size: 13px; border-bottom: 1px solid var(--line-soft); }
-  .engine-down.waiting { color: var(--muted); }
-  .engine-down strong { font-weight: 600; margin-right: 4px; }
-  .update { color: var(--muted); padding: 7px 16px; margin: 0; font-size: 12.5px; border-bottom: 1px solid var(--line-soft); background: var(--gold-wash); }
-  .update button { color: var(--faint); font-size: 12px; margin-left: 8px; text-decoration: underline; transition: color var(--motion-fast) var(--ease); }
-  @media (hover: hover) {
-    .update button:hover { color: var(--ink); }
-  }
   /* A close result is its own floating panel. The toast component's styles are
      scoped to it, so this panel carries the position and surface it needs. */
   .close-result {
@@ -2794,28 +2648,10 @@
   .toast-details li strong { color: var(--ink-2); font-weight: 500; }
   .toast-details li.error span { color: var(--coral); }
 
-  /* A phone: one column. The feed takes the width; the room rail and the
-     sidebar slide in as a drawer from the left, and the members or pins
-     panel as a sheet from the right. Touch targets are at least 44 px. */
+  /* A phone: one column. The feed takes the width, and the members or pins
+     panel slides in as a sheet from the right. */
   @media (max-width: 760px) {
     .app { padding-top: env(safe-area-inset-top); }
-    .nav {
-      display: flex;
-      position: fixed;
-      z-index: 50;
-      top: 0;
-      bottom: 0;
-      left: 0;
-      max-width: calc(100vw - 48px);
-      padding-top: env(safe-area-inset-top);
-      padding-bottom: env(safe-area-inset-bottom);
-      background: var(--side);
-      transform: translateX(-105%);
-      transition: transform var(--motion) ease-out;
-      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.45);
-    }
-    .nav.open { transform: none; }
-    .nav > :global(.side) { width: min(240px, calc(100vw - 120px)); }
     .panel:has(> :global(*)) {
       display: flex;
       position: fixed;
@@ -2832,29 +2668,6 @@
     .panel:has(> :global(.detail)) { width: 100vw; }
     .panel > :global(*) { width: 100% !important; flex: 1; }
     .scrim { display: block; position: fixed; inset: 0; z-index: 40; background: rgba(0, 0, 0, 0.5); }
-    .bar { height: 52px; padding: 0 6px 0 4px; gap: 4px; }
-    .meta, .slash, .chip { display: none; }
-    .dm-bar .back-name, .dm-bar .back-arrow, .dm-bar .dm-sep { display: none; }
-    .dm-bar > .spacer { display: none; }
-    .dm-bar .dm-back { width: 36px; max-width: none; font-size: 0; padding: 6px; }
-    .dm-bar .dm-back::before { content: '←'; font-size: 18px; }
-    .dm-threads, .dm-back { min-height: 44px; }
-    .dm-bar > .icon:last-child { display: none; }
-    /* Keep the page title readable while the bar buttons keep their width.
-       The room bar now holds Search and Members too, so the title gives way
-       first and ends in an ellipsis on the narrowest phones. */
-    .title, .crumb { min-width: 40px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .trail { gap: 4px; }
-    .crumb { flex: 0 1 auto; max-width: 40%; }
-    /* A phone shows only the nearest parent of the breadcrumb. In a session,
-       its arrow replaces the room arrow and goes up one level. */
-    .trail > :not(:last-child) { display: none; }
-    .dm-bar .dm-back:has(+ .trail) { display: none; }
-    .dm-bar .trail .dm-crumb { width: auto; flex: 0 1 auto; min-width: 0; max-width: 26vw; font-size: 12.5px; padding: 6px; gap: 4px; }
-    .dm-bar .trail .dm-crumb::before { flex: none; }
-    .dm-bar .trail .back-name { display: inline; }
-    .who { min-width: 0; }
-    .icon { width: 44px; height: 44px; flex: none; }
     .center { padding-bottom: env(safe-area-inset-bottom); }
     .toast-details { bottom: calc(146px + env(safe-area-inset-bottom)); max-height: 54vh; }
     .close-result { bottom: calc(96px + env(safe-area-inset-bottom)); }
