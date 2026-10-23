@@ -265,6 +265,7 @@ export const api = {
   setChangePolicyOverride: (roomId, changeId, override) => app.SetChangePolicyOverride(roomId, changeId, override),
   prSettings: (roomRef) => app.PRSettings(roomRef),
   prNoiseRules: (roomRef) => app.PRNoiseRules(roomRef),
+  admitPRComment: (roomRef, key, id) => app.AdmitPRComment(roomRef, key, id),
   removePRNoiseRule: (roomRef, id) => app.RemovePRNoiseRule(roomRef, id),
   setPRSettings: (roomRef, settings) => app.SetPRSettings(roomRef, settings),
   untrackPR: (roomRef, key) => app.UntrackPR(roomRef, key),

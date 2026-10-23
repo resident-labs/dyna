@@ -36,6 +36,13 @@ export interface Overlap {
   error?: string
 }
 
+export interface HeldComment {
+  id: string
+  commenter: string
+  body: string
+  url: string
+}
+
 // ChangeView is view.ChangeView, one row of the changes list.
 export interface ChangeView {
   isDraft: boolean
@@ -85,6 +92,7 @@ export interface ChangeView {
   hasReviewSummary?: boolean
   reviewUrl?: string
   head?: string
+  heldComments?: HeldComment[] | null
   filteredComments?: number
   overlaps?: Overlap[]
 }

@@ -25,6 +25,7 @@
   import PRCommits from './PRCommits.svelte'
   import PRFiles from './PRFiles.svelte'
   import Conversation from './Conversation.svelte'
+  import HeldComments from './HeldComments.svelte'
   import ChangeDetail from './ChangeDetail.svelte'
   import ReviewDrawer from './ReviewDrawer.svelte'
   import { authorName, factsLine, isBotAuthor, botKey, mergeBox, mergeState, type MergeItem, type MergeState, type Names, type Row } from './prlist.ts'
@@ -181,6 +182,9 @@
       {:else if tab !== 'files' || !number}
         {#if detailError}<p class="err">{detailError}</p>{:else if number && !detail}<p class="quiet">Loading #{number}…</p>{/if}
         {#if fullError}<p class="err">{fullError}</p>{/if}
+        {#key change.key}
+          <HeldComments comments={full?.heldComments ?? change.heldComments ?? []} {roomId} prKey={change.key ?? ''} onchange={() => { refresh(); return onchange() }} />
+        {/key}
         <Conversation bind:this={conversation} {detail} {events} {bots} change={full} {checks} {names} opener={author} {roomId} onchange={() => { refresh(); return onchange() }} />
         <PROverlaps overlaps={change.overlaps} />
         <MergeBox {change} {box} onchecks={() => show('checks')} onread={readReview} {onresume} {ontrack} {onreviewer} {onauthor} onrules={() => (drawer = true)} {onuntrack} {actions} />
