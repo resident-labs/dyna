@@ -99,10 +99,10 @@ export function recommendedVersion(row?: { recommendation?: RecommendedVersion |
   return ['pinned', 'resolved'].includes(candidate?.status ?? '') && exactVersion(candidate?.version) ? candidate.version.trim() : ''
 }
 
-export function recoveredLogins<F extends { accountId: string }>(flows: F[] | null | undefined, accounts: HarnessAccount[] | null | undefined): (F & { harness: string })[] {
+export function recoveredLogins<F extends { accountId: string; harness?: string }>(flows: F[] | null | undefined, accounts: HarnessAccount[] | null | undefined): (F & { harness: string })[] {
   return (flows ?? []).flatMap((flow) => {
-    const account = (accounts ?? []).find((account) => account.id === flow.accountId)
-    return account ? [{ ...flow, harness: account.harness }] : []
+    const harness = (accounts ?? []).find((account) => account.id === flow.accountId)?.harness ?? flow.harness
+    return harness ? [{ ...flow, harness }] : []
   })
 }
 

@@ -72,7 +72,7 @@ func TestPiProviderKeys(t *testing.T) {
 	}
 	home, _ := r.Accounts.HarnessHome("pi")
 	path := filepath.Join(home, "auth.json")
-	// An OAuth login that Dyna must keep and must not list.
+	// A provider sign-in is one more row of Pi's login, next to the API keys.
 	if err := os.MkdirAll(home, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestPiProviderKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err = r.HarnessProviderKeys(ctx, "pi", "add", "zai", testProviderKey)
-	if err != nil || len(got.Providers) != 1 || got.Providers[0].ID != "zai" {
+	if err != nil || len(got.Providers) != 2 || got.Providers[0].ID != "xai" || got.Providers[0].Auth != "oauth" || got.Providers[1].Auth != "api_key" {
 		t.Fatalf("add: %+v %v", got, err)
 	}
 	raw, _ := os.ReadFile(path)
@@ -94,11 +94,8 @@ func TestPiProviderKeys(t *testing.T) {
 	if out, _ := json.Marshal(got); strings.Contains(string(out), testProviderKey) {
 		t.Fatal("key in result")
 	}
-	if _, err = r.HarnessProviderKeys(ctx, "pi", "remove", "xai", ""); err == nil {
-		t.Fatal("removed an OAuth login")
-	}
 	got, err = r.HarnessProviderKeys(ctx, "pi", "remove", "zai", "")
-	if err != nil || len(got.Providers) != 0 {
+	if err != nil || len(got.Providers) != 1 {
 		t.Fatalf("remove: %+v %v", got, err)
 	}
 	raw, _ = os.ReadFile(path)
