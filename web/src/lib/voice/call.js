@@ -18,11 +18,15 @@ const micOpen = (s) => !s.muted && (!s.pushToTalk || s.talking)
 
 // RESUME_WATCH_MS is how often a found call's status is re-read.
 export const RESUME_WATCH_MS = 5000
+export const RECONNECT_MS = 30000
 
 export function createCall(deps) {
   const { api, socket, openAudio } = deps
   // every(ms, fn) repeats fn and returns a cancel; tests drive it.
   const every = deps.every ?? ((ms, fn) => { const t = setInterval(fn, ms); return () => clearInterval(t) })
+  const after = deps.after ?? ((ms, fn) => { const t = setTimeout(fn, ms); return () => clearTimeout(t) })
+  const now = deps.now ?? Date.now
+  let reconnect = null
   let watch = null // re-reads VoiceStatus while a found call waits
   let state = initial
   const subs = new Set()
@@ -49,9 +53,45 @@ export function createCall(deps) {
   const send = (msg) => { if (ws?.readyState === 1) ws.send(msg instanceof ArrayBuffer ? msg : JSON.stringify(msg)) }
 
   function release() {
+    stopReconnect()
     audio?.close()
     audio = null
     early = null
+  }
+
+  function stopReconnect() {
+    reconnect?.cancelRetry?.()
+    reconnect?.cancelDeadline?.()
+    reconnect = null
+  }
+
+  function retryConnection(mine) {
+    if (!reconnect) {
+      reconnect = { cutoff: now(), tries: 0 }
+      reconnect.cancelDeadline = after(RECONNECT_MS, () => {
+        if (mine !== attempt) return
+        const old = ws
+        ws = null
+        old?.close()
+        release()
+        set({ type: 'closed', reason: 'Voice could not reconnect. Please call again.' })
+      })
+    }
+    audio?.stopPlayback('clear')
+    audio?.unduck()
+    early ??= createEarlySpeech()
+    set({ type: 'voiceLost' })
+    const pending = reconnect
+    pending.cancelRetry = after(Math.min(500 * 2 ** pending.tries++, 4000), async () => {
+      if (mine !== attempt || reconnect !== pending) return
+      try {
+        await api.voiceResume(state.roomId, state.startedAt, pending.cutoff)
+        if (mine !== attempt || reconnect !== pending) return
+        connectSocket(mine, state.room)
+      } catch {
+        if (mine === attempt && reconnect === pending) retryConnection(mine)
+      }
+    })
   }
 
   // The player's receipts: what the owner heard of each response, so the
@@ -86,6 +126,7 @@ export function createCall(deps) {
     try { msg = JSON.parse(raw) } catch { return }
     const e = fromWire(msg)
     if (!e) return
+    if (e.type === 'voiceReady' || e.type === 'engineState') stopReconnect()
     switch (e.type) {
       case 'audio':
         audio?.play(e.audio, e.rate, e.responseId)
@@ -140,6 +181,10 @@ export function createCall(deps) {
     }
     if (mine !== attempt) return
     set({ type: 'started', startedAt: st?.startedAt || 0 })
+    connectSocket(mine, room)
+  }
+
+  function connectSocket(mine, room) {
     // Every callback belongs to this attempt's socket. After a hang-up and a
     // new call, the old socket's queued events must not touch the new call.
     const sock = socket(room)
@@ -154,6 +199,12 @@ export function createCall(deps) {
     sock.onclose = (c) => {
       if (!current()) return
       ws = null
+      // An interrupted transport or server restart can recover without
+      // closing the microphone or resetting the visible conversation.
+      if ([1006, 1012, 1013].includes(c.code)) {
+        retryConnection(mine)
+        return
+      }
       release()
       // 1000: the call ended normally (Hang up elsewhere, or no page for
       // 60 s); 4001: a newer page took it; 1011: an error, with its reason.
