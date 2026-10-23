@@ -263,6 +263,8 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 		stdin, err := cmd.StdinPipe()
 		if err != nil {
 			cancel()
+			_ = writer.Close()
+			_ = out.Close()
 			_ = flow.Cancel()
 			return PrivateLogin{}, err
 		}
@@ -271,6 +273,7 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = writer.Close()
+		_ = out.Close()
 		_ = flow.Cancel()
 		return PrivateLogin{}, fmt.Errorf("could not start the %s sign-in", harness)
 	}
