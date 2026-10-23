@@ -21,14 +21,42 @@
   let status = $state(null)
   let items = $state([])
   $effect(() => { const timer = setInterval(() => (now = Date.now()), 60000); return () => clearInterval(timer) })
-  // The status and checklist follow the selected goal; a late answer for an earlier goal is dropped.
+  let statusState = $state('loading')
+  let itemsState = $state('loading')
+  let statusError = $state('')
+  let itemsError = $state('')
+  let statusRequest = 0
+  let itemsRequest = 0
+  async function loadStatus(id = g.id, room = roomId) {
+    const request = ++statusRequest
+    statusState = 'loading'; statusError = ''
+    try {
+      const value = await api.goalStatus(room, id)
+      if (request !== statusRequest || g.id !== id || roomId !== room) return
+      status = value; statusState = 'loaded'
+    } catch (e) {
+      if (request !== statusRequest || g.id !== id || roomId !== room) return
+      statusError = String(e?.message || e); statusState = 'failed'
+    }
+  }
+  async function loadItems(id = g.id, room = roomId) {
+    const request = ++itemsRequest
+    itemsState = 'loading'; itemsError = ''
+    try {
+      const value = await api.goalItems(room, id)
+      if (request !== itemsRequest || g.id !== id || roomId !== room) return
+      items = value ?? []; itemsState = 'loaded'
+    } catch (e) {
+      if (request !== itemsRequest || g.id !== id || roomId !== room) return
+      itemsError = String(e?.message || e); itemsState = 'failed'
+    }
+  }
+  // Each selected goal gets independent reads; old and unmounted requests cannot publish.
   $effect(() => {
-    const id = g.id
-    if (!id) return
-    status = null
-    items = []
-    api.goalStatus(roomId, id).then((s) => { if (g.id === id) status = s }, () => {})
-    api.goalItems(roomId, id).then((list) => { if (g.id === id) items = list ?? [] }, () => {})
+    const id = g.id, room = roomId
+    status = null; items = []
+    if (id) { loadStatus(id, room); loadItems(id, room) }
+    return () => { statusRequest++; itemsRequest++ }
   })
   const TONES = { on_track: 'sage', waiting: 'muted', stuck: 'coral', errored: 'coral', ready_to_close: 'gold', unowned: 'gold' }
   const LABELS = { on_track: 'On track', waiting: 'Waiting', stuck: 'Stuck', errored: 'Errored', ready_to_close: 'Ready to close', unowned: 'Unowned' }
@@ -56,6 +84,8 @@
     {:else}
       <p class="prose">{g.text}</p>
     {/if}
+    {#if statusState === 'loading'}<p class="quiet" role="status">Loading status…</p>
+    {:else if statusState === 'failed'}<p class="read-error" role="alert">Status unavailable: {statusError} <button onclick={() => loadStatus()}>Retry status</button></p>{/if}
     {#if status}
       <p class="statusline"><span class="tone-{TONES[status.label] ?? 'muted'}">{LABELS[status.label] ?? status.label}</span> <span class="reason">{status.reason}</span>{#if status.open || status.done || status.dropped}<span class="counts">{status.open} open · {status.done} done · {status.dropped} dropped</span>{/if}</p>
     {/if}
@@ -83,7 +113,9 @@
     {/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
     <h3>Checklist</h3>
-    {#if !items.length}<p class="quiet">No items. Delegate with <code>dyna subagent start</code> or add one with <code>dyna goal item add</code>.</p>{/if}
+    {#if itemsState === 'loading'}<p class="quiet" role="status">Loading checklist…</p>
+    {:else if itemsState === 'failed'}<p class="read-error" role="alert">Checklist unavailable: {itemsError} <button onclick={() => loadItems()}>Retry checklist</button></p>
+    {:else if !items.length}<p class="quiet">No items. Delegate with <code>dyna subagent start</code> or add one with <code>dyna goal item add</code>.</p>{/if}
     <ol class="checklist" aria-label="Checklist">
       {#each items as it (it.id)}
         <li class:done={it.state === 'done'} class:dropped={it.state === 'dropped'}>
@@ -137,6 +169,8 @@
   .checklist .mark { color: var(--muted); } .checklist .done { color: var(--faint); } .checklist .done .mark { color: var(--sage); } .checklist .dropped { color: var(--faint); text-decoration: line-through; } .checklist .dropped .mark { color: var(--coral); }
   .item-text { min-width: 0; overflow-wrap: anywhere; }
   .assignee { color: var(--iris); font-size: var(--t-cap); white-space: nowrap; }
+  .read-error { color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
+  .read-error button { color: var(--iris); padding: 4px 6px; }
   .error { font-size: var(--t-sm); color: var(--coral); }
   @media (hover: none) { .remove { opacity: 1; } }
 </style>
