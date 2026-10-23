@@ -533,6 +533,13 @@ func TestGrokAcpResumesSessionInAFreshProcess(t *testing.T) {
 }
 
 func TestGrokAcpStopReasonBecomesUsageLimit(t *testing.T) {
+	// The turn must end on a usage limit. The failover after it has its own
+	// test, and the real one installs a harness bundle in the data folder.
+	oldFailover := FailoverAccount
+	FailoverAccount = func(context.Context, profile.Profile, string, string, error) (*AccountSwitch, error) {
+		return nil, nil
+	}
+	t.Cleanup(func() { FailoverAccount = oldFailover })
 	dir := acpScript(t, map[string]string{"task": `{"stopReason":"rate_limit"}`})
 	env, _ := acpTestEnv(t, dir)
 	acpPrepare(t)

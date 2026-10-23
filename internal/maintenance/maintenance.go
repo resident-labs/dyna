@@ -121,6 +121,9 @@ func Run(ctx context.Context, options ...Options) (Result, error) {
 		errs = append(errs, sweepWithDryPass(ctx, &result, "review inputs", reviewInputRetention, func(dry bool) (Pruned, error) {
 			return sweepReviewInputs(ctx, state.Root(store.DataDir()), now, dry)
 		}))
+		errs = append(errs, sweepWithDryPass(ctx, &result, "stale test folders", testFolderRetention, func(dry bool) (Pruned, error) {
+			return sweepTestFolders(now, os.TempDir(), processAlive, dry)
+		}))
 		// PR state removes closed records 14 days after close on each write;
 		// the pass reports how many it removed since the last pass.
 		if n, err := state.TakePruned(state.Root(store.DataDir())); err != nil {
@@ -234,37 +237,65 @@ func discover(ctx context.Context, session string) ([]string, error) {
 	return repos, errors.Join(errs...)
 }
 
-// freeBytes uses the closest existing ancestor when the managed root is new.
-func freeBytes(path string) (uint64, error) {
+// space is the free and total space of one file system, and whether it lives
+// in memory. Many hosts hold /tmp in a tmpfs, which is a share of RAM.
+type space struct {
+	Free, Total uint64
+	InMemory    bool
+}
+
+// freeSpace measures the file system that holds path, using the closest
+// existing ancestor when the path is new.
+func freeSpace(path string) (space, error) {
 	for {
 		var st syscall.Statfs_t
 		err := syscall.Statfs(path, &st)
 		if err == nil {
-			return st.Bavail * uint64(st.Bsize), nil
+			return space{Free: st.Bavail * uint64(st.Bsize), Total: st.Blocks * uint64(st.Bsize), InMemory: inMemory(&st)}, nil
 		}
 		parent := filepath.Dir(path)
 		if !os.IsNotExist(err) || parent == path {
-			return 0, err
+			return space{}, err
 		}
 		path = parent
 	}
 }
 
+// inMemoryFreeShare is the share of an in-memory file system that must stay
+// free. The owner's minimum free space is an absolute size, which a tmpfs of a
+// few GB can never reach, so a tmpfs is judged against its own size instead.
+const inMemoryFreeShare = 15
+
+// lowSpace reports whether a file system is under pressure: below the owner's
+// minimum free space on a disk, or below a share of the whole size on an
+// in-memory file system.
+func lowSpace(s space, minFree uint64) bool {
+	if s.InMemory && s.Total > 0 {
+		return s.Free*100 < s.Total*inMemoryFreeShare
+	}
+	return s.Free < minFree
+}
+
 type scheduler struct {
 	lastRun  time.Time
 	pressure bool
+	// low holds the paths of the last check that ran, which a later check
+	// that cannot run keeps.
+	low []string
 }
 
-func (s *scheduler) tick(ctx context.Context, now time.Time, pressure bool, run func(context.Context) (Result, error), alert func(string) error) error {
+func (s *scheduler) tick(ctx context.Context, now time.Time, low []string, run func(context.Context) (Result, error), alert func(string) error) error {
+	pressure := len(low) > 0
 	firstPressure := pressure && !s.pressure
 	s.pressure = pressure
+	s.low = low
 	if !firstPressure && !s.lastRun.IsZero() && now.Sub(s.lastRun) < time.Hour {
 		return nil
 	}
 	s.lastRun = now
 	result, err := run(ctx)
 	if firstPressure {
-		text := fmt.Sprintf("Disk space is low. Maintenance freed %d bytes.", result.BytesFreed)
+		text := fmt.Sprintf("Disk space is low in %s. Maintenance freed %d bytes.", strings.Join(low, ", "), result.BytesFreed)
 		reasons := make([]string, 0, len(result.Kept))
 		for reason, count := range result.Kept {
 			reasons = append(reasons, fmt.Sprintf("%s: %d", reason, count))
@@ -343,7 +374,7 @@ func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleH
 			}
 		}
 		v, err := settings.Load("")
-		pressure := false
+		var low []string
 		if err == nil && v.WorktreesMinFreeBytes > 0 {
 			root, rootErr := worktrees.ManagedRoot()
 			err = rootErr
@@ -352,13 +383,13 @@ func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleH
 				paths = append(paths, root)
 			}
 			for _, path := range paths {
-				free, e := freeBytes(path)
+				measured, e := freeSpace(path)
 				if e != nil {
 					err = errors.Join(err, fmt.Errorf("free space %s: %w", path, e))
 					continue
 				}
-				if free < uint64(v.WorktreesMinFreeBytes) {
-					pressure = true
+				if lowSpace(measured, uint64(v.WorktreesMinFreeBytes)) {
+					low = append(low, path)
 				}
 			}
 		}
@@ -367,13 +398,13 @@ func loop(ctx context.Context, logf func(string, ...any), hookService lifecycleH
 		}
 		if err != nil {
 			logf("maintenance pressure check: %v", err)
-			if !pressure {
-				pressure = schedule.pressure
+			if len(low) == 0 {
+				low = schedule.low
 			}
 		}
-		maintenanceErr := schedule.tick(ctx, time.Now(), pressure, func(ctx context.Context) (Result, error) {
+		maintenanceErr := schedule.tick(ctx, time.Now(), low, func(ctx context.Context) (Result, error) {
 			start := time.Now()
-			result, err := Run(ctx, Options{Pressure: pressure, Logf: logf, ClosedSessionKeeper: keep})
+			result, err := Run(ctx, Options{Pressure: len(low) > 0, Logf: logf, ClosedSessionKeeper: keep})
 			logf("maintenance: %s", result.Summary())
 			if saveErr := SaveReport(store.DataDir(), start, time.Since(start), result, err); saveErr != nil {
 				logf("maintenance report: %v", saveErr)
