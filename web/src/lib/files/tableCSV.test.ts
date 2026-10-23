@@ -14,4 +14,7 @@ test('visible table CSV preserves exact values and only the supplied columns', (
   assert.deepEqual(parseTable(csv).rows, [...rows.slice(0, 3), ['short', '', '']])
   assert.equal(tableCSV([['one', 'two', 'hidden']], 2), 'one,two')
   assert.equal(tableCSV([], 3), '')
+  const oneColumn = parseTable('name\nAlice\n\n').rows
+  assert.deepEqual(parseTable(tableCSV(oneColumn, 1)).rows, oneColumn)
+  assert.deepEqual(parseTable(tableCSV([['']], 1)).rows, [['']])
 })
