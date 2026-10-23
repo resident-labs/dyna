@@ -70,6 +70,7 @@ test('each section shows its moved controls in one shared layout', async () => {
     // The room's repo is fixed, so the hooks list has no repo picker.
     const hooks = show('hooks')
     assert.match(text(hooks), /Hooks Shell commands/)
+    assert.match(text(hooks), /Shared by every room on this repository\./)
     assert.doesNotMatch(hooks, /aria-label="Repo"/)
     assert.match(text(show('hooks', { room: { ...room, repo: '' } })), /This room has no repository\./)
     assert.match(text(show('noise')), /Bot noise rules .*Learned bot noise rules/)
@@ -206,7 +207,7 @@ test('the room menu opens the modal, for another room after selecting it, and Es
   const mount = /\{#if (showRoomSettings && room)\}\n(?:.*\n)*?\s*<RoomSettings [^\n]*onclose=\{(\(\) => \(showRoomSettings = false\))\} \/>/.exec(app)
   assert.ok(mount, 'App mounts RoomSettings with its close handler')
   const selected: string[] = []
-  const state = vm.createContext({ roomId: 'room-1', room, showRoomSettings: false, selectRoom: async (id: string) => { selected.push(id); state.roomId = id; return true } })
+  const state = vm.createContext({ roomId: 'room-1', room, showRoomSettings: false, roomSettingsAt: null, roomSettingsKey: 0, selectRoom: async (id: string) => { selected.push(id); state.roomId = id; return true } })
   const { actions, roomMenu } = await import('../ui/actions.ts')
   // The menu reads only the room and its settings opener.
   const openRoomSettings = vm.runInContext(stripTypes(opener), state)

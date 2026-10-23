@@ -2,6 +2,9 @@
 
 Hooks run trusted shell commands on Dyna events.
 Dyna records who added each hook and when.
+Hooks belong to the repository, so every room on that repository shares them.
+The owner adds, edits, runs and removes them in Room settings, under Hooks, or
+from a terminal with `dyna git hooks`.
 
 See `dyna guide git`.
 
