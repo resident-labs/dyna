@@ -288,3 +288,46 @@ func TestAuthorWritesRefuseAChangedAuthor(t *testing.T) {
 		t.Fatalf("a refused write changed the record: %+v", got)
 	}
 }
+
+func TestReviewDeltaExcludesRebasedMainChanges(t *testing.T) {
+	e := newEnv(t)
+	r, dir := localChange(t, e)
+	oldHead := r.Head
+	changeGit(t, dir, "checkout", "main")
+	if err := os.WriteFile(filepath.Join(dir, "main-only.txt"), []byte("unrelated main change\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	changeGit(t, dir, "add", ".")
+	changeGit(t, dir, "commit", "-m", "unrelated main change")
+	changeGit(t, dir, "checkout", "feature")
+	changeGit(t, dir, "rebase", "main")
+	r.Base = "main"
+	for _, update := range []bool{false, true} {
+		if update {
+			changeCommit(t, dir, "feature fixed\n")
+		}
+		r.Head = changeGit(t, dir, "rev-parse", "HEAD")
+		if _, err := e.s.prepareReviewTask(context.Background(), r, oldHead); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(state.ReviewInputsDir(e.s.Store.Root, r.Key), digest(r.Head)[:16]+"-0.json")
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var input ReviewContext
+		if err := json.Unmarshal(data, &input); err != nil {
+			t.Fatal(err)
+		}
+		delta, err := os.ReadFile(input.DeltaPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(delta), "main-only.txt") || strings.Contains(string(delta), "unrelated main change") {
+			t.Fatalf("delta includes main changes:\n%s", delta)
+		}
+		if update && !strings.Contains(string(delta), r.Head[:7]) {
+			t.Fatalf("delta omits the author's fix:\n%s", delta)
+		}
+	}
+}
