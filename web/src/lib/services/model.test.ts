@@ -82,3 +82,24 @@ test('the schedule sorts timers before triggers and counts each overlapping chan
   assert.equal(schedule[0]?.when, 'in 54 m')
   assert.ok(!rows.some((r) => r.id === 'keeper'))
 })
+
+test('the built-in update hook names its main-updated trigger', () => {
+  const hook = { name: 'self-update', label: 'Update Dyna', event: 'main-updated', everyMinutes: 0, disabled: false }
+  const hooks = [{ hook, lastRun: null }]
+  const update = row({ hooks }, 'update')
+  assert.equal(update.detail, 'When main updates · no run yet')
+  assert.equal(update.nextAt, '')
+  assert.equal(buildSchedule([update], 0)[0]?.when, 'When main updates')
+  assert.equal(row({ hooks: [{ hook: { ...hook, disabled: true }, lastRun: null }] }, 'update').nextText, '')
+})
+
+test('a pending update reports running until it has a real result', () => {
+  const hook = { name: 'self-update', label: 'Update Dyna', event: 'main-updated', everyMinutes: 0, disabled: false }
+  const lastRun = { result: 'pending', startedAt: '2026-10-21T22:49:00Z', finishedAt: '' }
+  const update = row({ hooks: [{ hook, lastRun }] }, 'update')
+  assert.equal(update.state, 'running')
+  assert.equal(update.tone, 'live')
+  assert.equal(update.detail, 'When main updates · running')
+  assert.equal(update.value, '')
+  assert.equal(row({ hooks: [{ hook, lastRun: { ...lastRun, result: 'pass' } }] }, 'update').detail, 'When main updates · last passed')
+})

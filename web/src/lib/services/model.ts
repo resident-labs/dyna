@@ -328,25 +328,32 @@ export function buildRows(i: Inputs): Row[] {
     nextAt: libraryOn ? nextAt(batch) : '',
   })
 
-  // Update Dyna: one schedule hook, with its own switch and a run-now action.
+  // Update Dyna follows its configured trigger, usually main-updated.
   const update = hook(i.hooks, 'self-update')
   const updateOff = update?.hook.disabled ?? false
-  const updateFailed = update?.lastRun?.result === 'error'
+  const updateResult = update?.lastRun?.result ?? ''
+  const updateFailed = updateResult === 'error'
+  const updateRunning = updateResult === 'pending'
+  const updateTrigger = !update ? '' : update.hook.event === 'schedule'
+    ? `Every ${update.hook.everyMinutes} min`
+    : update.hook.event === 'main-updated' ? 'When main updates' : `On ${update.hook.event.replaceAll('-', ' ')}`
+  const updateLast = updateRunning ? 'running' : `last ${updateResult === 'pass' ? 'passed' : updateFailed ? 'failed' : updateResult || unknown}`
   rows.push({
     ...base,
     id: 'update',
     name: 'Update Dyna',
-    state: !update ? (i.hooks === null ? unknown : 'off') : updateOff ? 'off' : updateFailed ? 'error' : 'on',
-    tone: !update ? 'off' : updateOff ? 'off' : updateFailed ? 'error' : 'on',
+    state: !update ? (i.hooks === null ? unknown : 'off') : updateRunning ? 'running' : updateOff ? 'off' : updateFailed ? 'error' : 'on',
+    tone: !update ? 'off' : updateRunning ? 'live' : updateOff ? 'off' : updateFailed ? 'error' : 'on',
     detail: i.hooks === null
       ? 'Hook state could not be read'
       : !update
         ? 'No update hook in this repository'
-        : `Every ${update.hook.everyMinutes} m${update.lastRun ? ` · last ${updateFailed ? 'failed' : 'passed'}` : ' · no run yet'}`,
+        : `${updateTrigger} · ${update.lastRun ? updateLast : 'no run yet'}`,
     toggle: update ? { id: 'update.enabled', on: !updateOff } : null,
-    value: update ? elapsed(update.lastRun?.startedAt ?? '', update.lastRun?.finishedAt ?? '') : '',
+    value: update && !updateRunning ? elapsed(update.lastRun?.startedAt ?? '', update.lastRun?.finishedAt ?? '') : '',
     last: update?.lastRun?.startedAt ?? '',
     nextAt: nextAt(update),
+    nextText: update && !updateOff ? updateTrigger : '',
   })
 
   // Maintenance and account usage run on their own. They carry no switch,
