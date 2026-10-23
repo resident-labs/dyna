@@ -1,17 +1,27 @@
-<script>
+<script lang="ts">
   // The agent's latest picture. It is a plain image of last.png, never a
   // stream. A new picture loads off screen first, so the tile never flickers.
   // With refresh set, a running computer asks for a fresh picture that often
   // while the page is visible; the server limits real captures to one per 5 s.
+  import type { Snippet } from 'svelte'
   import { api } from '../../api.ts'
   import { freshDue } from './preview.ts'
-  // minGap: the least time between two loads from shotAt changes (ms).
-  let { session, shotAt = null, phase = 'none', refresh = 0, alt = '', minGap = 0, children } = $props()
+  interface Props {
+    session: string
+    // minGap: the least time between two loads from shotAt changes (ms).
+    shotAt?: string | null
+    phase?: string
+    refresh?: number
+    alt?: string
+    minGap?: number
+    children?: Snippet
+  }
+  let { session, shotAt = null, phase = 'none', refresh = 0, alt = '', minGap = 0, children }: Props = $props()
   let src = $state('')
   let failed = $state(false)
   let seq = 0
 
-  function load(fresh) {
+  function load(fresh: boolean) {
     const mine = ++seq
     const url = `${api.computerShotURL(session, fresh)}${fresh ? '&' : '?'}t=${Date.now()}`
     const img = new Image()
@@ -22,7 +32,7 @@
 
   // A new picture time from the daemon means a new file.
   let lastLoad = 0
-  let timer = 0
+  let timer: ReturnType<typeof setTimeout> | undefined
   $effect(() => {
     shotAt
     // No picture time means no file yet: do not ask, so the console stays quiet.

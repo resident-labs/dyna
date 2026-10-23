@@ -1,16 +1,29 @@
-<script>
+<script lang="ts">
   // The Computer tab of a session. It opens the stream at once: no "Watch
   // live" step. While it connects, the viewer shows the last picture and
   // fades to the stream. The stream closes when the tab is left, the page
   // is hidden, or the computer stops. A computer with no window yet gets a
   // calm empty state and no stream.
-  import { onMount } from 'svelte'
+  import { onMount, type ComponentProps } from 'svelte'
   import ComputerViewer from './ComputerViewer.svelte'
   import ComputerShot from './ComputerShot.svelte'
   import { streamWanted, loadPreview, savePreview } from './preview.ts'
-  import { stateText } from './computers.ts'
+  import { stateText, type FeedItem } from './computers.ts'
+  import type ComputerChat from './ComputerChat.svelte'
+  import type { ComputerInfo, ComputerStream } from '../api/computer.ts'
 
-  let { c, room, feed = [], chat = null } = $props()
+  // ShownComputer is the part of a computer row this tab reads. stream is
+  // partial because the app passes an empty stream until the room list has
+  // the session's row.
+  type ShownComputer = Omit<ComputerInfo, 'stream'> & { stream?: Partial<ComputerStream> | null }
+
+  interface Props {
+    c: ShownComputer
+    room: string
+    feed?: FeedItem[]
+    chat?: ComponentProps<typeof ComputerChat> | null
+  }
+  let { c, room, feed = [], chat = null }: Props = $props()
   let pageVisible = $state(typeof document === 'undefined' || document.visibilityState !== 'hidden')
   onMount(() => {
     const f = () => (pageVisible = document.visibilityState !== 'hidden')

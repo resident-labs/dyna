@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // The room's running computers: a picture tile for each. Tiles are
   // screenshots, never streams. Computers that are not running stay hidden
   // behind a quiet "Show stopped" toggle.
@@ -9,9 +9,15 @@
   import EmptyState from '../ui/EmptyState.svelte'
   import { clock } from './clock.svelte.ts'
   import Chip from '../ui/Chip.svelte'
+  import type { ComputerInfo } from '../api/computer.ts'
   import { computerLabel, shotRatio, splitComputers, stateText, uptimeText } from './computers.ts'
-  let { list = [], error = '', onopen } = $props()
-  const split = $derived(splitComputers(list))
+  interface Props {
+    list?: ComputerInfo[] | null
+    error?: string
+    onopen: (c: ComputerInfo) => void
+  }
+  let { list = [], error = '', onopen }: Props = $props()
+  const split = $derived(splitComputers(list ?? []))
   let showStopped = $state(false)
 </script>
 
