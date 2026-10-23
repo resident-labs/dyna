@@ -109,13 +109,14 @@ func parseCacheClean(output string) ([]string, int64) {
 	return paths, freed
 }
 
-// runKeeper is the shell text that keeps a run's lock held on the node for as
-// long as the run lasts, and no longer: the keeper goes away with its lock when
-// the run directory is removed, and it gives up after the longest run anyway.
-// A crashed run therefore leaves only the lock file, never a held lock.
+// runKeeper is the shell command that keeps a run's lock held on the node for
+// as long as the run lasts, and no longer: the keeper goes away with its lock
+// when the run directory is removed, and it gives up after the longest run
+// anyway. A crashed run therefore leaves only the lock file, never a held lock.
+// A caller starts it as its own background statement.
 func runKeeper(active string) string {
 	wait := "end=$((SECONDS+10800)); while [ -e " + shellquote.Quote(active) + " ] && [ $SECONDS -lt $end ]; do sleep 5; done"
-	return "setsid flock -n " + shellquote.Quote(active) + " bash -c " + shellquote.Quote(wait) + " >/dev/null 2>&1 </dev/null & "
+	return "setsid flock -n " + shellquote.Quote(active) + " bash -c " + shellquote.Quote(wait) + " >/dev/null 2>&1 </dev/null"
 }
 
 // diskFullNote is the text the kernel and the tools print when a check runs
