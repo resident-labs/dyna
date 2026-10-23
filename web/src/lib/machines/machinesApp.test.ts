@@ -1,23 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import vm from 'node:vm'
-import { parse } from 'svelte/compiler'
 import { need } from '../../../test/need.ts'
-import { sourceRange, stripTypes } from '../../../test/svelte-source.ts'
+import { installMachines } from '../../../test/appModules.ts'
+import type { MachinesSlice } from '../../../test/appModules.ts'
 
-// The machine list and page live in App.svelte. These run their real code with
-// a fake api, so only the answer ordering is under test.
-const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const nodes = parse(source, { modern: true }).instance?.content.body ?? []
-
-function functionCode(name: string): string {
-  const node = nodes.find((n) => n.type === 'FunctionDeclaration' && n.id?.name === name)
-  assert.ok(node, `App declares ${name}`)
-  const { start, end } = sourceRange(node)
-  return source.slice(start, end)
-}
-
+// The machine list and page live in lib/app/machines.svelte.ts. These run their
+// real code with a fake api, so only the answer ordering is under test.
 interface State {
   machines: unknown[] | null
   machinesRequest: number
@@ -36,14 +24,8 @@ function app(state: Partial<State>, api: object, extra: Record<string, unknown> 
     machines: null, machinesRequest: 0, machineId: '', machineDetail: null, machineError: '', machineRequest: 0,
     machineBusy: false, machineProbing: false, ...state, ...extra, api, errorText: (e: unknown) => String(e),
   }
-  vm.createContext(c)
-  const code = [functionCode('loadMachines'), functionCode('loadMachine'), functionCode('probeResult'), functionCode('probeMachine')].join('\n')
-  vm.runInContext(stripTypes(code), c)
-  return Object.assign(c, vm.runInContext('({ loadMachines, loadMachine, probeMachine })', c)) as State & {
-    loadMachines: () => Promise<void>
-    loadMachine: (id: string) => Promise<void>
-    probeMachine: () => Promise<void>
-  }
+  installMachines(c)
+  return c as typeof c & MachinesSlice
 }
 
 // settle lets the promise callbacks run without a timer.
