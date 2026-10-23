@@ -33,17 +33,23 @@ func TestSessionDMReadsThePostsWrittenInIt(t *testing.T) {
 		{From: lead.Address(), Conversation: dm, To: []string{rec.Name}, SessionIDs: bound, Text: "Answer in the DM"},
 		// A post the session writes to another agent is not the DM's.
 		{From: lead.Address(), To: []string{peer.Address()}, SessionIDs: map[string]string{peer.Address(): peer.ID}, Text: "To peer"},
-		// A completion folds into its turn, so the DM does not draw it again.
-		{From: lead.Address(), Kind: "completed", Conversation: dm, To: []string{rec.Name}, SessionIDs: bound, Text: "Finished"},
 	} {
 		msg, err := store.Post(rec.ID, in)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if in.Conversation == dm && in.Kind == "" {
+		if in.Conversation == dm {
 			want = append(want, msg.ID)
 		}
 	}
+	// The session's completion of its own turn is the transcript's, not a post
+	// of its DM.
+	done, err := store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{rec.Name}, SessionIDs: bound,
+		Event: room.TurnEvent{Session: lead.Address(), SessionID: lead.ID, Turn: 1, State: room.TurnCompleted, Summary: "Finished"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = done
 	sess, err := e.svc.transcript(lead.ID, 0, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -55,9 +61,9 @@ func TestSessionDMReadsThePostsWrittenInIt(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DM posts = %v, want %v", got, want)
 	}
-	// The session's own completion of a turn in the room is the transcript's,
-	// not a reference row.
-	done, err := store.Post(rec.ID, room.PostInput{From: lead.Address(), Kind: "completed", To: []string{rec.Name}, SessionIDs: bound, Text: "Turn done"})
+	// Its later turn end stays out of the DM as well.
+	done, err = store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{rec.Name}, SessionIDs: bound,
+		Event: room.TurnEvent{Session: lead.Address(), SessionID: lead.ID, Turn: 2, State: room.TurnCompleted, Summary: "Turn done"}})
 	if err != nil {
 		t.Fatal(err)
 	}

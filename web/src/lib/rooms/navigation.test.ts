@@ -15,7 +15,7 @@ import { callTarget } from '../voice/callRequests.ts'
 import { prHash, parsePRHash, issueHash, parseIssueHash, parseFileHash } from '../prs/prlink.ts'
 import { roomIDPattern as ROOM, postIDPattern as POST, postHref } from '../ui/posts.ts'
 import { questionID } from '../questions/questions.ts'
-import { isShellResult } from './feedRows.ts'
+import { isShellResult, shellJobID } from './feedRows.ts'
 import { trimFeed } from './feedWindow.ts'
 import { mergeFeedPage, rerouteAnchors, withViews } from './feedPages.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
@@ -212,6 +212,7 @@ interface NavState {
   homeView: typeof homeView
   questionID: typeof questionID
   isShellResult: typeof isShellResult
+  shellJobID: typeof shellJobID
   trimFeed: typeof trimFeed
   rerouteAnchors: typeof rerouteAnchors
   withViews: typeof withViews
@@ -281,7 +282,7 @@ function navigation() {
     reviewOpen: false, reviewTab: 'files', reviewVersion: 0, mergeVersion: 0, roomId: B, roomRequest: 0, questionsRequest: 0, detailRequest: 0, narrow: false, hasTerminal: true,
     selectionRevision: 0, consolidationView: 0, consolidationAlive: true, memberRequest: 0, pickedSessions: [], pruneSelection,
     showClosed: false, rooms: [{ id: A }, { id: B }], needPair: false,
-    ROOM, POST, GENERAL, VOICE, routedParents: '', isFeedView, inView, homeView, isShellResult, trimFeed, mergeFeedPage, questionID, feedViews: feedModel([]), posts: [],
+    ROOM, POST, GENERAL, VOICE, routedParents: '', isFeedView, inView, homeView, isShellResult, shellJobID, trimFeed, mergeFeedPage, questionID, feedViews: feedModel([]), posts: [],
     view: GENERAL, openRun: '', openJob: '', drill: null, feed: null, feedAtBottom: true, location: { hash: '', pathname: '/', search: '' },
     started: true, routing: 0, routeFix: false, pop: null, readOnlyDm: false, sessionTurn: 0, entries: [], prLink: null, unreadFrom: '', loadError: '',
     goals: [], goalId: '', fetchedGoal: null, fetchedGoalVersion: 0, hierarchy: [], earlierLoad: null, STEP: 50, workflowData: null, roomSessionController: null, home: null,

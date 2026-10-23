@@ -14,6 +14,10 @@ export interface Usage {
 
 // Item is roomsvc.Item, one transcript entry. kind is prompt, steering,
 // reply, tool, thought, error, note or compaction. ts is an ISO time.
+// StepKind is what a tool call did, in the session view's own words. The view
+// draws a designed row per kind, never the harness's tool ID.
+export type StepKind = 'read' | 'edit' | 'write' | 'search' | 'list' | 'run' | 'fetch' | 'delegate' | 'plan' | 'monitor' | 'tool'
+
 export interface Item {
   postId?: string
   delivered?: boolean
@@ -21,6 +25,13 @@ export interface Item {
   ts: string
   text?: string
   from?: string
+  // step, label, toolName and durationMs describe a tool call: what it did,
+  // the short name a row shows, the harness's own tool ID, and how long it
+  // took. The ID and the full target stay in the row's details.
+  step?: StepKind
+  label?: string
+  toolName?: string
+  durationMs?: number
   tool?: string
   target?: string
   aside?: string

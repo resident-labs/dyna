@@ -58,6 +58,12 @@ type CompactionInfo struct {
 
 // Tool is a condensed tool call (or a run of similar ones).
 type Tool struct {
+	// Step is what the call did, in the session view's own words. The web picks
+	// the step's icon and its state chip from it, never from Verb.
+	Step StepKind
+	// Name is the harness's own tool ID, such as "mcp__dyna__shell". Only a
+	// step's expanded details show it.
+	Name    string
 	Verb    string // "ran", "read", "edited", "searched for", "started a dyna workflow", …
 	Target  string // the command, file, or query (shown as code)
 	Detail  string // the full input, for the expanded view
@@ -73,6 +79,25 @@ type Tool struct {
 	// Description is the shell call's one-line title.
 	JobID, JobOp, Description string
 }
+
+// StepKind is the kind of work one tool call did. It is a closed set, so the
+// session view draws a designed row for each kind instead of showing a tool ID.
+type StepKind string
+
+// Step kinds. StepTool covers every tool the view names, such as an MCP tool.
+const (
+	StepRead     StepKind = "read"
+	StepEdit     StepKind = "edit"
+	StepWrite    StepKind = "write"
+	StepSearch   StepKind = "search"
+	StepList     StepKind = "list"
+	StepRun      StepKind = "run"
+	StepFetch    StepKind = "fetch"
+	StepDelegate StepKind = "delegate"
+	StepPlan     StepKind = "plan"
+	StepMonitor  StepKind = "monitor"
+	StepTool     StepKind = "tool"
+)
 
 // Item is one entry of the conversation.
 type Item struct {
@@ -418,7 +443,7 @@ func mcpResultText(output string) string {
 func Summarize(e workeroutput.Event) Tool {
 	// TODO: legacy/shim remove later — renders old normalized Muse envelopes; remove after affected artifacts expire or migrate
 	e = workeroutput.UpgradeLegacyEvent(e)
-	t := Tool{Detail: e.Input, Output: e.Output, Exit: e.Exit}
+	t := Tool{Name: e.Name, Detail: e.Input, Output: e.Output, Exit: e.Exit}
 	t.Done = e.State == "completed" || e.State == "failed"
 	t.Failed = e.State == "failed" || (e.Exit != nil && *e.Exit != 0)
 	args := map[string]any{}
@@ -444,14 +469,14 @@ func Summarize(e workeroutput.Event) Tool {
 		t.Detail = UnwrapShell(cmd)
 		t.Verb, t.Target = shellSummary(t.Detail, e.Output)
 		if dynaShellOp(lower) == "run" {
-			t.Description = str("description")
+			t.Description, t.Step = str("description"), StepRun
 		}
 	case lower == "read" || lower == "read_file" || lower == "view_file":
-		t.Verb, t.Target = "read", shortPath(str("file_path", "path", "target_file", "AbsolutePath"))
+		t.Verb, t.Step, t.Target = "read", StepRead, shortPath(str("file_path", "path", "target_file", "AbsolutePath"))
 	case lower == "edit" || lower == "multiedit" || lower == "edit_file" || lower == "replace_file_content" || lower == "search_replace":
-		t.Verb, t.Target = "edited", shortPath(str("file_path", "path", "target_file", "TargetFile"))
+		t.Verb, t.Step, t.Target = "edited", StepEdit, shortPath(str("file_path", "path", "target_file", "TargetFile"))
 	case lower == "write" || lower == "write_file" || lower == "write_to_file":
-		t.Verb, t.Target = "wrote", shortPath(str("file_path", "path", "target_file", "TargetFile"))
+		t.Verb, t.Step, t.Target = "wrote", StepWrite, shortPath(str("file_path", "path", "target_file", "TargetFile"))
 	case lower == "file_change":
 		var paths []string
 		for _, line := range strings.Split(strings.TrimSpace(e.Input), "\n") {
@@ -459,44 +484,44 @@ func Summarize(e workeroutput.Event) Tool {
 				paths = append(paths, shortPath(f[len(f)-1]))
 			}
 		}
-		t.Verb = "edited"
+		t.Verb, t.Step = "edited", StepEdit
 		if len(paths) == 1 {
 			t.Target = paths[0]
 		} else if len(paths) > 1 {
 			t.Target, t.Count, t.Targets = paths[0], len(paths), paths
 		}
 	case lower == "grep" || lower == "grep_search" || lower == "codebase_search" || lower == "search":
-		t.Verb, t.Target = "searched for", str("pattern", "query", "Query")
+		t.Verb, t.Step, t.Target = "searched for", StepSearch, str("pattern", "query", "Query")
 	case lower == "glob" || lower == "list_dir" || lower == "ls" || lower == "find_by_name":
-		t.Verb, t.Target = "listed", str("pattern", "path", "SearchDirectory", "Pattern")
+		t.Verb, t.Step, t.Target = "listed", StepList, str("pattern", "path", "SearchDirectory", "Pattern")
 	case lower == "web_search" || lower == "websearch" || lower == "search_web":
-		t.Verb, t.Target = "searched the web", str("query", "Query")
+		t.Verb, t.Step, t.Target = "searched the web", StepSearch, str("query", "Query")
 		if t.Target == "" && !strings.HasPrefix(e.Input, "{") {
 			t.Target = strings.TrimSpace(e.Input)
 		}
 	case lower == "webfetch" || lower == "web_fetch" || lower == "read_url_content":
-		t.Verb, t.Target = "fetched", str("url", "Url")
+		t.Verb, t.Step, t.Target = "fetched", StepFetch, str("url", "Url")
 	case lower == "task" || lower == "agent":
-		t.Verb, t.Target = "delegated to a subagent", str("description", "subagent_type")
+		t.Verb, t.Step, t.Target = "delegated to a subagent", StepDelegate, str("description", "subagent_type")
 	case lower == "todowrite" || lower == "write_todos" || lower == "update_plan":
-		t.Verb = "updated the plan"
+		t.Verb, t.Step = "updated the plan", StepPlan
 	case lower == "monitor":
-		t.Verb, t.Target = "started a monitor", str("command", "description")
+		t.Verb, t.Step, t.Target = "started a monitor", StepMonitor, str("command", "description")
 	case lower == "toolsearch":
-		t.Verb = "loaded tools"
+		t.Verb, t.Step = "loaded tools", StepTool
 	case lower == "tool" || lower == "bash_input":
 		cmd := str("command")
 		if cmd != "" {
 			t.Detail = UnwrapShell(cmd)
 			t.Verb, t.Target = shellSummary(t.Detail, t.Output)
 		} else {
-			t.Verb = "used " + name
+			t.Verb, t.Step = "used "+name, StepTool
 			t.Target = str("file_path", "path", "query", "pattern", "description")
 		}
 	case strings.HasPrefix(name, "mcp__") || strings.Contains(name, "/"):
-		t.Verb, t.Target = "called", strings.ReplaceAll(strings.TrimPrefix(name, "mcp__"), "__", "/")
+		t.Verb, t.Step, t.Target = "called", StepTool, strings.ReplaceAll(strings.TrimPrefix(name, "mcp__"), "__", "/")
 	default:
-		t.Verb = "used " + name
+		t.Verb, t.Step = "used "+name, StepTool
 		t.Target = str("command", "file_path", "path", "query", "pattern", "description")
 	}
 	if t.Target == "" && t.Verb == "ran" {

@@ -153,7 +153,6 @@ func TestRootGateRequiresActionIntentForDirectWorkerCopies(t *testing.T) {
 		{Wake: true, From: "work:author", Kind: "message", To: []string{"work:root"}, NeedsRoot: true, Text: "action"},
 		{Wake: true, From: "work:author", Kind: "message", To: []string{"work"}, NeedsRoot: true, Text: "notice"},
 		{Wake: true, From: "work", Human: true, Kind: "message", To: []string{"work"}, Text: "human"},
-		{Wake: true, From: "work:author", Kind: "failed", OwnerReport: true, To: []string{"work"}, Text: "failure"},
 	} {
 		msg, err := rooms.Post(rec.ID, in)
 		if err != nil {
@@ -161,8 +160,15 @@ func TestRootGateRequiresActionIntentForDirectWorkerCopies(t *testing.T) {
 		}
 		messages = append(messages, msg)
 	}
+	// A failed turn owed to the owner is action input for root.
+	failure, err := rooms.PostEventInput(room.PostEventInput{RoomID: rec.ID, OwnerReport: true, To: []string{"work"},
+		Event: room.TurnEvent{Session: "work:author", SessionID: "ses_author", Turn: 1, State: room.TurnFailed, Summary: "The turn failed", Error: "boom"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages = append(messages, failure)
 	got := mustForSession(t, rooms, meta, messages)
-	if len(got) != 4 || got[0].Text != "action" || got[1].Text != "notice" || got[2].Text != "human" || got[3].Text != "failure" {
+	if len(got) != 4 || got[0].Text != "action" || got[1].Text != "notice" || got[2].Text != "human" || got[3].ID != failure.ID {
 		t.Fatalf("root gate input: %+v", got)
 	}
 }

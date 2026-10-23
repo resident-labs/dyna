@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -221,8 +222,12 @@ func notifyExit(st *shells.Store, id string) error {
 		return err
 	}
 	exit := notify.ShellExit{ID: info.ID, RoomID: info.RoomID, Description: info.Name, Code: -1}
+	if len(info.Cmd) > 0 {
+		exit.Command = filepath.Base(info.Cmd[0])
+	}
 	if info.Exit != nil {
 		exit.Code = info.Exit.Code
+		exit.Duration = info.Exit.Ended.Sub(info.Started)
 	}
 	if runstore.IsSessionDirID(info.Owner) {
 		exit.Parent = info.Owner

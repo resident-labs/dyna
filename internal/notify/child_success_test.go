@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
 
@@ -57,7 +58,7 @@ func TestExplicitPostSuppressesOnlySuccessfulCompletion(t *testing.T) {
 				if result.Message.ID != "" || len(posts) != 1 || posts[0].ID != explicit.Message.ID {
 					t.Fatalf("duplicate successful completion: %+v; posts=%+v", result, posts)
 				}
-			} else if result.Message.Kind != "failed" || len(posts) != 2 {
+			} else if !turnReport(result.Message, room.TurnFailed) || len(posts) != 2 {
 				t.Fatalf("failure was suppressed: %+v; posts=%+v", result, posts)
 			}
 		})

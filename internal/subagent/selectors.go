@@ -100,6 +100,31 @@ func (s *Store) ReplyAddress(msg room.Message) string {
 	if id := msg.SessionIDs[from]; id != "" {
 		ref = id
 	}
+	// A typed event names its own subject: a turn end answers its session, a
+	// run result its parent, and a shell result has no reader to answer.
+	if _, ok := msg.Shell(); ok {
+		return ""
+	}
+	if ev, ok := msg.TurnResult(); ok {
+		if info, err := s.replyTarget(ev.SessionID); err == nil && info.Closed.IsZero() {
+			return info.Address()
+		}
+		return ev.Session
+	}
+	if ev, ok := msg.RunResult(); ok {
+		if ev.Parent != "" {
+			if parent, err := s.replyTarget(ev.Parent); err == nil && parent.Closed.IsZero() {
+				return parent.Address()
+			}
+		}
+		if meta, err := runstore.ReadMeta(ev.RunID); err == nil {
+			return meta.Room
+		}
+		return ""
+	}
+	// TODO: legacy/shim remove later — a shell or run result stored before the
+	// typed events names its job in the sender. Remove when retained room
+	// history ages out.
 	switch {
 	case msg.Kind == string(room.FamilyCheckin) || strings.HasPrefix(from, "shell:"):
 		return ""

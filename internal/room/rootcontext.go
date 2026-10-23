@@ -27,6 +27,16 @@ const (
 	RootQuietPost = "quiet-post"
 )
 
+// rootSelfPost reports a post the root seat itself wrote: an agent post from
+// the seat's address, or a typed turn end that names the seat's session, which
+// the engine posts on that session's behalf.
+func rootSelfPost(msg Message, roomName string) bool {
+	if ev, ok := msg.TurnResult(); ok {
+		return ev.Session == roomName+":"+RootAgent || ev.Session == roomName
+	}
+	return msg.From == roomName+":"+RootAgent
+}
+
 // RootContext classifies one post for the root seat: wake, quiet or skip,
 // plus the quiet post's category. It is the one write-time classifier: notify
 // stores each post's seat delivery row from it, and every reader reads that
@@ -40,7 +50,7 @@ func RootContext(msg Message, roomName string) (RootDecision, string) {
 	// come back to it. An orchestrator's own post as the owner is an echo too,
 	// with two exceptions: a post that needs root, and one addressed to the root
 	// session itself, which the owner's shell and API posts reach directly.
-	if msg.Kind == "voice" || msg.From == roomName+":"+RootAgent {
+	if msg.Kind == "voice" || rootSelfPost(msg, roomName) {
 		return RootSkip, ""
 	}
 	if msg.From == roomName && !msg.Human && !msg.EngineEvent() && !msg.Addressed(roomName+":"+RootAgent) && !msg.NeedsRoot {
@@ -84,8 +94,11 @@ func rootWakes(msg Message, roomName string) bool {
 	// A registered event follows its spec, so its family decides how it
 	// reaches the root seat: a quiet one never wakes root, one that wakes its
 	// target wakes root only when the post needs root, and an alert wakes it
-	// now.
+	// now. A result root asked for itself wakes it when the owner is owed it.
 	if spec, ok := eventSpecFor(msg.Kind, msg.Notice.Kind); ok {
+		if msg.OwnerReport && spec.RootOnOwnerReport {
+			return true
+		}
 		switch spec.Wake {
 		case WakeNever:
 			return false

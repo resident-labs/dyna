@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"dyna-agent/internal/engineclient"
@@ -794,12 +795,54 @@ func (s *Service) completeTargets(ctx context.Context, roomID, from string, targ
 }
 
 func (s *Service) prepareCompletion(roomID, from string, targets []string, kind, text string, turn int, includeOwner bool) (*subagent.ReportPlan, error) {
+	rec, plan, err := s.planCompletion(roomID, targets, includeOwner)
+	if err != nil || plan == nil {
+		return nil, err
+	}
+	return &subagent.ReportPlan{RoomID: rec.ID, Post: room.PostInput{
+		Wake: true, SessionIDs: plan.sessionIDs, From: from, Kind: kind, To: plan.addrs, Via: plan.via, Turn: turn, OwnerReport: plan.ownerReport, Text: text,
+	}}, nil
+}
+
+// prepareEventCompletion plans a typed system event with the same recipients,
+// mention tokens and owner report as a completion post. The registry writes the
+// post kind and its text, so the poster cannot choose them.
+func (s *Service) prepareEventCompletion(roomID string, ev room.Event, targets []string, turn int, includeOwner bool) (*subagent.ReportPlan, error) {
+	rec, plan, err := s.planCompletion(roomID, targets, includeOwner)
+	if err != nil || plan == nil {
+		return nil, err
+	}
+	desc, ok := room.DescribeEvent(ev)
+	if !ok {
+		return nil, fmt.Errorf("event %T is not registered in internal/room/events.go", ev)
+	}
+	payload, err := json.Marshal(ev)
+	if err != nil {
+		return nil, err
+	}
+	return &subagent.ReportPlan{RoomID: rec.ID, Payload: payload, Post: room.PostInput{
+		Wake: true, SessionIDs: plan.sessionIDs, Kind: desc.Kind, Notice: room.EventNotice{Kind: string(desc.Type)}, To: plan.addrs, Via: plan.via, Turn: turn, OwnerReport: plan.ownerReport, Text: desc.Text,
+	}}, nil
+}
+
+// completionPlan is who receives a completion and how the post marks them.
+type completionPlan struct {
+	addrs       []string
+	via         []string
+	sessionIDs  map[string]string
+	ownerReport bool
+}
+
+// planCompletion resolves a completion's recipients. A target is a session
+// address or the room name (the owner). A session target that is closed or in
+// another room falls back to the owner.
+func (s *Service) planCompletion(roomID string, targets []string, includeOwner bool) (room.Record, *completionPlan, error) {
 	if roomID == "" {
-		return nil, errNoRoom
+		return room.Record{}, nil, errNoRoom
 	}
 	rec, err := s.Rooms.Resolve(roomID)
 	if err != nil {
-		return nil, err
+		return room.Record{}, nil, err
 	}
 	var recipients []recipient
 	var via []string
@@ -832,7 +875,7 @@ func (s *Service) prepareCompletion(roomID, from string, targets []string, kind,
 		}
 	}
 	if len(recipients) == 0 {
-		return nil, nil
+		return room.Record{}, nil, nil
 	}
 	addrs := make([]string, len(recipients))
 	for i, r := range recipients {
@@ -847,13 +890,13 @@ func (s *Service) prepareCompletion(roomID, from string, targets []string, kind,
 	if len(sessionIDs) == 0 {
 		sessionIDs = nil
 	}
-	return &subagent.ReportPlan{RoomID: rec.ID, Post: room.PostInput{
-		Wake: true, SessionIDs: sessionIDs, From: from, Kind: kind, To: addrs, Via: via, Turn: turn, OwnerReport: ownerReport, Text: text,
-	}}, nil
+	return rec, &completionPlan{addrs: addrs, via: via, sessionIDs: sessionIDs, ownerReport: ownerReport}, nil
 }
 
 // appendCompletion uses the exact recipient IDs saved with the plan. A
-// renamed or closed recipient never binds the post to a new session.
+// renamed or closed recipient never binds the post to a new session. A plan
+// that keeps a typed event posts it through PostEvent, so a replayed plan
+// stores the same event.
 func (s *Service) appendCompletion(ctx context.Context, plan subagent.ReportPlan) (Result, error) {
 	rec, err := s.Rooms.Resolve(plan.RoomID)
 	if err != nil {
@@ -871,6 +914,16 @@ func (s *Service) appendCompletion(ctx context.Context, plan subagent.ReportPlan
 			SessionIDs: plan.Post.SessionIDs,
 			Producer:   serviceProducer(plan.Service.Service),
 		})
+	} else if len(plan.Payload) > 0 {
+		ev, decodeErr := room.EventFromPayload(plan.Post.Kind, plan.Post.Notice.Kind, plan.Payload)
+		if decodeErr != nil {
+			return Result{}, decodeErr
+		}
+		// The plan's ID is keyed by session ID and turn, so two sessions that
+		// share an address keep their own posts: the registry's own key hashes
+		// the address, which a reused name would collide on.
+		msg, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: plan.RoomID, Event: ev, ID: plan.Post.ID, Producer: plan.Producer,
+			To: plan.Post.To, Via: plan.Post.Via, NeedsRoot: plan.Post.NeedsRoot, SessionIDs: plan.Post.SessionIDs, Turn: plan.Post.Turn, OwnerReport: plan.Post.OwnerReport})
 	} else {
 		msg, err = s.Rooms.Post(plan.RoomID, plan.Post)
 	}
@@ -1154,21 +1207,9 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 	if len(turn.ReportTo) == 0 && kind == "completed" {
 		return nil, nil
 	}
-	text := CompletionText(meta.Address(), turn.N, kind, turn.Result, turn.Error)
 	var targets []string
 	if kind == "failed" {
 		targets = s.sessionParentTargets(meta)
-		failedProfile, failedModel := turn.Profile, turn.Model
-		if failedProfile == "" {
-			failedProfile, failedModel = meta.Profile, meta.Model
-		}
-		if failedProfile != "" {
-			text += "\nFailed model: " + failedProfile
-			if failedModel != "" {
-				text += " / " + failedModel
-			}
-		}
-		text += fmt.Sprintf("\nInspect: dyna subagent output %s --turn %d --transcript\nRecover: dyna subagent transfer %s --profile <working-profile>", meta.ID, turn.N, meta.ID)
 	}
 	if kind == "completed" {
 		targets = s.sessionParentTargets(meta)
@@ -1182,22 +1223,103 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 		if slices.Contains(turn.PostedTo, postedAddress) {
 			return nil, nil
 		}
-	}
-	text, err = s.boundSessionReport(meta.ID, turn.N, text)
-	if err != nil {
-		return nil, err
-	}
-	if kind == "completed" {
-		result, err := s.prepareCompletion(meta.RoomID, meta.Address(), targets, kind, text, turn.N, false)
+		ev, err := s.turnEvent(meta, turn)
+		if err != nil {
+			return nil, err
+		}
+		// One plan per target set: the report is built once, so its spill is
+		// written once.
+		result, err := s.prepareEventCompletion(meta.RoomID, ev, targets, turn.N, false)
 		if result == nil && err == nil {
-			return s.prepareCompletion(meta.RoomID, meta.Address(), []string{meta.Room}, kind, text, turn.N, false)
+			return s.prepareEventCompletion(meta.RoomID, ev, []string{meta.Room}, turn.N, false)
 		}
 		return result, err
 	}
 	if meta.ParentSession == "" || slices.Contains(turn.ReportTo, meta.Room) {
 		targets = append(targets, meta.Room)
 	}
-	return s.prepareCompletion(meta.RoomID, meta.Address(), targets, kind, text, turn.N, true)
+	return s.prepareTurnReport(meta, turn, targets, true)
+}
+
+// turnEvent builds the typed end-of-turn event: the report the turn gave, the
+// failure's error, and how to inspect or recover from it.
+func (s *Service) turnEvent(meta subagent.Meta, turn subagent.Turn) (room.TurnEvent, error) {
+	state := turnState(sessionCompletionKind(turn))
+	summary, err := s.turnSummary(meta, turn)
+	if err != nil {
+		return room.TurnEvent{}, err
+	}
+	ev := room.TurnEvent{Session: meta.Address(), SessionID: meta.ID, Turn: turn.N, State: state, Summary: summary}
+	if state == room.TurnFailed {
+		ev.Error = strings.TrimSpace(turn.Error)
+	}
+	ev.Detail = turnReportDetail(meta, turn, state)
+	return ev, nil
+}
+
+// prepareTurnReport plans the typed end-of-turn event with the recipients,
+// owner report and wake the free-text completion post carried.
+func (s *Service) prepareTurnReport(meta subagent.Meta, turn subagent.Turn, targets []string, includeOwner bool) (*subagent.ReportPlan, error) {
+	ev, err := s.turnEvent(meta, turn)
+	if err != nil {
+		return nil, err
+	}
+	return s.prepareEventCompletion(meta.RoomID, ev, targets, turn.N, includeOwner)
+}
+
+// turnState names the state a completion kind reports in the typed event.
+func turnState(kind string) room.TurnState {
+	switch kind {
+	case "failed":
+		return room.TurnFailed
+	case "stopped":
+		return room.TurnStopped
+	}
+	return room.TurnCompleted
+}
+
+// turnSummary is the report a turn gave, bounded the way its completion text
+// was: a body the inline limit fits, or its head and the file that holds the
+// rest. A service reports the artifact it wrote instead of its own body.
+func (s *Service) turnSummary(meta subagent.Meta, turn subagent.Turn) (string, error) {
+	summary := ""
+	switch result := turn.Result.(type) {
+	case nil:
+	case string:
+		summary = strings.TrimSpace(result)
+	default:
+		if b, err := json.MarshalIndent(result, "", "  "); err == nil && string(b) != "null" {
+			summary = "```json\n" + string(b) + "\n```"
+		}
+	}
+	if summary == "" {
+		return "", nil
+	}
+	return s.boundSessionReport(meta.ID, turn.N, summary)
+}
+
+// turnReportDetail is what an agent needs past the row's own facts: where the
+// full output lives, and how to inspect or recover a failed turn.
+func turnReportDetail(meta subagent.Meta, turn subagent.Turn, state room.TurnState) string {
+	lines := []string{"Full output: dyna subagent output " + meta.Address()}
+	if state != room.TurnFailed {
+		return strings.Join(lines, "\n")
+	}
+	profile, model := turn.Profile, turn.Model
+	if profile == "" {
+		profile, model = meta.Profile, meta.Model
+	}
+	if profile != "" {
+		line := "Failed model: " + profile
+		if model != "" {
+			line += " / " + model
+		}
+		lines = append(lines, line)
+	}
+	lines = append(lines,
+		fmt.Sprintf("Inspect: dyna subagent output %s --turn %d --transcript", meta.ID, turn.N),
+		fmt.Sprintf("Recover: dyna subagent transfer %s --profile <working-profile>", meta.ID))
+	return strings.Join(lines, "\n")
 }
 
 // boundSessionReport keeps helper and ordinary completion reports on one spill
@@ -1221,7 +1343,8 @@ func (s *Service) boundSessionReport(id string, turn int, text string) (string, 
 
 // CompleteRun posts a detached workflow run's terminal state to its immediate
 // parent session, or to its room owner when an external orchestrator started
-// it.
+// it. The card, the agent text and the row's state all come from the typed
+// run event.
 func (s *Service) CompleteRun(ctx context.Context, runID string) (Result, error) {
 	meta, err := runstore.ReadMeta(runID)
 	if err != nil {
@@ -1230,46 +1353,85 @@ func (s *Service) CompleteRun(ctx context.Context, runID string) (Result, error)
 	if meta.Status == "running" {
 		return Result{}, fmt.Errorf("run %s is still running", runID)
 	}
-	kind := completionKind(meta.Status)
-	text := fmt.Sprintf("run:%s %s.", runID, kind)
-	if meta.Status == "canceled" {
-		text += " Canceled."
-	} else if meta.Error != "" {
-		text += " Error: " + resultPreview(meta.Error, 600)
-	} else if result, ok := runstore.ReadResult(runID); ok && result != "" {
-		var value any
-		if json.Unmarshal([]byte(result), &value) == nil {
-			text += " Result: " + resultPreview(value, 900)
+	ev := room.RunEvent{RunID: meta.ID, Name: meta.Name, State: runState(completionKind(meta.Status)), Parent: meta.ParentSession}
+	if !meta.StartedAt.IsZero() && !meta.EndedAt.IsZero() {
+		ev.DurationMS = int(meta.EndedAt.Sub(meta.StartedAt).Milliseconds())
+	}
+	ev.Steps, ev.Agents = runCounts(runID)
+	ev.Summary, ev.Detail = runResult(meta)
+	plan, err := s.prepareEventCompletion(meta.RoomID, ev, s.parentTargets(meta.Room, meta.ParentSession), 0, true)
+	if err != nil || plan == nil {
+		return Result{}, err
+	}
+	plan.Producer = room.ProducerWorkflow
+	return s.appendCompletion(ctx, *plan)
+}
+
+// runState names the state a run's completion kind reports.
+func runState(kind string) room.RunState {
+	switch kind {
+	case "failed":
+		return room.RunFailed
+	case "stopped":
+		return room.RunStopped
+	}
+	return room.RunCompleted
+}
+
+// runCounts reads how many agent calls a run recorded and how many worker
+// sessions served them. A run whose records cannot be read reports none.
+func runCounts(runID string) (steps, agents int) {
+	entries, err := runstore.ReadJournal(runID)
+	if err != nil {
+		return 0, 0
+	}
+	ids := map[int]bool{}
+	for _, entry := range entries {
+		ids[entry.ID] = true
+	}
+	return len(entries), len(ids)
+}
+
+// runResult is the run's own result as a short line, or the cause of its
+// failure, and the pointer an agent follows for the full output.
+func runResult(meta runstore.Meta) (summary, detail string) {
+	switch {
+	case meta.Status == "canceled":
+		summary = "Canceled."
+	case meta.Error != "":
+		summary = resultPreview(meta.Error, 600)
+	default:
+		result, _ := runstore.ReadResult(meta.ID)
+		if strings.TrimSpace(result) != "" {
+			var value any
+			if json.Unmarshal([]byte(result), &value) == nil {
+				summary = resultPreview(value, 900)
+			}
+		}
+		if summary == "" {
+			summary = "No result."
 		}
 	}
-	text += fmt.Sprintf(" Full output: dyna runs show %s", runID)
-	return s.complete(ctx, meta.RoomID, "run:"+runID, s.parentTargets(meta.Room, meta.ParentSession), kind, text, 0)
+	return summary, "Full output: dyna runs show " + meta.ID
 }
 
 // ShellExit is one finished shell job, as its owner hears of it.
 type ShellExit struct {
 	ID, RoomID, Parent string
 	Description        string
-	Code               int
+	// Command is the command's first word, which labels the job's row.
+	Command string
+	Code    int
+	// Duration is how long the job ran, from its start to its exit.
+	Duration time.Duration
 	// Tail is the last lines of the job's output.
 	Tail string
 }
 
 // CompleteShell posts a detached shell's exit to its parent session or room
-// owner, with the exit code and the tail of its output.
+// owner as a typed shell result: the job's label, its state, its exit code and
+// duration, and its output behind the row's own toggle.
 func (s *Service) CompleteShell(ctx context.Context, e ShellExit) (Result, error) {
-	kind := "completed"
-	if e.Code != 0 {
-		kind = "failed"
-	}
-	text := fmt.Sprintf("shell:%s %s with exit code %d", e.ID, kind, e.Code)
-	if e.Description != "" {
-		text += ": " + e.Description
-	}
-	if tail := strings.TrimRight(e.Tail, "\n"); tail != "" {
-		text += "\nLast output:\n```\n" + tail + "\n```"
-	}
-	text += "\nOutput: dyna shell tail " + e.ID
 	if e.RoomID == "" {
 		return Result{}, errNoRoom
 	}
@@ -1277,7 +1439,43 @@ func (s *Service) CompleteShell(ctx context.Context, e ShellExit) (Result, error
 	if err != nil {
 		return Result{}, err
 	}
-	return s.complete(ctx, e.RoomID, "shell:"+e.ID, s.parentTargets(rec.Name, e.Parent), kind, text, 0)
+	state := room.ShellCompleted
+	if e.Code != 0 {
+		state = room.ShellFailed
+	}
+	ev := room.ShellEvent{ShellID: e.ID, Label: shellLabel(e.Command, e.Description), State: state, ExitCode: e.Code,
+		DurationMS: int(e.Duration.Milliseconds()), Output: outputLines(e.Tail), Parent: e.Parent,
+		Detail: "Full output: dyna shell tail " + e.ID}
+	plan, err := s.prepareEventCompletion(e.RoomID, ev, s.parentTargets(rec.Name, e.Parent), 0, true)
+	if err != nil || plan == nil {
+		return Result{}, err
+	}
+	plan.Producer = room.ProducerShell
+	return s.appendCompletion(ctx, *plan)
+}
+
+// shellLabel labels a job's row: its command's first word and the short
+// description its caller gave, or the one of them it has.
+func shellLabel(command, description string) string {
+	command, description = strings.TrimSpace(command), strings.TrimSpace(description)
+	switch {
+	case command == "" && description == "":
+		return "shell"
+	case command == "":
+		return description
+	case description == "" || strings.EqualFold(description, command):
+		return command
+	}
+	return command + " · " + description
+}
+
+// outputLines splits a job's output tail into the lines its row shows.
+func outputLines(tail string) []string {
+	tail = strings.TrimRight(tail, "\n")
+	if strings.TrimSpace(tail) == "" {
+		return nil
+	}
+	return strings.Split(tail, "\n")
 }
 
 // FormatMessage renders one watch line as compact JSON.
