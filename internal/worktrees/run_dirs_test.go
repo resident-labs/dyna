@@ -18,6 +18,10 @@ func TestInferOwnersReadsRunDirectoryList(t *testing.T) {
 	run := filepath.Join(runstore.RunsDir(), "wf_listed")
 	inferenceTestWrite(t, filepath.Join(run, "meta.json"), map[string]any{"id": "wf_listed", "status": "running"})
 	inferenceTestBytes(t, filepath.Join(run, "dirs.jsonl"), []byte(`"`+tree+`"`+"\n"))
+	// Finish the one-time import before testing runtime list lookup.
+	if err := runstore.Migrate(filepath.Dir(runstore.RunsDir())); err != nil {
+		t.Fatal(err)
+	}
 	// The journal is not read: invalid content would fail a journal read.
 	inferenceTestBytes(t, filepath.Join(run, "journal.jsonl"), []byte("not json\n"))
 	got, err := inferOwners(context.Background(), []string{tree}, nil)
