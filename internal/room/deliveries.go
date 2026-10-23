@@ -21,8 +21,14 @@ const (
 	DeliveryQueued DeliveryState = "queued"
 	// DeliveryClaimed is taken by the recipient's turn and not finished.
 	DeliveryClaimed DeliveryState = "claimed"
-	// DeliveryDelivered reached the recipient.
+	// DeliveryDelivered reached the recipient, and a turn receipt says so.
 	DeliveryDelivered DeliveryState = "delivered"
+	// DeliveryImported comes from the one-time index import of posts that were
+	// stored before the index existed. It says the row is not known to have
+	// reached its recipient and not known to have missed it: the turn receipts
+	// decide. An imported row still takes a claim, a cancellation and a
+	// dismissal, so a pending post an owner can see stays theirs to drop.
+	DeliveryImported DeliveryState = "imported"
 	// DeliveryCancelled was dropped before it reached the recipient.
 	DeliveryCancelled DeliveryState = "cancelled"
 	// DeliveryFailed could not reach the recipient.

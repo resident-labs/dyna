@@ -37,7 +37,7 @@ func TestDormantMessageDeliveryState(t *testing.T) {
 			if state == "missing" {
 				// A claim for a post the room log does not hold: the row is there,
 				// the post is gone.
-				insertDeliveryRow(t, e, info.ID, "msg_0000000000000000", room.DeliveryClaimed, 1)
+				setDeliveryRow(t, e, info.ID, "msg_0000000000000000", room.DeliveryClaimed, 1)
 				cancelPostFor(t, e, info.ID, msg.ID)
 			}
 			if state == "cancelled" {

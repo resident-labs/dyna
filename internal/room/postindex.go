@@ -56,16 +56,22 @@ CREATE TABLE post_index_cursor (
  log_offset INTEGER NOT NULL
 );`
 
-// postDeliveriesV2 rebuilds post_deliveries with the claiming turn and the
-// dismissed state. SQLite cannot change a CHECK constraint in place, so the
-// table is copied and replaced; SQLite drops the old table's index with it.
+// postDeliveriesV2 rebuilds post_deliveries with the claiming turn, the
+// dismissed state and the imported state. SQLite cannot change a CHECK
+// constraint in place, so the table is copied and replaced; SQLite drops the old
+// table's index with it.
+//
+// The last statement gives version 1's imported rows their own state: that
+// release marked every retained row delivered without checking the recipient's
+// receipts, and no turn claimed those rows, so a delivered row a turn did claim
+// is the only one that stays delivered.
 const postDeliveriesV2 = `CREATE TABLE post_deliveries_v2 (
  room_id TEXT NOT NULL,
  post_id TEXT NOT NULL,
  session_id TEXT NOT NULL,
  mode TEXT NOT NULL CHECK(mode IN ('wake','quiet')),
  category TEXT NOT NULL DEFAULT '',
- state TEXT NOT NULL CHECK(state IN ('queued','claimed','delivered','cancelled','failed','dismissed')),
+ state TEXT NOT NULL CHECK(state IN ('queued','claimed','delivered','cancelled','failed','dismissed','imported')),
  claimed_turn INTEGER NOT NULL DEFAULT 0,
  updated_at INTEGER NOT NULL,
  PRIMARY KEY(post_id, session_id)
@@ -75,7 +81,8 @@ INSERT INTO post_deliveries_v2(room_id, post_id, session_id, mode, category, sta
 DROP TABLE post_deliveries;
 ALTER TABLE post_deliveries_v2 RENAME TO post_deliveries;
 CREATE INDEX post_deliveries_session ON post_deliveries(session_id, post_id);
-CREATE INDEX post_deliveries_updated ON post_deliveries(updated_at);`
+CREATE INDEX post_deliveries_updated ON post_deliveries(updated_at);
+UPDATE post_deliveries SET state='imported' WHERE state='delivered' AND claimed_turn=0;`
 
 // postIndexImportKey records that the retained posts of every room were
 // imported into the post index.
@@ -217,7 +224,7 @@ func (s *Store) addNamedRows(db *sql.DB, rec Record) error {
 		ctx := context.Background()
 		for _, r := range rows {
 			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO post_deliveries(room_id, post_id, session_id, mode, category, state, updated_at) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-				rec.ID, r.PostID, r.SessionID, string(r.Mode), r.Category, string(DeliveryDelivered), at); err != nil {
+				rec.ID, r.PostID, r.SessionID, string(r.Mode), r.Category, string(DeliveryImported), at); err != nil {
 				return err
 			}
 		}
@@ -306,15 +313,17 @@ func (s *Store) rewritePostAuthors(db *sql.DB, rec Record) error {
 // post index existed; remove once every supported store has run
 // room.post_index.import.
 //
-// Imported deliveries are delivered: the readers that acted on them have
-// already done so, and a later reader must not deliver them again.
+// Imported rows are imported, not delivered: the readers that acted on those
+// posts have mostly done so, but a pending one has not, and the index cannot
+// tell them apart. The turn receipts can, so they decide delivery, and an
+// imported row stays pending for its owner.
 func (s *Store) importPostIndex(db *sql.DB) error {
 	records, err := storedRecords(db)
 	if err != nil {
 		return err
 	}
 	for _, rec := range records {
-		if err := s.indexPostsFrom(rec.ID, 0, DeliveryDelivered); err != nil {
+		if err := s.indexPostsFrom(rec.ID, 0, DeliveryImported); err != nil {
 			return err
 		}
 	}

@@ -23,8 +23,9 @@ import (
 //     and returns the post as claimed again.
 //   - A later turn takes over a post a finished turn claimed and did not
 //     deliver, which is what a write of the queue blob did.
-//   - A cancellation only drops a queued delivery. Once a turn claimed a post,
-//     the owner cannot cancel it.
+//   - A cancellation only drops a pending delivery: queued, or imported from a
+//     release that could not tell a delivered post from a pending one. Once a
+//     turn claimed a post, the owner cannot cancel it.
 //   - A dismissal drops a queued or a claimed delivery. The caller checks
 //     first that the post is pending and that no turn is running (see
 //     subagent's DismissPendingPost), and the turn lock makes that race-free.
@@ -126,13 +127,35 @@ func addClaim(ctx context.Context, conn *sql.Conn, set DeliverySet, postID strin
 	if rows > 0 {
 		return false, nil
 	}
+	mode, err := deliveryModeOfPost(ctx, conn, set.RoomID, postID)
+	if err != nil {
+		return false, err
+	}
 	result, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO post_deliveries(room_id, post_id, session_id, mode, category, state, claimed_turn, updated_at)
-VALUES(?, ?, ?, 'quiet', '', 'claimed', ?, ?)`, set.RoomID, postID, set.Keys[0], turn, at)
+VALUES(?, ?, ?, ?, '', 'claimed', ?, ?)`, set.RoomID, postID, set.Keys[0], string(mode), turn, at)
 	if err != nil {
 		return false, err
 	}
 	n, err := result.RowsAffected()
 	return n > 0, err
+}
+
+// deliveryModeOfPost is the mode a delivery row this API adds carries: the mode
+// of the post's stored deliveries, so the added row never changes whether the
+// post asks its reader for a turn. The wake decision was made when the post was
+// written; a session that inherits a post inherits that decision with it. A post
+// with no delivery row at all is quiet.
+func deliveryModeOfPost(ctx context.Context, conn *sql.Conn, roomID, postID string) (DeliveryMode, error) {
+	var mode string
+	err := conn.QueryRowContext(ctx, `SELECT mode FROM post_deliveries WHERE room_id=? AND post_id=?
+ORDER BY mode='wake' DESC LIMIT 1`, roomID, postID).Scan(&mode)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeliveryQuiet, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return DeliveryMode(mode), nil
 }
 
 // CoverDeliveries cancels the deliveries of postIDs that a held prompt
@@ -210,7 +233,7 @@ func CancelDeliveryIn(ctx context.Context, conn *sql.Conn, set DeliverySet, post
 	args := []any{at, set.RoomID, postID}
 	args = keyArgs(args, set.Keys)
 	n, err := execCount(ctx, conn, "UPDATE post_deliveries SET state='cancelled', updated_at=? WHERE room_id=? AND post_id=?"+
-		" AND session_id IN ("+inClause(set.Keys)+") AND state='queued'", args...)
+		" AND session_id IN ("+inClause(set.Keys)+") AND state IN ('queued','imported')", args...)
 	if err != nil {
 		return false, err
 	}
@@ -240,8 +263,9 @@ func (s *Store) DismissDelivery(ctx context.Context, ev hub.Event, set DeliveryS
 //
 // A post the session has no row for, such as one it inherits from another
 // session's inbox, gets one: the owner named this session's dismissal, and
-// every origin's later read must see it. Such a row is quiet and dismissed, so
-// no reader takes it for input or for a wake.
+// every origin's later read must see it. The row copies the post's delivery
+// mode, so it changes nothing about who the post wakes, and it is dismissed, so
+// no reader takes it for input.
 func DismissDeliveryIn(ctx context.Context, conn *sql.Conn, set DeliverySet, postID string) (bool, error) {
 	if !set.Claimed() {
 		return false, nil
@@ -253,7 +277,7 @@ func DismissDeliveryIn(ctx context.Context, conn *sql.Conn, set DeliverySet, pos
 	args := []any{at, set.RoomID, postID}
 	args = keyArgs(args, set.Keys)
 	n, err := execCount(ctx, conn, "UPDATE post_deliveries SET state='dismissed', updated_at=? WHERE room_id=? AND post_id=?"+
-		" AND session_id IN ("+inClause(set.Keys)+") AND state IN ('queued','claimed')", args...)
+		" AND session_id IN ("+inClause(set.Keys)+") AND state IN ('queued','claimed','imported')", args...)
 	if err != nil {
 		return false, err
 	}
@@ -271,8 +295,12 @@ func DismissDeliveryIn(ctx context.Context, conn *sql.Conn, set DeliverySet, pos
 	if rows > 0 {
 		return false, nil
 	}
+	mode, err := deliveryModeOfPost(ctx, conn, set.RoomID, postID)
+	if err != nil {
+		return false, err
+	}
 	_, err = conn.ExecContext(ctx, `INSERT INTO post_deliveries(room_id, post_id, session_id, mode, category, state, claimed_turn, updated_at)
-VALUES(?, ?, ?, 'quiet', '', 'dismissed', 0, ?)`, set.RoomID, postID, set.Keys[0], at)
+VALUES(?, ?, ?, ?, '', 'dismissed', 0, ?)`, set.RoomID, postID, set.Keys[0], string(mode), at)
 	return err == nil, err
 }
 
