@@ -37,6 +37,12 @@ type Writer struct {
 
 	appendMu sync.Mutex // orders appends and their events
 	mirrorMu sync.Mutex // orders rollback copies, stamps and imports
+
+	events     sync.Mutex  // guards pending, publishing and idle
+	pending    []hub.Event // committed changes waiting to publish, oldest first
+	publishing bool        // a caller or the background goroutine publishes
+	idle       *sync.Cond  // signals that publishing became false
+
 	mu       sync.Mutex
 	next     uint64
 	inFlight map[uint64]time.Time // write -> when it was called
@@ -75,12 +81,18 @@ func For(db *sql.DB) *Writer {
 func newWriter(db *sql.DB) *Writer { return &Writer{db: db} }
 
 // SetPublish sends each later committed change to publish, for example the
-// engine's event hub. Without it, a Writer publishes nothing. For Write it
-// runs under the database writer lock, and for Append under the Writer's
-// append lock, so events follow commit order within each store and each log.
-// Neither lock is reentrant: publish must not block, and must never write
-// state. A Write and an Append can publish at the same time, so publish must
-// also be safe for concurrent use.
+// engine's event hub. Without it, a Writer publishes nothing. Write and
+// Append queue the change under the lock that orders it (the database
+// writer lock or the append lock) and publish it after that lock is
+// released, so events follow commit order within each store and each log,
+// and publish never runs under the writer (issue #247). publish runs on one
+// goroutine at a time: the writing caller publishes its own change before
+// it returns, unless an earlier change is still publishing. Then the change
+// waits in the queue, the caller returns at once, and a background
+// goroutine publishes it; WaitPublished waits for it. So a publish that
+// waits for a lock never blocks a writer, and a caller never runs another
+// caller's publish under its own locks. publish must still not take a lock
+// that the writing caller can hold, and must not call WaitPublished.
 func (w *Writer) SetPublish(publish func(hub.Event)) { w.publish.Store(&publish) }
 
 type done struct {
@@ -103,8 +115,8 @@ const (
 // Write runs fn in one writer transaction. Nothing is published when ctx
 // ends first or fn fails. fn and the helpers it calls may run any SQL on the
 // conn they are given: the ratchet counts the transaction, not each statement.
-// The change is published under the writer lock, so events follow commit
-// order (item 14).
+// The change is queued under the writer lock, so events follow commit
+// order (item 14), and published after the lock is released.
 //
 // When ctx carries a request ID (ForRequest), the call's first write also
 // records it, in the same transaction. A write whose ID was already applied
@@ -112,8 +124,12 @@ const (
 func (w *Writer) Write(ctx context.Context, c hub.Event, fn func(*sql.Conn) error) error {
 	fn, req := w.recordFirst(ctx, fn)
 	id, start := w.begin()
-	err := database.ImmediateThen(ctx, w.db, fn, func() { w.notify(c) })
+	var publish func()
+	err := database.ImmediateThen(ctx, w.db, fn, func() { publish = w.queue(c) })
 	w.end(id, start, c)
+	if publish != nil {
+		publish()
+	}
 	if err == nil && req != nil {
 		req.recorded.Store(true)
 	}
@@ -180,14 +196,93 @@ func (w *Writer) trim(at time.Time) {
 	w.recent = slices.Delete(w.recent, 0, cut)
 }
 
-// notify publishes c. An event with no topic is not published: its store
-// still publishes another way (posts, from the room watch, until item 16).
-func (w *Writer) notify(c hub.Event) {
+// queue records c in commit order. The caller holds the lock that orders c
+// and, when the result is not nil, calls it after releasing every lock it
+// can: it publishes c. When an earlier change is still publishing, c waits
+// in the queue for the background goroutine and queue returns nil. An event
+// with no topic is not published: its store still publishes another way
+// (posts, from the room watch, until item 16).
+func (w *Writer) queue(c hub.Event) func() {
 	if c.Topic == "" {
+		return nil
+	}
+	if publish := w.publish.Load(); publish == nil || *publish == nil {
+		return nil
+	}
+	w.events.Lock()
+	defer w.events.Unlock()
+	if w.publishing {
+		w.pending = append(w.pending, c)
+		return nil
+	}
+	w.publishing = true
+	return func() {
+		defer w.handOff()
+		w.publishOne(c)
+	}
+}
+
+// handOff ends the caller's publish. Changes queued meanwhile go to a
+// background goroutine, so the caller never runs another caller's publish
+// under its own locks.
+func (w *Writer) handOff() {
+	w.events.Lock()
+	defer w.events.Unlock()
+	if len(w.pending) > 0 {
+		go w.publishPending()
 		return
 	}
+	w.idleLocked()
+}
+
+// publishPending publishes queued changes in order until none are left. It
+// holds no lock while publish runs.
+func (w *Writer) publishPending() {
+	w.events.Lock()
+	defer w.events.Unlock()
+	for len(w.pending) > 0 {
+		c := w.pending[0]
+		w.pending = w.pending[1:]
+		w.events.Unlock()
+		w.publishOne(c)
+		w.events.Lock()
+	}
+	w.idleLocked()
+}
+
+// idleLocked marks the queue empty with no publish running. The caller
+// holds w.events.
+func (w *Writer) idleLocked() {
+	w.pending = nil
+	w.publishing = false
+	if w.idle != nil {
+		w.idle.Broadcast()
+	}
+}
+
+// publishOne calls publish for c. A panic is logged, so later changes still
+// publish and WaitPublished returns.
+func (w *Writer) publishOne(c hub.Event) {
+	defer func() {
+		if r := recover(); r != nil {
+			w.logf("state: publish %s %s %s panicked: %v", c.Topic, c.Room, c.Key, r)
+		}
+	}()
 	if publish := w.publish.Load(); publish != nil && *publish != nil {
 		(*publish)(c)
+	}
+}
+
+// WaitPublished returns after every change committed before the call has
+// been published. It must not be called from publish.
+func (w *Writer) WaitPublished() {
+	w.events.Lock()
+	defer w.events.Unlock()
+	if w.idle == nil {
+		w.idle = sync.NewCond(&w.events)
+	}
+	for w.publishing {
+		w.idle.Wait()
 	}
 }
 
