@@ -91,6 +91,9 @@ func check(q querier, sessions, id string) error {
 	if m.ID != id {
 		return errors.New("cannot verify session ownership: stored session ID does not match")
 	}
+	if m.HistoryOnly {
+		return errors.New("historical session cannot publish")
+	}
 	if m.IsClosed() {
 		return ErrClosed
 	}

@@ -1,7 +1,6 @@
 package subagent
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -75,28 +74,18 @@ func (s *Store) cachedClosed(id string) bool {
 // readRoomMeta distinguishes unassigned history from damaged room evidence.
 // It never invents membership or rewrites the original record.
 func (s *Store) readRoomMeta(id string) (Meta, bool, error) {
-	meta, raw, err := s.readMetaRecord(id)
+	meta, _, err := s.readMetaRecord(id)
 	if err != nil {
 		return Meta{}, false, err
 	}
 	if meta.ID != id {
 		return Meta{}, false, fmt.Errorf("session %s has missing or mismatched metadata ID", id)
 	}
+	if meta.HistoryOnly {
+		return meta, false, nil
+	}
 	if meta.RoomID != "" && meta.Room != "" {
 		return meta, true, nil
-	}
-	var stamp struct {
-		RoomID json.RawMessage `json:"roomId"`
-		Room   json.RawMessage `json:"room"`
-	}
-	if err := json.Unmarshal(raw, &stamp); err != nil {
-		return Meta{}, false, err
-	}
-	// Pre-room sessions omitted both fields. Explicit empty/null fields and
-	// partial stamps are damaged records; do not silently hide them.
-	// TODO: legacy/shim remove later — skips pre-room session history during metadata scans; remove when no retained session lacks a room stamp
-	if len(stamp.RoomID) == 0 && len(stamp.Room) == 0 {
-		return meta, false, nil
 	}
 	return Meta{}, false, fmt.Errorf("%w: session %s has an incomplete room stamp", ErrNoRoom, id)
 }
