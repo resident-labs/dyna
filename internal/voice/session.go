@@ -194,6 +194,30 @@ func tellPrompt(text string, shared []room.Attachment) string {
 	return strings.Join(parts, "\n\n")
 }
 
+// A spoken turn result is clipped like Codex output: about 1,000 tokens as a
+// head, a marker and a tail, so the end of a long result survives.
+const (
+	resultBudget = 4000
+	resultMarker = "\n…output truncated…\n"
+)
+
+// resultPrompt hands Voice the final result of a root turn that reports to
+// the owner. It is plain speech, so nothing is read aloud as markdown.
+func resultPrompt(text string) string {
+	return "[BACKEND] Root finished a turn for the owner: " + clipResult(plainSpeech(text))
+}
+
+// clipResult bounds text to the result budget, keeping both its start and its
+// end.
+func clipResult(text string) string {
+	if len(text) <= resultBudget {
+		return text
+	}
+	room := resultBudget - len(resultMarker)
+	head := headBytes(text, room/2)
+	return head + resultMarker + tailBytes(text, room-len(head))
+}
+
 // sharedName names a shared file by what it is and its title.
 func sharedName(a room.Attachment) string {
 	switch {
