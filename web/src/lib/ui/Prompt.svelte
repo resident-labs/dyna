@@ -55,6 +55,7 @@
   }
 
   function keydown(e: KeyboardEvent) {
+    if (e.isComposing || e.keyCode === 229) return
     if (e.key === 'Enter' && (!multiline || e.ctrlKey || e.metaKey) && e.target === field) {
       e.preventDefault()
       submit()
@@ -77,7 +78,7 @@
         <input bind:this={field} bind:value={text} {placeholder} disabled={busy} autocomplete="off" autocapitalize="off" spellcheck="false" />
       {/if}
     </label>
-    {#if multiline}<p class="hint"><kbd>Ctrl</kbd>+<kbd>Enter</kbd> to send</p>{/if}
+    {#if multiline}<p class="hint"><kbd>Ctrl</kbd>/<kbd>⌘</kbd>+<kbd>Enter</kbd> to send</p>{/if}
     {#if error}<p class="err">{error}</p>{/if}
     <div class="row">
       <button class="ghost" onclick={oncancel} disabled={busy}>Cancel</button>
