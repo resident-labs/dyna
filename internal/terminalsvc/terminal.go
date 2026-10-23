@@ -524,6 +524,12 @@ func control(f *os.File, fn func(uintptr) error) error {
 	return inner
 }
 
+// KillSessionGroups kills every process group in a private child session.
+// Callers must start the child with Setsid and wait for it before releasing state.
+func KillSessionGroups(sessionID int) {
+	killSessionGroups(sessionID)
+}
+
 // killSessionGroups includes background jobs that an interactive shell placed
 // outside its own group. A process that deliberately starts a new OS session
 // (for example a detached supervisor) owns its separate lifetime.

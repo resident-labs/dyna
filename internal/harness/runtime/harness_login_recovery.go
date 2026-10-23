@@ -42,10 +42,11 @@ func (a *Runtime) cancelPrivateLogin(id string) error {
 	defer login.control.Unlock()
 	flow, terminalID := login.flow, login.terminalID
 	if login.signIn != nil {
-		// A runner flow stops its own child: mark the card, then release the gate.
+		// Stop and join native work before restoring credentials or releasing the gate.
 		login.signIn.set(func(st *SignInState) { st.Phase = signInCancelled })
 		login.finished = true
 		login.signIn.stop()
+		<-login.signIn.done
 		err := flow.Cancel()
 		a.privateLoginMu.Lock()
 		if a.privateLogins[id] == login {
