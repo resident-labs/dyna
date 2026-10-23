@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -53,7 +52,7 @@ func Migrate(dataDir string) error {
 	return projection.Migrate(dataDir)
 }
 
-// openRuns opens the runs table and the rollback helper's stamp table. Both
+// openRuns opens the runs table and the legacy import stamp table. Both
 // migrate only in the engine and in tests; elsewhere an unmigrated store
 // fails with its name (item 41).
 func openRuns(dataDir string) (*sql.DB, error) {
@@ -98,14 +97,11 @@ func nextRev(ctx context.Context, conn *sql.Conn) (int64, error) {
 
 func runsDB() (*sql.DB, error) { return openRuns(store.DataDir()) }
 
-// metaKey names a run's meta.json copy for the rollback helper.
+// metaKey names a retained run metadata file in the import stamp table.
 func metaKey(id string) string { return "runs/" + id + "/meta" }
 
-// lockMeta holds a run's meta while one process imports, writes and copies
-// it: the runner, dyna workflows commands and the engine all write a run's
-// meta, and the helper orders those steps within one process only. The lock
-// file lives outside the run's folder, so a read never changes an archived
-// run (retention reads its newest file time) or needs it to be writable.
+// lockMeta serializes run metadata writes across processes. The lock file
+// stays outside the run folder so archived runs need not be writable.
 func lockMeta(id string) (func(), error) {
 	lockTaken()
 	if err := os.MkdirAll(runLocksDir(), 0o700); err != nil {
@@ -130,8 +126,7 @@ func removeRunLocks(id string) error {
 // lockTaken runs each time a run's lock is taken. Tests count it.
 var lockTaken = func() {}
 
-// changeMeta updates the canonical row and writes a rollback copy.
-// A failed copy is logged; the row is committed.
+// changeMeta updates the canonical row.
 func changeMeta(dir, id string, fn func(ctx context.Context, conn *sql.Conn) error) (Meta, error) {
 	db, err := runsDB()
 	if err != nil {
@@ -142,39 +137,15 @@ func changeMeta(dir, id string, fn func(ctx context.Context, conn *sql.Conn) err
 		return Meta{}, err
 	}
 	defer unlock()
-	w, ctx := state.For(db), context.Background()
-	path := filepath.Join(dir, "meta.json")
-	if err := w.Write(ctx, hub.Event{}, func(conn *sql.Conn) error { return fn(ctx, conn) }); err != nil {
+	ctx := context.Background()
+	if err := state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error { return fn(ctx, conn) }); err != nil {
 		return Meta{}, err
 	}
 	m, ok, err := storedMeta(db, id)
 	if err == nil && !ok {
 		err = fmt.Errorf("run %s has no meta", id)
 	}
-	if err != nil {
-		return m, err
-	}
-	// TODO: legacy/shim remove later — the earlier release reads run state only from meta.json, so a downgrade still sees every run; remove with item 31.
-	if err := w.Mirror(ctx, metaKey(id), path, func(out io.Writer) error {
-		b, err := json.MarshalIndent(m, "", "  ")
-		if err == nil {
-			_, err = out.Write(append(b, '\n'))
-		}
-		return err
-	}); err != nil {
-		log.Printf("run %s: meta.json copy for the earlier release: %v", id, err)
-	}
-	// TODO: legacy/shim remove later — an earlier-release runner reads only the paused file; remove with item 31, when no run from before this release is alive.
-	// Keep this copy under the metadata lock, so a pause cannot recreate it
-	// after a concurrent finish has removed it.
-	pauseFile := filepath.Join(dir, "paused")
-	if m.Status == "running" && m.Paused {
-		return m, os.WriteFile(pauseFile, []byte("paused\n"), 0o644)
-	}
-	if err := os.Remove(pauseFile); err != nil && !os.IsNotExist(err) {
-		return m, err
-	}
-	return m, nil
+	return m, err
 }
 
 // TODO: legacy/shim remove later — reads a meta.json that an earlier release wrote, which reads and writes only the file; remove with item 31, when no run or command from before this release is alive.

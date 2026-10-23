@@ -200,7 +200,6 @@ not-state internal/runstore/runstore.go Run.Finish 1 # result.json, a blob writt
 not-state internal/runstore/runstore.go Run.FinishWorkflow 1 # a sub-workflow's result.json, a blob written once
 not-state internal/runstore/runstore.go Run.StartWorkflow 1 # a sub-workflow's script.js, a blob written once
 not-state internal/runstore/runstore.go Run.recordDirs 1 # removes a directory list (a log) that a write left broken
-violation internal/runstore/meta_db.go changeMeta 2 # TODO: legacy/shim remove later — copies the row pause state for earlier-release runners; remove with item 31
 not-state internal/runstore/runstore.go create 1 # script.js, a blob written once
 not-state internal/sessionlife/lifecycle.go WithPublication 1 # a non-blocking flock that serializes one session's publication; a crash frees it, a row could not
 not-state internal/settings/settings.go writeAtomic 1 # settings.json is hand-edited config, item 20
