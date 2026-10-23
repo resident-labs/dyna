@@ -186,45 +186,49 @@ func TestBulkActionsKeepConsolidationReservations(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			e := newEnv(t)
 			rec := e.room("alpha")
-			// Reservation guards need stored hierarchy, not completed harness turns.
-			seed := func(name string, parent *subagent.Info) subagent.Info {
+			// The reservation guards read stored hierarchy and status only, so the
+			// reserved source needs no harness turn.
+			seed := func(name string, parent *subagent.Info, status string) subagent.Info {
 				meta := subagent.Meta{ID: subagent.NewID(), Name: name, RoomID: rec.ID, Room: rec.Name,
-					Profile: "mock", Status: subagent.StatusIdle, Dir: t.TempDir(), Created: time.Now(), Depth: 1}
+					Profile: "mock", Status: status, Dir: t.TempDir(), Created: time.Now(), Depth: 1}
 				if parent != nil {
 					meta.ParentSession, meta.Depth = parent.ID, parent.Depth+1
 				}
 				recordtest.Write(t, e.mgr.Store.Root, meta.ID, meta)
 				return subagent.Info{Meta: meta, Status: meta.Status}
 			}
-			lead := seed("lead", nil)
-			target := seed("target", &lead)
-			var source, free subagent.Info
+			lead := seed("lead", nil, subagent.StatusIdle)
+			target := seed("target", &lead, subagent.StatusIdle)
+			// A stop refuses a session that is not running before it reads the
+			// reservation, so the reserved source needs a running row to reach
+			// the same guard as the other actions.
+			sourceStatus := subagent.StatusIdle
+			if action == "stop" {
+				sourceStatus = subagent.StatusRunning
+			}
+			source := seed("source", &lead, sourceStatus)
+			// The free session is created exactly once: Start refuses a name that
+			// a seeded row already holds in the same room.
+			var free subagent.Info
 			if action == "stop" {
 				// A child delegates from its parent's goal.
 				if _, err := e.svc.goalService().Store.Add(rec.ID, "owner", goals.Input{Text: "Work", Holders: []string{lead.ID}}); err != nil {
 					t.Fatal(err)
 				}
-				// Wake needs an exact harness resume. Keep real completed
-				// turns for these two sessions before testing active stop.
-				source = e.start(rec, "source", &lead)
-				free = e.start(rec, "free", &lead)
+				// The stopped session's first turn is the long one, so the case
+				// needs no completed setup turn and no wake before the batch.
+				e.as(&lead)
+				info, _, err := e.mgr.Start(context.Background(), subagent.StartOptions{Goal: "Finish the test task", Profile: "mock", Name: "free", Dir: t.TempDir(), Task: "SLEEP:60000"})
+				e.as(nil)
+				if err != nil {
+					t.Fatalf("Start free: %v", err)
+				}
+				free = info
 			} else {
-				source = seed("source", &lead)
-				free = seed("free", &lead)
+				free = seed("free", &lead, subagent.StatusIdle)
 			}
 			e.mgr.ConsolidationLaunch = func(*subagent.Manager, string, string) error { return nil }
 			e.mgr.TransferLaunch = func(*subagent.Manager, string, string) error { return nil }
-			if action == "stop" {
-				for _, session := range []subagent.Info{source, free} {
-					post, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: rec.Name, To: []string{session.Address()}, Text: "SLEEP:60000"})
-					if err != nil {
-						t.Fatal(err)
-					}
-					if _, err = e.mgr.Wake(e.ctx, session.ID, subagent.WakeOptions{MessageID: post.ID}); err != nil {
-						t.Fatal(err)
-					}
-				}
-			}
 			operation, err := e.mgr.Consolidate(context.Background(), subagent.ConsolidationOptions{Sessions: []string{target.ID, source.ID}, Target: target.ID})
 			if err != nil {
 				t.Fatal(err)
@@ -232,7 +236,6 @@ func TestBulkActionsKeepConsolidationReservations(t *testing.T) {
 			defer func() {
 				_, _ = e.mgr.CancelConsolidation(context.Background(), rec.ID, operation.ID)
 				if action == "stop" {
-					_, _ = e.mgr.Stop(e.ctx, source.ID)
 					_, _ = e.mgr.Stop(e.ctx, free.ID)
 				}
 			}()
@@ -243,6 +246,9 @@ func TestBulkActionsKeepConsolidationReservations(t *testing.T) {
 			got, err := e.svc.BulkSessionAction(e.ctx, rec.ID, BulkSessionOptions{Action: action, Sessions: []string{source.ID, free.ID}, Profile: "mock", Force: true})
 			if err != nil || got.Succeeded != 1 || got.Failed != 1 || got.Results[0].OK || !got.Results[1].OK {
 				t.Fatalf("reserved and free batch = %+v, %v", got, err)
+			}
+			if !strings.Contains(got.Results[0].Error, "consolidation") {
+				t.Fatalf("reserved source was refused for another reason: %q", got.Results[0].Error)
 			}
 			meta, err := e.mgr.Store.ReadMeta(source.ID)
 			if err != nil || meta.Consolidating != operation.ID || !meta.Closed.IsZero() || meta.ParentSession != lead.ID || meta.Transfer == nil || meta.Transfer.ID != before.Transfer.ID {
