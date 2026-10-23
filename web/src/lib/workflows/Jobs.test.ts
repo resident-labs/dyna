@@ -40,4 +40,16 @@ test('job logs retry failed reads, preserve reading position, and reject late re
   pending[2]?.resolve({ text: 'stale first log', truncated: false })
   await old
   assert.equal((state.log as ShellLog).text, 'second log')
+  const closing = call(state, 'loadLog')
+  state.sel = ''
+  pending[4]?.resolve({ text: 'closed selection', truncated: false })
+  await closing
+  assert.equal(state.logLoading, false, 'a completed read clears loading after Back')
+  state.sel = 'second'
+  state.log = null
+  const reopened = call(state, 'loadLog')
+  assert.equal(pending.length, 6, 'reopening the same job starts a new read')
+  pending[5]?.resolve({ text: 'reopened log', truncated: false })
+  await reopened
+  assert.equal((state.log as ShellLog).text, 'reopened log')
 })
