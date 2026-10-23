@@ -51,6 +51,9 @@ var ownerCalls = []string{
 	"DismissNotice",
 	// A machine's roles, slots and route decide where the engine sends work.
 	"SaveMachine",
+	// A probe reads a machine over SSH and stores what it found; the owner
+	// starts it from the Machine page.
+	"ProbeMachine",
 }
 
 // protectOwnerCalls shares caller resolution with other mutations, then
