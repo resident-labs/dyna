@@ -23,7 +23,7 @@ const fixture = `<script>
   let roomId = room.id, detailRequest = 0, drill = null, card = null, viewing = null, feedAtBottom = true, view = '', openJob = '';
   const feed = { posts: [post] }, jumps = [], feedView = { jump: id => jumps.push(id) };
   const GENERAL = 'general', VOICE = 'voice-call';
-  const clearItemLink = () => {}, loadEarlier = async () => false, questionID = () => '', openQuestion = () => {}, isShellResult = () => false, inChannel = () => false, homeChannel = () => GENERAL;
+  const clearItemLink = () => {}, loadEarlier = async () => false, questionID = () => '', openQuestion = () => {}, isShellResult = () => false, inView = () => false, homeView = () => GENERAL;
   ${topLevelFunctions(app, ['jumpTo']).get('jumpTo')}
   export function reached() { return [...jumps] }
 </script>

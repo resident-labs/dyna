@@ -54,7 +54,7 @@ async function harness(thread = false) {
     export const scrollToIndex = (i) => list.scrollToIndex(i, 'start')
   </script>
   {#key $model.room}
-  <HistoryList bind:this={list} scroller={$model.scroller} items={$model.items} key={(p) => p.id} estimate={() => 40} earlier={$model.earlier} newer={$model.newer} onnewer={$model.onnewer} onpresent={$model.onpresent} onearlier={load} beginning="Beginning of #general">
+  <HistoryList bind:this={list} scroller={$model.scroller} items={$model.items} key={(p) => p.id} estimate={() => 40} earlier={$model.earlier} newer={$model.newer} onnewer={$model.onnewer} onpresent={$model.onpresent} onearlier={load} beginning="Beginning of Room chat">
     {#snippet children(row)}<div data-post={row.id}>{row.id}</div>{/snippet}
   </HistoryList>
   {/key}`
@@ -103,7 +103,7 @@ async function harness(thread = false) {
   }
 }
 
-for (const thread of [false]) test((thread ? 'a thread' : 'a channel') + ' opens at its latest post on first load and after a switch', { timeout: 9000 }, async () => {
+for (const thread of [false]) test((thread ? 'a thread' : 'a view') + ' opens at its latest post on first load and after a switch', { timeout: 9000 }, async () => {
   const h = await harness(thread)
   const el = () => thread ? h.target.querySelector('.thread-log') : h.feed
   const gap = () => el().scrollHeight - el().clientHeight - el().scrollTop
@@ -116,12 +116,12 @@ for (const thread of [false]) test((thread ? 'a thread' : 'a channel') + ' opens
     h.scroll(0)
     h.update({ room: 'other', items: rows(200, 50) })
     await h.tick()
-    assert.ok(gap() < 48, `a switched channel is ${gap()}px above the latest post`)
+    assert.ok(gap() < 48, `a switched view is ${gap()}px above the latest post`)
     assert.ok(h.target.querySelector('[data-post="p249"]'), 'the latest post renders')
   } finally { await h.close() }
 })
 
-test('a jump right after a channel switch wins over opening at the latest post', { timeout: 9000 }, async () => {
+test('a jump right after a view switch wins over opening at the latest post', { timeout: 9000 }, async () => {
   const h = await harness()
   try {
     const feed = h.mount(async () => false)
@@ -155,9 +155,9 @@ test('older page keeps the visible post at the same pixel when the beginning mar
     assert.ok(post, 'anchor post is rendered')
     const before = post.parentElement.getBoundingClientRect().top
     h.update({ items: rows(0, 60), earlier: false })
-    page.resolve(true); await h.until(() => h.target.textContent.includes('Beginning of #general')); h.flushSync()
+    page.resolve(true); await h.until(() => h.target.textContent.includes('Beginning of Room chat')); h.flushSync()
     assert.equal(h.target.querySelector('[data-post="p16"]').parentElement.getBoundingClientRect().top, before)
-    assert.match(h.target.textContent, /Beginning of #general/)
+    assert.match(h.target.textContent, /Beginning of Room chat/)
   } finally { await h.close() }
 })
 
@@ -180,12 +180,12 @@ test('beginning marker appears only after older pages end', { timeout: 9000 }, a
     h.mount(async () => false)
     assert.doesNotMatch(h.target.textContent, /Beginning of/)
     h.update({ earlier: false })
-    assert.match(h.target.textContent, /Beginning of #general/)
+    assert.match(h.target.textContent, /Beginning of Room chat/)
     assert.equal(h.target.querySelectorAll('.vrow').length < 50, true, 'list remains virtualized')
   } finally { await h.close() }
 })
 
-for (const thread of [false, true]) test((thread ? 'selected thread' : 'channel') + ' continues past an empty filtered page at the top of a full viewport', { timeout: 9000 }, async () => {
+for (const thread of [false, true]) test((thread ? 'selected thread' : 'view') + ' continues past an empty filtered page at the top of a full viewport', { timeout: 9000 }, async () => {
   const h = await harness(thread), empty = deferred()
   let calls = 0
   try {
@@ -284,7 +284,7 @@ test('a replaced first date divider cannot take the visible post anchor', {timeo
   const before=h.target.querySelector('[data-post="p10"]').parentElement.getBoundingClientRect().top
   h.update({items:[{id:'new-day'},...rows(0,60)],earlier:false})
   page.resolve(true)
-  await h.until(()=>h.target.textContent.includes('Beginning of #general'));h.flushSync()
+  await h.until(()=>h.target.textContent.includes('Beginning of Room chat'));h.flushSync()
   const post=h.target.querySelector('[data-post="p10"]')
   assert.ok(post,'the old visible post remains rendered')
   assert.equal(post.parentElement.getBoundingClientRect().top,before)
@@ -329,7 +329,7 @@ test('discarded history rows release their measured DOM nodes', { timeout: 9000 
  } finally { await h.close() }
 })
 
-test('a short channel list fills its viewport from older history; a short thread panel does not page the DM', { timeout: 9000 }, async () => {
+test('a short feed view list fills its viewport from older history; a short thread panel does not page the DM', { timeout: 9000 }, async () => {
   for (const thread of [false, true]) {
     const h = await harness(thread)
     let calls = 0

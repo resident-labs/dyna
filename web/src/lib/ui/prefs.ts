@@ -41,22 +41,23 @@ export function saveShowCompaction(value: boolean) {
   showCompaction.set(value)
 }
 
-// channelList is how the room sidebar lists channels: "all" shows every
-// agent channel, "folded" keeps #general and folds the rest into one "More
-// channels" row, and "messages" replaces them all with one Messages row that
-// opens #general.
-export const CHANNEL_LISTS: [string, string][] = [['all', 'All channels'], ['folded', 'Folded'], ['messages', 'Messages only']]
+// feedViewList is how the room sidebar lists feed views: "all" shows every
+// agent view, "folded" keeps the room chat and folds the rest into one "More
+// views" row, and "messages" replaces them all with one room chat row.
+export const VIEW_LISTS: [string, string][] = [['all', 'All views'], ['folded', 'Folded'], ['messages', 'Room chat only']]
 
-export function channelListOf(saved: Record<string, unknown>) {
+export function feedViewListOf(saved: Record<string, unknown>) {
+  // TODO: legacy/shim remove later — the layout keeps its old key, so a
+  // browser that saved a list before the feed view rename keeps it.
   const value = saved.channelList
-  return typeof value === 'string' && CHANNEL_LISTS.some(([v]) => v === value) ? value : 'all'
+  return typeof value === 'string' && VIEW_LISTS.some(([v]) => v === value) ? value : 'all'
 }
 
-export const channelList = writable(channelListOf(read()))
+export const feedViewList = writable(feedViewListOf(read()))
 
-export function saveChannelList(value: string) {
+export function saveFeedViewList(value: string) {
   saveLayout({ channelList: value })
-  channelList.set(value)
+  feedViewList.set(value)
 }
 
 // lastRoom is the room the owner had open: {room, view}, or null when none

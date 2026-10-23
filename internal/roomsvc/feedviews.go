@@ -6,24 +6,24 @@ import (
 	"dyna-agent/internal/room"
 )
 
-// channelIndex routes posts into the web app's channels: #general and one
-// channel per lead. Channels group the room feed; they never change delivery
+// feedViews routes posts into the web app's feed views: the room chat and one
+// view per lead. A feed view filters the room feed; it never changes delivery
 // or wakes. It uses the full stored member tree, including closed sessions.
-type channelIndex struct {
+type feedViews struct {
 	byAddress map[string]Member
 	byID      map[string]Member
 	owners    map[string]bool
 }
 
 // DMChannel holds posts that belong only in direct-message threads;
-// no channel view shows them.
+// no feed view shows them.
 const DMChannel = "dm"
 
 // VoiceChannel is the channel of the owner's voice call.
 const VoiceChannel = room.VoiceAgent
 
-func newChannelIndex(members []Member) channelIndex {
-	c := channelIndex{map[string]Member{}, map[string]Member{}, map[string]bool{}}
+func newFeedViews(members []Member) feedViews {
+	c := feedViews{map[string]Member{}, map[string]Member{}, map[string]bool{}}
 	for _, m := range members {
 		if m.Owner {
 			c.owners[m.Address] = true
@@ -34,16 +34,22 @@ func newChannelIndex(members []Member) channelIndex {
 	return c
 }
 
-func (c channelIndex) home(m Member) string {
+// home is the view token a member's posts belong to. The token keeps its
+// "channel:" prefix because routes and saved views store it, so a rename would
+// break links the owner already has.
+//
+// TODO: legacy/shim remove later — change the token only together with a read
+// for the "channel:" form.
+func (c feedViews) home(m Member) string {
 	if _, ok := c.byID[m.Parent]; ok {
 		return "channel:" + m.Parent
 	}
 	return "general"
 }
 
-// views lists the channels a post shows in, the sender's home first.
-func (c channelIndex) views(post room.Message) []string {
-	// The owner's voice call is its own conversation, never #general. Root
+// viewsFor lists the feed views a post shows in, the sender's home first.
+func (c feedViews) viewsFor(post room.Message) []string {
+	// The owner's voice call is its own conversation, never the room chat. Root
 	// still reads it: the call through its owner DM block, relays as input.
 	if post.Source == room.SourceVoice {
 		return []string{VoiceChannel}
@@ -75,12 +81,12 @@ func (c channelIndex) views(post room.Message) []string {
 			}
 			add(c.home(recipient))
 		}
-		// An explicit post to root shows in general.
+		// An explicit post to root shows in the room chat.
 		if c.owners[address] {
 			add("general")
 		}
 	}
-	// Unknown system posts stay visible in general rather than disappear.
+	// Unknown system posts stay visible in the room chat rather than disappear.
 	if len(out) == 0 {
 		add("general")
 	}

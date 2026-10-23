@@ -61,7 +61,7 @@ const senderGap = 7 * 60 * 1000
 const shellSender = /^shell:sh_\d{8}-\d{6}-[a-f0-9]{8}$/
 const resultKinds: ReadonlySet<string> = new Set(['completed', 'failed', 'stopped'])
 
-// Automatic `dyna shell` exit records stay out of channel feeds; the
+// Automatic `dyna shell` exit records stay out of feed views; the
 // shell-jobs view lists those jobs. They still wake the job's parent.
 export function isShellResult(post: FeedInput): boolean {
   return post.completion === true && resultKinds.has(post.kind ?? '') &&

@@ -38,7 +38,7 @@ test('Root only highlights root’s posts to the owner; Everyone to you highligh
   assert.equal(highlighted(look, rootDone, 'room'), false)
 })
 
-test('a choice applies to every channel, and clearing it restores the default', () => {
+test('a choice applies to every feed view, and clearing it restores the default', () => {
   let look = withChoice(empty(), 'finished', 'hidden')
   assert.equal(setting(look, 'finished'), 'hidden')
   assert.equal(visibleTo(look)(done), false)
@@ -57,7 +57,7 @@ test('the reader returns a saved on/off finished choice as saved, with no conver
   assert.equal(setting({ all: { finished: false } }, 'finished'), false)
 })
 
-test('per-channel overrides a browser saved before the look became global no longer apply', () => {
+test('per-view overrides a browser saved before the look became global no longer apply', () => {
   // The stored shape had a `channels` map keyed by room and view.
   const saved = readLook('{"all":{"finished":"hidden"},"channels":{"room_a:general":{"finished":"full"}}}')
   assert.deepEqual(saved, { all: { finished: 'hidden' } })
