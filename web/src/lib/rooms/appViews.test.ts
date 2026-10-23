@@ -10,9 +10,27 @@ import { sections } from './workViews.ts'
 // feed is a broken page.
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
 const ast = parse(source, { modern: true })
-function find(node, ok) {
+
+// The view chain is a tree of if blocks; only these fields matter to the walk.
+interface IfNode {
+  type: string
+  test: { start: number; end: number }
+  consequent: unknown
+  alternate?: { nodes?: unknown[] }
+  elseif?: boolean
+}
+
+function isIfNode(value: unknown): value is IfNode {
+  if (!value || typeof value !== 'object') return false
+  const node = value as Record<string, unknown>
+  const test = node.test
+  return typeof node.type === 'string' && typeof node.start === 'number' && typeof node.end === 'number'
+    && !!test && typeof test === 'object' && typeof Reflect.get(test, 'start') === 'number'
+}
+
+function find(node: unknown, ok: (node: IfNode) => boolean): IfNode | null {
   if (!node || typeof node !== 'object') return null
-  if (ok(node)) return node
+  if (isIfNode(node) && ok(node)) return node
   for (const v of Object.values(node)) {
     const hit = Array.isArray(v) ? v.map((x) => find(x, ok)).find(Boolean) : find(v, ok)
     if (hit) return hit
@@ -20,19 +38,21 @@ function find(node, ok) {
   return null
 }
 const chain = find(ast.fragment, (n) => n.type === 'IfBlock' && source.slice(n.test.start, n.test.end) === "view === 'cihealth'")
-const components = (node, out = []) => {
+const components = (node: unknown, out: string[] = []): string[] => {
   if (!node || typeof node !== 'object') return out
-  if (node.type === 'Component') out.push(node.name)
-  for (const [k, v] of Object.entries(node)) if (k !== 'alternate' || node.type !== 'IfBlock') Array.isArray(v) ? v.forEach((x) => components(x, out)) : components(v, out)
+  const record = node as Record<string, unknown>
+  if (record.type === 'Component' && typeof record.name === 'string') out.push(record.name)
+  for (const [k, v] of Object.entries(record)) if (k !== 'alternate' || record.type !== 'IfBlock') Array.isArray(v) ? v.forEach((x) => components(x, out)) : components(v, out)
   return out
 }
-function rendered(view) {
+function rendered(view: string): string[] {
   for (let n = chain; n; ) {
     if (vm.runInNewContext(source.slice(n.test.start, n.test.end), { view, hasTerminal: true, computers: [] })) return components(n.consequent)
     const next = n.alternate?.nodes?.[0]
-    if (next?.type === 'IfBlock' && next.elseif) n = next
+    if (isIfNode(next) && next.type === 'IfBlock' && next.elseif) n = next
     else return components(n.alternate)
   }
+  return []
 }
 
 test('every sidebar tab renders its own page, not the feed', () => {
