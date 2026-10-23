@@ -1,4 +1,5 @@
 <script>
+  import { refreshHeldComments } from './lib/prs/heldComments.ts'
   import { actions, actionItems, roomMenu as roomActionItems } from './lib/ui/actions.js'
   import { createReloadGate, listVisible, reconcileRows } from './lib/ui/reloadGate.js'
   import Skeleton from './lib/ui/Skeleton.svelte'
@@ -1761,6 +1762,7 @@
   }
 
   function handle(ev) {
+    if (['prs', 'changes', 'resync'].includes(ev.kind)) refreshHeldComments()
     const item = applyItemEvent(ev)
     home?.event(ev)
     if (ev.kind === 'computer') return handleComputer(ev)

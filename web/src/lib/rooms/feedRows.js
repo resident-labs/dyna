@@ -59,9 +59,9 @@ export function feedRows(posts, unreadFrom = '', calls = []) {
       !post.replyTo && prev.from === post.from && !!prev.human === !!post.human && gap < senderGap &&
       (prev.to || []).join() === (post.to || []).join()
     const last = out[out.length - 1]
-    const pr = post.kind === 'pr' ? parsePRPost(post.text, post.notice) : null
+    const pr = post.kind === 'pr' && post.notice?.kind !== 'held-comment' ? parsePRPost(post.text, post.notice) : null
     const plain = (p) => !p.replyTo && !p.forward && !p.attachments?.length
-    if (pr?.url && last?.post?.kind === 'pr' && plain(post) && plain(last.post) &&
+    if (pr?.url && last?.posts && plain(post) && plain(last.post) &&
       parsePRPost(last.post.text, last.post.notice).url === pr.url) {
       last.posts.push(post)
       last.post = post

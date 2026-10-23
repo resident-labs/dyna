@@ -98,3 +98,14 @@ test('a folded PR header retains approval through a generic update, and replaces
   assert.deepEqual(feedPREvents([approved, notice('New head.', 'b'.repeat(40))]).map((e) => e.kind), ['update'])
   assert.deepEqual(feedPREvents([approved, notice('PR merged.')]).map((e) => e.kind), ['merged'])
 })
+
+test('held comment notices stay separate from grouped PR updates', () => {
+  const common = { kind: 'pr', from: 'dyna', to: [], text: 'https://github.com/acme/app/pull/7\n\nPR update.' }
+  const posts = [
+    { ...common, id: 'one', ts: 1000 },
+    { ...common, id: 'held', ts: 2000, notice: { kind: 'held-comment', changeId: 'acme/app#7', commentId: 'issue:19' } },
+    { ...common, id: 'three', ts: 3000 },
+  ]
+  const rows = feedRows(posts).filter((row) => row.kind === 'post')
+  assert.deepEqual(rows.map((row) => row.post.id), ['one', 'held', 'three'])
+})
