@@ -75,3 +75,21 @@ export interface HookRunLog {
   tail: string
   exitCode: number
 }
+
+// Notice is notices.Notice, a machine alert such as low disk space.
+export interface Notice {
+  id: string
+  key: string
+  kind: string
+  severity: string
+  text: string
+  at: string
+  command?: string
+}
+
+// Pairing is devicesvc.Pairing.
+export interface Pairing {
+  code: string
+  url: string
+  expires: string
+}

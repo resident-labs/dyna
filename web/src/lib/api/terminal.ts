@@ -56,3 +56,10 @@ export interface ShellLog {
   text: string
   truncated: boolean
 }
+
+// ShellLogChunk is terminalsvc.ShellLogChunk: one byte range of a job's log.
+export interface ShellLogChunk {
+  text: string
+  next: number
+  size: number
+}

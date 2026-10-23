@@ -181,3 +181,57 @@ export interface BulkSessionResult {
   succeeded: number
   failed: number
 }
+
+// RoomSessionState is subagent.RoomSessionState: how a room's sessions run.
+// pausedAt and resumedAt are the zero time "0001-01-01T00:00:00Z" when unset.
+export interface RoomSessionState {
+  roomId: string
+  paused: boolean
+  pausedAt: string
+  resumedAt: string
+  running: number
+  held: number
+  dormant: number
+}
+
+export interface RoomSessionResult {
+  session: string
+  ok: boolean
+  status: string
+  error?: string
+}
+
+// RoomSessionMutation is subagent.RoomSessionMutation, the answer of pause, resume and clear.
+export interface RoomSessionMutation {
+  state: RoomSessionState
+  results: RoomSessionResult[] | null
+  succeeded: number
+  failed: number
+}
+
+// ConsolidationOptions is subagent.ConsolidationOptions, the request of ConsolidateSessions.
+export interface ConsolidationOptions {
+  sessions: string[]
+  target: string
+  profile?: string
+  model?: string
+}
+
+// TransferOptions is subagent.TransferOptions as the web sends it.
+// waitSeconds 0 falls back to the transcript at once; the most is 120.
+export interface TransferOptions {
+  profile: string
+  waitSeconds: number
+  model?: string
+  retry?: boolean
+}
+
+// BulkSessionOptions is roomsvc.BulkSessionOptions.
+export interface BulkSessionOptions {
+  sessions: string[]
+  action: string
+  profile?: string
+  model?: string
+  force?: boolean
+  parent?: string
+}
