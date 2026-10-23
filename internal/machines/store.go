@@ -66,6 +66,17 @@ type Machine struct {
 	Local   bool      `json:"local"`
 	Created time.Time `json:"createdAt"`
 	Updated time.Time `json:"updatedAt"`
+
+	// The probe fields are what the last probe read. A machine that has never
+	// been probed has Health unknown and no capabilities.
+	Health       Health       `json:"health"`
+	Capabilities Capabilities `json:"capabilities"`
+	Load         Load         `json:"load"`
+	// LastProbe is when the last probe started, and LastSeen when a probe last
+	// reached the machine. Both are zero before the first probe.
+	LastProbe  time.Time `json:"lastProbe"`
+	LastSeen   time.Time `json:"lastSeen"`
+	ProbeError string    `json:"probeError"`
 }
 
 // HasRole reports whether the machine has the role.
@@ -140,22 +151,43 @@ func (m Machine) Validate() error {
 	return nil
 }
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 const schema = `CREATE TABLE machines (
-	id         TEXT    PRIMARY KEY,
-	name       TEXT    NOT NULL UNIQUE,
-	roles      TEXT    NOT NULL CHECK(json_valid(roles)),
-	ssh        TEXT    NOT NULL,
-	ci_slots   INTEGER NOT NULL CHECK(ci_slots >= 0),
-	enabled    INTEGER NOT NULL CHECK(enabled IN (0,1)),
-	local      INTEGER NOT NULL CHECK(local IN (0,1)),
-	created_ms INTEGER NOT NULL,
-	updated_ms INTEGER NOT NULL
+	id             TEXT    PRIMARY KEY,
+	name           TEXT    NOT NULL UNIQUE,
+	roles          TEXT    NOT NULL CHECK(json_valid(roles)),
+	ssh            TEXT    NOT NULL,
+	ci_slots       INTEGER NOT NULL CHECK(ci_slots >= 0),
+	enabled        INTEGER NOT NULL CHECK(enabled IN (0,1)),
+	local          INTEGER NOT NULL CHECK(local IN (0,1)),
+	created_ms     INTEGER NOT NULL,
+	updated_ms     INTEGER NOT NULL,
+	capabilities   TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(capabilities)),
+	health         TEXT    NOT NULL DEFAULT 'unknown',
+	last_probe_ms  INTEGER NOT NULL DEFAULT 0,
+	last_seen_ms   INTEGER NOT NULL DEFAULT 0,
+	probe_error    TEXT    NOT NULL DEFAULT '',
+	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load))
 );
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
 
-const columns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
+// probeColumns add what the probes read to a version 1 table. A row that was
+// stored before the first probe keeps its registry data and starts unknown.
+var probeColumns = []string{
+	`ALTER TABLE machines ADD COLUMN capabilities TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(capabilities))`,
+	`ALTER TABLE machines ADD COLUMN health TEXT NOT NULL DEFAULT 'unknown'`,
+	`ALTER TABLE machines ADD COLUMN last_probe_ms INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE machines ADD COLUMN last_seen_ms INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE machines ADD COLUMN probe_error TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE machines ADD COLUMN last_load TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(last_load))`,
+}
+
+// registryColumns are the columns a machine edit writes. The probe columns
+// change only through SaveProbe.
+const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
+
+const columns = registryColumns + `,capabilities,health,last_probe_ms,last_seen_ms,probe_error,last_load`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -180,8 +212,8 @@ func (s Store) db() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "machines.version", schemaVersion, func(conn *sql.Conn, _ int) error {
-		return prepare(conn)
+	err = database.Migrate(db, "machines.version", schemaVersion, func(conn *sql.Conn, old int) error {
+		return prepare(conn, old)
 	})
 	if err != nil {
 		return nil, err
@@ -189,9 +221,16 @@ func (s Store) db() (*sql.DB, error) {
 	return db, nil
 }
 
-// prepare runs once, inside the version 1 migration.
-func prepare(conn *sql.Conn) error {
+// prepare runs inside the migration. Version 1 created the registry and
+// imported the old local CI nodes; version 2 added the probe columns.
+func prepare(conn *sql.Conn, old int) error {
 	ctx := context.Background()
+	if old >= schemaVersion {
+		return nil
+	}
+	if old == 1 {
+		return addProbeColumns(ctx, conn)
+	}
 	if _, err := conn.ExecContext(ctx, schema); err != nil {
 		return err
 	}
@@ -199,6 +238,16 @@ func prepare(conn *sql.Conn) error {
 		return err
 	}
 	return importLocalCINodes(ctx, conn)
+}
+
+// addProbeColumns adds the probe columns to a version 1 table.
+func addProbeColumns(ctx context.Context, conn *sql.Conn) error {
+	for _, statement := range probeColumns {
+		if _, err := conn.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("add probe columns: %w", err)
+		}
+	}
+	return nil
 }
 
 // addLocal inserts the engine host row when the registry has none. The name is
@@ -216,7 +265,7 @@ func addLocal(ctx context.Context, conn *sql.Conn) error {
 		return err
 	}
 	now := time.Now().UnixMilli()
-	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+columns+`) VALUES(?,?,?,'',0,1,1,?,?)`,
+	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`) VALUES(?,?,?,'',0,1,1,?,?)`,
 		newID(), name, marshalRoles([]Role{RoleEngine, RoleAgents}), now, now)
 	return err
 }
@@ -324,7 +373,7 @@ func importNode(ctx context.Context, conn *sql.Conn, name, ssh string, slots int
 	if err != nil {
 		return err
 	}
-	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+columns+`) VALUES(?,?,?,?,?,?,0,?,?)`,
+	_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`) VALUES(?,?,?,?,?,?,0,?,?)`,
 		newID(), name, marshalRoles([]Role{RoleCI}), ssh, slots, enabled, now, now)
 	return err
 }
@@ -404,17 +453,107 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var roles string
-	var created, updated int64
-	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated); err != nil {
+	var roles, capabilities, health, load, probeError string
+	var created, updated, probed, seen int64
+	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
+		&capabilities, &health, &probed, &seen, &probeError, &load); err != nil {
 		return Machine{}, err
 	}
 	if err := json.Unmarshal([]byte(roles), &m.Roles); err != nil {
 		return Machine{}, fmt.Errorf("machine %s roles: %w", m.Name, err)
 	}
+	if err := json.Unmarshal([]byte(capabilities), &m.Capabilities); err != nil {
+		return Machine{}, fmt.Errorf("machine %s capabilities: %w", m.Name, err)
+	}
+	if err := json.Unmarshal([]byte(load), &m.Load); err != nil {
+		return Machine{}, fmt.Errorf("machine %s load: %w", m.Name, err)
+	}
+	m.Health, m.ProbeError = parseHealth(health), probeError
 	m.Created = time.UnixMilli(created)
 	m.Updated = time.UnixMilli(updated)
+	if probed > 0 {
+		m.LastProbe = time.UnixMilli(probed)
+	}
+	if seen > 0 {
+		m.LastSeen = time.UnixMilli(seen)
+	}
 	return m, nil
+}
+
+// healthOnToggle keeps a machine's health while it stays enabled, and shows
+// disabled while it is turned off. A machine that comes back starts unknown,
+// so no client reads the last probe of a machine that was off.
+const healthOnToggle = `CASE WHEN ? = 0 THEN 'disabled' WHEN health = 'disabled' THEN 'unknown' ELSE health END`
+
+// healthOnCreate is the health a new machine starts with.
+func healthOnCreate(enabled bool) Health {
+	if !enabled {
+		return HealthDisabled
+	}
+	return HealthUnknown
+}
+
+// flag is the integer form of a switch that SQL compares with = 0.
+func flag(on bool) int {
+	if on {
+		return 1
+	}
+	return 0
+}
+
+// SaveProbe stores what one probe read. A failed probe keeps the capabilities
+// and the load of the last good probe, sets the machine offline and records
+// the error. A machine that is off stores disabled and nothing else.
+func (s Store) SaveProbe(ctx context.Context, id string, r ProbeResult) error {
+	db, err := s.db()
+	if err != nil {
+		return err
+	}
+	stored, err := getByID(ctx, db, id)
+	if err != nil {
+		return err
+	}
+	health := r.Health
+	if !stored.Enabled {
+		health = HealthDisabled
+	}
+	if r.At.IsZero() {
+		r.At = time.Now()
+	}
+	// Only a probe that reached the machine replaces what the last good probe
+	// read, so a machine that is off keeps its capabilities for the owner.
+	var capabilities, load string
+	if health == HealthOnline {
+		rawCaps, err := json.Marshal(r.Capabilities)
+		if err != nil {
+			return err
+		}
+		rawLoad, err := json.Marshal(r.Load)
+		if err != nil {
+			return err
+		}
+		capabilities, load = string(rawCaps), string(rawLoad)
+	}
+	probeErr := ""
+	if health == HealthOffline {
+		probeErr = r.Err
+	}
+	probed := r.At.UnixMilli()
+	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: probeKeyPrefix + stored.Name}, func(conn *sql.Conn) error {
+		if health == HealthOnline {
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET capabilities=?, last_load=?, health=?, last_probe_ms=?, last_seen_ms=?, probe_error='' WHERE id=?`,
+				capabilities, load, string(health), probed, probed, id)
+			return err
+		}
+		if health == HealthDisabled {
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, last_probe_ms=?, probe_error='' WHERE id=?`,
+				string(health), probed, id)
+			return err
+		}
+		_, err := conn.ExecContext(ctx, `UPDATE machines SET health=?, last_probe_ms=?, probe_error=? WHERE id=?`,
+			string(health), probed, probeErr, id)
+		return err
+	})
 }
 
 // Save inserts a machine, or updates the stored row that has this ID, and
@@ -446,8 +585,8 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	}
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=? WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), m.ID)
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+` WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -457,9 +596,9 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+columns+`) VALUES(?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health) VALUES(?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli())
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)))
 		return err
 	})
 	if err != nil {
@@ -495,7 +634,7 @@ func (s Store) SetEnabled(ctx context.Context, name string, enabled bool) error 
 		if _, err := getOn(ctx, conn, name, false); err != nil {
 			return err
 		}
-		_, err := conn.ExecContext(ctx, `UPDATE machines SET enabled=?, updated_ms=? WHERE name=?`, enabled, time.Now().UnixMilli(), name)
+		_, err := conn.ExecContext(ctx, `UPDATE machines SET enabled=?, updated_ms=?, health=`+healthOnToggle+` WHERE name=?`, enabled, time.Now().UnixMilli(), flag(enabled), name)
 		return err
 	})
 }

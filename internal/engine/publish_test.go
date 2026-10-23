@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"dyna-agent/internal/hub"
+	"dyna-agent/internal/machines"
 	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/sessionlife"
@@ -80,5 +81,41 @@ func TestPublishLocalCIRefreshesOnlyRoomsUsingHead(t *testing.T) {
 				t.Fatalf("head %s: unexpected event %+v", head, event)
 			}
 		}
+	}
+}
+
+// A machine edit wakes the CI workers and the probe; a probe result must not.
+// Otherwise every five-minute probe would wake the CI workers.
+func TestPublishMachineChangesWakeOnlyTheRegistryWorkers(t *testing.T) {
+	storetest.Isolate(t)
+	events := hub.New(1)
+	signals := newWorkerSignals()
+	publish := publishState(events, roomsvc.New(nil), signals)
+	drain := func(worker string) bool {
+		select {
+		case <-signals.channels[worker]:
+			return true
+		default:
+			return false
+		}
+	}
+
+	publish(hub.Event{Topic: machines.Topic, Key: "machine:hermeslab"})
+	for _, worker := range []string{"prs", "merges", "probe"} {
+		if !drain(worker) {
+			t.Fatalf("a machine change did not wake %s", worker)
+		}
+	}
+
+	rev := events.Rev()
+	publish(hub.Event{Topic: machines.Topic, Key: "health:hermeslab"})
+	for _, worker := range []string{"prs", "merges", "probe"} {
+		if drain(worker) {
+			t.Fatalf("a probe result woke %s", worker)
+		}
+	}
+	// Clients still get the result, so the machine page can show the health.
+	if events.Rev() != rev+1 {
+		t.Fatalf("a probe result did not reach the hub (rev %d)", events.Rev())
 	}
 }
