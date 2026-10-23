@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
 import { postHref, postAttachment, speaker } from './posts.ts'
+import { sourceRange } from '../../../test/svelte-source.ts'
 
 const room = 'room_20261017-123456-abcdef12'
 test('post links name stored room and post IDs and reject non-post targets', () => {
@@ -21,32 +22,56 @@ test('the same attachment opens in the selected post context without changing st
   assert.equal(postAttachment(attachment, ''), attachment)
 })
 
+// A modified click and its preventDefault call; the component reads no other field.
+interface OpenEvent {
+  button: number
+  preventDefault: () => void
+  ctrlKey?: boolean
+  metaKey?: boolean
+  shiftKey?: boolean
+  altKey?: boolean
+}
+
 const source = readFileSync(new URL('./PostLink.svelte', import.meta.url), 'utf8')
-const open = parse(source).instance.content.body.find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'open')
+const openNode = (parse(source, { modern: true }).instance?.content.body ?? []).find((node) => node.type === 'FunctionDeclaration' && node.id.name === 'open')
+assert.ok(openNode)
 test('source links support in-app navigation and native modified clicks', () => {
-  const calls = []
-  const c = { onopen: (id) => calls.push(id), postId: 'msg_123' }
+  const calls: string[] = []
+  const c: { onopen: ((id: string) => void) | null, postId: string } = { onopen: (id) => calls.push(id), postId: 'msg_123' }
   vm.createContext(c)
-  vm.runInContext(source.slice(open.start, open.end), c)
-  const event = { button: 0, preventDefault() { calls.push('prevent') } }
-  c.open(event)
+  const { start, end } = sourceRange(openNode)
+  vm.runInContext(source.slice(start, end), c)
+  // vm runs untyped JavaScript, so the handler comes back with its call shape.
+  const handlers = vm.runInContext('({ open })', c) as { open: (event: OpenEvent) => void }
+  const state = Object.assign(c, handlers)
+  const event: OpenEvent = { button: 0, preventDefault() { calls.push('prevent') } }
+  state.open(event)
   assert.deepEqual(calls, ['prevent', 'msg_123'])
-  for (const modifier of ['ctrlKey', 'metaKey', 'shiftKey', 'altKey']) c.open({ ...event, [modifier]: true })
-  c.open({ ...event, button: 1 })
-  c.onopen = null
-  c.open(event)
+  for (const modifier of ['ctrlKey', 'metaKey', 'shiftKey', 'altKey']) state.open({ ...event, [modifier]: true })
+  state.open({ ...event, button: 1 })
+  state.onopen = null
+  state.open(event)
   assert.deepEqual(calls, ['prevent', 'msg_123'])
 })
 
+// The Files component hands on the attachment a preview or card shows.
+interface ShownAttachment {
+  id: string
+  mime?: string
+  view?: string
+}
+
 test('Files sends both ordinary previews and card source views through the selected post context', () => {
   const files = readFileSync(new URL('../files/Files.svelte', import.meta.url), 'utf8')
-  const declaration = parse(files).instance.content.body.find((node) => node.type === 'VariableDeclaration' && node.declarations.some((d) => d.id.name === 'open'))
-  const opened = []
-  const c = { postAttachment, postId: 'msg_stored', onopen: (attachment) => opened.push(attachment) }
+  const declaration = (parse(files, { modern: true }).instance?.content.body ?? []).find((node) => node.type === 'VariableDeclaration' && node.declarations.some((d) => d.id.type === 'Identifier' && d.id.name === 'open'))
+  assert.ok(declaration)
+  const opened: ShownAttachment[] = []
+  const c = { postAttachment, postId: 'msg_stored', onopen: (attachment: ShownAttachment) => opened.push(attachment) }
   vm.createContext(c)
-  vm.runInContext(files.slice(declaration.start, declaration.end), c)
-  for (const attachment of [{ id: 'file' }, { id: 'image', mime: 'image/png' }, { id: 'card', view: 'source' }]) {
-    c.attachment = attachment
+  vm.runInContext(files.slice(sourceRange(declaration).start, sourceRange(declaration).end), c)
+  const shown: ShownAttachment[] = [{ id: 'file' }, { id: 'image', mime: 'image/png' }, { id: 'card', view: 'source' }]
+  for (const attachment of shown) {
+    Object.assign(c, { attachment })
     vm.runInContext('open(attachment)', c)
     assert.deepEqual(opened.at(-1), { ...attachment, postId: 'msg_stored' })
     assert.ok(!('postId' in attachment))
