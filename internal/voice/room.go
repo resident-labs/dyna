@@ -234,7 +234,7 @@ func (r *RoomLink) openQuestion(id string) (questions.Question, bool) {
 // options are suggestions: an answer that picks none of them is passed on
 // in the owner's own words.
 func questionPrompt(q questions.Question) string {
-	text := "[BACKEND] Ask the owner: " + q.Text
+	text := "[BACKEND] Ask the owner: " + plainSpeech(q.Text)
 	if len(q.Options) > 0 {
 		text += " The options are: " + strings.Join(q.Options, ", ") + ". The owner may also answer in their own words."
 	}

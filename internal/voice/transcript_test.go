@@ -33,3 +33,11 @@ func TestHallucinatedDropsNoiseLinesOnly(t *testing.T) {
 		}
 	}
 }
+
+// Root writes markdown; Voice reads text aloud, so labels and markers must go.
+func TestPlainSpeechStripsMarkdown(t *testing.T) {
+	in := "## Result\n**Key point:** CI is `green` on [PR 7](https://example.com/7).\n- merged\n- _done_\n```\ngo test\n```"
+	if got, want := plainSpeech(in), "Result Key point: CI is green on PR 7. merged _done_ go test"; got != want {
+		t.Fatalf("plainSpeech = %q, want %q", got, want)
+	}
+}
