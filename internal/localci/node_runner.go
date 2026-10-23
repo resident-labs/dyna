@@ -99,9 +99,6 @@ func (r Runner) nodeCommand(ctx context.Context, out, stderr io.Writer, scope, s
 			remote += " " + shellquote.Quote(arg)
 		}
 		name, args = "ssh", []string{"-o", "BatchMode=yes"}
-		if r.Node.Jump != "" {
-			args = append(args, "-J", r.Node.Jump)
-		}
 		args = append(args, r.Node.SSH, remote)
 	}
 	return fn(ctx, "", nil, out, stderr, name, args...)
@@ -183,12 +180,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	if node.SSH == "" {
 		err = r.run(control, repo, &output, "git", "push", cache, sha+":refs/dyna/ci/"+sha)
 	} else {
-		args := []string{}
-		if node.Jump != "" {
-			args = append(args, "-c", "core.sshCommand=ssh -o BatchMode=yes -J "+shellquote.Quote(node.Jump))
-		}
-		args = append(args, "push", node.SSH+":"+cache, sha+":refs/dyna/ci/"+sha)
-		err = r.run(control, repo, &output, "git", args...)
+		err = r.run(control, repo, &output, "git", "push", node.SSH+":"+cache, sha+":refs/dyna/ci/"+sha)
 	}
 	if err != nil {
 		return result, fmt.Errorf("push commit to node: %w: %s", err, &output)

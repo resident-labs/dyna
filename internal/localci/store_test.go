@@ -31,7 +31,7 @@ func TestStoreNodesAndRoomModes(t *testing.T) {
 	}
 	var events []hub.Event
 	state.For(db).SetPublish(func(ev hub.Event) { events = append(events, ev) })
-	n := Node{Name: "hermes", SSH: "pip@hermeslab", Jump: "ari@omarchy", Slots: 2, Enabled: true}
+	n := Node{Name: "hermes", SSH: "pip@hermeslab", Slots: 2, Enabled: true}
 	if err := s.PutNode(ctx, n); err != nil {
 		t.Fatal(err)
 	}
@@ -79,8 +79,6 @@ func TestStoreRejectsUnsafeNodeConfiguration(t *testing.T) {
 		{Name: "node", Slots: 0},
 		{Name: "node", Slots: 1, SSH: "-oProxyCommand=exec"},
 		{Name: "node", Slots: 1, SSH: "user@host; touch /tmp/injected"},
-		{Name: "node", Slots: 1, SSH: "host", Jump: "$(id)"},
-		{Name: "node", Slots: 1, Jump: "user@host"},
 	} {
 		if err := n.Validate(); err == nil {
 			t.Errorf("accepted unsafe node %#v", n)
@@ -192,5 +190,23 @@ func TestStoreHostedAttemptsPersist(t *testing.T) {
 	}
 	if _, err := s.LoadHostedRuns(ctx, repo, strings.Repeat("b", 40)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("another head inherited hosted attempts = %v", err)
+	}
+}
+
+func TestStoreDropsVersionOneJumpColumn(t *testing.T) {
+	s := fixtureStore(t)
+	db, err := database.Open(s.DataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v1 := strings.Replace(storeSchema, " ssh TEXT NOT NULL,\n", " ssh TEXT NOT NULL,\n jump TEXT NOT NULL,\n", 1)
+	if _, err := db.Exec(v1 + `
+INSERT INTO local_ci_nodes(name,ssh,jump,slots,enabled) VALUES('hermes','pip@hermeslab','ari@omarchy',2,1);
+INSERT INTO meta(key,value) VALUES('localci.schema','1');`); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := s.Nodes(t.Context())
+	if err != nil || !reflect.DeepEqual(nodes, []Node{{Name: "hermes", SSH: "pip@hermeslab", Slots: 2, Enabled: true}}) {
+		t.Fatalf("migrated nodes = %#v, %v", nodes, err)
 	}
 }

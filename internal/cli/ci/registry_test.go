@@ -12,7 +12,7 @@ import (
 	"dyna-agent/internal/localci"
 )
 
-func TestNodeCommandValidatesAndSavesJumpHost(t *testing.T) {
+func TestNodeCommandValidatesAndSavesNode(t *testing.T) {
 	s := localci.Store{DataDir: t.TempDir()}
 	t.Cleanup(func() { database.Close(s.DataDir) })
 	run := func(args ...string) (string, error) {
@@ -24,7 +24,7 @@ func TestNodeCommandValidatesAndSavesJumpHost(t *testing.T) {
 		err := cmd.Execute()
 		return out.String(), err
 	}
-	if _, err := run("add", "hermes", "--ssh", "pip@hermeslab", "--jump", "ari@omarchy", "--slots", "2"); err != nil {
+	if _, err := run("add", "hermes", "--ssh", "pip@hermeslab", "--slots", "2"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := run("add", "hermes", "--slots", "0"); err == nil {
@@ -38,7 +38,7 @@ func TestNodeCommandValidatesAndSavesJumpHost(t *testing.T) {
 	if err != nil || json.Unmarshal([]byte(output), &nodes) != nil || len(nodes) != 1 {
 		t.Fatalf("listed nodes = %q, %v", output, err)
 	}
-	if nodes[0].Slots != 2 || nodes[0].SSH != "pip@hermeslab" || nodes[0].Jump != "ari@omarchy" || !nodes[0].Enabled {
+	if nodes[0].Slots != 2 || nodes[0].SSH != "pip@hermeslab" || !nodes[0].Enabled {
 		t.Fatalf("saved flags = %#v", nodes)
 	}
 	if _, err := run("disable", "hermes"); err != nil {

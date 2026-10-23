@@ -146,19 +146,19 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 	}
 }
 
-func TestNodePreservesTestFailureWhenReportsFailAndUsesJump(t *testing.T) {
+func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 	for _, entered := range []bool{false, true} {
 		t.Run(fmt.Sprint(entered), func(t *testing.T) {
-			var sawJump, sawPush, sawCleanup bool
-			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "remote", SSH: "pip@host", Jump: "ari@jump", Slots: 1, Enabled: true}}
+			var sawSSH, sawPush, sawCleanup bool
+			runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}}
 			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
 				if fakeNodeGit(dir, out, name, args) {
 					if strings.Contains(strings.Join(args, " "), "push") {
-						sawPush = strings.Contains(strings.Join(args, " "), "core.sshCommand=ssh -o BatchMode=yes -J 'ari@jump'")
+						sawPush = strings.Contains(strings.Join(args, " "), "push pip@host:")
 					}
 					return nil
 				}
-				sawJump = sawJump || strings.Contains(strings.Join(args, " "), "-J ari@jump pip@host")
+				sawSSH = sawSSH || strings.Contains(strings.Join(args, " "), "-o BatchMode=yes pip@host")
 				script := args[len(args)-1]
 				if strings.Contains(script, "systemd-run") {
 					if entered {
@@ -182,8 +182,8 @@ func TestNodePreservesTestFailureWhenReportsFailAndUsesJump(t *testing.T) {
 			if entered {
 				want = "failed"
 			}
-			if err == nil || len(result.Checks) != 1 || result.Checks[0].Status != want || !sawJump || !sawPush || !sawCleanup {
-				t.Fatalf("result=%+v err=%v jump=%v push=%v cleanup=%v", result, err, sawJump, sawPush, sawCleanup)
+			if err == nil || len(result.Checks) != 1 || result.Checks[0].Status != want || !sawSSH || !sawPush || !sawCleanup {
+				t.Fatalf("result=%+v err=%v ssh=%v push=%v cleanup=%v", result, err, sawSSH, sawPush, sawCleanup)
 			}
 		})
 	}

@@ -29,7 +29,6 @@ const (
 type Node struct {
 	Name    string `json:"name"`
 	SSH     string `json:"ssh,omitempty"`
-	Jump    string `json:"jump,omitempty"`
 	Slots   int    `json:"slots"`
 	Enabled bool   `json:"enabled"`
 }
@@ -48,7 +47,6 @@ type HostedRuns struct {
 const storeSchema = `CREATE TABLE local_ci_nodes (
  name TEXT PRIMARY KEY,
  ssh TEXT NOT NULL,
- jump TEXT NOT NULL,
  slots INTEGER NOT NULL CHECK(slots > 0),
  enabled INTEGER NOT NULL CHECK(enabled IN (0,1))
 );
@@ -87,7 +85,12 @@ func (s Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "localci.schema", 1, func(conn *sql.Conn, _ int) error {
+	err = database.Migrate(db, "localci.schema", 2, func(conn *sql.Conn, old int) error {
+		if old == 1 {
+			// Version 1 had a jump host column; nodes are now reached directly.
+			_, err := conn.ExecContext(context.Background(), "ALTER TABLE local_ci_nodes DROP COLUMN jump")
+			return err
+		}
 		_, err := conn.ExecContext(context.Background(), storeSchema)
 		return err
 	})
@@ -105,13 +108,8 @@ func (n Node) Validate() error {
 	if n.Slots < 1 {
 		return fmt.Errorf("node slots must be positive")
 	}
-	for _, target := range []struct{ name, value string }{{"SSH", n.SSH}, {"jump", n.Jump}} {
-		if target.value != "" && !sshTarget.MatchString(target.value) {
-			return fmt.Errorf("%s destination must be a host or user@host", target.name)
-		}
-	}
-	if n.Jump != "" && n.SSH == "" {
-		return fmt.Errorf("a jump destination requires an SSH destination")
+	if n.SSH != "" && !sshTarget.MatchString(n.SSH) {
+		return fmt.Errorf("SSH destination must be a host or user@host")
 	}
 	return nil
 }
@@ -121,7 +119,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	rows, err := db.QueryContext(ctx, "SELECT name,ssh,jump,slots,enabled FROM local_ci_nodes ORDER BY name")
+	rows, err := db.QueryContext(ctx, "SELECT name,ssh,slots,enabled FROM local_ci_nodes ORDER BY name")
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +127,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 	nodes := []Node{}
 	for rows.Next() {
 		var n Node
-		if err := rows.Scan(&n.Name, &n.SSH, &n.Jump, &n.Slots, &n.Enabled); err != nil {
+		if err := rows.Scan(&n.Name, &n.SSH, &n.Slots, &n.Enabled); err != nil {
 			return nil, err
 		}
 		nodes = append(nodes, n)
@@ -146,8 +144,8 @@ func (s Store) PutNode(ctx context.Context, n Node) error {
 		return err
 	}
 	return state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "node:" + n.Name}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_nodes(name,ssh,jump,slots,enabled) VALUES(?,?,?,?,?)
-ON CONFLICT(name) DO UPDATE SET ssh=excluded.ssh,jump=excluded.jump,slots=excluded.slots,enabled=excluded.enabled`, n.Name, n.SSH, n.Jump, n.Slots, n.Enabled)
+		_, err := conn.ExecContext(ctx, `INSERT INTO local_ci_nodes(name,ssh,slots,enabled) VALUES(?,?,?,?)
+ON CONFLICT(name) DO UPDATE SET ssh=excluded.ssh,slots=excluded.slots,enabled=excluded.enabled`, n.Name, n.SSH, n.Slots, n.Enabled)
 		return err
 	})
 }

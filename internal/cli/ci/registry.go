@@ -20,12 +20,12 @@ func registryCommands() []*cobra.Command {
 
 func nodeCommand(s localci.Store) *cobra.Command {
 	root := &cobra.Command{Use: "node", Short: "Manage shared local CI runners", Args: cobra.NoArgs}
-	var ssh, jump string
+	var ssh string
 	var slots int
 	add := &cobra.Command{
 		Use: "add <name>", Short: "Add or update an enabled CI runner", Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
-			n := localci.Node{Name: args[0], SSH: ssh, Jump: jump, Slots: slots, Enabled: true}
+			n := localci.Node{Name: args[0], SSH: ssh, Slots: slots, Enabled: true}
 			if err := s.PutNode(c.Context(), n); err != nil {
 				return err
 			}
@@ -34,7 +34,6 @@ func nodeCommand(s localci.Store) *cobra.Command {
 		},
 	}
 	add.Flags().StringVar(&ssh, "ssh", "", "SSH destination as host or user@host (default: this machine)")
-	add.Flags().StringVar(&jump, "jump", "", "SSH jump destination as host or user@host")
 	add.Flags().IntVar(&slots, "slots", 1, "maximum concurrent CI checks")
 	var asJSON bool
 	list := &cobra.Command{
@@ -48,13 +47,13 @@ func nodeCommand(s localci.Store) *cobra.Command {
 				return jsonout.Write(c.OutOrStdout(), nodes)
 			}
 			out := tabwriter.NewWriter(c.OutOrStdout(), 0, 4, 2, ' ', 0)
-			fmt.Fprintln(out, "NAME\tSSH\tJUMP\tSLOTS\tENABLED")
+			fmt.Fprintln(out, "NAME\tSSH\tSLOTS\tENABLED")
 			for _, n := range nodes {
 				ssh := n.SSH
 				if ssh == "" {
 					ssh = "local"
 				}
-				fmt.Fprintf(out, "%s\t%s\t%s\t%d\t%t\n", n.Name, ssh, n.Jump, n.Slots, n.Enabled)
+				fmt.Fprintf(out, "%s\t%s\t%d\t%t\n", n.Name, ssh, n.Slots, n.Enabled)
 			}
 			return out.Flush()
 		},
