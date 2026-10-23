@@ -8,7 +8,7 @@
   import type { Room } from '../api/room.ts'
   import type { TemplateInfo } from '../api/workflow.ts'
   import { errorText } from '../errorText.ts'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { roomLabel } from '../ui/format.ts'
 
   interface Props {

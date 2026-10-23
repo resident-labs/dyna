@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { pair, connect } from '../../api.js'
+  import { pair, connect } from '../../api.ts'
   import { signIn } from './link.ts'
   // The web app's first screen on a new device. The owner runs
   // `dyna engine run --pair` on the computer and types the code here. The

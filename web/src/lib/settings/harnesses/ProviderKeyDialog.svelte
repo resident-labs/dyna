@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { api } from '../../../api.js'
+  import { api } from '../../../api.ts'
   import { dialog } from '../../ui/dialog.ts'
   import { filterProviders } from './state.ts'
 

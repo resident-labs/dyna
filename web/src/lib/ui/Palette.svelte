@@ -16,7 +16,7 @@
   //   ontarget  (target) a session, run or PR row was chosen
   //   onclose   the palette should close
   import { onMount, tick } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { isPathText, splitPath, folderRows, parentOf, atRoot, showHome, matches } from './palette.ts'
   import { findTargets, GROUPS } from './paletteTargets.ts'
   import { roomLabel, stamp } from './format.ts'

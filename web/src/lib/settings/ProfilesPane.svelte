@@ -8,7 +8,7 @@
   import { slide } from 'svelte/transition'
   import { BASE, motion } from '../ui/motion.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import ProfileEditor from './ProfileEditor.svelte'
   import ProfileUses from './ProfileUses.svelte'
   import ProfileWizard from './ProfileWizard.svelte'

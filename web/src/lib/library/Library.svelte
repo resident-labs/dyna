@@ -3,7 +3,7 @@
   // detail and the lint findings. Links open the file viewer.
   import TabHeader from '../rooms/TabHeader.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { tick } from 'svelte'
   import { errorText } from '../errorText.ts'
   import type { LibraryView } from '../api/library.ts'

@@ -14,7 +14,7 @@ globalThis.indexedDB = { open: () => request({ transaction: () => ({ objectStore
 const json = (body, status = 200) => Response.json(body, { status })
 
 test('concurrent binary requests share renewal and retain their response bodies', async () => {
-  const { authenticatedFetch, onRenewed } = await import('./api.js?auth-shared')
+  const { authenticatedFetch, onRenewed } = await import('./api.ts?auth-shared')
   let renewals = 0, renewed = 0
   const attempts = new Map()
   const controller = new AbortController()
@@ -36,7 +36,7 @@ test('concurrent binary requests share renewal and retain their response bodies'
 })
 
 test('a second 401 ends renewal and reports unauthorized once', async () => {
-  const { authenticatedFetch, onUnauthorized } = await import('./api.js?auth-bounded')
+  const { authenticatedFetch, onUnauthorized } = await import('./api.ts?auth-bounded')
   let renewals = 0, attempts = 0, refused = 0
   onUnauthorized(() => refused++)
   globalThis.fetch = async (path) => {
@@ -51,7 +51,7 @@ test('a second 401 ends renewal and reports unauthorized once', async () => {
 })
 
 test('renewal refusal cannot recursively renew itself', async () => {
-  const { authenticatedFetch, onUnauthorized } = await import('./api.js?auth-refused')
+  const { authenticatedFetch, onUnauthorized } = await import('./api.ts?auth-refused')
   let calls = 0, refused = 0
   onUnauthorized(() => refused++)
   globalThis.fetch = async () => { calls++; return json({ code: 'renew', error: 'Pair again' }, 401) }
@@ -61,7 +61,7 @@ test('renewal refusal cannot recursively renew itself', async () => {
 })
 
 test('cancellation during renewal prevents replay', async () => {
-  const { authenticatedFetch } = await import('./api.js?auth-aborted')
+  const { authenticatedFetch } = await import('./api.ts?auth-aborted')
   const controller = new AbortController()
   let attempts = 0
   globalThis.fetch = async (path) => {
@@ -74,7 +74,7 @@ test('cancellation during renewal prevents replay', async () => {
 })
 
 test('ordinary 401 and non-JSON failures keep the body readable', async () => {
-  const { authenticatedFetch, onUnauthorized } = await import('./api.js?auth-errors')
+  const { authenticatedFetch, onUnauthorized } = await import('./api.ts?auth-errors')
   let refused = 0
   onUnauthorized(() => refused++)
   for (const status of [401, 500]) {
@@ -87,7 +87,7 @@ test('ordinary 401 and non-JSON failures keep the body readable', async () => {
 })
 
 test('the data folder comes from the server for every client', async () => {
-  const { api } = await import('./api.js?data-folder')
+  const { api } = await import('./api.ts?data-folder')
   globalThis.fetch = async (path, options) => {
     assert.equal(path, '/api/DataDir')
     assert.deepEqual(JSON.parse(options.body), [])
@@ -97,7 +97,7 @@ test('the data folder comes from the server for every client', async () => {
 })
 
 test('a refused renewal (403) reports unauthorized instead of looping silently', async () => {
-  const { authenticatedFetch, onUnauthorized } = await import('./api.js?auth-renew-refused')
+  const { authenticatedFetch, onUnauthorized } = await import('./api.ts?auth-renew-refused')
   let refused = 0, renewals = 0
   onUnauthorized(() => refused++)
   globalThis.fetch = async (path) => {
@@ -110,7 +110,7 @@ test('a refused renewal (403) reports unauthorized instead of looping silently',
 })
 
 test('a busy relay (503) keeps the session and shows nothing', async () => {
-  const { authenticatedFetch, onUnauthorized } = await import('./api.js?auth-renew-busy')
+  const { authenticatedFetch, onUnauthorized } = await import('./api.ts?auth-renew-busy')
   let refused = 0
   onUnauthorized(() => refused++)
   globalThis.fetch = async (path) => path === '/api/connect/renew'

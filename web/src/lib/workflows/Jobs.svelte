@@ -7,7 +7,7 @@
   // seconds while it stays open. jobs is App's one room list, newest first.
   // onstop(job) stops a running job and resolves when it has ended.
   import { onMount, tick, untrack } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { ago, duration } from '../ui/format.ts'
   import { runningJob } from '../rooms/workViews.ts'
   import type { ShellJob, ShellLog } from '../api/terminal.ts'

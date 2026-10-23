@@ -10,7 +10,7 @@
   // streams output; keys go back as base64 bytes. Unmounting detaches but
   // never stops the shell, so a reload or a tab switch reattaches where it was.
   import { onMount } from 'svelte'
-  import { api, openExternal } from '../../api.js'
+  import { api, openExternal } from '../../api.ts'
   import { errorText } from '../errorText.ts'
   import type { TermEvent } from '../api/terminal.ts'
   import type { GhosttyTerminalSurface } from './ghostty/surface.ts'

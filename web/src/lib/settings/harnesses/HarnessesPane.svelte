@@ -12,7 +12,7 @@
   import { fade, fly, slide } from 'svelte/transition'
   import { BASE, motion } from '../../ui/motion.ts'
   import Loading from '../Loading.svelte'
-  import { api } from '../../../api.js'
+  import { api } from '../../../api.ts'
   import HarnessIcon from './HarnessIcon.svelte'
   import ToolEditor from './ToolEditor.svelte'
   import SignInCard from './SignInCard.svelte'

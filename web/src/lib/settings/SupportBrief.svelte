@@ -5,7 +5,7 @@
   // composer uses.
   import { errorText } from '../errorText.ts'
   import { dialog } from '../ui/dialog.ts'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { bestProfile, supportBrief, supportDraft } from './support.ts'
   import type { ProfileView } from '../api/profile.ts'
   import type { EditableProfile } from './profiles/state.ts'

@@ -2,7 +2,7 @@
   // The viewer alone, in its own browser window (web only). It opens from
   // the viewer's Pop out button at #pop=<room>:<session>.
   import { onMount } from 'svelte'
-  import { api, onEvent } from '../../api.js'
+  import { api, onEvent } from '../../api.ts'
   import ComputerViewer from './ComputerViewer.svelte'
   import { applyEvent, pushAction } from './computers.js'
   let { room, session } = $props()

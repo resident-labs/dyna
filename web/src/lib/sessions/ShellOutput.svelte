@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { api, copyText } from '../../api.js'
+  import { api, copyText } from '../../api.ts'
   import { bytesOf, commandOf, isLogChunk, isOpen, plainLog, sizeOf } from './shell.ts'
   import type { ShellJob } from '../api/terminal.ts'
 

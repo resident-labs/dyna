@@ -3,7 +3,7 @@
   import TabHeader from './TabHeader.svelte'
   import EmptyState from '../ui/EmptyState.svelte'
   import VisualPlaceholder from '../files/VisualPlaceholder.svelte'
-  import { fileURL } from '../../api.js'
+  import { fileURL } from '../../api.ts'
   import { ago } from '../ui/format.ts'
   import { checkStatus, filterVisuals } from '../files/visuals.ts'
   import { visuals as store } from '../files/visuals.svelte.ts'

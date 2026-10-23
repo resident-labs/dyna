@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { fileURL, authenticatedFetch } from '../../api.js'
+  import { fileURL, authenticatedFetch } from '../../api.ts'
   let { roomId, att } = $props()
   let pdf = $state.raw(null)
   let page = $state(1)

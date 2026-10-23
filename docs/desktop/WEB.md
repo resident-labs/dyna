@@ -190,7 +190,7 @@ calls the service method named in internal/engine/calls.go. Every binding
 declares read or write access. Missing access fails at startup, and one
 call-table wrapper refuses writes in read-only mode.
 
-`web/src/api.js` keeps one set of names over both transports.
+`web/src/api.ts` keeps one set of names over both transports.
 The server puts `<meta name="dyna-web">` in the page with the card origin
 and the features that exist; `api.features` reads it, so no component checks
 the transport.

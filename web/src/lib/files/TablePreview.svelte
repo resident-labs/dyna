@@ -1,5 +1,5 @@
 <script>
-  import { copyText } from '../../api.js'
+  import { copyText } from '../../api.ts'
   import { tableCSV } from './tableCSV.ts'
   import { parseTable, TABLE_ROWS } from './preview.ts'
   let { text, delimiter = ',' } = $props()

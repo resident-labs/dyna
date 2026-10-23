@@ -22,7 +22,7 @@ async function load() {
       builder.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({ contents: compile(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
       builder.onResolve({ filter: /ui[/\\]format\.ts$/ }, () => ({ path: 'format', namespace: 'stub' }))
       builder.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const ago = () => '1m ago'; export const markdown = (s) => s", loader: 'js' }))
-      builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: 'export const api = {}', loader: 'js' }))
+      builder.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: 'export const api = {}', loader: 'js' }))
     } }],
   })
   const file = join(dir, 'Conversation.mjs')

@@ -5,10 +5,18 @@ import Wizard from '../src/lib/settings/ProfileWizard.svelte'
 import Editor from '../src/lib/settings/ProfileEditor.svelte'
 import '../src/lib/ui/tokens.css'
 import '../src/app.css'
-import { api } from '../src/api.js'
+import { api } from '../src/api.ts'
 import { blankProfile, type EditorDraft, type ModelSelection } from '../src/lib/settings/profiles/state.ts'
 import type { CatalogModel } from '../src/lib/api/account.ts'
-import type { ProfileEdit } from '../src/lib/api/profile.ts'
+import type { ProfileView } from '../src/lib/api/profile.ts'
+import type { HarnessSupport } from '../src/lib/settings/support.ts'
+
+// noSupport is a harness Dyna cannot read yet. The pane shows it as unknown.
+const noSupport: HarnessSupport = { installed: true, installable: true, binary: '', version: '', versionError: '', lastHealthyVersion: '', dialect: '', partial: false, status: 'unknown', reason: '', items: [] }
+import type { ProfileSave } from '../src/lib/api/engine.ts'
+
+// savedView is the saved profile as the pane reads it: the name it reports.
+const savedView = (data: ProfileSave): ProfileView => ({ runtimeVersion: '', fallback: '', support: noSupport, ...data.profile })
 import { usageAccount } from '../test/account-fixtures.ts'
 import { element, need } from '../test/need.ts'
 
@@ -21,12 +29,12 @@ const models: CatalogModel[] = [
 ]
 api.profileModels = async () => {
  if (scenario === 'error') throw new Error('Fixture discovery error')
- return { models: scenario === 'empty' ? [] : models, source: 'Isolated UI fixture', observedAt: '2026-10-17T17:30:00Z' }
+ return { models: scenario === 'empty' ? [] : models, compact: { window: true }, source: 'Isolated UI fixture', observedAt: '2026-10-17T17:30:00Z' }
 }
-api.accountUsage = async () => ({ accounts: [usageAccount({ id: 'fixture-account', harness: 'opencode', providerId: 'opencode-go', active: true, label: 'Fixture account', status: 'authenticated', source: 'UI fixture only', observedAt: '2026-10-17T17:30:00Z', windows: [{ id: 'short', label: 'Fixture window', usedPercent: 20 }] })] })
+api.accountUsage = async () => ({ checkedAt: '2026-10-17T17:30:00Z', accounts: [usageAccount({ id: 'fixture-account', harness: 'opencode', providerId: 'opencode-go', active: true, label: 'Fixture account', status: 'authenticated', source: 'UI fixture only', observedAt: '2026-10-17T17:30:00Z', windows: [{ id: 'short', label: 'Fixture window', usedPercent: 20 }] })] })
 // What the last save asked for.
-const sent: { saved?: ProfileEdit } = {}
-api.saveProfile = async (data: ProfileEdit) => { document.body.dataset.savedModel = data.profile.model; return { name: data.profile.name } }
+const sent: { saved?: ProfileSave } = {}
+api.saveProfile = async (data: ProfileSave) => { document.body.dataset.savedModel = data.profile.model; return savedView(data) }
 const customScenarios = ['custom-error', 'draft-details', 'draft-navigation', 'advanced-details', 'advanced-navigation']
 const initialSelection: ModelSelection | null = scenario === 'harness' ? null : { harness: customScenarios.includes(scenario) ? 'custom' : 'opencode', ...(['details', 'settings'].includes(scenario) ? { connectionId: 'fixture-account', routeId: need(models[0]).id } : {}) }
 const app = need(document.getElementById('app'), 'app')
@@ -84,7 +92,7 @@ if (scenario === 'custom-error') {
  check('Save error is visible', !!error && error.getBoundingClientRect().top >= 0 && error.getBoundingClientRect().bottom <= innerHeight)
  check('Save error preserves name and command', name.value === 'custom-fixture' && command.value === 'fixture-agent\n{{prompt}}')
  check('Save action remains Create profile', findButton('Create profile') && !button('Create profile').disabled)
- api.saveProfile = async (data: ProfileEdit) => { document.body.dataset.savedModel = data.profile.model; return { name: data.profile.name } }; button('Create profile').click(); await pause()
+ api.saveProfile = async (data: ProfileSave) => { document.body.dataset.savedModel = data.profile.model; return savedView(data) }; button('Create profile').click(); await pause()
  check('Custom harness default remains empty on retry', document.body.dataset.savedModel === '')
  report()
 }
@@ -93,7 +101,7 @@ if (['draft-details', 'draft-navigation', 'draft-environment'].includes(scenario
  const command = 'fixture-agent\n{{prompt}}', args = '--fixture=true\n--second=value'
  const row = (key: string) => [...document.querySelectorAll('.envrow')].find((el) => el.textContent?.includes(key))
  const add = async (key: string, value: string) => { await input('input[placeholder="KEY"]', key); await input('input[placeholder="value"]', value); button('Add').click(); await tick() }
- api.saveProfile = async (data: ProfileEdit) => { sent.saved = data; return { name: data.profile.name } }
+ api.saveProfile = async (data: ProfileSave) => { sent.saved = data; return savedView(data) }
  await pause()
  if (scenario !== 'draft-environment') {
   button('Model details').click(); await tick(); button('Use harness default').click(); await tick()
@@ -146,7 +154,7 @@ if (['draft-details', 'draft-navigation', 'draft-environment'].includes(scenario
 }
 
 if (['advanced-details', 'advanced-navigation'].includes(scenario)) {
- api.saveProfile = async (data: ProfileEdit) => { sent.saved = data; return { name: data.profile.name } }
+ api.saveProfile = async (data: ProfileSave) => { sent.saved = data; return savedView(data) }
  await pause(); button('Model details').click(); await tick(); button('Use harness default').click(); await tick()
  await input('input[placeholder="e.g. quick-research"]', 'advanced-fixture')
  one('details.advanced summary').click(); await pause()

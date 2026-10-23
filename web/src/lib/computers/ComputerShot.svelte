@@ -3,7 +3,7 @@
   // stream. A new picture loads off screen first, so the tile never flickers.
   // With refresh set, a running computer asks for a fresh picture that often
   // while the page is visible; the server limits real captures to one per 5 s.
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { freshDue } from './preview.ts'
   // minGap: the least time between two loads from shotAt changes (ms).
   let { session, shotAt = null, phase = 'none', refresh = 0, alt = '', minGap = 0, children } = $props()

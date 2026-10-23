@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { openExternal } from '../../api.js'
+  import { openExternal } from '../../api.ts'
   import { markdown, stamp, clock } from '../ui/format.ts'
   import { shortSha } from './pr.ts'
   import { feedPRDetail, feedPREvents } from '../rooms/feedRows.js'

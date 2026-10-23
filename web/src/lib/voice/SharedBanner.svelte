@@ -2,7 +2,7 @@
   // The newest file shared in the call, as one slim row under the call's
   // header: a thumbnail, its title and who shared it. A tap opens the
   // full view; × hides it. The call's thread keeps every shared file.
-  import { fileURL } from '../../api.js'
+  import { fileURL } from '../../api.ts'
   import type { Attachment, Post } from '../api/room.ts'
   import { extOf } from '../files/attach.ts'
   import VisualPlaceholder from '../files/VisualPlaceholder.svelte'

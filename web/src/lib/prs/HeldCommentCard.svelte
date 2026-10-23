@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, openExternal } from '../../api.js'
+  import { api, openExternal } from '../../api.ts'
   import { errorText } from '../errorText.ts'
   import type { HeldComment } from '../api/change.ts'
   import { removeHeldComment } from './heldComments.ts'
