@@ -240,6 +240,13 @@ func (s *Service) registeredLocalObservation(ctx context.Context, r Record, snap
 	if result.Status == "passed" && !s.registeredJobResultComplete(ctx, job, result) {
 		localState = "pending"
 	}
+	// A hosted failure that only cancellations caused never tested the head, so
+	// it can neither fail nor pass it: the head waits for the local result, which
+	// decides once it is complete. Failing here would freeze the batch before the
+	// local CI that is still queued or running gets to finish.
+	if hostedState == "failed" && hostedCancelledOnly(snap, policy.RequiredChecks) {
+		hostedState, hostedKey, hostedJobs, hostedRuns = "pending", "cancelled-only:"+r.Head, nil, nil
+	}
 	observation := chooseRegisteredCI(r.Head, hostedState, hostedKey, hostedJobs, hostedRuns, localState, localJobs, logs)
 	if observation.Status == "pending" {
 		observation.Reason = "waiting for local CI"
