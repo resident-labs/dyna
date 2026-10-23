@@ -17,6 +17,33 @@ import (
 // closes it.
 const DormantCloseAfter = 7 * 24 * time.Hour
 
+// Neutral outcomes of a dormant close. A session that gained work or still
+// answers for work stays open by design, so the room controls show these as a
+// kept session, not as an error.
+var (
+	errDormantGainedWork       = errors.New("session is no longer dormant")
+	errDormantResponsibilities = errors.New("the session still has open responsibilities")
+)
+
+// keptForWork marks a dormant close error as the neutral "gained work"
+// outcome, and keeps the detail text for logs.
+func keptForWork(reason string) error {
+	return fmt.Errorf("%w: %s", errDormantGainedWork, reason)
+}
+
+// keptReason maps a dormant close error to what the room controls show. Only
+// RoomSessionKeptFailed is a real failure there.
+func keptReason(err error) RoomSessionKeptReason {
+	switch {
+	case errors.Is(err, errDormantGainedWork):
+		return RoomSessionKeptStartedWork
+	case errors.Is(err, errDormantResponsibilities):
+		return RoomSessionKeptResponsibilities
+	default:
+		return RoomSessionKeptFailed
+	}
+}
+
 // SweepDormantSessions is the automatic Clear dormant: it closes every session
 // that has stayed dormant, with no activity, for DormantCloseAfter.
 func (m *Manager) SweepDormantSessions(ctx context.Context) error {
@@ -64,12 +91,17 @@ func (m *Manager) closeDormantSessions(ctx context.Context, ref string, cutoff t
 		if !dormantBefore(meta, cutoff) || m.store().lockHeld(meta.ID) {
 			continue
 		}
-		row := RoomSessionResult{Session: meta.ID, Status: "closed", OK: true}
+		row := RoomSessionResult{Session: meta.ID, Name: meta.Address(), Status: "closed", OK: true}
 		if err = m.closeDormant(ctx, meta.ID, cutoff); err != nil {
-			row.OK = false
 			row.Status = "kept"
+			row.Reason = keptReason(err)
 			row.Error = err.Error()
-			out.Failed++
+			row.OK = row.Reason != RoomSessionKeptFailed
+			if row.OK {
+				out.Kept++
+			} else {
+				out.Failed++
+			}
 		} else {
 			out.Succeeded++
 		}
@@ -132,7 +164,7 @@ func (m *Manager) closeDormantLocked(ctx context.Context, id string, cutoff time
 	defer unlock()
 	turn, err := store.tryTurnLock(id)
 	if err != nil {
-		return fmt.Errorf("session became active: %w", err)
+		return keptForWork("the session started a turn")
 	}
 	defer turn.Close()
 	return store.withGateLockContext(ctx, id, func(dir string) error {
@@ -142,19 +174,19 @@ func (m *Manager) closeDormantLocked(ctx context.Context, id string, cutoff time
 		}
 		return m.rooms().WithRoomSnapshot(ctx, meta.RoomID, func(_ room.Record) error {
 			if token == "" || meta.Closing == nil || meta.Closing.Token != token {
-				return errors.New("dormant close reservation changed")
+				return keptForWork("the close reservation changed")
 			}
 			if !meta.Closing.Active() {
-				return errors.New("dormant close check outlasted its reservation")
+				return keptForWork("the close check outlasted its reservation")
 			}
 			if !meta.Closed.IsZero() {
-				return errors.New("session is already closed")
+				return keptForWork("another action already closed the session")
 			}
 			if !dormantBefore(meta, cutoff) {
-				return errors.New("session is no longer dormant")
+				return errDormantGainedWork
 			}
 			if meta.Consolidating != "" || meta.Transfer.Active() {
-				return errors.New("session has a transfer or consolidation reservation")
+				return keptForWork("the session has a transfer or consolidation reservation")
 			}
 			if meta.Turns > 0 {
 				t, e := store.ReadTurn(id, meta.Turns)
@@ -162,7 +194,7 @@ func (m *Manager) closeDormantLocked(ctx context.Context, id string, cutoff time
 					return e
 				}
 				if !t.Done() || t.RoomHeld || t.HeldPrompt != "" {
-					return errors.New("session has an unfinished turn")
+					return keptForWork("the session has an unfinished turn")
 				}
 			}
 			pending, e := m.pendingRoomMessages(meta)
@@ -170,7 +202,7 @@ func (m *Manager) closeDormantLocked(ctx context.Context, id string, cutoff time
 				return e
 			}
 			if len(pending) > 0 {
-				return pendingMessagesError(meta, pending)
+				return fmt.Errorf("%w: %w", errDormantGainedWork, pendingMessagesError(meta, pending))
 			}
 			members, e := m.roomSessions(meta.RoomID)
 			if e != nil {
@@ -178,7 +210,7 @@ func (m *Manager) closeDormantLocked(ctx context.Context, id string, cutoff time
 			}
 			for _, child := range members {
 				if child.ParentSession == id && child.Status != StatusDormant {
-					return errors.New("session has an unfinished child")
+					return keptForWork("the session has an unfinished child")
 				}
 			}
 			if m.checkpoint != nil {
@@ -191,7 +223,7 @@ func (m *Manager) closeDormantLocked(ctx context.Context, id string, cutoff time
 			// dormant session.
 			return store.writeMetaIf(context.Background(), meta, func(cur Meta) error {
 				if cur.Closing == nil || cur.Closing.Token != token || !cur.Closed.IsZero() || !dormantBefore(cur, cutoff) {
-					return errors.New("session changed during the dormant close")
+					return keptForWork("the session changed during the dormant close")
 				}
 				return nil
 			})
@@ -243,13 +275,13 @@ func (m *Manager) reserveDormant(ctx context.Context, id, token string, cutoff t
 			return err
 		}
 		if meta.Closing.Active() {
-			return errors.New("session has another close check")
+			return keptForWork("the session has another close check")
 		}
 		if !meta.Closed.IsZero() || !dormantBefore(meta, cutoff) || m.store().lockHeld(id) {
-			return errors.New("session is no longer dormant")
+			return errDormantGainedWork
 		}
 		if meta.Consolidating != "" || meta.Transfer.Active() {
-			return errors.New("session is reserved")
+			return keptForWork("the session has a reservation")
 		}
 		meta.Closing = &sessionlife.Closing{Token: token, PID: os.Getpid(), At: time.Now()}
 		return m.store().writeMeta(meta)
@@ -278,7 +310,7 @@ func (m *Manager) checkDormantOwnership(ctx context.Context, id string) error {
 		return err
 	}
 	if len(items) > 0 {
-		return responsibilityError("close a dormant session", items)
+		return errors.Join(errDormantResponsibilities, responsibilityError("close a dormant session", items))
 	}
 	return nil
 }
