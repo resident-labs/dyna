@@ -33,7 +33,7 @@ test('the session view shows the current call from the live activity, not the fi
   // transcript grouping keeps the first read's target and time but marks the group running.
   const dm = { address: 'repo:root', threads: [], rows: [
     { kind: 'turn', key: 'turn:1', ts: started, turn: { n: 1, status: 'running', started } },
-    { kind: 'timeline', key: 'timeline:1', ts: started, turn: { n: 1, started, status: 'running' }, steps: [{ kind: 'tool', key: 'tool:1', tool: 'read', target: 'old.go', ts: started, done: false }] },
+    { kind: 'timeline', key: 'timeline:1', ts: started, turn: { n: 1, started, status: 'running' }, steps: [{ kind: 'tool', key: 'tool:1', tool: 'read', target: 'old.go', ts: started }] },
   ] }
   const member = { name: 'root', hue: 1, state: 'live', address: 'repo:root', doing: { text: 'Read: new.go', since: now - 45000 } }
   const html = await render('../sessions/DmRows', { dm, member, room: { name: 'repo' }, members: [] })
