@@ -33,6 +33,9 @@ export type InstructionAction = "items" | "body" | "removed"
 // AlertSource is a named string type of an event payload.
 export type AlertSource = "doctor" | "engine"
 
+// AlertSeverity is a named string type of an event payload.
+export type AlertSeverity = "warning" | "critical"
+
 // ServiceRole is a named string type of an event payload.
 export type ServiceRole = "librarian" | "reviewer" | "helper"
 
@@ -66,6 +69,13 @@ export interface InstructionChange {
   added?: string[]
   removed?: string[]
   body?: string
+}
+
+// AlertFinding is a struct of an event payload.
+export interface AlertFinding {
+  severity: AlertSeverity
+  title: string
+  cause?: string
 }
 
 // WorktreeEvent is the payload of the worktree/kept events.
@@ -223,7 +233,9 @@ export interface AlertEvent {
   reportId?: string
   trigger?: string
   summary?: string
-  action?: string
+  findings?: AlertFinding[]
+  nextCommand?: string
+  remedy?: string
   detail?: string
 }
 
@@ -778,6 +790,7 @@ const SESSION_CHANGE: ReadonlySet<unknown> = new Set(["renamed", "promoted", "ad
 const ACCOUNT_REASON: ReadonlySet<unknown> = new Set(["usage-limit", "fallback"])
 const INSTRUCTION_ACTION: ReadonlySet<unknown> = new Set(["items", "body", "removed"])
 const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine"])
+const ALERT_SEVERITY: ReadonlySet<unknown> = new Set(["warning", "critical"])
 const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "helper"])
 const RULE_VERB: ReadonlySet<unknown> = new Set(["added", "edited", "removed"])
 const WORKTREE_REASON: ReadonlySet<unknown> = new Set(["not-merged", "dirty", "manual-handoff", "keep-failed", "other"])
@@ -816,6 +829,17 @@ export function isInstructionChange(v: unknown): v is InstructionChange {
 
 export function isInstructionChangeList(v: unknown): v is InstructionChange[] {
   return Array.isArray(v) && v.every((item: unknown) => isInstructionChange(item))
+}
+
+export function isAlertFinding(v: unknown): v is AlertFinding {
+  return isRecord(v) &&
+    ALERT_SEVERITY.has(v.severity) &&
+    typeof v.title === "string" &&
+    (v.cause === undefined || typeof v.cause === "string")
+}
+
+export function isAlertFindingList(v: unknown): v is AlertFinding[] {
+  return Array.isArray(v) && v.every((item: unknown) => isAlertFinding(item))
 }
 
 export function isWorktreeEvent(v: unknown): v is WorktreeEvent {
@@ -973,7 +997,9 @@ export function isAlertEvent(v: unknown): v is AlertEvent {
     (v.reportId === undefined || typeof v.reportId === "string") &&
     (v.trigger === undefined || typeof v.trigger === "string") &&
     (v.summary === undefined || typeof v.summary === "string") &&
-    (v.action === undefined || typeof v.action === "string") &&
+    (v.findings === undefined || isAlertFindingList(v.findings)) &&
+    (v.nextCommand === undefined || typeof v.nextCommand === "string") &&
+    (v.remedy === undefined || typeof v.remedy === "string") &&
     (v.detail === undefined || typeof v.detail === "string")
 }
 

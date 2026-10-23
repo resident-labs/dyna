@@ -871,6 +871,30 @@ const (
 // alertSources lists every alert source the web needs as a union type.
 var alertSources = []AlertSource{AlertDoctor, AlertEngine}
 
+// AlertSeverity is how urgent one finding of an alert is. A doctor ranks its
+// causes, so its first finding is the one to act on now.
+type AlertSeverity string
+
+// Alert severities.
+const (
+	// AlertWarning is a cause the owner should fix soon.
+	AlertWarning AlertSeverity = "warning"
+	// AlertCritical is the cause that needs the owner now.
+	AlertCritical AlertSeverity = "critical"
+)
+
+// alertSeverities lists every severity the web needs as a union type.
+var alertSeverities = []AlertSeverity{AlertWarning, AlertCritical}
+
+// AlertFinding is one cause an alert names, with the numbers behind it.
+type AlertFinding struct {
+	Severity AlertSeverity `json:"severity"`
+	// Title states the cause in a few words, such as "machine is overloaded".
+	Title string `json:"title"`
+	// Cause is the evidence the title rests on, with its numbers.
+	Cause string `json:"cause,omitempty"`
+}
+
 // AlertEvent tells the root seat that something needs the owner now: a doctor
 // report, or the engine stuck read-only.
 type AlertEvent struct {
@@ -881,8 +905,14 @@ type AlertEvent struct {
 	Trigger string `json:"trigger,omitempty"`
 	// Summary is the one line the alert states.
 	Summary string `json:"summary,omitempty"`
-	// Action is what root can do about it.
-	Action string `json:"action,omitempty"`
+	// Findings are the causes the doctor ranked, worst first.
+	Findings []AlertFinding `json:"findings,omitempty"`
+	// NextCommand is the one command the owner can run about the first doctor
+	// finding, as a chip the card copies.
+	NextCommand string `json:"nextCommand,omitempty"`
+	// Remedy is the one command that fixes what an engine alert reports, as a
+	// chip the card copies.
+	Remedy string `json:"remedy,omitempty"`
 	// Detail is the evidence the agent reads: the report text or the
 	// migration failure.
 	Detail string `json:"detail,omitempty"`
@@ -1516,6 +1546,7 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(AccountReason("")), Values: enumValues(accountReasons)},
 	{Type: reflect.TypeOf(InstructionAction("")), Values: enumValues(instructionActions)},
 	{Type: reflect.TypeOf(AlertSource("")), Values: enumValues(alertSources)},
+	{Type: reflect.TypeOf(AlertSeverity("")), Values: enumValues(alertSeverities)},
 	{Type: reflect.TypeOf(ServiceRole("")), Values: enumValues(serviceRoles)},
 	{Type: reflect.TypeOf(RuleVerb("")), Values: enumValues([]RuleVerb{RuleAdded, RuleEdited, RuleRemoved})},
 	{Type: reflect.TypeOf(WorktreeReason("")), Values: []string{
@@ -1533,6 +1564,7 @@ var eventObjects = []reflect.Type{
 	reflect.TypeOf(MergePR{}),
 	reflect.TypeOf(MergeCheckSummary{}),
 	reflect.TypeOf(InstructionChange{}),
+	reflect.TypeOf(AlertFinding{}),
 }
 
 // legacyFamilies are the post kinds that still go through Store.Post with a
