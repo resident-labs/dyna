@@ -474,7 +474,6 @@ func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	if !readOnly {
 		runtime.Accounts.RepairAntigravityACPAccount()
 	}
-	runtime.SetTerminals(terminals)
 	cleanup = append(cleanup, runtime.CancelPrivateLogins, runtime.CancelPrivateRuntimeSwitches)
 	config := &configsvc.Service{CLI: cli, NoUpdate: noUpdate, ReadOnly: readOnly, Sessions: rooms.Notify.Sessions}
 	accounts := service.New(service.Options{Store: accountstore.DefaultStore()})
