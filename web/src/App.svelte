@@ -35,10 +35,12 @@
   import Feed from './lib/rooms/Feed.svelte'
   import Composer from './lib/rooms/Composer.svelte'
   import Members from './lib/rooms/Members.svelte'
+  import Toast from './lib/ui/Toast.svelte'
+  import { clipText, dismissDelay, makeToast } from './lib/ui/toast.ts'
+  import type { Toast as ToastLine, ToastDetail, ToastInput } from './lib/ui/toast.ts'
   import { createRoomSessionControls, roomControlLabels, roomControlSummary } from './lib/rooms/roomSessionControls.ts'
   import type { RoomControlSummary, RoomControlValue } from './lib/rooms/roomSessionControls.ts'
   import { TOAST_DETAIL_MS, TOAST_MS } from './lib/ui/toast.ts'
-  import type { ToastDetail } from './lib/ui/toast.ts'
   import Pins from './lib/rooms/Pins.svelte'
   import SearchIcon from './lib/ui/SearchIcon.svelte'
   import SyncBadge from './lib/rooms/SyncBadge.svelte'
@@ -510,7 +512,7 @@
   let consolidationAlive = true
   let transferring = $state<Member | null>(null) // {kind: 'stop'|'close', m, busy, error}
   let expediting = $state<{ member: Member; goals: Goal[] } | null>(null) // the goal picker for a session with several goals
-  let toast = $state('')
+  let toast = $state<ToastLine | null>(null)
   let toastDetail = $state<ToastDetail | null>(null)
   let toastDetailOpen = $state(false)
   let closeResult = $state<{ name: string; items: string[] } | null>(null)
@@ -763,7 +765,7 @@
     const signature = `${roomControlsVisit}|${value.action}|${value.error}|${value.results.map((r) => `${r.session}:${r.ok}:${r.reason ?? ''}`).join(',')}`
     if (signature === controlsReported) return
     controlsReported = signature
-    if (value.error) { say(`${roomControlLabels[value.action] ?? 'The action'} failed: ${value.error}`); return }
+    if (value.error) { say({ tone: 'error', subject: `${roomControlLabels[value.action] ?? 'The action'} failed`, text: value.error }); return }
     sayDetails(roomControlSummary(value, hierarchy))
   })
   function closeRoomSessionMenu() { const anchor = roomControlsMenu?.anchor; roomControlsMenu = null; anchor?.focus?.() }
@@ -903,14 +905,17 @@
   function loadRun() { return workflowData.loadDetail() }
 
   async function pauseRun(run: RunSummary) {
-    await api.pauseRun(run.id, !run.paused)
-    say(run.paused ? `${run.name} resumed.` : `${run.name} is paused. Running agents finish; no new ones start.`)
+    const wasPaused = run.paused
+    await api.pauseRun(run.id, !wasPaused)
+    say(wasPaused
+      ? { tone: 'success', subject: `${run.name} resumed`, text: 'Its agents continue where they stopped.', action: { label: 'Open', run: () => showRun({ id: run.id }) } }
+      : { tone: 'success', subject: `${run.name} is paused`, text: 'Running agents finish; no new ones start.', action: { label: 'Open', run: () => showRun({ id: run.id }) } })
     loadRuns()
     await loadRun()
   }
   async function stopJob(job: ShellJob) {
     await api.stopShell(roomId, job.id)
-    say(`Shell job ${job.id} stopped.`)
+    say({ tone: 'success', subject: 'Stopped the shell job', text: clipText(job.name || job.command.join(' ')) })
     workflowData.loadJobs()
   }
 
@@ -987,7 +992,7 @@
       fetchedGoal = g
       return g
     } catch (e) {
-      if (rid === roomId) say(`Could not open goal ${id}: ${errorText(e)}`)
+      if (rid === roomId) say({ tone: 'error', subject: 'Could not open the goal', text: errorText(e) })
       return null
     }
   }
@@ -1069,7 +1074,7 @@
       loadIssues()
       loadIssues(true)
     } catch (e) {
-      say(`Could not update the issue: ${errorText(e)}`)
+      say({ tone: 'error', subject: 'Could not update the issue', text: errorText(e) })
     }
   }
 
@@ -1159,13 +1164,13 @@
     if (!drill) return
     await api.deletePendingSteer(drill.id, q.id)
     queue = queue.filter((x) => x.id !== q.id)
-    say('Removed. The turn will not see that message.')
+    say({ tone: 'success', subject: 'Removed the queued message', text: 'The turn will not see it.' })
   }
 
   async function dismissPendingPost(id: string, messageId: string) {
     await api.dismissPendingPost(id, messageId, true)
     if (drill?.id === id) queue = queue.filter((post) => post.id !== messageId)
-    say('Message dismissed. History stays available.')
+    say({ tone: 'success', subject: 'Message dismissed', text: 'Its history stays available.' })
   }
 
   function markShown(list: Post[]) { return readMarker.mark(list) }
@@ -1281,9 +1286,9 @@
     if (!pr.key) return
     try {
       await api.untrackPR(roomId, pr.key)
-      say(`Dyna stopped watching PR #${pr.number}.`)
+      say({ tone: 'success', subject: `Dyna stopped watching #${pr.number}`, text: 'Its updates no longer arrive here.' })
     } catch (e) {
-      say(errorText(e))
+      say({ tone: 'error', subject: 'Could not stop watching that pull request', text: errorText(e) })
     }
     loadChanges()
   }
@@ -1293,9 +1298,9 @@
     if (number === undefined || !m.id) return
     try {
       await api.trackPR(roomId, m.id, Number(number))
-      say(`Dyna watches PR #${number} for ${m.name}.`)
+      say({ tone: 'success', subject: `Dyna watches #${number}`, text: `Review and CI updates go to ${m.name}.` })
     } catch (e) {
-      say(errorText(e))
+      say({ tone: 'error', subject: 'Could not watch that pull request', text: errorText(e) })
     }
     loadChanges()
   }
@@ -1312,9 +1317,9 @@
     if (!pr.key) return
     try {
       await api.resumePR(roomId, pr.key)
-      say(`Dyna watches PR #${pr.number} again.`)
+      say({ tone: 'success', subject: `Dyna watches #${pr.number} again`, text: 'Review and CI updates resume.' })
     } catch (e) {
-      say(errorText(e))
+      say({ tone: 'error', subject: 'Could not resume watching that pull request', text: errorText(e) })
     }
     loadChanges()
   }
@@ -1574,7 +1579,7 @@
         await loadSession()
       }
       await loadMembers()
-      say(`${m.name} is open. Send a message to start its next turn.`)
+      say({ tone: 'success', subject: `${m.name} is open`, text: 'Its earlier turns are in the transcript.', action: m.id ? { label: 'Open', run: () => openSession(member) } : undefined })
     } finally { reopening = '' }
   }
 
@@ -1586,7 +1591,7 @@
     try {
       await api.returnSeat(rid)
     } catch (e) {
-      say(`Could not take back the root seat: ${errorText(e)}`)
+      say({ tone: 'error', subject: 'Could not take back the root seat', text: errorText(e) })
       return
     }
     if (rid === roomId) await loadMembers()
@@ -1605,7 +1610,7 @@
         await loadSession()
       }
       await loadMembers()
-      say(`${m.name} is dismissed and closed. Its transcript stays available under closed sessions.`)
+      say({ tone: 'success', subject: `${m.name} is closed`, text: 'Its transcript stays available under closed sessions.' })
     } finally { dismissing = '' }
   }
 
@@ -1616,7 +1621,9 @@
     const action = expediteAction($expedite, g)
     if (action === 'replace') { confirm = { kind: 'expedite', goal: g, roomId }; return }
     await api.expediteGoal(roomId, action === 'stop' ? '' : g.id, false)
-    say(action === 'stop' ? `Goal ${g.id} is no longer expedited.` : `Goal ${g.id} is expedited.`)
+    say(action === 'stop'
+      ? { tone: 'success', subject: 'Stopped expediting the goal', text: clipText(g.text) }
+      : { tone: 'success', subject: 'Expedited the goal', text: clipText(g.text), action: { label: 'Open', run: () => openGoal(g.id) } })
     loadGoals()
   }
   async function linkPRGoal(change: ChangeRow, goalId: string) {
@@ -1638,12 +1645,12 @@
     if (item.mode === 'choose') return [{ label: item.label, hint: item.hint, run: () => (expediting = { member: m, goals: held }) }]
     const only = held[0]
     if (!only) return []
-    return [{ label: item.label, run: () => expediteGoal(only).catch((e) => say(errorText(e))) }]
+    return [{ label: item.label, run: () => expediteGoal(only).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) })) }]
   }
   // Stop expediting the room's goal, from the picker.
   function stopExpediting(goals: Goal[]) {
     const g = goals.find((x) => x.id === $expedite.goalId)
-    if (g) expediteGoal(g).catch((e) => say(errorText(e)))
+    if (g) expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) }))
   }
 
   // Session menu: safe actions first, then the two that stop work, set
@@ -1653,13 +1660,16 @@
       { label: m.closed ? 'Open transcript' : 'Message', run: () => openSession(m) },
       { label: 'Open profile', run: () => openMember(m) },
     ]
-    if (isFinished(m)) items.push({ label: dismissing === m.id ? 'Dismissing…' : 'Dismiss', run: () => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${errorText(e)}`)) })
-    if (m.closed && m.resumable) items.push({ label: reopening === m.id ? 'Reopening…' : 'Reopen', run: () => reopenSession(m).catch((e) => say(`Could not reopen ${m.name}: ${errorText(e)}`)) })
+    if (isFinished(m)) items.push({ label: dismissing === m.id ? 'Dismissing…' : 'Dismiss', run: () => dismissSession(m).catch((e) => say({ tone: 'error', subject: `Could not dismiss ${m.name}`, text: errorText(e) })) })
+    if (m.closed && m.resumable) items.push({ label: reopening === m.id ? 'Reopening…' : 'Reopen', run: () => reopenSession(m).catch((e) => say({ tone: 'error', subject: `Could not reopen ${m.name}`, text: errorText(e) })) })
     // The internal root holds the root seat, so it is never consolidated.
     if (!m.closed && m.role !== 'root') items.push({ label: 'Consolidate sessions…', run: () => { selectingSessions = true; setPicked(m.id ? [m.id] : []); showMembers = true; showPins = false } })
     if (!m.closed) items.push({ label: 'Mention in composer', run: () => mentionMember(m) })
     items.push(...expediteItems(m))
-    items.push({ label: 'Copy address', hint: m.address, run: () => copyText(m.address).then(() => say(`Copied ${m.address}`), (e) => say(String(e))) })
+    items.push({ label: 'Copy address', hint: m.address, run: () => copyText(m.address).then(
+      () => say({ tone: 'success', subject: 'Copied the address', text: `Paste it to mention ${m.name}.` }),
+      (e) => say({ tone: 'error', subject: 'Could not copy the address', text: errorText(e) }),
+    ) })
     if (!m.closed) items.push({ label: m.transfer ? 'Model transfer…' : 'Transfer to new model…', run: () => { loadProfiles(); transferring = m } })
     if (!m.closed && m.parent) items.push({ label: 'Promote to lead', run: () => (confirm = { kind: 'promote', m }) })
     if (selectableSession(m)) items.push({ label: 'Move under…', run: () => moveUnder(m) })
@@ -1677,10 +1687,10 @@
   async function roomAction(fn: () => Promise<unknown>, done: string) {
     try {
       await fn()
-      say(done)
+      say({ tone: 'success', subject: done })
       await loadRooms()
     } catch (e) {
-      say(errorText(e))
+      say({ tone: 'error', subject: 'Could not finish that room action', text: errorText(e) })
     }
   }
 
@@ -1694,7 +1704,7 @@
       submit: async (name) => {
         await api.renameRoom(r.id, name)
         ask = null
-        say(`Renamed to ${name}.`)
+        say({ tone: 'success', subject: 'Room renamed', text: `It now shows as ${name}.` })
         loadRooms()
       },
     }
@@ -1712,7 +1722,7 @@
       submit: async () => {
         await api.deleteRoom(r.id)
         ask = null
-        say(`${roomLabel(r)} is deleted.`)
+        say({ tone: 'success', subject: 'Room deleted', text: `${roomLabel(r)} and its feed are gone.` })
         if (roomId === r.id) selectRoom('')
         loadRooms()
       },
@@ -1729,14 +1739,14 @@
       submit: async (text) => {
         await api.steerRun(run.id, a.id, text)
         ask = null
-        say('Steering sent.')
+        say({ tone: 'success', subject: 'Steering sent', text: 'The agent sees it while it works.' })
       },
     }
   }
 
   async function runStarted(id?: string) {
     starting = false
-    say('Workflow started.')
+    say({ tone: 'success', subject: 'Workflow started', text: 'Its agents run now. Open Runs to follow it.', action: id ? { label: 'Open', run: () => showRun({ id }) } : undefined })
     await loadRuns()
     if (id) showRun({ id })
   }
@@ -1748,26 +1758,40 @@
   }
 
   let toastTimer: ReturnType<typeof setTimeout> | undefined
+  // A toast reports the result of one action the user just took: a subject, one
+  // sentence, and at most one thing to do next. Call sites pass display names.
+  function say(input: ToastInput) {
+    const next = makeToast(input)
+    hideToast()
+    toast = next
+    clearTimeout(toastTimer)
+    toastTimer = setTimeout(hideToast, dismissDelay(next))
+  }
   function hideToast() {
-    toast = ''
+    toast = null
     toastDetail = null
     toastDetailOpen = false
-  }
-  function say(text: string) {
-    hideToast()
-    toast = text
     clearTimeout(toastTimer)
-    toastTimer = setTimeout(hideToast, TOAST_MS)
+  }
+  // runToastAction closes the toast, then follows the reader's choice.
+  function runToastAction(run: () => void) {
+    hideToast()
+    run()
+  }
+  // sayLine lets the command registry report a finished command as one
+  // success line, as it did before toasts had a tone.
+  function sayLine(message: string) {
+    say({ tone: 'success', subject: message })
   }
   // sayDetails reports a finished bulk action in one line. The per-session
   // list stays behind Details, so it never pushes the members out of view.
   function sayDetails(summary: RoomControlSummary) {
-    hideToast()
-    toast = summary.text
+    say({ subject: summary.text })
     toastDetail = { title: summary.title, items: summary.details }
     clearTimeout(toastTimer)
     toastTimer = setTimeout(hideToast, TOAST_DETAIL_MS)
   }
+  // toggleToastDetail keeps the one line on screen while its list is open.
   function toggleToastDetail() {
     if (toastDetailOpen) { closeToastDetail(); return }
     toastDetailOpen = true
@@ -1777,7 +1801,7 @@
   function closeToastDetail() {
     toastDetailOpen = false
     clearTimeout(toastTimer)
-    toastTimer = setTimeout(hideToast, TOAST_MS)
+    toastTimer = setTimeout(hideToast, toast?.action ? dismissDelay(toast) : TOAST_MS)
   }
 
   // guardItems lists what a close-guard error names: "responsibilities: cannot close:\n- ...".
@@ -1840,7 +1864,7 @@
     if (kind === 'expedite') {
       try {
         await api.expediteGoal(request.roomId, request.goal.id, true)
-        say(`Goal ${request.goal.id} is expedited.`)
+        say({ tone: 'success', subject: 'Expedited the goal', text: clipText(request.goal.text) })
         confirm = null
         loadGoals()
       } catch (e) {
@@ -1851,7 +1875,7 @@
     if (kind === 'cancelrun') {
       try {
         await api.cancelRun(request.run.id)
-        say(`${request.run.name} is canceled.`)
+        say({ tone: 'success', subject: `${request.run.name} is canceled`, text: 'Work it finished stays in the run record.' })
         confirm = null
         loadRuns()
         loadRun()
@@ -1870,7 +1894,9 @@
         closeResult = { name: m.name, items: result?.closeSummary ?? [] }
       }
       confirm = null
-      say(kind === 'stop' ? `Turn stopped. ${m.name} stays open.` : kind === 'promote' ? `${m.name} is now a top-level lead.` : `${m.name} is closed.`)
+      if (kind === 'stop') say({ tone: 'success', subject: 'Turn stopped', text: `${m.name} stays open; your next post starts a new turn.` })
+      else if (kind === 'promote') say({ tone: 'success', subject: `${m.name} is now a top-level lead`, text: 'Its children stay attached, with new depths.' })
+      else say({ tone: 'success', subject: `${m.name} is closed`, text: 'Its PR authorship and reviewer roles have moved on.' })
       loadMembers()
       loadChanges()
     } catch (e) {
@@ -2268,7 +2294,7 @@
           openSession(data.member, target.turn, data)
         }
       } catch (e) {
-        if (request === detailRequest) say(errorText(e))
+        if (request === detailRequest) say({ tone: 'error', subject: 'Could not open that session', text: errorText(e) })
       }
     }
   }
@@ -2286,7 +2312,7 @@
   // The pane reports a run this room's repository does not hold.
   function openHookLog(target: HookLogTarget) {
     navOpen = false
-    if (!room) { say('Open a room to see its hook runs.'); return }
+    if (!room) { say({ tone: 'info', subject: 'Open a room first', text: 'Hook runs belong to a room repository.' }); return }
     showSettings = false
     roomSettingsAt = { start: 'hooks', hookRun: target }
     roomSettingsKey++
@@ -2309,7 +2335,7 @@
   function actionRegistry(r = current ?? room) {
     return actions({
       room: r, rooms, icons: ICON, hasTerminal, narrow, runs, session: drill, sessionPRs: prMap[drill?.id ?? ''],
-      openView, openSettings, renameRoom, deleteRoom, roomAction, say, loadRooms,
+      openView, openSettings, renameRoom, deleteRoom, roomAction, say: sayLine, loadRooms,
       openFiles: (path) => { openView('files'); if (path) reveal = path.replace(/^\.?\//, '') },
       openPins: () => { showPins = true; if (narrow) showMembers = false },
       openSearch: (arg) => openSearch(arg || ''),
@@ -2337,7 +2363,7 @@
         }
         if (!r) return
         const res = await api.startRun(r.id, { template: name }, input)
-        say(`${name} started.`)
+        say({ tone: 'success', subject: `${name} started`, text: 'Its agents run now.', action: res?.id ? { label: 'Open', run: () => showRun({ id: res.id }) } : undefined })
         await loadRuns()
         if (res?.id) showRun({ id: res.id })
       },
@@ -2621,7 +2647,8 @@
         {/if}
         {#if engineStatus}
           <p class="engine-down" class:waiting={engineStatus === 'reconnecting'} role={engineStatus === 'reconnecting' ? 'status' : 'alert'}><strong>Reconnecting…</strong>
-            {#if engineStatus === 'offline'}This device is offline. Dyna reconnects when its network is back.
+            {#if engineStatus === 'reconnecting'}Contact with the engine broke. Dyna tries again now, and posts wait until it answers.
+            {:else if engineStatus === 'offline'}This device is offline. Dyna reconnects when its network is back.
             {:else if engineStatus === 'unreachable'}Dyna cannot reach the engine. Check this device's network connection.
             {:else if engineStatus === 'engine'}The engine did not answer. Agents, posts and merges wait until it is back. On the engine's computer, run <code>systemctl --user start dyna-engine</code>.
             {/if}</p>
@@ -2677,7 +2704,7 @@
         {:else if view === 'jobs'}
           {#key room.id}<Jobs older={listPages.jobs?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['jobs'])} {jobs} error={jobsError} jobId={openJob} {narrow} onstop={stopJob} />{/key}
         {:else if view === 'goals'}
-          {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id: string) => (goalId = id)} ongoal={openGoal} onexpedite={(g: Goal) => expediteGoal(g).catch((e) => say(errorText(e)))} />{/key}
+          {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id: string) => (goalId = id)} ongoal={openGoal} onexpedite={(g: Goal) => expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) }))} />{/key}
         {:else if view === 'runs'}
           {#if openRun}
             {#key openRun}<Run detail={runDetail} error={runError} oncancel={(run) => (confirm = { kind: 'cancelrun', run })} onpause={pauseRun} onsteer={steerAgent} />{/key}
@@ -2717,7 +2744,7 @@
       {:else if roomId && room && showPins}
         <Pins {room} {pins} ondetail={openDetail} onjump={(id: string) => { if (narrow) showPins = false; jumpTo(id) }} onunpin={togglePin} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} onclose={() => (showPins = false)} />
       {:else if roomId && room && showMembers && !drill}
-        <Members computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} onroomactions={roomSessionActions} onresumeroom={() => roomSessionController?.run('resume')} onreloadcontrols={() => roomSessionController?.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${errorText(e)}`))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
+        <Members computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} onroomactions={roomSessionActions} onresumeroom={() => roomSessionController?.run('resume')} onreloadcontrols={() => roomSessionController?.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say({ tone: 'error', subject: `Could not dismiss ${m.name}`, text: errorText(e) }))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
       {/if}
       </div>
     </div>
@@ -2774,7 +2801,7 @@
 {/if}
 {#if expediting && room}
   {@const context = { ...expediting }}
-  <ExpediteGoal goals={context.goals} roomId={room.id} session={context.member.address} expeditedId={$expedite.goalId} onpick={(g: Goal) => { expediting = null; expediteGoal(g).catch((e) => say(errorText(e))) }} onstop={() => { expediting = null; stopExpediting(context.goals) }} onclose={() => (expediting = null)} />
+  <ExpediteGoal goals={context.goals} roomId={room.id} session={context.member.address} expeditedId={$expedite.goalId} onpick={(g: Goal) => { expediting = null; expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) })) }} onstop={() => { expediting = null; stopExpediting(context.goals) }} onclose={() => (expediting = null)} />
 {/if}
 {#if confirm && confirmText}
   <Confirm {...confirmText} busy={confirm.busy} error={confirm.error} onconfirm={() => runConfirm()} oncancel={() => (confirm = null)} />
@@ -2786,13 +2813,13 @@
   <Prompt {...ask} onsubmit={ask.submit} oncancel={() => (ask = null)} />
 {/if}
 {#if closeResult}
-  <section class="toast close-result" role="status" aria-label="Session close result">
+  <section class="close-result" role="status" aria-label="Session close result">
     <strong>{closeResult.name} is closed.</strong>
     {#if closeResult.items.length}<ul>{#each closeResult.items as item}<li>{item}</li>{/each}</ul>{/if}
     <button onclick={() => (closeResult = null)}>Dismiss</button>
   </section>
 {:else if toast}
-  <div class="toast" role="status">{toast}{#if toastDetail}<button type="button" class="toast-action" aria-expanded={toastDetailOpen} onclick={toggleToastDetail}>Details</button>{/if}</div>
+  <Toast {toast} detail={toastDetail} detailOpen={toastDetailOpen} ondismiss={hideToast} onaction={runToastAction} ontoggle={toggleToastDetail} />
 {/if}
 {#if !closeResult && toast && toastDetail && toastDetailOpen}
   <div class="toast-details" role="region" aria-label={toastDetail.title}>
@@ -2909,10 +2936,29 @@
   @media (hover: hover) {
     .update button:hover { color: var(--ink); }
   }
-  .close-result { max-width: min(640px, calc(100vw - 32px)); max-height: 50vh; overflow: auto; overflow-wrap: anywhere; }
+  /* A close result is its own floating panel. The toast component's styles are
+     scoped to it, so this panel carries the position and surface it needs. */
+  .close-result {
+    position: fixed;
+    left: 50%;
+    bottom: 84px;
+    transform: translateX(-50%);
+    z-index: 70;
+    width: max-content;
+    max-width: min(640px, calc(100vw - 32px));
+    max-height: 50vh;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    padding: 10px 14px;
+    border: 1px solid var(--line-soft);
+    border-radius: var(--r-sm);
+    background: #121113;
+    color: var(--ink-2);
+    font-size: var(--t-ui);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  }
   .close-result ul { margin: 8px 0; padding-left: 20px; }
   .close-result button { margin-top: 8px; }
-  .toast-action { margin-left: 10px; color: var(--iris); font-size: inherit; text-decoration: underline; }
   .toast-details {
     position: fixed;
     left: 50%;
@@ -2937,21 +2983,6 @@
   .toast-details li { display: grid; gap: 2px; margin: 6px 0; }
   .toast-details li strong { color: var(--ink-2); font-weight: 500; }
   .toast-details li.error span { color: var(--coral); }
-
-  .toast {
-    position: fixed;
-    left: 50%;
-    bottom: 84px;
-    transform: translateX(-50%);
-    z-index: 70;
-    background: #121113;
-    border: 1px solid var(--line-soft);
-    color: var(--ink-2);
-    font-size: 13px;
-    padding: 8px 14px;
-    border-radius: 8px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
-  }
 
   /* A phone: one column. The feed takes the width; the room rail and the
      sidebar slide in as a drawer from the left, and the members or pins
@@ -3015,7 +3046,7 @@
     .who { min-width: 0; }
     .icon { width: 44px; height: 44px; flex: none; }
     .center { padding-bottom: env(safe-area-inset-bottom); }
-    .toast { bottom: calc(96px + env(safe-area-inset-bottom)); max-width: calc(100vw - 32px); }
     .toast-details { bottom: calc(146px + env(safe-area-inset-bottom)); max-height: 54vh; }
+    .close-result { bottom: calc(96px + env(safe-area-inset-bottom)); }
   }
 </style>

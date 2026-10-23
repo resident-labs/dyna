@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { call, runFunctions } from '../../../test/svelte-source.ts'
 import type { HookRun, HookRunLog } from '../api/settings.ts'
+import type { ToastInput } from '../ui/toast.ts'
 
 // Hooks belong to a repository, so Room settings is the only place that
 // manages them, and a hook card's "View log" leads there.
@@ -12,12 +13,12 @@ const target = { repo: '/repo', hook: 'verify', runId: 'r1' }
 
 interface OpenState extends Record<string, unknown> {
   roomSettingsAt?: { start: string; hookRun?: unknown }
-  said: string[]
+  said: unknown[]
 }
 
 function openContext(room: unknown): OpenState {
   const state: OpenState = { navOpen: true, showSettings: true, showRoomSettings: false, roomSettingsKey: 0, room, said: [] }
-  state.say = (text: string) => state.said.push(text)
+  state.say = (input: ToastInput) => state.said.push(input)
   runFunctions(app, ['openHookLog'], state)
   return state
 }
@@ -37,7 +38,11 @@ test('a hook card with no room says so instead of doing nothing', async () => {
   const state = openContext(null)
   await call(state, 'openHookLog', target)
   assert.equal(state.showRoomSettings, false)
-  assert.deepEqual(state.said, ['Open a room to see its hook runs.'])
+  assert.equal(state.said.length, 1)
+  const said = state.said[0] as ToastInput
+  assert.equal(said.tone, 'info')
+  assert.equal(said.subject, 'Open a room first')
+  assert.equal(said.text, 'Hook runs belong to a room repository.')
 })
 
 test('the room Hooks section opens the run of the hook this repository holds', async () => {
