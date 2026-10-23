@@ -50,19 +50,17 @@
     onpresent?: (() => Promise<boolean>) | null
     members?: Member[]
     jobs?: ShellJob[]
-    contextError?: string
     onopenfile: (attachment: Attachment) => void
     onpost?: ((postId: string) => void) | null
     onissue?: ((number: number) => void) | null
     onchild: (member: Member) => void
     onjob: (job: ShellJob) => void
     threadsOpen?: boolean
-    contextOpen?: boolean
     selectedThread?: string
     draft?: string
     readingHistory?: boolean
   }
-  let { readOnly = false, onreopen = null, reopening = '', ondismisssession = null, dismissing = '', session = null, error = '', room, onharness = null, onsend, queue = [], onunqueue = null, ondismiss = null, focusedTurn = 0, onrecent = null, onearlier = null, onnewer = null, onpresent = null, members = [], jobs = [], contextError = '', onopenfile, onpost = null, onissue = null, onchild, onjob, threadsOpen = $bindable(false), contextOpen = $bindable(false), selectedThread = $bindable(''), draft = $bindable(''), readingHistory = $bindable(false) }: Props = $props()
+  let { readOnly = false, onreopen = null, reopening = '', ondismisssession = null, dismissing = '', session = null, error = '', room, onharness = null, onsend, queue = [], onunqueue = null, ondismiss = null, focusedTurn = 0, onrecent = null, onearlier = null, onnewer = null, onpresent = null, members = [], jobs = [], onopenfile, onpost = null, onissue = null, onchild, onjob, threadsOpen = $bindable(false), selectedThread = $bindable(''), draft = $bindable(''), readingHistory = $bindable(false) }: Props = $props()
   // One selected post for the message list and one for the open thread (postSelect.ts).
   const listSelection = createSelection()
   const threadSelection = createSelection()
@@ -76,11 +74,9 @@
   let isNew = $derived(arrived(m?.id, dm.rows.map((r) => r.key)))
   let selected = $derived(dm.threads.find((t) => t.key === selectedThread) ?? (selectedThread ? { key: selectedThread, posts: [] } : null))
   let list = $derived(threadList(dm.threads, children))
-  let shellsOpen = $state(false)
   let allRecent = $state(false)
   let threadRows = $derived(groupMessages((selected?.posts || []).map((p): MessageRow => ({ kind: 'message', key: p.id, author: p.from, ts: p.ts, text: p.text, post: p, delivery: p.delivery, pending: p.pending }))))
   let isNewInThread = $derived(threadArrived(selected?.key, threadRows.map((r) => r.key)))
-  let ownJobs = $derived(jobs.filter((j) => j.owner === m?.id || j.owner === dm.address))
   let threadScroller = $state<HTMLElement>()
   let threadStuck = $state(true)
   $effect(() => {
@@ -327,21 +323,9 @@
                 </div>
               {/each}
             {/if}
-            {#if list.shells.length}
-              <button class="context-row shells" aria-expanded={shellsOpen} onclick={() => (shellsOpen = !shellsOpen)}><span class="symbol">{shellsOpen ? '▾' : '▸'}</span><span>Shell jobs</span><small>{list.shells.length} · {ago(list.shells[0]?.posts.at(-1)?.ts)}</small></button>
-              {#if shellsOpen}{#each list.shells as thread (thread.key)}{@render threadRow(thread)}{/each}{/if}
-            {/if}
           </div>
         {/if}
       </aside>
-      </div>
-    {/if}
-    {#if contextOpen}
-      <button class="context-scrim" aria-label="Close context" onclick={() => (contextOpen = false)}></button>
-      <div class="context-pop" role="dialog" aria-label={`Around ${m.name}`}>
-        {#if contextError}<p class="err">{contextError}</p>{/if}
-        {#each ownJobs as job (job.id)}<button class="context-row" onclick={() => { contextOpen = false; onjob?.(job) }}><span class="symbol">▶</span><span>{job.name || job.id}</span><small>{job.state}</small></button>{/each}
-        {#if !ownJobs.length}<EmptyState title="No shell jobs" />{/if}
       </div>
     {/if}
   {/if}
@@ -392,7 +376,7 @@
   .context-row > span:not(.symbol) { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .context-row small { color: var(--faint); font-size: var(--t-cap); }
   .context-row.more { color: var(--faint); font-size: var(--t-sm); padding-left: 38px; }
-  h3:not(:first-child), .shells { margin-top: 14px; }
+  h3:not(:first-child) { margin-top: 14px; }
   .child-row { display: flex; align-items: center; gap: var(--s1); }
   .thread-count { flex: none; padding: var(--s1) var(--s2); border-radius: 6px; font-size: var(--t-cap); color: var(--faint); white-space: nowrap; transition: background-color var(--motion-fast) var(--ease), color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
@@ -404,8 +388,6 @@
   .thread-wrap.overlay { display: block; position: absolute; inset: 0; z-index: 31; }
   .thread-wrap.overlay .panel-head { touch-action: pan-y; }
   .thread-scrim { display: none; }
-  .context-scrim { position: absolute; inset: 0; z-index: 33; background: transparent; }
-  .context-pop { position: absolute; top: 8px; right: 12px; z-index: 34; width: min(320px, 90%); max-height: 70%; overflow-y: auto; padding: 6px; background: var(--side); border: 1px solid var(--line-soft); border-radius: 8px; box-shadow: 0 8px 24px #0008; }
   @media (max-width: 1099px) {
     .thread-panel { position: absolute; top: 0; bottom: 0; right: 0; z-index: 32; width: min(360px, 90%); box-shadow: -4px 0 24px #0006; }
     .thread-scrim { display: block; position: absolute; inset: 0; background: #0006; z-index: 31; }
