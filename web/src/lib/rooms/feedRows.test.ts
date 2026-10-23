@@ -207,17 +207,16 @@ test('a running run shows on its hook row, and an older start keeps its place', 
   const live = content(feedRows([pass(1), running]))
   assert.equal(live.length, 1)
   assert.equal(rowPost(need(live[0]))?.id, 'start-r')
-  assert.deepEqual(need(live[0]).hook, { count: 1, lastTs: start + 60_000 })
-  // A later pass takes the row's state, so the older start never leaves a
-  // stale running card behind it.
+  assert.deepEqual(need(live[0]).hook, { count: 1, lastTs: start + 60_000, active: { runId: 'librarian-run-r', ts: start + 2 * 60_000 } })
+  // A later pass of the hook does not end that run: the row keeps saying that
+  // a run is going until the run's own result posts.
   const later = content(feedRows([pass(1), running, pass(3)]))
   assert.equal(later.length, 1)
   assert.deepEqual(rowPosts(need(later[0])).map((post) => post.id), ['pass-librarian-1', 'start-r', 'pass-librarian-3'])
-  assert.equal(rowPost(need(later[0]))?.notice?.kind, 'result')
-  assert.deepEqual(need(later[0]).hook, { count: 2, lastTs: start + 3 * 60_000 })
+  assert.deepEqual(need(later[0]).hook, { count: 2, lastTs: start + 3 * 60_000, active: { runId: 'librarian-run-r', ts: start + 2 * 60_000 } })
 })
 
-test('an overlapping run stays visible when a newer run finishes first', () => {
+test('an overlapping run stays visibly running until its own result arrives', () => {
   const posts = [
     hookPost('start-a', 'started', 'librarian-run-a', 'running', start, 'librarian'),
     hookPost('start-b', 'started', 'librarian-run-b', 'running', start + 60_000, 'librarian'),
@@ -226,7 +225,12 @@ test('an overlapping run stays visible when a newer run finishes first', () => {
   const rows = content(feedRows(posts))
   assert.equal(rows.length, 1)
   assert.deepEqual(rowPosts(need(rows[0])).map((post) => post.id), ['start-a', 'start-b', 'pass-b'])
-  assert.deepEqual(need(rows[0]).hook, { count: 1, lastTs: start + 90_000 })
+  // The row keeps saying that a run of this hook is going, and names the run
+  // whose log the card opens.
+  assert.deepEqual(need(rows[0]).hook, { count: 1, lastTs: start + 90_000, active: { runId: 'librarian-run-a', ts: start } })
+  // A's own result ends the active run, and the row then shows the pass.
+  const ended = content(feedRows([...posts, hookPost('pass-a', 'result', 'librarian-run-a', 'passed', start + 120_000, 'librarian')]))
+  assert.deepEqual(need(ended[0]).hook, { count: 2, lastTs: start + 120_000 })
 })
 
 test('the start of a run that ended badly shows nowhere', () => {
