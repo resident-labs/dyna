@@ -30,7 +30,7 @@ const rule = (source: string, selector: string): string => {
 
 test('a phone keeps the page title readable and moves the panel toggles into one menu', () => {
   // Four 44 px buttons took the whole bar, so the title shrank to 3 letters.
-  const actions = header.indexOf('aria-label="Channel actions"')
+  const actions = header.indexOf('aria-label="Room actions"')
   assert.ok(actions > 0, 'the phone bar has one actions button')
   const narrow = header.lastIndexOf('{#if narrow}', actions)
   const desktop = header.indexOf('{:else}', actions)
@@ -49,13 +49,11 @@ test('a phone title keeps a readable width and its buttons never shrink', () => 
   assert.match(rule(app, '.icon'), /flex: none/, 'bar buttons keep their 44 px touch target')
 })
 
-test('a nested channel shows one crumb on a phone instead of overflowing the bar', () => {
-  // Every crumb holds 96 px, so a trail of three plus the bar's buttons left the
-  // controls outside a 390 px viewport.
-  assert.match(rule(app, '.trail .crumb:not(.current), .trail .slash'), /display: none/, 'older crumbs and their slashes leave the phone bar')
-  assert.match(header, /class="crumb" class:current=\{!channelTrail\.length\} title=\{trailTitle\}/, 'the root crumb is current on the root channel')
-  assert.match(header, /class:current=\{i === channelTrail\.length - 1\}/, 'the last trail crumb is the current channel')
-  assert.match(app, /let trailTitle = \$derived\(\['general', \.\.\.channelTrail\.map\(\(a\) => a\.name\)\]\.join\(' \/ '\)\)/, 'the hidden trail stays in the tooltip')
+test('the room header shows its name and moves room tabs below the bar on phones', () => {
+  assert.match(header, /<span class="name">\{roomLabel\(current \?\? room\)\}<\/span>/)
+  assert.match(header, /\{#if !narrow\}<div class="dm-tabs"><Tabs tabs=\{roomTabs\}/)
+  assert.match(app, /\{#if !workRow && narrow\}<Tabs tabs=\{roomTabs\}/)
+  assert.doesNotMatch(header, /channelTrail|>general<|>Channels</)
 })
 
 test('the channel look popover stays inside a 390 px viewport', () => {
