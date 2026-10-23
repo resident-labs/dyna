@@ -8,6 +8,7 @@
   import { attachmentDraft } from '../files/attachmentDraft.ts'
   import { mentionOptions, matchMentions, fileMentionDirectory, fileMentionOptions, fileMentionText } from './mentions.ts'
   import { loadReferences, matchReferences, referenceKey, referenceLabel } from './references.ts'
+  import { modelLabel, profileHint } from './profileLabels.ts'
   import ReferenceChips from './ReferenceChips.svelte'
   import type { Reference } from './references.ts'
   import type { Action } from '../ui/actions.ts'
@@ -181,7 +182,7 @@
     token?.reference ? matchReferences(referenceOptions, token.text).map((reference) => ({ value: referenceKey(reference), hint: reference.title + ' · ' + reference.state, label: referenceLabel(reference), reference })) :
     token?.arg ? token.arg.options?.() ?? [] :
     token?.slash ? [
-      ...profiles.map((p) => ({ value: '/' + p.name, group: 'Start a session with', hint: [p.harness, p.model].filter(Boolean).join(' · ') + (p.default ? ' · default' : '') })),
+      ...profiles.map((p) => ({ value: '/' + p.name, group: 'Start a session with', hint: profileHint(p) })),
       ...appCommands.map((c) => ({ value: '/' + c.name, group: 'Commands', arg: c.arg, hint: c.hint })),
     ] :
     [...mentionOptions(choices).map((option) => ({ ...option, group: 'Sessions' })), ...fileMentionOptions(fileEntries, token?.text || '@')]
@@ -193,6 +194,17 @@
     if (t.arg) return options.filter((o) => `${o.value} ${o.hint}`.toLowerCase().includes(t.text.toLowerCase())).slice(0, 8)
     if (t.slash) return matchMentions(options, t.text, 20)
     return [...matchMentions(options.filter((option) => !option.file), t.text, 6), ...options.filter((option) => option.file)]
+  })
+  // One line for every token kind that finds nothing, so "/cl" and "@xx"
+  // never open an empty popup with no explanation.
+  let emptyLine = $derived.by((): string => {
+    const t = token
+    if (!t || matches.length) return ''
+    if (fileDirectory !== null && (fileLoading || fileError)) return ''
+    if (t.reference) return referenceLoading ? 'Loading PRs and issues…' : `No PRs or issues match “${t.text}”.`
+    if (t.slash) return `No session or command matches “${t.text}”.`
+    if (t.arg) return `No choice matches “${t.text}”.`
+    return `No sessions or files match “${t.text}”.`
   })
   // The option the menu marks as active, for aria-activedescendant.
   let activeOption = $derived.by(() => {
@@ -246,7 +258,7 @@
   })
   let wakeLine = $derived(
     !preview ? '' :
-    spawn ? (spawn.error || `New session @${spawn.name || 'agent-…'} · ${spawn.profile}${spawn.model ? ' (' + spawn.model + ')' : ''} · in ${spawn.dir}`) :
+    spawn ? (spawn.error || `New session @${spawn.name || 'agent-…'} · ${spawn.profile}${spawn.model ? ' (' + modelLabel(spawn.model) + ')' : ''} · in ${spawn.dir}`) :
     preview.self ? 'To root only · external orchestrators watching this room' :
     !preview.wakes?.length ? `To ${(preview.mentions ?? []).join(' ')} · wakes nobody` :
     `To ${preview.wakes.join(', ')} · ${preview.wakes.length} wake`
@@ -410,8 +422,8 @@
 </script>
 
 <div class="composer">
-  {#if token?.reference && !matches.length}
-    <div class="pop" role="status">{referenceLoading ? 'Loading PRs and issues…' : 'No matching PRs or issues.'}</div>
+  {#if emptyLine}
+    <div class="pop status" role="status">{emptyLine}</div>
   {/if}
   {#if matches.length}
     <div class="pop" id={completionID} role="listbox" aria-label="Composer suggestions" bind:this={completionList}>
@@ -442,8 +454,8 @@
       </button>
     </div>
   {/if}
-  {#if fileDirectory !== null && (fileLoading || fileError || !matches.length)}
-    <div class="file-status" role="status">{fileLoading ? 'Loading files…' : fileError ? 'Files unavailable: ' + fileError : 'No matching files or sessions.'}</div>
+  {#if fileDirectory !== null && (fileLoading || fileError)}
+    <div class="file-status" role="status">{fileLoading ? 'Loading files…' : 'Files unavailable: ' + fileError}</div>
   {/if}
   <ComposerBox onreference={openReferences} {room} {forwarding} onremoveforward={() => (forwarding = null)} {onopenfile} {attachments} bind:draft bind:field placeholder={`Message #${label || roomLabel(room)}`} {busy} {canSend} joined={!!reply} bad={!!(error || (spawn?.error && !command))} spawn={!!(spawn && !spawn.error)} oninput={() => { findToken(); error = '' }} onclick={findToken} onkeydown={keydown} onsend={send} mode={composerMode} model={selectedProfile?.model || ''} {completionID} expanded={!!matches.length} {activeOption}>
     {#snippet context()}<ReferenceChips {references} disabled={busy} onremove={(reference) => (references = references.filter((item) => referenceKey(item) !== referenceKey(reference)))} />{/snippet}
@@ -474,6 +486,7 @@
 
 <style>
   .file-status { padding: 5px var(--s2); font-size: var(--t-sm); color: var(--muted); }
+  .pop.status { padding: 8px var(--s3); font-size: var(--t-sm); color: var(--muted); }
   .command-chip { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 6px; color: var(--muted); font-family: var(--mono); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   .command-chip:hover { background: var(--hover); color: var(--ink); }
   .command-chip:active { background: var(--select); }
