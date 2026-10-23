@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
 
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/hub"
@@ -484,9 +483,6 @@ func (s *Store) deleteRows(id string) error {
 				return err
 			}
 		}
-		if err := invalidateOwnerReadMirror(ctx, conn, id); err != nil {
-			return err
-		}
 		return state.ForgetMirrors(ctx, conn, roomKey(id))
 	})
 }
@@ -510,57 +506,56 @@ func (s *Store) ownerReadsDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "room.owner_reads", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), ownerReadsSchema)
-		return err
+	err = database.Migrate(db, "room.owner_reads", 2, func(conn *sql.Conn, version int) error {
+		if version == 0 {
+			if _, err := conn.ExecContext(context.Background(), ownerReadsSchema); err != nil {
+				return err
+			}
+		}
+		return s.importRetainedOwnerReads(conn)
 	})
 	return db, err
 }
 
-func ownerReadsKey(id string) string { return roomKey(id) + "/owner-read" }
-
-// TODO: legacy/shim remove later — records which owner-read.json copy includes all canonical marks; remove with that mirror.
-func ownerReadsMirrorKey(id string) string { return ownerReadsKey(id) + "/complete" }
-
-func invalidateOwnerReadMirror(ctx context.Context, conn *sql.Conn, roomID string) error {
-	_, err := conn.ExecContext(ctx, "DELETE FROM meta WHERE key=?", ownerReadsMirrorKey(roomID))
-	return err
-}
-
-// importOwnerReads imports room id's owner-read.json when the earlier
-// release wrote it.
-//
-// TODO: legacy/shim remove later — the earlier release reads and writes only owner-read.json; remove with item 31.
-func (s *Store) importOwnerReads(db *sql.DB, roomID string, held bool) error {
-	dir, err := s.dir(roomID)
+// TODO: legacy/shim remove later — import retained owner-read.json once, without rewriting it.
+func (s *Store) importRetainedOwnerReads(conn *sql.Conn) error {
+	entries, err := os.ReadDir(s.root())
+	if os.IsNotExist(err) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(dir, ownerReadsFile)
-	w := state.For(db)
-	if foreign, err := w.Foreign(context.Background(), ownerReadsKey(roomID), path); err != nil || !foreign {
-		return err
+	ctx := context.Background()
+	for _, entry := range entries {
+		if !entry.IsDir() || !ValidID(entry.Name()) {
+			continue
+		}
+		var exists bool
+		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM room_owner_reads WHERE room_id=?)", entry.Name()).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		path := filepath.Join(s.root(), entry.Name(), ownerReadsFile)
+		raw, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		var ids []string
+		if err := json.Unmarshal(raw, &ids); err != nil {
+			log.Printf("room %s: skip malformed %s: %v", entry.Name(), path, err)
+			continue
+		}
+		if _, err := putOwnerReads(ctx, conn, entry.Name(), ids); err != nil {
+			return err
+		}
 	}
-	read := func() error {
-		_, err := w.ImportIfForeign(context.Background(), ownerReadsKey(roomID), path, func(conn *sql.Conn, raw []byte) error {
-			var ids []string
-			if err := json.Unmarshal(raw, &ids); err != nil {
-				return fmt.Errorf("room %s: %s: %v: %w", roomID, ownerReadsFile, err, state.ErrSkipForeign)
-			}
-			// The earlier release only adds reads, so the file's list is
-			// a superset of what it saw: add, never remove.
-			if _, err := putOwnerReads(context.Background(), conn, roomID, ids); err != nil {
-				return err
-			}
-			// Even an imported subset can omit newer canonical marks.
-			return invalidateOwnerReadMirror(context.Background(), conn, roomID)
-		})
-		return err
-	}
-	if held {
-		return read()
-	}
-	return s.withRoomLock(roomID, read)
+	return nil
 }
 
 func putOwnerReads(ctx context.Context, conn *sql.Conn, roomID string, ids []string) (bool, error) {
@@ -579,7 +574,7 @@ func putOwnerReads(ctx context.Context, conn *sql.Conn, roomID string, ids []str
 	return added, nil
 }
 
-// Tests count the real full-row materialization before sorting and mirroring.
+// Tests count full-set materialization to keep acknowledgements proportional to new marks.
 var storedOwnerReads = func(db *sql.DB, roomID string) (map[string]bool, error) {
 	rows, err := db.Query("SELECT msg_id FROM room_owner_reads WHERE room_id = ?", roomID)
 	if err != nil {
@@ -595,13 +590,4 @@ var storedOwnerReads = func(db *sql.DB, roomID string) (map[string]bool, error) 
 		out[id] = true
 	}
 	return out, rows.Err()
-}
-
-func sortedIDs(ids map[string]bool) []string {
-	list := make([]string, 0, len(ids))
-	for id := range ids {
-		list = append(list, id)
-	}
-	sort.Strings(list)
-	return list
 }

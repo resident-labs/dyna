@@ -141,3 +141,82 @@ func TestRoomRecordsMigrateBeforeAnyRead(t *testing.T) {
 		})
 	}
 }
+
+func TestOwnerReadsMigrateOnceAndCurrentWritesLeaveSource(t *testing.T) {
+	for _, mode := range []string{"retained", "empty", "canonical"} {
+		t.Run(mode, func(t *testing.T) {
+			s := recordsStore(t)
+			const id = "room_20261022-120000-1234abcd"
+			dir := filepath.Join(s.Root, id)
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(dir, ownerReadsFile)
+			raw := []byte(`["retained"]`)
+			want := "retained"
+			if mode == "empty" {
+				raw, want = []byte("[]"), ""
+			}
+			if mode == "canonical" {
+				db, err := s.recordsDB()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec(ownerReadsSchema); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec("INSERT INTO meta(key,value) VALUES('room.owner_reads','1')"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := db.Exec("INSERT INTO room_owner_reads(room_id,msg_id) VALUES(?,'canonical')", id); err != nil {
+					t.Fatal(err)
+				}
+				raw, want = []byte("{stale"), "canonical"
+			}
+			if err := os.WriteFile(path, raw, 0600); err != nil {
+				t.Fatal(err)
+			}
+			badDir := filepath.Join(s.Root, "room_20261022-120001-1234abcd")
+			if err := os.MkdirAll(badDir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(badDir, ownerReadsFile), []byte("{stale"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := Migrate(filepath.Dir(s.Root)); err != nil {
+				t.Fatal(err)
+			}
+			db, err := s.ownerReadsDB()
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := storedOwnerReads(db, id)
+			if err != nil || (want == "" && len(got) != 0) || (want != "" && (len(got) != 1 || !got[want])) {
+				t.Fatalf("eager import = %v, %v", got, err)
+			}
+			if err := s.MarkOwnerRead(id, "current"); err != nil {
+				t.Fatal(err)
+			}
+			if after, err := os.ReadFile(path); err != nil || !bytes.Equal(after, raw) {
+				t.Fatalf("source changed: %s, %v", after, err)
+			}
+			if err := os.WriteFile(path, []byte(`["stale"]`), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := database.Close(filepath.Dir(s.Root)); err != nil {
+				t.Fatal(err)
+			}
+			if err := Migrate(filepath.Dir(s.Root)); err != nil {
+				t.Fatal(err)
+			}
+			got, err = s.OwnerReadIDs(id)
+			count := 1
+			if want != "" {
+				count++
+			}
+			if err != nil || len(got) != count || !got["current"] || (want != "" && !got[want]) {
+				t.Fatalf("reopened marks = %v, %v", got, err)
+			}
+		})
+	}
+}

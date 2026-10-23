@@ -337,8 +337,7 @@ func (m Message) manifest(o FrameOptions, limit int) string {
 		}
 		kind := a.MIME
 		if a.Rich() {
-			// TODO: legacy/shim remove later — cards posted before versions have Version 0 and read as v1; remove when no retained room log has an unversioned card.
-			kind = fmt.Sprintf("HTML card %q, visual %s v%d", a.RichLabel(), a.VisualID(m.ID), max(a.Version, 1))
+			kind = fmt.Sprintf("HTML card %q, visual %s v%d", a.RichLabel(), a.VisualID(m.ID), a.Version)
 		}
 		line := fmt.Sprintf("\n- %s · %s · %s · %s", a.Name, kind, HumanSize(a.Size), where)
 		reserve := 0

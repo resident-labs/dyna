@@ -192,14 +192,14 @@ func TestPinsIgnoreFilesAfterMigration(t *testing.T) {
 }
 
 // The owner's reads are rows: they survive owner-read.json's removal, and an
-// earlier release's file only adds reads.
+// later changes to an earlier release's file do not alter canonical reads.
 func TestOwnerReadsAreRows(t *testing.T) {
 	s, rec, _ := pinFixture(t)
 	if err := s.MarkOwnerReadMany(rec.ID, []string{"msg_a", "msg_b"}); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(s.Root, rec.ID, "owner-read.json")
-	if err := os.Remove(path); err != nil {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	if ids, err := s.OwnerReadIDs(rec.ID); err != nil || !ids["msg_a"] || !ids["msg_b"] {
@@ -208,7 +208,7 @@ func TestOwnerReadsAreRows(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`["msg_c"]`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if ids, err := s.OwnerReadIDs(rec.ID); err != nil || len(ids) != 3 || !ids["msg_c"] {
-		t.Fatalf("reads after an earlier release's file = %v, %v; want all three", ids, err)
+	if ids, err := s.OwnerReadIDs(rec.ID); err != nil || len(ids) != 2 || ids["msg_c"] {
+		t.Fatalf("reads after an earlier release's file = %v, %v; want the two canonical marks", ids, err)
 	}
 }

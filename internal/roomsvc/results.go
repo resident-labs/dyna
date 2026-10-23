@@ -162,8 +162,6 @@ func (s *Service) expandShell(p Post) Post {
 		return p
 	}
 	p.Detail = &PostDetail{Kind: "shell", ID: id}
-	// TODO: legacy/shim remove later — exit records before output tails end with " Output: …"; remove when no retained room log has one.
-	p.Text = strings.TrimSuffix(p.Text, " Output: dyna shell tail "+id)
 	p.Text = strings.TrimSuffix(p.Text, "\nOutput: dyna shell tail "+id)
 	p.Text = strings.TrimPrefix(p.Text, p.From+" ")
 	if m.Name != "" {
