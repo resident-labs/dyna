@@ -98,8 +98,8 @@ func TestCoordinatorWatchSeedsTerminalCleanupAndDeduplicates(t *testing.T) {
 	if err := w.followCoordinators(t.Context(), map[string]bool{"wf_watch": true}); err != nil {
 		t.Fatal(err)
 	}
-	if len(w.legacy) != 0 || len(w.unwatched) != 0 || len(w.watched) != 0 {
-		t.Fatal("coordinator entered session watch/probe maps")
+	if len(w.unwatched) != 0 || len(w.watched) != 0 {
+		t.Fatal("coordinator entered session watch maps")
 	}
 	stop()
 	receiveCoordinatorExit(t, exited)
