@@ -398,11 +398,22 @@ type Post struct {
 	// Pinned marks a post in the room's pin list. PinnedAt (unix ms) and
 	// PinnedBy (an address) are set only on posts that Pins returns.
 	// Views lists the feed views the post shows in, the sender's home first.
-	// Only room feed pages and live posts set it.
+	// Only room feed pages and live posts set it. Channels repeats Views for a
+	// browser tab still running the bundle from before the feed view rename.
 	Views    []string `json:"views,omitempty"`
+	Channels []string `json:"channels,omitempty"`
 	Pinned   bool     `json:"pinned,omitempty"`
 	PinnedAt int64    `json:"pinnedAt,omitempty"`
 	PinnedBy string   `json:"pinnedBy,omitempty"`
+}
+
+// setViews records the feed views a post shows in, and repeats them under the
+// name an open tab still reads.
+//
+// TODO: legacy/shim remove later — stop sending Channels when a page reset
+// reloads every open tab onto the new bundle.
+func (p *Post) setViews(views []string) {
+	p.Views, p.Channels = views, views
 }
 
 // PostDetail identifies the stored job, workflow, or session turn a post reports.
@@ -425,6 +436,10 @@ type Feed struct {
 	Unread      int            `json:"unread"`
 	FirstUnread string         `json:"firstUnread,omitempty"`
 	ViewUnread  map[string]int `json:"viewUnread"`
+	// TODO: legacy/shim remove later — ChannelUnread repeats ViewUnread for a
+	// browser tab still running the bundle from before the feed view rename,
+	// whose sidebar and voice transcript would otherwise lose their counts.
+	ChannelUnread map[string]int `json:"channelUnread"`
 }
 
 // FeedTail returns a bounded page in append order. An empty cursor selects
@@ -509,11 +524,12 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	page.Messages = slices.DeleteFunc(page.Messages, func(m room.Message) bool { return !roomConversationPost(rec, m) })
 	out, err := s.feedOf(rec, page.Messages, page.Offset, book, reads)
 	for i := range out.Posts {
-		out.Posts[i].Views = views.viewsFor(out.Posts[i].Message)
+		out.Posts[i].setViews(views.viewsFor(out.Posts[i].Message))
 	}
 	out.Earlier, out.Newer, out.Cursor = page.Earlier, page.Newer, page.Cursor
 	out.Unread, out.FirstUnread = page.Unread, page.FirstUnread
 	out.ViewUnread = counts
+	out.ChannelUnread = counts
 	return out, err
 }
 
@@ -660,7 +676,7 @@ func (s *Service) FeedSince(roomID string, offset int64) ([]Post, int64, error) 
 	var out []Post
 	for _, m := range msgs {
 		post := s.expand(decorate(m, rec.Name, reads, book), book)
-		post.Views = views.viewsFor(m)
+		post.setViews(views.viewsFor(m))
 		out = append(out, post)
 	}
 	return out, next, nil
