@@ -6,8 +6,8 @@
   // The floating widget and the phone's sheet both show it.
   import Avatar from '../ui/Avatar.svelte'
   import VoiceRelay from './VoiceRelay.svelte'
-  import { icons } from './icons.js'
-  import { NAMES, shareTitle, shareWhat } from './conversation.js'
+  import { icons } from './icons.ts'
+  import { NAMES, shareTitle, shareWhat } from './conversation.ts'
 
   let { rows, partial = '', onopen } = $props()
   const HUES = { you: 4, voice: 3, root: 7 }

@@ -5,9 +5,9 @@
   // shared in the call and not yet opened; for a few seconds after one comes,
   // a one-line peek says what it is.
   import { untrack } from 'svelte'
-  import { icons } from './icons.js'
-  import { shareLine } from './conversation.js'
-  import { bubbleGestures, bubbleOrb, bubblePlace, bubbleTop, snapBubble, BUBBLE, SHARE_PEEK } from './phone.js'
+  import { icons } from './icons.ts'
+  import { shareLine } from './conversation.ts'
+  import { bubbleGestures, bubbleOrb, bubblePlace, bubbleTop, snapBubble, BUBBLE, SHARE_PEEK } from './phone.ts'
 
   // shared: the unseen shared items, oldest first.
   // ontalk(on) starts and ends a hold: it talks, and opens a muted mic

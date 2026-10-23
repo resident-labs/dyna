@@ -3,7 +3,7 @@
   // aloud during a call, so the owner may answer by voice, or here.
   import { api } from '../../api.ts'
   import { answers } from './attention.ts'
-  import { icons } from './icons.js'
+  import { icons } from './icons.ts'
 
   // phone: touch sizes for the full-screen call.
   let { question, roomId, live = false, phone = false } = $props()

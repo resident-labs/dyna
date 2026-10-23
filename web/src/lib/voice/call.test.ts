@@ -1,23 +1,90 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createCall } from './call.js'
+import { createCall, type CallDeps, type CallSocket, type VoiceReply } from './call.ts'
+import type { PlaybackReceipts } from './audio.ts'
+import { isRecord } from '../api/guards.ts'
 
-function fakeSocket() {
-  const ws = { readyState: 0, sent: [], closed: null }
-  ws.send = (m) => ws.sent.push(m instanceof ArrayBuffer ? m : JSON.parse(m))
-  ws.close = (code) => { ws.closed = code }
-  ws.open = () => { ws.readyState = 1; ws.onopen() }
-  ws.recv = (m) => ws.onmessage({ data: JSON.stringify(m) })
-  ws.drop = (code, reason = '') => { ws.readyState = 3; ws.onclose({ code, reason }) }
+// Sent is a message the call put on the socket: one of the engine's JSON
+// messages, or a binary audio frame.
+type Sent = ArrayBuffer | Record<string, unknown>
+
+const parse = (text: string): Record<string, unknown> => {
+  const v: unknown = JSON.parse(text)
+  return isRecord(v) ? v : {}
+}
+
+// frames are the socket's binary audio frames, and json its JSON messages.
+const frames = (sent: Sent[]): ArrayBuffer[] => sent.filter((m): m is ArrayBuffer => m instanceof ArrayBuffer)
+const json = (sent: Sent[]): Record<string, unknown>[] => sent.filter((m): m is Record<string, unknown> => !(m instanceof ArrayBuffer))
+
+// FakeSocket is the call's socket, driven by the test.
+interface FakeSocket extends CallSocket {
+  sent: Sent[]
+  closed: number | null
+  open(): void
+  recv(m: unknown): void
+  drop(code: number, reason?: string): void
+}
+
+// sockAt is the socket at i, which the test knows exists.
+const sockAt = (sockets: FakeSocket[], i: number): FakeSocket => {
+  const ws = sockets[i]
+  if (!ws) throw new Error(`no socket ${i}`)
   return ws
 }
 
-function setup({ startError, status = {}, micError } = {}) {
-  const calls = []
-  const audio = { played: [], done: [], stops: [], deafened: [], closed: 0, receipts: null, heard: 0, unducked: 0 }
-  let frame
+// Events the socket hands its handlers. Node has no CloseEvent before v23, so
+// the test builds the one the call's close handler reads: a close code, a
+// reason and whether it was clean.
+class FakeCloseEvent extends Event implements CloseEvent {
+  readonly code: number
+  readonly reason: string
+  readonly wasClean: boolean
+  constructor(code: number, reason: string) {
+    super('close')
+    this.code = code
+    this.reason = reason
+    this.wasClean = code === 1000
+  }
+  // Deprecated in the DOM, and the call never reads it.
+  initCloseEvent(): void {}
+}
+
+function fakeSocket(): FakeSocket {
+  const ws: FakeSocket = {
+    readyState: 0,
+    sent: [],
+    closed: null,
+    onopen: null,
+    onmessage: null,
+    onclose: null,
+    send(m) { ws.sent.push(m instanceof ArrayBuffer ? m : parse(m)) },
+    close(code) { ws.closed = code ?? null },
+    open() { ws.readyState = 1; ws.onopen?.(new Event('open')) },
+    recv(m) { ws.onmessage?.(new MessageEvent('message', { data: JSON.stringify(m) })) },
+    drop(code, reason = '') { ws.readyState = 3; ws.onclose?.(new FakeCloseEvent(code, reason)) },
+  }
+  return ws
+}
+
+// Recorder is the call's audio, as the test sees it.
+interface Recorder {
+  played: (string | number)[][]
+  done: string[]
+  stops: string[]
+  deafened: boolean[]
+  closed: number
+  receipts: PlaybackReceipts | null
+  heard: number
+  unducked: number
+}
+
+function setup({ startError, status = {}, micError }: { startError?: unknown; status?: VoiceReply; micError?: unknown } = {}) {
+  const calls: [string, string?][] = []
+  const audio: Recorder = { played: [], done: [], stops: [], deafened: [], closed: 0, receipts: null, heard: 0, unducked: 0 }
+  let frame: ((frame: Float32Array, rate: number) => void) | null = null
   const ws = fakeSocket()
-  const deps = {
+  const deps: CallDeps = {
     socket: (room) => { calls.push(['socket', room]); return ws },
     api: {
       voiceStart: async (room) => {
@@ -27,6 +94,7 @@ function setup({ startError, status = {}, micError } = {}) {
       },
       voiceStatus: async () => status,
       voiceStop: async () => { calls.push(['stop']) },
+      voiceResume: async () => ({}),
     },
     openAudio: async (onFrame, receipts) => {
       if (micError) throw micError
@@ -44,11 +112,11 @@ function setup({ startError, status = {}, micError } = {}) {
     },
   }
   const call = createCall(deps)
-  const mic = () => frame(new Float32Array(480).fill(0.25), 48000)
+  const mic = () => frame?.(new Float32Array(480).fill(0.25), 48000)
   return { call, ws, calls, audio, mic, deps }
 }
 
-async function liveCall(o) {
+async function liveCall(o?: Parameters<typeof setup>[0]) {
   const t = setup(o)
   await t.call.start('room_1', 'voice-test')
   t.ws.open()
@@ -68,20 +136,19 @@ test("start asks the engine, opens the room's call socket and says whether the m
 
 test('microphone frames go out only while the mic is open, at 24 kHz', async () => {
   const { call, ws, mic } = await liveCall()
-  const frames = () => ws.sent.filter((m) => m instanceof ArrayBuffer)
   mic()
-  assert.equal(frames().length, 1)
+  assert.equal(frames(ws.sent).length, 1)
   // 480 samples at 48 kHz are 240 at 24 kHz: 480 bytes of PCM16.
-  assert.equal(frames()[0].byteLength, 480)
+  assert.equal(frames(ws.sent)[0]?.byteLength, 480)
   call.toggleMute()
   mic()
   call.toggleMute()
   call.setPushToTalk(true)
   mic()
-  assert.equal(frames().length, 1)
+  assert.equal(frames(ws.sent).length, 1)
   call.talk(true)
   mic()
-  assert.equal(frames().length, 2)
+  assert.equal(frames(ws.sent).length, 2)
 })
 
 test("Voice's audio plays, the engine's clear stops it at once, and deafen silences it", async () => {
@@ -102,9 +169,9 @@ test("Voice's audio plays, the engine's clear stops it at once, and deafen silen
 
 test("the player's receipts tell the engine what the owner heard", async () => {
   const { ws, audio } = await liveCall()
-  audio.receipts.started('r1')
-  audio.receipts.ended('r1', 812.4)
-  audio.receipts.cancelled('r2', 'clear', 0)
+  audio.receipts?.started('r1')
+  audio.receipts?.ended('r1', 812.4)
+  audio.receipts?.cancelled('r2', 'clear', 0)
   assert.deepEqual(ws.sent.slice(-3), [
     { type: 'playback', id: 'r1', state: 'started', played_ms: 0 },
     { type: 'playback', id: 'r1', state: 'ended', played_ms: 812 },
@@ -160,24 +227,24 @@ test('hang up tells the engine, closes the socket and the audio, and stops the c
 
 test('mute is the turn signal: releasing push to talk or muting closes the turn, with no silent tail', async () => {
   const { call, ws, mic } = await liveCall()
-  const sent = () => ws.sent.filter((m) => m.type === 'mute').map((m) => m.muted)
+  const sent = () => json(ws.sent).filter((m) => m.type === 'mute').map((m) => m.muted)
   call.setPushToTalk(true)
   call.talk(true)
   mic()
   call.talk(false)
   assert.deepEqual(sent(), [false, true, false, true])
   mic()
-  assert.equal(ws.sent.filter((m) => m instanceof ArrayBuffer).length, 1, 'the mic stays closed after the release')
+  assert.equal(frames(ws.sent).length, 1, 'the mic stays closed after the release')
   call.setPushToTalk(false)
   call.toggleMute()
   call.toggleMute()
   assert.deepEqual(sent(), [false, true, false, true, false, true, false])
   // Nothing but audio frames carries sound.
-  assert.ok(ws.sent.filter((m) => m instanceof ArrayBuffer).every((m) => new Uint8Array(m).some((byte) => byte !== 0)))
+  assert.ok(frames(ws.sent).every((m) => new Uint8Array(m).some((byte) => byte !== 0)))
 })
 
 test("a failed start's late status never touches the next call", async () => {
-  let status
+  let status: ((v: VoiceReply) => void) | undefined
   let starts = 0
   const ws = fakeSocket()
   const call = createCall({
@@ -186,14 +253,15 @@ test("a failed start's late status never touches the next call", async () => {
       voiceStart: () => (++starts === 1 ? Promise.reject(new Error('busy')) : new Promise(() => {})),
       voiceStatus: () => new Promise((resolve) => { status = resolve }),
       voiceStop: async () => {},
+      voiceResume: async () => ({}),
     },
-    openAudio: async () => ({ play() {}, done() {}, stopPlayback() {}, setDeafened() {}, close() {} }),
+    openAudio: async () => ({ play() {}, done() {}, stopPlayback() {}, setDeafened() {}, close() {}, hear() {}, unduck() {} }),
   })
   const first = call.start('room_1', 'a')
   while (!status) await new Promise((r) => setImmediate(r))
   await call.hangup()
   call.start('room_1', 'a')
-  status({ live: true, roomId: 'room_2', room: 'b' })
+  status?.({ live: true, roomId: 'room_2', room: 'b' })
   await first
   assert.equal(call.state.phase, 'starting')
   assert.equal(call.state.busyRoom, '')
@@ -232,18 +300,18 @@ test('refresh turns the header on once voice is set up', async () => {
 })
 
 test("an old call's socket never touches the next call", async () => {
-  const sockets = []
+  const sockets: FakeSocket[] = []
   const t = setup()
   const call = createCall({ ...t.deps, socket: () => { const ws = fakeSocket(); sockets.push(ws); return ws } })
   await call.start('room_1', 'a')
-  const old = sockets[0]
+  const old = sockAt(sockets, 0)
   old.open()
   await call.hangup()
   await call.start('room_1', 'a')
-  const next = sockets[1]
+  const next = sockAt(sockets, 1)
   const sentBefore = old.sent.length
   // Events still queued on the old socket arrive after the new call began.
-  old.onopen()
+  old.onopen?.(new Event('open'))
   old.recv({ type: 'state', state: 'listening' })
   old.recv({ type: 'audio', id: 'r1', audio: 'AAAA' })
   old.recv({ type: 'clear', id: 'r1' })
@@ -261,7 +329,7 @@ test("an old call's socket never touches the next call", async () => {
 // The owner may talk as soon as they press Call. Their words wait in the
 // browser until the call's socket opens; the engine holds them until Voice
 // is ready, and they are never lost.
-const spoken = (ws) => ws.sent.filter((m) => m instanceof ArrayBuffer)
+const spoken = (ws: FakeSocket) => frames(ws.sent)
 
 test('speech after Call and before the socket opens is sent as it opens', async () => {
   const t = setup()
@@ -293,12 +361,12 @@ test('hanging up drops speech that waited for Voice', async () => {
 test('a failed start drops speech that waited for Voice', async () => {
   const t = setup()
   const ok = t.deps.api.voiceStart
-  let fail
+  let fail: ((err: unknown) => void) | undefined
   t.deps.api.voiceStart = () => new Promise((_, reject) => { fail = reject })
   const starting = t.call.start('room_1', 'voice-test')
   await new Promise((r) => setImmediate(r))
   t.mic()
-  fail(new Error('no gateway'))
+  fail?.(new Error('no gateway'))
   await starting
   assert.equal(t.call.state.phase, 'error')
   t.deps.api.voiceStart = ok
@@ -370,14 +438,14 @@ test('a page load shows a live call to resume, with no mic and no socket until R
 
 test('End stops a call found on page load, and Rejoin waits until it has ended', async () => {
   let live = true
-  let finish
+  let finish: (() => void) | undefined
   const t = setup()
   const call = createCall({
     ...t.deps,
     api: {
       ...t.deps.api,
       voiceStatus: async () => (live ? { available: true, live: true, roomId: 'room_1', room: 'voice-test', startedAt: 500 } : { available: true, live: false }),
-      voiceStop: () => new Promise((resolve) => { finish = () => { live = false; resolve() } }),
+      voiceStop: () => new Promise<void>((resolve) => { finish = () => { live = false; resolve() } }),
     },
   })
   await call.refresh()
@@ -386,14 +454,14 @@ test('End stops a call found on page load, and Rejoin waits until it has ended',
   await call.start('room_1', 'voice-test') // Rejoin while it ends
   assert.ok(!t.calls.some(([k]) => k === 'start'), 'no call starts during the stop')
   assert.equal(t.audio.receipts, null, 'no microphone opens during the stop')
-  finish()
+  finish?.()
   await ending
   assert.equal(call.state.phase, 'idle')
 })
 
 test('a call found on page load that ends elsewhere leaves the resume state', async () => {
   let live = true
-  const timers = []
+  const timers: { ms: number; fn: () => void; on: boolean }[] = []
   const t = setup()
   const call = createCall({
     ...t.deps,
@@ -404,21 +472,24 @@ test('a call found on page load that ends elsewhere leaves the resume state', as
   assert.equal(call.state.phase, 'resumable')
   assert.equal(timers.length, 1)
   live = false // 60 s without a page: the engine ended it
-  await timers[0].fn()
+  await timers[0]?.fn()
   assert.equal(call.state.phase, 'idle')
-  assert.equal(timers[0].on, false, 'it stops asking once the call is gone')
+  assert.equal(timers[0]?.on, false, 'it stops asking once the call is gone')
 })
 
 function reconnectSetup(initialCursor = '') {
   const t = setup()
-  const timers = []
-  const sockets = []
-  const resumes = []
+  const timers: { at: number; fn: () => void; active: boolean }[] = []
+  const sockets: FakeSocket[] = []
+  const resumes: [string, number, string][] = []
   let time = 1000
-  let resume = async () => ({ startedAt: 42 })
+  let resume: () => Promise<VoiceReply> = async () => ({ startedAt: 42 })
+  // A browser clock the call must never read: the resume cursor comes from
+  // the engine.
+  const wallClock = { now: () => { throw new Error('the browser clock must not set the resume cursor') } }
   const call = createCall({
     ...t.deps,
-    now: () => { throw new Error('the browser clock must not set the resume cursor') },
+    ...wallClock,
     after: (ms, fn) => {
       const timer = { at: time + ms, fn, active: true }
       timers.push(timer)
@@ -428,21 +499,21 @@ function reconnectSetup(initialCursor = '') {
     api: {
       ...t.deps.api,
       voiceStart: async (...args) => ({ ...await t.deps.api.voiceStart(...args), resumeCursor: initialCursor }),
-      voiceResume: (...args) => { resumes.push(args); return resume() },
+      voiceResume: (roomId, startedAt, cursor) => { resumes.push([roomId, startedAt, cursor]); return resume() },
     },
   })
   return {
     ...t, call, sockets, resumes,
     failResume: () => { resume = async () => { throw new Error('engine unavailable') } },
     stallResume: () => {
-      let finish
+      let finish: ((v: VoiceReply) => void) | undefined
       resume = () => new Promise((resolve) => { finish = resolve })
-      return () => finish({ startedAt: 42 })
+      return () => finish?.({ startedAt: 42 })
     },
-    async advance(ms) {
+    async advance(ms: number) {
       const target = time + ms
       for (;;) {
-        const timer = timers.filter((t) => t.active && t.at <= target).sort((a, b) => a.at - b.at)[0]
+        const timer = timers.filter((timer) => timer.active && timer.at <= target).sort((a, b) => a.at - b.at)[0]
         if (!timer) break
         time = timer.at
         timer.active = false
@@ -459,15 +530,15 @@ function reconnectSetup(initialCursor = '') {
 async function reconnectLive() {
   const t = reconnectSetup()
   await t.call.start('room_1', 'voice-test')
-  t.sockets[0].open()
-  t.sockets[0].recv({ type: 'state', state: 'listening' })
-  t.sockets[0].recv({ type: 'resume_cursor', cursor: 'engine-delivery-1' })
+  sockAt(t.sockets, 0).open()
+  sockAt(t.sockets, 0).recv({ type: 'state', state: 'listening' })
+  sockAt(t.sockets, 0).recv({ type: 'resume_cursor', cursor: 'engine-delivery-1' })
   return t
 }
 
 test('an engine restart resumes the same call with its microphone, controls and buffered speech', async () => {
   const t = await reconnectLive()
-  const old = t.sockets[0]
+  const old = sockAt(t.sockets, 0)
   t.call.toggleDeafen()
   old.drop(1006)
   assert.equal(t.call.state.phase, 'connecting')
@@ -478,7 +549,7 @@ test('an engine restart resumes the same call with its microphone, controls and 
   t.mic()
   await t.advance(500)
   assert.deepEqual(t.resumes, [['room_1', 42, 'engine-delivery-1']])
-  const next = t.sockets[1]
+  const next = sockAt(t.sockets, 1)
   old.recv({ type: 'state', state: 'listening' })
   old.recv({ type: 'resume_cursor', cursor: 'stale-cursor' })
   assert.equal(t.call.state.phase, 'connecting', 'stale socket cannot complete reconnect')
@@ -499,7 +570,7 @@ test('a disconnect before the first socket message uses the engine status cursor
   for (const cursor of ['', 'engine-initial']) {
     const t = reconnectSetup(cursor)
     await t.call.start('room_1', 'voice-test')
-    t.sockets[0].drop(1006)
+    sockAt(t.sockets, 0).drop(1006)
     await t.advance(500)
     assert.deepEqual(t.resumes, [['room_1', 42, cursor]])
     await t.call.hangup()
@@ -509,7 +580,7 @@ test('a disconnect before the first socket message uses the engine status cursor
 test('reconnect backs off and releases the microphone after 30 seconds, even if a request hangs', async () => {
   const t = await reconnectLive()
   t.failResume()
-  t.sockets[0].drop(1012)
+  sockAt(t.sockets, 0).drop(1012)
   await t.advance(1500)
   assert.equal(t.resumes.length, 2)
   assert.deepEqual(t.resumes[1], ['room_1', 42, 'engine-delivery-1'])
@@ -526,7 +597,7 @@ test('reconnect backs off and releases the microphone after 30 seconds, even if 
 
 test('hangup cancels reconnect and prevents a pending resume from opening another socket', async () => {
   const t = await reconnectLive()
-  t.sockets[0].drop(1006)
+  sockAt(t.sockets, 0).drop(1006)
   await t.call.hangup()
   await t.advance(30000)
   assert.equal(t.resumes.length, 0)
@@ -534,7 +605,7 @@ test('hangup cancels reconnect and prevents a pending resume from opening anothe
   assert.equal(t.audio.closed, 1)
   const pending = await reconnectLive()
   const finish = pending.stallResume()
-  pending.sockets[0].drop(1006)
+  sockAt(pending.sockets, 0).drop(1006)
   await pending.advance(500)
   await pending.call.hangup()
   finish()

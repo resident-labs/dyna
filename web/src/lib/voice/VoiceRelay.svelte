@@ -2,9 +2,9 @@
   // One quiet activity line in a conversation, outside any message: Voice
   // started work, Voice checked something, or someone shared a file. The
   // call window and the DM transcript show it.
-  import { icons } from './icons.js'
+  import { icons } from './icons.ts'
 
-  // icon names an icons.js path; text is the request, quoted when present;
+  // icon names an icons.ts path; text is the request, quoted when present;
   // state is working, answered, stopped, running, done, failed, queued or
   // delivered. onopen, when given, adds an "open" link.
   let { icon, label, text = '', state = '', onopen = null } = $props()

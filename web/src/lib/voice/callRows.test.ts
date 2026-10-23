@@ -1,5 +1,5 @@
 import test, { after } from 'node:test'
-import { icons } from './icons.js'
+import { icons } from './icons.ts'
 import type { CallState } from './callRequests.ts'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'

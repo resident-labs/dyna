@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { capturing, initial, offerCall, reduce, spaceTalk, statusLine } from './callState.js'
+import { capturing, initial, offerCall, reduce, spaceTalk, statusLine, type CallEvent, type TalkKey, type TalkTarget } from './callState.ts'
 
-const run = (...events) => events.reduce(reduce, initial)
-const live = (...more) => run({ type: 'start', roomId: 'r1', room: 'voice-test' }, { type: 'started', startedAt: 1000 }, { type: 'voiceReady' }, ...more)
+const run = (...events: CallEvent[]) => events.reduce(reduce, initial)
+const live = (...more: CallEvent[]) => run({ type: 'start', roomId: 'r1', room: 'voice-test' }, { type: 'started', startedAt: 1000 }, { type: 'voiceReady' }, ...more)
 
 test('a call goes idle → starting → connecting → live → ending → idle', () => {
   let s = run({ type: 'start', roomId: 'r1', room: 'voice-test' })
@@ -101,8 +101,8 @@ test('Space talks only with push to talk on, never starts from a text field, and
   const ptt = live({ type: 'pushToTalk', on: true })
   const talking = reduce(ptt, { type: 'talk', on: true })
   const page = { closest: () => null }
-  const field = (sel) => ({ closest: (q) => (q.split(', ').some((part) => part.startsWith(sel)) ? {} : null) })
-  const key = (type, target, more = {}) => ({ type, code: 'Space', target, ...more })
+  const field = (sel: string) => ({ closest: (q: string) => (q.split(', ').some((part) => part.startsWith(sel)) ? {} : null) })
+  const key = (type: string, target: TalkTarget, more: { repeat?: boolean } = {}): TalkKey => ({ type, code: 'Space', target, ...more })
   assert.equal(spaceTalk(key('keydown', page), ptt), true)
   assert.equal(spaceTalk(key('keyup', page), talking), false)
   assert.equal(spaceTalk(key('keyup', page), ptt), null, 'nothing to release')
@@ -129,8 +129,9 @@ test('a mode change unmutes, except in a deafened call', () => {
 })
 
 test('during a call the status line is only Listening, Speaking, Thinking or Muted', () => {
-  const lines = new Set()
-  for (const events of [[], [{ type: 'toggleMute' }], [{ type: 'toggleDeafen' }], [{ type: 'pushToTalk', on: true }], [{ type: 'pushToTalk', on: true }, { type: 'talk', on: true }], [{ type: 'activity', value: 'speaking' }], [{ type: 'activity', value: 'thinking' }], [{ type: 'activity', value: 'idle' }]]) {
+  const lines = new Set<string>()
+  const cases: CallEvent[][] = [[], [{ type: 'toggleMute' }], [{ type: 'toggleDeafen' }], [{ type: 'pushToTalk', on: true }], [{ type: 'pushToTalk', on: true }, { type: 'talk', on: true }], [{ type: 'activity', value: 'speaking' }], [{ type: 'activity', value: 'thinking' }], [{ type: 'activity', value: 'idle' }]]
+  for (const events of cases) {
     lines.add(statusLine(live(...events)))
   }
   assert.deepEqual([...lines].sort(), ['Listening', 'Muted', 'Speaking', 'Thinking'])
@@ -143,7 +144,7 @@ test('choosing the current mode keeps an explicit mute', () => {
 })
 
 test('a page load during a live call offers to resume it, and never starts audio itself', () => {
-  const found = { type: 'status', available: true, live: true, roomId: 'r1', room: 'voice-test', startedAt: 1000 }
+  const found: CallEvent = { type: 'status', available: true, live: true, roomId: 'r1', room: 'voice-test', startedAt: 1000 }
   const s = reduce(initial, found)
   assert.equal(s.phase, 'resumable')
   assert.deepEqual([s.roomId, s.room, s.startedAt], ['r1', 'voice-test', 1000])
