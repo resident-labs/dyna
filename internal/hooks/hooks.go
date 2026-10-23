@@ -457,7 +457,7 @@ func postRoomEvent(e Event, ev room.HookEvent, create bool) error {
 // When even that record cannot be stored, the spool error itself is still on
 // its way to the caller, and this line names why no card followed it.
 func (s Service) spoolAlert(ctx context.Context, r repoid.Repo, e Event, h Hook, cause error) {
-	run, file, err := s.newRun(ctx, r.ID, h, e.Session)
+	run, file, err := s.newRun(ctx, r, e, h)
 	if err != nil {
 		log.Printf("hook spool alert for %s: cannot record the run: %v (spool error: %v)", h.Name, err, cause)
 		return
@@ -557,7 +557,7 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 			return Run{}, err
 		}
 		if h.Builtin != "" {
-			return s.runBuiltin(ctx, r.ID, h, e)
+			return s.runBuiltin(ctx, r, h, e)
 		}
 		if e.Event == "" {
 			e.Event = h.Event
@@ -579,7 +579,7 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 		if cwd == "main" {
 			cwd = r.Main
 		}
-		ev, log, err := s.newRun(ctx, r.ID, h, e.Session)
+		ev, log, err := s.newRun(ctx, r, e, h)
 		if err != nil {
 			return Run{}, err
 		}
@@ -665,7 +665,7 @@ func failureClass(err error) string {
 // record, the log and the run events of a shell hook, so the screen and the
 // feed show both the same way. id is the repository identity, or the global
 // key for a built-in that belongs to no repository.
-func (s Service) runBuiltin(ctx context.Context, id string, h Hook, e Event) (Run, error) {
+func (s Service) runBuiltin(ctx context.Context, r repoid.Repo, h Hook, e Event) (Run, error) {
 	spec, err := s.builtin(h)
 	if err != nil {
 		return Run{}, err
@@ -673,7 +673,7 @@ func (s Service) runBuiltin(ctx context.Context, id string, h Hook, e Event) (Ru
 	if e.Event == "" {
 		e.Event = h.Event
 	}
-	ev, log, err := s.newRun(ctx, id, h, e.Session)
+	ev, log, err := s.newRun(ctx, r, e, h)
 	if err != nil {
 		return Run{}, err
 	}

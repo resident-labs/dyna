@@ -294,9 +294,13 @@ type workers struct {
 	probe func(context.Context) (time.Time, error)
 	// caches cleans the own CI caches of a CI machine once a day.
 	caches func(context.Context) (time.Time, error)
+	// settle finishes the hook runs that an earlier engine left running. Only
+	// the engine that owns the worker lock runs it, so a second engine on the
+	// same store cannot fail the first engine's live runs.
+	settle func(context.Context) error
 }
 
-func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub) workers {
+func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub, started time.Time) workers {
 	prs := watch.New()
 	prs.Notify = rooms.Notify
 	prs.GH.Rooms = rooms.Notify.Rooms
@@ -356,6 +360,7 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 		instructions: func(ctx context.Context) (time.Time, error) {
 			return rooms.Notify.Sessions.FlushInstructionNotes(ctx, time.Now())
 		},
+		settle: func(ctx context.Context) error { return settleHookRuns(ctx, started) },
 	}
 }
 
@@ -521,15 +526,33 @@ func runOwned(ctx context.Context, root string, w workers, signals *workerSignal
 		return false, err
 	}
 	defer unlock()
+	// A run that the previous owner left pending can never finish, so the owner
+	// ends it before the workers start new ones.
+	if w.settle != nil {
+		if err := w.settle(ctx); err != nil {
+			report("settle hook runs", err)
+		}
+	}
 	w.run(ctx, signals, t, report)
 	return true, nil
 }
 
-func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, load *sysload.Sampler, events *hub.Hub) {
+// settleFromStart ends the hook runs that an earlier engine left pending,
+// measured from this engine's start. A run this engine began, even while its
+// startup recovery was still running, is newer than that and stays live.
+func settleFromStart(ctx context.Context, started time.Time) error {
+	return hooks.New().SettleInterrupted(ctx, started)
+}
+
+// settleHookRuns is settleFromStart, replaced in a test that checks the cutoff
+// the workers pass.
+var settleHookRuns = settleFromStart
+
+func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, load *sysload.Sampler, events *hub.Hub, started time.Time) {
 	report := func(name string, err error) {
 		log.Print(watch.Sanitize(name + ": " + err.Error()))
 	}
-	owned, err := runOwned(ctx, store.DataDir(), engineWorkers(rooms, signals, load, events), signals, t, report)
+	owned, err := runOwned(ctx, store.DataDir(), engineWorkers(rooms, signals, load, events, started), signals, t, report)
 	if err != nil {
 		log.Print(watch.Sanitize("workers: " + err.Error()))
 		return
