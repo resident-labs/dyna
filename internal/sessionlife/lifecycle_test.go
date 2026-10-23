@@ -24,8 +24,7 @@ func TestCheckRequiresMatchingOpenSessionEvidence(t *testing.T) {
 	}{
 		{"open", `{"id":"` + id + `"}`, true},
 		{"closed", `{"id":"` + id + `","closed":"2026-10-17T12:00:00Z"}`, false},
-		// TODO: legacy/shim remove later — old done records are dormant sessions; remove with the shim.
-		{"legacy done", `{"id":"` + id + `","closed":"2026-10-17T12:00:00Z","done":true}`, true},
+		{"dormant", `{"id":"` + id + `","finished":"2026-10-17T12:00:00Z","status":"dormant"}`, true},
 		{"closing", `{"id":"` + id + `","closing":{"token":"operation-a","pid":1}}`, false},
 		{"missing identity", `{}`, false},
 		{"null evidence", `null`, false},

@@ -11,7 +11,7 @@ import (
 func TestLegacyDormantOwnerStaysOpen(t *testing.T) {
 	root := t.TempDir()
 	id := "ses_20261019-000001-aaaaaaaa"
-	recordtest.Write(t, filepath.Join(root, "sessions"), id, map[string]any{"id": id, "closed": time.Now(), "done": true})
+	recordtest.Write(t, filepath.Join(root, "sessions"), id, map[string]any{"id": id, "finished": time.Now(), "status": "dormant"})
 	if err := sessionlife.Check(filepath.Join(root, "sessions"), id); err != nil {
 		t.Fatal(err)
 	}

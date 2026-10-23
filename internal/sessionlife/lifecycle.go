@@ -226,14 +226,11 @@ func ActivateTx(conn *sql.Conn, sessions, id string) error {
 	}
 	var status string
 	_ = json.Unmarshal(fields["status"], &status)
-	if status != "dormant" && len(fields["finished"]) == 0 && len(fields["done"]) == 0 {
+	if status != "dormant" && len(fields["finished"]) == 0 {
 		return nil
 	}
 	fields["dormantWake"] = json.RawMessage("true")
 	fields["status"] = json.RawMessage(`"idle"`)
 	delete(fields, "finished")
-	// TODO: legacy/shim remove later — old done sessions stored dormancy in closed; remove with the legacy done reader.
-	delete(fields, "done")
-	delete(fields, "closed")
 	return SaveTx(conn, id, fields)
 }

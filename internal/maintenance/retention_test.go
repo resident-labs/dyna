@@ -210,7 +210,12 @@ func TestClosedSessionLogRetention(t *testing.T) {
 	} {
 		id := fmt.Sprintf("ses_20261001-000000-%08d", i)
 		dir := filepath.Join(runstore.SessionsDir(), id)
-		meta, _ := json.Marshal(map[string]any{"id": id, "closed": tc.closed, "turns": 1, "done": tc.name == "legacy-done"})
+		fields := map[string]any{"id": id, "closed": tc.closed, "turns": 1}
+		if tc.name == "legacy-done" {
+			delete(fields, "closed")
+			fields["finished"], fields["status"] = tc.closed, "dormant"
+		}
+		meta, _ := json.Marshal(fields)
 		recordtest.WriteRaw(t, runstore.SessionsDir(), id, meta)
 		files = append(files, savedFile{recordtest.Path(t, runstore.SessionsDir(), id), string(meta), false})
 		turn, _ := json.Marshal(map[string]any{"n": 1, "status": tc.status})
