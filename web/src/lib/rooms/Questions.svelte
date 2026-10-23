@@ -83,7 +83,7 @@
             {#each q.options ?? [] as option, i}
               <button class="option" class:gold={i === 0} type="button" disabled={busy.has(q.id)} onclick={() => answer(q, option)}>{option}</button>
             {/each}
-            <div class="reply-field"><input aria-label="Reply to {q.id}" placeholder="Reply…" value={replies[q.id] ?? ''} oninput={(e) => replies = { ...replies, [q.id]: e.target.value }} disabled={busy.has(q.id)} maxlength="2000" /><span class="send-hint">Enter to send</span></div>
+            <div class="reply-field"><input aria-label="Reply to {q.id}" placeholder="Reply…" value={replies[q.id] ?? ''} oninput={(e) => replies = { ...replies, [q.id]: e.target.value }} disabled={busy.has(q.id)} maxlength="2000" enterkeyhint="send" /><button class="send" type="submit" aria-label="Send answer to {q.id}" disabled={busy.has(q.id) || !(replies[q.id] ?? '').trim()}>Send</button></div>
           </form>
           {@const others = alsoAsked(questions, q)}
           {#if others.length}
@@ -122,10 +122,8 @@
   }
   .option:active { background: var(--select); }
   .option.gold { color: var(--rail); background: var(--gold); font-weight: 600; }
-  .reply-field { position: relative; flex: 1; min-width: 140px; }
-  .send-hint { display: none; position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: var(--faint); font-size: var(--t-cap); pointer-events: none; }
-  .reply-field:focus-within .send-hint { display: block; }
-  .reply-field:focus-within input { padding-right: 90px; }
+  .reply-field { display: flex; align-items: center; gap: var(--s2); flex: 1; min-width: 140px; }
+  .send { flex: none; min-height: 44px; min-width: 44px; padding: var(--s2) var(--s3); border-radius: 5px; background: var(--iris); color: var(--rail); font-size: var(--t-ui); font-weight: 600; }
   input { min-width: 0; width: 100%; background: var(--field); border: 1px solid var(--line); border-radius: 5px; color: var(--ink); font: inherit; font-size: var(--t-ui); padding: 7px 10px; }
   input::placeholder { color: var(--faint); }
   input:focus-visible { outline: 2px solid var(--iris-edge); }
@@ -139,5 +137,5 @@
   .answered { color: var(--sage); }
   .withdrawn { color: var(--muted); }
   .error { color: var(--coral); padding: 0 var(--s5); }
-  @media (max-width: 760px) { .list { padding: 0 var(--s4) var(--s4); } .question { padding: 14px; } .option { min-height: 44px; } input { min-height: 44px; } }
+  @media (max-width: 760px) { .list { padding: 0 var(--s4) var(--s4); } .question { padding: 14px; } .option { min-height: 44px; } input { min-height: 44px; font-size: var(--t-title); } }
 </style>
