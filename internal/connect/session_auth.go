@@ -58,7 +58,7 @@ func (s *Service) Authenticate(w http.ResponseWriter, r *http.Request, rt websvc
 			// writes cookies to disk lazily, so a browser killed right after
 			// a renew comes back with the old one). The old value alone
 			// gets nothing: only a renew with the session's key proof.
-			if s.limit.allow("old-cookie:"+x.ID, 1, time.Minute) {
+			if s.limit.Allow("old-cookie:"+x.ID, 1, time.Minute) {
 				s.o.Store.Audit("session.old-cookie", x.ID+": an earlier cookie value came back; renew with the key proof required")
 			}
 			p.Stale = true

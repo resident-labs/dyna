@@ -27,7 +27,7 @@ func (s *Service) renew(w http.ResponseWriter, r *http.Request, rt websvc.Route,
 		websvc.JSONError(w, http.StatusForbidden, err.Error())
 		return
 	}
-	if !s.limit.allow("renew:"+p.ID, 10, time.Minute) {
+	if !s.limit.Allow("renew:"+p.ID, 10, time.Minute) {
 		websvc.JSONError(w, http.StatusTooManyRequests, "too many renewals")
 		return
 	}

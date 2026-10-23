@@ -15,7 +15,7 @@ func (s *Service) handoff(w http.ResponseWriter, rt websvc.Route, p websvc.Princ
 		websvc.JSONError(w, http.StatusBadRequest, "only a Connect session can switch routes")
 		return
 	}
-	if !s.limit.allow("handoff:"+p.ID, 10, time.Minute) {
+	if !s.limit.Allow("handoff:"+p.ID, 10, time.Minute) {
 		websvc.JSONError(w, http.StatusTooManyRequests, "too many route switches")
 		return
 	}

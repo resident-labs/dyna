@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"dyna-agent/internal/ratelimit"
 	"dyna-agent/internal/websvc"
 )
 
@@ -101,7 +102,7 @@ type Service struct {
 	key   ed25519.PrivateKey
 	now   func() time.Time
 	logf  func(string, ...any)
-	limit *limiter
+	limit *ratelimit.Limiter
 
 	mu        sync.Mutex
 	codes     map[string]mintCode
@@ -144,7 +145,7 @@ func New(o Options) (*Service, error) {
 	}
 	ks, _ := o.Store.KeySet()
 	return &Service{
-		o: o, key: key, now: o.Now, logf: o.Logf, limit: newLimiter(o.Now),
+		o: o, key: key, now: o.Now, logf: o.Logf, limit: ratelimit.New(o.Now),
 		codes: map[string]mintCode{}, handoffs: map[string]handoff{}, seen: map[string]time.Time{},
 		grants: map[string]grantEntry{}, keys: ks,
 	}, nil
