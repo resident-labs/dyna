@@ -132,6 +132,12 @@ type MachineCapabilities struct {
 	// app.
 	Computers bool `json:"computers"`
 	Stream    bool `json:"stream"`
+	// FreeDisk is the free space of the filesystem that holds the machine's
+	// /var/tmp, where Dyna keeps its CI work, and DiskFloor is the free space a
+	// CI machine must keep. Values are bytes, and both stay absent for a
+	// machine that is not a CI machine or whose probe could not read them.
+	FreeDisk  *int64 `json:"freeDisk,omitempty"`
+	DiskFloor *int64 `json:"diskFloor,omitempty"`
 }
 
 // MachineLoad is the last load reading of a machine. CPUPercent stays absent
@@ -180,6 +186,12 @@ type MachineAPI struct {
 	// Prober reads a machine when the owner asks for a probe. A nil Prober
 	// reads it through this registry with no load sampler of this engine.
 	Prober *machines.Prober
+	// DiskFloor is the free space a CI machine must keep on its /var/tmp. A
+	// nil DiskFloor reads no floor, so every CI machine counts as online.
+	DiskFloor func() int64
+	// Alerter posts the low-disk alert of a machine that starts holding CI. A
+	// nil Alerter posts nothing.
+	Alerter machines.Alerter
 }
 
 // Machines lists every machine, the engine host first.
@@ -238,7 +250,7 @@ func (a MachineAPI) ProbeMachine(ctx context.Context, id string) (MachineDetail,
 	if err != nil {
 		return MachineDetail{}, err
 	}
-	prober := machines.Prober{Store: a.Store}
+	prober := machines.Prober{Store: a.Store, DiskFloorBytes: a.floorBytes(), Alerter: a.Alerter}
 	if a.Prober != nil {
 		prober = *a.Prober
 	}
@@ -247,6 +259,17 @@ func (a MachineAPI) ProbeMachine(ctx context.Context, id string) (MachineDetail,
 		return MachineDetail{}, err
 	}
 	return a.machine(ctx, stored, a.ciRuns()), nil
+}
+
+// floorBytes is the disk floor as the prober reads it.
+func (a MachineAPI) floorBytes() uint64 {
+	if a.DiskFloor == nil {
+		return 0
+	}
+	if floor := a.DiskFloor(); floor > 0 {
+		return uint64(floor)
+	}
+	return 0
 }
 
 // find reads the machine with this ID. The registry is small, so one list
@@ -277,13 +300,18 @@ func (a MachineAPI) machine(ctx context.Context, m machines.Machine, ci map[stri
 	if !m.LastSeen.IsZero() {
 		seen := m.LastSeen
 		out.SeenAt = &seen
-		out.Capabilities = capabilitiesView(m.Capabilities)
+		out.Capabilities = a.capabilitiesView(m)
 		out.Load = loadView(m.Load)
 	}
 	if m.HasRole(machines.RoleCI) {
 		runs := ci[m.Name]
 		out.CI = &MachineCISlots{Used: ciUsedSlots(runs), Slots: m.CISlots}
 		out.CIRuns = runs
+	}
+	// The reason explains a degraded health and nothing else, so a machine
+	// that recovered loses it.
+	if m.Status() == machines.HealthDegraded {
+		out.StatusReason = statusReason(m.HealthReason)
 	}
 	if !m.Local {
 		// The probe reads the version installed on the machine itself.
@@ -344,9 +372,12 @@ func machineSummary(m machines.Machine) MachineSummary {
 	return out
 }
 
-// capabilitiesView words what one probe read for the page.
-func capabilitiesView(c machines.Capabilities) *MachineCapabilities {
-	return &MachineCapabilities{
+// capabilitiesView words what one probe read for the page. The disk figures
+// belong to a CI machine, whose /var/tmp holds Dyna's CI work, so no other
+// machine shows them.
+func (a MachineAPI) capabilitiesView(m machines.Machine) *MachineCapabilities {
+	c := m.Capabilities
+	out := &MachineCapabilities{
 		OS:           c.OS,
 		Arch:         c.Arch,
 		CPUs:         c.CPUs,
@@ -357,6 +388,25 @@ func capabilitiesView(c machines.Capabilities) *MachineCapabilities {
 		Computers:    c.Computers.Ready(),
 		Stream:       c.Computers.Stream,
 	}
+	if m.HasRole(machines.RoleCI) && c.Disk.Total > 0 {
+		free := int64(c.Disk.Free)
+		out.FreeDisk = &free
+		if a.DiskFloor != nil {
+			floor := a.DiskFloor()
+			out.DiskFloor = &floor
+		}
+	}
+	return out
+}
+
+// statusReason words the stored health reason as the page's reason. A reason
+// the page does not know reads as empty, so it says only that the machine
+// needs attention.
+func statusReason(reason machines.HealthReason) MachineStatusReason {
+	if reason == machines.ReasonLowDisk {
+		return MachineLowDisk
+	}
+	return ""
 }
 
 // loadView words one load reading for the page.
@@ -377,6 +427,10 @@ func machineStatus(m machines.Machine) MachineStatus {
 	switch {
 	case !m.Enabled:
 		return MachineDisabled
+	case m.Status() == machines.HealthDegraded:
+		// A machine that answers but holds its CI work needs attention whether
+		// it is this engine's machine or a remote one.
+		return MachineDegraded
 	case m.Local:
 		return MachineOnline
 	}

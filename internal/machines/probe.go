@@ -28,9 +28,42 @@ const (
 	// HealthDisabled means the owner turned the machine off, so nothing probes
 	// it.
 	HealthDisabled Health = "disabled"
+	// HealthDegraded means the probe reached the machine, and the machine does
+	// not take every kind of work although it is up. The reason says what the
+	// machine misses.
+	HealthDegraded Health = "degraded"
 	// HealthUnknown means no probe has run since the machine was added.
 	HealthUnknown Health = "unknown"
 )
+
+// HealthReason is why a machine that the probe reached is degraded. An empty
+// reason means no reason, so a machine that is only online has none.
+type HealthReason string
+
+const (
+	// ReasonNone is the health reason of a machine that is not degraded.
+	ReasonNone HealthReason = ""
+	// ReasonLowDisk means the filesystem that holds the machine's /var/tmp is
+	// below the free space floor, so Dyna starts no CI there.
+	ReasonLowDisk HealthReason = "low-disk"
+)
+
+// reason explains a health that can carry a reason: a degraded machine, and an
+// offline machine that was degraded before a probe lost it. Every other health
+// keeps none, so a stored row cannot hold CI with no evidence.
+func (m Machine) reason() HealthReason {
+	if m.Health != HealthDegraded && m.Health != HealthOffline {
+		return ReasonNone
+	}
+	return m.HealthReason
+}
+
+// HoldsCI reports whether Dyna starts no CI work on this machine. A machine
+// with too little disk for Dyna's CI work holds it until a probe that reaches
+// the machine reads that space came back.
+func (m Machine) HoldsCI() bool {
+	return m.Status() != HealthDisabled && m.reason() == ReasonLowDisk
+}
 
 // Status is the health that the CLI and the clients show. A disabled machine
 // shows disabled whatever its last probe read.
@@ -44,12 +77,21 @@ func (m Machine) Status() Health {
 // parseHealth reads a stored health value, and treats anything it does not
 // know as unknown.
 func parseHealth(value string) Health {
-	for _, health := range []Health{HealthOnline, HealthOffline, HealthDisabled, HealthUnknown} {
+	for _, health := range []Health{HealthOnline, HealthOffline, HealthDisabled, HealthDegraded, HealthUnknown} {
 		if Health(value) == health {
 			return health
 		}
 	}
 	return HealthUnknown
+}
+
+// parseHealthReason reads a stored reason, and treats anything it does not
+// know as no reason.
+func parseHealthReason(value string) HealthReason {
+	if HealthReason(value) == ReasonLowDisk {
+		return ReasonLowDisk
+	}
+	return ReasonNone
 }
 
 // Containers is the container runtime of a machine. A machine can have both,
@@ -98,8 +140,18 @@ type Capabilities struct {
 	Containers   Containers `json:"containers"`
 	Computers    Computers  `json:"computers"`
 	DynaVersion  string     `json:"dynaVersion"`
+	// Disk is the filesystem that holds the machine's /var/tmp, where Dyna
+	// keeps its CI work. It says nothing about any other directory.
+	Disk Disk `json:"disk"`
 	// Harnesses stays empty: no command gives harness versions without the
 	// engine, and a probe never asks the machine's engine anything.
+}
+
+// Disk is the space of one filesystem. Values are bytes, and a zero total means
+// the probe could not read them.
+type Disk struct {
+	Free  uint64 `json:"free"`
+	Total uint64 `json:"total"`
 }
 
 // Load is the last load reading of a machine. CPUPercent is nil when the probe
@@ -125,10 +177,17 @@ const (
 	// probeKeyPrefix marks a stored probe result in the machines topic, so a
 	// health change does not wake the workers that a registry change wakes.
 	probeKeyPrefix = "health:"
+	// holdKeyPrefix marks a probe result that starts or ends a hold on CI, so
+	// the CI workers wake and move their work.
+	holdKeyPrefix = "hold:"
 )
 
 // IsProbeKey reports whether a machines event carries a probe result.
 func IsProbeKey(key string) bool { return strings.HasPrefix(key, probeKeyPrefix) }
+
+// IsHoldKey reports whether a machines event carries a probe result that
+// started or ended a hold on CI.
+func IsHoldKey(key string) bool { return strings.HasPrefix(key, holdKeyPrefix) }
 
 // Command runs one command with the probe script on its stdin. It matches the
 // shape internal/localci uses for its Runner, so a test injects a fake runner
@@ -147,6 +206,13 @@ type Prober struct {
 	Load func() sysload.Load
 	// Now replaces the clock, for tests.
 	Now func() time.Time
+	// DiskFloorBytes is the free space a CI machine must keep on the
+	// filesystem that holds its /var/tmp. Zero starts CI on any machine the
+	// probe reaches.
+	DiskFloorBytes uint64
+	// Alerter posts the alert of a machine that starts holding CI. A nil
+	// Alerter posts nothing, as a CLI probe does.
+	Alerter Alerter
 }
 
 // ProbeResult is one stored probe.
@@ -154,12 +220,20 @@ type ProbeResult struct {
 	// At is when the probe started.
 	At     time.Time
 	Health Health
+	// Reason explains a degraded health, and is empty for every other health.
+	Reason HealthReason
 	// Capabilities and Load are ignored when Health is not online: a failed
 	// probe keeps what the last good probe read.
 	Capabilities Capabilities
 	Load         Load
 	// Err is the probe failure to show the owner.
 	Err string
+}
+
+// Alerter posts the one alert a machine's own room needs when the machine
+// starts holding CI work. The prober calls it once per low-disk period.
+type Alerter interface {
+	MachineLowDisk(ctx context.Context, name string, free, floor uint64) error
 }
 
 // ProbeAll probes every enabled machine, at most probeConcurrency at once. A
@@ -210,10 +284,30 @@ func (p Prober) ProbeAndSave(ctx context.Context, m Machine) (Machine, error) {
 	if result.Err != "" {
 		result.Health = HealthOffline
 	}
-	if err := p.store().SaveProbe(ctx, m.ID, result); err != nil {
+	if result.Health == HealthOnline {
+		result.Health, result.Reason = p.health(m, result.Capabilities)
+	}
+	tookCI := m.HoldsCI()
+	after, err := p.store().SaveProbe(ctx, m.ID, result)
+	if err != nil {
 		return Machine{}, err
 	}
-	return p.store().Get(ctx, m.Name)
+	if !tookCI && after.HoldsCI() && p.Alerter != nil {
+		if err := p.Alerter.MachineLowDisk(ctx, after.Name, after.Capabilities.Disk.Free, p.DiskFloorBytes); err != nil {
+			return after, fmt.Errorf("alert low disk on %s: %w", after.Name, err)
+		}
+	}
+	return after, nil
+}
+
+// health is the stored health of a probe that reached the machine. A CI machine
+// whose /var/tmp is below the floor is degraded and keeps its capabilities, so
+// the owner still sees what the machine is.
+func (p Prober) health(m Machine, caps Capabilities) (Health, HealthReason) {
+	if m.HasRole(RoleCI) && p.DiskFloorBytes > 0 && caps.Disk.Total > 0 && caps.Disk.Free < p.DiskFloorBytes {
+		return HealthDegraded, ReasonLowDisk
+	}
+	return HealthOnline, ReasonNone
 }
 
 // Probe runs the probe script on one machine and parses what it printed. A
@@ -345,6 +439,11 @@ if [ -r /proc/stat ]; then
   fi
 fi
 if [ -d /dev/dri ]; then echo 'gpu=yes'; else echo 'gpu=no'; fi
+if D=$(df -Pk /var/tmp 2>/dev/null | sed -n 2p); then
+  set -- $D
+  case $2 in ''|*[!0-9]*) ;; *) printf 'disktotal=%s\n' "$(( $2 * 1024 ))" ;; esac
+  case $4 in ''|*[!0-9]*) ;; *) printf 'diskfree=%s\n' "$(( $4 * 1024 ))" ;; esac
+fi
 for C in docker podman labwc Xwayland wayvnc; do
   if command -v "$C" >/dev/null 2>&1; then printf 'has_%s=yes\n' "$C"; else printf 'has_%s=no\n' "$C"; fi
 done
@@ -373,6 +472,10 @@ func parseProbe(text string) (Capabilities, Load, error) {
 			caps.MemTotal, load.MemTotal = number(value), number(value)
 		case "memavailable":
 			caps.MemAvailable, load.MemAvailable = number(value), number(value)
+		case "disktotal":
+			caps.Disk.Total = number(value)
+		case "diskfree":
+			caps.Disk.Free = number(value)
 		case "load1":
 			load.LoadAvg[0] = decimal(value)
 		case "load5":

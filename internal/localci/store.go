@@ -33,6 +33,10 @@ type Node struct {
 	SSH     string `json:"ssh,omitempty"`
 	Slots   int    `json:"slots"`
 	Enabled bool   `json:"enabled"`
+	// LowDisk marks a machine whose last probe found less free space than the
+	// floor on the filesystem that holds its /var/tmp, so Dyna starts no CI
+	// work there until space is freed.
+	LowDisk bool `json:"lowDisk,omitempty"`
 }
 
 type Store struct{ DataDir string }
@@ -140,7 +144,7 @@ func (s Store) Nodes(ctx context.Context) ([]Node, error) {
 		if !m.HasRole(machines.RoleCI) {
 			continue
 		}
-		nodes = append(nodes, Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled})
+		nodes = append(nodes, Node{Name: m.Name, SSH: m.SSH, Slots: m.CISlots, Enabled: m.Enabled, LowDisk: m.HoldsCI()})
 	}
 	return nodes, nil
 }
