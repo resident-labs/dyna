@@ -33,7 +33,7 @@ func Command(o Options) *cobra.Command {
 		o.Session = notify.Default().Sessions.Store.ResolveSnapshot
 	}
 
-	root := &cobra.Command{Use: "pr", Short: "Track pull requests, CI and agent review verdicts", Long: `Link a GitHub PR to its author session after gh pr create:
+	root := &cobra.Command{Use: "pr", Short: "Track the GitHub pull request the engine merges", Long: `Link a GitHub PR to its author session after gh pr create:
   dyna git pr track <number|url>
 
 The engine checks CI, review comments, pushes and merge/close about once
