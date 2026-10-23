@@ -14,7 +14,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 
 	"dyna-agent/internal/workeroutput"
 )
@@ -254,32 +253,6 @@ type Store struct {
 
 const storeVersion = 3
 
-var (
-	bundledMu       sync.RWMutex
-	bundledProfiles map[string]Profile
-)
-
-// SetBundledDefaults configures the bundled profiles used by explicit bundle
-// operations. Passing nil clears the bundle.
-func SetBundledDefaults(raw []byte) error {
-	profiles := make(map[string]Profile)
-	if len(raw) > 0 {
-		var bundle struct {
-			Profiles []Profile `json:"profiles"`
-		}
-		if err := json.Unmarshal(raw, &bundle); err != nil {
-			return err
-		}
-		for _, p := range bundle.Profiles {
-			profiles[p.Name] = cloneProfile(p)
-		}
-	}
-	bundledMu.Lock()
-	bundledProfiles = profiles
-	bundledMu.Unlock()
-	return nil
-}
-
 func DefaultPath() string {
 	dir, err := os.UserConfigDir()
 	if err != nil {
@@ -338,50 +311,6 @@ func migrateAntigravityACP(p *Profile) {
 		args = nil
 	}
 	p.ExtraArgs = args
-}
-
-// ApplyBundledPreferences updates profiles whose names collide with the
-// bundled fleet. Replacement preserves the user's default and disabled flags
-// and use restrictions.
-func (s *Store) ApplyBundledPreferences(replace, managed bool) int {
-	bundledMu.RLock()
-	defer bundledMu.RUnlock()
-
-	collisions := 0
-	for i := range s.Profiles {
-		stored := &s.Profiles[i]
-		bundle, ok := bundledProfiles[stored.Name]
-		if !ok {
-			continue
-		}
-		collisions++
-		defaultValue, disabled, uses := stored.Default, stored.Disabled, stored.Uses
-		if replace {
-			copyBundledFields(stored, bundle)
-		}
-		stored.Default, stored.Disabled, stored.Uses, stored.Managed = defaultValue, disabled, uses, managed
-	}
-	return collisions
-}
-
-func copyBundledFields(dst *Profile, src Profile) {
-	dst.Description = src.Description
-	dst.Harness = src.Harness
-	dst.Model = src.Model
-	dst.Models = slices.Clone(src.Models)
-	dst.Output = workeroutput.CloneDeclaration(src.Output)
-	dst.Taste = src.Taste
-	dst.Intelligence = src.Intelligence
-	dst.Cost = src.Cost
-	dst.ExtraArgs = slices.Clone(src.ExtraArgs)
-	dst.Compact = cloneCompact(src.Compact)
-	dst.Command = slices.Clone(src.Command)
-	dst.Env = maps.Clone(src.Env)
-	dst.TimeoutSec = src.TimeoutSec
-	dst.SafeMode = src.SafeMode
-	dst.Uses = slices.Clone(src.Uses)
-	dst.MaxConcurrent = src.MaxConcurrent
-	dst.MaxCallsPerRun = src.MaxCallsPerRun
 }
 
 func cloneProfile(p Profile) Profile {

@@ -1,25 +1,16 @@
 package profiles
 
 import (
-	_ "embed"
 	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"dyna-agent/internal/configsvc"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/workeroutput"
 )
-
-//go:embed defaults/profiles.json
-var defaultProfilesJSON []byte
-
-func BundledDefaults() []byte {
-	return defaultProfilesJSON
-}
 
 // engineClient lets failure tests use a private socket without a restart wait.
 var engineClient = func() *engineclient.Client { return engineclient.New("") }
@@ -215,57 +206,7 @@ func NewCommand() *cobra.Command {
 		},
 	}
 
-	newInitCommand := func(use, short, harness string) *cobra.Command {
-		cmd := &cobra.Command{
-			Use:   use,
-			Short: short,
-			Long:  short + ". Existing profiles with the same name are always kept.",
-			RunE: func(c *cobra.Command, _ []string) error {
-				var bundle struct {
-					Profiles []profile.Profile `json:"profiles"`
-				}
-				if err := json.Unmarshal(defaultProfilesJSON, &bundle); err != nil {
-					return err
-				}
-				var seeded []configsvc.SeededProfile
-				if err := engineClient().Call(c.Context(), "SeedProfiles", []any{harness, bundle.Profiles}, &seeded); err != nil {
-					return err
-				}
-				for _, p := range seeded {
-					if p.Kept {
-						fmt.Fprintf(c.OutOrStdout(), "  - %-8s exists, kept\n", p.Name)
-					} else {
-						fmt.Fprintf(c.OutOrStdout(), "  ✓ %-8s %s · %s\n", p.Name, p.Harness, orDash(p.Model))
-					}
-				}
-				fmt.Fprintln(c.OutOrStdout(), "browse and edit them in the desktop app (Settings, Profiles); agents see them via `dyna profiles list --json`")
-				return nil
-			},
-		}
-		return cmd
-	}
-	initCodex := newInitCommand(
-		"init-codex",
-		"Register bundled Codex profiles (astra, luna, sol, sol-max, terra)",
-		profile.HarnessCodex,
-	)
-	initClaude := newInitCommand(
-		"init-claude",
-		"Register bundled Claude Code profiles (opus, fable, sonnet, haiku)",
-		profile.HarnessClaudeCode,
-	)
-	initAntigravity := newInitCommand(
-		"init-antigravity",
-		"Register the bundled Antigravity profile (agy)",
-		profile.HarnessAntigravity,
-	)
-	initMuse := newInitCommand(
-		"init-muse",
-		"Register bundled Muse profiles (wonder, wonder-full)",
-		profile.HarnessMuse,
-	)
-
-	cmd.AddCommand(newCheckCommand(), list, show, add, set, rm, enable, disable, setDefault, initCodex, initClaude, initAntigravity, initMuse)
+	cmd.AddCommand(newCheckCommand(), list, show, add, set, rm, enable, disable, setDefault)
 	return cmd
 }
 
