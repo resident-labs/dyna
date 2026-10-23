@@ -440,9 +440,74 @@ func TestDefaultVerificationWaitsForUnfinishedChecks(t *testing.T) {
 
 // Main CI comes from GitHub's rollup, which keeps counting a cancelled run after
 // a later run of the same workflow passed. The latest completed result of each
-// check must decide, so a superseded cancellation cannot fail main.
+// check must decide for every PR of the repository, from one read.
 func TestMainCIUsesTheLatestCompletedRunForEachCheck(t *testing.T) {
-	e, _, _ := mergeEnv(t, 1)
+	e, reads := cancelledMainCIEnv(t, []int{1, 2}, nil, nil)
+	if err := e.s.ConfirmHeads(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	st, err := e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reads.Load(); got != 1 {
+		t.Fatalf("commit CI reads = %d, want one shared read", got)
+	}
+	for _, number := range []int{1, 2} {
+		p, status := storedDefault(st, *st.Records[fmt.Sprintf("github.com/owner/repo#%d", number)])
+		if status != "passed" {
+			t.Fatalf("PR #%d main CI = %s (%s); a superseded cancellation failed main", number, status, defaultReason(p, status))
+		}
+	}
+}
+
+// The rollup counts external checks and commit statuses. A recheck that dropped
+// them would let the queue proceed on failed or unfinished main CI.
+func TestMainCIKeepsExternalChecksAndStatuses(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		extra    []Check
+		statuses []Status
+		want     string
+	}{
+		{name: "failed external check", extra: []Check{externalCheck("greptile", "completed", "failure")}, want: "failed"},
+		{name: "unfinished external check", extra: []Check{externalCheck("greptile", "in_progress", "")}, want: "pending"},
+		{name: "failed commit status", statuses: []Status{{ID: 1, Context: "ci/security", State: "failure"}}, want: "failed"},
+		{name: "pending commit status", statuses: []Status{{ID: 1, Context: "ci/security", State: "pending"}}, want: "pending"},
+		{name: "passed external check and status", extra: []Check{externalCheck("greptile", "completed", "success")}, statuses: []Status{{ID: 1, Context: "ci/security", State: "success"}}, want: "passed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, _ := cancelledMainCIEnv(t, []int{1}, tc.extra, tc.statuses)
+			if err := e.s.ConfirmHeads(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			st, err := e.s.Store.Read()
+			if err != nil {
+				t.Fatal(err)
+			}
+			p, status := storedDefault(st, *st.Records["github.com/owner/repo#1"])
+			if status != tc.want {
+				t.Fatalf("main CI = %s, want %s (%s)", status, tc.want, defaultReason(p, status))
+			}
+		})
+	}
+}
+
+// externalCheck is a check of another app, which the rollup counts.
+func externalCheck(name, status, conclusion string) Check {
+	c := Check{ID: 900, Name: name, Status: status, Conclusion: conclusion}
+	c.App.Slug, c.App.Name = "greptile", "Greptile"
+	c.CheckSuite.ID = 9
+	return c
+}
+
+// cancelledMainCIEnv serves a red default rollup with cancelled check runs, an
+// older cancelled run superseded by a passing one at the same head, and the
+// given extra checks and commit statuses. It returns the environment and a
+// count of the commit CI reads.
+func cancelledMainCIEnv(t *testing.T, numbers []int, extra []Check, statuses []Status) (*testEnv, *atomic.Int64) {
+	t.Helper()
+	e, _, _ := mergeEnv(t, numbers...)
 	head := ""
 	rewriteMergeDefault(e, func(target map[string]any) {
 		head, _ = target["oid"].(string)
@@ -457,7 +522,6 @@ func TestMainCIUsesTheLatestCompletedRunForEachCheck(t *testing.T) {
 			},
 		}
 	})
-	// The older run was cancelled and superseded at the same head by run 2.
 	var checks []Check
 	for i := range 8 {
 		name := fmt.Sprintf("job-%d", i)
@@ -467,15 +531,18 @@ func TestMainCIUsesTheLatestCompletedRunForEachCheck(t *testing.T) {
 		passed.CheckSuite.ID = 2
 		checks = append(checks, cancelled, passed)
 	}
+	checks = append(checks, extra...)
+	reads := &atomic.Int64{}
 	base := e.s.GH.run
 	e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
 		joined := strings.Join(cmd.Args, " ")
 		var body any
 		switch {
 		case strings.Contains(joined, "/check-runs?"):
+			reads.Add(1)
 			body = mainCheckRuns{Checks: checks}
 		case strings.Contains(joined, "/statuses?"):
-			body = []Status{}
+			body = statuses
 		case strings.Contains(joined, "/actions/runs?head_sha="):
 			body = mainWorkflowRuns{Runs: []Run{
 				{ID: 1, Attempt: 1, WorkflowID: 7, CheckSuiteID: 1, Event: "push", HeadSHA: head, HeadBranch: "main", Status: "completed", Conclusion: "cancelled"},
@@ -487,17 +554,7 @@ func TestMainCIUsesTheLatestCompletedRunForEachCheck(t *testing.T) {
 		fmt.Fprint(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n")
 		return json.NewEncoder(cmd.Stdout).Encode(body)
 	}
-	if err := e.s.ConfirmHeads(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	st, err := e.s.Store.Read()
-	if err != nil {
-		t.Fatal(err)
-	}
-	p, status := storedDefault(st, *st.Records["github.com/owner/repo#1"])
-	if status != "passed" {
-		t.Fatalf("main CI = %s (%s); a superseded cancellation failed main", status, defaultReason(p, status))
-	}
+	return e, reads
 }
 
 // mainCheckRuns is the GitHub check-runs response of one commit.
