@@ -57,6 +57,8 @@ func runSessionTurn(t *testing.T, ctx context.Context, pending <-chan pendingSes
 
 func sessionWorkerFixture(t *testing.T, ctx context.Context, pending chan pendingSessionTurn) (*subagent.Manager, room.Record) {
 	t.Helper()
+	// Session scratch must be removed with the fixture after its runners stop.
+	t.Setenv("TMPDIR", t.TempDir())
 	t.Cleanup(func() {
 		// Worker defers finish before cleanup. Release queued locks on failed assertions.
 		for {

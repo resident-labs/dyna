@@ -16,6 +16,7 @@ import (
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/scratch"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/subagent"
 )
@@ -53,6 +54,8 @@ func (s *turnSpawner) Spawn(m *subagent.Manager, id string, n int, lock *os.File
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
+	// Session scratch must be removed with the fixture after its runners stop.
+	t.Setenv("TMPDIR", t.TempDir())
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv(runstore.AgentJournalRootEnv, "")
@@ -522,5 +525,25 @@ func TestProfileChoicesIncludeEffectiveModels(t *testing.T) {
 	choices[0].Models[0] = "changed"
 	if store.Profiles[0].Models[0] != "first" {
 		t.Fatal("choice shares stored model list")
+	}
+}
+
+func TestRoomFixtureRemovesScratch(t *testing.T) {
+	var root string
+	t.Run("fixture", func(fixture *testing.T) {
+		newEnv(fixture)
+		root = scratch.Root()
+		// Refuse to remove a root that this test did not create.
+		if _, err := os.Stat(root); !os.IsNotExist(err) {
+			fixture.Fatalf("scratch root already exists: %s (%v)", root, err)
+		}
+		if _, err := scratch.Ensure("fixture-session"); err != nil {
+			fixture.Fatal(err)
+		}
+		// Also remove our root if the regression fails.
+		t.Cleanup(func() { _ = os.RemoveAll(root) })
+	})
+	if _, err := os.Stat(root); !os.IsNotExist(err) {
+		t.Fatalf("fixture left scratch root %s: %v", root, err)
 	}
 }
