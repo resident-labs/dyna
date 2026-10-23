@@ -318,7 +318,8 @@ Read hooks before changing repository automation. Agents may change hooks; tell 
 `dyna post @parent --needs-root "..."`, explaining the command and purpose. Avoid one-off hooks.
 
 Events: `worktree-created`, `before-land`, `after-land`, `pr-merged`, `main-updated`,
-`session-finish`, and `schedule`. The merge service emits `pr-merged`.
+`session-finish`, `session-turn-ended`, and `schedule`. `session-turn-ended` fires
+when a bound session's turn ends. The merge service emits `pr-merged`.
 The before-land and after-land events remain for stored hook configurations. `main-updated` is a generic repo event; its first observation sets a
 baseline. Schedules skip missed intervals.
 

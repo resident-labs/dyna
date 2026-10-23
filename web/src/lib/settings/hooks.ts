@@ -9,6 +9,7 @@ const events: Record<string, string> = {
   'main-updated': 'Main updated',
   'main-moved': 'Main updated',
   'session-finish': 'Session finish',
+  'session-turn-ended': 'Session turn ended',
   schedule: 'Schedule',
 }
 
