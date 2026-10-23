@@ -476,21 +476,49 @@ type processEffects struct {
 }
 
 // pollNotices collects one poll's notices per target and the changes that
-// make up their delivery token.
+// make up their delivery token. It also keeps the typed facts of the most
+// important event of each target, so the post is a typed PR event.
 type pollNotices struct {
 	batches, informational, batchLogs map[string][]string
 	// CI results are kept apart so a CI-only notice can be marked "ci".
 	ciBatches map[string][]string
-	drops     map[string]int
-	changes   []string
+	// facts holds the typed event facts of each target.
+	facts   map[string]noticeFacts
+	drops   map[string]int
+	changes []string
 }
 
 func newPollNotices(r *Record) *pollNotices {
-	n := &pollNotices{batches: map[string][]string{}, informational: map[string][]string{}, batchLogs: map[string][]string{}, ciBatches: map[string][]string{}, drops: r.PendingDrops}
+	n := &pollNotices{batches: map[string][]string{}, informational: map[string][]string{}, batchLogs: map[string][]string{}, ciBatches: map[string][]string{}, facts: map[string]noticeFacts{}, drops: r.PendingDrops}
 	if n.drops == nil {
 		n.drops = map[string]int{}
 	}
 	return n
+}
+
+// eventPriority orders the event types, heaviest last, so one post shows its
+// most important fact.
+var eventPriority = []room.PRType{
+	room.PRUpdate, room.PRComment, room.PRReady, room.PRApproved, room.PRChanges,
+	room.PRMerged, room.PRClosed, room.PRCIFailed, room.PRCIPaused,
+}
+
+func priority(typ room.PRType) int {
+	for i, known := range eventPriority {
+		if known == typ {
+			return i
+		}
+	}
+	return 0
+}
+
+// raise records the typed facts of a target's batch, keeping the strongest
+// event type and its facts.
+func (n *pollNotices) raise(target string, facts noticeFacts) {
+	if facts.Type == "" || priority(facts.Type) < priority(n.facts[target].Type) {
+		return
+	}
+	n.facts[target] = facts
 }
 
 func (n *pollNotices) add(target, text string) { n.batches[target] = append(n.batches[target], text) }
@@ -653,6 +681,7 @@ func (s *Service) applyCI(st *State, r *Record, snap Snapshot, ci, ciKey string,
 					r.PauseReason = "CI wakes paused after 3 consecutive failures; use dyna git pr resume or wait for passing CI"
 					text := fmt.Sprintf("PR #%d failed CI three times in a row. Later CI failures will not wake the author. Inspect dyna git pr show %s. Failed jobs: %s.", r.Number, r.URL, strings.Join(jobs, ", "))
 					n.batchLogs[r.Author] = logs
+					n.raise(r.Author, noticeFacts{Type: room.PRCIPaused, Summary: strings.Join(jobs, ", ")})
 					n.addCI(r.Author, text)
 				}
 			} else if !r.CIPaused && !strings.HasPrefix(ciKey, "budget:") {
@@ -662,6 +691,7 @@ func (s *Service) applyCI(st *State, r *Record, snap Snapshot, ci, ciKey string,
 				}
 				text := fmt.Sprintf("CI failed (%d/3): %s. Fix the failure and push to this PR.", r.Failures, names)
 				n.batchLogs[r.Author] = logs
+				n.raise(r.Author, noticeFacts{Type: room.PRCIFailed, Summary: names})
 				n.addCI(r.Author, text)
 			}
 		}
@@ -759,6 +789,7 @@ func (s *Service) routeComments(st *State, r *Record, snap Snapshot, n *pollNoti
 		}
 		text := commentNotice(e, decision, commentLink(snap, e.ID))
 		if decision.Action != "drop" {
+			n.raise(r.Author, noticeFacts{Type: room.PRComment, Commenter: e.Commenter, Summary: fmt.Sprintf("new %s from %s", e.Kind, e.Commenter)})
 			n.add(r.Author, text)
 		}
 		if toReviewer {
@@ -829,7 +860,11 @@ func (n *pollNotices) deliver(r *Record) {
 				kindToken = "informational:" + token
 			}
 		}
-		notice(r, target, text, kindToken, n.drops)
+		facts := n.facts[target]
+		if facts.Type == "" {
+			facts.Type = typeOfToken(*r, kindToken)
+		}
+		noticeTyped(r, target, text, kindToken, facts, n.drops)
 	}
 	r.PendingDrops = n.drops
 	if len(n.batches) > 0 || len(n.ciBatches) > 0 || len(n.informational) > 0 {
@@ -1159,7 +1194,13 @@ func (s *Service) verdictWithSnapshot(ctx context.Context, key, actor, head, ver
 				}
 			}
 		}
-		notice(r, target, text, fmt.Sprintf("verdict:%d:%s:%s:%s", r.Round, head, actor, verdict), r.PendingDrops)
+		facts := noticeFacts{Verdict: verdict, Summary: reviewSummary(summary)}
+		if approved(verdict) {
+			facts.Type = room.PRApproved
+		} else {
+			facts.Type = room.PRChanges
+		}
+		noticeTyped(r, target, text, fmt.Sprintf("verdict:%d:%s:%s:%s", r.Round, head, actor, verdict), facts, r.PendingDrops)
 		r.PendingDrops = nil
 		noticeIfLandable(*st, r, snap.GitHubFacts(*r, EffectivePolicy(*st, *r).RequiredChecks...))
 		return nil
@@ -1292,12 +1333,13 @@ func (s *Service) flush(ctx context.Context, key string) error {
 	return first
 }
 func (s *Service) deliver(ctx context.Context, r Record, n Notice) (string, error) {
+	ev := prEventOf(r, n)
 	if n.Kind == "held-comment" {
 		rec, err := s.roomsStore().Resolve(r.RoomID)
 		if err != nil {
 			return "", err
 		}
-		post, err := s.roomsStore().Post(rec.ID, room.PostInput{ID: n.ID, From: rec.Name + ":pr", Kind: "pr", To: []string{rec.Name}, Text: n.Text, Notice: room.PRNotice{Kind: "held-comment", Number: r.Number, ChangeID: r.Key, CommentID: n.CommentID}})
+		post, err := s.roomsStore().PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: ev, ID: n.ID, To: []string{rec.Name}, RoomService: true})
 		return post.ID, err
 	}
 	rec, err := s.Notify.Rooms.Resolve(r.RoomID)
@@ -1327,10 +1369,6 @@ func (s *Service) deliver(ctx context.Context, r Record, n Notice) (string, erro
 			}
 		}
 	}
-	var event room.PRNotice
-	if n.Kind == "land" {
-		event = room.PRNotice{Kind: "ready", Number: r.Number, Head: r.Head, ChangeID: changeID(r)}
-	}
 	sender := notify.Sender{Kind: notify.SenderOwner, Room: rec.Name}
 	if address == rec.Name {
 		// An automatic author record is unread owner input, like a turn
@@ -1340,7 +1378,7 @@ func (s *Service) deliver(ctx context.Context, r Record, n Notice) (string, erro
 			sender = notify.Sender{Kind: notify.SenderSession, Session: author}
 		}
 	}
-	result, err := s.Notify.Post(ctx, notify.PostInput{NeedsRoot: n.NeedsRoot, NoWake: n.Kind == "informational" || address == rec.Name && !n.NeedsRoot, ID: n.ID, Kind: "pr", Notice: event, Sender: sender, Mentions: []string{"@" + address}, Text: n.Text})
+	result, err := s.Notify.Post(ctx, notify.PostInput{NeedsRoot: n.NeedsRoot, NoWake: n.Kind == "informational" || address == rec.Name && !n.NeedsRoot, ID: n.ID, Event: ev, Sender: sender, Mentions: []string{"@" + address}})
 	return result.Message.ID, err
 }
 

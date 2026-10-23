@@ -3,6 +3,8 @@ package watch
 import (
 	"fmt"
 	"strings"
+
+	"dyna-agent/internal/room"
 )
 
 // staleNotice checks the current record, rather than the snapshot used to queue
@@ -91,8 +93,9 @@ func outcomeNotice(r *Record) {
 			return
 		}
 	}
+	typ := map[string]room.PRType{"merged": room.PRMerged, "closed": room.PRClosed}[r.State]
 	r.Notices = append(r.Notices, Notice{
-		ID: id, Target: r.Author, Kind: r.State,
+		ID: id, Target: r.Author, Kind: r.State, Type: typ,
 		Text: fmt.Sprintf("%s %s. Mark its goal done if it has no other open PRs. Clean up its worktree and end your turn. %s", changeLabel(*r), r.State, changeLocation(*r)),
 	})
 }
