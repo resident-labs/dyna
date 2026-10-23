@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"time"
 
 	"dyna-agent/internal/database"
@@ -20,6 +21,7 @@ const schema = `CREATE TABLE notices (
  severity TEXT NOT NULL,
  text TEXT NOT NULL,
  command TEXT NOT NULL,
+ facts TEXT NOT NULL DEFAULT '',
  at TEXT NOT NULL
 );
 CREATE TABLE notices_revision (n INTEGER NOT NULL);
@@ -38,11 +40,25 @@ func (s Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "notices.schema", 2, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "notices.schema", 3, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old == 0 {
 			if _, err := conn.ExecContext(ctx, schema); err != nil {
 				return err
+			}
+		}
+		if old > 0 && old < 3 {
+			// The typed facts of a notice live in one JSON column, decoded by the
+			// notice's kind. A notice saved before them keeps an empty column and
+			// shows its stored line.
+			has, err := hasColumn(conn, "notices", "facts")
+			if err != nil {
+				return err
+			}
+			if !has {
+				if _, err := conn.ExecContext(ctx, "ALTER TABLE notices ADD COLUMN facts TEXT NOT NULL DEFAULT ''"); err != nil {
+					return err
+				}
 			}
 		}
 		// Rows and committed empty revisions take precedence over retained files.
@@ -76,8 +92,28 @@ func (s Store) open() (*sql.DB, error) {
 	return db, err
 }
 
+// hasColumn reports whether a table already has a column, so a migration that
+// adds it can run over a table a test created in the new shape.
+func hasColumn(conn *sql.Conn, table, column string) (bool, error) {
+	rows, err := conn.QueryContext(context.Background(), "SELECT name FROM pragma_table_info(?)", table)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return false, err
+		}
+		if name == column {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
 func readNotices(q state.Reader) ([]Notice, error) {
-	rows, err := q.QueryContext(context.Background(), "SELECT id,key,kind,severity,text,command,at FROM notices ORDER BY position")
+	rows, err := q.QueryContext(context.Background(), "SELECT id,key,kind,severity,text,command,facts,at FROM notices ORDER BY position")
 	if err != nil {
 		return nil, err
 	}
@@ -85,16 +121,68 @@ func readNotices(q state.Reader) ([]Notice, error) {
 	list := []Notice{}
 	for rows.Next() {
 		var n Notice
-		var at string
-		if err := rows.Scan(&n.ID, &n.Key, &n.Kind, &n.Severity, &n.Text, &n.Command, &at); err != nil {
+		var at, facts string
+		if err := rows.Scan(&n.ID, &n.Key, &n.Kind, &n.Severity, &n.Text, &n.Command, &facts, &at); err != nil {
 			return nil, err
 		}
 		if n.At, err = time.Parse(time.RFC3339Nano, at); err != nil {
 			return nil, err
 		}
+		if err := decodeFacts(&n, facts); err != nil {
+			return nil, err
+		}
 		list = append(list, n)
 	}
 	return list, rows.Err()
+}
+
+// decodeFacts reads the stored facts into the typed field of the notice's
+// kind. An empty column is a notice saved before the typed facts.
+func decodeFacts(n *Notice, facts string) error {
+	if facts == "" {
+		return nil
+	}
+	switch n.Kind {
+	case KindDisk:
+		var f DiskFacts
+		if err := json.Unmarshal([]byte(facts), &f); err != nil {
+			return fmt.Errorf("notice %s disk facts: %w", n.ID, err)
+		}
+		n.Disk = &f
+	case KindProvider:
+		var f ProviderFacts
+		if err := json.Unmarshal([]byte(facts), &f); err != nil {
+			return fmt.Errorf("notice %s provider facts: %w", n.ID, err)
+		}
+		n.Provider = &f
+	case KindSync:
+		var f SyncFacts
+		if err := json.Unmarshal([]byte(facts), &f); err != nil {
+			return fmt.Errorf("notice %s sync facts: %w", n.ID, err)
+		}
+		n.Sync = &f
+	}
+	return nil
+}
+
+// encodeFacts writes the typed facts of the notice's kind as JSON.
+func encodeFacts(n Notice) (string, error) {
+	var facts any
+	switch {
+	case n.Disk != nil:
+		facts = n.Disk
+	case n.Provider != nil:
+		facts = n.Provider
+	case n.Sync != nil:
+		facts = n.Sync
+	default:
+		return "", nil
+	}
+	raw, err := json.Marshal(facts)
+	if err != nil {
+		return "", err
+	}
+	return string(raw), nil
 }
 
 func (s Store) snapshot(db *sql.DB) (list []Notice, err error) {
@@ -140,11 +228,15 @@ func saveNotices(conn *sql.Conn, list []Notice) error {
 		}
 	}
 	for i, n := range list {
-		if j, ok := before[n.ID]; ok && i == j && old[j] == n {
+		if j, ok := before[n.ID]; ok && i == j && reflect.DeepEqual(old[j], n) {
 			continue
 		}
-		if _, err := conn.ExecContext(ctx, `INSERT INTO notices(id,position,key,kind,severity,text,command,at) VALUES(?,?,?,?,?,?,?,?)
-ON CONFLICT(id) DO UPDATE SET position=excluded.position,key=excluded.key,kind=excluded.kind,severity=excluded.severity,text=excluded.text,command=excluded.command,at=excluded.at`, n.ID, i, n.Key, n.Kind, n.Severity, n.Text, n.Command, n.At.UTC().Format(time.RFC3339Nano)); err != nil {
+		facts, err := encodeFacts(n)
+		if err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, `INSERT INTO notices(id,position,key,kind,severity,text,command,facts,at) VALUES(?,?,?,?,?,?,?,?,?)
+ON CONFLICT(id) DO UPDATE SET position=excluded.position,key=excluded.key,kind=excluded.kind,severity=excluded.severity,text=excluded.text,command=excluded.command,facts=excluded.facts,at=excluded.at`, n.ID, i, n.Key, n.Kind, n.Severity, n.Text, n.Command, facts, n.At.UTC().Format(time.RFC3339Nano)); err != nil {
 			return err
 		}
 	}

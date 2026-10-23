@@ -83,6 +83,19 @@ func ancestor(ctx context.Context, repo, a, b string) (bool, error) {
 	}
 	return false, e
 }
+
+// syncNotice is the typed owner notice of one sync event: a split between two
+// lanes, or a lane whose history was rewritten.
+func syncNotice(key, repo, lane, other string, rewritten bool) notices.Notice {
+	return notices.Notice{
+		Key:      key,
+		Kind:     notices.KindSync,
+		Severity: notices.SeverityWarn,
+		Sync:     &notices.SyncFacts{Repo: repo, Lane: lane, Other: other, Rewritten: rewritten},
+		Command:  "dyna sync status",
+	}
+}
+
 func disagreementKey(repo, a, b string) string {
 	if a > b {
 		a, b = b, a
@@ -97,7 +110,10 @@ func (s *Service) Fetch(ctx context.Context, repos []string) error {
 		return err
 	}
 	var failures []error
-	events := map[string]string{}
+	// values is what this pass saw per event key, so a later pass posts only a
+	// change. found holds the typed notice each key posts.
+	values := map[string]string{}
+	found := map[string]notices.Notice{}
 	result := RemoteStatus{}
 	for _, repo := range repos {
 		oldRemotes := previous.Repositories[repo]
@@ -112,9 +128,17 @@ func (s *Service) Fetch(ctx context.Context, repos []string) error {
 				r.LastError = e.Error()
 				oldRemotes[name] = r
 			}
+			// A repository that cannot be inspected keeps the events the last
+			// pass found, so its notice stays until sync recovers.
 			for key, event := range previous.Events {
-				if strings.HasPrefix(key, "sync:rewrite:"+repo+":") || strings.HasPrefix(key, "sync:disagreement:"+repo+":") {
-					events[key] = event
+				switch {
+				case strings.HasPrefix(key, "sync:rewrite:"+repo+":"):
+					name := strings.TrimPrefix(key, "sync:rewrite:"+repo+":")
+					values[key] = event
+					found[key] = syncNotice(key, repo, name, "", true)
+				case strings.HasPrefix(key, "sync:disagreement:"+repo+":"):
+					values[key] = event
+					found[key] = syncNotice(key, repo, "", "", false)
 				}
 			}
 			continue
@@ -132,7 +156,9 @@ func (s *Service) Fetch(ctx context.Context, repos []string) error {
 				current.LastError = "fetch failed: " + e.Error()
 				remotes[name] = current
 				if old.Rewrite != "" {
-					events["sync:rewrite:"+repo+":"+name] = old.Rewrite
+					key := "sync:rewrite:" + repo + ":" + name
+					values[key] = old.Rewrite
+					found[key] = syncNotice(key, repo, name, "", true)
 				}
 				continue
 			}
@@ -172,7 +198,9 @@ func (s *Service) Fetch(ctx context.Context, repos []string) error {
 				current.LastError = e.Error()
 			}
 			if current.Rewrite != "" {
-				events["sync:rewrite:"+repo+":"+name] = current.Rewrite
+				key := "sync:rewrite:" + repo + ":" + name
+				values[key] = current.Rewrite
+				found[key] = syncNotice(key, repo, name, "", true)
 			}
 			remotes[name] = current
 		}
@@ -187,7 +215,8 @@ func (s *Service) Fetch(ctx context.Context, repos []string) error {
 				if ra.LastError != "" || rb.LastError != "" {
 					key := disagreementKey(repo, a, b)
 					if old := previous.Events[key]; old != "" {
-						events[key] = old
+						values[key] = old
+						found[key] = syncNotice(key, repo, a, b, false)
 					}
 					continue
 				}
@@ -201,15 +230,17 @@ func (s *Service) Fetch(ctx context.Context, repos []string) error {
 					continue
 				}
 				if !ab && !ba {
-					events[disagreementKey(repo, a, b)] = ra.Head + " / " + rb.Head
+					key := disagreementKey(repo, a, b)
+					values[key] = ra.Head + " / " + rb.Head
+					found[key] = syncNotice(key, repo, a, b, false)
 				}
 			}
 		}
 	}
 	ns := notices.Store{Dir: s.Dir}
-	for key, event := range events {
-		if previous.Events[key] != event {
-			if _, e := ns.Post(notices.Notice{Key: key, Kind: notices.KindSync, Severity: "warn", Text: "Remote history split: " + key + " (" + event + "). Review sync status."}); e != nil {
+	for key, n := range found {
+		if previous.Events[key] != values[key] {
+			if _, e := ns.Post(n); e != nil {
 				return e
 			}
 		}
@@ -219,7 +250,7 @@ func (s *Service) Fetch(ctx context.Context, repos []string) error {
 		return e
 	}
 	for _, n := range list {
-		if n.Kind == notices.KindSync && events[n.Key] == "" {
+		if _, live := found[n.Key]; n.Kind == notices.KindSync && !live {
 			if e := ns.Dismiss(n.ID); e != nil {
 				return e
 			}
@@ -229,7 +260,7 @@ func (s *Service) Fetch(ctx context.Context, repos []string) error {
 	// Keep operation and export changes made while Git was running.
 	err = s.update(ctx, func(st *Snapshot) error {
 		st.Repositories = result
-		st.Events = events
+		st.Events = values
 		return nil
 	})
 	// Save successful results even when a repository cannot be inspected.
