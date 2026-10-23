@@ -203,6 +203,20 @@ func (a *Runtime) RestartPrivateRuntimeLogin(ctx context.Context, id string, _ b
 	}
 	return a.startPrivateLogin(id, b.Executable)
 }
+
+// loginReady checks a completed login the way the pane's Finish sign-in does.
+// A capture can succeed and still leave no usable account, so status and
+// expiry decide whether the sign-in is really done.
+func loginReady(result NativeAccount) error {
+	if result.Status != "ready" {
+		if result.ExpiresAt != nil && !result.ExpiresAt.After(time.Now()) {
+			return fmt.Errorf("the new private login expired at %s; sign in again", result.ExpiresAt.UTC().Format(time.RFC3339))
+		}
+		return errors.New("private sign-in is not complete")
+	}
+	return nil
+}
+
 func (a *Runtime) FinishPrivateRuntimeLogin(ctx context.Context, id string) (PrivateRuntimeSnapshot, error) {
 	login := a.findPrivateLogin(id)
 	if login == nil {
@@ -227,11 +241,8 @@ func (a *Runtime) FinishPrivateRuntimeLogin(ctx context.Context, id string) (Pri
 	if err != nil {
 		return PrivateRuntimeSnapshot{}, err
 	}
-	if result.Status != "ready" {
-		if result.ExpiresAt != nil && !result.ExpiresAt.After(time.Now()) {
-			return PrivateRuntimeSnapshot{}, fmt.Errorf("the new private login expired at %s; sign in again", result.ExpiresAt.UTC().Format(time.RFC3339))
-		}
-		return PrivateRuntimeSnapshot{}, errors.New("private sign-in is not complete")
+	if err := loginReady(result); err != nil {
+		return PrivateRuntimeSnapshot{}, err
 	}
 	login.finished = true
 	a.privateLoginMu.Lock()
