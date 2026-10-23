@@ -125,7 +125,7 @@ func TestPRWatchDetectsExternalStateAndSettingChanges(t *testing.T) {
 func TestPRFeedExposesIntegrationKind(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
-	result, err := e.svc.Notify.Post(e.ctx, notify.PostInput{Event: room.PREvent{Type: room.PRCIFailed, Label: "PR #1", ChangeID: "github.com/o/r#1", Number: 1, CIAttempt: 1, CIMax: 3, Summary: "unit", LogTail: "Log tail:\nexample"},
+	result, err := e.svc.Notify.Post(e.ctx, notify.PostInput{Event: room.PREvent{Type: room.PRCIFailed, Label: "PR #1", Location: "github.com/o/r#1", ChangeID: "github.com/o/r#1", Number: 1, CIAttempt: 1, CIMax: 3, Summary: "unit", LogTail: "Log tail:\nexample"},
 		Sender: notify.Sender{Kind: notify.SenderOwner, Room: rec.Name}, Mentions: []string{"@" + rec.Name}})
 	if err != nil {
 		t.Fatal(err)

@@ -100,7 +100,7 @@ type Message struct {
 	RoomID     string            `json:"roomId"`
 	From       string            `json:"from"`
 	Kind       string            `json:"kind,omitempty"`
-	Notice     EventNotice          `json:"notice,omitzero"`
+	Notice     EventNotice       `json:"notice,omitzero"`
 	// Payload is the typed JSON of a sealed system event. Only PostEvent
 	// builds one; read it with the event accessor, such as Worktree().
 	Payload EventPayload `json:"payload,omitzero"`
@@ -164,7 +164,7 @@ type Forward struct {
 	TS          int64        `json:"ts"`
 	From        string       `json:"from"`
 	Kind        string       `json:"kind,omitempty"`
-	Notice      EventNotice     `json:"notice,omitzero"`
+	Notice      EventNotice  `json:"notice,omitzero"`
 	Human       bool         `json:"human,omitempty"`
 	Text        string       `json:"text"`
 	Attachments []Attachment `json:"attachments,omitempty"`

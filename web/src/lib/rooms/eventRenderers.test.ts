@@ -71,6 +71,7 @@ const fixtures: Record<string, EventPayload> = {
         type,
         label: 'PR #542',
         number: 542,
+        location: 'https://github.com/acme/app/pull/542',
         changeId: 'github.com/acme/app#542',
         repo: 'acme/app',
         title: 'Fix the parser',

@@ -1339,7 +1339,8 @@ func (s *Service) deliver(ctx context.Context, r Record, n Notice) (string, erro
 		if err != nil {
 			return "", err
 		}
-		post, err := s.roomsStore().PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: ev, ID: n.ID, To: []string{rec.Name}, RoomService: true})
+		// A held comment waits for the owner in the feed; it wakes nobody.
+		post, err := s.roomsStore().PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: ev, ID: n.ID, To: []string{rec.Name}, RoomService: true, NoWake: true})
 		return post.ID, err
 	}
 	rec, err := s.Notify.Rooms.Resolve(r.RoomID)

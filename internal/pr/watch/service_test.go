@@ -898,7 +898,7 @@ func TestOutboxRetryStoresOnlyOneRoomPost(t *testing.T) {
 	}
 }
 
-func TestOwnerEventNoticeComesFromAuthorForUnreadAndOwnerWatches(t *testing.T) {
+func TestOwnerPRNoticeComesFromAuthorForUnreadAndOwnerWatches(t *testing.T) {
 	root := t.TempDir()
 	rooms := &room.Store{Root: filepath.Join(root, "rooms")}
 	rec, err := rooms.Create(room.CreateInput{Name: "owner-alert"})

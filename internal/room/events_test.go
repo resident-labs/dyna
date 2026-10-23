@@ -140,8 +140,8 @@ func TestPostEventRequiresFieldsAndPostsOnce(t *testing.T) {
 func TestPREventStoresItsFactsAndText(t *testing.T) {
 	store, rec := newEventStore(t)
 	ev := PREvent{Type: PRCIFailed, Label: "PR #12", Number: 12, ChangeID: "https://github.com/a/b/pull/12", Key: "msg_0123456789abcdef",
-		Repo: "a/b", Head: "head1", URL: "https://github.com/a/b/pull/12", CIAttempt: 2, CIMax: 3, Summary: "unit, build",
-		Detail: "CI failed (2/3): unit, build.", LogTail: "Log tail:\nboom"}
+		Location: "https://github.com/a/b/pull/12", Repo: "a/b", Head: "head1", URL: "https://github.com/a/b/pull/12", CIAttempt: 2, CIMax: 3, Summary: "unit, build",
+		Detail: "the same fact line the agent already read", LogTail: "Log tail:\nboom"}
 	msg, err := store.PostEventInput(PostEventInput{RoomID: rec.ID, Event: ev, To: []string{rec.Name}})
 	if err != nil {
 		t.Fatal(err)
@@ -153,10 +153,9 @@ func TestPREventStoresItsFactsAndText(t *testing.T) {
 	if !ok || stored.CIAttempt != 2 || stored.Summary != "unit, build" || stored.ChangeID != ev.ChangeID || stored.Number != 12 {
 		t.Fatalf("stored payload = %+v, %v", stored, ok)
 	}
-	for _, want := range []string{"CI failed (2/3) on PR #12 at head1: unit, build. Fix the failure and push to this PR.", "Log tail:\nboom"} {
-		if !strings.Contains(msg.Text, want) {
-			t.Fatalf("event text %q does not hold %q", msg.Text, want)
-		}
+	want := "https://github.com/a/b/pull/12\nHead: head1\n\nCI failed (2/3): unit, build. Fix the failure and push to this PR.\n\nthe same fact line the agent already read\n\nLog tail:\nboom"
+	if msg.Text != want {
+		t.Fatalf("event text =\n%q\nwant\n%q", msg.Text, want)
 	}
 	// A retry of the same notice keeps the same post.
 	again, err := store.PostEventInput(PostEventInput{RoomID: rec.ID, Event: ev, To: []string{rec.Name}})
