@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -19,8 +20,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"dyna-agent/internal/authority"
+	"dyna-agent/internal/callerid"
 	"dyna-agent/internal/callspec"
 	"dyna-agent/internal/cli/version"
+	"dyna-agent/internal/engine"
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
@@ -198,10 +202,13 @@ func TestRunCancellationFinalizesBeforeReturning(t *testing.T) {
 	}
 }
 
+// TestDemoLeavesSavedProfilesUntouched also proves that the demo finishes as
+// its run's verified coordinator: the engine here serves the production run
+// lifecycle handlers, which refuse any other caller.
 func TestDemoLeavesSavedProfilesUntouched(t *testing.T) {
 	inRepo(t)
 	storetest.Isolate(t)
-	serveWorkflowEngine(t)
+	serveProductionWorkflowEngine(t)
 	owner := profile.Store{Path: profile.DefaultPath(), Profiles: []profile.Profile{{
 		Name: "owner-profile", Harness: profile.HarnessMock, Taste: 5, Intelligence: 5, Cost: 5, Default: true,
 	}}}
@@ -231,6 +238,73 @@ func TestDemoLeavesSavedProfilesUntouched(t *testing.T) {
 	runs, err := runstore.List()
 	if err != nil || len(runs) != 1 || runs[0].Name != "demo-fanout" || runs[0].Status != "ok" || runs[0].Detached {
 		t.Fatalf("demo runs = %+v, %v", runs, err)
+	}
+	meta, err := runstore.ReadMeta(runs[0].ID)
+	if err != nil || meta.Status != "ok" || meta.Pid == os.Getpid() || meta.Detached {
+		t.Fatalf("finished run = %+v, %v; want a child coordinator's ok run", meta, err)
+	}
+}
+
+// serveProductionWorkflowEngine serves the run's plan call and the production
+// run lifecycle handlers. Callers are resolved from the callerid launch
+// records as the engine resolves them, so a run worker is its coordinator and
+// the test process is the owner.
+func serveProductionWorkflowEngine(t *testing.T) {
+	t.Helper()
+	store, calls := enginetest.PlanAncestryCalls(t)
+	lifecycle, err := websvc.Bind(engine.RunLifecycleBindings())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, call := range lifecycle {
+		calls[name] = call
+	}
+	actForVerifiedCallers(calls)
+	enginetest.ServeCallers(t, store.DataDir, verifiedCallers(t, store.DataDir), calls)
+}
+
+// verifiedCallers resolves each peer through the launch records, as the engine
+// does, and refuses a caller it cannot name.
+func verifiedCallers(t *testing.T, dataDir string) func(net.Conn) (websvc.Caller, error) {
+	t.Helper()
+	records, err := callerid.OpenStore(dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver, err := callerid.New("/proc", os.Getpid(), records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return func(c net.Conn) (websvc.Caller, error) {
+		id := resolver.ResolveConn(c)
+		switch id.Kind {
+		case callerid.Owner:
+			return websvc.Caller{Kind: websvc.Owner}, nil
+		case callerid.Worker:
+			return websvc.Caller{Kind: websvc.Worker, Run: id.Run, Agent: id.Agent}, nil
+		default:
+			return websvc.Caller{}, fmt.Errorf("fixture refused a %s caller: %s", id.Kind, id.Reason)
+		}
+	}
+}
+
+// actForVerifiedCallers gives each call the actor its verified caller acts for.
+func actForVerifiedCallers(calls map[string]websvc.Call) {
+	for name, call := range calls {
+		calls[name] = func(ctx context.Context, args []json.RawMessage) (any, error) {
+			caller, local := websvc.CallerFromContext(ctx)
+			if !local || caller.Kind == websvc.Owner {
+				return call(authority.WithActor(ctx, authority.Actor{Role: authority.Owner}), args)
+			}
+			if caller.Kind != websvc.Worker {
+				return nil, fmt.Errorf("fixture cannot act for a %q caller", caller.Kind)
+			}
+			actor, err := authority.WorkerActor(caller.Run, caller.Agent)
+			if err != nil {
+				return nil, err
+			}
+			return call(authority.WithActor(ctx, actor), args)
+		}
 	}
 }
 
