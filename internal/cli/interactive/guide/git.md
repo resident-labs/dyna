@@ -262,7 +262,7 @@ That head stays out of batches until its author pushes a new head.
 
 `retry` drops the old batch and creates a new batch from the current queue.
 Repeat `--without` to exclude PRs from that retry batch. Use `return` to hold
-a PR until its next head. A retry with no eligible PRs leaves merging paused.
+a PR until its next head. A retry with no eligible PRs preserves the current merge pause.
 
 `bisect` starts the existing bounded prefix trials for the failed batch.
 That requested fallback may publish its passing prefix and return its failing
