@@ -4,6 +4,7 @@
   import Avatar from '../ui/Avatar.svelte'
   import SystemNote from '../ui/SystemNote.svelte'
   import DmMessage from './DmMessage.svelte'
+  import ThreadChip from './ThreadChip.svelte'
   import ActivityTimeline from './ActivityTimeline.svelte'
   import CompactionDivider from './CompactionDivider.svelte'
   import { createSelection } from '../ui/selection.svelte.ts'
@@ -72,11 +73,9 @@
     {:else if row.kind === 'thread'}
       {@const thread = row.thread}
       {@const person = members.find((p) => p.address === thread.key)}
-      <button class="thread-chip" class:enter={isNew(row.key)} class:selected={selectedKey === thread.key} onclick={() => onthread(thread.key)}>
-        <span aria-hidden="true">▱</span><Avatar name={short(thread.key, room.name)} emoji={person?.emoji} hue={person?.hue} size={18} />
-        <strong>{short(thread.key, room.name)}</strong><b>{row.posts.length} message{row.posts.length === 1 ? "" : "s"}</b>{#if row.queued}<span class="queued">queued</span>{/if}
-        <span class="snippet">{plain(row.posts.at(-1)?.text)}</span><time>{ago(row.posts.at(-1)?.ts)} ›</time>
-      </button>
+      <div class="thread-row">
+        <ThreadChip glyph="▱" name={short(thread.key, room.name)} emoji={person?.emoji} hue={person?.hue} badge={`${row.posts.length} message${row.posts.length === 1 ? '' : 's'}`} queued={row.queued} snippet={plain(row.posts.at(-1)?.text)} time={ago(row.posts.at(-1)?.ts)} selected={selectedKey === thread.key} enter={isNew(row.key)} onopen={() => onthread(thread.key)} />
+      </div>
     {:else if row.kind === 'instructions'}
       <SystemNote notes={row.notes ?? [{ ...row.note, id: row.note?.id ?? row.key, target: member.name, text: row.text, ts: row.ts }]} roomId={room.id} {onopenfile} {onissue} />
     {:else if row.kind === 'compaction'}
@@ -119,18 +118,13 @@
   .activity-body { min-width: 0; }
   .activity-head { display: flex; align-items: baseline; gap: var(--s2); font-size: var(--t-body); }
   .activity-head time { font-size: var(--t-cap); color: var(--faint); }
-  .thread-chip { display: flex; align-items: center; gap: var(--s2); margin: 6px var(--s4) 2px var(--gutter); padding: 6px 10px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--side); max-width: calc(100% - var(--gutter) - 16px); font-size: var(--t-ui); text-align: left; }
-  .thread-chip b { color: var(--iris); white-space: nowrap; }
-  .thread-chip strong { white-space: nowrap; }
-  .thread-chip .queued { color: var(--gold); font-size: var(--t-cap); white-space: nowrap; }
-  .thread-chip time { color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
-  .snippet { color: var(--faint); flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
-  .thread-chip.selected { border-color: var(--iris-edge); background: var(--iris-wash); }
+  .thread-row { display: flex; margin: 6px var(--s4) 2px var(--gutter); }
+  .thread-row :global(.thread-chip) { flex: 1; }
   .event-note { margin-left: var(--gutter); }
-  .compact .thread-chip .snippet, .compact .thread-chip time { display: none; }
+  .compact .thread-row :global(.snippet), .compact .thread-row :global(time) { display: none; }
   @media (max-width: 760px) {
-    .thread-chip .snippet, .thread-chip time { display: none; }
-    .thread-chip { flex-wrap: wrap; }
+    .thread-row :global(.snippet), .thread-row :global(time) { display: none; }
+    .thread-row :global(.thread-chip) { flex-wrap: wrap; }
     .rule span { font-size: var(--t-cap); }
   }
 </style>

@@ -465,16 +465,42 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   return { address, threads: [...threads.values()].filter((t) => !t.key.startsWith('shell:')), rows: groupMessages(rows) }
 }
 
-// threadList orders the thread panel list newest first. Every child gets a
-// row, with its thread when one exists; children with recent posts come first.
-export function threadList<M extends Pick<Member, 'name' | 'address'>>(threads: Thread[], children: M[] = []): { recent: Thread[]; children: { member: M; thread: Thread | undefined }[] } {
+// A row of the thread panel: an agent and the thread between it and this session.
+export interface PanelRow<M> {
+  member: M
+  thread: Thread | undefined
+}
+
+// The thread panel groups its rows by relationship: the session's open direct
+// children, its parent, its open siblings, then every other thread. A closed
+// child leaves the panel, thread and all. A grandchild is not a child, so its
+// thread counts as another thread.
+export interface ThreadPanel<M> {
+  children: PanelRow<M>[]
+  parent: PanelRow<M> | null
+  siblings: PanelRow<M>[]
+  others: Thread[]
+}
+
+export function threadPanel<M extends Pick<Member, 'name' | 'address' | 'parent' | 'closed'> & { id?: string }>(threads: Thread[], members: M[], session: Partial<Pick<Member, 'id' | 'parent'>> = {}): ThreadPanel<M> {
   const last = (t?: Thread) => time(t?.posts.at(-1)?.ts)
-  const sorted = [...threads].sort((a, b) => last(b) - last(a))
-  const childKeys = new Set(children.map((c) => c.address))
+  const shown = new Set<string>()
+  const row = (member: M): PanelRow<M> => {
+    shown.add(member.address)
+    return { member, thread: threads.find((t) => t.key === member.address) }
+  }
+  const rows = (list: M[]) => list.map(row).sort((a, b) => last(b.thread) - last(a.thread) || a.member.name.localeCompare(b.member.name))
+  const open = members.filter((x) => !x.closed)
+  const children = rows(session.id ? open.filter((x) => x.parent === session.id) : [])
+  const parent = (session.parent ? open.find((x) => x.id === session.parent) : undefined) ?? null
+  const siblings = session.parent ? rows(open.filter((x) => !!x.id && x.parent === session.parent && x.id !== session.id)) : []
+  // A closed child is gone from the panel, so its thread is not another thread either.
+  const gone = new Set(members.filter((x) => x.closed && x.parent === session.id).map((x) => x.address))
   return {
-    recent: sorted.filter((t) => !childKeys.has(t.key)),
-    children: children.map((member) => ({ member, thread: threads.find((t) => t.key === member.address) }))
-      .sort((a, b) => last(b.thread) - last(a.thread) || a.member.name.localeCompare(b.member.name)),
+    children,
+    parent: parent ? row(parent) : null,
+    siblings,
+    others: threads.filter((t) => !shown.has(t.key) && !gone.has(t.key)).sort((a, b) => last(b) - last(a)),
   }
 }
 
