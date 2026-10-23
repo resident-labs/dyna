@@ -23,7 +23,7 @@ func TestQuotaSummaryNamesTheCallersThatSpendQuota(t *testing.T) {
 	if len(lines) != 0 {
 		t.Fatalf("summary before the window closed: %v", lines)
 	}
-	now = now.Add(Window)
+	now = now.Add(window)
 	q.record(ghQuotaCaller("graphql"), true)
 	if len(lines) != 1 {
 		t.Fatalf("summaries = %v, want one", lines)
@@ -44,7 +44,7 @@ func TestQuotaSummaryCountsANamedCaller(t *testing.T) {
 		logf: func(format string, args ...any) { lines = append(lines, fmt.Sprintf(format, args...)) },
 	}
 	q.record("access-check", false)
-	now = now.Add(Window)
+	now = now.Add(window)
 	q.record("access-check", false)
 	if len(lines) != 1 || !strings.Contains(lines[0], "counted by caller: access-check 2") {
 		t.Fatalf("summaries = %v, want the named caller counted", lines)
