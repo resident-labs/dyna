@@ -155,13 +155,8 @@ func (s Store) record(ctx context.Context, at time.Time, unit string, p Process,
 	})
 }
 
-// ownerLaunchers are the only launches recorded for the owner: detached
-// processes that run a command for whoever ran it. Any other owner record
-// would hand the owner's power to a process that should have none.
-var ownerLaunchers = map[string]bool{"consolidate": true, "transfer": true, "resume-room": true}
-
 // Launch says what a started process acts for. Launcher names the launch
-// path, for example "turn", "workflow", "shell" or "transfer".
+// path, for example "turn", "workflow" or "shell".
 type Launch struct {
 	DataDir  string
 	Name     string // labels the scope, for example the session ID
@@ -170,7 +165,7 @@ type Launch struct {
 }
 
 // check refuses a launch that would record a wrong identity.
-func (l Launch) check() error { return l.checkActor(ownerLaunchers[l.Launcher]) }
+func (l Launch) check() error { return l.checkActor(false) }
 
 func (l Launch) checkActor(owner bool) error {
 	a := l.Actor
@@ -280,7 +275,7 @@ func RecordStarted(ctx context.Context, pid int, l Launch) error {
 // RecordHook records the live anchor of a stored hook while processguard's
 // native gate is closed. Only the engine may use this path, including for an
 // explicit request acting for its authenticated caller. Generic launchers
-// retain their existing owner restrictions.
+// reject owner identities.
 func RecordHook(ctx context.Context, process Process, dataDir, name string, actor Identity) error {
 	if !authority.IsEngine() {
 		return errors.New("only the verified engine may record a hook launch")
