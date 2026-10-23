@@ -97,9 +97,10 @@ If no goal is eligible, the child holds a new standalone goal, for any parent ro
 Placement does not change session hierarchy.
 
 Root holds no goals. A start from root's session makes the child the holder of a new
-top-level goal, unless `--under gN` names a goal that another agent holds. A goal that
-root holds is never used. When a closed session would hand a goal to root, the goal
-stays with the owner instead.
+top-level goal, unless `--under gN` names a goal that another agent holds. Implicit
+lookup never uses a goal root holds, and an explicit `--under` on one is refused.
+When a closed session would hand a goal to root, close is refused until the goal is
+resolved.
 
 For other work across turns, use `dyna goal "<outcome; done when>"`.
 The caller holds it by default. Select holders with `--for @name`, `@children`, `@siblings`, or `@room`.
