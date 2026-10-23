@@ -50,15 +50,11 @@ func localCommands() []*cobra.Command {
 			if err != nil {
 				return err
 			}
-			for _, node := range nodes {
-				if node.Name == nodeName && node.Enabled {
-					runner.Node = &node
-					break
-				}
-			}
-			if runner.Node == nil {
+			node, ok := findNode(nodes, nodeName)
+			if !ok {
 				return fmt.Errorf("enabled CI node %q was not found", nodeName)
 			}
+			runner.Node = &node
 		}
 		result, runErr := runner.Run(c.Context(), localci.Request{Repo: checkout.Root, SHA: sha, Suites: suites, Timeout: timeout, MaxTest: max, Allowed: allowed})
 		if result.SHA != "" {
@@ -96,6 +92,25 @@ func localCommands() []*cobra.Command {
 	}}
 	show.Flags().BoolVar(&showJSON, "json", false, "print the saved result as JSON")
 	return []*cobra.Command{run, show}
+}
+
+// findNode picks the enabled machine a manual run may use. The name "local"
+// also selects this machine, the row with no SSH destination, so scripts that
+// named the old local node keep working.
+func findNode(nodes []localci.Node, name string) (localci.Node, bool) {
+	for _, node := range nodes {
+		if node.Name == name {
+			return node, node.Enabled
+		}
+	}
+	if name == "local" {
+		for _, node := range nodes {
+			if node.SSH == "" {
+				return node, node.Enabled
+			}
+		}
+	}
+	return localci.Node{}, false
 }
 func printResult(c *cobra.Command, result localci.Result, asJSON bool) error {
 	if asJSON {
