@@ -131,8 +131,9 @@ var nonStampKeys = map[string]string{
 // Hook event fields and generated MCP bridge keys describe a child command;
 // they never authenticate that command as a Dyna caller.
 var nonStampPrefixes = map[string]string{
-	"DYNA_HOOK_": "Hook event fields, not the process caller stamp.",
-	"DYNA_MCP_":  "Generated per-server MCP execution bridge settings.",
+	"DYNA_HOOK_":     "Hook event fields, not the process caller stamp.",
+	"DYNA_MCP_":      "Generated per-server MCP execution bridge settings.",
+	"DYNA_CI_CLEAN_": "Settings of the cache cleanup that a run sends to a CI machine.",
 }
 
 // A test binary drops a stamp it inherited, such as the session of the
