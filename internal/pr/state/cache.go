@@ -90,13 +90,35 @@ func cloneStateValue(v reflect.Value) reflect.Value {
 		if len(fields) == 0 {
 			return v
 		}
-		out := reflect.New(v.Type()).Elem()
-		out.Set(v)
+		// A struct whose mutable fields are all nil, such as a notice without a
+		// merge payload, has nothing to copy: a plain assignment is safe and
+		// costs no allocation.
+		var out reflect.Value
 		for _, i := range fields {
-			out.Field(i).Set(cloneStateValue(v.Field(i)))
+			field := v.Field(i)
+			if nilable(field.Kind()) && field.IsNil() {
+				continue
+			}
+			if !out.IsValid() {
+				out = reflect.New(v.Type()).Elem()
+				out.Set(v)
+			}
+			out.Field(i).Set(cloneStateValue(field))
+		}
+		if !out.IsValid() {
+			return v
 		}
 		return out
 	default:
 		return v
 	}
+}
+
+// nilable reports a kind whose zero value is nil, so a clone can share it.
+func nilable(k reflect.Kind) bool {
+	switch k {
+	case reflect.Pointer, reflect.Interface, reflect.Map, reflect.Slice:
+		return true
+	}
+	return false
 }

@@ -89,14 +89,14 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 	}
 	job := registeredCIJob{record: r, head: head, branch: branch, trial: true}
 	s.registeredRuns = &registeredCIRuns{runs: map[string]*registeredCIRun{registeredJobKey(job): {node: "worker", cancel: func() {}}}}
-	ci, _, reason, err := s.mergeTrialCI(ctx, r, branch, head)
-	if err != nil || ci != "pending" || reason != "running local CI on worker" {
-		t.Fatalf("local execution: ci=%s reason=%q err=%v", ci, reason, err)
+	got, err := s.mergeTrialCI(ctx, r, branch, head)
+	if err != nil || got.Status != "pending" || got.Reason != "running local CI on worker" {
+		t.Fatalf("local execution: ci=%s reason=%q err=%v", got.Status, got.Reason, err)
 	}
 	s.registeredRuns.runs = map[string]*registeredCIRun{}
-	ci, _, reason, err = s.mergeTrialCI(ctx, r, branch, head)
-	if err != nil || ci != "pending" || reason != "waiting for local CI" {
-		t.Fatalf("local queue: ci=%s reason=%q err=%v", ci, reason, err)
+	got, err = s.mergeTrialCI(ctx, r, branch, head)
+	if err != nil || got.Status != "pending" || got.Reason != "waiting for local CI" {
+		t.Fatalf("local queue: ci=%s reason=%q err=%v", got.Status, got.Reason, err)
 	}
 	result := localci.Result{Repo: repo, SHA: head, RoomID: r.RoomID, Node: "worker", Status: "passed"}
 	for _, name := range requiredRegisteredChecks(localci.WorkflowSuites()) {
@@ -105,18 +105,18 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 	if err := registry.SaveResult(ctx, result); err != nil {
 		t.Fatal(err)
 	}
-	ci, _, reason, err = s.mergeTrialCI(ctx, r, branch, head)
-	if err != nil || ci != "passed" {
-		t.Fatalf("completed local pass: ci=%s reason=%q err=%v", ci, reason, err)
+	got, err = s.mergeTrialCI(ctx, r, branch, head)
+	if err != nil || got.Status != "passed" {
+		t.Fatalf("completed local pass: ci=%s reason=%q err=%v", got.Status, got.Reason, err)
 	}
 	result.Status = "failed"
 	result.Checks[0].Status = "failed"
 	if err := registry.SaveResult(ctx, result); err != nil {
 		t.Fatal(err)
 	}
-	ci, _, reason, err = s.mergeTrialCI(ctx, r, branch, head)
-	if err != nil || ci != "failed" {
-		t.Fatalf("completed local failure: ci=%s reason=%q err=%v", ci, reason, err)
+	got, err = s.mergeTrialCI(ctx, r, branch, head)
+	if err != nil || got.Status != "failed" {
+		t.Fatalf("completed local failure: ci=%s reason=%q err=%v", got.Status, got.Reason, err)
 	}
 	result.Status = "error"
 	result.Checks = nil
@@ -134,14 +134,14 @@ func TestRegisteredTrialProgressUsesLocalExecutionAndHostedFallback(t *testing.T
 	if reruns != 1 {
 		t.Fatalf("infrastructure failure did not restore hosted run: reruns=%d", reruns)
 	}
-	ci, _, reason, err = s.mergeTrialCI(ctx, r, branch, head)
-	if err != nil || ci != "pending" || reason != "waiting for hosted CI fallback" {
-		t.Fatalf("queued fallback: ci=%s reason=%q err=%v", ci, reason, err)
+	got, err = s.mergeTrialCI(ctx, r, branch, head)
+	if err != nil || got.Status != "pending" || got.Reason != "waiting for hosted CI fallback" {
+		t.Fatalf("queued fallback: ci=%s reason=%q err=%v", got.Status, got.Reason, err)
 	}
 	run.Status = "in_progress"
-	ci, _, reason, err = s.mergeTrialCI(ctx, r, branch, head)
-	if err != nil || ci != "pending" || reason != "running hosted CI fallback" {
-		t.Fatalf("running fallback: ci=%s reason=%q err=%v", ci, reason, err)
+	got, err = s.mergeTrialCI(ctx, r, branch, head)
+	if err != nil || got.Status != "pending" || got.Reason != "running hosted CI fallback" {
+		t.Fatalf("running fallback: ci=%s reason=%q err=%v", got.Status, got.Reason, err)
 	}
 	if jobReads != 0 {
 		t.Fatalf("read cancelled hosted job counts %d times", jobReads)

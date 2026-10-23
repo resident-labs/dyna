@@ -202,12 +202,12 @@ func TestLocalCancellationReachesFactsAndTrialGate(t *testing.T) {
 				if facts := normalized.GitHubFacts(r); facts.CI != localState {
 					t.Fatalf("PR facts = %s, want %s", facts.CI, localState)
 				}
-				got, _, _, err := s.mergeTrialCI(ctx, r, branch, head)
+				trial, err := s.mergeTrialCI(ctx, r, branch, head)
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got != localState {
-					t.Fatalf("trial publication gate = %s, want %s", got, localState)
+				if trial.Status != localState {
+					t.Fatalf("trial publication gate = %s, want %s", trial.Status, localState)
 				}
 			})
 		}
