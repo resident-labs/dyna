@@ -113,6 +113,7 @@ func migrationAlert(rooms *room.Store, cause error) {
 	event := room.AlertEvent{
 		Source:  room.AlertEngine,
 		Summary: "The engine has been read-only for more than 2 minutes because migration failed.",
+		Remedy:  "systemctl --user restart dyna-engine.service",
 		Detail:  cause.Error(),
 	}
 	for _, rec := range list {

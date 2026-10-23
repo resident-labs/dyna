@@ -196,12 +196,18 @@ const fixtures: Record<string, EventPayload> = {
   ),
   'alert/doctor': {
     source: 'doctor', reportId: '7', trigger: 'hook main-updated',
-    summary: 'machine is overloaded', action: 'dyna doctor report 7',
+    summary: 'machine is overloaded',
+    findings: [
+      { severity: 'critical', title: 'three builds run at once', cause: 'load 7.9 per 8 cores, PSI some avg10 22%' },
+      { severity: 'warning', title: 'the test shard holds the lock too long', cause: '3.1 s over the 1 s limit' },
+    ],
+    nextCommand: 'dyna doctor report 7',
     detail: 'machine is overloaded\n1. three builds run at once. Next: `dyna doctor report 7`',
   },
   'alert/engine': {
     source: 'engine',
     summary: 'The engine has been read-only for more than 2 minutes because migration failed.',
+    remedy: 'systemctl --user restart dyna-engine.service',
     detail: 'only the engine creates and migrates dyna.db',
   },
   'service/failed': {
@@ -265,11 +271,12 @@ function fixtureTip(payload: EventPayload): string {
   if ('children' in payload) return payload.children[0]?.name ?? payload.parent
   if ('ruleId' in payload) return payload.ruleId
   if ('floorBytes' in payload) return payload.name
-  if ('source' in payload) return payload.reportId ?? payload.summary ?? payload.source
+  if ('source' in payload) return payload.reportId ?? payload.remedy ?? payload.summary ?? payload.source
   if ('service' in payload) return payload.error
   if ('minutes' in payload) return String(payload.minutes)
   if ('questionId' in payload) return payload.questionId
   if ('session' in payload) {
+    if (payload.type === 'account') return payload.to ?? payload.session
     if (payload.type === 'renamed' || payload.type === 'spawned') return payload.name ?? payload.session
     if (payload.type === 'seat') return payload.seat ?? payload.session
     return payload.session
@@ -369,6 +376,54 @@ test('a folded hook card shows how many passes it holds and when the last one ra
   const text = (target.textContent ?? '').trim()
   assert.match(text, /12 times/)
   assert.match(text, /passed/)
+  web.unmount(mounted)
+  target.remove()
+})
+
+test('an alert card lists its typed findings and copies the next command', async () => {
+  const payload = fixtures['alert/doctor']
+  assert.ok(payload && 'findings' in payload, 'the doctor alert fixture is missing')
+  const post = postFor('alert', 'doctor', payload)
+  const target = document.createElement('div')
+  document.body.append(target)
+  const copied: string[] = []
+  Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    value: { clipboard: { writeText: async (text: string) => { copied.push(text) } } },
+  })
+  const mounted = web.mount(web.eventComponents.AlertCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+  web.flushSync()
+  const text = (target.textContent ?? '').trim()
+  // Both causes are rows of their own, with the numbers behind them.
+  assert.match(text, /three builds run at once/)
+  assert.match(text, /load 7\.9 per 8 cores/)
+  assert.match(text, /the test shard holds the lock too long/)
+  // The command is a chip with one copy action, and the raw report is not in
+  // the feed: it stays the agent's evidence behind Details.
+  const chip = need(target.querySelector('code.command'), 'the command chip')
+  assert.equal(chip.textContent, payload.nextCommand)
+  assert.doesNotMatch(text, /1\. three builds/)
+  need(target.querySelector('button'), 'the copy button').click()
+  await Promise.resolve()
+  assert.deepEqual(copied, [payload.nextCommand])
+  web.unmount(mounted)
+  target.remove()
+  Reflect.deleteProperty(globalThis, 'navigator')
+})
+
+test('an engine alert names its remedy as a command chip', () => {
+  const payload = fixtures['alert/engine']
+  assert.ok(payload && 'remedy' in payload, 'the engine alert fixture is missing')
+  const post = postFor('alert', 'engine', payload)
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.eventComponents.AlertCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+  web.flushSync()
+  const text = (target.textContent ?? '').trim()
+  assert.match(text, /migration failed/)
+  const chip = need(target.querySelector('code.command'), 'the remedy chip')
+  assert.equal(chip.textContent, payload.remedy)
+  assert.doesNotMatch(text, /only the engine creates/)
   web.unmount(mounted)
   target.remove()
 })

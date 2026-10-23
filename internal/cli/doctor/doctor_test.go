@@ -16,7 +16,10 @@ func TestDoctorReportPostsOneAlertThatWakesRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report := doctor.Report{ID: 1, Machine: "laptop", Trigger: "hook main-updated", Summary: "machine is overloaded"}
+	report := doctor.Report{ID: 1, Machine: "laptop", Trigger: "hook main-updated", Summary: "machine is overloaded", Findings: []doctor.Finding{
+		{Cause: "three builds run at once", Evidence: "load 7.9 per 8 cores", Command: "dyna doctor report 1"},
+		{Cause: "the test shard holds the lock", Evidence: "3.1 s over the limit"},
+	}}
 	first, err := postReport(store, rec, report)
 	if err != nil {
 		t.Fatal(err)
@@ -33,6 +36,14 @@ func TestDoctorReportPostsOneAlertThatWakesRoot(t *testing.T) {
 	payload, ok := first.Alert()
 	if !ok || payload.Source != room.AlertDoctor || payload.ReportID != "1" || payload.Summary != "machine is overloaded" {
 		t.Fatalf("payload = %+v, %v", payload, ok)
+	}
+	// The ranked causes are typed findings: the first is the one to act on
+	// now, and its command is the card's next step.
+	if len(payload.Findings) != 2 || payload.Findings[0].Severity != room.AlertCritical || payload.Findings[1].Severity != room.AlertWarning {
+		t.Fatalf("findings = %+v", payload.Findings)
+	}
+	if payload.Findings[0].Title != "three builds run at once" || payload.NextCommand != "dyna doctor report 1" {
+		t.Fatalf("first finding = %+v, next = %q", payload.Findings[0], payload.NextCommand)
 	}
 	again, err := postReport(store, rec, report)
 	if err != nil || again.ID != first.ID {
