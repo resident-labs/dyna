@@ -3,9 +3,9 @@
 package machine
 
 import (
-	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
@@ -122,7 +122,7 @@ func addCommand() *cobra.Command {
 			if len(roles) == 0 {
 				roles = []machines.Role{machines.RoleCI}
 			}
-			if c.Flags().Changed("ci-slots") && slots > 0 && !hasRole(roles, machines.RoleCI) {
+			if c.Flags().Changed("ci-slots") && slots > 0 && !slices.Contains(roles, machines.RoleCI) {
 				roles = append(roles, machines.RoleCI)
 			}
 			m := machines.Machine{Name: args[0], Roles: roles, SSH: ssh, CISlots: slots, Enabled: true}
@@ -187,7 +187,7 @@ func editCommand() *cobra.Command {
 				m.Enabled, changed = false, true
 			}
 			if !changed {
-				return errors.New("edit " + args[0] + ": give at least one of --rename, --ssh, --role, --ci-slots, --enable or --disable")
+				return fmt.Errorf("edit %s: give at least one of --rename, --ssh, --role, --ci-slots, --enable or --disable", args[0])
 			}
 			if m.HasRole(machines.RoleCI) && m.CISlots < 1 {
 				m.CISlots = 1
@@ -235,13 +235,4 @@ func parseRoles(names []string) ([]machines.Role, error) {
 		roles = append(roles, role)
 	}
 	return roles, nil
-}
-
-func hasRole(roles []machines.Role, role machines.Role) bool {
-	for _, have := range roles {
-		if have == role {
-			return true
-		}
-	}
-	return false
 }
