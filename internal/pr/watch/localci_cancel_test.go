@@ -13,6 +13,14 @@ import (
 )
 
 func TestLocalCancellationAggregateKeepsRealFailures(t *testing.T) {
+	// GitHub may omit a suite ID; the saved cancelled run itself is still ours.
+	withoutSuite := withoutLocalHostedCancellations(
+		Snapshot{Runs: []Run{{ID: 10, Attempt: 1, Status: "completed", Conclusion: "cancelled"}}},
+		localci.HostedRuns{Attempts: map[int64]int{10: 1}},
+	)
+	if len(withoutSuite.Runs) != 0 {
+		t.Fatal("saved cancelled run without a suite was retained")
+	}
 	for _, tc := range []struct {
 		name, runStatus, conclusion, dependency string
 		savedAttempt                            int
