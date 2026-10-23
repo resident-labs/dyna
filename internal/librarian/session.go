@@ -17,10 +17,10 @@ type Sessions interface {
 	Inspect(id string) (subagent.Info, subagent.Turn, error)
 	// Turn reads one turn of a session.
 	Turn(id string, n int) (subagent.Turn, error)
-	// Named finds the open librarian session in a room.
-	Named(roomID string) (subagent.Info, error)
+	// Named finds the open map or smell librarian session in a room.
+	Named(roomID string, smell bool) (subagent.Info, error)
 	// Start and Assign return the number of the turn that runs task.
-	Start(roomID, profile, dir, goal, task string) (subagent.Info, int, error)
+	Start(roomID, profile, dir, goal, task string, smell bool) (subagent.Info, int, error)
 	// Assign sends task as a follow-up turn of an idle session.
 	Assign(ctx context.Context, id, task string) (int, error)
 	Close(ctx context.Context, id string) error
@@ -51,15 +51,23 @@ func (l Live) Inspect(id string) (subagent.Info, subagent.Turn, error) {
 	return info, t, err
 }
 func (l Live) Turn(id string, n int) (subagent.Turn, error) { return l.Manager.Store.ReadTurn(id, n) }
-func (l Live) Named(roomID string) (subagent.Info, error) {
+func (l Live) Named(roomID string, smell bool) (subagent.Info, error) {
 	rec, err := l.Rooms.Resolve(roomID)
 	if err != nil {
 		return subagent.Info{}, err
 	}
-	return l.Manager.Store.Resolve(rec.Name + ":" + subagent.LibrarianName)
+	name := subagent.LibrarianName
+	if smell {
+		name = subagent.LibrarianSmellName
+	}
+	return l.Manager.Store.Resolve(rec.Name + ":" + name)
 }
-func (l Live) Start(roomID, prof, dir, goal, task string) (subagent.Info, int, error) {
-	info, turn, err := l.Manager.StartForEngine(subagent.StartOptions{Service: true, Role: subagent.RoleLibrarian, Name: subagent.LibrarianName, Profile: prof, Room: roomID, Dir: dir, Goal: goal, Task: task})
+func (l Live) Start(roomID, prof, dir, goal, task string, smell bool) (subagent.Info, int, error) {
+	name := subagent.LibrarianName
+	if smell {
+		name = subagent.LibrarianSmellName
+	}
+	info, turn, err := l.Manager.StartForEngine(subagent.StartOptions{Service: true, Role: subagent.RoleLibrarian, Name: name, Profile: prof, Room: roomID, Dir: dir, Goal: goal, Task: task})
 	return info, turn.N, err
 }
 func (l Live) Assign(ctx context.Context, id, task string) (int, error) {
