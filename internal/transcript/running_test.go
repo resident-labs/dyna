@@ -39,8 +39,13 @@ func TestRunningCacheMatchesFullRead(t *testing.T) {
 		if wantOmitted {
 			want = want[len(want)-MaxTurnEvents:]
 		}
-		// Cache correctness is event identity and omission state. Rendering has its own tests.
-		if omitted != wantOmitted || !reflect.DeepEqual(got, want) {
+		// The plain reader has no source offsets. Compare event content and
+		// omission state; the anchor rendering test covers loader offsets.
+		content := append([]workeroutput.Event(nil), got...)
+		for i := range content {
+			content[i].SourceOffset = 0
+		}
+		if omitted != wantOmitted || !reflect.DeepEqual(content, want) {
 			t.Fatalf("incremental events differ from full read: got %d events (omitted %t), want %d (omitted %t)", len(got), omitted, len(want), wantOmitted)
 		}
 		if len(cache.running[1].events) > MaxTurnEvents {

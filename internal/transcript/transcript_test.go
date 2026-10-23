@@ -150,17 +150,18 @@ func TestFromEventsHidesHookTrustStartupWarning(t *testing.T) {
 	}
 }
 
-func TestSessionTurnPlacesSteeringAndFallsBack(t *testing.T) {
+func TestSessionTurnPlacesAnchoredSteeringAndMarksMissingPosition(t *testing.T) {
 	base := time.UnixMilli(1_791_000_000_000)
+	anchor := int64(20)
 	turn := subagent.Turn{
 		N: 2, Prompt: "[dyna message msg_1 from amber-otter-42:lead]\nTo: amber-otter-42:decoder (you)\nReply: dyna post @amber-otter-42:lead \"…\"\n\nFix the decoder", Status: subagent.TurnOK,
 		Created: base, Started: base, Ended: base.Add(time.Minute),
-		Steering:   []subagent.Steer{{TS: base.Add(20 * time.Second).UnixMilli(), Message: "also run vet", Delivered: true}},
+		Steering:   []subagent.Steer{{TS: base.Add(20 * time.Second).UnixMilli(), Message: "also run vet", Delivered: true, SourceOffset: &anchor}},
 		Deliveries: []subagent.Delivery{{Kind: "steering", Outcome: "boundary", WaitedMs: 31000}},
 	}
 	timed := []workeroutput.Event{
 		{V: 1, Kind: "tool", Name: "command", State: "started", Input: "go test ./...", TS: base.Add(5 * time.Second).UnixMilli()},
-		{V: 1, Kind: "message", Role: "assistant", Text: "Tests pass; vet is clean.", TS: base.Add(50 * time.Second).UnixMilli()},
+		{V: 1, Kind: "message", Role: "assistant", Text: "Tests pass; vet is clean.", TS: base.Add(50 * time.Second).UnixMilli(), SourceOffset: 20},
 	}
 	tr := SessionTurn(turn, timed, false)
 	kinds := ""
@@ -176,8 +177,9 @@ func TestSessionTurnPlacesSteeringAndFallsBack(t *testing.T) {
 	if s := tr.Items[2]; !s.Delivered || s.Status != "delivered at a tool boundary after 31s" {
 		t.Fatalf("steering = %+v", s)
 	}
-	// Old output without timestamps: steering goes where the resumed process
-	// starts (the second thread.started).
+	// Missing anchor evidence is explicit; timestamps and continuations do not
+	// invent a position.
+	turn.Steering[0].SourceOffset = nil
 	untimed := []workeroutput.Event{
 		{V: 1, Kind: "status", Name: "thread", State: "started"},
 		{V: 1, Kind: "tool", Name: "command", State: "started", Input: "go test ./..."},
@@ -189,8 +191,8 @@ func TestSessionTurnPlacesSteeringAndFallsBack(t *testing.T) {
 	for _, it := range tr.Items {
 		kinds += map[Kind]string{Prompt: "P", Steering: "S", Reply: "R", ToolUse: "T"}[it.Kind]
 	}
-	if kinds != "PTSR" {
-		t.Fatalf("fallback order = %s", kinds)
+	if kinds != "PTRS" || !strings.Contains(tr.Items[3].Status, "source position unavailable") {
+		t.Fatalf("missing position order = %s, items = %+v", kinds, tr.Items)
 	}
 	// A turn with a JSON result and no reply events shows the result.
 	turn.Result = map[string]any{"ok": true}
@@ -307,7 +309,7 @@ func TestSessionTurnShowsWakingPostOnce(t *testing.T) {
 	if len(steering) != 1 || steering[0].Text != "also run vet" {
 		t.Fatalf("steering = %+v, want only the later post", steering)
 	}
-	if steering[0].Status != "delivered at a tool boundary after 4s" {
+	if steering[0].Status != "delivered at a tool boundary after 4s; source position unavailable" {
 		t.Fatalf("the live steer must keep its delivery note, got %q", steering[0].Status)
 	}
 }
