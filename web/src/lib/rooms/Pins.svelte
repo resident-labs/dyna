@@ -12,6 +12,11 @@
 
   // The label comes from Go (roomsvc.SpeakerLabel), as in the feed.
   const who = (p) => speaker(p, room.name)
+  let query = $state('')
+  let needle = $derived(query.trim().toLocaleLowerCase())
+  let filtered = $derived(pins.filter(p => !needle || [postParts(p).text, who(p),
+    ...postParts(p).attachments.flatMap(file => [file.name, file.title]), ...postParts(p).names]
+    .some(value => String(value || '').toLocaleLowerCase().includes(needle))))
 </script>
 
 <aside class="pins" aria-label="Pinned posts">
@@ -19,11 +24,20 @@
     <h2>Pinned <span class="n">{pins.length}</span></h2>
     <button class="x" onclick={onclose} title="Close (Esc)" aria-label="Close pinned posts">✕</button>
   </header>
+  {#if pins.length}
+    <div class="filter">
+      <div class="filter-field"><input type="search" aria-label="Filter pinned posts" placeholder="Filter pinned posts" bind:value={query} />
+        {#if query}<button onclick={() => query = ''} aria-label="Clear filter">Clear</button>{/if}
+      </div>
+      <p class="matches" role="status">{filtered.length} of {pins.length} pinned posts</p>
+    </div>
+  {/if}
   <div class="scroll">
     {#if pins.length === 0}
       <p class="none">No pinned posts. Hover a post and press Pin to keep it here.</p>
     {/if}
-    {#each pins as p (p.id)}
+    {#if pins.length && !filtered.length}<p class="none">No pinned posts match this filter.</p>{/if}
+    {#each filtered as p (p.id)}
       <article class="item">
         <div class="head">
           <Avatar name={who(p)} hue={p.fromHue} owner={p.owner} emoji={p.fromEmoji} size={32} ring="var(--side)" />
@@ -65,6 +79,11 @@
   .x:active {
     background: var(--select);
 }
+  .filter { padding: var(--s2) var(--s3); }
+  .filter-field { display: flex; gap: var(--s2); align-items: center; }
+  .filter-field input { width: 100%; min-width: 0; background: var(--field); border: 1px solid var(--line); border-radius: 6px; padding: 8px; color: var(--ink); font: inherit; }
+  .filter-field button { padding: 6px; color: var(--iris); }
+  .matches { color: var(--muted); font-size: var(--t-sm); margin: var(--s2) 0 0; }
   .scroll { flex: 1; overflow-y: auto; padding: var(--s1) 10px var(--s3); }
   .none { margin: var(--s2) 6px; font-size: var(--t-ui); color: var(--faint); line-height: var(--leading); }
   .item {
