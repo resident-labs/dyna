@@ -49,7 +49,14 @@ func Migrate(dataDir string) error {
 	if _, err := openRuns(dataDir); err != nil {
 		return err
 	}
-	return projection.Migrate(dataDir)
+	if err := projection.Migrate(dataDir); err != nil {
+		return err
+	}
+	db, err := database.Open(dataDir)
+	if err != nil {
+		return err
+	}
+	return migrateOutput(db, dataDir)
 }
 
 // openRuns opens the runs table and the legacy import stamp table. Both
@@ -413,22 +420,14 @@ func ChangesSince(rev int64) (Changes, error) {
 // so a cancel racing the run's own Finish cannot undo it: the first wins. It
 // reports whether this call ended the run, and the meta as stored.
 func endRun(dir, id, status, errMsg string, ended time.Time) (Meta, bool, error) {
-	at, _ := ended.Round(0).MarshalJSON()
-	var changed int64
-	m, err := changeMeta(dir, id, func(ctx context.Context, conn *sql.Conn) error {
-		rev, err := nextRev(ctx, conn)
-		if err != nil {
-			return err
-		}
-		res, err := conn.ExecContext(ctx, `UPDATE runs SET body=json_remove(json_set(body,'$.status',?,'$.endedAt',json(?),'$.error',?),'$.paused'), rev=?
-WHERE id=? AND status='running'`, status, string(at), errMsg, rev, id)
-		if err != nil {
-			return err
-		}
-		changed, err = res.RowsAffected()
+	var meta Meta
+	var changed bool
+	_, err := changeMeta(dir, id, func(ctx context.Context, conn *sql.Conn) error {
+		var err error
+		meta, changed, err = endRunTx(ctx, conn, id, status, errMsg, ended)
 		return err
 	})
-	return m, changed == 1, err
+	return meta, changed, err
 }
 
 // setPaused sets or clears a running run's paused field.
@@ -479,4 +478,37 @@ func deleteMeta(db *sql.DB, id string) error {
 		}
 		return ancestry.ForgetAncestry(ctx, conn, id)
 	})
+}
+
+// endRunTx is the shared first-terminal-state transition. The caller owns its transaction.
+func endRunTx(ctx context.Context, conn *sql.Conn, id, status, errMsg string, ended time.Time) (Meta, bool, error) {
+	previous, err := LoadStored(ctx, conn, id)
+	if err != nil {
+		return Meta{}, false, err
+	}
+	if previous.ID != id {
+		return Meta{}, false, fmt.Errorf("stored run identity does not match %s", id)
+	}
+	if previous.Status != "running" {
+		return previous, false, nil
+	}
+	at, err := ended.Round(0).MarshalJSON()
+	if err != nil {
+		return Meta{}, false, err
+	}
+	rev, err := nextRev(ctx, conn)
+	if err != nil {
+		return Meta{}, false, err
+	}
+	result, err := conn.ExecContext(ctx, `UPDATE runs SET body=json_remove(json_set(body,'$.status',?,'$.endedAt',json(?),'$.error',?),'$.paused'), rev=?
+WHERE id=? AND status='running'`, status, string(at), errMsg, rev, id)
+	if err != nil {
+		return Meta{}, false, err
+	}
+	changed, err := result.RowsAffected()
+	if err != nil {
+		return Meta{}, false, err
+	}
+	meta, err := LoadStored(ctx, conn, id)
+	return meta, changed == 1, err
 }
