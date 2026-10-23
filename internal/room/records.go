@@ -64,21 +64,33 @@ func (s *Store) migrateRecords() error {
 	} else if err != nil {
 		return err
 	}
-	return database.Migrate(db, "room.records.import", 1, func(conn *sql.Conn, _ int) error {
-		return s.importRoomFiles(context.Background(), conn)
+	var embeddedSeats []Record
+	err = database.Migrate(db, "room.records.import", 1, func(conn *sql.Conn, _ int) error {
+		var err error
+		embeddedSeats, err = s.importRoomFiles(context.Background(), conn)
+		return err
 	})
+	if err != nil {
+		return err
+	}
+	// Preserve rollback attachments only after the entire import commits.
+	for _, rec := range embeddedSeats {
+		s.mirrorSeat(state.For(db), rec)
+	}
+	return nil
 }
 
 // TODO: legacy/shim remove later — imports retained room.json and seat.json
 // only during room.records.import; remove after supported stores have migrated.
-func (s *Store) importRoomFiles(ctx context.Context, conn *sql.Conn) error {
+func (s *Store) importRoomFiles(ctx context.Context, conn *sql.Conn) ([]Record, error) {
 	entries, err := os.ReadDir(s.root())
 	if os.IsNotExist(err) {
-		return nil
+		return nil, nil
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
+	var embeddedSeats []Record
 	for _, entry := range entries {
 		if !entry.IsDir() || !ValidID(entry.Name()) {
 			continue
@@ -87,7 +99,7 @@ func (s *Store) importRoomFiles(ctx context.Context, conn *sql.Conn) error {
 		// A canonical row owns both columns, including an unchanged or detached seat.
 		var canonical bool
 		if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM room_records WHERE id=?)", id).Scan(&canonical); err != nil {
-			return err
+			return nil, err
 		}
 		if canonical {
 			continue
@@ -114,9 +126,14 @@ func (s *Store) importRoomFiles(ctx context.Context, conn *sql.Conn) error {
 			if _, err := os.Lstat(seatPath); !os.IsNotExist(err) {
 				return err
 			}
-			return putSeat(ctx, conn, id, imported.Seat)
+			if err := putSeat(ctx, conn, id, imported.Seat); err != nil {
+				return err
+			}
+			imported.Record.Seat = imported.Seat
+			embeddedSeats = append(embeddedSeats, imported.Record)
+			return nil
 		}); err != nil {
-			return err
+			return nil, err
 		}
 		if _, err := state.ImportMigration(ctx, conn, seatKey(id), seatPath, func(conn *sql.Conn, raw []byte) error {
 			var seat Seat
@@ -125,10 +142,10 @@ func (s *Store) importRoomFiles(ctx context.Context, conn *sql.Conn) error {
 			}
 			return putSeat(ctx, conn, id, seat)
 		}); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return embeddedSeats, nil
 }
 
 // recordKey and seatKey name a room's rollback copies; roomKey is the stem
