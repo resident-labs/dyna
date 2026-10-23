@@ -7,8 +7,9 @@
 #
 # Inputs come from the environment, so the caller sends one shell command:
 #   DYNA_CI_CLEAN_DRY=1        report what would go, delete nothing
-#   DYNA_CI_CLEAN_AGE_MIN=2880 keep everything younger than this many minutes
-#   DYNA_CI_CLEAN_ROOTS=...    exact CI directories to clean (space separated);
+#   DYNA_CI_CLEAN_AGE_MIN=2880     keep caches younger than this many minutes
+#   DYNA_CI_CLEAN_RUN_AGE_MIN=1440 keep run folders younger than this many minutes
+#   DYNA_CI_CLEAN_ROOTS=...        exact CI directories to clean (space separated);
 #                              empty cleans every directory Dyna owns
 #
 # A root is the directory a run keeps its caches in, holding runs/,
@@ -21,6 +22,7 @@ set -u
 
 dry=${DYNA_CI_CLEAN_DRY:-0}
 age_min=${DYNA_CI_CLEAN_AGE_MIN:-2880}
+run_age_min=${DYNA_CI_CLEAN_RUN_AGE_MIN:-1440}
 legacy=/var/tmp/dyna-local-ci
 
 refuse() { echo "dyna-ci-clean: $*" >&2; exit 2; }
@@ -29,6 +31,7 @@ refuse() { echo "dyna-ci-clean: $*" >&2; exit 2; }
 [ "$(id -u)" != 0 ] || refuse "refusing to run as root"
 case "$dry" in 0 | 1) ;; *) refuse "DYNA_CI_CLEAN_DRY must be 0 or 1" ;; esac
 [[ "$age_min" =~ ^[0-9]+$ ]] || refuse "DYNA_CI_CLEAN_AGE_MIN must be a number of minutes"
+[[ "$run_age_min" =~ ^[0-9]+$ ]] || refuse "DYNA_CI_CLEAN_RUN_AGE_MIN must be a number of minutes"
 
 # allowed is the only guard that keeps a typo from deleting another user's data.
 allowed() {
@@ -96,9 +99,11 @@ remove() {
   freed_kb=$((freed_kb + kb))
 }
 
-# older PATH: PATH itself is old, on this file system, and is not a symlink.
+# older PATH [AGE]: PATH itself is older than AGE minutes, on this file
+# system, and is not a symlink. Cache entries use the default age.
 older() {
-  [ -n "$(find "$1" -xdev -maxdepth 0 -mmin +"$age_min" ! -type l -print -quit 2>/dev/null)" ]
+  local age=${2:-$age_min}
+  [ -n "$(find "$1" -xdev -maxdepth 0 -mmin +"$age" ! -type l -print -quit 2>/dev/null)" ]
 }
 
 # live_run DIR: the run holds a lock on DIR/.active for as long as it runs, so
@@ -116,7 +121,7 @@ prune_runs() {
   for run in "$1"/runs/*; do
     [ -d "$run" ] && [ ! -L "$run" ] || continue
     live_run "$run" && continue
-    older "$run" || continue
+    older "$run" "$run_age_min" || continue
     remove "$run"
   done
 }
@@ -168,7 +173,7 @@ for base in "${bases[@]}"; do
     "$legacy/runs" | "$legacy/diagnostics" | "$legacy/go-build" | "$legacy/go-mod" | "$legacy/npm") continue ;;
     esac
     live_run "$path" && continue
-    older "$path" || continue
+    older "$path" "$run_age_min" || continue
     remove "$path"
   done
 done
