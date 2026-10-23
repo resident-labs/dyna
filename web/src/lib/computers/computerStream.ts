@@ -329,8 +329,7 @@ export function openStream({ target, url, on = () => {}, mode = 'auto' }: OpenSt
   const scrollKeys = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '])
   function scrollInput(event: Event): void {
     const key: unknown = Reflect.get(event, 'key')
-    if (event.type === 'keydown' && typeof key === 'string' && scrollKeys.has(key)) return
-    quality?.scroll(performance.now())
+    if (event.type !== 'keydown' || (typeof key === 'string' && scrollKeys.has(key))) quality?.scroll(performance.now())
   }
   for (const type of ['wheel', 'touchmove', 'keydown']) target.addEventListener(type, scrollInput, { capture: true, passive: true })
 
@@ -495,7 +494,7 @@ export function openStream({ target, url, on = () => {}, mode = 'auto' }: OpenSt
 // firstMessageType reads the RFB message type of a binary frame. A string or
 // an array buffer is never the owner's input.
 function firstMessageType(data: string | ArrayBufferLike | Blob | ArrayBufferView): number | undefined {
-  if (!ArrayBuffer.isView(data)) return undefined
+  if (!ArrayBuffer.isView(data) || data.byteLength === 0) return undefined
   const first = new Uint8Array(data.buffer, data.byteOffset, 1)[0]
   return first
 }

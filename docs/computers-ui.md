@@ -53,7 +53,7 @@ schema, read `docs/computers.md`.
   control. The chat reads the session data and sends through the same path as
   the Messages tab, so a message shows in both. It reuses `MessageInput` and
   `DmMessage` (the `compact` variant). The pop-out window has no chat.
-  Rules: `computers/chatState.js`. Parts: `computers/ComputerChat.svelte`.
+  Rules: `computers/chatState.ts`. Parts: `computers/ComputerChat.svelte`.
 - **Shared tokens.** `lib/ui/tokens.css` holds the `.state-label` and
   `.act-line` styles, hairlines
   (`--hair`), two radii (`--r-sm`, `--r-lg`) and three glass levels
@@ -116,7 +116,7 @@ same picture and stream routes as the web, with the same device auth.
 
 ## The stream client
 
-noVNC (`@novnc/novnc`, pinned to 1.7.0) runs in `computerStream.js`. It
+noVNC (`@novnc/novnc`, pinned to 1.7.0) runs in `computerStream.ts`. It
 loads on first use, in its own chunk.
 
 - The viewer starts **view only**. No key or pointer event leaves the page
@@ -143,7 +143,7 @@ loads on first use, in its own chunk.
   last two seconds. Frames per second and bitrate come from the page.
   Latency is the time from the owner's last key or pointer event to the next
   reply, and shows "—" when there was no input in 10 seconds. noVNC has no
-  stats API, so `computerStream.js` reads three private fields of the pinned
+  stats API, so `computerStream.ts` reads three private fields of the pinned
   version. A noVNC update that moves them loses the stats, not the stream.
 - **Phone.** The toolbar wraps and loses its text labels. Pinch zooms the
   picture inside the frame, and one finger pans while zoomed. **Fit** resets.
@@ -161,11 +161,11 @@ loads on first use, in its own chunk.
 | `internal/websvc/computers.go` | shot.png and view routes, the stream relay |
 | `internal/computerweb/host.go` | view model, viewer leases, events, action summaries |
 | `internal/engine/computers.go` | the computer host the engine mounts |
-| `web/src/lib/computers/computers.js` | pure helpers (states, ages, totals, events) |
+| `web/src/lib/computers/computers.ts` | pure helpers (states, ages, totals, events) |
 | `web/src/lib/computers/rfbStats.ts` | the stats meter |
-| `web/src/lib/computers/computerStream.js` | noVNC, fallback, instrumentation |
+| `web/src/lib/computers/computerStream.ts` | noVNC, fallback, instrumentation |
 | `web/src/lib/Computer*.svelte`, `Computers.svelte` | the screens |
-| `web/src/lib/computers/chatState.js`, `ComputerChat.svelte` | the floating chat |
+| `web/src/lib/computers/chatState.ts`, `ComputerChat.svelte` | the floating chat |
 
 ## Test it
 
