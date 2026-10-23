@@ -2,10 +2,16 @@ package harness
 
 import (
 	"context"
+	"dyna-agent/internal/profile"
+	"dyna-agent/internal/workeroutput"
 	"encoding/json"
 	"errors"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -85,4 +91,51 @@ func jsonDecode(r io.Reader) (hookReply, error) {
 	var reply hookReply
 	err := json.NewDecoder(r).Decode(&reply)
 	return reply, err
+}
+
+func TestTurnEndReplaysUnclaimedHookOffer(t *testing.T) {
+	old := steerHookSupport
+	steerHookSupport = func(string, string) bool { return true }
+	defer func() { steerHookSupport = old }()
+	dir := t.TempDir()
+	fifo := filepath.Join(dir, "hold")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "worker.sh")
+	body := "printf 'session\\n'\nread -r _ < " + fifo + "\n"
+	if err := os.WriteFile(script, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	offered := make(chan struct{})
+	source := &testSource{msgs: []runstore.SteeringMessage{{ID: "m1", Message: "steer"}}}
+	supervisor := newSteeringSupervisor(SteeringOptions{Source: source, DeliveryGate: func(offer func() error) error {
+		err := offer()
+		close(offered)
+		return err
+	}}, true)
+	tracker := newSessionTracker(func(line string) string {
+		if strings.TrimSpace(line) == "session" {
+			return "s1"
+		}
+		return ""
+	})
+	done := make(chan attempt, 1)
+	go func() {
+		done <- runOnce(t.Context(), profile.Profile{Harness: profile.HarnessMuse, RuntimeExecutable: "/bin/sh", RuntimeBindProcess: func(json.RawMessage) error { return nil }}, dir, commandSpec{prompt: "work", argv: []string{"/bin/sh", script}}, tracker, nil, supervisor, true, "", "", &workeroutput.Declaration{}, nil, newDeliveryGate(JournalOptions{}), &runState{}, ExecutionOptions{SkipComputer: true})
+	}()
+	select {
+	case <-offered:
+	case got := <-done:
+		t.Fatalf("turn ended before the offer: %v", got.runErr)
+	}
+	w, err := os.OpenFile(fifo, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+	got := <-done
+	if len(got.steering) != 1 || got.steering[0].ID != "m1" {
+		t.Fatalf("continuation messages = %+v, error %v", got.steering, got.runErr)
+	}
 }
