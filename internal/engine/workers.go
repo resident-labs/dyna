@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"dyna-agent/internal/hooks"
+	"dyna-agent/internal/hub"
 	"dyna-agent/internal/lanesync"
+	"dyna-agent/internal/machines"
 	"dyna-agent/internal/parentcheckin"
 	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/room"
@@ -222,10 +224,18 @@ type workers struct {
 	checkins, instructions, fetch, questions, hooks, prs, merges, sync func(context.Context) (time.Time, error)
 }
 
-func engineWorkers(rooms *roomsvc.Service, signals *workerSignals) workers {
+func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, events *hub.Hub) workers {
 	prs := watch.New()
 	prs.Notify = rooms.Notify
 	prs.GH.Rooms = rooms.Notify.Rooms
+	// A local CI run starting or ending changes what a machine runs, so the
+	// app reads the machine view again. This is a client notice, not a state
+	// write, so no worker wakes and no GitHub read follows it.
+	prs.RunningCIChanged = func() {
+		if events != nil {
+			events.Publish(hub.Event{Topic: machines.Topic, Key: "ci"})
+		}
+	}
 	syncer := lanesync.New()
 	spool := hooks.New()
 	checkins := parentcheckin.New(rooms.Notify)
@@ -415,11 +425,11 @@ func runOwned(ctx context.Context, root string, w workers, signals *workerSignal
 	return true, nil
 }
 
-func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers) {
+func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, events *hub.Hub) {
 	report := func(name string, err error) {
 		log.Print(watch.Sanitize(name + ": " + err.Error()))
 	}
-	owned, err := runOwned(ctx, store.DataDir(), engineWorkers(rooms, signals), signals, t, report)
+	owned, err := runOwned(ctx, store.DataDir(), engineWorkers(rooms, signals, events), signals, t, report)
 	if err != nil {
 		log.Print(watch.Sanitize("workers: " + err.Error()))
 		return
