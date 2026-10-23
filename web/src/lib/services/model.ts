@@ -91,6 +91,7 @@ export interface ChangeRow {
 export interface Inputs {
   reviewer: ReviewerInfo | null
   queue: QueueRow[] | null
+  mergePaused: boolean | null
   history: MergeHistoryRow[]
   services: ServiceInfo[] | null
   notices: NoticeRow[] | null
@@ -125,6 +126,7 @@ export interface Row {
   nextAt: string
   nextText: string
   filterable: boolean
+  settings?: { id: string; label: string; value: string; options?: string[] }[]
 }
 
 const unknown = 'unknown'
@@ -140,13 +142,12 @@ export function readableDuration(text: string): string {
   return `${amount} ${unit}${amount === 1 ? '' : plural}`
 }
 
-// shortDuration keeps a stored duration as short as it can be: "3m0s" as "3m",
-// "1s" as "1s". The page has little room for the CI budget line.
+// shortDuration keeps the CI budget compact, with spaces between values and units.
 export function shortDuration(text: string): string {
   const m = text.match(/^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$/)
   if (!m || text === '') return text
   const [, h, min, sec] = m
-  return [h ? `${Number(h)}h` : '', min && min !== '0' ? `${Number(min)}m` : '', sec ? `${Number(sec)}s` : ''].join('') || '0s'
+  return [Number(h) ? `${Number(h)} h` : '', Number(min) ? `${Number(min)} min` : '', Number(sec) ? `${Number(sec)} s` : ''].filter(Boolean).join(' ') || '0 s'
 }
 
 // msDuration names a millisecond limit in words: 1000 as "1 s", 10000 as "10 s".
@@ -230,5 +231,204 @@ export function nextAt(row: HookRow | null): string {
   if (!row || row.hook.disabled || row.hook.event !== 'schedule' || minutes <= 0 || !last) return ''
   const at = Date.parse(last) + minutes * 60000
   return Number.isFinite(at) ? new Date(at).toISOString() : ''
+}
+
+// A repository has a librarian only when its own path is enabled.
+function libraryRepos(settings: Inputs['settings']): string[] | null {
+  if (!settings) return null
+  try {
+    const value: unknown = JSON.parse(settings['library.enabled'] || '[]')
+    return Array.isArray(value) && value.every((r) => typeof r === 'string') ? value : null
+  } catch { return null }
+}
+
+export function buildRows(i: Inputs): Row[] {
+  const svc = (role: string): ServiceInfo | undefined => i.services?.find((s) => s.role === role)
+  const rows: Row[] = []
+  const base = { profileStatus: '', toggle: null, profile: null, value: '', last: '', nextAt: '', nextText: '', filterable: true }
+
+  // PR reviewers: one session per ready change, with a switch and a profile
+  // the owner can change without opening anything.
+  const rev = i.reviewer
+  const reviewerSvc = svc('reviewer')
+  rows.push({
+    ...base,
+    id: 'reviewer',
+    name: 'PR reviewers',
+    state: !rev ? 'unreadable' : !rev.enabled ? 'off' : rev.lastError ? 'error' : rev.current ? 'running' : 'waiting',
+    tone: !rev ? 'off' : !rev.enabled ? 'off' : rev.lastError ? 'error' : rev.current ? 'live' : 'on',
+    detail: !rev
+      ? 'Reviewer state could not be read'
+      : rev.lastError || (rev.current ? `reviewing #${rev.current.pr} · ${rev.current.title}` : rev.queued ? `${rev.queued} waiting for review` : 'nothing to review now'),
+    profileStatus: rateLimit(i.notices, reviewerSvc?.profile ?? rev?.profile ?? ''),
+    toggle: rev ? { id: 'review.enabled', on: rev.enabled } : null,
+    profile: reviewerSvc ? { id: 'review.profile', value: reviewerSvc.pinned, options: ['', ...reviewerSvc.profiles] } : null,
+    value: turnsOf(i.usage, 'reviewer'),
+    last: rev?.lastVerdictAt ?? '',
+    nextText: rev?.queued ? `${rev.queued} waiting` : '',
+  })
+
+  // Merge queue: the worker runs trials and publishes; the switch pauses it.
+  const paused = i.mergePaused
+  const counts = queueCounts(i.queue)
+  rows.push({
+    ...base,
+    id: 'merge',
+    name: 'Merge queue',
+    state: !i.queue || paused === null ? 'unreadable' : paused ? 'paused' : counts.running ? 'running' : 'waiting',
+    tone: !i.queue || paused === null ? 'off' : paused ? 'off' : counts.running ? 'live' : 'on',
+    detail: queueLine(i.queue),
+    toggle: i.queue && paused !== null ? { id: 'merge.paused', on: !paused } : null,
+    last: i.history[0]?.at ?? '',
+    nextText: counts.ready ? `${counts.ready} ready` : '',
+  })
+
+  // Merge steward: its profile is its switch, because off is the off state.
+  const steward = svc('merge-steward')
+  const stewardOff = steward?.pinned === 'off' || steward?.profile === 'off'
+  rows.push({
+    ...base,
+    id: 'steward',
+    name: 'Merge steward',
+    state: !steward ? 'unreadable' : stewardOff ? 'off' : !steward.profile ? 'unavailable' : 'on',
+    tone: !steward || stewardOff || !steward.profile ? 'off' : 'on',
+    detail: !steward ? 'Steward state could not be read' : stewardOff ? 'Off: a failed batch goes straight to root' : !steward.profile ? steward.reason || 'No enabled profile' : 'Handles a failed merge batch',
+    profile: steward ? { id: 'steward.profile', value: steward.pinned, options: ['', 'off', ...steward.profiles] } : null,
+  })
+
+  // Conflict radar runs with the watcher on every push, so it has no switch.
+  const overlaps = i.changes.filter((c) => (typeof c.overlaps === 'number' ? c.overlaps : c.overlaps?.length ?? 0) > 0).length
+  rows.push({
+    ...base,
+    id: 'radar',
+    name: 'Conflict radar',
+    state: 'always on',
+    tone: 'on',
+    detail: overlaps ? `${overlaps} open ${overlaps === 1 ? 'change overlaps' : 'changes overlap'} another` : 'No overlaps between open changes',
+    value: overlaps ? String(overlaps) : '',
+    nextText: 'each push',
+  })
+
+  // Librarian activation stays local; the browser shows status and profile.
+  const repos = libraryRepos(i.settings)
+  const libraryOn = repos === null || !i.repo ? null : repos.includes(i.repo)
+  const batch = hook(i.hooks, 'librarian-batch')
+  rows.push({
+    ...base,
+    id: 'librarian',
+    name: 'Librarian',
+    state: libraryOn === null ? unknown : libraryOn ? 'on' : 'off',
+    tone: libraryOn === null ? 'off' : libraryOn ? 'on' : 'off',
+    detail: libraryOn === null
+      ? !i.repo ? 'No repository for this room' : 'Librarian settings could not be read'
+      : libraryOn ? 'Keeps the feature map current' : 'Turn on with dyna library enable on this machine',
+    profile: i.settings ? { id: 'library.profile', value: i.settings['library.profile'] ?? '', options: [] } : null,
+    value: turnsOf(i.usage, 'librarian'),
+    last: batch?.lastRun?.startedAt ?? '',
+    nextAt: libraryOn ? nextAt(batch) : '',
+  })
+
+  // Update Dyna follows its configured trigger, usually main-updated.
+  const update = hook(i.hooks, 'self-update')
+  const updateOff = update?.hook.disabled ?? false
+  const updateResult = update?.lastRun?.result ?? ''
+  const updateFailed = updateResult === 'error'
+  const updateRunning = updateResult === 'pending'
+  const updateTrigger = !update ? '' : update.hook.event === 'schedule'
+    ? `Every ${update.hook.everyMinutes} min`
+    : update.hook.event === 'main-updated' ? 'When main updates' : `On ${update.hook.event.replaceAll('-', ' ')}`
+  const updateLast = updateRunning ? 'running' : `last ${updateResult === 'pass' ? 'passed' : updateFailed ? 'failed' : updateResult || unknown}`
+  rows.push({
+    ...base,
+    id: 'update',
+    name: 'Update Dyna',
+    state: !update ? (i.hooks === null ? unknown : 'off') : updateRunning ? 'running' : updateOff ? 'off' : updateFailed ? 'error' : 'on',
+    tone: !update ? 'off' : updateRunning ? 'live' : updateOff ? 'off' : updateFailed ? 'error' : 'on',
+    detail: i.hooks === null
+      ? 'Hook state could not be read'
+      : !update
+        ? 'No update hook in this repository'
+        : `${updateTrigger} · ${update.lastRun ? updateLast : 'no run yet'}`,
+    toggle: update ? { id: 'update.enabled', on: !updateOff } : null,
+    value: update && !updateRunning ? elapsed(update.lastRun?.startedAt ?? '', update.lastRun?.finishedAt ?? '') : '',
+    last: update?.lastRun?.startedAt ?? '',
+    nextAt: nextAt(update),
+    nextText: update && !updateOff ? updateTrigger : '',
+  })
+
+  // Maintenance and account usage run on their own. They carry no switch,
+  // because off would leave data on disk forever, or gain nothing at all.
+  rows.push({
+    ...base,
+    id: 'maintenance',
+    name: 'Maintenance',
+    state: 'always on',
+    tone: 'on',
+    detail: i.settings ? `Keeps runs ${readableDuration(i.settings['runs.retention'] ?? '')} · worktrees ${i.settings['worktrees.retention'] ?? unknown}` : 'Settings need admin access',
+    nextText: 'each min',
+    settings: i.settings ? [
+      { id: 'runs.retention', label: 'Keep runs for', value: i.settings['runs.retention'] ?? '' },
+      { id: 'worktrees.retention', label: 'Keep worktrees', value: i.settings['worktrees.retention'] ?? 'changed', options: ['changed', 'all', 'none'] },
+    ] : [],
+  })
+  rows.push({
+    ...base,
+    id: 'usage',
+    name: 'Account usage',
+    state: !i.accounts ? unknown : i.accounts.stale ? 'stale' : 'on',
+    tone: !i.accounts ? 'off' : i.accounts.stale ? 'off' : 'on',
+    detail: !i.accounts ? 'Account usage could not be read' : `Refreshes on sign-in and account switch · ${i.accounts.count} ${i.accounts.count === 1 ? 'account' : 'accounts'}`,
+    last: i.accounts?.at ?? '',
+    nextText: 'on sign-in',
+  })
+
+  // CI admission decides what a run may cost; its budget is its control.
+  rows.push({
+    ...base,
+    id: 'ci',
+    name: 'CI admission',
+    state: 'always on',
+    tone: 'on',
+    detail: i.budget
+      ? `Warn after ${shortDuration(i.budget.warnAfter)} · fail after ${shortDuration(i.budget.failAfter)} · tests ${shortDuration(i.budget.testMax)}`
+      : 'Budget could not be read',
+    nextText: 'each run',
+  })
+
+  // Voice runs one call at a time, started and stopped per call.
+  const voiceOff = i.voice?.startsWith('unavailable') ?? false
+  rows.push({
+    ...base,
+    id: 'voice',
+    name: 'Voice',
+    state: i.voice === null ? unknown : voiceOff ? 'off' : i.voice === 'live' ? 'in a call' : 'idle',
+    tone: i.voice === null || voiceOff ? 'off' : i.voice === 'live' ? 'live' : 'on',
+    detail: i.voice === null ? 'Voice status could not be read' : voiceOff ? i.voice.replace(/^unavailable:?\s*/, '') || 'Not available' : 'Started and stopped per call',
+  })
+  return rows
+}
+
+// Next is one thing that runs on a timer.
+export interface Next {
+  id: string
+  name: string
+  when: string
+  at: number
+}
+
+// buildSchedule lists what runs next, soonest first. A row with a time comes
+// before a row that only names its trigger.
+export function buildSchedule(rows: Row[], now: number): Next[] {
+  return rows
+    .filter((r) => r.nextAt || r.nextText)
+    .map((r) => ({ id: r.id, name: r.name, when: r.nextAt ? until(r.nextAt, now) : r.nextText, at: r.nextAt ? new Date(r.nextAt).getTime() : Number.POSITIVE_INFINITY }))
+    .sort((a, b) => a.at - b.at || a.name.localeCompare(b.name))
+}
+
+// until turns a future time into "in 6 m", "in 2 h" or "due".
+export function until(iso: string, now: number): string {
+  const minutes = Math.round((new Date(iso).getTime() - now) / 60000)
+  if (!Number.isFinite(minutes)) return ''
+  return minutes <= 0 ? 'due' : minutes < 60 ? `in ${minutes} m` : `in ${Math.round(minutes / 60)} h`
 }
 
