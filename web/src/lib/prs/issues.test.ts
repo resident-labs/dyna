@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 import { bundle, domNames, importBundle, installDom } from './prDetailHarness.ts'
-import { issueReference, unifiedIssues, type RoomIssue } from './unifiedIssues.ts'
+import { issueReference, roomIssueLabel, unifiedIssues, type RoomIssue } from './unifiedIssues.ts'
 import { issueGroups, issueChip } from './github.ts'
 import type { GitHubItem } from '../api/github.ts'
 import { element, elements, need } from '../../../test/need.ts'
@@ -174,6 +174,11 @@ test('local issue search includes its room number', () => {
   assert.deepEqual(unifiedIssues([], local, 'dyna', 'all', 'd12').map(i => i.local?.id), ['msg_local'])
   assert.deepEqual(unifiedIssues([], local, 'dyna', 'all', '12').map(i => i.local?.id), ['msg_local'])
   assert.deepEqual(unifiedIssues([], local, 'dyna', 'all', 'D-14'), [])
+  // A number query compares the number, not a substring of another label.
+  assert.deepEqual(unifiedIssues([], [...local, { ...localIssue, id: 'hundred', number: 112 }], 'dyna', 'all', '12').map(i => i.local?.id), ['msg_local'])
+  assert.deepEqual(unifiedIssues([], [...local, { ...localIssue, id: 'hundred', number: 112 }], 'dyna', 'all', 'd1').map(i => i.local?.id), [])
+  // A row without a number falls back to its message ID, like the Go label.
+  assert.equal(roomIssueLabel({ ...localIssue, number: 0 }), 'msg_local')
 })
 
 test('issue references use room labels and keep GitHub numbers', () => {
