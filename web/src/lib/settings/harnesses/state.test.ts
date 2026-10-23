@@ -342,6 +342,8 @@ test('private login recovery uses saved account metadata and keeps multiple card
   assert.deepEqual(flows.map((flow) => flow.harness), ['claude-code', 'codex'])
   assert.equal(need(flows[1]).warning, 'Shared login')
   assert.deepEqual(recoveredLogins([{ accountId: 'missing', signIn: { phase: 'waiting' } }], []), [])
+  // A Pi provider sign-in has no account; the engine names its harness.
+  assert.deepEqual(recoveredLogins([{ accountId: 'pi:provider', harness: 'pi', signIn: { phase: 'waiting' } }], []).map((flow) => flow.harness), ['pi'])
 })
 
 test('successful login cancellation accepts null, clears the flow, and reloads saved accounts', async () => {
@@ -587,8 +589,9 @@ test('the key reaches only the add call and is cleared after saving', () => {
   assert.match(dialog, /type="password"/)
   assert.ok(dialog.indexOf("key = ''") > dialog.indexOf("'add', picked.id, key"))
   assert.doesNotMatch(dialog, /console\.|localStorage|sessionStorage/)
-  // A pending sign-in of any harness, Pi included, keeps its card reachable.
-  assert.match(paneSource, /\{#if hasSubscriptionLogin\(r\.id\) \|\| \(login && login\.harness === r\.id\)\}/)
+  // A pending sign-in keeps its card reachable. Pi has no account list: its card sits with the providers.
+  assert.match(paneSource, /\{#if r\.id !== 'pi' && \(hasSubscriptionLogin\(r\.id\) \|\| \(login && login\.harness === r\.id\)\)\}/)
+  assert.match(paneSource, /login=\{login && login\.harness === r\.id \? login : null\}\n\s+\{signInState\}\n\s+onsignin=\{\(\) => signIn\(r, true\)\}/)
   assert.match(paneSource, /onsaved=\{[^}]*load\(\)/)
   assert.match(paneSource, /api\.harnessProviderKeys\(id, 'remove', provider\)/)
 })

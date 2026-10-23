@@ -89,6 +89,8 @@ export interface SignInState {
 // PrivateLogin is runtime.PrivateLogin: the flow a harness account waits on.
 export interface PrivateLogin {
   accountId: string
+  // Set when the sign-in has no account of its own, such as a Pi provider sign-in.
+  harness?: string
   warning?: string
   signIn?: SignInState
 }
@@ -119,6 +121,8 @@ export interface PreferencePreview {
 export interface ProviderKey {
   id: string
   name: string
+  // How the provider is signed in. Absent means an API key.
+  auth?: 'api_key' | 'oauth'
 }
 export interface ProviderKeysResult {
   providers: ProviderKey[]
