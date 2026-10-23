@@ -33,7 +33,7 @@ func commentNotice(e Event, d Decision, link string) string {
 }
 
 // AdmitComment admits only the held version. An edit requires a new decision.
-func (s *Service) AdmitComment(key, id string) error {
+func (s *Service) AdmitComment(key, id string, expectedVersion ...string) error {
 	err := s.Store.updateRecords([]string{key}, func(st *State) error {
 		r := st.Records[key]
 		if r == nil {
@@ -42,6 +42,9 @@ func (s *Service) AdmitComment(key, id string) error {
 		held, ok := r.HeldComments[id]
 		if !ok {
 			return fmt.Errorf("comment %q is not held", id)
+		}
+		if len(expectedVersion) > 0 && held.Version != expectedVersion[0] {
+			return fmt.Errorf("held comment changed; read its current version before admitting it")
 		}
 		if r.AdmittedComments == nil {
 			r.AdmittedComments = map[string]string{}
