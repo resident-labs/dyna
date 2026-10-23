@@ -67,6 +67,8 @@ type signInSpec struct {
 	Parse func(st *SignInState, line string)
 	// AcceptsPaste shows a paste box and keeps stdin open unless Respond is set.
 	AcceptsPaste bool
+	// SecretInput masks the paste field from the first published state.
+	SecretInput bool
 	// Respond handles a pasted response instead of writing it to stdin.
 	Respond func(context.Context, SignInState, string) error
 	// GracefulStop lets a helper stop and join children in separate groups.
@@ -300,7 +302,7 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 		timeout = signInTimeout
 	}
 	ctx, cancel := context.WithTimeout(a.lifetimeContext(), timeout)
-	signIn := &privateSignIn{state: SignInState{Phase: signInStarting, AcceptsPaste: spec.AcceptsPaste}, cancel: cancel, done: make(chan struct{})}
+	signIn := &privateSignIn{state: SignInState{Phase: signInStarting, AcceptsPaste: spec.AcceptsPaste, SecretInput: spec.SecretInput}, cancel: cancel, done: make(chan struct{})}
 	if spec.Respond != nil {
 		signIn.paste = func(st SignInState, text string) error { return spec.Respond(ctx, st, text) }
 	}

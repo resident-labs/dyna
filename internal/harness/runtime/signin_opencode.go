@@ -57,11 +57,10 @@ const openCodeGoSignInCommand = "_opencode-go-signin"
 const openCodeGoKeyPrompt = "OpenCode Go API key:"
 
 var openCodeGoSignInSpec = signInSpec{
-	Argv: openCodeGoArgv, AcceptsPaste: true, GracefulStop: true,
+	Argv: openCodeGoArgv, AcceptsPaste: true, SecretInput: true, GracefulStop: true,
 	Parse: func(st *SignInState, line string) {
 		if line == openCodeGoKeyPrompt {
 			st.Phase = signInWaiting
-			st.SecretInput = true
 			st.Message = "Paste your OpenCode Go API key."
 		}
 	},
