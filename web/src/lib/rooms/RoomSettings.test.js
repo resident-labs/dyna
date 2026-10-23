@@ -9,7 +9,7 @@ import vm from 'node:vm'
 import { compile, compileModule, parse } from 'svelte/compiler'
 import { build } from 'esbuild'
 import { normalizePolicy, budgetForm, checksText, saveRoomPolicy, DEFAULT_POLICY } from '../prs/pr.ts'
-import { stripTypes } from '../../../test/svelte-source.ts'
+import { stripTypes, topLevelFunctions } from '../../../test/svelte-source.ts'
 
 // Render the real Room settings modal on the server and read the text. The
 // ServiceHeader is a stub that prints its role, so each section shows which
@@ -185,10 +185,11 @@ test('the room menu opens the modal, for another room after selecting it, and Es
 // real dialog action with App's busy={rulesEditing} wiring.
 test('Esc in a rule edit cancels the edit, and leaving Rules mid-edit frees Esc for the modal', async () => {
   const rulesSource = readFileSync(new URL('./Rules.svelte', import.meta.url), 'utf8')
-  const onkey = /aria-label="Edit rule \{r\.id\}"[^\n]*?onkeydown=\{(\(e\) => \{ if \(e\.key === 'Enter'.*? edit = null \} \})\}/.exec(rulesSource)[1]
   const effect = /\$effect\((\(\) => \{ editing = !!edit;.*?\})\)\n/.exec(rulesSource)[1]
-  const rules = vm.createContext({ edit: null, editing: false, save() {} })
-  const textareaKey = vm.runInContext(stripTypes(onkey), rules)
+  const rules = vm.createContext({ edit: null, editing: false, save() {}, tick: async () => {}, document: { getElementById: () => null } })
+  const handlers = topLevelFunctions(rulesSource, ['editKey', 'cancelEdit', 'restoreEditFocus'])
+  vm.runInContext([...handlers.values()].join('\n'), rules)
+  const textareaKey = rules.editKey
   let cleanup = () => {}
   const rerun = () => { cleanup(); cleanup = vm.runInContext(stripTypes(effect), rules)() }
 
