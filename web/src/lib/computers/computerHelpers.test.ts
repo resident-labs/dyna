@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { stateWord, hintText, escTwice, isLive, hasComputer, stateText, ageText, uptimeText, mib, appName, openedApps, streamLine, sizeText, shotRatio, pushAction, applyEvent, sortComputers, viewKey, popOut, FEED_KEEP, splitComputers, type ActionFeed, type Computer } from './computers.ts'
+import { stateWord, hintText, escTwice, isLive, hasComputer, stateText, paneEmpty, ageText, uptimeText, mib, appName, openedApps, streamLine, sizeText, shotRatio, pushAction, applyEvent, sortComputers, viewKey, popOut, FEED_KEEP, splitComputers, type ActionFeed, type Computer } from './computers.ts'
 
 const now = Date.parse('2026-10-17T18:00:00Z')
 const ago = (s: number): string => new Date(now - s * 1000).toISOString()
@@ -16,6 +16,14 @@ test('states', () => {
   assert.equal(stateText({ state: 'starting' }), 'Starting…')
   assert.equal(hasComputer({ state: 'starting' }), true)
   assert.equal(isLive({ state: 'starting' }), false, 'the viewer waits until labwc runs')
+})
+
+test('the pane is empty without a picture, so a stopped one with none explains itself', () => {
+  assert.equal(paneEmpty({ state: 'none' }), true)
+  assert.equal(paneEmpty({ state: 'idle' }), true)
+  assert.equal(paneEmpty({ state: 'stopped' }), true)
+  assert.equal(paneEmpty({ state: 'stopped', shotAt: ago(60) }), false, 'a stopped computer keeps its last picture')
+  assert.equal(paneEmpty({ state: 'running', shotAt: ago(1) }), false)
 })
 
 test('age text', () => {

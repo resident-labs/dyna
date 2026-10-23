@@ -67,6 +67,12 @@ export function stateText(c: Computer | null | undefined): string {
   return STATE_TEXT[c?.state ?? ''] ?? STATE_TEXT.none ?? ''
 }
 
+// paneEmpty says the Computer tab has no picture to show, so it explains the
+// state in words. A stopped computer keeps its last picture; a stopped one
+// that never made one reads like a computer with no window yet.
+export const paneEmpty = (c: Computer | null | undefined): boolean =>
+  c?.state === 'none' || c?.state === 'idle' || (c?.state === 'stopped' && !c.shotAt)
+
 // ageText: "4 s ago", "3 min ago". A missing time says so.
 export function ageText(iso: string | null | undefined, now: number = Date.now()): string {
   if (!iso) return 'no picture yet'

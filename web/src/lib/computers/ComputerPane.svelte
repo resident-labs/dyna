@@ -8,7 +8,7 @@
   import ComputerViewer from './ComputerViewer.svelte'
   import ComputerShot from './ComputerShot.svelte'
   import { streamWanted, loadPreview, savePreview } from './preview.ts'
-  import { stateText, type FeedItem } from './computers.ts'
+  import { paneEmpty, stateText, type FeedItem } from './computers.ts'
   import type ComputerChat from './ComputerChat.svelte'
   import type { ComputerInfo, ComputerStream } from '../api/computer.ts'
 
@@ -38,7 +38,7 @@
     savePreview(c.session, { ...loadPreview(c.session), hidden: null })
     hiddenPreview = false
   }
-  const empty = $derived(c.state === 'none' || c.state === 'idle')
+  const empty = $derived(paneEmpty(c))
 </script>
 
 {#if wanted}
@@ -47,8 +47,14 @@
   <div class="pane">
     {#if empty}
       <div class="empty">
-        <b>No window yet.</b>
-        <span>It starts when this agent opens an app.</span>
+        {#if c.state === 'stopped'}
+          <b>This computer is stopped.</b>
+          {#if c.reason}<span>{c.reason}</span>{/if}
+          <span>It starts again when this agent opens an app.</span>
+        {:else}
+          <b>No window yet.</b>
+          <span>It starts when this agent opens an app.</span>
+        {/if}
       </div>
     {:else}
       <div class="still">
@@ -62,7 +68,7 @@
 
 <style>
   .pane { flex: 1; min-height: 0; padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
-  .empty { flex: 1; display: grid; place-content: center; text-align: center; gap: 4px; color: var(--muted); font-size: 14px; }
+  .empty { flex: 1; display: grid; place-content: center; text-align: center; gap: 4px; color: var(--muted); font-size: 14px; padding: 0 var(--s4); }
   .empty b { color: var(--ink-2); font-weight: 500; }
   .still { position: relative; flex: 1; min-height: 0; border: 2px solid var(--line); border-radius: 8px; background: #000; overflow: hidden; }
   .badge { position: absolute; left: 10px; top: 10px; background: rgba(20, 19, 22, 0.82); color: var(--ink-2); font-size: 12px; padding: 3px 10px; border-radius: 12px; }
