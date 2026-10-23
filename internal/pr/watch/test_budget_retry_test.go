@@ -351,3 +351,37 @@ func TestArtifactDeadlineRetriesStop(t *testing.T) {
 		})
 	}
 }
+
+func TestTickDeliversAfterArtifactExhaustsPollingTime(t *testing.T) {
+	e := newEnv(t)
+	testReportFixture(t, e, map[string]string{"results.xml": "<testsuite><testcase name=\"slow\" time=\"12\"/></testsuite>"})
+	e.track()
+	e.write()
+	originalTimeout := withTickTimeout
+	var expirePolling context.CancelFunc
+	withTickTimeout = func(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+		polling, stop := context.WithCancel(ctx)
+		expirePolling = stop
+		return polling, stop
+	}
+	t.Cleanup(func() { withTickTimeout = originalTimeout })
+	base := e.s.GH.run
+	downloaded := false
+	e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
+		if strings.Contains(strings.Join(cmd.Args, " "), "/artifacts/91/zip") {
+			downloaded = true
+			e.clock = e.clock.Add(60 * time.Second)
+			expirePolling()
+			if ctx.Err() != nil {
+				t.Fatalf("artifact inherited expired polling context: %v", ctx.Err())
+			}
+		}
+		return base(ctx, cmd)
+	}
+	if _, err := e.s.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !downloaded || len(e.sent) == 0 || !strings.Contains(e.sent[0].Text, "slow") {
+		t.Fatalf("slow artifact prevented delivery: downloaded=%v notices=%+v", downloaded, e.sent)
+	}
+}

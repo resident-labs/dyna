@@ -19,6 +19,9 @@ const (
 	noticesPerTick  = 4
 )
 
+// withTickTimeout lets tests expire the polling phase without waiting.
+var withTickTimeout = context.WithTimeout
+
 func (s *Service) recordBudget() time.Duration {
 	if s.recordTimeout > 0 {
 		return s.recordTimeout
@@ -96,11 +99,11 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 	if budget <= 0 {
 		budget = 50 * time.Second
 	}
-	budgetParent := ctx
-	ctx, cancel := context.WithTimeout(ctx, budget)
-	defer cancel()
 	ctx = context.WithValue(ctx, tickReadKey{}, tickReadScope{s, s.tickView()})
 	ctx = locallane.WithCommonDirs(ctx)
+	budgetParent := ctx
+	ctx, cancel := withTickTimeout(ctx, budget)
+	defer cancel()
 	// Reserve time for dispatch even when head refreshes use their whole phase.
 	pollCtx, stopPoll := context.WithTimeout(ctx, budget-min(s.recordBudget(), budget/2))
 	defer stopPoll()
@@ -245,12 +248,16 @@ func (s *Service) Tick(ctx context.Context) (time.Time, error) {
 	// later full poll, or at once when a test report is still pending.
 	for _, result := range budgets {
 		if ctx.Err() != nil {
-			return retry(errors.Join(first, ctx.Err()))
+			break
 		}
 		started := time.Now()
 		remember(s.runBudgets(budgetParent, result, pauses))
 		slog.Debug("PR watcher phase", "key", result.key, "phase", "budgets", "duration", time.Since(started))
 	}
+	// Long artifact reads may exhaust polling time. Give delivery its own
+	// bounded phase, while preserving cancellation from the service caller.
+	ctx, stopDelivery := context.WithTimeout(budgetParent, budget)
+	defer stopDelivery()
 	// The radar runs local git only, after GitHub work, so its notices go out
 	// with this tick's delivery. Its failures never fail the poll.
 	radarCtx, stopRadar := context.WithTimeout(ctx, s.recordBudget())
