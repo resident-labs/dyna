@@ -164,7 +164,7 @@ func runMockSession(ctx context.Context, prompt string, journal JournalOptions, 
 				}
 			}
 			if steeringOpts.OnMessage != nil {
-				steeringOpts.OnMessage(m)
+				steeringOpts.OnMessage(m, nil)
 			}
 			steered = append(steered, m.Message)
 		}
