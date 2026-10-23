@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/shells"
@@ -62,6 +63,14 @@ func TestShellJobsAndBoundedPlainLog(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := store.Create(shells.StartOptions{Cmd: []string{"true"}, Cwd: t.TempDir(), RoomID: other.ID}); err != nil {
+		t.Fatal(err)
+	}
+	// A malformed row in another room must not be decoded by this page.
+	db, err := database.Open(filepath.Dir(store.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE shell_jobs SET cmd = 'broken JSON' WHERE room_id = ?", other.ID); err != nil {
 		t.Fatal(err)
 	}
 	path, err := store.OutputPath(first.ID)
