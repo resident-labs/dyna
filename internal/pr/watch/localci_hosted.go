@@ -246,6 +246,19 @@ func (s *Service) hostedWithoutLocalCancellations(ctx context.Context, r Record,
 	return withoutLocalHostedCancellations(snap, saved), nil
 }
 
+// commitStatusState is the one conversion from a local CI outcome to the GitHub
+// commit status state Dyna posts. An infrastructure error posts no status: the
+// run is retried and hosted CI decides instead.
+func commitStatusState(outcome localci.Outcome) (state string, publish bool) {
+	switch outcome {
+	case localci.OutcomePassed:
+		return "success", true
+	case localci.OutcomeFailed:
+		return "failure", true
+	}
+	return "", false
+}
+
 func (s *Service) publishLocalStatuses(ctx context.Context, job registeredCIJob, result localci.Result) error {
 	registry := s.ciRegistry()
 	saved, err := registry.LoadHostedRuns(ctx, result.Repo, job.head)
@@ -269,13 +282,8 @@ func (s *Service) publishLocalStatuses(ctx context.Context, job registeredCIJob,
 		if name == "" {
 			name = check.Suite
 		}
-		state := "pending"
-		switch check.Status {
-		case "passed":
-			state = "success"
-		case "failed":
-			state = "failure"
-		case "error":
+		state, publish := commitStatusState(check.Status)
+		if !publish {
 			continue
 		}
 		if _, _, err := gh.requestMethod(ctx, refRecord(job.record), fmt.Sprintf("repos/%s/statuses/%s", job.record.Repo, job.head), "POST", "-f", "context="+name, "-f", "state="+state, "-f", "description="+clip(localStatusPrefix+result.Node, 140), "-f", "target_url=https://"+job.record.Host+"/"+job.record.Repo+"/commit/"+job.head); err != nil {

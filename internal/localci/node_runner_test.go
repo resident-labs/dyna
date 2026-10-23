@@ -215,9 +215,9 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 				return nil
 			}
 			result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []string{"go-static"}, DeferSave: true})
-			want := "error"
+			want := OutcomeError
 			if entered {
-				want = "failed"
+				want = OutcomeFailed
 			}
 			if err == nil || len(result.Checks) != 1 || result.Checks[0].Status != want || !sawSSH || !sawPush || !sawCleanup || !sawRemove {
 				t.Fatalf("result=%+v err=%v ssh=%v push=%v cleanup=%v remove=%v", result, err, sawSSH, sawPush, sawCleanup, sawRemove)
@@ -334,9 +334,9 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 			if got := cleans.Load(); got != 1 {
 				t.Fatalf("cleanups = %d, want one before the retry", got)
 			}
-			want := "passed"
+			want := OutcomePassed
 			if fullAttempts > 1 {
-				want = "error"
+				want = OutcomeError
 			}
 			if result.Status != want || len(result.Checks) != 1 || result.Checks[0].Status != want {
 				t.Fatalf("result = %+v, want %s", result, want)

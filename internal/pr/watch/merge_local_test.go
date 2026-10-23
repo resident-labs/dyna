@@ -71,19 +71,23 @@ func (f *fakeLocalCI) Run(ctx context.Context, req localci.Request) (localci.Res
 			return localci.Result{}, ctx.Err()
 		}
 	}
-	status := "passed"
+	status := localci.OutcomePassed
 	if f.bad {
 		// The fake tests the actual trial tree, rather than the original change SHA.
 		cmd := gitCommand(ctx, req.Repo, "cat-file", "-e", req.SHA+":bad.txt")
 		if cmd.Run() == nil {
-			status = "failed"
+			status = localci.OutcomeFailed
 		}
 	}
 	var suites []localci.SuiteResult
 	for _, name := range localci.DefaultSuites() {
 		suites = append(suites, localci.SuiteResult{Suite: name, Status: status})
 	}
-	result := localci.Result{Repo: req.Repo, SHA: req.SHA, Status: status, Suites: suites, Error: map[string]string{"failed": "bad change failed"}[status]}
+	errText := ""
+	if status == localci.OutcomeFailed {
+		errText = "bad change failed"
+	}
+	result := localci.Result{Repo: req.Repo, SHA: req.SHA, Status: status, Suites: suites, Error: errText}
 	f.mu.Lock()
 	f.results[req.SHA] = result
 	f.mu.Unlock()
