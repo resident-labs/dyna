@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"dyna-agent/internal/store"
 	"dyna-agent/internal/workeroutput"
 )
 
@@ -47,6 +48,17 @@ func AgentNormalizedOutputPath(runID string, agentID int) (string, error) {
 		return "", err
 	}
 	return filepath.Abs(filepath.Join(RunDir(runID), "agents", strconv.Itoa(agentID), "output.jsonl"))
+}
+
+// AgentNormalizedOutputKey identifies output across run archive moves.
+func AgentNormalizedOutputKey(runID string, agentID int) (string, error) {
+	if err := validateRunID(runID); err != nil {
+		return "", err
+	}
+	if err := validateAgentID(agentID); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("runs/%s/agents/%d", runID, agentID), nil
 }
 
 // AgentOutputConfigPath returns the selected profile/model declaration frozen
@@ -333,7 +345,11 @@ func ReadAgentNormalizedOutputLimitedFrom(runID string, agentID int, offset, lim
 	if err != nil {
 		return nil, offset, err
 	}
-	return readJSONLinesLimitedFrom[workeroutput.Event](path, offset, limit, normalizedOutputMaxRecordBytes)
+	key, err := AgentNormalizedOutputKey(runID, agentID)
+	if err != nil {
+		return nil, offset, err
+	}
+	return ReadProjectedNormalizedOutputPath(store.DataDir(), key, path, offset, limit)
 }
 
 func writeExclusiveFile(path string, contents []byte) error {
