@@ -1,10 +1,17 @@
-<script>
+<script lang="ts">
   import { heldComments, refreshHeldComments } from '../prs/heldComments.ts'
   import HeldCommentCard from '../prs/HeldCommentCard.svelte'
   import { onMount } from 'svelte'
   import { createReloadGate } from '../ui/reloadGate.ts'
   import { hasItemChange, patchListRows } from '../ui/listChanges.ts'
   import { api } from '../../api.ts'
+  import type { Room, Question } from '../api/room.ts'
+  import type { StreamEvent, ListEvent } from '../api/event.ts'
+  import type { UsageSnapshot } from '../api/account.ts'
+  import type { HarnessSnapshot } from '../api/harness.ts'
+  import type { Notice, UpdateNotice } from '../api/settings.ts'
+  import type { RowChange } from '../ui/listChanges.ts'
+  import type { UpdateRow } from './home.ts'
   import { ago, roomLabel } from '../ui/format.ts'
   import SubscriptionCard from '../settings/usage/SubscriptionCard.svelte'
   import Card from '../ui/Card.svelte'
@@ -14,15 +21,21 @@
   import { accountRows, allClear, updateRows, rootQuestions } from './home.ts'
   // update: the dyna update notice ({current, latest}) or null.
   // The machine list owns the load card now: Home shows what needs the owner.
-  let { rooms = [], update = null, onroom, onaccount } = $props()
+  interface Props {
+    rooms?: Room[]
+    update?: UpdateNotice | null
+    onroom: (id: string, view?: string) => void
+    onaccount: (id: string) => void
+  }
+  let { rooms = [], update = null, onroom, onaccount }: Props = $props()
 
-  let usage = $state(null)
-  let runtimes = $state(null)
-  let notices = $state([])
+  let usage = $state<UsageSnapshot | null>(null)
+  let runtimes = $state<HarnessSnapshot | null>(null)
+  let notices = $state<Notice[]>([])
   let questionAlive = true
-  let questions = $state({}) // room id -> questions
-  let busy = $state({}) // update row id -> true while it runs
-  let results = $state({}) // update row id -> {ok, text}
+  let questions = $state<Record<string, Question[]>>({}) // room id -> questions
+  let busy = $state<Record<string, boolean>>({}) // update row id -> true while it runs
+  let results = $state<Record<string, { ok: boolean; text: string }>>({}) // update row id -> {ok, text}
 
   let accounts = $derived(accountRows(usage))
   let updates = $derived(updateRows(update, runtimes))
@@ -41,7 +54,7 @@
   })
 
   // event takes App's live events: one stream feeds the whole app.
-  export function event(ev) {
+  export function event(ev: StreamEvent) {
     if (ev.kind === 'resync') refresh()
     if (ev.kind === 'notices' || ev.kind === 'resync') loadNotices()
     if (ev.kind === 'resync' || (ev.kind === 'questions' && !applyQuestionEvent(ev))) loadQuestions()
@@ -71,7 +84,7 @@
     } catch {}
   }
   // Only changes to active room membership refresh the grouped snapshot.
-  let questionRooms = null
+  let questionRooms: string | null = null
   const questionReload = createReloadGate(() => ({ room: 'home', visit: questionRooms }), () => questionAlive)
   function refreshQuestionRooms() {
     const active = rooms.filter((room) => !room.archived).map((room) => room.id).sort().join(',')
@@ -80,7 +93,7 @@
     questionsLoaded = false
     return loadQuestions()
   }
-  $effect(refreshQuestionRooms)
+  $effect(() => { refreshQuestionRooms() })
 
   function loadQuestions() {
     return questionReload('questions', async (current) => {
@@ -90,17 +103,20 @@
       } catch {}
     })
   }
-  function applyQuestionEvent(ev) {
-    if (!hasItemChange(ev.change)) return false
-    if (!rooms.some((room) => room.id === ev.roomId && !room.archived)) return true
+  function applyQuestionEvent(ev: ListEvent) {
+    // ListEvent shares an unknown item type across lists. The questions event carries a Question.
+    const questionChange = ev.change as RowChange<Question> | undefined
+    if (!hasItemChange(questionChange)) return false
+    const roomId = rooms.find((room) => room.id === ev.roomId && !room.archived)?.id
+    if (roomId === undefined) return true
     questionReload.patch('questions', (current) => {
       if (!current()) return
-      const rows = patchListRows(questions[ev.roomId] ?? [], ev.change).filter((q) => q.state === 'open')
-      questions = { ...questions, [ev.roomId]: rows }
+      const rows = patchListRows(questions[roomId] ?? [], questionChange).filter((q) => q.state === 'open')
+      questions = { ...questions, [roomId]: rows }
     })
     return true
   }
-  async function dismiss(id) {
+  async function dismiss(id: string) {
     notices = notices.filter((n) => n.id !== id)
     await api.dismissNotice(id).catch(() => {})
     loadNotices()
@@ -112,7 +128,7 @@
     loadNotices()
   }
 
-  async function runUpdate(u) {
+  async function runUpdate(u: UpdateRow) {
     busy = { ...busy, [u.id]: true }
     try {
       if (u.id === 'dyna') {
@@ -122,13 +138,13 @@
         runtimes = await api.installPrivateRuntime(u.id, u.latest)
       }
     } catch (e) {
-      results = { ...results, [u.id]: { ok: false, text: String(e?.message || e) } }
+      results = { ...results, [u.id]: { ok: false, text: String((typeof e === 'object' && e !== null && 'message' in e && e.message) || e) } }
     } finally {
       busy = { ...busy, [u.id]: false }
     }
   }
 
-  const noticeIcon = { disk: '⛁', hook: '!', provider: '!' }
+  const noticeIcon: Record<string, string> = { disk: '⛁', hook: '!', provider: '!' }
 </script>
 
 <section class="home">
@@ -180,7 +196,7 @@
       {#each updates as u (u.id)}
         <Row dense text={u.name}>
           {#snippet lead()}<span class="ico iris">{u.id === 'dyna' ? 'D' : '↓'}</span>{/snippet}
-          {#snippet meta()}{#if results[u.id]}<span class="sub" class:err={!results[u.id].ok}>{results[u.id].text}</span>{:else}<span class="ver mono">{u.current} → <b>{u.latest}</b></span>{/if}{/snippet}
+          {#snippet meta()}{@const result = results[u.id]}{#if result}<span class="sub" class:err={!result.ok}>{result.text}</span>{:else}<span class="ver mono">{u.current} → <b>{u.latest}</b></span>{/if}{/snippet}
           {#snippet trail()}<button class="btn iris" disabled={busy[u.id]} onclick={() => runUpdate(u)}>{busy[u.id] ? 'Updating…' : 'Update'}</button>{/snippet}
         </Row>
       {/each}
