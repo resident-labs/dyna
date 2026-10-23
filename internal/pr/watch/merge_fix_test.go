@@ -3,6 +3,7 @@ package watch
 import (
 	"context"
 	"dyna-agent/internal/authority"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/store/storetest"
 	"fmt"
 	"os/exec"
@@ -47,35 +48,38 @@ func TestMergeFixPublishesOnlyRequestedPRAndLogsActor(t *testing.T) {
 			if err != nil || r.State != "merged" || r.Watching {
 				t.Fatalf("repair was not reconciled: %+v %v", r, err)
 			}
-			owner, err := user.Current()
-			if err != nil {
-				t.Fatal(err)
+			requester := "the room owner"
+			if owner, err := user.Current(); err == nil {
+				requester += " (" + owner.Username + ")"
+			}
+			if actor != "human" {
+				requester = actor
 			}
 			messages, err := e.s.Notify.Rooms.Messages(e.author.RoomID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			from, human := "owner", true
-			if actor != "human" {
-				from, human = "merge-work:root", false
-			}
-			found := false
+			var audit []room.Message
 			for _, message := range messages {
-				if strings.Contains(message.Text, "requested merge-fix") {
-					if message.From != from || message.Human != human {
-						t.Errorf("wrong audit actor: from=%q human=%v, want %q human=%v", message.From, message.Human, from, human)
-					}
-					if !human && message.SessionIDs[from] != "ses_20261019-000001-bbbbbbbb" {
-						t.Errorf("root actor has no exact session ID: %v", message.SessionIDs)
-					}
-				}
-				if strings.Contains(message.Text, owner.Username) && strings.Contains(message.Text, actor) &&
-					strings.Contains(message.Text, "merge-fix") && strings.Contains(message.Text, r.Head) && strings.Contains(message.Text, r.URL) {
-					found = true
+				if message.Notice.Kind == string(room.MergeFixRequested) {
+					audit = append(audit, message)
 				}
 			}
-			if !found {
-				t.Fatalf("repair owner not logged: %+v", messages)
+			if len(audit) != 1 {
+				t.Fatalf("repair audit posts = %d, want 1: %+v", len(audit), messages)
+			}
+			ev, ok := audit[0].Merge()
+			if !ok {
+				t.Fatalf("audit post carries no typed merge event: %+v", audit[0])
+			}
+			if ev.Type != room.MergeFixRequested || ev.Actor != requester || ev.Head != r.Head {
+				t.Errorf("audit event = %+v, want fix-requested by %q at %s", ev, requester, r.Head)
+			}
+			if len(ev.PRs) != 1 || ev.PRs[0].URL != r.URL {
+				t.Errorf("audit names %+v, want %s", ev.PRs, r.URL)
+			}
+			if audit[0].Human || audit[0].From == "owner" {
+				t.Errorf("audit post wears a person as its sender: %+v", audit[0])
 			}
 		})
 	}
@@ -113,6 +117,49 @@ func TestMergeFixKeepsFreshPRGates(t *testing.T) {
 				t.Fatalf("repair published with %s", which)
 			}
 		})
+	}
+}
+
+func TestMergeFixRecordsEveryRequest(t *testing.T) {
+	// Every request is its own audit line. Two refused requests on one PR, from
+	// two callers, are two lines: the old typed post derived its ID from the
+	// change alone, so the second request vanished without a record.
+	storetest.ClearStamp(t)
+	e, fs, merged := mergeEnv(t, 1)
+	rewriteMergeDefault(e, func(target map[string]any) {
+		target["statusCheckRollup"].(map[string]any)["state"] = "FAILURE"
+	})
+	// A head the record does not have refuses the request before any merge.
+	fs[1].Pull.Head.SHA = strings.Repeat("f", 40)
+	if err := e.s.MergeFix(t.Context(), "github.com/owner/repo#1"); err == nil || !strings.Contains(err.Error(), "not eligible") {
+		t.Fatalf("owner repair request = %v", err)
+	}
+	t.Setenv("DYNA_MODE", "root")
+	t.Setenv("DYNA_SESSION", "ses_20261019-000001-bbbbbbbb")
+	if err := e.s.MergeFix(t.Context(), "github.com/owner/repo#1"); err == nil || !strings.Contains(err.Error(), "not eligible") {
+		t.Fatalf("root repair request = %v", err)
+	}
+	if len(*merged) != 0 {
+		t.Fatalf("repair published %v", *merged)
+	}
+	messages, err := e.s.Notify.Rooms.Messages(e.author.RoomID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var actors []string
+	for _, message := range messages {
+		if message.Notice.Kind != string(room.MergeFixRequested) {
+			continue
+		}
+		ev, ok := message.Merge()
+		if !ok {
+			t.Fatalf("audit post carries no typed merge event: %+v", message)
+		}
+		actors = append(actors, ev.Actor)
+	}
+	root := "root session ses_20261019-000001-bbbbbbbb"
+	if len(actors) != 2 || actors[0] == actors[1] || actors[1] != root {
+		t.Fatalf("repair audit actors = %v, want the owner then %s", actors, root)
 	}
 }
 
@@ -216,7 +263,7 @@ func TestMergeFixAuditWakeFollowsActor(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, message := range messages {
-				if strings.Contains(message.Text, "requested merge-fix") {
+				if message.Notice.Kind == string(room.MergeFixRequested) {
 					want := actor == "human"
 					if message.Wake != want || wakesRoot(message, "merge-work") != want {
 						t.Fatalf("audit wake for %s: Wake=%v wakes root=%v, want %v", actor, message.Wake, wakesRoot(message, "merge-work"), want)
@@ -275,12 +322,17 @@ func TestMergeFixUsesCallerContext(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, message := range messages {
-			if strings.Contains(message.Text, "requested merge-fix") {
-				if message.Human || message.Wake || message.SessionIDs[message.From] != session || !strings.Contains(message.Text, "root session "+session) {
-					t.Fatalf("audit lost caller: %+v", message)
-				}
-				return
+			if message.Notice.Kind != string(room.MergeFixRequested) {
+				continue
 			}
+			ev, ok := message.Merge()
+			if !ok || ev.Actor != "root session "+session {
+				t.Fatalf("audit lost the caller: %+v", message)
+			}
+			if message.Human || message.Wake {
+				t.Fatalf("root's own request woke someone: %+v", message)
+			}
+			return
 		}
 		t.Fatal("merge-fix audit is missing")
 	})

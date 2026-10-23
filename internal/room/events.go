@@ -125,6 +125,11 @@ const (
 	FamilyMachine EventFamily = "machine"
 	TypeLowDisk   EventType   = "low-disk"
 
+	// FamilyCall reports how the owner answered a call request. The engine
+	// posts it, so the answer wears no invented voice and carries no raw ID in
+	// its text.
+	FamilyCall EventFamily = "call"
+
 	// TypeRootFlush is the engine's nudge that delivers the quiet posts a room
 	// held for its root seat.
 	TypeRootFlush EventType = "root-flush"
@@ -451,12 +456,16 @@ const (
 	// MergeDecision is root's recorded decision about the queue, not a trial
 	// step: it has no trial and its own payload.
 	MergeDecision MergeStep = "decision"
+	// MergeFixRequested is the owner's or root's request to merge one approved,
+	// green PR while main CI is red. The engine records it, so it is a typed
+	// event rather than a post in the owner's name.
+	MergeFixRequested MergeStep = "fix-requested"
 )
 
 // mergeSteps lists every merge step the web needs as a union type.
 var mergeSteps = []MergeStep{
 	MergeQueued, MergeTrial, MergeChecks, MergeLanded, MergeFailed,
-	MergeReturned, MergeConflict, MergeRolledBack, MergeDecision,
+	MergeReturned, MergeConflict, MergeRolledBack, MergeDecision, MergeFixRequested,
 }
 
 // MergeReasonKind is the class of a merge event's cause. The card words a
@@ -741,6 +750,12 @@ type MergeEvent struct {
 	// Key is the steward's own identity of this event within a type, such as
 	// one checks progress step. One fact per trial needs no key.
 	Key string `json:"key,omitempty"`
+	// Head is the commit a merge-fix request was made for. The merge itself
+	// names the commit it landed in Commit.
+	Head string `json:"head,omitempty"`
+	// Actor is who asked for a merge-fix, as the card names them: the room
+	// owner or the root seat.
+	Actor string `json:"actor,omitempty"`
 	// Detail is the evidence the agent reads: CI logs, a root report, or the
 	// child URLs a rollback could not restore.
 	Detail string `json:"detail,omitempty"`
@@ -805,6 +820,38 @@ func (m MachineEvent) eventDedupe() string {
 	return strconv.Itoa(m.AtMS)
 }
 
+// CallState is how the owner answered a call request: they joined it, they
+// declined it, or the request was withdrawn before they answered.
+type CallState string
+
+// Call states.
+const (
+	CallJoined    CallState = "joined"
+	CallDeclined  CallState = "declined"
+	CallWithdrawn CallState = "withdrawn"
+)
+
+// callStates lists every call state the web needs as a union type.
+var callStates = []CallState{CallJoined, CallDeclined, CallWithdrawn}
+
+// CallEvent tells the room how one call request ended. It carries the
+// request's ID, so the card names the call without reading the post text.
+type CallEvent struct {
+	Type CallState `json:"type"`
+	// Call is the request ID the owner's call store made.
+	Call string `json:"call"`
+}
+
+func (CallEvent) eventFamily() EventFamily { return FamilyCall }
+func (c CallEvent) eventType() EventType   { return EventType(c.Type) }
+
+// eventSubject is the request, so the answer of one call is one row.
+func (c CallEvent) eventSubject() string { return c.Call }
+
+// eventDedupe keys one post per request and answer: a retried close delivery
+// posts once, and a request that rings again is its own post.
+func (c CallEvent) eventDedupe() string { return string(c.Type) + "\x00" + c.Call }
+
 // SessionChange is what a session note reports about its subject.
 type SessionChange string
 
@@ -825,12 +872,14 @@ const (
 	SessionSeat SessionChange = "seat"
 	// SessionSpawned is a session the owner started from the composer.
 	SessionSpawned SessionChange = "spawned"
+	// SessionTransfer asks a session for the handoff a model transfer needs.
+	SessionTransfer SessionChange = "transfer-request"
 )
 
 // sessionChanges lists every session change the web needs as a union type.
 var sessionChanges = []SessionChange{
 	SessionRenamed, SessionPromoted, SessionAdopted, SessionAccount,
-	SessionInstructions, SessionSeat, SessionSpawned,
+	SessionInstructions, SessionSeat, SessionSpawned, SessionTransfer,
 }
 
 // AccountReason is why a turn moved to another account or profile.
@@ -896,6 +945,9 @@ type SessionEvent struct {
 	Reason AccountReason `json:"reason,omitempty"`
 	// Profile is the profile a spawned session runs on.
 	Profile string `json:"profile,omitempty"`
+	// Transfer is the transfer ID a handoff request names, so the card can
+	// point at the transfer that asked for it.
+	Transfer string `json:"transfer,omitempty"`
 	// Dir is the directory a spawned session works in.
 	Dir string `json:"dir,omitempty"`
 	// Seat is the label of a root-seat change.
@@ -940,6 +992,8 @@ func (s SessionEvent) eventDedupe() string {
 		return strings.Join(lines, "\x00")
 	case SessionSeat:
 		return s.Seat
+	case SessionTransfer:
+		return s.Transfer
 	}
 	return s.Profile
 }
@@ -1592,6 +1646,18 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeNever,
 		Text:     "{note}",
 	},
+	// A merge-fix request is the owner's or root's recorded answer to a red
+	// main branch: one PR lands, and the room keeps the reason as a card. Only
+	// the owner's request needs root, which reads why main CI was bypassed.
+	{
+		Family:   FamilyMerge,
+		Type:     EventType(MergeFixRequested),
+		Renderer: "MergeCard",
+		Payload:  reflect.TypeOf(MergeEvent{}),
+		Wake:     WakeRootIfNeeded,
+		Once:     true,
+		Text:     "Merge fix requested by {actor} for {label} at {head}. This one merge bypasses main CI; fresh PR checks and approval remain required.",
+	},
 	// A machine that is low on disk warns root once per low-disk period, and
 	// holds its CI work until space is freed.
 	{
@@ -1602,6 +1668,35 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeRootIfNeeded,
 		Once:     true,
 		Text:     "Machine {name} is low on disk: {summary}. Dyna starts no CI there until space is freed.",
+	},
+	// The owner's answer to a call request is a fact of the room: root asked for
+	// the call and stops waiting when it reads the answer.
+	{
+		Family:   FamilyCall,
+		Type:     EventType(CallJoined),
+		Renderer: "CallCard",
+		Payload:  reflect.TypeOf(CallEvent{}),
+		Wake:     WakeTarget,
+		Once:     true,
+		Text:     "The owner joined the call {call}.",
+	},
+	{
+		Family:   FamilyCall,
+		Type:     EventType(CallDeclined),
+		Renderer: "CallCard",
+		Payload:  reflect.TypeOf(CallEvent{}),
+		Wake:     WakeTarget,
+		Once:     true,
+		Text:     "The owner declined the call {call}.",
+	},
+	{
+		Family:   FamilyCall,
+		Type:     EventType(CallWithdrawn),
+		Renderer: "CallCard",
+		Payload:  reflect.TypeOf(CallEvent{}),
+		Wake:     WakeTarget,
+		Once:     true,
+		Text:     "The call request {call} was withdrawn.",
 	},
 	// A review result wakes the PR author only when it asks for changes. The
 	// watcher posts an approval or a stop-early quietly to the room feed.
@@ -1806,6 +1901,19 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeNever,
 		Text:     "Started @{name} ({profile}) in {dir}:",
 	},
+	// A model transfer asks the running session for its handoff. The session
+	// must answer, so the ask is agent input: it wakes the session it is
+	// addressed to, and its own DM keeps the instructions behind Details.
+	{
+		Family:   FamilySession,
+		Type:     EventType(SessionTransfer),
+		Renderer: "SessionNoteCard",
+		Payload:  reflect.TypeOf(SessionEvent{}),
+		Wake:     WakeTarget,
+		Audience: AudienceSession,
+		Once:     true,
+		Text:     "[DYNA MODEL TRANSFER] Prepare a handoff for transfer {transfer}:",
+	},
 	// An alert needs the root seat now, so it always wakes it. The doctor and
 	// the engine are the only posters.
 	{
@@ -1968,6 +2076,7 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(ReviewStopReason("")), Values: []string{
 		string(ReviewSuperseded), string(ReviewDuplicate), string(ReviewEmpty), string(ReviewTooLarge),
 	}},
+	{Type: reflect.TypeOf(CallState("")), Values: enumValues(callStates)},
 }
 
 // eventObjects are the struct types that an event payload embeds. The
@@ -1986,13 +2095,14 @@ var eventObjects = []reflect.Type{
 // as a plain string, because a union of its values would be incomplete.
 var eventOpenStrings = []reflect.Type{reflect.TypeOf(IssueActor(""))}
 
-// legacyFamilies are the post kinds that still go through Store.Post with a
-// free text. Each later PR seals one family through PostEvent and deletes its
-// entry here, until the list is empty.
-var legacyFamilies = []string{
-	"merge-decision",
-	"voice",
-}
+// voiceCallKinds are the posts of the owner's voice call itself: the owner's
+// spoken words, Voice's replies and Voice's requests to root. A person or the
+// voice service says them aloud, so they are not system posts and no event
+// registry entry describes them. Store.Post keeps accepting them.
+//
+// Every other system post goes through PostEvent, so this list holds no
+// family with a registry entry and there is no legacy kind left.
+var voiceCallKinds = []string{"voice"}
 
 // agentKinds are the posts a person or a session writes. A service's own alert
 // is a session post too: the service session writes it to its owner or parent.
@@ -2037,8 +2147,8 @@ func sealedFamily(family string) bool {
 	return slices.ContainsFunc(eventSpecs, func(spec EventSpec) bool { return string(spec.Family) == family })
 }
 
-// legacyFamily reports a kind that still posts through Store.Post.
-func legacyFamily(kind string) bool { return slices.Contains(legacyFamilies, kind) }
+// voiceCallPost reports a kind that only the owner's voice call writes.
+func voiceCallPost(kind string) bool { return slices.Contains(voiceCallKinds, kind) }
 
 // agentKind reports a kind that a person or a session writes.
 func agentKind(kind string) bool { return kind == "" || slices.Contains(agentKinds, kind) }
@@ -2671,6 +2781,22 @@ func (m Message) Engine() (EngineEvent, bool) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil {
 		return EngineEvent{}, false
+	}
+	return ev, true
+}
+
+// Call returns the payload of an answer to a call request. It decodes the
+// stored bytes strictly, so an unknown field is a failed read rather than a
+// silent mismatch.
+func (m Message) Call() (CallEvent, bool) {
+	if m.Kind != string(FamilyCall) || len(m.Payload.raw) == 0 {
+		return CallEvent{}, false
+	}
+	var ev CallEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.Call == "" {
+		return CallEvent{}, false
 	}
 	return ev, true
 }

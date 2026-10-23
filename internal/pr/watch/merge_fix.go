@@ -37,22 +37,26 @@ func (s *Service) MergeFix(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	owner, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("identify repair merge owner: %w", err)
+	requester := "the room owner"
+	if owner, err := user.Current(); err == nil {
+		requester += " (" + owner.Username + ")"
 	}
-	actor := "human"
-	post := room.PostInput{From: "owner", To: []string{rm.Name}, Human: true, Wake: true}
 	if caller.Role == authority.Root {
-		id := caller.Session
-		actor = "root session " + id
-		post.From = rm.Name + ":" + room.RootAgent
-		post.Human, post.Wake = false, false
-		post.SessionIDs = map[string]string{post.From: id}
+		requester = "root session " + caller.Session
 	}
-	post.Text = fmt.Sprintf("Room owner %s (%s) requested merge-fix for %s at %s. This single merge bypasses main CI; fresh PR checks and approval remain required.", owner.Username, actor, r.URL, r.Head)
-	if _, err := s.Notify.Rooms.Post(r.RoomID, post); err != nil {
-		return fmt.Errorf("record repair merge owner: %w", err)
+	// The engine records the request, so it is a typed event from the room's
+	// own service: the owner asked for the merge, and the card says who asked.
+	// The merge that follows is the author's own event, and it wakes the author.
+	ev := mergeEventOf(r, room.MergeFixRequested)
+	ev.Head, ev.Actor = r.Head, requester
+	// The owner's request needs the root seat, which reads why main CI was
+	// bypassed. Root's own request needs nobody, as it always did.
+	needsRoot := caller.Role != authority.Root
+	// Every request is its own audit line: a refused attempt keeps its record,
+	// and a later attempt with another head or another caller is a second one.
+	// A request has no stable identity of its own to dedupe on.
+	if _, err := s.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: rm.ID, FreshID: true, Event: ev, To: []string{rm.Name}, RoomService: true, NeedsRoot: needsRoot}); err != nil {
+		return fmt.Errorf("record repair merge requester: %w", err)
 	}
 	current, children, ready, err := s.prepareMerge(ctx, r)
 	if err != nil {

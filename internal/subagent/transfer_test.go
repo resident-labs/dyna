@@ -495,6 +495,58 @@ func TestTransferAsksAfterTurnEndsPastDeadline(t *testing.T) {
 	}
 }
 
+// The ask for a handoff is a typed session event from the engine: its card
+// says a transfer needs a handoff, and the session reads the full instructions
+// as the event's text. The ask wakes the session it is addressed to, and no
+// post claims to come from the room's owner.
+func TestTransferAskIsATypedSessionEvent(t *testing.T) {
+	e, now := transferEnv(t)
+	info, _ := e.start("SLEEP:1 RESPOND: initial")
+	info, _ = e.wait(info.ID, 1)
+	held := &heldTurnSpawner{}
+	e.m.Spawner = held
+	second, err := e.m.beginTurn(info.ID, "RESPOND: running task", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.lock.Close()
+	state, err := e.m.TransferContext(context.Background(), info.ID, TransferOptions{Profile: "next", WaitSeconds: 30})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The turn ends past the deadline, so the ask goes out on this poll.
+	*now = now.Add(time.Minute)
+	if _, err := e.m.Store.UpdateTurn(info.ID, second.N, func(turn *Turn) {
+		turn.Status, turn.Ended = TurnOK, *now
+	}); err != nil {
+		t.Fatal(err)
+	}
+	held.lock.Close()
+	if _, err := e.m.advanceTransfer(e.ctx, info.ID, state.ID); err != nil {
+		t.Fatal(err)
+	}
+	msg, err := e.m.rooms().Message(info.RoomID, state.PostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.From != room.EngineSender || msg.Kind != string(room.FamilySession) || msg.Notice.Kind != string(room.SessionTransfer) {
+		t.Fatalf("ask is not a typed session event: from=%q kind=%q type=%q", msg.From, msg.Kind, msg.Notice.Kind)
+	}
+	if !msg.Wake || !msg.Addressed(info.Address()) {
+		t.Fatalf("ask does not wake its session: wake=%v to=%v", msg.Wake, msg.To)
+	}
+	ev, ok := msg.Session()
+	if !ok || ev.Type != room.SessionTransfer || ev.Session != info.Address() || ev.Transfer != state.ID {
+		t.Fatalf("ask payload = %+v, %v", ev, ok)
+	}
+	if !strings.Contains(ev.Detail, "dyna subagent transfer handoff "+info.ID) || !strings.Contains(ev.Detail, state.ID) {
+		t.Fatalf("ask lost the instructions: %q", ev.Detail)
+	}
+	if !strings.HasPrefix(msg.Text, "[DYNA MODEL TRANSFER]") || !strings.Contains(msg.Text, "[DYNA HANDOFF]") {
+		t.Fatalf("ask text = %q", msg.Text)
+	}
+}
+
 func TestTransferWakesInputThatArrivedAfterReplacementTurnEnded(t *testing.T) {
 	e, _ := transferEnv(t)
 	old, _ := e.start("SLEEP:1 RESPOND: old")
