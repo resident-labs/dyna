@@ -12,7 +12,7 @@
   import { createRoomData } from './lib/rooms/roomData.js'
   import { createSessionData } from './lib/sessions/sessionData.ts'
   import { mergeListPage } from './lib/ui/listPages.ts'
-  import { hasItemChange, patchListRows } from './lib/ui/listChanges.ts'
+  import { patchListRows } from './lib/ui/listChanges.ts'
   import { reloadsUnread } from './lib/ui/unreadReload.ts'
   import { createWorkflowData } from './lib/workflows/workflowData.ts'
   import { onMount, tick } from 'svelte'
@@ -118,6 +118,11 @@
   import type { ComputerInfo, ComputerEvent } from './lib/api/computer.ts'
   import type { AppEvent, ListChange } from './lib/api/event.ts'
   import type { UpdateNotice } from './lib/api/settings.ts'
+  import type { RowChange } from './lib/ui/listChanges.ts'
+  import type { Page } from './lib/api/wire.ts'
+  import type { ChannelMember } from './lib/rooms/channels.ts'
+  import type { Receipt } from './lib/sessions/dm.ts'
+  import type { ActionRoom } from './lib/ui/actions.ts'
   import type { Target as PaletteTarget } from './lib/ui/paletteTargets.ts'
   import type { ReviewerStatus } from './lib/api/change.ts'
   import type { Row as ChangeRow } from './lib/prs/prlist.ts'
@@ -131,6 +136,7 @@
 
   // A member the open view drills into. The root conversation is one made from the seat.
   interface Drill extends Member {
+    id: string
     rootSeat?: boolean
   }
   interface PromptSpec {
@@ -180,20 +186,21 @@
     roomId: string
     roomRequest: number
     selectionRevision: number
-    sessions: Member[]
+    sessions: (Member & { id: string })[]
     action: BulkAction
     value?: BulkValue
   }
   type Confirming =
     | { kind: 'promote' | 'stop' | 'close'; m: Member; busy?: boolean; error?: string }
     | { kind: 'forceclose'; m: Member; items: string[]; busy?: boolean; error?: string }
-    | { kind: 'cancelrun'; run: RunSummary; busy?: boolean; error?: string }
+    | { kind: 'cancelrun'; run: Pick<RunSummary, 'id' | 'name' | 'status'>; busy?: boolean; error?: string }
     | { kind: 'expedite'; goal: Goal; roomId: string; busy?: boolean; error?: string }
   // A page of one list, with its continuation cursor.
   interface ListPage<T> {
-    items: T[]
+    items: T[] | null
     older?: boolean
     cursor?: string
+    limit?: number
     loadedOlder?: boolean
   }
   interface ListKinds {
@@ -231,7 +238,7 @@
   let started = $state(false)
   let roomId = $state('')
   let voiceWidget = $state<ReturnType<typeof VoiceWidget>>()
-  let callPush = $state<CallRequest | null>(null) // the call request a push tap opened
+  let callPush = $state<ReturnType<typeof callLink>>(null) // the call request a push tap opened
   let roomCalls = $derived($callRequests.filter((r) => r.room === roomId))
   // The room's whole history of call requests, for its feed rows.
   $effect(() => {
@@ -260,7 +267,7 @@
     // Goals includes all active goals on the first page, regardless of its closed-item limit.
     const [lists, goalLists] = await Promise.all([
       Promise.all(open.map((r) => api.members(r.id).catch(() => null))),
-      Promise.all(open.map((r) => api.goals(r.id).then((page) => page?.items ?? [], () => null))),
+      Promise.all(open.map((r) => api.goals(r.id).then((page: Page<Goal> | null) => page?.items ?? [], () => null))),
     ])
     if (!current() || request !== agentsRequest) return
     agentGoals = Object.fromEntries(open.map((r, i) => [r.id, goalLists[i] ?? agentGoals[r.id] ?? []]))
@@ -273,7 +280,7 @@
   let hierarchy = $state<Member[]>([])
   let choices = $state<ProfileChoice[]>([])
   let view = $state<string>(GENERAL)
-  let prLink = $state<ReturnType<typeof parsePRHash>>(null) // a PR link from the address bar, for the Pull requests view
+  let prLink = $state<ReturnType<typeof parsePRHash> | ReturnType<typeof parseIssueHash>>(null) // a PR link from the address bar, for the Pull requests view
   let unreadFrom = $state('')
   let drill = $state<Drill | null>(null) // the member whose transcript is open
   let readOnlyDm = $state(false) // the open transcript came from Services: no header tabs, no composer
@@ -371,7 +378,7 @@
   // Items carry the expedite scope's assignees. They load for each room's
   // expedited goal, room:goal -> {at, items}, and load again when the goal
   // changes, so a new assignee gets the badge without a reload.
-  let expediteGoalItems = $state({})
+  let expediteGoalItems = $state<Record<string, { at: string; items: { state?: string; assignee?: string }[] }>>({})
   // withItems attaches the loaded items to the expedited goal, so the scope
   // can cover item assignees.
   function withItems(room: string, list: Goal[]) {
@@ -391,7 +398,7 @@
       const key = room + ':' + goal.id
       const cached = untrack(() => expediteGoalItems[key])
       if (cached && cached.at === goal.updatedAt) continue
-      api.goalItems(room, goal.id).then((items) => { expediteGoalItems = { ...expediteGoalItems, [key]: { at: goal.updatedAt, items: items ?? [] } } }, () => {})
+      api.goalItems(room, goal.id).then((items: { state?: string; assignee?: string }[] | null) => { expediteGoalItems = { ...expediteGoalItems, [key]: { at: goal.updatedAt, items: items ?? [] } } }, () => {})
     }
   })
   $effect(() => {
@@ -441,7 +448,7 @@
   let selectionMenu = $state<(SelectionContext & { x: number; y: number; anchor?: HTMLElement }) | null>(null)
   let selectingSessions = $state(false)
   let pickedSessions = $state<string[]>([])
-  let consolidating = $state<{ roomId: string; sessions: (Member | { id: string; name: string })[]; key: number } | null>(null)
+  let consolidating = $state<{ roomId: string; sessions: Member[]; key: number } | null>(null)
   let consolidationView = 0
   let consolidationAlive = true
   let transferring = $state<Member | null>(null) // {kind: 'stop'|'close', m, busy, error}
@@ -468,7 +475,7 @@
     sessionChanged = 0
     if (!session || !roomRef) return
     let stale = false
-    const load = () => api.gitStatus(roomRef, session).then((st) => { if (!stale) sessionChanged = changedCount(st) }, () => { if (!stale) sessionChanged = 0 })
+    const load = () => api.gitStatus(roomRef, session).then((st: Parameters<typeof changedCount>[0]) => { if (!stale) sessionChanged = changedCount(st) }, () => { if (!stale) sessionChanged = 0 })
     const tracker = trackChanges(load)
     changesTracker = tracker
     return () => { stale = true; tracker.stop(); changesTracker = null }
@@ -540,7 +547,7 @@
     dropping = false
     if (!hasFiles(e)) return
     e.preventDefault()
-    const files = e.dataTransfer.files
+    const files = e.dataTransfer?.files ?? []
     if (drill) sessionView?.addFiles(files)
     else composer?.addFiles(files)
   }
@@ -561,13 +568,13 @@
     return { id: 'root:' + roomId, rootSeat: true, role: 'root', name: 'root', address: room?.name + ':root', hue: owner?.hue ?? 0, state: 'idle', status: 'seat', profile: holder + ' holds the seat', seat: rootSeat, resumable: false, depth: 0, children: 0, turns: 0, created: '', lastActivity: '' }
   }
   // The breadcrumbs above a session and a run: root, then the parent sessions.
-  let sessionTrail = $derived(drill && !readOnlyDm && !isRootDm ? parentTrail(channels, drill.parent, rootMember()).filter((m) => m.id !== drill.id) : [])
+  let sessionTrail = $derived(drill && !readOnlyDm && !isRootDm ? parentTrail(channels, drill.parent, rootMember()).filter((m) => m.id !== drill?.id) : [])
   let runTrail = $derived(view === 'runs' && openRun && runDetail?.run?.parentId ? parentTrail(channels, runDetail.run.parentId, rootMember()) : [])
   let channelLabel = $derived(channel?.name ?? roomLabel(current ?? room))
   // Shell exit records live in shell-jobs, not in channel feeds.
   let posts = $derived((feed?.posts ?? []).filter((p) => !isShellResult(p) && (!isChannel(view) || inChannel(p, view))))
   // What the owner chose to show in this channel; hidden posts still count as read.
-  let shownPosts = $derived(isChannel(view) ? posts.filter(visibleTo(look, scopeOf(roomId, view), revealed)) : posts)
+  let shownPosts = $derived(isChannel(view) ? posts.filter(visibleTo(look, scopeOf(roomId, view), revealed) as (post: Post) => boolean) : posts)
   // The room's reviewers show only on the PR screen, so every other list uses people.
   let people = $derived(withoutReviewers(members, reviewer))
   let live = $derived(people.filter((m) => !m.owner && m.state === 'live'))
@@ -610,16 +617,16 @@
   const roomData = createRoomData(api, {
     current: () => ({ room: roomId, visit: roomRequest }),
     visible: visibleList,
-    choices: (value) => { choices = value },
-    rooms: (value) => { rooms = value; loadError = '' },
+    choices: (value: ProfileChoice[]) => { choices = value },
+    rooms: (value: Room[]) => { rooms = value; loadError = '' },
     unread: applyUnread,
     members: applyMembers,
     patchMembers: applyMemberItem,
-    opened: (value, initial) => {
+    opened: (value: Opened, initial: boolean) => {
       if (initial) unreadFrom = value.feed.firstUnread ?? (value.feed.posts ?? []).find((p) => p.unread)?.id ?? ''
       applyOpened(value)
     },
-    error: (error) => (loadError = error),
+    error: (error: string) => (loadError = error),
   })
   function loadRooms() { return roomData.loadRooms() }
   function loadMembers() { return roomData.loadMembers() }
@@ -644,10 +651,10 @@
   }
   async function rerouteLoaded() {
     const id = roomId, request = roomRequest
-    if (!feed?.posts.length) return
+    if (!feed?.posts?.length) return
     try {
       const pages = await Promise.all(rerouteAnchors(feed.posts).map((post) => api.feedAround(id, post, 200)))
-      if (id === roomId && request === roomRequest && feed) feed.posts = withChannels(feed.posts, pages)
+      if (id === roomId && request === roomRequest && feed) feed.posts = withChannels(feed.posts ?? [], pages)
     } catch { /* The next room open or reconnect reroutes the posts. */ }
   }
   function roomCountKey(list: Member[]) {
@@ -662,7 +669,7 @@
     const before = memberRoster(hierarchy)
     const counts = roomCountKey(hierarchy)
     const known = hierarchy.some((m) => (m.id || m.address) === change.id)
-    const rows = patchListRows(hierarchy, change, (member) => member.id || member.address)
+    const rows = patchListRows(hierarchy, change as RowChange<Member>, (member) => member.id || member.address)
     showMemberRows(rows, before !== memberRoster(rows), known ? counts : null)
     return hierarchy
   }
@@ -684,7 +691,7 @@
     clearDormantConfirm = null
     const visit = ++roomControlsVisit, request = roomRequest
     if (!id) return
-    roomSessionController = createRoomSessionControls(api, id, (value) => {
+    roomSessionController = createRoomSessionControls(api, id, (value: NonNullable<typeof roomControls>) => {
       if (!consolidationAlive || id !== roomId || request !== roomRequest || visit !== roomControlsVisit) return
       const finished = roomControls?.busy && !value.busy
       roomControls = value
@@ -706,15 +713,15 @@
     const busy = !roomControls?.state || roomControls.busy
     const dormant = roomControls?.state?.dormant || 0
     return [
-      { label: 'Pause all', hint: 'let running turns finish', disabled: busy || roomControls.state.paused, run: () => { if (currentRoomControls(context)) roomSessionController.run('pause') } },
-      { label: 'Resume all', disabled: busy, run: () => { if (currentRoomControls(context)) roomSessionController.run('resume') } },
+      { label: 'Pause all', hint: 'let running turns finish', disabled: busy || roomControls?.state?.paused, run: () => { if (currentRoomControls(context)) roomSessionController?.run('pause') } },
+      { label: 'Resume all', disabled: busy, run: () => { if (currentRoomControls(context)) roomSessionController?.run('resume') } },
       { label: 'Clear dormant sessions…', gap: true, disabled: busy || !dormant, run: () => { if (currentRoomControls(context)) askClearDormant(dormant) } },
     ]
   }
   function clearRoomDormant(context: RoomContext) {
     if (!currentRoomControls(context) || clearDormantConfirm?.visit !== context.visit) return
     clearDormantConfirm = null
-    roomSessionController.run('clearDormant')
+    roomSessionController?.run('clearDormant')
   }
 
   function setPicked(ids: string[]) {
@@ -727,14 +734,14 @@
     bulkBatches = bulkBatches.some((b) => b.key === record.key) ? bulkBatches.map((b) => b.key === record.key ? next : b) : [next, ...bulkBatches]
     if (record.roomId === roomId && record.roomRequest === roomRequest && record.selectionRevision === selectionRevision && value.started) {
       const byId = new Map(value.results.map((r) => [r.session, r]))
-      setPicked(record.sessions.map((m) => m.id).filter((id) => !byId.has(id) || bulkRetryable(byId.get(id), record.action)))
+      setPicked(record.sessions.map((m) => m.id).filter((id) => { const result = byId.get(id); return !result || bulkRetryable(result, record.action) }))
       record.selectionRevision = selectionRevision
     }
     if (old?.busy && !value.busy && value.started && record.roomId === roomId && record.roomRequest === roomRequest) { loadMembers(); loadChanges() }
   }
   function openBulkAction(action: BulkAction, context: SelectionContext) {
     if (!currentSelection(context)) return
-    const sessions = context.ids.map((id) => hierarchy.find((m) => m.id === id)).filter(selectableSession).map((m) => ({ ...m }))
+    const sessions = context.ids.map((id) => hierarchy.find((m) => m.id === id)).filter((m): m is Member & { id: string } => !!m?.id && selectableSession(m)).map((m) => ({ ...m }))
     if (!sessions.length) return
     detailRequest++
     const record = { key: ++bulkSerial, roomId, roomRequest, selectionRevision, sessions, action }
@@ -746,7 +753,7 @@
   function runBulk(key: number, force = false) { bulkControllers.get(key)?.run(force) }
   function selectBulkFailures(batch: BulkRecord) {
     if (batch.roomId !== roomId) return
-    const failed = batch.value.results.filter((r) => bulkRetryable(r, batch.action)).map((r) => r.session)
+    const failed = (batch.value?.results ?? []).filter((r) => bulkRetryable(r, batch.action)).map((r) => r.session)
     setPicked(pruneSelection(failed, hierarchy)); selectingSessions = true
     activeBulk = 0
   }
@@ -757,7 +764,7 @@
   function currentSelection(context: SelectionContext | null | undefined) { return context?.roomId === roomId && context.key === selectionKey(roomId, pickedSessions) }
   function selectionItems(context: SelectionContext) {
     return [
-      { label: 'Select all sessions', run: () => { if (currentSelection(context)) setPicked(people.filter(selectableSession).map((m) => m.id)) } },
+      { label: 'Select all sessions', run: () => { if (currentSelection(context)) setPicked(people.filter(selectableSession).flatMap((m) => m.id ? [m.id] : [])) } },
       { label: 'Message', run: () => messageSelection(context) },
       { label: 'Stop', run: () => openBulkAction('stop', context) },
       { label: 'Transfer model…', run: () => openBulkAction('transfer', context) },
@@ -769,12 +776,13 @@
   }
   // moveUnder opens the bulk "Move under…" panel for one session.
   function moveUnder(m: Member) {
-    setPicked([m.id])
+    if (!m.id) return
+    setPicked(m.id ? [m.id] : [])
     openBulkAction('adopt', { roomId, ids: [m.id], key: selectionKey(roomId, [m.id]) })
   }
   function messageSelection(context: SelectionContext) {
     if (!currentSelection(context)) return
-    const selected = context.ids.map((id) => hierarchy.find((m) => m.id === id)).filter(selectableSession)
+    const selected = context.ids.map((id) => hierarchy.find((m) => m.id === id)).filter((m): m is Member => !!m && selectableSession(m))
     clearItemLink()
     const focusRequest = ++detailRequest
     drill = null; card = null; reply = null; view = GENERAL
@@ -789,12 +797,12 @@
     selectingSessions = !selectingSessions
     if (!selectingSessions) { setPicked([]); selectionRevision++ }
   }
-  function pickSession(m: Member, checked: boolean, begin = false) { if (begin) selectingSessions = true; setPicked(toggleSelection(pickedSessions, m, checked)) }
+  function pickSession(m: Member, checked: boolean, begin = false) { if (!m.id) return; if (begin) selectingSessions = true; setPicked(toggleSelection(pickedSessions, { ...m, id: m.id }, checked)) }
   function openConsolidation() {
     const ids = pruneSelection(pickedSessions, hierarchy)
     if (ids.length < 2 || ids.length > 16) return
     detailRequest++
-    const sessions = ids.map((id) => hierarchy.find((m) => m.id === id) ?? { id, name: id })
+    const sessions = ids.flatMap((id) => { const member = hierarchy.find((m) => m.id === id); return member ? [member] : [] })
     consolidating = { roomId, sessions, key: ++consolidationView }
     menu = null
   }
@@ -813,7 +821,7 @@
   // Profiles change from the CLI or the Settings view; the composer asks
   // again each time "/" opens its list.
   function loadProfiles() {
-    api.profiles().then((p) => (profiles = p ?? [])).catch(() => {})
+    api.profiles().then((p: ProfileChoice[] | null) => (profiles = p ?? [])).catch(() => {})
   }
 
   const workflowData = createWorkflowData(api, {
@@ -922,10 +930,10 @@
     return goals.find((g) => g.id === id) ?? (fetchedGoal?.id === id ? fetchedGoal : undefined)
   }
   // The fetched goal follows its change events, as listed goals do.
-  function trackFetchedGoal(change: ListChange) {
+  function trackFetchedGoal(change: ListChange | undefined) {
     if (!fetchedGoal || change?.id !== fetchedGoal.id) return
     fetchedGoalVersion++
-    fetchedGoal = change.op === 'delete' ? null : change.item ?? fetchedGoal
+    fetchedGoal = change.op === 'delete' ? null : (change.item as Goal | undefined) ?? fetchedGoal
   }
   // After a goals reload (also after a detail action), read it again.
   async function refreshFetchedGoal(current = () => true) {
@@ -953,6 +961,7 @@
   async function syncAction(call: (roomId: string, repo: string) => Promise<unknown>) {
     syncNote = ''
     try {
+      if (!room?.repo) return
       await call(roomId, room.repo)
     } catch (e) {
       syncNote = errorText(e)
@@ -977,7 +986,7 @@
     try {
       const list = (await api.issues(id, history)) ?? []
       if (!current() || id !== roomId) return
-      if (history) issueHistory = reconcileRows(issueHistory, list.filter((i) => i.state !== 'open'))
+      if (history) issueHistory = reconcileRows(issueHistory, list.filter((i: RoomIssue) => i.state !== 'open'))
       else { issues = reconcileRows(issues, list); if (!issues.length) showIssues = false }
     } catch (e) {
       if (current()) loadError = String(e)
@@ -1037,7 +1046,7 @@
     if (request !== detailRequest || rid !== roomId) return
     clearItemLink()
     const post = (feed?.posts ?? []).find((p) => p.id === id)
-    if (questionID(post)) { openQuestion(post); return }
+    if (post && questionID(post)) { openQuestion(post); return }
     if (post && isShellResult(post)) { openJob = post.from.slice('shell:'.length); view = 'jobs'; return }
     // A voice call line has no channel view; Voice's call widget shows it.
     if (post && inChannel(post, VOICE)) return
@@ -1047,18 +1056,18 @@
   }
 
   const sessionData = createSessionData(api, {
-    current: () => ({ room: roomId, visit: roomRequest, id: drill?.id, root: !!drill?.rootSeat, selection: sessionVisit, turn: sessionTurn, visible: sessionVisible(), live: session?.member?.state === 'live' }),
+    current: () => ({ room: roomId, visit: roomRequest, id: drill?.id ?? '', root: !!drill?.rootSeat, selection: String(sessionVisit), turn: sessionTurn, visible: sessionVisible(), live: session?.member?.state === 'live' }),
     transcript: showSession,
     queue: (value) => (queue = value),
     error: (error) => (sessionError = error),
   })
-  function showSession(value: SessionData, older = false) {
+  function showSession(value: SessionData, older: boolean | string = false) {
     session = mergeSessionPage(session, value, older, sessionReadingHistory)
     sessionError = ''
     // The root seat opened before root had a session of its own. Once RootSession returns the real
     // session (root started, or the seat was released), continue as that member: its queue, paging and events.
     if (drill?.rootSeat && value.member?.id) {
-      drill = value.member
+      drill = { ...value.member, id: value.member.id }
       loadSession()
     }
   }
@@ -1069,18 +1078,19 @@
     untrack(() => { if (drill && sessionVisible(tab)) loadSession() })
   })
 
-  function loadEarlierSession(near = () => true) {
+  function loadEarlierSession(_cursor = '', near = () => true) {
     if (!session?.earlier || sessionTurn) return Promise.resolve(false)
-    return sessionData.earlier(session.cursor, near)
+    return sessionData.earlier(session.cursor ?? '', near)
   }
 
-  function loadNewerSession(near = () => true) {
+  function loadNewerSession(_cursor = '', near = () => true) {
     if (!session?.newer || sessionTurn) return Promise.resolve(false)
-    return sessionData.newer(String(session.turns.at(-1)?.n ?? ''), near)
+    return sessionData.newer(String(session.turns?.at(-1)?.n ?? ''), near)
   }
   function presentSession() { return sessionData.present() }
 
-  async function unqueue(q: QueueItem) {
+  async function unqueue(q: Receipt) {
+    if (!drill) return
     await api.deletePendingSteer(drill.id, q.id)
     queue = queue.filter((x) => x.id !== q.id)
     say('Removed. The turn will not see that message.')
@@ -1138,8 +1148,8 @@
 
   function applyListPage<K extends ListKind>(kind: K, page: ListPage<ListKinds[K]>, append = false): ListKinds[K][] {
     const previous = listPages[kind]
-    const merged = mergeListPage(previous, page, append)
-    if (kind === 'jobs') merged.items.sort((a, b) => (b.started || '').localeCompare(a.started || ''))
+    const merged = mergeListPage(previous as import('./lib/ui/listPages.ts').ListPageView<ListKinds[K]> | undefined, { ...page, items: page.items ?? [], older: page.older ?? false, cursor: page.cursor ?? '' }, append)
+    if (kind === 'jobs') merged.items.sort((a, b) => (String('started' in b ? b.started : '')).localeCompare(String('started' in a ? a.started : '')))
     merged.items = reconcileRows(previous?.items ?? [], merged.items, kind === 'changes' ? 'key' : 'id')
     listPages = { ...listPages, [kind]: merged }
     return merged.items
@@ -1147,8 +1157,8 @@
 
   function applyListItem<K extends ListKind>(kind: K, change: ListChange, rows: ListKinds[K][] | null): ListKinds[K][] {
     const previous = listPages[kind] ?? { items: rows ?? [] }
-    const items = patchListRows(previous.items, change, kind === 'changes' ? 'key' : 'id')
-    if (kind === 'jobs') items.sort((a, b) => (b.started || '').localeCompare(a.started || ''))
+    const items = patchListRows(previous.items ?? [], change as RowChange<ListKinds[K]>, kind === 'changes' ? 'key' : 'id')
+    if (kind === 'jobs') items.sort((a, b) => (String('started' in b ? b.started : '')).localeCompare(String('started' in a ? a.started : '')))
     listPages = { ...listPages, [kind]: { ...previous, items } }
     return items
   }
@@ -1172,9 +1182,8 @@
           if (!current() || id !== roomId || visit !== roomRequest || !selected?.older) return
           const next = await methods[kind](id, selected.cursor)
           if (!current() || id !== roomId || visit !== roomRequest) return
-          const merged = applyListPage(kind, next, true)
-          if (kind === 'goals') goals = merged
-          if (kind === 'changes') changes = merged
+          if (kind === 'goals') goals = applyListPage('goals', next, true)
+          if (kind === 'changes') changes = applyListPage('changes', next, true)
         })
       }
     } catch (e) { if (id === roomId && visit === roomRequest) { loadError = String(e); olderFailed = true } }
@@ -1208,7 +1217,7 @@
   }
 
   // trackPR links a PR to a session from the pull-requests view.
-  async function trackPR(number: number | string, m: Member) {
+  async function trackPR(number: number | string | undefined, m: Member) {
     try {
       await api.trackPR(roomId, m.id, number)
       say(`Dyna watches PR #${number} for ${m.name}.`)
@@ -1242,7 +1251,7 @@
   // applyOpened shows what api.openRoom returned for the open room.
   function applyOpened(o: Opened) {
     const f = mergeFeedPage(feed && !feedAtBottom ? { ...feed, historyLoaded: true } : feed, o.feed)
-    f.posts = reconcileRows(feed?.room.id === f.room.id ? feed.posts : [], f.posts ?? [])
+    f.posts = reconcileRows(feed && feed.room.id === f.room.id ? feed.posts ?? [] : [], f.posts ?? [])
     feed = f
     hierarchy = o.members ?? []
     noteParents(hierarchy)
@@ -1263,17 +1272,17 @@
   // objects and unread marks until the room is left.
   let earlierLoad: EarlierLoad | null = null
   const STEP = 50
-  async function loadEarlier(direction = 'older', target = '', near = () => true) {
+  async function loadEarlier(direction = 'older', target = '', near = () => true): Promise<boolean> {
     const id = roomId
     const roomLoad = roomRequest
     if (earlierLoad?.id === id && earlierLoad.roomLoad === roomLoad) {
-      if (earlierLoad.direction === direction) return earlierLoad.promise
-      return earlierLoad.promise.then(() => id === roomId && roomLoad === roomRequest && loadEarlier(direction, target, near))
+      if (earlierLoad.direction === direction) return earlierLoad.promise ?? false
+      return earlierLoad.promise?.then(() => id === roomId && roomLoad === roomRequest && loadEarlier(direction, target, near)) ?? false
     }
     if (!feed || (direction === 'older' && !feed.earlier) || (direction === 'newer' && !feed.newer)) return false
     feedAtBottom = false
-    const cursor = direction === 'older' ? feed.cursor : direction === 'newer' ? feed.posts.at(-1)?.id : target
-    const request = { id, roomLoad, direction, promise: null }
+    const cursor = direction === 'older' ? feed.cursor : direction === 'newer' ? feed.posts?.at(-1)?.id : target
+    const request: EarlierLoad = { id, roomLoad, direction, promise: null }
     earlierLoad = request
     request.promise = (async () => {
       try {
@@ -1283,7 +1292,7 @@
         if (id !== roomId || roomLoad !== roomRequest || !feed) return false
         if (!near()) return true
         if (direction === 'older' && feed.cursor !== cursor) return false
-        feed = direction === 'around' ? { ...page, historyLoaded: true } : mergeFeedPage(feed, page, direction)
+        feed = direction === 'around' ? { ...page, historyLoaded: true } : Reflect.apply(mergeFeedPage, undefined, [feed, page, direction]) as FeedPage
         return true
       } catch (e) {
         if (id === roomId && roomLoad === roomRequest) loadError = String(e)
@@ -1358,11 +1367,11 @@
   }
 
   // openMember shows a member's profile card. The owner has no card.
-  async function openMember(m: Drill | null | undefined) {
-    if (m?.rootSeat) { openSession(m); return }
+  async function openMember(m: Member | null | undefined) {
+    if (m && 'rootSeat' in m && m.rootSeat) { openSession(m); return }
     detailRequest++
     if (!m || m.owner) return
-    card = m
+    card = m as Drill
     profile = null
     profileError = ''
     try {
@@ -1387,8 +1396,9 @@
   }
 
   // openSession drills into a member's full session view.
-  function openSession(source: Drill | { rootSeat: true }, turn = 0, initial: SessionData | null = null, readOnly = false) {
-    const m: Drill = source.rootSeat || !('id' in source) ? rootMember() : source
+  function openSession(source: Member | ChannelMember | { rootSeat: true } | null, turn = 0, initial: SessionData | null = null, readOnly = false) {
+    if (!source) return
+    const m = ('rootSeat' in source && source.rootSeat ? rootMember() : source) as Drill
     clearItemLink()
     detailRequest++
     sessionVisit++
@@ -1445,6 +1455,7 @@
   // that watches the room, not you.
   function startReply(p: Post) {
     reply = p
+    if (!room) return
     if (!p.owner) {
       const body = draft.value.replace(/^\s*(?:@\S+(?:\s+|$))*/, '')
       const target = p.from.startsWith(room.name + ':') ? p.from.slice(room.name.length + 1) : 'root'
@@ -1479,13 +1490,13 @@
   async function reopenSession(m: Member) {
     if (reopening || dismissing || !m.closed || !m.resumable) return
     const rid = roomId, visit = roomRequest, selection = sessionVisit
-    reopening = m.id
+    reopening = m.id ?? ''
     try {
       const member = await api.reopenSession(rid, m.id)
       if (rid !== roomId || visit !== roomRequest) return
       if (drill?.id === m.id && selection === sessionVisit) {
         drill = member
-        if (session?.member?.id === m.id) session = { ...session, member }
+        if (session && session.member?.id === m.id) session = { ...session, member }
         await loadSession()
       }
       await loadMembers()
@@ -1509,13 +1520,13 @@
   async function dismissSession(m: Member) {
     if (dismissing || reopening || !isFinished(m)) return
     const rid = roomId, visit = roomRequest, selection = sessionVisit
-    dismissing = m.id
+    dismissing = m.id ?? ''
     try {
       const member = await api.dismissSession(rid, m.id)
       if (rid !== roomId || visit !== roomRequest) return
       if (drill?.id === m.id && selection === sessionVisit) {
         drill = member
-        if (session?.member?.id === m.id) session = { ...session, member }
+        if (session && session.member?.id === m.id) session = { ...session, member }
         await loadSession()
       }
       await loadMembers()
@@ -1533,7 +1544,7 @@
     say(action === 'stop' ? `Goal ${g.id} is no longer expedited.` : `Goal ${g.id} is expedited.`)
     loadGoals()
   }
-  async function linkPRGoal(change, goalId) {
+  async function linkPRGoal(change: ChangeRow, goalId: string) {
     const id = roomId
     // A GitHub-only row has no record to hold its goal yet. Track it for the owner first.
     const row = change.key ? change : await api.trackPR(id, '', change.number)
@@ -1553,14 +1564,14 @@
   // Session menu: safe actions first, then the two that stop work, set
   // apart in coral. Both of those ask first.
   function menuItems(m: Member) {
-    const items = [
+    const items: MenuItem[] = [
       { label: m.closed ? 'Open transcript' : 'Message', run: () => openSession(m) },
       { label: 'Open profile', run: () => openMember(m) },
     ]
     if (isFinished(m)) items.push({ label: dismissing === m.id ? 'Dismissing…' : 'Dismiss', run: () => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${errorText(e)}`)) })
     if (m.closed && m.resumable) items.push({ label: reopening === m.id ? 'Reopening…' : 'Reopen', run: () => reopenSession(m).catch((e) => say(`Could not reopen ${m.name}: ${errorText(e)}`)) })
     // The internal root holds the root seat, so it is never consolidated.
-    if (!m.closed && m.role !== 'root') items.push({ label: 'Consolidate sessions…', run: () => { selectingSessions = true; setPicked([m.id]); showMembers = true; showPins = false } })
+    if (!m.closed && m.role !== 'root') items.push({ label: 'Consolidate sessions…', run: () => { selectingSessions = true; setPicked(m.id ? [m.id] : []); showMembers = true; showPins = false } })
     if (!m.closed) items.push({ label: 'Mention in composer', run: () => mentionMember(m) })
     items.push(...expediteItems(m))
     items.push({ label: 'Copy address', hint: m.address, run: () => copyText(m.address).then(() => say(`Copied ${m.address}`), (e) => say(String(e))) })
@@ -1581,7 +1592,7 @@
   // The phone bar's overflow: the panel toggles and the channel look, which
   // the desktop bar shows as separate buttons.
   function channelMenuItems() {
-    const items = [
+    const items: MenuItem[] = [
       { label: 'Members', run: () => { showMembers = true; showPins = false; showIssues = false } },
       { label: 'Pinned posts', hint: pins.length ? String(pins.length) : '', run: () => { showPins = true; showMembers = false; showIssues = false } },
     ]
@@ -1600,7 +1611,7 @@
     }
   }
 
-  function renameRoom(r: Room) {
+  function renameRoom(r: ActionRoom) {
     ask = {
       title: 'Rename room',
       label: 'Name',
@@ -1616,7 +1627,7 @@
     }
   }
 
-  function deleteRoom(r: Room) {
+  function deleteRoom(r: ActionRoom) {
     ask = {
       title: `Delete ${roomLabel(r)}?`,
       lines: ['This removes the room, its feed and its pins. Records of closed sessions stay.', 'A room with live work cannot be deleted. Stop its sessions and runs first.', `Type ${r.name} to confirm.`],
@@ -1723,31 +1734,34 @@
   })
 
   async function runConfirm() {
-    const { kind, m } = confirm
-    confirm = { ...confirm, busy: true, error: '' }
+    const request = confirm
+    if (!request) return
+    const { kind } = request
+    confirm = { ...request, busy: true, error: '' }
     if (kind === 'expedite') {
       try {
-        await api.expediteGoal(confirm.roomId, confirm.goal.id, true)
-        say(`Goal ${confirm.goal.id} is expedited.`)
+        await api.expediteGoal(request.roomId, request.goal.id, true)
+        say(`Goal ${request.goal.id} is expedited.`)
         confirm = null
         loadGoals()
       } catch (e) {
-        confirm = { ...confirm, busy: false, error: errorText(e) }
+        confirm = { ...request, busy: false, error: errorText(e) }
       }
       return
     }
     if (kind === 'cancelrun') {
       try {
-        await api.cancelRun(confirm.run.id)
-        say(`${confirm.run.name} is canceled.`)
+        await api.cancelRun(request.run.id)
+        say(`${request.run.name} is canceled.`)
         confirm = null
         loadRuns()
         loadRun()
       } catch (e) {
-        confirm = { ...confirm, busy: false, error: errorText(e) }
+        confirm = { ...request, busy: false, error: errorText(e) }
       }
       return
     }
+    const m = request.m
     try {
       if (kind === 'stop') await api.stopSession(roomId, m.id)
       else if (kind === 'promote') await api.promoteSession(roomId, m.id)
@@ -1763,7 +1777,7 @@
       const msg = errorText(e)
       // Force is offered only when the automatic handoff fails.
       if (kind === 'close' && msg.startsWith('responsibilities:')) confirm = { kind: 'forceclose', m, items: guardItems(msg) }
-      else confirm = { ...confirm, busy: false, error: msg }
+      else confirm = { ...request, busy: false, error: msg }
     }
   }
 
@@ -1802,7 +1816,7 @@
     loadRooms()
     if (!roomId) return
     // Keep loaded history on screen when the event stream reconnects.
-    if (!await roomData.open(Math.max(feed?.posts.length ?? 0, 50) + 20)) return
+    if (!await roomData.open(Math.max(feed?.posts?.length ?? 0, 50) + 20)) return
     roomSessionController?.load()
     if (drill) { loadSession(); changesTracker?.poke() } // events may have been missed while the stream was down
     if (openRun) loadRun()
@@ -1820,7 +1834,7 @@
     const selecting = selectRoom(id, startView)
     const request = detailRequest
     if (!await selecting || request !== detailRequest || id !== roomId) return false
-    if (POST.test(post || '')) jumpTo(post)
+    if (post && POST.test(post)) jumpTo(post)
     return { roomId: id, request: detailRequest }
   }
 
@@ -1873,7 +1887,9 @@
   }
 
   function applyItemEvent(ev: StreamEvent) {
-    if (!('change' in ev) || !hasItemChange(ev.change) || !roomId || ev.roomId !== roomId) return false
+    if (!('change' in ev) || !(ev.change?.op === 'delete' || ev.change?.op === 'upsert' && ev.change.item) || !roomId || ev.roomId !== roomId) return false
+    const change = ev.change
+    if (!change) return false
     if (ev.kind === 'members') {
       roomData.patchMembers(ev.change)
       return true
@@ -1882,7 +1898,7 @@
     if (ev.kind === 'prs') return true
     if (ev.kind === 'changes') {
       reload.patch('changes', (current) => {
-        if (current()) changes = applyListItem('changes', ev.change, changes)
+        if (current()) changes = applyListItem('changes', change, changes)
       })
       return true
     }
@@ -1892,15 +1908,15 @@
     }
     if (ev.kind === 'questions') {
       reload.patch('questions', (current) => {
-        if (current()) questions = patchListRows(questions, ev.change)
+        if (current()) questions = patchListRows(questions, change as RowChange<Question>)
       })
       return true
     }
     if (ev.kind === 'goals') {
       reload.patch('goals', (current) => {
         if (!current()) return
-        goals = applyListItem('goals', ev.change, goals)
-        trackFetchedGoal(ev.change)
+        goals = applyListItem('goals', change, goals)
+        trackFetchedGoal(change)
       })
       return true
     }
@@ -1921,12 +1937,12 @@
       if (roomSessionController && (roomControls?.loading || roomControls?.state?.paused !== false)) roomSessionController.load()
     }
     if (ev.kind === 'posts' && feed && evRoom === feed.room.id) {
-      const seen = new Set(feed.posts.map((p) => p.id))
+      const seen = new Set((feed.posts ?? []).map((p) => p.id))
       const add = (ev.posts ?? []).filter((p) => !seen.has(p.id))
       if (add.length) {
         if (feed.newer || !feedAtBottom) feed = { ...feed, newer: (feed.newer ?? 0) + add.length }
         else {
-          feed.posts = [...feed.posts, ...add]
+          feed.posts = [...(feed.posts ?? []), ...add]
           if (feedAtBottom) feed = trimFeed(feed)
         }
       }
@@ -1962,9 +1978,9 @@
 
   // Ctrl+B toggles the room sidebar, as in most editors. It works from the
   // composer too; a textarea has no use for the key.
-  const inside = (e: Event, selector: string) => e.target instanceof Element && !!e.target.closest(selector)
   function shortcut(e: KeyboardEvent) {
-    if (e.key === 'Escape' && (e.defaultPrevented || inside(e, '[role="menu"], [role="dialog"], [role="alertdialog"]'))) return
+    const inside = (selector: string) => !!(e.target as Element | null)?.closest?.(selector)
+    if (e.key === 'Escape' && (e.defaultPrevented || inside('[role="menu"], [role="dialog"], [role="alertdialog"]'))) return
     if (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey) {
       e.preventDefault()
       showPalette = !showPalette
@@ -1972,7 +1988,7 @@
     }
     // Ctrl+F finds in the whole room while its feed shows. In the find box, in
     // another view, or under a dialog or menu, the browser's own find takes the key.
-    if (e.key.toLowerCase() === 'f' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && feedShown && !showPalette && !inside(e, '.find, [role="menu"], [role="dialog"], [role="alertdialog"]')) {
+    if (e.key.toLowerCase() === 'f' && (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && feedShown && !showPalette && !inside('.find, [role="menu"], [role="dialog"], [role="alertdialog"]')) {
       e.preventDefault()
       openFind()
       return
@@ -2045,7 +2061,7 @@
     const issue = parseIssueHash(location.hash)
     const pr = parsePRHash(location.hash)
     const file = parseFileHash(location.hash)
-    const link = issue ? ['issues', issue] : pr ? ['github', pr] : file ? ['files', file] : null
+    const link: [string, { roomId: string }] | null = issue ? ['issues', issue] : pr ? ['github', pr] : file ? ['files', file] : null
     return !!link && link[1].roomId === roomId && link[0] === view
   }
 
@@ -2072,7 +2088,7 @@
 
   // routeHere follows an address in the open room without reloading the room.
   // It returns false when the screen already shows the address.
-  function routeHere(r: Route) {
+  function routeHere(r: Route): { roomId: string; request: number } | false {
     // A followed address always ends a detail navigation that is still loading:
     // its older response must not open over the screen the reader asked for.
     detailRequest++
@@ -2153,12 +2169,12 @@
   // same handlers with no argument.
   let templates = $state<{ name: string; description?: string }[] | null>(null)
   function loadTemplates() {
-    if (!templates) api.listTemplates().then((t) => (templates = t ?? []), () => (templates = []))
+    if (!templates) api.listTemplates().then((t: { name: string; description?: string }[] | null) => (templates = t ?? []), () => (templates = []))
     return templates ?? []
   }
   function actionRegistry(r = current ?? room) {
     return actions({
-      room: r, rooms, icons: ICON, hasTerminal, narrow, runs, session: drill, sessionPRs: prMap[drill?.id],
+      room: r, rooms, icons: ICON, hasTerminal, narrow, runs, session: drill, sessionPRs: prMap[drill?.id ?? ''],
       openView, openSettings, renameRoom, deleteRoom, roomAction, say, loadRooms,
       openFiles: (path) => { openView('files'); if (path) reveal = path.replace(/^\.?\//, '') },
       openPins: () => { showPins = true; if (narrow) showMembers = false },
@@ -2167,7 +2183,7 @@
       openSessionPRs: () => (sessionTab = 'prs'),
       cancelRun: (run) => (confirm = { kind: 'cancelrun', run }),
       toggleSidebar: () => (narrow ? (navOpen = !navOpen) : (showSide = !showSide)),
-      roomOptions: () => rooms.filter((x) => x.id !== r.id).map((x) => ({ value: x.name, hint: x.displayName && x.displayName !== x.name ? x.displayName : x.repo || '' })),
+      roomOptions: () => rooms.filter((x) => x.id !== r?.id).map((x) => ({ value: x.name, hint: x.displayName && x.displayName !== x.name ? x.displayName : x.repo || '' })),
       switchRoom: (arg) => {
         if (!arg) return void (showPalette = true)
         const a = arg.toLowerCase()
@@ -2179,12 +2195,13 @@
       templateOptions: () => loadTemplates().map((t) => ({ value: t.name, hint: t.description || '' })),
       startWorkflow: async (arg) => {
         if (!arg) return void (openView('runs'), (starting = true))
-        const name = arg.split(/\s+/)[0]
+        const name = arg.split(/\s+/)[0] ?? ''
         const text = arg.slice(name.length).trim()
         let input = null
         if (text) {
           try { input = JSON.parse(text) } catch { input = text }
         }
+        if (!r) return
         const res = await api.startRun(r.id, { template: name }, input)
         say(`${name} started.`)
         await loadRuns()
@@ -2198,7 +2215,7 @@
 
   // The palette also finds the open room's sessions, runs and PRs. The runs
   // list loads only for the Runs view, so an open palette loads it too.
-  let targets = $derived(showPalette && roomId ? paletteTargets(hierarchy, runs?.runs ?? [], changes ?? []) : [])
+  let targets = $derived(showPalette && roomId ? paletteTargets(hierarchy.filter((m): m is Member & { id: string } => !!m.id), runs?.runs ?? [], (changes ?? []).filter((c): c is ChangeRow & { changeId: string } => !!c.changeId)) : [])
   $effect(() => { if (showPalette && roomId && runs === null) untrack(loadRuns) })
   function openPaletteTarget(t: PaletteTarget) {
     if (t.kind === 'session') openSession(t.session)
@@ -2252,16 +2269,16 @@
       }
     }
     mq.addEventListener('change', resize)
-    api.dataDir().then((d) => (dataDir = d))
-    api.health().then((h) => (health = h?.status ?? ''))
+    api.dataDir().then((d: string) => (dataDir = d))
+    api.health().then((h: { status?: string } | null) => (health = h?.status ?? ''))
     loadProfiles()
     // Check, never install: `dyna update` stays an explicit step.
-    api.updateNotice().then((n) => (update = n?.text ? n : null)).catch(() => {})
+    api.updateNotice().then((n: UpdateNotice | null) => (update = n?.text ? n : null)).catch(() => {})
     openFirst()
     const link = watch((r) => (route = r))
     // The call widget lives outside every view; it takes the same events.
     const engine = engineWatch((s) => (engineStatus = s), browserEngine(engineCheck))
-    const off = onEvent((ev) => { handle(ev); voiceWidget?.event(ev) }, (up) => { link.streamState(up); engine.state(up) })
+    const off = (onEvent as (event: (ev: StreamEvent) => void, state: (up: boolean) => void) => () => void)((ev) => { handle(ev); voiceWidget?.event(ev) }, (up) => { link.streamState(up); engine.state(up) })
     registerWorker()
     const fromWorker = (e: MessageEvent) => {
       if (e.data?.type !== 'open') return
@@ -2362,9 +2379,9 @@
 <div class="app" class:narrow>
   <!-- On a wide screen this wrapper adds no box; on a narrow one it is the drawer. -->
   <div class="nav" class:open={navOpen}>
-    <RoomRail {rooms} working={workingAgents} selected={agentsNav ? '' : roomId} onselect={selectRoom} onmenu={(r, x, y, anchor) => (roomMenu = { r, x, y, anchor })} />
+    <RoomRail {rooms} working={workingAgents} selected={agentsNav ? '' : roomId} onselect={selectRoom} onmenu={(r: Room, x: number, y: number, anchor?: HTMLElement) => (roomMenu = { r, x, y, anchor })} />
     {#if showSide || narrow}
-      <Sidebar agents={agentsNav ? agents : null} selected={drill?.address ?? ''} onroom={(id) => selectRoom(id)} {computers} channelUnread={feed?.channelUnread ?? {}} room={current ?? room} prs={openPRMap} onroommenu={(x, y, anchor) => (roomMenu = { r: current ?? room, x, y, anchor })} {view} questions={questions.filter((q) => q.state === 'open' && q.to === 'owner').length} {live} {runs} {dataDir} {ownerHue} {route} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onview={openView} onmember={openAgent} />
+      <Sidebar agents={agentsNav ? agents : null} selected={drill?.address ?? ''} onroom={(id: string) => selectRoom(id)} {computers} channelUnread={feed?.channelUnread ?? {}} room={current ?? room} prs={openPRMap} onroommenu={(x: number, y: number, anchor?: HTMLElement) => { const r = current ?? room; if (r) roomMenu = { r, x, y, anchor } }} view={view as typeof GENERAL} questions={questions.filter((q) => q.state === 'open' && q.to === 'owner').length} {live} {runs} {dataDir} {ownerHue} {route} update={!!update} onsettings={() => openSettings()} onlogout={signOut} onview={openView} onmember={openAgent} />
     {/if}
   </div>
   {#if narrow && navOpen}
@@ -2422,7 +2439,7 @@
           <span class="title">{runDetail?.run?.name ?? openRun}</span>
         {:else if workRow}
           <span class="title" title={room.repo}><span class="hash">#</span><span class="name">{workRow.label}</span></span>
-          {#if workTabs && !narrow}<div class="dm-tabs"><Tabs tabs={workTabs} tab={view} label={workRow.label} onselect={openView} /></div>{/if}
+          {#if workTabs && !narrow}<div class="dm-tabs"><Tabs tabs={workTabs} tab={view} label={workRow?.label ?? ''} onselect={openView} /></div>{/if}
         {:else}
           <span class="title" title={room.repo}><span class="name">{roomLabel(current ?? room)}</span></span>
           {#if !narrow}<div class="dm-tabs"><Tabs tabs={roomTabs} tab={view === 'github' || view === 'issues' ? view : GENERAL} label="Room" onselect={openView} /></div>{/if}
@@ -2464,13 +2481,13 @@
         <button class="icon" onclick={() => (showPalette = true)} title="Search rooms and commands" aria-label="Search rooms and commands"><SearchIcon size={22} /></button>
       {/if}
     </header>
-    {#if finding && feedShown}
+    {#if finding && feedShown && room}
       <FeedFind bind:this={feedFind} roomId={room.id} roomName={room.name} initial={findText} onjump={jumpTo} onclose={() => (finding = false)} />
     {/if}
     <div class="content">
       {#key viewIdentity({ roomId, view, drill })}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="center" in:fade={{ duration: prView ? 0 : motion(FAST) }} ondragover={dragOver} ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) dropping = false }} ondrop={drop}>
+      <div class="center" in:fade={{ duration: prView ? 0 : motion(FAST) }} ondragover={dragOver} ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget instanceof Node ? e.relatedTarget : null)) dropping = false }} ondrop={drop}>
         {#if dropping}
           <div class="dropzone"><div><strong>Drop to attach</strong><span>to your next post in {drill ? '@' + drill.name : '#' + roomLabel(current ?? room)}</span></div></div>
         {/if}
@@ -2491,7 +2508,7 @@
           <p class="load-err">{loadError}</p>
         {/if}
         {#if !roomId}
-          <Home bind:this={home} {rooms} {update} onroom={selectRoom} onaccount={(id) => openSettings('usage', false, '', id)} onagent={openAgent} />
+          <Home bind:this={home} {rooms} {update} onroom={selectRoom} onaccount={(id: string) => openSettings('usage', false, '', id)} onagent={openAgent} />
         {:else if !room}
           <Skeleton label="Loading room" />
         {:else if drill}
@@ -2499,25 +2516,25 @@
           {#if narrow && !readOnlyDm}<SessionTabs bind:tab={sessionTab} media={session?.media ?? []} prs={prMap[drill.id] ?? []} computer={computers && !drill.rootSeat ? computerOf(drill.id) ?? { state: 'none' } : null} changes={sessionChanged} shells={drillShells.length} />{/if}
           {#key drill.id}
             {#if sessionTab === 'computer' && computers}
-              <ComputerPane c={computerOf(drill.id) ?? { session: drill.id, name: drill.name, state: 'none', apps: [], stream: {}, viewers: 0, rssKiB: 0, streamRssKiB: 0 }} room={room.id} feed={computerFeed[drill.id] ?? []} chat={{ computerCount: 1, draft: drafts['computer:' + roomId + ':' + drill.id] ?? '', ondraft: computerDraft, session, room, members: hierarchy, onsend: sendToSession, onopenfile: (a) => (viewing = a), onpost: jumpTo, onmessages: () => (sessionTab = 'chat') }} />
+              <ComputerPane c={computerOf(drill.id) ?? { session: drill.id, name: drill.name, state: 'none', apps: [], stream: {}, viewers: 0, rssKiB: 0, streamRssKiB: 0 }} room={room.id} feed={computerFeed[drill.id] ?? []} chat={{ computerCount: 1, draft: drafts['computer:' + roomId + ':' + drill.id] ?? '', ondraft: computerDraft, session, room, members: hierarchy, onsend: sendToSession, onopenfile: (a: Attachment) => (viewing = a), onpost: jumpTo, onmessages: () => (sessionTab = 'chat') }} />
             {:else if sessionTab === 'shell'}
               <ShellGrid jobs={drillShells} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} />
             {:else if sessionTab === 'media'}
-              <SessionMedia onpost={jumpTo} {room} posts={session?.media ?? []} onopenfile={(a) => (viewing = a)} />
+              <SessionMedia onpost={(post) => jumpTo(post.id)} {room} posts={session?.media ?? []} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
             {:else if sessionTab === 'changes'}
               <Changes roomId={room.id} session={drill.id} sessionName={drill.name} />
             {:else if sessionTab === 'prs'}
               <PRPanel prs={prMap[drill.id] ?? []} error={prError} names={Object.fromEntries(members.filter((x) => x.id).map((x) => [x.id, x.name]))} onuntrack={untrackPR} onresume={resumePR} />
             {:else}
               <div class="sess-wrap" style:--shift={threadsOpen && !narrow ? '360px' : '0px'}>
-              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:contextOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} prs={prMap[drill.id] ?? []} jobs={jobs ?? []} contextError={jobsError} onchild={openSession} onpr={() => (sessionTab = 'prs')} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} onopenfile={(a) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} />
+              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={(post) => jumpTo(post.id)} bind:this={sessionView} bind:threadsOpen bind:contextOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} prs={prMap[drill.id] ?? []} jobs={jobs ?? []} contextError={jobsError} onchild={openSession} onpr={() => (sessionTab = 'prs')} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} />
               {#if showPreview}<ComputerPreview c={drillComputer} session={drill.id} name={drill.name} onopen={() => (sessionTab = 'computer')} />{/if}
               </div>
             {/if}
           {/key}
         {:else}
         {#if !workRow && narrow}<Tabs tabs={roomTabs} tab={view === 'github' || view === 'issues' ? view : GENERAL} label="Room" onselect={openView} />{/if}
-        {#if workTabs && narrow}<Tabs tabs={workTabs} tab={view} label={workRow.label} onselect={openView} />{/if}
+        {#if workTabs && narrow}<Tabs tabs={workTabs} tab={view} label={workRow?.label ?? ''} onselect={openView} />{/if}
         {#if view === 'files'}
           {#key room.id}<FileBrowser roomId={room.id} {narrow} {reveal} folder={revealFolder} onpr={openPR} />{/key}
         {:else if view === 'cihealth'}
@@ -2525,21 +2542,21 @@
         {:else if view === 'library'}
           {#key room.id}<Library roomId={room.id} {narrow} onopen={({ path, dir }) => { openView('files'); if (dir) revealFolder = { path }; else reveal = path }} />{/key}
         {:else if view === 'github' || view === 'issues'}
-          {#key `${room.id}:${view}`}<GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind={view === 'issues' ? 'issue' : 'pr'} integration={syncRepo?.integration ?? null} link={prLink} {changes} members={hierarchy} onask={askAgent} onsession={(m, tab) => { openSession(m); if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
+          {#key `${room.id}:${view}`}<GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind={view === 'issues' ? 'issue' : 'pr'} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onask={askAgent} onsession={(m, tab) => { openSession(m); if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
         {:else if view === 'terminal' && hasTerminal}
           {#key room.id}<Terminal roomId={room.id} ref={room.id} noRepo={!room.repo} {narrow} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
         {:else if view === 'questions'}
-          {#key room.id}<Questions roomId={room.id} {questions} focusId={questionFocus} focusRequest={questionFocusRequest} onanswer={answerQuestion} onopenfile={(a) => (viewing = a)} />{/key}
+          {#key room.id}<Questions roomId={room.id} {questions} focusId={questionFocus} focusRequest={questionFocusRequest} onanswer={answerQuestion} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />{/key}
         {:else if view === 'services'}
-          {#key room.id}<Services roomId={room.id} members={hierarchy} {changes} onopen={(m) => openSession(m, 0, null, true)} />{/key}
+          {#key room.id}<Services roomId={room.id} members={hierarchy} changes={changes ?? []} onopen={(m: Member) => openSession(m, 0, null, true)} />{/key}
         {:else if view === 'visuals'}
-          {#key room.id}<Visuals roomId={room.id} {visuals} onopen={(v) => (viewing = { ...v.attachment, postId: v.post.id })} />{/key}
+          {#key room.id}<Visuals roomId={room.id} {visuals} onopen={(v: Visual) => (viewing = { ...v.attachment, postId: v.post.id })} />{/key}
         {:else if view === 'computers' && computers}
-          {#key room.id}<Computers list={computers} error={computerError} onopen={(c) => { const m = hierarchy.find((x) => x.id === c.session); if (m) { openSession(m); sessionTab = 'computer' } else popOut(room.id, c.session) }} />{/key}
+          {#key room.id}<Computers list={computers} error={computerError} onopen={(c: ComputerInfo) => { const m = hierarchy.find((x) => x.id === c.session); if (m) { openSession(m); sessionTab = 'computer' } else popOut(room.id, c.session) }} />{/key}
         {:else if view === 'jobs'}
           {#key room.id}<Jobs older={listPages.jobs?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['jobs'])} {jobs} error={jobsError} jobId={openJob} {narrow} onstop={stopJob} />{/key}
         {:else if view === 'goals'}
-          {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id) => (goalId = id)} ongoal={openGoal} onexpedite={(g) => expediteGoal(g).catch((e) => say(errorText(e)))} />{/key}
+          {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id: string) => (goalId = id)} ongoal={openGoal} onexpedite={(g: Goal) => expediteGoal(g).catch((e) => say(errorText(e)))} />{/key}
         {:else if view === 'runs'}
           {#if openRun}
             {#key openRun}<Run detail={runDetail} error={runError} oncancel={(run) => (confirm = { kind: 'cancelrun', run })} onpause={pauseRun} onsteer={steerAgent} />{/key}
@@ -2547,10 +2564,10 @@
             <Runs {room} list={runs} error={runsError} onopen={showRun} onstart={() => (starting = true)} />
           {/if}
         {:else}
-          <Feed {goals} bind:this={feedView} bind:stuck={feedAtBottom} label={channelLabel} {room} posts={shownPosts} onreveal={revealPost} {questions} calls={view === GENERAL ? roomCalls : []} onacceptcall={acceptCall} ondeclinecall={declineCall} {view} earlier={feed?.earlier ?? 0} onearlier={(near) => loadEarlier('older', '', near)} newer={feed?.newer ?? 0} onnewer={(near) => loadEarlier('newer', '', near)} onpresent={() => loadEarlier('present')} onaround={(id) => loadEarlier('around', id)} {unreadFrom} pinned={pinnedIds} onaddress={openAddress} onreply={startReply} onforward={(p) => composer?.forward(p)} onpin={togglePin} ondetail={openDetail} onquestion={openQuestion} ongoal={openGoal} onissue={openIssues} onopenfile={(a) => (viewing = a)} />
+          <Feed {goals} bind:this={feedView} bind:stuck={feedAtBottom} label={channelLabel} {room} posts={shownPosts} onreveal={revealPost} {questions} calls={view === GENERAL ? roomCalls : []} onacceptcall={acceptCall} ondeclinecall={declineCall} {view} earlier={feed?.earlier ?? 0} onearlier={(near: () => boolean) => loadEarlier('older', '', near)} newer={feed?.newer ?? 0} onnewer={(near: () => boolean) => loadEarlier('newer', '', near)} onpresent={() => loadEarlier('present')} onaround={(id: string) => loadEarlier('around', id)} {unreadFrom} pinned={pinnedIds} onaddress={openAddress} onreply={startReply} onforward={(p: Post) => composer?.forward(p)} onpin={togglePin} ondetail={openDetail} onquestion={openQuestion} ongoal={openGoal} onissue={openIssues} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
           <!-- Keyed: staged files belong to one room and never follow a switch. -->
           {#key room.id + view}
-            <Composer onopenfile={(a) => (viewing = a)} bind:this={composer} label={channelLabel} prepareText={(text) => prepareChannelText(text, channel, channels, (value) => api.preview(room.id, value))} {room} {choices} {profiles} commands={composerCommands} onslash={() => { loadProfiles(); loadTemplates() }} {reply} bind:draft={draft.value} onsend={send} oncancelreply={() => (reply = null)} />
+            <Composer onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} bind:this={composer} label={channelLabel} prepareText={(text: string) => prepareChannelText(text, channel ?? null, channels, (value) => api.preview(room.id, value))} {room} {choices} {profiles} commands={composerCommands} onslash={() => { loadProfiles(); loadTemplates() }} {reply} bind:draft={draft.value} onsend={send} oncancelreply={() => (reply = null)} />
           {/key}
         {/if}
         {/if}
@@ -2564,24 +2581,25 @@
       {#if roomId && room && view === 'goals' && selectedGoal}
         {#key selectedGoal.id}<GoalDetail roomId={room.id} goal={selectedGoal} members={hierarchy} onchanged={loadGoals} onclose={() => (goalId = '')} onexpedite={expediteGoal} />{/key}
       {:else if roomId && room && showPins}
-        <Pins {room} {pins} ondetail={openDetail} onjump={(id) => { if (narrow) showPins = false; jumpTo(id) }} onunpin={togglePin} onopenfile={(a) => (viewing = a)} onclose={() => (showPins = false)} />
+        <Pins {room} {pins} ondetail={openDetail} onjump={(id: string) => { if (narrow) showPins = false; jumpTo(id) }} onunpin={togglePin} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} onclose={() => (showPins = false)} />
       {:else if roomId && room && showIssues}
         <Issues open={issues} history={issueHistory} onhistory={() => loadIssues(true)} onclose={() => (showIssues = false)}
-          ongoal={(i) => triageIssue(() => api.issueGoal(roomId, i.id))} onexport={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} oncloseissue={askCloseIssue} />
+          ongoal={(i: RoomIssue) => triageIssue(() => api.issueGoal(roomId, i.id))} onexport={(i: RoomIssue) => triageIssue(() => api.exportIssue(roomId, i.id))} oncloseissue={askCloseIssue} />
       {:else if roomId && room && showMembers && !drill}
-        <Members computers={computers ?? []} onopencomputer={(m) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} controlMembers={hierarchy} onroomactions={roomSessionActions} onresumeroom={() => roomSessionController?.run('resume')} onreloadcontrols={() => roomSessionController?.load()} oncleardormant={askClearDormant} ondismiss={(m) => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${errorText(e)}`))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={drill?.address ?? ''} closed={showClosed} onselect={openMember} onmenu={(m, x, y, anchor) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
+        <Members computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} controlMembers={hierarchy} onroomactions={roomSessionActions} onresumeroom={() => roomSessionController?.run('resume')} onreloadcontrols={() => roomSessionController?.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${errorText(e)}`))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
       {/if}
       </div>
     </div>
   </main>
-  <VoiceWidget bind:this={voiceWidget} bind:link={callPush} {narrow} {rooms} onopenfile={(a) => (viewing = a)} />
+  <VoiceWidget bind:this={voiceWidget} bind:link={callPush} {narrow} {rooms} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
 </div>
 {/if}
 {#if showPalette}
   <Palette {rooms} commands={paletteCommands} {targets} path={palettePath} onroom={paletteRoom} ontarget={openPaletteTarget} onclose={() => { showPalette = false; palettePath = null }} />
 {/if}
 {#if viewing && room}
-  <Viewer roomId={viewing.roomId ?? room.id} att={viewing} onjump={viewing.postId && (viewing.roomId ?? room.id) === room.id ? () => { const id = viewing.postId; viewing = null; jumpTo(id) } : null} onclose={() => (viewing = null)} />
+  {@const attachment = viewing}
+  <Viewer roomId={viewing.roomId ?? room.id} att={viewing} onjump={attachment.postId && (attachment.roomId ?? room.id) === room.id ? () => { viewing = null; if (attachment.postId) jumpTo(attachment.postId) } : null} onclose={() => (viewing = null)} />
 {/if}
 {#if showSettings}
   {#key settingsKey}
@@ -2590,7 +2608,7 @@
 {/if}
 {#if showRoomSettings && room}
   {#snippet roomRules()}<Rules roomId={room.id} view={rules} members={hierarchy} {ownerHue} bind:editing={rulesEditing} onchanged={loadRules} />{/snippet}
-  <RoomSettings {room} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action) => roomSessionController?.run(action)} onaction={(id) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={rulesEditing} onclose={() => (showRoomSettings = false)} />
+  <RoomSettings {room} {reviewer} onreviewer={loadReviewer} controls={roomControls} onsessions={(action: string) => roomSessionController?.run(action)} onaction={(id: string) => actionRegistry(room).find((a) => a.id === id)?.run()} rules={roomRules} busy={rulesEditing} onclose={() => (showRoomSettings = false)} />
 {/if}
 {#if roomMenu}
   <Menu x={roomMenu.x} y={roomMenu.y} title={roomLabel(roomMenu.r)} items={roomMenuItems(roomMenu.r)} onclose={() => { const a = roomMenu?.anchor; roomMenu = null; a?.focus?.() }} />
@@ -2616,8 +2634,8 @@
 {#if menu}
   <Menu x={menu.x} y={menu.y} title={menu.m.address} items={menuItems(menu.m)} onclose={closeMenu} />
 {/if}
-{#if currentBulk && currentBulk.roomId === roomId}
-  {@const batch = { ...currentBulk }}
+{#if currentBulk?.value && currentBulk.roomId === roomId}
+  {@const batch = { ...currentBulk, value: currentBulk.value }}
   {#key batch.key}<BulkSessionAction {batch} members={hierarchy} onclose={() => (activeBulk = 0)} onrun={(force) => runBulk(batch.key, force)} onconfigure={(patch) => bulkControllers.get(batch.key)?.configure(patch)} onreload={() => bulkControllers.get(batch.key)?.load()} onselectfailed={() => selectBulkFailures(batch)} />{/key}
 {/if}
 {#if consolidating && room && consolidating.roomId === roomId}
@@ -2646,7 +2664,7 @@
   <div class="toast" role="status">{toast}</div>
 {/if}
 {#if card && room}
-  <ProfileModal {goals} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} ongoal={(id) => { card = null; openGoal(id) }} onpost={jumpTo} onopenfile={(a) => (viewing = a)} {profile} error={profileError} {room} ondetail={openDetail} onclose={() => (card = null)} onmessage={openSession} onmention={mentionMember} />
+  <ProfileModal {goals} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} ongoal={(id) => { card = null; openGoal(id) }} onpost={jumpTo} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {profile} error={profileError} {room} ondetail={openDetail} onclose={() => (card = null)} onmessage={openSession} onmention={mentionMember} />
 {/if}
 
 <style>
