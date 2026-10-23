@@ -52,11 +52,11 @@
   .it.error::before { background: var(--coral); }
   time { flex: none; width: 38px; font-family: var(--mono); font-size: var(--t-sm); color: var(--faint); font-variant-numeric: tabular-nums; }
   .what { min-width: 0; }
-  .open { text-align: left; color: var(--ink-2); }
+  .open { text-align: left; color: var(--ink-2); transition: color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .open:hover { color: var(--ink); }
   }
-  .svc { margin-left: var(--s2); font-size: var(--t-cap); letter-spacing: 0.05em; text-transform: uppercase; color: var(--faint); }
+  .svc { margin-left: var(--s2); font-size: var(--t-cap); letter-spacing: 0.05em; text-transform: uppercase; color: var(--faint); transition: color var(--motion-fast) var(--ease); }
   @media (hover: hover) {
     .svc:hover { color: var(--muted); }
   }
