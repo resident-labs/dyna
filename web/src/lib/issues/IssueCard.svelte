@@ -8,10 +8,10 @@
   // its stored title line. TODO: legacy/shim remove later — remove when
   // retained room history ages out.
   import type { EventNotice, Room } from '../api/room.ts'
-  import type { EventPost, EventSurface } from './eventRenderers.ts'
-  import { issueEvent } from './eventPayloads.ts'
-  import type { IssueState } from './events.gen.ts'
-  import EventDetails from './EventDetails.svelte'
+  import type { EventPost, EventSurface } from '../rooms/eventRenderers.ts'
+  import { issueEvent } from '../rooms/eventPayloads.ts'
+  import type { IssueState } from '../rooms/events.gen.ts'
+  import EventDetails from '../rooms/EventDetails.svelte'
   import { clock, short } from '../ui/format.ts'
   import { api } from '../../api.ts'
 

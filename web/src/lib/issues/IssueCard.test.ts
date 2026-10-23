@@ -8,7 +8,7 @@ import { build } from 'esbuild'
 import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { installDom, domNames } from '../prs/prDetailHarness.ts'
 import { need } from '../../../test/need.ts'
-import type { IssueEvent } from './events.gen.ts'
+import type { IssueEvent } from '../rooms/events.gen.ts'
 
 // The issue card is one affordance for every filer, and it owns its actions:
 // assign an issue to a goal, and close it with a reason. The actions call the

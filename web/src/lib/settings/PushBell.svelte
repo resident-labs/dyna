@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { pushSupported, pushState, pushOn, pushOff, pushNames, pushTest } from '../settings/link.ts'
+  import { pushSupported, pushState, pushOn, pushOff, pushNames, pushTest } from './link.ts'
   // The bell in the sidebar footer and its small panel: Web Push on or off,
   // whether a notification may show room and sender names, and a test.
   let open = $state(false)

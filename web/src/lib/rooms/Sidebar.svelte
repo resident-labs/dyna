@@ -11,13 +11,13 @@
   import { motion, BASE, FAST } from '../ui/motion.ts'
   import { GENERAL, ROOM_CHAT } from './feedViews.ts'
   import Avatar from '../ui/Avatar.svelte'
-  import Notify from './Notify.svelte'
+  import PushBell from '../settings/PushBell.svelte'
   import { features } from '../../api.ts'
   import { ago, roomLabel } from '../ui/format.ts'
   import PRChip from '../prs/PRChip.svelte'
   import ExpediteBadge from './ExpediteBadge.svelte'
   import { expedite, agentExpedited } from './expedite.ts'
-  import GoalGlyph from './GoalGlyph.svelte'
+  import GoalGlyph from '../goals/GoalGlyph.svelte'
   import { isLive } from '../computers/computers.ts'
   import { available as terminal } from '../sessions/TermPane.svelte'
   import { sections, rowOf, shown, runningWork } from './workViews.ts'
@@ -149,7 +149,7 @@
     </button>
     {/if}
     {#if onlogout}
-    {#if features.push}<Notify />{/if}
+    {#if features.push}<PushBell />{/if}
     <button class="gear" onclick={onlogout} aria-label="Sign out this device" title="Sign out this device">
       <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M14 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2H14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><path d="M11 12h9m-3.2-3.5L20.3 12l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
     </button>
