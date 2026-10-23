@@ -335,7 +335,6 @@
   let syncRepo = $derived(room?.repo ? syncStatus[room.repo] ?? null : null) // {remotes, integration, operation?}
   let syncRemotes = $derived(remoteList(syncRepo?.remotes))
   let syncNote = $state('') // the last Refresh or Export answer that was not a start
-  let channelMenu = $state<{ x: number; y: number } | null>(null) // {x, y}: a phone shows the pinned posts in this menu
   let issues = $state<RoomIssue[]>([]) // open issues, newest first
   let issueHistory = $state<RoomIssue[]>([]) // closed and converted issues, newest first
   let feedView = $state<ReturnType<typeof Feed>>()
@@ -1583,15 +1582,6 @@
     return roomActionItems(actionRegistry(r))
   }
 
-  // The phone bar's overflow: the pinned posts. Members and Issues have their
-  // own header button, so they are not repeated here.
-  function channelMenuItems() {
-    const items: MenuItem[] = [
-      { label: 'Pinned posts', hint: pins.length ? String(pins.length) : '', run: () => { showPins = true; showMembers = false } },
-    ]
-    return items
-  }
-
   async function roomAction(fn: () => Promise<unknown>, done: string) {
     try {
       await fn()
@@ -2129,7 +2119,6 @@
     if (next === 'issues') openReview('issues')
     if (v !== 'goals') goalId = ''
     navOpen = false
-    channelMenu = null
     if (v === 'runs') loadRuns()
   }
 
@@ -2484,18 +2473,10 @@
         {#if !narrow}
           <button class="icon" onclick={() => openSearch()} title="Search (Ctrl+K)" aria-label="Search sessions and messages"><SearchIcon /></button>
         {/if}
-        {#if narrow}
-        <!-- A phone keeps the bar for the page title, so the pinned posts
-             toggle goes into one menu. -->
-        <button class="icon" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); channelMenu = { x: r.right - 240, y: r.bottom + 6 } }} title="Room actions" aria-label="Room actions" aria-haspopup="menu" aria-expanded={!!channelMenu}>
-          <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="5" cy="12" r="1.7" fill="currentColor" /><circle cx="12" cy="12" r="1.7" fill="currentColor" /><circle cx="19" cy="12" r="1.7" fill="currentColor" /></svg>
-        </button>
-        {:else}
-        <button class="icon pin" class:on={showPins} onclick={() => { showPins = !showPins }} title={showPins ? 'Hide pinned posts' : 'Show pinned posts'} aria-label={showPins ? 'Hide pinned posts' : 'Show pinned posts'} aria-expanded={showPins}>
+        <button class="icon pin" class:on={showPins} onclick={() => { showPins = !showPins; if (showPins) showMembers = false }} title={showPins ? 'Hide pinned posts' : 'Show pinned posts'} aria-label={showPins ? 'Hide pinned posts' : 'Show pinned posts'} aria-expanded={showPins}>
           <PinIcon size={21} />
           {#if pins.length}<span class="badge">{pins.length}</span>{/if}
         </button>
-        {/if}
         {/if}
       {/if}
       {#if room?.repo && !readOnlyDm}<button class="review-toggle" class:on={reviewOpen} aria-controls="review-workspace" aria-expanded={reviewOpen} onclick={() => reviewOpen ? closeReview() : openReview()}>Review</button>{/if}
@@ -2643,9 +2624,6 @@
 {/if}
 {#if roomMenu}
   <Menu x={roomMenu.x} y={roomMenu.y} title={roomLabel(roomMenu.r)} items={roomMenuItems(roomMenu.r)} onclose={() => { const a = roomMenu?.anchor; roomMenu = null; a?.focus?.() }} />
-{/if}
-{#if channelMenu}
-  <Menu x={channelMenu.x} y={channelMenu.y} title="Room" items={channelMenuItems()} onclose={() => (channelMenu = null)} />
 {/if}
 {#if roomControlsMenu}
   {@const context = { ...roomControlsMenu }}

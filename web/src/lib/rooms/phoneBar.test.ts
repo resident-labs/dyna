@@ -28,27 +28,18 @@ const rule = (source: string, selector: string): string => {
   return source.slice(open + 1, source.indexOf('}', open))
 }
 
-test('a phone puts Members last in the bar and keeps the menu for pinned posts', () => {
-  // The member list has its own button, so the overflow menu no longer
-  // repeats Members or Issues, and the bar ends with Members after Search.
-  const actions = header.indexOf('aria-label="Room actions"')
-  assert.ok(actions > 0, 'the phone bar has one actions button')
-  const narrow = header.lastIndexOf('{#if narrow}', actions)
-  const desktop = header.indexOf('{:else}', actions)
-  assert.ok(narrow > 0 && desktop > actions, 'the actions button is the phone branch of the bar')
-  assert.equal(header.slice(narrow, desktop).includes('Show member list'), false, 'the phone branch holds the pin toggle only')
+test('the bar shows pinned posts as its own button and puts Members last', () => {
+  // Pinned posts was the only entry left in the phone overflow menu, so the
+  // menu is gone and the pin toggle sits in the bar on every width.
+  assert.doesNotMatch(app, /Room actions|channelMenu/, 'the bar has no overflow menu')
+  const pin = header.indexOf("aria-label={showPins ? 'Hide pinned posts'")
+  assert.ok(pin > 0, 'the bar has the pinned posts button')
+  assert.equal(header.slice(header.lastIndexOf('{/if}', pin), pin).includes('{:else}'), false, 'phones and desktops share the pin button')
   const search = header.indexOf('aria-label="Search sessions and messages"')
   const members = header.indexOf("aria-label={showMembers ? 'Hide member list'")
   assert.ok(search > 0 && members > search, 'the Members button follows Search')
   assert.match(header.slice(header.lastIndexOf('{#if', members), members), /room && !drill/, 'Members renders only inside a room, never on the home page')
   assert.equal(header.slice(members).includes('class="icon"'), false, 'Members is the bar\'s last button')
-  assert.match(app, /label: 'Pinned posts'/, 'the menu opens the pinned posts')
-  // The menu itself must not repeat a header button or a look control.
-  const menuStart = app.indexOf('function channelMenuItems()')
-  const menu = app.slice(menuStart, app.indexOf('\n  }', menuStart))
-  assert.doesNotMatch(menu, /label: 'Members'/, 'Members is not repeated in the menu')
-  assert.doesNotMatch(menu, /label: 'Issues'/, 'Issues is not repeated in the menu')
-  assert.doesNotMatch(menu, /Channel look/, 'the look is set only in Settings')
 })
 
 test('a phone title keeps a readable width and its buttons never shrink', () => {
