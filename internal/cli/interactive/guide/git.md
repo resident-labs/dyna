@@ -190,9 +190,12 @@ Manual CI can also run one commit over the configured SSH destination:
 ```sh
 dyna git ci run <sha>
 dyna git ci run <sha> --suite go
-dyna git ci run <sha> --node omarchy --suite relay
+dyna git ci run <sha> --node local --suite relay
 dyna git ci show <sha> --json
 ```
+
+`--node local` selects this machine, so older scripts keep working. Any other
+name selects the machine with that name.
 
 Use `--suite relay,frontend,go,cross-build` to select suites.
 The configured SSH destination is `localci.remote`.

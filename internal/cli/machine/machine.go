@@ -3,8 +3,10 @@
 package machine
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"text/tabwriter"
 
@@ -110,11 +112,18 @@ func addCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "add <name>",
 		Short: "Add a machine, or update the machine with this name",
-		Long: "Add a machine, or replace the settings of the stored machine with this\n" +
-			"name. The default role is ci with one slot. A positive --ci-slots adds\n" +
-			"the ci role.",
+		Long: "Add a machine. Its name must be new: use edit to change a stored machine.\n" +
+			"The default role is ci with one slot. A positive --ci-slots adds the ci\n" +
+			"role.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
+			s := store()
+			switch _, err := s.Get(c.Context(), args[0]); {
+			case err == nil:
+				return fmt.Errorf("machine %s exists; use dyna machine edit", args[0])
+			case !errors.Is(err, os.ErrNotExist):
+				return err
+			}
 			roles, err := parseRoles(roleNames)
 			if err != nil {
 				return err
@@ -126,7 +135,7 @@ func addCommand() *cobra.Command {
 				roles = append(roles, machines.RoleCI)
 			}
 			m := machines.Machine{Name: args[0], Roles: roles, SSH: ssh, CISlots: slots, Enabled: true}
-			saved, err := store().Save(c.Context(), m)
+			saved, err := s.Save(c.Context(), m)
 			if err != nil {
 				return err
 			}

@@ -54,11 +54,14 @@ func ParseRole(name string) (Role, error) {
 
 // Machine is one row of the registry.
 type Machine struct {
-	ID      string    `json:"id"`
-	Name    string    `json:"name"`
-	Roles   []Role    `json:"roles"`
-	SSH     string    `json:"ssh"`
-	CISlots int       `json:"ciSlots"`
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Roles   []Role `json:"roles"`
+	SSH     string `json:"ssh"`
+	CISlots int    `json:"ciSlots"`
+	// Enabled turns the machine's work off. A disabled machine takes no new CI
+	// runs. On the local row it stops that work, not the engine, which keeps
+	// running.
 	Enabled bool      `json:"enabled"`
 	Local   bool      `json:"local"`
 	Created time.Time `json:"createdAt"`
@@ -299,6 +302,11 @@ func importLocalCINodes(ctx context.Context, conn *sql.Conn) error {
 func importNode(ctx context.Context, conn *sql.Conn, name, ssh string, slots int, enabled bool) error {
 	now := time.Now().UnixMilli()
 	if ssh == "" {
+		// A disabled local node stays off after the upgrade, so its CI work does
+		// not start on this machine unasked. Its slots come with the ci role.
+		if !enabled {
+			return nil
+		}
 		m, err := getOn(ctx, conn, "", true)
 		if err != nil {
 			return err
@@ -409,10 +417,10 @@ func scan(row scanner) (Machine, error) {
 	return m, nil
 }
 
-// Save inserts a machine, or updates the stored one that has this ID or this
-// name, and returns the stored row. An update keeps the row's ID, its created
-// time and its local mark, so a caller can never add a second engine host or
-// turn a stored machine into one.
+// Save inserts a machine, or updates the stored row that has this ID, and
+// returns the stored row. An update keeps the row's ID, its created time and
+// its local mark, so a caller can never add a second engine host or turn a
+// stored machine into one. A new machine takes a name that no other row has.
 func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	db, err := s.db()
 	if err != nil {
@@ -437,16 +445,16 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		return Machine{}, err
 	}
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
-		extant, err := getOn(ctx, conn, m.Name, false)
-		if err == nil && extant.ID != m.ID {
-			return fmt.Errorf("machine %q already exists: %w", m.Name, os.ErrExist)
-		}
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
 		if found {
 			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=? WHERE id=?`,
 				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), m.ID)
+			return err
+		}
+		extant, err := getOn(ctx, conn, m.Name, false)
+		if err == nil && extant.ID != m.ID {
+			return fmt.Errorf("machine %q exists: %w", m.Name, os.ErrExist)
+		}
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+columns+`) VALUES(?,?,?,?,?,?,?,?,?)`,
@@ -460,19 +468,13 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	return m, nil
 }
 
-// find reads the stored machine that m continues: the row with its ID when it
-// has one, otherwise the row with its name.
+// find reads the stored machine that m continues: the row with its ID, when it
+// has one. A machine without an ID is new.
 func find(ctx context.Context, q querier, m Machine) (Machine, bool, error) {
-	if m.ID != "" {
-		stored, err := getByID(ctx, q, m.ID)
-		if err == nil {
-			return stored, true, nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return Machine{}, false, err
-		}
+	if m.ID == "" {
+		return Machine{}, false, nil
 	}
-	stored, err := getOn(ctx, q, m.Name, false)
+	stored, err := getByID(ctx, q, m.ID)
 	switch {
 	case err == nil:
 		return stored, true, nil

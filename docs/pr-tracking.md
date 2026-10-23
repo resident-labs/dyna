@@ -296,6 +296,11 @@ dyna machine edit omarchy --disable
 dyna machine rm omarchy
 ```
 
+`--disable` stops new work on a machine: its CI slots are not scheduled, and no
+new agent goes there. On the local row it stops that work, not the engine,
+which keeps running. `dyna machine add` needs a new name; use
+`dyna machine edit` to change a stored machine.
+
 The mode applies to the current room. The default, `github`, keeps hosted CI.
 `local` and `both` let local and GitHub results race. A conclusive pass permits
 progress when every required check has passed. An observed failure from either
