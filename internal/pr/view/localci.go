@@ -27,10 +27,7 @@ func localCIChecks(facts watch.ReviewFacts, record watch.Record) watch.Record {
 	max, _, budgetErr := watch.EffectivePolicy(facts.State, record).TestBudget()
 	var slow []localci.TestTiming
 	for _, suite := range result.Suites {
-		name := suite.CheckName
-		if name == "" {
-			name = suite.Suite
-		}
+		name := string(suite.Name())
 		check := watch.CheckSummary{Name: name, Node: suite.Node, Status: "completed", DurationMs: suite.Duration.Milliseconds()}
 		switch suite.Status {
 		case localci.OutcomePassed:

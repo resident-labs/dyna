@@ -337,10 +337,7 @@ func (s *Service) localCIFailureEvidence(ctx context.Context, r Record, head, lo
 	for _, suite := range suites {
 		text := suite.Error + "\n" + strings.Join(suite.Failures, "\n") + "\n" + suite.LogTail
 		evidence, named := localCFirstEvidence(text)
-		line := suite.CheckName
-		if line == "" {
-			line = suite.Suite
-		}
+		line := string(suite.Name())
 		if evidence != "" {
 			line += ": " + evidence
 		}
