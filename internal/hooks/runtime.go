@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -20,8 +18,7 @@ import (
 
 const runtimeSchema = `CREATE TABLE hook_runtime (
  repo TEXT PRIMARY KEY,
- body BLOB NOT NULL,
- mirror TEXT NOT NULL DEFAULT ''
+ body BLOB NOT NULL
 );`
 
 func (s Service) dataDir() string {
@@ -36,44 +33,43 @@ func (s Service) runtimeDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The runtime copies' stamps live in the shared table, which the version
-	// 2 step fills from the old mirror column.
 	if err := statewrite.MigrateMirrors(s.dataDir()); err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "hooks.runtime", 2, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "hooks.runtime", 3, func(conn *sql.Conn, old int) error {
 		ctx := context.Background()
 		if old < 1 {
 			if _, err := conn.ExecContext(ctx, runtimeSchema); err != nil {
 				return err
 			}
+		} else if old < 2 {
+			// Preserve ownership evidence before dropping the old column.
+			if _, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO state_mirrors(key, version)
+SELECT 'hooks/runtime/' || repo, mirror FROM hook_runtime WHERE mirror != ''`); err != nil {
+				return err
+			}
 		}
-		// TODO: legacy/shim remove later — moves the stamps that #1480 kept in the mirror column into state_mirrors; remove with the mirror column and the copy, in item 31.
-		_, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO state_mirrors(key, version)
-SELECT 'hooks/runtime/' || repo, mirror FROM hook_runtime WHERE mirror != ''`)
+		if err := s.importRuntime(conn); err != nil {
+			return err
+		}
+		if old >= 1 {
+			if _, err := conn.ExecContext(ctx, "ALTER TABLE hook_runtime DROP COLUMN mirror"); err != nil {
+				return err
+			}
+		}
+		_, err := conn.ExecContext(ctx, "DELETE FROM meta WHERE key='hooks.runtime.import'")
 		return err
 	})
 	return db, err
 }
 
-// runtimeKey names a repository's runtime copy in state_mirrors.
-func runtimeKey(repo string) string { return "hooks/runtime/" + repo }
-
-// Migrate creates the hook runtime table and imports the old files once.
-// Only the engine calls it at start.
-func Migrate(dataDir string) error {
-	s := Service{DataDir: dataDir}
-	if err := s.validateStartupSpool(); err != nil {
-		return err
-	}
-	db, err := s.runtimeDB()
-	if err != nil {
-		return err
-	}
+// TODO: legacy/shim remove later — imports unowned runtime files once at cutover.
+func (s Service) importRuntime(conn *sql.Conn) error {
+	ctx := context.Background()
 	var done int
-	err = db.QueryRow("SELECT 1 FROM meta WHERE key='hooks.runtime.import'").Scan(&done)
+	err := conn.QueryRowContext(ctx, "SELECT 1 FROM meta WHERE key='hooks.runtime.import'").Scan(&done)
 	if err == nil {
-		return nil
+		return nil // A completed import owns absence as well as existing rows.
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
@@ -83,52 +79,50 @@ func Migrate(dataDir string) error {
 		return err
 	}
 	for _, path := range paths {
-		if err := s.updateRuntime(filepath.Dir(path), func(*state) error { return nil }); err != nil {
+		key := filepath.Base(filepath.Dir(path))
+		var exists int
+		err := conn.QueryRowContext(ctx, "SELECT 1 FROM hook_runtime WHERE repo=?", key).Scan(&exists)
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		_, err = statewrite.ImportMigration(ctx, conn, "hooks/runtime/"+key, path, func(conn *sql.Conn, raw []byte) error {
+			var st state
+			if err := json.Unmarshal(raw, &st); err != nil {
+				log.Printf("skip hook runtime %s: %v", path, err)
+				return nil
+			}
+			_, err := conn.ExecContext(ctx, "INSERT OR IGNORE INTO hook_runtime(repo,body) VALUES(?,?)", key, raw)
+			return err
+		})
+		if err != nil {
 			return fmt.Errorf("import hook runtime %s: %w", path, err)
 		}
 	}
-	return statewrite.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
-		_, err := conn.ExecContext(context.Background(), "INSERT OR IGNORE INTO meta(key,value) VALUES('hooks.runtime.import','1')")
+	return nil
+}
+
+// Migrate validates pending records and prepares the runtime table.
+func Migrate(dataDir string) error {
+	s := Service{DataDir: dataDir}
+	if err := s.validateStartupSpool(); err != nil {
 		return err
-	})
+	}
+	_, err := s.runtimeDB()
+	return err
 }
 
 func (s Service) runtime(id string, fn func(*state) error) error {
-	return s.updateRuntime(s.dir(id), fn)
-}
-
-func (s Service) updateRuntime(dir string, fn func(*state) error) error {
 	db, err := s.runtimeDB()
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
-	// The old lock also orders the post-commit copy and old binary writes.
-	unlock, err := store.Lock(filepath.Join(dir, "state.lock"))
-	if err != nil {
-		return err
-	}
-	defer unlock()
-	path := filepath.Join(dir, "state.json")
-	var st state
 	ctx := context.Background()
-	key := filepath.Base(dir)
-	writer := statewrite.For(db)
-	// TODO: legacy/shim remove later — imports a runtime file that an older binary wrote, before this read-modify-write; remove with item 31.
-	if _, err := writer.ImportIfForeign(ctx, runtimeKey(key), path, func(conn *sql.Conn, raw []byte) error {
-		// A damaged file is skipped once; the row stays.
-		if !json.Valid(raw) {
-			return fmt.Errorf("hook runtime %s is not JSON: %w", path, statewrite.ErrSkipForeign)
-		}
-		_, err := conn.ExecContext(ctx, `INSERT INTO hook_runtime(repo,body) VALUES(?,?)
-ON CONFLICT(repo) DO UPDATE SET body=excluded.body`, key, raw)
-		return err
-	}); err != nil {
-		return err
-	}
-	err = writer.Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+	key := filepath.Base(s.dir(id))
+	return statewrite.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
+		var st state
 		var body []byte
 		err := conn.QueryRowContext(ctx, "SELECT body FROM hook_runtime WHERE repo=?", key).Scan(&body)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -159,14 +153,4 @@ ON CONFLICT(repo) DO UPDATE SET body=excluded.body`, key, raw)
 ON CONFLICT(repo) DO UPDATE SET body=excluded.body`, key, body)
 		return err
 	})
-	if err != nil {
-		return err
-	}
-	// TODO: legacy/shim remove later — keeps state.json as a write-only rollback copy for the previous release; remove with item 31.
-	if err := writer.Mirror(ctx, runtimeKey(key), path, func(out io.Writer) error {
-		return json.NewEncoder(out).Encode(st)
-	}); err != nil {
-		log.Printf("hook runtime committed; previous-release copy failed: %v", err)
-	}
-	return nil
 }

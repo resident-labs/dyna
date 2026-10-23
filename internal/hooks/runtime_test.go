@@ -29,7 +29,7 @@ func TestRuntimeSurvivesRemovalOfLegacyFile(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(s.dir("repo"), "state.json")); err != nil {
+	if err := os.Remove(filepath.Join(s.dir("repo"), "state.json")); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	if err := s.runtime("repo", func(st *state) error {
@@ -86,10 +86,7 @@ func TestConcurrentRuntimeClaimsOnce(t *testing.T) {
 	if claims != 1 {
 		t.Fatalf("claims = %d", claims)
 	}
-	var copy state
-	if err := store.ReadJSON(filepath.Join(s.dir("repo"), "state.json"), &copy); err != nil || !copy.Notices["claim"] {
-		t.Fatalf("previous release copy = %+v, %v", copy, err)
-	}
+
 }
 
 func TestRuntimeImportsLegacyAtEngineStartOnce(t *testing.T) {
@@ -123,26 +120,6 @@ func TestRuntimeImportsLegacyAtEngineStartOnce(t *testing.T) {
 	var count int
 	if err := db.QueryRow("SELECT count(*) FROM hook_runtime").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("repeated startup import = %d rows, %v", count, err)
-	}
-}
-
-func TestRuntimeImportsOlderBinaryWrite(t *testing.T) {
-	s := Service{DataDir: t.TempDir()}
-	t.Cleanup(func() { database.Close(s.DataDir) })
-	if err := s.runtime("repo", func(st *state) error { st.Main = "new-binary"; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(s.dir("repo"), "state.json")
-	if err := store.WriteJSON(path, state{Main: "old-binary"}, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.runtime("repo", func(st *state) error {
-		if st.Main != "old-binary" {
-			t.Fatalf("old binary write was lost: %+v", st)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -210,30 +187,6 @@ func TestRuntimeWithoutSchemaOwnerDoesNotCreateTable(t *testing.T) {
 	}
 }
 
-// After an old binary's write, an update keeps its own value: it imports
-// first, then writes, then copies.
-func TestRuntimeUpdateAfterOlderBinaryWriteKeepsItsValue(t *testing.T) {
-	s := Service{DataDir: t.TempDir()}
-	t.Cleanup(func() { database.Close(s.DataDir) })
-	if err := s.runtime("repo", func(st *state) error { st.Main = "new-binary"; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.WriteJSON(filepath.Join(s.dir("repo"), "state.json"), state{Main: "old-binary"}, 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.runtime("repo", func(st *state) error { st.Main = "update"; return nil }); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.runtime("repo", func(st *state) error {
-		if st.Main != "update" {
-			t.Fatalf("the update was lost: %+v", st)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // The stamps that #1480 kept in the mirror column move to state_mirrors, so
 // a stale copy that its old stamp still covers is not imported over the row.
 func TestRuntimeStampsMoveFromTheMirrorColumn(t *testing.T) {
@@ -244,7 +197,7 @@ func TestRuntimeStampsMoveFromTheMirrorColumn(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := database.Migrate(db, "hooks.runtime", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), runtimeSchema)
+		_, err := conn.ExecContext(context.Background(), `CREATE TABLE hook_runtime(repo TEXT PRIMARY KEY, body BLOB NOT NULL, mirror TEXT NOT NULL DEFAULT '');`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
@@ -273,8 +226,7 @@ func TestRuntimeStampsMoveFromTheMirrorColumn(t *testing.T) {
 	}
 }
 
-// A damaged state.json from another binary is skipped once
-// (state.ErrSkipForeign): runtime updates go on from the row.
+// A damaged stale file cannot block canonical runtime updates.
 func TestRuntimeDamagedFileKeepsTheRow(t *testing.T) {
 	s := Service{DataDir: t.TempDir()}
 	t.Cleanup(func() { database.Close(s.DataDir) })
@@ -282,7 +234,7 @@ func TestRuntimeDamagedFileKeepsTheRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(s.dir("repo"), "state.json")
-	if err := os.Remove(path); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte("not JSON"), 0600); err != nil {

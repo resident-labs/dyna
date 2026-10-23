@@ -22,13 +22,18 @@ func (s Service) documentsDB() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "hooks.documents", 2, func(conn *sql.Conn, old int) error {
+	err = database.Migrate(db, "hooks.documents", 3, func(conn *sql.Conn, old int) error {
 		if old < 1 {
 			if _, err := conn.ExecContext(context.Background(), documentsSchema); err != nil {
 				return err
 			}
 		}
-		return s.importDocuments(conn)
+		if old < 2 {
+			if err := s.importDocuments(conn); err != nil {
+				return err
+			}
+		}
+		return migrateDocumentFields(conn)
 	})
 	return db, err
 }
