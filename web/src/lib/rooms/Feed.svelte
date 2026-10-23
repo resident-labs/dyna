@@ -26,6 +26,7 @@
   import { arrivals, motion, FAST } from '../ui/motion.ts'
   import SystemNote from '../ui/SystemNote.svelte'
   import { noteGroups } from '../ui/notices.ts'
+  import { sealedEvent, rendererFor } from './eventRenderers.ts'
   import { look } from './look.svelte.ts'
   import { highlighted, oneLine } from './look.ts'
 
@@ -207,7 +208,7 @@
       {@const parts = postParts(p)}
       <!-- Every stored post owns the same actions. Kind selects its body only. -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions, a11y_no_noninteractive_tabindex -->
-      <article class="post {p.completion ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind)} class:after-sys={p.completion && rows[index - 1]?.post?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, p, room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(p)} {...postHandlers(selection, p.id)}>
+      <article class="post {p.completion ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind) || sealedEvent(p)} class:after-sys={p.completion && rows[index - 1]?.post?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, p, room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(p)} {...postHandlers(selection, p.id)}>
         {@render replyCue()}
         {#if (row.posts ?? [p]).some((post) => pinned.has(post.id))}<span class="post-pin" title="Pinned" transition:scale={{ start: 0.6, duration: motion(FAST) }}><PinIcon size={13} filled /></span>{/if}
           {#if p.replyTo}
@@ -223,6 +224,13 @@
           {/if}
       {#if notes.has(index)}
         {#if notes.get(index)}<SystemNote notes={notes.get(index)} roomId={room.id} {onopenfile} {onissue} />{/if}
+      {:else if sealedEvent(p)}
+        {@const Card = rendererFor(p)}
+        {#if Card}
+          <Card post={p} notice={p.notice} surface="feed" />
+        {:else}
+          <p class="unknown-event" role="status">Unknown event {p.kind}/{p.notice?.kind ?? '?'}</p>
+        {/if}
       {:else if p.kind === 'goal'}
         <GoalPost post={p} {goals} {ongoal} />
       {:else if ownerQuestion(p)}
@@ -273,7 +281,7 @@
       {/if}
       {#if p.forward}<ForwardQuote {room} post={p.forward} author={byId[p.forward.id]} onpost={jump} {onopenfile} />{/if}
       {#if parts.attachments.length || p.references?.length}<div class="post-files"><PostFiles roomId={room.id} post={p} {parts} onopen={onopenfile} /></div>{/if}
-          {#if !notes.has(index) && p.kind !== 'pr'}<PostActions {room} {p} pinned={pinned.has(p.id)} show={selection.get() === p.id} {onreply} {onforward} {onpin} />{/if}
+          {#if !notes.has(index) && p.kind !== 'pr' && !sealedEvent(p)}<PostActions {room} {p} pinned={pinned.has(p.id)} show={selection.get() === p.id} {onreply} {onforward} {onpin} />{/if}
       </article>
     {/if}
   {/snippet}
@@ -330,6 +338,8 @@
   }
   /* System rows use their own compact layout. */
   .post.sysrow { display: block; padding-left: var(--s4); }
+  /* A sealed event whose type has no renderer must be obvious, not silent. */
+  .unknown-event { margin: var(--s1) 0; padding: 6px 10px; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); font-size: var(--t-sm); }
   .post.prrow > :global(.actions) { top: auto; bottom: calc(100% - 4px); }
   .post:global(.swipeable) { transform: var(--reply-transform, none); transition: transform var(--motion-fast) ease-out, background-color var(--motion-fast) var(--ease); }
   .post:global(.swipe-drag) { transition: none; user-select: none; }
