@@ -9,13 +9,15 @@ test('job logs retry failed reads, preserve reading position, and reject late re
   const pending: { resolve: (log: ShellLog) => void; reject: (error: Error) => void }[] = []
   const logEl = { scrollHeight: 1000, scrollTop: 5, clientHeight: 300 }
   const state: Record<string, unknown> = {
-    sel: 'first', log: null, logError: '', logLoading: false, logRequest: 0,
+    sel: 'first', log: null, logError: '', logLoading: false, logRequest: 0, loadingJob: '',
     logEl, follow: false, tick: async () => {}, errorText,
     api: { shellLog: () => new Promise<ShellLog>((resolve, reject) => pending.push({ resolve, reject })) },
   }
   const source = readFileSync(new URL('./Jobs.svelte', import.meta.url), 'utf8')
   runFunctions(source, ['loadLog', 'trackFollow', 'resumeFollowing'], state)
   const first = call(state, 'loadLog')
+  await call(state, 'loadLog')
+  assert.equal(pending.length, 1, 'a timed refresh waits for the selected job read')
   pending[0]?.reject(new Error('offline'))
   await first
   assert.equal(state.logError, 'offline')
