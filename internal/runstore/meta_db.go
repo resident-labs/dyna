@@ -85,7 +85,10 @@ func openRuns(dataDir string) (*sql.DB, error) {
 	if err := migrateMeta(db, dataDir); err != nil {
 		return db, err
 	}
-	return db, migrateSteering(db, dataDir)
+	if err := migrateSteering(db, dataDir); err != nil {
+		return db, err
+	}
+	return db, migrateDirectories(db, dataDir)
 }
 
 // nextRev advances the runs table's revision and returns it.
@@ -465,6 +468,9 @@ func deleteMeta(db *sql.DB, id string) error {
 			return err
 		}
 		if _, err := conn.ExecContext(ctx, "DELETE FROM run_agent_steering WHERE run=?", id); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "DELETE FROM run_directories WHERE run_id=?", id); err != nil {
 			return err
 		}
 		// The meta's and the workers' steering copies are all under runs/<id>.
