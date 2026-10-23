@@ -22,8 +22,6 @@ Dyna renews private credentials in the background while the host runs. If a prov
 
 ## Storage
 
-Dyna stores the account index in `$XDG_DATA_HOME/dyna/accounts/accounts.json`, or `~/.local/share/dyna/accounts/accounts.json`. Each account's login files live in its own native home under the same directory. Files have mode `0600` and directories have mode `0700`. Credentials stay on the host. Browser and mobile clients receive account projections only.
-
-Older releases saved some accounts as grants with no native home. Dyna moves each such grant into its own native home once. It then drops the grants that cannot move, such as OpenCode v2 references.
+Dyna stores the account index in `dyna.db`. Each account's login files live in its own native home under `$XDG_DATA_HOME/dyna/accounts`, or `~/.local/share/dyna/accounts`. Files have mode `0600` and directories have mode `0700`. Credentials stay on the host. Browser and mobile clients receive account projections only.
 
 To copy your personal login into Dyna, run `dyna harness login <harness> --use-personal`. It works only for a harness with no saved account. If an account with another identity exists, sign in instead.
