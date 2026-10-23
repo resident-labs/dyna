@@ -28,22 +28,71 @@ type cursor struct {
 	ID string
 }
 
+// boundaryOf reads a page cursor. An empty before names no boundary yet.
+func boundaryOf(before string) (cursor, error) {
+	if before == "" {
+		return cursor{}, nil
+	}
+	data, err := base64.RawURLEncoding.DecodeString(before)
+	if err != nil {
+		return cursor{}, fmt.Errorf("invalid list cursor")
+	}
+	var c cursor
+	if err := json.Unmarshal(data, &c); err != nil || (c.At.IsZero() && c.ID == "") {
+		return cursor{}, fmt.Errorf("invalid list cursor")
+	}
+	return c, nil
+}
+
+// Boundary reads a page cursor: the time and ID of the last closed item that
+// page returned. A store that bounds the rows of a later page in SQL uses it,
+// so the page it reads matches what Select would have selected.
+func Boundary(before string) (time.Time, string, error) {
+	c, err := boundaryOf(before)
+	return c.At, c.ID, err
+}
+
+func encodeCursor(c cursor) string {
+	data, _ := json.Marshal(c)
+	return base64.RawURLEncoding.EncodeToString(data)
+}
+
 // Select always includes open items on the first page. Closed items use a
 // 24-hour cutoff and a limit. Later pages contain closed items only, ordered
 // by descending time and ascending ID. The cursor fixes the page boundary.
 func Select[T any](items []T, before string, limit int, now time.Time, meta func(T) Meta) (Page[T], error) {
+	out, _, _, err := selectPage(items, before, limit, now, meta)
+	return out, err
+}
+
+// SelectWindow is Select for a store that read only the closed items a page
+// can reach, and reported with below whether closed items remain under that
+// window. A later page that showed no closed item reports no older page, so a
+// client never asks for the same cursor twice.
+func SelectWindow[T any](items []T, before string, limit int, now time.Time, meta func(T) Meta, below bool) (Page[T], error) {
+	out, boundary, advanced, err := selectPage(items, before, limit, now, meta)
+	if err != nil || out.Older || !below {
+		return out, err
+	}
+	if before != "" && !advanced {
+		return out, nil
+	}
+	out.Older, out.Cursor = true, encodeCursor(boundary)
+	return out, nil
+}
+
+// selectPage also reports whether a closed item advanced the boundary, so a
+// caller with a bounded window can tell a page that showed closed work from
+// one that could not.
+func selectPage[T any](items []T, before string, limit int, now time.Time, meta func(T) Meta) (Page[T], cursor, bool, error) {
 	out := Page[T]{Items: []T{}}
 	limit = Limit(limit)
-	boundary := cursor{At: now.Add(-Recent)}
-	if before != "" {
-		boundary = cursor{}
-		data, err := base64.RawURLEncoding.DecodeString(before)
-		if err != nil {
-			return out, fmt.Errorf("invalid list cursor")
-		}
-		if err := json.Unmarshal(data, &boundary); err != nil || (boundary.At.IsZero() && boundary.ID == "") {
-			return out, fmt.Errorf("invalid list cursor")
-		}
+	boundary, err := boundaryOf(before)
+	if err != nil {
+		return out, boundary, false, err
+	}
+	if before == "" {
+		boundary = cursor{At: now.Add(-Recent)}
 	}
 	// Only the newest limit+1 closed items can reach the page, and the extra
 	// one says whether older ones remain. A bounded insertion keeps each of
@@ -101,10 +150,9 @@ func Select[T any](items []T, before string, limit int, now time.Time, meta func
 		out.Older = true
 	}
 	if out.Older {
-		data, _ := json.Marshal(boundary)
-		out.Cursor = base64.RawURLEncoding.EncodeToString(data)
+		out.Cursor = encodeCursor(boundary)
 	}
-	return out, nil
+	return out, boundary, count > 0, nil
 }
 
 // Limit applies the same default and maximum to each history request.
