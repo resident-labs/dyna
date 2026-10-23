@@ -52,7 +52,7 @@ func TestOldPoolSlotsDoNotCreateAssignments(t *testing.T) {
 func TestReviewerLinksFollowRecordAssignmentAfterVerdict(t *testing.T) {
 	for _, verdict := range []string{"", "approve", "changes"} {
 		root := legacyRoot(t)
-		st := state.State{Version: 1, Records: map[string]*state.Record{"active": {RoomID: "room", State: "open", Watching: true, Reviewer: "reviewer", Verdict: verdict}}}
+		st := state.State{Version: 1, Records: map[string]*state.Record{"active": {RoomID: "room", State: "open", Watching: true, Reviewer: "reviewer", Verdict: state.ReviewVerdict(verdict)}}}
 		b, _ := json.Marshal(st)
 		if err := os.WriteFile(filepath.Join(root, "index.json"), b, 0600); err != nil {
 			t.Fatal(err)

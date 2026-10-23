@@ -40,7 +40,7 @@ func TestPublishingCLIBlocksAgentsAndKeepsMarkdownLocal(t *testing.T) {
 	view := &prview.Service{Notify: s.Notify}
 	s.Store = view.Watcher().Store
 	engineCalls, err := websvc.Bind([]websvc.Binding{
-		{Name: "RecordPRVerdict", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.RecordPRVerdict},
+		{Name: "RecordReviewResult", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.RecordReviewResult},
 		{Name: "SetReviewPublishing", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: view.SetReviewPublishing},
 		{Name: "CommentPR", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.CommentPR},
 		{Name: "PostPRReview", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.PostPRReview},

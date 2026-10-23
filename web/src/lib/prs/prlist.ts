@@ -96,6 +96,7 @@ const MERGE: Record<string, [string, string, string]> = {
   conflict: ['blocked', 'Conflict', 'coral'],
   'ci-failed': ['blocked', 'CI failed', 'coral'],
   changes: ['blocked', 'Changes requested', 'coral'],
+  stopped: ['blocked', 'Review stopped', 'gold'],
   paused: ['blocked', 'Paused', 'gold'],
   'waiting-base': ['progress', 'Waiting for the base PR', 'gold'],
   review: ['progress', 'Needs review', 'quiet'],

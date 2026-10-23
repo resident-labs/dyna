@@ -1,8 +1,8 @@
 // Typed readers for the payload of a sealed system event. They read the
 // stored payload only, never the post text, so a card and its event cannot
 // disagree. The types come from events.gen.ts, which the Go registry writes.
-import { eventSpecs, isAlertEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHookEvent, isIssueEvent, isMachineEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isRuleEvent, isServiceFailedEvent, isSessionEvent, isSlowTestEvent, isWorktreeEvent } from './events.gen.ts'
-import type { AlertEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HookEvent, IssueEvent, MachineEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, RuleEvent, ServiceFailedEvent, SessionEvent, SlowTestEvent, WorktreeEvent } from './events.gen.ts' 
+import { eventSpecs, isAlertEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHookEvent, isIssueEvent, isMachineEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isServiceFailedEvent, isSessionEvent, isSlowTestEvent, isWorktreeEvent } from './events.gen.ts'
+import type { AlertEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HookEvent, IssueEvent, MachineEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, ServiceFailedEvent, SessionEvent, SlowTestEvent, WorktreeEvent } from './events.gen.ts'
 
 // A post of one event family, with the fields its reader needs. A feed row, a
 // stored message and a test fixture all fit it.
@@ -93,6 +93,12 @@ export function slowTestEvent(post: EventPost): SlowTestEvent | undefined {
 export function ruleEvent(post: EventPost): RuleEvent | undefined {
   if (post.kind !== 'rule') return undefined
   return isRuleEvent(post.payload) ? post.payload : undefined
+}
+
+// reviewEvent returns the typed payload of a reviewer result post.
+export function reviewEvent(post: EventPost): ReviewEvent | undefined {
+  if (post.kind !== 'review') return undefined
+  return isReviewEvent(post.payload) ? post.payload : undefined
 }
 
 // machineEvent returns the typed payload of a machine event: the sizes its probe

@@ -164,11 +164,11 @@ func TestFindingsRepliesAndIncrementalReview(t *testing.T) {
 	if err != nil || !strings.Contains(string(data), "bounds checked") {
 		t.Fatalf("delta: %s %v", data, err)
 	}
-	if err = e.s.VerdictWithFindings(context.Background(), r.Key, again.Reviewer, head, "approve-with-nits", "Ready with a naming nit", 0, []Finding{{Severity: "nit", File: "code.txt", Why: "Name is unclear", Fix: "Rename it"}}); err != nil {
+	if err = e.s.VerdictWithFindings(context.Background(), r.Key, again.Reviewer, head, state.VerdictApprove, "Ready with a naming nit", 0, []Finding{{Severity: state.FindingNit, File: "code.txt", Why: "Name is unclear", Fix: "Rename it"}}); err != nil {
 		t.Fatal(err)
 	}
 	approvedRecord, _ := e.s.Store.Get(r.Key)
-	if len(approvedRecord.ReviewRounds) != 2 || approvedRecord.Verdict != "approve-with-nits" || len(approvedRecord.Findings) != 1 || approvedRecord.Findings[0].Severity != "nit" {
+	if len(approvedRecord.ReviewRounds) != 2 || approvedRecord.Verdict != state.VerdictApprove || len(approvedRecord.Findings) != 1 || approvedRecord.Findings[0].Severity != state.FindingNit {
 		t.Fatalf("final review: %+v", approvedRecord)
 	}
 }

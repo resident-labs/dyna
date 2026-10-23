@@ -269,3 +269,25 @@ test('a merge trial folds queued, trial and landed into one card', () => {
   assert.deepEqual(rowPosts(rows[0]).map((post) => post.id), ['m1', 'm2', 'm3', 'm4'])
   assert.equal(rowPost(rows[0])?.notice?.kind, 'landed')
 })
+
+// A review result is one card per PR head: a re-review of the same head keeps
+// one card, and a new head starts a new one.
+const reviewPost = (id: string, kind: 'approve' | 'changes' | 'approve-fast' | 'stop-early', head: string, ts = start): FeedInput => ({
+  id, ts, from: 'dyna', kind: 'review', text: 'review result',
+  notice: { kind: 'result' },
+  payload: {
+    kind, changeId: 'github.com/acme/app#542', number: 542, label: 'PR #542',
+    location: 'https://github.com/acme/app/pull/542', head,
+  },
+})
+
+test('review results fold per PR head', () => {
+  const rows = content(feedRows([
+    reviewPost('r1', 'approve', 'a'),
+    reviewPost('r2', 'changes', 'a', start + 60_000),
+    reviewPost('r3', 'approve', 'b', start + 120_000),
+  ]))
+  assert.equal(rows.length, 2)
+  assert.deepEqual(rowPosts(rows[0]).map((post) => post.id), ['r1', 'r2'])
+  assert.deepEqual(rowPosts(rows[1]).map((post) => post.id), ['r3'])
+})
