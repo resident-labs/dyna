@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"dyna-agent/internal/fsutil"
@@ -413,30 +414,41 @@ func TestInstallOfOneHarnessDoesNotBlockAnother(t *testing.T) {
 
 func TestInstallsOfOneHarnessSerialize(t *testing.T) {
 	m := manager(t)
-	var active, peak atomic.Int32
-	m.Run = func(ctx context.Context, args, env []string) error {
-		n := active.Add(1)
-		defer active.Add(-1)
-		if n > peak.Load() {
-			peak.Store(n)
-		}
-		time.Sleep(20 * time.Millisecond)
-		return fixtureInstall(ctx, args, env)
-	}
-	var wg sync.WaitGroup
-	for _, v := range []string{"1.0.0", "2.0.0"} {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			if _, err := m.Install(context.Background(), "codex", v); err != nil {
-				t.Error(err)
+	// The virtual clock lets the second installer retry its lock without
+	// waiting on real time, and synctest.Wait reports when both installers
+	// are blocked, so no timer decides the answer.
+	synctest.Test(t, func(t *testing.T) {
+		var active, peak atomic.Int32
+		entered := make(chan struct{}, 2)
+		release := make(chan struct{})
+		m.Run = func(ctx context.Context, args, env []string) error {
+			n := active.Add(1)
+			defer active.Add(-1)
+			if n > peak.Load() {
+				peak.Store(n)
 			}
-		}()
-	}
-	wg.Wait()
-	if peak.Load() != 1 {
-		t.Fatalf("concurrent installers of one harness: %d", peak.Load())
-	}
+			entered <- struct{}{}
+			<-release
+			return fixtureInstall(ctx, args, env)
+		}
+		var wg sync.WaitGroup
+		for _, v := range []string{"1.0.0", "2.0.0"} {
+			wg.Go(func() {
+				if _, err := m.Install(context.Background(), "codex", v); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+		// One installer holds the harness lock inside Run; the other waits
+		// for that lock, so it never enters Run at the same time.
+		<-entered
+		synctest.Wait()
+		if peak.Load() != 1 {
+			t.Fatalf("concurrent installers of one harness: %d", peak.Load())
+		}
+		close(release)
+		wg.Wait()
+	})
 }
 
 func TestIntegrityFallbackAndMissingMetadata(t *testing.T) {

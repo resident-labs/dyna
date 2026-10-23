@@ -43,6 +43,11 @@ type Reference struct{ value identity }
 // process start time, so a reused PID cannot inherit the launch record.
 func (r Reference) Leader() (pid int, birth string) { return r.value.Group, r.value.Birth }
 
+// Guardian names the guard process that owns the group's lifetime. The guard
+// kills, drains and reaps the group before it exits, so its exit reports that
+// cleanup has finished. The PID grants no authority on its own.
+func (r Reference) Guardian() int { return r.value.Guardian }
+
 func (r Reference) MarshalJSON() ([]byte, error) { return json.Marshal(r.value) }
 func (r *Reference) UnmarshalJSON(b []byte) error {
 	var v identity

@@ -3,9 +3,10 @@ package shells
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"testing"
-	"time"
 )
 
 // TestMain keeps the caller's worker identity out of temporary test stores.
@@ -27,7 +28,11 @@ func TestMain(m *testing.M) {
 			os.Exit(0)
 		case "_run":
 			_ = os.WriteFile(os.Getenv("SPAWN_READY"), fmt.Appendf(nil, "%d\n", os.Getpid()), 0)
-			time.Sleep(time.Minute)
+			// Hold until the test kills this child. A signal arrives as a
+			// termination, and SIGKILL needs no handler at all.
+			signals := make(chan os.Signal, 1)
+			signal.Notify(signals, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+			<-signals
 			os.Exit(0)
 		}
 	}

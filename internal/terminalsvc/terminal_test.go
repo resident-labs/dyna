@@ -5,9 +5,10 @@ import (
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/store/storetest"
 	"errors"
+	"fmt"
+	"io"
 	"os"
-	"regexp"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -165,10 +166,35 @@ func TestOpenLimits(t *testing.T) {
 
 func TestCloseStopsBackgroundJob(t *testing.T) {
 	s, in := terminalTest(t, Options{})
-	write(t, s, in.ID, "sleep 30 & printf '__bg_pid_%d__\\n' $!; wait\n")
-	pattern := regexp.MustCompile(`__bg_pid_([0-9]+)__`)
-	ev := until(t, s, in.ID, 0, func(ev Event) bool { return pattern.Match(ev.Data) })
-	pid := pattern.FindSubmatch(ev.Data)[1]
+	pipe := filepath.Join(t.TempDir(), "background-exit")
+	if err := syscall.Mkfifo(pipe, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The background child opens this pipe read-write and then blocks on the
+	// shell's own read builtin, so it runs no external command after that
+	// point and cannot sit in loader I/O while Close's SIGKILL is pending. A
+	// reader proves the child runs before Close; EOF proves the kill reached
+	// it.
+	holders := make(chan *os.File, 1)
+	go func() {
+		f, err := os.OpenFile(pipe, os.O_RDONLY, 0)
+		if err != nil {
+			holders <- nil
+			return
+		}
+		holders <- f
+	}()
+	write(t, s, in.ID, fmt.Sprintf("( exec 3<>%q; read -r line <&3 ) & wait\n", pipe))
+	var reader *os.File
+	select {
+	case reader = <-holders:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the background job never started")
+	}
+	if reader == nil {
+		t.Fatal("the background job never started")
+	}
+	defer reader.Close()
 	term, err := s.get(in.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -179,66 +205,16 @@ func TestCloseStopsBackgroundJob(t *testing.T) {
 	if term.cmd.ProcessState == nil || !term.cmd.ProcessState.Sys().(syscall.WaitStatus).Signaled() {
 		t.Fatal("close did not reap the killed shell")
 	}
-	// Close reaps its shell. A background child can remain in kernel I/O
-	// with SIGKILL pending until that I/O completes.
-	var status []byte
-	for deadline := time.Now().Add(3 * time.Second); ; {
-		b, err := os.ReadFile("/proc/" + string(pid) + "/status")
-		if os.IsNotExist(err) || errors.Is(err, syscall.ESRCH) {
-			return
-		}
+	// Close reaps its shell and kills the rest of the group. The child's own
+	// pipe reaches EOF when it exits, so a survivor fails here.
+	closed := make(chan error, 1)
+	go func() { _, err := io.Copy(io.Discard, reader); closed <- err }()
+	select {
+	case err := <-closed:
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("reading the background job's exit pipe: %v", err)
 		}
-		status = b
-		if backgroundJobTerminating(b) {
-			return
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	t.Fatalf("background job has no termination request after close: %s", status)
-}
-
-func backgroundJobTerminating(status []byte) bool {
-	for _, line := range strings.Split(string(status), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 2 {
-			continue
-		}
-		if fields[0] == "State:" && (fields[1] == "Z" || fields[1] == "X") {
-			return true
-		}
-		if fields[0] == "SigPnd:" || fields[0] == "ShdPnd:" {
-			pending, err := strconv.ParseUint(fields[1], 16, 64)
-			if err == nil && pending&(1<<(syscall.SIGKILL-1)) != 0 {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func TestBackgroundJobTerminationStatus(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		status string
-		want   bool
-	}{
-		{"zombie", "State:\tZ (zombie)\n", true},
-		{"dead", "State:\tX (dead)\n", true},
-		{"disk_wait_with_thread_kill", "State:\tD (disk sleep)\nSigPnd:\t0000000000000100\nShdPnd:\t0000000000000000\n", true},
-		{"disk_wait_with_shared_kill", "State:\tD (disk sleep)\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000100\n", true},
-		{"disk_wait_without_kill", "State:\tD (disk sleep)\nSigPnd:\t0000000000000000\nShdPnd:\t0000000000000000\n", false},
-		{"other_signal", "State:\tD (disk sleep)\nShdPnd:\t0000000000004000\n", false},
-		{"running", "State:\tR (running)\n", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := backgroundJobTerminating([]byte(tc.status)); got != tc.want {
-				t.Fatalf("termination requested = %v, want %v; status: %s", got, tc.want, tc.status)
-			}
-		})
+	case <-time.After(3 * time.Second):
+		t.Fatal("close did not stop the background job")
 	}
 }
