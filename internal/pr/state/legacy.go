@@ -26,6 +26,11 @@ func newState() State {
 func readLegacy(root string) (st legacyDocuments, found bool, err error) {
 	st.records = map[string]json.RawMessage{}
 	path := filepath.Join(root, "index.json")
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("PR import %s: %w", path, err)
+		}
+	}()
 	if _, err = os.Stat(path); os.IsNotExist(err) {
 		path = filepath.Join(root, "state.json")
 		if _, err = os.Stat(path); os.IsNotExist(err) {
@@ -39,6 +44,7 @@ func readLegacy(root string) (st legacyDocuments, found bool, err error) {
 	if err != nil {
 		return st, false, err
 	}
+	st.source = path
 	// A missing version is a version-1 whole-file store.
 	disk := diskIndex{State: newState(), Format: 1}
 	if err = json.Unmarshal(b, &disk); err != nil {
@@ -83,32 +89,36 @@ func readLegacy(root string) (st legacyDocuments, found bool, err error) {
 		}
 	}
 	files := map[string]string{}
+	origins := map[string]string{}
 	for key, name := range disk.Files {
 		files[key] = name
+		origins[key] = path
 	}
 	if disk.Format == 3 && disk.Closed != "" {
 		if filepath.Base(disk.Closed) != disk.Closed || !strings.HasSuffix(disk.Closed, ".json") {
 			return st, false, fmt.Errorf("invalid closed PR index path %q", disk.Closed)
 		}
-		raw, err := os.ReadFile(filepath.Join(root, "closed", disk.Closed))
+		closedPath := filepath.Join(root, "closed", disk.Closed)
+		raw, err := os.ReadFile(closedPath)
 		if err != nil {
 			return st, false, err
 		}
 		var closedFiles map[string]string
 		if err = json.Unmarshal(raw, &closedFiles); err != nil {
-			return st, false, fmt.Errorf("invalid closed PR index: %w", err)
+			return st, false, fmt.Errorf("invalid closed PR index %s: %w", closedPath, err)
 		}
 		for key, name := range closedFiles {
 			if _, duplicate := files[key]; duplicate {
 				return st, false, fmt.Errorf("PR %s occurs in both indexes", key)
 			}
 			files[key] = name
+			origins[key] = closedPath
 		}
 	}
 	if disk.Files != nil {
 		for key, name := range files {
 			if filepath.Base(name) != name || !strings.HasSuffix(name, ".json") {
-				return st, false, fmt.Errorf("invalid PR record path %q", name)
+				return st, false, fmt.Errorf("invalid PR record path %q in %s", name, origins[key])
 			}
 			raw, err := os.ReadFile(filepath.Join(root, "records", name))
 			if err != nil {
@@ -116,7 +126,7 @@ func readLegacy(root string) (st legacyDocuments, found bool, err error) {
 			}
 			var record diskRecord
 			if err = json.Unmarshal(raw, &record); err != nil {
-				return st, false, fmt.Errorf("invalid PR record %s: %w", key, err)
+				return st, false, fmt.Errorf("invalid PR record %s: %w", filepath.Join(root, "records", name), err)
 			}
 			st.records[key] = raw
 		}
