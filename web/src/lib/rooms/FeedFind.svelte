@@ -194,7 +194,7 @@
   .note { margin: 0; padding: 6px var(--s3) var(--s2); font-size: var(--t-ui); color: var(--faint); }
   .note.err { color: var(--coral); }
   @media (max-width: 760px) {
-    input { min-height: 44px; font-size: 16px; }
+    input { min-height: 44px; font-size: var(--t-title); }
     .nav, .x { width: 44px; min-height: 44px; }
     .bar { flex-wrap: wrap; gap: 0; }
     input { flex-basis: calc(100% - 164px); }
