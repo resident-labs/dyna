@@ -83,9 +83,10 @@ func TestIssueUpgradePreservesCurrentRowsAndSourceOrder(t *testing.T) {
 	if _, err := s.issuesDB(); err != nil {
 		t.Fatal(err)
 	}
-	checkMeta("2", 11)
+	checkMeta("3", 11)
 	got, err := s.Issues(roomID, true)
-	want := []Issue{current, {ID: "newer", State: "open"}, {ID: "older", State: "open"}}
+	current.Number = 3
+	want := []Issue{current, {ID: "newer", Number: 2, State: "open"}, {ID: "older", Number: 1, State: "open"}}
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("issues = %+v, %v", got, err)
 	}
@@ -95,7 +96,7 @@ func TestIssueUpgradePreservesCurrentRowsAndSourceOrder(t *testing.T) {
 	if _, err := s.issuesDB(); err != nil {
 		t.Fatal(err)
 	}
-	checkMeta("2", 11)
+	checkMeta("3", 11)
 	got, err = s.Issues(roomID, true)
 	if err != nil || !reflect.DeepEqual(got, want) {
 		t.Fatalf("source imported again: %+v, %v", got, err)

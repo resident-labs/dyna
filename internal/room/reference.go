@@ -16,6 +16,68 @@ type Reference struct {
 	URL    string `json:"url"`
 }
 
+// issueReferences resolves old message IDs without changing the append-only log.
+// Canonical D-N snapshots need no database lookup.
+type issueReferences struct {
+	store *Store
+	rooms map[string]map[string]int
+}
+
+func (r *issueReferences) canonical(roomID string, refs []Reference) error {
+	for i, ref := range refs {
+		if ref.Kind != "room_issue" {
+			continue
+		}
+		var number int
+		switch n := ref.Number.(type) {
+		case int:
+			number = n
+		case float64:
+			number = int(n)
+		case string:
+			if parsed, ok := issueNumber(n); ok {
+				number = parsed
+			} else {
+				if r.rooms == nil {
+					r.rooms = map[string]map[string]int{}
+				}
+				numbers, loaded := r.rooms[roomID]
+				if !loaded {
+					db, err := r.store.issuesDB()
+					if err != nil {
+						return err
+					}
+					rows, err := db.Query(`SELECT message_id,number FROM room_issue_numbers WHERE room_id=?`, roomID)
+					if err != nil {
+						return err
+					}
+					numbers = map[string]int{}
+					for rows.Next() {
+						var id string
+						var value int
+						if err := rows.Scan(&id, &value); err != nil {
+							rows.Close()
+							return err
+						}
+						numbers[id] = value
+					}
+					err = rows.Err()
+					rows.Close()
+					if err != nil {
+						return err
+					}
+					r.rooms[roomID] = numbers
+				}
+				number = numbers[n]
+			}
+		}
+		if number > 0 {
+			refs[i].Number = fmt.Sprintf("D-%d", number)
+		}
+	}
+	return nil
+}
+
 // ValidateReferences bounds untrusted composer metadata before storage.
 func ValidateReferences(refs []Reference) error {
 	if len(refs) > 20 {
@@ -75,6 +137,11 @@ func referenceText(body string, refs []Reference) string {
 			label = "Room issue"
 		}
 		line := fmt.Sprintf("%s #%v: %s", label, r.Number, r.Title)
+		if r.Kind == "room_issue" {
+			if number, ok := issueNumber(fmt.Sprint(r.Number)); ok {
+				line = fmt.Sprintf("%s D-%d: %s", label, number, r.Title)
+			}
+		}
 		var details []string
 		if r.State != "" {
 			details = append(details, r.State)

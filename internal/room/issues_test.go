@@ -21,7 +21,7 @@ func TestIssuesRoundTripAndTriage(t *testing.T) {
 		t.Fatal(err)
 	}
 	rows, err := s.Issues(rec.ID, false)
-	if err != nil || len(rows) != 2 || rows[0].ID != b.ID || rows[1].ID != a.ID {
+	if err != nil || len(rows) != 2 || rows[0].ID != b.ID || rows[1].ID != a.ID || a.Number != 1 || b.Number != 2 || rows[0].Number != 2 || rows[1].Number != 1 {
 		t.Fatalf("issues: %+v %v", rows, err)
 	}
 	post, err := s.Message(rec.ID, a.ID)
@@ -34,8 +34,8 @@ func TestIssuesRoundTripAndTriage(t *testing.T) {
 	if _, err = s.ChangeIssue(rec.ID, a.ID, "alpha", func(i *Issue) error { i.State = "closed"; return nil }); err == nil {
 		t.Fatal("closed without reason")
 	}
-	got, err := s.ChangeIssue(rec.ID, a.ID, "alpha:root", func(i *Issue) error { i.State = "closed"; i.Reason = "fixed"; return nil })
-	if err != nil || got.ChangedBy != "alpha:root" || got.ChangedAt == 0 {
+	got, err := s.ChangeIssue(rec.ID, "d1", "alpha:root", func(i *Issue) error { i.State = "closed"; i.Reason = "fixed"; return nil })
+	if err != nil || got.ChangedBy != "alpha:root" || got.ChangedAt == 0 || got.Label() != "D-1" {
 		t.Fatalf("close: %+v %v", got, err)
 	}
 	if _, err = s.ChangeIssue(rec.ID, a.ID, "alpha", func(i *Issue) error { i.State = "goal"; i.GoalID = "g1"; return nil }); err == nil {
@@ -47,8 +47,20 @@ func TestIssuesRoundTripAndTriage(t *testing.T) {
 	}
 	reopened := &Store{Root: s.Root}
 	rows, err = reopened.Issues(rec.ID, true)
-	if err != nil || len(rows) != 2 || rows[1].State != "closed" {
+	if err != nil || len(rows) != 2 || rows[1].State != "closed" || rows[1].Number != 1 {
 		t.Fatalf("round trip: %+v %v", rows, err)
+	}
+	c, err := reopened.FileIssue(rec.ID, "Third", "", "", 0, rec.Name)
+	if err != nil || c.Number != 3 {
+		t.Fatalf("number after close: %+v %v", c, err)
+	}
+	other, err := s.Create(CreateInput{Name: "beta", CreatedBy: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.FileIssue(other.ID, "Separate room", "", "", 0, other.Name)
+	if err != nil || first.Number != 1 {
+		t.Fatalf("other room: %+v %v", first, err)
 	}
 }
 
@@ -128,6 +140,9 @@ func TestLegacyIssuesImportKeepsOrderAndFields(t *testing.T) {
 	var want []Issue
 	if err := json.Unmarshal(raw, &want); err != nil {
 		t.Fatal(err)
+	}
+	for i := range want {
+		want[i].Number = len(want) - i
 	}
 	got, err := s.Issues(rec.ID, true)
 	if err != nil {
