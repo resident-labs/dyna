@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // The floating chat on the Computer tab. It reads the same session data and
   // sends through the same path as the Messages tab, so a message shows in
   // both places. Tucked: one pill. Composer: the pill widens into an input.
@@ -9,29 +9,49 @@
   import { dmView } from '../sessions/dm.ts'
   import { showReasoning, showCompaction } from '../ui/prefs.ts'
   import { ago } from '../ui/format.ts'
-  import { computerLine } from './summary.ts'
+  import { errorText } from '../errorText.ts'
+  import { computerLine, type ComputerView } from './summary.ts'
   import { clock } from './clock.svelte.ts'
   import { attachmentDraft } from '../files/attachmentDraft.ts'
-  import { TUCKED, COMPOSER, CHAT, RECENT, chatClick, chatKey, chatDriving, lastLine } from './chatState.ts'
+  import { TUCKED, COMPOSER, CHAT, RECENT, chatClick, chatKey, chatDriving, lastLine, type ChatShape, type ChatWhere } from './chatState.ts'
+  import type { AttachmentRef } from '../api/engine.ts'
+  import type { Attachment, Member, PostResult, Room, SendResult } from '../api/room.ts'
+  import type { Session } from '../api/session.ts'
 
-  // session: the transcript the app already holds. onsend sends to the
-  // session, as the Messages tab does. driving: the owner has control.
-  let { session = null, room, members = [], name = '', c = null, computerCount = 1, driving = false, onsend, onopenfile, onpost = null, onmessages = null, draft: saved = '', ondraft = null } = $props()
+  interface Props {
+    // session: the transcript the app already holds. onsend sends to the
+    // session, as the Messages tab does. driving: the owner has control.
+    session?: Session | null
+    room: Room
+    members?: Member[]
+    name?: string
+    c?: ComputerView | null
+    computerCount?: number
+    driving?: boolean
+    onsend: (text: string, atts: AttachmentRef[]) => Promise<PostResult | SendResult | undefined>
+    onopenfile: (attachment: Attachment) => void
+    onpost?: ((postId: string) => void) | null
+    onmessages?: (() => void) | null
+    draft?: string
+    ondraft?: ((draft: string) => void) | null
+  }
+  let { session = null, room, members = [], name = '', c = null, computerCount = 1, driving = false, onsend, onopenfile, onpost = null, onmessages = null, draft: saved = '', ondraft = null }: Props = $props()
 
-  let state = $state(TUCKED)
-  let dockEl = $state()
-  let field = $state()
-  let scroller = $state()
+  // shape is the chat's current form; the rules that move it are in chatState.ts.
+  let shape = $state<ChatShape>(TUCKED)
+  let dockEl = $state<HTMLDivElement | undefined>()
+  let field = $state<HTMLElement | undefined>()
+  let scroller = $state<HTMLDivElement | undefined>()
   let draft = $state(saved)
   $effect(() => { ondraft?.(draft) })
   let busy = $state(false)
   let sendError = $state('')
-  const attachments = attachmentDraft({ room: () => room?.id, error: (m) => (sendError = m), focus: () => field?.focus(), disabled: () => !!m?.closed, noun: 'message' })
+  const attachments = attachmentDraft({ room: () => room?.id, error: (m: string) => (sendError = m), focus: () => field?.focus(), disabled: () => !!m?.closed, noun: 'message' })
   onDestroy(() => attachments.destroy())
 
   const m = $derived(session?.member)
-  const dm = $derived(session ? dmView(session, room, { reasoning: $showReasoning, compaction: $showCompaction }, [], members.filter((child) => !!m?.id && child.parent === m.id)) : null)
-  const last = $derived(lastLine(dm?.rows, dm?.address))
+  const dm = $derived(session ? dmView(session, room, { reasoning: $showReasoning, compaction: $showCompaction }, [], members.filter((child) => !!m?.id && child.parent === m?.id)) : null)
+  const last = $derived(lastLine(dm?.rows, dm?.address ?? ''))
   // The overlay shows the newest rows; the Messages tab has the rest.
   const shown = $derived(dm ? { ...dm, rows: dm.rows.slice(-RECENT) } : null)
   // Intent comes from computer state; window metadata is the fallback.
@@ -39,50 +59,50 @@
   const age = $derived.by(() => {
     // Refresh the app's shared relative time on each clock tick.
     clock.now
-    return c?.latestStatus?.text?.trim() && Number.isFinite(Date.parse(c.latestStatus.at)) ? ago(c.latestStatus.at) : ''
+    return c?.latestStatus?.text?.trim() && Number.isFinite(Date.parse(c.latestStatus.at ?? '')) ? ago(c.latestStatus.at ?? '') : ''
   })
   const who = $derived(m?.name || name || 'the agent')
   const failed = $derived($attachments.failed)
   const canSend = $derived(!busy && !$attachments.uploading && !failed && !m?.closed && (draft.trim() !== '' || $attachments.ready.length > 0))
 
   // The dot shows when the agent did or said something since the chat was last open.
-  let seen = $state(null)
+  let seen = $state<string | null>(null)
   $effect(() => {
     if (!session) return
-    if (seen === null || state !== TUCKED) seen = last?.key ?? ''
+    if (seen === null || shape !== TUCKED) seen = last?.key ?? ''
   })
   const unread = $derived(seen !== null && !!last && last.key !== seen)
 
   // Taking control tucks the chat, so nothing sits on the stream.
-  $effect(() => { const d = driving; untrack(() => { state = chatDriving(state, d) }) })
+  $effect(() => { const d = driving; untrack(() => { shape = chatDriving(shape, d) }) })
 
   // Leaving tucked puts the cursor in the input.
   $effect(() => {
-    if (state !== TUCKED) tick().then(() => field?.focus())
+    if (shape !== TUCKED) tick().then(() => field?.focus())
   })
   // Follow the newest message.
   $effect(() => {
     shown?.rows.length; last?.key
-    if (state === CHAT) tick().then(() => scroller && (scroller.scrollTop = scroller.scrollHeight))
+    if (shape === CHAT) tick().then(() => scroller && (scroller.scrollTop = scroller.scrollHeight))
   })
 
-  const go = (where) => { state = chatClick(state, where) }
+  const go = (where: ChatWhere) => { shape = chatClick(shape, where) }
   // Stop the stream from taking a click on the chat, and tuck on a click on the stream.
   export function streamClick() { go('stream') }
 
-  function onkey(e) {
-    const t = e.target
+  function onkey(e: KeyboardEvent) {
+    const t = e.target instanceof Element ? e.target : null
     // A preview or other modal owns its keys, even when portaled outside the dock.
-    if (t?.closest?.('[aria-modal="true"]')) return
-    const r = chatKey(state, {
+    if (t?.closest('[aria-modal="true"]')) return
+    const r = chatKey(shape, {
       key: e.key, ctrl: e.ctrlKey, meta: e.metaKey, alt: e.altKey,
-      editable: !!t?.closest?.('input, textarea, select, [contenteditable]'),
-      inside: !!dockEl?.contains(t),
+      editable: !!t?.closest('input, textarea, select, [contenteditable]'),
+      inside: !!t && !!dockEl?.contains(t),
     }, driving)
     if (!r.handled) return
     e.preventDefault()
     e.stopImmediatePropagation()
-    state = r.state
+    shape = r.state
   }
   onMount(() => {
     // Capture: the computer's key handler would otherwise take Ctrl+/ first.
@@ -96,31 +116,33 @@
     sendError = ''
     try {
       const res = await onsend(draft, $attachments.atts)
-      if (res?.failed?.length) sendError = res.failed.map((f) => f.error || 'delivery failed').join(' · ')
-      if (res?.message?.id) {
+      // A post carries a message; a spawn or a refused send does not.
+      const post = res && 'message' in res ? res : null
+      if (post?.failed?.length) sendError = post.failed.map((f) => f.error || 'delivery failed').join(' · ')
+      if (post?.message?.id) {
         attachments.clear()
         draft = ''
       }
     } catch (e) {
-      sendError = String(e?.message || e)
+      sendError = errorText(e)
     } finally {
       busy = false
       await tick()
       field?.focus()
     }
   }
-  function keydown(e) {
+  function keydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       send()
     }
   }
-  export function addFiles(files) { attachments.addFiles(files) }
+  export function addFiles(files: ArrayLike<File> | null | undefined) { attachments.addFiles(files) }
   const placeholder = $derived(m?.closed ? `${who} is closed` : `Message @${who}`)
 </script>
 
-<div class="dock" data-chat data-state={state} bind:this={dockEl}>
-  {#if state === TUCKED}
+<div class="dock" data-chat data-state={shape} bind:this={dockEl}>
+  {#if shape === TUCKED}
     <button class="pill glass pop" onclick={() => go('pill')} title={line} aria-label={`Open chat: ${line}`}>
       <span class="status-dot" class:unread aria-hidden="true"></span>
       {#if computerCount > 1}<span class="who">{who}</span>{/if}
@@ -133,7 +155,7 @@
       <span class="last">{line}</span>
       {#if age}<span class="age">· {age}</span>{/if}<span class="grip" aria-hidden="true"></span>
     </button>
-  {:else if state === COMPOSER}
+  {:else if shape === COMPOSER}
     <div class="composer glass pop">
       <button class="lastline" onclick={() => go('lastline')} title="Open the chat (Ctrl+/)">
         <span class="t" title={line}>{line}</span>
@@ -153,7 +175,7 @@
       </header>
       <p class="intent">{line}</p>
       <div class="thread" bind:this={scroller}>
-        {#if shown}<DmRows compact dm={shown} {room} member={m} {members} onthread={() => onmessages?.()} {onopenfile} {onpost} />{/if}
+        {#if shown && m}<DmRows compact dm={shown} {room} member={m} {members} onthread={() => onmessages?.()} {onopenfile} {onpost} />{/if}
         {#if !shown?.rows.length}<p class="empty">Nothing said yet.</p>{/if}
       </div>
       <div class="input">
