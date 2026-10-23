@@ -33,7 +33,7 @@ func (s *Service) hello(w http.ResponseWriter, r *http.Request, rt websvc.Route)
 		websvc.JSONError(w, http.StatusNotFound, "this machine is not linked")
 		return
 	}
-	if !s.limit.allow("hello", 120, time.Minute) {
+	if !s.limit.Allow("hello", 120, time.Minute) {
 		websvc.JSONError(w, http.StatusTooManyRequests, "too many hellos")
 		return
 	}
