@@ -24,7 +24,7 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 	command := cacheCleanCommand("hermeslab", true, ciCacheCleanAge)
 	for _, keep := range []string{
 		"-xdev", `-maxdepth 0 -mmin +"$age_min" ! -type l`, "rm -rf --one-file-system",
-		"DYNA_CI_CLEAN_AGE_MIN=2880", "flock -n \"$1/.active\" true", `base_idle "$1" || return 0`,
+		"DYNA_CI_CLEAN_AGE_MIN=2880", "flock -n \"$1/.active\" true", `exec 8>>"$1/caches.lock"`, "flock -n 8",
 	} {
 		if !strings.Contains(command, keep) {
 			t.Fatalf("cleanup command lacks %q", keep)
@@ -78,8 +78,8 @@ func runCacheClean(t *testing.T, roots string, dryRun bool) ([]byte, error) {
 
 // TestCacheCleanRemovesOnlyWhatNoRunUses checks the liveness rule on a real tree
 // of Dyna's own: a dead run's directory goes, a held run's stays, and a base
-// with a live run keeps all of its caches. It also checks that a cleanup asked
-// for one tree never visits the shared legacy tree.
+// whose cache lock a run holds keeps all of its caches. It also checks that a
+// cleanup asked for one tree never visits the shared legacy tree.
 func TestCacheCleanRemovesOnlyWhatNoRunUses(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("the cleanup refuses to run as root")
@@ -115,8 +115,10 @@ func TestCacheCleanRemovesOnlyWhatNoRunUses(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// The live run holds its lock until this test closes the pipe.
-	holder := exec.Command("flock", "-n", filepath.Join(base, "runs", "held", ".active"), "bash", "-c", "echo held; read -r line")
+	// The live run holds its own lock and the base's shared cache lock, as
+	// runLocks does, until this test closes the pipe.
+	holder := exec.Command("flock", "-n", filepath.Join(base, "runs", "held", ".active"),
+		"flock", "-s", filepath.Join(base, "caches.lock"), "bash", "-c", "echo held; read -r line")
 	stdin, err := holder.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
