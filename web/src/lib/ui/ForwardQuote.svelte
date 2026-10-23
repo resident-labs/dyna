@@ -1,4 +1,5 @@
 <script>
+  import { tick } from 'svelte'
   import { speaker } from './posts.ts'
   import { markdown, stamp } from './format.ts'
   import { postParts } from './postParts.ts'
@@ -8,6 +9,31 @@
   let { room, post, author = null, onpost = null, onopenfile, onremove = null, disabled = false } = $props()
   let parts = $derived(postParts(post))
   let from = $derived(author ?? post)
+  let textEl = $state()
+  let expanded = $state(false)
+  let overflowing = $state(false)
+  $effect(() => {
+    post
+    parts.text
+    const node = textEl
+    const draft = !!onremove
+    expanded = false
+    overflowing = false
+    if (!node || !draft) return
+    let active = true
+    const measure = () => {
+      if (!active) return
+      // Measure the existing three-line clamp even while the text is expanded.
+      node.classList.add('measure')
+      overflowing = node.scrollHeight > node.clientHeight + 1
+      node.classList.remove('measure')
+      if (!overflowing) expanded = false
+    }
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    tick().then(measure)
+    return () => { active = false; observer.disconnect() }
+  })
 </script>
 
 <div class="fwd" class:draft={!!onremove}>
@@ -20,7 +46,11 @@
       <span class="jump"><PostLink roomId={post.roomId || room.id} postId={post.id} onopen={onpost}>Jump to original</PostLink></span>
     {/if}
   </div>
-  {#if parts.text}<div class="prose fwdtext">{@html markdown(parts.text)}</div>{/if}
+  {#if parts.text}
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex (Expanded draft text is a keyboard scroll region.) -->
+    <div class="prose fwdtext" class:expanded bind:this={textEl} tabindex={expanded ? 0 : undefined} role={expanded ? 'region' : undefined} aria-label={expanded ? 'Full forwarded post' : undefined}>{@html markdown(parts.text)}</div>
+    {#if onremove && overflowing}<button class="disclosure" aria-expanded={expanded} onclick={() => expanded = !expanded}>{expanded ? 'Show less' : 'Show full post'}</button>{/if}
+  {/if}
   {#if parts.attachments.length}<div class="fwdfiles"><PostFiles roomId={post.roomId || room.id} {post} {parts} onopen={onopenfile} /></div>{/if}
 </div>
 
@@ -34,7 +64,11 @@
   .draft { margin: 12px 12px 0; padding: 8px 12px; border: 1px solid var(--line); border-left: 3px solid var(--iris); border-radius: 6px; background: var(--side); }
   .draft .fwdhead { flex-wrap: nowrap; }
   .draft .fwdhead > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .draft .fwdtext { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .draft .fwdtext { display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .draft .fwdtext.expanded { display: block; max-height: min(50vh, 360px); overflow: auto; -webkit-line-clamp: unset; line-clamp: unset; overscroll-behavior: contain; }
+  .draft .fwdtext.measure { display: -webkit-box; max-height: none; overflow: hidden; -webkit-line-clamp: 3; line-clamp: 3; }
+  .disclosure { min-height: 44px; padding: 6px 0; color: var(--iris); font-size: var(--t-ui); }
+  .disclosure:focus-visible, .fwdtext:focus-visible { outline: 2px solid var(--iris-edge); outline-offset: 2px; }
   .remove { flex: none; margin-left: auto; align-self: start; min-width: 28px; min-height: 28px; border-radius: 4px; color: var(--muted); font-size: var(--t-head); transition: color var(--motion-fast) var(--ease), background-color var(--motion-fast) var(--ease); }
   @media (hover: hover) { .remove:hover { color: var(--ink); background: var(--hover); } }
   .remove:active { color: var(--ink); background: var(--select); }
