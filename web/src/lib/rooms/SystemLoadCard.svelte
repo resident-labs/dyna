@@ -5,11 +5,13 @@
   import Avatar from '../ui/Avatar.svelte'
   import { loadView } from './systemLoad.ts'
   // load: one SystemLoad answer. onagent opens a top row's session.
-  let { load, onagent } = $props()
+  // title names the card: the Home card shows this computer, the Machine page
+  // shows the same figures as that machine's usage.
+  let { load, onagent, title = 'This computer' } = $props()
   let v = $derived(loadView(load))
 </script>
 
-<Card title="This computer">
+<Card {title}>
   <div class="head">
     <span class="cpu">{v.cpu === null ? '–' : `${v.cpu}%`}</span>
     <span class="load" class:hot={v.hot}>{v.loadText}</span>
