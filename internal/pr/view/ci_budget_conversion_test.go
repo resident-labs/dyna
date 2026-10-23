@@ -38,7 +38,7 @@ func TestRoomCIBudgetConversion(t *testing.T) {
 		t.Fatal(err)
 	}
 	base.CITestAllowNotes = map[string]string{"pkg.Test/a,b": "Calls an external service"}
-	base.RequiredChecks, base.Land = []string{"special"}, "branch-only"
+	base.RequiredChecks = []string{"special"}
 	if err = a.SetRoomChangePolicy(ownerCtx, rec.ID, base); err != nil {
 		t.Fatal(err)
 	}

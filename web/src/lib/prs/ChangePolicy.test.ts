@@ -29,7 +29,7 @@ async function load(name: string) {
 }
 const text = (html: string) => html.replace(/<!--.*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
 const room = { ...DEFAULT_POLICY }
-const formOf = (p: Pick<NormalizedPolicy, 'requiredChecks' | 'review' | 'land'>) => ({ requiredChecks: p.requiredChecks.join(', '), review: p.review, land: p.land })
+const formOf = (p: Pick<NormalizedPolicy, 'requiredChecks' | 'review'>) => ({ requiredChecks: p.requiredChecks.join(', '), review: p.review })
 type Call = ['room', string, NormalizedPolicy] | ['override', string, string, Partial<PolicyOverride>]
 const mock = () => {
   const calls: Call[] = []
@@ -56,7 +56,7 @@ test('room policy save sends the whole policy with a check list', async () => {
   const b = mock()
   const legacy = { ...formOf(room), checks: 'local', review: 'off', land: 'branch-only', requiredChecks: 'x, y' }
   const sent = await saveRoomPolicy(b, 'r', legacy)
-  assert.deepEqual(b.calls, [['room', 'r', { requiredChecks: ['x', 'y'], review: 'off', land: 'branch-only' }]])
+  assert.deepEqual(b.calls, [['room', 'r', { requiredChecks: ['x', 'y'], review: 'off' }]])
   assert.equal(sent.requiredChecks.length, 2)
 })
 
@@ -83,7 +83,7 @@ test('an override that matches the room policy resets', async () => {
 test('change policy shows own rules, override reason and skips', async () => {
   const { dir, component, render } = await load('ChangePolicy')
   try {
-    const change = { changeId: 'c1', state: 'open', policy: { ...room, review: 'off', land: 'local-merge' }, policyOverride: { review: 'off', reason: 'docs only' }, skipReasons: ['docs only'] }
+    const change = { changeId: 'c1', state: 'open', policy: { ...room, review: 'off' }, policyOverride: { review: 'off', reason: 'docs only' }, skipReasons: ['docs only'] }
     const t = text(render(component, { props: { change, room, roomId: 'r' } }).body)
     assert.match(t, /This PR own rules/)
     assert.match(t, /Review Off/)
@@ -167,7 +167,7 @@ test('workflow exemptions save exact names and can be cleared', async () => {
 })
 
 test('retired check modes and local names do not reach policy controls or requests', async () => {
-  const old = { checks: 'local', requiredChecks: ['go-test-touched', 'unit', 'frontend-if-touched'], review: 'on', land: 'github-pr' }
+  const old = { land: 'github-pr', checks: 'local', requiredChecks: ['go-test-touched', 'unit', 'frontend-if-touched'], review: 'on' }
   assert.deepEqual(normalizePolicy(old), { ...DEFAULT_POLICY, requiredChecks: ['unit'] })
   const bridge = mock()
   await saveRoomPolicy(bridge, 'r', formOf(old))

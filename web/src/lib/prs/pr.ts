@@ -363,12 +363,6 @@ export const dispositionMeta = (id: string) => DISPOSITIONS.find((d) => d.id ===
 // Room change policy: how checks, review and landing work. Each list gives
 // the wire value and the words the owner reads.
 export const POLICY_REVIEW = [{ id: 'on', label: 'On' }, { id: 'off', label: 'Off' }]
-// TODO: legacy/shim remove later — labels saved landing policies; remove after stored policies migrate.
-export const POLICY_LAND = [
-  { id: 'github-pr', label: 'Merge the GitHub PR' },
-  { id: 'local-merge', label: 'Merge locally and push' },
-  { id: 'branch-only', label: 'Prepare the branch only' },
-]
 
 // BudgetForm is the CI budget part of a policy form. The lists are text, one
 // entry per line.
@@ -387,14 +381,12 @@ export interface BudgetForm {
 export interface PolicyForm extends Partial<BudgetForm> {
   requiredChecks: string
   review?: string
-  land?: string
 }
 
 // The settings a change can override.
 export interface OverrideForm {
   requiredChecks: string
   review: string
-  land: string
 }
 
 // A policy with every field the host may leave out filled in.
@@ -420,12 +412,11 @@ export const budgetForm = (p?: Partial<ChangePolicy> | null) => {
 }
 // Only outer whitespace is removed. Commas, #, and internal spaces stay exact.
 export const parseTestAllow = (text?: string | null): string[] => [...new Set(String(text ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean))]
-export const DEFAULT_POLICY: NormalizedPolicy = { requiredChecks: [], review: 'on', land: 'github-pr' }
+export const DEFAULT_POLICY: NormalizedPolicy = { requiredChecks: [], review: 'on' }
 
 const labelOf = (list: { id: string; label: string }[], id?: string): string => list.find((o) => o.id === id)?.label ?? id ?? ''
 export const policyLabel = {
   review: (id?: string): string => labelOf(POLICY_REVIEW, id),
-  land: (id?: string): string => labelOf(POLICY_LAND, id),
 }
 
 // parseChecks turns "a, b" into ["a","b"]; it drops blanks and repeats.
@@ -437,13 +428,14 @@ export const normalizePolicy = (p?: Partial<ChangePolicy> | null): NormalizedPol
   const next: NormalizedPolicy = { ...DEFAULT_POLICY, ...(p ?? {}), requiredChecks: p?.requiredChecks ?? DEFAULT_POLICY.requiredChecks }
   // TODO: legacy/shim remove later — discard retired policy fields from older hosts; remove when all hosts send current policies.
   Reflect.deleteProperty(next, 'checks')
+  Reflect.deleteProperty(next, 'land')
   // TODO: legacy/shim remove later — discard local check aliases from older hosts; remove when all hosts send current policies.
   next.requiredChecks = next.requiredChecks.filter((name) => !['go-test-touched', 'frontend-if-touched'].includes(name))
   return next
 }
 
 // overrideKeys lists the settings a policyOverride changes.
-const OVERRIDE_FIELDS = ['requiredChecks', 'review', 'land'] as const
+const OVERRIDE_FIELDS = ['requiredChecks', 'review'] as const
 export type OverrideField = (typeof OVERRIDE_FIELDS)[number]
 // An array is present even when empty: clearing required checks is an override.
 export const overrideKeys = (o?: Partial<PolicyOverride> | null): OverrideField[] => OVERRIDE_FIELDS.filter((k) => (Array.isArray(o?.[k]) ? true : String(o?.[k] ?? '').trim()))
@@ -453,7 +445,7 @@ export const overrideKeys = (o?: Partial<PolicyOverride> | null): OverrideField[
 export function buildOverride(room: Partial<ChangePolicy> | null | undefined, form: OverrideForm, reason?: string | null): Partial<PolicyOverride> & { reason: string } {
   const base = normalizePolicy(room)
   const out: Partial<PolicyOverride> & { reason: string } = { reason: String(reason ?? '').trim() }
-  for (const k of ['review', 'land'] as const) if (form[k] !== base[k]) out[k] = form[k]
+  for (const k of ['review'] as const) if (form[k] !== base[k]) out[k] = form[k]
   const req = parseChecks(form.requiredChecks)
   if (req.join('\n') !== base.requiredChecks.join('\n')) out.requiredChecks = req
   return out
