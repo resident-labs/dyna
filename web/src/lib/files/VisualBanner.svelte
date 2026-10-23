@@ -1,12 +1,21 @@
-<script>
+<script lang="ts">
   import { fileURL } from '../../api.ts'
   import { ago } from '../ui/format.ts'
   import VisualPlaceholder from './VisualPlaceholder.svelte'
+  import type { Attachment } from '../api/room.ts'
+
+  interface Props {
+    roomId: string
+    att: Attachment
+    at?: number
+    chip?: boolean
+    onopen: (attachment: Attachment) => void
+  }
   // A visualization in chat: the banner image of its newest version, its
   // title, version and when it last changed. A post that updated a visual
   // shows a one-line chip for its own version instead. Checks never show
   // here; the full view has them.
-  let { roomId, att, at = 0, chip = false, onopen } = $props()
+  let { roomId, att, at = 0, chip = false, onopen }: Props = $props()
   let title = $derived(att.title || att.name)
   let loaded = $state(false)
   let failed = $state(false)
