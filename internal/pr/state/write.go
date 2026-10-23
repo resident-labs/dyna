@@ -42,6 +42,11 @@ func Update(ctx context.Context, root string, fn func(*State) error) error {
 
 // update shares the PR lock, committed read, and writer fence for both callback
 // contracts. Only the private prepared state reaches write.
+//
+// Lock order: the PR lock (LockPath), then the snapshot mutex, then the
+// state writer. Code that holds the writer never takes the other two: a
+// Write callback runs only SQL, and state.Writer publishes events after it
+// releases the writer, so an event handler may read PR state (issue #247).
 func update(ctx context.Context, root string, fn func(Snapshot) (State, error)) error {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		return err
