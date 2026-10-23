@@ -75,11 +75,12 @@ func TestSelectorContextResolvesSelectorsNow(t *testing.T) {
 func TestReplyAddressForSenderClasses(t *testing.T) {
 	e := newTestEnv(t)
 	for from, want := range map[string]string{
-		"work:lead":        "work:lead",
-		"work":             "work",
-		"run:wf_x/agent:2": "run:wf_x/agent:2",
-		"shell:42":         "",
-		"run:wf_missing":   "",
+		"work:lead":              "work:lead",
+		"work":                   "work",
+		"run:wf_x/agent:2":       "run:wf_x/agent:2",
+		"shell:42":               "",
+		room.ParentCheckInSender: "",
+		"run:wf_missing":         "",
 	} {
 		if got := e.m.Store.ReplyAddress(room.Message{From: from}); got != want {
 			t.Fatalf("ReplyAddress(%q) = %q, want %q", from, got, want)
