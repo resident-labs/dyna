@@ -9,7 +9,7 @@
   import { dmView } from '../sessions/dm.ts'
   import { showReasoning, showCompaction } from '../ui/prefs.ts'
   import { ago } from '../ui/format.js'
-  import { computerLine } from './summary.js'
+  import { computerLine } from './summary.ts'
   import { clock } from './clock.svelte.js'
   import { attachmentDraft } from '../files/attachmentDraft.ts'
   import { TUCKED, COMPOSER, CHAT, RECENT, chatClick, chatKey, chatDriving, lastLine } from './chatState.js'

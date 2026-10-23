@@ -72,7 +72,7 @@ schema, read `docs/computers.md`.
   shows the faint line "computer stopped". A click opens that session's
   Computer tab. The floating preview stays only in a session's own Messages
   view, which has no right bar. Parts: `computers/ComputerThumb.svelte`,
-  `thumbKind` in `preview.js`.
+  `thumbKind` in `preview.ts`.
 - **All computers.** The **computers** item in the sidebar opens a grid of
   `shot.png` tiles for the room (columns of 280 px or more). Each tile shows
   the whole 16:10 picture and a caption row: state dot, session name, app and
@@ -162,7 +162,7 @@ loads on first use, in its own chunk.
 | `internal/computerweb/host.go` | view model, viewer leases, events, action summaries |
 | `internal/engine/computers.go` | the computer host the engine mounts |
 | `web/src/lib/computers/computers.js` | pure helpers (states, ages, totals, events) |
-| `web/src/lib/computers/rfbStats.js` | the stats meter |
+| `web/src/lib/computers/rfbStats.ts` | the stats meter |
 | `web/src/lib/computers/computerStream.js` | noVNC, fallback, instrumentation |
 | `web/src/lib/Computer*.svelte`, `Computers.svelte` | the screens |
 | `web/src/lib/computers/chatState.js`, `ComputerChat.svelte` | the floating chat |

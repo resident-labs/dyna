@@ -4,7 +4,7 @@
   // With refresh set, a running computer asks for a fresh picture that often
   // while the page is visible; the server limits real captures to one per 5 s.
   import { api } from '../../api.js'
-  import { freshDue } from './preview.js'
+  import { freshDue } from './preview.ts'
   // minGap: the least time between two loads from shotAt changes (ms).
   let { session, shotAt = null, phase = 'none', refresh = 0, alt = '', minGap = 0, children } = $props()
   let src = $state('')
