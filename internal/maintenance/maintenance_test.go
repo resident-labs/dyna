@@ -118,7 +118,7 @@ func TestLowSpaceJudgesInMemoryFileSystemsByShare(t *testing.T) {
 func TestLoopCanceledDoesNotRunMaintenance(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	Loop(ctx, func(string, ...any) { t.Fatal("canceled loop logged or ran") }, nil)
+	Loop(ctx, func(string, ...any) { t.Fatal("canceled loop logged or ran") }, shutdownHooks{}, nil)
 }
 
 func TestScratchOwnerReadsSessionAndRunLifecycle(t *testing.T) {
@@ -238,6 +238,7 @@ func (h shutdownHooks) Tick(context.Context, string, time.Time) error {
 	h.cancel()
 	return context.Canceled
 }
+func (h shutdownHooks) TickGlobal(context.Context, time.Time) error { return nil }
 
 func TestLoopReportsShutdownOnce(t *testing.T) {
 	for _, phase := range []string{"install", "hooks", "real-error", "real-hook-error"} {

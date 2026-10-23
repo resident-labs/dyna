@@ -208,8 +208,13 @@ func bindings(s services) []websvc.Binding {
 		{Name: "SetServiceProfile", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.SetServiceProfile},
 		{Name: "RestartReviewer", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.RestartReviewer},
 		{Name: "ListHooks", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.List},
+		{Name: "ListGlobalHooks", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.ListGlobal},
 		{Name: "HookSummary", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.Summaries},
+		{Name: "GlobalHookSummary", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.SummariesGlobal},
 		{Name: "HookRuns", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.Runs},
+		{Name: "GlobalHookRuns", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) ([]hooks.Run, error) {
+			return s.hooks.Runs(ctx, "", name)
+		}},
 		{Name: "RunHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, repo, name string) (hooks.Run, error) {
 			by, err := actor(ctx)
 			if err != nil {
@@ -224,6 +229,13 @@ func bindings(s services) []websvc.Binding {
 			}
 			return s.hooks.Run(ctx, hooks.Event{Repo: repo, Session: by, Room: authority.Of(ctx).Room, Branch: "sample-branch", SHA: "0000000000000000000000000000000000000000", PR: "1"}, name)
 		}},
+		{Name: "RunGlobalHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) (hooks.Run, error) {
+			by, err := actor(ctx)
+			if err != nil {
+				return hooks.Run{}, err
+			}
+			return s.hooks.RunGlobal(ctx, hooks.Event{Session: by}, name)
+		}},
 		{Name: "ReconcileHookInstall", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.hooks.ReconcileInstall},
 		{Name: "AddHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.addHook},
 		{Name: "EditHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, repo, name string, patch hooks.Patch) error {
@@ -234,7 +246,28 @@ func bindings(s services) []websvc.Binding {
 			return s.hooks.Edit(ctx, repo, name, by, patch)
 		}},
 		{Name: "RemoveHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.hooks.Remove},
+		{Name: "AddGlobalHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.addGlobalHook},
+		{Name: "EditGlobalHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string, patch hooks.Patch) error {
+			by, err := actor(ctx)
+			if err != nil {
+				return err
+			}
+			return s.hooks.Edit(ctx, "", name, by, patch)
+		}},
+		{Name: "RemoveGlobalHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) error {
+			return s.hooks.Remove(ctx, "", name)
+		}},
+		{Name: "ResetHook", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name string) error {
+			by, err := actor(ctx)
+			if err != nil {
+				return err
+			}
+			return s.hooks.Reset(ctx, name, by)
+		}},
 		{Name: "HookRunLog", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.hooks.HookRunLog},
+		{Name: "GlobalHookRunLog", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: func(ctx context.Context, name, id string) (hooks.HookRunLog, error) {
+			return s.hooks.HookRunLog("", name, id)
+		}},
 		{Name: "PRSettings", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.PRs.PRSettings},
 		{Name: "CommentPR", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.CommentPR},
 		{Name: "PostPRReview", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.PostPRReview},

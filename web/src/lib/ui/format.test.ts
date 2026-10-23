@@ -50,3 +50,14 @@ test('elapsed reads like a stopwatch, and calls over 30 s are long', async () =>
   assert.equal(isLongCall(30000), false)
   assert.equal(isLongCall(30001), true)
 })
+
+// A schedule shows when the next run is, so a hook row reads a future time
+// with the same words as a past one.
+test('until reads a future time from now', async () => {
+  const { until } = await import('./format.ts')
+  assert.equal(until(NaN), '')
+  assert.equal(until(Date.now() - 60_000), 'in under a minute')
+  assert.equal(until(Date.now() + 5 * 60_000), 'in 5m')
+  assert.equal(until(Date.now() + 2 * 3_600_000), 'in 2h')
+  assert.equal(until(Date.now() + 3 * 86_400_000), 'in 3d')
+})

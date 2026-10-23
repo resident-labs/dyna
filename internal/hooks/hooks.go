@@ -36,13 +36,20 @@ const (
 )
 
 type Hook struct {
-	Name         string     `json:"name"`
-	Label        string     `json:"label,omitempty"`
-	Event        string     `json:"event"`
-	Command      string     `json:"command"`
-	Cwd          string     `json:"cwd"`
-	Timeout      string     `json:"timeout"`
-	OnFail       string     `json:"onFail"`
+	Name    string `json:"name"`
+	Label   string `json:"label,omitempty"`
+	Event   string `json:"event"`
+	Command string `json:"command"`
+	Cwd     string `json:"cwd"`
+	Timeout string `json:"timeout"`
+	OnFail  string `json:"onFail"`
+	// Scope says where the hook belongs: one repository, or the machine. A
+	// hook stored before scope existed belongs to its repository.
+	Scope Scope `json:"scope"`
+	// Builtin names the table entry a hook the engine seeded runs, and is empty
+	// for a hook the owner added. The engine fixes its command and cannot
+	// remove it.
+	Builtin      Builtin    `json:"builtin,omitempty"`
 	AddedBy      string     `json:"addedBy"`
 	AddedAt      time.Time  `json:"addedAt"`
 	EditedBy     string     `json:"editedBy,omitempty"`
@@ -85,6 +92,10 @@ type Service struct {
 	DataDir string
 	Exec    processguard.Executor
 	Install *hookinstall.Service
+	// Builtins is the table of automatic hooks this service seeds and runs.
+	// internal/automations holds the table; a service without one runs no
+	// automatic hook.
+	Builtins []BuiltinSpec
 	// Post is where a run's events go. Tests replace it; the default posts
 	// them through room.PostEvent.
 	Post func(Event, room.HookEvent) error
@@ -92,7 +103,9 @@ type Service struct {
 	Fetch func(context.Context, string) error
 }
 
-func New() Service { return Service{} }
+// New returns a hook service that seeds and runs the given automatic hooks.
+// A caller that needs none, such as a spool drain, passes none.
+func New(builtins ...BuiltinSpec) Service { return Service{Builtins: builtins} }
 
 // scheduleKey names one hook's schedule in the runtime state. A hook that is
 // removed and added again starts with no run time, because AddedAt changes.
@@ -107,6 +120,26 @@ func Validate(h Hook) error {
 	if !namePattern.MatchString(h.Name) {
 		return fmt.Errorf("hook name must use 1 to 64 letters, digits, underscores, or hyphens")
 	}
+	switch h.Scope {
+	case ScopeRepository, ScopeGlobal:
+	case "":
+		// A hook stored before scope existed is a repository hook.
+		h.Scope = ScopeRepository
+	default:
+		return fmt.Errorf("unknown hook scope %q", h.Scope)
+	}
+	// A built-in runs in the engine, so its command and directory come from
+	// the built-in table and are never a shell command.
+	if h.Builtin != "" {
+		if h.Scope != ScopeGlobal {
+			return fmt.Errorf("a built-in hook belongs to no repository")
+		}
+		timeout, err := time.ParseDuration(h.Timeout)
+		if err != nil || timeout <= 0 {
+			return fmt.Errorf("timeout must be positive")
+		}
+		return nil
+	}
 	switch h.Event {
 	case WorktreeCreated, BeforeLand, AfterLand, PRMerged, MainUpdated, SessionFinish, Schedule, SessionTurnEnded:
 	default:
@@ -117,6 +150,9 @@ func Validate(h Hook) error {
 	}
 	if h.Cwd != "worktree" && h.Cwd != "main" && !filepath.IsAbs(h.Cwd) {
 		return fmt.Errorf("cwd must be worktree, main, or an absolute path")
+	}
+	if h.Scope == ScopeGlobal && (h.Cwd == "worktree" || h.Cwd == "main") {
+		return fmt.Errorf("a global hook has no repository, so cwd must be an absolute path")
 	}
 	if timeout, err := time.ParseDuration(h.Timeout); err != nil || timeout <= 0 {
 		return fmt.Errorf("timeout must be positive")
@@ -129,6 +165,8 @@ func Validate(h Hook) error {
 	}
 	return nil
 }
+
+// List returns a repository's hooks in their saved order.
 func (s Service) List(ctx context.Context, repo string) ([]Hook, error) {
 	r, err := repoid.Resolve(ctx, repo)
 	if err != nil {
@@ -137,11 +175,34 @@ func (s Service) List(ctx context.Context, repo string) ([]Hook, error) {
 	return s.load(ctx, r.ID)
 }
 
+// ListGlobal returns the global hooks: the built-ins the engine seeds and the
+// hooks the owner added for the whole machine.
+func (s Service) ListGlobal(ctx context.Context) ([]Hook, error) {
+	return s.load(ctx, globalKey)
+}
+
 func (s Service) Add(ctx context.Context, repo string, h Hook) error {
+	h.Scope = ScopeRepository
+	return s.add(ctx, repo, h)
+}
+
+// AddGlobal stores a hook that belongs to the machine and runs even when no
+// checkout is open. It has no repository, so its directory must be absolute.
+func (s Service) AddGlobal(ctx context.Context, h Hook) error {
+	h.Scope = ScopeGlobal
+	return s.add(ctx, "", h)
+}
+
+func (s Service) add(ctx context.Context, repo string, h Hook) error {
 	if err := authority.Check("git hooks add", authority.Of(ctx), nil); err != nil {
 		return err
 	}
-
+	if h.Builtin != "" {
+		return fmt.Errorf("hook %q is built in, so the engine seeds it", h.Name)
+	}
+	if _, reserved := s.builtinSpec(Builtin(h.Name)); reserved {
+		return fmt.Errorf("hook name %q is reserved for a built-in hook", h.Name)
+	}
 	if err := Validate(h); err != nil {
 		return err
 	}
@@ -149,17 +210,23 @@ func (s Service) Add(ctx context.Context, repo string, h Hook) error {
 		h.AddedBy = "owner"
 	}
 	h.AddedAt = time.Now().UTC()
-	r, err := repoid.Resolve(ctx, repo)
-	if err != nil {
-		return err
+	id, main := globalKey, ""
+	if repo != "" {
+		r, err := repoid.Resolve(ctx, repo)
+		if err != nil {
+			return err
+		}
+		id, main = r.ID, r.Main
 	}
-	return s.update(ctx, r.ID, func(d *document) error {
+	return s.update(ctx, id, func(d *document) error {
 		for _, old := range d.Hooks {
 			if old.Name == h.Name {
 				return fmt.Errorf("hook %q already exists; remove it first", h.Name)
 			}
 		}
-		d.Repo = r.Main
+		if main != "" {
+			d.Repo = main
+		}
 		d.Hooks = append(d.Hooks, h)
 		return nil
 	})
@@ -172,20 +239,26 @@ type Patch struct {
 	Disabled                             *bool
 }
 
+// Edit changes the supplied fields of a repository hook. An empty repository
+// edits a global hook.
 func (s Service) Edit(ctx context.Context, repo, name, editor string, patch Patch) error {
 	if err := authority.Check("git hooks edit", authority.Of(ctx), nil); err != nil {
 		return err
 	}
 
-	r, err := repoid.Resolve(ctx, repo)
-	if err != nil {
-		return err
+	id := globalKey
+	if repo != "" {
+		r, err := repoid.Resolve(ctx, repo)
+		if err != nil {
+			return err
+		}
+		id = r.ID
 	}
 	// A run time written by an older release has no record of the interval
 	// that set it. Record the interval that is in force before it changes, so
 	// the next tick moves the pending run instead of firing its old deadline.
 	if patch.EveryMinutes != nil {
-		hooks, err := s.load(ctx, r.ID)
+		hooks, err := s.load(ctx, id)
 		if err != nil {
 			return err
 		}
@@ -194,7 +267,7 @@ func (s Service) Edit(ctx context.Context, repo, name, editor string, patch Patc
 				continue
 			}
 			key := scheduleKey(old)
-			if err := s.runtime(r.ID, func(st *state) error {
+			if err := s.runtime(id, func(st *state) error {
 				if _, known := st.Every[key]; !known && !st.Due[key].IsZero() {
 					st.Every[key] = old.EveryMinutes
 				}
@@ -205,10 +278,15 @@ func (s Service) Edit(ctx context.Context, repo, name, editor string, patch Patc
 			break
 		}
 	}
-	return s.update(ctx, r.ID, func(d *document) error {
+	return s.update(ctx, id, func(d *document) error {
 		for i, old := range d.Hooks {
 			if old.Name != name {
 				continue
+			}
+			// A built-in's action comes from the built-in table, so only its
+			// interval, timeout and switch can change.
+			if old.Builtin != "" && (patch.Command != nil || patch.Event != nil || patch.Cwd != nil || patch.OnFail != nil) {
+				return fmt.Errorf("hook %q is built in, so its action cannot change; edit its interval, timeout or switch", name)
 			}
 			h := old
 			if patch.Command != nil {
@@ -247,18 +325,27 @@ func (s Service) Edit(ctx context.Context, repo, name, editor string, patch Patc
 	})
 }
 
+// Remove deletes a repository hook, or a global one when repo is empty. A
+// built-in stays, because the engine seeds it and its switch turns it off.
 func (s Service) Remove(ctx context.Context, repo, name string) error {
 	if err := authority.Check("git hooks rm", authority.Of(ctx), nil); err != nil {
 		return err
 	}
 
-	r, err := repoid.Resolve(ctx, repo)
-	if err != nil {
-		return err
+	id := globalKey
+	if repo != "" {
+		r, err := repoid.Resolve(ctx, repo)
+		if err != nil {
+			return err
+		}
+		id = r.ID
 	}
-	return s.update(ctx, r.ID, func(d *document) error {
+	return s.update(ctx, id, func(d *document) error {
 		for i, h := range d.Hooks {
 			if h.Name == name {
+				if h.Builtin != "" {
+					return fmt.Errorf("hook %q is built in, so it cannot be removed; turn it off instead", name)
+				}
 				d.Hooks = append(d.Hooks[:i], d.Hooks[i+1:]...)
 				return nil
 			}
@@ -266,7 +353,13 @@ func (s Service) Remove(ctx context.Context, repo, name string) error {
 		return fmt.Errorf("unknown hook %q", name)
 	})
 }
+
+// Runs lists the stored runs of one hook. An empty repository lists the runs
+// of a global hook.
 func (s Service) Runs(ctx context.Context, repo, name string) ([]Run, error) {
+	if repo == "" {
+		return s.runs(ctx, globalKey, name)
+	}
 	r, err := repoid.Resolve(ctx, repo)
 	if err != nil {
 		return nil, err
@@ -317,6 +410,11 @@ func (s Service) postEvent(e Event, ev room.HookEvent, create bool) error {
 // room. A routine event never creates a room, so a repo that is nobody's room
 // stays quiet; a failed hook creates the repo's room, as its alert always has.
 func postRoomEvent(e Event, ev room.HookEvent, create bool) error {
+	// A global hook belongs to no repository, so a run of it has no room to
+	// post in. Its runs stay in the hook store for the Hooks screen.
+	if e.Repo == "" {
+		return nil
+	}
 	rooms := room.DefaultStore()
 	var rec room.Record
 	var found bool
@@ -373,6 +471,7 @@ func hookEvent(e Event, h Hook, run Run, state room.HookState, detail string) ro
 	ev := room.HookEvent{
 		RunID: run.ID, Repo: e.Repo, Hook: h.Name, Event: e.Event,
 		Label: h.Label, Command: commandLabel(h.Command), State: state, Detail: detail,
+		Builtin: h.Builtin != "",
 	}
 	if state != room.HookRunning && !run.StartedAt.IsZero() && !run.FinishedAt.IsZero() {
 		ev.DurationMS = int(run.FinishedAt.Sub(run.StartedAt).Milliseconds())
@@ -414,13 +513,25 @@ func (s Service) Run(ctx context.Context, e Event, name string) (Run, error) {
 	return s.run(ctx, e, name, nil, true)
 }
 
+// RunGlobal runs one named global hook now, whether the owner added it or the
+// engine seeded it.
+func (s Service) RunGlobal(ctx context.Context, e Event, name string) (Run, error) {
+	e.Repo = ""
+	return s.run(ctx, e, name, nil, true)
+}
+
 // run records preparationErr without executing a command, or executes the hook
-// when preparation succeeded.
+// when preparation succeeded. An event that names no repository runs a global
+// hook.
 func (s Service) run(ctx context.Context, e Event, name string, preparationErr error, requested bool) (Run, error) {
 
-	r, err := repoid.Resolve(ctx, e.Repo)
-	if err != nil {
-		return Run{}, err
+	r := repoid.Repo{ID: globalKey}
+	if e.Repo != "" {
+		resolved, err := repoid.Resolve(ctx, e.Repo)
+		if err != nil {
+			return Run{}, err
+		}
+		r = resolved
 	}
 	hooks, err := s.load(ctx, r.ID)
 	if err != nil {
@@ -437,16 +548,20 @@ func (s Service) run(ctx context.Context, e Event, name string, preparationErr e
 		if err := Validate(h); err != nil {
 			return Run{}, err
 		}
+		if h.Builtin != "" {
+			return s.runBuiltin(ctx, r.ID, h, e)
+		}
 		if e.Event == "" {
 			e.Event = h.Event
 		}
 		if e.Worktree == "" {
 			e.Worktree = r.Root
 		}
-		if e.SHA == "" && preparationErr == nil {
+		// A global hook has no checkout, so it samples no Git values.
+		if e.SHA == "" && preparationErr == nil && e.Worktree != "" {
 			e.SHA, _ = repoid.Git(ctx, e.Worktree, "rev-parse", "HEAD")
 		}
-		if e.Branch == "" && preparationErr == nil {
+		if e.Branch == "" && preparationErr == nil && e.Worktree != "" {
 			e.Branch, _ = repoid.Git(ctx, e.Worktree, "symbolic-ref", "--short", "-q", "HEAD")
 		}
 		cwd := h.Cwd
@@ -536,4 +651,47 @@ func failureClass(err error) string {
 		return fmt.Sprintf("exit %d", exit.ExitCode())
 	}
 	return "runner error"
+}
+
+// runBuiltin runs one automatic hook in the engine process. It keeps the run
+// record, the log and the run events of a shell hook, so the screen and the
+// feed show both the same way. id is the repository identity, or the global
+// key for a built-in that belongs to no repository.
+func (s Service) runBuiltin(ctx context.Context, id string, h Hook, e Event) (Run, error) {
+	spec, err := s.builtin(h)
+	if err != nil {
+		return Run{}, err
+	}
+	if e.Event == "" {
+		e.Event = h.Event
+	}
+	ev, log, err := s.newRun(ctx, id, h, e.Session)
+	if err != nil {
+		return Run{}, err
+	}
+	// The card shows the run as running before the pass starts, so a slow pass
+	// is never invisible.
+	s.emit(e, hookEvent(e, h, ev, room.HookRunning, ""))
+	timeout, _ := time.ParseDuration(h.Timeout)
+	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	runErr := spec.Run(runCtx, log)
+	if runErr != nil {
+		_, logErr := fmt.Fprintln(log, runErr)
+		runErr = errors.Join(runErr, logErr)
+	}
+	closeErr := log.Close()
+	ev.Result = "pass"
+	if runErr != nil {
+		ev.Result = "error"
+	}
+	ev.FinishedAt = time.Now().UTC()
+	_, saveErr := s.saveRun(ctx, ev)
+	runErr = errors.Join(runErr, closeErr, saveErr)
+	if runErr != nil {
+		s.emit(e, hookEvent(e, h, ev, resultState(ev), failureClass(runErr)))
+	} else {
+		s.emit(e, hookEvent(e, h, ev, room.HookPassed, ""))
+	}
+	return ev, runErr
 }
