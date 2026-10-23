@@ -99,8 +99,8 @@ type LocalExtension interface {
 	Halt()
 	// KillGroup immediately kills the child's process group.
 	KillGroup()
-	// StderrTail returns the child's stderr written since this turn's
-	// attach, bounded.
+	// StderrTail drains pending pipe bytes, then returns the child's bounded
+	// stderr written since this turn's attach. It does not wait for child exit.
 	StderrTail() string
 }
 

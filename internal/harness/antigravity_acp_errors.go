@@ -33,7 +33,8 @@ func antigravityACPPromptError(session, stderr string) error {
 	return nil
 }
 
-// finishStderr reads this attachment's diagnostics without stopping its child.
+// finishStderr drains this attachment's pending diagnostics before the snapshot,
+// without stopping its retained child.
 func (s *acpSession) finishStderr() string {
 	if !s.antigravity || s.host == nil {
 		return ""
