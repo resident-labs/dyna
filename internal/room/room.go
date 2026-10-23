@@ -126,6 +126,7 @@ type Message struct {
 	Text      string `json:"text"`
 	// Attachments are files saved with the room before this post.
 	Attachments []Attachment `json:"attachments,omitempty"`
+	References  []Reference  `json:"references,omitempty"`
 }
 
 // OwnerLabel names the room owner as a speaker. Root and the human both use
@@ -164,11 +165,12 @@ type Forward struct {
 	Human       bool         `json:"human,omitempty"`
 	Text        string       `json:"text"`
 	Attachments []Attachment `json:"attachments,omitempty"`
+	References  []Reference  `json:"references,omitempty"`
 }
 
 // NewForward snapshots a stored post for forwarding.
 func NewForward(m Message) *Forward {
-	return &Forward{ID: m.ID, RoomID: m.RoomID, TS: m.TS, From: m.From, Kind: m.Kind, Notice: m.Notice, Human: m.Human, Text: m.Text, Attachments: m.Attachments}
+	return &Forward{ID: m.ID, RoomID: m.RoomID, TS: m.TS, From: m.From, Kind: m.Kind, Notice: m.Notice, Human: m.Human, Text: m.Text, Attachments: m.Attachments, References: append([]Reference(nil), m.References...)}
 }
 
 // Block renders the forwarded post as quoted text with a line that says who
@@ -181,8 +183,8 @@ func (f Forward) Block() string {
 	at := time.UnixMilli(f.TS).Local().Format("2006-01-02 15:04 MST")
 	var b strings.Builder
 	fmt.Fprintf(&b, "[Forwarded post %s, originally written by %s at %s]", f.ID, from, at)
-	if f.Text != "" {
-		for _, line := range strings.Split(f.Text, "\n") {
+	if body := referenceText(f.Text, f.References); body != "" {
+		for _, line := range strings.Split(body, "\n") {
 			b.WriteString("\n> " + line)
 		}
 	}
@@ -193,6 +195,8 @@ func (f Forward) Block() string {
 // flat returns the post as readers outside the desktop see it: the note and
 // the quoted original as text, and both attachment lists as one.
 func (m Message) flat() Message {
+	m.Text = referenceText(m.Text, m.References)
+	m.References = nil
 	if m.Forward == nil {
 		return m
 	}
@@ -807,6 +811,7 @@ type PostInput struct {
 	RelayOf     string
 	// Attachments must already be saved in this room (PutAttachment).
 	Attachments []Attachment
+	References  []Reference
 }
 
 // stripSelfLabel drops a leading "name:" that repeats the sender, as in
@@ -856,7 +861,7 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 	if in.From == "" || len(in.To) == 0 {
 		return Message{}, errors.New("a post needs a sender and at least one recipient")
 	}
-	if in.Text == "" && len(in.Attachments) == 0 && in.Forward == nil {
+	if in.Text == "" && len(in.Attachments) == 0 && len(in.References) == 0 && in.Forward == nil {
 		return Message{}, errors.New("message text is required")
 	}
 	if !utf8.ValidString(in.Text) {
@@ -872,6 +877,17 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 		in.Text = stripSelfLabel(in.From, in.Text)
 	}
 
+	if err := ValidateReferences(in.References); err != nil {
+		return Message{}, err
+	}
+	in.References = append([]Reference(nil), in.References...)
+	for i, ref := range in.References {
+		// JSON decodes numbers as float64. Canonicalize Go callers too, so
+		// retry comparisons do not depend on whether the input came from JSON.
+		if n, ok := ref.Number.(int); ok {
+			in.References[i].Number = float64(n)
+		}
+	}
 	if len(in.Attachments) > 0 {
 		atts, err := s.canonAttachments(roomID, in.Attachments)
 		if err != nil {
@@ -907,7 +923,7 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 		if in.ID != "" {
 			for _, m := range msgs {
 				if m.ID == in.ID {
-					if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.Kind != in.Kind || m.Notice != in.Notice || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
+					if m.NeedsRoot != in.NeedsRoot || m.Wake != in.Wake || m.From != in.From || m.Kind != in.Kind || m.Notice != in.Notice || m.Human != in.Human || m.Source != in.Source || m.Spoken != in.Spoken || m.RelayOf != in.RelayOf || m.Text != in.Text || m.ReplyTo != in.ReplyTo || !reflect.DeepEqual(m.References, in.References) || !reflect.DeepEqual(m.Forward, in.Forward) || m.Turn != in.Turn || !reflect.DeepEqual(m.To, in.To) || !reflect.DeepEqual(m.SessionIDs, in.SessionIDs) || !reflect.DeepEqual(unversioned(m.Attachments), unversioned(in.Attachments)) {
 						return fmt.Errorf("post ID already belongs to different content")
 					}
 					out = m
@@ -919,7 +935,7 @@ func (s *Store) Post(roomID string, in PostInput) (Message, error) {
 		out = Message{
 			Wake: in.Wake, ID: newMessageID(), TS: now.UnixMilli(), RoomID: roomID, SessionIDs: in.SessionIDs,
 			From: in.From, Kind: in.Kind, Notice: in.Notice, Human: in.Human, Source: in.Source, Spoken: in.Spoken, RelayOf: in.RelayOf, To: in.To, Via: in.Via, ReplyTo: in.ReplyTo, Forward: in.Forward, Turn: in.Turn, OwnerReport: in.OwnerReport, NeedsRoot: in.NeedsRoot, Text: in.Text,
-			Attachments: in.Attachments,
+			Attachments: in.Attachments, References: append([]Reference(nil), in.References...),
 		}
 		if in.ID != "" {
 			out.ID = in.ID

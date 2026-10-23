@@ -61,8 +61,13 @@ func (s *Service) Profile(ref string, posts int) (Profile, error) {
 // SendToSession posts text to one session as the human owner, from its
 // session view: it steers a running turn or starts the next one.
 func (s *Service) SendToSession(ctx context.Context, ref, text, forwardOf string, atts ...room.Attachment) (PostResult, error) {
+	return s.SendToSessionWithReferences(ctx, ref, text, forwardOf, nil, atts...)
+}
+
+// SendToSessionWithReferences sends composer references to one session.
+func (s *Service) SendToSessionWithReferences(ctx context.Context, ref, text, forwardOf string, refs []room.Reference, atts ...room.Attachment) (PostResult, error) {
 	text = strings.TrimSpace(text)
-	if text == "" && len(atts) == 0 && forwardOf == "" {
+	if text == "" && len(atts) == 0 && len(refs) == 0 && forwardOf == "" {
 		return PostResult{}, errors.New("type a message first")
 	}
 	info, err := s.sessions().Resolve(ref)
@@ -71,7 +76,7 @@ func (s *Service) SendToSession(ctx context.Context, ref, text, forwardOf string
 	}
 	res, err := s.Notify.Post(ctx, notify.PostInput{
 		Sender:   notify.Sender{Kind: notify.SenderOwner, Room: info.Room, Human: true},
-		Mentions: []string{"@" + info.Address()}, Text: text, Attachments: atts, ForwardOf: forwardOf,
+		Mentions: []string{"@" + info.Address()}, Text: text, Attachments: atts, ForwardOf: forwardOf, References: refs,
 	})
 	if res.Message.ID != "" {
 		_ = s.rooms().MarkOwnerRead(res.Message.RoomID, res.Message.ID)
