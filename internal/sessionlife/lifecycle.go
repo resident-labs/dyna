@@ -32,8 +32,8 @@ type Closing struct {
 const ClosingLimit = 10 * time.Minute
 
 // Active reports a reservation that still blocks the session. A holder killed
-// before its release, such as a 'dyna subagent finish' that ends with its
-// turn, must not wedge the session for good.
+// before its release, such as a dormancy check whose turn ended, must not
+// wedge the session for good.
 func (c *Closing) Active() bool {
 	if c == nil {
 		return false

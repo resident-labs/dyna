@@ -23,7 +23,6 @@ func TestWorkerAuthorityRefusesBeforeBackend(t *testing.T) {
 		{"subagent start", func() error { _, err := m.Wake(ctx, "missing", WakeOptions{}); return err }},
 		{"subagent stop", func() error { _, err := m.Stop(ctx, "missing"); return err }},
 		{"subagent close", func() error { _, err := m.Close(ctx, "missing"); return err }},
-		{"subagent finish", func() error { _, err := m.Finish(ctx, "missing"); return err }},
 		{"subagent reopen", func() error { _, err := m.Reopen(context.Background(), "missing"); return err }},
 		{"subagent promote", func() error { _, err := m.Promote(context.Background(), "missing"); return err }},
 		{"subagent rename", func() error { _, err := m.Rename(context.Background(), "missing", "renamed"); return err }},
@@ -54,7 +53,7 @@ func TestWorkerAuthorityRefusesBeforeBackend(t *testing.T) {
 			case "subagent start":
 				want = "subagent start is owner or root or session or steward only; " + instead
 			case "subagent close":
-				want = "subagent close is owner or root or another session only; a session must use dyna subagent finish instead of closing itself"
+				want = "subagent close is owner or root or another session only; a session becomes dormant when its turn ends, so it does not close itself"
 			case "subagent adopt", "subagent promote":
 				want = tt.action + " is owner or root or parent only; ask the session parent or root to move it"
 			case "subagent rename":
@@ -81,7 +80,6 @@ func TestEngineSessionChecksNeedACaller(t *testing.T) {
 	for name, call := range map[string]func() error{
 		"stop":            func() error { _, err := m.Stop(ctx, "missing"); return err },
 		"close":           func() error { _, err := m.Close(ctx, "missing"); return err },
-		"finish":          func() error { _, err := m.Finish(ctx, "missing"); return err },
 		"reopen":          func() error { _, err := m.Reopen(ctx, "missing"); return err },
 		"promote":         func() error { _, err := m.Promote(ctx, "missing"); return err },
 		"rename":          func() error { _, err := m.Rename(ctx, "missing", "renamed"); return err },

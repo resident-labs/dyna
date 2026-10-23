@@ -52,8 +52,8 @@ give it back with `dyna root detach`.
 conversation across turns, has no timeout, and stays open until it is closed.
 Sessions delegate only through Dyna: child sessions and workflows, up to
 `subagent.maxDepth` levels. A post to a busy session steers it without losing
-its work. A session that finished its goal runs `dyna subagent finish` and goes
-dormant; a post addressed to it starts a new turn.
+its work. A session that finished its goal and owns nothing goes dormant at the
+end of its turn; a post addressed to it starts a new turn.
 
 ### Workflows
 

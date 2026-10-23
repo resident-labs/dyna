@@ -43,7 +43,7 @@ func protectGoalCalls(calls map[string]websvc.Call) {
 
 // sessionCalls are the session lifecycle calls that the CLI and the web app
 // share. The Manager checks each one against the caller on ctx.
-var sessionCalls = []string{"StopSession", "CloseSession", "ForceCloseSession", "CloseSessionOptions", "ReopenSession", "PromoteSession", "AdoptSession", "RenameSession", "FinishSession", "StartSubagent", "DismissSession", "DismissPendingPost", "PauseRoomSessions", "ResumeRoomSessions", "ClearDormantSessions",
+var sessionCalls = []string{"StopSession", "CloseSession", "ForceCloseSession", "CloseSessionOptions", "ReopenSession", "PromoteSession", "AdoptSession", "RenameSession", "StartSubagent", "DismissSession", "DismissPendingPost", "PauseRoomSessions", "ResumeRoomSessions", "ClearDormantSessions",
 	"TransferSession", "CancelSessionTransfer", "SubmitTransferHandoff", "ConsolidateSessions", "ResumeSessionConsolidation", "CancelSessionConsolidation"}
 
 // protectSessionCalls applies the caller policy to the session calls.

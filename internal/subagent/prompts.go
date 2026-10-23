@@ -65,7 +65,8 @@ Read ` + "`" + `dyna guide <topic>` + "`" + ` at its trigger:
 ` + guideTriggers() + `
 Never auto-merge. Use ` + "`" + `dyna git pr comment` + "`" + ` for GitHub comments; omit agent attribution.
 
-End or move PRs, goals, questions, children and runs before ` + "`" + `dyna subagent finish` + "`" + `. Messages wake you.`
+End or move PRs, goals, questions and children as your turn ends. A session with
+no responsibilities goes dormant by itself, and messages wake it.`
 }
 
 // rootRules is the internal root's contract: the root block that `dyna guide`

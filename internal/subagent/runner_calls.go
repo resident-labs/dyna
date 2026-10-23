@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/harness"
 	"dyna-agent/internal/harness/runtime"
+	"dyna-agent/internal/shells"
 	"dyna-agent/internal/workeroutput"
 )
 
@@ -417,11 +418,18 @@ func (m *Manager) endTurn(ctx context.Context, id string, e TurnEnd) error {
 	return nil
 }
 
+// returnDormant makes the session dormant when the turn that just ended left
+// it no responsibilities. The job the turn runs in, when it has one, ends with
+// that turn and never counts as unfinished work.
 func (m *Manager) returnDormant(ctx context.Context, id string, turn int) error {
 	if turn <= 0 {
 		return errors.New("return dormant requires a positive turn number")
 	}
-	_, err := m.finish(ctx, id, turn)
+	ctx, err := withCallerJob(ctx, os.Getenv(shells.JobEnv))
+	if err != nil {
+		return err
+	}
+	_, err = m.dormantAfterTurn(ctx, id, turn)
 	return err
 }
 
@@ -528,8 +536,9 @@ func (m *Manager) RunnerCompleteTurn(ctx context.Context, turn int) error {
 	return m.TurnReporter(ctx, m, id, turn)
 }
 
-// RunnerReturnDormant uses the same finish body as explicit finish. That
-// body checks the stored temporary wake, turn and responsibilities again.
+// RunnerReturnDormant makes the caller's session dormant when the turn that
+// just ended left it no responsibilities. That body checks the stored turn and
+// responsibilities again.
 func (m *Manager) RunnerReturnDormant(ctx context.Context, turn int) error {
 	id, err := runnerSession(ctx)
 	if err != nil {

@@ -94,7 +94,7 @@ type Manager struct {
 	InstructionsChanged func()
 
 	// checkpoint lets tests act inside a lifecycle race window. Stages:
-	// "finish-checked", "dismiss-reserved", "wake-selected", "turn-started",
+	// "dormant-checked", "dismiss-reserved", "wake-selected", "turn-started",
 	// "turn-finished", "close-before-stop", "close-before-goal-handoff", and "cleanup-start".
 	checkpoint func(stage string)
 
@@ -542,9 +542,6 @@ func (m *Manager) beginTurnConfigured(id, prompt, schema string, owe []string, m
 			norm, _ := store.NormalizedPath(id)
 			meta.Turns++
 			meta.LastActivity = time.Now()
-			if meta.Status == StatusDormant {
-				meta.DormantWake = true
-			}
 			meta.Status, meta.Finished = StatusIdle, time.Time{}
 			roomPause, pauseErr := m.rooms().SessionPause(meta.RoomID)
 			if pauseErr != nil {

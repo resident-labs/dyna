@@ -7,41 +7,29 @@ import (
 	"os"
 	"time"
 
-	"dyna-agent/internal/authority"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/shells"
 )
 
-// Finish makes a session dormant. It works during the session's own turn.
-// It refuses while the session owns any responsibility. A dormant session
-// runs nothing; a coordination post wakes it. Notices do not wake it.
-func (m *Manager) Finish(ctx context.Context, ref string) (Info, error) {
-	if err := authority.Check("subagent finish", authority.Of(ctx), nil); err != nil {
-		return Info{}, err
-	}
-	return m.finish(ctx, ref, 0)
-}
-
 type callerJobKey struct{}
 
-// WithCallerJob returns ctx naming the shell job that runs a finish call. The
-// engine process has no job of its own, so the caller must name it. An empty
-// job adds nothing, and a job must have the shell ID shape.
-func WithCallerJob(ctx context.Context, job string) (context.Context, error) {
+// withCallerJob returns ctx naming the shell job the turn runs in. An empty job
+// adds nothing, and a job must have the shell ID shape.
+func withCallerJob(ctx context.Context, job string) (context.Context, error) {
 	if job == "" {
 		return ctx, nil
 	}
 	if !shells.ValidID(job) {
-		return ctx, fmt.Errorf("finish: invalid shell job %q", job)
+		return ctx, fmt.Errorf("dormancy: invalid shell job %q", job)
 	}
 	return context.WithValue(ctx, callerJobKey{}, job), nil
 }
 
-// withoutCallerJob drops the shell item for the job that runs the finish call.
-// That job ends with the command, so it is not unfinished work. Responsibilities
-// lists only jobs the session owns, so another session's job is never dropped.
-// Any other live job still refuses the finish.
+// withoutCallerJob drops the shell item for the job the turn runs in. That job
+// ends with the turn, so it is not unfinished work. Responsibilities lists only
+// jobs the session owns, so another session's job is never dropped. Any other
+// live job still keeps the session awake.
 func withoutCallerJob(ctx context.Context, items []Responsibility) []Responsibility {
 	job, _ := ctx.Value(callerJobKey{}).(string)
 	if job == "" {
@@ -57,17 +45,19 @@ func withoutCallerJob(ctx context.Context, items []Responsibility) []Responsibil
 	return kept
 }
 
-// afterTurn uses the same reservation, responsibility check and transition for
-// automatic return. Zero is an explicit finish, which may run mid-turn.
-func (m *Manager) finish(ctx context.Context, ref string, afterTurn int) (Info, error) {
+// dormantAfterTurn makes a session dormant when the turn that just ended left
+// it no responsibilities. A dormant session runs nothing, and any message wakes
+// it; Dyna closes it after 7 dormant days. The session's own turn runner calls
+// this, so no caller names a session.
+func (m *Manager) dormantAfterTurn(ctx context.Context, ref string, turn int) (Info, error) {
 	info, err := m.store().Resolve(ref)
 	if err != nil {
 		return Info{}, err
 	}
-	if info.Status == StatusClosed {
-		return info, ErrClosed
+	if turn <= 0 {
+		return info, errors.New("dormancy requires a positive turn number")
 	}
-	if afterTurn > 0 && (!info.DormantWake || info.Meta.Status == StatusDormant || info.Turns != afterTurn) {
+	if info.Status == StatusClosed || info.Meta.Status == StatusDormant || info.Turns != turn {
 		return info, nil
 	}
 	// Reserve the session first. Goal, question, PR, shell and workflow
@@ -82,22 +72,11 @@ func (m *Manager) finish(ctx context.Context, ref string, afterTurn int) (Info, 
 	if err != nil {
 		return info, err
 	}
-	items = withoutCallerJob(ctx, items)
-	if len(items) > 0 {
-		if afterTurn > 0 {
-			// Taking work consumes the temporary wake. Later idle turns keep
-			// the ordinary explicit-finish contract.
-			_, err := m.store().updateMetaContext(ctx, info.ID, func(meta *Meta) {
-				if meta.Turns == afterTurn {
-					meta.DormantWake = false
-				}
-			})
-			return info, err
-		}
-		return info, responsibilityError("finish", items)
+	if len(withoutCallerJob(ctx, items)) > 0 {
+		return info, nil
 	}
 	if m.checkpoint != nil {
-		m.checkpoint("finish-checked")
+		m.checkpoint("dormant-checked")
 	}
 	committed := false
 	err = m.store().withLockContext(ctx, info.ID, func() error {
@@ -109,32 +88,29 @@ func (m *Manager) finish(ctx context.Context, ref string, afterTurn int) (Info, 
 			return ErrClosed
 		}
 		if meta.Closing == nil || meta.Closing.Token != token {
-			return errors.New("finish reservation changed")
+			return errors.New("dormancy reservation changed")
 		}
 		// An expired reservation no longer fenced off new work, so its check
 		// cannot vouch for the session now.
 		if !meta.Closing.Active() {
-			return errors.New("finish check outlasted its reservation; run finish again")
+			return errors.New("dormancy check outlasted its reservation")
 		}
 		commit := func() error {
-			meta.Status, meta.Finished, meta.Closing, meta.DormantWake = StatusDormant, time.Now(), nil, false
+			meta.Status, meta.Finished, meta.Closing = StatusDormant, time.Now(), nil
 			if err := m.store().writeMeta(meta); err != nil {
 				return err
 			}
 			committed = true
 			return nil
 		}
-		if afterTurn == 0 {
-			return commit()
-		}
-		if !meta.DormantWake || meta.Turns != afterTurn || meta.Transfer.blocksTurns() || meta.Consolidating != "" {
+		if meta.Turns != turn || meta.Transfer.blocksTurns() || meta.Consolidating != "" {
 			return nil
 		}
-		turn, err := m.store().ReadTurn(info.ID, afterTurn)
+		ended, err := m.store().ReadTurn(info.ID, turn)
 		if err != nil {
 			return err
 		}
-		if !turn.Done() || turn.RoomHeld || turn.HeldPrompt != "" {
+		if !ended.Done() || ended.RoomHeld || ended.HeldPrompt != "" {
 			return nil
 		}
 		// Fence both queue claims and appended posts through the commit.
@@ -155,13 +131,13 @@ func (m *Manager) finish(ctx context.Context, ref string, afterTurn int) (Info, 
 		return info, err
 	}
 	if committed {
-		m.store().appendEvent(info.ID, map[string]any{"t": "session_finished"})
+		m.store().appendEvent(info.ID, map[string]any{"t": "session_dormant"})
 	}
 	return m.store().Info(info.ID)
 }
 
 // reserveFinish marks the session as checked, under the names lock so a child
-// start in progress completes first. It works during the session's own turn.
+// start in progress completes first. Close and dormancy both use it.
 func (m *Manager) reserveFinish(ctx context.Context, id, token string) error {
 	unlock, err := lockNamesContext(ctx, m.store())
 	if err != nil {
@@ -177,7 +153,7 @@ func (m *Manager) reserveFinish(ctx context.Context, id, token string) error {
 			return ErrClosed
 		}
 		if meta.Closing.Active() {
-			return errors.New("session has another close or finish check; retry after it")
+			return errors.New("session has another close or dormancy check; retry after it")
 		}
 		meta.Closing = &sessionlife.Closing{Token: token, PID: os.Getpid(), At: time.Now()}
 		return m.store().writeMeta(meta)

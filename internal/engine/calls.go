@@ -68,10 +68,9 @@ func SessionBindings(rooms *roomsvc.Service) []websvc.Binding {
 		{Name: "CloseSessionOptions", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: rooms.CloseSessionOptions},
 		{Name: "ReopenSession", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: rooms.ReopenSession},
 		{Name: "PromoteSession", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: rooms.PromoteSession},
-		// Only the CLI starts a subagent, adopts, renames and finishes one
-		// session; no UI does, so these calls stay on the engine's own socket.
+		// Only the CLI starts a subagent, adopts and renames one session; no UI
+		// does, so these calls stay on the engine's own socket.
 		{Name: "StartSubagent", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: rooms.StartSubagent},
-		{Name: "FinishSession", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: rooms.FinishSession},
 		{Name: "AdoptSession", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: rooms.AdoptSession},
 		{Name: "RenameSession", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: rooms.RenameSession},
 		{Name: "DismissSession", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: rooms.DismissSession},

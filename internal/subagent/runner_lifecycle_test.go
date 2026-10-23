@@ -81,16 +81,13 @@ func TestTurnEndCooldownUsesTheStoredOutcome(t *testing.T) {
 	}
 }
 
-// A runner may return only its own temporary dormant wake, for the turn
-// still stored on the session. Zero must never become an explicit finish.
-func TestRunnerReturnDormantChecksTheStoredWake(t *testing.T) {
-	for _, which := range []string{"finished", "stale-turn", "zero-turn", "ordinary-session", "running", "goal", "no-caller"} {
+// A runner may make only its own session dormant, for the turn still stored on
+// it. Zero must never become a turn.
+func TestRunnerReturnDormantChecksTheStoredTurn(t *testing.T) {
+	for _, which := range []string{"finished", "stale-turn", "zero-turn", "running", "goal", "no-caller"} {
 		t.Run(which, func(t *testing.T) {
 			e := newTestEnv(t)
 			info := completedFixtureSession(t, e)
-			if _, err := e.m.Store.UpdateMeta(info.ID, func(meta *Meta) { meta.DormantWake = which != "ordinary-session" }); err != nil {
-				t.Fatal(err)
-			}
 			if which == "running" {
 				lock, err := e.m.Store.tryTurnLock(info.ID)
 				if err != nil {
@@ -126,10 +123,7 @@ func TestRunnerReturnDormantChecksTheStoredWake(t *testing.T) {
 				t.Fatal(err)
 			}
 			if got := meta.Status == StatusDormant; got != (which == "finished") {
-				t.Fatalf("status = %s; want dormant only for a completed temporary wake", meta.Status)
-			}
-			if which == "goal" && meta.DormantWake {
-				t.Fatal("taking work did not consume the temporary wake")
+				t.Fatalf("status = %s; want dormant only after a turn that left no work", meta.Status)
 			}
 		})
 	}
@@ -140,9 +134,6 @@ func TestRunnerReturnDormantChecksTheStoredWake(t *testing.T) {
 func TestRunnerReturnsDormantThroughTheOutbox(t *testing.T) {
 	e := newTestEnv(t)
 	info := completedFixtureSession(t, e)
-	if _, err := e.m.Store.UpdateMeta(info.ID, func(meta *Meta) { meta.DormantWake = true }); err != nil {
-		t.Fatal(err)
-	}
 	path := filepath.Join(t.TempDir(), "engine.sock")
 	ln, err := net.Listen("unix", path)
 	if err != nil {

@@ -27,6 +27,7 @@ func TestPromotePreservesHistoryAndDescendants(t *testing.T) {
 	stampParent(t, lead)
 	child, _ := e.start("SLEEP:1 RESPOND: child", func(o *StartOptions) { o.Service = true })
 	child, _ = e.wait(child.ID, 1)
+	e.waitStatus(child.ID, StatusDormant)
 	stampParent(t, child)
 	grandchild, _ := e.start("SLEEP:1 RESPOND: grandchild")
 	grandchild, _ = e.wait(grandchild.ID, 1)
@@ -37,7 +38,7 @@ func TestPromotePreservesHistoryAndDescendants(t *testing.T) {
 	turnBefore, _ := e.m.Store.ReadTurn(child.ID, 1)
 	stampParent(t, lead)
 	promoted, err := e.m.Promote(context.Background(), child.Address())
-	if err != nil || !promoted.Service || promoted.Depth != 1 || promoted.ParentSession != "" || promoted.Owner != "" || promoted.Status != StatusIdle {
+	if err != nil || !promoted.Service || promoted.Depth != 1 || promoted.ParentSession != "" || promoted.Owner != "" || promoted.Status != StatusDormant {
 		t.Fatalf("Promote = %+v, %v", promoted, err)
 	}
 	after, _ := e.m.Store.ReadMeta(child.ID)

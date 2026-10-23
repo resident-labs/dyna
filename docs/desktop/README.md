@@ -724,10 +724,10 @@ pause choice. Held counts include queued sessions and sessions with pending
 posts, and exclude workflow workers.
 
 **Clear dormant sessions…** asks once, then closes the room's dormant
-sessions. Only finish makes a session dormant, and finish requires an empty
+sessions. A session goes dormant by itself when a turn ends with an empty
 responsibility list, so no idle timer ever makes a session dormant. The host
 checks responsibilities again and keeps any session that gained work after it
-finished. Once a day the host also closes sessions dormant and inactive for 7
+went dormant. Once a day the host also closes sessions dormant and inactive for 7
 days. Neither forces a close or deletes files or history.
 
 Progress and results appear under the Sessions header. Results preserve the

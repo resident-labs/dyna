@@ -8,7 +8,7 @@ const old = new Date(now - 60 * 60 * 1000).toISOString()
 const agent = (name, extra = {}) => ({ id: name, name, address: `r:${name}`, state: 'idle', lastActivity: recent, ...extra })
 
 test('lists awake agents by room and counts dormant and paused ones as hidden', () => {
-  // Only finish makes an agent dormant; a long idle agent stays awake.
+  // A session goes dormant when a turn ends with no work; long idle time never does.
   const rooms = [{ id: 'a' }, { id: 'b', paused: true }, { id: 'c', archived: true }, { id: 'd' }]
   const members = {
     a: [{ owner: true, name: 'a' }, agent('lead', { state: 'live' }), agent('sleepy', { lastActivity: old }), agent('gone', { closed: true }), agent('over', { status: 'dormant' }), agent('keeper', { service: true })],
