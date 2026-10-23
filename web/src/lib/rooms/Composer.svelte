@@ -25,6 +25,9 @@
   let error = $state('')
   let note = $state('')
   let pick = $state(0)
+  let completionList = $state()
+  const completionID = $props.id()
+  const optionID = (option) => completionID + '-option-' + encodeURIComponent(option.value)
   let preview = $state(null) // roomsvc.Draft for the current text: who it wakes
   let token = $state(null) // {start, end, text} of the @token at the caret
   const attachments = attachmentDraft({ room: () => room?.id, error: (message) => (error = message), focus: () => field?.focus(), noun: 'post' })
@@ -54,6 +57,28 @@
     ] :
     mentionOptions(choices))
   let matches = $derived(token ? (token.arg ? options.filter((o) => `${o.value} ${o.hint}`.toLowerCase().includes(token.text.toLowerCase())).slice(0, 8) : matchMentions(options, token.text, token.slash ? 20 : 8)) : [])
+  // Keep the selected option inside this menu without scrolling the feed.
+  $effect(() => {
+    const options = matches
+    if (pick >= options.length) {
+      pick = Math.max(0, options.length - 1)
+      return
+    }
+    const selected = options[pick]
+    if (!selected) return
+    tick().then(() => {
+      const menu = completionList
+      const row = menu?.querySelector('[id="' + optionID(selected) + '"]')
+      if (!menu || !row || matches[pick]?.value !== selected.value) return
+      const bounds = menu.getBoundingClientRect()
+      const item = row.getBoundingClientRect()
+      const top = item.top - bounds.top - menu.clientTop
+      const bottom = item.bottom - bounds.top - menu.clientTop
+      if (top < 0) menu.scrollTop += top
+      else if (bottom > menu.clientHeight) menu.scrollTop += bottom - menu.clientHeight
+    })
+  })
+
   let spawn = $derived(preview?.spawn ?? null)
 
   // The Go parser decides who a draft goes to; ask it shortly after typing stops.
@@ -196,11 +221,11 @@
 
 <div class="composer">
   {#if matches.length}
-    <div class="pop" role="listbox">
+    <div class="pop" role="listbox" bind:this={completionList}>
       {#if !matches[0].group}<div class="pophead">{token?.arg ? token.arg.listTitle || token.arg.arg : 'Mention'}</div>{/if}
       {#each matches as m, i}
         {#if m.group && m.group !== matches[i - 1]?.group}<div class="pophead">{m.group}</div>{/if}
-        <button class="opt" class:on={i === pick} role="option" aria-selected={i === pick} onmousedown={(e) => { e.preventDefault(); complete(m.value) }}>
+        <button id={optionID(m)} class="opt" class:on={i === pick} role="option" aria-selected={i === pick} onmousedown={(e) => { e.preventDefault(); complete(m.value) }}>
           <span class="mono">{m.value}{#if m.arg}<span class="argph"> ‹{m.arg}›</span>{/if}</span>
           <span class="kind">{m.hint}</span>
         </button>
