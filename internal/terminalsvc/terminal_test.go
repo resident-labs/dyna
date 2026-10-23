@@ -170,9 +170,11 @@ func TestCloseStopsBackgroundJob(t *testing.T) {
 	if err := syscall.Mkfifo(pipe, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	// The background child holds this pipe for its whole life. It opens the
-	// pipe only after it starts, so a reader proves the child runs before
-	// Close, and the pipe's EOF proves the group kill reached it.
+	// The background child opens this pipe read-write and then blocks on the
+	// shell's own read builtin, so it runs no external command after that
+	// point and cannot sit in loader I/O while Close's SIGKILL is pending. A
+	// reader proves the child runs before Close; EOF proves the kill reached
+	// it.
 	holders := make(chan *os.File, 1)
 	go func() {
 		f, err := os.OpenFile(pipe, os.O_RDONLY, 0)
@@ -182,7 +184,7 @@ func TestCloseStopsBackgroundJob(t *testing.T) {
 		}
 		holders <- f
 	}()
-	write(t, s, in.ID, fmt.Sprintf("( exec 3>%q; sleep 30 ) & wait\n", pipe))
+	write(t, s, in.ID, fmt.Sprintf("( exec 3<>%q; read -r line <&3 ) & wait\n", pipe))
 	var reader *os.File
 	select {
 	case reader = <-holders:
