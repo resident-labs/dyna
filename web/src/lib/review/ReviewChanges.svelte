@@ -4,17 +4,17 @@
   // comment on diff lines and send them to that session.
   // Staged, unstaged and untracked files are separate groups, as in git; a
   // file with both kinds of change shows in both.
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { api } from '../../api.js'
   import { ago } from '../ui/format.ts'
-  import DiffView from './DiffView.svelte'
-  import SendBar from './SendBar.svelte'
-  import { addComment } from './diffComments.ts'
-  import { code, setWrap } from './codeprefs.svelte.ts'
-  import { parseDiff, statusLetter, STATUS, split, base } from './repo.ts'
+  import DiffView from '../files/DiffView.svelte'
+  import SendBar from '../files/SendBar.svelte'
+  import { addComment, formatComments } from '../files/diffComments.ts'
+  import { code, setWrap } from '../files/codeprefs.svelte.ts'
+  import { parseDiff, statusLetter, STATUS, split, base } from '../files/repo.ts'
 
   // sessionName is the session's display name; the send bar names it as the receiver.
-  let { roomId, session, sessionName = '' } = $props()
+  let { roomId, session, sessionName = '', version = 0, active = true } = $props()
 
   let status = $state(null)
   let error = $state('')
@@ -24,8 +24,16 @@
   let open = $state(new Set())
   let cut = $state(false)
   let pending = $state([])
-  // Comments go to the session that owns the worktree: its open change, or a post to it.
-  const deliver = (comments) => api.sendWorktreeComments(roomId, session, comments)
+  // Send the comment as a message to the session shown beside the workspace.
+  const deliver = (comments) => api.sendToSession(session, formatComments(comments))
+  let loaded = false
+  $effect(() => {
+    version
+    if (!active) return
+    if (!loaded) { loaded = true; untrack(load); return }
+    const timer = setTimeout(() => untrack(load), 1000)
+    return () => clearTimeout(timer)
+  })
 
   let loadVersion = 0
   async function load() {
@@ -60,8 +68,7 @@
   }
 
   onMount(() => {
-    load()
-    const again = () => document.visibilityState === 'visible' && load()
+    const again = () => active && document.visibilityState === 'visible' && load()
     window.addEventListener('focus', again)
     return () => window.removeEventListener('focus', again)
   })
@@ -129,7 +136,7 @@
         {#if status.behind}<span class="ab" title="{status.behind} commit{status.behind === 1 ? '' : 's'} behind upstream">↓{status.behind}</span>{/if}
       </div>
       <p class="sub">
-        <span class="mono" title={status.root}>{base(status.root)}</span><span class="tag">worktree</span>
+        <span class="mono" title={status.root}>{base(status.root)}</span>{#if status.worktree}<span class="tag">worktree</span>{/if}
         · {total ? `${total} changed file${total === 1 ? '' : 's'}` : 'clean'}
       </p>
       <span class="spacer"></span>

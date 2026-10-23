@@ -172,7 +172,7 @@
       </div>
       <!-- PRFiles stays mounted (hidden) outside the keyed panel, so the diff
            survives tab changes; its CSS fade restarts each time it shows. -->
-      {#if filesSeen && number}<div class="tabpanel" hidden={tab !== 'files'}><PRFiles {roomId} {number} changeId={change.state === 'open' ? change.changeId : ''} author={author} onsent={() => { refresh(); return onchange() }} /></div>{/if}
+      {#if filesSeen && number}<div class="tabpanel" hidden={tab !== 'files'}><PRFiles {roomId} {number} authorSession={change.state === 'open' ? change.authorSession : ''} author={author} /></div>{/if}
       {#key tab}<div class="tabpanel">
       {#if tab === 'commits' && number}
         {#if detailError}<p class="err">{detailError}</p>{:else if detail}<PRCommits commits={detail.commits} url={detail.url} />{:else}<p class="quiet">Loading #{number}…</p>{/if}
