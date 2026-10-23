@@ -2,11 +2,14 @@ package sessionhost
 
 import (
 	"context"
+	"io"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -341,20 +344,30 @@ func TestSocketHostBindsEachAttach(t *testing.T) {
 func TestSocketSessionCloseFencesFrames(t *testing.T) {
 	h := realHost(t)
 	pids, refs := &pidRecorder{}, &refRecorder{}
-	s, err := h.Session(context.Background(), childLaunch("echo", "fake:fence", "f1", pids, refs))
+	fifo := filepath.Join(t.TempDir(), "written")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	launch := childLaunch("fence", "fake:fence", "f1", pids, refs)
+	launch.Env = append(launch.Env, "GO_SESSIONHOST_FENCE="+fifo)
+	s, err := h.Session(context.Background(), launch)
 	if err != nil {
 		t.Fatalf("session: %v", err)
 	}
-	if err := s.Write([]byte("last")); err != nil {
-		t.Fatalf("write: %v", err)
+	// The open returns once the child has opened its end, after it wrote the frame.
+	f, err := os.Open(fifo)
+	if err != nil {
+		t.Fatal(err)
 	}
+	_, _ = io.Copy(io.Discard, f)
+	f.Close()
 	if err := s.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), failDeadline)
 	defer cancel()
 	got, err := s.Next(ctx)
-	if err != nil || string(got) != "got:last" {
+	if err != nil || string(got) != "last" {
 		t.Fatalf("next after close = %q, %v, want the frame written before close", got, err)
 	}
 	if _, err := s.Next(ctx); err == nil {
