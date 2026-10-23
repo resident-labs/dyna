@@ -937,10 +937,6 @@ func (s *Service) CompleteSessionTurn(ctx context.Context, sessionID string, tur
 		if err != nil {
 			return Result{}, err
 		}
-		// TODO: legacy/shim remove later — an earlier runner can still mark Reported without the report lock; remove when those runners have exited.
-		if saved.RoomID == "" {
-			return Result{}, nil
-		}
 		plan = &saved
 	}
 	result, err := s.appendCompletion(ctx, *plan)

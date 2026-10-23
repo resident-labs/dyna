@@ -61,7 +61,7 @@ func (s *Store) SaveReportPlan(ctx context.Context, id string, n int, plan Repor
 			return err
 		}
 		if turn.Reported {
-			return nil
+			return fmt.Errorf("session %s turn %d report is already finished", id, n)
 		}
 		if turn.ReportPlan != nil {
 			saved = *turn.ReportPlan
