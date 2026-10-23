@@ -181,10 +181,10 @@ func TestCacheCleanRemovesOnlyWhatNoRunUses(t *testing.T) {
 	}
 }
 
-// TestCacheCleanFreesCachesRightAfterARunEnds runs the real lifecycle on a real
-// tree: two runs hold the base's caches between them, one ends, and a cleanup
-// frees the old caches only when the last of them is gone. Every step is a
-// state check, so nothing depends on how long a step took.
+// TestCacheCleanFreesCachesRightAfterARunEnds runs the cleanup against the
+// locks a run holds. Two runs hold one base's caches between them, one ends,
+// and the old caches go only when the last is gone. Readiness and release
+// travel over pipes and process exit, so the test never waits for a poll.
 func TestCacheCleanFreesCachesRightAfterARunEnds(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("the cleanup refuses to run as root")
@@ -201,40 +201,57 @@ func TestCacheCleanFreesCachesRightAfterARunEnds(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Start a run exactly as its setup does, and give back the file that holds
-	// the run's own lock.
-	start := func(name string) string {
+	// holdRun keeps one run's locks: the base's cache lock shared and the run's
+	// own lock exclusive, which is what a run holds while it works. Its pipe
+	// reports readiness and its closing ends the run, as runLocks and the run's
+	// teardown do on the node.
+	holdRun := func(name string) func() {
 		t.Helper()
 		active := filepath.Join(base, "runs", name, ".active")
 		if err := os.MkdirAll(filepath.Dir(active), 0700); err != nil {
 			t.Fatal(err)
 		}
-		if out, err := exec.Command("bash", "-c", "set -e; "+runLocks(base, active)).CombinedOutput(); err != nil {
-			t.Fatalf("run %s setup: %v: %s", name, err, out)
+		script := `exec 7>>"$0" || exit 1; flock -s 7 || exit 1; exec 6>>"$1" || exit 1; flock -x 6 || exit 1; echo ready; read -r _`
+		cmd := exec.Command("bash", "-c", script, filepath.Join(base, "caches.lock"), active)
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			t.Fatal(err)
 		}
-		t.Cleanup(func() { exec.Command("bash", "-c", stopKeeper(base, active)).Run() })
-		if err := exec.Command("flock", "-n", filepath.Join(base, "caches.lock"), "true").Run(); err == nil {
-			t.Fatalf("run %s did not take the base's cache lock", name)
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			t.Fatal(err)
 		}
-		return active
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		ended := false
+		end := func() {
+			if ended {
+				return
+			}
+			ended = true
+			stdin.Close()
+			cmd.Wait()
+		}
+		t.Cleanup(end)
+		if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || !strings.Contains(line, "ready") {
+			t.Fatalf("run %s did not take its locks: %q %v", name, line, err)
+		}
+		return end
 	}
-	first, second := start("one"), start("two")
+	first, second := holdRun("one"), holdRun("two")
 
 	// A cleanup under the runs frees no cache.
 	if out, err := runCacheClean(t, base, false); err != nil || strings.Contains(string(out), "go-mod") {
 		t.Fatalf("cleanup trimmed caches under a live run: %v: %s", err, out)
 	}
 	// The first run ends; the second still holds the caches, so they stay.
-	if out, err := exec.Command("bash", "-c", removeRunDir(base, first)).CombinedOutput(); err != nil {
-		t.Fatalf("run teardown: %v: %s", err, out)
-	}
+	first()
 	if out, err := runCacheClean(t, base, false); err != nil || strings.Contains(string(out), "go-mod") {
 		t.Fatalf("cleanup trimmed caches that another run still mounts: %v: %s", err, out)
 	}
 	// The last run ends, and the cleanup called right after frees them.
-	if out, err := exec.Command("bash", "-c", removeRunDir(base, second)).CombinedOutput(); err != nil {
-		t.Fatalf("last run teardown: %v: %s", err, out)
-	}
+	second()
 	if err := exec.Command("flock", "-n", filepath.Join(base, "caches.lock"), "true").Run(); err != nil {
 		t.Fatalf("a keeper still held the base cache lock after the last teardown: %v", err)
 	}
