@@ -76,7 +76,7 @@ func TestSpawnWithImageSavesPostBeforeStarting(t *testing.T) {
 		if p.ID == request.ID {
 			requests++
 		}
-		if p.Kind == KindSpawn {
+		if p.Kind == "session" && p.Notice.Kind == "spawned" {
 			spawnRecords++
 		}
 	}

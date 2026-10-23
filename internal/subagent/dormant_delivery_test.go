@@ -18,11 +18,14 @@ func TestDormantMessageDeliveryState(t *testing.T) {
 			if state == "unaddressed" {
 				to = info.Room + ":someone-else"
 			}
-			kind := "message"
+			var msg room.Message
+			var err error
 			if state == "notice" {
-				kind = "notice"
+				// A typed instruction note is agent input without a wake.
+				msg, err = e.m.rooms().PostEvent(info.RoomID, room.SessionEvent{Type: room.SessionInstructions, Session: to, Detail: "delivery regression"}, to)
+			} else {
+				msg, err = e.m.rooms().Post(info.RoomID, room.PostInput{Wake: true, From: info.Room, Kind: "message", To: []string{to}, Text: "delivery regression"})
 			}
-			msg, err := e.m.rooms().Post(info.RoomID, room.PostInput{Wake: true, From: info.Room, Kind: kind, To: []string{to}, Text: "delivery regression"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -105,11 +108,13 @@ func TestDormantInheritedMessageDeliveryState(t *testing.T) {
 			source, _ = e.wait(source.ID, 1)
 			target, _ := e.start("SLEEP:1 RESPOND: target")
 			target, _ = e.wait(target.ID, 1)
-			kind := "message"
+			var msg room.Message
+			var err error
 			if state == "notice" {
-				kind = "notice"
+				msg, err = e.m.rooms().PostEvent(source.RoomID, room.SessionEvent{Type: room.SessionInstructions, Session: source.Address(), Detail: "inherited regression"}, source.Address())
+			} else {
+				msg, err = e.m.rooms().Post(source.RoomID, room.PostInput{Wake: true, From: source.Room, Kind: "message", To: []string{source.Address()}, Text: "inherited regression"})
 			}
-			msg, err := e.m.rooms().Post(source.RoomID, room.PostInput{Wake: true, From: source.Room, Kind: kind, To: []string{source.Address()}, Text: "inherited regression"})
 			if err != nil {
 				t.Fatal(err)
 			}

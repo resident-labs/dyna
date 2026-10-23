@@ -240,18 +240,42 @@ func (m *Manager) noteInstructionsLocked(meta *Meta, now time.Time) error {
 		return nil
 	}
 	desired := m.desiredInstructions(*meta)
-	note := instructions.Note(*known, desired)
-	if note == "" {
+	changes := instructions.Changes(*known, desired)
+	if len(changes) == 0 {
 		meta.InstructionsChangedAt = time.Time{}
 		return nil
 	}
-	msg, err := m.rooms().Post(meta.RoomID, room.PostInput{Wake: false, From: "dyna", Kind: "instructions", To: []string{meta.Address()}, Text: note})
+	event := room.SessionEvent{
+		Type:     room.SessionInstructions,
+		Session:  meta.Address(),
+		Sections: instructionChanges(changes),
+		Detail:   instructions.Lines(changes),
+	}
+	msg, err := m.rooms().PostEvent(meta.RoomID, event, meta.Address())
 	if err != nil {
 		return err
 	}
-	meta.InstructionsKnown, meta.InstructionsNotes = &desired, append(meta.InstructionsNotes, msg.ID)
+	meta.InstructionsKnown = &desired
+	if msg.ID != "" {
+		meta.InstructionsNotes = append(meta.InstructionsNotes, msg.ID)
+	}
 	meta.InstructionsChangedAt = time.Time{}
 	return nil
+}
+
+// instructionChanges maps the change note's sections to the typed payload, so
+// a card reads the same sections the agent text names.
+func instructionChanges(changes []instructions.Change) []room.InstructionChange {
+	actions := map[instructions.ChangeAction]room.InstructionAction{
+		instructions.ChangeItems:   room.InstructionItems,
+		instructions.ChangeBody:    room.InstructionBody,
+		instructions.ChangeRemoved: room.InstructionRemoved,
+	}
+	out := make([]room.InstructionChange, len(changes))
+	for i, change := range changes {
+		out[i] = room.InstructionChange{Name: change.Name, Action: actions[change.Action], Added: change.Added, Removed: change.Removed, Body: change.Body}
+	}
+	return out
 }
 
 // NoteRoomInstructions queues a change for each open session in roomID,

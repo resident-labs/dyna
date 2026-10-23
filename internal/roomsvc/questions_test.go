@@ -172,8 +172,12 @@ func TestOwnerWithdrawsOwnQuestion(t *testing.T) {
 		t.Fatal(err)
 	}
 	post, err := e.svc.Notify.Rooms.Message(rec.ID, questions.PostID(rec.ID, q.ID, "withdrawn"))
-	if err != nil || post.From != rec.Name || len(post.To) != 1 || post.To[0] != rec.Name || post.ReplyTo != q.Post {
+	if err != nil || post.From != room.EngineSender || len(post.To) != 1 || post.To[0] != rec.Name || post.ReplyTo != q.Post {
 		t.Fatalf("withdrawal post = %+v, %v", post, err)
+	}
+	payload, ok := post.Question()
+	if !ok || payload.QuestionID != q.ID || payload.By != rec.Name || payload.Reason != "not needed" {
+		t.Fatalf("withdrawal payload = %+v, %v", payload, ok)
 	}
 }
 

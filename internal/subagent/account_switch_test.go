@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +24,7 @@ func accountSwitchNotes(t *testing.T, m *Manager, roomID string) []room.Message 
 	}
 	var notes []room.Message
 	for _, msg := range msgs {
-		if msg.Kind == "account" {
+		if msg.Kind == "session" && msg.Notice.Kind == "account" {
 			notes = append(notes, msg)
 		}
 	}
@@ -59,7 +58,7 @@ func TestAccountSwitchPostsOneQuietLineToRoot(t *testing.T) {
 				msgs, err := e.m.rooms().Messages(info.RoomID)
 				observationErr = err
 				for _, msg := range msgs {
-					if msg.Kind == "account" {
+					if msg.Kind == "session" && msg.Notice.Kind == "account" {
 						notesAtCommit++
 					}
 				}
@@ -83,7 +82,8 @@ func TestAccountSwitchPostsOneQuietLineToRoot(t *testing.T) {
 	}
 	msgs := accountSwitchNotes(t, e.m, info.RoomID)
 	for _, m := range msgs {
-		if m.Wake || len(m.To) != 1 || m.To[0] != meta.Room+":root" || !strings.Contains(m.Text, "work") || !strings.Contains(m.Text, "personal") {
+		payload, ok := m.Session()
+		if m.Wake || len(m.To) != 1 || m.To[0] != meta.Room+":root" || !ok || payload.From != "work" || payload.To != "personal" || payload.Reason != room.AccountUsageLimit {
 			t.Fatalf("note = %+v", m)
 		}
 	}

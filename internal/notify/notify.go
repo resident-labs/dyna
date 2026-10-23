@@ -415,7 +415,7 @@ func (s *Service) Post(ctx context.Context, in PostInput) (Result, error) {
 	if err := s.servicePost(in, res); err != nil {
 		return Result{}, err
 	}
-	if in.Sender.Kind == SenderSession && in.Sender.Session.Service && in.Kind == "alert" {
+	if in.Sender.Kind == SenderSession && in.Sender.Session.Service && in.Kind == serviceAlertKind {
 		dir, err := s.sessionStore().Dir(in.Sender.Session.ID)
 		if err != nil {
 			return Result{}, err
@@ -934,11 +934,15 @@ func silentSessionCompletion(turn subagent.Turn) bool {
 	return turn.WrapUp || turn.StopReason == "transfer" || turn.StopReason == "consolidation" || turn.StopReason == "close"
 }
 
-// serviceAlertKind is the post kind of a service failure alert. The sealed
-// system event registry replaces it with family "service", type "failed"
-// (dyna:notice-contract, PR 5), so the kind and the text live in these two
-// places only: one constant and one function.
-const serviceAlertKind = "alert"
+// ServiceAlertKind is the post kind of a service failure alert: a service
+// session reporting an actionable problem to the owner or its parent. It is
+// not a system event: a session writes it, so it carries the session's own
+// sender. It is named apart from the sealed "alert" family, which only the
+// engine posts through PostEvent.
+const ServiceAlertKind = "service-alert"
+
+// serviceAlertKind is the short name the notify package uses internally.
+const serviceAlertKind = ServiceAlertKind
 
 // serviceRoleName names the service an alert is about. A helper has no role of
 // its own, so it reports as a helper of its service.
