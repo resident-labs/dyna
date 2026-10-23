@@ -161,6 +161,18 @@ func (s *Store) readRecords(keys ...string) (State, error) {
 	}
 	return st, nil
 }
+
+// readRecordResponses gives one record's saved responses, so a service call
+// outside the poll workers can revalidate them instead of spending quota on
+// bodies it already holds.
+func (s *Store) readRecordResponses(key string) (map[string]cachedResponse, error) {
+	snapshot, err := state.ReadSnapshot(s.Root)
+	if err != nil {
+		return nil, err
+	}
+	return snapshot.Responses(key), nil
+}
+
 func (s *Store) Get(key string) (Record, error) {
 	snapshot, err := state.ReadSnapshot(s.Root)
 	if err != nil {

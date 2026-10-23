@@ -343,7 +343,17 @@ func (s *Service) mergeReady(ctx context.Context, expected Record) (Record, bool
 	if current == nil || current.Head != expected.Head || !current.Watching || current.State != "open" {
 		return Record{}, false, nil
 	}
-	snap, err := s.github(current.RoomID).Snapshot(ctx, refRecord(*current))
+	// The queue re-reads a ready PR every poll. Revalidate its saved copies so
+	// an unchanged PR costs 304 replies, not counted requests, and the read
+	// waits for a quota pause like every other poll.
+	gh, clientErr := s.mergePollClient(st, *current)
+	if clientErr != nil {
+		return Record{}, false, clientErr
+	}
+	snap, err := gh.Snapshot(ctx, refRecord(*current))
+	if saveErr := s.savePollResponses(current.Key, gh); saveErr != nil {
+		return Record{}, false, errors.Join(err, saveErr)
+	}
 	if err != nil {
 		return Record{}, false, err
 	}

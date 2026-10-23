@@ -138,6 +138,8 @@ func (g GitHub) requestBody(ctx context.Context, r Ref, path, method string, raw
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid GitHub HTTP status")
 	}
+	// A 304 reply validates a saved copy and costs no REST quota.
+	engineGHQuota.record(path, status == http.StatusNotModified)
 	headers, err := textproto.NewReader(reader).ReadMIMEHeader()
 	if err != nil {
 		return nil, "", fmt.Errorf("invalid GitHub HTTP headers")
