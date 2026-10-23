@@ -789,7 +789,7 @@ func (e *engine) spawn(call goja.FunctionCall) goja.Value {
 						Kind: "steer", Message: message.Message,
 					})
 				},
-				OnMessage: func(message runstore.SteeringMessage) {
+				OnMessage: func(message runstore.SteeringMessage, _ *int64) {
 					emitA(runstore.Event{
 						T: "agent_steer", ID: id, Label: label, Profile: prof.Name, Phase: phase,
 						Status: "delivered", Msg: truncate(message.Message, 2000), Preview: truncate(message.Message, 240),

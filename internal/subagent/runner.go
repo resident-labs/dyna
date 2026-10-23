@@ -297,8 +297,8 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			}
 			return writes.noteWait(ctx, TurnNote{Dispatched: &d})
 		},
-		OnMessage: func(msg runstore.SteeringMessage) {
-			writes.note(TurnNote{Delivered: &Steer{ID: msg.ID, TS: msg.TS, Message: msg.Message}})
+		OnMessage: func(msg runstore.SteeringMessage, sourceOffset *int64) {
+			writes.note(TurnNote{Delivered: &Steer{ID: msg.ID, TS: msg.TS, Message: msg.Message, SourceOffset: sourceOffset}})
 		},
 	}
 

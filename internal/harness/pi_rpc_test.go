@@ -272,7 +272,7 @@ func TestPiSteeringQueuesOverRPCWithoutInterrupt(t *testing.T) {
 	defer cancel()
 	r, err := RunWithOptions(ctx, p, "first task", t.TempDir(), false, JournalOptions{}, SteeringOptions{
 		Source:    source,
-		OnMessage: func(msg runstore.SteeringMessage) { delivered = append(delivered, msg) },
+		OnMessage: func(msg runstore.SteeringMessage, _ *int64) { delivered = append(delivered, msg) },
 	}, SessionOptions{}, ExecutionOptions{})
 	if err != nil {
 		t.Fatalf("turn: %v", err)

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/workeroutput"
 )
 
 // SteeringSource is what a steering supervisor drains. Run workers use the
@@ -37,12 +38,13 @@ func (m workerSteering) Read(offset int64, final bool) ([]runstore.SteeringMessa
 func (m workerSteering) Deactivate() { _ = runstore.DeactivateAgentSteering(m.runID, m.agentID) }
 
 type steeringSupervisor struct {
-	opts    SteeringOptions
-	source  SteeringSource
-	offset  int64
-	active  bool
-	pending []runstore.SteeringMessage
-	err     error
+	dispatched map[runstore.SteeringMessage]bool
+	opts       SteeringOptions
+	source     SteeringSource
+	offset     int64
+	active     bool
+	pending    []runstore.SteeringMessage
+	err        error
 	// hook delivers steering through the harness's post-tool hook (nil when
 	// the harness has none).
 	hook *steerHook
@@ -111,10 +113,17 @@ func (s *steeringSupervisor) dispatch(messages []runstore.SteeringMessage) error
 	if s == nil || s.opts.OnDispatch == nil {
 		return nil
 	}
+	if s.dispatched == nil {
+		s.dispatched = map[runstore.SteeringMessage]bool{}
+	}
 	for _, message := range messages {
+		if s.dispatched[message] {
+			continue
+		}
 		if err := s.opts.OnDispatch(message); err != nil {
 			return err
 		}
+		s.dispatched[message] = true
 	}
 	return nil
 }
@@ -165,4 +174,14 @@ func steeringPrompt(messages []runstore.SteeringMessage) string {
 		}
 	}
 	return b.String()
+}
+
+// normalizedBoundary copies the complete-line position at consumption.
+// Nil means unknown; zero is a proved position before the first event.
+func normalizedBoundary(n *workeroutput.Normalizer) *int64 {
+	offset, known := n.Boundary()
+	if !known {
+		return nil
+	}
+	return &offset
 }

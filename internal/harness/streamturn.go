@@ -133,13 +133,13 @@ func (t *streamTurn) handle(finish streamFinish) (attempt, bool, error) {
 	for _, n := range t.stream.drain() {
 		if c := n.consumed; c != nil {
 			switch c.kind {
-			case streamItemSteering:
+			case streamItemPrompt, streamItemSteering:
 				if t.steering != nil && t.steering.opts.OnMessage != nil {
 					for _, message := range c.messages {
-						t.steering.opts.OnMessage(message)
+						t.steering.opts.OnMessage(message, c.sourceOffset)
 					}
 				}
-				if c.inFlight > 0 {
+				if c.kind == streamItemSteering && c.inFlight > 0 {
 					t.gate.report(DeliverySteering, DeliveryBoundary, time.Since(c.written), t.tools.InFlight())
 				}
 			case streamItemJournal:
