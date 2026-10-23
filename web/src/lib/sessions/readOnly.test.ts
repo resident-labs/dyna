@@ -12,8 +12,8 @@ const code = await bundle({ component: '../sessions/Session', format })
 
 async function render(props: object) {
   const dom = installDom()
-  for (const n of ['DOMParser', 'NodeFilter', 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.set(globalThis, n, Reflect.get(dom.window, n))
-  Object.assign(globalThis, { matchMedia: () => ({ matches: false }) })
+  for (const n of ['DOMParser', 'NodeFilter', 'HTMLMediaElement', 'HTMLTextAreaElement', 'matchMedia']) Reflect.set(globalThis, n, Reflect.get(dom.window, n))
+  Object.assign(globalThis, { matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) })
   Object.assign(dom.window.HTMLElement.prototype, { scrollTo() {} })
   const Observer = class { observe() {} unobserve() {} disconnect() {} }
   Object.assign(globalThis, { ResizeObserver: Observer })
@@ -28,7 +28,7 @@ async function render(props: object) {
   } finally {
     if (app) unmount(app)
     dom.window.close()
-    for (const n of [...domNames, 'DOMParser', 'NodeFilter', 'HTMLMediaElement', 'HTMLTextAreaElement']) Reflect.deleteProperty(globalThis, n)
+    for (const n of [...domNames, 'DOMParser', 'NodeFilter', 'HTMLMediaElement', 'HTMLTextAreaElement', 'matchMedia']) Reflect.deleteProperty(globalThis, n)
     await rm(dir, { recursive: true, force: true })
   }
 }
