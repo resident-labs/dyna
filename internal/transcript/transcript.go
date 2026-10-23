@@ -882,6 +882,15 @@ func DeliveryText(delivered bool, d *subagent.Delivery, turnDone bool) string {
 		return fmt.Sprintf("delivered after %s: the running tool outlived steering.maxToolWait and was interrupted", wait)
 	case "turn-end":
 		return "delivered as a continuation when the turn ended"
+	case "interrupted":
+		if d.Reason == "wait-bound" {
+			return fmt.Sprintf("delivered after %s: the running tool outlived steering.maxToolWait and was interrupted", wait)
+		}
+		if d.Reason != "no-tool-boundaries" {
+			return fmt.Sprintf("delivered after %s: the worker was interrupted", wait)
+		}
+		return fmt.Sprintf("delivered after %s: no tool boundaries in this output format, so the worker was interrupted", wait)
+	// TODO: legacy/shim remove later — renders old deliveries until startup migration runs.
 	case "unsupported":
 		return fmt.Sprintf("delivered after %s: no tool boundaries in this output format, so the worker was interrupted", wait)
 	}

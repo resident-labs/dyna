@@ -190,6 +190,7 @@ type Steer struct {
 
 // Delivery records a deferred steering/journal delivery (tool boundaries).
 type Delivery struct {
+	Reason   string `json:"reason,omitempty"`
 	TS       int64  `json:"ts"`
 	Kind     string `json:"kind"`
 	Outcome  string `json:"outcome"`

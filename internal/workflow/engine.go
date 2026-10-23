@@ -1161,7 +1161,7 @@ func (e *engine) recordDelivery(emit func(runstore.Event), id int, label, profil
 		msg = fmt.Sprintf("%s delivery waited %s for an in-flight tool call to finish", note.Kind, note.Waited.Round(time.Millisecond))
 	case harness.DeliveryTurnEnd:
 		msg = fmt.Sprintf("%s delivery waited %s and was delivered as the next continuation because the turn ended first", note.Kind, note.Waited.Round(time.Millisecond))
-	case harness.DeliveryUnsupported:
+	case harness.DeliveryInterrupted:
 		msg = fmt.Sprintf("%s delivery waited %s; this profile's output dialect exposes no tool-call boundaries, so the worker was interrupted after steering.maxToolWait", note.Kind, note.Waited.Round(time.Millisecond))
 	default:
 		return
@@ -1170,7 +1170,7 @@ func (e *engine) recordDelivery(emit func(runstore.Event), id int, label, profil
 		T: "agent_defer", ID: id, Label: label, Profile: profileName, Phase: phase,
 		Kind: note.Kind, Status: note.Outcome, DurMs: note.Waited.Milliseconds(), Msg: msg,
 	})
-	if e.opts.Run != nil && journalPath != "" && note.Outcome == harness.DeliveryUnsupported {
+	if e.opts.Run != nil && journalPath != "" && note.Outcome == harness.DeliveryInterrupted {
 		_ = e.opts.Run.AppendAgentJournal(id, runstore.AgentJournalEntry{Kind: "delivery", Message: truncate(msg, 400)})
 	}
 }

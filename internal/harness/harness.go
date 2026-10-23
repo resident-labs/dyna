@@ -1151,15 +1151,16 @@ const (
 	// DeliveryTurnEnd: the turn finished before a boundary; delivered as the
 	// next continuation.
 	DeliveryTurnEnd = "turn-end"
-	// DeliveryUnsupported: the dialect's stream does not expose tool boundaries,
+	// DeliveryInterrupted: the dialect's stream does not expose tool boundaries,
 	// so the delivery waited steering.maxToolWait for the turn to end and then
 	// interrupted the worker.
-	DeliveryUnsupported = "unsupported"
+	DeliveryInterrupted = "interrupted"
 )
 
 // DeliveryNote describes a steering or journal delivery that did not happen
 // immediately, for the run event log.
 type DeliveryNote struct {
+	Reason  string
 	Kind    string
 	Outcome string
 	Waited  time.Duration
@@ -1184,7 +1185,11 @@ func (g *deliveryGate) report(kind, outcome string, waited time.Duration, inFlig
 	if g == nil || g.notify == nil {
 		return
 	}
-	g.notify(DeliveryNote{Kind: kind, Outcome: outcome, Waited: waited, InFlight: inFlight})
+	note := DeliveryNote{Kind: kind, Outcome: outcome, Waited: waited, InFlight: inFlight}
+	if outcome == DeliveryInterrupted {
+		note.Reason = "no-tool-boundaries"
+	}
+	g.notify(note)
 }
 
 // runState carries per-call accounting across invocations: token usage.
