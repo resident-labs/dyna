@@ -207,6 +207,11 @@ func TestRoomChatPagesPastAFullPageOfDMPosts(t *testing.T) {
 		dm = m
 	}
 	last := e.say(rec, "lead", "after the DMs")
+	// A DM post after every room post is a cursor too, and it is not listed.
+	afterLast, err := e.svc.rooms().Post(rec.ID, room.PostInput{From: lead.Address(), To: []string{rec.Name}, Conversation: room.DMConversation(lead.ID), Text: "dm after the room"})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	ids := func(page Feed) []string {
 		out := make([]string, 0, len(page.Posts))
@@ -243,6 +248,22 @@ func TestRoomChatPagesPastAFullPageOfDMPosts(t *testing.T) {
 	}
 	if got := ids(around); !reflect.DeepEqual(got, []string{first.ID, last.ID}) {
 		t.Fatalf("page around a DM post = %v, want the room's posts", got)
+	}
+	// A DM cursor must still find the next room post, and a DM cursor after the
+	// last room post ends the page instead of skipping it.
+	between, err := e.svc.FeedAfter(rec.ID, dm.ID, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(between); !reflect.DeepEqual(got, []string{last.ID}) || between.Newer != 0 {
+		t.Fatalf("page after a DM post = %v, newer %d; want the next room post", got, between.Newer)
+	}
+	tailAfter, err := e.svc.FeedAfter(rec.ID, afterLast.ID, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(tailAfter); len(got) != 0 || tailAfter.Newer != 0 {
+		t.Fatalf("page after the last DM post = %v, newer %d; want none", got, tailAfter.Newer)
 	}
 }
 
