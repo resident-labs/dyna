@@ -111,49 +111,94 @@ func deliveriesExist(db *sql.DB) (bool, error) {
 	return err == nil, err
 }
 
-// importQueueClaims moves one blob's state into its delivery rows.
+// importQueueClaims moves one blob's state into its delivery rows. A blob also
+// holds the state of posts this session never had a row for, because it
+// inherited them from another inbox; those get a row, or the claim or dismissal
+// would be lost and the post could reach the session again.
 func importQueueClaims(ctx context.Context, conn *sql.Conn, stores *Store, blob storedQueueBlob) error {
 	var queue legacyQueueClaims
 	if err := json.Unmarshal(blob.raw, &queue); err != nil {
 		return fmt.Errorf("read retired queue of session %s: %w", blob.session, err)
 	}
 	keys := room.DeliveryKeys(blob.session, "")
+	roomID := ""
 	if meta, err := stores.ReadMeta(blob.session); err == nil {
 		keys = room.DeliveryKeys(blob.session, meta.Address())
+		roomID = meta.RoomID
 	}
+	target := importTarget{roomID: roomID, keys: keys}
 	for postID, turn := range queue.Claimed {
 		if turn <= 0 {
 			continue
 		}
-		if err := importState(ctx, conn, keys, postID, room.DeliveryClaimed, turn); err != nil {
+		if err := importState(ctx, conn, target, postID, room.DeliveryClaimed, turn); err != nil {
 			return err
 		}
 	}
 	for postID := range queue.Cancelled {
-		if err := importState(ctx, conn, keys, postID, room.DeliveryCancelled, 0); err != nil {
+		if err := importState(ctx, conn, target, postID, room.DeliveryCancelled, 0); err != nil {
 			return err
 		}
 	}
 	for postID := range queue.Dismissed {
-		if err := importState(ctx, conn, keys, postID, room.DeliveryDismissed, 0); err != nil {
+		if err := importState(ctx, conn, target, postID, room.DeliveryDismissed, 0); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// importState sets the state of the delivery rows of postID named by keys, and
-// the turn that holds it, which is 0 for a state no turn holds.
-func importState(ctx context.Context, conn *sql.Conn, keys []string, postID string, state room.DeliveryState, turn int) error {
+// importTarget names the rows one blob's state belongs on: the room the session
+// is in, empty when its record is gone, and the session_id keys that name it.
+type importTarget struct {
+	roomID string
+	keys   []string
+}
+
+// importState gives the deliveries of postID the blob's state, and the turn that
+// holds it, which is 0 for a state no turn holds. A post the session has no row
+// for gets one, which is how an inherited claim or dismissal survives, and that
+// row copies the post's delivery mode, so the wake decision does not change.
+func importState(ctx context.Context, conn *sql.Conn, target importTarget, postID string, state room.DeliveryState, turn int) error {
 	var newest sql.NullInt64
 	if err := conn.QueryRowContext(ctx, "SELECT MAX(updated_at) FROM post_deliveries").Scan(&newest); err != nil {
 		return err
 	}
-	args := []any{string(state), turn, newest.Int64 + 1, postID}
-	for _, key := range keys {
+	at := newest.Int64 + 1
+	args := []any{string(state), turn, at, postID}
+	for _, key := range target.keys {
 		args = append(args, key)
 	}
-	_, err := conn.ExecContext(ctx, "UPDATE post_deliveries SET state=?, claimed_turn=?, updated_at=? WHERE post_id=? AND session_id IN ("+inClause(keys)+")", args...)
+	if _, err := conn.ExecContext(ctx, "UPDATE post_deliveries SET state=?, claimed_turn=?, updated_at=? WHERE post_id=? AND session_id IN ("+inClause(target.keys)+")", args...); err != nil {
+		return err
+	}
+	if target.roomID == "" {
+		return nil
+	}
+	// Only a post the session has no row for gets one: a row it already has,
+	// keyed by its ID or by its address, holds the state the update above set.
+	countArgs := []any{target.roomID, postID}
+	for _, key := range target.keys {
+		countArgs = append(countArgs, key)
+	}
+	var rows int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM post_deliveries WHERE room_id=? AND post_id=? AND session_id IN ("+inClause(target.keys)+")", countArgs...).Scan(&rows); err != nil {
+		return err
+	}
+	if rows > 0 {
+		return nil
+	}
+	var mode string
+	err := conn.QueryRowContext(ctx, `SELECT mode FROM post_deliveries WHERE room_id=? AND post_id=?
+ORDER BY mode='wake' DESC LIMIT 1`, target.roomID, postID).Scan(&mode)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		mode = string(room.DeliveryQuiet)
+	}
+	_, err = conn.ExecContext(ctx, `INSERT OR IGNORE INTO post_deliveries(room_id, post_id, session_id, mode, category, state, claimed_turn, updated_at)
+VALUES(?, ?, ?, ?, '', ?, ?, ?)`, target.roomID, postID, target.keys[0], mode, string(state), turn, at)
 	return err
 }
 
