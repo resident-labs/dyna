@@ -81,6 +81,14 @@ func TestMergeControlReturnHoldsOnlyExactHead(t *testing.T) {
 	if returned := mergeNotices(f.e.sent, room.MergeReturned); len(returned) != 1 || returned[0].Target != r.Author || !strings.Contains(returned[0].Text, "TestBroken") {
 		t.Fatalf("author notices=%+v", f.e.sent)
 	}
+	// The event carries the whole batch, so it names the returned member: the
+	// card must not claim that the other member was returned too.
+	if returned := mergeNotices(f.e.sent, room.MergeReturned); len(returned) == 1 {
+		ev := returned[0].Merge
+		if ev == nil || ev.Member != 2 || len(ev.PRs) != 2 {
+			t.Fatalf("returned event = %+v, want member 2 of two", ev)
+		}
+	}
 	rows, err := f.e.s.RoomMergeQueue(f.e.author.RoomID)
 	if err != nil {
 		t.Fatal(err)

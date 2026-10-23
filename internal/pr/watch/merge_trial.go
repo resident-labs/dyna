@@ -414,7 +414,8 @@ func (s *Service) advanceMergeTrial(ctx context.Context, repo string, b state.Me
 				member := *st.Records[change.Key]
 				text := fmt.Sprintf("%s conflicts with another PR in merge trial %s. Inspect the overlapping changes before this PR can join a batch.", changeLocation(member), b.Branch)
 				ev := mergeTrialEvent(st, b, room.MergeConflict)
-				ev.Label, ev.Reason = changeLabel(member), "conflicts with another PR in the trial"
+				ev.Label, ev.Reason, ev.ReasonKind = changeLabel(member), "conflicts with another PR in the trial", room.MergeConflictReason
+				ev.Member = member.Number
 				if err := s.postMergeNotice(ctx, member, "merge-trial-conflict", Notice{Target: member.Author, Merge: &ev, Text: text}); err != nil {
 					return err
 				}

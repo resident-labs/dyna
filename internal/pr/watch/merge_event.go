@@ -60,6 +60,7 @@ func mergeEventOf(r Record, step room.MergeStep) room.MergeEvent {
 		Base:    conflictBase(r),
 		PRs:     []room.MergePR{mergePR(r)},
 		Label:   changeLabel(r),
+		Member:  r.Number,
 	}
 }
 
