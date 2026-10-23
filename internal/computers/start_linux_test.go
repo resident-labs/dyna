@@ -23,7 +23,10 @@ func TestSlowStartDoesNotBlockOtherSessionStatus(t *testing.T) {
 	bin := t.TempDir()
 	marker := filepath.Join(bin, "started")
 	gate := filepath.Join(bin, "release")
-	script := "#!/bin/sh\nprintf x >> " + shellquote.Quote(marker) + "\nwhile [ ! -e " + shellquote.Quote(gate) + " ]; do /bin/sleep 0.02; done\nexit 1\n"
+	// The fake reports its own start through a FIFO, so the test waits for the
+	// start event instead of polling the marker file.
+	ready := readyFIFO(t)
+	script := "#!/bin/sh\nprintf x >> " + shellquote.Quote(marker) + "\nprintf ready > " + shellquote.Quote(ready) + "\nwhile [ ! -e " + shellquote.Quote(gate) + " ]; do /bin/sleep 0.02; done\nexit 1\n"
 	for name, body := range map[string]string{"labwc": script, "Xwayland": "#!/bin/sh\nexit 1\n", "setpriv": "#!/bin/sh\nexit 1\n"} {
 		if err := os.WriteFile(filepath.Join(bin, name), []byte(body), 0700); err != nil {
 			t.Fatal(err)
@@ -54,16 +57,7 @@ func TestSlowStartDoesNotBlockOtherSessionStatus(t *testing.T) {
 			<-joined
 		}
 	}()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		if _, err := os.Stat(marker); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("fake labwc did not start")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	awaitReady(t, ready)
 	joined = make(chan error, 1)
 	go func() { joined <- slow.start() }()
 	select {

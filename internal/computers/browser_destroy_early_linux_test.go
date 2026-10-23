@@ -4,14 +4,13 @@ package computers
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"time"
 
+	"dyna-agent/internal/shellquote"
 	"dyna-agent/internal/store"
 )
 
@@ -31,15 +30,15 @@ func TestOfflineDestroyStopsDaemonBeforePidFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := mergeEnvironment(os.Environ(), map[string]string{"AGENT_BROWSER_SOCKET_DIR": root, "AGENT_BROWSER_DAEMON": "1"})
-	child, err := startProcess(env, filepath.Join(Dir(id), "daemon.log"), "/bin/sleep", "600")
+	ready := readyFIFO(t)
+	// The shell signals after its own exec, so /proc/<pid>/environ is readable
+	// before destroy scans for the daemon.
+	child, err := startProcess(env, filepath.Join(Dir(id), "daemon.log"), "/bin/sh", "-c", "printf ready > "+shellquote.Quote(ready)+"; exec sleep 600")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer child.stop()
-	// Right after Start, /proc/<pid>/environ can still read as empty.
-	if err := waitForEnviron(child.cmd.Process.Pid); err != nil {
-		t.Fatal(err)
-	}
+	awaitReady(t, ready)
 	if err := destroyOffline(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
@@ -120,14 +119,15 @@ func TestDestroyStopsBrowserWhenDaemonDoesNotAnswer(t *testing.T) {
 	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
 	}
-	browser, err := startProcess(mergeEnvironment(os.Environ(), map[string]string{"AGENT_BROWSER_SOCKET_DIR": root, "AGENT_BROWSER_DAEMON": "1"}), filepath.Join(Dir(id), "browser.log"), "/bin/sleep", "600")
+	ready := readyFIFO(t)
+	// The shell signals after its own exec, so /proc/<pid>/environ is already
+	// readable when destroy scans for the daemon.
+	browser, err := startProcess(mergeEnvironment(os.Environ(), map[string]string{"AGENT_BROWSER_SOCKET_DIR": root, "AGENT_BROWSER_DAEMON": "1"}), filepath.Join(Dir(id), "browser.log"), "/bin/sh", "-c", "printf ready > "+shellquote.Quote(ready)+"; exec sleep 600")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer browser.stop()
-	if err := waitForEnviron(browser.cmd.Process.Pid); err != nil {
-		t.Fatal(err)
-	}
+	awaitReady(t, ready)
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	if err := Destroy(ctx, id); err != nil {
@@ -141,17 +141,5 @@ func TestDestroyStopsBrowserWhenDaemonDoesNotAnswer(t *testing.T) {
 	state := savedStatus(id)
 	if state.State != StateDestroyed {
 		t.Fatalf("state after destroy: %+v", state)
-	}
-}
-
-// waitForEnviron waits until the process environment is readable, so a scan
-// finds the daemon by it.
-func waitForEnviron(pid int) error {
-	for deadline := time.Now().Add(8 * time.Second); ; time.Sleep(time.Millisecond) {
-		if b, _ := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "environ")); len(b) > 0 {
-			return nil
-		} else if time.Now().After(deadline) {
-			return fmt.Errorf("daemon %d environment never became readable", pid)
-		}
 	}
 }

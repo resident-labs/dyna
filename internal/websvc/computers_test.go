@@ -26,7 +26,9 @@ type fakeHost struct {
 	keys     []string
 	opened   int
 	closed   int
-	server   net.Conn // the wayvnc end of the last view
+	server   net.Conn      // the wayvnc end of the last view
+	viewed   chan struct{} // one token per opened view
+	ended    chan struct{} // one token per closed view
 }
 
 func (f *fakeHost) Shot(s string, fresh bool) (string, error) {
@@ -45,11 +47,25 @@ func (f *fakeHost) OpenView(s, key string) (ComputerView, error) {
 	f.keys = append(f.keys, key)
 	f.server = b
 	f.mu.Unlock()
-	return ComputerView{Conn: a, Done: func() { f.mu.Lock(); f.closed++; f.mu.Unlock() }}, nil
+	f.signal(f.viewed)
+	return ComputerView{Conn: a, Done: func() {
+		f.mu.Lock()
+		f.closed++
+		f.mu.Unlock()
+		f.signal(f.ended)
+	}}, nil
+}
+
+// signal reports one change without ever blocking the connection handler.
+func (f *fakeHost) signal(ch chan struct{}) {
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
 }
 func computerEnv(t *testing.T) (*env, *fakeHost) {
 	e := newEnv(t)
-	h := &fakeHost{shotPath: filepath.Join(t.TempDir(), "last.png")}
+	h := &fakeHost{shotPath: filepath.Join(t.TempDir(), "last.png"), viewed: make(chan struct{}, 1), ended: make(chan struct{}, 1)}
 	if err := os.WriteFile(h.shotPath, []byte("\x89PNG-fake"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -164,18 +180,10 @@ func TestComputerViewRelay(t *testing.T) {
 	if ws.Subprotocol() != "binary" {
 		t.Fatalf("subprotocol %q", ws.Subprotocol())
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		h.mu.Lock()
-		srv := h.server
-		h.mu.Unlock()
-		if srv != nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("no viewer opened")
-		}
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-h.viewed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no viewer opened")
 	}
 	// Browser to wayvnc.
 	if err := ws.WriteMessage(websocket.BinaryMessage, []byte("RFB 003.008\n")); err != nil {
@@ -198,18 +206,16 @@ func TestComputerViewRelay(t *testing.T) {
 	}
 	// Closing the browser side sends view.close exactly once.
 	ws.Close()
-	deadline = time.Now().Add(2 * time.Second)
-	for {
-		h.mu.Lock()
-		closed := h.closed
-		h.mu.Unlock()
-		if closed == 1 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("view.close count %d", closed)
-		}
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-h.ended:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no view.close")
+	}
+	h.mu.Lock()
+	closed := h.closed
+	h.mu.Unlock()
+	if closed != 1 {
+		t.Fatalf("view.close count %d", closed)
 	}
 }
 
@@ -223,8 +229,10 @@ func TestComputerViewEndsWhenWayvncEnds(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ws.Close()
-	for i := 0; i < 200 && func() bool { h.mu.Lock(); defer h.mu.Unlock(); return h.server == nil }(); i++ {
-		time.Sleep(5 * time.Millisecond)
+	select {
+	case <-h.viewed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("no viewer opened")
 	}
 	h.server.Close()
 	_ = ws.SetReadDeadline(time.Now().Add(2 * time.Second))

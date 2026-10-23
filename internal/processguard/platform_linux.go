@@ -38,8 +38,11 @@ func defaultSignal(sig syscall.Signal) error {
 }
 
 func becomeSubreaper() error { return unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) }
-func reapOrphans(anchor int) {
-	childreaper.Reap(func(pid int) bool { return pid == anchor })
+
+// reapOrphans reaps adopted children and keeps anchor waitable. It reports how
+// many it reaped, so a caller can publish the reaping.
+func reapOrphans(anchor int) int {
+	return childreaper.Reap(func(pid int) bool { return pid == anchor })
 }
 
 // reapGroup waits for adopted group children to become waitable. A zombie

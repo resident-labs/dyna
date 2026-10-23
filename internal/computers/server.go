@@ -109,9 +109,18 @@ type FakeSupervisor struct {
 	Current     Status
 	Picture     Shot
 	Handle      Handler
+	Changed     chan struct{} // test hook: one token per state change
 	views       map[string]string
 	humanViewer string
 	next        int
+}
+
+// changed reports a state change to a waiting test and never blocks.
+func (f *FakeSupervisor) changed() {
+	select {
+	case f.Changed <- struct{}{}:
+	default:
+	}
 }
 
 func NewFakeSupervisor(id string) *FakeSupervisor {
@@ -143,6 +152,7 @@ func (f *FakeSupervisor) Dispatch(ctx context.Context, r Request) (any, error) {
 		f.views[id] = ConnectionID(ctx)
 		f.Current.Viewers = len(f.views)
 		f.Current.Stream.Running = true
+		f.changed()
 		go func() {
 			<-ctx.Done()
 			f.mu.Lock()
@@ -156,6 +166,7 @@ func (f *FakeSupervisor) Dispatch(ctx context.Context, r Request) (any, error) {
 			if len(f.views) == 0 {
 				f.Current.Control = ControlAgent
 			}
+			f.changed()
 		}()
 		return View{ViewerID: id, RFBSocket: "fake-rfb.sock"}, nil
 	case "view.close":
@@ -168,6 +179,7 @@ func (f *FakeSupervisor) Dispatch(ctx context.Context, r Request) (any, error) {
 		if len(f.views) == 0 {
 			f.Current.Control = ControlAgent
 		}
+		f.changed()
 		return Viewers{len(f.views)}, nil
 	case "control":
 		if r.Mode != ControlAgent && r.Mode != ControlHuman {
@@ -181,6 +193,7 @@ func (f *FakeSupervisor) Dispatch(ctx context.Context, r Request) (any, error) {
 			f.humanViewer = r.ViewerID
 		}
 		f.Current.Control = r.Mode
+		f.changed()
 		return Control{r.Mode}, nil
 	case "stop":
 		f.Current.State = StateIdleStopped

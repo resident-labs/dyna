@@ -69,6 +69,7 @@ func TestViewerLeaseReleasesOnConnectionLoss(t *testing.T) {
 		t.Fatal(err)
 	}
 	fake := NewFakeSupervisor("lease")
+	fake.Changed = make(chan struct{}, 4)
 	go fake.Serve(ctx, listener)
 	c := &Client{Socket: socket, Session: "lease"}
 	lease, err := c.OpenView(ctx)
@@ -79,13 +80,16 @@ func TestViewerLeaseReleasesOnConnectionLoss(t *testing.T) {
 		t.Fatal(err)
 	}
 	lease.Close()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	// Every viewer change reports one token, so the release is an event.
+	for {
+		select {
+		case <-fake.Changed:
+		case <-time.After(2 * time.Second):
+			t.Fatal("viewer disconnect did not release human control")
+		}
 		s, err := c.Status(ctx)
 		if err == nil && s.Viewers == 0 && s.Control == ControlAgent {
 			return
 		}
-		time.Sleep(time.Millisecond)
 	}
-	t.Fatal("viewer disconnect did not release human control")
 }
