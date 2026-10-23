@@ -19,3 +19,10 @@ export interface Page<T> {
   older: boolean
   cursor: string
 }
+
+// CardRef is websvc.CardRef, the answer of CardURL: where an HTML card loads
+// and when its ticket ends.
+export interface CardRef {
+  url: string
+  expires: string
+}
