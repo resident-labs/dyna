@@ -108,6 +108,11 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 	}
 	groups := map[string][]Record{}
 	repos = nil
+	// An explicit retry may select a replacement while the durable pause
+	// remains in place. Only saving that replacement clears the pause.
+	if roomID != "" {
+		delete(st.MergePauses, roomID)
+	}
 	for _, item := range mergeQueue(st) {
 		next = s.now().Add(pollEvery)
 		if item.State != "ready" {
@@ -177,6 +182,9 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 				batch.Changes = append(batch.Changes, trialChange(r))
 			}
 			st.MergeTrials[repo] = &batch
+			if roomID != "" {
+				delete(st.MergePauses, roomID)
+			}
 			return nil
 		}); err != nil {
 			failures = append(failures, err)

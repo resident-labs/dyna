@@ -25,7 +25,7 @@ func TestMergeControlPauseResumeAndStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	status, err := f.e.s.MergeControlStatus(id)
-	if err != nil || !status.Paused || len(status.Queue) != 1 || f.builds != 0 {
+	if err != nil || !status.Paused || status.Reason != "merging paused by owner" || len(status.Queue) != 1 || f.builds != 0 {
 		t.Fatalf("status=%+v error=%v builds=%d", status, err, f.builds)
 	}
 	if err := f.e.s.MergeControl(t.Context(), id, "resume", nil, nil); err != nil {
@@ -111,6 +111,52 @@ func TestMergeControlRetryWithoutStartsOneSharedBatch(t *testing.T) {
 		if strings.HasSuffix(c.Key, "#2") {
 			t.Fatal("excluded PR in retry")
 		}
+	}
+}
+
+func TestMergeControlRetryCancellationKeepsReplacementResumable(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	id := f.e.author.RoomID
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.e.s.MergeControl(t.Context(), id, "pause", nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	before, err := f.e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldBranch := before.MergeTrials["github.com/owner/repo"].Branch
+	run := f.e.s.GH.run
+	f.e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
+		if filepath.Base(cmd.Path) == "git" && len(cmd.Args) > 1 && cmd.Args[1] == "checkout" {
+			return context.Canceled
+		}
+		return run(ctx, cmd)
+	}
+	if err := f.e.s.MergeControl(t.Context(), id, "retry", nil, nil); !errors.Is(err, context.Canceled) {
+		t.Fatalf("retry error = %v, want cancellation", err)
+	}
+	// Read durable state as the restarted engine would.
+	after, err := f.e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch := after.MergeTrials["github.com/owner/repo"]
+	if batch == nil || batch.Branch == oldBranch || batch.Phase != "building" || after.MergePauses[id] != "" {
+		t.Fatalf("replacement = %+v, pauses = %v", batch, after.MergePauses)
+	}
+	f.e.s.GH.run = run
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	after, err = f.e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch := after.MergeTrials["github.com/owner/repo"]; batch == nil || batch.Phase != "running" {
+		t.Fatalf("replacement did not resume: %+v", batch)
 	}
 }
 
@@ -252,15 +298,24 @@ func TestMergeControlRejectsReadOnlyAndOtherRootRoom(t *testing.T) {
 	}
 }
 
-func TestMergeControlRetryWithoutAllPRsKeepsPause(t *testing.T) {
-	f := mergeTrialEnv(t, 1)
-	err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "retry", nil, []string{"1"})
-	if err == nil || f.builds != 0 {
-		t.Fatal("empty retry was accepted")
-	}
-	status, err := f.e.s.MergeControlStatus(f.e.author.RoomID)
-	if err != nil || !status.Paused {
-		t.Fatal("empty retry enabled automatic batching")
+func TestMergeControlRetryWithoutAllPRsPreservesPause(t *testing.T) {
+	for _, paused := range []bool{false, true} {
+		t.Run(strconv.FormatBool(paused), func(t *testing.T) {
+			f := mergeTrialEnv(t, 1)
+			if paused {
+				if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "pause", nil, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "retry", nil, []string{"1"})
+			if err == nil || f.builds != 0 {
+				t.Fatal("empty retry was accepted")
+			}
+			status, err := f.e.s.MergeControlStatus(f.e.author.RoomID)
+			if err != nil || status.Paused != paused {
+				t.Fatalf("empty retry changed pause: %+v, error: %v", status, err)
+			}
+		})
 	}
 }
 
