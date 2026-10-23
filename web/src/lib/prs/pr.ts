@@ -2,7 +2,7 @@
 // feed's watcher rows. Colors keep the app's meaning: gold needs attention,
 // sage is good, coral failed, quiet is waiting or over.
 import type { ChangePolicy, ChangeView, CheckSummary, Finding, PolicyOverride } from '../api/change.ts'
-import type { PRNotice } from '../api/room.ts'
+import type { EventNotice } from '../api/room.ts'
 
 // A check as a row shows it. A GitHub check carries only a name, a state and a link.
 export type CheckRow = Pick<CheckSummary, 'name'> & Partial<CheckSummary>
@@ -246,9 +246,12 @@ const EVENTS: { re: RegExp; make: (m: RegExpMatchArray) => PREvent }[] = [
 
 // parsePRPost reads a watcher post: "<url>\nHead: <sha>\n\n<notices>", the
 // notices joined by blank lines, an optional "Log tail:" block at the end.
-// notice is the post's structured notice, when the watcher stored one.
 // It returns {url, number, repo, head, events, body, log}.
-export function parsePRPost(text: string | null | undefined, notice: PRNotice | null = null): ParsedPost {
+//
+// TODO: legacy/shim remove later — the watcher posts typed pr/* events now and
+// PRCard reads their payload. This text reader serves only the posts stored
+// before that change; remove it when that history ages out.
+export function parsePRPost(text: string | null | undefined, notice: EventNotice | null = null): ParsedPost {
   let rest = text || ''
   const out: ParsedPost = { url: '', number: 0, repo: '', head: '', events: [], body: '', log: '', dropped: 0 }
   const first = rest.match(/^(https?:\/\/\S+)\n/)
@@ -270,9 +273,9 @@ export function parsePRPost(text: string | null | undefined, notice: PRNotice | 
     dropped += Number(n)
     return lead
   }).trim()
-  // A ready notice is one row; its sentence only repeats the row.
+  // TODO: legacy/shim remove later — a post stored before the typed PR events
+  // carries its ready row in text only; remove when that history ages out.
   if (notice?.kind === 'ready') {
-    out.head ||= notice.head
     out.events.push({ kind: 'ready', label: 'Ready to land', tone: 'sage' })
     rest = rest.replace(/^PR #\d+ is ready to land at \S+?\.(?:\n+|$)/m, '').trim()
   }
