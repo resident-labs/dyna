@@ -43,14 +43,17 @@ type Runner struct {
 	Node    *Node
 }
 type Request struct {
-	Repo    string
-	RepoDir string
-	RoomID  string
-	SHA     string
-	Suites  []string
-	Timeout time.Duration
-	MaxTest time.Duration
-	Allowed map[string]bool
+	// Parallelism limits this run without changing the shared node slot limit.
+	// Zero uses all node slots.
+	Parallelism int
+	Repo        string
+	RepoDir     string
+	RoomID      string
+	SHA         string
+	Suites      []string
+	Timeout     time.Duration
+	MaxTest     time.Duration
+	Allowed     map[string]bool
 	// OnStart runs after node setup, before the first check starts.
 	OnStart func(context.Context) error
 	// DeferSave lets the scheduler apply room budgets before publishing a result.
