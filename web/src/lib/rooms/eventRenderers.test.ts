@@ -29,9 +29,10 @@ const built = await build({
   stdin: {
     contents: `export { default as WorktreeCard } from './WorktreeCard.svelte';
       export { default as HookCard } from './HookCard.svelte';
+      export { default as MergeCard } from './MergeCard.svelte';
       export { default as PRCard } from '../prs/PRCard.svelte';
       export { eventRenderers, eventComponents, eventKey, rendererFor, sealedEvent } from './eventRenderers.ts';
-      export { hookEvent, prEvent, worktreeEvent } from './eventPayloads.ts';
+      export { hookEvent, mergeDecision, mergeEvent, prEvent, worktreeEvent } from './eventPayloads.ts';
       export { eventSpecs } from './events.gen.ts';
       export { mount, unmount, flushSync } from 'svelte';`,
     resolveDir: rooms,
@@ -87,6 +88,23 @@ const fixtures: Record<string, EventPayload> = {
       },
     ]),
   ),
+  ...Object.fromEntries(
+    (['queued', 'trial', 'checks', 'landed', 'failed', 'returned', 'conflict', 'rolled-back'] as const).map((type) => [
+      `merge/${type}`,
+      {
+        type,
+        trialId: 'dyna/merge-trial/7',
+        repo: 'acme/app',
+        base: 'main',
+        prs: [{ number: 242, title: 'Tidy the composer', url: 'https://github.com/acme/app/pull/242' }],
+        checks: { done: 4, total: 9, failed: type === 'failed' ? ['unit'] : undefined },
+        commit: type === 'landed' ? 'b'.repeat(40) : undefined,
+        reason: type === 'failed' || type === 'returned' || type === 'conflict' ? 'trial CI failed' : undefined,
+        label: 'PR #242',
+      },
+    ]),
+  ),
+  'merge/decision': { note: 'Keep the queue paused until the flake is fixed' },
 }
 
 function postFor(family: string, type: string, payload: EventPayload, text = ''): Message {
@@ -132,7 +150,9 @@ test('every registered event has a renderer and renders on feed and DM', () => {
 // fixtureTip is a value every payload fixture shows, so a card that renders
 // nothing meaningful fails.
 function fixtureTip(payload: EventPayload): string {
+  if ('note' in payload) return payload.note
   if ('hook' in payload) return payload.label || payload.hook
+  if ('trialId' in payload) return '#242'
   if ('type' in payload) return payload.changeId ? `PR #${payload.number}` : payload.label
   return payload.detail || payload.reason
 }
