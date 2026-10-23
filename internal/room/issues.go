@@ -373,6 +373,16 @@ func (s *Store) FileIssue(roomID string, in IssueInput) (Issue, error) {
 	return out, err
 }
 
+// CloseIssue closes an open issue with a reason. origin stays zero for a manual
+// close and names the merging PR for an automatic one.
+func (s *Store) CloseIssue(roomID, id, by, reason string, origin CloseOrigin) (Issue, error) {
+	return s.ChangeIssueFrom(roomID, id, by, origin, func(i *Issue) error {
+		i.State = "closed"
+		i.Reason = reason
+		return nil
+	})
+}
+
 // nextIssueNumber reads the number a new issue takes in its room.
 func (s *Store) nextIssueNumber(roomID string) (int, error) {
 	db, err := s.issuesDB()
