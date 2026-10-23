@@ -9,8 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -347,110 +345,8 @@ func WaitForLaunch() {
 	}
 }
 
-// TODO: legacy/shim remove later — records the live runners, workflow workers and shell supervisors that started before launches were recorded (#1418); remove with item 31's legacy scan, when no such process is alive.
-// Backfill records a live process that the engine knows from its own rows,
-// for example a session's runner PID, checked against cmdline by the caller.
-// Like Start, it never records the owner.
-func (s Store) Backfill(ctx context.Context, pid int, actor Identity, launcher string) error {
-	p, unit, err := backfillEntry(pid, actor, launcher)
-	if err != nil {
-		return err
-	}
-	if _, ok, err := s.ProcessIdentity(p); err != nil || ok {
-		return err
-	}
-	return s.record(ctx, time.Now(), unit, p, actor, launcher)
-}
+// Empty contains no committed launch records.
+type Empty struct{}
 
-// backfillEntry reads a live process for a backfill. Its scope comes from
-// its own cgroup, never from a name alone, and only when that scope is the
-// one its launcher made for the actor (the unit name carries the session or
-// run ID), so a scope it shares with other work is not recorded.
-func backfillEntry(pid int, actor Identity, launcher string) (Process, string, error) {
-	if err := (Launch{Actor: actor, Launcher: launcher}).check(); err != nil {
-		return Process{}, "", err
-	}
-	if actor.Kind == Owner {
-		return Process{}, "", fmt.Errorf("a backfill never records the owner")
-	}
-	p, _, err := readStat("/proc", pid)
-	if err != nil {
-		return Process{}, "", err
-	}
-	group, err := Cgroup("/proc", pid)
-	if err != nil {
-		return Process{}, "", err
-	}
-	unit := ""
-	parts := strings.Split(group, "/")
-	if last, id := parts[len(parts)-1], actor.Session+actor.Run; strings.Contains(group, "/"+agentslice.Slice+"/") &&
-		strings.HasPrefix(last, "dyna-"+id+"-") && strings.HasSuffix(last, ".scope") {
-		unit = last
-	}
-	return p, unit, nil
-}
-
-// TODO: legacy/shim remove later — Memory and Layered exist only so a read-only engine can backfill work that started before launches were recorded (#1418); remove both in the same change that removes Store.Backfill (item 31).
-// Memory holds backfilled records for an engine that cannot write them,
-// such as a read-only engine, for as long as it runs.
-type Memory struct {
-	mu        sync.Mutex
-	scopes    map[string]Identity
-	processes map[Process]Identity
-}
-
-// Backfill records a live process in memory, with the same checks as
-// Store.Backfill.
-func (m *Memory) Backfill(pid int, actor Identity, launcher string) error {
-	p, unit, err := backfillEntry(pid, actor, launcher)
-	if err != nil {
-		return err
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.processes == nil {
-		m.scopes, m.processes = map[string]Identity{}, map[Process]Identity{}
-	}
-	m.processes[p] = actor
-	if unit != "" {
-		m.scopes[unit] = actor
-	}
-	return nil
-}
-
-func (m *Memory) ScopeIdentity(unit string) (Identity, bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	id, ok := m.scopes[unit]
-	return id, ok && unit != "", nil
-}
-
-func (m *Memory) ProcessIdentity(p Process) (Identity, bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	id, ok := m.processes[p]
-	return id, ok, nil
-}
-
-// TODO: legacy/shim remove later — see Memory: remove with Store.Backfill (item 31).
-// Layered looks in each Records in turn; the first that knows wins, and an
-// error from any of them refuses the caller.
-type Layered []Records
-
-func (l Layered) ScopeIdentity(unit string) (Identity, bool, error) {
-	for _, r := range l {
-		if id, ok, err := r.ScopeIdentity(unit); err != nil || ok {
-			return id, ok, err
-		}
-	}
-	return Identity{}, false, nil
-}
-
-func (l Layered) ProcessIdentity(p Process) (Identity, bool, error) {
-	for _, r := range l {
-		if id, ok, err := r.ProcessIdentity(p); err != nil || ok {
-			return id, ok, err
-		}
-	}
-	return Identity{}, false, nil
-}
+func (Empty) ScopeIdentity(string) (Identity, bool, error)    { return Identity{}, false, nil }
+func (Empty) ProcessIdentity(Process) (Identity, bool, error) { return Identity{}, false, nil }

@@ -65,10 +65,14 @@ func checkID(id string) error {
 // Only the engine calls it, at start (requirement 41).
 func Migrate(dataDir string) error {
 	sessions := filepath.Join(dataDir, "sessions")
-	if _, err := records(sessions); err != nil {
+	db, err := records(sessions)
+	if err != nil {
 		return err
 	}
-	_, err := steeringDB(sessions)
+	if err := migrateSessionImport(db, sessions); err != nil {
+		return err
+	}
+	_, err = steeringDB(sessions)
 	return err
 }
 
