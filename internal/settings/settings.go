@@ -59,21 +59,22 @@ const (
 
 // Values are the effective V1 settings. Unknown file keys are kept in Extra.
 type Values struct {
-	PRTrustedBots          []string
-	LocalLaneRepos         []string
-	LibraryEnabled         []string
-	LibraryProfile         string
-	LibrarySmellProfile    string
-	LibraryReadmeMaxLines  int
-	LocalCIRemote          string
-	RootProfile            string
-	BrowserPath            string
-	BrowserExtraFlags      string
-	BrowserUseFlagsFile    bool
-	BrowserProfileMode     string
-	BrowserOwnerProfile    string
-	BrowserSaveBack        bool
-	ComputersEnabled       bool
+	PRTrustedBots         []string
+	LocalLaneRepos        []string
+	LibraryEnabled        []string
+	LibraryProfile        string
+	LibrarySmellProfile   string
+	LibraryReadmeMaxLines int
+	LocalCIRemote         string
+	RootProfile           string
+	BrowserPath           string
+	BrowserExtraFlags     string
+	BrowserUseFlagsFile   bool
+	BrowserProfileMode    string
+	BrowserOwnerProfile   string
+	BrowserSaveBack       bool
+	ComputersEnabled      bool
+	// TODO: legacy/shim remove later — the seeded parent check-ins hook imports this interval once; remove the key with that import.
 	SessionCheckInInterval time.Duration
 	MaxCardBytes           int64
 	MaxFileBytes           int64

@@ -15,7 +15,7 @@ import (
 func autoCheck(seen *[]Builtin) BuiltinSpec {
 	return BuiltinSpec{
 		Builtin: "auto-check", Label: "Auto check", EveryMinutes: 15, Timeout: "30s",
-		Run: func(_ context.Context, log io.Writer) error {
+		Run: func(_ context.Context, _ int, log io.Writer) error {
 			*seen = append(*seen, "auto-check")
 			_, err := fmt.Fprintln(log, "auto check ran")
 			return err
