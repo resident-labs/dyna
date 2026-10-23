@@ -54,6 +54,8 @@ func runningShell(t *testing.T, s *Store, owner string, keep bool) Meta {
 	if err != nil {
 		t.Fatal(err)
 	}
+	started := make(chan int, 1)
+	s.OnStarted = func(pid int) { started <- pid }
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- s.Supervise(ctx, meta.ID) }()
@@ -63,18 +65,19 @@ func runningShell(t *testing.T, s *Store, owner string, keep bool) Meta {
 			t.Errorf("supervisor: %v", err)
 		}
 	})
-	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
-		in, err := s.Info(meta.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if in.Status == "running" && in.Pid > 0 {
-			return in.Meta
-		}
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shell did not start")
 	}
-	t.Fatal("shell did not start")
-	return Meta{}
+	in, err := s.Info(meta.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in.Status != "running" || in.Pid == 0 {
+		t.Fatalf("started shell = %s, pid %d", in.Status, in.Pid)
+	}
+	return in.Meta
 }
 
 func ownerRecord(t *testing.T, s *Store, owner string, closed bool) {
