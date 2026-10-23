@@ -32,7 +32,7 @@ export interface ActionContext {
   openFiles: Handler
   startWorkflow: Handler
   openPins: Handler
-  openFind: Handler
+  openSearch: Handler
   openSessionPRs: Handler
   toggleSidebar: Handler
   openView: (view: string) => unknown
@@ -70,7 +70,7 @@ export function actions(c: ActionContext): Action[] {
     out.push(
       { id: 'workflows', palette: { label: 'Open workflows', icon: icon.flows, terms: 'runs run workflow' }, slash: { name: 'workflows', hint: 'runs in this room' }, run: () => c.openView('runs') },
       { id: 'pins', palette: { label: 'Open pinned posts', icon: icon.pin, terms: 'pin pinned saved' }, run: c.openPins },
-      { id: 'find', palette: { label: 'Find in this room', hint: 'Ctrl+F', icon: icon.find, terms: 'search find text messages posts history' }, slash: { name: 'find', arg: 'text', hint: 'search every post in this room' }, run: c.openFind },
+      { id: 'find', slash: { name: 'find', arg: 'text', hint: 'search sessions and every post in this room' }, run: c.openSearch },
       { id: 'roomsettings', palette: { label: 'Room settings…', hint: `#${label}`, icon: icon.gear, terms: 'room settings review reviewer landing ci budget hooks rules pause publishing noise' }, menu: { label: 'Room settings…' }, run: () => c.openRoomSettings(r) },
     )
     if (c.session && c.sessionPRs?.length) out.push({ id: 's-prs', palette: { label: `Pull requests of ${c.session.name}`, icon: icon.flows, terms: 'pr pull request ci review' }, run: c.openSessionPRs })
