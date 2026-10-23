@@ -101,3 +101,30 @@ test('query changes hide old matches immediately and ignore late answers; failed
     assert.equal(r.target.querySelector('.message'), null)
   } finally { await r.done() }
 })
+
+test('Enter on Retry repeats message search while a matching session stays unopened', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let fail = true
+  const r = await render(async () => {
+    if (fail) throw new Error('Search unavailable')
+    return { posts: [post('msg_deploy', 'deploy passed')], more: false }
+  })
+  try {
+    r.type('deploy')
+    t.mock.timers.tick(250)
+    await settle()
+    const retry = need(r.target.querySelector<HTMLButtonElement>('.retry'))
+    retry.focus()
+    fail = false
+    // jsdom does not perform a button's default Enter click. Activate it only
+    // when the real component leaves that native default action available.
+    const activate = retry.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    if (activate) retry.click()
+    await settle()
+    assert.deepEqual(r.searches, [['room_x', 'deploy'], ['room_x', 'deploy']])
+    assert.deepEqual(r.opened, [])
+    assert.deepEqual(r.jumps, [])
+    assert.equal(r.closed(), 0)
+    assert.equal(r.target.querySelector('.message .excerpt')?.textContent, 'deploy passed')
+  } finally { await r.done() }
+})
