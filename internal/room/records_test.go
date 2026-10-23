@@ -3,7 +3,6 @@ package room
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -52,7 +51,7 @@ func TestRoomRecordIsARow(t *testing.T) {
 	if after := roomsRevision(t, s); after <= before {
 		t.Fatalf("a record write left rooms.revision at %d (was %d)", after, before)
 	}
-	if err := os.Remove(filepath.Join(s.Root, rec.ID, "room.json")); err != nil {
+	if err := os.Remove(filepath.Join(s.Root, rec.ID, "room.json")); err != nil && !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	got, err := s.Resolve("alpha")
@@ -64,43 +63,7 @@ func TestRoomRecordIsARow(t *testing.T) {
 	}
 }
 
-// A room.json that the earlier release wrote is imported on read, by ID,
-// by name and by List, with no import walk at engine start.
-func TestEarlierReleaseRoomFileIsImportedOnRead(t *testing.T) {
-	s := recordsStore(t)
-	rec, err := s.Create(CreateInput{Name: "alpha"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(s.Root, rec.ID, "room.json")
-	old := rec
-	old.DisplayName = "set by the earlier release"
-	b, _ := json.MarshalIndent(old, "", "  ")
-	if err := os.WriteFile(path+".old", b, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Rename(path+".old", path); err != nil {
-		t.Fatal(err)
-	}
-	if list, err := s.List(true); err != nil || len(list) != 1 || list[0].DisplayName != old.DisplayName {
-		t.Fatalf("List = %+v, %v; want the earlier release's write", list, err)
-	}
-	// A room that only the earlier release created has no row yet.
-	other := Record{ID: newID(time.Now()), Name: "beta", CreatedAt: time.Now(), LastActivity: time.Now()}
-	if err := os.MkdirAll(filepath.Join(s.Root, other.ID), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	b, _ = json.MarshalIndent(other, "", "  ")
-	if err := os.WriteFile(filepath.Join(s.Root, other.ID, "room.json"), b, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := s.Resolve("beta"); err != nil || got.ID != other.ID {
-		t.Fatalf("Resolve(beta) = %+v, %v", got, err)
-	}
-}
-
-// A post records activity in the row only: room.json, which the earlier
-// release reads, is copied only for changes that release acts on.
+// Posts and archive changes leave retained source files untouched.
 func TestPostTouchesTheRowWithoutCopyingRoomFile(t *testing.T) {
 	now := time.Date(2026, 10, 20, 21, 0, 0, 0, time.UTC)
 	s := recordsStore(t)
@@ -110,8 +73,8 @@ func TestPostTouchesTheRowWithoutCopyingRoomFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(s.Root, rec.ID, "room.json")
-	copied, err := os.ReadFile(path)
-	if err != nil {
+	copied := []byte("retained")
+	if err := os.WriteFile(path, copied, 0600); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Minute)
@@ -127,9 +90,8 @@ func TestPostTouchesTheRowWithoutCopyingRoomFile(t *testing.T) {
 	if err := s.SetArchived(rec.ID, true); err != nil {
 		t.Fatal(err)
 	}
-	var file Record
-	if b, _ := os.ReadFile(path); json.Unmarshal(b, &file) != nil || !file.ManualArchive {
-		t.Fatalf("archive was not copied to room.json: %+v", file)
+	if after, _ := os.ReadFile(path); !bytes.Equal(after, copied) {
+		t.Fatal("archive rewrote room.json")
 	}
 }
 
@@ -183,5 +145,51 @@ func TestDeleteRemovesTheRoomsRows(t *testing.T) {
 	}
 	if _, err := s.Resolve("alpha"); err == nil {
 		t.Fatal("the deleted room still resolves")
+	}
+}
+
+func TestRoomWritesPreserveRetainedSources(t *testing.T) {
+	s := recordsStore(t)
+	rec, err := s.Create(CreateInput{Name: "alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(s.Root, rec.ID)
+	for _, name := range []string{"room.json", "seat.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("{}"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.Rename(rec.ID, "Current name"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.SetSeat(t.Context(), rec.ID, Seat{External: true}, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"room.json", "seat.json"} {
+		raw, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(raw) != "{}" {
+			t.Fatalf("write changed %s: %s, %v", name, raw, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("{stale"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Resolve(rec.ID)
+	if err != nil || got.DisplayName != "Current name" || !got.Seat.External {
+		t.Fatalf("canonical record = %+v, %v", got, err)
+	}
+	list, err := s.List(true)
+	if err != nil || len(list) != 1 || list[0] != got {
+		t.Fatalf("canonical listing = %+v, %v", list, err)
+	}
+	if err := s.SetArchived(rec.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"room.json", "seat.json"} {
+		raw, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(raw) != "{stale" {
+			t.Fatalf("write changed stale %s: %s, %v", name, raw, err)
+		}
 	}
 }

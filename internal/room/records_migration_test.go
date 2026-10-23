@@ -3,7 +3,6 @@ package room
 import (
 	"bytes"
 	"database/sql"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,13 +101,8 @@ func TestRoomRecordsMigrateBeforeAnyRead(t *testing.T) {
 				if err := s.Rename(id, "Renamed room"); err != nil {
 					t.Fatal(err)
 				}
-				raw, err := os.ReadFile(filepath.Join(dir, "seat.json"))
-				var rollback Seat
-				if err != nil {
-					t.Fatalf("embedded seat has no rollback file after record write: %v", err)
-				}
-				if err := json.Unmarshal(raw, &rollback); err != nil || rollback != want.Seat {
-					t.Fatalf("rollback seat = %+v, %v; want %+v", rollback, err, want.Seat)
+				if _, err := os.Stat(filepath.Join(dir, "seat.json")); !os.IsNotExist(err) {
+					t.Fatalf("migration wrote a seat file: %v", err)
 				}
 				if err := db.QueryRow("SELECT body,seat FROM room_records WHERE id=?", id).Scan(&body, &seat); err != nil {
 					t.Fatal(err)
