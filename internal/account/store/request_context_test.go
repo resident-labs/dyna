@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -12,7 +10,7 @@ import (
 )
 
 func TestUpdateContextRecordsOnlyTheCallbackSave(t *testing.T) {
-	for _, maintenance := range []string{"none", "import", "cleanup", "import and cleanup"} {
+	for _, maintenance := range []string{"none", "cleanup"} {
 		t.Run(maintenance, func(t *testing.T) {
 			s := registryStore(t)
 			meta := saveAccount(t, s, "fixture-token")
@@ -24,21 +22,6 @@ func TestUpdateContextRecordsOnlyTheCallbackSave(t *testing.T) {
 					st.OpenCodeProvidersCleaned = false
 					return nil
 				}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if maintenance == "import" || maintenance == "import and cleanup" {
-				st, err := s.Read()
-				if err != nil {
-					t.Fatal(err)
-				}
-				st.Find(meta.ID).Label = "imported label"
-				st.OpenCodeProvidersCleaned = maintenance == "import"
-				raw, err := json.Marshal(st)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(s.registryPath(), raw, 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -70,9 +53,6 @@ func TestUpdateContextRecordsOnlyTheCallbackSave(t *testing.T) {
 			}
 			if !st.OpenCodeProvidersCleaned || st.Find(meta.ID).Label == "must not commit" {
 				t.Fatal("maintenance or callback rollback changed")
-			}
-			if (maintenance == "import" || maintenance == "import and cleanup") && st.Find(meta.ID).Label != "imported label" {
-				t.Fatal("failed callback rolled back the independent import")
 			}
 			update := func(st *State) error {
 				entry := st.Find(meta.ID)

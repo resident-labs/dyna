@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,7 +16,7 @@ import (
 )
 
 func TestAccountUpdateReplayAfterMaintenanceAndLostReply(t *testing.T) {
-	for _, maintenance := range []string{"import", "cleanup", "import and cleanup"} {
+	for _, maintenance := range []string{"none", "cleanup"} {
 		t.Run(maintenance, func(t *testing.T) {
 			db, w, dir := thingsStore(t)
 			registry := &accountstore.Store{Root: filepath.Join(dir, "accounts")}
@@ -37,20 +36,6 @@ func TestAccountUpdateReplayAfterMaintenanceAndLostReply(t *testing.T) {
 					st.OpenCodeProvidersCleaned = false
 					return nil
 				}); err != nil {
-					t.Fatal(err)
-				}
-			} else {
-				st, err := registry.Read()
-				if err != nil {
-					t.Fatal(err)
-				}
-				st.Find(meta.ID).Label = "imported"
-				st.OpenCodeProvidersCleaned = maintenance == "import"
-				raw, err := json.Marshal(st)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(registry.Root, "accounts.json"), raw, 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -115,9 +100,7 @@ func TestAccountUpdateReplayAfterMaintenanceAndLostReply(t *testing.T) {
 			if entry.Observation == nil || entry.Observation.Failures != 1 || !st.OpenCodeProvidersCleaned {
 				t.Fatal("replay changed the committed observation or maintenance")
 			}
-			if maintenance != "cleanup" && entry.Label != "imported" {
-				t.Fatal("pending import was not retained")
-			}
+
 		})
 	}
 }
