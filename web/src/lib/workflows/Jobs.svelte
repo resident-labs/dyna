@@ -32,6 +32,7 @@
   let follow = $state(true)
   let logLoading = $state(false)
   let logRequest = 0
+  let loadingJob = ''
   const historyPageSize = 20
   let historyOpen = $state(false)
   let historyLimit = $state(historyPageSize)
@@ -79,8 +80,9 @@
   const stateText: Record<string, string> = { running: 'running', starting: 'starting', exited: 'exited', lost: 'lost' }
 
   async function loadLog() {
-    if (!sel) return
+    if (!sel || (logLoading && loadingJob === sel)) return
     const id = sel
+    loadingJob = id
     const request = ++logRequest
     logLoading = true
     try {
@@ -94,7 +96,7 @@
       if (id !== sel || request !== logRequest) return
       logError = errorText(e)
     } finally {
-      if (id === sel && request === logRequest) logLoading = false
+      if (id === sel && request === logRequest) { logLoading = false; loadingJob = '' }
     }
   }
 
