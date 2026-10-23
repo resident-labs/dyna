@@ -291,6 +291,19 @@ func noticeTyped(r *Record, target, text, token string, facts noticeFacts, drops
 	r.Notices = append(r.Notices, Notice{ID: id, Kind: noticeKind(token), Type: facts.Type, Summary: facts.Summary, Commenter: facts.Commenter, Verdict: facts.Verdict, Target: target, Other: pairOther(token), Text: boundNotice(changeLocation(*r) + "\nHead: " + r.Head + "\n\n" + text)})
 }
 
+// reviewNotice queues one typed review result post. The event is the fact the
+// card draws; the text is the reviewer's own line, which the DM shows as the
+// agent detail. One result per head and kind keeps its post on a retry.
+func queueReviewNotice(r *Record, target, text, key string, ev room.ReviewEvent) {
+	id := "msg_" + digest(r.Key + "/review:" + key + "/" + target)[:16]
+	for i := range r.Notices {
+		if r.Notices[i].ID == id {
+			return
+		}
+	}
+	r.Notices = append(r.Notices, Notice{ID: id, Kind: "review", Target: target, Review: &ev, Text: boundNotice(text)})
+}
+
 // typeOfToken reads the PR event type a notice write token names. A new notice
 // carries its type already; the token keeps a caller from repeating it.
 func typeOfToken(r Record, token string) room.PRType {

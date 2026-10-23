@@ -112,6 +112,10 @@ const (
 	TypeRootFlush EventType = "root-flush"
 	// TypeWithdrawn is a question that was withdrawn before it was answered.
 	TypeWithdrawn EventType = "withdrawn"
+	// FamilyReview reports how one reviewer turn ended. A review result is its
+	// own post, so the room reads a verdict, its findings and a stop reason as
+	// typed facts instead of parsing review text.
+	FamilyReview EventFamily = "review"
 )
 
 // The issue family posts one event per fact about a room issue. Every filer
@@ -496,7 +500,8 @@ type PREvent struct {
 	Summary   string `json:"summary,omitempty"`
 	Commenter string `json:"commenter,omitempty"`
 	CommentID string `json:"commentId,omitempty"`
-	// Verdict is a reviewer verdict: approve, approve-with-nits, changes or question.
+	// Verdict is a reviewer verdict: approve, changes or stop-early, or one of
+	// the values stored before the typed results.
 	Verdict string `json:"verdict,omitempty"`
 	// Detail is the body the agent reads: review markdown, comment text or the
 	// remaining notice sentences.
@@ -1020,6 +1025,96 @@ func (QuestionEvent) eventType() EventType     { return TypeWithdrawn }
 func (q QuestionEvent) eventSubject() string   { return q.Post }
 func (q QuestionEvent) eventDedupe() string    { return q.QuestionID }
 
+// ReviewKind is the typed result of a reviewer turn.
+type ReviewKind string
+
+// Review kinds.
+const (
+	ReviewApprove     ReviewKind = "approve"
+	ReviewChanges     ReviewKind = "changes"
+	ReviewApproveFast ReviewKind = "approve-fast"
+	ReviewStopEarly   ReviewKind = "stop-early"
+)
+
+// reviewKinds lists every review kind the web needs as a union type.
+var reviewKinds = []ReviewKind{ReviewApprove, ReviewChanges, ReviewApproveFast, ReviewStopEarly}
+
+// ReviewSeverity says how strongly a finding asks for a change.
+type ReviewSeverity string
+
+// Review severities.
+const (
+	ReviewBlocking  ReviewSeverity = "blocking"
+	ReviewShouldFix ReviewSeverity = "should-fix"
+	ReviewNit       ReviewSeverity = "nit"
+)
+
+// ReviewFinding is one typed finding of a changes review. It is the fact the
+// card lists, not the Markdown the reviewer wrote.
+type ReviewFinding struct {
+	ID       string         `json:"id"`
+	Severity ReviewSeverity `json:"severity"`
+	File     string         `json:"file"`
+	Line     int            `json:"line"`
+	Why      string         `json:"why"`
+	Fix      string         `json:"fix"`
+	Patch    string         `json:"patch,omitempty"`
+}
+
+// ReviewStopReason is why a reviewer stopped before it judged the change.
+type ReviewStopReason string
+
+// Review stop reasons.
+const (
+	ReviewSuperseded ReviewStopReason = "superseded"
+	ReviewDuplicate  ReviewStopReason = "duplicate"
+	ReviewEmpty      ReviewStopReason = "empty"
+	ReviewTooLarge   ReviewStopReason = "too-large"
+)
+
+// ReviewEvent tells a room how one reviewer turn ended: the verdict, the
+// findings by severity, a stop reason, or the fast-landing note. It is folded
+// with the events of one PR head, so a re-review of a new head is a new card.
+type ReviewEvent struct {
+	Kind     ReviewKind `json:"kind"`
+	ChangeID string     `json:"changeId"`
+	Number   int        `json:"number,omitempty"`
+	Label    string     `json:"label"`
+	Location string     `json:"location"`
+	Head     string     `json:"head"`
+	// Summary is the reviewer's one-line facts line, when it has one.
+	Summary string `json:"summary,omitempty"`
+	// Findings lists a changes review's findings, newest order kept.
+	Findings []ReviewFinding `json:"findings,omitempty"`
+	// Blocking, ShouldFix and Nits count the findings by severity, so the chip
+	// never recounts a list the card may not show.
+	Blocking  int `json:"blocking,omitempty"`
+	ShouldFix int `json:"shouldFix,omitempty"`
+	Nits      int `json:"nits,omitempty"`
+	// StopReason is set only by a stop-early result.
+	StopReason ReviewStopReason `json:"stopReason,omitempty"`
+	// FastLand reports an approve-fast that Dyna's path rules rated low risk.
+	FastLand bool `json:"fastLand,omitempty"`
+	// Area is the low-risk area that decided a fast landing.
+	Area string `json:"area,omitempty"`
+	// Note is the fast-landing line, or the normal-path fallback and its cause.
+	Note string `json:"note,omitempty"`
+	// Detail is the reviewer's Markdown body, which the agent text appends and
+	// no card parses.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (ReviewEvent) eventFamily() EventFamily { return FamilyReview }
+func (ReviewEvent) eventType() EventType     { return TypeResult }
+
+// eventSubject keeps the events of one PR head together and apart from another
+// head's result.
+func (e ReviewEvent) eventSubject() string { return e.ChangeID + "\x00" + e.Head }
+
+// eventDedupe keys one result per kind and head: a retried verdict keeps its
+// post, and a different result on the same head posts again.
+func (e ReviewEvent) eventDedupe() string { return string(e.Kind) }
+
 // EventSpec is one entry of the system event registry. The web app draws the
 // event with Renderer and reads its typed payload; Text is the one-line
 // summary that agents and `dyna room log` read.
@@ -1284,6 +1379,16 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeRootIfNeeded,
 		Once:     true,
 		Text:     "Machine {name} is low on disk: {summary}. Dyna starts no CI there until space is freed.",
+	},
+	// A review result wakes the PR author only when it asks for changes. The
+	// watcher posts an approval or a stop-early quietly to the room feed.
+	{
+		Family:   FamilyReview,
+		Type:     TypeResult,
+		Renderer: "ReviewResultCard",
+		Payload:  reflect.TypeOf(ReviewEvent{}),
+		Wake:     WakeTarget,
+		Text:     "{location}\nHead: {head}\n\nReviewer result for {label}: {kind}.",
 	},
 	// PR events reach the change's author, but they do not all wake it: the
 	// watcher marks an informational notice NoWake, and a notice that falls
@@ -1565,6 +1670,13 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(HookState("")), Values: []string{
 		string(HookRunning), string(HookPassed), string(HookFailed), string(HookError),
 	}},
+	{Type: reflect.TypeOf(ReviewKind("")), Values: enumValues(reviewKinds)},
+	{Type: reflect.TypeOf(ReviewSeverity("")), Values: []string{
+		string(ReviewBlocking), string(ReviewShouldFix), string(ReviewNit),
+	}},
+	{Type: reflect.TypeOf(ReviewStopReason("")), Values: []string{
+		string(ReviewSuperseded), string(ReviewDuplicate), string(ReviewEmpty), string(ReviewTooLarge),
+	}},
 }
 
 // eventObjects are the struct types that an event payload embeds. The
@@ -1575,6 +1687,7 @@ var eventObjects = []reflect.Type{
 	reflect.TypeOf(MergeCheckSummary{}),
 	reflect.TypeOf(InstructionChange{}),
 	reflect.TypeOf(AlertFinding{}),
+	reflect.TypeOf(ReviewFinding{}),
 }
 
 // legacyFamilies are the post kinds that still go through Store.Post with a
@@ -2040,6 +2153,22 @@ func (m Message) MergeDecision() (MergeDecisionEvent, bool) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil {
 		return MergeDecisionEvent{}, false
+	}
+	return ev, true
+}
+
+// Review returns the payload of a reviewer result event. It decodes the stored
+// bytes strictly, so an unknown field is a failed read rather than a silent
+// mismatch.
+func (m Message) Review() (ReviewEvent, bool) {
+	if m.Kind != string(FamilyReview) || m.Notice.Kind != string(TypeResult) || len(m.Payload.raw) == 0 {
+		return ReviewEvent{}, false
+	}
+	var ev ReviewEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.Kind == "" {
+		return ReviewEvent{}, false
 	}
 	return ev, true
 }

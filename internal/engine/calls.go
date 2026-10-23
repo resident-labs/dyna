@@ -195,7 +195,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "SetReviewEnabled", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.PRs.SetReviewEnabled},
 		{Name: "SetMergeSettings", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.rooms.PRs.SetMergeSettings},
 		{Name: "CloseChange", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.CloseChange},
-		{Name: "RecordPRVerdict", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.RecordPRVerdict},
+		{Name: "RecordReviewResult", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.RecordReviewResult},
 		{Name: "OpenChange", Access: websvc.Write, Scope: websvc.ScopeOperate, Local: true, Method: s.rooms.PRs.OpenChange},
 		{Name: "MergeControl", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.rooms.PRs.MergeControl},
 		{Name: "MergeFixPR", Access: websvc.Write, Scope: websvc.ScopeAdmin, Local: true, Method: s.rooms.PRs.MergeFixPR},

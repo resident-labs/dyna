@@ -72,7 +72,7 @@ func setup(t *testing.T) *fixture {
 	}
 	f.s.Store = view.Watcher().Store
 	engineCalls, err := websvc.Bind([]websvc.Binding{
-		{Name: "RecordPRVerdict", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.RecordPRVerdict},
+		{Name: "RecordReviewResult", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.RecordReviewResult},
 		{Name: "CloseChange", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.CloseChange},
 		{Name: "OpenChange", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.OpenChange},
 		{Name: "ReplyToFinding", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: view.ReplyToFinding},
@@ -264,14 +264,14 @@ func TestChangeShowReplyAndClose(t *testing.T) {
 }
 
 func TestVerdictWithFindingsAndMarkdown(t *testing.T) {
-	for _, value := range []string{"approve", "approve-with-nits", "changes", "question"} {
-		t.Run(value, func(t *testing.T) {
+	for _, value := range []state.ReviewVerdict{state.VerdictApprove, state.VerdictChanges} {
+		t.Run(string(value), func(t *testing.T) {
 			f := setup(t)
 			r := f.seed()
 			markdown := "# Review\n\nKeep this full review.\n"
 			findings := f.file("findings.json", `[{"id":"f2","severity":"nit","file":"a.go","line":2,"why":"unclear","fix":"rename"}]`)
 			f.as(f.reviewer.ID)
-			out, err := f.call(markdown, "verdict", r.ChangeID, value, "--head", f.head, "--body-file", "-", "--findings-file", findings)
+			out, err := f.call(markdown, "verdict", r.ChangeID, string(value), "--head", f.head, "--body-file", "-", "--findings-file", findings)
 			if err != nil {
 				t.Fatalf("verdict: %s %v", out, err)
 			}
@@ -289,11 +289,28 @@ func TestVerdictWithFindingsAndMarkdown(t *testing.T) {
 	}
 }
 
+func TestStopEarlyRecordsItsReasonWithoutJudgingTheHead(t *testing.T) {
+	f := setup(t)
+	r := f.seed()
+	f.as(f.reviewer.ID)
+	out, err := f.call("", "verdict", r.ChangeID, "stop-early", "--head", f.head, "--reason", "superseded")
+	if err != nil {
+		t.Fatalf("stop-early: %s %v", out, err)
+	}
+	got, err := f.s.Store.Get(r.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Verdict != "" || got.StopReason != state.StopSuperseded || len(got.ReviewRounds) != 1 || got.ReviewRounds[0].StopReason != state.StopSuperseded {
+		t.Fatalf("stop-early result: %+v", got)
+	}
+}
+
 func TestVerdictRejectsOversizedAndInvalidInput(t *testing.T) {
 	f := setup(t)
 	r := f.seed()
 	f.as(f.reviewer.ID)
-	args := []string{"verdict", r.ChangeID, "question", "--head", f.head}
+	args := []string{"verdict", r.ChangeID, "changes", "--head", f.head}
 	cases := []struct {
 		name, input string
 		extra       []string
@@ -335,7 +352,7 @@ func TestBoundedReadersAcceptExactLimits(t *testing.T) {
 	body := strings.Repeat("x", watch.MaxReviewBytes)
 	findings := f.file("findings.json", "[]"+strings.Repeat(" ", watch.MaxFindingsBytes-2))
 	f.as(f.reviewer.ID)
-	out, err := f.call("", "verdict", r.ChangeID, "question", "--head", f.head, "--body-file", f.file("review.md", body), "--findings-file", findings)
+	out, err := f.call("", "verdict", r.ChangeID, "changes", "--head", f.head, "--body-file", f.file("review.md", body), "--findings-file", findings)
 	if err != nil {
 		t.Fatalf("exact limits: %s %v", out, err)
 	}
@@ -399,7 +416,7 @@ esac
 		r := watch.Record{Key: "github.com/owner/repo#17", ChangeID: "generic-pr", Kind: "github", Host: "github.com", Repo: "owner/repo", Number: 17, Author: f.author.ID, Reviewer: f.reviewer.ID, RoomID: f.room, Head: f.head, RoundHead: f.head, Round: 1, Watching: true, State: "open", ReviewPublishing: publishing}
 		f.write(watch.State{Version: 1, Records: map[string]*watch.Record{r.Key: &r}, Reviewers: map[string]watch.Reviewer{}})
 		f.as(f.reviewer.ID)
-		args := []string{"verdict", r.ChangeID, "question", "Review", "--head", f.head}
+		args := []string{"verdict", r.ChangeID, "changes", "Review", "--head", f.head}
 
 		if out, err := f.call("", args...); err != nil {
 			t.Fatalf("%s verdict: %s %v", publishing, out, err)
