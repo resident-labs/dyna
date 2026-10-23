@@ -22,6 +22,7 @@
     instructions: 'iris',
     seat: 'iris',
     spawned: 'iris',
+    'transfer-request': 'gold',
   }
 
   let payload = $derived(sessionEvent(post))
@@ -47,6 +48,11 @@
         return p.seat ?? 'Root seat changed'
       case 'spawned':
         return `Started @${p.name}${p.profile ? ` (${p.profile})` : ''}${p.dir ? ` in ${p.dir}` : ''}`
+      case 'transfer-request':
+        // The DM already names the session, so it states the fact alone. The
+        // transfer ID is a detail of the request, behind Details with the
+        // instructions.
+        return `${surface === 'dm' ? '' : `${p.session}: `}Handoff requested for model transfer`
     }
     return 'Session note'
   })
@@ -65,6 +71,7 @@
   <div class="sum">
     <span class="glyph {changeTone[kind]}" aria-hidden="true">✦</span>
     <span class="title">{headline}</span>
+    {#if kind === 'transfer-request' && payload?.transfer}<span class="id mono" title="Transfer {payload.transfer}">{payload.transfer}</span>{/if}
     <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
   </div>
   {#if sections.length}
@@ -78,11 +85,19 @@
         </li>
       {/each}
     </ul>
-  {:else if payload?.detail && kind !== 'spawned'}
+  {:else if payload?.detail && kind !== 'spawned' && kind !== 'transfer-request'}
     <details class="more">
       <summary>Show the note</summary>
       <p class="detail">{payload.detail}</p>
     </details>
+  {/if}
+  {#if kind === 'transfer-request'}
+    {#if surface === 'feed' && payload?.detail}
+      <details class="more">
+        <summary>Show the handoff instructions</summary>
+        <p class="detail">{payload.detail}</p>
+      </details>
+    {/if}
   {/if}
   {#if payload?.detail && kind === 'spawned'}<p class="detail task">{payload.detail}</p>{/if}
   {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
@@ -107,6 +122,7 @@
   .glyph.sage { color: var(--sage); }
   .glyph.gold { color: var(--gold); }
   .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+  .id { flex: none; color: var(--faint); font-size: var(--t-cap); }
   time { margin-left: auto; flex: none; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
   .sections { margin: 4px 0 0 24px; padding: 0; list-style: none; display: grid; gap: 2px; }
   .sections li { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: var(--t-cap); }
