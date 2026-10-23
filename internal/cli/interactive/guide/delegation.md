@@ -180,6 +180,8 @@ Read `dyna guide steering` for reports and handoffs.
 Close accepted children unless a follow-up is likely.
 When an assigned item is done, run `dyna goal item done <goal> <item>`.
 When a held goal is done, run `dyna goal done <id> "Summary"`.
+Merged and closed PR notices wake the author. Mark the goal done when its last PR
+ends, clean up its worktree, and end your turn.
 End or move PR roles, other goals, questions, children, shells, and runs.
 A session with no responsibilities at the end of a turn goes dormant by itself; messages wake it.
 The shell job a turn runs in ends with that turn and never keeps it awake.
