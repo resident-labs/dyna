@@ -46,7 +46,7 @@ func TestFlakyPublishMergesAndFilesTheFix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.MergePauses[f.e.author.RoomID] != "" {
+	if st.MergePauses[f.e.author.RoomID].Reason != "" {
 		t.Fatalf("flaky publish kept the batch pause: %v", st.MergePauses)
 	}
 	issues, err := f.e.s.Notify.Rooms.Issues(f.e.author.RoomID, false)

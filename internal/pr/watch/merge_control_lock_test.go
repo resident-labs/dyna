@@ -51,7 +51,7 @@ func TestMergeControlWaitsForPublisherAndKeepsAutomaticTickNonblocking(t *testin
 		t.Fatal("resume never contended on the existing publisher lock")
 	}
 	st, err := e.s.Store.Read()
-	if err != nil || st.MergePauses[id] != "" {
+	if err != nil || st.MergePauses[id].Reason != "" {
 		t.Fatalf("resume did not commit after acquiring the lock: pauses=%v error=%v", st.MergePauses, err)
 	}
 	unlock, err := e.s.mergeLock()
@@ -81,7 +81,7 @@ func TestMergeControlCancellationKeepsTheCurrentPublisher(t *testing.T) {
 		t.Fatal("cancelled waiter released another publisher's lock")
 	}
 	st, err := e.s.Store.Read()
-	if err != nil || st.MergePauses[id] == "" {
+	if err != nil || st.MergePauses[id].Reason == "" {
 		t.Fatalf("cancelled waiter changed pause state: pauses=%v error=%v", st.MergePauses, err)
 	}
 	release()
@@ -111,7 +111,7 @@ func TestMergeControlRechecksRoomAccessAfterWaiting(t *testing.T) {
 		t.Fatalf("changed room access was not checked after waiting: %v", err)
 	}
 	st, err := e.s.Store.Read()
-	if err != nil || st.MergePauses[id] == "" {
+	if err != nil || st.MergePauses[id].Reason == "" {
 		t.Fatalf("read-only control changed pause state: pauses=%v error=%v", st.MergePauses, err)
 	}
 }

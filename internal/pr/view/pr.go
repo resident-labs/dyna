@@ -453,7 +453,7 @@ type mergeScanStatus struct {
 }
 
 func roomMergeScanStatus(st watch.State, roomID string, records []*watch.Record) mergeScanStatus {
-	out := mergeScanStatus{Pause: st.MergePauses[roomID], Trials: map[string]watch.MergeTrialStatus{}, Main: map[string]state.RepositoryFacts{}}
+	out := mergeScanStatus{Pause: st.MergePauses[roomID].Reason, Trials: map[string]watch.MergeTrialStatus{}, Main: map[string]state.RepositoryFacts{}}
 	for _, record := range records {
 		repo := record.Host + "/" + record.Repo
 		if record.Kind == "local" {

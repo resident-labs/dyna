@@ -373,13 +373,72 @@ type MergeTrialFailure struct {
 	Reason string           `json:"reason"`
 	Logs   string           `json:"logs,omitempty"`
 }
+
+// MergeTrialPhase is the persisted execution phase of a batch or prefix.
+type MergeTrialPhase string
+
+// Merge trial phases retain their stored JSON spellings.
+const (
+	MergeTrialPhaseQueued       MergeTrialPhase = "queued"
+	MergeTrialPhaseBuilding     MergeTrialPhase = "building"
+	MergeTrialPhaseRunning      MergeTrialPhase = "running"
+	MergeTrialPhaseReviewing    MergeTrialPhase = "reviewing"
+	MergeTrialPhasePassed       MergeTrialPhase = "passed"
+	MergeTrialPhaseFailed       MergeTrialPhase = "failed"
+	MergeTrialPhaseStacking     MergeTrialPhase = "stacking"
+	MergeTrialPhasePublishing   MergeTrialPhase = "publishing"
+	MergeTrialPhasePublished    MergeTrialPhase = "published"
+	MergeTrialPhaseAwaitingRoot MergeTrialPhase = "awaiting-root"
+)
+
+// MergePauseCause identifies why merging is paused, independently of its text.
+type MergePauseCause string
+
+const (
+	MergePauseCauseManual      MergePauseCause = "manual"
+	MergePauseCauseBatchFailed MergePauseCause = "batch-failed"
+)
+
+// MergeBatchFailedReason is the display text for a failed-batch pause.
+const MergeBatchFailedReason = "batch trial failed; merging paused for recovery"
+
+// MergePause keeps the machine-readable cause next to the display reason.
+type MergePause struct {
+	Cause  MergePauseCause `json:"cause"`
+	Reason string          `json:"reason"`
+}
+
+func (p *MergePause) UnmarshalJSON(data []byte) error {
+	var legacyReason string
+	if err := json.Unmarshal(data, &legacyReason); err == nil {
+		*p = legacyMergePause(legacyReason)
+		return nil
+	}
+	type pause MergePause
+	var saved pause
+	if err := json.Unmarshal(data, &saved); err != nil {
+		return err
+	}
+	*p = MergePause(saved)
+	return nil
+}
+
+// TODO: legacy/shim remove later — map pauses saved before causes were stored.
+func legacyMergePause(reason string) MergePause {
+	cause := MergePauseCauseManual
+	if reason == MergeBatchFailedReason {
+		cause = MergePauseCauseBatchFailed
+	}
+	return MergePause{Cause: cause, Reason: reason}
+}
+
 type MergeTrialStack struct {
-	Branch string `json:"branch"`
-	Head   string `json:"head,omitempty"`
-	Count  int    `json:"count"`
-	Phase  string `json:"phase"`
-	Reason string `json:"reason,omitempty"`
-	Logs   string `json:"logs,omitempty"`
+	Branch string          `json:"branch"`
+	Head   string          `json:"head,omitempty"`
+	Count  int             `json:"count"`
+	Phase  MergeTrialPhase `json:"phase"`
+	Reason string          `json:"reason,omitempty"`
+	Logs   string          `json:"logs,omitempty"`
 }
 type MergeTrial struct {
 	// TODO: legacy/shim remove later — retain the session ID from saved advisory reviews until their batches resume or are canceled; remove after all pre-upgrade batches are gone.
@@ -405,7 +464,7 @@ type MergeTrial struct {
 	Base          string             `json:"base"`
 	DefaultBranch string             `json:"defaultBranch"`
 	Head          string             `json:"head,omitempty"`
-	Phase         string             `json:"phase"`
+	Phase         MergeTrialPhase    `json:"phase"`
 	Reason        string             `json:"reason,omitempty"`
 	Changes       []MergeTrialChange `json:"changes"`
 	Created       time.Time          `json:"created"`
@@ -413,7 +472,7 @@ type MergeTrial struct {
 }
 
 type State struct {
-	MergePauses     map[string]string                    `json:"mergePauses,omitempty"`
+	MergePauses     map[string]MergePause                `json:"mergePauses,omitempty"`
 	MergeTrials     map[string]*MergeTrial               `json:"mergeTrials,omitempty"`
 	NextMergeTrial  uint64                               `json:"nextMergeTrial,omitempty"`
 	IssueWork       map[string]IssueWork                 `json:"issueWork,omitempty"`
