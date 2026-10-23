@@ -30,9 +30,7 @@ type Goal struct {
 	Text string `json:"text"`
 	// Detail is the brief stored with a spawn goal: context, owned files,
 	// checks and limits. Dyna resends it with Text after compaction.
-	Detail string `json:"detail,omitempty"`
-	// TODO: legacy/shim remove later — marks goals that root and service sessions held before they stopped getting goals; remove with goalkeeper.dropServiceGoals.
-	Service bool     `json:"service,omitempty"`
+	Detail  string   `json:"detail,omitempty"`
 	Setter  string   `json:"setter"`
 	Holders []string `json:"holders"`
 	Shared  bool     `json:"shared"`
