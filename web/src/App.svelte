@@ -40,7 +40,6 @@
   import SearchIcon from './lib/ui/SearchIcon.svelte'
   import SyncBadge from './lib/rooms/SyncBadge.svelte'
   import { remoteList, syncDelay } from './lib/rooms/sync.ts'
-  import Issues from './lib/rooms/Issues.svelte'
   import Library from './lib/library/Library.svelte'
   import CIHealth from './lib/cihealth/CIHealth.svelte'
   import Questions from './lib/rooms/Questions.svelte'
@@ -97,6 +96,7 @@
   import RunWorkflow from './lib/workflows/RunWorkflow.svelte'
   import PRPanel from './lib/prs/PRPanel.svelte'
   import GitHub from './lib/prs/GitHub.svelte'
+  import type { RoomIssue } from './lib/prs/unifiedIssues.ts'
   import RoomSettings from './lib/rooms/RoomSettings.svelte'
   import { prsBySession, isOpen, withoutReviewers } from './lib/prs/pr.ts'
   import { boot, watch, registerWorker } from './lib/settings/link.ts'
@@ -167,11 +167,6 @@
     danger?: boolean
     gap?: boolean
     disabled?: boolean
-  }
-  interface RoomIssue {
-    id: string
-    title: string
-    state: string
   }
   interface RuleList {
     hash: string
@@ -341,7 +336,6 @@
   let syncRepo = $derived(room?.repo ? syncStatus[room.repo] ?? null : null) // {remotes, integration, operation?}
   let syncRemotes = $derived(remoteList(syncRepo?.remotes))
   let syncNote = $state('') // the last Refresh or Export answer that was not a start
-  let showIssues = $state(false) // the Issues panel, beside Pinned; it needs an open issue
   let channelMenu = $state<{ x: number; y: number } | null>(null) // {x, y}: a phone shows the panel toggles in this menu
   let lookOpen = $state(false) // a phone opens the channel look from that menu
   let issues = $state<RoomIssue[]>([]) // open issues, newest first
@@ -987,14 +981,14 @@
       const list = (await api.issues(id, history)) ?? []
       if (!current() || id !== roomId) return
       if (history) issueHistory = reconcileRows(issueHistory, list.filter((i: RoomIssue) => i.state !== 'open'))
-      else { issues = reconcileRows(issues, list); if (!issues.length) showIssues = false }
+      else issues = reconcileRows(issues, list)
     } catch (e) {
       if (current()) loadError = String(e)
     }
   }) }
 
-  // A slow-test notice opens the Issues panel, where its issue is listed.
-  function openIssues() { showIssues = true; showPins = false; if (narrow) showMembers = false }
+  // Notices open the same Issues tab as the room navigation.
+  function openIssues() { showPins = false; showMembers = false; openView('issues') }
 
   // One issue action: run the call, then refresh both lists.
   async function triageIssue(call: () => Promise<unknown>) {
@@ -1002,7 +996,7 @@
       await call()
       loadError = ''
       loadIssues()
-      if (showIssues) loadIssues(true)
+      loadIssues(true)
     } catch (e) {
       say(`Could not update the issue: ${errorText(e)}`)
     }
@@ -1262,6 +1256,7 @@
     pins = o.pins ?? []
     loadSync()
     loadIssues()
+    loadIssues(true)
     runs = o.runs ?? null
     runsError = ''
     workflowData.loadJobs()
@@ -1346,7 +1341,6 @@
     pins = []
     issues = []
     issueHistory = []
-    showIssues = false
     questions = []
     visuals = []
     questionFocus = ''
@@ -1593,10 +1587,10 @@
   // the desktop bar shows as separate buttons.
   function channelMenuItems() {
     const items: MenuItem[] = [
-      { label: 'Members', run: () => { showMembers = true; showPins = false; showIssues = false } },
-      { label: 'Pinned posts', hint: pins.length ? String(pins.length) : '', run: () => { showPins = true; showMembers = false; showIssues = false } },
+      { label: 'Members', run: () => { showMembers = true; showPins = false } },
+      { label: 'Pinned posts', hint: pins.length ? String(pins.length) : '', run: () => { showPins = true; showMembers = false } },
     ]
-    if (issues.length) items.push({ label: 'Issues', hint: String(issues.length), run: () => { showIssues = true; showPins = false; showMembers = false } })
+    items.push({ label: 'Issues', hint: issues.length ? String(issues.length) : '', run: openIssues })
     if (isChannel(view)) items.push({ label: 'Channel look', gap: true, run: () => (lookOpen = true) })
     return items
   }
@@ -1806,6 +1800,7 @@
     loadPins()
     loadSync()
     loadIssues()
+    loadIssues(true)
     if (drill && sessionVisible()) loadSession()
   }
 
@@ -1950,7 +1945,7 @@
     if (ev.kind === 'goals' && evRoom === roomId) { if (!item) loadGoals(); loadRules() }
     if (ev.kind === 'goals' && evRoom !== roomId && agentsVisible()) loadAgents(rooms)
     if (ev.kind === 'pins' && evRoom === roomId) loadPins()
-    if (ev.kind === 'issues' && evRoom === roomId) { loadIssues(); if (showIssues) loadIssues(true) }
+    if (ev.kind === 'issues' && evRoom === roomId) { loadIssues(); loadIssues(true) }
     if (['room.paused', 'room.resumed'].includes(ev.kind) && (!evRoom || evRoom === roomId)) roomSessionController?.load()
     // A prs event without a row says the room's PR settings changed.
     if ((ev.kind === 'prs' || ev.kind === 'changes') && (!evRoom || evRoom === roomId)) {
@@ -2003,7 +1998,6 @@
     // Esc closes the panel unless a modal on top of it owns the key.
     if (e.key === 'Escape' && goalId && !viewing && !card && !showPalette) goalId = ''
     if (e.key === 'Escape' && showPins && !viewing && !card && !showPalette) showPins = false
-    if (e.key === 'Escape' && showIssues && !viewing && !card && !showPalette) showIssues = false
     if (e.key === 'Escape' && narrow) {
       navOpen = false
       showMembers = false
@@ -2460,17 +2454,11 @@
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="5" cy="12" r="1.7" fill="currentColor" /><circle cx="12" cy="12" r="1.7" fill="currentColor" /><circle cx="19" cy="12" r="1.7" fill="currentColor" /></svg>
         </button>
         {:else}
-        <button class="icon pin" class:on={showPins} onclick={() => { showPins = !showPins; if (showPins) showIssues = false }} title={showPins ? 'Hide pinned posts' : 'Show pinned posts'} aria-label={showPins ? 'Hide pinned posts' : 'Show pinned posts'} aria-expanded={showPins}>
+        <button class="icon pin" class:on={showPins} onclick={() => { showPins = !showPins }} title={showPins ? 'Hide pinned posts' : 'Show pinned posts'} aria-label={showPins ? 'Hide pinned posts' : 'Show pinned posts'} aria-expanded={showPins}>
           <PinIcon size={21} />
           {#if pins.length}<span class="badge">{pins.length}</span>{/if}
         </button>
-        {#if issues.length || showIssues}
-          <button class="icon pin" class:on={showIssues} onclick={() => { showIssues = !showIssues; if (showIssues) showPins = false }} title={showIssues ? 'Hide issues' : 'Show issues'} aria-label={showIssues ? 'Hide issues' : 'Show issues'} aria-expanded={showIssues}>
-            <svg viewBox="0 0 24 24" width="21" height="21" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M12 7.5v5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><circle cx="12" cy="16.2" r="1" fill="currentColor" /></svg>
-            <span class="badge">{issues.length}</span>
-          </button>
-        {/if}
-        <button class="icon" class:on={showMembers} onclick={() => { showMembers = !showMembers; if (showMembers) showIssues = false }} title={showMembers ? 'Hide member list' : 'Show member list'} aria-label={showMembers ? 'Hide member list' : 'Show member list'} aria-expanded={showMembers}>
+        <button class="icon" class:on={showMembers} onclick={() => { showMembers = !showMembers }} title={showMembers ? 'Hide member list' : 'Show member list'} aria-label={showMembers ? 'Hide member list' : 'Show member list'} aria-expanded={showMembers}>
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8" /><path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /><circle cx="16.5" cy="9" r="2.4" fill="none" stroke="currentColor" stroke-width="1.6" /><path d="M16 13.6c2.4 0 4 1.5 4.5 4.4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" /></svg>
         </button>
         {/if}
@@ -2542,7 +2530,7 @@
         {:else if view === 'library'}
           {#key room.id}<Library roomId={room.id} {narrow} onopen={({ path, dir }) => { openView('files'); if (dir) revealFolder = { path }; else reveal = path }} />{/key}
         {:else if view === 'github' || view === 'issues'}
-          {#key `${room.id}:${view}`}<GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind={view === 'issues' ? 'issue' : 'pr'} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onask={askAgent} onsession={(m, tab) => { openSession(m); if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
+          {#key `${room.id}:${view}`}<GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind={view === 'issues' ? 'issue' : 'pr'} localIssues={[...issues, ...issueHistory]} oncloseissue={askCloseIssue} onexportissue={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} ondismississue={(i) => triageIssue(() => api.closeIssue(roomId, i.id, 'Dismissed'))} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onask={askAgent} onsession={(m, tab) => { openSession(m); if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
         {:else if view === 'terminal' && hasTerminal}
           {#key room.id}<Terminal roomId={room.id} ref={room.id} noRepo={!room.repo} {narrow} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
         {:else if view === 'questions'}
@@ -2573,8 +2561,8 @@
         {/if}
       </div>
       {/key}
-      {#if narrow && roomId && room && (showPins || showIssues || (showMembers && !drill) || (view === 'goals' && selectedGoal))}
-        <button class="scrim" aria-label="Close the panel" onclick={() => { showPins = false; showIssues = false; showMembers = false; goalId = '' }}></button>
+      {#if narrow && roomId && room && (showPins || (showMembers && !drill) || (view === 'goals' && selectedGoal))}
+        <button class="scrim" aria-label="Close the panel" onclick={() => { showPins = false; showMembers = false; goalId = '' }}></button>
       {/if}
       <!-- On a wide screen this wrapper adds no box; on a narrow one it is a sheet. -->
       <div class="panel">
@@ -2582,9 +2570,6 @@
         {#key selectedGoal.id}<GoalDetail roomId={room.id} goal={selectedGoal} members={hierarchy} onchanged={loadGoals} onclose={() => (goalId = '')} onexpedite={expediteGoal} />{/key}
       {:else if roomId && room && showPins}
         <Pins {room} {pins} ondetail={openDetail} onjump={(id: string) => { if (narrow) showPins = false; jumpTo(id) }} onunpin={togglePin} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} onclose={() => (showPins = false)} />
-      {:else if roomId && room && showIssues}
-        <Issues open={issues} history={issueHistory} onhistory={() => loadIssues(true)} onclose={() => (showIssues = false)}
-          ongoal={(i: RoomIssue) => triageIssue(() => api.issueGoal(roomId, i.id))} onexport={(i: RoomIssue) => triageIssue(() => api.exportIssue(roomId, i.id))} oncloseissue={askCloseIssue} />
       {:else if roomId && room && showMembers && !drill}
         <Members computers={computers ?? []} onopencomputer={(m: Member) => { openSession(m); sessionTab = 'computer' }} members={people} focus={view.startsWith('channel:') ? view.slice('channel:'.length) : ''} scope="{room.id}|{view}" {roomControls} controlMembers={hierarchy} onroomactions={roomSessionActions} onresumeroom={() => roomSessionController?.run('resume')} onreloadcontrols={() => roomSessionController?.load()} oncleardormant={askClearDormant} ondismiss={(m: Member) => dismissSession(m).catch((e) => say(`Could not dismiss ${m.name}: ${errorText(e)}`))} {dismissing} ontakeseat={takeBackSeat} {fresh} selecting={selectingSessions} picked={pickedSessions} onselection={toggleSessionSelection} onpick={pickSession} onactions={selectionActions} selected={''} closed={showClosed} onselect={openMember} onmenu={(m: Member, x: number, y: number, anchor?: HTMLElement) => (menu = { m, x, y, anchor })} onclosed={() => { showClosed = !showClosed; loadMembers() }} />
       {/if}
