@@ -289,7 +289,6 @@
   const layout = loadLayout({ side: true, members: true, threads: true })
   let threadsOpen = $state(layout.threads)
   let selectedThread = $state('')
-  let contextOpen = $state(false)
   let listPages = $state<ListPages>({})
   let olderLoading = $state(false)
   let olderFailed = $state(false) // the last older-page load failed
@@ -1388,7 +1387,6 @@
       sessionError = ''
       sessionTab = 'chat'
       selectedThread = ''
-      contextOpen = false
       queue = []
     }
     drill = m
@@ -1973,7 +1971,6 @@
       showSide = !showSide
     }
     if (e.key === 'Escape' && selectingSessions) { e.preventDefault(); toggleSessionSelection(); return }
-    if (e.key === 'Escape' && drill && contextOpen && !viewing && !card && !showPalette) { contextOpen = false; return }
     if (e.key === 'Escape' && drill && threadsOpen && !viewing && !card && !showPalette) { threadsOpen = false; return }
     // Esc closes the panel unless a modal on top of it owns the key.
     if (e.key === 'Escape' && goalId && !viewing && !card && !showPalette) goalId = ''
@@ -2079,7 +2076,6 @@
     reviewTab = tab
     reviewOpen = true
     threadsOpen = false
-    contextOpen = false
     reviewVersion++
     showMembers = false
     showPins = false
@@ -2424,7 +2420,6 @@
           <span class="spacer"></span>
           <UseIcons shells={drillShells.length} computer={inUse(drillComputer)} tab={sessionTab} onselect={(tab) => (sessionTab = tab)} />
           {#if isRootDm}<CallButton {room} />{/if}
-          <button class="dm-threads" class:on={contextOpen} aria-expanded={contextOpen} title="Shell jobs" onclick={() => { contextOpen = !contextOpen; if (contextOpen) sessionTab = 'chat' }}>Context</button>
           <button class="dm-threads threads" class:on={threadsOpen} aria-expanded={threadsOpen} aria-label="Threads" title="Threads" onclick={() => { threadsOpen = !threadsOpen; selectedThread = ''; if (threadsOpen) sessionTab = 'chat' }}><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v6a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><b>{threadCount}</b></button>
           {/if}
         {:else if view === 'runs' && openRun}
@@ -2516,7 +2511,7 @@
               <SessionMedia onpost={jumpTo} {room} posts={session?.media ?? []} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
             {:else}
               <div class="sess-wrap" style:--shift={threadsOpen && !narrow ? '360px' : '0px'}>
-              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:contextOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} contextError={jobsError} onchild={openSession} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} />
+              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} onchild={openSession} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} />
               {#if showPreview}<ComputerPreview c={drillComputer} session={drill.id} name={drill.name} onopen={() => (sessionTab = 'computer')} />{/if}
               </div>
             {/if}
