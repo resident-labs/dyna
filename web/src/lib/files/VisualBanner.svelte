@@ -1,6 +1,6 @@
 <script>
   import { fileURL } from '../../api.js'
-  import { ago } from '../ui/format.js'
+  import { ago } from '../ui/format.ts'
   import VisualPlaceholder from './VisualPlaceholder.svelte'
   // A visualization in chat: the banner image of its newest version, its
   // title, version and when it last changed. A post that updated a visual

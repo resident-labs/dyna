@@ -4,7 +4,7 @@
   import EmptyState from '../ui/EmptyState.svelte'
   import TabHeader from './TabHeader.svelte'
   import QuestionFiles from './QuestionFiles.svelte'
-  import { markdown, ago } from '../ui/format.js'
+  import { markdown, ago } from '../ui/format.ts'
   import { alsoAsked, orderQuestions, answeredLine } from './questions.js'
 
   let { roomId, questions = [], focusId = '', focusRequest = 0, onanswer, onopenfile } = $props()

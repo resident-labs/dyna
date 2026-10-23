@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { frameKey } from './rich.js'
+import { frameKey } from './rich.ts'
 
 test('a card frame reloads when the same bytes change network policy', () => {
   const closed = { id: 'same-bytes', render: 'html' }
@@ -11,7 +11,7 @@ test('a card frame reloads when the same bytes change network policy', () => {
 })
 
 test('a policy change starts a fresh guard, so the new document is not a navigation', async () => {
-  const { guard, onLoad, forKey } = await import('./rich.js')
+  const { guard, onLoad, forKey } = await import('./rich.ts')
   const closed = frameKey({ id: 'same-bytes' })
   const open = frameKey({ id: 'same-bytes', net: true })
   const load = (g, key) => onLoad(forKey(g, key))

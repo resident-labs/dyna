@@ -1,6 +1,6 @@
 <script>
   import Segmented from '../ui/Segmented.svelte'
-  import { dialog } from '../ui/dialog.js'
+  import { dialog } from '../ui/dialog.ts'
   import { onMount } from 'svelte'
   import { api, copyText, fileURL, authenticatedFetch } from '../../api.js'
   import { human, extOf } from './attach.js'

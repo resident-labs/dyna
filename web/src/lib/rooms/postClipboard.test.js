@@ -5,7 +5,7 @@ import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
 import ts from 'typescript'
 import { copyText } from '../../api.js'
-import { postHref } from '../ui/posts.js'
+import { postHref } from '../ui/posts.ts'
 
 const source = readFileSync(new URL('../ui/PostActions.svelte', import.meta.url), 'utf8')
 const handlers = new Map()

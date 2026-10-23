@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { dialog as modal } from '../ui/dialog.js'
+  import { dialog as modal } from '../ui/dialog.ts'
   import { onMount } from 'svelte'
   import { api } from '../../api.js'
   import type { Member, ProfileChoice } from '../api/room.ts'

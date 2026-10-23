@@ -1,4 +1,4 @@
-import { trimHistoryRows } from '../ui/historyWindow.js'
+import { trimHistoryRows } from '../ui/historyWindow.ts'
 
 export const FEED_WINDOW = 300
 

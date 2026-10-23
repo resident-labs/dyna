@@ -9,8 +9,8 @@ import { mergeSessionPage } from '../sessions/sessionPages.ts'
 import { createSessionData } from '../sessions/sessionData.ts'
 import { createRoomSessionControls } from './roomSessionControls.js'
 import { applyEvent, openedApps, pushAction } from '../computers/computers.js'
-import { hasItemChange } from '../ui/listChanges.js'
-import { createReloadGate, listVisible, reconcileRows } from '../ui/reloadGate.js'
+import { hasItemChange } from '../ui/listChanges.ts'
+import { createReloadGate, listVisible, reconcileRows } from '../ui/reloadGate.ts'
 import { reloadsUnread } from '../ui/unreadReload.ts'
 
 const deferred = () => { let resolve; const promise = new Promise((yes) => { resolve = yes }); return { promise, resolve } }

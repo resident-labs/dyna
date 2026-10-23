@@ -7,7 +7,7 @@
   // reloads when the switch flips.
   import { tick, untrack } from 'svelte'
   import { api } from '../../api.js'
-  import { roomLabel } from '../ui/format.js'
+  import { roomLabel } from '../ui/format.ts'
   import Switch from '../ui/Switch.svelte'
   import SettingsShell from '../ui/SettingsShell.svelte'
   import ServiceHeader from '../services/ServiceHeader.svelte'

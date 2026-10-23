@@ -19,7 +19,7 @@ test('Escape resets the page field before the outer dialog can close', async () 
   const { build } = await import('esbuild')
   const { svelteEsbuildPlugin } = await import('../../../test/svelte-esbuild.ts')
   const { installDom, importBundle, domNames } = await import('../prs/prDetailHarness.ts')
-  const { dialog } = await import('../ui/dialog.js')
+  const { dialog } = await import('../ui/dialog.ts')
   const { rm } = await import('node:fs/promises')
   const dom = installDom()
   globalThis.HTMLMediaElement = dom.window.HTMLMediaElement

@@ -1,4 +1,4 @@
-import { clock } from '../ui/format.js'
+import { clock } from '../ui/format.ts'
 
 // The Services page's log and session lists, built from rows the app already
 // loads: members (created and ended times), changes (reviewAt, verdict) and

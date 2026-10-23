@@ -20,7 +20,7 @@ async function load() {
     format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
     plugins: [{ name: 'svelte-test', setup(builder) {
       builder.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({ contents: compile(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
-      builder.onResolve({ filter: /ui[/\\]format\.js$/ }, () => ({ path: 'format', namespace: 'stub' }))
+      builder.onResolve({ filter: /ui[/\\]format\.ts$/ }, () => ({ path: 'format', namespace: 'stub' }))
       builder.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const ago = () => '1m ago'; export const markdown = (s) => s", loader: 'js' }))
       builder.onLoad({ filter: /[/\\]api\.js$/ }, () => ({ contents: 'export const api = {}', loader: 'js' }))
     } }],

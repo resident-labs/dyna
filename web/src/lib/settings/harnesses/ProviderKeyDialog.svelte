@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { api } from '../../../api.js'
-  import { dialog } from '../../ui/dialog.js'
+  import { dialog } from '../../ui/dialog.ts'
   import { filterProviders } from './state.ts'
 
   // Add an API-key provider. The key goes to the engine once and is cleared

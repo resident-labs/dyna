@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { setImmediate } from 'node:timers/promises'
-import { createReloadGate } from '../ui/reloadGate.js'
-import { hasItemChange, patchListRows } from '../ui/listChanges.js'
+import { createReloadGate } from '../ui/reloadGate.ts'
+import { hasItemChange, patchListRows } from '../ui/listChanges.ts'
 import { parse } from 'svelte/compiler'
 
 // Run the real refresh code from Home.svelte and the real Settings onclose

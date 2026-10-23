@@ -1,14 +1,20 @@
+import type { Member } from '../api/room.ts'
 import { isChannel } from '../rooms/channels.ts'
+
+type Selection = { room: unknown; visit: unknown }
+type Load = (current: () => boolean) => void | Promise<unknown>
+type Task<S> = { value: S; load: Load }
+type Entry<S> = { next: Task<S> | null; patches: Task<S>[]; promise: Promise<void> }
 
 // Each room/list has one request and one pending refresh. Every caller waits
 // for the whole burst, including its trailing refresh.
-export function createReloadGate(selection, visible = () => true) {
-  const active = new Map()
-  function context(name) {
+export function createReloadGate<S extends Selection>(selection: () => S, visible: (name: string) => boolean = () => true) {
+  const active = new Map<string, Entry<S>>()
+  function context(name: string) {
     const value = { ...selection() }
     return value.room && visible(name) ? { value, key: name + ':' + value.room } : null
   }
-  function reload(name, load) {
+  function reload(name: string, load: Load) {
     const selected = context(name)
     if (!selected) return Promise.resolve()
     const { value, key } = selected
@@ -17,18 +23,19 @@ export function createReloadGate(selection, visible = () => true) {
       existing.next = { value, load }
       return existing.promise
     }
-    const entry = { next: null, patches: [], promise: null }
+    const entry: Entry<S> = { next: null, patches: [], promise: Promise.resolve() }
     active.set(key, entry)
-    const current = (v) => {
+    const current = (v: S) => {
       const now = selection()
       return v.room === now.room && v.visit === now.visit && visible(name)
     }
     entry.promise = (async () => {
-      let task = { value, load }
+      let task: Task<S> | undefined = { value, load }
       try {
         do {
           entry.next = null
-          if (current(task.value)) await task.load(() => current(task.value))
+          const running = task
+          if (current(running.value)) await running.load(() => current(running.value))
           task = entry.next ?? entry.patches.shift()
         } while (task)
       } finally { active.delete(key) }
@@ -37,7 +44,7 @@ export function createReloadGate(selection, visible = () => true) {
   }
   // History loads and item patches must survive a trailing refresh. Keep
   // them in order after the request burst, under their original visits.
-  reload.patch = (name, load) => {
+  reload.patch = (name: string, load: Load) => {
     const selected = context(name)
     if (!selected) return Promise.resolve()
     const entry = active.get(selected.key)
@@ -48,7 +55,17 @@ export function createReloadGate(selection, visible = () => true) {
   return reload
 }
 
-export function listVisible(name, { view, drill, showRoomSettings, memberChips, sidebarChips, sideVisible, controlsOpen }) {
+type Visibility = {
+  view: string
+  drill?: Partial<Member> | null
+  showRoomSettings?: boolean
+  memberChips?: boolean
+  sidebarChips?: boolean
+  sideVisible?: boolean
+  controlsOpen?: boolean
+}
+
+export function listVisible(name: string, { view, drill, showRoomSettings, memberChips, sidebarChips, sideVisible, controlsOpen }: Visibility) {
   if (name === 'roomControls') return !!memberChips || !!showRoomSettings || !!controlsOpen
   if (name === 'computers') return !!memberChips || !!sideVisible || !!drill || view === 'computers'
   if (name === 'mentions') return !drill && isChannel(view)
@@ -65,15 +82,17 @@ export function listVisible(name, { view, drill, showRoomSettings, memberChips, 
 }
 
 // Keep keyed row objects so Svelte only updates fields that changed.
-export function reconcileRows(previous, incoming, key = 'id') {
-  const identity = typeof key === 'function' ? key : (row) => row[key]
+export function reconcileRows<T extends object>(previous: T[], incoming: T[], key: string | ((row: T) => unknown) = 'id'): T[] {
+  const identity = typeof key === 'function' ? key : (row: T) => (row as Record<string, unknown>)[key]
   const byId = new Map(previous.map((row) => [identity(row), row]))
   const rows = incoming.map((row) => {
     const old = byId.get(identity(row))
     if (!old || old === row) return row
-    for (const field of Object.keys(old)) if (!(field in row)) delete old[field]
+    const oldFields = old as Record<string, unknown>
+    const fields = row as Record<string, unknown>
+    for (const field of Object.keys(old)) if (!(field in row)) delete oldFields[field]
     for (const field of Object.keys(row)) {
-      if (JSON.stringify(old[field]) !== JSON.stringify(row[field])) old[field] = row[field]
+      if (JSON.stringify(oldFields[field]) !== JSON.stringify(fields[field])) oldFields[field] = fields[field]
     }
     return old
   })

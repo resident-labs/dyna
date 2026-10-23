@@ -3,7 +3,7 @@
   // optional muted hint line that says what to do about it.
   import type { Snippet } from 'svelte'
   import { fade } from 'svelte/transition'
-  import { motion, FAST } from './motion.js'
+  import { motion, FAST } from './motion.ts'
   interface Props {
     title: string
     children?: Snippet | null

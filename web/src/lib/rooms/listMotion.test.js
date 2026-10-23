@@ -9,7 +9,7 @@ const files = ['Sidebar', 'RoomRail', 'Members']
 for (const file of files) {
   test(`${file} uses shared motion for keyed list movement and local arrival fades`, () => {
     const source = readFileSync(new URL(`./${file}.svelte`, import.meta.url), 'utf8')
-    assert.match(source, /import \{[^}]*motion[^}]*\} from '\.\.\/ui\/motion\.js'/)
+    assert.match(source, /import \{[^}]*motion[^}]*\} from '\.\.\/ui\/motion\.ts'/)
     assert.match(source, /animate:flip=\{\{ duration: motion\(BASE\), easing: cubicOut \}\}/)
     assert.match(source, /in:fade=\{\{ duration: motion\(FAST\) \}\}/)
     assert.doesNotMatch(source, /(?:in|out):fade\|global/)
