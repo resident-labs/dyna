@@ -100,16 +100,10 @@ func begin(ctx context.Context, rooms *roomsvc.Service, accounts *service.Servic
 	return done
 }
 
-func newRuntime(ctx context.Context, readOnly bool) (*harnessruntime.Runtime, error) {
+func newRuntime(ctx context.Context) *harnessruntime.Runtime {
 	runtime := harnessruntime.New()
 	runtime.SetLifetime(ctx)
-	if !readOnly {
-		// TODO: legacy/shim remove later — old grant-only entries and old Grok identities; remove once no store has them
-		if err := runtime.Accounts.MigrateLegacyGrants(); err != nil {
-			return nil, err
-		}
-	}
-	return runtime, nil
+	return runtime
 }
 
 // refreshAccounts shares one timer for credential renewal and inactive usage.
