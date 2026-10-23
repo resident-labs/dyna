@@ -50,16 +50,13 @@ func TestMigratePersistsRetainedTurnInputCutoff(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			preserved := int64(7)
-			if err := s.writeTurn(id, Turn{N: 2, Status: TurnStopped, InputCutoff: &preserved}); err != nil {
-				t.Fatal(err)
-			}
 			raw := []byte(`{"n":1,"status":"error","ended":"1970-01-01T00:00:10Z","future":{"kept":true},"usageNormalization":{"version":1}}`)
 			path := turnFile(t, s, id, 1)
 			if err := os.WriteFile(path, raw, 0600); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.migrateRetainedTurns(); err != nil {
+			preserved := int64(7)
+			if err := s.writeTurn(id, Turn{N: 2, Status: TurnStopped, InputCutoff: &preserved}); err != nil {
 				t.Fatal(err)
 			}
 			db, err := s.turnsDB()

@@ -27,7 +27,7 @@ func TestPendingReportIndexKeepsPromptFormatBoundary(t *testing.T) {
 		}
 	})
 	// Reopen so a process-local cache cannot hide the actual format boundary.
-	if err := database.Migrate(db, "subagent.turns", promptStoreFormat, func(*sql.Conn, int) error {
+	if err := database.Migrate(db, "subagent.turns", turnStoreFormat, func(*sql.Conn, int) error {
 		t.Error("the current reader unexpectedly needed a turn migration")
 		return nil
 	}); err != nil {

@@ -254,10 +254,7 @@ func TestUnreadableClaimedTurnFailsClosed(t *testing.T) {
 	if _, err := e.m.Store.steering(info.ID, 3); err != nil {
 		t.Fatalf("prepare the steering copy: %v", err)
 	}
-	// The claimed turn has no row and no retained copy left.
-	if err := os.Remove(turnFile(t, e.m.Store, info.ID, 2)); err != nil {
-		t.Fatal(err)
-	}
+	// The claimed turn has no canonical row.
 	db, err := database.Open(filepath.Dir(e.m.Store.Root))
 	if err != nil {
 		t.Fatal(err)

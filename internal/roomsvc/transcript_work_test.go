@@ -23,11 +23,7 @@ func TestTranscriptPageDoesNotCopyRetainedRoomHistory(t *testing.T) {
 	base := time.Date(2026, 10, 21, 0, 0, 0, 0, time.UTC)
 	meta := subagent.Meta{ID: id, Name: "lead", Room: rec.Name, RoomID: rec.ID, Turns: 3, Created: base}
 	recordtest.Write(t, e.mgr.Store.Root, id, meta)
-	dir, err := e.mgr.Store.Dir(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(dir, "turns"), 0700); err != nil {
+	if err := subagent.Migrate(filepath.Dir(e.mgr.Store.Root)); err != nil {
 		t.Fatal(err)
 	}
 	for n := 1; n <= 3; n++ {
@@ -35,9 +31,7 @@ func TestTranscriptPageDoesNotCopyRetainedRoomHistory(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "turns", fmt.Sprint(n)+".json"), data, 0600); err != nil {
-			t.Fatal(err)
-		}
+		seedTurnRow(t, e.mgr.Store, id, n, data)
 	}
 	const retained = 3200
 	var log bytes.Buffer

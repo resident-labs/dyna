@@ -12,30 +12,30 @@ import (
 	"strconv"
 	"strings"
 
-	"dyna-agent/internal/database"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/state"
 )
 
-func (s *Store) migrateRetainedTurns() error {
-	db, err := s.turnsDB()
-	if err != nil {
-		return err
-	}
-	var version string
-	err = db.QueryRow("SELECT value FROM meta WHERE key='subagent.turns.import'").Scan(&version)
+// TODO: legacy/shim remove later — complete eager import before retiring turn files.
+func (s *Store) migrateRetainedTurns(conn *sql.Conn) error {
+	ctx := context.Background()
+	var version int
+	err := conn.QueryRowContext(ctx, "SELECT value FROM meta WHERE key='subagent.turns.import'").Scan(&version)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if version == "" || version == "0" || version == "1" {
-		// A missing migration key must also get a backup before import.
-		if err := database.BackUpOnce(db); err != nil {
-			return fmt.Errorf("back up dyna.db before importing turns: %w", err)
-		}
+	if version > 2 {
+		return fmt.Errorf("subagent.turns.import is version %d; this dyna knows up to 2", version)
 	}
-	return database.Migrate(db, "subagent.turns.import", 2, func(conn *sql.Conn, _ int) error {
-		return s.importRetainedTurns(conn)
-	})
+	if version == 2 {
+		// Completed import preserves canonical absence, including deleted rows.
+		return nil
+	}
+	if err := s.importRetainedTurns(conn); err != nil {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, "INSERT INTO meta(key,value) VALUES('subagent.turns.import','2') ON CONFLICT(key) DO UPDATE SET value=excluded.value")
+	return err
 }
 
 // TODO: legacy/shim remove later — one-time import of retained numbered turn
