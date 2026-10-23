@@ -60,8 +60,9 @@
     onsend: (text: string, atts: { id: string; name: string }[], forwardOf: string, references: Reference[]) => Promise<SendResult | undefined> | SendResult | undefined
     onslash?: () => void
     oncancelreply?: () => void
+    onpending?: (pending: boolean) => void
   }
-  let { room, label = '', prepareText = (text) => text, choices = [], profiles = [], commands = [], reply = null, onopenfile, draft = $bindable(''), onsend, onslash, oncancelreply = () => {} }: Props = $props()
+  let { room, label = '', prepareText = (text) => text, choices = [], profiles = [], commands = [], reply = null, onopenfile, draft = $bindable(''), onsend, onslash, oncancelreply = () => {}, onpending = () => {} }: Props = $props()
 
   // An asynchronous recipient lookup must not outlive its composer.
   let active = true
@@ -162,7 +163,8 @@
   let failed = $derived($attachments.failed)
   let canSend = $derived(!busy && !$attachments.uploading && !failed && (draft.trim() !== '' || $attachments.ready.length > 0 || !!forwarding || references.length > 0))
   export function addFiles(files: ArrayLike<File> | null | undefined) { attachments.addFiles(files) }
-  onDestroy(() => attachments.destroy())
+  $effect(() => { onpending(busy || $attachments.items.length > 0 || !!forwarding || references.length > 0) })
+  onDestroy(() => { attachments.destroy(); onpending(false) })
 
   // App commands a profile does not shadow, and the one the draft names.
   let appCommands = $derived(commands.filter((c) => !profiles.some((p) => p.name === c.name)))

@@ -27,6 +27,7 @@
   import SystemNote from '../ui/SystemNote.svelte'
   import { noteGroups } from '../ui/notices.ts'
   import { sealedEvent, rendererFor } from './eventRenderers.ts'
+  import UnknownEventRow from './UnknownEventRow.svelte'
   import type { EventPost } from './eventRenderers.ts'
   import { prEvent } from './eventPayloads.ts'
   import { look } from './look.svelte.ts'
@@ -268,7 +269,7 @@
         {#if Card}
           <Card post={p} notice={p.notice} surface="feed" posts={row.posts} hookFold={row.hook} {showRepo} {room} {pinned} {selection} onreply={(post) => keep(post, onreply)} onforward={(post) => keep(post, onforward)} onpin={(post) => keep(post, onpin)} to={recipients(p).names} {onaddress} {goals} {ongoal} onissue={onissue ?? undefined} focus={flash?.key === row.key ? flash.id : ''} />
         {:else}
-          <p class="unknown-event" role="status">Unknown event {p.kind}/{p.notice?.kind ?? '?'}</p>
+          <UnknownEventRow />
         {/if}
       {:else if ownerQuestion(p)}
         {@const q = questionsById[ownerQuestion(p)]}
@@ -375,8 +376,6 @@
   }
   /* System rows use their own compact layout. */
   .post.sysrow { display: block; padding-left: var(--s4); }
-  /* A sealed event whose type has no renderer must be obvious, not silent. */
-  .unknown-event { margin: var(--s1) 0; padding: 6px 10px; border: 1px dashed var(--line); border-radius: 6px; color: var(--muted); font-size: var(--t-sm); }
   .post.prrow > :global(.actions) { top: auto; bottom: calc(100% - 4px); }
   .post:global(.swipeable) { transform: var(--reply-transform, none); transition: transform var(--motion-fast) ease-out, background-color var(--motion-fast) var(--ease); }
   .post:global(.swipe-drag) { transition: none; user-select: none; }
