@@ -49,21 +49,30 @@ type entry struct {
 // Tick reconciles eligibility, delivers due work, and returns the next deadline.
 // Pending rows have no timer; member and turn-end events retry them.
 func (s *Scheduler) Tick(ctx context.Context) (time.Time, error) {
+	_, next, err := s.Pass(ctx)
+	return next, err
+}
+
+// Pass runs one check-in pass: it delivers every due check-in and reports how
+// many it posted, with the next deadline. A job that runs a pass on its own
+// uses the count; Tick uses the deadline to time the engine's worker.
+func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
+	posted := 0
 	now := time.Now()
 	if s.Now != nil {
 		now = s.Now()
 	}
 	interval, err := s.Interval()
 	if err != nil {
-		return time.Time{}, err
+		return posted, time.Time{}, err
 	}
 	targets, err := s.Targets()
 	if err != nil {
-		return time.Time{}, err
+		return posted, time.Time{}, err
 	}
 	db, err := database.Open(s.Root)
 	if err != nil {
-		return time.Time{}, err
+		return posted, time.Time{}, err
 	}
 	active := map[string]Target{}
 	if interval > 0 {
@@ -124,7 +133,7 @@ func (s *Scheduler) Tick(ctx context.Context) (time.Time, error) {
 		return nil
 	})
 	if err != nil {
-		return time.Time{}, err
+		return posted, time.Time{}, err
 	}
 	var next time.Time
 	add := func(at time.Time) {
@@ -142,20 +151,21 @@ func (s *Scheduler) Tick(ctx context.Context) (time.Time, error) {
 		id := fmt.Sprintf("msg_%x", digest[:8])
 		delivered, err := s.Deliver(ctx, e.Target, id)
 		if err != nil {
-			return now.Add(time.Minute), err
+			return posted, now.Add(time.Minute), err
 		}
 		if !delivered {
 			continue
 		}
+		posted++
 		due := now.Add(interval)
 		err = state.For(db).Write(ctx, hub.Event{}, func(conn *sql.Conn) error {
 			_, err := conn.ExecContext(ctx, "UPDATE parent_checkins SET due=?,pending=0 WHERE session=? AND due=?", due.UnixNano(), e.ID, e.due)
 			return err
 		})
 		if err != nil {
-			return now.Add(time.Minute), err
+			return posted, now.Add(time.Minute), err
 		}
 		add(due)
 	}
-	return next, nil
+	return posted, next, nil
 }

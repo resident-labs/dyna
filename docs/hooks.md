@@ -17,7 +17,9 @@ Timeouts use duration strings, such as `30s` or `5m`.
 The timeout includes the slot wait and command run.
 
 Events are `worktree-created`, `before-land`, `after-land`, `pr-merged`,
-`main-updated`, `session-finish`, and `schedule`.
+`main-updated`, `session-finish`, `session-turn-ended`, and `schedule`.
+`session-turn-ended` fires when a bound session's turn ends, so a job can react
+to a turn at once instead of at its next interval.
 Only `before-land` allows `onFail: block`. A failed blocking hook prevents publication.
 Before-land hooks run against the trial merge and receive its SHA.
 Detached alert hooks get a separate trial worktree, which Dyna removes after the run.
