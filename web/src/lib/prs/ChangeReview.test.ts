@@ -1,12 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { compile } from 'svelte/compiler'
 import { build } from 'esbuild'
+import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import type { Finding } from '../api/change.ts'
 import { need } from '../../../test/need.ts'
 import { verdictMeta, statusMeta, refName, repoName, changeName, changeTitle, groupFindings } from './pr.ts'
@@ -18,8 +17,7 @@ async function load(name: string) {
     bundle: true, write: false,
     stdin: { contents: `export { default } from './${name}.svelte'; export { render } from 'svelte/server'`, resolveDir: new URL('.', import.meta.url).pathname, loader: 'js' },
     format: 'esm', platform: 'node', conditions: ['node'], logLevel: 'silent',
-    plugins: [{ name: 'svelte-test', setup(builder) {
-      builder.onLoad({ filter: /\.svelte$/ }, async ({ path }) => ({ contents: compile(readFileSync(path, 'utf8'), { filename: path, generate: 'server' }).js.code, loader: 'js', resolveDir: resolve(path, '..') }))
+    plugins: [svelteEsbuildPlugin('server'), { name: 'review-fixture', setup(builder) {
       builder.onLoad({ filter: /[/\\]api\.ts$/ }, () => ({ contents: 'export const api = {}', loader: 'js' }))
     } }],
   })
