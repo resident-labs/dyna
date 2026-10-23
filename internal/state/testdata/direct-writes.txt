@@ -42,13 +42,13 @@ not-state internal/computers/chromium_launch_linux.go LaunchChromium 1 # one com
 not-state internal/computers/chromium_launch_linux.go joinBrowserCgroup 1 # one computer's browser launch files
 not-state internal/computers/chromium_launch_linux.go markBrowserCleanExit 1 # one computer's browser launch files
 not-state internal/computers/daemon_linux.go RunDaemon 3 # the computer daemon's runtime files
-not-state internal/computers/diagnostics.go RecordFailure 2 # diagnostic dumps
+not-state internal/computers/diagnostics.go RecordFailure 1 # appends to the computer daemon log (rule r10); its failure reason lives in dyna.db
 not-state internal/computers/input_linux.go supervisor.act 1 # one computer's input device files
 not-state internal/computers/input_linux.go supervisor.capture 3 # one computer's input device files
 not-state internal/computers/process_linux.go destroyOffline 4 # one computer's process files
 not-state internal/computers/process_linux.go startDaemon 1 # one computer's process files
 not-state internal/computers/process_linux.go startProcess 1 # one computer's process files
-not-state internal/computers/store.go Ensure 2 # removes failure.json, the computer's diagnostic dump, after a successful start
+not-state internal/computers/diagnostics.go clearFailedSetup 1 # removes a failure.json that an earlier release left; the reason itself lives in dyna.db
 not-state internal/computers/store.go browserShims 2 # one computer's browser launch files: the Chromium wrapper, tool shims and profile folders
 not-state internal/computers/stream_linux.go wayVNCBackend.Command 1 # one computer's stream files
 not-state internal/computers/supervisor_linux.go newComputer 3 # one computer's folders and its cgroup runtime file; its registration lives in dyna.db
