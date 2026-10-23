@@ -101,7 +101,7 @@ test('the Sessions settings include the default root profile picker', () => {
 test('the Feed section previews the real feed with sample posts under the current choices', async () => {
   assert.match(source, /<Feed room=\{sampleRoom\} posts=\{previewPosts\} intro=\{false\}/)
   assert.match(source, /previewPosts = \$derived\(samplePosts\.filter\(visibleTo\(look, scopeOf\(sampleRoom\.id, 'general'\)\)\)\)/)
-  const { samplePosts } = await import('../rooms/feedSample.js')
+  const { samplePosts } = await import('../rooms/feedSample.ts')
   const { visibleTo, oneLine, highlighted } = await import('../rooms/look.ts')
   const look = { all: {}, channels: {} }
   assert.ok(samplePosts.every(visibleTo(look, 'preview:general')))
@@ -110,7 +110,7 @@ test('the Feed section previews the real feed with sample posts under the curren
 })
 
 test('with Finished turns Hidden, the preview drops worker results and keeps root results and failures', async () => {
-  const { samplePosts, sampleRoom } = await import('../rooms/feedSample.js')
+  const { samplePosts, sampleRoom } = await import('../rooms/feedSample.ts')
   const { visibleTo, scopeOf, withChoice } = await import('../rooms/look.ts')
   const look = withChoice({ all: {}, channels: {} }, null, 'finished', 'hidden')
   const shown: Partial<Post>[] = samplePosts.filter(visibleTo(look, scopeOf(sampleRoom.id, 'general')))

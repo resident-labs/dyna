@@ -1,11 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { itemCountLabel } from './goals.js'
+import { itemCountLabel } from './goals.ts'
 
 // Goals no longer carry keeper fields, so no goal view may read them.
 test('goal views never read keeper fields', () => {
-  for (const file of ['./GoalDetail.svelte', './Goals.svelte', './GoalGlyph.svelte', './goals.js', '../settings/ProfileModal.svelte']) {
+  for (const file of ['./GoalDetail.svelte', './Goals.svelte', './GoalGlyph.svelte', './goals.ts', '../settings/ProfileModal.svelte']) {
     const source = readFileSync(new URL(file, import.meta.url), 'utf8')
     assert.doesNotMatch(source, /\bg(oal)?\.keeper\b|\bg(oal)?\?\.keeper\b/, file)
   }
