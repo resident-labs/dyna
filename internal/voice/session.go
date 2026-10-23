@@ -152,7 +152,7 @@ func runCall(ctx context.Context, link *RoomLink, p realtime.Provider) (*session
 	call.ResumeCursor = link.replayCursor
 	call.CursorFor = link.cursorFor
 	if link.resumeStarted.IsZero() {
-		call.Greeting = "[BACKEND] The call has started. Greet the owner briefly once. If a request or question is pending, include its key point."
+		call.Greeting = "[BACKEND] The call has started. Greet the owner briefly once. If a request or question is pending, mention it in one short sentence."
 	} else {
 		started = link.resumeStarted
 	}
@@ -182,7 +182,7 @@ func runCall(ctx context.Context, link *RoomLink, p realtime.Provider) (*session
 func tellPrompt(text string, shared []room.Attachment) string {
 	var parts []string
 	if strings.TrimSpace(text) != "" || len(shared) == 0 {
-		parts = append(parts, "[BACKEND] "+text)
+		parts = append(parts, "[BACKEND] "+plainSpeech(text))
 	}
 	if len(shared) > 0 {
 		names := make([]string, len(shared))
