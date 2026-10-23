@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import { parse } from "svelte/compiler";
 import ts from "typescript";
 
-export type Rule = "no-explicit-any" | "no-double-cast" | "no-ts-suppression" | "no-non-null-assertion" | "no-javascript-file";
+export type Rule = "no-explicit-any" | "no-double-cast" | "no-ts-suppression" | "no-non-null-assertion" | "no-javascript-file" | "no-javascript-script";
 
 export interface Violation {
   file: string;
@@ -26,8 +26,6 @@ const SVELTE_NODE_TYPE = /^(Svelte|Title)|(Block|Tag|Directive|Element)$|^(Fragm
 const SKIPPED_DIRS = new Set(["node_modules", "dist", ".git"]);
 const TS_EXTENSIONS = new Set([".ts", ".mts", ".cts", ".tsx"]);
 const JAVASCRIPT_EXTENSIONS = new Set([".js", ".mjs", ".cjs"]);
-const SCRIPT_TAG = /<script\b(?<attributes>(?:"[^"]*"|'[^']*'|[^>"'])*)>/gi;
-const LANG_TS = /\blang\s*=\s*["']?ts["']?(?=[\s"'>]|$)/i;
 const SUPPRESSION = /^[\s/*]*@ts-(ignore|expect-error|nocheck)\b/m;
 
 function isJSDocKind(kind: ts.SyntaxKind): boolean {
@@ -110,19 +108,28 @@ function collectTemplateSlices(node: unknown, found: { start: number; end: numbe
 }
 
 /**
- * Checks a Svelte file that has a `<script lang="ts">` block: the script bodies and every
- * template expression. Plain JavaScript components are skipped. Positions refer to the whole file.
+ * Requires TypeScript on every Svelte script block, then checks TypeScript bodies and
+ * template expressions. Positions refer to the whole file.
  */
 export function checkSvelte(text: string, fileName: string): Violation[] {
   const violations: Violation[] = [];
   const inFile = (v: Violation): Violation => ({ ...v, file: fileName });
-  if (![...text.matchAll(SCRIPT_TAG)].some((tag) => LANG_TS.test(tag.groups?.attributes ?? ""))) return violations;
   const root = parse(text, { modern: true });
   let hasTypeScript = false;
   for (const script of [root.instance, root.module]) {
     if (!script) continue;
     const language = script.attributes.find((attribute) => attribute.name === "lang");
-    if (!language || !Array.isArray(language.value) || !language.value.some((part) => part.type === "Text" && part.data === "ts")) continue;
+    if (!language || !Array.isArray(language.value) || !language.value.some((part) => part.type === "Text" && part.data === "ts")) {
+      const prefix = text.slice(0, script.start);
+      violations.push({
+        file: fileName,
+        line: prefix.split("\n").length,
+        column: script.start - prefix.lastIndexOf("\n"),
+        rule: "no-javascript-script",
+        message: 'JavaScript script block; add lang="ts" and use TypeScript',
+      });
+      continue;
+    }
     hasTypeScript = true;
     const content = script.content;
     if (!("start" in content) || typeof content.start !== "number" || !("end" in content) || typeof content.end !== "number") {
@@ -141,7 +148,7 @@ export function checkSvelte(text: string, fileName: string): Violation[] {
       }
     }
   }
-  if (!hasTypeScript) return violations;
+  if (!hasTypeScript) return violations.sort((a, b) => a.line - b.line || a.column - b.column);
 
   const slices: { start: number; end: number; type: string }[] = [];
   collectTemplateSlices(root.fragment, slices);

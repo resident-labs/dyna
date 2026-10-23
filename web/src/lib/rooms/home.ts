@@ -12,8 +12,8 @@ export interface AccountAlert {
   action: string
 }
 
-export interface HomeAccounts {
-  cards: UsageGroup<AccountLike>[]
+export interface HomeAccounts<A extends AccountLike = AccountLike> {
+  cards: UsageGroup<A>[]
   alerts: AccountAlert[]
 }
 
@@ -23,8 +23,8 @@ const planId = (account: AccountLike) => (typeof account.plan === 'object' ? acc
 // accountRows splits the active accounts: one that works and reports usage
 // is a usage card, one that needs a login or is quota-blocked is an alert row.
 // Known subscriptions also show their period when no percentage is reported.
-export function accountRows(snapshot?: { accounts?: AccountLike[] | null } | null): HomeAccounts {
-  const cards: AccountLike[] = []
+export function accountRows<A extends AccountLike>(snapshot?: { accounts?: A[] | null } | null): HomeAccounts<A> {
+  const cards: A[] = []
   const alerts: AccountAlert[] = []
   for (const a of snapshot?.accounts ?? []) {
     if (!a.active) continue

@@ -1,13 +1,14 @@
-<script>
+<script lang="ts">
   import Card from '../ui/Card.svelte'
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
   import Avatar from '../ui/Avatar.svelte'
-  import { loadView } from './systemLoad.ts'
+  import { loadView, type LoadTopRow } from './systemLoad.ts'
+  import type { SystemLoad } from '../api/system.ts'
   // load: one SystemLoad answer. onagent opens a top row's session.
   // title names the card. rows=false leaves the busy sessions out, for a page
   // that lists the sessions that run there itself.
-  let { load, onagent = undefined, title = 'This computer', rows = true } = $props()
+  let { load, onagent = undefined, title = 'This computer', rows = true }: { load: SystemLoad; onagent?: (agent: LoadTopRow) => void; title?: string; rows?: boolean } = $props()
   let v = $derived(loadView(load))
 </script>
 

@@ -1,4 +1,7 @@
-<script>
+<script lang="ts">
+  import type { Member } from '../api/room.ts'
+  import type { ComputerInfo } from '../api/computer.ts'
+  import type { RoomControlValue } from './roomSessionControls.ts'
   import { flip } from 'svelte/animate'
   import { fade } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
@@ -17,11 +20,47 @@
   import { isLive, hasComputer, appName, ageText } from '../computers/computers.ts'
   import { finishedTrees, foldMembers, isFinished, openTrail, orderMemberSessions } from './memberOrder.ts'
 
-  let { members = [], focus = '', scope = '', selected = '', fresh = '', closed = false, computers = [], onopencomputer = () => {}, onselect, onclosed, onmenu, selecting = false, picked = [], onselection = () => {}, onpick = () => {}, onactions = () => {}, roomControls = null, onroomactions = () => {}, onresumeroom = () => {}, onreloadcontrols = () => {}, oncleardormant = null, ondismiss = null, dismissing = '', ontakeseat = null } = $props()
+  // sessionRow draws one folded row. The root row has no fold state, so the
+  // fold fields stay optional for it.
+  interface SessionRow {
+    member: Member
+    hasChildren?: boolean
+    folded?: boolean
+    hidden?: number
+  }
+
+  interface Props {
+    members?: Member[]
+    focus?: string
+    scope?: string
+    selected?: string
+    fresh?: string
+    closed?: boolean
+    computers?: ComputerInfo[]
+    onopencomputer?: (member: Member) => void
+    onselect: (member: Member | { rootSeat: true }) => void
+    onclosed: () => void
+    onmenu: (member: Member, x: number, y: number, anchor?: HTMLElement) => void
+    selecting?: boolean
+    picked?: string[]
+    onselection?: () => void
+    onpick?: (member: Member, checked: boolean, begin: boolean) => void
+    onactions?: (x: number, y: number, anchor?: HTMLElement) => void
+    roomControls?: RoomControlValue | null
+    onroomactions?: (x: number, y: number, anchor?: HTMLElement) => void
+    onresumeroom?: () => void
+    onreloadcontrols?: () => void
+    oncleardormant?: ((count: number) => void) | null
+    ondismiss?: ((member: Member) => void) | null
+    dismissing?: string
+    ontakeseat?: (() => void) | null
+  }
+
+  let { members = [], focus = '', scope = '', selected = '', fresh = '', closed = false, computers = [], onopencomputer = () => {}, onselect, onclosed, onmenu, selecting = false, picked = [], onselection = () => {}, onpick = () => {}, onactions = () => {}, roomControls = null, onroomactions = () => {}, onresumeroom = () => {}, onreloadcontrols = () => {}, oncleardormant = null, ondismiss = null, dismissing = '', ontakeseat = null }: Props = $props()
 
   // The session menu opens by right click, the Menu key or Shift+F10 on a
   // focused row, or the ⋯ button. Keyboard opens anchor it under the row.
-  function menuKey(e, m) {
+  function menuKey(e: KeyboardEvent & { currentTarget: HTMLButtonElement }, m: Member) {
     if (e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) {
       e.preventDefault()
       const r = e.currentTarget.getBoundingClientRect()
@@ -29,15 +68,15 @@
     }
   }
 
-  function rowClick(e, m) {
-    if (e.target.closest('button, a, input, summary') !== e.currentTarget) return
+  function rowClick(e: MouseEvent & { currentTarget: HTMLButtonElement }, m: Member) {
+    if (!e.target || !('closest' in e.target) || typeof e.target.closest !== 'function' || e.target.closest('button, a, input, summary') !== e.currentTarget) return
     if (selecting || e.ctrlKey || e.metaKey) {
       e.preventDefault()
       if (!selectableSession(m)) return
-      onpick(m, !pickedSet.has(m.id), !selecting)
+      onpick(m, !pickedSet.has(m.id ?? ''), !selecting)
     } else onselect(m)
   }
-  function selectionKeydown(e) {
+  function selectionKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape' && selecting && !e.defaultPrevented) {
       e.preventDefault(); e.stopPropagation(); onselection()
     }
@@ -50,11 +89,11 @@
     const t = setInterval(() => (now = Date.now()), members.some((m) => m.doing?.since) ? 1000 : 60 * 1000)
     return () => clearInterval(t)
   })
-  const finished = (m) => isFinished(m)
+  const finished = (m: Member) => isFinished(m)
 
-  const computerOf = (id) => computers.find((c) => c.session === id)
+  const computerOf = (id: string | undefined) => computers.find((c) => c.session === id)
   // The small hover note on the monitor glyph: the app and the picture age.
-  const computerTip = (c) => [appName(c.apps?.[0]?.appId) || (isLive(c) ? 'Computer' : 'Computer stopped'), c.shotAt && ageText(c.shotAt, now)].filter(Boolean).join(' · ')
+  const computerTip = (c: ComputerInfo | undefined) => [appName(c?.apps?.[0]?.appId) || (isLive(c) ? 'Computer' : 'Computer stopped'), c?.shotAt && ageText(c.shotAt, now)].filter(Boolean).join(' · ')
   let pickedSet = $derived(new Set(picked))
   let owner = $derived(members.find((m) => m.owner))
   // The open internal root sits with the owner, not in Services: it holds the
@@ -72,9 +111,9 @@
   // channel's lead and its ancestors open by default, and so does the path to
   // a session just started. A click on a chevron overrides the default for
   // this room and view only.
-  let overrides = $state({})
+  let overrides = $state<Record<string, Record<string, boolean>>>({})
   let trail = $derived(new Set([...openTrail([...sessions, ...services], focus), ...openTrail([...sessions, ...services], members.find((m) => m.id === fresh)?.parent)]))
-  const isOpen = (id) => selecting || (overrides[scope]?.[id] ?? trail.has(id))
+  const isOpen = (id: string | undefined) => selecting || ((id === undefined ? undefined : overrides[scope]?.[id]) ?? trail.has(id))
   let rows = $derived(foldMembers(sessions, isOpen))
   let serviceRows = $derived(foldMembers(services, isOpen))
   // Trees with no open session except finished ones fold into a Finished group.
@@ -85,16 +124,17 @@
   let finishedCount = $derived([...sessions, ...services].filter(isFinished).length)
   // Services stay folded to one line. Only a failed service needs attention.
   let failedServices = $derived(services.filter((m) => m.state === 'error').length)
-  let servicesChoice = $state(null)
+  let servicesChoice = $state<boolean | null>(null)
   let servicesOpen = $derived(selecting || (servicesChoice ?? serviceRows.some((row) => trail.has(row.member.id) || row.member.address === selected)))
-  let finishedChoice = $state(null)
+  let finishedChoice = $state<boolean | null>(null)
   let finishedOpen = $derived(selecting || (finishedChoice ?? finishedRows.some((row) => trail.has(row.member.id) || row.member.address === selected)))
-  function toggleFold(id) {
+  function toggleFold(id: string | undefined) {
+    if (id === undefined) return
     overrides = { ...overrides, [scope]: { ...overrides[scope], [id]: !isOpen(id) } }
   }
 </script>
 
-{#snippet sessionRow(row)}
+{#snippet sessionRow(row: SessionRow)}
   {@const m = row.member}
   {@const pc = computerOf(m.id)}
   {@const offSeat = external && m.id === rootSession?.id}
@@ -105,7 +145,7 @@
       <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="m6 4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
     </button>
   {/if}
-  <button class="row" class:sel={selecting ? pickedSet.has(m.id) : selected === m.address} class:closed={m.closed} class:finished={finished(m)} class:off={offSeat} class:fresh={fresh === m.id} class:pc={hasComputer(pc)} onclick={(e) => rowClick(e, m)} aria-pressed={selecting ? pickedSet.has(m.id) : undefined} aria-disabled={selecting && !selectableSession(m) ? true : undefined} title="{m.name} · {m.profile} · {sessionStatus(m, true)} · active {ago(m.lastActivity)}" oncontextmenu={(e) => { e.preventDefault(); onmenu(m, e.clientX, e.clientY, e.currentTarget) }} onkeydown={(e) => menuKey(e, m)}>
+  <button class="row" class:sel={selecting ? pickedSet.has(m.id ?? '') : selected === m.address} class:closed={m.closed} class:finished={finished(m)} class:off={offSeat} class:fresh={fresh === m.id} class:pc={hasComputer(pc)} onclick={(e) => rowClick(e, m)} aria-pressed={selecting ? pickedSet.has(m.id ?? '') : undefined} aria-disabled={selecting && !selectableSession(m) ? true : undefined} title="{m.name} · {m.profile} · {sessionStatus(m, true)} · active {ago(m.lastActivity)}" oncontextmenu={(e) => { e.preventDefault(); onmenu(m, e.clientX, e.clientY, e.currentTarget) }} onkeydown={(e) => menuKey(e, m)}>
     {#if m.depth > 0}
       <span class="guide" aria-hidden="true"></span>
     {/if}
@@ -122,7 +162,7 @@
         </div>
       {/if}
   {#if hasComputer(pc)}<button class="pc-glyph" aria-label="Open {m.name}'s computer" title={computerTip(pc)} onclick={() => onopencomputer(m)}><MonitorGlyph size={15} live={isLive(pc)} /></button>{/if}
-  <button class="more" aria-label="Actions for {m.name}" title="Actions" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); onmenu(m, r.left, r.bottom + 4, e.currentTarget.previousElementSibling) }}>
+  <button class="more" aria-label="Actions for {m.name}" title="Actions" onclick={(e) => { const r = e.currentTarget.getBoundingClientRect(); const anchor = e.currentTarget.previousElementSibling; onmenu(m, r.left, r.bottom + 4, anchor instanceof HTMLElement ? anchor : undefined) }}>
     <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="5" cy="10" r="1.6" fill="currentColor" /><circle cx="10" cy="10" r="1.6" fill="currentColor" /><circle cx="15" cy="10" r="1.6" fill="currentColor" /></svg>
   </button>
   </div>
@@ -142,7 +182,7 @@
       </div>
       {#if external}
         <button type="button" class="row" class:sel={selected === owner.address + ':root'} onclick={() => onselect({ rootSeat: true })} aria-label="Open root conversation">
-          <Avatar name="root" image={harnessIcons[seat.harness]} emoji="🖥️" hue={owner.hue} size={32} ring="var(--side)" />
+          <Avatar name="root" image={harnessIcons[seat.harness ?? '']} emoji="🖥️" hue={owner.hue} size={32} ring="var(--side)" />
           <span class="text">
             <span class="name hue-{owner.hue}">{seat.harness ? 'root' : 'root (external)'}</span>
             <span class="sub" title={stamp(seat.since)}>{seat.harness || 'external'} · since {clock(seat.since)}</span>

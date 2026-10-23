@@ -1,4 +1,10 @@
-<script>
+<script lang="ts">
+  import type { Member, Room } from '../api/room.ts'
+  import type { ComputerInfo } from '../api/computer.ts'
+  import type { MachineSummary } from '../api/machine.ts'
+  import type { RunList } from '../api/workflow.ts'
+  import type { RouteNotice } from '../settings/link.ts'
+  import type { Facts } from '../prs/pr.ts'
   import { flip } from 'svelte/animate'
   import { fade } from 'svelte/transition'
   import { cubicOut } from 'svelte/easing'
@@ -24,12 +30,37 @@
   // machines: the registered machines, or null until they first load.
   // machinesOpen: the rail's machines tile is open, so the sidebar lists the
   // machines of this engine instead of one room's views.
-  let { machines = null, machinesOpen = false, machineId = '', onmachine = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, channelUnread = {}, questions = 0, live = [], runs = null, dataDir = '', ownerHue = 0, update = false, prs = {}, computers = null, onroommenu = null, onview, onmember, onsettings = null, onlogout = null } = $props()
+  interface Props {
+    machines?: MachineSummary[] | null
+    machinesOpen?: boolean
+    machineId?: string
+    onmachine?: ((id: string) => void) | null
+    selected?: string
+    onroom?: ((id: string) => void) | null
+    route?: RouteNotice | null
+    room?: Room | null
+    view?: string
+    channelUnread?: Record<string, number>
+    questions?: number
+    live?: Member[]
+    runs?: RunList | null
+    dataDir?: string
+    ownerHue?: number
+    update?: boolean
+    prs?: Record<string, Facts[]>
+    computers?: ComputerInfo[] | null
+    onroommenu?: ((x: number, y: number, anchor?: HTMLElement) => void) | null
+    onview: (view: string) => void
+    onmember: (member: Member) => void
+    onsettings?: (() => void) | null
+    onlogout?: (() => void) | null
+  }
+  let { machines = null, machinesOpen = false, machineId = '', onmachine = null, selected = '', onroom = null, route = null, room = null, view = GENERAL, channelUnread = {}, questions = 0, live = [], runs = null, dataDir = '', ownerHue = 0, update = false, prs = {}, computers = null, onroommenu = null, onview, onmember, onsettings = null, onlogout = null }: Props = $props()
   // Gold marks only what needs the owner or runs now; no totals.
   let liveComputers = $derived(new Set((computers ?? []).filter(isLive).map((c) => c.session)).size)
   let running = $derived(runningWork(runs))
   let open = $derived(rowOf(view)?.id)
-  const icons = {
+  const icons: Record<string, string> = {
     messages: 'M4 4.5h12a1.5 1.5 0 0 1 1.5 1.5v7a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3H4A1.5 1.5 0 0 1 2.5 13V6A1.5 1.5 0 0 1 4 4.5Z',
     questions: 'M10 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14ZM7.9 8.1a2.1 2.1 0 1 1 3 1.9c-.6.3-.9.7-.9 1.3v.4M10 13.9v.1',
     runs: 'M10 3a7 7 0 1 1 0 14 7 7 0 0 1 0-14ZM8.5 7.2v5.6l4.3-2.8Z',
@@ -42,12 +73,13 @@
   }
 </script>
 
-{#snippet person(m, sel, onclick)}
+{#snippet person(m: Member, sel: boolean, onclick: () => void)}
+  {@const pr = prs[m.id ?? '']?.[0]}
   <button class="chan person" class:sel style="--depth: 0" {onclick}>
     <Avatar emoji={m.emoji} name={m.name} hue={m.hue} size={22} state={m.state} ring="var(--side)" />
     <span class="label hue-{m.hue}">{m.name}</span>
     {#if agentExpedited($expedite, m)}<ExpediteBadge short />{/if}
-    {#if prs[m.id]?.length}<PRChip pr={prs[m.id][0]} short />{:else}<span class="turn">{m.state === 'live' ? `turn ${m.turns}` : m.state === 'error' ? sessionStatus(m) : ago(m.lastActivity)}</span>{/if}
+    {#if pr}<PRChip {pr} short />{:else}<span class="turn">{m.state === 'live' ? `turn ${m.turns}` : m.state === 'error' ? sessionStatus(m) : ago(m.lastActivity)}</span>{/if}
   </button>
 {/snippet}
 
@@ -79,7 +111,7 @@
       {#if room.repo}<p class="repo mono" title={room.repo}><bdi>{room.repo}</bdi></p>{/if}
     </header>
     <div class="scroll">
-      <button class="chan" class:sel={view === GENERAL || view.startsWith('channel:')} class:unread={channelUnread[GENERAL] > 0} title="Room messages" onclick={() => onview(GENERAL)}>
+      <button class="chan" class:sel={view === GENERAL || view.startsWith('channel:')} class:unread={(channelUnread[GENERAL] ?? 0) > 0} title="Room messages" onclick={() => onview(GENERAL)}>
         <svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons.messages} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><span class="label">Messages</span>{#if channelUnread[GENERAL]}<span class="count">{channelUnread[GENERAL]}</span>{/if}
       </button>
       {#each sections as section (section.label)}
@@ -87,7 +119,7 @@
         {#if rows.length}
           <h2>{section.label}</h2>
           {#each rows as r (r.id)}
-            <button class="chan" class:sel={open === r.id} title={r.hint} onclick={() => onview(r.tabs[0].id)}>
+            <button class="chan" class:sel={open === r.id} title={r.hint} onclick={() => { const tab = r.tabs[0]; if (tab) onview(tab.id) }}>
               {#if r.id === 'goals'}<span class="wglyph"><GoalGlyph neutral /></span>{:else}<svg class="wglyph" viewBox="0 0 20 20" width="17" height="17" aria-hidden="true"><path d={icons[r.id]} fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" /></svg>
               {/if}<span class="label">{r.label}</span>
               {#if r.id === 'questions' && questions}<span class="count live" title="{questions} waiting for you">{questions}</span>{/if}
