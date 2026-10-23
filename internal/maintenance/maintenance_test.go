@@ -19,7 +19,9 @@ import (
 	"time"
 )
 
-func TestSchedulerHourlyAndPressureEpisodes(t *testing.T) {
+// The built-in maintenance hook owns the routine hourly pass, so this loop runs
+// only while disk pressure holds.
+func TestSchedulerRunsOnlyUnderPressure(t *testing.T) {
 	var s scheduler
 	now := time.Unix(1000, 0)
 	runs, alerts := 0, 0
@@ -44,13 +46,13 @@ func TestSchedulerHourlyAndPressureEpisodes(t *testing.T) {
 		low          []lowDisk
 		runs, alerts int
 	}{
-		{0, nil, 1, 0},
-		{time.Minute, nil, 1, 0},
-		{2 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 2, 1},
-		{3 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 2, 1},
-		{62 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 3, 1},
-		{63 * time.Minute, nil, 3, 1},
-		{64 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 4, 2},
+		{0, nil, 0, 0},
+		{time.Minute, nil, 0, 0},
+		{2 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 1, 1},
+		{3 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 1, 1},
+		{62 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 2, 1},
+		{63 * time.Minute, nil, 2, 1},
+		{64 * time.Minute, []lowDisk{{Path: "/tmp", FreeBytes: 1024}}, 3, 2},
 	} {
 		if err := s.tick(context.Background(), now.Add(tick.after), tick.low, run, alert); err != nil {
 			t.Fatal(err)
@@ -285,5 +287,21 @@ func TestMergeCleanupSkipsFolderSweeps(t *testing.T) {
 	scheduled, _ := Run(context.Background(), Options{Repos: []string{}})
 	if _, ok := scheduled.Pruned["scratch"]; !ok {
 		t.Fatalf("the scheduled pass did not sweep scratch: %v", scheduled.Pruned)
+	}
+}
+
+// Two maintenance passes never overlap: a pass waits for the running one, and
+// a pass whose context ends while it waits does not start.
+func TestAPassWaitsForTheRunningOne(t *testing.T) {
+	storetest.Isolate(t)
+	pass <- struct{}{}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := Run(ctx, Options{Repos: []string{}}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("a waiting pass ignored its ended context: %v", err)
+	}
+	<-pass
+	if _, err := Run(t.Context(), Options{Repos: []string{}}); err != nil {
+		t.Fatal(err)
 	}
 }

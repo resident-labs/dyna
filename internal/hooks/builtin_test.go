@@ -196,6 +196,71 @@ func TestGlobalUserHookNeedsAbsoluteCwd(t *testing.T) {
 	}
 }
 
+// A built-in's interval is the owner's to set, and a minute is its floor, so a
+// zero or negative interval is refused.
+func TestBuiltinIntervalCannotGoBelowOneMinute(t *testing.T) {
+	s, _ := setup(t)
+	var seen []Builtin
+	s.Builtins = []BuiltinSpec{autoCheck(&seen)}
+	if err := s.Seed(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	for _, minutes := range []int{0, -5} {
+		if err := s.Edit(t.Context(), "", "auto-check", "owner", Patch{EveryMinutes: &minutes}); err == nil || !strings.Contains(err.Error(), "positive every-minutes") {
+			t.Fatalf("everyMinutes=%d = %v", minutes, err)
+		}
+	}
+	hooks, err := s.ListGlobal(t.Context())
+	if err != nil || len(hooks) != 1 || hooks[0].EveryMinutes != 15 {
+		t.Fatalf("row after a refused edit = %+v, %v", hooks, err)
+	}
+}
+
+// A global hook the owner added earlier with a built-in's name keeps running
+// under a free name, so seeding never stores one name twice.
+func TestSeedRenamesAnOwnerHookThatHoldsABuiltinName(t *testing.T) {
+	s, repo := setup(t)
+	var seen []Builtin
+	s.Builtins = []BuiltinSpec{autoCheck(&seen)}
+	ctx := t.Context()
+	owned := hook("auto-check", Schedule).withEvery(15)
+	owned.Cwd = t.TempDir()
+	owned.Scope = ScopeGlobal
+	owned.AddedBy, owned.AddedAt = "owner", time.Now().UTC()
+	// An earlier release stored this row before the name was reserved.
+	if err := s.update(ctx, globalKey, func(d *document) error {
+		d.Hooks = append(d.Hooks, owned)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Seed(ctx); err != nil {
+		t.Fatal(err)
+	}
+	hooks, err := s.ListGlobal(ctx)
+	if err != nil || len(hooks) != 2 {
+		t.Fatalf("rows after seed = %+v, %v", hooks, err)
+	}
+	byName := map[string]Hook{}
+	for _, h := range hooks {
+		byName[h.Name] = h
+	}
+	if byName["auto-check"].Builtin != "auto-check" {
+		t.Fatalf("the built-in lost its name: %+v", byName["auto-check"])
+	}
+	if byName["auto-check-user"].Builtin != "" {
+		t.Fatalf("the owner's hook was not renamed: %+v", byName)
+	}
+	// The reserved name is refused for a new global hook, and allowed for a
+	// repository hook, which belongs to another scope.
+	fresh := hook("auto-check", Schedule).withEvery(15)
+	fresh.Cwd = t.TempDir()
+	if err := s.AddGlobal(ctx, fresh); err == nil || !strings.Contains(err.Error(), "reserved") {
+		t.Fatalf("reserved global name = %v", err)
+	}
+	add(t, s, repo, hook("auto-check", AfterLand))
+}
+
 // withEvery sets the interval of a schedule hook under test.
 func (h Hook) withEvery(minutes int) Hook {
 	h.Event, h.EveryMinutes = Schedule, minutes
