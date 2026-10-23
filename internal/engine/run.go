@@ -306,8 +306,9 @@ var errRetryMigration = errors.New("retry engine migration")
 
 // Run owns the engine services until ctx is cancelled.
 func Run(ctx context.Context, f Options) error {
+	noUpdate := os.Getenv("DYNA_NO_AUTO_UPDATE") == "1"
 	for {
-		err := run(ctx, f)
+		err := run(ctx, f, noUpdate)
 		if !errors.Is(err, errRetryMigration) {
 			return err
 		}
@@ -319,7 +320,7 @@ func Run(ctx context.Context, f Options) error {
 
 // run owns one complete engine lifetime. Recovery drains its read-only server
 // before Run starts the writable handlers and workers with current stores.
-func run(ctx context.Context, f Options) (runErr error) {
+func run(ctx context.Context, f Options, noUpdate bool) (runErr error) {
 	ctx, cancelRun := context.WithCancel(ctx)
 	defer cancelRun()
 	// The engine's environment is the owner's, never a caller's, so a check
@@ -441,7 +442,6 @@ func run(ctx context.Context, f Options) (runErr error) {
 	if err != nil {
 		return err
 	}
-	noUpdate := os.Getenv("DYNA_NO_AUTO_UPDATE") == "1"
 	dropDynaEnv()
 	rooms := roomsvc.New(nil)
 	files := &filesvc.Service{Rooms: rooms.Notify.Rooms, SessionInRoom: rooms.SessionInRoom, AttachmentBytes: rooms.AttachmentBytes}
