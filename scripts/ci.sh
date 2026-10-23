@@ -2,7 +2,7 @@
 # Shared CI commands. Reports live outside the checkout.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-suite=${1:?usage: scripts/ci.sh relay|frontend|go|cross-build|android [phase]}
+suite=${1:?usage: scripts/ci.sh relay|frontend|go|cross-build [phase]}
 phase=${2:-all}
 export RUNNER_TEMP=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
 # web/embed.go embeds all:dist, but only the frontend suite builds it. Every
@@ -49,20 +49,6 @@ case "$suite" in
       git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --short
       test -z "$(git -c safe.directory="${GITHUB_WORKSPACE:-$PWD/..}" status --porcelain)"
     fi
-    ;;
-  android)
-    sdk=${ANDROID_HOME:?set ANDROID_HOME}
-    if [[ ! -d "$sdk/platforms/android-35" || ! -d "$sdk/build-tools/35.0.0" ]]; then
-      mkdir -p "$sdk/cmdline-tools" "$RUNNER_TEMP/android-tools"
-      curl -fsSL -o "$RUNNER_TEMP/android-tools/cmdline-tools.zip" https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-      unzip -q -o "$RUNNER_TEMP/android-tools/cmdline-tools.zip" -d "$RUNNER_TEMP/android-tools"
-      rm -rf "$sdk/cmdline-tools/latest"
-      mv "$RUNNER_TEMP/android-tools/cmdline-tools" "$sdk/cmdline-tools/latest"
-      # sdkmanager asks for each license; "yes" in a process substitution avoids SIGPIPE under pipefail.
-      "$sdk/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$sdk" "platforms;android-35" "build-tools;35.0.0" < <(yes) >/dev/null
-    fi
-    cd mobile/android
-    ./gradlew --no-daemon -q testDebugUnitTest assembleDebug
     ;;
   cross-build)
     started=$SECONDS

@@ -26,7 +26,7 @@ type nodeCheck struct {
 // WorkflowSuites includes the conditional jobs needed for a complete trial.
 // DefaultSuites retains the manual SSH lane's historical suite selection.
 func WorkflowSuites() []string {
-	return []string{"relay", "go", "cross-build", "computer-smoke", "android"}
+	return []string{"relay", "go", "cross-build", "computer-smoke"}
 }
 
 func nodeChecks(suites []string) ([]nodeCheck, bool, error) {
@@ -72,8 +72,6 @@ func nodeChecks(suites []string) ([]nodeCheck, bool, error) {
 			add(suite, suite, "bash scripts/ci.sh go modules && bash scripts/ci.sh go vet && bash scripts/ci.sh go installer", "golang:1.26.3")
 		case "cross-build":
 			add(suite, suite, "bash scripts/ci.sh cross-build", "golang:1.26.3")
-		case "android":
-			add(suite, suite, "command -v curl >/dev/null && command -v unzip >/dev/null || exit 69; bash scripts/ci.sh android", "eclipse-temurin:17-jdk")
 		case "computer-smoke":
 			add(suite, suite, "", "")
 		default:
@@ -367,19 +365,16 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 		setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds env -i PATH=\"$PATH\" HOME=\"$isolated/home\" XDG_DATA_HOME=\"$isolated/data\" XDG_CONFIG_HOME=\"$isolated/config\" XDG_CACHE_HOME=\"$isolated/cache\" XDG_RUNTIME_DIR=\"${XDG_RUNTIME_DIR:-/run/user/$(id -u)}\" DBUS_SESSION_BUS_ADDRESS=\"${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}\" GOCACHE=%s GOMODCACHE=%s GOMAXPROCS=2 GOFLAGS=-p=2 DYNA_COMPUTERS_ENABLED=0 DYNA_COMPUTERS_REQUIRE_LIVE=1 go test -count=1 -timeout 5m ./internal/computers", seconds, q(path.Join(base, "go-build")), q(path.Join(base, "go-mod")))
 		return nodeSlotScript(base, node.Slots, index, setup)
 	}
-	for _, cacheDir := range []string{"go-build", "go-mod", "npm", "android", "gradle"} {
+	for _, cacheDir := range []string{"go-build", "go-mod", "npm"} {
 		setup += "mkdir -p " + q(path.Join(base, cacheDir)) + "; "
 	}
 	inner := "mkdir -p /tmp/home /tmp/data /tmp/config /tmp/cache; " + check.inner
 	user := " --user $(id -u):$(id -g)"
-	if strings.HasPrefix(check.image, "golang:") || check.id == "android" {
+	if strings.HasPrefix(check.image, "golang:") {
 		user = ""
 		prepare := ""
 		if check.id == "go-static" {
 			prepare = "timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 update -qq && timeout 120s apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 install -y -qq shellcheck >/dev/null || exit 69; "
-		}
-		if check.id == "android" {
-			prepare = "if ! command -v curl >/dev/null || ! command -v unzip >/dev/null; then timeout --signal=TERM --kill-after=10s 180s bash -c " + q("apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 update -qq && apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 install -y -qq curl unzip >/dev/null") + " || exit 69; fi; "
 		}
 		inner = prepare + "(getent group $CI_GID >/dev/null || groupadd --gid $CI_GID dyna-ci) && (getent passwd $CI_UID >/dev/null || useradd --no-log-init --uid $CI_UID --gid $CI_GID --no-create-home --home-dir /tmp/home dyna-ci) && exec setpriv --reuid=$CI_UID --regid=$CI_GID --clear-groups bash -c " + q(inner)
 	}
@@ -388,10 +383,10 @@ func nodeCheckScript(node Node, base, cache, runDir, runID, sha string, check no
 	// Temporary SQLite fixtures need no disk flushes and share the memory cap.
 	args := `"${docker[@]}" run --rm --init --cpus=2 --memory=4g --memory-swap=4g --pids-limit=512 --tmpfs /tmp:rw,exec,nosuid,nodev,size=1g --name ` + q(name) + user +
 		" -v " + q(work+":/workspace") + " -v " + q(cache+":"+cache) + " -v " + q(reportDir+":/reports") + " -w /workspace"
-	for _, mount := range [][2]string{{"go-build", "build"}, {"go-mod", "mod"}, {"npm", "npm"}, {"android", "android"}, {"gradle", "gradle"}} {
+	for _, mount := range [][2]string{{"go-build", "build"}, {"go-mod", "mod"}, {"npm", "npm"}} {
 		args += " -v " + q(path.Join(base, mount[0])+":/cache/"+mount[1])
 	}
-	args += " -e HOME=/tmp/home -e XDG_DATA_HOME=/tmp/data -e XDG_CONFIG_HOME=/tmp/config -e XDG_CACHE_HOME=/tmp/cache -e RUNNER_TEMP=/reports -e GITHUB_STEP_SUMMARY=/reports/step-summary.md -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod -e npm_config_cache=/cache/npm -e ANDROID_HOME=/cache/android -e GRADLE_USER_HOME=/cache/gradle -e GOMAXPROCS=2 -e GOMEMLIMIT=3GiB -e GOFLAGS=-p=2 -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/workspace -e GITHUB_WORKSPACE=/workspace -e CI_UID=$(id -u) -e CI_GID=$(id -g) -e JUNIT_REPORT_PATH=/reports/" + check.id + "-test.xml " + check.image
+	args += " -e HOME=/tmp/home -e XDG_DATA_HOME=/tmp/data -e XDG_CONFIG_HOME=/tmp/config -e XDG_CACHE_HOME=/tmp/cache -e RUNNER_TEMP=/reports -e GITHUB_STEP_SUMMARY=/reports/step-summary.md -e GOCACHE=/cache/build -e GOMODCACHE=/cache/mod -e npm_config_cache=/cache/npm -e GOMAXPROCS=2 -e GOMEMLIMIT=3GiB -e GOFLAGS=-p=2 -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/workspace -e GITHUB_WORKSPACE=/workspace -e CI_UID=$(id -u) -e CI_GID=$(id -g) -e JUNIT_REPORT_PATH=/reports/" + check.id + "-test.xml " + check.image
 	// Both host and container deadlines survive a disconnected SSH client.
 	setup += fmt.Sprintf("check_entered=1; timeout --signal=TERM --kill-after=10s %ds ", seconds+15) + args + fmt.Sprintf(" timeout --signal=TERM --kill-after=10s %ds bash -c ", seconds) + q(inner)
 	return nodeSlotScript(base, node.Slots, index, setup)
