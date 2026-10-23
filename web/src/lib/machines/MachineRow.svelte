@@ -51,6 +51,7 @@
   .row.quiet .name { color: var(--muted); font-weight: 500; }
   .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; background: var(--faint); }
   .dot.online { background: var(--sage); }
+  .dot.degraded { background: var(--gold); }
   .dot.disabled { background: var(--faint); }
   .dot.offline { background: var(--coral); }
   /* Not probed yet: a ring, so it reads as unknown rather than quiet. */

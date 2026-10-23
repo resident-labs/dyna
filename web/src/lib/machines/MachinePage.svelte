@@ -17,7 +17,7 @@
   import type { SystemLoad } from '../api/system.ts'
   import type { MachineAgent, MachineDetail, MachinePatch, MachineRole } from '../api/machine.ts'
   import { ago } from '../ui/format.ts'
-  import { ciRunDetail, ciRunText, computersText, count, loadText, memoryPct, roleLabel, routeText, runtimeText, statusText, systemText, versionText } from './machines.ts'
+  import { ciRunDetail, ciRunText, computersText, count, loadText, memoryPct, reasonText, roleLabel, routeText, runtimeText, sizeText, statusText, systemText, versionText } from './machines.ts'
 
   let { machine, error = '', busy = false, probing = false, onback, onagent, onsave, onprobe = () => {} }: {
     machine: MachineDetail | null
@@ -91,6 +91,10 @@
           <Row dense text="Last probe">
             {#snippet trail()}<span class="value warn">Did not reach the machine. Check the SSH route, then probe again.</span>{/snippet}
           </Row>
+        {:else if machine.status === 'degraded'}
+          <Row dense text="Needs attention">
+            {#snippet trail()}<span class="value gold">{reasonText(machine.statusReason)}</span>{/snippet}
+          </Row>
         {/if}
         {#if machine.seenAt}
           <Row dense text="Last seen">
@@ -110,6 +114,12 @@
           <Row dense text="Computers">
             {#snippet trail()}<span class="value">{computersText(caps)}</span>{/snippet}
           </Row>
+          {#if caps.freeDisk !== undefined}
+            {@const free = caps.freeDisk}
+            <Row dense text="Disk">
+              {#snippet trail()}<span class="value">{sizeText(free)} free</span>{/snippet}
+            </Row>
+          {/if}
         {/if}
         {#if machine.dynaVersion}
           {@const version = machine.dynaVersion}
@@ -252,6 +262,7 @@
   .back:active { background: var(--select); }
   .status { margin-left: auto; flex: none; font-size: var(--t-sm); color: var(--faint); }
   .status.online { color: var(--sage); }
+  .status.degraded { color: var(--gold); }
   .status.offline { color: var(--coral); }
   .status.disabled { color: var(--muted); }
   .body { padding: var(--s2) var(--s4) var(--s4); display: grid; gap: var(--s3); align-content: start; max-width: 900px; }
@@ -262,6 +273,7 @@
   .open { color: var(--iris); text-decoration: none; }
   @media (hover: hover) { .open:hover { text-decoration: underline; } }
   .warn { color: var(--coral); }
+  .gold { color: var(--gold); }
   .mono { font-family: var(--mono); font-size: var(--t-sm); }
   .mem { display: inline-flex; align-items: center; gap: var(--s2); }
   .bar { display: block; width: 72px; height: 4px; border-radius: 2px; overflow: hidden; background: var(--raise); }

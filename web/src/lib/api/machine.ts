@@ -9,8 +9,13 @@ export type MachineRole = 'engine' | 'agents' | 'ci'
 
 // MachineStatus is what the engine knows about a machine right now.
 // "disabled" means switched off in the registry, "offline" means the probe
-// could not reach it, and "unknown" means the engine has not probed it yet.
-export type MachineStatus = 'online' | 'disabled' | 'offline' | 'unknown'
+// could not reach it, "degraded" means it answered but needs attention, such
+// as low free disk space, and "unknown" means no probe has run yet.
+export type MachineStatus = 'online' | 'degraded' | 'disabled' | 'offline' | 'unknown'
+
+// MachineStatusReason names why a machine is degraded. The page words it, so a
+// probe message never reaches the screen.
+export type MachineStatusReason = 'low-disk'
 
 // MachineCISlots is the CI work this machine runs now, out of its slots.
 export interface MachineCISlots {
@@ -85,6 +90,8 @@ export interface MachineDetail extends MachineSummary {
   seenAt?: string
   capabilities?: MachineCapabilities
   load?: MachineLoad
+  // statusReason names why a degraded machine needs attention.
+  statusReason?: MachineStatusReason
 }
 
 // MachineCapabilities is what the last probe read about a machine. Memory
@@ -103,6 +110,9 @@ export interface MachineCapabilities {
   // and Xwayland. stream is whether wayvnc can show its desktop in the app.
   computers: boolean
   stream: boolean
+  // freeDisk is the free space on the machine's disk in bytes. It is absent
+  // when the probe could not read it.
+  freeDisk?: number
 }
 
 // MachineLoad is the last load reading of a machine. cpuPercent is absent when
