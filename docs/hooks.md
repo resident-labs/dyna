@@ -67,18 +67,18 @@ dyna git hooks add --recipe self-update --repo /home/user/dyna-agent
 
 Dyna does not add this hook automatically. The existing timer remains active.
 The hook uses `main-updated`, which fires after origin/main gets new commits,
-regardless of who merged them. `main-moved` remains an accepted alias in stored
-hook documents and CLI input. New documents use `main-updated`.
+regardless of who merged them. Stored `main-moved` events are migrated to
+`main-updated`; CLI input accepts only `main-updated`.
 
 The recipe starts a detached user service named `dyna-install-<sha>`. Its work
 continues when it restarts `dyna-engine`. The unit gets a shared heavy check slot
-and waits for `/tmp/dyna-agent-install.lock`, the same lock as the timer.
+and waits for `hooks/install/install.lock` in Dyna's data directory.
 After taking the lock, it fetches and re-reads origin/main. A queued older unit
 therefore cannot install an older commit after a newer unit finishes.
 
 The worker fast-forwards the main checkout only when it is on main and has no
 tracked edits. A different branch, tracked edits, or local commits cause one
-owner notice per cause. It shares the timer's `dyna-sync/alerted` marker.
+owner notice per cause. It stores the last warning cause in SQLite.
 These checkout warnings do not stop a build in the separate autoinstall tree.
 
 The worker uses `/home/user/dyna-agent-autoinstall` for this checkout. It runs
@@ -89,19 +89,19 @@ Dyna's data directory `computers/` folder. It fails if a tool is missing. It bac
 installed binary as `.bak-<time>`, keeps five backups, and replaces `dyna` and
 `dyna-desktop` in `~/.local/bin`. The shared service installer writes both engine and computer units. The engine
 restarts after each update. The computer service restarts only when the fixed
-computer-code paths in `internal/hookinstall/install.go` changed since the installed
+computer-code paths in `internal/hookinstall/computer_paths_gen.go` changed since the installed
 commit. An active transient computer service is preserved until it stops and is
 collected. A computer-service restart ends its desktops and apps.
-After a successful service restart, it writes
-`~/.local/share/dyna-sync/installed-commit`. The shared lock and state file let
-the timer and hook run side by side.
+After a successful service restart, it saves the installed commit in the
+`hook_install_state` table in `dyna.db`.
 
 The hook log records the unit name. Its result stays `pending` while the unit
-runs. Durable receipts live in Dyna's data directory under `hooks/install`.
+runs. Durable receipts live in the `hook_install_jobs` table in `dyna.db`.
+Output logs remain under `hooks/install` in Dyna's data directory.
 The maintenance loop and `dyna git hooks log` copy the worker output and final unit
 result into the original hook log. This also recovers a result after a server
 restart. Completed units are stopped and cleared after that result is recorded. Finished
-receipts move to `hooks/install/done` so each minute checks only active jobs.
+receipts are marked as archived in SQLite so each minute checks only active jobs.
 
 The recipe builds origin/main, as the timer does.
 The independent unit has a 75-minute limit, including slot and lock waits.
