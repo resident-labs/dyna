@@ -1,7 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { createTestServer } from '../../../test/ssr-server.ts'
+import { build } from 'esbuild'
+import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
+import { installDom, importBundle, domNames } from '../prs/prDetailHarness.ts'
+import { rm } from 'node:fs/promises'
 
 test('ComputerChat uses DmRows and the shared composer, with no renderer of its own', () => {
   const src = readFileSync(new URL('./ComputerChat.svelte', import.meta.url), 'utf8')
@@ -11,10 +14,6 @@ test('ComputerChat uses DmRows and the shared composer, with no renderer of its 
 })
 
 test('computer chat leaves modal Escape to the active dialog', async () => {
-  const { build } = await import('esbuild')
-  const { svelteEsbuildPlugin } = await import('../../../test/svelte-esbuild.ts')
-  const { installDom, importBundle, domNames } = await import('../prs/prDetailHarness.ts')
-  const { rm } = await import('node:fs/promises')
   const dom = installDom()
   globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
   globalThis.addEventListener = dom.window.addEventListener.bind(dom.window)
@@ -28,7 +27,16 @@ test('computer chat leaves modal Escape to the active dialog', async () => {
         contents: "export { default } from './ComputerChat.svelte'; export { mount, flushSync, unmount } from 'svelte'",
         resolveDir: new URL('.', import.meta.url).pathname,
       },
-      plugins: [svelteEsbuildPlugin()],
+      plugins: [{
+        name: 'unused-chat-transcript',
+        setup(builder) {
+          // This test never opens the transcript. Keep the real composer and
+          // keyboard handler without compiling the unrelated row renderers.
+          builder.onLoad({ filter: /[/\\]DmRows\.svelte$/ }, () => ({
+            contents: 'export default function DmRows() {}', loader: 'js',
+          }))
+        },
+      }, svelteEsbuildPlugin()],
     })
     api = await importBundle(result.outputFiles[0].contents, 'ComputerChat')
     component = api.mount(api.default, { target: document.getElementById('app'), props: { room: { id: 'global', name: 'team' } } })
