@@ -2,13 +2,13 @@ package watch
 
 import (
 	"context"
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/sessionlife/recordtest"
 	"dyna-agent/internal/subagent"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -130,18 +130,18 @@ func TestProfileChoiceSkipsLatestQuotaFailure(t *testing.T) {
 	mgr.Store = &subagent.Store{Root: filepath.Join(t.TempDir(), "sessions")}
 	e.s.Notify = notify.New(nil, mgr)
 	write := func(id, status string, at time.Time) {
-		dir, err := mgr.Store.Dir(id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err = os.MkdirAll(filepath.Join(dir, "turns"), 0700); err != nil {
-			t.Fatal(err)
-		}
 		meta := subagent.Meta{ID: id, RoomID: e.author.RoomID, Room: e.author.Room, Profile: "judge", Turns: 1, LastActivity: at}
 		recordtest.Write(t, mgr.Store.Root, id, meta)
 		turn := subagent.Turn{N: 1, Profile: "judge", Status: status, Created: at, Ended: at, Error: "429 quota exhausted"}
 		b, _ := json.Marshal(turn)
-		if err = os.WriteFile(filepath.Join(dir, "turns", "1.json"), b, 0600); err != nil {
+		if err := subagent.Migrate(filepath.Dir(mgr.Store.Root)); err != nil {
+			t.Fatal(err)
+		}
+		db, err := database.Open(filepath.Dir(mgr.Store.Root))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec("INSERT INTO session_turns(session,n,revision,turn) VALUES (?,1,(SELECT COALESCE(MAX(revision),0)+1 FROM session_turns),?)", id, b); err != nil {
 			t.Fatal(err)
 		}
 	}

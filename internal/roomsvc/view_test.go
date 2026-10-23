@@ -1,9 +1,9 @@
 package roomsvc
 
 import (
+	"dyna-agent/internal/database"
 	"dyna-agent/internal/room"
 	"encoding/json"
-	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -12,21 +12,30 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
-func TestTranscriptDefaults(t *testing.T) {
-	e := newEnv(t)
-	lead := e.start(e.room("transcript-default"), "lead", nil)
-	dir, err := e.mgr.Store.Dir(lead.ID)
+func seedTurnRow(t testing.TB, s *subagent.Store, id string, n int, raw []byte) {
+	t.Helper()
+	db, err := database.Open(filepath.Dir(s.Root))
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := db.Exec("INSERT INTO session_turns(session,n,revision,turn) VALUES (?,?,(SELECT COALESCE(MAX(revision),0)+1 FROM session_turns),?) ON CONFLICT(session,n) DO UPDATE SET revision=excluded.revision,turn=excluded.turn", id, n, raw); err != nil {
+		t.Fatal(err)
+	}
+	// Fixture JSON contains inline prompt text, so discard the replaced references.
+	if _, err := db.Exec("DELETE FROM prompt_refs WHERE session=? AND n=?", id, n); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTranscriptDefaults(t *testing.T) {
+	e := newEnv(t)
+	lead := e.start(e.room("transcript-default"), "lead", nil)
 	for n := 2; n <= 8; n++ {
 		data, err := json.Marshal(subagent.Turn{N: n, Status: subagent.TurnOK})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "turns", strconv.Itoa(n)+".json"), data, 0600); err != nil {
-			t.Fatal(err)
-		}
+		seedTurnRow(t, e.mgr.Store, lead.ID, n, data)
 	}
 	if _, err := e.mgr.Store.UpdateMeta(lead.ID, func(meta *subagent.Meta) { meta.Turns = 8 }); err != nil {
 		t.Fatal(err)
@@ -68,19 +77,13 @@ func TestTranscriptPage(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("transcript-pages")
 	lead := e.start(rec, "lead", nil)
-	dir, err := e.mgr.Store.Dir(lead.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	base := time.Date(2026, 10, 19, 0, 0, 0, 0, time.UTC)
 	for n := 1; n <= 8; n++ {
 		data, err := json.Marshal(subagent.Turn{N: n, Status: subagent.TurnOK, Started: base.Add(time.Duration(n) * time.Minute), Ended: base.Add(time.Duration(n)*time.Minute + 30*time.Second)})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "turns", strconv.Itoa(n)+".json"), data, 0600); err != nil {
-			t.Fatal(err)
-		}
+		seedTurnRow(t, e.mgr.Store, lead.ID, n, data)
 		e.svc.Notify.Rooms.Now = func() time.Time { return base.Add(time.Duration(n)*time.Minute + 10*time.Second) }
 		if _, err := e.svc.Notify.Rooms.Post(rec.ID, room.PostInput{From: lead.Address(), To: []string{rec.Name}, Text: strconv.Itoa(n)}); err != nil {
 			t.Fatal(err)
@@ -129,9 +132,7 @@ func TestTranscriptPage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(dir, "turns", strconv.Itoa(n)+".json"), data, 0600); err != nil {
-			t.Fatal(err)
-		}
+		seedTurnRow(t, e.mgr.Store, lead.ID, n, data)
 	}
 	if _, err := e.mgr.Store.UpdateMeta(lead.ID, func(meta *subagent.Meta) { meta.Turns = 208 }); err != nil {
 		t.Fatal(err)
@@ -149,13 +150,6 @@ func TestTranscriptPageWithoutTurnsKeepsConversation(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("empty-transcript")
 	lead := e.start(rec, "lead", nil)
-	dir, err := e.mgr.Store.Dir(lead.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(filepath.Join(dir, "turns", "1.json")); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := e.mgr.Store.UpdateMeta(lead.ID, func(meta *subagent.Meta) { meta.Turns = 0 }); err != nil {
 		t.Fatal(err)
 	}

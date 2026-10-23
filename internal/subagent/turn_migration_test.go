@@ -13,6 +13,24 @@ import (
 	"dyna-agent/internal/database"
 )
 
+func legacyTurnsDB(t *testing.T, s *Store) *sql.DB {
+	t.Helper()
+	db, err := database.Open(filepath.Dir(s.Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Migrate(db, "subagent.turns", 3, func(conn *sql.Conn, _ int) error {
+		_, err := conn.ExecContext(t.Context(), `CREATE TABLE session_turns (
+ session TEXT NOT NULL, n INTEGER NOT NULL, revision INTEGER NOT NULL,
+ turn BLOB NOT NULL, mirror TEXT NOT NULL DEFAULT '', PRIMARY KEY(session,n));
+CREATE UNIQUE INDEX session_turns_revision ON session_turns(revision);`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
 func TestPostMigrationTurnUpdateKeepsClearedCanonicalFields(t *testing.T) {
 	s, id := turnStore(t)
 	if err := s.writeTurn(id, Turn{N: 1, Status: TurnOK}); err != nil {
@@ -39,46 +57,29 @@ func TestPostMigrationTurnUpdateKeepsClearedCanonicalFields(t *testing.T) {
 			t.Errorf("update resurrected cleared canonical fields: %+v", turn)
 		}
 	}
-	checkCopy := func(profile string) {
-		t.Helper()
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var copied Turn
-		if err := json.Unmarshal(raw, &copied); err != nil {
-			t.Fatal(err)
-		}
-		check(copied, profile)
-	}
 	got, err := s.UpdateTurn(id, 1, func(turn *Turn) { turn.Profile = "current-profile" })
 	if err != nil {
 		t.Fatal(err)
 	}
 	check(got, "current-profile")
-	checkCopy("current-profile")
 	writeStale()
 	before, ok := s.turnVersion(id, 1)
 	if !ok {
 		t.Fatal("canonical turn has no revision")
-	}
-	if err := s.ImportLegacyTurn(id, 1); err != nil {
-		t.Fatal(err)
-	}
-	if after, ok := s.turnVersion(id, 1); !ok || after != before {
-		t.Errorf("watcher changed canonical revision: %s -> %s", before, after)
 	}
 	got, err = s.ReadTurn(id, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	check(got, "current-profile")
+	if after, ok := s.turnVersion(id, 1); !ok || after != before {
+		t.Errorf("read changed canonical revision: %s -> %s", before, after)
+	}
 	got, err = s.UpdateTurn(id, 1, func(turn *Turn) { turn.Profile = "next-profile" })
 	if err != nil {
 		t.Fatal(err)
 	}
 	check(got, "next-profile")
-	checkCopy("next-profile")
 	got, err = s.ReadTurn(id, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -97,13 +98,10 @@ func TestPostMigrationTurnUpdateKeepsClearedCanonicalFields(t *testing.T) {
 }
 
 func TestMigrateImportsRetainedTurnBeforeAnyRead(t *testing.T) {
-	for _, version := range []string{"", "1"} {
+	for _, version := range []string{"", "1", "3"} {
 		t.Run("prior_version_"+version, func(t *testing.T) {
 			s, id := turnStore(t)
-			db, err := s.turnsDB()
-			if err != nil {
-				t.Fatal(err)
-			}
+			db := legacyTurnsDB(t, s)
 			if version != "" {
 				if _, err := db.Exec("INSERT INTO meta(key,value) VALUES('subagent.turns.import',?)", version); err != nil {
 					t.Fatal(err)
@@ -122,6 +120,16 @@ func TestMigrateImportsRetainedTurnBeforeAnyRead(t *testing.T) {
 				t.Fatal(err)
 			}
 			// No session record or turn count exists for this artifact folder.
+			if version == "3" {
+				if _, err := s.turnsDB(); err == nil || !strings.Contains(err.Error(), "knows up to 2") {
+					t.Fatalf("future import version was accepted: %v", err)
+				}
+				var format int
+				if err := db.QueryRow("SELECT value FROM meta WHERE key='subagent.turns'").Scan(&format); err != nil || format != 3 {
+					t.Fatalf("refused import changed format: %d, %v", format, err)
+				}
+				return
+			}
 			if err := Migrate(filepath.Dir(s.Root)); err != nil {
 				t.Fatal(err)
 			}
@@ -205,7 +213,7 @@ func TestMigrateImportsRetainedTurnBeforeAnyRead(t *testing.T) {
 				t.Fatal(err)
 			}
 			var count int
-			if err := db.QueryRow("SELECT count(*) FROM session_turns").Scan(&count); err != nil || count != 0 {
+			if err := db.QueryRow("SELECT count(*) FROM sqlite_master WHERE name='session_turns'").Scan(&count); err != nil || count != 0 {
 				t.Fatalf("partial import survived rollback: %d, %v", count, err)
 			}
 			if err := db.QueryRow("SELECT count(*) FROM meta WHERE key='subagent.turns.import'").Scan(&count); err != nil || count != 0 {

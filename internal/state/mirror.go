@@ -116,17 +116,6 @@ var mirrorStep = func(step, path string) error { return nil }
 // session lock. A writer that edits the file in place, keeping its inode, is
 // not detected; old binaries write by rename.
 func (w *Writer) Mirror(ctx context.Context, key, path string, write func(io.Writer) error) error {
-	return w.mirror(ctx, key, path, false, write)
-}
-
-// MirrorCanonical writes the committed record's copy even when another binary
-// replaced the regular file. The caller must hold the record lock.
-// TODO: legacy/shim remove later — turn-only downgrade copy; remove with P1828a.
-func (w *Writer) MirrorCanonical(ctx context.Context, key, path string, write func(io.Writer) error) error {
-	return w.mirror(ctx, key, path, true, write)
-}
-
-func (w *Writer) mirror(ctx context.Context, key, path string, replaceForeign bool, write func(io.Writer) error) error {
 	w.mirrorMu.Lock()
 	defer w.mirrorMu.Unlock()
 	// Refuse a directory or symlink before any temporary file or pending
@@ -167,7 +156,7 @@ ON CONFLICT(key) DO UPDATE SET pending = excluded.pending`, key, fileID(ours))
 			return err
 		}
 		return fmt.Errorf("%s is not a regular file", path)
-	case err == nil && !replaceForeign && !stamp.owns(current):
+	case err == nil && !stamp.owns(current):
 		// Another binary wrote path: keep its file, unstamped.
 	default:
 		if err := os.Rename(tmp, path); err != nil {

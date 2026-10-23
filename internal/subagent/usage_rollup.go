@@ -53,9 +53,6 @@ func Migrate(dataDir string) error {
 	if err != nil {
 		return err
 	}
-	if err := s.migrateRetainedTurns(); err != nil {
-		return err
-	}
 	if err := migrateStoredPrompts(db); err != nil {
 		return err
 	}

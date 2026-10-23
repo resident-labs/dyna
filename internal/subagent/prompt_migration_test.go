@@ -40,7 +40,7 @@ func TestPromptMigrationResumesWithoutChangingLiteralHashes(t *testing.T) {
 			if _, err := saveTurnRow(ctx, db, id, n, raw); err != nil {
 				t.Fatal(err)
 			}
-		} else if _, err := db.Exec("INSERT INTO session_turns(session,n,revision,turn,mirror) VALUES (?,?,?,?,?)", id, n, n, raw, "retained-copy"); err != nil {
+		} else if _, err := db.Exec("INSERT INTO session_turns(session,n,revision,turn) VALUES (?,?,?,?)", id, n, n, raw); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -107,9 +107,8 @@ func TestPromptMigrationResumesWithoutChangingLiteralHashes(t *testing.T) {
 		}
 	}
 	for query, want := range map[string]int{
-		"SELECT count(*) FROM prompt_blobs":                                 2,
-		"SELECT count(*) FROM prompt_refs":                                  7,
-		"SELECT count(*) FROM session_turns WHERE mirror = 'retained-copy'": 3,
+		"SELECT count(*) FROM prompt_blobs": 2,
+		"SELECT count(*) FROM prompt_refs":  7,
 	} {
 		var got int
 		if err := db.QueryRow(query).Scan(&got); err != nil || got != want {

@@ -1,7 +1,6 @@
 package subagent
 
 import (
-	"os"
 	"testing"
 
 	"dyna-agent/internal/room"
@@ -15,7 +14,7 @@ func TestConsolidationInboxGateIncrementalDelivery(t *testing.T) {
 	b, _ = e.wait(b.ID, 1)
 	c, _ := e.start("RESPOND: other source SLEEP:1")
 	c, _ = e.wait(c.ID, 1)
-	// Keep a completed historical turn separate from the latest receipt file.
+	// Keep a completed historical turn separate from the latest receipt row.
 	for _, info := range []Info{a, b, c} {
 		if _, err := e.send(info.ID, "RESPOND: followup SLEEP:1", WakeOptions{}); err != nil {
 			t.Fatal(err)
@@ -100,12 +99,12 @@ func TestConsolidationInboxGateIncrementalDelivery(t *testing.T) {
 	read(shared.ID, pending.ID)
 	// Corrupt completed histories after the first read. Repeated polls must use
 	// cached receipts instead of reopening or decoding these growing histories.
+	db, err := store.turnsDB()
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, id := range []string{a.ID, b.ID, c.ID} {
-		path, err := store.turnPath(id, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte("invalid historical JSON"), 0600); err != nil {
+		if _, err := db.Exec("UPDATE session_turns SET turn=? WHERE session=? AND n=1", []byte(`{"n":"invalid history"}`), id); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -121,20 +120,16 @@ func TestConsolidationInboxGateIncrementalDelivery(t *testing.T) {
 	delayed := post(b.Address())
 	read(delayed.ID)
 	read()
-	// An empty poll must not even inspect the latest source receipt file.
-	latestPath, err := store.turnPath(b.ID, 2)
+	// An empty poll must not even inspect the latest source receipt row.
+	latest, _, err := storedTurn(t.Context(), db, b.ID, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	latest, err := os.ReadFile(latestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(latestPath, []byte("invalid latest JSON"), 0600); err != nil {
+	if _, err := db.Exec("UPDATE session_turns SET turn=? WHERE session=? AND n=2", []byte(`{"n":"invalid latest"}`), b.ID); err != nil {
 		t.Fatal(err)
 	}
 	read()
-	if err := os.WriteFile(latestPath, latest, 0600); err != nil {
+	if _, err := db.Exec("UPDATE session_turns SET turn=? WHERE session=? AND n=2", latest, b.ID); err != nil {
 		t.Fatal(err)
 	}
 	late := post(b.Address(), c.Address(), a.Address())
