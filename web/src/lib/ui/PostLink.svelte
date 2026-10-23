@@ -1,10 +1,17 @@
-<script>
+<script lang="ts">
+  import type { Snippet } from 'svelte'
   import { postHref } from './posts.ts'
   // children replaces the "Open post" label, such as a message's time.
-  let { roomId, postId, onopen = null, children = null } = $props()
+  interface Props {
+    roomId: string
+    postId: string
+    onopen?: ((postId: string) => void) | null
+    children?: Snippet | null
+  }
+  let { roomId, postId, onopen = null, children = null }: Props = $props()
   let href = $derived(postHref(roomId, postId))
 
-  function open(event) {
+  function open(event: MouseEvent) {
     if (!onopen || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
     event.preventDefault()
     onopen(postId)
