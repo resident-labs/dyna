@@ -683,7 +683,6 @@ var legacyFamilies = []string{
 	"hierarchy",
 	"instructions",
 	"issue",
-	"merge-decision",
 	"notice",
 	"seat",
 	"spawn",
