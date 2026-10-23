@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   import { untrack } from 'svelte'
   import { fileURL } from '../../api.ts'
   import { human, extOf } from './attach.ts'
@@ -7,14 +7,29 @@
   import { postAttachment } from '../ui/posts.ts'
   import { visuals } from './visuals.svelte.ts'
   import { visualOf, updates } from './visuals.ts'
-  let { roomId, items = [], postId = '', onopen } = $props()
-  const open = (attachment) => onopen(postAttachment(attachment, postId))
-  const image = (a) => /^image\/(png|jpeg|gif|webp)$/.test(a.mime)
+  import type { Attachment } from '../api/room.ts'
+
+  // An attachment as the viewer shows it: the stored file plus the post that carried it.
+  type ShownAttachment = Attachment & { view?: string }
+  interface Props {
+    roomId: string
+    items?: Attachment[]
+    postId?: string
+    onopen: (attachment: ShownAttachment & { postId?: string }) => void
+  }
+  interface Card {
+    att: Attachment
+    at?: number
+    chip: boolean
+  }
+  let { roomId, items = [], postId = '', onopen }: Props = $props()
+  const open = (attachment: ShownAttachment) => onopen(postAttachment(attachment, postId))
+  const image = (a: Attachment) => /^image\/(png|jpeg|gif|webp)$/.test(a.mime)
   // Go stamps render "html" on a post's card; a plain .html file is a file.
-  const rich = (a) => a.render === 'html'
+  const rich = (a: Attachment) => a.render === 'html'
   // The post that created a visual shows the banner of its newest version;
   // a post that updated it shows a chip for its own version.
-  let cards = $derived(items.filter(rich).map((a) => {
+  let cards = $derived(items.filter(rich).map((a): Card => {
     const v = visuals.room === roomId ? visualOf(visuals.byId, postId, a) : null
     // A chip names the visual by its current title, so one visual has one
     // name everywhere.
@@ -22,15 +37,15 @@
     return { att: v?.attachment ?? a, at: v?.post.ts ?? 0, chip: false }
   }))
   let images = $derived(items.filter(image))
-  let failedImages = $state(new Set())
-  const imageKey = (a) => JSON.stringify([roomId, a.id, a.sha256 || '', fileURL(roomId, a.id)])
+  let failedImages = $state<Set<string>>(new Set())
+  const imageKey = (a: Attachment) => JSON.stringify([roomId, a.id, a.sha256 || '', fileURL(roomId, a.id)])
   $effect(() => {
     const current = new Set(images.map(imageKey))
     untrack(() => {
       failedImages = new Set([...failedImages].filter((key) => current.has(key)))
     })
   })
-  function imageFailed(key) {
+  function imageFailed(key: string) {
     failedImages = new Set(failedImages).add(key)
   }
   let files = $derived(items.filter((a) => !image(a) && !rich(a)))
@@ -58,7 +73,7 @@
   {@render fileCard(a)}
 {/each}
 
-{#snippet fileCard(a, unavailable = false)}
+{#snippet fileCard(a: Attachment, unavailable = false)}
   <button class="file" onclick={() => open(a)} title={`Open ${a.name}`}>
     <span class="ext" class:document={['markdown', 'word', 'pdf'].includes(previewKind(a))} class:table={previewKind(a) === 'table'}>{extOf(a.name)}</span>
     <span class="meta">

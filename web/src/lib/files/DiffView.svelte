@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // One file's unified diff: hunk headers, old and new line numbers, and
   // added or removed lines on a sage or coral wash. Long lines wrap unless
   // the reader turned wrapping off.
@@ -6,14 +6,21 @@
   import { code } from './codeprefs.svelte.ts'
   // With oncomment, a + shows on each line and opens a comment box under it.
   import { commentLine } from './diffComments.ts'
-  let { file, oncomment = null } = $props()
+  import type { DiffComment } from './diffComments.ts'
+  import type { DiffFile, DiffLine } from './repo.ts'
+
+  interface Props {
+    file: DiffFile
+    oncomment?: ((comment: DiffComment) => void) | null
+  }
+  let { file, oncomment = null }: Props = $props()
   let picked = $state('') // the tapped line; on touch screens only it shows the +
   let boxAt = $state('') // "hunk:line" of the open comment box
   let draft = $state('')
-  let field = $state()
-  let origin = null
-  async function open(key, event) {
-    origin = event.currentTarget
+  let field = $state<HTMLTextAreaElement>()
+  let origin: HTMLElement | null = null
+  async function open(key: string, event: MouseEvent) {
+    origin = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
     boxAt = key
     draft = ''
     await tick()
@@ -24,7 +31,7 @@
     boxAt = ''
     tick().then(() => { if (!boxAt && button?.isConnected) button.focus({ preventScroll: true }) })
   }
-  function keydown(event, line) {
+  function keydown(event: KeyboardEvent, line: DiffLine) {
     if (event.isComposing) return
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -36,10 +43,10 @@
       add(line)
     }
   }
-  function add(l) {
+  function add(l: DiffLine) {
     const text = draft.trim()
     if (!text) return
-    oncomment({ file: file.path, line: commentLine(l), quote: l.t + l.text, text })
+    oncomment?.({ file: file.path, line: commentLine(l), quote: l.t + l.text, text })
     close()
   }
 </script>

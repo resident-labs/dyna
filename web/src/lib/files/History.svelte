@@ -1,30 +1,41 @@
-<script>
+<script lang="ts">
   // The commits of one file, or of the whole repository when `path` is empty.
   // A side panel on a wide screen, a bottom sheet on a phone. A file's rows
   // can be selected to show that version; repository rows are only a list.
   import { dialog } from '../ui/dialog.ts'
   import { api } from '../../api.ts'
   import { ago } from '../ui/format.ts'
+  import { errorText } from '../errorText.ts'
   import Row from '../ui/Row.svelte'
   import Chip from '../ui/Chip.svelte'
   import LoadOlder from '../ui/LoadOlder.svelte'
+  import type { GitHistoryCommit } from '../api/file.ts'
 
-  let { roomId, session = '', path = '', narrow = false, selected = null, onselect = null, onclose } = $props()
+  interface Props {
+    roomId: string
+    session?: string
+    path?: string
+    narrow?: boolean
+    selected?: { hash: string } | null
+    onselect?: ((commit: GitHistoryCommit | null) => void) | null
+    onclose: () => void
+  }
+  let { roomId, session = '', path = '', narrow = false, selected = null, onselect = null, onclose }: Props = $props()
 
-  function modal(node, narrow) {
-    let active
-    function update(enabled) {
+  function modal(node: HTMLElement, narrow: boolean) {
+    let active: ReturnType<typeof dialog> | null
+    function update(enabled: boolean) {
       active?.destroy()
       active = enabled ? dialog(node, {
         close: () => onclose(),
-        initial: () => node.querySelector('.x'),
+        initial: () => node.querySelector<HTMLElement>('.x'),
       }) : null
     }
     update(narrow)
     return { update, destroy() { active?.destroy() } }
   }
 
-  let commits = $state([])
+  let commits = $state<GitHistoryCommit[]>([])
   let cursor = $state('')
   let earlier = $state(false)
   let loading = $state(true)
@@ -36,12 +47,12 @@
     try {
       const page = await api.gitHistory(roomId, session, p, before, 50)
       if (p !== path) return
-      commits = before ? [...commits, ...page.commits] : page.commits
+      commits = before ? [...commits, ...(page.commits ?? [])] : (page.commits ?? [])
       cursor = page.cursor
       earlier = page.earlier
       error = ''
     } catch (e) {
-      if (p === path) error = String(e?.message || e)
+      if (p === path) error = errorText(e)
     } finally {
       if (p === path) loading = false
     }

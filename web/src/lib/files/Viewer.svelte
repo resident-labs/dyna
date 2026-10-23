@@ -1,8 +1,9 @@
-<script>
+<script lang="ts">
   import Segmented from '../ui/Segmented.svelte'
   import { dialog } from '../ui/dialog.ts'
   import { onMount } from 'svelte'
   import { api, copyText, fileURL, authenticatedFetch } from '../../api.ts'
+  import { errorText } from '../errorText.ts'
   import { human, extOf } from './attach.ts'
   import { code, setWrap } from './codeprefs.svelte.ts'
   import { afterOpen } from './afterOpen.ts'
@@ -11,8 +12,16 @@
   import TablePreview from './TablePreview.svelte'
   import PDFPreview from './PDFPreview.svelte'
   import { previewKind, previewLabel, markdownDocument, documentHTML, formatJSON, TEXT_LIMIT } from './preview.ts'
+  import type { Attachment } from '../api/room.ts'
 
-  let { roomId, att, onjump = null, onclose } = $props()
+  interface Props {
+    roomId: string
+    // view is "source" when the reader asked for the source of a document.
+    att: Attachment & { view?: string }
+    onjump?: (() => void) | null
+    onclose: () => void
+  }
+  let { roomId, att, onjump = null, onclose }: Props = $props()
   let cardReady = $state(false)
   let text = $state('')
   let html = $state('')
@@ -25,11 +34,11 @@
   let card = $derived(kind === 'card')
   let hasSource = $derived(['markdown', 'table', 'json'].includes(kind))
   // svelte-ignore state_referenced_locally
-  let view = $state(att.view === 'source' ? 'source' : 'preview')
+  let view = $state<'preview' | 'source'>(att.view === 'source' ? 'source' : 'preview')
   let source = $derived(view === 'source')
   let showTextTools = $derived(!loading && !error && (kind === 'text' || kind === 'json' || (source && hasSource)))
   let copyStatus = $state('')
-  let copyTimer
+  let copyTimer: ReturnType<typeof setTimeout> | undefined
   let copyGeneration = 0
   $effect(() => {
     att
@@ -52,7 +61,7 @@
     copyTimer = setTimeout(() => { copyStatus = '' }, 2000)
   }
   let delimiter = $derived(/\.tsv$/i.test(att.name) || att.mime === 'text/tab-separated-values' ? '\t' : ',')
-  let formatted = $derived.by(() => {
+  let formatted = $derived.by((): { text: string; error: string } => {
     if (kind !== 'json' || !text) return { text, error: '' }
     try { return { text: formatJSON(text), error: '' } }
     catch { return { text, error: 'This file is not valid JSON. Showing the original text.' } }
@@ -80,7 +89,7 @@
           if (kind === 'markdown') html = markdownDocument(content)
         }
       } catch (e) {
-        if (!stopped) error = String(e?.message || e)
+        if (!stopped) error = errorText(e)
       } finally {
         if (!stopped) loading = false
       }
@@ -88,7 +97,7 @@
     return () => { stopped = true; controller.abort() }
   })
 
-  async function download(file = att) {
+  async function download(file: Attachment = att) {
     downloading = true
     downloadError = ''
     try {
@@ -99,12 +108,12 @@
       link.href = url
       link.download = file.name
       // The app handles document links globally; this download stays local.
-      link.onclick = (e) => e.stopPropagation()
+      link.onclick = (e: MouseEvent) => e.stopPropagation()
       document.body.append(link)
       link.click()
       link.remove()
       setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (e) { downloadError = String(e.message || e) }
+    } catch (e) { downloadError = errorText(e) }
     finally { downloading = false }
   }
 
@@ -134,7 +143,7 @@
     </header>
     {#if hasSource || showTextTools}
       <div class="toolbar">
-        {#if hasSource}<Segmented small label="Document view" options={[['preview', 'Preview'], ['source', 'Source']]} value={source ? 'source' : 'preview'} onchange={(v) => (view = v)} />{/if}
+        {#if hasSource}<Segmented small label="Document view" options={[['preview', 'Preview'], ['source', 'Source']]} value={source ? 'source' : 'preview'} onchange={(v: string) => (view = v === 'source' ? 'source' : 'preview')} />{/if}
         {#if showTextTools}
           <div class="source-tools">
             <button class:active={code.wrap} aria-pressed={code.wrap} onclick={() => setWrap(!code.wrap)}>Wrap</button>
