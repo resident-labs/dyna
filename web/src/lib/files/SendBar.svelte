@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // The pending owner comments on a diff and the bar that sends them as one
   // batch. Nothing is sent until Send; Discard drops them all. Comments added
   // while a send runs stay pending.
@@ -9,20 +9,27 @@
   //   deliver  async (comments) that makes the one call
   import { tick } from 'svelte'
   import { sendLabel, sendPending } from './diffComments.ts'
+  import type { DiffComment } from './diffComments.ts'
+  import { errorText } from '../errorText.ts'
 
-  let { pending = $bindable([]), author = '', deliver } = $props()
+  interface Props {
+    pending?: DiffComment[]
+    author?: string
+    deliver: (comments: DiffComment[]) => unknown
+  }
+  let { pending = $bindable<DiffComment[]>([]), author = '', deliver }: Props = $props()
   let sending = $state(false)
   let error = $state('')
-  let editing = $state.raw(null)
+  let editing = $state.raw<DiffComment | null>(null)
   let draft = $state('')
-  let field = $state()
-  let origin = null
+  let field = $state<HTMLTextAreaElement>()
+  let origin: HTMLElement | null = null
   $effect(() => {
     if (editing && !pending.includes(editing)) editing = null
   })
-  async function edit(comment, event) {
+  async function edit(comment: DiffComment, event: MouseEvent) {
     if (sending || editing) return
-    origin = event.currentTarget
+    origin = event.currentTarget instanceof HTMLElement ? event.currentTarget : null
     editing = comment
     draft = comment.text
     await tick()
@@ -35,10 +42,11 @@
   }
   function save() {
     if (sending || !editing || !draft.trim()) return
-    pending = pending.map(comment => comment === editing ? { ...comment, text: draft.trim() } : comment)
+    const edited = editing
+    pending = pending.map(comment => comment === edited ? { ...comment, text: draft.trim() } : comment)
     finishEdit()
   }
-  function editKey(event) {
+  function editKey(event: KeyboardEvent) {
     if (event.isComposing) return
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -50,7 +58,7 @@
       save()
     }
   }
-  function remove(index) {
+  function remove(index: number) {
     if (!sending && !editing) pending = pending.filter((_, i) => i !== index)
   }
   async function send() {
@@ -60,7 +68,7 @@
     try {
       await sendPending(deliver, () => pending, (rest) => (pending = rest))
     } catch (e) {
-      error = String(e?.message || e)
+      error = errorText(e)
     } finally {
       sending = false
     }

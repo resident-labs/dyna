@@ -1,8 +1,12 @@
-<script>
+<script lang="ts">
   import { placeholderHue } from './visuals.ts'
+
+  interface Props {
+    title?: string
+  }
   // Stands in for a preview image: cards posted before previews, or with no
   // browser to render them. It fills its parent box.
-  let { title } = $props()
+  let { title }: Props = $props()
 </script>
 
 <div class="placeholder" style="--tint: var(--hue-{placeholderHue(title)})" aria-hidden="true">
