@@ -12,8 +12,11 @@ const RoleRoot = "root"
 // session is named LibrarianName.
 const RoleLibrarian = "librarian"
 
-// LibrarianName names the librarian session, after `dyna library`.
+// LibrarianName names the feature map and docs session, after `dyna library`.
 const LibrarianName = "library"
+
+// LibrarianSmellName names the independent code-reading smell session.
+const LibrarianSmellName = "library-smells"
 
 // RoleReviewer reviews pull requests. Profile choice ranks reviewers by
 // diagnostics.
@@ -21,7 +24,7 @@ const RoleReviewer = "reviewer"
 
 // serviceNames are the fixed session names of service roles. Only a session
 // of that role may take one, so a user session never blocks a service start.
-var serviceNames = map[string]string{LibrarianName: RoleLibrarian}
+var serviceNames = map[string]string{LibrarianName: RoleLibrarian, LibrarianSmellName: RoleLibrarian}
 
 func checkServiceName(name, role string) error {
 	if owner, ok := serviceNames[name]; ok && owner != role {

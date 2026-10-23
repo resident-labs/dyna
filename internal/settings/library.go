@@ -12,9 +12,12 @@ import (
 const (
 	// KeyLibraryEnabled lists the repositories whose librarian runs.
 	KeyLibraryEnabled = "library.enabled"
-	// KeyLibraryProfile is the one profile for all librarian work; empty ranks
-	// enabled service profiles.
+	// KeyLibraryProfile is the profile for feature map and docs work; empty
+	// ranks enabled service profiles.
 	KeyLibraryProfile = "library.profile"
+	// KeyLibrarySmellProfile is the profile for code-reading smell passes;
+	// empty ranks profiles with the reviewer's diagnostics preference.
+	KeyLibrarySmellProfile = "library.smellProfile"
 	// KeyLibraryReadmeMaxLines is the longest README the librarian may leave.
 	KeyLibraryReadmeMaxLines = "library.readmeMaxLines"
 	// DefaultLibraryReadmeMaxLines is the README limit until the owner sets one.
@@ -44,6 +47,11 @@ func (v *Values) loadLibrary(raw map[string]any) error {
 			return err
 		}
 	}
+	if value, ok := values["smellProfile"]; ok {
+		if err := v.setLibrary(KeyLibrarySmellProfile, fmt.Sprint(value)); err != nil {
+			return err
+		}
+	}
 	if value, ok := values["readmeMaxLines"]; ok {
 		return v.setLibrary(KeyLibraryReadmeMaxLines, numberText(value))
 	}
@@ -54,6 +62,8 @@ func (v *Values) setLibrary(key, value string) error {
 	switch key {
 	case KeyLibraryProfile:
 		v.LibraryProfile = strings.TrimSpace(value)
+	case KeyLibrarySmellProfile:
+		v.LibrarySmellProfile = strings.TrimSpace(value)
 	case KeyLibraryReadmeMaxLines:
 		n, err := strconv.Atoi(strings.TrimSpace(value))
 		if err != nil || n < 1 {
@@ -79,7 +89,7 @@ func (v *Values) setLibrary(key, value string) error {
 
 func (v Values) saveLibrary(raw map[string]any) {
 	values := nested(raw, "library")
-	values["enabled"], values["profile"], values["readmeMaxLines"] = v.LibraryEnabled, v.LibraryProfile, v.LibraryReadmeMaxLines
+	values["enabled"], values["profile"], values["smellProfile"], values["readmeMaxLines"] = v.LibraryEnabled, v.LibraryProfile, v.LibrarySmellProfile, v.LibraryReadmeMaxLines
 	raw["library"] = values
 }
 

@@ -5,6 +5,30 @@ import (
 	"testing"
 )
 
+func TestSmellTaskReadsCodeWithAChecklist(t *testing.T) {
+	task := SmellTask("/src/app", "/data/smell-tree", "aaa", "bbbbbbbbbbbbbbbb")
+	for _, want := range []string{
+		"git diff --name-only aaa..bbbbbbbbbbbbbbbb",
+		"Read each full changed file",
+		"callers",
+		"sibling features",
+		"Raw system text in the UI",
+		"map[string]any",
+		"Decisions made by parsing address strings",
+		"invented senders",
+		"leftovers from removed features",
+		"oversized files",
+		"dyna library smell",
+	} {
+		if !strings.Contains(task, want) {
+			t.Errorf("smell task lacks %q", want)
+		}
+	}
+	if strings.Contains(Task("/src/app", "/data/tree", "aaa", "bbb", "change", 120), "3. Smells.") {
+		t.Error("map task still includes smell finding")
+	}
+}
+
 func TestTaskStatesMaintainModeAndTheReadmeGate(t *testing.T) {
 	task := Task("/src/app", "/data/tree", "aaa", "bbbbbbbbbbbbbbbb", "owned file x.go changed", 120)
 	for _, want := range []string{

@@ -12,6 +12,7 @@ import (
 
 	"dyna-agent/internal/authority"
 	"dyna-agent/internal/hooks"
+	"dyna-agent/internal/librarianstate"
 	"dyna-agent/internal/library"
 	"dyna-agent/internal/profile"
 	"dyna-agent/internal/repoid"
@@ -33,7 +34,7 @@ type fakeSessions struct {
 }
 
 func (f *fakeSessions) Profiles() ([]profile.Profile, error) {
-	return []profile.Profile{{Name: "mock", Harness: profile.HarnessMock}}, nil
+	return []profile.Profile{{Name: "mock", Harness: profile.HarnessMock}, {Name: "diagnostic", Harness: profile.HarnessMock}}, nil
 }
 func (f *fakeSessions) Failures(time.Time) (map[string]time.Time, error) { return nil, nil }
 func (f *fakeSessions) Inspect(id string) (subagent.Info, subagent.Turn, error) {
@@ -48,7 +49,7 @@ func (f *fakeSessions) Turn(id string, n int) (subagent.Turn, error) {
 	}
 	return f.turns[n-1], nil
 }
-func (f *fakeSessions) Named(roomID string) (subagent.Info, error) {
+func (f *fakeSessions) Named(roomID string, _ bool) (subagent.Info, error) {
 	if f.info.ID == "" || f.info.RoomID != roomID {
 		return subagent.Info{}, os.ErrNotExist
 	}
@@ -68,10 +69,14 @@ func (f *fakeSessions) run(task string) int {
 	}
 	return len(f.turns)
 }
-func (f *fakeSessions) Start(roomID, prof, dir, goal, task string) (subagent.Info, int, error) {
+func (f *fakeSessions) Start(roomID, prof, dir, goal, task string, smell bool) (subagent.Info, int, error) {
 	f.starts++
 	f.turns = nil
-	f.info = subagent.Info{Meta: subagent.Meta{ID: fmt.Sprintf("ses_%d", f.starts), RoomID: roomID, Role: subagent.RoleLibrarian, Profile: prof, Dir: dir, Resumable: true, HarnessSession: "h"}}
+	name := subagent.LibrarianName
+	if smell {
+		name = subagent.LibrarianSmellName
+	}
+	f.info = subagent.Info{Meta: subagent.Meta{ID: fmt.Sprintf("ses_%d", f.starts), Name: name, RoomID: roomID, Role: subagent.RoleLibrarian, Profile: prof, Dir: dir, Resumable: true, HarnessSession: "h"}}
 	n := f.run(task)
 	return f.info, n, nil
 }
@@ -132,6 +137,12 @@ func setup(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	h.id = r.ID
+	if _, err := (librarianstate.Store{DataDir: data}).Update(h.id, false, func(st *librarianstate.State) error {
+		st.SmellHead, st.SmellLastRun = git(t, repo, "rev-parse", "HEAD"), h.clock
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	return h
 }
 
@@ -225,6 +236,52 @@ func TestWakeRunsOnlyWhenTheGatePasses(t *testing.T) {
 	h.sessions.info.Status = subagent.StatusIdle
 	if res := h.wake(t, "assigned"); !strings.Contains(res.Reason, "unmapped source file web/app.ts") {
 		t.Fatalf("reason %q", res.Reason)
+	}
+}
+
+func TestSmellWakeUsesItsOwnCheckpointAndProfile(t *testing.T) {
+	h := setup(t)
+	h.svc.Settings = func() (settings.Values, error) {
+		return settings.Values{LibraryEnabled: []string{h.repo}, LibrarySmellProfile: "diagnostic"}, nil
+	}
+	baseline := git(t, h.repo, "rev-parse", "HEAD")
+	if _, err := (librarianstate.Store{DataDir: h.svc.DataDir}).Update(h.id, false, func(st *librarianstate.State) error {
+		st.SmellHead, st.SmellLastRun = baseline, h.clock
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	commitFile(t, h.repo, "agents/run.go", "package agents\n\nfunc Run() { panic(1) }\n")
+	target := git(t, h.repo, "rev-parse", "HEAD")
+	if _, err := (librarianstate.Store{DataDir: h.svc.DataDir}).Update(h.id, false, func(st *librarianstate.State) error { st.Head = target; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	h.clock = h.clock.Add(SmellInterval)
+	res, err := h.svc.Wake(context.Background(), h.repo)
+	if err != nil || res.Action != "started" {
+		t.Fatalf("smell wake = %+v %v", res, err)
+	}
+	task := h.sessions.tasks[len(h.sessions.tasks)-1]
+	if !strings.Contains(task, baseline+".."+res.Head) || !strings.Contains(task, "Read each full changed file") {
+		t.Fatalf("smell task lacks its change range or code-reading assignment:\n%s", task)
+	}
+	if h.sessions.info.Name != subagent.LibrarianSmellName || h.sessions.info.Profile != "diagnostic" {
+		t.Fatalf("smell session = %q with profile %q", h.sessions.info.Name, h.sessions.info.Profile)
+	}
+	if _, err := os.Stat(filepath.Join(SmellTreePath(h.svc.DataDir, h.id), "agents", "run.go")); err != nil {
+		t.Fatalf("smell tree: %v", err)
+	}
+	h.clock = h.clock.Add(time.Minute)
+	if res, err = h.svc.Wake(context.Background(), h.repo); err != nil || res.Action != "current" {
+		t.Fatalf("completed smell checkpoint = %+v %v", res, err)
+	}
+	commitFile(t, h.repo, "agents/run.go", "package agents\n\nfunc Run() {}\n")
+	if _, err := (librarianstate.Store{DataDir: h.svc.DataDir}).Update(h.id, false, func(st *librarianstate.State) error { st.Head = git(t, h.repo, "rev-parse", "HEAD"); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	tasks := len(h.sessions.tasks)
+	if res, err = h.svc.Wake(context.Background(), h.repo); err != nil || res.Action != "current" || len(h.sessions.tasks) != tasks {
+		t.Fatalf("smell pass inside interval = %+v %v, tasks %d -> %d", res, err, tasks, len(h.sessions.tasks))
 	}
 }
 
