@@ -101,13 +101,6 @@ func TestLifecycleCLI(t *testing.T) {
 		t.Fatal("unknown recipe accepted")
 	}
 
-	if _, err := run("add", "old-event", "--event", "main-moved", "--command", "true"); err != nil {
-		t.Fatal(err)
-	}
-	if out, err := run("list"); err != nil || strings.Contains(out, `"event":"main-moved"`) {
-		t.Fatalf("CLI event alias: %s %v", out, err)
-	}
-
 }
 
 func TestEveryHooksCommandHasHelp(t *testing.T) {

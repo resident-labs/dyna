@@ -3,7 +3,6 @@
 Use `dyna git` for version-control work: `pr`, `change`, `ci`, `worktrees`, `hooks`, `sync`, and `issue`.
 Use `dyna git worktrees new <branch>` for a managed checkout.
 Run `eval "$(dyna git worktrees env)"` to set `DYNA_PORT`, `DYNA_PORTS` and `PORT` for that worktree's dev servers; open them with `dyna browser open http://127.0.0.1:$DYNA_PORT`.
-Old top-level command names remain hidden for one release; use the git paths in new briefs and scripts.
 
 ## Pull requests and changes
 

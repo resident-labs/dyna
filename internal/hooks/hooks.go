@@ -27,11 +27,8 @@ const (
 	AfterLand       = "after-land"
 	PRMerged        = "pr-merged"
 	MainUpdated     = "main-updated"
-	// MainMoved remains a read/CLI alias for older hook documents.
-	// TODO: legacy/shim remove later — accepts main-moved in old hook documents and CLI input; remove after those hooks use main-updated
-	MainMoved     = "main-moved"
-	SessionFinish = "session-finish"
-	Schedule      = "schedule"
+	SessionFinish   = "session-finish"
+	Schedule        = "schedule"
 )
 
 type Hook struct {
@@ -101,7 +98,7 @@ func Validate(h Hook) error {
 	if !namePattern.MatchString(h.Name) {
 		return fmt.Errorf("hook name must use 1 to 64 letters, digits, underscores, or hyphens")
 	}
-	switch NormalizeEvent(h.Event) {
+	switch h.Event {
 	case WorktreeCreated, BeforeLand, AfterLand, PRMerged, MainUpdated, SessionFinish, Schedule:
 	default:
 		return fmt.Errorf("unknown hook event %q", h.Event)
@@ -136,7 +133,6 @@ func (s Service) Add(ctx context.Context, repo string, h Hook) error {
 		return err
 	}
 
-	h.Event = NormalizeEvent(h.Event)
 	if err := Validate(h); err != nil {
 		return err
 	}
@@ -209,8 +205,7 @@ func (s Service) Edit(ctx context.Context, repo, name, editor string, patch Patc
 				h.Command = *patch.Command
 			}
 			if patch.Event != nil {
-				// TODO: legacy/shim remove later — accepts main-moved in edit flags; remove when the input alias is retired.
-				h.Event = NormalizeEvent(*patch.Event)
+				h.Event = *patch.Event
 			}
 			if patch.Cwd != nil {
 				h.Cwd = *patch.Cwd
@@ -314,7 +309,7 @@ func (s Service) Run(ctx context.Context, e Event, name string) (Run, error) {
 // run records preparationErr without executing a command, or executes the hook
 // when preparation succeeded.
 func (s Service) run(ctx context.Context, e Event, name string, preparationErr error, requested bool) (Run, error) {
-	e.Event = NormalizeEvent(e.Event)
+
 	r, err := repoid.Resolve(ctx, e.Repo)
 	if err != nil {
 		return Run{}, err
@@ -417,13 +412,4 @@ func failureClass(err error) string {
 		return fmt.Sprintf("exit %d", exit.ExitCode())
 	}
 	return "runner error"
-}
-
-// NormalizeEvent preserves the original main-moved spelling as an input alias.
-// TODO: legacy/shim remove later — normalizes the old main-moved event; remove after stored hooks and callers use main-updated
-func NormalizeEvent(event string) string {
-	if event == MainMoved {
-		return MainUpdated
-	}
-	return event
 }
