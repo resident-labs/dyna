@@ -1,14 +1,15 @@
-// Policy check for web TypeScript: rejects type escapes that hide real type errors.
+// Policy check for web TypeScript: rejects type escapes that hide real type errors,
+// and rejects JavaScript files under the checked source directories.
 // Run with Node's built-in type stripping, so this file uses erasable syntax only.
 //   node scripts/check-typescript.ts [path...]
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { extname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parse } from "svelte/compiler";
 import ts from "typescript";
 
-export type Rule = "no-explicit-any" | "no-double-cast" | "no-ts-suppression" | "no-non-null-assertion";
+export type Rule = "no-explicit-any" | "no-double-cast" | "no-ts-suppression" | "no-non-null-assertion" | "no-javascript-file";
 
 export interface Violation {
   file: string;
@@ -24,6 +25,7 @@ const CONFIG_FILE = /\.config\.[mc]?ts$/;
 const SVELTE_NODE_TYPE = /^(Svelte|Title)|(Block|Tag|Directive|Element)$|^(Fragment|Text|Comment|Attribute|SpreadAttribute|Component|Script|StyleSheet|Root)$/;
 const SKIPPED_DIRS = new Set(["node_modules", "dist", ".git"]);
 const TS_EXTENSIONS = new Set([".ts", ".mts", ".cts", ".tsx"]);
+const JAVASCRIPT_EXTENSIONS = new Set([".js", ".mjs", ".cjs"]);
 const SCRIPT_TAG = /<script\b(?<attributes>(?:"[^"]*"|'[^']*'|[^>"'])*)>/gi;
 const LANG_TS = /\blang\s*=\s*["']?ts["']?(?=[\s"'>]|$)/i;
 const SUPPRESSION = /^[\s/*]*@ts-(ignore|expect-error|nocheck)\b/m;
@@ -176,6 +178,34 @@ export function collectFiles(paths: string[]): string[] {
   return found;
 }
 
+/** Finds JavaScript files under `paths`, skipping the same directories as `collectFiles`. */
+function findJavaScriptFiles(paths: string[]): string[] {
+  const found: string[] = [];
+  const walk = (path: string): void => {
+    if (!existsSync(path)) return;
+    if (statSync(path).isDirectory()) {
+      for (const entry of readdirSync(path).sort()) {
+        if (!SKIPPED_DIRS.has(entry)) walk(join(path, entry));
+      }
+    } else if (JAVASCRIPT_EXTENSIONS.has(extname(path))) {
+      found.push(path);
+    }
+  };
+  paths.forEach(walk);
+  return found;
+}
+
+/** Rejects every JavaScript file under `paths`: those files must be TypeScript. */
+export function checkJavaScriptOnly(paths: string[]): Violation[] {
+  return findJavaScriptFiles(paths).map((file) => ({
+    file,
+    line: 1,
+    column: 1,
+    rule: "no-javascript-file",
+    message: "JavaScript file; convert it to TypeScript",
+  }));
+}
+
 export function formatViolation(v: Violation): string {
   return `${v.file}:${v.line}:${v.column} ${v.rule}: ${v.message}`;
 }
@@ -193,7 +223,7 @@ export function defaultRoots(dir: string): string[] {
 /** CLI entry. Returns the process exit code: 0 clean, 1 violations. */
 export function main(args: string[]): number {
   const roots = args.length > 0 ? args : defaultRoots(".");
-  const violations = collectFiles(roots).flatMap(checkFile);
+  const violations = [...checkJavaScriptOnly(roots), ...collectFiles(roots).flatMap(checkFile)];
   for (const violation of violations) console.error(formatViolation(violation));
   if (violations.length > 0) {
     console.error(`${violations.length} TypeScript policy violation(s)`);
