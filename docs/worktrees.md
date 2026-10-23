@@ -47,7 +47,8 @@ Dyna also keeps every tree whose recorded workflow is still running.
 A finished standalone workflow counts as a closed owner.
 
 Closing a session runs maintenance for its owned worktrees and scratch files.
-Dyna reports kept worktrees to the parent in one message.
+Dyna reports each kept worktree quietly to its owning session as an engine
+event. Repeated notices for the same owner, tree and reason are suppressed.
 When the PR watcher sees a merge, maintenance checks that PR branch immediately.
 An open owner gets one notice and keeps its worktree until the session closes.
 A finished session is dormant but still open, so it also keeps its worktrees.
