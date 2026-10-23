@@ -209,10 +209,10 @@ func (s *Service) advanceSyncOperation(ctx context.Context, repo string, op lane
 		if err != nil {
 			return finish("failed", err.Error())
 		}
-		if ci.Status == "failed" {
+		if ci.Status == VerdictFailed {
 			return finish("failed", ci.Logs)
 		}
-		if ci.Status != "passed" {
+		if ci.Status != VerdictPassed {
 			return nil
 		}
 		op.State = "publishing"
@@ -226,10 +226,10 @@ func (s *Service) advanceSyncOperation(ctx context.Context, repo string, op lane
 		if err != nil {
 			return finish("failed", err.Error())
 		}
-		if ci.Status == "failed" {
+		if ci.Status == VerdictFailed {
 			return finish("failed", ci.Logs)
 		}
-		if ci.Status != "passed" {
+		if ci.Status != VerdictPassed {
 			return nil
 		}
 		if op.Kind == "refresh" {

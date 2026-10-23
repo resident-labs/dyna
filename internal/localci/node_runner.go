@@ -244,7 +244,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	defer func() {
 		result.Checks = append([]SuiteResult(nil), result.Suites...)
 		if aggregate {
-			status := "passed"
+			status := OutcomePassed
 			for _, check := range result.Suites {
 				if check.Suite == "frontend" || check.Suite == "frontend-check" || check.Suite == "go-static" || strings.HasPrefix(check.Suite, "go-test-shard-") {
 					status = combinedStatus(status, check.Status)
@@ -360,14 +360,14 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	return result, nil
 }
 
-func combinedStatus(a, b string) string {
-	if a == "error" || b == "error" {
-		return "error"
+func combinedStatus(a, b Outcome) Outcome {
+	if a == OutcomeError || b == OutcomeError {
+		return OutcomeError
 	}
-	if a == "failed" || b == "failed" {
-		return "failed"
+	if a == OutcomeFailed || b == OutcomeFailed {
+		return OutcomeFailed
 	}
-	return "passed"
+	return OutcomePassed
 }
 
 // Slots belong to checks, across repositories and runner processes. A waiter

@@ -371,7 +371,7 @@ func localCIFailedSuites(ctx context.Context, registry localCIRegistry, r Record
 	}
 	var failed []localci.SuiteResult
 	for _, suite := range result.Checks {
-		if suite.Status == "failed" || suite.Status == "error" {
+		if suite.Status == localci.OutcomeFailed || suite.Status == localci.OutcomeError {
 			failed = append(failed, suite)
 		}
 	}
