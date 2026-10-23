@@ -52,7 +52,7 @@ var help = map[string]string{
 	settings.KeyWorktreesRetention:    "Which isolated worktrees a workflow keeps after an agent ends: changed ones, all, or none.",
 	settings.KeyLocalCIRemote:         "SSH destination and absolute cache directory for local CI. Applies to the next CI run.",
 	settings.KeyWorktreesRoot:         "Directory for new managed worktrees. Defaults to ~/.dyna-worktrees. Applies to the next worktree creation.",
-	settings.KeyWorktreesMinFreeBytes: "Minimum free disk space before worktree maintenance runs garbage collection. Defaults to 10 GiB. Accepts byte counts and sizes such as 10 GiB; zero disables the free-space trigger.",
+	settings.KeyWorktreesMinFreeBytes: "Minimum free disk space before worktree maintenance runs garbage collection. Defaults to 10 GiB. Accepts byte counts and sizes such as 10 GiB; zero disables the free-space trigger. A RAM-backed file system such as /tmp is judged by its share of free space instead.",
 	settings.KeyRootProfile:           "Profile for new internal root sessions (default opus). Existing roots keep their profile. Missing or disabled profiles use the default profile.",
 	settings.KeySubagentMaxDepth:      "How deep sessions may nest. Your own sessions are depth 1.",
 	settings.KeySteeringToolWait:      "How long a message to a busy session waits for a running tool before it interrupts the tool.",

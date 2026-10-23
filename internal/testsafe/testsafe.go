@@ -9,7 +9,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
+
+	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/procident"
 )
 
 // rootEnv carries the first test binary's temporary folder to the test
@@ -27,13 +33,32 @@ var tempRoot = startRoot()
 // DYNA_TESTSAFE_ROOT, such as "/" or a real home, never widens the guard.
 const rootMarker = ".dyna-testsafe-root"
 
+// tempPrefix names the temporary folders this package makes. A name carries
+// the ID of the test binary that made it, so a later binary can remove the
+// folders of a binary that has ended.
+const tempPrefix = "dyna-test-"
+
+// staleAfter is how long a folder of an ended test binary must stand before a
+// later binary removes it: a binary that still runs keeps writing it, and a
+// process ID can come back.
+const staleAfter = 5 * time.Minute
+
 func startRoot() string {
-	if root := os.Getenv(rootEnv); filepath.IsAbs(root) {
-		if _, err := os.Stat(filepath.Join(root, rootMarker)); err == nil {
-			return root
-		}
+	if inheritedRoot() {
+		return os.Getenv(rootEnv)
 	}
 	return os.TempDir()
+}
+
+// inheritedRoot reports whether this binary continues a test run that started
+// earlier.
+func inheritedRoot() bool {
+	root := os.Getenv(rootEnv)
+	if !filepath.IsAbs(root) {
+		return false
+	}
+	_, err := os.Stat(filepath.Join(root, rootMarker))
+	return err == nil
 }
 
 // Check refuses a test's folder outside the temporary folder: a test never
@@ -51,11 +76,16 @@ func Check(dir string) error {
 // settings.json) or /run/user/<uid>, starts with temporary ones instead.
 // Processes the tests start, such as a real dyna command or turn runner,
 // inherit them, so nothing reaches the live engine, dyna.db or settings.
-// The temporary folders stay under TMPDIR after the run; nothing removes
-// them.
+// The folders stay under TMPDIR after the run. The next test binary removes
+// them, and maintenance removes the folders no later run reaches.
 func init() {
 	if !testing.Testing() {
 		return
+	}
+	// Only the binary that owns the root removes what earlier runs left: a
+	// child binary reuses its parent's folders and must not touch them.
+	if !inheritedRoot() {
+		pruneStale(tempRoot, time.Now(), procident.Alive)
 	}
 	if err := os.WriteFile(filepath.Join(tempRoot, rootMarker), nil, 0o600); err == nil {
 		os.Setenv(rootEnv, tempRoot)
@@ -78,10 +108,47 @@ func init() {
 }
 
 func temporary(key, real string) string {
-	dir, err := os.MkdirTemp(tempRoot, "dyna-test-")
+	dir, err := os.MkdirTemp(tempRoot, fmt.Sprintf("%s%d-", tempPrefix, os.Getpid()))
 	if err != nil {
 		panic(fmt.Errorf("make a temporary %s: %w", key, err))
 	}
 	log.Printf("testsafe: %s %s is outside %s; this test binary uses %s", key, real, tempRoot, dir)
 	return dir
+}
+
+// pruneStale removes the folders that test binaries which have ended left in
+// root, so a run of the suite does not fill the temporary folder. A folder of
+// a binary that older Dyna builds made has no ID, and maintenance removes it.
+func pruneStale(root string, now time.Time, alive func(int) bool) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		pid, ok := folderPID(entry.Name())
+		if !ok || alive(pid) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil || now.Sub(info.ModTime()) < staleAfter {
+			continue
+		}
+		if err := fsutil.RemoveTree(filepath.Join(root, entry.Name())); err != nil {
+			log.Printf("testsafe: remove %s: %v", entry.Name(), err)
+		}
+	}
+}
+
+// folderPID reads the ID of the test binary that made a temporary folder.
+func folderPID(name string) (int, bool) {
+	rest, ok := strings.CutPrefix(name, tempPrefix)
+	if !ok {
+		return 0, false
+	}
+	digits, _, ok := strings.Cut(rest, "-")
+	if !ok {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(digits)
+	return pid, err == nil && pid > 0
 }

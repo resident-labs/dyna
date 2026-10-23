@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 // Stat is the identity of one process.
@@ -46,4 +47,11 @@ func Read(procRoot string, pid int) (Stat, error) {
 		return Stat{}, fmt.Errorf("start time: %w", err)
 	}
 	return Stat{PID: pid, ParentPID: parent, StartTime: start}, nil
+}
+
+// Alive reports whether a process exists. A process of another user answers
+// with a permission error, which still means it exists.
+func Alive(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	return err == nil || !errors.Is(err, syscall.ESRCH)
 }
