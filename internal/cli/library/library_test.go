@@ -87,6 +87,16 @@ func TestLibraryLinkAndUpdate(t *testing.T) {
 	}
 }
 
+// link removes paths as well as adds them, so a retired doc or test can go.
+func TestLibraryLinkRemovesAPath(t *testing.T) {
+	must := seeded(t)
+	must("link", "claude-code", "--docs", "docs/agents.md,docs/claude.md", "--tests", "agents/claude/*_test.go")
+	out := must("link", "claude-code", "--remove-docs", "docs/agents.md", "--remove-tests", "agents/claude/*_test.go")
+	if !strings.Contains(out, "Docs:\n  docs/claude.md\n") || strings.Contains(out, "docs/agents.md") || strings.Contains(out, "agents/claude/*_test.go") {
+		t.Fatalf("unlinked paths stay in the entry:\n%s", out)
+	}
+}
+
 func TestLibraryListTreeAndStale(t *testing.T) {
 	must := seeded(t)
 	if tree := must("list", "--tree"); !strings.Contains(tree, "agent-harnesses  Runs") || !strings.Contains(tree, "\n  claude-code  Runs Claude Code.") {
