@@ -24,6 +24,19 @@ var mergeFailedPackage = regexp.MustCompile(`(?:^|\s)FAIL[ \t]+([^\s]+)[ \t]+(?:
 // mergeBuildError matches a compiler, vet or type-check error that names a file
 // and a line, such as a Go build error or a svelte-check error line.
 var mergeBuildError = regexp.MustCompile(`(?:^|[\s(])([\w./-]+\.(?:go|ts|tsx|js|svelte|css)):(\d+):`)
+
+// mergeWorkspacePrefix drops the absolute prefix a CI workspace adds, so a
+// diagnostic names the same repository-relative file the trial patches use.
+var mergeWorkspacePrefix = regexp.MustCompile(`^(?:/workspace/|/github/workspace/|/home/runner/work/[^/]+/[^/]+/|/builds/[^/]+/[^/]+/)`)
+
+// mergeRepoPath turns a path from CI output into a repository-relative path.
+func mergeRepoPath(name string) string {
+	if prefix := mergeWorkspacePrefix.FindString(name); prefix != "" {
+		return strings.TrimPrefix(name, prefix)
+	}
+	return name
+}
+
 var mergeFailedTest = regexp.MustCompile(`--- FAIL:[ \t]+([^\s]+)`)
 
 // mergeFailureReport uses frozen inputs and reads source as data. Missing
@@ -368,21 +381,33 @@ func localCIFailedSuites(ctx context.Context, registry localCIRegistry, r Record
 // localCFirstEvidence is the first line of a local suite's output that names a
 // real failure, with the files it names. A file and line from a build, vet or
 // type check wins over the suite's exit status and over the package line that
-// only repeats that the build failed.
+// only repeats that the build failed. A bare location keeps its message on the
+// following line, as svelte-check prints it.
 func localCFirstEvidence(text string) (string, []string) {
 	var files []string
 	strong, medium, fallback := "", "", ""
-	for _, line := range strings.Split(text, "\n") {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "Preparing worktree") || strings.HasPrefix(line, "HEAD is now at") {
 			continue
 		}
 		if match := mergeBuildError.FindStringSubmatch(line); len(match) > 1 {
-			if mergeReportSafePath(match[1]) && len(files) < 4 && !slices.Contains(files, match[1]) {
-				files = append(files, match[1])
+			file := mergeRepoPath(match[1])
+			if mergeReportSafePath(file) && len(files) < 4 && !slices.Contains(files, file) {
+				files = append(files, file)
+			}
+			evidence := mergeRepoPath(line)
+			// A bare location line carries no message of its own: only digits and
+			// colons follow the file and line the match consumed.
+			rest := strings.TrimPrefix(line, match[0])
+			if strings.Trim(rest, "0123456789: ") == "" {
+				if message := mergeNextMessage(lines, i+1); message != "" {
+					evidence += " " + message
+				}
 			}
 			if strong == "" {
-				strong = line
+				strong = evidence
 			}
 			continue
 		}
@@ -405,4 +430,22 @@ func localCFirstEvidence(text string) (string, []string) {
 		}
 	}
 	return "", files
+}
+
+// mergeNextMessage is the diagnostic that follows a bare location line.
+func mergeNextMessage(lines []string, from int) string {
+	for i := from; i < len(lines); i++ {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			continue
+		}
+		if match := mergeBuildError.FindStringSubmatch(line); len(match) > 1 {
+			return ""
+		}
+		if strings.HasPrefix(line, "Error:") || strings.Contains(line, "error:") {
+			return mergeRepoPath(line)
+		}
+		return ""
+	}
+	return ""
 }
