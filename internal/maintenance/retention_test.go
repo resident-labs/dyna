@@ -283,7 +283,7 @@ func TestArchivedRunRetentionProtectsReadOnlyRecoveryRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 	journal := filepath.Join(dir, "journal.jsonl")
-	if err := os.WriteFile(journal, []byte("recovery evidence\n"), 0400); err != nil {
+	if err := os.WriteFile(journal, []byte("{\"type\":\"recovery evidence\"}\n"), 0400); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []string{path, journal, dir} {
@@ -319,7 +319,7 @@ func TestArchivedRunRetentionProtectsReadOnlyRecoveryRecords(t *testing.T) {
 		}
 	}
 	got, err := os.ReadFile(journal)
-	if err != nil || string(got) != "recovery evidence\n" {
+	if err != nil || string(got) != "{\"type\":\"recovery evidence\"}\n" {
 		t.Fatalf("protected evidence changed: %q %v", got, err)
 	}
 }
