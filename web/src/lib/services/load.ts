@@ -1,8 +1,8 @@
 // Loads what the service cards need, each call on its own: one that fails
 // (a caller without admin scope cannot read settings) leaves its part null
 // and the others still show.
-import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, ServiceInfo as ServiceRow, TestHealth, UsageRow } from './model.ts'
-import { readAccounts, readBudget, readHookRuns, readHookSummary, readMergeState, readNotices, readTestHealth, readHistory, readReviewer, readServices, readSettings, readUsage, readVoice } from './read.ts'
+import type { AccountsInfo, BudgetInfo, HookRow, HookRunRow, MergeHistoryRow as HistoryRow, NoticeRow, QueueRow, ReviewerInfo, ServiceInfo as ServiceRow, SyncInfo, TestHealth, UsageRow } from './model.ts'
+import { readAccounts, readBudget, readHookRuns, readHookSummary, readMergeState, readNotices, readSync, readTestHealth, readHistory, readReviewer, readServices, readSettings, readUsage, readVoice } from './read.ts'
 
 export interface ServiceApi {
   listServices(room: string): Promise<unknown>
@@ -16,10 +16,11 @@ export interface ServiceApi {
   roomCIBudget(room: string): Promise<unknown>
   accountUsageCached(): Promise<unknown>
   ciHealth(room: string, runs: number): Promise<unknown>
+  syncStatus(): Promise<unknown>
 }
 
-export type Part = 'services' | 'reviewer' | 'queue' | 'history' | 'settings' | 'usage' | 'voice' | 'hooks' | 'notices' | 'budget' | 'accounts' | 'tests'
-export const allParts: Part[] = ['services', 'reviewer', 'queue', 'history', 'settings', 'usage', 'voice', 'hooks', 'notices', 'budget', 'accounts', 'tests']
+export type Part = 'services' | 'reviewer' | 'queue' | 'history' | 'settings' | 'usage' | 'voice' | 'hooks' | 'notices' | 'budget' | 'accounts' | 'tests' | 'sync'
+export const allParts: Part[] = ['services', 'reviewer', 'queue', 'history', 'settings', 'usage', 'voice', 'hooks', 'notices', 'budget', 'accounts', 'tests', 'sync']
 
 export interface ServiceData {
   pending: Part[] // parts whose call has not answered yet; each card shows loading until its part arrives
@@ -37,9 +38,10 @@ export interface ServiceData {
   budget: BudgetInfo | null
   accounts: AccountsInfo | null
   testHealth: TestHealth | null
+  laneSync: SyncInfo | null
 }
 
-export const emptyData: ServiceData = { pending: allParts, services: [], reviewer: null, queue: null, mergePaused: null, history: [], settings: null, usage: null, voice: null, hooks: null, runs: {}, notices: null, budget: null, accounts: null, testHealth: null }
+export const emptyData: ServiceData = { pending: allParts, services: [], reviewer: null, queue: null, mergePaused: null, history: [], settings: null, usage: null, voice: null, hooks: null, runs: {}, notices: null, budget: null, accounts: null, testHealth: null, laneSync: null }
 
 // A call that does not answer in this time counts as failed, so a card shows an error and never loads forever.
 export const CALL_TIMEOUT_MS = 20000
@@ -100,6 +102,7 @@ export async function loadServiceData(
     load('budget', () => api.roomCIBudget(room), readBudget, (d, v) => ({ ...d, budget: v })),
     load('accounts', () => api.accountUsageCached(), readAccounts, (d, v) => ({ ...d, accounts: v })),
     load('tests', () => api.ciHealth(room, 30), readTestHealth, (d, v) => ({ ...d, testHealth: v })),
+    load('sync', () => api.syncStatus(), readSync, (d, v) => ({ ...d, laneSync: v })),
     runs,
   ])
   return data

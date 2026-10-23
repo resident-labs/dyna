@@ -54,6 +54,7 @@ export const api = {
   notices: () => Promise.resolve([{ key: 'provider:sol', severity: 'warn', text: 'sol: provider limit reached, resets in 60m' }]),
   roomCIBudget: () => Promise.resolve({ ciWarnAfter: '3m0s', ciFailAfter: '4m0s', ciTestMax: '1s' }),
   accountUsageCached: () => Promise.resolve({ accounts: [{ observedAt: iso(12), stale: true }] }),
+  syncStatus: () => Promise.resolve({ '/repo': { remotes: { origin: { ahead: 0, behind: 0, checkedAt: iso(3), lastError: '' } }, operation: null } }),
   ciHealth: () => Promise.resolve({ limitMs: 1000, tests: [{ test: 'TestWorse', limitMs: 1000, runs: [{ durationMs: 1200 }, { durationMs: 900 }] }] }),
   setReviewEnabled: (room, on) => { globalThis.__writes = (globalThis.__writes || []).concat('review.enabled ' + on); return Promise.reject(new Error('engine said no')) },
 }
@@ -98,7 +99,7 @@ test('the page has one tab per service family, and More holds the services with 
     const names = [...page.root.querySelectorAll('[role="tab"]')].map((t) => textOf(t).trim())
     assert.deepEqual(names, ['Merges', 'Reviews', 'Updates and hooks', 'Librarian', 'CI health', 'More'])
     const more = textOf(open(page, 'More'))
-    for (const name of ['Conflict radar', 'Maintenance', 'Account usage', 'Voice']) assert.match(more, new RegExp(name))
+    for (const name of ['Conflict radar', 'PR watcher', 'Lane sync', 'Maintenance', 'Account usage', 'Voice']) assert.match(more, new RegExp(name))
     assert.doesNotMatch(more, /no switch|always on/)
   } finally { await page.done() }
 })
