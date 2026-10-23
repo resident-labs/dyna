@@ -194,8 +194,8 @@ func tellPrompt(text string, shared []room.Attachment) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// A spoken turn result is clipped like Codex output: about 1,000 tokens as a
-// head, a marker and a tail, so the end of a long result survives.
+// A spoken turn result is clipped like Codex output: resultBudget is bytes,
+// about 1,000 English tokens, split between a head and a tail.
 const (
 	resultBudget = 4000
 	resultMarker = "\n…output truncated…\n"
