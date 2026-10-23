@@ -3,8 +3,11 @@ package profiles
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -66,6 +69,59 @@ func TestProfilesAddUseFlagAndJSON(t *testing.T) {
 	runProfilesCommand(t, "set", "solo", "--use", "workflows,agents,services")
 	if got := uses(); got != nil {
 		t.Fatalf("all three uses saved %v, want none", got)
+	}
+}
+
+func TestProfilesAddDiagnostics(t *testing.T) {
+	isolateProfiles(t)
+	runProfilesCommand(t, "add", "--name", "rated", "--harness", "mock", "--diagnostics", "9")
+	store, err := profile.Load(profile.DefaultPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := store.Get("rated"); !ok || p.Diagnostics != 9 {
+		t.Fatalf("saved profile = %+v, want diagnostics 9", p)
+	}
+	if list := runProfilesCommand(t, "list"); !strings.Contains(list, "diagnostics: 9/10") {
+		t.Fatalf("list output missing diagnostics: %s", list)
+	}
+	// A plain add keeps the neutral default of 5.
+	runProfilesCommand(t, "add", "--name", "plain", "--harness", "mock")
+	plain, _ := profile.Load(profile.DefaultPath())
+	if q, _ := plain.Get("plain"); q.Diagnostics != 5 {
+		t.Fatalf("default diagnostics = %d, want 5", q.Diagnostics)
+	}
+}
+
+// A store written before the rating existed has no diagnostics key, so the CLI
+// must show the neutral 5 for it rather than a zero.
+func TestProfilesShowNeutralDiagnosticsForOldProfiles(t *testing.T) {
+	isolateProfiles(t)
+	legacy := `{"version":3,"profiles":[{"name":"old","harness":"mock","taste":5,"intelligence":5,"cost":5}]}`
+	if err := os.MkdirAll(filepath.Dir(profile.DefaultPath()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(profile.DefaultPath(), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	type ratingRow struct {
+		Name        string `json:"name"`
+		Diagnostics int    `json:"diagnostics"`
+	}
+	var rows []ratingRow
+	if err := json.Unmarshal([]byte(runProfilesCommand(t, "list", "--all", "--json")), &rows); err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(rows, func(r ratingRow) bool { return r.Name == "old" })
+	if i < 0 || rows[i].Diagnostics != 5 {
+		t.Fatalf("list --json ratings = %+v, want old at 5", rows)
+	}
+	var one ratingRow
+	if err := json.Unmarshal([]byte(runProfilesCommand(t, "show", "old")), &one); err != nil {
+		t.Fatal(err)
+	}
+	if one.Diagnostics != 5 {
+		t.Fatalf("show diagnostics = %d, want 5", one.Diagnostics)
 	}
 }
 

@@ -90,7 +90,7 @@ func (s *Service) chooseProfile(cfg Reviewer) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	return rolesession.ChooseProfile(profiles, cfg.Profile, rolesession.MergeFailures(cfg.FailedProfiles, recent), s.now(), "reviewer")
+	return rolesession.ChooseProfile(profiles, cfg.Profile, rolesession.MergeFailures(cfg.FailedProfiles, recent), s.now(), subagent.RoleReviewer)
 }
 
 func (s *Service) SetReviewEnabled(roomID string, enabled bool) error {
