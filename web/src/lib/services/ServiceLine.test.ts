@@ -4,11 +4,11 @@ import test from 'node:test'
 import { bundle, domNames, importBundle, installDom } from '../prs/prDetailHarness.ts'
 import type { Row } from './model.ts'
 
-const code = await bundle({ component: '../services/ServiceList' })
+const code = await bundle({ component: '../services/ServiceLine' })
 
 const row = (over: Partial<Row>): Row => ({
   id: 'update', name: 'Update Dyna', state: 'on', tone: 'on', detail: 'When main updates · last passed',
-  profileStatus: '', toggle: { id: 'update.enabled', on: true }, profile: null, value: '', last: '',
+  toggle: { id: 'update.enabled', on: true }, profile: null, value: '', last: '',
   nextAt: '', nextText: '', filterable: true, ...over,
 })
 
@@ -16,8 +16,8 @@ const row = (over: Partial<Row>): Row => ({
 // refuse or hold it, so a test controls the order of the answers.
 async function mount(rows: Row[], onWrite: (id: string, value: string | boolean) => Promise<void>) {
   const dom = installDom()
-  const { dir, default: C, mount, unmount, flushSync } = await importBundle(code, '../services/ServiceList')
-  const app = mount(C, { target: document.getElementById('app'), props: { rows, selected: '', onSelect: () => {}, onWrite, onRun: async () => {} } })
+  const { dir, default: C, mount, unmount, flushSync } = await importBundle(code, '../services/ServiceLine')
+  const app = mount(C, { target: document.getElementById('app'), props: { rows, onWrite, onRun: async () => {} } })
   const root = document.getElementById('app')
   assert.ok(root)
   // The handlers await the fake page, so a few microtask turns reach the
