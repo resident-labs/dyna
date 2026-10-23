@@ -1,4 +1,4 @@
-<script>
+<script lang="ts">
   // The Voice call on a phone (design option A): the orb first, the call's
   // conversation in a bottom sheet, and a bubble while minimized. It shows the
   // same call state as the floating widget, with touch-sized controls.
@@ -13,23 +13,47 @@
   import QuestionCard from './QuestionCard.svelte'
   import { icons } from './icons.ts'
   import { dialog } from '../ui/dialog.ts'
+  import type { CallState } from './callState.ts'
+  import type { CallRow, SharedFile, SharedItem } from './conversation.ts'
+  import type { Layout, PhoneEvent, PhoneUI } from './phone.ts'
+  import type { Attachment, Question } from '../api/room.ts'
 
   // shared: the unseen shared items, oldest first; the banner shows the newest.
-  let { s, layout, ui, onui, rows, question, length, onclose, shared, onopenshared, ondismissshared } = $props()
+  let { s, layout, ui, onui, rows, question, length, onclose, shared, onopenshared, ondismissshared }: {
+    s: CallState
+    layout: Layout
+    ui: PhoneUI
+    onui: (e: PhoneEvent) => void
+    rows: CallRow[]
+    question: Question | null
+    length: string
+    onclose: () => void
+    shared: SharedItem[]
+    onopenshared: (share: SharedItem) => void
+    ondismissshared: (share: SharedItem) => void
+  } = $props()
 
   // The mode menu renders inside the call screen: the screen is an opaque
   // modal above the app, and a menu outside it would open behind it.
-  let modeMenu = $state(null)
+  let modeMenu = $state<{ x: number; y: number; anchor: HTMLElement } | null>(null)
   let o = $derived(orb(s))
   let mic = $derived(micControl(s))
   let active = $derived(['starting', 'connecting', 'live', 'ending'].includes(s.phase))
   let last = $derived(rows.at(-1))
-  let peek = $derived(!last ? 'The conversation appears here.' : last.tool ? `Voice · ${last.tool.label}` : last.share ? shareLine(last.share) : last.ask ? `Voice · started: ${last.post.text}` : `${NAMES[last.who]}${last.tag ? ' · ' + last.tag : ''}: ${last.post.text}`)
+  let peek = $derived(!last ? 'The conversation appears here.' : last.tool ? `Voice · ${last.tool.label}` : last.share ? shareLine(last.share) : last.ask ? `Voice · started: ${last.post?.text}` : `${last.who ? NAMES[last.who] : ''}${last.tag ? ' · ' + last.tag : ''}: ${last.post?.text}`)
+  // newest is the shared file the banner shows.
+  let newest = $derived(shared.at(-1))
+  // stored is a shared file as a stored Attachment. A shared file may instead
+  // be one the engine listed in a post's text; it carries the same id, name,
+  // mime and title that SharedBanner and the app's viewer read, and no wider
+  // type fits both of them.
+  const stored = (att: SharedFile): Attachment => att as Attachment
 
   // One mic control: tap to mute in open mic, hold to talk in push to talk.
-  function micDown(e) {
+  function micDown(e: PointerEvent) {
+    const source = e.currentTarget
     if (!mic.hold || e.button !== 0) return
-    e.currentTarget.setPointerCapture(e.pointerId)
+    if (source instanceof HTMLElement) source.setPointerCapture(e.pointerId)
     voiceCall.talk(true)
   }
   const micUp = () => mic.hold && voiceCall.talk(false)
@@ -37,9 +61,12 @@
 
   // The open sheet follows the newest row, unless the owner scrolled up to
   // read earlier ones.
-  let body = $state(null)
+  let body = $state<HTMLDivElement>()
   let pinned = true
-  const onscroll = () => { pinned = body.scrollHeight - body.scrollTop - body.clientHeight < 48 }
+  const onscroll = () => {
+    if (!body) return
+    pinned = body.scrollHeight - body.scrollTop - body.clientHeight < 48
+  }
   $effect(() => {
     rows.length
     s.partial
@@ -47,10 +74,10 @@
   })
 </script>
 
-{#snippet micIcon(size)}
+{#snippet micIcon(size: number)}
   <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true"><path d={s.muted || s.deafened ? icons.micOff : icons.mic} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
 {/snippet}
-{#snippet hangIcon(size)}
+{#snippet hangIcon(size: number)}
   <svg viewBox="0 0 24 24" width={size} height={size} aria-hidden="true"><path d={icons.phone} fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" transform="rotate(135 12 12)" /></svg>
 {/snippet}
 
@@ -78,7 +105,7 @@
       <div class="title"><strong>Voice</strong><span>#{s.room}{#if length && active}{' · '}{length}{/if}</span></div>
       <span class="round-space" aria-hidden="true"></span>
     </header>
-    {#if shared.length}<div class="shared"><SharedBanner roomId={s.roomId} share={shared.at(-1)} onopen={onopenshared} ondismiss={ondismissshared} /></div>{/if}
+    {#if newest}<div class="shared"><SharedBanner roomId={s.roomId} share={{ ...newest, att: stored(newest.att) }} onopen={onopenshared} ondismiss={ondismissshared} /></div>{/if}
 
     <div class="stage" class:small={ui.sheet || !!question}>
       <div class="orb {o.tone}" aria-hidden="true">
@@ -101,10 +128,11 @@
     {#if question}<div class="card"><QuestionCard {question} roomId={s.roomId} live={s.phase === 'live'} phone /></div>{/if}
 
     {#if s.switchTo}
+      {@const moveTo = s.switchTo}
       <div class="ask" role="alertdialog" aria-label="Move the call">
-        <p>End the call in {s.room} and call from {s.switchTo.room}?</p>
+        <p>End the call in {s.room} and call from {moveTo.room}?</p>
         <div class="row">
-          <button class="btn pri lg" onclick={() => voiceCall.switchHere(s.switchTo.roomId, s.switchTo.room)}>End and call here</button>
+          <button class="btn pri lg" onclick={() => voiceCall.switchHere(moveTo.roomId, moveTo.room)}>End and call here</button>
           <button class="btn quiet lg" onclick={voiceCall.cancelSwitch}>Cancel</button>
         </div>
       </div>
@@ -154,7 +182,7 @@
       </div>
     {/if}
     {#if modeMenu}
-      <Menu x={modeMenu.x} y={modeMenu.y} title="Microphone" items={micModes(s).map((m) => ({ label: m.label, hint: m.current ? '✓' : '', run: () => voiceCall.setPushToTalk(m.on) }))} onclose={() => { const a = modeMenu?.anchor; modeMenu = null; a?.focus?.() }} />
+      <Menu x={modeMenu.x} y={modeMenu.y} title="Microphone" items={micModes(s).map((m) => ({ label: m.label, hint: m.current ? '✓' : '', run: () => voiceCall.setPushToTalk(m.on) }))} onclose={() => { const a = modeMenu?.anchor; modeMenu = null; a?.focus() }} />
     {/if}
   </div>
 {/if}
