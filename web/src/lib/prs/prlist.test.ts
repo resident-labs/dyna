@@ -225,36 +225,6 @@ async function load(name: string) {
 }
 const text = (html: string) => html.replace(/<!--.*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
 
-test('status box draws the steps, the sentence and the main button', async () => {
-  const { dir, component, render } = await load('StatusBox')
-  try {
-    const show = (change: Row, props: object = {}) => render(component, { props: { change, roomId: 'r', ...props } }).body
-    const html = show(ready({ botReviews: [bot('rabbit', 'changes_requested')], policy: { requiredChecks: [], review: 'on' } }), { onrules: () => {} })
-    const t = text(html)
-    assert.match(t, /CI passed .*Review approved .*Merge ready/)
-    assert.match(t, /The reviewer approved this PR\. It merges cleanly into main\./)
-    assert.match(t, /rabbit asked for changes\. This does not block the merge\./)
-    assert.doesNotMatch(t, /Merge pull request/)
-    assert.match(t, /Uses room rules · change for this PR/)
-    assert.match(show(ready({ hasPolicyOverride: true }), { onrules: () => {} }), /Own rules for this PR/)
-    // A pending review has no manual merge action.
-    assert.doesNotMatch(text(show(open({ ci: 'pending' }))), /Merge pull request/)
-    // The CI step says why CI is absent.
-    assert.match(text(show(open({ ci: 'absent', ciReason: 'No CI ran for this change within 5 minutes.' }))), /CI No CI ran for this change within 5 minutes\./)
-    // The comment filter line only shows when it hid something.
-    assert.doesNotMatch(text(show(ready({ filteredComments: 0 }))), /Comment filter/)
-    assert.match(text(show(ready({ filteredComments: 2 }))), /Comment filter: 2 comments or reviews skipped\./)
-    // An untracked PR gets the plain sentence and Track and review, not "Review is off".
-    const none = text(show(open({ status: 'untracked', reviewState: 'off' }), { ontrack: () => {}, onrules: () => {} }))
-    assert.match(none, /Dyna does not watch this PR, so it gets no automatic review\./)
-    assert.match(none, /Track and review/)
-    assert.doesNotMatch(none, /Review is off|Merge pull request|room rules/)
-    const closed = text(show(open({ state: 'closed', reviewState: 'off' }), { onrules: () => {} }))
-    assert.doesNotMatch(closed, /off|Merge pull request|room rules/i)
-    assert.match(text(show(open({ ci: 'passed', reviewState: 'reviewing' }), { onsession: () => {} })), /Watch the reviewer/)
-  } finally { await rm(dir, { recursive: true, force: true }) }
-})
-
 test('checks show a summary, the failure with its log first, and fold the rest', async () => {
   const { dir, component, render } = await load('PRChecks')
   try {
@@ -293,20 +263,6 @@ test('the main branch CI row is informational during batch trials', async () => 
     assert.match(row({ state: 'failed', head: sha }), /main branch CI failed at 0a13514; the batch trial must pass/)
     assert.doesNotMatch(row({ state: 'passed', head: sha }), /main branch/)
     assert.doesNotMatch(row(null), /main branch/)
-  } finally { await rm(dir, { recursive: true, force: true }) }
-})
-
-test('the PR card shows the title, one facts line and one status box, and no CI checks twice', async () => {
-  const { dir, component, render } = await load('PRCard')
-  try {
-    const pr = ready({ title: 'Run agent turns', repo: 'o/r', url: 'https://github.com/o/r/pull/131', branch: 'f', base: 'main', authorSession: 's1', checks: [{ name: 'go-test', state: 'success' }], botReviews: [{ bot: 'rabbit', state: 'commented', findings: 1, url: '' }] })
-    const t = text(render(component, { props: { pr, names: { s1: 'lets-work' }, roomId: 'r', showChecks: false } }).body)
-    assert.match(t, /#1 Run agent turns/)
-    assert.match(t, /lets-work · f → main/)
-    assert.doesNotMatch(t, /undefined|checks passed|Bot reviews/)
-    const both = text(render(component, { props: { pr, names: {}, roomId: 'r' } }).body)
-    assert.equal((both.match(/Bot reviews/g) || []).length, 1)
-    assert.match(both, /Bot reviews/)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 

@@ -17,7 +17,7 @@ export function skeleton(): string {
 }
 
 export function loadingSession(): string {
-  return render(Session, { props: { room, session: null, onsend: async () => undefined, onopenfile: noop, onchild: noop, onpr: noop, onjob: noop } }).body
+  return render(Session, { props: { room, session: null, onsend: async () => undefined, onopenfile: noop, onchild: noop, onjob: noop } }).body
 }
 
 const post = (fields: Partial<Post>): Post => ({

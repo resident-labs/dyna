@@ -11,7 +11,7 @@ import { call, sourceRange, stripTypes } from '../../../test/svelte-source.ts'
 const A = 'room_20261017-100000-aaaaaaaa'
 const B = 'room_20261017-100000-bbbbbbbb'
 const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
-const names = ['clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'openView', 'selectRoom', 'openSession', 'openTarget', 'hashTarget', 'openPR']
+const names = ['openReview', 'clearItemLink', 'holdsItemLink', 'syncRoute', 'routeHere', 'openView', 'selectRoom', 'openSession', 'openTarget', 'hashTarget', 'openPR']
 const handlers = (parse(source, { modern: true }).instance?.content.body ?? []).filter((n) => n.type === 'FunctionDeclaration' && names.includes(n.id.name)).map((n) => { const { start, end } = sourceRange(n); return stripTypes(source.slice(start, end)) }).join('\n')
 // The slice of App's state the handlers read and write.
 interface Harness {
@@ -30,7 +30,7 @@ function app(hash: string): Harness {
   const c: Harness = {
     callTarget, callPush: null, URLSearchParams, location, history, entries, parsePRHash, parseIssueHash, parseFileHash, prHash, parseDetailHref: () => null,
     ROOT_SESSION, parseRoute, routeHash, routeSession, writeRoute, started: true, routing: 0, routeFix: false, pop: null, readOnlyDm: false, openRun: '',
-    roomId: A, view: 'github', drill: null, detailRequest: 0, roomRequest: 0, sessionVisit: 0,
+    roomId: A, reviewOpen: false, reviewTab: 'files', reviewVersion: 0, isChannel: (v: string) => v === 'general', loadChanges() {}, loadReviewer() {}, view: 'general', drill: null, detailRequest: 0, roomRequest: 0, sessionVisit: 0,
     GENERAL: 'general', hasTerminal: true, feed: null, feedAtBottom: false, needPair: false,
     selectionRevision: 0, consolidationRequest: 0, consolidationView: 0, questionsRequest: 0,
     rooms: [{ id: A }, { id: B }], ROOM: /^room_/, POST: /^msg_/,
@@ -90,6 +90,6 @@ test('a reload or history link keeps the item address while its room loads', asy
     assert.equal(c.location.hash, hash)
     assert.deepEqual(c.entries, [])
     assert.equal(c.roomId, B)
-    assert.equal(c.view, hash.includes('issue=') ? 'issues' : 'github')
+    assert.equal(c.view, hash.includes('issue=') ? 'issues' : 'general')
   }
 })

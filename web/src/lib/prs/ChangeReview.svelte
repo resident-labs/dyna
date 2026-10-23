@@ -1,7 +1,7 @@
 <script lang="ts">
   // The review side of a change: the author's notes, the review rounds, and
   // the findings grouped by severity with their replies. Authors answer
-  // reviewer findings; the owner can only resolve their own comments. PRCard
+  // reviewer findings; the owner can only resolve their own comments. PR details
   // draws it as its extra section, for a local change or a PR.
   //
   // Props:

@@ -1,7 +1,7 @@
 <script lang="ts">
   // The Conversation tab of a pull request: the Thread timeline with the
   // reviewer's rounds inline. The latest round opens its verdict and findings
-  // (Verdict, ChangeReview); earlier rounds are one line each. While the latest
+  // (ChangeReview); earlier rounds are one line each. While the latest
   // round has open findings, a card on top links to it. The merge box follows
   // the timeline.
   //
@@ -10,7 +10,7 @@
   //   change    the full change (rounds, findings, verdict), or null
   //   checks    the CI checks, for the CI line
   //   opener names who opened it (authorName)
-  //   names, roomId, onchange   for Verdict and the replies in ChangeReview
+  //   names, roomId, onchange   for the verdict and replies in ChangeReview
   import { tick } from 'svelte'
   import { ago, markdown } from '../ui/format.ts'
   import Card from '../ui/Card.svelte'

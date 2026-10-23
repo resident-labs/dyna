@@ -87,16 +87,6 @@ async function load(name: string) {
 }
 const text = (html: string) => html.replace(/<!--.*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ')
 
-test('the session card keeps the status track and its actions inline', async () => {
-  const { dir, component, render } = await load('PRStory')
-  try {
-    const card = render(component, { props: { pr: reviewing({ title: 'Require --goal', url: 'u' }), roomId: 'r' } }).body
-    assert.match(card, /aria-label="Progress"/)
-    assert.doesNotMatch(card, /pinned/)
-    assert.doesNotMatch(text(card), /Merge pull request/)
-  } finally { await rm(dir, { recursive: true, force: true }) }
-})
-
 test('a row without a merge item keeps its review lane while CI runs', () => {
   assert.equal(laneOf(open({ reviewState: 'reviewing' })), 'review')
   assert.equal(laneOf(open({ reviewState: 'queued' })), 'review')
