@@ -65,6 +65,7 @@ type signInSpec struct {
 // terminal. Every other harness keeps its terminal.
 var signInSpecs = map[string]signInSpec{
 	"codex": {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},
+	"grok":  {Argv: grokDeviceArgv, Parse: parseGrokSignIn},
 }
 
 var (
