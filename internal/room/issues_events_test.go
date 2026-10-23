@@ -147,7 +147,11 @@ func TestGoalAndCheckinWakeRules(t *testing.T) {
 			to: []string{rec.Name + ":" + RootAgent}, wake: true,
 		},
 	} {
-		msg, err := s.PostEventInput(PostEventInput{RoomID: rec.ID, Event: tc.event, To: tc.to, SessionIDs: map[string]string{tc.to[0]: "ses_parent"}})
+		in := PostEventInput{RoomID: rec.ID, Event: tc.event, To: tc.to, SessionIDs: map[string]string{tc.to[0]: "ses_parent"}}
+		if tc.name == "checkin" {
+			in.Producer = ProducerParentCheckin
+		}
+		msg, err := s.PostEventInput(in)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.name, err)
 		}
@@ -159,8 +163,10 @@ func TestGoalAndCheckinWakeRules(t *testing.T) {
 			if !ok || ev.Parent != "ses_parent" || ev.Counts.Idle != 1 || len(ev.Children) != 1 || ev.Children[0].Name != "child" {
 				t.Fatalf("check-in payload = %+v, %v", ev, ok)
 			}
-			if msg.From != ParentCheckInSender {
-				t.Fatalf("check-in sender = %q, want %q", msg.From, ParentCheckInSender)
+			// No invented sender: the check-in comes from the engine, and the
+			// producer is data on the post.
+			if msg.From != EngineSender || msg.Notice.Producer != ProducerParentCheckin {
+				t.Fatalf("check-in sender = %q, producer = %q", msg.From, msg.Notice.Producer)
 			}
 		}
 	}
