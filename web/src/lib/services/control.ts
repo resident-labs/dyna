@@ -6,10 +6,10 @@ export interface ControlHost {
   repo: string
 }
 
-import type { api } from '../../api.ts'
+import type { api } from '../../api.js'
 
 // Select the real browser API methods so unsupported adapters fail the type check.
-export type ControlApi = Pick<typeof api, 'setReviewEnabled' | 'setServiceProfile' | 'setSetting' | 'runHook'>
+export type ControlApi = Pick<typeof api, 'setReviewEnabled' | 'setMergePaused' | 'setServiceProfile' | 'setSetting' | 'runHook' | 'editHook'>
 
 // applyControl writes one control and resolves when the engine has it. It
 // throws the engine's message, which the row shows inline.
@@ -21,10 +21,15 @@ export async function applyControl(api: ControlApi, host: ControlHost, id: strin
       return api.setReviewEnabled(host.room, on)
     case 'review.profile':
       return api.setServiceProfile(host.room, 'reviewer', name)
+    case 'merge.paused':
+      return api.setMergePaused(host.room, on)
     case 'steward.profile':
       return api.setServiceProfile(host.room, 'merge-steward', name)
     case 'library.profile':
       return api.setSetting('library.profile', name)
+    // A hook switch keeps the hook's settings and stops its automatic runs.
+    case 'update.enabled':
+      return api.editHook(host.repo, 'self-update', { disabled: !on })
     case 'update.run':
       return api.runHook(host.repo, 'self-update')
   }

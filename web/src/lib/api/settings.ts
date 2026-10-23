@@ -37,6 +37,15 @@ export interface Hook {
   editedBy?: string
   editedAt?: string
   everyMinutes?: number
+  // disabled keeps the hook's settings and stops its automatic runs.
+  disabled?: boolean
+}
+
+// HookSummary is hooks.Summary: one hook with its newest run, which is what a
+// service line needs to name its trigger and its last result.
+export interface HookSummary {
+  hook: Hook
+  lastRun?: HookRun
 }
 
 // HookRun is hooks.Run, one execution of a hook. finishedAt is the zero time

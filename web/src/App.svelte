@@ -2543,7 +2543,7 @@
         {:else if view === 'questions'}
           {#key room.id}<Questions roomId={room.id} {questions} focusId={questionFocus} focusRequest={questionFocusRequest} onanswer={answerQuestion} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />{/key}
         {:else if view === 'services'}
-          {#key room.id}<Services roomId={room.id} members={hierarchy} changes={changes ?? []} onopen={(m: Member) => openSession(m, 0, null, true)} />{/key}
+          {#key room.id}<Services roomId={room.id} repo={room.repo ?? ''} members={hierarchy} changes={changes ?? []} onopen={(m: Member) => openSession(m, 0, null, true)} onopenhealth={() => openView('cihealth')} />{/key}
         {:else if view === 'visuals'}
           {#key room.id}<Visuals roomId={room.id} {visuals} onopen={(v: Visual) => (viewing = { ...v.attachment, postId: v.post.id })} />{/key}
         {:else if view === 'computers' && computers}

@@ -66,7 +66,7 @@ export const hookForm = (h: Partial<Hook>): HookFields => ({ ...newHook(), ...h,
 // and only a schedule hook has an interval. The command stays exact:
 // whitespace can change what a shell runs.
 // What a save sends: a hook without the stored fields.
-export type HookInput = Pick<Hook, 'name' | 'event' | 'command' | 'cwd' | 'timeout' | 'onFail'> & { everyMinutes?: number }
+export type HookInput = Pick<Hook, 'name' | 'event' | 'command' | 'cwd' | 'timeout' | 'onFail'> & { everyMinutes?: number; disabled?: boolean }
 export function hookOf(f: HookFields): HookInput {
   const h: HookInput = { name: f.name.trim(), event: f.event, command: f.command, cwd: f.cwd.trim(), timeout: f.timeout.trim(), onFail: f.event === 'before-land' ? f.onFail : 'alert' }
   if (f.event === 'schedule') h.everyMinutes = Number(f.everyMinutes)
