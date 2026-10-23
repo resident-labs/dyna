@@ -62,6 +62,8 @@ func serve(t testing.TB, dataDir, build string, callers func(net.Conn) (websvc.C
 	if err := testsafe.Check(dataDir); err != nil {
 		t.Fatalf("fake engine: %v", err)
 	}
+	// Store migrations also read the config template registry. Keep it private.
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	if err := stores.Migrate(dataDir); err != nil {
 		t.Fatalf("start fake engine: %v", err)
 	}
