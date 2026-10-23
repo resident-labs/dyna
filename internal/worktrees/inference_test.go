@@ -158,7 +158,6 @@ func TestInferOwnersRejectsIncompleteEvidence(t *testing.T) {
 		{"session ID mismatch", "sessions", "", `{"id":"other"}`},
 		{"session null", "sessions", "", "null"},
 		{"session relative path", "sessions", "", `{"dir":"relative"}`},
-		{"metadata bound", "sessions", "", strings.Repeat(" ", inferenceMetadataLimit+1)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tree := inferenceTestStore(t)

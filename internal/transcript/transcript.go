@@ -1030,6 +1030,3 @@ func compactDuration(d time.Duration) string {
 	d = d.Round(time.Minute)
 	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
 }
-
-// CompactDuration is exported for renderers: 42s, 3m05s, 1h02m.
-func CompactDuration(d time.Duration) string { return compactDuration(d) }

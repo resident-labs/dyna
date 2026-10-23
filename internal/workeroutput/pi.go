@@ -166,16 +166,6 @@ func decodePi(line []byte) Record {
 	return r
 }
 
-func PiSessionID(stdout string) string {
-	for _, line := range strings.Split(stdout, "\n") {
-		p, ok := parseRecord[piRecord]([]byte(line))
-		if ok && p.Type == "session" && p.ID != "" {
-			return p.ID
-		}
-	}
-	return ""
-}
-
 func PiOutput(stdout string) string {
 	var output string
 	for _, line := range strings.Split(stdout, "\n") {

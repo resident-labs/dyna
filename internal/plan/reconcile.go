@@ -2,7 +2,6 @@ package plan
 
 import (
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -261,27 +260,4 @@ func observedOnly(events []EventView) []RosterEntry {
 		out = append(out, *byID[id])
 	}
 	return out
-}
-
-// ReconcileKey is a stable fingerprint of roster identity+state for Mermaid cache.
-func ReconcileKey(rec *Reconciliation) string {
-	if rec == nil {
-		return ""
-	}
-	var b []byte
-	b = append(b, rec.Status...)
-	for _, e := range rec.Entries {
-		b = append(b, '|')
-		b = append(b, e.PlanNodeID...)
-		b = append(b, '/')
-		b = append(b, e.Workflow...)
-		b = append(b, '/')
-		b = append(b, e.State...)
-		b = append(b, '/')
-		b = append(b, strconv.Itoa(e.RuntimeID)...)
-		if e.Cached {
-			b = append(b, 'c')
-		}
-	}
-	return string(b)
 }
