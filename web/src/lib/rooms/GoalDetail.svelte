@@ -1,25 +1,36 @@
-<script>
+<script lang="ts">
+  import type { Goal, GoalItem, GoalStatus } from '../api/goal.ts'
+  import type { Member } from '../api/room.ts'
   import { api } from '../../api.ts'
+  import { errorText } from '../errorText.ts'
   import Avatar from '../ui/Avatar.svelte'
   import GoalGlyph from './GoalGlyph.svelte'
   import GoalHolders from './GoalHolders.svelte'
   import ExpediteBadge from './ExpediteBadge.svelte'
   import { expedite, goalExpedited } from './expedite.ts'
   import { goalAgo } from './goals.ts'
-  // onexpedite(goal) starts or stops priority; App asks first when it replaces another goal.
-  let { roomId, goal: g, members = [], onchanged, onclose, onexpedite = null } = $props()
+  interface Props {
+    roomId: string
+    goal: Goal
+    members?: Member[]
+    onchanged: () => unknown
+    onclose: () => void
+    // onexpedite(goal) starts or stops priority; App asks first when it replaces another goal.
+    onexpedite?: ((goal: Goal) => unknown) | null
+  }
+  let { roomId, goal: g, members = [], onchanged, onclose, onexpedite = null }: Props = $props()
   let editing = $state(false)
   let text = $state('')
   let pick = $state(false)
-  let holders = $state([])
+  let holders = $state<string[]>([])
   let shared = $state(true)
   let action = $state('')
   let summary = $state('')
   let busy = $state(false)
   let error = $state('')
   let now = $state(Date.now())
-  let status = $state(null)
-  let items = $state([])
+  let status = $state<GoalStatus | null>(null)
+  let items = $state<GoalItem[]>([])
   $effect(() => { const timer = setInterval(() => (now = Date.now()), 60000); return () => clearInterval(timer) })
   let statusState = $state('loading')
   let itemsState = $state('loading')
@@ -36,7 +47,7 @@
       status = value; statusState = 'loaded'
     } catch (e) {
       if (request !== statusRequest || g.id !== id || roomId !== room) return
-      statusError = String(e?.message || e); statusState = 'failed'
+      statusError = errorText(e); statusState = 'failed'
     }
   }
   async function loadItems(id = g.id, room = roomId) {
@@ -48,7 +59,7 @@
       items = value ?? []; itemsState = 'loaded'
     } catch (e) {
       if (request !== itemsRequest || g.id !== id || roomId !== room) return
-      itemsError = String(e?.message || e); itemsState = 'failed'
+      itemsError = errorText(e); itemsState = 'failed'
     }
   }
   // Each selected goal gets independent reads; old and unmounted requests cannot publish.
@@ -58,20 +69,20 @@
     if (id) { loadStatus(id, room); loadItems(id, room) }
     return () => { statusRequest++; itemsRequest++ }
   })
-  const TONES = { on_track: 'sage', waiting: 'muted', stuck: 'coral', errored: 'coral', ready_to_close: 'gold', unowned: 'gold' }
-  const LABELS = { on_track: 'On track', waiting: 'Waiting', stuck: 'Stuck', errored: 'Errored', ready_to_close: 'Ready to close', unowned: 'Unowned' }
-  const mark = (state) => (state === 'done' ? '✓' : state === 'dropped' ? '×' : '•')
-  const member = (id) => members.find((m) => m.id === id || m.address === id)
-  const name = (id) => member(id)?.name ?? id
-  async function perform(fn) {
+  const TONES: Record<string, string> = { on_track: 'sage', waiting: 'muted', stuck: 'coral', errored: 'coral', ready_to_close: 'gold', unowned: 'gold' }
+  const LABELS: Record<string, string> = { on_track: 'On track', waiting: 'Waiting', stuck: 'Stuck', errored: 'Errored', ready_to_close: 'Ready to close', unowned: 'Unowned' }
+  const mark = (state: string): string => (state === 'done' ? '✓' : state === 'dropped' ? '×' : '•')
+  const member = (id: string) => members.find((m) => m.id === id || m.address === id)
+  const name = (id: string): string => member(id)?.name ?? id
+  async function perform(fn: () => unknown) {
     busy = true; error = ''
     try { await fn(); editing = false; pick = false; action = ''; await onchanged() }
-    catch (e) { error = String(e?.message || e) }
+    catch (e) { error = errorText(e) }
     finally { busy = false }
   }
   function editHolders() { holders = [...(g.holders ?? [])]; shared = g.shared; pick = true }
-  function remove(id) {
-    const next = g.holders.filter((h) => h !== id)
+  function remove(id: string) {
+    const next = (g.holders ?? []).filter((h) => h !== id)
     perform(() => api.editGoal(roomId, g.id, '', next, !next.length))
   }
 </script>

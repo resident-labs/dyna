@@ -1,11 +1,17 @@
-<script>
+<script lang="ts">
+  import type { Member } from '../api/room.ts'
   import Avatar from '../ui/Avatar.svelte'
-  let { members = [], holders = $bindable([]), shared = $bindable(true) } = $props()
+  interface Props {
+    members?: Member[]
+    holders?: string[]
+    shared?: boolean
+  }
+  let { members = [], holders = $bindable([]), shared = $bindable(true) }: Props = $props()
   let query = $state('')
   let open = $state(false)
-  let choices = $derived(members.filter((m) => !m.owner && !m.closed && !holders.includes(m.id) && m.name.toLowerCase().includes(query.replace(/^@/, '').toLowerCase())))
-  function add(m) { shared = false; holders = [...holders, m.id]; query = ''; open = false }
-  function remove(id) { holders = holders.filter((h) => h !== id); if (!holders.length) shared = true }
+  let choices = $derived(members.filter((m) => !m.owner && !m.closed && !holders.includes(m.id ?? '') && m.name.toLowerCase().includes(query.replace(/^@/, '').toLowerCase())))
+  function add(m: Member) { shared = false; holders = [...holders, m.id ?? '']; query = ''; open = false }
+  function remove(id: string) { holders = holders.filter((h) => h !== id); if (!holders.length) shared = true }
 </script>
 <div class="picker">
   <div class="chips">
