@@ -2,7 +2,7 @@
 // and the results that service produced. A trial groups its tests and its
 // publish, repeated passing hook runs fold into one row per day, and a failure
 // always keeps its own row. Nothing here changes data.
-import { elapsed, nextAt, queueCounts, queueLine, testLine, until, type HookRow, type HookRunRow, type Inputs, type MergeHistoryRow, type Row, type Tone } from './model.ts'
+import { elapsed, nextAt, queueCounts, queueLine, testLine, until, type HookRow, type HookRunRow, type Inputs, type MergeHistoryRow, type Row, type RunReason, type Tone } from './model.ts'
 
 export type TabId = 'merges' | 'reviews' | 'updates' | 'librarian' | 'ci' | 'more'
 
@@ -13,13 +13,15 @@ export interface Step {
 }
 
 // Entry is one thing a service did: a review, a trial with its publish, a hook
-// run, or a folded day of passing runs.
+// run, or a folded day of passing runs. run names the hook run behind an entry
+// that opens its log.
 export interface Entry {
   key: string
   at: number
   text: string
   tone: Tone
   session: string
+  run?: { hook: string; id: string }
   steps: Step[]
 }
 
@@ -36,7 +38,7 @@ export interface Tab {
 }
 
 const rowIds: Record<Exclude<TabId, 'more'>, string> = { merges: 'merge', reviews: 'reviewer', updates: 'update', librarian: 'librarian', ci: 'ci' }
-const moreIds = ['radar', 'maintenance', 'usage', 'voice']
+const moreIds = ['radar', 'watcher', 'lanesync', 'maintenance', 'usage', 'voice']
 
 const isFailure = (result: string): boolean => result === 'error' || result === 'fail'
 const resultWord = (result: string): string => (result === 'pass' ? 'passed' : isFailure(result) ? 'failed' : result === 'pending' ? 'running' : result || 'unknown')
@@ -79,9 +81,17 @@ export function mergeEntries(history: MergeHistoryRow[]): Entry[] {
   return out.sort((a, b) => b.at - a.at)
 }
 
+// runReason names why a failed run failed: its exit code, or the log's last
+// line when the log records no exit code.
+function runReason(reason: RunReason | undefined): string {
+  if (!reason) return ''
+  return reason.exitCode >= 0 ? `exit ${reason.exitCode}` : reason.detail
+}
+
 // hookEntries lists a hook's runs. Passing runs of one day fold into one row;
-// a failed or running run keeps its own row.
-export function hookEntries(row: HookRow, runs: HookRunRow[], now: number, label = row.hook.label || row.hook.name): Entry[] {
+// a failed or running run keeps its own row, and a failed row names its reason
+// and opens the run's log.
+export function hookEntries(row: HookRow, runs: HookRunRow[], now: number, reasons: Record<string, RunReason>, label = row.hook.label || row.hook.name): Entry[] {
   const { hook } = row
   const list = runs.length ? runs : row.lastRun ? [row.lastRun] : []
   const today = new Date(now).toDateString()
@@ -95,8 +105,17 @@ export function hookEntries(row: HookRow, runs: HookRunRow[], now: number, label
       passes.set(day, [...(passes.get(day) ?? []), run])
       continue
     }
+    const failed = isFailure(run.result)
+    const why = failed ? runReason(reasons[run.id]) : ''
+    // A failure that ended at once shows no duration; its reason carries the row.
     const took = run.result === 'pending' ? '' : elapsed(run.startedAt, run.finishedAt)
-    out.push({ key: `hook:${hook.name}:${run.startedAt}`, at, text: `${label} · ${resultWord(run.result)}${took ? ` in ${took}` : ''}`, tone: run.result === 'pending' ? 'live' : isFailure(run.result) ? 'error' : 'off', session: '', steps: [] })
+    out.push({
+      key: `hook:${hook.name}:${run.startedAt}`, at,
+      text: `${label} · ${resultWord(run.result)}${why ? `: ${why}` : ''}${took && took !== '0 s' ? ` in ${took}` : ''}`,
+      tone: run.result === 'pending' ? 'live' : failed ? 'error' : 'off', session: '',
+      ...(failed && run.id ? { run: { hook: hook.name, id: run.id } } : {}),
+      steps: [],
+    })
   }
   for (const [day, group] of passes) {
     const newest = group.reduce((a, b) => (Date.parse(b.startedAt) > Date.parse(a.startedAt) ? b : a))
@@ -145,7 +164,7 @@ export function buildTabs(i: Inputs, rows: Row[], now: number): Tab[] {
   // Hooks that share a label show their own names, so their rows differ.
   const labels = hooks.map((h) => h.hook.label || h.hook.name)
   const labelOf = (h: HookRow): string => (labels.filter((l) => l === (h.hook.label || h.hook.name)).length > 1 ? h.hook.name : h.hook.label || h.hook.name)
-  const entriesOf = (list: HookRow[]): Entry[] => byNewest(list.flatMap((h) => hookEntries(h, i.runs[h.hook.name] ?? [], now, labelOf(h))))
+  const entriesOf = (list: HookRow[]): Entry[] => byNewest(list.flatMap((h) => hookEntries(h, i.runs[h.hook.name] ?? [], now, i.reasons, labelOf(h))))
 
   const merges = mergeEntries(i.history)
   const merge = row('merge')

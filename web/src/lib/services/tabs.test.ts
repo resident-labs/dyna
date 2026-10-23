@@ -22,13 +22,13 @@ test('a trial and its publish are one entry, and a failed trial shows its reason
 })
 
 const hook: HookRow['hook'] = { name: 'librarian-batch', label: 'Librarian', event: 'schedule', everyMinutes: 10, disabled: false }
-const run = (minutesAgo: number, result = 'pass') => ({ result, startedAt: new Date(now - minutesAgo * 60000).toISOString(), finishedAt: new Date(now - minutesAgo * 60000 + 1000).toISOString() })
+const run = (minutesAgo: number, result = 'pass') => ({ id: `run-${minutesAgo}`, result, startedAt: new Date(now - minutesAgo * 60000).toISOString(), finishedAt: new Date(now - minutesAgo * 60000 + 1000).toISOString() })
 
 test('passing runs fold into one row a day, and a failure keeps its own row', () => {
-  const entries = hookEntries({ hook, lastRun: null }, [run(1), run(11), run(21, 'error'), run(31), run(41, 'pending')], now)
+  const entries = hookEntries({ hook, lastRun: null }, [run(1), run(11), run(21, 'error'), run(31), run(41, 'pending')], now, {})
   assert.deepEqual(entries.map((e) => e.text).sort(), ['Librarian · 3 runs passed today', 'Librarian · failed in 1 s', 'Librarian · running'].sort())
-  assert.equal(hookEntries({ hook, lastRun: null }, [run(1)], now)[0]?.text, 'Librarian · passed in 1 s')
-  assert.equal(hookEntries({ hook, lastRun: run(2) }, [], now)[0]?.text, 'Librarian · passed in 1 s')
+  assert.equal(hookEntries({ hook, lastRun: null }, [run(1)], now, {})[0]?.text, 'Librarian · passed in 1 s')
+  assert.equal(hookEntries({ hook, lastRun: run(2) }, [], now, {})[0]?.text, 'Librarian · passed in 1 s')
 })
 
 test('each tab gets its own one-line state and results', () => {
@@ -36,8 +36,8 @@ test('each tab gets its own one-line state and results', () => {
     reviewer: { enabled: true, profile: 'sol', lastError: '', current: null, queued: 0, lastVerdictAt: '' }, queue: [], mergePaused: false,
     history: [merge({ outcome: 'failed', detail: 'go-test failed' })], services: null, notices: null,
     hooks: [{ hook, lastRun: run(1) }, { hook: { ...hook, name: 'self-update', label: 'Update Dyna', event: 'main-updated' }, lastRun: run(5) }],
-    runs: { 'librarian-batch': [run(1), run(11)] }, settings: { 'library.enabled': '["/repo"]' }, budget: null, accounts: null, usage: null, voice: null,
-    changes: [{ number: 3, title: 'Fix it', verdict: 'approve', reviewAt: new Date(now - 60000).toISOString() }], testHealth: { count: 2, limitMs: 2000 }, repo: '/repo',
+    runs: { 'librarian-batch': [run(1), run(11)] }, reasons: {}, settings: { 'library.enabled': '["/repo"]' }, budget: null, accounts: null, usage: null, voice: null,
+    changes: [{ number: 3, title: 'Fix it', verdict: 'approve', reviewAt: new Date(now - 60000).toISOString() }], testHealth: { count: 2, limitMs: 2000 }, laneSync: null, repo: '/repo',
   }
   const tabs = buildTabs(inputs, buildRows(inputs), now)
   const by = (id: string) => tabs.find((t) => t.id === id)
