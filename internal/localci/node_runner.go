@@ -183,7 +183,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		remove, stop := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer stop()
 		var log tailBuffer
-		if e := r.nodeCommand(remove, &log, &log, "", "rm -rf --one-file-system "+shellquote.Quote(runDir)+" || true"); e != nil {
+		if e := r.nodeCommand(remove, &log, &log, "", removeRunDir(base, active)); e != nil {
 			err = errors.Join(err, fmt.Errorf("remove run directory: %w: %s", e, log.String()))
 		}
 	}()

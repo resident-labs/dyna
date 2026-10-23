@@ -111,18 +111,48 @@ func parseCacheClean(output string) ([]string, int64) {
 }
 
 // runLocks is the shell command that takes a run's own lock and its base's
-// shared cache lock, and leaves both held by a keeper that ends with the run:
-// the keeper goes away when the run directory is removed, or after the longest
-// run anyway. The setup holds the shared cache lock before it returns, so a
-// cleanup that is trimming caches is never overtaken by a run that starts while
-// it works, and a run that already runs makes that cleanup skip every entry. A
-// crashed run therefore leaves only the lock files, never a held lock.
-// A caller starts it as its own background statement.
+// shared cache lock, and leaves both held by a keeper. It returns once the
+// keeper holds them, so a teardown always finds the process to stop. The setup
+// holds the shared cache lock before it returns, so a cleanup that is trimming
+// caches is never overtaken by a run that starts while it works, and a run that
+// already runs makes that cleanup skip every entry. A crashed run leaves only
+// the lock files behind, never a held lock: the keeper ends with the run
+// directory and gives up after the longest run anyway.
 func runLocks(base, active string) string {
-	wait := "end=$((SECONDS+10800)); while [ -e " + shellquote.Quote(active) + " ] && [ $SECONDS -lt $end ]; do sleep 5; done"
+	keeper := shellquote.Quote(keeperPID(active))
+	wait := "echo $$ > " + keeper + "; end=$((SECONDS+10800)); " +
+		"while [ -e " + shellquote.Quote(active) + " ] && [ $SECONDS -lt $end ]; do sleep 5; done"
+	ready := "i=0; while [ ! -s " + keeper + " ] && [ $i -lt 200 ]; do sleep 0.01; i=$((i+1)); done; "
 	return "exec 6>>" + shellquote.Quote(active) + "; flock -n -w 60 6; " +
 		"exec 7>>" + shellquote.Quote(path.Join(base, "caches.lock")) + "; flock -s -w 60 7; " +
-		"setsid bash -c " + shellquote.Quote(wait) + " 6>&6 7>&7 >/dev/null 2>&1 </dev/null & exec 6>&-; exec 7>&-"
+		"setsid bash -c " + shellquote.Quote(wait) + " 6>&6 7>&7 >/dev/null 2>&1 </dev/null & exec 6>&-; exec 7>&-; " + ready
+}
+
+// keeperPID is the file that names the keeper of one run, so its teardown can
+// stop it instead of waiting for it to notice the run directory has gone.
+func keeperPID(active string) string { return path.Join(path.Dir(active), ".keeper") }
+
+// stopKeeper is the shell command that stops a run's keeper and returns only
+// when the base's shared cache lock is free. A cleanup that follows a finished
+// run therefore frees the run's caches at once, and a retry after a full disk
+// is not skipped by the run's own keeper. The wait is bounded: a lock that some
+// other run holds honestly is not waited for.
+func stopKeeper(base, active string) string {
+	keeper := shellquote.Quote(keeperPID(active))
+	lock := shellquote.Quote(path.Join(base, "caches.lock"))
+	// The keeper leads its own process group, and its sleeping child inherits the
+	// lock file descriptors, so the group goes together: killing only the keeper
+	// would leave the lock held until that sleep ends.
+	killIt := "k=$(cat " + keeper + "); kill -TERM -- -\"$k\" 2>/dev/null || kill \"$k\" 2>/dev/null || true"
+	return "if [ -s " + keeper + " ]; then " + killIt + "; fi; " +
+		"i=0; while [ $i -lt 50 ] && ! flock -n " + lock + " true 2>/dev/null; do sleep 0.1; i=$((i+1)); done; "
+}
+
+// removeRunDir is the command that ends a run on its machine: it stops the
+// keeper, so the run's locks are free before it returns, and removes the run's
+// own directory.
+func removeRunDir(base, active string) string {
+	return stopKeeper(base, active) + "rm -rf --one-file-system " + shellquote.Quote(path.Dir(active)) + " || true"
 }
 
 // diskFullNote is the text the kernel and the tools print when a check runs

@@ -255,6 +255,10 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 		return result, fmt.Errorf("initialize cache: %w: %s", err, &log)
 	}
 	log.Reset()
+	// The run holds a lock on its own directory and its base's cache lock while
+	// it runs, so a cleanup tells a live run from one that died and never trims
+	// the caches a run mounts. Its teardown stops the keeper and removes it.
+	active := path.Join(runDir, ".active")
 	if err = r.run(sshCtx, repo, &log, "git", "push", host+":"+cache, result.SHA+":refs/dyna/ci/"+result.SHA); err != nil {
 		return result, fmt.Errorf("push commit: %w: %s", err, &log)
 	}
@@ -266,15 +270,12 @@ func (r Runner) Run(ctx context.Context, req Request) (result Result, err error)
 		for _, suite := range suites {
 			containers = append(containers, shellquote.Quote("dyna-ci-"+runID+"-"+suite))
 		}
-		script := "docker rm -f " + strings.Join(containers, " ") + " >/dev/null 2>&1 || true; git --git-dir=" + shellquote.Quote(cache) + " worktree remove --force " + shellquote.Quote(work) + " >/dev/null 2>&1 || true; rm -rf --one-file-system " + shellquote.Quote(runDir) + " || true"
+		script := "docker rm -f " + strings.Join(containers, " ") + " >/dev/null 2>&1 || true; git --git-dir=" + shellquote.Quote(cache) + " worktree remove --force " + shellquote.Quote(work) + " >/dev/null 2>&1 || true; " + removeRunDir(base, active)
 		if e := r.ssh(cleanupCtx, host, script, &output); e != nil {
 			err = errors.Join(err, fmt.Errorf("cleanup: %w: %s", e, &output))
 		}
 	}()
 	log.Reset()
-	// The run holds a lock on its own directory while it runs, so a cleanup can
-	// tell a live run from one that died and never trims the caches it mounts.
-	active := path.Join(runDir, ".active")
 	setup := "set -e; mkdir -p " + shellquote.Quote(reports) + " " + shellquote.Quote(path.Join(base, "go-build")) + " " + shellquote.Quote(path.Join(base, "go-mod")) + " " + shellquote.Quote(path.Join(base, "npm")) + " " + shellquote.Quote(path.Dir(active)) + " && git --git-dir=" + shellquote.Quote(cache) + " worktree add --detach " + shellquote.Quote(work) + " " + shellquote.Quote(result.SHA) + "; " + runLocks(base, active)
 	if err = r.ssh(sshCtx, host, setup, &log); err != nil {
 		return result, fmt.Errorf("create worktree: %w: %s", err, &log)
