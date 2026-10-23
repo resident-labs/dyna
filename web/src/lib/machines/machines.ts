@@ -1,21 +1,35 @@
-import type { MachineCIRun, MachineCapabilities, MachineDetail, MachineLoad, MachineRole, MachineStatus, MachineSummary } from '../api/machine.ts'
+import type { MachineCIRun, MachineCapabilities, MachineDetail, MachineLoad, MachineRole, MachineStatus, MachineStatusReason, MachineSummary } from '../api/machine.ts'
 
 // roleLabel is the short name a role chip shows.
 export function roleLabel(role: MachineRole): string {
   return role === 'ci' ? 'CI' : role
 }
 
-// statusText words a machine's status for a title or a row.
+// statusText words a machine's status for a title or a row. A degraded machine
+// works, but it needs attention.
 export function statusText(status: MachineStatus): string {
   switch (status) {
     case 'online':
       return 'Online'
+    case 'degraded':
+      return 'Degraded'
     case 'disabled':
       return 'Disabled'
     case 'offline':
       return 'Offline'
     default:
       return 'Not probed'
+  }
+}
+
+// reasonText words why a machine is degraded. It is a designed line, never the
+// probe's own message.
+export function reasonText(reason: MachineStatusReason | undefined): string {
+  switch (reason) {
+    case 'low-disk':
+      return 'Low disk space. The machine still works, but it needs free space soon.'
+    default:
+      return 'The machine still works, but it needs attention.'
   }
 }
 
@@ -63,6 +77,7 @@ export function statusCounts(machines: readonly MachineSummary[]): { status: Mac
   const of = (status: MachineStatus) => machines.filter((m) => m.status === status).length
   return [
     { status: 'online', n: of('online') },
+    { status: 'degraded', n: of('degraded') },
     { status: 'disabled', n: of('disabled') },
     { status: 'offline', n: of('offline') },
     { status: 'unknown', n: of('unknown') },
@@ -74,7 +89,7 @@ export function statusCounts(machines: readonly MachineSummary[]): { status: Mac
 export function machinesSub(machines: readonly MachineSummary[] | null): string {
   if (!machines) return ''
   if (!machines.length) return 'No machines yet'
-  const words: Record<MachineStatus, string> = { online: 'online', disabled: 'disabled', offline: 'offline', unknown: 'not probed' }
+  const words: Record<MachineStatus, string> = { online: 'online', degraded: 'degraded', disabled: 'disabled', offline: 'offline', unknown: 'not probed' }
   return statusCounts(machines)
     .filter((c) => c.n > 0)
     .map((c) => `${c.n} ${words[c.status]}`)
