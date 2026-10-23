@@ -164,7 +164,7 @@ func finishLocalTrials(t *testing.T, e *testEnv, ci *fakeLocalCI, bisect bool) {
 				if b.Phase != "awaiting-root" {
 					continue
 				}
-				if st.MergePauses[e.author.RoomID] == "" || len(b.Stacks) != 0 || !b.Notified {
+				if st.MergePauses[e.author.RoomID].Reason == "" || len(b.Stacks) != 0 || !b.Notified {
 					t.Fatalf("failed local batch did not stop and notify root: %+v", b)
 				}
 				localTick(t, e)

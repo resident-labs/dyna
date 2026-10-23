@@ -52,7 +52,8 @@ func (s *Service) MergeControlStatus(roomID string) (MergeControlStatus, error) 
 	if err != nil {
 		return MergeControlStatus{}, err
 	}
-	out := MergeControlStatus{ExpeditedGoalID: active[rm.ID], RoomID: rm.ID, Paused: st.MergePauses[rm.ID] != "", Reason: st.MergePauses[rm.ID], Queue: queue, Trials: []MergeTrialStatus{}}
+	pause := st.MergePauses[rm.ID]
+	out := MergeControlStatus{ExpeditedGoalID: active[rm.ID], RoomID: rm.ID, Paused: pause.Reason != "", Reason: pause.Reason, Queue: queue, Trials: []MergeTrialStatus{}}
 	for _, repo := range controlRepositories(st, rm.ID) {
 		out.Trials = append(out.Trials, *trialStatus(st, st.MergeTrials[repo]))
 	}
@@ -144,14 +145,14 @@ func (s *Service) authorizeMergeControl(ctx context.Context, roomID, action stri
 // batch. Any other pause reason, and any batch still awaiting root, stays.
 func (s *Service) clearSettledPause(roomID string) error {
 	return s.Store.update(func(st *State) error {
-		if st.MergePauses[roomID] != mergeBatchFailedReason {
+		if st.MergePauses[roomID].Cause != state.MergePauseCauseBatchFailed {
 			return nil
 		}
 		for _, b := range st.MergeTrials {
 			if b == nil || !trialHasRoom(*st, *b, roomID) {
 				continue
 			}
-			if b.Phase == "awaiting-root" || b.Phase == "failed" || b.Phase == "stacking" {
+			if mergePhaseHoldsBatchPause(b.Phase) {
 				return nil
 			}
 		}
@@ -213,10 +214,10 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 		}
 		return s.Store.update(func(st *State) error {
 			if st.MergePauses == nil {
-				st.MergePauses = map[string]string{}
+				st.MergePauses = map[string]state.MergePause{}
 			}
 			if paused {
-				st.MergePauses[rm.ID] = "merging paused by " + string(actor.Role)
+				st.MergePauses[rm.ID] = state.MergePause{Cause: state.MergePauseCauseManual, Reason: "merging paused by " + string(actor.Role)}
 			} else {
 				delete(st.MergePauses, rm.ID)
 			}
@@ -332,7 +333,7 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 		}
 		for _, repo := range repos {
 			b := st.MergeTrials[repo]
-			if b.Phase != "awaiting-root" {
+			if b.Phase != state.MergeTrialPhaseAwaitingRoot {
 				return fmt.Errorf("batch %s has not failed", b.Branch)
 			}
 		}
@@ -340,9 +341,9 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 			for _, repo := range repos {
 				b := st.MergeTrials[repo]
 				b.Bisect = true
-				b.Phase = "failed"
+				b.Phase = state.MergeTrialPhaseFailed
 				if len(b.Stacks) > 0 {
-					b.Phase = "stacking"
+					b.Phase = state.MergeTrialPhaseStacking
 				}
 				b.Reason = "root requested prefix trials"
 			}
@@ -389,7 +390,7 @@ func (s *Service) publishControlledTrial(ctx context.Context, roomID string, st 
 		if !matched {
 			continue
 		}
-		if original.Phase == "published" && original.Branch == b.Branch {
+		if original.Phase == state.MergeTrialPhasePublished && original.Branch == b.Branch {
 			return fmt.Errorf("trial %s already published", b.Branch)
 		}
 		if b.Head == "" {
@@ -401,7 +402,7 @@ func (s *Service) publishControlledTrial(ctx context.Context, roomID string, st 
 		}
 		if len(flaky) > 0 {
 			// Root names every failing test before a failed trial may merge.
-			if b.Phase != "failed" && b.Phase != "awaiting-root" {
+			if b.Phase != state.MergeTrialPhaseFailed && b.Phase != state.MergeTrialPhaseAwaitingRoot {
 				return fmt.Errorf("trial %s has not failed; publish it without --flaky", b.Branch)
 			}
 			if err := flakyCoverage(b.Logs, flaky); err != nil {
@@ -435,7 +436,7 @@ func (s *Service) publishControlledTrial(ctx context.Context, roomID string, st 
 			b.StackChanges = original.Changes
 		}
 		b.Failure = nil
-		b.Phase, b.Reason = "publishing", "root requested publication of passed trial"
+		b.Phase, b.Reason = state.MergeTrialPhasePublishing, "root requested publication of passed trial"
 		if len(flaky) > 0 {
 			b.Reason = "root published a failed trial for known flaky tests"
 		}

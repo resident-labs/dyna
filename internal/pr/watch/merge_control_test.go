@@ -2,9 +2,7 @@ package watch
 
 import (
 	"context"
-	"dyna-agent/internal/ghclient"
-	"dyna-agent/internal/pr/state"
-	"dyna-agent/internal/room"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -14,6 +12,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"dyna-agent/internal/ghclient"
+	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
 )
 
 func TestMergeControlPauseResumeAndStatus(t *testing.T) {
@@ -113,7 +115,7 @@ func TestMergeControlRetryWithoutStartsOneSharedBatch(t *testing.T) {
 	}
 	st, _ := f.e.s.Store.Read()
 	b := st.MergeTrials["github.com/owner/repo"]
-	if b == nil || len(b.Changes) != 2 || st.MergePauses[f.e.author.RoomID] != "" {
+	if b == nil || len(b.Changes) != 2 || st.MergePauses[f.e.author.RoomID].Reason != "" {
 		t.Fatalf("retry=%+v pauses=%v", b, st.MergePauses)
 	}
 	for _, c := range b.Changes {
@@ -153,7 +155,7 @@ func TestMergeControlRetryCancellationKeepsReplacementResumable(t *testing.T) {
 		t.Fatal(err)
 	}
 	batch := after.MergeTrials["github.com/owner/repo"]
-	if batch == nil || batch.Branch == oldBranch || batch.Phase != "building" || after.MergePauses[id] != "" {
+	if batch == nil || batch.Branch == oldBranch || batch.Phase != "building" || after.MergePauses[id].Reason != "" {
 		t.Fatalf("replacement = %+v, pauses = %v", batch, after.MergePauses)
 	}
 	f.e.s.GH.run = run
@@ -380,7 +382,7 @@ func TestMergeControlPublishesChosenPrefixWithoutReturningAnotherPR(t *testing.T
 	if st.Records["github.com/owner/repo#3"].MergeTrialFailure != nil {
 		t.Fatal("manual publication returned another PR without root choice")
 	}
-	if st.MergePauses[f.e.author.RoomID] == "" || len(f.branches) > 0 {
+	if st.MergePauses[f.e.author.RoomID].Reason == "" || len(f.branches) > 0 {
 		t.Fatal("manual prefix publication lost pause or trial cleanup")
 	}
 }
@@ -435,7 +437,7 @@ func TestMergeControlRepeatedPublishReportsAlreadyPublished(t *testing.T) {
 // Returning the only PR of a failed batch leaves no batch to recover from, so
 // the batch-failure pause must not keep the queue stopped until root resumes it
 // by hand.
-func TestReturnClearsThePauseWhenNoFailedBatchRemains(t *testing.T) {
+func TestReturnClearsLegacyPauseWhenNoFailedBatchRemains(t *testing.T) {
 	f := mergeTrialEnv(t, 1)
 	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
 		t.Fatal(err)
@@ -448,8 +450,22 @@ func TestReturnClearsThePauseWhenNoFailedBatchRemains(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.MergePauses[f.e.author.RoomID] != mergeBatchFailedReason {
+	if st.MergePauses[f.e.author.RoomID].Reason != state.MergeBatchFailedReason {
 		t.Fatalf("pauses = %v, want the failed-batch pause", st.MergePauses)
+	}
+	legacyJSON, err := json.Marshal(state.MergeBatchFailedReason)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var legacyPause state.MergePause
+	if err := json.Unmarshal(legacyJSON, &legacyPause); err != nil {
+		t.Fatalf("read legacy pause: %v", err)
+	}
+	if err := f.e.s.Store.update(func(st *State) error {
+		st.MergePauses[f.e.author.RoomID] = legacyPause
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	if err := f.e.s.MergeControl(t.Context(), f.e.author.RoomID, "return", []string{"1", "Fix the go-static error"}, nil, nil); err != nil {
 		t.Fatal(err)
@@ -458,7 +474,7 @@ func TestReturnClearsThePauseWhenNoFailedBatchRemains(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(st.MergeTrials) != 0 || st.MergePauses[f.e.author.RoomID] != "" {
+	if len(st.MergeTrials) != 0 || st.MergePauses[f.e.author.RoomID].Reason != "" {
 		t.Fatalf("trials=%d pauses=%v; a return left the queue paused with nothing to recover", len(st.MergeTrials), st.MergePauses)
 	}
 }

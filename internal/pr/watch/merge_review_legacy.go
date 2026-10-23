@@ -10,7 +10,7 @@ import (
 
 // TODO: legacy/shim remove later — close advisory sessions and discard their frozen inputs when old batches resume or are canceled; remove after all pre-upgrade batches are gone.
 func (s *Service) clearLegacyMergeReview(ctx context.Context, b *state.MergeTrial) error {
-	if b.Phase != "reviewing" && b.LegacyReview == nil {
+	if b.Phase != state.MergeTrialPhaseReviewing && b.LegacyReview == nil {
 		return nil
 	}
 	if b.LegacyReview != nil && b.LegacyReview.Session != "" {
@@ -23,8 +23,8 @@ func (s *Service) clearLegacyMergeReview(ctx context.Context, b *state.MergeTria
 		return err
 	}
 	b.LegacyReview = nil
-	if b.Phase == "reviewing" {
-		b.Phase, b.Reason = "building", ""
+	if b.Phase == state.MergeTrialPhaseReviewing {
+		b.Phase, b.Reason = state.MergeTrialPhaseBuilding, ""
 	}
 	return nil
 }
