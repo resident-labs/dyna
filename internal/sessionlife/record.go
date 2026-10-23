@@ -150,12 +150,6 @@ type querier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-// legacyOnly is a querier for a database without the record table: every
-// record comes from its legacy file.
-type legacyOnly struct{}
-
-func (legacyOnly) QueryRowContext(context.Context, string, ...any) *sql.Row { return nil }
-
 // Load decodes session id's record into v. A missing record wraps
 // os.ErrNotExist.
 func Load(sessions, id string, v any) error {
@@ -187,7 +181,7 @@ func LoadRaw(sessions, id string) ([]byte, Version, error) {
 		if err := checkID(id); err != nil {
 			return nil, "", err
 		}
-		return legacyLoadRaw(sessions, id)
+		return nil, "", os.ErrNotExist
 	}
 	return loadRaw(db, sessions, id)
 }
@@ -196,12 +190,9 @@ func loadRaw(q querier, sessions, id string) ([]byte, Version, error) {
 	if err := checkID(id); err != nil {
 		return nil, "", err
 	}
-	if _, ok := q.(legacyOnly); ok {
-		return legacyLoadRaw(sessions, id)
-	}
 	raw, version, err := loadStored(context.Background(), q, id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return legacyLoadRaw(sessions, id)
+		return nil, "", os.ErrNotExist
 	}
 	return raw, version, err
 }
@@ -245,6 +236,9 @@ func loadStored(ctx context.Context, q querier, id string) ([]byte, Version, err
 	if err != nil {
 		return nil, "", err
 	}
+	if !isObject([]byte(meta)) {
+		return nil, "", fmt.Errorf("%w: session %s record is not a bounded JSON object", ErrRecord, id)
+	}
 	return []byte(meta), rowVersion(revision), nil
 }
 
@@ -261,12 +255,12 @@ func RecordVersion(sessions, id string) (Version, bool) {
 		return "", false
 	}
 	if !ok {
-		return legacyVersion(sessions, id)
+		return "", false
 	}
 	var revision int64
 	err = db.QueryRow("SELECT revision FROM session_records WHERE id = ?", id).Scan(&revision)
 	if errors.Is(err, sql.ErrNoRows) {
-		return legacyVersion(sessions, id)
+		return "", false
 	}
 	if err != nil {
 		return "", false
@@ -366,6 +360,9 @@ VALUES (?, (SELECT COALESCE(MAX(revision), 0) + 1 FROM session_records), ?, ?, ?
 }
 
 func isObject(raw []byte) bool {
+	if len(raw) > recordLimit || !json.Valid(raw) {
+		return false
+	}
 	for _, c := range raw {
 		switch c {
 		case ' ', '\t', '\r', '\n':
@@ -664,6 +661,9 @@ func Each(sessions string, open bool, fn func(id string, raw []byte, err error) 
 			if raw, _, err = legacyLoadRaw(sessions, id); errors.Is(err, os.ErrNotExist) {
 				continue
 			}
+		}
+		if err == nil && !isObject(raw) {
+			err = fmt.Errorf("%w: session %s record is not a bounded JSON object", ErrRecord, id)
 		}
 		if err := fn(id, raw, err); err != nil {
 			return err

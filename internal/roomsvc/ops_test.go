@@ -266,11 +266,10 @@ func TestDeleteRoomSkipsUnassignedLegacyHistory(t *testing.T) {
 	id := subagent.NewID()
 	raw := []byte(`{"id":"` + id + `","name":"cu_mobile","closed":"2026-10-05T00:00:00Z"}`)
 	recordtest.WriteRaw(t, e.mgr.Store.Root, id, raw)
-	path := recordtest.Path(t, e.mgr.Store.Root, id)
 	if err := e.svc.DeleteRoom(e.ctx, rec.ID); err != nil {
 		t.Fatal(err)
 	}
-	after, err := os.ReadFile(path)
+	after, err := recordtest.ReadRaw(t, e.mgr.Store.Root, id)
 	if err != nil || string(after) != string(raw) {
 		t.Fatalf("legacy history changed: %s, %v", after, err)
 	}

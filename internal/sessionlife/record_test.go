@@ -59,7 +59,7 @@ func TestOnlyTheRecordCodeTouchesSessionJSON(t *testing.T) {
 	}
 }
 
-func TestLoadRefusesUnsafeOrInvalidRecords(t *testing.T) {
+func TestLegacyLoadRefusesUnsafeOrInvalidRecords(t *testing.T) {
 	sessions := t.TempDir()
 	id := "ses_20261020-000000-abcdef12"
 	dir := filepath.Join(sessions, id)
@@ -77,11 +77,18 @@ func TestLoadRefusesUnsafeOrInvalidRecords(t *testing.T) {
 		}
 	}
 	var s Snapshot
-	if err := Load(sessions, id, &s); !errors.Is(err, os.ErrNotExist) {
+	load := func() error {
+		raw, _, err := legacyLoadRaw(sessions, id)
+		if err != nil {
+			return err
+		}
+		return decode(id, raw, &s)
+	}
+	if err := load(); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("missing record = %v, want os.ErrNotExist", err)
 	}
 	write(`{"id":"`+id+`","turns":2}`, 0o600)
-	if err := Load(sessions, id, &s); err != nil || s.Turns != 2 {
+	if err := load(); err != nil || s.Turns != 2 {
 		t.Fatalf("Load = %+v, %v", s, err)
 	}
 	for name, bad := range map[string]func(){
@@ -100,7 +107,7 @@ func TestLoadRefusesUnsafeOrInvalidRecords(t *testing.T) {
 		},
 	} {
 		bad()
-		if err := Load(sessions, id, &s); err == nil {
+		if err := load(); err == nil {
 			t.Errorf("%s record loaded", name)
 		}
 	}
@@ -169,7 +176,7 @@ func TestRevisionChangesAfterTheNewestRecordIsReplaced(t *testing.T) {
 // A session folder replaced by a symlink to outside sessions must not be
 // read, and the failure must not look like a missing record: callers treat
 // a missing record as no evidence.
-func TestLoadStaysInsideSessions(t *testing.T) {
+func TestLegacyLoadStaysInsideSessions(t *testing.T) {
 	sessions := t.TempDir()
 	id := "ses_20261020-000000-abcdef12"
 	outside := t.TempDir()
@@ -179,10 +186,9 @@ func TestLoadStaysInsideSessions(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(sessions, id)); err != nil {
 		t.Fatal(err)
 	}
-	var s Snapshot
-	err := Load(sessions, id, &s)
+	raw, _, err := legacyLoadRaw(sessions, id)
 	if err == nil || errors.Is(err, os.ErrNotExist) || !errors.Is(err, ErrRecord) {
-		t.Fatalf("Load through a symlinked session folder = %v, %+v; want ErrRecord", err, s)
+		t.Fatalf("Load through a symlinked session folder = %v, %+v; want ErrRecord", err, raw)
 	}
 	if _, ok := RecordVersion(sessions, id); ok {
 		t.Fatal("RecordVersion followed a symlinked session folder")

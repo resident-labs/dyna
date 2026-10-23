@@ -2,7 +2,6 @@ package sessionlife
 
 import (
 	"context"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -32,16 +31,14 @@ func TestCheckRequiresMatchingOpenSessionEvidence(t *testing.T) {
 		{"invalid JSON", `{"id":`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if err := os.WriteFile(filepath.Join(dir, "session.json"), []byte(tc.body), 0600); err != nil {
-				t.Fatal(err)
-			}
+			writeRawRecord(t, root, id, []byte(tc.body))
 			err := Check(root, id)
 			if (err == nil) != tc.allowed {
 				t.Fatalf("Check allowed=%t, want %t, error=%v", err == nil, tc.allowed, err)
 			}
 		})
 	}
-	if err := os.Remove(filepath.Join(dir, "session.json")); err != nil {
+	if err := Delete(root, id); err != nil {
 		t.Fatal(err)
 	}
 	if err := Check(root, id); err == nil {
@@ -108,9 +105,7 @@ func TestActivatePreservesDormantOrigin(t *testing.T) {
 			if err := os.MkdirAll(dir, 0700); err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join(dir, "session.json")
-			body, _ := json.Marshal(map[string]string{"id": id, "status": status})
-			if err := os.WriteFile(path, body, 0600); err != nil {
+			if err := Save(root, id, map[string]string{"id": id, "status": status}); err != nil {
 				t.Fatal(err)
 			}
 			for range 2 {
