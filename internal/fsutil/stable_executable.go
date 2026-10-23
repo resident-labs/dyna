@@ -12,10 +12,10 @@ import (
 	"strings"
 )
 
-// stableExecutableCopies is how many running images the cache keeps. A copied
-// image is shared by every worker of one build; older builds age out once a
-// few newer ones exist.
-const stableExecutableCopies = 4
+// stableImageCopies is how many running images the cache keeps beside the ones
+// a live process runs. A copied image is shared by every worker of one build;
+// older builds age out once newer ones exist.
+const stableImageCopies = 4
 
 // StableExecutable returns a path to the binary this process runs that outlives
 // the process. Harness MCP commands, $DYNA_BIN and their published tool homes
@@ -25,11 +25,15 @@ const stableExecutableCopies = 4
 // which keeps a worker on its engine's version even while an installed update
 // waits for a restart. Naming /proc/<pid>/exe would break as soon as this
 // process exits.
-func StableExecutable() (string, error) {
+func StableExecutable() (string, error) { return StableImage(fmt.Sprintf("/proc/%d/exe", os.Getpid())) }
+
+// StableImage returns a stable path holding the image at source. It covers
+// every pinned image path, including another process's /proc/<pid>/exe, so a
+// harness MCP server named by such a path still starts on a later turn.
+func StableImage(source string) (string, error) {
 	if runtime.GOOS != "linux" {
 		return os.Executable()
 	}
-	source := fmt.Sprintf("/proc/%d/exe", os.Getpid())
 	info, err := os.Stat(source)
 	if err != nil {
 		return "", err
@@ -83,12 +87,20 @@ func copyExecutable(source, path, dir string) error {
 	return os.Rename(temp.Name(), path)
 }
 
-// pruneStableExecutables keeps the newest copies and the one just written.
-func pruneStableExecutables(dir, keep string) {
+// pruneStableExecutables keeps the newest copies and the one just written. It
+// never removes a copy that a running process executes: a long-lived session
+// MCP server or an idle harness child still runs the image its turn named, and
+// deleting it would break the next launch of that same path.
+func pruneStableExecutables(dir, keep string) { pruneImages(dir, keep, runningImages()) }
+
+// pruneImages keeps the newest copies and the one just written, and never
+// removes a copy whose path inUse names.
+func pruneImages(dir, keep string, inUse map[string]bool) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
+	running := inUse
 	type copyFile struct {
 		name  string
 		mtime int64
@@ -98,17 +110,41 @@ func pruneStableExecutables(dir, keep string) {
 		if !strings.HasPrefix(entry.Name(), "dyna-") || entry.Name() == keep {
 			continue
 		}
+		path := filepath.Join(dir, entry.Name())
+		if running[path] {
+			continue
+		}
 		info, err := entry.Info()
 		if err != nil {
 			continue
 		}
 		copies = append(copies, copyFile{entry.Name(), info.ModTime().UnixNano()})
 	}
-	if len(copies) < stableExecutableCopies {
+	if len(copies) < stableImageCopies {
 		return
 	}
 	sort.Slice(copies, func(i, j int) bool { return copies[i].mtime > copies[j].mtime })
-	for _, old := range copies[stableExecutableCopies-1:] {
+	for _, old := range copies[stableImageCopies-1:] {
 		_ = os.Remove(filepath.Join(dir, old.name))
 	}
+}
+
+// runningImages names the images live processes execute.
+func runningImages() map[string]bool {
+	out := map[string]bool{}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return out
+	}
+	for _, entry := range entries {
+		if entry.Name()[0] < '0' || entry.Name()[0] > '9' {
+			continue
+		}
+		target, err := os.Readlink(filepath.Join("/proc", entry.Name(), "exe"))
+		if err != nil {
+			continue
+		}
+		out[strings.TrimSuffix(target, " (deleted)")] = true
+	}
+	return out
 }
