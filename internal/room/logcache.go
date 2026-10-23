@@ -184,6 +184,7 @@ func (s *Store) scanMessageLines(roomID string, input io.Reader, offset int64, v
 		return offset, err
 	}
 	r := bufio.NewReaderSize(input, 64*1024)
+	refs := issueReferences{store: s}
 	for {
 		line, err := r.ReadBytes('\n')
 		if len(line) == 0 || line[len(line)-1] != '\n' {
@@ -210,6 +211,14 @@ func (s *Store) scanMessageLines(roomID string, input io.Reader, offset int64, v
 			}
 			if decode(canonical, &entry.msg) != nil {
 				entry.msg = Message{}
+			}
+			if err := refs.canonical(roomID, entry.msg.References); err != nil {
+				return entry.start, err
+			}
+			if f := entry.msg.Forward; f != nil {
+				if err := refs.canonical(f.RoomID, f.References); err != nil {
+					return entry.start, err
+				}
 			}
 		}
 		visit(entry)
