@@ -23,10 +23,7 @@ func (s *Service) closeFixedIssues(ctx context.Context, r Record, mergeCommit st
 	if err != nil {
 		return fmt.Errorf("close issues fixed by %s: %w", changeLabel(r), err)
 	}
-	short := mergeCommit
-	if len(short) > 7 {
-		short = short[:7]
-	}
+	short := shortSha(mergeCommit)
 	reason := "Fixed by #" + strconv.Itoa(r.Number)
 	if short != "" {
 		reason += " (" + short + ")"
