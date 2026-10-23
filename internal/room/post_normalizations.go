@@ -296,3 +296,16 @@ FROM room_post_normalizations WHERE room_id=? AND source_start>=?`, roomID, offs
 	}
 	return out, rows.Err()
 }
+
+// MigratePosts applies a startup projection with access to the migration transaction.
+func (s *Store) MigratePosts(name string, convert func(*sql.Conn, map[string]json.RawMessage, map[string]json.RawMessage) (bool, error)) error {
+	db, err := s.postNormalizationsDB()
+	if err != nil {
+		return err
+	}
+	return database.Migrate(db, name, 1, func(conn *sql.Conn, _ int) error {
+		return s.convertHistoricalPosts(context.Background(), conn, func(source, current map[string]json.RawMessage) (bool, error) {
+			return convert(conn, source, current)
+		})
+	})
+}
