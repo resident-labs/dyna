@@ -1,6 +1,12 @@
 package subagent
 
 import (
+	"context"
+	"database/sql"
+	"dyna-agent/internal/database"
+	"dyna-agent/internal/hub"
+	"dyna-agent/internal/room"
+	"dyna-agent/internal/state"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -23,6 +29,23 @@ func appendLegacyWakePost(t *testing.T, e *testEnv, info Info, kind string) stri
 	}
 	if closeErr != nil {
 		t.Fatal(closeErr)
+	}
+	// Simulate the first startup after the retained source was written.
+	db, err := database.Open(filepath.Dir(e.m.rooms().Root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+		_, err := conn.ExecContext(context.Background(), "DELETE FROM meta WHERE key='room.posts.wake'")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Close(filepath.Dir(e.m.rooms().Root)); err != nil {
+		t.Fatal(err)
+	}
+	if err := room.Migrate(filepath.Dir(e.m.rooms().Root)); err != nil {
+		t.Fatal(err)
 	}
 	return id
 }
