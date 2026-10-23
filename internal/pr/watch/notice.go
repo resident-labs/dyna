@@ -5,6 +5,12 @@ import "strings"
 // staleNotice checks the current record, rather than the snapshot used to queue
 // the notice. SupersededBy keeps the reason visible in PR history.
 func staleNotice(st State, r Record, n Notice) string {
+	if n.Kind == "held-comment" {
+		if _, ok := r.HeldComments[n.CommentID]; !ok {
+			return "comment-resolved"
+		}
+		return ""
+	}
 	// Lifecycle notices and comment batches remain relevant after a push or
 	// merge. Only CI results and readiness describe the current head.
 	if n.Kind != "ci" && n.Kind != "land" && !legacyCINotice(n.Text) {

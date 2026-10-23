@@ -23,6 +23,7 @@ import (
 const (
 	Version = 1
 
+	KeyPRTrustedBots         = "pr.trustedBots"
 	KeyLocalLaneRepos        = "lane.local.repos"
 	KeyComputersEnabled      = "computers.enabled"
 	KeyAutoCheck             = "updater.autoCheck"
@@ -57,6 +58,7 @@ const (
 
 // Values are the effective V1 settings. Unknown file keys are kept in Extra.
 type Values struct {
+	PRTrustedBots         []string
 	LocalLaneRepos        []string
 	LibraryEnabled        []string
 	LibraryProfile        string
@@ -104,6 +106,7 @@ func DefaultPath() string {
 
 func Defaults() Values {
 	return Values{
+		PRTrustedBots:         []string{"coderabbitai", "copilot-pull-request-reviewer"},
 		LocalCIRemote:         DefaultLocalCIRemote,
 		RootProfile:           "opus",
 		BrowserUseFlagsFile:   true,
@@ -168,6 +171,17 @@ func Load(path string) (Values, error) {
 		}
 	}
 	v.Extra = raw
+	if pr, ok := raw["pr"].(map[string]any); ok {
+		if bots, exists := pr["trustedBots"]; exists {
+			data, err := json.Marshal(bots)
+			if err != nil {
+				return Values{}, err
+			}
+			if err := v.Set(KeyPRTrustedBots, string(data)); err != nil {
+				return Values{}, err
+			}
+		}
+	}
 	if localci, ok := raw["localci"].(map[string]any); ok {
 		if remote, exists := localci["remote"]; exists {
 			value, ok := remote.(string)
@@ -354,6 +368,18 @@ func (v Values) EffectiveAutoCheck() bool {
 
 func (v *Values) Set(key, value string) error {
 	switch key {
+	case KeyPRTrustedBots:
+		var bots []string
+		if err := json.Unmarshal([]byte(value), &bots); err != nil {
+			return fmt.Errorf("pr.trustedBots must be a JSON list of GitHub logins")
+		}
+		for _, bot := range bots {
+			if strings.TrimSpace(bot) == "" {
+				return fmt.Errorf("pr.trustedBots cannot contain an empty login")
+			}
+		}
+		v.PRTrustedBots = bots
+		v.fromFile[key] = true
 	case KeyLocalLaneRepos:
 		var repos []string
 		if err := json.Unmarshal([]byte(value), &repos); err != nil {
@@ -474,6 +500,9 @@ func (v Values) Save() error {
 		raw = map[string]any{}
 	}
 	raw["version"] = Version
+	pr := nested(raw, "pr")
+	pr["trustedBots"] = v.PRTrustedBots
+	raw["pr"] = pr
 	lane := nested(raw, "lane")
 	local := nested(lane, "local")
 	local["repos"] = v.LocalLaneRepos
