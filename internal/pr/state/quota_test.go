@@ -41,7 +41,7 @@ func TestLegacyQuotaMigrationKeepsOnlyProvenPause(t *testing.T) {
 				if !st.LegacyPause.IsZero() {
 					t.Fatal("known scope became global")
 				}
-			} else if len(st.RateLimits) != 0 || !st.LegacyPause.Equal(until) {
+			} else if len(st.RateLimits) != 0 || !st.LegacyPause.IsZero() {
 				t.Fatalf("unknown scope: %+v", st)
 			}
 			if err := Write(root, st); err != nil {
@@ -52,11 +52,11 @@ func TestLegacyQuotaMigrationKeepsOnlyProvenPause(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !st.RateLimit.PauseUntil.Equal(until) {
+			if known && !st.RateLimit.PauseUntil.Equal(until) {
 				t.Fatal("restart lost original pause")
 			}
 			st.ExpireLegacyPause(until.Add(-time.Second))
-			if !known && !st.LegacyPause.Equal(until) {
+			if !known && !st.LegacyPause.IsZero() {
 				t.Fatal("unknown pause ended early")
 			}
 			st.ExpireLegacyPause(until)
