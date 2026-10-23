@@ -43,7 +43,7 @@ func TestInstructionNoteSteersTheRunningTurn(t *testing.T) {
 		t.Fatalf("running turn did not receive its note: %+v, %v", turn, err)
 	}
 	note, err := e.m.rooms().Message(info.RoomID, turn.Steering[0].ID)
-	if err != nil || note.Wake || note.Kind != "instructions" {
+	if err != nil || note.Wake || note.Kind != "session" || note.Notice.Kind != "instructions" {
 		t.Fatalf("instruction note: %+v, %v", note, err)
 	}
 	if meta, err := e.m.Store.ReadMeta(info.ID); err != nil || meta.Turns != 1 {

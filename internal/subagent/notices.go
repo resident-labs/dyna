@@ -29,8 +29,8 @@ func postCooldownNotice(s notices.Store, profileName, failure string, at time.Ti
 
 // postAccountSwitch tells root, quietly, that a turn moved to another account.
 func (m *Manager) postAccountSwitch(meta Meta, sw harness.AccountSwitch) {
-	text := fmt.Sprintf("%s hit its usage limit; %s's turn moved to %s.", sw.From, meta.Address(), sw.To)
-	if _, err := m.rooms().Post(meta.RoomID, room.PostInput{Wake: false, From: "dyna", Kind: "account", To: []string{meta.Room + ":" + RoleRoot}, Text: text}); err != nil {
+	event := room.SessionEvent{Type: room.SessionAccount, Session: meta.Address(), From: sw.From, To: sw.To, Reason: room.AccountUsageLimit}
+	if _, err := m.rooms().PostEvent(meta.RoomID, event, meta.Room+":"+RoleRoot); err != nil {
 		log.Printf("account switch note: %v", err)
 	}
 }
@@ -47,7 +47,15 @@ func (m *Manager) postFallbackNotice(id, token string) {
 	if err != nil {
 		return
 	}
-	if _, err := m.rooms().Post(meta.RoomID, room.PostInput{Wake: false, ID: transferNoticeID(token), From: "dyna", Kind: "account", To: []string{meta.Address()}, Text: t.Notice}); err != nil {
+	event := room.SessionEvent{
+		Type:    room.SessionAccount,
+		Session: meta.Address(),
+		From:    t.PreviousProfile,
+		To:      t.Profile,
+		Reason:  room.AccountFallback,
+		Detail:  t.Notice,
+	}
+	if _, err := m.rooms().PostEventInput(room.PostEventInput{RoomID: meta.RoomID, Event: event, ID: transferNoticeID(token), To: []string{meta.Address()}}); err != nil {
 		log.Printf("fallback notice: %v", err)
 		return
 	}

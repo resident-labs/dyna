@@ -41,7 +41,7 @@ func TestInstructionCreatorReadDoesNotRepairTheParent(t *testing.T) {
 func TestRunnerInstructionsSavesTheExactSnapshotAndCoveredNotes(t *testing.T) {
 	e := newTestEnv(t)
 	info := completedFixtureSession(t, e)
-	note, err := e.m.rooms().Post(info.RoomID, room.PostInput{From: "dyna", Kind: "instructions", To: []string{info.Address()}, Text: "old drift"})
+	note, err := e.m.rooms().PostEvent(info.RoomID, room.SessionEvent{Type: room.SessionInstructions, Session: info.Address(), Detail: "old drift"}, info.Address())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func TestRunnerInstructionsRetainsTheSnapshotAndUsesDriftNotes(t *testing.T) {
 		t.Fatalf("drift metadata = %+v, error %v", meta, err)
 	}
 	note, err := e.m.rooms().Message(info.RoomID, meta.InstructionsNotes[0])
-	if err != nil || note.Wake || note.Kind != "instructions" || !strings.Contains(note.Text, "Retain the cached prefix.") {
+	if err != nil || note.Wake || note.Kind != "session" || note.Notice.Kind != "instructions" || !strings.Contains(note.Text, "Retain the cached prefix.") {
 		t.Fatalf("drift note = %+v, error %v", note, err)
 	}
 }

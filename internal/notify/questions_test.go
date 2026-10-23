@@ -179,7 +179,10 @@ func TestQuestionWithdrawalKeepsActorAndParticipants(t *testing.T) {
 	}
 	msgs, _ := e.svc.Rooms.Messages(rec.ID)
 	p := msgs[len(msgs)-1]
-	if p.From != target.Address() || !p.Addressed(asker.Address()) || p.Addressed(target.Address()) || !p.Addressed(rec.Name) || p.Kind != "message" || p.ReplyTo != q.Post {
+	// The note is the engine's, not the withdrawing session's: it says who
+	// withdrew, and reaches the question's other participants.
+	payload, ok := p.Question()
+	if p.From != room.EngineSender || !ok || payload.By != target.Address() || payload.Reason != "obsolete" || !p.Addressed(asker.Address()) || p.Addressed(target.Address()) || !p.Addressed(rec.Name) || p.ReplyTo != q.Post {
 		t.Fatal(p)
 	}
 }

@@ -109,7 +109,8 @@ func (m *Manager) withdrawClosedQuestions(info Info) error {
 		if readErr != nil {
 			return readErr
 		}
-		if _, err = m.rooms().Post(info.RoomID, room.PostInput{ID: questions.PostID(q.Room, q.ID, "withdrawn"), From: info.Address(), Kind: "message", To: post.To, ReplyTo: q.Post, Text: "[WITHDRAWN " + q.ID + "] session closed"}); err != nil {
+		event := room.QuestionEvent{QuestionID: q.ID, Post: q.Post, By: info.Address(), Reason: "session closed"}
+		if _, err = m.rooms().PostEventInput(room.PostEventInput{RoomID: info.RoomID, Event: event, ID: questions.PostID(q.Room, q.ID, "withdrawn"), To: post.To, ReplyTo: q.Post}); err != nil {
 			return err
 		}
 	}
