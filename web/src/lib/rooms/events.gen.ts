@@ -48,6 +48,9 @@ export type WorktreeReason = "not-merged" | "dirty" | "manual-handoff" | "keep-f
 // HookState is a named string type of an event payload.
 export type HookState = "running" | "passed" | "failed" | "error"
 
+// MergeReasonKind is a named string type of an event payload.
+export type MergeReasonKind = "checks-failed" | "conflict" | "root-return" | "other"
+
 // ReviewKind is a named string type of an event payload.
 export type ReviewKind = "approve" | "changes" | "approve-fast" | "stop-early"
 
@@ -187,6 +190,7 @@ export interface MergeEvent {
   checks?: MergeCheckSummary
   commit?: string
   reason?: string
+  reasonKind?: MergeReasonKind
   summary?: string
   label?: string
   key?: string
@@ -847,6 +851,7 @@ const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "he
 const RULE_VERB: ReadonlySet<unknown> = new Set(["added", "edited", "removed"])
 const WORKTREE_REASON: ReadonlySet<unknown> = new Set(["not-merged", "dirty", "manual-handoff", "keep-failed", "other"])
 const HOOK_STATE: ReadonlySet<unknown> = new Set(["running", "passed", "failed", "error"])
+const MERGE_REASON_KIND: ReadonlySet<unknown> = new Set(["checks-failed", "conflict", "root-return", "other"])
 const REVIEW_KIND: ReadonlySet<unknown> = new Set(["approve", "changes", "approve-fast", "stop-early"])
 const REVIEW_SEVERITY: ReadonlySet<unknown> = new Set(["blocking", "should-fix", "nit"])
 const REVIEW_STOP_REASON: ReadonlySet<unknown> = new Set(["superseded", "duplicate", "empty", "too-large"])
@@ -1001,6 +1006,7 @@ export function isMergeEvent(v: unknown): v is MergeEvent {
     (v.checks === undefined || isMergeCheckSummary(v.checks)) &&
     (v.commit === undefined || typeof v.commit === "string") &&
     (v.reason === undefined || typeof v.reason === "string") &&
+    (v.reasonKind === undefined || MERGE_REASON_KIND.has(v.reasonKind)) &&
     (v.summary === undefined || typeof v.summary === "string") &&
     (v.label === undefined || typeof v.label === "string") &&
     (v.key === undefined || typeof v.key === "string") &&

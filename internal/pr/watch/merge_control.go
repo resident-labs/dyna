@@ -263,10 +263,10 @@ func (s *Service) MergeControl(ctx context.Context, roomID, action string, args,
 			// A local change merges into the integration branch.
 			ev.Base = locallane.Integration
 		}
-		ev.Reason = reason
+		ev.Reason, ev.ReasonKind = reason, room.MergeRootReturn
 		if trial != nil {
 			ev = mergeTrialEvent(st, *trial, room.MergeReturned)
-			ev.Label, ev.Reason = changeLabel(r), reason
+			ev.Label, ev.Reason, ev.ReasonKind = changeLabel(r), reason, room.MergeRootReturn
 		}
 		if err := s.postMergeNotice(ctx, r, "merge-root-return/"+digest(reason), Notice{Kind: "ci", Target: r.Author, Merge: &ev, Text: fmt.Sprintf("%s returned by root at %s. %s\n%s", r.URL, r.Head, reason, logs)}); err != nil {
 			return err

@@ -62,7 +62,7 @@ func TestFailedBatchWakesRootOnce(t *testing.T) {
 	if len(e.sent) != 1 || !posted.MergeTrials["repo"].Notified {
 		t.Fatalf("notices = %+v", e.sent)
 	}
-	if notice := e.sent[0]; notice.Merge == nil || notice.Merge.Reason != ci.Reason || notice.Merge.Checks == nil || len(notice.Merge.Checks.Failed) != 1 {
+	if notice := e.sent[0]; notice.Merge == nil || notice.Merge.Reason != "" || notice.Merge.ReasonKind != room.MergeChecksFailed || notice.Merge.Checks == nil || len(notice.Merge.Checks.Failed) != 1 {
 		t.Fatalf("retry notice lost the saved facts: %+v", notice.Merge)
 	}
 	// A restart resumes from the saved checkpoint, which is already notified.
@@ -114,11 +114,37 @@ func TestFailedBatchNoticeNamesTheFailedCheck(t *testing.T) {
 		t.Fatal(err)
 	}
 	ev, report := failedBatchNotice(t, f)
-	if !strings.Contains(ev.Reason, "frontend-check") || ev.Checks == nil || len(ev.Checks.Failed) != 1 || ev.Checks.Failed[0] != "frontend-check" {
-		t.Fatalf("notice reason=%q checks=%+v", ev.Reason, ev.Checks)
+	if ev.Reason != "" || ev.ReasonKind != room.MergeChecksFailed || ev.Checks == nil || len(ev.Checks.Failed) != 1 || ev.Checks.Failed[0] != "frontend-check" {
+		t.Fatalf("notice reason=%q kind=%q checks=%+v", ev.Reason, ev.ReasonKind, ev.Checks)
 	}
 	if !strings.Contains(report, "frontend-check") {
 		t.Fatalf("report does not name the failed check:\n%s", report)
+	}
+}
+
+// A failed batch names every member PR, so the card names the batch rather than
+// the one PR the trial was anchored on. Its cause is the typed kind alone: the
+// failing check names are the evidence, and the event repeats no reason text.
+func TestFailedBatchEventNamesEveryMember(t *testing.T) {
+	f := mergeTrialEnv(t, 1, 2)
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	f.ci, f.conclusion = "completed", "failure"
+	f.checks = []Check{actionsCheck(Check{ID: 501, Name: "go-test", Status: "completed", Conclusion: "failure"})}
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	ev, _ := failedBatchNotice(t, f)
+	var numbers []int
+	for _, pr := range ev.PRs {
+		numbers = append(numbers, pr.Number)
+	}
+	if len(numbers) != 2 || numbers[0] != 1 || numbers[1] != 2 {
+		t.Fatalf("member PRs = %v, want both members", numbers)
+	}
+	if ev.Reason != "" || ev.ReasonKind != room.MergeChecksFailed {
+		t.Fatalf("cause = %q/%q, want the checks-failed kind alone", ev.Reason, ev.ReasonKind)
 	}
 }
 
