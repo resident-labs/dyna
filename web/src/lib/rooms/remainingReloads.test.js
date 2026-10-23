@@ -238,9 +238,9 @@ test('a channel roster change refreshes computers once and its later computer ev
 
 test('App session event bursts share transcript and queue requests through the reload gate', async () => {
   const waits = [deferred(), deferred()]
-  let transcripts = 0, queues = 0, pokes = 0
+  let transcripts = 0, queues = 0
   const c = {
-    changesTracker: { poke: () => pokes++ },
+    reviewVersion: 0,
     roomId: 'a', roomRequest: 1, drill: { id: 'one' }, home: null, feed: null,
     roomSessionController: null, openRun: '', soonRooms() {},
     loadMembers() {}, loadConsolidations() {},
@@ -257,7 +257,7 @@ test('App session event bursts share transcript and queue requests through the r
   for (let i = 0; i < 10; i++) c.handle({ kind: 'session', roomId: 'a', change: { op: 'upsert', id: 'one' } })
   assert.equal(transcripts, 1)
   assert.equal(queues, 1)
-  assert.equal(pokes, 10, 'every event asks the throttled Changes count to refresh')
+  assert.equal(c.reviewVersion, 10, 'session activity updates the review workspace')
   waits[0].resolve({})
   await new Promise(setImmediate)
   assert.equal(transcripts, 2)
@@ -323,7 +323,7 @@ function sessionApp(tab, api) {
   let effect
   const c = {
     roomId: 'a', roomRequest: 1, drill: { id: 'one' }, sessionVisit: 1,
-    sessionTurn: 0, sessionReadingHistory: false, mergeSessionPage, sessionTab: tab, pageVisible: true,
+    narrow: false, reviewOpen: false, sessionTurn: 0, sessionReadingHistory: false, mergeSessionPage, sessionTab: tab, pageVisible: true,
     session: null, sessionError: '', queue: [],
     untrack: (fn) => fn(), $effect: (fn) => { effect = fn },
   }

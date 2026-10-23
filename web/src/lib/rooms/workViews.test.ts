@@ -11,8 +11,8 @@ test('the sidebar has nine rows in Work and Machine; Room settings is a modal, n
 
 test('work views resolve to their sidebar rows; PRs and Issues belong to the room', () => {
   const rows = Object.fromEntries(['questions', 'goals', 'runs', 'jobs', 'services', 'visuals', 'files', 'github', 'issues', 'cihealth', 'library', 'terminal', 'computers'].map((v) => [v, rowOf(v)?.id]))
-  assert.deepEqual(rows, { questions: 'questions', goals: 'goals', runs: 'runs', jobs: 'runs', services: 'services', visuals: 'visuals', files: 'code', github: undefined, issues: undefined, cihealth: 'code', library: 'library', terminal: 'terminal', computers: 'computers' })
-  assert.deepEqual(rowOf('files')?.tabs.map((t) => t.id), ['files', 'cihealth'], 'the code header has no Changes tab')
+  assert.deepEqual(rows, { questions: 'questions', goals: 'goals', runs: 'runs', jobs: 'runs', services: 'services', visuals: 'visuals', files: undefined, github: undefined, issues: undefined, cihealth: 'code', library: 'library', terminal: 'terminal', computers: 'computers' })
+  assert.equal(rowOf('files'), undefined)
   assert.equal(rowOf('changes'), undefined)
   for (const view of ['settings', 'rules', 'room-general', 'room-hooks']) assert.equal(rowOf(view), undefined, view)
   assert.equal(rowOf('general'), undefined)
@@ -37,8 +37,8 @@ test('the runs header shows no Shell jobs tab, but a job log stays under the run
   assert.equal(rowOf('jobs')?.id, 'runs')
 })
 
-test('the code row has Files and CI health tabs, and no Changes, Issues or Library tab', () => {
-  assert.deepEqual(rowOf('cihealth')?.tabs.map((t) => t.label), ['Files', 'CI health'])
+test('the code row holds CI health; files open in the review workspace', () => {
+  assert.deepEqual(rowOf('cihealth')?.tabs.map((t) => t.label), ['CI health'])
   assert.equal(rowOf('cihealth')?.id, 'code')
 })
 
@@ -50,8 +50,8 @@ test('Library is its own Machine row after code, repo-scoped, and the library vi
   assert.ok(!shown(machine, {}).some((r) => r.id === 'library'), 'hidden in a room without a repository')
 })
 
-test('room tabs keep the Messages, PR and Issues deep-link view IDs outside Code', () => {
-  assert.deepEqual(roomTabs, [{ id: 'general', label: 'Messages' }, { id: 'github', label: 'PRs' }, { id: 'issues', label: 'Issues' }])
+test('room tabs keep the Messages and Issues views outside Code', () => {
+  assert.deepEqual(roomTabs, [{ id: 'general', label: 'Messages' }, { id: 'issues', label: 'Issues' }])
   assert.equal(rowOf('github'), undefined)
   assert.equal(rowOf('issues'), undefined)
 })

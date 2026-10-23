@@ -72,13 +72,11 @@
   import Pair from './lib/settings/Pair.svelte'
   import Palette from './lib/ui/Palette.svelte'
   import ConnectStop from './lib/settings/ConnectStop.svelte'
-  import FileBrowser from './lib/files/FileBrowser.svelte'
-  import Changes from './lib/files/Changes.svelte'
+  import ReviewWorkspace from './lib/review/ReviewWorkspace.svelte'
   import SessionTabs from './lib/sessions/SessionTabs.svelte'
   import UseIcons from './lib/sessions/UseIcons.svelte'
   import ShellGrid from './lib/sessions/ShellGrid.svelte'
   import { runningShells } from './lib/sessions/shells.ts'
-  import { trackChanges, changedCount } from './lib/sessions/changesCount.ts'
   import Tabs from './lib/ui/Tabs.svelte'
   import { rowOf, visibleTabs, roomTabs } from './lib/rooms/workViews.ts'
   import SessionMedia from './lib/sessions/SessionMedia.svelte'
@@ -93,7 +91,6 @@
   import Jobs from './lib/workflows/Jobs.svelte'
   import Prompt from './lib/ui/Prompt.svelte'
   import RunWorkflow from './lib/workflows/RunWorkflow.svelte'
-  import PRPanel from './lib/prs/PRPanel.svelte'
   import GitHub from './lib/prs/GitHub.svelte'
   import type { Reference } from './lib/rooms/references.ts'
   import type { RoomIssue } from './lib/prs/unifiedIssues.ts'
@@ -460,20 +457,10 @@
   let update = $state<UpdateNotice | null>(null) // configsvc.UpdateNotice: a newer dyna release
   let updateHidden = $state(false)
   let sessionTab = $state('chat') // the open tab of a session view
-  let changesTracker: ReturnType<typeof trackChanges> | null = null // pokes a reload of the open session's changed-file count when it shows activity
-  let sessionChanged = $state(0) // files changed in the open session's worktree; the Changes tab shows above zero
-  $effect(() => {
-    const session = drill?.id, roomRef = room?.id
-    sessionChanged = 0
-    if (!session || !roomRef) return
-    let stale = false
-    const load = () => api.gitStatus(roomRef, session).then((st: Parameters<typeof changedCount>[0]) => { if (!stale) sessionChanged = changedCount(st) }, () => { if (!stale) sessionChanged = 0 })
-    const tracker = trackChanges(load)
-    changesTracker = tracker
-    return () => { stale = true; tracker.stop(); changesTracker = null }
-  })
-  // The PR views appear without the view fade.
-  let prView = $derived((!drill && (view === 'github' || view === 'issues')) || (!!drill && sessionTab === 'prs'))
+  let reviewOpen = $state(false)
+  let reviewTab = $state('files')
+  let reviewVersion = $state(0)
+  let prView = $derived(view === 'issues')
   // Agent computers of the open room (null when the feature is unavailable),
   // each session's recent actions, and whether the viewer is open.
   let computers = $state<ComputerInfo[] | null>(null)
@@ -590,14 +577,14 @@
   let sidebarChips = $derived((narrow ? navOpen : showSide) && (agentsNav || live.length > 0))
   function visibleList(name: string) {
     return consolidationAlive && pageVisible && listVisible(name, {
-      view, drill, showRoomSettings, memberChips, sidebarChips,
+      view, drill, reviewOpen, showRoomSettings, memberChips, sidebarChips,
       sideVisible: narrow ? navOpen : showSide,
       controlsOpen: !!roomControlsMenu || !!clearDormantConfirm,
     })
   }
   const reload = createReloadGate(() => ({ room: roomId, visit: roomRequest }), visibleList)
   const readMarker = createReadMarker(api, {
-    current: () => ({ room: roomId, visit: roomRequest + ':' + view, visible: pageVisible && consolidationAlive && !drill && isChannel(view) }),
+    current: () => ({ room: roomId, visit: roomRequest + ':' + view, visible: pageVisible && !(narrow && reviewOpen) && consolidationAlive && !drill && isChannel(view) }),
     read: () => { soonRooms(); soonRooms('feed') },
   })
 
@@ -1063,7 +1050,7 @@
       loadSession()
     }
   }
-  function sessionVisible(tab = sessionTab) { return pageVisible && ['chat', 'computer', 'media'].includes(tab) }
+  function sessionVisible(tab = sessionTab) { return pageVisible && !(narrow && reviewOpen) && ['chat', 'computer', 'media'].includes(tab) }
   function loadSession() { return sessionData.load() }
   $effect(() => {
     const tab = sessionTab
@@ -1323,7 +1310,9 @@
     sessionTurn = 0
     openJob = ''
     reply = null
-    view = ['all', 'owner', 'turns'].includes(startView) || (startView === 'terminal' && !hasTerminal) ? GENERAL : startView
+    reviewOpen = startView === 'files' || startView === 'github'
+    reviewTab = startView === 'github' ? 'prs' : 'files'
+    view = ['all', 'owner', 'turns', 'files', 'github'].includes(startView) || (startView === 'terminal' && !hasTerminal) ? GENERAL : startView
     members = []
     hierarchy = []
     runs = null
@@ -1807,7 +1796,7 @@
     // Keep loaded history on screen when the event stream reconnects.
     if (!await roomData.open(Math.max(feed?.posts?.length ?? 0, 50) + 20)) return
     roomSessionController?.load()
-    if (drill) { loadSession(); changesTracker?.poke() } // events may have been missed while the stream was down
+    if (drill) { loadSession(); reviewVersion++ } // events may have been missed while the stream was down
     if (openRun) loadRun()
     loadChanges()
     loadReviewer()
@@ -1839,9 +1828,9 @@
     const pr = parsePRHash(location.hash)
     const issue = parseIssueHash(location.hash)
     const file = parseFileHash(location.hash)
-    // The PR, Issues and Files views follow their own links with Back and Forward.
-    if (id === roomId && ((pr && view === 'github') || (issue && view === 'issues') || (file && view === 'files'))) return true
     const r = parseRoute(location.hash)
+    // Item panes follow their own links in the same conversation.
+    if (id === roomId && routeSession(drill) === r?.session && ((pr && reviewOpen && reviewTab === 'prs') || (issue && view === 'issues') || (file && reviewOpen && reviewTab === 'files'))) return true
     if (!r) return false
     const post = h.get('post')
     const item = pr || issue || file
@@ -1856,6 +1845,8 @@
       if (target?.kind === 'shell') await openDetail(target)
       else if (r.session === ROOT_SESSION) openSession({ rootSeat: true })
       else if (r.session || r.run) await openDetail({ kind: r.session ? 'session' : 'run', id: r.session || r.run, turn: r.turn })
+      if (r.review) openReview(r.review)
+      if (file) openReview('files')
       if (pr || issue) {
         openView(issue ? 'issues' : 'github')
         prLink = issue || pr
@@ -1947,7 +1938,7 @@
       reviewerSoon()
       if (ev.kind === 'changes' && !item) loadChanges()
     }
-    if (ev.kind === 'session' && evRoom === roomId && ev.change?.id === drill?.id) { loadSession(); changesTracker?.poke() }
+    if (ev.kind === 'session' && evRoom === roomId && ev.change?.id === drill?.id) { loadSession(); reviewVersion++ }
     if (ev.kind === 'members' && evRoom === roomId) {
       if (!item) loadMembers()
       if (ev.change?.controls) soonRooms('controls')
@@ -2023,7 +2014,7 @@
   }
 
   function openPR(n: number | string) {
-    history.pushState({ pr: true }, '', prHash(roomId, n))
+    history.pushState({ pr: true }, '', prHash(roomId, n, 'conversation', routeSession(drill)))
     openView('github')
     prLink = { roomId, pr: String(n), tab: 'conversation' }
   }
@@ -2038,12 +2029,12 @@
 
   // An open PR, issue or file keeps its own, more exact address.
   function holdsItemLink() {
-    if (drill) return false
+    if ((new URLSearchParams(location.hash.slice(1)).get('session') ?? '') !== routeSession(drill)) return false
     const issue = parseIssueHash(location.hash)
     const pr = parsePRHash(location.hash)
     const file = parseFileHash(location.hash)
     const link: [string, { roomId: string }] | null = issue ? ['issues', issue] : pr ? ['github', pr] : file ? ['files', file] : null
-    return !!link && link[1].roomId === roomId && link[0] === view
+    return !!link && link[1].roomId === roomId && (link[0] === 'issues' ? view === 'issues' : reviewOpen && reviewTab === (link[0] === 'files' ? 'files' : 'prs'))
   }
 
   // syncRoute puts the open screen's address in the address bar
@@ -2053,7 +2044,7 @@
   function syncRoute() {
     // A service's read-only conversation keeps the Services address.
     const session = readOnlyDm ? '' : routeSession(drill)
-    const hash = routeHash({ room: roomId, view, session, turn: session ? sessionTurn : 0, run: view === 'runs' ? openRun : '' })
+    const hash = routeHash({ room: roomId, view, session, turn: session ? sessionTurn : 0, run: view === 'runs' ? openRun : '', review: reviewOpen ? reviewTab : undefined })
     if (!started || routing || pop) return
     // An item link is already the right entry; the next screen adds its own.
     if (!holdsItemLink()) writeRoute(hash, routeFix, location, history)
@@ -2073,12 +2064,39 @@
     // A followed address always ends a detail navigation that is still loading:
     // its older response must not open over the screen the reader asked for.
     detailRequest++
-    if (r.session ? routeSession(drill) === r.session && sessionTurn === r.turn : r.run ? !drill && view === 'runs' && openRun === r.run : !drill && !openRun && view === r.view) return false
+    const sameChat = r.session ? routeSession(drill) === r.session && sessionTurn === r.turn : r.run ? !drill && view === 'runs' && openRun === r.run : !drill && !openRun && view === r.view
+    if (sameChat && (r.review ?? '') === (reviewOpen ? reviewTab : '')) return false
+    reviewOpen = !!r.review
     if (!r.session && !r.run) openView(r.view)
+    if (r.review) openReview(r.review)
     return { roomId, request: detailRequest }
   }
 
+  function openReview(tab = reviewTab) {
+    detailRequest++
+    if (tab !== reviewTab) prLink = null
+    reviewTab = tab
+    reviewOpen = true
+    threadsOpen = false
+    contextOpen = false
+    reviewVersion++
+    showMembers = false
+    showPins = false
+    navOpen = false
+    if (!drill && !isChannel(view)) view = GENERAL
+    loadChanges()
+    loadReviewer()
+  }
+
+  function closeReview() {
+    reviewOpen = false
+    prLink = null
+    writeRoute(routeHash({ room: roomId, view, session: routeSession(drill), turn: sessionTurn, run: '' }), true, location, history)
+  }
+
   function openView(v: string) {
+    if (v === 'files' || v === 'github') { openReview(v === 'files' ? 'files' : 'prs'); return }
+    reviewOpen = false
     clearItemLink(roomId, v)
     detailRequest++
     prLink = null
@@ -2161,7 +2179,7 @@
       openPins: () => { showPins = true; if (narrow) showMembers = false },
       openSearch: (arg) => openSearch(arg || ''),
       openRoomSettings: async (target) => { if (target.id === roomId || await selectRoom(target.id)) showRoomSettings = true },
-      openSessionPRs: () => (sessionTab = 'prs'),
+      openSessionPRs: () => openReview('prs'),
       cancelRun: (run) => (confirm = { kind: 'cancelrun', run }),
       toggleSidebar: () => (narrow ? (navOpen = !navOpen) : (showSide = !showSide)),
       roomOptions: () => rooms.filter((x) => x.id !== r?.id).map((x) => ({ value: x.name, hint: x.displayName && x.displayName !== x.name ? x.displayName : x.repo || '' })),
@@ -2369,7 +2387,7 @@
     <button class="scrim" aria-label="Close the room list" onclick={() => (navOpen = false)}></button>
   {/if}
   <main class="main">
-    <header class="bar" class:dm-bar={!!drill}>
+    <header class="bar" class:dm-bar={!!drill} inert={narrow && reviewOpen}>
       {#if narrow}
         <button class="icon" onclick={() => (navOpen = true)} title="Rooms and views" aria-label="Open the room list" aria-expanded={navOpen}>
           <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" /></svg>
@@ -2401,11 +2419,11 @@
           {/if}
           <span class="dm-sep" aria-hidden="true">/</span>
           <DmIdentity member={session?.member || drill} usage={session?.usage} onopen={openMember} />
-          {#if !narrow}<div class="dm-tabs"><SessionTabs bind:tab={sessionTab} media={session?.media ?? []} prs={prMap[drill.id] ?? []} computer={computers && !drill.rootSeat ? computerOf(drill.id) ?? { state: 'none' } : null} changes={sessionChanged} shells={drillShells.length} /></div>{/if}
+          {#if !narrow}<div class="dm-tabs"><SessionTabs bind:tab={sessionTab} media={session?.media ?? []} computer={computers && !drill.rootSeat ? computerOf(drill.id) ?? { state: 'none' } : null} shells={drillShells.length} /></div>{/if}
           <span class="spacer"></span>
           <UseIcons shells={drillShells.length} computer={inUse(drillComputer)} tab={sessionTab} onselect={(tab) => (sessionTab = tab)} />
           {#if isRootDm}<CallButton {room} />{/if}
-          <button class="dm-threads" class:on={contextOpen} aria-expanded={contextOpen} title="Pull requests and shell jobs" onclick={() => { contextOpen = !contextOpen; if (contextOpen) sessionTab = 'chat' }}>Context</button>
+          <button class="dm-threads" class:on={contextOpen} aria-expanded={contextOpen} title="Shell jobs" onclick={() => { contextOpen = !contextOpen; if (contextOpen) sessionTab = 'chat' }}>Context</button>
           <button class="dm-threads threads" class:on={threadsOpen} aria-expanded={threadsOpen} aria-label="Threads" title="Threads" onclick={() => { threadsOpen = !threadsOpen; selectedThread = ''; if (threadsOpen) sessionTab = 'chat' }}><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5v6a1.5 1.5 0 0 1-1.5 1.5H9l-3.5 3v-3h0A1.5 1.5 0 0 1 4 11.5z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" /></svg><b>{threadCount}</b></button>
           {/if}
         {:else if view === 'runs' && openRun}
@@ -2423,7 +2441,7 @@
           {#if workTabs && !narrow}<div class="dm-tabs"><Tabs tabs={workTabs} tab={view} label={workRow?.label ?? ''} onselect={openView} /></div>{/if}
         {:else}
           <span class="title" title={room.repo}><span class="name">{roomLabel(current ?? room)}</span></span>
-          {#if !narrow}<div class="dm-tabs"><Tabs tabs={roomTabs} tab={view === 'github' || view === 'issues' ? view : GENERAL} label="Room" onselect={openView} /></div>{/if}
+          {#if !narrow}<div class="dm-tabs"><Tabs tabs={roomTabs} tab={view === 'issues' ? view : GENERAL} label="Room" onselect={openView} /></div>{/if}
         {/if}
         {#if !drill}
         <span class="spacer"></span>
@@ -2451,15 +2469,17 @@
         {/if}
         {/if}
       {/if}
+      {#if room?.repo && !readOnlyDm}<button class="review-toggle" class:on={reviewOpen} aria-controls="review-workspace" aria-expanded={reviewOpen} onclick={() => reviewOpen ? closeReview() : openReview()}>Review</button>{/if}
       {#if !roomId}<span class="spacer"></span>{/if}
       {#if narrow}
         <button class="icon" onclick={() => openSearch()} title="Search (Ctrl+K)" aria-label="Search sessions and messages"><SearchIcon size={22} /></button>
       {/if}
     </header>
     <div class="content">
+      <div class="conversation-workspace">
       {#key viewIdentity({ roomId, view, drill })}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div class="center" in:fade={{ duration: prView ? 0 : motion(FAST) }} ondragover={dragOver} ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget instanceof Node ? e.relatedTarget : null)) dropping = false }} ondrop={drop}>
+      <div class="center" inert={narrow && reviewOpen} in:fade={{ duration: prView ? 0 : motion(FAST) }} ondragover={dragOver} ondragleave={(e) => { if (!e.currentTarget.contains(e.relatedTarget instanceof Node ? e.relatedTarget : null)) dropping = false }} ondrop={drop}>
         {#if dropping}
           <div class="dropzone"><div><strong>Drop to attach</strong><span>to your next post in {drill ? '@' + drill.name : '#' + roomLabel(current ?? room)}</span></div></div>
         {/if}
@@ -2485,7 +2505,7 @@
           <Skeleton label="Loading room" />
         {:else if drill}
           <!-- Keyed: staged files and the typed draft belong to one session. -->
-          {#if narrow && !readOnlyDm}<SessionTabs bind:tab={sessionTab} media={session?.media ?? []} prs={prMap[drill.id] ?? []} computer={computers && !drill.rootSeat ? computerOf(drill.id) ?? { state: 'none' } : null} changes={sessionChanged} shells={drillShells.length} />{/if}
+          {#if narrow && !readOnlyDm}<SessionTabs bind:tab={sessionTab} media={session?.media ?? []} computer={computers && !drill.rootSeat ? computerOf(drill.id) ?? { state: 'none' } : null} shells={drillShells.length} />{/if}
           {#key drill.id}
             {#if sessionTab === 'computer' && computers}
               <ComputerPane c={computerOf(drill.id) ?? { session: drill.id, name: drill.name, state: 'none', apps: [], stream: {}, viewers: 0, rssKiB: 0, streamRssKiB: 0 }} room={room.id} feed={computerFeed[drill.id] ?? []} chat={{ computerCount: 1, draft: drafts['computer:' + roomId + ':' + drill.id] ?? '', ondraft: computerDraft, session, room, members: hierarchy, onsend: sendToSession, onopenfile: (a: Attachment) => (viewing = a), onpost: jumpTo, onmessages: () => (sessionTab = 'chat') }} />
@@ -2493,28 +2513,22 @@
               <ShellGrid jobs={drillShells} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} />
             {:else if sessionTab === 'media'}
               <SessionMedia onpost={jumpTo} {room} posts={session?.media ?? []} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} />
-            {:else if sessionTab === 'changes'}
-              <Changes roomId={room.id} session={drill.id} sessionName={drill.name} />
-            {:else if sessionTab === 'prs'}
-              <PRPanel prs={prMap[drill.id] ?? []} error={prError} names={Object.fromEntries(members.filter((x) => x.id).map((x) => [x.id, x.name]))} onuntrack={untrackPR} onresume={resumePR} />
             {:else}
               <div class="sess-wrap" style:--shift={threadsOpen && !narrow ? '360px' : '0px'}>
-              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:contextOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} prs={prMap[drill.id] ?? []} jobs={jobs ?? []} contextError={jobsError} onchild={openSession} onpr={() => (sessionTab = 'prs')} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} />
+              <Session readOnly={readOnlyDm} bind:readingHistory={sessionReadingHistory} onissue={openIssues} onreopen={reopenSession} {reopening} ondismisssession={dismissSession} {dismissing} onpost={jumpTo} bind:this={sessionView} bind:threadsOpen bind:contextOpen bind:selectedThread bind:draft={sessionDraft.value} members={hierarchy} jobs={jobs ?? []} contextError={jobsError} onchild={openSession} onjob={(job) => { openJob = job.id; drill = null; view = 'jobs' }} onopenfile={(a: Attachment & { roomId?: string; postId?: string }) => (viewing = a)} {session} error={sessionError} {room} {queue} focusedTurn={sessionTurn} onrecent={() => openSession(drill)} onearlier={loadEarlierSession} onnewer={loadNewerSession} onpresent={presentSession} onunqueue={unqueue} ondismiss={dismissPendingPost} onharness={(name) => openSettings('profiles', false, name)} onsend={sendToSession} />
               {#if showPreview}<ComputerPreview c={drillComputer} session={drill.id} name={drill.name} onopen={() => (sessionTab = 'computer')} />{/if}
               </div>
             {/if}
           {/key}
         {:else}
-        {#if !workRow && narrow}<Tabs tabs={roomTabs} tab={view === 'github' || view === 'issues' ? view : GENERAL} label="Room" onselect={openView} />{/if}
+        {#if !workRow && narrow}<Tabs tabs={roomTabs} tab={view === 'issues' ? view : GENERAL} label="Room" onselect={openView} />{/if}
         {#if workTabs && narrow}<Tabs tabs={workTabs} tab={view} label={workRow?.label ?? ''} onselect={openView} />{/if}
-        {#if view === 'files'}
-          {#key room.id}<FileBrowser roomId={room.id} {narrow} {reveal} folder={revealFolder} onpr={openPR} />{/key}
-        {:else if view === 'cihealth'}
+        {#if view === 'cihealth'}
           {#key room.id}<CIHealth roomId={room.id} {narrow} {changes} onpr={openPR} />{/key}
         {:else if view === 'library'}
           {#key room.id}<Library roomId={room.id} {narrow} onopen={({ path, dir }) => { openView('files'); if (dir) revealFolder = { path }; else reveal = path }} />{/key}
-        {:else if view === 'github' || view === 'issues'}
-          {#key `${room.id}:${view}`}<GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind={view === 'issues' ? 'issue' : 'pr'} localIssues={[...issues, ...issueHistory]} oncloseissue={askCloseIssue} onexportissue={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} ondismississue={(i) => triageIssue(() => api.closeIssue(roomId, i.id, 'Dismissed'))} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m, tab) => { openSession(m); if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
+        {:else if view === 'issues'}
+          {#key `${room.id}:${view}`}<GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="issue" localIssues={[...issues, ...issueHistory]} oncloseissue={askCloseIssue} onexportissue={(i) => triageIssue(() => api.exportIssue(roomId, i.id))} ondismississue={(i) => triageIssue(() => api.closeIssue(roomId, i.id, 'Dismissed'))} integration={syncRepo?.integration as import('./lib/api/lanesync.ts').Integration | null} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m, tab) => { openSession(m); if (tab === 'prs') openReview('prs'); else if (tab) sessionTab = tab }} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />{/key}
         {:else if view === 'terminal' && hasTerminal}
           {#key room.id}<Terminal roomId={room.id} ref={room.id} noRepo={!room.repo} {narrow} names={Object.fromEntries(members.filter((m) => m.id).map((m) => [m.id, m.name]))} />{/key}
         {:else if view === 'questions'}
@@ -2545,6 +2559,16 @@
         {/if}
       </div>
       {/key}
+      {#if room && reviewOpen}
+        {#key room.id + ':' + (drill?.rootSeat ? '' : drill?.id ?? '')}
+          <ReviewWorkspace roomId={room.id} session={drill?.rootSeat ? '' : drill?.id ?? ''} sessionName={drill?.name ?? ''} members={hierarchy} bind:tab={reviewTab} {reveal} folder={revealFolder} version={reviewVersion} onpr={openPR} onclose={closeReview} onselect={(id) => { const member = hierarchy.find((m) => m.id === id); if (member) openSession(member); else { drill = null; view = GENERAL } }}>
+            {#snippet prs()}
+              <GitHub {mergeVersion} older={listPages.changes?.older} loadingOlder={olderLoading} failedOlder={olderFailed} onolder={() => loadOlderLists(['changes'])} roomId={room.id} kind="pr" active={reviewTab === 'prs'} session={routeSession(drill)} link={prLink} {changes} members={hierarchy} onmention={mentionReference} onsession={(m) => openSession(m)} onpr={openPR} ontrack={trackPR} onuntrack={untrackPR} onresume={resumePR} {reviewer} onreviewer={loadReviewer} goals={knownGoals} onexpedite={expediteGoal} onlinkgoal={linkPRGoal} />
+            {/snippet}
+          </ReviewWorkspace>
+        {/key}
+      {/if}
+      </div>
       {#if narrow && roomId && room && (showPins || (showMembers && !drill) || (view === 'goals' && selectedGoal))}
         <button class="scrim" aria-label="Close the panel" onclick={() => { showPins = false; showMembers = false; goalId = '' }}></button>
       {/if}
@@ -2637,6 +2661,9 @@
 {/if}
 
 <style>
+  .conversation-workspace { flex: 1; min-height: 0; min-width: 0; display: flex; position: relative; }
+  .review-toggle { flex: none; padding: var(--s2) var(--s3); border: 1px solid var(--line); border-radius: var(--r-sm); color: var(--muted); font-size: var(--t-sm); }
+  .review-toggle.on { color: var(--iris); background: var(--iris-wash); border-color: var(--iris-edge); }
   .sess-wrap { position: relative; flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
   .app { display: flex; height: 100vh; height: 100dvh; min-height: 0; }
   .nav, .panel { display: contents; }

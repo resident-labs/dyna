@@ -12,6 +12,7 @@ export interface Route {
   session: string
   turn: number
   run: string
+  review?: string
 }
 
 // The root conversation has no session ID of its own, so its address says root.
@@ -30,6 +31,7 @@ export function routeHash(r: Route): string {
     if (r.turn > 0) q.set('turn', String(r.turn))
   } else if (r.run) q.set('run', r.run)
   else if (r.view !== GENERAL && VIEW.test(r.view)) q.set('view', r.view)
+  if (r.review && ['files', 'changes', 'prs'].includes(r.review)) q.set('review', r.review)
   return `#${q}`
 }
 
@@ -48,9 +50,11 @@ export function parseRoute(hash: string): Route | null {
   const run = detail === 'run' ? id : q.get('run') ?? ''
   const turn = Number(q.get('turn') ?? 0)
   const view = q.get('view') ?? GENERAL
-  if (isSession(session)) return { room, view: GENERAL, session, turn: Number.isSafeInteger(turn) && turn > 0 ? turn : 0, run: '' }
-  if (detailIDs.run.test(run)) return { room, view: 'runs', session: '', turn: 0, run }
-  return { room, view: VIEW.test(view) ? view : GENERAL, session: '', turn: 0, run: '' }
+  const selectedReview = q.get('review') ?? ''
+  const review = ['files', 'changes', 'prs'].includes(selectedReview) ? { review: selectedReview } : {}
+  if (isSession(session)) return { ...review, room, view: GENERAL, session, turn: Number.isSafeInteger(turn) && turn > 0 ? turn : 0, run: '' }
+  if (detailIDs.run.test(run)) return { ...review, room, view: 'runs', session: '', turn: 0, run }
+  return { ...review, room, view: VIEW.test(view) ? view : GENERAL, session: '', turn: 0, run: '' }
 }
 
 // writeRoute puts the route's address in the address bar. A new screen gets
