@@ -41,10 +41,25 @@
     await tick()
     document.getElementById(`rule-edit-${r.id}`)?.focus()
   }
+  async function restoreEditFocus(id) {
+    await tick()
+    document.getElementById(`rule-control-${id}`)?.focus()
+  }
+  async function cancelEdit() {
+    const id = edit?.id
+    edit = null
+    if (id) await restoreEditFocus(id)
+  }
+  function editKey(e) {
+    if (e.isComposing || e.keyCode === 229) return
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save() }
+    else if (e.key === 'Escape') { e.stopPropagation(); cancelEdit() }
+  }
   async function save() {
     if (!edit?.text.trim() || busy) return
+    const draft = edit
     busy = true
-    try { await api.editRule(roomId, globalRule(edit), edit.id, edit.text); edit = null; error = ''; await tick(); await onchanged() }
+    try { await api.editRule(roomId, globalRule(draft), draft.id, draft.text); edit = null; error = ''; await tick(); await onchanged(); await restoreEditFocus(draft.id) }
     catch (e) { say(e) } finally { busy = false }
   }
   async function remove(r) {
@@ -71,13 +86,14 @@
         {#snippet lead()}<span class="id mono">{r.id}</span>{/snippet}
         {#if edit?.id === r.id}
           <Row {lead}>
-            <textarea id="rule-edit-{r.id}" class="edit" aria-label="Edit rule {r.id}" maxlength="500" rows="3" bind:value={edit.text} onkeydown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); save() } else if (e.key === 'Escape') { e.stopPropagation(); edit = null } }}></textarea>
-            <span class="edittools"><button class="ghost" onclick={() => (edit = null)}>Cancel</button><button class="save" disabled={busy || !edit.text.trim()} onclick={save}>Save</button></span>
+            <textarea id="rule-edit-{r.id}" class="edit" aria-label="Edit rule {r.id}" maxlength="500" rows="3" bind:value={edit.text} aria-describedby="rule-shortcuts-{r.id}" onkeydown={editKey}></textarea>
+            <p class="shortcuts" id="rule-shortcuts-{r.id}">Enter saves · Shift+Enter adds a line · Esc cancels</p>
+            <span class="edittools"><button class="ghost" onclick={cancelEdit}>Cancel</button><button class="save" disabled={busy || !edit.text.trim()} onclick={save}>Save</button></span>
           </Row>
         {:else}
           <Row text={r.text} clamp={false} {lead}>
             {#snippet meta()}{#if agent}<Avatar name={m?.name ?? r.setterName} hue={m?.hue ?? 0} emoji={m?.emoji} size={18} /><span>{m?.name ?? r.setterName ?? r.setter}</span><span class="tag">agent</span>{:else}<Avatar owner hue={ownerHue} size={18} /><span>owner</span>{/if}<span>· {ruleTime(r, now)}</span>{/snippet}
-            {#snippet actions()}<button onclick={() => startEdit(r)}>Edit</button><button aria-label="Remove rule {r.id}" onclick={() => (agent ? remove(r) : (removing = r))}>Remove ×</button>{/snippet}
+            {#snippet actions()}<button id="rule-control-{r.id}" onclick={() => startEdit(r)}>Edit</button><button aria-label="Remove rule {r.id}" onclick={() => (agent ? remove(r) : (removing = r))}>Remove ×</button>{/snippet}
           </Row>
         {/if}
       {/each}
@@ -106,6 +122,7 @@
   }
   .list button:active { background: var(--select); }
   .edit { display: block; width: 100%; background: var(--side); border: 1px solid var(--line); border-radius: 6px; resize: vertical; color: var(--ink); font: inherit; font-size: var(--t-body); line-height: var(--leading); padding: var(--s2) 10px; }
+  .shortcuts { margin: 6px 0 0; font-size: var(--t-cap); color: var(--muted); }
   .edittools { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
   .list .save { color: var(--ink); background: var(--raise); font-weight: 600; } .save:disabled { opacity: .4; cursor: default; }
   @media (max-width: 760px) { .list { padding: 0 var(--s2) var(--s4); } }
