@@ -33,11 +33,22 @@ func (s *Service) Goals(roomRef, before string, limit int) (listpage.Page[goals.
 	if err != nil {
 		return listpage.Page[goals.Goal]{}, err
 	}
-	items, err := s.goalService().Store.List(r.ID)
+	now := time.Now()
+	window := goals.GoalPage{Count: listpage.Limit(limit)}
+	if before == "" {
+		window.ClosedAfter = now.Add(-listpage.Recent)
+	} else {
+		at, id, err := listpage.Boundary(before)
+		if err != nil {
+			return listpage.Page[goals.Goal]{}, err
+		}
+		window.BelowAt, window.BelowID = at, id
+	}
+	items, more, err := s.goalService().Store.Page(r.ID, window)
 	if err != nil {
 		return listpage.Page[goals.Goal]{}, err
 	}
-	return goalPage(items, before, limit)
+	return listpage.SelectWindow(items, before, limit, now, goalMeta, more)
 }
 
 // Goal reads one goal by ID, so a link opens a goal that no loaded page
@@ -96,13 +107,15 @@ func (s *Service) GoalEvents(roomRef, goal, before string, limit int) (listpage.
 }
 
 func goalPage(items []goals.Goal, before string, limit int) (listpage.Page[goals.Goal], error) {
-	return listpage.Select(items, before, limit, time.Now(), func(g goals.Goal) listpage.Meta {
-		at := g.UpdatedAt
-		if g.Done != nil {
-			at = g.Done.At
-		}
-		return listpage.Meta{ID: g.ID, At: at, Open: g.Open()}
-	})
+	return listpage.Select(items, before, limit, time.Now(), goalMeta)
+}
+
+func goalMeta(g goals.Goal) listpage.Meta {
+	at := g.UpdatedAt
+	if g.Done != nil {
+		at = g.Done.At
+	}
+	return listpage.Meta{ID: g.ID, At: at, Open: g.Open()}
 }
 func (s *Service) validGoalHolders(roomID string, in goals.Input) error {
 	if in.Shared && len(in.Holders) > 0 {
