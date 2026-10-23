@@ -451,7 +451,7 @@ func TestConsolidationCommitRecoveryDoesNotStartAnotherTarget(t *testing.T) {
 	if _, err := e.m.Consolidate(context.Background(), ConsolidationOptions{Sessions: []string{a.ID, b.ID}, Target: b.ID}); err == nil {
 		t.Fatal("competing operation used consumed source")
 	}
-	if err := e.m.ProcessConsolidation(e.ctx, a.ID, c.ID); err != nil {
+	if err := e.m.runConsolidation(e.ctx, a.ID, c.ID); err != nil {
 		t.Fatal(err)
 	}
 	meta, _ = e.m.Store.ReadMeta(a.ID)
