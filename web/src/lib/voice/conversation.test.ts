@@ -1,8 +1,18 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { askState, callPosts, callRow, callRows, shareLine, sharedItems, shareWhat, toolLabel, unseen } from './conversation.js'
+import { askState, callPosts, callRow, callRows, shareLine, sharedItems, shareWhat, toolLabel, unseen, type CallPost, type CallRow, type SharedItem } from './conversation.ts'
+import type { Attachment } from '../api/room.ts'
 
-const post = (id, ts, more = {}) => ({ id, ts, channels: ['voice-call'], ...more })
+const post = (id: string, ts: number, more: Partial<CallPost> = {}): CallPost => ({ id, ts, channels: ['voice-call'], ...more })
+// att is a post's file: the fields the call reads, and the stored ones it
+// needs to be a real attachment.
+const att = (a: Pick<Attachment, 'id' | 'name' | 'mime'> & Partial<Attachment>): Attachment => ({ size: 0, sha256: '', ...a })
+// shareAt is the item shared on the row at i, which the test needs to exist.
+const shareAt = (rows: CallRow[], i: number): SharedItem => {
+  const share = rows[i]?.share
+  if (!share) throw new Error(`no shared item at row ${i}`)
+  return share
+}
 
 test('only this call: voice-call posts since it started, in order, once', () => {
   const posts = [post('a', 900), post('c', 1200), post('b', 1100), post('g', 1150, { channels: ['general'] }), post('b', 1100)]
@@ -58,11 +68,11 @@ test('rows: posts and tool calls in time order; dispatch shows only when it fail
   ]
   const rows = callRows([ask, said], tools, room, ['v1'])
   assert.deepEqual(rows.map((r) => r.key), ['q1', 'tool:c1', 'v1', 'tool:c3', 'tool:c4'])
-  assert.equal(rows[0].state, 'working')
-  assert.deepEqual(rows[1].tool, { label: 'Checked PR 1091', state: 'done' })
-  assert.equal(rows[2].tag, 'not spoken')
-  assert.deepEqual(rows[3].tool, { label: 'Starting the work', state: 'failed' })
-  assert.deepEqual(rows[4].tool, { label: 'Checked the merge queue', state: 'running' })
+  assert.equal(rows[0]?.state, 'working')
+  assert.deepEqual(rows[1]?.tool, { label: 'Checked PR 1091', state: 'done' })
+  assert.equal(rows[2]?.tag, 'not spoken')
+  assert.deepEqual(rows[3]?.tool, { label: 'Starting the work', state: 'failed' })
+  assert.deepEqual(rows[4]?.tool, { label: 'Checked the merge queue', state: 'running' })
   assert.equal(toolLabel('unknown_tool', 'not json'), 'unknown_tool')
   assert.equal(toolLabel('answer_question', '{"text":"yes"}'), 'Answered your question')
 })
@@ -70,22 +80,22 @@ test('rows: posts and tool calls in time order; dispatch shows only when it fail
 test('a shared file is its own quiet line after its post, and a post of only files is only its lines', () => {
   const room = 'voice-test'
   const ring = { from: `${room}:root`, to: [`${room}:voice-call`] }
-  const card = { id: 'a1', name: 'compare.html', mime: 'text/html', render: 'html', title: 'Provider comparison' }
-  const shot = { id: 'a2', name: 'ci.png', mime: 'image/png' }
+  const card = att({ id: 'a1', name: 'compare.html', mime: 'text/html', render: 'html', title: 'Provider comparison' })
+  const shot = att({ id: 'a2', name: 'ci.png', mime: 'image/png' })
   const told = post('r1', 1100, { ...ring, text: 'I compared the providers.', attachments: [card] })
-  const bare = post('r2', 1200, { ...ring, text: '', attachments: [shot, { id: 'a3', name: 'notes.txt', mime: 'text/plain' }] })
+  const bare = post('r2', 1200, { ...ring, text: '', attachments: [shot, att({ id: 'a3', name: 'notes.txt', mime: 'text/plain' })] })
   const rows = callRows([told, bare], [], room)
   assert.deepEqual(rows.map((r) => r.key), ['r1', 'share:r1:a1', 'share:r2:a2', 'share:r2:a3'])
-  assert.deepEqual(rows[1].share, { key: 'share:r1:a1', ts: 1100, postId: 'r1', who: 'root', att: card })
-  assert.deepEqual(rows.slice(1).map((r) => shareWhat(r.share.att)), ['a card', 'an image', 'a file'])
-  assert.equal(shareLine(rows[1].share), 'root shared “Provider comparison”')
-  assert.equal(shareLine(rows[2].share), 'root shared “ci.png”')
+  assert.deepEqual(shareAt(rows, 1), { key: 'share:r1:a1', ts: 1100, postId: 'r1', who: 'root', att: card })
+  assert.deepEqual([1, 2, 3].map((i) => shareWhat(shareAt(rows, i).att)), ['a card', 'an image', 'a file'])
+  assert.equal(shareLine(shareAt(rows, 1)), 'root shared “Provider comparison”')
+  assert.equal(shareLine(shareAt(rows, 2)), 'root shared “ci.png”')
 })
 
 test('the banner and badge show only what the owner has not opened or hidden', () => {
   const room = 'voice-test'
-  const items = sharedItems([post('r1', 1100, { from: `${room}:root`, to: [`${room}:voice-call`], attachments: [{ id: 'a1', name: 'x.png', mime: 'image/png' }, { id: 'a2', name: 'y.png', mime: 'image/png' }] })], room)
-  assert.deepEqual(unseen(items, new Set()).map((i) => i.key), ['share:r1:a1', 'share:r1:a2'])
+  const items = sharedItems([post('r1', 1100, { from: `${room}:root`, to: [`${room}:voice-call`], attachments: [att({ id: 'a1', name: 'x.png', mime: 'image/png' }), att({ id: 'a2', name: 'y.png', mime: 'image/png' })] })], room)
+  assert.deepEqual(unseen(items, new Set<string>()).map((i) => i.key), ['share:r1:a1', 'share:r1:a2'])
   assert.deepEqual(unseen(items, new Set(['share:r1:a2'])).map((i) => i.key), ['share:r1:a1'])
   assert.deepEqual(sharedItems([post('t', 1, { text: 'no files' })], room), [])
 })

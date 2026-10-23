@@ -1,13 +1,14 @@
 import { before, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { capturing, initial, reduce } from './callState.js'
-import { BUBBLE, DOUBLE_TAP_MS, HOLD_MS, bubbleGestures, bubbleOrb, bubbleTop, clampWidget, widgetPlace, bubblePlace, dragged, micControl, micModes, orb, phoneInitial, phoneLayout, phoneReduce, snapBubble } from './phone.js'
+import { capturing, initial, reduce, type CallEvent, type CallState } from './callState.ts'
+import { BUBBLE, DOUBLE_TAP_MS, HOLD_MS, bubbleGestures, bubbleOrb, bubbleTop, clampWidget, widgetPlace, bubblePlace, dragged, micControl, micModes, orb, phoneInitial, phoneLayout, phoneReduce, snapBubble, type GestureClock } from './phone.ts'
 import { readFileSync } from 'node:fs'
 import { parse } from 'svelte/compiler'
 import { bundle, importBundle, installDom, domNames } from '../prs/prDetailHarness.ts'
+import { isRecord } from '../api/guards.ts'
 
-const run = (...events) => events.reduce(reduce, initial)
-const live = (...more) => run({ type: 'start', roomId: 'r1', room: 'ops' }, { type: 'started', startedAt: 1000 }, { type: 'voiceReady' }, ...more)
+const run = (...events: CallEvent[]) => events.reduce(reduce, initial)
+const live = (...more: CallEvent[]) => run({ type: 'start', roomId: 'r1', room: 'ops' }, { type: 'started', startedAt: 1000 }, { type: 'voiceReady' }, ...more)
 
 test('the phone starts a call as the bubble, opens it full screen on a tap, and shows nothing after it ends', () => {
   assert.equal(phoneLayout(initial, phoneInitial), 'none')
@@ -49,23 +50,36 @@ test('a small move is a tap, a longer one drags, and a saved place is read back 
   }
 })
 
+// A clock the gestures never read: it runs the hold timers by hand, any
+// number at once. A timer id is only handed back to clear it.
+interface FakeClock extends GestureClock {
+  t: number
+  tick(ms: number): void
+  pending(): number
+}
+
 // fakeClock runs the gestures' timers by hand, any number at once.
-function fakeClock() {
-  const timers = new Map()
+function fakeClock(): FakeClock {
+  const timers = new Map<unknown, { fn: () => void; due: number }>()
   let next = 0
-  const c = { t: 0 }
-  c.set = (fn, ms) => (timers.set(++next, { fn, due: c.t + ms }), next)
-  c.clear = (id) => timers.delete(id)
-  c.now = () => c.t
-  c.tick = (ms) => {
-    c.t += ms
-    for (const [id, x] of [...timers]) if (c.t >= x.due) { timers.delete(id); x.fn() }
+  const c: FakeClock = {
+    t: 0,
+    set: (fn, ms) => { timers.set(++next, { fn, due: c.t + ms }); return next },
+    clear: (id) => { timers.delete(id) },
+    now: () => c.t,
+    tick: (ms) => {
+      c.t += ms
+      for (const [id, x] of [...timers]) if (c.t >= x.due) { timers.delete(id); x.fn() }
+    },
+    pending: () => timers.size,
   }
-  c.pending = () => timers.size
   return c
 }
+// Seen is one thing a gesture did.
+type Seen = (string | number | boolean)[]
+
 function gestures() {
-  const seen = []
+  const seen: Seen[] = []
   const clock = fakeClock()
   const g = bubbleGestures({ onmove: (p) => seen.push(['move', p.x]), ondrop: (p) => seen.push(['drop', p.x]), onexpand: () => seen.push(['open']), ontalk: (on) => seen.push(['talk', on]) }, clock)
   const tap = (x = 10) => { g.down({ button: 0, pointerId: 1, clientX: x, clientY: 10 }); clock.tick(80); g.up({ pointerId: 1, clientX: x, clientY: 10 }); g.click({ detail: 1 }) }
@@ -90,7 +104,7 @@ test('one tap does nothing, a double tap opens the call, and a keyboard press op
 
 test('a still hold talks until it lifts, and a drag never talks', () => {
   const { g, seen, clock } = gestures()
-  const at = (x) => ({ button: 0, pointerId: 1, clientX: x, clientY: 10 })
+  const at = (x: number) => ({ button: 0, pointerId: 1, clientX: x, clientY: 10 })
   g.down(at(10))
   clock.tick(HOLD_MS - 1)
   assert.deepEqual(seen, [], 'not yet a hold')
@@ -122,23 +136,25 @@ test('a still hold talks until it lifts, and a drag never talks', () => {
 // every press throws and the bubble neither drags nor talks.
 test('the gestures run on the real timers the way a browser allows', () => {
   const real = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout, now: Date.now }
-  const strict = (f, self) => function (...a) {
+  // strict refuses a call whose this is another object, as a browser does.
+  const strict = <A extends unknown[], R>(f: (...a: A) => R, self: unknown) => function (this: unknown, ...a: A): R {
     if (this !== undefined && this !== globalThis && this !== self) throw new TypeError('Illegal invocation')
     return f.apply(self, a)
   }
-  globalThis.setTimeout = strict(real.setTimeout, globalThis)
-  globalThis.clearTimeout = strict(real.clearTimeout, globalThis)
+  const setGlobal = (name: string, value: unknown) => Reflect.set(globalThis, name, value)
+  setGlobal('setTimeout', strict(real.setTimeout, globalThis))
+  setGlobal('clearTimeout', strict(real.clearTimeout, globalThis))
   Date.now = strict(real.now, Date)
   try {
-    const seen = []
+    const seen: Seen[] = []
     const g = bubbleGestures({ onmove: (p) => seen.push(['move', p.x]), ondrop: (p) => seen.push(['drop', p.x]), onexpand: () => seen.push(['open']), ontalk: (on) => seen.push(['talk', on]) })
     assert.equal(g.down({ button: 0, pointerId: 1, clientX: 10, clientY: 10 }), true)
     g.move({ pointerId: 1, clientX: 60, clientY: 10 })
     g.up({ pointerId: 1, clientX: 60, clientY: 10 })
     assert.deepEqual(seen, [['move', 60], ['drop', 60]])
   } finally {
-    globalThis.setTimeout = real.setTimeout
-    globalThis.clearTimeout = real.clearTimeout
+    setGlobal('setTimeout', real.setTimeout)
+    setGlobal('clearTimeout', real.clearTimeout)
     Date.now = real.now
   }
 })
@@ -166,7 +182,7 @@ test('a cancel ends a hold, and a cancelled press never starts talking later', (
 
 test('the first finger owns the gesture, and a second one changes nothing', () => {
   const { g, seen, clock } = gestures()
-  const finger = (id) => ({ button: 0, pointerId: id, clientX: 10, clientY: 10 })
+  const finger = (id: number) => ({ button: 0, pointerId: id, clientX: 10, clientY: 10 })
   assert.equal(g.down(finger(1)), true)
   assert.equal(g.down(finger(2)), false, 'a second finger is not taken')
   assert.equal(clock.pending(), 1, 'one hold timer')
@@ -186,8 +202,8 @@ test('the first finger owns the gesture, and a second one changes nothing', () =
 })
 
 test('a hold opens a muted mic only while held, and leaves an open mic as it is', () => {
-  const held = (s) => reduce(s, { type: 'hold', on: true })
-  const release = (s) => reduce(s, { type: 'hold', on: false })
+  const held = (s: CallState) => reduce(s, { type: 'hold', on: true })
+  const release = (s: CallState) => reduce(s, { type: 'hold', on: false })
   const muted = live({ type: 'toggleMute' })
   assert.equal(capturing(held(muted)), true, 'a muted mic opens while held')
   assert.equal(release(held(muted)).muted, true, 'and mutes again on release')
@@ -246,13 +262,12 @@ test('the mic mode menu offers both modes and marks the current one', () => {
 test('the call screen renders its mode menu inside the dialog', () => {
   const ast = parse(readFileSync(new URL('./CallScreen.svelte', import.meta.url), 'utf8'), { modern: true })
   let found = false
-  function walk(node, inDialog) {
-    if (!node || typeof node !== 'object') return
-    if (Array.isArray(node)) return node.forEach((n) => walk(n, inDialog))
-    const here = inDialog || !!node.attributes?.some((a) => a.name === 'aria-modal')
-    if (node.type === 'InlineComponent' || node.type === 'Component') {
-      if (node.name === 'Menu') { assert.ok(here, 'Menu sits outside the dialog'); found = true }
-    }
+  function walk(node: unknown, inDialog: boolean) {
+    if (Array.isArray(node)) return node.forEach((n: unknown) => walk(n, inDialog))
+    if (!isRecord(node)) return
+    const attributes = node.attributes
+    const here = inDialog || (Array.isArray(attributes) && attributes.some((a) => isRecord(a) && a.name === 'aria-modal'))
+    if ((node.type === 'InlineComponent' || node.type === 'Component') && node.name === 'Menu') { assert.ok(here, 'Menu sits outside the dialog'); found = true }
     for (const [k, v] of Object.entries(node)) if (k !== 'attributes') walk(v, here)
   }
   walk(ast.fragment, false)
@@ -298,7 +313,7 @@ test('a saved widget place is clamped into the window on load', () => {
   assert.deepEqual(clampWidget({ right: 900, bottom: 500 }, 1280, 800, { width: 360, height: 480 }), { right: 900, bottom: 312 })
   // A widget bigger than the window keeps its top left corner 8 px in, so
   // its header and controls stay reachable.
-  const corner = (width, height, size) => {
+  const corner = (width: number, height: number, size: { width: number; height: number }) => {
     const p = clampWidget({ right: 500, bottom: 500 }, width, height, size)
     return { left: width - p.right - size.width, top: height - p.bottom - size.height }
   }
@@ -313,7 +328,7 @@ test('the bubble stays inside the top and bottom edges at any height', () => {
 })
 
 const widgetRoom = 'room_20261020-000000-00000000'
-let widgetCode
+let widgetCode: Uint8Array | string
 before(async () => {
   const api = `export const api = {
     voiceStatus: () => Promise.resolve({ available: true, live: true, roomId: '${widgetRoom}', room: 'ops', startedAt: 1000 }),
@@ -332,9 +347,10 @@ test('the widget stays whole on screen as it grows after opening and with a new 
   // never keeps the test running.
   mock.timers.enable({ apis: ['setInterval'] })
   const { rm } = await import('node:fs/promises')
-  const observers = []
+  const observers: FakeResizeObserver[] = []
   class FakeResizeObserver {
-    constructor(cb) { this.cb = cb; observers.push(this) }
+    cb: (entries: unknown[]) => void
+    constructor(cb: (entries: unknown[]) => void) { this.cb = cb; observers.push(this) }
     observe() { this.cb([]) }
     disconnect() { observers.splice(observers.indexOf(this), 1) }
   }
@@ -342,43 +358,51 @@ test('the widget stays whole on screen as it grows after opening and with a new 
   const size = { width: 300, height: 96 }
   Object.defineProperty(window.HTMLElement.prototype, 'offsetWidth', { configurable: true, get() { return this.classList.contains('widget') ? size.width : 0 } })
   Object.defineProperty(window.HTMLElement.prototype, 'offsetHeight', { configurable: true, get() { return this.classList.contains('widget') ? size.height : 0 } })
-  globalThis.localStorage = window.localStorage
-  globalThis.HTMLMediaElement = window.HTMLMediaElement // ducking other media during a call
-  globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
+  Reflect.set(globalThis, 'localStorage', window.localStorage)
+  Reflect.set(globalThis, 'HTMLMediaElement', window.HTMLMediaElement) // ducking other media during a call
+  Reflect.set(globalThis, 'matchMedia', () => ({ matches: false, addEventListener() {}, removeEventListener() {} }))
   window.localStorage.setItem('dyna.voice.widget', JSON.stringify({ right: 16, bottom: 660 }))
   const roomId = widgetRoom
   const question = { id: 'q1', state: 'open', to: 'owner', askerName: 'root', askedAt: '2026-10-20T09:00:00Z', text: 'Merge PR 7 now?', options: ['yes', 'no'] }
   const { dir, default: VoiceWidget, mount, unmount, flushSync } = await importBundle(widgetCode, '../voice/VoiceWidget')
   // until resolves when check holds for the DOM, after each change to it.
-  const until = (check) => new Promise((resolve) => {
+  const until = (check: () => boolean) => new Promise<void>((resolve) => {
     if (check()) return resolve()
     const seen = new MutationObserver(() => { if (check()) { seen.disconnect(); resolve() } })
     seen.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true })
   })
-  const grow = (height) => { size.height = height; for (const o of [...observers]) o.cb([]); flushSync() }
-  const top = () => { const w = document.querySelector('section.widget'); return window.innerHeight - parseFloat(w.style.bottom) - size.height }
-  let app
+  const grow = (height: number) => { size.height = height; for (const o of [...observers]) o.cb([]); flushSync() }
+  const top = () => {
+    const w = document.querySelector<HTMLElement>('section.widget')
+    if (!w) throw new Error('the widget is not on the page')
+    return window.innerHeight - parseFloat(w.style.bottom) - size.height
+  }
+  // app is the mounted widget; mount sets it inside flushSync.
+  let app: { event(e: unknown): void } | undefined
   try {
     flushSync(() => { app = mount(VoiceWidget, { target: document.getElementById('app'), props: { narrow: false, onopenfile() {} } }) })
-    await until(() => document.querySelector('section.widget'))
+    await until(() => document.querySelector('section.widget') !== null)
     assert.equal(top(), window.innerHeight - 660 - 96, 'the saved place fits')
-    document.querySelector('button[aria-label="Show the conversation"]').click()
+    const opener = document.querySelector<HTMLElement>('button[aria-label="Show the conversation"]')
+    if (!opener) throw new Error('the widget has no conversation button')
+    opener.click()
     flushSync()
     grow(400)
     assert.ok(top() >= 8, `the open conversation grew the widget out of the window: top ${top()}`)
-    globalThis.questionList = { [roomId]: [question] }
+    Reflect.set(globalThis, 'questionList', { [roomId]: [question] })
+    if (!app) throw new Error('the widget did not mount')
     app.event({ kind: 'questions', roomId })
-    await until(() => document.body.textContent.includes('Merge PR 7 now?'))
+    await until(() => document.body.textContent?.includes('Merge PR 7 now?') ?? false)
     grow(560)
     assert.ok(top() >= 8, `the question grew the widget out of the window: top ${top()}`)
   } finally {
     if (app) unmount(app)
     dom.window.close()
-    for (const n of domNames) delete globalThis[n]
-    delete globalThis.localStorage
-    delete globalThis.HTMLMediaElement
-    delete globalThis.matchMedia
-    delete globalThis.questionList
+    for (const n of domNames) Reflect.deleteProperty(globalThis, n)
+    Reflect.deleteProperty(globalThis, 'localStorage')
+    Reflect.deleteProperty(globalThis, 'HTMLMediaElement')
+    Reflect.deleteProperty(globalThis, 'matchMedia')
+    Reflect.deleteProperty(globalThis, 'questionList')
     mock.timers.reset()
     await rm(dir, { recursive: true, force: true })
   }
