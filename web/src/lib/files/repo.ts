@@ -1,5 +1,5 @@
 // Helpers for the Files and Changes views: unified diff parsing, git status
-// labels, and path pieces. No transport here; api.js makes the calls.
+// labels, and path pieces. No transport here; api.ts makes the calls.
 
 export type DiffKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'binary'
 

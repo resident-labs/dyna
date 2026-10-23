@@ -1,7 +1,7 @@
 import type { Attachment } from '../api/room.ts'
 
 import { formatBytes } from '../settings/display.ts'
-import { api } from '../../api.js'
+import { api } from '../../api.ts'
 
 export interface DraftItem {
   key: string
@@ -75,8 +75,9 @@ export async function upload(roomId: string | undefined, item: DraftItem, update
   item.error = ''
   update(item)
   try {
-    const limits = await api.settings()
-    const limit = limits.find((it: { key: string; value: unknown }) => it.key === 'content.maxFileBytes')?.value
+    if (roomId === undefined) throw new Error('this file needs a room before it can be attached')
+    const settings = await api.settings()
+    const limit = (settings ?? []).find((it) => it.key === 'content.maxFileBytes')?.value
     if (typeof limit !== 'number' || !Number.isSafeInteger(limit) || limit < 1) throw new Error('could not read the attachment size limit')
     if (item.size > limit) throw new Error(`the file is too large (maximum ${formatBytes(limit)})`)
     item.att = await api.attach(roomId, item.name, await base64(item.file))

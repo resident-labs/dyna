@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import { parse } from 'svelte/compiler'
 import ts from 'typescript'
-import { copyText } from '../../api.js'
+import { copyText } from '../../api.ts'
 import { postHref } from '../ui/posts.ts'
 
 const source = readFileSync(new URL('../ui/PostActions.svelte', import.meta.url), 'utf8')

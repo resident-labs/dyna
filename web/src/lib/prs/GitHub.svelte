@@ -9,7 +9,7 @@
   // Issues come from GitHub through gh on the host, grouped by who is on them
   // (IssueList) and opened as an IssuePage.
   import { onMount, untrack } from 'svelte'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
   import { expedite, prExpedited } from '../rooms/expedite.ts'
   import RowItem from '../ui/Row.svelte'

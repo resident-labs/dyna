@@ -4,7 +4,7 @@
   // until opened. A row opens that session's read-only transcript.
   import { untrack } from 'svelte'
   import { createGoalEvents } from '../rooms/goalEvents.ts'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { ago } from '../ui/format.ts'
   import TabHeader from '../rooms/TabHeader.svelte'
   import DoingLine from '../sessions/DoingLine.svelte'

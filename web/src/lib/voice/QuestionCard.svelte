@@ -1,7 +1,7 @@
 <script>
   // Root's open question, as a card under the call widget. Voice reads it
   // aloud during a call, so the owner may answer by voice, or here.
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import { answers } from './attention.ts'
   import { icons } from './icons.js'
 

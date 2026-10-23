@@ -2,7 +2,7 @@
   import { errorText } from '../../errorText.ts'
   import { onMount, onDestroy } from 'svelte'
   import Loading from '../Loading.svelte'
-  import { api } from '../../../api.js'
+  import { api } from '../../../api.ts'
   import ActivityReport from './ActivityReport.svelte'
   import { rangeBounds, type ActivityRollup, type Period } from './activity.ts'
   import { requestGate } from './state.ts'

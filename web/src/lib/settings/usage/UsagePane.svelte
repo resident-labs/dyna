@@ -4,7 +4,7 @@
   import Loading from '../Loading.svelte'
   import TabHeader from '../../rooms/TabHeader.svelte'
   import EmptyState from '../../ui/EmptyState.svelte'
-  import { api } from '../../../api.js'
+  import { api } from '../../../api.ts'
   import SubscriptionCard from './SubscriptionCard.svelte'
   import AccountDetails from './AccountDetails.svelte'
   import LocalActivity from './LocalActivity.svelte'

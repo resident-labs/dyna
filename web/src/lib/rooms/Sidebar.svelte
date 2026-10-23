@@ -6,7 +6,7 @@
   import { GENERAL } from './channels.ts'
   import Avatar from '../ui/Avatar.svelte'
   import Notify from './Notify.svelte'
-  import { features } from '../../api.js'
+  import { features } from '../../api.ts'
   import { ago, roomLabel } from '../ui/format.ts'
   import PRChip from '../prs/PRChip.svelte'
   import ExpediteBadge from './ExpediteBadge.svelte'

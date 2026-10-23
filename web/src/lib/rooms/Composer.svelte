@@ -2,7 +2,7 @@
   import { speaker } from '../ui/posts.ts'
   import { tick, onDestroy } from 'svelte'
   import { short, roomLabel } from '../ui/format.ts'
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import ComposerBox from '../ui/ComposerBox.svelte'
   import { attachmentDraft } from '../files/attachmentDraft.ts'
   import { mentionOptions, matchMentions, fileMentionDirectory, fileMentionOptions, fileMentionText } from './mentions.ts'

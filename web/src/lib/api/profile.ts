@@ -47,7 +47,11 @@ export interface ProfileList {
 // edited; empty creates one. envSet adds or replaces values, envRemove drops keys.
 export interface ProfileEdit {
   original: string
-  profile: ProfileView
+  profile: ProfileDraft
   envSet: Record<string, string> | null
   envRemove: string[] | null
 }
+
+// ProfileDraft is the profile an editor sends: the fields it shows. The
+// engine keeps the fields it does not send from the saved profile.
+export type ProfileDraft = Omit<ProfileView, 'runtimeVersion' | 'fallback' | 'support'> & Partial<Pick<ProfileView, 'runtimeVersion' | 'fallback' | 'support'>>

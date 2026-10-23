@@ -2,6 +2,7 @@
 // their job bands and the slow tests; these functions turn the unknown JSON
 // into typed rows and compute only what the view draws.
 import { arrayOf, isBoolean, isNumber, isRecord, isString } from '../api/guards.ts'
+import type { CIBudgetSettings } from '../api/change.ts'
 
 export interface CIHealthJobBand {
   id: number
@@ -323,10 +324,10 @@ export function budgetWord(busyMs: number, warnMs: number, failMs: number): stri
 
 // budgetWithAllow returns the room's budget with the test allowed and its
 // reason, keeping every other field the engine sent. One list, no second one.
-export function budgetWithAllow(raw: unknown, test: string, reason: string): Record<string, unknown> | null {
-  if (!isRecord(raw)) return null
-  const allow = list(raw.ciTestAllow)
-  const notes: Record<string, unknown> = isRecord(raw.ciTestAllowNotes) ? { ...raw.ciTestAllowNotes } : {}
+export function budgetWithAllow(raw: CIBudgetSettings | null, test: string, reason: string): CIBudgetSettings | null {
+  if (!raw) return null
+  const allow = raw.ciTestAllow ?? []
+  const notes: Record<string, string> = raw.ciTestAllowNotes ? { ...raw.ciTestAllowNotes } : {}
   notes[test] = reason
   return { ...raw, ciTestAllow: allow.includes(test) ? allow : [...allow, test], ciTestAllowNotes: notes }
 }

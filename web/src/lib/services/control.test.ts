@@ -7,10 +7,10 @@ import { applyControl, type ControlApi } from './control.ts'
 const record = () => {
   const calls: string[] = []
   const api: ControlApi = {
-    setReviewEnabled: (room, on) => { calls.push(`review ${room} ${on}`); return Promise.resolve() },
-    setServiceProfile: (room, role, profile) => { calls.push(`service-profile ${room} ${role} ${profile}`); return Promise.resolve() },
-    setSetting: (key, value) => { calls.push(`setting ${key} ${value}`); return Promise.resolve() },
-    runHook: (repo, name) => { calls.push(`hook-run ${repo} ${name}`); return Promise.resolve() },
+    setReviewEnabled: (room, on) => { calls.push(`review ${room} ${on}`); return Promise.resolve(null) },
+    setServiceProfile: (room, role, profile) => { calls.push(`service-profile ${room} ${role} ${profile}`); return Promise.resolve(null) },
+    setSetting: (key, value) => { calls.push(`setting ${key} ${value}`); return Promise.resolve({ key, kind: 'string', value, source: 'file', help: '', liveVsRestart: '' }) },
+    runHook: (repo, name) => { calls.push(`hook-run ${repo} ${name}`); return Promise.resolve({ id: 'run_1', repo, name, command: '', result: 'pass', logPath: '', startedAt: '2026-10-23T12:00:00Z' }) },
   }
   return { calls, api }
 }

@@ -15,7 +15,7 @@ test('web attach decodes split frames and preserves raw binary bytes', async () 
     const bytes = new TextEncoder().encode(frame)
     return new Response(new ReadableStream({ start(c) { c.enqueue(bytes.slice(0, 41)); c.enqueue(bytes.slice(41)); c.close() } }))
   }
-  const { api } = await import('./api.js?web-test')
+  const { api } = await import('./api.ts?web-test')
   const received = []
   let finish
   const complete = new Promise((resolve) => { finish = resolve })

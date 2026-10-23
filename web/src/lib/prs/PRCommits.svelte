@@ -5,7 +5,7 @@
   // Props:
   //   commits  [{sha, headline, author, date}], oldest first
   //   url      the PR's GitHub address, to build each commit's link
-  import { openExternal } from '../../api.js'
+  import { openExternal } from '../../api.ts'
   import Card from '../ui/Card.svelte'
   import Row from '../ui/Row.svelte'
   import Avatar from '../ui/Avatar.svelte'

@@ -1,5 +1,5 @@
 <script>
-  import { api } from '../../api.js'
+  import { api } from '../../api.ts'
   import Avatar from '../ui/Avatar.svelte'
   import GoalGlyph from './GoalGlyph.svelte'
   import GoalHolders from './GoalHolders.svelte'
