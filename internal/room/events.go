@@ -848,12 +848,14 @@ func (s SessionEvent) eventDedupe() string {
 	case SessionAccount:
 		return s.From + "\x00" + s.To + "\x00" + string(s.Reason)
 	case SessionInstructions:
+		// The occurrence comes first, so a change that reverts to an earlier
+		// state is still a new note while a retry of one change keeps its post.
+		// The sections and the body follow it, because two different changes
+		// to one section are two notes.
 		lines := make([]string, len(s.Sections)+1)
 		lines[0] = strconv.Itoa(s.Occurrence)
 		for i, change := range s.Sections {
-			// The lines and the body are part of the key: two different changes
-			// to one section are two notes.
-			lines[i] = string(change.Action) + " " + change.Name + "\x00" + strings.Join(change.Added, "\x01") + "\x00" + strings.Join(change.Removed, "\x01") + "\x02" + change.Body
+			lines[i+1] = string(change.Action) + " " + change.Name + "\x00" + strings.Join(change.Added, "\x01") + "\x00" + strings.Join(change.Removed, "\x01") + "\x02" + change.Body
 		}
 		return strings.Join(lines, "\x00")
 	case SessionSeat:

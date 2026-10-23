@@ -240,3 +240,43 @@ func TestNewEventPayloadsRoundTrip(t *testing.T) {
 		t.Fatalf("question post ID = %q, want the caller's stable ID", question.ID)
 	}
 }
+
+// Two instruction notes with the same sections but their own occurrence are
+// two posts, and a retry of one occurrence keeps its post. Without the
+// occurrence in the key, a change that reverts to an earlier state would reuse
+// the first note and the session would keep the reverted instructions.
+func TestInstructionNotesKeyOnTheirOccurrence(t *testing.T) {
+	store, rec := newEventStore(t)
+	sample := []InstructionChange{
+		{Name: "Room rules", Action: InstructionItems, Added: []string{"r2 Check the running note."}},
+		{Name: "Your running jobs", Action: InstructionRemoved, Removed: []string{"- sh_1 · Watch the build"}},
+	}
+	post := func(occurrence int) Message {
+		t.Helper()
+		msg, err := store.PostEvent(rec.ID, SessionEvent{Type: SessionInstructions, Session: "work:kid", Sections: sample, Detail: "- Room rules: added.", Occurrence: occurrence}, "work:kid")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return msg
+	}
+	first, second := post(0), post(1)
+	if first.ID == "" || second.ID == "" {
+		t.Fatalf("a note was dropped: %q, %q", first.ID, second.ID)
+	}
+	if first.ID == second.ID {
+		t.Fatalf("two occurrences share the post ID %s", first.ID)
+	}
+	// The same occurrence again is a retry of one change: it keeps its post.
+	if again := post(1); again.ID != second.ID {
+		t.Fatalf("retry of occurrence 1 posted %s after %s", again.ID, second.ID)
+	}
+	msgs, err := store.Messages(rec.ID)
+	if err != nil || len(msgs) != 2 {
+		t.Fatalf("stored notes = %d, %v", len(msgs), err)
+	}
+	for _, msg := range msgs {
+		if payload, ok := msg.Session(); !ok || len(payload.Sections) != 2 {
+			t.Fatalf("note payload = %+v, %v", payload, ok)
+		}
+	}
+}
