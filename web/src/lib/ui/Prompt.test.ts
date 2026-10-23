@@ -5,22 +5,32 @@ import { bundle, importBundle, installDom, domNames } from '../prs/prDetailHarne
 
 const code = await bundle({ component: '../ui/Prompt' })
 
+// The props each case hands the component; a case sets only what it changes.
+interface PromptProps {
+  multiline?: boolean
+  ctrlKey?: boolean
+  metaKey?: boolean
+  match?: string
+}
+const cases: PromptProps[] = [{}, { multiline: true, ctrlKey: true }, { multiline: true, metaKey: true }, { match: 'DELETE' }]
+
 test('Prompt waits for IME confirmation before accepting normal submit keys and exact matches', async () => {
-  for (const props of [{}, { multiline: true, ctrlKey: true }, { multiline: true, metaKey: true }, { match: 'DELETE' }]) {
+  for (const props of cases) {
     const dom = installDom()
-    globalThis.HTMLMediaElement = dom.window.HTMLMediaElement
+    Object.assign(globalThis, { HTMLMediaElement: dom.window.HTMLMediaElement })
     const ui = await importBundle(code, '../ui/Prompt')
-    const sent = []
+    const sent: string[] = []
     const component = ui.mount(ui.default, { target: document.getElementById('app'), props: {
-      title: 'Edit', ...props, onsubmit: value => sent.push(value), oncancel() {},
+      title: 'Edit', ...props, onsubmit: (value: string) => sent.push(value), oncancel() {},
     } })
     try {
       ui.flushSync()
-      const field = document.querySelector('input, textarea')
-      const action = document.querySelector('.go')
+      const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>('input, textarea')
+      const action = document.querySelector<HTMLButtonElement>('.go')
+      assert.ok(field && action)
       const value = props.match || '日本語'
-      const fill = text => { field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); ui.flushSync() }
-      const key = options => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ctrlKey: props.ctrlKey, metaKey: props.metaKey, ...options }))
+      const fill = (text: string) => { field.value = text; field.dispatchEvent(new Event('input', { bubbles: true })); ui.flushSync() }
+      const key = (options: KeyboardEventInit) => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ctrlKey: props.ctrlKey, metaKey: props.metaKey, ...options }))
       if (props.match) { fill('delete'); assert.equal(action.disabled, true) }
       fill(value)
       key({ isComposing: true })
