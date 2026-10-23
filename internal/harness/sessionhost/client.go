@@ -112,6 +112,7 @@ func (h *socketHost) Session(ctx context.Context, launch Launch) (Session, error
 			h.mu.Lock()
 			h.used[id] = true
 			h.mu.Unlock()
+			r.connection = append([]byte(nil), reply.Connection...)
 			if reply.Started && launch.OnStart != nil {
 				launch.OnStart(reply.Pid)
 			}
@@ -225,17 +226,18 @@ func (h *socketHost) shutdownUsed() {
 
 // remoteSession is one attached client connection.
 type remoteSession struct {
-	conn    net.Conn
-	host    *socketHost
-	id      string
-	hostPid int
-	wmu     sync.Mutex
-	enc     *json.Encoder
-	cmu     sync.Mutex // one control call at a time
-	replies chan message
-	gone    chan struct{}
-	frames  *frameQueue
-	closed  sync.Once
+	connection []byte
+	conn       net.Conn
+	host       *socketHost
+	id         string
+	hostPid    int
+	wmu        sync.Mutex
+	enc        *json.Encoder
+	cmu        sync.Mutex // one control call at a time
+	replies    chan message
+	gone       chan struct{}
+	frames     *frameQueue
+	closed     sync.Once
 	// tail is the stderr the host reported at Close.
 	tail       string
 	closedTail bool
@@ -350,6 +352,9 @@ func (r *remoteSession) Next(ctx context.Context) ([]byte, error) { return r.fra
 
 func (r *remoteSession) Replace(ctx context.Context, launch Launch) error {
 	reply, err := r.call(ctx, message{Op: opReplace, Launch: toWire(launch)}, handshakeWait, launch.BindLease)
+	if err == nil {
+		r.connection = append([]byte(nil), reply.Connection...)
+	}
 	if err == nil && reply.Started && launch.OnStart != nil {
 		launch.OnStart(reply.Pid)
 	}
@@ -482,4 +487,43 @@ func (q *frameQueue) pop(ctx context.Context) ([]byte, error) {
 			return nil, ctx.Err()
 		}
 	}
+}
+
+func (r *remoteSession) Connection() []byte { return append([]byte(nil), r.connection...) }
+
+// CloseKey stops retained children for key across harnesses and account homes.
+// It does not attach a turn or start a missing host. Session close calls it only
+// after publishing the closed state, so no new turn can race the cleanup.
+func CloseKey(ctx context.Context, key string) error { return defaultHost.closeKey(ctx, key) }
+
+func (h *socketHost) closeKey(ctx context.Context, key string) error {
+	if key == "" {
+		return errors.New("session key is empty")
+	}
+	dir, err := h.privateDir()
+	if err != nil {
+		return err
+	}
+	sockets, err := filepath.Glob(filepath.Join(dir, "*.sock"))
+	if err != nil {
+		return err
+	}
+	var failures []error
+	for _, socket := range sockets {
+		conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
+		if errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ENOENT) {
+			continue
+		}
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		remote := newRemote(conn)
+		_, err = remote.call(ctx, message{Op: opCloseKey, Key: key}, stopWait, nil)
+		_ = conn.Close()
+		if err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }

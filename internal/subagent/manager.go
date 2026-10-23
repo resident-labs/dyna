@@ -21,6 +21,7 @@ import (
 	"dyna-agent/internal/fsutil"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/harness"
+	"dyna-agent/internal/harness/sessionhost"
 	"dyna-agent/internal/hooks"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/lockrank"
@@ -1090,6 +1091,11 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		summary = append(summary, "Child handoff failed: "+err.Error())
 	}
 	summary = append(summary, children...)
+	for _, key := range []string{"session/" + info.ID, info.ID} {
+		if err := sessionhost.CloseKey(ctx, key); err != nil {
+			summary = append(summary, "Native process cleanup failed: "+err.Error())
+		}
+	}
 	destroyComputer(info.ID)
 	closedForCleanup = true
 	if err := m.withdrawClosedQuestions(info); err != nil {

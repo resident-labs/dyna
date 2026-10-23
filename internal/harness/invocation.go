@@ -2,7 +2,6 @@ package harness
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	harnessruntime "dyna-agent/internal/harness/runtime"
@@ -130,56 +129,7 @@ func buildInvocationInDirExec(p profile.Profile, prompt, cwd string, exec Execut
 		return codexInvocation(p, prompt, exec)
 
 	case "opencode-run":
-		argv := []string{definition.Binary, "run"}
-		if p.Model != "" {
-			argv = append(argv, "--model", p.Model)
-		}
-		argv = append(argv, p.ExtraArgs...)
-		format, hasFormat := argumentValue(p.ExtraArgs, "--format")
-		jsonOutput := !hasFormat || format == "json"
-		if !hasFormat {
-			argv = append(argv, "--format", "json")
-		}
-		// OpenCode's JSON stream carries reasoning parts only with --thinking.
-		thinking := jsonOutput && !hasArg(p.ExtraArgs, "--thinking")
-		if thinking {
-			argv = append(argv, "--thinking")
-		}
-		argv = append(argv, prompt)
-		inv.initial = commandSpec{argv: argv, parseOutput: nil}
-		if jsonOutput {
-			inv.initial.parseOutput = openCodeOutput
-		}
-		if jsonOutput && !hasAnyOption(p.ExtraArgs, "--session", "-s", "--continue", "-c", "--fork") {
-			inv.sessionID = openCodeSessionID
-			inv.resume = func(id, nudge string) commandSpec {
-				args := []string{definition.Binary, "run"}
-				if p.Model != "" {
-					args = append(args, "--model", p.Model)
-				}
-				args = append(args, p.ExtraArgs...)
-				if !hasFormat {
-					args = append(args, "--format", "json")
-				}
-				if thinking {
-					args = append(args, "--thinking")
-				}
-				args = append(args, definition.Resume, id, nudge)
-				return commandSpec{argv: args, parseOutput: openCodeOutput}
-			}
-		}
-		if jsonOutput && inv.resume != nil {
-			inv.compact = func(id string) commandSpec {
-				wait := openCodeAPIArgs("experimental.session.wait", id, p.ExtraArgs)
-				// Preflight the wait protocol before admitting compaction. A changed
-				// endpoint leaves this session on native automatic compaction.
-				return commandSpec{argv: wait, checkOutput: openCodeWaitResponse, after: &commandSpec{
-					argv: openCodeAPIArgs("session.compact", id, p.ExtraArgs), after: &commandSpec{argv: slices.Clone(wait), checkOutput: openCodeWaitResponse},
-				}}
-			}
-		}
-
-		return inv, nil
+		return openCodeInvocation(p, prompt, exec)
 
 	case "muse-exec":
 		return museInvocation(p, prompt, exec)

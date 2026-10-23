@@ -2,10 +2,13 @@ package harness
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 
 	"dyna-agent/internal/profile"
@@ -50,51 +53,80 @@ func TestOpenCodeCompactReadsStoredContextAndWaitsBeforeResume(t *testing.T) {
 
 func installOpenCodeCompactCLI(t *testing.T) (string, SteeringOptions) {
 	t.Helper()
-	// Guard subprocesses inherit the race detector's default one-second exit
-	// delay. These short command fixtures need no grace period at exit.
-	t.Setenv("GORACE", os.Getenv("GORACE")+" atexit_sleep_ms=0")
-	ready := filepath.Join(t.TempDir(), "start.fifo")
-	if err := syscall.Mkfifo(ready, 0600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("OC_START_FIFO", ready)
-	log := installFakeCLI(t, "opencode", `#!/bin/sh
-set -eu
-read -r started < "$OC_START_FIFO"
-printf '%s %s\n' "$1" "$2" >> "$DYNA_FAKE_LOG"
-if [ "$1" = api ]; then
- case "$2" in
- session.context) printf '%s\n' '{"data":[{"type":"assistant","tokens":{"input":100,"cache":{"read":30,"write":10}}},{"type":"idle"}]}' ;;
- session.compact) printf '%s\n' '{"data":{"type":"compaction"}}' ;;
- experimental.session.wait)
-  case "${OC_WAIT_RESULT:-ok}" in
-    missing) echo 'Wait endpoint is missing' >&2; exit 1 ;;
-    changed) echo '{"unexpected":true}'; exit 0 ;;
-    changed-after)
-      if [ "$(grep -c '^api experimental.session.wait$' "$DYNA_FAKE_LOG")" -gt 1 ]; then
-        echo '{"unexpected":true}'
-      fi
-      exit 0 ;;
-  esac
-  exit 0 ;;
- *) exit 1 ;;
- esac
-else
- if [ -n "${OC_PROMPT_LOG:-}" ]; then
-   for last; do :; done
-   printf '%s\n' "$last" >> "$OC_PROMPT_LOG"
- fi
- printf '%s\n' '{"type":"text","sessionID":"ses_fixture","part":{"text":"done"}}'
-fi
-`)
-	return log, SteeringOptions{Source: &testSource{}, StartGate: func(_ context.Context, _ string, launch func() error) error {
-		if err := launch(); err != nil {
-			return err
+	installFakeCLI(t, "opencode", "#!/bin/sh\nexit 1\n")
+	log := filepath.Join(t.TempDir(), "requests")
+	host := &openCodeTestHost{}
+	var events chan string
+	var waits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/api/event" {
+			events = make(chan string, 8)
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.WriteHeader(200)
+			w.(http.Flusher).Flush()
+			for {
+				select {
+				case event := <-events:
+					fmt.Fprintf(w, "data: %s\n\n", event)
+					w.(http.Flusher).Flush()
+				case <-r.Context().Done():
+					return
+				}
+			}
 		}
-		// Keep the fake command alive until guarded launch has completed.
-		// Opening the FIFO waits for the child reader; no timer drives progress.
-		return os.WriteFile(ready, []byte("started\n"), 0600)
-	}}
+		record := func(line string) {
+			f, err := os.OpenFile(log, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer f.Close()
+			fmt.Fprintln(f, line)
+		}
+		env := func(key string) string { return environmentValue(host.env, key) }
+		switch {
+		case r.URL.Path == "/api/info":
+			fmt.Fprint(w, `{"version":"2.0.32"}`)
+		case r.URL.Path == "/api/session":
+			fmt.Fprint(w, `{"data":{"id":"ses_fixture"}}`)
+		case strings.HasSuffix(r.URL.Path, "/context"):
+			record("api session.context")
+			fmt.Fprint(w, `{"data":[{"type":"assistant","tokens":{"input":100,"cache":{"read":30,"write":10}}}]}`)
+		case strings.HasSuffix(r.URL.Path, "/wait"):
+			record("api experimental.session.wait")
+			waits++
+			mode := env("OC_WAIT_RESULT")
+			if mode == "missing" {
+				http.Error(w, "missing", 404)
+			} else if mode == "changed" || mode == "changed-after" && waits > 1 {
+				fmt.Fprint(w, `{"unexpected":true}`)
+			} else {
+				w.WriteHeader(204)
+			}
+		case strings.HasSuffix(r.URL.Path, "/compact"):
+			record("api session.compact")
+			fmt.Fprint(w, `{}`)
+		case strings.HasSuffix(r.URL.Path, "/prompt"):
+			record("run --format")
+			var body map[string]string
+			json.NewDecoder(r.Body).Decode(&body)
+			if path := env("OC_PROMPT_LOG"); path != "" {
+				os.WriteFile(path, []byte(body["text"]), 0600)
+			}
+			fmt.Fprint(w, `{"id":"inbox"}`)
+			events <- fmt.Sprintf(`{"type":"session.inbox.delivered","data":{"sessionID":"ses_fixture","inboxID":%q}}`, body["id"])
+			events <- `{"type":"session.text.ended","data":{"sessionID":"ses_fixture","text":"done"}}`
+			events <- `{"type":"session.execution.succeeded","data":{"sessionID":"ses_fixture"}}`
+		default:
+			fmt.Fprint(w, `{}`)
+		}
+	}))
+	host.connection, _ = json.Marshal(map[string]string{"url": server.URL, "password": "secret"})
+	old := nativeSessionHost
+	nativeSessionHost = host
+	t.Cleanup(func() { nativeSessionHost = old; server.Close() })
+	return log, SteeringOptions{}
 }
 
 func TestOpenCodeCompactSkipsMissingOrChangedWaitEndpoint(t *testing.T) {
