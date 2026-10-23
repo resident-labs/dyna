@@ -1,4 +1,6 @@
 <script>
+  import { heldComments, refreshHeldComments } from '../prs/heldComments.ts'
+  import HeldCommentCard from '../prs/HeldCommentCard.svelte'
   import { onMount } from 'svelte'
   import { createReloadGate } from '../ui/reloadGate.js'
   import { hasItemChange, patchListRows } from '../ui/listChanges.js'
@@ -27,15 +29,16 @@
   let accounts = $derived(accountRows(usage))
   let updates = $derived(updateRows(update, runtimes))
   let asked = $derived(rootQuestions(rooms, questions))
-  let alertCount = $derived(accounts.alerts.length + notices.length)
+  let alertCount = $derived(accounts.alerts.length + notices.length + $heldComments.comments.length)
   // Set only by a successful load: a slow or failed source is not "empty".
   let questionsLoaded = $state(false)
   let noticesLoaded = $state(false)
-  let clear = $derived(allClear({ usage, runtimes, questionsLoaded, noticesLoaded, cards: accounts.cards.length, asked: asked.length, alerts: alertCount, updates: updates.length }))
+  let clear = $derived($heldComments.loaded && allClear({ usage, runtimes, questionsLoaded, noticesLoaded, cards: accounts.cards.length, asked: asked.length, alerts: alertCount, updates: updates.length }))
 
   onMount(() => {
     refresh()
     loadNotices()
+    refreshHeldComments()
     const stopLoad = pollLoad(() => api.systemLoad(), (v) => { load = v })
     return () => { questionAlive = false; stopLoad() }
   })
@@ -162,6 +165,9 @@
           {#snippet trail()}<button class="btn" onclick={() => onaccount(a.id)}>{a.action}</button>{/snippet}
         </Row>
       {/each}
+      {#each $heldComments.comments as comment (comment.roomId + ':' + comment.key + ':' + comment.id)}
+        <HeldCommentCard {comment} />
+      {/each}
       {#each notices as n (n.id)}
         <Row dense clamp={false} text={n.text}>
           {#snippet lead()}<span class="ico" class:coral={n.severity === 'error'} class:gold={n.severity === 'warn'}>{noticeIcon[n.kind] ?? '!'}</span>{/snippet}
@@ -186,6 +192,7 @@
 
   {#if load}<SystemLoadCard {load} {onagent} />{/if}
 
+  {#if $heldComments.error}<p class="err" role="alert">Could not load held PR comments: {$heldComments.error}</p>{/if}
   {#if clear}<EmptyState title="All clear">No questions, alerts or updates need you.</EmptyState>{/if}
 </div>
 </section>

@@ -22,6 +22,7 @@ function appFunctions(c, names) {
   if (names.includes('handle') && !names.includes('applyItemEvent')) names = ['applyItemEvent', ...names]
   c.changesVisuals = changesVisuals
   for (const [k, v] of Object.entries({ routedParents: "", feed: null, roomId: "" })) if (!(k in c)) c[k] = v
+  c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   for (const name of names) {
     const node = functions.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
@@ -301,6 +302,7 @@ test('App polling leaves visible and hidden control panels unchanged', async () 
   }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), (name) => listVisible(name, c))
   c.roomSessionController = createRoomSessionControls(c.api, 'a', () => {}, () => listVisible('roomControls', c))
+  c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   const mounted = functions.find((n) => n.type === 'ExpressionStatement' && n.expression.callee?.name === 'onMount')
   const binding = mounted.expression.arguments[0].body.body.find((n) => n.type === 'VariableDeclaration' && n.declarations.some((d) => d.id.name === 'transferPoll'))

@@ -36,7 +36,11 @@ export interface Overlap {
   error?: string
 }
 
+// Owner-only HeldPRComments response; never part of ChangeView.
 export interface HeldComment {
+  key: string
+  roomId: string
+  number: number
   id: string
   commenter: string
   body: string
@@ -92,7 +96,7 @@ export interface ChangeView {
   hasReviewSummary?: boolean
   reviewUrl?: string
   head?: string
-  heldComments?: HeldComment[] | null
+  heldCommentCount?: number
   filteredComments?: number
   overlaps?: Overlap[]
 }

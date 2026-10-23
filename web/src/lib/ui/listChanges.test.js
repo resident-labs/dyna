@@ -47,6 +47,7 @@ function app(rows) {
   c.loadChanges = () => c.changeFetches++
   c.reviewerSoon = () => c.reviewerLoads++
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }))
+  c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   for (const node of functions) vm.runInContext(source.slice(node.start, node.end), c)
   c.hierarchy = []

@@ -111,6 +111,7 @@ test('App PR events use the real gated loaders and skip the closed PR view', asy
     },
   }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), (name) => listVisible(name, c))
+  c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   const declarations = parse(app).instance.content.body
   for (const name of ['applyListItem', 'applyListPage', 'loadReviewer', 'loadChanges', 'applyItemEvent', 'handle']) {
@@ -162,6 +163,7 @@ test('PR events never load TrackedPRs, and a burst loads the reviewer once', asy
     },
   }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), (name) => listVisible(name, c))
+  c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   const declarations = parse(app).instance.content.body
   for (const name of ['applyListItem', 'applyListPage', 'loadReviewer', 'loadChanges', 'reviewerSoon', 'applyItemEvent', 'handle']) {
@@ -191,6 +193,7 @@ test('a Changes load that succeeds after a failure clears the PR error', async (
     api: { changes: async () => { if (fail) throw new Error('engine away'); return { items: [], older: false, cursor: '' } } },
   }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), (name) => listVisible(name, c))
+  c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   const declarations = parse(app).instance.content.body
   for (const name of ['applyListPage', 'loadChanges']) {
@@ -256,6 +259,7 @@ test('room entry and channel events refresh visible PR and goal chips', async ()
   }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), (name) => listVisible(name, c))
   c.fetchedGoal ??= null; c.fetchedGoalVersion ??= 0
+  c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   for (const name of ['applyListItem', 'applyListPage', 'loadReviewer', 'loadChanges', 'loadGoals', 'trackFetchedGoal', 'refreshFetchedGoal', 'applyItemEvent', 'handle']) {
     const node = declarations.find((n) => n.type === 'FunctionDeclaration' && n.id.name === name)
@@ -299,6 +303,7 @@ test('the App visual loader reuses each card by the shared visual identity', asy
     api: { visuals: async () => response },
     reload: createReloadGate(() => ({ room: 'room', visit: 1 })),
   }
+  c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   const node = parse(app).instance.content.body.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'loadVisuals')
   vm.runInContext(app.slice(node.start, node.end), c)
@@ -357,6 +362,7 @@ test('a visual update reaches chat cards while chat stays open', async () => {
     api: { visuals: async () => response },
   }
   c.reload = createReloadGate(() => ({ room: c.roomId, visit: c.roomRequest }), (name) => listVisible(name, c))
+  c.refreshHeldComments ??= () => {}
   vm.createContext(c)
   const node = parse(app).instance.content.body.find((n) => n.type === 'FunctionDeclaration' && n.id.name === 'loadVisuals')
   vm.runInContext(app.slice(node.start, node.end), c)
