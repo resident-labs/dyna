@@ -12,6 +12,7 @@ const ACTIVE = new Set(['listening', 'thinking', 'speaking'])
 
 // fromWire turns one engine message into an app event, or null.
 const FROM_WIRE = {
+  resume_cursor: (e) => (typeof e.cursor === 'string' ? { type: 'resumeCursor', cursor: e.cursor } : null),
   state: (e) => (ACTIVE.has(e.state) ? { type: 'engineState', value: e.state } : e.state === 'reconnecting' ? { type: 'voiceLost', message: '' } : null),
   audio: (e) => (e.audio ? { type: 'audio', audio: e.audio, rate: RATE, responseId: e.id || '' } : null),
   audio_done: (e) => ({ type: 'audioDone', responseId: e.id || '' }),

@@ -4,6 +4,8 @@ import { RATE, audioMsg, cancelMsg, fromWire, hangupMsg, muteMsg, playbackMsg } 
 
 test('engine messages become app events', () => {
   assert.deepEqual(fromWire({ type: 'state', state: 'thinking' }), { type: 'engineState', value: 'thinking' })
+  assert.deepEqual(fromWire({ type: 'resume_cursor', cursor: 'm7' }), { type: 'resumeCursor', cursor: 'm7' })
+  assert.equal(fromWire({ type: 'resume_cursor', cursor: 123 }), null)
   assert.deepEqual(fromWire({ type: 'state', state: 'reconnecting' }), { type: 'voiceLost', message: '' })
   assert.equal(fromWire({ type: 'state', state: 'connecting' }), null)
   assert.deepEqual(fromWire({ type: 'audio', id: 'r1', audio: 'AAA=' }), { type: 'audio', audio: 'AAA=', rate: RATE, responseId: 'r1' })
