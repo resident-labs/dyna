@@ -67,12 +67,17 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 // runCacheClean runs the embedded script itself, with the roots a test chooses.
 func runCacheClean(t *testing.T, roots string, dryRun bool) ([]byte, error) {
 	t.Helper()
+	return runCacheCleanBody(t, roots, dryRun, ciCacheCleanBody)
+}
+
+func runCacheCleanBody(t *testing.T, roots string, dryRun bool, body string) ([]byte, error) {
+	t.Helper()
 	dry := "0"
 	if dryRun {
 		dry = "1"
 	}
 	command := "DYNA_CI_CLEAN_DRY=" + dry + " DYNA_CI_CLEAN_ROOTS=" + shellquote.Quote(roots) +
-		" bash -o pipefail -c " + shellquote.Quote(ciCacheCleanBody)
+		" bash -o pipefail -c " + shellquote.Quote(body)
 	return exec.Command("bash", "-c", command).CombinedOutput()
 }
 
@@ -87,6 +92,7 @@ func TestCacheCleanPrunesRunFoldersAfterOneDay(t *testing.T) {
 		"runs/old":      now.Add(-25 * time.Hour),
 		"runs/recent":   now.Add(-23 * time.Hour),
 		"go-mod/module": now.Add(-25 * time.Hour),
+		"repo.git":      now.Add(-25 * time.Hour),
 	} {
 		dir := filepath.Join(base, name)
 		if err := os.MkdirAll(dir, 0700); err != nil {
@@ -96,14 +102,20 @@ func TestCacheCleanPrunesRunFoldersAfterOneDay(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := runCacheClean(t, base, false)
+	// Relocate only the legacy root so the test exercises its top-level sweep
+	// without touching the machine's real legacy tree.
+	body := strings.Replace(ciCacheCleanBody, "legacy=/var/tmp/dyna-local-ci", "legacy="+shellquote.Quote(base), 1)
+	if body == ciCacheCleanBody {
+		t.Fatal("could not relocate the legacy cleanup root")
+	}
+	out, err := runCacheCleanBody(t, base, false, body)
 	if err != nil {
 		t.Fatalf("cleanup failed: %v: %s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(base, "runs", "old")); !os.IsNotExist(err) {
 		t.Fatalf("run folder older than a day stayed: %v: %s", err, out)
 	}
-	for _, kept := range []string{"runs/recent", "go-mod/module"} {
+	for _, kept := range []string{"runs/recent", "go-mod/module", "repo.git"} {
 		if _, err := os.Stat(filepath.Join(base, kept)); err != nil {
 			t.Fatalf("cleanup removed %s before its retention age: %v: %s", kept, err, out)
 		}
