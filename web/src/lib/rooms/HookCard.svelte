@@ -38,7 +38,13 @@
 
   let payload = $derived(hookEvent(post))
   let name = $derived(payload?.label || payload?.hook || 'Hook')
-  let state = $derived<HookState>(payload?.state ?? 'running')
+  // A folded row shows the state of its newest post. A run of the hook that
+  // started and has no result yet keeps the row running, also when a newer run
+  // of the same hook already passed: a manual run and a scheduled run can be
+  // live together.
+  let state = $derived<HookState>(hookFold?.active ? 'running' : payload?.state ?? 'running')
+  // View log opens the newest run of the row, or the run that is still going.
+  let runId = $derived(hookFold?.active?.runId ?? payload?.runId ?? '')
   // A folded row counts its passes here; a row of one run shows only its own
   // time, so a pass that folded once does not claim a count.
   let count = $derived(hookFold?.count ?? 1)
@@ -52,8 +58,8 @@
   })
 
   function viewLog() {
-    if (!payload) return
-    openHookLog({ repo: payload.repo, hook: payload.hook, runId: payload.runId })
+    if (!payload || !runId) return
+    openHookLog({ repo: payload.repo, hook: payload.hook, runId })
   }
 </script>
 
