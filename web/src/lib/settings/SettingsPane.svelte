@@ -32,7 +32,6 @@
     'browser.profileMode': 'Profile mode',
     'browser.ownerProfile': 'My Chromium profile',
     'browser.saveBack': 'Save cookies back when a computer stops',
-    'sessions.checkInInterval': 'Parent check-in interval',
     'content.maxCardBytes': 'HTML/JavaScript card size',
     'content.maxFileBytes': 'File attachment size',
     'updater.autoCheck': 'Check for updates',
@@ -46,7 +45,6 @@
     { title: 'Browser', keys: ['browser.path', 'browser.extraFlags', 'browser.useFlagsFile', 'browser.profileMode', 'browser.ownerProfile', 'browser.saveBack'] },
     { title: 'Cards and files', keys: ['content.maxCardBytes', 'content.maxFileBytes'] },
     { title: 'Sessions', keys: ['root.profile', 'subagent.maxDepth', 'steering.maxToolWait'] },
-    { title: 'Sessions', keys: ['sessions.checkInInterval'] },
     { title: 'Workflows', keys: ['worktrees.retention'] },
     { title: 'App', keys: ['updater.autoCheck'] },
   ]

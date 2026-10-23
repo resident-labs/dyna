@@ -154,8 +154,11 @@ The same rule applies to root. Dormant and closed children do not count.
 Parents remain responsible for their children and their work.
 The check-in lists children stalest first with state, duration, goal/item, and PR
 state. Act on stuck work. If everything is on track, end your turn without posting.
-Set `sessions.checkInInterval` to change the
-interval; `0s` disables check-ins.
+Check-ins are the `parent-checkins` built-in hook. Change its interval in
+Settings → Hooks or with `dyna git hooks edit parent-checkins --global
+--every-minutes 30`; switching it off stops check-ins, and `0` is not a valid
+interval. The old `sessions.checkInInterval` setting is imported once into that
+hook.
 Goal status uses running turns, turn failures, tracked PRs, and item counts.
 Use `dyna goal note <id> "<progress>"` to record progress.
 
