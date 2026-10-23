@@ -94,6 +94,8 @@
   let width = $state(1200) // this screen's own width, from its box
   let mergeStatus = $state<MergeControlStatus | null>(null)
   let mergeError = $state('')
+  let resuming = $state(false)
+  let resumeError = $state('')
   let merge = $state<MergeQueueItem[] | null>(null) // the room's RoomMergeStatus answer
   let starting = $state(0) // the issue number Start is working on
   let startNote = $state('') // a Start warning or error, shown in the list and on the issue page
@@ -154,6 +156,19 @@
       if (n === mseq) { mergeStatus = res; merge = res.queue ?? []; mergeError = '' }
     } catch (e) {
       if (n === mseq) { mergeStatus = null; merge = null; mergeError = errorText(e) }
+    }
+  }
+  async function resumeMerging() {
+    if (resuming) return
+    resuming = true
+    resumeError = ''
+    try {
+      await api.resumeMerging(roomId)
+      await loadMerge()
+    } catch (e) {
+      resumeError = errorText(e)
+    } finally {
+      resuming = false
     }
   }
   // Refresh for row changes and saved merge events, including main CI updates.
@@ -383,7 +398,7 @@
   {#if inPRs}
       <div class="list prlist" hidden={narrow && !!chg}>
         <TabHeader title="Pull requests" usage={`${listRows.length} open`} />
-        <MergingStrip status={mergeStatus} error={mergeError} onpick={openMerge} />
+        <MergingStrip status={mergeStatus} error={mergeError} onpick={openMerge} onresume={resumeMerging} {resuming} {resumeError} />
         {@render filters()}
         {#if error}<p class="more err">GitHub did not answer: {error}</p>{:else if list?.more}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
         {#if anyRows}
