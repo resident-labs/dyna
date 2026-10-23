@@ -63,8 +63,16 @@ func (s *Store) open() (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = database.Migrate(db, "callrequests.schema", 1, func(conn *sql.Conn, _ int) error {
-		_, err := conn.ExecContext(context.Background(), schema)
+	err = database.Migrate(db, "callrequests.schema", 2, func(conn *sql.Conn, old int) error {
+		ctx := context.Background()
+		if old < 1 {
+			if _, err := conn.ExecContext(ctx, schema); err != nil {
+				return err
+			}
+		}
+		_, err := conn.ExecContext(ctx, `CREATE TABLE call_requests_revision (
+   id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL
+  ); INSERT INTO call_requests_revision VALUES(1,0);`)
 		return err
 	})
 	return db, err
@@ -100,13 +108,14 @@ func get(conn *sql.Conn, room, id string) (Request, error) {
 }
 
 // setChange encodes the committed row in the shared list-event shape.
-func setChange(event *listchange.Event, row Request) error {
+func setChange(conn *sql.Conn, event *listchange.Event, row Request) error {
 	raw, err := json.Marshal(row)
 	if err != nil {
 		return err
 	}
 	event.Change = listchange.Change{Op: "upsert", ID: row.ID, Item: raw}
-	return nil
+	_, err = conn.ExecContext(context.Background(), "UPDATE call_requests_revision SET revision=revision+1 WHERE id=1")
+	return err
 }
 
 // Ask creates a request or updates the reason of the room's ringing request.
@@ -133,7 +142,7 @@ func (s *Store) Ask(room, reason, asker string) (Request, bool, error) {
 				return err
 			}
 			r.Reason = reason
-			return setChange(&event, r)
+			return setChange(conn, &event, r)
 		}
 		if err != sql.ErrNoRows {
 			return err
@@ -149,12 +158,24 @@ func (s *Store) Ask(room, reason, asker string) (Request, bool, error) {
 			return err
 		}
 		created = true
-		return setChange(&event, r)
+		return setChange(conn, &event, r)
 	})
 	if errors.Is(err, errUnchanged) {
 		err = nil
 	}
 	return r, created && err == nil, err
+}
+
+// Revision changes with each committed row change, including writes from
+// another process. No-op requests leave it unchanged.
+func (s *Store) Revision() (int64, error) {
+	db, err := s.open()
+	if err != nil {
+		return 0, err
+	}
+	var revision int64
+	err = db.QueryRow("SELECT revision FROM call_requests_revision WHERE id=1").Scan(&revision)
+	return revision, err
 }
 
 // List returns history for one room, or all rooms when no room is supplied.
@@ -227,7 +248,7 @@ func (s *Store) update(room, id, assignment, condition string, args ...any) (Req
 		if !changed {
 			return errUnchanged
 		}
-		return setChange(&event, r)
+		return setChange(conn, &event, r)
 	})
 	if errors.Is(err, errUnchanged) {
 		err = nil
