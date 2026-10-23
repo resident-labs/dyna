@@ -3,10 +3,12 @@ package health
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -182,23 +184,75 @@ func TestDetectVersionCustomAndMockNeverExecute(t *testing.T) {
 	}
 }
 
-func TestDetectVersionTimeoutKillsProcessGroup(t *testing.T) {
+// A run that ends while a descendant still runs must kill the whole process
+// group. The descendant holds a pipe open for its whole life, so its closed
+// pipe end proves the kill reached it: no fixed wait decides the answer.
+// A cancel and a deadline share the same cmd.Cancel kill; cliversion's tests
+// cover the deadline itself.
+func TestDetectVersionCancelKillsProcessGroup(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "escaped")
+	fifo := filepath.Join(t.TempDir(), "exited")
+	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	_, p := versionFake(t, "codex", `(
-/bin/sleep 0.2
+exec 3>"$FIFO"
+/bin/sleep 60
 printf escaped > "$MARKER"
 ) &
 wait`)
-	p.Env["MARKER"] = marker
+	p.Env["MARKER"], p.Env["FIFO"] = marker, fifo
+	// Opening the read end unblocks the descendant's own open, so a reader
+	// proves the descendant is running before the test ends the run.
+	readers := make(chan *os.File, 1)
+	go func() {
+		f, err := os.OpenFile(fifo, os.O_RDONLY, 0)
+		if err != nil {
+			readers <- nil
+			return
+		}
+		readers <- f
+	}()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	result := make(chan VersionInfo, 1)
 	start := time.Now()
-	got := detectVersion(context.Background(), p, 30*time.Millisecond)
+	go func() { result <- detectVersion(ctx, p, time.Minute) }()
+	var reader *os.File
+	select {
+	case reader = <-readers:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the descendant never held its exit pipe")
+	}
+	if reader == nil {
+		t.Fatal("the descendant never held its exit pipe")
+	}
+	defer reader.Close()
+	cancel()
+	var got VersionInfo
+	select {
+	case got = <-result:
+	case <-time.After(5 * time.Second):
+		t.Fatal("version detection did not stop")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("the group kill took %s", elapsed)
+	}
 	if got.Error == "" || got.Version != "" || !got.Installed {
 		t.Fatalf("timeout result: %+v", got)
 	}
-	if elapsed := time.Since(start); elapsed > time.Second {
-		t.Fatalf("timeout took %s", elapsed)
+	// The pipe reaches EOF only when every writer closed: the descendant is
+	// gone. A survivor holds it open and blocks here instead.
+	closed := make(chan error, 1)
+	go func() { _, err := io.Copy(io.Discard, reader); closed <- err }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatalf("reading the descendant's exit pipe: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("descendant survived the process-group kill")
 	}
-	time.Sleep(250 * time.Millisecond)
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("descendant survived: %v", err)
 	}

@@ -17,6 +17,7 @@ type controlFixture struct {
 	pending         bool
 	start           chan struct{}
 	activate        chan struct{}
+	activated       chan struct{}
 	finish          chan struct{}
 	personalConsent bool
 }
@@ -24,7 +25,7 @@ type controlFixture struct {
 func controlApp(t *testing.T) (*Runtime, *controlFixture) {
 	t.Helper()
 	a := testPrivateRuntime(t)
-	f := &controlFixture{running: 2, start: make(chan struct{}, 10), activate: make(chan struct{}), finish: make(chan struct{})}
+	f := &controlFixture{running: 2, start: make(chan struct{}, 10), activate: make(chan struct{}), activated: make(chan struct{}), finish: make(chan struct{})}
 	a.privateSwitch.hooks = &privateRuntimeControlHooks{
 		prepare: func(id string, consent bool) (string, string, error) {
 			if f.personalConsent && !consent {
@@ -46,6 +47,9 @@ func controlApp(t *testing.T) (*Runtime, *controlFixture) {
 			case <-f.activate:
 			}
 			onActivate()
+			// onActivate records the activating phase, so this reports a
+			// switch that activation can no longer cancel or stop.
+			close(f.activated)
 			<-f.finish
 			return nil
 		},
@@ -173,14 +177,13 @@ func TestRuntimeControlActivationCannotBeCanceled(t *testing.T) {
 	done := beginControlSwitch(t, a, f)
 	s := controlState(t, a)
 	close(f.activate)
-	deadline := time.After(time.Second)
-	for controlState(t, a).Phase != "activating" {
-		select {
-		case <-deadline:
-			t.Fatal("activation did not start")
-		default:
-			time.Sleep(time.Millisecond)
-		}
+	select {
+	case <-f.activated:
+	case <-time.After(time.Second):
+		t.Fatal("activation did not start")
+	}
+	if got := controlState(t, a).Phase; got != "activating" {
+		t.Fatalf("phase after activation = %s, want activating", got)
 	}
 	if _, err := a.CancelPrivateRuntimeAccountSwitch(context.Background(), "codex", s.RequestID); err == nil {
 		t.Fatal("activation cancel accepted")

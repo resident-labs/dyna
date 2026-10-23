@@ -99,6 +99,10 @@ type Store struct {
 	// startTime reads a process start time; nil uses procident.StartTime. A
 	// test sets it to act as a system without /proc.
 	startTime func(int) (uint64, error)
+	// OnStarted, when set, observes a job that started its command and
+	// recorded the process. A test waits on it instead of sampling the
+	// job's status, so no timer decides when the job is running.
+	OnStarted func(pid int)
 }
 
 // processStartTime reads pid's start time, or 0 when this system has none. A
@@ -245,6 +249,9 @@ func (s *Store) Supervise(ctx context.Context, id string) error {
 	redact := newRedactor(cmd.Env)
 	m.Pid = cmd.Process.Pid
 	_ = s.Save(m, nil)
+	if s.OnStarted != nil {
+		s.OnStarted(m.Pid)
+	}
 
 	copied := make(chan struct{})
 	var lines int

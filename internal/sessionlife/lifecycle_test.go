@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 func TestCheckRequiresMatchingOpenSessionEvidence(t *testing.T) {
@@ -62,38 +62,34 @@ func TestPublicationLockSerializesAndCancelsBeforeCallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
-	var called atomic.Bool
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	entered := make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		close(entered)
-		done <- WithPublication(ctx, root, "publish.lock", func() error { called.Store(true); return nil })
-	}()
-	<-entered
-	time.Sleep(20 * time.Millisecond)
-	if called.Load() {
-		t.Fatal("publication entered while lock held")
-	}
-	cancel()
-	select {
-	case err = <-done:
-		if err == nil {
+	// The held lock keeps the waiter in WithPublication's retry loop on the
+	// virtual clock, so synctest.Wait can report that state without a timer.
+	synctest.Test(t, func(t *testing.T) {
+		var called atomic.Bool
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			done <- WithPublication(ctx, root, "publish.lock", func() error { called.Store(true); return nil })
+		}()
+		synctest.Wait()
+		if called.Load() {
+			t.Fatal("publication entered while lock held")
+		}
+		cancel()
+		if err := <-done; err == nil {
 			t.Fatal("cancelled waiter succeeded")
 		}
-	case <-time.After(time.Second):
-		t.Fatal("cancelled waiter still needs lock release")
-	}
-	if called.Load() {
-		t.Fatal("cancelled publication mutated the protected store")
-	}
-	if err = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
-		t.Fatal(err)
-	}
-	if err = WithPublication(context.Background(), root, "publish.lock", func() error { called.Store(true); return nil }); err != nil || !called.Load() {
-		t.Fatalf("publication did not recover after release: %v", err)
-	}
+		if called.Load() {
+			t.Fatal("cancelled publication mutated the protected store")
+		}
+		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+			t.Fatal(err)
+		}
+		if err := WithPublication(context.Background(), root, "publish.lock", func() error { called.Store(true); return nil }); err != nil || !called.Load() {
+			t.Fatalf("publication did not recover after release: %v", err)
+		}
+	})
 }
 
 func TestActivatePreservesDormantOrigin(t *testing.T) {

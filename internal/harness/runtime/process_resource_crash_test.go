@@ -5,6 +5,8 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/processguard"
+	"golang.org/x/sys/unix"
 )
 
 func TestResourceRunnerCrashHelper(t *testing.T) {
@@ -67,6 +70,11 @@ func TestRunnerCrashDrainsGrandchildBeforeResourcesBecomeUnused(t *testing.T) {
 	_ = install(t, bundles, "codex", "3.0.0")
 	raw, _ := json.Marshal(old)
 	ready := filepath.Join(t.TempDir(), "grandchild.pid")
+	// The helper writes its grandchild's PID into this pipe, which blocks
+	// until the test reads it, so the PID is a real start signal.
+	if err := syscall.Mkfifo(ready, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -85,15 +93,29 @@ func TestRunnerCrashDrainsGrandchildBeforeResourcesBecomeUnused(t *testing.T) {
 			_ = cmd.Wait()
 		}
 	}()
-	deadline := time.Now().Add(15 * time.Second)
-	for {
-		if info, e := os.Stat(ready); e == nil && info.Size() > 0 {
-			break
+	pids := make(chan []byte, 1)
+	go func() {
+		f, err := os.OpenFile(ready, os.O_RDONLY, 0)
+		if err != nil {
+			pids <- nil
+			return
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("native grandchild did not start", stderr.String())
-		}
-		time.Sleep(10 * time.Millisecond)
+		defer f.Close()
+		b, _ := io.ReadAll(f)
+		pids <- b
+	}()
+	var pidRaw []byte
+	select {
+	case pidRaw = <-pids:
+	case <-time.After(15 * time.Second):
+		t.Fatal("native grandchild did not start", stderr.String())
+	}
+	if len(pidRaw) == 0 {
+		t.Fatal("native grandchild did not report its PID")
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(pidRaw)))
+	if err != nil {
+		t.Fatal(err)
 	}
 	paths, err := resourceLeasePaths(filepath.Join(accounts.Root, "codex", ".turns"), "")
 	if err != nil || len(paths) != 1 {
@@ -108,6 +130,13 @@ func TestRunnerCrashDrainsGrandchildBeforeResourcesBecomeUnused(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer processguard.Signal(ref, syscall.SIGKILL)
+	// The guard kills, drains and reaps the native group before it exits, so
+	// its exit reports finished cleanup without a clock sample.
+	guardian, err := unix.PidfdOpen(ref.Guardian(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer unix.Close(guardian)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	if release, e := accounts.switchGate(ctx, "codex"); e == nil {
 		release()
@@ -126,23 +155,10 @@ func TestRunnerCrashDrainsGrandchildBeforeResourcesBecomeUnused(t *testing.T) {
 	}
 	_ = cmd.Wait()
 	waited = true
-	for {
-		live, e := processguard.Probe(ref)
-		if e == nil && !live {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("native group survived runner SIGKILL", live, e)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	pidRaw, err := os.ReadFile(ready)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(pidRaw)))
-	if err != nil {
-		t.Fatal(err)
+	// The runner is gone and its guard retires the native group, then exits.
+	waitExit(t, guardian, "native group guard")
+	if live, e := processguard.Probe(ref); e != nil || live {
+		t.Fatalf("native group survived runner SIGKILL: live=%v, err=%v", live, e)
 	}
 	if syscall.Kill(pid, 0) == nil {
 		t.Fatal("backgrounded grandchild survived cleanup")
@@ -160,5 +176,21 @@ func TestRunnerCrashDrainsGrandchildBeforeResourcesBecomeUnused(t *testing.T) {
 	}
 	if _, err = bundles.Resolve("codex", old.Version); err == nil {
 		t.Fatal("dead native process retained old bundle")
+	}
+}
+
+// waitExit blocks until fd, a pidfd, reports that its process exited.
+func waitExit(t *testing.T, fd int, what string) {
+	t.Helper()
+	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	ready, err := unix.Poll(fds, 15000)
+	for errors.Is(err, unix.EINTR) {
+		ready, err = unix.Poll(fds, 15000)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready == 0 {
+		t.Fatalf("%s did not exit", what)
 	}
 }

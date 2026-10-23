@@ -68,12 +68,19 @@ func TestMockSessionResumesAndIsSteered(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	done := make(chan Result, 1)
+	// OnSession reports the turn's session id once it starts, so the test
+	// steers a turn that is running instead of waiting out a timer.
+	started := make(chan struct{})
 	go func() {
 		r, _ := RunSessionTurn(ctx, profile.Profile{Name: "m", Harness: profile.HarnessMock}, "work SLEEP:2000", t.TempDir(), true,
-			JournalOptions{}, SteeringOptions{Source: mb}, SessionOptions{OnSession: func(s string) { id = s }})
+			JournalOptions{}, SteeringOptions{Source: mb}, SessionOptions{OnSession: func(s string) { id = s; close(started) }})
 		done <- r
 	}()
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-started:
+	case r := <-done:
+		t.Fatalf("mock turn ended before it could be steered: %#v", r)
+	}
 	mb.submit("go left")
 	var r Result
 	select {
