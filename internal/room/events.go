@@ -421,6 +421,29 @@ var mergeSteps = []MergeStep{
 	MergeReturned, MergeConflict, MergeRolledBack, MergeDecision,
 }
 
+// MergeReasonKind is the class of a merge event's cause. The card words a
+// cause from this kind, so a reason the steward generates itself never repeats
+// the evidence the event already carries.
+type MergeReasonKind string
+
+// Merge reason kinds.
+const (
+	// MergeChecksFailed is a trial whose CI failed. Its failing check names are
+	// in Checks, so the event carries no reason text of its own.
+	MergeChecksFailed MergeReasonKind = "checks-failed"
+	// MergeConflict is a change that conflicts with another member or the base.
+	MergeConflictReason MergeReasonKind = "conflict"
+	// MergeRootReturn is root's recorded decision to return the change.
+	MergeRootReturn MergeReasonKind = "root-return"
+	// MergeReasonOther is any other cause, which the event words in Reason.
+	MergeReasonOther MergeReasonKind = "other"
+)
+
+// mergeReasonKinds lists every reason kind the web needs as a union type.
+var mergeReasonKinds = []MergeReasonKind{
+	MergeChecksFailed, MergeConflictReason, MergeRootReturn, MergeReasonOther,
+}
+
 // MergePR is one member PR of a merge trial, as the card names it.
 type MergePR struct {
 	Number int    `json:"number"`
@@ -655,8 +678,13 @@ type MergeEvent struct {
 	Checks *MergeCheckSummary `json:"checks,omitempty"`
 	// Commit is the commit the trial landed on the base branch.
 	Commit string `json:"commit,omitempty"`
-	// Reason is the short cause of a failure, a return or a conflict.
+	// Reason is the short cause of a failure, a return or a conflict. A cause
+	// the card can word from ReasonKind stays empty here, so the card never
+	// says the same thing twice.
 	Reason string `json:"reason,omitempty"`
+	// ReasonKind is the class of the cause, when the steward generated it.
+	// Root's own text keeps MergeReasonOther and shows in Reason.
+	ReasonKind MergeReasonKind `json:"reasonKind,omitempty"`
 	// Summary is the short facts line the agent text reads, such as a checks
 	// count. It never holds raw log lines.
 	Summary string `json:"summary,omitempty"`
@@ -1670,6 +1698,7 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(HookState("")), Values: []string{
 		string(HookRunning), string(HookPassed), string(HookFailed), string(HookError),
 	}},
+	{Type: reflect.TypeOf(MergeReasonKind("")), Values: enumValues(mergeReasonKinds)},
 	{Type: reflect.TypeOf(ReviewKind("")), Values: enumValues(reviewKinds)},
 	{Type: reflect.TypeOf(ReviewSeverity("")), Values: []string{
 		string(ReviewBlocking), string(ReviewShouldFix), string(ReviewNit),

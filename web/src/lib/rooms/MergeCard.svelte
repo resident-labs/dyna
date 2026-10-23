@@ -11,7 +11,7 @@
   import { shortSha, commitUrl } from '../prs/pr.ts'
   import type { EventNotice } from '../api/room.ts'
   import type { EventPost, EventSurface } from './eventRenderers.ts'
-  import type { MergeStep } from './events.gen.ts'
+  import type { MergeReasonKind, MergeStep } from './events.gen.ts'
 
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
@@ -73,10 +73,23 @@
   let first = $derived(prs[0])
   // A local change has no PR number, so the card names it by its title.
   let name = $derived(first ? (first.number ? `#${first.number}` : first.title || 'the change') : '')
-  let title = $derived(type === 'decision' ? verbs.decision : `${verbs[type]} ${name} into ${payload?.base ?? ''}`)
+  // A batch names every member, not only the PR the trial was anchored on.
+  let what = $derived(prs.length > 1 ? `${prs.length} PRs: ${prs.map((p) => (p.number ? `#${p.number}` : p.title || 'the change')).join(', ')}` : name)
+  let title = $derived(type === 'decision' ? verbs.decision : `${verbs[type]} ${what} into ${payload?.base ?? ''}`)
   let failedChecks = $derived(payload?.checks?.failed ?? [])
+  // The card says a cause once. The Go side words a cause the steward
+  // generated as a typed kind and leaves its text empty, so the evidence list
+  // and the reason line never repeat each other.
+  let reason = $derived(reasonLine(payload?.reason, payload?.reasonKind, failedChecks.length))
   let openCommit = $derived(commitUrl(first?.url, payload?.commit))
   let open = $state(false)
+
+  // reasonLine words a cause from its kind when the payload keeps no text.
+  function reasonLine(text: string | undefined, kind: MergeReasonKind | undefined, named: number) {
+    if (text) return text
+    if (kind === 'checks-failed' && !named) return 'Checks failed.'
+    return ''
+  }
 
   function openLink(url?: string) {
     if (url) openExternal(url)
@@ -105,11 +118,10 @@
         </div>
       {/if}
       <div class="facts">
-        {#if prs.length > 1}<span>{prs.length} PRs</span>{/if}
         {#if payload.checks && (payload.checks.total ?? 0) > 0}<span>checks <b>{payload.checks.done}/{payload.checks.total}</b></span>{/if}
         {#if payload.commit}<span>commit <b class="mono">{shortSha(payload.commit)}</b></span>{/if}
       </div>
-      {#if payload.reason && stepTones[type] === 'coral'}<p class="reason">{payload.reason}</p>{/if}
+      {#if reason && stepTones[type] === 'coral'}<p class="reason">{reason}</p>{/if}
       {#if failedChecks.length}<p class="reason">Failed checks: {failedChecks.join(', ')}</p>{/if}
       <div class="acts">
         {#if first?.url}<button class="btn" type="button" onclick={() => openLink(first?.url)}>Open PR</button>{/if}

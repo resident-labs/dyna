@@ -170,6 +170,6 @@ func (s *Service) rejectTrialFailure(ctx context.Context, b state.MergeTrial) er
 	if len(prs) == 0 {
 		prs = []room.MergePR{mergePR(member)}
 	}
-	ev := room.MergeEvent{Type: room.MergeFailed, TrialID: trialIdentity(b), Repo: mergeRepo(member), Base: b.DefaultBranch, PRs: prs, Label: changeLabel(member), Reason: "failed trial CI after the tested prefix"}
+	ev := room.MergeEvent{Type: room.MergeFailed, TrialID: trialIdentity(b), Repo: mergeRepo(member), Base: b.DefaultBranch, PRs: prs, Label: changeLabel(member), Reason: "failed trial CI after the tested prefix", ReasonKind: room.MergeReasonOther}
 	return s.postMergeNotice(ctx, member, "merge-trial-failed", Notice{Target: member.Author, Merge: &ev, Text: text})
 }
