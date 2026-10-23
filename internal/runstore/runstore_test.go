@@ -2,8 +2,6 @@ package runstore
 
 import (
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +42,7 @@ func TestCreateOmitsEmptySessionAndReadsOldMeta(t *testing.T) {
 		t.Fatal(err)
 	}
 	run.Finish("ok", "null", nil)
-	b, err := os.ReadFile(filepath.Join(run.Dir, "meta.json"))
+	b, err := json.Marshal(run.Meta)
 	if err != nil {
 		t.Fatal(err)
 	}

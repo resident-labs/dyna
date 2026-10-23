@@ -20,12 +20,11 @@ func newTestRun(t *testing.T, id string) *Run {
 	return run
 }
 
-// A run's meta lives in dyna.db (rule r10). meta.json is only the previous
-// release's copy, so the run reads the same without it.
+// A run's meta lives in dyna.db and creates no metadata file.
 func TestRunMetaLivesInDynaDB(t *testing.T) {
 	run := newTestRun(t, "wf_meta-db")
 	run.Finish("ok", "null", nil)
-	if err := os.Remove(filepath.Join(run.Dir, "meta.json")); err != nil {
+	if _, err := os.Stat(filepath.Join(run.Dir, "meta.json")); !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 	m, err := ReadMeta(run.Meta.ID)
@@ -138,8 +137,7 @@ func TestRemoveDeletesTheRow(t *testing.T) {
 	}
 }
 
-// A List whose runs all hold this binary's own meta.json copy takes no run
-// lock: the lock is only for importing an earlier release's file.
+// Listing canonical rows takes no per-run write lock.
 func TestListOfOurOwnRunsTakesNoLock(t *testing.T) {
 	run := newTestRun(t, "wf_meta-nolock")
 	run.Finish("ok", "null", nil)

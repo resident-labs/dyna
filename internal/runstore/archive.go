@@ -165,10 +165,7 @@ func scanLiveRuns() ([]liveRun, error) {
 	for _, id := range ids {
 		r := liveRun{id: id}
 		r.meta, r.hasMeta = rows[id]
-		// TODO: legacy/shim remove later — a paused file left by a runner from the earlier release keeps its run out of the archive; the row clears paused when a run ends. Remove with the paused file in SetPaused (item 31).
-		if _, err := os.Lstat(filepath.Join(RunsDir(), id, "paused")); err == nil {
-			r.paused = true
-		}
+		r.paused = r.meta.Paused
 		out = append(out, r)
 	}
 	return out, nil
@@ -410,8 +407,7 @@ func ArchiveRun(id string) (ArchiveResult, error) {
 	if !IsFinishedStatus(meta.Status) {
 		return res, fmt.Errorf("run %s is %s; only finished runs can be archived", id, meta.Status)
 	}
-	// TODO: legacy/shim remove later — a paused file left by a runner from the earlier release keeps its run out of the archive; the row clears paused when a run ends. Remove with the paused file in SetPaused (item 31).
-	if _, err := os.Lstat(filepath.Join(live, "paused")); err == nil {
+	if meta.Paused {
 		return res, fmt.Errorf("run %s is paused", id)
 	}
 	root := ArchiveDir()

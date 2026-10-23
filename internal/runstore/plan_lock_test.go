@@ -126,7 +126,7 @@ func TestRemoveAncestryFailureKeepsRunAndStamps(t *testing.T) {
 	if err := Remove(run.Meta.ID); err == nil {
 		t.Fatal("removal ignored ancestry failure")
 	}
-	for _, query := range []string{"SELECT count(*) FROM runs", "SELECT count(*) FROM plan_ancestry", "SELECT count(*) FROM state_mirrors WHERE key LIKE 'runs/%'", "SELECT count(*) FROM state_mirrors WHERE key LIKE 'plans/%'"} {
+	for _, query := range []string{"SELECT count(*) FROM runs", "SELECT count(*) FROM plan_ancestry", "SELECT count(*) FROM state_mirrors WHERE key LIKE 'plans/%'"} {
 		var n int
 		if err := db.QueryRow(query).Scan(&n); err != nil || n != 1 {
 			t.Fatalf("%s = %d,%v; want 1", query, n, err)
