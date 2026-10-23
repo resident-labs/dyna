@@ -147,6 +147,12 @@ func bindings(s services) []websvc.Binding {
 		{Name: "Send", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(ctx context.Context, roomID, draft, replyTo string, atts []room.Attachment, forwardOf string) (roomsvc.SendResult, error) {
 			return s.rooms.Send(ctx, roomID, draft, replyTo, forwardOf, atts...)
 		}},
+		{Name: "SendWithReferences", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(ctx context.Context, roomID, draft, replyTo string, atts []room.Attachment, forwardOf string, references []room.Reference) (roomsvc.SendResult, error) {
+			return s.rooms.SendWithReferences(ctx, roomID, draft, replyTo, forwardOf, references, atts...)
+		}},
+		{Name: "SendToSessionWithReferences", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: func(ctx context.Context, ref, text string, atts []room.Attachment, forwardOf string, references []room.Reference) (roomsvc.PostResult, error) {
+			return s.rooms.SendToSessionWithReferences(ctx, ref, text, forwardOf, references, atts...)
+		}},
 		{Name: "Profiles", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.Profiles},
 		{Name: "BulkSessionAction", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.BulkSessionAction},
 		{Name: "RoomSessionControls", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.RoomSessionControls},

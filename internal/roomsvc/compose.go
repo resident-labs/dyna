@@ -197,10 +197,10 @@ func (s *Service) parse(rec room.Record, draft string) (Draft, error) {
 // Attachments must be saved in the room first (Attach); mentions come from
 // the draft text only, never from the files.
 func (s *Service) Post(ctx context.Context, roomRef, draft, replyTo string, atts ...room.Attachment) (PostResult, error) {
-	return s.post(ctx, roomRef, draft, replyTo, "", atts...)
+	return s.post(ctx, roomRef, draft, replyTo, "", nil, atts...)
 }
 
-func (s *Service) post(ctx context.Context, roomRef, draft, replyTo, forwardOf string, atts ...room.Attachment) (PostResult, error) {
+func (s *Service) post(ctx context.Context, roomRef, draft, replyTo, forwardOf string, refs []room.Reference, atts ...room.Attachment) (PostResult, error) {
 	// A spawn-shaped draft is a command, never text: posting "/opus fix it"
 	// to @root would be a silent misfire. Send routes it; "//" escapes it.
 	if _, _, ok := splitSpawn(draft); ok {
@@ -215,12 +215,12 @@ func (s *Service) post(ctx context.Context, roomRef, draft, replyTo, forwardOf s
 	if err != nil {
 		return PostResult{}, err
 	}
-	if strings.TrimSpace(d.Text) == "" && len(atts) == 0 && forwardOf == "" {
+	if strings.TrimSpace(d.Text) == "" && len(atts) == 0 && len(refs) == 0 && forwardOf == "" {
 		return PostResult{}, errors.New("type a post after the mentions")
 	}
 	res, err := s.Notify.Post(ctx, notify.PostInput{
 		Sender:   notify.Sender{Kind: notify.SenderOwner, Room: rec.Name, Human: true},
-		Mentions: d.Mentions, Text: strings.TrimSpace(d.Text), ReplyTo: replyTo, ForwardOf: forwardOf, Attachments: atts,
+		Mentions: d.Mentions, Text: strings.TrimSpace(d.Text), ReplyTo: replyTo, ForwardOf: forwardOf, Attachments: atts, References: refs,
 	})
 	out := PostResult{Message: res.Message, Deliveries: res.Deliveries, Failed: res.Failed(), Sticky: d.Sticky()}
 	if res.Message.ID != "" {
