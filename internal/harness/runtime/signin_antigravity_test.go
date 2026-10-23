@@ -1,13 +1,21 @@
 package runtime
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
 
@@ -163,4 +171,78 @@ func TestPrivateSignInRoutesCustomPasteWithoutStdin(t *testing.T) {
 		t.Fatal(err)
 	}
 	<-login.signIn.done
+}
+
+func TestSignInCleanupProcess(t *testing.T) {
+	mode := os.Getenv("SIGNIN_CLEANUP_PROCESS")
+	if mode == "" {
+		return
+	}
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGTERM)
+	if mode == "child" {
+		fmt.Println("ready")
+		<-signals
+		os.Exit(0)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		os.Exit(2)
+	}
+	child := exec.Command(exe, "-test.run=^TestSignInCleanupProcess$")
+	child.Env = append(os.Environ(), "SIGNIN_CLEANUP_PROCESS=child")
+	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	out, err := child.StdoutPipe()
+	if err != nil || child.Start() != nil {
+		os.Exit(2)
+	}
+	_, _ = bufio.NewReader(out).ReadString('\n')
+	fmt.Printf("CHILD:%d\n", child.Process.Pid)
+	<-signals
+	_ = syscall.Kill(-child.Process.Pid, syscall.SIGKILL)
+	_ = child.Wait()
+	_ = os.WriteFile(os.Getenv("SIGNIN_CLEANUP_MARKER"), []byte("joined"), 0600)
+	os.Exit(0)
+}
+
+func TestAntigravityCancelJoinsSeparateProcessGroupBeforeRestore(t *testing.T) {
+	a := testPrivateRuntime(t)
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(t.TempDir(), "joined")
+	reached := make(chan int, 1)
+	spec := signInSpecs["antigravity"]
+	spec.Argv = func([]string) []string { return []string{exe, "-test.run=^TestSignInCleanupProcess$"} }
+	spec.Parse = func(st *SignInState, line string) {
+		if raw, ok := strings.CutPrefix(line, "CHILD:"); ok {
+			pid, _ := strconv.Atoi(raw)
+			st.Phase = signInWaiting
+			reached <- pid
+		}
+	}
+	flow := &NativeLogin{
+		Cwd: t.TempDir(),
+		Env: []string{"SIGNIN_CLEANUP_PROCESS=parent", "SIGNIN_CLEANUP_MARKER=" + marker},
+		Cancel: func() error {
+			if _, err := os.Stat(marker); err != nil {
+				t.Error("restored the login before the helper joined its separate process group")
+			}
+			return nil
+		},
+		Complete: func(context.Context) (NativeAccount, error) {
+			t.Error("cancelled login must not complete")
+			return NativeAccount{}, nil
+		},
+	}
+	if _, err := a.startPrivateSignIn("acct", "antigravity", spec, flow); err != nil {
+		t.Fatal(err)
+	}
+	pid := <-reached
+	t.Cleanup(func() { _ = syscall.Kill(-pid, syscall.SIGKILL) })
+	t.Cleanup(func() { _ = a.CancelPrivateRuntimeLogin("acct") })
+	if err := a.CancelPrivateRuntimeLogin("acct"); err != nil {
+		t.Fatal(err)
+	}
 }

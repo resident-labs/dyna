@@ -14,6 +14,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"dyna-agent/internal/terminalsvc"
 )
 
 // sign-in phases, as the shared in-app card shows them.
@@ -59,6 +61,8 @@ type signInSpec struct {
 	AcceptsPaste bool
 	// Respond handles a pasted response instead of writing it to stdin.
 	Respond func(context.Context, SignInState, string) error
+	// GracefulStop lets a helper stop and join children in separate groups.
+	GracefulStop bool
 	// Timeout bounds the wait for the owner. Zero uses signInTimeout.
 	Timeout time.Duration
 }
@@ -66,7 +70,7 @@ type signInSpec struct {
 // signInSpecs lists the harnesses that sign in through the runner rather than a
 // terminal. Every other harness keeps its terminal.
 var signInSpecs = map[string]signInSpec{
-	"antigravity": {Parse: parseAntigravitySignIn, AcceptsPaste: true, Respond: respondAntigravitySignIn, Timeout: 5 * time.Minute},
+	"antigravity": {Parse: parseAntigravitySignIn, AcceptsPaste: true, Respond: respondAntigravitySignIn, GracefulStop: true, Timeout: 5 * time.Minute},
 	"claude-code": {Parse: parseClaudeCodeSignIn, AcceptsPaste: true},
 	"codex":       {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},
 	"grok":        {Argv: grokDeviceArgv, Parse: parseGrokSignIn},
@@ -234,8 +238,8 @@ func (a *Runtime) PrivateRuntimeLoginState(id string) (SignInState, error) {
 	return login.signIn.snapshot(), nil
 }
 
-// RespondPrivateRuntimeLogin sends the code the owner pasted to a login that
-// reads one from stdin. The pane calls it only when AcceptsPaste is set.
+// RespondPrivateRuntimeLogin sends the owner's response through the paste
+// handler or stdin. The pane calls it only when AcceptsPaste is set.
 func (a *Runtime) RespondPrivateRuntimeLogin(id, text string) error {
 	login := a.findPrivateLogin(id)
 	if login == nil {
@@ -279,9 +283,19 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 	// The child has no terminal, so it starts its own process group and a
 	// cancel kills the whole group.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if spec.GracefulStop {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	}
+	var stopTimer *time.Timer
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {
 			return nil
+		}
+		if spec.GracefulStop {
+			// SIGTERM reaches the helper's context so it can join ACP before
+			// exiting. A stuck helper loses all groups in its private session.
+			stopTimer = time.AfterFunc(time.Second, func() { terminalsvc.KillSessionGroups(cmd.Process.Pid) })
+			return cmd.Process.Signal(syscall.SIGTERM)
 		}
 		return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
@@ -311,14 +325,23 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 	login := &privateRuntimeLogin{flow: flow, signIn: signIn}
 	a.privateLogins[id] = login
 	a.privateLoginMu.Unlock()
-	go a.watchPrivateSignIn(ctx, login, spec, cmd, out, writer, cancel)
+	go func() {
+		a.watchPrivateSignIn(ctx, login, spec, cmd, out, writer, cancel, func() {
+			if stopTimer != nil {
+				stopTimer.Stop()
+			}
+			if spec.GracefulStop {
+				terminalsvc.KillSessionGroups(cmd.Process.Pid)
+			}
+		})
+	}()
 	state := signIn.snapshot()
 	return PrivateLogin{AccountID: id, Warning: flow.Warning, SignIn: &state}, nil
 }
 
 // watchPrivateSignIn parses the login output and settles the flow when the
 // child exits. It never returns output beyond a short failure message.
-func (a *Runtime) watchPrivateSignIn(ctx context.Context, login *privateRuntimeLogin, spec signInSpec, cmd *exec.Cmd, out *io.PipeReader, writer *io.PipeWriter, cancel context.CancelFunc) {
+func (a *Runtime) watchPrivateSignIn(ctx context.Context, login *privateRuntimeLogin, spec signInSpec, cmd *exec.Cmd, out *io.PipeReader, writer *io.PipeWriter, cancel context.CancelFunc, stopped func()) {
 	signIn := login.signIn
 	defer cancel()
 	defer close(signIn.done)
@@ -336,6 +359,7 @@ func (a *Runtime) watchPrivateSignIn(ctx context.Context, login *privateRuntimeL
 		}
 	}()
 	err := cmd.Wait()
+	stopped()
 	// Wait copies all output first, so closing the writer ends the scan.
 	_ = writer.Close()
 	<-read
