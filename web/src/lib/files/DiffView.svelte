@@ -2,6 +2,7 @@
   // One file's unified diff: hunk headers, old and new line numbers, and
   // added or removed lines on a sage or coral wash. Long lines wrap unless
   // the reader turned wrapping off.
+  import { tick } from 'svelte'
   import { code } from './codeprefs.svelte.js'
   // With oncomment, a + shows on each line and opens a comment box under it.
   import { commentLine } from './diffComments.ts'
@@ -9,12 +10,37 @@
   let picked = $state('') // the tapped line; on touch screens only it shows the +
   let boxAt = $state('') // "hunk:line" of the open comment box
   let draft = $state('')
-  function open(key) { boxAt = key; draft = '' }
+  let field = $state()
+  let origin = null
+  async function open(key, event) {
+    origin = event.currentTarget
+    boxAt = key
+    draft = ''
+    await tick()
+    if (boxAt === key) field?.focus()
+  }
+  function close() {
+    const button = origin
+    boxAt = ''
+    tick().then(() => { if (!boxAt && button?.isConnected) button.focus({ preventScroll: true }) })
+  }
+  function keydown(event, line) {
+    if (event.isComposing) return
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      close()
+    } else if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault()
+      event.stopPropagation()
+      add(line)
+    }
+  }
   function add(l) {
     const text = draft.trim()
     if (!text) return
     oncomment({ file: file.path, line: commentLine(l), quote: l.t + l.text, text })
-    boxAt = ''
+    close()
   }
 </script>
 
@@ -31,16 +57,16 @@
         <!-- Tapping a line only selects it, so the + can show on touch screens; the + button is the keyboard path. -->
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <div class="ln {key === picked ? 'sel ' : ''}{l.t === '+' ? 'add' : l.t === '-' ? 'del' : l.t === '\\' ? 'eol' : ''}" role="row" onclick={() => (picked = key)}>
-          {#if oncomment && l.t !== '\\'}<button class="addc" aria-label="Comment on line {commentLine(l)}" onclick={() => open(key)}>+</button>{/if}
+          {#if oncomment && l.t !== '\\'}<button class="addc" aria-label="Comment on line {commentLine(l)}" onclick={(event) => open(key, event)}>+</button>{/if}
           <span class="n" aria-hidden="true">{l.a || ''}</span>
           <span class="n" aria-hidden="true">{l.b || ''}</span>
           <span class="s" aria-hidden="true">{l.t === '\\' ? '' : l.t}</span>
           <span class="t">{l.text}</span>
         </div>
         {#if boxAt === key}
-          <div class="box">
-            <textarea rows="3" bind:value={draft} placeholder="Comment for the author" aria-label="Comment on line {commentLine(l)}"></textarea>
-            <div class="bar"><button class="go" disabled={!draft.trim()} onclick={() => add(l)}>Add comment</button><button class="cx" onclick={() => (boxAt = '')}>Cancel</button></div>
+          <div class="box" data-esc>
+            <textarea rows="3" bind:this={field} bind:value={draft} onkeydown={(event) => keydown(event, l)} placeholder="Comment for the author" aria-label="Comment on line {commentLine(l)}"></textarea>
+            <div class="bar"><button class="go" disabled={!draft.trim()} onclick={() => add(l)}>Add comment</button><button class="cx" onclick={close}>Cancel</button><span class="hint">Ctrl/⌘+Enter to add</span></div>
           </div>
         {/if}
       {/each}
@@ -74,7 +100,8 @@
   .box { padding: 8px 12px 10px 62px; background: var(--side); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); font-family: var(--sans, inherit); min-width: 0; }
   .box textarea { width: 100%; font: inherit; font-size: 13.5px; background: var(--rail); border: 1px solid var(--line); border-radius: 6px; color: var(--ink); padding: 6px 8px; resize: vertical; }
   .box textarea:focus { border-color: var(--iris-edge); outline: none; }
-  .bar { display: flex; gap: 6px; margin-top: 6px; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+  .hint { color: var(--faint); font-size: var(--t-cap); }
   .go { background: var(--gold); color: #18161d; font-size: 13px; font-weight: 600; border-radius: 6px; padding: 5px 12px; }
   .cx { font-size: 12.5px; font-weight: 600; color: var(--ink-2); border-radius: 6px; padding: 4px 10px; background: var(--raise); }
   .go:disabled { opacity: 0.5; }
