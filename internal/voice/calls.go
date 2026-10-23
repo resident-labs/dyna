@@ -68,7 +68,8 @@ type CallStatus struct {
 	Room   string `json:"room,omitempty"`
 	// StartedAt (unix ms) is when the call started, before any of its
 	// posts. The app shows the call's voice-call posts from then on.
-	StartedAt int64 `json:"startedAt,omitempty"`
+	StartedAt    int64  `json:"startedAt,omitempty"`
+	ResumeCursor string `json:"resumeCursor,omitempty"`
 	// Error says why the last call ended, when it failed.
 	Error string `json:"error,omitempty"`
 }
@@ -83,23 +84,28 @@ func (e *BusyError) Error() string {
 // Start starts the call for room ref and returns once it is connected.
 // A start for the room whose call is live returns its status.
 func (c *Calls) Start(ref string) (CallStatus, error) {
-	return c.startOrResume(ref, 0, 0)
+	return c.startOrResume(ref, 0, "")
 }
 
 // Resume reconnects a lost call while retaining its original transcript window.
-// replayCutoff is the last connected time, in Unix milliseconds.
-func (c *Calls) Resume(ref string, startedAt, replayCutoff int64) (CallStatus, error) {
+// cursor is the last update whose playback started, issued by this service.
+func (c *Calls) Resume(ref string, startedAt int64, cursor string) (CallStatus, error) {
 	now := time.Now().UnixMilli()
-	if startedAt <= 0 || replayCutoff < startedAt || replayCutoff > now || startedAt > now {
+	if startedAt <= 0 || startedAt > now {
 		return CallStatus{}, errors.New("invalid voice resume timestamps")
 	}
-	return c.startOrResume(ref, startedAt, replayCutoff)
+	return c.startOrResume(ref, startedAt, cursor)
 }
 
-func (c *Calls) startOrResume(ref string, startedAt, replayCutoff int64) (CallStatus, error) {
+func (c *Calls) startOrResume(ref string, startedAt int64, cursor string) (CallStatus, error) {
 	link, err := c.Open(ref)
 	if err != nil {
 		return CallStatus{}, err
+	}
+	if cursor != "" {
+		if _, err := link.svc.Rooms.Message(link.ID(), cursor); err != nil {
+			return CallStatus{}, errors.New("invalid voice resume cursor")
+		}
 	}
 	c.mu.Lock()
 	c.reapLocked()
@@ -123,7 +129,7 @@ func (c *Calls) startOrResume(ref string, startedAt, replayCutoff int64) (CallSt
 	link.engineContext = c.Ctx
 	if startedAt > 0 {
 		started = time.UnixMilli(startedAt)
-		link.resumeStarted, link.replayCutoff = started, time.UnixMilli(replayCutoff)
+		link.resumeStarted, link.replayCursor = started, cursor
 	}
 	lc := &liveCall{link: link, started: started, stop: stop, exited: make(chan struct{})}
 	c.live, c.last = lc, ""
@@ -179,7 +185,7 @@ func (c *Calls) statusLocked() CallStatus {
 		return CallStatus{Available: why == "", Unavailable: why, Error: c.last}
 	}
 	lc := c.live
-	return CallStatus{Available: true, Live: lc.sess != nil && !lc.stopping, RoomID: lc.link.ID(), Room: lc.link.Name(), StartedAt: lc.started.UnixMilli()}
+	return CallStatus{Available: true, Live: lc.sess != nil && !lc.stopping, RoomID: lc.link.ID(), Room: lc.link.Name(), StartedAt: lc.started.UnixMilli(), ResumeCursor: lc.link.replayCursor}
 }
 
 // voiceReady checks, without starting anything, what a call needs first:
