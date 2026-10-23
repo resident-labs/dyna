@@ -781,16 +781,16 @@ func TestMergeQueueItemsCarryTheMainCIResult(t *testing.T) {
 	r := &Record{Key: "github.com/owner/repo#1", ChangeID: "github.com/owner/repo#1", Kind: "github", Host: "github.com", Repo: "owner/repo", Number: 1,
 		RoomID: "room_a", Head: "h1", BaseRef: "main", DefaultBranch: "main", Mergeable: &yes, State: "open", Watching: true, CI: "pending"}
 	for verdict, want := range map[string]MainCI{
-		"passed": {State: "passed", Head: "main-head", Reason: "GitHub CI passed on main at main-head"},
-		"failed": {State: "failed", Head: "main-head", Reason: "GitHub CI failed on main at main-head"},
-		"":       {State: "pending", Head: "main-head", Reason: "Waiting for completed GitHub CI on main at main-head"},
+		"passed": {State: "passed", Head: "main-head", Wait: &MainWait{Kind: MainWaitPassed, Base: "main"}},
+		"failed": {State: "failed", Head: "main-head", Wait: &MainWait{Kind: MainWaitFailed, Base: "main"}},
+		"":       {State: "pending", Head: "main-head", Wait: &MainWait{Kind: MainWaitPending, Base: "main"}},
 	} {
 		st := State{Records: map[string]*Record{r.Key: r}, RepositoryFacts: map[string]state.RepositoryFacts{
 			"github.com/owner/repo": {DefaultBranch: "main", Head: "main-head", Verdict: verdict, CheckedAt: time.Now()},
 		}}
 		items := mergeQueue(st)
 		// A PR that is not ready still carries the result: the Checks tab shows it for every PR.
-		if len(items) != 1 || items[0].State != "review" || items[0].Main == nil || *items[0].Main != want {
+		if len(items) != 1 || items[0].State != "review" || items[0].Main == nil || !reflect.DeepEqual(*items[0].Main, want) {
 			t.Fatalf("verdict %q: items=%+v want main %+v", verdict, items, want)
 		}
 	}
@@ -814,7 +814,7 @@ func TestPausedMergeStatusExplainsMainWithoutCI(t *testing.T) {
 			if err != nil || len(rows) != 1 {
 				t.Fatalf("rows=%+v err=%v", rows, err)
 			}
-			if rows[0].Main == nil || rows[0].Main.State != "paused" || rows[0].Main.Reason != "merging paused in this room" {
+			if rows[0].Main == nil || rows[0].Main.State != "paused" || rows[0].Main.Wait == nil || rows[0].Main.Wait.Kind != MainWaitPaused {
 				t.Fatalf("paused main field=%+v", rows[0].Main)
 			}
 		})

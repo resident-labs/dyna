@@ -1,6 +1,6 @@
 // The room's open PR list and saved merge progress. Queue order comes from
 // the merge service, never from inferred readiness in the browser.
-import type { MergeControlStatus, MergeQueueItem, MergeTrialStatus } from '../api/change.ts'
+import type { MainWaitKind, MergeControlStatus, MergeQueueItem, MergeTrialStatus } from '../api/change.ts'
 import { checkSummary, isLocal, prTracks, type Meta } from './pr.ts'
 import { isDone, type Row } from './prlist.ts'
 
@@ -53,8 +53,44 @@ export function trialProgress(trial: MergeTrialStatus, status: MergeControlStatu
   return { label: labels[trial.phase] ?? trial.phase, tone: ['failed', 'awaiting-root'].includes(trial.phase) ? 'coral' : trial.phase === 'published' ? 'sage' : 'gold', nodes: nodes.join(', '), total: summary.total, completed, passed: summary.passed.length, failed: summary.failed.length }
 }
 
-export function waitingReason(status: MergeControlStatus): string {
-  if (status.paused) return status.reason || 'Merging is paused.'
-  const main = status.queue?.find((q) => q.main && q.main.state !== 'passed')?.main
-  return main?.reason || ''
+// WaitingReason says why the queue waits and which PRs it holds, as facts.
+// The strip words the kind and shortens the commit; no sentence and no full
+// commit reach the screen.
+export interface WaitingReason {
+  kind: MainWaitKind
+  base: string
+  sha: string
+  prs: number[]
+}
+
+// waitingReason names the main CI fact that holds the queue, and the PRs it
+// holds. A paused room has its own block, so it has no waiting line.
+export function waitingReason(status: MergeControlStatus): WaitingReason | null {
+  if (status.paused) return null
+  const waiting = (status.queue ?? []).filter((q) => q.main && q.main.state !== 'passed')
+  const main = waiting[0]?.main
+  if (!main?.wait) return null
+  const prs = [...new Set(waiting.flatMap((q) => { const n = changeNumber(q.changeId); return n === null ? [] : [n] }))]
+  return { kind: main.wait.kind, base: main.wait.base ?? '', sha: main.head ?? '', prs }
+}
+
+// waitingWords words a wait kind. It names the fact, never a stored sentence.
+export function waitingWords(reason: WaitingReason): string {
+  switch (reason.kind) {
+    case 'no-push-ci': return 'No default-branch CI; the PR checks decide'
+    case 'no-head': return 'Default branch CI has not reported'
+    case 'failed': return 'Default branch CI failed'
+    case 'passed': return 'Default branch CI passed'
+    case 'paused': return 'Merging is paused'
+    default: return 'Waiting for default branch CI'
+  }
+}
+
+// changeNumber reads the PR number of a change key such as
+// "github.com/o/r#242". A local change has none.
+function changeNumber(changeId: string): number | null {
+  const at = changeId.lastIndexOf('#')
+  if (at < 0) return null
+  const n = Number(changeId.slice(at + 1))
+  return Number.isInteger(n) && n > 0 ? n : null
 }

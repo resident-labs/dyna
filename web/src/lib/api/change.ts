@@ -234,11 +234,21 @@ export interface ReviewerStatus {
   recent: { changeId?: string; pr: number; verdict: string; at: string }[] | null
 }
 
+// MainWaitKind is watch.MainWaitKind: why the queue waits on main's CI.
+export type MainWaitKind = 'no-push-ci' | 'no-head' | 'passed' | 'failed' | 'pending' | 'paused'
+
+// MainWait is watch.MainWait: why the queue waits, as facts. The UI words the
+// kind and shortens the commit, so no service sentence reaches the screen.
+export interface MainWait {
+  kind: MainWaitKind
+  base?: string
+}
+
 // MainCI is watch.MainCI: the state of main's CI between batches.
 export interface MainCI {
   state: string
   head: string
-  reason: string
+  wait?: MainWait
 }
 
 // MergeTrialStack is state.MergeTrialStack.

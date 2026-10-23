@@ -40,20 +40,21 @@ test('Checks renders saved failure output as plain text', async () => {
   assert.match(html, /Open the full log/)
 })
 
-test('main CI without a head shows its reason without a revision phrase', async () => {
+test('main CI without a head names no revision', async () => {
   const render = await load()
-  for (const state of ['pending', 'failed']) {
-    const html = render({ main: { state, head: '', reason: 'waiting for saved main CI evidence.' } })
-    assert.match(html, /Waiting for saved main CI evidence\./)
-    assert.doesNotMatch(html, /(?:running|failed) at/)
-  }
+  const pending = render({ main: { state: 'pending', head: '', wait: { kind: 'no-head' } } })
+  assert.match(pending, /Waiting for main branch CI; the batch trial must pass/)
+  assert.doesNotMatch(pending, /(?:running|failed) at/)
+  const failed = render({ main: { state: 'failed', head: '', wait: { kind: 'no-head' } } })
+  assert.match(failed, /Waiting for main branch CI; the batch trial must pass/)
+  assert.doesNotMatch(failed, /failed at/)
 })
 
 test('paused room merging has a warning row even when PR checks passed', async () => {
   const render = await load()
   const html = render({
     checks: [{ name: 'CI / unit', state: 'success' }],
-    main: { state: 'paused', head: '', reason: 'merging paused in this room' },
+    main: { state: 'paused', head: '', wait: { kind: 'paused' } },
   })
   assert.match(html, /Merging paused in this room/)
   assert.match(html, /class="cdot gold/)
