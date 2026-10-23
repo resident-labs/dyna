@@ -223,3 +223,70 @@ func TestMergeFailureReportReadsLocalCISuiteFailures(t *testing.T) {
 		t.Errorf("report still calls the failure unknown:\n%s", report)
 	}
 }
+
+// svelte-check prints a bare location and the message on the next line, with an
+// absolute workspace path. The report must keep the message and point the
+// culprit at the changed web/src file.
+func TestMergeFailureReportKeepsSvelteCheckEvidence(t *testing.T) {
+	ctx := t.Context()
+	f := mergeTrialEnv(t, 1)
+	f.branch, f.ci, f.conclusion = "dyna/merge-trial/1", "completed", "failure"
+	repoDir := filepath.Join(t.TempDir(), "repo")
+	if raw, err := exec.Command("git", "init", "--quiet", repoDir).CombinedOutput(); err != nil {
+		t.Fatalf("init repository: %v: %s", err, raw)
+	}
+	registry := localci.Store{DataDir: t.TempDir()}
+	f.e.s.LocalCIRegistry = registry
+	repo, err := localci.CanonicalRepo(ctx, repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := "/workspace/web/src/App.svelte:12:3\nError: Type 'Issue[]' is not assignable to type 'RoomIssue[]'.\n"
+	if err := registry.SaveResult(ctx, localci.Result{Repo: repo, SHA: f.head, Node: "worker", Status: "failed", Checks: []localci.SuiteResult{
+		{CheckName: "frontend-check", Status: "failed", Error: "exit status 1", LogTail: output},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var member Record
+	b := state.MergeTrial{Branch: f.branch, Base: f.main, Head: f.head, DefaultBranch: "main"}
+	if err := f.e.s.Store.update(func(st *State) error {
+		r := st.Records["github.com/owner/repo#1"]
+		r.RepoPath = repoDir
+		b.Changes = append(b.Changes, state.MergeTrialChange{Key: r.Key, Head: f.head})
+		member = *r
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run := f.e.s.GH.run
+	f.e.s.GH.run = func(ctx context.Context, cmd *exec.Cmd) error {
+		if filepath.Base(cmd.Path) != "git" {
+			return run(ctx, cmd)
+		}
+		args := cmd.Args[1:]
+		if strings.HasPrefix(args[0], "--work-tree=") {
+			base := strings.TrimPrefix(args[0], "--work-tree=")
+			if err := os.MkdirAll(filepath.Join(base, "web", "src"), 0700); err != nil {
+				return err
+			}
+			return os.WriteFile(filepath.Join(base, "go.mod"), []byte("module dyna-agent\n"), 0600)
+		}
+		if args[0] == "diff" {
+			file := "web/src/App.svelte"
+			fmt.Fprintf(cmd.Stdout, "diff --git a/%s b/%s\n--- a/%s\n+++ b/%s\n", file, file, file, file)
+		}
+		return nil
+	}
+	report, err := f.e.s.mergeFailureReport(ctx, member, b, trialCI{Status: "failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"Local CI failures:", "frontend-check", "web/src/App.svelte:12:3", "Type 'Issue[]' is not assignable to type 'RoomIssue[]'", "#1"} {
+		if !strings.Contains(report, want) {
+			t.Errorf("missing %q in report:\n%s", want, report)
+		}
+	}
+	if strings.Contains(report, "/workspace/") {
+		t.Errorf("report kept the CI workspace prefix:\n%s", report)
+	}
+}
