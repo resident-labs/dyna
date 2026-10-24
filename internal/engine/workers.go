@@ -90,6 +90,18 @@ func (s *workerSignals) seatDeliveries(ev roomsvc.Event) map[string]room.Deliver
 	return seats
 }
 
+func (s *workerSignals) seatAddress(ev roomsvc.Event) string {
+	if s.rooms == nil || ev.Kind != "posts" || ev.RoomID == "" {
+		return ""
+	}
+	rec, err := s.rooms.Resolve(ev.RoomID)
+	if err != nil {
+		log.Printf("sessions: resolve room %s for its seat address: %v", ev.RoomID, err)
+		return ""
+	}
+	return rec.Name
+}
+
 func (s *workerSignals) wake(ev roomsvc.Event) {
 	if ((ev.Kind == "prs" || ev.Kind == "goals") && ev.WorkerWake) || ev.Kind == "room.resumed" {
 		wakeWorker(s.channels["merges"])
@@ -97,9 +109,12 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 	if ev.Kind == "goals" && ev.WorkerWake {
 		wakeWorker(s.channels["prs"])
 	}
-	// The room's root seat takes a post when its stored delivery row wakes it;
-	// every other recipient takes the post by its address.
+	// The room's root seat takes a post when its stored delivery row wakes it,
+	// whatever address named it; every other recipient is a session, taken by its
+	// stored row or its address. The room's own address names the seat, so a
+	// recipient that carries it is no session target.
 	seats := s.seatDeliveries(ev)
+	seatAddr := s.seatAddress(ev)
 	s.mu.Lock()
 	if s.sessions.targets == nil {
 		s.sessions.targets = map[string]bool{}
@@ -113,23 +128,24 @@ func (s *workerSignals) wake(ev roomsvc.Event) {
 	switch ev.Kind {
 	case "posts":
 		add := func(address string, ids map[string]string) {
+			if address == seatAddr {
+				return
+			}
 			if id := ids[address]; id != "" {
 				s.sessions.targets[id] = true
-			} else if strings.Contains(address, ":") {
-				s.sessions.targets[address] = true
+				return
 			}
+			s.sessions.targets[address] = true
 		}
 		// The room's root seat takes a post when its stored delivery row wakes
-		// it; every other recipient takes the post by its address.
+		// it, which room.RootContext wrote from the post, not from its address.
 		for _, post := range ev.Posts {
 			if post.Wake {
-				seat := seats[post.Message.ID]
+				if seats[post.Message.ID].Mode == room.DeliveryWake {
+					s.sessions.roots[ev.RoomID] = true
+				}
 				for _, address := range post.To {
-					if !strings.Contains(address, ":") && seat.Mode == room.DeliveryWake {
-						s.sessions.roots[ev.RoomID] = true
-					} else {
-						add(address, post.SessionIDs)
-					}
+					add(address, post.SessionIDs)
 				}
 			}
 			// Bound turn-end senders recover queued input and wrap-up work.
