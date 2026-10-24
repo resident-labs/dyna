@@ -39,7 +39,7 @@ test('the session view has a composer by default and none when readOnly', async 
 })
 
 test('a read-only transcript cannot remove a queued message', async () => {
-  const queue = [{ id: 'q1', from: 'owner', human: true, text: 'wait for me', ts: Date.now(), state: 'waiting', cancellable: true }]
+  const queue = [{ id: 'q1', from: 'owner', human: true, text: 'wait for me', ts: Date.now(), state: 'waiting' as const, cancellable: true }]
   const props = { queue, onunqueue: () => {}, ondismiss: () => {} }
   assert.match(await render(props), /wait for me[\s\S]*<button[^>]*aria-label="(Dismiss this pending|Remove this waiting)/)
   assert.doesNotMatch(await render({ ...props, readOnly: true }), /aria-label="(Dismiss this pending|Remove this waiting)/)

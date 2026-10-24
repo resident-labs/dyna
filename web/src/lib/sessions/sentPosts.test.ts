@@ -42,13 +42,13 @@ test('only your newest read message says read; pending ones keep their state', (
 })
 
 test('identical posts in one turn keep independent receipts and keys', () => {
-  const repeated = queue.slice(0, 2).map((q, i) => ({ ...q, text: 'Same instruction', state: i ? 'waiting' : 'delivering', turn: i ? 0 : 1 }))
+  const repeated: Receipt[] = queue.slice(0, 2).map((q, i): Receipt => ({ ...q, text: 'Same instruction', state: i ? 'waiting' : 'delivering', turn: i ? 0 : 1 }))
   const turns: DmTurn[] = [{ ...turn, items: [{ kind: 'steering', postId: need(repeated[0]).id, delivered: true, from: 'alpha (human)', text: 'Same instruction', ts: ts(5) }] }]
   const before = dmView({ member, turns: [], posts: [] }, room, {}, repeated).rows
   const after = dmView({ member, turns, posts: [] }, room, {}, repeated).rows.filter(isKind('message'))
   assert.deepEqual(after.map((r) => r.key), before.map((r) => r.key))
   assert.deepEqual(after.map((r) => r.delivery), ['read', 'queued'])
-  const both = repeated.map((q) => ({ ...q, state: 'delivering', turn: 1 }))
+  const both: Receipt[] = repeated.map((q) => ({ ...q, state: 'delivering', turn: 1 }))
   const firstTurn = need(turns[0])
   firstTurn.items?.push({ ...need(firstTurn.items?.[0]), postId: need(repeated[1]).id, ts: ts(6) })
   const read = dmView({ member, turns, posts: [] }, room, {}, both).rows.filter(isKind('message'))
@@ -112,7 +112,7 @@ test('incoming peer receipts preserve thread history and counts, and stay in the
 
 test('owner text queue entries retain human identity without a stored transcript post', () => {
   for (const human of [true, false]) {
-    for (const state of ['waiting', 'delivering']) {
+    for (const state of ['waiting', 'delivering'] as const) {
       const q: Receipt = { ...need(queue[0]), human, state }
       const rows = dmView({ member, turns: [], posts: [] }, room, {}, [q]).rows
       assert.equal(rows.length, 1)

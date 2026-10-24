@@ -42,7 +42,7 @@ test('consecutive posts share a chip; a later post starts a new chip at the bott
 test('another agent\'s post stays in its thread through queued, steering, and prompt delivery', () => {
   const peer = 'room:peer'
   const p = post('p1', peer, [address], 10)
-  const q = (state: string): Receipt => ({ id: 'p1', from: peer, text: 'p1', ts: ts(10), state })
+  const q = (state: Receipt['state']): Receipt => ({ id: 'p1', from: peer, text: 'p1', ts: ts(10), state })
   const input = (kind: string, delivered: boolean): DmItem => ({ kind, postId: 'p1', from: peer, text: 'p1', ts: ts(12), delivered })
   const cases: Record<string, [DmSession, Receipt[]]> = {
     queued: [{ address, turns: [{ n: 1, started: ts(0) }], posts: [p] }, [q('waiting')]],
@@ -59,14 +59,14 @@ test('another agent\'s post stays in its thread through queued, steering, and pr
 })
 test('peer inputs without stored posts keep each post ID and prefer receipt text and time', () => {
   const peer = 'room:peer'
-  const receipt = (id: string, text: string, s: number, state: string): Receipt => ({ id, from: peer, text, ts: ts(s), state })
+  const receipt = (id: string, text: string, s: number, state: Receipt['state']): Receipt => ({ id, from: peer, text, ts: ts(s), state })
   const steer = (postId: string, text: string, s: number): DmItem => ({ kind: 'steering', postId, from: peer, text, ts: ts(s), delivered: true })
   const texts = (session: DmSession, queue: Receipt[]) => need(dmView({ address, posts: [], ...session }, room, {}, queue).threads.find((t) => t.key === peer)).posts.map((p) => [p.id, p.text, p.ts])
   assert.deepEqual(texts({ turns: [] }, [receipt('p1', 'Please check', 1, 'waiting'), receipt('p2', 'Please check again', 2, 'waiting')]),
     [['p1', 'Please check', ts(1)], ['p2', 'Please check again', ts(2)]])
   assert.deepEqual(texts({ turns: [{ n: 1, started: ts(0), items: [steer('p1', 'Same words', 3), steer('p2', 'Same words', 4)] }] }, []),
     [['p1', 'Same words', ts(3)], ['p2', 'Same words', ts(4)]])
-  for (const state of ['delivering', 'delivered']) {
+  for (const state of ['delivering', 'delivered'] as const) {
     assert.deepEqual(texts({ turns: [{ n: 1, started: ts(0), items: [steer('p1', 'Please ch…', 9)] }] }, [receipt('p1', 'Please check the full log', 5, state)]),
       [['p1', 'Please check the full log', ts(5)]], state)
   }
@@ -82,7 +82,7 @@ test('thread posts carry their delivery state for the thread panel', () => {
   const peer = 'room:peer'
   const session = { address, posts: [post('p1', peer, [address], 1), post('p2', peer, [address], 2)],
     turns: [{ n: 1, started: ts(0), items: [{ kind: 'steering', postId: 'p1', from: peer, text: 'p1', ts: ts(3), delivered: true }] }] }
-  const queue = [{ id: 'p2', from: peer, text: 'p2', ts: ts(2), state: 'waiting' }, { id: 'p3', from: peer, text: 'p3', ts: ts(4), state: 'delivering' }]
+  const queue: Receipt[] = [{ id: 'p2', from: peer, text: 'p2', ts: ts(2), state: 'waiting' }, { id: 'p3', from: peer, text: 'p3', ts: ts(4), state: 'delivering' }]
   const thread = need(dmView(session, room, {}, queue).threads.find((t) => t.key === peer))
   assert.deepEqual(thread.posts.map((p) => [p.id, p.delivery, p.pending?.id]), [['p1', 'read', undefined], ['p2', 'queued', 'p2'], ['p3', 'delivered', 'p3']])
   assert.equal(need(session.posts[1]).delivery, undefined, 'stored posts stay unchanged')
@@ -387,7 +387,7 @@ test('a queued check-in draws its card, not a bubble with its raw text', () => {
 test("Voice's request to root is one voice row, never a thread", () => {
   const voice = `${room.name}:voice-call`
   const p = { ...post('v1', voice, [room.name], 10), source: 'voice', text: 'Check CI on PR 7.' }
-  const q = (state: string): Receipt => ({ id: 'v1', from: voice, text: 'Check CI on PR 7.', ts: ts(10), state })
+  const q = (state: Receipt['state']): Receipt => ({ id: 'v1', from: voice, text: 'Check CI on PR 7.', ts: ts(10), state })
   const input = (kind: string): DmItem => ({ kind, postId: 'v1', from: voice, text: 'Check CI on PR 7.', ts: ts(12), delivered: true })
   const cases: Record<string, [DmSession, Receipt[], string | undefined]> = {
     queued: [{ address, turns: [{ n: 1, started: ts(0) }], posts: [p] }, [q('waiting')], 'queued'],

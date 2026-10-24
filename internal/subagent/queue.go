@@ -7,11 +7,47 @@ import (
 	"dyna-agent/internal/room"
 )
 
+// QueueState is how far one queued post got toward its target session.
+type QueueState string
+
+const (
+	QueueWaiting    QueueState = "waiting"
+	QueueDelivering QueueState = "delivering"
+	QueueDelivered  QueueState = "delivered"
+	QueueCancelled  QueueState = "cancelled"
+	QueueDismissed  QueueState = "dismissed"
+)
+
+// queueFacts are the stored delivery and steering facts that project one queue
+// state. Terminal delivery facts take precedence over steering receipts.
+type queueFacts struct {
+	dispatchedTurn int
+	claimedTurn    int
+	deliveredTurn  int
+	cancelled      bool
+	dismissed      bool
+}
+
+func queueStateFromFacts(facts queueFacts) QueueState {
+	switch {
+	case facts.dismissed:
+		return QueueDismissed
+	case facts.cancelled:
+		return QueueCancelled
+	case facts.deliveredTurn > 0:
+		return QueueDelivered
+	case facts.dispatchedTurn > 0 || facts.claimedTurn > 0:
+		return QueueDelivering
+	default:
+		return QueueWaiting
+	}
+}
+
 type QueueOrigin struct {
-	Session         string `json:"session"`
-	Address         string `json:"address"`
-	State           string `json:"state"`
-	TargetDelivered bool   `json:"targetDelivered,omitempty"`
+	Session         string     `json:"session"`
+	Address         string     `json:"address"`
+	State           QueueState `json:"state"`
+	TargetDelivered bool       `json:"targetDelivered,omitempty"`
 }
 type QueueItem struct {
 	Human       bool          `json:"human,omitempty"`
@@ -21,7 +57,7 @@ type QueueItem struct {
 	From        string        `json:"from"`
 	TS          int64         `json:"ts"`
 	Turn        int           `json:"turn"`
-	State       string        `json:"state"`
+	State       QueueState    `json:"state"`
 	Cancellable bool          `json:"cancellable"`
 }
 
@@ -62,21 +98,25 @@ func (s *Store) SessionQueue(rooms *room.Store, ref string) ([]QueueItem, error)
 			if msg.TS < info.Created.UnixMilli() && dispatched[msg.ID] == 0 && claims.claimedTurn[msg.ID] == 0 {
 				continue
 			}
-			item := QueueItem{ID: msg.ID, Text: msg.Text, From: msg.From, Human: msg.Human, TS: msg.TS, State: "waiting", Cancellable: msg.From == info.Room}
-			if n := dispatched[msg.ID]; n > 0 {
-				item.State, item.Turn, item.Cancellable = "delivering", n, false
+			facts := queueFacts{
+				dispatchedTurn: dispatched[msg.ID],
+				claimedTurn:    claims.claimedTurn[msg.ID],
+				deliveredTurn:  delivered[msg.ID],
+				cancelled:      claims.cancelled[msg.ID],
+				dismissed:      claims.dismissed[msg.ID],
 			}
-			if n := claims.claimedTurn[msg.ID]; n > 0 {
-				item.State, item.Turn, item.Cancellable = "delivering", n, false
+			item := QueueItem{ID: msg.ID, Text: msg.Text, From: msg.From, Human: msg.Human, TS: msg.TS, State: queueStateFromFacts(facts), Cancellable: msg.From == info.Room}
+			if facts.dispatchedTurn > 0 {
+				item.Turn, item.Cancellable = facts.dispatchedTurn, false
 			}
-			if n := delivered[msg.ID]; n > 0 {
-				item.State, item.Turn, item.Cancellable = "delivered", n, false
+			if facts.claimedTurn > 0 {
+				item.Turn, item.Cancellable = facts.claimedTurn, false
 			}
-			if claims.cancelled[msg.ID] {
-				item.State, item.Cancellable = "cancelled", false
+			if facts.deliveredTurn > 0 {
+				item.Turn, item.Cancellable = facts.deliveredTurn, false
 			}
-			if claims.dismissed[msg.ID] {
-				item.State, item.Cancellable = "dismissed", false
+			if facts.cancelled || facts.dismissed {
+				item.Cancellable = false
 			}
 			out = append(out, item)
 		}
@@ -127,10 +167,10 @@ func (s *Store) SessionQueue(rooms *room.Store, ref string) ([]QueueItem, error)
 				out = append(out, copy)
 			}
 			if received[item.ID] {
-				out[at].State = "delivered"
+				out[at].State = QueueDelivered
 				out[at].Cancellable = false
-			} else if item.State == "waiting" || item.State == "delivering" {
-				out[at].State = "waiting"
+			} else if item.State == QueueWaiting || item.State == QueueDelivering {
+				out[at].State = QueueWaiting
 			}
 			origin := QueueOrigin{Session: in.Session, Address: in.Address, State: item.State, TargetDelivered: received[item.ID]}
 			found := false
@@ -146,7 +186,7 @@ func (s *Store) SessionQueue(rooms *room.Store, ref string) ([]QueueItem, error)
 	}
 	for i := range out {
 		if dismissed[out[i].ID] {
-			out[i].State, out[i].Cancellable = "dismissed", false
+			out[i].State, out[i].Cancellable = QueueDismissed, false
 		}
 	}
 	return out, nil
