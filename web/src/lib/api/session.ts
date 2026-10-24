@@ -199,11 +199,54 @@ export interface ConsolidationState {
   charter?: string
 }
 
+export type CloseReason = 'responsibilities' | 'goal-needs-agent'
+export type CloseAction = 'retry' | 'force-close'
+
+// Responsibility is sessionclose.Responsibility from the engine.
+export interface Responsibility {
+  kind: string
+  id: string
+  text: string
+}
+
+// CloseRecovery is sessionclose.Recovery from the engine.
+export interface CloseRecovery {
+  reason: CloseReason
+  actions: CloseAction[]
+  items: Responsibility[]
+}
+
+const isCloseReason = (value: unknown): value is CloseReason => value === 'responsibilities' || value === 'goal-needs-agent'
+const isCloseAction = (value: unknown): value is CloseAction => value === 'retry' || value === 'force-close'
+const isResponsibility = (value: unknown): value is Responsibility => {
+  if (typeof value !== 'object' || value === null) return false
+  return typeof Reflect.get(value, 'kind') === 'string' && typeof Reflect.get(value, 'id') === 'string' && typeof Reflect.get(value, 'text') === 'string'
+}
+
+// asCloseRecovery validates a server recovery before it controls any buttons.
+export function asCloseRecovery(value: unknown): CloseRecovery | null {
+  if (typeof value !== 'object' || value === null) return null
+  const reason: unknown = Reflect.get(value, 'reason')
+  const actions: unknown = Reflect.get(value, 'actions')
+  const items: unknown = Reflect.get(value, 'items')
+  if (!isCloseReason(reason) || !Array.isArray(actions) || !actions.every(isCloseAction) || !Array.isArray(items) || !items.every(isResponsibility)) return null
+  return { reason, actions, items }
+}
+
+// closeRecoveryOf reads both a thrown API error and a bulk result row.
+export function closeRecoveryOf(value: unknown): CloseRecovery | null {
+  if (typeof value !== 'object' || value === null) return null
+  return asCloseRecovery(Reflect.get(value, 'close'))
+}
+
+export const allowsForceClose = (value: unknown): boolean => closeRecoveryOf(value)?.actions.includes('force-close') ?? false
+
 // BulkSessionItem is roomsvc.BulkSessionItem. transfer is set for a transfer.
 export interface BulkSessionItem {
   session: string
   ok: boolean
   error?: string
+  close?: CloseRecovery
   member?: Member
   transfer?: TransferState
 }

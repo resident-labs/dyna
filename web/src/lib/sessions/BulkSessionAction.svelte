@@ -3,6 +3,7 @@
   import { sessionIds } from './consolidation.ts'
   import { bulkTitles, bulkRetryable, bulkResultText, adoptTargets, type BulkAction, type BulkValue } from './bulkSessions.ts'
   import type { Member } from '../api/room.ts'
+  import { allowsForceClose } from '../api/session.ts'
 
   interface Props {
     batch: { key: number; roomId: string; action: BulkAction; sessions: Member[]; value: BulkValue }
@@ -20,7 +21,7 @@
   let retries = $derived(value.results.filter((r) => bulkRetryable(r, batch.action)))
   let accepted = $derived(value.results.filter((r) => r.ok).length)
   let targets = $derived(batch.action === 'adopt' ? adoptTargets(members, sessionIds(batch.sessions), value.maxDepth) : [])
-  let tracked = $derived(batch.action === 'close' && retries.some((r) => /responsibilities:|tracked|pull request/i.test(r.error ?? '')))
+  let tracked = $derived(batch.action === 'close' && retries.some(allowsForceClose))
   const name = (id: string) => batch.sessions.find((m) => m.id === id)?.name ?? id
 </script>
 

@@ -35,6 +35,10 @@ func TestBulkCloseKeepsOrderAndIndependentPRAndRoomGuards(t *testing.T) {
 	if !strings.HasPrefix(got.Results[0].Error, "responsibilities:") || !got.Results[1].OK || got.Results[1].Member == nil || !got.Results[1].Member.Closed || got.Results[2].OK || got.Results[3].OK {
 		t.Fatalf("ordered independent results = %+v", got.Results)
 	}
+	recovery := got.Results[0].Close
+	if recovery == nil || recovery.Reason != subagent.CloseReasonGoalNeedsAgent || len(recovery.Actions) != 1 || recovery.Actions[0] != subagent.CloseActionRetry || len(recovery.Items) != 1 || recovery.Items[0].Kind != "goal" {
+		t.Fatalf("bulk close recovery = %+v", recovery)
+	}
 	for _, id := range []string{author.ID, other.ID} {
 		info, _ := e.mgr.Store.Info(id)
 		if !info.Closed.IsZero() {
