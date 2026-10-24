@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -130,48 +131,91 @@ func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
 	}
 }
 
+// fakeNodeWork holds one kind of local CI run in the part of its work that keeps
+// a keeper on the machine. Each step is a channel, so the test controls when the
+// run starts and finishes its teardown.
+type fakeNodeWork struct {
+	started, cancelled, teardown chan struct{}
+	ctx                          context.Context
+}
+
+func newFakeNodeWork() *fakeNodeWork {
+	return &fakeNodeWork{started: make(chan struct{}), cancelled: make(chan struct{}), teardown: make(chan struct{})}
+}
+
+func (f *fakeNodeWork) work(ctx context.Context) (localci.Result, error) {
+	f.ctx = ctx
+	close(f.started)
+	<-ctx.Done()
+	close(f.cancelled)
+	// The node work is not over: the containers and the keeper are still there.
+	<-f.teardown
+	return localci.Result{}, ctx.Err()
+}
+
+// localLaneNodes starts the local lane's CI run and holds it in the same way.
+type localLaneNodes struct{ work *fakeNodeWork }
+
+func (l localLaneNodes) Show(string, string) (localci.Result, error) {
+	return localci.Result{}, os.ErrNotExist
+}
+func (l localLaneNodes) Run(ctx context.Context, _ localci.Request) (localci.Result, error) {
+	return l.work.work(ctx)
+}
+
 // A local CI run must end with its engine. A run that outlives the engine leaves
 // a keeper on the machine, and that keeper holds the cache lock for hours, so an
-// engine that stops cancels its runs and waits for their node work to end.
+// engine that stops cancels the runs it started, in both lanes, and waits for
+// their work on the machine to end.
 func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	s, saved, _ := scheduledCIRunFixture(t)
-	head := saved.Records["pr"].Head
-	started := make(chan struct{})
-	cancelled := make(chan struct{})
-	teardown := make(chan struct{})
+	record := saved.Records["pr"]
+	head := record.Head
+	scheduled := newFakeNodeWork()
 	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
-		close(started)
-		<-ctx.Done()
-		close(cancelled)
-		// The node work is not over: its containers and keeper are still there.
-		<-teardown
-		return localci.Result{}, ctx.Err()
+		return scheduled.work(ctx)
 	}
+	lane := newFakeNodeWork()
+	s.LocalCI = localLaneNodes{work: lane}
+
 	if err := s.scheduleRegisteredCI(context.Background(), saved); err != nil {
 		t.Fatal(err)
 	}
-	<-started
+	<-scheduled.started
+	if _, err := s.localTrialCI(context.Background(), *record, head); err != nil {
+		t.Fatal(err)
+	}
+	<-lane.started
+
+	// Cancellation starts with the engine and does not wait for the teardown.
+	s.CancelLocalCI()
+	if scheduled.ctx.Err() == nil || lane.ctx.Err() == nil {
+		t.Fatalf("a run was not cancelled with the engine: scheduled=%v lane=%v", scheduled.ctx.Err(), lane.ctx.Err())
+	}
+
+	// A stop with a live budget waits for both teardowns to end.
 	stopped := make(chan []string, 1)
 	go func() { stopped <- s.StopLocalCI(context.Background()) }()
-	<-cancelled
+	// The stop has cancelled every run, so a run that waits for its
+	// teardown is blocked here; one that returns at once has no value yet.
 	select {
 	case left := <-stopped:
-		t.Fatalf("engine stop returned before the run ended its node work: %v", left)
+		t.Fatalf("stop returned before the runs ended their node work: %v", left)
 	default:
 	}
-	// A run still working at the deadline is named for the log.
+
+	// A stop whose budget is already gone names the runs still working.
 	expired, cancel := context.WithCancel(context.Background())
 	cancel()
-	if left := s.StopLocalCI(expired); len(left) != 1 || left[0] != head[:7]+" on hermes" {
-		t.Fatalf("leftover runs = %v, want %s on hermes", left, head[:7])
+	want := []string{head[:7] + " on hermes", head[:7] + " on the local lane"}
+	if left := s.StopLocalCI(expired); !slices.Equal(left, want) {
+		t.Fatalf("leftover runs = %v, want %v", left, want)
 	}
-	close(teardown)
-	select {
-	case left := <-stopped:
-		if len(left) != 0 {
-			t.Fatalf("engine stop reported %v", left)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("engine stop did not wait for the run")
+
+	// Both teardowns end, and then the stop returns.
+	close(scheduled.teardown)
+	close(lane.teardown)
+	if left := <-stopped; len(left) != 0 {
+		t.Fatalf("stop reported %v", left)
 	}
 }

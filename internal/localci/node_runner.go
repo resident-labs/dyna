@@ -21,6 +21,20 @@ import (
 	"dyna-agent/internal/shellquote"
 )
 
+// The two steps of a cancelled run's teardown, on a machine that may answer
+// slowly. A caller that stops a run and waits for that teardown must allow both.
+const (
+	// containerCleanupTimeout bounds the node command that stops a run's
+	// containers, scopes and worktrees.
+	containerCleanupTimeout = time.Minute
+	// runRemovalTimeout bounds the node command that stops the run's keeper,
+	// which then removes the run directory and releases its locks.
+	runRemovalTimeout = 2 * time.Minute
+	// TeardownBudget is how long a cancelled run can take to leave its machine:
+	// it stops the containers and then the keeper, in that order.
+	TeardownBudget = containerCleanupTimeout + runRemovalTimeout
+)
+
 type nodeCheck struct {
 	id    Suite
 	name  CheckName
@@ -196,7 +210,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// own context, so a cancelled run still removes it, and it runs last, after
 	// the reports were copied back.
 	defer func() {
-		remove, stop := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		remove, stop := context.WithTimeout(context.WithoutCancel(ctx), runRemovalTimeout)
 		defer stop()
 		var log tailBuffer
 		if e := r.nodeCommand(remove, &log, &log, "", removeRunDir(base, active)); e != nil {
@@ -223,7 +237,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		return result, fmt.Errorf("push commit to node: %w: %s", err, &output)
 	}
 	defer func() {
-		cleanup, stop := context.WithTimeout(context.Background(), time.Minute)
+		cleanup, stop := context.WithTimeout(context.Background(), containerCleanupTimeout)
 		defer stop()
 		var log tailBuffer
 		// Stop daemon-owned containers before scopes, so a scope keeps its slot
