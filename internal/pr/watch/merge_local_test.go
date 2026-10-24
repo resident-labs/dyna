@@ -519,9 +519,9 @@ func TestReturnedLocalFailureKeepsFailedShardEvidence(t *testing.T) {
 	}
 }
 
-func TestLocalCIRequiresEachDefaultSuiteToPass(t *testing.T) {
+func TestLocalCIRequiresEachWorkflowSuiteToPass(t *testing.T) {
 	result := localci.Result{Repo: "repo", SHA: "head", Status: "passed"}
-	for _, suite := range localci.DefaultSuites() {
+	for _, suite := range localci.WorkflowSuites() {
 		result.Suites = append(result.Suites, localci.SuiteResult{Suite: suite, Status: "passed"})
 	}
 	result.Suites[0].Status = "failed"

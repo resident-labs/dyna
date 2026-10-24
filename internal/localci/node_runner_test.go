@@ -10,11 +10,104 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// Every failed check keeps its own output, a typed cause, a local log file and a
+// saved result, even when the report copy fails afterwards. The cases cover the
+// causes a node proves from its exit status and from the marker it writes.
+func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		node   Node
+		output []string
+		code   int
+		cause  FailureCause
+		status Outcome
+	}{
+		{"early container failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Docker access is unavailable"}, 69, CauseContainerFailure, OutcomeError},
+		{"ssh drop", Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}, []string{"Connection to port 22 timed out"}, 255, CauseSSHDrop, OutcomeError},
+		{"timeout", Node{Name: "local", Slots: 1, Enabled: true}, []string{"check reached its deadline", "DYNA_CI_CHECK_EXIT=124"}, 124, CauseTimeout, OutcomeError},
+		{"test failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"--- FAIL: TestBroken", "DYNA_CI_CHECK_EXIT=1"}, 1, CauseTestFailure, OutcomeFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := Runner{DataDir: t.TempDir(), Node: &tc.node}
+			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+				if fakeNodeGit(dir, out, name, args) {
+					return nil
+				}
+				script := args[len(args)-1]
+				switch {
+				case strings.Contains(script, "df -Pk"):
+					fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+					fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+					return nil
+				case name == "systemd-run" || strings.Contains(script, "systemd-run"):
+					for _, line := range tc.output {
+						fmt.Fprintln(out, line)
+					}
+					return exitError(t, tc.code)
+				case strings.Contains(script, "tar -C"):
+					return errors.New("transport lost")
+				}
+				return nil
+			}
+			result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
+			if err == nil || !strings.Contains(err.Error(), "copy reports") {
+				t.Fatalf("report copy failure was not reported: %v", err)
+			}
+			check := result.Checks[0]
+			if check.Status != tc.status || check.Cause != tc.cause {
+				t.Fatalf("check = %+v, want %s with cause %s", check, tc.status, tc.cause)
+			}
+			if !strings.Contains(check.LogTail, tc.output[0]) {
+				t.Fatalf("check result lost its output: %+v", check)
+			}
+			blob := ""
+			for _, report := range check.Reports {
+				if filepath.Ext(report) == ".log" {
+					blob = report
+				}
+			}
+			if blob == "" {
+				t.Fatalf("check kept no local log file: %+v", check.Reports)
+			}
+			data, err := os.ReadFile(blob)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range tc.output {
+				if !strings.Contains(string(data), line) {
+					t.Fatalf("local log lost %q: %q", line, data)
+				}
+			}
+			saved, err := (Store{DataDir: runner.DataDir}).LoadResult(t.Context(), result.Repo, result.SHA)
+			if err != nil {
+				t.Fatalf("failed run was not saved: %v", err)
+			}
+			if len(saved.Checks) == 0 || saved.Checks[0].Status != tc.status || saved.Checks[0].Cause != tc.cause {
+				t.Fatalf("saved result lost the check cause: %+v", saved)
+			}
+			if !strings.Contains(saved.Checks[0].LogTail, tc.output[0]) {
+				t.Fatalf("saved result lost the output: %+v", saved.Checks[0])
+			}
+		})
+	}
+}
+
+// exitError is the error a command returns when it exits with code.
+func exitError(t *testing.T, code int) error {
+	t.Helper()
+	err := exec.Command("bash", "-c", "exit "+strconv.Itoa(code)).Run()
+	if err == nil {
+		t.Fatalf("exit %d did not fail", code)
+	}
+	return err
+}
 
 func fakeNodeGit(dir string, out io.Writer, name string, args []string) bool {
 	if name != "git" {
@@ -239,6 +332,36 @@ func TestNodeCancellationDoesNotSaveResult(t *testing.T) {
 	}
 	if _, err := (Store{DataDir: runner.DataDir}).LoadResult(t.Context(), result.Repo, result.SHA); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("canceled run persisted: %v", err)
+	}
+}
+
+// A run that reaches its own deadline saves its evidence, so the owner can see
+// the cause for the commit. A deliberate cancel still belongs to its caller.
+func TestNodeSavesResultWhenTheRunReachesItsDeadline(t *testing.T) {
+	// The deadline has already passed, so the run ends at once and no clock runs.
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeNodeGit(dir, out, name, args) {
+			return nil
+		}
+		if strings.Contains(args[len(args)-1], "df -Pk") {
+			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+		}
+		return nil
+	}
+	result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v", err)
+	}
+	saved, err := (Store{DataDir: runner.DataDir}).LoadResult(t.Context(), result.Repo, result.SHA)
+	if err != nil {
+		t.Fatalf("timed out run was not saved: %v", err)
+	}
+	if saved.Cause != CauseTimeout || len(saved.Checks) == 0 || saved.Checks[0].Cause != CauseTimeout {
+		t.Fatalf("saved result lost the timeout cause: %+v", saved)
 	}
 }
 

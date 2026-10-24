@@ -133,6 +133,9 @@ func printResult(c *cobra.Command, result localci.Result, asJSON bool) error {
 	}
 	for _, suite := range checks {
 		name := string(suite.Name())
+		if suite.Cause != "" {
+			name += " (" + string(suite.Cause) + ")"
+		}
 		if suite.Node != "" {
 			name += " on " + suite.Node
 		}
