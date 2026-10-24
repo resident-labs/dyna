@@ -26,6 +26,7 @@ type kimiCodeManager struct {
 	host     Host
 	client   claudeHTTPClient
 	tokenURL string
+	usageURL string
 	now      func() time.Time
 }
 
