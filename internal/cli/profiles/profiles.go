@@ -94,7 +94,7 @@ func NewCommand() *cobra.Command {
 				return nil
 			}
 			if stats {
-				fmt.Fprintf(c.OutOrStdout(), "Measured activity: %s to %s (UTC). Cost uses known reports; ≥ marks partial coverage or a lower bound.\n\n", measured.From, measured.To)
+				fmt.Fprintf(c.OutOrStdout(), "Measured activity: %s to %s (UTC). Cost per turn uses reported turns; ≥ marks a lower bound.\n\n", measured.From, measured.To)
 			}
 			for _, p := range visible {
 				def := ""
@@ -133,8 +133,8 @@ func NewCommand() *cobra.Command {
 						}
 						fmt.Fprintf(c.OutOrStdout(), "  measured: %d turns  median turn %s  cache read %s\n", value.Turns, profileDurationText(value.MedianWallMs), cache)
 						known := value.Cost.CompleteTurns + value.Cost.PartialTurns
-						fmt.Fprintf(c.OutOrStdout(), "  measured cost: %s/turn  %s spend  (%d of %d turns report cost)\n",
-							profileCostText(value.CostPerTurnUSD, value.Cost, 4), profileCostText(value.Cost.USD, value.Cost, 2), known, value.Turns)
+						fmt.Fprintf(c.OutOrStdout(), "  measured cost: %s/reported turn  %s spend  (%d of %d turns report cost)\n",
+							profileCostPerTurnText(value.CostPerTurnUSD, value.Cost, 4), profileCostText(value.Cost.USD, value.Cost, 2), known, value.Turns)
 					}
 				}
 				fmt.Fprintf(c.OutOrStdout(), "  %s\n\n", p.Description)
@@ -293,11 +293,21 @@ type profileListSnapshot struct {
 }
 
 func profileCostText(value *float64, coverage subagent.UsageCost, precision int) string {
+	return priceText(value, coverage.PartialTurns > 0 || coverage.UnknownTurns > 0, precision)
+}
+
+// profileCostPerTurnText averages reported turns only. Missing reports do not
+// make that average a lower bound; partial reports among them do.
+func profileCostPerTurnText(value *float64, coverage subagent.UsageCost, precision int) string {
+	return priceText(value, coverage.PartialTurns > 0, precision)
+}
+
+func priceText(value *float64, lowerBound bool, precision int) string {
 	if value == nil {
 		return "unknown"
 	}
 	prefix := ""
-	if coverage.PartialTurns > 0 || coverage.UnknownTurns > 0 {
+	if lowerBound {
 		prefix = "≥ "
 	}
 	return fmt.Sprintf("%s$%.*f", prefix, precision, *value)

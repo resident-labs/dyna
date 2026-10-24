@@ -105,7 +105,7 @@ const profileList: Listed = {
 api.configProfiles = () => later(empty ? { ...profileList, profiles: [], default: '' } : profileList)
 const profileActivity: ProfileUsageStats[] = [
   { profile: 'sol', turns: 42, medianWallMs: 183_000, cost: { usd: 12.40, completeTurns: 40, partialTurns: 1, unknownTurns: 1 }, costPerTurnUsd: 12.40 / 41, cacheReadShare: 0.684, cachePaired: { input: 1_000_000, cached: 684_000, turns: 39 } },
-  { profile: 'mimo', turns: 95, medianWallMs: 45_000, cost: { usd: 8.75, completeTurns: 95, partialTurns: 0, unknownTurns: 0 }, costPerTurnUsd: 8.75 / 95, cacheReadShare: 0.72, cachePaired: { input: 2_000_000, cached: 1_440_000, turns: 95 } },
+  { profile: 'mimo', turns: 95, medianWallMs: 45_000, cost: { usd: 8.75, completeTurns: 94, partialTurns: 0, unknownTurns: 1 }, costPerTurnUsd: 8.75 / 94, cacheReadShare: 0.72, cachePaired: { input: 2_000_000, cached: 1_440_000, turns: 95 } },
   { profile: 'wonder-full', turns: 11, medianWallMs: 62_000, cost: { usd: null, completeTurns: 0, partialTurns: 0, unknownTurns: 11 }, costPerTurnUsd: null, cacheReadShare: null, cachePaired: { input: 0, cached: 0, turns: 0 } },
 ]
 api.profileUsage = (from: string, to: string) => later({ from: from.slice(0, 10), to: to.slice(0, 10), profiles: empty ? [] : profileActivity })
