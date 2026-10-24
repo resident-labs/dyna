@@ -56,6 +56,37 @@ func TestTranscriptDefaults(t *testing.T) {
 	}
 }
 
+// The web needs the stored wrap-up type so it can hide the engine's prompt.
+func TestTranscriptMarksWrapUp(t *testing.T) {
+	e := newEnv(t)
+	lead := e.start(e.room("wrap-up-view"), "lead", nil)
+	data, err := json.Marshal(subagent.Turn{N: 1, Status: subagent.TurnOK, WrapUp: true, Prompt: "[DYNA WRAP-UP] check open questions"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedTurnRow(t, e.mgr.Store, lead.ID, 1, data)
+	if _, err := e.mgr.Store.UpdateMeta(lead.ID, func(meta *subagent.Meta) { meta.Turns = 1 }); err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.svc.Transcript(lead.ID)
+	if err != nil || len(got.Turns) != 1 {
+		t.Fatalf("transcript: %+v, %v", got, err)
+	}
+	raw, err := json.Marshal(got.Turns[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		WrapUp bool `json:"wrapUp"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if !wire.WrapUp {
+		t.Fatalf("turn lost its wrap-up type: %s", raw)
+	}
+}
+
 func TestAttachmentText(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("attachment-text")

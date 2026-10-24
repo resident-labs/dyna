@@ -288,6 +288,13 @@ test('the turn divider text keeps spaces around its separators', () => {
   assert.doesNotMatch(turnTail({ ...turn, usage: null }), /tokens/)
 })
 
+test('a wrap-up turn shows a designed divider, not its engine prompt', () => {
+  const turn = Object.assign({ n: 7, started: ts(0), profile: 'opus', items: [{ kind: 'prompt', text: '[DYNA WRAP-UP] Before you go idle: close stale questions', ts: ts(0) }] }, { wrapUp: true })
+  const rows = dmView({ address, turns: [turn] }, room).rows
+  assert.equal(rows.some((row) => row.kind === 'message' && row.text?.includes('[DYNA WRAP-UP]')), false)
+  assert.equal(turnHead(turn), 'Wrap-up check · opus')
+})
+
 test('the seat DM is its own posts inline; a post of another conversation is one reference row', () => {
   const owner = 'room', root = 'room:root', seat = `dm:seat:${room.id}`
   const posts = [post('ask', owner, [root], 1, { human: true, conversation: seat }), post('answer', root, [owner], 2, { conversation: seat })]

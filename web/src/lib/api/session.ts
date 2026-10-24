@@ -57,6 +57,7 @@ export interface Turn {
   profile?: string
   model?: string
   harnessSession?: string
+  wrapUp?: boolean
   n: number
   status: string
   started: string
@@ -70,7 +71,7 @@ export interface Turn {
 // as a session's DM shows it. The row names the post and its home, so the
 // reader jumps to the post where it lives instead of drawing a copy. ts is
 // unix milliseconds.
-export interface SessionReference {
+export interface SessionReference extends Pick<Post, 'kind' | 'notice' | 'payload'> {
   postId: string
   from: string
   speaker: string
