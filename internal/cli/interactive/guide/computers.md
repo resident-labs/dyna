@@ -158,6 +158,21 @@ remains available. A restriction can show an error in a write control; record
 that restriction separately from an unexpected app error. This mode tests read
 flows. It cannot test a flow that needs a real write.
 
+The ready banner names what this mode cannot show: settings writes, live
+streams that need a WebSocket (the computer viewer and voice calls), and server
+fields newer than the installed engine. The room's live event stream is an
+EventSource over an allowed read, so room updates do arrive; only a socket
+stream stays closed, and a write control keeps its old value. The banner names
+the call to make.
+
+When a step times out, ask the QA page instead of guessing. Evaluate
+`globalThis.dynaQAReport()` in the QA page. It returns every blocked request
+kind with its count, such as `POST API request` with 4 and `socket`, and saves
+the page screenshot, whose path it returns in `screenshot`. The command prints
+both lines too. Read them together: a control that needs a write, a socket
+stream or a newer server field cannot work in this tab, and a branch bug looks
+different. The report never holds a URL, a header or a cookie.
+
 Use the existing `dyna browser` Playwright and CDP connection to inspect the
 QA context. Select the page where `globalThis.__dynaReadOnlyQA === true` in a page evaluation.
 A fresh CDP connection can list the QA page beside the installed app tabs. Set its
