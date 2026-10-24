@@ -59,8 +59,14 @@ func (c feedViews) home(m Member) string {
 	return "general"
 }
 
-// addressedToRoot reports a post whose recipients include the room's root
-// session, which the owner reads as a post to them.
+// addressedToRoot reports a post addressed to the root session's own address,
+// <room>:root. A session's @parent now names the seat by the room's own
+// address (notify resolver), so this covers the posts stored before that
+// change, and the engine's own posts to the seat, which still name the parent
+// session.
+//
+// TODO: legacy/shim remove later — the old seat address. Remove when retained
+// history ages out.
 func (c feedViews) addressedToRoot(post room.Message) bool {
 	return c.root.Address != "" && slices.Contains(post.To, c.root.Address)
 }

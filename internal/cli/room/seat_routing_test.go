@@ -117,19 +117,47 @@ func TestExternalSeatWatchReceivesRootParentPosts(t *testing.T) {
 	if err != nil || !changed || seat.External || len(deliveries) != 0 {
 		t.Fatalf("ReturnSeat = %+v, %v, %+v, %v", seat, changed, deliveries, err)
 	}
+	// One seat has one address: after the internal root takes the seat back, a
+	// child's @parent names the room's own address, exactly as @root does, and
+	// the seat's delivery carries the wake. A parent that is a session keeps its
+	// address and its binding.
 	for _, tc := range []struct {
 		sender subagent.Meta
 		target string
+		seat   bool
 	}{
-		{child, rec.Name + ":" + room.RootAgent},
-		{ordinary, rec.Name + ":" + parent.Name},
+		{child, rec.Name, true},
+		{ordinary, rec.Name + ":" + parent.Name, false},
 	} {
 		res := post(tc.sender, "@parent")
-		if !reflect.DeepEqual(res.Message.To, []string{tc.target}) || res.Message.SessionIDs[tc.target] != tc.sender.ParentSession {
+		if !reflect.DeepEqual(res.Message.To, []string{tc.target}) {
+			t.Errorf("parent routing after return = %v, want %v", res.Message.To, tc.target)
+		}
+		if tc.seat {
+			if _, bound := res.Message.SessionIDs[tc.target]; bound {
+				t.Errorf("the seat post bound a session: %v", res.Message.SessionIDs)
+			}
+			if !seatQueued(res.Deliveries, rec) {
+				t.Errorf("seat delivery = %+v", res.Deliveries)
+			}
+			continue
+		}
+		if res.Message.SessionIDs[tc.target] != tc.sender.ParentSession {
 			t.Errorf("parent routing after return = %v, session IDs %v", res.Message.To, res.Message.SessionIDs)
 		}
 		if len(res.Deliveries) == 0 || res.Deliveries[0].Delivery != "session-queued" {
 			t.Errorf("parent delivery after return = %+v", res.Deliveries)
 		}
 	}
+}
+
+// seatQueued reports a delivery that queued the post for the root session that
+// holds the seat.
+func seatQueued(deliveries []notify.Delivery, rec room.Record) bool {
+	for _, d := range deliveries {
+		if d.To == rec.Name+":"+room.RootAgent && d.Delivery == "session-queued" {
+			return true
+		}
+	}
+	return false
 }

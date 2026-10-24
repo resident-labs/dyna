@@ -20,6 +20,9 @@ import (
 // is not the internal root's input.
 func (s *Service) deliverRoot(ctx context.Context, msg room.Message, rec room.Record) (Delivery, bool) {
 	addr := rec.Name + ":" + room.RootAgent
+	// direct names the seat by its own address. A post stored before @parent
+	// resolved to the room's address reaches the seat this way, and so does a
+	// check-in, which the engine posts to the parent's address.
 	direct := msg.Addressed(addr)
 	seat, ok, err := s.Rooms.SeatDelivery(rec.ID, msg.ID)
 	if err != nil {
@@ -42,7 +45,13 @@ func (s *Service) deliverRoot(ctx context.Context, msg room.Message, rec room.Re
 	if ok && usable(info) == "" {
 		return s.deliver(msg, recipient{kind: toSession, addr: addr, rec: cur, session: info}), true
 	}
-	if !room.OwnerRequest(msg, rec.Name) && !direct {
+	// A post the seat's row marks as a wake asks root to act, so a session's post
+	// to the seat starts the root when none is open, as an address to the seat
+	// still does (the old seat address, which a check-in also names). The owner's
+	// request always does; the engine's own events wait for the root that reads
+	// them, as they did.
+	sessionPost := msg.SessionIDs[msg.From] != ""
+	if !room.OwnerRequest(msg, rec.Name) && !direct && !(sessionPost && seat.Mode == room.DeliveryWake) {
 		return Delivery{}, false
 	}
 	if ok {
