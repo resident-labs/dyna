@@ -162,8 +162,12 @@ func stopKeeper(base, active string) string {
 	// cleanup that waits for the base lock itself would wait for other runs.
 	killIt := "k=$(cat " + keeper + "); kill -TERM -- -\"$k\" 2>/dev/null || kill \"$k\" 2>/dev/null || true"
 	lock := shellquote.Quote(active)
-	return "if [ -s " + keeper + " ]; then " + killIt + "; fi; " +
-		"if [ -e " + lock + " ]; then i=0; while [ $i -lt 50 ] && ! flock -n " + lock + " true 2>/dev/null; do sleep 0.1; i=$((i+1)); done; fi; "
+	// Open the run lock before signalling the keeper. The keeper's EXIT trap
+	// removes its pathname, so only this descriptor still names the inode whose
+	// lock acknowledges that the keeper and its cache lock are gone.
+	return "opened=0; if [ -e " + lock + " ]; then exec 9>>" + lock + " && opened=1; fi; " +
+		"if [ -s " + keeper + " ]; then " + killIt + "; fi; " +
+		"if [ \"$opened\" = 1 ]; then i=0; while [ $i -lt 50 ] && ! flock -n 9; do sleep 0.1; i=$((i+1)); done; exec 9>&-; fi; "
 }
 
 // removeRunDir is the command that ends a run on its machine: it stops the
