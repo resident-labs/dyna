@@ -681,17 +681,20 @@ test('a review result card shows all four results on feed and DM', () => {
   }
 })
 
-// renderMergeCard mounts the merge card of one typed payload and returns its text.
-function renderMergeCard(payload: EventPayload): string {
+// renderMergeCard mounts the merge card and separates its visible summary
+// from the complete evidence in the disclosure.
+function renderMergeCard(payload: EventPayload): { summary: string; detail: string; text: string } {
   const post = postFor('merge', 'failed', payload)
   const target = document.createElement('div')
   document.body.append(target)
   const mounted = web.mount(web.eventComponents.MergeCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
   web.flushSync()
+  const summary = (target.querySelector('summary')?.textContent ?? '').trim()
+  const detail = (target.querySelector('.detail')?.textContent ?? '').trim()
   const text = (target.textContent ?? '').trim()
   web.unmount(mounted)
   target.remove()
-  return text
+  return { summary, detail, text }
 }
 
 test('a failed merge card says its failing checks once and names every member PR', () => {
@@ -707,16 +710,18 @@ test('a failed merge card says its failing checks once and names every member PR
     reason: undefined,
     reasonKind: 'checks-failed' as const,
   }
-  const text = renderMergeCard(batch)
-  assert.match(text, /2 PRs: #350, #352 into main/, `the title did not name the batch: ${text}`)
-  assert.equal(text.match(/go-test/g)?.length, 1, `the failed check shows more than once: ${text}`)
-  assert.doesNotMatch(text, /checks failed:/i, `the card repeated the cause: ${text}`)
+  const view = renderMergeCard(batch)
+  assert.match(view.summary, /2 PRs: #350, #352 into main/, `the title did not name the batch: ${view.summary}`)
+  assert.match(view.summary, /1 failed check/, `the summary did not keep a short failure count: ${view.summary}`)
+  assert.doesNotMatch(view.summary, /go-test/, 'the one-line summary clips the check name')
+  assert.match(view.detail, /Failed checks: go-test/, 'the expanded row lost the failed-check name')
+  assert.doesNotMatch(view.text, /checks failed:/i, `the card repeated the cause: ${view.text}`)
   // A kind with no named check still says the cause, worded from the kind.
   const unnamed = renderMergeCard({ ...batch, checks: { done: 2, total: 2 } })
-  assert.match(unnamed, /Checks failed\./, `the kind did not word the cause: ${unnamed}`)
+  assert.match(unnamed.text, /Checks failed\./, `the kind did not word the cause: ${unnamed.text}`)
   // A cause a person wrote, such as root's, still shows in full.
   const returned = renderMergeCard({ ...base, type: 'returned', reason: 'root sent it back to fix the flake', reasonKind: 'root-return' })
-  assert.match(returned, /root sent it back to fix the flake/, `a free reason vanished: ${returned}`)
+  assert.match(returned.text, /root sent it back to fix the flake/, `a free reason vanished: ${returned.text}`)
 })
 
 // A fact about one member of a batch, such as root returning that PR or its
@@ -734,7 +739,7 @@ test('a member-scoped merge card names that PR, not the whole batch', () => {
     { type: 'conflict' as const, reasonKind: 'conflict' as const, wants: /Merge conflict: #2 into main/ },
   ]
   for (const c of cases) {
-    const text = renderMergeCard({ ...base, ...c, prs: members, member: 2, label: 'PR #2', reason: 'named member' })
+    const text = renderMergeCard({ ...base, ...c, prs: members, member: 2, label: 'PR #2', reason: 'named member' }).text
     assert.match(text, c.wants, `${c.type} named the wrong subject: ${text}`)
     assert.doesNotMatch(text, /#1/, `${c.type} claimed the other member: ${text}`)
     assert.match(text, /batch of 2/, `${c.type} hid the batch: ${text}`)
@@ -743,7 +748,7 @@ test('a member-scoped merge card names that PR, not the whole batch', () => {
   }
   // A published prefix leaves the failed member out of the trial's own list.
   // The card names it by its typed number and points at no other PR.
-  const missing = renderMergeCard({ ...base, type: 'failed', prs: [members[0]], member: 2, reason: 'failed after the prefix', reasonKind: 'other' })
+  const missing = renderMergeCard({ ...base, type: 'failed', prs: [members[0]], member: 2, reason: 'failed after the prefix', reasonKind: 'other' }).text
   assert.match(missing, /Merge failed: #2 into main/, `an unlisted member lost its number: ${missing}`)
   assert.doesNotMatch(missing, /#1|First member|Open PR/, `an unlisted member fell back to another PR: ${missing}`)
 })
@@ -751,8 +756,8 @@ test('a member-scoped merge card names that PR, not the whole batch', () => {
 test('a single-PR merge card keeps the singular title', () => {
   const base = web.mergeEvent({ kind: 'merge', notice: { kind: 'landed' }, payload: fixtures['merge/landed'] })
   assert.ok(base, 'the landed merge fixture is missing')
-  const text = renderMergeCard(base)
+  const text = renderMergeCard(base).text
   assert.match(text, /Merged #242 into main/, `a one-PR title lost its shape: ${text}`)
-  const direct = renderMergeCard({ ...base, reasonKind: 'tested-head' as const })
+  const direct = renderMergeCard({ ...base, reasonKind: 'tested-head' as const }).text
   assert.match(direct, /Landed without a trial: this head contains the base tip and passed its required CI\./)
 })

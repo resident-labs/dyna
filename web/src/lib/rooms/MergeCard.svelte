@@ -99,6 +99,7 @@
   // generated as a typed kind and leaves its text empty, so the evidence list
   // and the reason line never repeat each other.
   let reason = $derived(reasonLine(payload?.reason, payload?.reasonKind, failedChecks.length))
+  let checkSummary = $derived(reason || (failedChecks.length ? `${failedChecks.length} failed check${failedChecks.length === 1 ? '' : 's'}` : ''))
   let openCommit = $derived(commitUrl(first?.url, payload?.commit))
 
   // reasonLine words a cause from its kind when the payload keeps no text.
@@ -120,7 +121,7 @@
   {surface}
   {title}
   chips={[{ label: stepWords[type], tone: stepTones[type], failure: stepTones[type] === 'coral' }]}
-  summary={[decision?.note, subject?.title, payload?.checks && (payload.checks.total ?? 0) > 0 ? `checks ${payload.checks.done}/${payload.checks.total}` : '', payload?.head ? `head ${shortSha(payload.head)}` : '', reason || (failedChecks.length ? `Failed checks: ${failedChecks.join(', ')}` : '')].filter(Boolean).join(' · ')}
+  summary={[decision?.note, subject?.title, payload?.checks && (payload.checks.total ?? 0) > 0 ? `checks ${payload.checks.done}/${payload.checks.total}` : '', payload?.head ? `head ${shortSha(payload.head)}` : '', checkSummary].filter(Boolean).join(' · ')}
 >
   {#snippet icon()}⇢{/snippet}
   {#snippet detail()}
@@ -144,7 +145,7 @@
         {#if payload.commit}<span>commit <b class="mono">{shortSha(payload.commit)}</b></span>{/if}
       </div>
       {#if reason && stepTones[type] === 'coral'}<p class="reason">{reason}</p>{:else if reason && type === 'landed'}<p class="note">{reason}</p>{/if}
-      {#if failedChecks.length && reason}<p class="reason">Failed checks: {failedChecks.join(', ')}</p>{/if}
+      {#if failedChecks.length}<p class="reason">Failed checks: {failedChecks.join(', ')}</p>{/if}
       <div class="acts">
         {#if subject?.url}<button class="btn" type="button" onclick={() => openLink(subject?.url)}>Open PR</button>{/if}
         {#if openCommit}<button class="btn" type="button" onclick={() => openLink(openCommit)}>Open commit</button>{/if}
