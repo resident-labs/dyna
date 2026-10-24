@@ -16,6 +16,8 @@
   import { bindPins, pinView } from './lib/app/pins.svelte.ts'
   import { bindPRs, changeView } from './lib/app/prs.svelte.ts'
   import { bindQuestions, questionView } from './lib/app/questions.svelte.ts'
+  import { bindComputers, computerView } from './lib/app/computers.svelte.ts'
+  import { bindConfirm, confirmView } from './lib/app/confirm.svelte.ts'
   import { bindSelection, selectionView } from './lib/app/selection.svelte.ts'
   import { bindSync, syncView } from './lib/app/sync.svelte.ts'
   import { closeToastDetail, hideToast, runToastAction, say, sayDetails, sayLine, toasts, toggleToastDetail } from './lib/app/toasts.svelte.ts'
@@ -177,11 +179,6 @@
     gap?: boolean
     disabled?: boolean
   }
-  type Confirming =
-    | { kind: 'promote' | 'stop' | 'close'; m: Member; busy?: boolean; error?: string }
-    | { kind: 'forceclose'; m: Member; items: string[]; busy?: boolean; error?: string }
-    | { kind: 'cancelrun'; run: Pick<RunSummary, 'id' | 'name' | 'status'>; busy?: boolean; error?: string }
-    | { kind: 'expedite'; goal: Goal; roomId: string; busy?: boolean; error?: string }
   // A page of one list, with its continuation cursor.
   interface ListPage<T> {
     items: T[] | null
@@ -407,7 +404,11 @@
   const rules = $derived(goalView.rules)
   // An inline rules edit keeps the list it started from until the edit closes.
   $effect(() => { goalView.applyPendingRules() })
-  let confirm = $state<Confirming | null>(null)
+  let confirm = $derived(confirmView.confirm)
+  const confirmText = $derived(confirmView.confirmText)
+  const { askConfirm, dismiss, runConfirm } = confirmView
+  // The goal the room expedites now, which the replace text names.
+  const expeditedGoalId = $derived($expedite.goalId)
   let roomSessionController: ReturnType<typeof createRoomSessionControls> | null = null
   let roomControls = $state<RoomControlValue | null>(null)
   let controlsReported = ''
@@ -447,52 +448,19 @@
   let updateHidden = $state(false)
   let sessionTab = $state('chat') // the open tab of a session view
   let prView = $derived(view === 'issues')
-  // Agent computers of the open room (null when the feature is unavailable),
-  // each session's recent actions, and whether the viewer is open.
-  let computers = $state<ComputerInfo[] | null>(null)
-  let computerFeed = $state<ReturnType<typeof pushAction>>({})
-  let computerError = $state('')
   let winWidth = $state(typeof window === 'undefined' ? 1400 : window.innerWidth)
   const popMatch = /^#pop=(room_[0-9]{8}-[0-9]{6}-[0-9a-f]{8}):([A-Za-z0-9][A-Za-z0-9_.-]{0,95})$/.exec(typeof location === 'undefined' ? '' : location.hash)
   const pop = popMatch ? { room: popMatch[1], session: popMatch[2] } : null
-  let computerRequest = 0
-  function loadComputers() { return reload('computers', async (current: () => boolean) => {
-    if (!roomId) return
-    const id = roomId, request = ++computerRequest
-    try {
-      const list = await api.computers(id)
-      if (!current() || id !== roomId || request !== computerRequest) return
-      computers = reconcileRows(computers ?? [], list ?? [], 'session')
-      computerError = ''
-    } catch (e) {
-      if (!current() || id !== roomId || request !== computerRequest) return
-      computerError = String(e)
-    }
-  }) }
-  let computerTimer: ReturnType<typeof setTimeout> | undefined
-  function handleComputer(ev: ComputerEvent) {
-    if (ev.action) computerFeed = pushAction(computerFeed, ev.session, ev.action)
-    if (!computers) return
-    // An app that starts reads "Opened Chromium" in the pill.
-    const before = computers.find((c) => c.session === ev.session)
-    for (const name of ev.computer ? openedApps(before?.apps, ev.computer.apps) : []) computerFeed = pushAction(computerFeed, ev.session, `open · ${name}`)
-    const r = applyEvent(computers, ev)
-    computers = r.list
-    if (r.needsReload) {
-      clearTimeout(computerTimer)
-      computerTimer = setTimeout(loadComputers, 250)
-    }
-  }
-  // The floating preview and the phone chip. The preview shows in a
-  // session's Messages view only, never opens a stream, and opens the Computer tab on a click.
-  const drillComputer = $derived(drill ? computerOf(drill.id) : null)
-  // view is '': a session view is open, so the computers page is not.
-  const showPreview = $derived(!!drill && !!drillComputer && previewVisible({ c: drillComputer, tab: sessionTab, view: '', width: winWidth, hidden: null }))
+  // The open room's computers live in lib/app/computers.svelte.ts. The page
+  // reads them through these aliases, so the template keeps its names.
+  const computers = $derived(computerView.computers)
+  const computerFeed = $derived(computerView.feed)
+  const computerError = $derived(computerView.error)
+  const drillComputer = $derived(computerView.drillComputer)
+  const sessionComputer = $derived(computerView.sessionComputer)
+  const showPreview = $derived(computerView.showPreview)
+  const { computerOf, loadComputers, handleComputer } = computerView
   const drillShells = $derived(drill ? runningShells(jobs, drill) : [])
-  // The computer the session tab row offers: none until the room's computers
-  // load, and none for the root seat, which has no computer of its own.
-  const sessionComputer = $derived(computers && drill && !drill.rootSeat ? computerOf(drill.id) ?? { state: 'none' } : null)
-  function computerOf(id?: string) { return computers?.find((c) => c.session === id) ?? null }
   let reveal = $state('') // a file the Files view opens, from Changes
   let revealFolder = $state<{ path: string } | null>(null) // a folder the Files view shows, from Library; an object so the root and repeats still open
   let starting = $state(false) // the Run workflow dialog is open
@@ -602,7 +570,7 @@
     selectGoal: (id) => (goalId = id),
     hidePins: () => (showPins = false),
     goalId: () => goalId,
-    askReplace: (goal) => (confirm = { kind: 'expedite', goal, roomId }),
+    askReplace: (goal) => askConfirm({ kind: 'expedite', goal, roomId }),
     pickGoal: (member, held) => (expediting = { member, goals: held }),
     hierarchy: () => hierarchy,
     applyPage: (value, append = false) => applyListPage('goals', value, append),
@@ -647,6 +615,25 @@
     reload,
     applyPage: (value) => applyListPage('changes', value),
     alive: () => consolidationAlive,
+    say,
+  })
+  // The page's side of the computers, which lib/app/computers.svelte.ts asks for.
+  bindComputers({
+    reload,
+    tab: () => sessionTab,
+    width: () => winWidth,
+  })
+  // The page's side of the confirm dialog, which lib/app/confirm.svelte.ts asks
+  // for.
+  bindConfirm({
+    members: () => members,
+    expedited: () => expeditedGoalId,
+    closed: (name, items) => (closeResult = { name, items }),
+    loadGoals,
+    loadRuns,
+    loadRun,
+    loadMembers,
+    loadChanges,
     say,
   })
   // The page's side of the member selection, which lib/app/selection.svelte.ts
@@ -911,7 +898,7 @@
       showRoomSettings = false
       selectionView.clear()
     }
-    if (id !== roomId) { computers = null; computerFeed = {} }
+    if (id !== roomId) computerView.clear()
     router.roomId = id
     // Goal IDs are per room; a goal fetched for a link belongs to the old one.
     goalView.clear()
@@ -1139,10 +1126,10 @@
       (e) => say({ tone: 'error', subject: 'Could not copy the address', text: errorText(e) }),
     ) })
     if (!m.closed) items.push({ label: m.transfer ? 'Model transfer…' : 'Transfer to new model…', run: () => { loadProfiles(); transferring = m } })
-    if (!m.closed && m.parent) items.push({ label: 'Promote to lead', run: () => (confirm = { kind: 'promote', m }) })
+    if (!m.closed && m.parent) items.push({ label: 'Promote to lead', run: () => askConfirm({ kind: 'promote', m }) })
     if (selectableSession(m)) items.push({ label: 'Move under…', run: () => moveUnder(m) })
-    if (m.state === 'live') items.push({ label: 'Stop turn', danger: true, gap: true, run: () => (confirm = { kind: 'stop', m }) })
-    if (!m.closed) items.push({ label: 'Close session', danger: true, gap: m.state !== 'live', run: () => (confirm = { kind: 'close', m }) })
+    if (m.state === 'live') items.push({ label: 'Stop turn', danger: true, gap: true, run: () => askConfirm({ kind: 'stop', m }) })
+    if (!m.closed) items.push({ label: 'Close session', danger: true, gap: m.state !== 'live', run: () => askConfirm({ kind: 'close', m }) })
     return items
   }
 
@@ -1223,110 +1210,6 @@
     const anchor = menu?.anchor
     menu = null
     anchor?.focus?.()
-  }
-
-  // guardItems lists what a close-guard error names: "responsibilities: cannot close:\n- ...".
-  function guardItems(msg: string) {
-    const items = msg.split('\n').filter((l) => l.startsWith('- ') && !l.startsWith('- or close anyway')).map((l) => l.slice(2))
-    return items.length ? items : [msg]
-  }
-
-  let confirmText = $derived.by(() => {
-    if (!confirm) return null
-    if (confirm.kind === 'promote') {
-      return {
-        title: `Promote ${confirm.m.name} to lead?`,
-        lines: ['This session becomes a top-level lead. Its children stay attached, with updated depths.', 'Its active work and full conversation continue.'],
-        action: 'Promote to lead', danger: false,
-      }
-    }
-    if (confirm.kind === 'forceclose') {
-      return {
-        title: `Could not hand over all work from ${confirm.m.name}`,
-        lines: [...confirm.items, 'Retry after fixing the error, or force close. Goals move to the owner; other work stays unresolved.'],
-        action: 'Close anyway',
-      }
-    }
-    if (confirm.kind === 'expedite') {
-      return {
-        title: `Expedite goal ${confirm.goal.id}?`,
-        lines: [`Goal ${$expedite.goalId} is expedited now. A room has one expedited goal, so this replaces it.`],
-        action: 'Replace and expedite', danger: false,
-      }
-    }
-    if (confirm.kind === 'cancelrun') {
-      return {
-        title: `Cancel ${confirm.run.name}?`,
-        lines: ['Its running agents stop now. Work they finished stays in the run record.'],
-        action: 'Cancel run',
-      }
-    }
-    const m = confirm.m
-    if (confirm.kind === 'stop') {
-      return {
-        title: `Stop the turn of ${m.name}?`,
-        lines: ['The running turn stops now, and its unfinished work is lost.', 'The session stays open. Your next post to it starts a new turn.'],
-        action: 'Stop turn',
-      }
-    }
-    const lines = ['The session closes, and its name becomes free.', 'PR authorship moves to its nearest open ancestor, or root. Reviewer roles return to the pool. Live workflows are canceled.']
-    lines.push('A held goal goes up with the work, but root cannot hold a goal. A goal with only root or the owner above it stops the close.')
-    lines.push('“Close and move goals” closes anyway and gives those goals to the owner. Other unfinished work then stays unresolved.')
-    if (m.state === 'live') lines.push('Its running turn stops first.')
-    const hasChildren = members.some((child) => !child.closed && child.parent === m.id)
-    if (hasChildren) lines.push('Its open children that own no work close too. Children that still own work move to its nearest open ancestor and keep running.')
-    return { title: `Close ${m.name}?`, lines, action: 'Close session', alternative: 'Close and move goals', onalternative: () => runConfirm(true) }
-  })
-
-  async function runConfirm(force = false) {
-    const request = confirm
-    if (!request) return
-    const { kind } = request
-    confirm = { ...request, busy: true, error: '' }
-    if (kind === 'expedite') {
-      try {
-        await api.expediteGoal(request.roomId, request.goal.id, true)
-        say({ tone: 'success', subject: 'Expedited the goal', text: clipText(request.goal.text) })
-        confirm = null
-        loadGoals()
-      } catch (e) {
-        confirm = { ...request, busy: false, error: errorText(e) }
-      }
-      return
-    }
-    if (kind === 'cancelrun') {
-      try {
-        await api.cancelRun(request.run.id)
-        say({ tone: 'success', subject: `${request.run.name} is canceled`, text: 'Work it finished stays in the run record.' })
-        confirm = null
-        loadRuns()
-        loadRun()
-      } catch (e) {
-        confirm = { ...request, busy: false, error: errorText(e) }
-      }
-      return
-    }
-    const m = request.m
-    if (!m.id) return
-    try {
-      if (kind === 'stop') await api.stopSession(roomId, m.id)
-      else if (kind === 'promote') await api.promoteSession(roomId, m.id)
-      else {
-        const result = await api.closeSession(roomId, m.id, force || kind === 'forceclose')
-        closeResult = { name: m.name, items: result?.closeSummary ?? [] }
-      }
-      confirm = null
-      if (kind === 'stop') say({ tone: 'success', subject: 'Turn stopped', text: `${m.name} stays open; your next post starts a new turn.` })
-      else if (kind === 'promote') say({ tone: 'success', subject: `${m.name} is now a top-level lead`, text: 'Its children stay attached, with new depths.' })
-      else say({ tone: 'success', subject: `${m.name} is closed`, text: 'Its PR authorship and reviewer roles have moved on.' })
-      loadMembers()
-      loadChanges()
-    } catch (e) {
-      const msg = errorText(e)
-      // Force is offered only when the automatic handoff fails.
-      if (kind === 'close' && msg.startsWith('responsibilities:')) confirm = { kind: 'forceclose', m, items: guardItems(msg) }
-      else confirm = { ...request, busy: false, error: msg }
-    }
   }
 
   let roomTimer: ReturnType<typeof setTimeout> | undefined
@@ -1652,7 +1535,7 @@
       openSearch: (arg) => openSearch(arg || ''),
       openRoomSettings: async (target) => { if (target.id === roomId || await selectRoom(target.id)) { roomSettingsAt = { start: 'general' }; roomSettingsKey++; showRoomSettings = true } },
       openSessionPRs: () => openReview('prs'),
-      cancelRun: (run) => (confirm = { kind: 'cancelrun', run }),
+      cancelRun: (run) => askConfirm({ kind: 'cancelrun', run }),
       toggleSidebar: () => (narrow ? (navOpen = !navOpen) : (showSide = !showSide)),
       roomOptions: () => rooms.filter((x) => x.id !== r?.id).map((x) => ({ value: x.name, hint: x.displayName && x.displayName !== x.name ? x.displayName : x.repo || '' })),
       switchRoom: (arg) => {
@@ -1960,7 +1843,7 @@
           {#key room.id}<Goals roomId={room.id} older={listPages.goals?.older} loadingOlder={olderLoading} onolder={() => loadOlderLists(['goals'])} {goals} members={hierarchy} selected={goalId} onselect={(id: string) => (goalId = id)} ongoal={openGoal} onexpedite={(g: Goal) => expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) }))} />{/key}
         {:else if view === 'runs'}
           {#if openRun}
-            {#key openRun}<Run detail={runDetail} error={runError} oncancel={(run) => (confirm = { kind: 'cancelrun', run })} onpause={pauseRun} onsteer={steerAgent} />{/key}
+            {#key openRun}<Run detail={runDetail} error={runError} oncancel={(run) => askConfirm({ kind: 'cancelrun', run })} onpause={pauseRun} onsteer={steerAgent} />{/key}
           {:else}
             <Runs {room} list={runs} error={runsError} onopen={showRun} onstart={() => (starting = true)} />
           {/if}
@@ -2057,7 +1940,7 @@
   <ExpediteGoal goals={context.goals} roomId={room.id} session={context.member.address} expeditedId={$expedite.goalId} onpick={(g: Goal) => { expediting = null; expediteGoal(g).catch((e) => say({ tone: 'error', subject: 'Could not expedite the goal', text: errorText(e) })) }} onstop={() => { expediting = null; stopExpediting(context.goals) }} onclose={() => (expediting = null)} />
 {/if}
 {#if confirm && confirmText}
-  <Confirm {...confirmText} busy={confirm.busy} error={confirm.error} onconfirm={() => runConfirm()} oncancel={() => (confirm = null)} />
+  <Confirm {...confirmText} busy={confirm.busy} error={confirm.error} onconfirm={() => runConfirm()} oncancel={dismiss} />
 {/if}
 {#if starting && room}
   <RunWorkflow {room} onstarted={runStarted} oncancel={() => (starting = false)} />
