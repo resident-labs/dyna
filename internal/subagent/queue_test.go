@@ -5,6 +5,29 @@ import (
 	"testing"
 )
 
+func TestQueueStateFromStoredFacts(t *testing.T) {
+	tests := []struct {
+		name  string
+		facts queueFacts
+		want  QueueState
+	}{
+		{name: "waiting", want: QueueWaiting},
+		{name: "dispatched steering", facts: queueFacts{dispatchedTurn: 2}, want: QueueDelivering},
+		{name: "claimed delivery", facts: queueFacts{claimedTurn: 3}, want: QueueDelivering},
+		{name: "delivered steering", facts: queueFacts{deliveredTurn: 3}, want: QueueDelivered},
+		{name: "cancelled delivery", facts: queueFacts{cancelled: true}, want: QueueCancelled},
+		{name: "dismissed delivery", facts: queueFacts{dismissed: true}, want: QueueDismissed},
+		{name: "dismissal wins", facts: queueFacts{deliveredTurn: 3, cancelled: true, dismissed: true}, want: QueueDismissed},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := queueStateFromFacts(test.facts); got != test.want {
+				t.Fatalf("state = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestQueueCancellationAndClaimBoundary(t *testing.T) {
 	e := newTestEnv(t)
 	info, _ := e.start("SLEEP:1 RESPOND: initial")
