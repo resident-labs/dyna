@@ -95,6 +95,8 @@ export const api = {
   goalEvents: (room: string, id: string, before = '', limit = 0) => app.GoalEvents(room, id, before, limit),
   goalItemCounts: (room: string) => app.GoalItemCounts(room),
   editGoal: (room: string, id: string, text: string, holders: string[], shared: boolean) => app.EditGoal(room, id, text, holders, shared),
+  // One append-only correction to the goal's brief; it keeps the original text.
+  amendGoalBrief: (room: string, id: string, text: string) => app.AmendGoalBrief(room, id, text),
   finishGoal: (room: string, id: string, summary: string, drop = false) => app.FinishGoal(room, id, summary, drop),
   // An empty id stops the room's expedite; replace switches from another goal.
   expediteGoal: (room: string, id: string, replace = false) => app.ExpediteGoal(room, id, replace),

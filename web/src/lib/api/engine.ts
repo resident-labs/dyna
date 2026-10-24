@@ -63,6 +63,8 @@ export interface Engine {
   GoalEvents(room: string, id: string, before: string, limit: number): Promise<Page<GoalEvent>>
   GoalItemCounts(room: string): Promise<Record<string, [number, number]> | null>
   EditGoal(room: string, id: string, text: string, holders: string[], shared: boolean): Promise<Goal>
+  // AmendGoalBrief appends one attributed correction to the goal's brief.
+  AmendGoalBrief(room: string, id: string, text: string): Promise<Goal>
   FinishGoal(room: string, id: string, summary: string, drop: boolean): Promise<Goal>
   ExpediteGoal(room: string, id: string, replace: boolean): Promise<Goal>
   SetPRGoal(room: string, key: string, goalId: string): Promise<null>

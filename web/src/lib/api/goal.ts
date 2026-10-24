@@ -12,6 +12,14 @@ export interface GoalOutcome {
   summary: string
 }
 
+// GoalAmendment is goals.Amendment: one attributed correction to the brief.
+// The engine appends amendments, so stored order is oldest first.
+export interface GoalAmendment {
+  at: string
+  by: string
+  text: string
+}
+
 // Goal is goals.Goal. Go time.Time fields with omitempty are never omitted: an
 // unset one is the zero time "0001-01-01T00:00:00Z".
 export interface Goal {
@@ -27,6 +35,7 @@ export interface Goal {
   updatedAt: string
   edits: GoalEdit[] | null
   detail?: string
+  amendments?: GoalAmendment[] | null
   service?: boolean
   expediteUntil?: string // omitted when not expedited; the room's one priority goal
   done?: GoalOutcome
