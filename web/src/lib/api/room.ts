@@ -131,6 +131,8 @@ export interface Post extends Message {
   fullResult?: boolean
   resultCut?: boolean
   views?: string[]
+  // forRoot marks a post addressed to the room's root session.
+  forRoot?: boolean
   pinned?: boolean
   pinnedAt?: number // unix milliseconds
   pinnedBy?: string

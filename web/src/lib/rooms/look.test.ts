@@ -26,16 +26,21 @@ test('defaults: root-only highlight, worker results on one line, updates shown',
   assert.equal(oneLine(look, failed), false)
 })
 
-test('Root only highlights root’s posts to the owner; Everyone to you highlights all; Off none', () => {
+test('Root only marks root’s posts and the posts to root; Everyone to you marks all; Off none', () => {
   let look = empty()
   assert.equal(highlighted(look, rootDone, 'room'), true)
   assert.equal(highlighted(look, done, 'room'), false)
   assert.equal(highlighted(look, { ...rootDone, owner: true }, 'room'), false)
+  // A post to the room's root session is a post to the owner's orchestrator.
+  assert.equal(highlighted(look, { ...done, forRoot: true }, 'room'), true)
+  assert.equal(highlighted(look, { ...rootDone, to: ['room:worker'] }, 'room'), false)
   look = withChoice(look, 'highlight', 'all')
   assert.equal(highlighted(look, done, 'room'), true)
   assert.equal(highlighted(look, { ...done, to: ['room:root'] }, 'room'), false)
+  assert.equal(highlighted(look, { ...done, to: ['room:root'], forRoot: true }, 'room'), true)
   look = withChoice(look, 'highlight', 'off')
   assert.equal(highlighted(look, rootDone, 'room'), false)
+  assert.equal(highlighted(look, { ...done, forRoot: true }, 'room'), false)
 })
 
 test('a choice applies to every feed view, and clearing it restores the default', () => {

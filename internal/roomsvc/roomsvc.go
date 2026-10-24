@@ -447,9 +447,12 @@ type Post struct {
 	// browser tab still running the bundle from before the feed view rename.
 	Views    []string `json:"views,omitempty"`
 	Channels []string `json:"channels,omitempty"`
-	Pinned   bool     `json:"pinned,omitempty"`
-	PinnedAt int64    `json:"pinnedAt,omitempty"`
-	PinnedBy string   `json:"pinnedBy,omitempty"`
+	// ForRoot marks a post addressed to the room's root session. The owner
+	// reads it in the room chat as a post to them, so it gets the gold mark.
+	ForRoot  bool   `json:"forRoot,omitempty"`
+	Pinned   bool   `json:"pinned,omitempty"`
+	PinnedAt int64  `json:"pinnedAt,omitempty"`
+	PinnedBy string `json:"pinnedBy,omitempty"`
 }
 
 // setViews records the feed views a post shows in, and repeats them under the
@@ -586,6 +589,7 @@ func (s *Service) roomFeed(rec room.Record, keep int, cursor string, book avatar
 	out, err := s.feedOf(rec, page.Messages, page.Offset, book, reads)
 	for i := range out.Posts {
 		out.Posts[i].setViews(views.viewsFor(out.Posts[i].Message, homeOf(elsewhere, out.Posts[i].ID)))
+		out.Posts[i].ForRoot = views.addressedToRoot(out.Posts[i].Message)
 	}
 	out.Earlier, out.Newer, out.Cursor = page.Earlier, page.Newer, page.Cursor
 	out.Unread, out.FirstUnread = page.Unread, page.FirstUnread
@@ -753,6 +757,7 @@ func (s *Service) FeedSince(roomID string, offset int64) ([]Post, int64, error) 
 	for _, m := range msgs {
 		post := s.expand(decorate(m, rec.Name, reads, book), book)
 		post.setViews(views.viewsFor(m, homeOf(elsewhere, m.ID)))
+		post.ForRoot = views.addressedToRoot(m)
 		out = append(out, post)
 	}
 	return out, next, nil
