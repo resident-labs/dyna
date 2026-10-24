@@ -41,7 +41,7 @@ func TestGrokAcpFakeAgent(t *testing.T) {
 		t.Skip("subprocess helper")
 	}
 	fakeMark(fmt.Sprintf("boot %d", os.Getpid()))
-	if len(os.Args) == 0 || os.Args[len(os.Args)-1] != "stdio" && os.Args[len(os.Args)-1] != "--uid=" {
+	if len(os.Args) == 0 || os.Args[len(os.Args)-1] != "stdio" && os.Args[len(os.Args)-1] != "--uid=" && os.Args[len(os.Args)-1] != "acp" {
 		t.Fatal("ACP child must use stdio")
 	}
 	fakeMark("stdio")
@@ -95,6 +95,22 @@ func (s *fakeAgentServer) serve(conn fakeAgentConn) {
 			work()
 		}
 	}()
+	active := 0
+	var activeMu sync.Mutex
+	beginPrompt := func() bool {
+		activeMu.Lock()
+		defer activeMu.Unlock()
+		if os.Getenv("FAKE_KIMI") == "1" && active > 0 {
+			return false
+		}
+		active++
+		return true
+	}
+	endPrompt := func() {
+		activeMu.Lock()
+		active--
+		activeMu.Unlock()
+	}
 	replied := map[string]chan struct{}{}
 	repliedMu := sync.Mutex{}
 	replyWritten := func(id string) <-chan struct{} {
@@ -178,6 +194,14 @@ func (s *fakeAgentServer) serve(conn fakeAgentConn) {
 			_ = json.Unmarshal(msg.Params, &params)
 			fakeMark("model " + params.ModelID)
 			reply(msg.ID, map[string]any{})
+		case "session/set_config_option":
+			var params struct {
+				ConfigID string `json:"configId"`
+				Value    string `json:"value"`
+			}
+			_ = json.Unmarshal(msg.Params, &params)
+			fakeMark("config " + params.ConfigID + " " + params.Value)
+			reply(msg.ID, map[string]any{})
 		case "session/cancel":
 			fakeMark("cancel")
 			if dropOnCancel {
@@ -213,11 +237,17 @@ func (s *fakeAgentServer) serve(conn fakeAgentConn) {
 				reply(msg.ID, map[string]any{"stopReason": "end_turn"})
 				continue
 			}
+			if !beginPrompt() {
+				fakeMark("busy")
+				write(map[string]any{"jsonrpc": "2.0", "id": msg.ID, "error": map[string]any{"code": -32600, "message": "another turn is already in progress"}})
+				continue
+			}
 			ignoreCancel = strings.Contains(string(body), "ignoreCancel")
 			promptID, dropAfter, waitFor := scriptFacts(body)
 			dropOnCancel = dropAfter < 0
 			cancelForPrompt := cancel
 			promptQueue <- func() {
+				defer endPrompt()
 				stopReason, cancelled := s.runScript(write, session, cancelForPrompt, body)
 				if cancelled {
 					stopReason = "cancelled"
@@ -334,6 +364,9 @@ func acpTestEnv(t *testing.T, scriptDir string) (map[string]string, string) {
 	}
 	script := fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'grok 1.0.62 (fake) [stable]'; exit 0; fi\nGO_GROK_ACP_FAKE=1 FAKE_SCRIPT=%s FAKE_MARK=%s FAKE_SESSION_ID=%s exec '%s' -test.run=^TestGrokAcpFakeAgent$ -- \"$@\"\n", scriptDir, mark, os.Getenv("FAKE_SESSION_ID"), testBin)
 	if err := os.WriteFile(filepath.Join(bin, "grok"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "kimi"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("DYNA_STEER_HOOKS", "off")

@@ -46,10 +46,28 @@ type InitializeResult struct {
 // SessionSetup is the shared shape of session/new, session/load and
 // session/resume replies.
 type SessionSetup struct {
-	SessionID string          `json:"sessionId"`
-	Modes     json.RawMessage `json:"modes"`
-	Models    json.RawMessage `json:"models"`
-	Meta      json.RawMessage `json:"_meta"`
+	SessionID     string                `json:"sessionId"`
+	Modes         json.RawMessage       `json:"modes"`
+	Models        json.RawMessage       `json:"models"`
+	ConfigOptions []SessionConfigOption `json:"configOptions"`
+	Meta          json.RawMessage       `json:"_meta"`
+}
+
+// SessionConfigOption is one model, thinking, or mode selector returned by ACP.
+type SessionConfigOption struct {
+	Type         string                      `json:"type"`
+	ID           string                      `json:"id"`
+	Name         string                      `json:"name"`
+	Category     string                      `json:"category"`
+	CurrentValue string                      `json:"currentValue"`
+	Options      []SessionConfigSelectOption `json:"options"`
+}
+
+// SessionConfigSelectOption is one allowed value of a select option.
+type SessionConfigSelectOption struct {
+	Value       string `json:"value"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
 }
 
 // ModelState is grok's session models extension on setup replies.
@@ -64,14 +82,28 @@ type ModelState struct {
 
 // CurrentModel decodes the setup reply's models extension when present.
 func (s SessionSetup) CurrentModel() (string, bool) {
-	if len(s.Models) == 0 {
-		return "", false
+	if len(s.Models) != 0 {
+		var state ModelState
+		if json.Unmarshal(s.Models, &state) == nil && state.CurrentModelID != "" {
+			return state.CurrentModelID, true
+		}
 	}
-	var state ModelState
-	if json.Unmarshal(s.Models, &state) != nil || state.CurrentModelID == "" {
-		return "", false
+	for _, option := range s.ConfigOptions {
+		if option.ID == "model" && option.CurrentValue != "" {
+			return option.CurrentValue, true
+		}
 	}
-	return state.CurrentModelID, true
+	return "", false
+}
+
+// CurrentThinking reads Kimi's thought_level config option.
+func (s SessionSetup) CurrentThinking() (string, bool) {
+	for _, option := range s.ConfigOptions {
+		if option.ID == "thinking" && option.CurrentValue != "" {
+			return option.CurrentValue, true
+		}
+	}
+	return "", false
 }
 
 // PromptBlock is one content block of a prompt.
@@ -236,4 +268,14 @@ func (a *Agent) SetModel(ctx context.Context, sessionID, modelID string) error {
 // SetMode selects the advertised native permission mode.
 func (a *Agent) SetMode(ctx context.Context, sessionID, modeID string) error {
 	return a.c.Request(ctx, "session/set_mode", map[string]any{"sessionId": sessionID, "modeId": modeID}, nil)
+}
+
+// SetConfigOption changes one ACP session config option, such as thinking.
+func (a *Agent) SetConfigOption(ctx context.Context, sessionID, configID, value string) error {
+	params := struct {
+		SessionID string `json:"sessionId"`
+		ConfigID  string `json:"configId"`
+		Value     string `json:"value"`
+	}{SessionID: sessionID, ConfigID: configID, Value: value}
+	return a.c.Request(ctx, "session/set_config_option", params, nil)
 }
