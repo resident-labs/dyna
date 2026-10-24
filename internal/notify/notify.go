@@ -1446,7 +1446,11 @@ func (s *Service) CompleteShell(ctx context.Context, e ShellExit) (Result, error
 	ev := room.ShellEvent{ShellID: e.ID, Label: shellLabel(e.Command, e.Description), State: state, ExitCode: e.Code,
 		DurationMS: int(e.Duration.Milliseconds()), Output: outputLines(e.Tail), Parent: e.Parent,
 		Detail: "Full output: dyna shell tail " + e.ID}
-	plan, err := s.prepareEventCompletion(e.RoomID, ev, s.parentTargets(rec.Name, e.Parent), 0, true)
+	// A command a session ran is that session's own: its result reaches the
+	// session alone and lives in the session's DM, so the room chat never lists
+	// it and root gets no copy. A shell with no session is the owner's command,
+	// and its result goes to the room owner, where root reads it.
+	plan, err := s.prepareEventCompletion(e.RoomID, ev, s.parentTargets(rec.Name, e.Parent), 0, e.Parent == "")
 	if err != nil || plan == nil {
 		return Result{}, err
 	}

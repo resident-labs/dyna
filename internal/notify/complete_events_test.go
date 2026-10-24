@@ -34,10 +34,13 @@ func TestShellCompletionPostsTypedResult(t *testing.T) {
 	if ev.Parent != f.lead.ID {
 		t.Fatalf("shell parent = %q, want %q", ev.Parent, f.lead.ID)
 	}
-	// The parent hears it, and the owner feed keeps the result without an owner
-	// report: no one owes the owner a report for a child's own command.
-	if !reflect.DeepEqual(res.Message.To, []string{f.lead.Address(), f.a.Name}) || res.Message.OwnerReport {
+	// The session hears it alone: a command the session ran is the session's own,
+	// so its result lives in that session's DM and the room feed carries no copy.
+	if !reflect.DeepEqual(res.Message.To, []string{f.lead.Address()}) || res.Message.OwnerReport {
 		t.Fatalf("shell recipients = %v, owner report = %v", res.Message.To, res.Message.OwnerReport)
+	}
+	if home := room.HomeFor(res.Message, f.a.Name, ""); home != room.DMConversation(f.lead.ID) {
+		t.Fatalf("shell home = %q, want the session DM %q", home, room.DMConversation(f.lead.ID))
 	}
 	if !res.Message.Wake || wakesRoot(res.Message, f.a.Name) {
 		t.Fatalf("a child's shell result must wake the child and not root: wake %v", res.Message.Wake)
