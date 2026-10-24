@@ -9,6 +9,7 @@ import (
 	"dyna-agent/internal/shells"
 	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/terminalsvc"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,6 +90,26 @@ func TestFullCompletionText(t *testing.T) {
 	got, cut := FullCompletionText("a:b", 1, "completed", big, "")
 	if !cut || !strings.Contains(got, "Cut at 64 KB") || strings.Count(got, "```")%2 != 0 || strings.Contains(got, "dyna subagent output") {
 		t.Fatalf("cut text tail = %q", got[len(got)-120:])
+	}
+}
+
+// The cache keeps a bounded set of recent full results instead of every
+// completion the engine ever served.
+func TestResultCacheEvictsOldest(t *testing.T) {
+	cache := newResultCache()
+	for i := 0; i < resultCacheEntries+1; i++ {
+		id := fmt.Sprintf("msg_%016x", i)
+		cache.Add(id, fullResult{text: id})
+	}
+	if got := cache.Len(); got != resultCacheEntries {
+		t.Fatalf("cache holds %d entries, want at most %d", got, resultCacheEntries)
+	}
+	if _, ok := cache.Get(fmt.Sprintf("msg_%016x", 0)); ok {
+		t.Fatal("the oldest result was not evicted")
+	}
+	newest := fmt.Sprintf("msg_%016x", resultCacheEntries)
+	if got, ok := cache.Get(newest); !ok || got.text != newest {
+		t.Fatalf("newest result = %+v, %v; want it retained", got, ok)
 	}
 }
 
