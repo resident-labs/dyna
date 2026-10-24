@@ -298,6 +298,33 @@ func TestCacheRepairRefusesUnsafeLinks(t *testing.T) {
 		}
 	})
 
+	t.Run("link with no target", func(t *testing.T) {
+		base := filepath.Join(t.TempDir(), "base")
+		if err := os.MkdirAll(base, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		targetParent := t.TempDir()
+		target := filepath.Join(targetParent, "missing")
+		link := filepath.Join(base, "go-build")
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+		out, err := exec.Command("bash", "-c", cacheRepairScript(base, time.Minute)).CombinedOutput()
+		var exit *exec.ExitError
+		if !errors.As(err, &exit) || exit.ExitCode() != 69 || !strings.Contains(string(out), "dangling") {
+			t.Fatalf("repair accepted a link whose target does not exist: %v: %s", err, out)
+		}
+		if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("repair changed the dangling link: %v", err)
+		}
+		if _, err := os.Lstat(link + ".before-d48"); !os.IsNotExist(err) {
+			t.Fatalf("repair made a backup for a dangling link: %v", err)
+		}
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Fatalf("repair created the missing target: %v", err)
+		}
+	})
+
 	t.Run("existing backup", func(t *testing.T) {
 		base := filepath.Join(t.TempDir(), "base")
 		target := t.TempDir()
