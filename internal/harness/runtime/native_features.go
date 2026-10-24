@@ -158,6 +158,7 @@ var nativeFeaturePolicies = map[string]nativeFeaturePolicy{
 		// into the private config without replacing providers or models.
 		Env: map[string]string{
 			"KIMI_DISABLE_CRON":                          "1",
+			"KIMI_CODE_BUILTIN_PRODUCT_SKILLS":           "0",
 			"KIMI_CODE_EXPERIMENTAL_FLAG":                "0",
 			"KIMI_CODE_EXPERIMENTAL_TOWER":               "0",
 			"KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK":       "0",
@@ -172,7 +173,7 @@ var nativeFeaturePolicies = map[string]nativeFeaturePolicy{
 			"builtin_product_skills":  false,
 			"tools.disabled": []string{
 				"Agent", "AgentSwarm", "AskUserQuestion", "UpdateGoal", "TodoList",
-				"WebSearch", "FetchURL",
+				"EnterPlanMode", "ExitPlanMode", "WebSearch", "FetchURL",
 				"CronCreate", "CronList", "CronDelete",
 				"TowerInit", "TowerPlan", "TowerSpawn", "TowerMerge", "TowerRebase",
 				"TowerTeardown", "TowerComplete", "TowerSend", "TowerInbox",

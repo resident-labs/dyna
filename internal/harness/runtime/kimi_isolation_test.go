@@ -33,7 +33,7 @@ func TestKimiGenerationDisablesConflictingNativeFeatures(t *testing.T) {
 	if document.DefaultPlanMode || document.DefaultPermissionMode != "auto" || document.Telemetry || document.BuiltinProductSkills {
 		t.Fatalf("headless or built-in defaults are not disabled: %+v", document)
 	}
-	for _, name := range []string{"Agent", "AgentSwarm", "AskUserQuestion", "UpdateGoal", "TodoList", "WebSearch", "FetchURL", "Bash"} {
+	for _, name := range []string{"Agent", "AgentSwarm", "AskUserQuestion", "UpdateGoal", "TodoList", "EnterPlanMode", "ExitPlanMode", "WebSearch", "FetchURL", "Bash"} {
 		if !strings.Contains(string(raw), name) {
 			t.Errorf("tools.disabled lacks %s", name)
 		}
@@ -69,8 +69,9 @@ func TestKimiGenerationDisablesConflictingNativeFeatures(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := a.NativeEnv(home)
+	env["KIMI_CODE_BUILTIN_PRODUCT_SKILLS"] = "1"
 	applyNativeFeatureEnvironment("kimi-code", env)
-	if env["KIMI_CODE_TRUST_WORKSPACE"] != "0" || env["KIMI_CODE_NO_AUTO_UPDATE"] != "1" || env["KIMI_DISABLE_TELEMETRY"] != "1" {
+	if env["KIMI_CODE_TRUST_WORKSPACE"] != "0" || env["KIMI_CODE_NO_AUTO_UPDATE"] != "1" || env["KIMI_DISABLE_TELEMETRY"] != "1" || env["KIMI_CODE_BUILTIN_PRODUCT_SKILLS"] != "0" {
 		t.Fatalf("isolation environment = %+v", env)
 	}
 	data, err = os.ReadFile(filepath.Join(g.Directory, "settings.json"))
