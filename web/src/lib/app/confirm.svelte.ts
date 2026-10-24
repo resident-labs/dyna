@@ -77,6 +77,13 @@ function dismiss() {
   confirm = null
 }
 
+function forceCloseLines(responsibilities: Responsibility[], detail?: string): string[] {
+  const lines = detail ? [detail] : []
+  lines.push(...responsibilities.map((item) => item.text))
+  lines.push('Retry after fixing the error, or force close. Goals move to the owner; other work stays unresolved.')
+  return lines
+}
+
 let confirmText = $derived.by((): ConfirmText | null => {
   if (!confirm) return null
   if (confirm.kind === 'promote') {
@@ -87,11 +94,9 @@ let confirmText = $derived.by((): ConfirmText | null => {
     }
   }
   if (confirm.kind === 'forceclose') {
-    const items = confirm.items.map((item) => item.text)
-    if (!items.length && confirm.detail) items.push(confirm.detail)
     return {
       title: `Could not hand over all work from ${confirm.m.name}`,
-      lines: [...items, 'Retry after fixing the error, or force close. Goals move to the owner; other work stays unresolved.'],
+      lines: forceCloseLines(confirm.items, confirm.detail),
       action: 'Close anyway',
     }
   }

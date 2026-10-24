@@ -22,16 +22,24 @@ test('closing shows the returned handoff until the user dismisses it', async () 
 })
 
 test('failed handoff shows typed responsibilities before offering force close', async () => {
-  const items = [{ kind: 'pr', id: 'github.com/owner/repo#17', text: 'PR #17 author has no open ancestor or root' }]
+  const detail = 'handoff failed without legacy prose'
+  const itemText = 'PR #17 author has no open ancestor or root'
+  const items = [{ kind: 'pr', id: 'github.com/owner/repo#17', text: itemText }]
   const app = {
     confirm: { kind: 'close', m: { id: 'one', name: 'worker' }, items: [] as typeof items },
     closeResult: null, errorText, allowsForceClose, closeRecoveryOf,
     roomId: 'room',
-    api: { closeSession: async () => { throw { message: 'handoff failed without legacy prose', close: { reason: 'responsibilities', actions: ['force-close'], items } } } },
+    api: { closeSession: async () => { throw { message: detail, close: { reason: 'responsibilities', actions: ['force-close'], items } } } },
   }
   installConfirm(app)
   await call(app, 'runConfirm')
   assert.equal(app.confirm.kind, 'forceclose')
   assert.deepEqual([...app.confirm.items], items)
+  assert.equal(Reflect.get(app.confirm, 'detail'), detail)
+  assert.deepEqual(JSON.parse(JSON.stringify(call(app, 'forceCloseLines', app.confirm.items, Reflect.get(app.confirm, 'detail')))), [
+    detail,
+    itemText,
+    'Retry after fixing the error, or force close. Goals move to the owner; other work stays unresolved.',
+  ])
   assert.equal(app.closeResult, null)
 })
