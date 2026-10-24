@@ -83,9 +83,9 @@ func (s *Service) ruleNotice(ctx context.Context, r room.Record, scope string, r
 	if err != nil {
 		return err
 	}
-	if err := goals.PostRuleNotice(s.rooms(), r, rule, who, verb); err != nil {
+	sessions := s.Notify.Sessions.NoteRoomInstructions(ctx, goals.RoomOfScope(scope))
+	if err := goals.PostRuleNotice(s.rooms(), r, rule, who, verb, sessions); err != nil {
 		log.Printf("rule %s was saved, but its room notice failed: %v", rule.ID, err)
 	}
-	s.Notify.Sessions.NoteRoomInstructions(ctx, goals.RoomOfScope(scope))
 	return nil
 }

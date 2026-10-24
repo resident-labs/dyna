@@ -117,6 +117,9 @@ const (
 
 	// TypeSummary tells a check-in apart from any other event of its family.
 	TypeSummary EventType = "summary"
+	// TypeInstructionBatch is one owner-facing summary of a shared instruction
+	// change. Each session still gets its own agent-facing note.
+	TypeInstructionBatch EventType = "instruction-batch"
 	// TypeSlowTest is the CI health line about a test over the limit.
 	TypeSlowTest EventType = "slow-test"
 	// TypeChanged is a rule that someone added, edited or removed.
@@ -396,6 +399,9 @@ type RuleEvent struct {
 	Verb  RuleVerb `json:"verb"`
 	// Text is the rule's own text, empty when it was removed.
 	Text string `json:"text,omitempty"`
+	// Sessions lists the open sessions whose instruction note carries this
+	// change. The rule row shows one reach count instead of one row per session.
+	Sessions []string `json:"sessions,omitempty"`
 }
 
 func (RuleEvent) eventFamily() EventFamily { return FamilyRule }
@@ -996,6 +1002,32 @@ func (s SessionEvent) eventDedupe() string {
 		return s.Transfer
 	}
 	return s.Profile
+}
+
+// InstructionBatchEvent summarizes one shared instruction change for the
+// owner. The per-session SessionEvent remains the agent's own input in its DM;
+// this quiet room event replaces the burst of owner-facing session rows.
+type InstructionBatchEvent struct {
+	Sections []InstructionChange `json:"sections"`
+	Sessions []string            `json:"sessions"`
+	// Notes names the per-session posts this summary replaces in the owner
+	// feed. Root context skips those source posts and reads this row once.
+	Notes []string `json:"notes"`
+}
+
+func (InstructionBatchEvent) eventFamily() EventFamily { return FamilySession }
+func (InstructionBatchEvent) eventType() EventType     { return TypeInstructionBatch }
+func (b InstructionBatchEvent) eventSubject() string   { return strings.Join(b.Sessions, "\x00") }
+
+// eventDedupe is a fallback for callers without a source-note ID. The manager
+// supplies an ID derived from the source notes, so a later identical edit is a
+// new batch while a retry keeps its post.
+func (b InstructionBatchEvent) eventDedupe() string {
+	lines := make([]string, len(b.Sections))
+	for i, change := range b.Sections {
+		lines[i] = string(change.Action) + " " + change.Name + "\x00" + strings.Join(change.Added, "\x01") + "\x00" + strings.Join(change.Removed, "\x01") + "\x02" + change.Body
+	}
+	return strings.Join(lines, "\x00")
 }
 
 // AlertSource is what observed the condition an alert reports.
@@ -1929,6 +1961,19 @@ var eventSpecs = []EventSpec{
 		Once:     true,
 		Text:     "[DYNA INSTRUCTIONS CHANGED] Since this conversation started, your standing instructions changed. These changes apply now:",
 	},
+	// A shared change has one quiet owner row. The per-session notes above
+	// remain agent input in each session's DM.
+	{
+		Family:   FamilySession,
+		Type:     TypeInstructionBatch,
+		Renderer: "InstructionBatchCard",
+		Payload:  reflect.TypeOf(InstructionBatchEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Audience: AudienceRoom,
+		Once:     true,
+		Text:     "Standing instructions changed for {sessions}.",
+	},
 	{
 		Family:   FamilySession,
 		Type:     EventType(SessionSeat),
@@ -2784,6 +2829,20 @@ func (m Message) Session() (SessionEvent, bool) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil || ev.Type == "" {
 		return SessionEvent{}, false
+	}
+	return ev, true
+}
+
+// InstructionBatch returns the payload of a shared instruction-change summary.
+func (m Message) InstructionBatch() (InstructionBatchEvent, bool) {
+	if m.Kind != string(FamilySession) || m.Notice.Kind != string(TypeInstructionBatch) || len(m.Payload.raw) == 0 {
+		return InstructionBatchEvent{}, false
+	}
+	var ev InstructionBatchEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || len(ev.Sections) == 0 || len(ev.Sessions) == 0 || len(ev.Notes) == 0 {
+		return InstructionBatchEvent{}, false
 	}
 	return ev, true
 }
