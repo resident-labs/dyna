@@ -174,7 +174,7 @@ test('issue work uses local goal and PR progress plus GitHub work facts', () => 
 })
 
 test('Issues default to Unhandled and In progress names the goal holder and PR', async () => {
-  const active = { ...localIssue, state: 'goal', goalId: 'g1', inProgress: true, goalHolder: 'ana', fixPr: 42 }
+  const active = { ...localIssue, state: 'open', goalId: 'g1', inProgress: true, goalHolder: 'ana', fixPr: 42 }
   const finished = { ...localIssue, id: 'msg_finished', number: 13, title: 'Finished goal', state: 'goal', goalId: 'g2', inProgress: false }
   const r = await render([], { localIssues: [active, finished] }, microtasks)
   try {
