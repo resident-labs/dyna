@@ -84,6 +84,7 @@ var signInSpecs = map[string]signInSpec{
 	"claude-code": {Parse: parseClaudeCodeSignIn, AcceptsPaste: true},
 	"codex":       {Argv: codexDeviceArgv, Parse: parseCodexSignIn, Timeout: signInTimeout},
 	"grok":        {Argv: grokDeviceArgv, Parse: parseGrokSignIn},
+	"kimi-code":   {Argv: kimiSignInArgv, Parse: parseKimiSignIn, AcceptsPaste: true, GracefulStop: true},
 	"muse":        {Argv: museDeviceArgv, Parse: parseMuseSignIn},
 	"opencode":    {Argv: openCodeDeviceArgv, Parse: parseOpenCodeSignIn},
 }
@@ -208,9 +209,9 @@ func (s *privateSignIn) closeStdin() {
 
 // signInEnv merges the login environment over the engine's own and drops
 // DYNA_* so the child never inherits session state.
-func signInEnv(overrides []string) []string {
+func signInEnv(harness string, overrides []string) []string {
 	// The login prints plain text for the card, not a full-screen UI.
-	return childenv.Merge(os.Environ(), overrides, "dumb")
+	return childenv.Merge(NativeEnvironmentBase(harness, os.Environ()), overrides, "dumb")
 }
 
 // findPrivateLogin returns the running flow for an account, or nil.
@@ -292,7 +293,7 @@ func (a *Runtime) startPrivateSignIn(id, harness string, spec signInSpec, flow *
 	out, writer := io.Pipe()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = flow.Cwd
-	cmd.Env = signInEnv(flow.Env)
+	cmd.Env = signInEnv(harness, flow.Env)
 	cmd.Stdout, cmd.Stderr = writer, writer
 	// The child has no terminal, so it starts its own process group and a
 	// cancel kills the whole group.

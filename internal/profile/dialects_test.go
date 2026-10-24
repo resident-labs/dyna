@@ -14,7 +14,7 @@ func TestHarnessDefaultDialects(t *testing.T) {
 		HarnessClaudeCode: "claude-stream-json", HarnessCodex: "codex-jsonl",
 		HarnessAntigravity: "acp-json",
 		HarnessOpenCode:    "opencode-json", HarnessMuse: "muse-jsonl",
-		HarnessGrok: "acp-json", HarnessPi: "pi-json",
+		HarnessGrok: "acp-json", HarnessPi: "pi-json", HarnessKimiCode: "acp-json",
 		HarnessCustom: "text", HarnessMock: "text",
 	} {
 		t.Run(harness, func(t *testing.T) {

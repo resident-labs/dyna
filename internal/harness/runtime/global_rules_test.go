@@ -20,6 +20,7 @@ func TestGenerationRemovesLegacyGlobalRulesFiles(t *testing.T) {
 		"opencode":    "AGENTS.md",
 		"grok":        "AGENTS.md",
 		"pi":          "AGENTS.md",
+		"kimi-code":   "AGENTS.md",
 		"muse":        "~/.config/muse/AGENTS.md",
 		"antigravity": "~/.gemini/GEMINI.md",
 	}

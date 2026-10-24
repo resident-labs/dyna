@@ -27,6 +27,7 @@ const (
 	HarnessMuse        = "muse"
 	HarnessGrok        = "grok"
 	HarnessPi          = "pi"
+	HarnessKimiCode    = "kimi-code"
 	HarnessCustom      = "custom"
 	HarnessMock        = "mock"
 	AntigravityModel   = "gemini-3.8-flash-high"
