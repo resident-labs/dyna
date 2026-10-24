@@ -1,11 +1,23 @@
 // Package sessionclose defines the dependency-free session close recovery contract.
 package sessionclose
 
+// ResponsibilityKind identifies one kind of owned work.
+type ResponsibilityKind string
+
+const (
+	ResponsibilityPR       ResponsibilityKind = "pr"
+	ResponsibilityGoal     ResponsibilityKind = "goal"
+	ResponsibilityItem     ResponsibilityKind = "item"
+	ResponsibilityQuestion ResponsibilityKind = "question"
+	ResponsibilityChild    ResponsibilityKind = "child"
+	ResponsibilityShell    ResponsibilityKind = "shell"
+	ResponsibilityWorkflow ResponsibilityKind = "workflow"
+)
+
 // Responsibility is one thing a session owns.
 type Responsibility struct {
-	// Kind is pr, goal, item, question, child, shell or workflow.
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
+	Kind ResponsibilityKind `json:"kind"`
+	ID   string             `json:"id"`
 	// Text names the item and the command that ends or moves it.
 	Text string `json:"text"`
 }
