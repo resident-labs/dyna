@@ -422,7 +422,9 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 		if s.RunNodeCI != nil {
 			result, err = s.RunNodeCI(ctx, node, req)
 		} else {
-			result, err = (localci.Runner{DataDir: filepath.Dir(s.Store.Root), Node: &node}).Run(ctx, req)
+			runner := localci.Runner{DataDir: filepath.Dir(s.Store.Root), Node: &node}
+			runner.OnCacheRepair = s.CacheRepairReporter(job.record.RoomID)
+			result, err = runner.Run(ctx, req)
 		}
 		// The node work is over: its teardown has stopped the keeper and released
 		// the machine's locks.

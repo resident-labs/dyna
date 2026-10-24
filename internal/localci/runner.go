@@ -31,6 +31,10 @@ type Command func(context.Context, string, io.Reader, io.Writer, io.Writer, stri
 type Runner struct {
 	DataDir string
 	Command Command
+	// OnCacheRepair reports a run that switched linked managed caches back to
+	// real directories, so the caller can publish one typed event. The runner
+	// reports it even when the run fails afterwards.
+	OnCacheRepair CacheRepairReporter
 	// Node is the registered CI machine that runs the checks. A run needs one:
 	// there is no other execution pipeline.
 	Node *Node
