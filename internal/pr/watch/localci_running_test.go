@@ -26,9 +26,10 @@ func (r *runningCIRegistry) LoadResult(context.Context, string, string) (localci
 	return localci.Result{}, os.ErrNotExist
 }
 
-// A run in flight names its machine, its slots and its PR, and it leaves the
-// snapshot when it ends.
-func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
+// scheduledCIRunFixture offers one PR whose head needs local CI, and a service
+// that can schedule it.
+func scheduledCIRunFixture(t *testing.T) (*Service, State, time.Time) {
+	t.Helper()
 	repo := t.TempDir()
 	git := func(args ...string) string {
 		t.Helper()
@@ -62,6 +63,15 @@ func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
 	started := time.Unix(1000, 0)
 	s := &Service{Store: &Store{Root: root}, LocalCIRegistry: &runningCIRegistry{}, Now: func() time.Time { return started }}
 	s.GH.run = func(context.Context, *exec.Cmd) error { return nil }
+	return s, saved, started
+}
+
+// A run in flight names its machine, its slots and its PR, and it leaves the
+// snapshot when it ends.
+func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
+	s, saved, started := scheduledCIRunFixture(t)
+	record := saved.Records["pr"]
+	head := record.Head
 	running := make(chan string, 1)
 	s.RunNodeCI = func(ctx context.Context, node localci.Node, _ localci.Request) (localci.Result, error) {
 		running <- node.Name
@@ -104,7 +114,7 @@ func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
 
 	// The PR is no longer tracked, so the run is cancelled and must leave the
 	// snapshot for clients.
-	if err := state.Write(root, State{Version: 1, Records: map[string]*Record{}}); err != nil {
+	if err := state.Write(s.Store.Root, State{Version: 1, Records: map[string]*Record{}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.scheduleRegisteredCI(context.Background(), State{Version: 1}); err != nil {
@@ -117,5 +127,51 @@ func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
 		case <-time.After(5 * time.Second):
 			t.Fatalf("finished run stayed in the snapshot: %+v", s.RunningCI())
 		}
+	}
+}
+
+// A local CI run must end with its engine. A run that outlives the engine leaves
+// a keeper on the machine, and that keeper holds the cache lock for hours, so an
+// engine that stops cancels its runs and waits for their node work to end.
+func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
+	s, saved, _ := scheduledCIRunFixture(t)
+	head := saved.Records["pr"].Head
+	started := make(chan struct{})
+	cancelled := make(chan struct{})
+	teardown := make(chan struct{})
+	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
+		close(started)
+		<-ctx.Done()
+		close(cancelled)
+		// The node work is not over: its containers and keeper are still there.
+		<-teardown
+		return localci.Result{}, ctx.Err()
+	}
+	if err := s.scheduleRegisteredCI(context.Background(), saved); err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	stopped := make(chan []string, 1)
+	go func() { stopped <- s.StopLocalCI(context.Background()) }()
+	<-cancelled
+	select {
+	case left := <-stopped:
+		t.Fatalf("engine stop returned before the run ended its node work: %v", left)
+	default:
+	}
+	// A run still working at the deadline is named for the log.
+	expired, cancel := context.WithCancel(context.Background())
+	cancel()
+	if left := s.StopLocalCI(expired); len(left) != 1 || left[0] != head[:7]+" on hermes" {
+		t.Fatalf("leftover runs = %v, want %s on hermes", left, head[:7])
+	}
+	close(teardown)
+	select {
+	case left := <-stopped:
+		if len(left) != 0 {
+			t.Fatalf("engine stop reported %v", left)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("engine stop did not wait for the run")
 	}
 }
