@@ -79,15 +79,15 @@ func (f *fakeLocalCI) Run(ctx context.Context, req localci.Request) (localci.Res
 			status = localci.OutcomeFailed
 		}
 	}
-	var suites []localci.SuiteResult
-	for _, name := range localci.DefaultSuites() {
-		suites = append(suites, localci.SuiteResult{Suite: name, Status: status})
+	var checks []localci.SuiteResult
+	for _, name := range localci.RequiredChecks(localci.WorkflowSuites()) {
+		checks = append(checks, localci.SuiteResult{Suite: localci.Suite(name), CheckName: name, Node: "local", Status: status})
 	}
 	errText := ""
 	if status == localci.OutcomeFailed {
 		errText = "bad change failed"
 	}
-	result := localci.Result{Repo: req.Repo, SHA: req.SHA, Status: status, Suites: suites, Error: errText}
+	result := localci.Result{Repo: req.Repo, SHA: req.SHA, Node: "local", Status: status, Suites: checks, Checks: checks, Error: errText}
 	f.mu.Lock()
 	f.results[req.SHA] = result
 	f.mu.Unlock()
@@ -495,6 +495,20 @@ func TestLocalLaneGitHubFactsAndPublicationAreHeld(t *testing.T) {
 		t.Fatalf("checkout-free refresh overwrote facts: %+v", got)
 	}
 
+}
+
+func TestLocalCIReadsNodeChecks(t *testing.T) {
+	result := localci.Result{Repo: "repo", SHA: "head", Node: "hermeslab", Status: localci.OutcomePassed}
+	for _, name := range localci.RequiredChecks(localci.WorkflowSuites()) {
+		result.Checks = append(result.Checks, localci.SuiteResult{Suite: localci.Suite(name), CheckName: name, Node: "hermeslab", Status: localci.OutcomePassed})
+	}
+	if status, _, _, err := localCIStatus(result, "repo", "head"); err != nil || status != VerdictPassed {
+		t.Fatalf("complete node checks did not pass: %s %v", status, err)
+	}
+	result.Checks = result.Checks[:len(result.Checks)-1]
+	if status, _, _, err := localCIStatus(result, "repo", "head"); err != nil || status != VerdictPending {
+		t.Fatalf("partial node checks did not stay pending: %s %v", status, err)
+	}
 }
 
 func TestLocalCIRequiresEachDefaultSuiteToPass(t *testing.T) {
