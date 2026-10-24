@@ -172,6 +172,12 @@ func (d *daemon) dispatch(ctx context.Context, r Request) (any, error) {
 	if err := ValidateID(r.Session); err != nil {
 		return nil, err
 	}
+	if r.Op == "stream.check" {
+		if err := CheckStreamInstalled(); err != nil {
+			return nil, err
+		}
+		return struct{}{}, nil
+	}
 	d.mu.Lock()
 	s := d.computers[r.Session]
 	if r.Op == "register" {

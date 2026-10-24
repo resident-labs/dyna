@@ -37,6 +37,9 @@ func TestStatusExplainsUnavailableDesktopOrStream(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- computers.Serve(ctx, listener, func(_ context.Context, r computers.Request) (any, error) {
+			if r.Op == "stream.check" {
+				return struct{}{}, nil
+			}
 			if r.Op != "status" {
 				return nil, fmt.Errorf("status must not create a desktop: %s", r.Op)
 			}
@@ -87,9 +90,9 @@ func TestStatusExplainsUnavailableDesktopOrStream(t *testing.T) {
 }
 
 func TestStatusDoctorReportsMissingWayVNC(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
 	state := computers.Status{State: computers.StateRunning, Renderer: "gles2"}
-	if got, want := statusDoctor(state), "the screen streamer (wayvnc) is not installed"; got != want {
+	streamErr := &computers.StreamError{Code: computers.StreamWayVNCMissing}
+	if got, want := statusDoctor(state, streamErr), "the screen streamer (wayvnc) is not installed"; got != want {
 		t.Fatalf("doctor = %q, want %q", got, want)
 	}
 }
