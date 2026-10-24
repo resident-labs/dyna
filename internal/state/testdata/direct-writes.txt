@@ -174,7 +174,7 @@ not-state internal/plan/plan.go writeGraph 1 # immutable generated graph blob, w
 not-state internal/pr/state/write.go update 1 # opens the cross-process lock file, which holds no data
 not-state internal/pr/state/write.go write 1 # creates the lock file for shared readers; it holds no data
 not-state internal/pr/trial/git.go Client.PrepareReview 2 # reviewer input patches, written read-only into the review folder
-not-state internal/pr/trial/git.go Client.repository 1 # a temporary git clone under the trial scratch folder, removed on return
+not-state internal/pr/trial/git.go Client.repositoryWithBranch 1 # a temporary git clone under the trial scratch folder, removed on return
 not-state internal/pr/view/testfixture/fixture.go FakeGHWithPull 3 # test fixture files: a fake gh script and its data
 not-state internal/pr/watch/github.go Service.PostReview 1 # a temporary JSON payload for gh api --input, removed after the call
 not-state internal/pr/watch/merge_failure_report.go Service.mergeFailureCandidates 1 # a temporary git work folder, removed on return

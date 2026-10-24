@@ -65,6 +65,6 @@ func (s *Service) MergeFix(ctx context.Context, key string) error {
 	if !ready {
 		return fmt.Errorf("repair PR is not eligible after fresh head, approval, CI, policy and pause checks")
 	}
-	_, err = s.publishMerge(ctx, current, children)
+	_, err = s.publishMerge(ctx, current, children, nil)
 	return err
 }
