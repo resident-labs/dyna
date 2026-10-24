@@ -38,9 +38,10 @@ type Writer struct {
 	appendMu sync.Mutex // orders appends and their events
 	mirrorMu sync.Mutex // orders rollback copies, stamps and imports
 
-	events     sync.Mutex  // guards pending, publishing and idle
+	events     sync.Mutex  // guards pending, publishing, closed and idle
 	pending    []hub.Event // committed changes waiting to publish, oldest first
 	publishing bool        // a caller or the background goroutine publishes
+	closed     bool        // a close stopped this Writer's publishing
 	idle       *sync.Cond  // signals that publishing became false
 
 	mu       sync.Mutex
@@ -56,8 +57,16 @@ var writers = struct {
 	byDB map[*sql.DB]*Writer
 }{byDB: map[*sql.DB]*Writer{}}
 
-// A closed handle's Writer goes with it; a later Open makes a new handle.
+// A closed handle's Writer goes with it; a later Open makes a new handle. The
+// Writer stops publishing before the handle closes, because a publish may read
+// the database it was raised from.
 func init() {
+	database.OnClosing(func(db *sql.DB) {
+		writers.Lock()
+		w := writers.byDB[db]
+		writers.Unlock()
+		w.Close()
+	})
 	database.OnClose(func(db *sql.DB) {
 		writers.Lock()
 		delete(writers.byDB, db)
@@ -94,6 +103,27 @@ func newWriter(db *sql.DB) *Writer { return &Writer{db: db} }
 // caller's publish under its own locks. publish must still not take a lock
 // that the writing caller can hold, and must not call WaitPublished.
 func (w *Writer) SetPublish(publish func(hub.Event)) { w.publish.Store(&publish) }
+
+// Close stops this Writer from publishing and returns after a publish that is
+// already running ends, including changes queued behind it. Whoever closes what
+// a publish reads, such as the database, may do it after Close returns. A write
+// that commits later still writes but publishes nothing, so no publish reaches
+// a closed handle. Close is safe to call more than once and on a nil Writer.
+// publish must not call Close.
+func (w *Writer) Close() {
+	if w == nil {
+		return
+	}
+	w.events.Lock()
+	defer w.events.Unlock()
+	w.closed = true
+	if w.idle == nil {
+		w.idle = sync.NewCond(&w.events)
+	}
+	for w.publishing {
+		w.idle.Wait()
+	}
+}
 
 type done struct {
 	at   time.Time
@@ -211,6 +241,9 @@ func (w *Writer) queue(c hub.Event) func() {
 	}
 	w.events.Lock()
 	defer w.events.Unlock()
+	if w.closed {
+		return nil
+	}
 	if w.publishing {
 		w.pending = append(w.pending, c)
 		return nil
