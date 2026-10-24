@@ -50,7 +50,7 @@ func TestResponsibilityCountsMatchOneSessionReads(t *testing.T) {
 		}
 		alone := map[string]int{}
 		for _, item := range items {
-			alone[item.Kind]++
+			alone[string(item.Kind)]++
 		}
 		if len(alone) != len(counts[info.ID]) {
 			t.Fatalf("bulk counts for %s = %v, one-session read = %v", info.Address(), counts[info.ID], alone)

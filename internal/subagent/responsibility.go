@@ -55,7 +55,7 @@ func (m *Manager) ResponsibilityCounts(ctx context.Context, infos []Info) (map[s
 			byKind = map[string]int{}
 			counts[item.info.ID] = byKind
 		}
-		byKind[item.r.Kind]++
+		byKind[string(item.r.Kind)]++
 	}
 	return counts, err
 }

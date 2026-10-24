@@ -202,9 +202,11 @@ export interface ConsolidationState {
 export type CloseReason = 'responsibilities' | 'goal-needs-agent'
 export type CloseAction = 'retry' | 'force-close'
 
+export type ResponsibilityKind = 'pr' | 'goal' | 'item' | 'question' | 'child' | 'shell' | 'workflow'
+
 // Responsibility is sessionclose.Responsibility from the engine.
 export interface Responsibility {
-  kind: string
+  kind: ResponsibilityKind
   id: string
   text: string
 }
@@ -218,9 +220,10 @@ export interface CloseRecovery {
 
 const isCloseReason = (value: unknown): value is CloseReason => value === 'responsibilities' || value === 'goal-needs-agent'
 const isCloseAction = (value: unknown): value is CloseAction => value === 'retry' || value === 'force-close'
+const isResponsibilityKind = (value: unknown): value is ResponsibilityKind => value === 'pr' || value === 'goal' || value === 'item' || value === 'question' || value === 'child' || value === 'shell' || value === 'workflow'
 const isResponsibility = (value: unknown): value is Responsibility => {
   if (typeof value !== 'object' || value === null) return false
-  return typeof Reflect.get(value, 'kind') === 'string' && typeof Reflect.get(value, 'id') === 'string' && typeof Reflect.get(value, 'text') === 'string'
+  return isResponsibilityKind(Reflect.get(value, 'kind')) && typeof Reflect.get(value, 'id') === 'string' && typeof Reflect.get(value, 'text') === 'string'
 }
 
 // asCloseRecovery validates a server recovery before it controls any buttons.
