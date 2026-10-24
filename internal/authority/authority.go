@@ -243,6 +243,7 @@ var Rules = []Rule{
 	{Action: "subagent dismiss-pending", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "DismissSession", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "ChangeIssue", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
+	{Action: "LinkIssueGoal", Allowed: []Role{Owner, Root, Session, Worker}, Instead: "link issues through a goal you can change"},
 	{Action: "SetGitHubAccess", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "goal expedite", Allowed: []Role{Owner, Root}, Instead: "ask the owner or root to set room priority"},
 	{Action: "post @voice-call", Allowed: []Role{Root}, Instead: "use an allowed mention to reach the room"},

@@ -195,15 +195,19 @@ func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text strin
 		}
 		text = current.Text
 	}
-	g, err := s.editGoal(ctx, r.ID, id, text, holders, shared)
-	if err != nil || len(fixes) == 0 {
-		return g, err
-	}
 	actor := author.Address
 	if author.ID == "owner" {
 		actor = r.Name
 	}
-	return g, s.goalService().Store.LinkIssues(r.ID, g.ID, actor, fixes)
+	links, err := s.goalService().Store.PrepareIssueLinks(r.ID, actor, fixes)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	g, err := s.editGoal(ctx, r.ID, id, text, holders, shared)
+	if err != nil || len(fixes) == 0 {
+		return g, err
+	}
+	return g, s.goalService().Store.LinkPreparedIssues(r.ID, g.ID, actor, links)
 }
 
 func (s *Service) editGoal(ctx context.Context, roomRef, id, text string, holders *[]string, shared bool) (goals.Goal, error) {

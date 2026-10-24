@@ -82,7 +82,7 @@ type CloseOrigin struct {
 // path that fills origin is the tracked-PR close (goal g343, change
 // fix/pr-closes-issues), which calls this from the merge watcher.
 func (s *Store) CloseIssue(roomID, id, by, reason string, origin CloseOrigin) (Issue, error) {
-	return s.changeIssueFrom(roomID, id, by, origin, true, func(i *Issue) error {
+	return s.changeIssueFrom(roomID, id, by, origin, true, "ChangeIssue", func(i *Issue) error {
 		i.State = "closed"
 		i.Reason = reason
 		return nil
@@ -424,7 +424,7 @@ func (s *Store) ChangeIssue(roomID, id, by string, change func(*Issue) error) (I
 // close. The room store posts the typed event after the change, so every path
 // that changes an issue uses it.
 func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, change func(*Issue) error) (Issue, error) {
-	return s.changeIssueFrom(roomID, id, by, origin, false, change)
+	return s.changeIssueFrom(roomID, id, by, origin, false, "ChangeIssue", change)
 }
 
 // LinkIssueGoal records goal work without closing the issue. Relinking a
@@ -433,17 +433,37 @@ func (s *Store) LinkIssueGoal(roomID, id, goalID, by string) (Issue, error) {
 	if strings.TrimSpace(goalID) == "" {
 		return Issue{}, errors.New("goal link needs a goal ID")
 	}
-	return s.changeIssueFrom(roomID, id, by, CloseOrigin{}, true, func(i *Issue) error {
+	return s.changeIssueFrom(roomID, id, by, CloseOrigin{}, true, "LinkIssueGoal", func(i *Issue) error {
 		i.State, i.GoalID, i.Assignee = "goal", goalID, ""
 		return nil
 	})
 }
 
-func (s *Store) changeIssueFrom(roomID, id, by string, origin CloseOrigin, allowGoal bool, change func(*Issue) error) (Issue, error) {
+// CheckIssueGoalLink checks link permission before a goal or session changes.
+func (s *Store) CheckIssueGoalLink(roomID, by string) error {
 	rec, err := s.Resolve(roomID)
 	if err != nil {
-		return Issue{}, err
+		return err
 	}
+	if by == "" {
+		by = rec.Name
+	}
+	return authority.Check("LinkIssueGoal", issueActor(rec, by), nil)
+}
+
+// RestoreIssueGoal restores a previous open or goal link after a later step
+// of starting or editing work fails.
+func (s *Store) RestoreIssueGoal(roomID, id string, snapshot Issue, by string) (Issue, error) {
+	if snapshot.State != "open" && snapshot.State != "goal" {
+		return Issue{}, errors.New("can restore only an open or goal issue")
+	}
+	return s.changeIssueFrom(roomID, id, by, CloseOrigin{}, true, "LinkIssueGoal", func(i *Issue) error {
+		i.State, i.GoalID, i.Assignee = snapshot.State, snapshot.GoalID, snapshot.Assignee
+		return nil
+	})
+}
+
+func issueActor(rec Record, by string) authority.Actor {
 	actor := authority.Actor{Role: authority.Session, Session: by, Room: rec.ID}
 	switch by {
 	case rec.Name:
@@ -451,7 +471,15 @@ func (s *Store) changeIssueFrom(roomID, id, by string, origin CloseOrigin, allow
 	case rec.Name + ":" + RootAgent:
 		actor.Role = authority.Root
 	}
-	if err := authority.Check("ChangeIssue", actor, nil); err != nil {
+	return actor
+}
+
+func (s *Store) changeIssueFrom(roomID, id, by string, origin CloseOrigin, allowGoal bool, action string, change func(*Issue) error) (Issue, error) {
+	rec, err := s.Resolve(roomID)
+	if err != nil {
+		return Issue{}, err
+	}
+	if err := authority.Check(action, issueActor(rec, by), nil); err != nil {
 		return Issue{}, err
 	}
 	db, err := s.issuesDB()
@@ -479,6 +507,10 @@ func (s *Store) changeIssueFrom(roomID, id, by string, origin CloseOrigin, allow
 				return err
 			}
 			switch i.State {
+			case "open":
+				if action != "LinkIssueGoal" {
+					return errors.New("invalid issue transition")
+				}
 			case "closed":
 				if strings.TrimSpace(i.Reason) == "" {
 					return errors.New("closing an issue needs a reason")
