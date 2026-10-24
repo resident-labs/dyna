@@ -52,10 +52,14 @@ var trialBranch = regexp.MustCompile(`^dyna/merge-trial/[1-9][0-9]*$`)
 var commitID = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
 
 func (c Client) repository(ctx context.Context, batch Batch, fn func(string) error) error {
+	return c.repositoryWithBranch(ctx, batch, true, fn)
+}
+
+func (c Client) repositoryWithBranch(ctx context.Context, batch Batch, requireTrialBranch bool, fn func(string) error) error {
 	if c.Run == nil || c.Scratch == "" {
 		return errors.New("merge trials require a scoped Git runner and scratch directory")
 	}
-	if !trialBranch.MatchString(batch.Branch) || batch.Remote == "" || !commitID.MatchString(batch.Base) {
+	if requireTrialBranch && !trialBranch.MatchString(batch.Branch) || batch.Remote == "" || !commitID.MatchString(batch.Base) {
 		return errors.New("invalid merge trial branch, remote, or base commit")
 	}
 	if err := os.MkdirAll(c.Scratch, 0700); err != nil {
@@ -178,10 +182,20 @@ func (c Client) Build(ctx context.Context, b Batch, save func(Result) error) (re
 // The explicit lease rejects outside movement, even when it would allow a
 // normal fast-forward. The ancestry check makes this an actual fast-forward.
 func (c Client) Publish(ctx context.Context, b Batch, head string) error {
+	return c.publish(ctx, b, head, true)
+}
+
+// PublishHead publishes a tested head with the same ancestry and atomic base
+// lease as Publish, but does not require a merge-trial branch to exist.
+func (c Client) PublishHead(ctx context.Context, b Batch, head string) error {
+	return c.publish(ctx, b, head, false)
+}
+
+func (c Client) publish(ctx context.Context, b Batch, head string, requireTrialBranch bool) error {
 	if !commitID.MatchString(head) {
 		return errors.New("invalid tested commit")
 	}
-	return c.repository(ctx, b, func(dir string) error {
+	return c.repositoryWithBranch(ctx, b, requireTrialBranch, func(dir string) error {
 		main, err := c.remoteHead(ctx, dir, b, b.DefaultBranch)
 		if err != nil {
 			return err
@@ -192,12 +206,14 @@ func (c Client) Publish(ctx context.Context, b Batch, head string) error {
 		if main != b.Base {
 			return ErrMainMoved
 		}
-		trial, err := c.remoteHead(ctx, dir, b, b.Branch)
-		if err != nil {
-			return err
-		}
-		if trial != head {
-			return errors.New("tested trial branch moved or disappeared")
+		if requireTrialBranch {
+			tested, err := c.remoteHead(ctx, dir, b, b.Branch)
+			if err != nil {
+				return err
+			}
+			if tested != head {
+				return errors.New("tested trial branch moved or disappeared")
+			}
 		}
 		if _, err := c.git(ctx, dir, b.Created, "fetch", "--quiet", "--no-tags", "--", b.Remote, b.Base, head); err != nil {
 			return err
