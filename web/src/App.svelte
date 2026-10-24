@@ -112,7 +112,7 @@
   import { engineWatch, browserEngine, type EngineStatus } from './lib/engineStatus.ts'
   import { loadLayout, saveLayout, lastRoom, saveLastRoom } from './lib/ui/prefs.ts'
   import { dmView } from './lib/sessions/dm.ts'
-  import { roomLabel } from './lib/ui/format.ts'
+  import { internalLinkHash, roomLabel } from './lib/ui/format.ts'
   import { parseDetailHref } from './lib/ui/details.ts'
   import { parsePRHash, parseIssueHash, parseFileHash } from './lib/prs/prlink.ts'
   import { ROOT_SESSION, parseRoute, routeHash, routeSession } from './lib/ui/route.ts'
@@ -1648,6 +1648,14 @@
       const target = parseDetailHref(a.getAttribute('href'))
       if (target) {
         openDetail(target)
+        return
+      }
+      const internal = internalLinkHash(a.href, location)
+      if (internal !== null) {
+        if (location.hash !== internal) {
+          history.pushState(null, '', location.pathname + location.search + internal)
+          hashChanged()
+        }
         return
       }
       if (/^https?:/.test(a.href)) openExternal(a.href)
