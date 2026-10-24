@@ -1,6 +1,7 @@
 package goals
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,7 +11,7 @@ import (
 // AddWithIssues uses the same goal creation path as Add, then links room
 // issues to the new goal. With no text, one linked issue supplies the title.
 func (s *Store) AddWithIssues(roomID, by, actor string, in Input, fixes []int) (Goal, error) {
-	links, err := s.issueLinks(roomID, fixes)
+	links, err := s.PrepareIssueLinks(roomID, actor, fixes)
 	if err != nil {
 		return Goal{}, err
 	}
@@ -24,7 +25,10 @@ func (s *Store) AddWithIssues(roomID, by, actor string, in Input, fixes []int) (
 	if err != nil {
 		return g, err
 	}
-	return g, s.linkIssues(roomID, g.ID, actor, links)
+	if err := s.LinkPreparedIssues(roomID, g.ID, actor, links); err != nil {
+		return g, errors.Join(err, s.deleteGoal(roomID, g.ID))
+	}
+	return g, nil
 }
 
 // LinkIssues links existing open goals and room issues without closing them.
@@ -41,11 +45,67 @@ func (s *Store) LinkIssues(roomID, goalID, actor string, fixes []int) error {
 	if !g.Open() {
 		return fmt.Errorf("goal %s is not open", goalID)
 	}
-	links, err := s.issueLinks(roomID, fixes)
+	links, err := s.PrepareIssueLinks(roomID, actor, fixes)
 	if err != nil {
 		return err
 	}
-	return s.linkIssues(roomID, goalID, actor, links)
+	return s.LinkPreparedIssues(roomID, goalID, actor, links)
+}
+
+// PrepareIssueLinks validates permission and every issue before any goal,
+// holder or item changes. The returned snapshots also restore partial work if
+// a later step fails.
+func (s *Store) PrepareIssueLinks(roomID, actor string, fixes []int) ([]room.Issue, error) {
+	links, err := s.issueLinks(roomID, fixes)
+	if err != nil || len(links) == 0 {
+		return links, err
+	}
+	actor, err = s.issueActor(roomID, actor)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.Issues.CheckIssueGoalLink(roomID, actor); err != nil {
+		return nil, err
+	}
+	return links, nil
+}
+
+// LinkPreparedIssues applies snapshots from PrepareIssueLinks. A failure
+// restores any links already changed by this call.
+func (s *Store) LinkPreparedIssues(roomID, goalID, actor string, links []room.Issue) error {
+	actor, err := s.issueActor(roomID, actor)
+	if err != nil && len(links) > 0 {
+		return err
+	}
+	for i, issue := range links {
+		if _, err := s.Issues.LinkIssueGoal(roomID, issue.Label(), goalID, actor); err != nil {
+			return errors.Join(fmt.Errorf("link %s to %s: %w", issue.Label(), goalID, err), s.RestoreIssueLinks(roomID, actor, links[:i]))
+		}
+	}
+	return nil
+}
+
+// RestoreIssueLinks puts prepared issue snapshots back after a later goal or
+// session step fails.
+func (s *Store) RestoreIssueLinks(roomID, actor string, links []room.Issue) error {
+	var errs []error
+	for _, issue := range links {
+		if _, err := s.Issues.RestoreIssueGoal(roomID, issue.Label(), issue, actor); err != nil {
+			errs = append(errs, fmt.Errorf("restore %s: %w", issue.Label(), err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *Store) issueActor(roomID, actor string) (string, error) {
+	if actor != "" {
+		return actor, nil
+	}
+	rec, err := s.Issues.Resolve(roomID)
+	if err != nil {
+		return "", err
+	}
+	return rec.Name, nil
 }
 
 func (s *Store) issueLinks(roomID string, fixes []int) ([]room.Issue, error) {
@@ -85,18 +145,11 @@ func (s *Store) issueLinks(roomID string, fixes []int) ([]room.Issue, error) {
 	return links, nil
 }
 
-func (s *Store) linkIssues(roomID, goalID, actor string, links []room.Issue) error {
-	if actor == "" && len(links) > 0 {
-		rec, err := s.Issues.Resolve(roomID)
-		if err != nil {
-			return err
-		}
-		actor = rec.Name
-	}
-	for _, issue := range links {
-		if _, err := s.Issues.LinkIssueGoal(roomID, issue.Label(), goalID, actor); err != nil {
-			return fmt.Errorf("link %s to %s: %w", issue.Label(), goalID, err)
-		}
-	}
-	return nil
+// deleteGoal removes only a new goal whose first issue link failed.
+func (s *Store) deleteGoal(roomID, goalID string) error {
+	where, args := named(roomID, goalID)
+	return s.updateTx(func(_ *wake, st *State) error {
+		delete(st.Room(roomID).Goals, goalID)
+		return nil
+	}, where, args...)
 }

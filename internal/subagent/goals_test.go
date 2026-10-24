@@ -127,13 +127,19 @@ func TestSpawnGoalUsesExistingGoal(t *testing.T) {
 		}
 	}
 	store := m.goalStore()
-	g, err := store.Add("r", leadID, goals.Input{Text: "Existing work", Holders: []string{leadID}})
+	g, err := store.Add("r", leadID, goals.Input{Text: "Existing work", Detail: "Old brief", Holders: []string{leadID}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	goalID, itemID, err := m.addSpawnGoal(Meta{ID: childID, RoomID: "r", Room: "work", ParentSession: leadID}, "", g.ID, "New brief", nil)
+	spawn := Meta{ID: childID, RoomID: "r", Room: "work", ParentSession: leadID, SpawnBrief: "New brief"}
+	goalID, itemID, err := m.addSpawnGoal(spawn, "", g.ID, "New brief", nil)
 	if err != nil || goalID != g.ID || itemID != "" {
 		t.Fatalf("existing goal = %q, item %q, %v", goalID, itemID, err)
+	}
+	spawn.Goal = goalID
+	block, hasBrief := m.spawnGoalBlock(spawn)
+	if !hasBrief || !strings.Contains(block, "New brief") || strings.Contains(block, "Old brief") {
+		t.Fatalf("spawn block lost the new brief: %q", block)
 	}
 	updated, err := store.Get("r", g.ID)
 	if err != nil || !updated.HeldBy(childID) {
@@ -158,6 +164,50 @@ func TestStartWithInvalidGoalLeavesNoSession(t *testing.T) {
 	}
 	svc, _ := e.start("SLEEP:1 RESPOND: service", func(so *StartOptions) { so.Service, so.Goal = true, "Serve the room" })
 	e.wait(svc.ID, 1)
+}
+
+func TestRejectedStartLeavesGoalUnchanged(t *testing.T) {
+	for _, kind := range []string{"existing", "delegated", "standalone"} {
+		t.Run(kind, func(t *testing.T) {
+			m := &Manager{Store: &Store{Root: filepath.Join(t.TempDir(), "sessions")}}
+			leadID, childID := NewID(), NewID()
+			for _, meta := range []Meta{
+				{ID: leadID, Name: "lead", RoomID: "r", Room: "work"},
+				{ID: childID, Name: "child", RoomID: "r", Room: "work", ParentSession: leadID},
+			} {
+				if err := m.Store.writeMeta(meta); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store := m.goalStore()
+			g, err := store.Add("r", leadID, goals.Input{Text: "Existing work", Detail: "Old brief", Holders: []string{leadID}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			under := ""
+			goalText := g.ID
+			if kind == "delegated" {
+				under, goalText = g.ID, "Child work"
+			} else if kind == "standalone" {
+				goalText = "New work"
+			}
+			if _, _, err := m.addSpawnGoal(Meta{ID: childID, RoomID: "r", Room: "work", ParentSession: leadID}, under, goalText, "New brief", []int{999}); err == nil {
+				t.Fatal("start with a missing issue succeeded")
+			}
+			updated, err := store.Get("r", g.ID)
+			if err != nil || !slices.Equal(updated.Holders, g.Holders) || updated.NextItem != g.NextItem || len(updated.Edits) != len(g.Edits) {
+				t.Fatalf("goal changed: before %+v, after %+v, %v", g, updated, err)
+			}
+			items, err := store.Items("r", g.ID)
+			if err != nil || len(items) != 0 {
+				t.Fatalf("rejected start left items: %+v, %v", items, err)
+			}
+			all, err := store.List("r")
+			if err != nil || len(all) != 1 {
+				t.Fatalf("rejected start left goals: %+v, %v", all, err)
+			}
+		})
+	}
 }
 
 func TestSpawnGoalUsesEffectiveGoal(t *testing.T) {

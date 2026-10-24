@@ -420,7 +420,7 @@ func (m *Manager) start(opts StartOptions, parent, owner string) (Info, Turn, er
 	meta := Meta{
 		ID: id, Name: name, Role: opts.Role, Service: service || opts.Role == RoleRoot, RoomID: roomRec.ID, Room: roomRec.Name, RoomCursor: roomCursor,
 		Profile: prof.Name, Model: prof.Model, Dir: dir, Depth: depth, ParentSession: parent,
-		Owner: owner, Created: now, LastActivity: now, Resumable: harness.Resumable(*prof),
+		Owner: owner, SpawnBrief: task, Created: now, LastActivity: now, Resumable: harness.Resumable(*prof),
 	}
 	if err := store.writeMeta(meta); err != nil {
 		return Info{}, Turn{}, err

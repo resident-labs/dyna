@@ -1,6 +1,7 @@
 package subagent
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -48,14 +49,18 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string, fixes []int
 		if m.rootHeld(meta.RoomID, goal) {
 			return "", "", fmt.Errorf("goal %s is held by root, which holds no goals", goal)
 		}
+		links, err := store.PrepareIssueLinks(meta.RoomID, actor, fixes)
+		if err != nil {
+			return "", "", err
+		}
+		if err := store.LinkPreparedIssues(meta.RoomID, goal, actor, links); err != nil {
+			return "", "", err
+		}
 		if !g.Shared && !g.HeldBy(meta.ID) {
 			holders := append(append([]string{}, g.Holders...), meta.ID)
 			if _, err := store.Edit(meta.RoomID, goal, setter, "", &holders, false); err != nil {
-				return "", "", fmt.Errorf("cannot assign the session's goal: %w", err)
+				return "", "", errors.Join(fmt.Errorf("cannot assign the session's goal: %w", err), store.RestoreIssueLinks(meta.RoomID, actor, links))
 			}
-		}
-		if err := store.LinkIssues(meta.RoomID, goal, actor, fixes); err != nil {
-			return "", "", err
 		}
 		return goal, "", nil
 	}
@@ -69,16 +74,20 @@ func (m *Manager) addSpawnGoal(meta Meta, under, text, brief string, fixes []int
 			if m.rootHeld(meta.RoomID, goal) {
 				return "", "", fmt.Errorf("goal %s is held by root, which holds no goals; start without --under, or use a goal an agent holds", goal)
 			}
+			links, err := store.PrepareIssueLinks(meta.RoomID, actor, fixes)
+			if err != nil {
+				return "", "", err
+			}
+			if err := store.LinkPreparedIssues(meta.RoomID, goal, actor, links); err != nil {
+				return "", "", err
+			}
 			itemText := text
 			if brief != "" {
 				itemText += "\n\nBrief:\n" + brief
 			}
 			item, err := store.AddItem(meta.RoomID, goal, setter, itemText, meta.ID)
 			if err != nil {
-				return "", "", fmt.Errorf("cannot create the session's item: %w", err)
-			}
-			if err := store.LinkIssues(meta.RoomID, goal, actor, fixes); err != nil {
-				return "", "", err
+				return "", "", errors.Join(fmt.Errorf("cannot create the session's item: %w", err), store.RestoreIssueLinks(meta.RoomID, actor, links))
 			}
 			return goal, item.ID, nil
 		}
@@ -155,10 +164,14 @@ func (m *Manager) spawnGoalBlock(meta Meta) (block string, hasBrief bool) {
 		return "", false
 	}
 	block = fmt.Sprintf("[DYNA GOAL AND BRIEF]\nGoal %s: %s\nWhen it is done, run `dyna goal done %s \"<summary>\"`.", g.ID, g.Text, g.ID)
-	if g.Detail != "" {
-		block += "\n\nBrief:\n" + g.Detail
+	brief := g.Detail
+	if meta.SpawnBrief != "" {
+		brief = meta.SpawnBrief
 	}
-	return block, g.Detail != ""
+	if brief != "" {
+		block += "\n\nBrief:\n" + brief
+	}
+	return block, brief != ""
 }
 
 // goalFrame leaves out the goal shown in full elsewhere in the same prompt.

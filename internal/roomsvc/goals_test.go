@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"dyna-agent/internal/authority"
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/room"
 )
@@ -189,6 +190,8 @@ func TestGoalItemAssigneeNoneClears(t *testing.T) {
 func TestGoalIssueLinks(t *testing.T) {
 	e := newEnv(t)
 	r := e.room("work")
+	lead := e.start(r, "lead", nil)
+	ctx := authority.WithActor(e.ctx, authority.Actor{Role: authority.Session, Session: lead.ID, Room: r.ID})
 	first, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Use the issue title", Filer: r.Name})
 	if err != nil {
 		t.Fatal(err)
@@ -197,11 +200,11 @@ func TestGoalIssueLinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := e.svc.AddGoal(e.ctx, r.ID, "", nil, []int{first.Number})
+	g, err := e.svc.AddGoal(ctx, r.ID, "", nil, []int{first.Number})
 	if err != nil || g.Text != first.Title {
 		t.Fatalf("goal = %+v, %v", g, err)
 	}
-	if _, err := e.svc.EditGoalSelectors(e.ctx, r.ID, g.ID, "", nil, []int{second.Number}); err != nil {
+	if _, err := e.svc.EditGoalSelectors(ctx, r.ID, g.ID, "", nil, []int{second.Number}); err != nil {
 		t.Fatal(err)
 	}
 	rows, err := e.svc.rooms().Issues(r.ID, true)
