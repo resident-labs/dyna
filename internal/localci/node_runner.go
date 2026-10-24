@@ -372,15 +372,22 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	for i := range result.Suites {
 		sr := &result.Suites[i]
 		switch {
-		case sr.Status != OutcomePassed:
-			// The check proved its own outcome; the run's end does not rewrite it.
 		case stopped != nil:
 			// The reports were never read, so a check that reported success is
-			// not a pass: only its log is proven.
-			sr.Status, sr.Error, sr.Cause = OutcomeError, "check stopped before its reports were read", runCause(node, control, stopped)
+			// not a pass: only its log is proven. A check that already failed
+			// keeps its own outcome.
+			if sr.Status == OutcomePassed {
+				sr.Status, sr.Error, sr.Cause = OutcomeError, "check stopped before its reports were read", runCause(node, control, stopped)
+			}
 		case copyErr != nil:
-			sr.Status, sr.Error, sr.Cause = OutcomeError, "copy reports: "+copyErr.Error(), CauseReports
+			if sr.Status == OutcomePassed {
+				sr.Status, sr.Error, sr.Cause = OutcomeError, "copy reports: "+copyErr.Error(), CauseReports
+			}
 		default:
+			// The reports say what the exit status cannot: the execution timing,
+			// the structured failures, the slow tests and the diagnostics links.
+			// Read them for every check, including one whose command failed; the
+			// command's own outcome and cause stay the check's.
 			readReports(sr, reportRoot, req.MaxTest, req.Allowed)
 		}
 		result.Status = combinedStatus(result.Status, sr.Status)
@@ -436,8 +443,8 @@ func (r Runner) fetchReports(ctx context.Context, reportRoot, reports string) er
 }
 
 // readReports fills one check's duration, reports and test failures from the
-// copied report files. A check that cannot show its result is an infrastructure
-// error and never a passing one.
+// copied report files, whatever the command already proved. A check that cannot
+// show a result of its own is an infrastructure error and never a passing one.
 func readReports(sr *SuiteResult, reportRoot string, max time.Duration, allowed map[string]bool) {
 	var timing struct {
 		DurationNanos time.Duration `json:"durationNanos"`
@@ -453,13 +460,17 @@ func readReports(sr *SuiteResult, reportRoot string, max time.Duration, allowed 
 		sr.Status, sr.Error, sr.Cause = OutcomeError, "check produced no valid execution timing", CauseReports
 	}
 	if e := checkReports(sr, reportRoot, max, allowed); e != nil {
-		if sr.Status != OutcomeFailed {
-			sr.Status = OutcomeError
-			if sr.Cause == "" {
-				sr.Cause = CauseReports
-			}
+		// A check that already proved how it failed keeps its status, its cause
+		// and its error: a report problem is not better evidence than the
+		// command, and it is added to what the command said instead.
+		switch {
+		case sr.Status == OutcomePassed:
+			sr.Status, sr.Error, sr.Cause = OutcomeError, e.Error(), CauseReports
+		case sr.Error == "":
+			sr.Error = e.Error()
+		default:
+			sr.Error += "; reports: " + e.Error()
 		}
-		sr.Error = e.Error()
 	}
 	if sr.Status == OutcomeFailed && sr.Cause == "" {
 		sr.Cause = CauseTestFailure
