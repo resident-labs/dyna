@@ -13,6 +13,8 @@ not-state internal/account/native/antigravity_acp_login.go AntigravityACPLogin.R
 not-state internal/account/native/claude.go claudeAtomicJSON 2 # a harness CLI's own credential and config files
 not-state internal/account/native/claude.go claudeDirLock.close 1 # a harness CLI's own credential and config files
 not-state internal/account/native/codex.go codexManager.activate 3 # a harness CLI's own credential and config files
+not-state internal/account/native/kimi_code.go kimiCodeLock 1 # a harness CLI's own credential and config files
+not-state internal/account/native/kimi_code.go kimiCodeManager.Activate 2 # a harness CLI's own credential and config files
 not-state internal/account/native/muse.go museLock 1 # a harness CLI's own credential and config files
 not-state internal/account/native/muse.go museManager.Activate 2 # a harness CLI's own credential and config files
 not-state internal/account/native/opencode.go lockOpenCode 1 # a harness CLI's own credential and config files
