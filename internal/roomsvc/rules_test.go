@@ -133,8 +133,34 @@ func TestSharedInstructionChangesProduceOneOwnerRow(t *testing.T) {
 	}
 	flush := func() {
 		t.Helper()
-		if _, err := e.mgr.FlushInstructionNotes(e.ctx, time.Now().Add(4*time.Second)); err != nil {
+		// Exercise the earliest and latest queued deadlines without sleeping.
+		// A shared edit must still produce one complete batch.
+		var earliest, latest time.Time
+		for _, id := range ids {
+			meta, err := e.mgr.Store.Info(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			at := meta.InstructionsChangedAt
+			if at.IsZero() {
+				continue
+			}
+			at = at.Add(3 * time.Second)
+			if earliest.IsZero() || at.Before(earliest) {
+				earliest = at
+			}
+			if latest.IsZero() || at.After(latest) {
+				latest = at
+			}
+		}
+		next, err := e.mgr.FlushInstructionNotes(e.ctx, earliest)
+		if err != nil {
 			t.Fatal(err)
+		}
+		if !next.IsZero() {
+			if _, err := e.mgr.FlushInstructionNotes(e.ctx, latest); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 

@@ -306,6 +306,9 @@ func (m *Manager) NoteRoomInstructions(ctx context.Context, roomID string) []str
 		return nil
 	}
 	var reached []string
+	// One queued update has one deadline. Otherwise the engine wakes for the
+	// first session and an owner batch can lose the sessions that are due later.
+	changedAt := time.Now()
 	for _, meta := range sessions {
 		if !meta.Closed.IsZero() || (roomID != "" && meta.RoomID != roomID) || meta.Instructions == nil {
 			continue
@@ -313,7 +316,7 @@ func (m *Manager) NoteRoomInstructions(ctx context.Context, roomID string) []str
 		queued := false
 		_, err := m.store().updateMetaContext(ctx, meta.ID, func(mm *Meta) {
 			if mm.Closed.IsZero() {
-				mm.InstructionsChangedAt = time.Now()
+				mm.InstructionsChangedAt = changedAt
 				queued = true
 			}
 		})
