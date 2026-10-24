@@ -31,7 +31,7 @@ func TestRuleChangesLeaveNoPendingRoomMessages(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := goals.PostRuleNotice(e.m.rooms(), rec, rule, "owner", verb); err != nil {
+		if err := goals.PostRuleNotice(e.m.rooms(), rec, rule, "owner", verb, nil); err != nil {
 			t.Fatal(err)
 		}
 		for _, id := range []string{first.ID, second.ID} {
