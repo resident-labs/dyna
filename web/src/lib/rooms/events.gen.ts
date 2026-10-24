@@ -194,6 +194,7 @@ export interface RuleEvent {
   actor: string
   verb: RuleVerb
   text?: string
+  sessions?: string[]
 }
 
 // MergeEvent is the payload of the merge/queued and merge/trial and merge/checks and merge/landed and merge/failed and merge/returned and merge/conflict and merge/rolled-back and merge/fix-requested events.
@@ -298,6 +299,13 @@ export interface SessionEvent {
   detail?: string
 }
 
+// InstructionBatchEvent is the payload of the session/instruction-batch events.
+export interface InstructionBatchEvent {
+  sections: InstructionChange[]
+  sessions: string[]
+  notes: string[]
+}
+
 // AlertEvent is the payload of the alert/doctor and alert/engine events.
 export interface AlertEvent {
   source: AlertSource
@@ -381,10 +389,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | CallEvent | ReviewEvent | PREvent | SessionEvent | AlertEvent | ServiceFailedEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | CallEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "helper-outcome" | "root-flush" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "helper-outcome" | "root-flush" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -875,6 +883,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
   },
   {
     family: "session",
+    type: "instruction-batch",
+    renderer: "InstructionBatchCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "Standing instructions changed for {sessions}.",
+  },
+  {
+    family: "session",
     type: "seat",
     renderer: "SessionNoteCard",
     quiet: false,
@@ -1179,7 +1197,8 @@ export function isRuleEvent(v: unknown): v is RuleEvent {
     typeof v.scope === "string" &&
     typeof v.actor === "string" &&
     RULE_VERB.has(v.verb) &&
-    (v.text === undefined || typeof v.text === "string")
+    (v.text === undefined || typeof v.text === "string") &&
+    (v.sessions === undefined || isStringList(v.sessions))
 }
 
 export function isMergeEvent(v: unknown): v is MergeEvent {
@@ -1282,6 +1301,13 @@ export function isSessionEvent(v: unknown): v is SessionEvent {
     (v.sections === undefined || isInstructionChangeList(v.sections)) &&
     (v.occurrence === undefined || Number.isInteger(v.occurrence)) &&
     (v.detail === undefined || typeof v.detail === "string")
+}
+
+export function isInstructionBatchEvent(v: unknown): v is InstructionBatchEvent {
+  return isRecord(v) &&
+    isInstructionChangeList(v.sections) &&
+    isStringList(v.sessions) &&
+    isStringList(v.notes)
 }
 
 export function isAlertEvent(v: unknown): v is AlertEvent {
@@ -1414,6 +1440,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "session" && type === "adopted") return isSessionEvent(v)
   if (family === "session" && type === "account") return isSessionEvent(v)
   if (family === "session" && type === "instructions") return isSessionEvent(v)
+  if (family === "session" && type === "instruction-batch") return isInstructionBatchEvent(v)
   if (family === "session" && type === "seat") return isSessionEvent(v)
   if (family === "session" && type === "spawned") return isSessionEvent(v)
   if (family === "session" && type === "transfer-request") return isSessionEvent(v)

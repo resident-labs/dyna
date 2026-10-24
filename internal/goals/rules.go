@@ -202,13 +202,14 @@ func (s *Store) changeRule(scope, id, by string, fn func(*RuleSet, *Rule) error)
 	return out, err
 }
 
-// PostRuleNotice records a rule change without session recipients or delivery.
-func PostRuleNotice(rooms *room.Store, rec room.Record, rule Rule, who, verb string) error {
+// PostRuleNotice records a rule change and the sessions its instruction note
+// reaches. It stays one owner row instead of echoing every session's note.
+func PostRuleNotice(rooms *room.Store, rec room.Record, rule Rule, who, verb string, sessions []string) error {
 	scope := "room"
 	if strings.HasPrefix(rule.ID, "u") {
 		scope = "global"
 	}
-	ev := room.RuleEvent{RuleID: rule.ID, Scope: scope, Actor: who, Verb: room.RuleVerb(verb), Text: rule.Text}
+	ev := room.RuleEvent{RuleID: rule.ID, Scope: scope, Actor: who, Verb: room.RuleVerb(verb), Text: rule.Text, Sessions: sessions}
 	_, err := rooms.PostEventInput(room.PostEventInput{RoomID: rec.ID, Event: ev, To: []string{rec.Name}})
 	return err
 }

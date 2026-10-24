@@ -1,8 +1,8 @@
 // Typed readers for the payload of a sealed system event. They read the
 // stored payload only, never the post text, so a card and its event cannot
 // disagree. The types come from events.gen.ts, which the Go registry writes.
-import { eventSpecs, isAlertEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isIssueEvent, isMachineEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTurnEvent, isWorktreeEvent } from './events.gen.ts'
-import type { AlertEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, IssueEvent, MachineEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, RunEvent, ServiceFailedEvent, SessionEvent, ShellEvent, SlowTestEvent, TurnEvent, WorktreeEvent } from './events.gen.ts'
+import { eventSpecs, isAlertEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isInstructionBatchEvent, isIssueEvent, isMachineEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTurnEvent, isWorktreeEvent } from './events.gen.ts'
+import type { AlertEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, InstructionBatchEvent, IssueEvent, MachineEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, RunEvent, ServiceFailedEvent, SessionEvent, ShellEvent, SlowTestEvent, TurnEvent, WorktreeEvent } from './events.gen.ts'
 
 // A post of one event family, with the fields its reader needs. A feed row, a
 // stored message and a test fixture all fit it.
@@ -145,6 +145,13 @@ export function callEvent(post: EventPost): CallEvent | undefined {
 export function sessionEvent(post: EventPost): SessionEvent | undefined {
   if (post.kind !== 'session') return undefined
   return isSessionEvent(post.payload) ? post.payload : undefined
+}
+
+// instructionBatchEvent returns the typed payload of a shared instruction
+// change's one owner-facing summary.
+export function instructionBatchEvent(post: EventPost): InstructionBatchEvent | undefined {
+  if (post.kind !== 'session' || post.notice?.kind !== 'instruction-batch') return undefined
+  return isInstructionBatchEvent(post.payload) ? post.payload : undefined
 }
 
 // alertEvent returns the typed payload of an alert from the doctor or the
