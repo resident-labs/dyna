@@ -6,7 +6,8 @@
   import { stamp } from '../ui/format.ts'
   import { referenceHome } from './dm.ts'
   import { rendererFor } from '../rooms/eventRenderers.ts'
-  import { registeredEvent, systemEvent } from '../rooms/eventPayloads.ts'
+  import { systemEvent } from '../rooms/eventPayloads.ts'
+  import { isEventPayload } from '../rooms/events.gen.ts'
   import UnknownEventRow from '../rooms/UnknownEventRow.svelte'
   import type { Member, Room } from '../api/room.ts'
   import type { ReferenceRow } from './dm.ts'
@@ -24,7 +25,7 @@
   let files = $derived(ref.attachments === 1 ? '1 file' : `${ref.attachments} files`)
   // A typed reference keeps the feed's own card and payload. Its agent-facing
   // text is not a second summary, and a legacy card alone keeps that old text.
-  let eventPost = $derived({ id: ref.postId, ts: ref.ts, text: registeredEvent(ref) ? '' : ref.preview, kind: ref.kind, from: ref.from, fromHue: ref.fromHue, speaker: ref.speaker, notice: ref.notice, payload: ref.payload })
+  let eventPost = $derived({ id: ref.postId, ts: ref.ts, text: isEventPayload(ref.kind, ref.notice?.kind, ref.payload) ? '' : ref.preview, kind: ref.kind, from: ref.from, fromHue: ref.fromHue, speaker: ref.speaker, notice: ref.notice, payload: ref.payload })
   let typed = $derived(systemEvent(eventPost))
   let Card = $derived(rendererFor(eventPost))
 </script>
