@@ -1,7 +1,6 @@
 package harness
 
 import (
-	"context"
 	"os"
 	"strings"
 	"testing"
@@ -57,15 +56,13 @@ func TestKimiAcpSteeringInterruptsAndResumes(t *testing.T) {
 	})
 	env, mark := acpTestEnv(t, dir)
 	p := kimiACPProfile(env)
-	source := &testSource{}
+	source := &doorbellSource{wake: make(chan struct{}), observed: make(chan struct{}, 1)}
 	go func() {
 		waitForMark(t, mark, "prompt long task")
-		source.submit("new evidence")
+		source.ring(runstore.SteeringMessage{Message: "new evidence"})
 	}()
 	zero := time.Duration(0)
-	ctx, cancel := context.WithTimeout(t.Context(), 750*time.Millisecond)
-	defer cancel()
-	result, err := RunWithOptions(ctx, p, "long task", t.TempDir(), true, JournalOptions{}, SteeringOptions{Source: source, pollEvery: 5 * time.Millisecond}, SessionOptions{RecoveryDelay: &zero}, ExecutionOptions{HealthProbe: true, startupLimit: time.Second})
+	result, err := RunWithOptions(t.Context(), p, "long task", t.TempDir(), true, JournalOptions{}, SteeringOptions{Source: source, pollEvery: time.Hour}, SessionOptions{RecoveryDelay: &zero}, ExecutionOptions{HealthProbe: true})
 	if err != nil {
 		t.Fatal(err)
 	}

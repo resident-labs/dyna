@@ -9,6 +9,31 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+func TestKimiGenerationRejectsLinkedConfig(t *testing.T) {
+	dir, home := t.TempDir(), t.TempDir()
+	settings := `{"mcpServers":{},"tools":{"disabled":["Agent"]}}`
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(settings), 0600); err != nil {
+		t.Fatal(err)
+	}
+	external := filepath.Join(t.TempDir(), "external.toml")
+	if err := os.WriteFile(external, []byte(`default_model = "kimi-code/k3"
+[providers."managed:kimi-code"]
+type = "kimi"
+base_url = "https://api.kimi.com/coding/v1"
+[providers."managed:kimi-code".oauth]
+storage = "file"
+key = "oauth/kimi-code"
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(external, filepath.Join(home, "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := publishKimiGeneration(dir, home); err == nil {
+		t.Fatal("a linked native config was accepted")
+	}
+}
+
 func TestKimiGenerationMergesOnlyToolPolicy(t *testing.T) {
 	dir, home := t.TempDir(), t.TempDir()
 	settings := `{"mcpServers":{"dyna":{"command":"/private/dyna","args":["mcp","shell"]}},"tools":{"disabled":["Agent","Bash","TaskList"]}}`
