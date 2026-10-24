@@ -223,9 +223,15 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	if e := r.cleanBeforeRun(control, node); e != nil {
 		log.Printf("local CI %s: free space check: %v", node.Name, e)
 	}
-	setup := "set -e; umask 077; mkdir -p " + shellquote.Quote(base) + " " + shellquote.Quote(reports) + "; " + runLocks(base, active) + "flock " + shellquote.Quote(path.Join(base, "init.lock")) + " bash -c " + shellquote.Quote("if [ ! -d "+shellquote.Quote(cache)+" ]; then git init --bare "+shellquote.Quote(cache)+"; fi")
-	if err := r.nodeCommand(control, &output, &output, "", setup); err != nil {
-		return result, fmt.Errorf("initialize node: %w: %s", err, &output)
+	setup := nodeSetupScript(base, cache, reports, active)
+	setupErr := r.nodeCommand(control, &output, &output, "", setup)
+	// A repair is a fact whether or not the run then succeeded, so report it
+	// before the setup error returns.
+	if kinds := parseCacheRepairs(output.String()); len(kinds) > 0 && r.OnCacheRepair != nil {
+		r.OnCacheRepair(control, CacheRepair{Node: node.Name, Kinds: kinds})
+	}
+	if setupErr != nil {
+		return result, fmt.Errorf("initialize node: %w: %s", setupErr, &output)
 	}
 	output.Reset()
 	if node.SSH == "" {
@@ -724,6 +730,18 @@ func combinedStatus(a, b Outcome) Outcome {
 		return OutcomeFailed
 	}
 	return OutcomePassed
+}
+
+// nodeSetupScript prepares one run on its node. The prepare stage repairs a
+// linked go-build or go-mod path under the exclusive cache lock, before the run
+// takes its ordinary shared lock, and refuses any remaining unsafe link. A run
+// therefore never mounts or trims a cache that Dyna does not own.
+func nodeSetupScript(base, cache, reports, active string) string {
+	q := shellquote.Quote
+	return "set -e; umask 077; " + baseLinkGuard(base) +
+		"mkdir -p " + q(base) + " " + q(reports) + "; " +
+		cacheRepairScript(base, admissionWait) + cacheLinkGuard(base) + runLocks(base, active) +
+		"flock " + q(path.Join(base, "init.lock")) + " bash -c " + q("if [ ! -d "+q(cache)+" ]; then git init --bare "+q(cache)+"; fi")
 }
 
 // Slots belong to checks, across repositories and runner processes. A waiter

@@ -369,7 +369,13 @@ The GitHub workflow stays unchanged and always checks landed code on main.
 
 Each machine limits concurrent checks with its slot count. Local work runs with
 systemd CPU and memory limits and a lower process priority. Containers also
-limit CPU, memory, and process counts. Machines reuse Go and package caches.
+limit CPU, memory, and process counts. Machines reuse Go and package caches in
+directories Dyna owns. Each cache has a size cap, and a run trims its oldest
+units to that cap, even when they are recent. A run that finds a linked
+go-build or go-mod path keeps the link beside the cache as `.before-d48`,
+creates a real directory under the exclusive cache lock, and posts a typed
+machine notice. Any other unsafe cache link stops the run, so it never mounts
+or trims another account's cache.
 Results and machine settings live in SQLite; report files remain on disk.
 Dyna publishes named commit statuses, including `go-test`, using the room's
 GitHub credentials. The PR Checks tab and `dyna git merge status` show machines.
