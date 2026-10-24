@@ -11,6 +11,12 @@
 #   DYNA_CI_CLEAN_RUN_AGE_MIN=120  keep run folders younger than this many minutes
 #   DYNA_CI_CLEAN_ROOTS=...        exact CI directories to clean (space separated);
 #                              empty cleans every directory Dyna owns
+#   DYNA_CI_CACHE_CAP_KB=...   size cap in KiB for every cache, for a caller
+#                              that runs this script directly; 0 turns the size
+#                              bound off. Defaults: 20 GiB go-build, 10 GiB
+#                              go-mod, 5 GiB npm. A cache over its cap loses
+#                              its oldest entries until it fits, even when they
+#                              are recent.
 #
 # A root is the directory a run keeps its caches in, holding runs/,
 # diagnostics/ and go-build/. The caller passes the one it writes to, which
@@ -23,6 +29,7 @@ set -u
 dry=${DYNA_CI_CLEAN_DRY:-0}
 age_min=${DYNA_CI_CLEAN_AGE_MIN:-2880}
 run_age_min=${DYNA_CI_CLEAN_RUN_AGE_MIN:-120}
+cap_override=${DYNA_CI_CACHE_CAP_KB:-}
 legacy=/var/tmp/dyna-local-ci
 
 refuse() { echo "dyna-ci-clean: $*" >&2; exit 2; }
@@ -32,6 +39,7 @@ refuse() { echo "dyna-ci-clean: $*" >&2; exit 2; }
 case "$dry" in 0 | 1) ;; *) refuse "DYNA_CI_CLEAN_DRY must be 0 or 1" ;; esac
 [[ "$age_min" =~ ^[0-9]+$ ]] || refuse "DYNA_CI_CLEAN_AGE_MIN must be a number of minutes"
 [[ "$run_age_min" =~ ^[0-9]+$ ]] || refuse "DYNA_CI_CLEAN_RUN_AGE_MIN must be a number of minutes"
+[ -z "$cap_override" ] || [[ "$cap_override" =~ ^[0-9]+$ ]] || refuse "DYNA_CI_CACHE_CAP_KB must be a number of KiB"
 
 # allowed is the only guard that keeps a typo from deleting another user's data.
 allowed() {
@@ -79,8 +87,9 @@ size_of() { du -sxk -- "$1" 2>/dev/null | awk 'NR == 1 {print $1}'; }
 remove() {
   local path=$1 real kb
   [ -e "$path" ] || [ -L "$path" ] || return 0
-  # A cached path can be a symlink out of the allow-list, as the Go caches are
-  # on a machine that keeps them in the home directory.
+  # A caller never hands over a symlink, because a link may name a cache outside
+  # the allow-list. Resolve the path anyway, so a typo or a new caller can only
+  # ever lose Dyna's own data.
   real=$(readlink -f -- "$path" 2>/dev/null) || return 0
   if [ -z "$real" ]; then return 0; fi
   allowed "$real" || {
@@ -126,25 +135,117 @@ prune_runs() {
   done
 }
 
-# trim_caches BASE: the cache entries that nothing has used for longer than the
-# age limit, removed while holding BASE's cache lock exclusively. A run takes
-# that lock shared before it mounts a cache and holds it until it ends, so a run
-# that already runs makes the lock fail here and keeps every entry, and a run
-# that starts now waits for these few seconds instead. Entries younger than the
-# limit always stay, so builds keep their warm cache.
+# cap_kb NAME: the size cap of one cache in KiB. The defaults bound the
+# caches of a machine that runs CI every day and still keep enough to stay warm.
+# A zero cap, or DYNA_CI_CACHE_CAP_KB=0, turns the size bound off.
+cap_kb() {
+  if [ -n "$cap_override" ]; then printf '%s\n' "$cap_override"; return; fi
+  case "$1" in
+  go-build) echo $((20 * 1024 * 1024)) ;;
+  go-mod) echo $((10 * 1024 * 1024)) ;;
+  npm) echo $((5 * 1024 * 1024)) ;;
+  *) echo 0 ;;
+  esac
+}
+
+# make_writable PATH: give the owner write permission on every real directory
+# inside PATH, so a read-only Go module directory can be removed. It changes
+# directories only and follows no symlink.
+make_writable() {
+  [ -d "$1" ] && [ ! -L "$1" ] || return 0
+  if ! find "$1" -xdev -type d -exec chmod u+w -- {} +; then
+    echo "dyna-ci-clean: cannot make $1 writable" >&2
+    return 1
+  fi
+}
+
+# trim_cache NAME DIR CAP: remove the cache units that nothing has used for
+# longer than the age limit, and the oldest units until DIR is at or below CAP
+# KiB. A unit is the smallest part that cache can lose on its own:
+#   go-build  one top-level shard or file
+#   go-mod    one extracted module directory selected by its @version boundary
+#             at any depth, one download cache directory, or one direct VCS
+#             checkout under cache/vcs
+#   npm       one hash shard four levels down
+# A module root can sit two levels down (gopkg.in/yaml.v3@v3), four levels down
+# (github.com/foo/bar/v2@v2) or deeper, so select the @version boundary itself
+# and never descend into it. A direct or private VCS download lives in
+# cache/vcs/<hash> as a bare checkout, which is one unit. Go keeps extracted
+# modules read-only, so each chosen module unit is made writable before it is
+# removed.
+trim_cache() {
+  local name=$1 dir=$2 cap=$3
+  case "$name" in
+  go-mod)
+    trim_units "$dir" "$cap" 1 -mindepth 2 \
+      \( -name '*@v*' -o \( -path "$dir/cache/vcs/*" -a ! -path "$dir/cache/vcs/*/*" \) \) \
+      -type d -prune
+    ;;
+  npm) trim_units "$dir" "$cap" 0 -mindepth 4 -maxdepth 4 ;;
+  *) trim_units "$dir" "$cap" 0 -mindepth 1 -maxdepth 1 ;;
+  esac
+}
+
+# trim_units DIR CAP MAKE_WRITABLE [FIND TEST...]: walk the real units that the
+# FIND TEST selects inside DIR, oldest first. A unit goes when it is older than
+# the age limit or when DIR is over CAP KiB; a young unit in a cache that fits
+# ends the walk, because every later unit is younger. Go refreshes the mtime of
+# a hot cache directory and keeps its objects in file entries, so each unit is
+# judged by its own mtime and size. MAKE_WRITABLE=1 gives the owner write
+# permission on the unit first, because Go keeps module directories read-only; a
+# dry run changes no permission. A symlink is never followed or removed: it may
+# name a cache outside Dyna's allow-list. A failed removal stops the trim with
+# an error, and so does a cache that stays over its cap after every unit went,
+# because a run must not report a bound it could not reach.
+trim_units() {
+  local dir=$1 cap=$2 writable=$3 total kb path _ts
+  shift 3
+  total=$(size_of "$dir")
+  case "$total" in '' | *[!0-9]*) return 0 ;; esac
+  while IFS=$'\t' read -r -d '' _ts path; do
+    [ -e "$path" ] && [ ! -L "$path" ] || continue
+    if [ "$cap" -gt 0 ] && [ "$total" -gt "$cap" ]; then
+      :
+    elif ! older "$path"; then
+      break
+    fi
+    kb=$(size_of "$path")
+    case "$kb" in '' | *[!0-9]*) kb=0 ;; esac
+    if [ "$writable" = 1 ] && [ "$dry" = 0 ]; then
+      make_writable "$path" || return 1
+    fi
+    remove "$path" || return 1
+    total=$((total - kb))
+  done < <(find "$dir" "$@" ! -type l -printf '%T@\t%p\0' 2>/dev/null | sort -z -n)
+  if [ "$cap" -gt 0 ] && [ "$total" -gt "$cap" ]; then
+    echo "dyna-ci-clean: $dir is still ${total} KiB, over its ${cap} KiB cap, and no trimmable unit remains" >&2
+    return 1
+  fi
+}
+
+# trim_caches BASE: the units that are older than the age limit and the oldest
+# units until each cache fits its size cap, both while holding BASE's cache lock
+# exclusively. A run takes that lock shared before it mounts a cache and holds
+# it until it ends, so a run that already runs makes the lock fail here and
+# keeps every entry, and a run that starts now waits for these few seconds
+# instead. A bounded cache also drops its oldest recent units, so a build that
+# writes all day cannot fill the machine. Any trim that fails makes the cleanup
+# fail, so a caller never records a partial removal as a success.
 trim_caches() {
-  local path
-  exec 8>>"$1/caches.lock" || return 1
+  local base=$1 name path failed=0
+  exec 8>>"$base/caches.lock" || return 1
   if ! flock -n 8; then
     exec 8>&-
     return 0
   fi
-  for path in "$1"/go-build/* "$1"/go-mod/* "$1"/npm/*; do
+  for name in go-build go-mod npm; do
+    path=$base/$name
+    # A cache path that is a link names another cache; never trim through it.
     [ -d "$path" ] && [ ! -L "$path" ] || continue
-    older "$path" || continue
-    remove "$path"
+    trim_cache "$name" "$path" "$(cap_kb "$name")" || failed=1
   done
   exec 8>&-
+  return "$failed"
 }
 
 # prune_tree BASE: the finished runs and the diagnostics of old runs, then the
@@ -161,8 +262,9 @@ prune_tree() {
   trim_caches "$1"
 }
 
+failed=0
 for base in "${bases[@]}"; do
-  prune_tree "$base"
+  prune_tree "$base" || failed=1
   # The legacy tree also holds the work trees and copies of the old runner, one
   # entry per run, at its top level. A moved-aside run names itself there, and
   # its own lock protects it. Only a cleanup asked to visit this tree does this.
@@ -180,4 +282,8 @@ for base in "${bases[@]}"; do
   done
 done
 
+if [ "$failed" = 1 ]; then
+  echo "dyna-ci-clean: cleanup did not finish; see the errors above" >&2
+  exit 1
+fi
 printf 'DYNA_CI_CACHE_CLEAN_FREED_KB=%s\n' "$freed_kb"
