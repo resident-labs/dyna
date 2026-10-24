@@ -66,6 +66,9 @@ func TestMergedPRClosesItsLinkedIssues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := e.rooms.LinkIssueGoal(e.room.ID, issue.ID, "g7", e.room.Name); err != nil {
+		t.Fatal(err)
+	}
 	r := e.mergedRecord(
 		state.IssueRef{Kind: state.IssueKindDyna, Number: issue.Number},
 		state.IssueRef{Kind: state.IssueKindGitHub, Number: 7},

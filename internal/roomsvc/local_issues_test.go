@@ -9,13 +9,16 @@ import (
 	"testing"
 
 	"dyna-agent/internal/ghclient"
+	prstate "dyna-agent/internal/pr/state"
+	prfixture "dyna-agent/internal/pr/view/testfixture"
+	"dyna-agent/internal/pr/watch"
 	"dyna-agent/internal/room"
 )
 
 func TestIssueGoalAndClose(t *testing.T) {
 	e := newEnv(t)
 	r := e.room("work")
-	i, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Fix parser", Note: "one path", File: "parser.go", Line: 7, Filer: r.Name+":agent"})
+	i, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Fix parser", Note: "one path", File: "parser.go", Line: 7, Filer: r.Name + ":agent"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +40,56 @@ func TestIssueGoalAndClose(t *testing.T) {
 	if err != nil || len(rows) != 0 {
 		t.Fatal(rows, err)
 	}
+}
+
+func TestIssueProgressUsesOpenGoalAndPR(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	issue, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Goal work", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked, err := e.svc.IssueGoal(t.Context(), r.ID, issue.ID, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	unhandled := func(want ...string) {
+		t.Helper()
+		rows, err := e.svc.Issues(r.ID, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := make(map[string]bool, len(rows))
+		for _, row := range rows {
+			got[row.ID] = true
+		}
+		if len(got) != len(want) {
+			t.Fatalf("unhandled rows = %+v, want IDs %v", rows, want)
+		}
+		for _, id := range want {
+			if !got[id] {
+				t.Fatalf("unhandled rows = %+v, missing %s", rows, id)
+			}
+		}
+	}
+	unhandled()
+	if _, err := e.svc.goalService().Store.Finish(r.ID, linked.GoalID, "owner", "done", false); err != nil {
+		t.Fatal(err)
+	}
+	unhandled(issue.ID)
+
+	withPR, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "PR work", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prfixture.SaveState(t, e.svc.PRs.Watcher().Store.Root, watch.State{Version: 1, Records: map[string]*watch.Record{
+		"pr": {Key: "pr", Kind: "github", RoomID: r.ID, Number: 42, State: "open", Fixes: []prstate.IssueRef{{Kind: prstate.IssueKindDyna, Number: withPR.Number}}},
+	}})
+	unhandled(issue.ID)
+	prfixture.SaveState(t, e.svc.PRs.Watcher().Store.Root, watch.State{Version: 1, Records: map[string]*watch.Record{
+		"pr": {Key: "pr", Kind: "github", RoomID: r.ID, Number: 42, State: "merged", Fixes: []prstate.IssueRef{{Kind: prstate.IssueKindDyna, Number: withPR.Number}}},
+	}})
+	unhandled(issue.ID, withPR.ID)
 }
 
 func TestIssueExportAccountAndReadOnly(t *testing.T) {

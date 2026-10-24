@@ -25,7 +25,7 @@ func (s *Service) goalService() *goalsvc.Service {
 	if root == "" {
 		root = subagent.DefaultStore().Root
 	}
-	service.Store = &goals.Store{Root: filepath.Join(filepath.Dir(root), "goals")}
+	service.Store = &goals.Store{Root: filepath.Join(filepath.Dir(root), "goals"), Issues: s.rooms()}
 	return service
 }
 func (s *Service) Goals(roomRef, before string, limit int) (listpage.Page[goals.Goal], error) {
@@ -144,7 +144,7 @@ func (s *Service) refuseRootHolders(holders []string) error {
 	return nil
 }
 
-func (s *Service) AddGoal(ctx context.Context, roomRef, text string, selectors []string) (goals.Goal, error) {
+func (s *Service) AddGoal(ctx context.Context, roomRef, text string, selectors []string, fixes []int) (goals.Goal, error) {
 	r, author, err := s.goalCaller(ctx, roomRef)
 	if err != nil {
 		return goals.Goal{}, err
@@ -157,7 +157,11 @@ func (s *Service) AddGoal(ctx context.Context, roomRef, text string, selectors [
 	if err = s.refuseRootHolders(holders); err != nil {
 		return goals.Goal{}, err
 	}
-	g, err := service.Store.Add(r.ID, author.ID, goals.Input{Text: text, Holders: holders, Shared: shared})
+	actor := author.Address
+	if author.ID == "owner" {
+		actor = r.Name
+	}
+	g, err := service.Store.AddWithIssues(r.ID, author.ID, actor, goals.Input{Text: text, Holders: holders, Shared: shared}, fixes)
 	if err != nil {
 		return g, err
 	}
@@ -170,7 +174,7 @@ func (s *Service) EditGoal(ctx context.Context, roomRef, id, text string, holder
 
 // EditGoalSelectors accepts CLI selectors; EditGoal accepts holder IDs from the web.
 // Both use editGoal for validation, the store mutation and its milestone.
-func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text string, selectors *[]string) (goals.Goal, error) {
+func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text string, selectors *[]string, fixes []int) (goals.Goal, error) {
 	r, author, err := s.goalCaller(ctx, roomRef)
 	if err != nil {
 		return goals.Goal{}, err
@@ -184,7 +188,26 @@ func (s *Service) EditGoalSelectors(ctx context.Context, roomRef, id, text strin
 		}
 		holders, shared = &h, sh
 	}
-	return s.editGoal(ctx, r.ID, id, text, holders, shared)
+	if len(fixes) > 0 && text == "" && selectors == nil {
+		current, err := s.goalService().Store.Get(r.ID, id)
+		if err != nil {
+			return goals.Goal{}, err
+		}
+		text = current.Text
+	}
+	actor := author.Address
+	if author.ID == "owner" {
+		actor = r.Name
+	}
+	links, err := s.goalService().Store.PrepareIssueLinks(r.ID, actor, fixes)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	g, err := s.editGoal(ctx, r.ID, id, text, holders, shared)
+	if err != nil || len(fixes) == 0 {
+		return g, err
+	}
+	return g, s.goalService().Store.LinkPreparedIssues(r.ID, g.ID, actor, links)
 }
 
 func (s *Service) editGoal(ctx context.Context, roomRef, id, text string, holders *[]string, shared bool) (goals.Goal, error) {

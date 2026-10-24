@@ -10,6 +10,7 @@ import (
 	"dyna-agent/internal/goals"
 	"dyna-agent/internal/goalsvc"
 	"dyna-agent/internal/mode"
+	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
 	"github.com/spf13/cobra"
 )
@@ -28,7 +29,7 @@ func Command(o Options) *cobra.Command {
 	if o.Client == nil {
 		o.Client = engineclient.New("")
 	}
-	var roomRef string
+	var roomRef, fixesText string
 	var all, asJSON bool
 	var selectors []string
 	root := &cobra.Command{Use: "goal [plain English text]", Args: cobra.MaximumNArgs(1), Short: "Set, hold and finish long-lasting room goals"}
@@ -36,6 +37,7 @@ func Command(o Options) *cobra.Command {
 	root.Flags().BoolVar(&all, "all", false, "include every goal in the room, including done goals")
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "print full goal data as JSON")
 	root.Flags().StringArrayVar(&selectors, "for", nil, "holder selector, repeatable: @name, @children, @siblings or @room")
+	root.Flags().StringVar(&fixesText, "fixes", "", "room issues linked to this goal, such as D-35,D-40")
 
 	listGoals := func(c *cobra.Command, _ []string) error {
 		s, rec, by, err := Caller(o.Service(), roomRef)
@@ -113,14 +115,28 @@ func Command(o Options) *cobra.Command {
 		return nil
 	}
 	root.RunE = func(c *cobra.Command, args []string) error {
-		if len(args) == 0 {
+		if len(args) == 0 && !c.Flags().Changed("fixes") {
 			return listGoals(c, args)
 		}
-		if isGoalCommandWord(root, args[0]) {
+		if len(args) == 1 && isGoalCommandWord(root, args[0]) {
 			return fmt.Errorf("%q looks like a goal command; use 'dyna goal list' to list goals, 'dyna goal --help' for commands, or write a descriptive goal sentence", strings.TrimSpace(args[0]))
 		}
+		var fixes []int
+		if c.Flags().Changed("fixes") {
+			var err error
+			if fixes, err = prstate.ParseDynaIssueNumbers(fixesText); err != nil {
+				return err
+			}
+			if len(fixes) == 0 {
+				return fmt.Errorf("--fixes needs at least one room issue such as D-35")
+			}
+		}
+		text := ""
+		if len(args) == 1 {
+			text = args[0]
+		}
 		var g goals.Goal
-		err := o.Client.Call(c.Context(), "AddGoal", []any{MutationRoom(roomRef), args[0], selectors}, &g)
+		err := o.Client.Call(c.Context(), "AddGoal", []any{MutationRoom(roomRef), text, selectors, fixes}, &g)
 		if err != nil {
 			return err
 		}
@@ -172,9 +188,11 @@ func Command(o Options) *cobra.Command {
 		}
 		return nil
 	}}
-	edit := &cobra.Command{Use: "edit <id> [new text]", Short: "Edit a goal's text or holders and reopen it", Args: cobra.RangeArgs(1, 2)}
+	edit := &cobra.Command{Use: "edit <id> [new text]", Short: "Edit a goal's text, holders or issue links and reopen it", Args: cobra.RangeArgs(1, 2)}
 	var editFor []string
+	var editFixes string
 	edit.Flags().StringArrayVar(&editFor, "for", nil, "replace holders with these selectors (repeatable)")
+	edit.Flags().StringVar(&editFixes, "fixes", "", "room issues linked to this existing goal, such as D-35,D-40")
 	edit.RunE = func(c *cobra.Command, a []string) error {
 		var selected *[]string
 		if c.Flags().Changed("for") {
@@ -184,8 +202,18 @@ func Command(o Options) *cobra.Command {
 		if len(a) == 2 {
 			text = a[1]
 		}
+		var fixes []int
+		if c.Flags().Changed("fixes") {
+			var err error
+			if fixes, err = prstate.ParseDynaIssueNumbers(editFixes); err != nil {
+				return err
+			}
+			if len(fixes) == 0 {
+				return fmt.Errorf("--fixes needs at least one room issue such as D-35")
+			}
+		}
 		var g goals.Goal
-		err := o.Client.Call(c.Context(), "EditGoalSelectors", []any{MutationRoom(roomRef), a[0], text, selected}, &g)
+		err := o.Client.Call(c.Context(), "EditGoalSelectors", []any{MutationRoom(roomRef), a[0], text, selected, fixes}, &g)
 		if err != nil {
 			return err
 		}
