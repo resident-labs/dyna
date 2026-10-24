@@ -35,6 +35,7 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 		{"ssh drop", Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}, []string{"Connection to port 22 timed out"}, 255, CauseSSHDrop, OutcomeError},
 		{"timeout", Node{Name: "local", Slots: 1, Enabled: true}, []string{"check reached its deadline", "DYNA_CI_CHECK_EXIT=124"}, 124, CauseTimeout, OutcomeError},
 		{"test failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"--- FAIL: TestBroken", "DYNA_CI_CHECK_EXIT=1"}, 1, CauseTestFailure, OutcomeFailed},
+		{"reports unavailable", Node{Name: "local", Slots: 1, Enabled: true}, []string{"ok ./...", "DYNA_CI_CHECK_EXIT=0"}, 0, CauseReports, OutcomeError},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			runner := Runner{DataDir: t.TempDir(), Node: &tc.node}
@@ -52,8 +53,18 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 					for _, line := range tc.output {
 						fmt.Fprintln(out, line)
 					}
+					if tc.code == 0 {
+						return nil
+					}
 					return exitError(t, tc.code)
 				case strings.Contains(script, "tar -C"):
+					// The copy must find the check's output already on disk.
+					logs, _ := filepath.Glob(filepath.Join(runner.DataDir, "local-ci", "*", "*", "run-*", "checks", "go-static.log"))
+					if len(logs) != 1 {
+						t.Errorf("check log missing before the report copy: %v", logs)
+					} else if data, readErr := os.ReadFile(logs[0]); readErr != nil || !strings.Contains(string(data), tc.output[0]) {
+						t.Errorf("check log held no output before the report copy: %v", readErr)
+					}
 					return errors.New("transport lost")
 				}
 				return nil
@@ -89,14 +100,7 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 			}
 			// The run folder alone says why the check stopped: the log ends with
 			// its typed cause, not only the output.
-			var exit checkExit
-			for _, line := range strings.Split(string(data), "\n") {
-				if record, ok := strings.CutPrefix(line, "DYNA_CI_CHECK_CAUSE "); ok {
-					if err := json.Unmarshal([]byte(record), &exit); err != nil {
-						t.Fatalf("invalid exit record %q: %v", record, err)
-					}
-				}
-			}
+			exit := loggedExit(t, check)
 			if exit.Cause != tc.cause || exit.Status != tc.status || exit.ExitCode != tc.code {
 				t.Fatalf("local log exit record = %+v, want %s/%s/%d", exit, tc.cause, tc.status, tc.code)
 			}
@@ -112,6 +116,31 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 			}
 		})
 	}
+}
+
+// loggedExit reads the typed exit record a check log ends with.
+func loggedExit(t *testing.T, check SuiteResult) checkExit {
+	t.Helper()
+	var exit checkExit
+	for _, report := range check.Reports {
+		if filepath.Ext(report) != ".log" {
+			continue
+		}
+		data, err := os.ReadFile(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			record, ok := strings.CutPrefix(line, "DYNA_CI_CHECK_CAUSE ")
+			if !ok {
+				continue
+			}
+			if err := json.Unmarshal([]byte(record), &exit); err != nil {
+				t.Fatalf("invalid exit record %q: %v", record, err)
+			}
+		}
+	}
+	return exit
 }
 
 // exitError is the error a command returns when it exits with code.
@@ -268,6 +297,13 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		if check.CheckName != "go-test" && check.Duration != time.Second {
 			t.Fatalf("check uses wall time instead of admitted execution time: %+v", check)
 		}
+		// This check's command passed; the reports proved the failure, and the
+		// log must end with that cause too.
+		if check.CheckName == "frontend" {
+			if cause := loggedExit(t, check).Cause; cause != CauseTestFailure {
+				t.Fatalf("frontend log lost the cause the reports proved: %q", cause)
+			}
+		}
 	}
 	if len(wanted) != 0 {
 		t.Fatalf("missing checks: %v", wanted)
@@ -350,7 +386,8 @@ func TestNodeCancellationDoesNotSaveResult(t *testing.T) {
 	}
 }
 
-// Close keeps the end of a check's log whatever its size. Output just past the
+// A flush keeps the end of a check's log whatever its size, before the file is
+// closed: the run copies reports only after that flush. Output just past the
 // head limit must not lose its ending, and a shortened log says how much it cut.
 func TestCheckLogKeepsTheEndOfTheOutput(t *testing.T) {
 	const end = "THE END OF THE CHECK LOG"
@@ -371,9 +408,11 @@ func TestCheckLogKeepsTheEndOfTheOutput(t *testing.T) {
 			if _, err := log.Write(body); err != nil {
 				t.Fatal(err)
 			}
-			if err := log.finish(checkExit{}); err != nil {
+			if err := log.flush(); err != nil {
 				t.Fatal(err)
 			}
+			// Read while the log is still open: the flush alone must have written
+			// the end, because the report copy runs before the file is closed.
 			data, err := os.ReadFile(log.path)
 			if err != nil {
 				t.Fatal(err)
@@ -386,6 +425,9 @@ func TestCheckLogKeepsTheEndOfTheOutput(t *testing.T) {
 			}
 			if tc.truncated && len(data) > checkLogHead+checkLogTail+len(end)+64 {
 				t.Fatalf("shortened log kept %d bytes", len(data))
+			}
+			if err := log.Close(); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}
