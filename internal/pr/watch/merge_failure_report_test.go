@@ -177,6 +177,9 @@ func TestMergeFailureReportReadsLocalCISuiteFailures(t *testing.T) {
 	if err := registry.SaveResult(ctx, localci.Result{Repo: repo, SHA: f.head, Node: "worker", Status: "failed", Checks: []localci.SuiteResult{
 		{CheckName: "go-static", Status: "failed", Error: "exit status 1", LogTail: "# dyna-agent/internal/room\n" + failure},
 		{CheckName: "go-test-shard (6)", Status: "failed", Error: "exit status 1", Failures: []string{failure}},
+		// A check that never reached its tests names the cause instead of leaving
+		// the report to say that it found no recognized failure.
+		{CheckName: "go-test-shard (2)", Status: "error", Cause: localci.CauseSSHDrop, Error: "ssh: connect to host worker port 22: Connection timed out"},
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +217,7 @@ func TestMergeFailureReportReadsLocalCISuiteFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Local CI failures:", "go-static", "go-test-shard (6)", "duplicate case reflect.Bool", "events_test.go:521:7", "internal/room/events_test.go", "#1"} {
+	for _, want := range []string{"Local CI failures:", "go-static", "go-test-shard (6)", "go-test-shard (2) (ssh-drop)", "duplicate case reflect.Bool", "events_test.go:521:7", "internal/room/events_test.go", "#1"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("missing %q in report:\n%s", want, report)
 		}
