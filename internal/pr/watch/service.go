@@ -945,7 +945,7 @@ func reviewTask(r Record) string {
 	base += "Assignment input: " + string(input) + "\n"
 	base += "You may start at most 3 live helper sessions, one level deep, using your own profile or a cheaper profile (higher cost-efficiency). Helpers report findings to you. Only you may record this assignment's verdict. Keep this reviewer session open between reviews.\n"
 	return base + fmt.Sprintf(`This assignment is Dyna-only. Read GitHub without posting: do not publish GitHub reviews or comments for this assignment.
-Record exactly one typed result in Dyna before your turn ends: %s approve|changes|approve-fast|stop-early --body-file <file> --findings-file <json-file> --head %s. A turn that ends without a typed result is an error. Use changes when fixes are needed, with structured findings. Use approve-fast only when the change is safe to land without the batch wait, such as docs, guide text or tests; Dyna's changed-path rules still decide, and a risky path falls back to the normal path. Use stop-early with --reason superseded|duplicate|empty|too-large when you stop before judging the change. Reviews over 12000 bytes are rejected, never silently clipped. Include findings, file paths, line numbers and suggested fixes in the Markdown. No GitHub review ID is needed. The stored result is visible in Dyna and a changes result is delivered to the author.`, command, r.Head)
+Record exactly one typed result in Dyna before your turn ends: %s approve|changes|approve-fast|stop-early --body-file <file> --findings-file <json-file> --head %s. A turn that ends without a typed result is an error. Use changes when fixes are needed, with structured findings. approve-fast is for test code or low-risk changes of any kind, at the reviewer's own discretion. It lands without a merge trial when required CI passed at exactly the approved head. Use stop-early with --reason superseded|duplicate|empty|too-large when you stop before judging the change. Reviews over 12000 bytes are rejected, never silently clipped. Include findings, file paths, line numbers and suggested fixes in the Markdown. No GitHub review ID is needed. The stored result is visible in Dyna and a changes result is delivered to the author.`, command, r.Head)
 }
 func (s *Service) launch(ctx context.Context, r Record, profile, task string) (string, error) {
 	if s.LaunchReviewer != nil {
@@ -1062,9 +1062,9 @@ func (s *Service) reviewResult(ctx context.Context, key, actor string, in Review
 	if paused {
 		return s.savePendingVerdict(r.Key, actor, head, in)
 	}
-	// The path rule decides a fast landing. A paused submission keeps its
-	// requested result and is classified when it replays.
-	in = s.normalizeReviewResult(ctx, r, in)
+	// A paused submission keeps the reviewer's requested result and applies its
+	// publication kind when it replays.
+	in = s.normalizeReviewResult(r, in)
 	verdict, summary = in.Verdict, in.Summary
 	prepared, err = prepareFindings(r, verdict, in.Findings)
 	if err != nil {

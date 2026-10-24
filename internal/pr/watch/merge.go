@@ -269,16 +269,16 @@ func (s *Service) MergeStatus(ctx context.Context) ([]MergeQueueItem, error) {
 	return rows, nil
 }
 
-// fastLandable reports an approval that Dyna's changed-path rules rated low
-// risk. The reviewer's word alone never lands a change fast.
+// fastLandable reports a reviewer's approve-fast decision at the current head.
+// The merge-ready gate has already proved required CI at that exact head.
 func fastLandable(r Record) bool {
-	return r.Verdict == state.VerdictApproveFast && r.FastLand != nil && r.FastLand.LowRisk && r.RoundHead == r.Head
+	return r.Verdict == state.VerdictApproveFast && r.CI == "passed" && r.RoundHead == r.Head
 }
 
 // fastLand publishes one change without the batch trial. Every existing merge
 // gate stays: a fresh head, the approval at that head, green CI, required
-// reviews, mergeability and the room pause. A low-risk approve-fast change has
-// no base lease. A tested-head landing supplies one and gets a landed event.
+// reviews, mergeability and the room pause. An approve-fast landing has no
+// base lease. A tested-head landing supplies one and gets a landed event.
 func (s *Service) fastLand(ctx context.Context, candidate Record, base *state.RepositoryFacts) error {
 	current, children, ready, err := s.prepareMerge(ctx, candidate)
 	if err != nil || !ready {
