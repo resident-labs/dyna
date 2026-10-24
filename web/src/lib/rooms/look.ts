@@ -22,6 +22,9 @@ interface FeedPost {
   payload?: EventPayload | null
   completion?: boolean
   owner?: boolean
+  // forRoot marks a post addressed to the room's root session, which the owner
+  // reads as a post to them (internal/roomsvc.Post.ForRoot).
+  forRoot?: boolean
   to?: string[]
 }
 
@@ -98,12 +101,17 @@ export function visibleTo(look: Look, revealed: Record<string, boolean> = {}) {
 // oneLine reports a finished turn the feed shows as a single line.
 export const oneLine = (look: Look, post: FeedPost) => kindOf(post) === 'finished' && setting(look, 'finished') === 'line'
 
-// highlighted reports a post that gets the gold mark: one addressed to the
-// owner by someone else, limited to root's posts in "Root only".
+// highlighted reports a post that gets the gold mark: one addressed to root or
+// to the room owner, by someone else. "Root only" marks root's own posts and
+// the posts addressed to root; "Everyone to you" marks every post addressed to
+// either. A post carries forRoot when its recipients include root's session, so
+// a post to root keeps the mark wherever it shows.
 export function highlighted(look: Look, post: FeedPost, roomName: string) {
   const mode = setting(look, 'highlight')
-  if (mode === 'off' || post.owner || post.kind === 'pr' || !(post.to || []).includes(roomName)) return false
-  return mode === 'all' || fromRoot(post)
+  if (mode === 'off' || post.owner || post.kind === 'pr') return false
+  const toYou = post.forRoot === true || (post.to || []).includes(roomName)
+  if (mode === 'all') return toYou
+  return post.forRoot === true || (toYou && fromRoot(post))
 }
 
 // withChoice returns look with one choice set. A null value clears it, so the

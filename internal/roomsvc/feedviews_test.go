@@ -22,6 +22,9 @@ func TestFeedViewRouting(t *testing.T) {
 			Name  string
 			Post  room.Message
 			Views []string
+			// ForRoot is set on a case whose recipients include the root
+			// session, which the owner reads as a post to them.
+			ForRoot *bool `json:"forRoot"`
 		}
 	}
 	if err := json.Unmarshal(data, &fixture); err != nil {
@@ -34,6 +37,9 @@ func TestFeedViewRouting(t *testing.T) {
 			got := slices.Sorted(slices.Values(views.viewsFor(tc.Post, tc.Post.Conversation.Home())))
 			if !reflect.DeepEqual(got, tc.Views) {
 				t.Fatalf("views = %v, want %v", got, tc.Views)
+			}
+			if tc.ForRoot != nil && views.addressedToRoot(tc.Post) != *tc.ForRoot {
+				t.Fatalf("forRoot = %v, want %v", views.addressedToRoot(tc.Post), *tc.ForRoot)
 			}
 		})
 	}
