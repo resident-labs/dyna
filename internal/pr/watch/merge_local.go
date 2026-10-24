@@ -232,20 +232,20 @@ func (s *Service) publishLocalChange(ctx context.Context, r Record, expected, tr
 func returnedLocalFailure(logs string) (string, string) {
 	suite := ""
 	excerpt := logs
+	failedAt := -1
 	names := localci.RequiredChecks(localci.WorkflowSuites())
 	// Results from the old runner used the go suite name without an aggregate.
 	names = append(names, localci.CheckName(localci.SuiteGo))
 	for _, name := range names {
 		for _, status := range []string{"failed", "error"} {
-			if at := strings.Index(logs, string(name)+" ("+status+"):"); at >= 0 {
+			if at := strings.Index(logs, string(name)+" ("+status+"):"); at >= 0 && (failedAt < 0 || at < failedAt) {
 				suite = string(name)
-				excerpt = logs[at:]
-				break
+				failedAt = at
 			}
 		}
-		if suite != "" {
-			break
-		}
+	}
+	if failedAt >= 0 {
+		excerpt = logs[failedAt:]
 	}
 	if len(excerpt) > 2000 {
 		excerpt = excerpt[:2000]

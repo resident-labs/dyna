@@ -511,6 +511,14 @@ func TestLocalCIReadsNodeChecks(t *testing.T) {
 	}
 }
 
+func TestReturnedLocalFailureKeepsFailedShardEvidence(t *testing.T) {
+	logs := "go-test-shard (2) (failed): shard compile error\nmore shard evidence\ngo-test (failed):\n"
+	suite, excerpt := returnedLocalFailure(logs)
+	if suite != "go-test-shard (2)" || !strings.Contains(excerpt, "shard compile error\nmore shard evidence") {
+		t.Fatalf("lost concrete shard failure: suite=%q excerpt=%q", suite, excerpt)
+	}
+}
+
 func TestLocalCIRequiresEachDefaultSuiteToPass(t *testing.T) {
 	result := localci.Result{Repo: "repo", SHA: "head", Status: "passed"}
 	for _, suite := range localci.DefaultSuites() {
