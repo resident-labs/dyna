@@ -26,7 +26,7 @@
   import MentionInChat from './MentionInChat.svelte'
   import RowActions from './RowActions.svelte'
   import type { RowAction } from './props.ts'
-  import { roomIssueLabel, unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
+  import { issueWork, roomIssueLabel, unifiedIssues, type RoomIssue, type IssueRow, type IssueReference } from './unifiedIssues.ts'
   import { location as issueLocation } from '../issues/localIssues.ts'
   import IssuePage from './IssuePage.svelte'
   import Menu from '../ui/Menu.svelte'
@@ -96,7 +96,7 @@
   let { onmention, localIssues = [], oncloseissue, onexportissue, ondismississue, mergeVersion = 0, older = false, loadingOlder = false, failedOlder = false, onolder = () => {}, roomId, session = '', active = true, kind = 'pr', integration = null, changes = null, members = [], link = null, onsession, onpr, ontrack, onuntrack, onresume, reviewer = null, onreviewer = () => {}, goals = [], onexpedite, onlinkgoal }: Props = $props()
 
   const saved = loadFilters()
-  let listState = $state(kind === 'issue' ? 'open' : saved.state)
+  let listState = $state(kind === 'issue' ? 'unhandled' : saved.state)
   let source = $state('all')
   let localSelected = $state<RoomIssue | null>(null)
   let selectedLocal = $derived(localIssues.find((i) => i.id === localSelected?.id) || localSelected)
@@ -149,7 +149,9 @@
   let chgAuthor = $derived(chg?.authorSession ? byId[chg.authorSession] : null)
   let chgReviewer = $derived(chg?.reviewerSession ? byId[chg.reviewerSession] : null)
   let rowItems = $derived(list?.items ?? [])
-  let issueRows = $derived(unifiedIssues(rowItems, localIssues, source, listState, query))
+  let issueAPIState = $derived(listState === 'unhandled' || listState === 'in-progress' ? 'open' : listState)
+  let allIssueRows = $derived(unifiedIssues(rowItems, localIssues, source, issueAPIState, query))
+  let issueRows = $derived(listState === 'unhandled' || listState === 'in-progress' ? allIssueRows.filter((it) => issueWork(it) === listState) : allIssueRows)
   async function pickIssue(it: IssueRow) {
     localSelected = it.number ? null : it.local || null
     localBody = ''; localBodyError = ''
@@ -172,7 +174,7 @@
   async function load() {
     const n = ++seq
     try {
-      const res = await api.githubList(roomId, kind, kind === 'pr' ? 'open' : listState, query)
+      const res = await api.githubList(roomId, kind, kind === 'pr' ? 'open' : issueAPIState, query)
       if (n !== seq) return
       list = res
       error = ''
@@ -327,7 +329,7 @@
   }
   function setState(s: string) {
     listState = s
-    saveFilters({ state: listState })
+    if (inPRs) saveFilters({ state: listState })
     load()
   }
   // The search runs on GitHub; wait for a pause in typing.
@@ -421,13 +423,13 @@
       if (inPRs && chg) history.replaceState(history.state, '', prHash(roomId, prRef(chg), tab, session))
     })
   })
-  const STATES = ['open', 'closed', 'all']
+  const ISSUE_STATES: [string, string][] = [['unhandled', 'Unhandled'], ['in-progress', 'In progress'], ['closed', 'Closed'], ['all', 'All']]
 </script>
 {#snippet filters()}
   <header class="lhead">
     {#if !inPRs}<div class="filters">
       <Segmented small label="Source" options={[['all', 'All'], ['dyna', 'Dyna'], ['github', 'GitHub']]} value={source} onchange={(value: string) => source = value} />
-      <Segmented small label="State" options={STATES.map((s) => [s, s.charAt(0).toUpperCase() + s.slice(1)])} value={listState} onchange={setState} />
+      <Segmented small label="State" options={ISSUE_STATES} value={listState} onchange={setState} />
     </div>{/if}
     <input class="search" type="search" bind:value={search} oninput={typed} onkeydown={(e) => e.key === 'Enter' && (clearTimeout(timer), (query = search.trim()), load())} placeholder="Search, for example author:@me label:bug" aria-label="Search {inPRs ? 'pull requests' : 'issues'}" />
   </header>
@@ -486,7 +488,7 @@
             oncloseissue={oncloseissue ? (it) => it.local && oncloseissue(it.local) : undefined} onexport={onexportissue ? (it) => it.local && onexportissue(it.local) : undefined} ondismiss={ondismississue ? (it) => it.local && ondismississue(it.local) : undefined} />
           {#if list?.more && source !== 'dyna'}<p class="more">Showing the first {list.items?.length ?? 0} from GitHub. Search to narrow the list.</p>{/if}
         {:else if list || error || source === 'dyna'}
-          <div class="empty"><strong>No issues</strong><p>{query ? 'Nothing matches this search.' : 'No issues match these filters.'}</p></div>
+          <div class="empty"><strong>No issues</strong><p>{query ? 'Nothing matches this search.' : listState === 'unhandled' ? 'Every open issue has work in progress.' : 'No issues match these filters.'}</p></div>
         {/if}
       </div>
     {/if}

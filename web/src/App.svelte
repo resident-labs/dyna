@@ -1375,7 +1375,7 @@
       if (roomSessionController && (roomControls?.loading || roomControls?.state?.paused !== false)) roomSessionController.load()
     }
     if (ev.kind === 'posts' && feed && evRoom === feed.room.id) roomData.applyPosts(ev)
-    if (ev.kind === 'goals' && evRoom === roomId) { if (!item) loadGoals(); loadRules() }
+    if (ev.kind === 'goals' && evRoom === roomId) { if (!item) loadGoals(); loadRules(); loadIssues(); loadIssues(true) }
     if (ev.kind === 'machines') machineView.changed()
     if (ev.kind === 'pins' && evRoom === roomId) loadPins()
     if (ev.kind === 'issues' && evRoom === roomId) { loadIssues(); loadIssues(true) }
@@ -1384,6 +1384,8 @@
     if ((ev.kind === 'prs' || ev.kind === 'changes') && (!evRoom || evRoom === roomId)) {
       changeView.bumpVersion()
       reviewerSoon()
+      loadIssues()
+      loadIssues(true)
       if (ev.kind === 'changes' && !item) loadChanges()
     }
     if (ev.kind === 'session' && evRoom === roomId && ev.change?.id === drill?.id) { loadSession(); router.reviewVersion++ }
