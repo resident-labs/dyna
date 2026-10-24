@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -90,6 +91,24 @@ func OnClose(fn func(*sql.DB)) {
 	closeHooks.Unlock()
 }
 
+// closingHooks run with each shared handle that Close is about to release,
+// before the handle closes, so a package that publishes from the handle
+// (internal/state's writers) can finish or stop a publish that is already
+// running. internal/state cannot be imported here.
+var closingHooks struct {
+	sync.Mutex
+	fns []func(*sql.DB)
+}
+
+// OnClosing runs fn with each shared handle that Close is about to release,
+// before the handle closes. Close waits for fn, so fn may block until its own
+// work on the handle has ended. fn must not call back into this package.
+func OnClosing(fn func(*sql.DB)) {
+	closingHooks.Lock()
+	closingHooks.fns = append(closingHooks.fns, fn)
+	closingHooks.Unlock()
+}
+
 // Close releases the shared handle after the data folder's users have stopped.
 func Close(dataDir string) error {
 	absolute, err := filepath.Abs(dataDir)
@@ -112,6 +131,14 @@ func Close(dataDir string) error {
 	}
 	handles.Unlock()
 	if db != nil {
+		// A package that publishes from this handle ends or stops its work
+		// before the handle closes, so no publish reaches a closed database.
+		closingHooks.Lock()
+		before := slices.Clone(closingHooks.fns)
+		closingHooks.Unlock()
+		for _, fn := range before {
+			fn(db)
+		}
 		err := db.Close()
 		closeHooks.Lock()
 		for _, fn := range closeHooks.fns {

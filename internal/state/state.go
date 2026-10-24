@@ -38,10 +38,12 @@ type Writer struct {
 	appendMu sync.Mutex // orders appends and their events
 	mirrorMu sync.Mutex // orders rollback copies, stamps and imports
 
-	events     sync.Mutex  // guards pending, publishing and idle
-	pending    []hub.Event // committed changes waiting to publish, oldest first
-	publishing bool        // a caller or the background goroutine publishes
-	idle       *sync.Cond  // signals that publishing became false
+	events     sync.Mutex    // guards pending, publishing, closed and idle
+	pending    []hub.Event   // committed changes waiting to publish, oldest first
+	publishing bool          // a caller or the background goroutine publishes
+	closed     bool          // a close stopped this Writer's publishing
+	stopped    chan struct{} // closed with closed, so a waiter needs no polling
+	idle       *sync.Cond    // signals that publishing became false
 
 	mu       sync.Mutex
 	next     uint64
@@ -56,8 +58,16 @@ var writers = struct {
 	byDB map[*sql.DB]*Writer
 }{byDB: map[*sql.DB]*Writer{}}
 
-// A closed handle's Writer goes with it; a later Open makes a new handle.
+// A closed handle's Writer goes with it; a later Open makes a new handle. The
+// Writer stops publishing before the handle closes, because a publish may read
+// the database it was raised from.
 func init() {
+	database.OnClosing(func(db *sql.DB) {
+		writers.Lock()
+		w := writers.byDB[db]
+		writers.Unlock()
+		w.Close()
+	})
 	database.OnClose(func(db *sql.DB) {
 		writers.Lock()
 		delete(writers.byDB, db)
@@ -78,7 +88,7 @@ func For(db *sql.DB) *Writer {
 	return w
 }
 
-func newWriter(db *sql.DB) *Writer { return &Writer{db: db} }
+func newWriter(db *sql.DB) *Writer { return &Writer{db: db, stopped: make(chan struct{})} }
 
 // SetPublish sends each later committed change to publish, for example the
 // engine's event hub. Without it, a Writer publishes nothing. Write and
@@ -94,6 +104,39 @@ func newWriter(db *sql.DB) *Writer { return &Writer{db: db} }
 // caller's publish under its own locks. publish must still not take a lock
 // that the writing caller can hold, and must not call WaitPublished.
 func (w *Writer) SetPublish(publish func(hub.Event)) { w.publish.Store(&publish) }
+
+// Close stops this Writer from publishing and returns after a publish that is
+// already running ends, including changes queued behind it. Whoever closes what
+// a publish reads, such as the database, may do it after Close returns. A write
+// that commits later still writes but publishes nothing, so no publish reaches
+// a closed handle. Close is safe to call more than once and on a nil Writer.
+// publish must not call Close.
+//
+// The stopped channel closes when this call stops publishing, before the wait,
+// so a waiter that must act inside the drain needs no polling.
+func (w *Writer) Close() {
+	if w == nil {
+		return
+	}
+	w.events.Lock()
+	defer w.events.Unlock()
+	if !w.closed {
+		w.closed = true
+		close(w.stopped)
+	}
+	if w.idle == nil {
+		w.idle = sync.NewCond(&w.events)
+	}
+	for w.publishing {
+		w.idle.Wait()
+	}
+}
+
+// Stopped returns a channel that closes when a close stops this Writer from
+// publishing, before that close waits for a publish that is already running. A
+// caller that must act while the close drains, as a test does, waits on it
+// instead of polling.
+func (w *Writer) Stopped() <-chan struct{} { return w.stopped }
 
 type done struct {
 	at   time.Time
@@ -211,6 +254,9 @@ func (w *Writer) queue(c hub.Event) func() {
 	}
 	w.events.Lock()
 	defer w.events.Unlock()
+	if w.closed {
+		return nil
+	}
 	if w.publishing {
 		w.pending = append(w.pending, c)
 		return nil
