@@ -64,6 +64,19 @@ export function markdown(text: string | null | undefined): string {
   return html
 }
 
+// internalLinkHash returns the app route in a same-origin link. Other paths,
+// such as attachments, keep their normal external-link behavior.
+export function internalLinkHash(href: string, current: Pick<Location, 'origin' | 'pathname'>): string | null {
+  try {
+    const url = new URL(href, current.origin)
+    if (url.origin !== current.origin) return null
+    if (url.pathname !== '/' && url.pathname !== current.pathname) return null
+    return url.hash
+  } catch {
+    return null
+  }
+}
+
 const two = (n: number): string => String(n).padStart(2, '0')
 
 export function clock(ts: string | number | Date = NaN): string {
