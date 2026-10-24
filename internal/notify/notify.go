@@ -1217,10 +1217,18 @@ func (s *Service) prepareSessionReport(info subagent.Info, turn subagent.Turn) (
 			targets = []string{meta.Room}
 		}
 		postedAddress := targets[0]
+		// A parent that is the root seat has one address for a session's post: the
+		// room's own (notify resolver). The completion target still names the root
+		// session, so both spellings are the same recipient here.
+		posted := []string{postedAddress}
 		if parent, err := store.DeliveryTarget(postedAddress); err == nil {
 			postedAddress = parent.Address()
+			posted = []string{postedAddress}
+			if parent.Role == subagent.RoleRoot && parent.RoomID == meta.RoomID {
+				posted = append(posted, meta.Room)
+			}
 		}
-		if slices.Contains(turn.PostedTo, postedAddress) {
+		if slices.ContainsFunc(posted, func(addr string) bool { return slices.Contains(turn.PostedTo, addr) }) {
 			return nil, nil
 		}
 		ev, err := s.turnEvent(meta, turn)
