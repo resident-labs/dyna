@@ -267,6 +267,13 @@ func (r *Runtime) prepare(ctx context.Context, p profile.Profile, previous *Pin,
 	if err != nil {
 		return p, pin, err
 	}
+	if a.Harness == "kimi-code" {
+		// Account activation restores config.toml independently of a generation
+		// pin. Reapply policy on every prepare, including a valid resumed pin.
+		if err := publishKimiGeneration(gen.Directory, home); err != nil {
+			return p, pin, err
+		}
+	}
 	pin.Generation = gen.Directory
 	for k, v := range gen.Env {
 		env[k] = v
