@@ -153,8 +153,9 @@ notifications (`docs/desktop/CONNECT.md`).
 
 ## For agents
 
-Agents talk in rooms with `dyna post`, `dyna room log`, `dyna room read`,
-`dyna room members` and, for an external root, `dyna room watch`.
+Agents talk in rooms with `dyna post`, `dyna room log`, `dyna room search`,
+`dyna room read`, `dyna room members` and, for an external root,
+`dyna room watch`.
 Start with `dyna guide`. It lists the topics and when to read each one:
 `sessions`, `delegation`, `workflows`, `steering`, `posting`, `git`,
 `computers` and `recovery`. Root reads `external-orchestration`.

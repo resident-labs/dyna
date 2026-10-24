@@ -40,7 +40,7 @@ func RoomCmd() *cobra.Command {
 			"Every member and the owner can read every post. Mentions decide who wakes, not who can read. " +
 			"Work started without --room goes to the current repo's room; outside a repo, pass --room.",
 	}
-	cmd.AddCommand(sessionControlsCmd("pause"), sessionControlsCmd("resume"), sessionControlsCmd("clear-dormant"), sessionControlsCmd("session-controls"), createCmd(), listCmd(), deleteCmd(), logCmd(), readCmd(), membersCmd(), watchCmd(), pinCmd(), unpinCmd(), pinsCmd())
+	cmd.AddCommand(sessionControlsCmd("pause"), sessionControlsCmd("resume"), sessionControlsCmd("clear-dormant"), sessionControlsCmd("session-controls"), createCmd(), listCmd(), deleteCmd(), logCmd(), searchCmd(), readCmd(), membersCmd(), watchCmd(), pinCmd(), unpinCmd(), pinsCmd())
 	return cmd
 }
 
