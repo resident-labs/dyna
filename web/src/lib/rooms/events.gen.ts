@@ -168,6 +168,7 @@ export interface GoalEvent {
   actor: string
   state: GoalState
   summary?: string
+  amendment?: number
 }
 
 // CheckinEvent is the payload of the checkin/summary events.
@@ -1197,7 +1198,8 @@ export function isGoalEvent(v: unknown): v is GoalEvent {
     typeof v.title === "string" &&
     typeof v.actor === "string" &&
     GOAL_STATE.has(v.state) &&
-    (v.summary === undefined || typeof v.summary === "string")
+    (v.summary === undefined || typeof v.summary === "string") &&
+    (v.amendment === undefined || Number.isInteger(v.amendment))
 }
 
 export function isCheckinEvent(v: unknown): v is CheckinEvent {

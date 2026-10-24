@@ -269,3 +269,43 @@ func TestGoalEventsPageNewestFirst(t *testing.T) {
 		t.Fatalf("older page = %+v err=%v", older, err)
 	}
 }
+
+// A correction reaches the holder as its own post. Repeating an earlier
+// correction is still a new post, because its stored position names it.
+func TestAmendGoalBriefPostsEachAmendmentOnce(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	lead := e.start(r, "lead", nil)
+	store := e.svc.goalService().Store
+	g, err := store.Add(r.ID, "owner", goals.Input{Text: "Ship the relay", Detail: "Own internal/room only.", Holders: []string{lead.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"Also update the guide.", "Skip the parser refactor.", "Also update the guide."} {
+		if _, err := e.svc.AmendGoalBrief(t.Context(), r.ID, g.ID, text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	messages, err := e.svc.rooms().Messages(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	texts := []string{}
+	for _, msg := range messages {
+		if ev, ok := msg.Goal(); ok && ev.Type == room.GoalAmended {
+			ids[msg.ID] = true
+			texts = append(texts, ev.Summary)
+			if len(msg.To) != 1 || msg.To[0] != lead.Address() {
+				t.Fatalf("amendment post was not addressed to the holder: %+v", msg)
+			}
+		}
+	}
+	want := []string{"Also update the guide.", "Skip the parser refactor.", "Also update the guide."}
+	if len(ids) != 3 || len(texts) != 3 || texts[0] != want[0] || texts[1] != want[1] || texts[2] != want[2] {
+		t.Fatalf("amendment posts = %v (ids %v), want %v", texts, ids, want)
+	}
+	if stored, err := store.Get(r.ID, g.ID); err != nil || stored.Detail != "Own internal/room only." || len(stored.Amendments) != 3 || stored.Text != "Ship the relay" {
+		t.Fatalf("stored goal = %+v, %v", stored, err)
+	}
+}
