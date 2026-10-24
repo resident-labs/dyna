@@ -16,8 +16,24 @@ import (
 	"dyna-agent/internal/harness/health"
 	harnessruntime "dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/workeroutput"
 )
+
+func TestProfileCostPerTurnCoverage(t *testing.T) {
+	value := 10.0
+	coverage := subagent.UsageCost{CompleteTurns: 1, UnknownTurns: 1}
+	if got := profileCostPerTurnText(&value, coverage, 2); got != "$10.00" {
+		t.Fatalf("average with an unknown turn = %q, want no lower-bound marker", got)
+	}
+	if got := profileCostText(&value, coverage, 2); got != "≥ $10.00" {
+		t.Fatalf("spend with an unknown turn = %q, want a lower-bound marker", got)
+	}
+	coverage.PartialTurns = 1
+	if got := profileCostPerTurnText(&value, coverage, 2); got != "≥ $10.00" {
+		t.Fatalf("average with a partial report = %q, want a lower-bound marker", got)
+	}
+}
 
 func TestProfilesAddUseFlagAndJSON(t *testing.T) {
 	// The removed flag must not come back as a compatibility alias.

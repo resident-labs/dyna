@@ -8,6 +8,7 @@ import { element, need } from '../../../test/need.ts'
 // globalThis.listed, and saveProfile waits for the test to settle it.
 const API = `export const api = {
   configProfiles: () => Promise.resolve(structuredClone(globalThis.listed)),
+  profileUsage: () => Promise.resolve({ from: '2026-10-18', to: '2026-10-24', profiles: [] }),
   saveProfile: (edit) => new Promise((ok, fail) => globalThis.saves.push({ edit, ok, fail })),
 }; export const openExternal = () => {}`
 const built = await bundle({ component: '../settings/ProfilesPane', api: API })
