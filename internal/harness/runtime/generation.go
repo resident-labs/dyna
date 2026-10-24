@@ -183,6 +183,19 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 		root["policies"] = policies
 		root["update"] = "disable"
 	}
+	if h == "kimi-code" {
+		// ACP has no per-session denylist. Merge only the generated tool
+		// policy into the private config; its provider and model sections stay.
+		if _, ok := servers[dynaMCPName]; ok {
+			tools, _ := root["tools"].(map[string]any)
+			if tools == nil {
+				tools = map[string]any{}
+				root["tools"] = tools
+			}
+			disabled, _ := tools["disabled"].([]string)
+			tools["disabled"] = append(disabled, nativeFeaturePolicies[h].Shell...)
+		}
+	}
 	if h == "grok" {
 		root["attribution"] = false
 		// Dyna's shell server replaces the native shell; deny it in the same

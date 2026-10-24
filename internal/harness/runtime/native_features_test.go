@@ -404,6 +404,7 @@ func TestDynaShellServerJoinsDynaShellGenerations(t *testing.T) {
 		{"claude-code", "mcp.json", []string{"Bash", "GetTask", "TaskOutput", "TaskStop", "Monitor"}, true, ""},
 		{"grok", "settings.toml", []string{"run_terminal_command", "get_command_or_subagent_output", "wait_commands_or_subagents", "kill_command_or_subagent"}, true, ""},
 		{"pi", "settings.json", []string{"bash"}, true, "direct"},
+		{"kimi-code", "settings.json", []string{"Bash", "TaskList", "TaskOutput", "TaskStop", "WaitFor"}, true, ""},
 		// Muse removes its shell tools with a flag, and its generated args
 		// name Dyna's own shell ("mcp shell"), so only bash_input can be
 		// searched here. The argv checks below cover the flag.
@@ -440,8 +441,9 @@ func TestDynaShellServerJoinsDynaShellGenerations(t *testing.T) {
 			// session launch removes them, and a policy with no switch yet
 			// removes nothing. Grok's shared agent process cannot take per-launch
 			// argv, so its generation denies the native shell in the same config
-			// that adds Dyna's shell server.
-			if tc.h == "grok" {
+			// that adds Dyna's shell server. Kimi merges the same denylist into
+			// its native config because ACP has no per-session tool filter.
+			if tc.h == "grok" || tc.h == "kimi-code" {
 				for _, tool := range tc.shell {
 					if !strings.Contains(string(raw), tool) {
 						t.Fatalf("grok generation lacks the shell deny hook entry %s: %s", tool, raw)

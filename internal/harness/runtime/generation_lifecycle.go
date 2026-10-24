@@ -61,7 +61,8 @@ const dynaMCPName = "dyna"
 // Version 7: harnesses with DynaShell get Dyna's MCP shell server.
 // Version 8: OpenCode denies its native shell and lists Dyna's server directly.
 // Version 8: Antigravity denies its native shell with a plugin hook.
-const generationInputsVersion = 9
+// Version 10: Kimi merges only Dyna-owned tool policy into native config.
+const generationInputsVersion = 10
 
 type generationInputs struct {
 	NativeFeatures                                           nativeFeaturePolicy
@@ -332,6 +333,11 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 	}
 	if h == "pi" {
 		if err = publishGenerationFile(dir, "pi-mcp.json", home, "mcp.json"); err != nil {
+			return err
+		}
+	}
+	if h == "kimi-code" {
+		if err = publishKimiGeneration(dir, home); err != nil {
 			return err
 		}
 	}
