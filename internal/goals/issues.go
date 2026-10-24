@@ -78,8 +78,13 @@ func (s *Store) LinkPreparedIssues(roomID, goalID, actor string, links []room.Is
 		return err
 	}
 	for i, issue := range links {
-		if _, err := s.Issues.LinkIssueGoal(roomID, issue.Label(), goalID, actor); err != nil {
-			return errors.Join(fmt.Errorf("link %s to %s: %w", issue.Label(), goalID, err), s.RestoreIssueLinks(roomID, actor, links[:i]))
+		linked, err := s.Issues.LinkIssueGoal(roomID, issue.Label(), goalID, actor)
+		if err != nil {
+			restore := links[:i]
+			if linked.ID == issue.ID && linked.State == "goal" && linked.GoalID == goalID {
+				restore = links[:i+1]
+			}
+			return errors.Join(fmt.Errorf("link %s to %s: %w", issue.Label(), goalID, err), s.RestoreIssueLinks(roomID, actor, restore))
 		}
 	}
 	return nil
