@@ -50,9 +50,14 @@ type Issue struct {
 	GitHubURL string `json:"githubUrl"`
 	// FixPR is the open PR that closes this issue on merge. It is filled at
 	// read time from the PR store, so it is never part of the stored issue.
-	FixPR     int    `json:"fixPr,omitempty"`
-	ChangedBy string `json:"changedBy"`
-	ChangedAt int64  `json:"changedAt"`
+	FixPR int `json:"fixPr,omitempty"`
+	// InProgress, GoalShared and GoalHolder are computed at read time from
+	// open goals and PR links. They are never part of the stored issue.
+	InProgress bool   `json:"inProgress"`
+	GoalShared bool   `json:"goalShared,omitempty"`
+	GoalHolder string `json:"goalHolder,omitempty"`
+	ChangedBy  string `json:"changedBy"`
+	ChangedAt  int64  `json:"changedAt"`
 }
 
 // Label is the short issue reference people can type within its room.
@@ -77,7 +82,7 @@ type CloseOrigin struct {
 // path that fills origin is the tracked-PR close (goal g343, change
 // fix/pr-closes-issues), which calls this from the merge watcher.
 func (s *Store) CloseIssue(roomID, id, by, reason string, origin CloseOrigin) (Issue, error) {
-	return s.ChangeIssueFrom(roomID, id, by, origin, func(i *Issue) error {
+	return s.changeIssueFrom(roomID, id, by, origin, true, "ChangeIssue", func(i *Issue) error {
 		i.State = "closed"
 		i.Reason = reason
 		return nil
@@ -419,10 +424,46 @@ func (s *Store) ChangeIssue(roomID, id, by string, change func(*Issue) error) (I
 // close. The room store posts the typed event after the change, so every path
 // that changes an issue uses it.
 func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, change func(*Issue) error) (Issue, error) {
+	return s.changeIssueFrom(roomID, id, by, origin, false, "ChangeIssue", change)
+}
+
+// LinkIssueGoal records goal work without closing the issue. Relinking a
+// legacy goal issue is allowed, so a finished goal can be replaced by new work.
+func (s *Store) LinkIssueGoal(roomID, id, goalID, by string) (Issue, error) {
+	if strings.TrimSpace(goalID) == "" {
+		return Issue{}, errors.New("goal link needs a goal ID")
+	}
+	return s.changeIssueFrom(roomID, id, by, CloseOrigin{}, true, "LinkIssueGoal", func(i *Issue) error {
+		i.State, i.GoalID, i.Assignee = "goal", goalID, ""
+		return nil
+	})
+}
+
+// CheckIssueGoalLink checks link permission before a goal or session changes.
+func (s *Store) CheckIssueGoalLink(roomID, by string) error {
 	rec, err := s.Resolve(roomID)
 	if err != nil {
-		return Issue{}, err
+		return err
 	}
+	if by == "" {
+		by = rec.Name
+	}
+	return authority.Check("LinkIssueGoal", issueActor(rec, by), nil)
+}
+
+// RestoreIssueGoal restores a previous open or goal link after a later step
+// of starting or editing work fails.
+func (s *Store) RestoreIssueGoal(roomID, id string, snapshot Issue, by string) (Issue, error) {
+	if snapshot.State != "open" && snapshot.State != "goal" {
+		return Issue{}, errors.New("can restore only an open or goal issue")
+	}
+	return s.changeIssueFrom(roomID, id, by, CloseOrigin{}, true, "LinkIssueGoal", func(i *Issue) error {
+		i.State, i.GoalID, i.Assignee = snapshot.State, snapshot.GoalID, snapshot.Assignee
+		return nil
+	})
+}
+
+func issueActor(rec Record, by string) authority.Actor {
 	actor := authority.Actor{Role: authority.Session, Session: by, Room: rec.ID}
 	switch by {
 	case rec.Name:
@@ -430,7 +471,15 @@ func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, chang
 	case rec.Name + ":" + RootAgent:
 		actor.Role = authority.Root
 	}
-	if err := authority.Check("ChangeIssue", actor, nil); err != nil {
+	return actor
+}
+
+func (s *Store) changeIssueFrom(roomID, id, by string, origin CloseOrigin, allowGoal bool, action string, change func(*Issue) error) (Issue, error) {
+	rec, err := s.Resolve(roomID)
+	if err != nil {
+		return Issue{}, err
+	}
+	if err := authority.Check(action, issueActor(rec, by), nil); err != nil {
 		return Issue{}, err
 	}
 	db, err := s.issuesDB()
@@ -451,13 +500,17 @@ func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, chang
 			if i.ID != id && (!numbered || i.Number != number) {
 				continue
 			}
-			if i.State != "open" {
+			if i.State != "open" && !(allowGoal && i.State == "goal") {
 				return fmt.Errorf("issue %s is already %s", i.Label(), i.State)
 			}
 			if err = change(&i); err != nil {
 				return err
 			}
 			switch i.State {
+			case "open":
+				if action != "LinkIssueGoal" {
+					return errors.New("invalid issue transition")
+				}
 			case "closed":
 				if strings.TrimSpace(i.Reason) == "" {
 					return errors.New("closing an issue needs a reason")
@@ -474,7 +527,6 @@ func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, chang
 				return errors.New("invalid issue transition")
 			}
 			i.ChangedBy, i.ChangedAt = by, s.now().UnixMilli()
-			out = i
 			body, err := json.Marshal(i)
 			if err != nil {
 				return err
@@ -492,6 +544,9 @@ func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, chang
 			}); err != nil {
 				return err
 			}
+			// A populated result proves the write committed. Callers can then
+			// distinguish an event failure from a pre-write failure.
+			out = i
 			return s.postIssueChange(rec, &i, by, origin)
 		}
 		return fmt.Errorf("issue %q not found", id)
