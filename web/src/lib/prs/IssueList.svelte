@@ -14,7 +14,7 @@
   import { openExternal } from '../../api.ts'
   import { ago } from '../ui/format.ts'
   import { labelStyle, issueChip } from './github.ts'
-  import { issueReference, roomIssueLabel, type IssueReference, type IssueRow as GitHubItem } from './unifiedIssues.ts'
+  import { issueReference, issueWork, roomIssueLabel, type IssueReference, type IssueRow as GitHubItem } from './unifiedIssues.ts'
   import RowActions from './RowActions.svelte'
   import type { RowAction } from './props.ts'
   import { location } from '../issues/localIssues.ts'
@@ -53,7 +53,8 @@
   {#each groups as g (g.id)}
     {#each g.rows as it (it.number || it.local?.id)}
       {@const unresolvedExport = it.state === 'UNKNOWN' && !!it.local?.githubUrl}
-      {@const chip = unresolvedExport ? { tone: '', label: 'Promoted' } : issueChip(it)}
+      {@const chip = unresolvedExport ? { tone: '', label: 'Promoted' } : it.local?.inProgress ? { tone: 'iris', label: 'In progress' } : issueChip(it)}
+      {@const work = issueWork(it)}
       {@const open = it.linkedPRs?.find((p) => p.state === 'OPEN') ?? it.linkedPRs?.[0]}
       <div class="item">
         <Row selected={!!it.number && it.number === sel} context={g.id === 'closed'} onclick={() => onpick(it)}>
@@ -64,8 +65,9 @@
             <Chip outline>{it.source || 'GitHub'}</Chip>
             {#if it.local && location(it.local)}<span>{location(it.local)}</span>{/if}
             {#if chip}<Chip tone={chip.tone} outline={!chip.tone}>{chip.label}</Chip>{/if}
+            {#if it.local?.goalShared}<span>Held by the room</span>{:else if it.local?.goalHolder}<span>Held by {it.local.goalHolder}</span>{/if}
             {#each (it.labels ?? []).slice(0, 3) as l}<span class="label" style={labelStyle(l.color)}>{l.name}</span>{/each}
-            {#if open && g.id !== 'has-pr'}<span class="pr">PR #{open.number}{open.isDraft ? ' draft' : ''}</span>{:else if it.fixPR}<span class="pr">Fix in #{it.fixPR}</span>{/if}
+            {#if open && g.id !== 'has-pr'}<span class="pr">PR #{open.number}{open.isDraft ? ' draft' : ''}</span>{:else if it.fixPR}<span class="pr">Fix in #{it.fixPR}</span>{:else if work === 'in-progress'}<span class="pr">no PR yet</span>{/if}
           </div>
         </Row>
         <RowActions name={rowName(it)} onmention={onmention ? () => onmention?.(issueReference(it)) : null} items={menuItems(it)} />

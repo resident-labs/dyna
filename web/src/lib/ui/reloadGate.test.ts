@@ -183,7 +183,7 @@ test('App PR events use the real gated loaders and skip the closed PR view', asy
   const c: VisibleSandbox = {
     errorText, mergeVersion: 0, roomId: 'a', roomRequest: 1, pageVisible: true, view: 'channel:general', drill: null,
     consolidationAlive: true, changes: null, prError: '', reviewer: null,
-    home: null, feed: null, hasItemChange, reloadsUnread, reconcileRows, mergeListPage, listPages: {}, soonRooms() {}, reviewerSoon() {},
+    home: null, feed: null, hasItemChange, reloadsUnread, reconcileRows, mergeListPage, listPages: {}, soonRooms() {}, reviewerSoon() {}, loadIssues() {},
     api: {
       changes: async () => { calls.push('changes'); return { items: [], older: false, cursor: '' } },
       reviewerStatus: async () => null,
@@ -227,6 +227,7 @@ test('PR events never load TrackedPRs, and a burst loads the reviewer once', asy
     errorText, mergeVersion: 0, roomId: 'a', roomRequest: 1, pageVisible: true, view: 'github', drill: null,
     consolidationAlive: true, changes: null, prError: '', reviewer: null,
     home: null, feed: null, hasItemChange, reloadsUnread, reconcileRows, mergeListPage, listPages: {}, soonRooms() {},
+    loadIssues() {},
     reviewerTimer: 0, setTimeout: (fn: () => void) => { timers.set(++next, fn); return next }, clearTimeout: (id: number) => timers.delete(id),
     api: {
       trackedPRs: async () => { calls.push('prs'); return { items: [], older: false, cursor: '' } },
@@ -303,7 +304,7 @@ test('room entry and channel events refresh visible PR and goal chips', async ()
     memberChips: true, sidebarChips: false, showRoomSettings: false,
     consolidationAlive: true, goals: [], changes: null,
     prError: '', loadError: '', reviewer: null, home: null, feed: null,
-    hasItemChange, reloadsUnread, reconcileRows, mergeListPage, listPages: {}, soonRooms() {}, reviewerSoon() {}, loadRules() {}, loadVisuals() {},
+    hasItemChange, reloadsUnread, reconcileRows, mergeListPage, listPages: {}, soonRooms() {}, reviewerSoon() {}, loadIssues() {}, loadRules() {}, loadVisuals() {},
     untrack: (fn: () => void) => fn(), $effect: (fn: () => void) => fn(),
     api: {
       changes: async () => { calls.push('changes'); return { items: [], older: false, cursor: '' } },

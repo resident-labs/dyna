@@ -72,6 +72,7 @@ interface SessionEventsState {
   loadReviewer: () => void
   loadChanges: () => void
   loadGoals: () => void
+  loadIssues: () => void
   loadRules: () => void
   refreshHeldComments: () => void
   reviewerSoon: () => void
@@ -104,7 +105,7 @@ function app(view: string) {
   const state: SessionEventsState = {
     hasItemChange, reloadsUnread, view, mergeVersion: 0, roomId: 'a', roomRequest: 1, drill: null, home: null, feed: null,
     memberChips: true, consolidationAlive: true, openRun: '',
-    roomControls: null, loadQuestions() {}, loadVisuals() {}, loadRooms() {}, loadReviewer() {}, loadChanges() {}, loadGoals() {}, loadRules() {}, refreshHeldComments() {}, reviewerSoon() {},
+    roomControls: null, loadQuestions() {}, loadVisuals() {}, loadRooms() {}, loadReviewer() {}, loadChanges() {}, loadGoals() {}, loadIssues() {}, loadRules() {}, refreshHeldComments() {}, reviewerSoon() {},
     soonRooms: (kind = 'rooms') => kind === 'controls' ? app.roomSessionController.load() : calls.push(kind),
     sessionData: { load: async () => calls.push('transcript') },
     reviewVersion: 0,
