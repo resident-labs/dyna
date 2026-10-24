@@ -257,6 +257,9 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}
 	}
 	result.Suites = make([]SuiteResult, len(checks))
+	// Each check log stays open until the report classification has run, so a
+	// cause the reports prove can still be appended to the check's own file.
+	logs := make([]*checkLog, len(checks))
 	defer func() {
 		result.Checks = append([]SuiteResult(nil), result.Suites...)
 		if aggregate {
@@ -326,11 +329,12 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 					sr.Status, sr.Error, sr.Cause = OutcomeError, "check ran out of disk space on the CI machine", CauseDiskFull
 				}
 				if blobErr == nil {
-					// The log ends with its typed cause, so the run folder alone says
-					// why the check stopped. The saved result stays the authority.
-					exit := checkExit{Cause: sr.Cause, Status: sr.Status, ExitCode: checkExitCode(runErr, markers)}
-					if finishErr := blob.finish(exit); finishErr != nil {
-						log.Printf("local CI %s: finish check log: %v", node.Name, finishErr)
+					logs[i] = blob
+					blob.exitCode = checkExitCode(runErr, markers)
+					// The output reaches the log before the report copy, and the cause the
+					// command proves is recorded now. The reports can still change it.
+					if recordErr := blob.record(checkExit{Cause: sr.Cause, Status: sr.Status, ExitCode: blob.exitCode}); recordErr != nil {
+						log.Printf("local CI %s: record check cause: %v", node.Name, recordErr)
 					}
 					sr.Reports = append(sr.Reports, blob.path)
 				}
@@ -360,6 +364,21 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 			readReports(sr, reportRoot, req.MaxTest, req.Allowed)
 		}
 		result.Status = combinedStatus(result.Status, sr.Status)
+	}
+	// The report classification can assign a cause to a check that passed its
+	// command, or replace the one the command proved. Each log ends with the
+	// cause the run finally reported.
+	for i, blob := range logs {
+		if blob == nil {
+			continue
+		}
+		sr := result.Suites[i]
+		if err := blob.record(checkExit{Cause: sr.Cause, Status: sr.Status, ExitCode: blob.exitCode}); err != nil {
+			log.Printf("local CI %s: record check cause: %v", node.Name, err)
+		}
+		if err := blob.Close(); err != nil {
+			log.Printf("local CI %s: finish check log: %v", node.Name, err)
+		}
 	}
 	if copyErr != nil {
 		result.Cause = CauseReports
@@ -508,6 +527,31 @@ func runCause(node Node, ctx context.Context, err error) FailureCause {
 	return CauseUnclassified
 }
 
+// checkExit is the typed end of a check log: it says why the check stopped, so
+// a person who opens the run folder reads the cause next to the output. A saved
+// result in SQLite stays the authority.
+type checkExit struct {
+	Cause    FailureCause `json:"cause"`
+	Status   Outcome      `json:"status"`
+	ExitCode int          `json:"exitCode,omitempty"`
+}
+
+// checkExitCode is the exit status the evidence proves, and 0 when it proves
+// none.
+func checkExitCode(err error, markers [][]string) int {
+	if len(markers) > 0 {
+		if code, convErr := strconv.Atoi(markers[len(markers)-1][1]); convErr == nil {
+			return code
+		}
+		return 0
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode()
+	}
+	return 0
+}
+
 // checkLogHead and checkLogTail bound what one check keeps in its local log: the
 // start and the end of the output, so a very long log cannot fill the disk.
 const (
@@ -519,13 +563,16 @@ const (
 // a failed check stays there whatever happens to the report archive, the
 // cleanup or the transport afterwards.
 type checkLog struct {
-	file    *os.File
-	path    string
-	written int64
-	dropped int64
-	tail    []byte
-	broken  bool
-	failure error
+	file     *os.File
+	path     string
+	written  int64
+	dropped  int64
+	tail     []byte
+	flushed  bool
+	recorded FailureCause
+	exitCode int
+	broken   bool
+	failure  error
 }
 
 func newCheckLog(dir string, check nodeCheck) (*checkLog, error) {
@@ -571,62 +618,64 @@ func (l *checkLog) keep(p []byte) {
 	}
 }
 
-// checkExit is the typed end of a check log: it says why the check stopped, so
-// a person who opens the run folder reads the cause next to the output. A saved
-// result in SQLite stays the authority.
-type checkExit struct {
-	Cause    FailureCause `json:"cause"`
-	Status   Outcome      `json:"status"`
-	ExitCode int          `json:"exitCode,omitempty"`
-}
-
-// checkExitCode is the exit status the evidence proves, and 0 when it proves
-// none.
-func checkExitCode(err error, markers [][]string) int {
-	if len(markers) > 0 {
-		if code, convErr := strconv.Atoi(markers[len(markers)-1][1]); convErr == nil {
-			return code
-		}
-		return 0
-	}
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		return exit.ExitCode()
-	}
-	return 0
-}
-
-// finish ends the log: the end of the output first, then the typed exit record.
-// A check that passed has no cause, so it keeps its plain output.
-func (l *checkLog) finish(exit checkExit) error {
+// flush writes the end of the output it kept in memory, once. It runs before the
+// report copy, so the output of a check is on disk whatever happens to the copy.
+func (l *checkLog) flush() error {
 	if l.broken {
-		l.file.Close()
 		return l.failure
 	}
-	if len(l.tail) > 0 {
-		if omitted := l.dropped - int64(len(l.tail)); omitted > 0 {
-			if _, err := fmt.Fprintf(l.file, "\n[... %d bytes of the middle omitted ...]\n", omitted); err != nil {
-				l.file.Close()
-				return err
-			}
-		}
-		if _, err := l.file.Write(l.tail); err != nil {
-			l.file.Close()
+	if l.flushed {
+		return nil
+	}
+	l.flushed = true
+	if len(l.tail) == 0 {
+		return nil
+	}
+	if omitted := l.dropped - int64(len(l.tail)); omitted > 0 {
+		if _, err := fmt.Fprintf(l.file, "\n[... %d bytes of the middle omitted ...]\n", omitted); err != nil {
+			l.broken, l.failure = true, err
 			return err
 		}
 	}
-	if exit.Cause != "" {
-		record, err := json.Marshal(exit)
-		if err != nil {
-			l.file.Close()
-			return err
-		}
-		if _, err := fmt.Fprintf(l.file, "\nDYNA_CI_CHECK_CAUSE %s\n", record); err != nil {
-			l.file.Close()
-			return err
-		}
+	if _, err := l.file.Write(l.tail); err != nil {
+		l.broken, l.failure = true, err
+		return err
 	}
-	return l.file.Close()
+	return nil
+}
+
+// record appends the typed cause of the check, so the run folder alone says why
+// it stopped. It is called once after the command and again after the report
+// classification when that changes the cause; a cause already written is not
+// written twice. A saved result in SQLite stays the authority.
+func (l *checkLog) record(exit checkExit) error {
+	// The output is flushed first, so a check that has no cause yet still keeps
+	// its evidence before the report copy starts.
+	if err := l.flush(); err != nil {
+		return err
+	}
+	if exit.Cause == "" || exit.Cause == l.recorded {
+		return nil
+	}
+	line, err := json.Marshal(exit)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(l.file, "\nDYNA_CI_CHECK_CAUSE %s\n", line); err != nil {
+		l.broken, l.failure = true, err
+		return err
+	}
+	l.recorded = exit.Cause
+	return nil
+}
+
+// Close ends the log: any output not yet written, then the file.
+func (l *checkLog) Close() error {
+	err := l.flush()
+	if closeErr := l.file.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 func combinedStatus(a, b Outcome) Outcome {
