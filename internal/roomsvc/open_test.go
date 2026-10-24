@@ -283,9 +283,9 @@ func TestFeedDefaultsMaximumAndCursor(t *testing.T) {
 }
 
 // A shell result belongs to the session that ran the command: it is delivered
-// to that session and to the owner feed, and it never counts as unread. The
-// shell view shows the job, so the feed hides the result row itself.
-func TestShellResultReachesTheSessionAndNeverUnreads(t *testing.T) {
+// to that session alone, it lives in that session's DM, and the room chat never
+// lists it. Only a command with no session, the owner's own, reaches the room.
+func TestShellResultBelongsToItsSession(t *testing.T) {
 	e := newEnv(t)
 	rec := e.room("alpha")
 	lead := e.start(rec, "lead", nil)
@@ -294,27 +294,23 @@ func TestShellResultReachesTheSessionAndNeverUnreads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(res.Message.To, []string{child.Address(), rec.Name}) || res.Message.SessionIDs[child.Address()] != child.ID {
+	if !reflect.DeepEqual(res.Message.To, []string{child.Address()}) || res.Message.SessionIDs[child.Address()] != child.ID {
 		t.Fatalf("shell recipients = %v, bindings = %v", res.Message.To, res.Message.SessionIDs)
+	}
+	homes, err := e.svc.rooms().OtherHomes(rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := homes[res.Message.ID]; got != room.DMConversation(child.ID) {
+		t.Fatalf("shell home = %q, want the session DM %q", got, room.DMConversation(child.ID))
 	}
 	feed, err := e.svc.FeedTail(rec.ID, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen := false
 	for _, p := range feed.Posts {
-		if p.ID != res.Message.ID {
-			continue
+		if p.ID == res.Message.ID {
+			t.Fatalf("the room chat lists a session's shell result: %+v", p)
 		}
-		seen = true
-		if p.Unread || !p.Completion || p.Detail == nil || p.Detail.Kind != "shell" {
-			t.Fatalf("shell result row = %+v", p)
-		}
-		if _, ok := p.Shell(); !ok {
-			t.Fatalf("the row lost the typed shell payload: %+v", p)
-		}
-	}
-	if !seen {
-		t.Fatal("the owner feed lost the shell result")
 	}
 }
