@@ -22,6 +22,7 @@ import (
 	"dyna-agent/internal/devicegrant"
 	"dyna-agent/internal/hub"
 	"dyna-agent/internal/scope"
+	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/websvc/devicestore"
 )
 
@@ -367,6 +368,32 @@ func TestCSRFAndHost(t *testing.T) {
 	// Identity headers grant nothing.
 	if w := e.do(e.app, req{url: tsApp + "/api/Echo", body: `["a",1]`, header: map[string]string{"Tailscale-User-Login": "owner@example.com"}}); w.Code != http.StatusUnauthorized {
 		t.Fatalf("identity header = %d", w.Code)
+	}
+}
+
+type testCloseRefusal struct{}
+
+func (testCloseRefusal) Error() string { return "close failed" }
+func (testCloseRefusal) CloseRecovery() sessionclose.Recovery {
+	return sessionclose.Recovery{
+		Reason:  sessionclose.ReasonResponsibilities,
+		Actions: []sessionclose.Action{sessionclose.ActionRetry, sessionclose.ActionForce},
+		Items:   []sessionclose.Responsibility{{Kind: "pr", ID: "github.com/owner/repo#17", Text: "PR #17 author"}},
+	}
+}
+
+func TestCallErrorIncludesCloseRecovery(t *testing.T) {
+	w := httptest.NewRecorder()
+	writeCallError(w, http.StatusUnprocessableEntity, testCloseRefusal{})
+	var got struct {
+		Error string                `json:"error"`
+		Close sessionclose.Recovery `json:"close"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Error != "close failed" || got.Close.Reason != sessionclose.ReasonResponsibilities || len(got.Close.Actions) != 2 || len(got.Close.Items) != 1 || got.Close.Items[0].Kind != "pr" {
+		t.Fatalf("close error response = %+v", got)
 	}
 }
 
