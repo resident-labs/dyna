@@ -163,9 +163,6 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 	}
 	if s.antigravity || p.Harness == profile.HarnessKimiCode {
 		mode := "yolo"
-		if p.Harness == profile.HarnessKimiCode {
-			mode = "auto"
-		}
 		if p.SafeMode {
 			mode = "default"
 		}
