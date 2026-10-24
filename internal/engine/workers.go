@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -334,6 +335,11 @@ type workers struct {
 	// receipts, ticks each repository's schedule and the global built-ins once
 	// a minute. It runs under the worker lock with the other workers.
 	hookSchedule func(context.Context) (time.Time, error)
+	// stopLocalCI cancels the local CI runs this engine started and waits for
+	// their work on the machine to end. A run outlives the worker that started
+	// it, and its keeper holds the machine's cache lock, so engine stop ends the
+	// runs before the process does.
+	stopLocalCI func(context.Context) []string
 }
 
 func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) workers {
@@ -352,7 +358,8 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 	spool := hookService
 	var globalSchedule sync.Mutex
 	return workers{
-		prs: prs.Tick,
+		prs:         prs.Tick,
+		stopLocalCI: prs.StopLocalCI,
 		questions: func(ctx context.Context) (time.Time, error) {
 			sweep := signals.takeSweep("questions")
 			var delivered []string
@@ -615,11 +622,30 @@ func settleFromStart(ctx context.Context, started time.Time) error {
 // the workers pass.
 var settleHookRuns = settleFromStart
 
+// localCIStop bounds how long engine stop waits for local CI runs to end their
+// work on the machine. Their teardown stops the containers and then the keeper,
+// which holds the machine's cache lock, so the wait is worth a few seconds. A
+// run still working then is reported for the next start.
+const localCIStop = 4 * time.Second
+
 func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) {
 	report := func(name string, err error) {
 		log.Print(watch.Sanitize(name + ": " + err.Error()))
 	}
-	owned, err := runOwned(ctx, store.DataDir(), engineWorkers(rooms, signals, load, events, hookService, started), signals, t, report)
+	workerSet := engineWorkers(rooms, signals, load, events, hookService, started)
+	// The local CI runs a worker starts keep going after their worker returns.
+	// End them here, so no keeper is left on a machine when this process exits.
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), localCIStop)
+		defer cancel()
+		if workerSet.stopLocalCI == nil {
+			return
+		}
+		if left := workerSet.stopLocalCI(stopCtx); len(left) > 0 {
+			log.Print(watch.Sanitize(fmt.Sprintf("engine stop left %d local CI runs working on their machine, for the next start: %v", len(left), left)))
+		}
+	}()
+	owned, err := runOwned(ctx, store.DataDir(), workerSet, signals, t, report)
 	if err != nil {
 		log.Print(watch.Sanitize("workers: " + err.Error()))
 		return
