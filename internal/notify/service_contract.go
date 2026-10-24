@@ -73,15 +73,12 @@ func (s *Service) previousServiceAlert(in PostInput, res resolved, text string) 
 func (s *Service) helperCompletion(meta subagent.Meta, turn subagent.Turn) (*subagent.ReportPlan, error) {
 	parent, err := s.sessionStore().DeliveryTarget(meta.ParentSession)
 	available := err == nil && parent.RoomID == meta.RoomID && (parent.Transfer.Active() || usable(parent) == "")
-	posts, err := s.Rooms.Messages(meta.RoomID)
+	found, err := s.Rooms.HasDeliveryFrom(meta.RoomID, meta.ID, parent.ID, turn.N, "message", serviceAlertKind)
 	if err != nil {
 		return nil, err
 	}
-	for _, post := range posts {
-		if parent.ID != "" && post.From == meta.Address() && post.SessionIDs[meta.Address()] == meta.ID && post.Turn == turn.N && post.SessionIDs[parent.Address()] == parent.ID &&
-			(post.Kind == "message" || post.Kind == serviceAlertKind) {
-			return nil, nil
-		}
+	if found {
+		return nil, nil
 	}
 	if !available {
 		return s.prepareCompletion(meta.RoomID, meta.Address(), nil, serviceAlertKind,
