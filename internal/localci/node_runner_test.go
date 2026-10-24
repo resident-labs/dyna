@@ -2,6 +2,7 @@ package localci
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,11 +11,147 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// Every failed check keeps its own output, a typed cause, a local log file and a
+// saved result, even when the report copy fails afterwards. The cases cover the
+// causes a node proves from its exit status and from the marker it writes.
+func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		node   Node
+		output []string
+		code   int
+		cause  FailureCause
+		status Outcome
+	}{
+		{"early container failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Docker access is unavailable"}, 69, CauseContainerFailure, OutcomeError},
+		{"killed container", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Killed"}, 137, CauseContainerFailure, OutcomeError},
+		{"ssh drop", Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}, []string{"Connection to port 22 timed out"}, 255, CauseSSHDrop, OutcomeError},
+		{"timeout", Node{Name: "local", Slots: 1, Enabled: true}, []string{"check reached its deadline", "DYNA_CI_CHECK_EXIT=124"}, 124, CauseTimeout, OutcomeError},
+		{"test failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"--- FAIL: TestBroken", "DYNA_CI_CHECK_EXIT=1"}, 1, CauseTestFailure, OutcomeFailed},
+		{"reports unavailable", Node{Name: "local", Slots: 1, Enabled: true}, []string{"ok ./...", "DYNA_CI_CHECK_EXIT=0"}, 0, CauseReports, OutcomeError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			runner := Runner{DataDir: t.TempDir(), Node: &tc.node}
+			runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+				if fakeNodeGit(dir, out, name, args) {
+					return nil
+				}
+				script := args[len(args)-1]
+				switch {
+				case strings.Contains(script, "df -Pk"):
+					fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+					fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+					return nil
+				case name == "systemd-run" || strings.Contains(script, "systemd-run"):
+					for _, line := range tc.output {
+						fmt.Fprintln(out, line)
+					}
+					if tc.code == 0 {
+						return nil
+					}
+					return exitError(t, tc.code)
+				case strings.Contains(script, "tar -C"):
+					// The copy must find the check's output already on disk.
+					logs, _ := filepath.Glob(filepath.Join(runner.DataDir, "local-ci", "*", "*", "run-*", "checks", "go-static.log"))
+					if len(logs) != 1 {
+						t.Errorf("check log missing before the report copy: %v", logs)
+					} else if data, readErr := os.ReadFile(logs[0]); readErr != nil || !strings.Contains(string(data), tc.output[0]) {
+						t.Errorf("check log held no output before the report copy: %v", readErr)
+					}
+					return errors.New("transport lost")
+				}
+				return nil
+			}
+			result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}, MaxTest: time.Second})
+			if err == nil || !strings.Contains(err.Error(), "copy reports") {
+				t.Fatalf("report copy failure was not reported: %v", err)
+			}
+			check := result.Checks[0]
+			if check.Status != tc.status || check.Cause != tc.cause {
+				t.Fatalf("check = %+v, want %s with cause %s", check, tc.status, tc.cause)
+			}
+			if !strings.Contains(check.LogTail, tc.output[0]) {
+				t.Fatalf("check result lost its output: %+v", check)
+			}
+			blob := ""
+			for _, report := range check.Reports {
+				if filepath.Ext(report) == ".log" {
+					blob = report
+				}
+			}
+			if blob == "" {
+				t.Fatalf("check kept no local log file: %+v", check.Reports)
+			}
+			data, err := os.ReadFile(blob)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, line := range tc.output {
+				if !strings.Contains(string(data), line) {
+					t.Fatalf("local log lost %q: %q", line, data)
+				}
+			}
+			// The run folder alone says why the check stopped: the log ends with
+			// its typed cause, not only the output.
+			exit := loggedExit(t, check)
+			if exit.Cause != tc.cause || exit.Status != tc.status || exit.ExitCode != tc.code {
+				t.Fatalf("local log exit record = %+v, want %s/%s/%d", exit, tc.cause, tc.status, tc.code)
+			}
+			saved, err := (Store{DataDir: runner.DataDir}).LoadResult(t.Context(), result.Repo, result.SHA)
+			if err != nil {
+				t.Fatalf("failed run was not saved: %v", err)
+			}
+			if len(saved.Checks) == 0 || saved.Checks[0].Status != tc.status || saved.Checks[0].Cause != tc.cause {
+				t.Fatalf("saved result lost the check cause: %+v", saved)
+			}
+			if !strings.Contains(saved.Checks[0].LogTail, tc.output[0]) {
+				t.Fatalf("saved result lost the output: %+v", saved.Checks[0])
+			}
+		})
+	}
+}
+
+// loggedExit reads the typed exit record a check log ends with.
+func loggedExit(t *testing.T, check SuiteResult) checkExit {
+	t.Helper()
+	var exit checkExit
+	for _, report := range check.Reports {
+		if filepath.Ext(report) != ".log" {
+			continue
+		}
+		data, err := os.ReadFile(report)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, line := range strings.Split(string(data), "\n") {
+			record, ok := strings.CutPrefix(line, "DYNA_CI_CHECK_CAUSE ")
+			if !ok {
+				continue
+			}
+			if err := json.Unmarshal([]byte(record), &exit); err != nil {
+				t.Fatalf("invalid exit record %q: %v", record, err)
+			}
+		}
+	}
+	return exit
+}
+
+// exitError is the error a command returns when it exits with code.
+func exitError(t *testing.T, code int) error {
+	t.Helper()
+	err := exec.Command("bash", "-c", "exit "+strconv.Itoa(code)).Run()
+	if err == nil {
+		t.Fatalf("exit %d did not fail", code)
+	}
+	return err
+}
 
 func fakeNodeGit(dir string, out io.Writer, name string, args []string) bool {
 	if name != "git" {
@@ -160,6 +297,13 @@ func TestNodeRunsBoundedWorkflowChecksAndAggregatesFrontendFailure(t *testing.T)
 		if check.CheckName != "go-test" && check.Duration != time.Second {
 			t.Fatalf("check uses wall time instead of admitted execution time: %+v", check)
 		}
+		// This check's command passed; the reports proved the failure, and the
+		// log must end with that cause too.
+		if check.CheckName == "frontend" {
+			if cause := loggedExit(t, check).Cause; cause != CauseTestFailure {
+				t.Fatalf("frontend log lost the cause the reports proved: %q", cause)
+			}
+		}
 	}
 	if len(wanted) != 0 {
 		t.Fatalf("missing checks: %v", wanted)
@@ -239,6 +383,83 @@ func TestNodeCancellationDoesNotSaveResult(t *testing.T) {
 	}
 	if _, err := (Store{DataDir: runner.DataDir}).LoadResult(t.Context(), result.Repo, result.SHA); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("canceled run persisted: %v", err)
+	}
+}
+
+// A flush keeps the end of a check's log whatever its size, before the file is
+// closed: the run copies reports only after that flush. Output just past the
+// head limit must not lose its ending, and a shortened log says how much it cut.
+func TestCheckLogKeepsTheEndOfTheOutput(t *testing.T) {
+	const end = "THE END OF THE CHECK LOG"
+	for _, tc := range []struct {
+		name      string
+		size      int
+		truncated bool
+	}{
+		{"just past the head", checkLogHead + 1, false},
+		{"shortened", checkLogHead + checkLogTail, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log, err := newCheckLog(t.TempDir(), nodeCheck{id: SuiteGoStatic})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := append(bytes.Repeat([]byte("x"), tc.size), end...)
+			if _, err := log.Write(body); err != nil {
+				t.Fatal(err)
+			}
+			if err := log.flush(); err != nil {
+				t.Fatal(err)
+			}
+			// Read while the log is still open: the flush alone must have written
+			// the end, because the report copy runs before the file is closed.
+			data, err := os.ReadFile(log.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasSuffix(string(data), end) {
+				t.Fatalf("a %d byte log lost its end: %q", len(body), data[len(data)-64:])
+			}
+			if omitted := strings.Contains(string(data), "bytes of the middle omitted"); omitted != tc.truncated {
+				t.Fatalf("omission marker = %v for a %d byte log", omitted, len(body))
+			}
+			if tc.truncated && len(data) > checkLogHead+checkLogTail+len(end)+64 {
+				t.Fatalf("shortened log kept %d bytes", len(data))
+			}
+			if err := log.Close(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// A run that reaches its own deadline saves its evidence, so the owner can see
+// the cause for the commit. A deliberate cancel still belongs to its caller.
+func TestNodeSavesResultWhenTheRunReachesItsDeadline(t *testing.T) {
+	// The deadline has already passed, so the run ends at once and no clock runs.
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer cancel()
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeNodeGit(dir, out, name, args) {
+			return nil
+		}
+		if strings.Contains(args[len(args)-1], "df -Pk") {
+			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+		}
+		return nil
+	}
+	result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v", err)
+	}
+	saved, err := (Store{DataDir: runner.DataDir}).LoadResult(t.Context(), result.Repo, result.SHA)
+	if err != nil {
+		t.Fatalf("timed out run was not saved: %v", err)
+	}
+	if saved.Cause != CauseTimeout || len(saved.Checks) == 0 || saved.Checks[0].Cause != CauseTimeout {
+		t.Fatalf("saved result lost the timeout cause: %+v", saved)
 	}
 }
 
@@ -345,5 +566,122 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 				t.Fatalf("a second full disk lost the reason: %+v", result.Checks[0])
 			}
 		})
+	}
+}
+
+// A run whose internal budget ends after a check reported success is not a pass:
+// the reports were never read, so the check is an error with the run's cause and
+// its log stays available. The command cancels the run itself, so no clock runs.
+func TestNodeRunFailsWhenItsBudgetEndsBeforeTheReports(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeNodeGit(dir, out, name, args) {
+			return nil
+		}
+		script := args[len(args)-1]
+		switch {
+		case strings.Contains(script, "df -Pk"):
+			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+		case name == "systemd-run" || strings.Contains(script, "systemd-run"):
+			fmt.Fprintln(out, "ok: the check reported success")
+			fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=0")
+			// The run's own budget ends before its reports can be read.
+			cancel()
+		case strings.Contains(script, "tar -C"):
+			return errors.New("reports fetched after the run ended")
+		}
+		return nil
+	}
+	result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run returned %v after its budget ended", err)
+	}
+	if result.Cause != CauseCancelled || len(result.Checks) != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.Checks[0].Status != OutcomeError || result.Checks[0].Cause != CauseCancelled {
+		t.Fatalf("unvalidated check = %+v", result.Checks[0])
+	}
+	blob := ""
+	for _, report := range result.Checks[0].Reports {
+		if filepath.Ext(report) == ".log" {
+			blob = report
+		}
+	}
+	data, err := os.ReadFile(blob)
+	if err != nil || !strings.Contains(string(data), "the check reported success") {
+		t.Fatalf("check log lost after the run ended: %v: %q", err, data)
+	}
+}
+
+// writeCheckReports writes the report files one check produced on its node.
+func writeCheckReports(out io.Writer, files map[string]string) error {
+	tw := tar.NewWriter(out)
+	for name, body := range files {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: int64(len(body))}); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(tw, body); err != nil {
+			return err
+		}
+	}
+	return tw.Close()
+}
+
+// A check that fails its command still keeps everything its reports prove: the
+// execution timing, the structured test failures, the slow tests and the report
+// links. The command's own outcome stays the check's outcome and cause.
+func TestNodeKeepsReportsOfACheckWhoseCommandFailed(t *testing.T) {
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeNodeGit(dir, out, name, args) {
+			return nil
+		}
+		script := args[len(args)-1]
+		switch {
+		case strings.Contains(script, "df -Pk"):
+			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+		case name == "systemd-run" || strings.Contains(script, "systemd-run"):
+			fmt.Fprintln(out, "--- FAIL: TestBroken")
+			fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=1")
+			return exitError(t, 1)
+		case strings.Contains(script, "tar -C"):
+			return writeCheckReports(out, map[string]string{
+				"relay/execution.json":       `{"durationNanos":250000000}`,
+				"relay/relay-test.xml":       `<testsuite><testcase name="TestSlow" time="0.2"/><testcase name="TestBroken"><failure message="bad"/></testcase></testsuite>`,
+				"relay/ci-diagnostics.jsonl": "{\"kind\":\"counter\",\"key\":\"go/test\",\"value\":\"exit=1\"}\n",
+			})
+		}
+		return nil
+	}
+	result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []Suite{SuiteRelay}, MaxTest: time.Second, DeferSave: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := result.Checks[0]
+	if check.Status != OutcomeFailed || check.Cause != CauseTestFailure {
+		t.Fatalf("command outcome lost: %+v", check)
+	}
+	if check.Duration != 250*time.Millisecond {
+		t.Fatalf("execution timing lost: %+v", check)
+	}
+	if failures := strings.Join(check.Failures, "\n"); !strings.Contains(failures, "TestBroken") {
+		t.Fatalf("structured failures lost: %+v", check.Failures)
+	}
+	if len(check.SlowTests) == 0 || check.SlowTests[0].Name != "TestSlow" {
+		t.Fatalf("slow tests lost: %+v", check.SlowTests)
+	}
+	links := map[string]bool{}
+	for _, report := range check.Reports {
+		links[filepath.Base(report)] = true
+	}
+	if !links["relay-test.xml"] || !links["ci-diagnostics.jsonl"] {
+		t.Fatalf("report links lost: %v", check.Reports)
+	}
+	if !strings.Contains(check.LogTail, "TestBroken") {
+		t.Fatalf("structured output lost from the tail: %q", check.LogTail)
 	}
 }

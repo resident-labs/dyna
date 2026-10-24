@@ -182,13 +182,8 @@ func containsName(names []CheckName, want CheckName) bool {
 	return false
 }
 
-// DefaultSuites returns the complete suite set used for a trial run.
-func DefaultSuites() []Suite {
-	return []Suite{SuiteRelay, SuiteFrontend, SuiteGo, SuiteCrossBuild}
-}
-
-// WorkflowSuites includes the conditional jobs needed for a complete trial.
-// DefaultSuites retains the manual SSH lane's historical suite selection.
+// WorkflowSuites returns the complete suite set a run needs for a trial,
+// including the conditional jobs.
 func WorkflowSuites() []Suite {
 	return []Suite{SuiteRelay, SuiteGo, SuiteCrossBuild, SuiteComputerSmoke}
 }

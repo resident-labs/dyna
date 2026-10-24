@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -18,6 +19,20 @@ import (
 	"time"
 
 	"dyna-agent/internal/shellquote"
+)
+
+// The two steps of a cancelled run's teardown, on a machine that may answer
+// slowly. A caller that stops a run and waits for that teardown must allow both.
+const (
+	// containerCleanupTimeout bounds the node command that stops a run's
+	// containers, scopes and worktrees.
+	containerCleanupTimeout = time.Minute
+	// runRemovalTimeout bounds the node command that stops the run's keeper,
+	// which then removes the run directory and releases its locks.
+	runRemovalTimeout = 2 * time.Minute
+	// TeardownBudget is how long a cancelled run can take to leave its machine:
+	// it stops the containers and then the keeper, in that order.
+	TeardownBudget = containerCleanupTimeout + runRemovalTimeout
 )
 
 type nodeCheck struct {
@@ -162,13 +177,12 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		result.Duration = time.Since(result.Started)
 		if ctx.Err() != nil {
 			err = errors.Join(err, ctx.Err())
-			return
 		}
 		if err != nil {
-			result.Status, result.Error = "error", err.Error()
-		}
-		if !req.DeferSave {
-			err = errors.Join(err, (Store{DataDir: r.root()}).SaveResult(context.Background(), result))
+			result.Status, result.Error = OutcomeError, err.Error()
+			if result.Cause == "" {
+				result.Cause = runCause(node, ctx, err)
+			}
 		}
 	}()
 	base := cacheBase(node.Name)
@@ -196,7 +210,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// own context, so a cancelled run still removes it, and it runs last, after
 	// the reports were copied back.
 	defer func() {
-		remove, stop := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
+		remove, stop := context.WithTimeout(context.WithoutCancel(ctx), runRemovalTimeout)
 		defer stop()
 		var log tailBuffer
 		if e := r.nodeCommand(remove, &log, &log, "", removeRunDir(base, active)); e != nil {
@@ -223,7 +237,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		return result, fmt.Errorf("push commit to node: %w: %s", err, &output)
 	}
 	defer func() {
-		cleanup, stop := context.WithTimeout(context.Background(), time.Minute)
+		cleanup, stop := context.WithTimeout(context.Background(), containerCleanupTimeout)
 		defer stop()
 		var log tailBuffer
 		// Stop daemon-owned containers before scopes, so a scope keeps its slot
@@ -257,6 +271,9 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}
 	}
 	result.Suites = make([]SuiteResult, len(checks))
+	// Each check log stays open until the report classification has run, so a
+	// cause the reports prove can still be appended to the check's own file.
+	logs := make([]*checkLog, len(checks))
 	defer func() {
 		result.Checks = append([]SuiteResult(nil), result.Suites...)
 		if aggregate {
@@ -295,29 +312,45 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				check := checks[i]
 				sr := SuiteResult{Suite: check.id, CheckName: check.name, Node: node.Name, Status: "passed"}
 				checkCtx, stop := context.WithTimeout(control, admissionWait+req.Timeout+time.Minute)
-				var log tailBuffer
-				e := r.nodeCommand(checkCtx, &log, &log, "dyna-ci-"+runID+"-"+string(check.id), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i))
-				sr.LogTail = log.String()
-				markers := regexp.MustCompile(`(?m)^DYNA_CI_CHECK_EXIT=([0-9]+)$`).FindAllStringSubmatch(sr.LogTail, -1)
-				if e != nil || len(markers) == 0 {
-					sr.Status, sr.Error = "error", "check command did not complete"
-					if e != nil {
-						sr.Error = e.Error()
+				var output tailBuffer
+				writer := io.Writer(&output)
+				// The check's own output goes to a local blob file first, so the
+				// evidence outlives a report archive, a cleanup or a transport that
+				// fails afterwards.
+				blob, blobErr := newCheckLog(filepath.Join(reportRoot, "checks"), check)
+				if blobErr != nil {
+					log.Printf("local CI %s: keep check log: %v", node.Name, blobErr)
+				} else {
+					writer = io.MultiWriter(&output, blob)
+				}
+				runErr := r.nodeCommand(checkCtx, writer, writer, "dyna-ci-"+runID+"-"+string(check.id), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i))
+				sr.LogTail = output.String()
+				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
+				if runErr != nil || len(markers) == 0 {
+					sr.Status, sr.Error = OutcomeError, "check command did not complete"
+					if runErr != nil {
+						sr.Error = runErr.Error()
 					}
-					if len(markers) != 0 && checkCtx.Err() == nil {
-						code, _ := strconv.Atoi(markers[len(markers)-1][1])
-						switch code {
-						case 0, 69, 75, 124, 125, 126, 127, 137, 143, 255:
-						default:
-							sr.Status = "failed"
-						}
+					sr.Cause = checkCause(node, checkCtx, runErr, markers, check.image != "")
+					if sr.Cause == CauseTestFailure {
+						sr.Status = OutcomeFailed
 					}
 				}
 				// A full disk on the machine is not a failing test: report it as an
 				// infrastructure error, so the run cleans up and retries, and hosted
 				// CI resumes when it stays broken.
-				if sr.Status == "failed" && diskFull(sr.LogTail+"\n"+sr.Error) {
-					sr.Status, sr.Error = "error", "check ran out of disk space on the CI machine"
+				if sr.Status == OutcomeFailed && diskFull(sr.LogTail+"\n"+sr.Error) {
+					sr.Status, sr.Error, sr.Cause = OutcomeError, "check ran out of disk space on the CI machine", CauseDiskFull
+				}
+				if blobErr == nil {
+					logs[i] = blob
+					blob.exitCode = checkExitCode(runErr, markers)
+					// The output reaches the log before the report copy, and the cause the
+					// command proves is recorded now. The reports can still change it.
+					if recordErr := blob.record(checkExit{Cause: sr.Cause, Status: sr.Status, ExitCode: blob.exitCode}); recordErr != nil {
+						log.Printf("local CI %s: record check cause: %v", node.Name, recordErr)
+					}
+					sr.Reports = append(sr.Reports, blob.path)
 				}
 				stop()
 				result.Suites[i] = sr
@@ -325,55 +358,362 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		}()
 	}
 	wg.Wait()
-	if control.Err() != nil {
-		return result, control.Err()
+	// A cancelled or expired run still reports what each check proved. A failed
+	// report copy stays an error on the result, but it never hides the checks'
+	// own causes or their local logs.
+	var copyErr error
+	stopped := control.Err()
+	if stopped == nil {
+		copyErr = r.fetchReports(control, reportRoot, reports)
+		// The deadline can end the copy itself, and then the reports are gone.
+		stopped = control.Err()
 	}
+	result.Status = OutcomePassed
+	for i := range result.Suites {
+		sr := &result.Suites[i]
+		switch {
+		case stopped != nil:
+			// The reports were never read, so a check that reported success is
+			// not a pass: only its log is proven. A check that already failed
+			// keeps its own outcome.
+			if sr.Status == OutcomePassed {
+				sr.Status, sr.Error, sr.Cause = OutcomeError, "check stopped before its reports were read", runCause(node, control, stopped)
+			}
+		case copyErr != nil:
+			if sr.Status == OutcomePassed {
+				sr.Status, sr.Error, sr.Cause = OutcomeError, "copy reports: "+copyErr.Error(), CauseReports
+			}
+		default:
+			// The reports say what the exit status cannot: the execution timing,
+			// the structured failures, the slow tests and the diagnostics links.
+			// Read them for every check, including one whose command failed; the
+			// command's own outcome and cause stay the check's.
+			readReports(sr, reportRoot, req.MaxTest, req.Allowed)
+		}
+		result.Status = combinedStatus(result.Status, sr.Status)
+	}
+	// The report classification can assign a cause to a check that passed its
+	// command, or replace the one the command proved. Each log ends with the
+	// cause the run finally reported.
+	for i, blob := range logs {
+		if blob == nil {
+			continue
+		}
+		sr := result.Suites[i]
+		if err := blob.record(checkExit{Cause: sr.Cause, Status: sr.Status, ExitCode: blob.exitCode}); err != nil {
+			log.Printf("local CI %s: record check cause: %v", node.Name, err)
+		}
+		if err := blob.Close(); err != nil {
+			log.Printf("local CI %s: finish check log: %v", node.Name, err)
+		}
+	}
+	if stopped != nil {
+		// A run that reached its own deadline, or that its caller cancelled, is
+		// not a pass whatever a check proved before the end: the reports were
+		// never read. The checks keep their logs and the run keeps a typed cause.
+		result.Cause = runCause(node, control, stopped)
+		return result, stopped
+	}
+	if copyErr != nil {
+		result.Cause = CauseReports
+		return result, fmt.Errorf("copy reports: %w", copyErr)
+	}
+	return result, nil
+}
+
+// fetchReports copies the node's report files into the local report blob folder.
+// The caller treats a failure as evidence about a check and not as a reason to
+// drop the run: the checks keep their logs either way.
+func (r Runner) fetchReports(ctx context.Context, reportRoot, reports string) error {
 	archive, err := os.CreateTemp(reportRoot, "reports-*.tar") // not-state: temporary report transport.
 	if err != nil {
-		return result, err
+		return err
 	}
 	defer os.Remove(archive.Name())
 	defer archive.Close()
 	script := "cd " + shellquote.Quote(reports) + " && find . -mindepth 2 -maxdepth 2 -type f \\( -name '*.xml' -o -name '*.json' -o -name 'ci-diagnostics.jsonl' \\) -print0 | tar -C " + shellquote.Quote(reports) + " --null -T - -cf -"
 	var stderr tailBuffer
-	if err := r.nodeCommand(control, &boundedWriter{writer: archive, remaining: 70 << 20}, &stderr, "", script); err != nil {
-		return result, fmt.Errorf("copy reports: %w: %s", err, stderr.String())
+	if err := r.nodeCommand(ctx, &boundedWriter{writer: archive, remaining: 70 << 20}, &stderr, "", script); err != nil {
+		return fmt.Errorf("%w: %s", err, stderr.String())
 	}
 	if _, err := archive.Seek(0, io.SeekStart); err != nil {
-		return result, err
+		return err
 	}
-	if err := readArchive(archive, reportRoot); err != nil {
-		return result, err
+	return readArchive(archive, reportRoot)
+}
+
+// readReports fills one check's duration, reports and test failures from the
+// copied report files, whatever the command already proved. A check that cannot
+// show a result of its own is an infrastructure error and never a passing one.
+func readReports(sr *SuiteResult, reportRoot string, max time.Duration, allowed map[string]bool) {
+	var timing struct {
+		DurationNanos time.Duration `json:"durationNanos"`
 	}
-	result.Status = "passed"
-	for i := range result.Suites {
-		sr := &result.Suites[i]
-		var timing struct {
-			DurationNanos time.Duration `json:"durationNanos"`
-		}
-		timingPath := filepath.Join(reportRoot, "reports", string(sr.Suite), "execution.json")
-		data, timingErr := os.ReadFile(timingPath)
-		if timingErr == nil {
-			timingErr = json.Unmarshal(data, &timing)
-		}
-		if timingErr == nil && timing.DurationNanos >= 0 {
-			sr.Duration = timing.DurationNanos
-		} else if sr.Status == "passed" {
-			sr.Status, sr.Error = "error", "check produced no valid execution timing"
-		}
-		if e := checkReports(sr, reportRoot, req.MaxTest, req.Allowed); e != nil {
-			if sr.Status != "failed" {
-				sr.Status = "error"
-			}
+	timingPath := filepath.Join(reportRoot, "reports", string(sr.Suite), "execution.json")
+	data, timingErr := os.ReadFile(timingPath)
+	if timingErr == nil {
+		timingErr = json.Unmarshal(data, &timing)
+	}
+	if timingErr == nil && timing.DurationNanos >= 0 {
+		sr.Duration = timing.DurationNanos
+	} else if sr.Status == OutcomePassed {
+		sr.Status, sr.Error, sr.Cause = OutcomeError, "check produced no valid execution timing", CauseReports
+	}
+	if e := checkReports(sr, reportRoot, max, allowed); e != nil {
+		// A check that already proved how it failed keeps its status, its cause
+		// and its error: a report problem is not better evidence than the
+		// command, and it is added to what the command said instead.
+		switch {
+		case sr.Status == OutcomePassed:
+			sr.Status, sr.Error, sr.Cause = OutcomeError, e.Error(), CauseReports
+		case sr.Error == "":
 			sr.Error = e.Error()
+		default:
+			sr.Error += "; reports: " + e.Error()
 		}
-		diagnostics := filepath.Join(reportRoot, "reports", string(sr.Suite), "ci-diagnostics.jsonl")
-		if info, e := os.Stat(diagnostics); e == nil && info.Mode().IsRegular() {
-			sr.Reports = append(sr.Reports, diagnostics)
-		}
-		result.Status = combinedStatus(result.Status, sr.Status)
 	}
-	return result, nil
+	if sr.Status == OutcomeFailed && sr.Cause == "" {
+		sr.Cause = CauseTestFailure
+	}
+	diagnostics := filepath.Join(reportRoot, "reports", string(sr.Suite), "ci-diagnostics.jsonl")
+	if info, e := os.Stat(diagnostics); e == nil && info.Mode().IsRegular() {
+		sr.Reports = append(sr.Reports, diagnostics)
+	}
+}
+
+// cancelled reports a caller that stopped the run on purpose. A deadline is the
+// run's own end, not a caller's decision, so it does not count.
+func cancelled(ctx context.Context) bool {
+	return ctx.Err() != nil && !errors.Is(ctx.Err(), context.DeadlineExceeded)
+}
+
+// checkMarker is the exit status the node writes after a check's command ran.
+// Without it the check never reached its command or never came back.
+var checkMarker = regexp.MustCompile(`(?m)^DYNA_CI_CHECK_EXIT=([0-9]+)$`)
+
+// checkCause reads why a check stopped from what its own output proves: the
+// deadline, the exit status the node recorded, and the marker it printed. It
+// never calls an unmarked local error an SSH drop: only an SSH client that lost
+// the connection returns 255 without the node's marker. Exit status 137 proves a
+// SIGKILL, which is not a timeout: a container that was killed ran out of
+// resources, and any other process was killed from outside.
+func checkCause(node Node, ctx context.Context, err error, markers [][]string, container bool) FailureCause {
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return CauseTimeout
+		}
+		return CauseCancelled
+	}
+	var exit *exec.ExitError
+	hasExit := errors.As(err, &exit)
+	if len(markers) == 0 {
+		if hasExit {
+			switch code := exit.ExitCode(); {
+			case code == 255 && node.SSH != "":
+				return CauseSSHDrop
+			case code == 69:
+				return CauseContainerFailure
+			case code == 124:
+				return CauseTimeout
+			case code == 137:
+				return killedCause(container)
+			}
+		}
+		return CauseUnclassified
+	}
+	code, convErr := strconv.Atoi(markers[len(markers)-1][1])
+	if convErr != nil {
+		return CauseUnclassified
+	}
+	switch code {
+	case 69, 125, 126, 127:
+		return CauseContainerFailure
+	case 75, 124:
+		return CauseTimeout
+	case 137:
+		return killedCause(container)
+	case 143:
+		return CauseCancelled
+	case 0, 255:
+		return CauseUnclassified
+	}
+	return CauseTestFailure
+}
+
+// killedCause names a check that something killed. In a container the usual
+// cause is a resource limit, so the report says so; outside one, the output
+// proves no cause of its own.
+func killedCause(container bool) FailureCause {
+	if container {
+		return CauseContainerFailure
+	}
+	return CauseUnclassified
+}
+
+// runCause names why a run stopped before its checks decided.
+func runCause(node Node, ctx context.Context, err error) FailureCause {
+	if ctx.Err() != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return CauseTimeout
+		}
+		return CauseCancelled
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 255 && node.SSH != "" {
+		return CauseSSHDrop
+	}
+	return CauseUnclassified
+}
+
+// checkExit is the typed end of a check log: it says why the check stopped, so
+// a person who opens the run folder reads the cause next to the output. A saved
+// result in SQLite stays the authority.
+type checkExit struct {
+	Cause    FailureCause `json:"cause"`
+	Status   Outcome      `json:"status"`
+	ExitCode int          `json:"exitCode,omitempty"`
+}
+
+// checkExitCode is the exit status the evidence proves, and 0 when it proves
+// none.
+func checkExitCode(err error, markers [][]string) int {
+	if len(markers) > 0 {
+		if code, convErr := strconv.Atoi(markers[len(markers)-1][1]); convErr == nil {
+			return code
+		}
+		return 0
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode()
+	}
+	return 0
+}
+
+// checkLogHead and checkLogTail bound what one check keeps in its local log: the
+// start and the end of the output, so a very long log cannot fill the disk.
+const (
+	checkLogHead = 1 << 20
+	checkLogTail = 64 << 10
+)
+
+// checkLog writes one check's own output to a local blob file. The evidence of
+// a failed check stays there whatever happens to the report archive, the
+// cleanup or the transport afterwards.
+type checkLog struct {
+	file     *os.File
+	path     string
+	written  int64
+	dropped  int64
+	tail     []byte
+	flushed  bool
+	recorded FailureCause
+	exitCode int
+	broken   bool
+	failure  error
+}
+
+func newCheckLog(dir string, check nodeCheck) (*checkLog, error) {
+	if err := os.MkdirAll(dir, 0700); err != nil { // not-state: report blobs live outside SQLite.
+		return nil, err
+	}
+	path := filepath.Join(dir, string(check.id)+".log")
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return nil, err
+	}
+	return &checkLog{file: file, path: path}, nil
+}
+
+// Write keeps the start of the output in the file and the end of it in memory.
+// A log file that fails never breaks the check: the caller still reads the tail.
+func (l *checkLog) Write(p []byte) (int, error) {
+	n := len(p)
+	if !l.broken && l.written < checkLogHead {
+		head := p
+		if room := int64(checkLogHead) - l.written; int64(len(head)) > room {
+			head = head[:room]
+		}
+		if _, err := l.file.Write(head); err != nil {
+			l.broken, l.failure = true, err
+			l.keep(p)
+			return n, nil
+		}
+		l.written += int64(len(head))
+		p = p[len(head):]
+	}
+	l.keep(p)
+	return n, nil
+}
+
+// keep remembers the end of the output, which is where a failure states its
+// cause.
+func (l *checkLog) keep(p []byte) {
+	l.dropped += int64(len(p))
+	l.tail = append(l.tail, p...)
+	if len(l.tail) > checkLogTail {
+		l.tail = l.tail[len(l.tail)-checkLogTail:]
+	}
+}
+
+// flush writes the end of the output it kept in memory, once. It runs before the
+// report copy, so the output of a check is on disk whatever happens to the copy.
+func (l *checkLog) flush() error {
+	if l.broken {
+		return l.failure
+	}
+	if l.flushed {
+		return nil
+	}
+	l.flushed = true
+	if len(l.tail) == 0 {
+		return nil
+	}
+	if omitted := l.dropped - int64(len(l.tail)); omitted > 0 {
+		if _, err := fmt.Fprintf(l.file, "\n[... %d bytes of the middle omitted ...]\n", omitted); err != nil {
+			l.broken, l.failure = true, err
+			return err
+		}
+	}
+	if _, err := l.file.Write(l.tail); err != nil {
+		l.broken, l.failure = true, err
+		return err
+	}
+	return nil
+}
+
+// record appends the typed cause of the check, so the run folder alone says why
+// it stopped. It is called once after the command and again after the report
+// classification when that changes the cause; a cause already written is not
+// written twice. A saved result in SQLite stays the authority.
+func (l *checkLog) record(exit checkExit) error {
+	// The output is flushed first, so a check that has no cause yet still keeps
+	// its evidence before the report copy starts.
+	if err := l.flush(); err != nil {
+		return err
+	}
+	if exit.Cause == "" || exit.Cause == l.recorded {
+		return nil
+	}
+	line, err := json.Marshal(exit)
+	if err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(l.file, "\nDYNA_CI_CHECK_CAUSE %s\n", line); err != nil {
+		l.broken, l.failure = true, err
+		return err
+	}
+	l.recorded = exit.Cause
+	return nil
+}
+
+// Close ends the log: any output not yet written, then the file.
+func (l *checkLog) Close() error {
+	err := l.flush()
+	if closeErr := l.file.Close(); err == nil {
+		err = closeErr
+	}
+	return err
 }
 
 func combinedStatus(a, b Outcome) Outcome {
