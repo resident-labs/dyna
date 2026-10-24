@@ -34,7 +34,7 @@ func TestTurnCompletionFollowsTerminalIntentAndLockRelease(t *testing.T) {
 				return err
 			}
 			for _, event := range events {
-				if event["t"] == "turn_end" && event["turn"] == float64(n) {
+				if end, ok := event.Payload.(*TurnEndJournal); ok && end.Turn == n {
 					return nil
 				}
 			}

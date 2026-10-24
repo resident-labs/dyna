@@ -119,14 +119,21 @@ func TestTurnStartResentAfterACrashWritesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := map[string]int{}
+	lines := map[JournalKind]int{}
 	for _, ev := range events {
-		if ev["t"] == "room_drained" && ev["message"] == "msg_once" || ev["t"] == "turn_start" && ev["turn"] == float64(1) {
-			lines[ev["t"].(string)]++
+		switch payload := ev.Payload.(type) {
+		case *RoomDrainedJournal:
+			if payload.Message == "msg_once" {
+				lines[JournalRoomDrained]++
+			}
+		case *TurnStartJournal:
+			if payload.Turn == 1 {
+				lines[JournalTurnStart]++
+			}
 		}
 	}
 	// The first run of turn 1 also logged a turn_start.
-	if lines["room_drained"] != 1 || lines["turn_start"] != 2 {
+	if lines[JournalRoomDrained] != 1 || lines[JournalTurnStart] != 2 {
 		t.Fatalf("event lines %v; want one room_drained and one more turn_start", lines)
 	}
 }

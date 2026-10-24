@@ -60,11 +60,11 @@ func TestTurnNotesRecordEachFact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seen := map[any]bool{}
+	seen := map[JournalKind]bool{}
 	for _, ev := range events {
-		seen[ev["t"]] = true
+		seen[ev.Payload.journalKind()] = true
 	}
-	for _, kind := range []string{"steer_delivered", "defer", "model_fallback", "harness_session", "compact_failed", "runtime_repin"} {
+	for _, kind := range []JournalKind{JournalSteerDelivered, JournalDefer, JournalModelFallback, JournalHarnessSession, JournalCompactFailed, JournalRuntimeRepin} {
 		if !seen[kind] {
 			t.Errorf("no %s event line", kind)
 		}
