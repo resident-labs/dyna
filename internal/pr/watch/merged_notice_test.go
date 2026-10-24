@@ -27,7 +27,7 @@ func TestEngineMergeWakesAuthorOnceAndKeepsCleanupQuiet(t *testing.T) {
 		Resumable:     true, HarnessSession: "builder",
 	})
 	e.s.Deliver = nil
-	merged, err := e.s.publishMerge(t.Context(), r, nil)
+	merged, err := e.s.publishMerge(t.Context(), r, nil, nil)
 	if err != nil || !merged {
 		t.Fatalf("engine publication: merged=%v err=%v", merged, err)
 	}

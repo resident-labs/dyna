@@ -26,6 +26,10 @@ type trialFixture struct {
 	merged                                          *[]int
 	main, head, branch, ci                          string
 	event, observedHead, observedBranch, conclusion string
+	compareStatus                                   string
+	mainAfterCompare                                string
+	deferDirectRead                                 bool
+	directPush                                      bool
 	conflictHead                                    string
 	heads                                           []string
 	branches                                        map[string]string
@@ -98,6 +102,16 @@ func mergeTrialEnv(t *testing.T, numbers ...int) *trialFixture {
 							}
 						}
 					}
+					if len(f.commitHeads[head]) == 0 {
+						f.directPush = true
+						for n, pull := range fs {
+							if pull.Pull.Head.SHA == head {
+								*merged = append(*merged, n)
+								pull.Pull.State = "closed"
+								pull.Pull.Merged = true
+							}
+						}
+					}
 				} else {
 					f.branch = ref
 					if head == "" {
@@ -112,6 +126,21 @@ func mergeTrialEnv(t *testing.T, numbers ...int) *trialFixture {
 		if strings.Contains(joined, "/actions/runs/81/attempts/1/jobs?") {
 			fmt.Fprint(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n")
 			return json.NewEncoder(cmd.Stdout).Encode(map[string]any{"jobs": f.jobs})
+		}
+		if strings.Contains(joined, "/compare/") {
+			status := f.compareStatus
+			if status == "" {
+				status = "diverged"
+			}
+			fmt.Fprint(cmd.Stdout, "HTTP/2.0 200 OK\r\n\r\n")
+			response := struct {
+				Status string `json:"status"`
+			}{Status: status}
+			err := json.NewEncoder(cmd.Stdout).Encode(response)
+			if f.mainAfterCompare != "" {
+				f.main = f.mainAfterCompare
+			}
+			return err
 		}
 		trialHead := f.head
 		for sha := range f.commitHeads {
@@ -183,6 +212,14 @@ func mergeTrialEnv(t *testing.T, numbers ...int) *trialFixture {
 			fmt.Fprint(out, "HTTP/2.0 200 OK\r\n\r\n")
 			return json.NewEncoder(out).Encode(data)
 		}
+		if f.deferDirectRead && f.directPush && strings.Contains(joined, "/pulls/") {
+			saved := fs[1].Pull
+			fs[1].Pull.State, fs[1].Pull.Merged = "open", false
+			f.deferDirectRead = false
+			err := run(ctx, cmd)
+			fs[1].Pull = saved
+			return err
+		}
 		return run(ctx, cmd)
 	}
 	return f
@@ -208,6 +245,96 @@ func TestAutomaticMergeWaitsForExactBatchTrial(t *testing.T) {
 	}
 	if f.main != f.head || len(f.branches) != 0 {
 		t.Fatalf("main=%s trial branches=%v", f.main, f.branches)
+	}
+}
+
+func TestSingleReadyPRWithContainingTestedHeadLandsDirectly(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	f.compareStatus = "ahead"
+	f.fs[1].Pull.Base.SHA = f.main
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(*f.merged, []int{1}) || f.builds != 0 || len(f.branches) != 0 {
+		t.Fatalf("direct landing: merged=%v builds=%d branches=%v", *f.merged, f.builds, f.branches)
+	}
+	st, err := f.e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.MergeTrials) != 0 {
+		t.Fatalf("direct landing started a trial: %+v", st.MergeTrials)
+	}
+	landed := mergeNotices(f.e.sent, room.MergeLanded)
+	if len(landed) != 1 || landed[0].Merge.ReasonKind != room.MergeTestedHead {
+		t.Fatalf("direct landing event = %+v", landed)
+	}
+}
+
+func TestDirectLandKeepsReasonWhenGitHubClosesLater(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	f.compareStatus = "ahead"
+	f.fs[1].Pull.Base.SHA = f.main
+	f.deferDirectRead = true
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	r, err := f.e.s.Store.Get("github.com/owner/repo#1")
+	if err != nil || r.State != "open" {
+		t.Fatalf("deferred read did not keep the PR open: %+v, %v", r, err)
+	}
+	landed := mergeNotices(f.e.sent, room.MergeLanded)
+	if len(landed) != 1 || landed[0].Merge.ReasonKind != room.MergeTestedHead {
+		t.Fatalf("deferred direct landing event = %+v", landed)
+	}
+	if _, err := f.e.s.Tick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	landed = mergeNotices(f.e.sent, room.MergeLanded)
+	if len(landed) != 1 || landed[0].Merge.ReasonKind != room.MergeTestedHead {
+		t.Fatalf("reconciliation repeated or lost the event: %+v", landed)
+	}
+	st, err := f.e.s.Store.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.MergeTrials) != 0 || f.builds != 0 || len(f.branches) != 0 {
+		t.Fatalf("deferred reconciliation started a trial: trials=%+v builds=%d branches=%v", st.MergeTrials, f.builds, f.branches)
+	}
+}
+
+func TestSingleReadyPRWithMovedMainTakesTrial(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	f.compareStatus = "diverged"
+	f.fs[1].Pull.Base.SHA = strings.Repeat("c", 40)
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(*f.merged) != 0 || f.builds != 1 || f.branch != "dyna/merge-trial/1" {
+		t.Fatalf("moved main skipped its trial: merged=%v builds=%d branch=%q", *f.merged, f.builds, f.branch)
+	}
+	f.ci = "completed"
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(*f.merged, []int{1}) {
+		t.Fatalf("trial did not publish after main moved: %v", *f.merged)
+	}
+}
+
+func TestSingleReadyPRTakesTrialWhenMainMovesDuringDirectPublication(t *testing.T) {
+	f := mergeTrialEnv(t, 1)
+	f.compareStatus = "ahead"
+	f.fs[1].Pull.Base.SHA = f.main
+	f.mainAfterCompare = strings.Repeat("f", 40)
+	if _, err := f.e.s.MergeTick(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(*f.merged) != 0 || f.builds != 1 || f.branch != "dyna/merge-trial/1" {
+		t.Fatalf("base race skipped its trial: merged=%v builds=%d branch=%q", *f.merged, f.builds, f.branch)
+	}
+	if f.main != f.mainAfterCompare {
+		t.Fatalf("direct publication overwrote the newer main: %s", f.main)
 	}
 }
 

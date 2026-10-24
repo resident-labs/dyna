@@ -482,13 +482,16 @@ const (
 	MergeConflictReason MergeReasonKind = "conflict"
 	// MergeRootReturn is root's recorded decision to return the change.
 	MergeRootReturn MergeReasonKind = "root-return"
+	// MergeTestedHead is a single PR whose head contains the base tip and whose
+	// required CI passed at that head, so its own tree needs no merge trial.
+	MergeTestedHead MergeReasonKind = "tested-head"
 	// MergeReasonOther is any other cause, which the event words in Reason.
 	MergeReasonOther MergeReasonKind = "other"
 )
 
 // mergeReasonKinds lists every reason kind the web needs as a union type.
 var mergeReasonKinds = []MergeReasonKind{
-	MergeChecksFailed, MergeConflictReason, MergeRootReturn, MergeReasonOther,
+	MergeChecksFailed, MergeConflictReason, MergeRootReturn, MergeTestedHead, MergeReasonOther,
 }
 
 // MergePR is one member PR of a merge trial, as the card names it.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -148,7 +149,7 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 			continue
 		}
 		if fastLandable(current) {
-			if err := s.fastLand(ctx, current); err != nil {
+			if err := s.fastLand(ctx, current, nil); err != nil {
 				failures = append(failures, err)
 			} else {
 				fastLanded[repo] = true
@@ -169,6 +170,30 @@ func (s *Service) mergeTickLocked(ctx context.Context, roomID string, without ma
 			continue
 		}
 		groups[repo] = chooseMergeBatch(groups[repo], active, s.expediteStreak("merge:"+repo))
+		if len(groups[repo]) == 1 {
+			candidate := groups[repo][0]
+			base := st.RepositoryFacts[repo]
+			direct, err := s.testedHeadLandable(ctx, candidate, base)
+			if err != nil {
+				// The optimization is optional. Keep the normal trial safe and quiet
+				// when its comparison is unavailable.
+				log.Printf("tested-head merge check for %s: %v; using a merge trial", changeID(candidate), err)
+			} else if direct {
+				err := s.fastLand(ctx, candidate, &base)
+				if errors.Is(err, trial.ErrMainMoved) {
+					// The base lease, not the earlier comparison, is the publication
+					// guard. A newer main gets the ordinary combined-tree trial.
+					log.Printf("tested-head publication for %s: %v; using a merge trial", changeID(candidate), err)
+				} else {
+					if err != nil {
+						failures = append(failures, err)
+					} else {
+						fastLanded[repo] = true
+					}
+					continue
+				}
+			}
+		}
 		limit := 0
 		for _, member := range groups[repo] {
 			settings, err := s.MergeSettings(member.RoomID)
