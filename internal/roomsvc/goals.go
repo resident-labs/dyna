@@ -290,7 +290,7 @@ func (s *Service) AmendGoalBrief(ctx context.Context, roomRef, id, text string) 
 	// The holder reads the correction itself, so the post goes to the holders.
 	// A shared goal has no holder session, so its post belongs to the room.
 	to, bound := s.holderAddresses(g, r.Name)
-	ev := room.GoalEvent{Type: room.GoalAmended, GoalID: g.ID, Title: g.Text, Actor: author.Name, State: room.GoalState(g.State), Summary: g.Amendments[len(g.Amendments)-1].Text}
+	ev := room.GoalEvent{Type: room.GoalAmended, GoalID: g.ID, Title: g.Text, Actor: author.Name, State: room.GoalState(g.State), Summary: g.Amendments[len(g.Amendments)-1].Text, Amendment: len(g.Amendments)}
 	_, err = s.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: r.ID, Event: ev, To: to, SessionIDs: bound})
 	return g, err
 }
