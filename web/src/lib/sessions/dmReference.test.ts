@@ -9,6 +9,7 @@ import { svelteEsbuildPlugin } from '../../../test/svelte-esbuild.ts'
 import { installDom, domNames } from '../prs/prDetailHarness.ts'
 import { need } from '../../../test/need.ts'
 import type { SessionReference } from '../api/session.ts'
+import type { PREvent } from '../rooms/events.gen.ts'
 
 // A post of another conversation reaches a session's DM as one compact row that
 // names the post and opens it where it lives, never as a second copy.
@@ -64,6 +65,64 @@ test('a reference row shows its sender, its home, a one-line preview and its fil
   assert.match(text, /The parser test failed on the new input\./)
   assert.match(text, /2 files/)
   assert.match(text, /Jump to message/)
+  web.unmount(mounted)
+  target.remove()
+})
+
+test('a typed event reference uses its card facts and keeps its jump action', () => {
+  const payload = {
+    type: 'ready', label: 'PR #379', location: 'https://github.com/resident-labs/dyna/pull/379', changeId: 'github.com/resident-labs/dyna#379',
+    number: 379, repo: 'resident-labs/dyna', title: 'room: clean orphaned post index rows at startup', head: 'b2fb3534', url: 'https://github.com/resident-labs/dyna/pull/379',
+  } satisfies PREvent
+  const typed = Object.assign({}, reference, { from: 'dyna', speaker: 'dyna', kind: 'pr', notice: { kind: 'ready' }, payload, preview: 'raw engine fallback' })
+  const target = document.createElement('div')
+  document.body.append(target)
+  const jumped: string[] = []
+  const mounted = web.mount(web.DmRows, {
+    target,
+    props: {
+      dm: view([typed]), room: { id: 'room_1', name: 'room_1' }, member: { name: 'author', address: 'room_1:author', hue: 0 },
+      members, onthread: () => {}, onopenfile: () => {}, onpost: (postId: string) => jumped.push(postId),
+    },
+  })
+  web.flushSync()
+  const text = (target.textContent ?? '').replace(/\s+/g, ' ').trim()
+  assert.match(text, /dyna/)
+  assert.match(text, /PR #379/)
+  assert.match(text, /Ready to land/)
+  assert.match(text, /room: clean orphaned post index rows at startup/)
+  assert.doesNotMatch(text, /raw engine fallback/)
+  const jump = [...target.querySelectorAll('button')].find((button) => button.textContent?.includes('Jump to message'))
+  assert.ok(jump, 'the typed reference keeps its jump action')
+  jump.click()
+  web.flushSync()
+  assert.deepEqual(jumped, [reference.postId])
+  web.unmount(mounted)
+  target.remove()
+})
+
+test('a legacy PR reference with a notice keeps its stored text', () => {
+  const preview = 'https://github.com/acme/app/pull/542\nHead: 0123456789abcdef0123456789abcdef01234567\n\nacme/app PR approved by its Dyna reviewer:\n\nNo open findings.'
+  const legacy = Object.assign({}, reference, { from: 'dyna', speaker: 'dyna', kind: 'pr', notice: { kind: 'approved' }, preview })
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.DmRows, {
+    target,
+    props: {
+      dm: view([legacy]), room: { id: 'room_1', name: 'room_1' }, member: { name: 'author', address: 'room_1:author', hue: 0 },
+      members, onthread: () => {}, onopenfile: () => {}, onpost: () => {},
+    },
+  })
+  web.flushSync()
+  const text = (target.textContent ?? '').replace(/\s+/g, ' ').trim()
+  assert.match(text, /PR #542/)
+  assert.match(text, /Approved by the reviewer/)
+  assert.doesNotMatch(text, /PR watcher/)
+  const details = [...target.querySelectorAll('button')].find((button) => button.textContent === 'Details')
+  assert.ok(details, 'the legacy card keeps its agent text behind Details')
+  details.click()
+  web.flushSync()
+  assert.match(target.textContent ?? '', /No open findings/)
   web.unmount(mounted)
   target.remove()
 })
