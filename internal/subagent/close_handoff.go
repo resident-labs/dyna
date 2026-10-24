@@ -72,7 +72,8 @@ func (m *Manager) refuseGoalsForHeir(info, heir Info) error {
 	for i, o := range held {
 		goals[i] = o.r
 	}
-	return fmt.Errorf("%w\nRoot and the owner hold no goals, so a forced close keeps the work here instead of handing it to them. If only the owner can unblock a goal, ask the owner first with dyna ask. Then run one command above for each goal, or hand it to an open session.", responsibilityError("close", goals))
+	message := fmt.Sprintf("%s\nRoot and the owner hold no goals, so a forced close keeps the work here instead of handing it to them. If only the owner can unblock a goal, ask the owner first with dyna ask. Then run one command above for each goal, or hand it to an open session.", responsibilityError("close", goals))
+	return newCloseRefusal(message, errGoalNeedsRoot, CloseReasonGoalNeedsAgent, []CloseAction{CloseActionRetry}, goals)
 }
 
 // handoffClose runs after the turn stops and new assignments are fenced off.

@@ -17,6 +17,7 @@ import (
 	"dyna-agent/internal/database"
 	"dyna-agent/internal/devicegrant"
 	"dyna-agent/internal/scope"
+	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/settings"
 
 	"dyna-agent/internal/websvc/devicestore"
@@ -87,6 +88,26 @@ func (s *Server) pair(w http.ResponseWriter, r *http.Request, rt Route) {
 
 // ErrReadOnly is a write method's answer in an engine that runs read-only.
 var ErrReadOnly = errors.New("read-only mode")
+
+type callErrorResponse struct {
+	Error string                 `json:"error"`
+	Close *sessionclose.Recovery `json:"close,omitempty"`
+}
+
+type closeRefusal interface {
+	error
+	CloseRecovery() sessionclose.Recovery
+}
+
+func writeCallError(w http.ResponseWriter, status int, err error) {
+	var refusal closeRefusal
+	if errors.As(err, &refusal) {
+		recovery := refusal.CloseRecovery()
+		jsonReply(w, status, callErrorResponse{Error: err.Error(), Close: &recovery})
+		return
+	}
+	jsonError(w, status, err.Error())
+}
 
 // methodStatus is the HTTP status for a method's error. An error that can
 // pass gets 503, so a caller may send the same request again: a write
@@ -178,7 +199,7 @@ func (s *Server) call(w http.ResponseWriter, r *http.Request, rt Route, p Princi
 		if status == http.StatusServiceUnavailable && !errors.Is(r.Context().Err(), context.Canceled) {
 			logTransient(name, err)
 		}
-		jsonError(w, status, err.Error())
+		writeCallError(w, status, err)
 		return
 	}
 	if result, ok := res.(PrincipalResult); ok {

@@ -2,6 +2,7 @@ package roomsvc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -27,6 +28,7 @@ type BulkSessionItem struct {
 	Session  string                  `json:"session"`
 	OK       bool                    `json:"ok"`
 	Error    string                  `json:"error,omitempty"`
+	Close    *subagent.CloseRecovery `json:"close,omitempty"`
 	Member   *Member                 `json:"member,omitempty"`
 	Transfer *subagent.TransferState `json:"transfer,omitempty"`
 }
@@ -127,6 +129,11 @@ func (s *Service) BulkSessionAction(ctx context.Context, roomRef string, opts Bu
 				item.OK = err == nil
 				if err != nil {
 					item.Error = err.Error()
+					var refusal *subagent.CloseRefusal
+					if errors.As(err, &refusal) {
+						recovery := refusal.CloseRecovery()
+						item.Close = &recovery
+					}
 				}
 			}
 		})

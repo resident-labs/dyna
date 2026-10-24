@@ -2,6 +2,7 @@
 import { deviceKey, makeProof } from '../settings/connect.ts'
 import { arrayOf, isBoolean, isRecord, isString, optional } from './guards.ts'
 import type { ConnectRoute, ConnectSession, Handoff, PushStatus, Renewal, RouteList, Whoami } from './connect.ts'
+import { asCloseRecovery } from './session.ts'
 
 // proof signs a request to path with this browser's device key.
 async function proof(path: string) {
@@ -28,7 +29,12 @@ export function createTransport() {
 
   // errorOf is what a failed call throws: the server message, or the status.
   function errorOf(data: unknown, status: number): unknown {
-    return (isRecord(data) ? data.error : undefined) ?? `HTTP ${status}`
+    if (isRecord(data)) {
+      const close = asCloseRecovery(data.close)
+      if (close) return { message: isString(data.error) ? data.error : `HTTP ${status}`, close }
+      return data.error ?? `HTTP ${status}`
+    }
+    return `HTTP ${status}`
   }
 
   function isRenewal(v: unknown): v is Renewal {

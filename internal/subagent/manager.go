@@ -970,11 +970,14 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	if !opts.Force && m.ClosePRs == nil {
 		items, err := m.Responsibilities(ctx, info)
 		if err != nil {
-			return info, fmt.Errorf("responsibilities: cannot close: %w; use --force to close anyway", err)
+			message := fmt.Sprintf("responsibilities: cannot close: %v; use --force to close anyway", err)
+			return info, newCloseRefusal(message, err, CloseReasonResponsibilities, []CloseAction{CloseActionRetry, CloseActionForce}, items)
 		}
 		items = slices.DeleteFunc(items, func(r Responsibility) bool { return r.Kind != "pr" })
 		if len(items) > 0 {
-			return info, fmt.Errorf("%w\n- PR handoff service is unavailable; use dyna subagent close %s --force to close anyway", responsibilityError("close", items), info.ID)
+			cause := responsibilityError("close", items)
+			message := fmt.Sprintf("%s\n- PR handoff service is unavailable; use dyna subagent close %s --force to close anyway", cause, info.ID)
+			return info, newCloseRefusal(message, cause, CloseReasonResponsibilities, []CloseAction{CloseActionRetry, CloseActionForce}, items)
 		}
 	}
 	// Root and the owner hold no goals, so a close that would leave one of them
@@ -1023,10 +1026,13 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	summary, err := m.handoffClose(ctx, info, heir)
 	if err != nil {
 		if errors.Is(err, errGoalNeedsRoot) {
-			return info, err
+			items, _ := m.Responsibilities(ctx, info)
+			return info, newCloseRefusal(err.Error(), err, CloseReasonGoalNeedsAgent, []CloseAction{CloseActionRetry}, items)
 		}
 		if !opts.Force {
-			return info, fmt.Errorf("responsibilities: cannot close: %w; retry or use --force to close anyway", err)
+			items, _ := m.Responsibilities(ctx, info)
+			message := fmt.Sprintf("responsibilities: cannot close: %v; retry or use --force to close anyway", err)
+			return info, newCloseRefusal(message, err, CloseReasonResponsibilities, []CloseAction{CloseActionRetry, CloseActionForce}, items)
 		}
 		summary = append(summary, "Handoff failed: "+err.Error())
 	}
