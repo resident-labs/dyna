@@ -7,7 +7,11 @@ import (
 	"time"
 )
 
-const shutdownTimeout = 2 * time.Second
+// shutdownTimeout bounds engine stop. A local CI run needs a few seconds to stop
+// its containers and then its keeper on the machine, and a session worker can
+// wait three seconds for a handoff, so the bound covers them. Nothing waits for
+// the full time when the work ends sooner.
+const shutdownTimeout = 5 * time.Second
 
 // stopEngine cancels every engine service before joining cleanup. HTTP, workers
 // and foreground process cleanup share one deadline, including error exits.
