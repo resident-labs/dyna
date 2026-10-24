@@ -6,7 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"dyna-agent/internal/profile"
 	"dyna-agent/internal/room"
 )
 
@@ -85,6 +87,140 @@ func TestRulesAPIAndEvents(t *testing.T) {
 		if _, err := e.svc.RemoveRule(t.Context(), ref, false, "r1"); err == nil {
 			t.Fatal("unknown room")
 		}
+	}
+}
+
+// A shared edit has one owner row, while every session keeps its own agent
+// note in its DM. A rule edit uses its existing rule row; another shared edit
+// uses one instruction-batch row.
+func TestSharedInstructionChangesProduceOneOwnerRow(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	ids := map[string]string{}
+	for _, name := range []string{"one", "two", "three"} {
+		info := e.start(r, name, nil)
+		ids[info.Address()] = info.ID
+	}
+	sameSessions := func(got []string) bool {
+		if len(got) != len(ids) {
+			return false
+		}
+		seen := map[string]bool{}
+		for _, address := range got {
+			if ids[address] == "" || seen[address] {
+				return false
+			}
+			seen[address] = true
+		}
+		return true
+	}
+	checkDMNotes := func(msgs []room.Message, want int) {
+		t.Helper()
+		notes := 0
+		for _, msg := range msgs {
+			ev, ok := msg.InstructionNote()
+			if !ok {
+				continue
+			}
+			notes++
+			if want := room.DMConversation(ids[ev.Session]); msg.Conversation != want {
+				t.Fatalf("instruction note for %s has home %q, want %q", ev.Session, msg.Conversation, want)
+			}
+		}
+		if notes != want {
+			t.Fatalf("instruction notes = %d, want %d", notes, want)
+		}
+	}
+	flush := func() {
+		t.Helper()
+		// Exercise the earliest and latest queued deadlines without sleeping.
+		// A shared edit must still produce one complete batch.
+		var earliest, latest time.Time
+		for _, id := range ids {
+			meta, err := e.mgr.Store.Info(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			at := meta.InstructionsChangedAt
+			if at.IsZero() {
+				continue
+			}
+			at = at.Add(3 * time.Second)
+			if earliest.IsZero() || at.Before(earliest) {
+				earliest = at
+			}
+			if latest.IsZero() || at.After(latest) {
+				latest = at
+			}
+		}
+		next, err := e.mgr.FlushInstructionNotes(e.ctx, earliest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !next.IsZero() {
+			if _, err := e.mgr.FlushInstructionNotes(e.ctx, latest); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	if _, err := e.svc.AddRule(e.ctx, r.ID, false, "Keep every shared notice together"); err != nil {
+		t.Fatal(err)
+	}
+	flush()
+	msgs, err := e.svc.rooms().Messages(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkDMNotes(msgs, 3)
+	var rules []room.RuleEvent
+	for _, msg := range msgs {
+		if ev, ok := msg.Rule(); ok {
+			rules = append(rules, ev)
+		}
+	}
+	if len(rules) != 1 || !sameSessions(rules[0].Sessions) {
+		t.Fatalf("rule reach = %+v, want one row for %v", rules, ids)
+	}
+
+	// A different shared change uses one batch row rather than a rule row.
+	e.mgr.Profiles = func() (*profile.Store, error) {
+		return &profile.Store{Profiles: []profile.Profile{
+			{Name: "mock", Harness: profile.HarnessMock, Default: true, Taste: 5, Intelligence: 5, Cost: 5},
+			{Name: "writer", Harness: profile.HarnessMock, Model: "model-2", Taste: 7, Intelligence: 8, Cost: 6},
+		}}, nil
+	}
+	e.mgr.NoteRoomInstructions(e.ctx, r.ID)
+	flush()
+	msgs, err = e.svc.rooms().Messages(r.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkDMNotes(msgs, 6)
+	var batches []room.InstructionBatchEvent
+	ownerRows := 0
+	for _, msg := range msgs {
+		if ev, ok := msg.InstructionBatch(); ok {
+			batches = append(batches, ev)
+		}
+		if msg.Conversation.Home() == room.ConversationRoom {
+			if _, ok := msg.Rule(); ok {
+				ownerRows++
+			}
+			if _, ok := msg.InstructionBatch(); ok {
+				ownerRows++
+			}
+			if _, ok := msg.InstructionNote(); ok {
+				ownerRows++
+			}
+		}
+	}
+	if len(batches) != 1 || len(batches[0].Sections) != 1 || batches[0].Sections[0].Name != "Subagent profiles" ||
+		!sameSessions(batches[0].Sessions) || len(batches[0].Notes) != 3 {
+		t.Fatalf("instruction batches = %+v", batches)
+	}
+	if ownerRows != 2 {
+		t.Fatalf("owner rows = %d, want one rule row and one batch row", ownerRows)
 	}
 }
 
