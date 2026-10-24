@@ -106,6 +106,7 @@
   // reasonLine words a cause from its kind when the payload keeps no text.
   function reasonLine(text: string | undefined, kind: MergeReasonKind | undefined, named: number) {
     if (text) return text
+    if (kind === 'tested-head') return 'Landed without a trial: this head contains the base tip and passed its required CI.'
     if (kind === 'checks-failed' && !named) return 'Checks failed.'
     return ''
   }
@@ -143,7 +144,7 @@
         {#if payload.head}<span>head <b class="mono">{shortSha(payload.head)}</b></span>{/if}
         {#if payload.commit}<span>commit <b class="mono">{shortSha(payload.commit)}</b></span>{/if}
       </div>
-      {#if reason && stepTones[type] === 'coral'}<p class="reason">{reason}</p>{/if}
+      {#if reason && stepTones[type] === 'coral'}<p class="reason">{reason}</p>{:else if reason && type === 'landed'}<p class="note">{reason}</p>{/if}
       {#if failedChecks.length}<p class="reason">Failed checks: {failedChecks.join(', ')}</p>{/if}
       <div class="acts">
         {#if subject?.url}<button class="btn" type="button" onclick={() => openLink(subject?.url)}>Open PR</button>{/if}

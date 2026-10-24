@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"slices"
 	"sort"
 	"strings"
@@ -274,18 +275,35 @@ func fastLandable(r Record) bool {
 	return r.Verdict == state.VerdictApproveFast && r.FastLand != nil && r.FastLand.LowRisk && r.RoundHead == r.Head
 }
 
-// fastLand publishes one low-risk approve-fast change without the batch trial.
-// Every existing merge gate stays: a fresh head, the approval at that head,
-// green CI, required reviews, mergeability and the room pause. The change's
-// own CI already ran the checks for its area: docs-only changes run none, and
-// test-only changes run their suites. Only the batch wait is skipped.
-func (s *Service) fastLand(ctx context.Context, candidate Record) error {
+// fastLand publishes one change without the batch trial. Every existing merge
+// gate stays: a fresh head, the approval at that head, green CI, required
+// reviews, mergeability and the room pause. A low-risk approve-fast change has
+// no base lease. A tested-head landing supplies one and gets a landed event.
+func (s *Service) fastLand(ctx context.Context, candidate Record, base *state.RepositoryFacts) error {
 	current, children, ready, err := s.prepareMerge(ctx, candidate)
 	if err != nil || !ready {
 		return err
 	}
-	_, err = s.publishMerge(ctx, current, children)
+	_, err = s.publishMerge(ctx, current, children, base)
 	return err
+}
+
+// testedHeadLandable reports whether a fresh, ready PR can publish its own
+// tested tree. mergeReady has already proved its required CI at this exact head
+// through the repository's registered local or hosted gate. This check adds the
+// other fact: the current default-branch tip is an ancestor of that head.
+func (s *Service) testedHeadLandable(ctx context.Context, candidate Record, base state.RepositoryFacts) (bool, error) {
+	if changeKind(candidate) != "github" || candidate.CI != "passed" || candidate.Head == "" || base.Head == "" || base.DefaultBranch == "" {
+		return false, nil
+	}
+	var comparison struct {
+		Status string `json:"status"`
+	}
+	path := fmt.Sprintf("repos/%s/compare/%s...%s", candidate.Repo, base.Head, candidate.Head)
+	if err := s.github(candidate.RoomID).api(ctx, refRecord(candidate), path, &comparison); err != nil {
+		return false, err
+	}
+	return comparison.Status == "ahead" || comparison.Status == "identical", nil
 }
 
 // prepareMerge keeps the owner repair preflight, child preparation and final fresh gate together.
@@ -306,9 +324,26 @@ func (s *Service) prepareMerge(ctx context.Context, candidate Record) (Record, [
 }
 
 // publishMerge owns guarded publication, outcome confirmation and reconciliation.
+// A tested-head publication uses the trial publisher's atomic base lease. Other
+// direct publications keep GitHub's exact-head merge guard.
 // It reports whether merged state is durable even when follow-up cleanup fails.
-func (s *Service) publishMerge(ctx context.Context, current Record, children []Ref) (bool, error) {
-	_, mergeErr := s.github(current.RoomID).command(ctx, "", false, "pr", "merge", "--merge", "--match-head-commit", current.Head, "--", current.URL)
+func (s *Service) publishMerge(ctx context.Context, current Record, children []Ref, base *state.RepositoryFacts) (bool, error) {
+	var mergeErr error
+	if base != nil {
+		batch := trialBatch(current, state.MergeTrial{Base: base.Head, DefaultBranch: base.DefaultBranch, Created: s.now()})
+		mergeErr = s.trialClient(current).PublishHead(ctx, batch, current.Head)
+	} else {
+		_, mergeErr = s.github(current.RoomID).command(ctx, "", false, "pr", "merge", "--merge", "--match-head-commit", current.Head, "--", current.URL)
+	}
+	if base != nil && mergeErr == nil {
+		// Publication, not GitHub's eventually consistent PR closure, owns this
+		// fact. The room post ID deduplicates a later reconciliation or retry.
+		ev := mergeEventOf(current, room.MergeLanded)
+		ev.ReasonKind, ev.Commit = room.MergeTestedHead, current.Head
+		if noticeErr := s.postMergeNotice(ctx, current, "merge-landed-"+string(room.MergeTestedHead), Notice{Merge: &ev}); noticeErr != nil {
+			log.Printf("merge landed event for %s: %v", changeID(current), noticeErr)
+		}
+	}
 	pull, readErr := s.github(current.RoomID).Pull(ctx, refRecord(current))
 	if readErr == nil && pull.Merged {
 		processErr := s.process(ctx, current.Key, Snapshot{Pull: pull, headConfirmed: true}, "", "", nil, nil, false)
@@ -322,6 +357,12 @@ func (s *Service) publishMerge(ctx context.Context, current Record, children []R
 			return false, errors.Join(processErr, fmt.Errorf("merged state for %s at %s is not yet durable", current.URL, current.Head))
 		}
 		return true, processErr
+	}
+	if base != nil && mergeErr == nil && readErr == nil && pull.State == "open" {
+		// GitHub can take a moment to close a PR whose exact head was pushed to
+		// its base. The base lease already published the tested commit, so leave
+		// reconciliation to the next observation instead of starting a trial.
+		return false, nil
 	}
 	if readErr != nil || mergeErr == nil || pull.State != "open" {
 		var urls []string

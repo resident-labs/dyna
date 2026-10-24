@@ -742,4 +742,6 @@ test('a single-PR merge card keeps the singular title', () => {
   assert.ok(base, 'the landed merge fixture is missing')
   const text = renderMergeCard(base)
   assert.match(text, /Merged #242 into main/, `a one-PR title lost its shape: ${text}`)
+  const direct = renderMergeCard({ ...base, reasonKind: 'tested-head' as const })
+  assert.match(direct, /Landed without a trial: this head contains the base tip and passed its required CI\./)
 })
