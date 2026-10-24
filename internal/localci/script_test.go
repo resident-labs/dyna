@@ -130,18 +130,16 @@ func TestGoContainerPreparesIdentityBeforeDroppingPrivileges(t *testing.T) {
 	stubs := map[string]string{
 		"docker": `#!/bin/sh
 case "$1" in
-  create)
+  info) exit 0 ;;
+  run)
     for arg; do last=$arg; done
     printf '%s' "$last" > "$CONTAINER_INNER"
-    touch "$CONTAINER_STATE"
-    echo identity-test
+    CI_UID=1001 CI_GID=1001 bash "$CONTAINER_INNER"
     ;;
-  start) CI_UID=1001 CI_GID=1001 bash "$CONTAINER_INNER" ;;
-  rm) rm -f "$CONTAINER_STATE" ;;
-  container) if [ -f "$CONTAINER_STATE" ]; then echo identity-test; fi ;;
-  *) exit 2 ;;
+  *) exit 0 ;;
 esac
 `,
+		"git":      "#!/bin/sh\nexit 0\n",
 		"apt-get":  "#!/bin/sh\nexit 0\n",
 		"getent":   "#!/bin/sh\nexit 2\n",
 		"groupadd": "#!/bin/sh\nexit 0\n",
@@ -153,15 +151,12 @@ esac
 			t.Fatal(err)
 		}
 	}
-	gate := writeTestHostGate(t, dir)
-	script := containerScript(dir, filepath.Join(dir, "repo.git"), filepath.Join(dir, "work"), filepath.Join(dir, "reports"), "identity-test", "go", time.Minute)
-	script = strings.ReplaceAll(script, hostAdmissionGate, gate)
+	check := nodeCheck{id: SuiteGoStatic, name: "go-static", inner: "bash scripts/ci.sh go vet", image: "golang:1.26.3"}
+	script := nodeCheckScript(Node{Name: "local", Slots: 1}, dir, filepath.Join(dir, "repo.git"), filepath.Join(dir, "run"), "run", strings.Repeat("a", 40), check, time.Minute, 0)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "bash", "-c", script)
-	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "IDENTITY_MARKER="+marker,
-		"CONTAINER_INNER="+filepath.Join(dir, "inner"), "CONTAINER_STATE="+filepath.Join(dir, "created"),
-		"CI_SLOT_DIR="+filepath.Join(dir, "slots"), "CI_SLOT_POLL=0.001")
+	cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "IDENTITY_MARKER="+marker, "CONTAINER_INNER="+filepath.Join(dir, "inner"))
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("container failed: %v: %s", err, out)
 	}

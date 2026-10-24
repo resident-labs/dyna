@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -334,6 +335,15 @@ type workers struct {
 	// receipts, ticks each repository's schedule and the global built-ins once
 	// a minute. It runs under the worker lock with the other workers.
 	hookSchedule func(context.Context) (time.Time, error)
+	// onStop runs as soon as the workers stop, before they wait for the ticks
+	// that are still running. Local CI runs must see their cancellation as
+	// early as the engine does, because their teardown is remote work.
+	onStop func()
+	// stopLocalCI cancels the local CI runs this engine started and waits for
+	// their work on the machine to end. A run outlives the worker that started
+	// it, and its keeper holds the machine's cache lock, so engine stop ends the
+	// runs before the process does.
+	stopLocalCI func(context.Context) []string
 }
 
 func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) workers {
@@ -352,7 +362,9 @@ func engineWorkers(rooms *roomsvc.Service, signals *workerSignals, load *sysload
 	spool := hookService
 	var globalSchedule sync.Mutex
 	return workers{
-		prs: prs.Tick,
+		prs:         prs.Tick,
+		onStop:      prs.CancelLocalCI,
+		stopLocalCI: prs.StopLocalCI,
 		questions: func(ctx context.Context) (time.Time, error) {
 			sweep := signals.takeSweep("questions")
 			var delivered []string
@@ -577,6 +589,9 @@ func (w workers) run(ctx context.Context, signals *workerSignals, t *timers, rep
 	t.at(timerSafetySweep, t.now().Add(safetySweepEvery), safety)
 	t.at(timerSweep, t.now().Add(sweepEvery), daily)
 	<-ctx.Done()
+	if w.onStop != nil {
+		w.onStop()
+	}
 }
 
 // runOwned runs the workers only while this engine owns the store's worker
@@ -615,11 +630,42 @@ func settleFromStart(ctx context.Context, started time.Time) error {
 // the workers pass.
 var settleHookRuns = settleFromStart
 
+// localCIStop is how long a cancelled local CI run may take to leave its
+// machine: it stops the containers and then the keeper, which is the runner's
+// own teardown budget. A run still working then is reported; its keeper holds
+// the machine's cache lock until its own lifetime ends.
+const localCIStop = localci.TeardownBudget
+
 func runWorkers(ctx context.Context, rooms *roomsvc.Service, signals *workerSignals, t *timers, load *sysload.Sampler, events *hub.Hub, hookService hooks.Service, started time.Time) {
 	report := func(name string, err error) {
 		log.Print(watch.Sanitize(name + ": " + err.Error()))
 	}
-	owned, err := runOwned(ctx, store.DataDir(), engineWorkers(rooms, signals, load, events, hookService, started), signals, t, report)
+	workerSet := engineWorkers(rooms, signals, load, events, hookService, started)
+	// Cancellation starts with the engine, so the runs' remote teardown overlaps
+	// the worker ticks that are still ending. The budget for that teardown starts
+	// here too, so the wait below covers the work it waits for.
+	stopDeadline := time.Time{}
+	cancelled := workerSet.onStop
+	workerSet.onStop = func() {
+		stopDeadline = time.Now().Add(localCIStop)
+		if cancelled != nil {
+			cancelled()
+		}
+	}
+	defer func() {
+		if stopDeadline.IsZero() {
+			stopDeadline = time.Now().Add(localCIStop)
+		}
+		stopCtx, cancel := context.WithDeadline(context.Background(), stopDeadline)
+		defer cancel()
+		if workerSet.stopLocalCI == nil {
+			return
+		}
+		if left := workerSet.stopLocalCI(stopCtx); len(left) > 0 {
+			log.Print(watch.Sanitize(fmt.Sprintf("engine stop left %d local CI runs working on their machine: %v", len(left), left)))
+		}
+	}()
+	owned, err := runOwned(ctx, store.DataDir(), workerSet, signals, t, report)
 	if err != nil {
 		log.Print(watch.Sanitize("workers: " + err.Error()))
 		return

@@ -180,15 +180,13 @@ func finishLocalTrials(t *testing.T, e *testEnv, ci *fakeLocalCI, bisect bool) {
 		}
 		// Wait only when the current tick started asynchronous CI work.
 		pending := false
-		e.s.localRuns().Range(func(_, v any) bool {
-			run := v.(*localCIRun)
+		for _, run := range e.s.localRuns().snapshot() {
 			select {
 			case <-run.done:
 			default:
 				pending = true
 			}
-			return true
-		})
+		}
 		if pending {
 			select {
 			case <-ci.completed:
@@ -370,12 +368,12 @@ func TestLocalTrialCIStartsOnceAndOutlivesTickContext(t *testing.T) {
 		t.Fatalf("running = %s %v", trial.Status, err)
 	}
 	close(ci.release)
-	value, ok := e.s.localRuns().Load(r.RepoPath + "\x00" + r.Head)
+	value, ok := e.s.localRuns().load(r.RepoPath + "\x00" + r.Head)
 	if !ok {
 		t.Fatal("missing active run")
 	}
 	select {
-	case <-value.(*localCIRun).done:
+	case <-value.done:
 	case <-deadline.Done():
 		t.Fatal("CI did not finish")
 	}
@@ -407,10 +405,10 @@ func TestLocalTrialDoesNotReusePartialCachedCI(t *testing.T) {
 	case <-deadline.Done():
 		t.Fatal("full trial CI did not start")
 	}
-	value, _ := e.s.localRuns().Load(r.RepoPath + "\x00" + r.Head)
+	value, _ := e.s.localRuns().load(r.RepoPath + "\x00" + r.Head)
 	close(ci.release)
 	select {
-	case <-value.(*localCIRun).done:
+	case <-value.done:
 	case <-deadline.Done():
 		t.Fatal("full CI did not finish")
 	}
@@ -519,9 +517,9 @@ func TestReturnedLocalFailureKeepsFailedShardEvidence(t *testing.T) {
 	}
 }
 
-func TestLocalCIRequiresEachDefaultSuiteToPass(t *testing.T) {
+func TestLocalCIRequiresEachWorkflowSuiteToPass(t *testing.T) {
 	result := localci.Result{Repo: "repo", SHA: "head", Status: "passed"}
-	for _, suite := range localci.DefaultSuites() {
+	for _, suite := range localci.WorkflowSuites() {
 		result.Suites = append(result.Suites, localci.SuiteResult{Suite: suite, Status: "passed"})
 	}
 	result.Suites[0].Status = "failed"

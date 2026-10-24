@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"dyna-agent/internal/ghclient"
@@ -36,7 +37,10 @@ func (s *Service) ciRegistry() localCIRegistry {
 
 type registeredCIRuns struct {
 	sync.Mutex
-	runs map[string]*registeredCIRun
+	// closed stops admission when the engine stops. It is atomic, so a stop
+	// sets it without waiting for a tick that holds the run lock over its work.
+	closed atomic.Bool
+	runs   map[string]*registeredCIRun
 }
 
 // registeredCIRun is one local CI run in flight. node, slots and cancel belong
@@ -46,6 +50,11 @@ type registeredCIRun struct {
 	node   string
 	slots  int
 	cancel context.CancelFunc
+	// stopped is closed when the run's work on the node has ended. An engine that
+	// stops waits on it, because a run that outlives its engine leaves a keeper
+	// on the machine that holds the cache lock for hours.
+	stopped  chan struct{}
+	stopOnce sync.Once
 
 	repo    string
 	number  int
@@ -80,6 +89,87 @@ func (s *Service) nodeRuns() *registeredCIRuns {
 }
 
 func registeredJobKey(j registeredCIJob) string { return defaultRepo(j.record) + "\x00" + j.head }
+
+// markStopped records that the run has no work left on the node.
+func (run *registeredCIRun) markStopped() { run.stopOnce.Do(func() { close(run.stopped) }) }
+
+// localCIStopTarget is one local CI run the engine has to end: its cancel
+// handle, the channel that closes when its work on the machine ends, and a name
+// for a log line.
+type localCIStopTarget struct {
+	label   string
+	cancel  context.CancelFunc
+	stopped <-chan struct{}
+}
+
+// closeLocalCIAdmission stops both run sets from admitting new runs and copies
+// the runs admitted so far. Admission closes before a snapshot waits for the
+// scheduled runs' lock, which a tick holds over its own work, so a tick that is
+// still finishing cannot add a run that the snapshot then misses.
+func (s *Service) closeLocalCIAdmission() []localCIStopTarget {
+	runs := s.nodeRuns()
+	runs.closed.Store(true)
+	var targets []localCIStopTarget
+	for _, run := range s.localRuns().close() {
+		targets = append(targets, localCIStopTarget{label: ciLocalRunLabel(run.head), cancel: run.cancel, stopped: run.done})
+	}
+	runs.Lock()
+	for _, run := range runs.runs {
+		targets = append(targets, localCIStopTarget{label: ciRunLabel(run), cancel: run.cancel, stopped: run.stopped})
+	}
+	runs.Unlock()
+	return targets
+}
+
+// CancelLocalCI closes admission and cancels the local CI runs this process
+// started, without waiting for them. An engine calls it as soon as it stops, so
+// their teardown overlaps the workers that are still finishing.
+func (s *Service) CancelLocalCI() {
+	for _, target := range s.closeLocalCIAdmission() {
+		target.cancel()
+	}
+}
+
+// StopLocalCI cancels the local CI runs this process started and waits for their
+// work on the machine to end, bounded by ctx. A run that outlives its engine
+// leaves a detached keeper on the machine, and that keeper holds the cache lock
+// for hours, so an engine that stops ends its runs first. It returns the runs
+// that were still working when ctx ended, for the caller to report.
+func (s *Service) StopLocalCI(ctx context.Context) []string {
+	targets := s.closeLocalCIAdmission()
+	for _, target := range targets {
+		target.cancel()
+	}
+	for i, target := range targets {
+		select {
+		case <-target.stopped:
+		case <-ctx.Done():
+			left := make([]string, 0, len(targets)-i)
+			for _, working := range targets[i:] {
+				left = append(left, working.label)
+			}
+			return left
+		}
+	}
+	return nil
+}
+
+// ciRunLabel names one scheduled run in a log line: its head and its machine.
+func ciRunLabel(run *registeredCIRun) string {
+	return shortHead(run.head) + " on " + run.node
+}
+
+// ciLocalRunLabel names one local-lane run in a log line.
+func ciLocalRunLabel(head string) string {
+	return shortHead(head) + " on the local lane"
+}
+
+func shortHead(head string) string {
+	if len(head) > 7 {
+		return head[:7]
+	}
+	return head
+}
 
 // Trials use the same node slots as PR heads and enter the queue first.
 func registeredCIJobs(st State) []registeredCIJob {
@@ -205,6 +295,11 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		active[run.node] += max(1, run.slots)
 	}
 	for _, job := range jobs {
+		// A stopping engine admits no new run: the runs it has are being torn
+		// down, and a keeper would outlive the process.
+		if runs.closed.Load() {
+			break
+		}
 		key := registeredJobKey(job)
 		repo, err := localci.CanonicalRepo(ctx, job.record.RepoPath)
 		if err != nil {
@@ -245,7 +340,7 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 		runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 		slots := min(registeredCIRunSlots, chosen.Slots-active[chosen.Name])
 		run := &registeredCIRun{
-			node: chosen.Name, slots: slots, cancel: cancel,
+			node: chosen.Name, slots: slots, cancel: cancel, stopped: make(chan struct{}),
 			repo: job.record.Repo, number: job.record.Number, trial: job.trial,
 			head: job.head, title: job.record.Title, url: job.record.URL, started: s.now(),
 		}
@@ -280,6 +375,8 @@ func availableCINode(nodes []localci.Node, active map[string]int) *localci.Node 
 }
 
 func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, repo string, node localci.Node, key string, run *registeredCIRun) {
+	// A run that ends on any path has no work left on the node.
+	defer run.markStopped()
 	defer func() {
 		run.cancel()
 		runs := s.nodeRuns()
@@ -327,11 +424,17 @@ func (s *Service) executeRegisteredCI(ctx context.Context, job registeredCIJob, 
 		} else {
 			result, err = (localci.Runner{DataDir: filepath.Dir(s.Store.Root), Node: &node}).Run(ctx, req)
 		}
+		// The node work is over: its teardown has stopped the keeper and released
+		// the machine's locks.
+		run.markStopped()
 	} else if err == nil {
 		result.Status = "passed"
 		result.Checks = []localci.SuiteResult{{Suite: localci.SuiteChanges, CheckName: localci.CheckName(localci.SuiteChanges), Node: node.Name, Status: localci.OutcomePassed}}
 	}
 	if ctx.Err() != nil {
+		// Nothing is left on the node, so a stopping engine does not wait for the
+		// recovery that follows.
+		run.markStopped()
 		if err := s.recoverInterruptedCI(ctx, job, repo, node, result); err != nil {
 			log.Printf("restore interrupted local CI: %v", err)
 		}

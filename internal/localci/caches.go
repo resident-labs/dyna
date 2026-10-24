@@ -34,8 +34,8 @@ const (
 // drop this constant then.
 const ciDiskFloorGB = 20
 
-// legacyCacheDir is where the old single-node runner kept its caches. Runs that
-// name no node still use it, so its entries stay until their age passes.
+// legacyCacheDir is where the old single-node runner kept its caches. No run
+// writes there now, so its entries stay until their age passes.
 const legacyCacheDir = "/var/tmp/dyna-local-ci"
 
 // cacheBase names the one directory a node keeps on its machine. Setup and
@@ -254,7 +254,11 @@ func (r Runner) runNodeWithDiskRetry(ctx context.Context, req Request) (Result, 
 			result, err = r.runNode(ctx, req)
 		}
 	}
-	if !save || ctx.Err() != nil {
+	// A run that reached its own deadline keeps its evidence, so the owner can
+	// see the cause. A run its caller cancelled belongs to that caller, which
+	// alone decides whether to save it: a deliberate cancel means the work will
+	// run again, and saving it here would report it as a failure.
+	if !save || cancelled(ctx) {
 		return result, err
 	}
 	if e := (Store{DataDir: r.root()}).SaveResult(context.Background(), result); e != nil {

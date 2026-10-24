@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"dyna-agent/internal/agentslice"
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/localci"
 )
 
 const Engine = agentslice.EngineUnit
@@ -116,6 +118,17 @@ func quote(value string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`, "%", "%%").Replace(value) + `"`
 }
 
+// engineStopGrace is added to the engine's own stop budget for the unit's stop
+// deadline, so systemd gives the engine room to exit after its last cleanup.
+const engineStopGrace = 15 * time.Second
+
+// engineStopTimeout is the unit's stop deadline. An engine that stops waits for
+// a cancelled local CI run to remove itself from its machine, which is the
+// runner's teardown budget: dropping the containers, then the run's keeper. A
+// shorter unit deadline would kill that cleanup and leave the keeper holding the
+// machine's cache lock.
+func engineStopTimeout() time.Duration { return localci.TeardownBudget + engineStopGrace }
+
 func engineUnit(binary string) string {
 	return `[Unit]
 Description=Dyna engine
@@ -128,6 +141,7 @@ Restart=always
 RestartSec=3
 KillMode=process
 Delegate=yes
+TimeoutStopSec=` + strconv.Itoa(int(engineStopTimeout()/time.Second)) + `
 Slice=` + agentslice.ForegroundSlice + `
 CPUWeight=` + agentslice.EngineWeight + `
 IOWeight=` + agentslice.EngineWeight + `

@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"dyna-agent/internal/localci"
 )
 
 func environment(t *testing.T) string {
@@ -66,7 +68,7 @@ func TestServiceInstallationAndTransientTransition(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				for _, text := range []string{"Wants=network-online.target dyna-computers.service", "After=network-online.target dyna-computers.service", `ExecStart="/test/bin/dyna" engine run --allow-agent`} {
+				for _, text := range []string{"Wants=network-online.target dyna-computers.service", "After=network-online.target dyna-computers.service", `ExecStart="/test/bin/dyna" engine run --allow-agent`, "TimeoutStopSec=195"} {
 					if !strings.Contains(string(engine), text) {
 						t.Fatalf("missing %q: %s", text, engine)
 					}
@@ -82,6 +84,13 @@ func TestServiceInstallationAndTransientTransition(t *testing.T) {
 				}
 				if strings.Contains(string(computer), "PartOf=") || strings.Contains(string(computer), "BindsTo=") {
 					t.Fatal("computer lifetime is tied to the engine")
+				}
+				// The unit must outlast the engine's own stop wait, or systemd kills
+				// a local CI run's teardown and leaves its keeper holding the
+				// machine's cache lock. 195 seconds is 3 minutes of teardown budget
+				// plus 15 seconds of grace.
+				if engineStopTimeout() <= localci.TeardownBudget {
+					t.Fatalf("unit stop timeout %s does not cover the teardown budget %s", engineStopTimeout(), localci.TeardownBudget)
 				}
 				config, err := os.ReadFile(filepath.Join(dir, "dyna-computers.env"))
 				if err != nil {
