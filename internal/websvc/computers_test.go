@@ -2,6 +2,7 @@ package websvc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -26,7 +27,8 @@ type fakeHost struct {
 	keys     []string
 	opened   int
 	closed   int
-	server   net.Conn      // the wayvnc end of the last view
+	server   net.Conn // the wayvnc end of the last view
+	viewErr  error
 	viewed   chan struct{} // one token per opened view
 	ended    chan struct{} // one token per closed view
 }
@@ -38,6 +40,9 @@ func (f *fakeHost) Shot(s string, fresh bool) (string, error) {
 	return f.shotPath, nil
 }
 func (f *fakeHost) OpenView(s, key string) (ComputerView, error) {
+	if f.viewErr != nil {
+		return ComputerView{}, f.viewErr
+	}
 	if s == "ses_gone" {
 		return ComputerView{}, errors.New("no such session")
 	}
@@ -251,6 +256,38 @@ func TestComputerViewRefusalIsPlainHTTP(t *testing.T) {
 	_, res, err := d.Dial("ws"+strings.TrimPrefix(ts.URL, "http")+"/api/computers/ses_gone/view?k=viewkey123", h)
 	if err == nil || res == nil || res.StatusCode != 422 {
 		t.Fatalf("got %v %v", err, res)
+	}
+}
+
+type permanentViewError struct{}
+
+func (permanentViewError) Error() string       { return "the screen streamer (wayvnc) is not installed" }
+func (permanentViewError) FailureCode() string { return "wayvnc-missing" }
+func (permanentViewError) Permanent() bool     { return true }
+
+func TestComputerViewPreflightReportsPermanentFailure(t *testing.T) {
+	e, h := computerEnv(t)
+	h.viewErr = permanentViewError{}
+	c := e.paired()
+	w := e.do(e.app, req{method: "GET", url: tsApp + "/api/computers/ses_a/view?k=viewkey123&check=1", cookie: c, header: map[string]string{"X-Dyna": "1"}})
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("preflight status = %d, want 422", w.Code)
+	}
+	var got struct {
+		Reason    string `json:"reason"`
+		Code      string `json:"code"`
+		Permanent bool   `json:"permanent"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Reason != h.viewErr.Error() || got.Code != "wayvnc-missing" || !got.Permanent {
+		t.Fatalf("preflight failure = %+v", got)
+	}
+	h.viewErr = nil
+	w = e.do(e.app, req{method: "GET", url: tsApp + "/api/computers/ses_a/view?k=viewkey123&check=1", cookie: c, header: map[string]string{"X-Dyna": "1"}})
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("successful preflight status = %d, want 204", w.Code)
 	}
 }
 

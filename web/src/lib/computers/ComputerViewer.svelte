@@ -23,7 +23,7 @@
   // the session's row.
   type ShownComputer = Omit<ComputerInfo, 'stream'> & { stream?: Partial<ComputerStream> | null }
   // The viewer's own phase; a failed or ended stream can be retried.
-  type ViewerPhase = 'connecting' | 'connected' | 'ended' | 'failed'
+  type ViewerPhase = 'connecting' | 'connected' | 'ended' | 'failed' | 'unavailable'
   // Zoom and pan of the picture inside the frame, and a point on the screen.
   interface Zoom { s: number; x: number; y: number }
   interface Point { x: number; y: number }
@@ -63,7 +63,7 @@
 
   const key = viewKey()
   let target = $state<HTMLDivElement | undefined>()
-  let phase = $state<ViewerPhase>('connecting') // connecting | connected | ended | failed
+  let phase = $state<ViewerPhase>('connecting') // connecting | connected | ended | failed | unavailable
   let note = $state('')
   let human = $state(false)
   let busy = $state(false)
@@ -112,7 +112,7 @@
         else {
           // The lease ends with the stream, so control is back with the agent.
           human = false
-          phase = detail.retrying ? 'connecting' : state === 'failed' ? 'failed' : 'ended'
+          phase = detail.retrying ? 'connecting' : state === 'failed' ? 'failed' : state === 'unavailable' ? 'unavailable' : 'ended'
           note = detail.reason ?? ''
         }
       },
@@ -336,7 +336,13 @@
         <ComputerShot session={c.session} shotAt={c.shotAt} phase={c.state} alt="Latest picture of the computer" />
       </div>
       <div class="rfb" class:hide={presenting || phase !== 'connected'} bind:this={target} style:transform={zoomed && !presenting ? `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.s})` : null}></div>
-      {#if badgeText(phase, liveShown)}
+      {#if phase === 'unavailable'}
+        <div class="unavailable" role="alert">
+          <strong>Live view unavailable</strong>
+          <span>{note || 'The screen stream cannot start.'}</span>
+          <button class="retry" onclick={retry}>Try again</button>
+        </div>
+      {:else if badgeText(phase, liveShown)}
         <div class="badge" class:bad={phase === 'failed' || phase === 'ended'} class:ok={phase === 'connected'} role="status">
           {#if phase === 'connecting'}<span class="spin" aria-hidden="true"></span>{/if}
           {badgeText(phase, liveShown)}
@@ -424,6 +430,10 @@
   .present.on { display: block; }
   .still { position: absolute; inset: 0; transition: opacity var(--motion-slow) var(--ease); }
   .still.gone { opacity: 0; pointer-events: none; }
+  .unavailable { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 24px; background: rgba(13, 13, 15, 0.88); color: var(--ink-2); text-align: center; }
+  .unavailable strong { color: var(--ink); font-size: 16px; }
+  .unavailable span { max-width: 420px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+  .unavailable .retry { padding: 6px 12px; border: 1px solid var(--hair-strong); border-radius: 7px; text-decoration: none; }
   .badge { position: absolute; left: 12px; top: 12px; z-index: 2; display: inline-flex; align-items: center; gap: 6px; background: rgba(20, 19, 22, 0.82); color: var(--ink-2); font-size: 12px; padding: 3px 11px; border-radius: 12px; pointer-events: none; animation: fadein var(--motion) var(--ease); }
   .badge.ok { color: var(--gold); animation: fadeout var(--motion-slow) var(--ease) forwards; }
   .badge.bad { color: var(--coral); pointer-events: auto; }

@@ -18,6 +18,9 @@ func statusDoctor(state computers.Status) string {
 		return "graphics unavailable"
 	}
 	if !state.Stream.Running {
+		if err := computers.CheckStreamInstalled(); err != nil {
+			return err.Error()
+		}
 		return "stream not running"
 	}
 	return ""

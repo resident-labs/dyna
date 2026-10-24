@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -119,6 +120,11 @@ func TestShotFallsBackToLastPNG(t *testing.T) {
 
 func TestViewLeaseAndControl(t *testing.T) {
 	// A stand-in for wayvnc, and a daemon that points the lease at it.
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "wayvnc"), []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
 	rfb := filepath.Join(t.TempDir(), "rfb.sock")
 	rl, err := net.Listen("unix", rfb)
 	if err != nil {
