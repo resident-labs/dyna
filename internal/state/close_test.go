@@ -97,7 +97,8 @@ func TestDatabaseCloseDrainsPublishing(t *testing.T) {
 	if _, err := db.Exec("CREATE TABLE things(name TEXT)"); err != nil {
 		t.Fatal(err)
 	}
-	w := newWriter(db)
+	// The database's registered Writer, which is the one a close drains.
+	w := For(db)
 	started, release := make(chan struct{}), make(chan struct{})
 	var readErr error
 	w.SetPublish(func(hub.Event) {
@@ -113,6 +114,10 @@ func TestDatabaseCloseDrainsPublishing(t *testing.T) {
 	<-started
 	closed := make(chan error, 1)
 	go func() { closed <- database.Close(dir) }()
+	// A close stops the Writer from publishing and then waits for this change,
+	// so waiting for that flag proves the close has reached its drain before the
+	// change is let go.
+	waitClosed(t, w)
 	close(release)
 	if err := <-writeDone; err != nil {
 		t.Fatal(err)
@@ -122,5 +127,24 @@ func TestDatabaseCloseDrainsPublishing(t *testing.T) {
 	}
 	if readErr != nil {
 		t.Fatalf("the publish read the database after its handle closed: %v", readErr)
+	}
+}
+
+// waitClosed waits for a close to reach w's drain. It yields instead of
+// sleeping, and gives up with a failure instead of hanging the suite when a
+// close never drains, because draining is the change this file guards.
+func waitClosed(t *testing.T, w *Writer) {
+	t.Helper()
+	for yields := 0; ; yields++ {
+		w.events.Lock()
+		closed := w.closed
+		w.events.Unlock()
+		if closed {
+			return
+		}
+		if yields > 1<<20 {
+			t.Fatal("the close never stopped this writer's publishing")
+		}
+		runtime.Gosched()
 	}
 }

@@ -43,7 +43,9 @@ func testWriter(t *testing.T) (*Writer, *[]hub.Event) {
 	}
 	var published []hub.Event
 	var mu sync.Mutex // writers publish concurrently
-	w := newWriter(db)
+	// The database's Writer, so a close drains it: a cleanup that closes the
+	// database waits for a publish that is still running (D-47).
+	w := For(db)
 	w.SetPublish(func(c hub.Event) {
 		// The change is visible to readers when it is published.
 		var n int
