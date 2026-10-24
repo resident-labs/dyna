@@ -63,7 +63,7 @@ var eventFamilyFacts = []familyFacts{
 	{Family: FamilyCIHealth, Renderers: []string{"SlowTestCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyRule, Renderers: []string{"RuleCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyMerge, Renderers: []string{"MergeCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeNever, WakeTarget, WakeRootIfNeeded}, Audiences: []Audience{AudienceRoom}},
-	{Family: FamilyMachine, Renderers: []string{"MachineDiskCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeRootIfNeeded}, Audiences: []Audience{AudienceRoom}},
+	{Family: FamilyMachine, Renderers: []string{"MachineDiskCard", "MachineCacheCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeRootIfNeeded, WakeNever}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyCall, Renderers: []string{"CallCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyReview, Renderers: []string{"ReviewResultCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
 	{Family: FamilyPR, Renderers: []string{"PRCard"}, Producers: []EventProducer{ProducerEngine}, Wakes: []WakeRule{WakeTarget}, Audiences: []Audience{AudienceRoom}},
@@ -491,6 +491,39 @@ func TestReviewEventReadsRemovedAreaAndNote(t *testing.T) {
 	m.Payload.raw = []byte(`{"kind":"approve-fast","unknown":true}`)
 	if _, ok := m.Review(); ok {
 		t.Fatal("review reader accepted an unrelated unknown field")
+	}
+}
+
+// A cache repair posts one quiet machine fact: the card and the agent text
+// read the typed payload, a retry posts once, and a later repair is a new post.
+func TestMachineCacheRepairPostsItsFactsOnce(t *testing.T) {
+	store, rec := newEventStore(t)
+	ev := MachineCacheEvent{
+		Name:    "node-a",
+		Caches:  []string{"Go build cache", "Go module cache"},
+		Summary: "Go build cache and Go module cache",
+		AtMS:    1700000000000,
+	}
+	msg, err := store.PostEvent(rec.ID, ev, rec.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg.Kind != string(FamilyMachine) || msg.Notice.Kind != string(TypeCacheRepaired) || msg.Wake || msg.Deliverable() {
+		t.Fatalf("stored event = %+v", msg)
+	}
+	if !strings.Contains(msg.Text, "node-a switched linked CI caches") || !strings.Contains(msg.Text, "Go build cache and Go module cache") {
+		t.Fatalf("event text = %q", msg.Text)
+	}
+	got, ok := msg.MachineCache()
+	if !ok || got.Name != ev.Name || len(got.Caches) != 2 || got.Caches[1] != "Go module cache" || got.AtMS != ev.AtMS {
+		t.Fatalf("stored payload = %+v, %v", got, ok)
+	}
+	if again, err := store.PostEvent(rec.ID, ev, rec.Name); err != nil || again.ID != msg.ID {
+		t.Fatalf("retried repair = %+v, %v", again, err)
+	}
+	ev.AtMS++
+	if next, err := store.PostEvent(rec.ID, ev, rec.Name); err != nil || next.ID == msg.ID {
+		t.Fatalf("later repair = %+v, %v", next, err)
 	}
 }
 

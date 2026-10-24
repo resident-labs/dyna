@@ -66,6 +66,7 @@ func localCommands() []*cobra.Command {
 			}
 			runner.Node = &node
 		}
+		runner.OnCacheRepair = svc.CacheRepairReporter(rec.ID)
 		result, runErr := runner.Run(c.Context(), localci.Request{Repo: checkout.Root, SHA: sha, Suites: requested, Timeout: timeout, MaxTest: max, Allowed: allowed})
 		if result.SHA != "" {
 			if err := printResult(c, result, asJSON); err != nil {

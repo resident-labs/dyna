@@ -231,6 +231,14 @@ export interface MachineEvent {
   atMs: number
 }
 
+// MachineCacheEvent is the payload of the machine/cache-repaired events.
+export interface MachineCacheEvent {
+  name: string
+  caches: string[]
+  summary: string
+  atMs: number
+}
+
 // CallEvent is the payload of the call/joined and call/declined and call/withdrawn events.
 export interface CallEvent {
   type: CallState
@@ -387,10 +395,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | CallEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | MachineCacheEvent | CallEvent | ReviewEvent | PREvent | SessionEvent | InstructionBatchEvent | AlertEvent | ServiceFailedEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "helper-outcome" | "root-flush" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "cache-repaired" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "instruction-batch" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "helper-outcome" | "root-flush" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -648,6 +656,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     once: true,
     audience: "room",
     text: "Machine {name} is low on disk: {summary}. Dyna starts no CI there until space is freed.",
+  },
+  {
+    family: "machine",
+    type: "cache-repaired",
+    renderer: "MachineCacheCard",
+    quiet: true,
+    wake: "never",
+    once: true,
+    audience: "room",
+    text: "Machine {name} switched linked CI caches back to managed directories: {summary}. The old links are kept beside them as backups.",
   },
   {
     family: "call",
@@ -1233,6 +1251,14 @@ export function isMachineEvent(v: unknown): v is MachineEvent {
     Number.isInteger(v.atMs)
 }
 
+export function isMachineCacheEvent(v: unknown): v is MachineCacheEvent {
+  return isRecord(v) &&
+    typeof v.name === "string" &&
+    isStringList(v.caches) &&
+    typeof v.summary === "string" &&
+    Number.isInteger(v.atMs)
+}
+
 export function isCallEvent(v: unknown): v is CallEvent {
   return isRecord(v) &&
     CALL_STATE.has(v.type) &&
@@ -1413,6 +1439,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "merge" && type === "decision") return isMergeDecisionEvent(v)
   if (family === "merge" && type === "fix-requested") return isMergeEvent(v)
   if (family === "machine" && type === "low-disk") return isMachineEvent(v)
+  if (family === "machine" && type === "cache-repaired") return isMachineCacheEvent(v)
   if (family === "call" && type === "joined") return isCallEvent(v)
   if (family === "call" && type === "declined") return isCallEvent(v)
   if (family === "call" && type === "withdrawn") return isCallEvent(v)

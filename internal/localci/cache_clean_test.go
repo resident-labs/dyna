@@ -25,7 +25,7 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 	command := cacheCleanCommand("hermeslab", true, ciCacheCleanAge)
 	for _, keep := range []string{
 		"-xdev", `-maxdepth 0 -mmin +"$age" ! -type l`, "rm -rf --one-file-system",
-		"DYNA_CI_CLEAN_AGE_MIN=2880", "DYNA_CI_CLEAN_RUN_AGE_MIN=120", "flock -n \"$1/.active\" true", `exec 8>>"$1/caches.lock"`, "flock -n 8",
+		"DYNA_CI_CLEAN_AGE_MIN=2880", "DYNA_CI_CLEAN_RUN_AGE_MIN=120", "flock -n \"$1/.active\" true", `exec 8>>"$base/caches.lock"`, "flock -n 8",
 	} {
 		if !strings.Contains(command, keep) {
 			t.Fatalf("cleanup command lacks %q", keep)
@@ -54,8 +54,23 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 			}
 		})
 	}
-	// Dyna's own trees stay allowed, including one entry inside them.
-	for _, inside := range []string{cacheBase("hermeslab"), legacyCacheDir + "/go-build", "/var/tmp/dyna-local-ci-1000/hermeslab"} {
+	// Dyna's own trees stay allowed, including one entry inside them. The test
+	// uses its own tree: a real CI tree may hold a cache lock this test cannot
+	// take, and a test must never touch a live CI cache.
+	parent := filepath.Dir(cacheBase("x"))
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := os.MkdirTemp(parent, "selftest-allowed-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	inner := filepath.Join(base, "go-build")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, inside := range []string{base, inner} {
 		t.Run(inside, func(t *testing.T) {
 			out, err := runCacheClean(t, inside, true)
 			if err != nil || strings.Contains(string(out), "refusing") {
@@ -66,18 +81,22 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 }
 
 // runCacheClean runs the embedded script itself, with the roots a test chooses.
-func runCacheClean(t *testing.T, roots string, dryRun bool) ([]byte, error) {
+func runCacheClean(t *testing.T, roots string, dryRun bool, env ...string) ([]byte, error) {
 	t.Helper()
-	return runCacheCleanBody(t, roots, dryRun, ciCacheCleanBody)
+	return runCacheCleanBody(t, roots, dryRun, ciCacheCleanBody, env...)
 }
 
-func runCacheCleanBody(t *testing.T, roots string, dryRun bool, body string) ([]byte, error) {
+func runCacheCleanBody(t *testing.T, roots string, dryRun bool, body string, env ...string) ([]byte, error) {
 	t.Helper()
 	dry := "0"
 	if dryRun {
 		dry = "1"
 	}
-	command := "DYNA_CI_CLEAN_DRY=" + dry + " DYNA_CI_CLEAN_ROOTS=" + shellquote.Quote(roots) +
+	prefix := ""
+	if len(env) > 0 {
+		prefix = strings.Join(env, " ") + " "
+	}
+	command := prefix + "DYNA_CI_CLEAN_DRY=" + dry + " DYNA_CI_CLEAN_ROOTS=" + shellquote.Quote(roots) +
 		" bash -o pipefail -c " + shellquote.Quote(body)
 	return exec.Command("bash", "-c", command).CombinedOutput()
 }
@@ -177,6 +196,381 @@ func TestStoppingRunKeeperWaitsOnTheSameLock(t *testing.T) {
 	}
 }
 
+// TestCacheCleanCapsRecentCacheSize bounds a cache by its own size, not only by
+// the age of its hot parent directory. A recent cache that is over its cap
+// loses its oldest entry and keeps the newest, a live run's shared cache lock
+// keeps every entry, and the cleanup reports what it removed.
+func TestCacheCleanCapsRecentCacheSize(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the cleanup refuses to run as root")
+	}
+	base := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-cap", os.Getpid()))
+	t.Cleanup(func() { os.RemoveAll(base) })
+	oldEntry := filepath.Join(base, "go-build", "aa")
+	newEntry := filepath.Join(base, "go-build", "bb")
+	now := time.Now()
+	write := func(path string, at time.Time) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, make([]byte, 64<<10), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A cache entry can be a directory, as Go keeps its shard folders, or a
+	// plain file, as Go keeps some cache objects. Both are trimmed by their own
+	// mtime, not by the age of the hot cache directory around them.
+	if err := os.MkdirAll(oldEntry, 0700); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(oldEntry, "object"), now.Add(-time.Hour))
+	if err := os.Chtimes(oldEntry, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	write(newEntry, now)
+	// The cap holds one 64 KiB entry and its directory block, not two.
+	const capEnv = "DYNA_CI_CACHE_CAP_KB=100"
+
+	// A run that holds the base's shared cache lock keeps every entry.
+	holder := exec.Command("flock", "-s", filepath.Join(base, "caches.lock"), "bash", "-c", "echo held; read -r line")
+	stdin, err := holder.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := holder.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Start(); err != nil {
+		t.Skipf("no flock to hold the test's lock: %v", err)
+	}
+	released := false
+	release := func() {
+		if released {
+			return
+		}
+		released = true
+		stdin.Close()
+		holder.Wait()
+	}
+	t.Cleanup(release)
+	if held, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || !strings.Contains(held, "held") {
+		t.Fatalf("lock holder did not start: %q %v", held, err)
+	}
+	out, err := runCacheClean(t, base, false, capEnv)
+	if err != nil {
+		t.Fatalf("cleanup failed: %v: %s", err, out)
+	}
+	for _, kept := range []string{oldEntry, newEntry} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Fatalf("cleanup trimmed a cache a live run holds: %v: %s", err, out)
+		}
+	}
+
+	release()
+	// A dry run reports the entry it would remove and deletes nothing.
+	out, err = runCacheClean(t, base, true, capEnv)
+	if err != nil {
+		t.Fatalf("dry run failed: %v: %s", err, out)
+	}
+	if paths, _ := parseCacheClean(string(out)); len(paths) != 1 || paths[0] != oldEntry {
+		t.Fatalf("dry run reported %v, want only %s: %s", paths, oldEntry, out)
+	}
+	if _, err := os.Stat(oldEntry); err != nil {
+		t.Fatalf("dry run removed an entry: %v: %s", err, out)
+	}
+
+	out, err = runCacheClean(t, base, false, capEnv)
+	if err != nil {
+		t.Fatalf("cleanup failed: %v: %s", err, out)
+	}
+	if _, err := os.Stat(oldEntry); !os.IsNotExist(err) {
+		t.Fatalf("the oldest entry stayed over the cap: %v: %s", err, out)
+	}
+	if _, err := os.Stat(newEntry); err != nil {
+		t.Fatalf("cleanup removed the newest entry, not the oldest: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "DYNA_CI_CACHE_CLEAN_ITEM") || !strings.Contains(string(out), oldEntry) {
+		t.Fatalf("cleanup did not report the entry it removed: %s", out)
+	}
+	paths, freed := parseCacheClean(string(out))
+	if len(paths) != 1 || paths[0] != oldEntry || freed <= 0 {
+		t.Fatalf("cleanup reported paths=%v freed=%d, want only %s: %s", paths, freed, oldEntry, out)
+	}
+}
+
+// TestCacheCleanTrimsCachesByTheirOwnShards checks that a size cap removes one
+// cache unit of the kind that cache keeps, not a whole cache. A Go module
+// cache keeps extracted modules and their download directories; an npm cache
+// keeps hash shards four levels down; a build cache keeps its shards at the
+// top. The older unit goes whole and its newer sibling stays.
+func TestCacheCleanTrimsCachesByTheirOwnShards(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the cleanup refuses to run as root")
+	}
+	t.Run("npm content", func(t *testing.T) {
+		base := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-npm", os.Getpid()))
+		t.Cleanup(func() { removeTree(t, base) })
+		now := time.Now()
+		write := func(entry string, at time.Time) string {
+			t.Helper()
+			dir := filepath.Join(base, "npm", entry)
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "object"), make([]byte, 64<<10), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(dir, at, at); err != nil {
+				t.Fatal(err)
+			}
+			return dir
+		}
+		old := write("_cacache/content-v2/sha512/aa", now.Add(-time.Hour))
+		newer := write("_cacache/content-v2/sha512/bb", now)
+		out, err := runCacheClean(t, base, false, "DYNA_CI_CACHE_CAP_KB=100")
+		if err != nil {
+			t.Fatalf("cleanup failed: %v: %s", err, out)
+		}
+		if _, err := os.Stat(old); !os.IsNotExist(err) {
+			t.Fatalf("the oldest shard stayed over the cap: %v: %s", err, out)
+		}
+		if _, err := os.Stat(newer); err != nil {
+			t.Fatalf("cleanup removed a newer shard with its older sibling: %v: %s", err, out)
+		}
+	})
+
+	t.Run("go modules", func(t *testing.T) {
+		base := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-go-modules", os.Getpid()))
+		t.Cleanup(func() { removeTree(t, base) })
+		root := filepath.Join(base, "go-mod")
+		now := time.Now()
+		// writeUnit makes one unit of 64 KiB, dated by its own mtime.
+		writeUnit := func(rel string, at time.Time) string {
+			t.Helper()
+			dir := filepath.Join(root, rel)
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "object"), make([]byte, 1<<20), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chtimes(dir, at, at); err != nil {
+				t.Fatal(err)
+			}
+			return dir
+		}
+		// A download unit, a direct VCS unit, a short module root, a deep /v2
+		// module root and a read-only module with a nested directory all go; the
+		// newest module stays whole. No module may survive as a partially deleted
+		// directory. Units are 1 MiB so directory overhead does not change the cap
+		// choice.
+		download := writeUnit(filepath.Join("cache", "download", "gopkg.in", "yaml.v2", "@v"), now.Add(-4*time.Hour))
+		short := writeUnit("gopkg.in/yaml.v2@v2.4.0", now.Add(-3*time.Hour))
+		deep := writeUnit("github.com/foo/bar/v2@v2.1.0", now.Add(-2*time.Hour))
+		vcs := writeUnit(filepath.Join("cache", "vcs", "0123456789abcdef"), now.Add(-90*time.Minute))
+		if err := os.MkdirAll(filepath.Join(vcs, "objects", "pack"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(vcs, "objects", "pack", "pack-1.pack"), make([]byte, 4096), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// Adding the checkout contents dates the unit again; keep its own age.
+		if err := os.Chtimes(vcs, now.Add(-90*time.Minute), now.Add(-90*time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		readonly := writeUnit("go.uber.org/zap@v1.24.0", now.Add(-time.Hour))
+		if err := os.MkdirAll(filepath.Join(readonly, "internal", "sub"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(readonly, "internal", "sub", "nested.go"), make([]byte, 4096), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// Adding the nested directory dates the module again; keep its own age.
+		if err := os.Chtimes(readonly, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		makeReadOnly(t, readonly)
+		kept := writeUnit("gopkg.in/yaml.v3@v3.0.1", now)
+
+		out, err := runCacheClean(t, base, false, "DYNA_CI_CACHE_CAP_KB=1500")
+		if err != nil {
+			t.Fatalf("cleanup failed on a read-only module: %v: %s", err, out)
+		}
+		paths, freed := parseCacheClean(string(out))
+		want := []string{download, short, deep, vcs, readonly}
+		if len(paths) != len(want) {
+			t.Fatalf("removed %v, want the module units %v: %s", paths, want, out)
+		}
+		for i, path := range want {
+			if paths[i] != path {
+				t.Fatalf("removed %v, want the module units %v: %s", paths, want, out)
+			}
+		}
+		if freed <= 0 {
+			t.Fatalf("cleanup reported no freed space: %s", out)
+		}
+		for _, gone := range want {
+			if _, err := os.Stat(gone); !os.IsNotExist(err) {
+				t.Fatalf("a trimmed unit remains, so its module is partial: %s: %v", gone, err)
+			}
+		}
+		info, err := os.Stat(filepath.Join(kept, "object"))
+		if err != nil || info.Size() != 1<<20 {
+			t.Fatalf("the newest module was not kept whole: %v", err)
+		}
+	})
+}
+
+// TestCacheCleanFailsWhenATrimCannotRemove checks that a failed trim ends the
+// cleanup with an error and no success total, so a caller never records a
+// cleanup that left a module half removed. A read-only cache root makes the
+// unit's parent refuse the unlink.
+func TestCacheCleanFailsWhenATrimCannotRemove(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the cleanup refuses to run as root")
+	}
+	base := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-trim-failure", os.Getpid()))
+	t.Cleanup(func() { removeTree(t, base) })
+	root := filepath.Join(base, "go-mod")
+	unit := filepath.Join(root, "example.com/foo@v1.0.0")
+	if err := os.MkdirAll(unit, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(unit, "object"), make([]byte, 64<<10), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Dir(unit), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCacheClean(t, base, false, "DYNA_CI_CACHE_CAP_KB=1")
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("cleanup reported success after a failed trim: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "cannot remove") || !strings.Contains(string(out), unit) {
+		t.Fatalf("cleanup did not name the unit it could not remove: %s", out)
+	}
+	if strings.Contains(string(out), "FREED_KB=") {
+		t.Fatalf("cleanup printed a success total after a failure: %s", out)
+	}
+}
+
+// TestCacheCleanRefusesAnUnboundedCache checks that a cache whose remaining
+// data has no trim unit ends the cleanup with an error, not with a successful
+// bound. The sum database is such data: it is not a module, a download unit or
+// a VCS checkout.
+func TestCacheCleanRefusesAnUnboundedCache(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the cleanup refuses to run as root")
+	}
+	base := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-residual", os.Getpid()))
+	t.Cleanup(func() { removeTree(t, base) })
+	sumdb := filepath.Join(base, "go-mod", "cache", "download", "sumdb", "sum.golang.org")
+	if err := os.MkdirAll(sumdb, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sumdb, "latest"), make([]byte, 1<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runCacheClean(t, base, false, "DYNA_CI_CACHE_CAP_KB=1")
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("cleanup claimed a bound it did not reach: %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "no trimmable unit remains") || !strings.Contains(string(out), filepath.Join(base, "go-mod")) {
+		t.Fatalf("cleanup did not explain the residual data: %s", out)
+	}
+	if strings.Contains(string(out), "FREED_KB=") {
+		t.Fatalf("cleanup printed a success total after a failed bound: %s", out)
+	}
+}
+
+// makeReadOnly makes every directory below dir read-only, as Go leaves an
+// extracted module, and every file read-only too.
+func makeReadOnly(t *testing.T, dir string) {
+	t.Helper()
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return os.Chmod(path, 0o555)
+		}
+		return os.Chmod(path, 0o444)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// removeTree removes a test tree that may hold read-only module directories.
+func removeTree(t *testing.T, dir string) {
+	t.Helper()
+	_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err == nil && info.IsDir() {
+			_ = os.Chmod(path, 0o700)
+		}
+		return nil
+	})
+	_ = os.RemoveAll(dir)
+}
+
+// TestCacheCleanValidatesALinkedTreeBeforeChangingIt checks that a base reached
+// through a linked parent never changes the external tree. The read-only module
+// keeps its mode and file, and the cleanup creates no lock there.
+func TestCacheCleanValidatesALinkedTreeBeforeChangingIt(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the cleanup refuses to run as root")
+	}
+	realParent := filepath.Join(t.TempDir(), "real")
+	base := filepath.Join(realParent, "node")
+	module := filepath.Join(base, "go-mod", "example.com", "module@v1.0.0")
+	if err := os.MkdirAll(module, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	object := filepath.Join(module, "object")
+	if err := os.WriteFile(object, make([]byte, 1<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeReadOnly(t, module)
+	t.Cleanup(func() { removeTree(t, realParent) })
+	linkParent := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-linked-parent", os.Getpid()))
+	if err := os.Symlink(realParent, linkParent); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(linkParent) })
+
+	out, err := runCacheClean(t, filepath.Join(linkParent, "node"), false, "DYNA_CI_CACHE_CAP_KB=1")
+	if err == nil {
+		t.Fatalf("cleanup accepted a base under a linked parent: %s", out)
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("cleanup exit = %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "linked parent") {
+		t.Fatalf("cleanup did not name the linked parent: %s", out)
+	}
+	info, err := os.Stat(module)
+	if err != nil {
+		t.Fatalf("cleanup changed the external module: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o555 {
+		t.Fatalf("external module permissions changed to %04o", perm)
+	}
+	if data, err := os.ReadFile(object); err != nil || len(data) != 1<<20 {
+		t.Fatalf("external module file changed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "caches.lock")); !os.IsNotExist(err) {
+		t.Fatalf("cleanup created a lock in the external tree: %v", err)
+	}
+}
+
 func TestCacheCleanPrunesRunFoldersAfterTwoHours(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("the cleanup refuses to run as root")
@@ -185,10 +579,10 @@ func TestCacheCleanPrunesRunFoldersAfterTwoHours(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(base) })
 	now := time.Now()
 	for name, modified := range map[string]time.Time{
-		"runs/old":      now.Add(-3 * time.Hour),
-		"runs/recent":   now.Add(-1 * time.Hour),
-		"go-mod/module": now.Add(-25 * time.Hour),
-		"repo.git":      now.Add(-25 * time.Hour),
+		"runs/old":                         now.Add(-3 * time.Hour),
+		"runs/recent":                      now.Add(-1 * time.Hour),
+		"go-mod/example.com/module@v1.0.0": now.Add(-25 * time.Hour),
+		"repo.git":                         now.Add(-25 * time.Hour),
 	} {
 		dir := filepath.Join(base, name)
 		if err := os.MkdirAll(dir, 0700); err != nil {
@@ -211,7 +605,7 @@ func TestCacheCleanPrunesRunFoldersAfterTwoHours(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(base, "runs", "old")); !os.IsNotExist(err) {
 		t.Fatalf("run folder older than two hours stayed: %v: %s", err, out)
 	}
-	for _, kept := range []string{"runs/recent", "go-mod/module", "repo.git"} {
+	for _, kept := range []string{"runs/recent", "go-mod/example.com/module@v1.0.0", "repo.git"} {
 		if _, err := os.Stat(filepath.Join(base, kept)); err != nil {
 			t.Fatalf("cleanup removed %s before its retention age: %v: %s", kept, err, out)
 		}
@@ -236,8 +630,8 @@ func TestCacheCleanRemovesOnlyWhatNoRunUses(t *testing.T) {
 		filepath.Join(base, "runs", "finished"),
 		filepath.Join(base, "runs", "crashed"),
 		filepath.Join(base, "runs", "held"),
-		filepath.Join(base, "go-mod", "module"),
-		filepath.Join(base, "npm", "package"),
+		filepath.Join(base, "go-mod", "example.com", "module@v1.0.0"),
+		filepath.Join(base, "npm", "_cacache", "content-v2", "sha512", "aa"),
 		filepath.Join(base, "diagnostics", "run"),
 	}
 	for _, dir := range dirs {
@@ -295,7 +689,7 @@ func TestCacheCleanRemovesOnlyWhatNoRunUses(t *testing.T) {
 			t.Fatalf("%s stayed: %s", gone, out)
 		}
 	}
-	for _, kept := range []string{"runs/held", "go-mod/module", "npm/package"} {
+	for _, kept := range []string{"runs/held", "go-mod/example.com/module@v1.0.0", "npm/_cacache/content-v2/sha512/aa"} {
 		if _, err := os.Stat(filepath.Join(base, kept)); err != nil {
 			t.Fatalf("%s went while a run held it: %v: %s", kept, err, out)
 		}
@@ -316,7 +710,7 @@ func TestCacheCleanRemovesOnlyWhatNoRunUses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cleanup failed: %v: %s", err, out)
 	}
-	for _, gone := range []string{"runs/held", "go-mod/module", "npm/package"} {
+	for _, gone := range []string{"runs/held", "go-mod/example.com/module@v1.0.0", "npm/_cacache/content-v2/sha512/aa"} {
 		if _, err := os.Stat(filepath.Join(base, gone)); !os.IsNotExist(err) {
 			t.Fatalf("%s stayed with no live run: %s", gone, out)
 		}
@@ -334,7 +728,7 @@ func TestCacheCleanFreesCachesRightAfterARunEnds(t *testing.T) {
 	base := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-lifecycle", os.Getpid()))
 	t.Cleanup(func() { os.RemoveAll(base) })
 	old := time.Now().Add(-72 * time.Hour)
-	caches := []string{filepath.Join(base, "go-mod", "module"), filepath.Join(base, "npm", "package")}
+	caches := []string{filepath.Join(base, "go-mod", "example.com", "module@v1.0.0"), filepath.Join(base, "npm", "_cacache", "content-v2", "sha512", "aa")}
 	for _, dir := range append([]string{filepath.Join(base, "runs")}, caches...) {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)

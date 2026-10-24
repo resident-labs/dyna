@@ -53,7 +53,7 @@ var help = map[string]string{
 	settings.KeyWorktreesMinFreeBytes:  "Minimum free disk space before worktree maintenance runs garbage collection. Defaults to 10 GiB. Accepts byte counts and sizes such as 10 GiB; zero disables the free-space trigger. A RAM-backed file system such as /tmp is judged by its share of free space instead.",
 	settings.KeyRootProfile:            "Profile for new internal root sessions (default opus). Existing roots keep their profile. Missing or disabled profiles use the default profile.",
 	settings.KeySubagentMaxDepth:       "How deep sessions may nest. Your own sessions are depth 1.",
-	settings.KeyCIDiskFloorGB:          "Free space a CI machine must keep on the file system that holds its /var/tmp, where Dyna keeps CI work, in GiB (1 GiB = 1,073,741,824 bytes; the key keeps the shorter GB name). A machine below the floor starts no new CI work until space is freed. Defaults to 20 GiB; zero turns the floor off.",
+	settings.KeyCIDiskFloorGB:          "Free space a CI machine must keep on the file system that holds its /var/tmp, where Dyna keeps CI work, in GiB (1 GiB = 1,073,741,824 bytes; the key keeps the shorter GB name). A machine below the floor starts no new CI work until space is freed, and a run below it removes Dyna's own caches first. Defaults to 20 GiB; zero turns the floor off.",
 	settings.KeySteeringToolWait:       "How long a message to a busy session waits for a running tool before it interrupts the tool.",
 }
 
