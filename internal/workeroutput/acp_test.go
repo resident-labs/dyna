@@ -87,6 +87,14 @@ func TestAcpOutputAccumulatesAndResetsOnNewPrompt(t *testing.T) {
 	}
 }
 
+func TestAcpOutputKeepsUntaggedKimiChunks(t *testing.T) {
+	acc := AcpOutput()
+	acc.Observe(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"kimi-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"answer"}}}}`)
+	if got := acc.Take(""); got != "answer" {
+		t.Fatalf("untagged answer = %q", got)
+	}
+}
+
 func TestAcpToolStatusMapsSuccessfulToCompleted(t *testing.T) {
 	decl := &Declaration{Dialect: DialectAcpJSON}
 	tracker := NewToolTracker(decl)

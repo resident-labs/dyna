@@ -44,5 +44,8 @@ func init() {
 			return []string{"--add-dir", filepath.Dir(configPath)}
 		},
 		LoginArgs: func(executable, _ string) []string { return []string{executable, "login"} },
+		PartialReasons: []string{
+			"Native settings use the shared Kimi home and are not pinned per generation.",
+		},
 	})
 }
