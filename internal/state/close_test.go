@@ -114,10 +114,16 @@ func TestDatabaseCloseDrainsPublishing(t *testing.T) {
 	<-started
 	closed := make(chan error, 1)
 	go func() { closed <- database.Close(dir) }()
-	// A close stops the Writer from publishing and then waits for this change,
-	// so waiting for that flag proves the close has reached its drain before the
-	// change is let go.
-	waitClosed(t, w)
+	// The close stops the Writer from publishing, then waits for this change.
+	// That stop is the barrier: the change is let go from inside the close. A
+	// close that returns first never stopped this Writer, so it fails here
+	// instead of waiting for the suite timeout.
+	select {
+	case <-w.Stopped():
+	case err := <-closed:
+		close(release)
+		t.Fatalf("the database close ended without stopping this writer's publishing: %v", err)
+	}
 	close(release)
 	if err := <-writeDone; err != nil {
 		t.Fatal(err)
@@ -127,24 +133,5 @@ func TestDatabaseCloseDrainsPublishing(t *testing.T) {
 	}
 	if readErr != nil {
 		t.Fatalf("the publish read the database after its handle closed: %v", readErr)
-	}
-}
-
-// waitClosed waits for a close to reach w's drain. It yields instead of
-// sleeping, and gives up with a failure instead of hanging the suite when a
-// close never drains, because draining is the change this file guards.
-func waitClosed(t *testing.T, w *Writer) {
-	t.Helper()
-	for yields := 0; ; yields++ {
-		w.events.Lock()
-		closed := w.closed
-		w.events.Unlock()
-		if closed {
-			return
-		}
-		if yields > 1<<20 {
-			t.Fatal("the close never stopped this writer's publishing")
-		}
-		runtime.Gosched()
 	}
 }
