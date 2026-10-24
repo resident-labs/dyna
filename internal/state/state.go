@@ -38,11 +38,12 @@ type Writer struct {
 	appendMu sync.Mutex // orders appends and their events
 	mirrorMu sync.Mutex // orders rollback copies, stamps and imports
 
-	events     sync.Mutex  // guards pending, publishing, closed and idle
-	pending    []hub.Event // committed changes waiting to publish, oldest first
-	publishing bool        // a caller or the background goroutine publishes
-	closed     bool        // a close stopped this Writer's publishing
-	idle       *sync.Cond  // signals that publishing became false
+	events     sync.Mutex    // guards pending, publishing, closed and idle
+	pending    []hub.Event   // committed changes waiting to publish, oldest first
+	publishing bool          // a caller or the background goroutine publishes
+	closed     bool          // a close stopped this Writer's publishing
+	stopped    chan struct{} // closed with closed, so a waiter needs no polling
+	idle       *sync.Cond    // signals that publishing became false
 
 	mu       sync.Mutex
 	next     uint64
@@ -87,7 +88,7 @@ func For(db *sql.DB) *Writer {
 	return w
 }
 
-func newWriter(db *sql.DB) *Writer { return &Writer{db: db} }
+func newWriter(db *sql.DB) *Writer { return &Writer{db: db, stopped: make(chan struct{})} }
 
 // SetPublish sends each later committed change to publish, for example the
 // engine's event hub. Without it, a Writer publishes nothing. Write and
@@ -110,13 +111,19 @@ func (w *Writer) SetPublish(publish func(hub.Event)) { w.publish.Store(&publish)
 // that commits later still writes but publishes nothing, so no publish reaches
 // a closed handle. Close is safe to call more than once and on a nil Writer.
 // publish must not call Close.
+//
+// The stopped channel closes when this call stops publishing, before the wait,
+// so a waiter that must act inside the drain needs no polling.
 func (w *Writer) Close() {
 	if w == nil {
 		return
 	}
 	w.events.Lock()
 	defer w.events.Unlock()
-	w.closed = true
+	if !w.closed {
+		w.closed = true
+		close(w.stopped)
+	}
 	if w.idle == nil {
 		w.idle = sync.NewCond(&w.events)
 	}
@@ -124,6 +131,12 @@ func (w *Writer) Close() {
 		w.idle.Wait()
 	}
 }
+
+// Stopped returns a channel that closes when a close stops this Writer from
+// publishing, before that close waits for a publish that is already running. A
+// caller that must act while the close drains, as a test does, waits on it
+// instead of polling.
+func (w *Writer) Stopped() <-chan struct{} { return w.stopped }
 
 type done struct {
 	at   time.Time
