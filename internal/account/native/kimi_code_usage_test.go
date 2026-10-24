@@ -116,6 +116,24 @@ func TestKimiCodeUsageRejectsConflictingCountAndRatio(t *testing.T) {
 	}
 }
 
+func TestKimiCodeUsageAllowsRoundedCountRatios(t *testing.T) {
+	payload := []byte(`{
+  "usage": {"limit": "100", "used": "1", "resetTime": "2026-09-24T02:09:07.465054Z"},
+  "limits": [{"window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"}, "detail": {"limit": "100", "remaining": "96", "resetTime": "2026-09-21T01:09:07.465054Z"}}],
+  "usages": {
+    "limit_5h": {"used_ratio": 0.038, "reset_time": "2026-09-21T01:09:06Z"},
+    "limit_7d": {"used_ratio": 0.0077, "reset_time": "2026-09-24T02:09:06Z"}
+  }
+}`)
+	observation, err := kimiCodeUsageObservation(payload, time.Now())
+	if err != nil || len(observation.Windows) != 2 {
+		t.Fatalf("rounded count and ratio = %+v, %v", observation, err)
+	}
+	if math.Abs(*observation.Windows[0].UsedPercent-3.8) > 1e-9 || math.Abs(*observation.Windows[1].UsedPercent-0.77) > 1e-9 {
+		t.Fatalf("precise ratios were not preserved: %+v", observation.Windows)
+	}
+}
+
 func jsonInt(value int64) string {
 	return strconv.FormatInt(value, 10)
 }

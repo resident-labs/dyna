@@ -16,6 +16,10 @@ import (
 var errKimiCodeUsage = errors.New("Kimi Code returned no usage windows")
 var errKimiCodeUsageConflict = errors.New("Kimi Code returned conflicting usage windows")
 
+// Count fields can be rounded to whole percentage points. Allow that rounding
+// precision, but no more: a 100% versus 0% conflict remains an error.
+const kimiCodeRatioTolerance = 0.005
+
 type kimiCodeUsageEntry struct {
 	UsedRatio json.RawMessage `json:"used_ratio"`
 	ResetTime string          `json:"reset_time"`
@@ -163,7 +167,7 @@ func kimiCodeReconcileCounts(response kimiCodeUsageResponse) error {
 			if !ok {
 				continue
 			}
-			if math.Abs(ratio-expected) > 0.0001 {
+			if math.Abs(ratio-expected) > kimiCodeRatioTolerance {
 				return errKimiCodeUsageConflict
 			}
 		}
