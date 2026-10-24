@@ -2,6 +2,7 @@ package localci
 
 import (
 	"archive/tar"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -30,6 +31,7 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 		status Outcome
 	}{
 		{"early container failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Docker access is unavailable"}, 69, CauseContainerFailure, OutcomeError},
+		{"killed container", Node{Name: "local", Slots: 1, Enabled: true}, []string{"Killed"}, 137, CauseContainerFailure, OutcomeError},
 		{"ssh drop", Node{Name: "remote", SSH: "pip@host", Slots: 1, Enabled: true}, []string{"Connection to port 22 timed out"}, 255, CauseSSHDrop, OutcomeError},
 		{"timeout", Node{Name: "local", Slots: 1, Enabled: true}, []string{"check reached its deadline", "DYNA_CI_CHECK_EXIT=124"}, 124, CauseTimeout, OutcomeError},
 		{"test failure", Node{Name: "local", Slots: 1, Enabled: true}, []string{"--- FAIL: TestBroken", "DYNA_CI_CHECK_EXIT=1"}, 1, CauseTestFailure, OutcomeFailed},
@@ -84,6 +86,19 @@ func TestNodeKeepsFailedCheckEvidence(t *testing.T) {
 				if !strings.Contains(string(data), line) {
 					t.Fatalf("local log lost %q: %q", line, data)
 				}
+			}
+			// The run folder alone says why the check stopped: the log ends with
+			// its typed cause, not only the output.
+			var exit checkExit
+			for _, line := range strings.Split(string(data), "\n") {
+				if record, ok := strings.CutPrefix(line, "DYNA_CI_CHECK_CAUSE "); ok {
+					if err := json.Unmarshal([]byte(record), &exit); err != nil {
+						t.Fatalf("invalid exit record %q: %v", record, err)
+					}
+				}
+			}
+			if exit.Cause != tc.cause || exit.Status != tc.status || exit.ExitCode != tc.code {
+				t.Fatalf("local log exit record = %+v, want %s/%s/%d", exit, tc.cause, tc.status, tc.code)
 			}
 			saved, err := (Store{DataDir: runner.DataDir}).LoadResult(t.Context(), result.Repo, result.SHA)
 			if err != nil {
@@ -332,6 +347,47 @@ func TestNodeCancellationDoesNotSaveResult(t *testing.T) {
 	}
 	if _, err := (Store{DataDir: runner.DataDir}).LoadResult(t.Context(), result.Repo, result.SHA); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("canceled run persisted: %v", err)
+	}
+}
+
+// Close keeps the end of a check's log whatever its size. Output just past the
+// head limit must not lose its ending, and a shortened log says how much it cut.
+func TestCheckLogKeepsTheEndOfTheOutput(t *testing.T) {
+	const end = "THE END OF THE CHECK LOG"
+	for _, tc := range []struct {
+		name      string
+		size      int
+		truncated bool
+	}{
+		{"just past the head", checkLogHead + 1, false},
+		{"shortened", checkLogHead + checkLogTail, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log, err := newCheckLog(t.TempDir(), nodeCheck{id: SuiteGoStatic})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body := append(bytes.Repeat([]byte("x"), tc.size), end...)
+			if _, err := log.Write(body); err != nil {
+				t.Fatal(err)
+			}
+			if err := log.finish(checkExit{}); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(log.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasSuffix(string(data), end) {
+				t.Fatalf("a %d byte log lost its end: %q", len(body), data[len(data)-64:])
+			}
+			if omitted := strings.Contains(string(data), "bytes of the middle omitted"); omitted != tc.truncated {
+				t.Fatalf("omission marker = %v for a %d byte log", omitted, len(body))
+			}
+			if tc.truncated && len(data) > checkLogHead+checkLogTail+len(end)+64 {
+				t.Fatalf("shortened log kept %d bytes", len(data))
+			}
+		})
 	}
 }
 
