@@ -36,6 +36,17 @@ test('markdown renders each text once and reuses the result', async (t) => {
   assert.equal(parses, 2)
 })
 
+test('Dyna app links stay in the current window and external links do not', async () => {
+  const { internalLinkHash } = await import('./format.ts')
+  const current = { origin: 'https://dyna.test', pathname: '/' }
+  assert.equal(internalLinkHash('#room=room_1&view=issues', current), '#room=room_1&view=issues')
+  assert.equal(internalLinkHash('https://dyna.test/#room=room_1&view=issues', current), '#room=room_1&view=issues')
+  assert.equal(internalLinkHash('https://dyna.test/#room=room_1&session=ses_1', current), '#room=room_1&session=ses_1')
+  assert.equal(internalLinkHash('https://dyna.test/', current), '')
+  assert.equal(internalLinkHash('https://elsewhere.test/#room=room_1', current), null)
+  assert.equal(internalLinkHash('https://dyna.test/attachments/room_1/file_1', current), null, 'files are not app routes')
+})
+
 test('a folded result line drops the turn lead-in and folds whitespace', async () => {
   const { resultLine } = await import('./format.ts')
   assert.equal(resultLine('dyna-agent:ui-guy-right turn 464 completed. Result: No action needed.\n\n#866 is ready.'), 'No action needed. #866 is ready.')

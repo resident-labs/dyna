@@ -110,6 +110,19 @@ test('opening an issue records its link; Back and Forward follow issue links', a
   } finally { await r.done() }
 })
 
+test('following a second issue link notifies the open pane', async () => {
+  const { followInternalLink } = await import('../ui/format.ts')
+  const r = await render([issue(839, 'needs-owner')], { link: { roomId: 'r', issue: 839 } }, microtasks)
+  try {
+    assert.match(element(r.target, '.dscroll').textContent, /Issue 839/)
+    const changed = new Promise<void>(resolve => window.addEventListener('hashchange', () => resolve(), { once: true }))
+    followInternalLink('#room=r&issue=900', location)
+    await changed
+    await microtasks()
+    assert.match(element(r.target, '.dscroll').textContent, /Issue 900/)
+  } finally { await r.done() }
+})
+
 test('an issue link opens even when the list filter excludes it', async () => {
   const r = await render([issue(839, 'needs-owner')], { link: { roomId: 'r', issue: 900 } })
   try {
