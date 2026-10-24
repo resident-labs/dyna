@@ -16,12 +16,13 @@ test('posts map to their choice; failures, chat and root results always show', (
   assert.deepEqual([done, pr, goal, failed, chat, rootDone].map(kindOf), ['finished', 'prs', 'goals', '', '', ''])
 })
 
-test('defaults: root-only highlight, worker results on one line, updates shown', () => {
+test('defaults: full text, root-only highlight and updates shown', () => {
   const look = empty()
+  assert.equal(setting(look, 'trim'), false)
   assert.equal(setting(look, 'highlight'), 'root')
-  assert.equal(setting(look, 'finished'), 'line')
+  assert.equal(setting(look, 'finished'), 'full')
   assert.equal([done, pr, goal, failed, chat].every(visibleTo(look)), true)
-  assert.equal(oneLine(look, done), true)
+  assert.equal(oneLine(look, done), false)
   assert.equal(oneLine(look, rootDone), false)
   assert.equal(oneLine(look, failed), false)
 })
@@ -50,7 +51,7 @@ test('a choice applies to every feed view, and clearing it restores the default'
   look = withChoice(look, 'finished', 'full')
   assert.equal(setting(look, 'finished'), 'full')
   look = withChoice(look, 'finished', null)
-  assert.equal(setting(look, 'finished'), 'line')
+  assert.equal(setting(look, 'finished'), 'full')
 })
 
 test('hidden kinds drop out; root results, failures and chat stay', () => {

@@ -106,7 +106,7 @@ test('the Feed section previews the real feed with sample posts under the curren
   const { visibleTo, oneLine, highlighted } = await import('../rooms/look.ts')
   const look = { all: {} }
   assert.ok(samplePosts.every(visibleTo(look)))
-  assert.ok(samplePosts.some((p) => oneLine(look, p)), 'a worker result folds to one line')
+  assert.ok(!samplePosts.some((p) => oneLine(look, p)), 'the full-text default keeps worker results open')
   assert.equal(samplePosts.filter((p) => highlighted(look, p, 'dyna-agent')).length, 2, 'root’s post and the post to root are highlighted')
 })
 
