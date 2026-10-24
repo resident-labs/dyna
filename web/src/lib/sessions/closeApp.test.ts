@@ -1,10 +1,8 @@
 import { errorText } from '../errorText.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { call, runFunctions } from '../../../test/svelte-source.ts'
-
-const source = readFileSync(new URL('../../App.svelte', import.meta.url), 'utf8')
+import { call } from '../../../test/svelte-source.ts'
+import { installConfirm } from '../../../test/appModules.ts'
 
 test('closing shows the returned handoff until the user dismisses it', async () => {
   const moved = ['PR #7 author → root', 'Workflow wf_one canceled']
@@ -15,7 +13,8 @@ test('closing shows the returned handoff until the user dismisses it', async () 
     api: { closeSession: async () => ({ closeSummary: moved }) },
     say() {}, loadMembers() {}, loadChanges() {},
   }
-  runFunctions(source, ['runConfirm'], app)
+  // The confirm dialog moved to lib/app/confirm.svelte.ts.
+  installConfirm(app)
   await call(app, 'runConfirm')
   assert.deepEqual(JSON.parse(JSON.stringify(app.closeResult)), { name: 'worker', items: moved })
   assert.equal(app.confirm, null)
@@ -29,7 +28,7 @@ test('failed handoff shows the inline cause before offering force close', async 
     roomId: 'room',
     api: { closeSession: async () => { throw new Error(reason) } },
   }
-  runFunctions(source, ['runConfirm', 'guardItems'], app)
+  installConfirm(app)
   await call(app, 'runConfirm')
   assert.equal(app.confirm.kind, 'forceclose')
   assert.deepEqual([...app.confirm.items], [reason])
