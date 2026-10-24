@@ -1,5 +1,5 @@
 import type { Member, Post } from '../api/room.ts'
-import type { Item, SessionReference, Turn, Usage } from '../api/session.ts'
+import type { Item, QueueState, SessionReference, Turn, Usage } from '../api/session.ts'
 import type { ShellJob } from '../api/terminal.ts'
 import { isSessionReference } from '../api/guards.ts'
 import { isNote, noteData } from '../ui/notices.ts'
@@ -14,13 +14,30 @@ type Time = string | number
 export interface Receipt {
   id: string
   from: string
-  state: string
+  state: QueueState
   ts: Time
   text?: string
   human?: boolean
   cancellable?: boolean
   turn?: number
 }
+
+interface ReceiptProjection {
+  include: boolean
+  delivery?: 'queued' | 'delivered'
+}
+
+// Every QueueState needs a receipt projection. The helper's undefined return
+// also keeps an unrecognized state from a server out of the DM.
+const receiptProjections: Record<QueueState, ReceiptProjection> = {
+  waiting: { include: true, delivery: 'queued' },
+  delivering: { include: true, delivery: 'delivered' },
+  delivered: { include: true },
+  cancelled: { include: false },
+  dismissed: { include: false },
+}
+const receiptProjection = (state: QueueState): ReceiptProjection | undefined => receiptProjections[state]
+const receiptDelivery = (receipt: Receipt | undefined): ReceiptProjection['delivery'] => receipt ? receiptProjection(receipt.state)?.delivery : undefined
 
 // A transcript item and turn as the DM reads them. A page holds the whole
 // Item and Turn; each field here is one the DM uses.
@@ -257,7 +274,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   // A post of another conversation that this one received or wrote. It is one
   // row that opens the post where it lives.
   const references = new Map<string, SessionReference>((session?.references || []).filter(isSessionReference).map((r): [string, SessionReference] => [r.postId, r]))
-  const receipts = new Map<string, Receipt>(queue.filter((q) => ['waiting', 'delivering', 'delivered'].includes(q.state)).map((q): [string, Receipt] => [q.id, q]))
+  const receipts = new Map<string, Receipt>(queue.filter((q) => receiptProjection(q.state)?.include).map((q): [string, Receipt] => [q.id, q]))
   const matched = new Set<string>(), carried = new Set<string>(), delivered = new Map<string, { delivery: string; pending?: Receipt }>()
   const shownReferences = new Set<string>()
   const threadFor = (key: string): Thread => {
@@ -370,7 +387,8 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
   // delivery first, then the queue's.
   const receiptOf = (p: ThreadPost): ThreadPost => {
     const q = receipts.get(p.id)
-    const d = delivered.get(p.id) ?? (q && q.state !== 'delivered' ? { delivery: q.state === 'waiting' ? 'queued' : 'delivered', pending: q } : null)
+    const delivery = receiptDelivery(q)
+    const d = delivered.get(p.id) ?? (delivery ? { delivery, pending: q } : null)
     return d ? { ...p, ...d } : p
   }
   for (const p of session?.posts || []) {
@@ -382,7 +400,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
       continue
     }
     if (voiceRequest(p, room.name)) {
-      if (!matched.has(p.id)) events.push({ kind: 'voice', key: `post:${p.id}`, ts: p.ts, text: p.text, post: p, delivery: receipts.get(p.id)?.state === 'waiting' ? 'queued' : undefined })
+      if (!matched.has(p.id)) events.push({ kind: 'voice', key: `post:${p.id}`, ts: p.ts, text: p.text, post: p, delivery: receiptDelivery(receipts.get(p.id)) === 'queued' ? 'queued' : undefined })
       continue
     }
     // An engine event is not a conversation with a peer: it draws its card, so
@@ -395,26 +413,27 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
     for (const key of keys) threadFor(key).posts.push(receiptOf(p))
     // A carried post draws its own message row; the queue's receipt does not
     // replace it, because the row below takes the delivery from the turn item.
-    events.push({ kind: 'post', key: `post:${p.id}`, ts: p.ts, post: p, threads: keys, suppressMessage: !!shell || matched.has(p.id) || (!carried.has(p.id) && receipts.has(p.id) && receipts.get(p.id)?.state !== 'delivered') })
+    events.push({ kind: 'post', key: `post:${p.id}`, ts: p.ts, post: p, threads: keys, suppressMessage: !!shell || matched.has(p.id) || (!carried.has(p.id) && receiptDelivery(receipts.get(p.id)) !== undefined) })
   }
   for (const q of receipts.values()) {
-    if (matched.has(q.id) || carried.has(q.id) || q.state === 'delivered') continue
+    const delivery = receiptDelivery(q)
+    if (matched.has(q.id) || carried.has(q.id) || !delivery) continue
     const post = posts.get(q.id)
     if (post && systemEvent(post)) {
       // A queued engine event draws its card, not a bubble with the raw text
       // and not a thread with the engine as a peer.
-      events.push({ kind: 'system-event', key: `post:${q.id}`, ts: post.ts ?? q.ts, post, author: post.from, text: post.text, delivery: q.state === 'waiting' ? 'queued' : 'delivered' })
+      events.push({ kind: 'system-event', key: `post:${q.id}`, ts: post.ts ?? q.ts, post, author: post.from, text: post.text, delivery })
       continue
     }
     if (q.from === voice) {
-      if (!post) events.push({ kind: 'voice', key: `post:${q.id}`, ts: q.ts, text: q.text, delivery: q.state === 'waiting' ? 'queued' : 'delivered' })
+      if (!post) events.push({ kind: 'voice', key: `post:${q.id}`, ts: q.ts, text: q.text, delivery })
       continue
     }
     if (peer(q.from, q.human)) {
       if (!post && !peerItems.has(q.id)) peerItems.set(q.id, { id: q.id, identified: true, from: q.from, to: [address], ts: q.ts, text: q.text || '' })
       continue
     }
-    events.push({ kind: 'message', key: `post:${q.id}`, ts: q.ts, author: q.from, human: !!(post?.human ?? q.human), text: q.text, post, pending: q, delivery: q.state === 'waiting' ? 'queued' : 'delivered' })
+    events.push({ kind: 'message', key: `post:${q.id}`, ts: q.ts, author: q.from, human: !!(post?.human ?? q.human), text: q.text, post, pending: q, delivery })
   }
   // A post of another conversation is one compact row, in the order it was
   // written, that jumps to the post there.
@@ -465,7 +484,7 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
     row.steps.push(step)
     return step
   }
-  const waiting = (p: ThreadPost) => receipts.get(p.id)?.state === 'waiting'
+  const waiting = (p: ThreadPost) => receiptDelivery(receipts.get(p.id)) === 'queued'
   for (const event of events) {
     if (event.kind === 'turn') current = event.turn
     if (event.kind === 'post') {

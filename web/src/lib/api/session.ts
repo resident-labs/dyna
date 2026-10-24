@@ -110,11 +110,14 @@ export interface MemberProfile {
   posts: Post[] | null
 }
 
+// QueueState is subagent.QueueState.
+export type QueueState = 'waiting' | 'delivering' | 'delivered' | 'cancelled' | 'dismissed'
+
 // QueueOrigin is subagent.QueueOrigin.
 export interface QueueOrigin {
   session: string
   address: string
-  state: string
+  state: QueueState
   targetDelivered?: boolean
 }
 
@@ -127,7 +130,7 @@ export interface QueueItem {
   from: string
   ts: number
   turn: number
-  state: string
+  state: QueueState
   cancellable: boolean
 }
 
