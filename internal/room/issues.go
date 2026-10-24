@@ -527,7 +527,6 @@ func (s *Store) changeIssueFrom(roomID, id, by string, origin CloseOrigin, allow
 				return errors.New("invalid issue transition")
 			}
 			i.ChangedBy, i.ChangedAt = by, s.now().UnixMilli()
-			out = i
 			body, err := json.Marshal(i)
 			if err != nil {
 				return err
@@ -545,6 +544,9 @@ func (s *Store) changeIssueFrom(roomID, id, by string, origin CloseOrigin, allow
 			}); err != nil {
 				return err
 			}
+			// A populated result proves the write committed. Callers can then
+			// distinguish an event failure from a pre-write failure.
+			out = i
 			return s.postIssueChange(rec, &i, by, origin)
 		}
 		return fmt.Errorf("issue %q not found", id)

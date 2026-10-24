@@ -23,6 +23,7 @@ var serviceAuthorityActions = map[string]bool{
 	"ResolveFinding":          true,
 	"DismissSession":          true,
 	"ChangeIssue":             true,
+	"LinkIssueGoal":           true,
 	"SetChangePolicyOverride": true,
 	"SetPRGoal":               true,
 	"UpdateChangeNotes":       true,
