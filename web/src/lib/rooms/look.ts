@@ -1,6 +1,6 @@
 import type { EventPayload } from './events.gen.ts'
 
-type ChoiceID = 'highlight' | 'finished' | 'prs' | 'goals'
+type ChoiceID = 'trim' | 'highlight' | 'finished' | 'prs' | 'goals'
 type ChoiceValue = string | boolean | null
 interface Choice {
   id: ChoiceID
@@ -32,13 +32,14 @@ interface FeedPost {
 // feed view follows them. A choice with options picks one of them; one without
 // is on or off.
 export const CHOICES: Choice[] = [
+  { id: 'trim', label: 'Trim long agent messages in Room chat', hint: 'Show the first paragraph with Show more. Root’s posts always show in full.' },
   { id: 'highlight', label: 'Highlight', hint: 'Posts that get the gold mark', options: [['root', 'Root only'], ['all', 'Everyone to you'], ['off', 'Off']] },
-  { id: 'finished', label: 'Finished turns', hint: 'Root’s results always show in full. Failures always show.', options: [['full', 'Full'], ['line', 'One line'], ['hidden', 'Hidden']] },
+  { id: 'finished', label: 'Finished turns', hint: 'Root’s results always show. Failures always show.', options: [['full', 'Full'], ['line', 'One line'], ['hidden', 'Hidden']] },
   { id: 'prs', label: 'Pull request updates', hint: 'Opened, reviewed, checked, merged' },
   { id: 'goals', label: 'Goal updates', hint: 'Goals added, done or dropped' },
 ]
 
-const DEFAULTS: Record<ChoiceID, string | boolean> = { highlight: 'root', finished: 'line', prs: true, goals: true }
+const DEFAULTS: Record<ChoiceID, string | boolean> = { trim: false, highlight: 'root', finished: 'full', prs: true, goals: true }
 
 // setting resolves one choice: the saved value, else the built-in default.
 export function setting(look: Look, id: ChoiceID) {
