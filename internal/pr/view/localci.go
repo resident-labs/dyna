@@ -28,6 +28,9 @@ func localCIChecks(facts watch.ReviewFacts, record watch.Record) watch.Record {
 	var slow []localci.TestTiming
 	for _, suite := range result.Suites {
 		name := string(suite.Name())
+		if suite.Cause != "" {
+			name += " (" + string(suite.Cause) + ")"
+		}
 		check := watch.CheckSummary{Name: name, Node: suite.Node, Status: "completed", DurationMs: suite.Duration.Milliseconds()}
 		switch suite.Status {
 		case localci.OutcomePassed:
@@ -58,9 +61,13 @@ func localCIChecks(facts watch.ReviewFacts, record watch.Record) watch.Record {
 		}
 	}
 	if result.Error != "" {
+		excerpt := result.Error
+		if result.Cause != "" {
+			excerpt = string(result.Cause) + ": " + excerpt
+		}
 		record.Checks = append(record.Checks, watch.CheckSummary{
 			Name: "local CI", State: "failure", Status: "completed", Conclusion: "failure",
-			DurationMs: result.Duration.Milliseconds(), FailureExcerpt: result.Error, FailureExcerptChecked: true,
+			DurationMs: result.Duration.Milliseconds(), FailureExcerpt: excerpt, FailureExcerptChecked: true,
 		})
 	}
 	record.CITestReportNote = ""

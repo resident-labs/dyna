@@ -338,6 +338,11 @@ func (s *Service) localCIFailureEvidence(ctx context.Context, r Record, head, lo
 		text := suite.Error + "\n" + strings.Join(suite.Failures, "\n") + "\n" + suite.LogTail
 		evidence, named := localCFirstEvidence(text)
 		line := string(suite.Name())
+		// The cause tells an infrastructure failure from a failed test, which is
+		// what the owner needs to know before deciding to retry.
+		if suite.Cause != "" {
+			line += " (" + string(suite.Cause) + ")"
+		}
 		if evidence != "" {
 			line += ": " + evidence
 		}
