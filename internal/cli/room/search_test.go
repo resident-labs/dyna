@@ -1,6 +1,7 @@
 package room
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -14,7 +15,9 @@ import (
 )
 
 // Search cites only its sources: a post ID, and with --sessions a session and
-// turn. A session closed outside the 14-day window is not part of the scan.
+// turn. A turn that wrote no output still matches on its stored prompt, a
+// message that is only the searched word still matches, and a session closed
+// outside the 14-day window is not scanned.
 func TestRoomSearchCitesPostsAndRecentTurns(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	clearStamp(t)
@@ -28,12 +31,13 @@ func TestRoomSearchCitesPostsAndRecentTurns(t *testing.T) {
 		t.Fatal(err)
 	}
 	sessions := subagent.DefaultStore()
-	writeSession := func(id, name string, closed time.Time) {
+	// writeSession stores one closed session with one finished turn. output is
+	// the stored normalized output, empty when the harness wrote none.
+	writeSession := func(id, name string, closed time.Time, prompt, output string) {
 		t.Helper()
 		start := closed.Add(-time.Hour)
 		recordtest.Write(t, sessions.Root, id, subagent.Meta{ID: id, Name: name, Room: work.Name, RoomID: work.ID,
 			Profile: "sol", Depth: 1, Turns: 1, Created: start, LastActivity: closed, Status: subagent.StatusClosed, Closed: closed})
-		output := `{"v":1,"kind":"message","role":"assistant","text":"the deploy gate stays shut until CI passes","ts":1792853630100}` + "\n"
 		dir, err := sessions.Dir(id)
 		if err != nil {
 			t.Fatal(err)
@@ -44,14 +48,16 @@ func TestRoomSearchCitesPostsAndRecentTurns(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(dir, "agents", "1"), 0o700); err != nil {
 			t.Fatal(err)
 		}
-		path, err := sessions.NormalizedPath(id)
-		if err != nil {
-			t.Fatal(err)
+		if output != "" {
+			path, err := sessions.NormalizedPath(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(output), 0o600); err != nil {
+				t.Fatal(err)
+			}
 		}
-		if err := os.WriteFile(path, []byte(output), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		turn, err := json.Marshal(subagent.Turn{N: 1, Status: subagent.TurnOK, Profile: "sol",
+		turn, err := json.Marshal(subagent.Turn{N: 1, Status: subagent.TurnOK, Profile: "sol", Prompt: prompt,
 			NormStart: 0, NormEnd: int64(len(output)), Started: start, Ended: closed})
 		if err != nil {
 			t.Fatal(err)
@@ -61,31 +67,58 @@ func TestRoomSearchCitesPostsAndRecentTurns(t *testing.T) {
 		}
 	}
 	now := time.Now()
-	writeSession("ses_20261024-100000-aaaaaaaa", "recent", now)
-	writeSession("ses_20261001-100000-bbbbbbbb", "old", now.Add(-20*24*time.Hour))
+	writeSession("ses_20261024-100000-aaaaaaaa", "recent", now, "finish the task", `{"v":1,"kind":"message","role":"assistant","text":"the deploy gate stays shut until CI passes","ts":1792853630100}`+"\n")
+	writeSession("ses_20261024-100001-bbbbbbbb", "whole", now, "finish the task", `{"v":1,"kind":"message","role":"assistant","text":"quasar","ts":1792853630100}`+"\n")
+	writeSession("ses_20261024-100002-cccccccc", "prompt", now, "prompthit: no output was written", "")
+	writeSession("ses_20261001-100000-dddddddd", "old", now.Add(-20*24*time.Hour), "the deploy gate stays shut until CI passes", "")
 
-	out, err := execCmd(t, RoomCmd(), "search", "deploy", "gate", "--room", "work", "--sessions")
-	if err != nil {
+	for _, tc := range []struct {
+		name          string
+		args          []string
+		want, notWant []string
+	}{
+		{"post and output turn", []string{"search", "deploy", "gate", "--room", "work", "--sessions"},
+			[]string{hit.ID, "the deploy gate waits for CI", "work:recent 1", "the deploy gate stays shut until CI passes"},
+			[]string{"unrelated chatter", "work:old"}},
+		{"message holding only the word", []string{"search", "quasar", "--room", "work", "--sessions"},
+			[]string{"work:whole 1"}, []string{"no matches"}},
+		{"turn with no output", []string{"search", "prompthit", "--room", "work", "--sessions"},
+			[]string{"work:prompt 1", "prompthit: no output was written"}, []string{"no matches"}},
+		{"posts only", []string{"search", "deploy", "gate", "--room", "work"},
+			[]string{hit.ID}, []string{"turn  work:"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := execCmd(t, RoomCmd(), tc.args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(out, want) {
+					t.Fatalf("missing %q: %s", want, out)
+				}
+			}
+			for _, notWant := range tc.notWant {
+				if strings.Contains(out, notWant) {
+					t.Fatalf("unexpected %q: %s", notWant, out)
+				}
+			}
+		})
+	}
+}
+
+// A bounded transcript scan that found no line says so, and never claims that
+// the room holds no match.
+func TestRoomSearchReportsAnIncompleteScan(t *testing.T) {
+	var out bytes.Buffer
+	found := turnSearch{stopped: true}
+	if err := printSearch(&out, room.Record{Name: "work", ID: "room_work"}, "quasar", nil, false, found, true); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, hit.ID) || !strings.Contains(out, "the deploy gate waits for CI") {
-		t.Fatalf("post hit missing: %s", out)
+	text := out.String()
+	if !strings.Contains(text, "stopped after") {
+		t.Fatalf("the incomplete scan is not reported: %s", text)
 	}
-	if !strings.Contains(out, "work:recent 1") || !strings.Contains(out, "the deploy gate stays shut until CI passes") {
-		t.Fatalf("turn hit missing: %s", out)
-	}
-	if strings.Contains(out, "unrelated chatter") {
-		t.Fatalf("a post without every word matched: %s", out)
-	}
-	if strings.Contains(out, "work:old") {
-		t.Fatalf("a session closed outside the window was searched: %s", out)
-	}
-
-	postsOnly, err := execCmd(t, RoomCmd(), "search", "deploy", "gate", "--room", "work")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(postsOnly, "turn ") || !strings.Contains(postsOnly, hit.ID) {
-		t.Fatalf("without --sessions search must read only posts: %s", postsOnly)
+	if strings.Contains(text, "no matches") {
+		t.Fatalf("an incomplete scan claims no matches: %s", text)
 	}
 }

@@ -19,14 +19,15 @@ import (
 
 // Search bounds keep one query's work small: an old session's transcript is
 // outside the window, and a long run of raw matches stops before it renders
-// every turn.
+// every turn. The turn budget is a variable so a test can force the stop.
 const (
 	searchSessionWindow = 14 * 24 * time.Hour
-	searchTurnBudget    = 200
 	searchLineChars     = 200
 	// toolOutputPrefix starts every tool-output line that WriteTurn prints.
 	toolOutputPrefix = "     │ "
 )
+
+var searchTurnBudget = 200
 
 // turnCandidate is one stored turn whose raw events hold every query word, so
 // rendering it may show a matching line.
@@ -110,8 +111,11 @@ func printSearch(w io.Writer, rec room.Record, query string, posts []room.Messag
 		return err
 	}
 	if len(posts) == 0 && len(found.hits) == 0 {
-		_, err := fmt.Fprintf(w, "no matches for %q\n", query)
-		return err
+		if !found.stopped {
+			if _, err := fmt.Fprintf(w, "no matches for %q\n", query); err != nil {
+				return err
+			}
+		}
 	}
 	for _, msg := range posts {
 		fmt.Fprintf(w, "post  %s  %s  %s -> %s [%s] %s\n", msg.ID,
@@ -221,20 +225,18 @@ func turnLine(loader *transcript.Loader, c turnCandidate, words []string) (turnH
 	return turnHit{}, false
 }
 
-// sessionCandidates returns the stored turns of one session whose raw events
-// hold every word. The raw events are a cheap filter: they are the same stored
-// output `dyna session history` reads, without building each turn.
+// sessionCandidates returns the stored turns of one session that may show a
+// matching line. A turn is a candidate when its raw events, or the turn
+// record's own text, holds every word. Both are a cheap filter over the same
+// stored turn `dyna session history` reads, without building it.
 func sessionCandidates(sessions *subagent.Store, info subagent.Info, words []string) []turnCandidate {
-	path, err := sessions.NormalizedPath(info.ID)
-	if err != nil {
-		return nil
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	if held, _ := holdsWordsInBytes(raw, words); !held {
-		return nil
+	// A turn that never wrote output still has a prompt, and a stopped harness
+	// may leave no output file at all, so a missing file is not an error.
+	var raw []byte
+	if path, err := sessions.NormalizedPath(info.ID); err == nil {
+		if b, err := os.ReadFile(path); err == nil {
+			raw = b
+		}
 	}
 	turns, err := sessions.Turns(info.ID)
 	if err != nil {
@@ -249,10 +251,14 @@ func sessionCandidates(sessions *subagent.Store, info subagent.Info, words []str
 		if end == 0 {
 			end = int64(len(raw))
 		}
-		if turn.NormStart < 0 || end > int64(len(raw)) || end < turn.NormStart {
-			continue
+		held, content := false, false
+		if turn.NormStart >= 0 && end <= int64(len(raw)) && end >= turn.NormStart {
+			held, content = holdsWordsInBytes(raw[turn.NormStart:end], words)
 		}
-		held, content := holdsWordsInBytes(raw[turn.NormStart:end], words)
+		if !held {
+			// The record's own fields render without any stored output.
+			held, content = holdsWordsInBytes(turnText(turn), words)
+		}
 		if !held {
 			continue
 		}
@@ -264,6 +270,24 @@ func sessionCandidates(sessions *subagent.Store, info subagent.Info, words []str
 			turn: turn.N, started: at, structured: !content})
 	}
 	return out
+}
+
+// turnText is the readable text a turn record holds by itself: its prompt, its
+// steering messages, its result and its error.
+func turnText(turn subagent.Turn) []byte {
+	var b strings.Builder
+	b.WriteString(turn.Prompt)
+	for _, steer := range turn.Steering {
+		b.WriteString("\n")
+		b.WriteString(steer.Message)
+	}
+	if turn.Result != nil {
+		b.WriteString("\n")
+		fmt.Fprint(&b, turn.Result)
+	}
+	b.WriteString("\n")
+	b.WriteString(turn.Error)
+	return []byte(b.String())
 }
 
 // holdsWordsInLine reports whether one line holds every word, ignoring case.
@@ -306,11 +330,11 @@ func containsFold(b []byte, word string) (found, content bool) {
 			next = upper
 		}
 		if next < 0 {
-			return false, false
+			return found, false
 		}
 		i += next
 		if i+len(word) > len(b) {
-			return false, false
+			return found, false
 		}
 		if equalFoldASCII(b[i:i+len(word)], word) {
 			if !quotedAt(b, i, i+len(word)) {
