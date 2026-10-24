@@ -68,11 +68,33 @@ func publishKimiGeneration(dir, home string) error {
 		}
 	}
 	tools["disabled"] = disabled
+	document["default_plan_mode"] = false
+	document["default_permission_mode"] = "auto"
+	document["telemetry"] = false
+	document["builtin_product_skills"] = false
 	merged, err := toml.Marshal(document)
 	if err != nil {
 		return errors.New("Kimi Code native configuration could not be encoded")
 	}
-	return fsutil.WriteFile(configPath, merged, 0600, false)
+	if err := fsutil.WriteFile(configPath, merged, 0600, false); err != nil {
+		return err
+	}
+	mcpPath := filepath.Join(home, "mcp.json")
+	if err := checkPrivateAccountFile(mcpPath, false); err != nil {
+		return err
+	}
+	if err := fsutil.WriteFile(mcpPath, []byte("{\"mcpServers\":{}}\n"), 0600, false); err != nil {
+		return err
+	}
+	pluginDir := filepath.Join(home, "plugins")
+	if err := os.MkdirAll(pluginDir, 0700); err != nil {
+		return err
+	}
+	pluginPath := filepath.Join(pluginDir, "installed.json")
+	if err := checkPrivateAccountFile(pluginPath, false); err != nil {
+		return err
+	}
+	return fsutil.WriteFile(pluginPath, []byte("{\"version\":1,\"plugins\":[]}\n"), 0600, false)
 }
 
 func kimiConfigStrings(value any) ([]string, error) {

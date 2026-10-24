@@ -70,7 +70,7 @@ func TestAntigravityACPMCPUsesCatalogAndLaunchEnvironment(t *testing.T) {
 
 func TestKimiACPMCPUsesCatalog(t *testing.T) {
 	generation := t.TempDir()
-	doc := `{"mcpServers":{"dyna":{"command":"/private/dyna","args":["mcp","shell"],"env":{}}}}`
+	doc := `{"mcpServers":{"dyna":{"command":"/private/dyna","args":["mcp","shell"],"env":{}},"other":{"command":"/other","args":[]}}}`
 	if err := os.WriteFile(filepath.Join(generation, "settings.json"), []byte(doc), 0600); err != nil {
 		t.Fatal(err)
 	}

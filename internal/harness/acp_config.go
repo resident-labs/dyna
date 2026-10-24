@@ -81,6 +81,9 @@ func acpMCPServers(p profile.Profile, launchEnv []string) ([]acp.McpServer, erro
 	sort.Strings(names)
 	result := make([]acp.McpServer, 0, len(names))
 	for _, name := range names {
+		if p.Harness == profile.HarnessKimiCode && name != "dyna" {
+			continue
+		}
 		server := config.Servers[name]
 		if server.URL != "" {
 			result = append(result, acp.McpServer{Name: name, URL: server.URL})
