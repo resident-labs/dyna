@@ -54,7 +54,7 @@ func TestPendingCheckInSurvivesRestartAndIntervalChanges(t *testing.T) {
 	if len(ids) != 2 {
 		t.Fatal("check-in stacked before next interval")
 	}
-	interval = time.Minute
+	interval = 2 * time.Minute
 	if next := tick(s); !next.Equal(now.Add(interval)) {
 		t.Fatalf("interval edit kept old deadline %v", next)
 	}
@@ -70,7 +70,7 @@ func TestPendingCheckInSurvivesRestartAndIntervalChanges(t *testing.T) {
 	if len(ids) != 3 {
 		t.Fatal("disabled check-in delivered")
 	}
-	interval = time.Minute
+	interval = 2 * time.Minute
 	tick(s)
 	targets = nil
 	now = now.Add(interval)

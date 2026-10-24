@@ -17,6 +17,10 @@ import (
 // that runs the pass owns the real interval and sets Interval.
 const DefaultInterval = 15 * time.Minute
 
+// dueSlack lets any trigger deliver a check-in that falls due within the next
+// minute without changing the configured interval stored on the row.
+const dueSlack = time.Minute
+
 // Target identifies an open parent with active direct children.
 type Target struct{ ID, Room string }
 
@@ -118,7 +122,7 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 					return err
 				}
 			}
-			if e.due <= now.UnixNano() && !e.pending {
+			if e.due <= now.Add(dueSlack).UnixNano() && !e.pending {
 				if _, err := conn.ExecContext(ctx, "UPDATE parent_checkins SET pending=1 WHERE session=?", e.ID); err != nil {
 					return err
 				}
