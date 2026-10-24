@@ -131,7 +131,7 @@ func (m *Manager) dormantAfterTurn(ctx context.Context, ref string, turn int) (I
 		return info, err
 	}
 	if committed {
-		m.store().appendEvent(info.ID, map[string]any{"t": "session_dormant"})
+		m.store().appendJournal(info.ID, SessionDormantJournal{})
 	}
 	return m.store().Info(info.ID)
 }

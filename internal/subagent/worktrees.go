@@ -130,7 +130,7 @@ func (m *Manager) reportKeptWorktree(info Info, k keptTree) {
 		Detail: strings.ReplaceAll(k.Reason, "\n", " "),
 	}, owner.Address())
 	if err != nil {
-		m.store().appendEvent(info.ID, map[string]any{"t": "worktree_cleanup_report_failed", "error": err.Error()})
+		m.store().appendJournal(info.ID, WorktreeReportFailedJournal{Error: err.Error()})
 	}
 }
 

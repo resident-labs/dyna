@@ -155,17 +155,17 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 			status, msg = endedAs(func() (Turn, error) { return store.ReadTurn(id, n) }, status, msg)
 		}
 		writes.finish(RunnerFinish{Turn: n, Usage: turnUsage, Baseline: turnBaseline, ContextTokens: turnContext, RoomCursor: cursor, HarnessSession: sid})
-		ev := map[string]any{"t": "turn_end", "turn": n, "status": status, "error": msg}
+		ev := TurnEndJournal{Turn: n, Status: status, Error: msg}
 		if werr != nil {
 			// The event is appended either way; say when the turn row
 			// was not written, so a later repair is explained.
-			ev["writeError"] = werr.Error()
+			ev.WriteError = werr.Error()
 		}
 		if s, ok := result.(string); ok && s != "" {
-			ev["preview"] = textutil.Prefix(s, 240)
+			ev.Preview = textutil.Prefix(s, 240)
 		} else if result != nil {
 			if b, err := json.Marshal(result); err == nil {
-				ev["preview"] = textutil.Prefix(string(b), 240)
+				ev.Preview = textutil.Prefix(string(b), 240)
 			}
 		}
 		if m.checkpoint != nil {
@@ -186,7 +186,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		_ = lock.Close()
 		// Named item 2 exception: an append-only log, written after the
 		// lock so that completion sees an idle session.
-		store.appendEvent(id, ev)
+		store.appendJournal(id, ev)
 		if werr == nil || errors.Is(werr, engineclient.ErrSpooled) {
 			writes.complete()
 		}
