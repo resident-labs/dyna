@@ -1,5 +1,5 @@
 import { readFile, realpath, mkdir, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, watch } from 'node:fs';
 import { resolve, sep, extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -113,15 +113,16 @@ await context.route('**/*', async route => {
 });
 const page = await context.newPage();
 await page.addInitScript(() => { globalThis.__dynaReadOnlyQA = true; });
-// A timed-out step has no other way to learn why. When the agent touches the
+// A timed-out step has no other way to learn why. When an agent creates the
 // request file, print the blocked kinds and save a screenshot beside it, so a
-// control that needs a write, a socket or a newer server is explained.
+// control that needs a write, a socket or a newer server is explained. The
+// report follows the file rather than a timer, so nothing polls while QA runs.
 const reportDir = join(process.env.DYNA_SCRATCH || tmpdir(), 'qa-report-' + process.pid);
 const reportRequest = join(reportDir, 'request');
 const reportPage = join(reportDir, 'page.png');
 await mkdir(reportDir, { recursive: true, mode: 0o700 });
 let reporting = false;
-const reportTimer = setInterval(async () => {
+const report = async () => {
   if (reporting || !existsSync(reportRequest)) return;
   reporting = true;
   await rm(reportRequest, { force: true }).catch(() => {});
@@ -133,7 +134,13 @@ const reportTimer = setInterval(async () => {
     console.log('QA page screenshot unavailable: the tab did not draw.');
   }
   reporting = false;
-}, 250);
+};
+let reportWatcher;
+try {
+  reportWatcher = watch(reportDir, () => { report().catch(() => {}); });
+} catch {
+  console.log('QA timeout reports are unavailable in this run.');
+}
 let stopped;
 const done = new Promise(resolve => { stopped = resolve; });
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, stopped);
@@ -142,12 +149,12 @@ browser.once('disconnected', stopped);
 try {
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
   console.log('Read-only QA tab ready at ' + origin + '. Keep this command running; press Ctrl+C to close it.');
-  console.log('Read-only QA cannot show settings writes, live updates (every socket stays closed) or server fields newer than the installed engine.');
+  console.log('Read-only QA cannot show settings writes, live streams that need a WebSocket (the computer viewer and voice calls), or server fields newer than the installed engine.');
   console.log('The computer stream stays closed in this tab: its socket relays desktop input, so QA is not read-only with it open. Check the viewer with dyna browser against the app the engine serves.');
   console.log('When a step times out, create ' + reportRequest + ' (mkdir -p and touch it): the command then prints every blocked request kind and saves a screenshot there.');
   await done;
 } finally {
-  clearInterval(reportTimer);
+  if (reportWatcher) reportWatcher.close();
   // Ignore route callbacks that fail while their context is shutting down.
   await context.unrouteAll({ behavior: 'ignoreErrors' }).catch(() => {});
   await context.close().catch(() => {});

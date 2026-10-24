@@ -4,6 +4,7 @@ import { writeFile } from 'node:fs/promises';
 const origin = 'http://127.0.0.1:7457';
 
 let handler;
+let closed;
 let socketsBlocked = false;
 let removingRoutes = false;
 let pendingRoute;
@@ -36,7 +37,7 @@ const context = {
   async newPage() {
     return {
       async addInitScript() {},
-      once(event) { assert.equal(event, 'close'); },
+      once(event, callback) { assert.equal(event, 'close'); closed = callback; },
       async goto(origin) {
         assert.equal(origin, 'http://127.0.0.1:7457');
         const checks = [
@@ -113,6 +114,9 @@ const context = {
           async continue() { assert.fail('closed context must not continue the pending request'); },
         });
         await cookieStarted.promise;
+        // The agent has its report: end the run as a closed page would, after
+        // the controller has printed where it saved the picture.
+        setImmediate(() => closed());
         return Buffer.from([0x89, 0x50, 0x4e, 0x47]);
       },
     };
