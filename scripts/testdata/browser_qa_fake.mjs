@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
 
 const origin = 'http://127.0.0.1:7457';
 
 let handler;
-let closed;
 let socketsBlocked = false;
 let removingRoutes = false;
 let pendingRoute;
@@ -36,7 +36,7 @@ const context = {
   async newPage() {
     return {
       async addInitScript() {},
-      once(event, callback) { assert.equal(event, 'close'); closed = callback; },
+      once(event) { assert.equal(event, 'close'); },
       async goto(origin) {
         assert.equal(origin, 'http://127.0.0.1:7457');
         const checks = [
@@ -101,13 +101,19 @@ const context = {
         }
         assert.ok(socketsBlocked);
         console.log('QA policy checks passed: ' + checks.length);
+      },
+      // The controller asks for this only when an agent reports a timed-out
+      // step: it must save the picture where it says it did.
+      async screenshot(options) {
+        assert.match(options.path, /qa-report-[0-9]+[\\/]page\.png$/);
+        await writeFile(options.path, 'PNG');
         closeWithPendingCookie = true;
         pendingRoute = handler({
           request: () => ({ url: () => origin + '/api/Rooms', method: () => 'POST' }),
           async continue() { assert.fail('closed context must not continue the pending request'); },
         });
         await cookieStarted.promise;
-        closed();
+        return Buffer.from([0x89, 0x50, 0x4e, 0x47]);
       },
     };
   },

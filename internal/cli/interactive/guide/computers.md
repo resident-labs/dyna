@@ -158,6 +158,19 @@ remains available. A restriction can show an error in a write control; record
 that restriction separately from an unexpected app error. This mode tests read
 flows. It cannot test a flow that needs a real write.
 
+The ready banner names what this mode cannot show: settings writes, live
+updates, and server fields newer than the installed engine. Every socket stays
+closed, so no live update ever arrives, and a write control keeps its old
+value. A banner line names the report path for this run.
+
+When a step times out, ask the QA command why instead of guessing. Create the
+report file it named, as `mkdir -p <dir> && touch <dir>/request`. The command
+then prints one line naming every blocked request kind with its count, such as
+`POST API request x4` and `socket`, and saves the page screenshot at
+`<dir>/page.png`. Read both together: a control that needs a write, a live
+socket or a newer server field cannot work in this tab, and a branch bug looks
+different. The report never holds a URL, a header or a cookie.
+
 Use the existing `dyna browser` Playwright and CDP connection to inspect the
 QA context. Select the page where `globalThis.__dynaReadOnlyQA === true` in a page evaluation.
 A fresh CDP connection can list the QA page beside the installed app tabs. Set its
