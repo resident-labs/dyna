@@ -288,8 +288,13 @@ type GoalEvent struct {
 	Title string    `json:"title"`
 	Actor string    `json:"actor"`
 	State GoalState `json:"state"`
-	// Summary is the finishing note of a finished goal.
+	// Summary is the finishing note of a finished goal, or the text of a brief
+	// amendment.
 	Summary string `json:"summary,omitempty"`
+	// Amendment is how many amendments the goal holds after this one, oldest
+	// first. It is part of the post identity, so the same words amended twice
+	// still deliver twice.
+	Amendment int `json:"amendment,omitempty"`
 }
 
 func (GoalEvent) eventFamily() EventFamily { return FamilyGoal }
@@ -298,10 +303,10 @@ func (g GoalEvent) eventType() EventType   { return EventType(g.Type) }
 func (g GoalEvent) eventSubject() string { return g.GoalID }
 
 // eventDedupe keys one post per goal and change and text, so a retried edit
-// posts once and a second edit posts again. The amendment text is in the key,
-// so two amendments to the same goal post twice.
+// posts once and a second edit posts again. An amendment adds its stored
+// position: two amendments with the same words are two different posts.
 func (g GoalEvent) eventDedupe() string {
-	return string(g.Type) + "\x00" + g.Title + "\x00" + g.Summary
+	return string(g.Type) + "\x00" + g.Title + "\x00" + g.Summary + "\x00" + strconv.Itoa(g.Amendment)
 }
 
 // CheckinState is a child's activity when the check-in was written.

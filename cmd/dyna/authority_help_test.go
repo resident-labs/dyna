@@ -28,6 +28,8 @@ var serviceAuthorityActions = map[string]bool{
 	"SetPRGoal":               true,
 	"UpdateChangeNotes":       true,
 	"post @voice-call":        true,
+	// goal amend is a flag of `dyna goal edit`, not a command path of its own.
+	"goal amend": true,
 }
 
 func TestAuthorityRulesResolveToCommands(t *testing.T) {
