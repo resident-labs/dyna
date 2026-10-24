@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -255,7 +256,10 @@ func (m *Manager) noteInstructionsLocked(meta *Meta, now time.Time) error {
 		Detail:     instructions.Lines(changes),
 		Occurrence: meta.InstructionsSeq,
 	}
-	msg, err := m.rooms().PostEvent(meta.RoomID, event, meta.Address())
+	msg, err := m.rooms().PostEventInput(room.PostEventInput{
+		RoomID: meta.RoomID, Event: event, To: []string{meta.Address()},
+		SessionIDs: map[string]string{meta.Address(): meta.ID},
+	})
 	if err != nil {
 		return err
 	}
@@ -287,33 +291,47 @@ func instructionChanges(changes []instructions.Change) []room.InstructionChange 
 
 // NoteRoomInstructions queues a change for each open session in roomID,
 // or every room for global edits. Persisting the time lets short CLI calls
-// exit and lets a new engine finish a batch after a restart.
-func (m *Manager) NoteRoomInstructions(ctx context.Context, roomID string) {
+// exit and lets a new engine finish a batch after a restart. It returns the
+// session addresses the queued change can reach, so a rule's one owner row can
+// carry the same reach as the per-session notes.
+func (m *Manager) NoteRoomInstructions(ctx context.Context, roomID string) []string {
 	if m == nil {
-		return
+		return nil
 	}
 	if m.InstructionsChanged != nil {
 		defer m.InstructionsChanged()
 	}
 	sessions, err := m.store().listMeta(false, true)
 	if err != nil {
-		return
+		return nil
 	}
+	var reached []string
+	// One queued update has one deadline. Otherwise the engine wakes for the
+	// first session and an owner batch can lose the sessions that are due later.
+	changedAt := time.Now()
 	for _, meta := range sessions {
 		if !meta.Closed.IsZero() || (roomID != "" && meta.RoomID != roomID) || meta.Instructions == nil {
 			continue
 		}
-		_, _ = m.store().updateMetaContext(ctx, meta.ID, func(mm *Meta) {
+		queued := false
+		_, err := m.store().updateMetaContext(ctx, meta.ID, func(mm *Meta) {
 			if mm.Closed.IsZero() {
-				mm.InstructionsChangedAt = time.Now()
+				mm.InstructionsChangedAt = changedAt
+				queued = true
 			}
 		})
+		if err == nil && queued {
+			reached = append(reached, meta.Address())
+		}
 	}
+	slices.Sort(reached)
+	return reached
 }
 
 // FlushInstructionNotes sends one combined note after three quiet seconds.
-// The deadline is checked again under the session lock before posting. It
-// returns when the next session's quiet period ends, or zero when none waits,
+// The deadline is checked again under the session lock before posting. Shared
+// changes also get one quiet owner summary; the agent's own notes stay in DMs.
+// It returns when the next session's quiet period ends, or zero when none waits,
 // so the engine can wake it then.
 func (m *Manager) FlushInstructionNotes(ctx context.Context, now time.Time) (time.Time, error) {
 	sessions, err := m.store().listMeta(false, true)
@@ -322,6 +340,7 @@ func (m *Manager) FlushInstructionNotes(ctx context.Context, now time.Time) (tim
 	}
 	var next time.Time
 	var failures []error
+	var posted []room.Message
 	for _, meta := range sessions {
 		if meta.InstructionsChangedAt.IsZero() {
 			continue
@@ -332,11 +351,111 @@ func (m *Manager) FlushInstructionNotes(ctx context.Context, now time.Time) (tim
 			}
 			continue
 		}
+		before := len(meta.InstructionsNotes)
 		if err := m.noteInstructionsAt(ctx, meta.ID, now); err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		after, err := m.store().Info(meta.ID)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		if len(after.InstructionsNotes) <= before {
+			continue
+		}
+		for _, id := range after.InstructionsNotes[before:] {
+			msg, err := m.rooms().Message(meta.RoomID, id)
+			if err != nil {
+				failures = append(failures, err)
+				continue
+			}
+			posted = append(posted, msg)
+		}
+	}
+	if err := m.postInstructionBatches(posted); err != nil {
+		failures = append(failures, err)
+	}
+	return next, errors.Join(failures...)
+}
+
+// postInstructionBatches stores one quiet owner row for each exact diff that
+// reached at least two sessions in this flush. Rule-only diffs use the rule's
+// own row and its Sessions field instead. A change with one recipient has only
+// that session's DM note and no room-chat row.
+func (m *Manager) postInstructionBatches(notes []room.Message) error {
+	type batch struct {
+		roomID   string
+		sections []room.InstructionChange
+		sessions map[string]bool
+		notes    map[string]bool
+	}
+	groups := map[string]*batch{}
+	var order []string
+	for _, msg := range notes {
+		ev, ok := msg.InstructionNote()
+		if !ok || len(ev.Sections) == 0 || ruleInstructionSections(ev.Sections) {
+			continue
+		}
+		// Detail is the exact instruction diff. Grouping by it keeps shared
+		// sections together without merging a session's own goal or job change.
+		key := msg.RoomID + "\x00" + ev.Detail
+		one := groups[key]
+		if one == nil {
+			one = &batch{roomID: msg.RoomID, sections: ev.Sections, sessions: map[string]bool{}, notes: map[string]bool{}}
+			groups[key] = one
+			order = append(order, key)
+		}
+		one.sessions[ev.Session] = true
+		one.notes[msg.ID] = true
+	}
+	var failures []error
+	for _, key := range order {
+		one := groups[key]
+		if len(one.sessions) < 2 {
+			continue
+		}
+		sessions := make([]string, 0, len(one.sessions))
+		for address := range one.sessions {
+			sessions = append(sessions, address)
+		}
+		slices.Sort(sessions)
+		noteIDs := make([]string, 0, len(one.notes))
+		for id := range one.notes {
+			noteIDs = append(noteIDs, id)
+		}
+		slices.Sort(noteIDs)
+		rec, err := m.rooms().Resolve(one.roomID)
+		if err != nil {
+			failures = append(failures, err)
+			continue
+		}
+		sum := sha256.Sum256([]byte(strings.Join(noteIDs, "\x00")))
+		_, err = m.rooms().PostEventInput(room.PostEventInput{
+			RoomID: one.roomID,
+			ID:     fmt.Sprintf("msg_%x", sum[:8]),
+			Event:  room.InstructionBatchEvent{Sections: one.sections, Sessions: sessions, Notes: noteIDs},
+			To:     []string{rec.Name},
+		})
+		if err != nil {
 			failures = append(failures, err)
 		}
 	}
-	return next, errors.Join(failures...)
+	return errors.Join(failures...)
+}
+
+// ruleInstructionSections reports a diff that the rule's own typed row already
+// summarizes. Mixed diffs still get a batch for their non-rule sections.
+func ruleInstructionSections(sections []room.InstructionChange) bool {
+	if len(sections) == 0 {
+		return false
+	}
+	for _, section := range sections {
+		if section.Name != "Room rules" && section.Name != "Global rules" {
+			return false
+		}
+	}
+	return true
 }
 
 // beforeInstructionsRefresh lets a test change rules just before a refresh.
