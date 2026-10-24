@@ -3,7 +3,9 @@ package computerweb
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -119,6 +121,9 @@ func TestShotFallsBackToLastPNG(t *testing.T) {
 
 func TestViewLeaseAndControl(t *testing.T) {
 	// A stand-in for wayvnc, and a daemon that points the lease at it.
+	// The engine's PATH is not the daemon's PATH. A working daemon stream
+	// must not depend on the engine finding wayvnc.
+	t.Setenv("PATH", t.TempDir())
 	rfb := filepath.Join(t.TempDir(), "rfb.sock")
 	rl, err := net.Listen("unix", rfb)
 	if err != nil {
@@ -186,6 +191,29 @@ func TestViewLeaseAndControl(t *testing.T) {
 	}
 	if _, err := h.Control("ses_a", "pagekey-1", "agent"); err == nil {
 		t.Fatal("a closed viewer still takes control calls")
+	}
+}
+
+func TestViewFailureKeepsDaemonCode(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "wayvnc"), []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	fake, h := daemon(t)
+	fake.Handle = func(context.Context, computers.Request) (any, error) {
+		return nil, &computers.StreamError{Code: computers.StreamWayVNCMissing}
+	}
+	_, err := h.OpenView("ses_a", "pagekey-1")
+	if err == nil {
+		t.Fatal("view opened without a daemon stream")
+	}
+	var failure interface {
+		FailureCode() string
+		Permanent() bool
+	}
+	if !errors.As(err, &failure) || failure.FailureCode() != "wayvnc-missing" || !failure.Permanent() {
+		t.Fatalf("daemon failure lost its code: %T %v", err, err)
 	}
 }
 

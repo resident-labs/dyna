@@ -18,8 +18,10 @@ func TestStatusExplainsUnavailableDesktopOrStream(t *testing.T) {
 	t.Setenv("DYNA_COMPUTERS_TEST_ENABLE", "1")
 	t.Setenv("DYNA_COMPUTERS_ENABLED", "")
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "labwc"), []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"labwc", "wayvnc"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	socket := computers.ControlSocket("")
@@ -35,6 +37,9 @@ func TestStatusExplainsUnavailableDesktopOrStream(t *testing.T) {
 	done := make(chan error, 1)
 	go func() {
 		done <- computers.Serve(ctx, listener, func(_ context.Context, r computers.Request) (any, error) {
+			if r.Op == "stream.check" {
+				return struct{}{}, nil
+			}
 			if r.Op != "status" {
 				return nil, fmt.Errorf("status must not create a desktop: %s", r.Op)
 			}
@@ -81,6 +86,14 @@ func TestStatusExplainsUnavailableDesktopOrStream(t *testing.T) {
 				t.Fatalf("status details were changed: %+v", got)
 			}
 		})
+	}
+}
+
+func TestStatusDoctorReportsMissingWayVNC(t *testing.T) {
+	state := computers.Status{State: computers.StateRunning, Renderer: "gles2"}
+	streamErr := &computers.StreamError{Code: computers.StreamWayVNCMissing}
+	if got, want := statusDoctor(state, streamErr), "the screen streamer (wayvnc) is not installed"; got != want {
+		t.Fatalf("doctor = %q, want %q", got, want)
 	}
 }
 
