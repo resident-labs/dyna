@@ -13,10 +13,11 @@ var nativePathKeys = map[string][]string{
 	"codex":       {"CODEX_HOME", "CODEX_SQLITE_HOME"},
 	"opencode":    {"OPENCODE_CONFIG_DIR", "OPENCODE_DB"},
 	"muse":        {"MUSE_AUTH_PATH", "TBH_CREDENTIAL_BACKEND"},
+	"kimi-code":   {"KIMI_CODE_HOME"},
 }
 
 func TestNativeEnvironmentIsSharedByLoginAndRuntime(t *testing.T) {
-	for _, h := range []string{"claude-code", "codex", "opencode", "muse", "grok", "pi", "antigravity"} {
+	for _, h := range []string{"claude-code", "codex", "opencode", "muse", "grok", "pi", "antigravity", "kimi-code"} {
 		t.Run(h, func(t *testing.T) {
 			a := testAccounts(t)
 			scope := filepath.Join(a.Root, h, ".runtime")

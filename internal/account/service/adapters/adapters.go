@@ -35,6 +35,8 @@ func Models(ctx context.Context, harness, executable string, env []string) ([]Mo
 		return modelsGrok(ctx, executable, env)
 	case "pi":
 		return modelsPi(ctx, executable, env)
+	case "kimi-code":
+		return modelsKimiCode(ctx, executable, env)
 	}
 	return nil, ErrUnsupported
 }

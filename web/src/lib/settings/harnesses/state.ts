@@ -32,6 +32,7 @@ export const HARNESS_ORDER: HarnessMeta[] = [
   { id: 'opencode', iconId: 'opencode', name: 'OpenCode', short: 'OpenCode' },
   { id: 'antigravity', iconId: 'antigravity', name: 'Antigravity', short: 'Antigrav.' },
   { id: 'grok', iconId: 'grok', name: 'Grok', short: 'Grok' },
+  { id: 'kimi-code', iconId: 'kimi-code', name: 'Kimi Code', short: 'Kimi' },
   { id: 'pi', iconId: 'pi', name: 'Pi', short: 'Pi' },
   { id: 'muse', iconId: 'muse', name: 'Muse', short: 'Muse' },
 ]

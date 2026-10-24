@@ -93,7 +93,7 @@ func (s *Service) privateInstallations() []Installation {
 		if err != nil {
 			continue
 		}
-		env := slices.DeleteFunc(os.Environ(), func(pair string) bool {
+		env := slices.DeleteFunc(runtime.NativeEnvironmentBase(h, os.Environ()), func(pair string) bool {
 			key, _, _ := strings.Cut(pair, "=")
 			_, replaced := native[key]
 			_, rooted := tools[key]

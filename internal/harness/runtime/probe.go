@@ -68,7 +68,7 @@ func (m *BundleManager) Probe(ctx context.Context, b Bundle) error {
 // toolchains (PATH, node, go) available but points HOME, the XDG roots and
 // the adapter's native roots at a private throwaway scope.
 func probeEnvironment(a RuntimeAdapter, scope string) ([]string, error) {
-	base := os.Environ()
+	base := NativeEnvironmentBase(a.Harness, os.Environ())
 	tools, err := home.ToolRoots(base)
 	if err != nil {
 		return nil, err

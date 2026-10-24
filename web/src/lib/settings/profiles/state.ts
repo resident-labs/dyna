@@ -15,6 +15,7 @@ export const harnesses: HarnessChoice[] = [
   { id: 'muse', label: 'Muse', icon: 'muse', description: 'A dedicated harness for Muse models and agent sessions.' },
   { id: 'pi', label: 'Pi', icon: 'pi', description: 'A minimal agent harness. Sign in to Anthropic, OpenAI or Copilot inside Pi, or use API keys.' },
   { id: 'grok', label: 'Grok Build', icon: 'grok', description: 'xAI’s coding agent, with Grok models and reasoning levels.' },
+  { id: 'kimi-code', label: 'Kimi Code', icon: 'kimi-code', description: 'Moonshot’s native coding agent, with managed models and thinking levels.' },
 ]
 export function inCategory(model: Pick<CatalogModel, 'category'>, category: string): boolean {
   return category === 'all' || (category === 'opencode' ? ['go', 'free'].includes(model.category) : model.category === category)
@@ -133,7 +134,7 @@ export function compactHint(rule: CompactRule | null | undefined, off = '', max 
 const ACCESS: Record<string, string> = { go: 'OpenCode Go', free: 'Free', other: 'Provider access' }
 export const accessLabel = (model?: Pick<CatalogModel, 'category'> | null): string => ACCESS[model?.category ?? ''] ?? 'Manual entry'
 
-const PUBLISHER_ICONS: Record<string, string> = { openai: 'codex', anthropic: 'claude', google: 'antigravity', muse: 'muse', xai: 'grok', opencode: 'opencode', 'opencode-go': 'opencode' }
+const PUBLISHER_ICONS: Record<string, string> = { openai: 'codex', anthropic: 'claude', google: 'antigravity', muse: 'muse', xai: 'grok', opencode: 'opencode', 'opencode-go': 'opencode', 'managed:kimi-code': 'kimi-code', kimi: 'kimi-code', moonshot: 'kimi-code' }
 export function publisherIcon(model?: Pick<CatalogModel, 'publisher' | 'providerId'> | null): string {
   const publisher = (model?.publisher || model?.providerId || '').toLowerCase()
   return PUBLISHER_ICONS[publisher] || ''

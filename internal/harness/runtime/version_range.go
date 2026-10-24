@@ -23,6 +23,11 @@ func supportedVersionRange(harness, version string) (bool, string) {
 			return true, ""
 		}
 		return false, "The " + piNPMPackage + " package starts at Pi 1.1.0."
+	case "kimi-code":
+		if versionAtLeast(version, "2.3.1") {
+			return true, ""
+		}
+		return false, "Dyna supports Kimi Code 2.3.1 or later."
 	}
 	return true, ""
 }
