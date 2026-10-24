@@ -368,6 +368,7 @@ var legacyGlobalRulesFiles = map[string]func(home string) string{
 	"grok":        func(home string) string { return filepath.Join(home, "AGENTS.md") },
 	"opencode":    func(home string) string { return filepath.Join(home, "AGENTS.md") },
 	"pi":          func(home string) string { return filepath.Join(home, "AGENTS.md") },
+	"kimi-code":   func(home string) string { return filepath.Join(home, "AGENTS.md") },
 	"muse": func(home string) string {
 		return filepath.Join(harnesshome.Roots(home)["XDG_CONFIG_HOME"], "muse", "AGENTS.md")
 	},

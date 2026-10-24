@@ -92,6 +92,9 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 	if p.Harness == profile.HarnessAntigravity {
 		home = p.Env["HOME"]
 	}
+	if p.Harness == profile.HarnessKimiCode {
+		home = p.Env["KIMI_CODE_HOME"]
+	}
 	launch.Key += "\x00" + home
 	cold := false
 	started := launch.OnStart
@@ -158,8 +161,11 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 		s.close()
 		return nil, err
 	}
-	if s.antigravity {
+	if s.antigravity || p.Harness == profile.HarnessKimiCode {
 		mode := "yolo"
+		if p.Harness == profile.HarnessKimiCode {
+			mode = "auto"
+		}
 		if p.SafeMode {
 			mode = "default"
 		}
@@ -175,6 +181,12 @@ func acpDial(ctx context.Context, p profile.Profile, cwd, sessionID string, exec
 }
 
 func acpArgv(p profile.Profile) ([]string, error) {
+	if p.Harness == profile.HarnessKimiCode {
+		if p.Env["KIMI_CODE_HOME"] == "" {
+			return nil, errors.New("Kimi Code ACP needs the private KIMI_CODE_HOME")
+		}
+		return []string{"acp"}, nil
+	}
 	if p.Harness == profile.HarnessAntigravity {
 		if err := validateAntigravityACPLogin(p.Env["HOME"]); err != nil {
 			return nil, err

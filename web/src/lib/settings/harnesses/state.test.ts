@@ -101,7 +101,7 @@ test('catalog rows require current runtime IDs', () => {
   assert.equal(preferenceStatusLabel('allowed'), 'will copy')
   assert.equal(preferenceStatusLabel('unknown'), 'not imported (unknown)')
   assert.equal(toolSummary('mcp', { command: 'npx', args: ['@playwright/mcp'] }), 'npx @playwright/mcp')
-  assert.equal(HARNESS_ORDER.length, 7)
+  assert.equal(HARNESS_ORDER.length, 8)
 })
 
 test('tool selection sends the runtime harness ID to the catalog', async () => {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -43,6 +44,17 @@ func privateAccountFiles(h, scope string) []string {
 		return []string{filepath.Join(config, "muse", "auth.json"), filepath.Join(config, "muse", ".auth.json.lock")}
 	case "opencode":
 		return []string{filepath.Join(roots["XDG_DATA_HOME"], "opencode", "auth.json"), filepath.Join(roots["XDG_STATE_HOME"], "opencode", ".dyna-account.lock")}
+	case "kimi-code":
+		files := []string{filepath.Join(scope, "config.toml"), filepath.Join(scope, ".dyna-account.lock"), filepath.Join(scope, "credentials", "kimi-code.json")}
+		entries, err := os.ReadDir(filepath.Join(scope, "credentials"))
+		if err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+					files = append(files, filepath.Join(scope, "credentials", entry.Name()))
+				}
+			}
+		}
+		return files
 	}
 	return nil
 }
@@ -187,6 +199,8 @@ func validateAccountManagerEnv(h, scope string, env map[string]string) error {
 	case "pi":
 		expected["PI_CODING_AGENT_DIR"] = scope
 		expected["PI_CODING_AGENT_SESSION_DIR"] = filepath.Join(scope, "sessions")
+	case "kimi-code":
+		expected["KIMI_CODE_HOME"] = scope
 	case "opencode":
 		expected["OPENCODE_CONFIG_DIR"] = scope
 		expected["OPENCODE_DB"] = filepath.Join(scope, "opencode.db")
