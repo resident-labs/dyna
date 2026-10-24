@@ -156,7 +156,10 @@ func (s *Store) migratePostIndex() error {
 	if err := s.backfillPostRecipients(db); err != nil {
 		return err
 	}
-	return s.catchUpPostIndex(db)
+	if err := s.catchUpPostIndex(db); err != nil {
+		return err
+	}
+	return s.pruneOrphanPostRows(db)
 }
 
 // postIndexRecipientsKey records that the retained posts of every room were
@@ -347,6 +350,73 @@ func (s *Store) catchUpPostIndex(db *sql.DB) error {
 	return nil
 }
 
+// pruneOrphanPostRows removes rows for posts that were never appended. It runs
+// after the cursor catch-up so a retained post gets its missing rows before the
+// cleanup decides which index rows have no post.
+func (s *Store) pruneOrphanPostRows(db *sql.DB) error {
+	records, err := storedRecords(db)
+	if err != nil {
+		return err
+	}
+	for _, rec := range records {
+		if err := s.pruneOrphanPostRowsForRoom(db, rec.ID); err != nil {
+			return fmt.Errorf("prune orphan post rows in room %s: %w", rec.ID, err)
+		}
+	}
+	return nil
+}
+
+func (s *Store) pruneOrphanPostRowsForRoom(db *sql.DB, roomID string) error {
+	return s.withRoomLock(roomID, func() error {
+		msgs, err := s.Messages(roomID)
+		if err != nil {
+			return err
+		}
+		retained := make(map[string]struct{}, len(msgs))
+		for _, msg := range msgs {
+			retained[msg.ID] = struct{}{}
+		}
+		rows, err := db.Query(`SELECT post_id FROM post_homes WHERE room_id=?
+UNION SELECT post_id FROM post_deliveries WHERE room_id=?`, roomID, roomID)
+		if err != nil {
+			return err
+		}
+		var orphans []string
+		for rows.Next() {
+			var postID string
+			if err := rows.Scan(&postID); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			if _, ok := retained[postID]; !ok {
+				orphans = append(orphans, postID)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+		if len(orphans) == 0 {
+			return nil
+		}
+		return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
+			ctx := context.Background()
+			for _, postID := range orphans {
+				if _, err := conn.ExecContext(ctx, "DELETE FROM post_deliveries WHERE room_id=? AND post_id=?", roomID, postID); err != nil {
+					return err
+				}
+				if _, err := conn.ExecContext(ctx, "DELETE FROM post_homes WHERE room_id=? AND post_id=?", roomID, postID); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+}
+
 // indexPostsFrom writes the rows of every post between offset and the end of
 // the room's log, then moves the cursor past them. A negative offset starts at
 // the room's stored cursor.
@@ -506,8 +576,8 @@ func (s *Store) ReplyHome(db *sql.DB, roomID, postID string) Conversation {
 // in the log also finds its rows: they are what decide who reads the post, and
 // a reader that saw the line first would miss them. The store removes the rows
 // again when the append fails (dropPostRows); a crash between the two steps
-// leaves them behind, and a row reader skips a row whose post the log does not
-// hold (see NewestSeatDelivery).
+// leaves them behind until the next startup cleanup, and a row reader skips a
+// row whose post the log does not hold (see NewestSeatDelivery).
 func (s *Store) indexPostRows(roomID, roomName string, msg Message) error {
 	db, err := s.postIndexDB()
 	if err != nil {
@@ -524,7 +594,7 @@ func (s *Store) indexPostRows(roomID, roomName string, msg Message) error {
 // dropPostRows removes the index rows of a post the store could not append, so
 // no reader acts on a delivery for a post the log does not hold. A failed
 // removal leaves the row where it looks like the crash case: a reader skips a
-// row whose post is not in the log.
+// row whose post is not in the log, and the next startup cleanup removes it.
 func (s *Store) dropPostRows(roomID, postID string) {
 	db, err := s.postIndexDB()
 	if err != nil {
