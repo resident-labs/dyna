@@ -615,3 +615,73 @@ func TestNodeRunFailsWhenItsBudgetEndsBeforeTheReports(t *testing.T) {
 		t.Fatalf("check log lost after the run ended: %v: %q", err, data)
 	}
 }
+
+// writeCheckReports writes the report files one check produced on its node.
+func writeCheckReports(out io.Writer, files map[string]string) error {
+	tw := tar.NewWriter(out)
+	for name, body := range files {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0600, Size: int64(len(body))}); err != nil {
+			return err
+		}
+		if _, err := io.WriteString(tw, body); err != nil {
+			return err
+		}
+	}
+	return tw.Close()
+}
+
+// A check that fails its command still keeps everything its reports prove: the
+// execution timing, the structured test failures, the slow tests and the report
+// links. The command's own outcome stays the check's outcome and cause.
+func TestNodeKeepsReportsOfACheckWhoseCommandFailed(t *testing.T) {
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeNodeGit(dir, out, name, args) {
+			return nil
+		}
+		script := args[len(args)-1]
+		switch {
+		case strings.Contains(script, "df -Pk"):
+			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+		case name == "systemd-run" || strings.Contains(script, "systemd-run"):
+			fmt.Fprintln(out, "--- FAIL: TestBroken")
+			fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=1")
+			return exitError(t, 1)
+		case strings.Contains(script, "tar -C"):
+			return writeCheckReports(out, map[string]string{
+				"relay/execution.json":       `{"durationNanos":250000000}`,
+				"relay/relay-test.xml":       `<testsuite><testcase name="TestSlow" time="0.2"/><testcase name="TestBroken"><failure message="bad"/></testcase></testsuite>`,
+				"relay/ci-diagnostics.jsonl": "{\"kind\":\"counter\",\"key\":\"go/test\",\"value\":\"exit=1\"}\n",
+			})
+		}
+		return nil
+	}
+	result, err := runner.Run(t.Context(), Request{Repo: t.TempDir(), Suites: []Suite{SuiteRelay}, MaxTest: time.Second, DeferSave: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check := result.Checks[0]
+	if check.Status != OutcomeFailed || check.Cause != CauseTestFailure {
+		t.Fatalf("command outcome lost: %+v", check)
+	}
+	if check.Duration != 250*time.Millisecond {
+		t.Fatalf("execution timing lost: %+v", check)
+	}
+	if failures := strings.Join(check.Failures, "\n"); !strings.Contains(failures, "TestBroken") {
+		t.Fatalf("structured failures lost: %+v", check.Failures)
+	}
+	if len(check.SlowTests) == 0 || check.SlowTests[0].Name != "TestSlow" {
+		t.Fatalf("slow tests lost: %+v", check.SlowTests)
+	}
+	links := map[string]bool{}
+	for _, report := range check.Reports {
+		links[filepath.Base(report)] = true
+	}
+	if !links["relay-test.xml"] || !links["ci-diagnostics.jsonl"] {
+		t.Fatalf("report links lost: %v", check.Reports)
+	}
+	if !strings.Contains(check.LogTail, "TestBroken") {
+		t.Fatalf("structured output lost from the tail: %q", check.LogTail)
+	}
+}
