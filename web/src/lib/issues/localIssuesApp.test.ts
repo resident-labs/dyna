@@ -18,6 +18,8 @@ interface IssueRow {
   id: string
   state: string
   changedAt: number
+  inProgress?: boolean
+  fixPr?: number
 }
 
 interface IssuesState {
@@ -51,6 +53,16 @@ test('the History list drops open issues that the all=true call returns', async 
   c.reload = createReloadGate(() => ({ room: 'a', visit: 1 }), () => true)
   await (c.loadIssues as (all?: boolean) => Promise<void>)(true)
   assert.deepEqual(c.issueHistory.map((i) => i.id), ['c', 'g'])
+})
+
+test('History retains open issues with linked work', async () => {
+  const c = app({
+    roomId: 'a', issues: [], issueHistory: [], showIssues: true, loadError: '',
+    api: { issues: async () => [{ id: 'p', state: 'open', inProgress: true, fixPr: 42, changedAt: 7 }, { id: 'o', state: 'open', changedAt: 8 }] },
+  })
+  c.reload = createReloadGate(() => ({ room: 'a', visit: 1 }), () => true)
+  await (c.loadIssues as (all?: boolean) => Promise<void>)(true)
+  assert.deepEqual(c.issueHistory.map((i) => i.id), ['p'])
 })
 
 test('Close asks for a reason and sends it', async () => {
