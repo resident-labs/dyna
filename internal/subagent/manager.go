@@ -221,6 +221,7 @@ type StartOptions struct {
 	Schema    string    // optional JSON Schema for the first turn's result
 	Goal      string    // required outcome and done condition; the session's goal, or its item's text when delegating
 	Under     string    // explicit parent goal ID to delegate from; empty picks deterministically
+	Fixes     []int     // room issue numbers linked to the session's goal
 	Task      string    // brief: context, owned files, checks and limits
 	MessageID string    // stored input for the first turn, instead of a task brief
 }
@@ -424,7 +425,7 @@ func (m *Manager) start(opts StartOptions, parent, owner string) (Info, Turn, er
 	if err := store.writeMeta(meta); err != nil {
 		return Info{}, Turn{}, err
 	}
-	if meta.Goal, meta.Item, err = m.addSpawnGoal(meta, opts.Under, goal, task); err == nil {
+	if meta.Goal, meta.Item, err = m.addSpawnGoal(meta, opts.Under, goal, task, opts.Fixes); err == nil {
 		if err = store.writeMeta(meta); err != nil {
 			if meta.Item == "" {
 				_, _ = m.goalStore().Finish(roomRec.ID, meta.Goal, id, "The session failed to start.", true)

@@ -156,6 +156,8 @@ type SubagentStart struct {
 	Profile, Name, Dir, Cwd, Schema, Goal, Task string
 	// Under names the goal to delegate from; empty picks deterministically.
 	Under string
+	// Fixes names room issues linked to the session's goal.
+	Fixes []int
 	// Owner labels an owner caller's harness thread, such as codex:<id>.
 	Owner string
 }
@@ -167,7 +169,7 @@ func (s *Service) StartSubagent(ctx context.Context, roomRef string, in Subagent
 	if err != nil {
 		return subagent.Info{}, err
 	}
-	info, _, err := s.Notify.Sessions.Start(ctx, subagent.StartOptions{Profile: in.Profile, Name: in.Name, Room: rec.ID, Dir: in.Dir, Cwd: in.Cwd, Schema: in.Schema, Goal: in.Goal, Under: in.Under, Task: in.Task, Owner: in.Owner})
+	info, _, err := s.Notify.Sessions.Start(ctx, subagent.StartOptions{Profile: in.Profile, Name: in.Name, Room: rec.ID, Dir: in.Dir, Cwd: in.Cwd, Schema: in.Schema, Goal: in.Goal, Under: in.Under, Fixes: in.Fixes, Task: in.Task, Owner: in.Owner})
 	return info, err
 }
 

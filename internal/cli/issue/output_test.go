@@ -80,7 +80,7 @@ esac
 }
 
 func TestIssueCommandsUseReadableOutputAndExplicitJSON(t *testing.T) {
-	for _, action := range []string{"file", "list", "close", "goal", "export"} {
+	for _, action := range []string{"file", "list", "close", "export"} {
 		for _, asJSON := range []bool{false, true} {
 			name := action + "/human"
 			if asJSON {
@@ -139,8 +139,6 @@ func TestIssueCommandsUseReadableOutputAndExplicitJSON(t *testing.T) {
 					want = "D-1  open  " + i.Title + "  parser.go:12\n"
 				case "close":
 					want = "closed D-1 : " + i.Title + "\n"
-				case "goal":
-					want = "goal D-1 : " + i.Title + " -> " + i.GoalID + "\n"
 				case "export":
 					want = "exported D-1 : " + i.Title + " -> " + i.GitHubURL + "\n"
 				}
@@ -149,6 +147,23 @@ func TestIssueCommandsUseReadableOutputAndExplicitJSON(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestIssueGoalAliasPrintsReplacement(t *testing.T) {
+	f := newIssueFixture(t)
+	f.file(t)
+	out, err := f.run("goal", "D-1")
+	if err != nil || out != "dyna goal --fixes D-1\n" {
+		t.Fatalf("alias output = %q, %v", out, err)
+	}
+	out, err = f.run("goal", "D-1", "--for", "@agent")
+	if err != nil || out != "dyna goal --for @agent --fixes D-1\n" {
+		t.Fatalf("alias holder output = %q, %v", out, err)
+	}
+	rows, err := f.rooms.Issues(f.rec.ID, true)
+	if err != nil || len(rows) != 1 || rows[0].State != "open" || rows[0].GoalID != "" {
+		t.Fatalf("alias changed the issue: %+v, %v", rows, err)
 	}
 }
 

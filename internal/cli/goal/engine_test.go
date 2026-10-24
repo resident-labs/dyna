@@ -21,8 +21,8 @@ func TestWritesCallEngine(t *testing.T) {
 		args         []string
 		count        int
 	}{
-		{"add", "AddGoal", []string{"Ship through engine", "--for", "@child"}, 3},
-		{"edit", "EditGoalSelectors", []string{"edit", "g1", "New text", "--for", "@child"}, 4},
+		{"add", "AddGoal", []string{"Ship through engine", "--for", "@child"}, 4},
+		{"edit", "EditGoalSelectors", []string{"edit", "g1", "New text", "--for", "@child"}, 5},
 		{"done", "FinishGoal", []string{"done", "g1", "Shipped"}, 4},
 		{"drop", "FinishGoal", []string{"drop", "g1"}, 4},
 	} {

@@ -50,9 +50,14 @@ type Issue struct {
 	GitHubURL string `json:"githubUrl"`
 	// FixPR is the open PR that closes this issue on merge. It is filled at
 	// read time from the PR store, so it is never part of the stored issue.
-	FixPR     int    `json:"fixPr,omitempty"`
-	ChangedBy string `json:"changedBy"`
-	ChangedAt int64  `json:"changedAt"`
+	FixPR int `json:"fixPr,omitempty"`
+	// InProgress, GoalShared and GoalHolder are computed at read time from
+	// open goals and PR links. They are never part of the stored issue.
+	InProgress bool   `json:"inProgress"`
+	GoalShared bool   `json:"goalShared,omitempty"`
+	GoalHolder string `json:"goalHolder,omitempty"`
+	ChangedBy  string `json:"changedBy"`
+	ChangedAt  int64  `json:"changedAt"`
 }
 
 // Label is the short issue reference people can type within its room.
@@ -77,7 +82,7 @@ type CloseOrigin struct {
 // path that fills origin is the tracked-PR close (goal g343, change
 // fix/pr-closes-issues), which calls this from the merge watcher.
 func (s *Store) CloseIssue(roomID, id, by, reason string, origin CloseOrigin) (Issue, error) {
-	return s.ChangeIssueFrom(roomID, id, by, origin, func(i *Issue) error {
+	return s.changeIssueFrom(roomID, id, by, origin, true, func(i *Issue) error {
 		i.State = "closed"
 		i.Reason = reason
 		return nil
@@ -419,6 +424,22 @@ func (s *Store) ChangeIssue(roomID, id, by string, change func(*Issue) error) (I
 // close. The room store posts the typed event after the change, so every path
 // that changes an issue uses it.
 func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, change func(*Issue) error) (Issue, error) {
+	return s.changeIssueFrom(roomID, id, by, origin, false, change)
+}
+
+// LinkIssueGoal records goal work without closing the issue. Relinking a
+// legacy goal issue is allowed, so a finished goal can be replaced by new work.
+func (s *Store) LinkIssueGoal(roomID, id, goalID, by string) (Issue, error) {
+	if strings.TrimSpace(goalID) == "" {
+		return Issue{}, errors.New("goal link needs a goal ID")
+	}
+	return s.changeIssueFrom(roomID, id, by, CloseOrigin{}, true, func(i *Issue) error {
+		i.State, i.GoalID, i.Assignee = "goal", goalID, ""
+		return nil
+	})
+}
+
+func (s *Store) changeIssueFrom(roomID, id, by string, origin CloseOrigin, allowGoal bool, change func(*Issue) error) (Issue, error) {
 	rec, err := s.Resolve(roomID)
 	if err != nil {
 		return Issue{}, err
@@ -451,7 +472,7 @@ func (s *Store) ChangeIssueFrom(roomID, id, by string, origin CloseOrigin, chang
 			if i.ID != id && (!numbered || i.Number != number) {
 				continue
 			}
-			if i.State != "open" {
+			if i.State != "open" && !(allowGoal && i.State == "goal") {
 				return fmt.Errorf("issue %s is already %s", i.Label(), i.State)
 			}
 			if err = change(&i); err != nil {
