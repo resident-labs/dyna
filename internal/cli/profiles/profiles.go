@@ -3,12 +3,15 @@ package profiles
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/subagent"
 	"dyna-agent/internal/workeroutput"
 )
 
@@ -29,11 +32,18 @@ func NewCommand() *cobra.Command {
 		RunE:  func(c *cobra.Command, _ []string) error { return c.Help() },
 	}
 
-	var asJSON, all bool
+	var asJSON, all, stats bool
+	var statsDays int
 	list := &cobra.Command{
 		Use:   "list",
 		Short: "List registered worker profiles with descriptions and stats",
 		RunE: func(c *cobra.Command, _ []string) error {
+			if c.Flags().Changed("days") && !stats {
+				return fmt.Errorf("--days requires --stats")
+			}
+			if stats && (statsDays < 1 || statsDays > 365) {
+				return fmt.Errorf("--days must be between 1 and 365")
+			}
 			s, err := loadStore()
 			if err != nil {
 				return err
@@ -42,13 +52,37 @@ func NewCommand() *cobra.Command {
 			if !all {
 				visible = s.EnabledProfiles()
 			}
+			measured := subagent.ProfileUsageSnapshot{Profiles: []subagent.ProfileUsageStats{}}
+			if stats {
+				now := time.Now().UTC()
+				today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+				from := today.AddDate(0, 0, 1-statsDays)
+				if err := engineClient().Call(c.Context(), "ProfileUsage", []any{from.Format(time.RFC3339), now.Format(time.RFC3339)}, &measured); err != nil {
+					return err
+				}
+			}
+			byName := map[string]subagent.ProfileUsageStats{}
+			for _, row := range measured.Profiles {
+				byName[row.Profile] = row
+			}
 			if asJSON {
 				rows := make([]profileListRow, 0, len(visible))
 				for _, p := range visible {
-					rows = append(rows, newProfileListRow(p))
+					row := newProfileListRow(p)
+					if stats {
+						value := byName[p.Name]
+						value.Profile = p.Name
+						row.Stats = &value
+					}
+					rows = append(rows, row)
 				}
-				b, _ := json.MarshalIndent(rows, "", "  ")
-				fmt.Fprintln(c.OutOrStdout(), string(b))
+				if stats {
+					b, _ := json.MarshalIndent(profileListSnapshot{From: measured.From, To: measured.To, Profiles: rows}, "", "  ")
+					fmt.Fprintln(c.OutOrStdout(), string(b))
+				} else {
+					b, _ := json.MarshalIndent(rows, "", "  ")
+					fmt.Fprintln(c.OutOrStdout(), string(b))
+				}
 				return nil
 			}
 			if len(visible) == 0 && len(s.Profiles) > 0 {
@@ -58,6 +92,9 @@ func NewCommand() *cobra.Command {
 			if len(visible) == 0 {
 				fmt.Fprintln(c.OutOrStdout(), "No profiles registered. Add one:\n  dyna profiles add --name opus-4.8 --harness claude-code --model opus --taste 5 --intelligence 4 --cost 2 --desc \"...\"")
 				return nil
+			}
+			if stats {
+				fmt.Fprintf(c.OutOrStdout(), "Measured activity: %s to %s (UTC). Cost uses known reports; ≥ marks partial coverage or a lower bound.\n\n", measured.From, measured.To)
 			}
 			for _, p := range visible {
 				def := ""
@@ -83,14 +120,32 @@ func NewCommand() *cobra.Command {
 				if p.Fallback != "" {
 					limits += "  fallback: " + p.Fallback
 				}
-				fmt.Fprintf(c.OutOrStdout(), "%s%s\n  harness: %s  model: %s  effective dialect: %s%s\n  taste: %d/10  diagnostics: %d/10  intelligence: %d/10  cost-efficiency: %d/10\n  %s\n\n",
-					p.Name, def, p.Harness, orDash(p.Model), orDash(p.EffectiveDialect()), limits, p.Taste, p.EffectiveDiagnostics(), p.Intelligence, p.Cost, p.Description)
+				fmt.Fprintf(c.OutOrStdout(), "%s%s\n  harness: %s  model: %s  effective dialect: %s%s\n  taste: %d/10  diagnostics: %d/10  intelligence: %d/10  cost-efficiency: %d/10\n",
+					p.Name, def, p.Harness, orDash(p.Model), orDash(p.EffectiveDialect()), limits, p.Taste, p.EffectiveDiagnostics(), p.Intelligence, p.Cost)
+				if stats {
+					value := byName[p.Name]
+					if value.Turns == 0 {
+						fmt.Fprintln(c.OutOrStdout(), "  measured: no turns")
+					} else {
+						cache := "unknown"
+						if value.CacheReadShare != nil {
+							cache = fmt.Sprintf("%s (%d paired turns)", measuredNumber(*value.CacheReadShare*100, "%"), value.CachePaired.Turns)
+						}
+						fmt.Fprintf(c.OutOrStdout(), "  measured: %d turns  median turn %s  cache read %s\n", value.Turns, profileDurationText(value.MedianWallMs), cache)
+						known := value.Cost.CompleteTurns + value.Cost.PartialTurns
+						fmt.Fprintf(c.OutOrStdout(), "  measured cost: %s/turn  %s spend  (%d of %d turns report cost)\n",
+							profileCostText(value.CostPerTurnUSD, value.Cost, 4), profileCostText(value.Cost.USD, value.Cost, 2), known, value.Turns)
+					}
+				}
+				fmt.Fprintf(c.OutOrStdout(), "  %s\n\n", p.Description)
 			}
 			return nil
 		},
 	}
 	list.Flags().BoolVar(&all, "all", false, "include disabled profiles")
 	list.Flags().BoolVar(&asJSON, "json", false, "machine-readable output")
+	list.Flags().BoolVar(&stats, "stats", false, "include measured activity beside authored ratings")
+	list.Flags().IntVar(&statsDays, "days", 7, "days of activity to include with --stats (1-365)")
 
 	show := &cobra.Command{
 		Use:   "show <name>",
@@ -225,8 +280,47 @@ func orDash(s string) string {
 // values. An unset rating (0) shows its neutral 5.
 type profileListRow struct {
 	profile.Profile
-	Diagnostics      int    `json:"diagnostics"`
-	EffectiveDialect string `json:"effectiveDialect"`
+	Diagnostics      int                         `json:"diagnostics"`
+	EffectiveDialect string                      `json:"effectiveDialect"`
+	Stats            *subagent.ProfileUsageStats `json:"stats,omitempty"`
+}
+
+// profileListSnapshot preserves the selected window in machine-readable output.
+type profileListSnapshot struct {
+	From     string           `json:"from"`
+	To       string           `json:"to"`
+	Profiles []profileListRow `json:"profiles"`
+}
+
+func profileCostText(value *float64, coverage subagent.UsageCost, precision int) string {
+	if value == nil {
+		return "unknown"
+	}
+	prefix := ""
+	if coverage.PartialTurns > 0 || coverage.UnknownTurns > 0 {
+		prefix = "≥ "
+	}
+	return fmt.Sprintf("%s$%.*f", prefix, precision, *value)
+}
+
+func measuredNumber(value float64, unit string) string {
+	text := strconv.FormatFloat(value, 'f', 1, 64)
+	return strings.TrimSuffix(text, ".0") + unit
+}
+
+func profileDurationText(wallMs *int64) string {
+	if wallMs == nil {
+		return "unknown"
+	}
+	duration := time.Duration(*wallMs) * time.Millisecond
+	switch {
+	case duration < time.Minute:
+		return measuredNumber(duration.Seconds(), "s")
+	case duration < time.Hour:
+		return measuredNumber(duration.Minutes(), "m")
+	default:
+		return measuredNumber(duration.Hours(), "h")
+	}
 }
 
 func newProfileListRow(p profile.Profile) profileListRow {

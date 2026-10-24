@@ -178,6 +178,74 @@ func TestReadUsageRollupGroups(t *testing.T) {
 	}
 }
 
+func TestReadProfileUsageGroupsTurnsAndPreservesCoverage(t *testing.T) {
+	s := rollupStore(t)
+	first := cachedTurn(100, 25, "complete", "complete")
+	first.Profile, first.Usage.CostUSD = "p", 1
+	first.Ended = first.Started.Add(time.Second)
+	second := cachedTurn(900, 0, "complete", "unknown")
+	second.Profile, second.Usage.CostUSD = "p", 3
+	second.UsageNormalization.Cost = "partial"
+	second.Ended = second.Started.Add(9 * time.Second)
+	third := cachedTurn(100, 75, "complete", "complete")
+	third.Profile, third.Model = "p", "n"
+	third.Usage.CostUSD = -1
+	third.UsageNormalization.Cost = "unknown"
+	third.Ended = third.Started.Add(5 * time.Second)
+	other := knownTurn(10, 1, 0)
+	other.Profile = "q"
+	other.Ended = other.Started.Add(30 * time.Second)
+	otherLong := knownTurn(10, 1, 0)
+	otherLong.Profile = "q"
+	otherLong.Ended = otherLong.Started.Add(50 * time.Second)
+	outside := knownTurn(10, 1, 100)
+	outside.Profile = "p"
+	outside.Started = outside.Started.AddDate(0, 0, 1)
+	outside.Ended = outside.Started.Add(time.Second)
+	for _, item := range []struct {
+		id   string
+		n    int
+		turn Turn
+	}{
+		{"ses_20261019-120000-aaaaaaaa", 1, first},
+		{"ses_20261019-120000-aaaaaaaa", 2, second},
+		{"ses_20261019-120000-bbbbbbbb", 1, third},
+		{"ses_20261019-120000-cccccccc", 1, other},
+		{"ses_20261019-120000-cccccccc", 2, otherLong},
+		{"ses_20261019-120000-dddddddd", 1, outside},
+	} {
+		item.turn.N = item.n
+		if err := s.RecordTurnUsage(Meta{ID: item.id, RoomID: "r1"}, item.turn); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	snap, err := s.ReadProfileUsage("2026-10-19", "2026-10-19")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.From != "2026-10-19" || snap.To != "2026-10-19" || len(snap.Profiles) != 2 {
+		t.Fatalf("snapshot = %+v", snap)
+	}
+	got := snap.Profiles[0]
+	if got.Profile != "p" || got.Turns != 3 || got.MedianWallMs == nil || *got.MedianWallMs != 5000 {
+		t.Fatalf("grouped turns and median = %+v", got)
+	}
+	if got.Cost.USD == nil || *got.Cost.USD != 4 || got.Cost.CompleteTurns != 1 || got.Cost.PartialTurns != 1 || got.Cost.UnknownTurns != 1 {
+		t.Fatalf("cost coverage = %+v", got.Cost)
+	}
+	if got.CostPerTurnUSD == nil || *got.CostPerTurnUSD != 2 {
+		t.Fatalf("cost per known-cost turn = %+v", got.CostPerTurnUSD)
+	}
+	if got.CacheReadShare == nil || *got.CacheReadShare != 0.5 || got.CachePaired.Turns != 2 {
+		t.Fatalf("cache share = %+v, pairs = %+v", got.CacheReadShare, got.CachePaired)
+	}
+	got = snap.Profiles[1]
+	if got.Profile != "q" || got.Turns != 2 || got.MedianWallMs == nil || *got.MedianWallMs != 40000 || got.CostPerTurnUSD == nil || *got.CostPerTurnUSD != 0 || got.CacheReadShare != nil {
+		t.Fatalf("second profile = %+v", got)
+	}
+}
+
 func TestRunTurnRecordsUsage(t *testing.T) {
 	e := newTestEnv(t)
 	t.Cleanup(func() { _ = database.Close(filepath.Dir(e.m.Store.Root)) })

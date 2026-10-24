@@ -76,6 +76,7 @@ export const api = {
   accountUsage: (refresh = false) => app.AccountUsage(refresh),
   profileModels: (harness: string, refresh = false) => app.ProfileModels(harness, refresh),
   usageRollup: (roomId = '', from: string, to: string) => app.UsageRollup(roomId, from, to),
+  profileUsage: (from: string, to: string) => app.ProfileUsage(from, to),
   questions: (roomId: string) => app.Questions(roomId),
   callRequests: (roomId = '') => app.CallRequests(roomId),
   callRequestShown: (roomId: string, id: string) => app.CallRequestShown(roomId, id),
