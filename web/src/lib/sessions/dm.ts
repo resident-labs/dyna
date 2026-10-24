@@ -613,6 +613,12 @@ export function threadsListed<M>(panel: ThreadPanel<M>): number {
   return rows.filter((row) => threadPosts(row) > 0).length + panel.others.length
 }
 
+// listedThreadCount is the one count used by the thread panel and the header
+// badge, so neither can count a closed child's or an empty thread by mistake.
+export function listedThreadCount<M extends Pick<Member, 'name' | 'address' | 'parent' | 'closed'> & { id?: string }>(threads: Thread[], members: M[], session: Partial<Pick<Member, 'id' | 'parent'>> = {}): number {
+  return threadsListed(threadPanel(threads, members, session))
+}
+
 // sameText reports whether two texts are equal apart from whitespace. Any
 // looser match can hide a correction in a word, link or path.
 export function sameText(a?: string | null, b?: string | null): boolean {

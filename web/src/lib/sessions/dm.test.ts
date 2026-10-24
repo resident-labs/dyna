@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { speaker } from '../ui/posts.ts'
-import { postedTo, referenceHome, threadsListed, turnHead, turnTail, dmView, groupMessages, sameText, sessionAddress, threadKeys, threadPanel, plain, voiceRequest, type DmItem, type DmRow, type DmSession, type Receipt, type Thread, type ThreadPost } from './dm.ts'
+import { postedTo, listedThreadCount, referenceHome, threadsListed, turnHead, turnTail, dmView, groupMessages, sameText, sessionAddress, threadKeys, threadPanel, plain, voiceRequest, type DmItem, type DmRow, type DmSession, type Receipt, type Thread, type ThreadPost } from './dm.ts'
 import type { SessionReference } from '../api/session.ts'
 import type { Attachment } from '../api/room.ts'
 import type { ShellJob } from '../api/terminal.ts'
@@ -262,6 +262,7 @@ test('the thread panel keeps open direct children, then the parent and siblings,
   // with it, and the child's empty thread has no count to show.
   assert.equal(threads.length, 8)
   assert.equal(threadsListed(panel), 6)
+  assert.equal(listedThreadCount(threads, members, { id: 'lead', parent: 'boss' }), 6)
 })
 test('a finished turn ends with a footer row at its end time; a running turn has none', () => {
   const session = { address, turns: [
