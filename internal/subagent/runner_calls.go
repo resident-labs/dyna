@@ -135,10 +135,10 @@ func (m *Manager) startTurn(ctx context.Context, id string, s TurnStart) error {
 		return err
 	}
 	for _, d := range s.Drained {
-		store.appendEvent(id, map[string]any{"t": "room_drained", "turn": s.Turn, "message": d.Steer.ID})
+		store.appendJournal(id, RoomDrainedJournal{Turn: s.Turn, Message: d.Steer.ID})
 	}
 	if s.Running {
-		store.appendEvent(id, map[string]any{"t": "turn_start", "turn": s.Turn})
+		store.appendJournal(id, TurnStartJournal{Turn: s.Turn})
 	}
 	return nil
 }
@@ -235,23 +235,23 @@ func (n TurnNote) apply(t *Turn) bool {
 	return true
 }
 
-// event is the note's event line, or nil.
-func (n TurnNote) event() map[string]any {
+// journal is the note's journal line, or nil.
+func (n TurnNote) journal() JournalPayload {
 	switch {
 	case n.Delivery != nil:
-		return map[string]any{"t": "defer", "turn": n.Turn, "kind": n.Delivery.Kind, "outcome": n.Delivery.Outcome, "waitedMs": n.Delivery.WaitedMs}
+		return DeferJournal{Turn: n.Turn, Kind: n.Delivery.Kind, Outcome: n.Delivery.Outcome, WaitedMs: n.Delivery.WaitedMs}
 	case n.Delivered != nil:
-		return map[string]any{"t": "steer_delivered", "turn": n.Turn}
+		return SteerDeliveredJournal{Turn: n.Turn}
 	case n.Fallback != nil:
-		return map[string]any{"t": "model_fallback", "turn": n.Turn, "from": n.Fallback.From, "to": n.Fallback.To, "message": n.Fallback.Reason}
+		return ModelFallbackJournal{Turn: n.Turn, From: n.Fallback.From, To: n.Fallback.To, Message: n.Fallback.Reason}
 	case n.HarnessSession != "":
-		return map[string]any{"t": "harness_session", "turn": n.Turn, "session": n.HarnessSession}
+		return HarnessSessionJournal{Turn: n.Turn, Session: n.HarnessSession}
 	case n.CompactError != "":
-		return map[string]any{"t": "compact_failed", "turn": n.Turn, "message": n.CompactError}
+		return CompactFailedJournal{Turn: n.Turn, Message: n.CompactError}
 	case n.Repinned != "":
-		return map[string]any{"t": "runtime_repin", "message": "The previous private bundle was removed. This session now uses the selected installed version.", "version": n.Repinned}
+		return RuntimeRepinJournal{Message: "The previous private bundle was removed. This session now uses the selected installed version.", Version: n.Repinned}
 	case n.Empty:
-		return map[string]any{"t": "turn_empty", "turn": n.Turn}
+		return TurnEmptyJournal{Turn: n.Turn}
 	}
 	return nil
 }
@@ -332,8 +332,8 @@ func (m *Manager) noteTurn(ctx context.Context, id string, n TurnNote) error {
 			m.postAccountSwitch(meta, *n.AccountSwitch)
 		}
 	}
-	if ev := n.event(); ev != nil {
-		store.appendEvent(id, ev)
+	if payload := n.journal(); payload != nil {
+		store.appendJournal(id, payload)
 	}
 	return nil
 }
