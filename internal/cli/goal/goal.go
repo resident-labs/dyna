@@ -188,12 +188,24 @@ func Command(o Options) *cobra.Command {
 		}
 		return nil
 	}}
-	edit := &cobra.Command{Use: "edit <id> [new text]", Short: "Edit a goal's text, holders or issue links and reopen it", Args: cobra.RangeArgs(1, 2)}
+	edit := &cobra.Command{Use: "edit <id> [new text]", Short: "Edit a goal's text, holders or issue links and reopen it; --amend corrects its brief", Long: "Changes a goal's text, replaces its holders or links room issues, and reopens the goal. Use --amend \"<text>\" to append a correction to the goal's brief instead: the brief and the goal text stay, the holder reads the correction, and the goal screen shows it. Only the owner or root may amend, and --amend takes no other change.", Args: cobra.RangeArgs(1, 2)}
 	var editFor []string
 	var editFixes string
+	var editAmend string
 	edit.Flags().StringArrayVar(&editFor, "for", nil, "replace holders with these selectors (repeatable)")
 	edit.Flags().StringVar(&editFixes, "fixes", "", "room issues linked to this existing goal, such as D-35,D-40")
+	edit.Flags().StringVar(&editAmend, "amend", "", "append a correction to the goal's brief; the goal text and holders stay")
 	edit.RunE = func(c *cobra.Command, a []string) error {
+		if c.Flags().Changed("amend") {
+			if len(a) == 2 || c.Flags().Changed("for") || c.Flags().Changed("fixes") {
+				return fmt.Errorf("--amend corrects the brief alone; use it without new text, --for or --fixes")
+			}
+			var g goals.Goal
+			if err := o.Client.Call(c.Context(), "AmendGoalBrief", []any{MutationRoom(roomRef), a[0], editAmend}, &g); err != nil {
+				return err
+			}
+			return printGoal(c, g)
+		}
 		var selected *[]string
 		if c.Flags().Changed("for") {
 			selected = &editFor

@@ -332,6 +332,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "EditGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.EditGoal},
 		{Name: "FinishGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.FinishGoal},
 		{Name: "ExpediteGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.ExpediteGoal},
+		{Name: "AmendGoalBrief", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.AmendGoalBrief, Local: true},
 		{Name: "SetPRGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.PRs.SetPRGoal},
 		{Name: "SetGoalItemState", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.SetGoalItemState},
 		{Name: "NoteGoal", Access: websvc.Write, Scope: websvc.ScopeOperate, Method: s.rooms.NoteGoal},

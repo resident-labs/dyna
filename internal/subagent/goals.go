@@ -159,7 +159,8 @@ func (m *Manager) spawnGoalBlock(meta Meta) (block string, hasBrief bool) {
 			if brief != "" {
 				block += "\n\nBrief:\n" + brief
 			}
-			return block, brief != ""
+			block += amendmentLines(g.Amendments)
+			return block, brief != "" || len(g.Amendments) > 0
 		}
 		return "", false
 	}
@@ -171,7 +172,23 @@ func (m *Manager) spawnGoalBlock(meta Meta) (block string, hasBrief bool) {
 	if brief != "" {
 		block += "\n\nBrief:\n" + brief
 	}
-	return block, brief != ""
+	block += amendmentLines(g.Amendments)
+	return block, brief != "" || len(g.Amendments) > 0
+}
+
+// amendmentLines lists the brief amendments in stored order, so a session that
+// joins late or refreshes after compaction reads every correction.
+func amendmentLines(amendments []goals.Amendment) string {
+	if len(amendments) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\nBrief amendments (oldest first):")
+	for _, a := range amendments {
+		b.WriteString("\n- ")
+		b.WriteString(a.Text)
+	}
+	return b.String()
 }
 
 // goalFrame leaves out the goal shown in full elsewhere in the same prompt.

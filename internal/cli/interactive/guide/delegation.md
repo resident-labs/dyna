@@ -124,6 +124,11 @@ Root cannot be a holder: `dyna goal` fails for root, and `--for @root` is refuse
 Link room issues with `--fixes D-35,D-40`. With no text, one issue supplies the
 goal title. `dyna goal edit g1 --fixes D-40` links an existing goal.
 
+A brief belongs to the goal. Only the owner or root can correct it later with
+`dyna goal edit g1 --amend "<text>"`. An amendment is appended and never replaces the
+brief: the holder reads it at once, every later refresh carries it, and the goal
+screen shows it. `--amend` takes no new text, `--for` or `--fixes`.
+
 ```bash
 dyna goal                         # your goals and other open room goals
 dyna goal --all                   # includes done and dropped goals
@@ -133,6 +138,7 @@ dyna goal --fixes D-35             # use the issue title
 dyna subagent start --goal g1 --profile <name> "<brief>"
 dyna goal edit g1 "New outcome"
 dyna goal edit g1 --fixes D-40
+dyna goal edit g1 --amend "Own internal/decoder only"  # owner or root: correct the brief
 dyna goal done g1 "Summary"
 dyna goal drop g1
 dyna goal item done g1 i2
