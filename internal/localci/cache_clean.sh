@@ -62,6 +62,36 @@ add_base() {
   done
   bases+=("$base")
 }
+
+# safe_base BASE: BASE and its Dyna-owned parent are real directories. A linked
+# base would point the cleanup at another user's tree, so nothing under it is
+# touched. The legacy tree's parent is /var/tmp, which is not Dyna's own.
+safe_base() {
+  local base=$1 parent
+  if [ -L "$base" ]; then
+    echo "dyna-ci-clean: refusing linked CI base $base" >&2
+    return 1
+  fi
+  parent=${base%/*}
+  if [ "$parent" != "$base" ] && allowed "$parent" && [ -L "$parent" ]; then
+    echo "dyna-ci-clean: refusing CI base $base under linked parent $parent" >&2
+    return 1
+  fi
+  return 0
+}
+
+# safe_path PATH: PATH resolves inside the allow-list. Nothing may change PATH
+# before this passes, because a linked parent can name another user's tree.
+safe_path() {
+  local real
+  real=$(readlink -f -- "$1" 2>/dev/null) || return 1
+  [ -n "$real" ] || return 1
+  allowed "$real" || {
+    echo "dyna-ci-clean: skipping $1, it resolves outside the allow-list" >&2
+    return 1
+  }
+}
+
 if [ -n "${DYNA_CI_CLEAN_ROOTS:-}" ]; then
   read -r -a named <<< "$DYNA_CI_CLEAN_ROOTS"
   for base in "${named[@]}"; do
@@ -72,7 +102,7 @@ if [ -n "${DYNA_CI_CLEAN_ROOTS:-}" ]; then
 else
   add_base "$legacy"
   for tree in /var/tmp/dyna-local-ci-*; do
-    [ -d "$tree" ] || continue
+    [ -d "$tree" ] && [ ! -L "$tree" ] || continue
     for base in "$tree"/*; do
       [ -d "$base" ] && [ ! -L "$base" ] || continue
       add_base "$base"
@@ -85,17 +115,12 @@ size_of() { du -sxk -- "$1" 2>/dev/null | awk 'NR == 1 {print $1}'; }
 
 # remove PATH: report PATH and its size, then delete it unless this is a dry run.
 remove() {
-  local path=$1 real kb
+  local path=$1 kb
   [ -e "$path" ] || [ -L "$path" ] || return 0
   # A caller never hands over a symlink, because a link may name a cache outside
-  # the allow-list. Resolve the path anyway, so a typo or a new caller can only
-  # ever lose Dyna's own data.
-  real=$(readlink -f -- "$path" 2>/dev/null) || return 0
-  if [ -z "$real" ]; then return 0; fi
-  allowed "$real" || {
-    echo "dyna-ci-clean: skipping $path, it resolves outside the allow-list" >&2
-    return 0
-  }
+  # the allow-list. Resolve the path first, so a typo, a linked parent or a new
+  # caller can only ever lose Dyna's own data.
+  safe_path "$path" || return 0
   kb=$(size_of "$path")
   case "$kb" in '' | *[!0-9]*) kb=0 ;; esac
   if [ "$dry" = 0 ]; then
@@ -153,6 +178,8 @@ cap_kb() {
 # directories only and follows no symlink.
 make_writable() {
   [ -d "$1" ] && [ ! -L "$1" ] || return 0
+  # Never chmod a tree until its resolved path proves it is Dyna's own.
+  safe_path "$1" || return 1
   if ! find "$1" -xdev -type d -exec chmod u+w -- {} +; then
     echo "dyna-ci-clean: cannot make $1 writable" >&2
     return 1
@@ -204,6 +231,8 @@ trim_units() {
   case "$total" in '' | *[!0-9]*) return 0 ;; esac
   while IFS=$'\t' read -r -d '' _ts path; do
     [ -e "$path" ] && [ ! -L "$path" ] || continue
+    # Validate the resolved unit before any chmod or removal.
+    safe_path "$path" || continue
     if [ "$cap" -gt 0 ] && [ "$total" -gt "$cap" ]; then
       :
     elif ! older "$path"; then
@@ -264,6 +293,10 @@ prune_tree() {
 
 failed=0
 for base in "${bases[@]}"; do
+  if ! safe_base "$base"; then
+    failed=1
+    continue
+  fi
   prune_tree "$base" || failed=1
   # The legacy tree also holds the work trees and copies of the old runner, one
   # entry per run, at its top level. A moved-aside run names itself there, and

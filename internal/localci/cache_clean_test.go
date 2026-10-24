@@ -505,6 +505,57 @@ func removeTree(t *testing.T, dir string) {
 	_ = os.RemoveAll(dir)
 }
 
+// TestCacheCleanValidatesALinkedTreeBeforeChangingIt checks that a base reached
+// through a linked parent never changes the external tree. The read-only module
+// keeps its mode and file, and the cleanup creates no lock there.
+func TestCacheCleanValidatesALinkedTreeBeforeChangingIt(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("the cleanup refuses to run as root")
+	}
+	realParent := filepath.Join(t.TempDir(), "real")
+	base := filepath.Join(realParent, "node")
+	module := filepath.Join(base, "go-mod", "example.com", "module@v1.0.0")
+	if err := os.MkdirAll(module, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	object := filepath.Join(module, "object")
+	if err := os.WriteFile(object, make([]byte, 1<<20), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	makeReadOnly(t, module)
+	t.Cleanup(func() { removeTree(t, realParent) })
+	linkParent := filepath.Join(filepath.Dir(cacheBase("x")), fmt.Sprintf("selftest-%d-linked-parent", os.Getpid()))
+	if err := os.Symlink(realParent, linkParent); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(linkParent) })
+
+	out, err := runCacheClean(t, filepath.Join(linkParent, "node"), false, "DYNA_CI_CACHE_CAP_KB=1")
+	if err == nil {
+		t.Fatalf("cleanup accepted a base under a linked parent: %s", out)
+	}
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("cleanup exit = %v: %s", err, out)
+	}
+	if !strings.Contains(string(out), "linked parent") {
+		t.Fatalf("cleanup did not name the linked parent: %s", out)
+	}
+	info, err := os.Stat(module)
+	if err != nil {
+		t.Fatalf("cleanup changed the external module: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o555 {
+		t.Fatalf("external module permissions changed to %04o", perm)
+	}
+	if data, err := os.ReadFile(object); err != nil || len(data) != 1<<20 {
+		t.Fatalf("external module file changed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "caches.lock")); !os.IsNotExist(err) {
+		t.Fatalf("cleanup created a lock in the external tree: %v", err)
+	}
+}
+
 func TestCacheCleanPrunesRunFoldersAfterTwoHours(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("the cleanup refuses to run as root")
