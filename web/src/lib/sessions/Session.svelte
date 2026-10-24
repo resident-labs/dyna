@@ -12,7 +12,7 @@
   import { createSelection } from '../ui/selection.svelte.ts'
   import DmRows from './DmRows.svelte'
   import ThreadChip from './ThreadChip.svelte'
-  import { dmView, groupMessages, plain, threadPanel, threadPosts, threadsListed } from './dm.ts'
+  import { dmView, groupMessages, listedThreadCount, plain, threadPanel, threadPosts } from './dm.ts'
   import { api } from '../../api.ts'
   import { short, ago } from '../ui/format.ts'
   import ComposerBox from '../ui/ComposerBox.svelte'
@@ -82,7 +82,7 @@
   let panel = $derived(threadPanel(dm.threads, members, m ?? {}))
   // The panel header counts the threads the panel lists, so its number always
   // matches the rows below it. A closed child's thread leaves with it.
-  let listed = $derived(threadsListed(panel))
+  let listed = $derived(listedThreadCount(dm.threads, members, m ?? {}))
   let folded = $state({ siblings: true, others: true })
   let threadRows = $derived(groupMessages((selected?.posts || []).map((p): MessageRow => ({ kind: 'message', key: p.id, author: p.from, ts: p.ts, text: p.text, post: p, delivery: p.delivery, pending: p.pending }))))
   let isNewInThread = $derived(threadArrived(selected?.key, threadRows.map((r) => r.key)))
