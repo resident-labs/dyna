@@ -129,12 +129,15 @@ const (
 	// CauseTestFailure is a check that ran its tests and failed them.
 	CauseTestFailure FailureCause = "test-failure"
 	// CauseContainerFailure is a check that stopped before its command ran: the
-	// container, its setup, or the worktree it needs was unavailable.
+	// container, its setup, or the worktree it needs was unavailable. A process
+	// that something killed is a container failure inside a container, where the
+	// usual cause is a resource limit.
 	CauseContainerFailure FailureCause = "container-failure"
 	// CauseSSHDrop is a check whose SSH client lost the connection to the node.
 	// Only a connection failure proves this; an unmarked local error never does.
 	CauseSSHDrop FailureCause = "ssh-drop"
-	// CauseTimeout is a check or a run that reached its own deadline.
+	// CauseTimeout is a check or a run that reached its own deadline, or a check
+	// whose command reported the timeout status. A bare SIGKILL is not a timeout.
 	CauseTimeout FailureCause = "timeout"
 	// CauseCancelled is a check or a run that its caller stopped.
 	CauseCancelled FailureCause = "cancelled"
@@ -146,6 +149,30 @@ const (
 	// CauseUnclassified is a failure whose output proves no more specific cause.
 	CauseUnclassified FailureCause = "unclassified"
 )
+
+// Label is how a cause reads to a person. The stored value never changes; only a
+// view, the command line and a report convert it here.
+func (c FailureCause) Label() string {
+	switch c {
+	case CauseTestFailure:
+		return "failed tests"
+	case CauseContainerFailure:
+		return "container failure"
+	case CauseSSHDrop:
+		return "SSH connection lost"
+	case CauseTimeout:
+		return "timeout"
+	case CauseCancelled:
+		return "cancelled"
+	case CauseDiskFull:
+		return "disk full"
+	case CauseReports:
+		return "reports unavailable"
+	case CauseUnclassified:
+		return "cause not proven"
+	}
+	return ""
+}
 
 func command(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) error {
 	c := exec.CommandContext(ctx, name, args...)

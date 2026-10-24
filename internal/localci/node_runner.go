@@ -306,21 +306,15 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				} else {
 					writer = io.MultiWriter(&output, blob)
 				}
-				e := r.nodeCommand(checkCtx, writer, writer, "dyna-ci-"+runID+"-"+string(check.id), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i))
-				if blobErr == nil {
-					if closeErr := blob.Close(); closeErr != nil {
-						log.Printf("local CI %s: finish check log: %v", node.Name, closeErr)
-					}
-					sr.Reports = append(sr.Reports, blob.path)
-				}
+				runErr := r.nodeCommand(checkCtx, writer, writer, "dyna-ci-"+runID+"-"+string(check.id), nodeCheckScript(node, base, cache, runDir, runID, sha, check, req.Timeout, i))
 				sr.LogTail = output.String()
 				markers := checkMarker.FindAllStringSubmatch(sr.LogTail, -1)
-				if e != nil || len(markers) == 0 {
+				if runErr != nil || len(markers) == 0 {
 					sr.Status, sr.Error = OutcomeError, "check command did not complete"
-					if e != nil {
-						sr.Error = e.Error()
+					if runErr != nil {
+						sr.Error = runErr.Error()
 					}
-					sr.Cause = checkCause(node, checkCtx, e, markers)
+					sr.Cause = checkCause(node, checkCtx, runErr, markers, check.image != "")
 					if sr.Cause == CauseTestFailure {
 						sr.Status = OutcomeFailed
 					}
@@ -330,6 +324,15 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 				// CI resumes when it stays broken.
 				if sr.Status == OutcomeFailed && diskFull(sr.LogTail+"\n"+sr.Error) {
 					sr.Status, sr.Error, sr.Cause = OutcomeError, "check ran out of disk space on the CI machine", CauseDiskFull
+				}
+				if blobErr == nil {
+					// The log ends with its typed cause, so the run folder alone says
+					// why the check stopped. The saved result stays the authority.
+					exit := checkExit{Cause: sr.Cause, Status: sr.Status, ExitCode: checkExitCode(runErr, markers)}
+					if finishErr := blob.finish(exit); finishErr != nil {
+						log.Printf("local CI %s: finish check log: %v", node.Name, finishErr)
+					}
+					sr.Reports = append(sr.Reports, blob.path)
 				}
 				stop()
 				result.Suites[i] = sr
@@ -434,8 +437,10 @@ var checkMarker = regexp.MustCompile(`(?m)^DYNA_CI_CHECK_EXIT=([0-9]+)$`)
 // checkCause reads why a check stopped from what its own output proves: the
 // deadline, the exit status the node recorded, and the marker it printed. It
 // never calls an unmarked local error an SSH drop: only an SSH client that lost
-// the connection returns 255 without the node's marker.
-func checkCause(node Node, ctx context.Context, err error, markers [][]string) FailureCause {
+// the connection returns 255 without the node's marker. Exit status 137 proves a
+// SIGKILL, which is not a timeout: a container that was killed ran out of
+// resources, and any other process was killed from outside.
+func checkCause(node Node, ctx context.Context, err error, markers [][]string, container bool) FailureCause {
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return CauseTimeout
@@ -451,8 +456,10 @@ func checkCause(node Node, ctx context.Context, err error, markers [][]string) F
 				return CauseSSHDrop
 			case code == 69:
 				return CauseContainerFailure
-			case code == 124, code == 137:
+			case code == 124:
 				return CauseTimeout
+			case code == 137:
+				return killedCause(container)
 			}
 		}
 		return CauseUnclassified
@@ -464,14 +471,26 @@ func checkCause(node Node, ctx context.Context, err error, markers [][]string) F
 	switch code {
 	case 69, 125, 126, 127:
 		return CauseContainerFailure
-	case 75, 124, 137:
+	case 75, 124:
 		return CauseTimeout
+	case 137:
+		return killedCause(container)
 	case 143:
 		return CauseCancelled
 	case 0, 255:
 		return CauseUnclassified
 	}
 	return CauseTestFailure
+}
+
+// killedCause names a check that something killed. In a container the usual
+// cause is a resource limit, so the report says so; outside one, the output
+// proves no cause of its own.
+func killedCause(container bool) FailureCause {
+	if container {
+		return CauseContainerFailure
+	}
+	return CauseUnclassified
 }
 
 // runCause names why a run stopped before its checks decided.
@@ -552,19 +571,57 @@ func (l *checkLog) keep(p []byte) {
 	}
 }
 
-// Close ends the log with the size of the output it dropped and the end of the
-// output.
-func (l *checkLog) Close() error {
+// checkExit is the typed end of a check log: it says why the check stopped, so
+// a person who opens the run folder reads the cause next to the output. A saved
+// result in SQLite stays the authority.
+type checkExit struct {
+	Cause    FailureCause `json:"cause"`
+	Status   Outcome      `json:"status"`
+	ExitCode int          `json:"exitCode,omitempty"`
+}
+
+// checkExitCode is the exit status the evidence proves, and 0 when it proves
+// none.
+func checkExitCode(err error, markers [][]string) int {
+	if len(markers) > 0 {
+		if code, convErr := strconv.Atoi(markers[len(markers)-1][1]); convErr == nil {
+			return code
+		}
+		return 0
+	}
+	var exit *exec.ExitError
+	if errors.As(err, &exit) {
+		return exit.ExitCode()
+	}
+	return 0
+}
+
+// finish ends the log: the end of the output first, then the typed exit record.
+// A check that passed has no cause, so it keeps its plain output.
+func (l *checkLog) finish(exit checkExit) error {
 	if l.broken {
 		l.file.Close()
 		return l.failure
 	}
-	if omitted := l.dropped - int64(len(l.tail)); omitted > 0 {
-		if _, err := fmt.Fprintf(l.file, "\n[... %d bytes of the middle omitted ...]\n", omitted); err != nil {
+	if len(l.tail) > 0 {
+		if omitted := l.dropped - int64(len(l.tail)); omitted > 0 {
+			if _, err := fmt.Fprintf(l.file, "\n[... %d bytes of the middle omitted ...]\n", omitted); err != nil {
+				l.file.Close()
+				return err
+			}
+		}
+		if _, err := l.file.Write(l.tail); err != nil {
 			l.file.Close()
 			return err
 		}
-		if _, err := l.file.Write(l.tail); err != nil {
+	}
+	if exit.Cause != "" {
+		record, err := json.Marshal(exit)
+		if err != nil {
+			l.file.Close()
+			return err
+		}
+		if _, err := fmt.Fprintf(l.file, "\nDYNA_CI_CHECK_CAUSE %s\n", record); err != nil {
 			l.file.Close()
 			return err
 		}
