@@ -35,7 +35,12 @@ func fixtureInstall(ctx context.Context, args, env []string) error {
 		return errors.New("missing metadata output")
 	}
 
-	root := args[4]
+	root := ""
+	for i, arg := range args {
+		if arg == "--prefix" {
+			root = args[i+1]
+		}
+	}
 	spec := args[len(args)-1]
 	h := "codex"
 	if strings.HasPrefix(spec, "@anthropic-ai/") {
@@ -44,6 +49,8 @@ func fixtureInstall(ctx context.Context, args, env []string) error {
 		h = "pi"
 	} else if strings.HasPrefix(spec, "@opencode/") {
 		h = "opencode"
+	} else if strings.HasPrefix(spec, "@moonshot-ai/") {
+		h = "kimi-code"
 	}
 	pkg, name := bundlePackage(h)
 	version := strings.TrimPrefix(spec, pkg+"@")

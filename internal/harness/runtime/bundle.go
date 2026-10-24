@@ -359,7 +359,7 @@ func (m *BundleManager) installCandidate(ctx context.Context, harness, version s
 			installEnv[key] = value
 		}
 	}
-	for _, item := range os.Environ() {
+	for _, item := range NativeEnvironmentBase(h, os.Environ()) {
 		key, _, _ := strings.Cut(item, "=")
 		_, replaced := installEnv[key]
 		if replaced || strings.HasPrefix(strings.ToLower(key), "npm_config_") || key == "NODE_AUTH_TOKEN" || key == "NPM_TOKEN" {
@@ -506,7 +506,9 @@ func installNPM(ctx context.Context, m *BundleManager, staging, version string, 
 		return InstallArtifact{}, errors.New("no exact private install recipe is verified for this harness")
 	}
 	args := []string{"npm", "install", "--global", "--prefix", staging, "--package-lock"}
-	if a.Harness == "pi" || a.Harness == "grok" {
+	// Kimi's postinstall can rename a legacy kimi shim elsewhere on PATH;
+	// private bundles must not change anything outside their staging tree.
+	if a.Harness == "pi" || a.Harness == "grok" || a.Harness == "kimi-code" {
 		args = append(args, "--ignore-scripts")
 	}
 	args = append(args, a.NPMPackage+"@"+version)

@@ -47,7 +47,7 @@ func NewAccounts() *Accounts { return &Accounts{Root: filepath.Join(runtimeDataD
 func canonicalAccountHarness(h string) (string, error) {
 	h = canonicalRuntimeID(h)
 	switch h {
-	case "claude-code", "codex", "opencode", "antigravity", "muse", "grok", "pi":
+	case "claude-code", "codex", "opencode", "antigravity", "muse", "grok", "pi", "kimi-code":
 		return h, nil
 	}
 	return "", native.ErrUnsupported
@@ -55,7 +55,7 @@ func canonicalAccountHarness(h string) (string, error) {
 
 // These native backends need a drained harness gate for interactive login.
 func sharedServiceAccount(h string) bool {
-	return h == "opencode" || h == "antigravity" || h == "muse"
+	return h == "opencode" || h == "antigravity" || h == "muse" || h == "kimi-code"
 }
 
 var errAccountPath = errors.New("The private account path is unsafe.")
@@ -408,7 +408,7 @@ func (a *Accounts) scopedManagerWith(h, home, executable string, pin map[string]
 	if !ok {
 		return nil, nil, native.ErrUnsupported
 	}
-	if h == "muse" || h == "opencode" || h == "antigravity" {
+	if h == "muse" || h == "opencode" || h == "antigravity" || h == "kimi-code" {
 		manager = checkedHomeManager{Manager: manager, harness: h, scope: home}
 	}
 	return manager, overrides, nil

@@ -45,7 +45,7 @@ func validateAntigravityACPBundle(cli string) error {
 // acpMCPServers carries the immutable catalog into Antigravity's ACP session.
 // Grok reads its generated account config directly.
 func acpMCPServers(p profile.Profile, launchEnv []string) ([]acp.McpServer, error) {
-	if p.Harness != profile.HarnessAntigravity {
+	if p.Harness != profile.HarnessAntigravity && p.Harness != profile.HarnessKimiCode {
 		return nil, nil
 	}
 	generation, ok := argumentValue(p.ExtraArgs, "--add-dir")
