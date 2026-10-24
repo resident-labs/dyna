@@ -43,8 +43,20 @@ func TestCloseGuardsOpenPRAuthorAndReviewers(t *testing.T) {
 			e := newTestEnv(t)
 			info := completedFixtureSession(t, e)
 			writePRLink(t, info, role, "open", true)
-			if _, err := e.m.Close(e.ctx, info.ID); err == nil || !strings.HasPrefix(err.Error(), "responsibilities:") || !strings.Contains(err.Error(), "#17 https://github.com/owner/repo/pull/17") || !strings.Contains(err.Error(), "--force") {
+			_, err := e.m.Close(e.ctx, info.ID)
+			if err == nil || !strings.HasPrefix(err.Error(), "responsibilities:") || !strings.Contains(err.Error(), "#17 https://github.com/owner/repo/pull/17") || !strings.Contains(err.Error(), "--force") {
 				t.Fatalf("close guard for %s: %v", role, err)
+			}
+			refusal, ok := err.(*CloseRefusal)
+			if !ok {
+				t.Fatalf("close error has no typed recovery: %T", err)
+			}
+			recovery := refusal.CloseRecovery()
+			if recovery.Reason != CloseReasonResponsibilities || len(recovery.Actions) != 2 || recovery.Actions[0] != CloseActionRetry || recovery.Actions[1] != CloseActionForce {
+				t.Fatalf("close recovery = %+v", recovery)
+			}
+			if len(recovery.Items) != 1 || recovery.Items[0].Kind != "pr" || recovery.Items[0].ID != "github.com/owner/repo#17" {
+				t.Fatalf("close items = %+v", recovery.Items)
 			}
 			links, err := e.m.TrackedPRs(info.ID)
 			if err != nil || len(links) != 1 || !links[0].Active() {

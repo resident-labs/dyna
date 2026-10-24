@@ -390,7 +390,7 @@ func TestConsolidationReturnsGoalsAndMovesQuestions(t *testing.T) {
 	}
 	got := map[string]bool{}
 	for _, r := range items {
-		got[r.Kind+" "+r.ID] = true
+		got[string(r.Kind)+" "+r.ID] = true
 	}
 	// Goals do not transfer as a rule. The delegated goal has no live setter,
 	// so the kept session, the close heir, holds it. b's own goal drops with
