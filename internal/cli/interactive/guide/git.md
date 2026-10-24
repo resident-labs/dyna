@@ -104,8 +104,9 @@ Source-only reviews of draft changes need no CI evidence. Merging a PR requires 
 
 Results are `approve`, `changes`, `approve-fast`, or `stop-early`. Every
 reviewer turn ends with exactly one typed result; a turn that ends without one
-is an error. `approve-fast` lands fast only when Dyna's changed-path rules also
-rate the change low risk; otherwise it records as `approve` on the normal path.
+is an error. approve-fast is for test code or low-risk changes of any kind, at
+the reviewer's own discretion. It lands without a merge trial when required CI
+passed at exactly the approved head.
 `stop-early` needs `--reason superseded|duplicate|empty|too-large`.
 Approval cannot contain `blocking` or `should-fix` findings.
 Findings JSON is an array with severity (`blocking`, `should-fix`, `nit`), file,

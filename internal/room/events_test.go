@@ -482,6 +482,18 @@ func TestMergeDecisionPostsOncePerDecision(t *testing.T) {
 	}
 }
 
+func TestReviewEventReadsRemovedAreaAndNote(t *testing.T) {
+	m := Message{Kind: string(FamilyReview), Notice: EventNotice{Kind: string(TypeResult)}, Payload: EventPayload{raw: []byte(`{"kind":"approve-fast","changeId":"github.com/a/b#1","number":1,"label":"PR #1","location":"https://github.com/a/b/pull/1","head":"abc","fastLand":true,"area":"docs","note":"fast landing"}`)}}
+	ev, ok := m.Review()
+	if !ok || ev.Kind != ReviewApproveFast || ev.ChangeID != "github.com/a/b#1" || !ev.FastLand {
+		t.Fatalf("old review payload = %+v, %v", ev, ok)
+	}
+	m.Payload.raw = []byte(`{"kind":"approve-fast","unknown":true}`)
+	if _, ok := m.Review(); ok {
+		t.Fatal("review reader accepted an unrelated unknown field")
+	}
+}
+
 func newEventStore(t *testing.T) (*Store, Record) {
 	t.Helper()
 	store := &Store{Root: t.TempDir()}

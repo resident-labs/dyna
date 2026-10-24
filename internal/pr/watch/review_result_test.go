@@ -2,9 +2,6 @@ package watch
 
 import (
 	"context"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -25,14 +22,11 @@ func TestReviewResultRouting(t *testing.T) {
 		result     ReviewResult
 		wantTarget func(Record) string
 		wantKind   string
-		wantNote   string
 	}{
-		{"approve", ReviewResult{Verdict: state.VerdictApprove, Summary: "Looks good."}, func(Record) string { return "" }, "approve", ""},
-		{"changes", ReviewResult{Verdict: state.VerdictChanges, Summary: "Please fix bounds.", Findings: []Finding{{Severity: state.FindingBlocking, File: "a.go", Line: 3, Why: "bounds", Fix: "check"}}}, func(r Record) string { return r.Author }, "changes", ""},
-		{"stop-early", ReviewResult{Verdict: state.VerdictStopEarly, StopReason: state.StopSuperseded}, func(Record) string { return "" }, "stop-early", ""},
-		// A GitHub PR has no path read in this fixture, so a fast approval
-		// falls back to the normal path instead of claiming a fast landing.
-		{"approve-fast falls back without paths", ReviewResult{Verdict: state.VerdictApproveFast, Summary: "Safe."}, func(Record) string { return "" }, "approve", "normal path"},
+		{"approve", ReviewResult{Verdict: state.VerdictApprove, Summary: "Looks good."}, func(Record) string { return "" }, "approve"},
+		{"changes", ReviewResult{Verdict: state.VerdictChanges, Summary: "Please fix bounds.", Findings: []Finding{{Severity: state.FindingBlocking, File: "a.go", Line: 3, Why: "bounds", Fix: "check"}}}, func(r Record) string { return r.Author }, "changes"},
+		{"stop-early", ReviewResult{Verdict: state.VerdictStopEarly, StopReason: state.StopSuperseded}, func(Record) string { return "" }, "stop-early"},
+		{"approve-fast", ReviewResult{Verdict: state.VerdictApproveFast, Summary: "Safe."}, func(Record) string { return "" }, "approve-fast"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -49,8 +43,8 @@ func TestReviewResultRouting(t *testing.T) {
 			if n.Review == nil || string(n.Review.Kind) != c.wantKind || n.Target != c.wantTarget(r) {
 				t.Fatalf("notice = %+v (review %+v)", n, n.Review)
 			}
-			if n.Review.Note != c.wantNote {
-				t.Fatalf("fast-land note = %q, want %q", n.Review.Note, c.wantNote)
+			if c.result.Verdict == state.VerdictApproveFast && !n.Review.FastLand {
+				t.Fatal("approve-fast did not preserve its direct-publication marker")
 			}
 			if c.wantKind == "changes" {
 				if n.Review.Blocking != 1 || len(n.Review.Findings) != 1 {
@@ -87,93 +81,14 @@ func TestStopEarlyRecordsItsReason(t *testing.T) {
 	}
 }
 
-// TestFastLandFollowsTheChangedPaths proves the path rule decides and the
-// reviewer's word alone never does.
-func TestFastLandFollowsTheChangedPaths(t *testing.T) {
-	dir := t.TempDir()
-	git := func(args ...string) string {
-		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("git %v: %s %v", args, out, err)
-		}
-		return strings.TrimSpace(string(out))
-	}
-	git("init", "-b", "main")
-	git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "--allow-empty", "-m", "base")
-	git("checkout", "-b", "docs")
-	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "docs", "map.md"), []byte("# Map\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git("add", ".")
-	git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "docs")
-	docsHead := git("rev-parse", "HEAD")
-	git("checkout", "main")
-	git("checkout", "-b", "code")
-	if err := os.WriteFile(filepath.Join(dir, "map.go"), []byte("package mapx\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git("add", ".")
-	git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "code")
-
-	git("checkout", "main")
-	git("checkout", "-b", "rename")
-	if err := os.MkdirAll(filepath.Join(dir, "internal"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "internal", "moved.go"), []byte("package moved\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	git("add", ".")
-	git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "source")
-	sourceBase := git("rev-parse", "HEAD")
-	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	git("mv", "internal/moved.go", "docs/moved.md")
-	git("-c", "user.name=Test", "-c", "user.email=test@example.test", "commit", "-m", "rename")
-	renameHead := git("rev-parse", "HEAD")
-
-	s := &Service{}
-	fast := func(paths []string, ok bool) ReviewResult {
-		return assessFastLand(ReviewResult{Verdict: state.VerdictApproveFast, Summary: "Safe."}, paths, ok)
-	}
-	docs := fast([]string{"docs/map.md"}, true)
-	if docs.Verdict != state.VerdictApproveFast || docs.FastLand == nil || !docs.FastLand.LowRisk || docs.FastLand.Area != state.FastLandDocs {
-		t.Fatalf("docs-only fast result = %+v (fast land %+v)", docs, docs.FastLand)
-	}
-	code := fast([]string{"map.go"}, true)
-	if code.Verdict != state.VerdictApprove || code.FastLand == nil || code.FastLand.LowRisk || code.FastLand.Note != "normal path" {
-		t.Fatalf("code fast result = %+v (fast land %+v)", code, code.FastLand)
-	}
-	// A local change has no guarded fast publisher, so it takes the normal path
-	// even when its docs are low risk.
-	local := s.normalizeReviewResult(context.Background(), Record{Kind: "local", RepoPath: dir, BaseRef: "main", Head: docsHead}, ReviewResult{Verdict: state.VerdictApproveFast, Summary: "Docs."})
-	if local.Verdict != state.VerdictApprove || local.FastLand == nil || local.FastLand.Note != "normal path" {
-		t.Fatalf("local fast result = %+v (fast land %+v)", local, local.FastLand)
-	}
-	// A production file moved into docs/ keeps its old path, so it stays risky.
-	renamed, err := s.changedPaths(context.Background(), Record{Kind: "local", RepoPath: dir, BaseRef: sourceBase, Head: renameHead})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := fast(renamed, true); got.Verdict != state.VerdictApprove {
-		t.Fatalf("rename into docs counted as docs-only: %v -> %+v", renamed, got)
-	}
-}
-
-// TestFastLandPublishesWithoutABatch is the merge steward's fast path: a
-// low-risk approve-fast lands directly, and the repository starts no trial.
-func TestFastLandPublishesWithoutABatch(t *testing.T) {
+// TestApproveFastCodePublishesWithoutABatch proves the reviewer's own
+// approve-fast decision lands a code-only PR with passing exact-head CI.
+func TestApproveFastCodePublishesWithoutABatch(t *testing.T) {
 	e, _, merged := mergeEnv(t, 1)
 	if err := e.s.Store.update(func(st *State) error {
 		r := st.Records["github.com/owner/repo#1"]
 		r.Verdict = state.VerdictApproveFast
-		r.FastLand = &state.FastLand{LowRisk: true, Area: state.FastLandDocs, Note: "fast landing"}
+		r.FastLand = nil
 		return nil
 	}); err != nil {
 		t.Fatal(err)
