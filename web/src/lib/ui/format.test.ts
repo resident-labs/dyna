@@ -64,11 +64,16 @@ test('elapsed reads like a stopwatch, and calls over 30 s are long', async () =>
 
 // A schedule shows when the next run is, so a hook row reads a future time
 // with the same words as a past one.
-test('until reads a future time from now', async () => {
+test('until reads a future time from now', async (t) => {
+  // Freeze the clock: until samples Date.now itself, so a millisecond between
+  // the two calls must not shorten "in 3d" to "in 2d".
+  t.mock.timers.enable({ apis: ['Date'] })
+  t.mock.timers.setTime(1_700_000_000_000)
+  const now = Date.now()
   const { until } = await import('./format.ts')
   assert.equal(until(NaN), '')
-  assert.equal(until(Date.now() - 60_000), 'in under a minute')
-  assert.equal(until(Date.now() + 5 * 60_000), 'in 5m')
-  assert.equal(until(Date.now() + 2 * 3_600_000), 'in 2h')
-  assert.equal(until(Date.now() + 3 * 86_400_000), 'in 3d')
+  assert.equal(until(now - 60_000), 'in under a minute')
+  assert.equal(until(now + 5 * 60_000), 'in 5m')
+  assert.equal(until(now + 2 * 3_600_000), 'in 2h')
+  assert.equal(until(now + 3 * 86_400_000), 'in 3d')
 })
