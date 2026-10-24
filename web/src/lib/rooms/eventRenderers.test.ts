@@ -216,13 +216,13 @@ const fixtures: Record<string, EventPayload> = {
         from: type === 'account' ? 'claude' : type === 'promoted' ? 'dyna:notice-contract' : type === 'adopted' ? 'dyna:root' : undefined,
         to: type === 'account' ? 'claude-2' : type === 'promoted' ? 'top level' : type === 'adopted' ? 'dyna:notice-contract' : undefined,
         reason: type === 'account' ? 'usage-limit' : undefined,
-        profile: type === 'spawned' ? 'deepseek' : undefined,
+        profile: type === 'spawned' ? 'deepseek' : type === 'transfer-request' ? 'sol' : undefined,
         dir: type === 'spawned' ? '/home/a/Work/app' : undefined,
         seat: type === 'seat' ? 'Internal root took back the seat' : undefined,
-        transfer: type === 'transfer-request' ? 'tr_ab12cd34' : undefined,
+        transfer: type === 'transfer-request' ? 'ses_20261023-120000-00000001' : undefined,
         sections: type === 'instructions' ? [{ name: 'Room rules', action: 'items', added: ['Rule 4'], removed: ['Rule 2'] }] : undefined,
         detail: type === 'transfer-request'
-          ? 'Prepare a handoff for the replacement model. Submit it with `dyna subagent transfer handoff ses_20261023-120000-00000000 --token tr_ab12cd34`.'
+          ? 'Prepare a handoff for the replacement model. Submit it with `dyna subagent transfer handoff ses_20261023-120000-00000000 --token ses_20261023-120000-00000001`.'
           : `The ${type} note body.`,
       },
     ]),
@@ -370,7 +370,7 @@ function fixtureTip(payload: EventPayload): string {
     if (payload.type === 'account') return payload.to ?? payload.session
     if (payload.type === 'renamed' || payload.type === 'spawned') return payload.name ?? payload.session
     if (payload.type === 'seat') return payload.seat ?? payload.session
-    if (payload.type === 'transfer-request') return payload.transfer ?? payload.session
+    if (payload.type === 'transfer-request') return payload.profile ?? payload.session
     return payload.session
   }
   return payload.detail || payload.reason
@@ -399,33 +399,44 @@ test('a call row says how the owner answered, without its request ID', () => {
   }
 })
 
-test('a transfer request names the transfer and keeps the instructions', () => {
+test('a transfer request names its target and keeps the token in details', () => {
   const payload = fixtures['session/transfer-request']
   assert.ok(payload && 'transfer' in payload, 'the transfer-request fixture is missing')
-  const feed = postFor('session', 'transfer-request', payload, '[DYNA MODEL TRANSFER] Prepare a handoff for transfer tr_ab12cd34:')
+  const token = /ses_20261023-120000-00000001/
+  const feed = postFor('session', 'transfer-request', payload, '[DYNA MODEL TRANSFER] Prepare a handoff for transfer ses_20261023-120000-00000001:')
   const target = document.createElement('div')
   document.body.append(target)
   const mounted = web.mount(web.eventComponents.SessionNoteCard, { target, props: { post: feed, notice: feed.notice, surface: 'feed' } })
   web.flushSync()
-  let text = (target.textContent ?? '').trim()
-  assert.match(text, /Handoff requested for model transfer/)
-  assert.equal(need(target.querySelector('.id'), 'the transfer ID').textContent, 'tr_ab12cd34')
-  // The feed keeps the instructions behind Details; the row states the fact.
-  assert.match(need(target.querySelector('details'), 'the instructions fold').textContent ?? '', /dyna subagent transfer handoff/)
+  const summary = need(target.querySelector('.sum'), 'the feed summary').textContent ?? ''
+  assert.match(summary, /dyna:notice-session: Handoff requested for sol/)
+  assert.doesNotMatch(summary, token)
+  assert.equal(target.querySelector('.id'), null)
+  // The feed keeps the request identity with the agent instructions, not in
+  // the owner-facing summary.
+  const instructions = need(target.querySelector('details'), 'the instructions fold').textContent ?? ''
+  assert.match(instructions, /dyna subagent transfer handoff/)
+  assert.match(instructions, token)
   web.unmount(mounted)
   target.remove()
 
-  const dm = postFor('session', 'transfer-request', payload, '[DYNA MODEL TRANSFER] Prepare a handoff for transfer tr_ab12cd34:')
+  const dmText = '[DYNA MODEL TRANSFER] Prepare a handoff for transfer ses_20261023-120000-00000001:\n\nPrepare a handoff. Submit it with `dyna subagent transfer handoff ses_20261023-120000-00000000 --token ses_20261023-120000-00000001`.'
+  const dm = postFor('session', 'transfer-request', payload, dmText)
   const dmTarget = document.createElement('div')
   document.body.append(dmTarget)
   const mountedDm = web.mount(web.eventComponents.SessionNoteCard, { target: dmTarget, props: { post: dm, notice: dm.notice, surface: 'dm' } })
   web.flushSync()
-  text = (dmTarget.textContent ?? '').trim()
-  // The DM already belongs to the session, so its row names neither the
-  // session nor a second copy of the instructions.
-  assert.doesNotMatch(text, /dyna:notice-session:/)
-  assert.doesNotMatch(text, /dyna subagent transfer handoff/)
-  assert.match(text, /Handoff requested for model transfer/)
+  const dmSummary = need(dmTarget.querySelector('.sum'), 'the DM summary').textContent ?? ''
+  // The DM already belongs to the session, so its summary states the target
+  // and handoff status without repeating the session or exposing the token.
+  assert.match(dmSummary, /Handoff requested for sol/)
+  assert.doesNotMatch(dmSummary, /dyna:notice-session:/)
+  assert.doesNotMatch(dmSummary, token)
+  assert.doesNotMatch(dmTarget.textContent ?? '', /dyna subagent transfer handoff/)
+  need(dmTarget.querySelector('button'), 'the Details button').click()
+  web.flushSync()
+  assert.match(dmTarget.textContent ?? '', /dyna subagent transfer handoff/)
+  assert.match(dmTarget.textContent ?? '', token)
   web.unmount(mountedDm)
   dmTarget.remove()
 })
