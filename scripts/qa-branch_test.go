@@ -88,51 +88,20 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 			_ = cmd.Wait()
 		}
 	})
-	lines := make(chan string, 256)
+	var printed []string
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
-			lines <- scanner.Text()
+			printed = append(printed, scanner.Text())
 		}
-		close(lines)
 	}()
-	var printed []string
-	find := func(marker string) string {
-		t.Helper()
-		for line := range lines {
-			printed = append(printed, line)
-			if strings.Contains(line, marker) {
-				return line
-			}
-		}
-		t.Fatalf("QA printed no line with %q: %v\n%s", marker, printed, stderr.String())
-		return ""
-	}
-	// The announcement names the one file that asks for a report, so an agent
-	// whose step timed out has a documented way to learn why it did.
-	announced := find("When a step times out, create ")
-	request, _, _ := strings.Cut(strings.TrimPrefix(announced, "When a step times out, create "), " (mkdir -p")
-	if request == "" {
-		t.Fatalf("announcement names no request file: %q", announced)
-	}
-	if err := os.WriteFile(request, nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	screenshot, _, _ := strings.Cut(strings.TrimPrefix(find("QA page screenshot: "), "QA page screenshot: "), " ")
-	if want := filepath.Join(filepath.Dir(request), "page.png"); screenshot != want {
-		t.Errorf("screenshot = %q; want %q beside the request", screenshot, want)
-	}
-	if body, err := os.ReadFile(screenshot); err != nil || string(body) != "PNG" {
-		t.Errorf("saved screenshot = %q, %v; want the tab's picture", body, err)
-	}
-	// An agent ends QA the way it started it: it stops the command.
-	if err := cmd.Process.Signal(os.Interrupt); err != nil {
-		t.Fatal(err)
-	}
-	for line := range lines {
-		printed = append(printed, line)
-	}
+	// The controller ends the run after one report, so this reads to EOF: a
+	// report that never comes fails here with what the controller printed,
+	// instead of waiting for the suite timeout.
+	<-finished
 	if err := cmd.Wait(); err != nil {
 		t.Fatalf("QA controller: %v\n%s\n%s", err, strings.Join(printed, "\n"), stderr.String())
 	}
@@ -147,6 +116,10 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 	if !strings.Contains(out, "Read-only QA cannot show settings writes, live streams that need a WebSocket (the computer viewer and voice calls), or server fields newer than the installed engine.") {
 		t.Fatalf("missing the read-only limits: %s", out)
 	}
+	// A timed-out step needs one documented call, not a guess.
+	if !strings.Contains(out, "call globalThis.dynaQAReport() in the QA page") {
+		t.Fatalf("missing the report call: %s", out)
+	}
 	// The tab cannot hold the computer stream, and QA must not report that as
 	// an app failure: the socket relays desktop input.
 	if !strings.Contains(out, "The computer stream stays closed in this tab") {
@@ -158,9 +131,13 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 	// The report names kinds with their counts, and never a URL, a header or a
 	// cookie: the fake drives the blocked requests the policy checks cover.
 	kinds := ""
+	screenshot := ""
 	for _, line := range printed {
-		if strings.HasPrefix(line, "QA blocked kinds: ") {
-			kinds = strings.TrimPrefix(line, "QA blocked kinds: ")
+		if value, ok := strings.CutPrefix(line, "QA blocked kinds: "); ok {
+			kinds = value
+		}
+		if value, ok := strings.CutPrefix(line, "QA page screenshot: "); ok {
+			screenshot = value
 		}
 	}
 	for _, want := range []string{"POST API request x", "socket", "GET external request x"} {
@@ -172,6 +149,12 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 		if strings.Contains(kinds, leak) {
 			t.Errorf("blocked kinds = %q; it leaks %q", kinds, leak)
 		}
+	}
+	if !strings.HasPrefix(screenshot, scratch+string(filepath.Separator)) || !strings.HasSuffix(screenshot, string(filepath.Separator)+"page.png") {
+		t.Fatalf("screenshot = %q; want a page.png inside the QA scratch space %q", screenshot, scratch)
+	}
+	if body, err := os.ReadFile(screenshot); err != nil || string(body) != "PNG" {
+		t.Errorf("saved screenshot = %q, %v; want the tab's picture", body, err)
 	}
 	if strings.Contains(out, "not-logged") {
 		t.Fatal("controller logged a credential")
