@@ -24,16 +24,26 @@ type Outcome struct {
 	By      string    `json:"by"`
 	Summary string    `json:"summary"`
 }
+
+// Amendment is one later correction to a goal's brief. Amendments are
+// append-only, so the stored brief stays the brief as it was set.
+type Amendment struct {
+	At   time.Time `json:"at"`
+	By   string    `json:"by"`
+	Text string    `json:"text"`
+}
 type Goal struct {
 	ID   string `json:"id"`
 	Room string `json:"room"`
 	Text string `json:"text"`
 	// Detail is the brief stored with a spawn goal: context, owned files,
 	// checks and limits. Dyna resends it with Text after compaction.
-	Detail  string   `json:"detail,omitempty"`
-	Setter  string   `json:"setter"`
-	Holders []string `json:"holders"`
-	Shared  bool     `json:"shared"`
+	Detail string `json:"detail,omitempty"`
+	// Amendments correct the brief after it was set; oldest first.
+	Amendments []Amendment `json:"amendments,omitempty"`
+	Setter     string      `json:"setter"`
+	Holders    []string    `json:"holders"`
+	Shared     bool        `json:"shared"`
 	// NextItem allocates the goal's item IDs: i1, i2, ...
 	NextItem  int       `json:"nextItem,omitempty"`
 	State     string    `json:"state"`
@@ -215,6 +225,31 @@ func (s *Store) Edit(room, id, by, text string, holders *[]string, shared bool) 
 		return nil
 	})
 }
+
+// Amend appends one correction to the goal's brief. The brief and the goal
+// text stay as they are, so an amendment reads as the latest word.
+func (s *Store) Amend(room, id, by, text string) (Goal, error) {
+	text = strings.TrimSpace(text)
+	if err := checkAmendment(text); err != nil {
+		return Goal{}, err
+	}
+	return s.change(room, id, func(_ *wake, _ *RoomState, g *Goal) error {
+		g.Amendments = append(g.Amendments, Amendment{At: s.now(), By: by, Text: text})
+		return nil
+	})
+}
+
+// checkAmendment reports why text cannot be a brief amendment.
+func checkAmendment(text string) error {
+	if text == "" {
+		return fmt.Errorf("an amendment needs text")
+	}
+	if utf8.RuneCountInString(text) > 2000 {
+		return fmt.Errorf("an amendment exceeds 2000 characters")
+	}
+	return nil
+}
+
 func (s *Store) Finish(room, id, by, summary string, drop bool) (Goal, error) {
 	return s.change(room, id, func(_ *wake, _ *RoomState, g *Goal) error {
 		g.State, g.ExpediteUntil = "done", nil

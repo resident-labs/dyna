@@ -384,6 +384,38 @@ func TestMovedSpawnInstructionsAndResponsibilities(t *testing.T) {
 	}
 }
 
+// A brief amendment corrects a brief after it was set. Every refresh carries
+// all of them in stored order, so a session that reads the prompt again after
+// compaction still follows the latest correction.
+func TestSpawnGoalBlockCarriesBriefAmendmentsInOrder(t *testing.T) {
+	m := &Manager{Store: &Store{Root: filepath.Join(t.TempDir(), "sessions")}}
+	meta := Meta{ID: NewID(), Name: "lead", RoomID: "r", Room: "work"}
+	if err := m.Store.writeMeta(meta); err != nil {
+		t.Fatal(err)
+	}
+	store := m.goalStore()
+	g, err := store.Add("r", "owner", goals.Input{Text: "Ship the decoder fix", Detail: "Own internal/decoder only.", Holders: []string{meta.ID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, amendment := range []string{"Also update the changelog.", "Skip the parser refactor."} {
+		if _, err := store.Amend("r", g.ID, "owner", amendment); err != nil {
+			t.Fatal(err)
+		}
+	}
+	meta.Goal = g.ID
+	block, hasBrief := m.spawnGoalBlock(meta)
+	if !hasBrief {
+		t.Fatalf("amendments left hasBrief false: %q", block)
+	}
+	brief := strings.Index(block, "Own internal/decoder only.")
+	first := strings.Index(block, "Also update the changelog.")
+	second := strings.Index(block, "Skip the parser refactor.")
+	if brief < 0 || first < brief || second < first {
+		t.Fatalf("spawn block order = brief %d, amendments %d and %d: %q", brief, first, second, block)
+	}
+}
+
 // No prompt asks root or a service session to set a goal: they get neither the
 // goal rule nor the goal frame. An ordinary worker still gets both.
 func TestOnlyWorkersAreToldToSetGoals(t *testing.T) {

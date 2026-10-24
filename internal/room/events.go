@@ -258,12 +258,13 @@ type GoalChange string
 const (
 	GoalAdded    GoalChange = "added"
 	GoalEdited   GoalChange = "edited"
+	GoalAmended  GoalChange = "amended"
 	GoalFinished GoalChange = "finished"
 	GoalDropped  GoalChange = "dropped"
 )
 
 // goalChanges lists every goal change the web needs as a union type.
-var goalChanges = []GoalChange{GoalAdded, GoalEdited, GoalFinished, GoalDropped}
+var goalChanges = []GoalChange{GoalAdded, GoalEdited, GoalAmended, GoalFinished, GoalDropped}
 
 // GoalState is where the goal stands after the event.
 type GoalState string
@@ -297,8 +298,11 @@ func (g GoalEvent) eventType() EventType   { return EventType(g.Type) }
 func (g GoalEvent) eventSubject() string { return g.GoalID }
 
 // eventDedupe keys one post per goal and change and text, so a retried edit
-// posts once and a second edit posts again.
-func (g GoalEvent) eventDedupe() string { return string(g.Type) + "\x00" + g.Title }
+// posts once and a second edit posts again. The amendment text is in the key,
+// so two amendments to the same goal post twice.
+func (g GoalEvent) eventDedupe() string {
+	return string(g.Type) + "\x00" + g.Title + "\x00" + g.Summary
+}
 
 // CheckinState is a child's activity when the check-in was written.
 type CheckinState string
@@ -1616,6 +1620,15 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeNever,
 		Once:     true,
 		Text:     "{actor} edited goal {goalId}: {title}",
+	},
+	{
+		Family:   FamilyGoal,
+		Type:     EventType(GoalAmended),
+		Renderer: "GoalPost",
+		Payload:  reflect.TypeOf(GoalEvent{}),
+		Wake:     WakeTarget,
+		Once:     true,
+		Text:     "{actor} amended the brief of goal {goalId}: {summary}",
 	},
 	{
 		Family:   FamilyGoal,
