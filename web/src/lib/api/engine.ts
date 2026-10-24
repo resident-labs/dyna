@@ -20,7 +20,7 @@ import type { HarnessConfig, HarnessSnapshot, ManagedMCP, ManagedSkill, Personal
 import type { SyncStarted, SyncStatus } from './lanesync.ts'
 import type { MachineDetail, MachinePatch, MachineSummary } from './machine.ts'
 import type { LibraryView } from './library.ts'
-import type { ProfileCheck, ProfileEdit, ProfileList, ProfileView } from './profile.ts'
+import type { ProfileCheck, ProfileEdit, ProfileList, ProfileUsageSnapshot, ProfileView } from './profile.ts'
 import type { Attachment, Draft, Feed, FeedSearch, Issue, Member, Opened, Post, PostResult, ProfileChoice, Question, Room, SeatReturn, SendResult, SpawnResult, Visual } from './room.ts'
 import type { ServiceView } from './service.ts'
 import type { BulkSessionOptions, BulkSessionResult, ConsolidationOptions, ConsolidationState, MemberProfile, QueueItem, RoomSessionMutation, RoomSessionState, Session, TransferOptions, TransferState } from './session.ts'
@@ -44,6 +44,7 @@ export interface Engine {
   AccountUsage(refresh: boolean): Promise<UsageSnapshot>
   ProfileModels(harness: string, refresh: boolean): Promise<Catalog>
   UsageRollup(roomId: string, from: string, to: string): Promise<ActivityRollup>
+  ProfileUsage(from: string, to: string): Promise<ProfileUsageSnapshot>
 
   // Questions, call requests and visuals.
   Questions(roomId: string): Promise<Record<string, Question[]>>

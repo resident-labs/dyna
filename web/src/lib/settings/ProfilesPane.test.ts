@@ -6,6 +6,7 @@ import { element, elements, need, textOf } from '../../../test/need.ts'
 
 const built = await bundle({ component: '../settings/ProfilesPane', api: `export const api = {
   configProfiles: () => Promise.resolve(structuredClone(globalThis.listed)),
+  profileUsage: () => Promise.resolve({ from: '2026-10-18', to: '2026-10-24', profiles: [] }),
 }` })
 
 test('profile filtering searches every field and preserves the complete uses grid and action context', async () => {

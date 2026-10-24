@@ -1,6 +1,7 @@
 // Profiles as the settings screen edits them. Source: internal/configsvc/profiles.go.
 import type { HarnessSupport } from '../settings/support.ts'
 import type { Compact } from './account.ts'
+import type { CachePaired, Cost } from '../settings/usage/activity.ts'
 
 // ProfileView is configsvc.ProfileView.
 export interface ProfileView {
@@ -27,6 +28,25 @@ export interface ProfileView {
   command: string[] | null
   envKeys: string[] | null
   support: HarnessSupport
+}
+
+// ProfileUsageStats is subagent.ProfileUsageStats. Null values are unknown,
+// never zero. Cost keeps the same coverage fields as the Usage activity view.
+export interface ProfileUsageStats {
+  profile: string
+  turns: number
+  medianWallMs: number | null
+  cost: Cost
+  costPerTurnUsd: number | null
+  cacheReadShare: number | null
+  cachePaired: CachePaired
+}
+
+// ProfileUsageSnapshot is subagent.ProfileUsageSnapshot for inclusive UTC days.
+export interface ProfileUsageSnapshot {
+  from: string
+  to: string
+  profiles: ProfileUsageStats[] | null
 }
 
 // ProfileCheck is what a live profile check returns: the profile's name and
