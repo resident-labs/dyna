@@ -6,7 +6,7 @@
 import { api } from '../../api.ts'
 import { createSessionData } from '../sessions/sessionData.ts'
 import { mergeSessionPage } from '../sessions/sessionPages.ts'
-import { dmView } from '../sessions/dm.ts'
+import { dmView, listedThreadCount } from '../sessions/dm.ts'
 import { roomData } from './roomLoader.svelte.ts'
 import { router } from './router.svelte.ts'
 import type { QueueItem, Session } from '../api/session.ts'
@@ -45,7 +45,7 @@ let sessionReadingHistory = $state(false)
 let sessionVisit = 0
 let queue = $state<QueueItem[]>([]) // steering that waits for the open session's turn
 let sessionError = $state('')
-let threadCount = $derived(dmView(session, room || { name: '' }).threads.length)
+let threadCount = $derived(listedThreadCount(dmView(session, room || { name: '' }, {}, queue).threads, roomData.hierarchy, session?.member ?? {}))
 
 // sessionVisible tells whether a transcript tab is on screen, so a hidden one
 // neither reads nor polls.
