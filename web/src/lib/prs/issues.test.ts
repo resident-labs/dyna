@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { rm } from 'node:fs/promises'
 import { bundle, domNames, importBundle, installDom } from './prDetailHarness.ts'
-import { issueReference, roomIssueLabel, unifiedIssues, type RoomIssue } from './unifiedIssues.ts'
+import { issueReference, issueWork, roomIssueLabel, unifiedIssues, type RoomIssue } from './unifiedIssues.ts'
 import { issueGroups, issueChip } from './github.ts'
 import type { GitHubItem } from '../api/github.ts'
 import { element, elements, need } from '../../../test/need.ts'
@@ -172,6 +172,35 @@ test('Issues never loads PR merge status, on mount or focus', async () => {
 })
 
 const localIssue: RoomIssue = { id: 'msg_local', number: 12, title: 'Local issue', state: 'open', file: 'web/Example.svelte', line: 12, filer: 'builder', filedAt: 100 }
+
+test('issue work uses local goal and PR progress plus GitHub work facts', () => {
+  const active = { ...localIssue, state: 'goal', goalId: 'g1', inProgress: true, goalHolder: 'ana', fixPr: 42 }
+  const activeRow = need(unifiedIssues([], [active], 'dyna', 'open', '')[0])
+  assert.equal(activeRow.state, 'OPEN')
+  assert.equal(issueWork(activeRow), 'in-progress')
+  const finished = { ...active, inProgress: false, fixPr: undefined }
+  assert.equal(issueWork(need(unifiedIssues([], [finished], 'dyna', 'open', '')[0])), 'unhandled')
+  assert.equal(issueWork(need(unifiedIssues([], [{ ...localIssue, state: 'closed' }], 'dyna', 'all', '')[0])), 'other')
+  assert.equal(issueWork(issue(1, 'working')), 'in-progress')
+  assert.equal(issueWork(issue(2, 'has-pr')), 'in-progress')
+  assert.equal(issueWork(issue(3, 'needs-owner')), 'unhandled')
+})
+
+test('Issues default to Unhandled and In progress names the goal holder and PR', async () => {
+  const active = { ...localIssue, state: 'open', goalId: 'g1', inProgress: true, goalHolder: 'ana', fixPr: 42 }
+  const finished = { ...localIssue, id: 'msg_finished', number: 13, title: 'Finished goal', state: 'goal', goalId: 'g2', inProgress: false }
+  const r = await render([], { localIssues: [active, finished] }, microtasks)
+  try {
+    assert.match(r.target.textContent || '', /Finished goal/)
+    assert.doesNotMatch(r.target.textContent || '', /Local issue/)
+    need(elements(r.target, 'button').find((b) => b.textContent?.trim() === 'In progress')).click()
+    await microtasks()
+    assert.match(r.target.textContent || '', /Local issue/)
+    assert.match(r.target.textContent || '', /Held by ana/)
+    assert.match(r.target.textContent || '', /Fix in #42/)
+    assert.doesNotMatch(r.target.textContent || '', /Finished goal/)
+  } finally { await r.done() }
+})
 
 test('unified issues deduplicate exports by repository URL and preserve local rows without GitHub', () => {
   const remote = issue(20, 'needs-owner')

@@ -63,7 +63,7 @@ function loadIssues(history = false) {
     try {
       const list = (await api.issues(id, history)) ?? []
       if (!current() || id !== roomId) return
-      if (history) issueHistory = reconcileRows(issueHistory, list.filter((i: RoomIssue) => i.state !== 'open'))
+      if (history) issueHistory = reconcileRows(issueHistory, list.filter((i: RoomIssue) => i.state !== 'open' || i.inProgress))
       else issues = reconcileRows(issues, list)
     } catch (e) {
       if (current()) issuesHost.error(String(e))

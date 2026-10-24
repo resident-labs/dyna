@@ -236,7 +236,7 @@ test('list-only events do not reload room summaries', () => {
     roomId: 'a', home: null, feed: null, drill: null, roomSessionController: null, openRun: '',
     soonRooms: (kind = 'rooms') => kind === 'feed' ? feeds++ : kind === 'members' ? members++ : summaries++,
   }
-  for (const name of ['loadQuestions', 'loadVisuals', 'loadGoals', 'loadRules', 'loadPins', 'reviewerSoon', 'loadChanges', 'loadMembers', 'loadConsolidations', 'loadRuns']) c[name] = () => {}
+  for (const name of ['loadQuestions', 'loadVisuals', 'loadGoals', 'loadRules', 'loadPins', 'loadIssues', 'reviewerSoon', 'loadChanges', 'loadMembers', 'loadConsolidations', 'loadRuns']) c[name] = () => {}
   appFunctions(c, ['handle'])
   for (const kind of ['prs', 'goals', 'questions', 'pins', 'runs']) call(c, 'handle', { kind, roomId: 'a' })
   assert.equal(summaries, 0)
