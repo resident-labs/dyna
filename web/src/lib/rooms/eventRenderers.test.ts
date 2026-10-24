@@ -409,6 +409,22 @@ test('a call row says how the owner answered, without its request ID', () => {
   }
 })
 
+test('event states are plain words and only failures carry the failure class', () => {
+  for (const [type, failed] of [['approved', false], ['ci-failed', true]] as const) {
+    const payload = fixtures[`pr/${type}`]
+    assert.ok(payload && 'changeId' in payload, `the pr/${type} fixture is missing`)
+    const post = postFor('pr', type, payload)
+    const target = document.createElement('div')
+    document.body.append(target)
+    const mounted = web.mount(web.eventComponents.PRCard, { target, props: { post, notice: post.notice, surface: 'feed' } })
+    web.flushSync()
+    assert.equal(target.querySelector('.chip'), null, 'the state still draws a chip')
+    assert.equal(need(target.querySelector('.state'), 'the plain state').classList.contains('failed'), failed)
+    web.unmount(mounted)
+    target.remove()
+  }
+})
+
 test('a transfer request names its target and keeps the token in details', () => {
   const payload = fixtures['session/transfer-request']
   assert.ok(payload && 'transfer' in payload, 'the transfer-request fixture is missing')
@@ -418,10 +434,9 @@ test('a transfer request names its target and keeps the token in details', () =>
   document.body.append(target)
   const mounted = web.mount(web.eventComponents.SessionNoteCard, { target, props: { post: feed, notice: feed.notice, surface: 'feed' } })
   web.flushSync()
-  const summary = need(target.querySelector('.sum'), 'the feed summary').textContent ?? ''
+  const summary = need(target.querySelector('summary'), 'the feed summary').textContent ?? ''
   assert.match(summary, /dyna:notice-session: Handoff requested for sol/)
   assert.doesNotMatch(summary, token)
-  assert.equal(target.querySelector('.id'), null)
   // The feed keeps the request identity with the agent instructions, not in
   // the owner-facing summary.
   const instructions = need(target.querySelector('details'), 'the instructions fold').textContent ?? ''
@@ -436,7 +451,7 @@ test('a transfer request names its target and keeps the token in details', () =>
   document.body.append(dmTarget)
   const mountedDm = web.mount(web.eventComponents.SessionNoteCard, { target: dmTarget, props: { post: dm, notice: dm.notice, surface: 'dm' } })
   web.flushSync()
-  const dmSummary = need(dmTarget.querySelector('.sum'), 'the DM summary').textContent ?? ''
+  const dmSummary = need(dmTarget.querySelector('summary'), 'the DM summary').textContent ?? ''
   // The DM already belongs to the session, so its summary states the target
   // and handoff status without repeating the session or exposing the token.
   assert.match(dmSummary, /Handoff requested for sol/)
@@ -567,14 +582,10 @@ test('a folded hook card keeps its count and last time outside the name', () => 
   const text = (target.textContent ?? '').trim()
   assert.match(text, /12 times/)
   assert.match(text, /passed/)
-  // The card shows the count and the last time in an element of its own, never
-  // inside the name, so the narrow stylesheet can give that line its own row
-  // and the name keeps its whole width. The stylesheet decides where the line
-  // sits; this test holds the markup it depends on.
-  const fact = need(target.querySelector('.fact'), 'the fold fact')
-  assert.match(fact.textContent ?? '', /12 times · last/)
-  assert.equal(fact.closest('.title'), null, 'the fold fact is inside the name line')
-  assert.equal(target.querySelector('.title .name')?.textContent, 'Update Dyna', 'the name is cut short')
+  // The shared row keeps the fold fact in its one-line summary, not in the
+  // event's name. The name keeps its full text on every width.
+  assert.match(need(target.querySelector('.summary'), 'the fold summary').textContent ?? '', /12 times · last/)
+  assert.equal(target.querySelector('strong')?.textContent, 'Update Dyna', 'the name is cut short')
   web.unmount(mounted)
   target.remove()
 })
@@ -646,7 +657,7 @@ test('a review result card shows all four results on feed and DM', () => {
   const base = web.reviewEvent({ kind: 'review', payload: fixtures['review/result'] })
   assert.ok(base, 'the review result fixture is missing')
   const cases = [
-    { payload: { ...base, kind: 'approve' as const }, wants: [/PR #542 approved/, /approved/] },
+    { payload: { ...base, kind: 'approve' as const }, wants: [/PR #542/, /approved/] },
     { payload: { ...base, kind: 'approve-fast' as const, fastLand: true, note: 'fast landing', area: 'docs' }, wants: [/fast landing/, /approved/] },
     { payload: { ...base, kind: 'approve' as const, note: 'normal path' }, wants: [/normal path/, /approved/] },
     { payload: base, wants: [/changes requested/, /1 blocking/, /events\.go:42/] },

@@ -1,15 +1,16 @@
 <script lang="ts">
-  // The card for a workflow run's result: its name, how it ended, how many
-  // agent calls served it, and how long it took. The summary is the run's own
-  // result line; the full output lives in the run view. It reads the typed
-  // payload, never the post text.
+  // The row for a workflow run's result: its name, how it ended, how many
+  // agent calls served it, and how long it took. The row carries the counts and
+  // the time; the run's own result line and the full output sit behind the row
+  // disclosure and in the run view. It reads the typed payload, never the post
+  // text.
   import type { EventNotice } from '../api/room.ts'
   import type { EventPost, EventSurface } from './eventRenderers.ts'
   import { runEvent } from './eventPayloads.ts'
   import type { RunState } from './events.gen.ts'
   import EventDetails from './EventDetails.svelte'
+  import EventRow from './EventRow.svelte'
   import RunIcon from '../workflows/RunIcon.svelte'
-  import { clock } from '../ui/format.ts'
 
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
@@ -19,6 +20,7 @@
   let payload = $derived(runEvent(post))
   let state = $derived<RunState>(payload?.state ?? 'completed')
   let name = $derived(payload?.name || 'Workflow')
+  let chips = $derived([{ label: stateWords[state], tone: stateTone[state], failure: state === 'failed' }])
   // A run under a second reads in milliseconds, so a quick run does not look
   // like a clock that failed to move.
   let elapsed = $derived.by(() => {
@@ -35,49 +37,23 @@
     const call = steps === 1 ? '1 agent call' : `${steps} agent calls`
     return agents > 1 ? `${call} · ${agents} agents` : call
   })
+  let summary = $derived([counts, elapsed].filter(Boolean).join(' · '))
+  let hasBody = $derived(!!payload?.summary)
 </script>
 
-<div class="card {surface}" data-id={post.id}>
-  <div class="sum">
-    <span class="glyph {stateTone[state]}" aria-hidden="true"><RunIcon size={15} /></span>
-    <span class="title">
-      <span class="name">{name}</span>
-      <span class="state {stateTone[state]}">{stateWords[state]}</span>
-    </span>
-    {#if counts}<span class="fact">{counts}</span>{/if}
-    {#if elapsed}<span class="fact">{elapsed}</span>{/if}
-    <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
-  </div>
-  {#if payload?.summary}<p class="body">{payload.summary}</p>{/if}
+{#snippet icon()}
+  <RunIcon size={15} />
+{/snippet}
+
+{#snippet body()}
+  {#if payload?.summary}<p class="text">{payload.summary}</p>{/if}
   {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
-</div>
+{/snippet}
+
+<EventRow id={post.id} ts={post.ts} {surface} title={name} {chips} {summary} {icon} detail={hasBody ? body : undefined} />
+
+{#if surface === 'dm' && !hasBody}<EventDetails text={post.text} />{/if}
 
 <style>
-  .card {
-    margin: var(--s1) var(--s4);
-    border: 1px solid var(--line);
-    background: var(--side);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  .card.dm { margin: var(--s1) 0; }
-  .sum { display: flex; align-items: baseline; gap: 8px; padding: 8px 12px; color: var(--ink-2); font-size: var(--t-sm); }
-  .glyph { flex: none; display: grid; place-items: center; align-self: center; }
-  .glyph.sage { color: var(--sage); }
-  .glyph.coral { color: var(--coral); }
-  .glyph.gold { color: var(--gold); }
-  .title { display: flex; align-items: baseline; gap: 6px; flex: 1; min-width: 0; }
-  .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-  .state { flex: none; font-size: var(--t-cap); font-weight: 600; }
-  .state.sage { color: var(--sage); }
-  .state.coral { color: var(--coral); }
-  .state.gold { color: var(--gold); }
-  .fact { flex: none; color: var(--muted); font-size: var(--t-cap); white-space: nowrap; }
-  time { flex: none; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
-  .body { margin: 0; padding: 0 12px 10px; color: var(--ink-2); font-size: var(--t-sm); overflow-wrap: anywhere; }
-  @media (max-width: 760px) {
-    .card { margin: var(--s1) var(--s2); }
-    .sum { min-height: 44px; padding: 6px var(--s2); }
-    time, .fact { display: none; }
-  }
+  .text { margin: 0; overflow-wrap: anywhere; }
 </style>

@@ -19,6 +19,7 @@ test('posts map to their choice; failures, chat and root results always show', (
 test('defaults: full text, root-only highlight and updates shown', () => {
   const look = empty()
   assert.equal(setting(look, 'trim'), false)
+  assert.equal(setting(look, 'events'), true)
   assert.equal(setting(look, 'highlight'), 'root')
   assert.equal(setting(look, 'finished'), 'full')
   assert.equal([done, pr, goal, failed, chat].every(visibleTo(look)), true)
@@ -69,6 +70,16 @@ test('per-view overrides a browser saved before the look became global no longer
   assert.deepEqual(saved, { all: { finished: 'hidden' } })
   assert.equal(setting(saved, 'finished'), 'hidden')
   assert.deepEqual(readLook('not json'), readLook(null), 'a broken value falls back to the defaults')
+})
+
+test('Show system events off hides engine rows but keeps messages, turns and jump targets', () => {
+  const hidden = withChoice(empty(), 'events', false)
+  const engine = [pr, goal, { kind: 'merge' }, { kind: 'hook' }, { kind: 'checkin' }, { kind: 'ci-health' }]
+  assert.ok(engine.every((post) => !visibleTo(hidden)(post)))
+  assert.equal(visibleTo(hidden)({ kind: 'turn', completion: true, speaker: 'root' }), true)
+  assert.equal(visibleTo(hidden)(chat), true)
+  assert.equal(visibleTo(empty())({ kind: 'worktree' }), false, 'worktree housekeeping stays out of Room chat, including old posts')
+  assert.equal(visibleTo(hidden, { msg_pr: true })({ ...pr, id: 'msg_pr' }), true)
 })
 
 test('a post a jump revealed shows although its kind is hidden', () => {

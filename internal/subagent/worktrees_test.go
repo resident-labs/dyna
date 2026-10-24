@@ -163,6 +163,9 @@ func TestKeptWorktreeNoticeIsPostedOnce(t *testing.T) {
 	if len(got) != 1 || got[0].From != room.EngineSender || len(got[0].To) != 1 || got[0].To[0] != owner.Address() || got[0].Wake {
 		t.Fatalf("kept notices = %+v", got)
 	}
+	if got[0].Conversation != room.DMConversation(owner.ID) {
+		t.Fatalf("kept notice conversation = %q, want the owner session's DM", got[0].Conversation)
+	}
 	kept, ok := got[0].Worktree()
 	if !ok || kept.Owner != owner.ID || kept.Path != "/w/feature" || kept.Reason != room.WorktreeNotMerged || kept.Ahead != 1 {
 		t.Fatalf("kept payload = %+v, %v", kept, ok)

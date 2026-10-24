@@ -7,7 +7,8 @@
   import { ruleEvent } from './eventPayloads.ts'
   import type { RuleVerb } from './events.gen.ts'
   import EventDetails from './EventDetails.svelte'
-  import { clock, short } from '../ui/format.ts'
+  import EventRow from './EventRow.svelte'
+  import { short } from '../ui/format.ts'
 
   let {
     post,
@@ -21,19 +22,17 @@
   let payload = $derived(ruleEvent(post))
   let reached = $derived(payload?.sessions ?? [])
   let actor = $derived(payload ? short(payload.actor, room?.name) : '')
-  let line = $derived.by(() => {
-    if (!payload) return ''
-    return `${actor} ${verbs[payload.verb]} the ${payload.scope} rule ${payload.ruleId}`
-  })
+  let title = $derived(payload ? `Rule ${payload.ruleId}` : 'Rule changed')
+  let line = $derived(payload ? `${actor} ${verbs[payload.verb]} the ${payload.scope} rule` : '')
+  let summary = $derived([line, reached.length ? `reached ${reached.length} ${reached.length === 1 ? 'session' : 'sessions'}` : ''].filter(Boolean).join(' · '))
+  let hasBody = $derived(!!payload?.text || reached.length > 0)
 </script>
 
-<div class="card {surface}" data-id={post.id}>
-  <div class="sum">
-    <span class="glyph" aria-hidden="true">§</span>
-    <span class="line">{line}</span>
-    {#if reached.length}<span class="reach">· reached {reached.length} {reached.length === 1 ? 'session' : 'sessions'}</span>{/if}
-    <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
-  </div>
+{#snippet icon()}
+  <span aria-hidden="true">§</span>
+{/snippet}
+
+{#snippet body()}
   {#if payload?.text}<p class="text">{payload.text}</p>{/if}
   {#if reached.length}
     <details class="sessions">
@@ -44,23 +43,15 @@
     </details>
   {/if}
   {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
-</div>
+{/snippet}
+
+<EventRow id={post.id} ts={post.ts} {surface} {title} {summary} {icon} detail={hasBody ? body : undefined} />
+
+{#if surface === 'dm' && !hasBody}<EventDetails text={post.text} />{/if}
 
 <style>
-  .card { margin: 6px var(--s4); color: var(--muted); font-size: var(--t-sm); }
-  .card.dm { margin: 6px 0; }
-  .sum { display: flex; align-items: baseline; gap: 8px; }
-  .glyph { flex: none; color: var(--iris); }
-  .line { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-  .reach { flex: none; color: var(--muted); font-size: var(--t-cap); }
-  time { flex: none; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
-  .text { margin: 2px 0 0 24px; color: var(--ink-2); overflow-wrap: anywhere; }
-  .sessions { margin: 4px 0 0 24px; }
+  .text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .sessions { margin: 4px 0 0; }
   .sessions summary { cursor: pointer; color: var(--faint); font-size: var(--t-cap); }
   .sessions ul { margin: 4px 0 0; padding-left: 18px; color: var(--muted); }
-  @media (max-width: 760px) {
-    .card { margin: 6px var(--s2); }
-    .sum { flex-wrap: wrap; gap: 4px 8px; }
-    time { display: none; }
-  }
 </style>

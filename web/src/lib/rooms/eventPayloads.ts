@@ -10,7 +10,7 @@ export interface EventPost {
   kind?: string
   from?: string
   notice?: { kind: string } | null
-  payload?: EventPayload
+  payload?: EventPayload | null
 }
 
 // registeredEvent reports a post whose family and type the registry knows.
@@ -22,6 +22,13 @@ export function registeredEvent(post: EventPost): boolean {
 // stays sealed, so the UI shows a neutral reload row instead of its raw text.
 export function systemEvent(post: EventPost): boolean {
   return registeredEvent(post) || legacyEvent(post) || !!post.notice?.kind
+}
+
+// sealedEvent reports a post of a family that only the engine posts. The feed
+// and the look settings share this lightweight reader, outside the component
+// registry, so filtering does not load every renderer.
+export function sealedEvent(post: EventPost): boolean {
+  return systemEvent(post) || eventSpecs.some((spec) => spec.family === post.kind)
 }
 
 // worktreeEvent returns the typed payload of a kept-worktree post.

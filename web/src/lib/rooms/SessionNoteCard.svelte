@@ -9,7 +9,7 @@
   import { sessionEvent } from './eventPayloads.ts'
   import type { InstructionAction, SessionChange } from './events.gen.ts'
   import EventDetails from './EventDetails.svelte'
-  import { clock } from '../ui/format.ts'
+  import EventRow from './EventRow.svelte'
 
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
@@ -70,12 +70,16 @@
   let sections = $derived(payload?.sections ?? [])
 </script>
 
-<div class="note {surface}" data-id={post.id}>
-  <div class="sum">
-    <span class="glyph {changeTone[kind]}" aria-hidden="true">✦</span>
-    <span class="title">{headline}</span>
-    <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
-  </div>
+<EventRow
+  id={post.id}
+  ts={post.ts}
+  {surface}
+  title={headline}
+  chips={[{ label: kind, tone: changeTone[kind] }]}
+  summary={sections.length ? sections.map((section) => section.name).join(', ') : ''}
+>
+  {#snippet icon()}✦{/snippet}
+  {#snippet detail()}
   {#if sections.length}
     <ul class="sections">
       {#each sections as section, i (i)}
@@ -103,44 +107,21 @@
   {/if}
   {#if payload?.detail && kind === 'spawned'}<p class="detail task">{payload.detail}</p>{/if}
   {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
-</div>
+  {/snippet}
+</EventRow>
 
 <style>
-  .note {
-    margin: 6px var(--s4) 6px var(--gutter, 56px);
-    padding: 6px 0;
-    border-top: 1px solid var(--hair);
-    font-size: var(--t-sm);
-    color: var(--muted);
-  }
-  .sum { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
-  /* A DM column is narrow, so its headline wraps inside its own column and
-     the time keeps its place on the first line. */
-  .note.dm .sum { flex-wrap: nowrap; align-items: baseline; }
-  .note.dm .title { flex: 1 1 auto; white-space: normal; }
-  .note.dm time { margin-left: auto; }
-  .glyph { flex: none; width: 16px; text-align: center; font-size: var(--t-cap); }
-  .glyph.iris { color: var(--iris); }
-  .glyph.sage { color: var(--sage); }
-  .glyph.gold { color: var(--gold); }
-  .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
-  time { margin-left: auto; flex: none; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
-  .sections { margin: 4px 0 0 24px; padding: 0; list-style: none; display: grid; gap: 2px; }
+  .sections { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 2px; }
   .sections li { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: var(--t-cap); }
   .name { color: var(--ink-2); font-weight: 600; }
   .action { color: var(--faint); }
   .item { max-width: 22ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .item.add { color: var(--sage); }
   .item.remove { color: var(--coral); }
-  .more { margin: 4px 0 0 24px; }
+  .more { margin: 4px 0 0; }
   .more summary { cursor: pointer; color: var(--faint); font-size: var(--t-cap); list-style: none; transition: color var(--motion-fast) var(--ease); }
   .more summary::-webkit-details-marker { display: none; }
   .more summary:hover { color: var(--ink-2); }
   .detail { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: var(--t-sm); }
-  .detail.task { margin-left: 24px; }
-  @media (max-width: 760px) {
-    .note { margin: 4px var(--s2); }
-    .title { white-space: normal; }
-    .sections { margin-left: 20px; }
-  }
+  .detail.task { margin-left: 0; }
 </style>

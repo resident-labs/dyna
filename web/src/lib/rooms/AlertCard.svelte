@@ -9,7 +9,7 @@
   import { alertEvent } from './eventPayloads.ts'
   import type { AlertSource } from './events.gen.ts'
   import EventDetails from './EventDetails.svelte'
-  import { clock } from '../ui/format.ts'
+  import EventRow from './EventRow.svelte'
 
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
@@ -29,6 +29,7 @@
   // shows only when it adds a sentence of its own.
   let summary = $derived(payload?.summary ?? '')
   let showSummary = $derived(!!summary && !(payload?.findings?.[0]?.cause ?? '').startsWith(summary))
+  let severity = $derived(payload?.findings?.some((finding) => finding.severity === 'critical') ? 'critical' : 'warning')
   let copyState = $state<'' | 'copied' | 'failed'>('')
   // An alert stored before the typed events carries no payload: the family
   // fallback still routes it here, so the card shows its stored line rather
@@ -47,13 +48,16 @@
   }
 </script>
 
-<div class="card alert {surface}" data-id={post.id}>
-  <div class="sum">
-    <span class="glyph" aria-hidden="true">!</span>
-    <span class="title">{title}</span>
-    {#if payload?.trigger}<span class="fact">{payload.trigger}</span>{/if}
-    <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
-  </div>
+<EventRow
+  id={post.id}
+  ts={post.ts}
+  {surface}
+  {title}
+  chips={payload ? [{ label: severity, tone: severity === 'critical' ? 'coral' : 'gold', failure: severity === 'critical' }] : []}
+  summary={[payload?.trigger ?? '', showSummary ? summary : '', payload?.findings?.length ? `${payload.findings.length} finding${payload.findings.length === 1 ? '' : 's'}` : '', command ? `${commandLabel}: ${command}` : ''].filter(Boolean).join(' · ')}
+>
+  {#snippet icon()}!{/snippet}
+  {#snippet detail()}
   {#if legacy}
     <!-- TODO: legacy/shim remove later — an alert stored before the typed
          events has only its line. Remove when that history ages out. -->
@@ -79,37 +83,13 @@
     </div>
   {/if}
   {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
-</div>
+  {/snippet}
+</EventRow>
 
 <style>
-  .card {
-    margin: var(--s1) var(--s4);
-    border: 1px solid var(--line);
-    border-left: 3px solid var(--coral);
-    background: var(--side);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  .card.dm { margin: var(--s1) 0; }
-  .sum { display: flex; align-items: center; gap: 8px; padding: 8px 12px; color: var(--ink-2); }
-  .glyph {
-    flex: none;
-    width: 16px;
-    height: 16px;
-    line-height: 16px;
-    text-align: center;
-    border-radius: 50%;
-    background: var(--coral);
-    color: var(--main);
-    font-size: var(--t-cap);
-    font-weight: 700;
-  }
-  .title { font-weight: 600; flex: none; }
-  .fact { color: var(--muted); font-size: var(--t-sm); }
-  time { margin-left: auto; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
-  .summary { margin: 0; padding: 0 12px 6px; color: var(--ink-2); }
+  .summary { margin: 0 0 6px; color: var(--ink-2); }
   .summary.legacy { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
-  .findings { margin: 0; padding: 0 12px 8px; list-style: none; display: grid; gap: 6px; }
+  .findings { margin: 0 0 8px; padding: 0; list-style: none; display: grid; gap: 6px; }
   .findings li { display: flex; gap: 8px; align-items: baseline; }
   .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; transform: translateY(-2px); background: var(--gold); }
   .findings li.critical .dot { background: var(--coral); }
@@ -120,7 +100,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 12px 10px;
+    padding: 6px 0 0;
     border-top: 1px solid var(--hair);
     flex-wrap: wrap;
   }
@@ -139,10 +119,6 @@
   }
   .status { color: var(--faint); font-size: var(--t-cap); }
   @media (max-width: 760px) {
-    .card { margin: var(--s1) var(--s2); }
-    .sum { min-height: 40px; padding: 6px var(--s2); }
-    time { display: none; }
-    .summary, .findings, .step { padding-inline: var(--s2); }
     .command { white-space: normal; overflow-wrap: anywhere; }
   }
 </style>

@@ -1,6 +1,7 @@
 import type { EventPayload } from './events.gen.ts'
+import { sealedEvent } from './eventPayloads.ts'
 
-type ChoiceID = 'trim' | 'highlight' | 'finished' | 'prs' | 'goals'
+type ChoiceID = 'trim' | 'events' | 'highlight' | 'finished' | 'prs' | 'goals'
 type ChoiceValue = string | boolean | null
 interface Choice {
   id: ChoiceID
@@ -16,7 +17,7 @@ interface FeedPost {
   id?: string
   speaker?: string
   kind?: string
-  notice?: { kind?: string } | null
+  notice?: { kind: string } | null
   // payload is the typed JSON of a sealed system event. The one field this
   // file reads is its state, which names a failed or stopped result.
   payload?: EventPayload | null
@@ -33,13 +34,14 @@ interface FeedPost {
 // is on or off.
 export const CHOICES: Choice[] = [
   { id: 'trim', label: 'Trim long agent messages in Room chat', hint: 'Show the first paragraph with Show more. Root’s posts always show in full.' },
+  { id: 'events', label: 'Show system events in Room chat', hint: 'PRs, merges, hooks, goals and other engine rows. Messages and turn results stay.' },
   { id: 'highlight', label: 'Highlight', hint: 'Posts that get the gold mark', options: [['root', 'Root only'], ['all', 'Everyone to you'], ['off', 'Off']] },
   { id: 'finished', label: 'Finished turns', hint: 'Root’s results always show. Failures always show.', options: [['full', 'Full'], ['line', 'One line'], ['hidden', 'Hidden']] },
   { id: 'prs', label: 'Pull request updates', hint: 'Opened, reviewed, checked, merged' },
   { id: 'goals', label: 'Goal updates', hint: 'Goals added, done or dropped' },
 ]
 
-const DEFAULTS: Record<ChoiceID, string | boolean> = { trim: false, highlight: 'root', finished: 'full', prs: true, goals: true }
+const DEFAULTS: Record<ChoiceID, string | boolean> = { trim: false, events: true, highlight: 'root', finished: 'full', prs: true, goals: true }
 
 // setting resolves one choice: the saved value, else the built-in default.
 export function setting(look: Look, id: ChoiceID) {
@@ -92,8 +94,13 @@ export function kindOf(post: FeedPost): ChoiceID | '' {
 // shows even when its kind is hidden.
 export function visibleTo(look: Look, revealed: Record<string, boolean> = {}) {
   return (post: FeedPost) => {
+    // Worktree retention is session housekeeping, never Room chat content.
+    // Older posts predate the DM binding, so hide them here too.
+    if (post.kind === 'worktree') return false
+    if (post.id !== undefined && revealed[post.id] === true) return true
+    if (post.kind !== 'turn' && sealedEvent(post) && setting(look, 'events') === false) return false
     const k = kindOf(post)
-    if (!k || (post.id !== undefined && revealed[post.id] === true)) return true
+    if (!k) return true
     const v = setting(look, k)
     return k === 'finished' ? v !== 'hidden' : v
   }

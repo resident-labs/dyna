@@ -5,10 +5,9 @@
   // TODO: legacy/shim remove later — remove the text readers when that history
   // ages out.
   import GoalGlyph from './GoalGlyph.svelte'
-  import ExpediteBadge from '../rooms/ExpediteBadge.svelte'
   import EventDetails from '../rooms/EventDetails.svelte'
+  import EventRow from '../rooms/EventRow.svelte'
   import { expedite, goalExpedited } from '../rooms/expedite.ts'
-  import { stamp } from '../ui/format.ts'
   import type { EventNotice } from '../api/room.ts'
   import type { EventPost, EventSurface, GoalRef } from '../rooms/eventRenderers.ts'
   import { goalEvent } from '../rooms/eventPayloads.ts'
@@ -45,24 +44,28 @@
   let tail = $derived(payload ? `: ${payload.title}` : (post.text?.split(/goal g\d+:?/i).slice(1).join('') ?? ''))
   let state = $derived(payload ? payload.state : verdict === 'done' ? 'done' : /\bdropped goal\b/.test(post.text ?? '') ? 'dropped' : 'active')
   const clip = (s: string): string => ([...s].length > 60 ? [...s].slice(0, 59).join('') + '…' : s)
+  let rowTitle = $derived(verdict ? id : `${actor}${rest}${id}`.replace(/\s+/g, ' ').trim())
+  let rowSummary = $derived(verdict ? [clip(title).replace(/\.$/, ''), summary].filter(Boolean).join(' · ') : tail.replace(/^:\s*/, ''))
+  let chips = $derived([
+    { label: state, tone: state === 'done' ? 'sage' : state === 'dropped' ? 'coral' : 'iris' },
+    ...(goalExpedited($expedite, { id }) ? [{ label: 'expedited', tone: 'iris' }] : []),
+  ])
 </script>
 
-<div class="goalpost" data-id={post.id}>
-  <GoalGlyph goal={{ state }} /><div class="body">
-    {#if verdict}
-      <button class="goal title" onclick={() => ongoal?.(id)}>{id} {clip(title).replace(/\.$/, '')}</button> is {verdict}: {summary}
-    {:else}
-      <span>{#if actor}<strong class="hue-{post.fromHue}">{actor}</strong>{rest}{:else}{rest}{/if}<button class="goal" onclick={() => ongoal?.(id)}>{id}</button>{tail}</span>
-    {/if}
-    {#if goalExpedited($expedite, { id })}<ExpediteBadge />{/if}
-    {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
-  </div><time title={new Date(post.ts ?? 0).toLocaleString()}>{stamp(post.ts)}</time>
-</div>
-<style>
-  .goalpost { display: flex; align-items: start; gap: 10px; margin: var(--s1) 20px; padding: 7px 0; color: var(--muted); font-size: var(--t-sm); }
-  .goalpost > :global(svg) { margin-top: 3px; }
-  .body { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-  .goal { color: var(--iris); font-size: var(--t-sm); margin: 0 var(--s1); } .goal:hover { text-decoration: underline; }
-  .title { margin: 0; color: var(--ink-2); text-align: left; }
-  time { font-size: var(--t-cap); color: var(--faint); white-space: nowrap; }
-</style>
+{#snippet icon()}<GoalGlyph goal={{ state }} />{/snippet}
+{#snippet detail()}
+  <button class="link" onclick={() => ongoal?.(id)}>Open goal</button>
+  {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
+{/snippet}
+
+<EventRow
+  id={post.id}
+  ts={post.ts}
+  {surface}
+  title={rowTitle}
+  summary={rowSummary}
+  {chips}
+  {icon}
+  detail={surface === 'dm' ? detail : undefined}
+  onclick={surface === 'feed' ? () => ongoal?.(id) : null}
+/>

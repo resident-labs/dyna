@@ -4,11 +4,10 @@
   // payload of the post, never its text, and keeps no feed-only state: the
   // optional props are the row's actions, which a DM does not pass.
   import { openExternal } from '../../api.ts'
-  import { markdown, stamp, clock } from '../ui/format.ts'
+  import { markdown, stamp } from '../ui/format.ts'
   import { commitUrl, refName, shortSha } from './pr.ts'
   import { prView } from './prCard.ts'
-  import Row from '../ui/Row.svelte'
-  import Chip from '../ui/Chip.svelte'
+  import EventRow from '../rooms/EventRow.svelte'
   import PostActions from '../ui/PostActions.svelte'
   import PinIcon from '../ui/PinIcon.svelte'
   import HeldCommentNotice from './HeldCommentNotice.svelte'
@@ -47,19 +46,18 @@
   let headUrl = $derived(/^[0-9a-f]{7,40}$/i.test(view.head) ? commitUrl(view.url, view.head) : '')
 </script>
 
-<details class="pr" class:dm={surface === 'dm'} {open} ontoggle={(e) => (more = e.currentTarget.open)}>
-  <summary>
-  <Row dense>
-    {#snippet lead()}<span class="glyph" aria-hidden="true">↑</span>{/snippet}
-    {#snippet children()}
-      <span class="headline"><strong>{view.number ? `PR #${view.number}` : view.title || 'PR watcher'}</strong>
-        {#each view.chips as chip}<Chip tone={chip.tone}>{chip.label}</Chip>{/each}
-      </span>
-      <span class="meta">{[view.title, showRepo ? view.repo : '', view.head ? `pushed ${refName(view.head)}` : '', folded.length > 1 ? `${folded.length} updates` : ''].filter(Boolean).join(' · ')}</span>
-    {/snippet}
-    {#snippet trail()}<time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time><span class="chevron" aria-hidden="true">›</span>{/snippet}
-  </Row>
-  </summary>
+<EventRow
+  id={post.id}
+  ts={post.ts}
+  {surface}
+  title={view.number ? `PR #${view.number}` : view.title || 'PR watcher'}
+  chips={view.chips.map((chip) => ({ ...chip, failure: chip.tone === 'coral' }))}
+  summary={[view.title, showRepo ? view.repo : '', view.head ? `pushed ${refName(view.head)}` : '', folded.length > 1 ? `${folded.length} updates` : ''].filter(Boolean).join(' · ')}
+  {open}
+  ontoggle={(value) => (more = value)}
+>
+  {#snippet icon()}↑{/snippet}
+  {#snippet detail()}
     <div class="details">
       {#if view.url}<button class="link" onclick={() => openExternal(view.url)}>Open PR #{view.number} on GitHub</button>{/if}
       {#if headUrl}<button class="link" onclick={() => openExternal(headUrl)}>Open commit {shortSha(view.head)} on GitHub</button>{/if}
@@ -84,27 +82,16 @@
       {/each}
       {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
     </div>
-</details>
+  {/snippet}
+</EventRow>
 
 <style>
-  .pr { min-width: 0; }
-  .pr > summary { list-style: none; cursor: pointer; }
-  .pr > summary::-webkit-details-marker { display: none; }
-  .pr[open] .chevron { transform: rotate(90deg); }
   .notice-head { display: flex; align-items: center; gap: var(--s2); }
   .notice-pin { display: inline-flex; color: var(--muted); }
   .notice:focus-visible { outline: 2px solid var(--iris); outline-offset: var(--s1); }
   .notice.flash { background: var(--iris-wash); }
   .notice-actions { margin-top: var(--s2); }
   .notice-actions :global(.actions) { position: static; width: fit-content; max-width: 100%; transform: none; }
-  .glyph { width: 24px; height: 24px; display: grid; place-items: center; color: var(--muted); font-size: var(--t-title); }
-  .headline { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s1) var(--s2); font-size: var(--t-body); }
-  strong { font-weight: 600; }
-  .meta { display: block; margin-top: 2px; color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
-  time, .chevron { flex: none; color: var(--faint); font-size: var(--t-cap); }
-  .chevron { font-size: var(--t-title); }
-  .details { padding: var(--s2) var(--s2) var(--s3) 44px; color: var(--ink-2); font-size: var(--t-sm); overflow-wrap: anywhere; }
-  .pr.dm .details { padding: var(--s2) 0 0 0; }
   section + section { margin-top: var(--s3); padding-top: var(--s2); border-top: 1px solid var(--hair); }
   .link { color: var(--iris); font-size: var(--t-sm); }
   .link:hover { text-decoration: underline; }
@@ -113,5 +100,4 @@
   .log { margin-top: var(--s2); }
   .log summary { cursor: pointer; color: var(--muted); }
   .log pre { max-height: 280px; overflow: auto; padding: var(--s3); background: var(--side); border-radius: var(--r-sm); white-space: pre-wrap; overflow-wrap: anywhere; font: var(--t-sm)/1.5 var(--mono); }
-  @media (max-width: 760px) { .details { padding-left: var(--s2); } }
 </style>
