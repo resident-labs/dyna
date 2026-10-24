@@ -1,12 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"dyna-agent/internal/engine"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,9 +36,10 @@ func TestQAWebDirRequiresBuiltIndex(t *testing.T) {
 	}
 }
 
-// Exercise the actual embedded controller, including navigation and unknown endpoints.
-// The fake CDP module avoids a browser startup and real engine calls.
-func TestQABrowserControllerFailsClosed(t *testing.T) {
+// Exercise the actual embedded controller: navigation, unknown endpoints, and
+// the report an agent asks for when a step times out. The fake CDP module
+// avoids a browser startup and real engine calls.
+func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		t.Skip("Node.js is unavailable")
@@ -65,24 +68,103 @@ func TestQABrowserControllerFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	scratch := t.TempDir()
 	cmd := exec.CommandContext(t.Context(), node, "--input-type=module", "-e", browserQAScript)
+	cmd.Env = append(os.Environ(), "DYNA_SCRATCH="+scratch)
 	cmd.Stdin = bytes.NewReader(config)
-	out, err := cmd.CombinedOutput()
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		t.Fatalf("QA controller: %v\n%s", err, out)
+		t.Fatal(err)
 	}
-	if !bytes.Contains(out, []byte("QA policy checks passed: 29")) {
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	lines := make(chan string, 256)
+	go func() {
+		scanner := bufio.NewScanner(stdout)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			lines <- scanner.Text()
+		}
+		close(lines)
+	}()
+	var printed []string
+	find := func(marker string) string {
+		t.Helper()
+		for line := range lines {
+			printed = append(printed, line)
+			if strings.Contains(line, marker) {
+				return line
+			}
+		}
+		t.Fatalf("QA printed no line with %q: %v\n%s", marker, printed, stderr.String())
+		return ""
+	}
+	// The announcement names the one file that asks for a report, so an agent
+	// whose step timed out has a documented way to learn why it did.
+	announced := find("When a step times out, create ")
+	request, _, _ := strings.Cut(strings.TrimPrefix(announced, "When a step times out, create "), " (mkdir -p")
+	if request == "" {
+		t.Fatalf("announcement names no request file: %q", announced)
+	}
+	if err := os.WriteFile(request, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	screenshot, _, _ := strings.Cut(strings.TrimPrefix(find("QA page screenshot: "), "QA page screenshot: "), " ")
+	if want := filepath.Join(filepath.Dir(request), "page.png"); screenshot != want {
+		t.Errorf("screenshot = %q; want %q beside the request", screenshot, want)
+	}
+	if body, err := os.ReadFile(screenshot); err != nil || string(body) != "PNG" {
+		t.Errorf("saved screenshot = %q, %v; want the tab's picture", body, err)
+	}
+	// An agent ends QA the way it started it: it stops the command.
+	if err := cmd.Process.Signal(os.Interrupt); err != nil {
+		t.Fatal(err)
+	}
+	for line := range lines {
+		printed = append(printed, line)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("QA controller: %v\n%s\n%s", err, strings.Join(printed, "\n"), stderr.String())
+	}
+	out := strings.Join(printed, "\n")
+	if !strings.Contains(out, "QA policy checks passed: 29") {
 		t.Fatalf("missing policy checks: %s", out)
+	}
+	// A control that needs a write, a socket or a newer server never appears in
+	// this tab, and the banner must say so before an agent blames the branch.
+	if !strings.Contains(out, "Read-only QA cannot show settings writes, live updates (every socket stays closed) or server fields newer than the installed engine.") {
+		t.Fatalf("missing the read-only limits: %s", out)
 	}
 	// The tab cannot hold the computer stream, and QA must not report that as
 	// an app failure: the socket relays desktop input.
-	if !bytes.Contains(out, []byte("The computer stream stays closed in this tab")) {
+	if !strings.Contains(out, "The computer stream stays closed in this tab") {
 		t.Fatalf("missing the computer stream note: %s", out)
 	}
-	if !bytes.Contains(out, []byte("QA teardown ignored the pending cookie error")) {
+	if !strings.Contains(out, "QA teardown ignored the pending cookie error") {
 		t.Fatalf("pending route teardown was not exercised: %s", out)
 	}
-	if bytes.Contains(out, []byte("not-logged")) {
+	// The report names kinds with their counts, and never a URL, a header or a
+	// cookie: the fake drives the blocked requests the policy checks cover.
+	kinds := ""
+	for _, line := range printed {
+		if strings.HasPrefix(line, "QA blocked kinds: ") {
+			kinds = strings.TrimPrefix(line, "QA blocked kinds: ")
+		}
+	}
+	for _, want := range []string{"POST API request x", "socket", "GET external request x"} {
+		if !strings.Contains(kinds, want) {
+			t.Errorf("blocked kinds = %q; want %q", kinds, want)
+		}
+	}
+	for _, leak := range []string{"http", "/api", "not-logged", "cookie"} {
+		if strings.Contains(kinds, leak) {
+			t.Errorf("blocked kinds = %q; it leaks %q", kinds, leak)
+		}
+	}
+	if strings.Contains(out, "not-logged") {
 		t.Fatal("controller logged a credential")
 	}
 }

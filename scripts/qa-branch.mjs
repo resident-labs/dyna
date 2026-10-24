@@ -1,5 +1,7 @@
-import { readFile, realpath } from 'node:fs/promises';
-import { resolve, sep, extname } from 'node:path';
+import { readFile, realpath, mkdir, rm } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { resolve, sep, extname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
@@ -9,6 +11,25 @@ const browser = await chromium.connectOverCDP(config.Endpoint);
 const origin = 'http://127.0.0.1:7457';
 const web = await realpath(config.Web);
 const reads = new Set(config.ReadMethods);
+// A short list of the kinds of request this tab blocks, never the requests
+// themselves: a step that times out needs to know what cannot work here, and
+// no URL, header or cookie may enter the list or its report.
+const blockedLimit = 20;
+const blocked = new Map();
+let blockedDropped = false;
+const noteBlocked = kind => {
+  if (!blocked.has(kind) && blocked.size === blockedLimit) {
+    blockedDropped = true;
+    return;
+  }
+  blocked.set(kind, (blocked.get(kind) || 0) + 1);
+};
+const blockedSummary = () => {
+  if (blocked.size === 0) return 'QA blocked nothing yet.';
+  const kinds = [...blocked].map(([kind, count]) => count > 1 ? kind + ' x' + count : kind);
+  const full = blockedDropped ? ', and further kinds' : '';
+  return 'QA blocked kinds: ' + kinds.join(', ') + full;
+};
 const source = browser.contexts()[0];
 // The QA tab starts as a copy of the agent's paired tab: the same cookies and
 // the same stored device state. A tab without that state is unpaired, and the
@@ -29,6 +50,7 @@ const deny = route => {
   const kind = url.origin !== origin ? 'external request' :
     url.pathname.startsWith('/api/') ? 'API request' : 'asset request';
   // Do not print URLs, arguments, headers, or cookies: they may hold credentials.
+  noteBlocked(request.method() + ' ' + kind);
   console.log('QA restriction: blocked ' + request.method() + ' ' + kind);
   return route.fulfill({
     status: 403, contentType: 'application/json',
@@ -39,7 +61,10 @@ const deny = route => {
 // wayvnc, which accepts RFB input, so an open viewer is not read-only, and
 // the tab cannot show the stream. Check the viewer with dyna browser against
 // the app the engine serves.
-await context.routeWebSocket('**/*', socket => socket.close());
+await context.routeWebSocket('**/*', socket => {
+  noteBlocked('socket');
+  socket.close();
+});
 // A computer's last picture is a read: the Computers page is made of it, and
 // the viewer shows it while its stream connects.
 const computerShot = name => /^computers\/[A-Za-z0-9][A-Za-z0-9_.-]{0,95}\/shot\.png$/.test(name);
@@ -88,6 +113,27 @@ await context.route('**/*', async route => {
 });
 const page = await context.newPage();
 await page.addInitScript(() => { globalThis.__dynaReadOnlyQA = true; });
+// A timed-out step has no other way to learn why. When the agent touches the
+// request file, print the blocked kinds and save a screenshot beside it, so a
+// control that needs a write, a socket or a newer server is explained.
+const reportDir = join(process.env.DYNA_SCRATCH || tmpdir(), 'qa-report-' + process.pid);
+const reportRequest = join(reportDir, 'request');
+const reportPage = join(reportDir, 'page.png');
+await mkdir(reportDir, { recursive: true, mode: 0o700 });
+let reporting = false;
+const reportTimer = setInterval(async () => {
+  if (reporting || !existsSync(reportRequest)) return;
+  reporting = true;
+  await rm(reportRequest, { force: true }).catch(() => {});
+  console.log(blockedSummary());
+  try {
+    await page.screenshot({ path: reportPage });
+    console.log('QA page screenshot: ' + reportPage);
+  } catch {
+    console.log('QA page screenshot unavailable: the tab did not draw.');
+  }
+  reporting = false;
+}, 250);
 let stopped;
 const done = new Promise(resolve => { stopped = resolve; });
 for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, stopped);
@@ -96,9 +142,12 @@ browser.once('disconnected', stopped);
 try {
   await page.goto(origin, { waitUntil: 'domcontentloaded' });
   console.log('Read-only QA tab ready at ' + origin + '. Keep this command running; press Ctrl+C to close it.');
+  console.log('Read-only QA cannot show settings writes, live updates (every socket stays closed) or server fields newer than the installed engine.');
   console.log('The computer stream stays closed in this tab: its socket relays desktop input, so QA is not read-only with it open. Check the viewer with dyna browser against the app the engine serves.');
+  console.log('When a step times out, create ' + reportRequest + ' (mkdir -p and touch it): the command then prints every blocked request kind and saves a screenshot there.');
   await done;
 } finally {
+  clearInterval(reportTimer);
   // Ignore route callbacks that fail while their context is shutting down.
   await context.unrouteAll({ behavior: 'ignoreErrors' }).catch(() => {});
   await context.close().catch(() => {});
