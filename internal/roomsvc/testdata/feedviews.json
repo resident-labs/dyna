@@ -9,6 +9,21 @@
       "address": "repo:lead"
     },
     {
+      "id": "root",
+      "address": "repo:root",
+      "role": "root"
+    },
+    {
+      "id": "top",
+      "address": "repo:top",
+      "parent": "root"
+    },
+    {
+      "id": "topchild",
+      "address": "repo:topchild",
+      "parent": "top"
+    },
+    {
       "id": "peer",
       "address": "repo:peer"
     },
@@ -81,7 +96,8 @@
       },
       "views": [
         "channel:lead"
-      ]
+      ],
+      "forRoot": false
     },
     {
       "name": "child to own child",
@@ -132,6 +148,44 @@
       "views": [
         "channel:lead",
         "general"
+      ]
+    },
+    {
+      "name": "root child to the root session",
+      "post": {
+        "from": "repo:top",
+        "to": [
+          "repo:root"
+        ]
+      },
+      "views": [
+        "general"
+      ],
+      "forRoot": true
+    },
+    {
+      "name": "root session to its child",
+      "post": {
+        "from": "repo:root",
+        "to": [
+          "repo:top"
+        ]
+      },
+      "views": [
+        "general"
+      ],
+      "forRoot": false
+    },
+    {
+      "name": "root child to its own child",
+      "post": {
+        "from": "repo:top",
+        "to": [
+          "repo:topchild"
+        ]
+      },
+      "views": [
+        "channel:top"
       ]
     },
     {

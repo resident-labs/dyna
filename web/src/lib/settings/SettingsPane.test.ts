@@ -107,7 +107,7 @@ test('the Feed section previews the real feed with sample posts under the curren
   const look = { all: {} }
   assert.ok(samplePosts.every(visibleTo(look)))
   assert.ok(samplePosts.some((p) => oneLine(look, p)), 'a worker result folds to one line')
-  assert.equal(samplePosts.filter((p) => highlighted(look, p, 'dyna-agent')).length, 1, 'only root is highlighted')
+  assert.equal(samplePosts.filter((p) => highlighted(look, p, 'dyna-agent')).length, 2, 'root’s post and the post to root are highlighted')
 })
 
 test('with Finished turns Hidden, the preview drops worker results and keeps root results and failures', async () => {
