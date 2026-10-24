@@ -87,15 +87,11 @@ func maintenancePass(n *notify.Service) func(context.Context, int, io.Writer) er
 }
 
 // checkInPass posts every parent check-in that is due, spaced by the hook's own
-// interval, and writes the posted count to the run log. The spacing keeps a
-// minute of slack: the runner starts a hook a moment after its interval ends,
-// and a check-in due exactly at the run must not wait a whole extra interval.
+// interval, and writes the posted count to the run log.
 func checkInPass(n *notify.Service) func(context.Context, int, io.Writer) error {
 	return func(ctx context.Context, minutes int, log io.Writer) error {
 		s := parentcheckin.New(n)
-		s.Interval = func() (time.Duration, error) {
-			return time.Duration(max(1, minutes-1)) * time.Minute, nil
-		}
+		s.Interval = func() (time.Duration, error) { return time.Duration(minutes) * time.Minute, nil }
 		posted, _, err := s.Pass(ctx)
 		if _, writeErr := fmt.Fprintf(log, "posted %d check-ins\n", posted); writeErr != nil {
 			return writeErr
