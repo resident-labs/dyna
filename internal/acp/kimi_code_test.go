@@ -47,7 +47,7 @@ func TestKimiSessionConfigOptionsAndThinking(t *testing.T) {
 			Value     string `json:"value"`
 		}
 		if err := json.Unmarshal(raw, &params); err != nil || params.SessionID != "kimi-session" || params.ConfigID != "thinking" || params.Value != "high" {
-			t.Fatalf("set_config_option params = %s, %v", raw, err)
+			t.Errorf("set_config_option params = %s, %v", raw, err)
 		}
 		agent.reply(msg["id"], struct{}{})
 	}()
