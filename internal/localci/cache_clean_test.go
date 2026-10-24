@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -97,30 +98,73 @@ func TestRunKeeperExitRemovesItsFolder(t *testing.T) {
 	}
 }
 
-// TestStoppingRunKeeperWaitsOnTheSameLock makes the keeper delete .active
-// while teardown waits. Teardown must hold that inode open before signalling;
-// reopening the pathname either fails or can acknowledge a different file.
+// TestStoppingRunKeeperWaitsOnTheSameLock makes a controlled keeper unlink
+// .active before teardown's first probe. Teardown must hold that inode open
+// before signalling; reopening the pathname can acknowledge a different file.
+// Pipe handshakes control both processes, so the test has no sleeps or polling.
 func TestStoppingRunKeeperWaitsOnTheSameLock(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "base")
-	active := filepath.Join(base, "runs", "run", ".active")
-	if output, err := exec.Command("bash", "-c", "set -e; mkdir -p "+shellquote.Quote(filepath.Dir(active))+"; "+runLocks(base, active)).CombinedOutput(); err != nil {
-		t.Fatalf("start run keeper: %v: %s", err, output)
+	runDir := filepath.Join(base, "runs", "run")
+	active := filepath.Join(runDir, ".active")
+	if err := os.MkdirAll(runDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	control, ack := filepath.Join(base, "control"), filepath.Join(base, "ack")
+	for _, fifo := range []string{control, ack} {
+		if output, err := exec.Command("mkfifo", fifo).CombinedOutput(); err != nil {
+			t.Fatalf("make test pipe: %v: %s", err, output)
+		}
+	}
+	// The controlled keeper takes the same run and cache locks as runLocks. Its
+	// exit trap unlinks the run and closes both locks before acknowledging exit.
+	cleanup := "rm -rf --one-file-system " + shellquote.Quote(runDir) +
+		"; exec 6>&-; exec 7>&-; printf 'done\\n' > " + shellquote.Quote(ack)
+	keeperScript := "set -e; exec 6>>" + shellquote.Quote(active) + "; flock -x 6; " +
+		"exec 7>>" + shellquote.Quote(filepath.Join(base, "caches.lock")) + "; flock -s 7; " +
+		"exec 5<>" + shellquote.Quote(control) + "; trap " + shellquote.Quote(cleanup) + " EXIT; " +
+		"printf 'ready\\n'; read -r _ <&5"
+	keeper := exec.Command("bash", "-c", keeperScript)
+	stdout, err := keeper.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := keeper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	stopped := false
+	t.Cleanup(func() {
+		if !stopped {
+			_ = keeper.Process.Kill()
+			_ = keeper.Wait()
+		}
+	})
+	if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || line != "ready\n" {
+		t.Fatalf("keeper did not take its locks: %q %v", line, err)
+	}
+	if err := os.WriteFile(keeperPID(active), []byte(strconv.Itoa(keeper.Process.Pid)), 0600); err != nil {
+		t.Fatal(err)
 	}
 	bin := t.TempDir()
 	flock, err := exec.LookPath("flock")
 	if err != nil {
 		t.Skipf("flock is unavailable: %v", err)
 	}
-	wrapper := "#!/bin/sh\nprintf 'call\\n' >> \"$FLOCK_COUNT\"\nexec " + shellquote.Quote(flock) + " \"$@\"\n"
+	// Before the descriptor probe, wait until the keeper has unlinked the run
+	// and released its locks. The old pathname probe misses this handshake.
+	wrapper := "#!/bin/sh\nprintf 'call\\n' >> \"$FLOCK_COUNT\"\n" +
+		"if [ \"$1\" = -n ] && [ \"$2\" = 9 ]; then IFS= read -r _ < \"$KEEPER_ACK\"; fi\n" +
+		"exec " + shellquote.Quote(flock) + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(bin, "flock"), []byte(wrapper), 0700); err != nil {
 		t.Fatal(err)
 	}
 	count := filepath.Join(t.TempDir(), "calls")
 	cmd := exec.Command("bash", "-c", stopKeeper(base, active))
-	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FLOCK_COUNT="+count)
+	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FLOCK_COUNT="+count, "KEEPER_ACK="+ack)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("stop run keeper: %v: %s", err, output)
 	}
+	stopped = true
+	_ = keeper.Wait()
 	data, err := os.ReadFile(count)
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +172,7 @@ func TestStoppingRunKeeperWaitsOnTheSameLock(t *testing.T) {
 	if calls := strings.Count(string(data), "call\n"); calls != 1 {
 		t.Fatalf("teardown reopened .active after its deletion: %d flock calls, want one", calls)
 	}
-	if _, err := os.Stat(filepath.Dir(active)); !os.IsNotExist(err) {
+	if _, err := os.Stat(runDir); !os.IsNotExist(err) {
 		t.Fatalf("run folder survived keeper teardown: %v", err)
 	}
 }
