@@ -20,6 +20,7 @@ import (
 	"dyna-agent/internal/cli/jsonout"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/notify"
+	prstate "dyna-agent/internal/pr/state"
 	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/subagent"
@@ -177,12 +178,12 @@ type startView struct {
 // ---- start ----
 
 func startCommand(newManager func() *subagent.Manager) *cobra.Command {
-	var profileName, name, roomRef, dir, schemaPath, goal, under string
+	var profileName, name, roomRef, dir, schemaPath, goal, under, fixesText string
 	var asJSON bool
 	cmd := &cobra.Command{
 		Use:   "start --goal <outcome; done when> --profile <name> [--name <label>] [--room <room>] [--dir <path>] [--schema <file>] [--under <goal>] <brief text | @file>",
 		Short: "Start a subagent session; prints its address and runs the first turn in the background",
-		Long:  "Start a subagent with a goal and brief. Use --under gN to select its goal. Otherwise, start uses the starter's unique open assigned item goal, then its single open held goal set by someone else. Multiple eligible goals require --under. With no eligible goal, the child holds a new standalone goal. Root holds no goals: a start from root's session gives the child a top-level goal of its own, unless --under names a goal an agent holds; a goal that root holds is refused.",
+		Long:  "Start a subagent with a goal and brief. --goal accepts new outcome text or an existing goal ID such as g12. Use --under gN to delegate an item on a goal. Otherwise, start uses the starter's unique open assigned item goal, then its single open held goal set by someone else. With no eligible goal, the child holds a new standalone goal. --fixes links room issues to the new or existing goal.",
 		// Start explains a missing brief better than cobra's argument count.
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
@@ -209,8 +210,17 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 				}
 			}
 			cwd, _ := os.Getwd()
+			var fixes []int
+			if c.Flags().Changed("fixes") {
+				if fixes, err = prstate.ParseDynaIssueNumbers(fixesText); err != nil {
+					return err
+				}
+				if len(fixes) == 0 {
+					return fmt.Errorf("--fixes needs at least one room issue such as D-35")
+				}
+			}
 			var info subagent.Info
-			in := roomsvc.SubagentStart{Profile: profileName, Name: name, Dir: dir, Cwd: cwd, Schema: schema, Goal: goal, Under: under, Task: task, Owner: runstore.OwnerFromEnv()}
+			in := roomsvc.SubagentStart{Profile: profileName, Name: name, Dir: dir, Cwd: cwd, Schema: schema, Goal: goal, Under: under, Fixes: fixes, Task: task, Owner: runstore.OwnerFromEnv()}
 			if err := engineClient().Call(c.Context(), "StartSubagent", []any{rec.ID, in}, &info); err != nil {
 				return err
 			}
@@ -231,7 +241,8 @@ func startCommand(newManager func() *subagent.Manager) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&goal, "goal", "", "required outcome and done condition; placed in an item or a standalone goal")
+	cmd.Flags().StringVar(&goal, "goal", "", "required new outcome, or an existing goal ID such as g12")
+	cmd.Flags().StringVar(&fixesText, "fixes", "", "room issues linked to the session's goal, such as D-35,D-40")
 	cmd.Flags().StringVar(&under, "under", "", "goal ID to delegate from; default: the starter's open assigned item's goal, then its single held goal set by someone else; otherwise a standalone goal")
 	cmd.Flags().StringVar(&profileName, "profile", "", "worker profile (default: the default profile)")
 	cmd.Flags().StringVar(&name, "name", "", "label for this session, unique among open sessions in its room")

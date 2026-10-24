@@ -374,4 +374,4 @@ dyna issue "Unify the parser paths" --at internal/parser.go:12 --note "Two calle
 dyna issue list --json
 ```
 
-Root or the owner can triage an issue with `dyna issue close <id> --reason "..."`, `dyna issue goal <id> [--for @name]`, or `dyna issue export <id>`. Export uses the room GitHub account and requires read-write access.
+Root or the owner can triage an issue with `dyna issue close <id> --reason "..."` or `dyna issue export <id>`. Start work with `dyna goal --fixes D-N [--for @name]`, or link an existing goal with `dyna goal edit gN --fixes D-N`. Export uses the room GitHub account and requires read-write access.

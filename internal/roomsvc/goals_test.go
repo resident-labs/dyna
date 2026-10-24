@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/goals"
+	"dyna-agent/internal/room"
 )
 
 func TestGoalsUseRoomAuthorityAndQuietMilestones(t *testing.T) {
@@ -182,6 +183,39 @@ func TestGoalItemAssigneeNoneClears(t *testing.T) {
 	it, err = e.svc.EditGoalItem(t.Context(), r.ID, g.ID, it.ID, "", &none)
 	if err != nil || it.Assignee != "" {
 		t.Fatal(it, err)
+	}
+}
+
+func TestGoalIssueLinks(t *testing.T) {
+	e := newEnv(t)
+	r := e.room("work")
+	first, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Use the issue title", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := e.svc.rooms().FileIssue(r.ID, room.IssueInput{Title: "Link another issue", Filer: r.Name})
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, err := e.svc.AddGoal(e.ctx, r.ID, "", nil, []int{first.Number})
+	if err != nil || g.Text != first.Title {
+		t.Fatalf("goal = %+v, %v", g, err)
+	}
+	if _, err := e.svc.EditGoalSelectors(e.ctx, r.ID, g.ID, "", nil, []int{second.Number}); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := e.svc.rooms().Issues(r.ID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	linked := map[string]room.Issue{}
+	for _, issue := range rows {
+		linked[issue.ID] = issue
+	}
+	for _, issue := range []room.Issue{first, second} {
+		if got := linked[issue.ID]; got.State != "goal" || got.GoalID != g.ID {
+			t.Fatalf("%s link = %+v, want %s", issue.Label(), got, g.ID)
+		}
 	}
 }
 

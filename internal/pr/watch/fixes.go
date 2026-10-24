@@ -46,13 +46,13 @@ func (s *Service) closeFixedIssues(ctx context.Context, r Record, mergeCommit st
 // already closed, or gone, is not an error: the same close may have run
 // before, or a person closed it first.
 func (s *Service) closeRoomIssue(rec room.Record, fix state.IssueRef, reason string, pr int, commit string) error {
-	open, err := s.Notify.Rooms.Issues(rec.ID, false)
+	open, err := s.Notify.Rooms.Issues(rec.ID, true)
 	if err != nil {
 		return fmt.Errorf("read room issues: %w", err)
 	}
 	id := ""
 	for _, issue := range open {
-		if issue.Number == fix.Number {
+		if issue.Number == fix.Number && (issue.State == "open" || issue.State == "goal") {
 			id = issue.Label()
 			break
 		}

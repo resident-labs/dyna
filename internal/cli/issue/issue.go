@@ -84,7 +84,7 @@ func Command(o Options) *cobra.Command {
 		return output(c, i)
 	}
 	var all bool
-	list := &cobra.Command{Use: "list", Short: "List open room issues", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
+	list := &cobra.Command{Use: "list", Short: "List unhandled room issues", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		s, r, _, err := caller()
 		if err != nil {
 			return err
@@ -105,9 +105,9 @@ func Command(o Options) *cobra.Command {
 		}
 		return nil
 	}}
-	list.Flags().BoolVar(&all, "all", false, "include closed, goal and exported issues")
+	list.Flags().BoolVar(&all, "all", false, "include in-progress, closed, goal and exported issues")
 	root.AddCommand(list)
-	for _, action := range []string{"close", "goal", "export"} {
+	for _, action := range []string{"close", "export"} {
 		var value string
 		c := &cobra.Command{Use: action + " <issue>", Short: action + " an open issue by D-N or message ID (root or owner)", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
 			if action == "close" {
@@ -141,6 +141,19 @@ func Command(o Options) *cobra.Command {
 		}
 		root.AddCommand(c)
 	}
+	// TODO: legacy/shim remove after one release — the hidden alias teaches
+	// the single goal-creation command instead of creating a second kind of goal.
+	legacyFor := ""
+	legacyGoal := &cobra.Command{Use: "goal <issue>", Short: "replaced by dyna goal --fixes", Hidden: true, Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
+		if legacyFor != "" {
+			_, err := fmt.Fprintf(c.OutOrStdout(), "dyna goal --for %s --fixes %s\n", legacyFor, a[0])
+			return err
+		}
+		_, err := fmt.Fprintf(c.OutOrStdout(), "dyna goal --fixes %s\n", a[0])
+		return err
+	}}
+	legacyGoal.Flags().StringVar(&legacyFor, "for", "", "ignored holder; use dyna goal --for @name")
+	root.AddCommand(legacyGoal)
 	return root
 }
 

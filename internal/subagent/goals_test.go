@@ -88,7 +88,7 @@ func TestRootStartNeverJoinsARootGoal(t *testing.T) {
 	}
 	// An implicit lookup finds no root goal.
 	meta := Meta{ID: "child", RoomID: "r", ParentSession: rootID}
-	goalID, itemID, err := m.addSpawnGoal(meta, "", "Child work", "Brief")
+	goalID, itemID, err := m.addSpawnGoal(meta, "", "Child work", "Brief", nil)
 	if err != nil || itemID != "" || goalID == rootGoal.ID {
 		t.Fatalf("implicit start: goal=%q item=%q err=%v", goalID, itemID, err)
 	}
@@ -100,18 +100,44 @@ func TestRootStartNeverJoinsARootGoal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	goalID, itemID, err = m.addSpawnGoal(Meta{ID: "child-2", RoomID: "r", ParentSession: rootID}, leadGoal.ID, "Child work", "Brief")
+	goalID, itemID, err = m.addSpawnGoal(Meta{ID: "child-2", RoomID: "r", ParentSession: rootID}, leadGoal.ID, "Child work", "Brief", nil)
 	if err != nil || itemID == "" || goalID != leadGoal.ID {
 		t.Fatalf("explicit agent goal: goal=%q item=%q err=%v", goalID, itemID, err)
 	}
 	// A goal root holds, and a bad ID, are both refused.
 	for _, under := range []string{rootGoal.ID, "g99"} {
-		if _, _, err := m.addSpawnGoal(Meta{ID: "child-3", RoomID: "r", ParentSession: rootID}, under, "Child work", "Brief"); err == nil {
+		if _, _, err := m.addSpawnGoal(Meta{ID: "child-3", RoomID: "r", ParentSession: rootID}, under, "Child work", "Brief", nil); err == nil {
 			t.Fatalf("under=%q accepted", under)
 		}
 	}
 	if items, err := store.Items("r", rootGoal.ID); err != nil || len(items) != 0 {
 		t.Fatalf("root goal items = %v, %v", items, err)
+	}
+}
+
+func TestSpawnGoalUsesExistingGoal(t *testing.T) {
+	m := &Manager{Store: &Store{Root: filepath.Join(t.TempDir(), "sessions")}}
+	leadID, childID := NewID(), NewID()
+	for _, meta := range []Meta{
+		{ID: leadID, Name: "lead", RoomID: "r", Room: "work"},
+		{ID: childID, Name: "child", RoomID: "r", Room: "work", ParentSession: leadID},
+	} {
+		if err := m.Store.writeMeta(meta); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store := m.goalStore()
+	g, err := store.Add("r", leadID, goals.Input{Text: "Existing work", Holders: []string{leadID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	goalID, itemID, err := m.addSpawnGoal(Meta{ID: childID, RoomID: "r", Room: "work", ParentSession: leadID}, "", g.ID, "New brief", nil)
+	if err != nil || goalID != g.ID || itemID != "" {
+		t.Fatalf("existing goal = %q, item %q, %v", goalID, itemID, err)
+	}
+	updated, err := store.Get("r", g.ID)
+	if err != nil || !updated.HeldBy(childID) {
+		t.Fatalf("goal holders = %+v, %v", updated.Holders, err)
 	}
 }
 
@@ -188,7 +214,7 @@ func TestSpawnGoalUsesEffectiveGoal(t *testing.T) {
 			}
 			if tc.parent == "" && tc.under == "" {
 				meta := Meta{ID: "child", RoomID: "r"}
-				goalID, itemID, err := m.addSpawnGoal(meta, tc.under, "Child work", "Brief")
+				goalID, itemID, err := m.addSpawnGoal(meta, tc.under, "Child work", "Brief", nil)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -202,7 +228,7 @@ func TestSpawnGoalUsesEffectiveGoal(t *testing.T) {
 				return
 			}
 			meta := Meta{ID: "child", RoomID: "r", ParentSession: tc.parent}
-			goalID, itemID, err := m.addSpawnGoal(meta, tc.under, "Child work", "Brief")
+			goalID, itemID, err := m.addSpawnGoal(meta, tc.under, "Child work", "Brief", nil)
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("err = %v, want %q", err, tc.wantErr)
