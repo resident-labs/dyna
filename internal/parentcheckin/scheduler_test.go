@@ -80,6 +80,45 @@ func TestPendingCheckInSurvivesRestartAndIntervalChanges(t *testing.T) {
 	}
 }
 
+func TestOneMinuteCheckInKeepsDelayBetweenPasses(t *testing.T) {
+	root := t.TempDir()
+	if err := Migrate(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { database.Close(root) })
+	now := time.Date(2026, 10, 24, 0, 0, 0, 0, time.UTC)
+	s := &Scheduler{
+		Root: root,
+		Now:  func() time.Time { return now },
+		Interval: func() (time.Duration, error) {
+			return time.Minute, nil
+		},
+		Targets: func() ([]Target, error) {
+			return []Target{{ID: "parent", Room: "room"}}, nil
+		},
+		Deliver: func(context.Context, Target, string) (bool, error) { return true, nil },
+	}
+	pass := func() int {
+		t.Helper()
+		posted, _, err := s.Pass(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return posted
+	}
+	if got := pass(); got != 0 {
+		t.Fatalf("initial pass posted %d check-ins", got)
+	}
+	now = now.Add(time.Minute)
+	if got := pass(); got != 1 {
+		t.Fatalf("due pass posted %d check-ins", got)
+	}
+	now = now.Add(2 * time.Second)
+	if got := pass(); got != 0 {
+		t.Fatalf("pass seconds later posted %d more check-ins", got)
+	}
+}
+
 func TestEligibilityUsesOnlyActiveDirectChildren(t *testing.T) {
 	for _, role := range []string{"root", ""} {
 		live := []subagent.Info{
