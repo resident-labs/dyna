@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"dyna-agent/internal/room"
+	"dyna-agent/internal/subagent"
 )
 
 // feedViews routes posts into the web app's feed views: the room chat and one
@@ -13,6 +14,9 @@ type feedViews struct {
 	byAddress map[string]Member
 	byID      map[string]Member
 	owners    map[string]bool
+	// root is the room's root session. Its team is the room itself, so it has
+	// no team view of its own.
+	root Member
 }
 
 // VoiceChannel is the feed view of the owner's voice call. It is a view token,
@@ -21,11 +25,14 @@ type feedViews struct {
 const VoiceChannel = room.VoiceAgent
 
 func newFeedViews(members []Member) feedViews {
-	c := feedViews{map[string]Member{}, map[string]Member{}, map[string]bool{}}
+	c := feedViews{byAddress: map[string]Member{}, byID: map[string]Member{}, owners: map[string]bool{}}
 	for _, m := range members {
 		if m.Owner {
 			c.owners[m.Address] = true
 			continue
+		}
+		if m.Role == subagent.RoleRoot {
+			c.root = m
 		}
 		c.byAddress[m.Address], c.byID[m.ID] = m, m
 	}
@@ -36,13 +43,26 @@ func newFeedViews(members []Member) feedViews {
 // "channel:" prefix because routes and saved views store it, so a rename would
 // break links the owner already has.
 //
+// The root session's team is the whole room: its children are the room's
+// top-level sessions. Root's own posts, and the posts of its children, belong
+// to the room chat, so the owner reads them there and not in a team view.
+//
 // TODO: legacy/shim remove later — change the token only together with a read
 // for the "channel:" form.
 func (c feedViews) home(m Member) string {
-	if _, ok := c.byID[m.Parent]; ok {
+	if m.Role == subagent.RoleRoot {
+		return "general"
+	}
+	if parent, ok := c.byID[m.Parent]; ok && parent.Role != subagent.RoleRoot {
 		return "channel:" + m.Parent
 	}
 	return "general"
+}
+
+// addressedToRoot reports a post whose recipients include the room's root
+// session, which the owner reads as a post to them.
+func (c feedViews) addressedToRoot(post room.Message) bool {
+	return c.root.Address != "" && slices.Contains(post.To, c.root.Address)
 }
 
 // viewsFor lists the feed views a post shows in, the sender's home first. home
