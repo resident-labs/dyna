@@ -14,6 +14,9 @@ export interface RoomIssue {
   githubUrl?: string
   // fixPr is the open PR that closes this issue on merge.
   fixPr?: number
+  inProgress?: boolean
+  goalShared?: boolean
+  goalHolder?: string
   changedAt?: number
 }
 export interface IssueReference { kind: 'pr' | 'issue' | 'room_issue'; number: number | string; title: string; state: string; url: string }
@@ -22,6 +25,23 @@ export interface IssueReference { kind: 'pr' | 'issue' | 'room_issue'; number: n
 export const roomIssueLabel = (i: RoomIssue): string => i.number > 0 ? `D-${i.number}` : i.id
 export const issueReference = (i: IssueRow): IssueReference => ({ kind: i.number ? 'issue' : 'room_issue', number: i.number || (i.local ? roomIssueLabel(i.local) : ''), title: i.title, state: i.state, url: i.url })
 export type IssueRow = GitHubItem & { local?: RoomIssue; source?: 'Dyna' | 'GitHub' }
+
+export type IssueWork = 'unhandled' | 'in-progress' | 'other'
+
+// issueWork is the view's projection of the backend's local issue rule and
+// GitHub's own work facts. Older engines omit inProgress, so their legacy
+// goal and PR fields remain a fallback.
+export function issueWork(it: IssueRow): IssueWork {
+  const local = it.local
+  if (it.source === 'Dyna') {
+    if (!local || local.state !== 'open' && local.state !== 'goal') return 'other'
+    const progress = local.inProgress ?? (local.state === 'goal' || !!local.fixPr)
+    return progress ? 'in-progress' : 'unhandled'
+  }
+  if (it.state !== 'OPEN') return 'other'
+  return it.group === 'working' || it.group === 'has-pr' || it.workingSessionLive ? 'in-progress' : 'unhandled'
+}
+
 const urlKey = (url: string) => url.replace(/\/+$/, '').toLowerCase()
 
 export function unifiedIssues(github: readonly GitHubItem[], local: readonly RoomIssue[], source: string, state: string, query: string): IssueRow[] {
@@ -34,7 +54,7 @@ export function unifiedIssues(github: readonly GitHubItem[], local: readonly Roo
   // Unresolved exports appear only in All, until a GitHub response supplies their state.
   for (const i of locals) {
     if (i.githubUrl && seen.has(urlKey(i.githubUrl))) continue
-    rows.push({ number: 0, title: i.title, state: i.githubUrl ? 'UNKNOWN' : i.state === 'open' ? 'OPEN' : 'CLOSED', group: i.state === 'open' ? 'needs-owner' : '', author: { login: i.filer || '' }, labels: [], workingSessionLive: false, createdAt: new Date(i.filedAt).toISOString(), updatedAt: new Date(i.changedAt || i.filedAt).toISOString(), url: i.githubUrl || '', source: 'Dyna', local: i, fixPR: i.fixPr || undefined })
+    rows.push({ number: 0, title: i.title, state: i.githubUrl ? 'UNKNOWN' : i.state === 'open' || i.state === 'goal' ? 'OPEN' : 'CLOSED', group: i.state === 'open' ? 'needs-owner' : '', author: { login: i.filer || '' }, labels: [], workingSessionLive: false, createdAt: new Date(i.filedAt).toISOString(), updatedAt: new Date(i.changedAt || i.filedAt).toISOString(), url: i.githubUrl || '', source: 'Dyna', local: i, fixPR: i.fixPr || undefined })
   }
   const q = query.trim().toLowerCase()
   // People type D-12, d12 or 12, so both spellings are searchable. A number

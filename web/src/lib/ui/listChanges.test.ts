@@ -91,6 +91,7 @@ interface AppState {
   questions: AppRow[]
   questionFetches: number
   loadRules: () => void
+  loadIssues: () => void
   soonRooms: () => void
   loadGoals: () => void
   loadQuestions: () => void
@@ -154,7 +155,7 @@ function app(rows: AppRow[]): AppSandbox {
     mergeVersion: 0, olderLoading: false, roomId: 'room', roomRequest: 1, home: null, fetchedGoal: null, fetchedGoalVersion: 0,
     goals: rows, listPages: { goals: { items: rows, loadedOlder: true, cursor: 'older', older: true } },
     hasItemChange, reloadsUnread, patchListRows, reconcileRows, mergeListPage,
-    goalFetches: 0, questions: [], questionFetches: 0, loadRules() {}, soonRooms() {},
+    goalFetches: 0, questions: [], questionFetches: 0, loadRules() {}, loadIssues() {}, soonRooms() {},
     loadGoals: () => { c.goalFetches++ },
     loadQuestions: () => { c.questionFetches++ },
     changes: [], changeFetches: 0, reviewerLoads: 0,
