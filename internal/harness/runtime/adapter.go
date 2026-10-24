@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 
 	harnessmgr "dyna-agent/internal/harness/config"
@@ -15,14 +16,17 @@ import (
 // RuntimeAdapter describes a harness's private native scope. Each provider lives
 // in its own file. Shared code owns manifests, catalog generation and launch.
 type RuntimeAdapter struct {
-	Harness             string
-	Binary              string
-	NPMPackage          string
-	ConfigFormat        string // json, opencode, or toml
-	MCPKey              string
-	ConfigFile          string // relative native config path, when no generation flag exists
-	SkillDir            string // relative native skill directory
-	NativeEnv           func(home string) map[string]string
+	Harness      string
+	Binary       string
+	NPMPackage   string
+	ConfigFormat string // json, opencode, or toml
+	MCPKey       string
+	ConfigFile   string // relative native config path, when no generation flag exists
+	SkillDir     string // relative native skill directory
+	NativeEnv    func(home string) map[string]string
+	// UnsetEnv removes inherited credentials, endpoints and personal model
+	// settings before NativeEnv and explicit profile values are applied.
+	UnsetEnv            []string
 	ConfigArgs          func(home, configPath, skillPath string) []string
 	LoginArgs           func(executable, home string) []string
 	AuthFiles           []string // native relative paths for an offline sign-in check
@@ -117,6 +121,27 @@ func RuntimeAdapters() []RuntimeAdapter {
 }
 
 func canonicalRuntimeID(h string) string { return harnessmgr.CanonicalHarnessID(h) }
+
+// NativeEnvironmentBase removes inherited values that a native harness must
+// never read. Callers merge account and profile overrides after this filter.
+func NativeEnvironmentBase(h string, environ []string) []string {
+	a, err := Adapter(h)
+	if err != nil || len(a.UnsetEnv) == 0 {
+		return environ
+	}
+	blocked := make(map[string]bool, len(a.UnsetEnv))
+	for _, key := range a.UnsetEnv {
+		blocked[key] = true
+	}
+	out := make([]string, 0, len(environ))
+	for _, item := range environ {
+		key, _, _ := strings.Cut(item, "=")
+		if !blocked[key] {
+			out = append(out, item)
+		}
+	}
+	return out
+}
 
 // RunBundleCommand runs installer argv with the supplied environment. Tests use
 // the manager's fake runner; implementations must not invoke a shell implicitly.
