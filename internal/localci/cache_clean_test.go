@@ -54,8 +54,23 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 			}
 		})
 	}
-	// Dyna's own trees stay allowed, including one entry inside them.
-	for _, inside := range []string{cacheBase("hermeslab"), legacyCacheDir + "/go-build", "/var/tmp/dyna-local-ci-1000/hermeslab"} {
+	// Dyna's own trees stay allowed, including one entry inside them. The test
+	// uses its own tree: a real CI tree may hold a cache lock this test cannot
+	// take, and a test must never touch a live CI cache.
+	parent := filepath.Dir(cacheBase("x"))
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	base, err := os.MkdirTemp(parent, "selftest-allowed-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(base) })
+	inner := filepath.Join(base, "go-build")
+	if err := os.MkdirAll(inner, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, inside := range []string{base, inner} {
 		t.Run(inside, func(t *testing.T) {
 			out, err := runCacheClean(t, inside, true)
 			if err != nil || strings.Contains(string(out), "refusing") {
