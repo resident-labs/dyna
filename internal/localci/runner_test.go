@@ -146,7 +146,7 @@ func TestRunCleansUpAfterTransportFailure(t *testing.T) {
 		if strings.Contains(call, "tar -C") {
 			reportsCopied = true
 		}
-		if strings.Contains(call, "rm -rf --one-file-system") {
+		if strings.Contains(call, "rm -rf --one-file-system") && strings.Contains(call, "kill -TERM -- -") {
 			if !reportsCopied || !strings.Contains(call, "/tmp/cache/runs/") {
 				t.Errorf("legacy run folder removed before report retrieval or by the wrong path: %s", call)
 			}

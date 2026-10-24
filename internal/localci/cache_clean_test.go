@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,7 +25,7 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 	command := cacheCleanCommand("hermeslab", true, ciCacheCleanAge)
 	for _, keep := range []string{
 		"-xdev", `-maxdepth 0 -mmin +"$age" ! -type l`, "rm -rf --one-file-system",
-		"DYNA_CI_CLEAN_AGE_MIN=2880", "DYNA_CI_CLEAN_RUN_AGE_MIN=1440", "flock -n \"$1/.active\" true", `exec 8>>"$1/caches.lock"`, "flock -n 8",
+		"DYNA_CI_CLEAN_AGE_MIN=2880", "DYNA_CI_CLEAN_RUN_AGE_MIN=120", "flock -n \"$1/.active\" true", `exec 8>>"$1/caches.lock"`, "flock -n 8",
 	} {
 		if !strings.Contains(command, keep) {
 			t.Fatalf("cleanup command lacks %q", keep)
@@ -81,7 +82,102 @@ func runCacheCleanBody(t *testing.T, roots string, dryRun bool, body string) ([]
 	return exec.Command("bash", "-c", command).CombinedOutput()
 }
 
-func TestCacheCleanPrunesRunFoldersAfterOneDay(t *testing.T) {
+// TestRunKeeperExitRemovesItsFolder covers a teardown interrupted just after
+// it stops the keeper. The keeper's own exit cleanup must remove the run,
+// rather than leaving an unlocked folder for the scheduled sweep.
+func TestRunKeeperExitRemovesItsFolder(t *testing.T) {
+	active := filepath.Join(t.TempDir(), "runs", "run", ".active")
+	if err := os.MkdirAll(filepath.Dir(active), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("bash", "-c", runKeeper(active)).CombinedOutput(); err != nil {
+		t.Fatalf("run keeper: %v: %s", err, output)
+	}
+	if _, err := os.Stat(filepath.Dir(active)); !os.IsNotExist(err) {
+		t.Fatalf("run folder survived keeper exit: %v", err)
+	}
+}
+
+// TestStoppingRunKeeperWaitsOnTheSameLock makes a controlled keeper unlink
+// .active before teardown's first probe. Teardown must hold that inode open
+// before signalling; reopening the pathname can acknowledge a different file.
+// Pipe handshakes control both processes, so the test has no sleeps or polling.
+func TestStoppingRunKeeperWaitsOnTheSameLock(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "base")
+	runDir := filepath.Join(base, "runs", "run")
+	active := filepath.Join(runDir, ".active")
+	if err := os.MkdirAll(runDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	control, ack := filepath.Join(base, "control"), filepath.Join(base, "ack")
+	for _, fifo := range []string{control, ack} {
+		if output, err := exec.Command("mkfifo", fifo).CombinedOutput(); err != nil {
+			t.Fatalf("make test pipe: %v: %s", err, output)
+		}
+	}
+	// The controlled keeper takes the same run and cache locks as runLocks. Its
+	// exit trap unlinks the run and closes both locks before acknowledging exit.
+	cleanup := "rm -rf --one-file-system " + shellquote.Quote(runDir) +
+		"; exec 6>&-; exec 7>&-; printf 'done\\n' > " + shellquote.Quote(ack)
+	keeperScript := "set -e; exec 6>>" + shellquote.Quote(active) + "; flock -x 6; " +
+		"exec 7>>" + shellquote.Quote(filepath.Join(base, "caches.lock")) + "; flock -s 7; " +
+		"exec 5<>" + shellquote.Quote(control) + "; trap " + shellquote.Quote(cleanup) + " EXIT; " +
+		"printf 'ready\\n'; read -r _ <&5"
+	keeper := exec.Command("bash", "-c", keeperScript)
+	stdout, err := keeper.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := keeper.Start(); err != nil {
+		t.Fatal(err)
+	}
+	stopped := false
+	t.Cleanup(func() {
+		if !stopped {
+			_ = keeper.Process.Kill()
+			_ = keeper.Wait()
+		}
+	})
+	if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || line != "ready\n" {
+		t.Fatalf("keeper did not take its locks: %q %v", line, err)
+	}
+	if err := os.WriteFile(keeperPID(active), []byte(strconv.Itoa(keeper.Process.Pid)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	flock, err := exec.LookPath("flock")
+	if err != nil {
+		t.Skipf("flock is unavailable: %v", err)
+	}
+	// Before the descriptor probe, wait until the keeper has unlinked the run
+	// and released its locks. The old pathname probe misses this handshake.
+	wrapper := "#!/bin/sh\nprintf 'call\\n' >> \"$FLOCK_COUNT\"\n" +
+		"if [ \"$1\" = -n ] && [ \"$2\" = 9 ]; then IFS= read -r _ < \"$KEEPER_ACK\"; fi\n" +
+		"exec " + shellquote.Quote(flock) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "flock"), []byte(wrapper), 0700); err != nil {
+		t.Fatal(err)
+	}
+	count := filepath.Join(t.TempDir(), "calls")
+	cmd := exec.Command("bash", "-c", stopKeeper(base, active))
+	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FLOCK_COUNT="+count, "KEEPER_ACK="+ack)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("stop run keeper: %v: %s", err, output)
+	}
+	stopped = true
+	_ = keeper.Wait()
+	data, err := os.ReadFile(count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls := strings.Count(string(data), "call\n"); calls != 1 {
+		t.Fatalf("teardown reopened .active after its deletion: %d flock calls, want one", calls)
+	}
+	if _, err := os.Stat(runDir); !os.IsNotExist(err) {
+		t.Fatalf("run folder survived keeper teardown: %v", err)
+	}
+}
+
+func TestCacheCleanPrunesRunFoldersAfterTwoHours(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("the cleanup refuses to run as root")
 	}
@@ -89,8 +185,8 @@ func TestCacheCleanPrunesRunFoldersAfterOneDay(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(base) })
 	now := time.Now()
 	for name, modified := range map[string]time.Time{
-		"runs/old":      now.Add(-25 * time.Hour),
-		"runs/recent":   now.Add(-23 * time.Hour),
+		"runs/old":      now.Add(-3 * time.Hour),
+		"runs/recent":   now.Add(-1 * time.Hour),
 		"go-mod/module": now.Add(-25 * time.Hour),
 		"repo.git":      now.Add(-25 * time.Hour),
 	} {
@@ -113,7 +209,7 @@ func TestCacheCleanPrunesRunFoldersAfterOneDay(t *testing.T) {
 		t.Fatalf("cleanup failed: %v: %s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(base, "runs", "old")); !os.IsNotExist(err) {
-		t.Fatalf("run folder older than a day stayed: %v: %s", err, out)
+		t.Fatalf("run folder older than two hours stayed: %v: %s", err, out)
 	}
 	for _, kept := range []string{"runs/recent", "go-mod/module", "repo.git"} {
 		if _, err := os.Stat(filepath.Join(base, kept)); err != nil {
@@ -312,10 +408,10 @@ func TestCacheCleanFreesCachesRightAfterARunEnds(t *testing.T) {
 	}
 }
 
-// TestCleanCachesTicksEveryEnabledMachineOnceADay checks the daily worker: an
-// engine with no CI machine gets no deadline, a machine enabled later gets one,
-// and the next cleanup waits a day.
-func TestCleanCachesTicksEveryEnabledMachineOnceADay(t *testing.T) {
+// TestCleanCachesTicksEveryEnabledMachineOnceAnHour checks the hourly worker:
+// an engine with no CI machine gets no deadline, a machine enabled later gets
+// one, and the next cleanup waits an hour.
+func TestCleanCachesTicksEveryEnabledMachineOnceAnHour(t *testing.T) {
 	dir := t.TempDir()
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	var cleaned []string
@@ -337,7 +433,7 @@ func TestCleanCachesTicksEveryEnabledMachineOnceADay(t *testing.T) {
 		t.Fatalf("enabled machine: next=%v err=%v cleaned=%v", next, err, cleaned)
 	}
 	cleaned = nil
-	next, err = cleanCachesTick(t.Context(), dir, func() time.Time { return at.Add(time.Hour) }, clean)
+	next, err = cleanCachesTick(t.Context(), dir, func() time.Time { return at.Add(30 * time.Minute) }, clean)
 	if err != nil || len(cleaned) != 0 || !next.Equal(at.Add(cacheCleanEvery)) {
 		t.Fatalf("second pass: next=%v err=%v cleaned=%v", next, err, cleaned)
 	}
