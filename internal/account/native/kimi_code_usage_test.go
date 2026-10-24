@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -93,6 +94,25 @@ key = "oauth/kimi-code"
 	var status *UsageHTTPError
 	if !errors.As(err, &status) || status.Status != http.StatusUnauthorized || errors.Is(err, ErrInvalidGrant) || requests != 0 {
 		t.Fatalf("expired token probe = %v, requests = %d", err, requests)
+	}
+}
+
+func TestKimiCodeUsageRejectsConflictingCountAndRatio(t *testing.T) {
+	payload := []byte(`{
+  "usage": {"limit": "100", "used": "100", "resetTime": "2026-09-24T02:09:07.465054Z"},
+  "limits": [{"window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"}, "detail": {"limit": "100", "remaining": "100", "resetTime": "2026-09-21T01:09:07.465054Z"}}],
+  "usages": {
+    "limit_5h": {"used_ratio": 0, "reset_time": "2026-09-21T01:09:06Z"},
+    "limit_7d": {"used_ratio": 0, "reset_time": "2026-09-24T02:09:06Z"}
+  }
+}`)
+	if _, err := kimiCodeUsageObservation(payload, time.Now()); !errors.Is(err, errKimiCodeUsageConflict) {
+		t.Fatalf("conflicting count and ratio = %v, want conflict", err)
+	}
+	consistent := []byte(strings.Replace(string(payload), `"used": "100"`, `"used": "0"`, 1))
+	observation, err := kimiCodeUsageObservation(consistent, time.Now())
+	if err != nil || len(observation.Windows) != 2 {
+		t.Fatalf("consistent count and ratio = %+v, %v", observation, err)
 	}
 }
 
