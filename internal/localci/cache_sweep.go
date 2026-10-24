@@ -2,7 +2,7 @@ package localci
 
 // The CI machines keep running out of disk space because a run that crashed
 // left its directory behind. Every run now removes its own directory and holds
-// a lock while it runs, so this sweep only clears leftovers, once a day per
+// a lock while it runs, so this sweep only clears leftovers, once an hour per
 // machine, from an engine worker.
 
 import (
@@ -13,13 +13,13 @@ import (
 )
 
 // cacheCleanEvery is how often one CI machine's own caches are cleaned.
-const cacheCleanEvery = 24 * time.Hour
+const cacheCleanEvery = time.Hour
 
 // cacheCleanRetry is how soon a failed cleanup is tried again.
 const cacheCleanRetry = time.Hour
 
 // CleanCachesTick cleans the caches of every enabled CI machine that has no
-// cleanup in the last day, and returns when the next cleanup is due. A machine
+// cleanup in the last hour, and returns when the next cleanup is due. A machine
 // change wakes the worker, so a machine enabled later gets its own deadline.
 func CleanCachesTick(ctx context.Context, dataDir string) (time.Time, error) {
 	return cleanCachesTick(ctx, dataDir, time.Now, func(ctx context.Context, node Node) (CacheCleanResult, error) {
@@ -61,7 +61,7 @@ func cleanCachesTick(ctx context.Context, dataDir string, now func() time.Time, 
 			soonest(at.Add(cacheCleanRetry))
 			continue
 		}
-		log.Printf("local CI %s: daily cache cleanup freed %d bytes from %d paths", node.Name, cleaned.FreedBytes, len(cleaned.Paths))
+		log.Printf("local CI %s: cache cleanup freed %d bytes from %d paths", node.Name, cleaned.FreedBytes, len(cleaned.Paths))
 		if err := store.SaveCacheClean(ctx, node.Name, at); err != nil {
 			errs = append(errs, err)
 			soonest(at.Add(cacheCleanRetry))

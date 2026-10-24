@@ -190,7 +190,7 @@ func TestNodePreservesTestFailureWhenReportsFail(t *testing.T) {
 					reportsCopied = true
 					return errors.New("transport lost")
 				}
-				if strings.Contains(script, "rm -rf --one-file-system") {
+				if strings.Contains(script, "rm -rf --one-file-system") && strings.Contains(script, "kill -TERM -- -") {
 					sawRemove = true
 					if !reportsCopied || !sawCleanup || !strings.Contains(script, "/runs/") {
 						t.Errorf("run directory removed before the reports or the cleanup, or by the wrong path: %s", script)

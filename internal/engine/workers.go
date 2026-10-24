@@ -308,7 +308,7 @@ type workers struct {
 	instructions, fetch, questions, hooks, prs, merges, sync func(context.Context) (time.Time, error)
 	// probe reads every enabled machine, and returns when to read them again.
 	probe func(context.Context) (time.Time, error)
-	// caches cleans the own CI caches of a CI machine once a day.
+	// caches cleans the own CI caches of a CI machine once an hour.
 	caches func(context.Context) (time.Time, error)
 	// settle finishes the hook runs that an earlier engine left running. Only
 	// the engine that owns the worker lock runs it, so a second engine on the

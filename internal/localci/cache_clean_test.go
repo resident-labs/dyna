@@ -24,7 +24,7 @@ func TestCacheCleanRefusesOtherPathsAndFindsItsTargets(t *testing.T) {
 	command := cacheCleanCommand("hermeslab", true, ciCacheCleanAge)
 	for _, keep := range []string{
 		"-xdev", `-maxdepth 0 -mmin +"$age" ! -type l`, "rm -rf --one-file-system",
-		"DYNA_CI_CLEAN_AGE_MIN=2880", "DYNA_CI_CLEAN_RUN_AGE_MIN=1440", "flock -n \"$1/.active\" true", `exec 8>>"$1/caches.lock"`, "flock -n 8",
+		"DYNA_CI_CLEAN_AGE_MIN=2880", "DYNA_CI_CLEAN_RUN_AGE_MIN=120", "flock -n \"$1/.active\" true", `exec 8>>"$1/caches.lock"`, "flock -n 8",
 	} {
 		if !strings.Contains(command, keep) {
 			t.Fatalf("cleanup command lacks %q", keep)
@@ -81,7 +81,23 @@ func runCacheCleanBody(t *testing.T, roots string, dryRun bool, body string) ([]
 	return exec.Command("bash", "-c", command).CombinedOutput()
 }
 
-func TestCacheCleanPrunesRunFoldersAfterOneDay(t *testing.T) {
+// TestRunKeeperExitRemovesItsFolder covers a teardown interrupted just after
+// it stops the keeper. The keeper's own exit cleanup must remove the run,
+// rather than leaving an unlocked folder for the scheduled sweep.
+func TestRunKeeperExitRemovesItsFolder(t *testing.T) {
+	active := filepath.Join(t.TempDir(), "runs", "run", ".active")
+	if err := os.MkdirAll(filepath.Dir(active), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command("bash", "-c", runKeeper(active)).CombinedOutput(); err != nil {
+		t.Fatalf("run keeper: %v: %s", err, output)
+	}
+	if _, err := os.Stat(filepath.Dir(active)); !os.IsNotExist(err) {
+		t.Fatalf("run folder survived keeper exit: %v", err)
+	}
+}
+
+func TestCacheCleanPrunesRunFoldersAfterTwoHours(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("the cleanup refuses to run as root")
 	}
@@ -89,8 +105,8 @@ func TestCacheCleanPrunesRunFoldersAfterOneDay(t *testing.T) {
 	t.Cleanup(func() { os.RemoveAll(base) })
 	now := time.Now()
 	for name, modified := range map[string]time.Time{
-		"runs/old":      now.Add(-25 * time.Hour),
-		"runs/recent":   now.Add(-23 * time.Hour),
+		"runs/old":      now.Add(-3 * time.Hour),
+		"runs/recent":   now.Add(-1 * time.Hour),
 		"go-mod/module": now.Add(-25 * time.Hour),
 		"repo.git":      now.Add(-25 * time.Hour),
 	} {
@@ -113,7 +129,7 @@ func TestCacheCleanPrunesRunFoldersAfterOneDay(t *testing.T) {
 		t.Fatalf("cleanup failed: %v: %s", err, out)
 	}
 	if _, err := os.Stat(filepath.Join(base, "runs", "old")); !os.IsNotExist(err) {
-		t.Fatalf("run folder older than a day stayed: %v: %s", err, out)
+		t.Fatalf("run folder older than two hours stayed: %v: %s", err, out)
 	}
 	for _, kept := range []string{"runs/recent", "go-mod/module", "repo.git"} {
 		if _, err := os.Stat(filepath.Join(base, kept)); err != nil {
@@ -312,10 +328,10 @@ func TestCacheCleanFreesCachesRightAfterARunEnds(t *testing.T) {
 	}
 }
 
-// TestCleanCachesTicksEveryEnabledMachineOnceADay checks the daily worker: an
-// engine with no CI machine gets no deadline, a machine enabled later gets one,
-// and the next cleanup waits a day.
-func TestCleanCachesTicksEveryEnabledMachineOnceADay(t *testing.T) {
+// TestCleanCachesTicksEveryEnabledMachineOnceAnHour checks the hourly worker:
+// an engine with no CI machine gets no deadline, a machine enabled later gets
+// one, and the next cleanup waits an hour.
+func TestCleanCachesTicksEveryEnabledMachineOnceAnHour(t *testing.T) {
 	dir := t.TempDir()
 	at := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 	var cleaned []string
@@ -337,7 +353,7 @@ func TestCleanCachesTicksEveryEnabledMachineOnceADay(t *testing.T) {
 		t.Fatalf("enabled machine: next=%v err=%v cleaned=%v", next, err, cleaned)
 	}
 	cleaned = nil
-	next, err = cleanCachesTick(t.Context(), dir, func() time.Time { return at.Add(time.Hour) }, clean)
+	next, err = cleanCachesTick(t.Context(), dir, func() time.Time { return at.Add(30 * time.Minute) }, clean)
 	if err != nil || len(cleaned) != 0 || !next.Equal(at.Add(cacheCleanEvery)) {
 		t.Fatalf("second pass: next=%v err=%v cleaned=%v", next, err, cleaned)
 	}

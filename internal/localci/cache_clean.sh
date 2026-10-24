@@ -8,7 +8,7 @@
 # Inputs come from the environment, so the caller sends one shell command:
 #   DYNA_CI_CLEAN_DRY=1        report what would go, delete nothing
 #   DYNA_CI_CLEAN_AGE_MIN=2880     keep caches younger than this many minutes
-#   DYNA_CI_CLEAN_RUN_AGE_MIN=1440 keep run folders younger than this many minutes
+#   DYNA_CI_CLEAN_RUN_AGE_MIN=120  keep run folders younger than this many minutes
 #   DYNA_CI_CLEAN_ROOTS=...        exact CI directories to clean (space separated);
 #                              empty cleans every directory Dyna owns
 #
@@ -22,7 +22,7 @@ set -u
 
 dry=${DYNA_CI_CLEAN_DRY:-0}
 age_min=${DYNA_CI_CLEAN_AGE_MIN:-2880}
-run_age_min=${DYNA_CI_CLEAN_RUN_AGE_MIN:-1440}
+run_age_min=${DYNA_CI_CLEAN_RUN_AGE_MIN:-120}
 legacy=/var/tmp/dyna-local-ci
 
 refuse() { echo "dyna-ci-clean: $*" >&2; exit 2; }
@@ -171,7 +171,7 @@ for base in "${bases[@]}"; do
     [ -d "$path" ] && [ ! -L "$path" ] || continue
     case "$path" in
     # Bare Git caches are not run folders. Keep them out of this sweep: its
-    # one-day age and run-lock check do not protect a cache with active worktrees.
+    # run age and run-lock check do not protect a cache with active worktrees.
     "$legacy"/*.git | "$legacy/runs" | "$legacy/diagnostics" | "$legacy/go-build" | "$legacy/go-mod" | "$legacy/npm") continue ;;
     esac
     live_run "$path" && continue
