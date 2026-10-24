@@ -17,7 +17,7 @@ func localCommands() []*cobra.Command {
 	var asJSON bool
 	var timeout time.Duration
 	var nodeName string
-	run := &cobra.Command{Use: "run [sha]", Short: "Run CI on one commit using a registered node or SSH", Args: cobra.MaximumNArgs(1), RunE: func(c *cobra.Command, args []string) error {
+	run := &cobra.Command{Use: "run [sha]", Short: "Run CI on one commit using a registered node", Args: cobra.MaximumNArgs(1), RunE: func(c *cobra.Command, args []string) error {
 		repo, err := os.Getwd()
 		if err != nil {
 			return err
@@ -49,7 +49,13 @@ func localCommands() []*cobra.Command {
 			return err
 		}
 		runner := localci.Runner{}
-		if nodeName != "" {
+		if nodeName == "" {
+			node, err := (localci.Store{}).LegacyRemoteNode(c.Context())
+			if err != nil {
+				return err
+			}
+			runner.Node = &node
+		} else {
 			nodes, err := (localci.Store{}).Nodes(c.Context())
 			if err != nil {
 				return err
@@ -74,9 +80,9 @@ func localCommands() []*cobra.Command {
 		}
 		return nil
 	}}
-	run.Flags().StringSliceVar(&suites, "suite", nil, "suite to run: relay, frontend, go, cross-build (repeatable; default: all)")
-	run.Flags().DurationVar(&timeout, "timeout", 15*time.Minute, "timeout for each suite")
-	run.Flags().StringVar(&nodeName, "node", "", "registered node to use instead of localci.remote")
+	run.Flags().StringSliceVar(&suites, "suite", nil, "suite to run: relay, frontend, frontend-check, go, go-static, cross-build, computer-smoke (repeatable; default: full workflow)")
+	run.Flags().DurationVar(&timeout, "timeout", 15*time.Minute, "timeout for each check")
+	run.Flags().StringVar(&nodeName, "node", "", "registered node to use (default: map localci.remote)")
 	run.Flags().BoolVar(&asJSON, "json", false, "print the saved result as JSON")
 	var showJSON bool
 	show := &cobra.Command{Use: "show <sha>", Short: "Show saved local CI results for a commit", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, args []string) error {

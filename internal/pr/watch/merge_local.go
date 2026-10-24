@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -121,38 +122,30 @@ type localCIRun struct {
 
 // completeLocalCI excludes cached manual runs of only part of the trial suite.
 func completeLocalCI(result localci.Result) bool {
-	for _, name := range localci.DefaultSuites() {
-		found := false
-		for _, suite := range result.Suites {
-			if suite.Suite == name && suite.Status.Conclusive() {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
+	return localci.CoversSuites(result, localci.WorkflowSuites())
 }
 
 func localCIStatus(result localci.Result, repo, head string) (CIVerdict, string, string, error) {
 	if result.SHA != head || result.Repo != repo {
 		return "", "", "", errors.New("local CI result does not match repository and trial head")
 	}
+	checks := result.Checks
+	if len(checks) == 0 {
+		checks = result.Suites
+	}
 	logs := result.Error
-	for _, suite := range result.Suites {
-		logs += "\n" + string(suite.Suite) + " (" + string(suite.Status) + "): " + suite.LogTail + "\n" + suite.Error + "\n" + strings.Join(suite.Failures, "\n")
+	for _, check := range checks {
+		logs += "\n" + string(check.Name()) + " (" + string(check.Status) + "): " + check.LogTail + "\n" + check.Error + "\n" + strings.Join(check.Failures, "\n")
 	}
 	switch result.Status {
 	case localci.OutcomePassed:
-		if !completeLocalCI(result) {
-			return VerdictPending, "", "waiting for complete local CI", nil
-		}
-		for _, suite := range result.Suites {
-			if suite.Status != localci.OutcomePassed || suite.Error != "" || len(suite.Failures) > 0 {
+		for _, check := range checks {
+			if check.Status != localci.OutcomePassed || check.Error != "" || len(check.Failures) > 0 {
 				return VerdictFailed, logs, "local CI failed", nil
 			}
+		}
+		if !completeLocalCI(result) {
+			return VerdictPending, "", "waiting for complete local CI", nil
 		}
 		return VerdictPassed, "", "", nil
 	case localci.OutcomeFailed, localci.OutcomeError:
@@ -163,9 +156,10 @@ func localCIStatus(result localci.Result, repo, head string) (CIVerdict, string,
 }
 
 func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (trialCI, error) {
+	dataDir := filepath.Dir(s.Store.Root)
 	runner := s.LocalCI
 	if runner == nil {
-		runner = localci.Runner{}
+		runner = localci.Runner{DataDir: dataDir}
 	}
 	show := func(result localci.Result) (trialCI, error) {
 		status, logs, reason, err := localCIStatus(result, r.RepoPath, head)
@@ -196,9 +190,18 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (tria
 	}
 	go func() {
 		defer close(run.done)
-		runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Minute)
+		runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Minute)
 		defer cancel()
-		run.result, run.err = runner.Run(runCtx, localci.Request{Repo: r.RepoPath, SHA: head})
+		runRunner := runner
+		if s.LocalCI == nil {
+			node, err := (localci.Store{DataDir: dataDir}).LegacyRemoteNode(runCtx)
+			if err != nil {
+				run.err = err
+				return
+			}
+			runRunner = localci.Runner{DataDir: dataDir, Node: &node}
+		}
+		run.result, run.err = runRunner.Run(runCtx, localci.Request{Repo: r.RepoPath, SHA: head, Suites: localci.WorkflowSuites()})
 	}()
 	return trialCI{Status: VerdictPending, Reason: "waiting for local CI"}, nil
 }
@@ -229,17 +232,20 @@ func (s *Service) publishLocalChange(ctx context.Context, r Record, expected, tr
 func returnedLocalFailure(logs string) (string, string) {
 	suite := ""
 	excerpt := logs
-	for _, name := range localci.DefaultSuites() {
+	failedAt := -1
+	names := localci.RequiredChecks(localci.WorkflowSuites())
+	// Results from the old runner used the go suite name without an aggregate.
+	names = append(names, localci.CheckName(localci.SuiteGo))
+	for _, name := range names {
 		for _, status := range []string{"failed", "error"} {
-			if at := strings.Index(logs, string(name)+" ("+status+"):"); at >= 0 {
+			if at := strings.Index(logs, string(name)+" ("+status+"):"); at >= 0 && (failedAt < 0 || at < failedAt) {
 				suite = string(name)
-				excerpt = logs[at:]
-				break
+				failedAt = at
 			}
 		}
-		if suite != "" {
-			break
-		}
+	}
+	if failedAt >= 0 {
+		excerpt = logs[failedAt:]
 	}
 	if len(excerpt) > 2000 {
 		excerpt = excerpt[:2000]

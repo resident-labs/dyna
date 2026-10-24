@@ -117,7 +117,7 @@ func TestMergeHistoryKeepsPrefixOnRevalidationFailure(t *testing.T) {
 	for _, name := range localci.DefaultSuites() {
 		suites = append(suites, localci.SuiteResult{Suite: name, Status: "failed"})
 	}
-	ci.results[prefixHead] = localci.Result{Repo: records[0].RepoPath, SHA: prefixHead, Status: "failed", Suites: suites, Error: "prefix changed"}
+	ci.results[prefixHead] = localci.Result{Repo: records[0].RepoPath, SHA: prefixHead, Node: "local", Status: "failed", Suites: suites, Checks: suites, Error: "prefix changed"}
 	good := state.MergeTrialChange{Key: records[0].Key, Head: records[0].Head}
 	bad := state.MergeTrialChange{Key: records[1].Key, Head: records[1].Head}
 	b := state.MergeTrial{Phase: "publishing", Branch: "dyna/merge-trial/9", Head: prefixHead, Changes: []state.MergeTrialChange{good},
