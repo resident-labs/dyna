@@ -15,6 +15,7 @@ import (
 	"dyna-agent/internal/goalsvc"
 	"dyna-agent/internal/listchange"
 	"dyna-agent/internal/listpage"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/subagent"
 )
 
@@ -270,6 +271,50 @@ func (s *Service) ExpediteGoal(ctx context.Context, roomRef, id string, replace 
 		return store.StopExpedite(r.ID)
 	}
 	return store.Expedite(r.ID, id, replace)
+}
+
+// AmendGoalBrief appends a correction to a goal's brief and sends it to every
+// holder as the typed amendment post. Only the owner or root may call it.
+func (s *Service) AmendGoalBrief(ctx context.Context, roomRef, id, text string) (goals.Goal, error) {
+	r, author, err := s.goalCaller(ctx, roomRef)
+	if err != nil {
+		return goals.Goal{}, err
+	}
+	if err := authority.Check("goal amend", authority.Of(ctx), nil); err != nil {
+		return goals.Goal{}, err
+	}
+	g, err := s.goalService().Store.Amend(r.ID, id, author.ID, text)
+	if err != nil {
+		return g, err
+	}
+	// The holder reads the correction itself, so the post goes to the holders.
+	// A shared goal has no holder session, so its post belongs to the room.
+	to, bound := s.holderAddresses(g, r.Name)
+	ev := room.GoalEvent{Type: room.GoalAmended, GoalID: g.ID, Title: g.Text, Actor: author.Name, State: room.GoalState(g.State), Summary: g.Amendments[len(g.Amendments)-1].Text}
+	_, err = s.Notify.Rooms.PostEventInput(room.PostEventInput{RoomID: r.ID, Event: ev, To: to, SessionIDs: bound})
+	return g, err
+}
+
+// holderAddresses resolves a goal's holders to post addresses bound to the
+// exact sessions. A goal the whole room holds, or one whose holders are gone,
+// is addressed to the room itself.
+func (s *Service) holderAddresses(g goals.Goal, roomName string) ([]string, map[string]string) {
+	var to []string
+	bound := map[string]string{}
+	if !g.Shared {
+		for _, holder := range g.Holders {
+			info, err := s.sessions().Info(holder)
+			if err != nil {
+				continue
+			}
+			to = append(to, info.Address())
+			bound[info.Address()] = info.ID
+		}
+	}
+	if len(to) == 0 {
+		return []string{roomName}, bound
+	}
+	return to, bound
 }
 
 // resolveAssignee turns one selector into one session id. An empty selector

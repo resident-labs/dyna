@@ -246,6 +246,7 @@ var Rules = []Rule{
 	{Action: "LinkIssueGoal", Allowed: []Role{Owner, Root, Session, Worker}, Instead: "link issues through a goal you can change"},
 	{Action: "SetGitHubAccess", Allowed: []Role{Owner, Root}, Instead: "ask the room owner or root to make this change"},
 	{Action: "goal expedite", Allowed: []Role{Owner, Root}, Instead: "ask the owner or root to set room priority"},
+	{Action: "goal amend", Allowed: []Role{Owner, Root}, Instead: "ask the owner or root to amend the brief"},
 	{Action: "post @voice-call", Allowed: []Role{Root}, Instead: "use an allowed mention to reach the room"},
 	{Action: "git change reply", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},
 	{Action: "git change close", Allowed: []Role{Owner, Root}, Relations: []Relation{Author}, Instead: "ask the author or root to make this change"},

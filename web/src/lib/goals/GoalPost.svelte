@@ -45,7 +45,7 @@
   let state = $derived(payload ? payload.state : verdict === 'done' ? 'done' : /\bdropped goal\b/.test(post.text ?? '') ? 'dropped' : 'active')
   const clip = (s: string): string => ([...s].length > 60 ? [...s].slice(0, 59).join('') + '…' : s)
   let rowTitle = $derived(verdict ? id : `${actor}${rest}${id}`.replace(/\s+/g, ' ').trim())
-  let rowSummary = $derived(verdict ? [clip(title).replace(/\.$/, ''), summary].filter(Boolean).join(' · ') : tail.replace(/^:\s*/, ''))
+  let rowSummary = $derived(verdict ? [clip(title).replace(/\.$/, ''), summary].filter(Boolean).join(' · ') : payload?.type === 'amended' ? summary : tail.replace(/^:\s*/, ''))
   let chips = $derived([
     { label: state, tone: state === 'done' ? 'sage' : state === 'dropped' ? 'coral' : 'iris' },
     ...(goalExpedited($expedite, { id }) ? [{ label: 'expedited', tone: 'iris' }] : []),
