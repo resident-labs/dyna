@@ -6,13 +6,13 @@
   import { refreshHeldComments } from '../prs/heldComments.ts'
   onMount(() => { refreshHeldComments() })
   import { scale } from 'svelte/transition'
-  import Avatar from '../ui/Avatar.svelte'
   import PinIcon from '../ui/PinIcon.svelte'
   import PostActions from '../ui/PostActions.svelte'
   import { postHandlers } from '../ui/postSelect.ts'
   import { createSelection } from '../ui/selection.svelte.ts'
   import ForwardQuote from '../ui/ForwardQuote.svelte'
   import HistoryList from './HistoryList.svelte'
+  import FeedMessage from './FeedMessage.svelte'
   import { focusWhen } from '../ui/focusWhen.ts'
   import CallRequestRow from '../voice/CallRequestRow.svelte'
   import CompletionBody from '../ui/CompletionBody.svelte'
@@ -22,7 +22,7 @@
   import { postParts } from '../ui/postParts.ts'
   import { questionID } from '../questions/questions.ts'
   import { swipeReply } from '../ui/swipeReply.ts'
-  import { markdown, clock, stamp, dayLabel, short, resultLine } from '../ui/format.ts'
+  import { stamp, dayLabel, short, resultLine } from '../ui/format.ts'
   import { arrivals, motion, FAST } from '../ui/motion.ts'
   import SystemNote from '../ui/SystemNote.svelte'
   import { noteGroups } from '../ui/notices.ts'
@@ -35,7 +35,6 @@
   import type { Attachment, Post, Question, Room } from '../api/room.ts'
   import type { Goal } from '../api/goal.ts'
   import type { CallRequest } from '../voice/callRequests.ts'
-  import { postPreview } from '../ui/preview.ts'
 
   interface Props {
     room: Room
@@ -246,7 +245,7 @@
       {@const replyTo = p.replyTo}
       <!-- Every stored post owns the same actions. Kind selects its body only. -->
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions, a11y_no_noninteractive_tabindex -->
-      <article class="post {p.completion ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind ?? '') || sealedEvent(p)} class:after-sys={p.completion && rowPost(rows[index - 1])?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, lookFields(p), room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(p)} {...postHandlers(selection, p.id)}>
+      <article class="post {p.completion && p.kind !== 'turn' ? `sys ${p.kind}` : ''}" class:enter={isNew(row.key)} class:noterow={notes.has(index)} class:notemerged={notes.has(index) && !notes.get(index)} class:prrow={p.kind === 'pr'} class:sysrow={ownerQuestion(p) || ['goal', 'pr'].includes(p.kind ?? '') || (sealedEvent(p) && p.kind !== 'turn')} class:after-sys={p.completion && rowPost(rows[index - 1])?.completion} class:cont={row.cont} class:unread={p.unread} class:forme={highlighted(look, lookFields(p), room.name)} class:flash={flash?.key === row.key && !row.posts} use:focusWhen={flash?.key === row.key && !row.posts} data-id={p.id} data-post-ids={row.posts?.map((post) => post.id).join(' ')} tabindex="0" data-select-id={p.id} use:swipeReply={() => onreply?.(p)} {...postHandlers(selection, p.id)}>
         {@render replyCue()}
         {#if (row.posts ?? [p]).some((post) => pinned.has(post.id))}<span class="post-pin" title="Pinned" transition:scale={{ start: 0.6, duration: motion(FAST) }}><PinIcon size={13} filled /></span>{/if}
           {#if replyTo}
@@ -283,39 +282,7 @@
       {:else if p.completion}
         {@render completionPost(p)}
       {:else}
-          <span class="gutter">
-            {#if row.cont}
-              <time class="side-time">{clock(p.ts)}</time>
-            {:else}
-              <button class="av" onclick={() => onaddress?.(p.from)} aria-label={who(p)}>
-                <Avatar name={who(p)} hue={p.fromHue} owner={p.owner} emoji={p.fromEmoji} size={40} />
-              </button>
-            {/if}
-          </span>
-          <div class="body">
-            {#if !row.cont}
-              {@const r = recipients(p)}
-              <header>
-                <button class="name hue-{p.fromHue}" onclick={() => onaddress?.(p.from)}>{who(p)}</button>
-                {#if p.owner && p.human}<span class="tag">human</span>{/if}
-                <time title={new Date(p.ts).toLocaleString()}>{stamp(p.ts)}</time>
-                <span class="to">
-                  <span class="arrow" aria-hidden="true">→</span>
-                  {#each r.groups as g}<span class="group">{g}</span>{/each}
-                  {#each r.names as n, i}<button class="rcpt" onclick={() => onaddress?.(p.to?.[i] ?? '')}>{n}</button>{#if i < r.names.length - 1}<span class="comma">,</span>{/if}{/each}
-                </span>
-              </header>
-            {/if}
-            {#if parts.text}
-              {#if p.human}
-                <div class="prose">{@html markdown(parts.text)}</div>
-              {:else}
-                {@const preview = postPreview(parts.text)}
-                <div id={"message-" + p.id} class="prose">{@html markdown(expanded.has(p.id) ? parts.text : preview.text)}</div>
-                {#if preview.truncated}<button class="message-toggle" aria-expanded={expanded.has(p.id)} aria-controls={"message-" + p.id} onclick={() => toggleMessage(p.id)}>{expanded.has(p.id) ? 'Show less' : 'Show more'}</button>{/if}
-              {/if}
-            {/if}
-          </div>
+        <FeedMessage post={p} {room} cont={!!row.cont} recipients={recipients(p)} expanded={expanded.has(p.id)} ontoggle={() => toggleMessage(p.id)} {onaddress} />
       {/if}
       {#if p.forward}<ForwardQuote {room} post={p.forward} author={byId[p.forward.id]} onpost={jump} {onopenfile} />{/if}
       {#if parts.attachments.length || p.references?.length}<div class="post-files"><PostFiles roomId={room.id} post={p} {parts} onopen={onopenfile} /></div>{/if}
@@ -400,42 +367,11 @@
   .post.forme:active { background: var(--select); }
   .post.flash { background: var(--iris-wash); }
   .gutter { display: flex; justify-content: center; padding-top: 2px; }
-  .av { border-radius: 50%; height: 40px; }
-  .side-time {
-    font-size: var(--t-cap);
-    color: var(--faint);
-    opacity: 0;
-    padding-top: 3px;
-    font-variant-numeric: tabular-nums;
-  }
-  .post:hover .side-time { opacity: 1; }
   .body { min-width: 0; }
-  header { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 8px; line-height: var(--leading-tight); }
   .name { font-weight: 600; font-size: var(--t-lead); }
   .name:hover { text-decoration: underline; }
-  .tag {
-    font-size: var(--t-cap);
-    font-weight: 600;
-    color: var(--muted);
-    background: var(--raise);
-    border: 1px solid var(--line);
-    border-radius: 4px;
-    padding: 0 5px;
-    line-height: 16px;
-    align-self: center;
-  }
   time { font-size: var(--t-sm); color: var(--faint); }
-  .to { font-size: var(--t-sm); color: var(--faint); display: inline-flex; gap: var(--s1); align-items: baseline; flex-wrap: wrap; }
-  .arrow { color: var(--faint); }
-  .group { color: var(--muted); font-family: var(--mono); font-size: var(--t-cap); }
-  .rcpt { color: var(--muted); transition: color var(--motion-fast) var(--ease); }
-  @media (hover: hover) {
-    .rcpt:hover { color: var(--ink); text-decoration: underline; }
-  }
-  .comma { margin-left: -4px; }
   .prose { margin-top: 1px; }
-  .message-toggle { color: var(--iris); font-size: var(--t-sm); margin-top: var(--s1); }
-  .message-toggle:hover { text-decoration: underline; }
   .prose.small { font-size: var(--t-body); color: var(--muted); }
 
   .replyline {

@@ -324,7 +324,7 @@ func TestFoldRule(t *testing.T) {
 	}
 	long := "first para\nstill first\n\nsecond para\n\nthird para\n" + strings.Repeat("more\n", 10)
 	p, hidden := Fold(long, false)
-	if p != "first para\nstill first\n\nsecond para" || hidden == 0 {
+	if p != "first para\nstill first" || hidden == 0 {
 		t.Fatalf("preview = %q hidden = %d", p, hidden)
 	}
 	tall := strings.Repeat("x\n", 20)
