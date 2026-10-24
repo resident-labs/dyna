@@ -86,6 +86,23 @@ func ParseIssueRefs(text string) ([]IssueRef, error) {
 	return NormalizeFixes(out), nil
 }
 
+// ParseDynaIssueNumbers reads goal --fixes values. Goals link room issues,
+// not GitHub issues, so every reference must use the D-N form.
+func ParseDynaIssueNumbers(text string) ([]int, error) {
+	refs, err := ParseIssueRefs(text)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]int, 0, len(refs))
+	for _, ref := range refs {
+		if ref.Kind != IssueKindDyna {
+			return nil, fmt.Errorf("goal --fixes accepts room issues such as D-5, not %s", ref.Label())
+		}
+		out = append(out, ref.Number)
+	}
+	return out, nil
+}
+
 // ParseFixLines reads the "Fixes D-5" and "Fixes #207" lines of a PR body.
 // Prose that names no issue is ignored, and one line may name several issues.
 func ParseFixLines(body string) []IssueRef {

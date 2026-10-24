@@ -50,7 +50,7 @@ func TestStartCallsTheEngine(t *testing.T) {
 			var stdout, stderr bytes.Buffer
 			cmd.SetOut(&stdout)
 			cmd.SetErr(&stderr)
-			args := []string{"start", "--room", work.Name, "--goal", "Finish the test task", "--profile", "mock", "--name", "kid", "@" + brief}
+			args := []string{"start", "--room", work.Name, "--goal", "Finish the test task", "--profile", "mock", "--name", "kid", "--fixes", "D-35,D-40", "@" + brief}
 			if asJSON {
 				args = append(args, "--json")
 			}
@@ -74,7 +74,7 @@ func TestStartCallsTheEngine(t *testing.T) {
 			}
 		}
 	}
-	if room != work.ID || got.Task != "Do the task." || got.Goal != "Finish the test task" || got.Profile != "mock" || got.Name != "kid" || got.Cwd != cwd || got.Dir != "" {
+	if room != work.ID || got.Task != "Do the task." || got.Goal != "Finish the test task" || got.Profile != "mock" || got.Name != "kid" || got.Cwd != cwd || got.Dir != "" || len(got.Fixes) != 2 || got.Fixes[0] != 35 || got.Fixes[1] != 40 {
 		t.Fatalf("StartSubagent got room %q and %+v; want room %s, the brief text and cwd %s", room, got, work.ID, cwd)
 	}
 	if sessions, err := m.Store.ListSnapshot(true); err != nil || len(sessions) != 0 {

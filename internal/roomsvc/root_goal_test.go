@@ -26,18 +26,18 @@ func TestRootCannotHoldGoals(t *testing.T) {
 			t.Fatalf("err = %v, want the root holder refusal", err)
 		}
 	}
-	_, err := e.svc.AddGoal(ctx, "", "Ship the room work", nil)
+	_, err := e.svc.AddGoal(ctx, "", "Ship the room work", nil, nil)
 	rootCannot(t, err)
-	_, err = e.svc.AddGoal(ctx, r.ID, "Ship the room work", []string{"@root"})
+	_, err = e.svc.AddGoal(ctx, r.ID, "Ship the room work", []string{"@root"}, nil)
 	rootCannot(t, err)
 
 	owner := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
-	g, err := e.svc.AddGoal(owner, r.ID, "Owner goal", []string{"@room"})
+	g, err := e.svc.AddGoal(owner, r.ID, "Owner goal", []string{"@room"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	rootSel := []string{"@root"}
-	_, err = e.svc.EditGoalSelectors(ctx, r.ID, g.ID, "", &rootSel)
+	_, err = e.svc.EditGoalSelectors(ctx, r.ID, g.ID, "", &rootSel, nil)
 	rootCannot(t, err)
 	rootHolder := []string{rootID}
 	_, err = e.svc.editGoal(ctx, r.ID, g.ID, "", &rootHolder, false)
@@ -54,7 +54,7 @@ func TestRootCannotHoldGoals(t *testing.T) {
 	agentID := "ses_20261022-000000-aaaaaaaa"
 	recordtest.Write(t, e.mgr.Store.Root, agentID, subagent.Meta{ID: agentID, Name: "lead", RoomID: r.ID, Room: r.Name, Depth: 1, Resumable: true, HarnessSession: "mock-fixture"})
 	asAgent := authority.WithActor(context.Background(), authority.Actor{Role: authority.Session, Session: agentID})
-	if _, err := e.svc.AddGoal(asAgent, r.ID, "Agent goal", nil); err != nil {
+	if _, err := e.svc.AddGoal(asAgent, r.ID, "Agent goal", nil, nil); err != nil {
 		t.Fatalf("an agent was refused its own goal: %v", err)
 	}
 }

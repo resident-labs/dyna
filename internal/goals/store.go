@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/store"
 )
@@ -58,7 +59,7 @@ func (g Goal) NeedsRoot() bool { return g.LegacyOwnerHeld && g.Open() }
 
 // RootHoldsNothing is the refusal for any goal holder that is root. Root leads
 // the room, so the agents that do the work hold the goals.
-const RootHoldsNothing = "root cannot hold goals; start an agent with dyna subagent start --goal, or pass --for @agent"
+const RootHoldsNothing = "root cannot hold goals; pass --for @agent when creating with dyna goal"
 
 // Concerns reports whether session id sees the goal: shared, held or set by it.
 func (g Goal) Concerns(id string) bool { return g.Shared || g.HeldBy(id) || g.Setter == id }
@@ -87,8 +88,9 @@ type State struct {
 	Global  *RuleSet              `json:"global,omitempty"`
 }
 type Store struct {
-	Root string
-	Now  func() time.Time
+	Root   string
+	Now    func() time.Time
+	Issues *room.Store
 }
 
 func DefaultStore() *Store { return &Store{Root: filepath.Join(store.DataDir(), "goals")} }

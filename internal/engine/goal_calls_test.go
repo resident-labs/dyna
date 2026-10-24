@@ -65,7 +65,7 @@ func TestGoalWritesRecordCaller(t *testing.T) {
 				recordtest.Write(t, svc.Notify.Sessions.Store.Root, id, subagent.Meta{ID: id, Name: "helper", RoomID: rec.ID, Room: rec.Name, Depth: 1, Resumable: true, HarnessSession: "mock-fixture"})
 			}
 			ctx := roomsvc.WithGoalAuthor(authority.WithActor(t.Context(), actor), by)
-			g, err := svc.AddGoal(ctx, rec.ID, "Record the caller", nil)
+			g, err := svc.AddGoal(ctx, rec.ID, "Record the caller", nil, nil)
 			if err != nil || g.Setter != tc.want {
 				t.Fatalf("goal = %+v, %v", g, err)
 			}
