@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
@@ -174,14 +173,23 @@ func (c FailureCause) Label() string {
 	return ""
 }
 
+// command runs one local command in the agent's own cgroup. Cancellation kills
+// its whole process group and bounds the pipe drain, so a check's shell that
+// dies cannot leave a child timeout or docker holding the output pipe open and
+// block the run before its cleanup.
 func command(ctx context.Context, dir string, in io.Reader, out, stderr io.Writer, name string, args ...string) error {
-	c := exec.CommandContext(ctx, name, args...)
+	c := processguard.Command(ctx, name, args...)
 	c.Dir = dir
 	c.Env = processguard.MetadataEnv()
 	c.Stdin = in
 	c.Stdout = out
 	c.Stderr = stderr
-	return c.Run()
+	err := c.Run()
+	// A cancelled command reports the context, not the signal that stopped it.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 func (r Runner) run(ctx context.Context, dir string, out io.Writer, name string, args ...string) error {
 	fn := r.Command

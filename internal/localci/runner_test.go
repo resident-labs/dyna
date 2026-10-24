@@ -2,8 +2,10 @@ package localci
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -229,5 +231,38 @@ func TestAdmissionAcceptsResultPublishedBeforeKeeperExit(t *testing.T) {
 	}
 	if err != nil {
 		t.Fatalf("completed keeper result was rejected: %v: %s", err, output)
+	}
+}
+
+// Cancelling a command kills its whole process group and drains its output
+// pipes. A child that outlived the command's shell keeps the pipe open; the
+// wait must not block on it, or the run never reaches its cleanup.
+func TestCommandCancelsTheProcessGroupAndDrainsItsPipes(t *testing.T) {
+	hold := filepath.Join(t.TempDir(), "hold")
+	if out, err := exec.Command("mkfifo", hold).CombinedOutput(); err != nil {
+		t.Skipf("mkfifo is unavailable: %v: %s", err, out)
+	}
+	writer, err := os.OpenFile(hold, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writer.Close() // the child reads this FIFO, so closing it ends the child
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	output, input := io.Pipe()
+	ran := make(chan error, 1)
+	go func() {
+		// The shell starts a child that holds the output pipe, then exits.
+		err := command(ctx, t.TempDir(), nil, input, input, "bash", "-c", `cat "$1" & printf 'ready\n'`, "command-test", hold)
+		input.Close()
+		ran <- err
+	}()
+	line, err := bufio.NewReader(output).ReadString('\n')
+	if err != nil || line != "ready\n" {
+		t.Fatalf("the command's child did not hold the pipe: %q %v", line, err)
+	}
+	cancel()
+	if err := <-ran; !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled command returned %v", err)
 	}
 }
