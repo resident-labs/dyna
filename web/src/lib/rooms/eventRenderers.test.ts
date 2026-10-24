@@ -247,6 +247,9 @@ const fixtures: Record<string, EventPayload> = {
     service: 'librarian', session: 'dyna:librarian', turn: 4,
     error: 'turn failed: harness exited with status 1', profile: 'deepseek', model: 'deepseek-flash',
   },
+  'service/helper-outcome': {
+    reason: 'no-artifact', session: 'dyna:helper-check', turn: 2,
+  },
   'engine/root-flush': { minutes: 15 },
   'question/withdrawn': { questionId: 'q1', post: 'msg_0123456789abcdef', by: 'dyna:notice-session', reason: 'session closed' },
   'shell/result': {

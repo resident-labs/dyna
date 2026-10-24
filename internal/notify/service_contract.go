@@ -81,12 +81,30 @@ func (s *Service) helperCompletion(meta subagent.Meta, turn subagent.Turn) (*sub
 		return nil, nil
 	}
 	if !available {
-		return s.prepareCompletion(meta.RoomID, meta.Address(), nil, serviceAlertKind,
-			"Service helper finished, but its parent is unavailable. Full output: dyna subagent output "+meta.Address(), turn.N, true)
+		plan, err := s.prepareHelperOutcome(meta, turn, room.HelperParentUnavailable, nil, true,
+			"Full output: dyna subagent output "+meta.Address())
+		if plan != nil {
+			// The old service-alert woke the root seat when no parent could take
+			// the warning. NeedsRoot keeps that delivery rule on the typed event.
+			plan.Post.NeedsRoot = true
+		}
+		return plan, err
 	}
 	if resultPreview(turn.Result, 1) != "" {
 		return s.prepareTurnReport(meta, turn, []string{parent.ID}, false)
 	}
-	return s.prepareCompletion(meta.RoomID, meta.Address(), []string{parent.ID}, serviceAlertKind,
-		"Service turn produced no artifact: helper finished without posting findings to its parent.", turn.N, false)
+	return s.prepareHelperOutcome(meta, turn, room.HelperNoArtifact, []string{parent.ID}, false, "")
+}
+
+// prepareHelperOutcome plans the same typed warning for either missing
+// outcome. The helper stays in the payload, while PostEvent supplies the
+// engine sender and the registry supplies the post kind and text.
+func (s *Service) prepareHelperOutcome(meta subagent.Meta, turn subagent.Turn, reason room.HelperOutcomeReason, targets []string, includeOwner bool, detail string) (*subagent.ReportPlan, error) {
+	plan, err := s.prepareEventCompletion(meta.RoomID, room.HelperOutcomeEvent{
+		Reason: reason, Session: meta.Address(), Turn: turn.N, Detail: detail,
+	}, targets, turn.N, includeOwner)
+	if plan != nil {
+		plan.Producer = room.ProducerHelper
+	}
+	return plan, err
 }
