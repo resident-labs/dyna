@@ -439,6 +439,7 @@ func bindings(s services) []websvc.Binding {
 		{Name: "AccountUsageCached", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.accounts.AccountUsageCached},
 		{Name: "ProfileModels", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accounts.ProfileModels},
 		{Name: "UsageRollup", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.UsageRollup},
+		{Name: "ProfileUsage", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.ProfileUsage},
 		{Name: "Computers", Access: websvc.Read, Scope: websvc.ScopeComputers, Method: s.computers.Computers},
 		{Name: "Computer", Access: websvc.Read, Scope: websvc.ScopeComputers, Method: s.computers.Computer},
 		{Name: "ComputerControl", Access: websvc.Write, Scope: websvc.ScopeComputers, Method: s.computers.Control},

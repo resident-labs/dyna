@@ -16,7 +16,7 @@ import { usageAccount } from '../test/account-fixtures.ts'
 import { need } from '../test/need.ts'
 import type { Capability, HarnessAccount, HarnessConfig, HarnessSnapshot, Bundle } from '../src/lib/api/harness.ts'
 import type { HarnessSupport } from '../src/lib/settings/support.ts'
-import type { ProfileList, ProfileView } from '../src/lib/api/profile.ts'
+import type { ProfileList, ProfileUsageStats, ProfileView } from '../src/lib/api/profile.ts'
 import type { ProfileSave } from '../src/lib/api/engine.ts'
 import type { UsageAccount } from '../src/lib/api/account.ts'
 import type { ActivityRollup } from '../src/lib/settings/usage/activity.ts'
@@ -103,6 +103,12 @@ const profileList: Listed = {
   ],
 }
 api.configProfiles = () => later(empty ? { ...profileList, profiles: [], default: '' } : profileList)
+const profileActivity: ProfileUsageStats[] = [
+  { profile: 'sol', turns: 42, medianWallMs: 183_000, cost: { usd: 12.40, completeTurns: 40, partialTurns: 1, unknownTurns: 1 }, costPerTurnUsd: 12.40 / 41, cacheReadShare: 0.684, cachePaired: { input: 1_000_000, cached: 684_000, turns: 39 } },
+  { profile: 'mimo', turns: 95, medianWallMs: 45_000, cost: { usd: 8.75, completeTurns: 94, partialTurns: 0, unknownTurns: 1 }, costPerTurnUsd: 8.75 / 94, cacheReadShare: 0.72, cachePaired: { input: 2_000_000, cached: 1_440_000, turns: 95 } },
+  { profile: 'wonder-full', turns: 11, medianWallMs: 62_000, cost: { usd: null, completeTurns: 0, partialTurns: 0, unknownTurns: 11 }, costPerTurnUsd: null, cacheReadShare: null, cachePaired: { input: 0, cached: 0, turns: 0 } },
+]
+api.profileUsage = (from: string, to: string) => later({ from: from.slice(0, 10), to: to.slice(0, 10), profiles: empty ? [] : profileActivity })
 api.setDefaultProfile = (name: string) => { profileList.default = name; return later(null) }
 api.setProfileDisabled = (name: string, disabled: boolean) => { profileList.profiles = profileList.profiles.map((p) => p.name === name ? { ...p, disabled } : p); return later(null) }
 api.saveProfile = ({ original, profile: p }: ProfileSave) => { profileList.profiles = profileList.profiles.map((x) => x.name === original ? { ...x, ...p } : x); return later(need(profileList.profiles.find((x) => x.name === p.name))) }

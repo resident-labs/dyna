@@ -15,13 +15,16 @@ import (
 )
 
 // The usage rollup keeps one row per day, session, profile and model in
-// dyna.db. usage_turn holds one key per folded turn, so replaying a turn
-// never counts it twice. Unknown values add to the unknown counters only.
+// dyna.db. usage_turn holds one key and wall time per folded turn, so replaying
+// a turn never counts it twice and profile reads can calculate an exact median.
+// Unknown values add to the unknown counters only.
 const usageRollupSchema = `
 CREATE TABLE IF NOT EXISTS usage_turn (
   session_id TEXT NOT NULL, n INTEGER NOT NULL, day TEXT NOT NULL,
+  profile TEXT NOT NULL, wall_ms INTEGER NOT NULL,
   PRIMARY KEY (session_id, n)
 );
+CREATE INDEX IF NOT EXISTS usage_turn_day_profile ON usage_turn(day, profile, wall_ms);
 CREATE TABLE IF NOT EXISTS usage_rollup (
   day TEXT NOT NULL, session_id TEXT NOT NULL, profile TEXT NOT NULL, model TEXT NOT NULL,
   room_id TEXT NOT NULL, role TEXT NOT NULL, harness TEXT NOT NULL,
@@ -37,7 +40,7 @@ CREATE INDEX IF NOT EXISTS usage_rollup_room_day ON usage_rollup(room_id, day);`
 
 // usageRollupVersion changes whenever the layout or the accounting rules change,
 // so rows folded under older rules are rebuilt from the turn files.
-const usageRollupVersion = 3
+const usageRollupVersion = 4
 
 // RoleSubagent is the rollup role of a session with no stored role.
 const RoleSubagent = "subagent"
@@ -156,7 +159,7 @@ func (s *Store) RecordTurnUsage(m Meta, t Turn) error {
 	in, cached, out, cost, costUSD, pair := turnUsageMetrics(t)
 	return state.For(db).Write(context.Background(), hub.Event{}, func(conn *sql.Conn) error {
 		ctx := context.Background()
-		res, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO usage_turn(session_id,n,day) VALUES (?,?,?)`, m.ID, t.N, day)
+		res, err := conn.ExecContext(ctx, `INSERT OR IGNORE INTO usage_turn(session_id,n,day,profile,wall_ms) VALUES (?,?,?,?,?)`, m.ID, t.N, day, t.Profile, wallMs)
 		if err != nil {
 			return err
 		}
@@ -426,6 +429,107 @@ func (s *Store) ReadUsageRollup(roomID, fromDay, toDay string) (UsageRollupSnaps
 		a, b := out.ByRoleModel[i], out.ByRoleModel[j]
 		return a.Role < b.Role || a.Role == b.Role && a.Model < b.Model
 	})
+	return out, nil
+}
+
+// ProfileUsageStats is measured activity for one profile. Cost and CachePaired
+// retain the rollup's coverage, so partial or unknown reports never become zero.
+type ProfileUsageStats struct {
+	Profile        string           `json:"profile"`
+	Turns          int              `json:"turns"`
+	MedianWallMs   *int64           `json:"medianWallMs"`
+	Cost           UsageCost        `json:"cost"`
+	CostPerTurnUSD *float64         `json:"costPerTurnUsd"`
+	CacheReadShare *float64         `json:"cacheReadShare"`
+	CachePaired    UsageCachePaired `json:"cachePaired"`
+}
+
+// ProfileUsageSnapshot answers profile activity for inclusive UTC days.
+type ProfileUsageSnapshot struct {
+	From     string              `json:"from"`
+	To       string              `json:"to"`
+	Profiles []ProfileUsageStats `json:"profiles"`
+}
+
+// ReadProfileUsage groups completed turns by profile. It uses the per-turn
+// durations in usage_turn for the median and the rollup for cost and cache sums.
+func (s *Store) ReadProfileUsage(fromDay, toDay string) (ProfileUsageSnapshot, error) {
+	out := ProfileUsageSnapshot{From: fromDay, To: toDay, Profiles: []ProfileUsageStats{}}
+	db, err := s.usageDB()
+	if err != nil {
+		return out, err
+	}
+	rows, err := db.Query(`SELECT profile, SUM(turns), SUM(wall_ms),
+  SUM(cost_usd), SUM(cost_complete), SUM(cost_partial), SUM(cost_unknown),
+  SUM(pair_input), SUM(pair_cached), SUM(pair_turns)
+FROM usage_rollup WHERE day BETWEEN ? AND ? GROUP BY profile`, fromDay, toDay)
+	if err != nil {
+		return out, err
+	}
+	groups := map[string]*usageSums{}
+	for rows.Next() {
+		var name string
+		var g usageSums
+		if err := rows.Scan(&name, &g.turns, &g.wallMs,
+			&g.cost, &g.costComplete, &g.costPartial, &g.costUnk,
+			&g.pairInput, &g.pairCached, &g.pairTurns); err != nil {
+			rows.Close()
+			return out, err
+		}
+		groups[name] = &g
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return out, err
+	}
+
+	// Window functions select only the one or two middle durations per profile.
+	rows, err = db.Query(`WITH ranked AS (
+  SELECT profile, wall_ms,
+    ROW_NUMBER() OVER (PARTITION BY profile ORDER BY wall_ms) AS position,
+    COUNT(*) OVER (PARTITION BY profile) AS samples
+  FROM usage_turn WHERE day BETWEEN ? AND ?
+)
+SELECT profile, wall_ms FROM ranked
+WHERE position IN ((samples + 1) / 2, (samples + 2) / 2)
+ORDER BY profile, wall_ms`, fromDay, toDay)
+	if err != nil {
+		return out, err
+	}
+	walls := map[string][]int64{}
+	for rows.Next() {
+		var name string
+		var wallMs int64
+		if err := rows.Scan(&name, &wallMs); err != nil {
+			rows.Close()
+			return out, err
+		}
+		walls[name] = append(walls[name], wallMs)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return out, err
+	}
+
+	for name, g := range groups {
+		row := g.row()
+		stats := ProfileUsageStats{Profile: name, Turns: row.Turns, Cost: row.Cost, CachePaired: row.CachePaired}
+		if known := g.costComplete + g.costPartial; known > 0 {
+			value := g.cost / float64(known)
+			stats.CostPerTurnUSD = &value
+		}
+		if g.pairTurns > 0 && g.pairInput > 0 {
+			value := float64(g.pairCached) / float64(g.pairInput)
+			stats.CacheReadShare = &value
+		}
+		if values := walls[name]; len(values) > 0 {
+			median := values[0]
+			if len(values) == 2 {
+				median = values[0] + (values[1]-values[0])/2
+			}
+			stats.MedianWallMs = &median
+		}
+		out.Profiles = append(out.Profiles, stats)
+	}
+	sort.Slice(out.Profiles, func(i, j int) bool { return out.Profiles[i].Profile < out.Profiles[j].Profile })
 	return out, nil
 }
 
