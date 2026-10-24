@@ -1,6 +1,6 @@
 <script lang="ts">
   // The card for one reviewer turn's typed result. It shows the verdict, the
-  // findings by severity, a stop reason, or the fast-landing note. It reads the
+  // findings by severity, or a stop reason. It reads the
   // typed payload, never the review text, and keeps no feed-only state. The
   // feed and a session DM draw the same card.
   import { openExternal } from '../../api.ts'
@@ -35,7 +35,6 @@
   let findings = $derived(payload?.findings ?? [])
   let tone = $derived(kind === 'approve-fast' || kind === 'approve' ? 'sage' : kind === 'stop-early' ? '' : (counts[0] ?? 0) > 0 ? 'coral' : 'gold')
   let title = $derived(payload?.label ?? 'Reviewer result')
-  let note = $derived(kind === 'approve-fast' && !fast ? 'normal path' : (payload?.note ?? ''))
   let reason = $derived(payload?.stopReason ? (stopWords[payload.stopReason] ?? payload.stopReason) : '')
   let showAll = $state(false)
   let shown = $derived(showAll ? findings : findings.slice(0, 3))
@@ -47,13 +46,12 @@
   {surface}
   {title}
   chips={[{ label: kind === 'approve-fast' ? (fast ? 'approved for a fast landing' : 'approved') : stateWords[kind], tone, outline: tone === '' }]}
-  summary={[note, kind === 'stop-early' && reason ? `Stopped early: ${reason}.` : '', findings.length ? `${findings.length} finding${findings.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}
+  summary={[kind === 'stop-early' && reason ? `Stopped early: ${reason}.` : '', findings.length ? `${findings.length} finding${findings.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}
 >
   {#snippet icon()}<ReviewIcon size={15} />{/snippet}
   {#snippet detail()}
   <div class="body">
     {#if payload}
-      {#if note}<p class="note">{note}</p>{/if}
       {#if kind === 'stop-early' && reason}<p class="reason">Stopped early: {reason}.</p>{/if}
       {#if findings.length}
         <div class="counts">
@@ -83,7 +81,6 @@
 </EventRow>
 
 <style>
-  .note { margin: 0 0 var(--s2); color: var(--muted); font-size: var(--t-sm); }
   .reason { margin: 0 0 var(--s2); color: var(--muted); font-size: var(--t-sm); }
   .counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--s2); }
   .findings { list-style: none; margin: 0 0 var(--s2); padding: 0; display: grid; gap: 6px; }

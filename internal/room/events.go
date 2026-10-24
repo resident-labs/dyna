@@ -1285,7 +1285,7 @@ const (
 )
 
 // ReviewEvent tells a room how one reviewer turn ended: the verdict, the
-// findings by severity, a stop reason, or the fast-landing note. It is folded
+// findings by severity, or a stop reason. It is folded
 // with the events of one PR head, so a re-review of a new head is a new card.
 type ReviewEvent struct {
 	Kind     ReviewKind `json:"kind"`
@@ -1305,12 +1305,9 @@ type ReviewEvent struct {
 	Nits      int `json:"nits,omitempty"`
 	// StopReason is set only by a stop-early result.
 	StopReason ReviewStopReason `json:"stopReason,omitempty"`
-	// FastLand reports an approve-fast that Dyna's path rules rated low risk.
+	// FastLand reports an approve-fast that uses direct publication. Keeping
+	// this Boolean also preserves the meaning of older review events.
 	FastLand bool `json:"fastLand,omitempty"`
-	// Area is the low-risk area that decided a fast landing.
-	Area string `json:"area,omitempty"`
-	// Note is the fast-landing line, or the normal-path fallback and its cause.
-	Note string `json:"note,omitempty"`
 	// Detail is the reviewer's Markdown body, which the agent text appends and
 	// no card parses.
 	Detail string `json:"detail,omitempty"`
@@ -2790,20 +2787,25 @@ func (m Message) MergeDecision() (MergeDecisionEvent, bool) {
 	return ev, true
 }
 
-// Review returns the payload of a reviewer result event. It decodes the stored
-// bytes strictly, so an unknown field is a failed read rather than a silent
-// mismatch.
+// Review returns the payload of a reviewer result event. It rejects unknown
+// fields except the area and note keys stored before those facts were removed.
 func (m Message) Review() (ReviewEvent, bool) {
 	if m.Kind != string(FamilyReview) || m.Notice.Kind != string(TypeResult) || len(m.Payload.raw) == 0 {
 		return ReviewEvent{}, false
 	}
-	var ev ReviewEvent
+	// TODO: legacy/shim remove later — read area and note from old review
+	// events; remove these two fields when that history ages out.
+	var ev struct {
+		ReviewEvent
+		Area string `json:"area"`
+		Note string `json:"note"`
+	}
 	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil || ev.Kind == "" {
 		return ReviewEvent{}, false
 	}
-	return ev, true
+	return ev.ReviewEvent, true
 }
 
 // Machine returns the payload of a low-disk machine event. It decodes the

@@ -252,8 +252,6 @@ export interface ReviewEvent {
   nits?: number
   stopReason?: ReviewStopReason
   fastLand?: boolean
-  area?: string
-  note?: string
   detail?: string
 }
 
@@ -1256,8 +1254,6 @@ export function isReviewEvent(v: unknown): v is ReviewEvent {
     (v.nits === undefined || Number.isInteger(v.nits)) &&
     (v.stopReason === undefined || REVIEW_STOP_REASON.has(v.stopReason)) &&
     (v.fastLand === undefined || typeof v.fastLand === "boolean") &&
-    (v.area === undefined || typeof v.area === "string") &&
-    (v.note === undefined || typeof v.note === "string") &&
     (v.detail === undefined || typeof v.detail === "string")
 }
 

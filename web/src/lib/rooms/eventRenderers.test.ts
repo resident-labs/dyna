@@ -658,8 +658,7 @@ test('a review result card shows all four results on feed and DM', () => {
   assert.ok(base, 'the review result fixture is missing')
   const cases = [
     { payload: { ...base, kind: 'approve' as const }, wants: [/PR #542/, /approved/] },
-    { payload: { ...base, kind: 'approve-fast' as const, fastLand: true, note: 'fast landing', area: 'docs' }, wants: [/fast landing/, /approved/] },
-    { payload: { ...base, kind: 'approve' as const, note: 'normal path' }, wants: [/normal path/, /approved/] },
+    { payload: { ...base, kind: 'approve-fast' as const, fastLand: true }, wants: [/fast landing/, /approved/] },
     { payload: base, wants: [/changes requested/, /1 blocking/, /events\.go:42/] },
     { payload: { ...base, kind: 'stop-early' as const, stopReason: 'superseded' as const, findings: [], blocking: 0, nits: 0 }, wants: [/stopped early/, /newer review replaced this one/] },
   ]

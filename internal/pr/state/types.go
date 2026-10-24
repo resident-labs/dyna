@@ -104,8 +104,8 @@ const (
 	VerdictApprove ReviewVerdict = "approve"
 	// VerdictChanges asks the author for changes, with typed findings.
 	VerdictChanges ReviewVerdict = "changes"
-	// VerdictApproveFast approves a low-risk change for a fast landing. Dyna's
-	// changed-path rules still decide whether the landing is fast.
+	// VerdictApproveFast approves a change for a fast landing at the reviewer's
+	// own discretion.
 	VerdictApproveFast ReviewVerdict = "approve-fast"
 	// VerdictStopEarly ends the review without a verdict on the change.
 	VerdictStopEarly ReviewVerdict = "stop-early"
@@ -122,25 +122,10 @@ const (
 	StopTooLarge   StopReason = "too-large"
 )
 
-// FastLandArea names the low-risk area that Dyna's changed-path rules found.
-// The empty area means the change is not low risk.
-type FastLandArea string
-
-// Fast landing areas.
-const (
-	FastLandDocs  FastLandArea = "docs"
-	FastLandGuide FastLandArea = "guide"
-	FastLandTests FastLandArea = "tests"
-)
-
-// FastLand is the engine's assessment of an approve-fast result against the
-// changed paths. The path rule decides, never the reviewer's word alone.
+// FastLand records whether an approve-fast result uses direct publication.
+// The stored Boolean also preserves the meaning of older review events.
 type FastLand struct {
-	LowRisk bool         `json:"lowRisk"`
-	Area    FastLandArea `json:"area,omitempty"`
-	// Note is the one line the review card shows: a fast landing, or the normal
-	// path and why the path rule did not rate the change low risk.
-	Note string `json:"note,omitempty"`
+	LowRisk bool `json:"lowRisk"`
 }
 
 // ReviewResult is one reviewer turn's typed result, as recorded through the

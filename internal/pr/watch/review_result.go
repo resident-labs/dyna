@@ -1,11 +1,9 @@
 package watch
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
-	"dyna-agent/internal/pr/fastland"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
@@ -48,76 +46,24 @@ func prepareReviewResult(in ReviewResult) error {
 	return nil
 }
 
-// normalizeReviewResult applies Dyna's changed-path rule to an approve-fast
-// result. A low-risk change stays fast; anything else records as a plain
-// approval with the normal path, and says why. A path read that fails is not
-// low risk: a fast landing needs the path rule's facts, not a guess.
-func (s *Service) normalizeReviewResult(ctx context.Context, r Record, in ReviewResult) ReviewResult {
+// normalizeReviewResult preserves a reviewer's approve-fast decision for a
+// GitHub PR. Only a local-lane change stays on the normal trial path.
+func (s *Service) normalizeReviewResult(r Record, in ReviewResult) ReviewResult {
 	if in.Verdict != state.VerdictApproveFast {
 		return in
 	}
-	// Only a GitHub change has the guarded publisher that a fast landing uses.
-	// A local-lane change keeps the normal trial, and says so.
 	if changeKind(r) != "github" {
 		return normalPath(in)
 	}
-	paths, err := s.changedPaths(ctx, r)
-	if err != nil {
-		return assessFastLand(in, nil, false)
-	}
-	return assessFastLand(in, paths, true)
-}
-
-// assessFastLand applies the changed-path rule to a fast approval. A path read
-// that failed (ok false) is not low risk: a fast landing needs the rule's facts,
-// not a guess.
-func assessFastLand(in ReviewResult, paths []string, ok bool) ReviewResult {
-	if in.Verdict != state.VerdictApproveFast {
-		return in
-	}
-	if !ok {
-		return normalPath(in)
-	}
-	area, low := fastland.Classify(paths)
-	if !low {
-		return normalPath(in)
-	}
-	in.FastLand = &state.FastLand{LowRisk: true, Area: area, Note: "fast landing"}
+	in.FastLand = &state.FastLand{LowRisk: true}
 	return in
 }
 
 // normalPath records a fast approval as a plain approval on the normal path.
 func normalPath(in ReviewResult) ReviewResult {
 	in.Verdict = state.VerdictApprove
-	in.FastLand = &state.FastLand{Note: "normal path"}
+	in.FastLand = nil
 	return in
-}
-
-// changedPaths reads the paths a change touches. The paths come from the change
-// itself, so a reviewer cannot claim a low-risk area that the diff does not
-// have.
-func (s *Service) changedPaths(ctx context.Context, r Record) ([]string, error) {
-	if changeKind(r) == "local" {
-		base := r.BaseRef
-		if base == "" {
-			base = r.Base
-		}
-		if r.RepoPath == "" || r.Head == "" || base == "" {
-			return nil, fmt.Errorf("the change has no base and head to diff")
-		}
-		out, err := gitRead(ctx, r.RepoPath, "diff", "--name-only", "--no-renames", "-z", base+"..."+r.Head)
-		if err != nil {
-			return nil, err
-		}
-		var paths []string
-		for _, name := range strings.Split(out, "\x00") {
-			if name = strings.TrimSpace(name); name != "" {
-				paths = append(paths, name)
-			}
-		}
-		return paths, nil
-	}
-	return s.github(r.RoomID).ChangedPaths(ctx, refRecord(r))
 }
 
 // reviewEventOf builds the typed review result event. The findings and counts
@@ -148,8 +94,6 @@ func reviewEventOf(r Record, in ReviewResult, detail string) room.ReviewEvent {
 	}
 	if in.FastLand != nil {
 		ev.FastLand = in.FastLand.LowRisk
-		ev.Area = string(in.FastLand.Area)
-		ev.Note = in.FastLand.Note
 	}
 	return ev
 }
