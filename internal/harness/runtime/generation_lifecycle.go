@@ -61,7 +61,8 @@ const dynaMCPName = "dyna"
 // Version 7: harnesses with DynaShell get Dyna's MCP shell server.
 // Version 8: OpenCode denies its native shell and lists Dyna's server directly.
 // Version 8: Antigravity denies its native shell with a plugin hook.
-const generationInputsVersion = 9
+// Version 10: Kimi merges only Dyna-owned tool policy into native config.
+const generationInputsVersion = 10
 
 type generationInputs struct {
 	NativeFeatures                                           nativeFeaturePolicy
@@ -325,7 +326,7 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 	if a.ConfigFormat == "toml" {
 		file = "settings.toml"
 	}
-	if h == "pi" || (a.ConfigFile != "" && h != "opencode" && h != "muse") {
+	if h == "pi" || h == "kimi-code" || (a.ConfigFile != "" && h != "opencode" && h != "muse") {
 		if err = r.recordGenerationView(h, home, dir, true); err != nil {
 			return err
 		}
@@ -335,12 +336,17 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 			return err
 		}
 	}
+	if h == "kimi-code" {
+		if err = publishKimiGeneration(dir, home); err != nil {
+			return err
+		}
+	}
 	if a.ConfigFile != "" && h != "opencode" && h != "muse" {
 		if err = publishGenerationFile(dir, file, home, a.ConfigFile); err != nil {
 			return err
 		}
 	}
-	if h == "pi" || (a.ConfigFile != "" && h != "opencode" && h != "muse") {
+	if h == "pi" || h == "kimi-code" || (a.ConfigFile != "" && h != "opencode" && h != "muse") {
 		if err = r.recordGenerationView(h, home, dir, false); err != nil {
 			return err
 		}
