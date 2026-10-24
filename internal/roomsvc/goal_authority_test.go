@@ -16,11 +16,11 @@ func TestGoalMutationsUseAuthenticatedCaller(t *testing.T) {
 	id := "ses_20261020-000001-aaaaaaaa"
 	recordtest.Write(t, e.mgr.Store.Root, id, subagent.Meta{ID: id, Name: "helper", RoomID: r.ID, Room: r.Name, Depth: 1, Resumable: true, HarnessSession: "mock-fixture"})
 	ctx := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: id})
-	g, err := e.svc.AddGoal(ctx, "", "Ship the engine calls", nil)
+	g, err := e.svc.AddGoal(ctx, "", "Ship the engine calls", nil, nil)
 	if err != nil || g.Setter != id || !g.HeldBy(id) {
 		t.Fatalf("add = %+v, %v", g, err)
 	}
-	g, err = e.svc.EditGoalSelectors(ctx, r.ID, g.ID, "Ship all engine calls", nil)
+	g, err = e.svc.EditGoalSelectors(ctx, r.ID, g.ID, "Ship all engine calls", nil, nil)
 	if err != nil || g.Edits[len(g.Edits)-1].By != id {
 		t.Fatalf("edit = %+v, %v", g, err)
 	}
@@ -46,7 +46,7 @@ func TestGoalMutationsUseAuthenticatedCaller(t *testing.T) {
 	}
 	actions := []func(context.Context, string) error{
 		func(ctx context.Context, room string) error {
-			_, err := e.svc.AddGoal(ctx, room, "Wrong caller", nil)
+			_, err := e.svc.AddGoal(ctx, room, "Wrong caller", nil, nil)
 			return err
 		},
 		func(ctx context.Context, room string) error {
@@ -54,7 +54,7 @@ func TestGoalMutationsUseAuthenticatedCaller(t *testing.T) {
 			return err
 		},
 		func(ctx context.Context, room string) error {
-			_, err := e.svc.EditGoalSelectors(ctx, room, g.ID, "Wrong caller", nil)
+			_, err := e.svc.EditGoalSelectors(ctx, room, g.ID, "Wrong caller", nil, nil)
 			return err
 		},
 		func(ctx context.Context, room string) error {
@@ -85,11 +85,11 @@ func TestExpediteGoalIsOwnerOrRootOnly(t *testing.T) {
 	recordtest.Write(t, e.mgr.Store.Root, id, subagent.Meta{ID: id, Name: "helper", RoomID: r.ID, Room: r.Name, Depth: 1, Resumable: true, HarnessSession: "mock-fixture"})
 	session := authority.WithActor(t.Context(), authority.Actor{Role: authority.Session, Session: id})
 	owner := authority.WithActor(t.Context(), authority.Actor{Role: authority.Owner})
-	first, err := e.svc.AddGoal(owner, r.ID, "First", []string{"@room"})
+	first, err := e.svc.AddGoal(owner, r.ID, "First", []string{"@room"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := e.svc.AddGoal(owner, r.ID, "Second", []string{"@room"})
+	second, err := e.svc.AddGoal(owner, r.ID, "Second", []string{"@room"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

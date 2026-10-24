@@ -116,15 +116,23 @@ When a closed session would hand a goal to root, close is refused until the goal
 resolved. Root asks the owner about the blocker when only the owner can clear it, then
 drops or finishes the goal, or hands it to an open agent.
 
-For other work across turns, use `dyna goal "<outcome; done when>"`.
-The caller holds it by default. Select holders with `--for @name`, `@children`, `@siblings`, or `@room`.
+Create every goal with `dyna goal "<outcome; done when>"`. A subagent start
+with new goal text uses that same creation path. To give a session an existing
+goal, use `dyna subagent start --goal g12` instead of naming new text.
+The caller holds a new goal by default. Select holders with `--for @name`, `@children`, `@siblings`, or `@room`.
 Root cannot be a holder: `dyna goal` fails for root, and `--for @root` is refused.
+Link room issues with `--fixes D-35,D-40`. With no text, one issue supplies the
+goal title. `dyna goal edit g1 --fixes D-40` links an existing goal.
 
 ```bash
 dyna goal                         # your goals and other open room goals
 dyna goal --all                   # includes done and dropped goals
 dyna goal show g1 --json
+dyna goal "Fix the parser" --for @agent --fixes D-35,D-40
+dyna goal --fixes D-35             # use the issue title
+dyna subagent start --goal g1 --profile <name> "<brief>"
 dyna goal edit g1 "New outcome"
+dyna goal edit g1 --fixes D-40
 dyna goal done g1 "Summary"
 dyna goal drop g1
 dyna goal item done g1 i2

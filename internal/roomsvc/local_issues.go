@@ -20,21 +20,53 @@ func (s *Service) Issues(roomRef string, all bool) ([]room.Issue, error) {
 	if err != nil {
 		return nil, err
 	}
-	issues, err := s.rooms().Issues(r.ID, all)
+	issues, err := s.rooms().Issues(r.ID, true)
 	if err != nil {
 		return nil, err
 	}
-	// The issue card shows "Fix in #N" while a linked PR is open.
+	openGoals, err := s.goalService().Store.ListOpen(r.ID)
+	if err != nil {
+		return nil, err
+	}
+	active := make(map[string]goals.Goal, len(openGoals))
+	for _, goal := range openGoals {
+		active[goal.ID] = goal
+	}
+	var fixes map[int]int
 	if s.PRs != nil {
-		fixes, err := s.PRs.IssueFixes(r.ID)
+		fixes, err = s.PRs.IssueFixes(r.ID)
 		if err != nil {
 			return nil, err
 		}
-		for i := range issues {
-			issues[i].FixPR = fixes[issues[i].Number]
-		}
 	}
-	return issues, nil
+	sessions, _ := s.sessions().ListSnapshot(true)
+	names := make(map[string]string, len(sessions))
+	for _, member := range sessions {
+		names[member.ID] = member.Name
+	}
+	out := issues[:0]
+	for _, issue := range issues {
+		if goal, ok := active[issue.GoalID]; ok {
+			issue.InProgress, issue.GoalShared = true, goal.Shared
+			holders := []string{}
+			for _, holder := range goal.Holders {
+				if name := names[holder]; name != "" {
+					holders = append(holders, name)
+				}
+			}
+			issue.GoalHolder = strings.Join(holders, ", ")
+		}
+		if pr := fixes[issue.Number]; pr > 0 {
+			issue.FixPR, issue.InProgress = pr, true
+		}
+		// The default is unhandled work. Closed goals leave their historical
+		// goal ID, but do not keep the issue in progress.
+		if !all && (issue.InProgress || issue.State != "open" && issue.State != "goal") {
+			continue
+		}
+		out = append(out, issue)
+	}
+	return out, nil
 }
 
 // Issue mutations use the same triage policy as the CLI, with the actor
@@ -133,7 +165,7 @@ func (s *Service) TriageIssue(ctx context.Context, roomRef, id, action, value, b
 					return err
 				}
 			}
-			g, err := s.goalService().Store.Add(r.ID, setter, in)
+			g, err := s.goalService().Store.AddWithIssues(r.ID, setter, by, in, nil)
 			if err != nil {
 				return err
 			}
