@@ -77,11 +77,15 @@ func NewCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
+		var streamErr error
+		if v.State == computers.StateRunning && v.Renderer != "" && !v.Stream.Running {
+			streamErr = computers.NewClient(id).CheckStream(c.Context())
+		}
 		out := struct {
 			computers.Status
 			Doctor string `json:"doctor,omitempty"`
 			Viewer string `json:"viewer,omitempty"`
-		}{Status: v, Doctor: statusDoctor(v)}
+		}{Status: v, Doctor: statusDoctor(v, streamErr)}
 		// A running computer gets a link a person can open to watch or take control.
 		if v.State == computers.StateRunning {
 			if origin, err := devicesvc.New(subagent.DefaultStore().Root).AppOrigin(); err == nil {
