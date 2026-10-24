@@ -316,6 +316,34 @@ func TestPostIndexMigrationRemovesCrashLeftovers(t *testing.T) {
 	}
 }
 
+// A delivery-existence check uses the stored author, recipient, turn and kind,
+// not address strings or a scan of every room post.
+func TestHasDeliveryFrom(t *testing.T) {
+	s := recordsStore(t)
+	rec, err := s.Create(CreateInput{Name: "alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = s.Post(rec.ID, PostInput{From: "alpha:helper", To: []string{"alpha:parent"}, SessionIDs: map[string]string{"alpha:helper": ownerSession, "alpha:parent": otherSession}, Turn: 2, Text: "findings"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.HasDeliveryFrom(rec.ID, ownerSession, otherSession, 2, "message"); err != nil || !got {
+		t.Fatalf("current findings = %v, %v; want a delivery", got, err)
+	}
+	for _, tc := range []struct {
+		turn int
+		kind string
+	}{{1, "message"}, {2, "service-alert"}} {
+		if got, err := s.HasDeliveryFrom(rec.ID, ownerSession, otherSession, tc.turn, tc.kind); err != nil || got {
+			t.Errorf("turn %d kind %s = %v, %v; want no match", tc.turn, tc.kind, got, err)
+		}
+	}
+	if got, err := s.HasDeliveryFrom(rec.ID, ownerSession, "ses_missing", 2, "message"); err != nil || got {
+		t.Fatalf("another recipient = %v, %v; want no match", got, err)
+	}
+}
+
 // A store that imported the index before the seat named its own posts keeps
 // those rows as they were. The seat's DM reads the seat as their author, so a
 // one-time backfill rewrites them: an old external root answer and an old

@@ -3,6 +3,7 @@ package room
 import (
 	"database/sql"
 	"math"
+	"slices"
 	"sort"
 	"time"
 )
@@ -68,6 +69,27 @@ func (s *Store) AuthoredPosts(roomID, author string, conversation Conversation, 
 	}
 	return s.readHomes(roomID, `WHERE h.room_id=? AND h.author_session_id=? AND h.conversation<>?`,
 		[]any{roomID, author, conversation.Home().String()}, since, before, limit)
+}
+
+// HasDeliveryFrom reports whether author wrote a post in turn with a live
+// delivery row to recipient and one of kinds. An empty kinds accepts every
+// kind. The index rows decide identity; the stored post decides turn and kind.
+func (s *Store) HasDeliveryFrom(roomID, author, recipient string, turn int, kinds ...string) (bool, error) {
+	if author == "" || recipient == "" {
+		return false, nil
+	}
+	posts, err := s.readHomes(roomID, `JOIN post_deliveries d ON d.room_id=h.room_id AND d.post_id=h.post_id
+ WHERE h.room_id=? AND h.author_session_id=? AND d.room_id=? AND d.session_id=? AND d.state NOT IN ('cancelled','failed')`,
+		[]any{roomID, author, roomID, recipient}, time.Time{}, time.Time{}, 0)
+	if err != nil {
+		return false, err
+	}
+	for _, post := range posts {
+		if post.Message.Turn == turn && (len(kinds) == 0 || slices.Contains(kinds, post.Message.Kind)) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // OtherHomes returns the home of every post of the room that was not written in
