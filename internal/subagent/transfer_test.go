@@ -536,7 +536,7 @@ func TestTransferAskIsATypedSessionEvent(t *testing.T) {
 		t.Fatalf("ask does not wake its session: wake=%v to=%v", msg.Wake, msg.To)
 	}
 	ev, ok := msg.Session()
-	if !ok || ev.Type != room.SessionTransfer || ev.Session != info.Address() || ev.Transfer != state.ID {
+	if !ok || ev.Type != room.SessionTransfer || ev.Session != info.Address() || ev.Transfer != state.ID || ev.Profile != state.Profile {
 		t.Fatalf("ask payload = %+v, %v", ev, ok)
 	}
 	if !strings.Contains(ev.Detail, "dyna subagent transfer handoff "+info.ID) || !strings.Contains(ev.Detail, state.ID) {

@@ -943,7 +943,7 @@ type SessionEvent struct {
 	To   string `json:"to,omitempty"`
 	// Reason is why an account change happened.
 	Reason AccountReason `json:"reason,omitempty"`
-	// Profile is the profile a spawned session runs on.
+	// Profile is the profile a spawned session runs on, or a transfer's target.
 	Profile string `json:"profile,omitempty"`
 	// Transfer is the transfer ID a handoff request names, so the card can
 	// point at the transfer that asked for it.
