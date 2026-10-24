@@ -163,8 +163,8 @@ not-state internal/hooks/runs.go Service.newRun 1 # raw command output stays in 
 not-state internal/hooks/spool.go Service.Drain 1 # allowed inbox, requirement 2: the git hook spool the engine drains
 not-state internal/hooks/spool.go Service.Enqueue 1 # allowed inbox, requirement 2: the git hook spool the engine drains
 not-state internal/hooks/spool.go quarantineSpoolFile 1 # allowed inbox, requirement 2: the git hook spool the engine drains
-not-state internal/localci/node_runner.go Runner.runNode 1 # local CI report blobs
-not-state internal/localci/runner.go Runner.Run 1 # local CI runner work files
+not-state internal/localci/node_runner.go Runner.fetchReports 1 # temporary report transport archive, removed when the copy returns
+not-state internal/localci/node_runner.go newCheckLog 1 # a check's own log blob beside the other report blobs; its result and cause stay in SQLite
 not-state internal/localci/runner.go readArchive 1 # local CI runner work files
 not-state internal/maintenance/retention.go removeClosedSession 1 # Deletes an expired session file bundle; sessionlife.Delete removes its SQLite record through the state writer.
 not-state internal/maintenance/retention.go sweepRejectedSpools 1 # removes rejected runner spool lines after their retention; a bug-report log, not state
