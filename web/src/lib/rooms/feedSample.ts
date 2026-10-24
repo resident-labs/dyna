@@ -17,7 +17,7 @@ export const sampleRoom: Room = { id: 'preview', name: 'dyna-agent', lastActivit
 export const samplePosts: SamplePost[] = [
   done('ui-guy-right', 464, 'No action needed. #866, the Computers empty state, is ready and merges on its own.'),
   done('root', 270, 'Merged #864. The Harnesses screen now shows Install, Sign in and Update only when they apply.'),
-  post('dyna-agent:settings-polish', 'settings-polish', 'All four cleanups are pushed to #868.', { to: ['dyna-agent:root'] }),
+  post('dyna-agent:settings-polish', 'settings-polish', 'All four cleanups are pushed to #868.', { to: ['dyna-agent:root'], forRoot: true }),
   done('settings-polish', 3, 'The Install change is ready. A harness that is not installed shows Install as its only action.'),
   post('dyna-agent', 'you', 'Nice. Ship it.', { human: true, owner: true, to: ['dyna-agent:root'] }),
   done('engine-lead', 51, 'The build broke on a missing import.', 'failed'),
