@@ -104,10 +104,10 @@ func cacheRepairScript(base string, wait time.Duration) string {
 		backup := cachePath + ".before-d48"
 		kind := path.Base(cachePath)
 		repair += "if [ -L " + q(cachePath) + " ]; then " +
-			"target=$(readlink -f -- " + q(cachePath) + " 2>/dev/null) || target=; " +
+			"target=$(readlink -e -- " + q(cachePath) + " 2>/dev/null) || target=; " +
+			"if [ -z \"$target\" ]; then echo " + q("refusing dangling CI cache link "+cachePath) + " >&2; exit 69; fi; " +
 			"case \"$target\" in \"$b\"|\"$b\"/*) echo " +
 			q("refusing unsafe CI cache link "+cachePath+" that resolves inside the managed base") + " >&2; exit 69 ;; esac; " +
-			"if [ -z \"$target\" ]; then echo " + q("refusing dangling CI cache link "+cachePath) + " >&2; exit 69; fi; " +
 			"if [ -e " + q(backup) + " ] || [ -L " + q(backup) + " ]; then echo " +
 			q("refusing to overwrite CI cache backup "+backup) + " >&2; exit 69; fi; " +
 			"mv -- " + q(cachePath) + " " + q(backup) + " || exit 69; " +
