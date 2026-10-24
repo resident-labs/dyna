@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
 
 const origin = 'http://127.0.0.1:7457';
 
 let handler;
 let closed;
+let exposed;
 let socketsBlocked = false;
 let removingRoutes = false;
 let pendingRoute;
@@ -37,6 +39,10 @@ const context = {
     return {
       async addInitScript() {},
       once(event, callback) { assert.equal(event, 'close'); closed = callback; },
+      async exposeFunction(name, callback) {
+        assert.equal(name, 'dynaQAReport');
+        exposed = callback;
+      },
       async goto(origin) {
         assert.equal(origin, 'http://127.0.0.1:7457');
         const checks = [
@@ -101,13 +107,31 @@ const context = {
         }
         assert.ok(socketsBlocked);
         console.log('QA policy checks passed: ' + checks.length);
+        // Ask for the timeout report exactly as an agent does, and end the run
+        // whether the report worked or not, so a broken report fails the test
+        // instead of leaving it waiting.
+        try {
+          const report = await exposed();
+          assert.ok(report.blocked.some(entry => entry.kind === 'POST API request' && entry.count > 0), 'report names blocked writes');
+          assert.ok(report.blocked.some(entry => entry.kind === 'socket'), 'report names the closed sockets');
+          for (const entry of report.blocked) assert.doesNotMatch(entry.kind, /http|\/api/, 'report must not name a URL');
+          assert.match(report.screenshot, /qa-report-[0-9]+[\\/]page\.png$/, 'report names the picture it saved');
+        } finally {
+          setImmediate(() => closed());
+        }
+      },
+      // The controller asks for this only when an agent reports a timed-out
+      // step: it must save the picture where it says it did.
+      async screenshot(options) {
+        assert.match(options.path, /qa-report-[0-9]+[\\/]page\.png$/);
+        await writeFile(options.path, 'PNG');
         closeWithPendingCookie = true;
         pendingRoute = handler({
           request: () => ({ url: () => origin + '/api/Rooms', method: () => 'POST' }),
           async continue() { assert.fail('closed context must not continue the pending request'); },
         });
         await cookieStarted.promise;
-        closed();
+        return Buffer.from([0x89, 0x50, 0x4e, 0x47]);
       },
     };
   },
