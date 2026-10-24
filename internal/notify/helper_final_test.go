@@ -41,6 +41,9 @@ func TestServiceHelperFinalResultReachesReviewerWithoutPost(t *testing.T) {
 			if !turnReport(out.Message, room.TurnCompleted) || out.Message.OwnerReport || !reflect.DeepEqual(out.Message.To, []string{parent.Address()}) || out.Message.SessionIDs[parent.Address()] != parent.ID || !strings.Contains(out.Message.Text, findings) {
 				t.Fatalf("helper final did not reach its current reviewer: %+v", out.Message)
 			}
+			if out.Message.Conversation != room.DMConversation(helper.ID) {
+				t.Fatalf("helper final has home %q, want its own DM %q", out.Message.Conversation, room.DMConversation(helper.ID))
+			}
 			if len(out.Deliveries) != 1 || out.Deliveries[0].Delivery != "session-queued" {
 				t.Fatalf("reviewer delivery: %+v", out.Deliveries)
 			}

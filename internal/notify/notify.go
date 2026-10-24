@@ -923,7 +923,8 @@ func (s *Service) appendCompletion(ctx context.Context, plan subagent.ReportPlan
 		// share an address keep their own posts: the registry's own key hashes
 		// the address, which a reused name would collide on.
 		msg, err = s.Rooms.PostEventInput(room.PostEventInput{RoomID: plan.RoomID, Event: ev, ID: plan.Post.ID, Producer: plan.Producer,
-			To: plan.Post.To, Via: plan.Post.Via, NeedsRoot: plan.Post.NeedsRoot, SessionIDs: plan.Post.SessionIDs, Turn: plan.Post.Turn, OwnerReport: plan.Post.OwnerReport})
+			To: plan.Post.To, Via: plan.Post.Via, NeedsRoot: plan.Post.NeedsRoot, SessionIDs: plan.Post.SessionIDs, Turn: plan.Post.Turn, OwnerReport: plan.Post.OwnerReport,
+			Conversation: string(plan.Post.Conversation)})
 	} else {
 		msg, err = s.Rooms.Post(plan.RoomID, plan.Post)
 	}
@@ -1272,7 +1273,13 @@ func (s *Service) prepareTurnReport(meta subagent.Meta, turn subagent.Turn, targ
 	if err != nil {
 		return nil, err
 	}
-	return s.prepareEventCompletion(meta.RoomID, ev, targets, turn.N, includeOwner)
+	plan, err := s.prepareEventCompletion(meta.RoomID, ev, targets, turn.N, includeOwner)
+	if plan != nil && meta.ServiceContract().Helper() {
+		// A service helper's result is input for its parent service, not room
+		// work. Its home is the helper's DM; To still delivers to the parent.
+		plan.Post.Conversation = room.DMConversation(meta.ID)
+	}
+	return plan, err
 }
 
 // turnState names the state a completion kind reports in the typed event.
