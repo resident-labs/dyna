@@ -11,10 +11,15 @@ const (
 
 // StreamError describes a stream failure without making callers match prose.
 type StreamError struct {
-	Code StreamFailureCode
+	Code             StreamFailureCode
+	Detail           string
+	PermanentFailure bool
 }
 
 func (e *StreamError) Error() string {
+	if e.Detail != "" {
+		return e.Detail
+	}
 	if e.Code == StreamWayVNCMissing {
 		return "the screen streamer (wayvnc) is not installed"
 	}
@@ -25,13 +30,21 @@ func (e *StreamError) Error() string {
 func (e *StreamError) FailureCode() string { return string(e.Code) }
 
 // Permanent reports whether retrying without changing the machine can succeed.
-func (e *StreamError) Permanent() bool { return e.Code == StreamWayVNCMissing }
+func (e *StreamError) Permanent() bool { return e.PermanentFailure || e.Code == StreamWayVNCMissing }
+
+// streamFailureResponse preserves a daemon failure across the control protocol.
+type streamFailureResponse struct {
+	Error     string `json:"error"`
+	Reason    string `json:"reason,omitempty"`
+	Code      string `json:"code,omitempty"`
+	Permanent bool   `json:"permanent,omitempty"`
+}
 
 // CheckStreamInstalled checks the one executable every Linux viewer needs.
 // Computers still run without it: agents can use the desktop by other means.
 func CheckStreamInstalled() error {
 	if _, err := exec.LookPath("wayvnc"); err != nil {
-		return &StreamError{Code: StreamWayVNCMissing}
+		return &StreamError{Code: StreamWayVNCMissing, PermanentFailure: true}
 	}
 	return nil
 }

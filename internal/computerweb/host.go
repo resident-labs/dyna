@@ -275,9 +275,6 @@ func (h *Host) OpenView(session, key string) (websvc.ComputerView, error) {
 	if err := computers.ValidateID(session); err != nil {
 		return websvc.ComputerView{}, err
 	}
-	if err := computers.CheckStreamInstalled(); err != nil {
-		return websvc.ComputerView{}, fmt.Errorf("this computer has no stream: %w", err)
-	}
 	// The lease lives as long as its context: never one with a deadline.
 	l, err := h.client(session).OpenView(context.Background())
 	if err != nil {

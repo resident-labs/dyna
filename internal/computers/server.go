@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"strconv"
@@ -74,7 +75,18 @@ func serveConnection(parent context.Context, conn net.Conn, handler Handler) {
 				value, err = handler(ctx, req)
 			}
 			if err != nil {
-				value = map[string]string{"error": err.Error()}
+				failure := streamFailureResponse{Error: err.Error()}
+				var coded interface {
+					error
+					FailureCode() string
+					Permanent() bool
+				}
+				if errors.As(err, &coded) {
+					failure.Reason = coded.Error()
+					failure.Code = coded.FailureCode()
+					failure.Permanent = coded.Permanent()
+				}
+				value = failure
 			}
 			enc := json.NewEncoder(conn)
 			if sub, ok := value.(Subscription); ok {
