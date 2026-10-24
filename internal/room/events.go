@@ -127,6 +127,9 @@ const (
 
 	FamilyMachine EventFamily = "machine"
 	TypeLowDisk   EventType   = "low-disk"
+	// TypeCacheRepaired is a run that switched linked managed cache paths back
+	// to real directories.
+	TypeCacheRepaired EventType = "cache-repaired"
 
 	// FamilyCall reports how the owner answered a call request. The engine
 	// posts it, so the answer wears no invented voice and carries no raw ID in
@@ -828,6 +831,31 @@ func (m MachineEvent) eventSubject() string { return m.Name }
 func (m MachineEvent) eventDedupe() string {
 	return strconv.Itoa(m.AtMS)
 }
+
+// MachineCacheEvent tells a room that a run switched linked CI caches back to
+// managed real directories. It names the machine and the cache kinds in words,
+// never a path or a link target, which belong to the machine and not the room.
+type MachineCacheEvent struct {
+	Name string `json:"name"`
+	// Caches names each repaired cache in clear words, such as "Go build
+	// cache".
+	Caches []string `json:"caches"`
+	// Summary is the short facts line the agent text reads.
+	Summary string `json:"summary"`
+	// AtMS is when Dyna repaired the caches, in milliseconds since the Unix
+	// epoch. Each repair is its own post, because each has its own time.
+	AtMS int `json:"atMs"`
+}
+
+func (MachineCacheEvent) eventFamily() EventFamily { return FamilyMachine }
+func (MachineCacheEvent) eventType() EventType     { return TypeCacheRepaired }
+
+// eventSubject is the machine, so repairs of one machine fold into one card.
+func (m MachineCacheEvent) eventSubject() string { return m.Name }
+
+// eventDedupe keys one repair per machine and time, so a retried post of the
+// same repair posts once.
+func (m MachineCacheEvent) eventDedupe() string { return strconv.Itoa(m.AtMS) }
 
 // CallState is how the owner answered a call request: they joined it, they
 // declined it, or the request was withdrawn before they answered.
@@ -1748,6 +1776,18 @@ var eventSpecs = []EventSpec{
 		Wake:     WakeRootIfNeeded,
 		Once:     true,
 		Text:     "Machine {name} is low on disk: {summary}. Dyna starts no CI there until space is freed.",
+	},
+	// A run that repaired a linked cache posts one quiet machine fact, so the
+	// owner sees that Dyna switched it back without waking a session.
+	{
+		Family:   FamilyMachine,
+		Type:     TypeCacheRepaired,
+		Renderer: "MachineCacheCard",
+		Payload:  reflect.TypeOf(MachineCacheEvent{}),
+		Quiet:    true,
+		Wake:     WakeNever,
+		Once:     true,
+		Text:     "Machine {name} switched linked CI caches back to managed directories: {summary}. The old links are kept beside them as backups.",
 	},
 	// The owner's answer to a call request is a fact of the room: root asked for
 	// the call and stops waiting when it reads the answer.
@@ -2820,6 +2860,22 @@ func (m Message) Machine() (MachineEvent, bool) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil {
 		return MachineEvent{}, false
+	}
+	return ev, true
+}
+
+// MachineCache returns the payload of a cache-repair machine event. It decodes
+// the stored bytes strictly, so an unknown field is a failed read rather than
+// a silent mismatch.
+func (m Message) MachineCache() (MachineCacheEvent, bool) {
+	if m.Kind != string(FamilyMachine) || m.Notice.Kind != string(TypeCacheRepaired) || len(m.Payload.raw) == 0 {
+		return MachineCacheEvent{}, false
+	}
+	var ev MachineCacheEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil {
+		return MachineCacheEvent{}, false
 	}
 	return ev, true
 }

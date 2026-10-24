@@ -13,26 +13,36 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
+	"dyna-agent/internal/settings"
 	"dyna-agent/internal/shellquote"
 )
 
 // Runs remove their own directory when they finish, so the sweep only clears
 // leftovers from a run whose engine or SSH client died. Cache entries stay
-// longer because they make later runs faster.
+// longer because they make later runs faster, and cache_clean.sh also keeps
+// each cache under a size cap so a busy machine cannot fill its disk.
 const (
 	ciRunCleanAge   = 2 * time.Hour
 	ciCacheCleanAge = 48 * time.Hour
 )
 
-// ciDiskFloorGB is the free space below which a run cleans the caches before
-// it starts.
-// TODO: read machines.ciDiskFloorGB once the disk floor setting lands, and
-// drop this constant then.
-const ciDiskFloorGB = 20
+// ciDiskFloorBytes is the free space a CI machine must keep, as the owner's
+// settings say it. The same floor holds new CI work and lets a run clean Dyna's
+// caches first, so an owner changes one policy. A settings file that cannot be
+// read keeps the default floor, so a broken file never leaves a full machine
+// unclean. Zero turns cache recovery off, as it turns CI admission off.
+func ciDiskFloorBytes() int64 {
+	values, err := settings.Load("")
+	if err != nil {
+		return int64(settings.Defaults().CIDiskFloorBytes())
+	}
+	return int64(values.CIDiskFloorBytes())
+}
 
 // legacyCacheDir is where the old single-node runner kept its caches. No run
 // writes there now, so its entries stay until their age passes.
@@ -47,6 +57,108 @@ func cacheBase(node string) string {
 
 //go:embed cache_clean.sh
 var ciCacheCleanBody string
+
+// baseLinkGuard refuses a managed base or its parent that is a symbolic link.
+// A repair under a linked base would write outside Dyna's own tree, so the run
+// stops instead, before it creates anything.
+func baseLinkGuard(base string) string {
+	q := shellquote.Quote
+	guard := ""
+	for _, unsafe := range []struct{ path, label string }{
+		{path.Dir(base), "CI cache base parent"},
+		{base, "CI cache base"},
+	} {
+		guard += "if [ -L " + q(unsafe.path) + " ]; then echo " +
+			q("unsafe "+unsafe.label+" "+unsafe.path+" is a symlink to") + " \"$(readlink -- " + q(unsafe.path) + ")\" >&2; exit 69; fi; "
+	}
+	return guard
+}
+
+// cacheLinkGuard refuses a managed cache path that is still a symbolic link
+// after the prepare stage. Docker and the node resolve a bind source link on
+// the host, so such a link would make a run read, write and prune a cache
+// outside Dyna's own tree. It also refuses a linked base or parent.
+func cacheLinkGuard(base string) string {
+	q := shellquote.Quote
+	guard := baseLinkGuard(base)
+	for _, name := range []string{"go-build", "go-mod", "npm"} {
+		unsafe := path.Join(base, name)
+		guard += "if [ -L " + q(unsafe) + " ]; then echo " +
+			q("unsafe CI cache path "+unsafe+" is a symlink to") + " \"$(readlink -- " + q(unsafe) + ")\" >&2; exit 69; fi; "
+	}
+	return guard
+}
+
+// cacheRepairScript switches a linked go-build or go-mod path back to a real
+// empty directory while it holds the cache lock exclusively, before the run
+// takes its ordinary shared lock. It keeps the link itself beside the cache as
+// <cache>.before-d48 and never changes or deletes its target. A link that
+// resolves inside the managed base, a dangling link and an existing backup are
+// unsafe, so they stop the run instead. A run with no linked path takes no
+// exclusive lock and prints nothing.
+func cacheRepairScript(base string, wait time.Duration) string {
+	q := shellquote.Quote
+	build, mod := path.Join(base, "go-build"), path.Join(base, "go-mod")
+	repair := "b=" + q(base) + "; "
+	for _, cachePath := range []string{build, mod} {
+		backup := cachePath + ".before-d48"
+		kind := path.Base(cachePath)
+		repair += "if [ -L " + q(cachePath) + " ]; then " +
+			"target=$(readlink -f -- " + q(cachePath) + " 2>/dev/null) || target=; " +
+			"case \"$target\" in \"$b\"|\"$b\"/*) echo " +
+			q("refusing unsafe CI cache link "+cachePath+" that resolves inside the managed base") + " >&2; exit 69 ;; esac; " +
+			"if [ -z \"$target\" ]; then echo " + q("refusing dangling CI cache link "+cachePath) + " >&2; exit 69; fi; " +
+			"if [ -e " + q(backup) + " ] || [ -L " + q(backup) + " ]; then echo " +
+			q("refusing to overwrite CI cache backup "+backup) + " >&2; exit 69; fi; " +
+			"mv -- " + q(cachePath) + " " + q(backup) + " || exit 69; " +
+			"if ! mkdir -m 0755 -- " + q(cachePath) + "; then mv -- " + q(backup) + " " + q(cachePath) + "; exit 69; fi; " +
+			"printf 'DYNA_CI_CACHE_REPAIR %s\\n' " + q(kind) + "; " +
+			"fi; "
+	}
+	lock := "exec 7>>" + q(path.Join(base, "caches.lock")) + "; flock -w " + strconv.Itoa(int(wait.Seconds())) + " 7 || exit 75; "
+	return "if [ -L " + q(build) + " ] || [ -L " + q(mod) + " ]; then " + lock + repair + "exec 7>&-; fi; "
+}
+
+// CacheKind names one managed cache path that a run can repair. The values are
+// the path names under the managed base.
+type CacheKind string
+
+const (
+	// CacheGoBuild is the Go build cache.
+	CacheGoBuild CacheKind = "go-build"
+	// CacheGoMod is the Go module cache, which also holds download and VCS
+	// checkouts.
+	CacheGoMod CacheKind = "go-mod"
+)
+
+// CacheRepair says which linked cache paths one run switched back to real
+// directories on its machine.
+type CacheRepair struct {
+	Node  string
+	Kinds []CacheKind
+}
+
+// CacheRepairReporter receives a completed cache repair. The runner calls it
+// even when the run fails afterwards, so a repair is never silent.
+type CacheRepairReporter func(context.Context, CacheRepair)
+
+// cacheRepairLine is the transport fact the repair stage prints while it
+// holds the exclusive cache lock. It is not the owner event; the runner turns
+// the facts into a registered typed event.
+var cacheRepairLine = regexp.MustCompile(`(?m)^DYNA_CI_CACHE_REPAIR (go-build|go-mod)$`)
+
+// parseCacheRepairs reads the repair facts from the setup output in the order
+// they happened, with no duplicate kind.
+func parseCacheRepairs(output string) []CacheKind {
+	var kinds []CacheKind
+	for _, match := range cacheRepairLine.FindAllStringSubmatch(output, -1) {
+		kind := CacheKind(match[1])
+		if !slices.Contains(kinds, kind) {
+			kinds = append(kinds, kind)
+		}
+	}
+	return kinds
+}
 
 // CacheCleanResult is what one cleanup removed on one CI machine.
 type CacheCleanResult struct {
@@ -274,8 +386,8 @@ func (r Runner) cleanBeforeRun(ctx context.Context, node Node) error {
 	if err != nil {
 		return err
 	}
-	floor := int64(ciDiskFloorGB) << 30
-	if free >= floor {
+	floor := ciDiskFloorBytes()
+	if floor <= 0 || free >= floor {
 		return nil
 	}
 	cleaned, err := r.CleanCaches(ctx, node, false)
