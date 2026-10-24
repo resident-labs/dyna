@@ -24,7 +24,7 @@ import (
 // leftovers from a run whose engine or SSH client died. Cache entries stay
 // longer because they make later runs faster.
 const (
-	ciRunCleanAge   = 24 * time.Hour
+	ciRunCleanAge   = 2 * time.Hour
 	ciCacheCleanAge = 48 * time.Hour
 )
 
@@ -124,12 +124,22 @@ func parseCacheClean(output string) ([]string, int64) {
 // directory and gives up after the longest run anyway.
 func runLocks(base, active string) string {
 	keeper := shellquote.Quote(keeperPID(active))
-	wait := "echo $$ > " + keeper + "; end=$((SECONDS+10800)); " +
-		"while [ -e " + shellquote.Quote(active) + " ] && [ $SECONDS -lt $end ]; do sleep 5; done"
+	wait := runKeeper(active)
 	ready := "i=0; while [ ! -s " + keeper + " ] && [ $i -lt 200 ]; do sleep 0.01; i=$((i+1)); done; "
 	return "exec 6>>" + shellquote.Quote(active) + "; flock -n -w 60 6; " +
 		"exec 7>>" + shellquote.Quote(path.Join(base, "caches.lock")) + "; flock -s -w 60 7; " +
 		"setsid bash -c " + shellquote.Quote(wait) + " 6>&6 7>&7 >/dev/null 2>&1 </dev/null & exec 6>&-; exec 7>&-; " + ready
+}
+
+// runKeeper holds a run's locks until its active file goes away. Its EXIT trap
+// also removes the run directory: teardown stops the keeper before it removes
+// the directory, so an interrupted SSH command cannot strand it between steps.
+func runKeeper(active string) string {
+	keeper := shellquote.Quote(keeperPID(active))
+	remove := "rm -rf --one-file-system " + shellquote.Quote(path.Dir(active))
+	return "trap " + shellquote.Quote(remove) + " EXIT; " +
+		"echo $$ > " + keeper + "; end=$((SECONDS+10800)); " +
+		"while [ -e " + shellquote.Quote(active) + " ] && [ $SECONDS -lt $end ]; do sleep 5; done"
 }
 
 // keeperPID is the file that names the keeper of one run, so its teardown can
@@ -160,7 +170,7 @@ func stopKeeper(base, active string) string {
 // keeper, so the run's locks are free before it returns, and removes the run's
 // own directory.
 func removeRunDir(base, active string) string {
-	return stopKeeper(base, active) + "rm -rf --one-file-system " + shellquote.Quote(path.Dir(active)) + " || true"
+	return stopKeeper(base, active) + "rm -rf --one-file-system " + shellquote.Quote(path.Dir(active))
 }
 
 // diskFullNote is the text the kernel and the tools print when a check runs
