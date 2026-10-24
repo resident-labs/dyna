@@ -22,7 +22,12 @@ const (
 	kimiCodeMaxFileBytes = 4 << 20
 )
 
-type kimiCodeManager struct{ host Host }
+type kimiCodeManager struct {
+	host     Host
+	client   claudeHTTPClient
+	tokenURL string
+	now      func() time.Time
+}
 
 type kimiCodeOAuthRef struct {
 	Storage   string `toml:"storage"`
@@ -54,6 +59,8 @@ type kimiCodeLogin struct {
 	token     json.RawMessage
 	tokenPath string
 	baseURL   string
+	oauthHost string
+	tokenInfo kimiCodeToken
 	expiresAt time.Time
 }
 
@@ -65,7 +72,7 @@ func (*kimiCodeManager) Harness() string { return "kimi-code" }
 
 func (*kimiCodeManager) Caps() Caps {
 	return Caps{
-		Activate: true, IsolatedLogin: true,
+		Activate: true, IsolatedLogin: true, Refresh: true,
 		Scope:         "Dyna’s shared Kimi Code home",
 		RunningEffect: "New turns use the active native login after the harness gate drains.",
 	}
@@ -228,6 +235,8 @@ func readKimiCodeLogin(root string) (kimiCodeLogin, error) {
 	login.config = append(json.RawMessage(nil), config...)
 	login.token = append(json.RawMessage(nil), tokenRaw...)
 	login.baseURL = provider.BaseURL
+	login.oauthHost = provider.OAuth.OAuthHost
+	login.tokenInfo = token
 	login.expiresAt = time.Unix(token.ExpiresAt, 0).UTC()
 	return login, nil
 }
@@ -270,6 +279,8 @@ func unpackKimiCodeLogin(c store.Credential) (kimiCodeLogin, error) {
 		return login, err
 	}
 	login.baseURL = provider.BaseURL
+	login.oauthHost = provider.OAuth.OAuthHost
+	login.tokenInfo = token
 	login.expiresAt = time.Unix(token.ExpiresAt, 0).UTC()
 	return login, nil
 }
@@ -345,7 +356,11 @@ func kimiCodeLock(ctx context.Context, root string) (*os.File, error) {
 	}
 }
 
-func (m *kimiCodeManager) Activate(ctx context.Context, integration string, c store.Credential) (previous []Captured, err error) {
+func (m *kimiCodeManager) Activate(ctx context.Context, integration string, c store.Credential) ([]Captured, error) {
+	return m.activate(ctx, integration, c, nil)
+}
+
+func (m *kimiCodeManager) activate(ctx context.Context, integration string, c store.Credential, refresh *activeRefresh) (previous []Captured, err error) {
 	if integration != "" {
 		return nil, ErrSchema
 	}
@@ -376,6 +391,27 @@ func (m *kimiCodeManager) Activate(ctx context.Context, integration string, c st
 	if err != nil && !errors.Is(err, ErrNotSignedIn) {
 		return previous, err
 	}
+	if refresh != nil {
+		if len(previous) != 1 || previous[0].Identity != refresh.current.Identity || previous[0].Integration != refresh.current.Integration {
+			return previous, ErrNoIdentity
+		}
+		source := previous[0]
+		if NewerCredential(refresh.current, source) {
+			source = refresh.current
+		}
+		next, e := m.Refresh(ctx, source)
+		refresh.result = next
+		if e != nil {
+			return previous, e
+		}
+		if e = refresh.checkpoint(next); e != nil {
+			return previous, e
+		}
+		login, e = unpackKimiCodeLogin(next.Credential)
+		if e != nil {
+			return previous, e
+		}
+	}
 	if err = ctx.Err(); err != nil {
 		return previous, err
 	}
@@ -400,10 +436,6 @@ func (m *kimiCodeManager) Activate(ctx context.Context, integration string, c st
 		return previous, ErrPartialActivation
 	}
 	return previous, nil
-}
-
-func (*kimiCodeManager) Refresh(context.Context, Captured) (Captured, error) {
-	return Captured{}, ErrUnsupported
 }
 
 func (*kimiCodeManager) CredentialExpiry(c Captured) (time.Time, error) {
