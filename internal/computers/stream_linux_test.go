@@ -4,11 +4,17 @@ package computers
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
 
 func TestWayVNCControlSocketBelongsToItsComputer(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "wayvnc"), []byte("#!/bin/sh\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // No GPU probe is needed to check the command.
 	controls := make(map[string]bool)
