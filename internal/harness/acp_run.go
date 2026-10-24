@@ -182,7 +182,7 @@ func acpArgv(p profile.Profile) ([]string, error) {
 		if p.Env["KIMI_CODE_HOME"] == "" {
 			return nil, errors.New("Kimi Code ACP needs the private KIMI_CODE_HOME")
 		}
-		return []string{"acp"}, nil
+		return []string{"kimi", "acp"}, nil
 	}
 	if p.Harness == profile.HarnessAntigravity {
 		if err := validateAntigravityACPLogin(p.Env["HOME"]); err != nil {
@@ -305,11 +305,20 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 	if tracker.idValue() == "" {
 		tracker.adopt(s.session)
 	}
-	if p.Model != "" && p.Model != s.model {
-		if err := s.agent.SetModel(ctx, s.session, p.Model); err != nil {
+	model, effort := p.Model, ""
+	if p.Harness == profile.HarnessKimiCode {
+		model, effort = splitKimiModelEffort(model)
+	}
+	if model != "" && model != s.model {
+		if err := s.agent.SetModel(ctx, s.session, model); err != nil {
 			return finishAttempt(spec, rawLines.String(), stderr.String(), err, true, ctx.Err() != nil, false, false, nil, nil)
 		}
-		s.model = p.Model
+		s.model = model
+	}
+	if effort != "" {
+		if err := s.agent.SetConfigOption(ctx, s.session, "thinking", effort); err != nil {
+			return finishAttempt(spec, rawLines.String(), stderr.String(), err, true, ctx.Err() != nil, false, false, nil, nil)
+		}
 	}
 	if steering != nil {
 		if err := steering.activateIfReady(tracker.idValue()); err != nil {
@@ -494,7 +503,7 @@ func runAcpAttempt(ctx context.Context, p profile.Profile, cwd string, spec comm
 				return finishAttempt(spec, rawLines.String(), stderr.String(), nil, true, false, false, false, nil, steering.errValue()), true
 			}
 			if steering.hasPending() && canDeliver(DeliverySteering) {
-				if p.Harness == profile.HarnessAntigravity {
+				if p.Harness == profile.HarnessAntigravity || p.Harness == profile.HarnessKimiCode {
 					if err := cancelAndDrain(); err != nil {
 						return finishAttempt(spec, rawLines.String(), stderr.String(), err, true, false, false, false, nil, nil), true
 					}

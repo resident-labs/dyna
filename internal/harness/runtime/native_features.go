@@ -152,6 +152,29 @@ var nativeFeaturePolicies = map[string]nativeFeaturePolicy{
 			"Muse before 1.4.7 cannot load Dyna's managed hooks, so its native memory tools stay enabled.",
 		},
 	},
+	"kimi-code": {
+		// Kimi Code 2.3.1 documents these switches and tool names. ACP has no
+		// per-session tool denylist, so the generation merges tools.disabled
+		// into the private config without replacing providers or models.
+		Env: map[string]string{
+			"KIMI_DISABLE_CRON":                          "1",
+			"KIMI_CODE_EXPERIMENTAL_FLAG":                "0",
+			"KIMI_CODE_EXPERIMENTAL_TOWER":               "0",
+			"KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK":       "0",
+			"KIMI_CODE_BACKGROUND_KEEP_ALIVE_ON_EXIT":    "0",
+			"KIMI_CODE_BACKGROUND_PRINT_BACKGROUND_MODE": "exit",
+			"KIMI_CODE_TRUST_WORKSPACE":                  "1",
+		},
+		Config: map[string]any{"tools.disabled": []string{
+			"Agent", "AgentSwarm", "AskUserQuestion", "UpdateGoal", "TodoList",
+			"CronCreate", "CronList", "CronDelete",
+			"TowerInit", "TowerPlan", "TowerSpawn", "TowerMerge", "TowerRebase",
+			"TowerTeardown", "TowerComplete", "TowerSend", "TowerInbox",
+			"TowerFinding", "TowerReview", "TowerMission", "TowerStatus",
+		}},
+		DynaShell: true,
+		Shell:     []string{"Bash", "TaskList", "TaskOutput", "TaskStop", "WaitFor"},
+	},
 	"antigravity": {
 		// Pinned ACP tool_filter.py accepts _meta.agy.disabledTools on new/load/resume.
 		// server.py removes these builtins before constructing localharness capabilities.
