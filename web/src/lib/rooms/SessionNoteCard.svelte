@@ -48,11 +48,14 @@
         return p.seat ?? 'Root seat changed'
       case 'spawned':
         return `Started @${p.name}${p.profile ? ` (${p.profile})` : ''}${p.dir ? ` in ${p.dir}` : ''}`
-      case 'transfer-request':
+      case 'transfer-request': {
         // The DM already names the session, so it states the fact alone. The
-        // transfer ID is a detail of the request, behind Details with the
-        // instructions.
-        return `${surface === 'dm' ? '' : `${p.session}: `}Handoff requested for model transfer`
+        // target profile and requested handoff describe the transfer without
+        // exposing its transport token. The token stays in event data and the
+        // agent instructions behind Details.
+        const target = p.profile ? ` for ${p.profile}` : ' for model transfer'
+        return `${surface === 'dm' ? '' : `${p.session}: `}Handoff requested${target}`
+      }
     }
     return 'Session note'
   })
@@ -71,7 +74,6 @@
   <div class="sum">
     <span class="glyph {changeTone[kind]}" aria-hidden="true">✦</span>
     <span class="title">{headline}</span>
-    {#if kind === 'transfer-request' && payload?.transfer}<span class="id mono" title="Transfer {payload.transfer}">{payload.transfer}</span>{/if}
     <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
   </div>
   {#if sections.length}
@@ -122,7 +124,6 @@
   .glyph.sage { color: var(--sage); }
   .glyph.gold { color: var(--gold); }
   .title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
-  .id { flex: none; color: var(--faint); font-size: var(--t-cap); }
   time { margin-left: auto; flex: none; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
   .sections { margin: 4px 0 0 24px; padding: 0; list-style: none; display: grid; gap: 2px; }
   .sections li { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; font-size: var(--t-cap); }

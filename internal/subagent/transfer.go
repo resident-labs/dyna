@@ -600,7 +600,7 @@ func (m *Manager) advanceTransfer(ctx context.Context, id, token string) (bool, 
 				if t.Phase != "waiting" {
 					return nil
 				}
-				event := room.SessionEvent{Type: room.SessionTransfer, Session: meta.Address(), Transfer: token, Detail: instructions}
+				event := room.SessionEvent{Type: room.SessionTransfer, Session: meta.Address(), Profile: t.Profile, Transfer: token, Detail: instructions}
 				if _, err := m.rooms().PostEventInput(room.PostEventInput{RoomID: meta.RoomID, ID: t.PostID, Event: event, To: []string{meta.Address()}, Via: []string{"@" + meta.Address()}, SessionIDs: map[string]string{meta.Address(): id}}); err != nil {
 					return err
 				}
