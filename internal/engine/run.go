@@ -307,7 +307,7 @@ func publishState(events *hub.Hub, rooms *roomsvc.Service, signals *workerSignal
 			wakeWorker(signals.channels["prs"])
 			wakeWorker(signals.channels["merges"])
 			wakeWorker(signals.channels["probe"])
-			// A new or enabled CI machine needs its daily cache cleanup, even
+			// A new or enabled CI machine needs its hourly cache cleanup, even
 			// when the engine started with no CI machine at all.
 			wakeWorker(signals.channels["caches"])
 		case prstate.Topic:
