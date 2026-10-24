@@ -17,6 +17,9 @@ type StreamOptions struct{ Socket, ConfigDir string }
 type wayVNCBackend struct{}
 
 func (wayVNCBackend) Command(ctx context.Context, opts StreamOptions) ([]string, Stream, error) {
+	if err := CheckStreamInstalled(); err != nil {
+		return nil, Stream{}, err
+	}
 	config := filepath.Join(opts.ConfigDir, "wayvnc")
 	if err := os.WriteFile(config, []byte("enable_auth=false\n"), 0600); err != nil {
 		return nil, Stream{}, err

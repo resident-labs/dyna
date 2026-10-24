@@ -68,13 +68,14 @@ func (c *connection) call(ctx context.Context, req Request, reply any) error {
 	}
 	line := bytes.TrimSpace(c.scan.Bytes())
 	if len(line) > 0 && line[0] == '{' {
-		var failure struct {
-			Error string `json:"error"`
-		}
+		var failure streamFailureResponse
 		if err := json.Unmarshal(line, &failure); err != nil {
 			return fmt.Errorf("computer response: %w", err)
 		}
 		if failure.Error != "" {
+			if failure.Code != "" {
+				return &StreamError{Code: StreamFailureCode(failure.Code), Detail: failure.Reason, PermanentFailure: failure.Permanent}
+			}
 			return errors.New(failure.Error)
 		}
 	}
@@ -92,6 +93,10 @@ func (c *Client) Call(ctx context.Context, req Request, reply any) error {
 func (c *Client) Status(ctx context.Context) (v Status, err error) {
 	err = c.Call(ctx, Request{Op: "status"}, &v)
 	return
+}
+func (c *Client) CheckStream(ctx context.Context) error {
+	var reply struct{}
+	return c.Call(ctx, Request{Op: "stream.check"}, &reply)
 }
 func (c *Client) Register(ctx context.Context, room string) (v Meta, err error) {
 	err = c.Call(ctx, Request{Op: "register", Room: room}, &v)

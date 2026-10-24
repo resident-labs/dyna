@@ -133,7 +133,7 @@ export function openedApps(prev: readonly AppRef[] | null | undefined, next: rea
   return (next ?? []).filter((a) => !had.has(a.appId)).map((a) => appName(a.appId)).filter(Boolean)
 }
 
-const PHASE_WORDS: Record<string, string> = { connected: 'Live', connecting: 'Connecting', failed: 'No stream', ended: 'Stream ended' }
+const PHASE_WORDS: Record<string, string> = { connected: 'Live', connecting: 'Connecting', failed: 'No stream', ended: 'Stream ended', unavailable: 'Unavailable' }
 
 // stateWord is the small-caps word at the left of the viewer's top line.
 export const stateWord = (phase: string, human: boolean): string => (human ? 'You are driving' : PHASE_WORDS[phase] ?? 'Live')
