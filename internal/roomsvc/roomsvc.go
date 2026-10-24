@@ -47,10 +47,9 @@ type Service struct {
 	loader       *transcript.Loader
 	runIdx       runIndex
 	// results caches full completion texts by post ID. A finished turn's
-	// result never changes. It never evicts: each entry is at most 64 KB and
-	// a desktop session views a bounded feed. A long-lived web server will
-	// need an LRU here.
-	results  sync.Map
+	// result never changes. The LRU keeps the newest 256 entries, so the
+	// long-lived web server does not retain every completion forever.
+	results  *resultCache
 	ownerMu  sync.Mutex
 	ownerIDs map[string]*ownerPostIDs
 	snap     sessionSnapshot
@@ -205,7 +204,7 @@ func New(n *notify.Service) *Service {
 	if n == nil {
 		n = notify.Default()
 	}
-	s := &Service{Notify: n, prWake: make(chan struct{}, 1), storeWake: make(chan struct{}, 1), callRequestWake: make(chan struct{}, 1), sessionWake: make(chan struct{}, 1), coordinatorWake: make(chan struct{}, 1)}
+	s := &Service{Notify: n, results: newResultCache(), prWake: make(chan struct{}, 1), storeWake: make(chan struct{}, 1), callRequestWake: make(chan struct{}, 1), sessionWake: make(chan struct{}, 1), coordinatorWake: make(chan struct{}, 1)}
 	s.PRs = &prview.Service{Notify: n, SessionInRoom: s.SessionInRoom, WorkspaceRoot: s.files().WorkspaceRoot}
 	n.Sessions.ClosePRs = func(ctx context.Context, from, heir subagent.Info) ([]string, error) {
 		return s.PRs.Watcher().CloseSession(ctx, from, heir)
