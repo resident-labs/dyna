@@ -243,6 +243,29 @@ test('an abnormal socket close retries even when noVNC calls it clean', async t 
   })
 })
 
+test('a permanent stream refusal shows its reason without retrying', async t => {
+  await withStream(async f => {
+    t.mock.timers.enable({ apis: ['setTimeout'] })
+    const states: { state: string; detail?: unknown }[] = []
+    let calls = 0
+    f.open({
+      url: () => { calls++; return Promise.reject({ code: 'wayvnc-missing', reason: 'the screen streamer (wayvnc) is not installed', permanent: true }) },
+      on: (state, detail) => states.push({ state, detail }),
+    })
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(states.at(-1)?.state, 'unavailable')
+    assert.deepEqual(states.at(-1)?.detail, {
+      failure: { code: 'wayvnc-missing', reason: 'the screen streamer (wayvnc) is not installed', permanent: true },
+      reason: 'the screen streamer (wayvnc) is not installed',
+    })
+    t.mock.timers.tick(20000)
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(calls, 1)
+    assert.equal(f.instances.length, 0)
+    t.mock.timers.reset()
+  })
+})
+
 test('normal closes and refused credentials do not retry', async t => {
   for (const refused of [false, true]) {
     await withStream(async f => {

@@ -37,6 +37,30 @@ type ComputerView struct {
 	Done func()
 }
 
+type computerViewError struct {
+	Error     string `json:"error"`
+	Reason    string `json:"reason,omitempty"`
+	Code      string `json:"code,omitempty"`
+	Permanent bool   `json:"permanent,omitempty"`
+}
+
+type codedComputerViewError interface {
+	error
+	FailureCode() string
+	Permanent() bool
+}
+
+func writeComputerViewError(w http.ResponseWriter, err error) {
+	var failure codedComputerViewError
+	if errors.As(err, &failure) {
+		jsonReply(w, http.StatusUnprocessableEntity, computerViewError{
+			Error: err.Error(), Reason: failure.Error(), Code: failure.FailureCode(), Permanent: failure.Permanent(),
+		})
+		return
+	}
+	jsonError(w, http.StatusUnprocessableEntity, err.Error())
+}
+
 var viewKey = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
 
 var sessionRef = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$`)
@@ -153,7 +177,10 @@ func (p *Shots) Serve(w http.ResponseWriter, r *http.Request, session string) {
 func sameOrigin(r *http.Request, rt Route) bool { return r.Header.Get("Origin") == rt.App }
 
 func (s *Server) computerView(w http.ResponseWriter, r *http.Request, rt Route, tok string, pr Principal, session string) {
-	if !sameOrigin(r, rt) {
+	preflight := r.URL.Query().Get("check") == "1"
+	// A WebSocket proves its origin with Origin. The HTTP preflight uses the
+	// same custom header as other app requests; foreign sites cannot send it.
+	if (!preflight && !sameOrigin(r, rt)) || (preflight && r.Header.Get("X-Dyna") != "1") {
 		jsonError(w, http.StatusForbidden, "the request did not come from the Dyna page")
 		return
 	}
@@ -185,7 +212,7 @@ func ServeComputerView(w http.ResponseWriter, r *http.Request, host ComputerHost
 	// Open the viewer first: a refusal is then a plain HTTP error the page can read.
 	v, err := host.OpenView(session, key)
 	if err != nil {
-		jsonError(w, http.StatusUnprocessableEntity, err.Error())
+		writeComputerViewError(w, err)
 		return
 	}
 	var once sync.Once
@@ -198,6 +225,10 @@ func ServeComputerView(w http.ResponseWriter, r *http.Request, host ComputerHost
 		})
 	}
 	defer finish()
+	if r.URL.Query().Get("check") == "1" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return // Upgrade has already answered

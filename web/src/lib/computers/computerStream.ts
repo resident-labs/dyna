@@ -13,6 +13,7 @@
 
 import { Meter } from './rfbStats.ts'
 import type { RfbDecoder, RfbDisplay, RfbMessages } from '@novnc/novnc'
+import { asComputerViewFailure, type ComputerViewFailure } from '../api/computer.ts'
 
 // NovncModule and RfbClass keep the untyped noVNC package at its import edge.
 type NovncModule = typeof import('@novnc/novnc')
@@ -24,13 +25,14 @@ export type RfbClient = InstanceType<RfbClass>
 export type StreamMode = 'auto' | 'sharp' | 'smooth'
 
 // StreamPhase is the state the viewer shows.
-export type StreamPhase = 'connecting' | 'connected' | 'disconnected' | 'failed' | 'fallback'
+export type StreamPhase = 'connecting' | 'connected' | 'disconnected' | 'failed' | 'fallback' | 'unavailable'
 
 // StreamDetail carries the reason or cleanup flag of one phase.
 export interface StreamDetail {
   clean?: boolean
   retrying?: boolean
   reason?: string
+  failure?: ComputerViewFailure
 }
 
 // StreamNotify reports progress to the viewer.
@@ -265,7 +267,8 @@ const DECODE_ERROR = /failed to decode|videodecoder|h\.?264|webcodecs/i
 // openStream connects. target is the element noVNC fills. It returns a
 // handle at once and reports progress through on(state, detail):
 //   'connecting', 'connected', 'disconnected' (detail.clean, detail.reason),
-//   'failed' (detail.reason), 'fallback' (H.264 turned off, reconnecting).
+//   'failed' (detail.reason), 'fallback' (H.264 turned off, reconnecting),
+//   'unavailable' (a permanent typed failure; no automatic retry).
 export function openStream({ target, url, on = () => {}, mode = 'auto' }: OpenStreamOptions): StreamHandle {
   let rfb: RfbClient | null = null
   let ws: WebSocket | null = null
@@ -482,7 +485,9 @@ export function openStream({ target, url, on = () => {}, mode = 'auto' }: OpenSt
       mine.addEventListener('credentialsrequired', () => refuse('The stream asked for a password'))
     } catch (e) {
       if (closed || mineAttempt !== attempt) return
-      on('failed', { reason: messageText(e) })
+      const failure = asComputerViewFailure(e)
+      if (failure) on('unavailable', { reason: failure.reason, failure })
+      else on('failed', { reason: messageText(e) })
     }
   }
   start()
