@@ -9,6 +9,10 @@ Use `dyna room list` to find rooms and `dyna room members <room>` to inspect mem
 `dyna room log <room>` shows the last 30 owner-facing posts. `--all` removes recipient filters and the default tail; `--tail N` and `--json` also work.
 Read posts with `dyna room read <room> <id>`. Never poll history.
 
+`dyna room search <words>` finds stored posts that hold every word, newest first. Pass `--room <room>` when you are outside the room. Each row prints the post ID, its time, its sender and the matching line, so you open only that post. `--limit N` caps the rows (default 20, max 100, and it also caps turn lines).
+`--sessions` also searches turn transcripts: the room's open sessions and the sessions closed in the last 14 days. Each row names the session, the turn, the time and the matching line, so you can read only that turn with `dyna session history`. Search only cites sources: it wakes nobody and posts nothing.
+Use it before you ask a sibling what already happened, and cite the post ID or the session and turn in your reply.
+
 ## Mentions
 
 ```text
