@@ -81,6 +81,13 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	// A failure before the controller ends must not leave its process behind.
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	})
 	lines := make(chan string, 256)
 	go func() {
 		scanner := bufio.NewScanner(stdout)
@@ -135,7 +142,9 @@ func TestQABrowserControllerBlocksWritesAndExplainsTimeouts(t *testing.T) {
 	}
 	// A control that needs a write, a socket or a newer server never appears in
 	// this tab, and the banner must say so before an agent blames the branch.
-	if !strings.Contains(out, "Read-only QA cannot show settings writes, live updates (every socket stays closed) or server fields newer than the installed engine.") {
+	// The room's live event stream is an EventSource over an allowed read, so
+	// the banner names socket streams only.
+	if !strings.Contains(out, "Read-only QA cannot show settings writes, live streams that need a WebSocket (the computer viewer and voice calls), or server fields newer than the installed engine.") {
 		t.Fatalf("missing the read-only limits: %s", out)
 	}
 	// The tab cannot hold the computer stream, and QA must not report that as
