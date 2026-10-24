@@ -24,8 +24,8 @@ import (
 )
 
 // Feed collapse rule: a body of at most
-// CollapseAtLines lines shows in full. A longer one shows its first two
-// paragraphs, capped at FoldedLines lines.
+// CollapseAtLines lines shows in full. A longer one shows its first
+// paragraph, capped at FoldedLines lines.
 const (
 	CollapseAtLines = 10
 	FoldedLines     = 6
@@ -675,21 +675,17 @@ func decorate(m room.Message, roomName string, reads map[string]bool, book avata
 }
 
 // Fold applies the feed collapse rule to a post body. It returns an empty
-// preview when the body shows in full. firstParagraphOnly is the completion
-// variant.
-func Fold(text string, firstParagraphOnly bool) (preview string, hidden int) {
+// preview when the body shows in full. A completion folds without the line
+// minimum that an ordinary agent post has; both keep the first paragraph.
+func Fold(text string, completion bool) (preview string, hidden int) {
 	text = strings.TrimSpace(text)
 	full := wrappedLines(text)
-	if !firstParagraphOnly && full <= CollapseAtLines {
+	if !completion && full <= CollapseAtLines {
 		return "", 0
 	}
-	keep := 2
-	if firstParagraphOnly {
-		keep = 1
-	}
 	paras := strings.Split(text, "\n\n")
-	if len(paras) > keep {
-		paras = paras[:keep]
+	if len(paras) > 1 {
+		paras = paras[:1]
 	}
 	short := strings.Join(paras, "\n\n")
 	if lines := strings.Split(short, "\n"); len(lines) > FoldedLines {

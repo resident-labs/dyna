@@ -65,7 +65,7 @@
       <ReferenceRow {row} {room} {members} {onpost} enter={isNew(row.key)} />
     {:else if row.kind === 'system-event'}
       {@const Card = rendererFor(row.post)}
-      <div class="event-row" class:enter={isNew(row.key)}>
+      <div class="event-row" class:turn-result={row.post.kind === 'turn'} class:enter={isNew(row.key)}>
         {#if Card}
           <Card post={row.post} notice={row.post.notice} surface="dm" {room} onissue={onissue ?? undefined} />
         {:else}
@@ -133,6 +133,7 @@
   .activity-head { display: flex; align-items: baseline; gap: var(--s2); font-size: var(--t-body); }
   .activity-head time { font-size: var(--t-cap); color: var(--faint); }
   .event-row { margin: 6px var(--s4) 2px var(--gutter); }
+  .event-row.turn-result { margin: 0; }
   .thread-row { display: flex; margin: 6px var(--s4) 2px var(--gutter); }
   .thread-row :global(.thread-chip) { flex: 1; }
   .event-note { margin-left: var(--gutter); }
