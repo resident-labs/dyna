@@ -275,6 +275,47 @@ func TestPostIndexImportAndCursorCatchUp(t *testing.T) {
 	}
 }
 
+// A crash can leave index rows for a post that was never appended. Startup
+// removes those rows without disturbing the rows of a retained post.
+func TestPostIndexMigrationRemovesCrashLeftovers(t *testing.T) {
+	s := recordsStore(t)
+	rec, err := s.Create(CreateInput{Name: "alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kept, err := s.Post(rec.ID, PostInput{From: "alpha:lead", To: []string{"alpha:worker"}, SessionIDs: map[string]string{"alpha:worker": otherSession}, Text: "keep me"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := s.postIndexDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const orphan = "msg_00000000000000ff"
+	if _, err := db.Exec(`INSERT INTO post_homes(room_id, post_id, ts, conversation, author_session_id) VALUES(?, ?, 1, 'room', '')`, rec.ID, orphan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO post_deliveries(room_id, post_id, session_id, mode, category, state, updated_at) VALUES(?, ?, ?, 'quiet', '', 'queued', 1)`, rec.ID, orphan, otherSession); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := Migrate(filepath.Dir(s.Root)); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"post_homes", "post_deliveries"} {
+		var n int
+		if err := db.QueryRow("SELECT COUNT(*) FROM "+table+" WHERE room_id=? AND post_id=?", rec.ID, orphan).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Errorf("%s kept %d rows for a post that was never appended", table, n)
+		}
+	}
+	if _, _, deliveries := postIndexRows(t, s, rec.ID, kept.ID); len(deliveries) != 1 || deliveries[0].session != otherSession {
+		t.Fatalf("retained post deliveries = %+v, want the original row", deliveries)
+	}
+}
+
 // A store that imported the index before the seat named its own posts keeps
 // those rows as they were. The seat's DM reads the seat as their author, so a
 // one-time backfill rewrites them: an old external root answer and an old
