@@ -45,11 +45,16 @@ type Session struct {
 }
 
 // ReferenceRow is one post of another conversation, as a session's DM shows it:
-// who wrote it, which conversation it is in, a one-line preview and how many
-// files it carries. TS is unix milliseconds, as a stored post keeps it.
+// who wrote it, which conversation it is in, its typed event facts or text
+// preview, and how many files it carries. TS is unix milliseconds.
 type ReferenceRow struct {
-	PostID string `json:"postId"`
-	From   string `json:"from"`
+	PostID string           `json:"postId"`
+	From   string           `json:"from"`
+	Kind   string           `json:"kind,omitempty"`
+	Notice room.EventNotice `json:"notice,omitzero"`
+	// Payload keeps a typed event's facts so the DM can use the same card as
+	// the feed instead of reading the agent-facing text as a preview.
+	Payload room.EventPayload `json:"payload,omitzero"`
 	// Speaker is the sender's label (see SpeakerLabel).
 	Speaker string `json:"speaker"`
 	// FromHue is the sender's stable name color index (see NameHue).
@@ -63,6 +68,7 @@ type ReferenceRow struct {
 
 // Turn is one transcript turn.
 type Turn struct {
+	WrapUp             bool                            `json:"wrapUp,omitempty"`
 	Harness            string                          `json:"harness,omitempty"`
 	OutputDialect      string                          `json:"outputDialect,omitempty"`
 	UsageNormalization workeroutput.UsageNormalization `json:"usageNormalization,omitempty"`
@@ -296,7 +302,7 @@ func (s *Service) sessionView(sess transcript.Session) (Session, error) {
 				claimed[it.Tool.JobID] = true
 			}
 		}
-		turn := Turn{Harness: t.Harness, OutputDialect: t.OutputDialect, UsageNormalization: t.UsageNormalization, Profile: t.Profile, Model: t.Model, HarnessSession: t.HarnessSession, N: t.N, Status: t.Status, Started: t.Started, Ended: t.Ended, Usage: t.Usage, Omitted: t.Omitted}
+		turn := Turn{WrapUp: t.WrapUp, Harness: t.Harness, OutputDialect: t.OutputDialect, UsageNormalization: t.UsageNormalization, Profile: t.Profile, Model: t.Model, HarnessSession: t.HarnessSession, N: t.N, Status: t.Status, Started: t.Started, Ended: t.Ended, Usage: t.Usage, Omitted: t.Omitted}
 		for _, it := range items {
 			item := sessionItem(it)
 			if in, ok := byID[item.JobID]; ok && item.JobOp == "run" {
@@ -457,6 +463,9 @@ func (s *Service) dmReferences(rec room.Record, conversation room.Conversation, 
 		rows = append(rows, ReferenceRow{
 			PostID:       m.ID,
 			From:         m.From,
+			Kind:         m.Kind,
+			Notice:       m.Notice,
+			Payload:      m.Payload,
 			Speaker:      SpeakerLabel(m, rec.Name),
 			FromHue:      NameHue(m.From),
 			Conversation: post.Home.String(),

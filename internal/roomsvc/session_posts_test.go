@@ -199,6 +199,53 @@ func TestSeatDMReadsTheSeatRows(t *testing.T) {
 	}
 }
 
+// A typed engine notice keeps its event facts and the engine's own name when
+// it reaches the root DM as a reference, including in the room named dyna.
+func TestSeatDMReferenceKeepsTypedEvent(t *testing.T) {
+	e := newEnv(t)
+	rec := e.room("dyna")
+	store := e.svc.Notify.Rooms
+	notice, err := store.PostEventInput(room.PostEventInput{RoomID: rec.ID, To: []string{rec.Name}, Via: []string{"@root"}, Event: room.PREvent{
+		Type: room.PRReady, Label: "PR #379", Location: "https://github.com/resident-labs/dyna/pull/379", Number: 379,
+		ChangeID: "github.com/resident-labs/dyna#379", Repo: "resident-labs/dyna", Title: "room: clean orphaned post index rows at startup", Head: "b2fb3534", URL: "https://github.com/resident-labs/dyna/pull/379",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := e.svc.RootSession(rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, ok := rowsByPost(session.References)[notice.ID]
+	if !ok {
+		t.Fatalf("typed notice is not a seat reference: %+v", session.References)
+	}
+	if row.Speaker != room.EngineSender {
+		t.Errorf("speaker = %q, want the engine name %q", row.Speaker, room.EngineSender)
+	}
+	raw, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire struct {
+		Kind   string `json:"kind"`
+		Notice struct {
+			Kind string `json:"kind"`
+		} `json:"notice"`
+		Payload struct {
+			Type   string `json:"type"`
+			Number int    `json:"number"`
+			Title  string `json:"title"`
+		} `json:"payload"`
+	}
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if wire.Kind != "pr" || wire.Notice.Kind != "ready" || wire.Payload.Type != "ready" || wire.Payload.Number != 379 || wire.Payload.Title == "" {
+		t.Errorf("reference lost its typed event: %s", raw)
+	}
+}
+
 // rowsByPost keys reference rows by the post they name.
 func rowsByPost(rows []ReferenceRow) map[string]ReferenceRow {
 	out := make(map[string]ReferenceRow, len(rows))

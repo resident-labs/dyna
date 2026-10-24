@@ -117,6 +117,7 @@ type Item struct {
 
 // Turn is one turn of a subagent session (or one workflow worker call).
 type Turn struct {
+	WrapUp             bool
 	Harness            string
 	OutputDialect      string
 	UsageNormalization workeroutput.UsageNormalization
@@ -781,7 +782,7 @@ func promptItems(t subagent.Turn, ts time.Time) []Item {
 // SessionTurn builds the conversation of one subagent turn: its prompt, the
 // condensed events, steering placed where it arrived, and the result or error.
 func SessionTurn(t subagent.Turn, events []workeroutput.Event, omitted bool) Turn {
-	out := Turn{Harness: t.Harness, OutputDialect: t.OutputDialect, UsageNormalization: t.UsageNormalization, Profile: t.Profile, Model: t.Model, HarnessSession: t.HarnessSession, N: t.N, Status: t.Status, Started: t.Started, Ended: t.Ended, Usage: t.Usage, Omitted: omitted}
+	out := Turn{WrapUp: t.WrapUp, Harness: t.Harness, OutputDialect: t.OutputDialect, UsageNormalization: t.UsageNormalization, Profile: t.Profile, Model: t.Model, HarnessSession: t.HarnessSession, N: t.N, Status: t.Status, Started: t.Started, Ended: t.Ended, Usage: t.Usage, Omitted: omitted}
 	promptTS := t.Created
 	if !t.Started.IsZero() {
 		promptTS = t.Started
