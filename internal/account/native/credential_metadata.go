@@ -159,6 +159,14 @@ func credentialMetadata(c store.Credential) (Captured, error) {
 			parsed.ExpiresAt = time.UnixMilli(ref.Expires).UTC()
 		}
 		return parsed, nil
+	case kimiCodeSchema:
+		login, err := unpackKimiCodeLogin(c)
+		if err != nil {
+			return Captured{}, err
+		}
+		parsed, err := capturedKimiCode(login)
+		parsed.Credential = c
+		return parsed, err
 	}
 	return Captured{}, ErrSchema
 }

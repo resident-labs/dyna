@@ -12,6 +12,7 @@ var harnessDistributions = map[string]struct {
 	"opencode":    {"npm", "@opencode/cli"},
 	"grok":        {"npm", "@xai-official/grok"},
 	"pi":          {"npm", piNPMPackage},
+	"kimi-code":   {"npm", "@moonshot-ai/kimi-code"},
 	"muse":        {"muse-stable", ""},
 	"antigravity": {"antigravity-manifest", ""},
 }
