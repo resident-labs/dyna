@@ -3,6 +3,7 @@
   import type { Member } from '../api/room.ts'
   import { api } from '../../api.ts'
   import { errorText } from '../errorText.ts'
+  import { markdown } from '../ui/format.ts'
   import Avatar from '../ui/Avatar.svelte'
   import GoalGlyph from './GoalGlyph.svelte'
   import GoalHolders from './GoalHolders.svelte'
@@ -28,6 +29,8 @@
   let summary = $state('')
   let busy = $state(false)
   let error = $state('')
+  let draft = $state('')
+  let amendError = $state('')
   let now = $state(Date.now())
   let status = $state<GoalStatus | null>(null)
   let items = $state<GoalItem[]>([])
@@ -72,6 +75,8 @@
   const TONES: Record<string, string> = { on_track: 'sage', waiting: 'muted', stuck: 'coral', errored: 'coral', ready_to_close: 'gold', unowned: 'gold', needs_root: 'gold' }
   const LABELS: Record<string, string> = { on_track: 'On track', waiting: 'Waiting', stuck: 'Stuck', errored: 'Errored', ready_to_close: 'Ready to close', unowned: 'Unowned', needs_root: 'Needs root' }
   const mark = (state: string): string => (state === 'done' ? '✓' : state === 'dropped' ? '×' : '•')
+  // The engine appends amendments, so stored order is oldest first.
+  const amendments = $derived(g.amendments ?? [])
   const member = (id: string) => members.find((m) => m.id === id || m.address === id)
   const name = (id: string): string => member(id)?.name ?? id
   async function perform(fn: () => unknown) {
@@ -81,6 +86,16 @@
     finally { busy = false }
   }
   function editHolders() { holders = [...(g.holders ?? [])]; shared = g.shared; pick = true }
+  // The amend form reports its own failure under the field, so the panel's
+  // error line stays for the other actions.
+  async function amend() {
+    const body = draft.trim()
+    if (!body || busy) return
+    busy = true; amendError = ''
+    try { await api.amendGoalBrief(roomId, g.id, body); draft = ''; await onchanged() }
+    catch (e) { amendError = errorText(e) }
+    finally { busy = false }
+  }
   function remove(id: string) {
     const next = (g.holders ?? []).filter((h) => h !== id)
     perform(() => api.editGoal(roomId, g.id, '', next, !next.length))
@@ -123,6 +138,28 @@
       {#if action === 'drop'}<div class="inline"><p>Drop this goal?</p><div class="buttons"><button class="danger" disabled={busy} onclick={() => perform(() => api.finishGoal(roomId, g.id, '', true))}>Drop goal</button><button onclick={() => (action = '')}>Cancel</button></div></div>{/if}
     {/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
+    {#if g.detail?.trim()}
+      <h3>Brief</h3>
+      <div class="brief prose">{@html markdown(g.detail)}</div>
+    {/if}
+    {#if amendments.length}
+      <h3>Amendments</h3>
+      <ol class="amendments" aria-label="Brief amendments">
+        {#each amendments as a}
+          <li>
+            <div class="amend-meta">{name(a.by)}<span aria-hidden="true">·</span><time datetime={a.at} title={new Date(a.at).toLocaleString()}>{goalAgo(a.at, now)}</time></div>
+            <div class="amend-text prose">{@html markdown(a.text)}</div>
+          </li>
+        {/each}
+      </ol>
+    {/if}
+    {#if g.state === 'active'}
+      <form class="amend" onsubmit={(e) => { e.preventDefault(); amend() }}>
+        <textarea aria-label="Amend the brief" maxlength="2000" rows="3" placeholder="A short correction for the brief" bind:value={draft}></textarea>
+        <div class="buttons"><button disabled={busy || !draft.trim()}>Amend brief</button></div>
+        {#if amendError}<p class="error" role="alert">{amendError}</p>{/if}
+      </form>
+    {/if}
     <h3>Checklist</h3>
     {#if itemsState === 'loading'}<p class="quiet" role="status">Loading checklist…</p>
     {:else if itemsState === 'failed'}<p class="read-error" role="alert">Checklist unavailable: {itemsError} <button onclick={() => loadItems()}>Retry checklist</button></p>
@@ -183,5 +220,11 @@
   .read-error { color: var(--muted); font-size: var(--t-sm); overflow-wrap: anywhere; }
   .read-error button { color: var(--iris); padding: 4px 6px; }
   .error { font-size: var(--t-sm); color: var(--coral); }
+  .brief { font-size: var(--t-ui); line-height: var(--leading); overflow-x: auto; }
+  .amendments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
+  .amendments li { border-left: 2px solid var(--line); padding-left: 10px; min-width: 0; }
+  .amend-meta { display: flex; flex-wrap: wrap; gap: 3px 6px; align-items: baseline; font-size: var(--t-cap); color: var(--muted); margin-bottom: 2px; }
+  .amend-text { font-size: var(--t-sm); overflow-x: auto; }
+  .amend { margin: 0 0 var(--s5); }
   @media (hover: none) { .remove { opacity: 1; } }
 </style>
