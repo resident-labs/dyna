@@ -568,3 +568,50 @@ func TestNodeRetriesOnceAfterAFullDisk(t *testing.T) {
 		})
 	}
 }
+
+// A run whose internal budget ends after a check reported success is not a pass:
+// the reports were never read, so the check is an error with the run's cause and
+// its log stays available. The command cancels the run itself, so no clock runs.
+func TestNodeRunFailsWhenItsBudgetEndsBeforeTheReports(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	runner := Runner{DataDir: t.TempDir(), Node: &Node{Name: "local", Slots: 1, Enabled: true}}
+	runner.Command = func(_ context.Context, dir string, _ io.Reader, out, _ io.Writer, name string, args ...string) error {
+		if fakeNodeGit(dir, out, name, args) {
+			return nil
+		}
+		script := args[len(args)-1]
+		switch {
+		case strings.Contains(script, "df -Pk"):
+			fmt.Fprintln(out, "Filesystem 1024-blocks Used Available Capacity Mounted on")
+			fmt.Fprintln(out, "/dev/x 1048576 1 104857600 1% /var/tmp")
+		case name == "systemd-run" || strings.Contains(script, "systemd-run"):
+			fmt.Fprintln(out, "ok: the check reported success")
+			fmt.Fprintln(out, "DYNA_CI_CHECK_EXIT=0")
+			// The run's own budget ends before its reports can be read.
+			cancel()
+		case strings.Contains(script, "tar -C"):
+			return errors.New("reports fetched after the run ended")
+		}
+		return nil
+	}
+	result, err := runner.Run(ctx, Request{Repo: t.TempDir(), Suites: []Suite{SuiteGoStatic}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Run returned %v after its budget ended", err)
+	}
+	if result.Cause != CauseCancelled || len(result.Checks) != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.Checks[0].Status != OutcomeError || result.Checks[0].Cause != CauseCancelled {
+		t.Fatalf("unvalidated check = %+v", result.Checks[0])
+	}
+	blob := ""
+	for _, report := range result.Checks[0].Reports {
+		if filepath.Ext(report) == ".log" {
+			blob = report
+		}
+	}
+	data, err := os.ReadFile(blob)
+	if err != nil || !strings.Contains(string(data), "the check reported success") {
+		t.Fatalf("check log lost after the run ended: %v: %q", err, data)
+	}
+}

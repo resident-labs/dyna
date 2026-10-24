@@ -362,19 +362,25 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	// report copy stays an error on the result, but it never hides the checks'
 	// own causes or their local logs.
 	var copyErr error
-	if control.Err() == nil {
+	stopped := control.Err()
+	if stopped == nil {
 		copyErr = r.fetchReports(control, reportRoot, reports)
+		// The deadline can end the copy itself, and then the reports are gone.
+		stopped = control.Err()
 	}
 	result.Status = OutcomePassed
 	for i := range result.Suites {
 		sr := &result.Suites[i]
-		// A check keeps what it proved. A report copy that failed makes an
-		// undecided check an error with its cause, but it does not rewrite a
-		// check that already reported its own outcome.
-		if sr.Status == OutcomePassed && copyErr != nil && control.Err() == nil {
+		switch {
+		case sr.Status != OutcomePassed:
+			// The check proved its own outcome; the run's end does not rewrite it.
+		case stopped != nil:
+			// The reports were never read, so a check that reported success is
+			// not a pass: only its log is proven.
+			sr.Status, sr.Error, sr.Cause = OutcomeError, "check stopped before its reports were read", runCause(node, control, stopped)
+		case copyErr != nil:
 			sr.Status, sr.Error, sr.Cause = OutcomeError, "copy reports: "+copyErr.Error(), CauseReports
-		}
-		if control.Err() == nil && copyErr == nil {
+		default:
 			readReports(sr, reportRoot, req.MaxTest, req.Allowed)
 		}
 		result.Status = combinedStatus(result.Status, sr.Status)
@@ -393,6 +399,13 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		if err := blob.Close(); err != nil {
 			log.Printf("local CI %s: finish check log: %v", node.Name, err)
 		}
+	}
+	if stopped != nil {
+		// A run that reached its own deadline, or that its caller cancelled, is
+		// not a pass whatever a check proved before the end: the reports were
+		// never read. The checks keep their logs and the run keeps a typed cause.
+		result.Cause = runCause(node, control, stopped)
+		return result, stopped
 	}
 	if copyErr != nil {
 		result.Cause = CauseReports
