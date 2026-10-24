@@ -271,7 +271,9 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (tria
 				run.err = err
 				return
 			}
-			runRunner = localci.Runner{DataDir: dataDir, Node: &node}
+			nodeRunner := localci.Runner{DataDir: dataDir, Node: &node}
+			nodeRunner.OnCacheRepair = s.CacheRepairReporter(r.RoomID)
+			runRunner = nodeRunner
 		}
 		run.result, run.err = runRunner.Run(runCtx, localci.Request{Repo: r.RepoPath, SHA: head, Suites: localci.WorkflowSuites()})
 	}()
