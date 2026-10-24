@@ -116,6 +116,7 @@ type localCIRunner interface {
 }
 type localCIRun struct {
 	done   chan struct{}
+	cancel context.CancelFunc
 	result localci.Result
 	err    error
 }
@@ -174,9 +175,11 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (tria
 		return trialCI{}, err
 	}
 	key := r.RepoPath + "\x00" + head
-	run := &localCIRun{done: make(chan struct{})}
+	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Minute)
+	run := &localCIRun{done: make(chan struct{}), cancel: cancel}
 	value, loaded := s.localRuns().LoadOrStore(key, run)
 	if loaded {
+		cancel()
 		run = value.(*localCIRun)
 		select {
 		case <-run.done:
@@ -190,7 +193,6 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (tria
 	}
 	go func() {
 		defer close(run.done)
-		runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Minute)
 		defer cancel()
 		runRunner := runner
 		if s.LocalCI == nil {

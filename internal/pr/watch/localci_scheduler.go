@@ -89,27 +89,60 @@ func registeredJobKey(j registeredCIJob) string { return defaultRepo(j.record) +
 // markStopped records that the run has no work left on the node.
 func (run *registeredCIRun) markStopped() { run.stopOnce.Do(func() { close(run.stopped) }) }
 
-// StopLocalCI cancels the local CI runs this process started and waits for their
-// node work to end, bounded by ctx. A run that outlives its engine leaves a
-// detached keeper on the machine, and that keeper holds the cache lock for
-// hours, so an engine that stops ends its runs first. It returns the runs that
-// were still working when ctx ended, for the caller to report.
-func (s *Service) StopLocalCI(ctx context.Context) []string {
+// localCIStopTarget is one local CI run the engine has to end: its cancel
+// handle, the channel that closes when its work on the machine ends, and a name
+// for a log line.
+type localCIStopTarget struct {
+	label   string
+	cancel  context.CancelFunc
+	stopped <-chan struct{}
+}
+
+// localCIStopTargets copies the runs this service must end: the scheduled runs
+// of this process and the runs of the local lane. It holds each run set's lock
+// only while it copies, so no lock is held over the teardown that follows.
+func (s *Service) localCIStopTargets() []localCIStopTarget {
+	var targets []localCIStopTarget
 	runs := s.nodeRuns()
 	runs.Lock()
-	pending := make([]*registeredCIRun, 0, len(runs.runs))
 	for _, run := range runs.runs {
-		run.cancel()
-		pending = append(pending, run)
+		targets = append(targets, localCIStopTarget{label: ciRunLabel(run), cancel: run.cancel, stopped: run.stopped})
 	}
 	runs.Unlock()
-	for i, run := range pending {
+	s.localRuns().Range(func(key, value any) bool {
+		run := value.(*localCIRun)
+		targets = append(targets, localCIStopTarget{label: ciLocalRunLabel(key.(string)), cancel: run.cancel, stopped: run.done})
+		return true
+	})
+	return targets
+}
+
+// CancelLocalCI cancels the local CI runs this process started, without waiting
+// for them. An engine calls it as soon as it stops, so their teardown overlaps
+// the workers that are still finishing.
+func (s *Service) CancelLocalCI() {
+	for _, target := range s.localCIStopTargets() {
+		target.cancel()
+	}
+}
+
+// StopLocalCI cancels the local CI runs this process started and waits for their
+// work on the machine to end, bounded by ctx. A run that outlives its engine
+// leaves a detached keeper on the machine, and that keeper holds the cache lock
+// for hours, so an engine that stops ends its runs first. It returns the runs
+// that were still working when ctx ended, for the caller to report.
+func (s *Service) StopLocalCI(ctx context.Context) []string {
+	targets := s.localCIStopTargets()
+	for _, target := range targets {
+		target.cancel()
+	}
+	for i, target := range targets {
 		select {
-		case <-run.stopped:
+		case <-target.stopped:
 		case <-ctx.Done():
-			left := make([]string, 0, len(pending)-i)
-			for _, working := range pending[i:] {
-				left = append(left, ciRunLabel(working))
+			left := make([]string, 0, len(targets)-i)
+			for _, working := range targets[i:] {
+				left = append(left, working.label)
 			}
 			return left
 		}
@@ -117,13 +150,23 @@ func (s *Service) StopLocalCI(ctx context.Context) []string {
 	return nil
 }
 
-// ciRunLabel names one run in a log line: its head and the machine it uses.
+// ciRunLabel names one scheduled run in a log line: its head and its machine.
 func ciRunLabel(run *registeredCIRun) string {
-	head := run.head
+	return shortHead(run.head) + " on " + run.node
+}
+
+// ciLocalRunLabel names one local-lane run in a log line. Its key is the
+// repository path and the head, joined by a NUL byte.
+func ciLocalRunLabel(key string) string {
+	_, head, _ := strings.Cut(key, "\x00")
+	return shortHead(head) + " on the local lane"
+}
+
+func shortHead(head string) string {
 	if len(head) > 7 {
-		head = head[:7]
+		return head[:7]
 	}
-	return head + " on " + run.node
+	return head
 }
 
 // Trials use the same node slots as PR heads and enter the queue first.
