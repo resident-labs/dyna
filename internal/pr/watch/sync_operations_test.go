@@ -78,10 +78,10 @@ func finishSync(t *testing.T, e *testEnv, repo string) lanesync.Operation {
 			return op
 		}
 		if op.State == "testing" {
-			if value, ok := e.s.localRuns().Load(common + "\x00" + op.Head); ok {
+			if value, ok := e.s.localRuns().load(common + "\x00" + op.Head); ok {
 				ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 				select {
-				case <-value.(*localCIRun).done:
+				case <-value.done:
 					cancel()
 				case <-ctx.Done():
 					cancel()
@@ -110,11 +110,11 @@ func TestRefreshPublishesTestedMergeAndSurvivesRestart(t *testing.T) {
 	}
 	// Start CI, then resume with a new service after the complete result was saved.
 	stepSync(t, e)
-	value, _ := e.s.localRuns().Load(changeGit(t, repo, "rev-parse", "--absolute-git-dir") + "\x00" + op.Head)
+	value, _ := e.s.localRuns().load(changeGit(t, repo, "rev-parse", "--absolute-git-dir") + "\x00" + op.Head)
 	waitCtx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	select {
-	case <-value.(*localCIRun).done:
+	case <-value.done:
 	case <-waitCtx.Done():
 		t.Fatal("CI did not finish")
 	}
@@ -341,11 +341,11 @@ func readyExport(t *testing.T, e *testEnv, repo string) lanesync.Operation {
 	stepSync(t, e)
 	stepSync(t, e)
 	op := savedOperation(t, repo)
-	if value, ok := e.s.localRuns().Load(changeGit(t, repo, "rev-parse", "--absolute-git-dir") + "\x00" + op.Head); ok {
+	if value, ok := e.s.localRuns().load(changeGit(t, repo, "rev-parse", "--absolute-git-dir") + "\x00" + op.Head); ok {
 		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 		defer cancel()
 		select {
-		case <-value.(*localCIRun).done:
+		case <-value.done:
 		case <-ctx.Done():
 			t.Fatal("CI did not finish")
 		}

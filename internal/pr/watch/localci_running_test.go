@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -135,21 +136,25 @@ func TestRunningCIReportsAMachineRunUntilItEnds(t *testing.T) {
 // a keeper on the machine. Each step is a channel, so the test controls when the
 // run starts and finishes its teardown.
 type fakeNodeWork struct {
-	started, cancelled, teardown chan struct{}
-	ctx                          context.Context
+	started, cancelled, teardown, finished chan struct{}
+	start, cancel, finish                  sync.Once
+	ctx                                    context.Context
 }
 
 func newFakeNodeWork() *fakeNodeWork {
-	return &fakeNodeWork{started: make(chan struct{}), cancelled: make(chan struct{}), teardown: make(chan struct{})}
+	return &fakeNodeWork{started: make(chan struct{}), cancelled: make(chan struct{}), teardown: make(chan struct{}), finished: make(chan struct{})}
 }
 
 func (f *fakeNodeWork) work(ctx context.Context) (localci.Result, error) {
-	f.ctx = ctx
-	close(f.started)
+	f.start.Do(func() {
+		f.ctx = ctx
+		close(f.started)
+	})
 	<-ctx.Done()
-	close(f.cancelled)
+	f.cancel.Do(func() { close(f.cancelled) })
 	// The node work is not over: the containers and the keeper are still there.
 	<-f.teardown
+	f.finish.Do(func() { close(f.finished) })
 	return localci.Result{}, ctx.Err()
 }
 
@@ -207,7 +212,7 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	// A stop whose budget is already gone names the runs still working.
 	expired, cancel := context.WithCancel(context.Background())
 	cancel()
-	want := []string{head[:7] + " on hermes", head[:7] + " on the local lane"}
+	want := []string{head[:7] + " on the local lane", head[:7] + " on hermes"}
 	if left := s.StopLocalCI(expired); !slices.Equal(left, want) {
 		t.Fatalf("leftover runs = %v, want %v", left, want)
 	}
@@ -218,4 +223,74 @@ func TestStopLocalCICancelsRunsAndWaitsForTheirNodeWork(t *testing.T) {
 	if left := <-stopped; len(left) != 0 {
 		t.Fatalf("stop reported %v", left)
 	}
+}
+
+// A stop closes admission in both lanes. A tick that is still finishing cannot
+// start a run after the engine has cancelled the runs it knew: that run's keeper
+// would outlive the process.
+func TestStopLocalCIRefusesRunsScheduledAfterTheStop(t *testing.T) {
+	s, saved, _ := scheduledCIRunFixture(t)
+	record := saved.Records["pr"]
+	head := record.Head
+	scheduled := newFakeNodeWork()
+	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
+		return scheduled.work(ctx)
+	}
+	lane := newFakeNodeWork()
+	s.LocalCI = localLaneNodes{work: lane}
+	if err := s.scheduleRegisteredCI(context.Background(), saved); err != nil {
+		t.Fatal(err)
+	}
+	<-scheduled.started
+	if _, err := s.localTrialCI(context.Background(), *record, head); err != nil {
+		t.Fatal(err)
+	}
+	<-lane.started
+
+	s.CancelLocalCI()
+
+	// Both lanes refuse the new head, and the engine's own runs stay the only
+	// ones it knows.
+	lateHead := addCommit(t, record.RepoPath, "late.txt")
+	late := *record
+	late.Key, late.Number, late.Head = "late", 18, lateHead
+	lateState := State{Version: 1, Records: map[string]*Record{late.Key: &late}}
+	if err := s.scheduleRegisteredCI(context.Background(), lateState); err != nil {
+		t.Fatal(err)
+	}
+	if runs := s.RunningCI(); len(runs) != 1 {
+		t.Fatalf("a scheduled run was admitted after the stop: %+v", runs)
+	}
+	if _, err := s.localTrialCI(context.Background(), late, lateHead); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.localRuns().load(record.RepoPath + "\x00" + lateHead); ok {
+		t.Fatal("a local lane run was admitted after the stop")
+	}
+
+	// Release the two runs the engine already had.
+	close(scheduled.teardown)
+	close(lane.teardown)
+	<-scheduled.finished
+	<-lane.finished
+}
+
+// addCommit writes one file and commits it, and returns the new head.
+func addCommit(t *testing.T, repo, name string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(repo, name), []byte(name+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := exec.Command("git", "-C", repo, "add", name).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git add: %v: %s", err, out)
+	}
+	if out, err = exec.Command("git", "-C", repo, "commit", "--quiet", "-m", name).CombinedOutput(); err != nil {
+		t.Fatalf("git commit: %v: %s", err, out)
+	}
+	out, err = exec.Command("git", "-C", repo, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
 }

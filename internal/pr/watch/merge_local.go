@@ -43,13 +43,78 @@ func recordLocalLane(ctx context.Context, r Record) (bool, error) {
 
 var localCIInit sync.Mutex
 
-func (s *Service) localRuns() *sync.Map {
+func (s *Service) localRuns() *localCIStore {
 	localCIInit.Lock()
 	defer localCIInit.Unlock()
 	if s.localCIRuns == nil {
-		s.localCIRuns = &sync.Map{}
+		s.localCIRuns = &localCIStore{}
 	}
 	return s.localCIRuns
+}
+
+// localCIStore is the local lane's admitted CI runs, by repository and head. One
+// mutex covers admission, the runs and a snapshot, so a closing engine refuses a
+// new run at the same moment it takes the runs it has.
+type localCIStore struct {
+	mu     sync.Mutex
+	closed bool
+	runs   map[string]*localCIRun
+}
+
+// admit keeps run for key when no other run holds that head and the engine still
+// admits work. The caller starts the run only when start is true.
+func (l *localCIStore) admit(key string, run *localCIRun) (current *localCIRun, start, ok bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.closed {
+		return nil, false, false
+	}
+	if existing, found := l.runs[key]; found {
+		return existing, false, true
+	}
+	if l.runs == nil {
+		l.runs = map[string]*localCIRun{}
+	}
+	l.runs[key] = run
+	return run, true, true
+}
+
+// load returns the run for one repository and head.
+func (l *localCIStore) load(key string) (*localCIRun, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	run, ok := l.runs[key]
+	return run, ok
+}
+
+// forget drops one finished run.
+func (l *localCIStore) forget(key string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	delete(l.runs, key)
+}
+
+// snapshot copies the runs admitted so far.
+func (l *localCIStore) snapshot() []*localCIRun {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	runs := make([]*localCIRun, 0, len(l.runs))
+	for _, run := range l.runs {
+		runs = append(runs, run)
+	}
+	return runs
+}
+
+// close refuses new runs and returns the ones admitted so far, in one step.
+func (l *localCIStore) close() []*localCIRun {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.closed = true
+	runs := make([]*localCIRun, 0, len(l.runs))
+	for _, run := range l.runs {
+		runs = append(runs, run)
+	}
+	return runs
 }
 
 func localMergeReady(r Record) bool {
@@ -117,6 +182,7 @@ type localCIRunner interface {
 type localCIRun struct {
 	done   chan struct{}
 	cancel context.CancelFunc
+	head   string
 	result localci.Result
 	err    error
 }
@@ -168,7 +234,7 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (tria
 	}
 	result, err := runner.Show(r.RepoPath, head)
 	if err == nil && completeLocalCI(result) {
-		s.localRuns().Delete(r.RepoPath + "\x00" + head)
+		s.localRuns().forget(r.RepoPath + "\x00" + head)
 		return show(result)
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -176,11 +242,15 @@ func (s *Service) localTrialCI(ctx context.Context, r Record, head string) (tria
 	}
 	key := r.RepoPath + "\x00" + head
 	runCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Minute)
-	run := &localCIRun{done: make(chan struct{}), cancel: cancel}
-	value, loaded := s.localRuns().LoadOrStore(key, run)
-	if loaded {
+	run := &localCIRun{done: make(chan struct{}), cancel: cancel, head: head}
+	current, start, admitted := s.localRuns().admit(key, run)
+	if !admitted {
 		cancel()
-		run = value.(*localCIRun)
+		return trialCI{Status: VerdictPending, Reason: "waiting for local CI"}, nil
+	}
+	if !start {
+		cancel()
+		run = current
 		select {
 		case <-run.done:
 			if run.err != nil {
