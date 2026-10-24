@@ -28,9 +28,6 @@ func localCIChecks(facts watch.ReviewFacts, record watch.Record) watch.Record {
 	var slow []localci.TestTiming
 	for _, suite := range result.Suites {
 		name := string(suite.Name())
-		if suite.Cause != "" {
-			name += " (" + string(suite.Cause) + ")"
-		}
 		check := watch.CheckSummary{Name: name, Node: suite.Node, Status: "completed", DurationMs: suite.Duration.Milliseconds()}
 		switch suite.Status {
 		case localci.OutcomePassed:
@@ -48,7 +45,14 @@ func localCIChecks(facts watch.ReviewFacts, record watch.Record) watch.Record {
 			if failures == "" {
 				failures = suite.Error
 			}
-			check.FailureExcerpt = strings.TrimSpace(failures + "\n\n" + suite.LogTail)
+			excerpt := failures + "\n\n" + suite.LogTail
+			// The check name stays the name the provider and the merge gate
+			// know; the cause belongs to the failure text, where a person
+			// reads why the check did not test the change.
+			if label := suite.Cause.Label(); label != "" {
+				excerpt = "Cause: " + label + "\n\n" + excerpt
+			}
+			check.FailureExcerpt = strings.TrimSpace(excerpt)
 			check.FailureExcerptChecked = true
 		}
 		record.Checks = append(record.Checks, check)
@@ -62,8 +66,8 @@ func localCIChecks(facts watch.ReviewFacts, record watch.Record) watch.Record {
 	}
 	if result.Error != "" {
 		excerpt := result.Error
-		if result.Cause != "" {
-			excerpt = string(result.Cause) + ": " + excerpt
+		if label := result.Cause.Label(); label != "" {
+			excerpt = "Cause: " + label + "\n\n" + excerpt
 		}
 		record.Checks = append(record.Checks, watch.CheckSummary{
 			Name: "local CI", State: "failure", Status: "completed", Conclusion: "failure",

@@ -341,7 +341,9 @@ func (s *Service) localCIFailureEvidence(ctx context.Context, r Record, head, lo
 		// The cause tells an infrastructure failure from a failed test, which is
 		// what the owner needs to know before deciding to retry.
 		if suite.Cause != "" {
-			line += " (" + string(suite.Cause) + ")"
+			// The report reads as prose, so it shows the label and never the
+			// stored value the result schema keeps.
+			line += " (" + suite.Cause.Label() + ")"
 		}
 		if evidence != "" {
 			line += ": " + evidence

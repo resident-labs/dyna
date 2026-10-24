@@ -217,7 +217,7 @@ func TestMergeFailureReportReadsLocalCISuiteFailures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"Local CI failures:", "go-static", "go-test-shard (6)", "go-test-shard (2) (ssh-drop)", "duplicate case reflect.Bool", "events_test.go:521:7", "internal/room/events_test.go", "#1"} {
+	for _, want := range []string{"Local CI failures:", "go-static", "go-test-shard (6)", "go-test-shard (2) (SSH connection lost)", "duplicate case reflect.Bool", "events_test.go:521:7", "internal/room/events_test.go", "#1"} {
 		if !strings.Contains(report, want) {
 			t.Errorf("missing %q in report:\n%s", want, report)
 		}

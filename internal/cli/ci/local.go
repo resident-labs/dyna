@@ -133,13 +133,13 @@ func printResult(c *cobra.Command, result localci.Result, asJSON bool) error {
 	}
 	for _, suite := range checks {
 		name := string(suite.Name())
-		if suite.Cause != "" {
-			name += " (" + string(suite.Cause) + ")"
-		}
 		if suite.Node != "" {
 			name += " on " + suite.Node
 		}
 		fmt.Fprintf(c.OutOrStdout(), "  %s: %s (%s)\n", name, suite.Status, suite.Duration.Round(time.Millisecond))
+		if label := suite.Cause.Label(); label != "" {
+			fmt.Fprintf(c.OutOrStdout(), "  cause: %s\n", label)
+		}
 		if suite.Error != "" {
 			fmt.Fprintln(c.OutOrStdout(), suite.Error)
 		}
@@ -148,6 +148,9 @@ func printResult(c *cobra.Command, result localci.Result, asJSON bool) error {
 		}
 	}
 	if result.Error != "" {
+		if label := result.Cause.Label(); label != "" {
+			fmt.Fprintf(c.OutOrStdout(), "  cause: %s\n", label)
+		}
 		fmt.Fprintln(c.OutOrStdout(), result.Error)
 	}
 	return nil
