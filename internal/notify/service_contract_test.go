@@ -172,11 +172,21 @@ func TestServiceContractHelperUsesCurrentParentAndCurrentTurn(t *testing.T) {
 			}
 			res, err := e.svc.CompleteSessionTurn(e.ctx, helper.ID, 1)
 			want := target.Address()
+			wantReason := room.HelperNoArtifact
 			if change == "closed-parent" {
 				want = rec.Name
+				wantReason = room.HelperParentUnavailable
 			}
-			if err != nil || res.Message.Kind != ServiceAlertKind || !reflect.DeepEqual(res.Message.To, []string{want}) {
-				t.Fatalf("artifact alert: %+v %v", res, err)
+			if err != nil || !reflect.DeepEqual(res.Message.To, []string{want}) || res.Message.From != room.EngineSender {
+				t.Fatalf("helper outcome recipients or sender: %+v %v", res, err)
+			}
+			payload, ok := res.Message.HelperOutcome()
+			if !ok || res.Message.Kind != string(room.FamilyService) || res.Message.Notice.Kind != string(room.TypeHelperOutcome) ||
+				payload.Reason != wantReason || payload.Session != helper.Address() || payload.Turn != 1 {
+				t.Fatalf("helper outcome is not the typed warning: %+v, payload %+v, %v", res.Message, payload, ok)
+			}
+			if change == "closed-parent" && !strings.Contains(res.Message.Text, "dyna subagent output "+helper.Address()) {
+				t.Fatalf("parent-unavailable warning lost its inspection command: %q", res.Message.Text)
 			}
 			if change != "closed-parent" {
 				e.wait(target.ID, 2)
@@ -229,7 +239,8 @@ func TestServiceContractHelperArtifactAndMissingAlert(t *testing.T) {
 				t.Fatalf("findings duplicated: %+v", res)
 			}
 			if !findings {
-				if res.Message.Kind != ServiceAlertKind || !reflect.DeepEqual(res.Message.To, []string{parent.Address()}) || !strings.Contains(res.Message.Text, "no artifact") {
+				if res.Message.Kind != string(room.FamilyService) || res.Message.Notice.Kind != string(room.TypeHelperOutcome) ||
+					!reflect.DeepEqual(res.Message.To, []string{parent.Address()}) || !strings.Contains(res.Message.Text, "no artifact") {
 					t.Fatalf("missing findings: %+v", res)
 				}
 				e.wait(parent.ID, 2)
