@@ -262,11 +262,12 @@ func (m *Manager) reparentLockedContext(ctx context.Context, id, parent string, 
 	}
 	releases = nil // Info may repair a turn and acquire its metadata lock.
 	if root.ParentSession != parent || root.Depth != depth {
-		event := "session_promoted"
+		moved := SessionMovedJournal{PreviousParent: root.ParentSession, PreviousDepth: root.Depth, Parent: parent, Depth: depth}
 		if parent != "" {
-			event = "session_reparented"
+			store.appendJournal(id, SessionReparentedJournal{SessionMovedJournal: moved})
+		} else {
+			store.appendJournal(id, SessionPromotedJournal{SessionMovedJournal: moved})
 		}
-		store.appendEvent(id, map[string]any{"t": event, "previousParent": root.ParentSession, "previousDepth": root.Depth, "parent": parent, "depth": depth})
 	}
 	return nil
 }

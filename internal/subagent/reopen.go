@@ -84,7 +84,7 @@ func (m *Manager) Reopen(ctx context.Context, ref string) (Info, error) {
 		if err := store.writeMeta(meta); err != nil {
 			return err
 		}
-		store.appendEvent(meta.ID, map[string]any{"t": "session_reopened"})
+		store.appendJournal(meta.ID, SessionReopenedJournal{})
 		return nil
 	})
 	if err != nil {

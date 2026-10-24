@@ -2,9 +2,6 @@ package subagent
 
 import (
 	"context"
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -38,15 +35,14 @@ func TestCloseForEngineRecordsTheEngine(t *testing.T) {
 
 func closedBy(t *testing.T, m *Manager, id string) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(m.Store.Root, id, "events.jsonl"))
+	events, err := m.Store.Events(id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	by := ""
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		var ev map[string]any
-		if json.Unmarshal([]byte(line), &ev) == nil && ev["t"] == "session_closed" {
-			by, _ = ev["by"].(string)
+	for _, ev := range events {
+		if closed, ok := ev.Payload.(*SessionClosedJournal); ok {
+			by = closed.By
 		}
 	}
 	return by

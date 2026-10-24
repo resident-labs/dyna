@@ -859,8 +859,8 @@ func (s *Store) RepairTurn(id string, n int, reason string) (bool, error) {
 		if dir, err := s.Dir(id); err == nil {
 			gate = readGateState(dir)
 		}
-		s.appendEvent(id, map[string]any{"t": "turn_repaired", "turn": n, "readStatus": t.Status, "readRevision": readRevision,
-			"gatePid": gate.Pid, "gateTurn": gate.Turn, "gateActive": gate.Active, "pid": os.Getpid(), "process": repairProcess(), "caller": repairCaller()})
+		s.appendJournal(id, TurnRepairedJournal{Turn: n, ReadStatus: t.Status, ReadRevision: readRevision,
+			GatePid: gate.Pid, GateTurn: gate.Turn, GateActive: gate.Active, Pid: os.Getpid(), Process: repairProcess(), Caller: repairCaller()})
 		t.Status = TurnError
 		t.RoomHeld, t.HeldPrompt, t.HeldAccepted = false, "", false
 		t.PendingInputIDs = nil
@@ -1112,14 +1112,14 @@ func (s *Store) nameTaken(roomID, name string) (bool, error) {
 	return false, nil
 }
 
-// appendEvent adds one line to the session's events.jsonl (debugging record).
-func (s *Store) appendEvent(id string, ev map[string]any) {
+// appendJournal adds one line to the session's events.jsonl (debugging
+// record). It stamps the line, so no writer has to.
+func (s *Store) appendJournal(id string, payload JournalPayload) {
 	path, err := s.EventsPath(id)
 	if err != nil {
 		return
 	}
-	ev["ts"] = time.Now().UnixMilli()
-	b, err := json.Marshal(ev)
+	b, err := json.Marshal(JournalEvent{TS: time.Now().UnixMilli(), Payload: payload})
 	if err != nil {
 		return
 	}
@@ -1132,8 +1132,10 @@ func (s *Store) appendEvent(id string, ev map[string]any) {
 	_ = state.For(db).Append(context.Background(), hub.Event{}, path, b)
 }
 
-// Events reads the session event log.
-func (s *Store) Events(id string) ([]map[string]any, error) {
+// Events reads the session event log. A line this version cannot read is left
+// out, as it always was: the journal is a debugging record. A line of a kind
+// this version does not know comes back whole, as an UnknownJournal.
+func (s *Store) Events(id string) ([]JournalEvent, error) {
 	path, err := s.EventsPath(id)
 	if err != nil {
 		return nil, err
@@ -1145,12 +1147,12 @@ func (s *Store) Events(id string) ([]map[string]any, error) {
 		}
 		return nil, err
 	}
-	var out []map[string]any
+	var out []JournalEvent
 	for _, line := range strings.Split(string(b), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		var ev map[string]any
+		var ev JournalEvent
 		if json.Unmarshal([]byte(line), &ev) == nil {
 			out = append(out, ev)
 		}

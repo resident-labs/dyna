@@ -439,7 +439,7 @@ func (m *Manager) start(opts StartOptions, parent, owner string) (Info, Turn, er
 		return Info{}, Turn{}, err
 	}
 	_ = m.rooms().Touch(roomRec.ID)
-	store.appendEvent(id, map[string]any{"t": "session_start", "profile": prof.Name, "depth": depth, "parent": parent, "owner": meta.Owner, "name": name, "room": roomRec.Name, "address": meta.Address(), "dir": dir, "cwd": opts.Cwd})
+	store.appendJournal(id, SessionStartJournal{Profile: prof.Name, Depth: depth, Parent: parent, Owner: meta.Owner, Name: name, Room: roomRec.Name, Address: meta.Address(), Dir: dir, Cwd: opts.Cwd})
 	turn, _, err := m.beginTurnConfigured(id, task, opts.Schema, []string{store.ReportTarget(meta)}, opts.MessageID, "", false, opts.Deadline)
 	if err != nil {
 		return Info{}, Turn{}, err
@@ -716,7 +716,7 @@ func (m *Manager) Wake(ctx context.Context, ref string, opts WakeOptions) (WakeR
 		}
 		if open {
 			queued := info.Status == StatusQueued
-			store.appendEvent(info.ID, map[string]any{"t": "steer_submitted", "turn": turn, "queued": queued})
+			store.appendJournal(info.ID, SteerSubmittedJournal{Turn: turn, Queued: queued})
 			return WakeResult{Session: info.ID, Turn: turn, Steered: true, Queued: queued}, nil
 		}
 		return WakeResult{}, ErrBusy
@@ -1049,7 +1049,7 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 				_, err = m.closeSession(ctx, child, CloseOptions{})
 			}
 			if err != nil {
-				store.appendEvent(id, map[string]any{"t": "cascade_close_failed", "parent": info.ID, "error": err.Error()})
+				store.appendJournal(id, CascadeCloseFailedJournal{Parent: info.ID, Error: err.Error()})
 			}
 		}
 	}()
@@ -1094,7 +1094,7 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 	// under a closed parent, so record it and finish the close.
 	var children []string
 	if cascade, children, err = m.handOverChildren(ctx, fresh, heir); err != nil {
-		store.appendEvent(info.ID, map[string]any{"t": "child_handover_failed", "error": err.Error()})
+		store.appendJournal(info.ID, ChildHandoverFailedJournal{Error: err.Error()})
 		summary = append(summary, "Child handoff failed: "+err.Error())
 	}
 	summary = append(summary, children...)
@@ -1109,7 +1109,7 @@ func (m *Manager) closeSession(ctx context.Context, info Info, opts CloseOptions
 		return info, err
 	}
 	m.closeGoals(info, heir.ID)
-	store.appendEvent(info.ID, map[string]any{"t": "session_closed", "by": opts.by, "handoff": summary})
+	store.appendJournal(info.ID, SessionClosedJournal{By: opts.by, Handoff: summary})
 	closed, err := store.Info(info.ID)
 	closed.CloseSummary = summary
 	return closed, err

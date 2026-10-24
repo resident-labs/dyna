@@ -2,11 +2,7 @@ package subagent
 
 import (
 	"bufio"
-	"encoding/json"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -67,19 +63,18 @@ func TestRepairWaitsForALiveRunner(t *testing.T) {
 	if repaired, err := s.RepairTurn(id, 1, "test repair"); err != nil || !repaired {
 		t.Fatalf("RepairTurn after the runner exited = %v, %v; want a repair", repaired, err)
 	}
-	raw, err := os.ReadFile(filepath.Join(dir, "events.jsonl"))
+	events, err := s.Events(id)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var found bool
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
-		var ev map[string]any
-		if json.Unmarshal([]byte(line), &ev) == nil && ev["t"] == "turn_repaired" {
-			found = ev["readStatus"] == TurnRunning && ev["process"] != "" && ev["caller"] != ""
+	for _, ev := range events {
+		if repaired, ok := ev.Payload.(*TurnRepairedJournal); ok {
+			found = repaired.ReadStatus == TurnRunning && repaired.Process != "" && repaired.Caller != ""
 		}
 	}
 	if !found {
-		t.Fatalf("no turn_repaired event with what the repair read: %s", raw)
+		t.Fatalf("no turn_repaired event with what the repair read: %+v", events)
 	}
 }
 
