@@ -77,6 +77,12 @@ export function internalLinkHash(href: string, current: Pick<Location, 'origin' 
   }
 }
 
+// followInternalLink uses native hash navigation so the router and every open
+// item pane receive the same hashchange event.
+export function followInternalLink(hash: string, loc: Pick<Location, 'hash'>): void {
+  if (loc.hash !== hash) loc.hash = hash
+}
+
 const two = (n: number): string => String(n).padStart(2, '0')
 
 export function clock(ts: string | number | Date = NaN): string {
