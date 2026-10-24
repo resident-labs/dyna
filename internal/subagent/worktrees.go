@@ -120,15 +120,20 @@ func (m *Manager) reportKeptWorktree(info Info, k keptTree) {
 			owner = meta
 		}
 	}
-	_, err := m.rooms().PostEvent(info.RoomID, room.WorktreeEvent{
-		Owner:  owner.ID,
-		Path:   k.Path,
-		Branch: k.Branch,
-		Ahead:  k.Ahead,
-		Dirty:  k.Dirty,
-		Reason: worktreeReason(k),
-		Detail: strings.ReplaceAll(k.Reason, "\n", " "),
-	}, owner.Address())
+	_, err := m.rooms().PostEventInput(room.PostEventInput{
+		RoomID: info.RoomID,
+		Event: room.WorktreeEvent{
+			Owner:  owner.ID,
+			Path:   k.Path,
+			Branch: k.Branch,
+			Ahead:  k.Ahead,
+			Dirty:  k.Dirty,
+			Reason: worktreeReason(k),
+			Detail: strings.ReplaceAll(k.Reason, "\n", " "),
+		},
+		To:         []string{owner.Address()},
+		SessionIDs: map[string]string{owner.Address(): owner.ID},
+	})
 	if err != nil {
 		m.store().appendJournal(info.ID, WorktreeReportFailedJournal{Error: err.Error()})
 	}

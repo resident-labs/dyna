@@ -4,8 +4,7 @@
   // merging, the trial's progress, its checks and the commit it landed. It
   // reads the typed payload, never the text, and keeps no feed-only state.
   import { openExternal } from '../../api.ts'
-  import { clock } from '../ui/format.ts'
-  import Chip from '../ui/Chip.svelte'
+  import EventRow from './EventRow.svelte'
   import EventDetails from './EventDetails.svelte'
   import { mergeDecision, mergeEvent } from './eventPayloads.ts'
   import { shortSha, commitUrl } from '../prs/pr.ts'
@@ -101,7 +100,6 @@
   // and the reason line never repeat each other.
   let reason = $derived(reasonLine(payload?.reason, payload?.reasonKind, failedChecks.length))
   let openCommit = $derived(commitUrl(first?.url, payload?.commit))
-  let open = $state(false)
 
   // reasonLine words a cause from its kind when the payload keeps no text.
   function reasonLine(text: string | undefined, kind: MergeReasonKind | undefined, named: number) {
@@ -116,15 +114,16 @@
   }
 </script>
 
-<div class="card {surface}" class:open data-id={post.id}>
-  <button class="sum" type="button" aria-expanded={open} aria-label={title} onclick={() => (open = !open)}>
-    <span class="glyph" class:done={type === 'landed'} class:bad={stepTones[type] === 'coral'} aria-hidden="true">⇢</span>
-    <span class="title">
-      <span class="what">{title}</span>
-      {#if type !== 'decision'}<Chip tone={stepTones[type]}>{stepWords[type]}</Chip>{/if}
-    </span>
-    <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
-  </button>
+<EventRow
+  id={post.id}
+  ts={post.ts}
+  {surface}
+  {title}
+  chips={[{ label: stepWords[type], tone: stepTones[type], failure: stepTones[type] === 'coral' }]}
+  summary={[decision?.note, subject?.title, payload?.checks && (payload.checks.total ?? 0) > 0 ? `checks ${payload.checks.done}/${payload.checks.total}` : '', payload?.head ? `head ${shortSha(payload.head)}` : '', reason || (failedChecks.length ? `Failed checks: ${failedChecks.join(', ')}` : '')].filter(Boolean).join(' · ')}
+>
+  {#snippet icon()}⇢{/snippet}
+  {#snippet detail()}
   <div class="body">
     {#if decision}<p class="note">{decision.note}</p>{/if}
     {#if payload}
@@ -145,7 +144,7 @@
         {#if payload.commit}<span>commit <b class="mono">{shortSha(payload.commit)}</b></span>{/if}
       </div>
       {#if reason && stepTones[type] === 'coral'}<p class="reason">{reason}</p>{:else if reason && type === 'landed'}<p class="note">{reason}</p>{/if}
-      {#if failedChecks.length}<p class="reason">Failed checks: {failedChecks.join(', ')}</p>{/if}
+      {#if failedChecks.length && reason}<p class="reason">Failed checks: {failedChecks.join(', ')}</p>{/if}
       <div class="acts">
         {#if subject?.url}<button class="btn" type="button" onclick={() => openLink(subject?.url)}>Open PR</button>{/if}
         {#if openCommit}<button class="btn" type="button" onclick={() => openLink(openCommit)}>Open commit</button>{/if}
@@ -153,42 +152,12 @@
     {/if}
     {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
   </div>
-</div>
+  {/snippet}
+</EventRow>
 
 <style>
-  .card {
-    margin: var(--s1) var(--s4);
-    border: 1px solid var(--line);
-    background: var(--side);
-    border-radius: 8px;
-    overflow: hidden;
-    min-width: 0;
-  }
-  .card.dm { margin: var(--s1) 0; }
-  .sum {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 8px 12px;
-    border: 0;
-    background: none;
-    color: var(--ink-2);
-    font: inherit;
-    text-align: left;
-    /* The card is always open on a desktop, so only the phone taps to expand. */
-    pointer-events: none;
-  }
-  .glyph { flex: none; color: var(--gold); font-size: var(--t-ui); }
-  .glyph.done { color: var(--sage); }
-  .glyph.bad { color: var(--coral); }
-  .title { display: flex; align-items: center; gap: 6px; min-width: 0; }
-  .what { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .fact { color: var(--muted); font-size: var(--t-sm); white-space: nowrap; flex: none; }
   .note { margin: 0; color: var(--ink-2); font-size: var(--t-sm); overflow-wrap: anywhere; }
-  /* The clock keeps the row short; the full stamp is in the title. */
-  time { margin-left: auto; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; flex: none; padding-left: 4px; }
-  .body { display: grid; gap: 6px; padding: 0 12px 10px; }
+  .body { display: grid; gap: 6px; }
   .sub { margin: 0; color: var(--muted); font-size: var(--t-sm); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; width: 100%; max-width: 360px; }
   .steps i { height: 3px; border-radius: 2px; background: var(--line); }
@@ -204,30 +173,7 @@
   .mono { font-family: var(--mono); }
   .reason { margin: 0; color: var(--coral); font-size: var(--t-sm); overflow-wrap: anywhere; }
   .acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-  .btn {
-    min-height: 28px;
-    padding: 3px 10px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--raise);
-    color: var(--ink-2);
-    font: inherit;
-    font-size: var(--t-sm);
-  }
   @media (max-width: 760px) {
-    .card { margin: var(--s1) var(--s2); }
-    .sum { min-height: 40px; padding: 6px var(--s2); cursor: pointer; pointer-events: auto; }
-    /* One row on a phone when it fits: the title, the step and the clock. A
-       title that needs the whole width wraps its step word under itself, so
-       the row never runs past the card.
-     */
-    .sum { align-items: flex-start; }
-    .title { flex: 1 1 auto; flex-wrap: wrap; row-gap: 2px; }
-    .what { white-space: normal; overflow: visible; }
-    .title .fact { display: none; }
     .legend { display: none; }
-    time { display: none; }
-    .card:not(.open) .body { display: none; }
-    .btn { min-height: 36px; }
   }
 </style>

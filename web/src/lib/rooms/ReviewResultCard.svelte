@@ -4,8 +4,8 @@
   // typed payload, never the review text, and keeps no feed-only state. The
   // feed and a session DM draw the same card.
   import { openExternal } from '../../api.ts'
-  import { clock } from '../ui/format.ts'
   import Chip from '../ui/Chip.svelte'
+  import EventRow from './EventRow.svelte'
   import ReviewIcon from '../ui/ReviewIcon.svelte'
   import EventDetails from './EventDetails.svelte'
   import { reviewEvent } from './eventPayloads.ts'
@@ -15,10 +15,10 @@
 
   let { post, notice = post.notice, surface = 'feed' }: { post: EventPost; notice?: EventNotice; surface?: EventSurface } = $props()
 
-  const words: Record<ReviewKind, string> = {
+  const stateWords: Record<ReviewKind, string> = {
     approve: 'approved',
     changes: 'changes requested',
-    'approve-fast': 'approved for a fast landing',
+    'approve-fast': 'approved',
     'stop-early': 'stopped early',
   }
   const stopWords: Record<string, string> = {
@@ -34,23 +34,23 @@
   let counts = $derived(payload ? [payload.blocking ?? 0, payload.shouldFix ?? 0, payload.nits ?? 0] : [0, 0, 0])
   let findings = $derived(payload?.findings ?? [])
   let tone = $derived(kind === 'approve-fast' || kind === 'approve' ? 'sage' : kind === 'stop-early' ? '' : (counts[0] ?? 0) > 0 ? 'coral' : 'gold')
-  let title = $derived(payload ? `${payload.label} ${kind === 'approve-fast' && !fast ? 'approved' : words[kind]}` : 'Reviewer result')
+  let title = $derived(payload?.label ?? 'Reviewer result')
   let note = $derived(kind === 'approve-fast' && !fast ? 'normal path' : (payload?.note ?? ''))
   let reason = $derived(payload?.stopReason ? (stopWords[payload.stopReason] ?? payload.stopReason) : '')
-  let open = $state(false)
   let showAll = $state(false)
   let shown = $derived(showAll ? findings : findings.slice(0, 3))
 </script>
 
-<div class="card {surface}" class:open>
-  <button class="sum" type="button" aria-expanded={open} aria-label={title} onclick={() => (open = !open)}>
-    <span class="glyph" class:done={tone === 'sage'} class:bad={tone === 'coral'}><ReviewIcon size={15} /></span>
-    <span class="title">
-      <span class="what">{title}</span>
-      <Chip {tone} outline={tone === ''}>{kind === 'approve-fast' ? (fast ? 'fast landing' : 'approved') : kind === 'changes' ? 'changes' : kind === 'stop-early' ? 'stopped' : 'approved'}</Chip>
-    </span>
-    <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
-  </button>
+<EventRow
+  id={post.id}
+  ts={post.ts}
+  {surface}
+  {title}
+  chips={[{ label: kind === 'approve-fast' ? (fast ? 'approved for a fast landing' : 'approved') : stateWords[kind], tone, outline: tone === '' }]}
+  summary={[note, kind === 'stop-early' && reason ? `Stopped early: ${reason}.` : '', findings.length ? `${findings.length} finding${findings.length === 1 ? '' : 's'}` : ''].filter(Boolean).join(' · ')}
+>
+  {#snippet icon()}<ReviewIcon size={15} />{/snippet}
+  {#snippet detail()}
   <div class="body">
     {#if payload}
       {#if note}<p class="note">{note}</p>{/if}
@@ -79,24 +79,10 @@
     {/if}
     {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
   </div>
-</div>
-
-{#snippet finderNote(value: string, isFast: boolean)}
-  {#if value && !isFast && false}<span>{value}</span>{/if}
-{/snippet}
+  {/snippet}
+</EventRow>
 
 <style>
-  .card { margin: var(--s1) var(--s4); border: 1px solid var(--line); background: var(--side); border-radius: 8px; overflow: hidden; min-width: 0; }
-  .card.dm { margin: var(--s1) 0; }
-  .sum { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-  .glyph { display: inline-flex; flex: none; color: var(--muted); }
-  .glyph.done { color: var(--sage); }
-  .glyph.bad { color: var(--coral); }
-  .title { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
-  .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: var(--t-sm); }
-  time { flex: none; color: var(--faint); font-size: var(--t-cap); }
-  .body { display: none; padding: 0 12px 10px; }
-  .card.open .body { display: block; }
   .note { margin: 0 0 var(--s2); color: var(--muted); font-size: var(--t-sm); }
   .reason { margin: 0 0 var(--s2); color: var(--muted); font-size: var(--t-sm); }
   .counts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--s2); }

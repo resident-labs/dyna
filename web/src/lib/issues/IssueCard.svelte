@@ -12,7 +12,8 @@
   import { issueEvent } from '../rooms/eventPayloads.ts'
   import type { IssueState } from '../rooms/events.gen.ts'
   import EventDetails from '../rooms/EventDetails.svelte'
-  import { clock, short } from '../ui/format.ts'
+  import { short } from '../ui/format.ts'
+  import EventRow from '../rooms/EventRow.svelte'
   import { api } from '../../api.ts'
 
   let {
@@ -50,7 +51,6 @@
   let title = $derived(payload?.title ?? legacyTitle)
   let issueState = $derived<IssueState | ''>(payload?.state ?? '')
   let files = $derived(payload?.files ?? [])
-  let open = $state(false)
   let closing = $state(false)
   let reason = $state('')
   let busy = $state(false)
@@ -109,14 +109,16 @@
   }
 </script>
 
-<div class="card {surface}" class:open data-id={post.id}>
-  <button class="sum" type="button" aria-expanded={open} onclick={() => (open = !open)}>
-    {#if number > 0}<span class="num">D-{number}</span>{:else}<span class="glyph" aria-hidden="true">◆</span>{/if}
-    <span class="title">{title}</span>
-    {#if issueState}<span class="chip {stateTone[issueState]}">{stateWords[issueState]}</span>{/if}
-    {#if who}<span class="by">filed by {who}</span>{/if}
-    <time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time>
-  </button>
+<EventRow
+  id={post.id}
+  ts={post.ts}
+  {surface}
+  title={number > 0 ? `D-${number}` : 'Issue'}
+  chips={issueState ? [{ label: stateWords[issueState], tone: stateTone[issueState] }] : []}
+  summary={[title, who ? `filed by ${who}` : ''].filter(Boolean).join(' · ')}
+>
+  {#snippet icon()}◆{/snippet}
+  {#snippet detail()}
   <div class="body">
     {#if files.length}
       <ul class="files">
@@ -154,46 +156,10 @@
     <span class="status" role="status">{status}</span>
     {#if surface === 'dm'}<EventDetails text={post.text} />{/if}
   </div>
-</div>
+  {/snippet}
+</EventRow>
 
 <style>
-  .card {
-    margin: var(--s1) var(--s4);
-    border: 1px solid var(--line);
-    background: var(--side);
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  .card.dm { margin: var(--s1) 0; }
-  .sum {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 8px 12px;
-    border: 0;
-    background: none;
-    color: var(--ink-2);
-    font: inherit;
-    text-align: left;
-  }
-  .num {
-    flex: none;
-    padding: 1px 6px;
-    border: 1px solid var(--line);
-    border-radius: 5px;
-    color: var(--muted);
-    font: var(--t-cap) var(--mono);
-  }
-  .glyph { flex: none; color: var(--iris); }
-  .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-  .chip { flex: none; font-size: var(--t-cap); font-weight: 600; }
-  .chip.gold { color: var(--gold); }
-  .chip.iris { color: var(--iris); }
-  .chip.sage { color: var(--sage); }
-  .by { flex: none; color: var(--muted); font-size: var(--t-sm); white-space: nowrap; }
-  time { flex: none; color: var(--faint); font-size: var(--t-cap); white-space: nowrap; }
-  .body { padding: 0 12px 10px; }
   .files { margin: 0 0 6px; padding: 0; list-style: none; font: var(--t-sm)/1.6 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
   /* A path breaks at its slashes, so the line number stays with the file name
      and a phone never splits ":41" into ":4" and "1". */
@@ -201,17 +167,6 @@
   .meta { margin: 0 0 4px; color: var(--muted); font-size: var(--t-sm); }
   .reason { margin: 0 0 6px; color: var(--ink-2); font-size: var(--t-sm); overflow-wrap: anywhere; }
   .acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
-  .btn {
-    min-height: 28px;
-    padding: 3px 10px;
-    border: 1px solid var(--line);
-    border-radius: 6px;
-    background: var(--raise);
-    color: var(--ink-2);
-    font: inherit;
-    font-size: var(--t-sm);
-    flex: none;
-  }
   .btn.danger { color: var(--coral); }
   .closing { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; width: 100%; }
   .closing input {
@@ -227,13 +182,4 @@
   }
   .status { display: block; min-height: 0; color: var(--muted); font-size: var(--t-sm); }
   .status:empty { display: none; }
-  @media (max-width: 760px) {
-    .card { margin: var(--s1) var(--s2); }
-    /* One row on a phone: the number, the title and the state. A tap opens
-       the files and the actions. */
-    .sum { min-height: 40px; padding: 6px var(--s2); }
-    .by, time { display: none; }
-    .body { display: none; }
-    .card.open .body { display: block; }
-  }
 </style>
