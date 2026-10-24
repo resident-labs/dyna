@@ -39,6 +39,9 @@ export type AlertSeverity = "warning" | "critical"
 // ServiceRole is a named string type of an event payload.
 export type ServiceRole = "librarian" | "reviewer" | "helper"
 
+// HelperOutcomeReason is a named string type of an event payload.
+export type HelperOutcomeReason = "parent-unavailable" | "no-artifact"
+
 // ShellState is a named string type of an event payload.
 export type ShellState = "completed" | "failed" | "stopped"
 
@@ -318,6 +321,14 @@ export interface ServiceFailedEvent {
   detail?: string
 }
 
+// HelperOutcomeEvent is the payload of the service/helper-outcome events.
+export interface HelperOutcomeEvent {
+  reason: HelperOutcomeReason
+  session: string
+  turn: number
+  detail?: string
+}
+
 // EngineEvent is the payload of the engine/root-flush events.
 export interface EngineEvent {
   minutes: number
@@ -370,10 +381,10 @@ export interface TurnEvent {
 }
 
 // EventPayload is the payload of any registered system event.
-export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | CallEvent | ReviewEvent | PREvent | SessionEvent | AlertEvent | ServiceFailedEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
+export type EventPayload = WorktreeEvent | HookEvent | IssueEvent | GoalEvent | CheckinEvent | SlowTestEvent | RuleEvent | MergeEvent | MergeDecisionEvent | MachineEvent | CallEvent | ReviewEvent | PREvent | SessionEvent | AlertEvent | ServiceFailedEvent | HelperOutcomeEvent | EngineEvent | QuestionEvent | ShellEvent | RunEvent | TurnEvent
 
 export type EventFamily = "worktree" | "hook" | "issue" | "goal" | "checkin" | "ci-health" | "rule" | "merge" | "machine" | "call" | "review" | "pr" | "session" | "alert" | "service" | "engine" | "question" | "shell" | "run" | "turn"
-export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "root-flush" | "completed" | "stopped"
+export type EventType = "kept" | "started" | "result" | "filed" | "updated" | "closed" | "added" | "edited" | "finished" | "dropped" | "summary" | "slow-test" | "changed" | "queued" | "trial" | "checks" | "landed" | "failed" | "returned" | "conflict" | "rolled-back" | "decision" | "fix-requested" | "low-disk" | "joined" | "declined" | "withdrawn" | "opened" | "ready" | "approved" | "changes" | "ci-failed" | "ci-paused" | "ci-passed" | "merged" | "comment" | "held-comment" | "review-assigned" | "update" | "renamed" | "promoted" | "adopted" | "account" | "instructions" | "seat" | "spawned" | "transfer-request" | "doctor" | "engine" | "helper-outcome" | "root-flush" | "completed" | "stopped"
 export type WakeRule = "never" | "target" | "root-if-needed" | "root"
 
 export type Audience = "room" | "session"
@@ -923,6 +934,16 @@ export const eventSpecs: readonly EventSpecEntry[] = [
     text: "The {service} service failed on turn {turn} ({session}): {error}",
   },
   {
+    family: "service",
+    type: "helper-outcome",
+    renderer: "HelperOutcomeRow",
+    quiet: false,
+    wake: "target",
+    once: true,
+    audience: "room",
+    text: "Helper {session} turn {turn} finished, but {reason}.",
+  },
+  {
     family: "engine",
     type: "root-flush",
     renderer: "EngineNoticeCard",
@@ -1007,6 +1028,7 @@ const INSTRUCTION_ACTION: ReadonlySet<unknown> = new Set(["items", "body", "remo
 const ALERT_SOURCE: ReadonlySet<unknown> = new Set(["doctor", "engine"])
 const ALERT_SEVERITY: ReadonlySet<unknown> = new Set(["warning", "critical"])
 const SERVICE_ROLE: ReadonlySet<unknown> = new Set(["librarian", "reviewer", "helper"])
+const HELPER_OUTCOME_REASON: ReadonlySet<unknown> = new Set(["parent-unavailable", "no-artifact"])
 const SHELL_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
 const RUN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
 const TURN_STATE: ReadonlySet<unknown> = new Set(["completed", "failed", "stopped"])
@@ -1285,6 +1307,14 @@ export function isServiceFailedEvent(v: unknown): v is ServiceFailedEvent {
     (v.detail === undefined || typeof v.detail === "string")
 }
 
+export function isHelperOutcomeEvent(v: unknown): v is HelperOutcomeEvent {
+  return isRecord(v) &&
+    HELPER_OUTCOME_REASON.has(v.reason) &&
+    typeof v.session === "string" &&
+    Number.isInteger(v.turn) &&
+    (v.detail === undefined || typeof v.detail === "string")
+}
+
 export function isEngineEvent(v: unknown): v is EngineEvent {
   return isRecord(v) &&
     Number.isInteger(v.minutes) &&
@@ -1390,6 +1420,7 @@ export function isEventPayload(family: string | undefined, type: string | undefi
   if (family === "alert" && type === "doctor") return isAlertEvent(v)
   if (family === "alert" && type === "engine") return isAlertEvent(v)
   if (family === "service" && type === "failed") return isServiceFailedEvent(v)
+  if (family === "service" && type === "helper-outcome") return isHelperOutcomeEvent(v)
   if (family === "engine" && type === "root-flush") return isEngineEvent(v)
   if (family === "question" && type === "withdrawn") return isQuestionEvent(v)
   if (family === "shell" && type === "result") return isShellEvent(v)

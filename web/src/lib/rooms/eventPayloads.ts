@@ -1,8 +1,8 @@
 // Typed readers for the payload of a sealed system event. They read the
 // stored payload only, never the post text, so a card and its event cannot
 // disagree. The types come from events.gen.ts, which the Go registry writes.
-import { eventSpecs, isAlertEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHookEvent, isIssueEvent, isMachineEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTurnEvent, isWorktreeEvent } from './events.gen.ts'
-import type { AlertEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HookEvent, IssueEvent, MachineEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, RunEvent, ServiceFailedEvent, SessionEvent, ShellEvent, SlowTestEvent, TurnEvent, WorktreeEvent } from './events.gen.ts'
+import { eventSpecs, isAlertEvent, isCallEvent, isCheckinEvent, isEngineEvent, isGoalEvent, isHelperOutcomeEvent, isHookEvent, isIssueEvent, isMachineEvent, isMergeDecisionEvent, isMergeEvent, isPREvent, isQuestionEvent, isReviewEvent, isRuleEvent, isRunEvent, isServiceFailedEvent, isSessionEvent, isShellEvent, isSlowTestEvent, isTurnEvent, isWorktreeEvent } from './events.gen.ts'
+import type { AlertEvent, CallEvent, CheckinEvent, EngineEvent, EventPayload, GoalEvent, HelperOutcomeEvent, HookEvent, IssueEvent, MachineEvent, MergeDecisionEvent, MergeEvent, PREvent, QuestionEvent, ReviewEvent, RuleEvent, RunEvent, ServiceFailedEvent, SessionEvent, ShellEvent, SlowTestEvent, TurnEvent, WorktreeEvent } from './events.gen.ts'
 
 // A post of one event family, with the fields its reader needs. A feed row, a
 // stored message and a test fixture all fit it.
@@ -158,6 +158,12 @@ export function alertEvent(post: EventPost): AlertEvent | undefined {
 export function serviceFailedEvent(post: EventPost): ServiceFailedEvent | undefined {
   if (post.kind !== 'service' || post.notice?.kind !== 'failed') return undefined
   return isServiceFailedEvent(post.payload) ? post.payload : undefined
+}
+
+// helperOutcomeEvent returns the typed payload of an automatic helper warning.
+export function helperOutcomeEvent(post: EventPost): HelperOutcomeEvent | undefined {
+  if (post.kind !== 'service' || post.notice?.kind !== 'helper-outcome') return undefined
+  return isHelperOutcomeEvent(post.payload) ? post.payload : undefined
 }
 
 // engineEvent returns the typed payload of a note from the engine itself.

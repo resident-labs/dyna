@@ -1114,8 +1114,56 @@ func (s ServiceFailedEvent) eventSubject() string { return s.Session }
 // eventDedupe keys one alert per service turn.
 func (s ServiceFailedEvent) eventDedupe() string { return strconv.Itoa(s.Turn) }
 
-// TypeFailed is the service family's only type: a failed turn.
-const TypeFailed EventType = "failed"
+// TypeFailed is a failed service turn. TypeHelperOutcome is an automatic
+// warning about a helper turn that finished without a deliverable result.
+const (
+	TypeFailed        EventType = "failed"
+	TypeHelperOutcome EventType = "helper-outcome"
+)
+
+// HelperOutcomeReason is why a finished helper turn needs attention.
+type HelperOutcomeReason string
+
+// Helper outcome reasons.
+const (
+	HelperParentUnavailable HelperOutcomeReason = "parent-unavailable"
+	HelperNoArtifact        HelperOutcomeReason = "no-artifact"
+)
+
+// helperOutcomeReasons lists every reason the web needs as a union type.
+var helperOutcomeReasons = []HelperOutcomeReason{HelperParentUnavailable, HelperNoArtifact}
+
+// String renders the reason in the event's agent-facing sentence.
+func (r HelperOutcomeReason) String() string {
+	switch r {
+	case HelperParentUnavailable:
+		return "its parent is unavailable"
+	case HelperNoArtifact:
+		return "it produced no artifact or findings for its parent"
+	default:
+		return string(r)
+	}
+}
+
+// HelperOutcomeEvent tells a helper's parent or the owner that a helper turn
+// finished without a deliverable result. The helper is event data; the engine
+// posts the event, so the warning never borrows the helper's sender.
+type HelperOutcomeEvent struct {
+	Reason  HelperOutcomeReason `json:"reason"`
+	Session string              `json:"session"`
+	Turn    int                 `json:"turn"`
+	// Detail keeps the inspection command with the agent-facing event text.
+	Detail string `json:"detail,omitempty"`
+}
+
+func (HelperOutcomeEvent) eventFamily() EventFamily { return FamilyService }
+func (HelperOutcomeEvent) eventType() EventType     { return TypeHelperOutcome }
+func (h HelperOutcomeEvent) eventSubject() string   { return h.Session }
+
+// eventDedupe keys one warning per helper turn and reason.
+func (h HelperOutcomeEvent) eventDedupe() string {
+	return strconv.Itoa(h.Turn) + "\x00" + string(h.Reason)
+}
 
 // EngineEvent is a note from the engine itself. The timed flush uses it to
 // deliver the quiet posts a room held for its root seat.
@@ -1947,6 +1995,18 @@ var eventSpecs = []EventSpec{
 		Text:      "The {service} service failed on turn {turn} ({session}): {error}",
 		Producers: []EventProducer{ProducerLibrarian, ProducerReviewer, ProducerHelper},
 	},
+	// A helper outcome wakes its available parent. An unavailable parent sends
+	// the warning to the owner with NeedsRoot, which wakes the root seat too.
+	{
+		Family:    FamilyService,
+		Type:      TypeHelperOutcome,
+		Renderer:  "HelperOutcomeRow",
+		Payload:   reflect.TypeOf(HelperOutcomeEvent{}),
+		Wake:      WakeTarget,
+		Once:      true,
+		Text:      "Helper {session} turn {turn} finished, but {reason}.",
+		Producers: []EventProducer{ProducerHelper},
+	},
 	// The timed flush is the engine asking the root seat to read the held
 	// batch, so it wakes root and nothing else.
 	{
@@ -2058,6 +2118,7 @@ var eventEnums = []eventEnum{
 	{Type: reflect.TypeOf(AlertSource("")), Values: enumValues(alertSources)},
 	{Type: reflect.TypeOf(AlertSeverity("")), Values: enumValues(alertSeverities)},
 	{Type: reflect.TypeOf(ServiceRole("")), Values: enumValues(serviceRoles)},
+	{Type: reflect.TypeOf(HelperOutcomeReason("")), Values: enumValues(helperOutcomeReasons)},
 	{Type: reflect.TypeOf(ShellState("")), Values: enumValues(shellStates)},
 	{Type: reflect.TypeOf(RunState("")), Values: enumValues(runStates)},
 	{Type: reflect.TypeOf(TurnState("")), Values: enumValues(turnStates)},
@@ -2767,6 +2828,20 @@ func (m Message) ServiceFailed() (ServiceFailedEvent, bool) {
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&ev); err != nil || ev.Service == "" {
 		return ServiceFailedEvent{}, false
+	}
+	return ev, true
+}
+
+// HelperOutcome returns the payload of an automatic helper outcome warning.
+func (m Message) HelperOutcome() (HelperOutcomeEvent, bool) {
+	if m.Kind != string(FamilyService) || m.Notice.Kind != string(TypeHelperOutcome) || len(m.Payload.raw) == 0 {
+		return HelperOutcomeEvent{}, false
+	}
+	var ev HelperOutcomeEvent
+	decoder := json.NewDecoder(bytes.NewReader(m.Payload.raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&ev); err != nil || ev.Reason == "" {
+		return HelperOutcomeEvent{}, false
 	}
 	return ev, true
 }
