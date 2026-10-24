@@ -370,6 +370,9 @@ func SpeakerLabel(m room.Message, roomName string) string {
 	if ev, ok := m.TurnResult(); ok {
 		return strings.TrimPrefix(ev.Session, roomName+":")
 	}
+	if m.From == room.EngineSender && m.EngineEvent() {
+		return room.EngineSender
+	}
 	if m.From == roomName {
 		return room.OwnerLabel(m.Human)
 	}

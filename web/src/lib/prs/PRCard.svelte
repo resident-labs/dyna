@@ -55,7 +55,7 @@
       <span class="headline"><strong>{view.number ? `PR #${view.number}` : view.title || 'PR watcher'}</strong>
         {#each view.chips as chip}<Chip tone={chip.tone}>{chip.label}</Chip>{/each}
       </span>
-      <span class="meta">{[showRepo ? view.repo : '', view.head ? `pushed ${refName(view.head)}` : '', folded.length > 1 ? `${folded.length} updates` : ''].filter(Boolean).join(' · ')}</span>
+      <span class="meta">{[view.title, showRepo ? view.repo : '', view.head ? `pushed ${refName(view.head)}` : '', folded.length > 1 ? `${folded.length} updates` : ''].filter(Boolean).join(' · ')}</span>
     {/snippet}
     {#snippet trail()}<time title={new Date(post.ts ?? 0).toLocaleString()}>{clock(post.ts)}</time><span class="chevron" aria-hidden="true">›</span>{/snippet}
   </Row>

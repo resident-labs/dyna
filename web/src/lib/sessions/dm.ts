@@ -289,6 +289,9 @@ export function dmView(session: DmSession | null | undefined, room: { name: stri
     if (done.includes(t.status ?? '') && t.ended) events.push({ kind: 'turnEnd', key: `turn-end:${t.n}`, ts: t.ended, turn: t })
     if (t.omitted) events.push({ kind: 'note', key: `omitted:${t.n}`, ts: t.started, text: 'Earlier events of this turn were left out.' })
     for (const [i, it] of (t.items || []).entries()) {
+      // A wrap-up prompt is engine plumbing, not the owner's writing. The
+      // typed turn divider names the check without showing that prompt.
+      if (t.wrapUp && it.kind === 'prompt') continue
       if (it.kind === 'thought' && show.reasoning === false) continue
       if (it.kind === 'compaction' && show.compaction === false) continue
       const input = ['prompt', 'steering'].includes(it.kind)
@@ -637,8 +640,8 @@ export function modelName(model?: string | null): string {
 // closes with a footer: its status, then turnTail, "1m00s · 30 tokens".
 // The profile is the display name, so the raw model slug only stands in when
 // a turn has no profile.
-export function turnHead(t: Pick<DmTurn, 'n' | 'profile' | 'model'>): string {
-  return [`Turn ${t.n}`, t.profile || modelName(t.model)].filter(Boolean).join(' · ')
+export function turnHead(t: Pick<DmTurn, 'n' | 'profile' | 'model' | 'wrapUp'>): string {
+  return [t.wrapUp ? 'Wrap-up check' : `Turn ${t.n}`, t.profile || modelName(t.model)].filter(Boolean).join(' · ')
 }
 export function turnTail(t: { started: string; ended?: string; usage?: Usage | null }): string {
   const output = t.usage?.outputTokens
