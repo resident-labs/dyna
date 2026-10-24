@@ -16,10 +16,12 @@ import (
 	"dyna-agent/internal/subagent"
 )
 
+var systemNow = time.Now
+
 // New connects the scheduler to the engine's session and room services. The
 // caller sets Interval: the parent check-ins hook owns the interval now.
 func New(n *notify.Service) *Scheduler {
-	s := &Scheduler{Root: store.DataDir()}
+	s := &Scheduler{Root: store.DataDir(), Now: systemNow}
 	s.Interval = func() (time.Duration, error) { return DefaultInterval, nil }
 	s.Targets = func() ([]Target, error) {
 		live, err := n.Sessions.Store.ListSnapshot(false)
