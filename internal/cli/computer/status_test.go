@@ -18,8 +18,10 @@ func TestStatusExplainsUnavailableDesktopOrStream(t *testing.T) {
 	t.Setenv("DYNA_COMPUTERS_TEST_ENABLE", "1")
 	t.Setenv("DYNA_COMPUTERS_ENABLED", "")
 	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "labwc"), []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"labwc", "wayvnc"} {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\nexit 99\n"), 0700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
 	socket := computers.ControlSocket("")
