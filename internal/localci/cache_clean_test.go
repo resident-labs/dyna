@@ -97,6 +97,42 @@ func TestRunKeeperExitRemovesItsFolder(t *testing.T) {
 	}
 }
 
+// TestStoppingRunKeeperWaitsOnTheSameLock makes the keeper delete .active
+// while teardown waits. Teardown must hold that inode open before signalling;
+// reopening the pathname either fails or can acknowledge a different file.
+func TestStoppingRunKeeperWaitsOnTheSameLock(t *testing.T) {
+	base := filepath.Join(t.TempDir(), "base")
+	active := filepath.Join(base, "runs", "run", ".active")
+	if output, err := exec.Command("bash", "-c", "set -e; mkdir -p "+shellquote.Quote(filepath.Dir(active))+"; "+runLocks(base, active)).CombinedOutput(); err != nil {
+		t.Fatalf("start run keeper: %v: %s", err, output)
+	}
+	bin := t.TempDir()
+	flock, err := exec.LookPath("flock")
+	if err != nil {
+		t.Skipf("flock is unavailable: %v", err)
+	}
+	wrapper := "#!/bin/sh\nprintf 'call\\n' >> \"$FLOCK_COUNT\"\nexec " + shellquote.Quote(flock) + " \"$@\"\n"
+	if err := os.WriteFile(filepath.Join(bin, "flock"), []byte(wrapper), 0700); err != nil {
+		t.Fatal(err)
+	}
+	count := filepath.Join(t.TempDir(), "calls")
+	cmd := exec.Command("bash", "-c", stopKeeper(base, active))
+	cmd.Env = append(os.Environ(), "PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"), "FLOCK_COUNT="+count)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("stop run keeper: %v: %s", err, output)
+	}
+	data, err := os.ReadFile(count)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls := strings.Count(string(data), "call\n"); calls != 1 {
+		t.Fatalf("teardown reopened .active after its deletion: %d flock calls, want one", calls)
+	}
+	if _, err := os.Stat(filepath.Dir(active)); !os.IsNotExist(err) {
+		t.Fatalf("run folder survived keeper teardown: %v", err)
+	}
+}
+
 func TestCacheCleanPrunesRunFoldersAfterTwoHours(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("the cleanup refuses to run as root")
