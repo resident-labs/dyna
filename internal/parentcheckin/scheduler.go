@@ -17,8 +17,8 @@ import (
 // that runs the pass owns the real interval and sets Interval.
 const DefaultInterval = 15 * time.Minute
 
-// dueSlack lets any trigger deliver a check-in that falls due within the next
-// minute without changing the configured interval stored on the row.
+// dueSlack is the most a trigger can deliver a check-in early. Pass caps it at
+// half the interval to preserve a delay between deliveries.
 const dueSlack = time.Minute
 
 // Target identifies an open parent with active direct children.
@@ -74,6 +74,7 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 	if err != nil {
 		return posted, time.Time{}, err
 	}
+	slack := min(dueSlack, interval/2)
 	targets, err := s.Targets()
 	if err != nil {
 		return posted, time.Time{}, err
@@ -122,7 +123,7 @@ func (s *Scheduler) Pass(ctx context.Context) (int, time.Time, error) {
 					return err
 				}
 			}
-			if e.due <= now.Add(dueSlack).UnixNano() && !e.pending {
+			if e.due <= now.Add(slack).UnixNano() && !e.pending {
 				if _, err := conn.ExecContext(ctx, "UPDATE parent_checkins SET pending=1 WHERE session=?", e.ID); err != nil {
 					return err
 				}
