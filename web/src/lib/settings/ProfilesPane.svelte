@@ -126,7 +126,7 @@
   function costPerTurnText(measured: ProfileUsageStats) {
     const value = measured.costPerTurnUsd
     if (value === null) return 'unknown'
-    const prefix = measured.cost.partialTurns > 0 || measured.cost.unknownTurns > 0 ? '≥ ' : ''
+    const prefix = measured.cost.partialTurns > 0 ? '≥ ' : ''
     const digits = value > 0 && value < 0.01 ? 4 : 2
     return prefix + '$' + value.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
   }
@@ -135,9 +135,15 @@
     return measured.cacheReadShare === null ? 'unknown' : measuredNumber(measured.cacheReadShare * 100, '%')
   }
 
-  function costTitle(measured: ProfileUsageStats) {
+  function costPerTurnTitle(measured: ProfileUsageStats) {
     const known = measured.cost.completeTurns + measured.cost.partialTurns
-    const partial = measured.cost.partialTurns > 0 || measured.cost.unknownTurns > 0 ? ' Partial or missing reports make the amounts lower bounds.' : ''
+    const partial = measured.cost.partialTurns > 0 ? ' Partial reports make this average a lower bound.' : ''
+    return `Average over ${known} of ${measured.turns} turns that report cost.${partial}`
+  }
+
+  function spendTitle(measured: ProfileUsageStats) {
+    const known = measured.cost.completeTurns + measured.cost.partialTurns
+    const partial = measured.cost.partialTurns > 0 || measured.cost.unknownTurns > 0 ? ' Partial or missing reports make total spend a lower bound.' : ''
     return `${known} of ${measured.turns} turns report cost.${partial}`
   }
 
@@ -251,7 +257,7 @@
           </select>
         </label>
       </div>
-      <p class="measurement-note">Measured activity uses UTC days. Costs use known reports only; ≥ marks partial coverage or a lower bound. Authored ratings stay unchanged.</p>
+      <p class="measurement-note">Measured activity uses UTC days. Cost per turn uses reported turns; ≥ marks a lower bound. Authored ratings stay unchanged.</p>
       {#if usageError}<p class="err">Measured activity unavailable: {usageError}</p>{/if}
       {#if !filteredProfiles.length}
         <EmptyState title="No matching profiles">Try another name, harness, model, or description, or clear the filter.</EmptyState>
@@ -283,9 +289,9 @@
             {#if measured}
               <div><dt>turns</dt><dd>{measured.turns.toLocaleString('en-US')}</dd></div>
               <div><dt>median turn</dt><dd>{medianText(measured.medianWallMs)}</dd></div>
-              <div title={costTitle(measured)}><dt>cost / turn</dt><dd>{costPerTurnText(measured)}</dd></div>
+              <div title={costPerTurnTitle(measured)}><dt>cost / reported turn</dt><dd>{costPerTurnText(measured)}</dd></div>
               <div title="Cache share uses {measured.cachePaired.turns} turns that reported both input and cache."><dt>cache read</dt><dd>{cacheText(measured)}</dd></div>
-              <div title={costTitle(measured)}><dt>total spend</dt><dd>{costText(measured.cost)}</dd></div>
+              <div title={spendTitle(measured)}><dt>total spend</dt><dd>{costText(measured.cost)}</dd></div>
             {:else}
               <div class="measured-empty"><dt>activity</dt><dd>{usageError ? 'unavailable' : usage ? 'no turns' : 'loading…'}</dd></div>
             {/if}
