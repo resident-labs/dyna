@@ -84,6 +84,14 @@ func TestStatusExplainsUnavailableDesktopOrStream(t *testing.T) {
 	}
 }
 
+func TestStatusDoctorReportsMissingWayVNC(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	state := computers.Status{State: computers.StateRunning, Renderer: "gles2"}
+	if got, want := statusDoctor(state), "the screen streamer (wayvnc) is not installed"; got != want {
+		t.Fatalf("doctor = %q, want %q", got, want)
+	}
+}
+
 func TestStatusPrintsViewerLinkOnlyWhileRunning(t *testing.T) {
 	call := rootComputerFixture(t)
 	t.Setenv("DYNA_COMPUTERS_TEST_ENABLE", "1")

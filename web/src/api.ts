@@ -14,6 +14,7 @@ import type { Attachment } from './lib/api/room.ts'
 import type { BulkSessionOptions, ConsolidationOptions, TransferOptions } from './lib/api/session.ts'
 import type { RunSource } from './lib/api/workflow.ts'
 import type { CardRef } from './lib/api/wire.ts'
+import { asComputerViewFailure } from './lib/api/computer.ts'
 import type { DiffComment } from './lib/files/diffComments.ts'
 import type { Reference } from './lib/rooms/references.ts'
 import type { HookInput } from './lib/settings/hooks.ts'
@@ -247,8 +248,21 @@ export const api = {
   computerControl: (session: string, key: string, mode: string) => app.ComputerControl(session, key, mode),
   computerShotURL: (session: string, fresh = false) => `/api/computers/${encodeURIComponent(session)}/shot.png${fresh ? '?fresh=1' : ''}`,
   computerViewURL: async (session: string, key: string) => {
+    const path = `/api/computers/${encodeURIComponent(session)}/view?k=${encodeURIComponent(key)}`
+    // Browser WebSockets hide a refused handshake. Read permanent setup
+    // failures over HTTP first; transient failures keep the old retry path.
+    try {
+      const response = await authenticatedFetch(`${path}&check=1`, { cache: 'no-store', headers: { 'X-Dyna': '1' } })
+      if (!response.ok) {
+        const failure = asComputerViewFailure(await response.json().catch(() => null))
+        if (failure) throw failure
+      }
+    } catch (e) {
+      const failure = asComputerViewFailure(e)
+      if (failure) throw failure
+    }
     const scheme = location.protocol === 'https:' ? 'wss' : 'ws'
-    return `${scheme}://${location.host}/api/computers/${encodeURIComponent(session)}/view?k=${encodeURIComponent(key)}`
+    return `${scheme}://${location.host}${path}`
   },
   // The owner's Voice call: the engine runs the gateway, and the page's
   // socket reaches it through the app origin.
