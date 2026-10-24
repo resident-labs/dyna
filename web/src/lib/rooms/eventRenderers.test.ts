@@ -134,6 +134,7 @@ const fixtures: Record<string, EventPayload> = {
     actor: 'dyna:owner',
     verb: 'edited',
     text: 'A subagent commits to its parent branch.',
+    sessions: ['dyna:notice-one', 'dyna:notice-two'],
   },
   'review/result': {
     kind: 'changes',
@@ -227,6 +228,11 @@ const fixtures: Record<string, EventPayload> = {
       },
     ]),
   ),
+  'session/instruction-batch': {
+    sections: [{ name: 'Subagent profiles', action: 'items', added: ['- writer | model: model-2'] }],
+    sessions: ['dyna:notice-one', 'dyna:notice-two'],
+    notes: ['msg_0000000000000001', 'msg_0000000000000002'],
+  },
   'alert/doctor': {
     source: 'doctor', reportId: '7', trigger: 'hook main-updated',
     summary: 'machine is overloaded',
@@ -358,7 +364,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('goalId' in payload) return payload.goalId
   if ('crossings' in payload) return payload.run
   if ('children' in payload) return payload.children[0]?.name ?? payload.parent
-  if ('ruleId' in payload) return payload.ruleId
+  if ('ruleId' in payload) return payload.sessions?.length ? `reached ${payload.sessions.length} sessions` : payload.ruleId
   if ('floorBytes' in payload) return payload.name
   if ('source' in payload) return payload.reportId ?? payload.remedy ?? payload.summary ?? payload.source
   if ('service' in payload) return payload.error
@@ -367,6 +373,7 @@ function fixtureTip(payload: EventPayload): string {
   if ('shellId' in payload) return payload.label
   if ('runId' in payload) return payload.name
   if ('call' in payload) return payload.type === 'withdrawn' ? 'Call request' : 'the call'
+  if ('sessions' in payload) return `reached ${payload.sessions.length} sessions`
   if ('session' in payload) {
     // A turn end names its session and carries no session change of its own.
     if (!('type' in payload)) return payload.session

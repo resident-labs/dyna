@@ -27,6 +27,9 @@ func ownerDMNote(roomName string, msgs []room.Message, seats map[string]room.Del
 		if _, instruction := msg.InstructionNote(); instruction {
 			continue
 		}
+		if _, batch := msg.InstructionBatch(); batch {
+			continue
+		}
 		seat, ok := seats[msg.ID]
 		if ok && seat.Category == room.RootOwnerDM {
 			text := strings.Join(strings.Fields(msg.Text), " ")
@@ -72,6 +75,9 @@ func quietRootPosts(roomName string, msgs []room.Message, seats map[string]room.
 		if _, instruction := msg.InstructionNote(); instruction {
 			continue
 		}
+		if _, batch := msg.InstructionBatch(); batch {
+			continue
+		}
 		if seat, ok := seats[msg.ID]; ok && seat.Category == room.RootQuietPost {
 			text := strings.Join(strings.Fields(msg.Text), " ")
 			if r := []rune(text); len(r) > 240 {
@@ -101,8 +107,8 @@ const instructionWindowMS int64 = 60_000
 // profiles". One edit reaches every session, so a burst is one fact, not one
 // fact per session. A change is one note per session of the same sections
 // within a minute of its first note: a session that gets a second note of the
-// same sections got a later edit, which is its own change. Every line counts
-// the distinct sessions it names.
+// same sections got a later edit, which is its own change. A stored batch
+// replaces its source notes here too. Every line counts distinct sessions.
 func instructionLines(msgs []room.Message) []string {
 	type change struct {
 		sections []string
@@ -111,17 +117,42 @@ func instructionLines(msgs []room.Message) []string {
 	}
 	var order []*change
 	current := map[string]*change{}
+	covered := map[string]bool{}
 	for _, msg := range msgs {
-		ev, ok := msg.InstructionNote()
-		if !ok {
-			continue
+		if ev, ok := msg.InstructionBatch(); ok {
+			for _, id := range ev.Notes {
+				covered[id] = true
+			}
 		}
-		names := make([]string, 0, len(ev.Sections))
-		for _, section := range ev.Sections {
+	}
+	namesOf := func(sections []room.InstructionChange) []string {
+		names := make([]string, 0, len(sections))
+		for _, section := range sections {
 			if section.Name != "" {
 				names = append(names, section.Name)
 			}
 		}
+		return names
+	}
+	for _, msg := range msgs {
+		if ev, ok := msg.InstructionBatch(); ok {
+			names := namesOf(ev.Sections)
+			found := &change{sections: names, firstMS: msg.TS, sessions: map[string]bool{}}
+			for _, session := range ev.Sessions {
+				found.sessions[session] = true
+			}
+			order = append(order, found)
+			current[strings.Join(names, "\x00")] = found
+			continue
+		}
+		if covered[msg.ID] {
+			continue
+		}
+		ev, ok := msg.InstructionNote()
+		if !ok {
+			continue
+		}
+		names := namesOf(ev.Sections)
 		fingerprint := strings.Join(names, "\x00")
 		found := current[fingerprint]
 		if found == nil || found.sessions[ev.Session] || msg.TS-found.firstMS >= instructionWindowMS || msg.TS < found.firstMS {

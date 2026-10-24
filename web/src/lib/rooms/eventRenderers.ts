@@ -23,6 +23,7 @@ import CheckinCard from './CheckinCard.svelte'
 import SlowTestCard from './SlowTestCard.svelte'
 import RuleCard from './RuleCard.svelte'
 import SessionNoteCard from './SessionNoteCard.svelte'
+import InstructionBatchCard from './InstructionBatchCard.svelte'
 import AlertCard from './AlertCard.svelte'
 import ServiceAlertCard from './ServiceAlertCard.svelte'
 import HelperOutcomeRow from './HelperOutcomeRow.svelte'
@@ -98,7 +99,7 @@ export type EventRenderer = Component<EventProps>
 // component here draws the unknown event row, and the test fails.
 export const eventComponents: Record<string, EventRenderer> = {
   WorktreeCard, HookCard, PRCard, MergeCard, IssueCard, GoalPost, CheckinCard, SlowTestCard, RuleCard, MachineDiskCard,
-  CallCard, SessionNoteCard, AlertCard, ServiceAlertCard, HelperOutcomeRow, EngineNoticeCard, QuestionNoteCard, ReviewResultCard,
+  CallCard, SessionNoteCard, InstructionBatchCard, AlertCard, ServiceAlertCard, HelperOutcomeRow, EngineNoticeCard, QuestionNoteCard, ReviewResultCard,
   ShellResultRow, RunResultCard, TurnCompletionRow,
 }
 
