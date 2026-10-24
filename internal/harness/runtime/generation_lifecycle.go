@@ -326,7 +326,7 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 	if a.ConfigFormat == "toml" {
 		file = "settings.toml"
 	}
-	if h == "pi" || h == "kimi-code" || (a.ConfigFile != "" && h != "opencode" && h != "muse") {
+	if h == "pi" || (a.ConfigFile != "" && h != "opencode" && h != "muse") {
 		if err = r.recordGenerationView(h, home, dir, true); err != nil {
 			return err
 		}
@@ -346,7 +346,7 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 			return err
 		}
 	}
-	if h == "pi" || h == "kimi-code" || (a.ConfigFile != "" && h != "opencode" && h != "muse") {
+	if h == "pi" || (a.ConfigFile != "" && h != "opencode" && h != "muse") {
 		if err = r.recordGenerationView(h, home, dir, false); err != nil {
 			return err
 		}

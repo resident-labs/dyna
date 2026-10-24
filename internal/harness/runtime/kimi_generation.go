@@ -30,6 +30,9 @@ func publishKimiGeneration(dir, home string) error {
 		return nil
 	}
 	configPath := filepath.Join(home, "config.toml")
+	if err := checkPrivateAccountFile(configPath, false); err != nil {
+		return err
+	}
 	existing, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return err
