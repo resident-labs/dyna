@@ -9,11 +9,27 @@ import (
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
 	"dyna-agent/internal/subagent"
+
+	lru "github.com/hashicorp/golang-lru/v2"
 )
 
 // MaxFeedResultKB caps the full result one feed row carries, so one giant
 // result cannot stall the page.
 const MaxFeedResultKB = 64
+
+// resultCacheEntries bounds retained full results to 256, or 16 MiB when
+// every result reaches MaxFeedResultKB.
+const resultCacheEntries = 256
+
+type resultCache = lru.Cache[string, fullResult]
+
+func newResultCache() *resultCache {
+	cache, err := lru.New[string, fullResult](resultCacheEntries)
+	if err != nil {
+		panic(err) // the entry count is a positive constant
+	}
+	return cache
+}
 
 type fullResult struct {
 	text    string
@@ -50,8 +66,7 @@ func (s *Service) expand(p Post, book avatarBook) Post {
 	if ev, ok := p.TurnResult(); ok {
 		author = ev.Session
 	}
-	if v, ok := s.results.Load(p.ID); ok {
-		r := v.(fullResult)
+	if r, ok := s.results.Get(p.ID); ok {
 		return withFull(p, r)
 	}
 	// The writer is the session at this address whose turn p.Turn ended
@@ -81,7 +96,7 @@ func (s *Service) expand(p Post, book avatarBook) Post {
 		}
 	}
 	r.text, r.cut = FullCompletionText(author, p.Turn, completionState(p.Message), result, turn.Error)
-	s.results.Store(p.ID, r)
+	s.results.Add(p.ID, r)
 	return withFull(p, r)
 }
 
@@ -132,8 +147,7 @@ func FullCompletionText(address string, turn int, kind string, result any, errTe
 // its whole result or error, as the run view does.
 func (s *Service) expandRun(p Post) Post {
 	id := strings.TrimPrefix(p.From, "run:")
-	if v, ok := s.results.Load(p.ID); ok {
-		r := v.(fullResult)
+	if r, ok := s.results.Get(p.ID); ok {
 		p.Speaker = r.speaker
 		return withFull(p, r)
 	}
@@ -164,7 +178,7 @@ func (s *Service) expandRun(p Post) Post {
 	if max := MaxFeedResultKB * 1024; len(r.text) > max {
 		r.text, r.cut = strings.ToValidUTF8(r.text[:max], "")+fmt.Sprintf("\n\n*Cut at %d KB. Open the workflow for more.*", MaxFeedResultKB), true
 	}
-	s.results.Store(p.ID, r)
+	s.results.Add(p.ID, r)
 	p.Speaker = r.speaker
 	return withFull(p, r)
 }
