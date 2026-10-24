@@ -101,6 +101,32 @@ test('a typed event reference uses its card facts and keeps its jump action', ()
   target.remove()
 })
 
+test('a legacy PR reference with a notice keeps its stored text', () => {
+  const preview = 'https://github.com/acme/app/pull/542\nHead: 0123456789abcdef0123456789abcdef01234567\n\nacme/app PR approved by its Dyna reviewer:\n\nNo open findings.'
+  const legacy = Object.assign({}, reference, { from: 'dyna', speaker: 'dyna', kind: 'pr', notice: { kind: 'approved' }, preview })
+  const target = document.createElement('div')
+  document.body.append(target)
+  const mounted = web.mount(web.DmRows, {
+    target,
+    props: {
+      dm: view([legacy]), room: { id: 'room_1', name: 'room_1' }, member: { name: 'author', address: 'room_1:author', hue: 0 },
+      members, onthread: () => {}, onopenfile: () => {}, onpost: () => {},
+    },
+  })
+  web.flushSync()
+  const text = (target.textContent ?? '').replace(/\s+/g, ' ').trim()
+  assert.match(text, /PR #542/)
+  assert.match(text, /Approved by the reviewer/)
+  assert.doesNotMatch(text, /PR watcher/)
+  const details = [...target.querySelectorAll('button')].find((button) => button.textContent === 'Details')
+  assert.ok(details, 'the legacy card keeps its agent text behind Details')
+  details.click()
+  web.flushSync()
+  assert.match(target.textContent ?? '', /No open findings/)
+  web.unmount(mounted)
+  target.remove()
+})
+
 test('clicking a reference row opens its post where it was written', () => {
   const target = document.createElement('div')
   document.body.append(target)
