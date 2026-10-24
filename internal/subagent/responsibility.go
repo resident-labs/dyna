@@ -12,19 +12,14 @@ import (
 	"dyna-agent/internal/pr/links"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/runstore"
+	"dyna-agent/internal/sessionclose"
 	"dyna-agent/internal/sessionlife"
 	"dyna-agent/internal/shells"
 )
 
 // Responsibility is one thing a session owns. A session may finish only when
 // it owns none. Close hands work to an ancestor and refuses failed handoffs unless forced.
-type Responsibility struct {
-	// Kind is pr, goal, question, child, shell or workflow.
-	Kind string `json:"kind"`
-	ID   string `json:"id"`
-	// Text names the item and the command that ends or moves it.
-	Text string `json:"text"`
-}
+type Responsibility = sessionclose.Responsibility
 
 // owned is one responsibility and the session that owns it.
 type owned struct {

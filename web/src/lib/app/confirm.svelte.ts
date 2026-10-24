@@ -10,11 +10,12 @@ import type { Goal } from '../api/goal.ts'
 import type { Member } from '../api/room.ts'
 import type { RunSummary } from '../api/workflow.ts'
 import type { ToastInput } from '../ui/toast.ts'
+import { allowsForceClose, closeRecoveryOf, type Responsibility } from '../api/session.ts'
 
 /** What the page asks to confirm. */
 export type Confirming =
   | { kind: 'promote' | 'stop' | 'close'; m: Member; busy?: boolean; error?: string }
-  | { kind: 'forceclose'; m: Member; items: string[]; busy?: boolean; error?: string }
+  | { kind: 'forceclose'; m: Member; items: Responsibility[]; detail?: string; busy?: boolean; error?: string }
   | { kind: 'cancelrun'; run: Pick<RunSummary, 'id' | 'name' | 'status'>; busy?: boolean; error?: string }
   | { kind: 'expedite'; goal: Goal; roomId: string; busy?: boolean; error?: string }
 
@@ -76,12 +77,6 @@ function dismiss() {
   confirm = null
 }
 
-// guardItems lists what a close-guard error names: "responsibilities: cannot close:\n- ...".
-function guardItems(msg: string) {
-  const items = msg.split('\n').filter((l) => l.startsWith('- ') && !l.startsWith('- or close anyway')).map((l) => l.slice(2))
-  return items.length ? items : [msg]
-}
-
 let confirmText = $derived.by((): ConfirmText | null => {
   if (!confirm) return null
   if (confirm.kind === 'promote') {
@@ -92,9 +87,11 @@ let confirmText = $derived.by((): ConfirmText | null => {
     }
   }
   if (confirm.kind === 'forceclose') {
+    const items = confirm.items.map((item) => item.text)
+    if (!items.length && confirm.detail) items.push(confirm.detail)
     return {
       title: `Could not hand over all work from ${confirm.m.name}`,
-      lines: [...confirm.items, 'Retry after fixing the error, or force close. Goals move to the owner; other work stays unresolved.'],
+      lines: [...items, 'Retry after fixing the error, or force close. Goals move to the owner; other work stays unresolved.'],
       action: 'Close anyway',
     }
   }
@@ -174,8 +171,9 @@ async function runConfirm(force = false) {
     confirmHost.loadChanges()
   } catch (e) {
     const msg = errorText(e)
-    // Force is offered only when the automatic handoff fails.
-    if (kind === 'close' && msg.startsWith('responsibilities:')) confirm = { kind: 'forceclose', m, items: guardItems(msg) }
+    const recovery = closeRecoveryOf(e)
+    // Force is offered only when the server allows that recovery.
+    if (kind === 'close' && recovery && allowsForceClose(e)) confirm = { kind: 'forceclose', m, items: recovery.items, detail: msg }
     else confirm = { ...request, busy: false, error: msg }
   }
 }
