@@ -1,7 +1,7 @@
 // Profiles as the settings screen edits them. Source: internal/configsvc/profiles.go.
 import type { HarnessSupport } from '../settings/support.ts'
 import type { Compact } from './account.ts'
-import type { CachePaired, Cost } from '../settings/usage/activity.ts'
+import type { CachePaired, Cost } from '../settings/accounts/activity.ts'
 
 // ProfileView is configsvc.ProfileView.
 export interface ProfileView {

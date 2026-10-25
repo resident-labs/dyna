@@ -38,8 +38,8 @@ func TestUsageRefreshOverEngineSocket(t *testing.T) {
 	if !strings.Contains(out.String(), `"checkedAt"`) {
 		t.Fatalf("accounts output: %s", &out)
 	}
-	var snapshot service.Snapshot
-	if err := client.Call(ctx, "AccountUsage", []any{true}, &snapshot); err != nil || snapshot.CheckedAt.IsZero() {
+	var snapshot service.AccountsSnapshot
+	if err := client.Call(ctx, "AccountsList", []any{"", false}, &snapshot); err != nil || snapshot.CheckedAt.IsZero() {
 		t.Fatalf("snapshot = %+v, %v", snapshot, err)
 	}
 	if err := client.Call(ctx, "NoSuchMethod", nil, nil); err == nil || !strings.Contains(err.Error(), "no method NoSuchMethod") {

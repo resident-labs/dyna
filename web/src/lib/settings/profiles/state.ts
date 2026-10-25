@@ -1,4 +1,4 @@
-import type { Catalog, CatalogModel, Compact, CompactRule, Effort, UsageAccount } from '../../api/account.ts'
+import type { Catalog, CatalogModel, Compact, CompactRule, Effort, Account } from '../../api/account.ts'
 import type { ProfileView } from '../../api/profile.ts'
 
 export interface HarnessChoice {
@@ -26,11 +26,11 @@ export function filterModels(models: CatalogModel[], { category = 'all', provide
 export function routeModel(models: readonly CatalogModel[] | null | undefined, routeId?: string): CatalogModel | null {
   return routeId ? (models ?? []).find(m => m.id === routeId) ?? null : null
 }
-export function selectedAccount(accounts: readonly UsageAccount[], harness: string, model: Pick<CatalogModel, 'id' | 'integrationId' | 'providerId'> | null | undefined, connectionId = ''): UsageAccount | null {
+export function selectedAccount(accounts: readonly Account[], harness: string, model: Pick<CatalogModel, 'id' | 'integrationId' | 'providerId'> | null | undefined, connectionId = ''): Account | null {
   const candidates = accounts.filter(a => a.harness === harness)
   // Provider identifies model billing; integration identifies its credentials.
   const integration = model?.integrationId || model?.providerId
-  const matchesRoute = (a: UsageAccount) => (harness !== 'opencode' || !integration || a.providerId === integration) && (!a.routeId || a.routeId === model?.id)
+  const matchesRoute = (a: Account) => (harness !== 'opencode' || !integration || a.providerId === integration) && (!a.routeId || a.routeId === model?.id)
   if (connectionId) return candidates.find(a => a.id === connectionId && a.active && matchesRoute(a)) ?? null
   const active = candidates.filter(a => a.active && matchesRoute(a))
   return active.length === 1 ? active[0] ?? null : null

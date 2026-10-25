@@ -1,7 +1,8 @@
 // What the Dyna home screen shows. The functions are pure; Home.svelte loads
 // the data and draws the result.
-import { accountLabel, accountStatus, needsSignIn, remainingPercent, SUBSCRIPTIONS, usageGroups } from '../settings/usage/state.ts'
-import type { AccountLike, UsageGroup } from '../settings/usage/state.ts'
+import { accountLabel, accountStatus, needsSignIn, remainingPercent } from '../settings/accounts/state.ts'
+import type { AccountLike } from '../settings/accounts/state.ts'
+import type { Provider, ProviderAccounts, ScopeAccount } from '../api/account.ts'
 import { HARNESS_ORDER, harnessRowState } from '../settings/harnesses/state.ts'
 import type { HarnessSnapshot } from '../api/harness.ts'
 
@@ -12,27 +13,34 @@ export interface AccountAlert {
   action: string
 }
 
-export interface HomeAccounts<A extends AccountLike = AccountLike> {
-  cards: UsageGroup<A>[]
+export interface HomeAccounts {
+  cards: ProviderAccounts[]
   alerts: AccountAlert[]
 }
 
-// The plan a subscription joins. A host may still send a plan as a bare string.
+// A plan that reports its period instead of a percentage. A host may still send
+// a plan as a bare string.
+const PERIODIC_PLANS = new Set(['x-subscription', 'grok-legacy'])
 const planId = (account: AccountLike) => (typeof account.plan === 'object' ? account.plan?.id : undefined)
 
-// accountRows splits the active accounts: one that works and reports usage
-// is a usage card, one that needs a login or is quota-blocked is an alert row.
-// Known subscriptions also show their period when no percentage is reported.
-export function accountRows<A extends AccountLike>(snapshot?: { accounts?: A[] | null } | null): HomeAccounts<A> {
-  const cards: A[] = []
+// accountRows splits the accounts the global scope uses: one that works and
+// reports usage is a card of its provider, one that needs a login or is
+// quota-blocked is an alert row. A plan that reports its period still gets a
+// card, so a weekly quota without a percentage stays visible.
+export function accountRows(snapshot?: { providers?: { provider?: Provider; accounts?: ScopeAccount[] }[] | null } | null): HomeAccounts {
+  const cards: ProviderAccounts[] = []
   const alerts: AccountAlert[] = []
-  for (const a of snapshot?.accounts ?? []) {
-    if (!a.active) continue
-    const login = needsSignIn(a)
-    if (login || a.quotaBlocked) alerts.push({ id: a.id ?? '', text: `${accountLabel(a)}: ${accountStatus(a)}`, action: login ? 'Log in' : 'Details' })
-    else if (SUBSCRIPTIONS.some((sub) => sub.id === planId(a)) || a.windows?.some((w) => remainingPercent(w) !== null)) cards.push(a)
+  for (const group of snapshot?.providers ?? []) {
+    const shown: ScopeAccount[] = []
+    for (const a of group.accounts ?? []) {
+      if (!a.activeHere) continue
+      const login = needsSignIn(a)
+      if (login || a.quotaBlocked) alerts.push({ id: a.id, text: `${accountLabel(a)}: ${accountStatus(a)}`, action: login ? 'Log in' : 'Details' })
+      else if (PERIODIC_PLANS.has(planId(a) ?? '') || a.windows?.some((w) => remainingPercent(w) !== null)) shown.push(a)
+    }
+    if (shown.length) cards.push({ provider: group.provider ?? '', accounts: shown })
   }
-  return { cards: usageGroups(cards), alerts }
+  return { cards, alerts }
 }
 
 // One row of what has a newer version.

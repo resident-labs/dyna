@@ -7,9 +7,9 @@ import type { Reference } from '../rooms/references.ts'
 // config.ConfigSnapshot, typed here as HarnessConfig, which lists the fields
 // the web app reads (mcp and skills).
 import type { HookInput } from '../settings/hooks.ts'
-import type { ActivityRollup } from '../settings/usage/activity.ts'
+import type { ActivityRollup } from '../settings/accounts/activity.ts'
 import type { CallRequest } from '../voice/callRequests.ts'
-import type { Catalog, UsageSnapshot } from './account.ts'
+import type { AccountsSnapshot, Catalog } from './account.ts'
 import type { ChangeDetail, ChangePolicy, ChangeView, HeldComment, MergeControlStatus, CIBudgetSettings, MergeHistoryEntry, MergeQueueItem, PolicyOverride, PRConfig, PRNoiseList, ReviewerStatus } from './change.ts'
 import type { ComputerInfo } from './computer.ts'
 import type { DiffComment } from '../files/diffComments.ts'
@@ -39,9 +39,14 @@ export type ProfileSave = Omit<ProfileEdit, 'envSet' | 'envRemove'> & Partial<Pi
 export type AttachmentRef = Pick<Attachment, 'id' | 'name'>
 
 export interface Engine {
-  // Usage and models.
-  AccountUsageCached(): Promise<UsageSnapshot>
-  AccountUsage(refresh: boolean): Promise<UsageSnapshot>
+  // Accounts and models. AccountsView reads the saved sign-ins grouped by
+  // provider and marks the one each provider uses in scope; AccountsList also
+  // asks each provider for new usage.
+  AccountsView(scope: string): Promise<AccountsSnapshot>
+  AccountsList(scope: string, refresh: boolean): Promise<AccountsSnapshot>
+  AccountsUse(id: string, scope: string): Promise<AccountsSnapshot>
+  AccountsAdd(provider: string, label: string, key: string): Promise<AccountsSnapshot>
+  AccountsRemove(id: string): Promise<AccountsSnapshot>
   ProfileModels(harness: string, refresh: boolean): Promise<Catalog>
   UsageRollup(roomId: string, from: string, to: string): Promise<ActivityRollup>
   ProfileUsage(from: string, to: string): Promise<ProfileUsageSnapshot>
@@ -270,7 +275,6 @@ export interface Engine {
   PrivateRuntimeSwitchState(harness: string): Promise<PrivateRuntimeSwitchControl>
   CancelPrivateRuntimeAccountSwitch(harness: string, requestId: string): Promise<PrivateRuntimeSwitchControl>
   ConfirmPrivateRuntimeAccountSwitch(harness: string, requestId: string, stopConfirmed: boolean): Promise<PrivateRuntimeSwitchControl>
-  SwitchPrivateRuntimeAccount(id: string, confirmed: boolean): Promise<HarnessSnapshot>
   PreviewPrivateConfig(id: string): Promise<PreferencePreview>
   ImportPrivateConfig(id: string, hash: string): Promise<HarnessSnapshot>
   PrivateRuntimes(): Promise<HarnessSnapshot>

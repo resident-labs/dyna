@@ -25,7 +25,7 @@ func TestEngineDown(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		err := noWait(path).Call(t.Context(), "AccountUsage", []any{true}, nil)
+		err := noWait(path).Call(t.Context(), "AccountsList", []any{"", false}, nil)
 		if !errors.Is(err, ErrNotRunning) {
 			t.Fatalf("stale=%v: got %v", stale, err)
 		}

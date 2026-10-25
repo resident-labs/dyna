@@ -12,14 +12,14 @@ import { mount } from 'svelte'
 import { api } from '../src/api.ts'
 import Settings from '../src/lib/settings/Settings.svelte'
 import { fixtureWindow, rollupFixture } from './usageRollupFixture.ts'
-import { usageAccount } from '../test/account-fixtures.ts'
+import { account } from '../test/account-fixtures.ts'
 import { need } from '../test/need.ts'
 import type { Capability, HarnessAccount, HarnessConfig, HarnessSnapshot, Bundle } from '../src/lib/api/harness.ts'
 import type { HarnessSupport } from '../src/lib/settings/support.ts'
 import type { ProfileList, ProfileUsageStats, ProfileView } from '../src/lib/api/profile.ts'
 import type { ProfileSave } from '../src/lib/api/engine.ts'
-import type { UsageAccount } from '../src/lib/api/account.ts'
-import type { ActivityRollup } from '../src/lib/settings/usage/activity.ts'
+import type { ScopeAccount } from '../src/lib/api/account.ts'
+import type { ActivityRollup } from '../src/lib/settings/accounts/activity.ts'
 import type { Device, SettingItem } from '../src/lib/api/settings.ts'
 
 const query = new URLSearchParams(location.search)
@@ -67,16 +67,6 @@ api.uninstallPrivateRuntime = (harness: string) => {
   delete selectedVersions[harness]
   return later(snapshot)
 }
-api.removePrivateRuntimeAccount = (id: string) => {
-  snapshot.accounts = snapshot.accounts.filter((a) => a.id !== id)
-  return later(snapshot)
-}
-api.switchPrivateRuntimeAccount = (id: string) => {
-  const h = need(snapshot.accounts.find((a) => a.id === id)).harness
-  snapshot.accounts = snapshot.accounts.map((a) => a.harness === h ? { ...a, active: a.id === id } : a)
-  return later(snapshot)
-}
-api.findPersonalLogin = () => later(null)
 api.beginPrivateRuntimeLogin = () => new Promise(() => {})
 
 const minutes = (n: number) => new Date(Date.now() - n * 60000).toISOString()
@@ -114,14 +104,30 @@ api.saveProfile = ({ original, profile: p }: ProfileSave) => { profileList.profi
 api.removeProfile = (name: string) => { profileList.profiles = profileList.profiles.filter((p) => p.name !== name); return later(null) }
 
 const window5 = (id: string, label: string, used: number) => fixtureWindow(id, label, used, inHours(id === 'short' ? 3 : 70))
-const usageAccounts: UsageAccount[] = [
-  usageAccount({ id: 'claude-work', harness: 'claude-code', label: 'Claude · Work', active: true, plan: { id: 'max', label: 'Max 20x' }, source: 'Claude account report', observedAt: minutes(2), profiles: ['opus', 'haiku'], windows: [window5('short', '5-hour window', 32), window5('weekly', 'Weekly window', 59)] }),
-  usageAccount({ id: 'codex-1', harness: 'codex', label: 'Codex · ChatGPT account', active: true, plan: { id: 'plus', label: 'Plus' }, source: 'Codex account report', observedAt: minutes(5), profiles: ['sol'], windows: [window5('short', '5-hour window', 18), window5('weekly', 'Weekly window', 41)] }),
-  usageAccount({ id: 'go', harness: 'opencode', label: 'OpenCode Go · Personal', active: true, source: 'OpenCode Console usage', observedAt: minutes(9), profiles: ['mimo'], windows: [{ ...window5('short', '5-hour window', 20), used: 2.4, limit: 12, unit: 'USD' }, { ...window5('weekly', 'Weekly window', 30), used: 9, limit: 30, unit: 'USD' }] }),
+const savedAccounts: ScopeAccount[] = [
+  { ...account({ id: 'claude-work', harness: 'pi', provider: 'anthropic', kind: 'oauth', label: 'Claude · Work', active: true, plan: { id: 'max', label: 'Max 20x' }, source: 'Claude account report', observedAt: minutes(2), profiles: ['opus', 'haiku'], windows: [window5('short', '5-hour window', 32), window5('weekly', 'Weekly window', 59)] }), activeHere: true },
+  { ...account({ id: 'claude-home', harness: 'pi', provider: 'anthropic', kind: 'oauth', label: 'Claude · Personal', source: 'Claude account report', observedAt: minutes(4), windows: [window5('short', '5-hour window', 11), window5('weekly', 'Weekly window', 22)] }), activeHere: false },
+  { ...account({ id: 'codex-1', harness: 'pi', provider: 'chatgpt', kind: 'oauth', label: 'Codex · ChatGPT account', active: true, plan: { id: 'plus', label: 'Plus' }, source: 'Codex account report', observedAt: minutes(5), profiles: ['sol'], windows: [window5('short', '5-hour window', 18), window5('weekly', 'Weekly window', 41)] }), activeHere: true },
+  { ...account({ id: 'go', harness: 'pi', provider: 'opencode-go', kind: 'api_key', label: 'OpenCode Go · Personal', active: true, source: 'OpenCode Console usage', observedAt: minutes(9), profiles: ['mimo'], windows: [{ ...window5('short', '5-hour window', 20), used: 2.4, limit: 12, unit: 'USD' }, { ...window5('weekly', 'Weekly window', 30), used: 9, limit: 30, unit: 'USD' }] }), activeHere: true },
 ]
-const usage = () => ({ accounts: empty ? [] : structuredClone(usageAccounts), checkedAt: minutes(1) })
-api.accountUsageCached = () => later(usage())
-api.accountUsage = () => later(usage())
+const accountsSnapshot = (scope = '') => {
+  const providers = [...new Set(savedAccounts.map((a) => a.provider ?? ''))]
+  return { scope, providers: empty ? [] : providers.map((provider) => ({ provider, accounts: savedAccounts.filter((a) => (a.provider ?? '') === provider) })), problems: [], checkedAt: minutes(1) }
+}
+api.accountsView = (scope = '') => later(accountsSnapshot(scope))
+api.accountsList = (scope = '') => later(accountsSnapshot(scope))
+api.accountsUse = (id: string, scope = '') => {
+  const chosen = savedAccounts.find((a) => a.id === id)
+  if (chosen) for (const a of savedAccounts) if (a.provider === chosen.provider) a.activeHere = a.id === id
+  return later(accountsSnapshot(scope))
+}
+api.accountsAdd = () => later(accountsSnapshot())
+api.setAccountRepos = () => later(snapshot)
+api.accountsRemove = (id: string) => {
+  const at = savedAccounts.findIndex((a) => a.id === id)
+  if (at >= 0) savedAccounts.splice(at, 1)
+  return later(accountsSnapshot())
+}
 const none = { tokens: null, completeTurns: 0, partialTurns: 0, unknownTurns: 0 }
 const emptyRollup: ActivityRollup = { from: '', to: '', totals: { turns: 0, wallMs: 0, input: none, cached: none, output: none, cost: { usd: null, completeTurns: 0, partialTurns: 0, unknownTurns: 0 }, cachePaired: { input: 0, cached: 0, turns: 0 } }, byDayModel: [], byRoleModel: [] }
 api.usageRollup = (_room: string | undefined, from: string, to: string) => later(empty ? emptyRollup : rollupFixture(Math.max(1, Math.round((Date.parse(to) - Date.parse(from)) / 864e5) + 1)))

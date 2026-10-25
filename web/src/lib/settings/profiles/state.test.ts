@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { filterModels, selectedAccount, routeModel, blankProfile, normalizeModels, withEffort, effortIn, routeEffort, profileEffort, chooseEffort, compactBlock, compactFor, compactWindows, compactHint } from './state.ts'
-import { catalogModel as model, effortOf as effort, usageAccount } from '../../../../test/account-fixtures.ts'
+import { catalogModel as model, effortOf as effort, account as accountFixture } from '../../../../test/account-fixtures.ts'
 import { need } from '../../../../test/need.ts'
 
 const go = model('opencode-go/model', { label: 'Shared name', providerId: 'opencode-go', category: 'go' })
@@ -19,7 +19,7 @@ test('route preselection preserves exact identity and never substitutes by label
   assert.equal(routeModel(models, ''), null)
 })
 test('account selection requires matching harness, route, and unambiguous active connection', () => {
-  const account = usageAccount({ id: 'a', harness: 'opencode', providerId: 'opencode-go', active: true })
+  const account = accountFixture({ id: 'a', harness: 'opencode', providerId: 'opencode-go', active: true })
   assert.equal(selectedAccount([account], 'opencode', go), account)
   assert.equal(selectedAccount([account], 'codex', go), null)
   assert.equal(selectedAccount([account], 'opencode', free, 'a'), null)
@@ -40,9 +40,9 @@ test('new profiles start every rating at neutral 5, including diagnostics', () =
 })
 
 test('single-route harnesses join by harness while OpenCode follows credential integration', () => {
-  const codex = usageAccount({ id: 'codex-account', harness: 'codex', providerId: 'codex', active: true })
+  const codex = accountFixture({ id: 'codex-account', harness: 'codex', providerId: 'codex', active: true })
   assert.equal(selectedAccount([codex], 'codex', { id: 'gpt-test', providerId: 'openai' }), codex)
-  const consoleAccount = usageAccount({ id: 'console-account', harness: 'opencode', providerId: 'opencode', active: true })
+  const consoleAccount = accountFixture({ id: 'console-account', harness: 'opencode', providerId: 'opencode', active: true })
   const route = { id: 'opencode-go/model', providerId: 'opencode-go', integrationId: 'opencode' }
   assert.equal(selectedAccount([consoleAccount], 'opencode', route), consoleAccount)
   assert.equal(selectedAccount([consoleAccount], 'opencode', { ...route, integrationId: 'different' }), null)

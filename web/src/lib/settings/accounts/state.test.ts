@@ -1,8 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { allowanceLabel, accountLabel, remainingPercent, percent, requestGate, needsSignIn, accountStatus, observation, shortLabel, windowReset, usageGroups, unreadText, harnessName } from './state.ts'
-import { usageAccount } from '../../../../test/account-fixtures.ts'
-import { need } from '../../../../test/need.ts'
+import { allowanceLabel, accountLabel, accountsOf, accountStatus, needsSignIn, observation, percent, problemText, providerName, remainingPercent, reposLabel, requestGate, shortLabel, usageUnavailableText, selectionText, windowReset } from './state.ts'
+import { account } from '../../../../test/account-fixtures.ts'
 import type { UsageWindow } from '../../api/account.ts'
 
 // A window with the fields a test leaves out.
@@ -21,14 +20,16 @@ test('missing allowance is unknown while an explicitly exhausted bucket is zero'
   assert.equal(remainingPercent(raw('{"usedPercent":"10"}')), null)
   assert.equal(percent(null), 'Not reported')
 })
+
 test('needsSignIn and quotaBlocked status reporting', () => {
   assert.equal(needsSignIn({ needsLogin: true }), true)
   assert.equal(needsSignIn({ status: 'needs_auth' }), true)
   assert.equal(needsSignIn({ status: 'ready' }), false)
   const at = Date.parse('2026-10-18T12:00:00Z')
   assert.match(accountStatus({ status: 'ready', quotaBlocked: true, blockingQuotaWindows: ['seven_day'], quotaBlockedUntil: '2026-10-18T13:00:00Z' }, '', at), /Weekly limit reached/)
-  assert.match(observation({ source: 'OAuth', refreshMessage: 'Refreshed by Dyna' }), /Refreshed by Dyna/)
+  assert.match(observation({ source: 'OAuth', observedAt: '2026-10-18T12:00:00Z' }), /Checked/)
 })
+
 test('a limit whose blocking windows have all reset stops being reported on an open page', () => {
   const at = Date.parse('2026-10-18T14:00:00Z')
   // The host marked the account blocked for a session window that has reset since.
@@ -46,6 +47,7 @@ test('a limit whose blocking windows have all reset stops being reported on an o
   // A window that is only partly used never blocks, whatever the host said.
   assert.equal(accountStatus({ harness: 'codex', status: 'ready', quotaBlocked: true, windows: [win({ id: 'seven_day', usedPercent: 40, resetsAt: '2026-10-20T13:00:00Z' })] }, '', at), 'Plan not reported')
 })
+
 test('a delayed response cannot replace a newer request, even for the same identity', async () => {
   const gate = requestGate()
   let resolve: (value: string) => void = () => {}
@@ -75,6 +77,13 @@ test('OpenCode default labels identify the provider and preserve custom account 
   assert.equal(accountLabel({ harness: 'codex', label: 'OpenCode account' }), 'OpenCode account')
 })
 
+test('an account without a label is named by its provider, and a provider has a name', () => {
+  assert.equal(providerName('anthropic'), 'Anthropic')
+  assert.equal(providerName('zai'), 'Z.ai')
+  assert.equal(providerName(''), 'No provider')
+  assert.equal(accountLabel({ provider: 'deepseek', harness: 'pi' }), 'DeepSeek')
+  assert.equal(accountLabel({ provider: 'deepseek', label: 'Work', harness: 'pi' }), 'Work')
+})
 
 test('short window labels name the model group and the period only', () => {
   const cases: Record<string, string> = {
@@ -90,51 +99,48 @@ test('short window labels name the model group and the period only', () => {
   for (const [label, short] of Object.entries(cases)) assert.equal(shortLabel(label), short, label)
 })
 
- test('observation shows a failed usage read with cached windows', () => {
-  assert.match(observation({ usageError: 'Provider unavailable', windows: [win({ usedPercent: 20 })] }), /Provider unavailable/)
-})
-
-test('subscription groups use the reported plan and preserve account readings', () => {
-  const weekly = usageAccount({ id: 'g1', harness: 'grok', plan: { id: 'x-subscription', label: '' }, windows: [win({ id: 'weekly', resetsAt: '2099-01-01T00:00:00Z' })] })
-  const other = { ...weekly, id: 'g2' }
-  const legacy = usageAccount({ id: 'old', harness: 'grok', plan: { id: 'grok-legacy', label: '' } })
-  const unknown = usageAccount({ id: 'unknown', harness: 'grok' })
-  const groups = usageGroups([weekly, other, legacy, unknown])
-  assert.deepEqual(groups.map(g => g.id), ['x-subscription', 'grok-legacy', 'unknown'])
-  const [subscription, old] = groups
-  assert.deepEqual(need(subscription).accounts, [weekly, other])
-  assert.equal(need(need(subscription).accounts[0]).windows, weekly.windows)
-  assert.equal(need(subscription).name, 'X Subscription (weekly)')
-  assert.equal(need(old).name, 'Legacy (monthly)')
-  assert.equal(unreadText(legacy), 'Legacy plan, usage not read')
-  assert.equal(harnessName('grok'), 'Grok')
-  assert.deepEqual(usageGroups([]), [])
-})
-
 test('window allowance shows the provider reason without inventing a percent', () => {
   assert.equal(allowanceLabel({ unavailableReason: 'Grok does not report remaining allowance.' }), 'Grok does not report remaining allowance.')
 })
 
-test('rate limited observations explain the cached reading without an unavailable prefix', () => {
-  const message = 'rate limited; showing the reading from 2026-10-19T08:00:00Z'
-  const detail = observation({ usageError: message, rateLimitedUntil: '2026-10-19T08:05:00Z' })
-  assert.ok(detail.includes(message))
-  assert.ok(!detail.includes('Usage unavailable:'))
-  assert.ok(observation({ usageError: 'provider unavailable' }).includes('Usage unavailable: provider unavailable'))
+test('idle window explains a passed reset without a new model call', () => {
+  const window = win({ label: 'Session (5-hour) (idle)', usedPercent: 21, resetsAt: '2020-01-01T00:00:00Z' })
+  assert.equal(remainingPercent(window), 79)
+  assert.match(windowReset(window), /^Idle since /)
+  assert.match(windowReset({ ...window, label: 'Weekly' }), /^Reset /)
 })
 
- test('idle window explains a passed reset without a new model call', () => {
- const window = win({ label: 'Session (5-hour) (idle)', usedPercent: 21, resetsAt: '2020-01-01T00:00:00Z' })
- assert.equal(remainingPercent(window), 79)
- assert.match(windowReset(window), /^Idle since /)
- assert.match(windowReset({ ...window, label: 'Weekly' }), /^Reset /)
- })
-
 test('OpenCode omits an unreported plan while preserving real plans and account warnings', () => {
-  const account = { harness: 'opencode', status: 'ready' }
-  assert.equal(accountStatus(account), '')
-  assert.equal(accountStatus({ ...account, plan: { id: 'unknown', label: '' } }), '')
-  assert.equal(accountStatus({ ...account, plan: { id: '', label: 'Reported plan' } }), 'Reported plan')
-  assert.equal(accountStatus({ ...account, needsLogin: true }), 'Needs sign-in')
-  assert.equal(accountStatus({ ...account, quotaBlocked: true }), 'Session limit reached')
+  const row = { harness: 'opencode', status: 'ready' }
+  assert.equal(accountStatus(row), '')
+  assert.equal(accountStatus({ ...row, plan: { id: 'unknown', label: '' } }), '')
+  assert.equal(accountStatus({ ...row, plan: { id: '', label: 'Reported plan' } }), 'Reported plan')
+  assert.equal(accountStatus({ ...row, needsLogin: true }), 'Needs sign-in')
+  assert.equal(accountStatus({ ...row, quotaBlocked: true }), 'Session limit reached')
+})
+
+test('an account without readable usage says why in words, never raw engine text', () => {
+  assert.equal(usageUnavailableText({ kind: 'api_key', usageError: 'provider said 403' }), 'Usage unavailable for an API key')
+  assert.equal(usageUnavailableText({ kind: 'oauth' }), 'Usage unavailable')
+  assert.equal(usageUnavailableText({ kind: 'oauth', needsLogin: true }), 'Sign in to read usage')
+  assert.equal(observation({ usageError: 'provider said 403', rateLimitedUntil: '2000-01-01T00:00:00Z' }), '')
+})
+
+test('the cards word the repo limit, the selection and a skipped saved row', () => {
+  assert.equal(reposLabel({ repos: null }), 'All repos')
+  assert.equal(reposLabel({ repos: ['github.com/me/one'] }), '1 repo only')
+  assert.equal(reposLabel({ repos: ['a', 'b'] }), '2 repos only')
+  assert.equal(selectionText({ ...account({ id: 'a', harness: 'pi' }), activeHere: true }, false), 'In use')
+  assert.equal(selectionText({ ...account({ id: 'a', harness: 'pi' }), activeHere: false, active: true }, true), 'Global choice')
+  assert.equal(selectionText({ ...account({ id: 'a', harness: 'pi' }), activeHere: false, active: false }, true), '')
+  assert.match(problemText({ id: 'x', label: 'Work', reason: 'missing-home' }), /^Work: its saved home directory is gone\.$/)
+  assert.match(problemText({ id: 'x', reason: 'unreadable' }), /^A saved account: Dyna could not read this saved account\.$/)
+})
+
+test('accountsOf flattens the provider groups in their engine order', () => {
+  const work = account({ id: 'w', harness: 'pi' })
+  const home = account({ id: 'h', harness: 'pi' })
+  assert.deepEqual(accountsOf({ providers: [{ provider: 'anthropic', accounts: [{ ...work, activeHere: true }] }, { provider: 'zai', accounts: [{ ...home, activeHere: false }] }] }).map((a) => a.id), ['w', 'h'])
+  assert.deepEqual(accountsOf(null), [])
+  assert.deepEqual(accountsOf({ providers: null }), [])
 })
