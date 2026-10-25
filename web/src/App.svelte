@@ -112,7 +112,7 @@
   import { engineWatch, browserEngine, type EngineStatus } from './lib/engineStatus.ts'
   import { loadLayout, saveLayout, lastRoom, saveLastRoom } from './lib/ui/prefs.ts'
   import { dmView } from './lib/sessions/dm.ts'
-  import { followInternalLink, internalLinkHash, roomLabel } from './lib/ui/format.ts'
+  import { followInternalLink, internalLinkHash, roomLabel, short } from './lib/ui/format.ts'
   import { parseDetailHref } from './lib/ui/details.ts'
   import { parsePRHash, parseIssueHash, parseFileHash } from './lib/prs/prlink.ts'
   import { ROOT_SESSION, parseRoute, routeHash, routeSession } from './lib/ui/route.ts'
@@ -1009,21 +1009,20 @@
     setTimeout(() => composer?.focus(), 0)
   }
 
-  // startReply targets the post's sender. It replaces the draft's leading
-  // recipients (a kept '@viewer ' included) and keeps any text already
-  // written after them. A reply to your own post leaves the draft alone.
-  // A reply to a root post targets @root: root is an external orchestrator
-  // that watches the room, not you.
+  // startReply targets the post's sender, which the server names from the
+  // stored identity of the post (Post.reply). The stored session answers at
+  // its current address, so a renamed session still takes the reply. It
+  // replaces the draft's leading recipients (a kept '@viewer ' included) and
+  // keeps any text already written after them. A post with no reply target,
+  // such as one the owner typed, leaves the draft alone.
   function startReply(p: Post) {
     reply = p
     if (!room) return
-    if (!p.owner) {
+    const target = p.reply
+    if (target) {
+      const address = (target.id ? members.find((m) => m.id === target.id)?.address : '') || target.address
       const body = draft.value.replace(/^\s*(?:@\S+(?:\s+|$))*/, '')
-      const target = p.from.startsWith(room.name + ':') ? p.from.slice(room.name.length + 1) : 'root'
-      draft.value = `@${target} ${body}`
-    } else if (!p.human) {
-      const body = draft.value.replace(/^\s*(?:@\S+(?:\s+|$))*/, '')
-      draft.value = `@root ${body}`
+      draft.value = `@${short(address, room.name)} ${body}`
     }
     composer?.focus()
   }
