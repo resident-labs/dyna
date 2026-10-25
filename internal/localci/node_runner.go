@@ -171,6 +171,30 @@ func (c checkResources) scope(host bool) scopeLimits {
 	return scopeLimits{CPUs: c.CPUs, MemoryMiB: memory, TasksMax: hostTasksMax}
 }
 
+// nodeDropCIRef removes the commit ref a previous run of the same commit left on
+// the node. An interrupted run can leave one that points at a missing object, and
+// neither a plain nor a forced push can replace such a ref.
+func nodeDropCIRef(cache, sha string) string {
+	return "git --git-dir=" + shellquote.Quote(cache) + " update-ref -d " + shellquote.Quote("refs/dyna/ci/"+sha) + " 2>/dev/null || true"
+}
+
+// pushCommitToNode gives the node the commit under its own ref, so a second run
+// of the same commit replaces whatever an interrupted first run left behind.
+func (r Runner) pushCommitToNode(ctx context.Context, repo, cache, sha string) error {
+	var output tailBuffer
+	if err := r.nodeCommand(ctx, &output, &output, "", nodeDropCIRef(cache, sha)); err != nil {
+		return fmt.Errorf("clear commit ref on node: %w: %s", err, &output)
+	}
+	dest := cache
+	if r.Node.SSH != "" {
+		dest = r.Node.SSH + ":" + cache
+	}
+	if err := r.run(ctx, repo, &output, "git", "push", dest, sha+":refs/dyna/ci/"+sha); err != nil {
+		return fmt.Errorf("push commit to node: %w: %s", err, &output)
+	}
+	return nil
+}
+
 // ErrHostChecksDisabled means a repository asked for host execution on a
 // machine whose owner has not allowed it. The repository cannot enable it.
 var ErrHostChecksDisabled = errors.New("host CI checks are disabled")
@@ -424,13 +448,8 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 		return result, fmt.Errorf("initialize node: %w: %s", setupErr, &output)
 	}
 	output.Reset()
-	if node.SSH == "" {
-		err = r.run(control, repo, &output, "git", "push", cache, sha+":refs/dyna/ci/"+sha)
-	} else {
-		err = r.run(control, repo, &output, "git", "push", node.SSH+":"+cache, sha+":refs/dyna/ci/"+sha)
-	}
-	if err != nil {
-		return result, fmt.Errorf("push commit to node: %w: %s", err, &output)
+	if err := r.pushCommitToNode(control, repo, cache, sha); err != nil {
+		return result, err
 	}
 	defer func() {
 		cleanup, stop := context.WithTimeout(context.Background(), containerCleanupTimeout)
