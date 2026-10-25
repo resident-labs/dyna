@@ -12,7 +12,7 @@ import (
 // accounts: the list returns the good row and names the bad one.
 func TestListSkipsUnknownHarnessRowAndNamesIt(t *testing.T) {
 	a := testAccounts(t)
-	good, err := a.Create("codex", "Good")
+	good, err := a.Create("pi", "Good")
 	if err != nil {
 		t.Fatal(err)
 	}
