@@ -6,6 +6,7 @@ import (
 
 	"dyna-agent/internal/account/service/adapters"
 	"dyna-agent/internal/account/store"
+	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/profile"
 )
 
@@ -14,33 +15,39 @@ type Window = store.Window
 type Effort = adapters.Effort
 type Account struct {
 	usageCheckedAt       time.Time
-	UsageError           string     `json:"usageError,omitempty"`
-	ExpiresAt            *time.Time `json:"expiresAt,omitempty"`
-	RefreshMessage       string     `json:"refreshMessage,omitempty"`
-	QuotaBlocked         bool       `json:"quotaBlocked"`
-	QuotaBlockedUntil    *time.Time `json:"quotaBlockedUntil,omitempty"`
-	BlockingQuotaWindows []string   `json:"blockingQuotaWindows,omitempty"`
-	ID                   string     `json:"id"`
-	Harness              string     `json:"harness"`
-	Label                string     `json:"label"`
-	ProviderID           string     `json:"providerId"`
-	RouteID              string     `json:"routeId,omitempty"`
-	Active               bool       `json:"active"`
-	Status               string     `json:"status"`
-	Plan                 *Plan      `json:"plan,omitempty"`
-	Source               string     `json:"source"`
-	ObservedAt           time.Time  `json:"observedAt"`
-	RateLimitedUntil     *time.Time `json:"rateLimitedUntil,omitempty"`
-	Stale                bool       `json:"stale"`
-	Profiles             []string   `json:"profiles"`
-	Windows              []Window   `json:"windows"`
-	Integration          string     `json:"integration,omitempty"`
-	NeedsLogin           bool       `json:"needsLogin"`
+	UsageError           string         `json:"usageError,omitempty"`
+	ExpiresAt            *time.Time     `json:"expiresAt,omitempty"`
+	RefreshMessage       string         `json:"refreshMessage,omitempty"`
+	QuotaBlocked         bool           `json:"quotaBlocked"`
+	QuotaBlockedUntil    *time.Time     `json:"quotaBlockedUntil,omitempty"`
+	BlockingQuotaWindows []string       `json:"blockingQuotaWindows,omitempty"`
+	ID                   string         `json:"id"`
+	Harness              string         `json:"harness"`
+	Provider             store.Provider `json:"provider,omitempty"`
+	Kind                 store.Kind     `json:"kind,omitempty"`
+	Repos                []string       `json:"repos"`
+	Label                string         `json:"label"`
+	ProviderID           string         `json:"providerId"`
+	RouteID              string         `json:"routeId,omitempty"`
+	Active               bool           `json:"active"`
+	Status               string         `json:"status"`
+	Plan                 *Plan          `json:"plan,omitempty"`
+	Source               string         `json:"source"`
+	ObservedAt           time.Time      `json:"observedAt"`
+	RateLimitedUntil     *time.Time     `json:"rateLimitedUntil,omitempty"`
+	Stale                bool           `json:"stale"`
+	Profiles             []string       `json:"profiles"`
+	Windows              []Window       `json:"windows"`
+	Integration          string         `json:"integration,omitempty"`
+	NeedsLogin           bool           `json:"needsLogin"`
 }
 type Snapshot struct {
-	Accounts  []Account `json:"accounts"`
-	CheckedAt time.Time `json:"checkedAt"`
-	Message   string    `json:"message,omitempty"`
+	Accounts []Account `json:"accounts"`
+	// Problems names each saved row the list skipped, so one bad row cannot hide
+	// the accounts that could be read.
+	Problems  []runtime.AccountProblem `json:"problems,omitempty"`
+	CheckedAt time.Time                `json:"checkedAt"`
+	Message   string                   `json:"message,omitempty"`
 }
 type Limit struct {
 	Label  string `json:"label"`

@@ -63,11 +63,11 @@ func TestExplicitUsageRefreshRenewsCredentialsBeforeProbe(t *testing.T) {
 			})
 			defer func() { http.DefaultTransport = old }()
 			s := New(Options{Store: st})
-			rows, err := s.nativeHomeAccounts(context.Background(), false)
+			rows, _, err := s.nativeHomeAccounts(context.Background(), false)
 			if err != nil || len(rows) != 1 || refreshes != 0 || probes != 0 {
 				t.Fatal("plain usage read refreshed credentials or probed", err)
 			}
-			rows, err = s.nativeHomeAccounts(context.Background(), true)
+			rows, _, err = s.nativeHomeAccounts(context.Background(), true)
 			if err != nil || len(rows) != 1 {
 				t.Fatal("usage refresh failed", err)
 			}

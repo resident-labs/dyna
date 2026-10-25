@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/account/service"
-	"dyna-agent/internal/cli/usage"
+	cliaccounts "dyna-agent/internal/cli/accounts"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/enginetest"
 	"dyna-agent/internal/store"
@@ -25,18 +25,18 @@ func TestUsageRefreshOverEngineSocket(t *testing.T) {
 	}
 	path := enginetest.Serve(t, store.DataDir(), calls)
 	client := engineclient.New(path)
-	cmd := usage.Command(usage.Options{Client: client})
+	cmd := cliaccounts.Command(cliaccounts.Options{Client: client})
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&out)
-	cmd.SetArgs([]string{"--refresh", "--json"})
+	cmd.SetArgs([]string{"list", "--refresh", "--json"})
 	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	if err := cmd.ExecuteContext(ctx); err != nil {
 		t.Fatal(err, out.String())
 	}
 	if !strings.Contains(out.String(), `"checkedAt"`) {
-		t.Fatalf("usage output: %s", &out)
+		t.Fatalf("accounts output: %s", &out)
 	}
 	var snapshot service.Snapshot
 	if err := client.Call(ctx, "AccountUsage", []any{true}, &snapshot); err != nil || snapshot.CheckedAt.IsZero() {

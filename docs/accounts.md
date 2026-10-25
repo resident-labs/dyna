@@ -12,6 +12,19 @@ Open **Settings → Harnesses** to manage accounts:
 
 The CLI does the same with `dyna harness login <harness>` and `dyna harness accounts activate <account-id>`. See [private harness runtimes](private-harness-runtimes.md) for homes and sign-in details.
 
+## Accounts by provider
+
+One account is one provider sign-in: anthropic, chatgpt, kimi-code, xai, meta-muse, opencode-go, deepseek, zai. A harness only runs the account, and two accounts of one provider can run at the same time because each keeps its own home.
+
+- `dyna accounts list [--provider P] [--room R] [--refresh] [--json]` lists the accounts grouped by provider, with the sign-in state and the usage windows. `--refresh` asks each provider for current usage.
+- `dyna accounts use <account> [--room R | --global]` chooses the account its provider runs. The default is global. `--room` changes only that room: its turns use the chosen account and every other room keeps its own.
+- `dyna accounts add <provider> [--label L] [--api-key-stdin]` adds an account. A key is read from standard input only, never from an argument. Without `--api-key-stdin` the command prints the sign-in step to run.
+- `dyna accounts remove <account>` deletes an account and its homes.
+
+An account is named by ID, an ID prefix, or a label that names one account only. A saved row Dyna cannot read shows as a skipped row with its reason; it never hides the other accounts. A harness that keeps one shared sign-in, such as OpenCode or Muse, has a global account only: a room cannot choose its own account for it.
+
+`dyna usage` was removed. Use `dyna accounts list --refresh` instead.
+
 ## Usage
 
 **Settings → Usage** lists the private accounts with their plan and usage windows. It first shows the last saved observation, with its checked time. **Refresh** asks each provider for the active account's current usage. A window whose reset time has passed shows reset usage. Missing quota stays unknown; it is never zero or unlimited.

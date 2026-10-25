@@ -55,10 +55,44 @@ func piProvider(id string) store.Provider {
 	return store.Provider(id)
 }
 
-// selectionProvider names the provider whose selection a harness uses. Pi
+// piProviderName maps each provider to the ID Pi uses for its login entry and
+// its model prefixes.
+var piProviderName = map[store.Provider]string{
+	store.ProviderAnthropic:  "anthropic",
+	store.ProviderChatGPT:    "openai",
+	store.ProviderKimiCode:   "kimi-coding",
+	store.ProviderXAI:        "xai",
+	store.ProviderMetaMuse:   "meta",
+	store.ProviderOpenCodeGo: "opencode",
+	store.ProviderDeepSeek:   "deepseek",
+	store.ProviderZAI:        "zai",
+}
+
+// PiProviderID returns the Pi provider ID of p, so a key goes to that
+// provider's own entry.
+func PiProviderID(p store.Provider) (string, bool) {
+	id, ok := piProviderName[p]
+	return id, ok
+}
+
+// PiProvider names the provider a Pi provider ID or a Dyna provider name means.
+// An ID this release does not know is not a provider Dyna can add a key for.
+func PiProvider(name string) (store.Provider, bool) {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if name == "" {
+		return "", false
+	}
+	provider := piProvider(name)
+	if _, known := piProviderName[provider]; !known {
+		return "", false
+	}
+	return provider, true
+}
+
+// SelectionProvider names the provider whose selection a harness uses. Pi
 // keeps one selection per provider. Another harness serves its own provider
 // and keeps one selection, whatever provider its accounts' credentials name.
-func selectionProvider(h string, p store.Provider) store.Provider {
+func SelectionProvider(h string, p store.Provider) store.Provider {
 	if h == "pi" {
 		return p
 	}

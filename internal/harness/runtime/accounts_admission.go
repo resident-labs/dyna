@@ -38,7 +38,7 @@ func (a *Accounts) CheckPreparedAccount(harness, accountID, room, repo string) (
 	if err != nil || n.Harness != canonical {
 		return NativeAccount{}, errPreparedAccountChanged
 	}
-	active, err := a.activeAccount(harness, selectionProvider(canonical, n.Provider), room)
+	active, err := a.activeAccount(harness, SelectionProvider(canonical, n.Provider), room)
 	if err != nil || active.ID != n.ID {
 		return NativeAccount{}, errPreparedAccountChanged
 	}
@@ -76,7 +76,7 @@ func (a *Accounts) CheckPreparedAccount(harness, accountID, room, repo string) (
 		return NativeAccount{}, errPreparedAccountChanged
 	}
 	n.Repos = slices.Clone(rules[n.ID])
-	n.prepared = &preparedAccount{root: a.Root, repo: repo, room: room, metadata: metadata, repos: slices.Clone(n.Repos), provider: selectionProvider(canonical, n.Provider)}
+	n.prepared = &preparedAccount{root: a.Root, repo: repo, room: room, metadata: metadata, repos: slices.Clone(n.Repos), provider: SelectionProvider(canonical, n.Provider)}
 	return n, nil
 }
 
@@ -93,7 +93,7 @@ func (a *Accounts) RecheckPreparedAccount(ctx context.Context, conn *sql.Conn, e
 		expected.Home != filepath.Join(a.Root, old.Harness, old.ID) || expected.Status != "ready" ||
 		// The account keeps its own provider; the selection is keyed by the
 		// provider its harness serves, and an OpenCode key account names another.
-		expected.Provider != old.Provider || snapshot.provider != selectionProvider(old.Harness, old.Provider) ||
+		expected.Provider != old.Provider || snapshot.provider != SelectionProvider(old.Harness, old.Provider) ||
 		!slices.Equal(expected.Repos, snapshot.repos) {
 		return errPreparedAccountChanged
 	}

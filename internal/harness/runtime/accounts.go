@@ -210,7 +210,7 @@ func (a *Accounts) native(e *store.Entry) (NativeAccount, error) {
 // different providers are active together and a Pi account never marks the
 // account Claude Code uses for the same provider.
 func (a *Accounts) activeForEntry(e *store.Entry) (string, error) {
-	return (&store.Store{Root: a.Root}).Active(selectionProvider(e.Harness, e.Provider), e.Harness, "")
+	return (&store.Store{Root: a.Root}).Active(SelectionProvider(e.Harness, e.Provider), e.Harness, "")
 }
 
 func (a *Accounts) Create(harness, label string) (result NativeAccount, err error) {
