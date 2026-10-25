@@ -6,8 +6,18 @@ import (
 
 	"dyna-agent/internal/account/importer"
 	"dyna-agent/internal/profile"
+	"dyna-agent/internal/roomsvc"
 	"dyna-agent/internal/subagent"
 )
+
+// TestAccountHarnessUseFailsClosedWithoutASessionStore stops an import when the
+// engine cannot read who runs the harness, instead of allowing it.
+func TestAccountHarnessUseFailsClosedWithoutASessionStore(t *testing.T) {
+	s := services{rooms: &roomsvc.Service{}}
+	if _, err := s.accountHarnessUse("codex"); err == nil {
+		t.Fatal("a missing session store did not stop the in-use check")
+	}
+}
 
 // TestHarnessUseNamesEnabledProfilesAndOpenSessions proves the import refuses a
 // harness that a profile or a turn still runs, and names it. A disabled profile

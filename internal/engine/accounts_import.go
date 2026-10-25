@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"errors"
 
 	"dyna-agent/internal/account/importer"
 	accountstore "dyna-agent/internal/account/store"
@@ -27,21 +28,24 @@ func (s services) accountsImport(ctx context.Context, harness, account string, d
 }
 
 // accountHarnessUse reads who runs the harness now: every enabled profile and
-// every open session, which the session store resolves to its profile.
+// every open session, which the session store resolves to its profile. A
+// missing session store is an error, never an empty answer: an import must
+// never retire a sign-in without knowing whether a turn still runs it.
 func (s services) accountHarnessUse(harness string) (importer.Use, error) {
+	if s.rooms == nil || s.rooms.Notify == nil {
+		return importer.Use{}, errors.New("The session store is unavailable, so Dyna cannot check who still runs the harness.")
+	}
 	manager := s.rooms.Notify.Sessions
-	if manager == nil {
-		return importer.Use{}, nil
+	if manager == nil || manager.Store == nil {
+		return importer.Use{}, errors.New("The session store is unavailable, so Dyna cannot check who still runs the harness.")
 	}
 	profiles, err := manager.ProfileStore()
 	if err != nil {
 		return importer.Use{}, err
 	}
-	sessions := []subagent.Meta{}
-	if manager.Store != nil {
-		if sessions, err = manager.Store.ListOpenMeta(); err != nil {
-			return importer.Use{}, err
-		}
+	sessions, err := manager.Store.ListOpenMeta()
+	if err != nil {
+		return importer.Use{}, err
 	}
 	return harnessUse(harness, profiles.Profiles, sessions), nil
 }

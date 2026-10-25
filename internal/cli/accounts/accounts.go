@@ -144,7 +144,7 @@ func (o Options) addCommand() *cobra.Command {
 		Long: "Add an account of one provider. With --api-key-stdin Dyna reads one API key from standard input and saves it as an account of that provider. " +
 			"A key is never read from an argument, so it does not stay in the shell history. " +
 			"Without it Dyna prints the sign-in step to run, because a provider sign-in is interactive and the owner completes it. " +
-			"With --import Dyna moves every saved sign-in of one harness into the Pi account of its provider and retires the source, so two copies never renew one refresh token. " +
+			"With --import Dyna moves every saved sign-in of one harness into the Pi account of its provider and retires the source, so Dyna never keeps two saved copies of that sign-in. " +
 			"--dry-run lists what would move and writes nothing. Dyna refuses a harness that an enabled profile or an open session still runs.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(c *cobra.Command, args []string) error {
