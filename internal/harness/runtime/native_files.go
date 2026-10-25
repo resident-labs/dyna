@@ -233,6 +233,9 @@ func nativeGrantValue(key string, value any) bool {
 }
 
 func (m *nativeFilesManager) ProbeSaved(ctx context.Context, c native.Captured) (store.Observation, error) {
+	if m.adapter.Harness == "pi" {
+		return native.ProbePiSaved(ctx, c)
+	}
 	if m.adapter.Harness != "grok" {
 		return store.Observation{}, native.ErrUnsupported
 	}

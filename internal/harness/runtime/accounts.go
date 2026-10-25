@@ -576,6 +576,15 @@ func (m savedAccountManager) Harness() string { return m.account.Harness }
 func (m savedAccountManager) Caps() native.Caps {
 	return native.Caps{Scope: "The saved native login snapshot; no native activation or refresh."}
 }
+
+// piManager reads a Pi account from that account's own Pi home. Pi renews its
+// provider tokens there, so the home is the current credential source; the
+// .login.json snapshot can be older.
+func (m savedAccountManager) piManager() (native.Manager, error) {
+	manager, _, err := m.accounts.scopedManager("pi", m.account.Home, m.executable)
+	return manager, err
+}
+
 func (m savedAccountManager) Capture(ctx context.Context, root string) ([]native.Captured, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -588,6 +597,20 @@ func (m savedAccountManager) Capture(ctx context.Context, root string) ([]native
 	}
 	if err := checkAccountFiles(m.account.Harness, m.account.Home, false); err != nil {
 		return nil, err
+	}
+	if m.account.Harness == "pi" {
+		manager, err := m.piManager()
+		if err != nil {
+			return nil, err
+		}
+		captured, err := manager.Capture(ctx, "")
+		if err != nil {
+			return nil, err
+		}
+		if len(captured) != 1 || captured[0].Identity != m.account.Identity {
+			return nil, native.ErrNoIdentity
+		}
+		return captured, nil
 	}
 	c, err := readAccountLogin(m.account.Home)
 	if err != nil {
@@ -610,6 +633,24 @@ func (m savedAccountManager) LoginCommand(string, string) ([]string, []string, e
 func (m savedAccountManager) ProbeSaved(ctx context.Context, c native.Captured) (store.Observation, error) {
 	if c.Identity != m.account.Identity {
 		return store.Observation{}, native.ErrNoIdentity
+	}
+	if m.account.Harness == "pi" {
+		manager, err := m.piManager()
+		if err != nil {
+			return store.Observation{}, err
+		}
+		captured, err := manager.Capture(ctx, "")
+		if err != nil {
+			return store.Observation{}, err
+		}
+		if len(captured) != 1 || captured[0].Identity != m.account.Identity {
+			return store.Observation{}, native.ErrNoIdentity
+		}
+		prober, ok := manager.(native.SavedProber)
+		if !ok {
+			return store.Observation{}, native.ErrUnsupported
+		}
+		return prober.ProbeSaved(ctx, captured[0])
 	}
 	home, err := m.accounts.HarnessHome(m.account.Harness)
 	if err != nil {
