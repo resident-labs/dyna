@@ -87,6 +87,7 @@ func TestReplyAddressForSenderClasses(t *testing.T) {
 	}
 	// An engine event has no one to reply to, whatever its sender.
 	for _, msg := range []room.Message{
+		{From: room.EngineSender, Kind: "session", Notice: room.EventNotice{Kind: "instructions"}},
 		{From: room.EngineSender, Kind: "checkin", Notice: room.EventNotice{Kind: "summary"}},
 		// TODO: legacy/shim remove later — a check-in stored before the typed
 		// events came from the invented system sender. Remove when that
@@ -96,5 +97,33 @@ func TestReplyAddressForSenderClasses(t *testing.T) {
 		if got := e.m.Store.ReplyAddress(msg); got != "" {
 			t.Fatalf("ReplyAddress(%+v) = %q, want no reply address", msg, got)
 		}
+	}
+}
+
+// An engine notice reports state, so its delivery header names no reply. The
+// engine sender is not a recipient, and its name can also be a room's name, so
+// a reply hint would send the agent's answer to the wrong room.
+func TestEngineNoticeHeaderNamesNoReply(t *testing.T) {
+	e := newTestEnv(t)
+	lead := completedFixtureSession(t, e)
+	msg, err := e.m.rooms().PostEventInput(room.PostEventInput{
+		RoomID:     e.room.ID,
+		Event:      room.SessionEvent{Type: room.SessionInstructions, Session: lead.Address(), Detail: "- a changed line"},
+		To:         []string{lead.Address()},
+		SessionIDs: map[string]string{lead.Address(): lead.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := e.m.Store.ReadMeta(lead.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := msg.Frame(e.m.Store.frameOptions(meta, msg))
+	if !strings.Contains(frame, "[dyna message "+msg.ID+" from "+room.EngineSender+"]") {
+		t.Fatalf("frame is not the engine notice:\n%s", frame)
+	}
+	if strings.Contains(frame, "@"+room.EngineSender) || strings.Contains(frame, "Reply: ") {
+		t.Fatalf("engine notice header names a reply:\n%s", frame)
 	}
 }
