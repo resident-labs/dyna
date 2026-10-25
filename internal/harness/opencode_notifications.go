@@ -126,7 +126,10 @@ func (n *openCodeTurnNotifications) observe(event openCodeEvent) []string {
 			detail = "429 " + detail
 		}
 		n.err = providerfailure.Tag(reason, fmt.Errorf("OpenCode turn failed: %s", detail))
-		raw, _ := json.Marshal(map[string]any{"type": "error", "sessionID": n.session, "error": map[string]any{"name": d.Error.Type, "data": map[string]any{"message": detail}}})
+		raw, _ := json.Marshal(map[string]any{"type": "error", "sessionID": n.session, "error": map[string]any{
+			"name": d.Error.Type, "status": d.Error.Status,
+			"data": map[string]any{"message": detail},
+		}})
 		return []string{string(raw)}
 	}
 	if kind == "" {
