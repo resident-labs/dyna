@@ -21,22 +21,24 @@ func TestProfileSelection(t *testing.T) {
 	profiles := []profile.Profile{
 		{Name: "disabled", Taste: 100, Disabled: true},
 		{Name: "failed", Taste: 90},
+		{Name: "signedout", Taste: 1},
 		{Name: "b", Taste: 5, Cost: 5, Intelligence: 9},
 		{Name: "a", Taste: 5, Cost: 5, Intelligence: 9},
 		{Name: "cheap", Taste: 6, Cost: 4, Intelligence: 8},
 	}
-	failures := map[string]time.Time{"failed": now.Add(time.Minute)}
+	failures := map[string]time.Time{"failed": now.Add(time.Minute), "signedout (not ready)": now.Add(time.Hour)}
 	for _, tc := range []struct{ pin, want, reason string }{
 		{"", "a", "auto: best taste + cost"},
 		{"cheap", "cheap", "pinned by the room"},
-		{"disabled", "a", "pinned profile unavailable; using best available profile"},
-		{"failed", "a", "pinned profile unavailable; using best available profile"},
-		{"missing", "a", "pinned profile unavailable; using best available profile"},
+		{"disabled", "a", "pinned keeper profile disabled is unavailable: it is disabled"},
+		{"failed", "a", "pinned keeper profile failed is unavailable: its last turn failed at the provider, so it is held out until 2026-10-17T12:01:00Z"},
+		{"signedout", "a", "pinned keeper profile signedout is unavailable: its last turn failed in a way that another model of the profile cannot fix, so it is held out until 2026-10-17T13:00:00Z"},
+		{"missing", "a", "pinned keeper profile missing is unavailable: no profile has that name"},
 	} {
 		t.Run(tc.pin, func(t *testing.T) {
-			got, reason, err := ChooseProfile(profiles, tc.pin, failures, now, "keeper")
-			if err != nil || got != tc.want || reason != tc.reason {
-				t.Fatalf("got %q %q %v", got, reason, err)
+			choice, err := ChooseProfile(profiles, tc.pin, failures, now, "keeper")
+			if err != nil || choice.Name != tc.want || choice.Reason != tc.reason {
+				t.Fatalf("got %q %q %v", choice.Name, choice.Reason, err)
 			}
 		})
 	}
@@ -47,7 +49,7 @@ func TestProfileSelection(t *testing.T) {
 	if profiles[0].Name != "disabled" {
 		t.Fatal("ranking mutated source")
 	}
-	if _, _, err := ChooseProfile(nil, "", nil, now, "keeper"); err == nil || !strings.Contains(err.Error(), "no enabled keeper profile") {
+	if _, err := ChooseProfile(nil, "", nil, now, "keeper"); err == nil || !strings.Contains(err.Error(), "no enabled keeper profile") {
 		t.Fatalf("unavailable: %v", err)
 	}
 }
@@ -58,12 +60,12 @@ func TestReviewerRanksByDiagnostics(t *testing.T) {
 		{Name: "stylish", Taste: 10, Cost: 4, Diagnostics: 3, Intelligence: 5},
 		{Name: "sharp", Taste: 4, Cost: 4, Diagnostics: 10, Intelligence: 5},
 	}
-	if got, reason, err := ChooseProfile(profiles, "", nil, now, subagent.RoleReviewer); err != nil || got != "sharp" || reason != "auto: best diagnostics + cost" {
-		t.Fatalf("reviewer chose %q %q, %v; want the high-diagnostics profile", got, reason, err)
+	if choice, err := ChooseProfile(profiles, "", nil, now, subagent.RoleReviewer); err != nil || choice.Name != "sharp" || choice.Reason != "auto: best diagnostics + cost" {
+		t.Fatalf("reviewer chose %q %q, %v; want the high-diagnostics profile", choice.Name, choice.Reason, err)
 	}
 	// Other roles still choose a solution by taste.
-	if got, reason, err := ChooseProfile(profiles, "", nil, now, subagent.RoleLibrarian); err != nil || got != "stylish" || reason != "auto: best taste + cost" {
-		t.Fatalf("librarian chose %q %q, %v; want the high-taste profile", got, reason, err)
+	if choice, err := ChooseProfile(profiles, "", nil, now, subagent.RoleLibrarian); err != nil || choice.Name != "stylish" || choice.Reason != "auto: best taste + cost" {
+		t.Fatalf("librarian chose %q %q, %v; want the high-taste profile", choice.Name, choice.Reason, err)
 	}
 	// A profile saved before the rating existed ranks as 5, the neutral value,
 	// so it beats an explicit 4 even though its stored value is 0.
@@ -207,14 +209,14 @@ func TestNotReadyExcludesMultiModelProfile(t *testing.T) {
 	}
 	info := subagent.Info{Meta: subagent.Meta{Profile: "chain"}}
 	quota := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Quota, Error: "worker chain: 429 quota exhausted"}
-	if got, _, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, quota, now), now, "reviewer"); err != nil || got != "chain" {
-		t.Fatalf("a quota error hid a profile with healthy models: %q %v", got, err)
+	if choice, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, quota, now), now, "reviewer"); err != nil || choice.Name != "chain" {
+		t.Fatalf("a quota error hid a profile with healthy models: %q %v", choice.Name, err)
 	}
 	// A rejected sign-in blocks the whole account, so no model of the profile may
 	// be chosen, even though the turn recorded no model cooldown.
 	rejected := subagent.Turn{Status: subagent.TurnError, Ended: now, FailureReason: providerfailure.Auth, Error: "worker chain: authentication_error: invalid api key"}
-	if got, _, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, rejected, now), now, "reviewer"); err != nil || got != "spare" {
-		t.Fatalf("a rejected sign-in kept the profile selectable: %q %v", got, err)
+	if choice, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, rejected, now), now, "reviewer"); err != nil || choice.Name != "spare" {
+		t.Fatalf("a rejected sign-in kept the profile selectable: %q %v", choice.Name, err)
 	}
 	// A capacity failure that ended the turn already spent the whole model chain,
 	// so the profile steps aside for the spare even though this engine process
@@ -223,13 +225,13 @@ func TestNotReadyExcludesMultiModelProfile(t *testing.T) {
 	if got := RankProfiles(profiles, RecordFailure(nil, info, busy, now), now, "reviewer"); len(got) != 1 || got[0].Name != "spare" {
 		t.Fatalf("a completed capacity failure kept the multi-model profile: %+v", got)
 	}
-	if got, _, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, busy, now), now, "reviewer"); err != nil || got != "spare" {
-		t.Fatalf("a completed capacity failure kept the profile selectable: %q %v", got, err)
+	if choice, err := ChooseProfile(profiles, "chain", RecordFailure(nil, info, busy, now), now, "reviewer"); err != nil || choice.Name != "spare" {
+		t.Fatalf("a completed capacity failure kept the profile selectable: %q %v", choice.Name, err)
 	}
 	signedOut := subagent.Turn{Status: subagent.TurnError, Ended: now, Error: "worker chain runtime is not ready: the active private account is not signed in"}
 	failures := RecordFailure(nil, info, signedOut, now)
-	if got, _, err := ChooseProfile(profiles, "chain", failures, now, "reviewer"); err != nil || got != "spare" {
-		t.Fatalf("not-ready profile chosen: %q %v", got, err)
+	if choice, err := ChooseProfile(profiles, "chain", failures, now, "reviewer"); err != nil || choice.Name != "spare" {
+		t.Fatalf("not-ready profile chosen: %q %v", choice.Name, err)
 	}
 	var cache FailureCache
 	cached, err := cache.Recent(now, func() ([]subagent.Info, error) { return []subagent.Info{info}, nil }, func(string, int) (subagent.Turn, error) { return signedOut, nil })
@@ -283,8 +285,8 @@ func TestConcurrentAccountRemainsSelectable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lease.Close()
-	got, _, err := ChooseProfile([]profile.Profile{{Name: "parallel", Harness: "codex", Taste: 10}, {Name: "spare", Taste: 1}}, "", nil, time.Now(), "reviewer")
-	if err != nil || got != "parallel" {
-		t.Fatalf("concurrent account was excluded: profile=%q error=%v", got, err)
+	choice, err := ChooseProfile([]profile.Profile{{Name: "parallel", Harness: "codex", Taste: 10}, {Name: "spare", Taste: 1}}, "", nil, time.Now(), "reviewer")
+	if err != nil || choice.Name != "parallel" {
+		t.Fatalf("concurrent account was excluded: profile=%q error=%v", choice.Name, err)
 	}
 }
