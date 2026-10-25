@@ -3,7 +3,9 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"dyna-agent/internal/account/service"
@@ -439,6 +441,14 @@ func bindings(s services) []websvc.Binding {
 		{Name: "HarnessConfig", Access: websvc.Read, Scope: websvc.ScopeAdmin, Method: s.runtime.HarnessConfig},
 		{Name: "AccountUsage", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accounts.AccountUsage},
 		{Name: "AccountUsageCached", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.accounts.AccountUsageCached},
+		// AccountsList is a write call because refresh asks each provider for
+		// usage and saves the answer, like AccountUsage above.
+		{Name: "AccountsList", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsList},
+		{Name: "AccountsUse", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsUse},
+		{Name: "AccountsRemove", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsRemove},
+		// AccountsAdd saves an API key from the Accounts add form and the CLI,
+		// like HarnessProviderKeys does for the harness form.
+		{Name: "AccountsAdd", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accountsAdd},
 		{Name: "ProfileModels", Access: websvc.Write, Scope: websvc.ScopeAdmin, Method: s.accounts.ProfileModels},
 		{Name: "UsageRollup", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.UsageRollup},
 		{Name: "ProfileUsage", Access: websvc.Read, Scope: websvc.ScopeRead, Method: s.rooms.ProfileUsage},
@@ -549,4 +559,73 @@ func (s services) switchAccount(id string, confirmed bool) (harnessruntime.Priva
 		go s.accounts.AccountUsage(context.Background(), true)
 	}
 	return snap, err
+}
+
+// accountsList returns the Accounts view grouped by provider. scope is a room
+// reference, whose row overrides the global one, or empty for the global
+// selection alone.
+func (s services) accountsList(ctx context.Context, scope string, refresh bool) (service.AccountsSnapshot, error) {
+	roomID, err := s.accountScope(scope)
+	if err != nil {
+		return service.AccountsSnapshot{}, err
+	}
+	return s.accounts.Accounts(ctx, roomID, refresh), nil
+}
+
+// accountsUse makes an account the one its provider uses in scope: that room
+// when scope names one, else globally.
+func (s services) accountsUse(ctx context.Context, id, scope string) (service.AccountsSnapshot, error) {
+	roomID, err := s.accountScope(scope)
+	if err != nil {
+		return service.AccountsSnapshot{}, err
+	}
+	if roomID != "" {
+		// A room choice changes that room's future turns, so a session may choose
+		// only for its own room. The owner may choose for any room.
+		if _, err := authority.ActorIn(ctx, roomID); err != nil {
+			return service.AccountsSnapshot{}, err
+		}
+	}
+	if _, err := s.runtime.UseAccount(ctx, id, roomID); err != nil {
+		return service.AccountsSnapshot{}, err
+	}
+	return s.accounts.Accounts(ctx, roomID, false), nil
+}
+
+// accountsRemove deletes an account and its homes. The caller asked for the
+// removal, so the engine needs no separate confirmation argument.
+func (s services) accountsRemove(ctx context.Context, id string) (service.AccountsSnapshot, error) {
+	if _, err := s.runtime.RemovePrivateRuntimeAccount(ctx, id, true); err != nil {
+		return service.AccountsSnapshot{}, err
+	}
+	return s.accounts.Accounts(ctx, "", false), nil
+}
+
+// accountScope reads a room reference as the scope key of an account selection.
+// An empty reference is the global scope.
+func (s services) accountScope(scope string) (string, error) {
+	if strings.TrimSpace(scope) == "" {
+		return "", nil
+	}
+	rec, err := s.rooms.Notify.Rooms.Resolve(scope)
+	if err != nil {
+		return "", err
+	}
+	return rec.ID, nil
+}
+
+// accountsAdd adds an API key as a new account of one provider. The CLI reads
+// the key from standard input and sends it once; it is never a CLI argument.
+func (s services) accountsAdd(ctx context.Context, provider, label, key string) (service.AccountsSnapshot, error) {
+	p, ok := harnessruntime.PiProvider(provider)
+	if !ok {
+		return service.AccountsSnapshot{}, errors.New("Unknown provider. Choose a provider Dyna knows, such as anthropic, deepseek or zai.")
+	}
+	if key == "" {
+		return service.AccountsSnapshot{}, errors.New("An API key is required on standard input.")
+	}
+	if _, err := s.runtime.AddProviderKey(ctx, p, label, key); err != nil {
+		return service.AccountsSnapshot{}, err
+	}
+	return s.accounts.Accounts(ctx, "", false), nil
 }

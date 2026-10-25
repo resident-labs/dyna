@@ -39,6 +39,43 @@ func forgetActive(ctx context.Context, conn *sql.Conn, id string) error {
 	return err
 }
 
+// Selection is one saved account selection: the account of a provider that a
+// harness uses in a scope, where scope is "" for the global row or a room ID.
+type Selection struct {
+	Provider Provider
+	Harness  string
+	Scope    string
+	Account  string
+}
+
+// Selections reads every saved selection, so a reader can place each account in
+// its scopes without one query per account. A row that names no account is kept:
+// it overrides the global row with no selection of its own.
+func (s *Store) Selections() ([]Selection, error) {
+	db, err := s.db()
+	if err != nil {
+		return nil, err
+	}
+	ctx := context.Background()
+	var out []Selection
+	err = statewrite.For(db).Read(ctx, func(q statewrite.Reader) error {
+		rows, err := q.QueryContext(ctx, "SELECT provider, harness, scope, account FROM account_active")
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var sel Selection
+			if err := rows.Scan(&sel.Provider, &sel.Harness, &sel.Scope, &sel.Account); err != nil {
+				return err
+			}
+			out = append(out, sel)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // Active returns the ID of the account harness h uses for provider in scope, or
 // empty.
 func (s *Store) Active(provider Provider, harness, scope string) (string, error) {
