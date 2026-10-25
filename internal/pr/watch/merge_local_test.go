@@ -253,6 +253,8 @@ func finishLocalTrials(t *testing.T, e *testEnv, ci *fakeLocalCI, bisect bool) {
 
 func TestLocalTrialPublishesBatchWithoutGitHub(t *testing.T) {
 	e, dir, records, ci := localMergeEnv(t, false)
+	ci.started = make(chan struct{}, 4)
+	ci.release = make(chan struct{})
 	if err := statewrite.MigrateMirrors(store.DataDir()); err != nil {
 		t.Fatal(err)
 	}
@@ -266,6 +268,18 @@ func TestLocalTrialPublishesBatchWithoutGitHub(t *testing.T) {
 	if got := changeGit(t, dir, "rev-parse", "dyna/integration"); got != base {
 		t.Fatal("integration moved before CI result")
 	}
+	deadline, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	select {
+	case <-ci.started:
+	case <-deadline.Done():
+		t.Fatal("local trial CI did not start")
+	}
+	localTick(t, e)
+	if got := changeGit(t, dir, "rev-parse", "dyna/integration"); got != base {
+		t.Fatal("integration moved while local CI ran")
+	}
+	close(ci.release)
 	finishLocalTrials(t, e, ci, false)
 	head := changeGit(t, dir, "rev-parse", "dyna/integration")
 	for _, r := range records {
