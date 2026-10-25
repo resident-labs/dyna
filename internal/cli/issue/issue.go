@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"dyna-agent/internal/notify"
 	"dyna-agent/internal/room"
@@ -15,6 +16,12 @@ import (
 
 type Options struct{ Service func() *roomsvc.Service }
 
+// shownIssue is one issue with the note it was filed with, for --json.
+type shownIssue struct {
+	room.Issue
+	Note string `json:"note,omitempty"`
+}
+
 func NewCommand() *cobra.Command { return Command(Options{}) }
 func Command(o Options) *cobra.Command {
 	if o.Service == nil {
@@ -22,7 +29,7 @@ func Command(o Options) *cobra.Command {
 	}
 	var roomRef, at, note string
 	var asJSON bool
-	root := &cobra.Command{Use: "issue <title>", Short: "File a quiet room issue for later triage", Long: "File a quiet room issue for later triage. Issues have room numbers such as D-12. Triage commands accept D-12, d12 or the original message ID.", Args: cobra.ExactArgs(1)}
+	root := &cobra.Command{Use: "issue <title|D-N>", Short: "File a quiet room issue for later triage", Long: "File a quiet room issue for later triage. Issues have room numbers such as D-12. Triage commands accept D-12, d12 or the original message ID. A lone issue reference reads that issue instead of filing one; dyna issue show D-12 does the same.", Args: cobra.ExactArgs(1)}
 	root.PersistentFlags().BoolVar(&asJSON, "json", false, "print full issue data as JSON")
 	root.PersistentFlags().StringVar(&roomRef, "room", "", "room name or ID (default: the current room)")
 	root.Flags().StringVar(&at, "at", "", "source file and line, such as internal/parser.go:12")
@@ -68,7 +75,63 @@ func Command(o Options) *cobra.Command {
 		_, err := fmt.Fprintf(c.OutOrStdout(), "%s %s : %s%s\n", action, i.Label(), i.Title, suffix)
 		return err
 	}
+	// show prints one issue as the board shows it: its state and title, its
+	// origin and link, and the note the filer gave it.
+	show := func(c *cobra.Command, ref string) error {
+		s, r, _, err := caller()
+		if err != nil {
+			return err
+		}
+		i, note, err := s.Issue(r.ID, ref)
+		if err != nil {
+			return err
+		}
+		if asJSON {
+			return json.NewEncoder(c.OutOrStdout()).Encode(shownIssue{Issue: i, Note: note})
+		}
+		out := c.OutOrStdout()
+		fmt.Fprintf(out, "%s  %s  %s\n", i.Label(), i.State, i.Title)
+		meta := []string{}
+		if i.Filer != "" {
+			meta = append(meta, "from "+i.Filer)
+		}
+		if i.FiledAt > 0 {
+			meta = append(meta, time.UnixMilli(i.FiledAt).Local().Format("2006-01-02 15:04"))
+		}
+		if i.File != "" {
+			loc := i.File
+			if i.Line > 0 {
+				loc += fmt.Sprintf(":%d", i.Line)
+			}
+			meta = append(meta, loc)
+		}
+		if i.GoalID != "" {
+			meta = append(meta, "goal "+i.GoalID)
+		}
+		if i.GitHubURL != "" {
+			meta = append(meta, i.GitHubURL)
+		}
+		if i.Reason != "" {
+			meta = append(meta, "reason: "+i.Reason)
+		}
+		if len(meta) > 0 {
+			fmt.Fprintln(out, strings.Join(meta, " · "))
+		}
+		if note != "" {
+			fmt.Fprintf(out, "\n%s\n", note)
+		}
+		return nil
+	}
 	root.RunE = func(c *cobra.Command, a []string) error {
+		title := strings.TrimSpace(a[0])
+		// A lone issue reference names an issue to read, never a new title. An
+		// agent that meant to read D-61 filed an empty issue titled "D-61".
+		if room.IsIssueNumber(title) || room.IsMessageID(title) {
+			if c.Flags().Changed("note") || c.Flags().Changed("at") {
+				return fmt.Errorf("%s reads an issue; --note and --at belong to a new issue", title)
+			}
+			return show(c, title)
+		}
 		file, line, err := location(at)
 		if err != nil {
 			return err
@@ -83,6 +146,9 @@ func Command(o Options) *cobra.Command {
 		}
 		return output(c, i)
 	}
+	root.AddCommand(&cobra.Command{Use: "show <issue>", Short: "Show one issue by D-N or message ID", Args: cobra.ExactArgs(1), RunE: func(c *cobra.Command, a []string) error {
+		return show(c, a[0])
+	}})
 	var all bool
 	list := &cobra.Command{Use: "list", Short: "List unhandled room issues", Args: cobra.NoArgs, RunE: func(c *cobra.Command, _ []string) error {
 		s, r, _, err := caller()

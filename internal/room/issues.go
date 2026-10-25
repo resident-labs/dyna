@@ -115,6 +115,14 @@ func issueNumber(ref string) (int, bool) {
 	return n, err == nil && n > 0
 }
 
+// IsIssueNumber reports whether ref is an issue reference on its own, such as
+// D-12, d12 or D12, and holds nothing else. A title written that way names an
+// existing issue instead of filing a new one.
+func IsIssueNumber(ref string) bool {
+	_, ok := issueNumber(ref)
+	return ok
+}
+
 func (s *Store) issuesPath(roomID string) (string, error) {
 	dir, err := s.dir(roomID)
 	if err != nil {
@@ -352,6 +360,11 @@ func (s *Store) FileIssue(roomID string, in IssueInput) (Issue, error) {
 	title, by := strings.TrimSpace(in.Title), strings.TrimSpace(in.Filer)
 	if title == "" || strings.ContainsAny(title, "\r\n") || by == "" || in.Line < 0 {
 		return Issue{}, errors.New("an issue needs a one-line title, a filer and a nonnegative line")
+	}
+	// A whole title that is only an issue number names an issue to read. This
+	// mistake filed empty issues titled "D-61" until the CLI read them instead.
+	if number, ok := issueNumber(title); ok {
+		return Issue{}, fmt.Errorf("D-%d is an issue, not a title: read it with dyna issue show D-%d", number, number)
 	}
 	rec, err := s.Resolve(roomID)
 	if err != nil {
