@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"testing/synctest"
 )
 
 // socketDir returns a short private directory for host sockets.
@@ -421,4 +422,37 @@ func TestSocketCloseKeyStopsEveryAccountHome(t *testing.T) {
 		t.Fatal("closed another session")
 	}
 	other.Detach(DetachIdle)
+}
+
+// A shutdown that follows an abandoned detach must not race it: the host kills
+// the child's group on that detach, so a shutdown that dials first closes stdin
+// and waits the whole stop grace for a child that ignores it (five seconds of
+// test time under load). Virtual time makes "still waiting" observable: after
+// synctest.Wait no goroutine in the bubble can run, so a shutdown that already
+// returned is proof that the wait is missing.
+func TestShutdownWaitsForThePendingDetach(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := newSocketHost(socketDir(t))
+		ack := make(chan struct{})
+		h.used = map[string]bool{"fake\x00order": true}
+		h.pending = map[string]chan struct{}{"fake\x00order": ack}
+		done := make(chan struct{})
+		go func() {
+			h.shutdownUsed()
+			close(done)
+		}()
+		synctest.Wait()
+		select {
+		case <-done:
+			t.Fatal("the shutdown finished while the detach was unacknowledged")
+		default:
+		}
+		close(ack)
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Fatal("the shutdown did not finish after the detach was acknowledged")
+		}
+	})
 }
