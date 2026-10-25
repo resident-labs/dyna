@@ -182,6 +182,9 @@ func printResult(c *cobra.Command, result localci.Result, asJSON bool) error {
 		if label := suite.Cause.Label(); label != "" {
 			fmt.Fprintf(c.OutOrStdout(), "  cause: %s\n", label)
 		}
+		if suite.Note != "" {
+			fmt.Fprintf(c.OutOrStdout(), "  note: %s\n", suite.Note)
+		}
 		if suite.Error != "" {
 			fmt.Fprintln(c.OutOrStdout(), suite.Error)
 		}
