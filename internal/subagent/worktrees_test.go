@@ -144,7 +144,7 @@ func TestKeptWorktreeNoticeIsPostedOnce(t *testing.T) {
 	owner, _ = e.wait(owner.ID, 1)
 	closing, _ := e.start("SLEEP:1 RESPOND: closing")
 	closing, _ = e.wait(closing.ID, 1)
-	k := keptTree{Owner: owner.ID, Path: "/w/feature", Branch: "feature", Ahead: 1, Reason: "HEAD is not merged into origin/main; cleanup kept it"}
+	k := keptTree{Owner: owner.ID, Path: "/w/feature", Branch: "feature", Ahead: 1, Reason: worktrees.ReasonNotMerged + "; cleanup kept it"}
 	for range 3 {
 		e.m.reportKeptWorktree(closing, k)
 	}
