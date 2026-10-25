@@ -24,6 +24,24 @@ type openCodeTool struct {
 	input json.RawMessage
 }
 
+// openCodeErrorRecord is the translated execution-failure event. Its fields are
+// concrete, so the status the provider reported survives into the record.
+type openCodeErrorRecord struct {
+	Type      string            `json:"type"`
+	SessionID string            `json:"sessionID"`
+	Error     openCodeErrorBody `json:"error"`
+}
+
+type openCodeErrorBody struct {
+	Name   string              `json:"name"`
+	Status int                 `json:"status"`
+	Data   openCodeErrorDetail `json:"data"`
+}
+
+type openCodeErrorDetail struct {
+	Message string `json:"message"`
+}
+
 func (n *openCodeTurnNotifications) observe(event openCodeEvent) []string {
 	var d struct {
 		Session string          `json:"sessionID"`
@@ -126,9 +144,8 @@ func (n *openCodeTurnNotifications) observe(event openCodeEvent) []string {
 			detail = "429 " + detail
 		}
 		n.err = providerfailure.Tag(reason, fmt.Errorf("OpenCode turn failed: %s", detail))
-		raw, _ := json.Marshal(map[string]any{"type": "error", "sessionID": n.session, "error": map[string]any{
-			"name": d.Error.Type, "status": d.Error.Status,
-			"data": map[string]any{"message": detail},
+		raw, _ := json.Marshal(openCodeErrorRecord{Type: "error", SessionID: n.session, Error: openCodeErrorBody{
+			Name: d.Error.Type, Status: d.Error.Status, Data: openCodeErrorDetail{Message: detail},
 		}})
 		return []string{string(raw)}
 	}
