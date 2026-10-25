@@ -12,7 +12,11 @@ import (
 	"time"
 
 	"dyna-agent/internal/localci"
+	"dyna-agent/internal/notify"
 	"dyna-agent/internal/pr/state"
+	"dyna-agent/internal/room"
+	"dyna-agent/internal/settings"
+	"dyna-agent/internal/subagent"
 )
 
 // runningCIRegistry offers one 16-slot machine and no saved result.
@@ -57,14 +61,31 @@ func scheduledCIRunFixture(t *testing.T) (*Service, State, time.Time) {
 	base := commit("README", "before\n")
 	head := commit("main.go", "package main\n")
 
+	// The repository is in the local lane, so a local head's trial hold passes.
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	lane, err := settings.Load("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lane.LocalLaneRepos = []string{repo}
+	if err := lane.Save(); err != nil {
+		t.Fatal(err)
+	}
 	root := filepath.Join(t.TempDir(), "prs")
-	record := &Record{Key: "pr", Kind: "github", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Number: 17, Title: "Show running local CI per machine", URL: "https://github.com/owner/repo/pull/17", Head: head, Base: base, Branch: "feature", RepoPath: repo, Watching: true, State: "open", Created: time.Unix(2, 0)}
+	rooms := &room.Store{Root: t.TempDir()}
+	rm, err := rooms.Create(room.CreateInput{Name: "ci-queue"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	record := &Record{Key: "pr", Kind: "github", Host: "github.com", Repo: "owner/repo", HeadRepo: "owner/repo", Number: 17, RoomID: rm.ID, Title: "Show running local CI per machine", URL: "https://github.com/owner/repo/pull/17", Head: head, Base: base, Branch: "feature", RepoPath: repo, Watching: true, State: "open", Created: time.Unix(2, 0)}
 	saved := State{Version: 1, Records: map[string]*Record{record.Key: record}}
 	if err := state.Write(root, saved); err != nil {
 		t.Fatal(err)
 	}
 	started := time.Unix(1000, 0)
-	s := &Service{Store: &Store{Root: root}, LocalCIRegistry: &runningCIRegistry{}, Now: func() time.Time { return started }}
+	s := &Service{Store: &Store{Root: root}, LocalCIRegistry: &runningCIRegistry{}, Notify: notify.New(rooms, subagent.NewManager()), Now: func() time.Time { return started }}
 	s.GH.run = func(context.Context, *exec.Cmd) error { return nil }
 	return s, saved, started
 }
@@ -231,9 +252,10 @@ func (r *oneSlotRegistry) Nodes(context.Context) ([]localci.Node, error) {
 	return []localci.Node{{Name: "hermes", Slots: 1, Enabled: true}}, nil
 }
 
-// A local trial enters the one admission queue before ordinary pull request
-// heads, so a backlog of hosted work cannot starve a local merge.
-func TestLocalTrialTakesTheQueueBeforePullRequestHeads(t *testing.T) {
+// localTrialQueueFixture offers a one-slot machine, a running local trial batch
+// and a pending pull request head, so the queue order decides what runs.
+func localTrialQueueFixture(t *testing.T) (*Service, State, *Record, string) {
+	t.Helper()
 	s, saved, _ := scheduledCIRunFixture(t)
 	s.LocalCIRegistry = &oneSlotRegistry{}
 	record := saved.Records["pr"]
@@ -246,24 +268,58 @@ func TestLocalTrialTakesTheQueueBeforePullRequestHeads(t *testing.T) {
 	if err := state.Write(s.Store.Root, st); err != nil {
 		t.Fatal(err)
 	}
-	started := make(chan string, 2)
-	s.RunNodeCI = func(ctx context.Context, _ localci.Node, req localci.Request) (localci.Result, error) {
-		started <- req.SHA
+	return s, st, &local, localHead
+}
+
+// A local trial enters the one admission queue before ordinary pull request
+// heads, so a backlog of hosted work cannot starve a local merge.
+func TestLocalTrialTakesTheQueueBeforePullRequestHeads(t *testing.T) {
+	s, st, _, localHead := localTrialQueueFixture(t)
+	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
 		<-ctx.Done()
 		return localci.Result{}, ctx.Err()
 	}
+	t.Cleanup(s.CancelLocalCI)
 	if err := s.scheduleRegisteredCI(context.Background(), st); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case head := <-started:
-		if head != localHead {
-			t.Fatalf("machine started %s, want the local trial head %s", head, localHead)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("no run started")
+	// The one slot went to the local trial, so the pull request head still waits.
+	runs := s.RunningCI()
+	if len(runs) != 1 || runs[0].Head != localHead[:7] {
+		t.Fatalf("machine runs = %+v, want the local trial head %s", runs, localHead[:7])
 	}
-	s.CancelLocalCI()
+}
+
+// A held merge queue admits no local run. The trial that reads the result cannot
+// stop a run the scheduler started on its own.
+func TestHeldMergeQueueAdmitsNoLocalRun(t *testing.T) {
+	s, st, local, localHead := localTrialQueueFixture(t)
+	s.RunNodeCI = func(ctx context.Context, _ localci.Node, _ localci.Request) (localci.Result, error) {
+		<-ctx.Done()
+		return localci.Result{}, ctx.Err()
+	}
+	t.Cleanup(s.CancelLocalCI)
+	if err := s.Store.update(func(read *State) error {
+		read.MergePauses = map[string]state.MergePause{local.RoomID: {Reason: "merge queue paused for recovery"}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Only the local trial is queued, so any admitted run is its own.
+	only := st
+	only.Records = map[string]*Record{local.Key: local}
+	if err := s.scheduleRegisteredCI(context.Background(), only); err != nil {
+		t.Fatal(err)
+	}
+	if head := runningLocalCIHead(s); head != "" {
+		t.Fatalf("a held queue admitted the run for %s", head)
+	}
+	if _, err := s.localTrialCI(context.Background(), *local, localHead); err != nil {
+		t.Fatal(err)
+	}
+	if head := runningLocalCIHead(s); head != "" {
+		t.Fatalf("a held queue admitted the run for %s", head)
+	}
 }
 
 // A poll tick never cancels a local head's run. No hosted poll decides that

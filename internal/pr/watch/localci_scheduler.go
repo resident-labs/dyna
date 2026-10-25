@@ -259,10 +259,10 @@ func (s *Service) scheduleRegisteredCI(ctx context.Context, st State) error {
 	var jobs []registeredCIJob
 	modes := map[string]string{}
 	for _, job := range registeredCIJobs(st) {
-		// A local head's run does not depend on the room's hosted CI mode: the
-		// local lane and its trial hold decide it. Without this, a room in GitHub
-		// mode would starve the local merges that share the same machines.
 		if job.hosted() {
+			// The room's hosted CI mode decides hosted work only: admission
+			// applies the local trial hold to a local head, so a room in GitHub
+			// mode does not starve the local merges that share these machines.
 			mode, ok := modes[job.record.RoomID]
 			if !ok {
 				mode, err = registry.Mode(ctx, job.record.RoomID)
@@ -381,6 +381,16 @@ func activeRegisteredCISlots(runs *registeredCIRuns) map[string]int {
 // the machine with a free slot, and starts the run. It returns whether it
 // started a run. Callers hold the runs lock.
 func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistry, st State, job registeredCIJob, enabled []localci.Node, active map[string]int, runs *registeredCIRuns) (bool, error) {
+	if !job.hosted() {
+		// A held room or merge queue admits no local run, whichever path asks
+		// for it: the trial that reads the result cannot stop a run that the
+		// scheduler started on its own.
+		if why, err := s.trialRoomHold(ctx, job.record); err != nil {
+			return false, err
+		} else if why != "" {
+			return false, nil
+		}
+	}
 	key := registeredJobKey(job)
 	repo, err := localci.CanonicalRepo(ctx, job.record.RepoPath)
 	if err != nil {
