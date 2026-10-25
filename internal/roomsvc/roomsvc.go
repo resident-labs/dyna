@@ -856,6 +856,9 @@ type Member struct {
 	Emoji            string         `json:"emoji,omitempty"` // avatar; empty for the owner
 	// Seat is set on the owner entry: who holds the room's root seat.
 	Seat *room.Seat `json:"seat,omitempty"`
+	// OwnerDisplay says this session's own shells use the owner's display.
+	// The app labels such a session.
+	OwnerDisplay bool `json:"ownerDisplay,omitempty"`
 }
 
 // Member states, in the shared color language: live is gold, done is green,
@@ -968,7 +971,7 @@ func (s *Service) member(info subagent.Info, depth, kids int) Member {
 		ID: info.ID, Role: info.Role, Service: info.Service, Name: info.EffectiveName(), Address: info.Address(), Profile: info.Profile, Model: info.Model, Parent: info.ParentSession,
 		Depth: depth, Children: kids, Status: info.Status, Turns: info.Turns, Created: info.Created, Activity: info.LastActivity,
 		Finished: info.Status == subagent.StatusDormant, Resumable: info.Resumable && info.HarnessSession != "" && info.ConsumedBy == "",
-		Closed: info.Status == subagent.StatusClosed, Hue: NameHue(info.Address()),
+		Closed: info.Status == subagent.StatusClosed, Hue: NameHue(info.Address()), OwnerDisplay: info.OwnerDisplay,
 	}
 	switch info.Status {
 	case subagent.StatusDormant:

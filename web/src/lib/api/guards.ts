@@ -347,7 +347,8 @@ export function isMember(v: unknown): v is Member {
     optional(v.doing, isDoing) &&
     optional(v.closed, isBoolean) &&
     optional(v.emoji, isString) &&
-    optional(v.seat, isSeat)
+    optional(v.seat, isSeat) &&
+    optional(v.ownerDisplay, isBoolean)
   )
 }
 

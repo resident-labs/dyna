@@ -211,6 +211,8 @@ export interface Member {
   emoji?: string
   seat?: Seat
   responsibilities?: Responsibilities
+  // ownerDisplay marks a session whose own shells use the owner's display.
+  ownerDisplay?: boolean
 }
 
 // Delivery is notify.Delivery.
