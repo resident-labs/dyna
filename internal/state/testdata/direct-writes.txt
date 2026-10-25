@@ -9,7 +9,6 @@ not-state internal/account/store/registry.go Store.writeCredential 2 # the one w
 not-state internal/account/store/store.go Store.lock 1 # accounts.lock, the registry's flock lock file, not state
 not-state internal/account/native/claude.go claudeAtomicJSON 2 # a harness CLI's own credential and config files
 not-state internal/account/native/claude.go claudeDirLock.close 1 # a harness CLI's own credential and config files
-not-state internal/account/native/codex.go codexManager.activate 3 # a harness CLI's own credential and config files
 not-state internal/account/native/kimi_code.go kimiCodeLock 1 # a harness CLI's own credential and config files
 not-state internal/account/native/kimi_code.go kimiCodeManager.activate 2 # a harness CLI's own credential and config files
 not-state internal/account/native/muse.go museLock 1 # a harness CLI's own credential and config files
@@ -96,7 +95,6 @@ not-state internal/harness/instructions.go writeFileOnce 2 # instruction input f
 not-state internal/harness/mock.go runMockSession 2 # mock harness for tests
 not-state internal/harness/opencodefixture/fixture.go New 1 # test fixture runtime
 not-state internal/harness/process.go runOnce 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
-not-state internal/harness/codex_run.go runCodexTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/harness/muse_run.go runMuseTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/harness/pi_rpc.go runPiTurn 2 # append-only turn output log, runner-written (rule r10: logs stay JSONL)
 not-state internal/harness/sessionhost/client.go socketHost.connect 1 # removes a dead session host's socket before it starts a new host
