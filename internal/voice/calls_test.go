@@ -238,17 +238,17 @@ func TestCallsAreAvailableOnlyWhenVoiceIsSetUp(t *testing.T) {
 	if st := c.Status(); !st.Available || st.Unavailable != "" {
 		t.Fatalf("status when set up = %+v", st)
 	}
-	c.ready = func() string { return "Sign in to Codex in Settings > Harnesses to call Voice." }
-	if st := c.Status(); st.Available || st.Live || !strings.Contains(st.Unavailable, "Codex") {
-		t.Fatalf("status without Codex = %+v", st)
+	c.ready = func() string { return "Sign in to a ChatGPT account in Settings > Accounts to call Voice." }
+	if st := c.Status(); st.Available || st.Live || !strings.Contains(st.Unavailable, "ChatGPT") {
+		t.Fatalf("status without ChatGPT = %+v", st)
 	}
 }
 
-// With no Codex account in a fresh data folder, voice is unavailable.
-func TestVoiceReadyWithoutCodex(t *testing.T) {
+// With no ChatGPT account in a fresh data folder, voice is unavailable.
+func TestVoiceReadyWithoutChatGPT(t *testing.T) {
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	if why := voiceReady(); !strings.Contains(why, "Codex") {
+	if why := voiceReady(); !strings.Contains(why, "ChatGPT") {
 		t.Fatalf("voiceReady = %q", why)
 	}
 }

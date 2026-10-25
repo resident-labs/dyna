@@ -87,7 +87,7 @@ func TestExecuteKeepsCreateOnceOutputProfileSnapshot(t *testing.T) {
 	}
 	second := &profile.Store{Profiles: []profile.Profile{{
 		Name: "worker", Harness: profile.HarnessMock, Default: true,
-		Output: &workeroutput.Declaration{Dialect: workeroutput.DialectCodexJSONL},
+		Output: &workeroutput.Declaration{Dialect: workeroutput.DialectPiJSON},
 		Taste:  5, Intelligence: 5, Cost: 5,
 	}}}
 	if _, err := Execute(context.Background(), Options{ScriptSrc: script, Store: second, Run: run, WorkDir: t.TempDir()}); err != nil {

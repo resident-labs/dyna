@@ -280,12 +280,12 @@ func TestQuotaResetKeepsProfileOut(t *testing.T) {
 
 func TestConcurrentAccountRemainsSelectable(t *testing.T) {
 	storetest.Isolate(t)
-	lease, err := runtime.NewAccounts().TurnLeaseManaged(context.Background(), "codex")
+	lease, err := runtime.NewAccounts().TurnLeaseManaged(context.Background(), "pi")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer lease.Close()
-	choice, err := ChooseProfile([]profile.Profile{{Name: "parallel", Harness: "codex", Taste: 10}, {Name: "spare", Taste: 1}}, "", nil, time.Now(), "reviewer")
+	choice, err := ChooseProfile([]profile.Profile{{Name: "parallel", Harness: "pi", Taste: 10}, {Name: "spare", Taste: 1}}, "", nil, time.Now(), "reviewer")
 	if err != nil || choice.Name != "parallel" {
 		t.Fatalf("concurrent account was excluded: profile=%q error=%v", choice.Name, err)
 	}
