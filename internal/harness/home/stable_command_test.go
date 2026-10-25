@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"dyna-agent/internal/fsutil"
 )
 
 // A Claude or Muse session names Dyna's shell MCP server in its config. That
@@ -55,6 +57,56 @@ func TestPrepareKeepsHarnessMCPCommandAcrossTurns(t *testing.T) {
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("harness MCP command is gone after its turns: %v", err)
 	}
+}
+
+// A tool home published for one engine build must call the build the engine
+// runs now. Its wrapper names one stable path, so an engine update moves that
+// path for every running session; naming one build's copy instead left sessions
+// on the build they first started with, and the updated engine refused their
+// calls as a version mismatch.
+func TestPrepareBridgeFollowsTheCurrentBuild(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("Linux running image link")
+	}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	scope := filepath.Join(t.TempDir(), "scope")
+	before, err := Prepare(scope, buildStub(t, "build one"), os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := Prepare(scope, buildStub(t, "build two, updated"), os.Environ())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before["DYNA_BIN"] != after["DYNA_BIN"] {
+		t.Fatalf("an engine update republished the Dyna command: %q then %q", before["DYNA_BIN"], after["DYNA_BIN"])
+	}
+	target := strings.TrimSpace(readBridgeTarget(t, after["DYNA_BIN"]))
+	if filepath.Base(target) != "current" {
+		t.Fatalf("published Dyna command names %q, want this scope's current link", target)
+	}
+	out, err := exec.Command(after["DYNA_BIN"]).Output()
+	if err != nil {
+		t.Fatalf("published Dyna command does not run after an update: %v", err)
+	}
+	if got := strings.TrimSpace(string(out)); got != "build two, updated" {
+		t.Fatalf("published Dyna command runs %q, want the current build", got)
+	}
+}
+
+// buildStub copies a stand-in engine build into the image cache, as the engine
+// does for the build it runs.
+func buildStub(t *testing.T, build string) string {
+	t.Helper()
+	source := filepath.Join(t.TempDir(), "dyna")
+	if err := os.WriteFile(source, []byte("#!/bin/sh\nprintf '%s\\n' \""+build+"\"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	image, err := fsutil.StableImage(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return image
 }
 
 // readBridgeTarget returns the exec target of the published dyna bridge.
