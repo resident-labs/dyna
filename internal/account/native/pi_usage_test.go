@@ -15,9 +15,9 @@ import (
 	"dyna-agent/internal/account/store"
 )
 
-func piCaptured(t *testing.T, entryID string, entry map[string]any) Captured {
+func piCaptured(t *testing.T, entryID string, entry piAuthEntry) Captured {
 	t.Helper()
-	payload, err := json.Marshal(map[string]any{"auth.json": map[string]any{entryID: entry}})
+	payload, err := json.Marshal(map[string]any{"auth.json": map[string]piAuthEntry{entryID: entry}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,8 +30,8 @@ func piTestJWT(claims map[string]any) string {
 }
 
 func TestPiChatGPTUsageReadsTheCodexPlan(t *testing.T) {
-	c := piCaptured(t, "openai-codex", map[string]any{
-		"type": "oauth", "access": "fixture-access", "accountId": "fixture-account", "expires": int64(1 << 62),
+	c := piCaptured(t, "openai-codex", piAuthEntry{
+		Type: "oauth", Access: "fixture-access", AccountID: "fixture-account", Expires: 1 << 62,
 	})
 	before := append([]byte(nil), c.Credential.Payload...)
 	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
@@ -53,7 +53,7 @@ func TestPiChatGPTUsageReadsTheCodexPlan(t *testing.T) {
 }
 
 func TestPiKimiCodeUsageReadsTheCodingPlan(t *testing.T) {
-	c := piCaptured(t, "kimi-coding", map[string]any{"type": "oauth", "access": "fixture-access"})
+	c := piCaptured(t, "kimi-coding", piAuthEntry{Type: "oauth", Access: "fixture-access"})
 	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	client := directTestClient(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://api.kimi.com/coding/v1/usages" || r.Header.Get("Authorization") != "Bearer fixture-access" {
@@ -69,7 +69,7 @@ func TestPiKimiCodeUsageReadsTheCodingPlan(t *testing.T) {
 
 func TestPiXAIUsageReadsTheGrokCredits(t *testing.T) {
 	token := piTestJWT(map[string]any{"sub": "fixture-user", "exp": int64(1 << 62)})
-	c := piCaptured(t, "xai", map[string]any{"type": "oauth", "access": token})
+	c := piCaptured(t, "xai", piAuthEntry{Type: "oauth", Access: token})
 	now := time.Date(2026, 10, 18, 8, 0, 0, 0, time.UTC)
 	client := directTestClient(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://cli-chat-proxy.grok.com/v1/billing?format=credits" || r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("x-userid") != "fixture-user" {
@@ -84,7 +84,7 @@ func TestPiXAIUsageReadsTheGrokCredits(t *testing.T) {
 }
 
 func TestPiOpenCodeGoUsageReadsTheGoPlan(t *testing.T) {
-	c := piCaptured(t, "opencode-go", map[string]any{"type": "api_key", "key": "fixture-key"})
+	c := piCaptured(t, "opencode-go", piAuthEntry{Type: "api_key", Key: "fixture-key"})
 	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	client := directTestClient(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://opencode.ai/inference/go/v1/usage" || r.Header.Get("Authorization") != "Bearer fixture-key" || r.Header.Get("User-Agent") != "opencode/latest/2.0.32/cli" {
@@ -99,7 +99,7 @@ func TestPiOpenCodeGoUsageReadsTheGoPlan(t *testing.T) {
 }
 
 func TestPiDeepSeekUsageReadsTheBalance(t *testing.T) {
-	c := piCaptured(t, "deepseek", map[string]any{"type": "api_key", "key": "fixture-key"})
+	c := piCaptured(t, "deepseek", piAuthEntry{Type: "api_key", Key: "fixture-key"})
 	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	client := directTestClient(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://api.deepseek.com/user/balance" || r.Header.Get("Authorization") != "Bearer fixture-key" {
@@ -114,7 +114,7 @@ func TestPiDeepSeekUsageReadsTheBalance(t *testing.T) {
 }
 
 func TestPiZAIUsageReadsTheCodingPlanLimits(t *testing.T) {
-	c := piCaptured(t, "zai", map[string]any{"type": "api_key", "key": "fixture-key"})
+	c := piCaptured(t, "zai", piAuthEntry{Type: "api_key", Key: "fixture-key"})
 	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	client := directTestClient(func(r *http.Request) (*http.Response, error) {
 		if r.URL.String() != "https://api.z.ai/api/monitor/usage/quota/limit" || r.Header.Get("Authorization") != "Bearer fixture-key" {
@@ -135,8 +135,8 @@ func TestPiZAIUsageReadsTheCodingPlanLimits(t *testing.T) {
 }
 
 func TestPiMetaOAuthUsageUsesTheIdentityToken(t *testing.T) {
-	c := piCaptured(t, "meta", map[string]any{
-		"type": "oauth", "access": "fixture-minted-key", "refresh": "fixture-identity",
+	c := piCaptured(t, "meta", piAuthEntry{
+		Type: "oauth", Access: "fixture-minted-key", Refresh: "fixture-identity",
 	})
 	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	client := directTestClient(func(r *http.Request) (*http.Response, error) {
@@ -153,8 +153,8 @@ func TestPiMetaOAuthUsageUsesTheIdentityToken(t *testing.T) {
 }
 
 func TestPiMetaOAuthIdlePlanIsKept(t *testing.T) {
-	c := piCaptured(t, "meta", map[string]any{
-		"type": "oauth", "access": "fixture-minted-key", "refresh": "fixture-identity",
+	c := piCaptured(t, "meta", piAuthEntry{
+		Type: "oauth", Access: "fixture-minted-key", Refresh: "fixture-identity",
 	})
 	now := time.Date(2026, 10, 25, 12, 0, 0, 0, time.UTC)
 	client := directTestClient(func(r *http.Request) (*http.Response, error) {
@@ -170,7 +170,7 @@ func TestPiMetaOAuthIdlePlanIsKept(t *testing.T) {
 }
 
 func TestPiMetaKeyIsTypedNotReadableWithoutARequest(t *testing.T) {
-	c := piCaptured(t, "meta", map[string]any{"type": "api_key", "key": "fixture-key"})
+	c := piCaptured(t, "meta", piAuthEntry{Type: "api_key", Key: "fixture-key"})
 	deny := directTestClient(func(*http.Request) (*http.Response, error) {
 		t.Error("a Meta API key must not request usage")
 		return nil, errors.New("unexpected request")
@@ -183,7 +183,7 @@ func TestPiMetaKeyIsTypedNotReadableWithoutARequest(t *testing.T) {
 }
 
 func TestPiUsageRejectsAnotherAccountsCredential(t *testing.T) {
-	c := piCaptured(t, "deepseek", map[string]any{"type": "api_key", "key": "fixture-key"})
+	c := piCaptured(t, "deepseek", piAuthEntry{Type: "api_key", Key: "fixture-key"})
 	c.Identity = "pi:zai"
 	deny := directTestClient(func(*http.Request) (*http.Response, error) {
 		t.Error("a mismatched credential must not request usage")
@@ -195,7 +195,7 @@ func TestPiUsageRejectsAnotherAccountsCredential(t *testing.T) {
 }
 
 func TestPiUsageNamesAnExpiredSignInWithoutSigningOut(t *testing.T) {
-	c := piCaptured(t, "xai", map[string]any{"type": "oauth", "access": piTestJWT(map[string]any{"sub": "fixture-user"})})
+	c := piCaptured(t, "xai", piAuthEntry{Type: "oauth", Access: piTestJWT(map[string]any{"sub": "fixture-user"})})
 	client := directTestClient(func(*http.Request) (*http.Response, error) {
 		return directTestResponse(401, "private-provider-error"), nil
 	})
