@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"maps"
 	"slices"
@@ -82,28 +83,19 @@ func (a *Runtime) piAccountForProvider(ctx context.Context, provider store.Provi
 // the selection must not change, because the owner asked to refresh one saved
 // credential, not to switch providers.
 func (a *Runtime) savePiProviderEntries(ctx context.Context, entries map[string]json.RawMessage, target string) ([]NativeAccount, error) {
-	var saved []NativeAccount
-	var firstErr error
-	var targetAccount *NativeAccount
 	if target != "" {
 		if n, err := a.Accounts.Find(target); err == nil && n.Harness == "pi" && n.Provider != "" {
-			targetAccount = &n
+			return a.saveTargetedPiEntry(ctx, entries, n)
 		}
 	}
+	var saved []NativeAccount
+	var firstErr error
 	for _, id := range slices.Sorted(maps.Keys(entries)) {
 		provider := piProvider(id)
-		keepSelection := false
-		var account NativeAccount
-		var found bool
-		var err error
-		if targetAccount != nil && targetAccount.Provider == provider {
-			account, found, keepSelection = *targetAccount, true, true
-		} else {
-			account, found, err = a.piAccountForProvider(ctx, provider)
-			if err != nil {
-				firstErr = errors.Join(firstErr, err)
-				continue
-			}
+		account, found, err := a.piAccountForProvider(ctx, provider)
+		if err != nil {
+			firstErr = errors.Join(firstErr, err)
+			continue
 		}
 		if !found {
 			account, err = a.Accounts.CreateProvider("pi", provider, piEntryKind(entries[id]), id+" login")
@@ -121,15 +113,40 @@ func (a *Runtime) savePiProviderEntries(ctx context.Context, entries map[string]
 			firstErr = errors.Join(firstErr, err)
 			continue
 		}
-		if !keepSelection {
-			if err := a.Accounts.setActiveAccount(captured); err != nil {
-				firstErr = errors.Join(firstErr, err)
-				continue
-			}
+		if err := a.Accounts.setActiveAccount(captured); err != nil {
+			firstErr = errors.Join(firstErr, err)
+			continue
 		}
 		saved = append(saved, captured)
 	}
 	return saved, firstErr
+}
+
+// saveTargetedPiEntry writes only the target account's provider entry. A
+// sign-in again must change that account and nothing else, and the provider
+// card offers every provider: a credential for another provider is refused,
+// because writing it would replace that provider's active account, which the
+// owner did not ask for.
+func (a *Runtime) saveTargetedPiEntry(ctx context.Context, entries map[string]json.RawMessage, target NativeAccount) ([]NativeAccount, error) {
+	var entryID string
+	var entry json.RawMessage
+	for _, id := range slices.Sorted(maps.Keys(entries)) {
+		if piProvider(id) == target.Provider {
+			entryID, entry = id, entries[id]
+			break
+		}
+	}
+	if entry == nil {
+		return nil, fmt.Errorf("This sign-in saved no %s credential. Sign in again and choose %s.", target.Provider, target.Provider)
+	}
+	if err := writePiAccountAuth(ctx, target, map[string]json.RawMessage{entryID: entry}); err != nil {
+		return nil, err
+	}
+	captured, err := a.Accounts.Capture(ctx, target.ID, "")
+	if err != nil {
+		return nil, err
+	}
+	return []NativeAccount{captured}, nil
 }
 
 // adoptProviderAccount gives a Pi row that held several providers the provider
