@@ -5,6 +5,11 @@
 // as it does for a turn, so Dyna never keeps a second copy of a provider's
 // refresh protocol. The script prints one word to stderr and never a token.
 //
+// It calls ModelRuntime.getAuth, not ModelRegistry.getApiKeyForProvider: the
+// registry swallows every authentication error and returns undefined, which
+// would report a rejected grant as a missing credential and a transient
+// provider failure as a sign-out.
+//
 // Exit codes: 0 renewed or still valid, 3 no signed-in credential, 4 the
 // provider rejected the grant, 5 the provider runtime failed.
 
@@ -22,18 +27,19 @@ if (!authPath || !provider || !pkg) {
 	fail(5, "usage");
 }
 
-let runtime;
 try {
 	const mod = await import(pathToFileURL(join(pkg, "dist", "index.js")).href);
-	runtime = await mod.ModelRuntime.create({ authPath, refreshOnCreate: false, allowModelNetwork: false });
-	const key = await new mod.ModelRegistry(runtime).getApiKeyForProvider(provider);
-	if (!key) {
+	const runtime = await mod.ModelRuntime.create({ authPath, refreshOnCreate: false, allowModelNetwork: false });
+	const resolution = await runtime.getAuth(provider);
+	if (!resolution || !resolution.auth || !resolution.auth.apiKey) {
 		fail(3, "no-credential");
 	}
 } catch (error) {
+	// Pi wraps a provider rejection in a ModelsError whose cause carries the
+	// provider's own words. Anything else is a transient failure.
 	const cause = error && typeof error === "object" ? error.cause : undefined;
-	const text = `${error?.message ?? error} ${cause?.message ?? ""}`;
-	if (/invalid_grant|refresh.*(failed|rejected)/iu.test(text)) {
+	const text = `${error?.message ?? error} ${cause?.message ?? ""} ${cause?.status ?? ""}`;
+	if (/invalid_grant|invalid_token|unauthorized|forbidden|\b40[13]\b|refresh.*(failed|rejected)/iu.test(text)) {
 		fail(4, "grant-rejected");
 	}
 	fail(5, "refresh-failed");
