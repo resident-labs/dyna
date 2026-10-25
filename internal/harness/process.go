@@ -37,39 +37,10 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 	if spec.streamInput {
 		return runClaudeTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
 	}
-	if spec.openCode {
-		return runOpenCodeTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
-	}
-	if spec.muse {
-		return runMuseTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
-	}
-	// Hook steering bookkeeping rides on every returned attempt.
-	streamSteered := false
-	defer func() {
-		out.streamSteered = streamSteered
-	}()
 	argv := spec.argv
-	hook := steering.hookValue()
-	if hook == nil {
-		var err error
-		hook, err = newSteerHook(p)
-		if err != nil {
-			return finishAttempt(spec, "", "", err, false, ctx.Err() != nil, false, false, nil, nil)
-		}
-		if hook != nil {
-			defer hook.cleanup()
-		}
-	}
 	cmd, err := harnessCommand(ctx, p, cwd, argv, execution)
 	if err != nil {
 		return finishAttempt(spec, "", "", err, false, ctx.Err() != nil, false, false, nil, nil)
-	}
-	if hook != nil {
-		cmd.Args, err = hook.argv(cmd.Args, cmd.Env)
-		if err != nil {
-			return finishAttempt(spec, "", "", err, false, ctx.Err() != nil, false, false, nil, nil)
-		}
-		hook.failed = false
 	}
 	if spec.stdinPrompt {
 		cmd.Stdin = strings.NewReader(spec.prompt)
@@ -241,78 +212,6 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 		return false
 	}
 	paused := func() bool { return steering != nil && steering.opts.Paused != nil && steering.opts.Paused() }
-	// deliverHooked records messages the post-tool hook handed to the worker
-	// inside its running turn.
-	deliverHooked := func(messages []runstore.SteeringMessage, since time.Time) error {
-		if len(messages) == 0 {
-			return nil
-		}
-		if err := steering.dispatch(messages); err != nil {
-			return fmt.Errorf("record steering dispatch for worker %s: %w", p.Name, err)
-		}
-		if steering.opts.OnMessage != nil {
-			// The write receipt arrived; the next output is the first to see it.
-			at := normalizedBoundary(normalizer)
-			for _, message := range messages {
-				steering.opts.OnMessage(message, at)
-			}
-		}
-		if journal != nil {
-			journal.noteExternalResume()
-		}
-		gate.report(DeliverySteering, DeliveryBoundary, time.Since(since), tools.InFlight())
-		streamSteered = true
-		return nil
-	}
-	// hookSteering offers pending steering to the worker's post-tool hook and
-	// notices when the hook took it. It never stops the worker.
-	hookSteering := func() error {
-		since := hook.offeredAt
-		if err := deliverHooked(hook.taken(), since); err != nil {
-			return err
-		}
-		if hook.stale() {
-			back, delivered := hook.withdraw()
-			if err := deliverHooked(delivered, since); err != nil {
-				return err
-			}
-			if len(back) > 0 {
-				// The hook did not run: use the interrupt path from here on.
-				hook.failed = true
-				steering.pending = append(back, steering.pending...)
-				return nil
-			}
-		}
-		if !steering.hasPending() || tracker.idValue() == "" {
-			return nil
-		}
-		back, delivered := hook.withdraw()
-		if err := deliverHooked(delivered, since); err != nil {
-			return err
-		}
-		if len(back) == 0 {
-			since = time.Now()
-		}
-		messages := append(back, steering.take()...)
-		if paused() {
-			steering.pending = append(messages, steering.pending...)
-			return nil
-		}
-		offer := func() error { return hook.offer(tracker.idValue(), messages, since) }
-		var offerErr error
-		if steering.opts.DeliveryGate != nil {
-			offerErr = steering.opts.DeliveryGate(offer)
-		} else {
-			offerErr = offer()
-		}
-		if offerErr != nil {
-			if !paused() {
-				hook.failed = true
-			}
-			steering.pending = append(messages, steering.pending...)
-		}
-		return nil
-	}
 	// poll is shared by the ticker and tool-completion wakeups. It returns a
 	// finished attempt when a delivery interrupted the worker.
 	poll := func(readInput bool) (attempt, bool) {
@@ -325,12 +224,7 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 				runErr := stopCanceledProcess(cmd, done)
 				return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, steering.errValue()), true
 			}
-			if hook.usable() {
-				if err := hookSteering(); err != nil {
-					runErr := stopCanceledProcess(cmd, done)
-					return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, err), true
-				}
-			} else if !paused() && steering.hasPending() && resumable && tracker.idValue() != "" && canDeliver(DeliverySteering) {
+			if !paused() && steering.hasPending() && resumable && tracker.idValue() != "" && canDeliver(DeliverySteering) {
 				runErr, interrupted := interruptForContinuation(ctx, cmd, done)
 				messages := steering.take()
 				if ctx.Err() != nil {
@@ -386,28 +280,6 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 				if ctx.Err() != nil {
 					return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, true, false, false, nil, nil)
 				}
-				var back []runstore.SteeringMessage
-				if hook != nil {
-					// A message the hook did not take becomes the continuation.
-					since := hook.offeredAt
-					// A granted hook process may have delivered its context. Retire it
-					// first; if that fails, replay nothing.
-					retireCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-					var delivered []runstore.SteeringMessage
-					var retireErr error
-					back, delivered, retireErr = hook.retire(retireCtx)
-					cancel()
-					if retireErr != nil {
-						return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, fmt.Errorf("retire steering hook peer: %w", retireErr))
-					}
-					if err := deliverHooked(delivered, since); err != nil {
-						return finishAttempt(spec, stdout.String(), stderr.String(), runErr, true, false, false, false, nil, err)
-					}
-					if len(back) > 0 {
-						gate.report(DeliverySteering, DeliveryTurnEnd, time.Since(since), tools.InFlight())
-					}
-				}
-				messages = append(messages, back...)
 				messages = append(messages, steering.take()...)
 			}
 			reportDeferred(DeliveryTurnEnd)
@@ -438,7 +310,6 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 			a.runErr = fmt.Errorf("no harness event within %s of startup", startupWait)
 			return a
 		case <-boundary:
-			hook.noteBoundary()
 			if result, ok := poll(inputWake == nil); ok {
 				return result
 			}
@@ -476,18 +347,6 @@ func harnessCommand(ctx context.Context, p profile.Profile, cwd string, argv []s
 		launchEnv = computerEnvironment(ctx, launchEnv)
 	}
 	// Private generations can include Dyna's server with either shell policy.
-	// Forward its environment only when the generated server actually exists.
-	if p.RuntimeExecutable != "" {
-		var err error
-		switch p.Harness {
-		case profile.HarnessMuse:
-			argv, err = harnessruntime.DynaShellMuseArgs(argv, launchEnv)
-		}
-		if err != nil {
-			return nil, err
-		}
-	}
-
 	executable := argv[0]
 	if p.DynaManaged() {
 		if p.RuntimeExecutable == "" {
@@ -522,9 +381,6 @@ func runCompaction(ctx context.Context, p profile.Profile, cwd string, spec comm
 }
 
 func runCompactCommand(ctx context.Context, p profile.Profile, cwd string, spec commandSpec, steering *steeringSupervisor, execution ExecutionOptions, admit func(context.Context) error) error {
-	if spec.openCode {
-		return runOpenCodeCompact(ctx, p, cwd, spec, execution, admit)
-	}
 	if spec.rpc {
 		return runPiCompact(ctx, p, cwd, spec, steering, execution, admit)
 	}

@@ -20,7 +20,6 @@ import (
 	"dyna-agent/internal/harness"
 	"dyna-agent/internal/harness/runtime"
 	"dyna-agent/internal/mode"
-	"dyna-agent/internal/profile"
 	"dyna-agent/internal/providerfailure"
 	"dyna-agent/internal/room"
 	"dyna-agent/internal/runstore"
@@ -312,10 +311,6 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 		return fail(err)
 	}
 	resumable := meta.Resumable
-	charterMeta, err := m.instructionMeta(meta, turn)
-	if err != nil {
-		return fail(err)
-	}
 	// The instructions stay byte for byte the same for the life of a harness
 	// conversation, so its cached prompt prefix holds. They refresh only where
 	// that cache is already lost; otherwise a change note reports the drift.
@@ -370,13 +365,7 @@ func (m *Manager) RunTurn(ctx context.Context, id string, n int, lock *os.File) 
 				writes.note(TurnNote{Fallback: &f})
 			},
 			OnCompaction: func() {
-				stale := true
-				if prof.Harness == profile.HarnessOpenCode {
-					// The controlled service compact reinstalls this snapshot immediately.
-					// Refresh later only when its contents have changed.
-					stale = m.desiredInstructions(charterMeta).Hash != frozen.Hash
-				}
-				writes.instructionsStale(stale)
+				writes.instructionsStale(true)
 			},
 			OnSession: func(sid string) {
 				mu.Lock()

@@ -3,8 +3,6 @@ package workeroutput
 import (
 	"encoding/json"
 	"strings"
-
-	"dyna-agent/internal/providerfailure"
 )
 
 // Record separates execution signals from filtered presentation events.
@@ -110,32 +108,6 @@ func decodeText(line []byte) Record {
 	return Record{Events: events, recognized: ok, valid: true}
 }
 
-func decodeOpenCode(line []byte) Record {
-	p, ok := parseRecord[openCodeRecord](line)
-	if !ok {
-		return Record{}
-	}
-	events, known := adaptOpenCodeJSON(p)
-	usage := recordUsage{Type: p.Type}
-	if p.Type == "step_finish" {
-		usage.Cost = p.Part.Cost
-		if p.Part.Tokens != nil {
-			usage.Usage = map[string]json.RawMessage{}
-			for native, normalized := range map[string]string{"input": "input_tokens", "output": "output_tokens", "reasoning": "reasoning_tokens"} {
-				if raw, ok := p.Part.Tokens[native]; ok {
-					usage.Usage[normalized] = raw
-				}
-			}
-			var cache map[string]json.RawMessage
-			if json.Unmarshal(p.Part.Tokens["cache"], &cache) == nil {
-				usage.Usage["cache_read_input_tokens"] = cache["read"]
-				usage.Usage["cache_creation_input_tokens"] = cache["write"]
-			}
-		}
-	}
-	return Record{Events: events, Signals: openCodeToolSignals(p), SessionID: p.SessionID, valid: true, recognized: known, recordUsage: usage}
-}
-
 func decodeClaude(line []byte) Record {
 	p, ok := parseRecord[claudeRecord](line)
 	if !ok {
@@ -144,85 +116,6 @@ func decodeClaude(line []byte) Record {
 	events, known := adaptClaudeStreamJSON(p)
 	p.recordUsage.Type, p.recordUsage.ThreadID = p.Type, p.SessionID
 	return Record{Events: events, Signals: claudeToolSignals(p), SessionID: p.SessionID, Compaction: p.Type == "system" && p.Subtype == "compact_boundary", valid: true, recognized: known, recordUsage: p.recordUsage}
-}
-
-func decodeMuse(line []byte) Record {
-	p, ok := parseRecord[museRecord](line)
-	if !ok {
-		return Record{}
-	}
-	events, known := adaptMuseJSONL(p)
-	r := Record{Events: events, Signals: museToolSignals(p), valid: true, recognized: known, recordUsage: recordUsage{Type: p.PayloadType, Usage: p.Payload.Usage}}
-	if p.Stream.Kind == "session" {
-		r.SessionID = p.Stream.ID
-	}
-	r.ContextTokens = p.Payload.ContextTokens
-	r.Generation = p.PayloadType == "run.reasoning.delta" || p.PayloadType == "run.lifecycle.started" || p.PayloadType == "run.usage"
-	return r
-}
-
-type openCodeRecord struct {
-	Type      string          `json:"type"`
-	SessionID string          `json:"sessionID"`
-	Error     json.RawMessage `json:"error"`
-	Part      struct {
-		Text      string                     `json:"text"`
-		MessageID string                     `json:"messageID"`
-		ID        string                     `json:"id"`
-		CallID    string                     `json:"callID"`
-		Tool      string                     `json:"tool"`
-		Reason    string                     `json:"reason"`
-		Cost      *float64                   `json:"cost"`
-		Tokens    map[string]json.RawMessage `json:"tokens"`
-		State     struct {
-			Status string          `json:"status"`
-			Input  json.RawMessage `json:"input"`
-			Output json.RawMessage `json:"output"`
-			Error  string          `json:"error"`
-		} `json:"state"`
-	} `json:"part"`
-}
-
-// recordError accepts both protocol error shapes without rejecting the envelope.
-// It keeps the provider's structured type, code and status, because they name a
-// failure on their own; the message is only a fallback.
-type recordError struct {
-	Message string
-	Type    string
-	Code    string
-	Status  string
-}
-
-func (e *recordError) UnmarshalJSON(raw []byte) error {
-	var object struct {
-		Message string          `json:"message"`
-		Type    json.RawMessage `json:"type"`
-		Code    json.RawMessage `json:"code"`
-		Status  json.RawMessage `json:"status"`
-	}
-	if json.Unmarshal(raw, &object) == nil {
-		e.Message = object.Message
-		e.Type, e.Code, e.Status = scalarText(object.Type), scalarText(object.Code), scalarText(object.Status)
-		return nil
-	}
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		e.Message = text
-	}
-	return nil
-}
-
-// Reason returns the provider reason of this error. A structured type, code or
-// status is preferred, because the message alone may use no provider words. The
-// fields are a provider diagnostic, not model output, so this is a trusted
-// boundary.
-func (e recordError) Reason() (providerfailure.Reason, bool) {
-	for _, field := range []string{e.Type, e.Code, e.Status} {
-		if reason, ok := providerfailure.ClassifyField(field); ok {
-			return reason, true
-		}
-	}
-	return providerfailure.Classify(e.Message)
 }
 
 // scalarText reads a structured field that is a JSON string or number. A field

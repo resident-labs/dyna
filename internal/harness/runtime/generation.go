@@ -36,10 +36,6 @@ type privateGenerationHome struct {
 }
 
 func restoreGenerationHome(h, dir string, generation harnessmgr.ConfigGeneration) (harnessmgr.ConfigGeneration, error) {
-	// TODO: legacy/shim remove later — drops standalone mode from OpenCode generations made before shared services; remove after those pins expire.
-	if h == "opencode" {
-		generation.Args = slices.DeleteFunc(generation.Args, func(arg string) bool { return arg == "--standalone" })
-	}
 	raw, err := os.ReadFile(filepath.Join(dir, "private-home.json"))
 	if err != nil {
 		return generation, err
@@ -74,32 +70,17 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 		}
 		definition := entry.MCPDefinition
 		row := map[string]any{}
-		if h == "opencode" {
-			if definition.URL != "" {
-				row["type"] = "remote"
-				row["url"] = definition.URL
-			} else {
-				row["type"] = "local"
-				row["command"] = append([]string{definition.Command}, definition.Args...)
-			}
-			// Code Mode would hide the server's tools behind execute.
-			if entry.Name == dynaMCPName {
-				row["codemode"] = false
-			}
-		}
 		// Pi keeps MCP tools from the model unless they are exposed directly
 		// (shipped docs/mcp.md: codemode is the default exposure), so the shell
 		// tools must be declared like built-in tools.
 		if h == "pi" && entry.Name == dynaMCPName {
 			row["exposure"] = "direct"
 		}
-		if h != "opencode" {
-			if definition.URL != "" {
-				row["url"] = definition.URL
-			} else {
-				row["command"] = definition.Command
-				row["args"] = definition.Args
-			}
+		if definition.URL != "" {
+			row["url"] = definition.URL
+		} else {
+			row["command"] = definition.Command
+			row["args"] = definition.Args
 		}
 		env := map[string]string{}
 		for _, name := range definition.EnvKeys {
@@ -111,18 +92,10 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 			g.Env[alias] = value
 			envReferences[alias] = name
 			g.EnvKeys = append(g.EnvKeys, name)
-			if h == "opencode" {
-				env[name] = "{env:" + harnessmgr.MCPEnvironmentName(name) + "}"
-			} else {
-				env[name] = "${" + harnessmgr.MCPEnvironmentName(name) + "}"
-			}
+			env[name] = "${" + harnessmgr.MCPEnvironmentName(name) + "}"
 		}
 		if len(env) > 0 {
-			if h == "opencode" {
-				row["environment"] = env
-			} else {
-				row["env"] = env
-			}
+			row["env"] = env
 		}
 		if definition.URL == "" && len(definition.EnvKeys) > 0 {
 			refs := map[string]string{}
@@ -133,12 +106,8 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 				return g, errors.New("Dyna CLI is required for MCP environment references")
 			}
 			args := []string{"mcp", "serve", published, entry.Name}
-			if h == "opencode" {
-				row["command"] = append([]string{cli}, args...)
-			} else {
-				row["command"] = cli
-				row["args"] = args
-			}
+			row["command"] = cli
+			row["args"] = args
 			delete(row, "env")
 			delete(row, "environment")
 			execSpecs[entry.Name] = harnessmgr.MCPExecSpec{Command: definition.Command, Args: definition.Args, Env: refs}
@@ -170,18 +139,6 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 	}
 	if a.MCPKey != "" {
 		root[a.MCPKey] = servers
-	}
-	if h == "opencode" {
-		root["mcp"] = map[string]any{"servers": servers}
-		root["skills"] = []string{filepath.Join(published, "skills")}
-		policies, _ := root["policies"].([]any)
-		policies = slices.Clone(policies)
-		for _, path := range paths {
-			name := filepath.Base(filepath.Dir(path))
-			policies = append(policies, map[string]any{"action": "integration.use", "resource": "skill:" + name, "effect": "allow"})
-		}
-		root["policies"] = policies
-		root["update"] = "disable"
 	}
 	var raw []byte
 	if a.ConfigFormat == "toml" {
@@ -217,17 +174,9 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 	for k, v := range harnesshome.Roots(home) {
 		g.Env[k] = v
 	}
-	if h == "opencode" {
-		g.Env["OPENCODE_CONFIG"] = filepath.Join(published, filepath.Base(file))
-	}
 	if a.ConfigArgs != nil {
-		// Muse reads the staged file to construct value arguments; the other
-		// adapters only construct paths and must receive published paths.
-		if h == "muse" {
-			g.Args = a.ConfigArgs(home, file, skills)
-		} else {
-			g.Args = a.ConfigArgs(home, filepath.Join(published, filepath.Base(file)), filepath.Join(published, "skills"))
-		}
+		// Adapters construct paths from the published generation.
+		g.Args = a.ConfigArgs(home, filepath.Join(published, filepath.Base(file)), filepath.Join(published, "skills"))
 	}
 	if h == "pi" {
 		mcpRaw, e := json.MarshalIndent(map[string]any{"mcpServers": servers}, "", "  ")
@@ -238,7 +187,7 @@ func materializeNative(h, home, dir, published, cli string, c harnessmgr.Harness
 			return g, e
 		}
 	}
-	if a.ConfigFile != "" && h != "opencode" && h != "muse" {
+	if a.ConfigFile != "" {
 		g.PartialReasons = append(g.PartialReasons, "Native settings use the shared harness home and are not pinned per generation.")
 	}
 	if a.SkillDir != "" && !a.SkillsPinned {

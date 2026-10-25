@@ -10,8 +10,7 @@ write fails, Dyna keeps the saved rotation and retries native repair. Private
 native accounts use the harness switch gate, so refresh waits for live turns.
 Each background private refresh attempt has a 20-second timeout.
 
-Muse, OpenCode V2, and Pi have no supported
-Dyna refresh operation. The account API reports known expiry through `expiresAt`, and
+Pi has no supported Dyna refresh operation. The account API reports known expiry through `expiresAt`, and
 explains unsupported refresh through `refreshMessage`. An unknown expiry is
 reported as unknown. Dyna does not guess provider OAuth endpoints.
 
@@ -32,22 +31,17 @@ The account API exposes exhausted `five_hour` and `seven_day` windows through
 Sign-in uses the Harnesses page or `dyna harness login`. Account responses
 never contain token payloads.
 
-## Sign-in fallback for Muse and OpenCode v2
+## Sign-in fallback
 
-Dyna has no verified refresh operation for these two adapters. A refresh token
-in a credential file does not establish an endpoint, client contract, or safe
-rotation order. Dyna keeps automatic refresh disabled until that contract has
-an offline test. It does not try guessed OAuth endpoints.
-
-| Harness | Available evidence | Current recovery |
-| --- | --- | --- |
-| Muse | File-backed Meta credentials can contain `expires_at` and a refresh token. The adapter has no verified refresh command or token endpoint. | A known expired credential without an API-key fallback marks the private account as not signed in. Use Sign in. |
-| OpenCode v2 | Dyna stores a reference to a credential in the native database. The redacted auth list does not expose expiry or a standalone refresh contract. | Use Sign in when OpenCode requests authentication. Dyna runs login in the private database scope. |
+Dyna has no verified refresh operation for Pi. A refresh token in a credential
+file does not establish an endpoint, client contract, or safe rotation order.
+Dyna keeps automatic refresh disabled until that contract has an offline test.
+It does not try guessed OAuth endpoints.
 
 Harnesses exposes Sign in in the account detail even when expiry is unknown.
 Known expiry is returned as `expiresAt`; an unknown expiry stays absent.
-Reading status does not refresh, rotate, or rewrite credentials. Muse sign-in
-uses Dyna's private account HOME and preserves the personal CLI login.
+Reading status does not refresh, rotate, or rewrite credentials. Sign-in uses
+Dyna's private account HOME and preserves the personal CLI login.
 
 An API-key fallback remains usable when an access-token timestamp has expired.
 Dyna preserves that account's signed-in state. It still reports the access-token

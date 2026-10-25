@@ -89,7 +89,7 @@ func ApplyBlockingQuota(accounts []Account, now time.Time) {
 		a.QuotaBlockedUntil = nil
 		a.BlockingQuotaWindows = nil
 		for _, w := range a.Windows {
-			if w.ID != "five_hour" && w.ID != "seven_day" && !(a.Harness == "muse" && w.ID == "subscription") {
+			if w.ID != "five_hour" && w.ID != "seven_day" {
 				continue
 			}
 			reset, err := time.Parse(time.RFC3339Nano, w.ResetsAt)

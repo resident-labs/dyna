@@ -10,15 +10,6 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"time"
-)
-
-// OpenCode ends a run when an MCP call takes about 5 s, and names its own
-// session in each call's _meta. Its calls therefore wait at most 3 s; the
-// wake on a job's exit means the model never has to poll.
-const (
-	openCodeClient  = "opencode"
-	openCodeWaitCap = 3 * time.Second
 )
 
 type request struct {
@@ -76,9 +67,6 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, tools *Tools) error
 				} `json:"clientInfo"`
 			}
 			_ = json.Unmarshal(req.Params, &p)
-			if p.ClientInfo.Name == openCodeClient {
-				tools.WaitCap = openCodeWaitCap
-			}
 			if p.ProtocolVersion == "" {
 				p.ProtocolVersion = "2025-06-18"
 			}

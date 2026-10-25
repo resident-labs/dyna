@@ -14,8 +14,7 @@ import (
 )
 
 // claudeUsageCapture turns Claude's in-stream rate_limit_event into a usage
-// observation on the admitted account, the way Muse quota errors are
-// recorded. Observe runs on every live stdout line and keeps the windows of
+// observation on the admitted account. Observe runs on every live stdout line and keeps the windows of
 // the newest event together with that event's own receipt time, so no later
 // line can restamp older data. Finish runs after the process stops and sends
 // that pair, after rechecking that the account is still the one the attempt

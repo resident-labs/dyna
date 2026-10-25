@@ -125,23 +125,6 @@ func ProviderFor(harness, integration string) (Provider, Kind) {
 		return ProviderKimiCode, KindOAuth
 	case "grok":
 		return ProviderXAI, KindOAuth
-	case "muse":
-		return ProviderMetaMuse, KindOAuth
-	case "opencode":
-		switch integration {
-		case "", "opencode", "opencode-go":
-			return ProviderOpenCodeGo, KindOAuth
-		case "anthropic":
-			return ProviderAnthropic, KindAPIKey
-		case "openai":
-			return ProviderChatGPT, KindAPIKey
-		case "xai":
-			return ProviderXAI, KindAPIKey
-		case "deepseek":
-			return ProviderDeepSeek, KindAPIKey
-		case "zai":
-			return ProviderZAI, KindAPIKey
-		}
 	case "pi":
 		// Pi keeps every provider in one home, so its row names no provider yet.
 		return "", KindOAuth

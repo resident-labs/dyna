@@ -169,8 +169,6 @@ func (s *Store) prepareSessionOutput(id, key string, turns []capturedTurn) (proj
 	})
 	type conversionUnit struct {
 		start, end int64
-		dialect    string
-		ambiguous  bool
 	}
 	var units []conversionUnit
 	for _, turn := range sorted {
@@ -187,10 +185,9 @@ func (s *Store) prepareSessionOutput(id, key string, turns []capturedTurn) (proj
 		if len(units) > 0 && start < units[len(units)-1].end {
 			unit := &units[len(units)-1]
 			unit.end = max(unit.end, end)
-			unit.ambiguous = unit.ambiguous || unit.dialect != turn.turn.OutputDialect
 			continue
 		}
-		units = append(units, conversionUnit{start: start, end: end, dialect: turn.turn.OutputDialect})
+		units = append(units, conversionUnit{start: start, end: end})
 	}
 	for _, unit := range units {
 		start, end := unit.start, unit.end
@@ -210,14 +207,8 @@ func (s *Store) prepareSessionOutput(id, key string, turns []capturedTurn) (proj
 		if err != nil {
 			return projection.Prepared{}, false, err
 		}
-		dialect := unit.dialect
 		if err := pack.Add(lines, func(events []workeroutput.Event) []int {
-			// Conflicting dialects cannot safely share a conversion context.
-			// Preserve their source events rather than reject startup.
-			if unit.ambiguous {
-				return nil
-			}
-			return workeroutput.ConvertSessionTurn(dialect, events)
+			return workeroutput.ConvertSessionTurn(events)
 		}); err != nil {
 			return projection.Prepared{}, false, fmt.Errorf("artifact %s range [%d,%d): %w", key, start, end, err)
 		}

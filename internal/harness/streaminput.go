@@ -82,8 +82,8 @@ type streamInput struct {
 const streamStallLimit = 30 * time.Second
 
 // emptyStepLimit: a worker that starts this many steps in a row without text,
-// reasoning or tool output counts as failed. OpenCode models that loop emit
-// one empty step about every 10 seconds, so this is about 60 seconds.
+// reasoning or tool output counts as failed. Model loops emit one empty step
+// about every 10 seconds, so this is about 60 seconds.
 const emptyStepLimit = 6
 
 // startupLimit bounds how long a turn may produce no harness event at all

@@ -4,11 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -25,7 +22,6 @@ var (
 	// command. It is transient, so the copy can run again.
 	errLoginRead       = errors.New("A native login could not be read:")
 	errOwnerLoginBusy  = errors.New("The owner login store is busy.")
-	errSQLiteMissing   = errors.New("sqlite3 is missing.")
 	errNoPersonalLogin = errors.New("Dyna found no personal login to copy. Sign in instead.")
 	errCopyFailed      = errors.New("Dyna could not copy your personal login. Sign in instead.")
 	errPrivateHomeUsed = errors.New("Dyna's private home for this harness already holds a login. Sign in instead.")
@@ -133,14 +129,12 @@ func (r *Runtime) copyPersonalLogin(ctx context.Context, harness string) (result
 		return native.ErrUnsupported
 	}
 	var captured []native.Captured
-	if h != "opencode" {
-		captured, err = source.Capture(ctx, "")
-		if err != nil || len(captured) == 0 {
-			if err = loginReadError(err); err != nil {
-				return err
-			}
-			return errNoPersonalLogin
+	captured, err = source.Capture(ctx, "")
+	if err != nil || len(captured) == 0 {
+		if err = loginReadError(err); err != nil {
+			return err
 		}
+		return errNoPersonalLogin
 	}
 	if err = writePrivateAccountJSON(pending, struct {
 		Version int `json:"version"`
@@ -150,27 +144,9 @@ func (r *Runtime) copyPersonalLogin(ctx context.Context, harness string) (result
 	if err = harnesshome.Ensure(scope); err != nil {
 		return errAccountPath
 	}
-	if h == "opencode" {
-		// Native Capture initializes the schema. Never activate an owner v2-ref.
-		rows, e := destination.Capture(ctx, "")
-		if e != nil && !errors.Is(e, native.ErrNotSignedIn) {
-			if e = loginReadError(e); e != nil {
-				return e
-			}
-			return errPrivateHomeUsed
-		}
-		if len(rows) != 0 {
-			return errPrivateHomeUsed
-		}
-		if err = importOwnerOpenCodeRows(ctx, owner, filepath.Join(scope, "opencode.db")); err != nil {
-			retry = errors.Is(err, errOwnerLoginBusy)
+	for _, c := range captured {
+		if _, err = destination.Activate(ctx, c.Integration, c.Credential); err != nil {
 			return err
-		}
-	} else {
-		for _, c := range captured {
-			if _, err = destination.Activate(ctx, c.Integration, c.Credential); err != nil {
-				return err
-			}
 		}
 	}
 	found, err := a.indexOwnerLogin(ctx, h, scope, destination, captured)
@@ -221,7 +197,7 @@ func (a *Accounts) indexOwnerLogin(ctx context.Context, h, scope string, destina
 	if err != nil || len(actual) == 0 {
 		return false, loginReadError(err)
 	}
-	if h != "opencode" {
+	if len(captured) > 0 {
 		for _, c := range captured {
 			verified := capturedFor(actual, c.Integration)
 			if verified == nil || !sameNativeLogin(*verified, c) {
@@ -312,7 +288,7 @@ func ownerLoginHost(a *Accounts) (native.Host, error) {
 		return native.Host{}, native.ErrNotSignedIn
 	}
 	selectors := map[string]bool{}
-	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "ANTHROPIC_CONFIG_DIR", "MUSE_AUTH_PATH", "GROK_HOME", "PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR", "OPENCODE_CONFIG_DIR", "OPENCODE_DB", "OPENCODE_TEST_HOME", "OPENCODE_CONFIG"} {
+	for _, k := range []string{"XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "ANTHROPIC_CONFIG_DIR", "GROK_HOME", "PI_CODING_AGENT_DIR", "PI_CODING_AGENT_SESSION_DIR"} {
 		selectors[k] = true
 	}
 	lookup := func(k string) string {
@@ -332,71 +308,3 @@ func ownerLoginHost(a *Accounts) (native.Host, error) {
 	}
 	return native.Host{Home: home, Env: lookup}, nil
 }
-
-// The inspected v2 CLI has no auth export/import command. Its credential table
-// has these nine columns (verified on the installed v2 artifact, 2026-10-18).
-// SQLite reads the owner's live WAL through a read-only connection. Only login
-// rows enter the initialized private DB; sessions/settings never leave owner DB.
-func importOwnerOpenCodeRows(ctx context.Context, owner native.Host, destination string) error {
-	data := owner.Getenv("XDG_DATA_HOME")
-	if data == "" {
-		data = filepath.Join(owner.HomeDir(), ".local", "share")
-	}
-	source := owner.Getenv("OPENCODE_DB")
-	if source == "" {
-		source = "opencode-v2.db"
-		if v := owner.Getenv("OPENCODE_DISABLE_CHANNEL_DB"); v == "1" || v == "true" {
-			source = "opencode.db"
-		}
-	}
-	if !filepath.IsAbs(source) {
-		source = filepath.Join(data, "opencode", source)
-	}
-	if safeAccountPath(source) != nil || checkPrivateAccountFile(destination, false) != nil {
-		return errAccountPath
-	}
-	if err := chmodAccountNode(destination, 0600, false); err != nil {
-		return err
-	}
-	info, err := os.Lstat(source)
-	if err != nil || !info.Mode().IsRegular() || source == destination {
-		return native.ErrNotSignedIn
-	}
-	sqlite, err := exec.LookPath("sqlite3")
-	if err != nil {
-		return errSQLiteMissing
-	}
-	uri := (&url.URL{Scheme: "file", Path: source, RawQuery: "mode=ro"}).String()
-	quote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }
-	columns := "id,integration_id,label,value,connector_id,method_id,active,time_created,time_updated"
-	// All guards run inside one transaction. A constraint failure rolls it back.
-	sql := ".bail on\n.timeout 500\nATTACH DATABASE " + quote(uri) + " AS owner;\nBEGIN IMMEDIATE;\nCREATE TEMP TABLE import_guard (ok INTEGER CHECK(ok=1));\n" +
-		"INSERT INTO import_guard SELECT count(*)=0 FROM main.credential;\n" +
-		"INSERT INTO import_guard SELECT group_concat(name, ',')=" + quote(columns) + " FROM pragma_table_info('credential','owner');\n" +
-		"INSERT INTO import_guard SELECT count(*)<=128 AND coalesce(max(length(value)),0)<=4194304 FROM owner.credential;\n" +
-		"INSERT INTO main.credential (" + columns + ") SELECT " + columns + " FROM owner.credential WHERE integration_id IN ('opencode','opencode-go');\nCOMMIT;\n"
-	cmd := exec.CommandContext(ctx, sqlite, "-batch", destination)
-	cmd.Stdin = strings.NewReader(sql)
-	// Keep only the error class. SQLite errors never echo credential values.
-	var stderr boundedBuffer
-	cmd.Stdout, cmd.Stderr = io.Discard, &stderr
-	cmd.WaitDelay = time.Second
-	if cmd.Run() != nil {
-		if msg := stderr.String(); strings.Contains(msg, "database is locked") || strings.Contains(msg, "database is busy") {
-			return errOwnerLoginBusy
-		}
-		return native.ErrSchema
-	}
-	return chmodAccountNode(destination, 0600, false)
-}
-
-// boundedBuffer keeps the first 4 KiB of sqlite3 stderr.
-type boundedBuffer struct{ b []byte }
-
-func (w *boundedBuffer) Write(p []byte) (int, error) {
-	if room := 4096 - len(w.b); room > 0 {
-		w.b = append(w.b, p[:min(room, len(p))]...)
-	}
-	return len(p), nil
-}
-func (w *boundedBuffer) String() string { return string(w.b) }

@@ -87,16 +87,6 @@ func cachedReplyChecks() map[string]func(context.Context, []json.RawMessage) err
 			}
 			return checkAdmissionCaller(ctx, in)
 		},
-		"ObserveMuseQuota": func(ctx context.Context, args []json.RawMessage) error {
-			var in callspec.MuseQuotaObservation
-			if len(args) != 1 {
-				return errors.New("Muse quota observation needs one observation argument")
-			}
-			if err := json.Unmarshal(args[0], &in); err != nil {
-				return err
-			}
-			return checkMuseQuotaCaller(ctx, in)
-		},
 		"ObserveClaudeUsage": func(ctx context.Context, args []json.RawMessage) error {
 			var in callspec.ClaudeUsageObservation
 			if len(args) != 1 {

@@ -19,7 +19,7 @@ type RuntimeAdapter struct {
 	Harness      string
 	Binary       string
 	NPMPackage   string
-	ConfigFormat string // json, opencode, or toml
+	ConfigFormat string // json or toml
 	MCPKey       string
 	ConfigFile   string // relative native config path, when no generation flag exists
 	SkillDir     string // relative native skill directory

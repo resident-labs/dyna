@@ -38,16 +38,10 @@ export function providerName(provider?: string | null): string {
   return PROVIDER_NAMES[provider] ?? provider
 }
 
-const OPENCODE_INTEGRATIONS: Record<string, string> = { 'opencode-go': 'OpenCode Go', opencode: 'OpenCode Zen' }
-
 // accountLabel names an account. A saved row without a label falls back to its
 // provider, which is what the account signs in to.
 export function accountLabel(account?: AccountLike | null): string {
   const label = account?.label || ''
-  if (account?.harness === 'opencode' && (!label.trim() || label.trim() === 'OpenCode account')) {
-    const integration = account.integration || ''
-    return OPENCODE_INTEGRATIONS[integration] || (integration ? `OpenCode · ${integration}` : 'OpenCode account')
-  }
   return label || providerName(account?.provider) || account?.harness || ''
 }
 
@@ -106,7 +100,7 @@ export function accountStatus(account?: AccountLike | null, plan = '', now = Dat
     const reset = dateTime(block.reset)
     return reset ? `${label} · Resets ${reset}` : label
   }
-  const noPlan = account?.harness === 'opencode' ? '' : 'Plan not reported'
+  const noPlan = 'Plan not reported'
   // TODO: legacy/shim remove later — a plan sent as a bare string by older hosts; remove when no host sends one.
   if (account?.plan) return typeof account.plan === 'string' ? account.plan : account.plan.label || plan || noPlan
   if (plan && [undefined, 'ready', 'authenticated', 'configured'].includes(account?.status)) return plan
@@ -118,7 +112,7 @@ export function accountStatus(account?: AccountLike | null, plan = '', now = Dat
 // showing a limit whose every blocking window has reset. A reading without
 // windows falls back to the host's own decision, which expires the same way.
 function blockedNow(account: AccountLike | null | undefined, now: number): { ids: string[]; reset: string } | null {
-  const block = quotaBlock(account?.windows ?? undefined, account?.harness, now)
+  const block = quotaBlock(account?.windows ?? undefined, now)
   if (block) return { ids: block.ids, reset: new Date(block.until).toISOString() }
   if (account?.windows?.length) return null
   const until = Date.parse(account?.quotaBlockedUntil ?? '')
