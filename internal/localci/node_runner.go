@@ -309,7 +309,7 @@ func (r Runner) runNode(ctx context.Context, req Request) (result Result, err er
 	var aggregate bool
 	prepareChecks := func() error {
 		var prepareErr error
-		checks, aggregate, prepareErr = nodeChecks(req.Definition, req.Suites, node.AllowHostChecks)
+		checks, aggregate, prepareErr = nodeChecks(req.Definition, req.Suites, node.HostChecksAllowed(req.RoomID))
 		if errors.Is(prepareErr, ErrHostChecksDisabled) {
 			return fmt.Errorf("CI node %q: %w", node.Name, prepareErr)
 		}

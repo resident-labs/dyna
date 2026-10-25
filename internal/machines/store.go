@@ -59,9 +59,11 @@ type Machine struct {
 	Roles   []Role `json:"roles"`
 	SSH     string `json:"ssh"`
 	CISlots int    `json:"ciSlots"`
-	// AllowHostChecks lets repository-defined CI commands run on this machine
-	// outside a container. It is false unless the owner explicitly enables it.
-	AllowHostChecks bool `json:"allowHostChecks"`
+	// HostChecksGrants lists who allows repository-defined CI commands to run
+	// on this machine outside a container: the owner for every room, or the
+	// root of one room for that room's CI work. It is empty unless someone
+	// allows them.
+	HostChecksGrants []HostChecksGrant `json:"hostChecksGrants,omitempty"`
 	// Rooms limits the CI work this machine takes to those room IDs. An empty
 	// list allows every room, which is what every machine allowed before it
 	// could name rooms.
@@ -85,6 +87,67 @@ type Machine struct {
 	LastProbe  time.Time `json:"lastProbe"`
 	LastSeen   time.Time `json:"lastSeen"`
 	ProbeError string    `json:"probeError"`
+}
+
+// Grantor is who allowed host checks on a machine.
+type Grantor string
+
+const (
+	// GrantorOwner means the owner allowed them, for every room.
+	GrantorOwner Grantor = "owner"
+	// GrantorRoot means the root of one room allowed them for that room.
+	GrantorRoot Grantor = "root"
+)
+
+// HostChecksGrant is one permission to run repository-defined CI commands
+// outside a container on a machine.
+type HostChecksGrant struct {
+	// By names who allowed it: the owner, or the root of Room.
+	By Grantor `json:"by"`
+	// Room is the room a root allowed it for. It is empty for the owner, whose
+	// grant covers every room.
+	Room string `json:"room,omitempty"`
+}
+
+// HostChecksAllowed reports whether host checks run on this machine for the
+// CI work of a room. An owner's grant covers every room, including work that
+// names no room; a root's grant covers its own room only, so one room's root
+// cannot allow another room's commands to leave their container.
+func HostChecksAllowed(grants []HostChecksGrant, room string) bool {
+	for _, grant := range grants {
+		if grant.By == GrantorOwner || (grant.Room != "" && grant.Room == room) {
+			return true
+		}
+	}
+	return false
+}
+
+// HostChecksAllowed reports whether this machine runs host checks for the CI
+// work of a room.
+func (m Machine) HostChecksAllowed(room string) bool {
+	return HostChecksAllowed(m.HostChecksGrants, room)
+}
+
+// HasHostChecksGrants reports whether anyone allows host checks on this
+// machine, whatever the room.
+func (m Machine) HasHostChecksGrants() bool { return len(m.HostChecksGrants) > 0 }
+
+// uniqueGrants drops a repeated grant and sorts the rest, so a stored grant
+// list never says the same thing twice.
+func uniqueGrants(grants []HostChecksGrant) []HostChecksGrant {
+	out := make([]HostChecksGrant, 0, len(grants))
+	for _, grant := range grants {
+		if !slices.Contains(out, grant) {
+			out = append(out, grant)
+		}
+	}
+	slices.SortFunc(out, func(a, b HostChecksGrant) int {
+		if a.By != b.By {
+			return strings.Compare(string(a.By), string(b.By))
+		}
+		return strings.Compare(a.Room, b.Room)
+	})
+	return out
 }
 
 // HasRole reports whether the machine has the role.
@@ -172,10 +235,24 @@ func (m Machine) Validate() error {
 		}
 		seen[room] = true
 	}
+	return validateGrants(m.HostChecksGrants)
+}
+
+// validateGrants reports whether every host-check grant names the owner, or the
+// root of one room.
+func validateGrants(grants []HostChecksGrant) error {
+	for _, grant := range grants {
+		switch {
+		case grant.By == GrantorOwner && grant.Room == "":
+		case grant.By == GrantorRoot && grant.Room != "":
+		default:
+			return fmt.Errorf("a host-check grant needs the owner, or the root of one room, not %q in %q", grant.By, grant.Room)
+		}
+	}
 	return nil
 }
 
-const schemaVersion = 5
+const schemaVersion = 6
 
 const schema = `CREATE TABLE machines (
 	id             TEXT    PRIMARY KEY,
@@ -194,9 +271,10 @@ const schema = `CREATE TABLE machines (
 	last_seen_ms   INTEGER NOT NULL DEFAULT 0,
 	probe_error    TEXT    NOT NULL DEFAULT '',
 	last_load      TEXT    NOT NULL DEFAULT '{}' CHECK(json_valid(last_load)),
-	allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1)),
+	host_checks_grants   TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(host_checks_grants)),
 	rooms          TEXT    NOT NULL DEFAULT '[]' CHECK(json_valid(rooms))
 );
+
 CREATE UNIQUE INDEX machines_one_local ON machines(local) WHERE local = 1;`
 
 // probeColumns add what the probes read to a version 1 table. A row that was
@@ -210,6 +288,16 @@ var probeColumns = []string{
 	`ALTER TABLE machines ADD COLUMN last_load TEXT NOT NULL DEFAULT '{}' CHECK(json_valid(last_load))`,
 }
 
+// grantColumns record who allows host checks, and for which room, on a table
+// that kept that permission as one boolean. Before this version the owner was
+// the only one who could allow it, so a permission that is on becomes the
+// owner's grant for every room.
+var grantColumns = []string{
+	`ALTER TABLE machines ADD COLUMN host_checks_grants TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(host_checks_grants))`,
+	`UPDATE machines SET host_checks_grants='[{"by":"owner"}]' WHERE allow_host_checks=1`,
+	`ALTER TABLE machines DROP COLUMN allow_host_checks`,
+}
+
 // degradedColumns add the reason of a degraded health to a version 2 table.
 // A row stored before the reason existed is online or offline, so it needs
 // none.
@@ -221,7 +309,7 @@ var degradedColumns = []string{
 // change only through SaveProbe.
 const registryColumns = `id,name,roles,ssh,ci_slots,enabled,local,created_ms,updated_ms`
 
-const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,allow_host_checks,rooms`
+const columns = registryColumns + `,capabilities,health,health_reason,last_probe_ms,last_seen_ms,probe_error,last_load,host_checks_grants,rooms`
 
 // Store keeps the machines registry in dyna.db.
 type Store struct{ DataDir string }
@@ -257,7 +345,8 @@ func (s Store) db() (*sql.DB, error) {
 
 // prepare runs inside the migration. Version 1 created the registry and
 // imported the old local CI nodes. Later versions added probe data, degradation
-// reasons, and the explicit host-check permission.
+// reasons, the host-check permission as one switch, and who allows host checks
+// for which room.
 func prepare(conn *sql.Conn, old int) error {
 	ctx := context.Background()
 	if old >= schemaVersion {
@@ -295,6 +384,13 @@ func prepare(conn *sql.Conn, old int) error {
 		// what every machine allowed before it could name rooms.
 		if _, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN rooms TEXT NOT NULL DEFAULT '[]' CHECK(json_valid(rooms))`); err != nil {
 			return err
+		}
+	}
+	if old < 6 {
+		for _, statement := range grantColumns {
+			if _, err := conn.ExecContext(ctx, statement); err != nil {
+				return fmt.Errorf("record who allows host checks: %w", err)
+			}
 		}
 	}
 	return nil
@@ -515,6 +611,16 @@ func (s Store) GetLocal(ctx context.Context) (Machine, error) {
 	return getOn(ctx, db, "", true)
 }
 
+// GetByID returns the machine with this ID, or os.ErrNotExist. A name can
+// change, so a caller that holds an ID reads the row it just changed.
+func (s Store) GetByID(ctx context.Context, id string) (Machine, error) {
+	db, err := s.db()
+	if err != nil {
+		return Machine{}, err
+	}
+	return getByID(ctx, db, id)
+}
+
 // querier runs the read that finds one machine.
 type querier interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
@@ -550,11 +656,17 @@ type scanner interface{ Scan(...any) error }
 
 func scan(row scanner) (Machine, error) {
 	var m Machine
-	var roles, capabilities, health, reason, load, probeError, rooms string
+	var roles, capabilities, health, reason, load, probeError, grants, rooms string
 	var created, updated, probed, seen int64
 	if err := row.Scan(&m.ID, &m.Name, &roles, &m.SSH, &m.CISlots, &m.Enabled, &m.Local, &created, &updated,
-		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &m.AllowHostChecks, &rooms); err != nil {
+		&capabilities, &health, &reason, &probed, &seen, &probeError, &load, &grants, &rooms); err != nil {
 		return Machine{}, err
+	}
+	if err := json.Unmarshal([]byte(grants), &m.HostChecksGrants); err != nil {
+		return Machine{}, fmt.Errorf("machine %s host-check grants: %w", m.Name, err)
+	}
+	if len(m.HostChecksGrants) == 0 {
+		m.HostChecksGrants = nil
 	}
 	if err := json.Unmarshal([]byte(roles), &m.Roles); err != nil {
 		return Machine{}, fmt.Errorf("machine %s roles: %w", m.Name, err)
@@ -717,9 +829,10 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		m.ID, m.Local, m.Created = newID(), false, now
 	}
 	m.Roles = uniqueRoles(m.Roles)
+	m.HostChecksGrants = uniqueGrants(m.HostChecksGrants)
 	if !m.HasRole(RoleCI) {
 		m.CISlots = 0
-		m.AllowHostChecks = false
+		m.HostChecksGrants = nil
 		m.Rooms = nil
 	}
 	m.Updated = now
@@ -729,8 +842,16 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 	rooms := marshalRooms(m.Rooms)
 	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + m.Name}, func(conn *sql.Conn) error {
 		if found {
-			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, allow_host_checks=?, rooms=? WHERE id=?`,
-				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), flag(m.AllowHostChecks), rooms, m.ID)
+			// An edit keeps who allows host checks: the engine changes grants
+			// through UpdateHostChecksGrants inside its own transaction, so a
+			// list read before that change cannot restore it. Removing the ci
+			// role clears the grants, which a machine without CI cannot hold.
+			grants := "host_checks_grants=host_checks_grants"
+			if !m.HasRole(RoleCI) {
+				grants = "host_checks_grants='[]'"
+			}
+			_, err := conn.ExecContext(ctx, `UPDATE machines SET name=?, roles=?, ssh=?, ci_slots=?, enabled=?, local=?, updated_ms=?, health=`+healthOnToggle+`, health_reason=`+reasonOnToggle+`, `+grants+`, rooms=? WHERE id=?`,
+				m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local, m.Updated.UnixMilli(), flag(m.Enabled), flag(m.Enabled), rooms, m.ID)
 			return err
 		}
 		extant, err := getOn(ctx, conn, m.Name, false)
@@ -740,15 +861,60 @@ func (s Store) Save(ctx context.Context, m Machine) (Machine, error) {
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
-		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,allow_host_checks,rooms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		_, err = conn.ExecContext(ctx, `INSERT INTO machines(`+registryColumns+`,health,host_checks_grants,rooms) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
 			m.ID, m.Name, marshalRoles(m.Roles), m.SSH, m.CISlots, m.Enabled, m.Local,
-			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), flag(m.AllowHostChecks), rooms)
+			m.Created.UnixMilli(), m.Updated.UnixMilli(), string(healthOnCreate(m.Enabled)), marshalGrants(m.HostChecksGrants), rooms)
 		return err
 	})
 	if err != nil {
 		return Machine{}, err
 	}
 	return m, nil
+}
+
+// UpdateHostChecksGrants reads a machine's host-check grants inside the writer
+// transaction, hands them to change, and stores what change returns. The read
+// and the write share one transaction, so two callers cannot overwrite each
+// other's grant and a change never restores a grant that another caller refused
+// meanwhile. A change that returns an error leaves the row as it stood.
+func (s Store) UpdateHostChecksGrants(ctx context.Context, id string, change func(Machine) ([]HostChecksGrant, error)) (Machine, error) {
+	db, err := s.db()
+	if err != nil {
+		return Machine{}, err
+	}
+	// The name names the event; only the grants need the transaction.
+	stored, err := getByID(ctx, db, id)
+	if err != nil {
+		return Machine{}, err
+	}
+	var out Machine
+	err = state.For(db).Write(ctx, hub.Event{Topic: Topic, Key: "machine:" + stored.Name}, func(conn *sql.Conn) error {
+		m, err := getByID(ctx, conn, id)
+		if err != nil {
+			return err
+		}
+		grants, err := change(m)
+		if err != nil {
+			return err
+		}
+		grants = uniqueGrants(grants)
+		if err := validateGrants(grants); err != nil {
+			return err
+		}
+		if !m.HasRole(RoleCI) && len(grants) > 0 {
+			return fmt.Errorf("machine %q needs the ci role for host checks", m.Name)
+		}
+		if _, err := conn.ExecContext(ctx, `UPDATE machines SET host_checks_grants=?, updated_ms=? WHERE id=?`,
+			marshalGrants(grants), time.Now().UnixMilli(), id); err != nil {
+			return err
+		}
+		out, err = getByID(ctx, conn, id)
+		return err
+	})
+	if err != nil {
+		return Machine{}, err
+	}
+	return out, nil
 }
 
 // find reads the stored machine that m continues: the row with its ID, when it
@@ -809,14 +975,14 @@ func (s Store) RemoveRole(ctx context.Context, name string, role Role) error {
 		}
 		if !m.HasRole(RoleCI) {
 			m.CISlots = 0
-			m.AllowHostChecks = false
+			m.HostChecksGrants = nil
 		}
 		if err := m.Validate(); err != nil {
 			return err
 		}
 		m.Updated = time.Now()
-		_, err = conn.ExecContext(ctx, `UPDATE machines SET roles=?, ci_slots=?, allow_host_checks=?, updated_ms=? WHERE id=?`,
-			marshalRoles(m.Roles), m.CISlots, flag(m.AllowHostChecks), m.Updated.UnixMilli(), m.ID)
+		_, err = conn.ExecContext(ctx, `UPDATE machines SET roles=?, ci_slots=?, host_checks_grants=?, updated_ms=? WHERE id=?`,
+			marshalRoles(m.Roles), m.CISlots, marshalGrants(m.HostChecksGrants), m.Updated.UnixMilli(), m.ID)
 		return err
 	})
 }
@@ -854,6 +1020,15 @@ func uniqueRoles(roles []Role) []Role {
 
 func marshalRoles(roles []Role) string {
 	raw, err := json.Marshal(uniqueRoles(roles))
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
+}
+
+// marshalGrants stores a machine's host-check grants as the row's JSON.
+func marshalGrants(grants []HostChecksGrant) string {
+	raw, err := json.Marshal(uniqueGrants(grants))
 	if err != nil {
 		return "[]"
 	}
