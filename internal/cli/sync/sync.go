@@ -54,6 +54,6 @@ func NewCommand() *cobra.Command {
 		}
 		return show(c, saved)
 	}}
-	cmd.AddCommand(status, fetch, OperationCommand("refresh", "SyncRefresh", "Merge origin/main into integration after local CI passes"))
+	cmd.AddCommand(status, fetch, OperationCommand("refresh", "SyncRefresh", "Merge the repository default branch into integration after local CI passes"))
 	return cmd
 }

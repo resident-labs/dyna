@@ -133,7 +133,7 @@ func newCommand() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&repo, "repo", ".", "repository path (defaults to the current directory)")
-	cmd.Flags().StringVar(&base, "base", "origin/main", "base revision for the new branch")
+	cmd.Flags().StringVar(&base, "base", "", "base revision (default: origin/HEAD, then current branch)")
 	cmd.Flags().BoolVar(&noDeps, "no-deps", false, "skip restoring node_modules in the new worktree")
 	return cmd
 }
