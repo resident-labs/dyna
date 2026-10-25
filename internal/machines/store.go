@@ -262,6 +262,32 @@ func prepare(conn *sql.Conn, old int) error {
 		}
 	}
 	_, err := conn.ExecContext(ctx, `ALTER TABLE machines ADD COLUMN allow_host_checks INTEGER NOT NULL DEFAULT 0 CHECK(allow_host_checks IN (0,1))`)
+	if err != nil {
+		return err
+	}
+	return inheritHostChecks(ctx, conn)
+}
+
+// inheritHostChecks is a one-time migration for machines that already ran the
+// old host-based computer-smoke check. New machines and machines without that
+// evidence stay opted out. A repository file cannot grant this permission.
+// TODO: legacy/shim remove when pre-repository-definition local_ci_results are
+// no longer retained; after that, every machine uses only its explicit setting.
+func inheritHostChecks(ctx context.Context, conn *sql.Conn) error {
+	present, err := database.HasTable(ctx, conn, "local_ci_results")
+	if err != nil || !present {
+		return err
+	}
+	_, err = conn.ExecContext(ctx, `UPDATE machines SET allow_host_checks=1
+WHERE EXISTS (
+ SELECT 1 FROM local_ci_results AS results, json_each(results.payload,'$.suites') AS item
+ WHERE json_extract(item.value,'$.suite')='computer-smoke'
+ AND json_extract(item.value,'$.node')=machines.name
+) OR EXISTS (
+ SELECT 1 FROM local_ci_results AS results, json_each(results.payload,'$.checks') AS item
+ WHERE json_extract(item.value,'$.suite')='computer-smoke'
+ AND json_extract(item.value,'$.node')=machines.name
+)`)
 	return err
 }
 
