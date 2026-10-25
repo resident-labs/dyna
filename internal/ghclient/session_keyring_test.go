@@ -61,7 +61,8 @@ esac
 		return login, stdout.String(), err
 	}
 
-	// The stored choice names the same account, so one identity check is enough.
+	// The stored choice names the same account, so the login matches; the token
+	// must still hold this repository's permission.
 	if login, out, err := run("worker-secret"); err != nil || login != "worker" || out != "worker-secret\n" {
 		t.Fatalf("account=%q token=%q err=%v, want the room account", login, out, err)
 	}
