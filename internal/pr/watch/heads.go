@@ -20,6 +20,10 @@ type defaultBranchProbe struct {
 	ChecksPending bool
 	NoPushCI      bool
 	MergeTrialCI  bool
+	// MergeTrialKnown says the workflow files were read completely, so
+	// MergeTrialCI is an answer about this read and not a default. A read that
+	// could not see them proves nothing and must not replace a known fact.
+	MergeTrialKnown bool
 	// Rollup is GitHub's own status summary. A red rollup that counted a
 	// cancelled run is re-read from the commit, because GitHub keeps counting a
 	// cancellation that a later run of the same workflow superseded.
@@ -191,9 +195,15 @@ func (g GitHub) readHeads(ctx context.Context, records []*Record) (map[string]he
 				}
 			}
 			branch := defaultBranchProbe{Name: defaultBranch.Name, Head: defaultBranch.Target.Head}
-			if callErr == nil && len(defaultBranch.Target.Workflows) > 0 {
+			if len(defaultBranch.Target.Workflows) > 0 {
+				// The workflow files are their own field, so a GraphQL error for
+				// another field or another repository in the same batch leaves
+				// this data usable. Dropping the whole batch lost the trial
+				// pipeline of every repository when one had no workflows.
 				branch.NoPushCI = noDefaultPushCI(defaultBranch.Target.Workflows, branch.Name)
-				branch.MergeTrialCI, _ = workflowPushEnabled(defaultBranch.Target.Workflows, "dyna/merge-trial/1")
+				var workflowErr error
+				branch.MergeTrialCI, workflowErr = workflowPushEnabled(defaultBranch.Target.Workflows, "dyna/merge-trial/1")
+				branch.MergeTrialKnown = workflowErr == nil
 			}
 			if rollup := defaultBranch.Target.Rollup; rollup != nil {
 				branch.CI, branch.CheckCount = rollup.State, rollup.Contexts.TotalCount
@@ -432,13 +442,21 @@ func (s *Service) observeHeadBatch(ctx context.Context, st State, records []*Rec
 			if probe, ok := heads[r.Key]; ok && probe.Err == nil {
 				// Response completion order must not make an older green query
 				// replace failed-main evidence from a newer query.
-				if current.RepositoryFacts[defaultRepo(*r)].CheckedAt.After(observedAt) {
+				previous := current.RepositoryFacts[defaultRepo(*r)]
+				if previous.CheckedAt.After(observedAt) {
 					continue
 				}
-				current.RepositoryFacts[defaultRepo(*r)] = RepositoryFacts{
+				next := RepositoryFacts{
 					DefaultBranch: probe.Default.Name, Head: probe.Default.Head,
 					Verdict: defaultVerification(probe.Default), CheckedAt: observedAt, NoPushCI: probe.Default.NoPushCI, MergeTrialCI: probe.Default.MergeTrialCI,
 				}
+				// A read that could not see the workflow files proves nothing about
+				// the trial pipeline, so the last conclusive answer stands instead
+				// of dropping to false and blocking every merge.
+				if !probe.Default.MergeTrialKnown {
+					next.MergeTrialCI = previous.MergeTrialCI
+				}
+				current.RepositoryFacts[defaultRepo(*r)] = next
 			}
 		}
 		if save != nil {
