@@ -18,6 +18,7 @@ import (
 	"dyna-agent/internal/cli/jsonout"
 	"dyna-agent/internal/engineclient"
 	"dyna-agent/internal/machines"
+	"dyna-agent/internal/room"
 	"dyna-agent/internal/settings"
 	"dyna-agent/internal/websvc"
 )
@@ -128,6 +129,7 @@ func showCommand() *cobra.Command {
 			fmt.Fprintf(out, "CI slots: %d\n", m.CISlots)
 			if m.HasRole(machines.RoleCI) {
 				fmt.Fprintf(out, "Host checks: %t\n", m.AllowHostChecks)
+				fmt.Fprintf(out, "Rooms:    %s\n", roomList(m.Rooms))
 			}
 			fmt.Fprintf(out, "Enabled:  %t\n", m.Enabled)
 			fmt.Fprintf(out, "Local:    %t\n", m.Local)
@@ -310,6 +312,7 @@ func editCommand() *cobra.Command {
 	var slots int
 	var enable, disable bool
 	var allowHostChecks, disallowHostChecks bool
+	var rooms []string
 	cmd := &cobra.Command{
 		Use:   "edit <name>",
 		Short: "Change a machine",
@@ -357,8 +360,17 @@ func editCommand() *cobra.Command {
 			if disallowHostChecks {
 				m.AllowHostChecks, changed = false, true
 			}
+			if c.Flags().Changed("rooms") {
+				if m.Rooms, err = resolveRooms(rooms); err != nil {
+					return err
+				}
+				changed = true
+			}
 			if !changed {
-				return fmt.Errorf("edit %s: give a machine or host-check setting to change", args[0])
+				return fmt.Errorf("edit %s: give a machine, host-check or room setting to change", args[0])
+			}
+			if len(m.Rooms) > 0 && !m.HasRole(machines.RoleCI) && c.Flags().Changed("rooms") {
+				return fmt.Errorf("a room list requires the ci role")
 			}
 			if allowHostChecks && !m.HasRole(machines.RoleCI) {
 				return fmt.Errorf("host checks require the ci role")
@@ -387,6 +399,7 @@ func editCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&disable, "disable", false, "stop new work on the machine")
 	cmd.Flags().BoolVar(&allowHostChecks, "allow-host-checks", false, "allow repository checks to run outside containers")
 	cmd.Flags().BoolVar(&disallowHostChecks, "disallow-host-checks", false, "require repository checks to use containers")
+	cmd.Flags().StringSliceVar(&rooms, "rooms", nil, "limit local CI to these rooms (comma separated; empty allows every room)")
 	cmd.MarkFlagsMutuallyExclusive("enable", "disable")
 	cmd.MarkFlagsMutuallyExclusive("allow-host-checks", "disallow-host-checks")
 	return cmd
@@ -447,6 +460,48 @@ func joinOr(names []string, fallback string) string {
 		return fallback
 	}
 	return strings.Join(names, ",")
+}
+
+// resolveRooms reads the room names or IDs a command line names and stores their
+// IDs, so a renamed room keeps taking the machine's work and a typo cannot limit
+// a machine to a room that does not exist.
+func resolveRooms(names []string) ([]string, error) {
+	rooms := room.DefaultStore()
+	ids := make([]string, 0, len(names))
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		record, err := rooms.Resolve(name)
+		if err != nil {
+			return nil, err
+		}
+		if !slices.Contains(ids, record.ID) {
+			ids = append(ids, record.ID)
+		}
+	}
+	slices.Sort(ids)
+	return ids, nil
+}
+
+// roomList words a machine's room limit: the names of the rooms it takes work
+// from, or every room when it names none.
+func roomList(ids []string) string {
+	if len(ids) == 0 {
+		return "every room"
+	}
+	rooms := room.DefaultStore()
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if record, err := rooms.Resolve(id); err == nil && record.Name != "" {
+			names = append(names, record.Name)
+			continue
+		}
+		names = append(names, id)
+	}
+	slices.Sort(names)
+	return strings.Join(names, ", ")
 }
 
 // orNone prints a value, or a dash when the probe read none.

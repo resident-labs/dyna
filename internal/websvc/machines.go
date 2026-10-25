@@ -95,6 +95,7 @@ type MachineSummary struct {
 	Status          MachineStatus   `json:"status"`
 	CISlots         int             `json:"ciSlots"`
 	AllowHostChecks bool            `json:"allowHostChecks"`
+	Rooms           []string        `json:"rooms,omitempty"`
 	CPU             *int            `json:"cpu,omitempty"`
 	Agents          *int            `json:"agents,omitempty"`
 	Computers       *int            `json:"computers,omitempty"`
@@ -173,6 +174,7 @@ type MachinePatch struct {
 	Roles           *[]machines.Role `json:"roles"`
 	CISlots         *int             `json:"ciSlots"`
 	AllowHostChecks *bool            `json:"allowHostChecks"`
+	Rooms           *[]string        `json:"rooms"`
 	SSH             *string          `json:"ssh"`
 }
 
@@ -253,6 +255,9 @@ func (a MachineAPI) SaveMachine(ctx context.Context, id string, patch MachinePat
 	}
 	if patch.AllowHostChecks != nil {
 		m.AllowHostChecks = *patch.AllowHostChecks
+	}
+	if patch.Rooms != nil {
+		m.Rooms = *patch.Rooms
 	}
 	if patch.SSH != nil {
 		m.SSH = strings.TrimSpace(*patch.SSH)
@@ -386,6 +391,7 @@ func machineSummary(m machines.Machine) MachineSummary {
 		Status:          machineStatus(m),
 		CISlots:         m.CISlots,
 		AllowHostChecks: m.AllowHostChecks,
+		Rooms:           m.Rooms,
 	}
 	if !m.Local && m.Load.CPUPercent != nil {
 		cpu := int(math.Round(*m.Load.CPUPercent))

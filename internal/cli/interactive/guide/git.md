@@ -195,6 +195,19 @@ blocks merging. Every configured required check must pass. With no enabled
 machines, GitHub remains the CI source.
 Use `dyna machine edit <name> --disable` or `dyna machine rm <name>` to stop
 assigning a machine CI work.
+
+A machine can take work from chosen rooms only, so each room's CI uses the
+machines it owns:
+
+```sh
+dyna machine edit hermeslab --rooms dyna
+dyna machine edit arch --rooms fl-rea,pve
+dyna machine edit hermeslab --rooms ""
+```
+
+An empty list lets every room use the machine, which is the default. Local CI
+and merge trials skip a machine that does not allow their room, so the work
+waits instead of running in the wrong room.
 Merge trials run first. Superseded heads are cancelled. Forks stay on GitHub.
 Local checks use bounded systemd scopes and containers, with warm caches.
 When local work starts, Dyna removes only queued or waiting runs of

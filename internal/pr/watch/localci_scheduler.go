@@ -439,7 +439,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 	if runs.runs[key] != nil {
 		return false, nil
 	}
-	chosen := availableCINode(enabled, active)
+	chosen := availableCINode(enabled, active, job.record.RoomID)
 	if chosen == nil {
 		return false, nil
 	}
@@ -469,7 +469,7 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 		if settled {
 			return false, nil
 		}
-		chosen = availableCINode(enabled, active)
+		chosen = availableCINode(enabled, active, job.record.RoomID)
 		if chosen == nil {
 			return false, nil
 		}
@@ -494,13 +494,14 @@ func (s *Service) admitRegisteredCI(ctx context.Context, registry localCIRegistr
 const registeredCIRunSlots = 6
 
 // Prefer the node with the most unreserved check slots. A machine that is low
-// on disk takes no new run, so its work waits for a node that has space.
-func availableCINode(nodes []localci.Node, active map[string]int) *localci.Node {
+// on disk takes no new run, so its work waits for a node that has space. A
+// machine that names rooms takes only those rooms' work.
+func availableCINode(nodes []localci.Node, active map[string]int, roomID string) *localci.Node {
 	var chosen *localci.Node
 	free := 0
 	for i := range nodes {
 		node := &nodes[i]
-		if node.LowDisk {
+		if node.LowDisk || !node.AllowsRoom(roomID) {
 			continue
 		}
 		if available := node.Slots - active[node.Name]; node.Enabled && available > free {
