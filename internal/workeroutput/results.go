@@ -2,16 +2,6 @@ package workeroutput
 
 import "strings"
 
-func CodexSessionID(stdout string) string {
-	for _, line := range strings.Split(stdout, "\n") {
-		ev, ok := parseRecord[codexRecord]([]byte(line))
-		if ok && ev.Type == "thread.started" && ev.ThreadID != "" {
-			return ev.ThreadID
-		}
-	}
-	return ""
-}
-
 func OpenCodeSessionID(stdout string) string {
 	for _, line := range strings.Split(stdout, "\n") {
 		ev, ok := parseRecord[openCodeRecord]([]byte(line))

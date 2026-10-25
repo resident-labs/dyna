@@ -225,7 +225,7 @@ func piClassify(provider string, o store.Observation, err error) (store.Observat
 // The Grok billing request sends it as x-userid. An unreadable token leaves it
 // empty; the request then carries no user header.
 func piXAIUserID(token string) string {
-	claims, err := codexClaims(token)
+	claims, err := jwtClaims(token)
 	if err != nil {
 		return ""
 	}
@@ -353,4 +353,32 @@ func zaiUsageObservation(raw []byte, now time.Time) (store.Observation, error) {
 		return store.Observation{}, ErrSchema
 	}
 	return observation, nil
+}
+
+// piAccountEntry returns the provider ID and entry of a saved Pi account.
+func piAccountEntry(c store.Credential) (string, piAuthEntry, error) {
+	if c.Schema != piNativeFilesSchema {
+		return "", piAuthEntry{}, ErrSchema
+	}
+	var files, auth map[string]json.RawMessage
+	if json.Unmarshal(c.Payload, &files) != nil || json.Unmarshal(files["auth.json"], &auth) != nil || len(auth) != 1 {
+		return "", piAuthEntry{}, ErrSchema
+	}
+	for id, raw := range auth {
+		var entry piAuthEntry
+		if json.Unmarshal(raw, &entry) != nil {
+			return "", piAuthEntry{}, ErrSchema
+		}
+		return id, entry, nil
+	}
+	return "", piAuthEntry{}, ErrSchema
+}
+
+// piEntryExpiry reads the access-token expiry of a Pi provider entry, which Pi
+// writes in milliseconds. An entry without one keeps no expiry.
+func piEntryExpiry(entry piAuthEntry) time.Time {
+	if entry.Expires <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(entry.Expires).UTC()
 }

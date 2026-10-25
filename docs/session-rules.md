@@ -22,7 +22,6 @@ tool output, and unknown event names do not trigger one.
 | Harness | Detection and evidence |
 | --- | --- |
 | Claude Code | Detects `{"type":"system","subtype":"compact_boundary"}` in `claude-stream-json`. The [Agent SDK streaming reference](https://code.claude.com/docs/en/agent-sdk/streaming-output) documents this message. Plain text output cannot expose it. |
-| Codex | No verified signal in `codex exec --json`. The upstream [exec event types](https://github.com/openai/codex/blob/main/codex-rs/exec/src/exec_events.rs) and [JSONL processor](https://github.com/openai/codex/blob/main/codex-rs/exec/src/event_processor_with_jsonl_output.rs) do not expose a compaction event. Dyna does not treat internal app-server events as exec stdout. |
 | OpenCode | Native v2 events are converted to OpenCode JSONL records without a verified compaction record. Dyna-controlled compaction waits for the server to become idle, requests compaction, and waits again before the resumed turn. Automatic compaction has no verified receipt. |
 | Muse | No verified signal in captured `internal/workeroutput/testdata/muse-stream.jsonl` and `muse-tools.jsonl` records or its adapter. |
 | Pi, mock | No verified structured compaction signal in the configured output stream. |

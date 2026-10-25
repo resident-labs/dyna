@@ -21,7 +21,6 @@ import (
 // Harness identifies which CLI executes the worker.
 const (
 	HarnessClaudeCode = "claude-code"
-	HarnessCodex      = "codex"
 	HarnessOpenCode   = "opencode"
 	HarnessMuse       = "muse"
 	HarnessPi         = "pi"

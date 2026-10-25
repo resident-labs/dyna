@@ -47,40 +47,6 @@ func openCodeToolSignals(record *openCodeRecord) []ToolSignal {
 	return nil
 }
 
-func codexToolSignals(record *codexRecord) []ToolSignal {
-	if record.Item.ID == "" || !codexToolItem(record.Item.Type) {
-		return nil
-	}
-	switch record.Type {
-	case "item.started":
-		return []ToolSignal{{ID: record.Item.ID, Start: true}}
-	case "item.completed":
-		return []ToolSignal{{ID: record.Item.ID}}
-	}
-	return nil
-}
-
-func codexToolItem(kind string) bool {
-	switch kind {
-	case "command_execution", "mcp_tool_call", "file_change", "web_search", "collab_tool_call":
-		return true
-	}
-	return strings.HasSuffix(kind, "_tool_call")
-}
-
-// codexItemGenerates reports whether a Codex item is model work, so an item
-// start counts as generation even before it carries display text.
-func codexItemGenerates(kind string) bool {
-	if codexToolItem(kind) {
-		return true
-	}
-	switch kind {
-	case "reasoning", "agent_message":
-		return true
-	}
-	return false
-}
-
 func claudeToolSignals(record *claudeRecord) []ToolSignal {
 	var out []ToolSignal
 	for _, block := range record.Message.Content {
@@ -175,8 +141,8 @@ func (u *Usage) Add(o Usage) {
 }
 
 // ExtractUsage reads token usage from one raw line when the dialect reports it
-// (codex turn.completed, claude result, opencode step_finish).
-// OpenCode step usage is additive. Codex values are raw
+// (claude result, opencode step_finish).
+// OpenCode step usage is additive. Other values are raw
 // thread snapshots; use UsageNormalizer for additive per-call accounting.
 func ExtractUsage(decl *Declaration, line string) (Usage, bool) {
 	if decl == nil || strings.TrimSpace(line) == "" {
@@ -213,11 +179,6 @@ func ExtractUsage(decl *Declaration, line string) (Usage, bool) {
 		cost = *record.Cost
 	}
 	switch strings.TrimSpace(decl.Dialect) {
-	case DialectCodexJSONL:
-		if record.Type != "turn.completed" {
-			return Usage{}, false
-		}
-		return Usage{InputTokens: u.Input, CachedTokens: u.Cached, OutputTokens: u.Output}, u.Input+u.Output > 0
 	case DialectClaudeStreamJSON:
 		if record.Type != "result" {
 			return Usage{}, false

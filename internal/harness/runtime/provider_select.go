@@ -30,8 +30,8 @@ var piProviderIDs = map[string]store.Provider{
 //
 // Pi runs every provider, so its model names the provider: a Pi turn of
 // "zai/glm-5.3" needs the zai account. Another harness serves one provider and
-// keeps its own credentials for it (Codex takes its keys from the owner's codex
-// home), so its model does not choose an account and the harness does.
+// keeps its own credentials for it, so its model does not choose an account and
+// the harness does.
 func providerForModel(harness, model string) store.Provider {
 	if harness == "pi" {
 		if prefix, _, found := strings.Cut(model, "/"); found && prefix != "" {

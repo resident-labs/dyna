@@ -43,9 +43,6 @@ func runOnce(ctx context.Context, p profile.Profile, cwd string, spec commandSpe
 	if spec.muse {
 		return runMuseTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
 	}
-	if spec.codex {
-		return runCodexTurn(ctx, p, cwd, spec, tracker, journal, steering, outputPath, normalizedOutputPath, output, liveLine, gate, state, execution)
-	}
 	// Hook steering bookkeeping rides on every returned attempt.
 	streamSteered := false
 	defer func() {
@@ -483,8 +480,6 @@ func harnessCommand(ctx context.Context, p profile.Profile, cwd string, argv []s
 	if p.RuntimeExecutable != "" {
 		var err error
 		switch p.Harness {
-		case profile.HarnessCodex:
-			argv, err = harnessruntime.DynaShellCodexArgs(argv, launchEnv)
 		case profile.HarnessMuse:
 			argv, err = harnessruntime.DynaShellMuseArgs(argv, launchEnv)
 		}

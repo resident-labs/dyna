@@ -2,7 +2,7 @@
 
 A local-first workspace where coding agents work together on your machine.
 
-Dyna runs agent CLIs (Claude Code, Codex, OpenCode, Muse,
+Dyna runs agent CLIs (Claude Code, OpenCode, Muse,
 Pi, or any custom CLI) as long-lived sessions and workflow workers. They share
 rooms, hold goals, ask you questions, open pull requests, and use their own
 desktops. You run it from the desktop app, a browser, or a phone. Agents use
@@ -18,7 +18,7 @@ From a checkout, `./install.sh` builds into `~/.local/bin`. Then add one
 profile for each agent CLI and model you use, and start the engine:
 
 ```bash
-dyna profiles add --name my-builder --harness codex --model <model-id> \
+dyna profiles add --name my-builder --harness pi --model <model-id> \
   --taste 7 --intelligence 9 --cost 6 --desc "Your routing notes."
 dyna engine install-services    # engine and computer user services
 dyna demo                       # sample workflow on unsaved mock workers
@@ -116,7 +116,7 @@ to call. See `docs/voice.md`.
 
 ### Harnesses and profiles
 
-A harness is an adapter for one agent CLI: `claude-code`, `codex`,
+A harness is an adapter for one agent CLI: `claude-code`,
 `opencode`, `muse`, `pi` and `mock`. Each
 runs as a headless child process, with its own private runtime and accounts.
 
@@ -126,7 +126,7 @@ by the work: reviewers rank by diagnostics, other roles by taste.
 `dyna profiles list` shows them; add your own in Settings or with:
 
 ```bash
-dyna profiles add --name my-builder --harness codex --model <model-id> \
+dyna profiles add --name my-builder --harness pi --model <model-id> \
   --taste 7 --diagnostics 6 --intelligence 9 --cost 6 --desc "Your routing notes."
 ```
 

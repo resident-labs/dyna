@@ -326,7 +326,7 @@ export function createCall(deps: CallDeps): CallStore {
   }
 
   // refresh reads whether voice is set up. The header asks on mount and
-  // after Settings closes, where the owner signs in to Codex.
+  // after Settings closes, where the owner signs in to ChatGPT.
   // refresh also finds a call the engine still runs after a page load
   // (resumable); the widget asks once when it mounts.
   async function refresh() {

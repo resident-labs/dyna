@@ -26,8 +26,7 @@ var prompt string
 // RealtimeModel is the OpenAI Realtime model Voice uses.
 const RealtimeModel = "gpt-realtime-2.1"
 
-// RealtimeVoice is Codex's default realtime voice
-// (codex-rs/protocol/src/protocol.rs).
+// RealtimeVoice is the provider's realtime voice protocol.
 const RealtimeVoice = "marin"
 
 // openAIRealtime is OpenAI's Realtime endpoint for Voice's model.
@@ -36,7 +35,7 @@ const openAIRealtime = "wss://api.openai.com/v1/realtime?model=" + RealtimeModel
 // Providers are the realtime voice services a call can use.
 // speechToSpeechURL is the address of a self-hosted speech-to-speech server.
 func Providers(speechToSpeechURL string) *realtime.Registry {
-	return realtime.NewRegistry(realtime.OpenAI(openAIRealtime, CodexCredentials), realtime.SpeechToSpeech(speechToSpeechURL))
+	return realtime.NewRegistry(realtime.OpenAI(openAIRealtime, ChatGPTCredentials), realtime.SpeechToSpeech(speechToSpeechURL))
 }
 
 // CallSession is Voice's session for a call in the room of t. call is the
@@ -56,7 +55,7 @@ var (
 	promptParams = json.RawMessage(`{"type":"object","properties":{"prompt":{"type":"string","description":"The owner's request, in their exact words."}},"required":["prompt"],"additionalProperties":false}`)
 )
 
-// Realtime follows Codex's two conversational tools. Execution and owner
+// Realtime follows the provider's two conversational tools. Execution and owner
 // question answers go through root; remaining silent has no visible effect.
 func (t *Tools) Realtime(call context.Context) []realtime.Tool {
 	return []realtime.Tool{
@@ -196,7 +195,7 @@ func tellPrompt(text string, shared []room.Attachment) string {
 	return strings.Join(parts, "\n\n")
 }
 
-// A spoken turn result is clipped like Codex output: resultBudget is bytes,
+// A spoken turn result is clipped like provider output: resultBudget is bytes,
 // about 1,000 English tokens, split between a head and a tail.
 const (
 	resultBudget = 4000

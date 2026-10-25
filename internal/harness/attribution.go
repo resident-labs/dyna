@@ -17,11 +17,6 @@ import (
 //   - Claude Code accepts a --settings JSON layer. The attribution object sets
 //     the commit trailer and the PR footer to empty and disables commit
 //     trailers and the session URL.
-//   - Codex (codex-cli 0.163) sends the <git_attribution> prompt section that
-//     asks for a commit trailer and a pull request footer. Its content follows
-//     the account's workspace policy and there is no local config.toml key, but
-//     the codex_git_commit feature gates the whole section, so Dyna disables
-//     that feature per launch with -c features.codex_git_commit=false.
 //   - OpenCode (v2 builds Dyna runs) adds no commit or PR attribution at all;
 //     there is nothing to disable.
 //   - Muse exposes no attribution switch Dyna knows, so
@@ -94,16 +89,4 @@ func claudeArgsWithSettings(args []string, cwd string, apply func(map[string]any
 		return nil, err
 	}
 	return append(out, "--settings", string(b)), nil
-}
-
-// codexAttributionArgs disables the codex_git_commit feature, whose model
-// instructions add the commit trailer and pull request footer. A profile that
-// names the feature itself keeps its own setting.
-func codexAttributionArgs(extra []string) []string {
-	for _, arg := range extra {
-		if strings.Contains(arg, "codex_git_commit") {
-			return nil
-		}
-	}
-	return []string{"-c", "features.codex_git_commit=false"}
 }

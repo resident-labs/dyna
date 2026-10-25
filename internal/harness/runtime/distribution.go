@@ -8,7 +8,6 @@ var harnessDistributions = map[string]struct {
 	Package string
 }{
 	"claude-code": {"npm", "@anthropic-ai/claude-code"},
-	"codex":       {"npm", "@openai/codex"},
 	"opencode":    {"npm", "@opencode/cli"},
 	"grok":        {"npm", "@xai-official/grok"},
 	"pi":          {"npm", piNPMPackage},
