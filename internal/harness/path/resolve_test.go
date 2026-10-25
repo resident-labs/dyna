@@ -35,11 +35,11 @@ func TestPATHPrecedesNativeFallbacks(t *testing.T) {
 
 func TestWindowsNativeResolutionUsesPATHEXTAndCaseInsensitiveEnvironment(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "codex.exe")
+	path := filepath.Join(dir, "pi.exe")
 	if err := os.WriteFile(path, []byte("fixture; never execute"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := resolveForOS("codex", []string{"Path=" + dir, "pathext=.EXE;.CMD", "HOME=" + t.TempDir()}, "windows")
+	got, err := resolveForOS("pi", []string{"Path=" + dir, "pathext=.EXE;.CMD", "HOME=" + t.TempDir()}, "windows")
 	if err != nil || got != path {
 		t.Fatalf("Windows executable lookup: %q %v", got, err)
 	}
@@ -53,7 +53,7 @@ func TestOpenCodeNativeFallback(t *testing.T) {
 	}
 }
 func TestLocalBinFallbackForEveryNativeHarness(t *testing.T) {
-	for _, binary := range []string{"claude", "codex", "opencode", "muse"} {
+	for _, binary := range []string{"claude", "opencode", "muse", "pi"} {
 		t.Run(binary, func(t *testing.T) {
 			home := t.TempDir()
 			want := executable(t, filepath.Join(home, ".local", "bin"), binary)
@@ -68,10 +68,10 @@ func TestEffectiveEnvironmentOverridesHostAndEarlierPATH(t *testing.T) {
 	host := t.TempDir()
 	override := t.TempDir()
 	home := t.TempDir()
-	executable(t, host, "codex")
-	want := executable(t, override, "codex")
+	executable(t, host, "pi")
+	want := executable(t, override, "pi")
 	t.Setenv("PATH", host)
-	got, err := Resolve("codex", []string{"HOME=" + home, "PATH=" + host, "PATH=" + override})
+	got, err := Resolve("pi", []string{"HOME=" + home, "PATH=" + host, "PATH=" + override})
 	if err != nil || got != want {
 		t.Fatalf("got %q, %v; want %q", got, err, want)
 	}
@@ -79,7 +79,7 @@ func TestEffectiveEnvironmentOverridesHostAndEarlierPATH(t *testing.T) {
 func TestRejectsNonExecutableDirectoryBrokenLinkAndCustomNames(t *testing.T) {
 	home := t.TempDir()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "codex"), []byte("not executable"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "pi"), []byte("not executable"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(dir, "claude"), 0700); err != nil {
@@ -88,7 +88,7 @@ func TestRejectsNonExecutableDirectoryBrokenLinkAndCustomNames(t *testing.T) {
 	if err := os.Symlink(filepath.Join(dir, "absent"), filepath.Join(dir, "muse")); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"codex", "claude", "muse"} {
+	for _, name := range []string{"pi", "claude", "muse"} {
 		if path, err := Resolve(name, []string{"HOME=" + home, "PATH=" + dir}); path != "" || !errors.Is(err, exec.ErrNotFound) {
 			t.Fatalf("%s accepted: %q, %v", name, path, err)
 		}
@@ -100,12 +100,12 @@ func TestRejectsNonExecutableDirectoryBrokenLinkAndCustomNames(t *testing.T) {
 func TestExecutableSymlinkIsAccepted(t *testing.T) {
 	home := t.TempDir()
 	dir := t.TempDir()
-	target := executable(t, t.TempDir(), "codex")
-	want := filepath.Join(dir, "codex")
+	target := executable(t, t.TempDir(), "pi")
+	want := filepath.Join(dir, "pi")
 	if err := os.Symlink(target, want); err != nil {
 		t.Fatal(err)
 	}
-	got, err := Resolve("codex", []string{"HOME=" + home, "PATH=" + dir})
+	got, err := Resolve("pi", []string{"HOME=" + home, "PATH=" + dir})
 	if err != nil || got != want {
 		t.Fatalf("got %q, %v; want %q", got, err, want)
 	}
@@ -113,9 +113,9 @@ func TestExecutableSymlinkIsAccepted(t *testing.T) {
 
 func TestExplicitEmptyHomeDoesNotUseHostFallback(t *testing.T) {
 	home := t.TempDir()
-	executable(t, filepath.Join(home, ".local", "bin"), "codex")
+	executable(t, filepath.Join(home, ".local", "bin"), "pi")
 	t.Setenv("HOME", home)
-	if got, err := Resolve("codex", []string{"HOME=", "PATH=" + t.TempDir()}); got != "" || !errors.Is(err, exec.ErrNotFound) {
+	if got, err := Resolve("pi", []string{"HOME=", "PATH=" + t.TempDir()}); got != "" || !errors.Is(err, exec.ErrNotFound) {
 		t.Fatalf("host home leaked into effective environment: %q, %v", got, err)
 	}
 }

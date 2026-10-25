@@ -265,7 +265,7 @@ func TestDiscoveryStaysPrivateAndPreparePreservesNativeValues(t *testing.T) {
 			t.Fatalf("%s escapes private HOME: %q", key, path)
 		}
 	}
-	for _, key := range []string{"CODEX_HOME", "CODEX_SQLITE_HOME", "CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "ANTHROPIC_CONFIG_DIR", "GROK_HOME", "PI_CODING_AGENT_DIR", "OPENCODE_CONFIG_DIR", "OPENCODE_DB", "MUSE_AUTH_PATH"} {
+	for _, key := range []string{"CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR", "ANTHROPIC_CONFIG_DIR", "GROK_HOME", "PI_CODING_AGENT_DIR", "OPENCODE_CONFIG_DIR", "OPENCODE_DB", "MUSE_AUTH_PATH"} {
 		if discovery[key] == "" {
 			t.Fatal("missing discovery root: " + key)
 		}
@@ -273,7 +273,7 @@ func TestDiscoveryStaysPrivateAndPreparePreservesNativeValues(t *testing.T) {
 	if len(Roots(scope)) != 5 {
 		t.Fatal("Roots must stay limited to HOME/XDG")
 	}
-	native := map[string]string{"CODEX_HOME": scope, "OPENCODE_DB": filepath.Join(scope, "opencode.db"), "OPENCODE_CONFIG": "/generation/config.json"}
+	native := map[string]string{"PI_CODING_AGENT_DIR": scope, "OPENCODE_DB": filepath.Join(scope, "opencode.db"), "OPENCODE_CONFIG": "/generation/config.json"}
 	env = merged(merged(env, discovery), native)
 	out, err := Prepare(scope, "", env)
 	if err != nil {
