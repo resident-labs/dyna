@@ -81,6 +81,10 @@ func TestPrepareBridgeFollowsTheCurrentBuild(t *testing.T) {
 	if before["DYNA_BIN"] != after["DYNA_BIN"] {
 		t.Fatalf("an engine update republished the Dyna command: %q then %q", before["DYNA_BIN"], after["DYNA_BIN"])
 	}
+	target := strings.TrimSpace(readBridgeTarget(t, after["DYNA_BIN"]))
+	if filepath.Base(target) != "current" {
+		t.Fatalf("published Dyna command names %q, want this scope's current link", target)
+	}
 	out, err := exec.Command(after["DYNA_BIN"]).Output()
 	if err != nil {
 		t.Fatalf("published Dyna command does not run after an update: %v", err)

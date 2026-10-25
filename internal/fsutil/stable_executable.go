@@ -17,9 +17,8 @@ import (
 // older builds age out once newer ones exist.
 const stableImageCopies = 4
 
-// currentImageLink always names the image of the build the engine runs now.
-// Published wrappers exec this link, so one engine update moves them all.
-const currentImageLink = "dyna-current"
+// currentImageLink is the file name a published link carries.
+const currentImageLink = "current"
 
 // StableExecutable returns a path to the binary this process runs that outlives
 // the process. Harness MCP commands, $DYNA_BIN and their published tool homes
@@ -64,71 +63,116 @@ func StableImage(source string) (string, error) {
 	return path, nil
 }
 
-// CurrentImage returns a path that always names the image of one build: the
-// path is a link in the image cache, and StableImage moves the link whenever
-// the build changes. Callers publish the link instead of one build's copy, so
-// a wrapper, a harness MCP command or $DYNA_BIN that outlives an engine update
-// calls the current build rather than the build it first named.
-//
-// source is a running image such as /proc/<pid>/exe or a copy in the image
-// cache. Any other path, such as an installed binary that an update replaces
-// in place, is returned unchanged.
-func CurrentImage(source string) (string, error) {
+// CurrentBuild returns the image of the build that source names, for a running
+// image such as /proc/<pid>/exe and for a copy in the image cache. It reports
+// false for a path that survives an update by itself, such as an installed
+// binary that the update replaces in place.
+func CurrentBuild(source string) (string, bool, error) {
 	if runtime.GOOS != "linux" {
-		return os.Executable()
+		return "", false, nil
 	}
 	if strings.HasPrefix(source, "/proc/") {
 		image, err := StableImage(source)
-		if err != nil {
-			return "", err
-		}
-		return pointCurrentImage(filepath.Dir(image), image)
+		return image, err == nil, err
 	}
-	dir, err := imageCacheDir()
+	service, err := cacheRoot()
+	if err != nil {
+		return "", false, err
+	}
+	if filepath.Dir(source) != filepath.Join(service, "bin") || !imageCopyName(filepath.Base(source)) {
+		return "", false, nil
+	}
+	return source, true, nil
+}
+
+// CurrentLink returns the path one native scope publishes to name the build the
+// engine runs now. Its own directory keeps pruning from treating the link as an
+// image, and a scope that is not the engine's still gets a link of its own.
+func CurrentLink(scope string) (string, error) {
+	service, err := cacheRoot()
 	if err != nil {
 		return "", err
 	}
-	if filepath.Dir(source) != dir || !imageCopyName(filepath.Base(source)) {
-		return source, nil
-	}
-	return pointCurrentImage(dir, source)
+	sum := sha256.Sum256([]byte(scope))
+	return filepath.Join(service, "links", hex.EncodeToString(sum[:8]), currentImageLink), nil
 }
 
-// pointCurrentImage makes the current link name image. The link is replaced by
-// rename, so a command that execs it during an update runs either the old build
-// or the new one, never a path that does not exist.
-func pointCurrentImage(dir, image string) (string, error) {
-	link := filepath.Join(dir, currentImageLink)
-	if target, err := os.Readlink(link); err == nil && target == image {
-		return link, nil
+// SetLink makes link name target. Each update stages the link under a name of
+// its own and renames it into place, so callers that publish at the same time
+// never share a staging path, and a command that execs the link runs either the
+// old target or the new one, never a path that does not exist.
+func SetLink(link, target string) error {
+	if current, err := os.Readlink(link); err == nil && current == target {
+		return nil
 	}
+	dir := filepath.Dir(link)
 	if err := os.MkdirAll(dir, 0700); err != nil {
-		return "", err
+		return err
 	}
-	staged := filepath.Join(dir, "."+currentImageLink+".new")
-	if err := os.Remove(staged); err != nil && !os.IsNotExist(err) {
-		return "", err
+	stage, err := os.MkdirTemp(dir, ".link-")
+	if err != nil {
+		return err
 	}
-	if err := os.Symlink(image, staged); err != nil {
-		return "", err
+	defer os.RemoveAll(stage)
+	staged := filepath.Join(stage, currentImageLink)
+	if err := os.Symlink(target, staged); err != nil {
+		return err
 	}
-	if err := os.Rename(staged, link); err != nil {
-		_ = os.Remove(staged)
-		return "", err
-	}
-	return link, nil
+	return os.Rename(staged, link)
 }
 
-// imageCacheDir is where copied images and the current link live.
-func imageCacheDir() (string, error) {
+// linkRoot is the directory that holds one link directory per native scope.
+func linkRoot() (string, error) {
+	service, err := cacheRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(service, "links"), nil
+}
+
+// linkedImages names every image a published link still points at. Pruning
+// keeps them: a scope that has not run a turn since an update still names the
+// build it last published, and deleting that image would break its wrappers.
+func linkedImages() map[string]bool {
+	out := map[string]bool{}
+	root, err := linkRoot()
+	if err != nil {
+		return out
+	}
+	scopes, err := os.ReadDir(root)
+	if err != nil {
+		return out
+	}
+	for _, scope := range scopes {
+		if !scope.IsDir() {
+			continue
+		}
+		if target, err := os.Readlink(filepath.Join(root, scope.Name(), currentImageLink)); err == nil {
+			out[target] = true
+		}
+	}
+	return out
+}
+
+// cacheRoot is the directory that holds copied images and published links.
+func cacheRoot() (string, error) {
 	cache, err := os.UserCacheDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(cache, "dyna", "bin"), nil
+	return filepath.Join(cache, "dyna"), nil
 }
 
-// imageCopyName reports whether name is one copied image, never the link.
+// imageCacheDir is where copied images live.
+func imageCacheDir() (string, error) {
+	root, err := cacheRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "bin"), nil
+}
+
+// imageCopyName reports whether name is one copied image.
 func imageCopyName(name string) bool {
 	const prefix, digits = "dyna-", 16
 	if !strings.HasPrefix(name, prefix) || len(name) != len(prefix)+digits {
@@ -169,16 +213,15 @@ func copyExecutable(source, path, dir string) error {
 	return os.Rename(temp.Name(), path)
 }
 
-// pruneStableExecutables keeps the newest copies, the one just written and the
-// copy the current link names. It never removes a copy that a running process
-// executes: a long-lived session MCP server or an idle harness child still runs
-// the image its turn named, and deleting it would break the next launch of that
-// same path. It never removes the current build either, because every published
-// wrapper execs that copy until the next update moves the link.
+// pruneStableExecutables keeps the newest copies, the one just written and
+// every copy a published link names. It never removes a copy that a running
+// process executes: a long-lived session MCP server or an idle harness child
+// still runs the image its turn named, and deleting it would break the next
+// launch of that same path.
 func pruneStableExecutables(dir, keep string) {
 	inUse := runningImages()
-	if current, err := os.Readlink(filepath.Join(dir, currentImageLink)); err == nil {
-		inUse[current] = true
+	for image := range linkedImages() {
+		inUse[image] = true
 	}
 	pruneImages(dir, keep, inUse)
 }

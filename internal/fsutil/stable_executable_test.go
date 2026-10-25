@@ -1,43 +1,102 @@
 package fsutil
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 )
 
-// Every published wrapper execs the copy the current link names. Pruning older
-// images must keep it, or the next harness turn starts a wrapper with no
-// executable.
-func TestPruneKeepsCurrentImage(t *testing.T) {
-	dir := t.TempDir()
-	current := filepath.Join(dir, "dyna-0000000000000001")
-	if err := os.WriteFile(current, []byte("image"), 0700); err != nil {
+// A scope that has not run a turn since an update still publishes the build it
+// last named. Pruning must keep that image, or its wrappers, MCP commands and
+// $DYNA_BIN point at an executable that no longer exists.
+func TestPruneKeepsLinkedImage(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	linked, err := buildImage(t, "published build")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Symlink(current, filepath.Join(dir, currentImageLink)); err != nil {
+	link, err := CurrentLink("/owner/accounts/one/.runtime.home")
+	if err != nil {
 		t.Fatal(err)
 	}
+	if err := SetLink(link, linked); err != nil {
+		t.Fatal(err)
+	}
+	// The linked copy is the oldest one, so an unbounded prune would drop it.
 	stamp := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(current, stamp, stamp); err != nil {
+	if err := os.Chtimes(linked, stamp, stamp); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < stableImageCopies; i++ {
-		newer := filepath.Join(dir, "dyna-100000000000000"+string(rune('0'+i)))
-		if err := os.WriteFile(newer, []byte("image"), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Chtimes(newer, stamp.Add(time.Duration(i)*time.Minute), stamp.Add(time.Duration(i)*time.Minute)); err != nil {
+	for i := 0; i <= stableImageCopies; i++ {
+		if _, err := buildImage(t, fmt.Sprintf("later build %d", i)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	pruneStableExecutables(dir, filepath.Join(dir, "dyna-2000000000000000"))
-	if _, err := os.Stat(current); err != nil {
-		t.Fatalf("pruned the image the current link names: %v", err)
+	if target, err := os.Readlink(link); err != nil || target != linked {
+		t.Fatalf("pruning moved this scope's link: %q, %v", target, err)
 	}
+	if _, err := os.Stat(link); err != nil {
+		t.Fatalf("pruning deleted the image a published link names: %v", err)
+	}
+}
+
+// Two preparations of one scope can publish at the same time, before any
+// generation lock. Neither may remove the other's staged link or fail, which
+// would leave that session on one fixed build.
+func TestSetLinkSupportsOverlappingUpdates(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	link, err := CurrentLink("/owner/accounts/one/.runtime.home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	targets := make([]string, 4)
+	for i := range targets {
+		if targets[i], err = buildImage(t, fmt.Sprintf("build %d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(targets)*8)
+	for round := 0; round < 8; round++ {
+		for _, target := range targets {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				errs <- SetLink(link, target)
+			}()
+		}
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("overlapping update failed: %v", err)
+		}
+	}
+	current, err := os.Readlink(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(targets, current) {
+		t.Fatalf("link names %q, which is not one of the published builds", current)
+	}
+}
+
+// buildImage makes a runnable stand-in for one engine build and returns its
+// copied image.
+func buildImage(t *testing.T, build string) (string, error) {
+	t.Helper()
+	source := filepath.Join(t.TempDir(), "dyna")
+	if err := os.WriteFile(source, []byte("#!/bin/sh\n# "+build+"\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	return StableImage(source)
 }
 
 // dyna publishes this path as $DYNA_BIN, in every harness MCP server command
