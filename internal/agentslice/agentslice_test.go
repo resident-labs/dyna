@@ -31,15 +31,51 @@ func fakeManager(t *testing.T) (config string, calls *[]string) {
 	underTest = false
 	t.Cleanup(func() { underTest = true })
 	var got []string
-	oldLook, oldRun := lookPath, runCommand
+	oldLook, oldRun, oldOutput := lookPath, runCommand, runCommandOutput
 	lookPath = func(string) (string, error) { return "/usr/bin/systemd-run", nil }
 	runCommand = func(name string, args ...string) error {
 		got = append(got, name+" "+strings.Join(args, " "))
 		return nil
 	}
-	sliceOnce = sync.Once{}
-	t.Cleanup(func() { lookPath, runCommand, sliceOnce = oldLook, oldRun, sync.Once{} })
+	runCommandOutput = func(string, ...string) ([]byte, error) {
+		return []byte("systemd 262 (262-1-arch)\n"), nil
+	}
+	sliceOnce, noExpandOnce, noExpand = sync.Once{}, sync.Once{}, ""
+	t.Cleanup(func() {
+		lookPath, runCommand, runCommandOutput = oldLook, oldRun, oldOutput
+		sliceOnce, noExpandOnce, noExpand = sync.Once{}, sync.Once{}, ""
+	})
 	return config, &got
+}
+
+// A systemd before 254 has no --expand-environment argument and rejects it, so
+// an agent scope starts without it; from 254 the argument stays, because that
+// systemd would otherwise expand the $ signs of the agent command.
+func TestWrapSuitsTheSystemdThatRunsIt(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		version  string
+		noExpand bool
+	}{
+		{"debian 12", "systemd 252 (252.39-1~deb12u1)\n", false},
+		{"systemd 254", "systemd 254.5-1\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fakeManager(t)
+			runCommandOutput = func(string, ...string) ([]byte, error) { return []byte(tc.version), nil }
+			noExpandOnce = sync.Once{}
+			cmd := exec.Command("/bin/dyna", "subagent", "_turn", "ses_1", "2")
+			Wrap(cmd, "ses_1/2")
+			args := strings.Join(cmd.Args, " ")
+			if got := strings.Contains(args, "--expand-environment=no"); got != tc.noExpand {
+				t.Fatalf("scope args = %q, want the no-expand argument %t", args, tc.noExpand)
+			}
+			// The agent command reaches systemd-run as written.
+			if !strings.Contains(args, "-- /bin/dyna subagent _turn ses_1 2") {
+				t.Fatalf("scope args = %q, want the agent command unchanged", args)
+			}
+		})
+	}
 }
 
 func TestWrapRewritesCommand(t *testing.T) {

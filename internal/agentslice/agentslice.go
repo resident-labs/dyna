@@ -22,6 +22,7 @@ import (
 
 	"dyna-agent/internal/childenv"
 	"dyna-agent/internal/fsutil"
+	"dyna-agent/internal/systemdver"
 )
 
 // Slice is the systemd slice that holds every agent scope.
@@ -59,7 +60,17 @@ MemoryMax=80%
 var (
 	lookPath   = exec.LookPath
 	runCommand = func(name string, args ...string) error { return childenv.Clean(exec.Command(name, args...)).Run() }
-	sliceOnce  sync.Once
+	// runCommandOutput reads what a command prints, for the systemd version that
+	// decides the scope arguments.
+	runCommandOutput = func(name string, args ...string) ([]byte, error) {
+		return childenv.Clean(exec.Command(name, args...)).Output()
+	}
+	sliceOnce sync.Once
+	// noExpandOnce and noExpand cache what this systemd-run supports. Every agent
+	// start asks, and a systemd upgrade comes with a reboot, so one read per
+	// process is enough.
+	noExpandOnce sync.Once
+	noExpand     string
 	// underTest keeps Go tests out of the real user manager.
 	underTest = testing.Testing()
 )
@@ -87,9 +98,11 @@ func wrap(cmd *exec.Cmd, name, slice string, properties ...string) string {
 		sliceOnce.Do(ensureSlice)
 	}
 	unit := unitName(name)
-	args := []string{run, "--user", "--scope", "--quiet", "--collect",
-		"--expand-environment=no", "--slice=" + slice,
-		"--unit=" + unit, "--description=Dyna " + name}
+	args := []string{run, "--user", "--scope", "--quiet", "--collect"}
+	if flag := noExpandArg(run); flag != "" {
+		args = append(args, flag)
+	}
+	args = append(args, "--slice="+slice, "--unit="+unit, "--description=Dyna "+name)
 	for _, property := range properties {
 		args = append(args, "--property="+property)
 	}
@@ -97,6 +110,27 @@ func wrap(cmd *exec.Cmd, name, slice string, properties ...string) string {
 	cmd.Args = append(args, append([]string{cmd.Path}, cmd.Args[1:]...)...)
 	cmd.Path = run
 	return unit
+}
+
+// noExpandArg reads the argument that stops systemd from expanding environment
+// variables in the agent command, which holds $ signs of its own. A systemd that
+// knows the argument gets it; an older systemd rejects it and expands nothing
+// itself, so it runs the scope without it. A systemd version that cannot be read
+// keeps the argument, so an old systemd fails loudly instead of running a
+// command that systemd rewrote.
+func noExpandArg(run string) string {
+	noExpandOnce.Do(func() {
+		out, err := runCommandOutput(run, "--version")
+		if err != nil {
+			noExpand = systemdver.NoExpandFlag
+			return
+		}
+		major, ok := systemdver.Major(string(out))
+		if !ok || systemdver.NeedsNoExpand(major) {
+			noExpand = systemdver.NoExpandFlag
+		}
+	})
+	return noExpand
 }
 
 func systemdRun() (string, bool) {

@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"dyna-agent/internal/shellquote"
+	"dyna-agent/internal/systemdver"
 )
 
 // The two steps of a cancelled run's teardown, on a machine that may answer
@@ -240,22 +241,54 @@ func (r Runner) nodeCommandScoped(ctx context.Context, out, stderr io.Writer, sc
 	}
 	name, args := "bash", []string{"-o", "pipefail", "-c", script}
 	if scope != "" {
-		name = "systemd-run"
-		args = append([]string{"--user", "--scope", "--quiet", "--expand-environment=no", "--unit", scope,
-			"-p", "CPUQuota=" + strconv.Itoa(limits.CPUs*100) + "%",
-			"-p", "MemoryMax=" + systemdMemory(limits.MemoryMiB),
-			"-p", "TasksMax=" + strconv.Itoa(limits.TasksMax),
-			"--", "nice", "-n", "10", "bash", "-o", "pipefail", "-c"}, script)
-	}
-	if r.Node.SSH != "" {
-		remote := shellquote.Quote(name)
-		for _, arg := range args {
-			remote += " " + shellquote.Quote(arg)
+		bounded := []string{"--user", "--scope", "--quiet"}
+		if r.systemdNeedsNoExpandFlag(ctx) {
+			bounded = append(bounded, systemdver.NoExpandFlag)
 		}
-		name, args = "ssh", []string{"-o", "BatchMode=yes"}
-		args = append(args, r.Node.SSH, remote)
+		bounded = append(bounded, "--unit", scope,
+			"-p", "CPUQuota="+strconv.Itoa(limits.CPUs*100)+"%",
+			"-p", "MemoryMax="+systemdMemory(limits.MemoryMiB),
+			"-p", "TasksMax="+strconv.Itoa(limits.TasksMax),
+			"--", "nice", "-n", "10", "bash", "-o", "pipefail", "-c", script)
+		name, args = "systemd-run", bounded
 	}
+	name, args = r.nodeProgram(name, args)
 	return fn(ctx, "", nil, out, stderr, name, args...)
+}
+
+// nodeProgram wraps a program in ssh when the node is another machine.
+func (r Runner) nodeProgram(name string, args []string) (string, []string) {
+	if r.Node.SSH == "" {
+		return name, args
+	}
+	remote := shellquote.Quote(name)
+	for _, arg := range args {
+		remote += " " + shellquote.Quote(arg)
+	}
+	return "ssh", append([]string{"-o", "BatchMode=yes"}, r.Node.SSH, remote)
+}
+
+// systemdNeedsNoExpandFlag reports whether the node's systemd-run must be told
+// not to expand environment variables in a command's arguments. The script Dyna
+// passes holds $ signs of its own, and a systemd that expands them rewrites it,
+// so a version that knows systemdver.NoExpandFlag gets it. An older systemd-run
+// rejects that argument and expands nothing of its own, so it runs the scope
+// without it: host checks failed on Debian 12 that way, with "unrecognized
+// option '--expand-environment=no'". A version this cannot read gets the
+// argument, because a loud failure on an old systemd is better than a script
+// that was quietly rewritten.
+func (r Runner) systemdNeedsNoExpandFlag(ctx context.Context) bool {
+	name, args := r.nodeProgram("systemd-run", []string{"--version"})
+	fn := r.Command
+	if fn == nil {
+		fn = command
+	}
+	var out bytes.Buffer
+	if err := fn(ctx, "", nil, &out, io.Discard, name, args...); err != nil {
+		return true
+	}
+	major, ok := systemdver.Major(out.String())
+	return !ok || systemdver.NeedsNoExpand(major)
 }
 
 func (r Runner) runNode(ctx context.Context, req Request) (result Result, err error) {
