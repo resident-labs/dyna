@@ -39,7 +39,25 @@ test('failed handoff shows typed responsibilities before offering force close', 
   assert.deepEqual(JSON.parse(JSON.stringify(call(app, 'forceCloseLines', app.confirm.items, Reflect.get(app.confirm, 'detail')))), [
     detail,
     itemText,
-    'Retry after fixing the error, or force close. Goals move to the owner; other work stays unresolved.',
+    'Retry after fixing the error, or close anyway. The work above stays unresolved.',
   ])
   assert.equal(app.closeResult, null)
+})
+
+// Root and the owner hold no goals, so the close offers no handoff that would
+// give them one: the only choice is the close the server performs, and force
+// close is offered only after the server returns that recovery.
+test('the close dialog offers only the choice the server performs', () => {
+  const app = {
+    confirm: { kind: 'close', m: { id: 'one', name: 'worker' } },
+    closeResult: null, errorText, allowsForceClose, closeRecoveryOf,
+    roomId: 'room', members: [],
+    api: { closeSession: async () => ({ closeSummary: [] }) },
+    say() {}, loadMembers() {}, loadChanges() {},
+  }
+  installConfirm(app)
+  const text = call(app, 'closeConfirm', { id: 'one', name: 'worker' }, false) as { lines: string[]; action: string; alternative?: string; onalternative?: unknown }
+  assert.equal(text.action, 'Close session')
+  assert.equal(text.alternative, undefined)
+  assert.equal(text.onalternative, undefined)
 })
