@@ -335,3 +335,21 @@ func accountMetadataBytes(t *testing.T, a *Accounts) []byte {
 	}
 	return out
 }
+
+// A native create is a second path beside State.Save, so it must name the
+// provider and kind too: a provider lookup would otherwise miss the account.
+func TestCreateNamesTheProvider(t *testing.T) {
+	a := testAccounts(t)
+	n, err := a.Create("codex", "Work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := (&store.Store{Root: a.Root}).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := st.Find(n.ID)
+	if entry == nil || entry.Provider != store.ProviderChatGPT || entry.Kind != store.KindOAuth {
+		t.Fatalf("created account = %+v", entry)
+	}
+}

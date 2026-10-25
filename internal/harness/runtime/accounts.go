@@ -221,7 +221,8 @@ func (a *Accounts) Create(harness, label string) (result NativeAccount, err erro
 			return err
 		}
 		now := time.Now().UTC()
-		e := store.Entry{Metadata: store.Metadata{ID: key, Harness: h, Label: label, NativeHome: home, NeedsLogin: true, CreatedAt: now, UpdatedAt: now}}
+		provider, kind := store.ProviderFor(h, "")
+		e := store.Entry{Metadata: store.Metadata{ID: key, Provider: provider, Kind: kind, Harness: h, Label: label, NativeHome: home, NeedsLogin: true, CreatedAt: now, UpdatedAt: now}}
 		state.Entries = append(state.Entries, e)
 		result, err = a.native(&e)
 		return err
