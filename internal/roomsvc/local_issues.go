@@ -68,6 +68,24 @@ func (s *Service) Issues(roomRef string, all bool) ([]room.Issue, error) {
 	return out, nil
 }
 
+// Issue reads one issue by D-N, its compact spelling or the ID of the post it
+// was filed with, with the note the filer gave it.
+func (s *Service) Issue(roomRef, id string) (room.Issue, string, error) {
+	r, err := s.rooms().Resolve(roomRef)
+	if err != nil {
+		return room.Issue{}, "", err
+	}
+	i, err := s.rooms().Issue(r.ID, id)
+	if err != nil {
+		return room.Issue{}, "", err
+	}
+	post, err := s.rooms().Message(r.ID, i.ID)
+	if err != nil {
+		return room.Issue{}, "", err
+	}
+	return i, strings.TrimSpace(issueText(post)), nil
+}
+
 // Issue mutations use the same triage policy as the CLI, with the caller that
 // the engine verified instead of the engine process's owner identity.
 func (s *Service) CloseIssue(ctx context.Context, roomRef, id, reason string) (room.Issue, error) {
