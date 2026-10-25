@@ -44,6 +44,44 @@ It preserves `XDG_RUNTIME_DIR`, `DBUS_SESSION_BUS_ADDRESS`, and
 `DYNA_OWNER_WAYLAND_DISPLAY` and `DYNA_OWNER_DISPLAY`, for tools that deliberately
 operate the owner's desktop.
 
+### Managed shells
+
+A Dyna shell runs on the display its owner may use, never on the owner's display
+by accident. Starting a shell never starts a computer.
+
+- An interactive owner terminal, the internal root session, and a session that
+  root or the owner granted owner display keep the owner display. After computer
+  injection these shells get it back from `DYNA_OWNER_DISPLAY` and
+  `DYNA_OWNER_WAYLAND_DISPLAY`; a saved value that is empty means the owner had
+  no display. They also drop the session computer's browser shims from `PATH`
+  and drop `AGENT_BROWSER_*`, `DYNA_CHROMIUM_*`, and `DYNA_COMPUTER_PROCESS`.
+- A shell whose session computer already runs gets the display that
+  `dyna computer env` prints, and starts nothing. It differs from that
+  environment on purpose: `DBUS_SESSION_BUS_ADDRESS` names a missing socket, so
+  a D-Bus singleton cannot activate an app on the owner desktop;
+  `WAYLAND_SOCKET`, `HYPRLAND_INSTANCE_SIGNATURE`, `DYNA_OWNER_DISPLAY`, and
+  `DYNA_OWNER_WAYLAND_DISPLAY` are removed, because a connected socket wins over
+  `WAYLAND_DISPLAY` and the `hypruse` shim would put a window back on the owner
+  display; and `CHROME_USER_DATA_DIR` and `CHROME_CONFIG_HOME` name the
+  computer's own private profile, so an absolute Chromium launch joins that
+  browser instead of one of the shared account config.
+- A shell with no running computer has no display. `DISPLAY`, `WAYLAND_SOCKET`,
+  `XDG_SESSION_TYPE`, and `DYNA_OWNER_*` are unset, and `WAYLAND_DISPLAY` names a
+  missing absolute socket, so a GUI program fails at once with its normal
+  cannot-open-display error. `DBUS_SESSION_BUS_ADDRESS` names a missing socket,
+  so neither dbus autolaunch nor `/run/user/<uid>/bus` finds the owner's bus.
+  `XDG_RUNTIME_DIR` stays, so `dyna computer open` and `dyna computer run` still
+  reach the control socket. `CHROME_USER_DATA_DIR` and `CHROME_CONFIG_HOME` name
+  private directories: Chromium finds a running browser through its profile
+  before it needs a display, so an absolute launch from a desktop entry must not
+  join one that runs on the owner display. The job output gets one hint that
+  names these commands.
+
+The browser shims keep each computer on its own profile: Chromium gets
+`--user-data-dir`, Firefox gets `--profile` without a shared remote, and the
+blocked bus does the rest. Firefox removed `--no-remote` and `MOZ_NO_REMOTE` in
+2024, so a separate profile and no session bus are what keep it apart.
+
 ## Browser settings
 
 Open desktop Settings and find Browser. Changes apply at the next Chromium start.
