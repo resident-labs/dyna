@@ -164,10 +164,11 @@ func (s Service) wakeMap(ctx context.Context, repoDir string) (Result, error) {
 		return Result{}, err
 	}
 	failed := rolesession.MergeFailures(st.FailedProfiles, recent)
-	name, _, err := rolesession.ChooseProfile(profiles, v.LibraryProfile, failed, s.now(), subagent.RoleLibrarian)
+	choice, err := rolesession.ChooseProfile(profiles, v.LibraryProfile, failed, s.now(), subagent.RoleLibrarian)
 	if err != nil {
 		return Result{}, err
 	}
+	name := choice.Name
 
 	tree := TreePath(s.DataDir, r.ID)
 	if err := syncTree(ctx, r.Main, tree, target); err != nil {
@@ -270,10 +271,11 @@ func (s Service) wakeSmells(ctx context.Context, repoDir string) (Result, error)
 		return Result{}, err
 	}
 	failed := rolesession.MergeFailures(st.SmellFailedProfiles, recent)
-	name, _, err := rolesession.ChooseProfile(profiles, v.LibrarySmellProfile, failed, s.now(), subagent.RoleReviewer)
+	choice, err := rolesession.ChooseProfile(profiles, v.LibrarySmellProfile, failed, s.now(), subagent.RoleReviewer)
 	if err != nil {
 		return Result{}, err
 	}
+	name := choice.Name
 	tree := SmellTreePath(s.DataDir, r.ID)
 	if err := syncTree(ctx, r.Main, tree, target); err != nil {
 		return Result{}, err

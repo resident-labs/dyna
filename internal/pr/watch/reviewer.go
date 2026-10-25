@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	harnesshealth "dyna-agent/internal/harness/health"
 	prfacts "dyna-agent/internal/pr/facts"
 	"dyna-agent/internal/pr/state"
 	"dyna-agent/internal/profile"
@@ -58,9 +59,13 @@ type ReviewerStatus struct {
 	Reviewers       []ReviewerSlotStatus `json:"reviewers"`
 	Helpers         []ReviewerHelper     `json:"helpers"`
 
-	Enabled       bool                 `json:"enabled"`
+	Enabled bool `json:"enabled"`
+	// Profile is the profile the pool uses. ProfileCause is the typed reason the
+	// pinned profile could not be used, and stays empty when the pool runs the
+	// pin or chooses automatically. ProfileReason gives the same cause in words.
 	Profile       string               `json:"profile"`
 	ProfileSource string               `json:"profileSource"`
+	ProfileCause  rolesession.Cause    `json:"profileCause,omitempty"`
 	ProfileReason string               `json:"profileReason"`
 	Queue         []ReviewQueued       `json:"queue"`
 	LastError     string               `json:"lastError"`
@@ -81,16 +86,35 @@ func (s *Service) profiles() ([]profile.Profile, error) {
 	return ps.Profiles, nil
 }
 
-func (s *Service) chooseProfile(cfg Reviewer) (string, string, error) {
+func (s *Service) chooseProfile(cfg Reviewer) (rolesession.Choice, error) {
 	profiles, err := s.profiles()
 	if err != nil {
-		return "", "", err
+		return rolesession.Choice{}, err
 	}
 	recent, err := s.recentProfileFailures()
 	if err != nil {
-		return "", "", err
+		return rolesession.Choice{}, err
 	}
-	return rolesession.ChooseProfile(profiles, cfg.Profile, rolesession.MergeFailures(cfg.FailedProfiles, recent), s.now(), subagent.RoleReviewer)
+	failures := rolesession.MergeFailures(cfg.FailedProfiles, recent)
+	return rolesession.ChooseProfile(profiles, cfg.Profile, s.recoveredNotReady(profiles, failures), s.now(), subagent.RoleReviewer)
+}
+
+// recoveredNotReady clears a hold that a turn recorded when the runtime did
+// not start, once the profile's health shows a later success. A passing live
+// check or a successful turn proves the cause is gone, so the pinned profile
+// must not stay out until the old hold expires.
+func (s *Service) recoveredNotReady(profiles []profile.Profile, failures map[string]time.Time) map[string]time.Time {
+	now := s.now()
+	for _, p := range profiles {
+		if !rolesession.NotReadyHeld(failures, p.Name, now) {
+			continue
+		}
+		version := harnesshealth.VersionDetector(context.Background(), p).Version
+		if harnesshealth.New("").View(p, version).Status == harnesshealth.Healthy {
+			failures = rolesession.ClearNotReady(failures, p.Name)
+		}
+	}
+	return failures
 }
 
 func (s *Service) SetReviewEnabled(roomID string, enabled bool) error {
@@ -438,7 +462,8 @@ func (s *Service) ReviewerStatus(roomID string) (ReviewerStatus, error) {
 	if cfg.Profile != "" {
 		out.ProfileSource = "pinned"
 	}
-	out.Profile, out.ProfileReason, err = s.chooseProfile(cfg)
+	choice, err := s.chooseProfile(cfg)
+	out.Profile, out.ProfileReason, out.ProfileCause = choice.Name, choice.Reason, choice.Cause
 	if err != nil && out.LastError == "" {
 		out.LastError = err.Error()
 	}
@@ -683,10 +708,11 @@ func (s *Service) reconcileRoom(ctx context.Context, roomID string) error {
 			continue
 		}
 		cfg := st.Reviewers[roomID]
-		name, _, e := s.chooseProfile(cfg)
+		choice, e := s.chooseProfile(cfg)
 		if e != nil {
 			return s.reviewBlocked(roomID, Sanitize(e.Error()))
 		}
+		name := choice.Name
 		if busy >= reviewerProfileCap(name, profiles) {
 			break
 		}
