@@ -21,6 +21,15 @@ import (
 // locally, so this is not a model round trip. Tests may shorten it.
 var claudeInterruptGrace = 2 * time.Second
 
+// SetClaudeInterruptGraceForTest shortens the interrupt grace, so a test that
+// cancels a turn does not wait the whole grace for a worker that never answers
+// the interrupt. It returns the previous value, and only a test calls it.
+func SetClaudeInterruptGraceForTest(d time.Duration) time.Duration {
+	previous := claudeInterruptGrace
+	claudeInterruptGrace = d
+	return previous
+}
+
 // claudeHostedInput writes stream-json lines to the shared session. The host
 // adds the LF that ends each frame, so the line's trailing LF is removed first.
 type claudeHostedInput struct{ sess sessionhost.Session }
