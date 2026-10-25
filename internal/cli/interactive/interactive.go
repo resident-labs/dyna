@@ -25,7 +25,7 @@ var guideFiles embed.FS
 //go:embed harness/*.md
 var harnessFiles embed.FS
 
-var guideHarnesses = []string{"claude", "codex", "muse", "other"}
+var guideHarnesses = []string{"claude", "muse", "other"}
 
 // guideIndex lists the topics. Root, which has no session stamp, sees the
 // root block first; the internal root (root mode) sees its own setup there. A

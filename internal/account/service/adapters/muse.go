@@ -13,7 +13,7 @@ import (
 // https://meta-models.github.io/muse-code-sdk/next/generated/msp/types/accountstate/
 // https://meta-models.github.io/muse-code-sdk/next/generated/msp/types/subscriptionusage/
 // T3 packages/provider-muse/src/server/sdk.ts establishes the read-only flags.
-func openMuseRPC(ctx context.Context, executable string, base []string) (*codexRPC, error) {
+func openMuseRPC(ctx context.Context, executable string, base []string) (*discoveryRPC, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

@@ -21,11 +21,9 @@ The owner can cancel a waiting steering post. It remains in history but was not 
 Apply new instructions while preserving work that does not conflict.
 
 Claude stream-JSON receives messages through stdin at tool boundaries.
-Codex uses native `turn/steer` requests on its session app-server process.
 Muse uses native `turn/steer` requests on its retained `muse serve` process.
 Undelivered messages become continuations. A stalled hook falls back to interruption after 20 seconds following tool completion.
 Set `DYNA_STEER_HOOKS=off` to disable hooks.
-Codex keeps its configured hook support for the process lifetime. Its hook delivery bypasses trust checks for all configured hooks; use trusted repositories.
 It replaces PostToolUse hooks. Muse keeps its memory-tool denial hook; steering uses MSP, the Muse session protocol.
 Other harnesses interrupt and resume immediately when no tool runs, or at the next tool-call completion.
 Known tool calls are never killed for steering.
@@ -40,7 +38,6 @@ dyna profiles check <name> --live
 Live checks may incur provider charges and have a two-minute limit.
 Harness background tasks end with their process. Run commands directly in your session. Use subagents for durable delegated work.
 
-Codex workers are launched with `-c features.code_mode={enabled=false,default_exec_yield_time_ms=600000}`.
 A profile's explicit `code_mode` setting takes priority. Some models force code mode on.
 
 ## Frames and replies

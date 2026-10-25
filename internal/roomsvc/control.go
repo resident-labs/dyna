@@ -158,7 +158,7 @@ type SubagentStart struct {
 	Under string
 	// Fixes names room issues linked to the session's goal.
 	Fixes []int
-	// Owner labels an owner caller's harness thread, such as codex:<id>.
+	// Owner labels an owner caller's harness thread, such as claude:<id>.
 	Owner string
 	// OwnerDisplay asks for the new session's own shells to use the owner's
 	// display. Only an owner or root caller may set it.

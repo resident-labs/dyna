@@ -218,7 +218,7 @@ type StartOptions struct {
 	Room      string    // room name or ID; empty inherits or uses global
 	Dir       string    // worker working directory (default: the parent's, else Cwd)
 	Cwd       string    // the caller's working directory, the default Dir for a top-level session
-	Owner     string    // an owner caller's own label, such as codex:<thread>; a session's is its session
+	Owner     string    // an owner caller's own label, such as claude:<session>; a session's is its session
 	Schema    string    // optional JSON Schema for the first turn's result
 	Goal      string    // required outcome and done condition; the session's goal, or its item's text when delegating
 	Under     string    // explicit parent goal ID to delegate from; empty picks deterministically

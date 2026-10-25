@@ -62,7 +62,7 @@ func CredentialUsesAPIKey(c Captured) bool {
 
 // ActiveRefresher holds the adapter's activation lock while it captures, refreshes,
 // checkpoints, and writes the active credential. The caller holds the store lock.
-// Codex locks coordinate Dyna only. Stop native writers first.
+// Native locks coordinate Dyna only. Stop native writers first.
 // A returned credential can contain a rotated grant even when a later step fails.
 type ActiveRefresher interface {
 	RefreshActive(context.Context, Captured, func(Captured) error) (Captured, error)
@@ -78,21 +78,6 @@ type activeRefresh struct {
 var errNotNewer = errors.New("the native login is already as new")
 
 func (m *claudeManager) RefreshActive(ctx context.Context, c Captured, checkpoint func(Captured) error) (Captured, error) {
-	if checkpoint == nil {
-		return c, ErrUnsupported
-	}
-	parsed, err := credentialMetadata(c.Credential)
-	if err != nil {
-		return c, err
-	}
-	if parsed.Identity != c.Identity || parsed.Integration != c.Integration {
-		return c, ErrNoIdentity
-	}
-	r := &activeRefresh{current: c, result: c, checkpoint: checkpoint}
-	_, err = m.activate(ctx, c.Integration, c.Credential, r)
-	return r.result, err
-}
-func (m *codexManager) RefreshActive(ctx context.Context, c Captured, checkpoint func(Captured) error) (Captured, error) {
 	if checkpoint == nil {
 		return c, ErrUnsupported
 	}
@@ -124,9 +109,12 @@ func credentialMetadata(c store.Credential) (Captured, error) {
 	case claudeSchema:
 		_, tok, id, label, err := claudeDecode(c)
 		return Captured{Identity: id, Label: label, Credential: c, ExpiresAt: time.UnixMilli(tok.ExpiresAt)}, err
-	case codexAuthSchema:
-		_, parsed, err := codexUnpack(c)
-		return parsed, err
+	case piNativeFilesSchema:
+		id, entry, err := piAccountEntry(c)
+		if err != nil {
+			return Captured{}, err
+		}
+		return Captured{Identity: "pi:" + id, Credential: c, ExpiresAt: piEntryExpiry(entry)}, nil
 	case museAuthSchema:
 		var p map[string]json.RawMessage
 		if len(c.Payload) > museAuthMaxBytes || json.Unmarshal(c.Payload, &p) != nil || len(p) != 1 {
@@ -199,7 +187,6 @@ func credentialExpiry(c Captured) (time.Time, error) {
 	return parsed.ExpiresAt, nil
 }
 func (*claudeManager) CredentialExpiry(c Captured) (time.Time, error)   { return credentialExpiry(c) }
-func (*codexManager) CredentialExpiry(c Captured) (time.Time, error)    { return credentialExpiry(c) }
 func (*museManager) CredentialExpiry(c Captured) (time.Time, error)     { return credentialExpiry(c) }
 func (*openCodeManager) CredentialExpiry(c Captured) (time.Time, error) { return credentialExpiry(c) }
 
@@ -246,9 +233,6 @@ func (m *claudeManager) RecoverCredential(ctx context.Context, c Captured) (Capt
 	// TODO: legacy/shim remove later — recovers rotated claude-accounts snapshots until the legacy helper is retired
 	rows, _ := ImportLegacyClaude(ctx, m.host)
 	return recoverNative(ctx, m, c, directNow(m.now), rows)
-}
-func (m *codexManager) RecoverCredential(ctx context.Context, c Captured) (Captured, error) {
-	return recoverNative(ctx, m, c, time.Now(), nil)
 }
 func (m *museManager) RecoverCredential(ctx context.Context, c Captured) (Captured, error) {
 	return recoverNative(ctx, m, c, time.Now(), nil)

@@ -23,8 +23,6 @@ func Models(ctx context.Context, harness, executable string, env []string) ([]Mo
 	switch harness {
 	case "opencode":
 		return modelsOpenCode(ctx, executable, env)
-	case "codex":
-		return modelsCodex(ctx, executable, env)
 	case "claude", "claude-code":
 		return modelsClaude(ctx, executable, env)
 	case "muse":

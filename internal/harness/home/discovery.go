@@ -14,11 +14,9 @@ const OpenCodeEmptyConfigContent = "{}"
 
 func Discovery(nativeScope string) map[string]string {
 	h := Home(nativeScope)
-	codex := filepath.Join(h, ".codex")
 	claude := filepath.Join(h, ".claude")
 	config := filepath.Join(h, ".config")
 	return map[string]string{
-		"CODEX_HOME": codex, "CODEX_SQLITE_HOME": filepath.Join(codex, "sqlite"),
 		"CLAUDE_CONFIG_DIR": claude, "CLAUDE_SECURESTORAGE_CONFIG_DIR": claude, "ANTHROPIC_CONFIG_DIR": filepath.Join(claude, "anthropic"),
 		"GROK_HOME": filepath.Join(h, ".grok"), "PI_CODING_AGENT_DIR": filepath.Join(h, ".pi/agent"),
 		"OPENCODE_CONFIG_DIR": filepath.Join(config, "opencode"), "OPENCODE_DB": filepath.Join(h, ".local/share/opencode/opencode.db"),

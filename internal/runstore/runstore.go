@@ -90,8 +90,8 @@ const SessionEnv = mode.EnvSession
 // OwnerFromEnv names the agent session that is starting dyna work, so runs,
 // subagent sessions, and shells can be followed per owner: $DYNA_SESSION when
 // set (subagent sessions and integrations set it), else the calling harness's
-// own session: "codex:<thread id>" inside Codex, "claude:<session id>" inside
-// Claude Code. Empty for a plain shell.
+// own session: "claude:<session id>" inside Claude Code. Empty for a plain
+// shell.
 func OwnerFromEnv() string {
 	clip := func(s string) string {
 		s = strings.TrimSpace(s)
@@ -102,9 +102,6 @@ func OwnerFromEnv() string {
 	}
 	if s := clip(os.Getenv(SessionEnv)); s != "" {
 		return s
-	}
-	if t := clip(os.Getenv("CODEX_THREAD_ID")); t != "" {
-		return clip("codex:" + t)
 	}
 	if c := clip(os.Getenv("CLAUDE_CODE_SESSION_ID")); c != "" {
 		return clip("claude:" + c)

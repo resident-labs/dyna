@@ -144,10 +144,10 @@ func (r *Runtime) captureGeneration(h, home, account, inputDir string, lookup fu
 		d.EnvKeys = slices.Clone(d.EnvKeys)
 		slices.Sort(d.EnvKeys)
 		d.EnvKeys = slices.Compact(d.EnvKeys)
-		for _, name := range d.EnvKeys {
-			if h != "claude-code" && (h != "codex" || harnessmgr.MCPEnvironmentName(name) != name) {
-				needsCLI = true
-			}
+		// A harness without its own CLI materializer needs Dyna's binary for
+		// the shell MCP server it starts.
+		if h != "claude-code" && len(d.EnvKeys) > 0 {
+			needsCLI = true
 		}
 		snapshot.MCP = append(snapshot.MCP, harnessmgr.ManagedMCP{Name: entry.Name, MCPDefinition: d, EnabledHarnesses: []string{h}})
 	}
@@ -273,7 +273,7 @@ func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (s
 	}
 	defer removeBundle(staging)
 	var g harnessmgr.ConfigGeneration
-	if h == "claude-code" || h == "codex" {
+	if h == "claude-code" {
 		g, err = r.Config.GenerateSnapshotAt(h, home, staging, published, snapshot, resolvedLookup, inputs.Preferences)
 	} else {
 		g, err = materializeNative(h, home, staging, published, inputs.CLI, snapshot, inputs.Preferences, resolvedLookup)
@@ -285,7 +285,7 @@ func (r *Runtime) generateLocked(h, home, account string, lookup func(string) (s
 	if err = os.WriteFile(filepath.Join(staging, nativeFeatureFile), nativeFeaturePolicyBytes(h), 0600); err != nil {
 		return g, err
 	}
-	// The shared Claude/Codex materializer retains its native manifest format.
+	// The shared Claude materializer retains its native manifest format.
 	// This separate, hashed marker gives every harness the same HOME contract.
 	if err = writeNativeGeneration(filepath.Join(staging, "private-home.json"), privateGenerationHome{Version: 1, Home: home}); err != nil {
 		return g, err
@@ -365,7 +365,6 @@ func (r *Runtime) publishGenerationViews(h, home, dir string) error {
 // instructions. Remove once no account home holds a Dyna-marked file.
 var legacyGlobalRulesFiles = map[string]func(home string) string{
 	"claude-code": func(home string) string { return filepath.Join(home, "CLAUDE.md") },
-	"codex":       func(home string) string { return filepath.Join(home, "AGENTS.md") },
 	"grok":        func(home string) string { return filepath.Join(home, "AGENTS.md") },
 	"opencode":    func(home string) string { return filepath.Join(home, "AGENTS.md") },
 	"pi":          func(home string) string { return filepath.Join(home, "AGENTS.md") },
@@ -530,7 +529,7 @@ func validateOwnedGeneration(dir string) (generationOwnership, error) {
 	}
 	// A complete native manifest is mandatory even for a generation with no skills.
 	name := "native-generation.json"
-	if meta.Harness == "claude-code" || meta.Harness == "codex" {
+	if meta.Harness == "claude-code" {
 		name = "generation.json"
 	}
 	var manifest struct {

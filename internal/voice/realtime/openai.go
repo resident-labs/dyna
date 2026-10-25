@@ -10,8 +10,9 @@ import (
 // Credentials gives the bearer token and ChatGPT account ID of one connection.
 type Credentials func(context.Context) (token, account string, err error)
 
-// CodexHeader is the header OpenAI expects from a Codex sign-in.
-func CodexHeader(token, account string) http.Header {
+// ChatGPTHeader is the header OpenAI expects from a ChatGPT sign-in. The
+// originator value is the client name the provider checks for that grant.
+func ChatGPTHeader(token, account string) http.Header {
 	h := http.Header{}
 	h.Set("Authorization", "Bearer "+token)
 	h.Set("ChatGPT-Account-ID", account)
@@ -37,7 +38,7 @@ func OpenAI(url string, creds Credentials) Provider {
 			if err != nil {
 				return "", nil, err
 			}
-			return url, CodexHeader(token, account), nil
+			return url, ChatGPTHeader(token, account), nil
 		},
 		Session: openAISession,
 		ContentRefused: func(code, message string) bool {

@@ -24,7 +24,7 @@ sudo pacman -S systemd
 Use a trusted Dyna rootfs tar, such as `dyna.tar.zst`.
 Build it with `image/build.sh`; see [the image README](../image/README.md).
 `dyna.tar.zst` is 706,590,233 bytes. The unpacked tar is 2,689,075,200 bytes.
-The image keeps the Codex and Claude CLIs. An image under 600 MB needs
+The image keeps the Claude Code CLI. An image under 600 MB needs
 these CLIs to install on first use instead.
 The installer accepts a local file or an HTTPS URL.
 HTTPS redirects must also use HTTPS.
@@ -156,7 +156,7 @@ use inside the container:
 
 ```sh
 sudo machinectl shell dyna@dyna /usr/local/bin/dyna profiles add \
-  --name my-builder --harness codex --model <model-id> --taste 7 --intelligence 9 --cost 6
+  --name my-builder --harness pi --model <model-id> --taste 7 --intelligence 9 --cost 6
 ```
 
 You can also add profiles in the app under Settings > Profiles. Dyna creates
@@ -166,7 +166,7 @@ The profiles use Dyna's private copy of the CLI and Dyna's saved accounts.
 
 ## Agent credentials
 
-The image does not contain Claude Code or Codex. Dyna installs a CLI the first
+The image does not contain Claude Code. Dyna installs a CLI the first
 time sign-in or a session needs it. The install needs internet access and can
 take a minute. The Harnesses page shows "Installing…" while it runs. See
 [first-use install](private-harness-runtimes.md#first-use-install).
@@ -175,14 +175,14 @@ Sign in from the Harnesses page, or open a shell and sign in through Dyna:
 
 ```sh
 sudo machinectl shell dyna@dyna
-dyna harness login codex
+dyna harness login pi
 ```
 
 You can opt in to a host credential bind by editing the container's
 `.nspawn` file. For example, add this under `[Files]`:
 
 ```ini
-Bind=/home/alice/.codex:/home/dyna/.codex
+Bind=/home/alice/.pi:/home/dyna/.pi
 ```
 
 Replace the host path with your own path.
@@ -254,7 +254,7 @@ with image 0.1.0. The image was 717.9 MiB compressed.
 | Live view stream encoder | software |
 | Uninstall on Btrfs | 159 seconds |
 
-One Codex agent session ran in the container. It opened `foot` on its
+One Pi agent session ran in the container. It opened `foot` on its
 computer and typed text. A browser on the host watched that computer live
 through `http://127.0.0.1:<port>`.
 

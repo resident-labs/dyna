@@ -1,5 +1,5 @@
 // dyna: harness-agnostic dynamic multi-agent workflows.
-// CLI for agents (claude-code, codex, opencode, muse, grok, pi); humans use the desktop app.
+// CLI for agents (claude-code, opencode, muse, grok, pi); humans use the desktop app.
 package main
 
 import (
@@ -133,7 +133,7 @@ func newRootCommand() *cobra.Command {
 		Short:   "Dynamic multi-agent workflows for any coding agent",
 		Version: resolvedVersion,
 		Long: "dyna runs JavaScript workflow scripts that orchestrate registered worker\n" +
-			"profiles (claude-code, codex, opencode, muse, grok, pi, custom CLIs). Agents use the CLI;\n" +
+			"profiles (claude-code, opencode, muse, grok, pi, custom CLIs). Agents use the CLI;\n" +
 			"humans use the Dyna desktop app (desktop/) to run rooms, watch runs, and edit settings.",
 		SilenceUsage: true,
 	}

@@ -14,7 +14,6 @@ The wizard does not create a per-profile account binding or silently switch one.
 | Harness | Model source |
 | --- | --- |
 | OpenCode | Native model/provider API, then native model listing |
-| Codex | App-server `model/list` |
 | Claude Code | Installed help's model aliases |
 | Muse | Version-negotiated MSP `model/list` |
 | Pi | Native `--list-models`, one probe per active provider |
@@ -45,9 +44,9 @@ usage from failed and stopped work. Workflow usage is not included in this first
 read model. Coverage details expose this boundary and incomplete metrics.
 
 Input already includes cached input; total tokens are input plus output. Cache
-share uses only input with cache coverage. Codex cumulative counters become
-deltas against persisted native-thread checkpoints. Missing baselines, counter
-resets, and reporting gaps remain partial or unknown. Historical unverified sums
+share uses only input with cache coverage. Claude Code session cost becomes a delta against the
+saved total. Missing baselines, counter resets, and reporting gaps remain
+partial or unknown. Historical unverified sums
 stay stored but are excluded from normalized activity totals.
 
 Local activity never reduces provider account quota or estimates a subscription

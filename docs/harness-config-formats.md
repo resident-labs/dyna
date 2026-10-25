@@ -9,7 +9,6 @@ All seven catalog harnesses support MCP and skills. `ConfigCapabilities()` retur
 | Catalog ID | User MCP file | Root key and format | Native user skills |
 | --- | --- | --- | --- |
 | `claude-code` | `~/.claude.json` | `mcpServers`, JSON | `~/.claude/skills/` |
-| `codex` | `~/.codex/config.toml` | `mcp_servers`, TOML | `~/.agents/skills/` |
 | `opencode` | `~/.config/opencode/opencode.json` and `.jsonc` | `mcp`, JSONC | `~/.config/opencode/skills/` |
 | `pi` | `~/.pi/agent/mcp.json` | `mcpServers`, JSON | `~/.pi/agent/skills/` |
 | `muse` | `~/.config/muse/settings.json` | `mcpServers`, JSON; legacy `mcp_servers` accepted | `~/.config/muse/skills/` |
@@ -24,7 +23,7 @@ Pi now has native MCP support. Do not classify it as unsupported based on older 
 - [Pi skill source documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/skills.md)
 - Local checks: Pi 1.1.0 includes `docs/mcp.md` and `docs/skills.md`. `pi mcp --help` identifies the user file. `pi --help` lists `--no-mcp`, `--skill`, and `--no-skills`.
 
-Muse accepts either MCP root spelling. The adapter rejects a file that contains both. It reads native and shared `.agents` skills, then Claude and Codex user skills. `context.foreign_personal_skills: false` excludes the latter two roots.
+Muse accepts either MCP root spelling. The adapter rejects a file that contains both. It reads native and shared `.agents` skills, then Claude user skills. `context.foreign_personal_skills: false` excludes the latter two roots.
 
 - [Muse MCP settings and legacy spellings](https://meta-models.github.io/muse-code-sdk/next/guides/extend/mcp-servers/)
 - [Muse skill roots and compatibility switch](https://meta-models.github.io/muse-code-sdk/next/guides/extend/skills/)

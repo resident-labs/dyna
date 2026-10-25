@@ -13,7 +13,7 @@ import (
 	"dyna-agent/internal/store"
 )
 
-var ConfigHarnesses = []string{"claude-code", "codex", "opencode", "grok", "pi", "muse", "kimi-code"}
+var ConfigHarnesses = []string{"claude-code", "opencode", "grok", "pi", "muse", "kimi-code"}
 
 type MCPDefinition struct {
 	Command string   `json:"command,omitempty"`

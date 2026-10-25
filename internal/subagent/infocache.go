@@ -169,9 +169,7 @@ func cloneMeta(m Meta) Meta {
 	m.InstructionsNotes = slices.Clone(m.InstructionsNotes)
 	m.UsageBaseline = cloneValue(m.UsageBaseline)
 	if m.UsageBaseline != nil {
-		m.UsageBaseline.Input = cloneValue(m.UsageBaseline.Input)
-		m.UsageBaseline.CachedInput = cloneValue(m.UsageBaseline.CachedInput)
-		m.UsageBaseline.Output = cloneValue(m.UsageBaseline.Output)
+		m.UsageBaseline.Cost = cloneValue(m.UsageBaseline.Cost)
 	}
 	return m
 }

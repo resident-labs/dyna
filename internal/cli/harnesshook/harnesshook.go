@@ -1,5 +1,5 @@
 // Package harnesshook provides the hidden steering hook Dyna injects into
-// Codex, Muse, and Claude Code workers it launches. It is an internal transport, not a
+// Muse and Claude Code workers it launches. It is an internal transport, not a
 // user-installed orchestrator hook.
 package harnesshook
 
