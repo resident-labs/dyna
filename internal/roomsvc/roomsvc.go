@@ -449,10 +449,13 @@ type Post struct {
 	Channels []string `json:"channels,omitempty"`
 	// ForRoot marks a post addressed to the room's root session. The owner
 	// reads it in the room chat as a post to them, so it gets the gold mark.
-	ForRoot  bool   `json:"forRoot,omitempty"`
-	Pinned   bool   `json:"pinned,omitempty"`
-	PinnedAt int64  `json:"pinnedAt,omitempty"`
-	PinnedBy string `json:"pinnedBy,omitempty"`
+	ForRoot bool `json:"forRoot,omitempty"`
+	// Reply names who a reply to this post answers, read from the post's stored
+	// sender identity rather than from the shape of its address text.
+	Reply    *ReplyTarget `json:"reply,omitempty"`
+	Pinned   bool         `json:"pinned,omitempty"`
+	PinnedAt int64        `json:"pinnedAt,omitempty"`
+	PinnedBy string       `json:"pinnedBy,omitempty"`
 }
 
 // setViews records the feed views a post shows in, and repeats them under the
@@ -469,6 +472,44 @@ type PostDetail struct {
 	Kind string `json:"kind"` // shell, run, or session
 	ID   string `json:"id"`
 	Turn int    `json:"turn,omitempty"`
+}
+
+// A reply target names one recipient of a reply: a session that wrote the
+// post, or the room's own address, which a session reaches as @root.
+const (
+	ReplySession = "session"
+	ReplyRoom    = "room"
+)
+
+// ReplyTarget is who a reply to a post answers. The composer routes the reply
+// by this target, so no address prefix decides a recipient.
+type ReplyTarget struct {
+	Kind string `json:"kind"` // ReplySession or ReplyRoom
+	// ID is the session bound to the sender address, and empty for the room.
+	ID string `json:"id,omitempty"`
+	// Address is the address a reply names: the sender's own, or the room's.
+	Address string `json:"address,omitempty"`
+}
+
+// replyTarget reads who a reply to m answers from the stored sender identity.
+// A session's own post names the session the sender address is bound to, which
+// survives a rename and works across rooms. The room's owner and its root seat
+// name the room, which a composer writes as @root, so the seat's holder can
+// change. A post the owner typed has no target: a reply to it keeps the
+// draft's recipients.
+func replyTarget(m room.Message, roomName string) *ReplyTarget {
+	if m.From == roomName || m.From == roomName+":"+room.RootAgent {
+		if m.Human {
+			return nil
+		}
+		return &ReplyTarget{Kind: ReplyRoom, Address: roomName}
+	}
+	if id := m.AuthorSessionID(); id != "" {
+		return &ReplyTarget{Kind: ReplySession, ID: id, Address: m.From}
+	}
+	// An engine, script or worker post has no session to answer, so a reply
+	// goes to the room's root, as it does for the owner's own posts.
+	return &ReplyTarget{Kind: ReplyRoom, Address: roomName}
 }
 
 // Feed is a room's posts in append order plus the log offset to watch from.
@@ -663,7 +704,7 @@ func decorate(m room.Message, roomName string, reads map[string]bool, book avata
 		// the row and finds the sender's avatar.
 		name = ev.Session
 	}
-	p := Post{Message: m, Owner: m.From == roomName, Completion: IsCompletion(m), FromHue: NameHue(name), Speaker: SpeakerLabel(m, roomName)}
+	p := Post{Message: m, Owner: m.From == roomName, Completion: IsCompletion(m), FromHue: NameHue(name), Speaker: SpeakerLabel(m, roomName), Reply: replyTarget(m, roomName)}
 	if !p.Owner {
 		p.FromEmoji = book.forPost(name, m.TS)
 	}
