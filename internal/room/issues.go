@@ -34,16 +34,16 @@ CREATE INDEX room_issues_state ON room_issues(room_id, state, seq);
 CREATE TABLE room_issue_revisions (room_id TEXT PRIMARY KEY, revision INTEGER NOT NULL);`
 
 type Issue struct {
-	ID      string `json:"id"`
-	Number  int    `json:"number"`
-	Title   string `json:"title"`
-	File    string `json:"file"`
-	Line    int    `json:"line"`
-	Filer   string `json:"filer"`
-	FiledAt int64  `json:"filedAt"`
-	State   string `json:"state"`
-	Reason  string `json:"reason"`
-	GoalID  string `json:"goalId"`
+	ID      string     `json:"id"`
+	Number  int        `json:"number"`
+	Title   string     `json:"title"`
+	File    string     `json:"file"`
+	Line    int        `json:"line"`
+	Filer   string     `json:"filer"`
+	FiledAt int64      `json:"filedAt"`
+	State   IssueState `json:"state"`
+	Reason  string     `json:"reason"`
+	GoalID  string     `json:"goalId"`
 	// Assignee is the session the issue was given to, when triage gave it to a
 	// goal holder.
 	Assignee  string `json:"assignee,omitempty"`
@@ -83,10 +83,19 @@ type CloseOrigin struct {
 // fix/pr-closes-issues), which calls this from the merge watcher.
 func (s *Store) CloseIssue(roomID, id, by, reason string, origin CloseOrigin) (Issue, error) {
 	return s.changeIssueFrom(roomID, id, by, origin, true, "ChangeIssue", func(i *Issue) error {
-		i.State = "closed"
+		i.State = IssueStateClosed
 		i.Reason = reason
 		return nil
 	})
+}
+
+// checkIssueState rejects a stored state the issue protocol does not define,
+// so a typo cannot pass from storage to a view as a finite state.
+func checkIssueState(i Issue) error {
+	if i.State.Valid() {
+		return nil
+	}
+	return fmt.Errorf("issue %s has unknown state %q", i.Label(), i.State)
 }
 
 // issueNumber accepts the canonical label and the compact composer spelling.
@@ -145,6 +154,9 @@ func (s *Store) Issues(roomID string, all bool) ([]Issue, error) {
 			return nil, err
 		}
 		i.Number = number
+		if err := checkIssueState(i); err != nil {
+			return nil, err
+		}
 		out = append(out, i)
 	}
 	return out, rows.Err()
@@ -241,6 +253,9 @@ func (s *Store) importLegacyIssues(ctx context.Context, conn *sql.Conn) error {
 					return fmt.Errorf("import issues %s: duplicate issue ID %q", path, issue.ID)
 				}
 				seen[issue.ID] = true
+				if err := checkIssueState(issue); err != nil {
+					return fmt.Errorf("import issues %s: %w", path, err)
+				}
 				var exists bool
 				if err := conn.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM room_issues WHERE room_id=? AND id=?)", id, issue.ID).Scan(&exists); err != nil {
 					return err
@@ -381,7 +396,7 @@ func (s *Store) FileIssue(roomID string, in IssueInput) (Issue, error) {
 	if err != nil {
 		return Issue{}, err
 	}
-	out = Issue{ID: msg.ID, Number: number, Title: title, File: in.File, Line: in.Line, Filer: by, FiledAt: msg.TS, State: string(IssueStateOpen)}
+	out = Issue{ID: msg.ID, Number: number, Title: title, File: in.File, Line: in.Line, Filer: by, FiledAt: msg.TS, State: IssueStateOpen}
 	db, err := s.issuesDB()
 	if err != nil {
 		return Issue{}, err
@@ -434,7 +449,7 @@ func (s *Store) LinkIssueGoal(roomID, id, goalID, by string) (Issue, error) {
 		return Issue{}, errors.New("goal link needs a goal ID")
 	}
 	return s.changeIssueFrom(roomID, id, by, CloseOrigin{}, true, "LinkIssueGoal", func(i *Issue) error {
-		i.State, i.GoalID, i.Assignee = "goal", goalID, ""
+		i.State, i.GoalID, i.Assignee = IssueStateGoal, goalID, ""
 		return nil
 	})
 }
@@ -454,7 +469,7 @@ func (s *Store) CheckIssueGoalLink(roomID, by string) error {
 // RestoreIssueGoal restores a previous open or goal link after a later step
 // of starting or editing work fails.
 func (s *Store) RestoreIssueGoal(roomID, id string, snapshot Issue, by string) (Issue, error) {
-	if snapshot.State != "open" && snapshot.State != "goal" {
+	if snapshot.State != IssueStateOpen && snapshot.State != IssueStateGoal {
 		return Issue{}, errors.New("can restore only an open or goal issue")
 	}
 	return s.changeIssueFrom(roomID, id, by, CloseOrigin{}, true, "LinkIssueGoal", func(i *Issue) error {
@@ -500,26 +515,26 @@ func (s *Store) changeIssueFrom(roomID, id, by string, origin CloseOrigin, allow
 			if i.ID != id && (!numbered || i.Number != number) {
 				continue
 			}
-			if i.State != "open" && !(allowGoal && i.State == "goal") {
+			if i.State != IssueStateOpen && !(allowGoal && i.State == IssueStateGoal) {
 				return fmt.Errorf("issue %s is already %s", i.Label(), i.State)
 			}
 			if err = change(&i); err != nil {
 				return err
 			}
 			switch i.State {
-			case "open":
+			case IssueStateOpen:
 				if action != "LinkIssueGoal" {
 					return errors.New("invalid issue transition")
 				}
-			case "closed":
+			case IssueStateClosed:
 				if strings.TrimSpace(i.Reason) == "" {
 					return errors.New("closing an issue needs a reason")
 				}
-			case "goal":
+			case IssueStateGoal:
 				if i.GoalID == "" {
 					return errors.New("goal triage needs a goal ID")
 				}
-			case "exported":
+			case IssueStateExported:
 				if i.GitHubURL == "" {
 					return errors.New("export needs a GitHub issue URL")
 				}
@@ -557,7 +572,7 @@ func (s *Store) changeIssueFrom(roomID, id, by string, origin CloseOrigin, allow
 // postIssueChange posts the typed event of one issue change. It is quiet: the
 // owner feed and an assignee read it, and no session wakes.
 func (s *Store) postIssueChange(rec Record, i *Issue, by string, origin CloseOrigin) error {
-	state := IssueState(i.State)
+	state := i.State
 	change := IssueUpdated
 	if state == IssueStateClosed {
 		change = IssueClosed
