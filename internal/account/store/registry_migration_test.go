@@ -160,6 +160,19 @@ func TestRegistryMigrationDropsRetiredHarnessRows(t *testing.T) {
 				return err
 			}
 		}
+		// A retired account can still own a repository scope and a pause.
+		if _, err := conn.ExecContext(ctx, "CREATE TABLE account_repo_scopes (account_id TEXT NOT NULL, repo TEXT NOT NULL, PRIMARY KEY (account_id, repo))"); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "CREATE TABLE account_limits (account_id TEXT PRIMARY KEY, until INTEGER NOT NULL)"); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "INSERT INTO account_repo_scopes(account_id, repo) VALUES('retired', 'resident-labs/dyna')"); err != nil {
+			return err
+		}
+		if _, err := conn.ExecContext(ctx, "INSERT INTO account_limits(account_id, until) VALUES('retired', 1)"); err != nil {
+			return err
+		}
 		_, err := conn.ExecContext(ctx, "INSERT INTO accounts_registry(id, version, opencode_cleaned) VALUES(1, 1, 1)")
 		return err
 	}); err != nil {
@@ -186,5 +199,14 @@ func TestRegistryMigrationDropsRetiredHarnessRows(t *testing.T) {
 	}
 	if len(kept) != 1 || kept[0] != "kept" {
 		t.Fatalf("rows after migration = %v, want only the codex row", kept)
+	}
+	for _, table := range []string{"account_repo_scopes", "account_limits"} {
+		var left int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+table+" WHERE account_id = 'retired'").Scan(&left); err != nil {
+			t.Fatal(err)
+		}
+		if left != 0 {
+			t.Fatalf("%s kept a row for the retired account", table)
+		}
 	}
 }
