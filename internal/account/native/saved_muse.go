@@ -67,10 +67,7 @@ func (*museManager) ProbeSaved(ctx context.Context, c Captured) (store.Observati
 		return o, err
 	}
 	observation, err := museUsageObservation(body, now, c.Identity)
-	if err != nil {
-		return observation, err
-	}
-	return observation, nil
+	return observation, err
 }
 
 // museUsageRequest mints a key with a Muse identity token. The same response

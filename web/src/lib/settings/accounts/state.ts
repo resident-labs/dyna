@@ -136,7 +136,7 @@ export function usageUnavailableText(account?: AccountLike | null): string {
 
 // notReadableUsage names the provider when Dyna cannot read its plan usage.
 function notReadableUsage(provider?: string | null): string {
-  if (provider === 'meta-muse') return 'Dyna cannot read Muse plan usage from this API key. Sign in to Muse with Pi\'s OAuth sign-in to read it.'
+  if (provider === 'meta-muse') return 'Dyna cannot read Muse plan usage from this API key. Sign in to Muse through Pi to read it.'
   return 'This provider does not publish usage that Dyna can read.'
 }
 
