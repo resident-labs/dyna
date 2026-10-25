@@ -135,6 +135,7 @@ var nonStampPrefixes = map[string]string{
 	"DYNA_MCP_":      "Generated per-server MCP execution bridge settings.",
 	"DYNA_CI_CLEAN_": "Settings of the cache cleanup that a run sends to a CI machine.",
 	"DYNA_CHROMIUM_": "Chromium launcher settings for a shell's browser, not a caller stamp.",
+	"DYNA_FAKE_":     "Fixture switches that only the test-only fake harness reads.",
 }
 
 // A test binary drops a stamp it inherited, such as the session of the
